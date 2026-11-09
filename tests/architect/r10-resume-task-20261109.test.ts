@@ -22,8 +22,7 @@ import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, SUPABASE_URL, supabaseParity, type Turn } from "../flow/handler.ts";
 import { anthropicWire } from "./helpers/anthropic_wire.ts";
 import { CareerProfile } from "../../supabase/functions/_shared/router_core.career.js";
-import { buildResume, resumeTaskTurn, targetOf } from "../../supabase/functions/_shared/career_resume_task.ts";
-import { memoryResumeStore } from "../../supabase/functions/_shared/career_tailor.ts";
+import { buildResume, holdsCardApproval, jobNumberOf, parseCheckWords, readTarget, resumeAskOf, resumeTaskTurn, targetOf, titleShaped } from "../../supabase/functions/_shared/career_resume_task.ts";
 
 const CI = Deno.env.get("CI") === "true";
 const ROOT = new URL("../..", import.meta.url).pathname;
@@ -105,7 +104,7 @@ Deno.test({
     if (!pgBinDir()) { if (CI) throw new Error("needs Postgres 16 binaries in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
     if (Deno.uid?.() === 0 && !CI) { console.log("NOT_RUN locally as root: run it as an unprivileged user (initdb)"); return; }
     const pg: Pg = await startPg();
-    const unset = ["CAREER_BRAIN", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING", "CAREER_ACCOUNT_MEMORY", "ANTHROPIC_API_KEY", "CAREER_MODEL", "CAREER_TAILOR_REWRITE", "CAREER_PLANNER"];
+    const unset = ["CAREER_BRAIN", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "CAREER_MAIL_TRACKING", "CAREER_ACCOUNT_MEMORY", "ANTHROPIC_API_KEY", "CAREER_MODEL", "CAREER_TAILOR_REWRITE", "CAREER_PLANNER", "TRAINEE_FILE_BASE_URL", "TRAINEE_FILE_LINK_SECRET"];
     const saved = Object.fromEntries(unset.map((k) => [k, Deno.env.get(k)]));
     for (const k of unset) Deno.env.delete(k);
     let h: Awaited<ReturnType<typeof careerHandler>> | null = null;
@@ -121,7 +120,7 @@ Deno.test({
         ${OLD.map((p, i) => `('${p.key}', 'greenhouse', '${p.board}', '${p.company}', '${p.title}', '${p.location}', '${p.url}', now() - interval '${i} hours', '${desc}', 'r10old${i}')`).join(",")};`);
       h = await careerHandler(pg, { "tok-a": A, "tok-b": B });
       const viaDouble = globalThis.fetch, outbound: string[] = [];
-      let modelCalls = 0;
+      let modelCalls = 0, otherCalls = 0;
       globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
         // deno-lint-ignore no-explicit-any
         const req = input instanceof Request && !init ? input : new Request(input as any, init);
@@ -132,6 +131,7 @@ Deno.test({
           modelCalls++;
           const sys = String(chat.messages?.find((m: { role: string }) => m.role === "system")?.content ?? "");
           const asked = String(chat.messages?.find((m: { role: string }) => m.role === "user")?.content ?? "");
+          if (!/Rewrite one resume bullet/.test(sys)) otherCalls++;
           const content = !/Rewrite one resume bullet/.test(sys) ? "{}" : /warmer/i.test(asked) && asked.includes(SHORTER) ? WARMER : SHORTER;
           return new Response(JSON.stringify({ id: "chatcmpl-test", model: chat.model, choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content } }], usage: { prompt_tokens: 10, completion_tokens: 1 } }), { headers: { "content-type": "application/json" } });
         });
@@ -139,6 +139,8 @@ Deno.test({
         return await viaDouble(req);
       }) as typeof fetch;
       Deno.env.set("ANTHROPIC_API_KEY", ["sk", "test", "fake"].join("-"));
+      Deno.env.set("TRAINEE_FILE_BASE_URL", "https://trainee.test/file");
+      Deno.env.set("TRAINEE_FILE_LINK_SECRET", "file-link-secret-0123456789-abcdef");
       const transcript: string[] = [];
       const turn = (chat: Chat, who: string) => async (m: string): Promise<Turn> => {
         await pg.sql(`delete from public.agent_rate_limits where user_id = '${who}'`);
@@ -151,8 +153,13 @@ Deno.test({
         const chat = h!.chat(tok), say = turn(chat, who);
         eq((await say(`here is my resume:\n${RESUME}`)).intent, "career_resume_ingest");
         eq((await say("yes, that's my resume")).resultStatus, "completed");
-        const list = await say("find machine learning jobs");
-        assertNode.ok(/reddit/i.test(list.reply), `the old list shows the Reddit ML manager role: ${list.reply}`);
+        // The old list as the person read it (the File page link is off for this turn, so the roles are in the reply itself).
+        const base = Deno.env.get("TRAINEE_FILE_BASE_URL")!;
+        Deno.env.delete("TRAINEE_FILE_BASE_URL");
+        const list = await say("find machine learning jobs").finally(() => Deno.env.set("TRAINEE_FILE_BASE_URL", base));
+        assertNode.ok(/reddit/i.test(list.reply) && /Machine Learning Engineering Manager/.test(list.reply), `the old list shows the Reddit ML manager role: ${list.reply}`);
+        const kept = await pg.sql(`select coalesce((select state->'career'->'stores'->'discovery'->'lastShortlist' from public.agent_flow_state where user_id = '${who}' and thread_id = '${chat.thread()}')::text, '[]')`);
+        assertNode.ok(/reddit/i.test(kept), `the old list holds the Reddit ML manager role: ${list.reply}`);
         return { chat, say };
       };
       const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -163,13 +170,16 @@ Deno.test({
         const b64 = await pg.sql(`select bytes_b64 from public.channel_artifacts where id = '${refs[0].ref}' and user_id = '${who}'`);
         return { bytes: Uint8Array.from(atob(b64.trim()), (c) => c.charCodeAt(0)), filename: refs[0].filename as string };
       };
-      const linkOf = async (r: Turn) => {
-        const url = /^https:\/\/\S+\/storage\/v1\/object\/sign\/career-resumes\/\S+$/m.exec(r.reply)?.[0];
-        assertNode.ok(url, `a download link on its own line: ${r.reply}`);
-        const res = await h!.double.fetch(new Request(url!));
-        eq(res.status, 200, `the link works: ${url}`);
-        return new Uint8Array(await res.arrayBuffer());
+      // The privacy ruling: a link only when asked for, and only ever the signed-in File page (file/1 proves it needs the sign-in);
+      // the File holds exactly the attached PDF. Never a storage link, in a reply or in the thread's saved messages.
+      const linkOf = async (r: Turn, who: string) => {
+        const url = /^https:\/\/trainee\.test\/file\?t=v1\.\S+$/m.exec(r.reply)?.[0];
+        assertNode.ok(url, `the File page link on its own line: ${r.reply}`);
+        const rec = await pg.sql(`select value->'data'->>'pdf_b64' from public.career_watch_kv where user_id = '${who}' and value->>'kind' = 'draft' and value->'data'->>'variant' = 'resume' order by updated_at desc limit 1`);
+        return Uint8Array.from(atob(rec.trim()), (c) => c.charCodeAt(0));
       };
+      const noLink = (r: Turn, what: string) => assertNode.ok(!/https:\/\//.test(r.reply), `${what}: no link unless asked for: ${r.reply}`);
+      const noBearer = async () => eq(await pg.sql(`select count(*) from public.agent_messages where content like '%object/sign%' or content like '%storage/v1%'`), "0", "no storage link or token in any saved message");
       const nothingApplied = async (who: string) => {
         for (const table of ["career_apply_wanted", "career_apply_jobs", "career_apply_cards", "career_send_queue", "career_outreach_drafts"]) {
           eq(await pg.sql(`select count(*) from public.${table} where user_id = '${who}'`), "0", `nothing in ${table}`);
@@ -189,7 +199,7 @@ Deno.test({
         assertNode.ok(!/no document file|Name the role|paste the posting/i.test(r.reply), `never "no document file ... name the role": ${r.reply}`);
         const f = await fileOf(r, A);
         inspect(f.bytes, "T1 attachment");
-        eq(await linkOf(r), f.bytes, "the link serves the same PDF");
+        noLink(r, "T1");
         t1File = f.bytes;
         assertNode.ok(/data analyst internships/i.test(r.reply) && /general/i.test(r.reply), `says it is the general data analyst internship version: ${r.reply}`);
         assertNode.ok(/original file/i.test(r.reply), `says the original file is not on hand and the saved intake was used: ${r.reply}`);
@@ -202,7 +212,7 @@ Deno.test({
         assertNode.ok(!OLD_ROLE.test(r.reply), `never a role from the old list: ${r.reply}`);
         const f = await fileOf(r, A);
         inspect(f.bytes, "T2 attachment");
-        await linkOf(r);
+        noLink(r, "T2");
         assertNode.ok(/What name and email/i.test(r.reply), `asked for the specific fact, as T2 asked: ${r.reply}`);
         assertNode.ok(!/general version/i.test(r.reply), `the T1 caveat is not repeated: ${r.reply}`);
         plain(r, "T2");
@@ -215,7 +225,7 @@ Deno.test({
         assertNode.ok(!["career_batch_apply", "career_apply_queue"].includes(String(r.intent)), `not an apply turn: ${r.intent}`);
         const f = await fileOf(r, A);
         inspect(f.bytes, "T3 attachment");
-        eq(await linkOf(r), f.bytes, "the download link serves the T3 PDF");
+        eq(await linkOf(r, A), f.bytes, "T3 asked for a link: the File page holds the T3 PDF");
         eq(f.bytes, t1File, "the same target, the same file as T1");
         assertNode.ok(/data analyst internships/i.test(r.reply) && /haven't applied/i.test(r.reply), `the target and the boundary, said: ${r.reply}`);
         assertNode.ok(!/What name and email/.test(r.reply), `the T2 question is not asked a third time: ${r.reply}`);
@@ -229,9 +239,14 @@ Deno.test({
         eq((q.reply.match(/\?/g) ?? []).length, 1, `one question: ${q.reply}`);
         assertNode.ok(/submit|apply/i.test(q.reply) && /PDF/.test(q.reply) && /\bor\b/.test(q.reply), `two concrete choices: ${q.reply}`);
         await nothingApplied(A);
+        // The other answer: "Submit job 2." names the application, and nothing goes before its exact payload is reviewed.
+        const sub = await a.say("Submit job 2.");
+        assertNode.ok(/^This is the .+ application at .+\. Nothing has been sent/.test(sub.reply) && (sub.body.artifacts ?? []).length === 0, `submit job 2: the review sentence, nothing sent: ${sub.reply}`);
+        await nothingApplied(A);
+        eq((await a.say("Send this one.")).intent, "career_resume_clarify");
         const p = await a.say("The PDF to me.");
         inspect((await fileOf(p, A)).bytes, "the PDF to me");
-        await linkOf(p);
+        noLink(p, "the PDF to me");
         await nothingApplied(A);
         const d = await a.say("Can you also send the DOCX of the resume?");
         const docx = await fileOf(d, A, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
@@ -257,7 +272,7 @@ Deno.test({
         assertNode.ok(text.includes(SHORTER) && !text.includes(FIRST), `C4: the approved bullet is in the file: ${text}`);
         assertNode.ok(!/GPA/.test(text), `C4: GPA is off the file: ${text}`);
         assertNode.ok(/revised/.test(c4.reply) && /GPA is omitted/.test(c4.reply) && /contact placeholders still need filling/.test(c4.reply) && /review draft/.test(c4.reply), `C4: ${c4.reply}`);
-        await linkOf(c4);
+        noLink(c4, "C4");
         plain(c4, "C4");
         const c5 = await a.say("Why does it still say contact details to fill in?");
         assertNode.ok(/didn't establish the contact details/.test(c5.reply) && /contact line/.test(c5.reply) && (c5.body.artifacts ?? []).length === 0, `C5: ${c5.reply}`);
@@ -272,19 +287,84 @@ Deno.test({
         eq(warm.intent, "career_resume_task", `"Make it warmer." stays on the resume just shown: ${warm.intent}: ${warm.reply}`);
         assertNode.ok(!/tailored for|Picked first/i.test(warm.reply) && /data analyst internships/.test(warm.reply), `the current resume, by its target: ${warm.reply}`);
         assertNode.ok(warm.reply.includes(`New: ${WARMER}`) && /^New: /m.test(warm.reply) && /^Now: /m.test(warm.reply) && (warm.body.artifacts ?? []).length === 0, `before and after shown, nothing regenerated: ${warm.reply}`);
+        // Re-review of #644 (1): a rewording is shown, then a new fact is told and its question answered. The answer is kept with the
+        // fact; the old rewording is never approved by it.
+        const swaps = async () => await pg.sql(`select coalesce((state->'career'->'stores'->'profile'->'_resumeTask'->'swaps')::text, '[]') from public.agent_flow_state where user_id = '${A}' and thread_id = '${a.chat.thread()}'`);
+        const nf = await a.say("update my resume with my new job at Acme (TEST)");
+        assertNode.ok(nf.intent === "career_resume_task" && /What is your title there/.test(nf.reply) && !(nf.body.artifacts ?? []).length, `a new fact is asked about: ${nf.reply}`);
+        const bare = await a.say("yes");
+        assertNode.ok(bare.intent === "career_resume_task" && /What is your title at Acme \(TEST\)/.test(bare.reply) && !/Kept with/.test(bare.reply), `a bare yes is asked again: ${bare.reply}`);
+        const detail = await a.say("ok, Analyst since May");
+        assertNode.ok(/Analyst since May/.test(detail.reply) && !(detail.body.artifacts ?? []).length && !/revised/i.test(detail.reply), `the answer is kept, nothing approved: ${detail.reply}`);
+        assertNode.ok(!(await swaps()).includes(WARMER), "the shown rewording was not approved by the answer to another question");
+        const facts = await pg.sql(`select (state->'career'->'stores'->'profile'->'facts')::text from public.agent_flow_state where user_id = '${A}' and thread_id = '${a.chat.thread()}'`);
+        assertNode.ok(/New job at Acme \(TEST\): Analyst since May/.test(facts) && /"status": "draft"/.test(facts), "the title is kept with the fact, unconfirmed");
+        // CodeRabbit #2 (architect, round 5): with the reply writer on, the preview is an exact payload: no writer or shape call,
+        // and the person sees exactly the hashed pairs.
+        Deno.env.set("CAREER_REPLY_WRITER", "on");
+        const before = otherCalls;
+        const again = await a.say("Make it warmer.");
+        const writerCalls = otherCalls - before;
+        Deno.env.delete("CAREER_REPLY_WRITER");
+        assertNode.ok(/^New: /m.test(again.reply) && again.reply.includes(`New: ${WARMER}`), `shown again, exactly: ${again.reply}`);
+        assertNode.equal(writerCalls, 0, "the writer never touches the preview");
+        assertNode.ok(again.body.meta?.resume_preview && !again.body.meta?.reply_writer && !again.body.meta?.reply_shape, `marked as an exact payload: ${JSON.stringify(again.body.meta)}`);
+        const fixed = await a.say(T3);
+        assertNode.equal(fixed.intent, "career_resume_task", "the correction is the task's");
+        const yesAfter = await a.say("yes");
+        assertNode.ok(yesAfter.intent !== "career_resume_task" && !(await swaps()).includes(WARMER), `a yes after a target correction approves no old rewording: ${yesAfter.intent}: ${yesAfter.reply}`);
+        // CodeRabbit #1 (architect, round 5): T3 said "don't apply", so a bare yes is never a card approval: it is asked about.
+        assertNode.ok(yesAfter.intent === "career_resume_clarify" && /haven't approved or sent anything/.test(yesAfter.reply), `held, asked: ${yesAfter.intent}: ${yesAfter.reply}`);
         await nothingApplied(A);
+        // Review of #634 (b): a shown rewording answers only the very next turn. Another reply comes between; a plain yes is then
+        // that reply's, never an approval of the old rewording, and no file is made.
+        eq((await a.say("send me the resume PDF again")).intent, "career_resume_task");
+        assertNode.ok(/^New: /m.test((await a.say("Make it warmer.")).reply), "a rewording is shown");
+        const between = await a.say("what do you know about me?");
+        assertNode.ok(between.intent !== "career_resume_task", `an unrelated turn is not the resume task's: ${between.intent}`);
+        const yes = await a.say("yes, that's fine");
+        assertNode.ok(yes.intent !== "career_resume_task" && (yes.body.artifacts ?? []).length === 0, `a stale rewording is never approved by a later yes: ${yes.intent}: ${yes.reply}`);
+        // Round-2 re-review (1a): a search or a question after the "new job" question leaves it and runs as itself; neither is the title.
+        const factTitles = async () => await pg.sql(`select coalesce(string_agg(f->>'title', ' | '), '') from public.agent_flow_state, jsonb_array_elements(state->'career'->'stores'->'profile'->'facts') f where user_id = '${A}' and thread_id = '${a.chat.thread()}'`);
+        for (const [co, next] of [["Beta (TEST)", "find machine learning jobs"], ["Gamma (TEST)", "what do you know about me?"]]) {
+          await a.say("Make it warmer.");
+          const asked = await a.say(`update my resume with my new job at ${co}`);
+          assertNode.ok(/What is your title there/.test(asked.reply), `${co}: asked: ${asked.reply}`);
+          const other = await a.say(next);
+          assertNode.ok(other.intent !== "career_resume_task" && !/Kept with/.test(other.reply), `"${next}" runs as itself: ${other.intent}: ${other.reply}`);
+          const titles = await factTitles();
+          assertNode.ok(titles.includes(`New job at ${co}`) && !titles.includes(`New job at ${co}:`), `"${next}" is not stored as the title: ${titles}`);
+        }
+        await nothingApplied(A);
+        // The ruling on review drafts: a file printed from unconfirmed or placeholder facts never reaches the apply door. None of the
+        // resume task's files is in an apply source, and the hosted apply refuses a resume it does not hold.
+        const shas = (await pg.sql(`select string_agg(distinct encode(sha256(decode(bytes_b64, 'base64')), 'hex'), ',') from public.channel_artifacts where user_id = '${A}' and mime = 'application/pdf'`)).split(",").filter(Boolean);
+        assertNode.ok(shas.length >= 2, "the resume task's PDFs");
+        for (const sha of shas) {
+          eq(await pg.sql(`select count(*) from public.career_apply_cloud_resumes where sha256 = '${sha}'`), "0", "not an apply resume");
+          eq(await pg.sql(`select count(*) from public.career_resume_uploads where sha256 = '${sha}'`), "0", "not a confirmed upload");
+          const door = await pg.sql(`do $$ begin perform public.career_apply_message_cloud_prepare_context('${A}', '${sha}'); raise exception 'opened'; exception when others then if sqlerrm = 'opened' then raise; end if; end $$; select 'refused'`).catch((e) => String(e));
+          assertNode.ok(/refused/.test(door), `the apply door refuses the review draft: ${door}`);
+        }
       });
 
       const b = await setup(B, "tok-b");
       await t.step("wrong: a last file for the old list's first role; T3 owns the mismatch once and makes the right file", async () => {
-        const wrong = await b.say("tailor my resume");
-        assertNode.ok(OLD_ROLE.test(wrong.reply), `setup: the posting tailor made a file for an old-list role (trunk's T2): ${wrong.reply.slice(0, 160)}`);
+        // R1 (spec E.1 #11; changed from #634, where this asserted trunk's pick): a bare "tailor my resume" never takes the old
+        // list's first role; it asks which role, with no file.
+        const bare = await b.say("tailor my resume");
+        assertNode.ok(/Which role should I tailor your resume for\?/.test(bare.reply) && !OLD_ROLE.test(bare.reply) && !(bare.body.artifacts ?? []).length, `a bare tailor asks which role: ${bare.intent}: ${bare.reply.slice(0, 200)}`);
+        // The person picks the old list's first role themselves; that file is the one T3 then calls wrong.
+        const wrong = await b.say("tailor my resume for the first one");
+        assertNode.ok(OLD_ROLE.test(wrong.reply), `setup: the posting tailor made a file for the old list's first role: ${wrong.reply.slice(0, 160)}`);
         assertNode.ok(!/parse check/i.test(wrong.reply) && /Saved as PDF and DOCX/.test(wrong.reply), `the posting tailor's reply keeps what was saved, without the parser's self-report: ${wrong.reply}`);
         const r = await b.say(T3);
         eq((r.reply.match(/wrong role/gi) ?? []).length, 1, `the mismatch owned once: ${r.reply}`);
         assertNode.ok(!/haven't started that batch|applications ready/i.test(r.reply), `no batch: ${r.reply}`);
-        inspect((await fileOf(r, B)).bytes, "wrong -> T3 attachment");
-        await linkOf(r);
+        const wf = await fileOf(r, B);
+        inspect(wf.bytes, "wrong -> T3 attachment");
+        eq(await linkOf(r, B), wf.bytes, "the File page holds the same PDF");
+        await noBearer();
         plain(r, "wrong T3");
         await nothingApplied(B);
       });
@@ -311,7 +391,7 @@ function intake(extra: string, confirm: boolean) {
   if (confirm) for (const f of p.facts) CareerProfile.confirmFact(p, f.id);
   return p;
 }
-const turnOn = (p: unknown, message: string) => resumeTaskTurn({ message, ctx: { profile: p }, userId: "u-r10", now: NOW, deps: { resumes: memoryResumeStore(), uploaded: async () => false } });
+const turnOn = (p: unknown, message: string) => resumeTaskTurn({ message, ctx: { profile: p }, userId: "u-r10", now: NOW, deps: { uploaded: async () => false } });
 
 Deno.test("facts/1 the target is read from the ask, the rejected role never is", () => {
   assertNode.deepStrictEqual(targetOf(T1), { role: "data analyst", level: "internship", label: "data analyst internships" });
@@ -345,4 +425,271 @@ Deno.test("facts/3 nothing confirmed: the saved intake is used, said unconfirmed
   const pdf = readPdf(Uint8Array.from(atob(r!.documents[0].base64), (c) => c.charCodeAt(0)));
   assertNode.ok(/Facts unconfirmed; not for external submission/.test(pdf.lines.join(" ")), pdf.lines.join(" | "));
   assertNode.ok(/not yet confirmed by you/.test(r!.reply) && /Are they right as written\?/.test(r!.reply), r!.reply);
+});
+
+// R3a (D-007): with nothing confirmed the saved intake is used, but a quarantined fact (flagged, delegated, or the bank's
+// F-027..F-079) is never printed.
+Deno.test("facts/5 nothing confirmed, quarantined facts present: none of them is printed", async () => {
+  const p = intake("", false);
+  (p as any).facts.push(
+    { id: "q1", kind: "experience", title: "Quant Researcher, Invented Capital (TEST)", text: "Quant Researcher, Invented Capital (TEST)", bullets: ["Built an invented trading model (TEST)"], quarantined: true, needs_confirmation: true },
+    { id: "q2", kind: "project", title: "Delegated Project Zeta (TEST)", text: "Delegated Project Zeta (TEST)", bullets: [], provenance: "owner-delegated answer-all", needs_confirmation: true },
+    { id: "q3", kind: "leadership", title: "Bank Fact Omega Club (TEST)", text: "Bank Fact Omega Club (TEST)", bullets: [], factId: "F-031", needs_confirmation: true });
+  const built = buildResume(p, targetOf(T1)!, false);
+  assertNode.ok(built.unconfirmed, "nothing confirmed");
+  const r = await turnOn(p, T1);
+  const pdf = readPdf(Uint8Array.from(atob(r!.documents[0].base64), (c) => c.charCodeAt(0))).lines.join(" ");
+  for (const x of ["Invented Capital", "invented trading model", "Project Zeta", "Omega Club"]) {
+    assertNode.ok(!built.lines.join(" ").includes(x) && !pdf.includes(x) && !r!.reply.includes(x), `${x}: never printed`);
+  }
+  assertNode.ok(/TEST University/.test(pdf), "the person's own intake is still used");
+});
+
+// R1 (owner readiness review): any stated target is the target, with or without a role word; an employer in front of a role is
+// a posting; a bare ask states none.
+Deno.test("target/1 the round-5 ruling: field words are targets in any case; an employer on hand or well known is a posting; anything else is asked", async () => {
+  const kind = (ask: string, employers: string[] = []) => readTarget(ask, { employers })?.kind;
+  // 1. Targets, whatever the capitalisation.
+  for (const [ask, label] of [["make my resume a PDF for product management", "product management roles"], ["tailor my resume for consulting roles", "consulting roles"],
+    ["make my resume a PDF for trading", "trading roles"], ["make my resume for nursing jobs", "nursing roles"], ["tailor my resume for product management roles", "product management roles"],
+    ["make my resume for underwater basket weaving roles", "underwater basket weaving roles"], ["make my resume for Underwater Basket Weaving roles", "underwater basket weaving roles"],
+    ["make my resume for cybersecurity roles", "cybersecurity roles"], ["make my resume for Cybersecurity roles", "cybersecurity roles"],
+    ["make my resume for fintech internships", "fintech internships"], ["make my resume for Fintech internships", "fintech internships"],
+    ["make my resume for robotics roles", "robotics roles"], ["make my resume for Robotics roles", "robotics roles"],
+    ["make my resume for blockchain roles", "blockchain roles"], ["make my resume for edtech roles", "edtech roles"], ["make my resume for pharma roles", "pharma roles"],
+    ["make my resume for ui/ux roles", "ui/ux roles"], ["make my resume for sre roles", "sre roles"], ["make my resume for esg roles", "esg roles"]] as const) {
+    assertNode.equal(targetOf(ask)?.label, label, ask);
+  }
+  // A whole name only: a pool holding "Boston Robotics" leaves "robotics roles" a target.
+  assertNode.equal(kind("make my resume for robotics roles", ["Boston Robotics"]), "target", "robotics is not Boston Robotics");
+  for (const ask of ["tailor my resume", "make my resume a pdf for me", "make my resume for review"]) assertNode.equal(readTarget(ask), null, ask);
+  // 2. Postings: a well-known employer, or one on hand (here Quillstone Analytics in the pool).
+  const task = { pending: null, file: { sha256: "x", filename: "x.pdf", pages: 1, label: "data analyst internships" }, target: targetOf(T1) } as any;
+  const view = { companies: [], jobs: 0, posting: false, resumeShown: true };
+  for (const ask of ["tailor my resume for IBM roles", "tailor my resume for the McKinsey role", "tailor my resume for the stripe role", "tailor my resume for the Stripe role",
+    "make my resume for the Goldman Sachs internship", "tailor my resume for Google roles"]) {
+    assertNode.equal(kind(ask), "posting", ask);
+    assertNode.equal(resumeAskOf(ask, task, view), null, `${ask}: not the resume task's`);
+  }
+  for (const ask of ["tailor my resume for the Quillstone data analyst intern role", "tailor my resume for the quillstone data analyst intern role"]) {
+    assertNode.equal(kind(ask, ["Quillstone Analytics"]), "posting", `${ask}: Quillstone on hand`);
+    assertNode.equal(resumeAskOf(ask, task, { ...view, employers: ["Quillstone Analytics"] }), null, `${ask}: on hand, not the task's`);
+  }
+  // 3. Asked: a name that is no field and no employer on hand ("the Quillstone role", lower-case quillstone with no pool).
+  for (const ask of ["tailor my resume for the Quillstone role", "tailor my resume for the quillstone data analyst intern role"]) {
+    assertNode.equal(kind(ask), "ask", ask);
+    assertNode.equal(resumeAskOf(ask, task, view), "target_which", ask);
+  }
+  // The question, then each answer: nothing is built until it is answered; a field is kept for the task; a company is a posting.
+  const p = intake("", true);
+  let intent = "career_resume_task";
+  const turn = (message: string) => resumeTaskTurn({ message, ctx: { profile: p }, userId: "u-r10", now: NOW, deps: { uploaded: async () => false, lastIntent: async () => intent } });
+  const q = await turn("make my resume for quillstone roles");
+  assertNode.ok(q && q.reply === "Do you mean roles at Quillstone (a company), or quillstone as a field?" && !q.documents.length, `one question, no file: ${q?.reply}`);
+  intent = q!.intent;
+  const field = await turn("as a field");
+  assertNode.ok(field && field.documents.length === 1 && /quillstone roles/.test(field.reply), `the field answer builds it: ${field?.reply}`);
+  assertNode.deepEqual((p as any)._resumeTask.fields, ["quillstone"], "the answer is kept for the task");
+  assertNode.equal(readTarget("make my resume for quillstone roles", { fields: (p as any)._resumeTask.fields })?.kind, "target", "not asked again");
+  intent = field!.intent;
+  const q2 = await turn("make my resume for the zephyrine role");
+  intent = q2!.intent;
+  const company = await turn("the company");
+  assertNode.ok(company && !company.documents.length && /I need the Zephyrine posting/.test(company.reply), `a company: a posting, nothing built: ${company?.reply}`);
+  assertNode.deepEqual((p as any)._resumeTask.employers, ["zephyrine"]);
+  // Round 6 (blocker): with no earlier task, the guess is no target: "make my resume a pdf" asks again and builds nothing.
+  const p2 = intake("", true);
+  let intent2 = "career_resume_task";
+  const turn2 = (message: string) => resumeTaskTurn({ message, ctx: { profile: p2 }, userId: "u-r10", now: NOW, deps: { uploaded: async () => false, lastIntent: async () => intent2 } });
+  const q3 = await turn2("make my resume for quillstone roles");
+  assertNode.ok(q3 && /Do you mean roles at Quillstone/.test(q3.reply) && !q3.documents.length, q3?.reply);
+  intent2 = q3!.intent;
+  const again = await turn2("make my resume a pdf");
+  assertNode.ok(again && /Do you mean roles at Quillstone/.test(again.reply) && !again.documents.length, `asked again, no file: ${again?.reply}`);
+  intent2 = again!.intent;
+  const co = await turn2("the company");
+  intent2 = co!.intent;
+  const none = await turn2("make my resume a pdf");
+  assertNode.ok(none && /Which role should I make this resume for\?/.test(none.reply) && !none.documents.length, `a company answer is no target: ${none?.reply}`);
+  intent2 = none!.intent;
+  const real = await turn2("make my resume a pdf for data analyst internships");
+  assertNode.ok(real && real.documents.length === 1, `a named target builds it: ${real?.reply}`);
+  // Round 6 (minors): no role word; a whole name; a well-known name that is also a field word or a common word.
+  assertNode.equal(kind("make my resume for Quillstone"), "ask", "no role word, written as a name");
+  assertNode.equal(kind("make my resume for quillstone", ["Quillstone Analytics"]), "posting", "no role word, on hand");
+  assertNode.equal(readTarget("make my resume for review"), null, "no role word, no name");
+  for (const [ask, name] of [["make my resume for Data Labs roles", "data labs"], ["make my resume for Analytics Inc roles", "analytics inc"]] as const) {
+    const r = readTarget(ask);
+    assertNode.ok(r?.kind === "ask" && r.name === name, `${ask}: ${JSON.stringify(r)}`);
+  }
+  for (const ask of ["make my resume for meta data roles", "make my resume for google data analyst roles", "make my resume for apple picking roles"]) assertNode.equal(kind(ask), "ask", ask);
+  for (const ask of ["make my resume for Meta roles", "make my resume for meta roles", "make my resume for apple roles", "make my resume for Google data analyst roles"]) assertNode.equal(kind(ask), "posting", ask);
+});
+
+Deno.test("facts/4 the task lapses after a day: an old target and an old rewording are not carried into a new ask", async () => {
+  const p = intake("", true);
+  const t1 = await turnOn(p, T1);
+  assertNode.ok(t1 && t1.task.target.label === "data analyst internships");
+  // Shown a rewording, then a day and an hour pass with no turn of the task's own.
+  (p as any)._resumeTask.proposed = [{ before: "x", after: "y" }];
+  (p as any)._resumeTask.at = new Date(NOW - 25 * 3600_000).toISOString();
+  const late = await resumeTaskTurn({ message: "That is fine, give me the PDF.", ctx: { profile: p }, userId: "u-r10", now: NOW, deps: { uploaded: async () => false, lastIntent: async () => "career_resume_task" } });
+  assertNode.equal(late, null, "an expired task answers nothing");
+  assertNode.equal((p as any)._resumeTask, undefined, "and is gone");
+});
+
+// Review of #634 (c): the task takes only resume and file wording. With a task and a file on hand, each of these is someone else's.
+Deno.test("routing/1 with a resume task on hand: posting links, apply corrections, other contact questions, cover letters and searches are not its", async () => {
+  const p = intake("", true);
+  const task = (await turnOn(p, T1))!.task;
+  const view = { companies: ["reddit", "stripe"], jobs: 2, posting: false, resumeShown: true };
+  const none: [string, string][] = [
+    ["send me a link to the posting", "a posting link"], ["can you send the application link for job 2?", "an application link"],
+    ["wrong job, apply to that other one instead", "an apply correction"], ["why do you need my contact info for the application?", "another contact question"],
+    ["write me a cover letter for data analyst internships", "a cover letter"], ["make a cover letter PDF for the data analyst role", "a cover letter file"],
+    ["Let's leave the resume for now. Find me 5 data analyst internships in Chicago that are actually open. Show the company, role, location, and application link. Don't apply yet.", "A.2 search turn 1"],
+    ["Okay, include business analyst and analytics internships in the Chicago area, plus remote US internships. Even 2 or 3 verified open roles is useful. Show the real links and any student or graduation requirements.", "A.2 search turn 2"],
+    ["apply with my resume to the data analyst role at Stripe", "an apply"],
+  ];
+  for (const [m, what] of none) assertNode.equal(resumeAskOf(m, task, view), null, `${what}: ${m}`);
+  // And what stays its own.
+  assertNode.equal(resumeAskOf("send a download link for the PDF, the attachment isn't opening", task, view), "link");
+  assertNode.equal(resumeAskOf(T3, task, view), "correct");
+  assertNode.equal(resumeAskOf("Why does it still say contact details to fill in?", task, view), "why_contact");
+  // "update my resume with my new job at X": kept as an unconfirmed fact and asked about, never dropped, never printed.
+  const r = await turnOn(p, "update my resume with my new job at Northwind Traders (TEST)");
+  assertNode.ok(r && r.documents.length === 0 && /new job at Northwind Traders \(TEST\) as unconfirmed/.test(r.reply) && /title/.test(r.reply), r?.reply);
+  const fact = (p as any).facts.find((f: { text?: string }) => /Northwind/.test(f.text ?? ""));
+  assertNode.ok(fact && fact.status === "draft" && fact.needs_confirmation === true, JSON.stringify(fact));
+  assertNode.ok(!buildResume(p, targetOf(T1)!, false).lines.some((l) => /Northwind/.test(l)), "an unconfirmed fact prints on no file beside confirmed ones");
+});
+
+// Review of #634 (d): every way a GPA is written is found, compared across forms and taken off whole (scale and comma included).
+Deno.test("gpa/1 '3.7 GPA', 'GPA 3.7/4.0', '3.7/4.0 GPA', 'GPA of 3.7': conflicts across forms, nothing left over when it is off", () => {
+  const base = buildResume(intake("", true), targetOf(T1)!, false);
+  assertNode.equal(base.gpaConflict, null, "one GPA, written once: no conflict");
+  for (const [form, other, conflict] of [["GPA 3.7/4.0", "3.4 GPA", true], ["3.7/4.0 GPA", "GPA of 3.7", false], ["3.70 GPA", "GPA: 3.7", false], ["GPA of 3.7", "3.5/4.0 cumulative GPA", true]] as const) {
+    const p = intake(`\nAWARDS\nDean's List (TEST), ${other}\n`, true);
+    for (const f of (p as any).facts) if (/TEST University/.test(f.title ?? "")) { f.title = f.title.replace("GPA 3.7", form); f.text = f.title; }
+    const b = buildResume(p, targetOf(T1)!, false);
+    assertNode.equal(!!b.gpaConflict, conflict, `${form} vs ${other}: ${JSON.stringify(b.gpaConflict)}`);
+    const off = buildResume(p, targetOf(T1)!, false, { noGpa: true }).blocks.filter((x) => !x.flag).map((x) => x.text).join(" | ");
+    assertNode.ok(!/GPA|\/4\.0|\b3\.[457]0?\b/.test(off), `leave GPA off takes every form off whole (${form}, ${other}): ${off}`);
+    assertNode.ok(off.includes("| TEST University - B.S. Computer Science, graduating May 2028 |"), `the school line, whole, with nothing left over: ${off}`);
+  }
+});
+
+Deno.test("scrub/1 a parser's PASS is not said; a FAIL is said in plain words", () => {
+  eq0(parseCheckWords("Saved as PDF and DOCX files, attached for your review — parse check PASS."), "Saved as PDF and DOCX files, attached for your review.");
+  eq0(parseCheckWords("Saved as PDF and DOCX files, attached for your review — parse check FAIL."), "Saved as PDF and DOCX files, attached for your review, but an applicant tracking system may not read it correctly, so check the file before you use it.");
+});
+const eq0 = (a: unknown, b: unknown) => assertNode.deepStrictEqual(a, b);
+
+// Re-review of #644 (2): the scale is never read as the GPA, and "GPA off" leaves no "out of 4", "Cumulative" or "(4.0 scale)".
+Deno.test("gpa/2 '3.8 out of 4.0 GPA' reads 3.8; every phrase comes off whole", () => {
+  const forms = ["3.8 out of 4.0 GPA", "GPA 3.8 out of 4", "GPA - 3.8", "GPA – 3.8", "Cumulative GPA: 3.80", "GPA: 3.8 (4.0 scale)", "GPA 3.8/4.0", "3.8/4.0 GPA", "GPA of 3.8", "3.8 GPA"];
+  for (const form of forms) {
+    const p = CareerProfile.createProfile({});
+    CareerProfile.ingestResume(p, { text: `EDUCATION\nTEST University - B.S. Economics, ${form}, graduating May 2028\n\nEXPERIENCE\nAnalyst, Acme (TEST), 2025\n- Did analysis (TEST)\n\nLEADERSHIP\nTreasurer, Club (TEST), 2024\n- Kept a GPA 3.8 study group going`, fileName: "x.txt" });
+    for (const f of (p as any).facts) CareerProfile.confirmFact(p, f.id);
+    const on = buildResume(p, targetOf(T1)!, false), off = buildResume(p, targetOf(T1)!, false, { noGpa: true });
+    assertNode.equal(on.gpaConflict, null, `${form}: read as 3.8 (the same as the other line), never 4.0`);
+    const school = off.lines.find((l) => /TEST University/.test(l));
+    assertNode.equal(school, "TEST University - B.S. Economics, graduating May 2028", `${form}: off whole`);
+  }
+  const p = CareerProfile.createProfile({});
+  CareerProfile.ingestResume(p, { text: `EDUCATION\nTEST University - B.S. Economics, 3.8 out of 4.0 GPA\n\nAWARDS\nDean's List (TEST), GPA 3.4\n\nEXPERIENCE\nAnalyst, Acme (TEST), 2025\n- Did analysis (TEST)`, fileName: "x.txt" });
+  for (const f of (p as any).facts) CareerProfile.confirmFact(p, f.id);
+  assertNode.deepEqual(buildResume(p, targetOf(T1)!, false).gpaConflict, ["3.8", "3.4"], "a real conflict names the values as written, never the scale");
+});
+
+// Round-2 re-review of #644 (2): a full stop after the value or the scale, a major and an overall value, "on a 4.0 scale", a GPA in
+// parentheses, "GPA (cumulative)", "CGPA": each is read as its value and comes off whole; "3.8/4.0" with no GPA word is left alone.
+Deno.test("gpa/3 'GPA 3.8.', 'GPA 3.8/4.0.', 'Major GPA 3.9, overall 3.6', '(GPA: 3.8)', 'CGPA 3.8': read right, off whole", () => {
+  const cases: [string, string | string[] | null, string][] = [
+    // Round 4: two values written together are both read, so they conflict.
+    ["GPA 3.6 and 3.8", ["3.6", "3.8"], "TEST University - B.S. Economics"],
+    ["GPA 3.8.", "3.8", "TEST University - B.S. Economics."],
+    ["GPA: 3.85. Dean's List", "3.85", "TEST University - B.S. Economics. Dean's List"],
+    ["GPA 3.8/4.0.", "3.8", "TEST University - B.S. Economics."],
+    ["Major GPA 3.9, overall 3.6", "3.6", "TEST University - B.S. Economics"],
+    ["Major GPA 3.9, overall GPA 3.6; Dean's List", "3.6", "TEST University - B.S. Economics; Dean's List"],
+    ["Overall GPA 3.6, Major GPA 3.9", "3.6", "TEST University - B.S. Economics"],
+    ["GPA 3.8 on a 4.0 scale", "3.8", "TEST University - B.S. Economics"],
+    ["(GPA: 3.8)", "3.8", "TEST University - B.S. Economics"],
+    ["GPA (cumulative): 3.8", "3.8", "TEST University - B.S. Economics"],
+    ["CGPA 3.8", "3.8", "TEST University - B.S. Economics"],
+    ["3.8/4.0", null, "TEST University - B.S. Economics, 3.8/4.0"],
+  ];
+  for (const [form, value, offLine] of cases) {
+    const p = CareerProfile.createProfile({});
+    CareerProfile.ingestResume(p, { text: `EDUCATION\nTEST University - B.S. Economics, ${form}\n\nAWARDS\nHonor (TEST), GPA 3.4\n\nEXPERIENCE\nAnalyst, Acme (TEST), 2025\n- Did analysis (TEST)`, fileName: "x.txt" });
+    for (const f of (p as any).facts) CareerProfile.confirmFact(p, f.id);
+    const on = buildResume(p, targetOf(T1)!, false), off = buildResume(p, targetOf(T1)!, false, { noGpa: true });
+    assertNode.deepEqual(on.gpaConflict, value ? [...[value].flat(), "3.4"] : null, `${form}: read as ${value ?? "no GPA"}`);
+    assertNode.equal(off.lines.find((l) => /TEST University/.test(l)), offLine, `${form}: off whole, nothing left over`);
+  }
+});
+
+// Round-2 re-review of #644 (1b): a yes approves exactly the pairs shown. Five bullets can be reworded, two are shown; the yes
+// puts those two in and no other.
+Deno.test("restyle/1 five rewordings, two shown: a yes changes only the two shown", async () => {
+  const p = CareerProfile.createProfile({});
+  CareerProfile.ingestResume(p, { text: RESUME, fileName: "r.txt" });
+  for (const f of (p as any).facts) CareerProfile.confirmFact(p, f.id);
+  const at = Date.parse("2026-11-09T12:00:00Z"), U = "11111111-1111-4111-8111-111111111111";
+  // Each bullet loses its last word: a real rewording the audit passes (no new word, number or claim).
+  const rewrite = async (b: string) => b.replace(/\s+\S+$/, "");
+  const turn = (message: string) => resumeTaskTurn({ message, ctx: { profile: p }, userId: U, now: at, deps: { uploaded: async () => false, lastIntent: async () => "career_resume_task", rewrite } });
+  assertNode.ok((await turn(T1))?.task.file, "the resume is made");
+  const warm = await turn("Make it warmer.");
+  const proposed = (p as any)._resumeTask.proposed as { before: string; after: string }[];
+  assertNode.equal(proposed.length, 2, `only the shown pairs are proposed: ${warm?.reply}`);
+  const shown = [...warm!.reply.matchAll(/^New: (.*)$/gm)].map((m) => m[1]);
+  assertNode.deepEqual(shown, proposed.map((x) => x.after), "what is proposed is what was shown");
+  assertNode.ok(Number(/(\d+) more bullets could change the same way/.exec(warm!.reply)?.[1] ?? 0) >= 3, `five or more reworded, the others named, not proposed: ${warm!.reply}`);
+  const yes = await turn("yes, that's fine");
+  const swaps = (p as any)._resumeTask.swaps as { before: string; after: string }[];
+  assertNode.deepEqual(swaps, proposed, `the yes puts in exactly the two shown: ${yes?.reply}`);
+  assertNode.ok(/2 bullets are reworded/.test(yes!.reply), yes!.reply);
+});
+
+// Round-2 re-review of #644 (1a): the "new job" question keeps only a title or role; anything else is not stored as the title.
+Deno.test("fact_detail/1 a search, a question and a bare yes are never stored as the new job's title", () => {
+  const task = { pending: "fact_detail", file: { sha256: "x", filename: "x.pdf", pages: 1, label: "data analyst internships" }, target: targetOf(T1) } as any;
+  const view = { companies: [], jobs: 3, posting: false, resumeShown: true };
+  for (const t of ["find machine learning jobs", "what do you know about me?", "search for data jobs in Boston", "send me the resume PDF"]) assertNode.notEqual(resumeAskOf(t, task, view), "fact_detail", t);
+  for (const t of ["yes", "no", "Yes.", "ok"]) { assertNode.equal(resumeAskOf(t, task, view), "fact_detail", `${t}: asked again`); assertNode.equal(titleShaped(t), false, t); }
+  // Round 3: one capitalised word is not a title unless it is a title word.
+  for (const t of ["Thanks", "Perfect", "Great", "Cool", "Hello", "Wait", "LOL"]) assertNode.equal(titleShaped(t), false, t);
+  assertNode.ok(titleShaped("Analyst"), "Analyst");
+  for (const t of ["ok, Analyst since May", "Data Analyst, started June 2026", "Sous Chef", "Junior Software Engineer"]) { assertNode.equal(resumeAskOf(t, task, view), "fact_detail", t); assertNode.ok(titleShaped(t), t); }
+});
+
+// CodeRabbit #1 and #8 on #634 (architect, round 5): after "don't apply", "Send this one" or a bare yes is held from the card step
+// and asked about; an error once the message is the task's is a contained reply.
+Deno.test("hold/1 'don't apply' holds a card approval; a resume-step error is a contained reply", async () => {
+  const p = intake("", true);
+  const at = Date.parse("2026-11-09T12:00:00Z");
+  const turn = (message: string) => resumeTaskTurn({ message, ctx: { profile: p }, userId: "u-r10", now: at, deps: { uploaded: async () => false, lastIntent: async () => "career_resume_task" } });
+  assertNode.ok((await turn(T1))?.task.file, "the resume is made");
+  for (const m of ["Send this one.", "yes", "approve"]) assertNode.equal(holdsCardApproval(p, m, at), false, `${m}: no limit yet`);
+  assertNode.ok((await turn(T3))?.task.limits.includes("no_apply"), "T3 keeps 'don't apply'");
+  for (const m of ["Send this one.", "send it", "yes", "Yes.", "approve"]) assertNode.equal(holdsCardApproval(p, m, at), true, `${m}: held`);
+  for (const m of ["send me the resume PDF", "find data analyst jobs"]) assertNode.equal(holdsCardApproval(p, m, at), false, `${m}: not an approval`);
+  assertNode.equal(holdsCardApproval(p, "yes", at + 25 * 3600_000), false, "a lapsed task holds nothing");
+  const send = await turn("Send this one.");
+  assertNode.ok(send && send.intent === "career_resume_clarify" && /haven't approved anything/.test(send.reply) && !send.documents.length, `asked, with no job list: ${send?.reply}`);
+  // An error after the message is the task's: a contained reply, not a fall-through to the planner or an apply step.
+  // (An unreadable clock throws inside the step once T1 has claimed the message.)
+  const boom = await resumeTaskTurn({ message: T1, ctx: { profile: intake("", true) }, userId: "u-r10", now: Number.NaN, deps: { uploaded: async () => false } });
+  assertNode.ok(boom && /^I couldn't finish the resume step: Invalid time value\. Nothing was applied or sent\.$/.test(boom.reply) && boom.resultStatus === "failed" && !boom.documents.length, `contained: ${boom?.reply}`);
+  // A message that is not the task's still falls through as before.
+  assertNode.equal(await resumeTaskTurn({ message: "what's the weather", ctx: { profile: p }, userId: "u-r10", now: at, deps: { uploaded: async () => false } }), null);
+});
+
+// Re-review of #644 (7): a number is a job number only with a cue.
+Deno.test("submit/1 'submit the 1 page version' is not job 1; 'job 2', '#2', 'number 2', 'the 2nd one' are job 2", () => {
+  for (const t of ["submit the 1 page version", "submit the 1-page one", "apply with the 2 page resume"]) assertNode.equal(jobNumberOf(t), null, t);
+  for (const t of ["submit job 2", "submit #2", "apply to number 2", "submit the 2nd one", "submit the second one", "submit job #2"]) assertNode.equal(jobNumberOf(t), 2, t);
 });

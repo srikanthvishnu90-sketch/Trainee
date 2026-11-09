@@ -64,7 +64,7 @@ function parseMultipart(buf, contentType) {
 }
 
 function startMockAts({ port = 0 } = {}) {
-  const submissions = [], loads = {};
+  const submissions = [], held = [], loads = {};
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
@@ -99,6 +99,12 @@ function startMockAts({ port = 0 } = {}) {
       for await (const c of req) chunks.push(c);
       const { fields, files } = parseMultipart(Buffer.concat(chunks), req.headers["content-type"]);
       if (submissions.some((s) => s.job === job && s.ats === ats)) return send(409, page("Duplicate", "<h1>Already applied</h1>"));
+      // WO-M: an employer that holds the application until the person types a code it emailed (Greenhouse's security code).
+      // The application is NOT received: it goes in `held`, never in `submissions`.
+      if (job.startsWith("emailcode")) {
+        held.push({ ats, job, fields, at: Date.now() });
+        return send(200, page("Verify your email", `<p>We sent a security code to your email address. Enter it below to finish your application.</p><form method="post" action="/${ats}/${job}/code"><label for="security_code">Security code</label><input id="security_code" name="security_code" type="text" autocomplete="one-time-code"><button type="submit">Verify</button></form>`));
+      }
       submissions.push({ ats, job, fields, files, cookie: req.headers.cookie || "", at: Date.now() });
       return send(200, ats === "greenhouse"
         ? page("Confirmation", `<h1>Thank you for applying.</h1><p id="confirmation">Your application has been submitted. Confirmation code GH-${job.toUpperCase()}.</p>`)
@@ -107,7 +113,7 @@ function startMockAts({ port = 0 } = {}) {
     send(405, "method not allowed");
   });
   return new Promise((resolve) => server.listen(port, "127.0.0.1", () => resolve({
-    server, port: server.address().port, base: `http://127.0.0.1:${server.address().port}`, submissions, loads,
+    server, port: server.address().port, base: `http://127.0.0.1:${server.address().port}`, submissions, held, loads,
     close: () => new Promise((r) => server.close(r)),
   })));
 }

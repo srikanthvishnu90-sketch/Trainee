@@ -183,3 +183,26 @@ test("submission needs an approval {approval_id, hash} whose hash is the hash of
   assert.equal(mock.submissions.some((s) => s.job.startsWith("ap")), false);
   assert.equal((await applyOne(browser, mk("lever", "ap7"))).status, "submitted_page_confirmed");
 });
+
+// WO-M fix a: after Submit the employer asks for a code it emailed and holds the application (the mock's "emailcode" job keeps
+// it in `held`, not in `submissions`). The engine reads the page, never types the code, and reports not_submitted / email_code
+// with the page's proof: a visible code box on the employer's host, no confirmation signal, the page-text and screenshot hashes.
+test("an emailed-code page after Submit is reported not_submitted / email_code with its proof; the code box is never typed into", { skip }, async () => {
+  const r = await applyOne(browser, mk("greenhouse", "emailcode1"));
+  assert.equal(r.status, "not_submitted");
+  assert.equal(r.reason, "email_code");
+  assert.equal(r.email_code.code_field_visible, true);
+  assert.equal(r.email_code.confirmation_signal, false);
+  assert.equal(r.email_code.host, "127.0.0.1");
+  assert.match(r.email_code.page_text_sha256, /^[0-9a-f]{64}$/);
+  assert.match(r.email_code.screenshot_sha256, /^[0-9a-f]{64}$/);
+  assert.equal(mock.held.filter((h) => h.job === "emailcode1").length, 1, "the employer held it once");
+  assert.equal(mock.submissions.some((s) => s.job === "emailcode1"), false, "it was never received");
+  assert.equal(r.attempts, 1, "never retried after the click");
+});
+
+test("a normal confirmation is unchanged: no code box, so confirmed as before", { skip }, async () => {
+  const r = await applyOne(browser, mk("lever", "plain-after-email-code"));
+  assert.equal(r.status, "submitted_page_confirmed");
+  assert.equal(r.email_code, undefined);
+});

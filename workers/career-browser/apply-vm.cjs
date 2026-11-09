@@ -178,6 +178,14 @@ function createWorker(o) {
       if (res.reason === "bot_check") await refused(row, "bot_wall", null);
       return void (await complete(row, "needs_user", res.reason, { ...ev, handed_back: res.reason === "bot_check" ? "a verification check appeared; the person finishes it at the link" : "the employer asks the person to sign in; they finish it at the link" }));
     }
+    // WO-M fix a: after the click the employer asked for a code it emailed: the application did not go in. Recorded
+    // not_submitted / email_code with the page's proof; the database keeps that only with the full proof (a visible code box
+    // on the employer's host, no confirmation, the page-text and screenshot hashes), else it records unknown_outcome. Proven,
+    // the posting is prepared again and goes only on a new card and the person's new yes. The code box is never typed into.
+    if (res.status === "not_submitted" && res.reason === "email_code") {
+      return void (await complete(row, "not_submitted", "email_code", { ...ev, submit_clicked: true, application_in: false, email_code: res.email_code || null,
+        handed_back: "the employer asked for a code it emailed; the application did not go in. Open the link and apply there; they will email a code to finish" }));
+    }
     if (res.status === "unknown_outcome") return void (await complete(row, "unknown_outcome", "application outcome unknown: " + String(res.reason || "").slice(0, 80), ev));
     // not_submitted
     // A required question the person has not answered (or one that could not be set and read back): handed back by name, never guessed.

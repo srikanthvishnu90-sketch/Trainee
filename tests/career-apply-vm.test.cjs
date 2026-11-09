@@ -276,3 +276,28 @@ test("a sign-in wall is handed back as 'needs you', never signed into, nothing s
     assert.equal(mock.submissions.length, 0);
   } finally { await browser.close(); await mock.close(); }
 });
+
+// WO-M fix a (20261109120000): end to end, the VM's real engine on the local mock form that answers Submit with an emailed-code
+// page. The database keeps not_submitted / email_code because the proof is complete; the person reads that it did not go in.
+test("an emailed-code page after the VM's Submit ends not_submitted / email_code with its proof, worded as not gone in", { skip: skipBrowser }, async () => {
+  await admin.q("update career_apply_jobs set state='not_submitted', reason='test reset' where state in ('queued','driving')");
+  await setting("APPLY_VM", "on"); await setting("APPLY_VM_USER_IDS", "*"); await setting("APPLY_VM_ALLOW_LOCAL", "on");
+  const mock = await startMockAts();
+  const browser = await pw.chromium.launch({ headless: true, chromiumSandbox: process.env.UPMORE_CHROMIUM_SANDBOX !== "off",
+    ...(process.env.UPMORE_CHROMIUM_PATH ? { executablePath: process.env.UPMORE_CHROMIUM_PATH } : {}) });
+  try {
+    await seedPeople(admin, 9200, 1);
+    await seedItems(admin, 9200, 1, 1, `'${mock.base}/greenhouse/emailcode-vm'`, undefined, "ok", { job: "EMAIL-CODE-", co: "Acme " });
+    const w = createWorker({ rpc: mk(), browser, workerId: "vm-ec", concurrency: 1, evidenceDir: null, log: () => {} });
+    assert.equal(await w.tick(), 1);
+    while (w.inflight.size) await new Promise((r) => setTimeout(r, 50));
+    const row = JSON.parse(await one(`select row_to_json(j)::text from career_apply_jobs j where user_id='${uid(9201)}' and job_id='EMAIL-CODE-1'`));
+    assert.equal(`${row.state}:${row.reason}`, "not_submitted:email_code");
+    assert.equal(row.vm_phase, "submitting", "the click was recorded before it");
+    assert.equal(row.evidence.email_code.code_field_visible, true);
+    assert.equal(row.evidence.application_in, false);
+    assert.equal(mock.held.length, 1); assert.equal(mock.submissions.length, 0);
+    const { statusLine } = require("../supabase/functions/_shared/career_apply_status.ts");
+    assert.equal(statusLine({ ...row, company: "Acme", title: null }), "Acme: Acme asked for a code they emailed you, so the application didn't go in. Open the link and apply there; they'll email you a code to finish.");
+  } finally { await browser.close(); await mock.close(); }
+});

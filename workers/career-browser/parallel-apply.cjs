@@ -57,6 +57,29 @@ const hasApproval = (p) => !!p.approval && typeof p.approval.approval_id === "st
   && typeof p.approval.hash === "string" && p.approval.hash === payloadHash(p);
 const CONFIRM_RE = /thank you for applying|application (has been )?submitted|we['’]ve received your application/i;
 
+// After the click, in the page. A code box: a visible input named, labelled or autocompleted as a one-time / verification /
+// security code (never a password box). A confirmation signal: the confirmation words in the visible text, a heading that
+// says the application went, or an address that says so.
+function CODE_PAGE() {
+  const vis = (e) => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+  const re = new RegExp("one[- _]?time|verification[\\s_-]*code|security[\\s_-]*code|confirmation[\\s_-]*code|\\botp\\b|passcode|email(ed)?[\\s_-]*code", "i");
+  const about = (e) => [e.name, e.id, e.getAttribute("autocomplete"), e.getAttribute("aria-label"), e.placeholder,
+    ...(e.labels ? [...e.labels].map((l) => l.textContent) : [])].filter(Boolean).join(" ");
+  const code = [...document.querySelectorAll("input")].some((e) => vis(e) && !["hidden", "password", "submit", "button", "checkbox", "radio", "file"].includes(e.type)
+    && (e.getAttribute("autocomplete") === "one-time-code" || re.test(about(e))));
+  const text = ((document.body && document.body.innerText) || "").slice(0, 20000);
+  const heads = [...document.querySelectorAll("h1, h2, [role='heading']")].filter(vis).map((h) => h.textContent || "").join(" | ");
+  const confirmText = /thank you for applying|application (has been |was )?(submitted|received)|we['\u2019]ve received your application|successfully submitted/i;
+  const confirmation_signal = confirmText.test(text) || /\b(thank you|thanks|application (submitted|received|sent|complete)|success)\b/i.test(heads)
+    || /\/(confirmation|thank-?you|thanks|success|submitted)(\/|$|\?)/i.test(location.pathname + location.search);
+  return { code_field_visible: code, confirmation_signal, text };
+}
+function AFTER_SUBMIT_SETTLED() {
+  if (document.querySelector("#confirmation, h1")) return true;
+  const re = new RegExp("one[- _]?time|verification[\\s_-]*code|security[\\s_-]*code|\\botp\\b|passcode", "i");
+  return [...document.querySelectorAll("input")].some((e) => (e.offsetWidth || e.offsetHeight) && (e.getAttribute("autocomplete") === "one-time-code" || re.test(`${e.name} ${e.id} ${e.placeholder || ""} ${e.labels && e.labels[0] ? e.labels[0].textContent : ""}`)));
+}
+
 class NeedsUser extends Error { constructor(reason, field) { super(`${reason}${field ? `: ${field}` : ""}`); this.reason = reason; this.field = field; this.needs = null; } }
 
 function checkPayload(p, { allowHosts = [] } = {}) {
@@ -150,14 +173,25 @@ async function attempt(browser, p, opts, timing) {
     timing.submitClicked = true;
     try {
       await Promise.all([page.waitForLoadState("domcontentloaded"), page.click('button[type="submit"]')]);
-      await page.waitForSelector("#confirmation, h1", { timeout: opts.stepTimeoutMs || 15000 });
+      // A page that settled: a confirmation or heading as before, or an emailed-code box (which may have no heading).
+      await page.waitForFunction(AFTER_SUBMIT_SETTLED, null, { timeout: opts.stepTimeoutMs || 15000 });
       if (blocked.length) return { status: "unknown_outcome", reason: `after submit: navigation to a disallowed host was refused (${blocked[0]})`, filled };
     } catch (e) {
       return { status: "unknown_outcome", reason: `after submit: ${e.message.split("\n")[0]}`, filled };
     }
     timing.submit = Date.now() - t2;
     const text = (await page.textContent("body")) || "";
-    if (opts.shotAfter) await page.screenshot({ path: opts.shotAfter, fullPage: true });
+    const shot = await page.screenshot({ fullPage: true, ...(opts.shotAfter ? { path: opts.shotAfter } : {}) });
+    // WO-M fix a: the employer answered the click with "enter the code we emailed you" and no confirmation: the application
+    // is held, not taken. The page is read (never typed into) and proved by hashes; the database decides whether the proof
+    // is enough (career_apply_vm_email_code_refusal), else it stays unknown_outcome.
+    const prompt = await page.evaluate(CODE_PAGE).catch(() => null);
+    if (prompt && prompt.code_field_visible && !prompt.confirmation_signal) {
+      return { status: "not_submitted", reason: "email_code", filled, email_code: {
+        code_field_visible: true, host: normHost(new URL(page.url()).hostname), url_changed: page.url() !== p.url,
+        confirmation_signal: false, page_text_sha256: sha256(Buffer.from(prompt.text, "utf8")), screenshot_sha256: sha256(shot),
+      } };
+    }
     if (!CONFIRM_RE.test(text)) return { status: "unknown_outcome", reason: "no confirmation text on the page after submit", filled };
     const code = /\b(?:GH|LV)-[A-Z0-9-]+/.exec(text);
     return { status: "submitted_page_confirmed", confirmation: code ? code[0] : null, filled };

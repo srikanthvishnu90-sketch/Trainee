@@ -151,6 +151,9 @@ export function statusLine(a: AppRow): string {
       return `${name}: stopped before it was sent; it needs you (${NEEDS_YOU_WORDS[String(a.reason)] ?? reasonWords(a.state, a.reason)}).`;
     case "failed":
     case "not_submitted":
+      // WO-M (architect ruling 2026-11-09): the apply VM pressed Submit and the employer held the application for a code it
+      // emailed; the database records not_submitted / email_code only with the page's proof. The application did not go in.
+      if (a.state === "not_submitted" && a.reason === "email_code") return `${name}: ${who} asked for a code they emailed you, so the application didn't go in. Open the link and apply there; they'll email you a code to finish.`;
       return `${name}: not sent (${reasonWords(a.state, a.reason)}).`;
     case "queued":
       // A site that asked us to slow down before anything was sent: the same application waits and goes by itself

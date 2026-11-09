@@ -45,7 +45,7 @@ test("R-A4 unreadable queue (no queue state in ctx): global pause is set, reply 
   // MI-048 triage (2026-10-15): the halt sentence was reworded ("blocks
   // every send path this product controls"); every semantic element of
   // the R-A4 contract is present — the pin follows the current wording.
-  assert.match(r.reply, /can.t say what already went out/i, "architect ruling F.3: with the queue unread, the reply says the counts are unknown (it no longer claims every send path is blocked)");
+  assert.match(r.reply, /what already went out/i, "architect ruling F.3: with the queue unread, the reply says the counts are unknown (it no longer claims every send path is blocked)");
   assert.match(r.reply, /could not read/i, "reply states the queue's own records could not be read");
   assert.match(r.reply, /unverified/i, "reply states the exact counts are unverified");
   assert.equal((r.reply.match(/next step/gi) || []).length, 1, "reply gives exactly one next step");

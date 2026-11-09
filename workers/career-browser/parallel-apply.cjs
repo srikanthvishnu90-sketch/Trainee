@@ -67,8 +67,19 @@ function SHOWN_CHECK() {
   const text = ((document.body && document.body.innerText) || "").slice(0, 20000);
   if (/verify\s+(?:that\s+)?you(?:\s+are|['\u2019]re)\s+(?:a\s+)?(?:human|not a robot)|are you a robot|i['\u2019]?m not a robot|complete the (security )?check|press (and|&) hold/i.test(text)) return "text";
   if (/^(just a moment|attention required)/i.test(document.title || "")) return "interstitial";
+  // A reCAPTCHA or hCaptcha container the page runs invisibly at its own click is not shown either: a hidden *-captcha-response
+  // field with a hidden submit button in the same form (every captured Lever form), or the reCAPTCHA badge (Greenhouse, Ashby).
+  // The 2026-11-09 benchmark (run 42676274898) saw 0 shown checks on these boards (architect ruling of 2026-10-19).
+  const hiddenEl = (b) => !vis(b) || b.hidden || /(^|\s)hidden(\s|$)/.test(b.className || "");
+  const runsInvisibly = (e) => {
+    if (!e.matches(".g-recaptcha, .h-captcha")) return false;
+    const scope = e.closest("form") || document;
+    const token = [...scope.querySelectorAll("[name$='-captcha-response']")].some((t) => t.type === "hidden" || !vis(t));
+    const hiddenSubmit = [...scope.querySelectorAll("button[type=submit], input[type=submit]")].some(hiddenEl);
+    return (token && hiddenSubmit) || (e.matches(".g-recaptcha") && !!document.querySelector(".grecaptcha-badge"));
+  };
   const widget = [...document.querySelectorAll(".g-recaptcha, .h-captcha, .cf-turnstile, #challenge-form, #cf-challenge-running")]
-    .find((e) => (e.getAttribute("data-size") || "").toLowerCase() !== "invisible" && !/invisible/i.test(e.getAttribute("data-badge") || ""));
+    .find((e) => (e.getAttribute("data-size") || "").toLowerCase() !== "invisible" && !/invisible/i.test(e.getAttribute("data-badge") || "") && !runsInvisibly(e));
   if (widget) return "widget";
   const frame = [...document.querySelectorAll("iframe")].find((f) => {
     const src = f.src || "";
@@ -261,7 +272,11 @@ async function attempt(browser, p, opts, timing) {
     timing.submit = Date.now() - t2;
     const text = (await page.textContent("body")) || "";
     if (opts.shotAfter) await page.screenshot({ path: opts.shotAfter, fullPage: true });
-    if (!CONFIRM_RE.test(text)) return { status: "unknown_outcome", reason: "no confirmation text on the page after submit", filled };
+    if (!CONFIRM_RE.test(text)) {
+      // The page's own check can become a shown challenge at the click: the person finishes it; it is never solved or retried.
+      if (await botCheck(page)) return { status: "unknown_outcome", reason: "after submit: the page showed a verification check; nothing is confirmed until you finish it", filled };
+      return { status: "unknown_outcome", reason: "no confirmation text on the page after submit", filled };
+    }
     const code = /\b(?:GH|LV)-[A-Z0-9-]+/.exec(text);
     return { status: "submitted_page_confirmed", confirmation: code ? code[0] : null, filled };
   } finally {
@@ -312,4 +327,4 @@ async function runPool(browser, payloads, opts = {}) {
   return { results, wallMs: Date.now() - started, concurrency };
 }
 
-module.exports = { applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, HANDOFF_REASONS, NeedsUser };
+module.exports = { botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, HANDOFF_REASONS, NeedsUser };

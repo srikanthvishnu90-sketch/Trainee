@@ -58,6 +58,10 @@ exists for the seven other providers.
 5. **The VM's captcha test reads the whole page source** (`BOT_RE.test(page.content())`): any page that only *loads* an
    invisible reCAPTCHA script contains the word "captcha" and stops as `needs_user` / `bot_check` before filling. The eval
    counts this as "runner BOT_RE stops" next to "captcha shown", so the gap is measured, not assumed.
+   **Update 2026-11-09:** #658 made the runner judge only a shown check (SHOWN_CHECK). The 220-posting benchmark (run
+   42676274898) still showed every Lever posting stopping, because Lever's hCaptcha container runs invisibly at the click and
+   carries no data-size. SHOWN_CHECK now skips a container the page runs invisibly (a hidden *-captcha-response field with a
+   hidden submit button, or the reCAPTCHA badge), and the eval and the dry-run worker measure with the runner's own botCheck.
 
 ## The dry-run eval (`scripts/browser-eval/`)
 

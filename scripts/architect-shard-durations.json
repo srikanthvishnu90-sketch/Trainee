@@ -73,6 +73,7 @@
     "tests/architect/d007-quarantine.test.ts": 0.1,
     "tests/architect/d037-live-effects.test.ts": 8.2,
     "tests/architect/d038-career-model.test.ts": 0.1,
+    "tests/architect/d046-people-model-and-v203.test.ts": 0.1,
     "tests/architect/d046-sonnet-only-no-person-cap.test.ts": 1,
     "tests/architect/date-components.test.ts": 0.1,
     "tests/architect/delivery-throughput-pg.test.ts": 14,
@@ -271,6 +272,8 @@
     "tests/architect/posted-line-date-only.test.ts": 0.1,
     "tests/architect/posting-place-negated-remote.test.ts": 0.1,
     "tests/architect/prepare-candidates-missing-account-row.test.ts": 8,
+    "tests/architect/research-free-sources.test.ts": 0.1,
+    "tests/architect/research-hardening-628.test.ts": 3.2,
     "tests/architect/research-review-fixes-589.test.ts": 0.1,
     "tests/architect/resume-cloud-copy-recovery.test.ts": 10,
     "tests/architect/resume-design.test.ts": 3.2,
@@ -536,6 +539,13 @@
     "tests/architect/scenarios-file-signin-r4-regressions.test.ts": 0.2,
     "tests/architect/flow-scenarios-file-signin-r4.test.ts": 14,
     "tests/architect/counter-draft-wording-20261106.test.ts": 3.0,
-    "tests/architect/code-redaction-length-20261106.test.ts": 10.5
+    "tests/architect/code-redaction-length-20261106.test.ts": 10.5,
+    "tests/architect/r10-files-browser-1.test.ts": 1.1,
+    "tests/architect/r10-files-shell.test.ts": 0.3,
+    "tests/architect/r10-files-browser-2.test.ts": 0.7,
+    "tests/architect/r10-files-woc.test.ts": 0.1,
+    "tests/architect/r10-files-live-parity.test.ts": 0.2,
+    "tests/architect/r10-files-browser-live.test.ts": 1.0,
+    "tests/architect/r10-files-s2.test.ts": 0.9
   }
 }

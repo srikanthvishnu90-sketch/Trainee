@@ -2182,7 +2182,7 @@ const CareerRouter = (() => {
         reply: compose({ headline: "That is the resume already on your record — nothing changed.", facts: [`Its ${n} entr${n === 1 ? "y is" : "ies are"} confirmed as you gave them, so I added nothing and need no new yes.`, ...(Array.isArray(res.replaced_drafts) && res.replaced_drafts.length ? ["The other resume you pasted, which you had not confirmed, is set aside: nothing from it is used."] : [])], nextStep: "To change an entry, tell me what it should say, or paste the updated resume." }) };
     }
     const byKind = {};
-    for (const f of profile.facts || []) if (f && f.source === "resume-ingest" && f.needs_confirmation) byKind[f.kind] = (byKind[f.kind] || 0) + 1;
+    for (const f of profile.facts || []) if (f && f.source === "resume-ingest" && f.needs_confirmation) { const k = f.kind === "other" && /^Interest: /.test(f.text || "") ? "interest" : f.kind; byKind[k] = (byKind[k] || 0) + 1; }
     const total = Object.values(byKind).reduce((a, b) => a + b, 0);
     const counts = Object.entries(byKind).map(([k, n]) => `${n} ${k}`).join(", ");
     const mir = threadMirrorForWrite(ctx);

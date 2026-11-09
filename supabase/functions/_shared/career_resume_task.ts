@@ -65,6 +65,8 @@ const LIMITS: [string, RegExp][] = [
   ["no_new_experience", /\b(don'?t|do not) add (any )?experience\b/], ["no_apply", /\b(don'?t|do not|never) (apply|submit)\b|\bnot apply\b/],
   ["ask_first", /\bask me\b/], ["no_gpa", /\b(leave|keep) (the |my )?gpa off\b|\b(no|drop|remove|omit) (the |my )?gpa\b/],
 ];
+// A message that says not to apply, or to leave the job search, is a boundary: nothing is queued, prepared or sent on it.
+export const noApplyAsk = (message: string) => /\b(don'?t|do not|never) (apply|submit)\b|\bnot apply\b|\bleave the (job )?search\b|\bnot asking for an application\b/.test(lc(message));
 export const limitsOf = (message: string) => LIMITS.filter(([, re]) => re.test(lc(message))).map(([k]) => k);
 
 const RESUME = /\b(resume|résumé|cv)\b/;
@@ -155,7 +157,7 @@ export function buildResume(profile: any, target: Target, uploaded: boolean, o: 
   const score = scorer(target);
   // A student target leads with education; everything else leads with experience. Within a section, the entries that show
   // the target's work come first (a stable order otherwise: the person's own).
-  const order = target.level === "internship" ? ["education", "experience", "project", "leadership", "certification"] : ["experience", "project", "education", "leadership", "certification"];
+  const order = target.level === "internship" ? ["education", "experience", "project", "leadership"] : ["experience", "project", "education", "leadership"];
   for (const kind of order) {
     const xs = facts.filter((f) => f.kind === kind).map((f, i) => ({ f, i, s: score(f) })).sort((a, b) => b.s - a.s || a.i - b.i);
     if (!xs.length) continue;
@@ -171,7 +173,10 @@ export function buildResume(profile: any, target: Target, uploaded: boolean, o: 
       if (kind === "education" && gpaConflict && new RegExp(GPA.source, "i").test(textOf(f))) blocks.push({ kind: "line", text: "GPA omitted: conflicting source values need confirmation before use.", flag: true });
     }
   }
-  const skills = skillLines(facts.filter((f) => f.kind === "skill"));
+  // Certifications and interests print in the skills block under their own labels (spec A.4), never as experience.
+  const skills = skillLines([...facts.filter((f) => f.kind === "skill"),
+    ...facts.filter((f) => f.kind === "certification").map((f) => ({ name: `Certifications: ${f.title || f.text}` })),
+    ...facts.filter((f) => f.kind === "other" && /^Interest: /.test(f.text || "")).map((f) => ({ name: `Interests: ${f.name || f.title}` }))]);
   if (skills.length) {
     const more = skills.find((x) => /^Certifications?$/.test(x.group)) ? " & Certifications" : skills.find((x) => /^Interests?$/.test(x.group)) ? " & Interests" : "";
     blocks.push({ kind: "heading", text: `Skills${more}` });

@@ -90,7 +90,7 @@ import { supabaseMemoryStore } from "../_shared/agent/memory.ts";
 import { codePending, readSituation } from "../_shared/career_situation.ts";
 import { statusRecordsFrom } from "../_shared/career_capabilities.ts";
 import { edgeRenderer, supabasePersonaStore, supabaseResumeStore } from "../_shared/career_tailor.ts";
-import { resumeTaskTurn } from "../_shared/career_resume_task.ts"; // R10 WO-A/B
+import { noApplyAsk, resumeTaskTurn } from "../_shared/career_resume_task.ts"; // R10 WO-A/B
 import { supabaseMailStore } from "../_shared/career_mail_store.ts";
 import { CONFIRM_INTENT, confirmWhichTurn, supabaseConfirmStore } from "../_shared/career_apply_confirm.ts";
 import { EMAIL_INTENT, emailTurn, supabaseEmailStore, supabaseResumes } from "../_shared/career_apply_email.ts";
@@ -658,6 +658,10 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // R10 WO-A/B (spec A.2 resume turns 1-3): a resume ask with a target and no posting, a correction to it, a link ask
       // and "send this one" are the resume task's (career_resume_task.ts), in the planner's slot: every action turn below is
       // skipped, so "don't apply" can never start an apply or a batch. Its files ride the reply as documents.
+      // R10 (spec A.2 resume T3, F.2): "don't apply", "leave the job search" is a boundary on this message. No apply turn
+      // runs on it, and an apply run the router plans on it is undone below (the run the thread held before is kept).
+      const noApply = noApplyAsk(message);
+      const batchBefore = JSON.stringify((ctx as any).batchApplyState ?? null);
       const resumeAns = !crisisText && !codeTurn && !tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await resumeTaskTurn({ message, ctx, userId: user.id, now: Date.now(), deps: { resumes: supabaseResumeStore(admin),
             // B.6 continuation 1: "make the first bullet less wordy" is the model's wording, metered like every model call
@@ -933,7 +937,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // APPLY HERE (apply_here.ts, Telegram): the link(s) or "apply to this" resolved and screened, no queueing; the tap on the one Apply
       // button queues or approves the exact payload. CAREER_APPLY_HERE=off turns off ONLY this intake (the one-line reply and the Apply button): the applyTurn below then answers as before.
       // It does NOT bring back attachments: the no-download default (attach_tool.ts, research_reply.ts attach) is separate and stays on.
-      const hereOut = Deno.env.get("CAREER_APPLY_HERE") !== "off" && writerChannel((body as any)?.channel) === "telegram" && !billing && !cancelled && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      const hereOut = !noApply && Deno.env.get("CAREER_APPLY_HERE") !== "off" && writerChannel((body as any)?.channel) === "telegram" && !billing && !cancelled && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await applyHereTurn({ message, now: Date.now(), db: supabasePostingsDb(admin), fetchFeed: boardFetchFeed((i, init) => fetch(i, init), { timeoutMs: 8000 }),
             apps: () => supabaseApplications(admin)(user.id), facts: screenFacts,
             last: (() => { const l = (loaded.snapshot as any)?.stores?.discovery?.lastShortlist; return Array.isArray(l) && l.length === 1 ? l[0] : null; })() })
@@ -978,7 +982,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           }
         }
       }
-      const queued: any = hereOut ? { reply: hereOut.reply, intent: APPLY_QUEUE_INTENT, status: hereOut.status } : !billing && !cancelled && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      const queued: any = hereOut ? { reply: hereOut.reply, intent: APPLY_QUEUE_INTENT, status: hereOut.status } : !noApply && !billing && !cancelled && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await applyTurn({
           ...feature1.apply,
           // FEATURE E2E: a pasted posting link (or a role at a registered board) read from the ATS's public API on demand
@@ -1559,6 +1563,11 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // prepare intent is planned from that skeleton. Either way the
       // intent commits transactionally with the reply below, and the
       // reply never claims a state the worker has not written.
+      if (noApply && !careerBatch && (out.intent === "career_batch_apply" || out.intent === APPLY_QUEUE_INTENT)) {
+        const prev = JSON.parse(batchBefore);
+        if (prev === null) delete (ctx as any).batchApplyState; else (ctx as any).batchApplyState = prev;
+        out = { reply: "I haven't applied to anything or put anything on your apply list, as you asked. Nothing was prepared or sent.", intent: "career_apply_held", resultStatus: "not_started", contained: false, handler: "no_apply" };
+      }
       const pausedBatchReadback = careerBatch && careerBatch.action === "status" && out.intent === "career_paused" && !ctx._hostPatch;
       if (careerBatch && (out.handler !== "CareerHostControl" || pausedBatchReadback)) {
         const plan = await planCareerBatchIntent({ batchRequest: careerBatch, message, userId: user.id, threadId: tid,

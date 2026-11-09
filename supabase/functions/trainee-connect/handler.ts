@@ -14,8 +14,8 @@ import { previewOg, renderBootstrap, renderConnect, renderDone, renderPreview, r
 
 export type { ProviderId } from "../_shared/connect_page.ts";
 export { connectLanding } from "../_shared/connect_landing.ts";
-export interface ProviderInfo { configured: boolean; scopes: string[] } // scopes: what the consent URL asks for, from the code that builds it
-export interface ProviderState { state: PState; email: string | null }
+export interface ProviderInfo { configured: boolean; scopes: string[]; sendScopes?: string[] } // sendScopes: what "Allow sending" asks for on a connected account (store.ts consentScopes) // scopes: what the consent URL asks for, from the code that builds it
+export interface ProviderState { state: PState; email: string | null; canSend?: boolean } // canSend: the grant already includes sending
 export interface ConnectDeps {
   env: { get(k: string): string | undefined };
   now: () => number;
@@ -130,7 +130,7 @@ export async function handleConnect(req: Request, d: ConnectDeps): Promise<Respo
     const info = d.providers(reasonKey(claims.w)), st = await d.status(u);
     const pending = cookieOf(req, PENDING) as ProviderId;
     if (!action && PROVIDERS.includes(pending) && info[pending].configured && st[pending].state === "not_connected") return html(renderUnfinished({ token, provider: pending, botUrl: bot }));
-    const providers: ProviderView[] = PROVIDERS.map((id) => ({ id, configured: info[id].configured, state: st[id].state, email: st[id].email, scopes: info[id].scopes }));
+    const providers: ProviderView[] = PROVIDERS.map((id) => ({ id, configured: info[id].configured, state: st[id].state, email: st[id].email, scopes: info[id].scopes, canSend: st[id].canSend, sendScopes: info[id].sendScopes }));
     return html(renderConnect({ token, reason: reasonKey(claims.w), providers, botUrl: bot }));
   } catch (e) {
     console.error("[trainee-connect]", scrub(String((e as Error)?.message ?? e)).slice(0, 160)); // never a link token

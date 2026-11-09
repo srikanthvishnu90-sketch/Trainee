@@ -9,7 +9,9 @@ import { reasonKey, REASONS } from "./connect_link.ts";
 
 export type ProviderId = "google" | "microsoft";
 export type PState = "not_connected" | "connected" | "needs_reconnect";
-export interface ProviderView { id: ProviderId; configured: boolean; state: PState; email: string | null; scopes: string[] }
+// canSend: a connected account already granted sending (from the grant's own scopes); sendScopes: what an "Allow sending"
+// consent asks for on top (store.ts consentScopes(google, "send", connected)), present only where that consent exists.
+export interface ProviderView { id: ProviderId; configured: boolean; state: PState; email: string | null; scopes: string[]; canSend?: boolean; sendScopes?: string[] }
 export interface ConnectModel { token: string; reason: string; providers: ProviderView[]; botUrl: string | null }
 export const NAMES: Record<ProviderId, { brand: string; mail: string }> = { google: { brand: "Google", mail: "Gmail" }, microsoft: { brand: "Microsoft", mail: "Outlook" } };
 
@@ -42,17 +44,20 @@ function extraReach(scopes: string[], than: string[]): string | null {
 export function effectRows(scopes: string[]): { effect: string; answer: string }[] {
   const c = capsOf(scopes);
   return [
-    { effect: "Read email", answer: c.read ? "Yes: sender, subject and a short preview of new email" : "No" },
+    { effect: "Read email", answer: c.read ? "Yes: sender, subject and a short preview of new email, and the security codes employers email you" : "No" },
     { effect: "Send email", answer: c.send ? "Only a message you approve word for word" : "No" },
     { effect: "Delete email", answer: "No" },
-    ...(c.calendar ? [{ effect: "Calendar", answer: "Reads busy times; adds an event only after you approve it" }] : []),
+    // Calendars.ReadWrite lets an app create, change and delete events: all three are said, each only on your approval.
+    ...(c.calendar ? [{ effect: "Calendar", answer: "Reads busy times; creates, changes or deletes an event only after you approve it" }] : []),
   ];
 }
-export function permissionsHtml(p: { id: ProviderId; scopes: string[] }): string {
+// asked: the exact scopes this consent requests when they differ from what the rows describe (an "Allow sending" consent asks
+// only for gmail.send on top of the existing grant; the rows describe the result).
+export function permissionsHtml(p: { id: ProviderId; scopes: string[]; asked?: string[]; account?: string | null }): string {
   const n = NAMES[p.id];
   const rows = effectRows(p.scopes).map((r) => `<li><span class="k">${esc(r.effect)}</span><span class="v">${esc(r.answer)}</span></li>`).join("");
-  const exact = p.scopes.map((x) => `<code>${esc(x)}</code>`).join(" ");
-  return `<section class="acct perms" aria-label="${n.mail} permissions"><p class="who">${n.mail}</p><p class="muted">Account: you choose it on ${n.brand}'s page next. Afterwards this page shows the exact address that was connected.</p><ul class="eff">${rows}</ul><p class="muted">Exact permissions requested: ${exact || "none"}</p></section>`;
+  const exact = (p.asked ?? p.scopes).map((x) => `<code>${esc(x)}</code>`).join(" ");
+  return `<section class="acct perms" aria-label="${n.mail} permissions"><p class="who">${n.mail}</p><p class="muted">${p.account ? `Account: ${esc(p.account)}. ${n.brand}'s page asks for this same account; another one is refused.` : `Account: you choose it on ${n.brand}'s page; this page then shows it.`}</p><ul class="eff">${rows}</ul><p class="muted">Exact permissions requested: ${exact || "none"}</p></section>`;
 }
 
 // ---------------------------------------------------------------- html
@@ -63,9 +68,9 @@ export function permissionsHtml(p: { id: ProviderId; scopes: string[] }): string
 export const CONNECT_CSS = `
 .wrap:has(>.connect){padding-left:calc(16px + env(safe-area-inset-left));padding-right:calc(16px + env(safe-area-inset-right))}
 .connect{font-size:16px;line-height:1.5;overflow-wrap:anywhere}
-.connect .lede{margin:8px 0 0;font-size:16px;color:var(--mute)}
-.line{margin:0 0 12px;font-size:16px}
-.actions{margin-top:20px;display:flex;flex-direction:column;gap:10px}.actions form{margin:0}
+.connect .lede{margin:6px 0 0;font-size:16px;color:var(--mute)}
+.line{margin:0 0 8px;font-size:16px}
+.actions{margin-top:14px;display:flex;flex-direction:column;gap:10px}.actions form{margin:0}
 .primary,.secondary,.notnow,.back,.lnk{font:inherit;cursor:pointer}
 .primary,.secondary{display:flex;width:100%;align-items:center;justify-content:center;text-align:center;text-decoration:none;min-height:48px;padding:6px 22px;border-radius:999px;font-size:17px;font-weight:600}
 .primary{background:var(--accent);border:1px solid var(--accent);color:var(--accent-ink)}.primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
@@ -84,8 +89,8 @@ export const CONNECT_CSS = `
 .lnk{display:inline-flex;align-items:center;min-height:44px;padding:0 4px;border:0;background:none;text-decoration:underline;font-size:16px}
 .lnk.danger{color:var(--bad);margin-top:2px}
 .ok{font-weight:600;color:var(--good)}
-.eff{list-style:none;margin:10px 0 0;padding:0}.eff li{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 12px;padding:8px 0;border-top:1px solid var(--line);font-size:16px}.eff .k{font-weight:600}.eff .v{text-align:right;color:var(--ink)}
-.perms code{font-size:14px;overflow-wrap:anywhere}.recovery{margin:0 0 12px;font-weight:600}
+.eff{list-style:none;margin:10px 0 0;padding:0}.eff li{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 12px;padding:6px 0;border-top:1px solid var(--line);font-size:16px}.eff .k{font-weight:600;flex:0 0 auto}.eff .v{flex:1 1 0;min-width:55%;text-align:right;color:var(--ink)}
+.perms{padding:8px 14px}.perms .eff{margin-top:4px}.perms .muted{margin-top:4px}.perms code{font-size:14px;overflow-wrap:anywhere}.recovery{margin:0 0 12px;font-weight:600}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 `;
 
@@ -115,6 +120,16 @@ export function renderConnect(m: ConnectModel): string {
     const act = `<form method="post" class="go">${hidden(m.token, "start", p.id)}<button type="submit" class="primary">Reconnect ${n.brand}</button></form>`;
     return page("Reconnect your email", `${alert}<div class="actions">${act}${back(m.botUrl, "notnow")}</div>${connected.map(acct).join("")}`, { script: CONNECT_SCRIPT, tg: true });
   }
+  // D-037 / D-048: a link made to allow sending, for a Gmail that is connected and cannot send yet: the one step that adds
+  // sending (gmail.send on that same account), with its exact permissions, instead of a page with nothing to do.
+  const sendable = m.reason === "send" ? connected.find((p) => p.configured && !p.canSend && p.sendScopes?.length) : undefined;
+  if (sendable) {
+    const n = NAMES[sendable.id];
+    const go = `<form method="post" class="go">${hidden(m.token, "start", sendable.id)}<button type="submit" class="primary">Allow sending</button></form>`;
+    const notnow = m.botUrl ? `<a class="notnow" href="${esc(m.botUrl)}" rel="noopener noreferrer">Not now</a>` : "";
+    return page("Allow sending from your email", `<p class="line">${n.mail} is connected as ${esc(sendable.email ?? n.mail)}. To send the emails you approve, ${n.brand} asks you to allow sending on that same account.</p>${permissionsHtml({ id: sendable.id, scopes: [...new Set([...sendable.scopes, ...sendable.sendScopes!])], asked: sendable.sendScopes, account: sendable.email })}<p class="fine">Asked on top of what you already allowed; reading stays as it is.</p><div class="actions">${go}${notnow}</div>`,
+      { script: CONNECT_SCRIPT, tg: true, lede: "So I can send the emails you approve, word for word, and nothing else." });
+  }
   if (connected.length) {
     return page("Your email is connected", `${connected.map(acct).join("")}<div class="actions">${back(m.botUrl)}</div>`, { script: CONNECT_SCRIPT, tg: true });
   }
@@ -124,10 +139,15 @@ export function renderConnect(m: ConnectModel): string {
   const buttons = open.map((p, i) => {
     const n = NAMES[p.id];
     const extra = i > 0 ? extraReach(p.scopes, open[0].scopes) : null;
-    return `<form method="post" class="go">${hidden(m.token, "start", p.id)}<button type="submit" class="${i === 0 ? "primary" : "secondary"}">Continue with ${n.brand}</button></form>${extra ? `<p class="fine">${esc(extra)}</p>` : ""}`;
+    // Each provider's permissions sit right above its own Continue button (owner review R11), so they are read before the step.
+    return `${permissionsHtml(p)}<form method="post" class="go">${hidden(m.token, "start", p.id)}<button type="submit" class="${i === 0 ? "primary" : "secondary"}">Continue with ${n.brand}</button></form>${extra ? `<p class="fine">${esc(extra)}</p>` : ""}`;
   }).join("");
   const notnow = m.botUrl ? `<a class="notnow" href="${esc(m.botUrl)}" rel="noopener noreferrer">Not now</a>` : "";
-  return page("Connect your email", `<p class="line">${esc(one)}</p><p class="line">${esc(two)}</p><div class="actions">${buttons}${notnow}</div>${open.map(permissionsHtml).join("")}`, { script: CONNECT_SCRIPT, tg: true, og: previewOg(m.reason), lede: `So I can ${reason}.` });
+  // The purpose line never promises what no row allows: a "send" link for an inbox that is not connected yet connects it first
+  // (reading only); sending is the separate step after (the "Allow sending" state above).
+  const sends = open.some((p) => capsOf(p.scopes).send);
+  const lede = reasonKey(m.reason) === "send" && !sends ? `So I can ${REASONS.replies}. Sending is a separate step you allow after this, on the same account.` : `So I can ${reason}.`;
+  return page("Connect your email", `<p class="line">${esc(one)}</p><p class="line">${esc(two)}</p><div class="actions">${buttons}${notnow}</div>`, { script: CONNECT_SCRIPT, tg: true, og: previewOg(m.reason), lede });
 }
 
 // After consent (the OAuth callback's landing), or after a disconnect: one calm state and the way back.
@@ -157,7 +177,11 @@ export function renderDone(m: DoneModel): string {
   if (m.why === "taken" || m.why === "other_account") {
     const who = m.email ? esc(m.email) : `a different ${n.brand} account`;
     const words = m.why === "taken" ? `You signed in to ${who}, which another Trainee account already uses, so nothing was connected.` : `You signed in to ${who}, not the account connected to Trainee, so nothing was changed.`;
-    return page("A different account was used", `${NOT_FINISHED}<p class="line">${words} Trainee never uses one account in place of another.</p><p class="line">Retry and choose the account you want on ${n.brand}'s page.</p>${retry}${b}`, { script: CONNECT_SCRIPT, tg: true });
+    // Never substituted: the person chooses. Retry with the account asked for, or (only where it can be done) use this one instead:
+    // disconnect the current account on the connect page, then connect this one. Nothing changes until they do.
+    const instead = m.why === "other_account" && m.connectUrl && m.email
+      ? `<div class="actions"><a class="secondary" href="${esc(m.connectUrl)}">Use ${esc(m.email)} instead</a></div><p class="fine">That disconnects the account connected now, then connects ${esc(m.email)}. Nothing changes until you do it.</p>` : "";
+    return page("A different account was used", `${NOT_FINISHED}<p class="line">${words} Trainee never uses one account in place of another.</p><p class="line">Choose: retry with the account you want on ${n.brand}'s page${instead ? `, or use ${esc(m.email!)} instead` : ""}.</p>${retry}${instead}${b}`, { script: CONNECT_SCRIPT, tg: true });
   }
   if (m.outcome === "denied" && m.why !== "incomplete") return page("Nothing was connected", `${NOT_FINISHED}<p class="line">You chose not to allow access, so nothing was connected. You can try again whenever you like.</p>${retry}${b}`, { script: CONNECT_SCRIPT, tg: true });
   const why = m.why === "incomplete" ? `The way back from ${n.brand} was not finished, so nothing was saved.` : `Something went wrong on the way back from ${n.brand}, so nothing was saved.`;

@@ -68,8 +68,8 @@ Deno.test("R10 fix 11 consent: before the provider's page, the account, the purp
   const html = await open(w.d);
   const t = plain(html);
   assert(/<h1>Connect your email<\/h1>/.test(html) && /So I can /.test(t), "the purpose");
-  assert(/Account: you choose it on Google's page next\. Afterwards this page shows the exact address that was connected\./.test(t), "which account, before the provider step");
-  assert(/Account: you choose it on Microsoft's page next/.test(t));
+  assert(/Account: you choose it on Google's page; this page then shows it\./.test(t), "which account, before the provider step");
+  assert(/Account: you choose it on Microsoft's page/.test(t));
   // Gmail: read yes, send no, delete no; Outlook: send only what you approve; calendar listed on its own
   const gm = html.match(/<section class="acct perms" aria-label="Gmail permissions">([\s\S]*?)<\/section>/)?.[1] ?? "";
   const ms = html.match(/<section class="acct perms" aria-label="Outlook permissions">([\s\S]*?)<\/section>/)?.[1] ?? "";
@@ -89,7 +89,7 @@ Deno.test("R10 fix 11 success: only a stored grant reads connected, names the ad
   eq(r.status, 200);
   const html = await r.text();
   assert(/<h1>Gmail connected<\/h1>/.test(html) && plain(html).includes(`Connected as ${ADDR}.`));
-  assert(/Read email: Yes: sender, subject and a short preview of new email\. Send email: No\. Delete email: No\./.test(plain(html)), "what it is allowed to do");
+  assert(/Read email: Yes: sender, subject and a short preview of new email, and the security codes employers email you\. Send email: No\. Delete email: No\./.test(plain(html)), "what it is allowed to do");
   assert(/form-action 'self' https:\/\/trainee\.example /.test(r.headers.get("content-security-policy") ?? ""), "the Disconnect form may post to the connect page");
   const done = await submit(w.d, html, />Disconnect</);
   eq(done.status, 200);

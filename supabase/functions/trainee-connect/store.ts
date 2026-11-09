@@ -31,7 +31,7 @@ export function supabaseConnectDeps(admin: any, env: { get(k: string): string | 
   return {
     env, now,
     providers: (purpose = "replies") => ({
-      google: { configured: CONNECTORS.gmail.wired(env), scopes: consentScopes("google", purpose, false, env) },
+      google: { configured: CONNECTORS.gmail.wired(env), scopes: consentScopes("google", purpose, false, env), sendScopes: consentScopes("google", "send", true, env) },
       microsoft: { configured: CONNECTORS.outlook.wired(env), scopes: consentScopes("microsoft", purpose, false, env) },
     } satisfies Record<ProviderId, ProviderInfo>),
     async status(userId) {
@@ -45,7 +45,7 @@ export function supabaseConnectDeps(admin: any, env: { get(k: string): string | 
           const t = await CONNECTORS.gmail.token(base, userId, "read").catch(() => null);
           if (t?.status === "needs_reconnect") state = "needs_reconnect";
         }
-        out[p] = { state, email: x.email };
+        out[p] = { state, email: x.email, canSend: x.uses.some((u) => /^send /.test(u)) };
       }
       return out;
     },

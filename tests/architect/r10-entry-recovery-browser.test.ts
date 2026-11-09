@@ -11,6 +11,7 @@
 // to tests/architect/snapshots/r10-entry/. No network: every request that is not the site is aborted (system fonts render).
 import assertNode from "node:assert/strict";
 import { createRequire } from "node:module";
+import { Buffer } from "node:buffer";
 import process from "node:process";
 import { mintFileToken } from "../../supabase/functions/_shared/file_link.ts";
 import { mintConnectToken } from "../../supabase/functions/_shared/connect_link.ts";
@@ -25,7 +26,25 @@ const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const ROOT = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
 const CI = Deno.env.get("CI") === "true";
 const OUT = `${ROOT}/tests/architect/snapshots/r10-entry`;
-const WRITE = Deno.env.get("R10_SNAPSHOTS") === "1";
+const WRITE = Deno.env.get("R10_SNAPSHOTS") === "1", WRITE_FONTS = WRITE;
+// Screenshots carry the real brand fonts (owner review V: Brygada 1918 and Inter, not a Times fallback): in R10_SNAPSHOTS mode the
+// pages' Google Fonts stylesheet and font files are fetched once, before the browser starts, and served from memory (a fetch made
+// inside a route handler never resolves under Playwright in Deno). Every other run stays offline: font requests are aborted.
+const FONT_CSS = "https://fonts.googleapis.com/css2?family=Brygada+1918:wght@500;700&family=Inter:wght@400;500;600;700&display=swap";
+const FONTS = new Map<string, { type: string; body: Uint8Array }>();
+async function prefetchFonts() {
+  if (!WRITE_FONTS || FONTS.size) return;
+  const css = await (await fetch(FONT_CSS, { headers: { "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36" } })).text();
+  FONTS.set(FONT_CSS, { type: "text/css", body: new TextEncoder().encode(css) });
+  for (const u of new Set([...css.matchAll(/url\((https:[^)]+)\)/g)].map((m) => m[1]))) FONTS.set(u, { type: "font/woff2", body: new Uint8Array(await (await fetch(u)).arrayBuffer()) });
+}
+async function fontRoute(route: any): Promise<boolean> {
+  const f = FONTS.get(route.request().url());
+  if (!f) return false;
+  await route.fulfill({ status: 200, headers: { "content-type": f.type, "access-control-allow-origin": "*" }, body: Buffer.from(f.body) });
+  return true;
+}
+
 const SITE = "https://trainee.test", GATEWAY = "https://gateway.test/functions/v1";
 const U = "8c0f8f8e-6a43-4a49-9d2c-0000000f3e01", U_PHONE = "+15125550160", LIST = "0c0c0c0c0c";
 const SECRET = "r10-browser-link-secret-0123456789-abcdef", BOT_URL = "https://t.me/TraineeTestBot";
@@ -114,6 +133,7 @@ Deno.test({ name: "R10 fixes 10-11 in Chromium: every entry, recovery and connec
   if (Deno.uid?.() === 0 && !CI) { console.log("NOT_RUN locally as root: run it as an unprivileged user (Chromium's sandbox)"); return; }
   if (WRITE) await Deno.mkdir(OUT, { recursive: true });
   const px = await proxies();
+  await prefetchFonts();
   const browser = await pw.chromium.launch({ args: ["--no-proxy-server"] }); // every request is answered or aborted here, never sent
   const problems: string[] = [];
   const shots: string[] = [];
@@ -131,6 +151,7 @@ Deno.test({ name: "R10 fixes 10-11 in Chromium: every entry, recovery and connec
           const res = await gateway(await handleFile(new Request(`${SITE}/file${url.search}`), fileDeps));
           return route.fulfill({ status: res.status, headers: { ...Object.fromEntries(res.headers), "content-type": "text/html; charset=utf-8" }, body: await res.text() });
         }
+        if (await fontRoute(route)) return;
         if (url.origin !== SITE) return route.abort();
         const body = r.method() === "POST" ? r.postData() ?? "" : undefined;
         const via = (u: URL) => (u.pathname === "/connect" ? px.connect : px.file);
@@ -156,6 +177,7 @@ Deno.test({ name: "R10 fixes 10-11 in Chromium: every entry, recovery and connec
     };
     const check = async (page: any, name: string, viewport: { width: number; height: number }, o: { action: string; title: RegExp; secret?: string[] }) => {
       await page.waitForLoadState("load");
+      if (WRITE_FONTS) await page.evaluate(() => document.fonts.ready);
       const m = await measure(page, o.action);
       const where = `${name} @${viewport.width}x${viewport.height}`;
       if (!o.title.test(m.h1Text)) problems.push(`${where}: heading "${m.h1Text}"`);
@@ -193,6 +215,10 @@ Deno.test({ name: "R10 fixes 10-11 in Chromium: every entry, recovery and connec
         const s = await session(vp);
         await s.page.goto(`${SITE}/file?t=${encodeURIComponent(link)}`);
         await check(s.page, "signin-1-phone-entry", vp, { action: "form.login button.apply", title: /^Sign in$/, secret: PRIVATE });
+        // R10b: help is a real place (the site's Contact support), not the same chat link; links are the brand's link colour
+        const help = await s.page.evaluate(() => { const a = [...document.querySelectorAll("a")].find((x) => x.textContent === "Get help") as HTMLAnchorElement; return { href: a?.getAttribute("href"), color: a ? getComputedStyle(a).color : "" }; });
+        if (help.href !== "/#product/support") problems.push(`Get help goes to ${help.href}`);
+        if (help.color !== "rgb(92, 39, 81)") problems.push(`Get help is ${help.color}, not the brand link colour`);
         await s.page.fill("#phone", "512-555-0160"); await s.page.click("form.login button.apply");
         await check(s.page, "signin-2-code-sent", vp, { action: "#codeform button.apply", title: /^Check your phone$/, secret: PRIVATE });
         await s.page.fill("#code", "000000"); await s.page.click("#codeform button.apply");
@@ -241,7 +267,8 @@ Deno.test({ name: "R10 fixes 10-11 in Chromium: every entry, recovery and connec
         await check(s2.page, "connect-expired", vp, { action: ".recovery a.primary", title: /expired/, secret: PRIVATE }); await s2.ctx.close();
         const t = (await mintConnectToken({ secret: SECRET, userId: U, reason: "confirmations", channel: "telegram", now: NOW, kind: "l" }))!;
         const s3 = await session(vp); await s3.page.goto(`${SITE}/connect?t=${encodeURIComponent(t)}`);
-        const m = await check(s3.page, "connect-consent", vp, { action: "form.go button.primary", title: /^Connect your email$/, secret: PRIVATE });
+        // the consent reads its permissions first (owner review R11): the first panel is in the first screen, Continue right after it
+        const m = await check(s3.page, "connect-consent", vp, { action: "section.perms p.who", title: /^Connect your email$/, secret: PRIVATE });
         if (!/Exact permissions requested: openid email https:\/\/www\.googleapis\.com\/auth\/gmail\.readonly/.test(m.text.replace(/\s+/g, " "))) problems.push(`consent @${vp.width}: the exact scopes are not shown`);
         await s3.page.screenshot({ fullPage: true }).then((png: Uint8Array) => WRITE ? Deno.writeFile(`${OUT}/connect-consent-full-${vp.width}x${vp.height}.png`, png) : undefined);
         shots.push(`connect-consent-full-${vp.width}x${vp.height}.png`);
@@ -270,7 +297,7 @@ Deno.test({ name: "R10 fixes 10-11 in Chromium: every entry, recovery and connec
         const res = await connectLanding(env, o)!;
         const body = await res.text();
         const ctx = await browser.newContext({ viewport: vp, deviceScaleFactor: 2 });
-        await ctx.route("**/*", (r: any) => r.request().url() === `${GATEWAY}/gmail-oauth` ? r.fulfill({ status: res.status, headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": res.headers.get("content-security-policy")! }, body }) : r.abort());
+        await ctx.route("**/*", async (r: any) => (await fontRoute(r)) ? undefined : r.request().url() === `${GATEWAY}/gmail-oauth` ? r.fulfill({ status: res.status, headers: { "content-type": "text/html; charset=utf-8", "content-security-policy": res.headers.get("content-security-policy")! }, body }) : r.abort());
         const page = await ctx.newPage(); await page.goto(`${GATEWAY}/gmail-oauth`);
         const m = await check(page, name, vp, { action, title, secret: name === "landing-connected" ? [] : [ADDR, "Connected as"] });
         if (name !== "landing-connected" && !/Connection not finished\s+No access saved\./.test(m.text)) problems.push(`${name}: no "Connection not finished / No access saved."`);

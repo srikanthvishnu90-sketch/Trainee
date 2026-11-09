@@ -24,6 +24,7 @@
 //   convert   documented public JSON, RSS and XML answers (ATS job boards, Wikidata, GitHub, USAJOBS, news RSS) turned into
 //             plain sentences by code from the fields of the answer, so the facts guard can quote them like any page.
 import { isPrivateIp } from "./contact_sources/web_gate.ts";
+import { isBlockedHost } from "./research_never.ts";
 
 export interface SourcePage {
   url: string; // the address that answered 200 (after any redirects); the only form of this source ever linked
@@ -39,20 +40,9 @@ export type RobotsCheck = (url: string) => Promise<boolean>;
 export type Convert = (url: string, contentType: string, body: string) => { title: string; text: string } | null;
 export interface FetchedSources { verified: SourcePage[]; rejected: SourceRejection[] }
 
-// Never fetched, never linked (owner rule). Matched on the host and every parent domain; Indeed's country sites too.
-const BLOCKED_DOMAINS = ["linkedin.com", "lnkd.in", "licdn.com", "indeed.com", "joinhandshake.com", "handshake.com"];
-// R9 free sources: the never-list on ANY TLD and at any depth, as a whole DNS label (glassdoor.co.uk, linkedin.cn,
-// www.ziprecruiter.ca, glassdoor.com.evil.example all refuse), the same names career_contact_sources.ts never opens.
-// Google Scholar is the label pair scholar.google on any suffix.
-const NEVER_LABELS = new Set(["linkedin", "lnkd", "licdn", "indeed", "indeedemail", "indeedmail", "joinhandshake", "glassdoor", "ziprecruiter", "crunchbase", "commoncrawl"]);
-export function isBlockedHost(url: string): boolean {
-  let host: string;
-  try { host = new URL(url).hostname.toLowerCase().replace(/\.$/, ""); } catch { return true; }
-  if (BLOCKED_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`))) return true;
-  const named = host.split(".").filter(Boolean).slice(0, -1);
-  if (named.some((l) => NEVER_LABELS.has(l)) || named.some((l, i) => l === "scholar" && named[i + 1] === "google")) return true;
-  return /(^|\.)indeed\.(co\.)?[a-z]{2,3}$/.test(host);
-}
+// The never-list (LinkedIn, Indeed, Handshake, Glassdoor and the rest, on any TLD) lives in research_never.ts, a module with no
+// network calls, so the host names it lists never sit in fetch code (tests/architect/wo-037-discovery.test.ts, WO-037/D7).
+export { isBlockedHost } from "./research_never.ts";
 export function isPrivateHost(url: string): boolean {
   let host: string;
   try { host = new URL(url).hostname.toLowerCase().replace(/^\[|\]$/g, ""); } catch { return true; }

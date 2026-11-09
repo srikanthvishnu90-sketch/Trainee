@@ -319,7 +319,7 @@ export function careerTools(deps: {
   // R10 WO-H fix 14b (spec B.6 continuation 4, E.4): a follow-up or thank-you draft, checked in code before it is shown.
   const followupTools: ToolSpec[] = [{
     name: "draft_followup", effect: "read",
-    description: "Use when the person asks you to write or change a follow-up, thank-you or short note to someone (\"write a thank-you note to Maya after my interview\", \"make it warmer\", \"a little less formal\"). YOU write the words in body, from the person's confirmed facts and what they said in this conversation only. Never state a meeting, call, offer, referral or relationship they did not mention, never guess an email address, keep \"[Your name]\" when you do not have their name. If it is not clear which document they mean, list the candidates in documents and leave document empty; if no recipient is named or a name fits several people, leave recipient empty or list them in recipient_options: the tool then asks one short question instead. Code shows the draft; nothing is sent.",
+    description: "Use when the person asks to write or change a follow-up, thank-you or short note (\"write a thank-you to Maya after my interview\", \"make it warmer\"). Write the body from their confirmed facts and this conversation only: never invent a meeting, offer, referral or relationship, never guess an address. If the recipient or document is unclear, leave it empty and list the options. Nothing is sent.",
     input_schema: obj({
       kind: { type: "string", enum: ["thank_you", "follow_up", "note"], description: "What kind of message" },
       recipient: str("Who it is to, as the person named them (a first name is enough); empty if they named no one"),

@@ -40,6 +40,8 @@ export const FAMILY_SOURCES: Record<FamilyId | "F-14n", { source: string | null;
 export function kindRoutes(rec: FileRecord): Set<string> {
   return new Set([...actionsOf(rec).filter((a) => a.state === "available" && a.id !== "copy").map((a) => a.id), "remove"]);
 }
+// The query keys a kind's page reads on GET: only the plain-text twin.
+export const KIND_LINKS: ReadonlySet<string> = new Set(["format"]);
 const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
 const iso = (t: unknown) => { const n = typeof t === "number" ? t : Date.parse(String(t ?? "")); return Number.isFinite(n) ? new Date(n).toISOString() : null; };
 const sourced = (xs: unknown) => (Array.isArray(xs) ? xs : []).filter((f) => f && typeof f.source === "string" && f.source && (f.value ?? f.text ?? f.answer));

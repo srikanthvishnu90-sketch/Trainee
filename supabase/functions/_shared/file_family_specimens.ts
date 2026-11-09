@@ -9,7 +9,7 @@ import type { Src } from "./file_family.ts";
 import type { KindId } from "./file_kinds.ts";
 import { FAMILIES, familyPage, familyStatePage, type Act, type Ctx, type FamilyFile, type FamilyId } from "./file_family.ts";
 import { rolesShortlistPage } from "./file_family_roles.ts";
-import { FILE_ROUTES } from "./file_routes.ts";
+import { FILE_LINKS, FILE_ROUTES } from "./file_routes.ts";
 import { answerLibraryFile, careerBriefFile, materialsFile, pathComparisonFile, profileFactsFile, roleWorkspaceFile, searchPlanFile } from "./file_family_plan.ts";
 import { applicationReviewFile, batchFile, interviewHubFile, messageReviewFile, negotiationFile, offerComparisonFile, pipelineFile, weeklyBriefFile } from "./file_family_apply.ts";
 
@@ -209,7 +209,7 @@ export const offers = (): OfferComparison => ({
 export interface SpecimenView { state: "loading" | "empty" | "error" | "ready"; width: 390 | 1280; theme?: "light" | "dark" }
 export interface FamilySpecimen { id: FamilyId | "F-14n"; name: string; kind: KindId; specimen: unknown; page: (c?: Ctx | SpecimenView) => string }
 // Drawn as the server would serve it: only the actions trainee-file answers are live (file_routes.ts).
-const CTX0: Ctx = { now: SPECIMEN_NOW, tz: SPECIMEN_TZ, routes: FILE_ROUTES };
+const CTX0: Ctx = { now: SPECIMEN_NOW, tz: SPECIMEN_TZ, routes: FILE_ROUTES, links: FILE_LINKS };
 const isView = (v: unknown): v is SpecimenView => !!v && typeof v === "object" && "state" in v && "width" in v;
 const DARK_Q = "@media (prefers-color-scheme:dark){";
 export function themed(html: string, theme?: "light" | "dark"): string {

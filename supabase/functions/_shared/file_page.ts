@@ -27,6 +27,8 @@ export interface Row {
   sends?: string; send?: { label: string; value: string; needs?: boolean }[];
   meta?: string; metaSrc?: "From the posting" | "Reported, not verified" | null; why?: string[];
   posted?: string | null; // "Posted 3 d ago (Oct 28)" from the posting's own date (postedLine), else when Trainee first saw it
+  window?: string | null; // R10 WO-C: the posting's own student or graduation sentence, or that it states none
+  openLine?: string | null; // R10 WO-C: "Open: application page checked Nov 8, 5:16 PM CST", or "Not re-checked"
 }
 // total: how many postings the list holds; the page shows the first rows.length of them and says so when that is fewer.
 // made: "Made for Ada · Nov 1, 2026" above the card; stamp: "Postings checked ..." from the postings' own check times (file_design.ts
@@ -227,8 +229,9 @@ function rowHtml(r: Row, token: string): string {
   const sendList = r.send?.length ? `<p class="sendh">What we send</p><ul class="send">${r.send.map((x) => `<li>${esc(x.label)}: ${x.needs ? `<strong>Needs you</strong>` : esc(x.value)}</li>`).join("")}</ul>` : "";
   const posted = r.posted ? `<p class="meta posted">${esc(r.posted)}</p>` : "";
   const why = r.why?.length ? `<p class="why">Why it fits you: ${esc(r.why.slice(0, 2).join(" "))}</p>` : "";
+  const win = r.window ? `<p class="meta window">${esc(r.window)}</p>` : "", openL = r.openLine ? `<p class="meta open">${esc(r.openLine)}</p>` : "";
   return `<li class="row" id="r-${esc(r.ref)}"><div class="head"><span class="logo"><span class="lettermark" aria-hidden="true">${initial}</span>${img}</span><span class="name">${esc(j.company)}</span>${act}</div>
-<details><summary><span class="role">${esc(j.title)}</span><span class="desc">${esc(r.snippet)}</span></summary>${sendList}${more}</details>${meta}${posted}${sendsLine}${why}${note}</li>`;
+<details><summary><span class="role">${esc(j.title)}</span><span class="desc">${esc(r.snippet)}</span></summary>${sendList}${more}</details>${meta}${win}${openL}${posted}${sendsLine}${why}${note}</li>`;
 }
 
 // A list with no jobs says so, why, and what happens next (file_design.ts stateHtml), never a blank card.

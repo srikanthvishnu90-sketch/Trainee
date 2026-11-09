@@ -7,11 +7,18 @@ export type LinkState = "live" | "dead" | "unknown";
 export type LinkCheck = (job: { job_id?: string; url?: string }) => Promise<LinkState>;
 
 export function apiUrlFor(jobId: string): string | null {
-  const m = /^(greenhouse|lever):([A-Za-z0-9._-]+):([A-Za-z0-9-]+)$/.exec(String(jobId ?? ""));
+  const m = /^(greenhouse|lever|smartrecruiters):([A-Za-z0-9._-]+):([A-Za-z0-9-]+)$/.exec(String(jobId ?? ""));
   if (!m) return null;
   const [, family, board, id] = m;
   if (family === "greenhouse") return /^\d+$/.test(id) ? `https://boards-api.greenhouse.io/v1/boards/${board}/jobs/${id}` : null;
+  // R10 WO-C: SmartRecruiters' public posting API answers 404 for a posting that is gone.
+  if (family === "smartrecruiters") return /^\d+$/.test(id) ? `https://api.smartrecruiters.com/v1/companies/${board}/postings/${id}` : null;
   return /^[0-9a-f-]{8,}$/i.test(id) ? `https://api.lever.co/v0/postings/${board}/${id.toLowerCase()}` : null;
+}
+// R10 WO-C: an Ashby posting is live while its board's public list still holds its id (the list answers for every board).
+export function ashbyBoardFor(jobId: string): { url: string; id: string } | null {
+  const m = /^ashby:([A-Za-z0-9._-]+):([0-9a-f-]{8,})$/i.exec(String(jobId ?? ""));
+  return m ? { url: `https://api.ashbyhq.com/posting-api/job-board/${m[1]}`, id: m[2].toLowerCase() } : null;
 }
 
 export function linkChecker(f: typeof fetch, o: { timeoutMs?: number; userAgent?: string } = {}): LinkCheck {
@@ -25,6 +32,20 @@ export function linkChecker(f: typeof fetch, o: { timeoutMs?: number; userAgent?
     } finally { clearTimeout(timer); }
   };
   return async (job) => {
+    const ashby = ashbyBoardFor(String(job.job_id ?? ""));
+    if (ashby) {
+      try {
+        const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), timeoutMs);
+        try {
+          const r = await f(ashby.url, { method: "GET", signal: ctl.signal, headers: { "user-agent": ua, accept: "application/json" } });
+          if (r.status === 404) { await r.body?.cancel().catch(() => {}); return "dead"; }
+          if (!r.ok) { await r.body?.cancel().catch(() => {}); return "unknown"; }
+          const body: any = await r.json().catch(() => null);
+          if (!Array.isArray(body?.jobs)) return "unknown";
+          return body.jobs.some((j: any) => String(j?.id ?? "").toLowerCase() === ashby.id) ? "live" : "dead";
+        } finally { clearTimeout(timer); }
+      } catch { return "unknown"; }
+    }
     const api = apiUrlFor(String(job.job_id ?? ""));
     const url = api ?? String(job.url ?? "");
     if (!/^https?:\/\//i.test(url)) return "dead";

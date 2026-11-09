@@ -12,13 +12,21 @@ import type { SearchHit } from "./career_search.ts";
 import type { SourcePosting } from "./career_search_judge.ts";
 import type { Limits } from "./posting_constraints.ts";
 import { type ApplyAllOffer, offerOf, offerQuestion } from "./apply_all_yes.ts";
+import { placesLine } from "./search_shortlist.ts";
 
 export const RESULTS_MAX = 25;
 const hex = async (s: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, "0")).join("");
 
 // What the person asked for, in their words' shape: "frontend internship(s)", "data analyst role(s)", "... in Chicago", "remote ...".
-export function whatOf(ask: { role: string; place: string | null; remote: boolean; remoteOnly?: boolean; limits?: Limits }): What {
-  const role = ask.role.replace(/\s+(roles?|jobs?|openings?|positions?)$/i, "").trim();
+export function whatOf(ask: { role: string; place: string | null; remote: boolean; remoteOnly?: boolean; limits?: Limits; roles?: string[]; area?: boolean; remoteRegion?: "us" | null }): What {
+  // R10 WO-C: a widened search names every role title and its places ("data analyst, business analyst or analytics internships in
+  // the Chicago area (...) and remote in the US").
+  const list = (ask.roles?.length ? ask.roles : [ask.role]).map((r) => r.replace(/\s+(roles?|jobs?|openings?|positions?)$/i, "").trim());
+  const role = list.length > 1 ? `${list.slice(0, -1).join(", ")} or ${list.at(-1)}` : list[0];
+  if (ask.area || ask.remoteRegion) {
+    const bands = ask.limits?.bands ?? [], noun = bands.includes("intern") ? ["internship", "internships"] : ["role", "roles"], at = ` in ${placesLine(ask)}`;
+    return { one: `${role} ${noun[0]}${at}`, many: `${role} ${noun[1]}${at}` };
+  }
   const bands = ask.limits?.bands ?? [];
   const noun = bands.includes("intern") ? ["internship", "internships"] : bands.includes("new_grad") ? ["new grad role", "new grad roles"] : ["role", "roles"];
   const pre = ask.remoteOnly ? "remote " : "";
@@ -26,7 +34,7 @@ export function whatOf(ask: { role: string; place: string | null; remote: boolea
   return { one: `${pre}${role} ${noun[0]}${where}`.replace(/\s+/g, " ").trim(), many: `${pre}${role} ${noun[1]}${where}`.replace(/\s+/g, " ").trim() };
 }
 
-export interface Picked { hit: SearchHit; posting: SourcePosting | null }
+export interface Picked { hit: SearchHit; posting: SourcePosting | null; checked?: { state: "live" | "unknown" | "unchecked"; at: number } | null }
 export async function resultsFile(o: {
   userId: string; now: number; what: What; floor: Floor | null; picked: Picked[]; store: JobStore;
   name?: string | null; source?: "live" | "snapshot" | null; read?: string | null;
@@ -53,7 +61,7 @@ export async function resultsFile(o: {
       url: p.posting?.url ?? p.hit.url, description: p.posting?.description ?? null, remote: live.remote ?? null, seniority_band: live.seniority_band ?? null, posted_at: live.posted_at ?? null,
       first_seen_at: p.posting?.first_seen_at ?? p.hit.first_seen_at, pay: p.posting?.pay ?? null, company_domain: live.company_domain ?? null };
     const pay = pays.get(p.hit.job_id) ?? null;
-    const view = { ...jobViewOf(p.hit, row), pay: pay ? payText(pay) : null, pay_parsed: pay };
+    const view = { ...jobViewOf(p.hit, row), pay: pay ? payText(pay) : null, pay_parsed: pay, ...(p.checked ? { checked: p.checked } : {}) };
     const ref = await refOf(o.userId, view.job_id);
     await o.store.remember(o.userId, ref, view, "text");
     boards.add(String(view.source ?? row.provider ?? view.job_id.split(":")[0]).toLowerCase());

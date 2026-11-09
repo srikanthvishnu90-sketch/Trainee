@@ -37,6 +37,7 @@ import type { ListMeta } from "../_shared/telegram_jobs.ts";
 import type { RateRow } from "../_shared/career_resume_outcomes.ts";
 import { fileShellHtml, firstNameOf, freshnessStamp, madeForLine, stateHtml } from "../_shared/file_design.ts";
 import { byHandUrl, FEED_ROWS, foreignFact, hashTag, isSecretField, NOT_YOURS, logoDomain, postingVerdict, secretFields, secretKey, tapJob, unsendable, type JobDeps, type JobSender, type JobStore, type JobView, type PostingRow, type PreparedRow } from "../_shared/telegram_jobs.ts";
+import { checkedAt, studentWindowOf } from "../_shared/search_shortlist.ts"; // R10 WO-C
 
 export type { AppRow } from "../_shared/file_page.ts";
 export interface FileStore extends JobStore {
@@ -269,6 +270,9 @@ async function loadFeed(claims: FileClaims, token: string, d: FileDeps, notes: R
     const stated = { ...job, location: post?.location ?? "", remote: post ? job.remote : null };
     return { ref, job, logo: rowLogo(job, d.env), snippet: snippetOf(stated, post?.description), full: fullOf(post?.description),
       status, inApps: !!app || away, tag, resume: app || away ? null : resumeOf(prep), byHand, blocked, note: notes[ref], ...metaOf(job, post), posted: postedLine({ posted_at: post?.posted_at ?? job.posted_at, first_seen_at: post?.first_seen_at ?? job.first_seen_at }, d.now(), tz), why: job.reasons.slice(0, 2),
+      // R10 WO-C: the student window in the posting's own words, and whether its application page was re-checked when listed.
+      ...(post ? { window: (() => { const w = studentWindowOf(post.description ?? ""); return w ? `Student window: "${w.replace(/[.]$/, "")}"` : "Student window: not stated in the posting"; })() } : {}),
+      ...(job.checked ? { openLine: job.checked.state === "live" ? `Open: application page checked ${checkedAt(job.checked.at, tz).text}` : "Not re-checked when listed" } : {}),
       sends: sd && !sd.secret ? `Sends: ${[resumeOf(prep) ?? "no resume", sd.answers ? "your saved answers" : "", sd.cover ? "a cover note" : ""].filter(Boolean).join(" + ")}` : undefined, send: sd?.items };
   }));
   // The same posting twice on one list (the same link under two ids): only the first row offers Apply.

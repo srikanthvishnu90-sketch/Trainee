@@ -1,0 +1,206 @@
+// R10 WO-C (owner order 2026-11-09; spec docs/architect/specs/APP-LAYER-15-FIXES.md A.2 job search turns 1-2, B.2, C.7, C.20,
+// E.2; fixes 5, 6 and 8). The two search turns that failed on production after release 9, replayed word for word through the
+// REAL handler (handler-career.ts handleChat on tests/flow: real supabase-js over the PostgREST double, Postgres 16 with every
+// migration), with the staged brain released and a scripted model on the Anthropic wire ($0). Every ATS board is a fake.
+//
+//   S1 "Let's leave the resume for now. Find me 5 data analyst internships in Chicago that are actually open. ..."
+//      production: "Nothing was invented to fill the list. Widen the role or the place and I'll search again." The role was
+//      read as the whole message ("let s leave resume now find data analyst actually open show company ..."), which no
+//      title holds. Now: the two open Chicago data analyst internships, numbered, each with employer, exact title, location
+//      and arrangement, student window (posting's words), its application page re-checked (time in the person's zone), and
+//      the link. A role closed on its board (Greenhouse 404, SmartRecruiters 404) is left out; "I did not find 5".
+//   S2 "Okay, include business analyst and analytics internships in the Chicago area, plus remote US internships. ..."
+//      production: the graduation-window template ("The window, checked against the record."). Now: the same search WIDENED
+//      (internship kept, business analyst and analytics added, Chicago suburbs and remote US added), the earlier roles kept
+//      under the same numbers, no model call (a search is code's), never the template.
+//   E  an empty search says the scope it checked, why nothing qualified and the one most useful widening.
+// Nothing is applied for, queued or sent in any step.
+import assertNode from "node:assert/strict";
+import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
+import { careerHandler, SUPABASE_URL, supabaseParity } from "../flow/handler.ts";
+import { anthropicWire } from "./helpers/anthropic_wire.ts";
+import { searchTextOf } from "../../supabase/functions/_shared/posting_constraints.ts";
+import { inMetro, remoteInUs, widenedAsk } from "../../supabase/functions/_shared/search_widen.ts";
+import { checkedAt, studentWindowOf, wantOf } from "../../supabase/functions/_shared/search_shortlist.ts";
+import { linkChecker } from "../../supabase/functions/_shared/link_check.ts";
+import { personZone } from "../../supabase/functions/_shared/person_zone.ts";
+import { renderFeed } from "../../supabase/functions/_shared/file_page.ts";
+
+const CI = Deno.env.get("CI") === "true";
+const S1 = "Let's leave the resume for now. Find me 5 data analyst internships in Chicago that are actually open. Show the company, role, location, and application link. Don't apply yet.";
+const S2 = "Okay, include business analyst and analytics internships in the Chicago area, plus remote US internships. Even 2 or 3 verified open roles is useful. Show the real links and any student or graduation requirements.";
+const ME = "7b0f8f8e-6a43-4a49-9d2c-000000c10001", OTHER = "7b0f8f8e-6a43-4a49-9d2c-000000c10002";
+const NB = "3f1c2a4e-5b6d-4e7f-8a9b-0c1d2e3f4a5b", MAPLE = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d", PRAIRIE = "0c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f";
+const lit = (s: string) => `$q$${s}$q$`;
+const BOARD = [
+  { id: "greenhouse:acme:101", co: "Acme Freight", t: "Data Analyst Intern", loc: "Chicago, IL", url: "https://boards.greenhouse.io/acme/jobs/101", d: "Hybrid, three days a week in our Chicago office. Open to students graduating between December 2026 and June 2028. SQL and Python." },
+  { id: "greenhouse:lake:102", co: "Lakeview Health", t: "Data Analytics Internship - Summer 2027", loc: "Chicago, Illinois, United States", url: "https://boards.greenhouse.io/lake/jobs/102", d: "Applicants must be currently enrolled in a bachelor's program. Excel and SQL." },
+  { id: `lever:prairie:${PRAIRIE}`, co: "Prairie Bank", t: "Business Analyst Intern", loc: "Evanston, IL", url: `https://jobs.lever.co/prairie/${PRAIRIE}`, d: "On-site at our Evanston office. Requirements gathering and SQL." },
+  { id: `ashby:northbeam:${NB}`, co: "Northbeam", t: "Analytics Intern", loc: "Remote - United States", url: `https://jobs.ashbyhq.com/northbeam/${NB}`, d: "Fully remote. Dashboards in Looker." },
+  { id: "greenhouse:acme:105", co: "Acme Freight", t: "Senior Data Analyst", loc: "Chicago, IL", url: "https://boards.greenhouse.io/acme/jobs/105", d: "Senior role. 5+ years." },
+  { id: "greenhouse:motorway:106", co: "Motorway Co", t: "Data Analyst Internship", loc: "Schaumburg, IL", url: "https://boards.greenhouse.io/motorway/jobs/106", d: "Summer internship in Schaumburg." },
+  { id: "greenhouse:gone:107", co: "Gone Corp", t: "Data Analyst Intern", loc: "Chicago, IL", url: "https://boards.greenhouse.io/gone/jobs/107", d: "Closed.", closed: true },
+  { id: "greenhouse:stale:108", co: "Stale Co", t: "Data Analyst Intern", loc: "Chicago, IL", url: "https://boards.greenhouse.io/stale/jobs/108", d: "Still in our index, gone from the board." },
+  { id: `ashby:maple:${MAPLE}`, co: "Maple Data", t: "Analytics Intern", loc: "Remote - Canada", url: `https://jobs.ashbyhq.com/maple/${MAPLE}`, d: "Remote within Canada only." },
+  { id: "smartrecruiters:quietco:7441", co: "Quiet Co", t: "Data Analyst Intern", loc: "Chicago, IL", url: "https://jobs.smartrecruiters.com/QuietCo/7441", d: "Gone from SmartRecruiters." },
+  { id: "greenhouse:fulltime:109", co: "Fulltime Inc", t: "Data Analyst", loc: "Chicago, IL", url: "https://boards.greenhouse.io/fulltime/jobs/109", d: "A full-time analyst role." },
+];
+const wire = { chat: 0 };
+const boardReads: string[] = [];
+function board(u: URL): Response | null {
+  if (u.host === "boards-api.greenhouse.io") { boardReads.push(u.pathname); return /\/(108)$/.test(u.pathname) ? new Response("{}", { status: 404 }) : Response.json({ id: Number(u.pathname.split("/").at(-1)) }); }
+  if (u.host === "api.lever.co") { boardReads.push(u.pathname); return Response.json({ id: u.pathname.split("/").at(-1) }); }
+  if (u.host === "api.ashbyhq.com") { boardReads.push(u.pathname); return Response.json({ jobs: /northbeam/.test(u.pathname) ? [{ id: NB }] : /maple/.test(u.pathname) ? [{ id: MAPLE }] : [] }); }
+  if (u.host === "api.smartrecruiters.com") { boardReads.push(u.pathname); return new Response("{}", { status: 404 }); }
+  return null;
+}
+
+Deno.test("WO-C units: the S1 role is the asked role; S2 widens the last search; metro, remote US, windows, zones, counts", async () => {
+  assertNode.equal(searchTextOf(S1).role, "data analyst");
+  assertNode.deepEqual(searchTextOf(S1).limits.bands, ["intern"]);
+  const prev = { role: "data analyst", place: "chicago", remote: false, limits: { bands: ["intern" as const], pay: null, company: null, term: null, needsSponsor: false } };
+  const w = widenedAsk(S2, { lastAsk: prev, lastAskAt: 1000, lastShortlist: [{ id: "greenhouse:acme:101" }] }, 2000)!;
+  assertNode.deepEqual(w.ask.roles, ["data analyst", "business analyst", "analytics"]);
+  assertNode.equal(w.ask.place, "chicago"); assertNode.equal(w.ask.area, true); assertNode.equal(w.ask.remote, true); assertNode.equal(w.ask.remoteRegion, "us");
+  assertNode.deepEqual(w.ask.limits?.bands, ["intern"], "the internship level is kept");
+  assertNode.deepEqual(w.ask.keep, ["greenhouse:acme:101"], "the earlier roles keep their numbers");
+  assertNode.equal(widenedAsk(S2, { lastAsk: prev, lastAskAt: 1000 }, 1000 + 31 * 60_000), null, "an old search is not widened");
+  assertNode.equal(widenedAsk("what should I include in my cover letter?", { lastAsk: prev, lastAskAt: 1000 }, 2000), null, "not a widening");
+  assertNode.ok(inMetro("Evanston, IL", "chicago") && inMetro("Schaumburg, Illinois", "chicago") && !inMetro("Springfield, IL", "chicago"));
+  assertNode.ok(remoteInUs("Remote - United States") && remoteInUs("Remote") && !remoteInUs("Remote - Canada"));
+  assertNode.equal(studentWindowOf("Hybrid. Open to students graduating between December 2026 and June 2028. SQL."), "Open to students graduating between December 2026 and June 2028.");
+  assertNode.equal(studentWindowOf("SQL and Python."), null);
+  assertNode.equal(wantOf(S1), 5); assertNode.equal(wantOf(S2), null);
+  assertNode.equal(checkedAt(Date.parse("2026-11-08T23:16:00Z"), "America/Chicago").text, "Nov 8, 5:16 PM CST");
+  assertNode.deepEqual(checkedAt(Date.parse("2026-11-08T23:16:00Z"), null), { text: "Nov 8, 11:16 PM UTC", zoneKnown: false });
+  assertNode.deepEqual(personZone({ alertTz: null, location: "Chicago, IL" }), { tz: "America/Chicago", city: "Chicago" });
+  assertNode.equal(personZone({ alertTz: null, location: null }), null);
+  // Fix 6: Ashby and SmartRecruiters postings are checked on their own public boards; Greenhouse and Lever by id as before.
+  const seen: string[] = [];
+  const f = (async (u: string) => { seen.push(u); return board(new URL(u)) ?? new Response("", { status: 500 }); }) as unknown as typeof fetch;
+  const check = linkChecker(f);
+  assertNode.equal(await check({ job_id: `ashby:northbeam:${NB}` }), "live");
+  assertNode.equal(await check({ job_id: "ashby:northbeam:11111111-2222-4333-8444-555555555555" }), "dead");
+  assertNode.equal(await check({ job_id: "smartrecruiters:quietco:7441" }), "dead");
+  assertNode.ok(seen.includes("https://api.ashbyhq.com/posting-api/job-board/northbeam") && seen.includes("https://api.smartrecruiters.com/v1/companies/quietco/postings/7441"), seen.join(" "));
+});
+
+Deno.test("WO-C fix 8: the shortlist File card carries the student window and the open check, stacked, no wide table", () => {
+  const job = { job_id: "greenhouse:acme:101", company: "Acme Freight", title: "Data Analyst Intern", location: "Chicago, IL", url: "https://boards.greenhouse.io/acme/jobs/101", pay: null, level: null, remote: null,
+    posted_at: null, first_seen_at: null, deadline: null, source: "greenhouse", reasons: [], gaps: [], company_domain: null };
+  const html = renderFeed({ token: "t", rows: [{ ref: "r1", job, logo: null, snippet: "Hybrid", full: "x", status: null, inApps: false, tag: null, resume: null, byHand: false, blocked: null,
+    window: 'Student window: "Open to students graduating between December 2026 and June 2028"', openLine: "Open: application page checked Nov 8, 5:16 PM CST" } as any], setHash: null, setSize: 0, top: null, og: null as any, total: 1 } as any);
+  assertNode.ok(html.includes("Student window: &quot;Open to students graduating between December 2026 and June 2028&quot;") || html.includes('Student window: "Open to students graduating'), "the window is on the card");
+  assertNode.ok(html.includes("Open: application page checked Nov 8, 5:16 PM CST"), "the check is on the card");
+  assertNode.ok(!/<table/i.test(html), "no table");
+});
+
+Deno.test({
+  name: "WO-C replay: production S1 and S2 through the real handler on real Postgres (staged brain, scripted model, fake boards)",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn(t) {
+    if (!pgBinDir()) { if (CI) throw new Error("needs Postgres 16 binaries in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
+    if (Deno.uid?.() === 0 && !CI) { console.log("NOT_RUN locally as root: run it as an unprivileged user (initdb)"); return; }
+    const pg: Pg = await startPg();
+    const keys = ["CAREER_BRAIN", "CAREER_KNOWLEDGE", "CAREER_BRAIN_ROUTER_INTENTS", "CAREER_JUDGE", "ANTHROPIC_API_KEY", "MODEL_PROVIDER", "CAREER_MODEL", "CAREER_MODEL_DAILY_USD", "CAREER_MODEL_DAILY_CALLS",
+      "MODEL_BUDGET_PAUSED", "TRAINEE_FILE_BASE_URL", "TRAINEE_FILE_LINK_SECRET", "TELEGRAM_BOT_TOKEN", "CAREER_REPLY_WRITER", "CAREER_APPLY_LINK", "CAREER_SEND_RAIL", "CAREER_APPLY_ALL_YES"];
+    const saved = Object.fromEntries(keys.map((k) => [k, Deno.env.get(k)]));
+    for (const k of keys) Deno.env.delete(k);
+    let h: Awaited<ReturnType<typeof careerHandler>> | null = null;
+    const realFetch = globalThis.fetch, realError = console.error;
+    try {
+      await supabaseParity(pg);
+      const prefs = JSON.stringify({ on: false, keywords: ["data analyst"], locations: [], remote_ok: true, report_hour: 8, quiet_start: 22, quiet_end: 7, max_instant_per_day: 3 });
+      await pg.sql(`insert into auth.users (id, email) values ('${ME}', 'c1@example.test'), ('${OTHER}', 'c2@example.test');
+        insert into public.profiles (id) values ('${ME}'), ('${OTHER}');
+        insert into public.career_watch_kv (user_id, key, value) values ('${ME}', 'career:account', '{"epoch":0,"version":0,"paused":false}'), ('${OTHER}', 'career:account', '{"epoch":0,"version":0,"paused":false}');
+        insert into public.career_alert_prefs (user_id, tz, prefs, last_checked_at) values ('${ME}', 'America/Chicago', ${lit(prefs)}::jsonb, now());
+        insert into public.career_postings (job_id, provider, board, company, title, location, url, description, first_seen_at, last_seen_at, closed_at) values
+        ${BOARD.map((b) => `(${lit(b.id)}, ${lit(b.id.split(":")[0])}, ${lit(b.id.split(":")[1])}, ${lit(b.co)}, ${lit(b.t)}, ${lit(b.loc)}, ${lit(b.url)}, ${lit(b.d)}, now() - interval '2 days', now(), ${(b as any).closed ? "now()" : "null"})`).join(",\n")};`);
+      h = await careerHandler(pg, { me: ME, other: OTHER });
+      const viaDouble = globalThis.fetch, outbound: string[] = [];
+      globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
+        const req = input instanceof Request && !init ? input : new Request(input as any, init);
+        const u = new URL(req.url);
+        if (u.host === "api.anthropic.com") return anthropicWire(req, (b: any) => { wire.chat++; return Response.json({ id: "c", model: b.model, choices: [{ index: 0, message: { role: "assistant", content: "A model reply." }, finish_reason: "stop" }], usage: { prompt_tokens: 30, completion_tokens: 4 } }); });
+        const ats = board(u);
+        if (ats) return ats;
+        if (u.origin !== new URL(SUPABASE_URL).origin) { outbound.push(`${req.method} ${u.host}`); throw new TypeError(`network refused: ${u.host}`); }
+        return await viaDouble(req);
+      }) as typeof fetch;
+      console.error = () => {};
+      // As production: the staged brain released, a model key configured (the scripted wire answers; nothing is spent).
+      Deno.env.set("CAREER_BRAIN", "staged");
+      Deno.env.set("ANTHROPIC_API_KEY", "sk-test-not-real");
+      const n = async (sql: string) => Number(await pg.sql(sql));
+      const effects = async () => ({ jobs: await n(`select count(*) from public.career_apply_jobs`), wanted: await n(`select count(*) from public.career_apply_wanted`), send: await n(`select count(*) from public.career_send_queue`) });
+      const zero = await effects();
+      const me = h.chat("me");
+      const say = async (c: ReturnType<NonNullable<typeof h>["chat"]>, m: string) => { await pg.sql(`delete from public.agent_rate_limits`); const r = await c.say(m); assertNode.equal(r.status, 200, r.reply); return r; };
+      const items = (reply: string) => reply.split("\n").filter((l) => /^\d+\. /.test(l));
+      const block = (reply: string, i: number) => { const lines = reply.split("\n"), k = lines.findIndex((l) => l.startsWith(`${i}. `)); return k < 0 ? "" : [lines[k], ...lines.slice(k + 1).filter((_, j, a) => a.slice(0, j + 1).every((x) => /^\s{3}/.test(x)))].join("\n"); };
+
+      let s1Items: string[] = [];
+      await t.step("S1: the open Chicago data analyst internships, each usable; closed ones left out; fewer than 5 said", async () => {
+        const r = await say(me, S1);
+        console.log(`--- S1 reply (${r.intent})\n${r.reply}`);
+        assertNode.ok(!/^\s*Nothing was invented to fill the list\. Widen the role/.test(r.reply), "not the bare production reply");
+        assertNode.ok(!/let s leave|application link don t/i.test(r.reply), "the role is the asked role, not the whole message");
+        s1Items = items(r.reply);
+        assertNode.equal(s1Items.length, 2, r.reply);
+        assertNode.match(s1Items[0], /^1\. Data Analyst Intern at Acme Freight — Chicago, IL, hybrid/);
+        assertNode.match(s1Items[1], /^2\. Data Analytics Internship - Summer 2027 at Lakeview Health — Chicago, Illinois, United States/);
+        const one = block(r.reply, 1), two = block(r.reply, 2);
+        assertNode.match(one, /Student window: "Open to students graduating between December 2026 and June 2028"/);
+        assertNode.match(two, /Student window: "Applicants must be currently enrolled in a bachelor's program"/);
+        for (const b of [one, two]) {
+          assertNode.match(b, /Open: its application page was checked [A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d\d [AP]M C[SD]T/, "checked time in the person's zone (Chicago)");
+          assertNode.match(b, /Apply: https:\/\/boards\.greenhouse\.io\/(acme|lake)\/jobs\/10[12]/);
+          assertNode.match(b, /Uncertain: your graduation date isn't confirmed/, "a missing fact is named beside the role, never an eligibility verdict");
+        }
+        assertNode.match(r.reply, /I did not find 5 within the scope checked/);
+        assertNode.match(r.reply, /2 roles were left out: closed when checked/);
+        assertNode.match(r.reply, /Nothing was applied for/);
+        for (const never of ["Stale Co", "Quiet Co", "Gone Corp", "Senior Data Analyst", "Fulltime Inc", "Motorway Co"]) assertNode.ok(!r.reply.includes(never), `${never} is not listed in S1`);
+      });
+
+      await t.step("S2: the same search widened, earlier roles under the same numbers, never the graduation-window template, no model call", async () => {
+        const before = wire.chat;
+        const r = await say(me, S2);
+        console.log(`--- S2 reply (${r.intent})\n${r.reply}`);
+        assertNode.ok(!/The window, checked against the record|I cannot answer that from the record/.test(r.reply), "never the graduation-window template");
+        assertNode.equal(r.intent, "career_discovery");
+        assertNode.equal(wire.chat, before, "a widened search is code's: no model call");
+        const list = items(r.reply);
+        assertNode.deepEqual(list.slice(0, 2), s1Items, "the earlier verified roles keep their numbers");
+        const rest = list.slice(2).join("\n");
+        for (const want of ["Data Analyst Internship at Motorway Co — Schaumburg, IL", "Business Analyst Intern at Prairie Bank — Evanston, IL, on-site", "Analytics Intern at Northbeam — Remote - United States, remote"]) assertNode.ok(rest.includes(want), `${want} | ${r.reply}`);
+        assertNode.equal(list.length, 5, r.reply);
+        assertNode.match(r.reply, /4 in the Chicago area, 1 remote in the US/);
+        assertNode.match(r.reply, /5 of 5 listed were re-checked open just now/);
+        for (const never of ["Maple Data", "Stale Co", "Quiet Co", "Gone Corp", "Senior Data Analyst", "Fulltime Inc"]) assertNode.ok(!r.reply.includes(never), `${never} is not listed in S2`);
+        assertNode.match(r.reply, /Nothing was applied for/);
+      });
+
+      await t.step("E: an empty search names the scope checked, why nothing qualified, and the most useful widening", async () => {
+        const r = await say(h!.chat("other"), "Find me 3 economist internships in Peoria. Show the links.");
+        console.log(`--- E reply (${r.intent})\n${r.reply}`);
+        assertNode.match(r.reply, /^I checked economist internships in Peoria, on the live board and the saved snapshot of job boards: none was found/);
+        assertNode.match(r.reply, /The most useful widening is remote roles in the US/);
+        assertNode.match(r.reply, /nothing was applied for/);
+        assertNode.equal(items(r.reply).length, 0);
+      });
+
+      assertNode.deepStrictEqual(await effects(), zero, "nothing applied for, queued or sent");
+      assertNode.deepStrictEqual(outbound, [], "no request left but the fake boards");
+      assertNode.ok(boardReads.some((p) => /\/108$/.test(p)) && boardReads.some((p) => /postings\/7441$/.test(p)), "the closed roles were re-checked on their boards");
+    } finally {
+      console.error = realError;
+      globalThis.fetch = realFetch;
+      for (const [k, v] of Object.entries(saved)) v === undefined ? Deno.env.delete(k) : Deno.env.set(k, v);
+      h?.restore();
+      await pg.stop();
+    }
+  },
+});

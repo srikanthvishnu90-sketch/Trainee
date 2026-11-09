@@ -82,6 +82,15 @@ const ROLE_NOISE = new Set(["me", "some", "any", "a", "an", "the", "jobs", "job"
 
 // What a search message states: the role (level, pay, place, term and sponsorship words taken out), the place, remote,
 // and the limits. The role is empty when the message names none ("find me something remote").
+// The sentence of a longer message that asks for roles: a search verb and a job noun in one sentence ("Find me 5 data analyst
+// internships in Chicago"), else the first sentence with a job noun, else the whole message.
+const JOB_NOUN = /\b(?:jobs?|roles?|positions?|openings?|internships?|interns?|co-?ops?)\b/i;
+export function searchSentence(raw: string): string {
+  const all = String(raw ?? "").split(/(?<=[.!?])\s+(?=\S)/).map((s) => s.trim()).filter(Boolean);
+  if (all.length < 2) return String(raw ?? "");
+  return all.find((s) => JOB_NOUN.test(s) && /\b(?:find|search|show me|look(?:ing)? for|get me|pull up|list|want|need|include|add)\b/i.test(s))
+    ?? all.find((s) => JOB_NOUN.test(s)) ?? String(raw ?? "");
+}
 export function searchTextOf(message: string): SearchText {
   const raw = String(message ?? "").replace(/\s+/g, " ").trim();
   let t = lc(raw);
@@ -89,6 +98,13 @@ export function searchTextOf(message: string): SearchText {
   const place = placeOf(t);
   const remote = /\bremote(?:ly)?\b|\bwork from home\b|\bwfh\b/.test(t);
   // The role: what is left when everything that is a parameter is taken out.
+  // R10 WO-C (2026-11-09, production S1): in a message of several sentences the role is read from the one that asks for the
+  // roles. "Let's leave the resume for now. Find me 5 data analyst internships in Chicago that are actually open. Show the
+  // company, role, location, and application link." was searched as the role "let s leave resume now find data analyst
+  // actually open show company location application link don t yet", which no title holds, so nothing was ever found.
+  t = lc(searchSentence(raw));
+  // What the roles must be ("that are actually open", "verified open") is how to check them, not words of the role.
+  t = t.replace(/\b(?:that|which)\s+(?:are|is|were|was)\b[^,.;]*/g, " ").replace(/\b(?:(?:actually|currently|still|verified|real)\s+)+(?:open|live|available)\b|\bverified\b/g, " ");
   t = t.replace(CUE, "").replace(CUE, "");
   // KNOWN GAPS (2026-10-30, #317): the ask to apply is not part of the role. "apply to jobs for me" was searched as the role
   // "apply", and "apply to data analyst jobs" as "apply data analyst". ("applied scientist" is a role: only the verb goes.)

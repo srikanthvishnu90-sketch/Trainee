@@ -48,7 +48,9 @@ const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2)
 const iso = (t: unknown) => { const n = typeof t === "number" ? t : Date.parse(String(t ?? "")); return Number.isFinite(n) ? new Date(n).toISOString() : null; };
 const sourced = (xs: unknown) => (Array.isArray(xs) ? xs : []).filter((f) => f && typeof f.source === "string" && f.source && (f.value ?? f.text ?? f.answer));
 
-export function familyOfRecord(rec: FileRecord, token: string): { family: FamilyId; file: FamilyFile } | null {
+// evidenceImage: whether a confirmation screenshot may be shown inline (its origin is the project's own storage, which the page's CSP
+// allows); any other screenshot is a link, exactly as on the kind's page.
+export function familyOfRecord(rec: FileRecord, token: string, o: { evidenceImage?: (url: string) => boolean } = {}): { family: FamilyId; file: FamilyFile } | null {
   const d = rec.data ?? {}, views = actionsOf(rec);
   // An introduction without a stored address keeps its kind page: F-12 never approves an email to an address it cannot show.
   if (rec.kind === "introduction" && d.message?.channel === "email" && rec.tag && typeof d.message?.to === "string" && d.message.to.trim()) {
@@ -77,6 +79,14 @@ export function familyOfRecord(rec: FileRecord, token: string): { family: Family
       ...(c.id ? [{ k: "Confirmation ID", v: String(c.id), src: rec_ }] : []),
       { k: "Last updated", v: iso(d.as_of) ? String(d.as_of).slice(0, 10) : null, src: rec_, missing: "unknown" }] }] };
     type Problem = { item?: unknown; outcome?: unknown; reason?: unknown };
+    // The employer's confirmation as the kind page shows it: its reference, when, the link, and the screenshot (inline only from storage).
+    const shot = typeof c.screenshot_url === "string" && /^https:\/\//i.test(c.screenshot_url) ? c.screenshot_url : null;
+    const proof: Block[] = c.id || evidence || shot ? [{ b: "card", label: "Confirmation", parts: [
+      ...(c.id ? [{ p: "text" as const, lead: "Confirmation ID:", text: String(c.id) }] : []),
+      ...(evidence ? [{ p: "item" as const, title: "The employer's confirmation page", src: evidence, act: { label: "Open the confirmation", effect: "open" as const, href: evidence.href } }] : []),
+      ...(shot && o.evidenceImage?.(shot) ? [{ p: "html" as const, html: `<figure class="ff-shot"><img src="${esc(shot)}" alt="${esc(`${d.company ?? "The employer"}'s confirmation screen`)}" loading="lazy" referrerpolicy="no-referrer"></figure>` }]
+        : shot ? [{ p: "item" as const, title: "Confirmation screenshot", act: { label: "Open the screenshot", effect: "open" as const, href: shot } }] : []),
+    ] }] : [];
     const problems: Problem[] = (Array.isArray(d.problems) ? d.problems : []).filter((x: Problem) => x?.reason);
     const notDone: Block[] = problems.length ? [{ b: "card", label: "Not done", parts: problems.map((x) => ({ p: "text" as const, lead: `${String(x.outcome ?? "").charAt(0).toUpperCase()}${String(x.outcome ?? "").slice(1)}:`, text: `${x.item}. ${x.reason}` })) }] : [];
     type Flag = { at?: unknown; note?: unknown };
@@ -91,7 +101,7 @@ export function familyOfRecord(rec: FileRecord, token: string): { family: Family
       answers: sourced(d.answers).map((a) => ({ q: String(a.question ?? a.label ?? "Answer"), a: String(a.value ?? a.answer ?? a.text), required: false, source: String(a.source) })),
       conditions: [], approve: { label: "Approve submission", effect: "submit", off: "Already approved - this is the record of what was sent." }, after: { state, evidence },
       edit: views.some((a) => a.id === "status" && a.state === "available") ? { label: "View status", effect: "decide", post: { token, action: "status" } } : null,
-      extra: [status, ...notDone, ...flagged, ...flag],
+      extra: [status, ...proof, ...notDone, ...flagged, ...flag],
     }) };
   }
   return null;

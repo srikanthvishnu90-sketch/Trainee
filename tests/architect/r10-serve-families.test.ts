@@ -84,3 +84,22 @@ Deno.test("serve families: nothing the kind page showed is lost - the record's s
   const noTo = await w.svc.create(U, "introduction", { ...structuredClone(INTRO), message: { ...INTRO.message, to: undefined } }) as { ok: true; id: string };
   assert.doesNotMatch(await (await w.open(noTo.id)).text(), /data-family=/);
 });
+
+Deno.test("serve families: the employer's confirmation stays on F-09 - its ID, the link, and the screenshot (inline only from the project's storage)", async () => {
+  const mk = async (supabase: string | undefined) => {
+    const A = signedIn(), env: Record<string, string | undefined> = { TRAINEE_FILE_LINK_SECRET: SECRET, TRAINEE_FILE_BASE_URL: "https://trainee.example/file", TRAINEE_FILE_FAMILIES: "on", SUPABASE_URL: supabase };
+    const store = memoryFileStore(), svc = createFileService({ store, env: { get: (k) => env[k] }, now: () => NOW });
+    const d = { ...A.deps, store: { async recallList() { return null; }, async recall() { return null; } } as unknown as FileStore, now: () => NOW, env: { get: (k: string) => env[k] },
+      cards: { async open() { return null; } }, tap: {} as never, files: svc, timeZone: async () => "America/Chicago" } as unknown as FileDeps;
+    const v = validateKind("application_proof", { ...PROOF, status: "confirmed", confirmation: { id: "GH-4471", url: "https://boards.greenhouse.io/acme/confirmation/4471", screenshot_url: "https://proj.supabase.co/storage/v1/object/sign/proofs/gh-4471.png" } }, { trusted: true, now: NOW }) as { ok: true; data: unknown };
+    await store.put({ id: "2c3d4e5f6a", userId: U, kind: "application_proof", data: v.data, state: {}, tag: null, created_at: NOW, expires_at: NOW + 3600_000, revoked_at: null } as FileRecord);
+    return await handleFile(new Request("https://trainee.example/file", { headers: { cookie: `tf_s=${await A.tok(U, "2c3d4e5f6a", NOW)}` } }), d);
+  };
+  const r = await mk("https://proj.supabase.co"), h = await r.text();
+  assert.match(h, /data-family="F-09"/); assert.match(h, /Confirmation ID:<\/strong> GH-4471/);
+  assert.match(h, /href="https:\/\/boards\.greenhouse\.io\/acme\/confirmation\/4471"[^>]*>Open the confirmation/);
+  assert.match(h, /<img src="https:\/\/proj\.supabase\.co\/storage\/v1\/object\/sign\/proofs\/gh-4471\.png" alt="Example Co&#39;s confirmation screen"/);
+  assert.match(r.headers.get("content-security-policy")!, /img-src [^;]*https:\/\/proj\.supabase\.co/, "the CSP allows exactly the storage origin");
+  const other = await (await mk(undefined)).text();
+  assert.doesNotMatch(other, /<img src="https:\/\/proj/); assert.match(other, /href="https:\/\/proj\.supabase\.co\/storage\/v1\/object\/sign\/proofs\/gh-4471\.png"[^>]*>Open the screenshot/);
+});

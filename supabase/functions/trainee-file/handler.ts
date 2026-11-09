@@ -651,13 +651,16 @@ async function handleKind(o: { g: Exclude<Awaited<ReturnType<FileService["get"]>
   // R10 fix 9: where the stored record holds what a File family needs, the family page is served (behind TRAINEE_FILE_FAMILIES),
   // drawn with this record's own actions as its routes so no control on it is dead. Any other record keeps the kind's page below.
   if (fileFamiliesOn(d.env)) {
-    const fam = familyOfRecord(rec, token);
+    const shotsOrigin = evidenceOrigin(d.env);
+    const fam = familyOfRecord(rec, token, { evidenceImage: (x) => !!shotsOrigin && originOf(x) === shotsOrigin });
     if (fam) {
       const tz = d.timeZone ? await d.timeZone(u).catch(() => null) : null;
       const file = note ? { ...fam.file, blocks: [{ b: "html" as const, html: `<p class="ff-note" role="status">${esc(note)}</p>` }, ...fam.file.blocks] } : fam.file;
       // Served exactly as a kind page is: the kind's script (its hash in script-src) and Telegram's WebApp script, so the family page
       // works as a Mini App (initData sign-in) and under the same Content-Security-Policy (D-049).
-      const fcsp = (await headers("text/html", d.env))["content-security-policy"].replace("script-src ", `script-src ${await kindScriptHash} `);
+      let fcsp = (await headers("text/html", d.env))["content-security-policy"].replace("script-src ", `script-src ${await kindScriptHash} `);
+      // A confirmation screenshot is shown inline only from the project's own storage origin; img-src then allows exactly that origin.
+      if (shotsOrigin) fcsp = fcsp.replace(/img-src ([^;]+)/, (_m, v: string) => `img-src ${v === "'none'" ? shotsOrigin : `${v} ${shotsOrigin}`}`);
       const title = `${String(rec.data?.title ?? KIND_LABEL[rec.kind])} - Trainee`; // the File's own title, as its kind page names it
       return o.html(layout(title, familyBodyHtml(file, { now: d.now(), tz, routes: kindRoutes(rec), links: KIND_LINKS }), { script: KIND_SCRIPT, tg: true, css: FAMILY_CSS,
         og: { title: `${KIND_LABEL[rec.kind]} from Trainee`, description: "Open in Trainee.", image: ogImageOf(rec.kind, d.env) } }), 200, { "content-security-policy": fcsp });

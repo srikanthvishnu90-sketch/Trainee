@@ -660,6 +660,17 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // skipped, so "don't apply" can never start an apply or a batch. Its files ride the reply as documents.
       const resumeAns = !crisisText && !codeTurn && !tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await resumeTaskTurn({ message, ctx, userId: user.id, now: Date.now(), deps: { resumes: supabaseResumeStore(admin),
+            // B.6 continuation 1: "make the first bullet less wordy" is the model's wording, metered like every model call
+            // here; the module audits it against the bullet's own fact and shows it beside the old one before it is used.
+            rewrite: careerModelConfig(Deno.env).apiKey ? async (bullet: string, ask: string) => {
+              const m = ledger.track(newMeter());
+              try {
+                const msg: any = await callModel(careerModelConfig(Deno.env), { system: "Rewrite one resume bullet as the person asks. Keep every fact, number, name and tool it states; add nothing that is not in it. Answer with the new bullet text only.",
+                  messages: [{ role: "user", content: JSON.stringify({ bullet, ask }) }], max_tokens: 200 }, { meter: m, role: "chat" });
+                const text = (Array.isArray(msg?.content) ? msg.content : []).filter((b: any) => b?.type === "text").map((b: any) => String(b.text ?? "")).join("").trim();
+                return text || null;
+              } finally { await ledger.record(m); }
+            } : undefined,
             uploaded: async () => { const r = await admin.from("career_resume_uploads").select("id").eq("user_id", user.id).limit(1); return !r.error && (r.data ?? []).length > 0; } } })
           .catch((e) => { console.error("resume task turn:", e?.message ?? e); return null; })
         : null;

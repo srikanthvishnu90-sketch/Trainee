@@ -37,6 +37,8 @@ const A = "7b0f8f8e-6a43-4a49-9d2c-0000010a0001", B = "7b0f8f8e-6a43-4a49-9d2c-0
 const OLD = [["reddit", "reddit", "Ads Conversion Modeling, Machine Learning Engineering Manager", "San Francisco, CA"], ["pinwheel", "Pinwheel Labs", "Machine Learning Engineer", "Remote"],
   ["quanta", "Quanta Freight", "Senior ML Engineer", "New York, NY"], ["orbit", "Orbit Data", "ML Platform Engineer", "Seattle, WA"], ["ferro", "Ferro Health", "Applied Scientist", "Boston, MA"]]
   .map(([board, company, title, location], i) => ({ key: `greenhouse:${board}:${i + 1}`, board, company, title, location, url: `https://boards.greenhouse.io/${board}/jobs/${i + 1}` }));
+const FIRST = "Built a reporting dashboard in React and Python used by 200 internal users";
+const SHORTER = "Built a React and Python reporting dashboard for 200 internal users";
 const INTERNAL = /\b(parse check|runner|record|batch|PASS)\b/i;
 const OLD_ROLE = /machine learning|pinwheel|quanta|orbit|ferro|applied scientist|picked first/i;
 
@@ -70,11 +72,12 @@ function readPdf(bytes: Uint8Array): { pages: number; runs: Run[]; lines: string
 }
 const FLAG_RGB = "0.541 0.353 0"; // career_resume_design.ts FLAG #8A5A00
 const norm = (s: string) => s.replace(/[•]/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
-const CORPUS = norm(RESUME.replace(/^- /gm, "")) + " " + ["Education", "Experience", "Projects", "Leadership", "Skills", "Skills:"].join(" ").toLowerCase();
+// The intake as written, and with GPA left off (the person's "Leave GPA off" takes the value out, nothing else).
+const CORPUS = norm(RESUME.replace(/^- /gm, "")) + " " + norm(RESUME.replace(/^- /gm, "").replace(/,\s*GPA \d\.\d+/g, "")) + " " + ["Education", "Experience", "Projects", "Leadership", "Skills", "Skills:"].join(" ").toLowerCase();
 // The file must be the asked one: one page, the data analyst internship target, the person's own words and nothing else
 // (every run that is not a flagged placeholder or review note comes out of their intake), the contact placeholders visible
 // and flagged, no run under 10 pt, no line of the old list's roles.
-function inspect(bytes: Uint8Array, what: string) {
+function inspect(bytes: Uint8Array, what: string, approved: string[] = []) {
   const pdf = readPdf(bytes);
   const text = norm(pdf.lines.join(" "));
   assertNode.equal(pdf.pages, 1, `${what}: one page`);
@@ -82,7 +85,7 @@ function inspect(bytes: Uint8Array, what: string) {
   for (const r of pdf.runs) {
     if (r.text === "•") continue;
     if (r.color === FLAG_RGB) continue;
-    assertNode.ok(CORPUS.includes(norm(r.text)), `${what}: an invented line: ${JSON.stringify(r.text)}`);
+    assertNode.ok(CORPUS.includes(norm(r.text)) || approved.some((x) => norm(x).includes(norm(r.text))), `${what}: an invented line: ${JSON.stringify(r.text)}`);
   }
   const flagged = pdf.runs.filter((r) => r.color === FLAG_RGB).map((r) => r.text).join(" ");
   assertNode.ok(/\[your name\]/i.test(flagged) && flagged.includes("[email · phone · LinkedIn to add]"), `${what}: contact placeholders visible and flagged: ${flagged}`);
@@ -123,7 +126,13 @@ Deno.test({
         const req = input instanceof Request && !init ? input : new Request(input as any, init);
         const u = new URL(req.url);
         // The fake model: answers nothing useful, so every turn here is the product's code.
-        if (u.host === "api.anthropic.com") return anthropicWire(req, (chat) => { modelCalls++; return new Response(JSON.stringify({ id: "chatcmpl-test", model: chat.model, choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: "{}" } }], usage: { prompt_tokens: 10, completion_tokens: 1 } }), { headers: { "content-type": "application/json" } }); });
+        // The fake model: the bullet rewriter gets one scripted shorter bullet; everything else gets nothing useful.
+        if (u.host === "api.anthropic.com") return anthropicWire(req, (chat) => {
+          modelCalls++;
+          const sys = String(chat.messages?.find((m: { role: string }) => m.role === "system")?.content ?? "");
+          const content = /Rewrite one resume bullet/.test(sys) ? SHORTER : "{}";
+          return new Response(JSON.stringify({ id: "chatcmpl-test", model: chat.model, choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content } }], usage: { prompt_tokens: 10, completion_tokens: 1 } }), { headers: { "content-type": "application/json" } });
+        });
         if (u.origin !== new URL(SUPABASE_URL).origin) { outbound.push(`${req.method} ${u.host}`); throw new TypeError(`network refused: ${u.host}`); }
         return await viaDouble(req);
       }) as typeof fetch;
@@ -227,6 +236,34 @@ Deno.test({
         const xml = [...new TextDecoder("latin1").decode(docx.bytes).matchAll(/word\/document\.xml/g)].length;
         assertNode.ok(xml > 0 && docx.filename.endsWith(".docx"), "a real Word file");
         plain(d, "DOCX");
+      });
+
+      await t.step("continuation 1 (spec B.6): one task through six turns; what changed, GPA off, a shorter bullet shown then used, the open details, no apply", async () => {
+        const c1 = await a.say("Make it more like a data analyst resume. Keep it one page.");
+        inspect((await fileOf(c1, A)).bytes, "C1");
+        assertNode.ok(/\babove\b/.test(c1.reply) && /one page/.test(c1.reply) && /unchanged/.test(c1.reply) && /contact details/.test(c1.reply), `C1 says what leads, one page, experience unchanged, what is still needed: ${c1.reply}`);
+        plain(c1, "C1");
+        const c2 = await a.say("Leave GPA off. What did you change?");
+        eq((c2.body.artifacts ?? []).length, 0, "C2 explains; no file claimed");
+        assertNode.ok(/\bmoved\b|kept the order/.test(c2.reply) && /did not add a new job, tool, result or credential/.test(c2.reply) && /GPA stays off/.test(c2.reply) && /placeholders/.test(c2.reply), `C2: the actual edits: ${c2.reply}`);
+        const c3 = await a.say("Can you make the first bullet less wordy?");
+        eq((c3.body.artifacts ?? []).length, 0, "C3 proposes; nothing regenerated");
+        assertNode.ok(c3.reply.includes(`Proposed replacement: ${SHORTER}`) && c3.reply.includes(`Now: ${FIRST}`) && /\b200\b.*not accurate/.test(c3.reply), `C3: the new bullet beside the old one, the kept number named: ${c3.reply}`);
+        const c4 = await a.say("That is fine, give me the PDF.");
+        const pdf = inspect((await fileOf(c4, A)).bytes, "C4", [SHORTER]);
+        const text = pdf.lines.join(" ");
+        assertNode.ok(text.includes(SHORTER) && !text.includes(FIRST), `C4: the approved bullet is in the file: ${text}`);
+        assertNode.ok(!/GPA/.test(text), `C4: GPA is off the file: ${text}`);
+        assertNode.ok(/revised/.test(c4.reply) && /GPA is omitted/.test(c4.reply) && /contact placeholders still need filling/.test(c4.reply) && /review draft/.test(c4.reply), `C4: ${c4.reply}`);
+        await linkOf(c4);
+        plain(c4, "C4");
+        const c5 = await a.say("Why does it still say contact details to fill in?");
+        assertNode.ok(/didn't establish the contact details/.test(c5.reply) && /contact line/.test(c5.reply) && (c5.body.artifacts ?? []).length === 0, `C5: ${c5.reply}`);
+        const c6 = await a.say("Now apply with it.");
+        eq((c6.reply.match(/\?/g) ?? []).length, 1, `C6: one question: ${c6.reply}`);
+        assertNode.ok(/Which role/.test(c6.reply) && /exact application answers/.test(c6.reply) && /contact details/.test(c6.reply), `C6: a short stop at the real decision: ${c6.reply}`);
+        assertNode.ok(!/batch|apply list/i.test(c6.reply), `C6: no batch plan: ${c6.reply}`);
+        await nothingApplied(A);
       });
 
       const b = await setup(B, "tok-b");

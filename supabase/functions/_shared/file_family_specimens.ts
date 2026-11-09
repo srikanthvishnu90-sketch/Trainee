@@ -64,6 +64,7 @@ export const brief = (): CareerBrief => ({
   acts: { primary: go("Start search", "?start=search", "navigate"), secondary: [go("Edit goals", "?edit=goals"), go("Add materials", "?add=materials")] },
 });
 export const profile = (): ProfileFacts => ({
+  updatedAt: "2026-11-09T15:20:00Z", basis: "your resume + 24 confirmed facts",
   conflict: { text: "Your resume says Northwind Logistics ended Mar 2024; your profile says Jun 2024. Two prepared applications use the old date." },
   facts: [
     { k: "Current title", v: "Operations Associate", kind: "confirmed", src: resume }, { k: "Experience", v: "3 years", kind: "confirmed", src: resume },
@@ -86,7 +87,7 @@ export const paths = (): PathComparison => ({
   acts: { primary: go("Find example roles for A", "?find=A", "navigate"), secondary: [go("Build transition plan", "?plan=transition"), go("Change priorities", "?priorities")] },
 });
 export const search = (): SearchPlan => ({
-  version: 1, title: "Climate operations search", batchCap: 12, updatedAt: "2026-11-09T15:00:00Z",
+  version: 1, title: "Climate operations search", batchCap: 12, updatedAt: "2026-11-09T15:00:00Z", basis: "your career brief v2",
   hard: [{ k: "Work arrangement", v: "US remote only", src: you() }, { k: "Role scope", v: "Individual contributor", src: you() }, { k: "Pay floor", v: "$80,000 base if listed", src: you() }, { k: "Excluded employers", v: "2", src: { label: "your list" } }],
   prefs: [{ k: "Sector", v: "Grid, solar, carbon", src: you() }, { k: "Company size", v: "50-500 preferred", src: plan }, { k: "Undisclosed pay", v: "Include, marked unknown", src: you() }],
   watch: { text: "Weekday mornings, quiet hours 9 PM-8 AM, stops Dec 15 or when you say stop.", active: true },
@@ -110,7 +111,7 @@ export const materials = (file: string | null = "/files/operations-resume-v3.pdf
   acts: { primary: { label: "Approve v3 for R-07", effect: "approve", post: { token: SPECIMEN_TOKEN, action: "approvedoc", fields: { doc: "operations-resume", v: "3", role: "R-07" } } }, secondary: [go("Compare changes", "?compare=v2-v3")] },
 });
 export const answers = (): AnswerLibrary => ({
-  needed: 2, declaration: { rid: "R-07", text: "I certify this information is true" },
+  updatedAt: "2026-11-09T15:10:00Z", basis: "answers you approved", needed: 2, declaration: { rid: "R-07", text: "I certify this information is true" },
   factual: [{ k: "Years of experience", v: "3", src: resume }, { k: "Earliest start", v: "2 weeks", src: you("2026-10-28", "you") }, { k: "Location", v: "Chicago, IL", src: { label: "confirmed" } }],
   roleSpecific: [{ q: "Why Example Carbon Co?", scope: "This role only", note: "Cites their grid-storage product and your rollout record. Replacing the company name would not survive - that is the test." }],
   scoped: [{ q: "Willing to relocate", answer: "No", scope: "US-remote roles", outside: "A role in Austin" }],
@@ -129,6 +130,7 @@ export const review = (answered = true): ApplicationReview => ({
   approve: { label: "Approve submission", effect: "submit", post: { token: SPECIMEN_TOKEN, action: "approveapp", fields: { app: "A-014" } } }, edit: go("Edit materials", "?edit=A-014"), cancel: { label: "Cancel", effect: "danger", href: "?cancel=A-014" },
 });
 export const batch = (): BatchFile => ({
+  updatedAt: "2026-11-09T15:32:00Z",
   batch: "B-01", review: "review v3", expiresAt: "2026-11-13T23:00:00Z", exclusions: "No outreach", pause: { label: "Pause remaining", effect: "danger", post: { token: SPECIMEN_TOKEN, action: "pause" } },
   check: { label: "Check status", effect: "decide", post: { token: SPECIMEN_TOKEN, action: "checkstatus", fields: { rid: "R-11" } } },
   rows: [
@@ -141,6 +143,7 @@ export const batch = (): BatchFile => ({
   ],
 });
 export const pipeline = (): Pipeline => ({
+  updatedAt: "2026-11-09T15:30:00Z", basis: "employer emails in your connected inbox",
   counts: { applications: 11, interviews: 2, offers: 0 },
   decisions: [{ title: "Example Grid Co - interview times offered", chip: { label: "Reply due", tone: "attention" }, text: "Recruiter wrote 2h ago - 3 conflict-free options found, none booked.", act: go("Review options", "?options=grid") }],
   waiting: [{ title: "Example Solar Co - R-01", chip: { label: "Confirmed", tone: "confirmed" }, text: "Submitted, confirmed Oct 28 - employer receipt on file", src: { label: "Employer email", href: "https://boards.greenhouse.io/examplesolar/receipt", at: "2026-10-28T16:00:00Z" } },
@@ -150,6 +153,7 @@ export const pipeline = (): Pipeline => ({
   acts: { primary: go("Review interview options", "?options=grid", "navigate"), secondary: [go("Correct a status", "?correct=status"), { label: "Export", effect: "download", href: "/files/pipeline.csv" }] },
 });
 export const message = (resolved = true): MessageReview => ({
+  updatedAt: "2026-11-09T15:25:00Z",
   kind: "Referral request", recipient: resolved ? { initials: "JM", name: "Jordan M.", basis: "Former teammate at Northwind Logistics, 2 shared roles. Identity resolved from your contacts - not guessed among lookalikes.", resolved, relation: "former teammate" }
     : { initials: "?", name: "Maya at Example Carbon Co", basis: "Two contacts match this name. No address is guessed; pick the right person first.", resolved },
   to: resolved ? "jordan.m@example.com" : null, channel: "email", attachments: "Role link + forwardable blurb v1", followUp: "None - silence ends the ask",
@@ -158,12 +162,14 @@ export const message = (resolved = true): MessageReview => ({
   acts: { secondary: [go("Edit wording", "?edit=M-3"), go("Change recipient", "?recipient=M-3")] },
 });
 export const hub = (booked = true): InterviewHub => ({
+  updatedAt: "2026-11-09T15:05:00Z", basis: "the recruiter's email",
   company: "Example Grid Co", stage: "stage 2 of 3", at: "2026-11-10T20:00:00Z", tz: "America/Chicago", interviewerTz: "America/Los_Angeles", minutes: 45, medium: "video", booked, calendarVerified: booked,
   person: { initials: "SP", name: "Sam P.", role: "Operations Director", verified: true, basis: "Identity verified against the recruiter's email. Public professional info only - no personal digging." },
   prep: [{ done: true, lead: "Likely topics:", text: "grid operations, incident process, cross-team rollout" }, { done: true, lead: "Your stories:", text: "3 outlined from confirmed facts - no invented achievements" }, { done: false, lead: "Questions to ask:", text: "on-call structure, 90-day expectations" }],
   acts: { primary: go("Open prep brief", "?brief=grid", "navigate"), secondary: [go("Propose new time", "?propose=grid"), go("Draft follow-up", "?followup=grid")] },
 });
 export const weekly = (quiet = false): WeeklyBrief => ({
+  basis: "your pipeline and connected inbox",
   week: "Nov 2", n: 4, generatedAt: "2026-11-09T15:00:00Z", cadence: "weekly",
   changed: quiet ? [] : ["1 interview confirmed - Example Grid Co, Nov 10", "9 applications confirmed; 1 employer replied with questions", "2 new verified roles match your constraints"],
   decisions: [{ title: "Interview time for Example Grid Co", text: "3 options found - none booked yet", act: go("Decide", "?decide=time") }, { title: "Broaden search to adjacent roles?", text: "Current filters returned fewer roles this week", act: go("Decide", "?decide=broaden") }],
@@ -171,6 +177,7 @@ export const weekly = (quiet = false): WeeklyBrief => ({
   acts: { primary: go("Review 2 decisions", "?decisions", "navigate"), secondary: [go("Adjust plan", "?plan"), { label: "Pause search", effect: "danger", post: { token: SPECIMEN_TOKEN, action: "pause" } }] },
 });
 export const negotiation = (): Negotiation => ({
+  updatedAt: "2026-11-09T14:50:00Z",
   company: "Example Grid Co", v: 2, deadline: "2026-11-13T23:00:00Z", basis: "the signed offer letter",
   position: [{ k: "Target base", v: "$98,000", src: { label: "you confirmed" } }, { k: "Walk-away floor", v: "$92,000", src: { label: "private, never shared" } }, { k: "Tradeable", v: "Start date, remote days", src: { label: "you said" } }],
   history: [{ v: "v1 - initial offer", written: true, text: "$92,000 base - 10% target bonus - offer letter Oct 30" }, { v: "v2 - recruiter call", written: false, text: "\"Room on base\"" }],
@@ -178,6 +185,7 @@ export const negotiation = (): Negotiation => ({
   acts: { primary: go("Review the counter draft", "?draft=counter", "navigate"), secondary: [go("Adjust priorities", "?priorities"), go("Prepare decision", "?decision")] },
 });
 export const offers = (): OfferComparison => ({
+  updatedAt: "2026-11-09T14:45:00Z",
   deadline: { company: "Grid Co", at: "2026-11-13T23:00:00Z" }, priorities: "You ranked stability over upside - A leads on guaranteed cash.",
   offers: [
     { letter: "A", company: "Example Grid Co", rows: [{ k: "Base", v: "$92,000", src: letter("2026-10-30") }, { k: "Bonus", v: "10% target - not guaranteed", src: letter("2026-10-30") }, { k: "Equity", v: "None", src: letter("2026-10-30") }, { k: "Start / location", v: "Dec 1 - US remote", src: letter("2026-10-30") }, { k: "Total compensation", v: "$101,200", src: { label: "added up" } }] },

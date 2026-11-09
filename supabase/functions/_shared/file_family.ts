@@ -55,6 +55,9 @@ export const FAMILIES: Record<FamilyId, FamilyMeta> = {
 export interface Src { label: string; href?: string | null; at?: string | null; dateOnly?: boolean; external?: boolean }
 export interface Ctx { now: number; tz?: string | null }
 export const UNCONFIRMED = "Unconfirmed";
+// D.4-2: a fact the source itself does not state is written as the word "unknown" (never a dash, "N/A" or a blank); a value that
+// waits on the person stays Unconfirmed. Both carry data-unconfirmed, so neither ever reads as a fact.
+export const UNKNOWN = "unknown";
 const blank = (s: unknown) => s === null || s === undefined || !String(s).trim();
 const msOf = (t: string | null | undefined) => { const n = t ? Date.parse(t) : NaN; return Number.isNaN(n) ? null : n; };
 const isExternal = (s: Src) => s.external === true || !blank(s.href);
@@ -207,6 +210,7 @@ export interface FamilyFile {
   family: FamilyId; header?: string; boundary?: string; mono?: string | null; back?: string | null; menu?: Act[]; pause?: Act | null;
   hero: { kicker: string; title: string; meta: Meta[]; counts?: { n: number; label: string }[] } | null; // F-11 and F-12 have none (p-72, p-74)
   title?: string; // the page title when there is no hero
+  fresh?: Meta[]; // D.4-1: a File with no hero still says how fresh it is and what it is based on, under its header
   segments?: { label: string; n?: number; href?: string | null; selected?: boolean }[];
   blocks: Block[]; actions?: { primary?: Act | null; secondary?: Act[]; caption?: string | null };
 }
@@ -227,7 +231,7 @@ function headHtml(f: Pick<FamilyFile, "family" | "header" | "boundary" | "mono" 
 }
 export function familyBodyHtml(f: FamilyFile, c: Ctx): string {
   const h = f.hero;
-  const hero = !h ? `<h1 class="ff-sr">${esc(f.title ?? FAMILIES[f.family].header)}</h1>` : `<section class="ff-hero" aria-label="Summary"><p class="ff-kick">${esc(h.kicker)}</p><h1 class="ff-h1">${esc(h.title)}</h1><p class="ff-metas">${h.meta.map((m) => metaHtml(m, c)).join("")}</p>`
+  const hero = !h ? `<h1 class="ff-sr">${esc(f.title ?? FAMILIES[f.family].header)}</h1>${f.fresh?.length ? `<p class="ff-metas ff-fresh">${f.fresh.map((m) => metaHtml(m, c)).join("")}</p>` : ""}` : `<section class="ff-hero" aria-label="Summary"><p class="ff-kick">${esc(h.kicker)}</p><h1 class="ff-h1">${esc(h.title)}</h1><p class="ff-metas">${h.meta.map((m) => metaHtml(m, c)).join("")}</p>`
     + (h.counts?.length ? `<ul class="ff-counts" aria-label="Counts">${h.counts.map((x) => `<li><b>${x.n}</b> ${esc(x.label)}</li>`).join("")}</ul>` : "") + `</section>`;
   const seg = f.segments?.length ? `<nav class="ff-seg" aria-label="Show">${f.segments.map((s) => { const t = `${esc(s.label)}${s.n === undefined ? "" : ` <b>${s.n}</b>`}`; return s.href ? `<a href="${esc(s.href)}"${s.selected ? ` aria-current="page" class="on"` : ""}>${t}</a>` : `<span${s.selected ? ` aria-current="page" class="on"` : ""}>${t}</span>`; }).join("")}</nav>` : "";
   const a = f.actions, sec = a?.secondary ?? [];
@@ -327,7 +331,7 @@ export const FAMILY_CSS = `
 .ff-role .ff-meta2{margin-top:4px!important}.ff-role .ff-fit{margin-top:12px}.ff-role .ff-row-acts{flex-wrap:wrap}
 .ff-fitd>summary{list-style:none}.ff-fitd>summary::-webkit-details-marker{display:none}.ff-fitd[open]{flex-basis:100%}.ff-fitd[open]>:not(summary){margin-top:10px}
 .ff-menul .ff-btn{justify-content:flex-start}.ff-menul .ff-pick{padding:0 4px}
-.ff-role .ff-p a:not(.ff-btn){color:var(--ff-ptext);font-weight:600}.ff-full{margin:8px 0 0}.ff-full>summary{display:inline-flex;align-items:center;min-height:44px;color:var(--ff-ptext);font-weight:600;font-size:15px;cursor:pointer}
+.ff-role .ff-p a:not(.ff-btn){color:var(--ff-ptext);font-weight:600}.ff-fresh{margin:0 0 14px;color:var(--ff-mute)}.ff-fresh b{color:var(--ff-ink)}.ff-full{margin:8px 0 0}.ff-full>summary{display:inline-flex;align-items:center;min-height:44px;color:var(--ff-ptext);font-weight:600;font-size:15px;cursor:pointer}
 .ff-pick{display:inline-flex;align-items:center;gap:10px;min-height:44px;font-size:16px}.ff-pick input{width:22px;height:22px;accent-color:var(--ff-plum)}
 .ff-act{display:flex;flex-direction:column;gap:4px;margin:0}.ff-off{font-size:14px;color:var(--ff-mute)}
 .ff-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;min-height:48px;padding:8px 16px;border-radius:16px;font:inherit;font-size:16px;font-weight:700;text-align:center;text-decoration:none;cursor:pointer}

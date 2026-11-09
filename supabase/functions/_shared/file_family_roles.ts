@@ -19,6 +19,7 @@ export interface ShortRole extends ResultRow {
   openLine?: string | null; // WO-C's open-check line, shown as given ("Open: application page checked Nov 8, 5:16 PM CST" / "Not re-checked when listed")
   uncertain?: string | null; // what is not certain about this role, in words
   restriction?: string | null; // the kind of restriction that blocks it ("Location restriction"); the reason is `blocked`
+  alsoAt?: { href: string; at: string | null }[]; // E-67: the same requisition cross-posted elsewhere, merged into this one role
 }
 export interface Target { company: string; note: string; watch?: Act | null }
 export interface ShortlistInput {
@@ -49,13 +50,16 @@ function roleCard(r: ShortRole, rid: string, f: ShortlistInput, c: Ctx): string 
   const sp = specOf(r), v = vocab(sp.key), link = webUrl(r.job.url), host = link ? hostOf(link) : "", label = `${r.job.title} at ${r.job.company}`;
   const pay = r.payShown ? `${r.payShown} employer-stated` : "pay not listed (marked unknown)";
   const at = checkedIso(r);
-  const meta = claimHtml([r.place || "Location not listed", pay].join(" - "), { label: "checked", href: r.job.url, at }, c);
+  const meta = claimHtml([r.place || "location unknown", pay].join(" - "), { label: "checked", href: r.job.url, at }, c);
+  const also = r.alsoAt?.length ? `<p class="ff-p ff-mute">Also posted: ${r.alsoAt.map((x) => claimHtml("same requisition", { label: "cross-post", href: x.href, at: x.at }, c)).join("; ")}</p>` : "";
   // WO-C hands the window already prefixed; strip the prefix so it is said once, and quote only raw posting words.
   const prefixed = WINDOW_PREFIX.test(r.window ?? ""), words = prefixed ? r.window!.replace(WINDOW_PREFIX, "") : r.window ? `"${r.window}"` : "";
   const win = words ? `<p class="ff-p ff-win"><strong>Student window:</strong> ${claimHtml(words, { label: "posting", href: r.job.url, at }, c)}</p>` : "";
   const open = r.openLine ? `<p class="ff-p ff-mute ff-open">${esc(r.openLine)}</p>` : "";
   const gap = r.job.gaps?.[0] ?? r.payNote ?? (r.openQs ? `${r.openQs} employer ${r.openQs === 1 ? "question needs" : "questions need"} your answer.` : null);
-  const fit = r.blocked
+  const closed = specOf(r).key === "closed";
+  const fit = closed ? `<div class="ff-fit ff-restr"><p class="ff-p"><strong>Closed:</strong> ${esc(r.blocked ?? "")}. Kept here as a record.</p></div>`
+    : r.blocked
     ? `<div class="ff-fit ff-restr"><p class="ff-p"><strong>${esc(r.restriction ?? "Restriction")}:</strong> ${esc(r.blocked)} - this must resolve before any preparation.</p></div>`
     : r.why?.length || gap ? `<div class="ff-fit"><p class="ff-p">${r.why?.length ? `<strong>Why it fits:</strong> ${esc(r.why[0])} ` : ""}${gap ? `Gap: ${esc(gap)}` : ""}</p></div>` : "";
   const unc = r.uncertain ? `<p class="ff-p"><strong>Uncertain:</strong> ${esc(r.uncertain)}</p>` : "";
@@ -64,15 +68,16 @@ function roleCard(r: ShortRole, rid: string, f: ShortlistInput, c: Ctx): string 
   const more: string[] = [];
   // Select carries the exact payload tag its card shows (none: prepare only), as the live page's Select does (results_page.ts).
   if (approvable && !paused && (f.live || !r.tag)) more.push(`<label class="ff-pick"><input type="checkbox" form="ff-sel" name="pick" value="${esc(`${r.ref}:${tag}`)}" aria-label="Select ${esc(label)}"> Select</label>`);
-  if (link && !r.blocked && !r.byHand) more.push(actHtml({ label: `View posting on ${host}`, effect: "open", href: link, ghost: true, aria: `View posting: ${label} on ${host}` }));
+  if (link && (!r.blocked || closed) && !r.byHand) more.push(actHtml({ label: `View posting on ${host}`, effect: "open", href: link, ghost: true, aria: `View posting: ${label} on ${host}` }));
   more.push(`<form method="post" class="ff-act">${hidden({ t: f.token, action: "dismiss", ref: r.ref })}<button type="submit" class="ff-btn ff-ghost" data-effect="decide" aria-label="Dismiss ${esc(label)}">Dismiss</button><span class="ff-off">Hides this role from your list. Private and reversible; no application is touched.</span></form>`);
   let main = "";
   // What will be sent: only a prepared application has one, and it is exactly what its Submit approves (its payload tag).
-  const sends = approvable && r.tag && r.send?.length ? `<details class="ff-fitd"><summary class="ff-btn ff-sec">${f.live ? "What will be sent" : "Review application"}</summary><dl class="ff-kv">${r.send.map((x) => `<div class="ff-kvr"><dt>${esc(x.label)}</dt><dd>${x.needs ? `<span class="ff-v ff-unk" data-unconfirmed="1">Needs you</span>` : esc(x.value)}</dd></div>`).join("")}${f.live ? `<div class="ff-kvr"><dt>Application</dt><dd class="ff-id">${esc(r.tag)}</dd></div></dl>` : `</dl><p class="ff-p ff-mute">Nothing is sent from this File.</p>`}</details>` : "";
+  const sends = approvable && r.tag && r.send?.length ? `<details class="ff-fitd"><summary class="ff-btn ff-sec">${f.live ? "What will be sent" : "Review application"}</summary><dl class="ff-kv">${r.send.map((x) => `<div class="ff-kvr"><dt>${esc(x.label)}</dt><dd>${x.needs ? `<span class="ff-v ff-unk" data-unconfirmed="1">Needs you</span>` : `${esc(x.value)}<span class="ff-src"> - as prepared for this role</span>`}</dd></div>`).join("")}${f.live ? `<div class="ff-kvr"><dt>Application</dt><dd class="ff-id">${esc(r.tag)}</dd></div></dl>` : `</dl><p class="ff-p ff-mute">Nothing is sent from this File.</p>`}</details>` : "";
   if (r.status) main = r.status.word === "preparing" ? actHtml({ label: "Refresh", effect: "navigate", href: `?#r-${r.ref}`, aria: `Refresh ${label}` }) : "";
   else if (approvable && paused) main = `<p class="ff-p ff-mute">Paused: this page is not starting new applications.</p>`;
   else if (approvable && !r.tag) main = actHtml({ label: "Prepare application", effect: "prepare", aria: `Prepare application: ${label}`, post: { token: f.token, action: "apply", fields: { ref: r.ref, tag: "none" } } }, true);
   else if (approvable && f.live) main = actHtml({ label: "Submit application", effect: "submit", aria: `Submit application: ${label}, exactly as What will be sent shows`, post: { token: f.token, action: "apply", fields: { ref: r.ref, tag } } });
+  else if (closed) main = actHtml({ label: "Prepare application", effect: "prepare", off: "Closed - the posting no longer takes applications, so this stays off. The record is kept." });
   else if (r.blocked && link) main = actHtml({ label: `Review ${(r.restriction ?? "restriction").toLowerCase()}`, effect: "open", href: link, aria: `Review ${(r.restriction ?? "restriction").toLowerCase()} on ${host}` });
   else if (r.byHand && link) main = actHtml({ label: `Apply yourself on ${host}`, effect: "open", href: link });
   const all = [...(r.why ?? []).slice(1), ...(r.job.gaps ?? []).slice(1)];
@@ -81,10 +86,24 @@ function roleCard(r: ShortRole, rid: string, f: ShortlistInput, c: Ctx): string 
   const said = note ? `<p class="ff-p" role="status">${esc(note)}</p>` : r.status ? `<p class="ff-p">${esc(r.status.word === "preparing" ? r.guide || "Getting your application ready. Nothing has been sent." : sp.detail)}</p>` : "";
   const guide = approvable && r.guide ? `<p class="ff-p">${esc(r.guide)}${r.openQs ? ` <a href="?things=${esc(r.ref)}">Answer them now</a>` : ""}</p>` : "";
   const full = `<details class="ff-full"><summary>Full posting</summary><p class="ff-p">${esc(r.full || "The full posting text isn't on file.")}</p></details>`;
-  return `<article class="ff-card ff-role" id="r-${esc(r.ref)}"><p class="ff-idrow"><span class="ff-id">${esc(rid)}</span>${chipHtml({ label: v.chip, tone: v.tone })}</p><h3 class="ff-it ff-serif">${esc(r.job.title)}</h3><p class="ff-p ff-mute ff-meta2">${meta}</p>${open}${win}${fit}${unc}${guide}${said}${full}<div class="ff-row-acts">${main}${sends}${review}${menu(`More for ${label}`, more)}</div></article>`;
+  return `<article class="ff-card ff-role" id="r-${esc(r.ref)}"><p class="ff-idrow"><span class="ff-id">${esc(rid)}</span>${chipHtml({ label: v.chip, tone: v.tone })}</p><h3 class="ff-it ff-serif">${esc(r.job.title)}</h3><p class="ff-p ff-mute ff-meta2">${meta}</p>${also}${open}${win}${fit}${unc}${guide}${said}${full}<div class="ff-row-acts">${main}${sends}${review}${menu(`More for ${label}`, more)}</div></article>`;
 }
 
-export function rolesShortlistFile(f: ShortlistInput): FamilyFile {
+// E-67: cross-posts of one requisition (same company, same stated requisition id) are one role with several source links; similar
+// titles without the same requisition id stay separate roles. The first row is kept; the others' postings become its alsoAt.
+export function dedupeCrossPosts(rows: ShortRole[]): ShortRole[] {
+  const seen = new Map<string, ShortRole>(), out: ShortRole[] = [];
+  for (const r of rows) {
+    const k = r.reqId ? `${r.job.company.trim().toLowerCase()}|${r.reqId.trim().toLowerCase()}` : null, first = k ? seen.get(k) : undefined;
+    if (first) { first.alsoAt = [...(first.alsoAt ?? []), { href: r.job.url, at: checkedIso(r) }]; continue; }
+    const kept = { ...r, alsoAt: r.alsoAt ? [...r.alsoAt] : undefined };
+    if (k) seen.set(k, kept);
+    out.push(kept);
+  }
+  return out;
+}
+export function rolesShortlistFile(f0: ShortlistInput): FamilyFile {
+  const f = { ...f0, rows: dedupeCrossPosts(f0.rows) };
   const ids = roleIds(f.rows.map((r) => r.ref)), batch = batchIdOf(f.rows.map((r) => r.ref));
   const counts = stateCountsOf(f.rows).filter((x) => x.n > 0).map((x) => ({ n: x.n, label: vocab(x.key).count }));
   const groups = new Map<string, ShortRole[]>();

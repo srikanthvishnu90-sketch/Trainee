@@ -51,7 +51,7 @@ Deno.test({ name: "WO-107: status, inbox and due follow-ups from one read model 
       assert(/Added to your tracker: Vandelay Industries/.test(logged.reply), logged.reply);
       const all = await say(chat, "where are my applications?");
       eq(all.intent, "career_apply_status", all.reply);
-      for (const w of [/Acme confirmed it \(confirmation ACME-1\)/, /Globex has not confirmed it yet/, /can't tell whether it reached Initech/, /Umbrella[^:\n]*: approved, not sent yet/, /Hooli[^:\n]*: not sent/]) assert(w.test(all.reply), `${w}: ${all.reply}`);
+      for (const w of [/Acme[^:\n]*: submitted; their page showed ACME-1; Acme has not confirmed it by email yet\./, /Globex has not confirmed it yet/, /can't tell whether it reached Initech/, /Umbrella[^:\n]*: approved, not sent yet/, /Hooli[^:\n]*: not sent/]) assert(w.test(all.reply), `${w}: ${all.reply}`);
       assert(/Also on your tracker \(what you told Trainee\): Vandelay Industries \([^)]*Data Analyst[^)]*\): you told Trainee you applied on \w+ \d+; stage \w+/.test(all.reply), all.reply);
       assert(/Employer email on record \(last 30 days\): Stark Industries: recruiter reply on/.test(all.reply) && /Globex \(Data Analyst\): interview invitation on/.test(all.reply), all.reply);
       const one = await say(chat, "did my application to Globex go through?");

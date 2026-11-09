@@ -41,6 +41,11 @@ test("Lever's invisible hCaptcha (hidden token field and hidden submit) and the 
     <div class="grecaptcha-badge" style="width:256px;height:60px;position:fixed;bottom:14px;right:-186px">
     <iframe src="https://www.google.com/recaptcha/enterprise/anchor?k=x&size=invisible" width="256" height="60"></iframe></div>`), false);
   assert.equal(await shown(`<form><input name="email"><div id="h-captcha" class="h-captcha" data-sitekey="k"></div><button type="submit">Submit</button></form>`), false, "an empty 0-height container (live Lever)");
+  // What strict benchmark run 42707036468 saw on every live Lever and Ashby form: hCaptcha's enclave frame filling the window, and
+  // reCAPTCHA's challenge frame parked hidden off-screen. Neither is a check a person can see.
+  assert.equal(await shown(`<form><input name="email"></form><iframe src="https://newassets.hcaptcha.com/captcha/v1/abc/static/hcaptcha-enclave.html#frame=enclave&_channel=x" style="position:fixed;top:0;left:0;width:900px;height:1100px;border:0"></iframe>`), false, "hCaptcha enclave frame");
+  assert.equal(await shown(`<form><input name="email"></form><div style="visibility:hidden;position:absolute;top:-10000px"><iframe src="https://www.recaptcha.net/recaptcha/enterprise/bframe?hl=en&k=x" width="898" height="150"></iframe></div>`), false, "parked reCAPTCHA bframe");
+  assert.equal(await shown(`<form><input name="email"></form><div style="position:absolute;top:-10000px"><iframe src="https://www.recaptcha.net/recaptcha/enterprise/bframe?hl=en&k=x" width="898" height="150"></iframe></div>`), false, "off-screen bframe");
   assert.equal(await shown(`<script src="https://www.google.com/recaptcha/api.js"></script><p>This site is protected by reCAPTCHA.</p><form><input name="a"><input name="b"><button type="submit">Apply</button></form>`), false);
 });
 
@@ -48,6 +53,7 @@ test("a shown check still stops: checkbox widget, challenge frame, interstitial,
   assert.ok(await shown(fs.readFileSync(path.join(__dirname, "fixtures/apply-dryrun/lever-acme.html"), "utf8")), "the dry-run Lever fixture's drawn checkbox");
   assert.ok(await shown(`<form><input name="email"><div class="g-recaptcha" data-sitekey="k" style="width:304px;height:78px"></div><button type="submit">Submit</button></form>`));
   assert.ok(await shown(`<iframe src="https://www.google.com/recaptcha/api2/anchor?k=x&size=normal" width="304" height="78"></iframe>`));
+  assert.ok(await shown(`<div style="position:fixed;top:100px;left:100px"><iframe src="https://www.recaptcha.net/recaptcha/enterprise/bframe?hl=en&k=x" width="400" height="580"></iframe></div>`), "a raised reCAPTCHA challenge");
   assert.ok(await shown(`<iframe src="https://newassets.hcaptcha.com/captcha/v1/x/static/hcaptcha.html#frame=checkbox" width="303" height="78"></iframe>`));
   assert.ok(await shown(`<title>Just a moment...</title><p>Checking your browser before accessing the site.</p>`));
   assert.ok(await shown(`<p>Verify you are human by completing the action below.</p>`));

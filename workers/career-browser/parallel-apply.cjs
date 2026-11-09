@@ -65,6 +65,20 @@ function urlVerdict(u, allowHosts = []) {
 // Still never solved, never submitted past: a shown check stops the run as needs_user / bot_check.
 function SHOWN_CHECK() {
   const vis = (e) => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+  // Shown means a person can see it: at least 60x40 of it on the page (scrolling allowed), and neither it nor any parent hidden, collapsed or
+  // transparent. reCAPTCHA keeps its challenge frame (bframe) on every page, hidden and off-screen until it raises one (every
+  // Ashby form, strict benchmark run 42707036468).
+  const onScreen = (e) => {
+    // On the page, not parked above or left of it (a person scrolls down to a check below the fold; never to top:-10000px).
+    const r = e.getBoundingClientRect(), top = r.top + scrollY, left = r.left + scrollX;
+    const pageW = Math.max(document.documentElement.scrollWidth, innerWidth);
+    if (r.width <= 60 || r.height <= 40 || top + r.height <= 0 || left + r.width <= 0 || left >= pageW) return false;
+    for (let n = e; n && n.nodeType === 1; n = n.parentElement) {
+      const cs = getComputedStyle(n);
+      if (cs.display === "none" || cs.visibility === "hidden" || cs.visibility === "collapse" || Number(cs.opacity) < 0.05) return false;
+    }
+    return true;
+  };
   const text = ((document.body && document.body.innerText) || "").slice(0, 20000);
   if (/verify\s+(?:that\s+)?you(?:\s+are|['\u2019]re)\s+(?:a\s+)?(?:human|not a robot)|are you a robot|i['\u2019]?m not a robot|complete the (security )?check|press (and|&) hold/i.test(text)) return "text";
   if (/^(just a moment|attention required)/i.test(document.title || "")) return "interstitial";
@@ -83,14 +97,17 @@ function SHOWN_CHECK() {
     .find((e) => (e.getAttribute("data-size") || "").toLowerCase() !== "invisible" && !/invisible/i.test(e.getAttribute("data-badge") || "") && !runsInvisibly(e)
       // A reCAPTCHA or hCaptcha container is shown only once it has drawn its checkbox: an empty 680x0 box (every live Lever
       // form, strict benchmark run 42696835430) is not something a person can see or tick.
-      && (!e.matches(".g-recaptcha, .h-captcha") || (e.offsetWidth > 60 && e.offsetHeight > 40)));
+      && (!e.matches(".g-recaptcha, .h-captcha") || onScreen(e)));
   const desc = (e) => `${e.tagName.toLowerCase()}${e.id ? "#" + e.id : ""}${[...e.classList].slice(0, 3).map((c) => "." + c).join("")} ${e.offsetWidth}x${e.offsetHeight}${e.getAttribute("data-size") ? " size=" + e.getAttribute("data-size") : ""}${e.children.length ? " children=" + e.children.length : ""}`;
   if (widget) return `widget ${desc(widget)}`;
   const frame = [...document.querySelectorAll("iframe")].find((f) => {
     const src = f.src || "";
-    if (!/recaptcha\/(?:api2|enterprise)\/(?:anchor|bframe)|\/recaptcha\/anchor|hcaptcha\.com\/captcha|challenges\.cloudflare\.com/i.test(src)) return false;
+    if (!/recaptcha\/(?:api2|enterprise)\/(?:anchor|bframe)|\/recaptcha\/anchor|hcaptcha\.com\/captcha|challenges\.cloudflare\.com|captcha-delivery\.com/i.test(src)) return false;
     if (/[?&]size=invisible\b/i.test(src)) return false;
-    return vis(f) && f.offsetWidth > 60 && f.offsetHeight > 40;
+    // hCaptcha's enclave frame (hcaptcha-enclave.html, #frame=enclave) is its background scoring frame on every Lever form, never
+    // a challenge (strict benchmark run 42707036468); its checkbox and challenge frames are.
+    if (/hcaptcha-enclave\.html|[#&]frame=enclave\b/i.test(src)) return false;
+    return onScreen(f);
   });
   if (!frame) return null;
   let src = ""; try { const u = new URL(frame.src); src = u.host + u.pathname.slice(0, 50); } catch { /* opaque */ }
@@ -147,10 +164,18 @@ async function openApply(page, timeout) {
       return !e.closest("form") && (e.offsetWidth || e.offsetHeight) && re.test(t) && !never.test(t);
     });
     if (!c.length) return null;
-    const hrefs = new Set(c.map((e) => (e.tagName === "A" && e.href) || ""));
-    if (c.length > 1 && (hrefs.size !== 1 || hrefs.has(""))) return null;
-    c[0].removeAttribute("target");
-    return c[0];
+    // Repeats of one control: every link goes to the same address and every button carries a link's words (Personio), or
+    // there are no links and every button says the same thing (BambooHR). Anything else is ambiguous and is not clicked.
+    const words = (e) => (e.innerText || e.getAttribute("aria-label") || "").trim().toLowerCase();
+    const links = c.filter((e) => e.tagName === "A" && e.href), buttons = c.filter((e) => !(e.tagName === "A" && e.href));
+    let pick = null;
+    if (links.length) {
+      const hrefs = new Set(links.map((e) => e.href)), lw = new Set(links.map(words));
+      if (hrefs.size === 1 && buttons.every((b) => lw.has(words(b)))) pick = links[0];
+    } else if (new Set(buttons.map(words)).size === 1) pick = buttons[0];
+    if (!pick) return null;
+    pick.removeAttribute("target");
+    return pick;
   }, [APPLY_TEXT.source, NEVER_CLICK.source])).asElement();
   if (!h) return false;
   await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded", timeout }).catch(() => null), h.click()]);
@@ -193,8 +218,10 @@ function DIAG(field) {
     inputs: document.querySelectorAll("input:not([type=hidden]), textarea, select").length };
   if (field && !/^https?:/.test(field)) {
     const want = field.toLowerCase().slice(0, 30);
-    const lab = [...document.querySelectorAll("label, legend, [id*=label], .application-label, div, span")].find((e) => e.children.length < 6 && (e.innerText || "").toLowerCase().includes(want));
+    const cands = [...document.querySelectorAll("label, legend, [id*=label], .application-label")].filter((e) => (e.innerText || "").toLowerCase().includes(want));
+    const lab = cands.sort((a, b) => (a.innerText || "").length - (b.innerText || "").length)[0];
     const box = lab && (lab.closest(".application-question, .field, .form-group, li, fieldset") || lab.parentElement);
+    if (box && box.outerHTML.length > 4000) out.field_note = "container too large; label only";
     out.field = cut(box ? box.outerHTML : lab ? lab.outerHTML : "", 600);
   }
   out.captcha = [...document.querySelectorAll(".g-recaptcha, .h-captcha, .cf-turnstile, iframe[src*=captcha], iframe[src*=challenges]")].slice(0, 3)
@@ -256,7 +283,23 @@ async function attempt(browser, p, opts, timing) {
     { const shown = await botCheck(page); if (shown) { const e = new NeedsUser("bot_check", p.url); e.detail = shown; throw e; } }
     // An employer that wants the person to sign in first: never signed into, never given a password (the person does that).
     await stopAtWall(page, p.url);
-    const hasForm = async () => !!(await page.$("form input, form select, form textarea")) && !!(await page.$('form button[type="submit"]'));
+    // The form's own Submit control, as a person would press it: the visible one. A <button> with no type submits its form
+    // (Breezy); Lever's visible "Submit application" is type="button" beside a hidden type="submit" its script presses
+    // after the hCaptcha token. Marked data-upmore-submit, so the check below and the click use that same control.
+    const markSubmit = () => page.evaluate(() => {
+      const vis = (e) => !!(e.offsetWidth || e.offsetHeight) && getComputedStyle(e).visibility !== "hidden";
+      for (const e of document.querySelectorAll("[data-upmore-submit]")) e.removeAttribute("data-upmore-submit");
+      const forms = [...document.querySelectorAll("form")].filter((f) => f.querySelector("input, select, textarea"));
+      const word = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$|^\s*(bewerbung )?(absenden|senden)\s*$|^\s*(envoyer|enviar|verzenden|skicka)( .{0,20})?$/i;
+      for (const f of forms) {
+        const typed = [...f.querySelectorAll("button[type=submit], button:not([type]), input[type=submit]")].filter(vis);
+        const worded = [...f.querySelectorAll("button, [role=button], input[type=button]")].filter((b) => vis(b) && word.test(b.innerText || b.value || ""));
+        const pick = worded.length === 1 ? worded[0] : typed.length === 1 ? typed[0] : worded.find((b) => typed.includes(b)) || null;
+        if (pick) { pick.setAttribute("data-upmore-submit", "1"); return true; }
+      }
+      return false;
+    });
+    const hasForm = async () => !!(await page.$("form input, form select, form textarea")) && (await markSubmit());
     // A board whose form lives at its own apply address one GET away (Lever /apply, Ashby /application, ...): loaded once,
     // through the same host rules, and checked like the first load.
     if (!(await page.waitForSelector("form input, form textarea", { timeout: 5000 }).catch(() => null))) {
@@ -299,7 +342,8 @@ async function attempt(browser, p, opts, timing) {
     onAllowedHost();
     { const shown = await botCheck(page); if (shown) { const e = new NeedsUser("bot_check", p.url); e.detail = shown; throw e; } }
     await stopAtWall(page, p.url);
-    const action = await page.$eval('form button[type="submit"]', (b) => {
+    if (!(await markSubmit())) throw new NeedsUser("no_submit_control", p.url);
+    const action = await page.$eval("[data-upmore-submit]", (b) => {
       const a = b.getAttribute("formaction") ?? (b.form && b.form.getAttribute("action"));
       return new URL(a || location.href, document.baseURI).href;
     });
@@ -313,7 +357,7 @@ async function attempt(browser, p, opts, timing) {
     const t2 = Date.now();
     timing.submitClicked = true;
     try {
-      await Promise.all([page.waitForLoadState("domcontentloaded"), page.click('button[type="submit"]')]);
+      await Promise.all([page.waitForLoadState("domcontentloaded"), page.click("[data-upmore-submit]")]);
       await page.waitForSelector("#confirmation, h1", { timeout: opts.stepTimeoutMs || 15000 });
       if (blocked.length) return { status: "unknown_outcome", reason: `after submit: navigation to a disallowed host was refused (${blocked[0]})`, filled };
     } catch (e) {

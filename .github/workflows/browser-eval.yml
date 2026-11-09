@@ -20,7 +20,7 @@ permissions:
 jobs:
   eval:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -39,6 +39,13 @@ jobs:
           echo "EVAL_LABEL=$label" >> "$GITHUB_ENV"
           node scripts/browser-eval/run.cjs --sample scripts/browser-eval/sample.csv --label "$label" --max-per-provider "$PER_PROVIDER" | tee "$RUNNER_TEMP/eval.log"
           cat "artifacts/browser-eval/$label/summary.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Strict benchmark (the production runner; a pass only at the instant before Submit; nothing is submitted)
+        if: always()
+        env:
+          PER_PROVIDER: ${{ inputs.per_provider }}
+        run: |
+          node scripts/browser-eval/strict.cjs --sample scripts/browser-eval/sample.csv --label "${EVAL_LABEL}-strict" --max-per-provider "$PER_PROVIDER"
+          cat "artifacts/browser-eval/${EVAL_LABEL}-strict/strict-summary.md" >> "$GITHUB_STEP_SUMMARY"
       - name: Upload the report
         if: always()
         uses: actions/upload-artifact@v4
@@ -48,5 +55,7 @@ jobs:
             artifacts/browser-eval/${{ env.EVAL_LABEL }}/summary.json
             artifacts/browser-eval/${{ env.EVAL_LABEL }}/summary.md
             artifacts/browser-eval/${{ env.EVAL_LABEL }}/results.jsonl
+            artifacts/browser-eval/${{ env.EVAL_LABEL }}-strict/strict-summary.md
+            artifacts/browser-eval/${{ env.EVAL_LABEL }}-strict/strict.jsonl
           retention-days: 14
           if-no-files-found: warn

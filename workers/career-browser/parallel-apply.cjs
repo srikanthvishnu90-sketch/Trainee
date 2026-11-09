@@ -183,8 +183,12 @@ async function attempt(browser, p, opts, timing) {
   // GET navigations are fetched with redirects off so the Location of each hop is checked BEFORE the browser requests it
   // (a browser-followed redirect would already have reached the other host); the 3xx is handed back and the next hop comes
   // through this same handler.
+  // A benchmark's dry run (scripts/browser-eval/strict.cjs) adds its own guard on every request and a page script that cancels
+  // any form submit; production passes neither.
+  if (opts.initScript) await ctx.addInitScript(opts.initScript);
   await ctx.route("**/*", async (route) => {
     const req = route.request();
+    if (opts.requestGate && !(await opts.requestGate(req))) return route.abort("blockedbyclient");
     // Every top-level navigation, of this page or of any tab it tries to open, is checked.
     if (req.isNavigationRequest() && !req.frame().parentFrame()) {
       const g = urlVerdict(req.url(), allow);

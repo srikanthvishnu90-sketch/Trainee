@@ -22041,6 +22041,21 @@ const CareerProfile = (() => {
         if (head.skip) { section = null; if (!unread.includes(head.label)) unread.push(head.label); } else section = head.kind;
         continue;
       }
+      // R10 (fix 3): a labelled line ("Skills: Python, SQL", "Certifications: ...", "Interests: Golf"), under its own heading,
+      // under a combined one or under none, is its own kind: never an experience entry, never a skill named "Skills: Python".
+      const labelled = line.match(/^(?:[-•*]\s*)?(skills?|technical(?: skills)?|tools|technologies|certifications?|certificates?|licen[cs]es?|interests?|hobbies)\s*:\s*(.+)$/i);
+      if (labelled) {
+        flush();
+        lastWasMore = false;
+        const kind = /^(cert|licen)/i.test(labelled[1]) ? "certification" : /^(interest|hobb)/i.test(labelled[1]) ? "interest" : "skill";
+        for (const name of labelled[2].split(/[,;•|·]/).map((x) => x.trim()).filter(Boolean)) {
+          if (kind === "skill") drafts.push({ kind: "skill", name, title: name, text: `Skill: ${name}`, skills: [name], evidence: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
+          // Interests have no profile kind of their own: "other", marked, so they are never counted as experience or skills.
+          else if (kind === "interest") drafts.push({ kind: "other", section: "interests", name, title: name, text: `Interest: ${name}`, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
+          else drafts.push({ kind: "certification", title: name, text: name, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
+        }
+        continue;
+      }
       if (!section) continue; // header/contact block (or a section that holds no entries) is not a fact
       if (section === "skill") {
         for (const name of line.split(/[,;•|·]/).map((x) => x.trim()).filter(Boolean)) {
@@ -39079,7 +39094,7 @@ const CareerRouter = (() => {
         reply: compose({ headline: "That is the resume already on your record — nothing changed.", facts: [`Its ${n} entr${n === 1 ? "y is" : "ies are"} confirmed as you gave them, so I added nothing and need no new yes.`, ...(Array.isArray(res.replaced_drafts) && res.replaced_drafts.length ? ["The other resume you pasted, which you had not confirmed, is set aside: nothing from it is used."] : [])], nextStep: "To change an entry, tell me what it should say, or paste the updated resume." }) };
     }
     const byKind = {};
-    for (const f of profile.facts || []) if (f && f.source === "resume-ingest" && f.needs_confirmation) byKind[f.kind] = (byKind[f.kind] || 0) + 1;
+    for (const f of profile.facts || []) if (f && f.source === "resume-ingest" && f.needs_confirmation) { const k = f.kind === "other" && /^Interest: /.test(f.text || "") ? "interest" : f.kind; byKind[k] = (byKind[k] || 0) + 1; }
     const total = Object.values(byKind).reduce((a, b) => a + b, 0);
     const counts = Object.entries(byKind).map(([k, n]) => `${n} ${k}`).join(", ");
     const mir = threadMirrorForWrite(ctx);

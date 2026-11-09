@@ -39,6 +39,7 @@ const OLD = [["reddit", "reddit", "Ads Conversion Modeling, Machine Learning Eng
   .map(([board, company, title, location], i) => ({ key: `greenhouse:${board}:${i + 1}`, board, company, title, location, url: `https://boards.greenhouse.io/${board}/jobs/${i + 1}` }));
 const FIRST = "Built a reporting dashboard in React and Python used by 200 internal users";
 const SHORTER = "Built a React and Python reporting dashboard for 200 internal users";
+const WARMER = "For 200 internal users, built a React and Python reporting dashboard";
 const INTERNAL = /\b(parse check|runner|record|batch|PASS)\b/i;
 const OLD_ROLE = /machine learning|pinwheel|quanta|orbit|ferro|applied scientist|picked first/i;
 
@@ -130,7 +131,8 @@ Deno.test({
         if (u.host === "api.anthropic.com") return anthropicWire(req, (chat) => {
           modelCalls++;
           const sys = String(chat.messages?.find((m: { role: string }) => m.role === "system")?.content ?? "");
-          const content = /Rewrite one resume bullet/.test(sys) ? SHORTER : "{}";
+          const asked = String(chat.messages?.find((m: { role: string }) => m.role === "user")?.content ?? "");
+          const content = !/Rewrite one resume bullet/.test(sys) ? "{}" : /warmer/i.test(asked) && asked.includes(SHORTER) ? WARMER : SHORTER;
           return new Response(JSON.stringify({ id: "chatcmpl-test", model: chat.model, choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content } }], usage: { prompt_tokens: 10, completion_tokens: 1 } }), { headers: { "content-type": "application/json" } });
         });
         if (u.origin !== new URL(SUPABASE_URL).origin) { outbound.push(`${req.method} ${u.host}`); throw new TypeError(`network refused: ${u.host}`); }
@@ -263,6 +265,13 @@ Deno.test({
         eq((c6.reply.match(/\?/g) ?? []).length, 1, `C6: one question: ${c6.reply}`);
         assertNode.ok(/Which role/.test(c6.reply) && /exact application answers/.test(c6.reply) && /contact details/.test(c6.reply), `C6: a short stop at the real decision: ${c6.reply}`);
         assertNode.ok(!/batch|apply list/i.test(c6.reply), `C6: no batch plan: ${c6.reply}`);
+        await nothingApplied(A);
+        // WO-H's finding: a bare follow-up right after the resume is about that resume (the current artifact), never a fresh
+        // tailor. The model's rewording is audited per bullet; only what passes is shown, nothing is applied or sent.
+        const warm = await a.say("Make it warmer.");
+        eq(warm.intent, "career_resume_task", `"Make it warmer." stays on the resume just shown: ${warm.intent}: ${warm.reply}`);
+        assertNode.ok(!/tailored for|Picked first/i.test(warm.reply) && /data analyst internships/.test(warm.reply), `the current resume, by its target: ${warm.reply}`);
+        assertNode.ok(warm.reply.includes(`New: ${WARMER}`) && /^New: /m.test(warm.reply) && /^Now: /m.test(warm.reply) && (warm.body.artifacts ?? []).length === 0, `before and after shown, nothing regenerated: ${warm.reply}`);
         await nothingApplied(A);
       });
 

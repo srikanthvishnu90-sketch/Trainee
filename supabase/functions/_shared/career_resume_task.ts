@@ -29,7 +29,7 @@ export interface ResumeTask {
   target: Target; limits: string[]; rejected: string | null; said: string[]; asked: string[];
   file: { sha256: string; filename: string; pages: number; label: string } | null; pending: "send_choice" | null; at: string;
   // B.6 continuation 1: the order changes of the last build, a bullet rewrite shown and not yet approved, and the approved ones.
-  moved?: string[]; proposed?: { before: string; after: string } | null; swaps?: { before: string; after: string }[];
+  moved?: string[]; proposed?: { before: string; after: string }[] | null; swaps?: { before: string; after: string }[];
 }
 type Doc = { kind: "document"; format: string; filename: string; mime: string; base64: string; sha256: string };
 export type ResumeTurn = { reply: string; intent: string; resultStatus: string; documents: Doc[]; link: string | null; task: ResumeTask };
@@ -72,6 +72,7 @@ const MAKE = /\b(turn|make|tailor|create|generate|build|format|redo|regenerate|r
 const DOC = /\b(pdf|docx|word file|one[- ]page|file|document|draft|version)\b/;
 const CORRECTION = /\b(wrong (role|job|target|position|resume|one|version)|fix the (target|role)|not what i asked|that'?s not (the|my) (role|target))\b/;
 const LINK = /\b(download link|a link|link (to|for)|(isn'?t|won'?t|can'?t|doesn'?t|not) (open|opening|load|loading))\b/;
+const RESTYLE = /^\s*(?:can you |could you |please |ok(?:ay)?,? )?(?:make|keep) (?:it|this|that)(?: a (?:bit|little|touch))?(?: more| less)? (?:warmer|friendlier|friendly|shorter|tighter|punchier|formal|casual|concise|wordy|clearer|stronger|professional|crisper|confident|simpler|direct)\b[^?]*[.!]?\s*$/;
 const AMBIGUOUS = /^\s*(?:please\s+|ok(?:ay)?,?\s+)?send (?:this|that|it)(?: one)?(?: now)?\s*[.!]?\s*$/;
 // A posting named or pasted is the posting tailor's (142 career_tailor), not a general version.
 function postingNamed(t: string, companies: string[]): boolean {
@@ -79,8 +80,8 @@ function postingNamed(t: string, companies: string[]): boolean {
   if (t.length > 600 && /\b(requirements|qualifications|responsibilities)\b/.test(t)) return true;
   return companies.some((c) => c.length > 2 && new RegExp(`\\b${c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(t));
 }
-export type ResumeAsk = "make" | "correct" | "link" | "ask_send" | "send_pdf" | "explain" | "edit" | "approve_edit" | "why_contact" | "apply_which" | null;
-export function resumeAskOf(message: string, task: ResumeTask | null, view: { companies: string[]; jobs: number; posting: boolean; lastFile?: boolean }): ResumeAsk {
+export type ResumeAsk = "make" | "correct" | "link" | "ask_send" | "send_pdf" | "explain" | "edit" | "restyle" | "approve_edit" | "why_contact" | "apply_which" | null;
+export function resumeAskOf(message: string, task: ResumeTask | null, view: { companies: string[]; jobs: number; posting: boolean; lastFile?: boolean; resumeShown?: boolean }): ResumeAsk {
   // A pasted resume or posting is material, not an ask about the resume task (its own words say "for", "file", "update").
   if (message.length > 600 || message.split("\n").filter((l) => l.trim()).length > 4 || /^\s*(here'?s|here is|this is|my) (my |the )?(resume|cv)\b/i.test(message)) return null;
   const t = lc(message), rest = t.replace(/\bnot (?:an? |the )?[a-z][a-z0-9 &/+.-]{2,80}?(?=[,.;!?]|$| please| since| and )/g, " ");
@@ -91,6 +92,8 @@ export function resumeAskOf(message: string, task: ResumeTask | null, view: { co
   if (AMBIGUOUS.test(t) && task?.file) return view.jobs > 0 ? "ask_send" : "send_pdf";
   if (task?.proposed && /\b(fine|good|ok(ay)?|yes|use (it|that)|approve)\b/.test(t) && !/\b(no|not|don'?t)\b/.test(t)) return "approve_edit";
   if (task?.file && /\bbullet\b/.test(t) && /\b(less wordy|shorter|shorten|tighten|trim|concise|simplify)\b/.test(t)) return "edit";
+  // A bare follow-up ("Make it warmer.") right after the resume was shown is about that resume, never a fresh tailor.
+  if (task?.file && view.resumeShown && RESTYLE.test(t)) return "restyle";
   if (task && /\bwhy\b/.test(t) && /\b(contact|placeholders?|fill in|to add)\b/.test(t)) return "why_contact";
   if (task?.file && /\bwhat (did|have) you change(d)?\b|\bwhat changed\b/.test(t)) return "explain";
   if (task?.file && /^\s*(now |ok(ay)?,? |then )?apply (with|using) (it|this|that)\s*[.!]?\s*$/.test(t)) return "apply_which";
@@ -206,14 +209,16 @@ const hex = async (u: Uint8Array) => [...new Uint8Array(await crypto.subtle.dige
 
 // deno-lint-ignore no-explicit-any
 export async function resumeTaskTurn(o: { message: string; ctx: any; userId: string; now: number;
-  deps: { resumes: ResumeStore; uploaded: () => Promise<boolean>; rewrite?: (bullet: string, ask: string) => Promise<string | null> } }): Promise<ResumeTurn | null> {
+  deps: { resumes: ResumeStore; uploaded: () => Promise<boolean>; rewrite?: (bullet: string, ask: string) => Promise<string | null>; lastIntent?: () => Promise<string | null> } }): Promise<ResumeTurn | null> {
   const profile = o.ctx?.profile;
   if (!profile || typeof profile !== "object" || !(profile.facts || []).some((f: Fact) => f && SECTION[f.kind])) return null;
   const prior: ResumeTask | null = profile._resumeTask && typeof profile._resumeTask === "object" ? profile._resumeTask : null;
   const shortlist = Array.isArray(o.ctx?.discovery?.lastShortlist) ? o.ctx.discovery.lastShortlist : [];
   const companies = shortlist.map((r: any) => lc(r?.company)).filter(Boolean);
   const routerLast = [...(Array.isArray(profile._careerRouterArtifacts) ? profile._careerRouterArtifacts : [])].reverse().find((a: any) => a?.pdf?.base64);
-  const ask = resumeAskOf(o.message, prior, { companies, jobs: shortlist.length, posting: !!o.ctx?.posting, lastFile: !!routerLast });
+  const lastIntent = o.deps.lastIntent ? await o.deps.lastIntent().catch(() => null) : null;
+  const ask = resumeAskOf(o.message, prior, { companies, jobs: shortlist.length, posting: !!o.ctx?.posting, lastFile: !!routerLast,
+    resumeShown: lastIntent === RESUME_TASK_INTENT || lastIntent === RESUME_CLARIFY_INTENT });
   if (!ask) { if (prior?.pending) prior.pending = null; return null; }
   const t = lc(o.message);
   const named = targetOf(o.message);
@@ -221,13 +226,13 @@ export async function resumeTaskTurn(o: { message: string; ctx: any; userId: str
   const target = named ?? prior!.target;
   const task: ResumeTask = { target, limits: [...new Set([...(prior?.limits ?? []), ...limitsOf(o.message)])], rejected: rejectedOf(o.message) ?? prior?.rejected ?? null,
     said: prior && prior.target.label === target.label ? [...prior.said] : [], asked: [...(prior?.asked ?? [])], file: prior?.file ?? null, pending: null, at: new Date(o.now).toISOString(),
-    moved: prior?.moved ?? [], proposed: ask === "approve_edit" ? null : prior?.proposed ?? null, swaps: [...(prior?.swaps ?? []), ...(ask === "approve_edit" && prior?.proposed ? [prior.proposed] : [])] };
+    moved: prior?.moved ?? [], proposed: ask === "approve_edit" ? null : prior?.proposed ?? null, swaps: [...(prior?.swaps ?? []), ...(ask === "approve_edit" && prior?.proposed ? prior.proposed : [])] };
   const say: string[] = [];
   const noGpa = task.limits.includes("no_gpa");
   const uploaded = await o.deps.uploaded().catch(() => false);
   const reply = (text: string, intent = RESUME_TASK_INTENT, status = "awaiting_user"): ResumeTurn => { profile._resumeTask = task; return { reply: text, intent, resultStatus: status, documents: [], link: null, task }; };
   // B.6 continuation 1, the turns that answer from the task without a new file.
-  if (ask === "why_contact" || ask === "apply_which" || ask === "explain" || ask === "edit") {
+  if (ask === "why_contact" || ask === "apply_which" || ask === "explain" || ask === "edit" || ask === "restyle") {
     const now = buildResume(profile, target, uploaded, { noGpa, swaps: task.swaps });
     const open = [...(now.gpaConflict ? ["your correct GPA"] : []), ...(now.contactMissing ? ["your contact details"] : [])];
     if (ask === "why_contact") return reply(now.contactMissing
@@ -239,6 +244,19 @@ export async function resumeTaskTurn(o: { message: string; ctx: any; userId: str
       return reply([moves, `I did not add a new job, tool, result or credential.${(task.swaps ?? []).length ? ` I used the shorter wording you approved for ${task.swaps!.length === 1 ? "one bullet" : `${task.swaps!.length} bullets`}.` : ""}`,
         ...(noGpa ? ["GPA stays off."] : []), ...(now.contactMissing ? ["Contact details are still placeholders."] : [])].join(" "), RESUME_TASK_INTENT, "completed");
     }
+    if (ask === "restyle") {
+      // Every bullet the model rewrites in the asked tone, each audited against its own fact; only those that pass are shown.
+      const out: { before: string; after: string }[] = [];
+      for (const b of now.facts.slice(0, 8)) {
+        const a = (await (o.deps.rewrite?.(b.text, o.message) ?? Promise.resolve(null)).catch(() => null) ?? "").replace(/^[-•\s"]+|["\s]+$/g, "").replace(/\s+/g, " ");
+        if (a && a !== b.text && auditRewrite({ original: b.text, proposed: a, fact: b.fact, profile }).ok) out.push({ before: b.text, after: a });
+      }
+      if (!out.length) return reply(`I couldn't change the tone of your resume for ${target.label} without changing what it says, so it stays as it is.`, RESUME_TASK_INTENT, "completed");
+      task.proposed = out;
+      return reply([`For your ${target.label} resume, ${out.length === 1 ? "one bullet" : `${out.length} bullets`} would change:`,
+        ...out.slice(0, 2).flatMap((x) => [`New: ${x.after}`, `Now: ${x.before}`]), ...(out.length > 2 ? [`and ${out.length - 2} more in the same way.`] : []),
+        "Nothing else changes. Say if it's fine and I'll put it in the PDF."].join("\n"));
+    }
     const ord = /\b(second|2nd)\b/.test(t) ? 1 : /\b(third|3rd)\b/.test(t) ? 2 : /\blast\b/.test(t) ? now.facts.length - 1 : 0;
     const pick = now.facts[ord];
     if (!pick) return reply("There's no bullet like that on this draft.");
@@ -246,7 +264,7 @@ export async function resumeTaskTurn(o: { message: string; ctx: any; userId: str
     const clean = after ? after.replace(/^[-•\s"]+|["\s]+$/g, "").replace(/\s+/g, " ") : "";
     const audit = clean && clean !== pick.text ? auditRewrite({ original: pick.text, proposed: clean, fact: pick.fact, profile }) : { ok: false, reasons: [] };
     if (!audit.ok) return reply(`I couldn't shorten it without changing what it says, so it stays as written: "${pick.text}".`, RESUME_TASK_INTENT, "completed");
-    task.proposed = { before: pick.text, after: clean };
+    task.proposed = [{ before: pick.text, after: clean }];
     const nums = (clean.match(/\d[\d,.]*\+?%?/g) ?? []).filter((n) => pick.text.includes(n.replace(/\+$/, "")));
     return reply([`Proposed replacement: ${clean}`, `Now: ${pick.text}`, ...nums.slice(0, 1).map((n) => `This keeps the ${n} already in your intake. If ${n} is not accurate, tell me the supported number before we use it.`), "Say if it's fine and I'll put it in the PDF."].join("\n"));
   }
@@ -290,7 +308,7 @@ export async function resumeTaskTurn(o: { message: string; ctx: any; userId: str
   const pages = out.fit.pages === 1 ? "one-page" : `${out.fit.pages}-page`;
   if (ask === "approve_edit") {
     say.push(`Here is the revised ${pages} PDF.`);
-    say.push([noGpa || built.gpaConflict ? "GPA is omitted" : null, "the bullet is shorter", built.contactMissing ? "the contact placeholders still need filling" : null].filter(Boolean).join(", ").replace(/, ([^,]*)$/, ", and $1").replace(/^./, (c) => c.toUpperCase()) + ".");
+    say.push([noGpa || built.gpaConflict ? "GPA is omitted" : null, (prior?.proposed?.length ?? 0) > 1 ? `${prior!.proposed!.length} bullets are reworded as you asked` : "the bullet is changed as you asked", built.contactMissing ? "the contact placeholders still need filling" : null].filter(Boolean).join(", ").replace(/, ([^,]*)$/, ", and $1").replace(/^./, (c) => c.toUpperCase()) + ".");
     if (built.contactMissing || built.gpaConflict || built.unconfirmed) say.push("This is a review draft, not ready for an employer.");
   } else if (ask === "make" && movedBefore && built.moved.length && !named) {
     say.push(`Here is the ${pages} PDF for ${target.label}: I put ${built.moved[0]}${task.limits.includes("one_page") ? ", kept it to one page" : ""} and left the experience itself unchanged.`);

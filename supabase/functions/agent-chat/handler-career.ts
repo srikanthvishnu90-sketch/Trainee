@@ -671,6 +671,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
                 return text || null;
               } finally { await ledger.record(m); }
             } : undefined,
+            // The thread's last reply, so a bare "Make it warmer." is about the resume only right after it was shown.
+            lastIntent: async () => { const r = await admin.from("agent_messages").select("meta").eq("thread_id", tid).eq("role", "assistant").order("id", { ascending: false }).limit(1); return r.error ? null : (r.data?.[0]?.meta?.intent ?? null); },
             uploaded: async () => { const r = await admin.from("career_resume_uploads").select("id").eq("user_id", user.id).limit(1); return !r.error && (r.data ?? []).length > 0; } } })
           .catch((e) => { console.error("resume task turn:", e?.message ?? e); return null; })
         : null;

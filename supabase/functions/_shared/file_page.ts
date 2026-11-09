@@ -33,7 +33,7 @@ export interface Row {
 // freshnessStamp), null when none is known (the page then says the check time is unknown, as a value).
 // RELEASE 9: resumeRates, when read, is the person's own response, interview and offer rates by resume version, tailored or not,
 // layout and kind of change (career_resume_outcomes.ts, the view career_apply_outcomes_by_resume): a read-only section.
-export interface Feed { og?: Og; token: string; rows: Row[]; setHash: string | null; setSize: number; top?: string; botUrl?: string | null; total?: number; made?: string; stamp?: string | null; resumeRates?: RateRow[] | null }
+export interface Feed { signedIn?: string; og?: Og; token: string; rows: Row[]; setHash: string | null; setSize: number; top?: string; botUrl?: string | null; total?: number; made?: string; stamp?: string | null; resumeRates?: RateRow[] | null }
 
 // Bidi overrides and isolates (U+202A-E, U+2066-9) in a company, title or location would reverse the text after them on the page,
 // a provenance label included; they are dropped, never rendered.
@@ -178,6 +178,7 @@ details[open] .desc{display:block;-webkit-line-clamp:unset}
 :focus-visible{outline:3px solid var(--accent);outline-offset:3px;border-radius:8px}
 ${DISABLED_CSS}
 ${FILE_CSS}
+.signedin{display:flex;flex-wrap:wrap;align-items:center;gap:0 8px;margin:0 0 12px;font-size:15px;color:var(--mute)}.signedin form{display:inline;margin:0}.signedin .lnk{font-size:15px}
 .foot{margin-top:24px;padding-top:14px;border-top:1px solid var(--line);font-size:15px;color:var(--mute)}
 @media (max-width:360px){details,.meta,.why,.note{margin-left:0}.apply{min-width:80px;padding:6px 12px}}
 `;
@@ -241,9 +242,15 @@ export function renderFeed(f: Feed): string {
   const top = f.top ? `<p class="top-note" role="alert">${esc(f.top)} ${refresh(f.token)}</p>` : "";
   // The File shell (file_design.ts): the wordmark and who it was made for above one card; the title, its freshness stamp, then the rows.
   const rates = f.resumeRates ? ratesHtml(f.resumeRates, esc) : "";
-  const inner = `<div id="root"><header class="fhead">${BRAND}${f.made ? `<p class="made">${esc(f.made)}</p>` : ""}</header><div class="fcard"><h1 class="ftitle">Your jobs</h1>${stampHtml(f.stamp ?? null)}${withLine}${more}${all}<main id="main">${top}${f.rows.length ? `<ul class="rows">${f.rows.map((r) => rowHtml(r, f.token)).join("")}</ul>` : EMPTY_FEED}${rates}</main></div>${signOutFoot(f.token)}</div><p id="live" class="sr" role="status" aria-live="polite"></p>`;
+  const inner = `<div id="root"><header class="fhead">${BRAND}${f.made ? `<p class="made">${esc(f.made)}</p>` : ""}</header>${f.signedIn ? signedInBar(f.signedIn, f.token) : ""}<div class="fcard"><h1 class="ftitle">Your jobs</h1>${stampHtml(f.stamp ?? null)}${withLine}${more}${all}<main id="main">${top}${f.rows.length ? `<ul class="rows">${f.rows.map((r) => rowHtml(r, f.token)).join("")}</ul>` : EMPTY_FEED}${rates}</main></div>${signOutFoot(f.token)}</div><p id="live" class="sr" role="status" aria-live="polite"></p>`;
   return layout("Your jobs - Trainee", inner, { script: FEED_SCRIPT, tg: true, og: f.og, ...(rates ? { css: RATES_CSS } : {}) });
 }
+// R10 fix 10 (spec C.23 panel 5, E.7 #58): who the page is signed in as, masked, beside Sign out. Drawn only from a verified session
+// (the caller passes the session row it checked), so a code request, a page load or a Telegram button is never "Signed in".
+export function signedInWords(r: { via: string; phone: string | null }): string {
+  return r.via === "phone" && r.phone ? `Signed in as ••• ${r.phone.replace(/\D/g, "").slice(-4)}` : "Signed in with Telegram";
+}
+export const signedInBar = (words: string, token: string) => `<div class="signedin" role="status"><span>${esc(words)}</span><span aria-hidden="true">·</span><form method="post">${hidden(token, "signout")}<button type="submit" class="lnk">Sign out</button></form></div>`;
 // Sign out of this page here, or everywhere it is open (every session of the account ends; each needs a new sign-in).
 export const signOutFoot = (token: string) => `<footer class="foot"><form method="post" style="display:inline">${hidden(token, "signout")}<button type="submit" class="lnk">Sign out</button></form> · <form method="post" style="display:inline">${hidden(token, "signout_all")}<button type="submit" class="lnk">Sign out everywhere</button></form></footer>`;
 

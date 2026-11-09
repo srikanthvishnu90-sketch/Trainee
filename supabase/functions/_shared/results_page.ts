@@ -8,7 +8,7 @@
 // each answer, the cover note, where it goes) is an expand on the card itself, and the tap on Apply approves exactly that (the
 // hash-bound approval in trainee-file/handler.ts). A card that isn't ready says why: the employer's questions are asked on
 // "A few things first" (renderThings), or the application is still being prepared. Nothing here sends on a GET.
-import { cap1, esc, hostOf, layout, webUrl, initialOf, type Row } from "./file_page.ts";
+import { cap1, esc, hostOf, layout, signedInBar, webUrl, initialOf, type Row } from "./file_page.ts";
 import { BRAND } from "./brand.ts";
 import { stampHtml, stateHtml } from "./file_design.ts";
 import { applyHelp, coverage, NOT_LISTED, specOf, stateCountsOf, stateOfDismissed, type Spec, type StateKey } from "./results_spec.ts";
@@ -29,6 +29,7 @@ export interface ResultRow extends Row {
   checked?: string | null; // "Checked Nov 1, 2026, 9:08 AM CT" from this posting's own last_seen_at, else null
 }
 export interface ResultsFeed {
+  signedIn?: string; // R10: "Signed in as ••• 0160" from the verified session, beside Sign out (file_page.ts signedInBar)
   token: string; title: string; floor: string | null; rows: ResultRow[]; total: number;
   filters: { pay: PayFilter; where: string; state?: StateKey | null }; places: string[]; top?: string; notes?: Record<string, string>;
   // The header: who and when, what was read and when, what is not confirmed, and a 2-3 line quick read.
@@ -185,7 +186,7 @@ export function renderResults(f: ResultsFeed): string {
       : open ? `<div class="pausebar"><p><b>Pause on this page</b> (button at the bottom) stops this page from approving or starting anything new. It does not stop Telegram: the buttons there still work. Applications already approved or in progress are not cancelled and may still finish.</p></div>` : "")
     + `</section>`;
   const gone = f.dismissed?.length ? `<details class="gone"><summary>Dismissed (${f.dismissed.length})</summary><ul class="cards">${f.dismissed.map((r) => `<li class="card" id="r-${esc(r.ref)}"><p class="state">${r.rid ? `<span class="rid">${esc(r.rid)}</span>` : "<span></span>"}${chipOf(stateOfDismissed(), "dismissed")}</p><div class="head">${logoOf(r)}<div class="ttl"><h3 class="title">${esc(r.job.title)}</h3><p class="co">${esc(r.job.company)}</p></div></div><p class="markhelp">Dismissed by you. Private and reversible. No application was touched. Current state: ${esc(specOf(r).label)}.</p>${markForm(r, f, "restore")}</li>`).join("")}</ul></details>` : "";
-  const inner = `<div id="root" class="results"><a class="skip" href="#main">Skip to the roles</a>${BRAND}<header class="filehead">${headTop}${renderBatchHead(f)}${topBlock}</header>${quick}${f.total === 0 ? "" : filters}${shown}${renderStateFilters(f)}${renderExceptions(f)}${renderApprove(f)}${renderPauseNote(f)}${selhelp}${actionbar}<main id="main">${top}${body}${gone}</main></div>`;
+  const inner = `<div id="root" class="results"><a class="skip" href="#main">Skip to the roles</a>${BRAND}${f.signedIn ? signedInBar(f.signedIn, f.token) : ""}<header class="filehead">${headTop}${renderBatchHead(f)}${topBlock}</header>${quick}${f.total === 0 ? "" : filters}${shown}${renderStateFilters(f)}${renderExceptions(f)}${renderApprove(f)}${renderPauseNote(f)}${selhelp}${actionbar}<main id="main">${top}${body}${gone}</main></div>`;
   return layout(`${cap1(f.title)} - Trainee`, inner, { css: CSS, head: DESIGN_FONT_LINK });
 }
 
@@ -193,7 +194,7 @@ export function renderResults(f: ResultsFeed): string {
 // One labelled input per question: the employer's own options as radios (a select when there are many), yes/no as two choices,
 // else text. Nothing is pre-filled or defaulted. A question that needs a secret has no input at all.
 export interface ThingQuestion { id: string; label: string; options: string[]; kind: "choice" | "yesno" | "text" | "long" | "secret"; value?: string; error?: string }
-export function renderThings(o: { token: string; ref: string; title: string; company: string; link: string | null; questions: ThingQuestion[]; note?: string; stamp?: string | null }): string {
+export function renderThings(o: { signedIn?: string; token: string; ref: string; title: string; company: string; link: string | null; questions: ThingQuestion[]; note?: string; stamp?: string | null }): string {
   const field = (q: ThingQuestion) => {
     const id = `q_${q.id}`, err = q.error ? `<p class="err" id="e_${esc(q.id)}" role="alert">${esc(cap1(q.error))}</p>` : "";
     const radios = (opts: string[]) => opts.map((x, i) => `<label class="opt" for="${esc(id)}_${i}"><input type="radio" id="${esc(id)}_${i}" name="${esc(id)}" value="${esc(x)}"${q.value === x ? " checked" : ""}> ${esc(x)}</label>`).join("");
@@ -206,7 +207,7 @@ export function renderThings(o: { token: string; ref: string; title: string; com
     return `<fieldset${q.error ? ` aria-describedby="e_${esc(q.id)}"` : ""}><legend>${esc(q.label)}</legend>${ctl}${err}</fieldset>`;
   };
   const askable = o.questions.some((q) => q.kind !== "secret");
-  const inner = `<div id="root" class="things">${BRAND}<header class="filehead"><p class="kicker">A few things first</p><h1>${esc(o.title)} at ${esc(o.company)}</h1>${stampHtml(o.stamp ?? null)}<p class="lede">The employer asks these. Your answers are saved as typed, nothing is guessed, and nothing is sent from this page.</p></header>`
+  const inner = `<div id="root" class="things">${BRAND}${o.signedIn ? signedInBar(o.signedIn, o.token) : ""}<header class="filehead"><p class="kicker">A few things first</p><h1>${esc(o.title)} at ${esc(o.company)}</h1>${stampHtml(o.stamp ?? null)}<p class="lede">The employer asks these. Your answers are saved as typed, nothing is guessed, and nothing is sent from this page.</p></header>`
     + `<main id="main">${o.note ? `<p class="top-note" role="status">${esc(o.note)}</p>` : ""}<form method="post">${hidden(o.token, "answer", `<input type="hidden" name="ref" value="${esc(o.ref)}">`)}${o.questions.map(field).join("")}${askable ? `<button type="submit" class="apply">Save answers</button>` : ""}</form><p><a class="back" href="?#r-${esc(o.ref)}">Back to the list</a></p></main></div>`;
   return layout("A few things first - Trainee", inner, { css: CSS, head: DESIGN_FONT_LINK });
 }

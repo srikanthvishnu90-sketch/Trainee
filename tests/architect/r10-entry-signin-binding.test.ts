@@ -90,7 +90,22 @@ Deno.test({ name: "R10 fix 10 sign-in: a valid link -> Sign in -> Check your pho
     eq(await w.q(`select user_id || ' ' || via || ' ' || phone || ' ' || list from trainee_file_sessions where id_hash = '${await sha256(sid)}' and revoked_at is null`), `${U} phone ${U_PHONE} ${U_LIST}`);
     const page = await w.req({ cookie: `tf_s=${sid}` });
     eq(page.status, 200);
-    assert((await page.text()).includes(U_CO), "signed in: the person's own list");
+    const ph = await page.text();
+    assert(ph.includes(U_CO), "signed in: the person's own list");
+    // "Signed in" only now, after real authentication, masked, beside Sign out (spec C.23 panel 5, E.7 #58)
+    assert(/<div class="signedin" role="status"><span>Signed in as ••• 0140<\/span>/.test(ph) && !ph.includes(U_PHONE), "the masked account label");
+    for (const [name, h] of [["phone entry", entry], ["code sent", sent], ["a stranger's number", other]] as const) assert(!/Signed in as|Signed in with/.test(h), `${name}: never 'Signed in' before authentication`);
+    const bar = ph.match(/<div class="signedin"[\s\S]*?<\/div>/)![0];
+    const pageTok = bar.match(/name="t" value="([^"]+)"/)![1];
+    assert(/name="action" value="signout"/.test(bar) && />Sign out</.test(bar), "Sign out in the bar");
+    // signing out makes the private page unavailable again
+    const out = await w.req({ form: { t: pageTok, action: "signout" }, cookie: `tf_s=${sid}` });
+    eq(out.status, 200);
+    assert(/Signed out/.test(await out.text()) && /tf_s=;/.test(out.headers.get("set-cookie") ?? ""));
+    assert(await w.q(`select revoked_at is not null from trainee_file_sessions where id_hash = '${await sha256(sid)}'`) === "t", "revoked in the database");
+    const after = await w.req({ cookie: `tf_s=${sid}` });
+    eq(after.status, 401);
+    assert(!(await after.text()).includes(U_CO), "the list is unavailable after signing out");
   } finally { await w.pg.stop(); }
 } });
 
@@ -168,3 +183,19 @@ Deno.test({ name: "R10 fix 10 recovery: an expired, invalid, used or bare link s
     }
   } finally { await w.pg.stop(); }
 } });
+
+Deno.test("R10 fix 10 the results list: 'Signed in as' (masked) and Sign out from the verified session; signing out makes the list unavailable", async () => {
+  const R = await import("../helpers/results_world.ts");
+  const w = R.world(); const r = await R.made(w); const s = await w.A.tok(R.U, r.listId, R.NOW);
+  const html = await (await R.get(w, s)).text();
+  const bar = html.match(/<div class="signedin" role="status">[\s\S]*?<\/div>/)?.[0] ?? "";
+  const last4 = w.A.phoneOf(R.U).slice(-4);
+  assert(bar.includes(`Signed in as ••• ${last4}`) && />Sign out</.test(bar), bar || "no signed-in bar on the results list");
+  assert(!html.includes(w.A.phoneOf(R.U)), "the number is masked");
+  const out = await R.post(w, s, { action: "signout" });
+  eq(out.status, 200);
+  assert(/Signed out/.test(await out.text()));
+  const gone = await R.get(w, s);
+  eq(gone.status, 401);
+  assert(!/class="card"/.test(await gone.text()), "no role card after signing out");
+});

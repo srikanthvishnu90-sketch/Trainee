@@ -245,6 +245,10 @@ Deno.test({ name: "R10 fixes 10-11 in Chromium: every entry, recovery and connec
         if (!/Exact permissions requested: openid email https:\/\/www\.googleapis\.com\/auth\/gmail\.readonly/.test(m.text.replace(/\s+/g, " "))) problems.push(`consent @${vp.width}: the exact scopes are not shown`);
         await s3.page.screenshot({ fullPage: true }).then((png: Uint8Array) => WRITE ? Deno.writeFile(`${OUT}/connect-consent-full-${vp.width}x${vp.height}.png`, png) : undefined);
         shots.push(`connect-consent-full-${vp.width}x${vp.height}.png`);
+        // a consent started (Continue tapped) that never came back: the page remembers it and offers Resume or Cancel
+        await s3.ctx.addCookies([{ name: "tc_p", value: "google", url: SITE, httpOnly: true, secure: true }]);
+        await s3.page.goto(`${SITE}/connect`);
+        await check(s3.page, "connect-unfinished", vp, { action: "form.go button.primary", title: /^Connecting didn.t finish$/, secret: PRIVATE });
         cw.conn.google = { state: "connected", email: ADDR };
         await s3.page.goto(`${SITE}/connect`);
         await check(s3.page, "connect-connected", vp, { action: "form.disc button", title: /^Your email is connected$/ });

@@ -17,7 +17,7 @@ import { applyAllYesEnabled } from "../_shared/apply_all_yes_flag.ts";
 import { FILE_TTL_MS, verifyFileToken, type FileClaims } from "../_shared/file_link.ts";
 import { ACCOUNT_MAX_TRIES, checkSession, CLEAR_LOGIN, CLEAR_SESSION, codeOf, LOGIN_TTL_MS, loginCookie, MAX_CODE_SENDS, MAX_CODE_TRIES, normalizePhone, PAGE_TOKEN, pageTokenOf, sameToken, SESSION_ID, sessionCookie, sha256, startSession, type PhoneAuth, type SessionCheck, type SessionStore } from "../_shared/file_session.ts";
 import { verifyInitData } from "../_shared/telegram_webapp.ts";
-import { BOOT_SCRIPT, cut, FEED_SCRIPT, LOGIN_SCRIPT, fullOf, hostOf, renderBootstrap, renderFeed, renderLinkState, renderPhoneLogin, renderPreview, renderText, signOutFoot, snippetOf, statusOf, type AppRow, type Feed, type Row } from "../_shared/file_page.ts";
+import { BOOT_SCRIPT, cut, FEED_SCRIPT, LOGIN_SCRIPT, fullOf, hostOf, renderBootstrap, renderFeed, renderLinkState, renderPhoneLogin, renderPreview, renderText, signedInWords, signOutFoot, snippetOf, statusOf, type AppRow, type Feed, type Row } from "../_shared/file_page.ts";
 import { dayOf, BRAND, esc, layout, postedLine, webUrl } from "../_shared/file_page.ts";
 import { researchOgImage } from "../_shared/research_og.ts";
 import { actOn, bodyHtml, COPY_SCRIPT, KIND_CSS, KIND_LABEL, textOf, type Effects, type FileRecord } from "../_shared/file_kinds.ts";
@@ -563,6 +563,7 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
   }
   const claims = { u: s.userId, r: s.list, k: "s", j: "0".repeat(16), i: 0, e: Date.parse(s.row.expires_at) } as FileClaims;
   const { u } = claims;
+  const who = signedInWords(s.row); // only ever from this verified session
   // A logo for a row of THIS signed-in person's list, from that employer's own domain (TRAINEE_LOGO_URL=self). Any other domain: 404.
   if (req.method === "GET" && url.searchParams.has("logo")) return await logoOf(url.searchParams.get("logo") ?? "", claims, d);
   if (d.files) {
@@ -575,7 +576,7 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
   if (d.store.recallListMeta) {
     try { meta = await d.store.recallListMeta(u, claims.r); } catch { return state("Couldn't open this just now", ["Nothing was opened and nothing was sent. Try again in a minute."], 503); }
   }
-  if (meta) return handleResults({ meta, d, claims, token, action, fields, url, req, html, text, state });
+  if (meta) return handleResults({ meta, d, claims, token, action, fields, url, req, html, text, state, who });
   const notes: Record<string, string> = {};
   let top: string | undefined;
 
@@ -624,7 +625,7 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
   const feed = await loadFeed(claims, token, d, notes, top);
   if (!feed) return state("This list is gone", ["It is no longer available. " + NEW_LINK], 404);
   if (req.method === "GET" && fields.get("format") === "text") return text(renderText(feed));
-  return html(renderFeed(feed));
+  return html(renderFeed({ ...feed, signedIn: who }));
 }
 
 // ---------------------------------------------------------------- the other kinds: one shell, the kind's body, the kind's actions
@@ -705,7 +706,7 @@ const kindOf = (q: OpenQuestion): ThingQuestion["kind"] => {
 };
 const qsFor = (all: OpenQuestion[] | null, r: Row) => (all ?? []).filter((q) => q.job_ids.includes(r.job.job_id));
 
-async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaims; token: string; action: string; fields: URLSearchParams; url: URL; req: Request;
+async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaims; token: string; action: string; fields: URLSearchParams; url: URL; req: Request; who?: string;
   html: (b: string, s?: number, e?: Record<string, string>) => Promise<Response>; text: (b: string, s?: number) => Promise<Response>; state: (t: string, p: string[], s: number) => Promise<Response> }): Promise<Response> {
   const { d, claims, token, action, fields } = o, u = claims.u;
   let meta = o.meta;
@@ -722,7 +723,7 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
   };
   const readQs = async () => d.questions ? await d.questions.open(u, 500).catch(() => null) : null;
   const thingsPage = async (row: Row, qs: OpenQuestion[], o2: { errs?: Record<string, string>; vals?: Record<string, string>; note?: string } = {}) =>
-    o.html(renderThings({ token, ref: row.ref, title: row.job.title, company: row.job.company, link: webUrl(row.job.url), stamp: await stampOf([row]), note: o2.note,
+    o.html(renderThings({ signedIn: o.who, token, ref: row.ref, title: row.job.title, company: row.job.company, link: webUrl(row.job.url), stamp: await stampOf([row]), note: o2.note,
       questions: qs.map((q) => ({ id: q.id, label: q.label, options: q.options, kind: kindOf(q), value: o2.vals?.[q.id], error: o2.errs?.[q.id] })) }));
   // One row, judged now against the page as it is (the same screen the list ran): the row to approve, the questions it still needs
   // answered, or why nothing goes for it. An unprepared row with no questions is queued to be prepared (nothing is sent by that).
@@ -941,7 +942,7 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
     fl ? `${nMeets} of ${keep.length} list ${fl} or more${nUnlisted ? `; ${nUnlisted} ${nUnlisted === 1 ? "doesn't" : "don't"} list pay` : ""}${nOther ? `; ${nOther} can't be compared` : ""}${nBelow ? `; ${nBelow} now list less` : ""}.` : `${keep.length} ${keep.length === 1 ? "role" : "roles"}, sorted by fit.`,
     `Next: tap Apply on a role. A ready one is sent exactly as its What will be sent shows; one that isn't ready asks for what it needs first. ${coverage(all) === NOTHING_SENT ? "Nothing is sent until you tap Apply." : "Each new send needs your tap on Apply."}`,
   ].filter(Boolean);
-  return o.html(renderResults({ token, title, floor: fl, rows, coverRows: all, countRows: keep, total: all.length, filters, places, top, notes,
+  return o.html(renderResults({ signedIn: o.who, token, title, floor: fl, rows, coverRows: all, countRows: keep, total: all.length, filters, places, top, notes,
     madeFor: `Made for ${meta.name ?? "you"} · ${day}`, stamp: await stampOf(rows), caveat, quick,
     paused: !!meta.paused, updated, dismissed: gone,
     all: applyAllYesEnabled(d.env) && !meta.paused && readySet(keep, new Set()).length >= 2 ? { hash: await setHashOf(readySet(keep, new Set())), size: readySet(keep, new Set()).length, filtered: filters.pay !== "any" || !!filters.where || !!filters.state } : null }));

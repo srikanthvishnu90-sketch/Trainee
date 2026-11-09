@@ -162,6 +162,14 @@ export function renderDone(m: DoneModel): string {
   return page("That didn't work", `${NOT_FINISHED}<p class="line">${why} ${m.connectUrl ? "Retry here, or ask" : "Ask"} Trainee for a new link in the chat.</p>${retry}${b}`, { script: CONNECT_SCRIPT, tg: true });
 }
 
+// R10 fix 11: a consent that was started (Continue was tapped) and never came back here: nothing was connected; resume it, or cancel.
+export function renderUnfinished(m: { token: string; provider: ProviderId; botUrl: string | null }): string {
+  const n = NAMES[m.provider];
+  const resume = `<form method="post" class="go">${hidden(m.token, "start", m.provider)}<button type="submit" class="primary">Resume connecting ${n.mail}</button></form>`;
+  const cancel = `<form method="post">${hidden(m.token, "cancel", m.provider)}<button type="submit" class="secondary">Cancel</button></form>`;
+  return page("Connecting didn't finish", `${NOT_FINISHED}<p class="line">You started connecting ${n.mail} on ${n.brand}'s page, but it didn't come back here, so nothing was connected.</p><p class="line">Resume to choose the account on ${n.brand}'s page again, or cancel.</p><div class="actions">${resume}${cancel}${back(m.botUrl, "notnow")}</div>`, { script: CONNECT_SCRIPT, tg: true });
+}
+
 // A link that cannot be used or a step that cannot be done: says why, shows nothing about any account.
 export function renderState(title: string, paras: string[], botUrl: string | null): string {
   // R10 fix 10: the way back is always there, right under the heading (a phone's first screen): Back to Telegram, else the words.

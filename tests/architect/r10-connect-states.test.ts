@@ -151,3 +151,35 @@ Deno.test("R10 fix 11 opening a link without sign-in never shows an address or a
   const bare = await handleConnect(new Request(BASE, { headers: { "user-agent": BROWSER } }), { ...w.d, env: { get: (k: string) => (k === "TRAINEE_BOT_URL" ? undefined : ENV[k]) } });
   assert(/<p class="recovery">Ask Trainee in your chat for a new link to the same task\.<\/p>/.test(await bare.text()));
 });
+
+Deno.test("R10 fix 11 a consent started and never finished: coming back says 'Connecting didn't finish' with Resume and Cancel; Resume starts it again, Cancel clears it", async () => {
+  const w = world();
+  const first = await get(w.d, `${BASE}?t=${encodeURIComponent((await link())!)}`);
+  const session = (first.headers.get("set-cookie") ?? "").split(";")[0];
+  const consent = await (await get(w.d, BASE, { cookie: session })).text();
+  // Continue with Google: off to Google, and the page remembers the consent was started
+  const go = await submit(w.d, consent, />Continue with Google</);
+  eq(go.status, 303);
+  const pending = (go.headers.get("set-cookie") ?? "").split(";")[0];
+  assert(/^tc_p=google$/.test(pending) && /HttpOnly/.test(go.headers.get("set-cookie") ?? ""), "the started consent is remembered in an HttpOnly cookie");
+  // the person comes back without finishing (closed Google's page, the redirect never landed)
+  const back = await (await get(w.d, BASE, { cookie: `${session}; ${pending}` })).text();
+  const t = plain(back);
+  assert(/<h1>Connecting didn't finish<\/h1>/.test(back.replace(/&#39;/g, "'")), "the named state");
+  assert(/Connection not finished No access saved\./.test(t) && /You started connecting Gmail on Google's page, but it didn't come back here, so nothing was connected\./.test(t));
+  assert(/>Resume connecting Gmail</.test(back) && />Cancel</.test(back) && /Back to Telegram/.test(back), "resume, cancel, and the way back");
+  assert(!/Connected as/.test(t));
+  // Resume: the same consent again
+  eq((await submit(w.d, back, />Resume connecting Gmail</)).status, 303);
+  eq(w.log.started, [`google:${U}`, `google:${U}`]);
+  // Cancel: nothing connected, the reminder cleared, the page is the plain consent again
+  const cancel = await submit(w.d, back, />Cancel</);
+  eq(cancel.status, 200);
+  assert(/You cancelled connecting Gmail\. No access was saved\./.test(plain(await cancel.text())));
+  assert(/^tc_p=;/.test(cancel.headers.get("set-cookie") ?? "") && /Max-Age=0/.test(cancel.headers.get("set-cookie") ?? ""), "the reminder is cleared");
+  assert(/<h1>Connect your email<\/h1>/.test(await (await get(w.d, BASE, { cookie: session })).text()));
+  // finished after all (the callback stored the grant): connected wins over the reminder
+  w.connect(U, "google", ADDR);
+  const done = await (await get(w.d, BASE, { cookie: `${session}; ${pending}` })).text();
+  assert(/Your email is connected/.test(done) && !/didn't finish/.test(done.replace(/&#39;/g, "'")));
+});

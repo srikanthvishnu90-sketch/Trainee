@@ -271,6 +271,7 @@
     "tests/architect/posted-line-date-only.test.ts": 0.1,
     "tests/architect/posting-place-negated-remote.test.ts": 0.1,
     "tests/architect/prepare-candidates-missing-account-row.test.ts": 8,
+    "tests/architect/research-free-brief.test.ts": 0.1,
     "tests/architect/research-free-sources.test.ts": 0.1,
     "tests/architect/research-review-fixes-589.test.ts": 0.1,
     "tests/architect/resume-cloud-copy-recovery.test.ts": 10,

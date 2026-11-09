@@ -4,6 +4,10 @@
 // (timeout, network) is "unknown": never called live, never hidden as dead. Wrong is worse than empty: a dead link is never
 // shown.
 export type LinkState = "live" | "dead" | "unknown";
+// Release item 8 (spec E.21): CAREER_SEARCH_OPEN_CHECK=always re-checks every search's postings on their boards, not only a
+// search that asked for open or verified roles. Any other value, or unset: only when asked (the shipped behaviour).
+export const SEARCH_OPEN_CHECK_ENV = "CAREER_SEARCH_OPEN_CHECK";
+export const searchOpenCheckAlways = (env: { get(k: string): string | undefined }) => (env.get(SEARCH_OPEN_CHECK_ENV) ?? "").trim().toLowerCase() === "always";
 export type LinkCheck = (job: { job_id?: string; url?: string }) => Promise<LinkState>;
 
 export function apiUrlFor(jobId: string): string | null {

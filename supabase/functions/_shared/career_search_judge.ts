@@ -614,7 +614,8 @@ export async function searchJudgeTurn(o: {
     return !f ? 0 : f.excluded ? -1 : f.score == null ? 0 : f.score >= 75 ? 3 : f.score >= 55 ? 2 : 1;
   };
   rows = rankBySubmit(rows, tierOf, (r) => r.h.job_id, caps);
-  const listed = rows.slice(0, show);
+  // Release item 8 loop: never more rows than the person asked for ("Find 2" listed 3).
+  const listed = rows.slice(0, o.want ? Math.min(show, o.want) : show);
   const more = rows.length - listed.length;
   const lines = [freshness];
   let summary = "";

@@ -47,7 +47,7 @@ import { spendCap } from "../_shared/career_spend_cap.ts";
 import { enterTurnGate, type TurnGate } from "../_shared/career_turn_gate.ts";
 import { CONFLICT_CODES, CONFLICT_REPLY, countSend, newTurnEffects, refusedSaveReply, trackTurnEffects } from "../_shared/career_save_replies.ts";
 import { poolNeeded } from "./career_pool_need.ts";
-import { linkChecker } from "../_shared/link_check.ts";
+import { linkChecker, searchOpenCheckAlways } from "../_shared/link_check.ts";
 import { knowledgeOn } from "../_shared/agent/knowledge/index.ts";
 import { fileKindPublisher } from "../_shared/agent/research/file_publisher.ts";
 import { modelDerive } from "../_shared/agent/research/derive.ts";
@@ -1481,8 +1481,11 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
               // R10 WO-C (fix 6): each role's application page is re-checked before it is shown (Greenhouse, Lever, Ashby and
               // SmartRecruiters public boards by id; any other link by fetching it). The checked time is said in the person's zone.
               // Only when the person asked for open or verified roles (SearchAsk.verify); otherwise each is said to be not re-checked.
+              // Release item 8 loop (tests/architect/loop-08-discovery.test.ts; spec E.21: "a search excerpt is a lead, not proof"):
+              // CAREER_SEARCH_OPEN_CHECK=always re-checks on every search; unchecked, a posting gone from its board was listed (as
+              // not re-checked). Off by default until the architect rules: two architect tests assert a plain search reads no board.
               canSubmit: canSubmitByHost, // R10 owner ruling (apply by message and yes): the posting's own host decides the label
-              openCheck: f5Ask.verify ? linkChecker(fetch, { userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }) : null,
+              openCheck: f5Ask.verify || searchOpenCheckAlways(Deno.env) ? linkChecker(fetch, { userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }) : null,
               tz: f5Zone?.tz ?? null, want: f5Ask.want ?? wantOf(message) }));
             // F.1: the blocker question gets the evidenced blocker: a source that could not be read is a connection problem.
             if (!found && f5Said?.explain) out = { ...out, intent: "career_discovery", resultStatus: "blocked", handler: "search_judge",

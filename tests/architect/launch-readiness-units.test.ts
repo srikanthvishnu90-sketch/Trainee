@@ -1,12 +1,12 @@
 // Launch readiness fixes (audit PR #192, 2026-10-26), unit level: the edges the handler test cannot reach cheaply.
-//   X7  the ceiling counts this turn's own calls, so a turn that crosses it stops at its next call; bad env values fall
-//       back to the defaults; the mock-interview judge goes through the capped call.
+//   X7  (architect ruling D-046, 2026-11-09: no per-person cap) the wrapper never refuses on a person's spend and never reads
+//       it; the old env limits are ignored; the mock-interview judge goes through the wrapped call.
 //   R1  the gate goes ahead when it cannot be read and after its wait; the channel retries revision_conflict once only.
 //   X3  the pool probe: "hi" does not need the pool, a job search does, a probe that throws reads it.
 //   S3  grounding: near misses and injections in an instruction or a tracker row are refused; the person's words pass.
 //   deno test -A --no-check tests/architect/launch-readiness-units.test.ts
 import assertNode from "node:assert/strict";
-import { DEFAULT_DAILY_CALLS, DEFAULT_DAILY_USD, spendCap, spendLimitsFromEnv } from "../../supabase/functions/_shared/career_spend_cap.ts";
+import { IGNORED_PERSON_CAP_ENV, resetIgnoredPersonCapWarnings, spendCap, warnIgnoredPersonCap } from "../../supabase/functions/_shared/career_spend_cap.ts";
 import { enterTurnGate } from "../../supabase/functions/_shared/career_turn_gate.ts";
 import { chatThroughAgent } from "../../supabase/functions/_shared/channel_runtime.ts";
 import { poolNeeded } from "../../supabase/functions/agent-chat/career_pool_need.ts";
@@ -22,34 +22,39 @@ const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a,
 const env = (o: Record<string, string>) => ({ get: (k: string) => o[k] });
 const cfg = { provider: "anthropic" as const, model: "claude-haiku-5-5", apiKey: "sk-fake", reasoningEffort: "low" };
 
-Deno.test("X7: the ceiling counts this turn's spend; the turn that crosses it stops at its next call, and reads the spend once", async () => {
+Deno.test("X7 (D-046): no per-person ceiling: a turn past the old $0.05 keeps calling, and no spend is read", async () => {
   let reads = 0, sent = 0;
   const cap = spendCap({ read: async () => { reads++; return { usd_micros: 40_000, calls: 1 }; }, limits: { usdMicros: 50_000, calls: 100 },
     call: (async (_c: unknown, _p: unknown, o: any) => { sent++; o.meter.calls++; o.meter.usd_micros += 6_000; return { content: [] }; }) as any });
   const m = newMeter();
-  await cap.call(cfg, {}, { meter: m });          // 40,000 before: allowed, now 46,000
-  await cap.call(cfg, {}, { meter: m });          // 46,000: allowed, now 52,000
-  await assertNode.rejects(() => cap.call(cfg, {}, { meter: m }), /daily model limit/);
-  eq([sent, reads, cap.refused()], [2, 1, "limit"], "two sent, the third refused before any request, one read of the spend");
-  assert(cap.note()!.includes("today's limit"), cap.note()!);
+  await cap.call(cfg, {}, { meter: m });          // 40,000 before (old rule: allowed)
+  await cap.call(cfg, {}, { meter: m });          // 46,000 (old rule: allowed)
+  await cap.call(cfg, {}, { meter: m });          // 52,000 (old rule: refused; now it goes)
+  eq([sent, reads, cap.refused()], [3, 0, null], "all three sent, the person's spend never read");
+  eq(cap.note(), null);
 });
 
-Deno.test("X7: an unreadable spend refuses every call; nothing refused leaves no note", async () => {
+Deno.test("X7 (D-046): an unreadable spend does not matter (it is never read); nothing refused leaves no note", async () => {
   let sent = 0;
   const cap = spendCap({ read: async () => { throw new Error("permission denied"); }, limits: { usdMicros: 50_000, calls: 100 }, call: (async () => { sent++; }) as any });
-  await assertNode.rejects(() => cap.call(cfg, {}, { meter: newMeter() }), /could not be read/);
-  eq([sent, cap.refused()], [0, "unread"]);
+  await cap.call(cfg, {}, { meter: newMeter() });
+  eq([sent, cap.refused()], [1, null]);
   const ok = spendCap({ read: async () => ({ usd_micros: 0, calls: 0 }), limits: { usdMicros: 50_000, calls: 100 }, call: (async () => ({})) as any });
   await ok.call(cfg, {}, { meter: newMeter() });
   eq([ok.refused(), ok.note()], [null, null]);
 });
 
-Deno.test("X7: the env limits: defaults, explicit values, and junk falls back to the default rather than to no limit", () => {
-  eq(spendLimitsFromEnv(env({})), { usdMicros: Math.round(DEFAULT_DAILY_USD * 1e6), calls: DEFAULT_DAILY_CALLS });
-  eq(spendLimitsFromEnv(env({ CAREER_MODEL_DAILY_USD: "0.25", CAREER_MODEL_DAILY_CALLS: "7" })), { usdMicros: 250_000, calls: 7 });
-  eq(spendLimitsFromEnv(env({ CAREER_MODEL_DAILY_USD: "-1", CAREER_MODEL_DAILY_CALLS: "lots" })), { usdMicros: Math.round(DEFAULT_DAILY_USD * 1e6), calls: DEFAULT_DAILY_CALLS });
-  eq(spendLimitsFromEnv(env({ CAREER_MODEL_DAILY_USD: "Infinity" })).usdMicros, Math.round(DEFAULT_DAILY_USD * 1e6));
-  eq(spendLimitsFromEnv(env({ CAREER_MODEL_DAILY_USD: "0" })).usdMicros, 0, "0 turns the model off");
+Deno.test("X7 (D-046): the old env limits are ignored, whatever their value, and said once", async () => {
+  resetIgnoredPersonCapWarnings();
+  const lines: string[] = [];
+  for (const v of [{}, { CAREER_MODEL_DAILY_USD: "0.25", CAREER_MODEL_DAILY_CALLS: "7" }, { CAREER_MODEL_DAILY_USD: "0" }]) {
+    let sent = 0;
+    warnIgnoredPersonCap(env(v), (l) => lines.push(l));
+    const cap = spendCap({ call: (async () => { sent++; return {}; }) as any });
+    for (let i = 0; i < 10; i++) await cap.call(cfg, {}, { meter: newMeter() });
+    eq(sent, 10, `${JSON.stringify(v)}: every call goes`);
+  }
+  eq(lines.length, IGNORED_PERSON_CAP_ENV.length, `one line per variable: ${lines}`);
 });
 
 Deno.test("X7: the mock-interview judge makes its call through the capped call it is given", async () => {

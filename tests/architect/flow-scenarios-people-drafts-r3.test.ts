@@ -16,7 +16,7 @@
 //                  employer in common: nothing of it is stored.
 //   H  addresses   a discovered person whose stored address is a guessed personal mailbox: never drafted to.
 //   I  batch       150 people at one firm: 150 drafts, numbered once each, no cap; draft 120 approved by its number.
-//   J  allowance   the day's AI allowance runs out mid-batch: the drafts written are kept, the rest said as the limit.
+//   J  allowance   (D-046) no per-person AI allowance: a person who already used the day still gets every draft.
 // The writer is a scripted stand-in at the Anthropic URL; any other host is refused and counted (asserted empty). Nothing is
 // approved, queued or sent.
 import assertNode from "node:assert/strict";
@@ -340,15 +340,15 @@ Deno.test({ name: "people drafts r3 end to end: names, stale titles, injected ro
     });
 
     // ---------------------------------------------------------------------------------------------- J
-    await t.step("J. the day's AI allowance runs out mid-batch: the drafts written are kept, the rest are said as the limit, not as a model failure", async () => {
+    await t.step("J. (D-046) no per-person AI allowance: a person who already made 998 calls today still gets every draft", async () => {
       const p = await person();
       await p.importList(Array.from({ length: 5 }, (_, j) => ({ name: `Quota ${String.fromCharCode(65 + j)} Person`, firm: "Sony", title: "Data Analyst", email: `quota.${j}@sony.example` })));
       // setup: 998 of the day's 1,000 calls already used (a recorded turn earlier today)
       await pg.sql(`insert into public.agent_turn_costs (user_id, meter_state, provider, models, calls, usd_micros) values ('${p.id}', 'metered', 'openai', '{claude-haiku-5-5}', 998, 0)`);
       const r = await p.say("reach out to everyone at Sony");
       const ds = await p.drafts();
-      eq(ds.length, 2, `two drafts fit in what was left of the day: ${r.reply.slice(0, 300)}`);
-      assert(/today's limit on AI-written drafts/.test(r.reply) && /Not drafted yet: 3 /.test(r.reply), `the rest are said as the day's limit: ${r.reply.slice(0, 400)}`);
+      eq(ds.length, 5, `every draft is written, whatever was used today: ${r.reply.slice(0, 300)}`);
+      assert(!/today's limit on AI-written drafts/.test(r.reply) && !/Not drafted yet/.test(r.reply), `no per-person limit is said: ${r.reply.slice(0, 400)}`);
       assert(!/the writing model didn't answer/.test(r.reply), `not as a model failure: ${r.reply.slice(0, 400)}`);
     });
 

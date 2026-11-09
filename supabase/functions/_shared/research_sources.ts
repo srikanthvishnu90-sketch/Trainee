@@ -4,7 +4,13 @@
 // fetched (owner rule: never automate or fetch them), nor are private or local addresses.
 //
 // This is not a search engine: it reads the pages it is handed (from whatever search capability the turn has) and says
-// which ones it could actually open. Self-contained on purpose (no imports), so tests load it on its own.
+// which ones it could actually open. Its one import is the shared SSRF address check (contact_sources/web_gate.ts isPrivateIp).
+//
+// Review of #589 (DNS rebinding): fetchSources also takes, per call, a resolver: the host's A/AAAA answers, checked on EVERY hop
+// (the first request and each redirect). One private, loopback, link-local, CGNAT or reserved answer and the page is refused as
+// private_address (a public name that answers a private address). No answer at all is unreachable. research_dns.ts
+// systemResolver is the production one (Deno.resolveDns, read at call time so a test can stand in a stub).
+import { isPrivateIp } from "./contact_sources/web_gate.ts";
 
 export interface SourcePage {
   url: string; // the address that answered 200 (after any redirects); the only form of this source ever linked
@@ -15,6 +21,7 @@ export interface SourcePage {
   fetchedAt: number;
 }
 export interface SourceRejection { url: string; why: "blocked_site" | "not_http" | "private_address" | "http_status" | "not_text" | "too_many_redirects" | "unreachable" | "empty" }
+export type Resolver = (host: string) => Promise<string[]>;
 export interface FetchedSources { verified: SourcePage[]; rejected: SourceRejection[] }
 
 // Never fetched, never linked (owner rule). Matched on the host and every parent domain; Indeed's country sites too.
@@ -66,7 +73,8 @@ export function readableText(html: string): { title: string; text: string } {
 const MAX_BYTES = 1_500_000, MAX_TEXT = 60_000, MAX_REDIRECTS = 3;
 
 // Reads each page once. Nothing here throws: a page that cannot be read is a rejection with its reason.
-export async function fetchSources(urls: string[], o: { fetch?: typeof fetch; timeoutMs?: number; now?: () => number; max?: number } = {}): Promise<FetchedSources> {
+type ReadOpts = { resolver?: Resolver };
+export async function fetchSources(urls: string[], o: { fetch?: typeof fetch; timeoutMs?: number; now?: () => number; max?: number } & ReadOpts = {}): Promise<FetchedSources> {
   const f = o.fetch ?? fetch, timeout = o.timeoutMs ?? 10000, now = o.now ?? Date.now;
   const out: FetchedSources = { verified: [], rejected: [] };
   const seen = new Set<string>();
@@ -74,7 +82,7 @@ export async function fetchSources(urls: string[], o: { fetch?: typeof fetch; ti
     const requested = normalizeUrl(raw);
     if (seen.has(requested)) continue;
     seen.add(requested);
-    const page = await readOne(requested, f, timeout);
+    const page = await readOne(requested, f, timeout, o);
     if ("why" in page) { out.rejected.push({ url: requested, why: page.why }); continue; }
     if (out.verified.some((v) => v.url === page.url)) continue;
     out.verified.push({ ...page, requested, status: 200, fetchedAt: now() });
@@ -82,13 +90,22 @@ export async function fetchSources(urls: string[], o: { fetch?: typeof fetch; ti
   return out;
 }
 
-async function readOne(start: string, f: typeof fetch, timeout: number): Promise<{ url: string; title: string; text: string } | { why: SourceRejection["why"] }> {
+// The host's resolved addresses, all public? (no answer: unreachable; any private answer: private_address)
+async function resolvedPublic(url: string, resolver: Resolver): Promise<true | SourceRejection["why"]> {
+  let ips: string[];
+  try { ips = await resolver(new URL(url).hostname.toLowerCase().replace(/\.$/, "")); } catch { return "unreachable"; }
+  if (!Array.isArray(ips) || !ips.length) return "unreachable";
+  return ips.every((ip) => !isPrivateIp(String(ip))) ? true : "private_address";
+}
+async function readOne(start: string, f: typeof fetch, timeout: number, o: ReadOpts = {}): Promise<{ url: string; title: string; text: string } | { why: SourceRejection["why"] }> {
   let url = start;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-    // Every hop passes the same checks, so a redirect can never carry a fetch to a blocked or private address.
+    // Every hop passes the same checks, so a redirect can never carry a fetch to a blocked or private address: the name, then
+    // (with a resolver) the addresses it resolves to right now.
     if (!isHttp(url)) return { why: "not_http" };
     if (isBlockedHost(url)) return { why: "blocked_site" };
     if (isPrivateHost(url)) return { why: "private_address" };
+    if (o.resolver) { const r = await resolvedPublic(url, o.resolver); if (r !== true) return { why: r }; }
     let res: Response;
     try {
       res = await f(url, { method: "GET", redirect: "manual", headers: { accept: "text/html,text/plain;q=0.9" }, signal: AbortSignal.timeout(timeout) });

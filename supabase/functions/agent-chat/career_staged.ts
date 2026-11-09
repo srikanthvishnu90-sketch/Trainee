@@ -358,6 +358,18 @@ export function companyInterviewAsk(message: string): boolean {
   const m = String(message ?? "").replace(/[\u2019`]/g, "'"), hit = INTERVIEW_AT.exec(m);
   return !!hit && /(?<![\p{L}])\p{Lu}[\p{L}&.-]+/u.test(hit[1]) && KNOW_OR_ASK.test(m);
 }
+// R10 WO-H, spec F.2 (owner's production turns, 2026-11-08 6:03-6:04 pm): "What's Stripe like to work for as a data analyst intern?
+// Give me a useful company research answer ... Don't apply or contact anyone." was claimed as a batch apply (career_batch_apply ->
+// BATCH_NOT_STARTED_REPLY), and the correction "I'm not asking for an application batch. I only want company research about
+// Stripe ..." as a people list (outreach_clarification -> "Building the list now: 5 analysts at Stripe"). A research ask that sets
+// a no-action boundary ("don't apply or contact anyone", "I'm not asking for an application batch") is research, whatever the
+// router's keywords say: never applications, introductions or outreach. The boundary is the person's own words.
+const NO_ACTION = /\b(?:don'?t|do\s+not|never|without)\s+(?:apply(?:ing)?|contact(?:ing)?|email(?:ing)?|messag(?:e|ing)|reach(?:ing)?\s+out)\b|\bnot\s+asking\s+(?:you\s+)?(?:for|to)\s+(?:an?\s+)?(?:application|apply|batch|list|introductions?|outreach)/i;
+const COMPANY_RESEARCH = /\b(?:[Cc]ompany|[Ee]mployer)\s+research\b|\bresearch\s+(?:about|on|into)\s+\p{Lu}|\bwhat(?:'s|\s+is)\s+\p{Lu}[\p{L}&.-]*\s+like\s+to\s+work\s+(?:for|at)\b/u;
+export function researchOverAction(message: string): boolean {
+  const m = String(message ?? "").replace(/[\u2019`]/g, "'");
+  return NO_ACTION.test(m) && (COMPANY_RESEARCH.test(m) || researchAsk(m));
+}
 export function researchAsk(message: string): boolean {
   const m = String(message ?? "").replace(/[\u2019`]/g, "'");
   return !OWN_PAPERS.test(m) && !OWN_RECORD.test(m) && (RESEARCH_ASK.some((r) => r.test(m)) || MARKET_ASK.some((r) => r.test(m)) || companyInterviewAsk(m));
@@ -397,6 +409,8 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
     intent = UNCLAIMED;
   } else intent = probe.intent ?? null;
   if (!intent) return { brain: false, mode, intent: null, reason: "router_claimed" };
+  // Spec F.2: research with a no-action boundary is the brain's research turn, before any rule that keeps the router's intent.
+  if (o.env.get("CAREER_RESEARCH_REPLY") === "on" && researchOverAction(o.message)) return { brain: true, mode, intent, reason: "company_research" };
   if (routerKept(o.env).has(intent)) return { brain: false, mode, intent, reason: "kept_on_router" };
   if (marketResearchAsk(o.env, o.message, intent)) return { brain: true, mode, intent, reason: "market_research" };
   if (SEARCH_LIKE.has(intent) && filePageAsk(o.message, askFor(o.message, { intent, resultStatus: probe.result?.resultStatus }, o.ctx.discovery)?.ask)) return { brain: true, mode, intent, reason: "file_page_ask" };

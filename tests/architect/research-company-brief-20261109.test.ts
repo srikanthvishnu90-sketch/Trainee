@@ -73,7 +73,9 @@ Deno.test("WO-H/2 the brief: facts, reading and unknowns separate; dated develop
   // E.46: a list of links without synthesis is not the brief; every section holds guarded lines and the File renders in order.
   const { html, text } = render(w.published[0]);
   const heads = [...html.matchAll(/<h2>([^<]+)<\/h2>/g)].map((m) => m[1]);
-  eq(heads, ["What the company sells and how it makes money", "Recent developments", "Competitors and tradeoffs", "What the role page asks for", "Questions you can ask", "What this brief cannot tell you", "Sources"]);
+  // The order of the owner's target pages (app-layer-visuals p-88/p-89) and spec C.22.
+  eq(heads, ["The short answer", "How the business works", "Evidence versus interpretation", "Recent developments", "Competitors and tradeoffs", "What the role page asks for", "Questions worth asking", "What this brief cannot tell you", "Sources"]);
+  ok(/<dt>Reported fact<\/dt><dd>Feb 24, 2026: Businesses on Stripe generated \$1\.9 trillion/.test(html) && /<dt>Interpretation<\/dt>/.test(html) && /<dt>Unknown<\/dt>/.test(html) && /<dt>Source state<\/dt><dd>7 sources read Nov 9, 2026; 1 paywalled; 1 outdated; 1 could not be opened<\/dd>/.test(html), "evidence versus interpretation, as on p-89");
   ok(html.includes('<span class="src rb-measure">Volume, not revenue</span>') && html.includes("A forecast at the time, not a result"));
   ok(/Stripe signed more enterprise customers this year\.[^]*?<span class="src rb-limit">\[\d+\] paywalled<\/span>/.test(html), "the paywall mark sits beside the claim it affects");
   ok(html.includes("Trainee&#39;s reading") || html.includes("Trainee's reading"), "the frame is labelled as Trainee's reading");
@@ -102,7 +104,7 @@ Deno.test("WO-H/3 turns 2 and 3: the role is used without asking again; 'less ge
   ok(!/1\.9 trillion/.test(three.t.reply), "a figure outside the expanded area is removed from the reply");
   ok(/hiring manager/.test(three.t.reply));
   const { html } = render(d3);
-  eq([...html.matchAll(/<h2>([^<]+)<\/h2>/g)].map((m) => m[1]), ["Questions you can ask", "Sources"]);
+  eq([...html.matchAll(/<h2>([^<]+)<\/h2>/g)].map((m) => m[1]), ["Questions worth asking", "Sources"]);
 });
 
 Deno.test("WO-H/4 routing: the spec's interview research asks reach the research path; prep without a company does not", () => {

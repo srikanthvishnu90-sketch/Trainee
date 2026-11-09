@@ -127,7 +127,8 @@ export function pageLimit(text: string, now: number): { limit?: "paywalled" | "o
   return now - at(newest) > OUTDATED_DAYS * 86400_000 ? { limit: "outdated", dated: showDay(newest) } : {};
 }
 const UNREAD_WHY: Record<string, string> = { http_status: "it answered with an error (it may be paywalled or removed)", robots_disallow: "the site asks programs not to read it",
-  unreachable: "it could not be reached", not_text: "it had no readable text", empty: "it had no readable text", too_many_redirects: "it redirected too many times", private_address: "its address is private", not_http: "it is not a web page" };
+  unreachable: "it could not be reached", not_text: "it had no readable text", empty: "it had no readable text", too_many_redirects: "it redirected too many times", private_address: "its address is private", not_http: "it is not a web page",
+  time_budget: "the research time limit was reached before it was read", blocked_site: "Trainee never reads that site" };
 
 const parse = (raw: string) => { try { return JSON.parse(raw.trim().replace(/^```(?:json)?\s*|\s*```$/g, "")); } catch { return null; } };
 

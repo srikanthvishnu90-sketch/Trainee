@@ -643,6 +643,11 @@ async function handleKind(o: { g: Exclude<Awaited<ReturnType<FileService["get"]>
   if (action) {
     const r = await actOn(rec, action, fields, d.now(), d.fileEffects, (patch) => files.patchState(u, rec.id, patch), () => files.claim(u, rec.id, "choice"));
     if (r.status === 400) return o.state("Not done", [r.note], 400);
+    // The resume File's download: the owner's own PDF, after the sign-in above, never cached.
+    if (r.file) {
+      const bytes = Uint8Array.from(atob(r.file.base64), (c) => c.charCodeAt(0));
+      return new Response(bytes, { status: 200, headers: { "content-type": r.file.mime, "content-disposition": `attachment; filename="${r.file.filename.replace(/[^A-Za-z0-9._-]+/g, "_")}"`, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+    }
     if (r.patch) await files.patchState(u, rec.id, r.patch);
     note = r.note;
     const again = await files.get(u, rec.id);

@@ -51,7 +51,9 @@ export function widthPt(text: string, font: Font, size: number): number {
 }
 
 // ---------------------------------------------------------------- the block model
-export interface Block { kind: "name" | "contact" | "links" | "heading" | "entry" | "bullet" | "line"; text: string; right?: string }
+// flag: a placeholder or a review note (R10 resume task): set in FLAG, so a missing detail can never pass for real data.
+export interface Block { kind: "name" | "contact" | "links" | "heading" | "entry" | "bullet" | "line"; text: string; right?: string; flag?: boolean; label?: string }
+export const FLAG = "#8A5A00"; // dark amber: the comparator's placeholder colour, readable on white
 const MONTH = "(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]{0,6}\\.?";
 const RANGE = `(?:${MONTH} )?\\d{4}(?:\\s*[–—-]\\s*(?:(?:${MONTH} )?\\d{4}|Present))?`;
 const TRAILING_DATES = new RegExp(`^(.*\\S,)\\s*(${RANGE})$`, "i");
@@ -74,11 +76,13 @@ const PAGE = { w: 612, h: 792, x0: 54, x1: 558, top: 742, bottom: 50 };
 const COL = PAGE.x1 - PAGE.x0;
 const BULLET_X = PAGE.x0 + 4, TEXT_X = PAGE.x0 + 14;
 const rgb = (hex: string) => [1, 3, 5].map((i) => Math.round((parseInt(hex.slice(i, i + 2), 16) / 255) * 1000) / 1000).join(" ");
-export interface Palette { accent: string; ink: string; mute: string; upperHeadings: boolean; rules: boolean }
+// review (R10, spec A.4's one-page review draft): name centred in spaced capitals at 20 pt, contact line centred, spaced
+// headings, small diamond bullets, a run-in bold label on a labelled line, a dotted rule over a flagged closing note.
+export interface Palette { accent: string; ink: string; mute: string; upperHeadings: boolean; rules: boolean; review?: boolean }
 export const TRAINEE_PALETTE: Palette = { accent: PLUM, ink: LIGHT.ink, mute: LIGHT.mute, upperHeadings: true, rules: true };
 export const PLAIN_PALETTE: Palette = { accent: LIGHT.ink, ink: LIGHT.ink, mute: LIGHT.ink, upperHeadings: false, rules: false };
-interface Run { text: string; font: Font; size: number; x: number; y: number; color: string }
-interface Rule { y: number; w: number; color: string }
+interface Run { text: string; font: Font; size: number; x: number; y: number; color: string; tc?: number }
+interface Rule { y: number; w: number; color: string; dash?: boolean; diamond?: number }
 interface Page { runs: Run[]; rules: Rule[] }
 export interface Spacing { lead: number; unit: number; nameLead: number; before: Record<string, number> }
 export function spacingFor(body: number, scale: number): Spacing {
@@ -105,11 +109,13 @@ export function typeset(blocks: Block[], body: number, scale: number, pal: Palet
   const page = () => pages[pages.length - 1];
   const newPage = () => { pages.push({ runs: [], rules: [] }); y = PAGE.top; };
   const linesOf = (b: Block): { pieces: string[]; font: Font; size: number; x: number; width: number; lead: number } => {
+    if (b.kind === "name" && pal.review) return { pieces: [b.text.toUpperCase()], font: "F3", size: 20, x: PAGE.x0, width: COL, lead: sp.nameLead + 8 };
     if (b.kind === "name") return { pieces: [b.text], font: "F3", size: 12, x: PAGE.x0, width: COL, lead: sp.nameLead };
     const font: Font = b.kind === "heading" || b.kind === "entry" ? "F2" : "F1";
     const text = b.kind === "heading" && pal.upperHeadings ? b.text.toUpperCase() : b.text;
     if (b.kind === "bullet") return { pieces: wrap(text, font, body, PAGE.x1 - TEXT_X), font, size: body, x: TEXT_X, width: PAGE.x1 - TEXT_X, lead: sp.lead };
     const width = b.right ? COL - widthPt(b.right, "F1", body) - 12 : COL;
+    if (b.label) { const ps = wrap(`${b.label} ${text}`, font, body, width); ps[0] = ps[0].slice(b.label.length + 1); return { pieces: ps, font, size: body, x: PAGE.x0, width, lead: sp.lead }; }
     return { pieces: wrap(text, font, body, width), font, size: body, x: PAGE.x0, width, lead: sp.lead };
   };
   let prev: Block["kind"] | null = null, seenHeading = false;
@@ -123,15 +129,27 @@ export function typeset(blocks: Block[], body: number, scale: number, pal: Palet
     // Keep a heading or an entry with the first line of what follows it.
     const next = blocks[i + 1];
     const keep = (b.kind === "heading" || b.kind === "entry") && next && !["heading", "name"].includes(next.kind) ? sp.lead + (b.kind === "heading" ? sp.before.afterHeading : 0) : 0;
+    const closing = pal.review && b.flag && !next && b.kind === "line";
+    if (closing) gap = sp.before.heading;
     if (!header && page().runs.length && y - gap - L.lead * L.pieces.length - keep < PAGE.bottom) newPage();
     else y -= page().runs.length ? gap : 0;
+    if (closing) page().rules.push({ y: Math.round((y + sp.unit) * 100) / 100, w: 0.6, color: FLAG, dash: true });
     L.pieces.forEach((piece, k) => {
       if (y - L.lead < PAGE.bottom && page().runs.length) newPage();
       y -= L.lead;
       const yy = Math.round(y * 100) / 100;
-      const color = b.kind === "name" || b.kind === "heading" ? pal.accent : header ? pal.mute : pal.ink;
-      if (b.kind === "bullet" && k === 0) { page().runs.push({ text: "•", font: "F1", size: body, x: BULLET_X, y: yy, color: pal.ink }); printed.push("•"); }
-      page().runs.push({ text: piece, font: L.font, size: L.size, x: L.x, y: yy, color });
+      const color = b.flag ? FLAG : b.kind === "name" || b.kind === "heading" ? pal.accent : header ? pal.mute : pal.ink;
+      if (b.kind === "bullet" && k === 0 && pal.review) page().rules.push({ y: yy + body * 0.32, w: 0, color: pal.accent, diamond: BULLET_X + 2 });
+      else if (b.kind === "bullet" && k === 0) { page().runs.push({ text: "•", font: "F1", size: body, x: BULLET_X, y: yy, color: pal.ink }); printed.push("•"); }
+      const tc = pal.review ? (b.kind === "name" ? 2 : b.kind === "heading" ? 1 : 0) : 0;
+      const centred = pal.review && (b.kind === "name" || b.kind === "contact" || b.kind === "links");
+      let x = centred ? Math.round(((PAGE.x0 + PAGE.x1) / 2 - (widthPt(piece, L.font, L.size) + tc * (piece.length - 1)) / 2) * 100) / 100 : L.x;
+      if (b.label && k === 0) {
+        page().runs.push({ text: b.label, font: "F2", size: body, x, y: yy, color: b.flag ? FLAG : pal.ink, ...(pal.review ? { tc: 0 } : {}) });
+        printed.push(b.label);
+        x = Math.round((x + widthPt(`${b.label} `, "F2", body)) * 100) / 100;
+      }
+      page().runs.push({ text: piece, font: L.font, size: L.size, x, y: yy, color, ...(pal.review ? { tc } : {}) });
       printed.push(piece);
       if (k === 0 && b.right) {
         const x = Math.round((PAGE.x1 - widthPt(b.right, "F1", body)) * 100) / 100;
@@ -180,8 +198,10 @@ function writePdf(R: any, set: Typeset): Uint8Array {
   set.pages.forEach((pg, i) => {
     objects.push([pageIds[i], P.bytes(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE.w} ${PAGE.h}] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >> /Contents ${contentIds[i]} 0 R >>`)]);
     const ops = [
-      ...pg.rules.map((r) => `q ${rgb(r.color)} RG ${r.w} w ${PAGE.x0} ${r.y} m ${PAGE.x1} ${r.y} l S Q`),
-      ...pg.runs.map((r) => `BT /${r.font} ${r.size} Tf ${rgb(r.color)} rg 1 0 0 1 ${r.x} ${r.y} Tm ${P.pdfLiteral(P.encodeWinAnsi(r.text, unencodable))} Tj ET`),
+      ...pg.rules.map((r) => r.diamond !== undefined
+        ? `q ${rgb(r.color)} rg ${r.diamond} ${r.y + 2.2} m ${r.diamond + 2.2} ${r.y} l ${r.diamond} ${r.y - 2.2} l ${r.diamond - 2.2} ${r.y} l f Q`
+        : `q ${rgb(r.color)} RG ${r.w} w${r.dash ? " [1 2] 0 d" : ""} ${PAGE.x0} ${r.y} m ${PAGE.x1} ${r.y} l S Q`),
+      ...pg.runs.map((r) => `BT /${r.font} ${r.size} Tf ${rgb(r.color)} rg${r.tc !== undefined ? ` ${r.tc} Tc` : ""} 1 0 0 1 ${r.x} ${r.y} Tm ${P.pdfLiteral(P.encodeWinAnsi(r.text, unencodable))} Tj ET`),
     ].join("\n");
     const stream = P.deflate(P.bytes(ops, "latin1"));
     objects.push([contentIds[i], P.concat([P.bytes(`<< /Length ${stream.length} /Filter /FlateDecode >>\nstream\n`, "latin1"), stream, P.bytes("\nendstream", "latin1")])]);
@@ -281,12 +301,13 @@ function traineeDocx(R: any, blocks: Block[], f: Fit, pal: Palette): { buffer: U
     const border = b.kind === "heading" ? `<w:pBdr><w:bottom w:val="single" w:sz="4" w:space="1" w:color="${hex(pal.accent)}"/></w:pBdr>`
       : closesHeader ? `<w:pBdr><w:bottom w:val="single" w:sz="6" w:space="4" w:color="${hex(pal.accent)}"/></w:pBdr>` : "";
     const styleId = b.kind === "name" ? "TraineeName" : header ? "TraineeContact" : b.kind === "heading" ? "Heading1" : b.kind === "entry" ? "TraineeEntry" : b.kind === "bullet" ? "TraineeBullet" : null;
-    const ppr = `<w:pPr>${styleId ? `<w:pStyle w:val="${styleId}"/>` : ""}${border}<w:spacing w:before="${tw(before)}" w:after="0" w:line="${tw(lead)}" w:lineRule="exact"/></w:pPr>`;
+    const ppr = `<w:pPr>${styleId ? `<w:pStyle w:val="${styleId}"/>` : ""}${border}${pal.review && header ? `<w:jc w:val="center"/>` : ""}<w:spacing w:before="${tw(before)}" w:after="0" w:line="${tw(lead)}" w:lineRule="exact"/></w:pPr>`;
     let runs: string;
-    const c = docxCondense(b, f.body, pal), cpr = c ? `<w:rPr><w:spacing w:val="-${c}"/></w:rPr>` : "";
+    const c = docxCondense(b, f.body, pal), flag = (b.flag ? `<w:color w:val="${hex(FLAG)}"/>` : "") + (b.kind === "name" && pal.review ? `<w:sz w:val="40"/><w:szCs w:val="40"/>` : "");
+    const cpr = c || flag ? `<w:rPr>${flag}${c ? `<w:spacing w:val="-${c}"/>` : ""}</w:rPr>` : "";
     if (b.kind === "entry" && b.right) { runs = `<w:r>${cpr}${t(b.text)}</w:r><w:r><w:rPr><w:b w:val="0"/><w:color w:val="${hex(pal.mute)}"/></w:rPr><w:tab/>${t(b.right)}</w:r>`; printed.push(`${b.text} ${b.right}`); }
     else if (b.kind === "bullet") { runs = c ? `<w:r>${t("•")}<w:tab/></w:r><w:r>${cpr}${t(b.text)}</w:r>` : `<w:r>${t("•")}<w:tab/>${t(b.text)}</w:r>`; printed.push(`• ${b.text}`); }
-    else { const text = b.kind === "heading" && pal.upperHeadings ? b.text.toUpperCase() : b.text; runs = `<w:r>${cpr}${t(text)}</w:r>`; printed.push(text); }
+    else { const text = (b.kind === "heading" && pal.upperHeadings) || (b.kind === "name" && pal.review) ? b.text.toUpperCase() : b.text; runs = `<w:r>${cpr}${t(text)}</w:r>`; printed.push(text); }
     if (b.kind === "heading") seenHeading = true;
     prev = b.kind;
     return `<w:p>${ppr}${runs}</w:p>`;
@@ -531,6 +552,16 @@ export function renderDesigned(R: any, resume: any, o: { layout: DesignLayout; o
   if (!same) fails.push("same_text: the PDF and the DOCX do not carry the same words in the same order");
   const lines = o.layout === "trainee" ? docxPrinted! : sourceLines!.map((l) => l.text);
   return { ok: true, layout: o.layout, pdf, docx, fit: f, sameText: same, lines, parseCheck: { status: fails.length ? "FAIL" : warnings.length ? "WARN" : "PASS", fails, warnings }, ...extra };
+}
+
+// R10 resume task: blocks a caller built (a general resume for a target, with flagged placeholders) set in the Trainee
+// layout, fitted to one page where the record allows, as a PDF and a DOCX with the same words. The caller reads the words
+// back out of the files itself; nothing here reports a check.
+// deno-lint-ignore no-explicit-any
+export function renderBlocks(R: any, blocks: Block[]): { pdf: Uint8Array; docx: Uint8Array; fit: Fit; printed: string[] } {
+  const pal: Palette = { ...TRAINEE_PALETTE, review: true };
+  const { fit: f, set } = fit(blocks, pal);
+  return { pdf: writePdf(R, set), docx: traineeDocx(R, blocks.map((b) => b.label ? { ...b, text: `${b.label} ${b.text}` } : b), f, pal).buffer, fit: f, printed: set.printed };
 }
 
 // "Keep my layout" reads the person's newest Word upload: the release-8 clean copy, which is what career_resume_uploads stores

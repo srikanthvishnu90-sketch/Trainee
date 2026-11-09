@@ -29,6 +29,12 @@ async function pass(request) {
     img.set("content-security-policy", pageCsp(r.headers, IMAGE_CSP));
     return new Response(await r.arrayBuffer(), { status: 200, headers: img });
   }
+  // The resume File's download (R10): its PDF passes as bytes with the function's own type and file name, never as page text.
+  if (r.status === 200 && upType === "application/pdf") {
+    const pdf = new Headers({ "content-type": "application/pdf" });
+    for (const k of [...KEEP, "content-disposition"]) { const v = r.headers.get(k); if (v) pdf.set(k, v); }
+    return new Response(await r.arrayBuffer(), { status: 200, headers: pdf });
+  }
   const body = await r.text();
   // Supabase answers a function that is not deployed with its own 404 JSON; passing that on looks like a missing page on this site.
   if (r.status === 404 && /"code":"NOT_FOUND"/.test(body) && /Requested function was not found/.test(body)) return new Response("File pages are not available yet.", { status: 503, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });

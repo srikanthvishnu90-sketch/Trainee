@@ -770,11 +770,14 @@ export function careerTools(deps: {
           recommended: plan.recommended ? { template: Number(plan.recommended.template.slice(1)), name: plan.recommended.name, why: plan.recommended.why } : null,
           // When their layout was not used after all, the reply says that (never "I'll keep your layout").
           summary: keptNote ? `Your resume's format scores ${plan.rating.score}/100. ${keptNote}` : plan.summary } } : rest;
-        // The PDF (and, with a layout, its Word copy) are attached to this reply; the private link stays as well.
+        // The PDF (and, with a layout, its Word copy) are attached to this reply.
         if (t.deliver) {
           t.deliver({ format: "pdf", filename: r.filename, mime: "application/pdf", base64: b64(detail.pdf), sha256: r.sha256 });
           if (detail.docx) t.deliver({ format: "docx", filename: r.filename.replace(/\.pdf$/i, "") + ".docx", mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: b64(detail.docx), sha256: null });
-          return { ...out, attached: [r.filename, ...(detail.docx ? [r.filename.replace(/\.pdf$/i, "") + ".docx"] : [])] };
+          // R10 privacy ruling: with the file attached, no bearer link to the person's resume reaches the model, the reply or the
+          // thread's history (the private object stays stored for the email apply path; a link is the signed-in File page only).
+          const { link: _l, expires_at: _e, ...noLink } = out;
+          return { ...noLink, text: out.text.split("\n")[0], attached: [r.filename, ...(detail.docx ? [r.filename.replace(/\.pdf$/i, "") + ".docx"] : [])] };
         }
         return out;
       },

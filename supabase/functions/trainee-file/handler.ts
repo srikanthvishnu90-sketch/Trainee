@@ -413,7 +413,7 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
   const locked = () => state("Too many wrong codes", ["This link is locked so nobody can guess the code. " + NEW_LINK], 429);
   // ---- phone sign-in steps (the pending link is in the HttpOnly tf_l cookie)
   if (action === "phone_reset") return phoneStep(action);
-  if (action === "phone_start" || action === "phone_verify") {
+  if (action === "phone_start" || action === "phone_verify" || action === "phone_resend") {
     // Every answer of these two steps is paced to the same floor, whatever the number and whatever was refused, so the time an
     // answer takes cannot say whether the typed number is the account's (only then is a code texted or checked).
     const began = performance.now();
@@ -434,6 +434,8 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
     const down = () => state("Couldn't open this just now", ["Nothing was sent. Try again in a minute."], 503);
     if (!d.phone) return state("Phone sign-in isn't switched on yet", ["Nothing was opened and nothing was sent."], 503);
     if (step === "phone_reset") { await sessions!.setPhone(row.jti, null, false).catch(() => {}); return page("phone"); }
+    // "Send a new code": the same step as typing the number again (same count, same cap, same answer for any number).
+    if (step === "phone_resend") { if (!row.phone) return page("phone"); fields.set("phone", row.phone); step = "phone_start"; }
     if (step === "phone_start") {
       const phone = normalizePhone(fields.get("phone"));
       if (!phone) return page("phone", "That doesn't look like a phone number. Include the country code if it's outside the US.", 400);

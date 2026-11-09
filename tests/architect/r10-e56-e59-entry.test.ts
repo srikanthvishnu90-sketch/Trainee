@@ -151,3 +151,28 @@ Deno.test({ name: "E-56: the expired-link, phone, code and wrong-code states at 
   } finally { await browser.close(); }
   assert(!problems.length, problems.join("\n"));
 } });
+
+Deno.test("R10a (spec C.23 panel 2): 'Send a new code' re-sends to the typed number within the link's own limit, says that limit, and answers the same for any number", async () => {
+  const w = world();
+  const link = (await mintFileToken({ secret: SECRET, userId: U, list: LIST, now: NOW, kind: "l" }))!;
+  const cookie = ((await req(w.d, { get: `?t=${encodeURIComponent(link)}` })).headers.get("set-cookie") ?? "").split(";")[0];
+  const sent = await (await req(w.d, { form: { action: "phone_start", phone: U_PHONE }, cookie })).text();
+  assert(/name="action" value="phone_resend"[^]*>Send a new code</.test(sent), "the resend control");
+  assert(/A link sends at most 3 codes, each replacing the last\. After that, open a new link from Trainee\./.test(plain(sent)), "its real limit, stated");
+  const again = await req(w.d, { form: { action: "phone_resend" }, cookie });
+  const againBody = await again.text();
+  eq(again.status, 200); eq(againBody, sent, "the same page after a resend");
+  eq(w.P.texts.length, 2, "a second code went to the account's number");
+  await req(w.d, { form: { action: "phone_resend" }, cookie });
+  const past = await req(w.d, { form: { action: "phone_resend" }, cookie });
+  eq(w.P.texts.length, 3, "never more than the link's limit");
+  eq(await past.text(), sent, "past the limit the answer is the same page: nothing says whether this number was texted");
+  // a number on no account: the same control, the same words, nothing texted
+  const w2 = world();
+  const c2 = ((await req(w2.d, { get: `?t=${encodeURIComponent(link)}` })).headers.get("set-cookie") ?? "").split(";")[0];
+  await req(w2.d, { form: { action: "phone_start", phone: NOBODY }, cookie: c2 });
+  eq(await (await req(w2.d, { form: { action: "phone_resend" }, cookie: c2 })).text(), sent, "identical for a number on no account");
+  eq(w2.P.texts.length, 0);
+  // the code from the latest text signs in (each new code replaces the last)
+  eq((await req(w.d, { form: { action: "phone_verify", code: w.P.lastCode() }, cookie })).status, 303);
+});

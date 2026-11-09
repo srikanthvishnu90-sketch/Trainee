@@ -8,8 +8,11 @@
 //      which keeps its own $1 guard and FAILs on any model call that is not claude-sonnet-5-5; a row's `live:<turn>` steps must
 //      all have PASSed. It uses only the secrets r10-live-replay.ts names (SUPABASE_PROJECT_REF, SUPABASE_ACCESS_TOKEN,
 //      SUPABASE_DB_URL, TELEGRAM_BOT_TOKEN); run it only where those are set and the owner or architect means to.
-// Then one line per row: PASS, FAIL (with why), BLOCKED (the row's named reason: not a failure), or PENDING_LIVE (a live-only row,
-// or a row's live step, without --live). A GAP row is a FAIL: nothing checks it. Exit 0 only when every row is PASS or BLOCKED.
+// Then one line per row: PASS, FAIL (with why), BLOCKED (the row's named reason: not a failure), PENDING_LIVE (a live-only row,
+// or a row's live step, without --live) or PENDING_REVIEW (R-3, until replies-verdict.md says PASS or FAIL). A GAP row is a FAIL:
+// nothing checks it. R-6 (the integrated pre-release run) is PASS only on the trunk tip, with the gate, when every other row is
+// PASS or BLOCKED. Every run writes replies.md (every reply it produced) for the R-3 review. Exit 0 only when every row is PASS
+// or BLOCKED.
 // The loop: run it, fix each FAIL, run it again.
 //   deno run -A scripts/r10-loop.ts [--no-gate] [--live --sha <sha>] [--only <id,id>]
 const ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
@@ -42,11 +45,11 @@ for (const dir of ["tests/architect/pending/r10-app-layer", "tests/architect/r10
 }
 const evidenceDir = `${OUT}/evidence`;
 const suite = files.length ? await sh("R10 acceptance suite", [Deno.execPath(), "test", "-A", "--no-check", "--import-map=tests/flow/supabase-npm.json", ...files.sort()], { R10_EVIDENCE_DIR: evidenceDir }) : -1;
-interface Rec { item: number; test: string; file: string; outcome: string; why?: string }
+interface Rec { item: number; test: string; file: string; outcome: string; why?: string; reply?: string; scenario?: string }
 const recs: Rec[] = await Deno.readTextFile(`${evidenceDir}/evidence.jsonl`).then((t) => t.split("\n").filter(Boolean).map((l) => JSON.parse(l)), () => []);
 // 4. live
 interface LiveCheck { item: number; turn: string; check: string; status: string; detail: string }
-let live: { outcome: string; checks: LiveCheck[] } | null = null;
+let live: { outcome: string; checks: LiveCheck[]; transcript?: { turn: string; text: string; reply: string }[] } | null = null;
 if (LIVE) {
   const script = `${ROOT}/scripts/launch/r10-live-replay.ts`;
   const exists = await Deno.stat(script).then(() => true, () => false);
@@ -55,6 +58,20 @@ if (LIVE) {
     live = await Deno.readTextFile(`${OUT}/live/r10-live-replay.json`).then((t) => JSON.parse(t), () => null);
   } else console.log("   the live replay script is not on this commit yet: every live step is FAIL");
 }
+
+// R-3: every reply this run produced, in one transcript for an independent writing-quality review (spec D, E.6 52, A.5). The review's
+// verdict goes in replies-verdict.md in this run's directory (first line "VERDICT: PASS" or "VERDICT: FAIL"); --verdict <path> names
+// one elsewhere. Without it the row is PENDING_REVIEW.
+const replyLines: string[] = [`# R10 replies, loop run ${RUN}`, "", "In-process replies (fake model, $0), then live replies when --live ran. Review against spec D and the reply-quality criteria (A.5, E.6 52).", ""];
+for (const r of recs.filter((x) => x.reply && x.item !== 0)) replyLines.push(`## ${r.file} :: ${r.test}${r.scenario ? ` [${r.scenario}]` : ""}`, "", "```", String(r.reply).trim(), "```", "");
+for (const t of live?.transcript ?? []) replyLines.push(`## LIVE ${t.turn}: ${t.text.slice(0, 160)}`, "", "```", String(t.reply).trim(), "```", "");
+await Deno.writeTextFile(`${OUT}/replies.md`, replyLines.join("\n"));
+const verdictPath = opt("--verdict") ?? `${OUT}/replies-verdict.md`;
+const reviewVerdict = await Deno.readTextFile(verdictPath).then((t) => (/^\s*VERDICT:\s*(PASS|FAIL)/i.exec(t)?.[1] ?? "").toUpperCase(), () => "");
+// R-6: is this run the integrated one (the trunk tip, with the gate)?
+const git = async (...a: string[]) => new TextDecoder().decode((await new Deno.Command("git", { args: a, cwd: ROOT, stdout: "piped", stderr: "null" }).output()).stdout).trim();
+const head = await git("rev-parse", "HEAD"), trunkTip = await git("rev-parse", "origin/trunk").catch(() => "");
+const onTrunk = !!head && head === trunkTip;
 
 // Rows.
 const matrix = await Deno.readTextFile(`${ROOT}/docs/architect/specs/R10-COVERAGE.md`);
@@ -81,7 +98,11 @@ const out: { id: string; verdict: string; why: string }[] = [];
 for (const [id, crit, , tests, liveCol, status, note] of rows) {
   if (ONLY.length && !ONLY.includes(id)) continue;
   let verdict: string, why = "";
-  if (status === "BLOCKED") { verdict = "BLOCKED"; why = note; }
+  if (status === "integrated") { out.push({ id, verdict: "R6", why: "" }); continue; }
+  if (status === "review") {
+    verdict = reviewVerdict === "PASS" ? "PASS" : reviewVerdict === "FAIL" ? "FAIL" : "PENDING_REVIEW";
+    why = verdict === "PENDING_REVIEW" ? `transcript: ${OUT}/replies.md; no verdict at ${verdictPath}` : `review verdict ${verdictPath}`;
+  } else if (status === "BLOCKED") { verdict = "BLOCKED"; why = note; }
   else if (status === "GAP") { verdict = "FAIL"; why = `GAP: ${note}`; }
   else {
     const vs = [...tests.split(";").map((s) => s.trim()).filter(Boolean).map(testRef), ...liveCol.split(";").map((s) => s.trim()).filter(Boolean).map(liveRef)];
@@ -93,10 +114,20 @@ for (const [id, crit, , tests, liveCol, status, note] of rows) {
     else { verdict = "PASS"; }
   }
   out.push({ id, verdict, why });
-  console.log(`${verdict.padEnd(12)} ${id.padEnd(8)} ${crit.slice(0, 90)}${why ? `\n             ${why.slice(0, 220)}` : ""}`);
 }
+// R-6, decided after every other row: the integrated pre-release run is the trunk tip, with the gate, and nothing else open.
+for (const o of out.filter((x) => x.verdict === "R6")) {
+  const open = out.filter((x) => x.verdict !== "R6" && x.verdict !== "PASS" && x.verdict !== "BLOCKED").map((x) => x.id);
+  if (!onTrunk) { o.verdict = "FAIL"; o.why = `not the integrated run: HEAD ${head.slice(0, 8)} is not the trunk tip ${trunkTip.slice(0, 8) || "(origin/trunk unknown)"}`; }
+  else if (gate !== "PASS") { o.verdict = "FAIL"; o.why = `the integrated run needs the gate (gate ${gate})`; }
+  else if (open.length) { o.verdict = "FAIL"; o.why = `${open.length} row(s) not PASS or BLOCKED: ${open.slice(0, 12).join(", ")}${open.length > 12 ? "…" : ""}`; }
+  else { o.verdict = "PASS"; o.why = `integrated: trunk ${head.slice(0, 8)}, gate PASS, every row PASS or BLOCKED`; }
+}
+const crits = new Map(rows.map((r) => [r[0], r[1]]));
+for (const o of out) console.log(`${o.verdict.padEnd(14)} ${o.id.padEnd(8)} ${(crits.get(o.id) ?? "").slice(0, 90)}${o.why ? `\n               ${o.why.slice(0, 220)}` : ""}`);
 const count = (v: string) => out.filter((o) => o.verdict === v).length;
-console.log(`\nR10 loop ${RUN}: ${out.length} rows: ${count("PASS")} PASS, ${count("FAIL")} FAIL, ${count("BLOCKED")} BLOCKED, ${count("PENDING_LIVE")} PENDING_LIVE`);
+console.log(`\nR10 loop ${RUN}: ${out.length} rows: ${count("PASS")} PASS, ${count("FAIL")} FAIL, ${count("BLOCKED")} BLOCKED, ${count("PENDING_LIVE")} PENDING_LIVE, ${count("PENDING_REVIEW")} PENDING_REVIEW`);
+console.log(`replies for the R-3 review: ${OUT}/replies.md`);
 console.log(`coverage check exit ${coverage}; gate ${gate}; suite exit ${suite} (${files.length} files); live ${LIVE ? live?.outcome ?? "no report" : "not run"}; evidence ${OUT}`);
 await Deno.writeTextFile(`${OUT}/loop.json`, JSON.stringify({ run: RUN, sha: SHA || null, gate, coverage, suite, live: live?.outcome ?? null, rows: out }, null, 2));
 Deno.exit(coverage === 0 && out.every((o) => o.verdict === "PASS" || o.verdict === "BLOCKED") ? 0 : 1);

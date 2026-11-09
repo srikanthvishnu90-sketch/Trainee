@@ -8,7 +8,9 @@ prints PASS / FAIL / BLOCKED / PENDING_LIVE per row.
 Tests column: `file::name prefix` is an R10 check (tests/architect/pending/r10-app-layer/ or, once its order lands, tests/architect/; the row
 passes when every check it names passed); `gate:path` is an existing gate test (passes when the gate passes); `live:<turn>` is a step of
 `scripts/launch/r10-live-replay.ts` (`all` = every live check; `smoke` = `--smoke`; `entry` = the bare /file and /connect pages). Status:
-`covered` (a test or check names it), `live-only`, `BLOCKED` (named reason; not a FAIL) or `GAP` (nothing checks it: a FAIL in the loop).
+`covered` (a test or check names it), `live-only`, `BLOCKED` (named reason; not a FAIL), `GAP` (nothing checks it: a FAIL in the loop),
+`review` (R-3: PENDING_REVIEW until a review verdict exists) or `integrated` (R-6: the full run on the trunk tip). Rows R-1..R-6 come from the
+owner's readiness review ("Trainee readiness findings", 2026-11-08 8:55 pm CST), relayed by the architect.
 
 | id | criterion | order | tests | live | status | note |
 |---|---|---|---|---|---|---|
@@ -148,5 +150,16 @@ passes when every check it names passed); `gate:path` is an existing gate test (
 | F.1 | Post-reset search: checked open postings with links, or one evidenced blocker | WO-C | r10-post-reset-replay.test.ts::F1a; r10-post-reset-replay.test.ts::F1b | live:F1a; live:F1b | covered |  |
 | F.2 | Post-reset research and its correction: research or the named blocker; never applications or outreach | WO-H | r10-post-reset-replay.test.ts::F2a; r10-post-reset-replay.test.ts::F2b; r10-fix-14-research.test.ts::F2a with sources reachable; r10-fix-14-research.test.ts::F2b (the correction) | live:F2a; live:F2b | covered |  |
 | F.3 | Stop: claims only what the control state shows; no unscheduled reconciliation; no automatic unpause | WO-K | r10-post-reset-replay.test.ts::F3 | live:F3 | covered | reads career_user_quiet until WO-K documents the control contract |
+| R-1 | Permission copy is consistent: the intro never contradicts a provider row, and the scopes shown equal the scopes requested (owner readiness review 2026-11-08) | WO-F | r10-fix-11-connections.test.ts::before connecting |  | GAP | r10-fix-11 checks purpose, plain-words permissions and the account; no test yet compares the rendered scopes with the scopes the consent URL requests, or the intro with each provider row |
+| R-2.1 | Third-party sign-in: the wall is detected (apply-vm.cjs and the cloud worker stop at needs_user / login_required) | WO-G | gate:tests/career-apply-vm.test.cjs; gate:tests/architect/flow-scenarios-apply.test.ts |  | covered |  |
+| R-2.2 | Third-party sign-in: the person picks the right account (the account the application is for) | WO-G |  |  | GAP | no code or test names which account to sign in with; the hand-back says only "finish this one yourself at this link" |
+| R-2.3 | Third-party sign-in: a permitted verification step (the person types an emailed code themselves; Trainee never types a password) | WO-G | gate:tests/architect/wo-096-email-code.test.ts |  | covered |  |
+| R-2.4 | Third-party sign-in: prepared work is kept while the person signs in | WO-G | gate:tests/architect/flow-scenarios-apply.test.ts |  | covered | needs_user keeps the prepared row and its link; the person finishes at that link (CLOUD-RUNNER.md fallback: their own browser, the extension) |
+| R-2.5 | Third-party sign-in: session expiry or revocation is handled (SIGNED_OUT, SIGN_IN_TIMEOUT read as "sign in first") | WO-G | gate:tests/career-approve-first.test.cjs |  | covered | the status wording is tested; a revoked session in the middle of a fill is not |
+| R-2.6 | Third-party sign-in: the ORIGINAL task resumes after the person signs in | WO-G |  |  | GAP | no resumption exists: apply-vm.cjs stops at needs_user, the cloud worker hands back login_required, and the fallback is the person finishing in their own browser or the extension; nothing re-queues the original application after sign-in |
+| R-3 | Whole-product writing quality: every reply the suite and the live replay produce, reviewed against spec D and the reply-quality criteria | WO-A |  |  | review | scripts/r10-loop.ts writes artifacts/r10-loop/<run>/replies.md; the row is PENDING_REVIEW until a reviewer puts replies-verdict.md (first line "VERDICT: PASS" or "VERDICT: FAIL") in that run's directory |
+| R-4 | Delivered artifacts on the real channel: the Telegram document arrives, the signed File link opens for its owner, the DOCX layout renders | WO-B |  | live:smoke; live:T1 | live-only | the live replay opens the File link signed in and checks the PDF's bytes against the stored document; the Telegram delivery itself is not observable without a real chat (the replay never calls the Bot API), and the DOCX is read for text, not rendered |
+| R-5 | Every File family shown as actual output at 390 and 1280 px, with its loading, empty and error states | WO-E | r10-fix-09-file-families.test.ts::F- |  | GAP | r10-fix-09 renders each family at 390 px light and dark; 1280 px and the loading, empty and error states are not rendered yet |
+| R-6 | Integrated revision: the loop's full run on trunk after every R10 PR merges is the pre-release gate | WO-I |  |  | integrated | PASS only when scripts/r10-loop.ts runs on the trunk tip, with the gate, and every other row is PASS or BLOCKED |
 
-Rows: 136. Covered: 121. Live-only: 1. BLOCKED: 4. GAP: 10 (E-34, E-39, E-40, E-59, E-87, D.1, D.4-1, D.4-2, D.4-5, D.4-12).
+Rows: 147. Covered: 125. Live-only: 2. BLOCKED: 4. GAP: 14 (E-34, E-39, E-40, E-59, E-87, D.1, D.4-1, D.4-2, D.4-5, D.4-12, R-1, R-2.2, R-2.6, R-5). Review: 1 (R-3). Integrated: 1 (R-6).

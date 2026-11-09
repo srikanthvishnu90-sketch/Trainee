@@ -94,7 +94,7 @@ export function receiptText(
       }. Nothing reached the employer.${tail}`;
     }
     case "unknown_outcome":
-      return `${company}: Trainee cannot tell whether it went through, and will not send it again. If they email you a confirmation, it did.${tail}`;
+      return `Submission may have landed at ${company}: Trainee cannot tell whether it went through, and will not send it again. If they email you a confirmation, it did.${tail}`;
     default:
       throw Error("not a finished application: " + row.state);
   }

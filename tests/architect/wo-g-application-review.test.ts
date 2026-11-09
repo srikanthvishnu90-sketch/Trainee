@@ -149,3 +149,20 @@ Deno.test("WO-G 13: the closeout has spec B.3's shape from the real outcome only
   eq(all[1], "TEST Analyst at TEST Delta: approved, not sent yet.");
   assert(all[2].startsWith(`TEST Data Analyst Intern at TEST Lakefront Transit Analytics is ready but not submitted because "Expected graduation date" is unanswered.`), all[2]);
 });
+
+Deno.test("WO-G 13 (acceptance replay): a final click that timed out reads 'submission may have landed' in chat, its receipt and its proof File, never 'submitted'", async () => {
+  const { statusReply } = await import("../../supabase/functions/_shared/career_apply_status.ts");
+  const { receiptText } = await import("../../supabase/functions/_shared/career_apply_receipts.ts");
+  const row = { id: "J1", company: "TEST Beta", title: "TEST Analyst", state: "unknown_outcome", reason: "DRIVER_ERROR_AT_SUBMIT", created_at: "2026-11-09T15:00:00Z", updated_at: "2026-11-09T15:05:00Z" };
+  for (const ask of ["did it go through?", "did my application to TEST Beta go through?", "where are my applications"]) {
+    const r = statusReply(ask, [row], NOW)!;
+    assert(r.reply.includes("TEST Beta (TEST Analyst): submission may have landed, but I can't tell whether it reached TEST Beta and TEST Beta has not confirmed it. It will not be sent again."), `${ask}: ${r.reply}`);
+    assert(!/\bsubmitted\b/i.test(r.reply.replace(/1 applications?:[^\n]*\n/, "")), `${ask}: never "submitted": ${r.reply}`);
+  }
+  eq(receiptText({ company: "TEST Beta", state: "unknown_outcome" }), "Submission may have landed at TEST Beta: Trainee cannot tell whether it went through, and will not send it again. If they email you a confirmation, it did.");
+  const store = memoryFileStore(), svc = createFileService({ store, env: { get: (k) => ENV[k] }, now: () => NOW, records: { application: async () => ({ ...row, confirmation_id: null, url: "https://boards.greenhouse.io/beta/jobs/1", payload: { fields: [] } }) as never } });
+  const made = await svc.create(U, "application_proof", { application_id: "J1" });
+  assert(made.ok, JSON.stringify(made));
+  const text = textOf(store.all()[0], { now: NOW });
+  assert(text.includes("Status: Submission may have landed.") && text.includes("Submission uncertain.") && !/Status: Submitted/.test(text), text);
+});

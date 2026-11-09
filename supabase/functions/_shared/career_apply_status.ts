@@ -143,7 +143,8 @@ export function statusLine(a: AppRow): string {
     case "submitted_unconfirmed":
       return `${name}: submitted${on ? ` on ${on}` : ""}; ${who} has not confirmed it yet${conf ? ` (their page showed ${conf})` : ""}.`;
     case "unknown_outcome":
-      return `${name}: I can't tell whether it reached ${who}. It will not be sent again.`;
+      // WO-G (R10 fix 13): a final step whose answer never came back is said as what it is, never "submitted".
+      return `${name}: submission may have landed, but I can't tell whether it reached ${who} and ${who} has not confirmed it. It will not be sent again.`;
     case "needs_user":
       // Round 2 of the apply scenarios (2026-10-30): an emailed code is asked AFTER the application went (the receipt says
       // so); "stopped before it was sent" was untrue for it, and the reason was the queue's own code ("email_code").

@@ -379,6 +379,11 @@ export function researchOverAction(message: string): boolean {
   const m = String(message ?? "").replace(/[\u2019`]/g, "'");
   return NO_ACTION.test(m) && (COMPANY_RESEARCH.test(m) || researchAsk(m));
 }
+// R10 WO-H fix 14b: "write a thank-you note to Maya after my interview" was read as an application-tracking log (tracking_log),
+// and "draft a follow-up email for my Stripe interview" as a general question. An ask to write, draft or redo a thank-you or
+// follow-up message is the brain's draft_followup, which checks the draft in code before it is shown and sends nothing.
+const FOLLOWUP_DRAFT = /\b(?:write|draft|compose|help\s+me\s+(?:write|with)|redo|rewrite|make|send\s+me)\b[^?.!]{0,40}\b(?:thank[\s-]?you|follow[\s-]?up)\s*(?:note|email|e-mail|message|letter|text)?\b/i;
+export const followupDraftAsk = (message: string) => FOLLOWUP_DRAFT.test(String(message ?? "").replace(/[\u2019`]/g, "'"));
 export function researchAsk(message: string): boolean {
   const m = String(message ?? "").replace(/[\u2019`]/g, "'");
   return !OWN_PAPERS.test(m) && !OWN_RECORD.test(m) && (RESEARCH_ASK.some((r) => r.test(m)) || MARKET_ASK.some((r) => r.test(m)) || companyInterviewAsk(m));
@@ -422,6 +427,7 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (researchReplyOn(o.env) && researchOverAction(o.message)) return { brain: true, mode, intent, reason: "company_research" };
   if (routerKept(o.env).has(intent)) return { brain: false, mode, intent, reason: "kept_on_router" };
   if (marketResearchAsk(o.env, o.message, intent)) return { brain: true, mode, intent, reason: "market_research" };
+  if ((!CODE_OWNED_INTENTS.has(intent) || intent === "tracking_log") && followupDraftAsk(o.message)) return { brain: true, mode, intent, reason: "followup_draft" };
   if (SEARCH_LIKE.has(intent) && filePageAsk(o.message, askFor(o.message, { intent, resultStatus: probe.result?.resultStatus }, o.ctx.discovery)?.ask)) return { brain: true, mode, intent, reason: "file_page_ask" };
   if (careerSwitcherOpenAsk(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "career_switcher_open_ask" };
   if (openCareerQuestion(o.env, o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "open_career_question" };

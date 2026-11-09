@@ -52,6 +52,8 @@ export const SHARED_REPLY_MODULES = [
   "research_dns.ts", "contact_sources/web_gate.ts", "contact_sources/types.ts", "contact_sources/suppression.ts",
   // R9 free sources (2026-11-08): the no-key sources and the reader's robots.txt check.
   "research_free_sources.ts", "research_never.ts",
+  // R10 WO-H fix 14b (2026-11-09): the follow-up and thank-you draft check (draft_followup).
+  "followup_draft.ts",
   // R9 outreach (2026-11-08): who may be written to (no-reply, role and ATS/job-board inboxes never) and the staged route's
   // reading of an ask to write to someone.
   "automated_inbox.ts", "outreach_ask.ts",

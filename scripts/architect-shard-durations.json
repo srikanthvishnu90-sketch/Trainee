@@ -543,12 +543,9 @@
     "tests/architect/r10-files-woc.test.ts": 0.1,
     "tests/architect/r10-files-live-parity.test.ts": 0.2,
     "tests/architect/r10-files-browser-live.test.ts": 1.0,
-<<<<<<< HEAD
     "tests/architect/r10-spec-global.test.ts": 0.2,
     "tests/architect/r10-spec-families.test.ts": 0.1,
     "tests/architect/r10-spec-review.test.ts": 0.2,
-=======
->>>>>>> wo/r10-e1b-f05-live-parity
     "tests/architect/r10-files-s2.test.ts": 0.9
   }
 }

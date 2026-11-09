@@ -50,6 +50,8 @@ export const SHARED_REPLY_MODULES = [
   // R9 outreach (2026-11-08): who may be written to (no-reply, role and ATS/job-board inboxes never) and the staged route's
   // reading of an ask to write to someone.
   "automated_inbox.ts", "outreach_ask.ts",
+  // R10 F.3 (2026-11-09): a stop turn's reply, built from the control state it wrote and read back (handler-career.ts).
+  "career_stop_truth.ts",
 ] as const;
 
 // D-036 (release flags, agent-chat/release_config.ts RELEASE_FLAGS): the code behind every flag the release serves ON that

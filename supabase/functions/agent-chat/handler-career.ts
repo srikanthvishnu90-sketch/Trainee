@@ -122,7 +122,7 @@ import { careerTools } from "../_shared/agent/career_tools.ts"; // TASK PLANNER:
 import { CAREER_READ_SCOPE as PEOPLE_READ_SCOPE, supabasePeopleDeps } from "../_shared/career_people.ts"; // D-033
 import { CareerWriting } from "../_shared/router_core.career.js"; // FEATURE 4
 import { rewriteOn, tailorRewriteTurn } from "../_shared/career_tailor_rewrite.ts"; // FEATURE 4
-import { supabaseOwnDocx } from "../_shared/career_resume_design.ts"; // RELEASE 9
+import { supabaseNewestUpload, supabaseOwnDocx } from "../_shared/career_resume_design.ts"; // RELEASE 9; RELEASE 10: the newest upload, for the format rater
 import { supabaseVersionLog } from "../_shared/career_resume_outcomes.ts"; // RELEASE 9
 // FEATURE 8: inbox check and follow-ups that can be sent.
 import { careerGrant, followupTurn, gmailReadGrant, gmailReadNow, mailNow, supabaseFollowupStores } from "../_shared/career_inbox_followups.ts";
@@ -1335,7 +1335,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           files: createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now, records: { application: (u, id) => supabaseFileStore(admin).appRow(u, id) } }),
           verifier: hunterVerifier({ fetch, apiKey: Deno.env.get("HUNTER_API_KEY"), cache: supabaseCheckCache(admin), now: Date.now }),
           // RELEASE 9: "keep my layout" reads their own Word file; each tailored file is recorded by version for the outcome rates.
-          tailor: { posting: (id) => postingsDb.get(id), personas: supabasePersonaStore(admin), resumes: supabaseResumeStore(admin), render: edgeRenderer(), ownDocx: supabaseOwnDocx(admin), versions: supabaseVersionLog(admin),
+          tailor: { posting: (id) => postingsDb.get(id), personas: supabasePersonaStore(admin), resumes: supabaseResumeStore(admin), render: edgeRenderer(), ownDocx: supabaseOwnDocx(admin), upload: supabaseNewestUpload(admin), versions: supabaseVersionLog(admin),
             deliver: (d) => { turnDocuments.push(d); } },
           // WO-066: "apply me to these" puts the postings in the person's own queue; the extension prepares each, and each
           // goes only on its card's tap.

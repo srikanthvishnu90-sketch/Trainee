@@ -10,16 +10,16 @@
 import { CONNECT_SESSION_TTL_MS, connectSecret, mintConnectToken, reasonKey, verifyConnectToken } from "../_shared/connect_link.ts";
 import { verifyInitData } from "../_shared/telegram_webapp.ts";
 import { connectHeaders as headers } from "../_shared/connect_landing.ts";
-import { previewOg, renderBootstrap, renderConnect, renderDone, renderPreview, renderState, type PState, type ProviderId, type ProviderView } from "../_shared/connect_page.ts";
+import { previewOg, renderBootstrap, renderConnect, renderDone, renderPreview, renderState, renderUnfinished, type PState, type ProviderId, type ProviderView } from "../_shared/connect_page.ts";
 
 export type { ProviderId } from "../_shared/connect_page.ts";
 export { connectLanding } from "../_shared/connect_landing.ts";
-export interface ProviderInfo { configured: boolean; scopes: string[] } // scopes: what the consent URL asks for, from the code that builds it
-export interface ProviderState { state: PState; email: string | null }
+export interface ProviderInfo { configured: boolean; scopes: string[]; sendScopes?: string[] } // sendScopes: what "Allow sending" asks for on a connected account (store.ts consentScopes) // scopes: what the consent URL asks for, from the code that builds it
+export interface ProviderState { state: PState; email: string | null; canSend?: boolean } // canSend: the grant already includes sending
 export interface ConnectDeps {
   env: { get(k: string): string | undefined };
   now: () => number;
-  providers(): Record<ProviderId, ProviderInfo>;
+  providers(purpose?: string): Record<ProviderId, ProviderInfo>; // the scopes each consent asks for this purpose (store.ts consentScopes)
   status(userId: string): Promise<Record<ProviderId, ProviderState>>;
   start(provider: ProviderId, userId: string, channel: string, reason?: string): Promise<string | null>; // the provider's consent URL for this person, or null when it can't be made
   disconnect(provider: ProviderId, userId: string): Promise<{ ok: boolean; reply: string }>;
@@ -37,11 +37,12 @@ const cookieOf = (req: Request, name: string) => {
   for (const part of (req.headers.get("cookie") ?? "").split(";")) { const [k, ...v] = part.trim().split("="); if (k === name) return v.join("="); }
   return "";
 };
+const PENDING = "tc_p"; // the provider whose consent was started from this browser and has not come back connected
 const NEW_LINK = "Ask Trainee in Telegram to connect your email again and open the new link.";
 
 export async function handleConnect(req: Request, d: ConnectDeps): Promise<Response> {
   const html = async (body: string, status = 200, extra: Record<string, string> = {}) => new Response(body, { status, headers: { ...(await headers("text/html; charset=utf-8")), ...extra } });
-  const json = async (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: await headers("application/json; charset=utf-8") });
+  const json = async (body: unknown, status = 200, extra: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { ...(await headers("application/json; charset=utf-8")), ...extra } });
   const botUrl = (d.env.get("TRAINEE_BOT_URL") || "").trim();
   const bot = /^https:\/\//.test(botUrl) ? botUrl : null;
   const state = (title: string, paras: string[], status: number) => html(renderState(title, paras, bot), status);
@@ -105,15 +106,20 @@ export async function handleConnect(req: Request, d: ConnectDeps): Promise<Respo
 
   try {
     if (action) {
-      if (!["start", "disconnect", "refresh"].includes(action)) return state("Not done", ["That is not something this page can do. Nothing was changed."], 400);
+      if (!["start", "disconnect", "refresh", "cancel"].includes(action)) return state("Not done", ["That is not something this page can do. Nothing was changed."], 400);
       if (action !== "refresh" && !PROVIDERS.includes(provider as ProviderId)) return state("Not done", ["That is not something this page can do. Nothing was changed."], 400);
       const p = provider as ProviderId;
       if (action === "start") {
-        if (!d.providers()[p].configured) return unavailable();
+        if (!d.providers(reasonKey(claims.w))[p].configured) return unavailable();
         const to = await d.start(p, u, claims.ch, claims.w); // D-037: reason "send" is the incremental gmail.send consent
         if (!to) return unavailable();
-        if ((req.headers.get("accept") ?? "").includes("application/json")) return json({ url: to });
-        return html("", 303, { location: to });
+        // R10 fix 11: remember that this consent was started, so coming back without finishing it shows "Connecting didn't finish".
+        const started = { "set-cookie": `${PENDING}=${p}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${Math.floor(CONNECT_SESSION_TTL_MS / 1000)}` };
+        if ((req.headers.get("accept") ?? "").includes("application/json")) return json({ url: to }, 200, started);
+        return html("", 303, { location: to, ...started });
+      }
+      if (action === "cancel") {
+        return html(renderState("Nothing was connected", [`You cancelled connecting ${p === "google" ? "Gmail" : "Outlook"}. No access was saved.`], bot), 200, { "set-cookie": `${PENDING}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0` });
       }
       if (action === "disconnect") {
         const r = await d.disconnect(p, u);
@@ -121,8 +127,10 @@ export async function handleConnect(req: Request, d: ConnectDeps): Promise<Respo
         return html(renderDone({ outcome: "disconnected", provider: p, email: null, botUrl: bot, message: r.reply }));
       }
     }
-    const info = d.providers(), st = await d.status(u);
-    const providers: ProviderView[] = PROVIDERS.map((id) => ({ id, configured: info[id].configured, state: st[id].state, email: st[id].email, scopes: info[id].scopes }));
+    const info = d.providers(reasonKey(claims.w)), st = await d.status(u);
+    const pending = cookieOf(req, PENDING) as ProviderId;
+    if (!action && PROVIDERS.includes(pending) && info[pending].configured && st[pending].state === "not_connected") return html(renderUnfinished({ token, provider: pending, botUrl: bot }));
+    const providers: ProviderView[] = PROVIDERS.map((id) => ({ id, configured: info[id].configured, state: st[id].state, email: st[id].email, scopes: info[id].scopes, canSend: st[id].canSend, sendScopes: info[id].sendScopes }));
     return html(renderConnect({ token, reason: reasonKey(claims.w), providers, botUrl: bot }));
   } catch (e) {
     console.error("[trainee-connect]", scrub(String((e as Error)?.message ?? e)).slice(0, 160)); // never a link token

@@ -140,7 +140,7 @@ Deno.test({ name: "R10 fix 10 binding: a session shows only its own account's co
     // the Telegram entry page itself (opened outside Telegram): its own named state, the way back, nothing about anyone
     const entry = await (await w.req({ get: `?list=${U_LIST}` })).text();
     eq(h1(entry), "Open from your Trainee chat");
-    assert(/Use the button in Telegram so this page can identify your account/.test(entry) && /Open Telegram/.test(entry) && entry.includes(BOT_URL) && /Sign in another way/.test(entry));
+    assert(/Use the button in your Trainee chat to identify your account/.test(entry) && /Open Telegram/.test(entry) && entry.includes(BOT_URL) && /Sign in another way/.test(entry));
     assert(!entry.includes(U_CO) && !entry.includes(V_CO));
   } finally { await w.pg.stop(); }
 } });

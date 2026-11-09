@@ -201,8 +201,8 @@ Deno.test({ name: "R10 fixes 10-11 in Chromium: every entry, recovery and connec
         // Verifying: the form's submit event fires (the page's own script draws the state) with the post deferred, so the state can
         // be measured; then the same form is posted for real.
         await s.page.evaluate(() => { const f = document.getElementById("codeform") as HTMLFormElement; const hold = (e: Event) => e.preventDefault(); f.addEventListener("submit", hold); f.requestSubmit(); f.removeEventListener("submit", hold); });
-        const v = await s.page.evaluate(() => { const b = document.querySelector("#codeform button") as HTMLButtonElement; const st = document.getElementById("verifying")!; return { disabled: b.disabled, label: b.textContent, status: st.hidden ? "" : st.textContent, h1: document.querySelector("h1")!.textContent }; });
-        if (!v.disabled || v.label !== "Signing in..." || v.status !== "Checking this sign-in. Private content remains hidden." || v.h1 !== "Signing you in") problems.push(`verifying @${vp.width}: ${JSON.stringify(v)}`);
+        const v = await s.page.evaluate(() => { const b = document.querySelector("#codeform button") as HTMLButtonElement; const st = document.getElementById("verifying")!; return { disabled: b.disabled, label: b.textContent, status: st.hidden ? "" : st.textContent, h1: document.querySelector("h1")!.textContent, masked: (document.getElementById("code") as HTMLInputElement).type === "password" }; });
+        if (!v.masked || !v.disabled || v.label !== "Signing in..." || v.status !== "Checking this sign-in. Private content remains hidden." || v.h1 !== "Signing you in") problems.push(`verifying @${vp.width}: ${JSON.stringify(v)}`);
         await check(s.page, "signin-4-verifying", vp, { action: "#codeform button", title: /^Signing you in$/, secret: PRIVATE });
         await Promise.all([s.page.waitForNavigation(), s.page.evaluate(() => (document.getElementById("codeform") as HTMLFormElement).submit())]);
         await s.page.waitForSelector("li.row");
@@ -227,6 +227,7 @@ Deno.test({ name: "R10 fixes 10-11 in Chromium: every entry, recovery and connec
         fileDeps = (await fileWorld()).d;
         const s = await session(vp); await s.page.goto(`${SITE}/file?list=${LIST}`);
         await s.page.waitForSelector("#nodata:not([hidden])");
+        if (await s.page.isVisible("p.status")) problems.push(`telegram entry @${vp.width}: still says it is signing in after it found no Telegram data`);
         await check(s.page, "telegram-entry", vp, { action: "#nodata a.apply", title: /^Open from your Trainee chat$/, secret: PRIVATE });
         await s.ctx.close();
       }

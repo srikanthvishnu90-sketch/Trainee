@@ -22,9 +22,8 @@ const MAX_PER_PROVIDER = 20;
 const UA_TOKEN = "TraineeBrowserEval/1 (dry run; never submits)";
 // What the runner does with the page: its own shown-check test (workers/career-browser/parallel-apply.cjs botCheck).
 const { botCheck: runnerBotCheck } = require("../../workers/career-browser/parallel-apply.cjs");
+const { APPLY_TEXT, NEVER_CLICK, applyUrlFor } = require("../../workers/career-browser/apply-entry.cjs");
 const SEND_METHODS = /^(GET|HEAD|OPTIONS)$/;
-const APPLY_TEXT = /^\s*(apply|apply now|apply here|apply for (this|the) (job|position|role)|apply to (this )?(job|position|role)|apply manually|i['’]?m interested|start (your )?application|bewerben|jetzt bewerben|ansök( nu)?|ansøg( nu)?|søk( nå)?|solliciteer( nu)?|postuler|candidatar(-se|me)?|inscr[ií]bete|candidati)\s*[»>→]?\s*$/i;
-const NEVER_CLICK = /submit|send|senden|absenden|envoyer|enviar|verzenden|skicka|finish|complete|confirm/i;
 
 // ---------------------------------------------------------------------------------------------------------- sample
 // CSV: provider,url (a header line is optional). Deterministic: input order, capped per provider.
@@ -96,20 +95,6 @@ function createPacer({ gapMs = 1000, now = () => Date.now(), sleep = (ms) => new
 }
 
 // ---------------------------------------------------------------------------------------------------------- providers
-// Where a provider's application form lives, one GET away from the posting page (null: follow the page's own Apply link).
-function applyUrlFor(provider, landed) {
-  let u;
-  try { u = new URL(landed); } catch { return null; }
-  const p = u.pathname.replace(/\/+$/, "");
-  switch (provider) {
-    case "lever": return /^\/[^/]+\/[0-9a-f-]{36}$/i.test(p) ? `${u.origin}${p}/apply` : null;
-    case "ashby": return /^\/[^/]+\/[0-9a-f-]{36}$/i.test(p) ? `${u.origin}${p}/application` : null;
-    case "breezy": return /^\/p\/[^/]+$/.test(p) ? `${u.origin}${p}/apply` : null;
-    case "workable": return /^\/[^/]+\/j\/[A-Z0-9]+$/i.test(p) ? `${u.origin}${p}/apply/` : null;
-    case "recruitee": return /^\/o\/[^/]+$/.test(p) ? `${u.origin}${p}/c/new` : null;
-    default: return null;
-  }
-}
 // The schema key an approved answer would come from, for one question the page asked (ats-fill's own decision).
 const FACT_KEYS = ["first_name", "last_name", "preferred_name", "full_name", "email", "phone", "current_company", "current_title", "linkedin_url", "github_url", "website_url", "location"];
 const PROBE = Object.fromEntries(FACT_KEYS.map((k) => [k, `@${k}`]));

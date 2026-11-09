@@ -31,6 +31,7 @@
 //    (the owner-run approve-first path), and this module never discovers or logs in anywhere.
 const fs = require("node:fs");
 const { fillForm } = require("./ats-fill.cjs");
+const { APPLY_TEXT, NEVER_CLICK, applyUrlFor } = require("./apply-entry.cjs");
 const crypto = require("node:crypto");
 
 const sha256 = (b) => crypto.createHash("sha256").update(b).digest("hex");
@@ -131,16 +132,24 @@ async function stopAtWall(page, url) {
 // The one "Apply" control on a job page that has no form yet: opened (never a control inside a form, never a new tab), so
 // the wall or the form behind it can be read. Opening it sends nothing; the same host rules guard where it leads.
 async function openApply(page, timeout) {
-  const h = (await page.evaluateHandle(() => {
-    const re = /^\s*(?:apply|apply now|apply for this (?:job|role|position)|apply to this (?:job|role)|start (?:your |my )?application)\s*$/i;
-    const c = [...document.querySelectorAll("a, button, [role=button]")]
-      .filter((e) => !e.closest("form") && (e.offsetWidth || e.offsetHeight) && re.test(e.innerText || e.getAttribute("aria-label") || ""));
-    if (c.length !== 1) return null;
+  // Job pages repeat their Apply control (top and bottom of the posting): several controls are one control when they all lead
+  // to the same address. Controls that lead to different places, or buttons with no address, stay ambiguous unless there is one.
+  const h = (await page.evaluateHandle(([at, nc]) => {
+    const re = new RegExp(at, "i"), never = new RegExp(nc, "i");
+    const c = [...document.querySelectorAll("a, button, [role=button]")].filter((e) => {
+      const t = (e.innerText || e.getAttribute("aria-label") || "").trim();
+      return !e.closest("form") && (e.offsetWidth || e.offsetHeight) && re.test(t) && !never.test(t);
+    });
+    if (!c.length) return null;
+    const hrefs = new Set(c.map((e) => (e.tagName === "A" && e.href) || ""));
+    if (c.length > 1 && (hrefs.size !== 1 || hrefs.has(""))) return null;
     c[0].removeAttribute("target");
     return c[0];
-  })).asElement();
+  }, [APPLY_TEXT.source, NEVER_CLICK.source])).asElement();
   if (!h) return false;
   await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded", timeout }).catch(() => null), h.click()]);
+  // A board that renders its form in place (no navigation) gets a moment to draw it.
+  await page.waitForSelector("form input, form textarea, form select", { timeout: Math.min(timeout, 8000) }).catch(() => null);
   return true;
 }
 async function botCheck(page) {
@@ -223,6 +232,18 @@ async function attempt(browser, p, opts, timing) {
     // An employer that wants the person to sign in first: never signed into, never given a password (the person does that).
     await stopAtWall(page, p.url);
     const hasForm = async () => !!(await page.$("form input, form select, form textarea")) && !!(await page.$('form button[type="submit"]'));
+    // A board whose form lives at its own apply address one GET away (Lever /apply, Ashby /application, ...): loaded once,
+    // through the same host rules, and checked like the first load.
+    if (!(await page.waitForSelector("form input, form textarea", { timeout: 5000 }).catch(() => null))) {
+      const direct = applyUrlFor(p.ats, page.url());
+      if (direct) {
+        try { await page.goto(direct, { waitUntil: "domcontentloaded" }); } catch (e) { onAllowedHost(); throw e; }
+        onAllowedHost();
+        await page.waitForSelector("form input, form textarea", { timeout: 8000 }).catch(() => null);
+        if (await botCheck(page)) throw new NeedsUser("bot_check", p.url);
+        await stopAtWall(page, p.url);
+      }
+    }
     // A job page whose form is behind its "Apply" control: opened once, and what it leads to is checked like the first load.
     if (!(await hasForm()) && (await openApply(page, opts.stepTimeoutMs || 15000))) {
       onAllowedHost();

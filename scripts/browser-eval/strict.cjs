@@ -14,7 +14,7 @@
 //   - every request but GET/HEAD/OPTIONS is aborted, except a POST whose body is a GraphQL read (every operation a `query`,
 //     no `mutation`), which some boards use to load the form; each one is logged;
 //   - a page script cancels every form submit, form.submit() and requestSubmit(), and counts the attempt;
-//   - the runner is stopped before its click, with retries 0; robots.txt is obeyed; 1 request a second per host.
+//   - the runner is stopped before its click, with retries 0; robots.txt is obeyed; 1 page load a second per host.
 //   node scripts/browser-eval/strict.cjs --sample scripts/browser-eval/sample.csv --label strict-1 [--max-per-provider 20]
 const fs = require("node:fs");
 const path = require("node:path");
@@ -72,12 +72,13 @@ async function strictPosting(browser, item, o) {
       else { r.sent_blocked++; return false; }
     }
     if (["image", "media", "font"].includes(req.resourceType())) return false;
-    await o.pacer.wait(u.host);
+    // Polite pacing is per page load (1 a second per host), not per script or stylesheet a page loads with it.
+    if (req.isNavigationRequest()) await o.pacer.wait(u.host);
     return true;
   };
   const stop = async (phase) => { if (phase === "submitting") throw new NeedsUser("strict_reached_submit"); };
   const out = await applyOne(browser, p, { allowHosts, retries: 0, stepTimeoutMs: 20000, requestGate: gate, initScript: lib.SUBMIT_TRAP, onPhase: stop }).catch((e) => ({ status: "error", reason: `driver_error: ${String(e && e.message).split("\n")[0].slice(0, 140)}` }));
-  r.reason = out.reason || out.status; r.field = out.field ? String(out.field).slice(0, 80) : null; r.needs = out.needs || null;
+  r.reason = out.reason || out.status; r.error = out.error ? String(out.error).slice(0, 140) : null; r.field = out.field ? String(out.field).slice(0, 80) : null; r.needs = out.needs || null;
   if (out.reason === "strict_reached_submit") r.result = "pass";
   else if (out.reason === "missing_required_answer" && CUSTOM_ONLY(out.needs)) r.result = "ready_if_answered";
   if (out.status === "submitted_page_confirmed" || out.status === "unknown_outcome") { r.result = "fail"; r.reason = `BREACH: runner reported ${out.status}`; }
@@ -120,7 +121,7 @@ async function main() {
   const rows = new Array(items.length); let next = 0;
   const conc = Math.max(1, Number(arg("concurrency", 6)));
   await Promise.all(Array.from({ length: conc }, async () => { while (next < items.length) { const i = next++; rows[i] = await strictPosting(browser, items[i], o);
-    const x = rows[i]; console.log(["STRICT", x.provider, x.result, x.reason, x.field || "", `blocked=${x.sent_blocked}`, `gql=${x.graphql_reads}`, `${(x.ms / 1000).toFixed(1)}s`, x.url].join(" | ")); } }));
+    const x = rows[i]; console.log(["STRICT", x.provider, x.result, x.reason, x.field || x.error || "", `blocked=${x.sent_blocked}`, `gql=${x.graphql_reads}`, `${(x.ms / 1000).toFixed(1)}s`, x.url].join(" | ")); } }));
   await browser.close();
   const s = summarize(rows);
   fs.writeFileSync(path.join(out, "strict.jsonl"), rows.map((x) => JSON.stringify(x)).join("\n") + "\n");

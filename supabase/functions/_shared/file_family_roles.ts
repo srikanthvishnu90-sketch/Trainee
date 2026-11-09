@@ -9,13 +9,14 @@
 // Targets (companies with no verified opening) never show Apply and never enter a count (C.7).
 import { type Act, type Block, type Ctx, type FamilyFile, type Tone, familyPage, familyStatePage, claimHtml, chipHtml, actHtml } from "./file_family.ts";
 import { esc, hostOf, webUrl } from "./file_page.ts";
-import type { ResultRow } from "./results_page.ts";
+import type { ResultRow, ResultsFeed } from "./results_page.ts";
 import { batchIdOf } from "./results_batch.ts";
 import { roleIds, specOf, stateCountsOf, STATES, type StateKey } from "./results_spec.ts";
 
 export interface ShortRole extends ResultRow {
   checkedAt?: string | null; // when this posting was last read live (the posting's last_seen_at): the time on its sourced facts
-  window?: string | null; // the student or graduation window in the posting's own words (Example 2)
+  window?: string | null; // the student or graduation window: the posting's own words, or WO-C's ready line ('Student window: "..."' / 'Student window: not stated in the posting')
+  openLine?: string | null; // WO-C's open-check line, shown as given ("Open: application page checked Nov 8, 5:16 PM CST" / "Not re-checked when listed")
   uncertain?: string | null; // what is not certain about this role, in words
   restriction?: string | null; // the kind of restriction that blocks it ("Location restriction"); the reason is `blocked`
 }
@@ -32,11 +33,22 @@ const vocab = (k: StateKey) => VOCAB[k] ?? { chip: STATES[k].label, tone: STATES
 const hidden = (f: Record<string, string>) => Object.entries(f).map(([k, v]) => `<input type="hidden" name="${esc(k)}" value="${esc(v)}">`).join("");
 const menu = (label: string, items: string[]) => items.length ? `<details class="ff-menu"><summary class="ff-sq" aria-label="${esc(label)}"><span aria-hidden="true">⋯</span></summary><div class="ff-menul">${items.join("")}</div></details>` : "";
 
+// The time on a role's sourced facts: WO-C's live check (JobView.checked) when it read the page live, else checkedAt. Never a guess.
+const checkedIso = (r: ShortRole): string | null => {
+  const ck = (r.job as { checked?: { state?: string; at?: number } | null }).checked;
+  return ck?.state === "live" && Number.isFinite(ck.at) ? new Date(ck.at as number).toISOString() : r.checkedAt ?? null;
+};
+const WINDOW_PREFIX = /^\s*student window:\s*/i;
+
 function roleCard(r: ShortRole, rid: string, f: ShortlistInput, c: Ctx): string {
   const sp = specOf(r), v = vocab(sp.key), link = webUrl(r.job.url), host = link ? hostOf(link) : "", label = `${r.job.title} at ${r.job.company}`;
   const pay = r.payShown ? `${r.payShown} employer-stated` : "pay not listed (marked unknown)";
-  const meta = claimHtml([r.place || "Location not listed", pay].join(" - "), { label: "checked", href: r.job.url, at: r.checkedAt ?? null }, c);
-  const win = r.window ? `<p class="ff-p"><strong>Student window:</strong> ${claimHtml(`"${r.window}"`, { label: "posting", href: r.job.url, at: r.checkedAt ?? null }, c)}</p>` : "";
+  const at = checkedIso(r);
+  const meta = claimHtml([r.place || "Location not listed", pay].join(" - "), { label: "checked", href: r.job.url, at }, c);
+  // WO-C hands the window already prefixed; strip the prefix so it is said once, and quote only raw posting words.
+  const prefixed = WINDOW_PREFIX.test(r.window ?? ""), words = prefixed ? r.window!.replace(WINDOW_PREFIX, "") : r.window ? `"${r.window}"` : "";
+  const win = words ? `<p class="ff-p ff-win"><strong>Student window:</strong> ${claimHtml(words, { label: "posting", href: r.job.url, at }, c)}</p>` : "";
+  const open = r.openLine ? `<p class="ff-p ff-mute ff-open">${esc(r.openLine)}</p>` : "";
   const gap = r.job.gaps?.[0] ?? r.payNote ?? (r.openQs ? `${r.openQs} employer ${r.openQs === 1 ? "question needs" : "questions need"} your answer.` : null);
   const fit = r.blocked
     ? `<div class="ff-fit ff-restr"><p class="ff-p"><strong>${esc(r.restriction ?? "Restriction")}:</strong> ${esc(r.blocked)} - this must resolve before any preparation.</p></div>`
@@ -56,7 +68,7 @@ function roleCard(r: ShortRole, rid: string, f: ShortlistInput, c: Ctx): string 
   const all = [...(r.why ?? []).slice(1), ...(r.job.gaps ?? []).slice(1)];
   const review = all.length ? `<details class="ff-fitd"><summary class="ff-btn ff-sec">Review fit</summary><ul class="ff-p">${all.map((w) => `<li>${esc(w)}</li>`).join("")}</ul></details>` : "";
   const said = r.status ? `<p class="ff-p">${esc(sp.detail)}</p>` : "";
-  return `<article class="ff-card ff-role" id="r-${esc(r.ref)}"><p class="ff-idrow"><span class="ff-id">${esc(rid)}</span>${chipHtml({ label: v.chip, tone: v.tone })}</p><h3 class="ff-it ff-serif">${esc(r.job.title)}</h3><p class="ff-p ff-mute ff-meta2">${meta}</p>${win}${fit}${unc}${said}<div class="ff-row-acts">${main}${review}${menu(`More for ${label}`, more)}</div></article>`;
+  return `<article class="ff-card ff-role" id="r-${esc(r.ref)}"><p class="ff-idrow"><span class="ff-id">${esc(rid)}</span>${chipHtml({ label: v.chip, tone: v.tone })}</p><h3 class="ff-it ff-serif">${esc(r.job.title)}</h3><p class="ff-p ff-mute ff-meta2">${meta}</p>${open}${win}${fit}${unc}${said}<div class="ff-row-acts">${main}${review}${menu(`More for ${label}`, more)}</div></article>`;
 }
 
 export function rolesShortlistFile(f: ShortlistInput): FamilyFile {
@@ -80,6 +92,13 @@ export function rolesShortlistFile(f: ShortlistInput): FamilyFile {
   };
 }
 // The page; with no roles, the empty state names the scope checked and adds nothing (C.24).
+// The live roles page's feed (trainee-file/handler.ts renderResults) as F-05's input: the same rows, the same token, nothing
+// added. A row's check time is the posting's own last_seen_at when the ingest read it; WO-C's live check wins (checkedIso).
+export function shortlistOfFeed(f: ResultsFeed, o: { updatedAt?: string | null; sourcesChecked?: string | null; targets?: Target[]; back?: string | null } = {}): ShortlistInput {
+  const rows: ShortRole[] = f.rows.map((r) => ({ ...r, checkedAt: (r as ShortRole).checkedAt ?? (r.job as { last_seen_at?: string | null }).last_seen_at ?? null }));
+  return { token: f.token, title: f.title, updatedAt: o.updatedAt ?? null, sourcesChecked: o.sourcesChecked ?? null, rows, targets: o.targets, back: o.back ?? null };
+}
+
 export function rolesShortlistPage(f: ShortlistInput, c: Ctx): string {
   if (!f.rows.length) return familyStatePage({ state: "empty", family: "F-05", scope: f.sourcesChecked, next: f.targets?.[0]?.watch ?? null }, c);
   return familyPage(rolesShortlistFile(f), c);

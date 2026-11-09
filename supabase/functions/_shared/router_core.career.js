@@ -26459,9 +26459,14 @@ const CareerRender = (() => {
     const pages = (s.match(/\/Type\s*\/Page(?![a-zA-Z])/g) || []).length;
     const runs = extractPdfRuns(buf);
     const sizes = [...new Set(runs.map((r) => r.size).filter(Boolean))].sort((a, b) => a - b);
+    const first = runs.filter((r) => r.page === 0);
+    const topY = first.length ? Math.max(...first.map((r) => r.y)) : null;
+    const nameRuns = topY === null ? [] : first.filter((r) => Math.abs(r.y - topY) < 0.5);
+    const nameSizes = [...new Set(nameRuns.map((r) => r.size).filter(Boolean))];
+    const bodySizes = [...new Set(runs.filter((r) => !nameRuns.includes(r)).map((r) => r.size).filter(Boolean))].sort((a, b) => a - b);
     const rightDate = (r) => DATE_ONLY_RE.test(String(r.text).trim()) && runs.some((o) => o !== r && o.page === r.page && Math.abs(o.y - r.y) < 0.5 && o.x <= 100);
     const xs = [...new Set(runs.filter((r) => r.x <= 100 || !rightDate(r)).map((r) => Math.round(r.x)))];
-    return { bytes: Bytes.isBuffer(buf) ? buf.length : 0, pages, fonts, fontSizesPt: sizes, images, singleColumn: runs.length > 0 && xs.every((x) => x <= 100), rightAlignedDates: runs.filter((r) => r.x > 100 && rightDate(r)).length, headings: [] };
+    return { bytes: Bytes.isBuffer(buf) ? buf.length : 0, pages, fonts, fontSizesPt: sizes, bodySizesPt: bodySizes, nameSizesPt: nameSizes, images, singleColumn: runs.length > 0 && xs.every((x) => x <= 100), rightAlignedDates: runs.filter((r) => r.x > 100 && rightDate(r)).length, headings: [] };
   }
   function extractPdfPoppler(buf) {
     if (!cp || !fs || !os) return null;
@@ -26511,12 +26516,23 @@ const CareerRender = (() => {
     const stylesXml = (parts.get("word/styles.xml") || Bytes.alloc(0)).toString("utf8");
     const fonts = [...new Set([...stylesXml.matchAll(/w:ascii="([^"]+)"/g)].map((m) => m[1]))];
     const sizes = [...new Set([...stylesXml.matchAll(/<w:sz w:val="(\d+)"/g)].map((m) => parseInt(m[1], 10) / 2))].sort((a, b) => a - b);
+    const firstStyle = (/<w:p[\s>][\s\S]*?<w:pStyle w:val="([^"]+)"[\s\S]*?<\/w:p>/.exec(docXml.slice(0, (docXml.indexOf("</w:p>") + 6) || 0)) || [])[1] || null;
+    const styleUses = firstStyle ? (docXml.match(new RegExp(`<w:pStyle w:val="${firstStyle.replace(/[^\w-]/g, "")}"`, "g")) || []).length : 0;
+    const styleSz = (id) => { const m = new RegExp(`<w:style\\b[^>]*w:styleId="${id.replace(/[^\w-]/g, "")}"[^>]*>([\\s\\S]*?)<\\/w:style>`).exec(stylesXml); return m ? [...m[1].matchAll(/<w:sz w:val="(\d+)"/g)].map((x) => parseInt(x[1], 10) / 2) : []; };
+    const nameSizes = firstStyle && styleUses === 1 ? [...new Set(styleSz(firstStyle))] : [];
+    const styleDefs = new Map([...stylesXml.matchAll(/<w:style\b([^>]*)>([\s\S]*?)<\/w:style>/g)].map((m) => [(/w:styleId="([^"]+)"/.exec(m[1]) || [])[1], { attrs: m[1], body: m[2] }]).filter(([id]) => id));
+    const used = new Set([...docXml.matchAll(/<w:(?:pStyle|rStyle|tblStyle) w:val="([^"]+)"/g)].map((m) => m[1]));
+    for (const [id, d] of styleDefs) if (/w:default="(?:1|true)"/.test(d.attrs) && /w:type="(?:paragraph|character)"/.test(d.attrs)) used.add(id);
+    for (const id of [...used]) { let cur = id, n = 0; while (cur && n++ < 20) { used.add(cur); const b = styleDefs.get(cur); cur = b ? ((/<w:basedOn w:val="([^"]+)"/.exec(b.body) || [])[1] || null) : null; } }
+    const otherSizes = [...styleDefs].filter(([id]) => used.has(id) && !(nameSizes.length && id === firstStyle)).flatMap(([, d]) => [...d.body.matchAll(/<w:sz w:val="(\d+)"/g)].map((x) => parseInt(x[1], 10) / 2));
+    const defaults = [...(/<w:docDefaults>[\s\S]*?<\/w:docDefaults>/.exec(stylesXml) || [""])[0].matchAll(/<w:sz w:val="(\d+)"/g)].map((x) => parseInt(x[1], 10) / 2);
+    const bodySizes = [...new Set([...defaults, ...otherSizes])].sort((a, b) => a - b);
     const mediaParts = names.filter((k) => k.startsWith("word/media/")).length;
     const images = mediaParts + (docXml.match(/<w:drawing|<a:blip|<w:pict/g) || []).length;
     const tables = (docXml.match(/<w:tbl[\s>]/g) || []).length;
     const textFrames = (docXml.match(/txbxContent/g) || []).length;
     const headerFooterParts = names.filter((k) => /word\/(header|footer)\d*\.xml/.test(k)).length;
-    return { bytes: Bytes.isBuffer(buf) ? buf.length : 0, fonts, fontSizesPt: sizes, images, tables, textFrames, headerFooterParts, headings: [] };
+    return { bytes: Bytes.isBuffer(buf) ? buf.length : 0, fonts, fontSizesPt: sizes, bodySizesPt: bodySizes, nameSizesPt: nameSizes, images, tables, textFrames, headerFooterParts, headings: [] };
   }
   function extractDocxPython(buf) {
     if (!cp || !fs || !os) return null;
@@ -26626,16 +26642,20 @@ const CareerRender = (() => {
         if (!st.singleColumn) add("single_column", "fail", "PDF text does not start in a single column — R1");
         const badFonts = st.fonts.filter((f) => !["Helvetica", "Helvetica-Bold", "Times-Roman", "Times-Bold", "Courier", "Courier-Bold"].includes(f));
         if (badFonts.length) add("fonts", "fail", `non-standard PDF font(s): ${badFonts.join(", ")} — R6`);
-        const badSizes = st.fontSizesPt.filter((s) => s < 10 || s > 12);
+        const badSizes = st.bodySizesPt.filter((s) => s < 10 || s > 12);
         if (badSizes.length) add("fonts", "fail", `PDF font size(s) outside 10–12pt: ${badSizes.join(", ")} — R6`);
+        const badName = st.nameSizesPt.filter((s) => s < 10 || s > 18);
+        if (badName.length) add("fonts", "fail", `PDF name size(s) outside 10–18pt: ${badName.join(", ")} — R6`);
         if (o.pageLimit && st.pages > o.pageLimit) add("page_count", "warn", `PDF runs ${st.pages} pages; this role family's limit is ${o.pageLimit} (123 conventions)`);
       } else {
         if (st.images > 0) add("images", "fail", `DOCX contains ${st.images} image/media part(s) — R2`);
         if (st.tables > 0) add("tables", "fail", `DOCX uses ${st.tables} layout table(s) — R1: no layout tables`);
         if (st.textFrames > 0) add("text_frames", "fail", `DOCX contains ${st.textFrames} text frame(s) — R1: no text boxes/frames`);
         if (st.headerFooterParts > 0) add("contact_in_body", "warn", `DOCX has ${st.headerFooterParts} header/footer part(s); contact info belongs in the body — R4`);
-        const badSizes = st.fontSizesPt.filter((s) => s < 10 || s > 12);
+        const badSizes = st.bodySizesPt.filter((s) => s < 10 || s > 12);
         if (badSizes.length) add("fonts", "fail", `DOCX font size(s) outside 10–12pt: ${badSizes.join(", ")} — R6`);
+        const badName = st.nameSizesPt.filter((s) => s < 10 || s > 18);
+        if (badName.length) add("fonts", "fail", `DOCX name size(s) outside 10–18pt: ${badName.join(", ")} — R6`);
       }
       const aLines = extractA(buf);
       let bLines = extractB(buf);

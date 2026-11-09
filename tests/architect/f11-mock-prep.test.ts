@@ -84,8 +84,8 @@ Deno.test("F11/5 the judge: rubric-anchored prompt, Claude only, metered with on
     callModel: (cfg, payload, o) => callModel(cfg, payload, { ...o, request: wire.request }),
   });
   eq((await live({ question: "Q", requirement: "sql", keys: ["dense rank"], answer: "dense rank", userId: "u1", threadId: "t1" }))?.verdict, "strong");
-  eq([wire.urls, wire.bodies[0].model, wire.headers[0]["x-api-key"], wire.onlyAnthropic()], [["https://api.anthropic.com/v1/messages"], "claude-haiku-5-5", "sk-ant-test", true]);
-  eq([rows2[0].r.provider, rows2[0].r.models], ["anthropic", ["claude-haiku-5-5"]]);
+  eq([wire.urls, wire.bodies[0].model, wire.headers[0]["x-api-key"], wire.onlyAnthropic()], [["https://api.anthropic.com/v1/messages"], "claude-sonnet-5-5", "sk-ant-test", true]);
+  eq([rows2[0].r.provider, rows2[0].r.models], ["anthropic", ["claude-sonnet-5-5"]]);
   const broken = modelJudge(admin, { get: () => undefined }, { call: () => Promise.reject(new Error("down")) });
   eq(await broken({ question: "Q", requirement: null, keys: [], answer: "a" }), null, "a failed judge leaves the code check standing");
   // D-036: CAREER_MOCK_JUDGE is a release flag: on when unset, and CAREER_MOCK_JUDGE=off (its rollback) means no judge.

@@ -674,8 +674,8 @@ export async function runSources(s: Sources) {
 }
 
 // ================================================================================================ allowance
-// The person's daily AI ceiling (career_spend_cap.ts) under a batch's concurrent calls (five at a time): never one call
-// past it, however many start together; every call under it goes.
+// Architect ruling D-046 (2026-11-09): there is no per-person daily AI ceiling. Under a batch's concurrent calls (five at a
+// time), whatever the person "used" today and whatever the old limit was, every call goes and no limit note is added.
 export interface Allowance { id: number; category: string; used: number; limit: number; asked: number; group: number }
 function genAllowance(r: ReturnType<typeof rng>, n: number, id0: number): Allowance[] {
   return Array.from({ length: n }, (_, i) => {
@@ -695,11 +695,10 @@ export async function runAllowance(s: Allowance) {
     const part = Array.from({ length: Math.min(s.group, s.asked - k) }, () => cap.call({ provider: "anthropic", model: "claude-haiku-5-5" } as any, {}, { meter }).then(() => { ok++; }, () => {}));
     await Promise.all(part);
   }
-  const want = Math.max(0, Math.min(s.asked, s.limit - s.used));
-  const got = { used: s.used, limit: s.limit, asked: s.asked, group: s.group, sent, want };
-  if (sent > want) return { why: "calls went past the person's daily ceiling (calls started together each saw the same total)", got };
-  if (sent < want) return { why: "a call under the ceiling was refused", got };
-  if (want < s.asked && cap.note() === null) return { why: "the ceiling was reached and the reply has no note saying so", got };
+  const want = s.asked;
+  const got = { used: s.used, limit: s.limit, asked: s.asked, group: s.group, sent, want, ok };
+  if (sent !== want || ok !== want) return { why: "a call was refused by a per-person ceiling (D-046: there is none)", got };
+  if (cap.note() !== null) return { why: "a per-person limit note was added", got };
   return null;
 }
 

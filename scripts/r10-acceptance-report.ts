@@ -37,11 +37,9 @@ const BASELINE = { scenarios: 2, turns: 5 };
 // Acceptance criteria this suite (PR1: the harness and the two replays) does not check, said plainly so no reader takes them as
 // covered. Spec E numbers.
 const NOT_COVERED = [
-  "E.4 36-41 (ambiguity and messages: the referent settled before any action, destination kept, versions by human labels, no guessed address): not checked here",
-  "E.1 13 (a changed bullet shown beside the previous one, no silent regeneration): not checked here",
-  "E.6 51 (budget enforcement intact, no cap raised or credits bought): not checked here; the replay only spends the limit, it does not test enforcement settings",
-  "E.6 54 (after a blocker: what is done, what remains, the smallest decision): not checked here",
-  "Items 9-14 (File families, entry and sign-in, connections, application review, execution and proof, research and drafts): their tests come in later PRs",
+  "E.4 37, 39-41 (destination kept after follow-ups, clarification is not payload approval, versions by human labels, no guessed address): not checked here; 36 and 38 are (r10-fix-04: 'Send this one.' and 'The PDF to me.')",
+  "E.6 51 (no cap raised, no credits bought): not checked here; r10-fix-07 checks only that no model call is made at the limit",
+  "Items 9-14 (File families, entry and sign-in, connections, application review, execution and proof, research and drafts): their tests come in the next PR",
 ];
 
 const args = Deno.args;

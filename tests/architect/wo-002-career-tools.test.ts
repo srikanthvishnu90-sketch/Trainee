@@ -25,6 +25,7 @@ Deno.test("WO-002/T1 the tool set: names, effects, schemas; no external tool yet
     "brief_from_invite", "set_weekly_digest",
     "offer_benchmark", "career_path_answer",
     "queue_applications", "get_posting", "get_situation",
+    "draft_followup",
   ].sort()); // correct_profile_fact (a correction replaces the fact it corrects) and read_resume (a pasted resume read by code): WO-106; // get_situation (the person's situation, read once per turn): WO-100; // get_posting (one posting in full, its stated pay): WO-068; // queue_applications (the person's own apply queue; each application goes only on its card's tap): WO-066; // the three alert tools: WO-007; standing instructions: WO-023; where_do_i_stand: WO-024; the pre-interview brief: WO-025; recall (the account's timeline): WO-027; the resume tools: WO-028; brief_from_invite and set_weekly_digest: WO-034; offer_benchmark and career_path_answer: WO-036;
   // contacts, outreach drafts and the referral map: WO-033 (drafting is write_own: sending is only by the approval reply and the scheduled run)
   const effects = Object.fromEntries(tools.map((t) => [t.name, t.effect]));
@@ -39,6 +40,7 @@ Deno.test("WO-002/T1 the tool set: names, effects, schemas; no external tool yet
     contact_list: "read", verify_contacts: "write_own", record_list_cost: "write_own", draft_outreach: "write_own",
     set_outreach_signature: "write_own", referral_map: "read",
     brief_from_invite: "write_own", set_weekly_digest: "write_own",
+    draft_followup: "read", // a draft only: nothing is stored or sent (spec B.6); sending needs its own approval
   });
   for (const t of tools) {
     assert(t.description.length >= 20 && t.description.length <= 400, `${t.name}: a real description`);

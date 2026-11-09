@@ -249,7 +249,40 @@ async function fillText(page, d, value) {
   if (d.inputType === "number" && !Number.isFinite(Number(String(value).trim()))) return { ok: false, reason: "answer_not_a_number" };
   await page.locator(sel(d.q)).first().fill(String(value));
   const s = await stateOf(page, d);
-  return String(s.text).trim() === String(value).trim() ? { ok: true } : { ok: false, reason: "readback_mismatch" };
+  if (String(s.text).trim() === String(value).trim()) return { ok: true };
+  if (isPhone(d, value) && await phoneSame(page, d, value, s.text)) return { ok: true };
+  return { ok: false, reason: "readback_mismatch" };
+}
+// A phone box that reformats what is typed (Workable, intl-tel-input: "+1 312 555 0100" reads back as "(312) 555-0100" beside a
+// "+1" country picker; strict benchmark run 42707036468, 12 Workable forms) holds the same number when its digits are the
+// approved digits, or the approved digits less a dial code that the field's own country picker shows. Any other digit is a
+// mismatch: nothing but the approved number is ever accepted.
+const digitsOf = (v) => String(v || "").replace(/\D/g, "");
+const isPhone = (d, value) => (d.inputType === "tel" || /^(phone|mobile|telephone|cell|telefon|telefoon|handy|mobil)/.test(norm(d.label)))
+  && /^\+?[\d\s().\-\/]{6,}$/.test(String(value).trim());
+async function phoneSame(page, d, value, text) {
+  const want = digitsOf(value), got = digitsOf(text);
+  if (!got) return false;
+  if (got === want) return true;
+  if (!String(value).trim().startsWith("+") || got.length >= want.length || !want.endsWith(got)) return false;
+  const dial = want.slice(0, want.length - got.length);
+  if (dial.length > 3) return false;
+  const shown = await page.evaluate(([q]) => {
+    const el = document.querySelector(`[data-upmore-q="${q}"]`);
+    if (!el) return "";
+    // The phone field's own shell: never one that holds another question (its country picker is not one of ours).
+    let box = el.closest(".iti, [class*='phone' i]");
+    if (!box || box.querySelectorAll("[data-upmore-q]").length > 1) box = el.parentElement;
+    const bits = [];
+    for (const n of (box ? [box, ...box.querySelectorAll("*")] : [])) {
+      if (n === el || n.tagName === "OPTION") continue;
+      if (n.matches && n.matches("ul, [role=listbox], .iti__country-list, .iti__dropdown-content")) continue;
+      if (n.closest && n.closest("ul, [role=listbox], .iti__country-list, .iti__dropdown-content")) continue;
+      bits.push(n.getAttribute("aria-label") || "", n.getAttribute("title") || "", n.children.length ? "" : n.textContent || "", n.tagName === "SELECT" ? (n.options[n.selectedIndex] || {}).textContent || "" : "");
+    }
+    return bits.join(" | ");
+  }, [d.q]).catch(() => "");
+  return new RegExp(`\\+\\s?${dial}(?!\\d)`).test(shown);
 }
 async function fillSelect(page, d, value) {
   const m = matchOption(d.options.map((o) => o.label), value);
@@ -284,8 +317,32 @@ async function fillCheckbox(page, d) {
   return (await stateOf(page, d)).filled ? { ok: true } : { ok: false, reason: "readback_mismatch" };
 }
 async function fillFile(page, d, path) {
+  // The upload's own block (the input's nearest ancestor that holds no other question), marked before the file is set: a board
+  // that swaps the input for a chip naming the file once it has it (Greenhouse's "Attach": the input is replaced, strict
+  // benchmark run 42712892939) is read back from that chip. Only the resume's own file name, in that block, counts.
+  await page.evaluate(([q]) => {
+    const el = document.querySelector(`[data-upmore-q="${q}"]`);
+    let box = el && el.parentElement;
+    for (let i = 0; box && i < 3; i++) {
+      const up = box.parentElement;
+      if (!up || up.querySelectorAll("[data-upmore-q]").length > 1 || up.querySelectorAll("input[type=file]").length > 1) break;
+      box = up;
+    }
+    if (box) box.setAttribute("data-upmore-fbox", q);
+  }, [d.q]).catch(() => {});
   await page.locator(sel(d.q)).first().setInputFiles(path);
-  return (await stateOf(page, d)).filled ? { ok: true } : { ok: false, reason: "upload_not_accepted" };
+  const name = require("node:path").basename(path);
+  for (let i = 0; i < 8; i++) {
+    const s = await stateOf(page, d);
+    if (s.filled) return { ok: true };
+    const chip = await page.evaluate(([q, n]) => {
+      const b = document.querySelector(`[data-upmore-fbox="${q}"]`);
+      return !!b && (b.innerText || "").includes(n);
+    }, [d.q, name]).catch(() => false);
+    if (chip) return { ok: true };
+    await page.waitForTimeout(200);
+  }
+  return { ok: false, reason: "upload_not_accepted" };
 }
 async function fillCombo(page, d, value, pick) {
   const input = page.locator(sel(d.q)).first();

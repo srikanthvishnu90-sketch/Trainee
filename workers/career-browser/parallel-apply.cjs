@@ -154,6 +154,8 @@ async function stopAtWall(page, url) {
 }
 // The one "Apply" control on a job page that has no form yet: opened (never a control inside a form, never a new tab), so
 // the wall or the form behind it can be read. Opening it sends nothing; the same host rules guard where it leads.
+// A field of an application: inside a form, or (a board without a <form>, Ashby) the resume upload or an email box on the page.
+const FIELD_SEL = "form input, form select, form textarea, input[type=file], input[type=email]";
 async function openApply(page, timeout) {
   // Job pages repeat their Apply control (top and bottom of the posting): several controls are one control when they all lead
   // to the same address. Controls that lead to different places, or buttons with no address, stay ambiguous unless there is one.
@@ -180,7 +182,7 @@ async function openApply(page, timeout) {
   if (!h) return false;
   await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded", timeout }).catch(() => null), h.click()]);
   // A board that renders its form in place (no navigation) gets a moment to draw it.
-  await page.waitForSelector("form input, form textarea, form select", { timeout: Math.min(timeout, 8000) }).catch(() => null);
+  await page.waitForSelector(FIELD_SEL, { timeout: Math.min(timeout, 8000) }).catch(() => null);
   return true;
 }
 async function botCheck(page) {
@@ -297,17 +299,24 @@ async function attempt(browser, p, opts, timing) {
         const pick = worded.length === 1 ? worded[0] : typed.length === 1 ? typed[0] : worded.find((b) => typed.includes(b)) || null;
         if (pick) { pick.setAttribute("data-upmore-submit", "1"); return true; }
       }
+      // A board that builds its application without a <form> (Ashby: every posting, strict benchmark run 42712892939, forms=0 with
+      // 19 to 48 fields): the page is the form when it has no form of its own, asks for a file or an email, and has exactly one
+      // visible control in the Submit words. Two or none: no Submit is pressed.
+      if (!forms.length && document.querySelector("input[type=file], input[type=email]")) {
+        const worded = [...document.querySelectorAll("button, [role=button], input[type=button], input[type=submit]")].filter((b) => vis(b) && word.test(b.innerText || b.value || ""));
+        if (worded.length === 1) { worded[0].setAttribute("data-upmore-submit", "1"); return true; }
+      }
       return false;
     });
-    const hasForm = async () => !!(await page.$("form input, form select, form textarea")) && (await markSubmit());
+    const hasForm = async () => !!(await page.$(FIELD_SEL)) && (await markSubmit());
     // A board whose form lives at its own apply address one GET away (Lever /apply, Ashby /application, ...): loaded once,
     // through the same host rules, and checked like the first load.
-    if (!(await page.waitForSelector("form input, form textarea", { timeout: 5000 }).catch(() => null))) {
+    if (!(await page.waitForSelector(FIELD_SEL, { timeout: 5000 }).catch(() => null))) {
       const direct = applyUrlFor(p.ats, page.url());
       if (direct) {
         try { await page.goto(direct, { waitUntil: "domcontentloaded" }); } catch (e) { onAllowedHost(); throw e; }
         onAllowedHost();
-        await page.waitForSelector("form input, form textarea", { timeout: 8000 }).catch(() => null);
+        await page.waitForSelector(FIELD_SEL, { timeout: 8000 }).catch(() => null);
         { const shown = await botCheck(page); if (shown) { const e = new NeedsUser("bot_check", p.url); e.detail = shown; throw e; } }
         await stopAtWall(page, p.url);
       }

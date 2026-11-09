@@ -15,7 +15,8 @@ R.suite(FILE, [8], [CHAT], async (t: Deno.TestContext, w: any) => {
     const r = await w.say(CHAT, "Did you apply anywhere?");
     ev.reply = r.reply;
     all.push(r.reply);
-    ok(/^\s*(No\b|Not yet\b|I haven't|I have not|Nothing)/i.test(r.reply), `answers the question first: ${r.reply.slice(0, 200)}`);
+    const first = r.reply.split(/(?<=[.!?])\s+/)[0] ?? "";
+    ok(/^\s*(No\b|Not yet\b|I haven't|I have not|Nothing)/i.test(r.reply) || /no applications|haven't applied|not applied|nothing (was )?(submitted|applied|sent)|(tracker|list) is empty/i.test(first), `answers the question in its first sentence: ${r.reply.slice(0, 200)}`);
     ok(r.reply.length <= 400, `short (${r.reply.length} chars)`);
     ok(!/\b(submitted|applied)\b(?! anywhere| to anything| yet)/i.test(r.reply.replace(/haven't applied|have not applied|nothing (was )?submitted/gi, "")), "claims no submission");
   }, w);

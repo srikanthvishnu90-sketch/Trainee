@@ -338,8 +338,13 @@ Deno.test({
 
       const b = await setup(B, "tok-b");
       await t.step("wrong: a last file for the old list's first role; T3 owns the mismatch once and makes the right file", async () => {
-        const wrong = await b.say("tailor my resume");
-        assertNode.ok(OLD_ROLE.test(wrong.reply), `setup: the posting tailor made a file for an old-list role (trunk's T2): ${wrong.reply.slice(0, 160)}`);
+        // R1 (spec E.1 #11; changed from #634, where this asserted trunk's pick): a bare "tailor my resume" never takes the old
+        // list's first role; it asks which role, with no file.
+        const bare = await b.say("tailor my resume");
+        assertNode.ok(/Which role should I tailor your resume for\?/.test(bare.reply) && !OLD_ROLE.test(bare.reply) && !(bare.body.artifacts ?? []).length, `a bare tailor asks which role: ${bare.intent}: ${bare.reply.slice(0, 200)}`);
+        // The person picks the old list's first role themselves; that file is the one T3 then calls wrong.
+        const wrong = await b.say("tailor my resume for the first one");
+        assertNode.ok(OLD_ROLE.test(wrong.reply), `setup: the posting tailor made a file for the old list's first role: ${wrong.reply.slice(0, 160)}`);
         assertNode.ok(!/parse check/i.test(wrong.reply) && /Saved as PDF and DOCX/.test(wrong.reply), `the posting tailor's reply keeps what was saved, without the parser's self-report: ${wrong.reply}`);
         const r = await b.say(T3);
         eq((r.reply.match(/wrong role/gi) ?? []).length, 1, `the mismatch owned once: ${r.reply}`);
@@ -408,6 +413,34 @@ Deno.test("facts/3 nothing confirmed: the saved intake is used, said unconfirmed
   const pdf = readPdf(Uint8Array.from(atob(r!.documents[0].base64), (c) => c.charCodeAt(0)));
   assertNode.ok(/Facts unconfirmed; not for external submission/.test(pdf.lines.join(" ")), pdf.lines.join(" | "));
   assertNode.ok(/not yet confirmed by you/.test(r!.reply) && /Are they right as written\?/.test(r!.reply), r!.reply);
+});
+
+// R3a (D-007): with nothing confirmed the saved intake is used, but a quarantined fact (flagged, delegated, or the bank's
+// F-027..F-079) is never printed.
+Deno.test("facts/5 nothing confirmed, quarantined facts present: none of them is printed", async () => {
+  const p = intake("", false);
+  (p as any).facts.push(
+    { id: "q1", kind: "experience", title: "Quant Researcher, Invented Capital (TEST)", text: "Quant Researcher, Invented Capital (TEST)", bullets: ["Built an invented trading model (TEST)"], quarantined: true, needs_confirmation: true },
+    { id: "q2", kind: "project", title: "Delegated Project Zeta (TEST)", text: "Delegated Project Zeta (TEST)", bullets: [], provenance: "owner-delegated answer-all", needs_confirmation: true },
+    { id: "q3", kind: "leadership", title: "Bank Fact Omega Club (TEST)", text: "Bank Fact Omega Club (TEST)", bullets: [], factId: "F-031", needs_confirmation: true });
+  const built = buildResume(p, targetOf(T1)!, false);
+  assertNode.ok(built.unconfirmed, "nothing confirmed");
+  const r = await turnOn(p, T1);
+  const pdf = readPdf(Uint8Array.from(atob(r!.documents[0].base64), (c) => c.charCodeAt(0))).lines.join(" ");
+  for (const x of ["Invented Capital", "invented trading model", "Project Zeta", "Omega Club"]) {
+    assertNode.ok(!built.lines.join(" ").includes(x) && !pdf.includes(x) && !r!.reply.includes(x), `${x}: never printed`);
+  }
+  assertNode.ok(/TEST University/.test(pdf), "the person's own intake is still used");
+});
+
+// R1 (owner readiness review): any stated target is the target, with or without a role word; an employer in front of a role is
+// a posting; a bare ask states none.
+Deno.test("target/1 'product management', 'consulting', 'trading', 'nursing' are targets; 'the quillstone data analyst intern role' is a posting", () => {
+  for (const [ask, label] of [["make my resume a PDF for product management", "product management roles"], ["tailor my resume for consulting roles", "consulting roles"],
+    ["make my resume a PDF for trading", "trading roles"], ["make my resume for nursing jobs", "nursing roles"], ["make my resume for underwater basket weaving roles", "underwater basket weaving roles"]] as const) {
+    assertNode.equal(targetOf(ask)?.label, label, ask);
+  }
+  for (const ask of ["tailor my resume for the quillstone data analyst intern role", "tailor my resume", "make my resume a pdf for me", "make my resume for review"]) assertNode.equal(targetOf(ask), null, ask);
 });
 
 Deno.test("facts/4 the task lapses after a day: an old target and an old rewording are not carried into a new ask", async () => {

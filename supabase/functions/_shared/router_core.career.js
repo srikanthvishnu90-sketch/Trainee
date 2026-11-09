@@ -23343,6 +23343,10 @@ const CareerRouter = (() => {
         const reply = compose({ headline: "I need the posting to tailor against — Big Law is a category, not a posting.", facts, nextStep: "Paste the firm's posting and the CV cut runs immediately." });
         return { intent: "tailor_needs_posting", reply, resultStatus: "awaiting_user", artifact: null, sends: 0 };
       }
+      if (/^\s*(?:hey,?\s+|ok(?:ay)?,?\s+|so\s+)?(?:please\s+|can you\s+|could you\s+|help me\s+)?tailor\s+(?:my\s+)?(?:resume|cv)(?:\s+(?:please|for me|now|again))?\s*[.!?]*\s*$/i.test(String(text || ""))) {
+        const reply = compose({ headline: "Which role should I tailor your resume for?", nextStep: "Name the role, or paste the posting, and I'll tailor it to that." });
+        return { intent: "tailor_needs_posting", reply, resultStatus: "awaiting_user", artifact: null, sends: 0 };
+      }
       const disc = handleDiscovery(text, c, {});
       if (disc.shortlist && disc.shortlist.length) {
         const topAdapted = postingsFromCtx(c).find((p) => p.corpus_id === disc.shortlist[0].id) || null;

@@ -43,29 +43,40 @@ type Doc = { kind: "document"; format: string; filename: string; mime: string; b
 export type ResumeTurn = { reply: string; intent: string; resultStatus: string; documents: Doc[]; link: string | null; task: ResumeTask };
 
 const lc = (s: unknown) => String(s ?? "").toLowerCase().replace(/[’‘]/g, "'");
-const ROLE = "(?:internships?|interns?|analysts?|engineers?|scientists?|developers?|designers?|managers?|associates?|consultants?|specialists?|coordinators?|researchers?|accountants?|roles?|jobs?|positions?)";
-const FIELD = /^(data|business|financial|finance|product|marketing|software|research|operations|ops|sales|analytics|analyst|analysts|machine|learning|ml|ai|engineering|engineer|engineers|scientist|scientists|science|developer|developers|designer|designers|ux|ui|manager|managers|associate|associates|consultant|consultants|specialist|specialists|coordinator|coordinators|researcher|researchers|accountant|accountants|accounting|investment|banking|quantitative|quant|policy|strategy|supply|chain|people|hr|legal|healthcare|health|climate|frontend|front-end|backend|back-end|full-stack|fullstack|web|mobile|cloud|security|devops|qa|test|economics|statistics|reporting|bi|intelligence|junior|senior|entry-level|graduate|summer|fall|spring|remote|hybrid|technical|it|support|customer|success|growth|content|communications|design|venture|capital|equity|private|public|tech|technology|platform)$/;
+const ROLE = "(?:internships?|interns?|analysts?|engineers?|scientists?|developers?|designers?|managers?|associates?|consultants?|specialists?|coordinators?|researchers?|accountants?|traders?|nurses?|teachers?|writers?|recruiters?|paralegals?|roles?|jobs?|positions?)";
+const FIELD = /^(data|business|financial|finance|product|marketing|software|research|operations|ops|sales|analytics|analyst|analysts|machine|learning|ml|ai|engineering|engineer|engineers|scientist|scientists|science|developer|developers|designer|designers|ux|ui|manager|managers|associate|associates|consultant|consultants|specialist|specialists|coordinator|coordinators|researcher|researchers|accountant|accountants|accounting|investment|banking|quantitative|quant|policy|strategy|supply|chain|people|hr|legal|healthcare|health|climate|frontend|front-end|backend|back-end|full-stack|fullstack|web|mobile|cloud|security|devops|qa|test|economics|statistics|reporting|bi|intelligence|junior|senior|entry-level|graduate|summer|fall|spring|remote|hybrid|technical|it|support|customer|success|growth|content|communications|design|venture|capital|equity|private|public|tech|technology|platform|management|consulting|trading|trader|traders|nursing|nurse|nurses|teaching|teacher|teachers|education|law|paralegal|paralegals|medicine|medical|clinical|pharmacy|biotech|biology|chemistry|physics|mathematics|math|nonprofit|government|journalism|writing|writer|writers|editorial|media|publishing|retail|hospitality|real|estate|insurance|actuarial|audit|tax|wealth|asset|risk|compliance|hardware|electrical|mechanical|civil|chemical|aerospace|manufacturing|logistics|procurement|recruiting|recruiter|recruiters|talent|administration|administrative|project|program|partnerships|events|social|digital|brand|advertising|pr|relations|user|game|games|gaming|film|music|arts|architecture|environmental|energy|sustainability|agriculture|food|nutrition|sports|entry|level|new|grad|computer|economic|international|corporate|commercial|retail|sales|account|executive|executives|client|services|service)$/;
 const NOT_TARGET = /\b(resume|cv|pdf|docx|file|page|version|draft|that|this|it|one)\b/;
 // What is rejected ("not a machine learning manager job at Reddit") is taken out before the target is read.
 function rejectedOf(message: string): string | null {
   const m = /\bnot (?:an? |the )?([a-z][a-z0-9 &/+.-]{2,80}?)(?=[,.;!?]|$| please| since| and )/.exec(lc(message));
   return m ? String(message).slice(m.index + m[0].length - m[1].length, m.index + m[0].length).trim() : null;
 }
+// R1 (owner readiness review): any stated target is the person's target, with or without a role word ("for product management",
+// "for consulting roles", "for trading"). Only an employer named in front of a role ("the Quillstone data analyst intern role")
+// makes it a posting, which is the posting tailor's.
+const GENERIC = /^(internships?|interns?|roles?|jobs?|positions?)$/;
+const LEADS_TO = `(?:for|is|as|asked for|toward|towards|targeting|aimed at)\\s+(?:an? |the |some )?`;
 export function targetOf(message: string): Target | null {
   const t = lc(message).replace(/\bnot (?:an? |the )?[a-z][a-z0-9 &/+.-]{2,80}?(?=[,.;!?]|$| please| since| and )/g, " ");
-  const re = new RegExp(`\\b(?:for|is|as|asked for|toward|towards|targeting|aimed at)\\s+(?:an? |the |some )?((?:[a-z][a-z&/+-]*\\s+){0,4}?${ROLE}(?:\\s+${ROLE})*)\\b`, "g");
-  for (const m of t.matchAll(re)) {
-    const words = m[1].trim().split(/\s+/);
-    if (words.some((w) => NOT_TARGET.test(w)) || words.length < 2 && /^(roles?|jobs?|positions?)$/.test(words[0])) continue;
-    const level = /\bintern/.test(m[1]) ? "internship" : /\b(senior|lead|manager|director|principal|staff)\b/.test(m[1]) ? "senior" : null;
-    const role = words.filter((w) => !/^(internships?|interns?|roles?|jobs?|positions?)$/.test(w)).join(" ");
-    if (!role) continue;
-    // A general target is made of role and field words only; any other word (an employer: "the Quillstone data analyst
-    // intern role") makes it a posting, which is the posting tailor's.
-    if (!role.split(" ").every((w) => FIELD.test(w))) return null;
+  const withRole = new RegExp(`\\b${LEADS_TO}((?:[a-z][a-z&/+-]*\\s+){0,4}?${ROLE}(?:\\s+${ROLE})*)\\b`, "g");
+  const fieldOnly = new RegExp(`\\b${LEADS_TO}((?:[a-z][a-z&/+-]*\\s+){0,3}[a-z][a-z&/+-]*)(?=\\s*(?:[,.;!?]|$|\\s(?:please|and|since|now|instead)\\b))`, "g");
+  const read = (phrase: string, needField: boolean): Target | null | "posting" => {
+    const words = phrase.trim().split(/\s+/);
+    if (words.some((w) => NOT_TARGET.test(w)) || words.length < 2 && /^(roles?|jobs?|positions?)$/.test(words[0])) return null;
+    const level = /\bintern/.test(phrase) ? "internship" : /\b(senior|lead|manager|director|principal|staff)\b/.test(phrase) ? "senior" : null;
+    const role = words.filter((w) => !GENERIC.test(w)).join(" ");
+    if (!role) return null;
+    const known = (w: string) => FIELD.test(w) || new RegExp(`^${ROLE}$`).test(w);
+    if (needField && !role.split(" ").every(known)) return null;
+    // An unknown word in front of a known field or role word is an employer ("quillstone data analyst intern").
+    const ws = role.split(" ");
+    const firstKnown = ws.findIndex(known);
+    if (firstKnown > 0) return "posting";
     const label = level === "internship" ? `${role} internships` : `${role} roles`;
     return { role, level, label };
-  }
+  };
+  for (const m of t.matchAll(withRole)) { const r = read(m[1], false); if (r === "posting") return null; if (r) return r; }
+  for (const m of t.matchAll(fieldOnly)) { const r = read(m[1], true); if (r === "posting") return null; if (r) return r; }
   return null;
 }
 const LIMITS: [string, RegExp][] = [
@@ -200,7 +211,8 @@ const short = (s: string) => String(s).split(/,| - | \(/)[0].trim();
 export function buildResume(profile: any, target: Target, uploaded: boolean, o: { noGpa?: boolean; swaps?: { before: string; after: string }[] } = {}): Built {
   const confirmed = (CareerProfile.confirmedFacts(profile || {}) as Fact[]).filter((f) => f.status !== "draft");
   const unconfirmed = !confirmed.length;
-  const facts: Fact[] = unconfirmed ? (profile?.facts || []).filter((f: Fact) => f && f.kind) : confirmed;
+  // R3a (D-007): with nothing confirmed, the saved intake is used, but never a quarantined (agent-invented) fact.
+  const facts: Fact[] = unconfirmed ? (profile?.facts || []).filter((f: Fact) => f && f.kind && !CareerProfile.quarantinedFact(f)) : confirmed;
   // The values as written, one per number (3.7 and 3.70 are one value).
   const byValue = new Map<number, string>();
   for (const f of facts) for (const m of textOf(f).matchAll(GPA)) { const v = gpaValue(m); if (!byValue.has(Number(v))) byValue.set(Number(v), v); }

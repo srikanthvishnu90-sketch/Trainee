@@ -74,7 +74,7 @@ export interface FileDeps extends Omit<JobDeps, "store"> {
   pending?: (userId: string) => Promise<PendingRow[] | null>;
   // Every phone step (number, code) answers only after this resolves, given how long the step took: deps.ts pads to a floor
   // (file_session.ts PHONE_STEP_FLOOR_MS) so time cannot tell whether the typed number is the account's. Absent: no padding.
-  pace?: (step: "phone_start" | "phone_verify", elapsedMs: number) => Promise<void>;
+  pace?: (step: "phone_start" | "phone_verify" | "phone_resend", elapsedMs: number) => Promise<void>;
   // Work that outlives the answer (the sign-in text): the edge runtime keeps it alive (EdgeRuntime.waitUntil). Absent: it runs on.
   background?: (work: Promise<unknown>) => void;
 }

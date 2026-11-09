@@ -44,7 +44,10 @@ result into the per-item report. Item 15 is PASS only when both the in-process r
 
 Model calls are counted by the product's own counters: `agent_turn_costs` for the test person (checked before every turn; the
 run stops once it reaches the cap, default and maximum $1.00) and the global ledger `model_budget_days` (read before and after).
-The per-person daily AI cap ($0.05) applies to the test person like anyone else. The $70 cycle budget is unchanged.
+This guard is the run's own: the owner removed the per-person AI cap on 2026-11-09 (WO-J). The run also records the model of every
+call it caused (the test person's `agent_turn_costs.models`, exact; and every `model_budget_reservations` row made during the run
+window, which may include other people's turns) and FAILS on any model other than `claude-sonnet-5-5` (owner ruling 2026-11-09).
+The $70 cycle budget is unchanged.
 
 ## Secrets
 

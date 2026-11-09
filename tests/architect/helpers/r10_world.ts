@@ -53,14 +53,14 @@ export const BRAIN_STUB = "BRAIN_STUB: the fake model made no tool call.";
 const enc = new TextEncoder();
 
 // ------------------------------------------------------------------------------------------------ evidence
-export interface Evidence { item: number; test: string; file: string; outcome: "PASS" | "FAIL" | "NOT_RUN"; why?: string; files?: string[]; screenshots?: string[]; reply?: string; turns?: number; scenario?: string; model_calls?: number }
+export interface Evidence { item: number; test: string; file: string; outcome: "PASS" | "FAIL" | "NOT_RUN"; why?: string; files?: string[]; screenshots?: string[]; reply?: string; turns?: number; scenario?: string; target?: string; model_calls?: number }
 export async function record(e: Evidence) {
   await Deno.mkdir(EVIDENCE_DIR, { recursive: true });
   await Deno.writeTextFile(`${EVIDENCE_DIR}/evidence.jsonl`, JSON.stringify({ ...e, reply: e.reply?.slice(0, 1200), at: new Date().toISOString() }) + "\n", { append: true });
 }
 // One acceptance check: runs as a Deno step, records PASS or FAIL with what it opened, and fails the step on FAIL (these tests
 // are the gate for the R10 orders; a failure is never swallowed). `ev` collects files, screenshots and the reply as it goes.
-export type Ev = { files: string[]; screenshots: string[]; reply: string; turns: number; scenario?: string };
+export type Ev = { files: string[]; screenshots: string[]; reply: string; turns: number; scenario?: string; target?: string };
 export async function check(t: Deno.TestContext, file: string, item: number, name: string, fn: (ev: Ev) => Promise<void>, w?: World): Promise<boolean> {
   const ev: Ev = { files: [], screenshots: [], reply: "", turns: 0 };
   return await t.step(`fix ${item}: ${name}`, async () => {
@@ -188,7 +188,7 @@ export async function world(o: { chats: number[]; market?: Seeded[] }): Promise<
   const json = async (s: string) => JSON.parse((await sql(`select coalesce(json_agg(x), '[]') from (${s}) x`)) || "[]");
   for (const [k, v] of Object.entries({ TELEGRAM_BOT_TOKEN: TOKEN, TELEGRAM_WEBHOOK_SECRET: SECRET, TELEGRAM_BOT_USERNAME: "TraineeR10Bot", TRAINEE_SIGNUP: "closed",
     TRAINEE_ALLOWED_CONTACTS: o.chats.map((c) => `telegram:${c}`).join(","), TRAINEE_DELIVER_SECRET: "TEST-deliver-secret-0123456789-abcdefgh", ANTHROPIC_API_KEY: "sk-test-not-real",
-    CAREER_MODEL: "claude-haiku-5-5", TRAINEE_FILE_BASE_URL: FILE_BASE, TRAINEE_FILE_LINK_SECRET: FILE_SECRET, TRAINEE_BOT_URL: "https://t.me/TraineeR10Bot", SUPABASE_URL })) Deno.env.set(k, v);
+    CAREER_MODEL: "claude-sonnet-5-5", TRAINEE_FILE_BASE_URL: FILE_BASE, TRAINEE_FILE_LINK_SECRET: FILE_SECRET, TRAINEE_BOT_URL: "https://t.me/TraineeR10Bot", SUPABASE_URL })) Deno.env.set(k, v);
 
   // The market and the old list, as live posting rows (a "stale" one is closed in the database too).
   const rows = [...market, ...OLD_LIST.map((x) => ({ ...x, page: "open" as const }))].map((p) => {

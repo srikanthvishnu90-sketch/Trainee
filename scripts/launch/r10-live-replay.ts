@@ -20,7 +20,8 @@
 //     each is live), with a 10 s timeout and an identifying user agent; nothing is posted to any employer.
 //   - Spend: model calls are counted by the product's own counters (agent_turn_costs for the test person; the global ledger
 //     model_budget_days before and after). The run stops before the next turn once the person's recorded spend reaches the cap
-//     (R10_LIVE_USD_CAP, default and maximum $1.00). The per-person daily AI cap ($0.05) applies to the test person as to anyone.
+//     (R10_LIVE_USD_CAP, default and maximum $1.00). This guard is the run's own: the owner removed the per-person AI cap
+//     (2026-11-09, WO-J). Every call's model is recorded and the run FAILS on any model other than claude-sonnet-5-5.
 //   - Cleanup: at the end (and on any failure) the test person is deleted (auth.users cascade, the channel contact, its storage
 //     objects); --cleanup-stale also deletes any earlier r10-live-replay person older than an hour.
 // Secrets: only those already in the Actions "production" environment: SUPABASE_PROJECT_REF, SUPABASE_ACCESS_TOKEN (to read the
@@ -32,7 +33,7 @@
 //   --dry-run: prints what it would do (the person's identity, the turns, the checks) and touches nothing.
 // Exit: 0 every live check PASS; 1 any FAIL; 2 could not run (a missing secret, the project unreachable).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
-import { BASELINE, INTAKE_RESUME, OBSERVED_FAILURES, OLD_SEARCH, SCENARIOS } from "../../tests/architect/helpers/r10_turns.ts";
+import { BASELINE, BASELINE_ALL, INTAKE_RESUME, OBSERVED_FAILURES, OLD_SEARCH, SCENARIOS, SCENARIOS_F } from "../../tests/architect/helpers/r10_turns.ts";
 import { closeBrowser, inspectDocx, inspectPdf, renderPhone, saveFile } from "../../tests/architect/helpers/r10_inspect.ts";
 
 const args = Deno.args;
@@ -58,7 +59,7 @@ Deno.env.set("R10_EVIDENCE_DIR", OUT);
 type Status = "PASS" | "FAIL" | "NOT_RUN";
 interface Check { item: number; turn: string; check: string; status: Status; detail: string }
 const checks: Check[] = [];
-const files: string[] = [], screenshots: string[] = [];
+const files: string[] = [], screenshots: string[] = [], modelLog: string[] = [];
 const transcript: { turn: string; text: string; reply: string; artifacts: string[]; links: string[]; usd_micros_after: number; calls_after: number }[] = [];
 const note = (item: number, turn: string, check: string, pass: boolean | null, detail = "") => {
   const status: Status = pass === null ? "NOT_RUN" : pass ? "PASS" : "FAIL";
@@ -95,11 +96,13 @@ async function signedInit(botToken: string, id: number) {
 
 async function main() {
   console.log(`R10 live replay: deployed sha ${SHA}; test person ${EMAIL} (tg:${TG_ID}); spend cap $${USD_CAP.toFixed(2)}; ${BASELINE.scenarios} scenarios, ${BASELINE.turns} turns`);
-  const turns = [...SCENARIOS.resume.map((x) => ({ ...x, scenario: "resume" })), ...SCENARIOS.search.map((x) => ({ ...x, scenario: "search" }))];
+  const turns = [...SCENARIOS.resume.map((x) => ({ ...x, scenario: "resume" })), ...SCENARIOS.search.map((x) => ({ ...x, scenario: "search" })),
+    ...SCENARIOS_F.search.map((x) => ({ ...x, scenario: "post-reset search" })), ...SCENARIOS_F.research.map((x) => ({ ...x, scenario: "post-reset research and stop" }))];
   if (DRY) {
     console.log("DRY RUN: nothing is created, sent or deleted.");
     console.log(`setup: create ${EMAIL}, contact tg:${TG_ID}; send the intake (pasted), "yes, that's my resume", "${OLD_SEARCH}"`);
     for (const t of turns) console.log(`turn ${t.id} (${t.scenario}): ${t.text}`);
+    console.log(`historical baseline: ${BASELINE_ALL.scenarios} scenarios, ${BASELINE_ALL.turns} turns (spec A + F)`);
     console.log("then: download every attachment and link, open each file, screenshot each File page at 390 px, check nothing was applied, delete the test person.");
     return 0;
   }
@@ -116,6 +119,7 @@ async function main() {
   }
   if (psql(db, `select count(*) from public.channel_contacts where contact = 'tg:${TG_ID}'`) !== "0") throw new Error(`tg:${TG_ID} already belongs to an account; refusing to reuse it`);
   const budgetBefore = psql(db, `select coalesce(sum(spent_micros), 0) from public.model_budget_days where day >= current_date - 1`);
+  const runStart = psql(db, "select now()::text");
 
   const made = await admin.auth.admin.createUser({ email: EMAIL, email_confirm: true, user_metadata: { r10_live_replay: true, run: RUN } });
   if (made.error || !made.data.user) throw new Error(`create the test person: ${made.error?.message}`);
@@ -250,6 +254,31 @@ async function main() {
       if (/limit/i.test(r.reply)) note(7, t.id, "at the limit: reset in the person's time, not midnight UTC", !/midnight UTC/i.test(r.reply), r.reply.slice(-200));
       for (const p of d.pages) if (p.isFile) note(5, t.id, `File page fits 390 px${p.signedIn ? " (signed in)" : " (signed out: no TELEGRAM_BOT_TOKEN)"}`, p.fits);
     }
+    // Spec F (the owner's post-reset audit), in the same conversation as the audit ran them.
+    for (const t of SCENARIOS_F.search) {
+      const r = await say(t.text, t.id);
+      const d = await delivered(t.id, r);
+      quality(t.id, r.reply);
+      const items = r.reply.split("\n").filter((l) => /^\s*\d+[.)]\s/.test(l));
+      note(5, t.id, "checked open postings with links, or one named, evidenced blocker; no resume-confirmation tail", (items.length > 0 && d.pages.some((p) => !p.isFile)) || /no open (roles|postings) (were )?found in|search connection|(checked|searched) \d+/i.test(r.reply), r.reply.slice(0, 200));
+    }
+    for (const t of SCENARIOS_F.research) {
+      const r = await say(t.text, t.id);
+      quality(t.id, r.reply);
+      const fx = effects();
+      if (t.id !== "F3") note(14, t.id, "Stripe research or its named blocker; no applications, introductions or outreach", /Stripe/.test(r.reply) && !/Building the list|applications ready/i.test(r.reply) && fx === "0|0|0|0", `${fx} ${r.reply.slice(0, 160)}`);
+      else {
+        // F.3: what the stop reply claims, against the authoritative control state (career_user_quiet: the career:account paused
+        // flag and contact opt-outs, WO-091c; WO-K's documented contract replaces this read when it lands) and the send tables.
+        const quiet = psql(db, `select public.career_user_quiet(${lit(person)})`) === "t";
+        const kv = psql(db, `select coalesce((select value::text from public.career_watch_kv where user_id = ${lit(person)} and key = 'career:account'), '{}')`);
+        transcript.at(-1)!.reply += `\n--- control state after the stop: career_user_quiet=${quiet}; career:account=${kv}; wanted|jobs|send_queue|approved_drafts=${fx}`;
+        const claimsPause = /pause (is )?(now )?set|global pause|blocks every send path|stopped everything/i.test(r.reply);
+        note(8, t.id, "a claimed pause is in the authoritative state", !claimsPause || quiet, `claims pause: ${claimsPause}; career_user_quiet=${quiet}`);
+        note(8, t.id, "no promise of a reconciliation nothing schedules", !/the moment .* load|you do not need to ask again/i.test(r.reply), r.reply.slice(0, 200));
+        note(15, t.id, "nothing sent or queued after the stop", fx === "0|0|0|0", fx);
+      }
+    }
     // Fix 10 on the deployed site: the bare /file and /connect pages (no link), as a phone opens them through the site's proxy
     // and under the policy it serves: the recovery heading, text and action inside the first 390 x 844 screen.
     const site = transcript.flatMap((x) => x.links).map((l) => { try { const u = new URL(l); return /\/file$/.test(u.pathname) ? u.origin : null; } catch { return null; } }).find(Boolean);
@@ -268,6 +297,15 @@ async function main() {
     note(15, "all", "nothing applied, queued or sent for the test person", e === "0|0|0|0", `wanted|jobs|send_queue|approved_drafts = ${e}`);
     const s = spent();
     note(15, "all", `spend within $${USD_CAP} (recorded by agent_turn_costs)`, s.usd < USD_CAP * 1_000_000, `$${(s.usd / 1e6).toFixed(4)} over ${s.calls} model calls`);
+    // Owner ruling 2026-11-09 (WO-J): Sonnet 5.5 is the only model for Trainee output. The test person's own calls name their
+    // models in agent_turn_costs (exact). The global ledger's reservations carry no person, so every reservation made during
+    // this run's window is read too (other people's turns may be in it; any other model there is a real finding as well).
+    const MODEL = "claude-sonnet-5-5";
+    const own = psql(db, `select coalesce(string_agg(distinct m, ','), '') from public.agent_turn_costs, unnest(models) m where user_id = ${lit(person)}`).split(",").filter(Boolean);
+    note(15, "all", `every model call the test person caused is ${MODEL} (agent_turn_costs)`, own.length > 0 && own.every((m) => m.startsWith(MODEL)), `models: ${own.join(", ") || "none recorded"}`);
+    const windowModels = psql(db, `select coalesce(string_agg(coalesce(model, '(none)') || '=' || n, ','), '') from (select model, count(*) n from public.model_budget_reservations where created_at >= ${lit(runStart)}::timestamptz group by model) x`);
+    modelLog.push(`reservations since ${runStart}: ${windowModels || "none"}`);
+    note(15, "all", `every model_budget_reservations row in the run window is ${MODEL}`, windowModels !== "" && windowModels.split(",").every((x) => x.startsWith(`${MODEL}`)), windowModels || "no reservation rows in the window");
     const budgetAfter = psql(db, `select coalesce(sum(spent_micros), 0) from public.model_budget_days where day >= current_date - 1`);
     console.log(`global model budget (last two days) before $${(Number(budgetBefore) / 1e6).toFixed(4)}, after $${(Number(budgetAfter) / 1e6).toFixed(4)} (other people's turns are in this figure too)`);
   } finally {
@@ -283,8 +321,8 @@ if (!DRY) {
   const items: Record<string, string> = {};
   for (const c of checks) items[String(c.item)] = items[String(c.item)] === "FAIL" || c.status === "FAIL" ? "FAIL" : c.status === "NOT_RUN" && !items[String(c.item)] ? "NOT_RUN" : (items[String(c.item)] ?? c.status);
   const usd = transcript.length ? transcript.at(-1)!.usd_micros_after / 1e6 : 0;
-  const report = { outcome: fails.length || !checks.length ? "FAIL" : "PASS", sha: SHA, at: new Date().toISOString(), run: RUN, test_person: EMAIL, turns: transcript.filter((x) => /^[TS]\d$/.test(x.turn)).length,
-    setup_turns: transcript.filter((x) => x.turn.startsWith("setup")).length, usd, baseline: BASELINE, items, checks, files, screenshots, transcript };
+  const report = { outcome: fails.length || !checks.length ? "FAIL" : "PASS", sha: SHA, at: new Date().toISOString(), run: RUN, test_person: EMAIL, turns: transcript.filter((x) => /^([TS]\d|F\d[ab]?)$/.test(x.turn)).length,
+    setup_turns: transcript.filter((x) => x.turn.startsWith("setup")).length, usd, baseline: BASELINE, baseline_all: BASELINE_ALL, models: modelLog, items, checks, files, screenshots, transcript };
   await Deno.mkdir(OUT, { recursive: true });
   await Deno.writeTextFile(`${OUT}/r10-live-replay.json`, JSON.stringify(report, null, 2));
   console.log(`\nR10 live replay ${report.outcome}: ${checks.length - fails.length}/${checks.length} checks; ${report.turns} observed turns + ${report.setup_turns} setup turns; $${usd.toFixed(4)}; report ${OUT}/r10-live-replay.json`);

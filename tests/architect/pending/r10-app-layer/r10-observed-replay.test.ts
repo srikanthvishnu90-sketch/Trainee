@@ -140,7 +140,8 @@ R.suite(FILE, [1, 2, 3, 4, 5, 6, 7, 8, 15], [CHAT, CHAT_B], async (t: Deno.TestC
   // The observed context at S2: the person's daily AI-answer allowance ran out on that turn (spec A.2). Spent here before S2.
   await w.sql(`insert into public.career_alert_prefs (user_id, tz, prefs, last_checked_at) values ('${searcher}', 'America/Chicago', '{"on": false, "keywords": ["data analyst"]}'::jsonb, now()) on conflict (user_id) do update set tz = excluded.tz`).catch(() => "");
   await w.sql(`insert into public.career_digest_prefs (user_id, tz) values ('${searcher}', 'America/Chicago') on conflict (user_id) do update set tz = excluded.tz`).catch(() => "");
-  await w.sql(`insert into public.agent_turn_costs (user_id, provider, models, calls, usd_micros) values ('${searcher}', 'anthropic', '{claude-haiku-5-5}', 100, 60000)`);
+  await w.sql(`insert into public.agent_turn_costs (user_id, provider, models, calls, usd_micros) values ('${searcher}', 'anthropic', '{claude-sonnet-5-5}', 100, 60000)`);
+  await w.sql(`update public.model_budget_days set spent_micros = limit_micros where day >= current_date - 1`);
   let s2: any = null;
   await c(t, FILE, 5, "S2 widens only role and place, keeps the verified S1 options, adds the new ones with their student requirements", async (ev: any) => {
     s2 = await turn(ev, S2.text, CHAT_B);

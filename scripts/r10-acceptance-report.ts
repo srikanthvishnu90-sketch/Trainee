@@ -42,7 +42,10 @@ const livePath = opt("--live");
 const jsonOut = opt("--json");
 const only = opt("--only");
 
-interface Rec { item: number; test: string; file: string; outcome: "PASS" | "FAIL" | "NOT_RUN"; why?: string; files?: string[]; screenshots?: string[]; reply?: string; turns?: number; model_calls?: number }
+interface Rec { item: number; test: string; file: string; outcome: "PASS" | "FAIL" | "NOT_RUN"; why?: string; files?: string[]; screenshots?: string[]; reply?: string; turns?: number; model_calls?: number; scenario?: string; target?: string }
+// The owner's post-reset audit (spec F) is a HISTORICAL BASELINE, reported apart from post-fix acceptance (architect, 2026-11-09).
+const BASE_F = { scenarios: 3, turns: 10 };
+const isBaseline = (r: Rec) => r.scenario === "post-reset";
 
 // The suite's files: still pending, or already moved into tests/architect/ when their order landed.
 async function suiteFiles(): Promise<string[]> {
@@ -87,7 +90,9 @@ if (import.meta.main) {
   const files = await suiteFiles();
   if (!files.length) { console.log("no R10 acceptance files found"); Deno.exit(2); }
   const testExit = args.includes("--no-run") ? null : await run(files);
-  const recs = await readEvidence();
+  const all = await readEvidence();
+  const recs = all.filter((r) => !isBaseline(r));
+  const baseline = all.filter(isBaseline);
   const live = await readLive();
   const summary: Record<number, { status: string; checks: Rec[] }> = {};
   const lines: string[] = [];
@@ -107,6 +112,7 @@ if (import.meta.main) {
       if (c.why) say(`      why: ${clip(c.why, 400)}`);
       for (const f of c.files ?? []) say(`      file opened: ${f}`);
       for (const s of c.screenshots ?? []) say(`      screenshot (390 px, dsf 2): ${s}`);
+      if (c.target) say(`      target page (owner's design): ${c.target}`);
       if (c.reply) say(`      reply: "${clip(c.reply, 220)}"`);
     }
     if (item === 15) {
@@ -114,15 +120,32 @@ if (import.meta.main) {
       if (live?.items) for (const [k, v] of Object.entries(live.items)) say(`      live ${k}: ${v}`);
     }
   }
-  const meta = recs.filter((r) => r.item === 0);
+  say("\n" + "=".repeat(100));
+  say(`HISTORICAL BASELINE, kept apart (spec F, owner's post-reset audit; with spec A: ${BASE_F.scenarios} scenarios, ${BASE_F.turns} user turns)`);
+  if (!baseline.length) say("  (not run)");
+  for (const c of baseline) {
+    say(`  - ${c.outcome.padEnd(7)} [item ${c.item}] ${c.test}`);
+    if (c.why) say(`      why: ${clip(c.why, 300)}`);
+    if (c.reply) say(`      reply: "${clip(c.reply, 200)}"`);
+  }
+  const meta = all.filter((r) => r.item === 0);
   const turns = meta.reduce((n, r) => n + (r.turns ?? 0), 0), calls = meta.reduce((n, r) => n + (r.model_calls ?? 0), 0);
   say("\n" + "=".repeat(100));
-  say(`Interactions, counted honestly: the observed baseline is ${BASELINE.scenarios} scenarios and ${BASELINE.turns} user turns (spec A.1), not a 1,000-example audit.`);
+  say(`Interactions, counted honestly: the observed baseline is ${BASELINE.scenarios} scenarios and ${BASELINE.turns} user turns (spec A.1), and with the post-reset audit (spec F) ${BASE_F.scenarios} scenarios and ${BASE_F.turns} user turns; not a 1,000-example audit.`);
   say(`This run replayed those ${BASELINE.turns} turns once (r10-observed-replay) and sent ${turns} messages in all across ${meta.length} test file(s), setup included,`);
   say(`all in-process against a $0 fake model (${calls} fake model calls). None of them is a live interaction${live ? `; the live replay sent ${live.turns ?? "?"} turns to the deployed agent-chat` : ""}.`);
   const counts = Object.values(summary).reduce((m, s) => ({ ...m, [s.status]: (m[s.status] ?? 0) + 1 }), {} as Record<string, number>);
   say(`Items: ${Object.entries(counts).map(([k, v]) => `${v} ${k}`).join(", ")}${testExit === null ? "" : `; deno test exit ${testExit}`}`);
   await Deno.writeTextFile(`${evidenceDir}/report.txt`, lines.join("\n") + "\n").catch(() => {});
-  if (jsonOut) await Deno.writeTextFile(jsonOut, JSON.stringify({ baseline: BASELINE, turns, fake_model_calls: calls, live, items: Object.fromEntries(Object.entries(summary).map(([k, v]) => [k, { title: ITEMS[Number(k)], status: v.status, checks: v.checks }])) }, null, 2));
+  // Visual conformance, side by side: each File family's 390 px screenshot beside the owner's target pages, with its gaps.
+  const esc = (x: string) => x.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+  const rel = (p: string) => p.startsWith("/") ? `file://${p}` : `file://${ROOT}/${p}`;
+  const visual = recs.filter((r) => r.target);
+  const html = `<!doctype html><meta charset="utf-8"><title>R10 visual conformance</title><style>body{font:14px system-ui;margin:16px}section{border-top:1px solid #ccc;padding:12px 0}.row{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap}img{width:300px;border:1px solid #ddd}.FAIL{color:#a00}.PASS{color:#070}</style>
+<h1>R10 visual conformance: rendered File beside the owner's target page</h1>${visual.length ? "" : "<p>No family rendered yet (none registered or all failed before rendering).</p>"}
+${visual.map((r) => `<section><h2 class="${r.outcome}">${r.outcome} ${esc(r.test)}</h2>${r.why ? `<p>${esc(r.why)}</p>` : ""}<div class="row">${(r.screenshots ?? []).map((s) => `<figure><img src="${esc(rel(s))}"><figcaption>rendered: ${esc(s)}</figcaption></figure>`).join("")}${String(r.target).split(" ").map((t) => `<figure><img src="${esc(rel(t))}"><figcaption>target: ${esc(t)}</figcaption></figure>`).join("")}</div></section>`).join("\n")}`;
+  await Deno.writeTextFile(`${evidenceDir}/visual-conformance.html`, html).catch(() => {});
+  say(`Visual conformance page (screenshot beside target): ${evidenceDir}/visual-conformance.html (${visual.length} famil${visual.length === 1 ? "y" : "ies"} checked, ${visual.filter((r) => (r.screenshots ?? []).length).length} rendered)`);
+  if (jsonOut) await Deno.writeTextFile(jsonOut, JSON.stringify({ baseline: BASELINE, baseline_all: BASE_F, historical: baseline, turns, fake_model_calls: calls, live, items: Object.fromEntries(Object.entries(summary).map(([k, v]) => [k, { title: ITEMS[Number(k)], status: v.status, checks: v.checks }])) }, null, 2));
   Deno.exit(Object.values(summary).every((s) => s.status === "PASS") ? 0 : 1);
 }

@@ -18,6 +18,21 @@ export const SCENARIOS = {
 } as const;
 export const BASELINE = { scenarios: 2, turns: 5 } as const;
 
+// The owner's post-reset audit (spec F, 2026-11-08 6:02-6:07 pm CST, production 7d2e8ee1): five more user turns, quoted exactly.
+// HISTORICAL BASELINE, kept apart from post-fix acceptance. With spec A: 3 scenarios (resume, search, research) and 10 user turns.
+export const SCENARIOS_F = {
+  search: [
+    { id: "F1a", text: "Can you try that search again now? Find 3 verified open data analyst, business analyst or analytics internships in the Chicago area or remote in the US. Include the company, exact role, location, application link and any student or graduation requirements. Don't apply to anything." },
+    { id: "F1b", text: "I already widened the roles and location. What is actually blocking the search: no open roles found, a search connection problem, or my unconfirmed resume? Please tell me which. You can show me open postings and their requirements without deciding whether I'm eligible. Don't apply or confirm my resume for me." },
+  ],
+  research: [
+    { id: "F2a", text: "Let's leave the job search for now. What's Stripe like to work for as a data analyst intern? Give me a useful company research answer: what its business does, what an analyst might work on, any concerns to investigate, and 5 good questions to ask in an interview. Use real sources and distinguish facts from your interpretation. Don't apply or contact anyone." },
+    { id: "F2b", text: "I'm not asking for an application batch. I only want company research about Stripe. Please answer in chat: what Stripe does, what data analysts work on, 5 interview questions, and source links. If you can't research it, name the specific blocker instead of explaining how to apply." },
+    { id: "F3", text: "Stop the people list. I didn't ask for analysts to contact, any drafts, or an application batch. Don't contact anyone or start any new work. I asked for company research, and you haven't answered it. Leave everything unsent." },
+  ],
+} as const;
+export const BASELINE_ALL = { scenarios: 3, turns: 10 } as const;
+
 // What Trainee said on production after release 9 (spec A.2), one marker per observed failure. A reply that still carries
 // one of these is the observed failure again.
 export const OBSERVED_FAILURES: Record<string, RegExp[]> = {
@@ -26,6 +41,11 @@ export const OBSERVED_FAILURES: Record<string, RegExp[]> = {
   T3: [/haven't started that batch/i, /runner for that kind of ask/i, /apply to the top 10/i],
   S1: [/^\s*Nothing was invented to fill the list\.[^\n]*Widen the role or the place[^\n]*$/im],
   S2: [/The window, checked against the record/i, /2026-10-13/, /Tell me what you'd like to do next/i, /resets at midnight UTC/i],
+  F1a: [/^\s*Nothing was invented to fill the list/im, /entries are waiting for your word/i, /nothing is sent anywhere before your resume is confirmed/i],
+  F1b: [/Eligibility can't be graded without the posting/i, /verdict is graded and spoken/i],
+  F2a: [/haven't started that batch/i, /runner for that kind of ask/i, /looking for roles now/i],
+  F2b: [/Building the list now/i, /analysts at Stripe/i, /LinkedIn export/i],
+  F3: [/the moment the queue records load/i, /you do not need to ask again/i],
 };
 
 // The synthetic intake (the earlier resume, uploaded as a PDF in the earlier conversation; its file is no longer available).

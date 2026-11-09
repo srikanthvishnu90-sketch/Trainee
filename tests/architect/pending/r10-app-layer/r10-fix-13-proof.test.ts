@@ -19,10 +19,8 @@ R.suite(FILE, [13], [CHAT], async (t: Deno.TestContext, w: any) => {
     await w.say(CHAT, "yes");
   }
   const jobs = await w.json(`select id, job_id, state, attempts from public.career_apply_jobs where user_id = '${person}' order by created_at`);
-  await check(t, FILE, 13, "setup: three applications approved by the person's yes, each queued with no attempt", async (ev: any) => {
-    ev.reply = JSON.stringify(jobs);
-    ok(jobs.length === 3 && jobs.every((j: any) => j.state === "queued" && j.attempts === 0), ev.reply);
-  }, w);
+  // Precondition, not a check of fix 13: three applications approved by the person's yes, each queued with no attempt.
+  ok(jobs.length === 3 && jobs.every((j: any) => j.state === "queued" && j.attempts === 0), `setup: ${JSON.stringify(jobs)}`);
   if (jobs.length === 3) {
     await w.sql(`update public.career_apply_jobs set state = 'submitted_unconfirmed', attempts = 1, reason = 'the final submit timed out; no confirmation page was seen', updated_at = now() where id = '${jobs[0].id}'`);
     await w.sql(`update public.career_apply_jobs set state = 'confirmed', attempts = 1, confirmation_id = 'LTA-2026-0042', email_confirmed_at = now(), confirmation_mail_hash = repeat('ab', 32), updated_at = now() where id = '${jobs[1].id}'`);

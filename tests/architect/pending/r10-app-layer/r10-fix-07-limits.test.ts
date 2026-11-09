@@ -10,20 +10,20 @@ const { ok, check, deliveredFiles, internalHits, repeated, renderPhone } = R;
 const FILE = "r10-fix-07-limits.test.ts", CHAT = 7_910_701;
 R.suite(FILE, [7], [CHAT], async (t: Deno.TestContext, w: any) => {
   const person = await w.observedPerson(CHAT);
-  await check(t, FILE, 7, "the caps are unchanged: $0.05 and 100 model calls a person a UTC day", async (ev: any) => {
-    const cap = await import(`${helper}../../../supabase/functions/_shared/career_spend_cap.ts`);
-    ev.reply = `DEFAULT_DAILY_USD=${cap.DEFAULT_DAILY_USD} DEFAULT_DAILY_CALLS=${cap.DEFAULT_DAILY_CALLS}`;
-    ok(cap.DEFAULT_DAILY_USD === 0.05 && cap.DEFAULT_DAILY_CALLS === 100, ev.reply);
-    ok(Deno.env.get("CAREER_MODEL_DAILY_USD") === undefined && Deno.env.get("CAREER_MODEL_DAILY_CALLS") === undefined, "the suite runs at the defaults");
-  }, w);
   await w.sql(`insert into public.career_digest_prefs (user_id, tz) values ('${person}', 'America/Chicago') on conflict (user_id) do update set tz = excluded.tz`);
-  await w.sql(`insert into public.agent_turn_costs (user_id, provider, models, calls, usd_micros) values ('${person}', 'anthropic', '{claude-haiku-5-5}', 100, 60000)`);
+  // The limit, whichever applies on the build under test: the person's recorded spend is past the old per-person ceiling and
+  // today's global model budget (model_budget_days, D-038a) is spent. Owner ruling 2026-11-09 (WO-J): no per-person cap; the
+  // global budget stays enforced and is never raised here.
+  await w.sql(`insert into public.agent_turn_costs (user_id, provider, models, calls, usd_micros) values ('${person}', 'anthropic', '{claude-sonnet-5-5}', 100, 60000)`);
+  await w.sql(`update public.model_budget_days set spent_micros = limit_micros where day >= current_date - 1`);
   const reset = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1));
   const local = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "numeric", hour12: true }).format(reset);
   const [h, ampm] = local.split(" ");
   await check(t, FILE, 7, `at the limit: what stopped, the task kept, the reset at ${local} Chicago time, nothing applied, no template`, async (ev: any) => {
+    const calls0 = w.modelCalls();
     const r = await w.say(CHAT, T.SCENARIOS.search[1].text);
     ev.reply = r.reply;
+    ok(w.modelCalls() === calls0, `enforcement intact: no model call at the limit (${w.modelCalls() - calls0} made)`);
     ok(/limit/i.test(r.reply) && r.reply.search(/limit/i) < 300, `the limit is said first: ${r.reply.slice(0, 300)}`);
     ok(!/midnight UTC/i.test(r.reply), "not in UTC");
     ok(new RegExp(`\\b${h}(:00)?\\s?${ampm}\\b`, "i").test(r.reply) && /Chicago|Central|your time/i.test(r.reply), `the reset in the person's zone (${local}): ${r.reply.slice(0, 400)}`);
@@ -34,6 +34,7 @@ R.suite(FILE, [7], [CHAT], async (t: Deno.TestContext, w: any) => {
   }, w);
   await check(t, FILE, 7, "after the reset, 'go ahead' finishes the same widened search", async (ev: any) => {
     await w.sql(`delete from public.agent_turn_costs where user_id = '${person}'`);
+    await w.sql(`update public.model_budget_days set spent_micros = 0 where day >= current_date - 1`);
     const r = await w.say(CHAT, "Go ahead.");
     ev.reply = r.reply;
     for (const m of T.MARKET.filter((x: any) => x.s2)) ok(r.reply.includes(m.company), `the kept task resumes with ${m.company}: ${r.reply.slice(0, 400)}`);

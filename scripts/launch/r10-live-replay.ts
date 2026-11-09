@@ -235,6 +235,13 @@ async function main() {
       for (const r of OBSERVED_FAILURES[id] ?? []) note(15, id, `the observed failure is gone (${r.source.slice(0, 50)})`, !r.test(reply), reply.slice(0, 200));
     };
 
+    // R-4, the Telegram document (architect, 2026-11-09): observed from Trainee's side, from the delivery record's sendDocument
+    // response (ok, document.file_id, file_size equal to the PDF's length, then getFile and a sha256 match). Not observable yet,
+    // so this is a FAIL with its reason, never a pass: the delivery record keeps only message_id (_shared/telegram.ts
+    // sendDocument), which is a WO-B change; and Telegram refuses sendDocument to a chat that never started the bot, so the
+    // synthetic id receives no document at all (nothing is sent to anyone; the check needs a test chat that has started the bot).
+    const telegramDocument = () => note(4, "telegram", "the Telegram document is observed: sendDocument ok, file_id, file_size = the PDF's length, getFile sha256 match", false,
+      "not observable: the delivery record keeps only message_id (WO-B), and the synthetic chat id never started the bot, so Telegram delivers it nothing");
     // --smoke (the deploy smoke's R10 step): the File endpoint, a resume PDF link with intact bytes, and the inbound path, each
     // for the synthetic identity only. Then the run ends (no observed-turn replay).
     if (SMOKE) {
@@ -274,10 +281,12 @@ async function main() {
       }
       note(4, "smoke", "a resume PDF link opens: 200, application/pdf", pdfLinks.some((p) => p.status === 200 && /application\/pdf/.test(p.type)), pdfLinks.length ? JSON.stringify(pdfLinks.map((p) => [p.status, p.type])) : `no PDF link in the reply (${t1.links.length} links, ${t1.arts.length} attachments)`);
       note(4, "smoke", "the downloaded PDF's bytes are the stored document's, byte for byte", Object.keys(stored).length ? pdfLinks.some((p) => stored[p.sha] !== undefined) : null, Object.keys(stored).length ? `stored ${Object.keys(stored).length} attachment(s)` : "no stored attachment to compare (the link is the only copy)");
+      telegramDocument();
       return 0;
     }
 
     // Scenario 1: resume.
+    telegramDocument();
     for (const t of SCENARIOS.resume) {
       const r = await say(t.text, t.id);
       const d = await delivered(t.id, r);

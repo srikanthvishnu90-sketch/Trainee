@@ -63,6 +63,13 @@ id to `trainee-telegram`, and a reply recorded for it (Telegram cannot deliver t
 File endpoint: the list link opens signed out (200 or 303, HTML, its own policy) and signed in; (3) a resume PDF link: 200,
 `application/pdf`, and the same bytes as the stored document.
 
+Both modes also record the R-4 Telegram document step (`telegram`) as a FAIL with its reason, never a pass. The architect's
+design observes it from Trainee's side: the delivery record's `sendDocument` response with `ok`, `document.file_id` and a
+`file_size` equal to the PDF's length, then `getFile` and a sha256 match against the stored PDF. Two things stand in the way
+today. The delivery record keeps only `message_id` (`_shared/telegram.ts`), so storing the response is a WO-B change. And
+Telegram refuses `sendDocument` to a chat that never started the bot, so the synthetic id gets no document. The step needs a
+test chat that has started the bot.
+
 ## Not covered
 
 The live replay checks the five observed turns and the entry pages. Spec E.11's live-only flows (valid phone sign-in, connected

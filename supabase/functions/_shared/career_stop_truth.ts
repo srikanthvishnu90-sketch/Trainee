@@ -107,7 +107,7 @@ function countLines(c: Counts): string[] {
     ? `Emails on the send rail: ${c.emails.queued} queued, ${c.emails.sending} sending (outcome uncertain), ${c.emails.out} already out.`
     : "I could not read the send rail, so its email counts are unknown.");
   out.push(c.applications
-    ? `Applications on record: ${c.applications.waiting} waiting, ${c.applications.inProgress} in progress, ${c.applications.submitted} submitted, ${c.applications.uncertain} uncertain.`
+    ? `Applications on record: ${c.applications.waiting} waiting, ${c.applications.inProgress} in progress, ${c.applications.submitted} confirmed by the employer, ${c.applications.uncertain} with the outcome unknown.`
     : "I could not read your applications, so their counts are unknown.");
   return out;
 }

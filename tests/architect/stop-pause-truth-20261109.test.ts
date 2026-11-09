@@ -90,7 +90,7 @@ Deno.test({
         eq(lines[3], `Outreach drafts on record: ${ds.shown} waiting for your yes, 0 approved, 0 sending (outcome uncertain), ${ds.sent} already out.`);
         const rail = Object.fromEntries((await w.json<{ state: string; n: number }[]>(`select state, count(*)::int n from public.career_send_queue where user_id = ${q(p.uid)} group by state`)).map((x) => [x.state, x.n]));
         eq(lines[4], `Emails on the send rail: ${rail.queued ?? 0} queued, ${rail.sending ?? 0} sending (outcome uncertain), ${(rail.sent ?? 0) + (rail.replied ?? 0) + (rail.bounced ?? 0)} already out.`);
-        eq(lines[5], `Applications on record: 0 waiting, 0 in progress, 0 submitted, 0 uncertain.`);
+        eq(lines[5], `Applications on record: 0 waiting, 0 in progress, 0 confirmed by the employer, 0 with the outcome unknown.`);
         eq(await n(`select count(*) from public.career_apply_jobs where user_id = ${q(p.uid)}`), 0);
         eq(lines[6], `Your account is not paused. Say "pause everything" to stop all sending.`);
         eq(lines[7], "Your ask for company research is still open: I have not answered it in this message.");

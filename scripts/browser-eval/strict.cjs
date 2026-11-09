@@ -77,11 +77,12 @@ async function strictPosting(browser, item, o) {
     return true;
   };
   const stop = async (phase) => { if (phase === "submitting") throw new NeedsUser("strict_reached_submit"); };
-  const out = await applyOne(browser, p, { allowHosts, retries: 0, stepTimeoutMs: 20000, requestGate: gate, initScript: lib.SUBMIT_TRAP, onPhase: stop }).catch((e) => ({ status: "error", reason: `driver_error: ${String(e && e.message).split("\n")[0].slice(0, 140)}` }));
+  const out = await applyOne(browser, p, { allowHosts, retries: 0, diag: true, stepTimeoutMs: 20000, requestGate: gate, initScript: lib.SUBMIT_TRAP, onPhase: stop }).catch((e) => ({ status: "error", reason: `driver_error: ${String(e && e.message).split("\n")[0].slice(0, 140)}` }));
   r.reason = out.reason || out.status; r.error = out.error ? String(out.error).slice(0, 140) : out.check ? `shown: ${out.check}` : null; r.field = out.field ? String(out.field).slice(0, 80) : null; r.needs = out.needs || null;
   if (out.reason === "strict_reached_submit") r.result = "pass";
   else if (out.reason === "missing_required_answer" && CUSTOM_ONLY(out.needs)) r.result = "ready_if_answered";
   if (out.status === "submitted_page_confirmed" || out.status === "unknown_outcome") { r.result = "fail"; r.reason = `BREACH: runner reported ${out.status}`; }
+  r.diag = out.diag || null; r.check = out.check || null;
   r.ms = Date.now() - t0;
   return r;
 }
@@ -121,7 +122,8 @@ async function main() {
   const rows = new Array(items.length); let next = 0;
   const conc = Math.max(1, Number(arg("concurrency", 6)));
   await Promise.all(Array.from({ length: conc }, async () => { while (next < items.length) { const i = next++; rows[i] = await strictPosting(browser, items[i], o);
-    const x = rows[i]; console.log(["STRICT", x.provider, x.result, x.reason, x.field || x.error || "", `blocked=${x.sent_blocked}`, `gql=${x.graphql_reads}`, `${(x.ms / 1000).toFixed(1)}s`, x.url].join(" | ")); } }));
+    const x = rows[i]; console.log(["STRICT", x.provider, x.result, x.reason, x.field || x.error || "", `blocked=${x.sent_blocked}`, `gql=${x.graphql_reads}`, `${(x.ms / 1000).toFixed(1)}s`, x.url].join(" | "));
+    if (x.result !== "pass" && (x.diag || x.check)) console.log("DIAG | " + x.provider + " | " + JSON.stringify({ check: x.check, ...x.diag })); } }));
   await browser.close();
   const s = summarize(rows);
   fs.writeFileSync(path.join(out, "strict.jsonl"), rows.map((x) => JSON.stringify(x)).join("\n") + "\n");

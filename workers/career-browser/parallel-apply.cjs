@@ -185,6 +185,25 @@ function checkPayload(p, { allowHosts = [] } = {}) {
 }
 
 // One attempt in its own fresh context. Returns a result; throws NeedsUser for a stop, Error for a retryable failure.
+// What a page showed when the run stopped, for a benchmark's record only: the control the stop names, the apply controls, the
+// forms, frames and captcha containers on the page. Plain data, cut short; nothing typed by the person is on a benchmark page.
+function DIAG(field) {
+  const cut = (x, n = 300) => String(x || "").replace(/\s+/g, " ").slice(0, n);
+  const out = { url: location.href.slice(0, 120), title: cut(document.title, 80), forms: document.forms.length,
+    inputs: document.querySelectorAll("input:not([type=hidden]), textarea, select").length };
+  if (field && !/^https?:/.test(field)) {
+    const want = field.toLowerCase().slice(0, 30);
+    const lab = [...document.querySelectorAll("label, legend, [id*=label], .application-label, div, span")].find((e) => e.children.length < 6 && (e.innerText || "").toLowerCase().includes(want));
+    const box = lab && (lab.closest(".application-question, .field, .form-group, li, fieldset") || lab.parentElement);
+    out.field = cut(box ? box.outerHTML : lab ? lab.outerHTML : "", 600);
+  }
+  out.captcha = [...document.querySelectorAll(".g-recaptcha, .h-captcha, .cf-turnstile, iframe[src*=captcha], iframe[src*=challenges]")].slice(0, 3)
+    .map((e) => cut(`${e.tagName} ${e.className || ""} ${e.getAttribute("src") || ""} ${e.offsetWidth}x${e.offsetHeight} vis=${getComputedStyle(e).visibility}`, 160));
+  out.apply = [...document.querySelectorAll("a, button, [role=button]")].filter((e) => /apply|bewerb|postul|solicit|interest|candidat/i.test(e.innerText || ""))
+    .slice(0, 5).map((e) => cut(`${e.tagName} "${(e.innerText || "").trim()}" ${e.getAttribute("href") || ""} ${e.offsetWidth}x${e.offsetHeight}`, 140));
+  out.frames = [...document.querySelectorAll("iframe")].slice(0, 4).map((f) => cut(f.getAttribute("src"), 100));
+  return out;
+}
 async function attempt(browser, p, opts, timing) {
   const ctx = await browser.newContext({ viewport: { width: 900, height: 1100 } });
   const page = await ctx.newPage();
@@ -310,6 +329,10 @@ async function attempt(browser, p, opts, timing) {
     }
     const code = /\b(?:GH|LV)-[A-Z0-9-]+/.exec(text);
     return { status: "submitted_page_confirmed", confirmation: code ? code[0] : null, filled };
+  } catch (e) {
+    // A benchmark's dry run asks what the page showed at a stop (opts.diag); production never does.
+    if (opts.diag && e instanceof NeedsUser) e.diag = await page.evaluate(DIAG, e.field || "").catch(() => null);
+    throw e;
   } finally {
     await ctx.close();
   }
@@ -333,7 +356,7 @@ async function applyOne(browser, p, opts = {}) {
       const r = await attempt(browser, p, { ...opts, shotBefore: opts.shotDir && `${opts.shotDir}/${p.id}-1-filled.png`, shotAfter: opts.shotDir && `${opts.shotDir}/${p.id}-2-confirmation.png` }, t);
       return { ...out, ...r, timing: t, ms: Date.now() - started };
     } catch (e) {
-      if (e instanceof NeedsUser && !t.submitClicked) return { ...out, ...(e.detail ? { check: e.detail } : {}), status: HANDOFF_REASONS.includes(e.reason) ? "needs_user" : "not_submitted", reason: e.reason, field: e.field, wall: e.wall || undefined, needs: e.needs || undefined, ms: Date.now() - started };
+      if (e instanceof NeedsUser && !t.submitClicked) return { ...out, ...(e.detail ? { check: e.detail } : {}), ...(e.diag ? { diag: e.diag } : {}), status: HANDOFF_REASONS.includes(e.reason) ? "needs_user" : "not_submitted", reason: e.reason, field: e.field, wall: e.wall || undefined, needs: e.needs || undefined, ms: Date.now() - started };
       if (t.submitClicked) return { ...out, status: "unknown_outcome", reason: e.message, ms: Date.now() - started };
       out.lastError = e.message.split("\n")[0];
       if (out.lastError === "page_load_429") break; // the portal said slow down: not asked again by this run

@@ -171,8 +171,8 @@ Deno.test({
         assertNode.match(one, /Student window: "Open to students graduating between December 2026 and June 2028"/);
         assertNode.match(two, /Student window: "Applicants must be currently enrolled in a bachelor's program"/);
         for (const b of [one, two]) {
-          assertNode.match(b, /\n   Checked: open on its application page, [A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d\d [AP]M C[SD]T\.\n/, "checked time in the person's zone (Chicago)");
-          assertNode.match(b, /Apply: https:\/\/boards\.greenhouse\.io\/(acme|lake)\/jobs\/10[12]/);
+          assertNode.match(b, /\n   Checked: open on its application page, [A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d\d [AP]M C[SD]T\.$/, "checked time in the person's zone (Chicago)");
+          assertNode.match(b.split("\n")[0], /\(https:\/\/boards\.greenhouse\.io\/(acme|lake)\/jobs\/10[12]\)/, "the application link on the numbered line");
           assertNode.match(b, /\n   Uncertain: your graduation date isn't confirmed, so eligibility isn't decided\./, "a missing fact is named beside the role, never an eligibility verdict");
         }
         assertNode.match(r.reply, /I did not find 5 within the scope checked/);

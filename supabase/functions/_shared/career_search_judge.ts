@@ -528,9 +528,10 @@ export async function searchJudgeTurn(o: {
   const lineOf = (h: SearchHit, i: number, tail: string | null) => {
     const desc = byId.get(h.job_id)?.description ?? "", arr = arrangementOf(where(h), desc), win = studentWindowOf(desc), link = linkOf.get(h.job_id);
     const open = link === "live" ? `Checked: open on its application page, ${at.text}` : offBoard.has(h.job_id) ? "Checked: not re-checked, it is not on a public job board I can check" : link === "unknown" ? "Checked: not re-checked, its application page did not answer" : "Checked: not re-checked";
-    return `${i + 1}. ${h.title} at ${h.company || "an employer the posting does not name"} — ${where(h) || "location not stated"}, ${arr ?? "arrangement not stated"}${noLevel(h) ? " [level not stated]" : ""}${tail ? `. ${tail}` : ""}${/[.!?]$/.test(tail ?? "") ? "" : "."}`
+    // The link stays on the numbered line, in parentheses (the texting channel puts it right under its posting; D-036).
+    return `${i + 1}. ${h.title} at ${h.company || "an employer the posting does not name"} — ${where(h) || "location not stated"}, ${arr ?? "arrangement not stated"}${h.url ? ` (${h.url})` : " (the posting gives no application link)"}${noLevel(h) ? " [level not stated]" : ""}${tail ? `. ${tail}` : ""}${/[.!?]$/.test(tail ?? "") ? "" : "."}`
       + `\n   Student window: ${win ? `"${win.replace(/[.]$/, "")}"` : "not stated in the posting"}.${win && !gradKnown ? `\n   Uncertain: your graduation date isn't confirmed, so eligibility isn't decided.` : ""}`
-      + `\n   ${open}.\n   ${h.url ? `Apply: ${h.url}` : "The posting gives no application link."}`;
+      + `\n   ${open}.`;
   };
   const top = hits.slice(0, N);
   // 3. The judge, when on and a model is given; else the fit order.

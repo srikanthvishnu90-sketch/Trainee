@@ -19,7 +19,7 @@ export interface CareerBrief {
   questions: { q: string; why: string; act?: Act }[]; first: { done: boolean; text: string }[]; acts?: Acts;
 }
 export function careerBriefFile(d: CareerBrief): FamilyFile {
-  const aim: Part[] = [{ p: "text", lead: d.aim.text, text: "" }, ...(d.aim.detail || d.aim.provisional ? [{ p: "text" as const, muted: true, text: [d.aim.detail, d.aim.provisional ? "Provisional reading - you can change this anytime." : ""].filter(Boolean).join(" ") }] : [])];
+  const aim: Part[] = [{ p: "heading", bold: true, title: d.aim.text }, ...(d.aim.detail || d.aim.provisional ? [{ p: "text" as const, muted: true, text: [d.aim.detail, d.aim.provisional ? "Provisional reading - you can change this anytime." : ""].filter(Boolean).join(" ") }] : [])];
   return {
     family: "F-01", hero: { kicker: `Career brief - v${d.version}`, title: d.title, meta: [{ label: "Updated", at: d.updatedAt }, { label: "Source:", value: d.sources }] },
     blocks: [
@@ -35,18 +35,17 @@ export function careerBriefFile(d: CareerBrief): FamilyFile {
 // ---------------------------------------------------------------- F-02 profile facts (C.4)
 export type FactKind = "confirmed" | "estimate" | "inferred" | "review";
 export interface ProfileFact { k: string; v: string | null; kind: FactKind; src: Src | null; correct?: Act }
-export interface ProfileFacts { facts: ProfileFact[]; conflict?: { text: string } | null; acts?: Acts; updatedAt: string | null }
+export interface ProfileFacts { facts: ProfileFact[]; conflict?: { text: string } | null; acts?: Acts }
 export function profileFactsFile(d: ProfileFacts): FamilyFile {
   const c = (k: FactKind) => d.facts.filter((f) => f.kind === k);
   const kv = (fs: ProfileFact[]): KV[] => fs.map((f) => ({ k: f.k, v: f.v, src: f.src }));
   return {
-    family: "F-02", hero: { kicker: "Profile facts", title: "What Trainee may say about you", meta: [{ label: "Updated", at: d.updatedAt }, { label: "Based on", value: n(c("confirmed").length, "confirmed fact") }] },
+    family: "F-02", hero: null, title: "Profile facts", // p-46: segments come straight after the header
     segments: [{ label: "Confirmed", n: c("confirmed").length, selected: true }, { label: "Estimates", n: c("estimate").length }, { label: "Inferred", n: c("inferred").length }, { label: "Needs review", n: c("review").length }],
     blocks: [
       ...(d.conflict ? [note("danger", "Conflict to resolve.", d.conflict.text)] : []),
-      ...(c("confirmed").length + c("estimate").length ? [card("Confirmed facts and your estimates", [{ p: "kv", rows: kv([...c("confirmed"), ...c("estimate")]) }])] : []),
-      ...(c("review").length ? [card("Needs review", [{ p: "kv", rows: kv(c("review")) }])] : []),
-      ...(c("inferred").length ? [card("Inferred preferences - not attestations", c("inferred").map((f) => ({ p: "item" as const, title: f.v ?? f.k, text: `${f.k}. Working interpretation - never sent to employers.`, act: f.correct })))] : []),
+      ...(c("confirmed").length + c("estimate").length ? [card("Confirmed facts - sample", [{ p: "kv", rows: kv([...c("confirmed"), ...c("estimate")]) }])] : []),
+      ...(c("inferred").length ? [card("Inferred preferences - not attestations", c("inferred").map((f) => ({ p: "item" as const, title: f.v ?? f.k, text: `Working interpretation from ${f.k} - never sent to employers.`, act: f.correct })))] : []),
       card("Sensitive fields", [{ p: "tile", icon: "lock", title: "Work authorization, veteran status, demographics", text: "Answered per application, only by you. Never guessed, never reused silently. \"Prefer not to say\" is respected." }]),
     ],
     actions: d.acts,
@@ -54,14 +53,14 @@ export function profileFactsFile(d: ProfileFacts): FamilyFile {
 }
 
 // ---------------------------------------------------------------- F-03 path comparison (C.5)
-export interface Direction { letter: string; name: string; reach: string; evidence: "Strong" | "Partial" | "Weak"; rows: KV[]; find?: Act }
+export interface Direction { letter: string; name: string; reach: string; evidence: "Strong" | "Partial" | "Weak"; rows: KV[] }
 export interface PathComparison { title: string; confirmedFacts: number; updatedAt: string | null; directions: Direction[]; experiment?: string | null; acts?: Acts }
 const EVIDENCE: Record<Direction["evidence"], Chip["tone"]> = { Strong: "confirmed", Partial: "attention", Weak: "risk" };
 export function pathComparisonFile(d: PathComparison): FamilyFile {
   return {
     family: "F-03", hero: { kicker: `Comparing ${n(d.directions.length, "direction")}`, title: d.title, meta: [{ label: "Based on", value: n(d.confirmedFacts, "confirmed fact") }, { label: "Updated", at: d.updatedAt }] },
     blocks: [
-      ...d.directions.map((x): Block => ({ b: "card", parts: [{ p: "item", title: `${x.letter} - ${x.name}`, text: x.reach, chip: { label: `${x.evidence} evidence`, tone: EVIDENCE[x.evidence] }, act: x.find }, { p: "kv", rows: x.rows }] })),
+      ...d.directions.map((x): Block => ({ b: "card", parts: [{ p: "heading", title: `${x.letter} - ${x.name}`, sub: x.reach, chip: { label: `${x.evidence} evidence`, tone: EVIDENCE[x.evidence] } }, { p: "kv", rows: x.rows }] })),
       ...(d.experiment ? [note("info", "Recommended experiment:", d.experiment)] : []),
       note("caution", "Unknowns stay unknown.", "Hiring odds are not predicted. No course or certification is claimed to guarantee progression."),
     ],
@@ -74,7 +73,7 @@ export interface SearchPlan { version: number; title: string; batchCap: number; 
 export function searchPlanFile(d: SearchPlan): FamilyFile {
   return {
     family: "F-04", boundary: `Plan v${d.version} - searching is not applying`,
-    hero: { kicker: `Search plan - v${d.version}`, title: d.title, meta: [{ label: "First batch:", value: `${d.batchCap} roles max` }, { label: "Updated", at: d.updatedAt }] },
+    hero: { kicker: `Search plan - v${d.version}`, title: d.title, meta: [{ label: "First batch:", value: `${d.batchCap} roles max` }, { label: "Calibration before scaling" }, { label: "Updated", at: d.updatedAt }] },
     blocks: [
       card("Hard constraints - cannot be overridden by fit score", [{ p: "kv", rows: d.hard }]),
       card("Preferences - influence ranking, never gate", [{ p: "kv", rows: d.prefs }]),
@@ -94,12 +93,12 @@ export interface RoleWorkspace {
 const FIT_LEAD = { met: "Met:", partial: "Partly evidenced:", missing: "Missing:", unknown: "Unknown:" } as const;
 export function roleWorkspaceFile(d: RoleWorkspace): FamilyFile {
   return {
-    family: "F-06", mono: [d.rid, d.appId].filter(Boolean).join(" - "),
-    hero: { kicker: "Role workspace", title: d.title, meta: [{ label: d.company, value: d.req ? `Req ${d.req}` : null }, { label: "Checked", at: d.checkedAt }] },
+    family: "F-06", mono: [d.rid, d.appId].filter(Boolean).join(" - "), boundary: undefined,
+    hero: { kicker: "Role workspace", title: d.title, meta: [{ label: "", value: d.company }, { label: "Req", value: d.req ?? null }, { label: "Checked", at: d.checkedAt }] },
     blocks: [
       card("Fit and eligibility", [{ p: "check", items: d.fit.map((f) => ({ state: f.state, lead: FIT_LEAD[f.state], text: f.text, src: f.src })) }]),
       card("Materials for this role", [{ p: "kv", rows: d.materials }]),
-      { b: "card", parts: [{ p: "tile", icon: "route", title: "Execution route", text: d.route.text, chip: d.route.supported ? { label: "Supported", tone: "confirmed" } : { label: "You do this step", tone: "attention" } }] },
+      { b: "card", parts: [{ p: "tile", icon: "route", title: "Execution route", text: `${d.route.supported ? "Supported" : "Not supported - you do this step"}: ${d.route.text}` }] },
       ...(d.declaration ? [note("caution", "Declarations.", d.declaration)] : []),
     ],
     actions: d.acts,
@@ -108,19 +107,20 @@ export function roleWorkspaceFile(d: RoleWorkspace): FamilyFile {
 
 // ---------------------------------------------------------------- F-07 materials studio (C.9)
 export type ChangeKind = "Emphasis" | "Wording" | "Fact needed";
+// lead: a bold run-in before the text ("Needs your input"); from: the version pair the summary compares ("v2", "v3").
 export interface Materials {
   rid: string; docTitle: string; base: string; approved?: string | null; draft: string; updatedAt: string | null;
-  changes: { kind: ChangeKind; before?: string | null; after: string; text: string }[]; format: string | null; usedBy: string; download: Act; acts?: Acts;
+  changes: { kind: ChangeKind; before?: string | null; after: string; text: string; lead?: string }[]; format: string | null; usedBy: string; download: Act; acts?: Acts;
 }
 export function materialsFile(d: Materials): FamilyFile {
   const needs = d.changes.filter((c) => c.kind === "Fact needed").length;
   return {
     family: "F-07", boundary: `${d.docTitle.split(" - ")[0]} - for ${d.rid} - nothing sent`,
-    hero: { kicker: "Materials studio", title: d.docTitle, meta: [{ label: "Based on", value: d.base }, { label: d.approved ? `${d.approved} approved -` : "No version approved -", value: `${d.draft} draft` }, { label: "Updated", at: d.updatedAt }] },
+    hero: { kicker: "Materials studio", title: d.docTitle, meta: [{ label: "Based on", value: d.base }, { label: `${d.approved ? `${d.approved} approved` : "No version approved"} - ${d.draft}`, value: "draft" }, { label: "Updated", at: d.updatedAt }] },
     blocks: [
-      card(`Change summary${needs ? ` - ${n(needs, "fact")} needed` : ""}`, d.changes.map((c) => ({ p: "diff" as const, before: c.before, after: c.after, text: c.text, chip: { label: c.kind, tone: c.kind === "Fact needed" ? "attention" as const : "neutral" as const } }))),
+      card(`Change summary - ${d.approved ?? "master"} → ${d.draft}${needs ? ` - ${n(needs, "fact")} needed` : ""}`, d.changes.map((c) => ({ p: "diff" as const, before: c.before, after: c.after, text: c.text, lead: c.lead, chip: { label: c.kind, tone: c.kind === "Fact needed" ? "attention" as const : "neutral" as const } }))),
       note("danger", "Never fabricated.", "No invented metrics, titles, tools, or employers. A missing achievement becomes a question to you, not a sentence in the resume."),
-      card("Checks", [{ p: "kv", rows: [{ k: "Format check", v: d.format, src: d.format ? { label: "Checked by Trainee on the produced file" } : null, missing: "Not checked yet" }, { k: "Used by", v: d.usedBy, src: { label: "Approving here covers no other role" } }] }]),
+      { b: "card", parts: [{ p: "kv", rows: [{ k: "Format check", v: d.format, src: d.format ? { label: "checked on the file" } : null, missing: "Not checked yet" }, { k: "Used by", v: d.usedBy, src: { label: "approving here covers no other role" } }] }] },
     ],
     actions: { ...d.acts, secondary: [...(d.acts?.secondary ?? []), d.download], caption: d.acts?.caption ?? "Downloading never submits. The approved version is the one used - not the newest." },
   };
@@ -129,16 +129,16 @@ export function materialsFile(d: Materials): FamilyFile {
 // ---------------------------------------------------------------- F-08 answer library (C.10)
 export interface AnswerLibrary {
   declaration?: { rid: string; text: string } | null; factual: KV[]; roleSpecific: { q: string; scope: string; note: string }[];
-  scoped: { q: string; answer: string; scope: string }[]; needed: number; updatedAt: string | null; acts?: Acts;
+  scoped: { q: string; answer: string; scope: string; outside?: string | null }[]; needed: number; acts?: Acts;
 }
 export function answerLibraryFile(d: AnswerLibrary): FamilyFile {
   return {
-    family: "F-08", hero: { kicker: "Answer library", title: "Exact answers you have approved", meta: [{ label: "Updated", at: d.updatedAt }, { label: "Needs you:", value: n(d.needed, "answer") }] },
+    family: "F-08", hero: null, title: "Answer library", // p-64: the blocking banner comes first
     blocks: [
       ...(d.declaration ? [note("caution", `New declaration on ${d.declaration.rid}.`, `"${d.declaration.text}" is an attestation. It blocks submission until you review it - it is never treated as routine reusable text.`)] : []),
       card("Factual - reused with source", [{ p: "kv", rows: d.factual }]),
       ...(d.roleSpecific.length ? [card("Role-specific - drafted from evidence", d.roleSpecific.map((r) => ({ p: "item" as const, title: `"${r.q}"`, chip: { label: r.scope, tone: "plum" as const }, text: r.note })))] : []),
-      ...(d.scoped.length ? [card("Scoped reuse", d.scoped.map((s) => ({ p: "item" as const, title: s.q, chip: { label: "Scoped", tone: "info" as const }, text: `Answer: "${s.answer}" - scoped to ${s.scope}. Anything outside that scope asks again, never reuses silently.` })))] : []),
+      ...(d.scoped.length ? [card("Scoped reuse", d.scoped.map((s) => ({ p: "item" as const, title: s.q, chip: { label: "Scoped", tone: "info" as const }, text: `Answer: "${s.answer}" - scoped to ${s.scope}. ${s.outside ?? "Anything outside that scope"} would ask again, not reuse silently.` })))] : []),
       card("Sensitive - always yours", [{ p: "tile", icon: "lock", title: "Sponsorship, demographics, disability, veteran status", text: "Never guessed or inferred. Optional fields say so. \"Prefer not to say\" is preserved, not recommended." }]),
     ],
     actions: d.acts,

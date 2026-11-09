@@ -10,7 +10,7 @@ import { researchCompany } from "../../../supabase/functions/_shared/agent/resea
 import { bodyHtml, type FileRecord, KIND_CSS, validateKind } from "../../../supabase/functions/_shared/file_kinds.ts";
 import { fileShellHtml } from "../../../supabase/functions/_shared/file_design.ts";
 import { layout } from "../../../supabase/functions/_shared/file_page.ts";
-import { NOW, world } from "../../../tests/helpers/research_company_web.ts";
+import { FACTS, NOW, world } from "../../../tests/helpers/research_company_web.ts";
 import { browserChecks, MEASURE, playwright } from "./quality.ts";
 
 const ROOT = new URL("../../../", import.meta.url).pathname;
@@ -31,7 +31,7 @@ if (import.meta.main) {
   try {
     for (const r of RUNS) {
       const w = world();
-      await researchCompany({ company: "Stripe", role: r.role, question: r.question, focus: r.focus, audience: r.audience, now: NOW, deps: w.deps, plan: { queries: ["Stripe"], companies: ["Stripe"], sites: ["stripe.example"] } });
+      await researchCompany({ company: "Stripe", role: r.role, question: r.question, focus: r.focus, audience: r.audience, now: NOW, deps: w.deps, facts: r.role ? FACTS : [], plan: { queries: ["Stripe"], companies: ["Stripe"], sites: ["stripe.example"] } });
       const v: any = validateKind("research_brief", w.published[0], { now: NOW });
       if (!v.ok) { lines.push(`FAIL ${r.id}: the File does not validate: ${v.errors.join("; ")}`); continue; }
       const rec = { id: r.id, userId: "u", kind: "research_brief", data: v.data, state: {}, tag: null, created_at: NOW, expires_at: NOW + 86400_000, revoked_at: null } as FileRecord;

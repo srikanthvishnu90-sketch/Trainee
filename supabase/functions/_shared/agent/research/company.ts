@@ -29,12 +29,17 @@ type Cited = { text: string; cite: number[] };
 export type Measure = "volume" | "forecast" | null;
 export interface Development extends Cited { date: string; measure: Measure }
 export interface Question { area: string; a: string; b: string; text: string; cite: number[] }
+// The person's side (architect ruling 2026-11-09, spec C.22 and p-89), read only from their CONFIRMED facts: which confirmed fact
+// speaks to what the role page asks (and nothing more), and a five-minute list built from the brief's own lines.
+export interface ProjectTie { fact: string; ties: Cited[] }
+export interface FiveItem { label: string; text: string; cite?: number[] }
 export interface CompanySource { n: number; url: string; title: string; fetched_at: string; by: "company" | "reported"; limit?: "paywalled" | "outdated"; dated?: string }
 export type CompanyResult =
   | { kind: "company"; status: "no_sources"; ask: "role" | null; notes: string[]; unread: string[]; blocker: string; note: string }
   | { kind: "company"; status: "ok"; format: "file" | "inline"; company: string; role: string | null; ask: "role" | null; focus: Focus; audience: string | null; title: string;
       frame: Cited | null; business: Cited[]; developments: Development[]; competitors: (Cited & { name: string })[]; role_asks: Cited[];
-      questions: Question[]; unknowns: string[]; sources: CompanySource[]; unread: string[]; file_url: string | null; dropped: number; notes: string[]; note: string };
+      questions: Question[]; unknowns: string[]; sources: CompanySource[]; products: { name: string; angle: string }[];
+      project: { ties: ProjectTie[]; missing: string | null }; five: FiveItem[]; unread: string[]; file_url: string | null; dropped: number; notes: string[]; note: string };
 
 const squash = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim();
 const arr = (x: unknown, n: number): any[] => Array.isArray(x) ? x.slice(0, n) : [];
@@ -44,7 +49,7 @@ const hostOf = (u: string) => { try { return new URL(u).hostname.toLowerCase().r
 const word = (name: string, text: string) => new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(text);
 
 const SECTIONS: Record<Exclude<Focus, "all">, string> = {
-  business: '"business": [{"text": "...", "quote": "...", "url": "..."}]: up to 5 facts on what the company sells, to whom, and how it makes money',
+  business: '"business": [{"text": "...", "quote": "...", "url": "...", "product": "the product the line is about, if one"}]: up to 6 facts on what the company sells, to whom, and how it makes money; "products": [{"name": "...", "angle": "a few words the pages use for what it does, e.g. the revenue lifecycle"}] for up to 3 products the role touches',
   developments: '"developments": [{"text": "...", "quote": "...", "url": "...", "date": "YYYY-MM-DD or Month YYYY or YYYY, as the page dates it"}]: up to 5 material recent developments; keep each metric\'s meaning (volume is not revenue; a forecast is not a result)',
   competitors: '"competitors": [{"name": "...", "text": "...", "quote": "...", "url": "..."}]: up to 4 competitors or tradeoffs, each quote naming that competitor',
   role: '"role": [{"text": "...", "quote": "...", "url": "..."}]: up to 5 things the role page asks for (only when a PAGE is the role\'s page)',
@@ -126,7 +131,7 @@ const UNREAD_WHY: Record<string, string> = { http_status: "it answered with an e
 
 const parse = (raw: string) => { try { return JSON.parse(raw.trim().replace(/^```(?:json)?\s*|\s*```$/g, "")); } catch { return null; } };
 
-export async function researchCompany(i: { company: string; role?: string | null; question: string; focus?: Focus; audience?: string | null; plan: SearchPlan; deps: MarketDeps; now: number; fileLinks?: string[]; format?: "file" | "inline" }): Promise<CompanyResult> {
+export async function researchCompany(i: { company: string; role?: string | null; question: string; focus?: Focus; audience?: string | null; plan: SearchPlan; deps: MarketDeps; now: number; fileLinks?: string[]; format?: "file" | "inline"; facts?: string[] }): Promise<CompanyResult> {
   const format = i.format === "inline" ? "inline" as const : "file" as const;
   const company = squash(i.company).slice(0, 80), role = squash(i.role ?? "").slice(0, 80) || null, focus: Focus = FOCI.includes(i.focus as Focus) ? i.focus as Focus : "all";
   const audience = squash(i.audience ?? "").slice(0, 40) || null, ask = role ? null : "role" as const;
@@ -157,7 +162,9 @@ export async function researchCompany(i: { company: string; role?: string | null
   };
   const kept = (f: { text: string; page: SourcePage }): Cited => ({ text: f.text, cite: [num(f.page)] });
   const on = (f: Focus) => focus === "all" || focus === f;
-  const business = on("business") ? arr(d.business, 5).map(fact).filter(Boolean).map((f) => kept(f!)) : [];
+  // A product line keeps its product only when the quote names it.
+  const business: (Cited & { product?: string })[] = on("business") ? arr(d.business, 6).map((x) => { const f = fact(x); if (!f) return null; const pr = squash(x?.product).slice(0, 40);
+    return { ...kept(f), ...(pr && linkFree(pr) && word(pr, squash(x?.quote)) ? { product: pr } : {}) }; }).filter(Boolean) as (Cited & { product?: string })[] : [];
   const developments: Development[] = on("developments") ? arr(d.developments, 5).map((x) => {
     const day = parseDay(squash(x?.date)), f = fact(x);
     if (!f) return null;
@@ -198,12 +205,29 @@ export async function researchCompany(i: { company: string; role?: string | null
   }
   const cited = order.map((k) => byUrl.get(k)!);
   const pageText = cited.map((p) => p.text.slice(0, 60000)).join("\n");
+  const cited0 = (n: number) => (cited[n - 1]?.text ?? "").slice(0, 60000);
   const known = [company, role ?? ""].join(" ");
   const unknowns = focus === "all" ? arr(d.unknowns, 4).map(squash).filter((u) => {
     const ok = u && u.length <= 200 && linkFree(u) && !numbersIn(u).length && specifics(u).names.every((n) => word(n, pageText) || word(n, known));
     if (!ok && u) dropped++;
     return ok;
   }) : [];
+  // Products (C.22 "Billing: the revenue lifecycle"): a product with kept lines, and an angle every word of which is on those lines' pages.
+  const products = focus === "all" ? arr(d.products, 3).map((x) => ({ name: squash(x?.name).slice(0, 40), angle: squash(x?.angle).replace(/[.]+$/, "").slice(0, 60) })).filter((x) => {
+    const mine = business.filter((b) => b.product && b.product.toLowerCase() === x.name.toLowerCase());
+    const words = new Set(mine.flatMap((b) => b.cite.flatMap((n) => [...contentWords(cited0(n))])));
+    const ok = !!x.name && !!x.angle && linkFree(x.angle) && mine.length > 0 && contentWords(x.angle).size > 0 && [...contentWords(x.angle)].every((w) => words.has(w));
+    if (!ok && x.name) dropped++;
+    return ok;
+  }) : [];
+  for (const b of business) if (b.product && !products.some((x) => x.name.toLowerCase() === b.product!.toLowerCase())) delete b.product;
+  // The person's project, from confirmed facts only: a fact ties to a role line when they share a content word that is not generic.
+  const GENERIC = new Set(["work", "team", "build", "experi", "use", "business", "data", "role", "job", "intern", "student", "project", "company"].map((w) => [...contentWords(w)][0] ?? w));
+  const facts = (i.facts ?? []).map(squash).filter((f) => f && f.length <= 300 && linkFree(f)).slice(0, 12);
+  const ties: ProjectTie[] = focus === "all" ? facts.map((f) => { const fw = new Set([...contentWords(f)].filter((w) => !GENERIC.has(w)));
+    return { fact: f, ties: role_asks.filter((r) => [...contentWords(r.text)].some((w) => fw.has(w))).slice(0, 2) }; }).filter((t) => t.ties.length).slice(0, 3) : [];
+  const missing = focus !== "all" ? null : !facts.length ? "No confirmed facts about your projects yet. Confirm one project (what you built, with which tools, at what scale) and this section ties it to the role."
+    : !role_asks.length ? "The role page was not read, so none of your confirmed facts could be matched to what it asks." : !ties.length ? "None of your confirmed facts matches what the role page asks for; the brief does not stretch one to fit." : null;
   if (ask && focus === "all") unknowns.unshift("Which role you are interviewing for: the brief has no role-specific section until you say.");
   const any = business.length + developments.length + competitors.length + role_asks.length + questions.length;
   if (!any) { const blocker = `${pages.length} page(s) about ${company} were opened, but none stated anything the brief could quote`; return { kind: "company", status: "no_sources", ask, notes, unread, blocker, note: `Research found nothing it could stand on: ${blocker}. Say that plainly; do not guess.${roleAsk}` }; }
@@ -211,19 +235,29 @@ export async function researchCompany(i: { company: string; role?: string | null
   const sources: CompanySource[] = cited.map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || hostOf(p.url), fetched_at: new Date(p.fetchedAt).toISOString(),
     by: [...siteHosts].some((h) => h && (hostOf(p.url) === h || hostOf(p.url).endsWith(`.${h}`))) ? "company" as const : "reported" as const, ...pageLimit(p.text, i.now) }));
   const title = `${company}${role ? `: ${role}` : ""} interview brief`.slice(0, 80);
+  // Five minutes before the interview (p-89), from the brief's own lines: the frame, one number named for what it measures, the
+  // person's own example (a confirmed fact, or that none is confirmed), and the first question.
+  const dev = developments.find((x) => x.measure) ?? developments[0];
+  const five: FiveItem[] = focus !== "all" ? [] : [
+    ...(frame ? [{ label: "The frame", text: frame.text, cite: frame.cite }] : []),
+    ...(dev ? [{ label: "One number, correctly named", text: `${dev.date}: ${dev.text}${dev.measure === "volume" ? " That is volume, not revenue." : dev.measure === "forecast" ? " That was a forecast at the time, not a result." : ""}`, cite: dev.cite }] : []),
+    { label: "Your example", text: ties[0] ? ties[0].fact : "Not confirmed yet: see how to use your project, above." },
+    ...(questions[0] ? [{ label: "Your first question", text: questions[0].text, cite: questions[0].cite }] : []),
+  ];
 
   let file_url: string | null = null;
   if (format === "inline") notes.push("answered in chat, as the person asked");
   else if (i.deps.publish) {
     const data = { variant: "company", title, company, ...(role ? { role } : {}), ...(ask ? { role_asked: true } : {}), ...(focus !== "all" ? { focus } : {}), ...(audience ? { audience } : {}),
-      ...(frame ? { frame } : {}), business, developments, competitors, role_asks, questions, unknowns, ...(unread.length && focus === "all" ? { unread } : {}), sources: sources.map(({ n: _n, ...s }) => s) };
+      ...(frame ? { frame } : {}), business, ...(products.length ? { products } : {}), developments, competitors, role_asks, questions, unknowns,
+      ...(focus === "all" ? { project: { ties, ...(missing ? { missing } : {}) }, five } : {}), ...(unread.length && focus === "all" ? { unread } : {}), sources: sources.map(({ n: _n, ...s }) => s) };
     const made = await i.deps.publish(data).catch(() => null);
     if (made && /^https:\/\//.test(made.url)) { file_url = made.url; i.fileLinks?.push(made.url); } else notes.push("answered inline: the brief could not be saved");
   } else notes.push("answered inline: research files are not switched on here");
   const area = focus === "all" ? "" : ` The person asked to go deeper on ${focus === "questions" ? `the questions${audience ? ` for the ${audience}` : ""}` : `the ${focus}`}: talk about that area only.`;
-  if (format === "inline") return { kind: "company", status: "ok", format, company, role, ask, focus, audience, title, frame, business, developments, competitors, role_asks, questions, unknowns, sources, unread, file_url, dropped, notes,
+  if (format === "inline") return { kind: "company", status: "ok", format, company, role, ask, focus, audience, title, frame, business, developments, competitors, role_asks, questions, unknowns, sources, products, project: { ties, missing }, five, unread, file_url, dropped, notes,
     note: `The person asked for the answer in chat. Write three to five short sentences from the lines above only: what the company does and what someone in this role would work on, each sentence ending with its source numbers like [1]. Write no link, no question list and no source list: code adds the interview questions, what the sources cannot establish and the numbered sources after your text.${roleAsk}` };
-  return { kind: "company", status: "ok", format, company, role, ask, focus, audience, title, frame, business, developments, competitors, role_asks, questions, unknowns, sources, unread, file_url, dropped, notes,
+  return { kind: "company", status: "ok", format, company, role, ask, focus, audience, title, frame, business, developments, competitors, role_asks, questions, unknowns, sources, products, project: { ties, missing }, five, unread, file_url, dropped, notes,
     note: `Reply in two or three plain sentences: the most useful themes for the interview, drawn only from the lines above, and that the brief with its sources is in the file${file_url ? "" : " (no file was made: say so)"}.${area} Write no link and no figure that is not in a line above.${roleAsk}` };
 }
 

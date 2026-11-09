@@ -41,11 +41,13 @@ export const FULL = {
   title: "Stripe interview brief",
   frame: { text: "Stripe is easier to understand as payments plus software for the revenue lifecycle than as card processing alone.", urls: [U.billing, U.update] },
   business: [
-    { text: "Stripe Billing lets businesses bill customers with subscriptions and invoices.", quote: "Stripe Billing lets businesses bill customers with subscriptions and invoices.", url: U.billing },
-    { text: "Radar uses machine learning to help businesses block fraudulent payments.", quote: "Radar uses machine learning to help businesses block fraudulent payments.", url: U.radar },
+    { text: "Stripe Billing lets businesses bill customers with subscriptions and invoices.", quote: "Stripe Billing lets businesses bill customers with subscriptions and invoices.", url: U.billing, product: "Billing" },
+    { text: "Radar uses machine learning to help businesses block fraudulent payments.", quote: "Radar uses machine learning to help businesses block fraudulent payments.", url: U.radar, product: "Radar" },
     { text: "Stripe signed more enterprise customers this year.", quote: "Stripe signed more enterprise customers this year.", url: U.paywall },
     { text: "Stripe launched usage-based billing for software companies.", quote: "Stripe launched usage-based billing for software companies.", url: U.old },
   ],
+  // C.22's per-product headings; "Atlas" has no kept line, so it is dropped.
+  products: [{ name: "Billing", angle: "the revenue lifecycle" }, { name: "Radar", angle: "fraudulent payments and good payments" }, { name: "Atlas", angle: "incorporating startups" }],
   developments: [
     { text: "Businesses on Stripe generated $1.9 trillion in total volume in 2025, up 34% from 2024.", quote: "Businesses on Stripe generated $1.9 trillion in total volume in 2025, up 34% from 2024.", url: U.update, date: "2026-02-24" },
     { text: "The Revenue suite is on track to reach a $1 billion annual run rate in 2026.", quote: "The Revenue suite is on track to reach a $1 billion annual run rate in 2026.", url: U.update, date: "February 2026" },
@@ -78,6 +80,8 @@ export const QUESTIONS_ONLY = {
   business: [{ text: "Stripe Billing lets businesses bill customers with subscriptions and invoices.", quote: "Stripe Billing lets businesses bill customers with subscriptions and invoices.", url: U.billing }], // a focus keeps its area only
 };
 
+// The person's confirmed facts (as the tool reads them: confirmed only), one tying to the role page's SQL and dashboards.
+export const FACTS = ["project: Built a Python screening workflow that combined company, revenue and contact data across 100+ targets", "skill: SQL and dashboards in Tableau"];
 export function world() {
   const published: any[] = [], drafts: string[] = [];
   const deps: MarketDeps = {

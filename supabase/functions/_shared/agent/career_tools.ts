@@ -23,7 +23,7 @@ import type { DigestStore, InterviewStore } from "../career_brief_store.ts";
 import { DAY_NAMES, DEFAULT_DIGEST, validDigest } from "../career_digest.ts";
 import { type ContactRow, contactsOf, firmKey, hunterPass, knownFirm, LIST_TARGET_USD, listCost, listReport, sameFirm, type Verifier, vendorSource } from "../career_contacts.ts";
 import {
-  batchMessages, batchText, blockedAddresses, confirmed, draftFor, draftLangOf, emailHash, footerOf, messageOf, type ModelFn, OUTREACH_INTENT, type OutreachDraft,
+  batchMessages, batchText, blockedAddresses, confirmed, draftFor, draftLangOf, factText, emailHash, footerOf, messageOf, type ModelFn, OUTREACH_INTENT, type OutreachDraft,
   type OutreachStore, payloadHash, recordOutreach, SIGNATURE_ASK, guardRecipient,
 } from "../career_outreach.ts";
 import { legacyRows, REFERRAL_ASK, referralMap, targetFirms } from "../career_referrals.ts";
@@ -304,6 +304,7 @@ export function careerTools(deps: {
       const list = (x: unknown) => Array.isArray(x) ? x.map(String).filter(Boolean).slice(0, 4) : [];
       const company = String(i.company ?? "").trim(), role = String(i.role ?? "").trim() || null, q = String(i.question ?? c.turn?.message ?? "");
       const r = await researchCompany({ company, role, question: q, focus: (FOCI as readonly string[]).includes(String(i.focus)) ? i.focus as Focus : "all", format: i.format === "inline" ? "inline" : "file", audience: i.audience ? String(i.audience) : null, now: c.now,
+        facts: confirmed(profileOf(c).facts || []).map(factText), // the person's side of the brief: confirmed facts only (D-007)
         deps: deps.market!, fileLinks: c.turn ? (c.turn.fileLinks ??= []) : undefined,
         plan: { queries: list(i.queries).slice(0, 3).concat(list(i.queries).length ? [] : [`${company} ${role ?? ""}`.trim()]), companies: company ? [company] : [], sites: list(i.sites) } });
       deps.market!.onResult?.(r);

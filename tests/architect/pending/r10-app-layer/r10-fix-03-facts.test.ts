@@ -17,7 +17,9 @@ R.suite(FILE, [3], [CHAT], async (t: Deno.TestContext, w: any) => {
     ev.reply = up.reply;
     ok(!/Skill:\s*(Skills|Interests|Certifications):/i.test(up.reply), `a section label is not filed as a skill: ${up.reply.match(/Skill:\s*(Skills|Interests|Certifications):[^\n]*/i)?.[0]}`);
     ok(!/Skill:\s*(Golf|Chess|Coding)\b/i.test(up.reply), "an interest is not a skill");
-    const exp = Number(/(\d+) experience/i.exec(up.reply)?.[1] ?? "0");
+    const em = /(\d+) experience/i.exec(up.reply);
+    ok(em, `the readback says how many experience entries it read: ${up.reply.slice(0, 300)}`);
+    const exp = Number(em![1]);
     ok(exp <= 4, `only the four jobs are experience; skills, certifications and interests are not (${exp} experience entries read)`);
     ok(/skills?\b/i.test(up.reply) && /certifications?\b/i.test(up.reply) && /interests?\b/i.test(up.reply), "the readback names skills, certifications and interests as their own kinds");
     ok(!/Skill:\s*(Bloomberg Market Concepts|Google Data Analytics Certificate)/i.test(up.reply), "a certification is not a skill");
@@ -38,7 +40,7 @@ R.suite(FILE, [3], [CHAT], async (t: Deno.TestContext, w: any) => {
     ev.reply = r.reply;
     ok(!/what('s| is) your (name|school|major)|which (university|school)|what did you do at|tell me about your experience/i.test(r.reply), `does not re-ask a fact on file: ${r.reply.slice(0, 400)}`);
     ok(/email|phone|contact/i.test(r.reply) && /\?/.test(r.reply), `asks the one missing fact by name: ${r.reply.slice(0, 400)}`);
-    ok(/GPA/i.test(r.reply), "names the GPA conflict (3.6 vs 3.8) instead of picking one");
+    ok(/GPA/i.test(r.reply) && ((/3\.6/.test(r.reply) && /3\.8/.test(r.reply)) || /GPA[^.?]*\b(conflict\w*|two (different )?(values|GPAs)|differ\w*|disagree\w*|which (one|is right))\b/i.test(r.reply)), `names the GPA conflict (both 3.6 and 3.8, or conflict wording) instead of picking one: ${r.reply.slice(0, 400)}`);
   }, w);
   await check(t, FILE, 3, "'Leave GPA off. What did you change?' names the actual edits, adds nothing, and the file has no GPA", async (ev: any) => {
     const r = await w.say(CHAT, "Leave GPA off. What did you change?");

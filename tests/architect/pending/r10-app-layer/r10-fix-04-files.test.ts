@@ -9,7 +9,7 @@ const { ok, check, deliveredFiles, internalHits, repeated, renderPhone } = R;
 const FILE = "r10-fix-04-files.test.ts", CHAT = 7_910_401;
 R.suite(FILE, [4], [CHAT], async (t: Deno.TestContext, w: any) => {
   const person = await w.observedPerson(CHAT);
-  let pdfText = "";
+  let pdfText = "", pdfSent = false; // pdfSent: a PDF was delivered by an earlier turn of this conversation
   await check(t, FILE, 4, "the draft PDF is delivered and opens: one page, selectable text, readable type, nothing outside the page", async (ev: any) => {
     const r = await w.say(CHAT, T.SCENARIOS.resume[0].text);
     ev.reply = r.reply;
@@ -21,6 +21,7 @@ R.suite(FILE, [4], [CHAT], async (t: Deno.TestContext, w: any) => {
     ok(pdf.pdf.outOfPage === 0, "no clipped text");
     ok(!/^(Resume_Resume|document|resume)\.pdf$/i.test(pdf.name), `a meaningful filename: ${pdf.name}`);
     pdfText = pdf.pdf.text;
+    pdfSent = true;
   }, w);
   await check(t, FILE, 4, "'send me the Word version too' delivers a DOCX that opens with the same facts", async (ev: any) => {
     const r = await w.say(CHAT, "Send me the Word version too.");
@@ -33,7 +34,9 @@ R.suite(FILE, [4], [CHAT], async (t: Deno.TestContext, w: any) => {
   await check(t, FILE, 4, "'Send this one.' with a resume and an application in view asks which (two concrete choices) and sends nothing", async (ev: any) => {
     const r = await w.say(CHAT, "Send this one.");
     ev.reply = r.reply;
-    ok(/\?/.test(r.reply) && /PDF|resume/i.test(r.reply), `a short question naming the concrete choices: ${r.reply.slice(0, 300)}`);
+    // B.4: two concrete choices ("submit the application for job 2, or send you the revised resume PDF?"), not "please clarify".
+    ok(/\?/.test(r.reply) && /PDF|resume/i.test(r.reply) && /\b(application|submit|job \d|role)\b/i.test(r.reply) && /\bor\b/i.test(r.reply), `a short question naming two concrete choices (the resume PDF or the application): ${r.reply.slice(0, 300)}`);
+    ok(!/please clarify|can you clarify|what do you mean\??$/i.test(r.reply), "not a generic clarification request");
     ok(r.docs.length === 0, "nothing sent while the referent is unsettled");
     ok((await w.sql(`select count(*) from public.career_apply_wanted where user_id = '${person}'`)) === "0" && (await w.sql(`select count(*) from public.career_outreach_drafts where user_id = '${person}'`)) === "0", "no application or message started");
   }, w);
@@ -42,6 +45,7 @@ R.suite(FILE, [4], [CHAT], async (t: Deno.TestContext, w: any) => {
     ev.reply = r.reply;
     const files = await deliveredFiles(w, CHAT, r, "files-to-me", ev);
     ok(files.some((f: any) => f.kind === "pdf" && f.pdf.pages === 1), `the PDF comes with the reply: ${r.reply.slice(0, 300)}`);
+    if (files.some((f: any) => f.kind === "pdf")) pdfSent = true;
     ok(!/email address|what('s| is) your email/i.test(r.reply), "'to me' is this chat, not a contact search");
   }, w);
   await check(t, FILE, 4, "'Is the PDF attached?' is answered truthfully: what the reply says matches what came with it", async (ev: any) => {
@@ -50,7 +54,11 @@ R.suite(FILE, [4], [CHAT], async (t: Deno.TestContext, w: any) => {
     const files = await deliveredFiles(w, CHAT, r, "files-attached-q", ev);
     const says = { yes: /\b(yes|here it is|attached)\b/i.test(r.reply) && !/not attached|isn't attached|no (pdf|file|attachment)/i.test(r.reply), no: /not attached|isn't attached|no (pdf|file|attachment)|haven't (made|sent)/i.test(r.reply) };
     ok(says.yes || says.no, `a plain yes or no: ${r.reply.slice(0, 300)}`);
-    ok(says.yes === files.some((f: any) => f.kind === "pdf"), `the answer (${says.yes ? "yes" : "no"}) matches what came with it (${files.length} file(s)): ${r.reply.slice(0, 300)}`);
+    // The truth is the conversation's, not this reply's alone: once an earlier turn delivered a PDF, "No, I haven't sent a PDF"
+    // is false, and "yes, in my previous message" is true even with no file on this reply.
+    const now = files.some((f: any) => f.kind === "pdf"), before = pdfSent, pointsBack = /previous|earlier|last message|above|already sent/i.test(r.reply);
+    ok(says.yes === (now || before), `the answer (${says.yes ? "yes" : "no"}) matches the conversation (a PDF on this reply: ${now}; sent earlier: ${before}): ${r.reply.slice(0, 300)}`);
+    if (says.yes && !now) ok(before && pointsBack, `a yes with no file on this reply points to the earlier message that carried it: ${r.reply.slice(0, 300)}`);
     ok(!/parse check/i.test(r.reply), "no parser verdict passed off as inspection");
   }, w);
 });

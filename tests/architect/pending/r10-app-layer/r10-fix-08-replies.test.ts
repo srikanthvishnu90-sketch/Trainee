@@ -16,7 +16,9 @@ R.suite(FILE, [8], [CHAT], async (t: Deno.TestContext, w: any) => {
     ev.reply = r.reply;
     all.push(r.reply);
     const first = r.reply.split(/(?<=[.!?])\s+/)[0] ?? "";
-    ok(/^\s*(No\b|Not yet\b|I haven't|I have not|Nothing)/i.test(r.reply) || /no applications|haven't applied|not applied|nothing (was )?(submitted|applied|sent)|(tracker|list) is empty/i.test(first), `answers the question in its first sentence: ${r.reply.slice(0, 200)}`);
+    // The first sentence answers with application wording ("No, I haven't applied anywhere", "No applications yet"); "Nothing
+    // was..." or "the list is empty" alone does not say what was asked.
+    ok(/\b(no|not|haven't|have not|zero|0|none)\b/i.test(first) && /\bappl(y|ied|ying|ications?)\b/i.test(first), `answers the question in its first sentence: ${first.slice(0, 200)}`);
     ok(r.reply.length <= 400, `short (${r.reply.length} chars)`);
     ok(!/\b(submitted|applied)\b(?! anywhere| to anything| yet)/i.test(r.reply.replace(/haven't applied|have not applied|nothing (was )?submitted/gi, "")), "claims no submission");
   }, w);
@@ -24,9 +26,11 @@ R.suite(FILE, [8], [CHAT], async (t: Deno.TestContext, w: any) => {
     const r = await w.say(CHAT, "Apply to the first one.");
     ev.reply = r.reply;
     all.push(r.reply);
-    ok(/\?/.test(r.reply), `ends at the decision needed: ${r.reply.slice(0, 400)}`);
+    const sentences = r.reply.trim().split(/(?<=[.!?])\s+/).filter((x: string) => x.trim());
+    const last = sentences.at(-1) ?? "";
+    ok(/\?\s*$/.test(last) || /^(reply|say|tap|choose|pick)\b/i.test(last), `ends at the decision: the last sentence is the question or choice: "${last.slice(0, 200)}"`);
     ok(/(not (sent|submitted)|nothing (is |was )?(sent|submitted))/i.test(r.reply), "says what has not happened");
-    ok(/contact|email|phone|resume|review/i.test(r.reply), "names what remains (the open facts or the review)");
+    ok(/\b(email( address)?|phone( number)?|contact details|GPA|graduation date|work authori[sz]ation)\b|review (the|this|your) (application|answers|exact)/i.test(r.reply), `names the concrete element that remains (an open fact by name, or the payload review): ${r.reply.slice(0, 400)}`);
   }, w);
   await check(t, FILE, 8, "no internal process language and no repeated sentence anywhere in the scenario", async (ev: any) => {
     ev.reply = all.join("\n---\n");

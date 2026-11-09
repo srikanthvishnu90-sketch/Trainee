@@ -27,7 +27,8 @@ R.suite(FILE, [2], [CHAT, CHAT_B], async (t: Deno.TestContext, w: any) => {
     const r = await w.say(CHAT_B, "I need remote only.");
     ev.reply = r.reply;
     ok(!/haven't started|runner|batch/i.test(r.reply), r.reply.slice(0, 300));
-    for (const c of ["Northline Health Data", "Old Harbor Freight", "Example Carbon Co"]) ok(!new RegExp(`^\\s*\\d+[.)].*${c}`, "m").test(r.reply), `${c} is onsite: not offered as a remote match`);
+    // The S1 shortlist's onsite and hybrid roles (seeded open, so they were on it) must leave; a numbered or bulleted line counts.
+    for (const c of ["Lakefront Transit Analytics", "Northline Health Data", "Prairie Ledger"]) ok(!new RegExp(`^\\s*(\\d+[.)]|[-*•])\\s.*${c}`, "m").test(r.reply), `${c} is onsite or hybrid: not offered as a remote match`);
     ok(/remote/i.test(r.reply) && /(removed?|drops?|no longer|takes? out|leaves?)/i.test(r.reply), `says which earlier options the change removed: ${r.reply.slice(0, 400)}`);
     ok(/remote[- ]US|remote in the US|US remote/i.test(r.reply), "keeps remote-US as the requirement");
     ok((await w.sql(`select count(*) from public.career_apply_wanted where user_id = '${searcher}'`)) === "0", "nothing queued");

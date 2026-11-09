@@ -34,6 +34,8 @@ R.suite(FILE, [5], [CHAT], async (t: Deno.TestContext, w: any) => {
     const n = first.split("\n").filter((l: string) => /^\s*\d+[.)]\s/.test(l)).length;
     ok(n >= 1, "a numbered shortlist");
     const words = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"];
-    ok(new RegExp(`\\b(${n}|${words[n]})\\b`, "i").test(first.split("\n").slice(0, 3).join(" ")), `the opening sentence counts ${n}: ${first.slice(0, 200)}`);
+    // A count sentence of its own ("3 roles", "three open"), not the list's own "1." and "2." markers.
+    const prose = first.split("\n").filter((l: string) => !/^\s*(\d+[.)]|[-*•])\s/.test(l)).join(" ");
+    ok(new RegExp(`\\b(${n}|${words[n]})\\b(?:\\s+[\\w-]+){0,3}?\\s+(roles?|open|internships?|postings?|jobs?|results?|matches)\\b`, "i").test(prose), `a sentence outside the list counts ${n} roles: ${prose.slice(0, 200)}`);
   }, w);
 });

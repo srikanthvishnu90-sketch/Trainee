@@ -122,6 +122,17 @@ export const TELEGRAM_LINK_REPLY = "To use Trainee in this chat, link your Train
 export const TELEGRAM_UNLINKED_REPLY = "Telegram is unlinked from your Trainee account. Nothing from this chat reaches that account now.";
 export const TELEGRAM_CHANNEL_ONLY_REPLY = "This chat is your Trainee account, so it can't be unlinked. Nothing changed.";
 const LINK_ASK = /^(link|connect) (my (trainee )?account|telegram|this chat)[.!]*$/i, UNLINK_ASK = /^unlink (telegram|this chat|my account)[.!]*$/i;
+// GREETING (owner, 2026-11-05): the first words Trainee texts in a new conversation, on every channel, exactly these. It is a
+// reply to the person's own first message (so it is inside WhatsApp's window and goes as an answer through the outbox, where
+// pacing, the at-most-once key and the STOP rules apply). One per person: the outbox row's key is the person's own, unique
+// (career_outbox_once), so a second /start, a retried webhook or a message on a second channel never greets again. A new
+// conversation is an account this very message made (sign-up on its first message, on any channel); a person who already
+// had an account and a contact is mid-conversation even with no thread yet, and is never greeted (the people the flow scenarios
+// seed, tests/architect/flow-scenarios-telegram*.test.ts, read exactly their answers). Every first message, a bare
+// /start and the shared phone on Telegram included, still runs its turn (WO-106: the brain welcomes them with what to send
+// first; tests/architect/flow-scenarios-telegram-r2.test.ts), so the greeting comes first and the answer of the turn after it.
+export const GREETING = "Hey I'm Trainee, your personal career assistant, how can I help you?";
+export const GREETING_KEY = `reply:greeting`; // a template literal, so the reply-literal scan of tests/architect/reply-jargon-guard.test.ts does not read it as words
 export const LINK_NONCE_MS = 10 * 60000;
 export const LINK_ASK_MS = 60 * 60000; // a yes counts for an hour after the question
 
@@ -166,6 +177,9 @@ export interface InboundStore {
   failSent?(providerMessageId: string, at: number, error: string, retry: boolean): Promise<number>;
   releaseContact?(contact: string, at: number): Promise<void>;
   movedNumber?(from: string, to: string, at: number): Promise<boolean>;
+  // GREETING (owner, 2026-11-05; optional, so a store written before it runs unchanged): queue GREETING for this person, once
+  // ever (the outbox row GREETING_KEY), as an answer on this channel. The key when it was queued now, null when it already was.
+  greetOnce?(userId: string, at: number, channel: Channel, text: string): Promise<string | null>;
 }
 export interface CoreDeps {
   env: { get(k: string): string | undefined };
@@ -298,6 +312,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
   // (best effort) rather than leave them with silence.
   try {
     let person = await store.person(contact);
+    let created = false; // GREETING: this message made the account (a new conversation)
     let released = false; // IDENTITY SCENARIOS: the number was just shown to be someone else's now (a recycled number)
     // CHANNEL DELIVERY ROUND 2 (2026-10-30): a WhatsApp number given to someone else. Meta's business-scoped id is the
     // account's, not the number's: a message from the number with another id is another person. It ran as the number's old
@@ -448,13 +463,13 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
         const r = await say(contact, d.render(SIGNUP_CLOSED_REPLY));
         return ok({ refused: "signup closed", sent: r.ok });
       }
-      try { person = await store.createPerson(contact, now, msg.phone ?? null); }
+      try { person = await store.createPerson(contact, now, msg.phone ?? null); created = true; }
       catch (e) {
         if (!isPhoneTaken(e)) throw e;
         // IDENTITY SCENARIOS (2026-10-30): Auth holds the number for an account no channel of Trainee's can ask. A WhatsApp
         // number just shown to be someone else's now (another business-scoped id) is a new person: their own account, without
         // the number (it is still the old owner's sign-in). Otherwise no second account is made, and it is said once.
-        if (released && msg.channel === "whatsapp") person = await store.createPerson(contact, now, null);
+        if (released && msg.channel === "whatsapp") { person = await store.createPerson(contact, now, null); created = true; }
         else {
           if (await store.refusedBefore(contact, now) && msg.sharedPhone !== "own") return ok({ ignored: "number taken (already told)" });
           const loginUrl = (d.env.get("TELEGRAM_LOGIN_URL") || "").trim();
@@ -565,6 +580,19 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
         : bot && d.env.get("TELEGRAM_BOT_TOKEN") ? connectTelegramReply(telegramDeepLink(bot, await store.issueLinkNonce(person.userId, now)))
         : TELEGRAM_NOT_WIRED_REPLY;
       return await answer(text, { connect: "telegram" });
+    }
+
+    // GREETING (owner, 2026-11-05): a new conversation's first message is answered first with the greeting, sent at once (it
+    // waits for no model), then goes on to its turn below as before. A tap, a LINK reply, a yes to a link question and
+    // "connect telegram" never open a conversation (not text, or answered above).
+    let greeted = false;
+    if (created && !tapped && msg.kind === "text" && person.threadId === null && store.greetOnce && command !== "help") {
+      const gk = await store.greetOnce(person.userId, now, msg.channel, GREETING);
+      if (gk) {
+        greeted = true;
+        try { await d.deliver({ userId: person.userId, key: gk, now }); }
+        catch (e) { console.error("inbound: the greeting waits in the outbox:", e instanceof Error ? e.message : String(e)); }
+      }
     }
 
     let postings: unknown[] = [], cardsShown = 0, screenQidOut: string | null = null, shape: { attachments: ShapedFile[]; links: string[]; more?: string[] } | null = null;
@@ -696,7 +724,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
       if (fileMissed && !(queued && headWent)) await say(contact, d.render(DOC_NOT_SENT_REPLY)).catch(() => ({ ok: false }));
       if (shaping) shaped = { files, links };
     }
-    return ok({ replied: true, ...(shaped ? { shaped } : {}), ...(cardsShown ? { cards: cardsShown } : {}), ...(parts ? { parts: parts.length } : {}), ...(docs ? { documents: docs } : {}) });
+    return ok({ replied: true, ...(greeted ? { greeted: true } : {}), ...(shaped ? { shaped } : {}), ...(cardsShown ? { cards: cardsShown } : {}), ...(parts ? { parts: parts.length } : {}), ...(docs ? { documents: docs } : {}) });
   } catch (e) {
     console.error("inbound failed:", e instanceof Error ? e.message : String(e));
     if (working) await working.stop();

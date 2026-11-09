@@ -2,7 +2,7 @@
 // provider), channel_contacts (a person's contacts, one per channel, sharing one thread; STOPs and closed-signup refusals
 // kept by contact), career_outbox (the reply, bound to the channel it answers), and the linking functions of
 // 20261021070000_channel_parity.sql.
-import { type InboundStore, type Person, PhoneTakenError } from "../_shared/channel_inbound.ts";
+import { GREETING_KEY, type InboundStore, type Person, PhoneTakenError } from "../_shared/channel_inbound.ts";
 
 const iso = (t: number) => new Date(t).toISOString();
 const duplicate = (e: { code?: string; message: string } | null) => !!e && (e.code === "23505" || /duplicate key/i.test(e.message));
@@ -82,6 +82,13 @@ export function supabaseInboundStore(admin: any): InboundStore {
       if (duplicate(r.error)) return false;
       must(r, "queue the reply");
       return true;
+    },
+    // GREETING (owner, 2026-11-05): the greeting is an answer row like any reply; career_outbox_once (user_id, key) makes it once.
+    async greetOnce(userId, at, channel, text) {
+      const r = await admin.from("career_outbox").insert({ user_id: userId, key: GREETING_KEY, kind: "reply", text, deliver_at: iso(at), channel });
+      if (duplicate(r.error)) return null;
+      must(r, "queue the greeting");
+      return GREETING_KEY;
     },
     async sawInbound(contact, at, o) {
       must(await admin.rpc("channel_inbound_seen", { p_contact: contact, p_at: iso(at), p_alias: o.alias ?? null, p_phone: o.phone ?? null }), "record the message time");

@@ -64,7 +64,8 @@ export function loopSend(o: { apiKey: string; fetch?: typeof fetch; pauseMs?: nu
 // answers one to one only, as on Telegram); delivery_type "sms" says it came over SMS (iMessage was not available), where
 // the carrier keywords apply. Before, any alert_type with "message" in it and a text was read as the person's words:
 // message_scheduled and message_timeout carry the text Trainee itself sent, and ran it as a turn.
-export type LoopInbound = { kind: "text"; text: string; sender: string; messageId: string | null; sms?: boolean } | { kind: "ignored"; why: string };
+export type LoopInbound = { kind: "text"; text: string; sender: string; messageId: string | null; sms?: boolean }
+  | { kind: "file"; sender: string; messageId: string | null; sms?: boolean } | { kind: "ignored"; why: string };
 // A delivery callback that says a message Trainee sent was not delivered (message_failed, message_timeout): its message id
 // and the reason; null for anything else.
 export function parseLoopFailure(raw: unknown): { messageId: string; error: string } | null {
@@ -88,8 +89,15 @@ export function parseLoopInbound(raw: unknown): LoopInbound {
   if (group !== null && group !== undefined && group !== "" && group !== false) return { kind: "ignored", why: "a group chat (Trainee answers one to one only)" };
   const text = msg.text ?? msg.body ?? msg.content ?? b.text ?? b.body ?? "";
   const sender = msg.from ?? msg.sender ?? msg.contact ?? msg.recipient ?? msg.phone ?? b.from ?? b.sender ?? b.contact ?? b.recipient ?? b.phone ?? "";
+  const sms = String(msg.delivery_type ?? b.delivery_type ?? "").toLowerCase() === "sms";
+  // CHANNEL PARITY (2026-11-05): a file or photo with no words (LoopMessage's attachments, a list of URLs) got silence on
+  // iMessage, where WhatsApp and Telegram say what to send instead. It is now a file the core answers the same way; it is
+  // never downloaded or read here.
+  const attachments = msg.attachments ?? b.attachments;
+  if ((typeof text !== "string" || !text.trim()) && Array.isArray(attachments) && attachments.length && typeof sender === "string" && sender.trim()) {
+    return { kind: "file", sender, messageId: id === null || id === undefined || id === "" ? null : String(id).slice(0, 200), ...(sms ? { sms } : {}) };
+  }
   if (typeof text !== "string" || !text.trim()) return { kind: "ignored", why: "no text (attachments are not read yet)" };
   if (typeof sender !== "string" || !sender.trim()) return { kind: "ignored", why: "no sender" };
-  const sms = String(msg.delivery_type ?? b.delivery_type ?? "").toLowerCase() === "sms";
   return { kind: "text", text, sender, messageId: id === null || id === undefined || id === "" ? null : String(id).slice(0, 200), ...(sms ? { sms } : {}) };
 }

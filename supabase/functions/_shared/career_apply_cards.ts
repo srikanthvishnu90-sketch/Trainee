@@ -82,6 +82,8 @@ export type CardReply =
   | { kind: "change"; n: number };
 
 export const CARD_INTENT = "career_apply_card";
+// "Submit job 2", "send application #3", "apply to job 1": a submit aimed at one numbered application (spec B.4).
+const SUBMIT_REF = /^(?:please\s+)?(?:submit|send|apply(?:\s+to)?|approve)\s+(?:job|application|app|role|posting|#)\s*#?(\d{1,3})[.!]?$/i;
 export const CARD_ANSWER_INTENT = "career_apply_card_answer";
 // The pushed card (career_proactive_run / career_prepare_ahead) is one text of at most 4,000 characters, and the
 // database's push takes at most 8 until builder A's D-MS-2 migration. It is a size for one text, never a limit on what
@@ -494,6 +496,14 @@ export async function cardTurn(
     return { ...out, reply: `${out.reply}\n\n${extra}`, ...(out.parts?.length ? { parts: [...out.parts.slice(0, -1), `${out.parts.at(-1)}\n\n${extra}`] } : {}) };
   };
   let r = parseCardReply(o.message);
+  // WO-G (spec B.4, E-39): "Submit job 2" after a clarification, with no card as this thread's last word, is never an
+  // approval: the card is shown so the exact answers and resume are reviewed first, and nothing is submitted.
+  const ref = SUBMIT_REF.exec(String(o.message ?? "").trim());
+  let lead = "";
+  if (ref && (o.replyTo === undefined || o.replyTo === null || String(o.replyTo) === "") && (await o.store.lastAssistantIntent(o.threadId)) !== CARD_INTENT) {
+    r = { kind: "show" };
+    lead = `Nothing was submitted. Before anything goes to an employer, review #${ref[1]} below: its exact answers and the resume it sends. To approve just that one, reply "only ${ref[1]}".\n\n`;
+  }
   if (!r) return null;
   if (r.kind === "show") {
     // Fail closed (review of PR #194): only a confirmed "yes, on file" shows a card; "no" asks for the resume, and a check
@@ -526,7 +536,7 @@ export async function cardTurn(
     const current = o.store.latestOpenPaged ? await o.store.latestOpenPaged(o.userId).catch(() => null) : null;
     if (current && current.items.length === ids.length && current.items.every((it, i) => it.prepared_id === ids[i])
       && Date.parse(current.shown_at) > o.now - 5 * 60_000) {
-      return await withReview(c, { reply: c.text, status: "shown", card_id: current.id, ...(c.parts.length ? { parts: c.parts } : {}) });
+      return await withReview(c, { reply: lead + c.text, status: "shown", card_id: current.id, ...(c.parts.length ? { parts: [lead + c.parts[0], ...c.parts.slice(1)] } : {}) });
     }
     let opened: Card;
     try {
@@ -540,7 +550,7 @@ export async function cardTurn(
       c = smaller;
       opened = await o.store.open(o.userId, c.take.map((p) => p.id));
     }
-    return await withReview(c, { reply: c.text, status: "shown", card_id: opened.id, ...(c.parts.length ? { parts: c.parts } : {}) });
+    return await withReview(c, { reply: lead + c.text, status: "shown", card_id: opened.id, ...(c.parts.length ? { parts: [lead + c.parts[0], ...c.parts.slice(1)] } : {}) });
   }
   // Which card the answer is about (D-MS-1). With the channel's reply-to id, the card whose message it replies to; a reply
   // to any other message is not about the card (a yes there approves nothing and says how). Without one (iMessage and

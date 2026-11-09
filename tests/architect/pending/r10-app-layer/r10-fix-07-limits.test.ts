@@ -30,7 +30,7 @@ R.suite(FILE, [7], [CHAT], async (t: Deno.TestContext, w: any) => {
     ev.reply = `gate: ${gate}\n${r.reply}`;
     ok(w.modelCalls() === calls0, `enforcement intact: no model call at the limit (${w.modelCalls() - calls0} made)`);
     ok(/limit/i.test(r.reply) && r.reply.search(/limit/i) < 300, `the limit is said first: ${r.reply.slice(0, 300)}`);
-    ok(!/\b(UTC|GMT)\b|\b\d{1,2}(:\d{2})?\s?Z\b/i.test(r.reply), `no UTC, GMT or Z time anywhere (the reset is the person's): ${r.reply.match(/[^.]*\b(UTC|GMT)\b[^.]*|\b\d{1,2}(:\d{2})?\s?Z\b/i)?.[0]}`);
+    ok(!/\b(UTC|GMT)\b|Coordinated Universal Time|Greenwich|\b\d{1,2}(:\d{2})?\s?Z\b/i.test(r.reply), `no UTC, GMT or Z time anywhere (the reset is the person's): ${r.reply.match(/[^.]*\b(UTC|GMT)\b[^.]*|\b\d{1,2}(:\d{2})?\s?Z\b/i)?.[0]}`);
     ok((new RegExp(`\\b${h}(:00)?\\s?${ampm}\\b`, "i").test(r.reply) || (h === "12" && /\bmidnight\b(?!\s*\(?\s*(UTC|GMT|Z)\b)/i.test(r.reply))) && /Chicago|Central|your time/i.test(r.reply), `the reset in the person's zone (${local}, midnight Chicago): ${r.reply.slice(0, 400)}`);
     ok(/search|internships?|list/i.test(r.reply), "names the task that stopped");
     ok(/(haven't|have not|didn't|did not) appl|nothing (was )?(applied|sent)/i.test(r.reply), "says nothing was applied");

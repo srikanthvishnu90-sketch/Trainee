@@ -15,12 +15,12 @@ R.suite(FILE, [8], [CHAT], async (t: Deno.TestContext, w: any) => {
     const r = await w.say(CHAT, "Did you apply anywhere?");
     ev.reply = r.reply;
     all.push(r.reply);
-    const first = r.reply.split(/(?<=[.!?])\s+/)[0] ?? "";
+    const first = (r.reply.replace(/[’‘]/g, "'").split(/(?<=[.!?])\s+/)[0] ?? "");
     // The first sentence answers with application wording ("No, I haven't applied anywhere", "No applications yet"); "Nothing
     // was..." or "the list is empty" alone does not say what was asked.
     // The negation sits next to the apply wording ("haven't applied", "no applications", "not applied to any"): "Let's apply now,
     // no problem." has both words and answers nothing.
-    ok(/\b(no|not|never|haven't|have not|didn't|did not|zero|0|none of)\b(\s+(yet|any|anywhere|one|single|I|I've|we|been))*\s+appl(y|ied|ying|ications?)\b/i.test(first), `answers the question in its first sentence: ${first.slice(0, 200)}`);
+    ok(/\b(no|not|never|haven't|have not|didn't|did not|zero|0|none of)\b(\s+(yet|any|anywhere|one|single|I|I've|we|been))*\s+appl(y|ied|ying|ications?)\b|\bnothing\s+(was\s+|has been\s+)?applied\b/i.test(first), `answers the question in its first sentence: ${first.slice(0, 200)}`);
     ok(r.reply.length <= 400, `short (${r.reply.length} chars)`);
     ok(!/\b(submitted|applied)\b(?! anywhere| to anything| yet)/i.test(r.reply.replace(/haven't applied|have not applied|nothing (was )?submitted/gi, "")), "claims no submission");
   }, w);
@@ -35,7 +35,12 @@ R.suite(FILE, [8], [CHAT], async (t: Deno.TestContext, w: any) => {
     // The element named must be one this person is actually missing: the intake has no email, no phone and no graduation date,
     // and two GPAs that disagree. It must be named as missing or asked for, not merely mentioned.
     const missing = [!/@/.test(T.INTAKE_RESUME) && "email", !/\(?\d{3}\)?[ .-]\d{3}[ .-]\d{4}/.test(T.INTAKE_RESUME) && "phone", !/graduat/i.test(T.INTAKE_RESUME) && "graduation date", "GPA"].filter(Boolean) as string[];
-    const asked = missing.filter((m) => new RegExp(`\\b(need|missing|still|don't have|do not have|no|confirm|which|what)\\b[^.?\\n]{0,60}\\b${m}\\b|\\b${m}\\b[^.?\\n]{0,40}\\b(missing|needed|is open|isn't on file|not on file)\\b`, "i").test(r.reply));
+    // Inside a question about the person's own item ("What email should employers use?") or a missing/needed clause about it
+    // ("your email is missing", "I need your phone number"); "I'll email you" and "email me if needed" are neither.
+    const plain = r.reply.replace(/[’‘]/g, "'");
+    const sentences8: string[] = plain.split(/(?<=[.!?])\s+/);
+    const asked = missing.filter((m) => sentences8.some((s) => (/\?\s*$/.test(s) && new RegExp(`\\b(your|which|what|the|an?)\\s+(\\w+\\s+){0,2}${m}\\b(?!\\s+(me|you)\\b)`, "i").test(s))
+      || new RegExp(`\\byour\\s+(\\w+\\s+){0,2}${m}\\b[^.?]{0,30}\\b(is|are)\\s+(still\\s+)?(missing|needed|not on file|open)\\b|\\b(need|missing|don't have|do not have)\\s+(\\w+\\s+){0,2}your\\s+(\\w+\\s+){0,2}${m}\\b`, "i").test(s)));
     ok(asked.length > 0, `names an element this person is missing (${missing.join(", ")}) as missing or asked for: ${r.reply.slice(0, 400)}`);
   }, w);
   await check(t, FILE, 8, "no internal process language and no repeated sentence anywhere in the scenario", async (ev: any) => {

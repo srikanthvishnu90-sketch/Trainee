@@ -28,16 +28,17 @@ R.suite(FILE, [2], [CHAT, CHAT_B], async (t: Deno.TestContext, w: any) => {
     ev.reply = r.reply;
     ok(!/haven't started|runner|batch/i.test(r.reply), r.reply.slice(0, 300));
     // The S1 shortlist's onsite and hybrid roles (seeded open, so they were on it) must leave. Any list line counts ("1.", "1)",
-    // "1 -", "#1", "-", "*", "•", "▪"), except under a header that says they were removed ("Removed:", "No longer ...", "Dropped").
-    const ITEM = /^\s*(\d+\s*[.):-]|#\d+|[-*•▪◦‣])\s/, HEADER = /^\s*[^\n]{0,60}:\s*$|^\s*\*\*[^*]+\*\*\s*$/, GONE = /\b(removed|no longer|dropped|taken off|off the list|left out)\b/i;
+    // "1 -", "#1", "-", "*", "•", "▪"), except in a section whose header STARTS with the removal ("Removed:", "No longer ...",
+    // "Dropped", "Taken off"); that section ends at the next header or a blank line.
+    const ITEM = /^\s*(\d+\s*[.):-]|#\d+|[-*•▪◦‣])\s/, GONE = /^\s*(\*\*)?\s*(removed|no longer|dropped|taken off)\b/i;
     let underGone = false;
     const offered: string[] = [];
     for (const line of r.reply.split("\n")) {
-      if (!ITEM.test(line) && (HEADER.test(line) || GONE.test(line))) { underGone = GONE.test(line); continue; }
-      if (!line.trim()) continue;
-      if (ITEM.test(line) && !underGone) offered.push(line);
+      if (!line.trim()) { underGone = false; continue; }
+      if (!ITEM.test(line)) { underGone = GONE.test(line); continue; }
+      if (!underGone) offered.push(line);
     }
-    for (const c of ["Lakefront Transit Analytics", "Northline Health Data", "Prairie Ledger"]) ok(!offered.some((l) => l.includes(c) && !GONE.test(l)), `${c} is onsite or hybrid: not offered as a remote match (offered: ${offered.join(" | ").slice(0, 300)})`);
+    for (const c of ["Lakefront Transit Analytics", "Northline Health Data", "Prairie Ledger"]) ok(!offered.some((l) => l.includes(c)), `${c} is onsite or hybrid: not offered as a remote match (offered: ${offered.join(" | ").slice(0, 300)})`);
     ok(/remote/i.test(r.reply) && /(removed?|drops?|no longer|takes? out|leaves?)/i.test(r.reply), `says which earlier options the change removed: ${r.reply.slice(0, 400)}`);
     ok(/remote[- ]US|remote in the US|US remote/i.test(r.reply), "keeps remote-US as the requirement");
     ok((await w.sql(`select count(*) from public.career_apply_wanted where user_id = '${searcher}'`)) === "0", "nothing queued");

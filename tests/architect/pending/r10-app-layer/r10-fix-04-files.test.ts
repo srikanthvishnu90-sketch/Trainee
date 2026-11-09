@@ -37,7 +37,9 @@ R.suite(FILE, [4], [CHAT], async (t: Deno.TestContext, w: any) => {
     // B.4: two concrete choices ("submit the application for job 2, or send you the revised resume PDF?"), not "please clarify".
     // Both choices concrete: the resume PDF by name, and a specific application (job N, or one at a named employer or role).
     const pdfChoice = /\b(resume|revised|the|your)\s+(resume\s+)?PDF\b|\b(revised|tailored) resume\b|\bresume draft\b/i.test(r.reply);
-    const appChoice = /\bjob \d\b|\b(application|role|posting|internship)\s+(for|at|to|with)\s+(the\s+)?[A-Z][\w&.'-]+|\b[A-Z][\w&.'-]+(\s+[A-Z][\w&.'-]+)*\s+(application|role|internship)\b/.test(r.reply);
+    // The application is a role or an employer of this test's world (the fixtures), or "job N" of the list shown.
+    const names = [...T.MARKET, ...T.OLD_LIST].flatMap((m: any) => [m.company, m.title]).filter((x: string) => x.length > 3);
+    const appChoice = /\bjob \d\b/i.test(r.reply) || names.some((n: string) => r.reply.toLowerCase().includes(n.toLowerCase()));
     ok(/\?/.test(r.reply) && /\bor\b/i.test(r.reply) && pdfChoice && appChoice && !/\b(something|anything) else\b|\bor (other|another) (thing|one)\b/i.test(r.reply), `a short question naming two concrete choices (the resume PDF or a specific application): ${r.reply.slice(0, 300)}`);
     ok(!/please clarify|can you clarify|what do you mean\??$/i.test(r.reply), "not a generic clarification request");
     ok(r.docs.length === 0, "nothing sent while the referent is unsettled");

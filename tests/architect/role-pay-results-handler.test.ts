@@ -76,21 +76,24 @@ Deno.test({ name: "results (handler): iMessage 'frontend internships that pay $3
   const t = await chat.say("I want frontend internships that pay $30/hr", { channel: "imessage" });
   eq(t.status, 200, t.reply);
   // The reply shape.
+  // Architect ruling (R10 fix 8, 2026-11-09; spec B.2): the sentences, then the roles by number (employer, exact title, location,
+  // one-word check state), then the link alone as its own message.
   const lines = t.reply.split("\n");
-  eq(lines.length, 2, t.reply);
+  eq(lines.length, 5, t.reply);
   eq(lines[0], "I found 2 frontend internships that list pay of $30/hr or more, plus 1 that doesn't list pay, so I couldn't check it. Here they are by fit, with Apply on each.");
-  eq(t.body.parts, lines, "sent as two messages: the sentences, then the link alone");
-  assert(/^https:\/\/trainee\.example\/file\?t=v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/.test(lines[1]), `the link alone on its own line: ${lines[1]}`);
+  assert(lines.slice(1, 4).every((l, i) => new RegExp(`^${i + 1}\\. TEST Pay \\w+ — [^()]+, [^()]+ \\((?:open-checked|not re-checked)\\)$`).test(l)), t.reply);
+  eq(t.body.parts, [lines.slice(0, 4).join("\n"), lines[4]], "sent as two messages: the sentences with the numbered roles, then the link alone");
+  assert(/^https:\/\/trainee\.example\/file\?t=v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/.test(lines[4]), `the link alone on its own line: ${lines[4]}`);
   assert(!MARKDOWN.test(t.reply), "no markdown on iMessage");
-  assert(!/TEST Pay/.test(t.reply), "no wall of postings in the chat");
+  assert(!/Pay \$|listed on the posting|https?:/.test(lines.slice(1, 4).join("\n")), "the numbered lines are short: no pay, no posting text, no links");
   // The page: the link opens a sign-in (one per link); a session for this account then reads the list from the database.
-  const link = new URL(lines[1]).searchParams.get("t")!;
+  const link = new URL(lines[4]).searchParams.get("t")!;
   const claims = await verifyFileToken(link, SECRET, Date.now());
   assert(claims.ok && claims.claims.u === person && claims.claims.k === "l");
   const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
   const A = signedIn();
   const d = { ...buildFileDeps(admin, { get: (k: string) => Deno.env.get(k) }, Date.now), ...A.deps };
-  const preview = await handleFile(new Request(lines[1], { headers: { "user-agent": "facebookexternalhit/1.1 Facebot Twitterbot/1.0" } }), d);
+  const preview = await handleFile(new Request(lines[4], { headers: { "user-agent": "facebookexternalhit/1.1 Facebot Twitterbot/1.0" } }), d);
   assert(!/TEST Pay/.test(await preview.text()), "a link preview shows nothing about the roles");
   const s = await A.tok(person, claims.ok ? claims.claims.r : "", Date.now());
   const page = await handleFile(new Request(`${BASE}`, { headers: { cookie: `tf_s=${s}` } }), d);
@@ -122,7 +125,9 @@ Deno.test({ name: "results (handler): the same ask on Telegram or the web, and a
     const parts = t.body.parts as string[];
     assert(Array.isArray(parts) && parts.length === 2, `${channel ?? "web"}: ${t.reply}`);
     assert(/^https:\/\/trainee\.example\/file\?t=v1\./.test(parts[1]) && !/https?:/.test(parts[0]), `${channel ?? "web"}: the link is its own message`);
-    assert(!/TEST Pay/.test(t.reply) && !MARKDOWN.test(t.reply), `${channel ?? "web"}: no wall of postings, no markdown: ${t.reply}`);
+    // Architect ruling (R10 fix 8): the roles by number, short (no pay, no posting text), no markdown.
+    const listed = parts[0].split("\n").slice(1);
+    assert(listed.length >= 1 && listed.every((l, i) => l.startsWith(`${i + 1}. `) && /\((?:open-checked|not re-checked)\)$/.test(l) && !/Pay \$|https?:/.test(l)) && !MARKDOWN.test(t.reply), `${channel ?? "web"}: numbered short roles, no markdown: ${t.reply}`);
   }
   });
 } });

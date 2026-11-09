@@ -360,7 +360,8 @@ export const FAMILY_CSS = `
 .ff-role .ff-meta2{margin-top:4px!important}.ff-role .ff-fit{margin-top:12px}.ff-role .ff-row-acts{flex-wrap:wrap}
 .ff-fitd>summary{list-style:none}.ff-fitd>summary::-webkit-details-marker{display:none}.ff-fitd[open]{flex-basis:100%}.ff-fitd[open]>:not(summary){margin-top:10px}
 .ff-menul .ff-btn{justify-content:flex-start}.ff-menul .ff-pick{padding:0 4px}
-.ff-role .ff-p a:not(.ff-btn){color:var(--ff-ptext);font-weight:600}.ff-ta{width:100%;min-height:96px;padding:10px 12px;border-radius:12px;border:1px solid var(--ff-line);background:var(--ff-card);color:var(--ff-ink);font:inherit;font-size:16px}
+.ff-role .ff-p a:not(.ff-btn){color:var(--ff-ptext);font-weight:600}.ff-shot{margin:12px 0 0}.ff-shot img{display:block;max-width:100%;height:auto;border-radius:12px;border:1px solid var(--ff-line)}
+.ff-ta{width:100%;min-height:96px;padding:10px 12px;border-radius:12px;border:1px solid var(--ff-line);background:var(--ff-card);color:var(--ff-ink);font:inherit;font-size:16px}
 .ff-note{margin:0 0 12px;padding:12px 14px;border-radius:12px;background:var(--ff-card);border:2px solid var(--ff-ptext);font-size:16px;line-height:1.5}
 .ff-fresh{margin:0 0 14px;color:var(--ff-mute)}.ff-fresh b{color:var(--ff-ink)}.ff-full{margin:8px 0 0}.ff-full>summary{display:inline-flex;align-items:center;min-height:44px;color:var(--ff-ptext);font-weight:600;font-size:15px;cursor:pointer}
 .ff-pick{display:inline-flex;align-items:center;gap:10px;min-height:44px;font-size:16px}.ff-pick input{width:22px;height:22px;accent-color:var(--ff-plum)}

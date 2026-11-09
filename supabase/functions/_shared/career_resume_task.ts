@@ -56,7 +56,11 @@ function rejectedOf(message: string): string | null {
 // makes it a posting, which is the posting tailor's.
 const GENERIC = /^(internships?|interns?|roles?|jobs?|positions?)$/;
 const LEADS_TO = `(?:for|is|as|asked for|toward|towards|targeting|aimed at)\\s+(?:an? |the |some )?`;
-export function targetOf(message: string): Target | null {
+// Round 3 (R1): a name followed only by a generic word ("the Stripe role", "the Goldman Sachs internship", "Google roles") is an
+// employer, so a posting: the last job list or 142's named-firm reply answers it, never a general resume.
+export const postingTarget = (message: string) => readTarget(message) === "posting";
+export function targetOf(message: string): Target | null { const r = readTarget(message); return r === "posting" ? null : r; }
+function readTarget(message: string): Target | null | "posting" {
   const t = lc(message).replace(/\bnot (?:an? |the )?[a-z][a-z0-9 &/+.-]{2,80}?(?=[,.;!?]|$| please| since| and )/g, " ");
   const withRole = new RegExp(`\\b${LEADS_TO}((?:[a-z][a-z&/+-]*\\s+){0,4}?${ROLE}(?:\\s+${ROLE})*)\\b`, "g");
   const fieldOnly = new RegExp(`\\b${LEADS_TO}((?:[a-z][a-z&/+-]*\\s+){0,3}[a-z][a-z&/+-]*)(?=\\s*(?:[,.;!?]|$|\\s(?:please|and|since|now|instead)\\b))`, "g");
@@ -71,12 +75,12 @@ export function targetOf(message: string): Target | null {
     // An unknown word in front of a known field or role word is an employer ("quillstone data analyst intern").
     const ws = role.split(" ");
     const firstKnown = ws.findIndex(known);
-    if (firstKnown > 0) return "posting";
+    if (firstKnown > 0 || firstKnown < 0 && words.some((w) => GENERIC.test(w))) return "posting";
     const label = level === "internship" ? `${role} internships` : `${role} roles`;
     return { role, level, label };
   };
-  for (const m of t.matchAll(withRole)) { const r = read(m[1], false); if (r === "posting") return null; if (r) return r; }
-  for (const m of t.matchAll(fieldOnly)) { const r = read(m[1], true); if (r === "posting") return null; if (r) return r; }
+  for (const m of t.matchAll(withRole)) { const r = read(m[1], false); if (r) return r; }
+  for (const m of t.matchAll(fieldOnly)) { const r = read(m[1], true); if (r) return r; }
   return null;
 }
 const LIMITS: [string, RegExp][] = [
@@ -117,10 +121,14 @@ function postingNamed(t: string, companies: string[]): boolean {
 const BARE = /^\s*(?:yes|yeah|yep|yup|no|nope|nah|ok(?:ay)?|sure|right|correct|fine)\s*[.!]*\s*$/;
 const ROLE_WORD = /\b(?:analyst|engineer|intern|associate|manager|developer|designer|scientist|consultant|assistant|coordinator|specialist|lead|director|researcher|technician|representative|officer|administrator|teacher|tutor|barista|cashier|server|clerk|writer|editor|accountant|fellow|trainee|apprentice|founder|volunteer|president|treasurer|architect|programmer|strategist|planner|advisor|agent|operator|partner|aide|instructor|counselor|nurse|chef|cook|driver|recruiter|vp|cto|ceo|coo|cfo)s?\b/;
 const NOT_TITLE = /\?|^\s*(?:what|how|why|who|when|where|which|can|could|would|do|does|did|is|are|will|should|find|search|show|look|get|send|tell|make|list|give|apply|submit|help|stop|cancel|leave|update|add|tailor|turn|create|generate)\b|\b(?:jobs?|roles?|internships?|openings?|postings?|resume|cv|pdf|file|link)\b/;
+const CHAT_WORD = /^\s*(?:thanks?|thank you|ty|great|perfect|cool|hello|hi|hey|wait|lol|lmao|nice|awesome|got it|sounds good|amazing|wow|hmm+|ha+|oops|sorry)\b/;
 // A title or role, with or without when it started: "Analyst since May", "Data Analyst, started June 2026", "Sous Chef".
 export const titleShaped = (message: string) => {
   const s = message.trim().replace(/^(?:ok(?:ay)?|yes|sure|so)[,!. ]+/i, "").replace(/[.!]+$/, "");
   if (!s || BARE.test(lc(s)) || s.length > 100 || s.split(/\s+/).length > 12 || NOT_TITLE.test(lc(s))) return false;
+  if (CHAT_WORD.test(lc(s))) return false;
+  // Round 3 (1a): one word is a title only if it is a title word ("Analyst"); "Thanks", "Perfect", "LOL" are not.
+  if (s.split(/\s+/).length === 1) return ROLE_WORD.test(lc(s));
   return ROLE_WORD.test(lc(s)) || /^[A-Z][\w&.'-]*(?:\s+(?:of|&|[A-Z][\w&.'-]*)){0,4}(?:,?\s+(?:since|from|starting|started)\b.*)?$/.test(s);
 };
 export type ResumeAsk = "fact_detail" | "submit_job" | "new_fact" | "make" | "correct" | "link" | "ask_send" | "send_pdf" | "explain" | "edit" | "restyle" | "approve_edit" | "why_contact" | "apply_which" | null;
@@ -146,6 +154,7 @@ export function resumeAskOf(message: string, task: ResumeTask | null, view: { co
   if (task && /\bwhy\b/.test(t) && /\b(placeholders?|to fill in|to add)\b|\bcontact\b[^?.!]*\b(resume|pdf|file|top)\b/.test(t)) return "why_contact";
   if (task?.file && /\bwhat (did|have) you change(d)?\b|\bwhat changed\b/.test(t)) return "explain";
   if (task?.file && /^\s*(now |ok(ay)?,? |then )?apply (with|using) (it|this|that)\s*[.!]?\s*$/.test(t)) return "apply_which";
+  if (postingTarget(message) && !AMBIGUOUS.test(t)) return null;
   const target = targetOf(message);
   // A correction or a link ask about the resume file this person was last given (ours, or the posting tailor's).
   const onFile = !!task || !!view.lastFile && !!target;
@@ -165,7 +174,7 @@ export function resumeAskOf(message: string, task: ResumeTask | null, view: { co
 type Fact = any;
 const SECTION: Record<string, string> = { education: "Education", experience: "Experience", project: "Projects", leadership: "Leadership", certification: "Certifications" };
 // Every way a GPA is written (review of #634 (d)): "GPA 3.7", "GPA: 3.7", "GPA of 3.7", "3.7 GPA", "GPA 3.7/4.0", "3.7/4.0 GPA",
-// "3.7 cumulative GPA". The value is group 1 or 2; the scale ("/4.0") goes with it when it is taken off.
+// "3.7 cumulative GPA". The value is read by gpaValue; the scale ("/4.0") goes with it when it is taken off.
 // Re-review of #644 (2): the scale in any form ("/4.0", "out of 4", "(4.0 scale)") goes with the value and is never read as one;
 // "Cumulative"/"Overall" and a dash or colon after "GPA" go with it too.
 // Round-2 re-review of #644 (2): a full stop after the value or the scale ("GPA 3.8.", "GPA 3.8/4.0.") is the sentence's, not
@@ -175,12 +184,15 @@ const NUM = "\\d\\.\\d{1,2}(?!\\d)(?!\\.\\d)";
 const SCALE_N = "\\d(?:\\.\\d{1,2})?(?!\\d)(?!\\.\\d)";
 const SCALE = `(?:\\s*(?:\\/|out\\s+of)\\s*${SCALE_N})?(?:\\s*\\(\\s*(?:on\\s+an?\\s+)?${SCALE_N}\\s*(?:-?\\s*point\\s+)?scale\\s*\\)|\\s+on\\s+an?\\s+${SCALE_N}\\s*(?:-?\\s*point\\s+)?scale\\b)?`;
 const LEAD = "(?:\\b(?:cumulative|overall|major)\\s+)?";
+const LEAD_C = "(?:\\b(cumulative|overall|major)\\s+)?";
 const WORD = "\\bC?GPA(?:\\s*\\(\\s*(?:cumulative|overall|major)\\s*\\))?";
-const GPA_SRC = `${LEAD}${WORD}\\s*(?:of\\s*|[-–—:]\\s*)?(${NUM})${SCALE}(?:\\s*[,;]?\\s*(?:and\\s+)?(?:overall|cumulative)(?:\\s+C?GPA)?\\s*(?:of\\s*|[-–—:]\\s*)?(${NUM})${SCALE})?|\\b(${NUM})${SCALE}\\s*${LEAD}C?GPA\\b`;
+const GPA_SRC = `${LEAD_C}${WORD}\\s*(?:of\\s*|[-–—:]\\s*)?(${NUM})${SCALE}(?:\\s*[,;]?\\s*(?:and\\s+)?(overall|cumulative|major)(?:\\s+C?GPA)?\\s*(?:of\\s*|[-–—:]\\s*)?(${NUM})${SCALE})?|\\b(${NUM})${SCALE}\\s*${LEAD}C?GPA\\b`;
 const GPA = new RegExp(GPA_SRC, "gi");
 // In parentheses the parentheses go with it; otherwise the comma before it does.
 const GPA_OFF = new RegExp(`\\s*\\(\\s*(?:${GPA_SRC})\\s*\\)|,?\\s*(?:${GPA_SRC})`, "gi");
-const gpaValue = (m: RegExpMatchArray) => m[2] ?? m[1] ?? m[3];
+// Groups: 1 the first label, 2 its value, 3 the second label, 4 its value, 5 the value of "3.8 GPA". The overall value wins
+// over a major value, in either order.
+const gpaValue = (m: RegExpMatchArray) => m[4] && /overall|cumulative/i.test(m[3] ?? "") ? m[4] : m[2] ?? m[5];
 const gpaOff = (s: string) => s.replace(GPA_OFF, "").replace(/\(\s*\)/g, "").replace(/\s+([,.;])/g, "$1").replace(/([,;])\s*([,.;])/g, "$2")
   .replace(/\s{2,}/g, " ").replace(/^[,;.\s]+|[,;\s]+$/g, "").trim();
 const textOf = (f: Fact) => `${f.title || ""} ${f.text || ""} ${(f.bullets || []).join(" ")}`;
@@ -376,7 +388,7 @@ export async function resumeTaskTurn(o: { message: string; ctx: any; userId: str
       task.proposed = shown; task.proposedHash = await proposalHash(shown);
       return reply([`For your ${target.label} resume, ${shown.length === 1 ? "this bullet" : "these 2 bullets"} would change:`,
         ...shown.flatMap((x) => [`New: ${x.after}`, `Now: ${x.before}`]),
-        ...(rest > 0 ? [`${rest === 1 ? "One more bullet" : `${rest} more bullets`} could change the same way; I'll show ${rest === 1 ? "it" : "them"} after you decide on these.`] : []),
+        ...(rest > 0 ? [`${rest === 1 ? "One more bullet" : `${rest} more bullets`} could change the same way; ${rest === 1 ? "it isn't" : "they aren't"} part of this change.`] : []),
         `Nothing else changes. Say if ${shown.length === 1 ? "it's" : "these are"} fine and I'll put ${shown.length === 1 ? "it" : "them"} in the PDF.`].join("\n"));
     }
     const ord = /\b(second|2nd)\b/.test(t) ? 1 : /\b(third|3rd)\b/.test(t) ? 2 : /\blast\b/.test(t) ? now.facts.length - 1 : 0;

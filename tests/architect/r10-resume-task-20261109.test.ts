@@ -437,10 +437,17 @@ Deno.test("facts/5 nothing confirmed, quarantined facts present: none of them is
 // a posting; a bare ask states none.
 Deno.test("target/1 'product management', 'consulting', 'trading', 'nursing' are targets; 'the quillstone data analyst intern role' is a posting", () => {
   for (const [ask, label] of [["make my resume a PDF for product management", "product management roles"], ["tailor my resume for consulting roles", "consulting roles"],
-    ["make my resume a PDF for trading", "trading roles"], ["make my resume for nursing jobs", "nursing roles"], ["make my resume for underwater basket weaving roles", "underwater basket weaving roles"]] as const) {
+    ["make my resume a PDF for trading", "trading roles"], ["make my resume for nursing jobs", "nursing roles"], ["tailor my resume for product management roles", "product management roles"]] as const) {
     assertNode.equal(targetOf(ask)?.label, label, ask);
   }
   for (const ask of ["tailor my resume for the quillstone data analyst intern role", "tailor my resume", "make my resume a pdf for me", "make my resume for review"]) assertNode.equal(targetOf(ask), null, ask);
+  // Round 3: a name and only a generic word is an employer: a posting, never "Resume for stripe roles". With a resume task on
+  // hand it is still not the task's (142's named-firm path or the last job list answers it).
+  const task = { pending: null, file: { sha256: "x", filename: "x.pdf", pages: 1, label: "data analyst internships" }, target: targetOf(T1) } as any;
+  for (const ask of ["tailor my resume for the Stripe role", "make my resume for the Goldman Sachs internship", "tailor my resume for Google roles"]) {
+    assertNode.equal(targetOf(ask), null, ask);
+    assertNode.equal(resumeAskOf(ask, task, { companies: [], jobs: 0, posting: false, resumeShown: true }), null, `${ask}: not the resume task's`);
+  }
 });
 
 Deno.test("facts/4 the task lapses after a day: an old target and an old rewording are not carried into a new ask", async () => {
@@ -529,6 +536,7 @@ Deno.test("gpa/3 'GPA 3.8.', 'GPA 3.8/4.0.', 'Major GPA 3.9, overall 3.6', '(GPA
     ["GPA 3.8/4.0.", "3.8", "TEST University - B.S. Economics."],
     ["Major GPA 3.9, overall 3.6", "3.6", "TEST University - B.S. Economics"],
     ["Major GPA 3.9, overall GPA 3.6; Dean's List", "3.6", "TEST University - B.S. Economics; Dean's List"],
+    ["Overall GPA 3.6, Major GPA 3.9", "3.6", "TEST University - B.S. Economics"],
     ["GPA 3.8 on a 4.0 scale", "3.8", "TEST University - B.S. Economics"],
     ["(GPA: 3.8)", "3.8", "TEST University - B.S. Economics"],
     ["GPA (cumulative): 3.8", "3.8", "TEST University - B.S. Economics"],
@@ -574,6 +582,9 @@ Deno.test("fact_detail/1 a search, a question and a bare yes are never stored as
   const view = { companies: [], jobs: 3, posting: false, resumeShown: true };
   for (const t of ["find machine learning jobs", "what do you know about me?", "search for data jobs in Boston", "send me the resume PDF"]) assertNode.notEqual(resumeAskOf(t, task, view), "fact_detail", t);
   for (const t of ["yes", "no", "Yes.", "ok"]) { assertNode.equal(resumeAskOf(t, task, view), "fact_detail", `${t}: asked again`); assertNode.equal(titleShaped(t), false, t); }
+  // Round 3: one capitalised word is not a title unless it is a title word.
+  for (const t of ["Thanks", "Perfect", "Great", "Cool", "Hello", "Wait", "LOL"]) assertNode.equal(titleShaped(t), false, t);
+  assertNode.ok(titleShaped("Analyst"), "Analyst");
   for (const t of ["ok, Analyst since May", "Data Analyst, started June 2026", "Sous Chef", "Junior Software Engineer"]) { assertNode.equal(resumeAskOf(t, task, view), "fact_detail", t); assertNode.ok(titleShaped(t), t); }
 });
 

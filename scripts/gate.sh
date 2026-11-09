@@ -137,6 +137,7 @@ edge_tests=(
   tests/edge/career-ask-once.test.ts
   tests/edge/control-state.test.ts
   tests/edge/fact-quarantine.test.ts
+  tests/edge/reply-rubric.test.ts
 )
 
 portable_test_paths() {
@@ -177,6 +178,7 @@ browser_node_tests=(
   tests/career-apply-dryrun.test.cjs
   tests/career-apply-exact-option.test.cjs
   tests/career-approval-card-browser.test.cjs
+  tests/career-browser-eval.test.cjs
   tests/career-dashboard-browser.test.cjs
   tests/career-extension-agent-submits.test.cjs
   tests/career-extension-browser.test.cjs

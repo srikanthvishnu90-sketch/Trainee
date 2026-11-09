@@ -2182,7 +2182,7 @@ const CareerRouter = (() => {
         reply: compose({ headline: "That is the resume already on your record — nothing changed.", facts: [`Its ${n} entr${n === 1 ? "y is" : "ies are"} confirmed as you gave them, so I added nothing and need no new yes.`, ...(Array.isArray(res.replaced_drafts) && res.replaced_drafts.length ? ["The other resume you pasted, which you had not confirmed, is set aside: nothing from it is used."] : [])], nextStep: "To change an entry, tell me what it should say, or paste the updated resume." }) };
     }
     const byKind = {};
-    for (const f of profile.facts || []) if (f && f.source === "resume-ingest" && f.needs_confirmation) byKind[f.kind] = (byKind[f.kind] || 0) + 1;
+    for (const f of profile.facts || []) if (f && f.source === "resume-ingest" && f.needs_confirmation) { const k = f.kind === "other" && /^Interest: /.test(f.text || "") ? "interest" : f.kind; byKind[k] = (byKind[k] || 0) + 1; }
     const total = Object.values(byKind).reduce((a, b) => a + b, 0);
     const counts = Object.entries(byKind).map(([k, n]) => `${n} ${k}`).join(", ");
     const mir = threadMirrorForWrite(ctx);
@@ -14406,6 +14406,12 @@ const CareerRouter = (() => {
         const reply = compose({ headline: "I need the posting to tailor against — Big Law is a category, not a posting.", facts, nextStep: "Paste the firm's posting and the CV cut runs immediately." });
         return { intent: "tailor_needs_posting", reply, resultStatus: "awaiting_user", artifact: null, sends: 0 };
       }
+      // R10 R1 (spec E.1 #11): a tailor ask that states no role is never answered by the first role of a list on hand (an old
+      // shortlist is not the person's target); it asks which role.
+      if (/^\s*(?:hey,?\s+|ok(?:ay)?,?\s+|so\s+)?(?:please\s+|can you\s+|could you\s+|help me\s+)?tailor\s+(?:my\s+)?(?:resume|cv)(?:\s+(?:please|for me|now|again))?\s*[.!?]*\s*$/i.test(String(text || ""))) {
+        const reply = compose({ headline: "Which role should I tailor your resume for?", nextStep: "Name the role, or paste the posting, and I'll tailor it to that." });
+        return { intent: "tailor_needs_posting", reply, resultStatus: "awaiting_user", artifact: null, sends: 0 };
+      }
       // A6 chaining: no posting in hand — discover inside the ask's
       // families and tailor the top role in the same turn.
       const disc = handleDiscovery(text, c, {});
@@ -17500,7 +17506,8 @@ const CareerRouter = (() => {
     // about the posting alone ("that posting is not in the list", "I found no posting for apply"), so the person learned
     // only later that nothing can be sent without a confirmed resume. The reply now says so too, and what to do.
     if (res && typeof res.reply === "string" && res.reply && res.intent !== "career_fallback" && res.intent !== "honest_unavailable" && !/\bresume\b/i.test(res.reply) && !resumeOnRecord(c)) {
-      const ask = lc(s(text)).replace(/[’]/g, "'");
+      // R10 F.1 (2026-11-08): "Don't apply to anything" is not an apply ask; listing roles never needs a confirmed resume.
+      const ask = lc(s(text)).replace(/[’]/g, "'").replace(/\b(?:don't|do not|never|not|without|no need to)\s+(?:\w+\s+){0,2}?(?:apply|applying|submit\w*)\b[^.?!]*/g, " ");
       if (!/\?\s*$/.test(ask) && /\bapply\s+(?:to|for|at|me|on|now)\b|\bapply\b[^.?!]{0,40}\b(?:jobs?|roles?|postings?|positions?|internships?|openings?)\b|\bsubmit (?:my|an?) applications?\b/.test(ask)) {
         res.reply = `${res.reply}\n\n${resumeDraftsPending(c).length
           ? "And nothing is sent anywhere before your resume is confirmed: its entries are waiting for your word (reply \"yes, that's my resume\" if they're right)."

@@ -27,7 +27,10 @@ Every executor uses one scheduler, `workers/career-browser/mass-run.ts`:
   (`career_apply_host_backoff`), so one instance's refusal stops every instance. Until the database lane ships that
   table, each instance holds off on its own and says so once at start.
 - **A captcha is never solved.** The application ends `needs_user` with its link, and is never retried. A sign-in wall
-  (`ACCOUNT_LOGIN_REQUIRED`) does the same. A rate-limited one ends `not_submitted`, with "the employer's site was
+  (`ACCOUNT_LOGIN_REQUIRED`) does the same. In the apply VM (WO-L), an SSO redirect (an identity provider or a sign-in
+  path), a password, create-account or sign-in-to-apply page, on load or behind the one "Apply" control, ends
+  `needs_user/login_required`, and a page asking for an emailed code ends `needs_user/email_code`, each with
+  `evidence.nothing_sent` and the wall kind (`evidence.wall`). Nothing on such a page is typed into. A rate-limited one ends `not_submitted`, with "the employer's site was
   turning visitors away for a while (too many requests), so nothing was filled in" on the receipt.
 
 ## Many instances: leases, fairness, crash recovery

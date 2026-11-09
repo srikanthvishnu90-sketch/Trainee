@@ -139,10 +139,12 @@ export async function closeBrowser() { if (browser) { const b = await browser.ca
 export interface Rendered { screenshot: string | null; scrollWidth: number; innerWidth: number; innerHeight: number; text: string; probe: any }
 // A page as a phone shows it: 390 x 844 CSS px at deviceScaleFactor 2, in light (and dark when asked), with nothing fetched
 // from the network. `probe` runs in the page and returns whatever the check needs (boxes, styles).
-export async function renderPhone(html: string, name: string, probe?: string, o: { scheme?: "light" | "dark"; csp?: string } = {}): Promise<Rendered> {
+// width: 390 (a phone, the default) or a desktop width such as 1280 (R-5), at 844 and 800 px tall.
+export async function renderPhone(html: string, name: string, probe?: string, o: { scheme?: "light" | "dark"; csp?: string; width?: number } = {}): Promise<Rendered> {
   const b = await chromium();
   if (!b) throw new Error("NOT_RUN: no Playwright browser on this machine");
-  const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, colorScheme: o.scheme ?? "light" });
+  const width = o.width ?? 390;
+  const ctx = await b.newContext({ viewport: { width, height: width > 390 ? 800 : 844 }, deviceScaleFactor: 2, colorScheme: o.scheme ?? "light" });
   try {
     const p = await ctx.newPage();
     // Served at its public address with the headers production serves it with (its CSP included), so what the browser
@@ -154,7 +156,7 @@ export async function renderPhone(html: string, name: string, probe?: string, o:
     await p.goto(at, { waitUntil: "load" });
     const dir = `${EVIDENCE_DIR}/screens`;
     await Deno.mkdir(dir, { recursive: true });
-    const shot = `${dir}/${name.replace(/[^\w.-]+/g, "_")}${o.scheme === "dark" ? "-dark" : ""}.png`;
+    const shot = `${dir}/${name.replace(/[^\w.-]+/g, "_")}${width !== 390 ? `-${width}` : ""}${o.scheme === "dark" ? "-dark" : ""}.png`;
     await p.screenshot({ path: shot, fullPage: true });
     const m = await p.evaluate(`(() => ({ sw: document.documentElement.scrollWidth, iw: innerWidth, ih: innerHeight, text: document.body ? document.body.innerText : "" }))()`);
     const pr = probe ? await p.evaluate(probe) : null;

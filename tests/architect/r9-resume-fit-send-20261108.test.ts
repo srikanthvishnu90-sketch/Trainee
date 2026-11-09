@@ -226,7 +226,8 @@ Deno.test("tool/1 tailor_resume uses the confirmed header and attaches its PDF a
   const tools = Object.fromEntries(careerTools({ postings: async () => [], tailor: { posting: async () => null, personas: memoryPersonaStore(), resumes: store, render: edgeRenderer(), deliver: (d) => sent.push(d) } } as any).map((x: any) => [x.name, x]));
   const ctx = { userId: USER, threadId: "t1", now: NOW, state: { profile: headerOnlyProfile() } as Record<string, any>, turn: { message: "make my resume fit this job, one page pdf please", added: [] as string[] } };
   const r = await tools.tailor_resume.run({ posting_text: DATA_POSTING, layout: "trainee" }, ctx) as any;
-  assert(r.ok && r.link, JSON.stringify(r).slice(0, 300));
+  // architect ruling #634(a) (2026-11-09): when the files ride the reply, no bearer link reaches the model, the reply or history.
+  assert(r.ok && !r.link, JSON.stringify(r).slice(0, 300));
   eq(sent.map((d) => [d.format, d.mime]), [["pdf", "application/pdf"], ["docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"]]);
   eq(r.attached, [sent[0].filename, sent[1].filename], "the model is told what rides its reply");
   const pdf = fromB64(sent[0].base64);

@@ -60746,6 +60746,8 @@ const CareerApplyLedger = (() => {
         entries.push({ source: t.kind === "tracked" ? "tracker" : "queue", company: t.company || null, role: t.title || null, state, since: t.since || null,
           reason: ev.reason || null, confirmation: ev.confirmation_id || (rc && rc.confirmation_id) || null, url: ev.url || null, key: t.id,
           // Proof and send time come only from the receipt: a row's updated_at is when anything about it last changed.
+          // Architect ruling 13-Obs (2026-11-09, D-024): only the employer's email confirms; a page reference alone does not.
+          byEmail: !!ev.email_confirmed_at,
           receipt: !!rc && SENT.has(state), sentAt: rc && SENT.has(state) ? (rc.clicked_at || rc.finished_at || null) : null });
       }
     }
@@ -60777,8 +60779,11 @@ const CareerApplyLedger = (() => {
   function lineOf(e) {
     let w = STATES[e.state] || e.state;
     if (e.state === "needs_you" && e.reason && NEEDS_WORDS[lc(e.reason)]) w = `${w}: ${NEEDS_WORDS[lc(e.reason)]}`;
-    if (e.state === "submitted" || e.state === "confirmed") {
+    if (e.state === "confirmed" && !e.byEmail) w = `submitted; ${e.confirmation ? `their page showed ${e.confirmation}; ` : ""}the employer has not confirmed it by email yet`;
+    else if (e.state === "submitted" || e.state === "confirmed") {
       if (e.confirmation) w = `${w} (confirmation ${e.confirmation})`;
+    }
+    if (e.state === "submitted" || e.state === "confirmed") {
       if (e.source === "queue") w = `${w}; ${e.receipt ? "the receipt is on record" : "no receipt is on record yet"}`;
     }
     return `${nameOf(e)}: ${w}`;
@@ -60791,7 +60796,8 @@ const CareerApplyLedger = (() => {
     if (n.approved) parts.push(`${n.approved} approved, not sent yet`);
     if (n.submitted || n.confirmed) {
       const r = entries.filter((e) => (e.state === "submitted" || e.state === "confirmed") && e.receipt).length;
-      const notes = [n.confirmed ? `${n.confirmed} confirmed by the employer` : null, `${r ? r : "none"} with the receipt on record`].filter(Boolean);
+      const byEmail = entries.filter((e) => e.state === "confirmed" && e.byEmail).length, pageOnly = (n.confirmed || 0) - byEmail;
+      const notes = [byEmail ? `${byEmail} confirmed by the employer` : null, pageOnly ? `${pageOnly} page reference only` : null, `${r ? r : "none"} with the receipt on record`].filter(Boolean);
       parts.push(`${(n.submitted || 0) + (n.confirmed || 0)} submitted (${notes.join(", ")})`);
     }
     if (n.sent_unconfirmed) parts.push(`${n.sent_unconfirmed} sent with no confirmation recorded`);
@@ -60945,7 +60951,7 @@ const CareerApplyLedger = (() => {
       }
       case "prepared_vs_submitted": {
         push("Prepared means built and shown to you for a yes, with nothing sent. Approved means your yes landed on that exact version and it has not gone yet.");
-        push("Submitted means the submit step recorded it as sent, and I say whether its receipt is on record; confirmed means the employer confirmed it too. Without a record of the send I never call it submitted.");
+        push("Submitted means the submit step recorded it as sent, and I say whether its receipt is on record; confirmed means the employer confirmed it too, by their email; a reference shown on their page alone is not their confirmation. Without a record of the send I never call it submitted.");
         push(countsLine(led.entries) || "Nothing is on your record yet in any of those states.");
         push(unreadableFact(led));
         return out("career_status_states", "Yes: prepared, approved and submitted are separate states, and I report each from its record.", "Want the full list with each one's state?");

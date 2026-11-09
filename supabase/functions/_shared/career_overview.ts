@@ -41,7 +41,9 @@ const lost = (s: Situation) => (s.unreadable.length ? [`Not read just now, so no
 export function overviewText(s: Situation, now: number): string {
   const T = s.tasks;
   const apps = T.filter((t) => t.kind === "application");
-  const confirmed = apps.filter((t) => t.state === "confirmed");
+  // Architect ruling 13-Obs (2026-11-09, D-024): only the employer's email confirms; a page reference alone has its own bucket.
+  const confirmed = apps.filter((t) => t.state === "confirmed" && !!t.evidence.email_confirmed_at);
+  const pageOnly = apps.filter((t) => t.state === "confirmed" && !t.evidence.email_confirmed_at);
   const unconfirmed = apps.filter((t) => t.state === "submitted_unconfirmed");
   const unknown = apps.filter((t) => t.state === "unknown_outcome");
   const running = T.filter((t) => ["queued", "driving", "waiting_extension"].includes(t.state) || (t.kind === "outreach" && ["approved", "sending"].includes(t.state)));
@@ -50,8 +52,9 @@ export function overviewText(s: Situation, now: number): string {
   const interviews = T.filter((t) => t.kind === "interview");
   const tracked = T.filter((t) => t.kind === "tracked");
   const L: string[] = [];
-  L.push(`Status as of now: ${confirmed.length} confirmed by the employer, ${unconfirmed.length + unknown.length} sent but not confirmed, ${running.length} in progress, ${blocked.length + (questions.length ? 1 : 0)} waiting on you.`);
+  L.push(`Status as of now: ${confirmed.length} confirmed by the employer, ${pageOnly.length ? `${pageOnly.length} page reference only, ` : ""}${unconfirmed.length + unknown.length} sent but not confirmed, ${running.length} in progress, ${blocked.length + (questions.length ? 1 : 0)} waiting on you.`);
   if (confirmed.length) L.push("Confirmed by the employer:", ...confirmed.map((t) => `- ${name(t)}${t.evidence.confirmation_id ? `, confirmation ${t.evidence.confirmation_id}` : ""}${t.since ? ` (${day(t.since)})` : ""}`));
+  if (pageOnly.length) L.push("Page reference only (not the employer's confirmation):", ...pageOnly.map((t) => `- ${name(t)}: ${t.evidence.confirmation_id ? `their page showed ${t.evidence.confirmation_id}; ` : "sent; "}${t.company ?? "the employer"} has not confirmed it by email yet`));
   if (unconfirmed.length || unknown.length) L.push("Sent, not confirmed by the employer yet:", ...unconfirmed.map((t) => `- ${name(t)}: sent${t.since ? ` ${day(t.since)}` : ""}, no confirmation from them yet`), ...unknown.map((t) => `- ${name(t)}: submission may have landed; I can't tell whether it reached them; it will not be sent again`));
   if (running.length) L.push("In progress:", ...running.map((t) => `- ${name(t)}: ${t.state === "driving" ? "being sent now" : t.state === "waiting_extension" ? "asked for, not prepared yet" : t.kind === "outreach" ? "approved, sends on the schedule" : "approved, waiting to run"}${t.blocker && t.blocker.who !== "person" && t.blocker.how !== "nothing for you to do" && t.blocker.how !== "nothing yet" ? ` (${t.blocker.what}; ${t.blocker.how})` : ""}`));
   if (blocked.length || questions.length) {

@@ -139,6 +139,9 @@ export function statusLine(a: AppRow): string {
   const who = a.company || "An employer", name = `${who}${a.title ? ` (${a.title})` : ""}`, on = date(a.updated_at), conf = a.confirmation_id;
   switch (a.state) {
     case "confirmed":
+      // Architect ruling 13-Obs (2026-11-09, D-024): a page reference alone is never "confirmed by the employer"; only their
+      // email matched to the row is (career_apply_confirm_as sets email_confirmed_at with the mail's hash).
+      if (!a.email_confirmed_at) return `${name}: submitted; ${conf ? `their page showed ${conf}; ` : ""}${who} has not confirmed it by email yet.`;
       return `${name}: submitted, and ${who} confirmed it${conf ? ` (confirmation ${conf})` : ""}.`;
     case "submitted_unconfirmed":
       return `${name}: submitted${on ? ` on ${on}` : ""}; ${who} has not confirmed it yet${conf ? ` (their page showed ${conf})` : ""}.`;
@@ -209,7 +212,8 @@ function statusReplyFor(ask: NonNullable<ReturnType<typeof statusAsk>>, rows: Ap
 export function countsLine(rows: AppRow[]): string {
   const n = (f: (a: AppRow) => boolean) => rows.filter(f).length;
   const parts: [number, string][] = [
-    [n((a) => a.state === "confirmed"), "confirmed by the employer"],
+    [n((a) => a.state === "confirmed" && !!a.email_confirmed_at), "confirmed by the employer"],
+    [n((a) => a.state === "confirmed" && !a.email_confirmed_at), "page reference only"],
     [n((a) => a.state === "submitted_unconfirmed"), "submitted"],
     [n((a) => a.state === "unknown_outcome"), "may have gone (unknown)"],
     [n((a) => a.state === "needs_user"), "waiting on you"],

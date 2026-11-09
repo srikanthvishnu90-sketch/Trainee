@@ -55,15 +55,22 @@ export const FAMILIES: Record<FamilyId, FamilyMeta> = {
 export interface Src { label: string; href?: string | null; at?: string | null; dateOnly?: boolean; external?: boolean }
 // routes: the actions the server that serves this page answers (file_routes.ts). Given it, a control that posts any other action is
 // drawn disabled with its reason - a button that does nothing would be a false claim. Absent (specimens, unit renders): unchanged.
-export interface Ctx { now: number; tz?: string | null; routes?: ReadonlySet<string> }
+// links: the query keys that page's GET answers; a same-page link ("?key=...") using any other key is drawn disabled too.
+export interface Ctx { now: number; tz?: string | null; routes?: ReadonlySet<string>; links?: ReadonlySet<string> }
 export const NOT_CONNECTED = "Not connected yet - this step can't be done from this page, so it is off.";
 // Every Act anywhere in a File (header, blocks, parts, actions), copied, with an unrouted post turned off. Functions are left as they are.
-function routed<T>(x: T, routes: ReadonlySet<string>): T {
-  if (Array.isArray(x)) return x.map((y) => routed(y, routes)) as T;
+export const deadQuery = (href: string, links: ReadonlySet<string>): boolean => {
+  if (!href.startsWith("?")) return false; // another page, an anchor or an absolute link: not this page's GET
+  const q = href.slice(1).split("#")[0];
+  return [...new URLSearchParams(q).keys()].some((k) => !links.has(k));
+};
+function routed<T>(x: T, routes: ReadonlySet<string>, links?: ReadonlySet<string>): T {
+  if (Array.isArray(x)) return x.map((y) => routed(y, routes, links)) as T;
   if (!x || typeof x !== "object") return x;
-  const o = Object.fromEntries(Object.entries(x).map(([k, v]) => [k, typeof v === "function" ? v : routed(v, routes)])) as Record<string, unknown>;
+  const o = Object.fromEntries(Object.entries(x).map(([k, v]) => [k, typeof v === "function" ? v : routed(v, routes, links)])) as Record<string, unknown>;
   const post = o.post as { action?: unknown } | undefined;
   if (post && typeof post.action === "string" && typeof o.label === "string" && !o.off && !routes.has(post.action)) o.off = NOT_CONNECTED;
+  if (links && !post && typeof o.href === "string" && typeof o.label === "string" && typeof o.effect === "string" && !o.off && deadQuery(o.href, links)) o.off = NOT_CONNECTED;
   return o as T;
 }
 export const UNCONFIRMED = "Unconfirmed";
@@ -242,7 +249,7 @@ function headHtml(f: Pick<FamilyFile, "family" | "header" | "boundary" | "mono" 
   return `<header class="ff-head">${back}<div class="ff-hb"><p class="ff-ht">${esc(f.header ?? meta.header)}</p><p class="ff-hs">${sub}</p></div>${menu}</header>`;
 }
 export function familyBodyHtml(f0: FamilyFile, c: Ctx): string {
-  const f = c.routes ? routed(f0, c.routes) : f0;
+  const f = c.routes ? routed(f0, c.routes, c.links) : f0;
   const h = f.hero;
   const hero = !h ? `<h1 class="ff-sr">${esc(f.title ?? FAMILIES[f.family].header)}</h1>${f.fresh?.length ? `<p class="ff-metas ff-fresh">${f.fresh.map((m) => metaHtml(m, c)).join("")}</p>` : ""}` : `<section class="ff-hero" aria-label="Summary"><p class="ff-kick">${esc(h.kicker)}</p><h1 class="ff-h1">${esc(h.title)}</h1><p class="ff-metas">${h.meta.map((m) => metaHtml(m, c)).join("")}</p>`
     + (h.counts?.length ? `<ul class="ff-counts" aria-label="Counts">${h.counts.map((x) => `<li><b>${x.n}</b> ${esc(x.label)}</li>`).join("")}</ul>` : "") + `</section>`;
@@ -267,7 +274,7 @@ export interface StateInput {
   nothingSent?: boolean; // error: the caller has proof nothing changed and nothing was sent; without it the page does not claim so
 }
 export function familyStateHtml(s0: StateInput, c: Ctx): string {
-  const s = c.routes ? routed(s0, c.routes) : s0;
+  const s = c.routes ? routed(s0, c.routes, c.links) : s0;
   const t = s.title ?? STATE_TITLE[s.state], kv = (rows?: KV[]) => rows?.length ? partHtml({ p: "kv", rows }, c) : "";
   let body: string;
   switch (s.state) {

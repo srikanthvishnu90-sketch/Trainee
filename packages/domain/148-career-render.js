@@ -1036,7 +1036,14 @@ const CareerRender = (() => {
     const styleUses = firstStyle ? (docXml.match(new RegExp(`<w:pStyle w:val="${firstStyle.replace(/[^\w-]/g, "")}"`, "g")) || []).length : 0;
     const styleSz = (id) => { const m = new RegExp(`<w:style\\b[^>]*w:styleId="${id.replace(/[^\w-]/g, "")}"[^>]*>([\\s\\S]*?)<\\/w:style>`).exec(stylesXml); return m ? [...m[1].matchAll(/<w:sz w:val="(\d+)"/g)].map((x) => parseInt(x[1], 10) / 2) : []; };
     const nameSizes = firstStyle && styleUses === 1 ? [...new Set(styleSz(firstStyle))] : [];
-    const otherSizes = [...stylesXml.matchAll(/<w:style\b[^>]*w:styleId="([^"]+)"[^>]*>([\s\S]*?)<\/w:style>/g)].filter((m) => !(nameSizes.length && m[1] === firstStyle)).flatMap((m) => [...m[2].matchAll(/<w:sz w:val="(\d+)"/g)].map((x) => parseInt(x[1], 10) / 2));
+    // Only the styles the document uses count (review of #620: Word's built-in template carries Title 26 pt, Heading 14 pt,
+    // footnote 8 pt ... whether or not a paragraph uses them): the default paragraph and character styles, every style a
+    // paragraph or run names, and the styles those are based on.
+    const styleDefs = new Map([...stylesXml.matchAll(/<w:style\b([^>]*)>([\s\S]*?)<\/w:style>/g)].map((m) => [(/w:styleId="([^"]+)"/.exec(m[1]) || [])[1], { attrs: m[1], body: m[2] }]).filter(([id]) => id));
+    const used = new Set([...docXml.matchAll(/<w:(?:pStyle|rStyle|tblStyle) w:val="([^"]+)"/g)].map((m) => m[1]));
+    for (const [id, d] of styleDefs) if (/w:default="(?:1|true)"/.test(d.attrs) && /w:type="(?:paragraph|character)"/.test(d.attrs)) used.add(id);
+    for (const id of [...used]) { let cur = id, n = 0; while (cur && n++ < 20) { used.add(cur); const b = styleDefs.get(cur); cur = b ? ((/<w:basedOn w:val="([^"]+)"/.exec(b.body) || [])[1] || null) : null; } }
+    const otherSizes = [...styleDefs].filter(([id]) => used.has(id) && !(nameSizes.length && id === firstStyle)).flatMap(([, d]) => [...d.body.matchAll(/<w:sz w:val="(\d+)"/g)].map((x) => parseInt(x[1], 10) / 2));
     const defaults = [...(/<w:docDefaults>[\s\S]*?<\/w:docDefaults>/.exec(stylesXml) || [""])[0].matchAll(/<w:sz w:val="(\d+)"/g)].map((x) => parseInt(x[1], 10) / 2);
     const bodySizes = [...new Set([...defaults, ...otherSizes])].sort((a, b) => a - b);
     const mediaParts = names.filter((k) => k.startsWith("word/media/")).length;

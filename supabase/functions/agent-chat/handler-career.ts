@@ -508,12 +508,14 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // TASK PLANNER: a planned step that the router answers reads the pool for its own words (`text`); a turn the pool is
       // not needed for leaves it unread, so a later step that needs it still reads it once.
       // `message` inside readPool is the text the pool is read for: this turn's message, or a planned step's own words.
-      const readPool = async (message: string) => {
+      // Round-5 ruling: `force` reads the pool for a resume ask whose target names an employer that may be on hand, whatever the
+      // router copy would need; the pool counts as read only once a load succeeded, so a failed read is tried again.
+      const readPool = async (message: string, force = false) => {
         if (poolRead) return;
-        if (!poolNeeded({ host, message, ctx: ctx as unknown as Record<string, unknown>, clock }).needed) return;
-        poolRead = true;
+        if (!force && !poolNeeded({ host, message, ctx: ctx as unknown as Record<string, unknown>, clock }).needed) return;
         const pool = await clock.wait("pool_load", () => poolLoader.loadPool());
         if (pool.error) console.error("career pool load failed:", pool.error);
+        else poolRead = true;
         // V240 LIVE-FIX (probe f2): the window is a discovery slice,
         // not the shelf — when the turn names a specific company/title
         // (the router's OWN parser decides; no second parser lives
@@ -667,7 +669,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       const resumeAns = !crisisText && !codeTurn && !tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await resumeTaskTurn({ message, ctx, userId: user.id, now: Date.now(), deps: {
             // An unknown word in the stated target may be an employer in the pool ("the quillstone ... role"): read it then.
-            loadPool: () => ensurePool(),
+            loadPool: () => readPool(message, true),
             // The privacy ruling: the resume opens only on the signed-in File page (a code-built draft File), never a bearer link.
             file: async (data) => { const r = await createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }).create(user.id, "draft", data, { trusted: true });
               return !r.ok ? { error: r.error } : r.url ? { url: r.url } : { error: "links to File pages aren't set up" }; },

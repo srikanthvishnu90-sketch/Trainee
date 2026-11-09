@@ -22,7 +22,7 @@ import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, SUPABASE_URL, supabaseParity, type Turn } from "../flow/handler.ts";
 import { anthropicWire } from "./helpers/anthropic_wire.ts";
 import { CareerProfile } from "../../supabase/functions/_shared/router_core.career.js";
-import { buildResume, jobNumberOf, parseCheckWords, resumeAskOf, resumeTaskTurn, targetOf, titleShaped } from "../../supabase/functions/_shared/career_resume_task.ts";
+import { buildResume, jobNumberOf, parseCheckWords, readTarget, resumeAskOf, resumeTaskTurn, targetOf, titleShaped } from "../../supabase/functions/_shared/career_resume_task.ts";
 
 const CI = Deno.env.get("CI") === "true";
 const ROOT = new URL("../..", import.meta.url).pathname;
@@ -435,27 +435,56 @@ Deno.test("facts/5 nothing confirmed, quarantined facts present: none of them is
 
 // R1 (owner readiness review): any stated target is the target, with or without a role word; an employer in front of a role is
 // a posting; a bare ask states none.
-Deno.test("target/1 'product management', 'consulting', 'trading', 'nursing' are targets; 'the quillstone data analyst intern role' is a posting", () => {
+Deno.test("target/1 the round-5 ruling: field words are targets in any case; an employer on hand or well known is a posting; anything else is asked", async () => {
+  const kind = (ask: string, employers: string[] = []) => readTarget(ask, { employers })?.kind;
+  // 1. Targets, whatever the capitalisation.
   for (const [ask, label] of [["make my resume a PDF for product management", "product management roles"], ["tailor my resume for consulting roles", "consulting roles"],
     ["make my resume a PDF for trading", "trading roles"], ["make my resume for nursing jobs", "nursing roles"], ["tailor my resume for product management roles", "product management roles"],
-    ["make my resume for underwater basket weaving roles", "underwater basket weaving roles"],
-    // Round 4: field words the vocabulary does not hold are fields, not employers, unless written as a name.
-    ["make my resume for cybersecurity roles", "cybersecurity roles"], ["make my resume for fintech internships", "fintech internships"],
-    ["make my resume for robotics roles", "robotics roles"], ["make my resume for blockchain roles", "blockchain roles"], ["make my resume for edtech roles", "edtech roles"],
-    ["make my resume for pharma roles", "pharma roles"], ["make my resume for ui/ux roles", "ui/ux roles"], ["make my resume for sre roles", "sre roles"],
-    ["make my resume for esg roles", "esg roles"]] as const) {
+    ["make my resume for underwater basket weaving roles", "underwater basket weaving roles"], ["make my resume for Underwater Basket Weaving roles", "underwater basket weaving roles"],
+    ["make my resume for cybersecurity roles", "cybersecurity roles"], ["make my resume for Cybersecurity roles", "cybersecurity roles"],
+    ["make my resume for fintech internships", "fintech internships"], ["make my resume for Fintech internships", "fintech internships"],
+    ["make my resume for robotics roles", "robotics roles"], ["make my resume for Robotics roles", "robotics roles"],
+    ["make my resume for blockchain roles", "blockchain roles"], ["make my resume for edtech roles", "edtech roles"], ["make my resume for pharma roles", "pharma roles"],
+    ["make my resume for ui/ux roles", "ui/ux roles"], ["make my resume for sre roles", "sre roles"], ["make my resume for esg roles", "esg roles"]] as const) {
     assertNode.equal(targetOf(ask)?.label, label, ask);
   }
-  for (const ask of ["tailor my resume", "make my resume a pdf for me", "make my resume for review"]) assertNode.equal(targetOf(ask), null, ask);
-  // Round 4: written in lower case, a name is an employer when it is one on hand (the last job list or the posting pool).
-  assertNode.equal(targetOf("tailor my resume for the quillstone data analyst intern role", ["quillstone analytics"]), null, "an employer in the pool, lower case");
-  // Round 3: a name and only a generic word is an employer: a posting, never "Resume for stripe roles". With a resume task on
-  // hand it is still not the task's (142's named-firm path or the last job list answers it).
+  // A whole name only: a pool holding "Boston Robotics" leaves "robotics roles" a target.
+  assertNode.equal(kind("make my resume for robotics roles", ["Boston Robotics"]), "target", "robotics is not Boston Robotics");
+  for (const ask of ["tailor my resume", "make my resume a pdf for me", "make my resume for review"]) assertNode.equal(readTarget(ask), null, ask);
+  // 2. Postings: a well-known employer, or one on hand (here Quillstone Analytics in the pool).
   const task = { pending: null, file: { sha256: "x", filename: "x.pdf", pages: 1, label: "data analyst internships" }, target: targetOf(T1) } as any;
-  for (const ask of ["tailor my resume for the Stripe role", "make my resume for the Goldman Sachs internship", "tailor my resume for Google roles", "tailor my resume for the Quillstone data analyst intern role"]) {
-    assertNode.equal(targetOf(ask), null, ask);
-    assertNode.equal(resumeAskOf(ask, task, { companies: [], jobs: 0, posting: false, resumeShown: true }), null, `${ask}: not the resume task's`);
+  const view = { companies: [], jobs: 0, posting: false, resumeShown: true };
+  for (const ask of ["tailor my resume for IBM roles", "tailor my resume for the McKinsey role", "tailor my resume for the stripe role", "tailor my resume for the Stripe role",
+    "make my resume for the Goldman Sachs internship", "tailor my resume for Google roles"]) {
+    assertNode.equal(kind(ask), "posting", ask);
+    assertNode.equal(resumeAskOf(ask, task, view), null, `${ask}: not the resume task's`);
   }
+  for (const ask of ["tailor my resume for the Quillstone data analyst intern role", "tailor my resume for the quillstone data analyst intern role"]) {
+    assertNode.equal(kind(ask, ["Quillstone Analytics"]), "posting", `${ask}: Quillstone on hand`);
+    assertNode.equal(resumeAskOf(ask, task, { ...view, employers: ["Quillstone Analytics"] }), null, `${ask}: on hand, not the task's`);
+  }
+  // 3. Asked: a name that is no field and no employer on hand ("the Quillstone role", lower-case quillstone with no pool).
+  for (const ask of ["tailor my resume for the Quillstone role", "tailor my resume for the quillstone data analyst intern role"]) {
+    assertNode.equal(kind(ask), "ask", ask);
+    assertNode.equal(resumeAskOf(ask, task, view), "target_which", ask);
+  }
+  // The question, then each answer: nothing is built until it is answered; a field is kept for the task; a company is a posting.
+  const p = intake("", true);
+  let intent = "career_resume_task";
+  const turn = (message: string) => resumeTaskTurn({ message, ctx: { profile: p }, userId: "u-r10", now: NOW, deps: { uploaded: async () => false, lastIntent: async () => intent } });
+  const q = await turn("make my resume for quillstone roles");
+  assertNode.ok(q && q.reply === "Do you mean roles at Quillstone (a company), or quillstone as a field?" && !q.documents.length, `one question, no file: ${q?.reply}`);
+  intent = q!.intent;
+  const field = await turn("as a field");
+  assertNode.ok(field && field.documents.length === 1 && /quillstone roles/.test(field.reply), `the field answer builds it: ${field?.reply}`);
+  assertNode.deepEqual((p as any)._resumeTask.fields, ["quillstone"], "the answer is kept for the task");
+  assertNode.equal(readTarget("make my resume for quillstone roles", { fields: (p as any)._resumeTask.fields })?.kind, "target", "not asked again");
+  intent = field!.intent;
+  const q2 = await turn("make my resume for the zephyrine role");
+  intent = q2!.intent;
+  const company = await turn("the company");
+  assertNode.ok(company && !company.documents.length && /I need the Zephyrine posting/.test(company.reply), `a company: a posting, nothing built: ${company?.reply}`);
+  assertNode.deepEqual((p as any)._resumeTask.employers, ["zephyrine"]);
 });
 
 Deno.test("facts/4 the task lapses after a day: an old target and an old rewording are not carried into a new ask", async () => {

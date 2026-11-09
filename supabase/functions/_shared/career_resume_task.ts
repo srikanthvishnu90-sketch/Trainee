@@ -32,19 +32,21 @@ const proposalHash = async (xs: { before: string; after: string }[]) =>
 type Target = { role: string; level: string | null; label: string };
 export interface ResumeTask {
   target: Target; limits: string[]; rejected: string | null; said: string[]; asked: string[];
-  file: { sha256: string; filename: string; pages: number; label: string } | null; pending: "send_choice" | "fact_detail" | null; at: string;
+  file: { sha256: string; filename: string; pages: number; label: string } | null; pending: "send_choice" | "fact_detail" | "target_which" | null; at: string;
   // B.6 continuation 1: the order changes of the last build, a bullet rewrite shown and not yet approved, and the approved ones.
   moved?: string[]; proposed?: { before: string; after: string }[] | null; swaps?: { before: string; after: string }[];
   // Re-review of #644 (1): an approval binds to the exact rewording shown (its hash) and to the turn right after it; the fact a
   // "new job" turn asked about, so its answer is kept.
   proposedHash?: string | null; lastAsk?: string | null; factId?: string | null;
+  // Round 5 ruling: an unclear target ("the Quillstone role", nothing on hand) is asked once; the answer is kept for the task.
+  which?: { name: string; target: Target } | null; fields?: string[]; employers?: string[];
 }
 type Doc = { kind: "document"; format: string; filename: string; mime: string; base64: string; sha256: string };
 export type ResumeTurn = { reply: string; intent: string; resultStatus: string; documents: Doc[]; link: string | null; task: ResumeTask };
 
 const lc = (s: unknown) => String(s ?? "").toLowerCase().replace(/[’‘]/g, "'");
 const ROLE = "(?:internships?|interns?|analysts?|engineers?|scientists?|developers?|designers?|managers?|associates?|consultants?|specialists?|coordinators?|researchers?|accountants?|traders?|nurses?|teachers?|writers?|recruiters?|paralegals?|roles?|jobs?|positions?)";
-const FIELD = /^(data|business|financial|finance|product|marketing|software|research|operations|ops|sales|analytics|analyst|analysts|machine|learning|ml|ai|engineering|engineer|engineers|scientist|scientists|science|developer|developers|designer|designers|ux|ui|manager|managers|associate|associates|consultant|consultants|specialist|specialists|coordinator|coordinators|researcher|researchers|accountant|accountants|accounting|investment|banking|quantitative|quant|policy|strategy|supply|chain|people|hr|legal|healthcare|health|climate|frontend|front-end|backend|back-end|full-stack|fullstack|web|mobile|cloud|security|devops|qa|test|economics|statistics|reporting|bi|intelligence|junior|senior|entry-level|graduate|summer|fall|spring|remote|hybrid|technical|it|support|customer|success|growth|content|communications|design|venture|capital|equity|private|public|tech|technology|platform|management|consulting|trading|trader|traders|nursing|nurse|nurses|teaching|teacher|teachers|education|law|paralegal|paralegals|medicine|medical|clinical|pharmacy|biotech|biology|chemistry|physics|mathematics|math|nonprofit|government|journalism|writing|writer|writers|editorial|media|publishing|retail|hospitality|real|estate|insurance|actuarial|audit|tax|wealth|asset|risk|compliance|hardware|electrical|mechanical|civil|chemical|aerospace|manufacturing|logistics|procurement|recruiting|recruiter|recruiters|talent|administration|administrative|project|program|partnerships|events|social|digital|brand|advertising|pr|relations|user|game|games|gaming|film|music|arts|architecture|environmental|energy|sustainability|agriculture|food|nutrition|sports|entry|level|new|grad|computer|economic|international|corporate|commercial|retail|sales|account|executive|executives|client|services|service)$/;
+const FIELD = /^(data|business|financial|finance|product|marketing|software|research|operations|ops|sales|analytics|analyst|analysts|machine|learning|ml|ai|engineering|engineer|engineers|scientist|scientists|science|developer|developers|designer|designers|ux|ui|manager|managers|associate|associates|consultant|consultants|specialist|specialists|coordinator|coordinators|researcher|researchers|accountant|accountants|accounting|investment|banking|quantitative|quant|policy|strategy|supply|chain|people|hr|legal|healthcare|health|climate|frontend|front-end|backend|back-end|full-stack|fullstack|web|mobile|cloud|security|devops|qa|test|economics|statistics|reporting|bi|intelligence|junior|senior|entry-level|graduate|summer|fall|spring|remote|hybrid|technical|it|support|customer|success|growth|content|communications|design|venture|capital|equity|private|public|tech|technology|platform|management|consulting|trading|trader|traders|nursing|nurse|nurses|teaching|teacher|teachers|education|law|paralegal|paralegals|medicine|medical|clinical|pharmacy|biotech|biology|chemistry|physics|mathematics|math|nonprofit|government|journalism|writing|writer|writers|editorial|media|publishing|retail|hospitality|real|estate|insurance|actuarial|audit|tax|wealth|asset|risk|compliance|hardware|electrical|mechanical|civil|chemical|aerospace|manufacturing|logistics|procurement|recruiting|recruiter|recruiters|talent|administration|administrative|project|program|partnerships|events|social|digital|brand|advertising|pr|relations|user|game|games|gaming|film|music|arts|architecture|environmental|energy|sustainability|agriculture|food|nutrition|sports|entry|level|new|grad|computer|economic|international|corporate|commercial|retail|sales|account|executive|executives|client|services|service|fintech|cybersecurity|cyber|robotics|blockchain|crypto|web3|edtech|healthtech|medtech|proptech|insurtech|cleantech|climatetech|pharma|pharmaceutical|ui\/ux|ux\/ui|sre|esg|nlp|llm|iot|embedded|semiconductor|semiconductors|quantum|animation|fashion|beauty|underwater|basket|weaving|crafts|woodworking|ceramics|automotive|maritime|aviation|telecom|biomedical|neuroscience|genomics|bioinformatics|geospatial|gis|devrel|localization|translation)$/;
 const NOT_TARGET = /\b(resume|cv|pdf|docx|file|page|version|draft|that|this|it|one)\b/;
 // What is rejected ("not a machine learning manager job at Reddit") is taken out before the target is read.
 function rejectedOf(message: string): string | null {
@@ -56,50 +58,68 @@ function rejectedOf(message: string): string | null {
 // makes it a posting, which is the posting tailor's.
 const GENERIC = /^(internships?|interns?|roles?|jobs?|positions?)$/;
 const LEADS_TO = `(?:for|is|as|asked for|toward|towards|targeting|aimed at)\\s+(?:an? |the |some )?`;
-// Round 3 (R1): a name followed only by a generic word ("the Stripe role", "the Goldman Sachs internship", "Google roles") is an
-// employer, so a posting: the last job list or 142's named-firm reply answers it, never a general resume.
-// Round 4: a word is a name only when the person wrote it Capitalised (in their own message, not the lowercased copy) or it is
-// an employer on the last job list; "fintech internships" and "underwater basket weaving roles" are fields.
-export const postingTarget = (message: string, companies: string[] = []) => readTarget(message, companies) === "posting";
-export function targetOf(message: string, companies: string[] = []): Target | null { const r = readTarget(message, companies); return r === "posting" ? null : r; }
-// The words of the employers on hand (the last job list and the posting pool), read once per list.
-const wordsCache = new WeakMap<string[], Set<string>>();
-const employerWords = (companies: string[]) => {
-  let w = wordsCache.get(companies);
-  if (!w) wordsCache.set(companies, w = new Set(companies.flatMap((c) => lc(c).split(/[^a-z0-9&]+/).filter((x) => x.length > 2 && !FIELD.test(x)))));
-  return w;
+// Architect ruling (round 5; spec E.4, ask when ambiguous, never guess), in this order:
+// 1. every word of the phrase (generic words aside) is in the field vocabulary, or a field the person named for this task:
+//    a TARGET, whatever its capitalisation ("Fintech internships", "Robotics roles");
+// 2. the phrase (generic words aside), or the name in front of its field words, EQUALS an employer on hand (the last job list,
+//    a pool company, one the person named for this task) or a well-known employer, whole name and case-insensitive (never a
+//    substring: "robotics" is not "Boston Robotics"): a POSTING, the posting tailor's or 142's named-firm reply;
+// 3. anything else: ASK once, "roles at X (a company), or X as a field?", and build nothing until it is answered.
+const KNOWN_EMPLOYERS = ["ibm", "mckinsey", "google", "alphabet", "meta", "facebook", "amazon", "apple", "microsoft", "netflix", "stripe",
+  "goldman sachs", "goldman", "jpmorgan", "jpmorgan chase", "jp morgan", "morgan stanley", "citi", "citigroup", "bank of america", "wells fargo",
+  "blackrock", "deloitte", "pwc", "ey", "kpmg", "accenture", "bain", "bcg", "boston consulting group", "nvidia", "tesla", "salesforce", "oracle",
+  "adobe", "intel", "uber", "airbnb", "spotify", "palantir", "openai", "anthropic", "reddit", "linkedin", "citadel", "jane street", "two sigma",
+  "bloomberg", "pfizer", "ramp"];
+const CORP = /^(inc|llc|ltd|corp|corporation|co|company|group|labs|lab|technologies|holdings|plc|the|&)$/;
+// An employer's names, for equality: as written, without its corporate suffix, and without its trailing field words
+// ("Quillstone Analytics" is also "quillstone").
+const keysOf = (name: string) => {
+  const ws = lc(name).replace(/[^a-z0-9& ]+/g, " ").split(/\s+/).filter(Boolean);
+  const bare = ws.filter((w, i) => !(CORP.test(w) && (i > 0 || w === "the")));
+  const out = new Set([ws.join(" "), bare.join(" ")]);
+  const stem = [...bare]; while (stem.length > 1 && FIELD.test(stem[stem.length - 1])) stem.pop();
+  out.add(stem.join(" "));
+  return [...out].filter(Boolean);
 };
-const hasUnknownWord = (message: string) => {
-  const r = readTarget(message, []);
-  return !!r && r !== "posting" && r.role.split(" ").some((w) => !FIELD.test(w) && !new RegExp(`^${ROLE}$`).test(w));
+const keyCache = new WeakMap<string[], Set<string>>();
+const employerKeys = (names: string[]) => {
+  let k = keyCache.get(names);
+  if (!k) keyCache.set(names, k = new Set([...KNOWN_EMPLOYERS, ...names].flatMap(keysOf)));
+  return k;
 };
-const esc = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-function readTarget(message: string, companies: string[]): Target | null | "posting" {
-  const named = (w: string) => new RegExp(`(?<![A-Za-z])${esc(w.charAt(0).toUpperCase() + w.slice(1))}(?![a-z])`).test(String(message))
-    || employerWords(companies).has(w);
+export type TargetRead = { kind: "target"; target: Target } | { kind: "posting"; name: string } | { kind: "ask"; name: string; target: Target };
+export type TargetHints = { employers?: string[]; fields?: string[] };
+export function readTarget(message: string, hints: TargetHints = {}): TargetRead | null {
+  const employers = employerKeys(hints.employers ?? []), fields = new Set((hints.fields ?? []).flatMap((f) => lc(f).split(/\s+/)));
+  const known = (w: string) => FIELD.test(w) || new RegExp(`^${ROLE}$`).test(w) || fields.has(w);
   const t = lc(message).replace(/\bnot (?:an? |the )?[a-z][a-z0-9 &/+.-]{2,80}?(?=[,.;!?]|$| please| since| and )/g, " ");
   const withRole = new RegExp(`\\b${LEADS_TO}((?:[a-z][a-z&/+-]*\\s+){0,4}?${ROLE}(?:\\s+${ROLE})*)\\b`, "g");
   const fieldOnly = new RegExp(`\\b${LEADS_TO}((?:[a-z][a-z&/+-]*\\s+){0,3}[a-z][a-z&/+-]*)(?=\\s*(?:[,.;!?]|$|\\s(?:please|and|since|now|instead)\\b))`, "g");
-  const read = (phrase: string, needField: boolean): Target | null | "posting" => {
+  const read = (phrase: string, needField: boolean): TargetRead | null => {
     const words = phrase.trim().split(/\s+/);
     if (words.some((w) => NOT_TARGET.test(w)) || words.length < 2 && /^(roles?|jobs?|positions?)$/.test(words[0])) return null;
     const level = /\bintern/.test(phrase) ? "internship" : /\b(senior|lead|manager|director|principal|staff)\b/.test(phrase) ? "senior" : null;
     const role = words.filter((w) => !GENERIC.test(w)).join(" ");
     if (!role) return null;
-    const known = (w: string) => FIELD.test(w) || new RegExp(`^${ROLE}$`).test(w);
-    if (needField && !role.split(" ").every(known)) return null;
-    // An unknown word in front of a known field or role word is an employer ("quillstone data analyst intern").
     const ws = role.split(" ");
+    const target = { role, level, label: level === "internship" ? `${role} internships` : `${role} roles` };
+    if (ws.every(known)) return { kind: "target", target };
     const firstKnown = ws.findIndex(known);
-    const lead = firstKnown < 0 ? ws : ws.slice(0, firstKnown);
-    if (lead.length && lead.some(named) && (firstKnown > 0 || words.some((w) => GENERIC.test(w)))) return "posting";
-    const label = level === "internship" ? `${role} internships` : `${role} roles`;
-    return { role, level, label };
+    const lead = (firstKnown < 0 ? ws : ws.slice(0, firstKnown)).join(" ");
+    const restKnown = ws.slice(lead.split(" ").length).every(known);
+    if (employers.has(role) || restKnown && employers.has(lead)) return { kind: "posting", name: employers.has(role) ? role : lead };
+    if (needField) return null;
+    return { kind: "ask", name: restKnown ? lead : ws.filter((w) => !known(w)).join(" "), target };
   };
   for (const m of t.matchAll(withRole)) { const r = read(m[1], false); if (r) return r; }
   for (const m of t.matchAll(fieldOnly)) { const r = read(m[1], true); if (r) return r; }
   return null;
 }
+export const postingTarget = (message: string, hints: TargetHints = {}) => readTarget(message, hints)?.kind === "posting";
+export function targetOf(message: string, hints: TargetHints = {}): Target | null { const r = readTarget(message, hints); return r?.kind === "target" ? r.target : null; }
+// The pool is read for any ask that would otherwise be decided by rule 2 or 3 (an unknown word in the stated target).
+const needsEmployers = (message: string) => readTarget(message)?.kind === "ask";
+const title = (s: string) => s.replace(/\b[a-z]/g, (c) => c.toUpperCase());
 const LIMITS: [string, RegExp][] = [
   ["one_page", /\b(one|1|single)[- ]page\b/], ["facts_as_written", /\b(facts as written|keep the facts|don'?t (add|invent|change)|do not (add|invent))\b/],
   ["no_new_experience", /\b(don'?t|do not) add (any )?experience\b/], ["no_apply", /\b(don'?t|do not|never) (apply|submit)\b|\bnot apply\b/],
@@ -148,7 +168,7 @@ export const titleShaped = (message: string) => {
   if (s.split(/\s+/).length === 1) return ROLE_WORD.test(lc(s));
   return ROLE_WORD.test(lc(s)) || /^[A-Z][\w&.'-]*(?:\s+(?:of|&|[A-Z][\w&.'-]*)){0,4}(?:,?\s+(?:since|from|starting|started)\b.*)?$/.test(s);
 };
-export type ResumeAsk = "fact_detail" | "submit_job" | "new_fact" | "make" | "correct" | "link" | "ask_send" | "send_pdf" | "explain" | "edit" | "restyle" | "approve_edit" | "why_contact" | "apply_which" | null;
+export type ResumeAsk = "target_which" | "target_field" | "target_company" | "fact_detail" | "submit_job" | "new_fact" | "make" | "correct" | "link" | "ask_send" | "send_pdf" | "explain" | "edit" | "restyle" | "approve_edit" | "why_contact" | "apply_which" | null;
 export function resumeAskOf(message: string, task: ResumeTask | null, view: { companies: string[]; employers?: string[]; jobs: number; posting: boolean; lastFile?: boolean; resumeShown?: boolean }): ResumeAsk {
   // A pasted resume or posting is material, not an ask about the resume task (its own words say "for", "file", "update").
   if (message.length > 600 || message.split("\n").filter((l) => l.trim()).length > 4 || /^\s*(here'?s|here is|this is|my) (my |the )?(resume|cv)\b/i.test(message)) return null;
@@ -156,6 +176,10 @@ export function resumeAskOf(message: string, task: ResumeTask | null, view: { co
   // The answer to the "new job" question ("ok, Analyst since May"): kept with that fact, never read as a yes to anything else.
   // Round-2 re-review (1a): only an answer shaped like a title or role is kept; a bare yes or no is asked again, and a search, a
   // question or any other ask leaves this question and runs as itself.
+  if (task?.pending === "target_which" && view.resumeShown) {
+    if (/\b(compan(y|ies)|employer|firm|business|work (there|at)|at (them|it)|the org)\b/.test(t)) return "target_company";
+    if (/\b(field|industry|area|sector|kind of (work|role)|type of (work|role)|in general|generally)\b/.test(t)) return "target_field";
+  }
   if (task?.pending === "fact_detail" && view.resumeShown && (BARE.test(t) || titleShaped(message))) return "fact_detail";
   if (task?.pending === "send_choice") {
     // Example 4's other answer: "Submit job 2" names the application; its exact payload is reviewed before anything is sent.
@@ -171,8 +195,11 @@ export function resumeAskOf(message: string, task: ResumeTask | null, view: { co
   if (task && /\bwhy\b/.test(t) && /\b(placeholders?|to fill in|to add)\b|\bcontact\b[^?.!]*\b(resume|pdf|file|top)\b/.test(t)) return "why_contact";
   if (task?.file && /\bwhat (did|have) you change(d)?\b|\bwhat changed\b/.test(t)) return "explain";
   if (task?.file && /^\s*(now |ok(ay)?,? |then )?apply (with|using) (it|this|that)\s*[.!]?\s*$/.test(t)) return "apply_which";
-  if (postingTarget(message, view.employers ?? view.companies) && !AMBIGUOUS.test(t)) return null;
-  const target = targetOf(message, view.employers ?? view.companies);
+  const hints = { employers: [...(view.employers ?? view.companies), ...(task?.employers ?? [])], fields: task?.fields ?? [] };
+  const read = AMBIGUOUS.test(t) ? null : readTarget(message, hints);
+  if (read?.kind === "posting") return null;
+  if (read?.kind === "ask" && RESUME.test(t) && (MAKE.test(t) || DOC.test(t)) && !(/\b(apply|submit)\b/.test(t) && !noApplyAsk(message))) return "target_which";
+  const target = targetOf(message, hints);
   // A correction or a link ask about the resume file this person was last given (ours, or the posting tailor's).
   const onFile = !!task || !!view.lastFile && !!target;
   // A cover letter, a job search and an apply are their own paths; a correction is this task's only about the resume's target.
@@ -328,7 +355,7 @@ export async function resumeTaskTurn(o: { message: string; ctx: any; userId: str
   const companies = shortlist.map((r: any) => lc(r?.company)).filter(Boolean);
   // Round 4: the posting pool's employers are names too ("the quillstone data analyst intern role" written in lower case). The
   // pool is read only when the stated target holds a word the field vocabulary does not know.
-  if (hasUnknownWord(o.message)) await o.deps.loadPool?.().catch(() => undefined);
+  if (needsEmployers(o.message)) await o.deps.loadPool?.().catch(() => undefined);
   const poolRaw = o.ctx?.postings || o.ctx?.corpus || o.ctx?.discovery?.postings || [];
   const pool = (Array.isArray(poolRaw) ? poolRaw : poolRaw.postings || []).map((p: any) => lc(p?.company || p?.company_name)).filter(Boolean);
   const employers = [...new Set([...companies, ...pool])];
@@ -338,16 +365,33 @@ export async function resumeTaskTurn(o: { message: string; ctx: any; userId: str
   // A shown rewording and the two-choice question answer only the very next turn: once any other reply came between (a card, an
   // offer, a question), a plain "yes" or "the PDF" is that reply's, never this task's.
   if (prior && !resumeShown) { prior.pending = null; prior.proposed = null; }
-  const ask = resumeAskOf(o.message, prior, { companies, employers, jobs: shortlist.length, posting: !!o.ctx?.posting, lastFile: !!routerLast, resumeShown });
+  let ask = resumeAskOf(o.message, prior, { companies, employers, jobs: shortlist.length, posting: !!o.ctx?.posting, lastFile: !!routerLast, resumeShown });
   if (!ask) { if (prior) { prior.pending = null; prior.proposed = null; } return null; }
   const t = lc(o.message);
-  const named = targetOf(o.message, employers);
-  if (!named && !prior) return null;
-  const target = named ?? prior!.target;
+  const hints = { employers: [...employers, ...(prior?.employers ?? [])], fields: prior?.fields ?? [] };
+  const unclear = ask === "target_which" ? readTarget(o.message, hints) : null;
+  if (ask === "target_field" && !prior?.which) ask = null;
+  const named = unclear?.kind === "ask" ? null : ask === "target_field" ? prior!.which!.target : targetOf(o.message, hints);
+  if (!ask || !named && !prior && unclear?.kind !== "ask") { if (prior) { prior.pending = null; prior.proposed = null; } return null; }
+  const target = named ?? prior?.target ?? (unclear as { target: Target }).target;
   const task: ResumeTask = { target, limits: [...new Set([...(prior?.limits ?? []), ...limitsOf(o.message)])], rejected: rejectedOf(o.message) ?? prior?.rejected ?? null,
     said: prior && prior.target.label === target.label ? [...prior.said] : [], asked: [...(prior?.asked ?? [])], file: prior?.file ?? null, pending: null, at: new Date(o.now).toISOString(),
     // Only an edit or restyle turn shows a rewording; every other turn (a fact, a correction, a question, a new file) ends it.
-    moved: prior?.moved ?? [], proposed: null, proposedHash: null, lastAsk: ask, factId: null, swaps: [...(prior?.swaps ?? [])] };
+    moved: prior?.moved ?? [], proposed: null, proposedHash: null, lastAsk: ask, factId: null, swaps: [...(prior?.swaps ?? [])],
+    which: null, fields: [...(prior?.fields ?? [])], employers: [...(prior?.employers ?? [])] };
+  if (ask === "target_which" && unclear?.kind === "ask") {
+    task.pending = "target_which"; task.which = { name: unclear.name, target: unclear.target };
+    if (!prior) task.file = null;
+    profile._resumeTask = task;
+    return { reply: `Do you mean roles at ${title(unclear.name)} (a company), or ${unclear.name} as a field?`, intent: RESUME_CLARIFY_INTENT, resultStatus: "awaiting_user", documents: [], link: null, task };
+  }
+  if (ask === "target_company") {
+    const name = prior!.which!.name;
+    task.employers = [...new Set([...(task.employers ?? []), name])];
+    profile._resumeTask = task;
+    return { reply: `Then this is a posting at ${title(name)}. I need the ${title(name)} posting to tailor against: paste it or its link and I'll tailor your resume to it.`, intent: RESUME_CLARIFY_INTENT, resultStatus: "awaiting_user", documents: [], link: null, task };
+  }
+  if (ask === "target_field") { task.fields = [...new Set([...(task.fields ?? []), prior!.which!.name])]; ask = "make"; task.lastAsk = ask; }
   if (ask === "approve_edit") {
     const shown = prior?.proposed ?? [];
     if (!shown.length || await proposalHash(shown) !== prior?.proposedHash) return null;

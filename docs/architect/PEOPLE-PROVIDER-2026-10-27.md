@@ -15,8 +15,9 @@ so no code for them is merged and nothing calls them.
 
 ## How a person and an address are found
 
-1. **Search.** Trainee calls OpenAI's `web_search` tool through the Responses API, with the gateway's OpenAI config
-   (`modelConfig`, OpenAI only). The search recipe for a company:
+1. **Search.** Through the gateway's one web-search door (`gatewaySearch` → `webSearch` in `model_gateway.ts`: Claude only,
+   `claude-sonnet-5-5`, D-046). It is dark today: it answers `not_wired` and nothing is sent or spent (owner directive
+   2026-11-02; OpenAI is no longer used). The search recipe for a company:
    - the role asked for, or "team"
    - "team page"
    - "engineering blog author"
@@ -72,7 +73,7 @@ so no code for them is merged and nothing calls them.
   - The shared tables hold no user id.
   - Each person gets their own copy, deduped against what they have (`career_provider_deliver`, one set-based statement).
 - **No volume limit of Trainee's own** (owner, 2026-10-27 19:55). The only brake is the search service refusing:
-  - OpenAI 429 is a rate limit, with its `retry-after`. 429 `insufficient_quota` is out of credit.
+  - A provider 429 is a rate limit, with its `retry-after`. A 429 that says the credit is used up is out of credit.
   - A refusal blocks discovery for every instance (`career_provider_state`). The job waits without spending an attempt.
   - The reply says plainly what happened and when it resumes.
 - **Spend view**: `select * from career_provider_spend(now() - interval '30 days')` (service role). It shows, per day:
@@ -80,7 +81,7 @@ so no code for them is merged and nothing calls them.
   - calls (searches, pages read, MX)
   - results
   - model cost: the gateway's price for the tokens. The web_search tool's own per-call fee is not in `PRICES`, so read
-    it on the OpenAI invoice.
+    it on the provider's invoice.
   - cache hits
   - refusals
 - **Erase**:
@@ -102,7 +103,7 @@ interface ProviderPerson { provider: "web"; provider_id; name; email: string | n
 providerConfig(env)                       // CAREER_PEOPLE_SEARCH=on + the gateway's Anthropic key; model claude-sonnet-5-5 only (D-046: CAREER_PEOPLE_SEARCH_MODEL naming another is ignored)
 makeProvider(config, fetch, { resolve?, mx?, search? }): PeopleProvider | null   // null: NOT_WIRED, no call
 notWiredReply(config): string             // the plain sentence
-openAiWebSearch({ fetch, apiKey, model }): SearchFn;  searchRecipe(company, titles): string[]
+gatewaySearch(): SearchFn (dark: the gateway's webSearch answers not_wired);  searchRecipe(company, titles): string[]
 webProvider({ search, fetch, resolve?, mx?, read? }): PeopleProvider
 
 parseTargetAsk(message): TargetAsk | null

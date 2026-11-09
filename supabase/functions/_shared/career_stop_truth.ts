@@ -14,19 +14,17 @@
 // 2026-11-09 against the latest migration of each function. Only the paths that refuse while paused are named as held.
 export const PAUSE_HOLDS = [
   "new applications and cloud applications (enqueue, claim and the check before submit)",
-  "outreach emails (refused when they are claimed to send)",
+  "outreach emails (checked again right before each one goes, so a batch already started stops too)",
   "follow-ups",
+  "calendar invites for meetings you approved from a reply",
   "job alerts, job cards and other messages I send on my own",
   "reminders",
 ] as const;
-// Paths that do NOT read the pause on this trunk: career_send_go (20261031020000:123) re-checks nothing between the
-// emails of a claimed batch, and replies-lane actions (career_outreach_action_claim, runOutreachActions) run while paused,
-// calendar invites with sendUpdates=all. Said plainly, never claimed as stopped. The send-paths PR
-// (fix/r10-pause-send-paths-20261109) closes both; this list shrinks with it. Networking introductions do not read the
-// pause either, but that connector is not wired.
+// What the pause cannot reach: an email already handed to the mail provider when the pause lands is out of Trainee's
+// hands (it is recorded as sent). career_send_go and the replies-lane action claim read the pause since
+// 20261109120000_career_pause_send_paths.sql (#657). Networking introductions do not read it, but that connector is not wired.
 export const PAUSE_GAPS = [
-  "an email batch already claimed before the pause (it can finish its next couple of minutes of sends)",
-  "calendar invites for meetings you already approved from a reply",
+  "an email already handed to Gmail at the moment you paused",
 ] as const;
 
 type Admin = { from(t: string): any; rpc(n: string, a: unknown): PromiseLike<{ data: any; error: { message: string } | null }> };

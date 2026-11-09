@@ -4,8 +4,7 @@
 //   - the exact F.3 turn: the people list is cancelled, unsent drafts are held, nothing is sent, the account is NOT
 //     paused, and every number in the reply is the table's;
 //   - "pause everything" / "stop all sending": career:account paused, read back, and each send path the reply names
-//     refuses while paused (one step per path); the two paths that do not yet (a batch already claimed, replies-lane
-//     calendar invites) are named as not covered;
+//     refuses while paused (one step per path; a claimed batch and replies-lane invites are pause-send-paths-pg's);
 //   - a failed or contradicted write: the reply says the stop is not confirmed, and that is what is stored;
 //   - resume only on an explicit ask.
 import assertNode from "node:assert/strict";

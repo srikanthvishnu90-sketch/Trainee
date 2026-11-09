@@ -163,9 +163,9 @@ export type Part =
   | { p: "check"; items: { state: CheckState; lead?: string; text: string; src?: Src | null }[] }
   | { p: "item"; id?: string; chip?: Chip; title: string; text?: string; lead?: string; src?: Src | null; act?: Act; menu?: Act[]; serif?: boolean; icon?: Icon }
   | { p: "tile"; icon: Icon; title: string; text: string; chip?: Chip; act?: Act }
-  | { p: "heading"; title: string; sub?: string; chip?: Chip }
+  | { p: "heading"; title: string; sub?: string; chip?: Chip; bold?: boolean }
   | { p: "quote"; text: string }
-  | { p: "diff"; before?: string | null; after: string; chip?: Chip; text: string }
+  | { p: "diff"; before?: string | null; after: string; chip?: Chip; text: string; lead?: string }
   | { p: "person"; initials: string; name: string; text: string; chip?: Chip }
   | { p: "divider" }
   | { p: "html"; html: string };
@@ -190,9 +190,14 @@ function partHtml(x: Part, c: Ctx): string {
       return `<div class="ff-item${x.id ? " ff-idd" : ""}">${x.icon ? iconHtml(x.icon) : ""}<div class="ff-itb">${x.id ? `<p class="ff-idrow"><span class="ff-id">${esc(x.id)}</span>${x.chip ? chipHtml(x.chip) : ""}</p>` : ""}<p class="ff-it${x.serif ? " ff-serif" : ""}">${esc(x.title)}</p>${text}${below}</div>${right ? `<div class="ff-ita">${right}</div>` : ""}</div>`;
     }
     case "tile": return `<div class="ff-item ff-tiled">${iconHtml(x.icon)}<div class="ff-itb"><p class="ff-it">${esc(x.title)}</p><p class="ff-p ff-mute">${esc(x.text)}</p></div>${x.act || x.chip ? `<div class="ff-ita">${x.act ? actHtml(x.act) : chipHtml(x.chip!)}</div>` : ""}</div>`;
-    case "heading": return `<div class="ff-item ff-head2"><div class="ff-itb"><p class="ff-h2">${esc(x.title)}</p>${x.sub ? `<p class="ff-p">${esc(x.sub)}</p>` : ""}</div>${x.chip ? `<div class="ff-ita">${chipHtml(x.chip)}</div>` : ""}</div>`;
+    case "heading": return `<div class="ff-item ff-head2"><div class="ff-itb"><p class="ff-h2${x.bold ? " ff-b" : ""}">${esc(x.title)}</p>${x.sub ? `<p class="ff-p">${esc(x.sub)}</p>` : ""}</div>${x.chip ? `<div class="ff-ita">${chipHtml(x.chip)}</div>` : ""}</div>`;
     case "quote": return `<blockquote class="ff-quote">${esc(x.text)}</blockquote>`;
-    case "diff": return `<div class="ff-diff">${x.chip ? `<p class="ff-idrow">${chipHtml(x.chip)}</p>` : ""}${x.before ? `<p class="ff-p"><del class="ff-old"><span class="ff-sr">Before: </span>${esc(x.before)}</del></p>` : ""}<p class="ff-p"><ins class="ff-new"><span class="ff-sr">After: </span>${esc(x.after)}</ins></p><p class="ff-p ff-mute">${esc(x.text)}</p></div>`;
+    // A change (p-62): a wording change shows the old text struck and the new text beside it; any other change is its title. The
+    // type chip sits right; the line under says why, and where it came from.
+    case "diff": {
+      const head = x.before ? `<p class="ff-it ff-pair"><del class="ff-old"><span class="ff-sr">Before: </span>${esc(x.before)}</del> <ins class="ff-new"><span class="ff-sr">After: </span>${esc(x.after)}</ins></p>` : `<p class="ff-it">${esc(x.after)}</p>`;
+      return `<div class="ff-item ff-diff"><div class="ff-itb">${head}<p class="ff-p ff-mute">${x.lead ? `<strong class="ff-ink">${esc(x.lead)}</strong> ` : ""}${esc(x.text)}</p></div>${x.chip ? `<div class="ff-ita">${chipHtml(x.chip)}</div>` : ""}</div>`;
+    }
     case "person": return `<div class="ff-item ff-tiled"><span class="ff-avatar" aria-hidden="true">${esc(x.initials.slice(0, 3))}</span><div class="ff-itb"><p class="ff-it">${esc(x.name)} ${x.chip ? chipHtml(x.chip) : ""}</p><p class="ff-p ff-mute">${esc(x.text)}</p></div></div>`;
     case "divider": return `<hr class="ff-hr">`;
     case "html": return x.html;
@@ -220,7 +225,8 @@ export interface FamilyFile {
 // A meta line: a time (in the person's zone; none known: "time unknown", said) or a value (none: Unconfirmed).
 function metaHtml(m: Meta, c: Ctx): string {
   if ("at" in m) { const t = timeIn(m.at, c, { dateOnly: m.dateOnly, future: m.future, zone: true, cap: true }); return `<span class="ff-meta">${esc(m.label)} ${t ? `<b>${timeTag(m.at!, t)}</b>` : `<b data-unconfirmed="1">time unknown</b>`}</span>`; }
-  return `<span class="ff-meta">${esc(m.label)} <b${blank(m.value) ? ` data-unconfirmed="1"` : ""}>${esc(blank(m.value) ? UNCONFIRMED : m.value)}</b></span>`;
+  if (m.value === undefined) return `<span class="ff-meta">${esc(m.label)}</span>`; // a plain line ("Calibration before scaling")
+  return `<span class="ff-meta">${m.label ? `${esc(m.label)} ` : ""}<b${blank(m.value) ? ` data-unconfirmed="1"` : ""}>${esc(blank(m.value) ? UNCONFIRMED : m.value)}</b></span>`;
 }
 function headHtml(f: Pick<FamilyFile, "family" | "header" | "boundary" | "mono" | "back" | "menu" | "pause">): string {
   const meta = FAMILIES[f.family];
@@ -319,14 +325,14 @@ export const FAMILY_CSS = `
 .ff-ckt{flex:1;min-width:0}
 .ff-item{display:flex;gap:12px;align-items:flex-start;padding:14px 0;border-top:1px solid var(--ff-line)}.ff-card>.ff-item:first-child,.ff-label+.ff-item{border-top:0;padding-top:0}.ff-card>.ff-item:last-child{padding-bottom:0}
 .ff-itb{flex:1;min-width:0}.ff-ita{flex:none;max-width:46%}.ff-tiled:has(>.ff-ita>.ff-btn,>.ff-ita>.ff-act){flex-wrap:wrap}.ff-tiled>.ff-itb{flex:1 1 180px}.ff-tiled>.ff-ita:has(>.ff-btn,>.ff-act){flex:1 1 100%;max-width:none;padding-left:52px}.ff-it{font-weight:700;font-size:18px;line-height:1.35}.ff-serif{font-family:${DISPLAY_FONT};font-weight:500;font-size:22px;line-height:1.25}
-.ff-h2{font-size:20px;line-height:1.3}.ff-ink{color:var(--ff-ink)}
+.ff-h2{font-size:20px;line-height:1.3}.ff-b{font-weight:700}.ff-ink{color:var(--ff-ink)}
 .ff-row-acts{display:flex;gap:6px;align-items:center;margin-top:14px}.ff-row-acts>.ff-act,.ff-row-acts>a{flex:0 1 auto;width:auto}.ff-row-acts .ff-btn{width:auto;min-height:48px;padding-left:10px;padding-right:10px;font-size:15px}.ff-row-acts .ff-menu{margin-left:auto}
 .ff-idrow{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:6px!important}
 .ff-id{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:14px;font-weight:600;color:var(--ff-mute)}
 .ff-tile,.ff-avatar{flex:none;display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:12px;background:var(--ff-lav);color:var(--ff-ptext)}.ff-tile svg{width:22px;height:22px}
 .ff-avatar{border-radius:50%;background:var(--ff-plum-bg);font-weight:700;font-size:15px}
 .ff-quote{margin:0 0 12px;padding:14px 16px;border-radius:14px;background:var(--ff-lav);border:1px solid var(--ff-lav-line);white-space:pre-wrap}
-.ff-diff{padding:12px 0;border-top:1px solid var(--ff-line)}.ff-old{background:var(--ff-bad-bg);color:var(--ff-bad);text-decoration:line-through}.ff-new{background:var(--ff-good-bg);color:var(--ff-good);text-decoration:none}
+.ff-pair{font-weight:600}.ff-old,.ff-new{padding:0 4px;border-radius:6px}.ff-old{background:var(--ff-bad-bg);color:var(--ff-bad);text-decoration:line-through}.ff-new{background:var(--ff-good-bg);color:var(--ff-good);text-decoration:none}
 .ff-note{display:grid;grid-template-columns:minmax(0,max-content) minmax(0,1fr);column-gap:12px;row-gap:8px;margin:0 0 16px;padding:16px;border-radius:20px;border:1px solid;font-size:16px}.ff-note>strong{max-width:7.5em}.ff-note>.ff-act,.ff-note>a{grid-column:1/-1}
 .ff-n-info{background:var(--ff-lav);border-color:var(--ff-lav-line);color:var(--ff-ink)}.ff-n-info strong{color:var(--ff-ptext)}
 .ff-n-caution{background:var(--ff-warn-bg);border-color:var(--ff-warn);color:var(--ff-ink)}.ff-n-caution strong{color:var(--ff-warn)}

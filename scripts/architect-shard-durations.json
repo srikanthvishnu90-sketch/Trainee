@@ -542,6 +542,7 @@
     "tests/architect/code-redaction-length-20261106.test.ts": 10.5,
     "tests/architect/r10-files-browser-1.test.ts": 1.1,
     "tests/architect/r10-files-shell.test.ts": 0.3,
+    "tests/architect/r10-files-browser-2.test.ts": 0.7,
     "tests/architect/r10-files-woc.test.ts": 0.1,
     "tests/architect/r10-files-live-parity.test.ts": 0.2,
     "tests/architect/r10-files-browser-live.test.ts": 1.0,

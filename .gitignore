@@ -30,3 +30,4 @@ tools/node_modules/
 artifacts/r10-acceptance/
 artifacts/r10-live-replay/
 artifacts/browser-eval/
+artifacts/r10-loop/

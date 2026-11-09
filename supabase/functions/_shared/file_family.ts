@@ -60,7 +60,14 @@ const msOf = (t: string | null | undefined) => { const n = t ? Date.parse(t) : N
 const isExternal = (s: Src) => s.external === true || !blank(s.href);
 // A link a File may carry: an http(s) URL, or this site's own path, query or anchor. Never javascript:, data: or any other scheme,
 // and never a protocol-relative "//host" (it would leave the site while looking like a path).
-export const safeHref = (h: string | null | undefined): string | null => !h ? null : webUrl(h) ? h : /^(\?|#|\/(?!\/))/.test(h) ? h : null;
+// Backslashes and control characters (tab, CR, LF) are refused outright: browsers strip or rewrite them, so "/\\evil.com" or
+// "/\t/evil.com" would leave the site. A relative link must still resolve to this site's own origin.
+export const safeHref = (h: string | null | undefined): string | null => {
+  if (!h || /[\\\u0000-\u001f\u007f]/.test(h)) return null;
+  if (webUrl(h)) return /^https?:\/\//i.test(h) ? h : null;
+  if (!/^(\?|#|\/(?!\/))/.test(h)) return null;
+  try { return new URL(h, "https://file.invalid/f").origin === "https://file.invalid" ? h : null; } catch { return null; }
+};
 // The test claimHtml uses before an external source counts: an https link and a time it was read. A green "confirmed" needs it too.
 const proven = (s: Src | null | undefined, c: Ctx) => !!s && isExternal(s) && /^https:/i.test((s.href && webUrl(s.href)) || "") && !!timeIn(s.at, c, { dateOnly: s.dateOnly });
 // A time in the person's zone (Chicago's when none is on file), as the library writes it (C.1, D.4.1): "Today 9:40 AM" (a header),

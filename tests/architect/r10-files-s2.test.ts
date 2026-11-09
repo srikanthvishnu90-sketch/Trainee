@@ -32,7 +32,7 @@ Deno.test("S2-2: an error says nothing was changed or sent, and that typing is k
 });
 
 Deno.test("S2-3: back, segment and action links are http(s) or this site's own; javascript:, data: and //host are refused", () => {
-  for (const bad of ["javascript:alert(1)", "data:text/html,<b>x</b>", "//evil.example/f", "JaVaScRiPt:alert(1)", " javascript:alert(1)", "vbscript:x"]) {
+  for (const bad of ["javascript:alert(1)", "data:text/html,<b>x</b>", "//evil.example/f", "JaVaScRiPt:alert(1)", " javascript:alert(1)", "vbscript:x", "/\\evil.com", "/\n/evil.com", "/\t/evil.com", "\t//evil.com", "\\\\evil.com", "https:evil.com", "java\tscript:x"]) {
     assert.equal(safeHref(bad), null, bad);
     const f: FamilyFile = { family: "F-05", back: bad, hero: null, title: "t", segments: [{ label: "All", n: 1, href: bad }], blocks: [], actions: { primary: { label: "Go", effect: "navigate", href: bad } } };
     const h = familyBodyHtml(f, CTX);

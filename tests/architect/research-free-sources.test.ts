@@ -39,23 +39,31 @@ Deno.test("robots.txt: obeyed for every page host (404 = no rules; unreadable = 
 // ---------------------------------------------------------------- JSON and RSS become plain sentences, by code
 Deno.test("convertFree: ATS boards, GitHub, Wikidata, USAJOBS and news RSS become sentences from their fields; counts are counted", () => {
   const gh = convertFree("https://boards-api.greenhouse.io/v1/boards/zentrafin/jobs", "application/json", JSON.stringify(GH_JOBS))!;
-  ok(gh.text.includes("The Greenhouse job board zentrafin lists 4 open roles."));
-  ok(gh.text.includes("2 of the 4 open roles on the Greenhouse job board zentrafin say intern, new grad, junior, associate or entry level in the title."));
-  ok(gh.text.includes("2 open roles on the Greenhouse job board zentrafin are in New York, NY."));
+  // Review of #628: a count belongs to the board token, never to the company, unless the board names its company itself.
+  ok(gh.text.includes("The Greenhouse job board with the token zentrafin lists 4 open roles. The board does not name its company."));
+  ok(gh.text.includes("2 of the 4 open roles on the Greenhouse job board with the token zentrafin say intern, new grad, junior, associate or entry level in the title."));
+  ok(gh.text.includes("2 open roles on the Greenhouse job board with the token zentrafin are in New York, NY."));
+  const named = convertFree("https://boards-api.greenhouse.io/v1/boards/zentrafin/jobs", "application/json", JSON.stringify({ jobs: GH_JOBS.jobs.map((j) => ({ ...j, company_name: "Zentrafin" })), meta: GH_JOBS.meta }))!;
+  ok(named.text.startsWith("The Greenhouse job board of Zentrafin (token zentrafin) lists 4 open roles."), named.text.slice(0, 120));
   const lever = convertFree("https://api.lever.co/v0/postings/zentrafin?mode=json", "application/json", JSON.stringify([{ text: "Junior Analyst", categories: { location: "Austin, TX" } }]))!;
-  ok(lever.text.startsWith("The Lever job board zentrafin lists 1 open roles."));
+  ok(lever.text.startsWith("The Lever job board with the token zentrafin lists 1 open roles."));
   const ashby = convertFree("https://api.ashbyhq.com/posting-api/job-board/zentrafin", "application/json", JSON.stringify({ jobs: [{ title: "Engineer", location: "Remote", isListed: true }, { title: "Hidden", isListed: false }] }))!;
-  ok(ashby.text.startsWith("The Ashby job board zentrafin lists 1 open roles.") && !ashby.text.includes("Hidden"));
+  ok(ashby.text.startsWith("The Ashby job board with the token zentrafin lists 1 open roles.") && !ashby.text.includes("Hidden"));
   const sr = convertFree("https://api.smartrecruiters.com/v1/companies/zentrafin/postings", "application/json", JSON.stringify({ totalFound: 9, content: [{ name: "Sales Associate", location: { city: "Denver", region: "CO", country: "us" } }] }))!;
   ok(sr.text.includes("lists 9 open roles") && sr.text.includes("Sales Associate, Denver, CO, US"));
   ok(convertFree("https://api.github.com/orgs/zentrafin", "application/json", JSON.stringify(GH_ORG))!.text.includes("has 37 public repositories"));
+  // Review of #628: a missing repository count is left out, never written as 0.
+  const noRepos = convertFree("https://api.github.com/orgs/zentrafin", "application/json", JSON.stringify({ ...GH_ORG, public_repos: undefined }))!.text;
+  ok(!/public repositories/.test(noRepos) && noRepos.startsWith("The GitHub organization zentrafin (Zentrafin) is a GitHub organization."), noRepos);
+  // Review of #628: RSS from any host but GDELT is not read as news headlines.
+  eq(convertFree("https://news.example/feed.xml", "application/rss+xml", RSS), null);
   const wd = convertFree("https://www.wikidata.org/wiki/Special:EntityData/Q999001.json", "application/json", JSON.stringify(WD))!.text;
   ok(wd.includes("Zentrafin had 2,400 employees as of 2025, according to Wikidata.") && wd.includes("founded in 2016") && wd.includes("official website is zentrafin.example"));
   ok(convertFree("https://data.usajobs.gov/api/historicjoa?PositionSeries=2210&StartPositionOpenDate=2026-08-10", "application/json", JSON.stringify({ paging: { metadata: { totalCount: 212 } }, data: [] }))!.text.includes("212 federal job announcements in occupational series 2210 opened since 2026-08-10"));
   const news = convertFree("https://api.gdeltproject.org/api/v2/doc/doc?query=%22Zentrafin%22&format=rss", "application/rss+xml", RSS)!.text;
   ok(news.includes("Zentrafin opens a Chicago office") && !/glassdoor|review roundup/i.test(news), "a never-listed item is dropped");
   eq(convertFree("https://unknown.example/api", "application/json", "{}"), null, "unknown JSON is not read");
-  eq(boardText("Lever", "x", []).text, "The Lever job board x lists 0 open roles.");
+  eq(boardText("Lever", "x", []).text, "The Lever job board with the token x lists 0 open roles. The board does not name its company.");
   eq(slugsFor("Zentrafin Inc", ["zentrafin.example"]), ["zentrafin"]);
 });
 

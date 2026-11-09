@@ -70,6 +70,8 @@ export const isStubWebHost = (host: string) => Object.prototype.hasOwnProperty.c
 export function stubWebFetch(req: Request): Response {
   const u = new URL(req.url), site = STUB_WEB[u.hostname];
   if (!site || req.method !== "GET" || u.protocol !== "https:") return new Response("not found", { status: 404 });
+  // Review of #628: the research reader reads robots.txt first; the stub sites allow every program (an explicit answer, not a 404).
+  if (u.pathname === "/robots.txt") return new Response("User-agent: *\nAllow: /\n", { status: 200, headers: { "content-type": "text/plain" } });
   if (u.pathname === "/") return new Response(page(site.title, site.home), { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
   if (u.pathname === "/about") return new Response(page(`About: ${site.title}`, site.about), { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
   return new Response("not found", { status: 404 });

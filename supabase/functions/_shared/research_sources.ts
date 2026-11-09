@@ -7,10 +7,17 @@
 // which ones it could actually open. Its one import is the shared SSRF address check (contact_sources/web_gate.ts isPrivateIp).
 //
 // Review of #589 (DNS rebinding) and R9 free sources (2026-11-08): fetchSources also takes, per call,
-//   resolver  the host's A/AAAA answers, checked on EVERY hop (the first request and each redirect): one private, loopback,
-//             link-local, CGNAT or reserved answer and the page is refused as private_address (DNS rebinding: a public name
-//             that answers a private address). No answer at all is unreachable. research_dns.ts systemResolver is the
+//   resolver  the host's A/AAAA answers, checked on EVERY hop (the first request and each redirect) BEFORE the fetch and again
+//             right AFTER it: one private, loopback, link-local, CGNAT or reserved answer either time and the page is refused or
+//             discarded as private_address. No answer before the fetch is unreachable. research_dns.ts systemResolver is the
 //             production one (Deno.resolveDns, read at call time so the eval can stand in a stub).
+//             What this does NOT close (review of #628): fetch() resolves the name again itself, and the edge runtime cannot pin
+//             a connection to the checked address (no IP with SNI), so a TTL-0 name could answer a private address to fetch()
+//             alone, between the two checks. The second check discards the page whenever the name answers a private address
+//             again right after; a name that flips for exactly one lookup can still reach an internal address once. The page
+//             is then discarded only if the second lookup catches it; its body is never read past MAX_BYTES either way.
+//   deadline  a wall-clock time (by `clock`, the machine's real clock) after which no further hop starts: the rest are refused as
+//             time_budget, so a research turn names what it did not read instead of waiting.
 //   robots    may this exact URL be read (robots.txt; research_free_sources.ts robotsGate)? Checked on every hop too.
 //   convert   documented public JSON, RSS and XML answers (ATS job boards, Wikidata, GitHub, USAJOBS, news RSS) turned into
 //             plain sentences by code from the fields of the answer, so the facts guard can quote them like any page.
@@ -24,7 +31,7 @@ export interface SourcePage {
   text: string; // the page's readable text (tags, scripts and styles removed), capped
   fetchedAt: number;
 }
-export interface SourceRejection { url: string; why: "blocked_site" | "not_http" | "private_address" | "robots_disallow" | "http_status" | "not_text" | "too_many_redirects" | "unreachable" | "empty" }
+export interface SourceRejection { url: string; why: "blocked_site" | "not_http" | "private_address" | "robots_disallow" | "http_status" | "not_text" | "too_many_redirects" | "unreachable" | "empty" | "time_budget" }
 export type Resolver = (host: string) => Promise<string[]>;
 export type RobotsCheck = (url: string) => Promise<boolean>;
 export type Convert = (url: string, contentType: string, body: string) => { title: string; text: string } | null;
@@ -85,7 +92,25 @@ export function readableText(html: string): { title: string; text: string } {
 const MAX_BYTES = 1_500_000, MAX_TEXT = 60_000, MAX_REDIRECTS = 3;
 
 // Reads each page once. Nothing here throws: a page that cannot be read is a rejection with its reason.
-type ReadOpts = { resolver?: Resolver; robots?: RobotsCheck; convert?: Convert };
+type ReadOpts = { resolver?: Resolver; robots?: RobotsCheck; convert?: Convert; deadline?: number; clock?: () => number };
+// Review of #628: a body is read as a stream and stops at its cap; nothing past the cap is ever buffered. truncated: the cap was hit.
+export async function readCapped(res: Response, max: number): Promise<{ bytes: Uint8Array; truncated: boolean }> {
+  if (!res.body) return { bytes: new Uint8Array(await res.arrayBuffer()).slice(0, max), truncated: false };
+  const reader = res.body.getReader(), parts: Uint8Array[] = [];
+  let n = 0, truncated = false;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const room = max - n;
+      if (value.length > room) { parts.push(value.subarray(0, room)); n += room; truncated = true; break; }
+      parts.push(value); n += value.length;
+    }
+  } finally { if (truncated) await reader.cancel().catch(() => {}); else reader.releaseLock(); }
+  const bytes = new Uint8Array(n); let at = 0;
+  for (const p of parts) { bytes.set(p, at); at += p.length; }
+  return { bytes, truncated };
+}
 export async function fetchSources(urls: string[], o: { fetch?: typeof fetch; timeoutMs?: number; now?: () => number; max?: number } & ReadOpts = {}): Promise<FetchedSources> {
   const f = o.fetch ?? fetch, timeout = o.timeoutMs ?? 10000, now = o.now ?? Date.now;
   const out: FetchedSources = { verified: [], rejected: [] };
@@ -117,12 +142,17 @@ async function readOne(start: string, f: typeof fetch, timeout: number, o: ReadO
     if (!isHttp(url)) return { why: "not_http" };
     if (isBlockedHost(url)) return { why: "blocked_site" };
     if (isPrivateHost(url)) return { why: "private_address" };
+    const clock = o.clock ?? Date.now, left = () => (o.deadline === undefined ? Infinity : o.deadline - clock());
+    if (left() <= 0) return { why: "time_budget" };
     if (o.resolver) { const r = await resolvedPublic(url, o.resolver); if (r !== true) return { why: r }; }
     if (o.robots) { let yes = false; try { yes = await o.robots(url); } catch { yes = false; } if (!yes) return { why: "robots_disallow" }; }
+    if (left() <= 0) return { why: "time_budget" };
     let res: Response;
     try {
-      res = await f(url, { method: "GET", redirect: "manual", headers: { accept: "text/html,text/plain;q=0.9" }, signal: AbortSignal.timeout(timeout) });
-    } catch { return { why: "unreachable" }; }
+      res = await f(url, { method: "GET", redirect: "manual", headers: { accept: "text/html,text/plain;q=0.9" }, signal: AbortSignal.timeout(Math.max(1, Math.min(timeout, left()))) });
+    } catch { return { why: left() <= 0 ? "time_budget" : "unreachable" }; }
+    // Re-resolved right after the fetch: a name that now answers a private address (or one more in its set) is discarded unread.
+    if (o.resolver && (await resolvedPublic(url, o.resolver)) === "private_address") { await res.body?.cancel().catch(() => {}); return { why: "private_address" }; }
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get("location");
       await res.body?.cancel().catch(() => {});
@@ -135,10 +165,7 @@ async function readOne(start: string, f: typeof fetch, timeout: number, o: ReadO
     const structured = !!o.convert && /json|xml|rss|atom/.test(type) && !/text\/html|application\/xhtml/.test(type);
     if (!structured && !/text\/html|text\/plain|application\/xhtml/.test(type)) { await res.body?.cancel().catch(() => {}); return { why: "not_text" }; }
     let body = "";
-    try {
-      const buf = new Uint8Array(await res.arrayBuffer());
-      body = new TextDecoder().decode(buf.slice(0, MAX_BYTES));
-    } catch { return { why: "unreachable" }; }
+    try { body = new TextDecoder().decode((await readCapped(res, MAX_BYTES)).bytes); } catch { return { why: "unreachable" }; }
     let conv: { title: string; text: string } | null = null;
     if (structured) { try { conv = o.convert!(url, type, body); } catch { conv = null; } if (!conv) return { why: "not_text" }; }
     const { title, text } = conv ?? (/text\/plain/.test(type) ? { title: "", text: body.trim() } : readableText(body));

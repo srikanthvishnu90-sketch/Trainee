@@ -25,9 +25,9 @@
 // URL-encoded) only decide what to propose; the page shown is always the one the reader fetched.
 // deno-lint-ignore-file no-explicit-any require-await
 import { braveProvider, BRAVE_ENDPOINT, firstPartyProvider, type SearchHit, type SearchOut, type SearchPlan, type SearchProvider } from "./research_search.ts";
-import { type Convert, fetchSources, type FetchedSources, isBlockedHost, normalizeUrl, type Resolver, type RobotsCheck } from "./research_sources.ts";
+import { type Convert, fetchSources, type FetchedSources, isBlockedHost, normalizeUrl, readCapped, type Resolver, type RobotsCheck } from "./research_sources.ts";
 import { parseRobots, robotsAllows } from "./contact_sources/web_gate.ts";
-import { dnsProbe, type DnsProbe, systemResolver } from "./research_dns.ts";
+import { dnsProbe, type DnsProbe, RESEARCH_BUDGET_MS, systemResolver } from "./research_dns.ts";
 
 type Env = { get(k: string): string | undefined };
 export type FreeKind = "company_site" | "sec_edgar" | "sec_fts" | "bls_oes" | "bls_ooh" | "usajobs" | "ats_board" | "wikipedia" | "wikidata" | "github" | "news_rss";
@@ -39,6 +39,14 @@ export const DEFAULT_UA = "TraineeBot/1.0 (+https://trainee.chat/bot)";
 // Documented public APIs: their own terms govern (they are meant for programs). Everything else obeys robots.txt.
 export const DOCUMENTED_API_HOSTS = new Set(["data.sec.gov", "efts.sec.gov", "data.usajobs.gov", "boards-api.greenhouse.io", "api.lever.co", "api.ashbyhq.com",
   "api.smartrecruiters.com", "api.github.com", "www.wikidata.org", "api.gdeltproject.org"]);
+// Review of #628: Wikipedia's REST API (and only it, not the article pages, which obey robots.txt) is a documented API too.
+export function documentedApi(url: string | URL): boolean {
+  let u: URL; try { u = new URL(String(url)); } catch { return false; }
+  const h = u.hostname.toLowerCase();
+  return DOCUMENTED_API_HOSTS.has(h) || (h === "en.wikipedia.org" && u.pathname.startsWith("/api/rest_v1/"));
+}
+// Body caps (review of #628): robots.txt and a provider's JSON probe are read as a stream and stop at their cap.
+export const ROBOTS_MAX_BYTES = 512_000, JSON_MAX_BYTES = 2_000_000, ROBOTS_MAX_REDIRECTS = 5, MAX_CRAWL_DELAY_S = 10;
 
 // ---------------------------------------------------------------- BLS OOH and OPM series, by SOC code (reviewed 2026-11-08)
 export const OOH: Record<string, { path: string; title: string }> = {
@@ -138,17 +146,22 @@ const day = (t: unknown) => { const n = Date.parse(String(t ?? "")); return Numb
 const ENTRY = /\b(intern(ship)?s?|new\s+grad(uate)?s?|graduate|junior|entry[\s-]level|early[\s-]career|apprentice|associate)\b/i;
 
 // What an open-roles list says, in plain sentences: computed counts, then the roles themselves (title and place).
-export function boardText(ats: string, token: string, roles: { title: string; location: string }[], total?: number): { title: string; text: string } {
+// Review of #628: every count belongs to the board token, never to a company, unless the board itself names its company (`owner`,
+// from the board's own answer); then the count is that named company's board, still with its token.
+export function boardText(ats: string, token: string, roles: { title: string; location: string }[], total?: number, owner?: string | null): { title: string; text: string } {
   const n = Number.isInteger(total) && total! >= roles.length ? total! : roles.length;
-  const lines = [`The ${ats} job board ${token} lists ${fmt(n)} open roles.`];
+  const on = owner ? `on ${owner}'s ${ats} job board (token ${token})` : `on the ${ats} job board with the token ${token}`;
+  const lines = [owner ? `The ${ats} job board of ${owner} (token ${token}) lists ${fmt(n)} open roles.` : `The ${ats} job board with the token ${token} lists ${fmt(n)} open roles. The board does not name its company.`];
   const entry = roles.filter((r) => ENTRY.test(r.title)).length;
-  if (roles.length) lines.push(`${fmt(entry)} of the ${fmt(roles.length)} open roles on the ${ats} job board ${token} say intern, new grad, junior, associate or entry level in the title.`);
+  if (roles.length) lines.push(`${fmt(entry)} of the ${fmt(roles.length)} open roles ${on} say intern, new grad, junior, associate or entry level in the title.`);
   const by = new Map<string, number>();
   for (const r of roles) if (r.location) by.set(r.location, (by.get(r.location) ?? 0) + 1);
-  for (const [loc, k] of [...by.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)) lines.push(`${fmt(k)} open roles on the ${ats} job board ${token} are in ${loc}.`);
-  for (const r of roles.slice(0, 30)) lines.push(`Open role on the ${ats} job board ${token}: ${r.title}${r.location ? `, ${r.location}` : ""}.`);
-  return { title: `${ats} job board: ${token}`, text: lines.join("\n") };
+  for (const [loc, k] of [...by.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)) lines.push(`${fmt(k)} open roles ${on} are in ${loc}.`);
+  for (const r of roles.slice(0, 30)) lines.push(`Open role ${on}: ${r.title}${r.location ? `, ${r.location}` : ""}.`);
+  return { title: owner ? `${owner}: ${ats} job board` : `${ats} job board token: ${token}`, text: lines.join("\n") };
 }
+// The company a board names for itself: the same non-empty name on every role that carries one, else none.
+const ownerOf = (names: unknown[]) => { const xs = [...new Set(names.map((x) => clean(x, 80)).filter(Boolean))]; return xs.length === 1 ? xs[0] : null; };
 function rssItems(xml: string): { title: string; link: string; date: string; source: string }[] {
   const out: { title: string; link: string; date: string; source: string }[] = [];
   const cdata = (s: string) => s.replace(/^<!\[CDATA\[|\]\]>$/g, "");
@@ -171,7 +184,7 @@ export const convertFree: Convert = (url, type, body) => {
   if (host === "boards-api.greenhouse.io") {
     const token = decodeURIComponent(path.split("/")[3] ?? ""), j = J();
     if (!Array.isArray(j?.jobs)) return null;
-    return boardText("Greenhouse", token, j.jobs.map((x: any) => ({ title: clean(x?.title, 120), location: clean(x?.location?.name, 80) })).filter((r: any) => r.title), Number(j?.meta?.total));
+    return boardText("Greenhouse", token, j.jobs.map((x: any) => ({ title: clean(x?.title, 120), location: clean(x?.location?.name, 80) })).filter((r: any) => r.title), Number(j?.meta?.total), ownerOf(j.jobs.map((x: any) => x?.company_name)));
   }
   if (host === "api.lever.co") {
     const token = decodeURIComponent(path.split("/")[3] ?? ""), j = J();
@@ -187,12 +200,14 @@ export const convertFree: Convert = (url, type, body) => {
     const token = decodeURIComponent(path.split("/")[3] ?? ""), j = J();
     if (!Array.isArray(j?.content)) return null;
     const loc = (l: any) => [l?.city, l?.region, l?.country?.toUpperCase?.()].map((x) => clean(x, 40)).filter(Boolean).join(", ");
-    return boardText("SmartRecruiters", token, j.content.map((x: any) => ({ title: clean(x?.name, 120), location: loc(x?.location) })).filter((r: any) => r.title), Number(j?.totalFound));
+    return boardText("SmartRecruiters", token, j.content.map((x: any) => ({ title: clean(x?.name, 120), location: loc(x?.location) })).filter((r: any) => r.title), Number(j?.totalFound), ownerOf(j.content.map((x: any) => x?.company?.name)));
   }
   if (host === "api.github.com") {
     const j = J();
     if (!j?.login) return null;
-    const lines = [`The GitHub organization ${clean(j.login, 60)}${j.name ? ` (${clean(j.name, 80)})` : ""} has ${fmt(Number(j.public_repos) || 0)} public repositories.`];
+    // Review of #628: no repository count when the answer has none (never "0" for a missing field).
+    const repos = Number(j.public_repos), named = `The GitHub organization ${clean(j.login, 60)}${j.name ? ` (${clean(j.name, 80)})` : ""}`;
+    const lines = [j.public_repos !== undefined && j.public_repos !== null && Number.isInteger(repos) && repos >= 0 ? `${named} has ${fmt(repos)} public repositories.` : `${named} is a GitHub organization.`];
     if (j.description) lines.push(`The GitHub organization ${clean(j.login, 60)} describes itself as: ${clean(j.description, 200)}.`);
     if (j.location) lines.push(`The GitHub organization ${clean(j.login, 60)} lists its location as ${clean(j.location, 80)}.`);
     if (j.created_at) lines.push(`The GitHub organization ${clean(j.login, 60)} was created on ${day(j.created_at)}.`);
@@ -237,7 +252,8 @@ export const convertFree: Convert = (url, type, body) => {
     }
     return { title: `USAJOBS open announcements: ${kw}`, text: lines.join("\n") };
   }
-  if (/xml|rss|atom/.test(type)) {
+  // News headlines only from GDELT's feed (review of #628): any other RSS or XML answer is not read as news.
+  if (host === "api.gdeltproject.org" && /xml|rss|atom/.test(type)) {
     const items = rssItems(body);
     if (!items.length) return null;
     const q = (u.searchParams.get("query") ?? "").replace(/"/g, "").slice(0, 80);
@@ -249,29 +265,43 @@ export const convertFree: Convert = (url, type, body) => {
 // ---------------------------------------------------------------- robots.txt
 // One robots.txt read per host per reader: 200 parsed for TraineeBot (or *), 404/410 no rules, anything else (3xx, 401, 403,
 // 429, 5xx, unreachable) no read. Documented APIs are governed by their terms instead.
-export function robotsGate(f: typeof fetch, o: { timeoutMs?: number } = {}): RobotsCheck {
+export type FreeRobots = RobotsCheck & { delayMs(url: string): Promise<number> };
+export function robotsGate(f: typeof fetch, o: { timeoutMs?: number } = {}): FreeRobots {
   const cache = new Map<string, Promise<ReturnType<typeof parseRobots> | "deny">>();
   const load = (origin: string) => {
     let p = cache.get(origin);
     if (!p) {
       p = (async () => {
         try {
-          const r = await f(`${origin}/robots.txt`, { redirect: "manual", headers: { accept: "text/plain" }, signal: AbortSignal.timeout(o.timeoutMs ?? 8000) });
-          if (r.status === 200) return parseRobots(await r.text(), ROBOTS_TOKEN);
-          await r.body?.cancel().catch(() => {});
-          return r.status === 404 || r.status === 410 ? { rules: [], crawlDelayS: 0 } : "deny";
+          // Up to 5 redirects (RFC 9309 2.3.1.2), each to an http(s) address on a host that is not never-listed; the body capped.
+          let url = `${origin}/robots.txt`;
+          for (let hop = 0; hop <= ROBOTS_MAX_REDIRECTS; hop++) {
+            const r = await f(url, { redirect: "manual", headers: { accept: "text/plain" }, signal: AbortSignal.timeout(o.timeoutMs ?? 8000) });
+            if (r.status >= 300 && r.status < 400) {
+              const loc = r.headers.get("location"); await r.body?.cancel().catch(() => {});
+              let next: URL; try { next = new URL(loc ?? "", url); } catch { return "deny"; }
+              if (!loc || !/^https?:$/.test(next.protocol) || isBlockedHost(next.toString())) return "deny";
+              url = next.toString(); continue;
+            }
+            if (r.status === 200) return parseRobots(new TextDecoder().decode((await readCapped(r, ROBOTS_MAX_BYTES)).bytes), ROBOTS_TOKEN);
+            await r.body?.cancel().catch(() => {});
+            return r.status === 404 || r.status === 410 ? { rules: [], crawlDelayS: 0 } : "deny";
+          }
+          return "deny";
         } catch { return "deny"; }
       })();
       cache.set(origin, p);
     }
     return p;
   };
-  return async (url) => {
-    const u = new URL(url);
-    if (DOCUMENTED_API_HOSTS.has(u.hostname.toLowerCase())) return true;
-    const rb = await load(u.origin);
+  const check = (async (url: string) => {
+    if (documentedApi(url)) return true;
+    const u = new URL(url), rb = await load(u.origin);
     return rb !== "deny" && robotsAllows(rb, u.pathname + u.search);
-  };
+  }) as FreeRobots;
+  // The Crawl-delay robots.txt asks of this host (at most 10 s); documented APIs: none.
+  check.delayMs = async (url: string) => { if (documentedApi(url)) return 0; const rb = await load(new URL(url).origin); return rb === "deny" ? 0 : Math.min(MAX_CRAWL_DELAY_S, rb.crawlDelayS) * 1000; };
+  return check;
 }
 
 // ---------------------------------------------------------------- DNS
@@ -286,8 +316,10 @@ export function freeFetch(f: typeof fetch, o: { userAgent?: string | null; usajo
     let host = "", path = "";
     try { const u = new URL(String(input instanceof Request ? input.url : input)); host = u.hostname.toLowerCase(); path = u.pathname; } catch { /* the fetch fails on its own */ }
     const h = new Headers(init.headers);
-    if (/(^|\.)(sec\.gov|bls\.gov|usajobs\.gov)$/.test(host)) { if (o.userAgent) h.set("user-agent", o.userAgent); }
-    else if (/(^|\.)(wikipedia\.org|wikidata\.org|github\.com|gdeltproject\.org)$/.test(host)) h.set("user-agent", o.userAgent || DEFAULT_UA);
+    // Review of #628: SEC, BLS and USAJOBS get the owner's declared contact; Wikimedia, GitHub and GDELT a descriptive one (the
+    // contact, else the default); every other host the default TraineeBot User-Agent (the token robots.txt rules are read for).
+    if (/(^|\.)(sec\.gov|bls\.gov|usajobs\.gov|wikipedia\.org|wikidata\.org|github\.com|gdeltproject\.org)$/.test(host)) h.set("user-agent", o.userAgent || DEFAULT_UA);
+    else h.set("user-agent", DEFAULT_UA);
     if (host === "api.github.com") h.set("accept", "application/vnd.github+json");
     if (host === "data.usajobs.gov" && path.startsWith("/api/search") && o.usajobsKey) h.set("authorization-key", o.usajobsKey);
     return f(input, { ...init, headers: h });
@@ -303,7 +335,8 @@ export function freeProvider(o: { fetch: typeof fetch; now: () => number; userAg
     try {
       const r = await f(url, { headers: { accept: "application/json" }, redirect: "manual", signal: AbortSignal.timeout(8000) });
       if (r.status !== 200 || !/json/.test(r.headers.get("content-type") ?? "")) { await r.body?.cancel().catch(() => {}); return null; }
-      return await r.json();
+      const got = await readCapped(r, JSON_MAX_BYTES); // over 2 MB: not parsed, the probe answers nothing
+      return got.truncated ? null : JSON.parse(new TextDecoder().decode(got.bytes));
     } catch { return null; }
   };
   async function board(slug: string): Promise<SearchHit | null> {
@@ -435,15 +468,35 @@ export function freeProvider(o: { fetch: typeof fetch; now: () => number; userAg
 // The production reader for free research: every hop's resolved addresses checked, robots.txt obeyed, documented JSON and RSS
 // converted, up to MAX_FREE_HITS pages, six at a time (order kept).
 // With the system resolver (no resolver given), the startup probe must have passed; if it failed, nothing is read.
-export function freeReader(o: { fetch: typeof fetch; userAgent?: string | null; usajobsKey?: string | null; resolver?: Resolver; now?: () => number; probe?: () => Promise<DnsProbe> }) {
-  const f = freeFetch(o.fetch, o), robots = robotsGate(f), resolver = o.resolver ?? systemResolver;
+export function freeReader(o: { fetch: typeof fetch; userAgent?: string | null; usajobsKey?: string | null; resolver?: Resolver; now?: () => number; probe?: () => Promise<DnsProbe>; budgetMs?: number; clock?: () => number; sleep?: (ms: number) => Promise<void> }) {
+  const base = freeFetch(o.fetch, o), robots = robotsGate(base), resolver = o.resolver ?? systemResolver, clock = o.clock ?? Date.now;
+  const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  // Crawl-delay, per host, serially (review of #628): each request to a host waits until its previous one plus the delay robots.txt
+  // asks for. Page fetches only; robots.txt itself and documented APIs are not delayed.
+  const lane = new Map<string, Promise<void>>(), lastAt = new Map<string, number>();
+  const f = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input instanceof Request ? input.url : input);
+    let host = ""; try { host = new URL(url).host; } catch { return base(input, init); }
+    if (/\/robots\.txt$/.test(new URL(url).pathname)) return base(input, init);
+    const delay = await robots.delayMs(url).catch(() => 0);
+    if (!delay) return base(input, init);
+    const prev = lane.get(host) ?? Promise.resolve();
+    let release!: () => void;
+    const mine = new Promise<void>((r) => { release = r; });
+    lane.set(host, prev.then(() => mine));
+    await prev;
+    try { const wait = (lastAt.get(host) ?? -Infinity) + delay - clock(); if (wait > 0) await sleep(wait); lastAt.set(host, clock()); return await base(input, init); }
+    finally { release(); }
+  }) as typeof fetch;
   return async (urls: string[]): Promise<FetchedSources> => {
     const list = [...new Set(urls.map(normalizeUrl))].slice(0, MAX_FREE_HITS), out: FetchedSources = { verified: [], rejected: [] };
     if (!o.resolver && !(await (o.probe ?? dnsProbe)()).ok) return { verified: [], rejected: list.map((url) => ({ url, why: "unreachable" as const })) };
+    // One wall-clock budget for the whole read (25 s): what is not reached by then is refused as time_budget and named.
+    const deadline = clock() + (o.budgetMs ?? RESEARCH_BUDGET_MS);
     const parts: FetchedSources[] = new Array(list.length);
     for (let i = 0; i < list.length; i += 6) {
       const batch = list.slice(i, i + 6);
-      const got = await Promise.all(batch.map((u) => fetchSources([u], { fetch: f, resolver, robots, convert: convertFree, now: o.now, max: 1 })));
+      const got = await Promise.all(batch.map((u) => fetchSources([u], { fetch: f, resolver, robots, convert: convertFree, now: o.now, max: 1, deadline, clock })));
       got.forEach((g, j) => { parts[i + j] = g; });
     }
     for (const p of parts) { for (const v of p.verified) if (!out.verified.some((x) => x.url === v.url)) out.verified.push(v); out.rejected.push(...p.rejected); }

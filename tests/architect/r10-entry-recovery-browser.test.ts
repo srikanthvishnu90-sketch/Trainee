@@ -174,7 +174,7 @@ Deno.test({ name: "R10 fixes 10-11 in Chromium: every entry, recovery and connec
     for (const vp of VIEWPORTS) {
       // ---- /file: bare, expired, invalid, used; the same bare page with no style at all (the gateway's policy in the browser)
       fileDeps = (await fileWorld()).d; connectDeps = connectWorld().d;
-      const recovery = "p.recovery a, p.recovery b";
+      const recovery = "p.recovery a, p.recovery strong";
       const expired = (await mintFileToken({ secret: SECRET, userId: U, list: LIST, now: NOW - 3 * 86_400_000, kind: "l" }))!;
       for (const [name, q, title] of [["file-bare-invalid", "", /isn.t valid/], ["file-expired", `?t=${encodeURIComponent(expired)}`, /expired/], ["file-tampered", `?t=${encodeURIComponent(expired.slice(0, -5) + "AAAAA")}`, /isn.t valid/]] as const) {
         const s = await session(vp); await s.page.goto(`${SITE}/file${q}`);
@@ -184,7 +184,7 @@ Deno.test({ name: "R10 fixes 10-11 in Chromium: every entry, recovery and connec
         const s = await session(vp); await s.page.goto(`${GATEWAY}/trainee-file`);
         const sty = await s.page.evaluate(() => getComputedStyle(document.body).backgroundColor);
         if (sty !== "rgba(0, 0, 0, 0)") problems.push(`no-style check: the sandboxed page still has a style (${sty})`);
-        await check(s.page, "file-bare-no-style", vp, { action: "p.recovery a, p.recovery b", title: /isn.t valid/, secret: PRIVATE }); await s.ctx.close();
+        await check(s.page, "file-bare-no-style", vp, { action: "p.recovery a, p.recovery strong", title: /isn.t valid/, secret: PRIVATE }); await s.ctx.close();
       }
       // ---- the phone sign-in, step by step, through the proxy (cookies as the browser keeps them)
       {

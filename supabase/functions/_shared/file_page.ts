@@ -254,7 +254,7 @@ export const signOutFoot = (token: string) => `<footer class="foot"><form method
 // is the account's), "Signing you in" (the code is being checked; the button is disabled, nothing private shows), "That code did
 // not work" (a notice, "Try again", "Use a different number"), and the Telegram entry. No code or password is ever asked in chat.
 const LOGIN_CSS = `.login label{display:block;margin:14px 0 6px;font-weight:600}.login input{box-sizing:border-box;width:100%;max-width:320px;min-height:48px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:18px;background:var(--bg);color:inherit}.login .apply{margin-top:14px}.hint{font-size:15px;color:var(--mute)}
-.notice{margin:0 0 14px;padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--ink)}.notice b{display:block}
+.notice{margin:0 0 14px;padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--ink)}.notice strong{display:block}
 .alt{display:flex;flex-wrap:wrap;gap:4px 16px;margin:8px 0 0}.alt form{margin:0}.alt a,.alt .lnk{display:inline-flex;align-items:center;min-height:44px;font-size:16px}
 .status{margin:12px 0 0;color:var(--mute)}main:has(#nodata:not([hidden])) .status{display:none}.recovery .apply{width:100%;max-width:360px}`;
 export type LoginStep = "phone" | "code" | "wrong_code";
@@ -265,7 +265,7 @@ export const LOGIN_SCRIPT = `(function(){var f=document.getElementById("codeform
 export function renderPhoneLogin(o: { step: LoginStep | "phone" | "code"; note?: string; botUrl?: string | null }): string {
   const step = o.step as LoginStep;
   const wrong = step === "wrong_code";
-  const note = wrong ? `<div class="notice" role="alert"><b>That code did not work</b>${esc(o.note ?? "Check the latest code or request a new one.")}</div>` : o.note ? `<p class="top-note" role="alert">${esc(o.note)}</p>` : "";
+  const note = wrong ? `<div class="notice" role="alert"><strong>That code did not work</strong>${esc(o.note ?? "Check the latest code or request a new one.")}</div>` : o.note ? `<p class="top-note" role="alert">${esc(o.note)}</p>` : "";
   const reset = `<form method="post"><input type="hidden" name="action" value="phone_reset"><button type="submit" class="lnk">Use a different number</button></form>`;
   const tg = o.botUrl ? `<a href="${esc(o.botUrl)}" rel="noopener noreferrer">Open from Telegram</a>` : "";
   const form = step === "phone"
@@ -284,7 +284,7 @@ export function renderBootstrap(list: string, botUrl?: string | null): string {
 // recovery sits right under the heading, inside a phone's first screen (tests/architect/r10-entry-recovery-browser.test.ts).
 export const RECOVERY_WORDS = "Ask Trainee in your chat for a new link to the same task.";
 export function renderLinkState(title: string, paras: string[], botUrl?: string | null): string {
-  const action = botUrl ? `<p class="recovery"><a class="apply" href="${esc(botUrl)}" rel="noopener noreferrer">Get a new link</a></p>` : `<p class="recovery"><b>${esc(RECOVERY_WORDS)}</b></p>`;
+  const action = botUrl ? `<p class="recovery"><a class="apply" href="${esc(botUrl)}" rel="noopener noreferrer">Get a new link</a></p>` : `<p class="recovery"><strong>${esc(RECOVERY_WORDS)}</strong></p>`;
   return layout(`${title} - Trainee`, `<header>${BRAND}<h1>${esc(title)}</h1></header><main id="main">${paras.map((p) => `<p>${esc(p)}</p>`).join("")}${action}</main>`, { css: LOGIN_CSS });
 }
 

@@ -171,7 +171,7 @@ Deno.test({ name: "f05 (j): judged on the fixed scale with grounded reasons and 
   eq(model.calls, 1, "one model call judges the batch");
   const sent = JSON.parse(model.bodies[0].messages.find((m: any) => m.role === "user").content);
   assert(sent.confirmed_facts.some((f: string) => /Python/.test(f)), "the judge reads the confirmed facts");
-  eq(model.bodies[0].model, "claude-haiku-5-5");
+  eq(model.bodies[0].model, "claude-sonnet-5-5");
   assert(/strong: most of what it asks for/.test(model.bodies[0].messages[0].content), "the scale's words and meanings go to the model");
   eq(await count(`select count(*) from public.agent_turn_costs where user_id = '${person}' and calls = 1 and input_tokens = 900`), 1, "the judge call is metered");
   // The same ask again: every verdict from the cache, no new call.

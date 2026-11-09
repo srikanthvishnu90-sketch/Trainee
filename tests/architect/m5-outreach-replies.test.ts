@@ -671,7 +671,7 @@ Deno.test("M5/Claude the reply reader goes through the gateway to api.anthropic.
   const thread = { recipient_email: "avery.synthetic@beta.example", recipient_name: "Avery Synthetic", recipient_firm: "Beta", subject: "Question about your path at Beta", offered: [] } as any;
   const r = await understand({ msg, thread, model: readerCall(env, wire.request), now: NOW, tz: "America/Chicago" });
   eq([r.cls, r.by, r.asks], ["interested", "model", ["send your resume"]]);
-  eq([wire.urls, wire.bodies.length, wire.bodies[0].model, wire.bodies[0].tool_choice, wire.headers[0]["x-api-key"], "store" in wire.bodies[0]], [["https://api.anthropic.com/v1/messages"], 1, "claude-haiku-5-5", { type: "tool", name: "record_email" }, "sk-ant-test", false]);
+  eq([wire.urls, wire.bodies.length, wire.bodies[0].model, wire.bodies[0].tool_choice, wire.headers[0]["x-api-key"], "store" in wire.bodies[0]], [["https://api.anthropic.com/v1/messages"], 1, "claude-sonnet-5-5", { type: "auto" }, "sk-ant-test", false]); // D-046: Sonnet 5.5 takes no forced tool_choice (sent as auto, the one tool alone)
   assert(wire.onlyAnthropic(), "no other host");
   // No Anthropic key: not configured, the reading stays "none" and nothing is sent anywhere.
   const none = fakeAnthropic(() => "x");

@@ -89,7 +89,7 @@ Deno.test("claude-only: providerFor refuses gpt-5-mini and every other non-Claud
   eq([providerFor("claude-haiku-5-5"), providerFor("claude-sonnet-5-5")], ["anthropic", "anthropic"]);
 });
 
-Deno.test("claude-only: a rejected CAREER_MODEL, CAREER_REPLY_MODEL or MODEL_PROVIDER is said once per boot on the error log and falls back to Haiku", async () => {
+Deno.test("claude-only: a rejected CAREER_MODEL, CAREER_REPLY_MODEL or MODEL_PROVIDER is said once per boot on the error log and Sonnet 5.5 is used (D-046)", async () => {
   const { careerModel } = await import("../../supabase/functions/agent-chat/release_model.ts");
   const { modelConfig, readerModel, resetIgnoredWarnings } = await import("../../supabase/functions/_shared/model_gateway.ts");
   const env = (o: Record<string, string>) => ({ get: (k: string) => o[k] });
@@ -97,14 +97,14 @@ Deno.test("claude-only: a rejected CAREER_MODEL, CAREER_REPLY_MODEL or MODEL_PRO
   console.error = (...a: unknown[]) => { lines.push(a.map(String).join(" ")); };
   try {
     resetIgnoredWarnings();
-    eq(careerModel(env({ ANTHROPIC_API_KEY: "a", CAREER_REPLY_MODEL: "gpt-5-mini" })), "claude-haiku-5-5");
+    eq(careerModel(env({ ANTHROPIC_API_KEY: "a", CAREER_REPLY_MODEL: "gpt-5-mini" })), "claude-sonnet-5-5");
     careerModel(env({ ANTHROPIC_API_KEY: "a", CAREER_REPLY_MODEL: "gpt-5-mini" }));
-    eq(readerModel(env({ CAREER_MODEL: "gpt-4.1-mini" })), "claude-haiku-5-5");
+    eq(readerModel(env({ CAREER_MODEL: "gpt-4.1-mini" })), "claude-sonnet-5-5");
     readerModel(env({ CAREER_MODEL: "gpt-4.1-mini" }));
-    eq(modelConfig(env({ MODEL_PROVIDER: "openai" })).model, "claude-haiku-5-5");
+    eq(modelConfig(env({ MODEL_PROVIDER: "openai" })).model, "claude-sonnet-5-5");
     modelConfig(env({ MODEL_PROVIDER: "openai" }));
     eq(lines.length, 3, "once per variable, however often it is read: " + lines.join(" | "));
-    for (const name of ["CAREER_REPLY_MODEL", "CAREER_MODEL", "MODEL_PROVIDER"]) assert(lines.some((l) => l.includes(`${name}=`) && l.includes("claude-haiku-5-5")), name);
+    for (const name of ["CAREER_REPLY_MODEL", "CAREER_MODEL", "MODEL_PROVIDER"]) assert(lines.some((l) => l.includes(`${name}=`) && l.includes("claude-sonnet-5-5")), name);
     // Honoured or empty values say nothing.
     resetIgnoredWarnings(); lines.length = 0;
     careerModel(env({ ANTHROPIC_API_KEY: "a", CAREER_REPLY_MODEL: "claude-sonnet-5-5" }));

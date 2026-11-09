@@ -37,6 +37,24 @@ function extraReach(scopes: string[], than: string[]): string | null {
   return more.length ? `${NAMES.microsoft.mail} access also lets Trainee ${more.join(" and ")}.` : null;
 }
 
+// R10 fix 11 (spec C.23 panels 8-9): before the provider's page, the account, the task's purpose and the exact permissions, with
+// reading, sending and deleting as separate effects (never one vague "connect"). Every row follows the scopes the consent URL asks.
+export function effectRows(scopes: string[]): { effect: string; answer: string }[] {
+  const c = capsOf(scopes);
+  return [
+    { effect: "Read email", answer: c.read ? "Yes: sender, subject and a short preview of new email" : "No" },
+    { effect: "Send email", answer: c.send ? "Only a message you approve word for word" : "No" },
+    { effect: "Delete email", answer: "No" },
+    ...(c.calendar ? [{ effect: "Calendar", answer: "Reads busy times; adds an event only after you approve it" }] : []),
+  ];
+}
+export function permissionsHtml(p: { id: ProviderId; scopes: string[] }): string {
+  const n = NAMES[p.id];
+  const rows = effectRows(p.scopes).map((r) => `<li><span class="k">${esc(r.effect)}</span><span class="v">${esc(r.answer)}</span></li>`).join("");
+  const exact = p.scopes.map((x) => `<code>${esc(x)}</code>`).join(" ");
+  return `<section class="acct perms" aria-label="${n.mail} permissions"><p class="who">${n.mail}</p><p class="muted">Account: you choose it on ${n.brand}'s page next. Afterwards this page shows the exact address that was connected.</p><ul class="eff">${rows}</ul><p class="muted">Exact permissions requested: ${exact || "none"}</p></section>`;
+}
+
 // ---------------------------------------------------------------- html
 // The page keeps Trainee's one visual identity (brand.ts tokens, checked in a real browser by design-pages-browser.test.ts): the
 // shared ground and ink, plum ONLY on the one primary action and links, Inter + Brygada 1918, dark scheme. On top of that the
@@ -66,6 +84,8 @@ export const CONNECT_CSS = `
 .lnk{display:inline-flex;align-items:center;min-height:44px;padding:0 4px;border:0;background:none;text-decoration:underline;font-size:16px}
 .lnk.danger{color:var(--bad);margin-top:2px}
 .ok{font-weight:600;color:var(--good)}
+.eff{list-style:none;margin:10px 0 0;padding:0}.eff li{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 12px;padding:8px 0;border-top:1px solid var(--line);font-size:16px}.eff .k{font-weight:600}.eff .v{text-align:right;color:var(--ink)}
+.perms code{font-size:14px;overflow-wrap:anywhere}.recovery{margin:0 0 12px;font-weight:600}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 `;
 
@@ -105,23 +125,47 @@ export function renderConnect(m: ConnectModel): string {
     return `<form method="post" class="go">${hidden(m.token, "start", p.id)}<button type="submit" class="${i === 0 ? "primary" : "secondary"}">Continue with ${n.brand}</button></form>${extra ? `<p class="fine">${esc(extra)}</p>` : ""}`;
   }).join("");
   const notnow = m.botUrl ? `<a class="notnow" href="${esc(m.botUrl)}" rel="noopener noreferrer">Not now</a>` : "";
-  return page("Connect your email", `<p class="line">${esc(one)}</p><p class="line">${esc(two)}</p><div class="actions">${buttons}${notnow}</div>`, { script: CONNECT_SCRIPT, tg: true, og: previewOg(m.reason), lede: `So I can ${reason}.` });
+  return page("Connect your email", `<p class="line">${esc(one)}</p><p class="line">${esc(two)}</p><div class="actions">${buttons}${notnow}</div>${open.map(permissionsHtml).join("")}`, { script: CONNECT_SCRIPT, tg: true, og: previewOg(m.reason), lede: `So I can ${reason}.` });
 }
 
 // After consent (the OAuth callback's landing), or after a disconnect: one calm state and the way back.
-export interface DoneModel { outcome: "connected" | "denied" | "failed" | "disconnected"; provider: ProviderId; email: string | null; botUrl: string | null; message?: string }
+// R10 fix 11: "connected" only after the grant was stored (the callback's own result), with the address, what it is allowed to do
+// and a working Disconnect (a form to the connect page carrying a fresh session for this person, when the callback can mint one).
+// A cancelled consent, an incomplete or failed redirect and a different account each say "No access saved" and offer a retry;
+// a different account is named and never used in place of the one asked for.
+export type DoneWhy = "taken" | "other_account" | "incomplete";
+export interface DoneModel {
+  outcome: "connected" | "denied" | "failed" | "disconnected"; provider: ProviderId; email: string | null; botUrl: string | null; message?: string;
+  why?: DoneWhy; scopes?: string[];
+  manage?: { action: string; token: string } | null; // after a stored grant only: the connect page's address and a session for this person (Disconnect)
+  connectUrl?: string | null; // the connect page: Retry opens it (it signs the person in itself)
+}
+const NOT_FINISHED = `<p class="alert" role="status"><span class="chip t-attention">Connection not finished</span>No access saved.</p>`;
 export function renderDone(m: DoneModel): string {
   const n = NAMES[m.provider];
-  const b = m.botUrl ? `<div class="actions">${back(m.botUrl)}</div>` : `<p class="fine">You can close this tab and go back to your chat with Trainee.</p>`;
-  if (m.outcome === "connected") return page(`${n.mail} connected`, `<p class="line ok">Connected as ${esc(m.email ?? n.mail)}.</p><p class="line">Trainee will tell you in the chat when it has something. Say "disconnect ${n.mail.toLowerCase()}" in the chat any time to remove it.</p>${b}`, { script: CONNECT_SCRIPT, tg: true });
-  if (m.outcome === "denied") return page("Nothing was connected", `<p class="line">You chose not to allow access, so nothing was connected. You can try again whenever you like.</p>${b}`, { script: CONNECT_SCRIPT, tg: true });
+  const b = m.botUrl ? `<div class="actions">${back(m.botUrl, m.connectUrl && m.outcome !== "connected" && m.outcome !== "disconnected" ? "notnow" : "primary")}</div>` : `<p class="fine">You can close this tab and go back to your chat with Trainee.</p>`;
+  const post = (action: string, cls: string, label: string) => m.manage ? `<form method="post" action="${esc(m.manage.action)}">${hidden(m.manage.token, action, m.provider)}<button type="submit" class="${cls}">${esc(label)}</button></form>` : "";
+  const retry = m.connectUrl ? `<div class="actions"><a class="primary" href="${esc(m.connectUrl)}">Retry connection</a></div>` : "";
+  if (m.outcome === "connected") {
+    const allowed = m.scopes?.length ? effectRows(m.scopes).map((r) => `${r.effect}: ${r.answer}.`).join(" ") : "";
+    const disc = m.manage ? post("disconnect", "lnk danger", "Disconnect") : `<p class="fine">To disconnect, say "disconnect ${n.mail.toLowerCase()}" in the chat.</p>`;
+    return page(`${n.mail} connected`, `<p class="line ok">Connected as ${esc(m.email ?? n.mail)}.</p>${allowed ? `<p class="line">${esc(allowed)}</p>` : ""}<p class="line">Trainee will tell you in the chat when it has something. Say "disconnect ${n.mail.toLowerCase()}" in the chat any time to remove it.</p>${b}${disc}`, { script: CONNECT_SCRIPT, tg: true });
+  }
   if (m.outcome === "disconnected") return page(`${n.mail} disconnected`, `<p class="line">${esc(m.message ?? "Trainee's access is removed.")}</p>${b}`, { script: CONNECT_SCRIPT, tg: true });
-  return page("That didn't work", `<p class="line">Something went wrong on the way back from ${n.brand}, so nothing was saved. Ask Trainee for a new link in the chat.</p>${b}`, { script: CONNECT_SCRIPT, tg: true });
+  if (m.why === "taken" || m.why === "other_account") {
+    const who = m.email ? esc(m.email) : `a different ${n.brand} account`;
+    const words = m.why === "taken" ? `You signed in to ${who}, which another Trainee account already uses, so nothing was connected.` : `You signed in to ${who}, not the account connected to Trainee, so nothing was changed.`;
+    return page("A different account was used", `${NOT_FINISHED}<p class="line">${words} Trainee never uses one account in place of another.</p><p class="line">Retry and choose the account you want on ${n.brand}'s page.</p>${retry}${b}`, { script: CONNECT_SCRIPT, tg: true });
+  }
+  if (m.outcome === "denied" && m.why !== "incomplete") return page("Nothing was connected", `${NOT_FINISHED}<p class="line">You chose not to allow access, so nothing was connected. You can try again whenever you like.</p>${retry}${b}`, { script: CONNECT_SCRIPT, tg: true });
+  const why = m.why === "incomplete" ? `The way back from ${n.brand} was not finished, so nothing was saved.` : `Something went wrong on the way back from ${n.brand}, so nothing was saved.`;
+  return page("That didn't work", `${NOT_FINISHED}<p class="line">${why} ${m.connectUrl ? "Retry here, or ask" : "Ask"} Trainee for a new link in the chat.</p>${retry}${b}`, { script: CONNECT_SCRIPT, tg: true });
 }
 
 // A link that cannot be used or a step that cannot be done: says why, shows nothing about any account.
 export function renderState(title: string, paras: string[], botUrl: string | null): string {
-  return page(title, `${paras.map((p) => `<p class="line">${esc(p)}</p>`).join("")}${botUrl ? `<div class="actions">${back(botUrl)}</div>` : ""}`, { script: CONNECT_SCRIPT, tg: true });
+  // R10 fix 10: the way back is always there, right under the heading (a phone's first screen): Back to Telegram, else the words.
+  return page(title, `${paras.map((p) => `<p class="line">${esc(p)}</p>`).join("")}${botUrl ? `<div class="actions recovery">${back(botUrl)}</div>` : `<p class="recovery">Ask Trainee in your chat for a new link to the same task.</p>`}`, { script: CONNECT_SCRIPT, tg: true });
 }
 
 export function renderBootstrap(reason: string): string {

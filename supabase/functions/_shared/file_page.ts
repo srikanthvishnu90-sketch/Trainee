@@ -149,8 +149,8 @@ ${TOKENS_CSS}
 body{margin:0;background:var(--bg);color:var(--ink);font:18px/1.5 ${BODY_FONT};letter-spacing:-.005em;-webkit-font-smoothing:antialiased}
 h1{font-family:'Brygada 1918',Georgia,serif;font-weight:500}
 .wrap{max-width:640px;margin:0 auto;min-height:100vh;min-height:100dvh;padding:calc(20px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right)) calc(48px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left))}
-header{padding:4px 0 18px}.brand{display:flex;align-items:center;gap:10px;margin-bottom:22px}.mark{width:32px;height:32px;flex:none}
-.wm{font-family:'Brygada 1918',Georgia,serif;font-weight:700;font-size:24px;letter-spacing:-.01em}
+header{padding:0 0 14px}.brand{display:flex;align-items:center;gap:8px;margin-bottom:14px}.mark{width:28px;height:28px;flex:none}
+.wm{font-family:'Brygada 1918',Georgia,serif;font-weight:700;font-size:20px;letter-spacing:-.01em}
 h1{margin:0;font-size:28px;line-height:1.2}
 .with{margin:6px 0 0;font-size:14px;color:var(--mute)}
 .all{margin:6px 0 0}.all button{display:inline-flex;align-items:center;min-height:44px;padding:0;border:0;background:none;color:var(--link);font:inherit;font-size:15px;font-weight:500;text-decoration:underline;cursor:pointer}
@@ -249,21 +249,43 @@ export const signOutFoot = (token: string) => `<footer class="foot"><form method
 
 // PHONE SIGN-IN (file_session.ts): a link opens this, never the list. Step 1 the number, step 2 the texted code. Nothing about
 // the person or their jobs is on either page, not even a masked number.
-const LOGIN_CSS = `.login label{display:block;margin:14px 0 6px;font-weight:600}.login input{box-sizing:border-box;width:100%;max-width:320px;min-height:48px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:18px;background:var(--bg);color:inherit}.login .apply{margin-top:14px}.login .hint{font-size:15px;opacity:.8}`;
-export function renderPhoneLogin(o: { step: "phone" | "code"; note?: string; botUrl?: string | null }): string {
-  const note = o.note ? `<p class="top-note" role="alert">${esc(o.note)}</p>` : "";
-  const form = o.step === "phone"
-    ? `<form method="post" class="login"><input type="hidden" name="action" value="phone_start"><label for="phone">Your phone number</label><input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" required maxlength="32" placeholder="+1 (555) 000-0000"><p class="hint">The number on your Trainee account. We text it a 6-digit code.</p><button type="submit" class="apply">Text me a code</button></form>`
-    : `<form method="post" class="login"><input type="hidden" name="action" value="phone_verify"><label for="code">6-digit code</label><input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 -]{6,9}" required maxlength="9"><button type="submit" class="apply">Sign in</button></form><form method="post" class="login"><input type="hidden" name="action" value="phone_reset"><button type="submit" class="lnk">Use a different number</button></form>`;
-  const lead = o.step === "phone" ? "Sign in with your phone number to see your jobs and apply." : "If that is the number on your Trainee account, we texted it a code. Type it here.";
-  return layout("Sign in - Trainee", `<header>${BRAND}<h1>Sign in</h1></header><main id="main">${note}<p>${esc(lead)}</p>${form}<p class="hint">Trainee never asks for a password, and never asks for this code in chat.</p>${o.botUrl ? `<p><a href="${esc(o.botUrl)}" rel="noopener noreferrer">Get a new link</a></p>` : ""}</main>`, { css: LOGIN_CSS });
+// R10 fix 10 (spec C.23 panels 1-4 and 6): each step is its own named state, the heading first and the one action right under it
+// so both fit a phone's first screen: "Sign in" (the number), "Check your phone" (the code; the same words whether or not the number
+// is the account's), "Signing you in" (the code is being checked; the button is disabled, nothing private shows), "That code did
+// not work" (a notice, "Try again", "Use a different number"), and the Telegram entry. No code or password is ever asked in chat.
+const LOGIN_CSS = `.login label{display:block;margin:14px 0 6px;font-weight:600}.login input{box-sizing:border-box;width:100%;max-width:320px;min-height:48px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;font-size:18px;background:var(--bg);color:inherit}.login .apply{margin-top:14px}.hint{font-size:15px;color:var(--mute)}
+.notice{margin:0 0 14px;padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--ink)}.notice b{display:block}
+.alt{display:flex;flex-wrap:wrap;gap:4px 16px;margin:8px 0 0}.alt form{margin:0}.alt a,.alt .lnk{display:inline-flex;align-items:center;min-height:44px;font-size:16px}
+.status{margin:12px 0 0;color:var(--mute)}.recovery .apply{width:100%;max-width:360px}`;
+export type LoginStep = "phone" | "code" | "wrong_code";
+export const LOGIN_HEADINGS: Record<LoginStep, string> = { phone: "Sign in", code: "Check your phone", wrong_code: "That code did not work" };
+export const VERIFYING = { heading: "Signing you in", button: "Signing in...", status: "Checking this sign-in. Private content remains hidden." };
+// The "Signing you in" state, drawn in the page while the code is checked (the CSP allows exactly this script's hash).
+export const LOGIN_SCRIPT = `(function(){var f=document.getElementById("codeform");if(!f)return;f.addEventListener("submit",function(){var b=f.querySelector("button"),h=document.querySelector("h1"),s=document.getElementById("verifying");if(b){b.disabled=true;b.textContent=${JSON.stringify(VERIFYING.button)}}if(h)h.textContent=${JSON.stringify(VERIFYING.heading)};if(s)s.hidden=false;var n=document.querySelector(".notice");if(n)n.hidden=true})})();`;
+export function renderPhoneLogin(o: { step: LoginStep | "phone" | "code"; note?: string; botUrl?: string | null }): string {
+  const step = o.step as LoginStep;
+  const wrong = step === "wrong_code";
+  const note = wrong ? `<div class="notice" role="alert"><b>That code did not work</b>${esc(o.note ?? "Check the latest code or request a new one.")}</div>` : o.note ? `<p class="top-note" role="alert">${esc(o.note)}</p>` : "";
+  const reset = `<form method="post"><input type="hidden" name="action" value="phone_reset"><button type="submit" class="lnk">Use a different number</button></form>`;
+  const tg = o.botUrl ? `<a href="${esc(o.botUrl)}" rel="noopener noreferrer">Open from Telegram</a>` : "";
+  const form = step === "phone"
+    ? `<form method="post" class="login"><input type="hidden" name="action" value="phone_start"><label for="phone">Phone number</label><input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel" required maxlength="32" placeholder="+1 (555) 000-0000"><p class="hint">The number on your Trainee account. We text it a 6-digit code.</p><button type="submit" class="apply">Send code</button></form><div class="alt">${tg}${o.botUrl ? `<a href="${esc(o.botUrl)}" rel="noopener noreferrer">Get help</a>` : ""}</div>`
+    : `<form method="post" class="login" id="codeform"><input type="hidden" name="action" value="phone_verify"><label for="code">6-digit code</label><input id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 -]{6,9}" required maxlength="9"><button type="submit" class="apply">${wrong ? "Try again" : "Sign in"}</button></form><p id="verifying" class="status" role="status" hidden>${esc(VERIFYING.status)}</p><div class="alt">${reset}</div><p class="hint">To get a new code, use a different number or open your link again; each link sends a few codes at most.</p>`;
+  const lead = step === "phone" ? "Sign in with your phone number to see your jobs and apply." : wrong ? "" : "If that is the number on your Trainee account, we texted it a code. Type it here.";
+  return layout(`${LOGIN_HEADINGS[step]} - Trainee`, `<header>${BRAND}<h1>${LOGIN_HEADINGS[step]}</h1></header><main id="main">${note}${lead ? `<p>${esc(lead)}</p>` : ""}${form}<p class="hint">Trainee never asks for a password, and never asks for this code in chat.</p></main>`, { css: LOGIN_CSS, ...(step === "phone" ? {} : { script: LOGIN_SCRIPT }) });
 }
-export function renderBootstrap(list: string): string {
-  return layout("Opening your jobs - Trainee", `<header>${BRAND}<h1>Opening your jobs</h1></header><main id="main"><p>Signing you in with Telegram.</p><p id="nodata" hidden>Open this page from the button in Telegram, or use the link Trainee sent you.</p><noscript><p>This needs JavaScript. Use the link Trainee sent you instead.</p></noscript></main>`, { script: BOOT_SCRIPT, tg: true, bodyAttrs: `data-list="${esc(list)}"` });
+// The Telegram entry (spec C.23 panel 6): the Mini App posts Telegram's signed data back; until it has, and if it cannot (opened
+// outside Telegram), the page stays on this screen and shows nothing about any account. A forwarded link is not who opened it.
+export function renderBootstrap(list: string, botUrl?: string | null): string {
+  const open = botUrl ? `<p class="recovery"><a class="apply" href="${esc(botUrl)}" rel="noopener noreferrer">Open Telegram</a></p>` : "";
+  return layout("Open from your Trainee chat - Trainee", `<header>${BRAND}<h1>Open from your Trainee chat</h1></header><main id="main"><p>Use the button in Telegram so this page can identify your account.</p><p class="status" role="status">Signing you in with Telegram.</p><div id="nodata" hidden><p>This page could not tell who opened it, so nothing is shown.</p>${open}<p class="hint">Sign in another way: open the link Trainee sent you and sign in with your phone number.</p></div><noscript><p>This needs JavaScript. Use the link Trainee sent you instead.</p></noscript></main>`, { script: BOOT_SCRIPT, tg: true, css: LOGIN_CSS, bodyAttrs: `data-list="${esc(list)}"` });
 }
-// A link that cannot be used: says why, shows nothing about any job, offers a way to get a new one.
+// A link that cannot be used: says why, shows nothing about any job, and always offers the way back (spec C.23 panel 7): the
+// recovery sits right under the heading, inside a phone's first screen (tests/architect/r10-entry-recovery-browser.test.ts).
+export const RECOVERY_WORDS = "Ask Trainee in your chat for a new link to the same task.";
 export function renderLinkState(title: string, paras: string[], botUrl?: string | null): string {
-  return layout(`${title} - Trainee`, `<header>${BRAND}<h1>${esc(title)}</h1></header><main id="main">${paras.map((p) => `<p>${esc(p)}</p>`).join("")}${botUrl ? `<p><a class="apply" href="${esc(botUrl)}" rel="noopener noreferrer">Get a new link</a></p>` : ""}</main>`);
+  const action = botUrl ? `<p class="recovery"><a class="apply" href="${esc(botUrl)}" rel="noopener noreferrer">Get a new link</a></p>` : `<p class="recovery"><b>${esc(RECOVERY_WORDS)}</b></p>`;
+  return layout(`${title} - Trainee`, `<header>${BRAND}<h1>${esc(title)}</h1></header><main id="main">${paras.map((p) => `<p>${esc(p)}</p>`).join("")}${action}</main>`, { css: LOGIN_CSS });
 }
 
 // ---------------------------------------------------------------- plain text twin: every row, its state, what Apply does

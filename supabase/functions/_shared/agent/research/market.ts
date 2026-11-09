@@ -90,7 +90,7 @@ export function agrees(claim: string, quote: string, page: string): boolean {
 }
 const parse = (raw: string) => { try { return JSON.parse(raw.trim().replace(/^```(?:json)?\s*|\s*```$/g, "")); } catch { return null; } };
 
-export async function researchMarket(i: { question: string; format: "inline" | "file"; plan: SearchPlan; deps: MarketDeps; fileLinks?: string[] }): Promise<MarketResult> {
+export async function researchMarket(i: { question: string; format: "inline" | "file"; plan: SearchPlan; deps: MarketDeps; fileLinks?: string[]; fileCards?: { kind: string; title: string; url: string }[] }): Promise<MarketResult> {
   const found = await i.deps.search.search(i.plan);
   const got = found.hits.length ? await i.deps.read(found.hits.map((h) => h.url)) : { verified: [], rejected: [] };
   const pages = got.verified.filter((v) => v.status === 200 && isHttps(v.url) && !isBlockedHost(v.url));
@@ -152,7 +152,7 @@ export async function researchMarket(i: { question: string; format: "inline" | "
         ...(comparison ? { comparison: { options: comparison.options.map((name) => ({ name })), rows: comparison.rows.map((r) => ({ label: r.label, cells: r.cells.map((c) => c ? { value: c.value, source: R, cite: c.cite } : null) })) } } : {}),
         conditions, risks, sources: sources.map(({ title: t, url, fetched_at }) => ({ title: t, url, fetched_at })) };
       const made = await i.deps.publish(data).catch(() => null);
-      if (made && /^https:\/\//.test(made.url)) { file_url = made.url; i.fileLinks?.push(made.url); } else why = "the brief could not be saved";
+      if (made && /^https:\/\//.test(made.url)) { file_url = made.url; i.fileLinks?.push(made.url); i.fileCards?.push({ kind: "research_brief", title, url: made.url }); } else why = "the brief could not be saved";
     }
     if (why) notes.push(`answered inline: ${why}`);
   }

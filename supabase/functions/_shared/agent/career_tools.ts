@@ -277,7 +277,7 @@ export function careerTools(deps: {
     run: async (i, c) => {
       const list = (x: unknown) => Array.isArray(x) ? x.map(String).filter(Boolean).slice(0, 4) : [];
       const q = String(i.question ?? c.turn?.message ?? "");
-      const r = await researchMarket({ question: q, format: i.format === "file" ? "file" : "inline", deps: deps.market!, fileLinks: c.turn ? (c.turn.fileLinks ??= []) : undefined,
+      const r = await researchMarket({ question: q, format: i.format === "file" ? "file" : "inline", deps: deps.market!, fileLinks: c.turn ? (c.turn.fileLinks ??= []) : undefined, fileCards: c.turn ? (c.turn.fileCards ??= []) : undefined,
         plan: { queries: list(i.queries).slice(0, 3).concat(list(i.queries).length ? [] : [q]), companies: list(i.companies), sites: list(i.sites), soc: i.soc ? String(i.soc) : null, cbsa: i.cbsa ? String(i.cbsa) : null } });
       deps.market!.onResult?.(r);
       return r;

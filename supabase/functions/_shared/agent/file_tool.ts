@@ -32,7 +32,7 @@ export function createFileTool(files: FileService): ToolSpec {
       if (bad?.length) throw new Error(`not created: the file states things no tool returned this turn and the person did not say: ${[...new Set(bad)].slice(0, 8).join(", ")}. Remove them or label them "Reported, not verified", then create it again.`);
       const r = await files.create(c.userId, String(i?.kind ?? ""), i?.data);
       if (!r.ok) throw new Error(r.error);
-      if (r.url && c.turn) (c.turn.fileLinks ??= []).push(r.url);
+      if (r.url && c.turn) { (c.turn.fileLinks ??= []).push(r.url); (c.turn.fileCards ??= []).push({ kind: String(r.kind), title: String(r.title), url: r.url }); }
       else if (!r.url) throw new Error("not created: the link could not be made");
       return { created: true, kind: r.kind, title: r.title, expires_in_hours: files.ttlHours(), note: "The link is added after your reply. Do not write a URL." };
     },

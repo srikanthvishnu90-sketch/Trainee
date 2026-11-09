@@ -132,7 +132,8 @@ import { fetchSources } from "../_shared/research_sources.ts";
 import { declaredFetch, searchProviderFor } from "../_shared/research_search.ts";
 import { prepFileTurn } from "./career_prep_file.ts"; // BETA C03: the interview prep File
 import { factsForTurn, replyWriterOn, rewrites, writable, writeReply, writerChannel } from "../_shared/career_reply_writer.ts"; // V1 TEXTING VOICE
-import { fileCardOn, type FileCardOut, type FileCardSource, withFileCard } from "../_shared/file_card_reply.ts"; // R10 C.2 chat File card
+import { cardFromTurnFiles, fileCardOn, type FileCardOut, type FileCardSource, withFileCard } from "../_shared/file_card_reply.ts"; // R10 C.2 chat File card
+import { KIND_LABEL } from "../_shared/file_kinds.ts";
 import { correctedAsk } from "../_shared/search_correction.ts"; // SPEC 2.3
 import { applyReadiness } from "../_shared/apply_readiness.ts"; // SPEC 2.2
 import { writeReadinessAsk } from "../_shared/readiness_ask.ts";
@@ -1309,6 +1310,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           // A batch of outreach drafts is shown by code, and its intent makes the next text an answer to it.
           turnPostings = Array.isArray(turn.postings) ? turn.postings : [];
           turnAttachments = turn.attachments ?? []; turnLinks = turn.linksSeen ?? []; turnFileLinks = turn.fileLinks ?? [];
+          // R10 C.2: a research brief or an application record this turn made is answered as its File card (the resume stays a document).
+          fileCardSrc = cardFromTurnFiles(turn.fileCards, KIND_LABEL, Date.now()) ?? fileCardSrc;
           // The files tailor_resume made this turn ride the reply (documentsOf below), as a router tailor's do.
           out = { reply: turn.reply, intent: turn.show?.intent ?? "agent", resultStatus: turn.stopped, contained: false, handler: "agent", ...(turn.show?.parts ? { parts: turn.show.parts } : {}),
             ...(turnDocuments.length ? { result: { documents: turnDocuments } } : {}) };
@@ -1599,6 +1602,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         if (sh.parts) out = { ...out, parts: sh.parts };
         shapeField = sh.shape;
         // FILE KINDS: the links to the pages create_file made were minted by code; they are sent after the answer whatever the shape decided.
+        // The File a card carries is not also sent as a bare link (CAREER_FILE_CARD).
+        if (fileCardSrc && fileCardOn(Deno.env)) turnFileLinks = turnFileLinks.filter((l) => l !== fileCardSrc!.url);
         if (turnFileLinks.length) shapeField = { attachments: shapeField?.attachments ?? [], links: [...(shapeField?.links ?? []), ...turnFileLinks.filter((l) => !(shapeField?.links ?? []).includes(l))] };
         if (sh.notes.length) agentMeta = { ...(agentMeta || {}), reply_shape: sh.notes.slice(0, 8) };
       }

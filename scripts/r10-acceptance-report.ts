@@ -34,6 +34,15 @@ const ITEMS: Record<number, string> = {
   15: "Prove fixes with end-to-end acceptance, then verify deployment",
 };
 const BASELINE = { scenarios: 2, turns: 5 };
+// Acceptance criteria this suite (PR1: the harness and the two replays) does not check, said plainly so no reader takes them as
+// covered. Spec E numbers.
+const NOT_COVERED = [
+  "E.4 36-41 (ambiguity and messages: the referent settled before any action, destination kept, versions by human labels, no guessed address): not checked here",
+  "E.1 13 (a changed bullet shown beside the previous one, no silent regeneration): not checked here",
+  "E.6 51 (budget enforcement intact, no cap raised or credits bought): not checked here; the replay only spends the limit, it does not test enforcement settings",
+  "E.6 54 (after a blocker: what is done, what remains, the smallest decision): not checked here",
+  "Items 9-14 (File families, entry and sign-in, connections, application review, execution and proof, research and drafts): their tests come in later PRs",
+];
 
 const args = Deno.args;
 const opt = (k: string) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : undefined; };
@@ -59,6 +68,9 @@ async function suiteFiles(): Promise<string[]> {
 }
 
 async function run(files: string[]): Promise<number> {
+  // A run starts from an empty evidence directory, so it deletes the old one: only ever under this repository's artifacts/.
+  const real = await Deno.realPath(evidenceDir).catch(() => new URL(evidenceDir, `file://${Deno.cwd()}/`).pathname);
+  if (!real.startsWith(`${ROOT}/artifacts/`) || real.includes("/../")) { console.log(`refusing to delete --evidence ${evidenceDir}: a run clears its evidence directory, which must be under ${ROOT}/artifacts/ (use --no-run to only read one elsewhere)`); Deno.exit(2); }
   await Deno.remove(evidenceDir, { recursive: true }).catch(() => {});
   await Deno.mkdir(evidenceDir, { recursive: true });
   console.log(`running ${files.length} R10 acceptance file(s); evidence -> ${evidenceDir}`);
@@ -128,6 +140,9 @@ if (import.meta.main) {
     if (c.why) say(`      why: ${clip(c.why, 300)}`);
     if (c.reply) say(`      reply: "${clip(c.reply, 200)}"`);
   }
+  say("\n" + "=".repeat(100));
+  say("NOT COVERED by this suite (not to be read as passing):");
+  for (const n of NOT_COVERED) say(`  - ${n}`);
   const meta = all.filter((r) => r.item === 0);
   const turns = meta.reduce((n, r) => n + (r.turns ?? 0), 0), calls = meta.reduce((n, r) => n + (r.model_calls ?? 0), 0);
   say("\n" + "=".repeat(100));
@@ -146,6 +161,6 @@ if (import.meta.main) {
 ${visual.map((r) => `<section><h2 class="${r.outcome}">${r.outcome} ${esc(r.test)}</h2>${r.why ? `<p>${esc(r.why)}</p>` : ""}<div class="row">${(r.screenshots ?? []).map((s) => `<figure><img src="${esc(rel(s))}"><figcaption>rendered: ${esc(s)}</figcaption></figure>`).join("")}${String(r.target).split(" ").map((t) => `<figure><img src="${esc(rel(t))}"><figcaption>target: ${esc(t)}</figcaption></figure>`).join("")}</div></section>`).join("\n")}`;
   await Deno.writeTextFile(`${evidenceDir}/visual-conformance.html`, html).catch(() => {});
   say(`Visual conformance page (screenshot beside target): ${evidenceDir}/visual-conformance.html (${visual.length} famil${visual.length === 1 ? "y" : "ies"} checked, ${visual.filter((r) => (r.screenshots ?? []).length).length} rendered)`);
-  if (jsonOut) await Deno.writeTextFile(jsonOut, JSON.stringify({ baseline: BASELINE, baseline_all: BASE_F, historical: baseline, turns, fake_model_calls: calls, live, items: Object.fromEntries(Object.entries(summary).map(([k, v]) => [k, { title: ITEMS[Number(k)], status: v.status, checks: v.checks }])) }, null, 2));
+  if (jsonOut) await Deno.writeTextFile(jsonOut, JSON.stringify({ not_covered: NOT_COVERED, baseline: BASELINE, baseline_all: BASE_F, historical: baseline, turns, fake_model_calls: calls, live, items: Object.fromEntries(Object.entries(summary).map(([k, v]) => [k, { title: ITEMS[Number(k)], status: v.status, checks: v.checks }])) }, null, 2));
   Deno.exit(Object.values(summary).every((s) => s.status === "PASS") ? 0 : 1);
 }

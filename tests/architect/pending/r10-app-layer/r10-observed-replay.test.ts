@@ -140,8 +140,8 @@ R.suite(FILE, [1, 2, 3, 4, 5, 6, 7, 8, 15], [CHAT, CHAT_B], async (t: Deno.TestC
   // The observed context at S2: the person's daily AI-answer allowance ran out on that turn (spec A.2). Spent here before S2.
   await w.sql(`insert into public.career_alert_prefs (user_id, tz, prefs, last_checked_at) values ('${searcher}', 'America/Chicago', '{"on": false, "keywords": ["data analyst"]}'::jsonb, now()) on conflict (user_id) do update set tz = excluded.tz`).catch(() => "");
   await w.sql(`insert into public.career_digest_prefs (user_id, tz) values ('${searcher}', 'America/Chicago') on conflict (user_id) do update set tz = excluded.tz`).catch(() => "");
-  await w.sql(`insert into public.agent_turn_costs (user_id, provider, models, calls, usd_micros) values ('${searcher}', 'anthropic', '{claude-sonnet-5-5}', 100, 60000)`);
-  await w.sql(`update public.model_budget_days set spent_micros = limit_micros where day >= current_date - 1`);
+  // The limit is made real and proven: the gate itself refuses a reservation before S2 (R.spendLimit).
+  const gateAtS2 = await R.spendLimit(w, searcher);
   let s2: any = null;
   await c(t, FILE, 5, "S2 widens only role and place, keeps the verified S1 options, adds the new ones with their student requirements", async (ev: any) => {
     s2 = await turn(ev, S2.text, CHAT_B);
@@ -162,7 +162,7 @@ R.suite(FILE, [1, 2, 3, 4, 5, 6, 7, 8, 15], [CHAT, CHAT_B], async (t: Deno.TestC
     const b = blockOf(s2.reply, remote.company);
     ok(b, `S2: ${remote.company} (remote US, with a graduation window) is listed, so its eligibility can be read: ${s2.reply.slice(0, 400)}`);
     ok(!/\byou (are|'re) eligible\b|\bmeets? (all|the) (hard )?requirements\b/i.test(b), `S2: eligibility is not asserted while the graduation date is unknown: ${b}`);
-    ok(/graduation date|not (confirmed|on (file|your record))|can't (call|confirm)|unknown/i.test(s2.reply), `S2: names the unknown graduation date as the open eligibility fact: ${s2.reply.slice(0, 500)}`);
+    ok(/graduation date/i.test(b) && /(not (confirmed|on (file|your record)|stated)|unknown|haven't (told|said)|don't have)/i.test(b), `S2: names the person's graduation date as the unknown eligibility fact, beside ${remote.company}: ${b}`);
     const blocked = T.MARKET.find((x: any) => x.page === "blocked")!;
     if (s2.reply.includes(blocked.company)) ok(/couldn't (open|check)|limited|not verified|blocked/i.test(blockOf(s2.reply, blocked.company)), `S2: a page that refused the check is reported as a limited check: ${blockOf(s2.reply, blocked.company)}`);
   }, w);
@@ -171,15 +171,16 @@ R.suite(FILE, [1, 2, 3, 4, 5, 6, 7, 8, 15], [CHAT, CHAT_B], async (t: Deno.TestC
     ev.reply = s2.reply;
     ok(!/midnight UTC/i.test(s2.reply), `S2: the reset is not in UTC: ${s2.reply.slice(-400)}`);
     ok(!/The window, checked against the record|2026-10-13/.test(s2.reply), "S2: no unrelated graduation-window template or old date");
-    if (/limit/i.test(s2.reply)) {
-      const reset = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1));
-      const hour = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "numeric", hour12: true }).format(reset); // e.g. "6 PM"
-      const [h, ampm] = hour.split(" ");
-      ok(new RegExp(`\\b${h}(:00)?\\s?${ampm}\\b`, "i").test(s2.reply) && /Chicago|Central|CT\b|CST|your time/i.test(s2.reply), `S2: the reset time in the person's zone (${hour} Chicago): ${s2.reply.slice(-400)}`);
-      ok(s2.reply.search(/limit/i) < 400, "S2: the limit is said up front, not after unrelated text");
-      ok(/search|list|internship/i.test(s2.reply.slice(Math.max(0, s2.reply.search(/limit/i) - 300), s2.reply.search(/limit/i) + 400)), "S2: says what stopped (the search) beside the limit");
-      ok(/(haven't|have not|didn't|did not) appl|nothing (was )?(applied|sent)|not applied/i.test(s2.reply), "S2: says nothing was applied");
-    }
+    ev.reply = `gate before S2: ${gateAtS2}\n${s2.reply}`;
+    const reset = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate() + 1));
+    const hour = new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "numeric", hour12: true }).format(reset); // e.g. "6 PM"
+    const [h, ampm] = hour.split(" ");
+    const at = s2.reply.search(/limit/i);
+    ok(at >= 0 && at < 400, `S2: the limit is said, up front (the gate refused before this turn): ${s2.reply.slice(0, 300)}`);
+    ok(new RegExp(`\\b${h}(:00)?\\s?${ampm}\\b`, "i").test(s2.reply) && /Chicago|Central|CT\b|CST|your time/i.test(s2.reply), `S2: the reset time in the person's zone (${hour} Chicago): ${s2.reply.slice(0, 400)}`);
+    ok(/search|list|internship/i.test(s2.reply.slice(Math.max(0, at - 300), at + 400)), "S2: says what stopped (the search) beside the limit");
+    ok(/(haven't|have not|didn't|did not) appl|nothing (was )?(applied|sent)|not applied/i.test(s2.reply), "S2: says nothing was applied");
+    ok(/business analyst|analytics|remote/i.test(s2.reply), "S2: the unfinished task is kept (the widened search is named)");
   }, w);
   await c(t, FILE, 8, "the search replies are direct: no bare acknowledgement as the answer, no internal language, no repeated sentences", async (ev: any) => {
     for (const [id, s] of [["S1", s1], ["S2", s2]] as const) {
@@ -192,18 +193,8 @@ R.suite(FILE, [1, 2, 3, 4, 5, 6, 7, 8, 15], [CHAT, CHAT_B], async (t: Deno.TestC
     }
   }, w);
 
-  // ------------------------------------------------------------------------------------------------ fix 15: the replay itself
-  await check(t, FILE, 15, "both observed scenarios replayed with the same context meet every criterion; 2 scenarios, 5 user turns, counted honestly", async (ev: any) => {
-    ev.turns = 5;
-    ev.reply = `baseline ${T.BASELINE.scenarios} scenarios / ${T.BASELINE.turns} turns`;
-    ok(T.BASELINE.scenarios === 2 && T.BASELINE.turns === 5, "the baseline is 2 scenarios and 5 user turns, not 1,000 tests");
-    ok(t1 && t2 && s1 && s2, "every observed turn ran");
-    ok(passed.every(Boolean), `${passed.filter((x) => !x).length} of the ${passed.length} replay checks above failed; fix 15 passes only when every observed turn meets its criteria`);
-    ok(w.outbound.length === 0, `nothing left the machine: ${w.outbound.join(", ")}`);
-    ok(w.bot.violations.length === 0, `every Telegram message valid: ${w.bot.violations.slice(0, 2).join(" | ")}`);
-  }, w);
   // Screenshots of the File pages the replay's replies linked (the shortlist), at 390 px.
-  await c(t, FILE, 5, "the shortlist's File page (if linked) opens on a phone at 390 px without sideways scroll", async (ev: any) => {
+  await c(t, FILE, 5, "the shortlist's File page opens on a phone at 390 px without sideways scroll", async (ev: any) => {
     const links = [...(s1?.links ?? []), ...(s2?.links ?? [])].filter((l: string) => l.startsWith(R.FILE_BASE));
     ok(links.length >= 1, `the shortlist reply links its File page: ${JSON.stringify([...(s1?.links ?? []), ...(s2?.links ?? [])])}`);
     for (const [i, l] of links.entries()) {
@@ -214,6 +205,17 @@ R.suite(FILE, [1, 2, 3, 4, 5, 6, 7, 8, 15], [CHAT, CHAT_B], async (t: Deno.TestC
       ok(r.scrollWidth <= r.innerWidth, `no sideways scroll at 390 px (${r.scrollWidth})`);
       for (const m of T.MARKET.filter((x: any) => x.s1)) ok(r.text.includes(m.company), `the File page lists ${m.company}`);
     }
+  }, w);
+
+  // ------------------------------------------------------------------------------------------------ fix 15: the replay itself
+  await check(t, FILE, 15, "both observed scenarios replayed with the same context meet every criterion; 2 scenarios, 5 user turns, counted honestly", async (ev: any) => {
+    ev.turns = 5;
+    ev.reply = `baseline ${T.BASELINE.scenarios} scenarios / ${T.BASELINE.turns} turns`;
+    ok(T.BASELINE.scenarios === 2 && T.BASELINE.turns === 5, "the baseline is 2 scenarios and 5 user turns, not 1,000 tests");
+    ok(t1 && t2 && s1 && s2, "every observed turn ran");
+    ok(passed.every(Boolean), `${passed.filter((x) => !x).length} of the ${passed.length} replay checks above failed; fix 15 passes only when every observed turn meets its criteria`);
+    ok(w.outbound.length === 0, `nothing left the machine: ${w.outbound.join(", ")}`);
+    ok(w.bot.violations.length === 0, `every Telegram message valid: ${w.bot.violations.slice(0, 2).join(" | ")}`);
   }, w);
 });
 

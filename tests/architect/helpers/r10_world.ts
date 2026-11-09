@@ -330,8 +330,13 @@ export async function deliveredFiles(w: World, chat: number, said: Said, label: 
     out.push({ name, via, kind, bytes, ...(kind === "pdf" ? { pdf: await inspectPdf(bytes) } : {}), ...(kind === "docx" ? { docx: await inspectDocx(bytes) } : {}) });
   };
   for (const d of said.docs) await take(d.filename, "attachment", d.mime, d.bytes);
+  // Every link the reply gives is followed. An employer's posting link is the market's (checked elsewhere); any other link that
+  // does not open (an error status, a network refusal) FAILS here with its status: a broken download link is never dropped.
+  const employer = new Set([...MARKET, ...OLD_LIST].map((p) => p.url));
   for (const l of said.links) {
+    if (employer.has(l)) continue;
     const got = await w.open(l, chat);
+    ok(got.status === 200 || got.status === 303, `${label}: the link ${l.replace(/([?&]t=)[^&]+/, "$1…")} does not open (HTTP ${got.status}${got.why ? `: ${got.why}` : ""})`);
     if (got.status === 200 && !got.html && got.bytes.length) await take(new URL(l).pathname.split("/").pop() || "download", "link", got.type, got.bytes);
   }
   return out;
@@ -380,4 +385,23 @@ export async function prepare(w: World, person: string, job: { job: string; comp
     await w.sql(`insert into public.career_apply_questions (user_id, key, kind, label, type, job_ids, company) values ('${person}', '${key}', 'screen', ${q(label)}, 'text', array[${q(job.job)}], ${q(job.company)})`);
   }
   return { ...JSON.parse(out.split("\n")[0]) as { id: string; hash: string }, sha };
+}
+
+// The AI-answer limit, made real and proven (architect review of #639): today's global budget row (model_budget_day(now()), and
+// the next day's, in case the turn crosses midnight Chicago) is inserted if missing and spent to its limit, the person's recorded
+// spend is past the old per-person ceiling, and the gate itself is asked: a reservation must be refused ('limit'). Returns the
+// gate's answer. Undo with releaseLimit.
+export async function spendLimit(w: World, person: string): Promise<string> {
+  await w.sql(`insert into public.agent_turn_costs (user_id, provider, models, calls, usd_micros) values ('${person}', 'anthropic', '{claude-sonnet-5-5}', 100, 60000)`);
+  await w.sql(`insert into public.model_budget_days (day, limit_micros, spent_micros) select public.model_budget_day(now() + d), 20000000, 20000000
+    from (values (interval '0'), (interval '1 day')) v(d) on conflict (day) do update set spent_micros = public.model_budget_days.limit_micros`);
+  const gate = await w.sql(`select public.model_budget_reserve(1)::text`);
+  const j = JSON.parse(gate);
+  if (j.ok) { await w.sql(`select public.model_budget_release('${j.id}')`); throw new Error(`the limit did not take effect: the gate reserved (${gate})`); }
+  ok(j.state === "limit", `the gate refuses at the limit: ${gate}`);
+  return gate;
+}
+export async function releaseLimit(w: World, person: string) {
+  await w.sql(`delete from public.agent_turn_costs where user_id = '${person}'`);
+  await w.sql(`update public.model_budget_days set spent_micros = 0, reserved_micros = 0 where day >= public.model_budget_day(now()) - 1`);
 }

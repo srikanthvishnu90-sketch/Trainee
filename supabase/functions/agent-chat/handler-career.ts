@@ -100,6 +100,10 @@ import { CAREER_SEND_SCOPE, careerTokenFor, sendMail } from "../_shared/career_m
 import { supabaseDigestStore, supabaseInterviewStore } from "../_shared/career_brief_store.ts";
 import { draftFor, outreachTurn, supabaseOutreachStore } from "../_shared/career_outreach.ts";
 import { queueApprovedOutreach, sendRailOn } from "../_shared/career_send_rail.ts"; // MASS NETWORKING M1
+import { contactsByName, contactTurn, lastReplyRow, outreachSignature } from "../_shared/career_contact_turn.ts"; // R10 contact outreach wiring
+import { supabaseContactStore } from "../_shared/career_contact_pipeline.ts";
+import { supabaseSendLimits } from "../_shared/career_contact_send.ts";
+import { sendProviders } from "../_shared/mail_providers.ts";
 import { repliesTurn, supabaseRepliesStore } from "../_shared/career_outreach_replies.ts"; // MASS NETWORKING M5
 import { hunterVerifier, supabaseCheckCache } from "../_shared/career_contacts.ts";
 import { GMAIL_SEND_SCOPE } from "../_shared/career_outreach_gmail.ts";
@@ -139,8 +143,8 @@ import { applyHereTurn } from "../_shared/apply_here.ts"; // APPLY HERE: a paste
 import { supabaseFileStore } from "../trainee-file/store.ts";
 import { createFileService, supabaseFileKindStore } from "../_shared/file_service.ts"; // FILE KINDS
 import { researchBriefOn, researchReplyOn } from "../_shared/research_reply.ts"; // R9-C
-import { searchProviderFor } from "../_shared/research_search.ts";
-import { dnsProbe, resolvedReader } from "../_shared/research_dns.ts";
+import { dnsProbe } from "../_shared/research_dns.ts";
+import { researchSearchFor } from "../_shared/research_free_sources.ts";
 import { prepFileTurn } from "./career_prep_file.ts"; // BETA C03: the interview prep File
 import { factsForTurn, replyWriterOn, rewrites, writable, writeReply, writerChannel } from "../_shared/career_reply_writer.ts"; // V1 TEXTING VOICE
 import { correctedAsk } from "../_shared/search_correction.ts"; // SPEC 2.3
@@ -783,7 +787,19 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // message; sending is the scheduled run's. A store that cannot be read sends the text on to the brain, never a guess.
       const outreachStore = supabaseOutreachStore(admin), outreachMeter = ledger.track(newMeter());
       const outreachModel = (payload: any) => callModel(careerModelConfig(Deno.env), payload, { meter: outreachMeter, role: "chat" });
-      const outreachAns = !tapIn && !card && !mock && !asked && !which && !emailed && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      // R10 CONTACT OUTREACH (career_contact_turn.ts): "email <a contact you resolved>" puts that exact email (and its follow-ups)
+      // on a card; a yes while the card is the thread's last word queues exactly it on the send rail, from the person's own
+      // Gmail or Outlook. Behind CAREER_PEOPLE_SEARCH and CAREER_CONTACT_OUTREACH (RELEASE_NEVER_ON), read at every turn: off, it
+      // claims only a yes to a card shown while on, and refuses it. It takes the outreach slot (every later turn stands down).
+      const contactAns = !tapIn && !card && !mock && !asked && !which && !emailed && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+        ? await (async (now: number) => contactTurn({ message, userId: user.id, now, deps: {
+            env: (k) => Deno.env.get(k), contacts: { ...supabaseContactStore(admin), byName: contactsByName(admin) },
+            model: outreachModel, senderFacts: () => ((ctx as any).profile?.facts ?? []), signature: outreachSignature(admin),
+            mailboxes: async (u) => (await sendProviders(admin, u)).map((x) => ({ id: x.id })), lastCard: () => lastReplyRow(admin, tid),
+            store: outreachStore, rail: { rpc: (name, args) => admin.rpc(name, args) }, limits: supabaseSendLimits(admin, { now: () => now }) } }))(Date.now())
+          .catch((e) => { console.error("contact turn:", e?.message ?? e); return null; })
+        : null;
+      const outreachAns = contactAns ? { ...contactAns, parts: undefined } : !tapIn && !card && !mock && !asked && !which && !emailed && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await outreachTurn({ message, userId: user.id, threadId: tid, now: Date.now(), store: outreachStore, events, tz: undefined,
             redraft: (d) => draftFor({ model: outreachModel, facts: ((ctx as any).profile?.facts ?? []), r: d.recipient, previous: d.body }),
             gmailConnected: () => careerGrantHas(admin, user.id, GMAIL_SEND_SCOPE), connectAsk: missingIntegration("gmail"),
@@ -1185,7 +1201,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         out = { reply: emailed.reply, intent: emailed.waiting ? EMAIL_INTENT : "career_apply_email_answer", resultStatus: emailed.status, contained: false, handler: "email" };
         if (emailed.waiting && emailed.card_id) agentMeta = { email_card: emailed.card_id };
       } else if (outreachAns) {
-        out = { reply: outreachAns.reply, intent: outreachAns.intent, resultStatus: outreachAns.status, contained: false, handler: "outreach", ...(outreachAns.parts ? { parts: outreachAns.parts } : {}) };
+        out = { reply: outreachAns.reply, intent: outreachAns.intent, resultStatus: outreachAns.status, contained: false, handler: contactAns ? "contact" : "outreach", ...(outreachAns.parts ? { parts: outreachAns.parts } : {}) };
+        if (contactAns?.meta) agentMeta = { ...(agentMeta || {}), ...contactAns.meta }; // the card waiting for its yes
       } else if (repliesAns) {
         out = { reply: repliesAns.reply, intent: repliesAns.intent, resultStatus: repliesAns.status, contained: false, handler: "outreach_replies" };
       } else if (cloud) {
@@ -1322,11 +1339,11 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           // Open career questions: cached, capped web search. DARK: offered only when the gateway's web search is available (WEB_SEARCH_AVAILABLE, false until a live call proves it). The cache is per instance
           // until a table is approved by the owner; the brief is returned as markdown until PR #280 (file kinds) supplies `publish`.
           // R9-C market research (CAREER_RESEARCH_REPLY=on; off by default): Brave with the owner's BRAVE_SEARCH_API_KEY, else the
-          // no-key first-party sources (SEC EDGAR, BLS, company sites). The research brief File only with CAREER_RESEARCH_BRIEF=on.
+          // free first-party sources (research_free_sources.ts: SEC EDGAR, BLS OEWS/OOH, USAJOBS, ATS job boards, Wikipedia/Wikidata,
+          // GitHub, news RSS, company sites). Every page is read through the free reader: the resolved addresses of every hop,
+          // robots.txt, the never-list. The research brief File only with CAREER_RESEARCH_BRIEF=on.
           market: researchReplyOn(Deno.env) && cfg.apiKey ? {
-            search: searchProviderFor(Deno.env, fetch),
-            // Every hop's resolved addresses are checked (research_dns.ts resolvedReader; review of #589).
-            read: resolvedReader({ fetch, userAgent: Deno.env.get("RESEARCH_USER_AGENT") }),
+            ...researchSearchFor(Deno.env, fetch),
             draft: async (p) => { const r = await callModel(cfg, { system: p.system, messages: p.messages.map((m) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: 1800 }, { meter, role: "chat" }); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); },
             publish: researchBriefOn(Deno.env) ? async (data) => { const r = await createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }).create(user.id, "research_brief", data); return r.ok && r.url ? { url: r.url } : null; } : null,
           } : null,

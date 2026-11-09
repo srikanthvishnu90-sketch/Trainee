@@ -245,10 +245,11 @@ export function renderFeed(f: Feed): string {
   const inner = `<div id="root"><header class="fhead">${BRAND}${f.made ? `<p class="made">${esc(f.made)}</p>` : ""}</header>${f.signedIn ? signedInBar(f.signedIn, f.token) : ""}<div class="fcard"><h1 class="ftitle">Your jobs</h1>${stampHtml(f.stamp ?? null)}${withLine}${more}${all}<main id="main">${top}${f.rows.length ? `<ul class="rows">${f.rows.map((r) => rowHtml(r, f.token)).join("")}</ul>` : EMPTY_FEED}${rates}</main></div>${signOutFoot(f.token)}</div><p id="live" class="sr" role="status" aria-live="polite"></p>`;
   return layout("Your jobs - Trainee", inner, { script: FEED_SCRIPT, tg: true, og: f.og, ...(rates ? { css: RATES_CSS } : {}) });
 }
-// R10 fix 10 (spec C.23 panel 5, E.7 #58): who the page is signed in as, masked, beside Sign out. Drawn only from a verified session
+// R10 fix 10 (spec C.23 panel 5, E.7 #58): that the page is signed in, and how, beside Sign out. No digit of the number, not even
+// the last 4 (scenarios-file-signin-battery.ts: a phone number or its last 4 is never in a response). Drawn only from a verified session
 // (the caller passes the session row it checked), so a code request, a page load or a Telegram button is never "Signed in".
 export function signedInWords(r: { via: string; phone: string | null }): string {
-  return r.via === "phone" && r.phone ? `Signed in as ••• ${r.phone.replace(/\D/g, "").slice(-4)}` : "Signed in with Telegram";
+  return r.via === "phone" ? "Signed in with your phone number" : "Signed in with Telegram";
 }
 export const signedInBar = (words: string, token: string) => `<div class="signedin" role="status"><span>${esc(words)}</span><span aria-hidden="true">·</span><form method="post">${hidden(token, "signout")}<button type="submit" class="lnk">Sign out</button></form></div>`;
 // Sign out of this page here, or everywhere it is open (every session of the account ends; each needs a new sign-in).

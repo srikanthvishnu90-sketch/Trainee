@@ -29,7 +29,7 @@ export interface ResultRow extends Row {
   checked?: string | null; // "Checked Nov 1, 2026, 9:08 AM CT" from this posting's own last_seen_at, else null
 }
 export interface ResultsFeed {
-  signedIn?: string; // R10: "Signed in as ••• 0160" from the verified session, beside Sign out (file_page.ts signedInBar)
+  signedIn?: string; // R10: "Signed in with your phone number" from the verified session, beside Sign out (file_page.ts signedInBar)
   token: string; title: string; floor: string | null; rows: ResultRow[]; total: number;
   filters: { pay: PayFilter; where: string; state?: StateKey | null }; places: string[]; top?: string; notes?: Record<string, string>;
   // The header: who and when, what was read and when, what is not confirmed, and a 2-3 line quick read.

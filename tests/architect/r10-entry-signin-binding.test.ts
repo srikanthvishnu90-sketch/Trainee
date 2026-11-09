@@ -93,8 +93,9 @@ Deno.test({ name: "R10 fix 10 sign-in: a valid link -> Sign in -> Check your pho
     const ph = await page.text();
     assert(ph.includes(U_CO), "signed in: the person's own list");
     // "Signed in" only now, after real authentication, masked, beside Sign out (spec C.23 panel 5, E.7 #58)
-    assert(/<div class="signedin" role="status"><span>Signed in as ••• 0140<\/span>/.test(ph) && !ph.includes(U_PHONE), "the masked account label");
-    for (const [name, h] of [["phone entry", entry], ["code sent", sent], ["a stranger's number", other]] as const) assert(!/Signed in as|Signed in with/.test(h), `${name}: never 'Signed in' before authentication`);
+    assert(/<div class="signedin" role="status"><span>Signed in with your phone number<\/span>/.test(ph), "the signed-in mark");
+    assert(!ph.includes(U_PHONE) && !ph.includes(U_PHONE.slice(-4)), "no digit of the number, not even the last 4");
+    for (const [name, h] of [["phone entry", entry], ["code sent", sent], ["a stranger's number", other]] as const) assert(!/Signed in with/.test(h), `${name}: never 'Signed in' before authentication`);
     const bar = ph.match(/<div class="signedin"[\s\S]*?<\/div>/)![0];
     const pageTok = bar.match(/name="t" value="([^"]+)"/)![1];
     assert(/name="action" value="signout"/.test(bar) && />Sign out</.test(bar), "Sign out in the bar");
@@ -184,14 +185,13 @@ Deno.test({ name: "R10 fix 10 recovery: an expired, invalid, used or bare link s
   } finally { await w.pg.stop(); }
 } });
 
-Deno.test("R10 fix 10 the results list: 'Signed in as' (masked) and Sign out from the verified session; signing out makes the list unavailable", async () => {
+Deno.test("R10 fix 10 the results list: 'Signed in' and Sign out from the verified session; signing out makes the list unavailable", async () => {
   const R = await import("../helpers/results_world.ts");
   const w = R.world(); const r = await R.made(w); const s = await w.A.tok(R.U, r.listId, R.NOW);
   const html = await (await R.get(w, s)).text();
   const bar = html.match(/<div class="signedin" role="status">[\s\S]*?<\/div>/)?.[0] ?? "";
-  const last4 = w.A.phoneOf(R.U).slice(-4);
-  assert(bar.includes(`Signed in as ••• ${last4}`) && />Sign out</.test(bar), bar || "no signed-in bar on the results list");
-  assert(!html.includes(w.A.phoneOf(R.U)), "the number is masked");
+  assert(bar.includes("Signed in with your phone number") && />Sign out</.test(bar), bar || "no signed-in bar on the results list");
+  assert(!html.includes(w.A.phoneOf(R.U)) && !html.includes(w.A.phoneOf(R.U).slice(-4)), "no digit of the number, not even the last 4");
   const out = await R.post(w, s, { action: "signout" });
   eq(out.status, 200);
   assert(/Signed out/.test(await out.text()));

@@ -35,7 +35,7 @@ Deno.test("claude-only: every reader's config is Claude on Anthropic's key, what
   const e = (o: Record<string, string>) => ({ get: (k: string) => o[k] });
   for (const o of [{}, { CAREER_MODEL: "gpt-5-mini" }, { CAREER_MODEL: "o3" }, { MODEL_PROVIDER: "openai", OPENAI_MODEL: "gpt-5-nano", OPENAI_API_KEY: "o" }]) {
     for (const cfg of [readerModelConfig(e({ ...o, ANTHROPIC_API_KEY: "a" })), mailModelConfig(e({ ...o, ANTHROPIC_API_KEY: "a" })), essayModelConfig(e({ ...o, ANTHROPIC_API_KEY: "a" }))]) {
-      eq([cfg.provider, cfg.model, cfg.apiKey], ["anthropic", "claude-haiku-5-5", "a"], JSON.stringify(o));
+      eq([cfg.provider, cfg.model, cfg.apiKey], ["anthropic", "claude-sonnet-5-5", "a"], JSON.stringify(o)); // D-046: Sonnet only
     }
     eq(readerModelConfig(e(o)).apiKey, "", `no Anthropic key: not configured, an OpenAI key is not a key (${JSON.stringify(o)})`);
   }

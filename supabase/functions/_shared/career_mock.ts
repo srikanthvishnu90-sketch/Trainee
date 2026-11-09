@@ -868,7 +868,7 @@ export function validState(v: any): v is MockState {
   return !!v && v.v === 1 && Array.isArray(v.questions) && Array.isArray(v.answers) && typeof v.last_at === "number" &&
     typeof v.started_at === "number" && (v.status === "running" || v.status === "ended");
 }
-// callModel: the model call the judge makes (the chat passes its daily-capped call, career_spend_cap.ts).
+// callModel: the model call the judge makes (the chat passes its per-turn wrapped call, career_spend_cap.ts; no per-person cap, D-046).
 export function supabaseMockStore(admin: any, o: { callModel?: ModelCall } = {}): MockStore {
   const cards = supabaseCardStore(admin);
   return {

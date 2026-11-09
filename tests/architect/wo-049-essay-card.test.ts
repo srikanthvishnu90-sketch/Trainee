@@ -247,7 +247,7 @@ Deno.test("WO-049/8 the edge: the person's own session only, POST only, JSON; Cl
   eq(essayModelConfig(env({ OPENAI_API_KEY: "k1", ANTHROPIC_API_KEY: "k2" })).apiKey, "k2");
   eq(essayModelConfig(env({ OPENAI_API_KEY: "k1" })).apiKey, "", "an OpenAI key is not a key: not configured");
   eq(essayModelConfig(env({ ANTHROPIC_API_KEY: "k2", CAREER_MODEL: "claude-sonnet-5-5" })).model, "claude-sonnet-5-5");
-  eq(essayModelConfig(env({ ANTHROPIC_API_KEY: "k2", CAREER_MODEL: "gpt-5-mini" })).model, "claude-haiku-5-5", "a gpt id never moves the essay off Claude");
+  eq(essayModelConfig(env({ ANTHROPIC_API_KEY: "k2", CAREER_MODEL: "gpt-5-mini" })).model, "claude-sonnet-5-5", "a gpt id never moves the essay off Claude");
   for (const src of [FN_SRC, CORE_SRC]) {
     const code = src.split("\n").filter((l) => !/^\s*\/\//.test(l)).join("\n");
     assert(!/openai|api\.anthropic|ANTHROPIC_API_KEY|OPENAI_API_KEY/i.test(code), "no provider URL or key in the function: only the gateway names them");
@@ -401,5 +401,5 @@ Deno.test("WO-049/16 the essay draft goes through the gateway to api.anthropic.c
   const d = deps({ model: (payload: any) => callModel(cfg, payload, { role: "chat", request: wire.request }) });
   const r = await essayCardDraft("u1", ask(), d);
   eq((r as any).text, CLEAN);
-  eq([wire.urls, wire.bodies[0].model, wire.headers[0]["x-api-key"], wire.onlyAnthropic()], [["https://api.anthropic.com/v1/messages"], "claude-haiku-5-5", "sk-ant-test", true]);
+  eq([wire.urls, wire.bodies[0].model, wire.headers[0]["x-api-key"], wire.onlyAnthropic()], [["https://api.anthropic.com/v1/messages"], "claude-sonnet-5-5", "sk-ant-test", true]);
 });

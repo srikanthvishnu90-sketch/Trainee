@@ -11,7 +11,7 @@
 //           /alerts data analyst, analyst | new york, remote   turn alerts on without the brain (a test shortcut)
 //           /post Data Analyst | Stripe | Remote - US   add a TEST posting first seen now (example.test link)
 //           /state           print this person's stored state          /quit
-// --brain agent needs ANTHROPIC_API_KEY (model: the career default, claude-haiku-5-5); nothing is sent anywhere else.
+// --brain agent needs ANTHROPIC_API_KEY (model: the career model, claude-sonnet-5-5); nothing is sent anywhere else.
 // State lives in .simulator/state.json (gitignored) so a session resumes; --fresh starts over.
 import { handleInbound, memoryStore, type Brain, type Attachment, type MemoryState } from "../supabase/functions/_shared/conversation.ts";
 import { memoryChannel } from "../supabase/functions/_shared/channel.ts";

@@ -22,6 +22,9 @@ export interface ToolSpec {
   description: string;
   input_schema: { type: "object"; properties: Record<string, unknown>; required: string[] };
   effect: Effect;
+  // The effect a call actually had, from its result, when it depends on what the call did (research_market: "write_own" only
+  // when it published a File). Absent: `effect`.
+  effectOf?: (out: unknown) => Effect;
   run(input: any, ctx: ToolCtx): Promise<unknown>;
 }
 export type ModelFn = (payload: { system: string; messages: any[]; tools: { name: string; description: string; input_schema: unknown }[]; max_tokens: number; tool_choice?: { type: "none" } }) =>
@@ -419,7 +422,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
           if (bad.length) { throw new Error(`not attached: the file states things no tool returned this turn and the person did not say: ${[...new Set(bad)].slice(0, 8).join(", ")}. Remove them or mark them "not verified", then attach again.`); }
           o.ctx.turn!.attachments!.push({ filename: att.filename, content: att.content });
         }
-        tool_calls.push({ name: t.name, ok: true, effect: t.effect });
+        tool_calls.push({ name: t.name, ok: true, effect: t.effectOf ? t.effectOf(out) : t.effect });
         results.push({ type: "tool_result", tool_use_id: u.id, content: resultText(out) });
         seen.push(resultText(out));
         if (u.name === "search_jobs" && out && Array.isArray((out as any).postings)) found = (out as any).postings.slice(0, 50);

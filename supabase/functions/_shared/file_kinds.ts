@@ -457,37 +457,49 @@ function marketHtml(d: any): string {
 // to ask; what the brief cannot tell you; sources, each with its kind (the company's own page or reported elsewhere) and its limit.
 const LIMIT_WORD: Record<string, string> = { paywalled: "paywalled", outdated: "outdated" };
 const MEASURE_WORD: Record<string, string> = { volume: "Volume, not revenue", forecast: "A forecast at the time, not a result" };
-const COMPANY_HEADS = { business: "What the company sells and how it makes money", developments: "Recent developments", competitors: "Competitors and tradeoffs", role_asks: "What the role page asks for",
-  questions: "Questions you can ask", unknowns: "What this brief cannot tell you", sources: "Sources" } as const;
+// Headings and order follow the owner's target pages (app-layer-visuals p-88/p-89, the interview brief specimen, and spec C.22's
+// sourced Stripe brief): the short answer, how the business works, evidence versus interpretation, then the dated and sourced detail.
+const COMPANY_HEADS = { answer: "The short answer", business: "How the business works", evidence: "Evidence versus interpretation", developments: "Recent developments", competitors: "Competitors and tradeoffs",
+  role_asks: "What the role page asks for", questions: "Questions worth asking", unknowns: "What this brief cannot tell you", sources: "Sources" } as const;
+// The evidence-versus-interpretation rows (p-89): one reported fact, Trainee's reading, one unknown, and the state of the sources.
+function companyEvidence(d: any): [string, string][] {
+  const S = d.sources ?? [], f = (d.developments ?? [])[0] ?? (d.business ?? [])[0];
+  const lim = (k: string) => S.filter((s: any) => s.limit === k).length, unread = (d.unread ?? []).length;
+  const state = [`${S.length} source${S.length === 1 ? "" : "s"} read ${marketReadOn(d)}`, lim("paywalled") ? `${lim("paywalled")} paywalled` : "", lim("outdated") ? `${lim("outdated")} outdated` : "", unread ? `${unread} could not be opened` : ""].filter(Boolean).join("; ");
+  return [["Reported fact", f ? `${f.date ? `${f.date}: ` : ""}${f.text}` : ""], ["Interpretation", d.frame?.text ?? ""], ["Unknown", (d.unknowns ?? [])[0] ?? ""], ["Source state", state]].filter(([, v]) => v) as [string, string][];
+}
 function companyHtml(d: any): string {
   const S = d.sources ?? [], read = marketReadOn(d);
   const limits = (c: unknown) => (Array.isArray(c) ? c : []).filter((i: number) => S[i - 1]?.limit).map((i: number) => `<span class="src rb-limit">[${esc(i)}] ${esc(LIMIT_WORD[S[i - 1].limit])}${S[i - 1].dated ? ` · ${esc(S[i - 1].dated)}` : ""}</span>`).join("");
   const kind = (c: unknown) => { const ks = new Set((Array.isArray(c) ? c : []).map((i: number) => S[i - 1]?.by)); return `<span class="src">${ks.has("reported") ? (ks.has("company") ? "Company-reported and reported elsewhere" : "Reported elsewhere, not verified") : "Company-reported, not verified"}</span>`; };
   const li = (x: any, lead = "", chip = "") => `<li><span class="rb-t">${lead}${esc(x.text)}${cites(x.cite)}</span><span class="rb-chips">${chip}${kind(x.cite)}${limits(x.cite)}</span></li>`;
   const ul = (xs: any[], f: (x: any) => string) => xs.length ? `<ul class="rb-list">${xs.map(f).join("")}</ul>` : "";
-  const sub = [d.role ? esc(d.role) : "", read ? `Sources read ${esc(read)}` : "", `${S.length} source${S.length === 1 ? "" : "s"}`, "Research only: nothing was sent or applied for"].filter(Boolean).join(" · ");
-  const cover = `<section class="rb-cover" aria-label="Cover"><p class="rb-brand">${MARK}<span>Trainee</span><span class="rb-dot" aria-hidden="true">·</span><span>${d.focus ? "Brief, one area" : "Interview brief"}</span></p>`
-    + (d.frame ? `<p class="rb-thesis">${esc(d.frame.text)}${cites(d.frame.cite)}</p><p class="rb-basis">${READING} ${limits(d.frame.cite)}</p>` : "")
-    + `<p class="rb-date">${sub}</p></section>`;
+  const sub = [d.role ? esc(d.role) : "", d.focus ? "One area, expanded" : "Interview brief", "Research only: nothing was sent or applied for"].filter(Boolean).join(" · ");
+  const head = `<p class="meta rb-sub">${sub}</p>`;
+  const answer = d.frame ? `<p class="rb-answer">${esc(d.frame.text)}${cites(d.frame.cite)}</p><span class="rb-chips">${READING}${limits(d.frame.cite)}</span>` : "";
+  const ev = d.focus ? [] : companyEvidence(d);
+  const evidence = ev.length ? `<dl class="rb-kv">${ev.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join("")}</dl><p class="rb-caution">Do not turn a plausible interpretation into a reported fact: each line below names its source, and what no source supports is listed as unknown.</p>` : "";
   const qs = (d.questions ?? []).length ? `<ol class="rb-qs">${d.questions.map((q: any) => `<li><span class="rb-t">${esc(q.text)}</span><span class="rb-chips"><span class="src">Grounded in ${q.cite.map((i: number) => `[${esc(i)}]`).join("")}</span>${limits(q.cite)}</span></li>`).join("")}</ol>` : "";
   const cannot = [...(d.unknowns ?? []), ...(d.unread ?? [])];
-  const srcs = `<ol class="rb-src">${S.map((s: any, i: number) => `<li id="src-${i + 1}"><span class="rb-n">[${i + 1}]</span>${linkHtml(s.url, s.title) || esc(s.title)}<span class="meta"><span class="rb-host" title="${esc(hostOf(s.url))}">${esc(hostOf(s.url))}</span> · ${s.by === "company" ? "The company's own page" : "Reported elsewhere"} · Read ${esc(DAY(s.fetched_at))}</span>${s.limit === "paywalled" ? `<span class="meta rb-lim">Paywalled: only the part shown without a subscription was read.</span>` : s.limit === "outdated" ? `<span class="meta rb-lim">Outdated: the newest date on this page is ${esc(s.dated ?? "old")}.</span>` : ""}</li>`).join("")}</ol>`;
-  return cover + sec(COMPANY_HEADS.business, ul(d.business ?? [], (x) => li(x)))
+  const srcs = `<ol class="rb-src">${S.map((s: any, i: number) => `<li id="src-${i + 1}"><span class="rb-n">[${i + 1}]</span>${linkHtml(s.url, s.title) || esc(s.title)}<span class="meta">Source: <span class="rb-host" title="${esc(hostOf(s.url))}">${esc(hostOf(s.url))}</span> · ${s.by === "company" ? "The company's own page" : "Reported elsewhere"} · Read ${esc(DAY(s.fetched_at))}</span>${s.limit === "paywalled" ? `<span class="meta rb-lim">Paywalled: only the part shown without a subscription was read.</span>` : s.limit === "outdated" ? `<span class="meta rb-lim">Outdated: the newest date on this page is ${esc(s.dated ?? "old")}.</span>` : ""}</li>`).join("")}</ol>`;
+  return `<div class="rb-co">` + head + sec(COMPANY_HEADS.answer, answer) + sec(COMPANY_HEADS.business, ul(d.business ?? [], (x) => li(x)))
+    + sec(COMPANY_HEADS.evidence, evidence)
     + sec(COMPANY_HEADS.developments, ul(d.developments ?? [], (x) => li(x, `<span class="rb-day">${esc(x.date)}</span> `, x.measure ? `<span class="src rb-measure">${esc(MEASURE_WORD[x.measure])}</span>` : "")))
     + sec(COMPANY_HEADS.competitors, ul(d.competitors ?? [], (x) => li(x, `<b>${esc(x.name)}</b>: `)))
     + sec(COMPANY_HEADS.role_asks, ul(d.role_asks ?? [], (x) => li(x)))
     + sec(COMPANY_HEADS.questions, qs)
     + sec(COMPANY_HEADS.unknowns, cannot.length ? `<ul class="rb-list rb-gaps">${cannot.map((g: string) => `<li><span class="rb-t">${esc(g)}</span><span class="rb-chips"><span class="src">Unknown</span></span></li>`).join("")}</ul>` : "")
-    + sec(COMPANY_HEADS.sources, srcs);
+    + sec(COMPANY_HEADS.sources, srcs) + `</div>`;
 }
 function companyText(d: any, L: string[]) {
   const S = d.sources ?? [], c = (x: any) => Array.isArray(x?.cite) && x.cite.length ? ` ${x.cite.map((i: number) => `[${i}]`).join("")}` : "";
   const lim = (x: any) => (x?.cite ?? []).filter((i: number) => S[i - 1]?.limit).map((i: number) => ` (source [${i}] ${LIMIT_WORD[S[i - 1].limit]}${S[i - 1].dated ? `, ${S[i - 1].dated}` : ""})`).join("");
   if (d.role) L.push(`Role: ${d.role}`);
-  if (d.frame) L.push(`${d.frame.text}${c(d.frame)} [Trainee's reading]${lim(d.frame)}`);
+  if (d.frame) L.push(`## ${COMPANY_HEADS.answer}`, `${d.frame.text}${c(d.frame)} [Trainee's reading]${lim(d.frame)}`, "");
   L.push(`${marketReadOn(d) ? `Sources read ${marketReadOn(d)}. ` : ""}Research only: nothing was sent or applied for.`, "");
   const block = (h: string, xs: any[], f: (x: any) => string) => { if (!xs?.length) return; L.push(`## ${h}`); xs.forEach((x) => L.push(f(x))); L.push(""); };
   block(COMPANY_HEADS.business, d.business, (x) => `- ${x.text}${c(x)}${lim(x)}`);
+  if (!d.focus) block(COMPANY_HEADS.evidence, companyEvidence(d), ([k, v]) => `- ${k}: ${v}`);
   block(COMPANY_HEADS.developments, d.developments, (x) => `- ${x.date}: ${x.text}${c(x)}${x.measure ? ` (${MEASURE_WORD[x.measure]})` : ""}${lim(x)}`);
   block(COMPANY_HEADS.competitors, d.competitors, (x) => `- ${x.name}: ${x.text}${c(x)}${lim(x)}`);
   block(COMPANY_HEADS.role_asks, d.role_asks, (x) => `- ${x.text}${c(x)}${lim(x)}`);
@@ -597,7 +609,9 @@ ol.rb-src .rb-host{display:inline-block;max-width:100%;overflow:hidden;text-over
 ul.rb-list{margin:0;padding-left:20px}ul.rb-list li{margin:0 0 12px;overflow-wrap:anywhere}.rb-list .src{display:block;margin:4px 0 0;width:fit-content}
 /* R10 WO-H: the company interview brief. Chips sit on their own row under each line and wrap; dates stay with their line. */
 .rb-chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 0}.rb-chips .src{margin-left:0;white-space:normal}.rb-day{font-weight:600;white-space:nowrap}
-.rb-limit{border-color:var(--ink);color:var(--ink)}ol.rb-qs{margin:0;padding-left:22px}ol.rb-qs li{margin:0 0 14px;overflow-wrap:anywhere}ol.rb-src .rb-lim{grid-column:2}
+.rb-limit{border-color:var(--ink);color:var(--ink)}.rb-answer{margin:0;font-family:'Brygada 1918',Georgia,serif;font-size:20px;line-height:1.35;overflow-wrap:anywhere}
+dl.rb-kv{margin:0}dl.rb-kv>div{display:grid;grid-template-columns:minmax(0,190px) minmax(0,1fr);gap:4px 16px;padding:10px 0;border-top:1px solid var(--line)}dl.rb-kv>div:first-child{border-top:0}
+dl.rb-kv dt{color:var(--mute);font-size:15px}dl.rb-kv dd{margin:0;overflow-wrap:anywhere}@media (max-width:560px){dl.rb-kv>div{grid-template-columns:1fr}}.rb-co .blk h2{font-family:'Brygada 1918',Georgia,serif;font-size:21px;font-weight:500;line-height:1.25}.rb-caution{margin:12px 0 0;padding-left:12px;border-left:2px solid var(--line);font-size:15px;color:var(--mute)}ol.rb-qs{margin:0;padding-left:22px}ol.rb-qs li{margin:0 0 14px;overflow-wrap:anywhere}ol.rb-src .rb-lim{grid-column:2}
 .rb-cite{font-size:14px;color:var(--mute);white-space:nowrap;font-variant-numeric:tabular-nums}
 ol.rb-src{list-style:none;margin:0;padding:0}ol.rb-src li{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:6px;align-items:baseline;padding:8px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}ol.rb-src li:first-child{border-top:0}
 ol.rb-src a{display:inline-flex;align-items:center;min-height:44px;color:var(--link);font-weight:600}ol.rb-src .meta{display:block;grid-column:2}.rb-n{color:var(--mute);font-variant-numeric:tabular-nums}

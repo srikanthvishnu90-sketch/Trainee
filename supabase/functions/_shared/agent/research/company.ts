@@ -31,8 +31,8 @@ export interface Development extends Cited { date: string; measure: Measure }
 export interface Question { area: string; a: string; b: string; text: string; cite: number[] }
 export interface CompanySource { n: number; url: string; title: string; fetched_at: string; by: "company" | "reported"; limit?: "paywalled" | "outdated"; dated?: string }
 export type CompanyResult =
-  | { kind: "company"; status: "no_sources"; ask: "role" | null; notes: string[]; note: string }
-  | { kind: "company"; status: "ok"; company: string; role: string | null; ask: "role" | null; focus: Focus; audience: string | null; title: string;
+  | { kind: "company"; status: "no_sources"; ask: "role" | null; notes: string[]; unread: string[]; blocker: string; note: string }
+  | { kind: "company"; status: "ok"; format: "file" | "inline"; company: string; role: string | null; ask: "role" | null; focus: Focus; audience: string | null; title: string;
       frame: Cited | null; business: Cited[]; developments: Development[]; competitors: (Cited & { name: string })[]; role_asks: Cited[];
       questions: Question[]; unknowns: string[]; sources: CompanySource[]; unread: string[]; file_url: string | null; dropped: number; notes: string[]; note: string };
 
@@ -48,7 +48,7 @@ const SECTIONS: Record<Exclude<Focus, "all">, string> = {
   developments: '"developments": [{"text": "...", "quote": "...", "url": "...", "date": "YYYY-MM-DD or Month YYYY or YYYY, as the page dates it"}]: up to 5 material recent developments; keep each metric\'s meaning (volume is not revenue; a forecast is not a result)',
   competitors: '"competitors": [{"name": "...", "text": "...", "quote": "...", "url": "..."}]: up to 4 competitors or tradeoffs, each quote naming that competitor',
   role: '"role": [{"text": "...", "quote": "...", "url": "..."}]: up to 5 things the role page asks for (only when a PAGE is the role\'s page)',
-  questions: '"tensions": [{"area": "...", "area_quote": "...", "a": "...", "b": "...", "urls": ["..."]}]: up to 4 (6 when asked for more) business tensions the PAGES show: area is what the company is working on (area_quote copied from a page), a and b the two sides of a real tradeoff the pages state',
+  questions: '"tensions": [{"area": "...", "area_quote": "...", "a": "...", "b": "...", "urls": ["..."]}]: up to 5 (6 when asked for more) business tensions the PAGES show: area is what the company is working on (area_quote copied from a page), a and b the two sides of a real tradeoff the pages state',
 };
 export function companyDraftPayload(o: { company: string; role: string | null; focus: Focus; audience: string | null; question: string }, pages: SourcePage[]) {
   const want = o.focus === "all" ? Object.values(SECTIONS) : [SECTIONS[o.focus]];
@@ -126,7 +126,8 @@ const UNREAD_WHY: Record<string, string> = { http_status: "it answered with an e
 
 const parse = (raw: string) => { try { return JSON.parse(raw.trim().replace(/^```(?:json)?\s*|\s*```$/g, "")); } catch { return null; } };
 
-export async function researchCompany(i: { company: string; role?: string | null; question: string; focus?: Focus; audience?: string | null; plan: SearchPlan; deps: MarketDeps; now: number; fileLinks?: string[] }): Promise<CompanyResult> {
+export async function researchCompany(i: { company: string; role?: string | null; question: string; focus?: Focus; audience?: string | null; plan: SearchPlan; deps: MarketDeps; now: number; fileLinks?: string[]; format?: "file" | "inline" }): Promise<CompanyResult> {
+  const format = i.format === "inline" ? "inline" as const : "file" as const;
   const company = squash(i.company).slice(0, 80), role = squash(i.role ?? "").slice(0, 80) || null, focus: Focus = FOCI.includes(i.focus as Focus) ? i.focus as Focus : "all";
   const audience = squash(i.audience ?? "").slice(0, 40) || null, ask = role ? null : "role" as const;
   const found = await i.deps.search.search(i.plan);
@@ -136,7 +137,11 @@ export async function researchCompany(i: { company: string; role?: string | null
   // Every source that could not be opened is named (by its site) with why; never-listed sites are not mentioned.
   const unread = [...new Set(got.rejected.filter((r) => r.why !== "blocked_site" && hostOf(r.url)).map((r) => `${hostOf(r.url)}: not read, because ${UNREAD_WHY[r.why] ?? "it could not be opened"}.`))].slice(0, 6);
   const roleAsk = ask ? " Ask ONE short question only: which role they are interviewing for. Say the company overview is in the file meanwhile. Ask nothing else." : "";
-  if (!pages.length) return { kind: "company", status: "no_sources", ask, notes, note: `No source about ${company} could be opened. Say so plainly in one sentence and give no fact from memory.${roleAsk}` };
+  // Spec F.2 (d): when research cannot run, the reply names the specific blocker: what was tried and why each failed.
+  if (!pages.length) {
+    const blocker = !found.hits.length ? `no source about ${company} was found to open` : unread.length ? `no source about ${company} could be opened (${unread.map((u) => u.replace(/\.$/, "")).join("; ")})` : `no source about ${company} could be opened`;
+    return { kind: "company", status: "no_sources", ask, notes, unread, blocker, note: `Research could not run: ${blocker}. Say that blocker plainly in one or two sentences, give no fact from memory, and say nothing was applied for or sent.${roleAsk}` };
+  }
   const d = parse(await i.deps.draft(companyDraftPayload({ company, role, focus, audience, question: i.question }, pages)).catch(() => "")) ?? {};
   const byUrl = new Map(pages.map((p) => [normalizeUrl(p.url), p]));
   const pageOf = (u: unknown) => { const g = verifiedLinkGuard([String(u ?? "")], pages); return g.kept.length ? byUrl.get(g.kept[0]) ?? null : null; };
@@ -170,7 +175,7 @@ export async function researchCompany(i: { company: string; role?: string | null
   const role_asks = on("role") && role ? arr(d.role, 5).map(fact).filter(Boolean).map((f) => kept(f!)) : [];
   // A question is code's sentence around a verified tension: the area agrees with its quote on a cited page; A and B are each stated
   // on the cited pages (every content word, every figure); A and B differ. Nothing in a question is the model's own claim.
-  const questions: Question[] = on("questions") ? arr(d.tensions, focus === "questions" ? 6 : 4).map((x) => {
+  const questions: Question[] = on("questions") ? arr(d.tensions, focus === "questions" ? 6 : 5).map((x) => {
     const area = squash(x?.area).replace(/[.?!]+$/, ""), a = squash(x?.a).replace(/[.?!]+$/, ""), b = squash(x?.b).replace(/[.?!]+$/, ""), aq = squash(x?.area_quote);
     const ps = arr(x?.urls, 4).map(pageOf).filter(Boolean) as SourcePage[];
     if (!ps.length || ![area, a, b].every((s) => s && s.length <= 120 && linkFree(s))) return drop();
@@ -201,21 +206,24 @@ export async function researchCompany(i: { company: string; role?: string | null
   }) : [];
   if (ask && focus === "all") unknowns.unshift("Which role you are interviewing for: the brief has no role-specific section until you say.");
   const any = business.length + developments.length + competitors.length + role_asks.length + questions.length;
-  if (!any) return { kind: "company", status: "no_sources", ask, notes, note: `Sources were opened but none supported a claim about ${company}. Say you could not confirm one from them; do not guess.${roleAsk}` };
+  if (!any) { const blocker = `${pages.length} page(s) about ${company} were opened, but none stated anything the brief could quote`; return { kind: "company", status: "no_sources", ask, notes, unread, blocker, note: `Research found nothing it could stand on: ${blocker}. Say that plainly; do not guess.${roleAsk}` }; }
   const siteHosts = new Set((i.plan.sites ?? []).map((s) => hostOf(`https://${String(s).replace(/^https?:\/\//, "")}`)));
   const sources: CompanySource[] = cited.map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || hostOf(p.url), fetched_at: new Date(p.fetchedAt).toISOString(),
     by: [...siteHosts].some((h) => h && (hostOf(p.url) === h || hostOf(p.url).endsWith(`.${h}`))) ? "company" as const : "reported" as const, ...pageLimit(p.text, i.now) }));
   const title = `${company}${role ? `: ${role}` : ""} interview brief`.slice(0, 80);
 
   let file_url: string | null = null;
-  if (i.deps.publish) {
+  if (format === "inline") notes.push("answered in chat, as the person asked");
+  else if (i.deps.publish) {
     const data = { variant: "company", title, company, ...(role ? { role } : {}), ...(ask ? { role_asked: true } : {}), ...(focus !== "all" ? { focus } : {}), ...(audience ? { audience } : {}),
       ...(frame ? { frame } : {}), business, developments, competitors, role_asks, questions, unknowns, ...(unread.length && focus === "all" ? { unread } : {}), sources: sources.map(({ n: _n, ...s }) => s) };
     const made = await i.deps.publish(data).catch(() => null);
     if (made && /^https:\/\//.test(made.url)) { file_url = made.url; i.fileLinks?.push(made.url); } else notes.push("answered inline: the brief could not be saved");
   } else notes.push("answered inline: research files are not switched on here");
   const area = focus === "all" ? "" : ` The person asked to go deeper on ${focus === "questions" ? `the questions${audience ? ` for the ${audience}` : ""}` : `the ${focus}`}: talk about that area only.`;
-  return { kind: "company", status: "ok", company, role, ask, focus, audience, title, frame, business, developments, competitors, role_asks, questions, unknowns, sources, unread, file_url, dropped, notes,
+  if (format === "inline") return { kind: "company", status: "ok", format, company, role, ask, focus, audience, title, frame, business, developments, competitors, role_asks, questions, unknowns, sources, unread, file_url, dropped, notes,
+    note: `The person asked for the answer in chat. Write three to five short sentences from the lines above only: what the company does and what someone in this role would work on, each sentence ending with its source numbers like [1]. Write no link, no question list and no source list: code adds the interview questions, what the sources cannot establish and the numbered sources after your text.${roleAsk}` };
+  return { kind: "company", status: "ok", format, company, role, ask, focus, audience, title, frame, business, developments, competitors, role_asks, questions, unknowns, sources, unread, file_url, dropped, notes,
     note: `Reply in two or three plain sentences: the most useful themes for the interview, drawn only from the lines above, and that the brief with its sources is in the file${file_url ? "" : " (no file was made: say so)"}.${area} Write no link and no figure that is not in a line above.${roleAsk}` };
 }
 
@@ -226,8 +234,11 @@ export async function researchCompany(i: { company: string; role?: string | null
 const ROLE_Q = /\b(?:role|position|job|team|internship|title|interviewing\s+for)\b/i;
 export function enforceCompanyReply(reply: string, r: CompanyResult): string {
   if (r.status !== "ok") {
-    const kept = stripUrls(reply).split(/(?<=[.!?])\s+/).filter((s) => s && !numbersIn(s).length && (!/\?\s*$/.test(s) || (r.ask && ROLE_Q.test(s)))).join(" ");
-    return kept || NO_SOURCES;
+    // Only sentences that say research could not run (a blocker, nothing from memory) stand; anything else (apply instructions,
+    // a claim) gives way to the blocker code names. The role question stays when the role is unknown.
+    const SAYS_NO = /\b(?:couldn['’]?t|could not|can['’]?t|cannot|unable to|wasn['’]?t able|was not able|not able to|blocked|refused|no (?:source|page))\b/i;
+    const kept = stripUrls(reply).split(/(?<=[.!?])\s+/).filter((s) => s && !numbersIn(s).length && (/\?\s*$/.test(s) ? !!(r.ask && ROLE_Q.test(s)) : SAYS_NO.test(s) && !/\b(?:but|however)\b/i.test(s))).join(" ");
+    return kept || (r.blocker ? `I couldn't do this research: ${r.blocker}. Nothing was applied for or sent.` : NO_SOURCES);
   }
   const lines: string[] = r.focus === "all"
     ? [r.frame?.text ?? "", ...r.business.map((x) => x.text), ...r.developments.map((x) => x.text), ...r.competitors.map((x) => `${x.name} ${x.text}`), ...r.role_asks.map((x) => x.text), ...r.questions.map((x) => x.text)]
@@ -235,14 +246,31 @@ export function enforceCompanyReply(reply: string, r: CompanyResult): string {
     : r.focus === "competitors" ? r.competitors.map((x) => `${x.name} ${x.text}`) : r.role_asks.map((x) => x.text);
   const all = lines.filter(Boolean).join("\n"), nums = numbersIn(all), known = `${all}\n${r.company} ${r.role ?? ""} ${r.audience ?? ""}`;
   let asked = false;
-  const body = stripUrls(reply).replace(/\s*\[\d+\]/g, "").split(/(?<=[.!?])\s+/).filter((s) => {
+  const inline = r.format === "inline", max = r.sources.length;
+  const cleaned = inline ? stripUrls(reply).replace(/\[(\d+)\]/g, (m, n) => Number(n) >= 1 && Number(n) <= max ? m : "") : stripUrls(reply).replace(/\s*\[\d+\]/g, "");
+  const body = cleaned.split(/(?<=[.!?])\s+/).filter((s) => {
     if (!s.trim()) return false;
     if (/\?\s*$/.test(s)) { // a question to the person
       if (!r.ask) return !numbersIn(s).length && specifics(s).names.every((n) => word(n, known));
       if (asked || !ROLE_Q.test(s)) return false;
       asked = true; return true;
     }
-    return numbersIn(s).every((n) => nums.some((x) => numEq(x, n))) && specifics(s).names.every((n) => word(n, known));
+    const plain = s.replace(/\[\d+\]/g, "");
+    // In chat, a factual sentence must cite a source (the sources are listed under it).
+    return (!inline || /\[\d+\]/.test(s)) && numbersIn(plain).every((n) => nums.some((x) => numEq(x, n))) && specifics(plain).names.every((n) => word(n, known));
   }).join(" ").trim();
-  return body || lines.filter(Boolean).slice(0, 2).join(" ");
+  const text = body || lines.filter(Boolean).slice(0, 2).join(" ");
+  if (!inline) return text;
+  // The chat answer's evidence, from the result only: the reading (labelled), the grounded questions, what the sources cannot
+  // establish (with each limited or unopened source), and the numbered sources with their read dates.
+  const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+  const cite = (c: number[]) => c.map((n) => `[${n}]`).join("");
+  const limits = r.sources.filter((x) => x.limit).map((x) => `[${x.n}] is ${x.limit}${x.dated ? ` (newest date ${x.dated})` : ""}`);
+  const out = [text];
+  if (r.frame) out.push(`My interpretation, not a sourced fact: ${r.frame.text} ${cite(r.frame.cite)}`);
+  if (r.questions.length) out.push(`Questions you could ask:\n${r.questions.map((q, k) => `${k + 1}. ${q.text} ${cite(q.cite)}`).join("\n")}`);
+  const unk = [...r.unknowns, ...limits.map((l) => `Source ${l}.`), ...r.unread];
+  if (unk.length) out.push(`Not established by these sources:\n${unk.map((u) => `- ${u}`).join("\n")}`);
+  out.push(r.sources.map((x) => `[${x.n}] ${x.title}: ${x.url} (read ${day(x.fetched_at)})`).join("\n"));
+  return out.join("\n\n");
 }

@@ -296,13 +296,14 @@ export function careerTools(deps: {
       question: str("The person's ask, in their words"),
       focus: { type: "string", enum: [...FOCI], description: "all: the full brief. Otherwise the one area the person asked to go deeper on" },
       audience: str("Who the questions are for, if they said (e.g. 'hiring manager', 'recruiter')"),
+      format: { type: "string", enum: ["file", "inline"], description: "file (default): the brief File and a short chat summary. inline: only when the person asked for the answer in chat" },
       sites: strs("The company's website domains, like stripe.com (only ones they wrote or a tool returned)"),
       queries: strs("Up to 3 web search queries that would find the company's own product, newsroom and role pages"),
     }, ["company", "question"]),
     run: async (i, c) => {
       const list = (x: unknown) => Array.isArray(x) ? x.map(String).filter(Boolean).slice(0, 4) : [];
       const company = String(i.company ?? "").trim(), role = String(i.role ?? "").trim() || null, q = String(i.question ?? c.turn?.message ?? "");
-      const r = await researchCompany({ company, role, question: q, focus: (FOCI as readonly string[]).includes(String(i.focus)) ? i.focus as Focus : "all", audience: i.audience ? String(i.audience) : null, now: c.now,
+      const r = await researchCompany({ company, role, question: q, focus: (FOCI as readonly string[]).includes(String(i.focus)) ? i.focus as Focus : "all", format: i.format === "inline" ? "inline" : "file", audience: i.audience ? String(i.audience) : null, now: c.now,
         deps: deps.market!, fileLinks: c.turn ? (c.turn.fileLinks ??= []) : undefined,
         plan: { queries: list(i.queries).slice(0, 3).concat(list(i.queries).length ? [] : [`${company} ${role ?? ""}`.trim()]), companies: company ? [company] : [], sites: list(i.sites) } });
       deps.market!.onResult?.(r);

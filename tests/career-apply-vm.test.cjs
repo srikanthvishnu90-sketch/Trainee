@@ -276,3 +276,23 @@ test("a sign-in wall is handed back as 'needs you', never signed into, nothing s
     assert.equal(mock.submissions.length, 0);
   } finally { await browser.close(); await mock.close(); }
 });
+
+// WO-M fix a: a required question with no confirmed answer, found by the worker, ends not_submitted / needs_answers, and the
+// database's re-prepare (career_apply_reprepare_on_needs_answers, 20261101130000) puts the posting back in the person's queue
+// and asks for a preparation. Before, the VM wrote needs_user / "missing_required_answer: ..." and the trigger never fired.
+test("a missing answer found by the VM is re-prepared: not_submitted / needs_answers, back in the queue, a preparation asked", async () => {
+  await admin.q("update career_apply_jobs set state='not_submitted', reason='test reset' where state in ('queued','driving')");
+  await setting("APPLY_VM", "on"); await setting("APPLY_VM_USER_IDS", "*"); await setting("APPLY_VM_ALLOW_LOCAL", "on");
+  await seedPeople(admin, 9100, 1);
+  await seedItems(admin, 9100, 1, 1, `'https://boards.greenhouse.io/acme/jobs/9101'`, undefined, "ok", { job: "NEEDS-ANS-", co: "Co NA2 " });
+  const engine = async () => ({ status: "not_submitted", reason: "missing_required_answer", field: "Why do you want to work here?", attempts: 1, ms: 1,
+    needs: [{ label: "Why do you want to work here?", reason: "no_confirmed_answer" }] });
+  // A stand-in engine: nothing is opened (the queue takes only https links; the host is allowed so prepare() passes).
+  const w = createWorker({ rpc: mk(), browser: {}, applyOne: engine, workerId: "vm-na", concurrency: 1, allowHosts: ["boards.greenhouse.io"], evidenceDir: null, log: () => {} });
+  assert.equal(await w.tick(), 1);
+  while (w.inflight.size) await new Promise((r) => setTimeout(r, 20));
+  assert.equal(await one(`select state||':'||reason from career_apply_jobs where user_id='${uid(9101)}' and job_id='NEEDS-ANS-1'`), "not_submitted:needs_answers");
+  assert.equal(await one(`select evidence->'questions'->0->>'label' from career_apply_jobs where user_id='${uid(9101)}' and job_id='NEEDS-ANS-1'`), "Why do you want to work here?");
+  assert.equal(await one(`select state from career_apply_wanted where user_id='${uid(9101)}' and posting_key='NEEDS-ANS-1'`), "waiting", "the posting is back in the person's queue");
+  assert.equal(await one(`select count(*) from career_apply_prepare_requests where user_id='${uid(9101)}' and 'NEEDS-ANS-1' = any(job_ids)`), "1", "a preparation is asked for");
+});

@@ -45,7 +45,7 @@ export const MEASURE = `(() => {
   });
   const claims = [...document.querySelectorAll("[data-src=external]")].map((el) => ({ el: name(el), link: !!el.querySelector('a[href^="https://"]'), time: !!el.querySelector("time[datetime]") }));
   const effects = [...document.querySelectorAll("[data-effect]")].map((el) => ({ el: name(el), effect: el.dataset.effect, tag: el.tagName, download: el.hasAttribute("download"), pri: el.classList.contains("ff-pri"), disabled: !!el.disabled }));
-  const restrictions = [...document.querySelectorAll(".ff-fit.ff-n-danger")].map((el) => { const a = el.closest(".ff-role"); if (!a) return false; const x = el.getBoundingClientRect(), y = a.getBoundingClientRect(); return x.top >= y.top && x.bottom <= y.bottom; });
+  const restrictions = [...document.querySelectorAll(".ff-restr")].map((el) => { const a = el.closest(".ff-role"); if (!a) return false; const x = el.getBoundingClientRect(), y = a.getBoundingClientRect(); return x.top >= y.top && x.bottom <= y.bottom; });
   const ff = document.querySelector(".ff"), fr = ff ? ff.getBoundingClientRect() : null;
   return { scrollW: document.documentElement.scrollWidth, innerW: window.innerWidth, wide, texts, actions, claims, effects, restrictions,
     column: fr ? { x: fr.x, w: fr.width, right: window.innerWidth - fr.right } : null, unconfirmed: [...document.querySelectorAll("[data-unconfirmed]")].map((e) => e.textContent.trim()) };

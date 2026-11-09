@@ -1,3 +1,4 @@
+-- definer-scan: dynamic function DDL reviewed (career_apply_handoff_install rewrites installed bodies by exact anchors)
 -- WO-L (b, d): an application stopped by an employer's sign-in wall is the person's to finish, and their answer is recorded.
 --
 -- Before: the cloud worker ended such an application needs_user (login_required, bot_check, email_code) and nothing could
@@ -17,8 +18,17 @@
 -- moment the worker stops (the work order's first sketch): then career_apply_prepare_candidates (an alert within 14 days)
 -- would prepare it again on its own and put a second card in front of someone just told to finish it at the employer,
 -- and the same wall would stop that one too.
--- career_apply_vm_handoff_requeue (20261028180000) re-queues a handed-back row with its old approval; it now refuses a
--- row the person already answered.
+-- career_apply_vm_handoff_requeue (20261028180000) re-queued a handed-back row under its old approval (architect, WO-L):
+--   a CLOUD row (the apply VM, or a portal triage handed back) is refused: a fresh cloud context never carries the
+--   person's sign-in, and the approval was spent on the wall. Those go through career_apply_person_finished_as.
+--   a row the person's own engine ran (source own_computer or extension: their browser session persists) is re-queued
+--   under the same approval only while the payload still hashes to it and nothing was clicked; its source is cleared so
+--   career_apply_claim_own can take it again (career_apply_jobs_fixed allows that for this one function's re-queue).
+--   Either way, a hand-off the person already answered is never re-queued.
+-- A person-submitted row is left out of the daily-cap "went" readers (architect, WO-L): that cap paces Trainee's own
+-- sends, and the person submitting themselves is not Trainee sending. It still counts as sent everywhere else (the
+-- posting ledger, the pipeline, the overview, the mail match). Rewritten by exact anchors (career_apply_handoff_install,
+-- which career_apply_reconcile_bridge now ends with).
 -- Additive and reversible (supabase/rollbacks/20261109150000_career_apply_handoff_finish.down.sql). Idempotent.
 
 -- 1. History: the form needed answers (20261101130000), or the person said they did not finish a wall nothing was sent past.
@@ -82,7 +92,7 @@ end $$;
 revoke all on function public.career_apply_person_finished_as(uuid, uuid, text) from public, anon, authenticated;
 grant execute on function public.career_apply_person_finished_as(uuid, uuid, text) to service_role;
 
--- 4. 20261028180000's re-queue, refusing a hand-off the person already answered (its old approval is spent).
+-- 4. 20261028180000's re-queue: cloud rows go through the hand-off File; the person's own engine may be re-queued.
 create or replace function public.career_apply_vm_handoff_requeue(p_user uuid, p_job_id text) returns jsonb
 language plpgsql security definer set search_path = public, pg_temp as $$
 declare j public.career_apply_jobs;
@@ -90,11 +100,77 @@ begin
  select * into j from public.career_apply_jobs where user_id = p_user and job_id = p_job_id and state = 'needs_user' and reason = 'login_required'
   and not (evidence ? 'by_person') for update;
  if not found then return jsonb_build_object('ok', false); end if;
- -- A portal the VM cannot fill at all (a sign-in-only employer) is finished by the person; re-queuing it would wait for nothing.
- if not public.career_apply_vm_claimable(j.url) then return jsonb_build_object('ok', false, 'why', 'site_not_supported_yet'); end if;
- if public.career_apply_vm_approval_refusal(j, clock_timestamp()) is not null then return jsonb_build_object('ok', false, 'why', 'not_approved'); end if;
- update public.career_apply_jobs set state = 'queued', reason = null, evidence = evidence || jsonb_build_object('handoff_done_at', clock_timestamp()), updated_at = clock_timestamp()
+ if j.source is distinct from 'own_computer' and j.source is distinct from 'extension' then
+  return jsonb_build_object('ok', false, 'why', 'finish_in_handoff_file');
+ end if;
+ if j.approval_hash is distinct from j.payload_hash or j.payload_hash is distinct from public.career_apply_payload_hash(j.payload) then
+  return jsonb_build_object('ok', false, 'why', 'approval_changed');
+ end if;
+ if coalesce(j.vm_phase, '') = 'submitting' or j.evidence ? 'clicked_at'
+  or (jsonb_typeof(j.evidence->'proof') = 'object' and j.evidence->'proof' ? 'click') then
+  return jsonb_build_object('ok', false, 'why', 'clicked');
+ end if;
+ perform set_config('career.apply_requeue', j.id::text, true);
+ update public.career_apply_jobs set state = 'queued', reason = null, source = null, attempts = 0, lease_token = null, claimed_at = null,
+  evidence = evidence || jsonb_build_object('handoff_done_at', clock_timestamp(), 'handoff_source', j.source), updated_at = clock_timestamp()
   where id = j.id;
+ perform set_config('career.apply_requeue', '', true);
  return jsonb_build_object('ok', true);
 end $$;
 revoke all on function public.career_apply_vm_handoff_requeue(uuid, text) from public, anon, authenticated;
+
+-- 5. The anchored rewrites: the daily-cap readers leave out a person-submitted row; the source of a local hand-off may be
+--    cleared by the re-queue above (career.apply_requeue names that row, as 20261029180000's own re-queue does).
+create or replace function public.career_apply_handoff_install() returns text
+language plpgsql security definer set search_path = public, pg_temp as $hi$
+declare n int := 0; f text; bad text[] := '{}';
+ fns text[] := array['public.career_apply_message_cloud_authorize(uuid,uuid,text,text)', 'public.career_apply_cloud_refusal(public.career_apply_jobs,timestamptz)',
+  'public.career_apply_cloud_text_refusal(public.career_apply_jobs,timestamptz,text,integer,integer)',
+  'public.career_apply_cloud_text_claim_at(integer,timestamptz,text,integer,integer)'];
+begin
+ n := n + public.career_apply_mass_submit_rewrite(fns[1], array[
+  E'id<>j.id and state=any(went) and claimed_at>n-interval''1 day''',
+  E'id<>j.id and state=any(went) and coalesce(reason,'''')<>''finished_by_person'' and claimed_at>n-interval''1 day''']);
+ n := n + public.career_apply_mass_submit_rewrite(fns[2], array[
+  E'where user_id = j.user_id and state = any(went) and claimed_at > p_now - interval ''1 day'')',
+  E'where user_id = j.user_id and state = any(went) and coalesce(reason, '''') <> ''finished_by_person'' and claimed_at > p_now - interval ''1 day'')']);
+ n := n + public.career_apply_mass_submit_rewrite(fns[3], array[
+  E'x.state = any(went)\n  and x.claimed_at > p_now - interval ''1 day'') >= cap',
+  E'x.state = any(went) and coalesce(x.reason, '''') <> ''finished_by_person''\n  and x.claimed_at > p_now - interval ''1 day'') >= cap']);
+ n := n + public.career_apply_mass_submit_rewrite(fns[4], array[
+  E'y.state = any(went) and y.claimed_at > p_now - interval ''1 day'')',
+  E'y.state = any(went) and coalesce(y.reason, '''') <> ''finished_by_person'' and y.claimed_at > p_now - interval ''1 day'')']);
+ n := n + public.career_apply_mass_submit_rewrite('public.career_apply_jobs_fixed()', array[
+  E'new.source is null and old.state = ''driving'' and new.state = ''queued''',
+  E'new.source is null and old.state in (''driving'', ''needs_user'') and new.state = ''queued''']);
+ -- Every installed one must now carry the change; an anchor that moved fails loudly, never silently.
+ foreach f in array fns loop
+  if to_regprocedure(f) is not null and position('finished_by_person' in pg_get_functiondef(to_regprocedure(f))) = 0 then bad := bad || f; end if;
+ end loop;
+ -- The guard is checked only in a shape that has the re-queue exception at all (20261029180000 and later, as production):
+ -- an older one (a migration-order test's) allows no source change, so a local re-queue there fails loudly (source_fixed).
+ f := pg_get_functiondef('public.career_apply_jobs_fixed()'::regprocedure);
+ if position('career.apply_requeue' in f) > 0 and position('old.state in (''driving'', ''needs_user'')' in f) = 0 then
+  bad := bad || 'public.career_apply_jobs_fixed()'::text; end if;
+ if cardinality(bad) > 0 then raise exception 'handoff: an anchor was not found in %', array_to_string(bad, ', '); end if;
+ return format('rewritten %s', n);
+end $hi$;
+revoke all on function public.career_apply_handoff_install() from public, anon, authenticated;
+
+-- 20261101130000's reconcile, ending with the rewrite above too.
+create or replace function public.career_apply_reconcile_bridge() returns text
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare r text;
+begin
+ r := public.career_apply_reconcile_bridge_20261025110000();
+ perform public.career_apply_cloud_refusal_own_pace();
+ perform public.career_apply_mass_submit_install();
+ perform public.career_apply_submit_worker_install();
+ perform public.career_apply_cloud_authorize_closed_install();
+ perform public.career_apply_reprepare_install();
+ perform public.career_apply_handoff_install();
+ return r;
+end $$;
+revoke all on function public.career_apply_reconcile_bridge() from public, anon, authenticated;
+
+select public.career_apply_handoff_install();

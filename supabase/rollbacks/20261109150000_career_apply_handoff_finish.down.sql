@@ -16,6 +16,39 @@ create unique index if not exists career_apply_jobs_live_posting on public.caree
  where not (state = 'not_submitted' and coalesce(reason, '') = 'needs_answers');
 drop index if exists public.career_apply_jobs_live_posting_v2;
 drop function if exists public.career_apply_person_finished_as(uuid, uuid, text);
+-- The anchored rewrites, reversed by the same anchors; then the reconcile as 20261101130000 left it.
+do $d$
+begin
+ perform public.career_apply_mass_submit_rewrite('public.career_apply_message_cloud_authorize(uuid,uuid,text,text)', array[
+  E'id<>j.id and state=any(went) and coalesce(reason,'''')<>''finished_by_person'' and claimed_at>n-interval''1 day''',
+  E'id<>j.id and state=any(went) and claimed_at>n-interval''1 day''']);
+ perform public.career_apply_mass_submit_rewrite('public.career_apply_cloud_refusal(public.career_apply_jobs,timestamptz)', array[
+  E'where user_id = j.user_id and state = any(went) and coalesce(reason, '''') <> ''finished_by_person'' and claimed_at > p_now - interval ''1 day'')',
+  E'where user_id = j.user_id and state = any(went) and claimed_at > p_now - interval ''1 day'')']);
+ perform public.career_apply_mass_submit_rewrite('public.career_apply_cloud_text_refusal(public.career_apply_jobs,timestamptz,text,integer,integer)', array[
+  E'x.state = any(went) and coalesce(x.reason, '''') <> ''finished_by_person''\n  and x.claimed_at > p_now - interval ''1 day'') >= cap',
+  E'x.state = any(went)\n  and x.claimed_at > p_now - interval ''1 day'') >= cap']);
+ perform public.career_apply_mass_submit_rewrite('public.career_apply_cloud_text_claim_at(integer,timestamptz,text,integer,integer)', array[
+  E'y.state = any(went) and coalesce(y.reason, '''') <> ''finished_by_person'' and y.claimed_at > p_now - interval ''1 day'')',
+  E'y.state = any(went) and y.claimed_at > p_now - interval ''1 day'')']);
+ perform public.career_apply_mass_submit_rewrite('public.career_apply_jobs_fixed()', array[
+  E'new.source is null and old.state in (''driving'', ''needs_user'') and new.state = ''queued''',
+  E'new.source is null and old.state = ''driving'' and new.state = ''queued''']);
+end $d$;
+create or replace function public.career_apply_reconcile_bridge() returns text
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare r text;
+begin
+ r := public.career_apply_reconcile_bridge_20261025110000();
+ perform public.career_apply_cloud_refusal_own_pace();
+ perform public.career_apply_mass_submit_install();
+ perform public.career_apply_submit_worker_install();
+ perform public.career_apply_cloud_authorize_closed_install();
+ perform public.career_apply_reprepare_install();
+ return r;
+end $$;
+revoke all on function public.career_apply_reconcile_bridge() from public, anon, authenticated;
+drop function if exists public.career_apply_handoff_install();
 -- 20261028180000's re-queue, as it was.
 create or replace function public.career_apply_vm_handoff_requeue(p_user uuid, p_job_id text) returns jsonb
 language plpgsql security definer set search_path = public, pg_temp as $$
@@ -30,3 +63,4 @@ begin
   where id = j.id;
  return jsonb_build_object('ok', true);
 end $$;
+revoke all on function public.career_apply_vm_handoff_requeue(uuid, text) from public, anon, authenticated;

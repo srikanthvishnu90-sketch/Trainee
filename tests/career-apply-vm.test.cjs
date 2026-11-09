@@ -131,12 +131,14 @@ test("refusals: LinkedIn, Indeed and Handshake are never driven; Workday-style p
   assert.equal(by["REF-6"].status, "preparing");
   // the person signs in themselves (handoff), then the item is driven again; nothing else can be re-queued this way
   assert.deepEqual(await admin.q(`select public.career_apply_vm_handoff_requeue('${uid(3001)}','REF-1')::text`), ['{"ok": false}']);
-  assert.deepEqual(await admin.q(`select public.career_apply_vm_handoff_requeue('${uid(3001)}','REF-4')::text`), ['{"ok": false, "why": "site_not_supported_yet"}'], "a sign-in-only portal is finished by the person");
-  // a sign-in wall on a form the VM does fill (the worker handed it back): after the person signs in themselves, it is driven again
+  assert.deepEqual(await admin.q(`select public.career_apply_vm_handoff_requeue('${uid(3001)}','REF-4')::text`), ['{"ok": false, "why": "finish_in_handoff_file"}'], "a sign-in-only portal is finished by the person, in the hand-off File");
+  // a sign-in wall on a form the VM does fill (the worker handed it back): WO-L (architect ruling) a cloud drive is never
+  // re-queued under its spent approval (a fresh cloud context never carries the person's sign-in); the person finishes it
+  // in the hand-off File (career_apply_person_finished_as). Was: re-queued and driven again.
   await admin.q(`update career_apply_jobs set state='needs_user', reason='login_required', attempts=1, lease_token=gen_random_uuid(), claimed_at=now() where user_id='${uid(3001)}' and job_id='REF-6'`);
   await admin.q(`update career_apply_jobs set state='needs_user' where user_id='${uid(3001)}' and job_id='REF-6'`);
-  assert.deepEqual(await admin.q(`select public.career_apply_vm_handoff_requeue('${uid(3001)}','REF-6')::text`), ['{"ok": true}']);
-  assert.equal(await one(`select state from career_apply_jobs where user_id='${uid(3001)}' and job_id='REF-6'`), "queued");
+  assert.deepEqual(await admin.q(`select public.career_apply_vm_handoff_requeue('${uid(3001)}','REF-6')::text`), ['{"ok": false, "why": "finish_in_handoff_file"}']);
+  assert.equal(await one(`select state from career_apply_jobs where user_id='${uid(3001)}' and job_id='REF-6'`), "needs_user");
 });
 
 test("honest outcomes: submitted only after the 'submitting' record; a dead worker retries only before it", async () => {

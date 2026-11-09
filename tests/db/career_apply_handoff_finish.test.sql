@@ -18,16 +18,16 @@ insert into storage.objects (bucket_id, name) values ('career-resumes', '0000000
 --  hf:1 SSO wall after a drive (WO-L a: nothing_sent)      hf:2 password wall after a drive (nothing_sent)
 --  hf:3 a portal triage handed back before any drive        hf:4 a wall recorded before WO-L (no nothing_sent)
 --  hf:5 a required question with no answer (needs_user, not a wall)
-insert into career_apply_jobs(id,user_id,job_id,company,url,payload,payload_hash,approval_hash)
+insert into public.career_apply_jobs(id,user_id,job_id,company,url,payload,payload_hash,approval_hash)
 select ('10000000-0000-4000-8000-0000014c000'||n)::uuid, '00000000-0000-4000-8000-0000014c0001', 'greenhouse:hf:'||n, 'TEST HF', 'https://boards.greenhouse.io/hf/jobs/'||n,
  jsonb_build_object('resume_sha256',repeat('a',64),'job_id','greenhouse:hf:'||n,'engine_approval',repeat(n::text,64),'title','TEST Intern'), repeat(n::text,64), repeat(n::text,64)
 from generate_series(1,5) n;
 set local session_replication_role = replica;
-update career_apply_jobs set state='needs_user', reason='login_required', attempts=1, evidence='{"nothing_sent":true,"wall":"sso_redirect"}' where job_id='greenhouse:hf:1';
-update career_apply_jobs set state='needs_user', reason='login_required', attempts=1, evidence='{"nothing_sent":true,"wall":"password"}' where job_id='greenhouse:hf:2';
-update career_apply_jobs set state='needs_user', reason='login_required', attempts=0, evidence='{"handoff":"person_signs_in"}' where job_id='greenhouse:hf:3';
-update career_apply_jobs set state='needs_user', reason='login_required', attempts=1, evidence='{}' where job_id='greenhouse:hf:4';
-update career_apply_jobs set state='needs_user', reason='missing_required_answer: Graduation date', attempts=1, evidence='{"nothing_sent":true}' where job_id='greenhouse:hf:5';
+update public.career_apply_jobs set state='needs_user', reason='login_required', attempts=1, evidence='{"nothing_sent":true,"wall":"sso_redirect"}' where job_id='greenhouse:hf:1';
+update public.career_apply_jobs set state='needs_user', reason='login_required', attempts=1, evidence='{"nothing_sent":true,"wall":"password"}' where job_id='greenhouse:hf:2';
+update public.career_apply_jobs set state='needs_user', reason='login_required', attempts=0, evidence='{"handoff":"person_signs_in"}' where job_id='greenhouse:hf:3';
+update public.career_apply_jobs set state='needs_user', reason='login_required', attempts=1, evidence='{}' where job_id='greenhouse:hf:4';
+update public.career_apply_jobs set state='needs_user', reason='missing_required_answer: Graduation date', attempts=1, evidence='{"nothing_sent":true}' where job_id='greenhouse:hf:5';
 set local session_replication_role = origin;
 
 -- 0. The index and the function agree; only the one RPC entry, service role only.
@@ -35,8 +35,8 @@ select t.ok(to_regclass('public.career_apply_jobs_live_posting') is null and to_
 select t.ok(not has_function_privilege('authenticated', 'public.career_apply_person_finished_as(uuid,uuid,text)', 'execute')
  and not has_function_privilege('anon', 'public.career_apply_person_finished_as(uuid,uuid,text)', 'execute')
  and has_function_privilege('service_role', 'public.career_apply_person_finished_as(uuid,uuid,text)', 'execute'), 'service role only');
-select t.ok((select not public.career_apply_job_history(j) from career_apply_jobs j where job_id='greenhouse:hf:1'), 'a wall is not history before the person answers (no automatic re-preparation)');
-select t.must_fail($$insert into career_apply_jobs(user_id,job_id,company,url,payload,payload_hash,approval_hash)
+select t.ok((select not public.career_apply_job_history(j) from public.career_apply_jobs j where job_id='greenhouse:hf:1'), 'a wall is not history before the person answers (no automatic re-preparation)');
+select t.must_fail($$insert into public.career_apply_jobs(user_id,job_id,company,url,payload,payload_hash,approval_hash)
  values ('00000000-0000-4000-8000-0000014c0001','greenhouse:hf:1','TEST HF','https://boards.greenhouse.io/hf/jobs/1',
   jsonb_build_object('resume_sha256',repeat('a',64),'job_id','greenhouse:hf:1','engine_approval',repeat('9',64)),repeat('9',64),repeat('9',64))$$,
  'duplicate key|career_apply_jobs_live_posting', 'while it waits on the person the posting has one live row');
@@ -46,32 +46,78 @@ select t.ok(public.career_apply_person_finished_as('00000000-0000-4000-8000-0000
 select t.ok(public.career_apply_person_finished_as('00000000-0000-4000-8000-0000014c0002','10000000-0000-4000-8000-0000014c0001','submitted')->>'why' = 'not_found', 'another person cannot answer it');
 select t.ok(public.career_apply_person_finished_as('00000000-0000-4000-8000-0000014c0001','10000000-0000-4000-8000-0000014c0005','submitted')->>'why' = 'not_handed_back', 'a missing answer is not a wall');
 select t.ok(public.career_apply_person_finished_as('00000000-0000-4000-8000-0000014c0001','10000000-0000-4000-8000-0000014c0004','not_done')->>'why' = 'not_handed_back', 'a wall with no proof nothing was sent is refused');
-select t.ok((select state='needs_user' and evidence='{}'::jsonb from career_apply_jobs where job_id='greenhouse:hf:4'), 'and is left exactly as it was');
+select t.ok((select state='needs_user' and evidence='{}'::jsonb from public.career_apply_jobs where job_id='greenhouse:hf:4'), 'and is left exactly as it was');
 
 -- 2. "I submitted it": submitted_unconfirmed by the person, no confirmation invented; a double tap is a no-op; the other answer is refused.
 select t.ok(public.career_apply_person_finished_as('00000000-0000-4000-8000-0000014c0001','10000000-0000-4000-8000-0000014c0002','submitted') @> '{"ok":true,"state":"submitted_unconfirmed"}', 'submitted');
 select t.ok((select state='submitted_unconfirmed' and reason='finished_by_person' and confirmation_id is null
   and evidence->'by_person'->>'outcome'='submitted' and evidence->'by_person'->>'wall'='login_required' and evidence->>'nothing_sent'='true'
- from career_apply_jobs where job_id='greenhouse:hf:2'), 'by the person, unconfirmed, no confirmation id, the wall kept');
+ from public.career_apply_jobs where job_id='greenhouse:hf:2'), 'by the person, unconfirmed, no confirmation id, the wall kept');
 select t.ok(public.career_apply_person_finished_as('00000000-0000-4000-8000-0000014c0001','10000000-0000-4000-8000-0000014c0002','submitted') @> '{"ok":true,"already":true}', 'the same answer twice is one answer');
 select t.ok(public.career_apply_person_finished_as('00000000-0000-4000-8000-0000014c0001','10000000-0000-4000-8000-0000014c0002','not_done')->>'why' = 'already_answered', 'the other answer after it is refused');
-select t.ok((select not public.career_apply_job_history(j) from career_apply_jobs j where job_id='greenhouse:hf:2'), 'a submitted one is not history: the posting stays sent');
+select t.ok((select not public.career_apply_job_history(j) from public.career_apply_jobs j where job_id='greenhouse:hf:2'), 'a submitted one is not history: the posting stays sent');
 -- a portal triage handed back before any drive can be finished by the person too
 select t.ok(public.career_apply_person_finished_as('00000000-0000-4000-8000-0000014c0001','10000000-0000-4000-8000-0000014c0003','submitted') @> '{"ok":true}', 'a triaged portal the person finished');
 
 -- 3. "I didn't finish": history, back in the queue, a preparation asked for; the old approval is never used again.
 select t.ok(public.career_apply_person_finished_as('00000000-0000-4000-8000-0000014c0001','10000000-0000-4000-8000-0000014c0001','not_done') @> '{"ok":true,"outcome":"not_done","reprepare":true}', 'not_done');
-select t.ok((select count(*)=1 from career_apply_prepare_requests where user_id='00000000-0000-4000-8000-0000014c0001' and 'greenhouse:hf:1' = any(job_ids) and state='queued'), 'a preparation is asked for (a new card)');
-select t.ok((select state='needs_user' and public.career_apply_job_history(j) and evidence->'by_person'->>'outcome'='not_done' from career_apply_jobs j where job_id='greenhouse:hf:1'), 'the row is history, its state unchanged');
-select t.ok((select state='waiting' from career_apply_wanted where user_id='00000000-0000-4000-8000-0000014c0001' and posting_key='greenhouse:hf:1'), 'the posting is back in the person''s queue');
-select t.must_fail($$insert into career_apply_jobs(user_id,job_id,company,url,payload,payload_hash,approval_hash)
+select t.ok((select count(*)=1 from public.career_apply_prepare_requests where user_id='00000000-0000-4000-8000-0000014c0001' and 'greenhouse:hf:1' = any(job_ids) and state='queued'), 'a preparation is asked for (a new card)');
+select t.ok((select state='needs_user' and public.career_apply_job_history(j) and evidence->'by_person'->>'outcome'='not_done' from public.career_apply_jobs j where job_id='greenhouse:hf:1'), 'the row is history, its state unchanged');
+select t.ok((select state='waiting' from public.career_apply_wanted where user_id='00000000-0000-4000-8000-0000014c0001' and posting_key='greenhouse:hf:1'), 'the posting is back in the person''s queue');
+select t.must_fail($$insert into public.career_apply_jobs(user_id,job_id,company,url,payload,payload_hash,approval_hash)
  values ('00000000-0000-4000-8000-0000014c0001','greenhouse:hf:1','TEST HF','https://boards.greenhouse.io/hf/jobs/1',
   jsonb_build_object('resume_sha256',repeat('a',64),'job_id','greenhouse:hf:1','engine_approval',repeat('1',64),'title','TEST Intern'),repeat('1',64),repeat('1',64))$$,
  'approval_spent', 'the old payload and approval are refused');
 select t.ok(public.career_apply_vm_handoff_requeue('00000000-0000-4000-8000-0000014c0001','greenhouse:hf:1') = '{"ok": false}'::jsonb, 'the VM re-queue never resends an answered hand-off');
-insert into career_apply_jobs(user_id,job_id,company,url,payload,payload_hash,approval_hash)
+insert into public.career_apply_jobs(user_id,job_id,company,url,payload,payload_hash,approval_hash)
  values ('00000000-0000-4000-8000-0000014c0001','greenhouse:hf:1','TEST HF','https://boards.greenhouse.io/hf/jobs/1',
   jsonb_build_object('resume_sha256',repeat('a',64),'job_id','greenhouse:hf:1','engine_approval',repeat('b',64),'title','TEST Intern'),repeat('b',64),repeat('b',64));
-select t.ok((select count(*)=2 from career_apply_jobs where job_id='greenhouse:hf:1'), 'the new card''s new approval makes the new row');
+select t.ok((select count(*)=2 from public.career_apply_jobs where job_id='greenhouse:hf:1'), 'the new card''s new approval makes the new row');
 select t.ok(public.career_apply_person_finished_as('00000000-0000-4000-8000-0000014c0001','10000000-0000-4000-8000-0000014c0001','submitted')->>'why' = 'already_answered', 'a history row cannot be turned into a submission afterwards');
+
+-- 4. The VM re-queue (architect, WO-L): a CLOUD row is never re-queued under its spent approval (a fresh cloud context
+--    never carries the person's sign-in); a row the person's own engine ran is, while its payload still hashes to the
+--    approval and nothing was clicked, with its source cleared so their own engine can claim it again.
+insert into public.career_apply_jobs(id,user_id,job_id,company,url,payload,payload_hash,approval_hash)
+select ('10000000-0000-4000-8000-0000014c000'||n)::uuid, '00000000-0000-4000-8000-0000014c0001', 'greenhouse:hf:'||n, 'TEST HF', 'https://boards.greenhouse.io/hf/jobs/'||n,
+ jsonb_build_object('resume_sha256',repeat('a',64),'job_id','greenhouse:hf:'||n,'engine_approval',repeat(n::text,64),'title','TEST Intern',
+  'privacy_epoch',1,'account_version',1,'expires_at',now()+interval '1 day'), repeat(n::text,64), repeat(n::text,64)
+from generate_series(6,9) n;
+insert into public.career_watch_kv(user_id,key,value) values ('00000000-0000-4000-8000-0000014c0001','career:account','{"epoch":1,"version":1,"paused":false}')
+ on conflict (user_id,key) do update set value = excluded.value;
+set local session_replication_role = replica;
+update public.career_apply_jobs set payload_hash = public.career_apply_payload_hash(payload), approval_hash = public.career_apply_payload_hash(payload)
+ where job_id in ('greenhouse:hf:6','greenhouse:hf:7','greenhouse:hf:8','greenhouse:hf:9');
+update public.career_apply_jobs set state='needs_user', reason='login_required', attempts=1, source='own_computer', claimed_at=now(), lease_token=gen_random_uuid(), evidence='{}' where job_id='greenhouse:hf:6';
+update public.career_apply_jobs set state='needs_user', reason='login_required', attempts=1, source='extension', claimed_at=now(), lease_token=gen_random_uuid(), evidence='{"proof":{"click":{"at":1}}}' where job_id='greenhouse:hf:7';
+update public.career_apply_jobs set state='needs_user', reason='login_required', attempts=1, source='own_computer', claimed_at=now(), lease_token=gen_random_uuid(), evidence='{}',
+ payload = payload || '{"title":"TEST changed after the yes"}' where job_id='greenhouse:hf:8';
+update public.career_apply_jobs set state='needs_user', reason='login_required', attempts=1, source='cloud', claimed_at=now(), lease_token=gen_random_uuid(), evidence='{"nothing_sent":true}' where job_id='greenhouse:hf:9';
+set local session_replication_role = origin;
+select t.ok(public.career_apply_vm_handoff_requeue('00000000-0000-4000-8000-0000014c0001','greenhouse:hf:9') = '{"ok": false, "why": "finish_in_handoff_file"}'::jsonb
+ and (select state='needs_user' and source='cloud' from public.career_apply_jobs where job_id='greenhouse:hf:9'), 'a cloud drive stopped at a wall is finished in the hand-off File, never re-queued');
+select t.ok(public.career_apply_vm_handoff_requeue('00000000-0000-4000-8000-0000014c0001','greenhouse:hf:7') = '{"ok": false, "why": "clicked"}'::jsonb, 'a local run that clicked is never re-queued');
+select t.ok(public.career_apply_vm_handoff_requeue('00000000-0000-4000-8000-0000014c0001','greenhouse:hf:8') = '{"ok": false, "why": "approval_changed"}'::jsonb, 'a payload that no longer hashes to its approval is not re-queued');
+select t.ok(public.career_apply_vm_handoff_requeue('00000000-0000-4000-8000-0000014c0001','greenhouse:hf:6') = '{"ok": true}'::jsonb, 'the person''s own engine, same approval, nothing clicked: re-queued');
+select t.ok((select state='queued' and source is null and attempts=0 and lease_token is null and claimed_at is null and reason is null
+  and evidence->>'handoff_source'='own_computer' and payload_hash=approval_hash and payload_hash=public.career_apply_payload_hash(payload)
+ from public.career_apply_jobs where job_id='greenhouse:hf:6'), 'queued again under the same approval, claimable by their own engine');
+select t.as_user('00000000-0000-4000-8000-0000014c0001');
+set role authenticated;
+create temp table hf_own as select * from public.career_apply_claim_own(10, 'own_computer');
+reset role;
+select t.ok((select count(*) = 1 from hf_own where job_id = 'greenhouse:hf:6' and state = 'driving' and source = 'own_computer'), 'and their own engine claims it again');
+select t.must_fail($$update public.career_apply_jobs set state='queued', source=null where job_id='greenhouse:hf:7'$$, 'source_fixed',
+ 'outside that re-queue a source still never changes');
+
+-- 5. A person-submitted row is left out of the daily-cap "went" readers (it still counts as sent everywhere else), and the
+--    launch reconcile keeps that.
+select t.ok((select bool_and(position('finished_by_person' in pg_get_functiondef(to_regprocedure(f))) > 0) from unnest(array[
+  'public.career_apply_message_cloud_authorize(uuid,uuid,text,text)', 'public.career_apply_cloud_refusal(public.career_apply_jobs,timestamptz)',
+  'public.career_apply_cloud_text_refusal(public.career_apply_jobs,timestamptz,text,integer,integer)',
+  'public.career_apply_cloud_text_claim_at(integer,timestamptz,text,integer,integer)']) f), 'every daily-cap reader leaves out a person-submitted row');
+select t.ok(position('career_apply_handoff_install' in pg_get_functiondef('public.career_apply_reconcile_bridge()'::regprocedure)) > 0
+ and public.career_apply_handoff_install() = 'rewritten 0', 'the reconcile ends with it, and it is already in place');
+select t.ok(public.career_apply_posting_sent('00000000-0000-4000-8000-0000014c0001','greenhouse:hf:2','https://boards.greenhouse.io/hf/jobs/2', null, false),
+ 'a posting the person submitted still counts as sent (never prepared or sent again)');
 rollback;

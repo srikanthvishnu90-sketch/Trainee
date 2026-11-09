@@ -186,7 +186,7 @@ function partHtml(x: Part, c: Ctx): string {
       const head = x.before ? `<p class="ff-it ff-pair"><del class="ff-old"><span class="ff-sr">Before: </span>${esc(x.before)}</del> <ins class="ff-new"><span class="ff-sr">After: </span>${esc(x.after)}</ins></p>` : `<p class="ff-it">${esc(x.after)}</p>`;
       return `<div class="ff-item ff-diff"><div class="ff-itb">${head}<p class="ff-p ff-mute">${x.lead ? `<strong class="ff-ink">${esc(x.lead)}</strong> ` : ""}${esc(x.text)}</p></div>${x.chip ? `<div class="ff-ita">${chipHtml(x.chip)}</div>` : ""}</div>`;
     }
-    case "person": return `<div class="ff-item ff-tiled"><span class="ff-avatar" aria-hidden="true">${esc(x.initials.slice(0, 3))}</span><div class="ff-itb"><p class="ff-it">${esc(x.name)} ${x.chip ? chipHtml(x.chip) : ""}</p><p class="ff-p ff-mute">${esc(x.text)}</p></div></div>`;
+    case "person": return `<div class="ff-item ff-tiled"><span class="ff-avatar" aria-hidden="true">${esc(x.initials.slice(0, 3))}</span><div class="ff-itb"><p class="ff-it">${esc(x.name)}</p><p class="ff-p ff-mute">${esc(x.text)}</p></div>${x.chip ? `<div class="ff-ita">${chipHtml(x.chip)}</div>` : ""}</div>`;
     case "divider": return `<hr class="ff-hr">`;
     case "html": return x.html;
   }

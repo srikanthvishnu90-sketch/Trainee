@@ -35,7 +35,10 @@ R.suite(FILE, [4], [CHAT], async (t: Deno.TestContext, w: any) => {
     const r = await w.say(CHAT, "Send this one.");
     ev.reply = r.reply;
     // B.4: two concrete choices ("submit the application for job 2, or send you the revised resume PDF?"), not "please clarify".
-    ok(/\?/.test(r.reply) && /PDF|resume/i.test(r.reply) && /\b(application|submit|job \d|role)\b/i.test(r.reply) && /\bor\b/i.test(r.reply), `a short question naming two concrete choices (the resume PDF or the application): ${r.reply.slice(0, 300)}`);
+    // Both choices concrete: the resume PDF by name, and a specific application (job N, or one at a named employer or role).
+    const pdfChoice = /\b(resume|revised|the|your)\s+(resume\s+)?PDF\b|\b(revised|tailored) resume\b|\bresume draft\b/i.test(r.reply);
+    const appChoice = /\bjob \d\b|\b(application|role|posting|internship)\s+(for|at|to|with)\s+(the\s+)?[A-Z][\w&.'-]+|\b[A-Z][\w&.'-]+(\s+[A-Z][\w&.'-]+)*\s+(application|role|internship)\b/.test(r.reply);
+    ok(/\?/.test(r.reply) && /\bor\b/i.test(r.reply) && pdfChoice && appChoice && !/\b(something|anything) else\b|\bor (other|another) (thing|one)\b/i.test(r.reply), `a short question naming two concrete choices (the resume PDF or a specific application): ${r.reply.slice(0, 300)}`);
     ok(!/please clarify|can you clarify|what do you mean\??$/i.test(r.reply), "not a generic clarification request");
     ok(r.docs.length === 0, "nothing sent while the referent is unsettled");
     ok((await w.sql(`select count(*) from public.career_apply_wanted where user_id = '${person}'`)) === "0" && (await w.sql(`select count(*) from public.career_outreach_drafts where user_id = '${person}'`)) === "0", "no application or message started");

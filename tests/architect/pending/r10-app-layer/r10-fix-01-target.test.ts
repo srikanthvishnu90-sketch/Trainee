@@ -30,7 +30,8 @@ R.suite(FILE, [1], [CHAT], async (t: Deno.TestContext, w: any) => {
     const r = await w.say(CHAT, "Can you make the first bullet less wordy?");
     ev.reply = r.reply;
     ok(/100\+/.test(r.reply), `the proposed bullet keeps the supplied scale (100+): ${r.reply.slice(0, 400)}`);
-    ok(/previous|before|was:|replac|instead of|changed (it )?(from|to)/i.test(r.reply), `the change is shown as a change (old beside new, or a change note): ${r.reply.slice(0, 400)}`);
+    // Old beside new: labelled ("Before:" / "Previous:" / "Old:" / "Was:") or "from <old> to <new>"; "before you apply" is not it.
+    ok(/\b(before|previous|old|original|was)\s*:/i.test(r.reply) || /\bfrom\s+["“'][^"”']{8,}["”']\s+to\s+["“']/i.test(r.reply) || /\bchanged\b[^.\n]{0,40}\bfrom\b[^\n]{8,}\bto\b/i.test(r.reply), `the change is shown old beside new: ${r.reply.slice(0, 400)}`);
     ok(!/Machine Learning|reddit/i.test(r.reply), "still the data analyst target");
   }, w);
   await check(t, FILE, 1, "'That is fine, give me the PDF.' delivers the revised one-page PDF on the same target", async (ev: any) => {

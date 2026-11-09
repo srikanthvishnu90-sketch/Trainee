@@ -17,9 +17,10 @@ R.suite(FILE, [3], [CHAT], async (t: Deno.TestContext, w: any) => {
     ev.reply = up.reply;
     ok(!/Skill:\s*(Skills|Interests|Certifications):/i.test(up.reply), `a section label is not filed as a skill: ${up.reply.match(/Skill:\s*(Skills|Interests|Certifications):[^\n]*/i)?.[0]}`);
     ok(!/Skill:\s*(Golf|Chess|Coding)\b/i.test(up.reply), "an interest is not a skill");
-    const em = /(\d+) experience/i.exec(up.reply);
+    const NUM = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
+    const em = new RegExp(`\\b(\\d+|${NUM.join("|")})\\s+(?:\\w+\\s+)?experience`, "i").exec(up.reply);
     ok(em, `the readback says how many experience entries it read: ${up.reply.slice(0, 300)}`);
-    const exp = Number(em![1]);
+    const exp = /^\d+$/.test(em![1]) ? Number(em![1]) : NUM.indexOf(em![1].toLowerCase());
     ok(exp <= 4, `only the four jobs are experience; skills, certifications and interests are not (${exp} experience entries read)`);
     ok(/skills?\b/i.test(up.reply) && /certifications?\b/i.test(up.reply) && /interests?\b/i.test(up.reply), "the readback names skills, certifications and interests as their own kinds");
     ok(!/Skill:\s*(Bloomberg Market Concepts|Google Data Analytics Certificate)/i.test(up.reply), "a certification is not a skill");

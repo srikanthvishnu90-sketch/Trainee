@@ -355,9 +355,17 @@ const RESEARCH_OVER = new Set(["career_document_delivery", "profile_export"]);
 // (research_company), not the router's company-intel recipe. "What should I ask in my interview?" names no company and stays prep.
 const INTERVIEW_AT = /\b(?:have|got|landed)\s+(?:an?\s+)?(.{2,48}?)\s+interviews?\b/i;
 const KNOW_OR_ASK = /\bwhat\s+(?:i\s+should|should\s+i|to|i\s+need\s+to|do\s+i\s+need\s+to)\s+(?:know|ask)\b|\b(?:research|brief\s+me\s+on|tell\s+me\s+about)\b/i;
+// Review F2 (item 6): also "an interview at/with <Name>" ("I have an interview at Stripe next week, what should I know?") and research
+// about a named company before the interview ("Tell me about Stripe's business before my interview, do not apply").
+const INTERVIEW_WITH = /\binterview(?:s|ing)?\s+(?:at|with)\s+(\p{Lu}[\p{L}&.-]+)/u;
+const ABOUT_BEFORE = /\b(?:tell\s+me\s+about|research|brief\s+me\s+on|what\s+should\s+i\s+know\s+about|look\s+into)\s+(\p{Lu}[\p{L}&.-]+)[^?!]{0,80}?\b(?:before|for|ahead\s+of)\s+(?:my|the|an?|this|that)\s+(?:\w+\s+){0,2}interview/iu;
 export function companyInterviewAsk(message: string): boolean {
   const m = String(message ?? "").replace(/[\u2019`]/g, "'"), hit = INTERVIEW_AT.exec(m);
-  return !!hit && /(?<![\p{L}])\p{Lu}[\p{L}&.-]+/u.test(hit[1]) && KNOW_OR_ASK.test(m);
+  if (hit && /(?<![\p{L}])\p{Lu}[\p{L}&.-]+/u.test(hit[1]) && KNOW_OR_ASK.test(m)) return true;
+  const w = INTERVIEW_WITH.exec(m);
+  if (w && !/^(?:I|My|The|A|An)$/.test(w[1]) && (KNOW_OR_ASK.test(m) || /\b(?:prepare|prep|ready)\b/i.test(m))) return true;
+  const b = ABOUT_BEFORE.exec(m);
+  return !!b && /^\p{Lu}/u.test(b[1]) && !/^(?:I|My|The|A|An)$/.test(b[1]);
 }
 // R10 WO-H, spec F.2 (owner's production turns, 2026-11-08 6:03-6:04 pm): "What's Stripe like to work for as a data analyst intern?
 // Give me a useful company research answer ... Don't apply or contact anyone." was claimed as a batch apply (career_batch_apply ->

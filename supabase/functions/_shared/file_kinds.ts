@@ -203,8 +203,8 @@ function companyBrief(x: Record<string, any>, v: V) {
     developments: lines(x.developments, "developments", 5, (q, p) => ({ date: v.str(q.date, `${p}.date`, { max: 20, links: false }), ...(q.measure ? { measure: v.one(q.measure, `${p}.measure`, ["volume", "forecast"] as const) } : {}) })),
     competitors: lines(x.competitors, "competitors", 4, (q, p) => ({ name: v.str(q.name, `${p}.name`, { max: 60, links: false }) })),
     questions: v.list(x.questions ?? [], "questions", 0, 6).map((r, i) => { const q = v.obj(r, `questions[${i}]`); return { text: v.str(q.text, `questions[${i}].text`, { max: 400, links: false }), cite: cite(q.cite, `questions[${i}].cite`) }; }),
-    unknowns: v.list(x.unknowns ?? [], "unknowns", 0, 6).map((g, i) => v.str(g, `unknowns[${i}]`, { max: 240, links: false })),
-    ...(x.unread !== undefined ? { unread: v.list(x.unread, "unread", 1, 6).map((g, i) => v.str(g, `unread[${i}]`, { max: 240, links: false })) } : {}), sources };
+    unknowns: v.list(x.unknowns ?? [], "unknowns", 0, 8).map((g, i) => v.str(g, `unknowns[${i}]`, { max: 240, links: false })),
+    ...(x.unread !== undefined ? { unread: v.list(x.unread, "unread", 1, 10).map((g, i) => v.str(g, `unread[${i}]`, { max: 240, links: false })) } : {}), sources };
   if (![out.business, out.developments, out.competitors, out.role_asks, out.questions].some((xs) => xs.length)) v.err("data", "a company brief needs at least one sourced line");
   for (let i = 1; i <= n; i++) if (!used.has(i)) v.err(`sources[${i - 1}]`, "is not cited by any line; leave it out");
   return out;

@@ -181,6 +181,17 @@ export const convertFree: Convert = (url, type, body) => {
   let u: URL; try { u = new URL(url); } catch { return null; }
   const host = u.hostname.toLowerCase(), path = u.pathname;
   const J = () => JSON.parse(body);
+  // One Greenhouse posting with its description (?content=true): what the role does, in the posting's own words.
+  if (host === "boards-api.greenhouse.io" && /^\/v1\/boards\/[^/]+\/jobs\/\d+$/.test(path)) {
+    const token = decodeURIComponent(path.split("/")[3] ?? ""), j = J();
+    if (!j?.title) return null;
+    const owner = clean(j.company_name, 80);
+    const desc = clean(String(j.content ?? "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&").replace(/<\/(p|li|h\d|div)>/gi, ". ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s*\.\s*\./g, "."), 6000);
+    const on = owner ? `${owner}'s Greenhouse job board (token ${token})` : `the Greenhouse job board with the token ${token}`;
+    const lines = [`Posting on ${on}: ${clean(j.title, 120)}${j.location?.name ? `, ${clean(j.location.name, 80)}` : ""}.`];
+    if (desc) lines.push(`The posting says: ${desc}`);
+    return { title: `${clean(j.title, 100)}: posting on ${owner || `token ${token}`}'s Greenhouse board`, text: lines.join("\n") };
+  }
   if (host === "boards-api.greenhouse.io") {
     const token = decodeURIComponent(path.split("/")[3] ?? ""), j = J();
     if (!Array.isArray(j?.jobs)) return null;
@@ -345,7 +356,7 @@ export function freeProvider(o: { fetch: typeof fetch; now: () => number; userAg
       return got.truncated ? null : JSON.parse(new TextDecoder().decode(got.bytes));
     } catch { return null; }
   };
-  async function board(slug: string): Promise<SearchHit | null> {
+  async function board(slug: string): Promise<{ hit: SearchHit; json: any; ats: string } | null> {
     const s = encodeURIComponent(slug);
     const tries: [string, string, (j: any) => boolean][] = [
       [`https://boards-api.greenhouse.io/v1/boards/${s}/jobs`, "Greenhouse", (j) => Array.isArray(j?.jobs)],
@@ -353,9 +364,9 @@ export function freeProvider(o: { fetch: typeof fetch; now: () => number; userAg
       [`https://api.ashbyhq.com/posting-api/job-board/${s}`, "Ashby", (j) => Array.isArray(j?.jobs)],
       [`https://api.smartrecruiters.com/v1/companies/${s}/postings`, "SmartRecruiters", (j) => Array.isArray(j?.content) && j.content.length > 0],
     ];
-    const got = await Promise.all(tries.map(async ([u, , ok]) => ok(await getJson(u))));
-    const i = got.indexOf(true);
-    return i < 0 ? null : hit(tries[i][0], `${tries[i][1]} job board: ${slug}`, "ats_board");
+    const got = await Promise.all(tries.map(async ([u, , ok]) => { const j = await getJson(u); return ok(j) ? j : null; }));
+    const i = got.findIndex((j) => j !== null);
+    return i < 0 ? null : { hit: hit(tries[i][0], `${tries[i][1]} job board: ${slug}`, "ats_board"), json: got[i], ats: tries[i][1] };
   }
   async function wiki(name: string): Promise<SearchHit[]> {
     for (const t of [name, `${name} (company)`]) {
@@ -368,6 +379,31 @@ export function freeProvider(o: { fetch: typeof fetch; now: () => number; userAg
       return out;
     }
     return [];
+  }
+  // R10 WO-H (review F2-sources): the company's official site when the turn named none: Wikidata's official website (P856), else
+  // the host the company's own Greenhouse postings link to (absolute_url, never an ATS host).
+  async function officialSite(wk: SearchHit[], bd: { json: any; ats: string } | null): Promise<string | null> {
+    const wd = wk.find((h) => h.provider === "wikidata");
+    if (wd) {
+      const e: any = Object.values((await getJson(wd.url))?.entities ?? {})[0];
+      const xs = (e?.claims?.P856 ?? []).filter((c: any) => c?.mainsnak?.datavalue);
+      const v = (xs.find((c: any) => c.rank === "preferred") ?? xs[0])?.mainsnak?.datavalue?.value;
+      try { const h = apex(new URL(String(v)).hostname); if (DOMAIN.test(h) && !isBlockedHost(`https://${h}/`)) return h; } catch { /* none */ }
+    }
+    if (bd?.ats === "Greenhouse") {
+      const hosts = (bd.json?.jobs ?? []).map((j: any) => { try { return apex(new URL(String(j?.absolute_url)).hostname); } catch { return ""; } })
+        .filter((h: string) => h && DOMAIN.test(h) && !/(^|\.)(greenhouse\.io|lever\.co|ashbyhq\.com|smartrecruiters\.com)$/.test(h) && !isBlockedHost(`https://${h}/`));
+      if (hosts.length && hosts.every((h: string) => h === hosts[0])) return hosts[0];
+    }
+    return null;
+  }
+  // The postings that match the role asked (title words), as the board's own posting JSON with its description (?content=true).
+  function postingsFor(bd: { hit: SearchHit; json: any; ats: string } | null, words: Set<string>): SearchHit[] {
+    if (bd?.ats !== "Greenhouse" || !words.size) return [];
+    const token = decodeURIComponent(new URL(bd.hit.url).pathname.split("/")[3] ?? "");
+    const score = (t: string) => (String(t).toLowerCase().match(/[a-z]{3,}/g) ?? []).filter((w) => words.has(w)).length;
+    return (bd.json?.jobs ?? []).filter((j: any) => Number.isInteger(Number(j?.id)) && score(j?.title) > 0).sort((a: any, b: any) => score(b.title) - score(a.title)).slice(0, 2)
+      .map((j: any) => hit(`https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(token)}/jobs/${Number(j.id)}?content=true`, `${clean(j.title, 100)} (Greenhouse posting)`, "ats_board"));
   }
   async function github(name: string, slugs: string[], sites: string[]): Promise<SearchHit | null> {
     for (const s of slugs) {
@@ -384,9 +420,10 @@ export function freeProvider(o: { fetch: typeof fetch; now: () => number; userAg
     const j = await getJson(u.toString());
     const rows = Array.isArray(j?.hits?.hits) ? j.hits.hits : [];
     const want = squash(name), out: SearchHit[] = [];
-    // The company's own filings first (the filer's name is the company), then filings by others that name it.
+    // The company's own filings only (the filer's name is the company). Another company's filing that merely names it is not a
+    // source about it (review F2, item 10: a private company has no filings of its own, and others' would read as its own).
     const own = (r: any) => (r?._source?.display_names ?? []).some((d: string) => squash(String(d).replace(/\(.*$/, "")) === want);
-    for (const r of [...rows.filter(own), ...rows.filter((r: any) => !own(r))].slice(0, 2)) {
+    for (const r of rows.filter(own).slice(0, 2)) {
       const [adsh, file] = String(r?._id ?? "").split(":"), cik = Number(String(r?._source?.ciks?.[0] ?? "").replace(/^0+/, ""));
       if (!/^\d{10}-\d{2}-\d{6}$/.test(adsh) || !/^[\w.-]+$/.test(file ?? "") || !cik) continue;
       out.push(hit(`https://www.sec.gov/Archives/edgar/data/${cik}/${adsh.replace(/-/g, "")}/${file}`, `${clean(r._source?.display_names?.[0], 80) || name} ${clean(r._source?.form, 10)} ${clean(r._source?.file_date, 10)} (SEC EDGAR full-text search)`, "sec_fts"));
@@ -435,6 +472,8 @@ export function freeProvider(o: { fetch: typeof fetch; now: () => number; userAg
       for (const h of b.hits.filter((h) => h.provider === "company_site")) put(0, h);
       for (const s of sites) { put(0, hit(`https://${s}/careers`, s, "company_site")); put(2, hit(`https://${s}/press`, s, "company_site")); put(3, hit(`https://${s}/team`, s, "company_site")); }
       for (const h of b.hits.filter((h) => h.provider === "sec_edgar")) put(1, h);
+      const derived: string[] = [];
+      const roleWords = new Set((asked.toLowerCase().match(/[a-z]{3,}/g) ?? []).filter((w) => !["the", "and", "for", "what", "with", "about", "work", "company", "research", "interview", "should", "know", "ask", "questions", "sources", "real"].includes(w)));
       const work = companies.map(async (c) => {
         const slugs = slugsFor(c, sites);
         searches += 3 + (o.userAgent ? 1 : 0);
@@ -442,7 +481,13 @@ export function freeProvider(o: { fetch: typeof fetch; now: () => number; userAg
           slugs.length ? Promise.any(slugs.map(async (s) => { const r = await board(s); if (!r) throw 0; return r; })).catch(() => null) : null,
           wiki(c), github(c, slugs, sites), o.userAgent ? fts(c) : Promise.resolve([] as SearchHit[]),
         ]);
-        if (bd) put(0, bd); else noBoard.push(c.slice(0, 60));
+        if (bd) put(0, bd.hit); else noBoard.push(c.slice(0, 60));
+        for (const h of postingsFor(bd, roleWords)) put(0, h);
+        // No site named: the official one (Wikidata P856, else the postings' own host), its home, newsroom, blog and careers pages.
+        if (!sites.length) {
+          const site = await officialSite(wk, bd);
+          if (site) { derived.push(site); put(0, hit(`https://${site}/`, site, "company_site")); put(1, hit(`https://${site}/newsroom`, site, "company_site")); put(2, hit(`https://${site}/blog`, site, "company_site")); put(2, hit(`https://${site}/careers`, site, "company_site")); }
+        }
         wk.forEach((h) => put(1, h)); if (!wk.length) noWiki.push(c.slice(0, 60));
         put(3, gh);
         ft.forEach((h) => put(2, h));
@@ -465,7 +510,7 @@ export function freeProvider(o: { fetch: typeof fetch; now: () => number; userAg
         if (!seen.has(k)) { seen.add(k); hits.push({ ...h, url: k }); }
       }
       if (hits.length) for (let i = notes.length - 1; i >= 0; i--) if (/no first-party source fits/.test(notes[i])) notes.splice(i, 1);
-      return { hits: hits.slice(0, MAX_FREE_HITS), notes, gaps, ...(basis.length ? { basis } : {}), provider: "first_party", searches };
+      return { hits: hits.slice(0, MAX_FREE_HITS), notes, gaps, ...(basis.length ? { basis } : {}), ...(derived.length ? { sites: [...new Set(derived)] } : {}), provider: "first_party", searches };
     },
   };
 }

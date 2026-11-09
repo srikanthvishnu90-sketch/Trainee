@@ -51,11 +51,13 @@ async function turn(message: string, history: any[], deps: MarketDeps, input: Re
 Deno.test("F.2 replay with research on: a sourced chat answer, interpretation labelled, grounded questions, sources listed", async () => {
   const w = world();
   const a = await turn(F2A, [], w.deps, { company: "Stripe", role: "data analyst intern", question: F2A, format: "inline", sites: ["stripe.example"] },
-    "Stripe Billing lets businesses bill customers with subscriptions and invoices [2]. As a Data Analyst Intern you would define metrics and build reports and dashboards [5]. Stripe is the best place to start your career. Read more at https://stripe.example/jobs.");
+    "Stripe Billing lets businesses bill customers with subscriptions and invoices [1]. The Data Analyst Intern will define metrics and build reports and dashboards for business teams [7]. Stripe has a demanding culture [3]. Stripe is the best place to start your career. Read more at https://stripe.example/jobs.");
   eq([a.call.ok, a.call.effect, w.published.length], [true, "read", 0], "an answer in chat makes no File");
   const r = a.t.reply as string;
   ok(/Stripe Billing lets businesses bill customers with subscriptions and invoices \[\d\]\./.test(r), r);
   ok(!/best place to start/.test(r), "an unsourced opinion stated as fact is removed");
+  ok(!/demanding culture/.test(r), "a sentence its cited page does not say is removed (cite fidelity)");
+  ok(/The Data Analyst Intern will define metrics and build reports and dashboards for business teams \[7\]/.test(r), r);
   ok(/My interpretation, not a sourced fact: Stripe is easier to understand as payments plus software/.test(r), "interpretation is labelled");
   ok(/Questions you could ask:\n1\. Your team is working on blocking fraudulent payments with Radar\. How do you decide between/.test(r), r);
   ok(/Not established by these sources:\n- Which team the role sits on/.test(r) && /\[\d\] is paywalled/.test(r) && /refuses\.example: not read/.test(r), "concerns and limits are listed");
@@ -63,7 +65,7 @@ Deno.test("F.2 replay with research on: a sourced chat answer, interpretation la
   ok(!ACTIONS.test(r), "no batch, list, intro or outreach");
   // The correction turn, after the first: still research, still in chat.
   const b = await turn(F2B, [{ role: "user", content: F2A }, { role: "assistant", content: r }], w.deps, { company: "Stripe", role: "data analyst intern", question: F2B, format: "inline", sites: ["stripe.example"] },
-    "Stripe builds payment software; Radar uses machine learning to help businesses block fraudulent payments [3].");
+    "Radar uses machine learning to help businesses block fraudulent payments [2].");
   ok(/Radar uses machine learning/.test(b.t.reply) && /Questions you could ask:/.test(b.t.reply) && !ACTIONS.test(b.t.reply), b.t.reply);
 });
 

@@ -113,3 +113,10 @@ Deno.test("when two cited sources differ on a figure, the brief shows both with 
     deps: { search: { id: "first_party", needsKey: false, search: async () => ({ hits: [a, b].map((url) => ({ url, title: "t", provider: "company_site" as const, foundAt: NOW })), notes: [], provider: "first_party", searches: 1 }) }, read: (u) => fetchSources(u, { fetch: f, resolver: PUBLIC, now: () => NOW }), draft: async () => JSON.stringify(draft) } });
   ok(/give each value with its source number and say they differ; never pick one/.test(inline.note));
 });
+
+// Review of #628 (follow-up, on #629): a host name with a trailing dot is judged without it.
+Deno.test("isPrivateHost: \"localhost.\", \"x.internal.\" and \"a.local.\" are private names; a trailing dot does not hide them", async () => {
+  const f = (async () => html("t", "a page with some words")) as typeof fetch;
+  for (const u of ["https://localhost./x", "https://x.internal./y", "https://a.local./z"]) eq((await fetchSources([u], { fetch: f, now: () => NOW })).rejected.map((r) => r.why), ["private_address"], u);
+  eq((await fetchSources(["https://public.example./ok"], { fetch: f, now: () => NOW })).verified.length, 1);
+});

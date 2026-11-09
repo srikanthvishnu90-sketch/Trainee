@@ -9,6 +9,7 @@ import type { Src } from "./file_family.ts";
 import type { KindId } from "./file_kinds.ts";
 import { FAMILIES, familyPage, type Act, type Ctx, type FamilyFile, type FamilyId } from "./file_family.ts";
 import { rolesShortlistPage } from "./file_family_roles.ts";
+import { FILE_ROUTES } from "./file_routes.ts";
 import { answerLibraryFile, careerBriefFile, materialsFile, pathComparisonFile, profileFactsFile, roleWorkspaceFile, searchPlanFile } from "./file_family_plan.ts";
 import { applicationReviewFile, batchFile, interviewHubFile, messageReviewFile, negotiationFile, offerComparisonFile, pipelineFile, weeklyBriefFile } from "./file_family_apply.ts";
 
@@ -203,7 +204,8 @@ export const offers = (): OfferComparison => ({
 // family's main state, at SPECIMEN_NOW in SPECIMEN_TZ, with the header's back and overflow controls.
 
 export interface FamilySpecimen { id: FamilyId | "F-14n"; name: string; kind: KindId; specimen: unknown; page: (c?: Ctx) => string }
-const CTX0: Ctx = { now: SPECIMEN_NOW, tz: SPECIMEN_TZ };
+// Drawn as the server would serve it: only the actions trainee-file answers are live (file_routes.ts).
+const CTX0: Ctx = { now: SPECIMEN_NOW, tz: SPECIMEN_TZ, routes: FILE_ROUTES };
 const MENU: Act[] = [{ label: "Export", effect: "download", href: "/files/export.json" }, { label: "Close this File", effect: "navigate", href: "/f" }];
 const nav = (f: FamilyFile): FamilyFile => ({ ...f, back: "/f", menu: f.menu ?? MENU });
 function fam<T>(id: FamilyId | "F-14n", kind: KindId, data: () => T, build: (d: T) => FamilyFile, name?: string): FamilySpecimen {

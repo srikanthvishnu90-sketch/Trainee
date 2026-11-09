@@ -53,7 +53,19 @@ export const FAMILIES: Record<FamilyId, FamilyMeta> = {
 // external: a posting, an employer page, a board, a document, an offer letter: shown with its link and the time it was read.
 // personal: what the person confirmed, estimated, or what Trainee inferred: shown with its kind (and its date when one is known).
 export interface Src { label: string; href?: string | null; at?: string | null; dateOnly?: boolean; external?: boolean }
-export interface Ctx { now: number; tz?: string | null }
+// routes: the actions the server that serves this page answers (file_routes.ts). Given it, a control that posts any other action is
+// drawn disabled with its reason - a button that does nothing would be a false claim. Absent (specimens, unit renders): unchanged.
+export interface Ctx { now: number; tz?: string | null; routes?: ReadonlySet<string> }
+export const NOT_CONNECTED = "Not connected yet - this step can't be done from this page, so it is off.";
+// Every Act anywhere in a File (header, blocks, parts, actions), copied, with an unrouted post turned off. Functions are left as they are.
+function routed<T>(x: T, routes: ReadonlySet<string>): T {
+  if (Array.isArray(x)) return x.map((y) => routed(y, routes)) as T;
+  if (!x || typeof x !== "object") return x;
+  const o = Object.fromEntries(Object.entries(x).map(([k, v]) => [k, typeof v === "function" ? v : routed(v, routes)])) as Record<string, unknown>;
+  const post = o.post as { action?: unknown } | undefined;
+  if (post && typeof post.action === "string" && typeof o.label === "string" && !o.off && !routes.has(post.action)) o.off = NOT_CONNECTED;
+  return o as T;
+}
 export const UNCONFIRMED = "Unconfirmed";
 // D.4-2: a fact the source itself does not state is written as the word "unknown" (never a dash, "N/A" or a blank); a value that
 // waits on the person stays Unconfirmed. Both carry data-unconfirmed, so neither ever reads as a fact.
@@ -229,7 +241,8 @@ function headHtml(f: Pick<FamilyFile, "family" | "header" | "boundary" | "mono" 
   const sub = f.mono && !f.boundary ? `<span class="ff-id">${esc(f.mono)}</span>` : `${f.mono ? `<span class="ff-id">${esc(f.mono)}</span> · ` : ""}${esc(f.boundary ?? meta.boundary)}`;
   return `<header class="ff-head">${back}<div class="ff-hb"><p class="ff-ht">${esc(f.header ?? meta.header)}</p><p class="ff-hs">${sub}</p></div>${menu}</header>`;
 }
-export function familyBodyHtml(f: FamilyFile, c: Ctx): string {
+export function familyBodyHtml(f0: FamilyFile, c: Ctx): string {
+  const f = c.routes ? routed(f0, c.routes) : f0;
   const h = f.hero;
   const hero = !h ? `<h1 class="ff-sr">${esc(f.title ?? FAMILIES[f.family].header)}</h1>${f.fresh?.length ? `<p class="ff-metas ff-fresh">${f.fresh.map((m) => metaHtml(m, c)).join("")}</p>` : ""}` : `<section class="ff-hero" aria-label="Summary"><p class="ff-kick">${esc(h.kicker)}</p><h1 class="ff-h1">${esc(h.title)}</h1><p class="ff-metas">${h.meta.map((m) => metaHtml(m, c)).join("")}</p>`
     + (h.counts?.length ? `<ul class="ff-counts" aria-label="Counts">${h.counts.map((x) => `<li><b>${x.n}</b> ${esc(x.label)}</li>`).join("")}</ul>` : "") + `</section>`;
@@ -252,7 +265,8 @@ export interface StateInput {
   prior?: Meta | null; scope?: string | null; next?: Act | null; field?: { name: string; why: string } | null; draft?: KV[]; step?: string | null;
   evidence?: { quote: string; src: Src } | null; target?: KV[]; recover?: Act | null;
 }
-export function familyStateHtml(s: StateInput, c: Ctx): string {
+export function familyStateHtml(s0: StateInput, c: Ctx): string {
+  const s = c.routes ? routed(s0, c.routes) : s0;
   const t = s.title ?? STATE_TITLE[s.state], kv = (rows?: KV[]) => rows?.length ? partHtml({ p: "kv", rows }, c) : "";
   let body: string;
   switch (s.state) {

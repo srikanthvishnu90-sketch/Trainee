@@ -26,8 +26,8 @@ result into the per-item report. Item 15 is PASS only when both the in-process r
 
 - A new Supabase Auth user per run: `r10-live-replay-<GitHub run id>@users.trainee.invalid`, `user_metadata.r10_live_replay = true`.
   `.invalid` is a reserved top-level domain (RFC 2606), so no mail can reach it.
-- One channel contact, `tg:<9_100_000_000 + run id mod 10^8>`, created only so the File pages' Telegram sign-in maps to this
-  person. The script refuses to run if that contact already belongs to an account.
+- One channel contact, `tg:<9_900_000_000 + run id mod 10^7>` (above every user id Telegram issues today), created only so the
+  File pages' Telegram sign-in maps to this person. The script refuses to run if that contact already belongs to an account.
 - `--cleanup-stale` (the workflow passes it) also deletes any earlier `r10-live-replay-*@users.trainee.invalid` user older than an
   hour, so a run that died mid-way leaves nothing behind for long.
 
@@ -54,6 +54,14 @@ The $70 cycle budget is unchanged.
 Only secrets already in the Actions `production` environment: `SUPABASE_PROJECT_REF`, `SUPABASE_ACCESS_TOKEN` (reads the
 project's service key from the Management API; never printed), `SUPABASE_DB_URL` (reads, the checks and cleanup), and
 `TELEGRAM_BOT_TOKEN` (optional: signs the test person's own Mini App sign-in; without it the File pages are fetched signed out).
+
+## Smoke mode (`--smoke`)
+
+The same script with `--smoke` is the deploy smoke's R10 step (to be added to `deploy-production.yml` in its own PR): the same
+test person, guard and cleanup, but instead of the replay it checks (1) the inbound path: a Telegram update from the synthetic
+id to `trainee-telegram`, and a reply recorded for it (Telegram cannot deliver to a synthetic id, so nobody receives it); (2) the
+File endpoint: the list link opens signed out (200 or 303, HTML, its own policy) and signed in; (3) a resume PDF link: 200,
+`application/pdf`, and the same bytes as the stored document.
 
 ## Not covered
 

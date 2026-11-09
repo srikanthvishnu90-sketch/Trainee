@@ -4,7 +4,7 @@
 // fetched page with its date; interpretation must be labelled as such; open questions must be named. Nothing here is a real fact
 // about any company: each page says it is a test fixture, and the figures are invented. A world without `sources` refuses these
 // hosts like any other (the named-blocker case, r10-post-reset-replay).
-export interface SourcePage { url: string; title: string; date: string; kind: "company" | "newsroom" | "role" | "reporting"; body: string }
+export interface SourcePage { url: string; title: string; date: string; kind: "company" | "newsroom" | "role" | "reporting" | "paywalled" | "stale"; body: string }
 export const STRIPE_SOURCES: SourcePage[] = [
   { url: "https://stripe.com/about", title: "About Stripe", date: "2026-09-15", kind: "company",
     body: "TEST FIXTURE, fictional. Stripe builds payments and financial software for businesses of every size: online payments, billing and subscriptions, invoicing, fraud screening (Radar) and revenue reporting." },
@@ -14,6 +14,13 @@ export const STRIPE_SOURCES: SourcePage[] = [
     body: "TEST FIXTURE, fictional. Data Analyst Intern, Summer 2027. You will build dashboards on payment success and dispute rates, design metrics for experiments, and write recommendations for product teams. SQL and Python required. Open to students graduating between December 2027 and June 2028." },
   { url: "https://news.example.test/2026/10/stripe-disputes", title: "Merchants report longer dispute windows", date: "2026-10-28", kind: "reporting",
     body: "TEST FIXTURE, fictional. A trade outlet reported on 2026-10-28 that some merchants saw longer card dispute windows this autumn; Stripe did not comment. The report is based on interviews with 12 merchants." },
+  // E.5 47: a source whose text cannot be read (a paywall: only the headline is visible, HTTP 402) and one that is stale (2023).
+  // A claim that rests on either must be marked beside it: "paywalled / couldn't read past the headline", "from 2023, may be out
+  // of date".
+  { url: "https://news.example.test/2026/11/stripe-analytics-reorg", title: "Stripe reorganizes its analytics team", date: "2026-11-03", kind: "paywalled",
+    body: "TEST FIXTURE, fictional. Subscribe to continue reading. (Only the headline is visible.)" },
+  { url: "https://stripe.com/newsroom/2023-03-atlas-express", title: "Stripe launches Atlas Express", date: "2023-03-01", kind: "stale",
+    body: "TEST FIXTURE, fictional. On 2023-03-01 Stripe launched Atlas Express, a faster incorporation flow for founders." },
 ];
 export const SOURCE_HOSTS = new Set(STRIPE_SOURCES.map((p) => new URL(p.url).host));
 export function sourcePage(u: URL): SourcePage | null {
@@ -21,6 +28,8 @@ export function sourcePage(u: URL): SourcePage | null {
   return STRIPE_SOURCES.find((p) => p.url === want) ?? null;
 }
 export function sourceResponse(p: SourcePage): Response {
+  if (p.kind === "paywalled") return new Response(`<html><head><title>${p.title}</title></head><body><h1>${p.title}</h1><time datetime="${p.date}">${p.date}</time><p>${p.body}</p></body></html>`,
+    { status: 402, headers: { "content-type": "text/html; charset=utf-8" } });
   return new Response(`<html><head><title>${p.title}</title><meta name="date" content="${p.date}"></head><body><h1>${p.title}</h1><time datetime="${p.date}">${p.date}</time><p>${p.body}</p></body></html>`,
     { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
 }

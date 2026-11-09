@@ -45,6 +45,18 @@ R.suite(FILE, [14], [CHAT], async (t: Deno.TestContext, w: any) => {
     await sourcedResearch(w, r, "F2a", ev);
     ok((await sideEffects()) === 0, "no application, people list or outreach");
   }, w);
+  await check(t, FILE, 14, "E.5 47: the paywalled and the stale source are marked beside the claims that rest on them", async (ev: any) => {
+    const r = await w.say(CHAT, "What has changed at Stripe recently, and is any of it older news? Include anything you could only partly read.");
+    ev.reply = r.reply;
+    const paywalled = S.STRIPE_SOURCES.find((p: any) => p.kind === "paywalled")!, stale = S.STRIPE_SOURCES.find((p: any) => p.kind === "stale")!;
+    const near = (needle: RegExp, marker: RegExp) => { const i = r.reply.search(needle); return i >= 0 && marker.test(r.reply.slice(Math.max(0, i - 250), i + 250)); };
+    ok(r.sourceChecks.includes(paywalled.url) && r.sourceChecks.includes(stale.url), `both listed sources were opened this turn (opened: ${JSON.stringify(r.sourceChecks)})`);
+    ok(/reorgani[sz]/i.test(r.reply), `the paywalled item is reported (its headline is all that could be read): ${r.reply.slice(0, 300)}`);
+    ok(near(/reorgani[sz]/i, /paywall|subscri|couldn't read|could not read|only the headline|not (able|accessible)/i), "the paywalled claim is marked beside it as unread past the headline");
+    ok(!/reorgani[sz]\w* (?:its )?analytics team (?:into|by|because|to)\b/i.test(r.reply), "nothing beyond the headline is claimed about the paywalled story");
+    ok(/Atlas Express/.test(r.reply) && near(/Atlas Express/, /2023|older|out of date|stale|not recent/i), "the stale item carries its 2023 date or an older-news label beside it");
+    ok(!/BRAIN.STUB|MODEL.STUB|SCRIPTED.BRAIN/.test(r.reply), "the product's answer, not a stub's");
+  }, w);
   await check(t, FILE, 14, "F2b (the correction) with sources reachable: the same research answer in chat, no batch, no people list", async (ev: any) => {
     const r = await w.say(CHAT, F2b.text);
     ev.reply = r.reply;

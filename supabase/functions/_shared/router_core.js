@@ -22041,6 +22041,21 @@ const CareerProfile = (() => {
         if (head.skip) { section = null; if (!unread.includes(head.label)) unread.push(head.label); } else section = head.kind;
         continue;
       }
+      // R10 (fix 3): a labelled line ("Skills: Python, SQL", "Certifications: ...", "Interests: Golf"), under its own heading,
+      // under a combined one or under none, is its own kind: never an experience entry, never a skill named "Skills: Python".
+      const labelled = line.match(/^(?:[-•*]\s*)?(skills?|technical(?: skills)?|tools|technologies|certifications?|certificates?|licen[cs]es?|interests?|hobbies)\s*:\s*(.+)$/i);
+      if (labelled) {
+        flush();
+        lastWasMore = false;
+        const kind = /^(cert|licen)/i.test(labelled[1]) ? "certification" : /^(interest|hobb)/i.test(labelled[1]) ? "interest" : "skill";
+        for (const name of labelled[2].split(/[,;•|·]/).map((x) => x.trim()).filter(Boolean)) {
+          if (kind === "skill") drafts.push({ kind: "skill", name, title: name, text: `Skill: ${name}`, skills: [name], evidence: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
+          // Interests have no profile kind of their own: "other", marked, so they are never counted as experience or skills.
+          else if (kind === "interest") drafts.push({ kind: "other", section: "interests", name, title: name, text: `Interest: ${name}`, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
+          else drafts.push({ kind: "certification", title: name, text: name, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
+        }
+        continue;
+      }
       if (!section) continue; // header/contact block (or a section that holds no entries) is not a fact
       if (section === "skill") {
         for (const name of line.split(/[,;•|·]/).map((x) => x.trim()).filter(Boolean)) {
@@ -39079,7 +39094,7 @@ const CareerRouter = (() => {
         reply: compose({ headline: "That is the resume already on your record — nothing changed.", facts: [`Its ${n} entr${n === 1 ? "y is" : "ies are"} confirmed as you gave them, so I added nothing and need no new yes.`, ...(Array.isArray(res.replaced_drafts) && res.replaced_drafts.length ? ["The other resume you pasted, which you had not confirmed, is set aside: nothing from it is used."] : [])], nextStep: "To change an entry, tell me what it should say, or paste the updated resume." }) };
     }
     const byKind = {};
-    for (const f of profile.facts || []) if (f && f.source === "resume-ingest" && f.needs_confirmation) byKind[f.kind] = (byKind[f.kind] || 0) + 1;
+    for (const f of profile.facts || []) if (f && f.source === "resume-ingest" && f.needs_confirmation) { const k = f.kind === "other" && /^Interest: /.test(f.text || "") ? "interest" : f.kind; byKind[k] = (byKind[k] || 0) + 1; }
     const total = Object.values(byKind).reduce((a, b) => a + b, 0);
     const counts = Object.entries(byKind).map(([k, n]) => `${n} ${k}`).join(", ");
     const mir = threadMirrorForWrite(ctx);
@@ -51303,6 +51318,12 @@ const CareerRouter = (() => {
         const reply = compose({ headline: "I need the posting to tailor against — Big Law is a category, not a posting.", facts, nextStep: "Paste the firm's posting and the CV cut runs immediately." });
         return { intent: "tailor_needs_posting", reply, resultStatus: "awaiting_user", artifact: null, sends: 0 };
       }
+      // R10 R1 (spec E.1 #11): a tailor ask that states no role is never answered by the first role of a list on hand (an old
+      // shortlist is not the person's target); it asks which role.
+      if (/^\s*(?:hey,?\s+|ok(?:ay)?,?\s+|so\s+)?(?:please\s+|can you\s+|could you\s+|help me\s+)?tailor\s+(?:my\s+)?(?:resume|cv)(?:\s+(?:please|for me|now|again))?\s*[.!?]*\s*$/i.test(String(text || ""))) {
+        const reply = compose({ headline: "Which role should I tailor your resume for?", nextStep: "Name the role, or paste the posting, and I'll tailor it to that." });
+        return { intent: "tailor_needs_posting", reply, resultStatus: "awaiting_user", artifact: null, sends: 0 };
+      }
       // A6 chaining: no posting in hand — discover inside the ask's
       // families and tailor the top role in the same turn.
       const disc = handleDiscovery(text, c, {});
@@ -54397,7 +54418,8 @@ const CareerRouter = (() => {
     // about the posting alone ("that posting is not in the list", "I found no posting for apply"), so the person learned
     // only later that nothing can be sent without a confirmed resume. The reply now says so too, and what to do.
     if (res && typeof res.reply === "string" && res.reply && res.intent !== "career_fallback" && res.intent !== "honest_unavailable" && !/\bresume\b/i.test(res.reply) && !resumeOnRecord(c)) {
-      const ask = lc(s(text)).replace(/[’]/g, "'");
+      // R10 F.1 (2026-11-08): "Don't apply to anything" is not an apply ask; listing roles never needs a confirmed resume.
+      const ask = lc(s(text)).replace(/[’]/g, "'").replace(/\b(?:don't|do not|never|not|without|no need to)\s+(?:\w+\s+){0,2}?(?:apply|applying|submit\w*)\b[^.?!]*/g, " ");
       if (!/\?\s*$/.test(ask) && /\bapply\s+(?:to|for|at|me|on|now)\b|\bapply\b[^.?!]{0,40}\b(?:jobs?|roles?|postings?|positions?|internships?|openings?)\b|\bsubmit (?:my|an?) applications?\b/.test(ask)) {
         res.reply = `${res.reply}\n\n${resumeDraftsPending(c).length
           ? "And nothing is sent anywhere before your resume is confirmed: its entries are waiting for your word (reply \"yes, that's my resume\" if they're right)."
@@ -55904,11 +55926,18 @@ const CareerRender = (() => {
     const pages = (s.match(/\/Type\s*\/Page(?![a-zA-Z])/g) || []).length;
     const runs = extractPdfRuns(buf);
     const sizes = [...new Set(runs.map((r) => r.size).filter(Boolean))].sort((a, b) => a - b);
+    // RELEASE 10 (architect ruling 2026-11-08, R6 scoped): the name, the first line of page one, may be set larger (14-18 pt:
+    // the career-center guides and the eye-tracking study support a name that stands out); body and headings stay 10-12 pt.
+    const first = runs.filter((r) => r.page === 0);
+    const topY = first.length ? Math.max(...first.map((r) => r.y)) : null;
+    const nameRuns = topY === null ? [] : first.filter((r) => Math.abs(r.y - topY) < 0.5);
+    const nameSizes = [...new Set(nameRuns.map((r) => r.size).filter(Boolean))];
+    const bodySizes = [...new Set(runs.filter((r) => !nameRuns.includes(r)).map((r) => r.size).filter(Boolean))].sort((a, b) => a - b);
     // RELEASE 9: an entry's dates set flush right on the entry's own baseline (a run that is only a date or a date range,
     // beside a run that starts at the left margin) are part of that line, not a second column. Anything else past x 100 is.
     const rightDate = (r) => DATE_ONLY_RE.test(String(r.text).trim()) && runs.some((o) => o !== r && o.page === r.page && Math.abs(o.y - r.y) < 0.5 && o.x <= 100);
     const xs = [...new Set(runs.filter((r) => r.x <= 100 || !rightDate(r)).map((r) => Math.round(r.x)))];
-    return { bytes: Bytes.isBuffer(buf) ? buf.length : 0, pages, fonts, fontSizesPt: sizes, images, singleColumn: runs.length > 0 && xs.every((x) => x <= 100), rightAlignedDates: runs.filter((r) => r.x > 100 && rightDate(r)).length, headings: [] };
+    return { bytes: Bytes.isBuffer(buf) ? buf.length : 0, pages, fonts, fontSizesPt: sizes, bodySizesPt: bodySizes, nameSizesPt: nameSizes, images, singleColumn: runs.length > 0 && xs.every((x) => x <= 100), rightAlignedDates: runs.filter((r) => r.x > 100 && rightDate(r)).length, headings: [] };
   }
   // External parser B (poppler) — used when the caller opts in.
   function extractPdfPoppler(buf) {
@@ -55964,12 +55993,28 @@ const CareerRender = (() => {
     const stylesXml = (parts.get("word/styles.xml") || Bytes.alloc(0)).toString("utf8");
     const fonts = [...new Set([...stylesXml.matchAll(/w:ascii="([^"]+)"/g)].map((m) => m[1]))];
     const sizes = [...new Set([...stylesXml.matchAll(/<w:sz w:val="(\d+)"/g)].map((m) => parseInt(m[1], 10) / 2))].sort((a, b) => a - b);
+    // RELEASE 10 (R6 scoped): the style of the document's first paragraph (the name), when no other paragraph uses it, is the
+    // name's size; every other style size is body (10-12 pt).
+    const firstStyle = (/<w:p[\s>][\s\S]*?<w:pStyle w:val="([^"]+)"[\s\S]*?<\/w:p>/.exec(docXml.slice(0, (docXml.indexOf("</w:p>") + 6) || 0)) || [])[1] || null;
+    const styleUses = firstStyle ? (docXml.match(new RegExp(`<w:pStyle w:val="${firstStyle.replace(/[^\w-]/g, "")}"`, "g")) || []).length : 0;
+    const styleSz = (id) => { const m = new RegExp(`<w:style\\b[^>]*w:styleId="${id.replace(/[^\w-]/g, "")}"[^>]*>([\\s\\S]*?)<\\/w:style>`).exec(stylesXml); return m ? [...m[1].matchAll(/<w:sz w:val="(\d+)"/g)].map((x) => parseInt(x[1], 10) / 2) : []; };
+    const nameSizes = firstStyle && styleUses === 1 ? [...new Set(styleSz(firstStyle))] : [];
+    // Only the styles the document uses count (review of #620: Word's built-in template carries Title 26 pt, Heading 14 pt,
+    // footnote 8 pt ... whether or not a paragraph uses them): the default paragraph and character styles, every style a
+    // paragraph or run names, and the styles those are based on.
+    const styleDefs = new Map([...stylesXml.matchAll(/<w:style\b([^>]*)>([\s\S]*?)<\/w:style>/g)].map((m) => [(/w:styleId="([^"]+)"/.exec(m[1]) || [])[1], { attrs: m[1], body: m[2] }]).filter(([id]) => id));
+    const used = new Set([...docXml.matchAll(/<w:(?:pStyle|rStyle|tblStyle) w:val="([^"]+)"/g)].map((m) => m[1]));
+    for (const [id, d] of styleDefs) if (/w:default="(?:1|true)"/.test(d.attrs) && /w:type="(?:paragraph|character)"/.test(d.attrs)) used.add(id);
+    for (const id of [...used]) { let cur = id, n = 0; while (cur && n++ < 20) { used.add(cur); const b = styleDefs.get(cur); cur = b ? ((/<w:basedOn w:val="([^"]+)"/.exec(b.body) || [])[1] || null) : null; } }
+    const otherSizes = [...styleDefs].filter(([id]) => used.has(id) && !(nameSizes.length && id === firstStyle)).flatMap(([, d]) => [...d.body.matchAll(/<w:sz w:val="(\d+)"/g)].map((x) => parseInt(x[1], 10) / 2));
+    const defaults = [...(/<w:docDefaults>[\s\S]*?<\/w:docDefaults>/.exec(stylesXml) || [""])[0].matchAll(/<w:sz w:val="(\d+)"/g)].map((x) => parseInt(x[1], 10) / 2);
+    const bodySizes = [...new Set([...defaults, ...otherSizes])].sort((a, b) => a - b);
     const mediaParts = names.filter((k) => k.startsWith("word/media/")).length;
     const images = mediaParts + (docXml.match(/<w:drawing|<a:blip|<w:pict/g) || []).length;
     const tables = (docXml.match(/<w:tbl[\s>]/g) || []).length;
     const textFrames = (docXml.match(/txbxContent/g) || []).length;
     const headerFooterParts = names.filter((k) => /word\/(header|footer)\d*\.xml/.test(k)).length;
-    return { bytes: Bytes.isBuffer(buf) ? buf.length : 0, fonts, fontSizesPt: sizes, images, tables, textFrames, headerFooterParts, headings: [] };
+    return { bytes: Bytes.isBuffer(buf) ? buf.length : 0, fonts, fontSizesPt: sizes, bodySizesPt: bodySizes, nameSizesPt: nameSizes, images, tables, textFrames, headerFooterParts, headings: [] };
   }
   // External parser B (python-docx) — used when the caller opts in.
   function extractDocxPython(buf) {
@@ -56107,16 +56152,21 @@ const CareerRender = (() => {
         if (!st.singleColumn) add("single_column", "fail", "PDF text does not start in a single column — R1");
         const badFonts = st.fonts.filter((f) => !["Helvetica", "Helvetica-Bold", "Times-Roman", "Times-Bold", "Courier", "Courier-Bold"].includes(f));
         if (badFonts.length) add("fonts", "fail", `non-standard PDF font(s): ${badFonts.join(", ")} — R6`);
-        const badSizes = st.fontSizesPt.filter((s) => s < 10 || s > 12);
+        // R6, scoped (release 10): body and headings 10-12 pt; the name line 10-18 pt.
+        const badSizes = st.bodySizesPt.filter((s) => s < 10 || s > 12);
         if (badSizes.length) add("fonts", "fail", `PDF font size(s) outside 10–12pt: ${badSizes.join(", ")} — R6`);
+        const badName = st.nameSizesPt.filter((s) => s < 10 || s > 18);
+        if (badName.length) add("fonts", "fail", `PDF name size(s) outside 10–18pt: ${badName.join(", ")} — R6`);
         if (o.pageLimit && st.pages > o.pageLimit) add("page_count", "warn", `PDF runs ${st.pages} pages; this role family's limit is ${o.pageLimit} (123 conventions)`);
       } else {
         if (st.images > 0) add("images", "fail", `DOCX contains ${st.images} image/media part(s) — R2`);
         if (st.tables > 0) add("tables", "fail", `DOCX uses ${st.tables} layout table(s) — R1: no layout tables`);
         if (st.textFrames > 0) add("text_frames", "fail", `DOCX contains ${st.textFrames} text frame(s) — R1: no text boxes/frames`);
         if (st.headerFooterParts > 0) add("contact_in_body", "warn", `DOCX has ${st.headerFooterParts} header/footer part(s); contact info belongs in the body — R4`);
-        const badSizes = st.fontSizesPt.filter((s) => s < 10 || s > 12);
+        const badSizes = st.bodySizesPt.filter((s) => s < 10 || s > 12);
         if (badSizes.length) add("fonts", "fail", `DOCX font size(s) outside 10–12pt: ${badSizes.join(", ")} — R6`);
+        const badName = st.nameSizesPt.filter((s) => s < 10 || s > 18);
+        if (badName.length) add("fonts", "fail", `DOCX name size(s) outside 10–18pt: ${badName.join(", ")} — R6`);
       }
       const aLines = extractA(buf);
       let bLines = extractB(buf);

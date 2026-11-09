@@ -20,6 +20,7 @@ const RECORDS: Source = "From Trainee's records";
 // Accepted only on trusted (code-built) plan reviews: a model's create_file can never label its own text this way.
 export const MADE: Source = "Made by Trainee";
 const MADE_OK = new Set<string>(["plan_review"]);
+export const RESUME_B64_MAX = 400_000; // about 290 KB of PDF
 export const KIND_IDS = ["job_list", "introduction", "application_proof", "application_review", "plan_review", "comparison", "draft", "research_brief"] as const;
 export type KindId = typeof KIND_IDS[number];
 export const KIND_LABEL: Record<KindId, string> = { job_list: "Your jobs", introduction: "Introduction", application_proof: "Application proof", application_review: "Application review", plan_review: "Plan review", comparison: "Comparison", draft: "Draft", research_brief: "Research brief" };
@@ -195,6 +196,14 @@ const KINDS: Record<Exclude<KindId, "job_list">, (raw: unknown, v: V) => any> = 
   },
   draft(raw, v) {
     const x = v.obj(raw, "data");
+    // R10 (privacy ruling): a resume file the resume task made, opened only on the signed-in File page (never a bearer link). Built by
+    // code only: the model's create_file can never make one. The PDF rides the record; "Download PDF" returns it to its owner.
+    if (x.variant === "resume") {
+      if (!v.trusted) { v.err("variant", "a resume file is made by Trainee's resume task, not by create_file"); return {}; }
+      const b64 = typeof x.pdf_b64 === "string" && /^[A-Za-z0-9+/]+=*$/.test(x.pdf_b64) && x.pdf_b64.length <= RESUME_B64_MAX ? x.pdf_b64 : (v.err("pdf_b64", `the PDF is larger than ${Math.round(RESUME_B64_MAX * 3 / 4 / 1024)} KB`), undefined);
+      return { variant: "resume", title: v.str(x.title, "title", { max: 80 }), target: v.str(x.target, "target", { max: 120 }), filename: v.str(x.filename, "filename", { max: 120 }),
+        review: x.review === true, note: v.str(x.note, "note", { max: 400, opt: true }), sha256: typeof x.sha256 === "string" && /^[0-9a-f]{64}$/.test(x.sha256) ? x.sha256 : (v.err("sha256", "must be the PDF's sha256"), undefined), pdf_b64: b64 };
+    }
     return { title: v.str(x.title, "title", { max: 80 }), type: v.one(x.type, "type", ["email", "cover_letter", "message"] as const), to: v.str(x.to, "to", { max: 120, opt: true }), subject: v.str(x.subject, "subject", { max: 140, opt: true, templ: true }),
       body: v.str(x.body, "body", { max: 4000, multi: true, templ: true }), basis: v.list(x.basis ?? [], "basis", 0, 10).map((f, i) => v.fact(f, `basis[${i}]`)) };
   },
@@ -238,10 +247,20 @@ function marketBrief(x: Record<string, any>, v: V) {
     });
     comparison = { options, rows };
   }
-  const out = { variant: "market", title: v.str(x.title, "title", { max: 80, links: false }), subject: v.str(x.subject, "subject", { max: 120 }), thesis: v.str(x.thesis, "thesis", { max: 160, links: false }),
+  // The cover thesis names the sources it stands on (thesis_cite), or says it summarizes the cited sections (thesis_summary).
+  const thesisMark = x.thesis_cite !== undefined ? { thesis_cite: cite(x.thesis_cite, "thesis_cite") } : x.thesis_summary === true ? { thesis_summary: true } : {};
+  const out = { variant: "market", title: v.str(x.title, "title", { max: 80, links: false }), subject: v.str(x.subject, "subject", { max: 120 }), thesis: v.str(x.thesis, "thesis", { max: 160, links: false }), ...thesisMark,
     summary: v.list(x.summary, "summary", 1, 5).map((r, i) => line(r, `summary[${i}]`, true)), ...(comparison ? { comparison } : {}),
     conditions: v.list(x.conditions, "conditions", 1, 6).map((r, i) => line(r, `conditions[${i}]`, false)),
-    risks: v.list(x.risks, "risks", 1, 6).map((r, i) => line(r, `risks[${i}]`, false)), sources };
+    risks: v.list(x.risks, "risks", 1, 6).map((r, i) => line(r, `risks[${i}]`, false)),
+    // R9 free sources: what no free source supplied (code-written from the sources' outcomes, D-007); optional, at most 8.
+    // Where the cited sources give different figures for the same thing (code-detected, agent/research/market.ts disagreementsIn):
+    // every value with the source it came from; Trainee never picks one. Optional, at most 4.
+    ...(x.disagreements !== undefined ? { disagreements: v.list(x.disagreements, "disagreements", 1, 4).map((r, i) => { const q = v.obj(r, `disagreements[${i}]`);
+      return { label: v.str(q.label, `disagreements[${i}].label`, { max: 120, links: false }), values: v.list(q.values, `disagreements[${i}].values`, 2, 4).map((y, j) => { const z = v.obj(y, `disagreements[${i}].values[${j}]`); return { value: v.str(z.value, `disagreements[${i}].values[${j}].value`, { max: 60, links: false }), cite: cite(z.cite, `disagreements[${i}].values[${j}].cite`) }; }) }; }) } : {}),
+    // How a source was chosen when the person did not say (a role matched to a BLS occupation), code-written; optional, at most 4.
+    ...(x.basis !== undefined ? { basis: v.list(x.basis, "basis", 1, 4).map((g, i) => v.str(g, `basis[${i}]`, { max: 240, links: false })) } : {}),
+    ...(x.gaps !== undefined ? { gaps: v.list(x.gaps, "gaps", 1, 8).map((g, i) => v.str(g, `gaps[${i}]`, { max: 240, links: false })) } : {}), sources };
   for (let i = 1; i <= n; i++) if (!used.has(i)) v.err(`sources[${i - 1}]`, "is not cited by any line; leave it out");
   return out;
 }
@@ -258,7 +277,9 @@ export function validateKind(kind: string, raw: unknown, o: { trusted?: boolean;
   v.trusted = !!o.trusted;
   let data: any;
   try { data = fn(raw, v); } catch (e) { return { ok: false, errors: [`data: could not be read (${e instanceof Error ? e.message : String(e)})`] }; }
-  if (!v.errors.length && JSON.stringify(data).length > 24_000) v.err("data", "is over 24 KB");
+  // A resume File carries its PDF (re-review of #644 (4): a real one- or two-page resume runs to tens of KB); every other kind stays small.
+  const max = kind === "draft" && data?.variant === "resume" ? RESUME_B64_MAX + 8_000 : 24_000;
+  if (!v.errors.length && JSON.stringify(data).length > max) v.err("data", `is over ${Math.round(max / 1000)} KB`);
   return v.errors.length ? { ok: false, errors: v.errors.slice(0, 12) } : { ok: true, data: JSON.parse(JSON.stringify(data)) };
 }
 
@@ -355,11 +376,12 @@ export function actionsOf(rec: FileRecord): ActionView[] {
     return [{ id: "status", label: "View status", state: "available", note: `Shows what is recorded as of ${when(rec.data?.as_of)}.` },
       { id: "flag", label: "Flag a problem", state: "available", note: flags ? `${flags} flagged.` : "Saves your note on this file." }];
   }
+  if (rec.kind === "draft" && rec.data?.variant === "resume") return [{ id: "download", label: "Download PDF", state: "available", note: "Saves the file to this device. Nothing is sent to anyone." }];
   if (rec.kind === "draft") return [{ id: "copy", label: "Copy", state: "available", note: "Copies the text as it is in the box. Edits stay on this page." }];
   return [];
 }
 
-export interface ActResult { ok: boolean; status: number; note: string; patch?: Record<string, unknown> }
+export interface ActResult { ok: boolean; status: number; note: string; patch?: Record<string, unknown>; file?: { filename: string; mime: string; base64: string } }
 export interface Effects { introduce?(userId: string, rec: FileRecord): Promise<{ ok: boolean; reason?: string }> }
 // One tap. Returns the note to show and the state to keep; never throws for a refused tap.
 // `persist` stores a state patch at once: the approval is written BEFORE any send is attempted, so a crash or a second tap can never send twice.
@@ -367,6 +389,7 @@ export interface Effects { introduce?(userId: string, rec: FileRecord): Promise<
 export async function actOn(rec: FileRecord, action: string, form: URLSearchParams, now: number, fx: Effects = {}, persist?: (patch: Record<string, unknown>) => Promise<void>, claim?: () => Promise<boolean>): Promise<ActResult> {
   const views = actionsOf(rec), view = views.find((a) => a.id === action);
   if (!view || action === "copy") return { ok: false, status: 400, note: "That is not something this file can do. Nothing was sent." };
+  if (action === "download") return { ok: true, status: 200, note: "", file: { filename: String(rec.data.filename), mime: "application/pdf", base64: String(rec.data.pdf_b64) } };
   if (rec.kind === "introduction") {
     if (view.state !== "available") return { ok: false, status: 200, note: view.note ?? "Already decided." };
     const decided = { ok: false, status: 200, note: "Already decided. Nothing more was sent." };
@@ -404,6 +427,8 @@ function actionsHtml(rec: FileRecord, token: string): string {
     const note = a.note ? `<p class="anote">${esc(a.note)}</p>` : "";
     if (a.id === "copy") return `<div class="act1"><button type="button" class="${kind()}" data-copy>Copy</button><span id="copy-status" role="status"></span>${note}</div>`;
     if (a.state !== "available") return `<div class="act1"><span class="btn off" role="status">${esc(a.label)}: ${STATE_WORD[a.state]}</span>${note}</div>`;
+    // A download is a plain post (not the page's ajax form): the answer is the file itself.
+    if (a.id === "download") return `<form method="post" class="act1">${hidden(token, a.id)}<button type="submit" class="${kind()}">${esc(a.label)}</button>${note}</form>`;
     if (a.id === "flag") return `<form method="post" class="ajax act1">${hidden(token, "flag")}<label for="flag-note">What looks wrong</label><textarea id="flag-note" name="note" rows="3" maxlength="500"></textarea><button type="submit" class="${kind()}">Flag a problem</button>${note}</form>`;
     const extra = a.id === "introduce" ? `<input type="hidden" name="tag" value="${esc(rec.tag ?? "")}">` : "";
     return `<form method="post" class="ajax act1">${hidden(token, a.id, extra)}<button type="submit" class="${kind(a.id === "pass")}">${esc(a.label)}</button>${note}</form>`;
@@ -475,6 +500,10 @@ export function bodyHtml(rec: FileRecord, token: string, o: { tz?: string | null
       break;
     }
     case "draft":
+      if (d.variant === "resume") {
+        main = `<p class="meta">${esc(`For ${d.target}`)}</p>${d.review ? `<p class="meta"><strong>Review draft, not for external submission.</strong></p>` : ""}${d.note ? `<p>${esc(d.note)}</p>` : ""}<p class="meta">${esc(d.filename)}</p>`;
+        break;
+      }
       main = `<p class="meta">${esc([cap1(String(d.type).replace("_", " ")), d.to ? `to ${d.to}` : ""].filter(Boolean).join(" "))}</p>${d.subject ? `<p class="meta">Subject: ${esc(d.subject)}</p>` : ""}<label for="draft-body" class="lbl">Edit the text here. Edits stay on this page.</label><textarea id="draft-body" class="draft" rows="14">${esc(d.body)}</textarea>`
         + sec("What it says about you", dl(Fs(d.basis).map((f) => factHtml(f, f.label)).join("")))
         + `<p class="meta">This page cannot send it. To send it, ask Trainee in Telegram; you approve the exact message first.</p>`;
@@ -500,27 +529,32 @@ const MARK = `<svg class="rb-mark" viewBox="0 0 64 64" aria-hidden="true"><rect 
 function marketHtml(d: any): string {
   const n = (d.sources ?? []).length, read = marketReadOn(d);
   const cover = `<section class="rb-cover" aria-label="Cover"><p class="rb-brand">${MARK}<span>Trainee</span><span class="rb-dot" aria-hidden="true">·</span><span>Research brief</span></p>`
-    + `<p class="rb-thesis">${esc(d.thesis)}</p><p class="rb-date">${read ? `Sources read ${esc(read)} · ` : ""}${n} source${n === 1 ? "" : "s"}</p></section>`;
+    + `<p class="rb-thesis">${esc(d.thesis)}${cites(d.thesis_cite)}</p>${d.thesis_summary ? `<p class="rb-basis">A summary of the cited sections below.</p>` : ""}<p class="rb-date">${read ? `Sources read ${esc(read)} · ` : ""}${n} source${n === 1 ? "" : "s"}</p></section>`;
   const list = (xs: any[], sourced: boolean) => `<ul class="rb-list">${xs.filter((f) => sourced ? hasSrc(f) : !!f?.text).map((f) => `<li><span class="rb-t">${esc(f.text)}${cites(f.cite)}</span>${sourced ? src(f.source) : READING}</li>`).join("")}</ul>`;
   const c = d.comparison, opts = (c?.options ?? []).map((o: any) => o.name);
   const cell = (x: any) => hasSrc(x) ? `${esc(x.value)}${cites(x.cite)}<br>${src(x.source)}` : `<span class="meta">Not stated</span>`;
   // Under 560 px each row stacks as a card of option/value pairs (KIND_CSS .rb-tbl): the option name is repeated in each cell as a
   // visual label (aria-hidden; the table's own headers still name the cell), so no column is ever cut off at phone width.
   const table = c ? `<div class="tbl rb-tbl" tabindex="0" role="region" aria-label="Comparison table"><table><caption class="sr">Comparison</caption><thead><tr><th scope="col"><span class="sr">Item</span></th>${opts.map((o: string) => `<th scope="col">${esc(o)}</th>`).join("")}</tr></thead><tbody>${(c.rows ?? []).map((r: any) => `<tr><th scope="row">${esc(r.label)}</th>${(r.cells ?? []).map((x: any, i: number) => `<td><span class="rb-k" aria-hidden="true">${esc(opts[i] ?? "")}</span><span class="rb-v">${cell(x)}</span></td>`).join("")}</tr>`).join("")}</tbody></table></div>` : "";
-  const srcs = `<ol class="rb-src">${(d.sources ?? []).map((s: any, i: number) => `<li id="src-${i + 1}"><span class="rb-n">[${i + 1}]</span>${linkHtml(s.url, s.title) || esc(s.title)}<span class="meta">${esc(hostOf(s.url))} · Read ${esc(DAY(s.fetched_at))}</span></li>`).join("")}</ol>`;
-  return cover + sec("Summary", list(d.summary ?? [], true)) + sec("Comparison", table) + sec("What would have to be true", list(d.conditions ?? [], false)) + sec("Risks", list(d.risks ?? [], false)) + sec("Sources", srcs);
+  const srcs = `<ol class="rb-src">${(d.sources ?? []).map((s: any, i: number) => `<li id="src-${i + 1}"><span class="rb-n">[${i + 1}]</span>${linkHtml(s.url, s.title) || esc(s.title)}<span class="meta"><span class="rb-host" title="${esc(hostOf(s.url))}">${esc(hostOf(s.url))}</span> · Read ${esc(DAY(s.fetched_at))}</span></li>`).join("")}</ol>`;
+  return cover + sec("Summary", list(d.summary ?? [], true)) + sec("Comparison", table) + sec("Where the sources differ", (d.disagreements ?? []).length ? `<ul class="rb-list rb-differ">${d.disagreements.map((x: any) => `<li><span class="rb-t">${esc(x.label)}: ${x.values.map((y: any) => `${esc(y.value)}${cites(y.cite)}`).join(" · ")}. The sources differ; Trainee has not picked one.</span></li>`).join("")}</ul>` : "") + sec("What would have to be true", list(d.conditions ?? [], false)) + sec("Risks", list(d.risks ?? [], false))
+    + sec("How the sources were chosen", (d.basis ?? []).length ? `<ul class="rb-list rb-basis-list">${d.basis.map((g: string) => `<li><span class="rb-t">${esc(g)}</span></li>`).join("")}</ul>` : "")
+    + sec("Not found in a free source", (d.gaps ?? []).length ? `<ul class="rb-list rb-gaps">${d.gaps.map((g: string) => `<li><span class="rb-t">${esc(g)}</span></li>`).join("")}</ul>` : "") + sec("Sources", srcs);
 }
 function marketText(d: any, L: string[]) {
   const c = (x: any) => Array.isArray(x?.cite) && x.cite.length ? ` ${x.cite.map((i: number) => `[${i}]`).join("")}` : "";
   const read = marketReadOn(d);
-  L.push(d.thesis, `${read ? `Sources read ${read}. ` : ""}${(d.sources ?? []).length} source${(d.sources ?? []).length === 1 ? "" : "s"}.`, "", "## Summary");
+  L.push(`${d.thesis}${c({ cite: d.thesis_cite })}${d.thesis_summary ? " (A summary of the cited sections below.)" : ""}`, `${read ? `Sources read ${read}. ` : ""}${(d.sources ?? []).length} source${(d.sources ?? []).length === 1 ? "" : "s"}.`, "", "## Summary");
   Fs(d.summary).forEach((f) => L.push(`- ${f.text}${c(f)} [${f.source}]`)); L.push("");
   if (d.comparison) {
     const opts = (d.comparison.options ?? []).map((o: any) => o.name);
     L.push("## Comparison"); (d.comparison.rows ?? []).forEach((r: any) => { L.push(`### ${r.label}`); (r.cells ?? []).forEach((x: any, i: number) => L.push(hasSrc(x) ? `- ${opts[i]}: ${x.value}${c(x)} [${x.source}]` : `- ${opts[i]}: Not stated`)); }); L.push("");
   }
+  if ((d.disagreements ?? []).length) { L.push("## Where the sources differ"); d.disagreements.forEach((x: any) => L.push(`- ${x.label}: ${x.values.map((y: any) => `${y.value}${c(y)}`).join(" · ")}. The sources differ; Trainee has not picked one.`)); L.push(""); }
   L.push("## What would have to be true"); (d.conditions ?? []).forEach((f: any) => L.push(`- ${f.text}${c(f)} [Trainee's reading]`)); L.push("");
   L.push("## Risks"); (d.risks ?? []).forEach((f: any) => L.push(`- ${f.text}${c(f)} [Trainee's reading]`)); L.push("");
+  if ((d.basis ?? []).length) { L.push("## How the sources were chosen"); d.basis.forEach((g: string) => L.push(`- ${g}`)); L.push(""); }
+  if ((d.gaps ?? []).length) { L.push("## Not found in a free source"); d.gaps.forEach((g: string) => L.push(`- ${g}`)); L.push(""); }
   L.push("## Sources"); (d.sources ?? []).forEach((s: any, i: number) => L.push(`${i + 1}. ${s.title}: ${s.url} (read ${DAY(s.fetched_at)})`)); L.push("");
 }
 
@@ -566,6 +600,7 @@ export function textOf(rec: FileRecord, o: { now: number; url?: string }): strin
       break;
     }
     case "draft":
+      if (d.variant === "resume") { L.push(`For ${d.target}`, ...(d.review ? ["Review draft, not for external submission."] : []), ...(d.note ? [d.note] : []), `File: ${d.filename}`, ""); break; }
       L.push(`${cap1(String(d.type).replace("_", " "))}${d.to ? ` to ${d.to}` : ""}`); if (d.subject) L.push(`Subject: ${d.subject}`); L.push("", d.body, "");
       if (Fs(d.basis).length) { h("What it says about you"); Fs(d.basis).forEach((f) => L.push(factText(f, f.label))); L.push(""); }
       L.push("Sending: not from this file. Ask Trainee in Telegram; you approve the exact message first.", "");
@@ -609,7 +644,10 @@ textarea{width:100%;min-height:96px;padding:10px 12px;border:1px solid var(--mut
 .rb-cover{margin:16px 0 4px;padding:18px 18px 16px;border:1px solid var(--line);border-radius:16px;background:var(--bg)}
 .rb-brand{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:14px;font-weight:600;color:var(--mute)}.rb-brand span:nth-of-type(1){font-family:'Brygada 1918',Georgia,serif;font-size:17px;color:var(--ink)}
 .rb-mark{width:22px;height:22px;flex:none}.rb-thesis{margin:0;font-family:'Brygada 1918',Georgia,serif;font-size:24px;line-height:1.25;font-weight:500;overflow-wrap:anywhere}
-.rb-date{margin:12px 0 0;font-size:15px;color:var(--mute)}
+.rb-date{margin:12px 0 0;font-size:15px;color:var(--mute)}.rb-basis{margin:8px 0 0;font-size:15px;color:var(--mute)}.rb-thesis .rb-cite{font-family:'Inter',system-ui,sans-serif}
+/* R9 free sources: a source's host never breaks mid-word; a host longer than the line ends in an ellipsis (its full name is the
+   link above and the title attribute). */
+ol.rb-src .rb-host{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
 ul.rb-list{margin:0;padding-left:20px}ul.rb-list li{margin:0 0 12px;overflow-wrap:anywhere}.rb-list .src{display:block;margin:4px 0 0;width:fit-content}
 .rb-cite{font-size:14px;color:var(--mute);white-space:nowrap;font-variant-numeric:tabular-nums}
 ol.rb-src{list-style:none;margin:0;padding:0}ol.rb-src li{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:6px;align-items:baseline;padding:8px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}ol.rb-src li:first-child{border-top:0}

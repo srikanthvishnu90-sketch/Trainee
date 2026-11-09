@@ -6,5 +6,8 @@
 // entry (index.ts -> handler.ts) remains in the repo, shelved.
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 import { handleChat } from "./handler-career.ts";
+import { probePdfjs } from "../_shared/career_resume_geometry.ts";
 
 serve(handleChat);
+// RELEASE 10: once per instance, off the request path: log if pdf.js (the resume format rater's reader) fails to load here.
+probePdfjs().catch(() => {});

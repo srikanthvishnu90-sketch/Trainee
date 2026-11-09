@@ -24,7 +24,7 @@ export const REPLY_CODE_DIRS = [
 export const ROUTER_BUNDLE = "supabase/functions/_shared/router_core.career.js";
 
 export const SHARED_REPLY_MODULES = [
-  "ai_policy.ts", "answer_options.ts", "application_review.ts", "application_review_links.ts", "apply_email.ts", "apply_status_summary.ts", "career_search_judge.ts", "posting_constraints.ts", "search_correction.ts", "career_pool.js", "apply_trust.ts", "approval_words.ts", "career_account_memory.ts",
+  "ai_policy.ts", "answer_options.ts", "application_review.ts", "application_review_links.ts", "apply_email.ts", "apply_status_summary.ts", "career_search_judge.ts", "posting_constraints.ts", "search_correction.ts", "career_pool.js", "apply_trust.ts", "approval_words.ts", "career_account_memory.ts", "search_widen.ts", "search_shortlist.ts", "person_zone.ts", "submit_capability.ts",
   "career_alert_store.ts", "career_alerts.ts", "career_apply.ts", "career_ask_canon.ts", "career_resume_design.ts", "career_resume_gaps.ts", "career_resume_outcomes.ts", "career_apply_cards.ts", "career_apply_gate.ts",
   "career_apply_screen.ts", "career_apply_status.ts", "career_apply_want.ts", "career_brief_store.ts", "career_calendar.ts",
   "career_capabilities.ts", "career_contacts.ts", "career_digest.ts", "career_floor.ts", "career_fresh.ts", "career_hired.ts",
@@ -44,6 +44,8 @@ export const SHARED_REPLY_MODULES = [
   "career_reply_writer.ts", "career_code_in_chat.ts",
   // 2026-11-07 (release 9 B): tailor_resume's layouts and gap report, and the version record it writes (career_tools.ts).
   "career_resume_design.ts", "career_resume_gaps.ts", "career_resume_outcomes.ts",
+  // R10 (2026-11-08): the fifteen templates, their metrics, the format rater and the geometry reader it measures with.
+  "career_resume_templates.ts", "career_resume_metrics.ts", "career_resume_rater.ts", "career_resume_geometry.ts",
   // R9-C (2026-11-07): market research on the reply path: the search provider and what it imports (sources, the research
   // reply, its report store and the artifact it is delivered as).
   "research_search.ts", "research_sources.ts", "research_reply.ts", "research_report_store.ts", "channel_artifacts.ts",

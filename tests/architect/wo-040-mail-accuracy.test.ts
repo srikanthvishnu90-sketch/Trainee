@@ -209,7 +209,7 @@ Deno.test("WO-040/M1 what goes to Claude: From, Subject and snippet only, number
   const masked = seen[1].messages[0].content as string;
   assert(!/4829137|99887766|0199|jo\.smith@/.test(masked) && /\[number\]/.test(masked) && /\[email\]/.test(masked), masked);
   const wire = toAnthropic(seen[0], mailModelConfig(ENV()));
-  eq([wire.model, "store" in wire, wire.messages.length], ["claude-haiku-5-5", false, 1], "the Anthropic request has no store flag: there is none");
+  eq([wire.model, "store" in wire, wire.messages.length], ["claude-sonnet-5-5", false, 1], "the Anthropic request has no store flag: there is none");
   eq(Object.keys(mailModelPayload(VAGUE)).sort(), ["max_tokens", "messages", "system"]);
 });
 
@@ -249,8 +249,8 @@ Deno.test("WO-040/M4 the model never writes what the person reads: extra fields 
 
 Deno.test("WO-040/M5 Claude only, off by default: CAREER_MAIL_MODEL=on wires it; MODEL_PROVIDER=openai and a gpt id in CAREER_MODEL are ignored; no key is NOT_WIRED", () => {
   eq(mailModelConfig(ENV({ MODEL_PROVIDER: "openai", OPENAI_API_KEY: "o" })).provider, "anthropic");
-  eq(mailModelConfig(ENV()).model, "claude-haiku-5-5");
-  eq([mailModelConfig(ENV({ CAREER_MODEL: "gpt-5-mini" })).provider, mailModelConfig(ENV({ CAREER_MODEL: "gpt-5-mini" })).model], ["anthropic", "claude-haiku-5-5"], "a gpt id left in CAREER_MODEL never moves the reader off Claude");
+  eq(mailModelConfig(ENV()).model, "claude-sonnet-5-5");
+  eq([mailModelConfig(ENV({ CAREER_MODEL: "gpt-5-mini" })).provider, mailModelConfig(ENV({ CAREER_MODEL: "gpt-5-mini" })).model], ["anthropic", "claude-sonnet-5-5"], "a gpt id left in CAREER_MODEL never moves the reader off Claude");
   eq(mailModelConfig({ get: (k: string) => ({ OPENAI_API_KEY: "o" } as Record<string, string>)[k] }).apiKey, "", "an OpenAI key alone is not a key: not configured");
   const none = mailModelWiring({ get: () => undefined }, costSink().admin);
   eq(none.status, "NOT_WIRED");
@@ -327,7 +327,7 @@ Deno.test("WO-040/W1 the run with the second pass: the model's confident reading
   eq([body.mail_model, body.mail_model_calls, body.mail_model_decided, body.statuses], ["on", 1, 1, 1]);
   eq(h.outbox().length, 1);
   assert(h.outbox()[0].text.startsWith("Asana (Account Manager) wants to interview you"), h.outbox()[0].text);
-  eq([h.ai.bodies.map((b) => b.model), h.ai.onlyAnthropic(), h.ai.hosts()], [["claude-haiku-5-5"], true, ["api.anthropic.com"]], "one call, on the Claude reader model, to api.anthropic.com only");
+  eq([h.ai.bodies.map((b) => b.model), h.ai.onlyAnthropic(), h.ai.hosts()], [["claude-sonnet-5-5"], true, ["api.anthropic.com"]], "one call, on the Claude reader model, to api.anthropic.com only");
   eq(h.costs.rows.length, 1);
   const c = h.costs.rows[0];
   eq([c.table, c.user_id, c.thread_id, c.provider, c.calls, c.input_tokens, c.output_tokens], ["agent_turn_costs", "U1", null, "anthropic", 1, 320, 18]);

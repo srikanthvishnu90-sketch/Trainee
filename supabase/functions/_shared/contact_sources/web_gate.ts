@@ -76,13 +76,43 @@ export function isInternalName(host: string): boolean {
   const h = host.toLowerCase().replace(/\.$/, "");
   return !h.includes(".") || h === "localhost" || /\.(localhost|local|internal|intranet|lan|home|corp|localdomain)$/.test(h) || h === "metadata.google.internal";
 }
+const privateV4 = (a: number, b: number) =>
+  a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224 || (a === 192 && b === 0) || (a === 198 && (b === 18 || b === 19));
+// An IPv6 address as its eight 16-bit groups (a dotted IPv4 tail counts as two); null when it is not one.
+function v6Groups(h: string): number[] | null {
+  let s = h.replace(/%.*$/, "");
+  const tail = /(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(s);
+  if (tail) { const q = tail.slice(1).map(Number); if (q.some((x) => x > 255)) return null; s = s.slice(0, tail.index) + `${((q[0] << 8) | q[1]).toString(16)}:${((q[2] << 8) | q[3]).toString(16)}`; }
+  const parts = s.split("::");
+  if (parts.length > 2) return null;
+  const side = (x: string) => (x ? x.split(":") : []);
+  const head = side(parts[0]), rest = parts.length === 2 ? side(parts[1]) : [];
+  const fill = parts.length === 2 ? 8 - head.length - rest.length : 0;
+  if (fill < 0 || (parts.length === 1 && head.length !== 8)) return null;
+  const all = [...head, ...Array(fill).fill("0"), ...rest];
+  if (all.length !== 8 || all.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return null;
+  return all.map((g) => parseInt(g, 16));
+}
+// Review of #628 (2026-11-09): IPv6 by its groups, not by its spelling. Refused: unspecified and loopback, IPv4-mapped (::ffff:0:0/96)
+// and IPv4-compatible (::a.b.c.d), NAT64 (64:ff9b::/96), unique-local (fc00::/7), link-local (fe80::/10), site-local (fec0::/10),
+// multicast (ff00::/8), Teredo (2001:0::/32, its IPv4 is hidden), documentation (2001:db8::/32), discard-only (100::/64), and 6to4
+// (2002::/16) whenever the IPv4 it embeds is private.
 export function isPrivateIp(ip: string): boolean {
   const h = ip.replace(/^\[|\]$/g, "").toLowerCase();
-  const m4 = h.match(/^(?:::ffff:)?(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  if (m4) { const [a, b] = [Number(m4[1]), Number(m4[2])];
-    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224 || (a === 192 && b === 0) || (a === 198 && (b === 18 || b === 19)); }
-  if (h.includes(":")) return h === "::" || h === "::1" || /^(fc|fd|fe[89ab])/.test(h) || h.startsWith("::ffff:") || h.startsWith("64:ff9b");
-  return true; // not parseable as an address: refuse
+  const m4 = h.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (m4) return privateV4(Number(m4[1]), Number(m4[2]));
+  if (!h.includes(":")) return true; // not parseable as an address: refuse
+  const g = v6Groups(h);
+  if (!g) return true;
+  if (g.slice(0, 6).every((x) => x === 0)) return true; // ::, ::1, ::a.b.c.d (IPv4-compatible)
+  if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) return true; // ::ffff:a.b.c.d (IPv4-mapped)
+  if (g[0] === 0x64 && g[1] === 0xff9b) return true; // NAT64
+  if ((g[0] & 0xfe00) === 0xfc00 || (g[0] & 0xffc0) === 0xfe80 || (g[0] & 0xffc0) === 0xfec0 || (g[0] & 0xff00) === 0xff00) return true;
+  if (g[0] === 0x2001 && g[1] === 0) return true; // Teredo
+  if (g[0] === 0x2001 && g[1] === 0x0db8) return true; // documentation (2001:db8::/32), never a real host
+  if (g[0] === 0x0100 && g[1] === 0 && g[2] === 0 && g[3] === 0) return true; // discard-only (100::/64)
+  if (g[0] === 0x2002) return privateV4(g[1] >> 8, g[1] & 0xff); // 6to4: the IPv4 in groups 1-2
+  return false;
 }
 
 const LOGIN_PATH = /\/(login|log-in|signin|sign-in|sso|auth|authenticate|account\/login|uas\/login)(\/|$|\?)/i;

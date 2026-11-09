@@ -34,7 +34,7 @@ Deno.test("a working provider: the probe answers, the call is recorded, 200 ok w
   const d = db({ status: "ok", calls: 5, errors: 0 });
   const r = await handleHealth(get(`?probe=1&token=${TOKEN}`), { env: env(), admin: d, request: ok as any });
   const b = await r.json();
-  assert(r.status === 200 && b.status === "ok" && b.provider === "Anthropic" && b.model === "claude-haiku-5-5" && b.probe.ok && b.probe.reply === "OK", JSON.stringify(b));
+  assert(r.status === 200 && b.status === "ok" && b.provider === "Anthropic" && b.model === "claude-sonnet-5-5" && b.probe.ok && b.probe.reply === "OK", JSON.stringify(b));
   assert(d.events.length === 1 && d.events[0].role === "probe" && d.events[0].ok === true, JSON.stringify(d.events));
   assert(d.alerts.length === 0);
 });

@@ -1,0 +1,55 @@
+# WO-M: the real-site browser DRY-RUN eval (scripts/browser-eval/). The build sandboxes cannot reach job sites; CI can.
+# Run by hand only (Actions > browser-eval > Run workflow): never on a push or a pull request. It opens real public postings
+# from scripts/browser-eval/sample.csv, fills a synthetic TEST person and resume, and stops before Submit. Every request but
+# GET/HEAD/OPTIONS is aborted inside the browser, no submit control is clicked, a shown captcha / password / code field stops
+# the posting, robots.txt is obeyed, 1 request a second per host. No secrets. The report is uploaded as an artifact.
+name: browser-bench
+on:
+  push:
+    branches: ["bench/browser-*"]
+permissions:
+  contents: read
+jobs:
+  eval:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22.23.3" }
+      - name: Playwright and its Chromium
+        run: |
+          npm ci --prefix tools --no-audit --no-fund
+          (cd tools && npx --no-install playwright install --with-deps chromium)
+          echo "UPMORE_PLAYWRIGHT_PATH=$GITHUB_WORKSPACE/tools/node_modules/playwright" >> "$GITHUB_ENV"
+      - name: Dry run on the sample (nothing is submitted)
+        env:
+          LABEL: bench-${{ github.sha }}
+          PER_PROVIDER: "20"
+        run: |
+          label=$(printf '%s' "$LABEL" | tr -c 'A-Za-z0-9._-' '-')
+          echo "EVAL_LABEL=$label" >> "$GITHUB_ENV"
+          node scripts/browser-eval/run.cjs --sample scripts/browser-eval/sample.csv --label "$label" --max-per-provider "$PER_PROVIDER" | tee "$RUNNER_TEMP/eval.log"
+          cat "artifacts/browser-eval/$label/summary.md" >> "$GITHUB_STEP_SUMMARY"
+          # One line per posting in the log (the artifact store is not reachable from every reviewer's sandbox).
+          node -e 'for (const l of require("fs").readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean)) { const r = JSON.parse(l); let u = ""; try { const x = new URL(r.final_url || r.url); u = x.host + x.pathname.slice(0, 60); } catch {} console.log(["ROW", r.provider, r.n, r.opened ? "open" : "-", r.form_found ? "form" : "-", "q=" + (r.questions ?? "-"), "fail=" + (r.fill_failed ?? "-"), "walls=" + (r.walls || []).join(","), "stop=" + (r.runner_bot_re ? 1 : 0), "hops=" + (r.hops || []).join(">"), "err=" + (r.error || ""), u].join(" | ")); }' "artifacts/browser-eval/$label/results.jsonl"
+      - name: Strict benchmark (the production runner; a pass only at the instant before Submit; nothing is submitted)
+        if: always()
+        env:
+          PER_PROVIDER: "20"
+        run: |
+          node scripts/browser-eval/strict.cjs --sample scripts/browser-eval/sample.csv --label "${EVAL_LABEL}-strict" --max-per-provider "$PER_PROVIDER"
+          cat "artifacts/browser-eval/${EVAL_LABEL}-strict/strict-summary.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-eval-${{ env.EVAL_LABEL }}
+          path: |
+            artifacts/browser-eval/${{ env.EVAL_LABEL }}/summary.json
+            artifacts/browser-eval/${{ env.EVAL_LABEL }}/summary.md
+            artifacts/browser-eval/${{ env.EVAL_LABEL }}/results.jsonl
+            artifacts/browser-eval/${{ env.EVAL_LABEL }}-strict/strict-summary.md
+            artifacts/browser-eval/${{ env.EVAL_LABEL }}-strict/strict.jsonl
+          retention-days: 14
+          if-no-files-found: warn

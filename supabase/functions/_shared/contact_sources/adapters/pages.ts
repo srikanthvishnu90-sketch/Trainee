@@ -3,7 +3,7 @@
 // Email is taken only from a mailto: link or a visible address inside that person's own card. Never constructed.
 import type { Candidate, Provenance, RoleFamily, SourceKind } from "../types.ts";
 import { cleanEmail, cleanName, classifyRoleFamily } from "../types.ts";
-import { GateDeny, WebGate } from "../web_gate.ts";
+import { type GateDeny, type WebGate } from "../web_gate.ts";
 
 const ENT: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ", "#39": "'" };
 const decode = (s: string) => s.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (m, e: string) => { if (e[0] === "#") { const n = e[1].toLowerCase() === "x" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10); return n > 0 && n < 0x110000 ? String.fromCodePoint(n) : ""; } return ENT[e.toLowerCase()] ?? m; });

@@ -216,9 +216,17 @@ jobs:
           TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
           WHATSAPP_VERIFY_TOKEN: ${{ secrets.WHATSAPP_VERIFY_TOKEN }}
           TRAINEE_GO_LIVE_LOG: ${{ runner.temp }}/go-live/smoke.log
+          # R10 (WO-I, LR-3): the R10 smoke (scripts/launch/r10-live-replay.ts --smoke: the inbound path, the File link signed out
+          # and in, a resume PDF link's bytes, for a synthetic test person; one model turn, its own $1 guard). Part of S6, so its
+          # FAIL rolls back like the smoke's. Runs only when the repository variable R10_DEPLOY_SMOKE is "on": until the R10 fixes
+          # are deployed its PDF check fails on production, and every deploy would roll back.
+          R10_DEPLOY_SMOKE: ${{ vars.R10_DEPLOY_SMOKE }}
         run: |
           set -o pipefail
           bash scripts/launch/trainee-go-live.sh --sha "$GITHUB_SHA" --only-smoke --no-wait --non-interactive --label "github-actions run ${{ github.run_id }} smoke"
+          if [ "${R10_DEPLOY_SMOKE:-}" = on ]; then
+            deno run -A --import-map=tests/flow/supabase-npm.json scripts/launch/r10-live-replay.ts --smoke --sha "$GITHUB_SHA" --out "$RUNNER_TEMP/go-live/r10-smoke" --cleanup-stale
+          else echo "R10 smoke: not run (vars.R10_DEPLOY_SMOKE is not \"on\")"; fi
       # Rollback: go-live started and the commit did not end live and smoked (go-live or the smoke failed, was cancelled or
       # timed out) after the standard passed. The previous successful production deploy's SHA
       # (the standard job read it from this workflow's runs) is deployed again from its own checkout, exactly as

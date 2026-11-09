@@ -25,6 +25,7 @@ import { careerHandler, SERVICE_KEY, SUPABASE_URL, supabaseParity } from "../../
 import { fakeBot, plainOf } from "../scenarios/telegram-bot-api.ts";
 import { anthropicWire } from "./anthropic_wire.ts";
 import { INTAKE_RESUME, MARKET, OLD_LIST, OLD_SEARCH, type Seeded } from "./r10_turns.ts";
+import { sourceIndex, sourcePage, sourceResponse } from "./r10_sources.ts";
 
 export const ITEMS: Record<number, string> = {
   1: "Keep the requested target through the whole task",
@@ -104,7 +105,7 @@ const latin1 = (b: Uint8Array) => new TextDecoder("latin1").decode(b);
 
 // ------------------------------------------------------------------------------------------------ the world
 export interface Doc { chat: string; filename: string; mime: string; bytes: Uint8Array; at: number }
-export interface Said { id: number; reply: string; bubbles: string[]; buttons: { text: string; callback_data?: string; url?: string; web_app?: { url: string } }[]; docs: Doc[]; links: string[]; pageChecks: string[] }
+export interface Said { id: number; reply: string; bubbles: string[]; buttons: { text: string; callback_data?: string; url?: string; web_app?: { url: string } }[]; docs: Doc[]; links: string[]; pageChecks: string[]; sourceChecks: string[] }
 // csp: the Content-Security-Policy the browser gets for this page in production: the function's own policy, relayed past the
 // gateway (page_csp.ts relayPageCsp) and chosen by the site's proxy (api/_page_csp.js pageCsp), so a render obeys it.
 export interface Opened { url: string; status: number; type: string; bytes: Uint8Array; html: string | null; csp?: string; why?: string }
@@ -124,7 +125,7 @@ const KEYS = ["CAREER_BRAIN", "CAREER_NETWORKING_DRAFT", "ANTHROPIC_API_KEY", "C
   "TRAINEE_ALLOWED_CONTACTS", "TRAINEE_DELIVER_SECRET", "CAREER_PREPARE_AHEAD_URL", "CAREER_PREPARE_AHEAD_TOKEN", "CAREER_EMAIL_SEND", "LOOPMESSAGE_API_KEY", "WHATSAPP_TOKEN", "TRAINEE_FILE_BASE_URL",
   "TRAINEE_FILE_LINK_SECRET", "TRAINEE_BOT_URL", "TRAINEE_CONNECT_BASE_URL", "TRAINEE_CONNECT_LINK_SECRET", "CAREER_MODEL_DAILY_USD", "CAREER_MODEL_DAILY_CALLS", "SUPABASE_URL"];
 
-export async function world(o: { chats: number[]; market?: Seeded[]; brain?: BrainScript }): Promise<World> {
+export async function world(o: { chats: number[]; market?: Seeded[]; brain?: BrainScript; sources?: boolean }): Promise<World> {
   const { RELEASE_FLAGS, RELEASE_NEVER_ON, RELEASE_PENDING } = await import("../../../supabase/functions/agent-chat/release_config.ts");
   const keys = [...KEYS, ...Object.keys(RELEASE_FLAGS), ...RELEASE_NEVER_ON, ...Object.keys(RELEASE_PENDING)];
   const saved = Object.fromEntries(keys.map((k) => [k, Deno.env.get(k)]));
@@ -142,7 +143,7 @@ export async function world(o: { chats: number[]; market?: Seeded[]; brain?: Bra
   const pace = virtualClock();
   const bot = fakeBot({ token: TOKEN, now: pace.clock });
   const realFetch = globalThis.fetch, viaDouble = globalThis.fetch;
-  const outbound: string[] = [], pageChecks: string[] = [], docs: Doc[] = [];
+  const outbound: string[] = [], pageChecks: string[] = [], sourceChecks: string[] = [], docs: Doc[] = [];
   const telegramFiles = new Map<string, Uint8Array>();
   const market = o.market ?? MARKET;
   let modelCalls = 0, brainCalls = 0;
@@ -193,6 +194,13 @@ export async function world(o: { chats: number[]; market?: Seeded[]; brain?: Bra
     }
     if (u.host === "api.anthropic.com") return anthropicWire(req, (chat) => fakeModel(chat));
     if (`${u.origin}${u.pathname}` === FILE_BASE) return await handleFile(req, fileDeps());
+    // The scripted source double (r10_sources.ts), only when the world was made with `sources`; otherwise refused like any host.
+    if (o.sources) {
+      const sp = sourcePage(u);
+      if (sp) { sourceChecks.push(sp.url); return sourceResponse(sp); }
+      const idx = sourceIndex(u);
+      if (idx) { sourceChecks.push(`${u.origin}${u.pathname}`); return idx; }
+    }
     const page = employerPage(u);
     if (page) return page;
     outbound.push(`${req.method} ${u.host}${u.pathname}`);
@@ -227,14 +235,14 @@ export async function world(o: { chats: number[]; market?: Seeded[]; brain?: Bra
   };
   const collect = async (chat: number, body: Record<string, unknown>): Promise<Said> => {
     turns++;
-    const before = bot.to(chat).length, d0 = docs.length, p0 = pageChecks.length;
+    const before = bot.to(chat).length, d0 = docs.length, p0 = pageChecks.length, s0 = sourceChecks.length;
     const id = await post(body);
     const msgs = bot.to(chat).slice(before);
     const bubbles = msgs.map(plainOf);
     const buttons = msgs.flatMap((m: any) => m.buttons) as Said["buttons"];
     const reply = bubbles.join("\n\n");
     const links = [...new Set([...reply.matchAll(/https?:\/\/[^\s)<>"\]]+/g)].map((m) => m[0].replace(/[.,;:]+$/, "")).concat(buttons.flatMap((b) => [b.url, b.web_app?.url].filter(Boolean) as string[])))];
-    return { id, reply, bubbles, buttons, docs: docs.slice(d0).filter((d) => d.chat === String(chat)), links, pageChecks: pageChecks.slice(p0) };
+    return { id, reply, bubbles, buttons, docs: docs.slice(d0).filter((d) => d.chat === String(chat)), links, pageChecks: pageChecks.slice(p0), sourceChecks: sourceChecks.slice(s0) };
   };
   const say = (chat: number, words: string) => collect(chat, { message: { message_id: ++mid, chat: { id: chat, type: "private" }, from: { id: chat, is_bot: false, first_name: "TEST" }, date: Math.floor(Date.now() / 1000), text: words } });
   const upload = (chat: number, filename: string, bytes: Uint8Array, caption?: string) => {
@@ -343,7 +351,7 @@ export async function deliveredFiles(w: World, chat: number, said: Said, label: 
 }
 
 // Runs a suite file: the world, the checks, the cleanup; when the machine cannot run it, every item it covers is NOT_RUN.
-export function suite(file: string, items: number[], chats: number[], body: (t: Deno.TestContext, w: World) => Promise<void>, brain?: BrainScript) {
+export function suite(file: string, items: number[], chats: number[], body: (t: Deno.TestContext, w: World) => Promise<void>, brain?: BrainScript, opts: { sources?: boolean } = {}) {
   Deno.test({
     name: `R10 acceptance ${file}`,
     sanitizeResources: false,
@@ -351,7 +359,7 @@ export function suite(file: string, items: number[], chats: number[], body: (t: 
     async fn(t) {
       const no = canRun(file);
       if (no) { await notRun(file, items, no); return; }
-      const w = await world({ chats, brain });
+      const w = await world({ chats, brain, sources: opts.sources });
       try { await body(t, w); } finally {
         console.log(`R10 ${file} turns=${w.turns()} model_calls=${w.modelCalls()} brain_calls=${w.brainCalls()} outbound=${w.outbound.length} page_checks=${w.pageChecks.length}`);
         // Item 0 is the run's own count (not one of the fifteen): every message the suite sent, setup included, all in-process.

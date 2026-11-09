@@ -1,4 +1,4 @@
--- Reverses 20261109120000_career_outbox_interim.sql: the interim lines recorded are removed (they were already delivered,
+-- Reverses 20261109130000_career_outbox_interim.sql: the interim lines recorded are removed (they were already delivered,
 -- so nothing waits on them), then the outbox's kind and key checks are the twelve kinds again.
 delete from public.career_outbox where kind = 'interim';
 alter table public.career_outbox drop constraint if exists career_outbox_kind_check;

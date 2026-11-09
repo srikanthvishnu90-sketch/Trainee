@@ -50,6 +50,8 @@ export const SHARED_REPLY_MODULES = [
   // Review of #589 (2026-11-09): the reader's resolved-address check (research_dns.ts) and the SSRF address helper it uses
   // (contact_sources/web_gate.ts, with the modules it imports).
   "research_dns.ts", "contact_sources/web_gate.ts", "contact_sources/types.ts", "contact_sources/suppression.ts",
+  // R9 free sources (2026-11-08): the no-key sources and the reader's robots.txt check.
+  "research_free_sources.ts", "research_never.ts",
   // R9 outreach (2026-11-08): who may be written to (no-reply, role and ATS/job-board inboxes never) and the staged route's
   // reading of an ask to write to someone.
   "automated_inbox.ts", "outreach_ask.ts",

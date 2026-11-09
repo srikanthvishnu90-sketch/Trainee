@@ -90,8 +90,14 @@ function isGenericProviderWord(w: string): boolean {
 // Warm-isolate catalog cache (see the fetch site for the TTL rationale).
 let catalogCache: { at: number; routes: any[] } | null = null;
 
+// NOT A TRAINEE ROLLBACK (D-046, architect, 2026-11-09): this is the Upmore-era agent-chat. It calls Anthropic directly,
+// outside Trainee's gateway and its $70 budget, on a Haiku default. Function secrets are project-wide, so on a project that
+// holds Trainee's secrets it refuses every request instead of serving as Trainee's agent-chat.
+const TRAINEE_PROJECT = ["TRAINEE_INBOUND_SECRET", "TRAINEE_DELIVER_SECRET", "CAREER_INGEST_SECRET", "CAREER_PROACTIVE_SECRET"].some((k) => !!Deno.env.get(k));
+
 serve(async (req) => {
   const cors = corsFor(req);
+  if (TRAINEE_PROJECT) return json(cors, { error: "not_a_trainee_rollback", detail: "agent-chat v203 is the Upmore-era handler and is never served as Trainee; roll Trainee back with docs/launch/TRAINEE-GO-LIVE.md (Rollback)" }, 503);
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   try {
     const authHeader = req.headers.get("Authorization") ?? "";

@@ -6,10 +6,14 @@
 // This is not a search engine: it reads the pages it is handed (from whatever search capability the turn has) and says
 // which ones it could actually open. Its one import is the shared SSRF address check (contact_sources/web_gate.ts isPrivateIp).
 //
-// Review of #589 (DNS rebinding): fetchSources also takes, per call, a resolver: the host's A/AAAA answers, checked on EVERY hop
-// (the first request and each redirect). One private, loopback, link-local, CGNAT or reserved answer and the page is refused as
-// private_address (a public name that answers a private address). No answer at all is unreachable. research_dns.ts
-// systemResolver is the production one (Deno.resolveDns, read at call time so a test can stand in a stub).
+// Review of #589 (DNS rebinding) and R9 free sources (2026-11-08): fetchSources also takes, per call,
+//   resolver  the host's A/AAAA answers, checked on EVERY hop (the first request and each redirect): one private, loopback,
+//             link-local, CGNAT or reserved answer and the page is refused as private_address (DNS rebinding: a public name
+//             that answers a private address). No answer at all is unreachable. research_dns.ts systemResolver is the
+//             production one (Deno.resolveDns, read at call time so the eval can stand in a stub).
+//   robots    may this exact URL be read (robots.txt; research_free_sources.ts robotsGate)? Checked on every hop too.
+//   convert   documented public JSON, RSS and XML answers (ATS job boards, Wikidata, GitHub, USAJOBS, news RSS) turned into
+//             plain sentences by code from the fields of the answer, so the facts guard can quote them like any page.
 import { isPrivateIp } from "./contact_sources/web_gate.ts";
 
 export interface SourcePage {
@@ -20,16 +24,24 @@ export interface SourcePage {
   text: string; // the page's readable text (tags, scripts and styles removed), capped
   fetchedAt: number;
 }
-export interface SourceRejection { url: string; why: "blocked_site" | "not_http" | "private_address" | "http_status" | "not_text" | "too_many_redirects" | "unreachable" | "empty" }
+export interface SourceRejection { url: string; why: "blocked_site" | "not_http" | "private_address" | "robots_disallow" | "http_status" | "not_text" | "too_many_redirects" | "unreachable" | "empty" }
 export type Resolver = (host: string) => Promise<string[]>;
+export type RobotsCheck = (url: string) => Promise<boolean>;
+export type Convert = (url: string, contentType: string, body: string) => { title: string; text: string } | null;
 export interface FetchedSources { verified: SourcePage[]; rejected: SourceRejection[] }
 
 // Never fetched, never linked (owner rule). Matched on the host and every parent domain; Indeed's country sites too.
 const BLOCKED_DOMAINS = ["linkedin.com", "lnkd.in", "licdn.com", "indeed.com", "joinhandshake.com", "handshake.com"];
+// R9 free sources: the never-list on ANY TLD and at any depth, as a whole DNS label (glassdoor.co.uk, linkedin.cn,
+// www.ziprecruiter.ca, glassdoor.com.evil.example all refuse), the same names career_contact_sources.ts never opens.
+// Google Scholar is the label pair scholar.google on any suffix.
+const NEVER_LABELS = new Set(["linkedin", "lnkd", "licdn", "indeed", "indeedemail", "indeedmail", "joinhandshake", "glassdoor", "ziprecruiter", "crunchbase", "commoncrawl"]);
 export function isBlockedHost(url: string): boolean {
   let host: string;
   try { host = new URL(url).hostname.toLowerCase().replace(/\.$/, ""); } catch { return true; }
   if (BLOCKED_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`))) return true;
+  const named = host.split(".").filter(Boolean).slice(0, -1);
+  if (named.some((l) => NEVER_LABELS.has(l)) || named.some((l, i) => l === "scholar" && named[i + 1] === "google")) return true;
   return /(^|\.)indeed\.(co\.)?[a-z]{2,3}$/.test(host);
 }
 function isPrivateHost(url: string): boolean {
@@ -73,7 +85,7 @@ export function readableText(html: string): { title: string; text: string } {
 const MAX_BYTES = 1_500_000, MAX_TEXT = 60_000, MAX_REDIRECTS = 3;
 
 // Reads each page once. Nothing here throws: a page that cannot be read is a rejection with its reason.
-type ReadOpts = { resolver?: Resolver };
+type ReadOpts = { resolver?: Resolver; robots?: RobotsCheck; convert?: Convert };
 export async function fetchSources(urls: string[], o: { fetch?: typeof fetch; timeoutMs?: number; now?: () => number; max?: number } & ReadOpts = {}): Promise<FetchedSources> {
   const f = o.fetch ?? fetch, timeout = o.timeoutMs ?? 10000, now = o.now ?? Date.now;
   const out: FetchedSources = { verified: [], rejected: [] };
@@ -101,11 +113,12 @@ async function readOne(start: string, f: typeof fetch, timeout: number, o: ReadO
   let url = start;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
     // Every hop passes the same checks, so a redirect can never carry a fetch to a blocked or private address: the name, then
-    // (with a resolver) the addresses it resolves to right now.
+    // (with a resolver) the addresses it resolves to right now, then (with a robots check) robots.txt for that exact path.
     if (!isHttp(url)) return { why: "not_http" };
     if (isBlockedHost(url)) return { why: "blocked_site" };
     if (isPrivateHost(url)) return { why: "private_address" };
     if (o.resolver) { const r = await resolvedPublic(url, o.resolver); if (r !== true) return { why: r }; }
+    if (o.robots) { let yes = false; try { yes = await o.robots(url); } catch { yes = false; } if (!yes) return { why: "robots_disallow" }; }
     let res: Response;
     try {
       res = await f(url, { method: "GET", redirect: "manual", headers: { accept: "text/html,text/plain;q=0.9" }, signal: AbortSignal.timeout(timeout) });
@@ -119,13 +132,16 @@ async function readOne(start: string, f: typeof fetch, timeout: number, o: ReadO
     }
     if (res.status !== 200) { await res.body?.cancel().catch(() => {}); return { why: "http_status" }; }
     const type = (res.headers.get("content-type") ?? "").toLowerCase();
-    if (!/text\/html|text\/plain|application\/xhtml/.test(type)) { await res.body?.cancel().catch(() => {}); return { why: "not_text" }; }
+    const structured = !!o.convert && /json|xml|rss|atom/.test(type) && !/text\/html|application\/xhtml/.test(type);
+    if (!structured && !/text\/html|text\/plain|application\/xhtml/.test(type)) { await res.body?.cancel().catch(() => {}); return { why: "not_text" }; }
     let body = "";
     try {
       const buf = new Uint8Array(await res.arrayBuffer());
       body = new TextDecoder().decode(buf.slice(0, MAX_BYTES));
     } catch { return { why: "unreachable" }; }
-    const { title, text } = /text\/plain/.test(type) ? { title: "", text: body.trim() } : readableText(body);
+    let conv: { title: string; text: string } | null = null;
+    if (structured) { try { conv = o.convert!(url, type, body); } catch { conv = null; } if (!conv) return { why: "not_text" }; }
+    const { title, text } = conv ?? (/text\/plain/.test(type) ? { title: "", text: body.trim() } : readableText(body));
     if (!text) return { why: "empty" };
     return { url, title: title || new URL(url).hostname, text: text.slice(0, MAX_TEXT) };
   }

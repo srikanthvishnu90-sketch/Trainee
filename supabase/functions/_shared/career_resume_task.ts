@@ -105,7 +105,7 @@ function scorer(target: Target): (f: Fact) => number {
   return (f) => { const x = lc(textOf(f)); return [...words, ...family].reduce((n, w) => n + (x.includes(w) ? 1 : 0), 0); };
 }
 // A skill read with its label still on it ("Skills: Python", "Interests: Coding"): the label is the person's, kept as theirs.
-function skillLines(skills: Fact[]): { text: string }[] {
+function skillLines(skills: Fact[]): { label?: string; text: string; group: string }[] {
   const groups = new Map<string, string[]>();
   for (const f of skills) {
     const raw = String(f.name || f.title || f.text || "").trim();
@@ -114,13 +114,13 @@ function skillLines(skills: Fact[]): { text: string }[] {
     const v = (m ? m[2] : raw).trim();
     if (v) groups.set(label, [...(groups.get(label) ?? []), v]);
   }
-  // Under the Skills heading, a lone Skills group needs no label of its own.
-  return [...groups].map(([k, v]) => ({ text: groups.size === 1 && k === "Skills" ? v.join(", ") : `${k}: ${v.join(", ")}` }));
+  // A.4's run-in labels (Technical:, Certifications:, Interests:); a lone group of plain skills needs none.
+  return [...groups].map(([k, v]) => ({ group: k, text: v.join(", "), ...(groups.size === 1 && k === "Skills" ? {} : { label: `${k === "Skills" ? "Technical" : k}:` }) }));
 }
-const printedOf = (bs: Block[]) => bs.flatMap((b) => b.right ? [b.text, b.right] : [b.text]);
+const printedOf = (bs: Block[]) => bs.flatMap((b) => [...(b.label ? [b.label] : []), b.text, ...(b.right ? [b.right] : [])]);
 export interface Built { blocks: Block[]; lines: string[]; gpaConflict: string[] | null; contactMissing: boolean; unconfirmed: boolean; left: string[] }
 // deno-lint-ignore no-explicit-any
-export function buildResume(profile: any, target: Target, source: string): Built {
+export function buildResume(profile: any, target: Target, uploaded: boolean): Built {
   const confirmed = (CareerProfile.confirmedFacts(profile || {}) as Fact[]).filter((f) => f.status !== "draft");
   const unconfirmed = !confirmed.length;
   const facts: Fact[] = unconfirmed ? (profile?.facts || []).filter((f: Fact) => f && f.kind) : confirmed;
@@ -145,13 +145,18 @@ export function buildResume(profile: any, target: Target, source: string): Built
     for (const { f } of xs) {
       blocks.push({ kind: "entry", ...splitDates(asWritten(String(f.title || f.text))) });
       for (const b of (f.bullets?.length ? f.bullets : (f.text && f.text !== f.title ? [f.text] : []))) blocks.push({ kind: "bullet", text: asWritten(String(b)) });
+      if (kind === "education" && gpaConflict && new RegExp(GPA.source, "i").test(textOf(f))) blocks.push({ kind: "line", text: "GPA omitted: conflicting source values need confirmation before use.", flag: true });
     }
   }
   const skills = skillLines(facts.filter((f) => f.kind === "skill"));
-  if (skills.length) { blocks.push({ kind: "heading", text: "Skills" }); for (const s of skills) blocks.push({ kind: "line", text: s.text }); }
-  const notes = [`Review draft for ${target.label}, built from ${source}.`];
-  if (gpaConflict) notes.push(`GPA omitted: your resume shows ${gpaConflict.join(" and ")}; confirm one before use.`);
-  notes.push(unconfirmed ? "Facts unconfirmed; not for external submission." : contactMissing ? "Contact details to add; not ready for an employer." : "General version, not written for a specific posting.");
+  if (skills.length) {
+    const more = skills.find((x) => /^Certifications?$/.test(x.group)) ? " & Certifications" : skills.find((x) => /^Interests?$/.test(x.group)) ? " & Interests" : "";
+    blocks.push({ kind: "heading", text: `Skills${more}` });
+    for (const x of skills) blocks.push({ kind: "line", text: x.text, ...(x.label ? { label: x.label } : {}) });
+  }
+  // A.4's closing note, in the flag colour under a dotted rule: what this draft is, what it was built from, what is open.
+  const notes = [`Review draft for ${target.label}, built from ${uploaded ? "your uploaded resume" : "the saved intake notes, not the original resume file"}.`];
+  notes.push(unconfirmed ? "Facts unconfirmed; not for external submission." : contactMissing || gpaConflict ? "Details to confirm; not for external submission." : "General version, not written for a specific posting.");
   blocks.push({ kind: "line", text: notes.join(" "), flag: true });
   return { blocks, lines: printedOf(blocks), gpaConflict, contactMissing, unconfirmed, left: [] };
 }
@@ -212,7 +217,7 @@ export async function resumeTaskTurn(o: { message: string; ctx: any; userId: str
   }
   const R = await R0();
   const source = (await o.deps.uploaded().catch(() => false)) ? "the facts read from your uploaded resume" : "your saved resume intake, not the original file";
-  const built = buildResume(profile, target, source);
+  const built = buildResume(profile, target, source.startsWith("the facts read"));
   const out = toOnePage(R, built, target);
   // The words read back out of the PDF must be exactly the lines built (no line lost, none added).
   const back = (R as any).extractPdfLines((R as any).primitives.bytes(out.pdf)) as string[];

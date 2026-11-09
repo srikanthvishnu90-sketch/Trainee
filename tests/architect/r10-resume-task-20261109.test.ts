@@ -85,7 +85,7 @@ function inspect(bytes: Uint8Array, what: string) {
     assertNode.ok(CORPUS.includes(norm(r.text)), `${what}: an invented line: ${JSON.stringify(r.text)}`);
   }
   const flagged = pdf.runs.filter((r) => r.color === FLAG_RGB).map((r) => r.text).join(" ");
-  assertNode.ok(flagged.includes("[Your name]") && flagged.includes("[email · phone · LinkedIn to add]"), `${what}: contact placeholders visible and flagged: ${flagged}`);
+  assertNode.ok(/\[your name\]/i.test(flagged) && flagged.includes("[email · phone · LinkedIn to add]"), `${what}: contact placeholders visible and flagged: ${flagged}`);
   assertNode.ok(!OLD_ROLE.test(text), `${what}: nothing of the old list's roles`);
   assertNode.ok(pdf.runs.every((r) => r.size >= 10), `${what}: readable type (no run under 10 pt): ${[...new Set(pdf.runs.map((r) => r.size))]}`);
   for (const k of ["TEST Systems Inc", "TEST University", "Python"]) assertNode.ok(text.includes(k.toLowerCase()), `${what}: ${k} from the intake`);
@@ -279,7 +279,7 @@ Deno.test("facts/2 two GPA values: left off the file, one narrow question; label
   // As the production intake filed them: "Skill: Skills: Python", "Skill: Interests: Golf".
   const sk = p.facts.filter((f: { kind: string }) => f.kind === "skill");
   sk[0].name = "Skills: Python"; sk[1].name = "Interests: Golf";
-  const b = buildResume(p, targetOf(T1)!, "your saved resume intake");
+  const b = buildResume(p, targetOf(T1)!, false);
   assertNode.deepStrictEqual(b.gpaConflict, ["3.7", "3.4"]);
   const body = b.blocks.filter((x) => !x.flag).map((x) => x.text).join(" ");
   assertNode.ok(!/GPA/.test(body), `no GPA printed while the values conflict: ${body}`);

@@ -1,27 +1,32 @@
 // R10 F.3 (stop/pause truth, owner finding 2026-11-08): a stop turn's reply says only the effect that was written AND
-// read back. career_host.js classifies the stop (ctx._stopControl); this module does the database side:
-//   - workflow stop ("stop the people list", "don't contact anyone", "leave everything unsent"): unsent approved outreach
-//     drafts are held (back to waiting, approval cleared, so nothing sends without a new yes) and queued outreach emails
-//     on the send rail are cancelled; the account is NOT paused;
+// read back. career_host.js classifies the stop (stopControlOf); this module does the database side:
+//   - workflow stop ("stop the people list", "don't contact anyone", "leave everything unsent"): everything approved and
+//     not yet sent is held: outreach drafts and replies-lane actions go back to waiting (approval cleared, so nothing goes
+//     without a new yes), queued outreach emails are cancelled, and queued applications are cancelled through the
+//     race-safe career_apply_cancel_for; then it is all read back; the account is NOT paused;
 //   - account pause ("pause everything", "stop all sending"): the pause rides the turn's commit (career_host_commit,
 //     career:account paused) and is read back after it, with career_user_quiet, the predicate the send paths read.
-// Counts come from the real tables (career_outreach_drafts, career_send_queue, career_apply_jobs) or are said unknown.
+// Counts come from the real tables (career_outreach_drafts, career_send_queue, career_outreach_actions,
+// career_apply_jobs) or are said unknown.
 // No later reconciliation is promised: none is scheduled.
 
 // The account control contract (career_user_quiet and career_apply_current, both reading career:account paused), audited
 // 2026-11-09 against the latest migration of each function. Only the paths that refuse while paused are named as held.
 export const PAUSE_HOLDS = [
   "new applications and cloud applications (enqueue, claim and the check before submit)",
-  "outreach emails (checked again right before each one goes, so a batch already started stops too)",
+  "outreach emails (refused when they are claimed to send)",
   "follow-ups",
-  "calendar invites for meetings you approved from a reply",
   "job alerts, job cards and other messages I send on my own",
   "reminders",
 ] as const;
-// What the pause cannot reach: an email already handed to the mail provider when the pause lands is out of Trainee's
-// hands (it is recorded as sent). Networking introductions do not read it either, but that connector is not wired.
+// Paths that do NOT read the pause on this trunk: career_send_go (20261031020000:123) re-checks nothing between the
+// emails of a claimed batch, and replies-lane actions (career_outreach_action_claim, runOutreachActions) run while paused,
+// calendar invites with sendUpdates=all. Said plainly, never claimed as stopped. The send-paths PR
+// (fix/r10-pause-send-paths-20261109) closes both; this list shrinks with it. Networking introductions do not read the
+// pause either, but that connector is not wired.
 export const PAUSE_GAPS = [
-  "an email already handed to Gmail at the moment you paused",
+  "an email batch already claimed before the pause (it can finish its next couple of minutes of sends)",
+  "calendar invites for meetings you already approved from a reply",
 ] as const;
 
 type Admin = { from(t: string): any; rpc(n: string, a: unknown): PromiseLike<{ data: any; error: { message: string } | null }> };
@@ -30,8 +35,10 @@ export interface Counts {
   drafts: { waiting: number; approved: number; sending: number; out: number } | null;
   emails: { queued: number; sending: number; out: number } | null;
   applications: { waiting: number; inProgress: number; submitted: number; uncertain: number } | null;
+  actions: { waiting: number; approved: number; running: number; done: number } | null;
 }
-export interface Hold { held: number | null; cancelledEmails: number | null; error: string | null }
+// null: that write failed (or could not be read back), so that part is NOT stopped.
+export interface Hold { held: number | null; cancelledEmails: number | null; actions: number | null; applications: number | null; error: string | null }
 
 const tally = (rows: { s: string }[], m: Record<string, string[]>) => {
   const out: Record<string, number> = {};
@@ -57,7 +64,30 @@ export async function holdUnsent(admin: Admin, userId: string, now: number): Pro
     if (r.error) throw new Error(r.error.message);
     cancelledEmails = (r.data ?? []).length;
   } catch (e) { errors.push(`emails: ${(e as Error)?.message ?? e}`); }
-  return { held, cancelledEmails, error: errors.length ? errors.join("; ") : null };
+  // Replies-lane actions (follow-ups, scheduling replies, calendar invites) approved and not yet taken by a worker.
+  let actions: number | null = null;
+  try {
+    const r = await admin.from("career_outreach_actions").update({ status: "shown", approved_hash: null, approved_at: null, result: "held: the person stopped this in chat", updated_at: at })
+      .eq("user_id", userId).eq("status", "approved").select("id");
+    if (r.error) throw new Error(r.error.message);
+    actions = (r.data ?? []).length;
+  } catch (e) { errors.push(`actions: ${(e as Error)?.message ?? e}`); }
+  // Applications approved and not yet claimed: cancelled by the existing race-safe cancel, one employer at a time (queued,
+  // no attempt yet, under the person's lock; a worker's claim takes only 'queued'). A cloud-bound or started one is not
+  // touched here and is counted as waiting or in progress, so the reply says it still goes.
+  let applications: number | null = null;
+  try {
+    const r = await admin.from("career_apply_jobs").select("company").eq("user_id", userId).eq("state", "queued").eq("attempts", 0).is("source", null).limit(500);
+    if (r.error) throw new Error(r.error.message);
+    let n = 0;
+    for (const co of [...new Set((r.data ?? []).map((x: any) => String(x.company ?? "")).filter(Boolean))]) {
+      const c = await admin.rpc("career_apply_cancel_for", { p_user: userId, p_company: co });
+      if (c.error) throw new Error(c.error.message);
+      n += Number((c.data as any)?.approved_cancelled ?? 0);
+    }
+    applications = n;
+  } catch (e) { errors.push(`applications: ${(e as Error)?.message ?? e}`); }
+  return { held, cancelledEmails, actions, applications, error: errors.length ? errors.join("; ") : null };
 }
 
 export async function reconcile(admin: Admin, userId: string): Promise<Counts> {
@@ -71,10 +101,12 @@ export async function reconcile(admin: Admin, userId: string): Promise<Counts> {
   const d = await read("career_outreach_drafts", "status");
   const q = await read("career_send_queue", "state");
   const a = await read("career_apply_jobs", "state");
+  const x = await read("career_outreach_actions", "status");
   return {
     drafts: d && tally(d, { waiting: ["shown"], approved: ["approved"], sending: ["sending"], out: ["sent", "replied", "bounced"] }) as Counts["drafts"],
     emails: q && tally(q, { queued: ["queued"], sending: ["sending"], out: ["sent", "replied", "bounced"] }) as Counts["emails"],
     applications: a && tally(a, { waiting: ["queued", "needs_user"], inProgress: ["driving"], submitted: ["confirmed"], uncertain: ["submitted_unconfirmed", "unknown_outcome"] }) as Counts["applications"],
+    actions: x && tally(x, { waiting: ["shown"], approved: ["approved"], running: ["running"], done: ["done"] }) as Counts["actions"],
   };
 }
 
@@ -109,22 +141,35 @@ function countLines(c: Counts): string[] {
   out.push(c.applications
     ? `Applications on record: ${c.applications.waiting} waiting, ${c.applications.inProgress} in progress, ${c.applications.submitted} confirmed by the employer, ${c.applications.uncertain} with the outcome unknown.`
     : "I could not read your applications, so their counts are unknown.");
+  out.push(c.actions
+    ? `Follow-ups and call invites on record: ${c.actions.waiting} waiting for your yes, ${c.actions.approved} approved, ${c.actions.running} being carried out now (outcome uncertain), ${c.actions.done} done.`
+    : "I could not read your follow-ups and call invites, so their counts are unknown.");
   return out;
 }
 
-export function workflowReply(o: { stop: StopControl; hold: Hold; counts: Counts; accountPaused?: boolean }): string {
+// researchBlocker: why the open ask cannot be answered in this turn, in plain words (the caller decides it from the release
+// switches); null when no blocker is known.
+export function workflowReply(o: { stop: StopControl; hold: Hold; counts: Counts; accountPaused?: boolean; researchBlocker?: string | null }): string {
   const s = o.stop, lines: string[] = [];
   lines.push(s.cancelled?.includes("people_list") ? "Stopped: the people list in this conversation is cancelled, and no one on it was contacted." : "No people list was being built in this conversation, so there was none to cancel.");
   if (o.hold.held === null) lines.push("I could not hold your approved outreach drafts (the write failed), so any approved draft is NOT stopped.");
   else if (o.hold.held > 0) lines.push(`Held ${n(o.hold.held, "approved outreach draft", "approved outreach drafts")}: ${o.hold.held === 1 ? "it goes" : "they go"} back to waiting and won't send without a new yes.`);
   if (o.hold.cancelledEmails === null) lines.push("I could not cancel queued outreach emails (the write failed), so any queued email is NOT stopped.");
   else if (o.hold.cancelledEmails > 0) lines.push(`Cancelled ${n(o.hold.cancelledEmails, "queued outreach email", "queued outreach emails")}.`);
+  if (o.hold.actions === null) lines.push("I could not hold your approved follow-ups and call invites (the write failed), so any approved one is NOT stopped.");
+  else if (o.hold.actions > 0) lines.push(`Held ${n(o.hold.actions, "approved follow-up or call invite", "approved follow-ups and call invites")}: back to waiting for a new yes.`);
+  if (o.hold.applications === null) lines.push("I could not stop your approved applications (the write failed), so any approved application is NOT stopped.");
+  else if (o.hold.applications > 0) lines.push(`Stopped ${n(o.hold.applications, "approved application", "approved applications")} before ${o.hold.applications === 1 ? "it was" : "they were"} sent: ${o.hold.applications === 1 ? "it goes" : "they go"} only if you approve again.`);
   lines.push(...countLines(o.counts));
   const a = o.counts.applications;
-  const live = a ? a.waiting + a.inProgress : null;
+  const live = a ? a.waiting + a.inProgress : null; // what is still standing after the holds, read back
+  if (o.counts.drafts && o.counts.drafts.approved > 0 && o.hold.held !== null) lines.push(`${n(o.counts.drafts.approved, "approved outreach draft is", "approved outreach drafts are")} still on record as approved after the hold, so ${o.counts.drafts.approved === 1 ? "it is" : "they are"} NOT confirmed stopped.`);
+  if (o.counts.actions && o.counts.actions.approved > 0 && o.hold.actions !== null) lines.push(`${n(o.counts.actions.approved, "approved follow-up or call invite is", "approved follow-ups and call invites are")} still on record as approved after the hold, so NOT confirmed stopped.`);
   if (o.accountPaused) lines.push("Your account is still paused, as it was before this message; this stop did not change that.");
   else lines.push(`Your account is not paused${live ? `, so ${n(live, "application you already approved or started still goes", "applications you already approved or started still go")}` : ""}. Say "pause everything" to stop all sending.`);
-  if (s.outstanding) lines.push(`Your ask for ${s.outstanding} is still open: I have not answered it in this message.`);
+  if (s.outstanding) lines.push(o.researchBlocker
+    ? `Your ask for ${s.outstanding} is still open, and I can't answer it here: ${o.researchBlocker}`
+    : `Your ask for ${s.outstanding} is still open: I have not answered it in this message.`);
   return lines.join("\n");
 }
 

@@ -4,7 +4,8 @@
 //   - the exact F.3 turn: the people list is cancelled, unsent drafts are held, nothing is sent, the account is NOT
 //     paused, and every number in the reply is the table's;
 //   - "pause everything" / "stop all sending": career:account paused, read back, and each send path the reply names
-//     refuses while paused (one step per path), a batch already claimed included;
+//     refuses while paused (one step per path); the two paths that do not yet (a batch already claimed, replies-lane
+//     calendar invites) are named as not covered;
 //   - a failed or contradicted write: the reply says the stop is not confirmed, and that is what is stored;
 //   - resume only on an explicit ask.
 import assertNode from "node:assert/strict";
@@ -15,6 +16,7 @@ import { serviceRpc } from "../flow/pgwire.ts";
 import { queueApproved, queueApprovedOutreach } from "../../supabase/functions/_shared/career_send_rail.ts";
 import { payloadHash } from "../../supabase/functions/_shared/career_outreach.ts";
 import { PAUSE_GAPS, PAUSE_HOLDS } from "../../supabase/functions/_shared/career_stop_truth.ts";
+import { proposeEvent, supabaseRepliesStore } from "../../supabase/functions/_shared/career_outreach_replies.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -32,7 +34,7 @@ Deno.test({
   async fn(t) {
     if (!pgBinDir()) { if (CI) throw new Error("needs Postgres 16 binaries in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
     if (Deno.uid?.() === 0 && !CI) { console.log("NOT_RUN locally as root: run it as an unprivileged user (initdb)"); return; }
-    const ids = [930001, 930002, 930003, 930004, 930005, 930006, 930007, 930008];
+    const ids = [930001, 930002, 930003, 930004, 930005, 930006, 930007];
     const w: World = await startWorld({ tokens: Object.fromEntries(ids.map((j) => [tokenOf(j), uidOf(j)])) });
     const rpc = serviceRpc(w.conn as any);
     const outreachDeps = { ...rpc, drafts: draftsReader(w.conn as any) };
@@ -56,8 +58,19 @@ Deno.test({
       await t.step("the exact F.3 turn: the people list is cancelled, unsent drafts held, nothing sent, the account not paused, the reply's numbers are the tables'", async () => {
         const p = await w.addPerson(ids[0], 0);
         await w.connectGmail(p);
-        await w.web(p, "hi");
+        // An application approved and queued, not yet claimed by a worker (a confirmed resume first).
+        const up = await w.tgResumeFile(p, resumeOf(p.spec));
+        assert(/15 facts/.test(up.said.join("\n")), up.said.join(" | "));
+        await w.tg(p, "yes, that's my resume");
+        eq((await w.web(p, `apply to the Data Analyst role at ${POSTINGS[0].company}`)).resultStatus, "queued", "setup: one application queued");
         await plantPeopleList(p);
+        // A replies-lane calendar invite, approved and not yet created.
+        const store = supabaseRepliesStore(w.admin);
+        const now = Date.now();
+        const th = await store.track({ user_id: p.uid, draft_id: null, provider: "gmail", provider_thread: `th-f3-${RUN}`, email: at("f3cal"), name: "Avery Synthetic", firm: "Beta", subject: "Hello", sent_at: new Date(now - 86_400_000).toISOString() });
+        await store.applyReply(p.uid, th, `m-f3-${RUN}`, "wants_call", new Date(now).toISOString(), { who: "contact" });
+        const inv = (await proposeEvent({ store, userId: p.uid, threadId: th, slot: { start: new Date(now + 3 * 86_400_000).toISOString(), end: new Date(now + 3 * 86_400_000 + 1_800_000).toISOString(), person: "Thu 10:00" } as any, now }))!;
+        eq((await store.approve(p.uid, inv.batch_id, [{ n: inv.n, hash: inv.hash }], now)).length, 1, "setup: the invite is approved");
         // Outreach on record: two approved and unsent (one already handed to the send rail), one waiting, one already out.
         const [queuedOne, approvedOnly, waiting, out] = await approvedDrafts(railDb, p.uid, [at("f3q"), at("f3a"), at("f3w"), at("f3o")]);
         const queued = await queueApprovedOutreach(outreachDeps, p.uid, [queuedOne]);
@@ -79,6 +92,8 @@ Deno.test({
         const ds = await draftStates(p);
         eq(ds, { shown: 3, sent: 1 }, "both approved drafts are back to waiting; nothing else changed");
         eq(await w.sql(`select state from public.career_send_queue where source_id = ${q(queuedOne.draftId)}`), "cancelled");
+        eq(await w.sql(`select status from public.career_outreach_actions where id = ${q(inv.id)}`), "shown", "the approved invite is back to waiting for a yes");
+        eq(await w.sql(`select string_agg(state, ',') from public.career_apply_jobs where user_id = ${q(p.uid)}`), "not_submitted", "the queued application is stopped before it was sent");
         // Nothing is sent, now or by the sender's next pass.
         await w.sendWorker();
         eq(w.gmail.sent.length, sentBefore, "nothing went out");
@@ -87,14 +102,18 @@ Deno.test({
         eq(lines[0], "Stopped: the people list in this conversation is cancelled, and no one on it was contacted.");
         eq(lines[1], "Held 2 approved outreach drafts: they go back to waiting and won't send without a new yes.");
         eq(lines[2], "Cancelled 1 queued outreach email.");
+        eq(lines[3], "Held 1 approved follow-up or call invite: back to waiting for a new yes.");
+        eq(lines[4], "Stopped 1 approved application before it was sent: it goes only if you approve again.");
+        lines.splice(3, 2);
         eq(lines[3], `Outreach drafts on record: ${ds.shown} waiting for your yes, 0 approved, 0 sending (outcome uncertain), ${ds.sent} already out.`);
         const rail = Object.fromEntries((await w.json<{ state: string; n: number }[]>(`select state, count(*)::int n from public.career_send_queue where user_id = ${q(p.uid)} group by state`)).map((x) => [x.state, x.n]));
         eq(lines[4], `Emails on the send rail: ${rail.queued ?? 0} queued, ${rail.sending ?? 0} sending (outcome uncertain), ${(rail.sent ?? 0) + (rail.replied ?? 0) + (rail.bounced ?? 0)} already out.`);
         eq(lines[5], `Applications on record: 0 waiting, 0 in progress, 0 confirmed by the employer, 0 with the outcome unknown.`);
-        eq(await n(`select count(*) from public.career_apply_jobs where user_id = ${q(p.uid)}`), 0);
-        eq(lines[6], `Your account is not paused. Say "pause everything" to stop all sending.`);
-        eq(lines[7], "Your ask for company research is still open: I have not answered it in this message.");
-        eq(lines.length, 8, r.reply);
+        eq(await n(`select count(*) from public.career_apply_jobs where user_id = ${q(p.uid)} and state in ('queued', 'driving', 'needs_user', 'confirmed', 'submitted_unconfirmed', 'unknown_outcome')`), 0);
+        eq(lines[6], `Follow-ups and call invites on record: 1 waiting for your yes, 0 approved, 0 being carried out now (outcome uncertain), 0 done.`);
+        eq(lines[7], `Your account is not paused. Say "pause everything" to stop all sending.`);
+        eq(lines[8], "Your ask for company research is still open, and I can't answer it here: company research isn't turned on in this version of Trainee yet, so I can't look it up for you. Nothing about it was sent anywhere.");
+        eq(lines.length, 9, r.reply);
         // The stored reply is the one returned.
         eq(await w.sql(`select content from public.agent_messages where thread_id = ${q(p.web.thread!)} and role = 'assistant' order by id desc limit 1`), r.reply);
       });
@@ -170,42 +189,6 @@ Deno.test({
         eq((await w.web(p, "resume career work")).intent, "career_resumed");
         await w.sendWorker();
         assert(w.gmail.sent.length > sent, "after the explicit resume the rail sends");
-      });
-
-      await t.step("paused in the middle of a claimed batch: the email already sent stays sent, the rest are held (queued, not failed)", async () => {
-        const p = await w.addPerson(ids[7], 7);
-        await w.connectGmail(p);
-        await w.web(p, "hi");
-        const items = await approvedDrafts(railDb, p.uid, [at("mb1"), at("mb2"), at("mb3")]);
-        eq((await queueApprovedOutreach(outreachDeps, p.uid, items)).map((x) => x.status), ["queued", "queued", "queued"]);
-        const before = w.gmail.sent.length;
-        // The pause lands right after Gmail accepts the first email, while the worker still holds the batch: the record the
-        // chat's pause writes (career:account paused), set between two sends of one claim.
-        const orig = w.gmail.fetch;
-        let pausedAt = 0;
-        w.gmail.fetch = async (input: Request | URL | string, init?: RequestInit) => {
-          const res = await orig(input, init);
-          const req = input instanceof Request && !init ? input : new Request(input as any, init);
-          if (!pausedAt && req.method === "POST" && new URL(req.url).pathname.endsWith("/messages/send") && res.ok) {
-            pausedAt = w.gmail.sent.length;
-            await w.sql(`update public.career_watch_kv set value = jsonb_set(value, '{paused}', 'true') where user_id = ${q(p.uid)} and key = 'career:account'`);
-          }
-          return res;
-        };
-        try { await w.sendWorker(); } finally { w.gmail.fetch = orig; }
-        eq(await quiet(p), true, "setup: paused mid-batch");
-        eq(w.gmail.sent.length - before, 1, "only the email sent before the pause went out");
-        const st = await w.json<{ state: string; n: number }>(`select state, count(*)::int n from public.career_send_queue where user_id = ${q(p.uid)} group by state order by state`);
-        eq(st, [{ state: "queued", n: 2 }, { state: "sent", n: 1 }], "the rest are held, not failed");
-        // Due again and paused: still nothing goes.
-        await w.sql(`update public.career_send_queue set next_at = now() where user_id = ${q(p.uid)} and state = 'queued'`);
-        await w.sendWorker();
-        eq(w.gmail.sent.length - before, 1, "nothing goes while paused");
-        // Resumed by the explicit ask, the held two go, once each.
-        eq((await w.web(p, "resume career work")).intent, "career_resumed");
-        await w.sql(`update public.career_send_queue set next_at = now() where user_id = ${q(p.uid)} and state = 'queued'`);
-        await w.sendWorker();
-        eq(w.gmail.sent.length - before, 3, "after the resume the held emails go");
       });
 
       await t.step("paused: follow-ups, job alerts, cards and proactive messages, and reminders refuse", async () => {

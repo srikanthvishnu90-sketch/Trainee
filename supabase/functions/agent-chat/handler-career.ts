@@ -1592,7 +1592,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         stopHold = await holdUnsent(admin as any, user.id, Date.now());
         if (stopHold.error) console.error("career stop: hold failed:", stopHold.error);
         out = { ...out, intent: "career_stop_workflow", resultStatus: "completed", parts: undefined,
-          reply: workflowReply({ stop: stopTurn, hold: stopHold, counts: await reconcile(admin as any, user.id), accountPaused: accountPausedBefore }) };
+          reply: workflowReply({ stop: stopTurn, hold: stopHold, counts: await reconcile(admin as any, user.id), accountPaused: accountPausedBefore,
+            // The open ask is named with its blocker, from the release switch itself (research_reply.ts): company research is
+            // not served in this release, or (served) this message does not say which company.
+            researchBlocker: /research/i.test(stopTurn.outstanding ?? "")
+              ? (researchReplyOn(Deno.env) ? "this message doesn't say which company, so tell me the company and I'll research it." : "company research isn't turned on in this version of Trainee yet, so I can't look it up for you. Nothing about it was sent anywhere.")
+              : null }) };
       } else if (stopTurn?.kind === "resume") out = { ...out, reply: resumeReply, resultStatus: "completed", parts: undefined };
       if (!stopTurn && replyWriterOn(Deno.env) && out.handler !== "code_in_chat" && rewrites(out, agentMeta, { structured: !!(careerTask || careerBatch) })) {
         const wMeter = ledger.track(newMeter());

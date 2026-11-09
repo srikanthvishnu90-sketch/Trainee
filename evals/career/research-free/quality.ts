@@ -104,7 +104,7 @@ export function dataChecks(d: any, pages: Record<string, string>): { r1: string[
   return { r1, r3: h.length ? [] : ["no sections"] };
 }
 
-const MEASURE = `(() => {
+export const MEASURE = `(() => {
   const rgb = (s) => { const m = /rgba?\\(([^)]+)\\)/.exec(s); if (!m) return null; const p = m[1].split(/[ ,\\/]+/).filter(Boolean).map(Number); return { c: p.slice(0, 3), a: p.length > 3 ? p[3] : 1 }; };
   const ground = (el) => { for (let e = el; e; e = e.parentElement) { const b = rgb(getComputedStyle(e).backgroundColor); if (b && b.a > 0.5) return b.c; } return [255,255,255]; };
   const vis = (el) => { const r = el.getBoundingClientRect(), s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== "hidden" && s.display !== "none" && !el.closest(".sr"); };
@@ -152,7 +152,7 @@ export function browserChecks(m: any, width: number): { r2: string[]; r3: string
   }
   return { r2, r3, r4, r5 };
 }
-function playwright(): any {
+export function playwright(): any {
   const req = createRequire(import.meta.url);
   for (const p of [Deno.env.get("UPMORE_PLAYWRIGHT_PATH"), `${ROOT}tools/node_modules/playwright`, "/opt/node-tools/node_modules/playwright", "playwright"]) { if (!p) continue; try { return req(p); } catch { /* next */ } }
   return null;

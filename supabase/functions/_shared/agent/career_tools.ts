@@ -38,6 +38,7 @@ import type { Limits } from "../career_apply.ts";
 import { type Situation, statusText } from "../career_situation.ts";
 import { researchCareerQuestion, type ResearchDeps } from "./research/index.ts";
 import { type MarketDeps, type MarketResult, researchMarket } from "./research/market.ts";
+import { type CompanyResult, FOCI, type Focus, researchCompany } from "./research/company.ts";
 
 const obj = (properties: Record<string, unknown> = {}, required: string[] = []) => ({ type: "object" as const, properties, required });
 const str = (description: string) => ({ type: "string", description });
@@ -247,7 +248,7 @@ export function careerTools(deps: {
   // Open career questions (CAREER_KNOWLEDGE=on): cached, capped web research and the brief file. Absent: no such tool.
   research?: ResearchDeps | null;
   // R9-C market research (CAREER_RESEARCH_REPLY=on): searched, fetched, cited pages; inline or a research brief File. Absent: no such tool.
-  market?: (MarketDeps & { onResult?: (r: MarketResult) => void }) | null;
+  market?: (MarketDeps & { onResult?: (r: MarketResult | CompanyResult) => void }) | null;
 }): ToolSpec[] {
   const alertsOf = () => { if (!deps.alerts) throw new Error("job alerts are not configured here"); return deps.alerts; };
   const outreachOf = () => { if (!deps.outreach) throw new Error("outreach is not set up here; say so, never pretend a draft or send happened"); return deps.outreach; };
@@ -281,6 +282,29 @@ export function careerTools(deps: {
       const q = String(i.question ?? c.turn?.message ?? "");
       const r = await researchMarket({ question: q, format: i.format === "file" ? "file" : "inline", deps: deps.market!, fileLinks: c.turn ? (c.turn.fileLinks ??= []) : undefined,
         plan: { queries: list(i.queries).slice(0, 3).concat(list(i.queries).length ? [] : [q]), companies: list(i.companies), sites: list(i.sites), soc: i.soc ? String(i.soc) : null, cbsa: i.cbsa ? String(i.cbsa) : null } });
+      deps.market!.onResult?.(r);
+      return r;
+    },
+  }, {
+    // R10 WO-H fix 14 (spec B.5, C.22): company research for an interview, as a brief File built in code from guarded lines.
+    name: "research_company", effect: "read",
+    effectOf: (out) => (out as CompanyResult | null)?.status === "ok" && !!(out as any).file_url ? "write_own" : "read",
+    description: "Use when the person asks to research a company before an interview (or to know what to ask there): what it sells, how it makes money, dated recent developments, competitors and tradeoffs, what the role page asks for, and questions grounded in real business tensions. It searches, opens each page itself, keeps only lines a fetched page states, and makes a brief File; code sends the link. Pass the role ONLY when the person said it in this conversation (never guess one; with no role the tool asks for it and makes the overview meanwhile). When they ask to go deeper on one area (\"less generic, what should I ask the hiring manager?\"), call it again with that focus and the same company and role, and talk about that area only. Never answer from memory; write no link.",
+    input_schema: obj({
+      company: str("The company, as the person wrote it"),
+      role: str("The role they are interviewing for, only if they said it in this conversation"),
+      question: str("The person's ask, in their words"),
+      focus: { type: "string", enum: [...FOCI], description: "all: the full brief. Otherwise the one area the person asked to go deeper on" },
+      audience: str("Who the questions are for, if they said (e.g. 'hiring manager', 'recruiter')"),
+      sites: strs("The company's website domains, like stripe.com (only ones they wrote or a tool returned)"),
+      queries: strs("Up to 3 web search queries that would find the company's own product, newsroom and role pages"),
+    }, ["company", "question"]),
+    run: async (i, c) => {
+      const list = (x: unknown) => Array.isArray(x) ? x.map(String).filter(Boolean).slice(0, 4) : [];
+      const company = String(i.company ?? "").trim(), role = String(i.role ?? "").trim() || null, q = String(i.question ?? c.turn?.message ?? "");
+      const r = await researchCompany({ company, role, question: q, focus: (FOCI as readonly string[]).includes(String(i.focus)) ? i.focus as Focus : "all", audience: i.audience ? String(i.audience) : null, now: c.now,
+        deps: deps.market!, fileLinks: c.turn ? (c.turn.fileLinks ??= []) : undefined,
+        plan: { queries: list(i.queries).slice(0, 3).concat(list(i.queries).length ? [] : [`${company} ${role ?? ""}`.trim()]), companies: company ? [company] : [], sites: list(i.sites) } });
       deps.market!.onResult?.(r);
       return r;
     },

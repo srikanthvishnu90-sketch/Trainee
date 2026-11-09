@@ -349,9 +349,18 @@ const OWN_PAPERS = /\b(?:my|mine|our|the|that|this|these|those)\s+(?:tailored\s+
 // of all the jobs I've applied for", "a report on all my applications"), is an export, never market research.
 const OWN_RECORD = /\b(?:everything|all(?:\s+of)?(?:\s+(?:the|my))?(?:\s+(?:stuff|things|ones|jobs?|roles?|positions?|places|applications?|apps))?|each|every\s+(?:job|role|application|place))\s+(?:that\s+)?(?:i|we)(?:'ve|\s+have|\s+had|'d)?\s+(?:ever\s+)?(?:applied|sent|submitted|saved|done)\b|\b(?:brief|briefing|report|analysis|overview|rundown|write[\s-]?up|summary)\s+(?:on|about|of|for|covering)\s+(?:everything|all\s+(?:of\s+)?(?:my|mine|it))\b/i;
 const RESEARCH_OVER = new Set(["career_document_delivery", "profile_export"]);
+// R10 WO-H fix 14 (spec B.6 continuation 5): "I have a Stripe analyst interview. Tell me what I should know, not a generic company
+// overview." A named company's interview (a capitalized name before "interview") with what to know or ask is company research
+// (research_company), not the router's company-intel recipe. "What should I ask in my interview?" names no company and stays prep.
+const INTERVIEW_AT = /\b(?:have|got|landed)\s+(?:an?\s+)?(.{2,48}?)\s+interviews?\b/i;
+const KNOW_OR_ASK = /\bwhat\s+(?:i\s+should|should\s+i|to|i\s+need\s+to|do\s+i\s+need\s+to)\s+(?:know|ask)\b|\b(?:research|brief\s+me\s+on|tell\s+me\s+about)\b/i;
+export function companyInterviewAsk(message: string): boolean {
+  const m = String(message ?? "").replace(/[\u2019`]/g, "'"), hit = INTERVIEW_AT.exec(m);
+  return !!hit && /(?<![\p{L}])\p{Lu}[\p{L}&.-]+/u.test(hit[1]) && KNOW_OR_ASK.test(m);
+}
 export function researchAsk(message: string): boolean {
   const m = String(message ?? "").replace(/[\u2019`]/g, "'");
-  return !OWN_PAPERS.test(m) && !OWN_RECORD.test(m) && (RESEARCH_ASK.some((r) => r.test(m)) || MARKET_ASK.some((r) => r.test(m)));
+  return !OWN_PAPERS.test(m) && !OWN_RECORD.test(m) && (RESEARCH_ASK.some((r) => r.test(m)) || MARKET_ASK.some((r) => r.test(m)) || companyInterviewAsk(m));
 }
 const SEARCH_ASK = /\b(?:find|show|search|look\s+for|get|pull|list)\b[^?.!]{0,40}\b(?:jobs?|roles?|openings?|postings?|internships?|positions?)\b/i;
 const SEARCH_INTENTS = new Set(["career_discovery", "career_internship_discovery", "discovery_dead_board"]);

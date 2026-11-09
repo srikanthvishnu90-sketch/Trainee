@@ -170,10 +170,39 @@ const KINDS: Record<Exclude<KindId, "job_list">, (raw: unknown, v: V) => any> = 
   research_brief(raw, v) {
     const x = v.obj(raw, "data");
     if (x.variant === "market") return marketBrief(x, v);
+    if (x.variant === "company") return companyBrief(x, v);
     return { title: v.str(x.title, "title", { max: 80 }), subject: v.str(x.subject, "subject", { max: 120 }), findings: v.list(x.findings, "findings", 1, 12).map((f, i) => v.fact(f, `findings[${i}]`)),
       sources: v.list(x.sources, "sources", 1, 10).map((s, i) => { const q = v.obj(s, `sources[${i}]`); return { title: v.str(q.title, `sources[${i}].title`, { max: 120 }), url: v.https(q.url, `sources[${i}].url`, false) }; }) };
   },
 };
+// R10 WO-H fix 14 (2026-11-09): the company interview brief, a variant of research_brief (agent/research/company.ts builds it in code
+// from guarded lines). Facts (business, dated developments, competitors, what the role page asks), Trainee's reading (the frame) and
+// unknowns are separate blocks; every line names its numbered sources and every source is cited; a source may carry its limit
+// (paywalled, outdated), which is shown beside each line citing it. Questions are code's sentence around a verified tension.
+function companyBrief(x: Record<string, any>, v: V) {
+  const sources = v.list(x.sources, "sources", 1, 12).map((s, i) => { const q = v.obj(s, `sources[${i}]`); return { title: v.str(q.title, `sources[${i}].title`, { max: 120, links: false }), url: v.https(q.url, `sources[${i}].url`, false),
+    fetched_at: v.time(q.fetched_at, `sources[${i}].fetched_at`, false), by: v.one(q.by, `sources[${i}].by`, ["company", "reported"] as const), ...(q.limit !== undefined ? { limit: v.one(q.limit, `sources[${i}].limit`, ["paywalled", "outdated"] as const) } : {}),
+    ...(q.dated !== undefined ? { dated: v.str(q.dated, `sources[${i}].dated`, { max: 20, links: false }) } : {}) }; });
+  const n = sources.length, used = new Set<number>();
+  const cite = (raw: unknown, path: string) => { const xs = v.list(raw, path, 1, 6), ok = xs.filter((i) => Number.isInteger(i) && i >= 1 && i <= n); if (ok.length !== xs.length) v.err(path, `each cite is a source number from 1 to ${n}`); ok.forEach((i) => used.add(i)); return [...new Set(ok as number[])]; };
+  const text = (q: any, path: string, max = 400) => v.str(q.text, `${path}.text`, { max, links: false, fact: true });
+  const lines = (raw: unknown, path: string, max: number, more: (q: any, p: string) => Record<string, unknown> = () => ({})) =>
+    v.list(raw ?? [], path, 0, max).map((r, i) => { const q = v.obj(r, `${path}[${i}]`); return { ...more(q, `${path}[${i}]`), text: text(q, `${path}[${i}]`), cite: cite(q.cite, `${path}[${i}].cite`) }; });
+  const out = { variant: "company", title: v.str(x.title, "title", { max: 80, links: false }), company: v.str(x.company, "company", { max: 80, links: false }),
+    ...(x.role !== undefined ? { role: v.str(x.role, "role", { max: 80, links: false }) } : {}), ...(x.role_asked === true ? { role_asked: true } : {}),
+    ...(x.focus !== undefined ? { focus: v.one(x.focus, "focus", ["business", "developments", "competitors", "role", "questions"] as const) } : {}),
+    ...(x.audience !== undefined ? { audience: v.str(x.audience, "audience", { max: 40, links: false }) } : {}),
+    ...(x.frame !== undefined ? { frame: (() => { const q = v.obj(x.frame, "frame"); return { text: text(q, "frame", 300), cite: cite(q.cite, "frame.cite") }; })() } : {}),
+    business: lines(x.business, "business", 5), role_asks: lines(x.role_asks, "role_asks", 5),
+    developments: lines(x.developments, "developments", 5, (q, p) => ({ date: v.str(q.date, `${p}.date`, { max: 20, links: false }), ...(q.measure ? { measure: v.one(q.measure, `${p}.measure`, ["volume", "forecast"] as const) } : {}) })),
+    competitors: lines(x.competitors, "competitors", 4, (q, p) => ({ name: v.str(q.name, `${p}.name`, { max: 60, links: false }) })),
+    questions: v.list(x.questions ?? [], "questions", 0, 6).map((r, i) => { const q = v.obj(r, `questions[${i}]`); return { text: v.str(q.text, `questions[${i}].text`, { max: 400, links: false }), cite: cite(q.cite, `questions[${i}].cite`) }; }),
+    unknowns: v.list(x.unknowns ?? [], "unknowns", 0, 6).map((g, i) => v.str(g, `unknowns[${i}]`, { max: 240, links: false })),
+    ...(x.unread !== undefined ? { unread: v.list(x.unread, "unread", 1, 6).map((g, i) => v.str(g, `unread[${i}]`, { max: 240, links: false })) } : {}), sources };
+  if (![out.business, out.developments, out.competitors, out.role_asks, out.questions].some((xs) => xs.length)) v.err("data", "a company brief needs at least one sourced line");
+  for (let i = 1; i <= n; i++) if (!used.has(i)) v.err(`sources[${i - 1}]`, "is not cited by any line; leave it out");
+  return out;
+}
 // R9-C (2026-11-07): the market research brief, a variant of research_brief (KIND_IDS stays as it is). Blocks: a cover (title, one-line
 // thesis, the date its sources were read), a summary, an optional comparison table, "what would have to be true", risks, sources. Every
 // summary line and table cell is a sourced fact AND names the numbered sources it stands on; the conditions and risks are Trainee's
@@ -391,6 +420,7 @@ export function bodyHtml(rec: FileRecord, token: string, o: { tz?: string | null
       break;
     case "research_brief":
       if (d.variant === "market") { main = marketHtml(d); break; }
+      if (d.variant === "company") { main = companyHtml(d); break; }
       main = sec(`What we found about ${d.subject ?? ""}`, dl(Fs(d.findings).map((f) => factHtml(f, f.label)).join("")))
         + sec("Sources", `<ul class="why">${(d.sources ?? []).map((s: any) => `<li>${linkHtml(s.url, s.title) || esc(s.title)}</li>`).join("")}</ul>`);
       break;
@@ -421,6 +451,49 @@ function marketHtml(d: any): string {
   return cover + sec("Summary", list(d.summary ?? [], true)) + sec("Comparison", table) + sec("Where the sources differ", (d.disagreements ?? []).length ? `<ul class="rb-list rb-differ">${d.disagreements.map((x: any) => `<li><span class="rb-t">${esc(x.label)}: ${x.values.map((y: any) => `${esc(y.value)}${cites(y.cite)}`).join(" · ")}. The sources differ; Trainee has not picked one.</span></li>`).join("")}</ul>` : "") + sec("What would have to be true", list(d.conditions ?? [], false)) + sec("Risks", list(d.risks ?? [], false))
     + sec("How the sources were chosen", (d.basis ?? []).length ? `<ul class="rb-list rb-basis-list">${d.basis.map((g: string) => `<li><span class="rb-t">${esc(g)}</span></li>`).join("")}</ul>` : "")
     + sec("Not found in a free source", (d.gaps ?? []).length ? `<ul class="rb-list rb-gaps">${d.gaps.map((g: string) => `<li><span class="rb-t">${esc(g)}</span></li>`).join("")}</ul>` : "") + sec("Sources", srcs);
+}
+// R10 WO-H fix 14: the company interview brief. Order (spec C.22): the frame (Trainee's reading) on the cover; what the company sells;
+// recent developments, each with its date and what its figure measures; competitors and tradeoffs; what the role page asks; questions
+// to ask; what the brief cannot tell you; sources, each with its kind (the company's own page or reported elsewhere) and its limit.
+const LIMIT_WORD: Record<string, string> = { paywalled: "paywalled", outdated: "outdated" };
+const MEASURE_WORD: Record<string, string> = { volume: "Volume, not revenue", forecast: "A forecast at the time, not a result" };
+const COMPANY_HEADS = { business: "What the company sells and how it makes money", developments: "Recent developments", competitors: "Competitors and tradeoffs", role_asks: "What the role page asks for",
+  questions: "Questions you can ask", unknowns: "What this brief cannot tell you", sources: "Sources" } as const;
+function companyHtml(d: any): string {
+  const S = d.sources ?? [], read = marketReadOn(d);
+  const limits = (c: unknown) => (Array.isArray(c) ? c : []).filter((i: number) => S[i - 1]?.limit).map((i: number) => `<span class="src rb-limit">[${esc(i)}] ${esc(LIMIT_WORD[S[i - 1].limit])}${S[i - 1].dated ? ` · ${esc(S[i - 1].dated)}` : ""}</span>`).join("");
+  const kind = (c: unknown) => { const ks = new Set((Array.isArray(c) ? c : []).map((i: number) => S[i - 1]?.by)); return `<span class="src">${ks.has("reported") ? (ks.has("company") ? "Company-reported and reported elsewhere" : "Reported elsewhere, not verified") : "Company-reported, not verified"}</span>`; };
+  const li = (x: any, lead = "", chip = "") => `<li><span class="rb-t">${lead}${esc(x.text)}${cites(x.cite)}</span><span class="rb-chips">${chip}${kind(x.cite)}${limits(x.cite)}</span></li>`;
+  const ul = (xs: any[], f: (x: any) => string) => xs.length ? `<ul class="rb-list">${xs.map(f).join("")}</ul>` : "";
+  const sub = [d.role ? esc(d.role) : "", read ? `Sources read ${esc(read)}` : "", `${S.length} source${S.length === 1 ? "" : "s"}`, "Research only: nothing was sent or applied for"].filter(Boolean).join(" · ");
+  const cover = `<section class="rb-cover" aria-label="Cover"><p class="rb-brand">${MARK}<span>Trainee</span><span class="rb-dot" aria-hidden="true">·</span><span>${d.focus ? "Brief, one area" : "Interview brief"}</span></p>`
+    + (d.frame ? `<p class="rb-thesis">${esc(d.frame.text)}${cites(d.frame.cite)}</p><p class="rb-basis">${READING} ${limits(d.frame.cite)}</p>` : "")
+    + `<p class="rb-date">${sub}</p></section>`;
+  const qs = (d.questions ?? []).length ? `<ol class="rb-qs">${d.questions.map((q: any) => `<li><span class="rb-t">${esc(q.text)}</span><span class="rb-chips"><span class="src">Grounded in ${q.cite.map((i: number) => `[${esc(i)}]`).join("")}</span>${limits(q.cite)}</span></li>`).join("")}</ol>` : "";
+  const cannot = [...(d.unknowns ?? []), ...(d.unread ?? [])];
+  const srcs = `<ol class="rb-src">${S.map((s: any, i: number) => `<li id="src-${i + 1}"><span class="rb-n">[${i + 1}]</span>${linkHtml(s.url, s.title) || esc(s.title)}<span class="meta"><span class="rb-host" title="${esc(hostOf(s.url))}">${esc(hostOf(s.url))}</span> · ${s.by === "company" ? "The company's own page" : "Reported elsewhere"} · Read ${esc(DAY(s.fetched_at))}</span>${s.limit === "paywalled" ? `<span class="meta rb-lim">Paywalled: only the part shown without a subscription was read.</span>` : s.limit === "outdated" ? `<span class="meta rb-lim">Outdated: the newest date on this page is ${esc(s.dated ?? "old")}.</span>` : ""}</li>`).join("")}</ol>`;
+  return cover + sec(COMPANY_HEADS.business, ul(d.business ?? [], (x) => li(x)))
+    + sec(COMPANY_HEADS.developments, ul(d.developments ?? [], (x) => li(x, `<span class="rb-day">${esc(x.date)}</span> `, x.measure ? `<span class="src rb-measure">${esc(MEASURE_WORD[x.measure])}</span>` : "")))
+    + sec(COMPANY_HEADS.competitors, ul(d.competitors ?? [], (x) => li(x, `<b>${esc(x.name)}</b>: `)))
+    + sec(COMPANY_HEADS.role_asks, ul(d.role_asks ?? [], (x) => li(x)))
+    + sec(COMPANY_HEADS.questions, qs)
+    + sec(COMPANY_HEADS.unknowns, cannot.length ? `<ul class="rb-list rb-gaps">${cannot.map((g: string) => `<li><span class="rb-t">${esc(g)}</span><span class="rb-chips"><span class="src">Unknown</span></span></li>`).join("")}</ul>` : "")
+    + sec(COMPANY_HEADS.sources, srcs);
+}
+function companyText(d: any, L: string[]) {
+  const S = d.sources ?? [], c = (x: any) => Array.isArray(x?.cite) && x.cite.length ? ` ${x.cite.map((i: number) => `[${i}]`).join("")}` : "";
+  const lim = (x: any) => (x?.cite ?? []).filter((i: number) => S[i - 1]?.limit).map((i: number) => ` (source [${i}] ${LIMIT_WORD[S[i - 1].limit]}${S[i - 1].dated ? `, ${S[i - 1].dated}` : ""})`).join("");
+  if (d.role) L.push(`Role: ${d.role}`);
+  if (d.frame) L.push(`${d.frame.text}${c(d.frame)} [Trainee's reading]${lim(d.frame)}`);
+  L.push(`${marketReadOn(d) ? `Sources read ${marketReadOn(d)}. ` : ""}Research only: nothing was sent or applied for.`, "");
+  const block = (h: string, xs: any[], f: (x: any) => string) => { if (!xs?.length) return; L.push(`## ${h}`); xs.forEach((x) => L.push(f(x))); L.push(""); };
+  block(COMPANY_HEADS.business, d.business, (x) => `- ${x.text}${c(x)}${lim(x)}`);
+  block(COMPANY_HEADS.developments, d.developments, (x) => `- ${x.date}: ${x.text}${c(x)}${x.measure ? ` (${MEASURE_WORD[x.measure]})` : ""}${lim(x)}`);
+  block(COMPANY_HEADS.competitors, d.competitors, (x) => `- ${x.name}: ${x.text}${c(x)}${lim(x)}`);
+  block(COMPANY_HEADS.role_asks, d.role_asks, (x) => `- ${x.text}${c(x)}${lim(x)}`);
+  block(COMPANY_HEADS.questions, d.questions, (x) => `- ${x.text} (grounded in${c(x)})${lim(x)}`);
+  block(COMPANY_HEADS.unknowns, [...(d.unknowns ?? []), ...(d.unread ?? [])], (g) => `- ${g} [Unknown]`);
+  L.push(`## ${COMPANY_HEADS.sources}`); S.forEach((s: any, i: number) => L.push(`${i + 1}. ${s.title}: ${s.url} (${s.by === "company" ? "the company's own page" : "reported elsewhere"}; read ${DAY(s.fetched_at)}${s.limit ? `; ${LIMIT_WORD[s.limit]}${s.dated ? ` ${s.dated}` : ""}` : ""})`)); L.push("");
 }
 function marketText(d: any, L: string[]) {
   const c = (x: any) => Array.isArray(x?.cite) && x.cite.length ? ` ${x.cite.map((i: number) => `[${i}]`).join("")}` : "";
@@ -479,6 +552,7 @@ export function textOf(rec: FileRecord, o: { now: number; url?: string }): strin
       break;
     case "research_brief":
       if (d.variant === "market") { marketText(d, L); break; }
+      if (d.variant === "company") { companyText(d, L); break; }
       h(`What we found about ${d.subject}`); Fs(d.findings).forEach((f) => L.push(factText(f, f.label))); L.push("");
       h("Sources"); (d.sources ?? []).forEach((s: any) => L.push(`- ${s.title}: ${s.url}`)); L.push("");
       break;
@@ -521,6 +595,9 @@ textarea{width:100%;min-height:96px;padding:10px 12px;border:1px solid var(--mut
    link above and the title attribute). */
 ol.rb-src .rb-host{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
 ul.rb-list{margin:0;padding-left:20px}ul.rb-list li{margin:0 0 12px;overflow-wrap:anywhere}.rb-list .src{display:block;margin:4px 0 0;width:fit-content}
+/* R10 WO-H: the company interview brief. Chips sit on their own row under each line and wrap; dates stay with their line. */
+.rb-chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 0}.rb-chips .src{margin-left:0;white-space:normal}.rb-day{font-weight:600;white-space:nowrap}
+.rb-limit{border-color:var(--ink);color:var(--ink)}ol.rb-qs{margin:0;padding-left:22px}ol.rb-qs li{margin:0 0 14px;overflow-wrap:anywhere}ol.rb-src .rb-lim{grid-column:2}
 .rb-cite{font-size:14px;color:var(--mute);white-space:nowrap;font-variant-numeric:tabular-nums}
 ol.rb-src{list-style:none;margin:0;padding:0}ol.rb-src li{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:6px;align-items:baseline;padding:8px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}ol.rb-src li:first-child{border-top:0}
 ol.rb-src a{display:inline-flex;align-items:center;min-height:44px;color:var(--link);font-weight:600}ol.rb-src .meta{display:block;grid-column:2}.rb-n{color:var(--mute);font-variant-numeric:tabular-nums}

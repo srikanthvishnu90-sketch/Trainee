@@ -114,6 +114,9 @@ textarea{width:100%;min-height:96px;padding:10px 12px;border:1px solid var(--mut
    link above and the title attribute). */
 ol.rb-src .rb-host{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
 ul.rb-list{margin:0;padding-left:20px}ul.rb-list li{margin:0 0 12px;overflow-wrap:anywhere}.rb-list .src{display:block;margin:4px 0 0;width:fit-content}
+/* R10 WO-H: the company interview brief. Chips sit on their own row under each line and wrap; dates stay with their line. */
+.rb-chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 0}.rb-chips .src{margin-left:0;white-space:normal}.rb-day{font-weight:600;white-space:nowrap}
+.rb-limit{border-color:var(--ink);color:var(--ink)}ol.rb-qs{margin:0;padding-left:22px}ol.rb-qs li{margin:0 0 14px;overflow-wrap:anywhere}ol.rb-src .rb-lim{grid-column:2}
 .rb-cite{font-size:14px;color:var(--mute);white-space:nowrap;font-variant-numeric:tabular-nums}
 ol.rb-src{list-style:none;margin:0;padding:0}ol.rb-src li{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:6px;align-items:baseline;padding:8px 0;border-top:1px solid var(--line);overflow-wrap:anywhere}ol.rb-src li:first-child{border-top:0}
 ol.rb-src a{display:inline-flex;align-items:center;min-height:44px;color:var(--link);font-weight:600}ol.rb-src .meta{display:block;grid-column:2}.rb-n{color:var(--mute);font-variant-numeric:tabular-nums}

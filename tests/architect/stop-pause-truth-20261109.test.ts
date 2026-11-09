@@ -113,7 +113,8 @@ Deno.test({
         eq(await n(`select count(*) from public.career_apply_jobs where user_id = ${q(p.uid)} and state in ('queued', 'driving', 'needs_user', 'confirmed', 'submitted_unconfirmed', 'unknown_outcome')`), 0);
         eq(lines[6], `Follow-ups and call invites on record: 1 waiting for your yes, 0 approved, 0 being carried out now (outcome uncertain), 0 done.`);
         eq(lines[7], `Your account is not paused. Say "pause everything" to stop all sending.`);
-        eq(lines[8], "Your ask for company research is still open, and I can't answer it here: company research isn't turned on in this version of Trainee yet, so I can't look it up for you. Nothing about it was sent anywhere.");
+        // architect ruling D-047 (2026-11-09): company research is on in release 10, so the open ask names the blocker that remains.
+        eq(lines[8], "Your ask for company research is still open, and I can't answer it here: this message doesn't say which company, so tell me the company and I'll research it.");
         eq(lines.length, 9, r.reply);
         // The stored reply is the one returned.
         eq(await w.sql(`select content from public.agent_messages where thread_id = ${q(p.web.thread!)} and role = 'assistant' order by id desc limit 1`), r.reply);

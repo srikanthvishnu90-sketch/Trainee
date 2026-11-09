@@ -19,6 +19,7 @@ const RECORDS: Source = "From Trainee's records";
 // Accepted only on trusted (code-built) plan reviews: a model's create_file can never label its own text this way.
 export const MADE: Source = "Made by Trainee";
 const MADE_OK = new Set<string>(["plan_review"]);
+export const RESUME_B64_MAX = 400_000; // about 290 KB of PDF
 export const KIND_IDS = ["job_list", "introduction", "application_proof", "plan_review", "comparison", "draft", "research_brief"] as const;
 export type KindId = typeof KIND_IDS[number];
 export const KIND_LABEL: Record<KindId, string> = { job_list: "Your jobs", introduction: "Introduction", application_proof: "Application proof", plan_review: "Plan review", comparison: "Comparison", draft: "Draft", research_brief: "Research brief" };
@@ -168,7 +169,7 @@ const KINDS: Record<Exclude<KindId, "job_list">, (raw: unknown, v: V) => any> = 
     // code only: the model's create_file can never make one. The PDF rides the record; "Download PDF" returns it to its owner.
     if (x.variant === "resume") {
       if (!v.trusted) { v.err("variant", "a resume file is made by Trainee's resume task, not by create_file"); return {}; }
-      const b64 = typeof x.pdf_b64 === "string" && /^[A-Za-z0-9+/]+=*$/.test(x.pdf_b64) && x.pdf_b64.length <= 20_000 ? x.pdf_b64 : (v.err("pdf_b64", "must be a PDF under 15 KB, base64"), undefined);
+      const b64 = typeof x.pdf_b64 === "string" && /^[A-Za-z0-9+/]+=*$/.test(x.pdf_b64) && x.pdf_b64.length <= RESUME_B64_MAX ? x.pdf_b64 : (v.err("pdf_b64", `the PDF is larger than ${Math.round(RESUME_B64_MAX * 3 / 4 / 1024)} KB`), undefined);
       return { variant: "resume", title: v.str(x.title, "title", { max: 80 }), target: v.str(x.target, "target", { max: 120 }), filename: v.str(x.filename, "filename", { max: 120 }),
         review: x.review === true, note: v.str(x.note, "note", { max: 400, opt: true }), sha256: typeof x.sha256 === "string" && /^[0-9a-f]{64}$/.test(x.sha256) ? x.sha256 : (v.err("sha256", "must be the PDF's sha256"), undefined), pdf_b64: b64 };
     }
@@ -235,7 +236,9 @@ export function validateKind(kind: string, raw: unknown, o: { trusted?: boolean;
   v.trusted = !!o.trusted;
   let data: any;
   try { data = fn(raw, v); } catch (e) { return { ok: false, errors: [`data: could not be read (${e instanceof Error ? e.message : String(e)})`] }; }
-  if (!v.errors.length && JSON.stringify(data).length > 24_000) v.err("data", "is over 24 KB");
+  // A resume File carries its PDF (re-review of #644 (4): a real one- or two-page resume runs to tens of KB); every other kind stays small.
+  const max = kind === "draft" && data?.variant === "resume" ? RESUME_B64_MAX + 8_000 : 24_000;
+  if (!v.errors.length && JSON.stringify(data).length > max) v.err("data", `is over ${Math.round(max / 1000)} KB`);
   return v.errors.length ? { ok: false, errors: v.errors.slice(0, 12) } : { ok: true, data: JSON.parse(JSON.stringify(data)) };
 }
 

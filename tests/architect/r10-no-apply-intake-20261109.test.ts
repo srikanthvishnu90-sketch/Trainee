@@ -11,7 +11,7 @@ import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, SUPABASE_URL, supabaseParity } from "../flow/handler.ts";
 import { anthropicWire } from "./helpers/anthropic_wire.ts";
 import { CareerProfile, CareerRouter } from "../../supabase/functions/_shared/router_core.career.js";
-import { buildResume, targetOf } from "../../supabase/functions/_shared/career_resume_task.ts";
+import { buildResume, resumeTaskTurn, targetOf } from "../../supabase/functions/_shared/career_resume_task.ts";
 import { createFileService, memoryFileStore } from "../../supabase/functions/_shared/file_service.ts";
 import { validateKind } from "../../supabase/functions/_shared/file_kinds.ts";
 import { handleFile, type FileDeps, type FileStore } from "../../supabase/functions/trainee-file/handler.ts";
@@ -82,6 +82,17 @@ Deno.test({
       };
       await run("tok-a", P[0], "find machine learning jobs", T3);
       await run("tok-b", P[1], "find data analyst jobs", F2A);
+      // Re-review of #644 (5): "don't apply to any of these, just save them" queues nothing, as text and with a structured batch
+      // approval riding the same message (the batch path is held too: no intent row, no run).
+      const SAVE = "don't apply to any of these, just save them";
+      const c = h!.chat("tok-a");
+      for (const extra of [{}, { career_batch: { action: "approve", runId: "batch-r10-test-1", eventId: "evt-r10-1", cardSha256: "a".repeat(64) } }]) {
+        await pg.sql(`delete from public.agent_rate_limits where user_id = '${P[0]}'`);
+        const r = await c.say(SAVE, extra);
+        assertNode.ok(!["career_batch_apply", "career_apply_queue"].includes(String(r.intent)) && !/applications ready/i.test(r.reply), `${JSON.stringify(extra)}: ${r.intent}: ${r.reply}`);
+        await nothing(P[0], `${SAVE} ${Object.keys(extra).join("")}`);
+        assertNode.equal(await pg.sql(`select count(*) from public.career_batch_intents_v1 where user_id = '${P[0]}'`), "0", "no batch intent committed");
+      }
       assertNode.deepEqual(outbound, [], "no network");
     } finally {
       globalThis.fetch = realFetch;
@@ -127,37 +138,44 @@ Deno.test("intake/1 labelled skills, certifications and interests are their own 
 // The resume opens only on the signed-in File page: the link opens a sign-in and nothing of the resume; a signed-out post, someone
 // else's session and a crawler get nothing; the owner's own session downloads the exact PDF. The model can never make one.
 
-Deno.test("file/1 the resume File needs sign-in: signed out, a crawler or another person see no resume; the owner downloads the exact PDF", async () => {
+Deno.test("file/1 the resume File needs sign-in: signed out, a crawler or another person get no bytes; the owner downloads the real PDF, one page or two", async () => {
   const ENV: Record<string, string> = { TRAINEE_FILE_LINK_SECRET: "file-link-secret-0123456789-abcdef", TRAINEE_FILE_BASE_URL: "https://trainee.example/file", TRAINEE_BOT_URL: "https://t.me/TraineeBot" };
   const U = "11111111-1111-4111-8111-111111111111", OTHER = "22222222-2222-4222-8222-222222222222", at = Date.parse("2026-11-09T12:00:00Z");
   const A = signedIn(), store = memoryFileStore(), files = createFileService({ store, env: { get: (k) => ENV[k] }, now: () => at });
-  const pdf = new TextEncoder().encode("%PDF-1.4\n% TEST resume for data analyst internships\n%%EOF\n");
-  const b64 = btoa(String.fromCharCode(...pdf)), sha = [...new Uint8Array(await crypto.subtle.digest("SHA-256", pdf))].map((x) => x.toString(16).padStart(2, "0")).join("");
-  const data = { variant: "resume", title: "Resume for data analyst internships", target: "data analyst internships", filename: "Resume_Data_Analyst_Internships.pdf", review: true, sha256: sha, pdf_b64: b64 };
-  const made = validateKind("draft", data);
+  const made = validateKind("draft", { variant: "resume", title: "x", target: "x", filename: "x.pdf", sha256: "0".repeat(64), pdf_b64: "JVBERg==" });
   assertNode.ok(!made.ok && made.errors.some((e) => /made by Trainee's resume task/.test(e)), "a model's create_file can never make a resume File");
-  const r = await files.create(U, "draft", data, { trusted: true });
-  assertNode.ok(r.ok && r.url && r.url.startsWith(`${ENV.TRAINEE_FILE_BASE_URL}?t=`) && !/storage\/v1|object\/sign/.test(r.url), `a File page link, not a storage link: ${JSON.stringify(r)}`);
   const stub = { async recallList() { return null; }, async recall() { return null; }, async postings() { return []; } } as unknown as FileStore;
   const deps = () => ({ ...A.deps, store: stub, now: () => at, env: { get: (k: string) => ENV[k] }, cards: { async open() { throw new Error("no"); } }, tap: {} as never, files }) as unknown as FileDeps;
-  const leaks = async (res: Response) => { const b = new Uint8Array(await res.arrayBuffer()), s = new TextDecoder("latin1").decode(b); return ["%PDF", "Resume_Data_Analyst", "data analyst internships"].filter((x) => s.includes(x)); };
-  const link = await handleFile(new Request(r.ok ? r.url! : "", { headers: { "user-agent": "Mozilla/5.0" } }), deps());
-  assertNode.equal(link.status, 303, "the link opens a sign-in");
-  const cookie = (link.headers.get("set-cookie") ?? "").split(";")[0];
-  const signIn = await handleFile(new Request("https://x.example/f", { headers: { cookie } }), deps());
-  assertNode.deepEqual(await leaks(signIn), [], "the sign-in page shows nothing of the resume");
-  const crawl = await handleFile(new Request(r.ok ? r.url! : "", { headers: { "user-agent": "TelegramBot (like TwitterBot)" } }), deps());
-  assertNode.deepEqual(await leaks(crawl), [], "a link preview shows nothing of the resume");
-  const id = r.ok ? r.id : "";
-  const out = await handleFile(new Request("https://x.example/f", { method: "POST", body: new URLSearchParams({ action: "download" }), headers: { "content-type": "application/x-www-form-urlencoded" } }), deps());
-  assertNode.ok(out.status >= 400 && (await leaks(out)).length === 0, "a signed-out download gets no bytes");
-  const theirs = await handleFile(new Request("https://x.example/f", await phonePost({ t: await A.tok(OTHER, id, at), action: "download" }, ENV.TRAINEE_FILE_LINK_SECRET)), deps());
-  assertNode.deepEqual(await leaks(theirs), [], "another person's session gets nothing");
-  const page = await handleFile(new Request("https://x.example/f", { headers: { cookie: `tf_s=${await A.tok(U, id, at)}` } }), deps());
-  const html = await page.text();
-  assertNode.ok(page.status === 200 && html.includes("Review draft, not for external submission.") && html.includes("Download PDF"), "the owner's page: the review label and the download");
-  const dl = await handleFile(new Request("https://x.example/f", await phonePost({ t: await A.tok(U, id, at), action: "download" }, ENV.TRAINEE_FILE_LINK_SECRET)), deps());
-  assertNode.equal(dl.headers.get("content-type"), "application/pdf");
-  assertNode.ok(/attachment; filename="Resume_Data_Analyst_Internships\.pdf"/.test(dl.headers.get("content-disposition") ?? "") && dl.headers.get("cache-control") === "no-store");
-  assertNode.deepEqual(new Uint8Array(await dl.arrayBuffer()), pdf, "the owner's download is the exact PDF");
+  // The resume task's own PDFs: the fixture on one page, and a long record on two (the size a real two-page resume reaches).
+  const long = RESUME.replace("PROJECTS", Array.from({ length: 9 }, (_, i) => `Analyst ${i + 1}, Example Firm ${i + 1} (TEST), June 201${i % 10} - May 201${(i + 1) % 10}\n- Built reporting pipeline number ${i + 1} in Python and SQL, used weekly by analysts across three offices\n- Cut the monthly close review by ${10 + i} hours with a reconciled dashboard for the finance team\n- Wrote the data dictionary for ${20 + i} tables and trained ${3 + i} analysts to use it\n`).join("\n") + "\nPROJECTS");
+  for (const [what, text, ask, pages] of [["one page", RESUME, "Make my resume a one-page PDF for data analyst internships and send me a link to the PDF", 1], ["two pages", long, "Make my resume a PDF for data analyst internships and send me a link to the PDF", 2]] as const) {
+    const p = CareerProfile.createProfile({});
+    CareerProfile.ingestResume(p, { text, fileName: "r.txt" });
+    for (const f of (p as any).facts) CareerProfile.confirmFact(p, f.id);
+    const turn = await resumeTaskTurn({ message: ask, ctx: { profile: p }, userId: U, now: at, deps: { uploaded: async () => false,
+      file: async (data) => { const r = await files.create(U, "draft", data, { trusted: true }); return r.ok && r.url ? { url: r.url } : { error: r.ok ? "no link" : r.error }; } } });
+    assertNode.ok(turn && turn.task.file?.pages === pages, `${what}: ${turn?.task.file?.pages} pages`);
+    const url = /^https:\/\/trainee\.example\/file\?t=\S+$/m.exec(turn!.reply)?.[0];
+    assertNode.ok(url && !/storage\/v1|object\/sign/.test(turn!.reply), `${what}: the File page link only, made for this size of PDF: ${turn!.reply}`);
+    const pdf = Uint8Array.from(atob(turn!.documents[0].base64), (c) => c.charCodeAt(0));
+    assertNode.equal(new TextDecoder("latin1").decode(pdf.subarray(0, 5)), "%PDF-", `${what}: a real PDF`);
+    const id = [...(store as any).all()].at(-1).id as string;
+    const leaks = async (res: Response) => { const s = new TextDecoder("latin1").decode(new Uint8Array(await res.arrayBuffer())); return ["%PDF", "Resume_Data_Analyst"].filter((x) => s.includes(x)); };
+    const link = await handleFile(new Request(url!, { headers: { "user-agent": "Mozilla/5.0" } }), deps());
+    assertNode.equal(link.status, 303, `${what}: the link opens a sign-in`);
+    const cookie = (link.headers.get("set-cookie") ?? "").split(";")[0];
+    assertNode.deepEqual(await leaks(await handleFile(new Request("https://x.example/f", { headers: { cookie } }), deps())), [], `${what}: the sign-in shows nothing of it`);
+    assertNode.deepEqual(await leaks(await handleFile(new Request(url!, { headers: { "user-agent": "TelegramBot (like TwitterBot)" } }), deps())), [], `${what}: a link preview shows nothing`);
+    const out = await handleFile(new Request("https://x.example/f", { method: "POST", body: new URLSearchParams({ action: "download" }), headers: { "content-type": "application/x-www-form-urlencoded" } }), deps());
+    assertNode.ok(out.status >= 400 && (await leaks(out)).length === 0, `${what}: a signed-out download is refused, no bytes`);
+    const theirs = await handleFile(new Request("https://x.example/f", await phonePost({ t: await A.tok(OTHER, id, at), action: "download" }, ENV.TRAINEE_FILE_LINK_SECRET)), deps());
+    assertNode.ok(theirs.headers.get("content-type") !== "application/pdf" && (await leaks(theirs)).length === 0, `${what}: another account is refused`);
+    const page = await handleFile(new Request("https://x.example/f", { headers: { cookie: `tf_s=${await A.tok(U, id, at)}` } }), deps());
+    const html = await page.text();
+    assertNode.ok(page.status === 200 && html.includes("Review draft, not for external submission.") && html.includes("Download PDF"), `${what}: the owner's page`);
+    const dl = await handleFile(new Request("https://x.example/f", await phonePost({ t: await A.tok(U, id, at), action: "download" }, ENV.TRAINEE_FILE_LINK_SECRET)), deps());
+    assertNode.equal(dl.headers.get("content-type"), "application/pdf");
+    assertNode.ok(/attachment; filename="Resume_Data_Analyst_Internships\.pdf"/.test(dl.headers.get("content-disposition") ?? "") && dl.headers.get("cache-control") === "no-store");
+    assertNode.deepEqual(new Uint8Array(await dl.arrayBuffer()), pdf, `${what}: the owner downloads exactly the PDF the reply attached`);
+  }
 });

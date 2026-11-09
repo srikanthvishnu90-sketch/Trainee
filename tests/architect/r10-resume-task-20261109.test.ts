@@ -22,7 +22,7 @@ import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, SUPABASE_URL, supabaseParity, type Turn } from "../flow/handler.ts";
 import { anthropicWire } from "./helpers/anthropic_wire.ts";
 import { CareerProfile } from "../../supabase/functions/_shared/router_core.career.js";
-import { buildResume, parseCheckWords, resumeAskOf, resumeTaskTurn, targetOf } from "../../supabase/functions/_shared/career_resume_task.ts";
+import { buildResume, jobNumberOf, parseCheckWords, resumeAskOf, resumeTaskTurn, targetOf } from "../../supabase/functions/_shared/career_resume_task.ts";
 
 const CI = Deno.env.get("CI") === "true";
 const ROOT = new URL("../..", import.meta.url).pathname;
@@ -152,7 +152,11 @@ Deno.test({
         const chat = h!.chat(tok), say = turn(chat, who);
         eq((await say(`here is my resume:\n${RESUME}`)).intent, "career_resume_ingest");
         eq((await say("yes, that's my resume")).resultStatus, "completed");
-        const list = await say("find machine learning jobs");
+        // The old list as the person read it (the File page link is off for this turn, so the roles are in the reply itself).
+        const base = Deno.env.get("TRAINEE_FILE_BASE_URL")!;
+        Deno.env.delete("TRAINEE_FILE_BASE_URL");
+        const list = await say("find machine learning jobs").finally(() => Deno.env.set("TRAINEE_FILE_BASE_URL", base));
+        assertNode.ok(/reddit/i.test(list.reply) && /Machine Learning Engineering Manager/.test(list.reply), `the old list shows the Reddit ML manager role: ${list.reply}`);
         const kept = await pg.sql(`select coalesce((select state->'career'->'stores'->'discovery'->'lastShortlist' from public.agent_flow_state where user_id = '${who}' and thread_id = '${chat.thread()}')::text, '[]')`);
         assertNode.ok(/reddit/i.test(kept), `the old list holds the Reddit ML manager role: ${list.reply}`);
         return { chat, say };
@@ -282,8 +286,26 @@ Deno.test({
         eq(warm.intent, "career_resume_task", `"Make it warmer." stays on the resume just shown: ${warm.intent}: ${warm.reply}`);
         assertNode.ok(!/tailored for|Picked first/i.test(warm.reply) && /data analyst internships/.test(warm.reply), `the current resume, by its target: ${warm.reply}`);
         assertNode.ok(warm.reply.includes(`New: ${WARMER}`) && /^New: /m.test(warm.reply) && /^Now: /m.test(warm.reply) && (warm.body.artifacts ?? []).length === 0, `before and after shown, nothing regenerated: ${warm.reply}`);
+        // Re-review of #644 (1): a rewording is shown, then a new fact is told and its question answered. The answer is kept with the
+        // fact; the old rewording is never approved by it.
+        const swaps = async () => await pg.sql(`select coalesce((state->'career'->'stores'->'profile'->'_resumeTask'->'swaps')::text, '[]') from public.agent_flow_state where user_id = '${A}' and thread_id = '${a.chat.thread()}'`);
+        const nf = await a.say("update my resume with my new job at Acme (TEST)");
+        assertNode.ok(nf.intent === "career_resume_task" && /What is your title there/.test(nf.reply) && !(nf.body.artifacts ?? []).length, `a new fact is asked about: ${nf.reply}`);
+        const detail = await a.say("ok, Analyst since May");
+        assertNode.ok(/Analyst since May/.test(detail.reply) && !(detail.body.artifacts ?? []).length && !/revised/i.test(detail.reply), `the answer is kept, nothing approved: ${detail.reply}`);
+        assertNode.ok(!(await swaps()).includes(WARMER), "the shown rewording was not approved by the answer to another question");
+        const facts = await pg.sql(`select (state->'career'->'stores'->'profile'->'facts')::text from public.agent_flow_state where user_id = '${A}' and thread_id = '${a.chat.thread()}'`);
+        assertNode.ok(/New job at Acme \(TEST\): Analyst since May/.test(facts) && /"status": "draft"/.test(facts), "the title is kept with the fact, unconfirmed");
+        const again = await a.say("Make it warmer.");
+        assertNode.ok(/^New: /m.test(again.reply), `shown again: ${again.reply}`);
+        const fixed = await a.say(T3);
+        assertNode.equal(fixed.intent, "career_resume_task", "the correction is the task's");
+        const yesAfter = await a.say("yes");
+        assertNode.ok(yesAfter.intent !== "career_resume_task" && !(await swaps()).includes(WARMER), `a yes after a target correction approves no old rewording: ${yesAfter.intent}: ${yesAfter.reply}`);
         // Review of #634 (b): a shown rewording answers only the very next turn. Another reply comes between; a plain yes is then
         // that reply's, never an approval of the old rewording, and no file is made.
+        eq((await a.say("send me the resume PDF again")).intent, "career_resume_task");
+        assertNode.ok(/^New: /m.test((await a.say("Make it warmer.")).reply), "a rewording is shown");
         const between = await a.say("what do you know about me?");
         assertNode.ok(between.intent !== "career_resume_task", `an unrelated turn is not the resume task's: ${between.intent}`);
         const yes = await a.say("yes, that's fine");
@@ -433,3 +455,27 @@ Deno.test("scrub/1 a parser's PASS is not said; a FAIL is said in plain words", 
   eq0(parseCheckWords("Saved as PDF and DOCX files, attached for your review — parse check FAIL."), "Saved as PDF and DOCX files, attached for your review, but an applicant tracking system may not read it correctly, so check the file before you use it.");
 });
 const eq0 = (a: unknown, b: unknown) => assertNode.deepStrictEqual(a, b);
+
+// Re-review of #644 (2): the scale is never read as the GPA, and "GPA off" leaves no "out of 4", "Cumulative" or "(4.0 scale)".
+Deno.test("gpa/2 '3.8 out of 4.0 GPA' reads 3.8; every phrase comes off whole", () => {
+  const forms = ["3.8 out of 4.0 GPA", "GPA 3.8 out of 4", "GPA - 3.8", "GPA – 3.8", "Cumulative GPA: 3.80", "GPA: 3.8 (4.0 scale)", "GPA 3.8/4.0", "3.8/4.0 GPA", "GPA of 3.8", "3.8 GPA"];
+  for (const form of forms) {
+    const p = CareerProfile.createProfile({});
+    CareerProfile.ingestResume(p, { text: `EDUCATION\nTEST University - B.S. Economics, ${form}, graduating May 2028\n\nEXPERIENCE\nAnalyst, Acme (TEST), 2025\n- Did analysis (TEST)\n\nLEADERSHIP\nTreasurer, Club (TEST), 2024\n- Kept a GPA 3.8 study group going`, fileName: "x.txt" });
+    for (const f of (p as any).facts) CareerProfile.confirmFact(p, f.id);
+    const on = buildResume(p, targetOf(T1)!, false), off = buildResume(p, targetOf(T1)!, false, { noGpa: true });
+    assertNode.equal(on.gpaConflict, null, `${form}: read as 3.8 (the same as the other line), never 4.0`);
+    const school = off.lines.find((l) => /TEST University/.test(l));
+    assertNode.equal(school, "TEST University - B.S. Economics, graduating May 2028", `${form}: off whole`);
+  }
+  const p = CareerProfile.createProfile({});
+  CareerProfile.ingestResume(p, { text: `EDUCATION\nTEST University - B.S. Economics, 3.8 out of 4.0 GPA\n\nAWARDS\nDean's List (TEST), GPA 3.4\n\nEXPERIENCE\nAnalyst, Acme (TEST), 2025\n- Did analysis (TEST)`, fileName: "x.txt" });
+  for (const f of (p as any).facts) CareerProfile.confirmFact(p, f.id);
+  assertNode.deepEqual(buildResume(p, targetOf(T1)!, false).gpaConflict, ["3.8", "3.4"], "a real conflict names the values as written, never the scale");
+});
+
+// Re-review of #644 (7): a number is a job number only with a cue.
+Deno.test("submit/1 'submit the 1 page version' is not job 1; 'job 2', '#2', 'number 2', 'the 2nd one' are job 2", () => {
+  for (const t of ["submit the 1 page version", "submit the 1-page one", "apply with the 2 page resume"]) assertNode.equal(jobNumberOf(t), null, t);
+  for (const t of ["submit job 2", "submit #2", "apply to number 2", "submit the 2nd one", "submit the second one", "submit job #2"]) assertNode.equal(jobNumberOf(t), 2, t);
+});

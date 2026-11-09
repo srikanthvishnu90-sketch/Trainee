@@ -12,6 +12,10 @@ import { careerHandler, SUPABASE_URL, supabaseParity } from "../flow/handler.ts"
 import { anthropicWire } from "./helpers/anthropic_wire.ts";
 import { CareerProfile, CareerRouter } from "../../supabase/functions/_shared/router_core.career.js";
 import { buildResume, targetOf } from "../../supabase/functions/_shared/career_resume_task.ts";
+import { createFileService, memoryFileStore } from "../../supabase/functions/_shared/file_service.ts";
+import { validateKind } from "../../supabase/functions/_shared/file_kinds.ts";
+import { handleFile, type FileDeps, type FileStore } from "../../supabase/functions/trainee-file/handler.ts";
+import { phonePost, signedIn } from "./file-session-fakes.ts";
 
 const CI = Deno.env.get("CI") === "true";
 const ROOT = new URL("../..", import.meta.url).pathname;
@@ -117,4 +121,43 @@ Deno.test("intake/1 labelled skills, certifications and interests are their own 
   const ctx: { now: number; thread: Record<string, unknown> } = { now: Date.UTC(2026, 10, 9), thread: {} };
   const shown = CareerRouter.handleChat(`here is my resume:\n${LABELLED}`, ctx).reply;
   assertNode.ok(/\(1 education, 2 experience, 3 skill, 1 certification, 2 interest\)/.test(shown), `the counts the person reads: ${shown}`);
+});
+
+// ------------------------------------------------------------------------------------------------ file/1 the privacy ruling
+// The resume opens only on the signed-in File page: the link opens a sign-in and nothing of the resume; a signed-out post, someone
+// else's session and a crawler get nothing; the owner's own session downloads the exact PDF. The model can never make one.
+
+Deno.test("file/1 the resume File needs sign-in: signed out, a crawler or another person see no resume; the owner downloads the exact PDF", async () => {
+  const ENV: Record<string, string> = { TRAINEE_FILE_LINK_SECRET: "file-link-secret-0123456789-abcdef", TRAINEE_FILE_BASE_URL: "https://trainee.example/file", TRAINEE_BOT_URL: "https://t.me/TraineeBot" };
+  const U = "11111111-1111-4111-8111-111111111111", OTHER = "22222222-2222-4222-8222-222222222222", at = Date.parse("2026-11-09T12:00:00Z");
+  const A = signedIn(), store = memoryFileStore(), files = createFileService({ store, env: { get: (k) => ENV[k] }, now: () => at });
+  const pdf = new TextEncoder().encode("%PDF-1.4\n% TEST resume for data analyst internships\n%%EOF\n");
+  const b64 = btoa(String.fromCharCode(...pdf)), sha = [...new Uint8Array(await crypto.subtle.digest("SHA-256", pdf))].map((x) => x.toString(16).padStart(2, "0")).join("");
+  const data = { variant: "resume", title: "Resume for data analyst internships", target: "data analyst internships", filename: "Resume_Data_Analyst_Internships.pdf", review: true, sha256: sha, pdf_b64: b64 };
+  const made = validateKind("draft", data);
+  assertNode.ok(!made.ok && made.errors.some((e) => /made by Trainee's resume task/.test(e)), "a model's create_file can never make a resume File");
+  const r = await files.create(U, "draft", data, { trusted: true });
+  assertNode.ok(r.ok && r.url && r.url.startsWith(`${ENV.TRAINEE_FILE_BASE_URL}?t=`) && !/storage\/v1|object\/sign/.test(r.url), `a File page link, not a storage link: ${JSON.stringify(r)}`);
+  const stub = { async recallList() { return null; }, async recall() { return null; }, async postings() { return []; } } as unknown as FileStore;
+  const deps = () => ({ ...A.deps, store: stub, now: () => at, env: { get: (k: string) => ENV[k] }, cards: { async open() { throw new Error("no"); } }, tap: {} as never, files }) as unknown as FileDeps;
+  const leaks = async (res: Response) => { const b = new Uint8Array(await res.arrayBuffer()), s = new TextDecoder("latin1").decode(b); return ["%PDF", "Resume_Data_Analyst", "data analyst internships"].filter((x) => s.includes(x)); };
+  const link = await handleFile(new Request(r.ok ? r.url! : "", { headers: { "user-agent": "Mozilla/5.0" } }), deps());
+  assertNode.equal(link.status, 303, "the link opens a sign-in");
+  const cookie = (link.headers.get("set-cookie") ?? "").split(";")[0];
+  const signIn = await handleFile(new Request("https://x.example/f", { headers: { cookie } }), deps());
+  assertNode.deepEqual(await leaks(signIn), [], "the sign-in page shows nothing of the resume");
+  const crawl = await handleFile(new Request(r.ok ? r.url! : "", { headers: { "user-agent": "TelegramBot (like TwitterBot)" } }), deps());
+  assertNode.deepEqual(await leaks(crawl), [], "a link preview shows nothing of the resume");
+  const id = r.ok ? r.id : "";
+  const out = await handleFile(new Request("https://x.example/f", { method: "POST", body: new URLSearchParams({ action: "download" }), headers: { "content-type": "application/x-www-form-urlencoded" } }), deps());
+  assertNode.ok(out.status >= 400 && (await leaks(out)).length === 0, "a signed-out download gets no bytes");
+  const theirs = await handleFile(new Request("https://x.example/f", await phonePost({ t: await A.tok(OTHER, id, at), action: "download" }, ENV.TRAINEE_FILE_LINK_SECRET)), deps());
+  assertNode.deepEqual(await leaks(theirs), [], "another person's session gets nothing");
+  const page = await handleFile(new Request("https://x.example/f", { headers: { cookie: `tf_s=${await A.tok(U, id, at)}` } }), deps());
+  const html = await page.text();
+  assertNode.ok(page.status === 200 && html.includes("Review draft, not for external submission.") && html.includes("Download PDF"), "the owner's page: the review label and the download");
+  const dl = await handleFile(new Request("https://x.example/f", await phonePost({ t: await A.tok(U, id, at), action: "download" }, ENV.TRAINEE_FILE_LINK_SECRET)), deps());
+  assertNode.equal(dl.headers.get("content-type"), "application/pdf");
+  assertNode.ok(/attachment; filename="Resume_Data_Analyst_Internships\.pdf"/.test(dl.headers.get("content-disposition") ?? "") && dl.headers.get("cache-control") === "no-store");
+  assertNode.deepEqual(new Uint8Array(await dl.arrayBuffer()), pdf, "the owner's download is the exact PDF");
 });

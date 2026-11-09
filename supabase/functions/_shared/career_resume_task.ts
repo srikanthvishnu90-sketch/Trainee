@@ -14,16 +14,18 @@
 // flagged placeholder and is asked for. Each missing or conflicting fact is ONE narrow question.
 //
 // Files: the PDF (and the DOCX only when asked for) ride the reply as documents (channel_artifacts.ts) and the PDF is kept in
-// the private resume bucket behind a signed link (career_tailor.ts privateLinkProblem). The words are read back out of the PDF
+// a resume File (file_kinds.ts draft variant "resume") opened only on the signed-in File page: a link is sent only when asked for, and
+// never a bearer link to the bytes (privacy ruling, 2026-11-09). The words are read back out of the PDF
 // before it is offered: a file that does not carry exactly the lines built for it is not sent. No reply claims a check, an
 // attachment or a format that is not delivered.
 import { CareerProfile, CareerRender } from "./router_core.career.js";
 import { type Block, renderBlocks, splitDates } from "./career_resume_design.ts";
 import { auditRewrite } from "./career_tailor_rewrite.ts";
-import { CONTACT_QUESTION, LINK_TTL_SECONDS, privateLinkProblem, resumeContact, resumePath, type ResumeStore } from "./career_tailor.ts";
+import { CONTACT_QUESTION, resumeContact } from "./career_tailor.ts";
 
 export const RESUME_TASK_INTENT = "career_resume_task";
 export const RESUME_CLARIFY_INTENT = "career_resume_clarify";
+export const TASK_TTL_MS = 24 * 3600_000;
 type Target = { role: string; level: string | null; label: string };
 export interface ResumeTask {
   target: Target; limits: string[]; rejected: string | null; said: string[]; asked: string[];
@@ -67,13 +69,20 @@ const LIMITS: [string, RegExp][] = [
 ];
 // A message that says not to apply, or to leave the job search, is a boundary: nothing is queued, prepared or sent on it.
 export const noApplyAsk = (message: string) => /\b(don'?t|do not|never) (apply|submit)\b|\bnot apply\b|\bleave the (job )?search\b|\bnot asking for an application\b/.test(lc(message));
+// Review of #634 (e): a parser's pass is not evidence for the person, so "parse check PASS" goes; a failed check is said in plain words.
+export const parseCheckWords = (x: string) => x
+  .replace(/\s*(?:—|-|,)\s*(?:the\s+)?parse check (?:FAIL|failed)\b/gi, ", but an applicant tracking system may not read it correctly, so check the file before you use it")
+  .replace(/\s*(?:—|-|,)\s*(?:the\s+)?parse check (?:PASS|passed|WARN|ran)\b/gi, "");
 export const limitsOf = (message: string) => LIMITS.filter(([, re]) => re.test(lc(message))).map(([k]) => k);
 
 const RESUME = /\b(resume|résumé|cv)\b/;
 const MAKE = /\b(turn|make|tailor|create|generate|build|format|redo|regenerate|rewrite|fix|update|clean|send|give|produce)\b/;
 const DOC = /\b(pdf|docx|word file|one[- ]page|file|document|draft|version)\b/;
 const CORRECTION = /\b(wrong (role|job|target|position|resume|one|version)|fix the (target|role)|not what i asked|that'?s not (the|my) (role|target))\b/;
-const LINK = /\b(download link|a link|link (to|for)|(isn'?t|won'?t|can'?t|doesn'?t|not) (open|opening|load|loading))\b/;
+// Review of #634 (c): a link to the PDF, resume or file only; a posting or page link is never the resume task's.
+const LINK = /\b(download link|link (to|for) (the |my |this |that )?(pdf|resume|cv|file|document|attachment)|(pdf|resume|file|attachment) link|(attachment|pdf|file)\b[^.?!]{0,20}\b(isn'?t|won'?t|can'?t|doesn'?t|not) (open|opening|load|loading))\b/;
+const SEARCH = /\b(leave the resume|find me|search for|look for|looking for|show me)\b[^.?!]*\b(jobs?|roles?|internships?|openings?|postings?)\b/;
+const NEW_FACT = /\b(?:update|add)\b[^.?!]*\b(?:resume|cv)\b[^.?!]*\b(?:my )?new (?:job|role|position|internship) (?:at|with) ([A-Za-z0-9&.'() -]{2,60})/;
 const RESTYLE = /^\s*(?:can you |could you |please |ok(?:ay)?,? )?(?:make|keep) (?:it|this|that)(?: a (?:bit|little|touch))?(?: more| less)? (?:warmer|friendlier|friendly|shorter|tighter|punchier|formal|casual|concise|wordy|clearer|stronger|professional|crisper|confident|simpler|direct)\b[^?]*[.!]?\s*$/;
 const AMBIGUOUS = /^\s*(?:please\s+|ok(?:ay)?,?\s+)?send (?:this|that|it)(?: one)?(?: now)?\s*[.!]?\s*$/;
 // A posting named or pasted is the posting tailor's (142 career_tailor), not a general version.
@@ -82,12 +91,14 @@ function postingNamed(t: string, companies: string[]): boolean {
   if (t.length > 600 && /\b(requirements|qualifications|responsibilities)\b/.test(t)) return true;
   return companies.some((c) => c.length > 2 && new RegExp(`\\b${c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(t));
 }
-export type ResumeAsk = "make" | "correct" | "link" | "ask_send" | "send_pdf" | "explain" | "edit" | "restyle" | "approve_edit" | "why_contact" | "apply_which" | null;
+export type ResumeAsk = "submit_job" | "new_fact" | "make" | "correct" | "link" | "ask_send" | "send_pdf" | "explain" | "edit" | "restyle" | "approve_edit" | "why_contact" | "apply_which" | null;
 export function resumeAskOf(message: string, task: ResumeTask | null, view: { companies: string[]; jobs: number; posting: boolean; lastFile?: boolean; resumeShown?: boolean }): ResumeAsk {
   // A pasted resume or posting is material, not an ask about the resume task (its own words say "for", "file", "update").
   if (message.length > 600 || message.split("\n").filter((l) => l.trim()).length > 4 || /^\s*(here'?s|here is|this is|my) (my |the )?(resume|cv)\b/i.test(message)) return null;
   const t = lc(message), rest = t.replace(/\bnot (?:an? |the )?[a-z][a-z0-9 &/+.-]{2,80}?(?=[,.;!?]|$| please| since| and )/g, " ");
   if (task?.pending === "send_choice") {
+    // Example 4's other answer: "Submit job 2" names the application; its exact payload is reviewed before anything is sent.
+    if (/\b(submit|apply)\b/.test(t) && /\b(?:job|number|#)?\s*(\d{1,2})\b/.test(t)) return "submit_job";
     if (/\b(submit|apply)\b/.test(t)) return null;
     if (/\b(pdf|resume|to me|the file|download|send it to me)\b/.test(t)) return "send_pdf";
   }
@@ -96,17 +107,20 @@ export function resumeAskOf(message: string, task: ResumeTask | null, view: { co
   if (task?.file && /\bbullet\b/.test(t) && /\b(less wordy|shorter|shorten|tighten|trim|concise|simplify)\b/.test(t)) return "edit";
   // A bare follow-up ("Make it warmer.") right after the resume was shown is about that resume, never a fresh tailor.
   if (task?.file && view.resumeShown && RESTYLE.test(t)) return "restyle";
-  if (task && /\bwhy\b/.test(t) && /\b(contact|placeholders?|fill in|to add)\b/.test(t)) return "why_contact";
+  if (task && /\bwhy\b/.test(t) && /\b(placeholders?|to fill in|to add)\b|\bcontact\b[^?.!]*\b(resume|pdf|file|top)\b/.test(t)) return "why_contact";
   if (task?.file && /\bwhat (did|have) you change(d)?\b|\bwhat changed\b/.test(t)) return "explain";
   if (task?.file && /^\s*(now |ok(ay)?,? |then )?apply (with|using) (it|this|that)\s*[.!]?\s*$/.test(t)) return "apply_which";
   const target = targetOf(message);
   // A correction or a link ask about the resume file this person was last given (ours, or the posting tailor's).
   const onFile = !!task || !!view.lastFile && !!target;
-  if (onFile && CORRECTION.test(t) && !postingNamed(rest, view.companies)) return "correct";
+  // A cover letter, a job search and an apply are their own paths; a correction is this task's only about the resume's target.
+  if (/\bcover letters?\b/.test(t) || SEARCH.test(t) && !/\b(resume|cv|pdf)\b[^.?!]*\b(make|turn|tailor|generate)\b/.test(t)) return null;
+  const wantsApply = /\b(apply|submit)\b/.test(t) && !noApplyAsk(message);
+  if (task && NEW_FACT.test(message.toLowerCase()) && !wantsApply) return "new_fact";
+  if (onFile && CORRECTION.test(t) && !wantsApply && (view.resumeShown || /\b(resume|cv|pdf|target)\b/.test(t)) && !postingNamed(rest, view.companies)) return "correct";
   if ((task?.file || onFile) && LINK.test(t) && !postingNamed(rest, view.companies)) return "link";
   if (view.posting || postingNamed(rest, view.companies)) return null;
-  if (RESUME.test(t) && (MAKE.test(t) || DOC.test(t)) && (target || task)) return "make";
-  if (task && target && DOC.test(t) && MAKE.test(t)) return "make";
+  if (RESUME.test(t) && (MAKE.test(t) || DOC.test(t)) && (target || task) && !wantsApply) return "make";
   return null;
 }
 
@@ -114,7 +128,12 @@ export function resumeAskOf(message: string, task: ResumeTask | null, view: { co
 // deno-lint-ignore no-explicit-any
 type Fact = any;
 const SECTION: Record<string, string> = { education: "Education", experience: "Experience", project: "Projects", leadership: "Leadership", certification: "Certifications" };
-const GPA = /\bGPA\s*(?:of\s*)?:?\s*(\d\.\d{1,2})\b/gi;
+// Every way a GPA is written (review of #634 (d)): "GPA 3.7", "GPA: 3.7", "GPA of 3.7", "3.7 GPA", "GPA 3.7/4.0", "3.7/4.0 GPA",
+// "3.7 cumulative GPA". The value is group 1 or 2; the scale ("/4.0") goes with it when it is taken off.
+const SCALE = "(?:\\s*\\/\\s*\\d(?:\\.\\d{1,2})?)?";
+const GPA_SRC = `\\bGPA\\s*(?:of\\s*)?:?\\s*(\\d\\.\\d{1,2})${SCALE}\\b|\\b(\\d\\.\\d{1,2})${SCALE}\\s*(?:cumulative\\s+|overall\\s+)?GPA\\b`;
+const GPA = new RegExp(GPA_SRC, "gi");
+const GPA_OFF = new RegExp(`,?\\s*(?:${GPA_SRC})`, "gi");
 const textOf = (f: Fact) => `${f.title || ""} ${f.text || ""} ${(f.bullets || []).join(" ")}`;
 // Words that make an entry relevant to the target: the target's own words and the family's usual evidence.
 function scorer(target: Target): (f: Fact) => number {
@@ -144,9 +163,12 @@ export function buildResume(profile: any, target: Target, uploaded: boolean, o: 
   const confirmed = (CareerProfile.confirmedFacts(profile || {}) as Fact[]).filter((f) => f.status !== "draft");
   const unconfirmed = !confirmed.length;
   const facts: Fact[] = unconfirmed ? (profile?.facts || []).filter((f: Fact) => f && f.kind) : confirmed;
-  const gpas = [...new Set(facts.flatMap((f) => [...textOf(f).matchAll(GPA)].map((m) => m[1])))];
+  // The values as written, one per number (3.7 and 3.70 are one value).
+  const byValue = new Map<number, string>();
+  for (const f of facts) for (const m of textOf(f).matchAll(GPA)) { const v = m[1] ?? m[2]; if (!byValue.has(Number(v))) byValue.set(Number(v), v); }
+  const gpas = [...byValue.values()];
   const gpaConflict = gpas.length > 1 && !o.noGpa ? gpas : null;
-  const asWritten = (s: string) => gpaConflict || o.noGpa ? s.replace(/,?\s*\bGPA\s*(?:of\s*)?:?\s*\d\.\d{1,2}\b/gi, "").replace(/\s{2,}/g, " ").trim() : s;
+  const asWritten = (s: string) => gpaConflict || o.noGpa ? s.replace(GPA_OFF, "").replace(/\s{2,}/g, " ").replace(/^[,;\s]+|[,;\s]+$/g, "").trim() : s;
   const top = resumeContact(profile, "confirmed");
   const contactMissing = !top.name || !top.email;
   const blocks: Block[] = [], moved: string[] = [], bullets: { text: string; fact: Fact }[] = [];
@@ -214,17 +236,23 @@ const hex = async (u: Uint8Array) => [...new Uint8Array(await crypto.subtle.dige
 
 // deno-lint-ignore no-explicit-any
 export async function resumeTaskTurn(o: { message: string; ctx: any; userId: string; now: number;
-  deps: { resumes: ResumeStore; uploaded: () => Promise<boolean>; rewrite?: (bullet: string, ask: string) => Promise<string | null>; lastIntent?: () => Promise<string | null> } }): Promise<ResumeTurn | null> {
+  deps: { file?: (data: Record<string, unknown>) => Promise<string | null>; uploaded: () => Promise<boolean>; rewrite?: (bullet: string, ask: string) => Promise<string | null>; lastIntent?: () => Promise<string | null> } }): Promise<ResumeTurn | null> {
   const profile = o.ctx?.profile;
   if (!profile || typeof profile !== "object" || !(profile.facts || []).some((f: Fact) => f && SECTION[f.kind])) return null;
-  const prior: ResumeTask | null = profile._resumeTask && typeof profile._resumeTask === "object" ? profile._resumeTask : null;
+  // The task lapses after a day without a turn of its own (review of #634): an old target is never carried into a new day's asks.
+  const kept: ResumeTask | null = profile._resumeTask && typeof profile._resumeTask === "object" ? profile._resumeTask : null;
+  const prior = kept && o.now - Date.parse(kept.at) < TASK_TTL_MS ? kept : null;
+  if (kept && !prior) delete profile._resumeTask;
   const shortlist = Array.isArray(o.ctx?.discovery?.lastShortlist) ? o.ctx.discovery.lastShortlist : [];
   const companies = shortlist.map((r: any) => lc(r?.company)).filter(Boolean);
   const routerLast = [...(Array.isArray(profile._careerRouterArtifacts) ? profile._careerRouterArtifacts : [])].reverse().find((a: any) => a?.pdf?.base64);
   const lastIntent = o.deps.lastIntent ? await o.deps.lastIntent().catch(() => null) : null;
-  const ask = resumeAskOf(o.message, prior, { companies, jobs: shortlist.length, posting: !!o.ctx?.posting, lastFile: !!routerLast,
-    resumeShown: lastIntent === RESUME_TASK_INTENT || lastIntent === RESUME_CLARIFY_INTENT });
-  if (!ask) { if (prior?.pending) prior.pending = null; return null; }
+  const resumeShown = lastIntent === RESUME_TASK_INTENT || lastIntent === RESUME_CLARIFY_INTENT;
+  // A shown rewording and the two-choice question answer only the very next turn: once any other reply came between (a card, an
+  // offer, a question), a plain "yes" or "the PDF" is that reply's, never this task's.
+  if (prior && !resumeShown) { prior.pending = null; prior.proposed = null; }
+  const ask = resumeAskOf(o.message, prior, { companies, jobs: shortlist.length, posting: !!o.ctx?.posting, lastFile: !!routerLast, resumeShown });
+  if (!ask) { if (prior) { prior.pending = null; prior.proposed = null; } return null; }
   const t = lc(o.message);
   const named = targetOf(o.message);
   if (!named && !prior) return null;
@@ -236,6 +264,22 @@ export async function resumeTaskTurn(o: { message: string; ctx: any; userId: str
   const noGpa = task.limits.includes("no_gpa");
   const uploaded = await o.deps.uploaded().catch(() => false);
   const reply = (text: string, intent = RESUME_TASK_INTENT, status = "awaiting_user"): ResumeTurn => { profile._resumeTask = task; return { reply: text, intent, resultStatus: status, documents: [], link: null, task }; };
+  if (ask === "submit_job") {
+    const n = Number(/\b(\d{1,2})\b/.exec(t)![1]), job = shortlist[n - 1];
+    if (!job) return reply(`There's no job ${n} on the list I showed. Which one do you mean?`, RESUME_CLARIFY_INTENT);
+    const open = buildResume(profile, target, false, { noGpa: task.limits.includes("no_gpa"), swaps: task.swaps });
+    return reply([`This is the ${job.title} application at ${job.company}. Nothing has been sent: you haven't reviewed its exact answers and resume yet.`,
+      open.contactMissing || open.unconfirmed ? "The resume draft still has placeholders or unconfirmed facts, so it can't go to an employer as it is." : null,
+      `Say "apply to ${n}" and I'll prepare it and show you exactly what would be sent before anything is submitted.`].filter(Boolean).join(" "), RESUME_CLARIFY_INTENT);
+  }
+  // Review of #634 (c): "update my resume with my new job at X" is kept, unconfirmed, in their words, and the missing details are
+  // asked; it is never dropped, and it prints on no file until they confirm it.
+  if (ask === "new_fact") {
+    const at = (NEW_FACT.exec(o.message.toLowerCase())![1] ?? "").trim().replace(/[.!?]+$/, "");
+    const said = o.message.slice(o.message.toLowerCase().indexOf(at), o.message.toLowerCase().indexOf(at) + at.length);
+    CareerProfile.addFact(profile, { kind: "experience", title: `New job at ${said}`, text: `New job at ${said}`, bullets: [], source: "chat", needs_confirmation: true });
+    return reply(`I've noted your new job at ${said} as unconfirmed, so it isn't on the resume yet. What is your title there, and when did you start?`);
+  }
   // B.6 continuation 1, the turns that answer from the task without a new file.
   if (ask === "why_contact" || ask === "apply_which" || ask === "explain" || ask === "edit" || ask === "restyle") {
     const now = buildResume(profile, target, uploaded, { noGpa, swaps: task.swaps });
@@ -302,13 +346,14 @@ export async function resumeTaskTurn(o: { message: string; ctx: any; userId: str
   const sha = await hex(out.pdf), filename = `${fileStem(target)}.pdf`;
   const documents: Doc[] = [{ kind: "document", format: "pdf", filename, mime: "application/pdf", base64: b64(out.pdf), sha256: sha }];
   if (/\b(docx|word)\b/.test(t)) documents.push({ kind: "document", format: "docx", filename: `${fileStem(target)}.docx`, mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: b64(out.docx), sha256: await hex(out.docx) });
+  // A link only when the person asks for one (T3: "send a download link … the attachment isn't opening"): the File page, sign-in first.
+  const wantsLink = ask === "link" || /\b(link|download)\b/.test(t);
   let link: string | null = null;
-  try {
-    const path = resumePath(o.userId, sha);
-    await o.deps.resumes.put(path, out.pdf);
-    const l = await o.deps.resumes.signedUrl(path, LINK_TTL_SECONDS);
-    link = privateLinkProblem(l, path) ? null : l;
-  } catch (e) { console.error("resume task link:", (e as Error)?.message ?? e); }
+  if (wantsLink && o.deps.file) {
+    link = await o.deps.file({ variant: "resume", title: `Resume for ${target.label}`, target: target.label, filename, review: built.contactMissing || built.unconfirmed || !!built.gpaConflict,
+      note: built.unconfirmed ? "Built from your saved intake; the facts are not confirmed yet." : built.contactMissing ? "Contact details are placeholders until you send them." : undefined, sha256: sha, pdf_b64: b64(out.pdf) })
+      .catch((e) => { console.error("resume task file:", (e as Error)?.message ?? e); return null; });
+  }
   task.file = { sha256: sha, filename, pages: out.fit.pages, label: target.label };
   const pages = out.fit.pages === 1 ? "one-page" : `${out.fit.pages}-page`;
   if (ask === "approve_edit") {
@@ -319,7 +364,7 @@ export async function resumeTaskTurn(o: { message: string; ctx: any; userId: str
     say.push(`Here is the ${pages} PDF for ${target.label}: I put ${built.moved[0]}${task.limits.includes("one_page") ? ", kept it to one page" : ""} and left the experience itself unchanged.`);
   } else if (ask === "make" || ask === "send_pdf") say.push(documents.length > 1 ? `Here are the PDF and Word (DOCX) files of your resume for ${target.label}.`
     : ask === "send_pdf" || prior?.file?.label === target.label && !named ? `Here is the resume PDF for ${target.label}.` : `Here is your ${pages} resume PDF for ${target.label}.`);
-  else if (ask === "link" && !say.length) say.push(`Here is the resume PDF for ${target.label} again, with a download link.`);
+  else if (ask === "link" && !say.length) say.push(`Here is the resume PDF for ${target.label} again.`);
   if (!task.said.includes("general") && ask !== "send_pdf") { say.push("It's a general version, not written for one posting; send me a posting and I'll tailor it to that."); task.said.push("general"); }
   if (!task.said.includes("source")) {
     say.push(`I used ${source}${built.unconfirmed ? " (not yet confirmed by you)" : ""}, kept every fact as written and added no experience.`);
@@ -337,8 +382,8 @@ export async function resumeTaskTurn(o: { message: string; ctx: any; userId: str
   }
   if (questions.length && !say.some((s) => s.endsWith("?")) && ask !== "send_pdf" && ask !== "approve_edit") say.push(`I still need ${questions.map(([k]) => k === "gpa" ? "your correct GPA" : k === "contact" ? "your contact details" : "your confirmation of the facts").join(" and ")} before this is ready to send outside this chat.`);
   if (limitsOf(o.message).includes("no_apply")) say.push("I haven't applied to anything.");
-  if (link) say.push(`Download link (works for 7 days):\n${link}`);
-  else say.push("I couldn't make a download link this time.");
+  if (link) say.push(`Download it from your private File page (you sign in to open it):\n${link}`);
+  else if (wantsLink) say.push("I couldn't make your File page just now, so there's no link this time.");
   profile._resumeTask = task;
   return { reply: say.join("\n"), intent: RESUME_TASK_INTENT, resultStatus: questions.length ? "awaiting_user" : "completed", documents, link, task };
 }

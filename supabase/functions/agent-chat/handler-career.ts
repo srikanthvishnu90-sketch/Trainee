@@ -90,7 +90,7 @@ import { supabaseMemoryStore } from "../_shared/agent/memory.ts";
 import { codePending, readSituation } from "../_shared/career_situation.ts";
 import { statusRecordsFrom } from "../_shared/career_capabilities.ts";
 import { edgeRenderer, supabasePersonaStore, supabaseResumeStore } from "../_shared/career_tailor.ts";
-import { noApplyAsk, resumeTaskTurn } from "../_shared/career_resume_task.ts"; // R10 WO-A/B
+import { noApplyAsk, parseCheckWords, resumeTaskTurn } from "../_shared/career_resume_task.ts"; // R10 WO-A/B
 import { supabaseMailStore } from "../_shared/career_mail_store.ts";
 import { CONFIRM_INTENT, confirmWhichTurn, supabaseConfirmStore } from "../_shared/career_apply_confirm.ts";
 import { EMAIL_INTENT, emailTurn, supabaseEmailStore, supabaseResumes } from "../_shared/career_apply_email.ts";
@@ -663,7 +663,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       const noApply = noApplyAsk(message);
       const batchBefore = JSON.stringify((ctx as any).batchApplyState ?? null);
       const resumeAns = !crisisText && !codeTurn && !tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
-        ? await resumeTaskTurn({ message, ctx, userId: user.id, now: Date.now(), deps: { resumes: supabaseResumeStore(admin),
+        ? await resumeTaskTurn({ message, ctx, userId: user.id, now: Date.now(), deps: {
+            // The privacy ruling: the resume opens only on the signed-in File page (a code-built draft File), never a bearer link.
+            file: async (data) => { const r = await createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }).create(user.id, "draft", data, { trusted: true }); return r.ok ? r.url : null; },
             // B.6 continuation 1: "make the first bullet less wordy" is the model's wording, metered like every model call
             // here; the module audits it against the bullet's own fact and shows it beside the old one before it is used.
             rewrite: careerModelConfig(Deno.env).apiKey ? async (bullet: string, ask: string) => {
@@ -1648,7 +1650,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // R10 WO-B (spec A.5 pattern 3): a parser's own verdict is not evidence for the person ("parse check PASS"); the files and
       // what they hold are. The posting tailor's (142) line keeps what was saved, without the self-report.
       if (/\bparse check\b/i.test(out.reply)) {
-        const scrub = (x: string) => x.replace(/\s*(?:—|-|,)\s*(?:the\s+)?parse check (?:PASS|WARN|FAIL|passed|ran)\b/gi, "");
+        const scrub = parseCheckWords;
         out = { ...out, reply: scrub(out.reply), ...(out.parts ? { parts: out.parts.map(scrub) } : {}) };
       }
       // LAUNCH READINESS X7: a model call refused by the daily ceiling (or an unreadable spend) is said, never hidden.

@@ -160,7 +160,7 @@ Deno.test("file/1 the resume File needs sign-in: signed out, a crawler or anothe
     const pdf = Uint8Array.from(atob(turn!.documents[0].base64), (c) => c.charCodeAt(0));
     assertNode.equal(new TextDecoder("latin1").decode(pdf.subarray(0, 5)), "%PDF-", `${what}: a real PDF`);
     const id = [...(store as any).all()].at(-1).id as string;
-    const leaks = async (res: Response) => { const s = new TextDecoder("latin1").decode(new Uint8Array(await res.arrayBuffer())); return ["%PDF", "Resume_Data_Analyst"].filter((x) => s.includes(x)); };
+    const leaks = async (res: Response) => { const s = new TextDecoder("latin1").decode(new Uint8Array(await res.arrayBuffer())).toLowerCase(); return ["%PDF", "Resume_Data_Analyst", "data analyst internships"].filter((x) => s.includes(x.toLowerCase())); };
     const link = await handleFile(new Request(url!, { headers: { "user-agent": "Mozilla/5.0" } }), deps());
     assertNode.equal(link.status, 303, `${what}: the link opens a sign-in`);
     const cookie = (link.headers.get("set-cookie") ?? "").split(";")[0];

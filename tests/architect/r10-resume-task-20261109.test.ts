@@ -22,7 +22,7 @@ import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, SUPABASE_URL, supabaseParity, type Turn } from "../flow/handler.ts";
 import { anthropicWire } from "./helpers/anthropic_wire.ts";
 import { CareerProfile } from "../../supabase/functions/_shared/router_core.career.js";
-import { buildResume, jobNumberOf, parseCheckWords, resumeAskOf, resumeTaskTurn, targetOf } from "../../supabase/functions/_shared/career_resume_task.ts";
+import { buildResume, jobNumberOf, parseCheckWords, resumeAskOf, resumeTaskTurn, targetOf, titleShaped } from "../../supabase/functions/_shared/career_resume_task.ts";
 
 const CI = Deno.env.get("CI") === "true";
 const ROOT = new URL("../..", import.meta.url).pathname;
@@ -291,6 +291,8 @@ Deno.test({
         const swaps = async () => await pg.sql(`select coalesce((state->'career'->'stores'->'profile'->'_resumeTask'->'swaps')::text, '[]') from public.agent_flow_state where user_id = '${A}' and thread_id = '${a.chat.thread()}'`);
         const nf = await a.say("update my resume with my new job at Acme (TEST)");
         assertNode.ok(nf.intent === "career_resume_task" && /What is your title there/.test(nf.reply) && !(nf.body.artifacts ?? []).length, `a new fact is asked about: ${nf.reply}`);
+        const bare = await a.say("yes");
+        assertNode.ok(bare.intent === "career_resume_task" && /What is your title at Acme \(TEST\)/.test(bare.reply) && !/Kept with/.test(bare.reply), `a bare yes is asked again: ${bare.reply}`);
         const detail = await a.say("ok, Analyst since May");
         assertNode.ok(/Analyst since May/.test(detail.reply) && !(detail.body.artifacts ?? []).length && !/revised/i.test(detail.reply), `the answer is kept, nothing approved: ${detail.reply}`);
         assertNode.ok(!(await swaps()).includes(WARMER), "the shown rewording was not approved by the answer to another question");
@@ -310,6 +312,17 @@ Deno.test({
         assertNode.ok(between.intent !== "career_resume_task", `an unrelated turn is not the resume task's: ${between.intent}`);
         const yes = await a.say("yes, that's fine");
         assertNode.ok(yes.intent !== "career_resume_task" && (yes.body.artifacts ?? []).length === 0, `a stale rewording is never approved by a later yes: ${yes.intent}: ${yes.reply}`);
+        // Round-2 re-review (1a): a search or a question after the "new job" question leaves it and runs as itself; neither is the title.
+        const factTitles = async () => await pg.sql(`select coalesce(string_agg(f->>'title', ' | '), '') from public.agent_flow_state, jsonb_array_elements(state->'career'->'stores'->'profile'->'facts') f where user_id = '${A}' and thread_id = '${a.chat.thread()}'`);
+        for (const [co, next] of [["Beta (TEST)", "find machine learning jobs"], ["Gamma (TEST)", "what do you know about me?"]]) {
+          await a.say("Make it warmer.");
+          const asked = await a.say(`update my resume with my new job at ${co}`);
+          assertNode.ok(/What is your title there/.test(asked.reply), `${co}: asked: ${asked.reply}`);
+          const other = await a.say(next);
+          assertNode.ok(other.intent !== "career_resume_task" && !/Kept with/.test(other.reply), `"${next}" runs as itself: ${other.intent}: ${other.reply}`);
+          const titles = await factTitles();
+          assertNode.ok(titles.includes(`New job at ${co}`) && !titles.includes(`New job at ${co}:`), `"${next}" is not stored as the title: ${titles}`);
+        }
         await nothingApplied(A);
         // The ruling on review drafts: a file printed from unconfirmed or placeholder facts never reaches the apply door. None of the
         // resume task's files is in an apply source, and the hosted apply refuses a resume it does not hold.
@@ -472,6 +485,63 @@ Deno.test("gpa/2 '3.8 out of 4.0 GPA' reads 3.8; every phrase comes off whole", 
   CareerProfile.ingestResume(p, { text: `EDUCATION\nTEST University - B.S. Economics, 3.8 out of 4.0 GPA\n\nAWARDS\nDean's List (TEST), GPA 3.4\n\nEXPERIENCE\nAnalyst, Acme (TEST), 2025\n- Did analysis (TEST)`, fileName: "x.txt" });
   for (const f of (p as any).facts) CareerProfile.confirmFact(p, f.id);
   assertNode.deepEqual(buildResume(p, targetOf(T1)!, false).gpaConflict, ["3.8", "3.4"], "a real conflict names the values as written, never the scale");
+});
+
+// Round-2 re-review of #644 (2): a full stop after the value or the scale, a major and an overall value, "on a 4.0 scale", a GPA in
+// parentheses, "GPA (cumulative)", "CGPA": each is read as its value and comes off whole; "3.8/4.0" with no GPA word is left alone.
+Deno.test("gpa/3 'GPA 3.8.', 'GPA 3.8/4.0.', 'Major GPA 3.9, overall 3.6', '(GPA: 3.8)', 'CGPA 3.8': read right, off whole", () => {
+  const cases: [string, string | null, string][] = [
+    ["GPA 3.8.", "3.8", "TEST University - B.S. Economics."],
+    ["GPA: 3.85. Dean's List", "3.85", "TEST University - B.S. Economics. Dean's List"],
+    ["GPA 3.8/4.0.", "3.8", "TEST University - B.S. Economics."],
+    ["Major GPA 3.9, overall 3.6", "3.6", "TEST University - B.S. Economics"],
+    ["Major GPA 3.9, overall GPA 3.6; Dean's List", "3.6", "TEST University - B.S. Economics; Dean's List"],
+    ["GPA 3.8 on a 4.0 scale", "3.8", "TEST University - B.S. Economics"],
+    ["(GPA: 3.8)", "3.8", "TEST University - B.S. Economics"],
+    ["GPA (cumulative): 3.8", "3.8", "TEST University - B.S. Economics"],
+    ["CGPA 3.8", "3.8", "TEST University - B.S. Economics"],
+    ["3.8/4.0", null, "TEST University - B.S. Economics, 3.8/4.0"],
+  ];
+  for (const [form, value, offLine] of cases) {
+    const p = CareerProfile.createProfile({});
+    CareerProfile.ingestResume(p, { text: `EDUCATION\nTEST University - B.S. Economics, ${form}\n\nAWARDS\nHonor (TEST), GPA 3.4\n\nEXPERIENCE\nAnalyst, Acme (TEST), 2025\n- Did analysis (TEST)`, fileName: "x.txt" });
+    for (const f of (p as any).facts) CareerProfile.confirmFact(p, f.id);
+    const on = buildResume(p, targetOf(T1)!, false), off = buildResume(p, targetOf(T1)!, false, { noGpa: true });
+    assertNode.deepEqual(on.gpaConflict, value ? [value, "3.4"] : null, `${form}: read as ${value ?? "no GPA"}`);
+    assertNode.equal(off.lines.find((l) => /TEST University/.test(l)), offLine, `${form}: off whole, nothing left over`);
+  }
+});
+
+// Round-2 re-review of #644 (1b): a yes approves exactly the pairs shown. Five bullets can be reworded, two are shown; the yes
+// puts those two in and no other.
+Deno.test("restyle/1 five rewordings, two shown: a yes changes only the two shown", async () => {
+  const p = CareerProfile.createProfile({});
+  CareerProfile.ingestResume(p, { text: RESUME, fileName: "r.txt" });
+  for (const f of (p as any).facts) CareerProfile.confirmFact(p, f.id);
+  const at = Date.parse("2026-11-09T12:00:00Z"), U = "11111111-1111-4111-8111-111111111111";
+  // Each bullet loses its last word: a real rewording the audit passes (no new word, number or claim).
+  const rewrite = async (b: string) => b.replace(/\s+\S+$/, "");
+  const turn = (message: string) => resumeTaskTurn({ message, ctx: { profile: p }, userId: U, now: at, deps: { uploaded: async () => false, lastIntent: async () => "career_resume_task", rewrite } });
+  assertNode.ok((await turn(T1))?.task.file, "the resume is made");
+  const warm = await turn("Make it warmer.");
+  const proposed = (p as any)._resumeTask.proposed as { before: string; after: string }[];
+  assertNode.equal(proposed.length, 2, `only the shown pairs are proposed: ${warm?.reply}`);
+  const shown = [...warm!.reply.matchAll(/^New: (.*)$/gm)].map((m) => m[1]);
+  assertNode.deepEqual(shown, proposed.map((x) => x.after), "what is proposed is what was shown");
+  assertNode.ok(Number(/(\d+) more bullets could change the same way/.exec(warm!.reply)?.[1] ?? 0) >= 3, `five or more reworded, the others named, not proposed: ${warm!.reply}`);
+  const yes = await turn("yes, that's fine");
+  const swaps = (p as any)._resumeTask.swaps as { before: string; after: string }[];
+  assertNode.deepEqual(swaps, proposed, `the yes puts in exactly the two shown: ${yes?.reply}`);
+  assertNode.ok(/2 bullets are reworded/.test(yes!.reply), yes!.reply);
+});
+
+// Round-2 re-review of #644 (1a): the "new job" question keeps only a title or role; anything else is not stored as the title.
+Deno.test("fact_detail/1 a search, a question and a bare yes are never stored as the new job's title", () => {
+  const task = { pending: "fact_detail", file: { sha256: "x", filename: "x.pdf", pages: 1, label: "data analyst internships" }, target: targetOf(T1) } as any;
+  const view = { companies: [], jobs: 3, posting: false, resumeShown: true };
+  for (const t of ["find machine learning jobs", "what do you know about me?", "search for data jobs in Boston", "send me the resume PDF"]) assertNode.notEqual(resumeAskOf(t, task, view), "fact_detail", t);
+  for (const t of ["yes", "no", "Yes.", "ok"]) { assertNode.equal(resumeAskOf(t, task, view), "fact_detail", `${t}: asked again`); assertNode.equal(titleShaped(t), false, t); }
+  for (const t of ["ok, Analyst since May", "Data Analyst, started June 2026", "Sous Chef", "Junior Software Engineer"]) { assertNode.equal(resumeAskOf(t, task, view), "fact_detail", t); assertNode.ok(titleShaped(t), t); }
 });
 
 // Re-review of #644 (7): a number is a job number only with a cue.

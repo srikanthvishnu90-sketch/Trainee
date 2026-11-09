@@ -103,13 +103,24 @@ function postingNamed(t: string, companies: string[]): boolean {
   if (t.length > 600 && /\b(requirements|qualifications|responsibilities)\b/.test(t)) return true;
   return companies.some((c) => c.length > 2 && new RegExp(`\\b${c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(t));
 }
+const BARE = /^\s*(?:yes|yeah|yep|yup|no|nope|nah|ok(?:ay)?|sure|right|correct|fine)\s*[.!]*\s*$/;
+const ROLE_WORD = /\b(?:analyst|engineer|intern|associate|manager|developer|designer|scientist|consultant|assistant|coordinator|specialist|lead|director|researcher|technician|representative|officer|administrator|teacher|tutor|barista|cashier|server|clerk|writer|editor|accountant|fellow|trainee|apprentice|founder|volunteer|president|treasurer|architect|programmer|strategist|planner|advisor|agent|operator|partner|aide|instructor|counselor|nurse|chef|cook|driver|recruiter|vp|cto|ceo|coo|cfo)s?\b/;
+const NOT_TITLE = /\?|^\s*(?:what|how|why|who|when|where|which|can|could|would|do|does|did|is|are|will|should|find|search|show|look|get|send|tell|make|list|give|apply|submit|help|stop|cancel|leave|update|add|tailor|turn|create|generate)\b|\b(?:jobs?|roles?|internships?|openings?|postings?|resume|cv|pdf|file|link)\b/;
+// A title or role, with or without when it started: "Analyst since May", "Data Analyst, started June 2026", "Sous Chef".
+export const titleShaped = (message: string) => {
+  const s = message.trim().replace(/^(?:ok(?:ay)?|yes|sure|so)[,!. ]+/i, "").replace(/[.!]+$/, "");
+  if (!s || BARE.test(lc(s)) || s.length > 100 || s.split(/\s+/).length > 12 || NOT_TITLE.test(lc(s))) return false;
+  return ROLE_WORD.test(lc(s)) || /^[A-Z][\w&.'-]*(?:\s+(?:of|&|[A-Z][\w&.'-]*)){0,4}(?:,?\s+(?:since|from|starting|started)\b.*)?$/.test(s);
+};
 export type ResumeAsk = "fact_detail" | "submit_job" | "new_fact" | "make" | "correct" | "link" | "ask_send" | "send_pdf" | "explain" | "edit" | "restyle" | "approve_edit" | "why_contact" | "apply_which" | null;
 export function resumeAskOf(message: string, task: ResumeTask | null, view: { companies: string[]; jobs: number; posting: boolean; lastFile?: boolean; resumeShown?: boolean }): ResumeAsk {
   // A pasted resume or posting is material, not an ask about the resume task (its own words say "for", "file", "update").
   if (message.length > 600 || message.split("\n").filter((l) => l.trim()).length > 4 || /^\s*(here'?s|here is|this is|my) (my |the )?(resume|cv)\b/i.test(message)) return null;
   const t = lc(message), rest = t.replace(/\bnot (?:an? |the )?[a-z][a-z0-9 &/+.-]{2,80}?(?=[,.;!?]|$| please| since| and )/g, " ");
   // The answer to the "new job" question ("ok, Analyst since May"): kept with that fact, never read as a yes to anything else.
-  if (task?.pending === "fact_detail" && view.resumeShown && !AMBIGUOUS.test(t) && !/\b(resume|cv|pdf|apply|submit)\b/.test(t)) return "fact_detail";
+  // Round-2 re-review (1a): only an answer shaped like a title or role is kept; a bare yes or no is asked again, and a search, a
+  // question or any other ask leaves this question and runs as itself.
+  if (task?.pending === "fact_detail" && view.resumeShown && (BARE.test(t) || titleShaped(message))) return "fact_detail";
   if (task?.pending === "send_choice") {
     // Example 4's other answer: "Submit job 2" names the application; its exact payload is reviewed before anything is sent.
     if (/\b(submit|apply)\b/.test(t) && jobNumberOf(t) !== null) return "submit_job";
@@ -146,12 +157,21 @@ const SECTION: Record<string, string> = { education: "Education", experience: "E
 // "3.7 cumulative GPA". The value is group 1 or 2; the scale ("/4.0") goes with it when it is taken off.
 // Re-review of #644 (2): the scale in any form ("/4.0", "out of 4", "(4.0 scale)") goes with the value and is never read as one;
 // "Cumulative"/"Overall" and a dash or colon after "GPA" go with it too.
-const NUM = "\\d\\.\\d{1,2}(?![\\d.])";
-const SCALE = "(?:\\s*(?:\\/|out\\s+of)\\s*\\d(?:\\.\\d{1,2})?(?![\\d.]))?(?:\\s*\\(\\s*(?:on\\s+a\\s+)?\\d(?:\\.\\d{1,2})?\\s*(?:point\\s+)?scale\\s*\\))?";
-const LEAD = "(?:\\b(?:cumulative|overall)\\s+)?";
-const GPA_SRC = `${LEAD}\\bGPA\\s*(?:of\\s*|[-–—:]\\s*)?(${NUM})${SCALE}|\\b(${NUM})${SCALE}\\s*${LEAD}GPA\\b`;
+// Round-2 re-review of #644 (2): a full stop after the value or the scale ("GPA 3.8.", "GPA 3.8/4.0.") is the sentence's, not
+// part of a number; "Major GPA 3.9, overall 3.6" reads the overall value and comes off whole; "on a 4.0 scale", "(GPA: 3.8)",
+// "GPA (cumulative): 3.8" and "CGPA 3.8" are GPA phrases too. "3.8/4.0" with no GPA word is not one.
+const NUM = "\\d\\.\\d{1,2}(?!\\d)(?!\\.\\d)";
+const SCALE_N = "\\d(?:\\.\\d{1,2})?(?!\\d)(?!\\.\\d)";
+const SCALE = `(?:\\s*(?:\\/|out\\s+of)\\s*${SCALE_N})?(?:\\s*\\(\\s*(?:on\\s+an?\\s+)?${SCALE_N}\\s*(?:-?\\s*point\\s+)?scale\\s*\\)|\\s+on\\s+an?\\s+${SCALE_N}\\s*(?:-?\\s*point\\s+)?scale\\b)?`;
+const LEAD = "(?:\\b(?:cumulative|overall|major)\\s+)?";
+const WORD = "\\bC?GPA(?:\\s*\\(\\s*(?:cumulative|overall|major)\\s*\\))?";
+const GPA_SRC = `${LEAD}${WORD}\\s*(?:of\\s*|[-–—:]\\s*)?(${NUM})${SCALE}(?:\\s*[,;]?\\s*(?:and\\s+)?(?:overall|cumulative)(?:\\s+C?GPA)?\\s*(?:of\\s*|[-–—:]\\s*)?(${NUM})${SCALE})?|\\b(${NUM})${SCALE}\\s*${LEAD}C?GPA\\b`;
 const GPA = new RegExp(GPA_SRC, "gi");
-const GPA_OFF = new RegExp(`,?\\s*(?:${GPA_SRC})`, "gi");
+// In parentheses the parentheses go with it; otherwise the comma before it does.
+const GPA_OFF = new RegExp(`\\s*\\(\\s*(?:${GPA_SRC})\\s*\\)|,?\\s*(?:${GPA_SRC})`, "gi");
+const gpaValue = (m: RegExpMatchArray) => m[2] ?? m[1] ?? m[3];
+const gpaOff = (s: string) => s.replace(GPA_OFF, "").replace(/\(\s*\)/g, "").replace(/\s+([,.;])/g, "$1").replace(/([,;])\s*([,.;])/g, "$2")
+  .replace(/\s{2,}/g, " ").replace(/^[,;.\s]+|[,;\s]+$/g, "").trim();
 const textOf = (f: Fact) => `${f.title || ""} ${f.text || ""} ${(f.bullets || []).join(" ")}`;
 // Words that make an entry relevant to the target: the target's own words and the family's usual evidence.
 function scorer(target: Target): (f: Fact) => number {
@@ -183,10 +203,10 @@ export function buildResume(profile: any, target: Target, uploaded: boolean, o: 
   const facts: Fact[] = unconfirmed ? (profile?.facts || []).filter((f: Fact) => f && f.kind) : confirmed;
   // The values as written, one per number (3.7 and 3.70 are one value).
   const byValue = new Map<number, string>();
-  for (const f of facts) for (const m of textOf(f).matchAll(GPA)) { const v = m[1] ?? m[2]; if (!byValue.has(Number(v))) byValue.set(Number(v), v); }
+  for (const f of facts) for (const m of textOf(f).matchAll(GPA)) { const v = gpaValue(m); if (!byValue.has(Number(v))) byValue.set(Number(v), v); }
   const gpas = [...byValue.values()];
   const gpaConflict = gpas.length > 1 && !o.noGpa ? gpas : null;
-  const asWritten = (s: string) => gpaConflict || o.noGpa ? s.replace(GPA_OFF, "").replace(/\s{2,}/g, " ").replace(/^[,;\s]+|[,;\s]+$/g, "").trim() : s;
+  const asWritten = (s: string) => gpaConflict || o.noGpa ? gpaOff(s) : s;
   const top = resumeContact(profile, "confirmed");
   const contactMissing = !top.name || !top.email;
   const blocks: Block[] = [], moved: string[] = [], bullets: { text: string; fact: Fact }[] = [];
@@ -300,6 +320,10 @@ export async function resumeTaskTurn(o: { message: string; ctx: any; userId: str
   if (ask === "fact_detail") {
     const f = (profile.facts || []).find((x: Fact) => x.id === prior?.factId);
     if (!f) return reply("I've lost track of which new job that was. Tell me the employer, your title and when you started.");
+    if (!titleShaped(o.message)) {
+      task.pending = "fact_detail"; task.factId = f.id;
+      return reply(`What is your title at ${String(f.title).replace(/^New job at /, "").replace(/:.*$/, "")}, and when did you start? I'll keep it with that job, unconfirmed.`);
+    }
     const said = o.message.trim().replace(/^(ok(ay)?|yes|sure|so)[,!. ]+/i, "").replace(/[.!]+$/, "");
     f.title = `${f.title}: ${said}`; f.text = f.title;
     return reply(`Kept with your new job: "${said}". It stays unconfirmed and off the resume until you confirm it. Is "${f.title}" right as written?`);
@@ -334,10 +358,14 @@ export async function resumeTaskTurn(o: { message: string; ctx: any; userId: str
         if (a && a !== b.text && auditRewrite({ original: b.text, proposed: a, fact: b.fact, profile }).ok) out.push({ before: b.text, after: a });
       }
       if (!out.length) return reply(`I couldn't change the tone of your resume for ${target.label} without changing what it says, so it stays as it is.`, RESUME_TASK_INTENT, "completed");
-      task.proposed = out; task.proposedHash = await proposalHash(out);
-      return reply([`For your ${target.label} resume, ${out.length === 1 ? "one bullet" : `${out.length} bullets`} would change:`,
-        ...out.slice(0, 2).flatMap((x) => [`New: ${x.after}`, `Now: ${x.before}`]), ...(out.length > 2 ? [`and ${out.length - 2} more in the same way.`] : []),
-        "Nothing else changes. Say if it's fine and I'll put it in the PDF."].join("\n"));
+      // Round-2 re-review (1b): a yes approves exactly what was shown. Only the shown pairs are kept and hashed; the rest are not
+      // proposed until they are shown.
+      const shown = out.slice(0, 2), rest = out.length - shown.length;
+      task.proposed = shown; task.proposedHash = await proposalHash(shown);
+      return reply([`For your ${target.label} resume, ${shown.length === 1 ? "this bullet" : "these 2 bullets"} would change:`,
+        ...shown.flatMap((x) => [`New: ${x.after}`, `Now: ${x.before}`]),
+        ...(rest > 0 ? [`${rest === 1 ? "One more bullet" : `${rest} more bullets`} could change the same way; I'll show ${rest === 1 ? "it" : "them"} after you decide on these.`] : []),
+        `Nothing else changes. Say if ${shown.length === 1 ? "it's" : "these are"} fine and I'll put ${shown.length === 1 ? "it" : "them"} in the PDF.`].join("\n"));
     }
     const ord = /\b(second|2nd)\b/.test(t) ? 1 : /\b(third|3rd)\b/.test(t) ? 2 : /\blast\b/.test(t) ? now.facts.length - 1 : 0;
     const pick = now.facts[ord];

@@ -8,6 +8,11 @@
 // in from Telegram, then rendered in Chromium at 390 x 844 (deviceScaleFactor 2, light and dark) and checked against the shared
 // anatomy (C.1): a back control, a serif title, a one-line subtitle stating the privacy or effect boundary, no sideways
 // scroll, every button at least 44 px tall, and the plain-text twin carrying the title. A family that does not render fails.
+// R-5 (owner readiness review; WO-E's interface, 2026-11-09): page({ state, width }) with state loading | empty | error | ready
+// and width 390 | 1280 is one responsive document per state. Every family is rendered in all four states at both widths: each
+// has a heading, no sideways scroll, buttons at least 44 px tall on the phone, the loading, empty and error states keep the
+// family's own header title (the first text in the page's <header>, after the back control, equal to the ready File's; F-14n:
+// F-14's; the subtitle may differ, since a page with no data has no record id to name), and each differs from the ready File.
 // EXPECTED TO FAIL ON TRUNK (WO-E). Run: CI=true deno test -A --no-check --import-map=tests/flow/supabase-npm.json <this file>
 const helper = (() => { let u = new URL(".", import.meta.url); for (let i = 0; i < 8; i++) { const c = new URL("tests/architect/helpers/", u); try { Deno.statSync(c); return c.href; } catch { u = new URL("..", u); } } throw new Error("tests/architect/helpers not found"); })();
 const R = await import(`${helper}r10_world.ts`);
@@ -103,6 +108,41 @@ R.suite(FILE, [9], [CHAT], async (t: Deno.TestContext, w: any) => {
       for (const a of target.actions) if (!buttons.some((b) => b.includes(a.toLowerCase()))) gaps.push(`action: "${a}" has no button or link`);
       ok(gaps.length === 0, `${id} against ${target.spec} (target ${ev.target}): ${gaps.join(" | ")}`);
       ev.reply = got.html.replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>|<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 600);
+    }, w);
+  }
+  // R-5: every family, every state, both widths.
+  for (let i = 0; i < 16; i++) {
+    const id = i < 15 ? `F-${String(i + 1).padStart(2, "0")}` : "F-14n";
+    await check(t, FILE, 9, `${id} ${FAMILIES[i]}: loading, empty, error and ready at 390 and 1280 px (R-5)`, async (ev: any) => {
+      const f = fam.find((x: any) => x.id === id);
+      ok(f && typeof f.page === "function", `${id}: page(view) is exported`);
+      const headerOf = fam.find((x: any) => x.id === (id === "F-14n" ? "F-14" : id)) ?? f;
+      const textOf = (h: string) => h.replace(/<[^>]+>/g, " ").replace(/&#39;|&rsquo;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+      const headerOf2 = (html: string) => {
+        const head = /<header\b[^>]*>([\s\S]*?)<\/header>/i.exec(html)?.[1] ?? "";
+        const rest = head.replace(/<a\b[^>]*aria-label="Back"[^>]*>[\s\S]*?<\/a>/i, "").replace(/<details[\s\S]*?<\/details>/gi, "");
+        return textOf(/>([^<>]*\w[^<>]*)</.exec(rest)?.[1] ?? "");
+      };
+      const gaps: string[] = [];
+      for (const width of [390, 1280] as const) {
+        const ready = String(await f.page({ state: "ready", width }));
+        const header = headerOf2(String(await headerOf.page({ state: "ready", width })));
+        for (const state of ["loading", "empty", "error", "ready"] as const) {
+          const html = state === "ready" ? ready : String(await f.page({ state, width }));
+          const r = await renderPhone(html, `r5-${id}-${state}`, PROBE, { width });
+          ev.screenshots.push(r.screenshot);
+          const at = `${state} @${width}`;
+          if (!/<h[12]\b/i.test(html)) gaps.push(`${at}: no heading`);
+          if (r.scrollWidth > r.innerWidth) gaps.push(`${at}: sideways scroll (${r.scrollWidth} > ${r.innerWidth})`);
+          if (width === 390 && r.probe?.small?.length) gaps.push(`${at}: buttons under 44 px: ${r.probe.small.join(", ")}`);
+          if (state !== "ready") {
+            const own = headerOf2(html);
+            if (!own || own !== header) gaps.push(`${at}: header title "${own}" is not the family's "${header}"`);
+            if (html === ready) gaps.push(`${at}: the same document as the ready File`);
+          }
+        }
+      }
+      ok(gaps.length === 0, `${id} states: ${gaps.join(" | ")}`);
     }, w);
   }
 });

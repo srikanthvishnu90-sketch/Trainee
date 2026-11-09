@@ -497,6 +497,33 @@ Deno.test("target/1 the round-5 ruling: field words are targets in any case; an 
   const company = await turn("the company");
   assertNode.ok(company && !company.documents.length && /I need the Zephyrine posting/.test(company.reply), `a company: a posting, nothing built: ${company?.reply}`);
   assertNode.deepEqual((p as any)._resumeTask.employers, ["zephyrine"]);
+  // Round 6 (blocker): with no earlier task, the guess is no target: "make my resume a pdf" asks again and builds nothing.
+  const p2 = intake("", true);
+  let intent2 = "career_resume_task";
+  const turn2 = (message: string) => resumeTaskTurn({ message, ctx: { profile: p2 }, userId: "u-r10", now: NOW, deps: { uploaded: async () => false, lastIntent: async () => intent2 } });
+  const q3 = await turn2("make my resume for quillstone roles");
+  assertNode.ok(q3 && /Do you mean roles at Quillstone/.test(q3.reply) && !q3.documents.length, q3?.reply);
+  intent2 = q3!.intent;
+  const again = await turn2("make my resume a pdf");
+  assertNode.ok(again && /Do you mean roles at Quillstone/.test(again.reply) && !again.documents.length, `asked again, no file: ${again?.reply}`);
+  intent2 = again!.intent;
+  const co = await turn2("the company");
+  intent2 = co!.intent;
+  const none = await turn2("make my resume a pdf");
+  assertNode.ok(none && /Which role should I make this resume for\?/.test(none.reply) && !none.documents.length, `a company answer is no target: ${none?.reply}`);
+  intent2 = none!.intent;
+  const real = await turn2("make my resume a pdf for data analyst internships");
+  assertNode.ok(real && real.documents.length === 1, `a named target builds it: ${real?.reply}`);
+  // Round 6 (minors): no role word; a whole name; a well-known name that is also a field word or a common word.
+  assertNode.equal(kind("make my resume for Quillstone"), "ask", "no role word, written as a name");
+  assertNode.equal(kind("make my resume for quillstone", ["Quillstone Analytics"]), "posting", "no role word, on hand");
+  assertNode.equal(readTarget("make my resume for review"), null, "no role word, no name");
+  for (const [ask, name] of [["make my resume for Data Labs roles", "data labs"], ["make my resume for Analytics Inc roles", "analytics inc"]] as const) {
+    const r = readTarget(ask);
+    assertNode.ok(r?.kind === "ask" && r.name === name, `${ask}: ${JSON.stringify(r)}`);
+  }
+  for (const ask of ["make my resume for meta data roles", "make my resume for google data analyst roles", "make my resume for apple picking roles"]) assertNode.equal(kind(ask), "ask", ask);
+  for (const ask of ["make my resume for Meta roles", "make my resume for meta roles", "make my resume for apple roles", "make my resume for Google data analyst roles"]) assertNode.equal(kind(ask), "posting", ask);
 });
 
 Deno.test("facts/4 the task lapses after a day: an old target and an old rewording are not carried into a new ask", async () => {

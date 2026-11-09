@@ -40,6 +40,8 @@ export interface ResumeTask {
   proposedHash?: string | null; lastAsk?: string | null; factId?: string | null;
   // Round 5 ruling: an unclear target ("the Quillstone role", nothing on hand) is asked once; the answer is kept for the task.
   which?: { name: string; target: Target } | null; fields?: string[]; employers?: string[];
+  // Round 6: the task has no target of the person's yet (it began with that question); nothing is built until one is named.
+  noTarget?: boolean;
 }
 type Doc = { kind: "document"; format: string; filename: string; mime: string; base64: string; sha256: string };
 export type ResumeTurn = { reply: string; intent: string; resultStatus: string; documents: Doc[]; link: string | null; task: ResumeTask };
@@ -82,19 +84,26 @@ const keysOf = (name: string) => {
   return [...out].filter(Boolean);
 };
 const keyCache = new WeakMap<string[], Set<string>>();
-const employerKeys = (names: string[]) => {
+const employerKeys = (names: string[], withKnown = true): Set<string> => {
+  if (withKnown) return new Set([...KNOWN, ...employerKeys(names, false)]);
   let k = keyCache.get(names);
-  if (!k) keyCache.set(names, k = new Set([...KNOWN_EMPLOYERS, ...names].flatMap(keysOf)));
+  if (!k) keyCache.set(names, k = new Set(names.flatMap(keysOf)));
   return k;
 };
+const KNOWN = new Set(KNOWN_EMPLOYERS);
+const esc = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const COMMON_WORD_EMPLOYERS = new Set(["meta", "apple", "oracle", "amazon", "ramp", "citadel", "intel", "bain", "uber", "stripe", "ey"]);
 export type TargetRead = { kind: "target"; target: Target } | { kind: "posting"; name: string } | { kind: "ask"; name: string; target: Target };
 export type TargetHints = { employers?: string[]; fields?: string[] };
 export function readTarget(message: string, hints: TargetHints = {}): TargetRead | null {
-  const employers = employerKeys(hints.employers ?? []), fields = new Set((hints.fields ?? []).flatMap((f) => lc(f).split(/\s+/)));
+  const fields = new Set((hints.fields ?? []).flatMap((f) => lc(f).split(/\s+/)));
   const known = (w: string) => FIELD.test(w) || new RegExp(`^${ROLE}$`).test(w) || fields.has(w);
   const t = lc(message).replace(/\bnot (?:an? |the )?[a-z][a-z0-9 &/+.-]{2,80}?(?=[,.;!?]|$| please| since| and )/g, " ");
   const withRole = new RegExp(`\\b${LEADS_TO}((?:[a-z][a-z&/+-]*\\s+){0,4}?${ROLE}(?:\\s+${ROLE})*)\\b`, "g");
   const fieldOnly = new RegExp(`\\b${LEADS_TO}((?:[a-z][a-z&/+-]*\\s+){0,3}[a-z][a-z&/+-]*)(?=\\s*(?:[,.;!?]|$|\\s(?:please|and|since|now|instead)\\b))`, "g");
+  // Written as a name by the person (their own message, not the lowercased copy).
+  const cap = (w: string) => new RegExp(`(?<![A-Za-z])${esc(w.charAt(0).toUpperCase() + w.slice(1))}(?![a-z])`).test(String(message));
+  const onHand = employerKeys(hints.employers ?? [], false);
   const read = (phrase: string, needField: boolean): TargetRead | null => {
     const words = phrase.trim().split(/\s+/);
     if (words.some((w) => NOT_TARGET.test(w)) || words.length < 2 && /^(roles?|jobs?|positions?)$/.test(words[0])) return null;
@@ -104,12 +113,23 @@ export function readTarget(message: string, hints: TargetHints = {}): TargetRead
     const ws = role.split(" ");
     const target = { role, level, label: level === "internship" ? `${role} internships` : `${role} roles` };
     if (ws.every(known)) return { kind: "target", target };
-    const firstKnown = ws.findIndex(known);
-    const lead = (firstKnown < 0 ? ws : ws.slice(0, firstKnown)).join(" ");
-    const restKnown = ws.slice(lead.split(" ").length).every(known);
-    if (employers.has(role) || restKnown && employers.has(lead)) return { kind: "posting", name: employers.has(role) ? role : lead };
-    if (needField) return null;
-    return { kind: "ask", name: restKnown ? lead : ws.filter((w) => !known(w)).join(" "), target };
+    // Round 6: the name is the phrase without its trailing field and role words ("quillstone data analyst" is "quillstone";
+    // "Data Labs" and "Analytics Inc" are themselves), asked about whole.
+    let end = ws.length; while (end > 1 && known(ws[end - 1])) end--;
+    const name = ws.slice(0, end).join(" "), rest = ws.slice(end);
+    // A phrase with no role word ("for Quillstone") is read only when its unknown words are written as a name or are on hand;
+    // otherwise it is no target at all ("for review").
+    if (needField && !ws.filter((w) => !known(w)).every((w) => cap(w) || onHand.has(w) || onHand.has(name))) return null;
+    if (onHand.has(role) || onHand.has(name)) return { kind: "posting", name: onHand.has(role) ? role : name };
+    // A well-known employer stands apart from field words ("meta data" is a field phrase): with field words after it, or as a
+    // common word (meta, apple, oracle, amazon...), it is a posting only written as a name or followed by a generic word alone.
+    const known_ = KNOWN.has(role) ? role : KNOWN.has(name) ? name : null;
+    if (known_) {
+      const plain = known_ === role && words.length > ws.length;
+      const named = known_.split(" ").every(cap);
+      if ((COMMON_WORD_EMPLOYERS.has(known_) || rest.length) ? named || plain && !rest.length : true) return { kind: "posting", name: known_ };
+    }
+    return { kind: "ask", name, target };
   };
   for (const m of t.matchAll(withRole)) { const r = read(m[1], false); if (r) return r; }
   for (const m of t.matchAll(fieldOnly)) { const r = read(m[1], true); if (r) return r; }
@@ -400,20 +420,27 @@ async function resumeTaskTurnInner(o: { message: string; ctx: any; userId: strin
     said: prior && prior.target.label === target.label ? [...prior.said] : [], asked: [...(prior?.asked ?? [])], file: prior?.file ?? null, pending: null, at: new Date(o.now).toISOString(),
     // Only an edit or restyle turn shows a rewording; every other turn (a fact, a correction, a question, a new file) ends it.
     moved: prior?.moved ?? [], proposed: null, proposedHash: null, lastAsk: ask, factId: null, swaps: [...(prior?.swaps ?? [])],
-    which: null, fields: [...(prior?.fields ?? [])], employers: [...(prior?.employers ?? [])] };
+    which: named ? null : prior?.which ?? null, noTarget: named ? false : prior?.noTarget ?? false, fields: [...(prior?.fields ?? [])], employers: [...(prior?.employers ?? [])] };
   if (ask === "target_which" && unclear?.kind === "ask") {
     task.pending = "target_which"; task.which = { name: unclear.name, target: unclear.target };
-    if (!prior) task.file = null;
+    // The guess is kept only in `which`: with no earlier task there is no target of the person's to build for.
+    if (!prior) { task.file = null; task.noTarget = true; } else task.target = prior.target;
     profile._resumeTask = task;
     return { reply: `Do you mean roles at ${title(unclear.name)} (a company), or ${unclear.name} as a field?`, intent: RESUME_CLARIFY_INTENT, resultStatus: "awaiting_user", documents: [], link: null, task };
   }
   if (ask === "target_company") {
     const name = prior!.which!.name;
-    task.employers = [...new Set([...(task.employers ?? []), name])];
+    task.employers = [...new Set([...(task.employers ?? []), name])]; task.which = null;
     profile._resumeTask = task;
     return { reply: `Then this is a posting at ${title(name)}. I need the ${title(name)} posting to tailor against: paste it or its link and I'll tailor your resume to it.`, intent: RESUME_CLARIFY_INTENT, resultStatus: "awaiting_user", documents: [], link: null, task };
   }
-  if (ask === "target_field") { task.fields = [...new Set([...(task.fields ?? []), prior!.which!.name])]; ask = "make"; task.lastAsk = ask; }
+  if (ask === "target_field") { task.fields = [...new Set([...(task.fields ?? []), prior!.which!.name])]; task.which = null; task.noTarget = false; ask = "make"; task.lastAsk = ask; }
+  // Round 6: while the question is unanswered, or no target of the person's is known, nothing is built: it is asked again.
+  if (task.which || task.noTarget) {
+    profile._resumeTask = task;
+    if (task.which) { task.pending = "target_which"; return { reply: `Do you mean roles at ${title(task.which.name)} (a company), or ${task.which.name} as a field? I'll make the resume once I know.`, intent: RESUME_CLARIFY_INTENT, resultStatus: "awaiting_user", documents: [], link: null, task }; }
+    return { reply: "Which role should I make this resume for? Name the role, or paste the posting.", intent: RESUME_CLARIFY_INTENT, resultStatus: "awaiting_user", documents: [], link: null, task };
+  }
   if (ask === "approve_edit") {
     const shown = prior?.proposed ?? [];
     if (!shown.length || await proposalHash(shown) !== prior?.proposedHash) return null;

@@ -93,6 +93,7 @@ import { supabaseMemoryStore } from "../_shared/agent/memory.ts";
 import { codePending, readSituation } from "../_shared/career_situation.ts";
 import { statusRecordsFrom } from "../_shared/career_capabilities.ts";
 import { edgeRenderer, supabasePersonaStore, supabaseResumeStore } from "../_shared/career_tailor.ts";
+import { holdsCardApproval, noApplyAsk, parseCheckWords, RESUME_CLARIFY_INTENT, resumeTaskTurn } from "../_shared/career_resume_task.ts"; // R10 WO-A/B
 import { supabaseMailStore } from "../_shared/career_mail_store.ts";
 import { CONFIRM_INTENT, confirmWhichTurn, supabaseConfirmStore } from "../_shared/career_apply_confirm.ts";
 import { EMAIL_INTENT, emailTurn, supabaseEmailStore, supabaseResumes } from "../_shared/career_apply_email.ts";
@@ -130,7 +131,7 @@ import { careerTools } from "../_shared/agent/career_tools.ts"; // TASK PLANNER:
 import { CAREER_READ_SCOPE as PEOPLE_READ_SCOPE, supabasePeopleDeps } from "../_shared/career_people.ts"; // D-033
 import { CareerWriting } from "../_shared/router_core.career.js"; // FEATURE 4
 import { rewriteOn, tailorRewriteTurn } from "../_shared/career_tailor_rewrite.ts"; // FEATURE 4
-import { supabaseOwnDocx } from "../_shared/career_resume_design.ts"; // RELEASE 9
+import { supabaseNewestUpload, supabaseOwnDocx } from "../_shared/career_resume_design.ts"; // RELEASE 9; RELEASE 10: the newest upload, for the format rater
 import { supabaseVersionLog } from "../_shared/career_resume_outcomes.ts"; // RELEASE 9
 // FEATURE 8: inbox check and follow-ups that can be sent.
 import { careerGrant, followupTurn, gmailReadGrant, gmailReadNow, mailNow, supabaseFollowupStores } from "../_shared/career_inbox_followups.ts";
@@ -525,12 +526,14 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // TASK PLANNER: a planned step that the router answers reads the pool for its own words (`text`); a turn the pool is
       // not needed for leaves it unread, so a later step that needs it still reads it once.
       // `message` inside readPool is the text the pool is read for: this turn's message, or a planned step's own words.
-      const readPool = async (message: string) => {
+      // Round-5 ruling: `force` reads the pool for a resume ask whose target names an employer that may be on hand, whatever the
+      // router copy would need; the pool counts as read only once a load succeeded, so a failed read is tried again.
+      const readPool = async (message: string, force = false) => {
         if (poolRead) return;
-        if (!poolNeeded({ host, message, ctx: ctx as unknown as Record<string, unknown>, clock }).needed) return;
-        poolRead = true;
+        if (!force && !poolNeeded({ host, message, ctx: ctx as unknown as Record<string, unknown>, clock }).needed) return;
         const pool = await clock.wait("pool_load", () => poolLoader.loadPool());
         if (pool.error) console.error("career pool load failed:", pool.error);
+        else poolRead = true;
         // V240 LIVE-FIX (probe f2): the window is a discovery slice,
         // not the shelf — when the turn names a specific company/title
         // (the router's OWN parser decides; no second parser lives
@@ -659,7 +662,10 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // reply to a card still goes to the card).
       const offerLastWord = applyAllYesOn(Deno.env) && (isApplyAllYes(message) || isConditionalYes(message)) && !tapIn
         ? readOffer((await liveOfferRow(admin, tid).catch(() => null))?.meta) : null;
-      const card0 = !tapIn && !connAns && !outlookAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      // CodeRabbit #1 on #634 (architect, round 5): after "don't apply" is the resume task's limit, "Send this one" or a bare yes
+      // never approves an open card here; the resume task (or the held reply below) asks which is meant.
+      const cardHold = holdsCardApproval((ctx as any).profile, message, Date.now());
+      const card0 = !cardHold && !tapIn && !connAns && !outlookAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         // FEATURE 16: OWNER RULE (2026-10-26): no card without a confirmed resume on file (resumeReady).
         ? await cardTurn({ message, userId: user.id, threadId: tid, now: Date.now(), replyTo, resumeReady: resumeOnFileReader(admin, user.id), store: supabaseCardStore(admin), events })
         : null;
@@ -688,8 +694,44 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       const codeChatText = !crisisText && codeFirst && !card && !mock ? CODE_IN_CHAT_REPLY : null;
       let codeTurn = !!codeChatText;
       if (codeChatText) planned = { claimed: true, reply: codeChatText, intent: CODE_IN_CHAT_INTENT, resultStatus: "completed", parts: undefined, documents: [], meta: null } as unknown as Extract<PlannerTurn, { claimed: true }>;
+      // R10 WO-A/B (spec A.2 resume turns 1-3): a resume ask with a target and no posting, a correction to it, a link ask
+      // and "send this one" are the resume task's (career_resume_task.ts), in the planner's slot: every action turn below is
+      // skipped, so "don't apply" can never start an apply or a batch. Its files ride the reply as documents.
+      // R10 (spec A.2 resume T3, F.2): "don't apply", "leave the job search" is a boundary on this message. No apply turn
+      // runs on it, and an apply run the router plans on it is undone below (the run the thread held before is kept).
+      const noApply = noApplyAsk(message);
+      const batchBefore = JSON.stringify((ctx as any).batchApplyState ?? null);
+      const resumeAns = !crisisText && !codeTurn && !tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+        ? await resumeTaskTurn({ message, ctx, userId: user.id, now: Date.now(), deps: {
+            // An unknown word in the stated target may be an employer in the pool ("the quillstone ... role"): read it then.
+            loadPool: () => readPool(message, true),
+            // The privacy ruling: the resume opens only on the signed-in File page (a code-built draft File), never a bearer link.
+            file: async (data) => { const r = await createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }).create(user.id, "draft", data, { trusted: true });
+              return !r.ok ? { error: r.error } : r.url ? { url: r.url } : { error: "links to File pages aren't set up" }; },
+            // B.6 continuation 1: "make the first bullet less wordy" is the model's wording, metered like every model call
+            // here; the module audits it against the bullet's own fact and shows it beside the old one before it is used.
+            rewrite: careerModelConfig(Deno.env).apiKey ? async (bullet: string, ask: string) => {
+              const m = ledger.track(newMeter());
+              try {
+                const msg: any = await callModel(careerModelConfig(Deno.env), { system: "Rewrite one resume bullet as the person asks. Keep every fact, number, name and tool it states; add nothing that is not in it. Answer with the new bullet text only.",
+                  messages: [{ role: "user", content: JSON.stringify({ bullet, ask }) }], max_tokens: 200 }, { meter: m, role: "chat" });
+                const text = (Array.isArray(msg?.content) ? msg.content : []).filter((b: any) => b?.type === "text").map((b: any) => String(b.text ?? "")).join("").trim();
+                return text || null;
+              } finally { await ledger.record(m); }
+            } : undefined,
+            // The thread's last reply, so a bare "Make it warmer." is about the resume only right after it was shown.
+            lastIntent: async () => { const r = await admin.from("agent_messages").select("meta").eq("thread_id", tid).eq("role", "assistant").order("id", { ascending: false }).limit(1); return r.error ? null : (r.data?.[0]?.meta?.intent ?? null); },
+            uploaded: async () => { const r = await admin.from("career_resume_uploads").select("id").eq("user_id", user.id).limit(1); return !r.error && (r.data ?? []).length > 0; } } })
+          .catch((e) => { console.error("resume task turn:", e?.message ?? e); return null; })
+        : null;
+      // CodeRabbit #2 (architect, round 5): a pending rewording preview is an exact payload (its pairs are hashed for the yes), so
+      // the reply writer and the channel shape leave it as shown (career_reply_writer.ts PAYLOAD_META).
+      if (resumeAns) planned = { claimed: true, reply: resumeAns.reply, intent: resumeAns.intent, resultStatus: resumeAns.resultStatus, parts: undefined, documents: resumeAns.documents,
+        meta: resumeAns.task?.proposed?.length ? { resume_preview: resumeAns.task.proposedHash ?? true } : null } as unknown as Extract<PlannerTurn, { claimed: true }>;
+      else if (cardHold) planned = { claimed: true, reply: "You asked me not to apply, so I haven't approved or sent anything. Do you want me to submit the application on your card, or send you the resume PDF?",
+        intent: RESUME_CLARIFY_INTENT, resultStatus: "awaiting_user", parts: undefined, documents: [], meta: null } as unknown as Extract<PlannerTurn, { claimed: true }>;
       // The planner calls the model: without a model key it is never tried (no failing call, no cost row), as the brain.
-      if (!crisisText && !codeTurn && !tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && plannerOn(Deno.env, user.id) && !!careerModelConfig(Deno.env).apiKey && !host.isHostControlled(message, ctx)) {
+      if (!resumeAns && !cardHold && !noApply && !crisisText && !codeTurn && !tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && plannerOn(Deno.env, user.id) && !!careerModelConfig(Deno.env).apiKey && !host.isHostControlled(message, ctx)) {
         const pMeter = ledger.track(newMeter()), pCfg = careerModelConfig(Deno.env);
         const pModel = (payload: any) => callModel(pCfg, payload, { meter: pMeter, role: "chat" });
         try {
@@ -956,7 +998,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // APPLY HERE (apply_here.ts, Telegram): the link(s) or "apply to this" resolved and screened, no queueing; the tap on the one Apply
       // button queues or approves the exact payload. CAREER_APPLY_HERE=off turns off ONLY this intake (the one-line reply and the Apply button): the applyTurn below then answers as before.
       // It does NOT bring back attachments: the no-download default (attach_tool.ts, research_reply.ts attach) is separate and stays on.
-      const hereOut = Deno.env.get("CAREER_APPLY_HERE") !== "off" && writerChannel((body as any)?.channel) === "telegram" && !billing && !cancelled && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      const hereOut = !noApply && Deno.env.get("CAREER_APPLY_HERE") !== "off" && writerChannel((body as any)?.channel) === "telegram" && !billing && !cancelled && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await applyHereTurn({ message, now: Date.now(), db: supabasePostingsDb(admin), fetchFeed: boardFetchFeed((i, init) => fetch(i, init), { timeoutMs: 8000 }),
             apps: () => supabaseApplications(admin)(user.id), facts: screenFacts,
             last: (() => { const l = (loaded.snapshot as any)?.stores?.discovery?.lastShortlist; return Array.isArray(l) && l.length === 1 ? l[0] : null; })() })
@@ -1001,7 +1043,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           }
         }
       }
-      const queued: any = hereOut ? { reply: hereOut.reply, intent: APPLY_QUEUE_INTENT, status: hereOut.status } : !billing && !cancelled && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      const queued: any = hereOut ? { reply: hereOut.reply, intent: APPLY_QUEUE_INTENT, status: hereOut.status } : !noApply && !billing && !cancelled && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await applyTurn({
           ...feature1.apply,
           // FEATURE E2E: a pasted posting link (or a role at a registered board) read from the ATS's public API on demand
@@ -1161,7 +1203,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         if (outlookAns.meta) agentMeta = { ...(agentMeta || {}), ...outlookAns.meta };
       } else if (planned) { // TASK PLANNER: each step's own reply, in order; a waiting prompt a step left is the thread's last word
         if (codeTurn) flowCtx.note = noteForCodeTurn(flowCtx.note); // the safety text says "never in chat" once
-        out = { reply: planned.reply, intent: planned.intent, resultStatus: planned.resultStatus, contained: false, handler: crisisText ? "crisis" : codeTurn ? "code_in_chat" : "planner", parts: planned.parts,
+        out = { reply: planned.reply, intent: planned.intent, resultStatus: planned.resultStatus, contained: false, handler: crisisText ? "crisis" : codeTurn ? "code_in_chat" : resumeAns ? "resume_task" : "planner", parts: planned.parts,
           ...(planned.documents.length ? { result: { documents: planned.documents } } : {}) };
         agentMeta = planned.meta;
       } else if (card) {
@@ -1325,7 +1367,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           files: createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now, records: { application: (u, id) => supabaseFileStore(admin).appRow(u, id) } }),
           verifier: hunterVerifier({ fetch, apiKey: Deno.env.get("HUNTER_API_KEY"), cache: supabaseCheckCache(admin), now: Date.now }),
           // RELEASE 9: "keep my layout" reads their own Word file; each tailored file is recorded by version for the outcome rates.
-          tailor: { posting: (id) => postingsDb.get(id), personas: supabasePersonaStore(admin), resumes: supabaseResumeStore(admin), render: edgeRenderer(), ownDocx: supabaseOwnDocx(admin), versions: supabaseVersionLog(admin),
+          tailor: { posting: (id) => postingsDb.get(id), personas: supabasePersonaStore(admin), resumes: supabaseResumeStore(admin), render: edgeRenderer(), ownDocx: supabaseOwnDocx(admin), upload: supabaseNewestUpload(admin), versions: supabaseVersionLog(admin),
             deliver: (d) => { turnDocuments.push(d); } },
           // WO-066: "apply me to these" puts the postings in the person's own queue; the extension prepares each, and each
           // goes only on its card's tap.
@@ -1615,8 +1657,15 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // prepare intent is planned from that skeleton. Either way the
       // intent commits transactionally with the reply below, and the
       // reply never claims a state the worker has not written.
+      // Re-review of #644 (5): a structured batch approval that arrives with "don't apply" in its words is held too.
+      const batchHeld = noApply && careerBatch?.action === "approve";
+      if (noApply && (batchHeld || out.intent === "career_batch_apply" || out.intent === APPLY_QUEUE_INTENT)) {
+        const prev = JSON.parse(batchBefore);
+        if (prev === null) delete (ctx as any).batchApplyState; else (ctx as any).batchApplyState = prev;
+        out = { reply: "I haven't applied to anything or put anything on your apply list, as you asked. Nothing was prepared or sent.", intent: "career_apply_held", resultStatus: "not_started", contained: false, handler: "no_apply" };
+      }
       const pausedBatchReadback = careerBatch && careerBatch.action === "status" && out.intent === "career_paused" && !ctx._hostPatch;
-      if (careerBatch && (out.handler !== "CareerHostControl" || pausedBatchReadback)) {
+      if (careerBatch && !batchHeld && (out.handler !== "CareerHostControl" || pausedBatchReadback)) {
         const plan = await planCareerBatchIntent({ batchRequest: careerBatch, message, userId: user.id, threadId: tid,
           turnKey, requestHash, ctx, accountVersion: loaded.accountVersion, account: loaded.account, persistence,
           summarizeRun: (run: unknown) => { const r = CareerBatchApply.restoreRun(run); return r ? CareerBatchApply.speakSummary(r).join("\n") : null; } });
@@ -1691,6 +1740,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           if (m.artifacts.length) artifactsField = m.artifacts;
           if (m.failed > 0) artifactNote = "One file from this turn couldn't be attached here — ask me to send it again and I'll rebuild it.";
         }
+      }
+      // R10 WO-B (spec A.5 pattern 3): a parser's own verdict is not evidence for the person ("parse check PASS"); the files and
+      // what they hold are. The posting tailor's (142) line keeps what was saved, without the self-report.
+      if (/\bparse check\b/i.test(out.reply)) {
+        const scrub = parseCheckWords;
+        out = { ...out, reply: scrub(out.reply), ...(out.parts ? { parts: out.parts.map(scrub) } : {}) };
       }
       // A model call refused by the global budget (D-038a; no per-person cap since D-046) is said, never hidden.
       // R10 WO-D: a held reply already says what stopped; the note is not repeated under it.

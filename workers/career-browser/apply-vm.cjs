@@ -10,7 +10,8 @@
 //    VM's own allow-list (APPLY_VM_ALLOW_HOSTS) names them; loopback (mock forms) always passes for the dry run.
 //  - isolation: every attempt is a fresh browser context (no cookies or storage shared between people or attempts); the
 //    resume of one application is written to a private folder of its own and removed after.
-//  - a verification check (captcha) or a sign-in wall stops the item as 'needs you' with its link. Never solved, never signed in.
+//  - a verification check (captcha), a sign-in wall (SSO, password, create-account) or an emailed code stops the item as 'needs you'
+//    with its link and nothing_sent (WO-L). Never solved, never signed in.
 //  - retries only BEFORE Submit (in-process, and the database re-queues a worker that died before it); "submitting" is
 //    recorded in the database before the click, and nothing after it is ever re-sent.
 //  - no volume cap of ours (D-MS-2). Concurrency is the machine's capacity; a portal that refuses (429 / 503 / bot check)
@@ -20,6 +21,12 @@ const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { applyOne, payloadHash, NeedsUser } = require("./parallel-apply.cjs");
+// What the person is told was handed to them, per HANDOFF_REASONS (the same words as parallel-apply.cjs and scripts/apply.ts).
+const HANDED_BACK = {
+  login_required: "the employer asks the person to sign in; they finish it at the link",
+  bot_check: "a verification check appeared; the person finishes it at the link",
+  email_code: "the employer emailed the person a code; they finish it at the link",
+};
 
 const sha256 = (b) => crypto.createHash("sha256").update(b).digest("hex");
 // The same canonical JSON as supabase/functions/_shared/career_apply_store.ts and career_apply_canonical in SQL.
@@ -176,7 +183,10 @@ function createWorker(o) {
     }
     if (res.status === "needs_user") {
       if (res.reason === "bot_check") await refused(row, "bot_wall", null);
-      return void (await complete(row, "needs_user", res.reason, { ...ev, handed_back: res.reason === "bot_check" ? "a verification check appeared; the person finishes it at the link" : "the employer asks the person to sign in; they finish it at the link" }));
+      // A wall stops the run before Submit (parallel-apply never hands one back after the click): nothing was sent, which
+      // is what lets the person finish it themselves or have it prepared again (WO-L). The wall kind is kept; the page's
+      // contents are not.
+      return void (await complete(row, "needs_user", res.reason, { ...ev, nothing_sent: true, wall: res.wall || (res.reason === "bot_check" ? "bot_check" : null), handed_back: HANDED_BACK[res.reason] || HANDED_BACK.login_required }));
     }
     if (res.status === "unknown_outcome") return void (await complete(row, "unknown_outcome", "application outcome unknown: " + String(res.reason || "").slice(0, 80), ev));
     // not_submitted

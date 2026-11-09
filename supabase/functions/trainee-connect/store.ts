@@ -10,18 +10,29 @@ import { emailBind, googleConsentUrl, issueState, redirectUriFrom, requestScopes
 import type { ConnectDeps, ProviderId, ProviderInfo, ProviderState } from "./handler.ts";
 
 const CONNECTOR: Record<ProviderId, ConnectorId> = { google: "gmail", microsoft: "outlook" };
+
+// R10 WO-F (owner readiness review): the ONE table of what each provider's consent asks for, per purpose. The page (its intro,
+// its permission rows and the exact scopes it lists) and the consent URL start() builds both read this, so the screen can
+// never say less or more than the request. `connected`: a Gmail is already connected (D-037: a "send" link then asks only
+// for gmail.send on top of it, bound to that account); with nothing connected every purpose is the plain connect.
+// Microsoft: one consent for every purpose (outlook_graph.ts SCOPES, which authorizeUrl sends).
+export function consentScopes(p: ProviderId, purpose: string, connected: boolean, env: { get(k: string): string | undefined }): string[] {
+  if (p === "microsoft") return [...MS_SCOPES];
+  if (purpose === "send" && connected) return [...SEND_CONSENT_SCOPES];
+  return requestScopesFor("career", env.get("GOOGLE_APPROVED_EXTRA_SCOPES")).scopes;
+}
 const at = (ms: number) => new Date(ms).toISOString();
 const must = (r: any, what: string) => { if (r?.error) throw new Error(`${what}: ${r.error.message ?? r.error}`); return r?.data; };
 
 export function supabaseConnectDeps(admin: any, env: { get(k: string): string | undefined }, f: typeof fetch = fetch, now: () => number = Date.now): ConnectDeps {
   const base: Deps = { admin, env, fetch: f, now };
-  // The scopes each consent URL asks for, from the code that builds it (never copy written on the page).
-  const googleScopes = () => requestScopesFor("career", env.get("GOOGLE_APPROVED_EXTRA_SCOPES")).scopes;
+  // What the page shows for a provider is what its consent URL asks for (consentScopes; never copy written on the page). The
+  // page offers a consent only for a provider that is not connected, so it shows the not-connected request for the purpose.
   return {
     env, now,
-    providers: () => ({
-      google: { configured: CONNECTORS.gmail.wired(env), scopes: googleScopes() },
-      microsoft: { configured: CONNECTORS.outlook.wired(env), scopes: [...MS_SCOPES] },
+    providers: (purpose = "replies") => ({
+      google: { configured: CONNECTORS.gmail.wired(env), scopes: consentScopes("google", purpose, false, env), sendScopes: consentScopes("google", "send", true, env) },
+      microsoft: { configured: CONNECTORS.outlook.wired(env), scopes: consentScopes("microsoft", purpose, false, env) },
     } satisfies Record<ProviderId, ProviderInfo>),
     async status(userId) {
       const s = await statuses(base, userId);
@@ -34,7 +45,7 @@ export function supabaseConnectDeps(admin: any, env: { get(k: string): string | 
           const t = await CONNECTORS.gmail.token(base, userId, "read").catch(() => null);
           if (t?.status === "needs_reconnect") state = "needs_reconnect";
         }
-        out[p] = { state, email: x.email };
+        out[p] = { state, email: x.email, canSend: x.uses.some((u) => /^send /.test(u)) };
       }
       return out;
     },
@@ -55,7 +66,7 @@ export function supabaseConnectDeps(admin: any, env: { get(k: string): string | 
       const bound = typeof held?.email === "string" && held.email.trim() ? held.email.trim() : null;
       const state = await issueState(userId, "career", stateSecret, now(), bound ? await emailBind(bound) : undefined);
       return googleConsentUrl({ clientId, redirectUri: redirectUriFrom(env), state,
-        scopes: bound ? [...SEND_CONSENT_SCOPES] : googleScopes(), incremental: !!bound, ...(bound ? { loginHint: bound } : {}) });
+        scopes: consentScopes("google", reason ?? "", !!bound, env), incremental: !!bound, ...(bound ? { loginHint: bound } : {}) });
     },
     async disconnect(provider, userId) {
       const r = await disconnectConnector(base, CONNECTORS[CONNECTOR[provider]], userId);

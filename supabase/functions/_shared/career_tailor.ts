@@ -13,7 +13,8 @@
 // tool refuses; nothing is stored or linked.
 import { CareerProfile, CareerRender, CareerTailor } from "./router_core.career.js";
 import { documentLines, guardMaterials } from "./career_materials_guard.ts";
-import { type Fit, type FitRecord, fitRecord, type LayoutName, renderDesigned, type Swap } from "./career_resume_design.ts";
+import { type DesignLayout, type Fit, type FitRecord, fitRecord, type OwnFact, renderDesigned, type Swap } from "./career_resume_design.ts";
+import type { TemplateId, TemplateSpec } from "./career_resume_templates.ts";
 import { gapAnalysis, type GapReport, previewText } from "./career_resume_gaps.ts";
 
 export const RESUME_BUCKET = "career-resumes";
@@ -296,19 +297,20 @@ function contactProblems(R: any, resume: any, buf: any): string[] {
 }
 // RELEASE 9: a layout (career_resume_design.ts) renders the PDF and the DOCX together; the DOCX, the page fit and the
 // printed lines ride the result. With no layout asked for, the renderer is exactly WO-028's (148's own PDF).
-export interface RenderOpts { layout?: LayoutName | null; ownDocx?: Uint8Array | null; swaps?: Swap[] }
-export type RenderOut = { ok: true; pdf: Uint8Array; sha256: string; filename: string; ats: AtsVerdict; where: string; layout?: LayoutName; docx?: Uint8Array; fit?: Fit; lines?: string[]; replaced?: number; missing?: string[] } | { ok: false; reason: string; where: string };
+// RELEASE 10: a template (one of the fifteen, branded or neutral), or "own" from the person's PDF rebuilt from its geometry.
+export interface RenderOpts { layout?: DesignLayout | null; ownDocx?: Uint8Array | null; swaps?: Swap[]; template?: TemplateId | null; branded?: boolean; ownPdfSpec?: TemplateSpec | null; ownFacts?: OwnFact[] | null }
+export type RenderOut = { ok: true; pdf: Uint8Array; sha256: string; filename: string; ats: AtsVerdict; where: string; layout?: DesignLayout; template?: TemplateId | null; docx?: Uint8Array; fit?: Fit; lines?: string[]; replaced?: number; missing?: string[] } | { ok: false; reason: string; where: string };
 export type ResumeRenderer = (resume: any, opts?: RenderOpts) => Promise<RenderOut>;
 export function renderWith(R: any, where: string): ResumeRenderer {
   return async (resume, opts) => {
     if (!R?.runtime?.zlib || !R?.runtime?.crypto) return { ok: false, where, reason: `the PDF renderer needs zlib and crypto, which ${where} does not provide` };
     if (opts?.layout) {
-      const d = renderDesigned(R, resume, { layout: opts.layout, ownDocx: opts.ownDocx ?? null, swaps: opts.swaps ?? [] });
+      const d = renderDesigned(R, resume, { layout: opts.layout, ownDocx: opts.ownDocx ?? null, swaps: opts.swaps, template: opts.template ?? null, branded: !!opts.branded, ownPdfSpec: opts.ownPdfSpec ?? null, ownFacts: opts.ownFacts ?? null });
       if (!d.ok) return { ok: false, where, reason: d.reason };
       const buf = R.toBuffer(d.pdf);
       const reasons = [...d.parseCheck.fails, ...contactProblems(R, resume, buf)];
       const ats: AtsVerdict = { pass: reasons.length === 0, status: reasons.length ? "FAIL" : d.parseCheck.status, reasons, warnings: d.parseCheck.warnings };
-      return { ok: true, pdf: d.pdf, sha256: R.sha256(buf), filename: R.filenameFor(resume?.header?.name, "pdf"), ats, where, layout: d.layout, docx: d.docx, fit: d.fit, lines: d.lines, ...(d.replaced !== undefined ? { replaced: d.replaced, missing: d.missing } : {}) };
+      return { ok: true, pdf: d.pdf, sha256: R.sha256(buf), filename: R.filenameFor(resume?.header?.name, "pdf"), ats, where, layout: d.layout, template: d.template ?? null, docx: d.docx, fit: d.fit, lines: d.lines, ...(d.replaced !== undefined ? { replaced: d.replaced, missing: d.missing } : {}) };
     }
     const r = R.renderPdf(resume);
     if (!r.ok) return { ok: false, where, reason: r.reason || "the PDF could not be rendered" };
@@ -401,12 +403,13 @@ export type TailorOut = {
   not_on_your_record: string[]; lead_not_picked: string[]; rendered_in: string; ms: number; detail: { doc: any; base: any; diff: any; docx: Uint8Array | null; pdf: Uint8Array };
   // RELEASE 9: the posting against the resume (missing, weak, emphasise) and the top of the file as it prints, both for the
   // chat before the file is sent; the layout and its page fit when one was asked for.
-  gaps: GapReport; preview: string; layout: LayoutName | "plain"; fit: FitRecord | null; own_layout?: { replaced: number; missing: string[] };
+  gaps: GapReport; preview: string; layout: DesignLayout | "plain"; template: TemplateId | null; fit: FitRecord | null; own_layout?: { replaced: number; missing: string[] };
 } | { ok: false; refused: "no_confirmed_facts" | "no_contact" | "truth_audit" | "render" | "ats_parse" | "link"; reason: string; ms: number };
 
 export async function tailorForPosting(o: {
   userId: string; profile: any; posting: { text: string; job_id?: string | null; company?: string | null };
-  persona?: Persona | null; deps: TailorDeps; now: number; layout?: LayoutName | null; ownDocx?: Uint8Array | null; swaps?: Swap[];
+  persona?: Persona | null; deps: TailorDeps; now: number; layout?: DesignLayout | null; ownDocx?: Uint8Array | null; swaps?: Swap[];
+  template?: TemplateId | null; branded?: boolean; ownPdfSpec?: TemplateSpec | null;
   contact?: "typed" | "confirmed";
 }): Promise<TailorOut> {
   const t0 = performance.now();
@@ -431,8 +434,17 @@ export async function tailorForPosting(o: {
   // G5/B2: no skill, employer, title, date or number the person did not confirm, on any printed line.
   const guard = guardMaterials(documentLines(doc), clean);
   if (!guard.ok) return { ok: false, refused: "truth_audit", reason: `the truth check refused it: ${guard.refused.flatMap((x) => x.reasons).slice(0, 3).join("; ")}`, ms: ms() };
-  const r = o.layout ? await o.deps.render(doc, { layout: o.layout, ownDocx: o.ownDocx ?? null, swaps: o.swaps ?? [] }) : await o.deps.render(doc);
+  // RELEASE 10: their own Word file, with no hand-made swaps, gets the tailored lines from the confirmed facts it was read
+  // from (career_resume_design.ts planOwnEdits); the printed lines are then held to this document (verifyOwnPrinted).
+  const ownFacts = o.layout === "own" && o.ownDocx?.length && !o.swaps ? (clean.facts || []).map((f: any) => ({ id: String(f.id), title: f.title, text: f.text, bullets: f.bullets })) : null;
+  const r = o.layout ? await o.deps.render(doc, { layout: o.layout, ownDocx: o.ownDocx ?? null, swaps: o.swaps, template: o.template ?? null, branded: !!o.branded, ownPdfSpec: o.ownPdfSpec ?? null, ownFacts }) : await o.deps.render(doc);
   if (!r.ok) return { ok: false, refused: "render", reason: `the PDF could not be made: ${r.reason}`, ms: ms() };
+  // The truth check on exactly what prints: a kept file's own lines (its header and headings included) pass the same
+  // materials guard as the document above.
+  if (r.layout === "own" && r.lines?.length) {
+    const g2 = guardMaterials(r.lines, clean);
+    if (!g2.ok) return { ok: false, refused: "truth_audit", reason: `the truth check refused your own file's printed lines: ${g2.refused.flatMap((x) => x.reasons).slice(0, 3).join("; ")}`, ms: ms() };
+  }
   if (!r.ats.pass) return { ok: false, refused: "ats_parse", reason: `it failed the ATS parse check: ${r.ats.reasons.slice(0, 3).join("; ")}`, ms: ms() };
   const path = resumePath(o.userId, r.sha256);
   await o.deps.resumes.put(path, r.pdf);
@@ -452,7 +464,7 @@ export async function tailorForPosting(o: {
     ats: { status: r.ats.status, warnings: r.ats.warnings }, not_on_your_record: (t.requiredGaps || []).map((g: any) => g.requirement),
     lead_not_picked: lead.filter((id) => !selected.has(id)), rendered_in: r.where, ms: ms(), detail: { doc, base, diff, docx: r.docx ?? null, pdf: r.pdf },
     gaps: gapAnalysis({ jd, profile: clean, doc, gaps: t.gaps || [] }), preview: previewText(r.lines ?? ((CareerRender as any).sourceLines(doc) as { text: string }[]).map((l) => l.text)),
-    layout: r.layout ?? "plain", fit: r.fit ? fitRecord(r.fit) : null, ...(r.replaced !== undefined ? { own_layout: { replaced: r.replaced, missing: r.missing ?? [] } } : {}),
+    layout: r.layout ?? "plain", template: r.template ?? null, fit: r.fit ? fitRecord(r.fit) : null, ...(r.replaced !== undefined ? { own_layout: { replaced: r.replaced, missing: r.missing ?? [] } } : {}),
   };
 }
 

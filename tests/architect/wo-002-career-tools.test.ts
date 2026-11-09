@@ -30,6 +30,7 @@ Deno.test("WO-002/T1 the tool set: names, effects, schemas; no external tool yet
   // contacts, outreach drafts and the referral map: WO-033 (drafting is write_own: sending is only by the approval reply and the scheduled run)
   const effects = Object.fromEntries(tools.map((t) => [t.name, t.effect]));
   eq(effects, {
+    draft_followup: "read", // a draft only: nothing is stored or sent (spec B.6); sending needs its own approval (listed first: the tool set's order)
     remember_instruction: "write_own", forget_instruction: "write_own", get_memory: "read",
     get_profile: "read", add_profile_fact: "write_own", confirm_profile_fact: "write_own", read_resume: "write_own", correct_profile_fact: "write_own",
     get_situation: "read", list_applications: "read", track_application: "write_own", queue_applications: "write_own", get_posting: "read", search_jobs: "read",
@@ -40,7 +41,6 @@ Deno.test("WO-002/T1 the tool set: names, effects, schemas; no external tool yet
     contact_list: "read", verify_contacts: "write_own", record_list_cost: "write_own", draft_outreach: "write_own",
     set_outreach_signature: "write_own", referral_map: "read",
     brief_from_invite: "write_own", set_weekly_digest: "write_own",
-    draft_followup: "read", // a draft only: nothing is stored or sent (spec B.6); sending needs its own approval
   });
   for (const t of tools) {
     assert(t.description.length >= 20 && t.description.length <= 400, `${t.name}: a real description`);

@@ -2,9 +2,9 @@
 // for every row of docs/architect/specs/R10-COVERAGE.md, whether that criterion holds right now:
 //   1. the coverage check (scripts/r10-coverage-check.ts): every spec id has a row;
 //   2. the gate (bash scripts/gate.sh), unless --no-gate: rows that name `gate:<test>` pass only when the gate passed;
-//   3. the R10 acceptance suite, conformance included: every r10-*.test.ts under tests/architect/pending/r10-app-layer/ and
+//   3. the R10 acceptance suite (then 3b, the R-4 DOCX render with LibreOffice), conformance included: every r10-*.test.ts under tests/architect/pending/r10-app-layer/ and
 //      tests/architect/, evidence to artifacts/r10-loop/<run>/; a row's `file::name prefix` checks must all have PASSed;
-//   4. with --live --sha <deployed sha>, after a deploy: the live replay (scripts/launch/r10-live-replay.ts) against production,
+//   4. with --live --sha <deployed sha>, after a deploy: the live replay, then its --smoke mode, (scripts/launch/r10-live-replay.ts) against production,
 //      which keeps its own $1 guard and FAILs on any model call that is not claude-sonnet-5-5; a row's `live:<turn>` steps must
 //      all have PASSed. It uses only the secrets r10-live-replay.ts names (SUPABASE_PROJECT_REF, SUPABASE_ACCESS_TOKEN,
 //      SUPABASE_DB_URL, TELEGRAM_BOT_TOKEN); run it only where those are set and the owner or architect means to.
@@ -47,6 +47,30 @@ const evidenceDir = `${OUT}/evidence`;
 const suite = files.length ? await sh("R10 acceptance suite", [Deno.execPath(), "test", "-A", "--no-check", "--import-map=tests/flow/supabase-npm.json", ...files.sort()], { R10_EVIDENCE_DIR: evidenceDir }) : -1;
 interface Rec { item: number; test: string; file: string; outcome: string; why?: string; reply?: string; scenario?: string }
 const recs: Rec[] = await Deno.readTextFile(`${evidenceDir}/evidence.jsonl`).then((t) => t.split("\n").filter(Boolean).map((l) => JSON.parse(l)), () => []);
+// 3b. R-4 DOCX render (architect, 2026-11-09): every DOCX the suite delivered is rendered with LibreOffice headless
+// (soffice --convert-to pdf), then given the same checks as the PDF: one page by pdfinfo, the person's name in pdftotext's text.
+// Without soffice the step is BLOCKED (the owner opens the DOCX); it never passes on the DOCX's text alone.
+const SOFFICE = ["soffice", "libreoffice"].find((b) => { try { return new Deno.Command("which", { args: [b], stdout: "null", stderr: "null" }).outputSync().success; } catch { return false; } });
+const docxRender: { v: "PASS" | "FAIL" | "BLOCKED"; why: string } = await (async () => {
+  if (!SOFFICE) return { v: "BLOCKED", why: "soffice is not installed here: the owner opens the DOCX" };
+  const docs = [...new Set((recs as (Rec & { files?: string[] })[]).flatMap((r) => r.files ?? []).filter((f) => /\.docx$/i.test(f)))];
+  if (!docs.length) return { v: "FAIL", why: "the suite delivered no DOCX to render" };
+  const name = (await import("../tests/architect/helpers/r10_turns.ts")).INTAKE_NAME;
+  const outDir = `${OUT}/docx-render`;
+  await Deno.mkdir(outDir, { recursive: true });
+  for (const d of docs) {
+    const conv = await new Deno.Command(SOFFICE, { args: ["--headless", "--convert-to", "pdf", "--outdir", outDir, d], stdout: "null", stderr: "piped" }).output();
+    const pdf = `${outDir}/${d.split("/").pop()!.replace(/\.docx$/i, ".pdf")}`;
+    if (!conv.success || !(await Deno.stat(pdf).then(() => true, () => false))) return { v: "FAIL", why: `${d}: LibreOffice could not render it` };
+    const run = async (b: string, a: string[]) => new TextDecoder().decode((await new Deno.Command(b, { args: a, stdout: "piped", stderr: "null" }).output()).stdout);
+    const pages = Number(/^Pages:\s+(\d+)/m.exec(await run("pdfinfo", [pdf]))?.[1] ?? 0);
+    const text = await run("pdftotext", ["-layout", pdf, "-"]);
+    if (pages !== 1) return { v: "FAIL", why: `${d}: renders to ${pages} pages, not one` };
+    if (!text.includes(name)) return { v: "FAIL", why: `${d}: the rendered page does not carry the person's name` };
+  }
+  return { v: "PASS", why: `${docs.length} DOCX rendered to one page each (${outDir})` };
+})();
+console.log(`== DOCX render: ${docxRender.v} ${docxRender.why}`);
 // 4. live
 interface LiveCheck { item: number; turn: string; check: string; status: string; detail: string }
 let live: { outcome: string; checks: LiveCheck[]; transcript?: { turn: string; text: string; reply: string }[] } | null = null;
@@ -56,6 +80,10 @@ if (LIVE) {
   if (exists) {
     await sh("live replay", [Deno.execPath(), "run", "-A", "--import-map=tests/flow/supabase-npm.json", "scripts/launch/r10-live-replay.ts", "--sha", SHA, "--out", `${OUT}/live`, "--cleanup-stale"]);
     live = await Deno.readTextFile(`${OUT}/live/r10-live-replay.json`).then((t) => JSON.parse(t), () => null);
+    // The smoke (File link, PDF bytes, inbound path) is its own mode of the same script; its checks are the rows' live:smoke steps.
+    await sh("live smoke", [Deno.execPath(), "run", "-A", "--import-map=tests/flow/supabase-npm.json", "scripts/launch/r10-live-replay.ts", "--smoke", "--sha", SHA, "--out", `${OUT}/live-smoke`]);
+    const smoke = await Deno.readTextFile(`${OUT}/live-smoke/r10-live-replay.json`).then((t) => JSON.parse(t), () => null);
+    if (live && smoke) live.checks.push(...smoke.checks.filter((c: LiveCheck) => c.turn === "smoke"));
   } else console.log("   the live replay script is not on this commit yet: every live step is FAIL");
 }
 
@@ -78,6 +106,7 @@ const matrix = await Deno.readTextFile(`${ROOT}/docs/architect/specs/R10-COVERAG
 const rows = matrix.split("\n").filter((l) => /^\| [A-Z]/.test(l) && !/^\| id \|/.test(l)).map((l) => l.slice(1, -1).split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, "|")));
 type Verdict = { v: "PASS" | "FAIL" | "NOT_RUN" | "PENDING_LIVE"; why: string };
 function testRef(ref: string): Verdict {
+  if (ref === "docx:render") return docxRender.v === "PASS" ? { v: "PASS", why: "" } : { v: docxRender.v === "BLOCKED" ? "NOT_RUN" : "FAIL", why: `docx:render ${docxRender.v}: ${docxRender.why}` };
   if (ref.startsWith("gate:")) return gate === "PASS" ? { v: "PASS", why: "" } : { v: gate === "FAIL" ? "FAIL" : "NOT_RUN", why: `gate ${gate} (${ref.slice(5)})` };
   const [file, prefix = ""] = ref.split("::");
   const hits = recs.filter((r) => r.file === file && r.item !== 0 && (r.test.startsWith(prefix) || r.test.startsWith(`[post-reset baseline] ${prefix}`)));
@@ -107,6 +136,7 @@ for (const [id, crit, , tests, liveCol, status, note] of rows) {
   else {
     const vs = [...tests.split(";").map((s) => s.trim()).filter(Boolean).map(testRef), ...liveCol.split(";").map((s) => s.trim()).filter(Boolean).map(liveRef)];
     const first = (k: string) => vs.find((x) => x.v === k);
+    if (vs.length && vs.every((x) => x.v !== "FAIL") && tests.includes("docx:render") && docxRender.v === "BLOCKED") { verdict = "BLOCKED"; why = `docx:render: ${docxRender.why}`; out.push({ id, verdict, why }); continue; }
     if (status === "live-only" && !LIVE) { verdict = "PENDING_LIVE"; why = liveCol; }
     else if (first("FAIL")) { verdict = "FAIL"; why = first("FAIL")!.why; }
     else if (first("NOT_RUN")) { verdict = "FAIL"; why = first("NOT_RUN")!.why; }

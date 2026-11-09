@@ -4,7 +4,7 @@
 // (we pace at 150 ms or more through WebGate). Tests use fixtures; nothing here fetches unless a WebGate is passed in.
 import type { Candidate, Provenance } from "../types.ts";
 import { cleanName } from "../types.ts";
-import { SiteRule, WebGate } from "../web_gate.ts";
+import { type SiteRule, type WebGate } from "../web_gate.ts";
 
 export const SEC_LICENSE = "SEC EDGAR public filings (sec.gov). Public record; reuse is subject to sec.gov Privacy & Security / Accessing EDGAR Data policy (declared User-Agent, <10 requests/second). Names and roles only.";
 export const secRules = (reviewedOn: string, reviewedBy: string): SiteRule[] => ["www.sec.gov", "data.sec.gov"].map((host) => ({

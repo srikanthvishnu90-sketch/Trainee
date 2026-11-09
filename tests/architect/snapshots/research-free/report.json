@@ -1,0 +1,1035 @@
+{
+ "at": "2026-11-08T15:00:00.000Z",
+ "seed": 20261108,
+ "pass": 30,
+ "total": 30,
+ "rows": [
+  {
+   "id": "F-RE-091",
+   "family": "research.employer",
+   "style": "typo",
+   "question": "is Silverpine Robotics a godo pace to start? give me a file",
+   "format": "file",
+   "file": true,
+   "sources": 5,
+   "summary": 5,
+   "gaps": [
+    "SEC EDGAR has no 10-K for Silverpine Robotics (it may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0116-silverpineroboticsasanemployer.e2e.test/",
+    "https://boards-api.greenhouse.io/v1/boards/silverpinerobotics/jobs",
+    "https://en.wikipedia.org/wiki/Silverpine_Robotics",
+    "https://www.wikidata.org/wiki/Special:EntityData/Q99000101.json",
+    "https://r0116-silverpineroboticsasanemployer.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
+   "dropped": 0,
+   "notes": [
+    "no 10-K on SEC EDGAR for Silverpine Robotics",
+    "4 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-091-390.png",
+    "tests/architect/snapshots/research-free/F-RE-091-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-001",
+   "family": "research.market",
+   "style": "slang",
+   "question": "yo research the new grad software engineering job market in New York and give me a file no cap",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [],
+   "basis": [],
+   "cited": [
+    "https://r0026-newgradsoftwareengineeringjobm.e2e.test/",
+    "https://r0026-newgradsoftwareengineeringjobm.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-001-390.png",
+    "tests/architect/snapshots/research-free/F-RE-001-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-141",
+   "family": "research.pay",
+   "style": "plain",
+   "question": "research software engineer pay in New York and give me a file",
+   "format": "file",
+   "file": true,
+   "sources": 6,
+   "summary": 5,
+   "gaps": [],
+   "basis": [
+    "Pay figures use BLS occupation 15-1252 (software developers), matched from \"software engineer\" with Trainee's table of BLS job titles, and the New York metro area (CBSA 35620)."
+   ],
+   "cited": [
+    "https://www.bls.gov/oes/current/oes151252.htm",
+    "https://www.bls.gov/oes/current/oes_35620.htm",
+    "https://www.bls.gov/ooh/computer-and-information-technology/software-developers.htm",
+    "https://data.usajobs.gov/api/historicjoa?PositionSeries=2210&StartPositionOpenDate=2026-08-10",
+    "https://r0166-entrylevelsoftwareengineerpayi.e2e.test/",
+    "https://r0166-entrylevelsoftwareengineerpayi.e2e.test/about"
+   ],
+   "thesis_cite": [
+    5
+   ],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-141-390.png",
+    "tests/architect/snapshots/research-free/F-RE-141-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-181",
+   "family": "research.compare",
+   "style": "typo",
+   "question": "compare Oakridge Media and Kestrel Analytics as placees to start my carer and give me a file",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Oakridge Media or Kestrel Analytics, so open roles were not counted.",
+    "Wikipedia has no company article found for Oakridge Media or Kestrel Analytics.",
+    "SEC EDGAR has no 10-K for Oakridge Media or Kestrel Analytics (they may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0206-oakridgemediaandkestrelanalyti.e2e.test/",
+    "https://r0206-oakridgemediaandkestrelanalyti.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
+   "dropped": 0,
+   "notes": [
+    "no 10-K on SEC EDGAR for Oakridge Media",
+    "no 10-K on SEC EDGAR for Kestrel Analytics",
+    "5 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-181-390.png",
+    "tests/architect/snapshots/research-free/F-RE-181-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-092",
+   "family": "research.employer",
+   "style": "es",
+   "question": "investiga Delta Bay Freight como empleador para recién graduados y mándame un archivo",
+   "format": "file",
+   "file": true,
+   "sources": 5,
+   "summary": 5,
+   "gaps": [
+    "Wikipedia has no company article found for Delta Bay Freight.",
+    "SEC EDGAR has no 10-K for Delta Bay Freight (it may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0117-deltabayfreightasanemployerfor.e2e.test/",
+    "https://api.lever.co/v0/postings/deltabayfreight?mode=json",
+    "https://api.github.com/orgs/deltabayfreight",
+    "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Delta+Bay+Freight%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "https://r0117-deltabayfreightasanemployerfor.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
+   "dropped": 0,
+   "notes": [
+    "no 10-K on SEC EDGAR for Delta Bay Freight",
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-092-390.png",
+    "tests/architect/snapshots/research-free/F-RE-092-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-002",
+   "family": "research.market",
+   "style": "hi",
+   "question": "Austin mein new grad software engineering ka job market research karke file bhejo",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [],
+   "basis": [],
+   "cited": [
+    "https://r0027-newgradsoftwareengineeringjobm.e2e.test/",
+    "https://r0027-newgradsoftwareengineeringjobm.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-002-390.png",
+    "tests/architect/snapshots/research-free/F-RE-002-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-142",
+   "family": "research.pay",
+   "style": "texting",
+   "question": "research software engineer pay in Austin and give me a file pls",
+   "format": "file",
+   "file": true,
+   "sources": 6,
+   "summary": 5,
+   "gaps": [],
+   "basis": [
+    "Pay figures use BLS occupation 15-1252 (software developers), matched from \"software engineer\" with Trainee's table of BLS job titles, and the Austin metro area (CBSA 12420)."
+   ],
+   "cited": [
+    "https://www.bls.gov/oes/current/oes151252.htm",
+    "https://www.bls.gov/oes/current/oes_12420.htm",
+    "https://www.bls.gov/ooh/computer-and-information-technology/software-developers.htm",
+    "https://data.usajobs.gov/api/historicjoa?PositionSeries=2210&StartPositionOpenDate=2026-08-10",
+    "https://r0167-entrylevelsoftwareengineerpayi.e2e.test/",
+    "https://r0167-entrylevelsoftwareengineerpayi.e2e.test/about"
+   ],
+   "thesis_cite": [
+    5
+   ],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-142-390.png",
+    "tests/architect/snapshots/research-free/F-RE-142-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-182",
+   "family": "research.compare",
+   "style": "es",
+   "question": "compara Kestrel Media y Ironleaf Software para empezar mi carrera y dame un archivo",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Kestrel Media or Ironleaf Software, so open roles were not counted.",
+    "Wikipedia has no company article found for Kestrel Media or Ironleaf Software.",
+    "SEC EDGAR has no 10-K for Kestrel Media or Ironleaf Software (they may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0207-kestrelmediaandironleafsoftwar.e2e.test/",
+    "https://r0207-kestrelmediaandironleafsoftwar.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
+   "dropped": 0,
+   "notes": [
+    "no 10-K on SEC EDGAR for Kestrel Media",
+    "no 10-K on SEC EDGAR for Ironleaf Software",
+    "5 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-182-390.png",
+    "tests/architect/snapshots/research-free/F-RE-182-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-093",
+   "family": "research.employer",
+   "style": "plain",
+   "question": "is Hollow Oak Logistics a good place to start? give me a file",
+   "format": "file",
+   "file": true,
+   "sources": 5,
+   "summary": 5,
+   "gaps": [
+    "Wikipedia has no company article found for Hollow Oak Logistics."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0118-hollowoaklogisticsasanemployer.e2e.test/",
+    "https://api.ashbyhq.com/posting-api/job-board/hollowoaklogistics",
+    "https://www.sec.gov/Archives/edgar/data/9990001/000999000126000002/hoak-10k.htm",
+    "https://www.sec.gov/Archives/edgar/data/9990001/000999000126000007/hoak-8k.htm",
+    "https://r0118-hollowoaklogisticsasanemployer.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
+   "dropped": 0,
+   "notes": [
+    "4 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-093-390.png",
+    "tests/architect/snapshots/research-free/F-RE-093-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-003",
+   "family": "research.market",
+   "style": "texting",
+   "question": "make me a file on data science hiring in Denver 🙏",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [],
+   "basis": [],
+   "cited": [
+    "https://r0028-datasciencejobmarketindenver.e2e.test/",
+    "https://r0028-datasciencejobmarketindenver.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-003-390.png",
+    "tests/architect/snapshots/research-free/F-RE-003-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-143",
+   "family": "research.pay",
+   "style": "plain",
+   "question": "what do entry-level financial analysts earn in Atlanta? put it in a file with sources",
+   "format": "file",
+   "file": true,
+   "sources": 6,
+   "summary": 5,
+   "gaps": [],
+   "basis": [
+    "Pay figures use BLS occupation 13-2051 (financial analysts), matched from \"financial analysts\" with Trainee's table of BLS job titles, and the Atlanta metro area (CBSA 12060)."
+   ],
+   "cited": [
+    "https://www.bls.gov/oes/current/oes132051.htm",
+    "https://www.bls.gov/oes/current/oes_12060.htm",
+    "https://www.bls.gov/ooh/business-and-financial/financial-analysts.htm",
+    "https://data.usajobs.gov/api/historicjoa?PositionSeries=1160&StartPositionOpenDate=2026-08-10",
+    "https://r0168-entrylevelfinancialanalystpayi.e2e.test/",
+    "https://r0168-entrylevelfinancialanalystpayi.e2e.test/about"
+   ],
+   "thesis_cite": [
+    5
+   ],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-143-390.png",
+    "tests/architect/snapshots/research-free/F-RE-143-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-183",
+   "family": "research.compare",
+   "style": "plain",
+   "question": "compare Lumina Software and Keystone Labs as places to start my career and give me a file",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Lumina Software or Keystone Labs, so open roles were not counted.",
+    "Wikipedia has no company article found for Lumina Software or Keystone Labs.",
+    "SEC EDGAR has no 10-K for Lumina Software or Keystone Labs (they may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0208-luminasoftwareandkeystonelabsa.e2e.test/",
+    "https://r0208-luminasoftwareandkeystonelabsa.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
+   "dropped": 0,
+   "notes": [
+    "no 10-K on SEC EDGAR for Lumina Software",
+    "no 10-K on SEC EDGAR for Keystone Labs",
+    "5 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-183-390.png",
+    "tests/architect/snapshots/research-free/F-RE-183-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-094",
+   "family": "research.employer",
+   "style": "es",
+   "question": "investiga Redwood Capital como empleador para recién graduados y mándame un archivo",
+   "format": "file",
+   "file": true,
+   "sources": 3,
+   "summary": 5,
+   "gaps": [
+    "Wikipedia has no company article found for Redwood Capital.",
+    "SEC EDGAR has no 10-K for Redwood Capital (it may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0119-redwoodcapitalasanemployerforn.e2e.test/",
+    "https://api.smartrecruiters.com/v1/companies/redwoodcapital/postings",
+    "https://r0119-redwoodcapitalasanemployerforn.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
+   "dropped": 0,
+   "notes": [
+    "no 10-K on SEC EDGAR for Redwood Capital",
+    "4 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-094-390.png",
+    "tests/architect/snapshots/research-free/F-RE-094-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-004",
+   "family": "research.market",
+   "style": "plain",
+   "question": "make me a file on financial analyst hiring in Chicago",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [],
+   "basis": [],
+   "cited": [
+    "https://r0029-financialanalystjobmarketinchi.e2e.test/",
+    "https://r0029-financialanalystjobmarketinchi.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-004-390.png",
+    "tests/architect/snapshots/research-free/F-RE-004-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-144",
+   "family": "research.pay",
+   "style": "texting",
+   "question": "research software engineer pay in Atlanta and give me a file",
+   "format": "file",
+   "file": true,
+   "sources": 6,
+   "summary": 5,
+   "gaps": [],
+   "basis": [
+    "Pay figures use BLS occupation 15-1252 (software developers), matched from \"software engineer\" with Trainee's table of BLS job titles, and the Atlanta metro area (CBSA 12060)."
+   ],
+   "cited": [
+    "https://www.bls.gov/oes/current/oes151252.htm",
+    "https://www.bls.gov/oes/current/oes_12060.htm",
+    "https://www.bls.gov/ooh/computer-and-information-technology/software-developers.htm",
+    "https://data.usajobs.gov/api/historicjoa?PositionSeries=2210&StartPositionOpenDate=2026-08-10",
+    "https://r0169-entrylevelsoftwareengineerpayi.e2e.test/",
+    "https://r0169-entrylevelsoftwareengineerpayi.e2e.test/about"
+   ],
+   "thesis_cite": [
+    5
+   ],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-144-390.png",
+    "tests/architect/snapshots/research-free/F-RE-144-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-184",
+   "family": "research.compare",
+   "style": "hi",
+   "question": "Brightline Security aur Corvid Foods ko career start ke liye compare karo, file do",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Brightline Security or Corvid Foods, so open roles were not counted.",
+    "Wikipedia has no company article found for Brightline Security or Corvid Foods.",
+    "SEC EDGAR has no 10-K for Brightline Security or Corvid Foods (they may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0209-brightlinesecurityandcorvidfoo.e2e.test/",
+    "https://r0209-brightlinesecurityandcorvidfoo.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
+   "dropped": 0,
+   "notes": [
+    "no 10-K on SEC EDGAR for Brightline Security",
+    "no 10-K on SEC EDGAR for Corvid Foods",
+    "5 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-184-390.png",
+    "tests/architect/snapshots/research-free/F-RE-184-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-095",
+   "family": "research.employer",
+   "style": "texting",
+   "question": "research Truecourse Systems as an employer 4 new grads and send me a file asap",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Truecourse Systems, so open roles were not counted.",
+    "Wikipedia has no company article found for Truecourse Systems.",
+    "SEC EDGAR has no 10-K for Truecourse Systems (it may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0120-truecoursesystemsasanemployerf.e2e.test/",
+    "https://r0120-truecoursesystemsasanemployerf.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
+   "dropped": 0,
+   "notes": [
+    "no 10-K on SEC EDGAR for Truecourse Systems",
+    "4 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-095-390.png",
+    "tests/architect/snapshots/research-free/F-RE-095-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-005",
+   "family": "research.market",
+   "style": "hi",
+   "question": "Seattle mein data analyst ka job market research karke file bhejo",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [],
+   "basis": [],
+   "cited": [
+    "https://r0030-dataanalystjobmarketinseattle.e2e.test/",
+    "https://r0030-dataanalystjobmarketinseattle.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-005-390.png",
+    "tests/architect/snapshots/research-free/F-RE-005-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-145",
+   "family": "research.pay",
+   "style": "texting",
+   "question": "research software engineer pay in San Francisco and give me a file thx",
+   "format": "file",
+   "file": true,
+   "sources": 6,
+   "summary": 5,
+   "gaps": [],
+   "basis": [
+    "Pay figures use BLS occupation 15-1252 (software developers), matched from \"software engineer\" with Trainee's table of BLS job titles, and the San Francisco metro area (CBSA 41860)."
+   ],
+   "cited": [
+    "https://www.bls.gov/oes/current/oes151252.htm",
+    "https://www.bls.gov/oes/current/oes_41860.htm",
+    "https://www.bls.gov/ooh/computer-and-information-technology/software-developers.htm",
+    "https://data.usajobs.gov/api/historicjoa?PositionSeries=2210&StartPositionOpenDate=2026-08-10",
+    "https://r0170-entrylevelsoftwareengineerpayi.e2e.test/",
+    "https://r0170-entrylevelsoftwareengineerpayi.e2e.test/about"
+   ],
+   "thesis_cite": [
+    5
+   ],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-145-390.png",
+    "tests/architect/snapshots/research-free/F-RE-145-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-185",
+   "family": "research.compare",
+   "style": "texting",
+   "question": "compare Silverpine Labs and Fernhill Bio as places to start my career and give me a file asap",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Silverpine Labs or Fernhill Bio, so open roles were not counted.",
+    "Wikipedia has no company article found for Silverpine Labs or Fernhill Bio.",
+    "SEC EDGAR has no 10-K for Silverpine Labs or Fernhill Bio (they may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0210-silverpinelabsandfernhillbioas.e2e.test/",
+    "https://r0210-silverpinelabsandfernhillbioas.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
+   "dropped": 0,
+   "notes": [
+    "no 10-K on SEC EDGAR for Silverpine Labs",
+    "no 10-K on SEC EDGAR for Fernhill Bio",
+    "5 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-185-390.png",
+    "tests/architect/snapshots/research-free/F-RE-185-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-096",
+   "family": "research.employer",
+   "style": "es",
+   "question": "investiga Lumina Insurance como empleador para recién graduados y mándame un archivo",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Lumina Insurance, so open roles were not counted.",
+    "Wikipedia has no company article found for Lumina Insurance.",
+    "SEC EDGAR has no 10-K for Lumina Insurance (it may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0121-luminainsuranceasanemployerfor.e2e.test/",
+    "https://r0121-luminainsuranceasanemployerfor.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
+   "dropped": 0,
+   "notes": [
+    "no 10-K on SEC EDGAR for Lumina Insurance",
+    "4 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-096-390.png",
+    "tests/architect/snapshots/research-free/F-RE-096-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-006",
+   "family": "research.market",
+   "style": "plain",
+   "question": "how's the frontend engineering market in Denver? put it in a file with sources",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [],
+   "basis": [],
+   "cited": [
+    "https://r0031-frontendengineeringjobmarketin.e2e.test/",
+    "https://r0031-frontendengineeringjobmarketin.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-006-390.png",
+    "tests/architect/snapshots/research-free/F-RE-006-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-146",
+   "family": "research.pay",
+   "style": "hi",
+   "question": "New York mein entry-level data scientist kitna kamate hain? sources ke saath file do",
+   "format": "file",
+   "file": true,
+   "sources": 6,
+   "summary": 5,
+   "gaps": [],
+   "basis": [
+    "Pay figures use BLS occupation 15-2051 (data scientists), matched from \"data scientist\" with Trainee's table of BLS job titles, and the New York metro area (CBSA 35620)."
+   ],
+   "cited": [
+    "https://www.bls.gov/oes/current/oes152051.htm",
+    "https://www.bls.gov/oes/current/oes_35620.htm",
+    "https://www.bls.gov/ooh/math/data-scientists.htm",
+    "https://data.usajobs.gov/api/historicjoa?PositionSeries=1560&StartPositionOpenDate=2026-08-10",
+    "https://r0171-entryleveldatascientistpayinne.e2e.test/",
+    "https://r0171-entryleveldatascientistpayinne.e2e.test/about"
+   ],
+   "thesis_cite": [
+    5
+   ],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-146-390.png",
+    "tests/architect/snapshots/research-free/F-RE-146-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-186",
+   "family": "research.compare",
+   "style": "typo",
+   "question": "compare Quasar Bank and Hollow Oak Freight as placces to start my carreer and give me a file",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Quasar Bank or Hollow Oak Freight, so open roles were not counted.",
+    "Wikipedia has no company article found for Quasar Bank or Hollow Oak Freight.",
+    "SEC EDGAR has no 10-K for Quasar Bank or Hollow Oak Freight (they may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0211-quasarbankandhollowoakfreighta.e2e.test/",
+    "https://r0211-quasarbankandhollowoakfreighta.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
+   "dropped": 0,
+   "notes": [
+    "no 10-K on SEC EDGAR for Quasar Bank",
+    "no 10-K on SEC EDGAR for Hollow Oak Freight",
+    "5 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-186-390.png",
+    "tests/architect/snapshots/research-free/F-RE-186-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-097",
+   "family": "research.employer",
+   "style": "plain",
+   "question": "is Quarry Energy a good place to start? give me a file",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Quarry Energy, so open roles were not counted.",
+    "Wikipedia has no company article found for Quarry Energy.",
+    "SEC EDGAR has no 10-K for Quarry Energy (it may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0122-quarryenergyasanemployerfornew.e2e.test/",
+    "https://r0122-quarryenergyasanemployerfornew.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
+   "dropped": 0,
+   "notes": [
+    "no 10-K on SEC EDGAR for Quarry Energy",
+    "4 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-097-390.png",
+    "tests/architect/snapshots/research-free/F-RE-097-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-007",
+   "family": "research.market",
+   "style": "typo",
+   "question": "make me a fiel on financial analyst hirnig in Chicago",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [],
+   "basis": [],
+   "cited": [
+    "https://r0032-financialanalystjobmarketinchi.e2e.test/",
+    "https://r0032-financialanalystjobmarketinchi.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-007-390.png",
+    "tests/architect/snapshots/research-free/F-RE-007-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-147",
+   "family": "research.pay",
+   "style": "es",
+   "question": "¿cuánto gana un data scientist junior en Atlanta? ponlo en un archivo con fuentes",
+   "format": "file",
+   "file": true,
+   "sources": 6,
+   "summary": 5,
+   "gaps": [],
+   "basis": [
+    "Pay figures use BLS occupation 15-2051 (data scientists), matched from \"data scientist\" with Trainee's table of BLS job titles, and the Atlanta metro area (CBSA 12060)."
+   ],
+   "cited": [
+    "https://www.bls.gov/oes/current/oes152051.htm",
+    "https://www.bls.gov/oes/current/oes_12060.htm",
+    "https://www.bls.gov/ooh/math/data-scientists.htm",
+    "https://data.usajobs.gov/api/historicjoa?PositionSeries=1560&StartPositionOpenDate=2026-08-10",
+    "https://r0172-entryleveldatascientistpayinat.e2e.test/",
+    "https://r0172-entryleveldatascientistpayinat.e2e.test/about"
+   ],
+   "thesis_cite": [
+    5
+   ],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-147-390.png",
+    "tests/architect/snapshots/research-free/F-RE-147-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-187",
+   "family": "research.compare",
+   "style": "plain",
+   "question": "compare Willow Energy and Elmstead Health as places to start my career and give me a file",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Willow Energy or Elmstead Health, so open roles were not counted.",
+    "Wikipedia has no company article found for Willow Energy or Elmstead Health.",
+    "SEC EDGAR has no 10-K for Willow Energy or Elmstead Health (they may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0212-willowenergyandelmsteadhealtha.e2e.test/",
+    "https://r0212-willowenergyandelmsteadhealtha.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
+   "dropped": 0,
+   "notes": [
+    "no 10-K on SEC EDGAR for Willow Energy",
+    "no 10-K on SEC EDGAR for Elmstead Health",
+    "5 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-187-390.png",
+    "tests/architect/snapshots/research-free/F-RE-187-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-098",
+   "family": "research.employer",
+   "style": "texting",
+   "question": "research Delta Bay Insurance as an employer 4 new grads and send me a file 🙏",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [
+    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Delta Bay Insurance, so open roles were not counted.",
+    "Wikipedia has no company article found for Delta Bay Insurance.",
+    "SEC EDGAR has no 10-K for Delta Bay Insurance (it may be private)."
+   ],
+   "basis": [],
+   "cited": [
+    "https://r0123-deltabayinsuranceasanemployerf.e2e.test/",
+    "https://r0123-deltabayinsuranceasanemployerf.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
+   "dropped": 0,
+   "notes": [
+    "no 10-K on SEC EDGAR for Delta Bay Insurance",
+    "4 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-098-390.png",
+    "tests/architect/snapshots/research-free/F-RE-098-1280.png"
+   ],
+   "pass": true
+  },
+  {
+   "id": "F-RE-008",
+   "family": "research.market",
+   "style": "plain",
+   "question": "research the financial analyst job market in Seattle and give me a file",
+   "format": "file",
+   "file": true,
+   "sources": 2,
+   "summary": 3,
+   "gaps": [],
+   "basis": [],
+   "cited": [
+    "https://r0033-financialanalystjobmarketinsea.e2e.test/",
+    "https://r0033-financialanalystjobmarketinsea.e2e.test/about"
+   ],
+   "thesis_cite": [
+    1
+   ],
+   "dropped": 0,
+   "notes": [
+    "3 page(s) could not be opened and were not used"
+   ],
+   "error": null,
+   "fail": {},
+   "shots": [
+    "tests/architect/snapshots/research-free/F-RE-008-390.png",
+    "tests/architect/snapshots/research-free/F-RE-008-1280.png"
+   ],
+   "pass": true
+  }
+ ]
+}

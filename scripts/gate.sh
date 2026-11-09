@@ -137,6 +137,7 @@ edge_tests=(
   tests/edge/career-ask-once.test.ts
   tests/edge/control-state.test.ts
   tests/edge/fact-quarantine.test.ts
+  tests/edge/reply-rubric.test.ts
 )
 
 portable_test_paths() {

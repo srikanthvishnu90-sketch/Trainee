@@ -1356,7 +1356,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
               // SmartRecruiters public boards by id; any other link by fetching it). The checked time is said in the person's zone.
               // Only when the person asked for open or verified roles (SearchAsk.verify); otherwise each is said to be not re-checked.
               openCheck: f5Ask.verify ? linkChecker(fetch, { userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }) : null,
-              tz: f5Zone?.tz ?? null, want: wantOf(message) }));
+              tz: f5Zone?.tz ?? null, want: f5Ask.want ?? wantOf(message) }));
             // F.1: the blocker question gets the evidenced blocker: a source that could not be read is a connection problem.
             if (!found && f5Said?.explain) out = { ...out, intent: "career_discovery", resultStatus: "blocked", handler: "search_judge",
               reply: "What blocked it: a search connection problem. The job boards could not be read just now, so this says nothing about whether open roles exist. It is not your resume: listing roles never needs a confirmed resume. Nothing was applied for. Ask again in a few minutes and I'll run the same search." };

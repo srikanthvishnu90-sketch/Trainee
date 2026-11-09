@@ -118,6 +118,9 @@ export function searchTextOf(message: string): SearchText {
   if (limits.company) t = t.replace(new RegExp(`(?<![\\p{L}\\p{N}])(?:at|for|with)\\s+${limits.company.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "gu"), " ");
   if (place) t = t.replace(new RegExp(`\\b(?:in|near|around|based in|located in)\\s+${place.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g"), " ").replace(new RegExp(`\\b${place.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g"), " ");
   for (const [k, v] of Object.entries(ALIAS)) if (v === place) t = t.replace(new RegExp(`\\b${k}\\b`, "g"), " ");
+  // R10 WO-C (architect, 2026-11-09): region and area words are the place, never the role ("data analyst area u s", "us analytics").
+  t = t.replace(/(?<![\p{L}\p{N}])(?:in\s+)?(?:the\s+)?(?:u\.\s?s\.?(?:a\.?)?|us|usa|united states|america)(?![\p{L}\p{N}])/gu, " ")
+    .replace(/\b(?:the\s+)?(?:greater\s+)?(?:area|metro(?:politan)?|suburbs?|region|nationwide|anywhere)\b/g, " ");
   const words = t.split(/[^a-z0-9+#-]+/).filter((w) => w && !ROLE_NOISE.has(w) && !/^\d+$/.test(w)).map((w) => EXPAND[w] ?? w);
   return { role: [...new Set(words.join(" ").split(" "))].join(" ").trim(), place, remote, limits };
 }

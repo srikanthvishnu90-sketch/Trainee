@@ -21,7 +21,7 @@ import { careerHandler, SUPABASE_URL, supabaseParity } from "../flow/handler.ts"
 import { anthropicWire } from "./helpers/anthropic_wire.ts";
 import { searchTextOf } from "../../supabase/functions/_shared/posting_constraints.ts";
 import { inMetro, remoteInUs, widenedAsk } from "../../supabase/functions/_shared/search_widen.ts";
-import { checkedAt, studentWindowOf, wantOf } from "../../supabase/functions/_shared/search_shortlist.ts";
+import { arrangementOf, checkedAt, studentWindowOf, wantOf } from "../../supabase/functions/_shared/search_shortlist.ts";
 import { linkChecker } from "../../supabase/functions/_shared/link_check.ts";
 import { personZone } from "../../supabase/functions/_shared/person_zone.ts";
 import { renderFeed } from "../../supabase/functions/_shared/file_page.ts";
@@ -99,6 +99,24 @@ Deno.test("WO-C units: the S1 role is the asked role; S2 widens the last search;
   assertNode.equal(await check({ job_id: "ashby:northbeam:11111111-2222-4333-8444-555555555555" }), "dead");
   assertNode.equal(await check({ job_id: "smartrecruiters:quietco:7441" }), "dead");
   assertNode.ok(seen.includes("https://api.ashbyhq.com/posting-api/job-board/northbeam") && seen.includes("https://api.smartrecruiters.com/v1/companies/quietco/postings/7441"), seen.join(" "));
+  // Architect review (2026-11-09) 6-b: each Ashby board is read once per checker, however many of its postings are checked.
+  assertNode.equal(seen.filter((u) => u.endsWith("/job-board/northbeam")).length, 1, "one read of the Ashby board");
+  const big = { jobs: Array.from({ length: 2000 }, (_, i) => ({ id: `00000000-0000-4000-8000-${String(i).padStart(12, "0")}` })) };
+  let reads = 0;
+  const bigCheck = linkChecker((async () => { reads++; return Response.json(big); }) as unknown as typeof fetch);
+  const t0 = performance.now();
+  for (let i = 0; i < 40; i++) assertNode.equal(await bigCheck({ job_id: `ashby:bigco:00000000-0000-4000-8000-${String(i * 7).padStart(12, "0")}` }), "live");
+  assertNode.equal(reads, 1, "40 postings on one 2,000-job board: one read");
+  assertNode.ok(performance.now() - t0 < 500, `40 checks on one board in under 0.5 s (${Math.round(performance.now() - t0)} ms)`);
+  // 4-c: region and area words never end up in the role; 5-b: a bare "Remote" names no region; 6-c: "U.S." is not a sentence end.
+  assertNode.equal(searchTextOf("Find business analyst roles remote in the U.S.").role, "business analyst");
+  assertNode.equal(searchTextOf("us analytics internships").role, "analytics");
+  assertNode.equal(searchTextOf("data analyst jobs in the Chicago area").role, "data analyst");
+  assertNode.equal(arrangementOf("Remote", ""), "remote, region not stated");
+  assertNode.equal(arrangementOf("Remote - United States", ""), "remote");
+  assertNode.equal(studentWindowOf("Interns work in the U.S. office. Open to students graduating in the U.S. between May 2027 and June 2028. SQL."), "Open to students graduating in the U.S. between May 2027 and June 2028.");
+  // 10: the alert settings' default zone is not a zone the person stated.
+  assertNode.equal(personZone({ alertTz: "America/New_York", location: null }), null);
 });
 
 Deno.test("WO-C fix 8: the shortlist File card carries the student window and the open check, stacked, no wide table", () => {
@@ -133,7 +151,14 @@ Deno.test({
         insert into public.career_watch_kv (user_id, key, value) values ('${ME}', 'career:account', '{"epoch":0,"version":0,"paused":false}'), ('${OTHER}', 'career:account', '{"epoch":0,"version":0,"paused":false}'), ('${F1P}', 'career:account', '{"epoch":0,"version":0,"paused":false}');
         insert into public.career_alert_prefs (user_id, tz, prefs, last_checked_at) values ('${ME}', 'America/Chicago', ${lit(prefs)}::jsonb, now());
         insert into public.career_postings (job_id, provider, board, company, title, location, url, description, first_seen_at, last_seen_at, closed_at) values
-        ${BOARD.map((b) => `(${lit(b.id)}, ${lit(b.id.split(":")[0])}, ${lit(b.id.split(":")[1])}, ${lit(b.co)}, ${lit(b.t)}, ${lit(b.loc)}, ${lit(b.url)}, ${lit(b.d)}, now() - interval '2 days', now(), ${(b as any).closed ? "now()" : "null"})`).join(",\n")};`);
+        ${BOARD.map((b) => `(${lit(b.id)}, ${lit(b.id.split(":")[0])}, ${lit(b.id.split(":")[1])}, ${lit(b.co)}, ${lit(b.t)}, ${lit(b.loc)}, ${lit(b.url)}, ${lit(b.d)}, now() - interval '2 days', now(), ${(b as any).closed ? "now()" : "null"})`).join(",\n")};
+        -- Architect review (2026-11-09) 5/F.1-a: production holds ~13,900 open "data analyst" postings, and the newest 300 held
+        -- none of the Chicago or remote internships. 6,000 newer data analyst postings elsewhere stand in for them here.
+        insert into public.career_postings (job_id, provider, board, company, title, location, url, description, first_seen_at, last_seen_at)
+          select 'greenhouse:noise:' || g, 'greenhouse', 'noise', 'TEST Noise ' || g, case when g % 3 = 0 then 'Data Analyst Intern' else 'Senior Data Analyst' end,
+            (array['Austin, TX', 'Denver, CO', 'Remote - Canada', 'London, UK', 'Seattle, WA'])[1 + g % 5], 'https://boards.greenhouse.io/noise/jobs/' || g,
+            'A data analyst role. SQL and Python.', now() - (g || ' seconds')::interval, now()
+          from generate_series(1, 6000) g;`);
       h = await careerHandler(pg, { me: ME, other: OTHER, f1: F1P });
       const viaDouble = globalThis.fetch, outbound: string[] = [];
       globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
@@ -171,7 +196,7 @@ Deno.test({
         assertNode.match(one, /Student window: "Open to students graduating between December 2026 and June 2028"/);
         assertNode.match(two, /Student window: "Applicants must be currently enrolled in a bachelor's program"/);
         for (const b of [one, two]) {
-          assertNode.match(b, /\n   Checked: open on its application page, [A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d\d [AP]M C[SD]T\.$/, "checked time in the person's zone (Chicago)");
+          assertNode.match(b, /\n   Checked: open on the Greenhouse board, [A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d\d [AP]M C[SD]T\.$/, "checked on its board, the time in the person's zone (Chicago)");
           assertNode.match(b.split("\n")[0], /\(https:\/\/boards\.greenhouse\.io\/(acme|lake)\/jobs\/10[12]\)/, "the application link on the numbered line");
           assertNode.match(b, /\n   Uncertain: your graduation date isn't confirmed, so eligibility isn't decided\./, "a missing fact is named beside the role, never an eligibility verdict");
         }
@@ -202,7 +227,7 @@ Deno.test({
       await t.step("E: an empty search names the scope checked, why nothing qualified, and the most useful widening", async () => {
         const r = await say(h!.chat("other"), "Find me 3 economist internships in Peoria. Show the links.");
         console.log(`--- E reply (${r.intent})\n${r.reply}`);
-        assertNode.match(r.reply, /^I checked economist internships in Peoria, on the live board and the saved snapshot of job boards: none was found/);
+        assertNode.match(r.reply, /^I checked economist internships in Peoria, on the live board \(last refreshed [A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d\d [AP]M UTC\) and the saved snapshot of job boards: none was found/);
         assertNode.match(r.reply, /The most useful widening is remote roles in the US/);
         assertNode.match(r.reply, /nothing was applied for/);
         assertNode.equal(items(r.reply).length, 0);
@@ -217,8 +242,9 @@ Deno.test({
         console.log(`--- F.1 turn 1 (${r1.intent})\n${r1.reply}`);
         assertNode.ok(!/nothing is sent anywhere before your resume is confirmed/i.test(r1.reply), "a search never carries the resume-confirmation tail");
         const list = items(r1.reply);
-        assertNode.ok(list.length >= 3, r1.reply);
-        for (const want of ["Acme Freight", "Prairie Bank", "Northbeam"]) assertNode.ok(r1.reply.includes(want), `${want} | ${r1.reply}`);
+        // "Find 3": three roles, each one that fits the whole scope (three titles, the Chicago area or remote in the US).
+        assertNode.equal(list.length, 3, r1.reply);
+        assertNode.ok(list.every((l) => /Acme Freight|Lakeview Health|Motorway Co|Prairie Bank|Northbeam/.test(l)), r1.reply);
         for (const never of ["Maple Data", "Stale Co", "Quiet Co", "Fulltime Inc"]) assertNode.ok(!r1.reply.includes(never), never);
         const r2 = await say(c, F2);
         console.log(`--- F.1 turn 2 (${r2.intent})\n${r2.reply}`);

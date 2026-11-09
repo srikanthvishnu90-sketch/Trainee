@@ -19,7 +19,8 @@ export function checkedAt(now: number, tz: string | null | undefined): { text: s
 export function arrangementOf(location: string, description: string): string | null {
   const l = lc(location), d = lc(description);
   if (/\bhybrid\b/.test(l) || /\bhybrid\b/.test(d)) return "hybrid";
-  if (/\bremote\b/.test(l)) return "remote";
+  // A bare "Remote" names no region (about 10,700 open postings, many on EU boards): said so, never read as the US.
+  if (/\bremote\b/.test(l)) return /^\s*(?:fully\s+)?remote\s*$/.test(l) ? "remote, region not stated" : "remote";
   if (/\b(?:on-?site|in[- ]office|in[- ]person)\b/.test(l) || /\b(?:on-?site|in[- ]office|in[- ]person)\b/.test(d)) return "on-site";
   if (/\b(?:fully remote|100% remote|remote[- ]first)\b/.test(d)) return "remote";
   return null;
@@ -29,9 +30,11 @@ export function arrangementOf(location: string, description: string): string | n
 const WINDOW = /\b(?:graduat\w*|enrolled|pursuing (?:a|an|your)?\s*(?:bachelor|master|degree|ba|bs|ms)\w*|class of 20\d\d|currently a student|current students?|rising (?:junior|senior|sophomore)s?|returning to (?:school|university|college)|expected (?:graduation|to graduate))\b/i;
 export function studentWindowOf(description: string): string | null {
   const text = String(description ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-  const s = text.split(/(?<=[.!?;])\s+/).find((x) => WINDOW.test(x));
+  // Abbreviations ("U.S.", "e.g.", "Ph.D.") are not sentence ends: their dots are held while the text is split.
+  const held = text.replace(/\b(?:[A-Za-z]\.){2,}/g, (m) => m.replace(/\./g, "\u0000")).replace(/\b(?:St|Dr|Mr|Ms|Jr|Sr|vs|approx)\./g, (m) => m.replace(".", "\u0000"));
+  const s = held.split(/(?<=[.!?;])\s+/).find((x) => WINDOW.test(x.replace(/\u0000/g, ".")));
   if (!s) return null;
-  const q = s.trim().replace(/[;]$/, ".");
+  const q = s.replace(/\u0000/g, ".").trim().replace(/[;]$/, ".");
   return q.length > 170 ? `${q.slice(0, 167).replace(/\s+\S*$/, "")}...` : q;
 }
 

@@ -31,20 +31,26 @@ export function linkChecker(f: typeof fetch, o: { timeoutMs?: number; userAgent?
       return r;
     } finally { clearTimeout(timer); }
   };
+  const ashbyBoards = new Map<string, Promise<Set<string> | "dead" | "unknown">>();
+  const readAshby = async (url: string): Promise<Set<string> | "dead" | "unknown"> => {
+    try {
+      const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), timeoutMs);
+      try {
+        const r = await f(url, { method: "GET", signal: ctl.signal, headers: { "user-agent": ua, accept: "application/json" } });
+        if (r.status === 404) { await r.body?.cancel().catch(() => {}); return "dead"; }
+        if (!r.ok) { await r.body?.cancel().catch(() => {}); return "unknown"; }
+        const body: any = await r.json().catch(() => null);
+        return Array.isArray(body?.jobs) ? new Set(body.jobs.map((j: any) => String(j?.id ?? "").toLowerCase())) : "unknown";
+      } finally { clearTimeout(timer); }
+    } catch { return "unknown"; }
+  };
   return async (job) => {
     const ashby = ashbyBoardFor(String(job.job_id ?? ""));
     if (ashby) {
-      try {
-        const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), timeoutMs);
-        try {
-          const r = await f(ashby.url, { method: "GET", signal: ctl.signal, headers: { "user-agent": ua, accept: "application/json" } });
-          if (r.status === 404) { await r.body?.cancel().catch(() => {}); return "dead"; }
-          if (!r.ok) { await r.body?.cancel().catch(() => {}); return "unknown"; }
-          const body: any = await r.json().catch(() => null);
-          if (!Array.isArray(body?.jobs)) return "unknown";
-          return body.jobs.some((j: any) => String(j?.id ?? "").toLowerCase() === ashby.id) ? "live" : "dead";
-        } finally { clearTimeout(timer); }
-      } catch { return "unknown"; }
+      // One read of each Ashby board per checker (one checker per turn), its ids kept as a set: the board is not fetched or
+      // parsed again for each of its postings.
+      const board = await (ashbyBoards.get(ashby.url) ?? (() => { const p = readAshby(ashby.url); ashbyBoards.set(ashby.url, p); return p; })());
+      return board === "dead" || board === "unknown" ? board : board.has(ashby.id) ? "live" : "dead";
     }
     const api = apiUrlFor(String(job.job_id ?? ""));
     const url = api ?? String(job.url ?? "");

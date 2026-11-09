@@ -11,12 +11,15 @@ const CITY_ZONE: [RegExp, string, string][] = [
 ];
 const ZONE_CITY: Record<string, string> = Object.fromEntries(CITY_ZONE.map(([, z, c]) => [z, c]));
 
+export const ALERT_TZ_DEFAULT = "America/New_York";
 const real = (tz: string) => { try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); return true; } catch { return false; } };
 
 export interface PersonZone { tz: string; city: string | null }
 export function personZone(o: { alertTz?: string | null; location?: string | null }): PersonZone | null {
+  // The alert settings' column defaults to America/New_York (career_alerts migration), so that value is not taken as stated
+  // (architect, 2026-11-09: a zone only when the person stated it; otherwise UTC, said).
   const tz = String(o.alertTz ?? "").trim();
-  if (tz && real(tz)) return { tz, city: ZONE_CITY[tz] ?? null };
+  if (tz && tz !== ALERT_TZ_DEFAULT && real(tz)) return { tz, city: ZONE_CITY[tz] ?? null };
   const loc = String(o.location ?? "");
   for (const [re, zone, city] of CITY_ZONE) if (re.test(loc)) return { tz: zone, city };
   return null;

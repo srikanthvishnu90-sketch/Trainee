@@ -83,7 +83,7 @@ export async function resultsFile(o: {
   // A prepared application that cannot be read leaves its role untagged: a yes never approves what it could not see.
   const offer = offerOf({ list: listId, at: o.now, jobs: await Promise.all(shown.map(async (x) => ({ ...x, payload_hash: (await o.store.prepared(o.userId, x.job_id).catch(() => null))?.payload_hash ?? null }))) });
   // R10 fix 8 (architect ruling 2026-11-09, spec B.2): the chat lists the roles by number, in the page's order, one short line each
-  // (employer, exact title, location, one-word check state); the page holds the rest.
-  const lines = ordered.map((p, i) => `${i + 1}. ${p.posting?.company ?? p.hit.company ?? "Employer not named"} — ${p.posting?.title ?? p.hit.title}, ${p.posting?.location ?? p.hit.location ?? "location not stated"} (${p.checked?.state === "live" ? "open-checked" : "not re-checked"})`);
+  // (employer, exact title, location, one-word check state, the posting's own link: E.2 #18); the page holds the rest.
+  const lines = ordered.map((p, i) => `${i + 1}. ${p.posting?.company ?? p.hit.company ?? "Employer not named"} — ${p.posting?.title ?? p.hit.title}, ${p.posting?.location ?? p.hit.location ?? "location not stated"} (${p.checked?.state === "live" ? "open-checked" : "not re-checked"})${(p.posting?.url ?? p.hit.url) ? ` ${p.posting?.url ?? p.hit.url}` : ""}`);
   return { reply: parts.join("\n"), parts, listId, url, offer, offerAsk: offerQuestion(offer), below, ...counts, lines };
 }

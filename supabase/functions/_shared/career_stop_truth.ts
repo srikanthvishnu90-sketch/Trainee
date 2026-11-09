@@ -38,7 +38,7 @@ export interface Counts {
   actions: { waiting: number; approved: number; running: number; done: number } | null;
 }
 // null: that write failed (or could not be read back), so that part is NOT stopped.
-export interface Hold { held: number | null; cancelledEmails: number | null; actions: number | null; applications: number | null; error: string | null }
+export interface Hold { held: number | null; cancelledEmails: number | null; actions: number | null; applications: number | null; wanted: number | null; error: string | null }
 
 const tally = (rows: { s: string }[], m: Record<string, string[]>) => {
   const out: Record<string, number> = {};
@@ -75,19 +75,24 @@ export async function holdUnsent(admin: Admin, userId: string, now: number): Pro
   // Applications approved and not yet claimed: cancelled by the existing race-safe cancel, one employer at a time (queued,
   // no attempt yet, under the person's lock; a worker's claim takes only 'queued'). A cloud-bound or started one is not
   // touched here and is counted as waiting or in progress, so the reply says it still goes.
-  let applications: number | null = null;
+  // Applications asked for and still waiting to be prepared (career_apply_wanted 'waiting': preparing visits the employer's
+  // site, new work the person said not to start) go the same way: the cancel removes them too.
+  let applications: number | null = null, wanted: number | null = null;
   try {
-    const r = await admin.from("career_apply_jobs").select("company").eq("user_id", userId).eq("state", "queued").eq("attempts", 0).is("source", null).limit(500);
-    if (r.error) throw new Error(r.error.message);
-    let n = 0;
-    for (const co of [...new Set((r.data ?? []).map((x: any) => String(x.company ?? "")).filter(Boolean))]) {
+    const j = await admin.from("career_apply_jobs").select("company").eq("user_id", userId).eq("state", "queued").eq("attempts", 0).is("source", null).limit(500);
+    if (j.error) throw new Error(j.error.message);
+    const wq = await admin.from("career_apply_wanted").select("company").eq("user_id", userId).eq("state", "waiting").limit(500);
+    if (wq.error) throw new Error(wq.error.message);
+    let a = 0, w = 0;
+    for (const co of [...new Set([...(j.data ?? []), ...(wq.data ?? [])].map((x: any) => String(x.company ?? "")).filter(Boolean))]) {
       const c = await admin.rpc("career_apply_cancel_for", { p_user: userId, p_company: co });
       if (c.error) throw new Error(c.error.message);
-      n += Number((c.data as any)?.approved_cancelled ?? 0);
+      a += Number((c.data as any)?.approved_cancelled ?? 0);
+      w += Number((c.data as any)?.queued_removed ?? 0);
     }
-    applications = n;
+    applications = a; wanted = w;
   } catch (e) { errors.push(`applications: ${(e as Error)?.message ?? e}`); }
-  return { held, cancelledEmails, actions, applications, error: errors.length ? errors.join("; ") : null };
+  return { held, cancelledEmails, actions, applications, wanted, error: errors.length ? errors.join("; ") : null };
 }
 
 export async function reconcile(admin: Admin, userId: string): Promise<Counts> {
@@ -159,7 +164,8 @@ export function workflowReply(o: { stop: StopControl; hold: Hold; counts: Counts
   if (o.hold.actions === null) lines.push("I could not hold your approved follow-ups and call invites (the write failed), so any approved one is NOT stopped.");
   else if (o.hold.actions > 0) lines.push(`Held ${n(o.hold.actions, "approved follow-up or call invite", "approved follow-ups and call invites")}: back to waiting for a new yes.`);
   if (o.hold.applications === null) lines.push("I could not stop your approved applications (the write failed), so any approved application is NOT stopped.");
-  else if (o.hold.applications > 0) lines.push(`Stopped ${n(o.hold.applications, "approved application", "approved applications")} before ${o.hold.applications === 1 ? "it was" : "they were"} sent: ${o.hold.applications === 1 ? "it goes" : "they go"} only if you approve again.`);
+  else if (o.hold.wanted) lines.push(`Stopped ${n(o.hold.wanted, "application waiting to be prepared", "applications waiting to be prepared")}: nothing was prepared or sent, and ${o.hold.wanted === 1 ? "it starts" : "they start"} only if you ask again.`);
+  if (o.hold.applications && o.hold.applications > 0) lines.push(`Stopped ${n(o.hold.applications, "approved application", "approved applications")} before ${o.hold.applications === 1 ? "it was" : "they were"} sent: ${o.hold.applications === 1 ? "it goes" : "they go"} only if you approve again.`);
   lines.push(...countLines(o.counts));
   const a = o.counts.applications;
   const live = a ? a.waiting + a.inProgress : null; // what is still standing after the holds, read back

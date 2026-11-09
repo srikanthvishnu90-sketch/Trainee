@@ -58,11 +58,12 @@ Deno.test({
       await t.step("the exact F.3 turn: the people list is cancelled, unsent drafts held, nothing sent, the account not paused, the reply's numbers are the tables'", async () => {
         const p = await w.addPerson(ids[0], 0);
         await w.connectGmail(p);
-        // An application approved and queued, not yet claimed by a worker (a confirmed resume first).
+        // An application asked for and waiting to be prepared (a confirmed resume first): new work not yet started.
         const up = await w.tgResumeFile(p, resumeOf(p.spec));
         assert(/15 facts/.test(up.said.join("\n")), up.said.join(" | "));
         await w.tg(p, "yes, that's my resume");
-        eq((await w.web(p, `apply to the Data Analyst role at ${POSTINGS[0].company}`)).resultStatus, "queued", "setup: one application queued");
+        eq((await w.web(p, `apply to the Data Analyst role at ${POSTINGS[0].company}`)).resultStatus, "queued", "setup: one application asked for");
+        eq(await n(`select count(*) from public.career_apply_wanted where user_id = ${q(p.uid)} and state = 'waiting'`), 1, "setup: waiting to be prepared");
         await plantPeopleList(p);
         // A replies-lane calendar invite, approved and not yet created.
         const store = supabaseRepliesStore(w.admin);
@@ -93,7 +94,8 @@ Deno.test({
         eq(ds, { shown: 3, sent: 1 }, "both approved drafts are back to waiting; nothing else changed");
         eq(await w.sql(`select state from public.career_send_queue where source_id = ${q(queuedOne.draftId)}`), "cancelled");
         eq(await w.sql(`select status from public.career_outreach_actions where id = ${q(inv.id)}`), "shown", "the approved invite is back to waiting for a yes");
-        eq(await w.sql(`select string_agg(state, ',') from public.career_apply_jobs where user_id = ${q(p.uid)}`), "not_submitted", "the queued application is stopped before it was sent");
+        eq(await n(`select count(*) from public.career_apply_wanted where user_id = ${q(p.uid)}`), 0, "the application waiting to be prepared is stopped");
+        eq(await n(`select count(*) from public.career_apply_jobs where user_id = ${q(p.uid)}`), 0, "and nothing was ever queued to submit");
         // Nothing is sent, now or by the sender's next pass.
         await w.sendWorker();
         eq(w.gmail.sent.length, sentBefore, "nothing went out");
@@ -103,7 +105,7 @@ Deno.test({
         eq(lines[1], "Held 2 approved outreach drafts: they go back to waiting and won't send without a new yes.");
         eq(lines[2], "Cancelled 1 queued outreach email.");
         eq(lines[3], "Held 1 approved follow-up or call invite: back to waiting for a new yes.");
-        eq(lines[4], "Stopped 1 approved application before it was sent: it goes only if you approve again.");
+        eq(lines[4], "Stopped 1 application waiting to be prepared: nothing was prepared or sent, and it starts only if you ask again.");
         lines.splice(3, 2);
         eq(lines[3], `Outreach drafts on record: ${ds.shown} waiting for your yes, 0 approved, 0 sending (outcome uncertain), ${ds.sent} already out.`);
         const rail = Object.fromEntries((await w.json<{ state: string; n: number }[]>(`select state, count(*)::int n from public.career_send_queue where user_id = ${q(p.uid)} group by state`)).map((x) => [x.state, x.n]));

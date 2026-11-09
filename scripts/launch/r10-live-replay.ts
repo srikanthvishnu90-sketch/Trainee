@@ -9,7 +9,8 @@
 // THE TEST PERSON, and why it cannot reach a real employer or contact:
 //   - Identity: a fresh Supabase Auth user per run, email r10-live-replay-<run>@users.trainee.invalid (".invalid" is reserved by
 //     RFC 2606: no mail can ever be delivered to it), user_metadata { r10_live_replay: true, run }. Its only channel contact is
-//     tg:<id> with id = 9_100_000_000 + (run mod 10^8), refused if that contact already exists. The contact exists only so the
+//     tg:<id> with id = 9_900_000_000 + (run mod 10^7), above every id Telegram issues today, refused if that contact already
+//     exists. The contact exists only so the
 //     File pages' Telegram sign-in maps to this person; no Telegram message is ever sent by this script (it never calls the Bot
 //     API), and a bot can only message a user who has started it, which a synthetic id never has.
 //   - Applications: the five turns say "don't apply"; the script sends no other words (no "yes", no approve, no tap). After every
@@ -29,7 +30,10 @@
 // TELEGRAM_BOT_TOKEN (optional: signs the test person's Mini App sign-in for File pages; without it File pages are fetched signed
 // out and their private content is reported NOT_RUN). No secret is printed or written to the report.
 //
-// Usage: deno run -A scripts/launch/r10-live-replay.ts --sha <deployed sha> [--out <dir>] [--usd-cap 1] [--cleanup-stale] [--dry-run]
+// Usage: deno run -A scripts/launch/r10-live-replay.ts --sha <deployed sha> [--out <dir>] [--usd-cap 1] [--cleanup-stale] [--dry-run] [--smoke]
+//   --smoke: the deploy smoke's R10 step instead of the replay: the inbound path answers the synthetic identity (a Telegram
+//   update to trainee-telegram, its reply recorded), the File link opens (signed out and signed in), and a resume PDF link
+//   returns 200, application/pdf and the stored document's exact bytes. Same test person, same cleanup, same $1 guard.
 //   --dry-run: prints what it would do (the person's identity, the turns, the checks) and touches nothing.
 // Exit: 0 every live check PASS; 1 any FAIL; 2 could not run (a missing secret, the project unreachable).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
@@ -43,7 +47,9 @@ const OUT = opt("--out") ?? Deno.env.get("R10_EVIDENCE_DIR") ?? "artifacts/r10-l
 const USD_CAP = Math.min(1, Number(opt("--usd-cap") ?? Deno.env.get("R10_LIVE_USD_CAP") ?? "1") || 1); // never above $1 a run
 const DRY = args.includes("--dry-run");
 const RUN = Deno.env.get("GITHUB_RUN_ID") ?? String(Date.now());
-const TG_ID = 9_100_000_000 + (Number(RUN.replace(/\D/g, "").slice(-8)) || Date.now() % 100_000_000);
+// Above every id Telegram issues today (about 8.5 billion at most), so it names nobody; refused if any account already has it.
+const TG_ID = 9_900_000_000 + (Number(RUN.replace(/\D/g, "").slice(-7)) || Date.now() % 10_000_000);
+const SMOKE = args.includes("--smoke");
 const EMAIL = `r10-live-replay-${RUN.replace(/[^\w-]/g, "")}@users.trainee.invalid`;
 const UA = "TraineeR10LiveReplay/1.0 (post-deploy check; read-only)";
 // The same fold probe as tests/architect/pending/r10-app-layer/r10-fix-10-entry.test.ts.
@@ -164,7 +170,7 @@ async function main() {
     // Setup: the intake (pasted: the original file is not available, as in the audit), confirmed, then the old search.
     await say(`ok here is my resume:\n${INTAKE_RESUME}`, "setup-intake");
     await say("yes, that's my resume", "setup-confirm");
-    await say(OLD_SEARCH, "setup-old-list");
+    const oldList = await say(OLD_SEARCH, "setup-old-list");
 
     const openFile = async (label: string, bytes: Uint8Array, name: string, mime: string) => {
       const pdf = /pdf/i.test(mime) || name.endsWith(".pdf") || new TextDecoder("latin1").decode(bytes.subarray(0, 5)) === "%PDF-";
@@ -228,6 +234,48 @@ async function main() {
       note(8, id, "no internal process language", !/parse check|\brunner\b|switched on|checked against the record|live board|saved snapshot|Nothing was invented to fill the list/i.test(reply), reply.slice(0, 200));
       for (const r of OBSERVED_FAILURES[id] ?? []) note(15, id, `the observed failure is gone (${r.source.slice(0, 50)})`, !r.test(reply), reply.slice(0, 200));
     };
+
+    // --smoke (the deploy smoke's R10 step): the File endpoint, a resume PDF link with intact bytes, and the inbound path, each
+    // for the synthetic identity only. Then the run ends (no observed-turn replay).
+    if (SMOKE) {
+      const hex = async (b: Uint8Array) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", b as BufferSource))].map((x) => x.toString(16).padStart(2, "0")).join("");
+      // 1. Inbound: a Telegram update from the synthetic id to the deployed webhook; the reply is recorded for that identity.
+      const hook = Deno.env.get("TELEGRAM_WEBHOOK_SECRET");
+      if (!hook) note(15, "smoke", "inbound answers the synthetic identity", null, "TELEGRAM_WEBHOOK_SECRET not given");
+      else {
+        const upd = 900_000_000 + Math.floor(Math.random() * 99_000_000);
+        const res = await fetch(`${url}/functions/v1/trainee-telegram`, { method: "POST", signal: AbortSignal.timeout(60_000), headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": hook },
+          body: JSON.stringify({ update_id: upd, message: { message_id: 1, date: Math.floor(Date.now() / 1000), chat: { id: TG_ID, type: "private" }, from: { id: TG_ID, is_bot: false, first_name: "R10 smoke" }, text: "hi" } }) });
+        await res.body?.cancel();
+        let rows = "0";
+        for (let i = 0; i < 30 && rows === "0"; i++) { await new Promise((r) => setTimeout(r, 2000)); rows = psql(db, `select count(*) from public.career_outbox where user_id = ${lit(person)} and key like ${lit(`reply:tg:${upd}%`)}`); }
+        note(15, "smoke", "inbound (trainee-telegram) answers the synthetic identity: a reply recorded for it", res.status === 200 && rows !== "0", `HTTP ${res.status}; reply rows ${rows} (Telegram itself cannot deliver to a synthetic id; nothing reaches a person)`);
+      }
+      // 2. The File endpoint: the list link from the old search opens signed out (its sign-in page) and signed in (the list).
+      const fileLink = oldList.links.find((l) => { try { return /\/file$/.test(new URL(l).pathname); } catch { return false; } });
+      if (!fileLink) note(10, "smoke", "a File link is given and opens", false, "the search reply carried no File link");
+      else {
+        const out = await fetch(fileLink, { redirect: "manual", signal: AbortSignal.timeout(20_000), headers: { "user-agent": `Mozilla/5.0 ${UA}` } });
+        note(10, "smoke", "the File link answers signed out (200/303, HTML, its own policy)", [200, 303].includes(out.status) && (out.status === 303 || /text\/html/.test(out.headers.get("content-type") ?? "")) && !!out.headers.get("content-security-policy"), `HTTP ${out.status} ${out.headers.get("content-type")}`);
+        await out.body?.cancel();
+        const f = await follow("smoke-file", fileLink);
+        note(10, "smoke", "the File opens signed in for the synthetic identity", !!bot && f?.status === 200 && !!f?.html, bot ? `HTTP ${f?.status}` : "TELEGRAM_BOT_TOKEN not given");
+      }
+      // 3. A resume PDF link: 200, application/pdf, and the same bytes as the stored document.
+      const t1 = await say(SCENARIOS.resume[0].text, "smoke-T1");
+      const stored: Record<string, string> = {};
+      for (const a of t1.arts) { const { data } = await admin.from("channel_artifacts").select("bytes_b64").eq("id", a.ref).eq("user_id", person).maybeSingle(); if (data?.bytes_b64) stored[await hex(Uint8Array.from(atob(data.bytes_b64), (c) => c.charCodeAt(0)))] = a.ref; }
+      const pdfLinks: { link: string; status: number; type: string; sha: string }[] = [];
+      for (const l of t1.links) {
+        const r = await fetch(l, { redirect: "follow", signal: AbortSignal.timeout(20_000), headers: { "user-agent": `Mozilla/5.0 ${UA}` } }).catch(() => null);
+        if (!r) continue;
+        const type = r.headers.get("content-type") ?? "", b = new Uint8Array(await r.arrayBuffer());
+        if (/pdf/.test(type) || new TextDecoder("latin1").decode(b.subarray(0, 5)) === "%PDF-") pdfLinks.push({ link: new URL(l).origin + new URL(l).pathname, status: r.status, type, sha: await hex(b) });
+      }
+      note(4, "smoke", "a resume PDF link opens: 200, application/pdf", pdfLinks.some((p) => p.status === 200 && /application\/pdf/.test(p.type)), pdfLinks.length ? JSON.stringify(pdfLinks.map((p) => [p.status, p.type])) : `no PDF link in the reply (${t1.links.length} links, ${t1.arts.length} attachments)`);
+      note(4, "smoke", "the downloaded PDF's bytes are the stored document's, byte for byte", Object.keys(stored).length ? pdfLinks.some((p) => stored[p.sha] !== undefined) : null, Object.keys(stored).length ? `stored ${Object.keys(stored).length} attachment(s)` : "no stored attachment to compare (the link is the only copy)");
+      return 0;
+    }
 
     // Scenario 1: resume.
     for (const t of SCENARIOS.resume) {

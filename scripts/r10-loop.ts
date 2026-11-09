@@ -1,0 +1,203 @@
+// R10 INTERNAL LOOP (owner order 2026-11-09, "fix everything ... and internal loop test"; architect, WO-I). One command that says,
+// for every row of docs/architect/specs/R10-COVERAGE.md, whether that criterion holds right now:
+//   1. the coverage check (scripts/r10-coverage-check.ts): every spec id has a row;
+//   2. the gate (bash scripts/gate.sh), unless --no-gate: rows that name `gate:<test>` pass only when the gate passed;
+//   3. the R10 acceptance suite (then 3b, the R-4 DOCX render with LibreOffice), conformance included: every r10-*.test.ts under tests/architect/pending/r10-app-layer/ and
+//      tests/architect/, evidence to artifacts/r10-loop/<run>/; a row's `file::name prefix` checks must all have PASSed;
+//   4. with --live --sha <deployed sha>, after a deploy: the live replay, then its --smoke mode, (scripts/launch/r10-live-replay.ts) against production,
+//      which keeps its own $1 guard and FAILs on any model call that is not claude-sonnet-5-5; a row's `live:<turn>` steps must
+//      all have PASSed. It uses only the secrets r10-live-replay.ts names (SUPABASE_PROJECT_REF, SUPABASE_ACCESS_TOKEN,
+//      SUPABASE_DB_URL, TELEGRAM_BOT_TOKEN); run it only where those are set and the owner or architect means to.
+// Then one line per row: PASS, FAIL (with why), BLOCKED (the row's named reason: not a failure), PENDING_LIVE (a live-only row,
+// or a row's live step, without --live) or PENDING_REVIEW (R-3, until replies-verdict.md says PASS or FAIL). A GAP row is a FAIL:
+// nothing checks it. R-6 (the integrated pre-release run) is PASS only on the trunk tip, with the gate, when every other row is
+// PASS or BLOCKED. Every run writes replies.md (every reply it produced) for the R-3 review. A row with a live step is
+// PENDING_LIVE without --live. Exit 0 only when the suite exited 0 and every row is PASS or BLOCKED.
+// The loop: run it, fix each FAIL, run it again.
+//   deno run -A scripts/r10-loop.ts [--no-gate] [--live --sha <sha>] [--only <id,id>]
+const ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const args = Deno.args;
+const opt = (k: string) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : undefined; };
+const LIVE = args.includes("--live"), NO_GATE = args.includes("--no-gate"), SHA = opt("--sha") ?? "";
+const ONLY = (opt("--only") ?? "").split(",").filter(Boolean);
+const RUN = new Date().toISOString().replace(/[:.]/g, "-");
+const OUT = `${ROOT}/artifacts/r10-loop/${RUN}`;
+await Deno.mkdir(OUT, { recursive: true });
+if (LIVE && !/^[0-9a-f]{7,40}$/.test(SHA)) { console.log("--live needs --sha <the deployed commit>"); Deno.exit(2); }
+
+async function sh(label: string, cmd: string[], env: Record<string, string> = {}): Promise<number> {
+  console.log(`== ${label}: ${cmd.join(" ")}`);
+  const p = await new Deno.Command(cmd[0], { args: cmd.slice(1), cwd: ROOT, env, stdout: "piped", stderr: "piped" }).output();
+  const log = `${OUT}/${label.replace(/\W+/g, "-")}.log`;
+  await Deno.writeFile(log, new Uint8Array([...p.stdout, ...p.stderr]));
+  console.log(`   exit ${p.code} (log: ${log})`);
+  return p.code;
+}
+
+// 1. coverage
+const coverage = await sh("coverage check", [Deno.execPath(), "run", "-A", "scripts/r10-coverage-check.ts"]);
+// 2. gate
+const gate: "PASS" | "FAIL" | "NOT_RUN" = NO_GATE ? "NOT_RUN" : (await sh("gate", ["bash", "scripts/gate.sh"])) === 0 ? "PASS" : "FAIL";
+// 3. the R10 suite (conformance included)
+const files: string[] = [];
+for (const dir of ["tests/architect/pending/r10-app-layer", "tests/architect/r10-app-layer", "tests/architect"]) {
+  try { for await (const e of Deno.readDir(`${ROOT}/${dir}`)) if (e.isFile && /^r10-.*\.test\.ts$/.test(e.name)) files.push(`${dir}/${e.name}`); } catch { /* not there */ }
+}
+const evidenceDir = `${OUT}/evidence`;
+// Rows can cite a non-R10 test with `run:<path>` (CM-2: F.3 cites the stop/pause truth test and the send-path DB test). The loop
+// runs each such file itself, not only through the gate: a .ts by deno test, a .cjs by node --test, a tests/db/*.sql through
+// tests/db/run.sh (which runs every SQL test; once per loop). A cited file that is not on this commit is a FAIL.
+const matrixText = await Deno.readTextFile(`${ROOT}/docs/architect/specs/R10-COVERAGE.md`);
+const runRefs = [...new Set([...matrixText.matchAll(/\brun:([\w./-]+)/g)].map((m) => m[1]))];
+const runResult = new Map<string, number | "absent">();
+let dbRun: number | undefined;
+for (const f of runRefs) {
+  if (!(await Deno.stat(`${ROOT}/${f}`).then(() => true, () => false))) { runResult.set(f, "absent"); continue; }
+  if (/^tests\/db\/.+\.sql$/.test(f)) { dbRun ??= await sh("db tests", ["bash", "tests/db/run.sh"], { PGBIN: (await import("../tests/flow/pg.ts")).pgBinDir() ?? "" }); runResult.set(f, dbRun); }
+  else if (f.endsWith(".cjs")) runResult.set(f, await sh(`run ${f}`, ["node", "--test", f]));
+  else runResult.set(f, await sh(`run ${f}`, [Deno.execPath(), "test", "-A", "--no-check", "--import-map=tests/flow/supabase-npm.json", f]));
+}
+const suite = files.length ? await sh("R10 acceptance suite", [Deno.execPath(), "test", "-A", "--no-check", "--import-map=tests/flow/supabase-npm.json", ...files.sort()], { R10_EVIDENCE_DIR: evidenceDir }) : -1;
+interface Rec { item: number; test: string; file: string; outcome: string; why?: string; reply?: string; scenario?: string }
+const recs: Rec[] = await Deno.readTextFile(`${evidenceDir}/evidence.jsonl`).then((t) => t.split("\n").filter(Boolean).map((l) => JSON.parse(l)), () => []);
+// 3b. R-4 DOCX render (architect, 2026-11-09): every DOCX the suite delivered is rendered with LibreOffice headless
+// (soffice --convert-to pdf), then given the same checks as the PDF: one page by pdfinfo, the person's name in pdftotext's text.
+// Without soffice the step is BLOCKED (the owner opens the DOCX); it never passes on the DOCX's text alone.
+const SOFFICE = ["soffice", "libreoffice"].find((b) => { try { return new Deno.Command("which", { args: [b], stdout: "null", stderr: "null" }).outputSync().success; } catch { return false; } });
+const docxRender: { v: "PASS" | "FAIL" | "BLOCKED"; why: string } = await (async () => {
+  if (!SOFFICE) return { v: "BLOCKED", why: "soffice is not installed here: the owner opens the DOCX" };
+  const docs = [...new Set((recs as (Rec & { files?: string[] })[]).flatMap((r) => r.files ?? []).filter((f) => /\.docx$/i.test(f)))];
+  if (!docs.length) return { v: "FAIL", why: "the suite delivered no DOCX to render" };
+  const name = (await import("../tests/architect/helpers/r10_turns.ts")).INTAKE_NAME;
+  const outDir = `${OUT}/docx-render`;
+  await Deno.mkdir(outDir, { recursive: true });
+  for (const d of docs) {
+    const conv = await new Deno.Command(SOFFICE, { args: ["--headless", "--convert-to", "pdf", "--outdir", outDir, d], stdout: "null", stderr: "piped" }).output();
+    const pdf = `${outDir}/${d.split("/").pop()!.replace(/\.docx$/i, ".pdf")}`;
+    if (!conv.success || !(await Deno.stat(pdf).then(() => true, () => false))) return { v: "FAIL", why: `${d}: LibreOffice could not render it` };
+    const run = async (b: string, a: string[]) => new TextDecoder().decode((await new Deno.Command(b, { args: a, stdout: "piped", stderr: "null" }).output()).stdout);
+    const pages = Number(/^Pages:\s+(\d+)/m.exec(await run("pdfinfo", [pdf]))?.[1] ?? 0);
+    const text = await run("pdftotext", ["-layout", pdf, "-"]);
+    if (pages !== 1) return { v: "FAIL", why: `${d}: renders to ${pages} pages, not one` };
+    if (!text.includes(name)) return { v: "FAIL", why: `${d}: the rendered page does not carry the person's name` };
+  }
+  return { v: "PASS", why: `${docs.length} DOCX rendered to one page each (${outDir})` };
+})();
+console.log(`== DOCX render: ${docxRender.v} ${docxRender.why}`);
+// 4. live
+interface LiveCheck { item: number; turn: string; check: string; status: string; detail: string }
+let live: { outcome: string; checks: LiveCheck[]; transcript?: { turn: string; text: string; reply: string }[] } | null = null;
+if (LIVE) {
+  const script = `${ROOT}/scripts/launch/r10-live-replay.ts`;
+  const exists = await Deno.stat(script).then(() => true, () => false);
+  if (exists) {
+    await sh("live replay", [Deno.execPath(), "run", "-A", "--import-map=tests/flow/supabase-npm.json", "scripts/launch/r10-live-replay.ts", "--sha", SHA, "--out", `${OUT}/live`, "--cleanup-stale"]);
+    live = await Deno.readTextFile(`${OUT}/live/r10-live-replay.json`).then((t) => JSON.parse(t), () => null);
+    // The smoke (File link, PDF bytes, inbound path) is its own mode of the same script; its checks are the rows' live:smoke steps.
+    await sh("live smoke", [Deno.execPath(), "run", "-A", "--import-map=tests/flow/supabase-npm.json", "scripts/launch/r10-live-replay.ts", "--smoke", "--sha", SHA, "--out", `${OUT}/live-smoke`]);
+    const smoke = await Deno.readTextFile(`${OUT}/live-smoke/r10-live-replay.json`).then((t) => JSON.parse(t), () => null);
+    if (live && smoke) live.checks.push(...smoke.checks.filter((c: LiveCheck) => c.turn === "smoke"));
+  } else console.log("   the live replay script is not on this commit yet: every live step is FAIL");
+}
+
+// R-3: every reply this run produced, in one transcript for an independent writing-quality review (spec D, E.6 52, A.5), each
+// run through WO-N's reply rubric (supabase/functions/_shared/reply_rubric.ts checkReply, #660) with its violation lines under
+// it and its skipped rules named (a skipped rule is never a pass). The review's verdict goes in replies-verdict.md in this run's
+// directory (first line "VERDICT: PASS" or "VERDICT: FAIL"); --verdict <path> names one elsewhere. R-3 is PASS only when the
+// rubric is on this commit, finds no violation in any reply, and the verdict is PASS.
+type Rubric = { checkReply: (i: Record<string, unknown>) => { ok: boolean; violations: unknown[]; skipped: string[] }; describe: (r: unknown) => string[] };
+const rubric: Rubric | null = await import(`${ROOT}/supabase/functions/_shared/reply_rubric.ts`).catch(() => null);
+// The ask each reply answered: the scenario turn when the test is named for one (T1..S2, F1a..F3), else the quoted words in the
+// test's name; otherwise unknown (the rubric then judges against an empty ask, which can only add violations).
+const { SCENARIOS: SC, SCENARIOS_F: SF } = await import(`${ROOT}/tests/architect/helpers/r10_turns.ts`);
+const turnText = new Map<string, string>([...SC.resume, ...SC.search, ...SF.search, ...SF.research].map((x: { id: string; text: string }) => [x.id, x.text]));
+const askOf = (test: string) => { const id = /(?:^|\]\s*|\b)(T[1-3]|S[12]|F1[ab]|F2[ab]|F3)\b/.exec(test)?.[1]; if (id && turnText.has(id)) return turnText.get(id)!; return /['‘“]([^'’”]{3,200})['’”]/.exec(test)?.[1] ?? ""; };
+let rubricViolations = 0, rubricReplies = 0;
+const rubricLines = (reply: string, ask: string) => {
+  if (!rubric) return ["rubric: reply_rubric.ts is not on this commit (WO-N #660): not checked"];
+  const r = rubric.checkReply({ reply, ask, channel: "telegram" });
+  rubricReplies++; rubricViolations += r.violations.length;
+  return [...(r.violations.length ? rubric.describe(r).map((l) => `- VIOLATION ${l}`) : ["- rubric: no violation"]), ...(r.skipped.length ? [`- skipped (not judged, not a pass): ${r.skipped.join(", ")}`] : []), ...(ask ? [] : ["- ask: not recorded for this reply"])];
+};
+const replyLines: string[] = [`# R10 replies, loop run ${RUN}`, "", "In-process replies (fake model, $0), then live replies when --live ran. Each is followed by the reply rubric's lines. Review against spec D and the reply-quality criteria (A.5, E.6 52).", ""];
+for (const r of recs.filter((x) => x.reply && x.item !== 0)) { const reply = String(r.reply).trim(); replyLines.push(`## ${r.file} :: ${r.test}${r.scenario ? ` [${r.scenario}]` : ""}`, "", "```", reply, "```", "", ...rubricLines(reply, askOf(r.test)), ""); }
+for (const t of live?.transcript ?? []) { const reply = String(t.reply).trim(); replyLines.push(`## LIVE ${t.turn}: ${t.text.slice(0, 160)}`, "", "```", reply, "```", "", ...rubricLines(reply, t.text), ""); }
+replyLines.splice(3, 0, rubric ? `Rubric: ${rubricViolations} violation(s) across ${rubricReplies} replies.` : "Rubric: not on this commit (reply_rubric.ts, WO-N #660).", "");
+await Deno.writeTextFile(`${OUT}/replies.md`, replyLines.join("\n"));
+const verdictPath = opt("--verdict") ?? `${OUT}/replies-verdict.md`;
+const reviewVerdict = await Deno.readTextFile(verdictPath).then((t) => (/^\s*VERDICT:\s*(PASS|FAIL)/i.exec(t)?.[1] ?? "").toUpperCase(), () => "");
+// R-6: is this run the integrated one (the trunk tip, with the gate)?
+const git = async (...a: string[]) => new TextDecoder().decode((await new Deno.Command("git", { args: a, cwd: ROOT, stdout: "piped", stderr: "null" }).output()).stdout).trim();
+const head = await git("rev-parse", "HEAD"), trunkTip = await git("rev-parse", "origin/trunk").catch(() => "");
+const onTrunk = !!head && head === trunkTip;
+
+// Rows.
+const matrix = matrixText;
+const rows = matrix.split("\n").filter((l) => /^\| [A-Z]/.test(l) && !/^\| id \|/.test(l)).map((l) => l.slice(1, -1).split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, "|")));
+type Verdict = { v: "PASS" | "FAIL" | "NOT_RUN" | "PENDING_LIVE" | "BLOCKED"; why: string };
+function testRef(ref: string): Verdict {
+  if (ref.startsWith("run:")) { const r = runResult.get(ref.slice(4)); return r === 0 ? { v: "PASS", why: "" } : { v: "FAIL", why: r === "absent" ? `${ref}: not on this commit` : `${ref}: exit ${r}` }; }
+  if (ref === "docx:render") return docxRender.v === "PASS" ? { v: "PASS", why: "" } : { v: docxRender.v === "BLOCKED" ? "NOT_RUN" : "FAIL", why: `docx:render ${docxRender.v}: ${docxRender.why}` };
+  if (ref.startsWith("gate:")) return gate === "PASS" ? { v: "PASS", why: "" } : { v: gate === "FAIL" ? "FAIL" : "NOT_RUN", why: `gate ${gate} (${ref.slice(5)})` };
+  const [file, prefix = ""] = ref.split("::");
+  const hits = recs.filter((r) => r.file === file && r.item !== 0 && (r.test.startsWith(prefix) || r.test.startsWith(`[post-reset baseline] ${prefix}`)));
+  if (!hits.length) return { v: "NOT_RUN", why: `no evidence for ${ref}${files.some((f) => f.endsWith(file)) ? "" : " (file not on this commit)"}` };
+  const bad = hits.filter((r) => r.outcome !== "PASS");
+  return bad.length ? { v: "FAIL", why: `${ref}: ${bad[0].outcome} ${(bad[0].why ?? "").slice(0, 160)}` } : { v: "PASS", why: "" };
+}
+function liveRef(ref: string): Verdict {
+  if (!LIVE) return { v: "PENDING_LIVE", why: `${ref} (run with --live after deploy)` };
+  if (!live) return { v: "FAIL", why: `${ref}: no live report` };
+  const turn = ref.slice(5);
+  const hits = turn === "all" ? live.checks : live.checks.filter((c) => c.turn === turn);
+  if (!hits.length) return { v: "FAIL", why: `${ref}: the live replay ran no such step` };
+  // A live step the replay marks BLOCKED (a named outside reason, e.g. R-4's owner-provided test chat) blocks the row, never passes it.
+  const bad = hits.filter((c) => c.status !== "PASS" && c.status !== "BLOCKED"), blocked = hits.filter((c) => c.status === "BLOCKED");
+  if (bad.length) return { v: "FAIL", why: `${ref}: ${bad[0].status} ${bad[0].check} ${bad[0].detail.slice(0, 120)}` };
+  return blocked.length ? { v: "BLOCKED", why: `${ref}: BLOCKED ${blocked[0].check}: ${blocked[0].detail.slice(0, 120)}` } : { v: "PASS", why: "" };
+}
+const out: { id: string; verdict: string; why: string }[] = [];
+for (const [id, crit, , tests, liveCol, status, note] of rows) {
+  if (ONLY.length && !ONLY.includes(id)) continue;
+  let verdict: string, why = "";
+  if (status === "integrated") { out.push({ id, verdict: "R6", why: "" }); continue; }
+  if (status === "review") {
+    // Both must hold: the reply rubric finds nothing in any reply, and the independent writing review says PASS.
+    if (!rubric) { verdict = "FAIL"; why = "reply_rubric.ts is not on this commit (WO-N #660)"; }
+    else if (rubricViolations > 0) { verdict = "FAIL"; why = `reply rubric: ${rubricViolations} violation(s) across ${rubricReplies} replies (${OUT}/replies.md)`; }
+    else if (reviewVerdict === "FAIL") { verdict = "FAIL"; why = `review verdict FAIL (${verdictPath})`; }
+    else if (reviewVerdict === "PASS") { verdict = "PASS"; why = `rubric clean over ${rubricReplies} replies; review verdict PASS`; }
+    else { verdict = "PENDING_REVIEW"; why = `rubric clean over ${rubricReplies} replies; no review verdict at ${verdictPath} (transcript ${OUT}/replies.md)`; }
+  } else if (status === "BLOCKED") { verdict = "BLOCKED"; why = note; }
+  else if (status === "GAP") { verdict = "FAIL"; why = `GAP: ${note}`; }
+  else {
+    const vs = [...tests.split(";").map((s) => s.trim()).filter(Boolean).map(testRef), ...liveCol.split(";").map((s) => s.trim()).filter(Boolean).map(liveRef)];
+    const first = (k: string) => vs.find((x) => x.v === k);
+    if (vs.length && vs.every((x) => x.v !== "FAIL") && tests.includes("docx:render") && docxRender.v === "BLOCKED") { verdict = "BLOCKED"; why = `docx:render: ${docxRender.why}`; out.push({ id, verdict, why }); continue; }
+    if (status === "live-only" && !LIVE) { verdict = "PENDING_LIVE"; why = liveCol; }
+    else if (first("FAIL")) { verdict = "FAIL"; why = first("FAIL")!.why; }
+    else if (first("NOT_RUN")) { verdict = "FAIL"; why = first("NOT_RUN")!.why; }
+    // CM-3: a row with a live step is never PASS without --live, however its in-process checks went.
+    else if (first("BLOCKED")) { verdict = "BLOCKED"; why = first("BLOCKED")!.why; }
+    else if (first("PENDING_LIVE")) { verdict = "PENDING_LIVE"; why = tests ? `in-process PASS; ${first("PENDING_LIVE")!.why}` : first("PENDING_LIVE")!.why; }
+    else { verdict = "PASS"; }
+  }
+  out.push({ id, verdict, why });
+}
+// R-6, decided after every other row: the integrated pre-release run is the trunk tip, with the gate, and nothing else open.
+for (const o of out.filter((x) => x.verdict === "R6")) {
+  const open = out.filter((x) => x.verdict !== "R6" && x.verdict !== "PASS" && x.verdict !== "BLOCKED").map((x) => x.id);
+  if (!onTrunk) { o.verdict = "FAIL"; o.why = `not the integrated run: HEAD ${head.slice(0, 8)} is not the trunk tip ${trunkTip.slice(0, 8) || "(origin/trunk unknown)"}`; }
+  else if (gate !== "PASS") { o.verdict = "FAIL"; o.why = `the integrated run needs the gate (gate ${gate})`; }
+  else if (open.length) { o.verdict = "FAIL"; o.why = `${open.length} row(s) not PASS or BLOCKED: ${open.slice(0, 12).join(", ")}${open.length > 12 ? "…" : ""}`; }
+  else { o.verdict = "PASS"; o.why = `integrated: trunk ${head.slice(0, 8)}, gate PASS, every row PASS or BLOCKED`; }
+}
+const crits = new Map(rows.map((r) => [r[0], r[1]]));
+for (const o of out) console.log(`${o.verdict.padEnd(14)} ${o.id.padEnd(8)} ${(crits.get(o.id) ?? "").slice(0, 90)}${o.why ? `\n               ${o.why.slice(0, 220)}` : ""}`);
+const count = (v: string) => out.filter((o) => o.verdict === v).length;
+console.log(`\nR10 loop ${RUN}: ${out.length} rows: ${count("PASS")} PASS, ${count("FAIL")} FAIL, ${count("BLOCKED")} BLOCKED, ${count("PENDING_LIVE")} PENDING_LIVE, ${count("PENDING_REVIEW")} PENDING_REVIEW`);
+console.log(`replies for the R-3 review: ${OUT}/replies.md`);
+console.log(`coverage check exit ${coverage}; gate ${gate}; suite exit ${suite} (${files.length} files); live ${LIVE ? live?.outcome ?? "no report" : "not run"}; evidence ${OUT}`);
+await Deno.writeTextFile(`${OUT}/loop.json`, JSON.stringify({ run: RUN, sha: SHA || null, gate, coverage, suite, live: live?.outcome ?? null, rows: out }, null, 2));
+if (suite !== 0) console.log(`FAIL the R10 suite exited ${suite}: the loop fails whatever the rows say`);
+Deno.exit(coverage === 0 && suite === 0 && out.every((o) => o.verdict === "PASS" || o.verdict === "BLOCKED") ? 0 : 1);

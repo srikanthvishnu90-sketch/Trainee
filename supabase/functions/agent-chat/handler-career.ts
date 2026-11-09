@@ -1395,8 +1395,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
                   read: found.source === "snapshot" ? picked.map((x) => String(x.posting?.fetched_on ?? "")).filter(Boolean).sort().at(-1) ?? null : null,
                   links: (u, l) => feedUrlsFor(Deno.env, u, l, Date.now()) })).catch((e) => { console.error("results page: the list stands:", (e as Error)?.message ?? e); return null; });
                 if (made) {
-                  // R10 WO-C (fix 8): short and choosable by number; the File holds each role's window, checks and links.
-                  if (found.brief?.length) made.parts[0] = [why.trim(), made.parts[0], found.summary, ...found.brief].filter(Boolean).join("\n");
+                  // F.1: the blocker question's answer leads the results message (the page's own two sentences and link stay as they are;
+                  // owner 2026-11-01/02: on every channel the list itself is the hosted page).
+                  if (why) made.parts[0] = `${why.trim()}\n${made.parts[0]}`;
                   out = { ...out, reply: [made.parts[0], made.parts[1]].join("\n") + resumeLine, parts: [made.parts[0], ...(resumeLine ? [resumeLine.trim()] : []), made.parts[1]] };
                   agentMeta = { ...(agentMeta || {}), results_file: made.listId };
                   f5Offer = { offer: made.offer, ask: made.offerAsk, resumeLine: !!resumeLine };

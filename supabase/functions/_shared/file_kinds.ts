@@ -19,6 +19,7 @@ const RECORDS: Source = "From Trainee's records";
 // Accepted only on trusted (code-built) plan reviews: a model's create_file can never label its own text this way.
 export const MADE: Source = "Made by Trainee";
 const MADE_OK = new Set<string>(["plan_review"]);
+export const RESUME_B64_MAX = 400_000; // about 290 KB of PDF
 export const KIND_IDS = ["job_list", "introduction", "application_proof", "plan_review", "comparison", "draft", "research_brief"] as const;
 export type KindId = typeof KIND_IDS[number];
 export const KIND_LABEL: Record<KindId, string> = { job_list: "Your jobs", introduction: "Introduction", application_proof: "Application proof", plan_review: "Plan review", comparison: "Comparison", draft: "Draft", research_brief: "Research brief" };
@@ -164,6 +165,14 @@ const KINDS: Record<Exclude<KindId, "job_list">, (raw: unknown, v: V) => any> = 
   },
   draft(raw, v) {
     const x = v.obj(raw, "data");
+    // R10 (privacy ruling): a resume file the resume task made, opened only on the signed-in File page (never a bearer link). Built by
+    // code only: the model's create_file can never make one. The PDF rides the record; "Download PDF" returns it to its owner.
+    if (x.variant === "resume") {
+      if (!v.trusted) { v.err("variant", "a resume file is made by Trainee's resume task, not by create_file"); return {}; }
+      const b64 = typeof x.pdf_b64 === "string" && /^[A-Za-z0-9+/]+=*$/.test(x.pdf_b64) && x.pdf_b64.length <= RESUME_B64_MAX ? x.pdf_b64 : (v.err("pdf_b64", `the PDF is larger than ${Math.round(RESUME_B64_MAX * 3 / 4 / 1024)} KB`), undefined);
+      return { variant: "resume", title: v.str(x.title, "title", { max: 80 }), target: v.str(x.target, "target", { max: 120 }), filename: v.str(x.filename, "filename", { max: 120 }),
+        review: x.review === true, note: v.str(x.note, "note", { max: 400, opt: true }), sha256: typeof x.sha256 === "string" && /^[0-9a-f]{64}$/.test(x.sha256) ? x.sha256 : (v.err("sha256", "must be the PDF's sha256"), undefined), pdf_b64: b64 };
+    }
     return { title: v.str(x.title, "title", { max: 80 }), type: v.one(x.type, "type", ["email", "cover_letter", "message"] as const), to: v.str(x.to, "to", { max: 120, opt: true }), subject: v.str(x.subject, "subject", { max: 140, opt: true, templ: true }),
       body: v.str(x.body, "body", { max: 4000, multi: true, templ: true }), basis: v.list(x.basis ?? [], "basis", 0, 10).map((f, i) => v.fact(f, `basis[${i}]`)) };
   },
@@ -237,7 +246,9 @@ export function validateKind(kind: string, raw: unknown, o: { trusted?: boolean;
   v.trusted = !!o.trusted;
   let data: any;
   try { data = fn(raw, v); } catch (e) { return { ok: false, errors: [`data: could not be read (${e instanceof Error ? e.message : String(e)})`] }; }
-  if (!v.errors.length && JSON.stringify(data).length > 24_000) v.err("data", "is over 24 KB");
+  // A resume File carries its PDF (re-review of #644 (4): a real one- or two-page resume runs to tens of KB); every other kind stays small.
+  const max = kind === "draft" && data?.variant === "resume" ? RESUME_B64_MAX + 8_000 : 24_000;
+  if (!v.errors.length && JSON.stringify(data).length > max) v.err("data", `is over ${Math.round(max / 1000)} KB`);
   return v.errors.length ? { ok: false, errors: v.errors.slice(0, 12) } : { ok: true, data: JSON.parse(JSON.stringify(data)) };
 }
 
@@ -279,11 +290,12 @@ export function actionsOf(rec: FileRecord): ActionView[] {
     return [{ id: "status", label: "View status", state: "available", note: `Shows what is recorded as of ${when(rec.data?.as_of)}.` },
       { id: "flag", label: "Flag a problem", state: "available", note: flags ? `${flags} flagged.` : "Saves your note on this file." }];
   }
+  if (rec.kind === "draft" && rec.data?.variant === "resume") return [{ id: "download", label: "Download PDF", state: "available", note: "Saves the file to this device. Nothing is sent to anyone." }];
   if (rec.kind === "draft") return [{ id: "copy", label: "Copy", state: "available", note: "Copies the text as it is in the box. Edits stay on this page." }];
   return [];
 }
 
-export interface ActResult { ok: boolean; status: number; note: string; patch?: Record<string, unknown> }
+export interface ActResult { ok: boolean; status: number; note: string; patch?: Record<string, unknown>; file?: { filename: string; mime: string; base64: string } }
 export interface Effects { introduce?(userId: string, rec: FileRecord): Promise<{ ok: boolean; reason?: string }> }
 // One tap. Returns the note to show and the state to keep; never throws for a refused tap.
 // `persist` stores a state patch at once: the approval is written BEFORE any send is attempted, so a crash or a second tap can never send twice.
@@ -291,6 +303,7 @@ export interface Effects { introduce?(userId: string, rec: FileRecord): Promise<
 export async function actOn(rec: FileRecord, action: string, form: URLSearchParams, now: number, fx: Effects = {}, persist?: (patch: Record<string, unknown>) => Promise<void>, claim?: () => Promise<boolean>): Promise<ActResult> {
   const views = actionsOf(rec), view = views.find((a) => a.id === action);
   if (!view || action === "copy") return { ok: false, status: 400, note: "That is not something this file can do. Nothing was sent." };
+  if (action === "download") return { ok: true, status: 200, note: "", file: { filename: String(rec.data.filename), mime: "application/pdf", base64: String(rec.data.pdf_b64) } };
   if (rec.kind === "introduction") {
     if (view.state !== "available") return { ok: false, status: 200, note: view.note ?? "Already decided." };
     const decided = { ok: false, status: 200, note: "Already decided. Nothing more was sent." };
@@ -328,6 +341,8 @@ function actionsHtml(rec: FileRecord, token: string): string {
     const note = a.note ? `<p class="anote">${esc(a.note)}</p>` : "";
     if (a.id === "copy") return `<div class="act1"><button type="button" class="${kind()}" data-copy>Copy</button><span id="copy-status" role="status"></span>${note}</div>`;
     if (a.state !== "available") return `<div class="act1"><span class="btn off" role="status">${esc(a.label)}: ${STATE_WORD[a.state]}</span>${note}</div>`;
+    // A download is a plain post (not the page's ajax form): the answer is the file itself.
+    if (a.id === "download") return `<form method="post" class="act1">${hidden(token, a.id)}<button type="submit" class="${kind()}">${esc(a.label)}</button>${note}</form>`;
     if (a.id === "flag") return `<form method="post" class="ajax act1">${hidden(token, "flag")}<label for="flag-note">What looks wrong</label><textarea id="flag-note" name="note" rows="3" maxlength="500"></textarea><button type="submit" class="${kind()}">Flag a problem</button>${note}</form>`;
     const extra = a.id === "introduce" ? `<input type="hidden" name="tag" value="${esc(rec.tag ?? "")}">` : "";
     return `<form method="post" class="ajax act1">${hidden(token, a.id, extra)}<button type="submit" class="${kind(a.id === "pass")}">${esc(a.label)}</button>${note}</form>`;
@@ -385,6 +400,10 @@ export function bodyHtml(rec: FileRecord, token: string, o: { tz?: string | null
       break;
     }
     case "draft":
+      if (d.variant === "resume") {
+        main = `<p class="meta">${esc(`For ${d.target}`)}</p>${d.review ? `<p class="meta"><strong>Review draft, not for external submission.</strong></p>` : ""}${d.note ? `<p>${esc(d.note)}</p>` : ""}<p class="meta">${esc(d.filename)}</p>`;
+        break;
+      }
       main = `<p class="meta">${esc([cap1(String(d.type).replace("_", " ")), d.to ? `to ${d.to}` : ""].filter(Boolean).join(" "))}</p>${d.subject ? `<p class="meta">Subject: ${esc(d.subject)}</p>` : ""}<label for="draft-body" class="lbl">Edit the text here. Edits stay on this page.</label><textarea id="draft-body" class="draft" rows="14">${esc(d.body)}</textarea>`
         + sec("What it says about you", dl(Fs(d.basis).map((f) => factHtml(f, f.label)).join("")))
         + `<p class="meta">This page cannot send it. To send it, ask Trainee in Telegram; you approve the exact message first.</p>`;
@@ -473,6 +492,7 @@ export function textOf(rec: FileRecord, o: { now: number; url?: string }): strin
       break;
     }
     case "draft":
+      if (d.variant === "resume") { L.push(`For ${d.target}`, ...(d.review ? ["Review draft, not for external submission."] : []), ...(d.note ? [d.note] : []), `File: ${d.filename}`, ""); break; }
       L.push(`${cap1(String(d.type).replace("_", " "))}${d.to ? ` to ${d.to}` : ""}`); if (d.subject) L.push(`Subject: ${d.subject}`); L.push("", d.body, "");
       if (Fs(d.basis).length) { h("What it says about you"); Fs(d.basis).forEach((f) => L.push(factText(f, f.label))); L.push(""); }
       L.push("Sending: not from this file. Ask Trainee in Telegram; you approve the exact message first.", "");

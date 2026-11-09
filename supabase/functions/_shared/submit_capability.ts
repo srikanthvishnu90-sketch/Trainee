@@ -40,7 +40,7 @@ export function rankBySubmit<T>(rows: T[], tier: (r: T) => number, id: (r: T) =>
 }
 
 // WO-M (owner ruling 2026-11-09: apply by message and yes): the real per-posting check, from the posting's own host.
-// The cloud runner submits after the person's yes on the guest-apply boards it drives (docs/architect/specs/BROWSER-COVERAGE.md);
+// The cloud runner is meant to submit after the person's yes on the guest-apply boards (docs/architect/specs/BROWSER-COVERAGE.md);
 // the account boards need the person's own account (D-050: Trainee never creates one or holds a password here). Any other
 // host is not labelled (null): never a guess.
 const GUEST: [RegExp, string][] = [
@@ -54,7 +54,10 @@ const ACCOUNT: [RegExp, string][] = [
 export const canSubmitByHost: CanSubmit = (p) => {
   let host = "";
   try { host = new URL(String(p.url ?? "")).hostname.toLowerCase().replace(/\.$/, ""); } catch { return null; }
-  for (const [re, name] of GUEST) if (re.test(host)) return { can: true, reason: `${name}: Trainee submits it after your yes` };
+  // A guest board gets no "I can submit" label yet: the 2026-11-09 benchmark (run 42676274898) filled 19 of 220 real postings
+  // as a guest, so the promise is not earned. It returns null (no label) until the benchmark shows the runner completes that
+  // board's forms; the account boards keep their honest note.
+  for (const [re] of GUEST) if (re.test(host)) return null;
   for (const [re, name] of ACCOUNT) if (re.test(host)) return { can: false, reason: `${name} needs your own account; Trainee sends you the link and your approved answers` };
   return null;
 };

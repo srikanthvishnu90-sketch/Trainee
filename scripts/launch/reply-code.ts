@@ -24,7 +24,7 @@ export const REPLY_CODE_DIRS = [
 export const ROUTER_BUNDLE = "supabase/functions/_shared/router_core.career.js";
 
 export const SHARED_REPLY_MODULES = [
-  "ai_policy.ts", "answer_options.ts", "apply_email.ts", "apply_status_summary.ts", "career_search_judge.ts", "posting_constraints.ts", "search_correction.ts", "search_widen.ts", "search_shortlist.ts", "person_zone.ts", "career_pool.js", "apply_trust.ts", "approval_words.ts", "career_account_memory.ts",
+  "ai_policy.ts", "answer_options.ts", "apply_email.ts", "apply_status_summary.ts", "career_search_judge.ts", "posting_constraints.ts", "search_correction.ts", "search_widen.ts", "search_shortlist.ts", "person_zone.ts", "submit_capability.ts", "career_pool.js", "apply_trust.ts", "approval_words.ts", "career_account_memory.ts",
   "career_alert_store.ts", "career_alerts.ts", "career_apply.ts", "career_ask_canon.ts", "career_resume_design.ts", "career_resume_gaps.ts", "career_resume_outcomes.ts", "career_apply_cards.ts", "career_apply_gate.ts",
   "career_apply_screen.ts", "career_apply_status.ts", "career_apply_want.ts", "career_brief_store.ts", "career_calendar.ts",
   "career_capabilities.ts", "career_contacts.ts", "career_digest.ts", "career_floor.ts", "career_fresh.ts", "career_hired.ts",

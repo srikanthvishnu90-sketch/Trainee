@@ -6,6 +6,7 @@
 // The list is written here, by code, from the search's own rows: ordered by fit (career_search.ts ranks by fit to CONFIRMED
 // facts), roles whose listed pay reaches the floor first, then the roles that list no pay (a separate group, never counted as
 // meeting it). A role whose listed pay is below the floor is not on the list. Nothing about pay is invented.
+import { type SubmitCapability, submitLabel } from "./submit_capability.ts"; // R10 owner ruling
 import { jobViewOf, refOf, type JobStore, type ListMeta, type PostingRow } from "./telegram_jobs.ts";
 import { type Floor, parsePay, type Pay, payGroup, payText, resultsParts, type What } from "./role_pay.ts";
 import type { SearchHit } from "./career_search.ts";
@@ -34,7 +35,7 @@ export function whatOf(ask: { role: string; place: string | null; remote: boolea
   return { one: `${pre}${role} ${noun[0]}${where}`.replace(/\s+/g, " ").trim(), many: `${pre}${role} ${noun[1]}${where}`.replace(/\s+/g, " ").trim() };
 }
 
-export interface Picked { hit: SearchHit; posting: SourcePosting | null; checked?: { state: "live" | "unknown" | "unchecked"; at: number } | null }
+export interface Picked { hit: SearchHit; posting: SourcePosting | null; checked?: { state: "live" | "unknown" | "unchecked"; at: number } | null; submit?: SubmitCapability | null }
 export async function resultsFile(o: {
   userId: string; now: number; what: What; floor: Floor | null; picked: Picked[]; store: JobStore;
   name?: string | null; source?: "live" | "snapshot" | null; read?: string | null;
@@ -61,7 +62,7 @@ export async function resultsFile(o: {
       url: p.posting?.url ?? p.hit.url, description: p.posting?.description ?? null, remote: live.remote ?? null, seniority_band: live.seniority_band ?? null, posted_at: live.posted_at ?? null,
       first_seen_at: p.posting?.first_seen_at ?? p.hit.first_seen_at, pay: p.posting?.pay ?? null, company_domain: live.company_domain ?? null };
     const pay = pays.get(p.hit.job_id) ?? null;
-    const view = { ...jobViewOf(p.hit, row), pay: pay ? payText(pay) : null, pay_parsed: pay, ...(p.checked ? { checked: p.checked } : {}) };
+    const view = { ...jobViewOf(p.hit, row), pay: pay ? payText(pay) : null, pay_parsed: pay, ...(p.checked ? { checked: p.checked } : {}), ...(p.submit ? { submit: p.submit } : {}) };
     const ref = await refOf(o.userId, view.job_id);
     await o.store.remember(o.userId, ref, view, "text");
     boards.add(String(view.source ?? row.provider ?? view.job_id.split(":")[0]).toLowerCase());
@@ -84,6 +85,6 @@ export async function resultsFile(o: {
   const offer = offerOf({ list: listId, at: o.now, jobs: await Promise.all(shown.map(async (x) => ({ ...x, payload_hash: (await o.store.prepared(o.userId, x.job_id).catch(() => null))?.payload_hash ?? null }))) });
   // R10 fix 8 (architect ruling 2026-11-09, spec B.2): the chat lists the roles by number, in the page's order, one short line each
   // (employer, exact title, location, one-word check state, the posting's own link: E.2 #18); the page holds the rest.
-  const lines = ordered.map((p, i) => `${i + 1}. ${p.posting?.company ?? p.hit.company ?? "Employer not named"} — ${p.posting?.title ?? p.hit.title}, ${p.posting?.location ?? p.hit.location ?? "location not stated"} (${p.checked?.state === "live" ? "open-checked" : "not re-checked"})${(p.posting?.url ?? p.hit.url) ? ` ${p.posting?.url ?? p.hit.url}` : ""}`);
+  const lines = ordered.map((p, i) => `${i + 1}. ${p.posting?.company ?? p.hit.company ?? "Employer not named"} — ${p.posting?.title ?? p.hit.title}, ${p.posting?.location ?? p.hit.location ?? "location not stated"}${submitLabel(p.submit) ? ` — ${submitLabel(p.submit)}` : ""} (${p.checked?.state === "live" ? "open-checked" : "not re-checked"})${(p.posting?.url ?? p.hit.url) ? ` ${p.posting?.url ?? p.hit.url}` : ""}`);
   return { reply: parts.join("\n"), parts, listId, url, offer, offerAsk: offerQuestion(offer), below, ...counts, lines };
 }

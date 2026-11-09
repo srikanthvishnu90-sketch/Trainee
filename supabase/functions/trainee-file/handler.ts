@@ -38,6 +38,7 @@ import type { RateRow } from "../_shared/career_resume_outcomes.ts";
 import { fileShellHtml, firstNameOf, freshnessStamp, madeForLine, stateHtml } from "../_shared/file_design.ts";
 import { byHandUrl, FEED_ROWS, foreignFact, hashTag, isSecretField, NOT_YOURS, logoDomain, postingVerdict, secretFields, secretKey, tapJob, unsendable, type JobDeps, type JobSender, type JobStore, type JobView, type PostingRow, type PreparedRow } from "../_shared/telegram_jobs.ts";
 import { checkedAt, studentWindowOf } from "../_shared/search_shortlist.ts"; // R10 WO-C
+import { submitLabel } from "../_shared/submit_capability.ts"; // R10 owner ruling
 
 export type { AppRow } from "../_shared/file_page.ts";
 export interface FileStore extends JobStore {
@@ -273,6 +274,8 @@ async function loadFeed(claims: FileClaims, token: string, d: FileDeps, notes: R
       // R10 WO-C: the student window in the posting's own words, and whether its application page was re-checked when listed.
       ...(post ? { window: (() => { const w = studentWindowOf(post.description ?? ""); return w ? `Student window: "${w.replace(/[.]$/, "")}"` : "Student window: not stated in the posting"; })() } : {}),
       ...(job.checked ? { openLine: job.checked.state === "live" ? `Open: application page checked ${checkedAt(job.checked.at, tz).text}` : "Not re-checked when listed" } : {}),
+      // R10 owner ruling: whether Trainee can submit it itself, as found when it was listed (never guessed here).
+      ...(job.submit ? { submitLine: (() => { const l = submitLabel(job.submit) ?? ""; return l.charAt(0).toUpperCase() + l.slice(1); })() } : {}),
       sends: sd && !sd.secret ? `Sends: ${[resumeOf(prep) ?? "no resume", sd.answers ? "your saved answers" : "", sd.cover ? "a cover note" : ""].filter(Boolean).join(" + ")}` : undefined, send: sd?.items };
   }));
   // The same posting twice on one list (the same link under two ids): only the first row offers Apply.

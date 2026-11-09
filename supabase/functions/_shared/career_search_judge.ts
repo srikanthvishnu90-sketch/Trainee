@@ -26,6 +26,7 @@ import { correctedAsk } from "./search_correction.ts";
 import { blockerAsk, inMetro, METRO, remoteInUs, widenedAsk, withScope } from "./search_widen.ts";
 import { arrangementOf, checkedAt, nextWidening, placesLine, roleVariants, studentWindowOf, wantOf } from "./search_shortlist.ts";
 import { apiUrlFor, ashbyBoardFor, type LinkCheck, liveOnly } from "./link_check.ts";
+import { type CanSubmit, capabilitiesOf, rankBySubmit, submitLabel } from "./submit_capability.ts";
 import { hasLimits, type Limits, limitsLine, outsideLimits, REASON_WORDS, type Reason, searchTextOf, statedBand, statedPay } from "./posting_constraints.ts";
 import { CareerPool } from "./career_pool.js";
 import { CareerProfile } from "./router_core.career.js";
@@ -460,6 +461,8 @@ export async function searchJudgeTurn(o: {
   // R10 WO-C: the application page of each role is re-checked just before it is shown (link_check.ts); the person's time zone
   // (the checked time is said in it; UTC, said, when unknown); how many roles they asked for ("find me 5").
   openCheck?: LinkCheck | null; tz?: string | null; want?: number | null;
+  // R10 owner ruling: whether Trainee can submit each posting itself (submit_capability.ts; WO-M fills it in).
+  canSubmit?: CanSubmit | null;
 }): Promise<SearchJudgeResult | null> {
   const clock = o.clock ?? NO_CLOCK;
   const ask = o.ask, roleWords = roleWordsOf(ask.role), placeWords = ask.place ? searchWords(ask.place) : [];
@@ -571,10 +574,12 @@ export async function searchJudgeTurn(o: {
     // The link stays on the numbered line, in parentheses (the texting channel puts it right under its posting; D-036).
     return `${i + 1}. ${h.title} at ${h.company || "an employer the posting does not name"} — ${where(h) || "location not stated"}, ${arr ?? "arrangement not stated"}${h.url ? ` (${h.url})` : " (the posting gives no application link)"}${noLevel(h) ? " [level not stated]" : ""}${tail ? `. ${tail}` : ""}${/[.!?]$/.test(tail ?? "") ? "" : "."}`
       + `\n   Student window: ${win ? `"${win.replace(/[.]$/, "")}"` : "not stated in the posting"}.${win && !gradKnown ? `\n   Uncertain: your graduation date isn't confirmed, so eligibility isn't decided.` : ""}`
-      + `\n   ${open}.`;
+      + `\n   ${open}.`
+      + (submitLabel(caps.get(h.job_id)) ? `\n   Apply: ${submitLabel(caps.get(h.job_id))}.` : "");
   };
   const top = hits.slice(0, N);
   // 3. The judge, when on and a model is given; else the fit order.
+  const judged = new Map<string, Verdict>();
   let rows: { h: SearchHit; tail: string | null }[] = [], account: Accounting | null = null, modelCalled = false, header: string;
   if (o.judge.on && o.judge.model) {
     let instructions: string[] = [];
@@ -587,6 +592,7 @@ export async function searchJudgeTurn(o: {
     const kept = top.filter((h) => { const v = run.judgments.get(h.job_id)?.verdict; return v && KEPT_VERDICTS.has(v); })
       .sort((a, b) => verdictRank(run.judgments.get(b.job_id)!.verdict!) - verdictRank(run.judgments.get(a.job_id)!.verdict!) || order.get(a.job_id)! - order.get(b.job_id)!);
     const unjudged = top.filter((h) => !run.judgments.get(h.job_id)?.verdict);
+    for (const h of kept) judged.set(h.job_id, run.judgments.get(h.job_id)!.verdict!);
     rows = [
       ...kept.map((h) => { const j = run.judgments.get(h.job_id)!; return { h, tail: `${j.verdict}: ${j.reason}` }; }),
       ...unjudged.map((h) => ({ h, tail: `not judged${fitWord(h) ? `; ${fitWord(h)}` : ""}` })),
@@ -600,6 +606,14 @@ export async function searchJudgeTurn(o: {
       ? "You have no confirmed facts yet, so these are newest first."
       : "Ranked by how well each matches what you've confirmed.";
   }
+  // R10 owner ruling: within equal fit, the postings Trainee can submit itself come first; a better fit is never moved down.
+  const caps = await capabilitiesOf(rows.map((r) => ({ job_id: r.h.job_id, url: r.h.url || null, company: r.h.company || null, title: r.h.title })), o.canSubmit);
+  const tierOf = (r: { h: SearchHit; tail: string | null }) => {
+    if (o.judge.on && o.judge.model) { const v = judged.get(r.h.job_id); return v ? 10 + verdictRank(v) : 0; }
+    const f = r.h.fit;
+    return !f ? 0 : f.excluded ? -1 : f.score == null ? 0 : f.score >= 75 ? 3 : f.score >= 55 ? 2 : 1;
+  };
+  rows = rankBySubmit(rows, tierOf, (r) => r.h.job_id, caps);
   const listed = rows.slice(0, show);
   const more = rows.length - listed.length;
   const lines = [freshness];
@@ -628,7 +642,7 @@ export async function searchJudgeTurn(o: {
   const noApply = /\b(?:don'?t|do not|never|not)\s+(?:\w+\s+){0,2}?apply/i.test(String(o.message ?? ""));
   if (!(listed.length && noApply)) lines.push(listed.length ? `Say "apply to these" to queue the ${listed.length === 1 ? "one" : listed.length} listed, or name one to tailor your resume for.` : "Widen the role or the place and I'll search again.");
   const shortlist = listed.map((r) => ({ id: r.h.job_id, title: r.h.title, company: r.h.company || null, location: where(r.h) || null, url: r.h.url || null }));
-  const picked = rows.slice(0, 25).map((r) => ({ hit: r.h, posting: byId.get(r.h.job_id) ?? null, checked: { state: (linkOf.get(r.h.job_id) ?? "unchecked") as "live" | "unknown" | "unchecked", at: o.now } }));
+  const picked = rows.slice(0, 25).map((r) => ({ hit: r.h, posting: byId.get(r.h.job_id) ?? null, checked: { state: (linkOf.get(r.h.job_id) ?? "unchecked") as "live" | "unknown" | "unchecked", at: o.now }, submit: caps.get(r.h.job_id) ?? null }));
   return { reply: lines.join("\n"), status: account ? "judged" : "ranked", source, shortlist, accounting: account, modelCalled, picked, summary, blocker: "none" };
 }
 

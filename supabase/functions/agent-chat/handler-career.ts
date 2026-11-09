@@ -25,6 +25,7 @@
 // (_shared/model_gateway.ts): the calls it made, zero when it made none, or
 // "unrecorded" when the sink failed. A missing row is never a zero.
 
+import { canSubmitStub } from "../_shared/submit_capability.ts"; // R10 owner ruling
 import { careerAskCanon } from "../_shared/career_ask_canon.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
 import { chatSwitches, liveSwitches, readSubmitSettings } from "./chat_switches.ts"; // D-036 release flags (each gate below reads one switch)
@@ -1355,6 +1356,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
               // R10 WO-C (fix 6): each role's application page is re-checked before it is shown (Greenhouse, Lever, Ashby and
               // SmartRecruiters public boards by id; any other link by fetching it). The checked time is said in the person's zone.
               // Only when the person asked for open or verified roles (SearchAsk.verify); otherwise each is said to be not re-checked.
+              canSubmit: canSubmitStub, // R10 owner ruling: WO-M fills in the real per-posting check
               openCheck: f5Ask.verify ? linkChecker(fetch, { userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }) : null,
               tz: f5Zone?.tz ?? null, want: f5Ask.want ?? wantOf(message) }));
             // F.1: the blocker question gets the evidenced blocker: a source that could not be read is a connection problem.

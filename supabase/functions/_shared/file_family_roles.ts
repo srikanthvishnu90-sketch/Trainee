@@ -49,7 +49,7 @@ function roleCard(r: ShortRole, rid: string, f: ShortlistInput, c: Ctx): string 
   const sp = specOf(r), v = vocab(sp.key), link = webUrl(r.job.url), host = link ? hostOf(link) : "", label = `${r.job.title} at ${r.job.company}`;
   const pay = r.payShown ? `${r.payShown} employer-stated` : "pay not listed (marked unknown)";
   const at = checkedIso(r);
-  const meta = claimHtml([r.place || "Location not listed", pay].join(" - "), { label: "checked", href: r.job.url, at }, c);
+  const meta = claimHtml([r.place || "location unknown", pay].join(" - "), { label: "checked", href: r.job.url, at }, c);
   // WO-C hands the window already prefixed; strip the prefix so it is said once, and quote only raw posting words.
   const prefixed = WINDOW_PREFIX.test(r.window ?? ""), words = prefixed ? r.window!.replace(WINDOW_PREFIX, "") : r.window ? `"${r.window}"` : "";
   const win = words ? `<p class="ff-p ff-win"><strong>Student window:</strong> ${claimHtml(words, { label: "posting", href: r.job.url, at }, c)}</p>` : "";
@@ -91,7 +91,8 @@ export function rolesShortlistFile(f: ShortlistInput): FamilyFile {
   for (const r of f.rows) groups.set(r.job.company, [...(groups.get(r.job.company) ?? []), r]);
   const blocks: Block[] = [];
   for (const [co, rs] of groups) {
-    const open = rs.filter((r) => specOf(r).key !== "closed").length;
+    // "Open" is a role you could still act on: closed, blocked, excluded and submission-uncertain roles are never counted as open.
+    const open = rs.filter((r) => !["closed", "blocked", "excluded", "uncertain"].includes(specOf(r).key)).length;
     blocks.push({ b: "group", label: `${co} - ${open} open ${open === 1 ? "role" : "roles"}` }, { b: "fn", html: (c) => rs.map((r) => roleCard(r, r.rid ?? ids.get(r.ref) ?? "", f, c)).join("") });
   }
   if (f.targets?.length) blocks.push({ b: "group", label: "Targets - companies, no verified opening" },

@@ -4,25 +4,26 @@
 //
 //   CAREER_MODEL_DEFAULT   the committed model: the brain, the reply writer, drafts, outreach, the search judge.
 //
-// Claude-only (owner, 2026-11-02 18:38 CT): the default is claude-haiku-5-5; claude-sonnet-5-5 stays an allowed rollback.
-// The one environment override is the EMERGENCY ROLLBACK, on its own key (CAREER_MODEL is the background readers' key):
+// SONNET ONLY (owner, 2026-11-09, D-046: "Make sure sonnet 5.5 is the only model used for trainee's output"): the default is
+// claude-sonnet-5-5 and it is the only model on ROLLBACK_MODELS, so no setting can move a reply off Sonnet 5.5; there is no
+// Haiku default, rollback or fallback. The environment key stays read (CAREER_MODEL is the background readers' key):
 //
 //   supabase secrets set CAREER_REPLY_MODEL=<allowlisted model> --project-ref <ref>    that model at once, no deploy
 //   supabase secrets unset CAREER_REPLY_MODEL --project-ref <ref>                      back to CAREER_MODEL_DEFAULT
 //
-// It is honoured only for a model on ROLLBACK_MODELS (each priced in _shared/model_gateway.ts PRICES, so the global daily
-// budget caps it) and ANTHROPIC_API_KEY is configured; anything else (a typo, an unknown id, a non-Claude id, no key) serves
-// the default. Every model here is a Claude model (providerFor refuses any other id).
+// It is honoured only for a model on ROLLBACK_MODELS (each priced in _shared/model_gateway.ts PRICES, so the global
+// budget caps it) and ANTHROPIC_API_KEY is configured; anything else (a Haiku id, a typo, an unknown id, a non-Claude id, no
+// key) is ignored with one log line and serves the default. Every model here is a Claude model (providerFor refuses any other id).
 // The rollback is temporary; the lasting change is a reviewed commit to CAREER_MODEL_DEFAULT that passes the deploy standard.
-import { type ModelConfig, modelConfigFor, PRICES, warnIgnoredOnce } from "../_shared/model_gateway.ts";
+import { type ModelConfig, modelConfigFor, PRICES, PRODUCT_MODELS, warnIgnoredOnce } from "../_shared/model_gateway.ts";
 
 type Env = { get(k: string): string | undefined };
 
 // The model this commit serves. Read as text by tests: keep it one line, quoted.
-export const CAREER_MODEL_DEFAULT = "claude-haiku-5-5";
+export const CAREER_MODEL_DEFAULT = "claude-sonnet-5-5";
 export const CAREER_MODEL_ENV = "CAREER_REPLY_MODEL";
-// The models a rollback may name (D-038): the current default and Sonnet 5.5.
-export const ROLLBACK_MODELS: readonly string[] = ["claude-haiku-5-5", "claude-sonnet-5-5"];
+// The models a rollback may name (D-038, narrowed by D-046): Sonnet 5.5 only, the product's one model.
+export const ROLLBACK_MODELS: readonly string[] = PRODUCT_MODELS;
 
 const keyed = (env: Env, model: string) => !!modelConfigFor(env, model).apiKey.trim(); // the gateway reads the key; nothing here does
 
@@ -30,7 +31,7 @@ const keyed = (env: Env, model: string) => !!modelConfigFor(env, model).apiKey.t
 export function careerModel(env: Env): string {
   const v = (env.get(CAREER_MODEL_ENV) ?? "").trim();
   if (v && ROLLBACK_MODELS.includes(v) && PRICES[v] && keyed(env, v)) return v;
-  if (v) warnIgnoredOnce(CAREER_MODEL_ENV, v, ROLLBACK_MODELS.includes(v) ? "no ANTHROPIC_API_KEY" : "not a listed Claude model");
+  if (v) warnIgnoredOnce(CAREER_MODEL_ENV, v, ROLLBACK_MODELS.includes(v) ? "no ANTHROPIC_API_KEY" : "Trainee serves claude-sonnet-5-5 only (D-046)");
   return CAREER_MODEL_DEFAULT;
 }
 

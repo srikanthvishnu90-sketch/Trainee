@@ -267,8 +267,8 @@ if (import.meta.main) {
   const meter = newMeter(), judgeMeter = newMeter();
   // D-038: the measured commit's committed reply model (agent-chat/release_model.ts) or the request's model (CAREER_REPLY_MODEL).
   const rm: any = await import("../../supabase/functions/agent-chat/release_model.ts").catch(() => null);
-  const brainCfg = rm ? rm.careerModelConfig(Deno.env) : modelConfigFor(Deno.env, get("CAREER_REPLY_MODEL") || "claude-haiku-5-5");
-  const committedModel: string = rm ? rm.CAREER_MODEL_DEFAULT : "claude-haiku-5-5";
+  const brainCfg = rm ? rm.careerModelConfig(Deno.env) : modelConfigFor(Deno.env, get("CAREER_REPLY_MODEL") || "claude-sonnet-5-5");
+  const committedModel: string = rm ? rm.CAREER_MODEL_DEFAULT : "claude-sonnet-5-5";
   if (usesModel && !isClaude(brainCfg.model)) { console.log(`NOT RUN: the brain model ${brainCfg.model} is not a claude- model (Trainee is Claude only); name one with CAREER_REPLY_MODEL.`); Deno.exit(2); }
   const brainLabel = usesModel && brainCfg.model !== committedModel ? `${brainName}:${brainCfg.model}` : brainName;
   const judgeCfg = modelConfigFor(Deno.env, judgeAModel), judge2Cfg = modelConfigFor(Deno.env, judgeBModel);

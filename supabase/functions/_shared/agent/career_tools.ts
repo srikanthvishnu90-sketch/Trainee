@@ -264,6 +264,8 @@ export function careerTools(deps: {
   const strs = (description: string) => ({ type: "array", items: { type: "string" }, description });
   const marketTools: ToolSpec[] = deps.market ? [{
     name: "research_market", effect: "read",
+    // Review of #589: publishing a research brief File writes to the person's own account (a File row and its link).
+    effectOf: (out) => (out as MarketResult | null)?.status === "ok" && !!(out as any).file_url ? "write_own" : "read",
     description: "Use when the person asks for market research that needs current, cited sources: what would change a market or industry, how 2 to 4 companies compare, pay for a role in a place, a company's size or business. Not for job search and not for an open \"how do I become X\" question. It searches, opens each page itself and returns only points that a fetched page states, each with numbered sources. YOU choose the format: \"inline\" for a quick answer (one figure, one fact, a yes or no), \"file\" for a comparison, an outlook, or anything that needs more than about three points. Never answer such a question from memory; write no link (code adds the sources or the file link).",
     input_schema: obj({
       question: str("The person's question, in their words"),

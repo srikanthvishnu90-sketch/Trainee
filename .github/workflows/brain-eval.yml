@@ -68,8 +68,8 @@ jobs:
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       # D-038: no model pin. The brain runs the measured commit's committed Claude model (agent-chat/release_model.ts), or the
-      # request model (allowlisted below) for a comparison run, logged under its own brain name (e.g. staged:claude-haiku-5-5)
-      # so S3 never counts it. run.ts refuses a brain that is not a claude- model.
+      # request model (allowlisted below; empty since D-046, Sonnet only) for a comparison run, logged under its own brain
+      # name so S3 never counts it. run.ts refuses a brain that is not a claude- model.
       # The sealed set opens with HELDOUT_SEAL_KEY alone, after the owner has run the rewrap workflow (sealed-set-rewrap.yml):
       # the set was first sealed to a key derived from the old provider secret, which this workflow no longer receives.
       HELDOUT_SEAL_KEY: ${{ secrets.HELDOUT_SEAL_KEY }}
@@ -117,7 +117,9 @@ jobs:
             const releaseBrain = String(ev ? (Deno.env.get("IN_RELEASE_BRAIN") || "agent") : (f.release_brain ?? (set !== "sealed" ? "agent" : ""))).trim();
             const suite = ev ? "heldout" : (f.suite ?? "heldout");
             // D-038: an optional reply model from an allowlist (the request file model on a push); empty = the committed default.
-            const MODELS = ["claude-haiku-5-5"]; // Haiku only: Sonnet is Judge A, never a candidate reply model (owner, 2026-11-03)
+            // D-046 (owner, 2026-11-09): Trainee serves claude-sonnet-5-5 only, so the brain is always measured as served (the
+            // committed default); no other reply model may be requested (release_model.ts would ignore it and run.ts refuse).
+            const MODELS = [];
             const model = String((ev ? "" : f.model) ?? "").trim();
             if (model && (!MODELS.includes(model) || suite !== "heldout" || set === "sealed")) { console.log(`NOT RUN: model ${model} needs the allowlist (${MODELS.join(", ")}), the heldout suite and a set other than sealed`); Deno.exit(2); }
             if (set === "sealed" && (!brains.includes(releaseBrain) || !["router", "staged", "agent"].includes(releaseBrain))) { console.log(`NOT RUN: a sealed request names its release_brain (${releaseBrain || "missing"}), and it must be one of the brains measured (${brains})`); Deno.exit(2); }

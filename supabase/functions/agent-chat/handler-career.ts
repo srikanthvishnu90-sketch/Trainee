@@ -40,9 +40,8 @@ import { CareerPool } from "../_shared/career_pool.js";
 import { createCareerPersistence, careerRequestHash } from "../_shared/career_persistence.js";
 import { callModel as callModelUncapped, newMeter, turnLedger, WEB_SEARCH_AVAILABLE } from "../_shared/model_gateway.ts";
 import { careerModelConfig } from "./release_model.ts";
-// LAUNCH READINESS (2026-10-26): the daily model ceiling, the per-person turn order, the pool read only when used.
-import { CAP_REPLACED_INTENTS, capPausedView, capViewFor } from "./cap_views.ts";
-import { spendCap, spendLimitsFromEnv, supabaseDailySpend } from "../_shared/career_spend_cap.ts";
+// LAUNCH READINESS (2026-10-26): the per-turn model wrapper (no per-person cap since D-046), the per-person turn order, the pool read only when used.
+import { spendCap } from "../_shared/career_spend_cap.ts";
 import { enterTurnGate, type TurnGate } from "../_shared/career_turn_gate.ts";
 import { CONFLICT_CODES, CONFLICT_REPLY, countSend, newTurnEffects, refusedSaveReply, trackTurnEffects } from "../_shared/career_save_replies.ts";
 import { poolNeeded } from "./career_pool_need.ts";
@@ -53,6 +52,9 @@ import { modelDerive } from "../_shared/agent/research/derive.ts";
 import { replyFlagsMeta } from "../_shared/agent/loop.ts"; // flag-only reply checks saved with the turn (Greptile on #566)
 import { gatewayGroundSearch, memoryGroundCache } from "../_shared/agent/research/ground.ts";
 const researchCache = memoryGroundCache();
+// Review of #589 (DNS rebinding): at startup, can this runtime resolve names (Deno.resolveDns)? Logged once (research_dns_probe);
+// when it cannot, the research reader reads nothing (fails closed) instead of fetching without the resolved-address check.
+if (researchReplyOn(Deno.env)) void dnsProbe();
 import { AGENT_BRAIN_RELEASED, chooseBrain, agentTurn, HISTORY_WINDOW, historyWindow, summaryFor } from "./career_brain.ts";
 import { brainMode, stagedRoute, stagedToolPolicy } from "./career_staged.ts";
 import { turnClock } from "./turn_clock.ts";
@@ -129,8 +131,8 @@ import { applyHereTurn } from "../_shared/apply_here.ts"; // APPLY HERE: a paste
 import { supabaseFileStore } from "../trainee-file/store.ts";
 import { createFileService, supabaseFileKindStore } from "../_shared/file_service.ts"; // FILE KINDS
 import { researchBriefOn, researchReplyOn } from "../_shared/research_reply.ts"; // R9-C
-import { fetchSources } from "../_shared/research_sources.ts";
-import { declaredFetch, searchProviderFor } from "../_shared/research_search.ts";
+import { searchProviderFor } from "../_shared/research_search.ts";
+import { dnsProbe, resolvedReader } from "../_shared/research_dns.ts";
 import { prepFileTurn } from "./career_prep_file.ts"; // BETA C03: the interview prep File
 import { factsForTurn, replyWriterOn, rewrites, writable, writeReply, writerChannel } from "../_shared/career_reply_writer.ts"; // V1 TEXTING VOICE
 import { correctedAsk } from "../_shared/search_correction.ts"; // SPEC 2.3
@@ -458,10 +460,10 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
     // product's designed honest-empty reply — never a crashed turn,
     // never an invented role. The worker's postingsFor reads through
     // the same loader, so the two pools cannot disagree.
-    // LAUNCH READINESS X7: every model call this turn makes goes through the person's daily ceiling
-    // (_shared/career_spend_cap.ts); over it, the call is refused before any request and the reply says so. The name
-    // callModel is shadowed here on purpose, so no call site below can reach the gateway around the ceiling.
-    const spend = spendCap({ read: supabaseDailySpend(admin, user.id), limits: spendLimitsFromEnv(Deno.env), call: callModelUncapped });
+    // Every model call this turn makes goes through one wrapper (_shared/career_spend_cap.ts). D-046: there is no per-person
+    // cap; the wrapper only remembers a refusal by the GLOBAL budget (the gateway's reservation) so the reply says so. The
+    // name callModel is shadowed here on purpose, so every call site below is seen by that one wrapper.
+    const spend = spendCap({ call: callModelUncapped, env: Deno.env });
     const callModel = spend.call;
     // 2026-10-28: this turn's cost row, always (see turnLedger): calls made, zero, or unrecorded. Written in finally, below.
     const ledger = turnLedger(admin, user.id, tid);
@@ -1118,7 +1120,6 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // rollback, and then it is never taken and the router answers exactly as before. Read lazily, only when the brain
       // test below is reached. With no model key configured the staged brain is never tried: the router answers, as it
       // does when the model fails (D-035).
-      let capHeld = null as "limit" | "unread" | null; // cast: an initialiser of null would narrow every later read to never
       const staged = stagedRoute({ env: Deno.env, message, ctx: ctx as unknown as Record<string, unknown>, host, structured: !!(careerTask || careerBatch), clock });
       // A "judge prompt: ..." instruction is code's (judgePromptTurn), and without a model key the brain is never tried.
       const stagedReady = !isJudgePromptAsk(message) && !!careerModelConfig(Deno.env).apiKey;
@@ -1265,7 +1266,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         if (offerAns.card) agentMeta = { offer_card: offerAns.card };
       } else if (outreachStatus) {
         out = { reply: outreachStatus.reply, intent: outreachStatus.intent, resultStatus: outreachStatus.status, contained: false, handler: "outreach_status" };
-      } else if (!careerTask && !careerBatch && ((AGENT_BRAIN_RELEASED && chooseBrain(Deno.env) === "agent") || (stagedReady && staged.toBrain())) && !host.isHostControlled(message, ctx) && !(capHeld = await spend.exhausted())) {
+      } else if (!careerTask && !careerBatch && ((AGENT_BRAIN_RELEASED && chooseBrain(Deno.env) === "agent") || (stagedReady && staged.toBrain())) && !host.isHostControlled(message, ctx)) {
         const meter = ledger.track(newMeter());
         const cfg = careerModelConfig(Deno.env);
         // WO-027 (B5): the last 40 messages after the latest erase; one more row says whether the thread is longer.
@@ -1315,7 +1316,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           // no-key first-party sources (SEC EDGAR, BLS, company sites). The research brief File only with CAREER_RESEARCH_BRIEF=on.
           market: researchReplyOn(Deno.env) && cfg.apiKey ? {
             search: searchProviderFor(Deno.env, fetch),
-            read: (urls) => fetchSources(urls, { fetch: declaredFetch(fetch, Deno.env.get("RESEARCH_USER_AGENT")), max: 8 }),
+            // Every hop's resolved addresses are checked (research_dns.ts resolvedReader; review of #589).
+            read: resolvedReader({ fetch, userAgent: Deno.env.get("RESEARCH_USER_AGENT") }),
             draft: async (p) => { const r = await callModel(cfg, { system: p.system, messages: p.messages.map((m) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: 1800 }, { meter, role: "chat" }); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); },
             publish: researchBriefOn(Deno.env) ? async (data) => { const r = await createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }).create(user.id, "research_brief", data); return r.ok && r.url ? { url: r.url } : null; } : null,
           } : null,
@@ -1337,20 +1339,6 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             // flag-only reply checks (loop.ts): saved with the turn so remaining reply problems can be counted (Greptile on #566)
             ...replyFlagsMeta(turn as { flags?: unknown }) };
         }
-      } else if (capHeld) {
-        // PR-5 (2026-11-06): the allowance is spent, so the brain is not tried (zero model calls): code's views (cap_views.ts).
-        const at = { now: Date.now(), unread: capHeld === "unread" };
-        // A crisis message is code's 988 reply first, as in the router else-block below (crisis.ts).
-        const capCrisis = crisisReply(message);
-        const capShown = (v: { reply: string; intent: string; status: "completed" }): typeof out => ({ reply: v.reply, intent: v.intent, resultStatus: v.status, contained: false, handler: capCrisis ? "crisis" : "cap_view" });
-        const view = capCrisis ? { reply: capCrisis, intent: CRISIS_INTENT, status: "completed" as const } : capViewFor(message, at);
-        if (view) out = capShown(view);
-        else {
-          await ensurePool();
-          out = clock.sync("router", () => host.runTurn(message, ctx));
-          if (!out.intent || CAP_REPLACED_INTENTS.includes(out.intent)) out = capShown(capPausedView(at));
-        }
-        agentMeta = { ...(agentMeta || {}), model_limit: capHeld };
       } else {
         // FEATURE 5: job search ranked by fit and judged (_shared/career_search_judge.ts). "judge prompt: ..." keeps the
         // person's own judging instructions (a standing instruction). After the router decides a turn is a role search
@@ -1642,7 +1630,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         const scrub = (x: string) => x.replace(/\s*(?:—|-|,)\s*(?:the\s+)?parse check (?:PASS|WARN|FAIL|passed|ran)\b/gi, "");
         out = { ...out, reply: scrub(out.reply), ...(out.parts ? { parts: out.parts.map(scrub) } : {}) };
       }
-      // LAUNCH READINESS X7: a model call refused by the daily ceiling (or an unreadable spend) is said, never hidden.
+      // A model call refused by the global budget (D-038a; no per-person cap since D-046) is said, never hidden.
       const spendNote = spend.note();
       if (spendNote) {
         out = { ...out, reply: `${out.reply}\n${spendNote}`, ...(out.parts ? { parts: [...out.parts, spendNote] } : {}) };

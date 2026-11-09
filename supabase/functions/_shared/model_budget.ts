@@ -232,7 +232,7 @@ export function usageProven(provider: string, raw: any): boolean {
 
 // An eval or test runner calls this BEFORE starting any new run (owner, 2026-11-02): at or over the $70 total the run does not
 // start; and when the run's quoted worst case is given (micros) the ledger must be able to take it right now (it is reserved,
-// then released: a proven no-call). Production serving does not call it (its own per-person daily gate stays); every
+// then released: a proven no-call). Production serving does not call it (each of its calls reserves in callModel; no per-person gate, D-046); every
 // reservation still counts in the ledger. An unreadable ledger also refuses (fail closed). Throws ModelBudgetBlockedError
 // (message "NOT RUN: ..."); returns the status when the run may start.
 const notRun = (block: "limit" | "unavailable", detail: string) => { const e = new ModelBudgetBlockedError(block, detail); e.message = `NOT RUN: ${e.message}`; return e; };

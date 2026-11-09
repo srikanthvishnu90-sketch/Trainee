@@ -17,6 +17,15 @@ handler, so the planner, texting-native delivery and the drafting features are n
 the task eval (`evals/career/tasks/run.ts`, real handler), delivery and the approval paths by the acceptance suite. Features
 that would change reply words with nothing measuring them stay OFF (reply writer, knowledge library, search judge).
 
+**Model and caps (D-046, owner, 2026-11-09).** Every model call that produces Trainee's output or decides what it does uses
+`claude-sonnet-5-5` (`_shared/model_gateway.ts` `TRAINEE_MODEL`; `agent-chat/release_model.ts` `CAREER_MODEL_DEFAULT`, whose
+`ROLLBACK_MODELS` is Sonnet 5.5 alone; `_shared/career_reader_model.ts`). `CAREER_REPLY_MODEL`, `CAREER_MODEL`,
+`MODEL_PROVIDER` and `ANTHROPIC_MODEL` naming anything else are ignored with one log line; nothing falls back to Haiku. There
+is no per-person AI cap: `CAREER_MODEL_DAILY_USD` and `CAREER_MODEL_DAILY_CALLS` are ignored (one log line if set). What
+stays: the global $70 model budget (D-038a: a reservation before every call, the hard stop, `MODEL_BUDGET_PAUSED`) and the
+safety limits on external actions (200 applications a day, D-R9-1; the per-employer pace; 20 new contacts a day and 2
+follow-ups, D-043). Tested by `tests/architect/d046-sonnet-only-no-person-cap.test.ts`.
+
 Columns: default before D-036 → served now; what it enables; what it needs; risk; class.
 (a) = ON for end-to-end testing; (a′) = pending; (b) = stays OFF; (c) = unchanged default, not a release flag.
 
@@ -117,7 +126,8 @@ Nothing sends from Trainee's own identity and there is no switch that could. `ve
 | `CAREER_APPLY_HERE`, `CAREER_APPLY_LINK` | on (`off` disables) | already on |
 | `CAREER_ACCOUNT_MEMORY` | auto (on for texting-linked people) | `off` is its kill switch |
 | `CAREER_BRAIN_ROUTER_INTENTS`, `CAREER_PLANNER_USERS` | unset | per-class and per-person limits, still honored |
-| `CHANNEL_APPROVAL_TTL_MIN`, `CAREER_MODEL*`, `CAREER_MODEL_DAILY_*`, `INGEST_*`, `LOOPMESSAGE_DAILY_CONTACTS`, `WHATSAPP_DAILY_TEMPLATES`, `CAREER_SEND_BOUNCE_*`, `CAREER_PEOPLE_CACHE_DAYS`, `CLOUD_MAX_*`, `CLOUD_PREPARE_*` limits | tuning values | not switches |
+| `CAREER_MODEL`, `CAREER_REPLY_MODEL`, `CAREER_MODEL_DAILY_*` | ignored (D-046) | the model is always `claude-sonnet-5-5`; no per-person cap; one log line when set |
+| `CHANNEL_APPROVAL_TTL_MIN`, `INGEST_*`, `LOOPMESSAGE_DAILY_CONTACTS`, `WHATSAPP_DAILY_TEMPLATES`, `CAREER_SEND_BOUNCE_*`, `CAREER_PEOPLE_CACHE_DAYS`, `CLOUD_MAX_*`, `CLOUD_PREPARE_*` limits | tuning values | not switches |
 | Secrets (`OPENAI_API_KEY`, `TELEGRAM_*`, `LOOPMESSAGE_*`, `WHATSAPP_*`, `GOOGLE_OAUTH_*`, `STRIPE_*`, `HUNTER_API_KEY`, ...) | per `scripts/launch/secrets-audit.sh` | their presence wires a feature (S5); none is set by this change |
 
 Not in the deployed code at this SHA (so nothing to switch here): an outreach personalization default and the results

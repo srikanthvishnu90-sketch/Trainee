@@ -21,14 +21,14 @@ const text = (t: string) => ({ type: "text", text: t });
 const toolUse = (id: string, name: string, input: unknown) => ({ type: "tool_use", id, name, input });
 const gate = () => ({ budget: memoryBudgetGate() });
 
-Deno.test("provider choice: Claude Haiku 5.5 for every role; no secret selects another provider or model", () => {
+Deno.test("provider choice: Claude Sonnet 5.5 for every role (D-046); no secret selects another provider or model", () => {
   const o = modelConfig(env({ ANTHROPIC_API_KEY: KEY }));
-  eq([o.provider, o.model, o.reasoningEffort, o.apiKey === KEY], ["anthropic", "claude-haiku-5-5", "low", true]);
-  eq(CLAUDE_DEFAULT_MODEL, "claude-haiku-5-5");
-  for (const role of ["chat", "router", "planner", "probe"] as const) eq(modelConfig(env({ ANTHROPIC_API_KEY: KEY }), role).model, "claude-haiku-5-5", role);
+  eq([o.provider, o.model, o.reasoningEffort, o.apiKey === KEY], ["anthropic", "claude-sonnet-5-5", "low", true]);
+  eq(CLAUDE_DEFAULT_MODEL, "claude-sonnet-5-5");
+  for (const role of ["chat", "router", "planner", "probe"] as const) eq(modelConfig(env({ ANTHROPIC_API_KEY: KEY }), role).model, "claude-sonnet-5-5", role);
   // Q3 (SEC11): provider and model are not switchable by secret. These are ignored.
   const asked = modelConfig(env({ ANTHROPIC_API_KEY: KEY, MODEL_PROVIDER: "other", ANTHROPIC_MODEL: "claude-x", ANTHROPIC_ROUTER_MODEL: "claude-r", OPENAI_MODEL: "x", OPENAI_ROUTER_MODEL: "y" }), "router");
-  eq([asked.provider, asked.model], ["anthropic", "claude-haiku-5-5"], "model and provider secrets are ignored");
+  eq([asked.provider, asked.model], ["anthropic", "claude-sonnet-5-5"], "model and provider secrets are ignored");
   eq(modelConfig(env({})).apiKey, "", "no key is not configured, never a fallback");
   eq(modelConfig(env({ ANTHROPIC_API_KEY: KEY, ANTHROPIC_EFFORT: "medium" })).reasoningEffort, "medium");
   eq(modelConfigFor(env({ ANTHROPIC_API_KEY: KEY }), "claude-sonnet-5-5").model, "claude-sonnet-5-5");

@@ -15,13 +15,15 @@
 // - delivery records each part's state, and a part that did not go out is said, never claimed.
 //
 // The model writes the draft (composeResearchDraft) only with CAREER_RESEARCH_REPLY=on; off, nothing here runs a model.
+import { releaseFlagOn } from "../agent-chat/release_config.ts"; // D-047: CAREER_RESEARCH_REPLY is a release flag
 import { isBlockedHost, isHttps, normalizeUrl, type SourcePage, urlsIn, verifiedLinkGuard } from "./research_sources.ts";
 import { type ReportStore, storeReport } from "./research_report_store.ts";
 import { dropHalfRange } from "./agent/research/reply.ts";
 import { numbersIn, numEq } from "./agent/research/guard.ts";
 import type { ChannelAdapter } from "./channel_adapters.ts";
 
-export const researchReplyOn = (env: { get(k: string): string | undefined }) => env.get("CAREER_RESEARCH_REPLY") === "on";
+// D-047: a release flag, read through the release config (served on unless the environment rolls it back with "off").
+export const researchReplyOn = (env: { get(k: string): string | undefined }) => releaseFlagOn(env, "CAREER_RESEARCH_REPLY");
 
 export interface ResearchReply {
   answer: string;

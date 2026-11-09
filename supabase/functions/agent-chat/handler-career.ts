@@ -643,8 +643,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         ? readOffer((await liveOfferRow(admin, tid).catch(() => null))?.meta) : null;
       const card0 = !tapIn && !connAns && !outlookAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         // FEATURE 16: OWNER RULE (2026-10-26): no card without a confirmed resume on file (resumeReady).
-        ? await cardTurn({ message, userId: user.id, threadId: tid, now: Date.now(), replyTo, resumeReady: resumeOnFileReader(admin, user.id), store: supabaseCardStore(admin), events,
-          review: (shown) => reviewLinksFor(shown, cardReviewDeps(admin, user.id)) })
+        ? await cardTurn({ message, userId: user.id, threadId: tid, now: Date.now(), replyTo, resumeReady: resumeOnFileReader(admin, user.id),
+          review: (shown) => reviewLinksFor(shown, cardReviewDeps(admin, user.id)), store: supabaseCardStore(admin), events })
         : null;
       const card = card0 && offerLastWord && card0.status === CARD_NEEDS_REPLY_STATUS ? null : card0;
       // WO-025: the text mock interview, code's like the card: "mock me for <role> at <company>", "end mock", and the answers

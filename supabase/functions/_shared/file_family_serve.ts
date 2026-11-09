@@ -12,6 +12,8 @@ import type { Act, Block, FamilyFile, FamilyId, Src } from "./file_family.ts";
 import { esc } from "./file_design.ts";
 import { applicationReviewFile, messageReviewFile } from "./file_family_apply.ts";
 
+// The application record's own status notes (file_kinds.ts STATUS_NOTE), so the family says exactly what the kind page says.
+const STATUS_WORDS: Record<string, string> = { queued: "Queued. Nothing has been submitted yet.", prepared: "Prepared. Nothing has been submitted yet.", submitted: "Submitted. The employer hasn't confirmed it.", confirmed: "Confirmed by the employer." };
 export const FILE_FAMILIES_ENV = "TRAINEE_FILE_FAMILIES";
 // Off unless set to "on": the family pages replace a kind's page only when the owner turns this on.
 export const fileFamiliesOn = (env: { get(k: string): string | undefined }): boolean => (env.get(FILE_FAMILIES_ENV) ?? "").trim().toLowerCase() === "on";
@@ -48,7 +50,8 @@ const sourced = (xs: unknown) => (Array.isArray(xs) ? xs : []).filter((f) => f &
 
 export function familyOfRecord(rec: FileRecord, token: string): { family: FamilyId; file: FamilyFile } | null {
   const d = rec.data ?? {}, views = actionsOf(rec);
-  if (rec.kind === "introduction" && d.message?.channel === "email" && rec.tag) {
+  // An introduction without a stored address keeps its kind page: F-12 never approves an email to an address it cannot show.
+  if (rec.kind === "introduction" && d.message?.channel === "email" && rec.tag && typeof d.message?.to === "string" && d.message.to.trim()) {
     const p = d.person ?? {}, m = d.message ?? {}, intro = views.find((a) => a.id === "introduce"), pass = views.find((a) => a.id === "pass");
     const why = sourced(d.why).map((b) => `${b.text} (${b.source})`).join(" ");
     const name = String(p.name ?? "").trim();
@@ -58,7 +61,7 @@ export function familyOfRecord(rec: FileRecord, token: string): { family: Family
       recipient: { initials: initials(name), name: name || "Not named", basis: [[p.role, p.company].filter(Boolean).join(", "), why].filter(Boolean).join(". "), resolved: !!name && !!p.source && !!m.to },
       to: m.to ?? null, channel: "email", attachments: null, followUp: "None - silence ends the ask", words: [m.subject ? `Subject: ${m.subject}` : "", m.body ?? ""].filter(Boolean).join("\n\n"),
       approve: { label: "Approve send", effect: "send", post: { token, action: "introduce", fields: { tag: rec.tag } } },
-      approveOff: intro && intro.state !== "available" ? intro.note ?? "Already decided." : null,
+      approveOff: intro && intro.state !== "available" ? intro.note ?? "Already decided." : null, code: rec.tag,
       acts: { secondary: passAct },
     }) };
   }
@@ -68,6 +71,15 @@ export function familyOfRecord(rec: FileRecord, token: string): { family: Family
     const evidence: Src | null = c.url && /^https:\/\//i.test(c.url) ? { label: c.id ? `Employer confirmation ${c.id}` : "Employer confirmation", href: c.url, at: iso(d.submitted_at ?? d.as_of) } : null;
     const state = d.status === "queued" || d.status === "prepared" ? "approved" as const : "submitted" as const;
     // Flag a problem keeps its own note box (the record's action): a family control cannot carry a text field.
+    // The record's own words for where it stands, its confirmation reference, and what was not done - each from the record.
+    const status: Block = { b: "card", label: "Status - from the application record", parts: [{ p: "kv", rows: [
+      { k: "Status", v: STATUS_WORDS[String(d.status)] ?? null, src: rec_ },
+      ...(c.id ? [{ k: "Confirmation ID", v: String(c.id), src: rec_ }] : []),
+      { k: "Last updated", v: iso(d.as_of) ? String(d.as_of).slice(0, 10) : null, src: rec_, missing: "unknown" }] }] };
+    const problems = (Array.isArray(d.problems) ? d.problems : []).filter((x: any) => x?.reason);
+    const notDone: Block[] = problems.length ? [{ b: "card", label: "Not done", parts: problems.map((x: any) => ({ p: "text" as const, lead: `${String(x.outcome ?? "").charAt(0).toUpperCase()}${String(x.outcome ?? "").slice(1)}:`, text: `${x.item}. ${x.reason}` })) }] : [];
+    const flags = (Array.isArray(rec.state?.flags) ? rec.state.flags : []).filter((x: any) => x?.note);
+    const flagged: Block[] = flags.length ? [{ b: "card", label: "Flagged by you", parts: flags.map((x: any) => ({ p: "text" as const, lead: `${iso(x.at)?.slice(0, 10) ?? "unknown"}:`, text: String(x.note) })) }] : [];
     const flag: Block[] = views.some((a) => a.id === "flag" && a.state === "available")
       ? [{ b: "html", html: `<section class="ff-card"><h2 class="ff-label">Flag a problem</h2><form method="post" class="ff-act"><input type="hidden" name="t" value="${esc(token)}"><input type="hidden" name="action" value="flag"><label for="ff-flag" class="ff-p">What looks wrong</label><textarea id="ff-flag" name="note" rows="3" maxlength="500" class="ff-ta"></textarea><button type="submit" class="ff-btn ff-sec" data-effect="decide">Flag a problem</button></form></section>` }] : [];
     return { family: "F-09", file: applicationReviewFile({
@@ -75,9 +87,9 @@ export function familyOfRecord(rec: FileRecord, token: string): { family: Family
       destination: { label: "where it was sent", href: destHref, at: iso(d.as_of) },
       pkg: [{ k: "Company", v: d.company ?? null, src: rec_ }, { k: "Role", v: d.role ?? null, src: rec_ }, { k: "Resume", v: d.resume ?? null, src: rec_ }],
       answers: sourced(d.answers).map((a) => ({ q: String(a.question ?? a.label ?? "Answer"), a: String(a.value ?? a.answer ?? a.text), required: false })),
-      conditions: [], approve: { label: "Approve submission", effect: "submit" }, after: { state, evidence },
+      conditions: [], approve: { label: "Approve submission", effect: "submit", off: "Already approved - this is the record of what was sent." }, after: { state, evidence },
       edit: views.some((a) => a.id === "status" && a.state === "available") ? { label: "View status", effect: "decide", post: { token, action: "status" } } : null,
-      extra: flag,
+      extra: [status, ...notDone, ...flagged, ...flag],
     }) };
   }
   return null;

@@ -99,7 +99,7 @@ type FindResult = { status: "ok"; people: ProviderPerson[]; company; domain: str
   | { status: "not_wired"; reason; http_calls } | { status: "error"; detail; http_calls };
 interface ProviderPerson { provider: "web"; provider_id; name; email: string | null /* published only */; company; company_key; position; source_ref; source_url: string; profile_text: string | null }
 
-providerConfig(env)                       // CAREER_PEOPLE_SEARCH=on + the gateway's OpenAI key; CAREER_PEOPLE_SEARCH_MODEL (default gpt-4.1-mini)
+providerConfig(env)                       // CAREER_PEOPLE_SEARCH=on + the gateway's Anthropic key; model claude-sonnet-5-5 only (D-046: CAREER_PEOPLE_SEARCH_MODEL naming another is ignored)
 makeProvider(config, fetch, { resolve?, mx?, search? }): PeopleProvider | null   // null: NOT_WIRED, no call
 notWiredReply(config): string             // the plain sentence
 openAiWebSearch({ fetch, apiKey, model }): SearchFn;  searchRecipe(company, titles): string[]
@@ -123,10 +123,10 @@ studied, so alumni come from the person's own contacts. The reply says so.
 ## Owner steps
 
 1. Approve model spend for discovery. Each company costs 6 searches plus page reads, cached for everyone for 30 days.
-2. Set the function secret `CAREER_PEOPLE_SEARCH=on`. The key is the existing `OPENAI_API_KEY`, and no new key is
-   needed. This is optional:
-   - `CAREER_PEOPLE_SEARCH_MODEL`: a model that supports Responses `web_search`. The default is `gpt-4.1-mini`, which
-     OpenAI's guide lists for it.
+2. Set the function secret `CAREER_PEOPLE_SEARCH=on`. The key is the existing `ANTHROPIC_API_KEY` (Claude only), and no
+   new key is needed. Nothing runs while the gateway's web search is not available. This is optional:
+   - `CAREER_PEOPLE_SEARCH_MODEL`: ignored unless it is `claude-sonnet-5-5`, the only model Trainee serves (D-046); any
+     other value is logged once and Sonnet 5.5 is used.
    - `CAREER_PEOPLE_CACHE_DAYS`
 3. Apply the migration with go-live (it is in `MIGRATIONS` with its `MIGRATION_MARK`).
 

@@ -437,14 +437,22 @@ Deno.test("facts/5 nothing confirmed, quarantined facts present: none of them is
 // a posting; a bare ask states none.
 Deno.test("target/1 'product management', 'consulting', 'trading', 'nursing' are targets; 'the quillstone data analyst intern role' is a posting", () => {
   for (const [ask, label] of [["make my resume a PDF for product management", "product management roles"], ["tailor my resume for consulting roles", "consulting roles"],
-    ["make my resume a PDF for trading", "trading roles"], ["make my resume for nursing jobs", "nursing roles"], ["tailor my resume for product management roles", "product management roles"]] as const) {
+    ["make my resume a PDF for trading", "trading roles"], ["make my resume for nursing jobs", "nursing roles"], ["tailor my resume for product management roles", "product management roles"],
+    ["make my resume for underwater basket weaving roles", "underwater basket weaving roles"],
+    // Round 4: field words the vocabulary does not hold are fields, not employers, unless written as a name.
+    ["make my resume for cybersecurity roles", "cybersecurity roles"], ["make my resume for fintech internships", "fintech internships"],
+    ["make my resume for robotics roles", "robotics roles"], ["make my resume for blockchain roles", "blockchain roles"], ["make my resume for edtech roles", "edtech roles"],
+    ["make my resume for pharma roles", "pharma roles"], ["make my resume for ui/ux roles", "ui/ux roles"], ["make my resume for sre roles", "sre roles"],
+    ["make my resume for esg roles", "esg roles"]] as const) {
     assertNode.equal(targetOf(ask)?.label, label, ask);
   }
-  for (const ask of ["tailor my resume for the quillstone data analyst intern role", "tailor my resume", "make my resume a pdf for me", "make my resume for review"]) assertNode.equal(targetOf(ask), null, ask);
+  for (const ask of ["tailor my resume", "make my resume a pdf for me", "make my resume for review"]) assertNode.equal(targetOf(ask), null, ask);
+  // Round 4: written in lower case, a name is an employer when it is one on hand (the last job list or the posting pool).
+  assertNode.equal(targetOf("tailor my resume for the quillstone data analyst intern role", ["quillstone analytics"]), null, "an employer in the pool, lower case");
   // Round 3: a name and only a generic word is an employer: a posting, never "Resume for stripe roles". With a resume task on
   // hand it is still not the task's (142's named-firm path or the last job list answers it).
   const task = { pending: null, file: { sha256: "x", filename: "x.pdf", pages: 1, label: "data analyst internships" }, target: targetOf(T1) } as any;
-  for (const ask of ["tailor my resume for the Stripe role", "make my resume for the Goldman Sachs internship", "tailor my resume for Google roles"]) {
+  for (const ask of ["tailor my resume for the Stripe role", "make my resume for the Goldman Sachs internship", "tailor my resume for Google roles", "tailor my resume for the Quillstone data analyst intern role"]) {
     assertNode.equal(targetOf(ask), null, ask);
     assertNode.equal(resumeAskOf(ask, task, { companies: [], jobs: 0, posting: false, resumeShown: true }), null, `${ask}: not the resume task's`);
   }
@@ -530,7 +538,9 @@ Deno.test("gpa/2 '3.8 out of 4.0 GPA' reads 3.8; every phrase comes off whole", 
 // Round-2 re-review of #644 (2): a full stop after the value or the scale, a major and an overall value, "on a 4.0 scale", a GPA in
 // parentheses, "GPA (cumulative)", "CGPA": each is read as its value and comes off whole; "3.8/4.0" with no GPA word is left alone.
 Deno.test("gpa/3 'GPA 3.8.', 'GPA 3.8/4.0.', 'Major GPA 3.9, overall 3.6', '(GPA: 3.8)', 'CGPA 3.8': read right, off whole", () => {
-  const cases: [string, string | null, string][] = [
+  const cases: [string, string | string[] | null, string][] = [
+    // Round 4: two values written together are both read, so they conflict.
+    ["GPA 3.6 and 3.8", ["3.6", "3.8"], "TEST University - B.S. Economics"],
     ["GPA 3.8.", "3.8", "TEST University - B.S. Economics."],
     ["GPA: 3.85. Dean's List", "3.85", "TEST University - B.S. Economics. Dean's List"],
     ["GPA 3.8/4.0.", "3.8", "TEST University - B.S. Economics."],
@@ -548,7 +558,7 @@ Deno.test("gpa/3 'GPA 3.8.', 'GPA 3.8/4.0.', 'Major GPA 3.9, overall 3.6', '(GPA
     CareerProfile.ingestResume(p, { text: `EDUCATION\nTEST University - B.S. Economics, ${form}\n\nAWARDS\nHonor (TEST), GPA 3.4\n\nEXPERIENCE\nAnalyst, Acme (TEST), 2025\n- Did analysis (TEST)`, fileName: "x.txt" });
     for (const f of (p as any).facts) CareerProfile.confirmFact(p, f.id);
     const on = buildResume(p, targetOf(T1)!, false), off = buildResume(p, targetOf(T1)!, false, { noGpa: true });
-    assertNode.deepEqual(on.gpaConflict, value ? [value, "3.4"] : null, `${form}: read as ${value ?? "no GPA"}`);
+    assertNode.deepEqual(on.gpaConflict, value ? [...[value].flat(), "3.4"] : null, `${form}: read as ${value ?? "no GPA"}`);
     assertNode.equal(off.lines.find((l) => /TEST University/.test(l)), offLine, `${form}: off whole, nothing left over`);
   }
 });

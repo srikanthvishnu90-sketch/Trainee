@@ -58,9 +58,25 @@ const GENERIC = /^(internships?|interns?|roles?|jobs?|positions?)$/;
 const LEADS_TO = `(?:for|is|as|asked for|toward|towards|targeting|aimed at)\\s+(?:an? |the |some )?`;
 // Round 3 (R1): a name followed only by a generic word ("the Stripe role", "the Goldman Sachs internship", "Google roles") is an
 // employer, so a posting: the last job list or 142's named-firm reply answers it, never a general resume.
-export const postingTarget = (message: string) => readTarget(message) === "posting";
-export function targetOf(message: string): Target | null { const r = readTarget(message); return r === "posting" ? null : r; }
-function readTarget(message: string): Target | null | "posting" {
+// Round 4: a word is a name only when the person wrote it Capitalised (in their own message, not the lowercased copy) or it is
+// an employer on the last job list; "fintech internships" and "underwater basket weaving roles" are fields.
+export const postingTarget = (message: string, companies: string[] = []) => readTarget(message, companies) === "posting";
+export function targetOf(message: string, companies: string[] = []): Target | null { const r = readTarget(message, companies); return r === "posting" ? null : r; }
+// The words of the employers on hand (the last job list and the posting pool), read once per list.
+const wordsCache = new WeakMap<string[], Set<string>>();
+const employerWords = (companies: string[]) => {
+  let w = wordsCache.get(companies);
+  if (!w) wordsCache.set(companies, w = new Set(companies.flatMap((c) => lc(c).split(/[^a-z0-9&]+/).filter((x) => x.length > 2 && !FIELD.test(x)))));
+  return w;
+};
+const hasUnknownWord = (message: string) => {
+  const r = readTarget(message, []);
+  return !!r && r !== "posting" && r.role.split(" ").some((w) => !FIELD.test(w) && !new RegExp(`^${ROLE}$`).test(w));
+};
+const esc = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function readTarget(message: string, companies: string[]): Target | null | "posting" {
+  const named = (w: string) => new RegExp(`(?<![A-Za-z])${esc(w.charAt(0).toUpperCase() + w.slice(1))}(?![a-z])`).test(String(message))
+    || employerWords(companies).has(w);
   const t = lc(message).replace(/\bnot (?:an? |the )?[a-z][a-z0-9 &/+.-]{2,80}?(?=[,.;!?]|$| please| since| and )/g, " ");
   const withRole = new RegExp(`\\b${LEADS_TO}((?:[a-z][a-z&/+-]*\\s+){0,4}?${ROLE}(?:\\s+${ROLE})*)\\b`, "g");
   const fieldOnly = new RegExp(`\\b${LEADS_TO}((?:[a-z][a-z&/+-]*\\s+){0,3}[a-z][a-z&/+-]*)(?=\\s*(?:[,.;!?]|$|\\s(?:please|and|since|now|instead)\\b))`, "g");
@@ -75,7 +91,8 @@ function readTarget(message: string): Target | null | "posting" {
     // An unknown word in front of a known field or role word is an employer ("quillstone data analyst intern").
     const ws = role.split(" ");
     const firstKnown = ws.findIndex(known);
-    if (firstKnown > 0 || firstKnown < 0 && words.some((w) => GENERIC.test(w))) return "posting";
+    const lead = firstKnown < 0 ? ws : ws.slice(0, firstKnown);
+    if (lead.length && lead.some(named) && (firstKnown > 0 || words.some((w) => GENERIC.test(w)))) return "posting";
     const label = level === "internship" ? `${role} internships` : `${role} roles`;
     return { role, level, label };
   };
@@ -132,7 +149,7 @@ export const titleShaped = (message: string) => {
   return ROLE_WORD.test(lc(s)) || /^[A-Z][\w&.'-]*(?:\s+(?:of|&|[A-Z][\w&.'-]*)){0,4}(?:,?\s+(?:since|from|starting|started)\b.*)?$/.test(s);
 };
 export type ResumeAsk = "fact_detail" | "submit_job" | "new_fact" | "make" | "correct" | "link" | "ask_send" | "send_pdf" | "explain" | "edit" | "restyle" | "approve_edit" | "why_contact" | "apply_which" | null;
-export function resumeAskOf(message: string, task: ResumeTask | null, view: { companies: string[]; jobs: number; posting: boolean; lastFile?: boolean; resumeShown?: boolean }): ResumeAsk {
+export function resumeAskOf(message: string, task: ResumeTask | null, view: { companies: string[]; employers?: string[]; jobs: number; posting: boolean; lastFile?: boolean; resumeShown?: boolean }): ResumeAsk {
   // A pasted resume or posting is material, not an ask about the resume task (its own words say "for", "file", "update").
   if (message.length > 600 || message.split("\n").filter((l) => l.trim()).length > 4 || /^\s*(here'?s|here is|this is|my) (my |the )?(resume|cv)\b/i.test(message)) return null;
   const t = lc(message), rest = t.replace(/\bnot (?:an? |the )?[a-z][a-z0-9 &/+.-]{2,80}?(?=[,.;!?]|$| please| since| and )/g, " ");
@@ -154,8 +171,8 @@ export function resumeAskOf(message: string, task: ResumeTask | null, view: { co
   if (task && /\bwhy\b/.test(t) && /\b(placeholders?|to fill in|to add)\b|\bcontact\b[^?.!]*\b(resume|pdf|file|top)\b/.test(t)) return "why_contact";
   if (task?.file && /\bwhat (did|have) you change(d)?\b|\bwhat changed\b/.test(t)) return "explain";
   if (task?.file && /^\s*(now |ok(ay)?,? |then )?apply (with|using) (it|this|that)\s*[.!]?\s*$/.test(t)) return "apply_which";
-  if (postingTarget(message) && !AMBIGUOUS.test(t)) return null;
-  const target = targetOf(message);
+  if (postingTarget(message, view.employers ?? view.companies) && !AMBIGUOUS.test(t)) return null;
+  const target = targetOf(message, view.employers ?? view.companies);
   // A correction or a link ask about the resume file this person was last given (ours, or the posting tailor's).
   const onFile = !!task || !!view.lastFile && !!target;
   // A cover letter, a job search and an apply are their own paths; a correction is this task's only about the resume's target.
@@ -174,7 +191,7 @@ export function resumeAskOf(message: string, task: ResumeTask | null, view: { co
 type Fact = any;
 const SECTION: Record<string, string> = { education: "Education", experience: "Experience", project: "Projects", leadership: "Leadership", certification: "Certifications" };
 // Every way a GPA is written (review of #634 (d)): "GPA 3.7", "GPA: 3.7", "GPA of 3.7", "3.7 GPA", "GPA 3.7/4.0", "3.7/4.0 GPA",
-// "3.7 cumulative GPA". The value is read by gpaValue; the scale ("/4.0") goes with it when it is taken off.
+// "3.7 cumulative GPA". The values are read by gpaValues; the scale ("/4.0") goes with it when it is taken off.
 // Re-review of #644 (2): the scale in any form ("/4.0", "out of 4", "(4.0 scale)") goes with the value and is never read as one;
 // "Cumulative"/"Overall" and a dash or colon after "GPA" go with it too.
 // Round-2 re-review of #644 (2): a full stop after the value or the scale ("GPA 3.8.", "GPA 3.8/4.0.") is the sentence's, not
@@ -186,13 +203,14 @@ const SCALE = `(?:\\s*(?:\\/|out\\s+of)\\s*${SCALE_N})?(?:\\s*\\(\\s*(?:on\\s+an
 const LEAD = "(?:\\b(?:cumulative|overall|major)\\s+)?";
 const LEAD_C = "(?:\\b(cumulative|overall|major)\\s+)?";
 const WORD = "\\bC?GPA(?:\\s*\\(\\s*(?:cumulative|overall|major)\\s*\\))?";
-const GPA_SRC = `${LEAD_C}${WORD}\\s*(?:of\\s*|[-–—:]\\s*)?(${NUM})${SCALE}(?:\\s*[,;]?\\s*(?:and\\s+)?(overall|cumulative|major)(?:\\s+C?GPA)?\\s*(?:of\\s*|[-–—:]\\s*)?(${NUM})${SCALE})?|\\b(${NUM})${SCALE}\\s*${LEAD}C?GPA\\b`;
+const GPA_SRC = `${LEAD_C}${WORD}\\s*(?:of\\s*|[-–—:]\\s*)?(${NUM})${SCALE}(?:\\s+(?:and|or|&)\\s+(${NUM})${SCALE})?(?:\\s*[,;]?\\s*(?:and\\s+)?(overall|cumulative|major)(?:\\s+C?GPA)?\\s*(?:of\\s*|[-–—:]\\s*)?(${NUM})${SCALE})?|\\b(${NUM})${SCALE}\\s*${LEAD}C?GPA\\b`;
 const GPA = new RegExp(GPA_SRC, "gi");
 // In parentheses the parentheses go with it; otherwise the comma before it does.
 const GPA_OFF = new RegExp(`\\s*\\(\\s*(?:${GPA_SRC})\\s*\\)|,?\\s*(?:${GPA_SRC})`, "gi");
-// Groups: 1 the first label, 2 its value, 3 the second label, 4 its value, 5 the value of "3.8 GPA". The overall value wins
-// over a major value, in either order.
-const gpaValue = (m: RegExpMatchArray) => m[4] && /overall|cumulative/i.test(m[3] ?? "") ? m[4] : m[2] ?? m[5];
+// Groups: 1 the first label, 2 its value, 3 a second value with no label ("GPA 3.6 and 3.8"), 4 the second label, 5 its
+// value, 6 the value of "3.8 GPA". The overall value wins over a major value, in either order; an unlabelled second value is
+// read too, so two values written together are a conflict.
+const gpaValues = (m: RegExpMatchArray) => [m[5] && /overall|cumulative/i.test(m[4] ?? "") ? m[5] : m[2] ?? m[6], m[3]].filter(Boolean) as string[];
 const gpaOff = (s: string) => s.replace(GPA_OFF, "").replace(/\(\s*\)/g, "").replace(/\s+([,.;])/g, "$1").replace(/([,;])\s*([,.;])/g, "$2")
   .replace(/\s{2,}/g, " ").replace(/^[,;.\s]+|[,;\s]+$/g, "").trim();
 const textOf = (f: Fact) => `${f.title || ""} ${f.text || ""} ${(f.bullets || []).join(" ")}`;
@@ -227,7 +245,7 @@ export function buildResume(profile: any, target: Target, uploaded: boolean, o: 
   const facts: Fact[] = unconfirmed ? (profile?.facts || []).filter((f: Fact) => f && f.kind && !CareerProfile.quarantinedFact(f)) : confirmed;
   // The values as written, one per number (3.7 and 3.70 are one value).
   const byValue = new Map<number, string>();
-  for (const f of facts) for (const m of textOf(f).matchAll(GPA)) { const v = gpaValue(m); if (!byValue.has(Number(v))) byValue.set(Number(v), v); }
+  for (const f of facts) for (const m of textOf(f).matchAll(GPA)) for (const v of gpaValues(m)) if (!byValue.has(Number(v))) byValue.set(Number(v), v);
   const gpas = [...byValue.values()];
   const gpaConflict = gpas.length > 1 && !o.noGpa ? gpas : null;
   const asWritten = (s: string) => gpaConflict || o.noGpa ? gpaOff(s) : s;
@@ -299,7 +317,7 @@ const hex = async (u: Uint8Array) => [...new Uint8Array(await crypto.subtle.dige
 
 // deno-lint-ignore no-explicit-any
 export async function resumeTaskTurn(o: { message: string; ctx: any; userId: string; now: number;
-  deps: { file?: (data: Record<string, unknown>) => Promise<{ url: string } | { error: string }>; uploaded: () => Promise<boolean>; rewrite?: (bullet: string, ask: string) => Promise<string | null>; lastIntent?: () => Promise<string | null> } }): Promise<ResumeTurn | null> {
+  deps: { file?: (data: Record<string, unknown>) => Promise<{ url: string } | { error: string }>; uploaded: () => Promise<boolean>; rewrite?: (bullet: string, ask: string) => Promise<string | null>; lastIntent?: () => Promise<string | null>; loadPool?: () => Promise<void> } }): Promise<ResumeTurn | null> {
   const profile = o.ctx?.profile;
   if (!profile || typeof profile !== "object" || !(profile.facts || []).some((f: Fact) => f && SECTION[f.kind])) return null;
   // The task lapses after a day without a turn of its own (review of #634): an old target is never carried into a new day's asks.
@@ -308,16 +326,22 @@ export async function resumeTaskTurn(o: { message: string; ctx: any; userId: str
   if (kept && !prior) delete profile._resumeTask;
   const shortlist = Array.isArray(o.ctx?.discovery?.lastShortlist) ? o.ctx.discovery.lastShortlist : [];
   const companies = shortlist.map((r: any) => lc(r?.company)).filter(Boolean);
+  // Round 4: the posting pool's employers are names too ("the quillstone data analyst intern role" written in lower case). The
+  // pool is read only when the stated target holds a word the field vocabulary does not know.
+  if (hasUnknownWord(o.message)) await o.deps.loadPool?.().catch(() => undefined);
+  const poolRaw = o.ctx?.postings || o.ctx?.corpus || o.ctx?.discovery?.postings || [];
+  const pool = (Array.isArray(poolRaw) ? poolRaw : poolRaw.postings || []).map((p: any) => lc(p?.company || p?.company_name)).filter(Boolean);
+  const employers = [...new Set([...companies, ...pool])];
   const routerLast = [...(Array.isArray(profile._careerRouterArtifacts) ? profile._careerRouterArtifacts : [])].reverse().find((a: any) => a?.pdf?.base64);
   const lastIntent = o.deps.lastIntent ? await o.deps.lastIntent().catch(() => null) : null;
   const resumeShown = lastIntent === RESUME_TASK_INTENT || lastIntent === RESUME_CLARIFY_INTENT;
   // A shown rewording and the two-choice question answer only the very next turn: once any other reply came between (a card, an
   // offer, a question), a plain "yes" or "the PDF" is that reply's, never this task's.
   if (prior && !resumeShown) { prior.pending = null; prior.proposed = null; }
-  const ask = resumeAskOf(o.message, prior, { companies, jobs: shortlist.length, posting: !!o.ctx?.posting, lastFile: !!routerLast, resumeShown });
+  const ask = resumeAskOf(o.message, prior, { companies, employers, jobs: shortlist.length, posting: !!o.ctx?.posting, lastFile: !!routerLast, resumeShown });
   if (!ask) { if (prior) { prior.pending = null; prior.proposed = null; } return null; }
   const t = lc(o.message);
-  const named = targetOf(o.message);
+  const named = targetOf(o.message, employers);
   if (!named && !prior) return null;
   const target = named ?? prior!.target;
   const task: ResumeTask = { target, limits: [...new Set([...(prior?.limits ?? []), ...limitsOf(o.message)])], rejected: rejectedOf(o.message) ?? prior?.rejected ?? null,

@@ -666,6 +666,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       const batchBefore = JSON.stringify((ctx as any).batchApplyState ?? null);
       const resumeAns = !crisisText && !codeTurn && !tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await resumeTaskTurn({ message, ctx, userId: user.id, now: Date.now(), deps: {
+            // An unknown word in the stated target may be an employer in the pool ("the quillstone ... role"): read it then.
+            loadPool: () => ensurePool(),
             // The privacy ruling: the resume opens only on the signed-in File page (a code-built draft File), never a bearer link.
             file: async (data) => { const r = await createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }).create(user.id, "draft", data, { trusted: true });
               return !r.ok ? { error: r.error } : r.url ? { url: r.url } : { error: "links to File pages aren't set up" }; },

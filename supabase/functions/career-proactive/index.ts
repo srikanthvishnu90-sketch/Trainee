@@ -19,6 +19,7 @@ import { runOutreachFollowupsGated } from "../_shared/career_outreach_track.ts";
 import { runRepliesLane } from "../_shared/career_outreach_replies.ts";
 import { readerCall } from "../_shared/career_reader_model.ts";
 import { vaultRefreshWrite } from "../_shared/oauth_vault_refresh.ts";
+import { supabaseBatches } from "../_shared/batch_closeout.ts";
 
 // The career Google grant (vault oauth_google_career_<uid>), read the same way by mail tracking and outreach.
 const grant = (admin: any): TokenDeps => ({
@@ -61,6 +62,7 @@ serve((req) => {
         return { ...r, tz: p?.tz ?? null, quiet_start: p?.prefs?.quiet_start, quiet_end: p?.prefs?.quiet_end };
       });
     },
+    finishedBatches: supabaseBatches(admin),
     readyApplications: async () => {
       const { data, error } = await admin.from("career_apply_prepared").select("id,user_id,company,card_lines,created_at")
         .eq("state", "ready").order("created_at", { ascending: true }).limit(2000);

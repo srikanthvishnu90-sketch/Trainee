@@ -207,7 +207,7 @@ export async function reviewLinksFor(shown: { id: string }[], d: ReviewDeps): Pr
   const byId = new Map(rows.map((r) => [r.id, r]));
   const titles = d.titles ? await d.titles(rows.map((r) => String(r.job_id ?? "")).filter(Boolean)).catch(() => new Map<string, string>()) : new Map<string, string>();
   const open = d.open ? await d.open(rows.map((r) => String(r.job_id ?? "")).filter(Boolean)).catch(() => []) : [];
-  const lines: string[] = [];
+  const lines: string[] = [], held: string[] = [];
   for (const [i, p] of shown.entries()) {
     const r = byId.get(p.id);
     if (!r) continue;
@@ -215,8 +215,15 @@ export async function reviewLinksFor(shown: { id: string }[], d: ReviewDeps): Pr
     const item = reviewOf({ ...r, title: titles.get(job) ?? null, open: open.filter((q) => job && (q.job_ids ?? []).includes(job)) });
     const made = await d.create(item).catch(() => null);
     if (made?.url) lines.push(`${i + 1}. ${item.employer}${item.role ? `, ${item.role}` : ""}: ${made.url}`);
+    // Owner clarification (2026-11-09, D-MS-1 item 4): one held for an unanswered required question stays out of the set a
+    // yes approves, and the card says so, with the one narrow question.
+    if (item.unresolved.length) held.push(`${i + 1}. ${item.employer}: held back, so a yes does not approve it. ${item.unresolved[0].ask}`);
   }
-  return lines.length ? `The full review of each, with the application page, the resume file and exactly what your yes covers:\n${lines.join("\n")}` : null;
+  const out = [
+    held.length ? `Not covered by a yes until you answer:\n${held.join("\n")}` : "",
+    lines.length ? `The full review of each, with the application page, the resume file and exactly what your yes covers:\n${lines.join("\n")}` : "",
+  ].filter(Boolean);
+  return out.length ? out.join("\n\n") : null;
 }
 
 // A card text with its review links after it, only while the whole stays one text (the outbox and the card push take at most

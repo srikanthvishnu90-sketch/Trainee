@@ -111,6 +111,13 @@
     refreshTimer = setTimeout(() => (busy ? undefined : refresh().catch(() => {})), 350);
   };
 
+  // D-MS-1 (x-audit, 2026-11-10): the one place this script writes into the employer's page before the tap. With the shipped
+  // config (prefill: false) it writes nothing, so an employer that autosaves as fields are typed receives nothing before the
+  // yes. extension/config.js says why; tests/architect/pending/x-audit-extension-fill-after-tap.test.ts holds it.
+  async function prefillWrite(b, value, resume, choose) {
+    if (ctx?.prefill !== true) return false;
+    return await D.fill(b, value, resume, choose);
+  }
   // Every non-empty answer on the form now, with where it came from and what the browser sends for it (apply_core.ts).
   function snapshot() {
     // WO-048: Workday's review step is read as Workday shows it (every answer of every step); the Submit is bound to it.
@@ -289,7 +296,7 @@
           return v;
         } : undefined;
         const t0 = Date.now();
-        const ok = await D.fill(b, p.value, resume, choose);
+        const ok = await prefillWrite(b, p.value, resume, choose);
         if (!ok && refused && s.required && !plan.needs.some((n) => n.label === s.label)) {
           plan.needs.push({ label: s.label, type: String(s.type || "input_text"), options: refused.length <= 60 ? refused : [] });
         }
@@ -308,7 +315,7 @@
       for (const p of dropped) {
         const b = form.bindings[p.name];
         if (edited.has(p.name)) continue;
-        const ok = await D.fill(b, p.value, resume);
+        const ok = await prefillWrite(b, p.value, resume);
         await sleep(20);
         const v = D.readValue(b);
         if (ok && v) {
@@ -435,7 +442,7 @@
         tried.add(p.name);
         if (D.readValue(b)) continue; // never over a value already on the page
         const t0 = Date.now();
-        const ok = await D.fill(b, p.value, resume);
+        const ok = await prefillWrite(b, p.value, resume);
         await sleep(20);
         if (Date.now() - t0 > 300) (timing.slow ??= {})[p.name] = Date.now() - t0;
         let v = D.readValue(b);
@@ -696,9 +703,11 @@
     if (busy || !ctx) return { ok: false, message: "Trainee is still reading this form. Try again in a moment." };
     const b = form.bindings[name], s = form.schema.find((x) => x.name === name);
     if (!b || !s || !C.essayQuestions({ schema: [s], fields: [] }).length) return { ok: false, message: "That question is not on this form any more." };
+    // With prefill off nothing is typed into the employer's page before the tap: the person pastes the draft themselves.
+    if (ctx.prefill !== true) return { ok: false, message: "Paste this draft into the question yourself. Trainee types nothing into the employer's page before you approve." };
     busy = true;
     try {
-      const ok = await D.fill(b, String(text), null);
+      const ok = await prefillWrite(b, String(text), null);
       const v = D.readValue(b);
       if (String(text) === "") drafted.delete(name);
       else if (ok && v) drafted.set(name, { value: v, factIds: Array.isArray(ids) ? ids.map(String) : [] });

@@ -140,7 +140,9 @@ Deno.test("WO-042/10 Greenhouse's location search is typed key by key; a value t
   assert(/else typeKeys\(el, placeQuery\(wanted\)\)/.test(widget), "an untoggled search gets the place key by key");
   // Live run 12: Anduril's First Name was empty 20 ms after it was set; it is set once more after the rest.
   assert(/else if \(ok && !listed && b\.inputType !== "file"\) dropped\.push\(p\)/.test(CONTENT), "a dropped plain field is kept for later");
-  assert(/for \(const p of dropped\)[\s\S]{0,120}edited\.has\(p\.name\)[\s\S]{0,80}D\.fill\(b, p\.value, resume\)/.test(CONTENT), "and set again unless the person edited it");
+  assert(/for \(const p of dropped\)[\s\S]{0,120}edited\.has\(p\.name\)[\s\S]{0,80}(?:D\.fill|prefillWrite)\(b, p\.value, resume\)/.test(CONTENT), "and set again unless the person edited it");
+  // architect amendment (2026-11-10, #703 D-MS-1): every extension write goes through prefillWrite (no typed value before
+  // the tap); the refill of a dropped value is the same call through that guard.
 });
 
 Deno.test("WO-042/11 ask once, from the form: only the person's own answer to a question this posting raised is kept, under the text path's key", () => {

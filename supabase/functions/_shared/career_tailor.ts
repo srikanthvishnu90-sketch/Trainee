@@ -13,7 +13,7 @@
 // tool refuses; nothing is stored or linked.
 import { CareerProfile, CareerRender, CareerTailor } from "./router_core.career.js";
 import { documentLines, guardMaterials } from "./career_materials_guard.ts";
-import { type DesignLayout, type Fit, type FitRecord, fitRecord, type OwnFact, renderDesigned, type Swap } from "./career_resume_design.ts";
+import { type DesignLayout, type Fit, type FitRecord, fitRecord, newestFirst, type OwnFact, renderDesigned, type Swap } from "./career_resume_design.ts";
 import type { TemplateId, TemplateSpec } from "./career_resume_templates.ts";
 import { gapAnalysis, type GapReport, previewText } from "./career_resume_gaps.ts";
 
@@ -192,8 +192,10 @@ export function supabasePersonaStore(admin: any): PersonaStore {
 }
 
 // A persona picks (hide) before tailoring and orders (lead) after it. Leading moves whole entries (the entry and its
-// own bullets) and the sections that hold them; it never changes a line.
-export function applyPersonaOrder(resume: any, lead: string[]): any {
+// own bullets) and the sections that hold them; it never changes a line. Entries start newest first (newestFirst, RESUME-
+// TEMPLATES E5); a lead the person chose still goes first.
+export function applyPersonaOrder(resume0: any, lead: string[]): any {
+  const resume = newestFirst(resume0);
   if (!lead.length) return resume;
   const rank = (ids: string[]) => Math.min(...(ids || []).map((id) => { const i = lead.indexOf(id); return i < 0 ? Infinity : i; }));
   const sections = resume.sections.map((s: any) => {

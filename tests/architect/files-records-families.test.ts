@@ -12,7 +12,7 @@
 import assert from "node:assert/strict";
 import { familyPage, type FamilyFile, familyStatePage } from "../../supabase/functions/_shared/file_family.ts";
 import { answerLibraryFile, careerBriefFile, pathComparisonFile, profileFactsFile } from "../../supabase/functions/_shared/file_family_plan.ts";
-import { interviewHubFile, offerComparisonFile, weeklyBriefFile } from "../../supabase/functions/_shared/file_family_apply.ts";
+import { interviewHubFile, negotiationFile, offerComparisonFile, weeklyBriefFile } from "../../supabase/functions/_shared/file_family_apply.ts";
 import { LIVE_FAMILIES, type LiveFamily, viewOf } from "../../supabase/functions/_shared/file_family_records.ts";
 
 import { FULL, NONE, NOW } from "./files-records-fixtures.ts";
@@ -20,7 +20,7 @@ const TOKEN = "page-token-abc";
 // The decisions the File server turns into a prefilled chat (file_family_serve.ts ASK_KEYS, #676).
 const ASK = new Set(["answer", "edit", "correct", "propose", "decide", "followup", "prefer", "priorities", "recipient", "questions", "negotiate", "decision", "plan", "add", "tighten", "adjacent", "widen", "find", "practice", "start"]);
 // deno-lint-ignore no-explicit-any
-const BUILD: Record<LiveFamily, (v: any) => FamilyFile> = { "F-01": careerBriefFile, "F-02": profileFactsFile, "F-03": pathComparisonFile, "F-08": answerLibraryFile, "F-13": interviewHubFile, "F-14": weeklyBriefFile, "F-15": offerComparisonFile };
+const BUILD: Record<LiveFamily, (v: any) => FamilyFile> = { "F-01": careerBriefFile, "F-02": profileFactsFile, "F-03": pathComparisonFile, "F-08": answerLibraryFile, "F-13": interviewHubFile, "F-14": weeklyBriefFile, "F-14n": negotiationFile, "F-15": offerComparisonFile };
 
 function draw(family: LiveFamily, r: Records): string {
   const v = viewOf(family, r, { token: TOKEN });
@@ -46,12 +46,12 @@ function controls(html: string): { kind: Kind; what: string }[] {
   return out;
 }
 
-Deno.test("FILES RECORDS: the seven families drawn from records, full and empty: every control served, none dead", () => {
+Deno.test("FILES RECORDS: the eight families (F-14n included) drawn from records, full and empty: every control served, none dead", () => {
   const all: { family: string; world: string; kind: Kind; what: string }[] = [];
   let pages = 0;
   for (const [world, r] of [["records", FULL], ["none", NONE]] as const) for (const f of LIVE_FAMILIES) {
     const html = draw(f, r); pages++;
-    assert.match(html, new RegExp(`data-family="${f}"`), `${f} (${world}): drawn as its family`);
+    assert.match(html, new RegExp(`data-family="${f === "F-14n" ? "F-14" : f}"`), `${f} (${world}): drawn as its family`);
     for (const c of controls(html)) all.push({ family: f, world, ...c });
   }
   const n = (k: Kind) => all.filter((x) => x.kind === k).length;
@@ -114,4 +114,14 @@ Deno.test("F-14: a quiet week says so; the pause is drawn as a POST form carryin
   const html = draw("F-14", FULL);
   assert.match(html, /<form method="post"[^>]*><input type="hidden" name="t" value="page-token-abc"><input type="hidden" name="action" value="briefpause">/);
   assert.match(draw("F-14", { ...FULL, digest: { ...FULL.digest!, enabled: false } }), /name="action" value="briefresume"/);
+});
+
+Deno.test("F-14n: the offer as told is verbal, the position is Unknown until said, no counter or leverage is invented", () => {
+  const html = draw("F-14n", FULL);
+  assert.match(html, /Negotiation plan/); assert.match(html, /Evercore offer/);
+  assert.match(html, /base \$110,000, signing \$15,000/); assert.match(html, /Verbal/); assert.match(html, /verbal claim, labeled verbal/);
+  assert.match(html, /Walk-away number[\s\S]{0,300}Unknown - you haven&#39;t said|Walk-away number[\s\S]{0,300}Unknown - you haven't said/);
+  assert.match(html, /No counter drafted yet/); assert.match(html, /approving this plan sends nothing/);
+  assert.doesNotMatch(html, /competing offer from|accept by/i);
+  assert.match(draw("F-14n", NONE), /No offer to plan a negotiation for/);
 });

@@ -366,7 +366,7 @@ if (!vm.SourceTextModule) {
       assert.match(t1.body.reply, /Paste your resume/, `the tailor names the one missing input: ${t1.body.reply.slice(0, 200)}`);
       const t2 = await app.chat("Send me the PDF as a file in this chat.", "j-a2");
       assert.equal(t2.body.meta.intent, "career_document_delivery", `intent=${t2.body.meta.intent}`);
-      assert.match(t2.body.reply, /no document file on this conversation yet/i, `the honest no-document reply: ${t2.body.reply.slice(0, 160)}`);
+      assert.match(t2.body.reply, /can't send you a file yet because no resume has been tailored/i, `the honest no-document reply: ${t2.body.reply.slice(0, 160)}`);
       assert.equal(db.artifactRows.length, 0, "no artifact row exists before any document is produced");
     } finally { app.close(); }
   });

@@ -38884,7 +38884,7 @@ const CareerRouter = (() => {
       if (fr.draft && typeof fr.draft === "object") return null;
       // Surgery on nothing is answered as exactly that: no draft
       // exists in this conversation to revise.
-      const reply = compose({ headline: "There is no draft in this conversation to revise yet.", facts: ["No letter or outreach draft has been produced here — the cover-letter ask is still waiting on the facts it is written from, and no outreach draft has been drafted from the plan.", "The moment a draft exists, revisions like shorter or more casual apply to it directly, and the original is kept on the record."], nextStep: "Give me the facts for the letter, or say 'draft the first one' on the plan, and revision has something real to work on." });
+      const reply = compose({ headline: "I can't revise anything yet because there's no draft in this chat.", facts: ["The cover-letter ask is still waiting on the facts it is written from, and no outreach draft has been drafted from the plan; once one exists, a change like shorter or more casual applies to it and the original is kept."], nextStep: "Give me the facts for the letter, or say 'draft the first one' on the plan, and revision has something real to work on." });
       return { intent: "career_tailor", reply, resultStatus: "awaiting_user", sends: 0 };
     }
     const lines = s(draft.text).split("\n");
@@ -38967,9 +38967,9 @@ const CareerRouter = (() => {
       // Nothing is claimed attached, and no outreach-wave language
       // leaks in — the user asked for their file, not a campaign.
       const reply = compose({
-        headline: "There is no document file on this conversation yet to send you.",
-        facts: ["A file exists here only once a resume has been tailored in this chat — tailoring renders the PDF from your confirmed facts, and the file then rides with my reply."],
-        nextStep: "Name the role (or paste the posting) and I will tailor your resume and send the PDF here.",
+        headline: "I can't send you a file yet because no resume has been tailored in this chat.",
+        facts: ["Tailoring renders the PDF from your confirmed facts, and the file then comes with my reply."],
+        nextStep: "Which role should I tailor it for? I'll send the PDF here when it's done.",
       });
       return { intent: "career_document_delivery", reply, resultStatus: "awaiting_user", sends: 0, documents: [] };
     }
@@ -40565,7 +40565,8 @@ const CareerRouter = (() => {
       return named ? say(`Your name is ${named.value} — that's what you told me.`, "Want me to change it?") : say("You haven't told me your name yet.", "What should I call you?");
     }
     if (/^(thx|thanks|thank you|thank u|ty|tysm|cool|nice|great|awesome|perfect|lol|lmao|haha|ok|okay|k|kk|got it|sounds good|alright|nvm|never ?mind|nevermind)\b/.test(t)) {
-      return say("Anytime.", next);
+      // The thanks and the one next question in a single line (R1, R10).
+      return say(`Anytime — ${next.charAt(0).toLowerCase()}${next.slice(1)}`, "");
     }
     if (/^(yes|yeah|yep|yup|sure|no|nope|nah|idk|i don'?t know|not sure|maybe)\b/.test(t)) {
       return say(waiting ? "I didn't take that as confirming anything — your resume's entries are still drafts." : "No problem — there's nothing waiting on your answer right now.", next);
@@ -40780,6 +40781,11 @@ const CareerRouter = (() => {
     if (Doorstep && Doorstep.PAUSED_PHRASES) { /* doorstep form submits are 141's, keyed on its own phrases */ }
     const plan = ctx.plan && ctx.plan.kind === "campaign_plan" ? ctx.plan : null;
     const draft = planDraftOf(ctx);
+    // agent2 response sweep (2026-11-09): with nothing built, "send this one" has no referent: say so in one line and ask the
+    // one narrow question (RESPONSE-RULES section 2, ambiguous referent), instead of the approval-gate lecture.
+    if (!draft && !plan && !frameMarksOf(ctx).draft) {
+      return { intent: "outreach_clarification", reply: compose({ headline: "Which do you mean, and who should it go to?", facts: ["Nothing was sent: there is no draft or list in this chat yet, so tell me which one you mean and I'll start it."], nextStep: "" }), resultStatus: "awaiting_user", sends: 0 };
+    }
     const facts = [];
     if (draft) facts.push("What exists is the held sample draft you just reviewed — it has no named recipient yet, because the list it sends to has not been built, and a sample with a bracketed name cannot send to anyone.");
     else if (plan) facts.push("What exists is the plan — its list has not been built, no draft has been approved, and there is no wave standing ready to go.");
@@ -42499,6 +42505,10 @@ const CareerRouter = (() => {
     // claimed (the reply said "The target is set — the role you named" to a bare "tailor my resume").
     const rm = lc(s(text)).match(/\b(?:for|to)\s+(?:a|an|the|this|that)\s+([a-z][a-z /&-]{1,40}?)\s+(role|job|position|internship|opening)\b/);
     if (rm) return { label: `the ${rm[1].trim()} ${rm[2]}`, cir: null, company: null };
+    // agent2 response sweep (2026-11-09): "make it more like a data analyst resume" names the role; asking for it again
+    // repeats the ask (RESPONSE-RULES R4).
+    const rk = lc(s(text)).match(/\b(?:like|into|as|for)\s+(?:a|an)\s+([a-z][a-z /&-]{1,40}?)\s+(?:resume|cv)\b/);
+    if (rk && !/^(?:better|good|great|real|proper|new|clean|nice|stronger|one[- ]page|professional)$/.test(rk[1].trim())) return { label: `the ${rk[1].trim()} role`, cir: null, company: null };
     return { label: null, cir: null, company: null };
   }
   function handleTailorNeedsFacts(text, ctx) {
@@ -42583,7 +42593,7 @@ const CareerRouter = (() => {
       if (goal) offerNext(ctx, `find ${goal.value}`);
       // A pick of a role with no list behind it also says plainly that nothing is prepared (eval H029: "walk me through what
       // you will submit for the first one" needs "nothing has been prepared or submitted yet", not only "no list").
-      return done("I haven't shown you a list of roles yet, so there's nothing to pick from.", moreAsk ? [] : ["There is no list, so nothing has been prepared from one."], goal ? `Want me to search for ${goal.value} now?` : "What role should I search for, and which city or remote?");
+      return done("There's no first one yet because I haven't shown you a list of roles in this chat.", moreAsk ? [] : ["There is no list, so nothing has been prepared from one."], goal ? `Want me to search for ${goal.value} now?` : "What role should I search for, and which city or remote?");
     }
     if (moreAsk) {
       const more = Array.isArray(disc.lastMore) ? disc.lastMore.filter((r) => r && r.title) : [];
@@ -44578,7 +44588,20 @@ const CareerRouter = (() => {
       const bias = cirFieldText(cir.known_biases_of_data);
       if (bias) facts.push(`On sample size, the file states its own limit: ${bias.split(/(?<=[.!?])\s/)[0]}`);
     }
-    facts.push(cir.as_of ? `Source: the ${name} company file (public sources), as of ${cir.as_of}.` : `Source: the ${name} company file (public sources); the file carries no as-of date, so none is claimed.`);
+    // agent2 response sweep (2026-11-09): a short ask gets about 600 characters (RESPONSE-RULES R2). Whole sections past that
+    // are not pasted: they are offered as the next step, so nothing is cut mid-sentence and nothing is lost.
+    if (s(text).split(/\s+/).filter(Boolean).length <= 25) {
+      const firstOf = (f) => String(f).split(/(?<=[.!?])\s/)[0];
+      const budget = 600 - headline.length - 260;
+      let used = 0, keep = 0;
+      for (const f of facts) { const n = firstOf(f).length + 1; if (keep && used + n > budget) break; used += n; keep++; }
+      if (keep < facts.length) {
+        const kept = new Set(facts.slice(0, keep));
+        chosen = chosen.filter((x) => kept.has(x.label ? `${x.label}: ${x.text}` : x.text));
+        facts.length = keep;
+      }
+    }
+    facts.push(cir.as_of ? `Source: ${name}'s company file (public sources), as of ${cir.as_of}.` : `Source: ${name}'s company file (public sources), undated.`);
     const shownKeys = new Set(chosen.map((x) => x.key));
     const remaining = sections.filter((x) => !shownKeys.has(x.key)).map((x) => x.offerName).filter(Boolean);
     const nextStep = remaining.length >= 2 ? `Want ${remaining[0]} or ${remaining[1]} next?` : remaining.length === 1 ? `Want ${remaining[0]} next?` : "Want your gaps against this file next?";
@@ -45467,12 +45490,15 @@ const CareerRouter = (() => {
         try {
           const offerObj = { company: thread.firm || null, descriptor: thread.descriptor || null, role: thread.role || null, base_salary: thread.amount, signing_bonus: thread.signing || null };
           const strat = Negotiation.counterStrategy(offerObj, bench, {});
+          // agent2 response sweep (2026-11-09): the answer first ("should I negotiate?" gets a yes and the offer in the person's
+          // words), one benchmark line (never two that say the same), the plan in one line; no internal words (R1, R2, R6).
+          const offerLine = `an offer${offerObj.company ? ` from ${offerObj.company}` : offerObj.descriptor ? ` from ${offerObj.descriptor}` : ""} at $${Number(thread.amount).toLocaleString()} base${thread.deadline ? `, with an answer wanted by ${thread.deadline}` : ""}${thread.signing ? `, plus a $${Number(thread.signing).toLocaleString()} signing bonus` : ""}`;
+          const asksWhether = /\bshould i (?:negotiate|counter|ask for more)\b/.test(typoNorm(text));
           const facts = [];
-          facts.push(`On the record from your words: an offer${offerObj.company ? ` from ${offerObj.company}` : offerObj.descriptor ? ` from ${offerObj.descriptor}` : ""} at $${Number(thread.amount).toLocaleString()} base${thread.deadline ? `, with an answer wanted by ${thread.deadline}` : ""}${thread.signing ? `, plus a $${Number(thread.signing).toLocaleString()} signing bonus` : ""}.`);
-          facts.push(bench && bench.text ? s(bench.text).split(/(?<=[.!?])\s/)[0] : benchSentence);
           if (strat && strat.text) facts.push(s(strat.text).split(/(?<=[.!?])\s/)[0]);
-          facts.push("The sequence from here: the extension first if the deadline is tight, one written counter second, and no bridges burned with your other processes until you sign.");
-          const reply = compose({ headline: "Your offer, parsed from your words — here is the plan.", facts, nextStep: thread.deadline ? "Want the extension drafted first, or the counter?" : "Tell me the decision deadline and I will sequence the extension and the counter around it." });
+          else facts.push(bench && bench.text ? s(bench.text).split(/(?<=[.!?])\s/)[0] : benchSentence);
+          facts.push("The plan: the extension first if the deadline is tight, then one written counter, and no bridges burned with your other processes until you sign.");
+          const reply = compose({ headline: asksWhether ? `Yes, one written counter is worth it on ${offerLine}.` : `Here is the plan for ${offerLine}.`, facts, nextStep: thread.deadline ? "Want the extension drafted first, or the counter?" : "When do you have to answer them?" });
           return { intent: "negotiation_plan", reply, resultStatus: "prepared", sends: 0, offer: offerObj, strategy: strat, bench, payload: offerObj };
         } catch { /* fall through to the advice answer */ }
       }
@@ -48853,9 +48879,10 @@ const CareerRouter = (() => {
     if (!resumeOnRecord(ctx)) missing.push("your resume");
     if (!(interest.filters.locations || []).length && !homeKnown) missing.push("the city you want to work in");
     const nextStep = missing.length
-      ? `To rank matches for you, send ${missing.join(" and ")} — anything that needs ${missing.length > 1 ? "them" : "it"}, like tailoring or applying, waits until then.`
+      // agent2 response sweep (2026-11-09): the one missing input as the closing question, so no generic closer follows it.
+      ? `Can you send ${missing.join(" and ")} so I can rank matches for you?`
       : "Want another role watched, or the list of what you are watching now?";
-    const reply = compose({ headline: `Watch set: ${role.title}.`, facts, nextStep });
+    const reply = compose({ headline: `Watch set: ${role.title}.`, facts: facts.filter((f) => !/^It's saved to your account/.test(f)), nextStep });
     return { intent: "career_watch_create", reply, resultStatus: "prepared", sends: 0, watch_profile: wp, payload: wp, artifact: wp };
   }
   // The opt-out write + reply, shared by handleWatchManage and the
@@ -49812,7 +49839,7 @@ const CareerRouter = (() => {
     }
     // Plainly outside a job search, with no career word in it: said so, not guessed at.
     if (!FAM_CAREER.test(t) && /\b(weather|forecast|poems?|poetry|songs?|lyrics|jokes?|riddles?|recipes?|bake|baking|cook|cooking|restaurants?|pizza|movies?|films?|tv shows?|netflix|who won|the score|scores?|super bowl|nba|nfl|mlb|lakers|homework|calculus|algebra|equations?|capital of|trivia|horoscope)\b/.test(t)) {
-      const reply = compose({ headline: "That is outside what I can help with.", facts: ["I'm Trainee, a career agent: I find roles, prepare and track your applications, and get you ready for interviews."], nextStep: "Is there something in your job search I can take on?" });
+      const reply = compose({ headline: "I can't help with that because it's outside what I do: I work only on your job search, finding roles, preparing and tracking your applications, and getting you ready for interviews.", facts: [], nextStep: "Is there something in your job search I can take on?" });
       return { intent: "career_out_of_scope", reply, resultStatus: "awaiting_user", sends: 0 };
     }
     return null;
@@ -49841,11 +49868,12 @@ const CareerRouter = (() => {
   function greetingResult(ctx) {
     const hasResume = resumeOnRecord(ctx);
     const reply = compose({
-      headline: "Hi — I'm Trainee, your career agent.",
-      facts: ["I find jobs that fit you, get your applications ready for your OK, and prep you for interviews, all by text."],
+      // agent2 response sweep (2026-11-09): a greeting gets one plain line and the one decision, not an introduction first.
+      headline: hasResume ? "Hi, what role should I look for — and where, or remote?" : "Hi, what role are you looking for?",
+      facts: ["I'm Trainee, your career agent: I find jobs that fit you, get applications ready for your OK and prep you for interviews, by text."],
       nextStep: hasResume
-        ? "What role should I look for — and where, or remote?"
-        : "To start, paste your resume or attach the file — or just tell me the role you want.",
+        ? "Tell me the role and the place, and I'll start the search."
+        : "Paste your resume here or attach the file to start.",
     });
     return { intent: "career_greeting", reply, resultStatus: "awaiting_user", sends: 0 };
   }
@@ -53016,7 +53044,8 @@ const CareerRouter = (() => {
     // Mark it pending so handlePendingAffirmation can bind that
     // turn instead of dropping it to the generic fallback.
     try { const m = threadMirrorForWrite(ctx); if (m) m.affirmRecord = { at: nowOf(ctx) }; } catch { /* the reply stands alone */ }
-    const reply = compose({ headline: "Recorded — that is on your record now, in your words.", facts: [`On record so far: ${all.map(factLine).join("; ")}.`, "These facts are what your searches, drafts, and prep are built from — nothing about you is assumed beyond what you state, and you can correct any of it the same way you stated it."], nextStep: "Tell me the next fact, or say what you want to do first and it runs on these." });
+    // agent2 response sweep (2026-11-09): the first sentence is what was saved (R1), not a statement about saving.
+    const reply = compose({ headline: `Recorded — that is on your record now, in your words: ${all.map((f) => String(factLine(f)).replace(/[.\s]+$/, "")).join("; ")}.`, facts: [], nextStep: "Tell me the next fact, or say what you want to do first and it runs on these." });
     return { intent: "profile_correction", reply, resultStatus: "completed", sends: 0, stated_facts: all };
   }
   // LANE A (conversation depth): RECALL of the conversation record.
@@ -53487,7 +53516,7 @@ const CareerRouter = (() => {
     for (const f of statedFactsOf(ctx)) hay.push(`${f.value} ${f.evidence || ""}`);
     // NOTE: each fact below is ONE sentence by construction — 140's
     // composer keeps the first sentence of a fact and drops the rest.
-    const facts = ["Eligibility is judged requirement by requirement from the posting's own text — the same grading the tailored packet prints — and with no posting on this thread there is nothing honest to grade yet, so no verdict will be guessed."];
+    const facts = [];
     if (classes.length) {
       for (const cl of classes.slice(0, 2)) {
         const hit = cl.probe ? hay.find((h) => cl.probe.test(lc(h))) : null;
@@ -53496,9 +53525,10 @@ const CareerRouter = (() => {
           : `The fact this turns on: ${cl.name} — your record does not show it, so if you hold it, state it in your own words and it is recorded in this turn; if you don't, that one requirement by itself decides this posting.`);
       }
     } else {
-      facts.push("What it will turn on is the posting's hard requirements — a license or certification, a degree, years of experience, work authorization — each one checked against your record, none of them assumed.");
+      facts.push("It turns on the posting's hard requirements, such as a license, a degree, years of experience or work authorization; none is assumed.");
     }
-    const reply = compose({ headline: "Eligibility can't be graded without the posting — here is exactly what it takes.", facts, nextStep: "Paste the posting text, or name the company and role and I'll take the posting from the board list — the verdict is graded and spoken in that turn." });
+    // agent2 response sweep (2026-11-09): the answer (not yet, and why) first; the facts it turns on; one ask (R1, R4).
+    const reply = compose({ headline: "I can't say yet whether you qualify because I haven't read that posting's requirements in this chat.", facts, nextStep: "Send me the posting's link or its text, and I'll check each requirement against what you've confirmed." });
     return { intent: "eligibility_check", reply, resultStatus: "awaiting_user", sends: 0 };
   }
   // ---------- DEPTH LANE A (MI-013 / MI-021, LF-01h): memory USE —
@@ -55152,36 +55182,80 @@ const CareerRender = (() => {
   // synchronously), so async platform compression cannot serve it
   // either. The bundle-legal primitive is plain JS, vendored here as
   // ordinary source: an RFC 1950/1951 codec plus SHA-256.
-  //   - DEFLATE writer: stored (uncompressed) blocks — always-valid
-  //     deflate, fully deterministic; the streams it serves are a few
-  //     KB of PDF text operators / DOCX parts.
+  //   - DEFLATE writer: deflateFixed below (fixed Huffman, greedy
+  //     LZ77). Since #673 it writes EVERY stream on every runtime, Node
+  //     included, so rendered bytes are identical on Node and Deno.
   //   - Inflater: a full RFC 1951 decoder (stored + fixed + dynamic
-  //     Huffman), so parse-check also reads Node-produced files.
-  // These run ONLY when the Node captures are absent. On Node, `zlib`
-  // and `crypto` below ARE the platform modules and rendered bytes stay
-  // byte-identical (golden-pinned in tests/career-render-edge-pdf.test.cjs;
+  //     Huffman), so parse-check also reads files made elsewhere.
+  // The inflater and SHA-256 run ONLY when the Node captures are absent.
+  // On Node, `zlib` (for reading) and `crypto` below are the platform
+  // modules (golden-pinned in tests/career-render-edge-pdf.test.cjs;
   // staged-bundle proof in tests/edge/edge-pdf-renderer.test.ts).
   function adler32(data) {
     let a = 1, b = 0;
     for (let i = 0; i < data.length; i++) { a = (a + data[i]) % 65521; b = (b + a) % 65521; }
     return ((b << 16) | a) >>> 0;
   }
-  function deflateStored(data) {
-    const chunks = [];
-    let off = 0;
-    do {
-      const len = Math.min(65535, data.length - off);
-      const head = Bytes.alloc(5);
-      head[0] = off + len >= data.length ? 1 : 0; // BFINAL, BTYPE=00, then byte-aligned
-      head.writeUInt16LE(len, 1);
-      head.writeUInt16LE((~len) & 0xffff, 3);
-      chunks.push(head, Bytes.from(data.subarray(off, off + len)));
-      off += len;
-    } while (off < data.length);
-    return Bytes.concat(chunks);
+  // DETERMINISTIC DEFLATE (architect ruling 2026-11-10, #673): every file this module writes (PDF content streams, DOCX
+  // zip entries, the templates' streams) is compressed by THIS function, on Node and on Deno alike, so the same document
+  // is the same bytes everywhere. Before, each runtime used its own zlib: Deno's node:zlib and Node's zlib agreed on only
+  // 14 of 27 plain-layout PDFs (WO-028/5). Fixed settings, never tuned per call: one final block with the fixed Huffman
+  // codes (RFC 1951 3.2.6), greedy LZ77 over a 32 KiB window, minimum match 3, maximum 258, a 15-bit hash of the next
+  // three bytes, and at most DEFLATE_CHAIN candidates per position. Any standard inflater reads it.
+  const DEFLATE_CHAIN = 64;
+  const LEN_BASE = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
+  const LEN_EXTRA = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0];
+  const DIST_BASE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577];
+  const DIST_EXTRA = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13];
+  function deflateFixed(input) {
+    const d = input instanceof Uint8Array ? input : Bytes.from(input);
+    const n = d.length, out = [];
+    let buf = 0, cnt = 0;
+    const put = (v, bits) => { buf |= v << cnt; cnt += bits; while (cnt >= 8) { out.push(buf & 0xff); buf >>>= 8; cnt -= 8; } };
+    const rev = (c, bits) => { let r = 0; for (let i = 0; i < bits; i++) { r = (r << 1) | (c & 1); c >>= 1; } return r; };
+    const sym = (s) => {
+      if (s < 144) put(rev(0x30 + s, 8), 8);
+      else if (s < 256) put(rev(0x190 + s - 144, 9), 9);
+      else if (s < 280) put(rev(s - 256, 7), 7);
+      else put(rev(0xc0 + s - 280, 8), 8);
+    };
+    const below = (table, v) => { let k = 0; while (k + 1 < table.length && table[k + 1] <= v) k++; return k; };
+    put(1, 1); put(1, 2); // BFINAL = 1, BTYPE = 01 (fixed Huffman)
+    const MASK = 0x7fff, head = new Int32Array(MASK + 1).fill(-1), prev = new Int32Array(MASK + 1).fill(-1);
+    const hashAt = (p) => ((d[p] << 10) ^ (d[p + 1] << 5) ^ d[p + 2]) & MASK;
+    const insert = (p) => { if (p + 2 < n) { const h = hashAt(p); prev[p & MASK] = head[h]; head[h] = p; } };
+    let i = 0;
+    while (i < n) {
+      let best = 0, dist = 0;
+      if (i + 2 < n) {
+        const max = Math.min(258, n - i);
+        let j = head[hashAt(i)], chain = DEFLATE_CHAIN;
+        while (j >= 0 && i - j <= 32768 && chain-- > 0) {
+          let l = 0;
+          while (l < max && d[j + l] === d[i + l]) l++;
+          if (l > best) { best = l; dist = i - j; if (l === max) break; }
+          const next = prev[j & MASK];
+          if (next >= j) break;
+          j = next;
+        }
+      }
+      if (best >= 3) {
+        const k = below(LEN_BASE, best);
+        sym(257 + k); put(best - LEN_BASE[k], LEN_EXTRA[k]);
+        const c = below(DIST_BASE, dist);
+        put(rev(c, 5), 5); put(dist - DIST_BASE[c], DIST_EXTRA[c]);
+        for (let p = i; p < i + best; p++) insert(p);
+        i += best;
+      } else {
+        sym(d[i]); insert(i); i++;
+      }
+    }
+    sym(256);
+    if (cnt > 0) out.push(buf & 0xff);
+    return Bytes.from(out);
   }
-  function zlibDeflate(data) {
-    const body = deflateStored(data);
+  function zlibDeflateFixed(data) {
+    const body = deflateFixed(data);
     const out = Bytes.alloc(2 + body.length + 4);
     out[0] = 0x78; out[1] = 0x01; // CMF/FLG: deflate, 32K window; (0x78*256+0x01) % 31 === 0
     body.copy(out, 2);
@@ -55302,8 +55376,8 @@ const CareerRender = (() => {
     return core.buffer;
   }
   const pureZlib = {
-    deflateSync: (data) => zlibDeflate(data),
-    deflateRawSync: (data) => deflateStored(data),
+    deflateSync: (data) => zlibDeflateFixed(data),
+    deflateRawSync: (data) => deflateFixed(data),
     inflateSync: (data, opts) => zlibInflate(data, opts),
     inflateRawSync: (data, opts) => inflateRaw(data, opts),
   };
@@ -55442,7 +55516,7 @@ const CareerRender = (() => {
     for (const entry of entries) {
       const nameBuf = Bytes.from(entry.name, "utf8");
       const data = Bytes.isBuffer(entry.data) ? entry.data : Bytes.from(String(entry.data), "utf8");
-      const compressed = zlib.deflateRawSync(data);
+      const compressed = deflateFixed(data); // deterministic on every runtime (#673)
       const crc = crc32(data);
       const local = Bytes.alloc(30);
       local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0x0800, 6);
@@ -55669,7 +55743,7 @@ const CareerRender = (() => {
     pages.forEach((lines, i) => {
       objects.push([pageIds[i], Bytes.from(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE.w} ${PAGE.h}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${contentIds[i]} 0 R >>`)]);
       const ops = lines.map((l) => `BT /${l.font} ${l.size} Tf 1 0 0 1 ${l.x} ${l.y} Tm ${pdfLiteral(encodeWinAnsi(l.text, unencodable))} Tj ET`).join("\n");
-      const stream = zlib.deflateSync(Bytes.from(ops, "latin1"));
+      const stream = zlibDeflateFixed(Bytes.from(ops, "latin1")); // deterministic on every runtime (#673)
       const head = Bytes.from(`<< /Length ${stream.length} /Filter /FlateDecode >>\nstream\n`, "latin1");
       objects.push([contentIds[i], Bytes.concat([head, stream, Bytes.from("\nendstream", "latin1")])]);
     });
@@ -56216,7 +56290,7 @@ const CareerRender = (() => {
 
   const runtime = { zlib: !!rt.zlib, crypto: !!rt.crypto, Buffer: !!Buffer, codec: rt.zlib && rt.crypto ? "platform" : zlib && crypto ? "vendored" : "none" };
   // RELEASE 9: the byte primitives career_resume_design.ts builds its two layouts with (same codec, same ZIP writer).
-  const primitives = { zipBuffer, unzipParts, encodeWinAnsi, pdfLiteral, escXml, deflate: (b) => zlib.deflateSync(Bytes.from(b)), bytes: (x, enc) => Bytes.from(x, enc), concat: (xs) => Bytes.concat(xs) };
+  const primitives = { zipBuffer, unzipParts, encodeWinAnsi, pdfLiteral, escXml, deflate: (b) => zlibDeflateFixed(Bytes.from(b)), bytes: (x, enc) => Bytes.from(x, enc), concat: (xs) => Bytes.concat(xs) };
   return { primitives, renderPdf, renderDocx, parseCheck, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
   }
   return make(NODE_RUNTIME);

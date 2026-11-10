@@ -185,7 +185,10 @@ Deno.test("FILES LIVE LOOP: the S0 hooks: a live view is read every time, a null
   assert.ok(!("view" in store.all()[0].data), "a live family stores no view");
   const sid = await A.tok(U, made.id, SPECIMEN_NOW), get = async () => await handleFile(new Request(BASE, { headers: { cookie: `tf_s=${sid}` } }), deps);
   const post = async (f: Record<string, string>) => await handleFile(new Request(BASE, await phonePost({ t: sid, ...f }, ENV.TRAINEE_FILE_LINK_SECRET, { headers: { origin: new URL(BASE).origin } })), deps);
-  const served = SERVED_POSTS["F-04"] as Set<string>;
+  // F-04 is the scratch family here: whatever S3 lists for it is set aside for this test and put back after, so the hook is
+  // measured from "not listed" to "listed" whatever the family serves on trunk.
+  const served = SERVED_POSTS["F-04"] as Set<string>, had = [...served];
+  served.clear();
   try {
     let h = await (await get()).text();
     assert.match(h, /data-family="F-04"/); assert.doesNotMatch(h, /name="action" value="approveplan"/, "not listed: shown off");
@@ -219,5 +222,5 @@ Deno.test("FILES LIVE LOOP: the S0 hooks: a live view is read every time, a null
     assert.match(g, /data-state="error"/); assert.doesNotMatch(g, /class="ff-hero"|Approve search scope/, "no stored or stale view in its place");
     assert.deepEqual(calls.filter((c) => !c.startsWith("view")), ["approveplan h-now", "approveplan h-old"], "only listed posts reach the source");
     assert.ok(calls.filter((c) => c === "view p-1").length >= 3, "the view is read on every GET, by the File's ref");
-  } finally { served.delete("approveplan"); }
+  } finally { served.clear(); for (const x of had) served.add(x); }
 });

@@ -51,6 +51,7 @@ type Script = (typeof SCRIPTS)[number];
 export const PARITY_GAP: Partial<Record<Script, string>> = {
   // Telegram downloads the file and reads it (getFile); LoopMessage's attachment download is not wired (its URLs and host are
   // not verified, docs/launch/TRAINEE-GO-LIVE.md), so on iMessage the person is answered and told to paste the text instead.
+  // Known, not wired: accepted for this release (coordinator ruling 2026-11-10); WO-121 wires the download and removes this.
   "attachment-resume": "read: Telegram reads a PDF resume; iMessage answers and asks for the text",
 };
 

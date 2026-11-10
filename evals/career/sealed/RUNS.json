@@ -1,0 +1,4 @@
+{
+ "note": "Each run of the sealed set, by its SHA-256, appended by brain-eval.yml. The bar is judged once per sealed set: a second run of the same hash is refused unless the owner dispatches it with allow_sealed_rerun.",
+ "runs": []
+}

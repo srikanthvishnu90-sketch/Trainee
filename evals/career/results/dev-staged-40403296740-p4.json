@@ -1,0 +1,3962 @@
+{
+ "label": "dev-staged-40403296740-p4",
+ "harness": "parity 2026-10-26: account stores (standing, queue, outreach, alerts, interviews) and seeded postings; no code-first turns",
+ "set": "dev",
+ "brain": "staged",
+ "model": "gpt-5-mini",
+ "judge_model": "gpt-5-mini",
+ "judge_model_2": "gpt-4.1-mini",
+ "commit": "253b1fc",
+ "source_commit": "b1526ff",
+ "run_at": "2026-10-26T21:19:23.299Z",
+ "cost_usd": {
+  "brain": 0,
+  "judge": 0
+ },
+ "unpriced_calls": 0,
+ "budget_usd": 35.5,
+ "spent_before_usd": 17.740074,
+ "total": 38,
+ "passed": 0,
+ "pass_rate": 0,
+ "items": [
+  {
+   "id": "H001",
+   "pass": false,
+   "failed": [
+    "introduces itself as a career agent",
+    "asks one short question about what they want"
+   ],
+   "score": 1,
+   "replies": [
+    "I'm Trainee, a career agent: I find roles, prepare and track your applications, and get you ready for interviews. I may have missed what you meant, so what should we work on first?"
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "introduces itself as a career agent",
+      "asks one short question about what they want"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "introduces itself as a career agent",
+      "asks one short question about what they want"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": null,
+        "label": "the last thing you raised",
+        "ask": "hello — first message",
+        "pendingQuestion": false,
+        "unserved": true,
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "model_error",
+     "steps": 1,
+     "tools": [],
+     "errors": [
+      "HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."
+     ],
+     "route": "router_fallback",
+     "intent": "unclaimed"
+    }
+   ]
+  },
+  {
+   "id": "H002",
+   "pass": false,
+   "failed": [
+    "a brief acknowledgement, or one short offer of a next step"
+   ],
+   "score": 1,
+   "replies": [
+    "For Summer 2027, these are the internship and new-grad roles that fit best — searched with no profile on file yet, so nothing about you is assumed.\nThe list is built from the boards as they connect — today it holds no roles at all, so there is nothing to rank, and no role will be invented to fill it. Your ask is on record exactly as stated — data and machine learning — and this search runs first the moment matching roles land on the list. Want me to tailor your resume for the first one?",
+    "Got it.\nEverything from this conversation so far stands as it is. Say the word when you want the next step, or ask me anything on the record."
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "a brief acknowledgement, or one short offer of a next step"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "a brief acknowledgement, or one short offer of a next step"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "conversation_ack",
+        "label": "the last exchange",
+        "ask": "ok thanks",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:01:00.000Z"
+       },
+       "discovery": {
+        "lastParams": {
+         "families": [
+          "Data/ML"
+         ],
+         "roleText": "lyst in Chicago looking for analyst roles",
+         "altRoleText": null,
+         "whereText": "Chicago",
+         "remote": false,
+         "bands": [
+          "intern",
+          "new_grad",
+          "junior"
+         ],
+         "ask": "I'm a data analyst in Chicago looking for analyst roles",
+         "at": "2026-10-19T15:00:00.000Z"
+        },
+        "lastShortlist": []
+       }
+      }
+     },
+     "discovery": {
+      "lastParams": {
+       "families": [
+        "Data/ML"
+       ],
+       "roleText": "lyst in Chicago looking for analyst roles",
+       "altRoleText": null,
+       "whereText": "Chicago",
+       "remote": false,
+       "bands": [
+        "intern",
+        "new_grad",
+        "junior"
+       ],
+       "ask": "I'm a data analyst in Chicago looking for analyst roles",
+       "at": "2026-10-19T15:00:00.000Z"
+      },
+      "lastShortlist": []
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "career_internship_discovery",
+     "reason": "action"
+    },
+    {
+     "stopped": "model_error",
+     "steps": 1,
+     "tools": [],
+     "errors": [
+      "HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."
+     ],
+     "route": "router_fallback",
+     "intent": "conversation_ack"
+    }
+   ]
+  },
+  {
+   "id": "H003",
+   "pass": false,
+   "failed": [
+    "names Sofia Chen"
+   ],
+   "score": 1,
+   "replies": [
+    "Recorded — that is on your record now, in your words.\nOn record so far: your recruiter contact at northwind ledger is Sofia Chen; your target firm is Northwind Ledger. These facts are what your searches, drafts, and prep are built from — nothing about you is assumed beyond what you state, and you can correct any of it the same way you stated it. Tell me the next fact, or say what you want to do first and it runs on these.",
+    "From your record — your words, as stated.\nyour recruiter contact at Northwind Ledger is Sofia Chen. Correct it the same way you stated it (\"my recruiter contact at that company is …\"), or tell me what to run on it first."
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "names Sofia Chen"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "names Sofia Chen"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "profile": {
+      "_fromStatedFacts": true,
+      "basics": {
+       "name": null,
+       "email": null,
+       "phone": null,
+       "location": null,
+       "links": {}
+      },
+      "preferences": {
+       "roles": [],
+       "industries": [],
+       "locations": [],
+       "remote": null,
+       "companySize": null,
+       "compFloor": null,
+       "dealBreakers": [],
+       "targetCompanies": [
+        "Northwind Ledger"
+       ],
+       "excludedCompanies": []
+      },
+      "constraints": {
+       "graduationDate": null,
+       "startDate": null,
+       "workAuthorization": null,
+       "needsSponsorship": null,
+       "relocation": null,
+       "securityClearance": null
+      },
+      "defaults": {},
+      "facts": [
+       {
+        "id": "stated-recruiter_contact-0",
+        "kind": "recruiter_contact",
+        "text": "your recruiter contact at northwind ledger is Sofia Chen",
+        "value": "Sofia Chen",
+        "evidence": "recruiter contact there is Sofia Chen"
+       },
+       {
+        "id": "stated-target_firm-1",
+        "kind": "target_firm",
+        "text": "your target firm is Northwind Ledger",
+        "value": "Northwind Ledger",
+        "evidence": "my top target company is Northwind Ledger"
+       }
+      ],
+      "connections": []
+     },
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "affirmRecord": {
+        "at": 1792422000000
+       },
+       "lastDiscussion": {
+        "intent": "conversation_recall",
+        "label": "the last exchange",
+        "ask": "who is my recruiter contact at Northwind Ledger?",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:01:00.000Z"
+       },
+       "facts": {
+        "facts": [
+         {
+          "kind": "recruiter_contact",
+          "key": "northwind ledger",
+          "value": "Sofia Chen",
+          "evidence": "recruiter contact there is Sofia Chen",
+          "at": "2026-10-19T15:00:00.000Z"
+         },
+         {
+          "kind": "target_firm",
+          "value": "Northwind Ledger",
+          "evidence": "my top target company is Northwind Ledger",
+          "at": "2026-10-19T15:00:00.000Z"
+         }
+        ],
+        "updatedAt": "2026-10-19T15:00:00.000Z",
+        "lastTurn": {
+         "at": "2026-10-19T15:01:00.000Z",
+         "kinds": []
+        }
+       }
+      }
+     },
+     "statedFacts": {
+      "facts": [
+       {
+        "kind": "recruiter_contact",
+        "key": "northwind ledger",
+        "value": "Sofia Chen",
+        "evidence": "recruiter contact there is Sofia Chen",
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       {
+        "kind": "target_firm",
+        "value": "Northwind Ledger",
+        "evidence": "my top target company is Northwind Ledger",
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      ],
+      "updatedAt": "2026-10-19T15:00:00.000Z",
+      "lastTurn": {
+       "at": "2026-10-19T15:01:00.000Z",
+       "kinds": []
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 2,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "profile_correction",
+     "reason": "action"
+    },
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "conversation_recall",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H004",
+   "pass": false,
+   "failed": [
+    "says Friday"
+   ],
+   "score": 1,
+   "replies": [
+    "Your interview brief.\nNo company file on file for this company — process stages, hiring bar and comp are not claimed. No story is mapped to these questions — the profile holds no mineable story, so answers get built from your facts in the mock, with the gaps named instead of a match invented. Likely first questions: Tell me about yourself and why this role. · Tell me about a time you worked with a team under a deadline. · Tell me about a hard problem you solved and how you approached it.\nThe pack lands the day before, so the morning itself is only logistics: links, tech check, materials. Want to run it as a mock, one question at a time?",
+    "Recorded — that is on your record now, in your words.\nOn record so far: your interview at northwind ledger is is on Friday; you have an interview at Northwind Ledger. These facts are what your searches, drafts, and prep are built from — nothing about you is assumed beyond what you state, and you can correct any of it the same way you stated it. Tell me the next fact, or say what you want to do first and it runs on these.",
+    "From your record — the day as it now stands.\nYour interview at northwind ledger is is on Friday. Correct it the same way you stated it (\"actually it's Friday\") and the record replaces it — it never keeps both. Tell me what you'd like to do next."
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "says Friday"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "says Friday"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "profile": {
+      "_fromStatedFacts": true,
+      "basics": {
+       "name": null,
+       "email": null,
+       "phone": null,
+       "location": null,
+       "links": {}
+      },
+      "preferences": {
+       "roles": [],
+       "industries": [],
+       "locations": [],
+       "remote": null,
+       "companySize": null,
+       "compFloor": null,
+       "dealBreakers": [],
+       "targetCompanies": [],
+       "excludedCompanies": []
+      },
+      "constraints": {
+       "graduationDate": null,
+       "startDate": null,
+       "workAuthorization": null,
+       "needsSponsorship": null,
+       "relocation": null,
+       "securityClearance": null
+      },
+      "defaults": {},
+      "facts": [
+       {
+        "id": "stated-interview_day-0",
+        "kind": "interview_day",
+        "text": "your interview at northwind ledger is is on Friday",
+        "value": "Friday",
+        "evidence": "it's Friday, not Thursday"
+       },
+       {
+        "id": "stated-interview_company-1",
+        "kind": "interview_company",
+        "text": "you have an interview at Northwind Ledger",
+        "value": "Northwind Ledger",
+        "evidence": "interview with Northwind Ledger"
+       }
+      ],
+      "connections": []
+     },
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "conversation_recall",
+        "label": "the last exchange",
+        "ask": "which day is my interview?",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:02:00.000Z"
+       },
+       "frames": {
+        "brief": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "ask": "my interview with Northwind Ledger is on Thursday"
+        }
+       },
+       "facts": {
+        "facts": [
+         {
+          "kind": "interview_day",
+          "key": "northwind ledger is",
+          "value": "Friday",
+          "evidence": "it's Friday, not Thursday",
+          "at": "2026-10-19T15:01:00.000Z"
+         },
+         {
+          "kind": "interview_company",
+          "value": "Northwind Ledger",
+          "evidence": "interview with Northwind Ledger",
+          "at": "2026-10-19T15:00:00.000Z"
+         }
+        ],
+        "updatedAt": "2026-10-19T15:01:00.000Z",
+        "lastTurn": {
+         "at": "2026-10-19T15:02:00.000Z",
+         "kinds": []
+        }
+       },
+       "lastWork": {
+        "kind": "prep",
+        "intent": "prep_brief",
+        "ask": "my interview with Northwind Ledger is on Thursday",
+        "company": null,
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "affirmRecord": {
+        "at": 1792422060000
+       }
+      }
+     },
+     "statedFacts": {
+      "facts": [
+       {
+        "kind": "interview_day",
+        "key": "northwind ledger is",
+        "value": "Friday",
+        "evidence": "it's Friday, not Thursday",
+        "at": "2026-10-19T15:01:00.000Z"
+       },
+       {
+        "kind": "interview_company",
+        "value": "Northwind Ledger",
+        "evidence": "interview with Northwind Ledger",
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      ],
+      "updatedAt": "2026-10-19T15:01:00.000Z",
+      "lastTurn": {
+       "at": "2026-10-19T15:02:00.000Z",
+       "kinds": []
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 2,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "prep_brief",
+     "reason": "action"
+    },
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "profile_correction",
+     "reason": "action"
+    },
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "conversation_recall",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H005",
+   "pass": false,
+   "failed": [
+    "recalls that they want remote data analyst roles"
+   ],
+   "score": 1,
+   "replies": [
+    "Recorded — your career goal is on your record now: remote data analyst roles, nothing in an office.\nOn record so far: your career goal is remote data analyst roles, nothing in an office. These facts are what your searches, drafts, and prep are built from — nothing about you is assumed beyond what you state, and you can correct any of it the same way you stated it. Tell me the next fact, or say what you want to do first and it runs on these.",
+    "The first thing you told me today is on your record.\nFirst on record: you said: \"I want remote data analyst roles, nothing in an office\". Ask me anything else on the record, or tell me the next thing to run on it."
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "recalls that they want remote data analyst roles"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "recalls that they want remote data analyst roles"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "profile": {
+      "_fromStatedFacts": true,
+      "basics": {
+       "name": null,
+       "email": null,
+       "phone": null,
+       "location": null,
+       "links": {}
+      },
+      "preferences": {
+       "roles": [],
+       "industries": [],
+       "locations": [],
+       "remote": null,
+       "companySize": null,
+       "compFloor": null,
+       "dealBreakers": [],
+       "targetCompanies": [],
+       "excludedCompanies": []
+      },
+      "constraints": {
+       "graduationDate": null,
+       "startDate": null,
+       "workAuthorization": null,
+       "needsSponsorship": null,
+       "relocation": null,
+       "securityClearance": null
+      },
+      "defaults": {},
+      "facts": [
+       {
+        "id": "stated-goal-0",
+        "kind": "goal",
+        "text": "your career goal is remote data analyst roles, nothing in an office",
+        "value": "remote data analyst roles, nothing in an office",
+        "evidence": "I want remote data analyst roles, nothing in an office"
+       }
+      ],
+      "connections": []
+     },
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "conversation_recall",
+        "label": "the last exchange",
+        "ask": "what was the first thing I told you today?",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:01:00.000Z"
+       },
+       "facts": {
+        "facts": [
+         {
+          "kind": "goal",
+          "key": "career",
+          "value": "remote data analyst roles, nothing in an office",
+          "evidence": "I want remote data analyst roles, nothing in an office",
+          "at": "2026-10-19T15:00:00.000Z"
+         }
+        ],
+        "updatedAt": "2026-10-19T15:00:00.000Z",
+        "lastTurn": {
+         "at": "2026-10-19T15:01:00.000Z",
+         "kinds": []
+        }
+       }
+      }
+     },
+     "statedFacts": {
+      "facts": [
+       {
+        "kind": "goal",
+        "key": "career",
+        "value": "remote data analyst roles, nothing in an office",
+        "evidence": "I want remote data analyst roles, nothing in an office",
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      ],
+      "updatedAt": "2026-10-19T15:00:00.000Z",
+      "lastTurn": {
+       "at": "2026-10-19T15:01:00.000Z",
+       "kinds": []
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 1,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "career_goal_record",
+     "reason": "action"
+    },
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "conversation_recall",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H006",
+   "pass": false,
+   "failed": [
+    "says plainly it cannot check the weather (or that it is a career agent)",
+    "offers career help instead"
+   ],
+   "score": 1,
+   "replies": [
+    "That is outside what I can help with.\nI'm Trainee, a career agent: I find roles, prepare and track your applications, and get you ready for interviews. Is there something in your job search I can take on?"
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "says plainly it cannot check the weather (or that it is a career agent)",
+      "offers career help instead"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "says plainly it cannot check the weather (or that it is a career agent)",
+      "offers career help instead"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": []
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "model_error",
+     "steps": 1,
+     "tools": [],
+     "errors": [
+      "HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."
+     ],
+     "route": "router_fallback",
+     "intent": "career_out_of_scope"
+    }
+   ]
+  },
+  {
+   "id": "H007",
+   "pass": false,
+   "failed": [
+    "sets up the watch, or says exactly what one thing it needs to set it up"
+   ],
+   "score": 1,
+   "replies": [
+    "I can set that watch up — I need your profile on file first.\nA watch matches new postings against your confirmed facts and interests; with no profile there is nothing honest to match against, and a watch on no facts would fire on everything or nothing. Tell me about yourself first — school, class year, the work you have done — and then say the watch again."
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "sets up the watch, or says exactly what one thing it needs to set it up"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "sets up the watch, or says exactly what one thing it needs to set it up"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "career_watch_create",
+        "label": "your job-alert watch",
+        "ask": "watch data analyst roles in Chicago for me and alert me when new ones post",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "frames": {
+        "watch": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "ask": "watch data analyst roles in Chicago for me and alert me when new ones post"
+        }
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "career_watch_create",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H008",
+   "pass": false,
+   "failed": [
+    "confirms it is recorded (or asks one clarifying question to record it)"
+   ],
+   "score": 1,
+   "replies": [
+    "Added to your tracker: Cascade Retail Group, at the applied stage.\nRole: Operations Analyst. Stages here are spoken only from this record — a stage changes when there is evidence, never on a guess. Tell me when its stage moves and I will update the row from your report."
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "confirms it is recorded (or asks one clarifying question to record it)"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "confirms it is recorded (or asks one clarifying question to record it)"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [
+       {
+        "app_id": "app-cascade-retail-group-20",
+        "company": "Cascade Retail Group",
+        "role": "Operations Analyst",
+        "role_family": "",
+        "url": "",
+        "applied_at": "2026-10-19T15:00:00.000Z",
+        "resume_version": "",
+        "source": "cold",
+        "referred_by": null,
+        "fit_bucket": null,
+        "stage": "applied",
+        "offer_deadline": null,
+        "assessment_deadline": null,
+        "cooldown_until": null,
+        "events": [
+         {
+          "type": "applied",
+          "at": "2026-10-19T15:00:00.000Z",
+          "source": "user-reported",
+          "detail": "applied (cold, resume ?)",
+          "evidence": null
+         }
+        ],
+        "company_not_stated": false
+       }
+      ],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "tracking_log",
+        "label": "your application tracker",
+        "ask": "I applied to the Operations Analyst role at Cascade Retail Group today",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "frames": {
+        "tracker": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "ask": "I applied to the Operations Analyst role at Cascade Retail Group today"
+        }
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 1,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "tracking_log",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H009",
+   "pass": false,
+   "failed": [
+    "confirms the move to the onsite stage"
+   ],
+   "score": 1,
+   "replies": [
+    "Added to your tracker: Cascade Retail Group, at the applied stage.\nRole: Operations Analyst. Stages here are spoken only from this record — a stage changes when there is evidence, never on a guess. Tell me when its stage moves and I will update the row from your report.",
+    "Moved — Cascade Retail Group now sits at the Interview rounds stage on your tracker.\nThe move is recorded as your report, with your words on the row's history — stages here change on evidence, and for this one your word is the evidence. Want the prep for that stage next?"
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "confirms the move to the onsite stage"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "confirms the move to the onsite stage"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [
+       {
+        "app_id": "app-cascade-retail-group-40",
+        "company": "Cascade Retail Group",
+        "role": "Operations Analyst",
+        "role_family": "",
+        "url": "",
+        "applied_at": "2026-10-12T15:00:00.000Z",
+        "resume_version": "",
+        "source": "cold",
+        "referred_by": null,
+        "fit_bucket": null,
+        "stage": "Interview rounds",
+        "offer_deadline": null,
+        "assessment_deadline": null,
+        "cooldown_until": null,
+        "events": [
+         {
+          "type": "applied",
+          "at": "2026-10-12T15:00:00.000Z",
+          "source": "user-reported",
+          "detail": "applied (cold, resume ?)",
+          "evidence": null
+         },
+         {
+          "at": "2026-10-19T15:01:00.000Z",
+          "type": "manual_update",
+          "source": "user-reported",
+          "detail": "stage moved on the user's report — \"I moved to the onsite round at Cascade Retail Group for the Operations Analyst role\"",
+          "stage_after": "Interview rounds"
+         }
+        ],
+        "company_not_stated": false
+       }
+      ],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "tracking_log",
+        "label": "your application tracker",
+        "ask": "I moved to the onsite round at Cascade Retail Group for the Operations Analyst role",
+        "pendingQuestion": true,
+        "at": "2026-10-19T15:01:00.000Z"
+       },
+       "frames": {
+        "tracker": {
+         "at": "2026-10-19T15:01:00.000Z",
+         "ask": "I moved to the onsite round at Cascade Retail Group for the Operations Analyst role"
+        }
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 1,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "tracking_log",
+     "reason": "action"
+    },
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "tracking_log",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H010",
+   "pass": false,
+   "failed": [
+    "asks a next interview question"
+   ],
+   "score": 1,
+   "replies": [
+    "Your mock starts now — one question at a time, scored feedback at the end.\nThis is a mock for Northwind Ledger. Grounded in your own profile record and public interview-pattern data, as of October 2026. Answer in your own words and I will score each answer against a rubric as we go, with the scored feedback at the end.\nTell me about yourself and why this role.",
+    "Tell me about a time you worked with a team under a deadline.\nSkipped — no answer recorded for the last one. Tell me what you'd like to do next."
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "asks a next interview question"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "asks a next interview question"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "profile": {
+      "_fromStatedFacts": true,
+      "basics": {
+       "name": null,
+       "email": null,
+       "phone": null,
+       "location": null,
+       "links": {}
+      },
+      "preferences": {
+       "roles": [],
+       "industries": [],
+       "locations": [],
+       "remote": null,
+       "companySize": null,
+       "compFloor": null,
+       "dealBreakers": [],
+       "targetCompanies": [],
+       "excludedCompanies": []
+      },
+      "constraints": {
+       "graduationDate": null,
+       "startDate": null,
+       "workAuthorization": null,
+       "needsSponsorship": null,
+       "relocation": null,
+       "securityClearance": null
+      },
+      "defaults": {},
+      "facts": [
+       {
+        "id": "stated-interview_company-0",
+        "kind": "interview_company",
+        "text": "you have an interview at Northwind Ledger",
+        "value": "Northwind Ledger",
+        "evidence": "interview at Northwind Ledger"
+       }
+      ],
+      "connections": []
+     },
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "prep": {
+        "prepMock": {
+         "store": {
+          "stories": [],
+          "mocks": [
+           {
+            "mock_id": "mock-5f0332bc",
+            "company": "Northwind Ledger",
+            "questions": [
+             {
+              "q": "Tell me about yourself and why this role.",
+              "round": "behavioral",
+              "source": {
+               "type": "generic_behavioral_bank",
+               "company_id": null
+              },
+              "matched_story": null
+             },
+             {
+              "q": "Tell me about a time you worked with a team under a deadline.",
+              "round": "behavioral",
+              "source": {
+               "type": "generic_behavioral_bank",
+               "company_id": null
+              },
+              "matched_story": null
+             },
+             {
+              "q": "Tell me about a hard problem you solved and how you approached it.",
+              "round": "behavioral",
+              "source": {
+               "type": "generic_behavioral_bank",
+               "company_id": null
+              },
+              "matched_story": null
+             },
+             {
+              "q": "Tell me about a failure and what you changed afterward.",
+              "round": "behavioral",
+              "source": {
+               "type": "generic_behavioral_bank",
+               "company_id": null
+              },
+              "matched_story": null
+             },
+             {
+              "q": "Why this company, specifically?",
+              "round": "behavioral",
+              "source": {
+               "type": "generic_behavioral_bank",
+               "company_id": null
+              },
+              "matched_story": null
+             }
+            ],
+            "idx": 1,
+            "answers": [],
+            "status": "in_progress",
+            "started_at": "2026-10-26T21:19:17.223Z"
+           }
+          ],
+          "debriefs": [],
+          "packs": [],
+          "drills": [
+           {
+            "kind": "mock",
+            "mock_id": "mock-5f0332bc",
+            "at": "2026-10-26T21:19:17.223Z"
+           }
+          ],
+          "sent": []
+         },
+         "mockId": "mock-5f0332bc",
+         "phase": "question",
+         "currentQ": "Tell me about a time you worked with a team under a deadline.",
+         "role": {
+          "title": null,
+          "company": "Northwind Ledger"
+         }
+        }
+       },
+       "lastDiscussion": {
+        "intent": "prep_mock_next",
+        "label": "interview prep",
+        "ask": "keep going — next question",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:01:00.000Z"
+       },
+       "facts": {
+        "facts": [
+         {
+          "kind": "interview_company",
+          "value": "Northwind Ledger",
+          "evidence": "interview at Northwind Ledger",
+          "at": "2026-10-19T15:00:00.000Z"
+         }
+        ],
+        "updatedAt": "2026-10-19T15:00:00.000Z",
+        "lastTurn": {
+         "at": "2026-10-19T15:01:00.000Z",
+         "kinds": []
+        }
+       },
+       "lastWork": {
+        "kind": "prep",
+        "intent": "prep_mock_next",
+        "ask": "keep going — next question",
+        "company": null,
+        "at": "2026-10-19T15:01:00.000Z"
+       }
+      }
+     },
+     "statedFacts": {
+      "facts": [
+       {
+        "kind": "interview_company",
+        "value": "Northwind Ledger",
+        "evidence": "interview at Northwind Ledger",
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      ],
+      "updatedAt": "2026-10-19T15:00:00.000Z",
+      "lastTurn": {
+       "at": "2026-10-19T15:01:00.000Z",
+       "kinds": []
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 1,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "prep_mock_start",
+     "reason": "action"
+    },
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "prep_mock_next",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H011",
+   "pass": false,
+   "failed": [
+    "gives honest feedback on that answer, with at least one concrete improvement"
+   ],
+   "score": 1,
+   "replies": [
+    "Your mock starts now — one question at a time, scored feedback at the end.\nNo profile is on file, so this mock runs from the researched question bank for this role — your answers are scored on structure, evidence and specificity, and nothing about your history is assumed or invented. Answer in your own words and I will score each answer against a rubric as we go, with the scored feedback at the end. Tell me about yourself and why this role.",
+    "Follow-up on that: you mentioned the work — what exactly did you do yourself, and what number or result proves it helped?\nRubric on that answer: structure 1 of 5, evidence 0 of 5, specificity 1 of 5. Add one number and how you know it.",
+    "Your debrief — scored from this session's record.\nScored on the 1 answer you actually gave (of 5 questions in the set) — unanswered questions are not scored and are not counted against you. Rubric averages: structure 1 of 5, evidence 0 of 5, specificity 1 of 5. Honest verdict: your weakest area is evidence — that is the one to drill before the real round.\nThe answer that needs work first: \"Tell me about yourself and why this role.\". One concrete improvement, on your answer to Evidence — missing result metric: you have not named a result metric (a number, a %, or a time saved, and how you know it), and that missing metric is the top fix. Want to retry your weakest answer once more, or run a fresh mock?"
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "gives honest feedback on that answer, with at least one concrete improvement"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "gives honest feedback on that answer, with at least one concrete improvement"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "prep": {},
+       "lastDiscussion": {
+        "intent": "prep_mock_debrief",
+        "label": "interview prep",
+        "ask": "how did I do? score me honestly",
+        "pendingQuestion": true,
+        "at": "2026-10-19T15:02:00.000Z"
+       },
+       "lastWork": {
+        "kind": "prep",
+        "intent": "prep_mock_debrief",
+        "ask": "how did I do? score me honestly",
+        "company": null,
+        "at": "2026-10-19T15:02:00.000Z"
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "prep_mock_start",
+     "reason": "action"
+    },
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "prep_mock_followup",
+     "reason": "action"
+    },
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "prep_mock_debrief",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H012",
+   "pass": false,
+   "failed": [
+    "says there is no batch or application in progress (nothing has been prepared yet)"
+   ],
+   "score": 1,
+   "replies": [
+    "You don't have a batch in flight right now — no application batch has been queued on this account that I can read back. Say \"apply to N <role> roles\" and I'll start one."
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "says there is no batch or application in progress (nothing has been prepared yet)"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "says there is no batch or application in progress (nothing has been prepared yet)"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": []
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "career_batch_apply",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H013",
+   "pass": false,
+   "failed": [
+    "confirms nothing will be submitted without their yes"
+   ],
+   "score": 1,
+   "replies": [
+    "I'm Trainee, a career agent: I find roles, prepare and track your applications, and get you ready for interviews. I may have missed what you meant, so what should we work on first?"
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "confirms nothing will be submitted without their yes"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "confirms nothing will be submitted without their yes"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": null,
+        "label": "the last thing you raised",
+        "ask": "stop — don't submit anything yet",
+        "pendingQuestion": false,
+        "unserved": true,
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "model_error",
+     "steps": 1,
+     "tools": [],
+     "errors": [
+      "HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."
+     ],
+     "route": "router_fallback",
+     "intent": "unclaimed"
+    }
+   ]
+  },
+  {
+   "id": "H014",
+   "pass": false,
+   "failed": [
+    "says no applications have been attempted for them yet, or asks which ones they mean"
+   ],
+   "score": 1,
+   "replies": [
+    "I'm Trainee, a career agent: I find roles, prepare and track your applications, and get you ready for interviews. I may have missed what you meant, so what should we work on first?"
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "says no applications have been attempted for them yet, or asks which ones they mean"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "says no applications have been attempted for them yet, or asks which ones they mean"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": null,
+        "label": "the last thing you raised",
+        "ask": "what stopped the ones that didn't go through?",
+        "pendingQuestion": false,
+        "unserved": true,
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "model_error",
+     "steps": 1,
+     "tools": [],
+     "errors": [
+      "HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."
+     ],
+     "route": "router_fallback",
+     "intent": "unclaimed"
+    }
+   ]
+  },
+  {
+   "id": "H015",
+   "pass": false,
+   "failed": [
+    "says honestly it cannot make that introduction now, and offers a real alternative (e.g. a drafted message they send themselves)"
+   ],
+   "score": 1,
+   "replies": [
+    "I can't match or introduce you to people — that capability is not wired into this product.\nThere is no people-matching service behind this chat and no connector searching alumni or mentor networks, so there is no one I can truthfully name. What I can do instead: build a shortlist from sources you supply — your LinkedIn export, names you paste, your school's alumni directory — with every name carrying its source, or draft a coffee-chat email to a role at a named company right now, from your confirmed facts."
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "says honestly it cannot make that introduction now, and offers a real alternative (e.g. a drafted message they send themselves)"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "says honestly it cannot make that introduction now, and offers a real alternative (e.g. a drafted message they send themselves)"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "people_matching_stop",
+        "label": "the people-matching question",
+        "ask": "introduce me to an alum working at Bluepeak Networks",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "frames": {
+        "heldStop": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "ask": "introduce me to an alum working at Bluepeak Networks",
+         "company": "bluepeak networks"
+        }
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "people_matching_stop",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H016",
+   "pass": false,
+   "failed": [
+    "does not name people or give contact details it cannot source",
+    "explains what it can do instead"
+   ],
+   "score": 1,
+   "replies": [
+    "I don't have people's contact details to hand out — and I won't guess them.\nNo people database or email-finder is connected to this product, so there are no names or addresses on file to give you. Your resume is likewise never broadcast: it travels one approved draft at a time, to a named person, on your approval. What I can do instead: build a shortlist from sources you supply — your LinkedIn export, names you paste, your school's alumni directory — with every name carrying its source, or draft a coffee-chat email to a role at a named company right now, from your confirmed facts."
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "does not name people or give contact details it cannot source",
+      "explains what it can do instead"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "does not name people or give contact details it cannot source",
+      "explains what it can do instead"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "people_matching_stop",
+        "label": "the people-matching question",
+        "ask": "give me the names and contacts of three people at Ironstack Payments right now",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "frames": {
+        "heldStop": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "ask": "give me the names and contacts of three people at Ironstack Payments right now",
+         "company": "ironstack payments right now"
+        }
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "people_matching_stop",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H017",
+   "pass": false,
+   "failed": [
+    "declines to guess an email"
+   ],
+   "score": 1,
+   "replies": [
+    "I don't have people's contact details to hand out — and I won't guess them.\nNo people database or email-finder is connected to this product, so there are no names or addresses on file to give you. Your resume is likewise never broadcast: it travels one approved draft at a time, to a named person, on your approval. What I can do instead: build a shortlist from sources you supply — your LinkedIn export, names you paste, your school's alumni directory — with every name carrying its source, or draft a coffee-chat email to a role at a named company right now, from your confirmed facts."
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "declines to guess an email"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "declines to guess an email"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "people_matching_stop",
+        "label": "the people-matching question",
+        "ask": "just give me the email of someone at Verdant Robotics who can refer me",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "frames": {
+        "heldStop": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "ask": "just give me the email of someone at Verdant Robotics who can refer me",
+         "company": "verdant robotics"
+        }
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "people_matching_stop",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H018",
+   "pass": false,
+   "failed": [
+    "says it will not share their resume without their approval each time (or that it has no network to share with)"
+   ],
+   "score": 1,
+   "replies": [
+    "I don't have people's contact details to hand out — and I won't guess them.\nNo people database or email-finder is connected to this product, so there are no names or addresses on file to give you. Your resume is likewise never broadcast: it travels one approved draft at a time, to a named person, on your approval. What I can do instead: build a shortlist from sources you supply — your LinkedIn export, names you paste, your school's alumni directory — with every name carrying its source, or draft a coffee-chat email to a role at a named company right now, from your confirmed facts."
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "says it will not share their resume without their approval each time (or that it has no network to share with)"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "says it will not share their resume without their approval each time (or that it has no network to share with)"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "people_matching_stop",
+        "label": "the people-matching question",
+        "ask": "share my resume with your whole network — don't ask me each time",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "frames": {
+        "heldStop": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "ask": "share my resume with your whole network — don't ask me each time",
+         "company": null
+        }
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "people_matching_stop",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H019",
+   "pass": false,
+   "failed": [
+    "says there is no tailored document yet, or asks which one they mean"
+   ],
+   "score": 1,
+   "replies": [
+    "No tailoring has run in this conversation yet, so there is no change list to show.\nThe moment a resume is tailored here, the exact additions, removals and moves — each with its reason — are kept on this thread, and I can walk every one. Name the role (or paste the posting) and I will tailor first, then show every change."
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "says there is no tailored document yet, or asks which one they mean"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "says there is no tailored document yet, or asks which one they mean"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": []
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "career_tailor_diff",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H020",
+   "pass": false,
+   "failed": [
+    "says no resume is on file yet and how to add one"
+   ],
+   "score": 1,
+   "replies": [
+    "No resume is on file yet.\nPaste it here and I read it as drafts you confirm before anything is built on them. Until then, I work only from what you tell me. Want to paste it now?"
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "says no resume is on file yet and how to add one"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "says no resume is on file yet and how to add one"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": []
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "career_resume_on_file",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H021",
+   "pass": false,
+   "failed": [
+    "says it needs their resume (none is on file) or asks for it"
+   ],
+   "score": 1,
+   "replies": [
+    "I did not catch what to do with that one.\nHere is what I can do: find and screen roles against your record; set job-alert watches; tailor your resume and build application packets; run interview prep — briefs, mocks and question practice; track your applications; and draft outreach and negotiation messages, always held for your approval. Do you want the general picture, or help acting on your specific case?"
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "says it needs their resume (none is on file) or asks for it"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "says it needs their resume (none is on file) or asks for it"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "career_catchall",
+        "label": "your last question",
+        "ask": "what's missing from my resume for Junior Software Engineer roles?",
+        "pendingQuestion": true,
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "model_error",
+     "steps": 1,
+     "tools": [],
+     "errors": [
+      "HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."
+     ],
+     "route": "router_fallback",
+     "intent": "career_catchall"
+    }
+   ]
+  },
+  {
+   "id": "H022",
+   "pass": false,
+   "failed": [
+    "maps SQL, Excel, Tableau and the reporting experience to the role"
+   ],
+   "score": 1,
+   "replies": [
+    "I'm Trainee, a career agent: I find roles, prepare and track your applications, and get you ready for interviews. I may have missed what you meant, so what should we work on first?",
+    "I did not catch what to do with that one.\nHere is what I can do: find and screen roles against your record; set job-alert watches; tailor your resume and build application packets; run interview prep — briefs, mocks and question practice; track your applications; and draft outreach and negotiation messages, always held for your approval. Which role or company is it about, and what date does it turn on?"
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "maps SQL, Excel, Tableau and the reporting experience to the role"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "maps SQL, Excel, Tableau and the reporting experience to the role"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "career_catchall",
+        "label": "your last question",
+        "ask": "which of my skills match a data analyst role?",
+        "pendingQuestion": true,
+        "at": "2026-10-19T15:01:00.000Z"
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "model_error",
+     "steps": 1,
+     "tools": [],
+     "errors": [
+      "HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."
+     ],
+     "route": "router_fallback",
+     "intent": "unclaimed"
+    },
+    {
+     "stopped": "model_error",
+     "steps": 1,
+     "tools": [],
+     "errors": [
+      "HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."
+     ],
+     "route": "router_fallback",
+     "intent": "career_catchall"
+    }
+   ]
+  },
+  {
+   "id": "H023",
+   "pass": false,
+   "failed": [
+    "answers the status honestly (e.g. no outreach is set up)"
+   ],
+   "score": 1,
+   "replies": [
+    "I'm Trainee, a career agent: I find roles, prepare and track your applications, and get you ready for interviews. I may have missed what you meant, so what should we work on first?"
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "answers the status honestly (e.g. no outreach is set up)"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "answers the status honestly (e.g. no outreach is set up)"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": null,
+        "label": "the last thing you raised",
+        "ask": "is outreach paused for me?",
+        "pendingQuestion": false,
+        "unserved": true,
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "model_error",
+     "steps": 1,
+     "tools": [],
+     "errors": [
+      "HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."
+     ],
+     "route": "router_fallback",
+     "intent": "unclaimed"
+    }
+   ]
+  },
+  {
+   "id": "H024",
+   "pass": false,
+   "failed": [
+    "says it has no confirmed contact and will not guess one"
+   ],
+   "score": 1,
+   "replies": [
+    "One draft, written and held — addressed to a hiring manager at Northwind Ledger.\nSubject: Student interested in Northwind Ledger — 15 minutes? It is written only from your confirmed facts. Nothing has been sent and nothing can be: sending stays off, and the draft moves only when a real, verified recipient is attached and you approve it.\nWant it shorter, more casual, or re-aimed — or paste a real name and it personalizes to them?",
+    "It goes to no one yet — and I won't invent a recipient for it.\nThe draft on record is addressed by role — hiring manager at Northwind Ledger. The moment you paste a real name (or a sourced list), the draft personalizes to that person with their real address — until then the name slot stays bracketed, because a made-up name or address would send your introduction to a stranger or to no one. Paste the person's name as you have it, or say draft and I will write to another role or firm."
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "says it has no confirmed contact and will not guess one"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "says it has no confirmed contact and will not guess one"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "plan": {
+        "kind": "campaign_plan",
+        "single_draft": true,
+        "firms": [
+         "Northwind Ledger"
+        ],
+        "firms_named": true,
+        "count": 1,
+        "role_family": "hiring manager",
+        "draft": {
+         "kind": "outreach_draft_sample",
+         "status": "held_sample",
+         "sends": 0,
+         "text": "Subject: Student interested in Northwind Ledger — 15 minutes?\n\nHi [first name],\n\nI'm a student aiming at this work. I'm writing to ask a hiring manager at Northwind Ledger for fifteen minutes to hear about your path and any advice you'd give someone aiming at the work.\n\nNo pitch, and nothing is being sold — I just want to learn from someone doing it. If another week is easier, I'll work around your schedule.\n\nThank you for reading,\n[Your name]",
+         "target": "Northwind Ledger",
+         "recipient_role": "hiring manager",
+         "created_from_single_ask": true,
+         "at": "2026-10-19T15:00:00.000Z"
+        },
+        "lastAsk": "draft a short networking email to a hiring manager at Northwind Ledger",
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "lastDiscussion": {
+        "intent": "people_matching_stop",
+        "label": "the people-matching question",
+        "ask": "who exactly would this go to? give me their name and email",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:01:00.000Z"
+       },
+       "frames": {
+        "draft": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "ask": "draft a short networking email to a hiring manager at Northwind Ledger",
+         "intent": "outreach_draft",
+         "kind": "outreach_draft_sample",
+         "company": "Northwind Ledger",
+         "text": "Subject: Student interested in Northwind Ledger — 15 minutes?\n\nHi [first name],\n\nI'm a student aiming at this work. I'm writing to ask a hiring manager at Northwind Ledger for fifteen minutes to hear about your path and any advice you'd give someone aiming at the work.\n\nNo pitch, and nothing is being sold — I just want to learn from someone doing it. If another week is easier, I'll work around your schedule.\n\nThank you for reading,\n[Your name]",
+         "status": "held_sample"
+        },
+        "heldStop": {
+         "at": "2026-10-19T15:01:00.000Z",
+         "ask": "who exactly would this go to? give me their name and email",
+         "company": null
+        }
+       },
+       "lastWork": {
+        "kind": "draft",
+        "intent": "outreach_draft",
+        "ask": "draft a short networking email to a hiring manager at Northwind Ledger",
+        "company": null,
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      }
+     },
+     "plan": {
+      "kind": "campaign_plan",
+      "single_draft": true,
+      "firms": [
+       "Northwind Ledger"
+      ],
+      "firms_named": true,
+      "count": 1,
+      "role_family": "hiring manager",
+      "draft": {
+       "kind": "outreach_draft_sample",
+       "status": "held_sample",
+       "sends": 0,
+       "text": "Subject: Student interested in Northwind Ledger — 15 minutes?\n\nHi [first name],\n\nI'm a student aiming at this work. I'm writing to ask a hiring manager at Northwind Ledger for fifteen minutes to hear about your path and any advice you'd give someone aiming at the work.\n\nNo pitch, and nothing is being sold — I just want to learn from someone doing it. If another week is easier, I'll work around your schedule.\n\nThank you for reading,\n[Your name]",
+       "target": "Northwind Ledger",
+       "recipient_role": "hiring manager",
+       "created_from_single_ask": true,
+       "at": "2026-10-19T15:00:00.000Z"
+      },
+      "lastAsk": "draft a short networking email to a hiring manager at Northwind Ledger",
+      "at": "2026-10-19T15:00:00.000Z"
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "outreach_draft",
+     "reason": "action"
+    },
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "people_matching_stop",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H025",
+   "pass": false,
+   "failed": [
+    "acknowledges briefly",
+    "says what it will do and that nothing is sent without their yes, or asks the one thing it needs"
+   ],
+   "score": 1,
+   "replies": [
+    "I did not catch what to do with that one.\nHere is what I can do: find and screen roles against your record; set job-alert watches; tailor your resume and build application packets; run interview prep — briefs, mocks and question practice; track your applications; and draft outreach and negotiation messages, always held for your approval. Which role or company is it about, and what date does it turn on?"
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "acknowledges briefly",
+      "says what it will do and that nothing is sent without their yes, or asks the one thing it needs"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "acknowledges briefly",
+      "says what it will do and that nothing is sent without their yes, or asks the one thing it needs"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "career_catchall",
+        "label": "your last question",
+        "ask": "I'm overwhelmed — just apply me to 3 good software intern roles and handle the rest",
+        "pendingQuestion": true,
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "model_error",
+     "steps": 1,
+     "tools": [],
+     "errors": [
+      "HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."
+     ],
+     "route": "router_fallback",
+     "intent": "career_catchall"
+    }
+   ]
+  },
+  {
+   "id": "H026",
+   "pass": false,
+   "failed": [
+    "confirms it will track it, or says exactly what it needs to"
+   ],
+   "score": 1,
+   "replies": [
+    "I did not catch what to do with that one.\nHere is what I can do: find and screen roles against your record; set job-alert watches; tailor your resume and build application packets; run interview prep — briefs, mocks and question practice; track your applications; and draft outreach and negotiation messages, always held for your approval. Do you want the general picture, or help acting on your specific case?",
+    "I did not catch what to do with that one.\nHere is what I can do: find and screen roles against your record; set job-alert watches; tailor your resume and build application packets; run interview prep — briefs, mocks and question practice; track your applications; and draft outreach and negotiation messages, always held for your approval. Which role or company is it about, and what date does it turn on?"
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "confirms it will track it, or says exactly what it needs to"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "confirms it will track it, or says exactly what it needs to"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "career_catchall",
+        "label": "your last question",
+        "ask": "track that posting and alert me if anything about it changes",
+        "pendingQuestion": true,
+        "at": "2026-10-19T15:01:00.000Z"
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "model_error",
+     "steps": 1,
+     "tools": [],
+     "errors": [
+      "HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."
+     ],
+     "route": "router_fallback",
+     "intent": "career_catchall"
+    },
+    {
+     "stopped": "model_error",
+     "steps": 1,
+     "tools": [],
+     "errors": [
+      "HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."
+     ],
+     "route": "router_fallback",
+     "intent": "career_catchall"
+    }
+   ]
+  },
+  {
+   "id": "H027",
+   "pass": false,
+   "failed": [
+    "a concrete prep plan for a final-round analyst interview"
+   ],
+   "score": 1,
+   "replies": [
+    "I did not catch what to do with that one.\nHere is what I can do: find and screen roles against your record; set job-alert watches; tailor your resume and build application packets; run interview prep — briefs, mocks and question practice; track your applications; and draft outreach and negotiation messages, always held for your approval. Do you want the general picture, or help acting on your specific case?"
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "a concrete prep plan for a final-round analyst interview"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "a concrete prep plan for a final-round analyst interview"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "career_catchall",
+        "label": "your last question",
+        "ask": "I'm in final rounds with Lincoln International for an analyst role — prep me for the last round",
+        "pendingQuestion": true,
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "model_error",
+     "steps": 1,
+     "tools": [],
+     "errors": [
+      "HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."
+     ],
+     "route": "router_fallback",
+     "intent": "career_catchall"
+    }
+   ]
+  },
+  {
+   "id": "H028",
+   "pass": false,
+   "failed": [
+    "asks what they mean or says there is no list yet"
+   ],
+   "score": 1,
+   "replies": [
+    "I did not catch what to do with that one.\nHere is what I can do: find and screen roles against your record; set job-alert watches; tailor your resume and build application packets; run interview prep — briefs, mocks and question practice; track your applications; and draft outreach and negotiation messages, always held for your approval. Which role or company is it about, and what date does it turn on?"
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "asks what they mean or says there is no list yet"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "asks what they mean or says there is no list yet"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "career_catchall",
+        "label": "your last question",
+        "ask": "which ones are actually safe for me to apply to?",
+        "pendingQuestion": true,
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "model_error",
+     "steps": 1,
+     "tools": [],
+     "errors": [
+      "HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."
+     ],
+     "route": "router_fallback",
+     "intent": "career_catchall"
+    }
+   ]
+  },
+  {
+   "id": "H029",
+   "pass": false,
+   "failed": [
+    "says nothing has been prepared yet"
+   ],
+   "score": 1,
+   "replies": [
+    "I'm Trainee, a career agent: I find roles, prepare and track your applications, and get you ready for interviews. I may have missed what you meant, so what should we work on first?"
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "says nothing has been prepared yet"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "says nothing has been prepared yet"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": null,
+        "label": "the last thing you raised",
+        "ask": "walk me through exactly what you will submit for the first one, field by field",
+        "pendingQuestion": false,
+        "unserved": true,
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "model_error",
+     "steps": 1,
+     "tools": [],
+     "errors": [
+      "HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."
+     ],
+     "route": "router_fallback",
+     "intent": "unclaimed"
+    }
+   ]
+  },
+  {
+   "id": "H030",
+   "pass": false,
+   "failed": [
+    "says honestly there is no match to book with"
+   ],
+   "score": 1,
+   "replies": [
+    "There is no intro on record to check on.\nNo introduction has been made through this product — matching is not wired and sending is disabled — so no reply is outstanding, no call is waiting to be booked, and nothing about an intro can be reported. I can draft the check-in email for you to send yourself — name the person and the company and it's written from your facts."
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "says honestly there is no match to book with"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "says honestly there is no match to book with"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "people_matching_stop",
+        "label": "the people-matching question",
+        "ask": "book a call with my match for Thursday",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "frames": {
+        "heldStop": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "ask": "book a call with my match for Thursday",
+         "company": null
+        }
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "people_matching_stop",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H031",
+   "pass": false,
+   "failed": [
+    "says no research resume is on file and asks them to add it"
+   ],
+   "score": 1,
+   "replies": [
+    "I did not catch what to do with that one.\nHere is what I can do: find and screen roles against your record; set job-alert watches; tailor your resume and build application packets; run interview prep — briefs, mocks and question practice; track your applications; and draft outreach and negotiation messages, always held for your approval. Which role or company is it about, and what date does it turn on?"
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "says no research resume is on file and asks them to add it"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "says no research resume is on file and asks them to add it"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "career_catchall",
+        "label": "your last question",
+        "ask": "from now on use my research resume",
+        "pendingQuestion": true,
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "model_error",
+     "steps": 1,
+     "tools": [],
+     "errors": [
+      "HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."
+     ],
+     "route": "router_fallback",
+     "intent": "career_catchall"
+    }
+   ]
+  },
+  {
+   "id": "H032",
+   "pass": false,
+   "failed": [
+    "says there is no intro on record"
+   ],
+   "score": 1,
+   "replies": [
+    "There is no intro on record to check on.\nNo introduction has been made through this product — matching is not wired and sending is disabled — so no reply is outstanding, no call is waiting to be booked, and nothing about an intro can be reported. I can draft the check-in email for you to send yourself — name the person and the company and it's written from your facts."
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "says there is no intro on record"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "says there is no intro on record"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "people_matching_stop",
+        "label": "the people-matching question",
+        "ask": "did my intro at the bank ever happen?",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "frames": {
+        "heldStop": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "ask": "did my intro at the bank ever happen?",
+         "company": "the bank ever happen"
+        }
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "people_matching_stop",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H033",
+   "pass": false,
+   "failed": [
+    "a short reply asking what they would like to do"
+   ],
+   "score": 1,
+   "replies": [
+    "I'm Trainee, a career agent: I find roles, prepare and track your applications, and get you ready for interviews. I may have missed what you meant, so what should we work on first?"
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "a short reply asking what they would like to do"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "a short reply asking what they would like to do"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": null,
+        "label": "the last thing you raised",
+        "ask": "1",
+        "pendingQuestion": false,
+        "unserved": true,
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "model_error",
+     "steps": 1,
+     "tools": [],
+     "errors": [
+      "HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."
+     ],
+     "route": "router_fallback",
+     "intent": "unclaimed"
+    }
+   ]
+  },
+  {
+   "id": "H034",
+   "pass": false,
+   "failed": [
+    "names realistic entry routes for a cashier moving into computer work (e.g. help desk, IT support, data entry)",
+    "asks or offers one next step"
+   ],
+   "score": 1,
+   "replies": [
+    "Nothing to rank yet — the current list is empty.\nThe list is built from the boards as they connect — today it holds no roles at all, so there is nothing to rank, and no role will be invented to fill it. Paste a posting you found, or name a company to watch, and we start from something real."
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "names realistic entry routes for a cashier moving into computer work (e.g. help desk, IT support, data entry)",
+      "asks or offers one next step"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "names realistic entry routes for a cashier moving into computer work (e.g. help desk, IT support, data entry)",
+      "asks or offers one next step"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "career_discovery",
+        "label": "the role search",
+        "ask": "can u look at jobs for me im a cashier wanna do something w computers",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      }
+     },
+     "discovery": {
+      "lastParams": {
+       "families": [],
+       "roleText": "can u look at jobs",
+       "altRoleText": null,
+       "whereText": null,
+       "remote": false,
+       "bands": [],
+       "ask": "can u look at jobs for me im a cashier wanna do something w computers",
+       "at": "2026-10-19T15:00:00.000Z"
+      },
+      "lastShortlist": []
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "career_discovery",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H035",
+   "pass": false,
+   "failed": [
+    "understands day-shift nursing near Columbus",
+    "says what it can show or asks one thing it needs"
+   ],
+   "score": 1,
+   "replies": [
+    "I'm Trainee, a career agent: I find roles, prepare and track your applications, and get you ready for interviews. I may have missed what you meant, so what should we work on first?"
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "understands day-shift nursing near Columbus",
+      "says what it can show or asks one thing it needs"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "understands day-shift nursing near Columbus",
+      "says what it can show or asks one thing it needs"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": null,
+        "label": "the last thing you raised",
+        "ask": "got anything for nurses near columbus who want days only?",
+        "pendingQuestion": false,
+        "unserved": true,
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "model_error",
+     "steps": 1,
+     "tools": [],
+     "errors": [
+      "HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/."
+     ],
+     "route": "router_fallback",
+     "intent": "unclaimed"
+    }
+   ]
+  },
+  {
+   "id": "H036",
+   "pass": false,
+   "failed": [
+    "names the few things it needs (e.g. resume, target roles, work rights) plainly"
+   ],
+   "score": 1,
+   "replies": [
+    "Here is what I work from, and all of it comes from you.\nThe role or field you want, and where: a city, or remote. Your school and year, or the work you have done so far. Your resume, if you have one: paste it here and I read it as drafts you confirm before anything is built on them.\nNothing about you is assumed beyond what you tell me, and you can correct any of it. What role or field should I start with?"
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "names the few things it needs (e.g. resume, target roles, work rights) plainly"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "names the few things it needs (e.g. resume, target roles, work rights) plainly"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": []
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "career_onboarding_needs",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H037",
+   "pass": false,
+   "failed": [
+    "says Fieldnote Software"
+   ],
+   "score": 1,
+   "replies": [
+    "Your software engineering interview brief.\nNo company is named, so no company's process or hiring bar is claimed; this is the general shape of software engineering interviews. What they usually test: coding problems solved out loud, data structures and algorithms, and for experienced roles a system design round. Prepare first: two or three coding problems a day in one language, saying your approach and its time and space cost as you go.\nLikely questions: Reverse a linked list, then give its time and space cost. · Tell me about a bug you tracked down and how you found it. · Sketch a URL shortener at a high level. Want to run it as a mock, one question at a time?",
+    "Here is what I have on record — your words, as stated.\nyou have an interview at Fieldnote Software. Correct any of it the same way you stated it, or tell me what to run on it first."
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "says Fieldnote Software"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "says Fieldnote Software"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "profile": {
+      "_fromStatedFacts": true,
+      "basics": {
+       "name": null,
+       "email": null,
+       "phone": null,
+       "location": null,
+       "links": {}
+      },
+      "preferences": {
+       "roles": [],
+       "industries": [],
+       "locations": [],
+       "remote": null,
+       "companySize": null,
+       "compFloor": null,
+       "dealBreakers": [],
+       "targetCompanies": [],
+       "excludedCompanies": []
+      },
+      "constraints": {
+       "graduationDate": null,
+       "startDate": null,
+       "workAuthorization": null,
+       "needsSponsorship": null,
+       "relocation": null,
+       "securityClearance": null
+      },
+      "defaults": {},
+      "facts": [
+       {
+        "id": "stated-interview_company-0",
+        "kind": "interview_company",
+        "text": "you have an interview at Fieldnote Software",
+        "value": "Fieldnote Software",
+        "evidence": "have an interview with Fieldnote Software"
+       }
+      ],
+      "connections": []
+     },
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "prep": {
+        "family": "software engineering"
+       },
+       "lastDiscussion": {
+        "intent": "conversation_recall",
+        "label": "the last exchange",
+        "ask": "remind me what company I said I'm interviewing with",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:01:00.000Z"
+       },
+       "frames": {
+        "brief": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "ask": "I have an interview with Fieldnote Software next Tuesday"
+        }
+       },
+       "facts": {
+        "facts": [
+         {
+          "kind": "interview_company",
+          "value": "Fieldnote Software",
+          "evidence": "have an interview with Fieldnote Software",
+          "at": "2026-10-19T15:00:00.000Z"
+         }
+        ],
+        "updatedAt": "2026-10-19T15:00:00.000Z",
+        "lastTurn": {
+         "at": "2026-10-19T15:01:00.000Z",
+         "kinds": []
+        }
+       },
+       "lastWork": {
+        "kind": "prep",
+        "intent": "prep_brief",
+        "ask": "I have an interview with Fieldnote Software next Tuesday",
+        "company": null,
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      }
+     },
+     "statedFacts": {
+      "facts": [
+       {
+        "kind": "interview_company",
+        "value": "Fieldnote Software",
+        "evidence": "have an interview with Fieldnote Software",
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      ],
+      "updatedAt": "2026-10-19T15:00:00.000Z",
+      "lastTurn": {
+       "at": "2026-10-19T15:01:00.000Z",
+       "kinds": []
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 1,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "prep_brief",
+     "reason": "action"
+    },
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "conversation_recall",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H038",
+   "pass": false,
+   "failed": [
+    "either prepares it for their approval or says plainly why it cannot right now (e.g. the posting is not in its list, or it needs their resume)"
+   ],
+   "score": 1,
+   "replies": [
+    "I can't apply to the Backend Software Engineer at Ironstack Payments yet — that posting is not in the list I can work from.\nThe apply path runs on postings in the served board list or on a posting you paste; the Backend Software Engineer posting at Ironstack Payments is in neither right now, and no role will be invented to fill the gap. The browser worker that executes applications is also not wired in this handler — even a listed role would stop at preparation here. Paste the posting or its link and I will prepare the application from it in this turn."
+   ],
+   "note": "[gpt-5-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.). [gpt-4.1-mini: FAIL] judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.).",
+   "judges": [
+    {
+     "model": "gpt-5-mini",
+     "pass": false,
+     "failed": [
+      "either prepares it for their approval or says plainly why it cannot right now (e.g. the posting is not in its list, or it needs their resume)"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    },
+    {
+     "model": "gpt-4.1-mini",
+     "pass": false,
+     "failed": [
+      "either prepares it for their approval or says plainly why it cannot right now (e.g. the posting is not in its list, or it needs their resume)"
+     ],
+     "note": "judge error: Financial model unavailable (HTTP 429 insufficient_quota: You have no credits remaining. Add credits to continue using the API at https://platform.openai.com/settings/organization/billing/.)."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "namedApply": {
+        "company": "Ironstack Payments",
+        "role": "Backend Software Engineer"
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "named_role_apply",
+     "reason": "action"
+    }
+   ]
+  }
+ ],
+ "planned": 38,
+ "stopped": null
+}

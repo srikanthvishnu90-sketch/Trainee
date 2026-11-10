@@ -66,7 +66,7 @@ import { CODE_IN_CHAT_INTENT, CODE_IN_CHAT_REPLY, codeInChat, noteForCodeTurn } 
 import { supabaseEventStore } from "../_shared/agent/timeline.ts";
 import { CARD_ANSWER_INTENT, CARD_NEEDS_REPLY_STATUS, cardIntent, cardTurn, cardWaiting, supabaseCardStore } from "../_shared/career_apply_cards.ts";
 import { billingTurn, PAY_BY_CHECKOUT, stripeFromEnv, supabaseBillingStore } from "../_shared/career_billing.ts";
-import { mockTurn, supabaseMockStore as supabaseMockStoreUncapped } from "../_shared/career_mock.ts";
+import { mockPassNote, mockTurn, supabaseMockStore as supabaseMockStoreUncapped } from "../_shared/career_mock.ts";
 import { hiredSourceFromEnv } from "../_shared/career_hired.ts";
 import { askNextOpenQuestion, QUESTIONS_INTENT, questionsTurn, supabaseQuestionStore } from "../_shared/career_apply_questions.ts";
 import { applicationsTurn, supabaseApplications } from "../_shared/career_apply_status.ts";
@@ -159,6 +159,7 @@ import { APPLY_ALL_INTENT, type ApplyAllOffer, applyAllYesTurn, isApplyAllYes, i
 import { applyAllYesOn } from "./release_config.ts";
 import { supabaseTapStore } from "../_shared/channel_card_tap.ts";
 import { feedUrlsFor } from "../_shared/file_link.ts";
+import { fileCard, fileCardOn, rolesCardSource } from "../_shared/file_card.ts"; // SPEC C.2 / D-049: the chat File card
 import { vaultRefreshWrite } from "../_shared/oauth_vault_refresh.ts";
 import { reminderTurn, supabaseReminderStore } from "../_shared/career_reminders.ts"; // REQS DOC 2: reminders
 import { overviewTurn } from "../_shared/career_overview.ts"; // REQS DOC 2: "any update?", "what's waiting on me?"
@@ -688,6 +689,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       const mock = !card && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await mockTurn({ message, userId: user.id, threadId: tid, now: Date.now(), store: supabaseMockStore(admin) })
         : null;
+      // LOOP 11: a prep ask naming a company with no interview on file is not the mock's: the turn goes on, and the reply
+      // that answers it starts with a note naming the interviews that are on file.
+      if (!mock && !card && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)) {
+        const note = await mockPassNote({ message, userId: user.id, now: Date.now(), store: supabaseMockStore(admin) });
+        if (note) flowCtx.note = flowCtx.note ? `${flowCtx.note} ${note}` : note;
+      }
       // TASK PLANNER (career_planner.ts; CAREER_PLANNER=on with the brain released, default off): a message asking for two or
       // more actions is planned into steps, and each step runs through the code path that already does that one thing (the
       // router, the apply turn, the networking turn, the tracker and standing-instruction tools, the reminder store), on
@@ -1527,10 +1534,21 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
                   // owner 2026-11-01/02: on every channel the list itself is the hosted page).
                   if (why) made.parts[0] = `${why.trim()}\n${made.parts[0]}`;
                   // R10 fix 8 (architect ruling 2026-11-09): the roles by number beside the File link, so one can be chosen in chat.
-                  if (made.lines.length) made.parts[0] = [made.parts[0], ...made.lines].join("\n");
+                  // Architect amendment, D-049 over E.2 #18's chat form: with the File card on, the lines keep the number, employer,
+                  // title, location and check state (a role is still chosen by number) and drop the posting links; each role's
+                  // inspected link is on the File (F-05), which the card opens. Off: the lines as before.
+                  const roleLines = fileCardOn(Deno.env) ? made.lines.map((l) => l.replace(/\)\s+https:\/\/\S+$/, ")")) : made.lines;
+                  if (roleLines.length) made.parts[0] = [made.parts[0], ...roleLines].join("\n");
                   out = { ...out, reply: [made.parts[0], made.parts[1]].join("\n") + resumeLine, parts: [made.parts[0], ...(resumeLine ? [resumeLine.trim()] : []), made.parts[1]] };
                   agentMeta = { ...(agentMeta || {}), results_file: made.listId };
                   f5Offer = { offer: made.offer, ask: made.offerAsk, resumeLine: !!resumeLine };
+                  // SPEC C.2 / D-049: the web chat gets the results page as its File card (the texting channels get it at delivery,
+                  // file_card.ts withFileCards); counts from each listed role's own state, read now.
+                  if (fileCardOn(Deno.env)) {
+                    const src = await rolesCardSource(supabaseJobStore(admin), user.id, made.listId).catch(() => null);
+                    const card = src ? fileCard({ ...src, url: made.url }) : null;
+                    if (card) (out as any).fileCards = [card];
+                  }
                 }
               }
               // SPEC 2.2 (apply_readiness.ts): what an application still needs, from CONFIRMED facts only, handed to the model as data.
@@ -1815,7 +1833,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         const visibleReply = [reply, ...reminderLines].join("\n");
         // The same reply as separate messages for a texting channel: the note, each part whole, then the reminders.
         const parts = out.parts ? [...(flowCtx.note ? [flowCtx.note] : []), ...out.parts, ...(artifactNote ? [artifactNote] : []), ...reminderLines] : null;
-        return { thread_id: tid, reply: visibleReply, action: null, capabilities: out.capabilities, turn_key: turnKey, reminders, ...(out.task ? { task: out.task } : {}), ...(out.batch ? { batch: out.batch } : {}), ...(parts ? { parts } : {}), ...(artifactsField ? { artifacts: artifactsField } : {}), ...(turnPostings.length ? { postings: turnPostings } : {}), ...(shapeField ? { shape: shapeField } : {}), meta: { career: true, intent: out.intent, result_status: out.resultStatus, contained: out.contained, ...(agentMeta || {}) } };
+        return { thread_id: tid, reply: visibleReply, action: null, capabilities: out.capabilities, turn_key: turnKey, reminders, ...(out.task ? { task: out.task } : {}), ...(out.batch ? { batch: out.batch } : {}), ...(parts ? { parts } : {}), ...(artifactsField ? { artifacts: artifactsField } : {}), ...((out as any).fileCards?.length ? { file_cards: (out as any).fileCards } : {}), ...(turnPostings.length ? { postings: turnPostings } : {}), ...(shapeField ? { shape: shapeField } : {}), meta: { career: true, intent: out.intent, result_status: out.resultStatus, contained: out.contained, ...(agentMeta || {}) } };
       };
       const commitTurn = (events: unknown[]) => clock.wait("commit", () => persistence.commit({ userId: user.id, threadId: tid, turnKey, requestHash, revision: loaded.revision, accountVersion: loaded.accountVersion, snapshot: clock.sync("snapshot_extract", () => host.extractSnapshot(ctx)), patch: ctx._hostPatch, input: userContent, response: clock.sync("respond", respond), taskIntent, batchIntent, events }));
       clockTag = { intent: out.intent ?? null, handler: out.handler ?? null };

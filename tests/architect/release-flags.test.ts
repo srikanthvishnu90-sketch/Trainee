@@ -47,7 +47,9 @@ const D037: Record<string, string> = { ...REAL_SUBMIT, ...SEND_AS_PERSON };
 // D-047 (architect ruling 2026-11-09, on the owner's order that research work in production): research answers in chat.
 // D-047 amended (2026-11-09): the research brief File (CAREER_RESEARCH_BRIEF) ships with the reply.
 const D047: Record<string, string> = { CAREER_RESEARCH_REPLY: "on", CAREER_RESEARCH_BRIEF: "on" };
-const ALL = [...ON, ...Object.keys(D037), ...Object.keys(D047)].sort();
+// D-049 (architect ruling 2026-11-09; architect amendment): the chat File card (spec C.2) ships on.
+const D049: Record<string, string> = { CAREER_FILE_CARD: "on" };
+const ALL = [...ON, ...Object.keys(D037), ...Object.keys(D047), ...Object.keys(D049)].sort();
 const UNMEASURED = ["CAREER_REPLY_WRITER", "CAREER_KNOWLEDGE", "CAREER_JUDGE"];
 
 Deno.test("D-036: production serves exactly the release flags on, with the staged brain", () => {

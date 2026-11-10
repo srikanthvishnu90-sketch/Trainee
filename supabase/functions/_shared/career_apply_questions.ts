@@ -647,15 +647,22 @@ export function supabaseQuestionStore(admin: any): QuestionStore {
     },
     // D-053: the person's answered salary-expectation questions (any key: an old fact:salary_expectation row or a posting's
     // job: row), newest first; offered beside another posting's salary question, never filled.
+    // WO-122: with the person's own IANA zone (career_alert_prefs.tz, as the card's payload.tz), so an answer texted to
+    // another posting is labelled "(from your answer on <Mon D>)" in their day. No zone saved, or a failed read of it: no
+    // zone, and reusedSourceSuffix shows no date (never a UTC one).
     async earlierSalary(userId) {
-      const rows = must(
-        await admin.from("career_apply_questions").select("id,label,type,answer,answered_at,job_ids").eq("user_id", userId).eq("state", "answered")
+      const [read, prefs] = await Promise.all([
+        admin.from("career_apply_questions").select("id,label,type,answer,answered_at,job_ids").eq("user_id", userId).eq("state", "answered")
           .order("answered_at", { ascending: false, nullsFirst: false }).limit(200),
-        "read the salary answers on file",
-      ) ?? [];
+        admin.from("career_alert_prefs").select("tz").eq("user_id", userId).maybeSingle(),
+      ]);
+      const rows = must(read, "read the salary answers on file") ?? [];
+      if (prefs?.error) console.error("questions: time zone not read", prefs.error.message ?? String(prefs.error));
+      const tz = !prefs?.error && typeof prefs?.data?.tz === "string" && prefs.data.tz.trim() ? prefs.data.tz.trim() : null;
       return {
         answers: rows.filter((r: any) => typeof r.answer === "string" && r.answer.trim() && salaryExpectationAsked({ label: String(r.label ?? ""), type: String(r.type ?? "") }))
           .map((r: any) => ({ value: String(r.answer), factId: `text-answer:${r.id}`, ...(r.answered_at ? { at: String(r.answered_at) } : {}), job_ids: (r.job_ids ?? []).map(String) })),
+        ...(tz ? { tz } : {}),
       };
     },
     // G4: the drafts written ahead (prepare-ahead.ts) for these of the person's open questions.

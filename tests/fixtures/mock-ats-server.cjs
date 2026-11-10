@@ -45,7 +45,7 @@ const LV = (job) => page("Mock Lever Co - Software Engineer Intern", `
 <label for="comments">Additional information</label><textarea id="comments" name="comments"></textarea>
 <button type="submit" id="btn-submit">Submit application</button></form>`);
 
-const BOT = () => page("Verify you are human", `<h1>Please verify you are human</h1><div class="g-recaptcha" data-sitekey="TEST-NEVER-SOLVED"></div><p>This page has no application form until the check passes.</p>`);
+const BOT = () => page("Verify you are human", `<h1>Please verify you are human</h1><div class="g-recaptcha" data-sitekey="TEST-NEVER-SOLVED" style="width:304px;height:78px"></div><p>This page has no application form until the check passes.</p>`);
 
 function parseMultipart(buf, contentType) {
   const boundary = /boundary=(.+)$/.exec(contentType || "")?.[1];
@@ -82,7 +82,7 @@ function startMockAts({ port = 0 } = {}) {
       if (job.startsWith("redir")) { res.writeHead(302, { location: url.searchParams.get("to") || "/" }); return res.end(); }
       if (job.startsWith("captchaform")) {
         const kind = job.split("-")[1];
-        const extra = { recaptcha: '<div class="g-recaptcha" data-sitekey="TEST-NEVER-SOLVED"></div>',
+        const extra = { recaptcha: '<div class="g-recaptcha" data-sitekey="TEST-NEVER-SOLVED" style="width:304px;height:78px"></div>', // a drawn checkbox (the size a shown widget takes)
           hcaptcha: '<script src="/static/hcaptcha/api.js"></script>', turnstile: '<div class="cf-turnstile" data-sitekey="TEST-NEVER-SOLVED"></div>',
           text: "<p>Please verify you are human before applying.</p>", iframe: '<iframe src="/static/recaptcha/anchor" title="check"></iframe>',
           // WO-M: what Greenhouse and Ashby forms carry: an invisible reCAPTCHA (its script, an invisible widget and its badge frame).

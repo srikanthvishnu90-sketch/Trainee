@@ -15,6 +15,8 @@ import { messageRecords, outreachDrafts } from "../_shared/file_family_message.t
 import { sendRailOn } from "../_shared/career_send_rail.ts";
 import { PHONE_STEP_FLOOR_MS, phonePace } from "../_shared/file_session.ts";
 import { supabaseResumeRates } from "../_shared/career_resume_outcomes.ts";
+import { reviewRecords } from "../_shared/file_family_review.ts";
+import { supabaseReviewDeps } from "../_shared/application_review_links.ts";
 
 // Supabase's edge runtime keeps a promise handed to EdgeRuntime.waitUntil running after the answer is sent.
 export const edgeBackground = (work: Promise<unknown>) => {
@@ -37,6 +39,8 @@ export function buildFileDeps(admin: any, env: FileDeps["env"], now: () => numbe
     // Item 6: each File family's records and posts (file_family_serve.ts FamilyRecords). One line per family; each builder adds only its
     // own line (an absent family loads nothing: a ref File shows the C.24 error state, and no post is dispatched).
     familyRecords: {
+      // S1: the live Application review, read from the prepared application and its record on every GET (file_family_review.ts).
+      "F-09": (() => { const st = supabaseFileStore(admin); return reviewRecords({ review: (u) => supabaseReviewDeps(admin, u, env), current: (u, j) => st.prepared(u, j), appRow: (u, j, url) => st.appRow(u, j, url), cards: supabaseCardStore(admin), account: supabaseAccountStamp(admin), events: supabaseEventStore(admin) }, now); })(),
       "F-12": messageRecords({ store: outreachDrafts(admin), rail: sendRailOn(env) ? { rpc: (name: string, args: { p: unknown }) => admin.rpc(name, args), drafts: (u: string, ids: string[]) => outreachDrafts(admin).drafts(u, ids) } : null }),
     },
     // A results card that isn't ready: the employer's open questions (asked on the page, saved the way the chat saves them), then

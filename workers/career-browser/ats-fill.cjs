@@ -108,9 +108,12 @@ function EXTRACT() {
     // the site's own shortcut, not a question. Neither is a question we fill.
     if (el.closest(".iti__country-container, .iti__flag-container, .iti__dropdown-content") || (el.getAttribute("role") === "combobox" && el.closest(".iti") && !el.classList.contains("iti__tel-input"))) continue;
     if (el.closest("[class*='autofill' i]")) continue;
-    if (type === "radio" || (type === "checkbox" && (el.closest("fieldset") || (el.name && rootOf(el).querySelectorAll(`input[type="checkbox"][name="${CSS.escape(el.name)}"]`).length > 1)))) {
-      const fs = el.closest("fieldset");
-      const mates = all.filter((x) => x.type === type && !seen.has(x) && (fs ? x.closest("fieldset") === fs : x.name === el.name));
+    // Drawn checkboxes in one role=group (Workable's "Permanent - Full-time / Remote / ..." with no fieldset or shared name) are one
+    // question's options, not each an agreement (strict run 42777082059).
+    const drawnGroup = drawnChoice && !el.closest("fieldset") ? el.closest("[role=group], [role=radiogroup]") : null;
+    if (type === "radio" || (type === "checkbox" && (el.closest("fieldset") || drawnGroup || (el.name && rootOf(el).querySelectorAll(`input[type="checkbox"][name="${CSS.escape(el.name)}"]`).length > 1)))) {
+      const fs = el.closest("fieldset") || drawnGroup;
+      const mates = all.filter((x) => x.type === type && !seen.has(x) && (drawnGroup ? !x.closest("fieldset") && x.closest("[role=group], [role=radiogroup]") === fs : fs ? x.closest("fieldset") === fs : x.name === el.name));
       mates.forEach((x) => seen.add(x));
       const byId = (ids) => (ids || "").split(/\s+/).map((id) => id && (rootOf(el).getElementById ? rootOf(el).getElementById(id) : document.getElementById(id))).find((n) => n && nodeText(n));
       const group = el.closest("[role=radiogroup], [role=group]");

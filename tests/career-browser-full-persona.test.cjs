@@ -13,14 +13,14 @@ const path = require("node:path");
 const http = require("node:http");
 const lib = require("../scripts/browser-eval/eval-lib.cjs");
 const { strictPosting } = require("../scripts/browser-eval/strict.cjs");
-const { matchPlace, matchState, factKey, factValue, decide } = require("../workers/career-browser/ats-fill.cjs");
+const { matchPlace, matchState, factKey, factValue, decide, EXTRACT } = require("../workers/career-browser/ats-fill.cjs");
 const { applyOne, payloadHash, sha256 } = require("../workers/career-browser/parallel-apply.cjs");
 
 let pw = null;
 for (const id of [process.env.UPMORE_PLAYWRIGHT_PATH, "playwright", "/opt/npm-tools/node_modules/playwright"].filter(Boolean)) { try { pw = require(id); break; } catch { /* next */ } }
 const skip = pw ? false : "PLAYWRIGHT_UNRESOLVABLE: set UPMORE_PLAYWRIGHT_PATH";
 
-test("place: the person's own spelling first, else the same city, the same US state by name or code, the confirmed country", () => {
+test("place: the option that is the place's own text first, else the same city, the same US state by name or code, the confirmed country", () => {
   const US = "United States";
   assert.deepEqual(matchPlace(["Chicago Heights, Illinois, United States", "Chicago, Illinois, United States"], "Chicago, IL", US), { index: 1 });
   assert.equal(matchPlace(["Chicago, Illinois, United States", "Chicago, IL, United States"], "Chicago, IL", US).error, "ambiguous_option", "the same place twice is the person's to pick");
@@ -225,4 +225,14 @@ test("Greenhouse 'Location (City)': the confirmed place is picked from the looku
   const r = await strictPosting(browser, { provider: "greenhouse", url: `${base}/ghloc` }, opts("default"));
   assert.equal(r.result, "pass", JSON.stringify({ ...r, diag: undefined }));
   assert.deepEqual(posts.filter((p) => p.url === "/submit/ghloc"), [], "nothing posted");
+});
+
+test("Workable: drawn checkboxes in one role=group are one question's options, never each an agreement", { skip, timeout: 30000 }, async () => {
+  const page = await browser.newPage();
+  try {
+    const opt = (n, t) => `<div role="checkbox" aria-checked="false" tabindex="0"><label><input type="checkbox" name="${n}" aria-hidden="true" tabindex="-1"><span>${t}</span></label></div>`;
+    await page.setContent(`<form><span id="jt">Job type *</span><div role="group" aria-labelledby="jt">${opt("CA_1[]", "Permanent - Full-time")}${opt("CA_2[]", "Remote")}${opt("CA_3[]", "On-site")}</div></form>`);
+    const qs = await page.evaluate(EXTRACT);
+    assert.deepEqual(qs.map((q) => [q.kind, q.label, q.options.map((o) => o.label)]), [["checkgroup", "Job type", ["Permanent - Full-time", "Remote", "On-site"]]]);
+  } finally { await page.close(); }
 });

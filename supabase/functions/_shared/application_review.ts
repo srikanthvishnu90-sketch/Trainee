@@ -50,11 +50,31 @@ export interface ReviewInput {
   id: string; payload: any; payload_hash: string; card_lines?: string[];
   title?: string | null; // the posting's role, from the posting record (never from the model)
   open?: { label: string; options?: string[] }[]; // the employer's required questions still unanswered for this posting
+  // Item 6 S1: the resume file's own record (career:resume-versions, career_resume_outcomes.ts VersionEntry) when Trainee made it.
+  resume_version?: { n: number; at: string | null } | null;
+}
+// Item 6 S1: where an answer came from, in words, from the fact id the preparer bound it to (career_apply.ts PlannedField.factId).
+// No fact id is said as such: it is never presented as confirmed (D-024).
+export function sourceOf(factId: unknown): string {
+  const f = String(factId ?? "").trim();
+  if (!f) return "Source not on record";
+  if (/^(basics|profile)\./.test(f)) return "From your confirmed profile";
+  if (/^(text-answer|chat_answer|answer)[:.]/.test(f)) return "Your answer in the chat";
+  if (f === "batch_approval") return "From your batch approval";
+  return "From a fact you confirmed";
+}
+// Item 6 S1: the resume as a person reads it: name, version, what it targets, and the date it was made. Never a hash prefix.
+export interface ResumeMeta { name: string; version: string; target: string; at: string | null }
+export function resumeLabelOf(m: ResumeMeta, tz?: string | null): string {
+  const d = m.at && Number.isFinite(Date.parse(m.at)) ? (() => { const f = (timeZone: string) => new Date(Date.parse(m.at!)).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone }); try { return f(tz || "UTC"); } catch { return f("UTC"); } })() : null;
+  return [m.name, m.version, m.target, d ? `made ${d}` : "date not on file"].join(" - ");
 }
 export interface ReviewItem {
   id: string; job_id: string | null; employer: string; role: string | null; url: string | null; destination: string | null;
   resume: { label: string; sha12: string } | null; files: string[];
-  answers: { question: string; answer: string; sensitive: Sensitive | null }[];
+  resume_meta?: ResumeMeta; // item 6 S1: the resume in words (name, version, target, date) for the F-09 page
+  answers: { question: string; answer: string; sensitive: Sensitive | null; source?: string }[];
+  payload_hash?: string; // item 6 S1: the full hash the review File's Approve is bound to (D-MS-1)
   unresolved: { question: string; fact: Sensitive | null; ask: string }[];
   page_fields: string[]; hash12: string; approvable: boolean; covers: string[]; expires_at: string | null; letter: boolean;
 }
@@ -67,18 +87,23 @@ export function reviewOf(x: ReviewInput): ReviewItem {
     const question = one(f?.label ?? f?.name, 200), fact = sensitiveOf(question);
     // A blank answer is not an answer: shown unresolved, never sent as a default (D-007).
     if (blank(f?.value)) unresolved.push({ question, fact, ask: narrowQuestion({ label: question, company: employer }) });
-    else answers.push({ question, answer: String(f.value === true ? "Yes" : f.value === false ? "No" : f.value).replace(/\s+/g, " ").trim().slice(0, 2000), sensitive: fact });
+    else answers.push({ question, answer: String(f.value === true ? "Yes" : f.value === false ? "No" : f.value).replace(/\s+/g, " ").trim().slice(0, 2000), sensitive: fact, source: sourceOf(f?.factId) });
   }
   for (const q of x.open ?? []) {
     const question = one(q.label, 200);
     if (!unresolved.some((u) => u.question === question)) unresolved.push({ question, fact: sensitiveOf(question), ask: narrowQuestion({ label: question, company: employer, options: q.options }) });
   }
-  // The resume line the card already carries (career_prepared_card.ts resumeCardLine): "Resume: <name> (<sha12>)".
+  // The resume line the card already carries (career_prepared_card.ts resumeCardLine): "Resume: <name>" (before R6, with
+  // "(<sha12>)" after it, which a card prepared earlier may still carry).
   const line = (x.card_lines ?? []).find((l) => /^Resume: /.test(String(l)));
   const label = line ? String(line).replace(/^Resume: /, "").replace(/\s*\([0-9a-f]{12}\)$/, "") : "your confirmed resume";
-  const resume = /^[0-9a-f]{64}$/.test(sha) ? { label: one(label, 120), sha12: sha.slice(0, 12) } : null;
+  const tailored = /, tailored for this role$/.test(label) || p.resume_tailored === true;
+  const name = one(label.replace(/, tailored for this role$/, ""), 120);
+  const meta: ResumeMeta = { name, version: x.resume_version ? `version ${x.resume_version.n}` : tailored ? "version not recorded" : "your base resume",
+    target: tailored ? `tailored for ${one(x.title, 120) || "this role"} at ${employer}` : "not tailored for this role", at: x.resume_version?.at ?? null };
+  const resume = /^[0-9a-f]{64}$/.test(sha) ? { label: name, sha12: sha.slice(0, 12) } : null;
   const files = [...(resume ? [`Resume: ${resume.label}`] : []), ...(p.cover_note && typeof p.cover_note === "object" && p.cover_note.text ? ["Cover note (its full text is under the answers)"] : [])];
-  if (p.cover_note?.text) answers.push({ question: "Cover note", answer: one(p.cover_note.text, 4000), sensitive: null });
+  if (p.cover_note?.text) answers.push({ question: "Cover note", answer: one(p.cover_note.text, 4000), sensitive: null, source: "Drafted by Trainee; your yes approves this exact text" });
   const page_fields = Array.isArray(p.page_field_names) ? p.page_field_names.map((s: unknown) => one(s, 80)) : [];
   const url = /^https?:\/\//.test(String(p.url ?? "")) ? one(p.url, 500) : null, destination = one(p.destination, 500) || null;
   const role = one(x.title, 120) || null, hash12 = String(x.payload_hash ?? "").slice(0, 12);
@@ -86,7 +111,8 @@ export function reviewOf(x: ReviewInput): ReviewItem {
     ...(destination ? [`where it is sent: ${destination}`] : []), ...(resume ? [`the resume file ${resume.sha12}`] : []),
     `${answers.length} answer${answers.length === 1 ? "" : "s"}, word for word as shown`, ...(page_fields.length ? [`the fields the employer's page sets: ${page_fields.join(", ")}`] : [])];
   const expires_at = Number.isFinite(Date.parse(String(p.expires_at ?? ""))) ? new Date(Date.parse(p.expires_at)).toISOString() : null;
-  return { id: x.id, job_id: one(p.job_id, 200) || null, employer, role, url, destination, resume, files, answers, unresolved, page_fields, hash12, approvable: !!resume && !unresolved.length, covers, expires_at, letter: !!p.cover_note?.text };
+  return { id: x.id, job_id: one(p.job_id, 200) || null, employer, role, url, destination, resume, files, answers, unresolved, page_fields, hash12, approvable: !!resume && !unresolved.length, covers, expires_at, letter: !!p.cover_note?.text,
+    ...(resume ? { resume_meta: meta } : {}), ...(/^[0-9a-f]{64}$/.test(String(x.payload_hash ?? "")) ? { payload_hash: String(x.payload_hash) } : {}) };
 }
 
 // The review in words: the card's "full review" and the plain-text twin of the review File. Nothing here is a success word.
@@ -197,22 +223,27 @@ export function closeoutText(rows: RecordRow[], o: { tz?: string | null; held?: 
 // The card's review links (career_apply_cards.ts cardTurn review): one review File per application shown, built from the
 // prepared payload, the posting's own title and the employer's still-open required questions. Null when none could be made.
 export interface ReviewDeps {
-  prepared(ids: string[]): Promise<{ id: string; job_id?: string | null; payload: any; payload_hash: string; card_lines?: string[] }[]>;
+  prepared(ids: string[]): Promise<{ id: string; job_id?: string | null; payload: any; payload_hash: string; card_lines?: string[]; created_at?: string | null }[]>;
   titles?(jobIds: string[]): Promise<Map<string, string>>;
   open?(jobIds: string[]): Promise<{ label: string; options?: string[]; job_ids?: string[] }[]>;
   create(item: ReviewItem): Promise<{ url: string | null } | null>;
+  // Item 6 S1: the person's resume-version record (career:resume-versions) by file sha256, when it can be read.
+  versions?(): Promise<Record<string, { n: number; at?: string | null }>>;
 }
 export async function reviewLinksFor(shown: { id: string }[], d: ReviewDeps): Promise<string | null> {
   const rows = await d.prepared(shown.map((p) => p.id));
   const byId = new Map(rows.map((r) => [r.id, r]));
   const titles = d.titles ? await d.titles(rows.map((r) => String(r.job_id ?? "")).filter(Boolean)).catch(() => new Map<string, string>()) : new Map<string, string>();
   const open = d.open ? await d.open(rows.map((r) => String(r.job_id ?? "")).filter(Boolean)).catch(() => []) : [];
+  const versions = d.versions ? await d.versions().catch(() => ({} as Record<string, { n: number; at?: string | null }>)) : {};
   const lines: string[] = [], held: string[] = [];
   for (const [i, p] of shown.entries()) {
     const r = byId.get(p.id);
     if (!r) continue;
     const job = String(r.job_id ?? "");
-    const item = reviewOf({ ...r, title: titles.get(job) ?? null, open: open.filter((q) => job && (q.job_ids ?? []).includes(job)) });
+    const v = versions[String(r.payload?.resume_sha256 ?? "")];
+    const item = reviewOf({ ...r, title: titles.get(job) ?? null, open: open.filter((q) => job && (q.job_ids ?? []).includes(job)),
+      resume_version: v && Number.isInteger(v.n) && v.n > 0 ? { n: v.n, at: typeof v.at === "string" ? v.at : null } : null });
     const made = await d.create(item).catch(() => null);
     if (made?.url) lines.push(`${i + 1}. ${item.employer}${item.role ? `, ${item.role}` : ""}: ${made.url}`);
     // Owner clarification (2026-11-09, D-MS-1 item 4): one held for an unanswered required question stays out of the set a

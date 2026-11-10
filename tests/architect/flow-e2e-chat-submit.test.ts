@@ -229,7 +229,9 @@ Deno.test({
         assert(/^[0-9a-f-]{36}$/.test(String(cardMeta.card_id)), `the card's id rides the reply: ${JSON.stringify(cardMeta)}`);
         for (const f of rowFields) assert(shown.reply.includes(String(f.value)), `the card shows ${f.label} = ${f.value}: ${shown.reply}`);
         for (const v of ["Alex Testcase", "alex.testcase@example.test", "Illinois"]) assert(shown.reply.includes(v), `${v} on the card: ${shown.reply}`);
-        assert(/Resume: .*tailored for this role \([0-9a-f]{12}\)/.test(shown.reply), `the resume on the card: ${shown.reply}`);
+        // Architect amendment R6 (2026-11-10): the resume in human terms on the card, no hash prefix; the hash is in the stored approval.
+        assert(/Resume: .*tailored for this role/.test(shown.reply) && !/\([0-9a-f]{12}\)/.test(shown.reply), `the resume on the card: ${shown.reply}`);
+        assert(/^[0-9a-f]{64}$/.test(await pg.sql(`select payload->>'resume_sha256' from public.career_apply_prepared where payload_hash = '${preparedHash}'`)), "the resume's hash is in the approved payload");
         assertEquals(await pg.sql(`select items->0->>'payload_hash' from public.career_apply_cards where id = '${cardMeta.card_id}'`), preparedHash);
       });
 

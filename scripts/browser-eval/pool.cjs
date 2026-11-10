@@ -19,7 +19,7 @@ const crypto = require("node:crypto");
 const lib = require("./eval-lib.cjs");
 const { graphqlRead, robotsOk, PROVIDER_HOSTS } = require("./strict.cjs");
 const { runPool, payloadHash, NeedsUser } = require("../../workers/career-browser/parallel-apply.cjs");
-const { factValue, answerFor, norm, DECLINE } = require("../../workers/career-browser/ats-fill.cjs");
+const { factValue, answerFor, norm, DECLINE, factsFrom, holdsApproved } = require("../../workers/career-browser/ats-fill.cjs");
 
 // Round robin over the sample's providers, in file order, until n postings: every board is in the batch.
 function pickBatch(items, n) {
@@ -36,17 +36,19 @@ function pickBatch(items, n) {
 
 const digits = (v) => String(v || "").replace(/\D/g, "");
 // Is this field's approved value the payload's own, and does the field hold exactly it? Returns null, or why not.
+// The facts are the ones the fill used: the payload's facts, and its approved answers under a contact label (ats-fill factsFrom).
 function fieldMismatch(f, p) {
   let want;
-  if (f.source === "fact") want = factValue(f.label, p.facts);
+  const facts = factsFrom(p.facts, p.answers);
+  if (f.source === "fact") want = factValue(f.label, facts);
   else if (f.source === "answer") want = answerFor(f.label, p.answers);
   else if (f.source === "resume") want = path.basename(p.resume.path);
-  else if (f.source === "eeo_policy") want = p.facts.eeo_policy === "decline" ? "decline" : undefined;
+  else if (f.source === "eeo_policy") want = facts.eeo_policy === "decline" ? "decline" : undefined;
   if (want === undefined || String(want) !== String(f.approved)) return "approved_value_not_in_payload";
   if (f.held === null || f.held === undefined || f.gone) return "field_gone";
   const held = Array.isArray(f.held) ? f.held : [f.held];
   if (f.source === "eeo_policy") return held.length === 1 && DECLINE.test(norm(held[0])) ? null : "holds_other_than_decline";
-  if (["select", "radio", "buttons", "combobox"].includes(f.kind)) return held.length === 1 && norm(held[0]) === norm(want) ? null : "holds_other_option";
+  if (["select", "radio", "buttons", "combobox"].includes(f.kind)) return held.length === 1 && (norm(held[0]) === norm(want) || holdsApproved(f, want, facts)) ? null : "holds_other_option";
   if (f.kind === "checkgroup") {
     const parts = String(want).split(/\s*[;,]\s*/).filter(Boolean).map(norm);
     const h = held.map(norm);
@@ -54,6 +56,8 @@ function fieldMismatch(f, p) {
   }
   const t = String(held[0]).trim();
   if (t === String(want).trim()) return null;
+  // Lever's place box holds the place picked from its own list ("Chicago, Illinois, United States" for "Chicago, IL").
+  if (f.place && holdsApproved(f, want, facts)) return null;
   // A phone box that formats the number: the same digits, or the digits less the dial code its picker shows (ats-fill phoneSame).
   if (/^\+?[\d\s().\-\/]{6,}$/.test(String(want).trim()) && digits(t) && (digits(t) === digits(want) || (String(want).trim().startsWith("+") && digits(want).endsWith(digits(t)) && digits(want).length - digits(t).length <= 3))) return null;
   return "holds_other_text";

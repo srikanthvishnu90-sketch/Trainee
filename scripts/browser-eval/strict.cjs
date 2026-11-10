@@ -40,6 +40,9 @@ const SIMULATED_UPLOADS = [
   // job-boards.greenhouse.io posts the resume straight to its S3 bucket (strict runs 42736815031, 42737911402:
   // grnhse-prod-jben-us-east-1.s3.amazonaws.com, grnhse-prod-jben-eu-west-1.s3.eu-west-1.amazonaws.com).
   { provider: "greenhouse", host: /^grnhse-prod-jben-[a-z0-9-]+\.s3(?:\.[a-z0-9-]+)?\.amazonaws\.com$/, path: /^\/$/, methods: ["POST", "OPTIONS"] },
+  // Architect ruling on #741: Workable posts the resume to its own S3 bucket (strict r12 DIAG: workable-application-form.s3.us-east-1
+  // .amazonaws.com/); blocked, the page discards its form a moment later. Answered here the same way, never sent.
+  { provider: "workable", host: /^workable-application-form\.s3(?:\.[a-z0-9-]+)?\.amazonaws\.com$/, path: /^\/$/, methods: ["POST", "OPTIONS"] },
 ];
 function simulatedUpload(req, provider) {
   let u; try { u = new URL(req.url()); } catch { return null; }
@@ -84,6 +87,15 @@ async function robotsOk(url, cache, ua) {
   return g !== "deny" && lib.robotsAllows(g, u.pathname + u.search);
 }
 
+// The bench's stop at the instant before the click. A Submit inside an employee sign-in form is refused (architect ruling on #741:
+// Teamtailor's "Already working at X?" form was counted as a pass), never counted as reaching the application's Submit.
+function strictStop() {
+  return async (phase, _audit, submit) => {
+    if (phase !== "submitting") return;
+    if (submit && submit.signin) throw new NeedsUser("strict_signin_form", String(submit.form || "").slice(0, 80));
+    throw new NeedsUser("strict_reached_submit");
+  };
+}
 async function strictPosting(browser, item, o) {
   const persona = o.persona || "default";
   if (!lib.PERSONAS[persona]) throw new Error(`unknown persona: ${persona}`);
@@ -110,7 +122,7 @@ async function strictPosting(browser, item, o) {
     if (req.isNavigationRequest()) await o.pacer.wait(u.host);
     return true;
   };
-  const stop = async (phase) => { if (phase === "submitting") throw new NeedsUser("strict_reached_submit"); };
+  const stop = strictStop();
   const out = await applyOne(browser, p, { allowHosts, retries: 0, diag: true, stepTimeoutMs: 20000, requestGate: gate, initScript: lib.SUBMIT_TRAP, onPhase: stop }).catch((e) => ({ status: "error", reason: `driver_error: ${String(e && e.message).split("\n")[0].slice(0, 140)}` }));
   r.reason = out.reason || out.status; r.error = out.error ? String(out.error).slice(0, 140) : out.check ? `shown: ${out.check}` : null; r.field = out.field ? String(out.field).slice(0, 80) : null; r.needs = out.needs || null;
   if (out.reason === "strict_reached_submit") r.result = r.upload_simulated ? "ready_except_upload" : "pass";
@@ -175,4 +187,4 @@ async function main() {
   if (s.all.breaches) process.exit(3);
 }
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
-module.exports = { simulatedUpload, SIMULATED_UPLOADS, strictPosting, graphqlRead, robotsOk, summarize, markdown, CUSTOM_ONLY, PROVIDER_HOSTS };
+module.exports = { strictStop, simulatedUpload, SIMULATED_UPLOADS, strictPosting, graphqlRead, robotsOk, summarize, markdown, CUSTOM_ONLY, PROVIDER_HOSTS };

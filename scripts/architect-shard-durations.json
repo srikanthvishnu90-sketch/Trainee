@@ -589,6 +589,8 @@
     "tests/architect/wo-g-uncertain-reconcile-pg.test.ts": 10,
     "tests/architect/writer-long-answers-20261106.test.ts": 0.1,
     "tests/architect/yes-approves-batch-handler.test.ts": 11.2,
-    "tests/architect/yes-approves-batch.test.ts": 0.2
+    "tests/architect/yes-approves-batch.test.ts": 0.2,
+    "tests/architect/loop-09-memory-apply.test.ts": 38,
+    "tests/architect/loop-09-memory.test.ts": 12
   }
 }

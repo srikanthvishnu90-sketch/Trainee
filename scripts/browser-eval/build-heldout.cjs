@@ -24,13 +24,15 @@ function shuffle(xs, r) { const a = xs.slice(); for (let i = a.length - 1; i > 0
 
 // ------------------------------------------------------------------ company keys
 const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+const isOut = (set, s) => { const k = norm(s); return k.length > 0 && set.has(k); }; // an empty key never matches
 // The company a posting URL belongs to (as sample.csv writes them); null when the URL does not say (Workable /j/).
 function companyOf(provider, url) {
   let u; try { u = new URL(url); } catch { return null; }
   const host = u.hostname.toLowerCase(), seg = u.pathname.split("/").filter(Boolean);
   switch (provider) {
     case "greenhouse": case "lever": case "ashby": case "smartrecruiters": return seg[0] || null;
-    case "workable": return seg[0] && seg[0] !== "j" ? seg[0] : null;
+    case "workable": if (host !== "apply.workable.com") { const l = host.split("."); return l[l.length - 2] || null; } // a custom careers domain
+      return seg[0] && seg[0] !== "j" && norm(seg[0]) ? seg[0] : null;
     case "workday": return host.split(".")[0];
     case "teamtailor": return host.endsWith(".teamtailor.com") ? host.split(".")[0] : host;
     default: return host.split(".")[0]; // bamboohr, breezy, personio, recruitee: <slug>.<provider host>
@@ -103,11 +105,12 @@ async function main() {
   const sampleUrls = new Set(sampleRows.map((r) => r.url.replace(/[?#].*$/, "").replace(/\/$/, "").toLowerCase()));
   // Every company in sample.csv, normalized, across providers (a company sampled on one site is excluded on all).
   const excluded = new Set();
-  for (const r of sampleRows) { const c = companyOf(r.provider, r.url); if (c) excluded.add(norm(c));
-    if (c && c.includes(".")) { const l = c.split("."); excluded.add(norm(l[l.length - 2])); } } // a custom careers domain: its name
+  const exclude = (c) => { if (norm(c)) excluded.add(norm(c)); };
+  for (const r of sampleRows) { const c = companyOf(r.provider, r.url); if (c) exclude(c);
+    if (c && c.includes(".")) { const l = c.split("."); exclude(l[l.length - 2]); } } // a custom careers domain: its name
   for (const r of sampleRows.filter((x) => x.provider === "workable")) { // /j/<code> -> apply.workable.com/<account>/j/<code>
     const x = await req(r.url, { accept: "text/html" }); const c = companyOf("workable", x.url);
-    console.log(`SAMPLE-WORKABLE | ${r.url} -> ${x.status} ${x.url}`); if (c) excluded.add(norm(c)); await sleep(300);
+    console.log(`SAMPLE-WORKABLE | ${r.url} -> ${x.status} ${x.url}`); if (c) exclude(c); await sleep(300);
   }
   console.log(`EXCLUDED companies from sample.csv: ${excluded.size}`);
 
@@ -121,11 +124,11 @@ async function main() {
     for (const b of boards) {
       if (picked[p].length >= per || tried >= maxBoards) break;
       const key = norm(boardKey(p, b.board_token));
-      if (excluded.has(key) || usedCompanies.has(key) || excluded.has(norm(b.company))) continue;
+      if (!key || isOut(excluded, key) || usedCompanies.has(key) || isOut(excluded, b.company)) continue;
       tried++;
       let jobs = []; try { jobs = await PROVIDERS[p](b.board_token); } catch (e) { console.log(`SKIP | ${p} | ${b.board_token} | list error ${e.message}`); }
       await sleep(300);
-      jobs = jobs.filter((j) => !sampleUrls.has(j.url.replace(/[?#].*$/, "").replace(/\/$/, "").toLowerCase()) && !excluded.has(norm(j.company || "")) && !excluded.has(norm(companyOf(p, j.url) || "")));
+      jobs = jobs.filter((j) => !sampleUrls.has(j.url.replace(/[?#].*$/, "").replace(/\/$/, "").toLowerCase()) && !isOut(excluded, j.company) && !isOut(excluded, companyOf(p, j.url)));
       if (!jobs.length) { console.log(`SKIP | ${p} | ${b.board_token} | no postings in feed`); continue; }
       // One posting per board, chosen with the seed; a closed one is replaced by the next of the same board (up to 3).
       let ok = null;

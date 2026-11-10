@@ -29,6 +29,7 @@ import { needsText, type Situation } from "./career_situation.ts";
 import { draftNote, eligibilityDraft, eligibilityFactOf, type Said } from "./eligibility_draft.ts";
 import { contactDraft, isContactFact } from "./contact_draft.ts";
 import { redactIdentity } from "./identity_redact.ts";
+import { neededSentence, orderAsks } from "./batch_needs.ts";
 
 export interface OpenQuestion {
   id: string;
@@ -62,6 +63,9 @@ export interface QuestionStore {
   statements?(userId: string): Promise<Said[]>;
   // G4: the drafts written ahead for these open questions, by question id. Without it, every draft is written on "draft N".
   drafted?(userId: string, ids: string[]): Promise<Record<string, AheadDraft>>;
+  // Batch needs (2026-11-10): the postings of the person's batch (their queue), so a question says how many of them it is
+  // needed for and the one needed by most is asked first. Without it, the postings each question names are counted.
+  batch?(userId: string): Promise<string[]>;
 }
 
 export const QUESTIONS_INTENT = "career_apply_questions";
@@ -210,8 +214,10 @@ const offerDraft = (q: OpenQuestion) =>
 // The one question a text asks (PER_TEXT), the first open one, with how many are open in all. The numbered list is gone:
 // a person answers one question, then the next is asked. `total`: every open question, this one included.
 // G2: notes(q, n) adds a line under the question (the person's own earlier words, offered as a draft).
+// Batch needs (2026-11-10): the question's line ends with one plain sentence saying how many applications it is needed for
+// ("It's needed for 7 of your 12 applications."); `batch` is the batch's postings, when known.
 export function questionsText(
-  qs: OpenQuestion[], total: number, notes?: (q: OpenQuestion, n: number) => string | null,
+  qs: OpenQuestion[], total: number, notes?: (q: OpenQuestion, n: number) => string | null, batch?: string[] | null,
 ): { take: OpenQuestion[]; text: string } | null {
   const ask = qs.filter((q) => !NEVER_BY_TEXT.test(q.label));
   if (!ask.length) return null;
@@ -226,7 +232,8 @@ export function questionsText(
     offerDraft(q) ? `For a written answer, say "draft 1" and I'll draft it from your confirmed facts for you to check first.` : "",
     rest > 0 ? `I'll ask the next one after you answer this.` : "",
   ].filter(Boolean).join(" ");
-  return { take, text: [head, line(q, 1).replace(/^1\. /, ""), notes?.(q, 1) ?? "", foot].filter(Boolean).join("\n") };
+  const needed = neededSentence(q, batch);
+  return { take, text: [head, `${line(q, 1).replace(/^1\. /, "")}${needed ? ` ${needed}` : ""}`, notes?.(q, 1) ?? "", foot].filter(Boolean).join("\n") };
 }
 
 const said = (q: OpenQuestion, value: string) => {
@@ -241,7 +248,9 @@ const said = (q: OpenQuestion, value: string) => {
 async function present(o: { userId: string; threadId: string; now: number; store: QuestionStore }, skipped: string[] = []): Promise<string | null> {
   const [all, total] = await Promise.all([o.store.open(o.userId, 20 + skipped.length), o.store.countOpen(o.userId)]);
   // "skip" leaves a question for later: the next one is asked; the skipped one comes back once the others are answered.
-  const later = all.filter((q) => !skipped.includes(q.id)), open = later.length ? later : all;
+  // Batch needs: the question most of the batch waits on is asked first (ties: oldest first, as before).
+  const batch = o.store.batch ? await o.store.batch(o.userId).catch(() => null) : null;
+  const later = all.filter((q) => !skipped.includes(q.id)), open = orderAsks(later.length ? later : all, batch);
   if (!later.length) skipped = [];
   const offers = await eligibilityOffers(o.store, o.userId, open);
   const ahead = await aheadDrafts(o.store, o.userId, open);
@@ -251,7 +260,7 @@ async function present(o: { userId: string; threadId: string; now: number; store
     return ahead.has(q.id) && offerDraft(q)
       ? `   A draft of ${n} is ready, written only from your confirmed facts. Say "draft ${n}" to read it; nothing is saved until you say "use ${n}".`
       : null;
-  });
+  }, batch);
   if (!t) return null;
   const at = new Date(o.now).toISOString();
   // G2: an offered draft waits beside the question shown, and only "use N" saves it (draftTurn), as an essay draft does.
@@ -275,7 +284,7 @@ export const askNextOpenQuestion = present;
 // code, a card, a draft, a failure to decide) follows; "Nothing is waiting on you" only when the situation shows nothing.
 export async function questionsTurn(
   o: { message: string; userId: string; threadId: string; now: number; store: QuestionStore; draft?: DraftDeps; situation?: Situation | null },
-): Promise<{ reply: string; status: string } | null> {
+): Promise<{ reply: string; status: string; jobs?: string[] } | null> {
   if (isAsk(o.message)) {
     const shownNow = await present(o);
     const rest = o.situation ? needsText(o.situation, { questionsShown: !!shownNow }) : null;
@@ -323,7 +332,7 @@ export async function questionsTurn(
     return { reply: `Those questions are more than a day old, so nothing was saved. Say "what do you need from me" to see them again.`, status: "expired" };
   }
   const byId = new Map((await o.store.get(o.userId, shown.ids)).map((q) => [q.id, q]));
-  const saved: string[] = [], open: string[] = [];
+  const saved: string[] = [], open: string[] = [], jobs = new Set<string>();
   for (const [n, raw] of [...parts.entries()].sort((a, b) => a[0] - b[0])) {
     const q = byId.get(shown.ids[n - 1]);
     if (!q) { open.push(`${n}: that question is gone (the application was removed).`); continue; }
@@ -338,6 +347,7 @@ export async function questionsTurn(
     if (!c.ok) { open.push(`${n} ${c.why}.`); continue; }
     await o.store.answer(o.userId, q.id, c.value);
     saved.push(`${n}. ${said(q, c.value)}`);
+    (q.job_ids ?? []).forEach((j) => jobs.add(String(j))); // the postings this answer may have readied (prepareAfterAnswers)
     if (shown.drafts?.[q.id]) delete shown.drafts[q.id]; // their own words replace a draft they did not use
   }
   if (shown.drafts && saved.length) await o.store.setShown(o.userId, shown);
@@ -347,7 +357,7 @@ export async function questionsTurn(
   if (saved.length && !open.length && left > 0) {
     const next = await present(o, (shown.skipped ?? []).filter((id) => !shown!.ids.includes(id)));
     if (next) {
-      return { reply: [`Saved. I won't ask this again:`, ...saved.map((x) => x.replace(/^\d+\. /, "")), "", `Next: ${next}`].join("\n"), status: "answered_next" };
+      return { reply: [`Saved. I won't ask this again:`, ...saved.map((x) => x.replace(/^\d+\. /, "")), "", `Next: ${next}`].join("\n"), status: "answered_next", jobs: [...jobs] };
     }
   }
   const reply = [
@@ -357,7 +367,7 @@ export async function questionsTurn(
     saved.length ? "They go on the forms the next time you prepare applications on your computer." : "",
     left > 0 && !open.length ? `${left} more question${left === 1 ? "" : "s"} waiting; say "what do you need from me" for ${left === 1 ? "it" : "them"}.` : "",
   ].filter(Boolean).join("\n");
-  return { reply, status: open.length ? "partial" : "answered" };
+  return { reply, status: open.length ? "partial" : "answered", ...(jobs.size ? { jobs: [...jobs] } : {}) };
 }
 
 // G2: for each open sponsorship or work-authorization question, the person's own newest clear statement about it, when
@@ -416,7 +426,7 @@ async function draftTurn(
   o: { userId: string; threadId: string; now: number; store: QuestionStore; draft?: DraftDeps },
   shown: Shown,
   cmd: { act: "draft" | "redo" | "use"; n: number | null },
-): Promise<{ reply: string; status: string }> {
+): Promise<{ reply: string; status: string; jobs?: string[] }> {
   if (Date.parse(shown.at) < o.now - DAY) {
     return { reply: `Those questions are more than a day old, so nothing was drafted or saved. Say "what do you need from me" to see them again.`, status: "expired" };
   }
@@ -448,7 +458,7 @@ async function draftTurn(
     // One at a time: the draft saved, the next open question is asked in the same reply.
     if (!still && shown.ids.length === 1 && (await o.store.countOpen(o.userId)) > 0) {
       const next = await present(o, (shown.skipped ?? []).filter((x) => !shown.ids.includes(x)));
-      if (next) return { reply: ["Saved, as drafted. I won't ask this again:", said(q, c.value), "", `Next: ${next}`].join("\n"), status: "answered_next" };
+      if (next) return { reply: ["Saved, as drafted. I won't ask this again:", said(q, c.value), "", `Next: ${next}`].join("\n"), status: "answered_next", jobs: (q.job_ids ?? []).map(String) };
     }
     return {
       reply: [
@@ -581,6 +591,17 @@ export function supabaseQuestionStore(admin: any): QuestionStore {
       const out: Record<string, AheadDraft> = {};
       for (const r of rows) if (r && typeof r.text === "string" && r.text.trim()) out[String(r.question_id)] = { text: r.text, at: String(r.drafted_at) };
       return out;
+    },
+    // Batch needs: the person's batch is their queue (career_apply_wanted, waiting), read page by page, never cut.
+    async batch(userId) {
+      const ids: string[] = [];
+      for (let from = 0; ; from += 1000) {
+        const page = (must(await admin.from("career_apply_wanted").select("posting_key").eq("user_id", userId).eq("state", "waiting")
+          .order("posting_key", { ascending: true }).range(from, from + 999), "read the queue") ?? []).map((r: any) => String(r.posting_key));
+        ids.push(...page);
+        if (page.length < 1000) break;
+      }
+      return ids;
     },
     async lastAssistantIntent(threadId) {
       const rows = must(

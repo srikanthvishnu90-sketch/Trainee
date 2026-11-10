@@ -80,6 +80,7 @@ import { APPLY_QUEUE_INTENT, applyManyAsk, applyTurn, EMPLOYER_ANSWER_INTENT, EM
 import { confirmNotRecordedReply, correctionNotRecordedReply, type EvidenceResult, evidenceEntryCorrections, evidenceResumeConfirmation, heldEvents, heldReply, resumeConfirmationContext } from "../_shared/career_router_evidence.ts";
 // FEATURE 9: account memory (stated-fact provenance, standing needs on the router path).
 import { accountMemoryAfterTurn, accountMemoryOn, statedFactsBefore } from "../_shared/career_account_memory.ts";
+import { entryCorrectionFacts, freshStatedFacts, reopenContradicted, reopenedLine } from "../_shared/career_stated_answers.ts";
 import { cloudTurn, supabaseCloudOptinStore } from "../_shared/career_cloud_optin.ts";
 import { CLOUD_CARD_INTENT, cloudCardYesTurn, personCloudCardStore } from "../_shared/career_cloud_card_chat.ts";
 import { boardFetchFeed, supabasePostingsDb, searchWords } from "../_shared/career_ingest.ts"; // FEATURE E2E: boardFetchFeed
@@ -143,7 +144,7 @@ import { outlookAsk, outlookChatTurn } from "../_shared/outlook_connector.ts"; /
 import { shapeForTurn } from "../_shared/channel_shape.ts"; // REPLY SHAPE
 import { applyHereTurn } from "../_shared/apply_here.ts"; // APPLY HERE: a pasted link or "apply to this" -> one line + one Apply button
 import { supabaseFileStore } from "../trainee-file/store.ts";
-import { createFileService, supabaseFileKindStore } from "../_shared/file_service.ts"; // FILE KINDS
+import { createFileService, personFacingError, supabaseFileKindStore } from "../_shared/file_service.ts"; // FILE KINDS
 import { researchBriefOn, researchReplyOn } from "../_shared/research_reply.ts"; // R9-C
 import { dnsProbe } from "../_shared/research_dns.ts";
 import { researchSearchFor } from "../_shared/research_free_sources.ts";
@@ -727,7 +728,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             loadPool: () => readPool(message, true),
             // The privacy ruling: the resume opens only on the signed-in File page (a code-built draft File), never a bearer link.
             file: async (data) => { const r = await createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }).create(user.id, "draft", data, { trusted: true });
-              return !r.ok ? { error: r.error } : r.url ? { url: r.url } : { error: "links to File pages aren't set up" }; },
+              return !r.ok ? { error: personFacingError(r.error) } : r.url ? { url: r.url } : { error: "links to File pages aren't set up" }; },
             // B.6 continuation 1: "make the first bullet less wordy" is the model's wording, metered like every model call
             // here; the module audits it against the bullet's own fact and shows it beside the old one before it is used.
             rewrite: careerModelConfig(Deno.env).apiKey ? async (bullet: string, ask: string) => {
@@ -954,7 +955,14 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       const employerAsk = supabaseEmployerAskStore(admin);
       // Review F2 (item 8): a change or send ask right after a draft was shown stays with that draft (career_staged.ts
       // draftContinuation). Read only for such a message: the thread's last reply, and whether it was a follow-up draft.
-      const draftThread = draftContinuation(message) ? (await employerAsk.lastAssistant(tid).catch(() => null))?.intent === FOLLOWUP_INTENT : false;
+      // H2H fix 4 (docs/architect/INSTINCT-HEAD-TO-HEAD.md C4 t6): a draft the brain itself showed ("Draft: Hi Maya, ...") is the
+      // draft too; "Make it warmer." was answered "there's no draft in this chat" with a cover letter brought in.
+      const draftThread = draftContinuation(message) ? await (async () => {
+        const r = await admin.from("agent_messages").select("meta,content").eq("thread_id", tid).eq("role", "assistant").order("id", { ascending: false }).limit(1);
+        const last = r.error ? null : r.data?.[0];
+        const intent = last?.meta?.intent ?? null;
+        return intent === FOLLOWUP_INTENT || intent === "agent" && /^\s*draft\s*:/i.test(String(last?.content ?? ""));
+      })().catch(() => false) : false;
       if (draftThread) (ctx as any)._draftThread = true;
       // SERIAL-1490/1491: "is X where you work now?" is answered by the next yes or no while that question is this thread's
       // last word: no queues exactly that posting once, yes keeps it out; the same answer again is told it stands.
@@ -1358,6 +1366,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       } else if (offerAns) { // FEATURE 12: the offer turn's answer; the counter's card rides the reply's meta.
         out = { reply: offerAns.reply, intent: offerAns.intent, resultStatus: offerAns.status, contained: false, handler: "offer", parts: offerAns.parts };
         if (offerAns.card) agentMeta = { offer_card: offerAns.card };
+        if (offerAns.comparison) agentMeta = { ...(agentMeta || {}), offer_comparison: offerAns.comparison }; // LOOP 13: the F-15 File's data
       } else if (outreachStatus) {
         out = { reply: outreachStatus.reply, intent: outreachStatus.intent, resultStatus: outreachStatus.status, contained: false, handler: "outreach_status" };
       } else if (!careerTask && !careerBatch && !researchReplyOn(Deno.env) && researchOverAction(message) && !host.isHostControlled(message, ctx)) {
@@ -1677,6 +1686,16 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         if (mem?.patch) out = { ...out, ...mem.patch };
       }
       // END FEATURE 9
+      // Release item 9: a fact this turn recorded (sponsorship or graduation date said in chat, or a confirmed education entry's
+      // date corrected) that contradicts the person's earlier answer to an employer's question reopens that answer, so it is
+      // asked again and never reused (career_stated_answers.ts).
+      if (out.handler !== "agent") {
+        const fresh = [...freshStatedFacts(statedFactsBefore(loaded.account, loaded.snapshot), (ctx as any).statedFacts?.facts), ...entryCorrectionFacts(confirmEvents.rows())];
+        if (fresh.length) {
+          const line = reopenedLine(await reopenContradicted(admin, user.id, fresh, Date.now()).catch((e) => { console.error("career stated answers:", e?.message ?? e); return null; }));
+          if (line) out = { ...out, reply: `${out.reply}\n${line}`, ...(out.parts ? { parts: [...out.parts, line] } : {}) };
+        }
+      }
       // BETA C03 / A15.1 (career_prep_file.ts): the router's interview prep File (result.file) is stored as a File for this person
       // and its signed link is sent after the summary; when it cannot be made, the reply says so and gives the page as text.
       if (out.handler !== "agent" && !careerTask && !careerBatch) {

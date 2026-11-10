@@ -378,11 +378,12 @@ async function fillChoice(page, d, value, multi) {
         // The board may draw its own layer over the option's words (strict run 42780366348: a 20 s actionability wait). The
         // click goes to the point a person would click only when what is drawn there belongs to this same option; anything
         // else (a banner, a dialog, another control) is reported, never clicked.
-        await loc.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+        // Centred in the window, so a bar fixed to the page's top or bottom (a cookie notice) is not over it.
+        await loc.evaluate((e) => e.scrollIntoView({ block: "center", inline: "nearest" })).catch(() => {});
         const hit = await loc.evaluate((e) => { const r = e.getBoundingClientRect(), w = e.closest("[role=radio], [role=checkbox]"), h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
           // What is on top is this option's own (inside it, or the option's own box that holds no other option).
           const own = w && h && (w.contains(h) || (h.contains(w) && h.querySelectorAll("[role=radio], [role=checkbox]").length === 1 && !h.querySelector("button, a[href], select, textarea, input:not([type=radio]):not([type=checkbox])")));
-          return !h ? "nothing" : own ? "own" : `${h.tagName.toLowerCase()}.${String(h.className || "").slice(0, 40)} ${h.contains(w) ? "around" : w && w.parentElement && w.parentElement.contains(h) ? "beside" : "elsewhere"}`; }).catch(() => "unreadable");
+          return !h ? "nothing" : own ? "own" : `${h.tagName.toLowerCase()}.${String(h.className || "").slice(0, 40)} ${h.contains(w) ? "around" : w && w.parentElement && w.parentElement.contains(h) ? "beside" : "elsewhere"} "${String(h.innerText || "").replace(/\s+/g, " ").trim().slice(0, 40)}"`; }).catch(() => "unreadable");
         if (hit !== "own") return { ok: false, reason: "option_covered", detail: `drawn there: ${hit}` };
       }
       await loc.click(d.drawn ? { force: true, timeout: 5000 } : {});

@@ -70,8 +70,12 @@ function EXTRACT() {
 
   const out = [];
   const seen = new Set();
-  let qn = 0;
-  const push = (d) => { d.q = qn++; out.push(d); return d.q; };
+  // A question keeps its number across passes (an element tagged in an earlier pass keeps its tag), and a new one gets a number
+  // never used before on this page: a control the board removed or hid can never share a number with a live one (strict run
+  // 42737911402: a field read as empty after a re-render).
+  const tagOf = (el) => (el && el.hasAttribute("data-upmore-q") ? Number(el.getAttribute("data-upmore-q")) : null);
+  let qn = 1 + deepAll(document, "[data-upmore-q]").reduce((m, e) => Math.max(m, Number(e.getAttribute("data-upmore-q")) || 0), -1);
+  const push = (d, el) => { const t = tagOf(el); d.q = t !== null && !out.some((x) => x.q === t) ? t : qn++; out.push(d); return d.q; };
   const all = deepAll(scope, "input, select, textarea");
 
   // Yes/No button pairs (Ashby): the hidden checkbox inside them is not a question of its own.
@@ -79,7 +83,7 @@ function EXTRACT() {
     const btns = [...box.querySelectorAll("button")];
     const node = groupLabelNode(box);
     const label = node ? nodeText(node) : "";
-    const q = push({ kind: "buttons", label, required: isReq([], node), eeo: eeoOf(box, label), options: btns.map((b, i) => ({ i, label: squash(b.textContent) })) });
+    const q = push({ kind: "buttons", label, required: isReq([], node), eeo: eeoOf(box, label), options: btns.map((b, i) => ({ i, label: squash(b.textContent) })) }, btns[0]);
     btns.forEach((b, i) => { b.setAttribute("data-upmore-q", q); b.setAttribute("data-upmore-o", i); });
     box.querySelectorAll("input").forEach((x) => seen.add(x));
   }
@@ -101,7 +105,7 @@ function EXTRACT() {
       mates.forEach((x) => seen.add(x));
       const node = (fs && fs.querySelector("legend")) || groupLabelNode(el);
       const label = node ? nodeText(node) : clean(el.name);
-      const q = push({ kind: type === "radio" ? "radio" : "checkgroup", label, name: el.name || "", required: isReq(mates, node), eeo: eeoOf(el, label), options: mates.map((m, i) => ({ i, label: optLabel(m) })) });
+      const q = push({ kind: type === "radio" ? "radio" : "checkgroup", label, name: el.name || "", required: isReq(mates, node), eeo: eeoOf(el, label), options: mates.map((m, i) => ({ i, label: optLabel(m) })) }, mates[0]);
       mates.forEach((m, i) => { m.setAttribute("data-upmore-q", q); m.setAttribute("data-upmore-o", i); });
       continue;
     }
@@ -127,7 +131,7 @@ function EXTRACT() {
     } else {
       d = { ...base, kind: "text", inputType: type };
     }
-    const q = push(d);
+    const q = push(d, el);
     el.setAttribute("data-upmore-q", q);
   }
   return out;
@@ -347,7 +351,7 @@ async function fillFile(page, d, path) {
     const bs = [...document.querySelectorAll(`[data-upmore-fbox="${q}"]`)];
     const b = bs[0], el = document.querySelector(`[data-upmore-q="${q}"]`);
     return `boxes=${bs.length} input=${el ? (el.files ? el.files.length : "?") : "gone"} name_on_page=${(document.body.innerText || "").includes(n)} shows=${String(b ? b.innerText : "").replace(/\s+/g, " ").trim().slice(0, 100)}`;
-  }, [d.q, name]).catch(() => "");
+  }, [d.q, name]).catch((e) => `detail_error: ${String(e && e.message).split("\n")[0].slice(0, 80)}`);
   return { ok: false, reason: "upload_not_accepted", detail };
 }
 // Is the resume's file name shown in its upload block (any marked level still on the page)? One answer per [q, name] pair.
@@ -389,6 +393,19 @@ async function fillCombo(page, d, value, pick, phone) {
   // The phone's country picker shows its choice in its own words ("United States" for the option "United States +1"): it
   // holds the approved country when that shown value is itself the confirmed country, alone or with the phone's dial code.
   if (s.filled && pick === "phone_country" && !phoneCountryMatch([s.text], value, phone).error) return { ok: true };
+  // Greenhouse's phone picker shows only the dial code ("+1", which Canada shares): the choice is read back from the option
+  // the reopened menu marks as selected, which must be the one picked; the menu is closed again without choosing anything.
+  if (s.filled && pick === "phone_country") {
+    await input.press("ArrowDown").catch(() => {}); // opens a react-select menu without choosing anything
+    await page.waitForTimeout(120);
+    const selected = ctl0 => (ctl0 ? page.locator(`[id="${ctl0.replace(/"/g, "")}"] [role="option"][aria-selected="true"]`) : shell.locator('[role="option"][aria-selected="true"]'));
+    const ctl2 = await input.getAttribute("aria-controls").catch(() => null);
+    const held = (await selected(ctl2 || ctl).allInnerTexts().catch(() => [])).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean);
+    await input.press("Escape").catch(() => {});
+    const s2 = await stateOf(page, d);
+    if (held.length === 1 && norm(held[0]) === norm(list[m.index]) && s2.filled && norm(s2.text) === norm(s.text)) return { ok: true };
+    return { ok: false, reason: "readback_mismatch", detail: `picked: ${String(list[m.index]).slice(0, 60)} | shows: ${String(s.text || "").slice(0, 30)} | menu selected: ${held.join(" / ").slice(0, 60)}` };
+  }
   return { ok: false, reason: "readback_mismatch", detail: `picked: ${String(list[m.index]).slice(0, 60)} | shows: ${String(s.text || "").slice(0, 60)}` };
 }
 
@@ -487,6 +504,20 @@ async function fillForm(page, ctx0) {
       if (r.detail) entry.detail = r.detail;
       // A required question we could not set is handed back with the reason; the person is asked, nothing is guessed.
       (ask ? needsUser : failed).push({ label: d.label, reason: r.reason, ...(r.options ? { options: r.options } : {}), ...(r.detail ? { detail: r.detail } : {}) });
+    }
+  }
+  // A value the board dropped after it was set and read back (React re-mounting the input after hydration: strict run
+  // 42737911402, "First Name" and "E-mail" empty at the end) is set again once, from the same approved value, and read back.
+  {
+    const qsR = await page.evaluate(EXTRACT).catch(() => []);
+    const stR = qsR.length ? await page.evaluate(STATE, qsR).catch(() => []) : [];
+    for (const f of filled) {
+      if (!["text", "textarea", "select"].includes(f.kind) || f.source === "resume") continue;
+      const now = qsR.find((x) => x.label === f.d.label && x.kind === f.d.kind && x.name === f.d.name);
+      const st = now && stR.find((x) => x.q === now.q);
+      if (!now || !st || st.filled) continue;
+      let r; try { r = await doFill(page, now, { status: "fill", value: f.value, source: f.source }, ctx); } catch (e) { r = { ok: false }; }
+      if (r.ok) { f.d = now; f.refilled = true; }
     }
   }
   // Sweep: a required question still empty that we did not already account for is handed back, not ignored.

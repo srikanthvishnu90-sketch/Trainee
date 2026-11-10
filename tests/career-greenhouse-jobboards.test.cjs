@@ -24,7 +24,7 @@ before(async () => {
   server = http.createServer((req, res) => {
     if (req.method !== "GET") { posts.push(`${req.method} ${req.url}`); return res.writeHead(200).end("ok"); }
     if (req.url === "/robots.txt") return res.writeHead(200, { "content-type": "text/plain" }).end("User-agent: *\nAllow: /\n");
-    if (req.url === "/gh" || req.url === "/gh?s3") return res.writeHead(200, { "content-type": "text/html" }).end(html);
+    if (/^\/gh(\?(s3|remount))?$/.test(req.url)) return res.writeHead(200, { "content-type": "text/html" }).end(html);
     res.writeHead(404).end();
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
@@ -92,4 +92,23 @@ test("the same upload on another provider, another path or another host is not s
   assert.equal(r.upload_simulated, 0);
   assert.ok(r.sent_blocked >= 1);
   assert.deepEqual(posts, []);
+});
+
+test("a field the board re-mounts empty after it was filled is set again once from the same approved value; strict pass", { skip }, async () => {
+  const r = await strictPosting(browser, { provider: "greenhouse", url: `${base}/gh?remount` }, { robots: new Map(), pacer: lib.createPacer({ gapMs: 0 }), ua: "test", resumePath: resume() });
+  assert.equal(r.result, "pass", JSON.stringify({ reason: r.reason, field: r.field, needs: r.needs }));
+  assert.deepEqual(posts, []);
+});
+
+test("the phone picker showing only '+1' is read back from the menu's selected option, which must be the one picked", { skip }, async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(`${base}/gh`);
+    const fr = await fillForm(page, { facts: lib.TEST_FACTS, answers: {}, resumePath: resume() });
+    const c = fr.filled.find((f) => f.label === "Country" && f.d.phoneCountry);
+    assert.ok(c, JSON.stringify({ needs: fr.needsUser, failed: fr.failed }));
+    assert.equal(await page.evaluate(() => document.querySelector(".phone-input .select__single-value").textContent), "+1");
+    // The menu was closed again and nothing else was chosen.
+    assert.equal(await page.evaluate(() => document.querySelectorAll(".phone-input [role=listbox]").length), 0);
+  } finally { await page.close(); }
 });

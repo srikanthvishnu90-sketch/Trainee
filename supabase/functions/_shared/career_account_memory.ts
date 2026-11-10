@@ -119,7 +119,7 @@ export async function accountMemoryAfterTurn(o: {
       }
     }
     if (lines.length) {
-      const empty = /^Nothing is on your record yet\b/.test(out.reply);
+      const empty = /^(?:Nothing is on your record yet|Nothing about you so far)\b/.test(out.reply);
       patch = { reply: empty ? `Here is what I have on record for you.\n${lines.join("\n")}\nCorrect any of it in your own words, or tell me what to run on it first.` : `${out.reply}\n${lines.join("\n")}` };
     }
   }

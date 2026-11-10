@@ -673,6 +673,40 @@ export async function searchJudgeTurn(o: {
 // The ask for this turn: the router's search with the message's own parameters added; a search the router ran but named no
 // role for ("SWE internship Chicago summer 2027"); or a search the router did not run (searchAskFromMessage). `append`: the
 // router's own reply stays and the search follows it.
+// The parts of a search reply around searchJudgeTurn's list (agent-chat handler-career.ts, FEATURE 5; the eval harness runs the
+// same step, evals/career/harness.ts searchStep). ONBOARDING ROUND 2: the line that nothing is sent before the resume is
+// confirmed (an apply ask with no confirmed resume) stays with the search's own reply. F.1: "what is blocking the search?"
+// is answered first, from this run's own evidence.
+// D-055 (R05, RESPONSE-RULES R3): a "remote only" correction says first what it changed: the place it drops, and the roles the
+// last list showed that the remote-only search no longer lists, counted from the thread's own last shortlist (none invented;
+// the dropped roles are not named again, so no onsite role reads as a match). `prior` is the thread's search state before this turn (discovery).
+export function correctionLead(message: string, prior: any, found: SearchJudgeResult): string {
+  const fixed = correctedAsk(message, prior);
+  if (!fixed || !fixed.changes.includes("remote_only")) return "";
+  const was = String(prior?.lastAsk?.place ?? "").trim() || String(fixed.ask.prevPlace ?? "").trim();
+  if (!was) return "";
+  const now = new Set(found.shortlist.map((s) => String(s.id)));
+  const gone = (Array.isArray(prior?.lastShortlist) ? prior.lastShortlist : []).filter((s: ShortlistEntry) => s && !now.has(String(s.id))).length;
+  return gone
+    ? `Remote only now: ${was} is dropped, so the ${gone === 1 ? `${was} role I listed that isn't remote is` : `${gone} ${was} roles I listed that aren't remote are`} off the list.\n`
+    : `Remote only now: ${was} is dropped.\n`;
+}
+export function searchReplyParts(o: { message: string; said: { append?: boolean; explain?: boolean } | null; found: SearchJudgeResult; profile: any; prior?: any }): { why: string; resumeLine: string } {
+  const { message, found } = o, prof = o.profile;
+  const facts: any[] = Array.isArray(prof?.facts) && !prof?._fromStatedFacts ? prof.facts : [];
+  const confirmedResume = facts.some((f) => f && ["education", "experience", "project", "leadership", "skill"].includes(f.kind) && f.needs_confirmation !== true && (f.status == null || f.status === "confirmed"));
+  // F.1: "Don't apply to anything" is not an apply ask: a search never needs a confirmed resume to list roles.
+  const askText = String(message ?? "").toLowerCase().replace(/[’]/g, "'").replace(/\b(?:don't|do not|never|not|without|no need to)\s+(?:\w+\s+){0,2}?(?:apply|applying|submit\w*)\b[^.?!]*/g, " ");
+  const applyAsk = !/\?\s*$/.test(askText) && /\bapply\s+(?:to|for|at|me|on|now)\b|\bapply\b[^.?!]{0,40}\b(?:jobs?|roles?|postings?|positions?|internships?|openings?)\b|\bsubmit (?:my|an?) applications?\b/.test(askText);
+  const resumeLine = o.said?.append || confirmedResume || !applyAsk || /\bresume\b/i.test(found.reply) ? ""
+    : facts.some((f) => f && f.source === "resume-ingest" && f.needs_confirmation === true)
+    ? "\n\nAnd nothing is sent anywhere before your resume is confirmed: its entries are waiting for your word (reply \"yes, that's my resume\" if they're right)."
+    : "\n\nAnd nothing is sent anywhere before your resume is confirmed: paste or attach it, confirm it, then ask again.";
+  const why = !o.said?.explain ? correctionLead(message, o.prior, found) : found.blocker === "none"
+    ? `Nothing is blocking it: ${found.shortlist.length} open ${found.shortlist.length === 1 ? "role is" : "roles are"} listed below. Your resume isn't confirmed, and that doesn't block a search: listing roles never needs it, and eligibility isn't decided here.\n`
+    : `What blocked it: ${found.blocker === "all_closed" ? "the matching roles I found were closed when I checked their application pages" : "no open roles were found in the scope I checked"}. It was not a connection problem (the job boards were read), and not your resume (listing roles never needs a confirmed resume).\n`;
+  return { why, resumeLine };
+}
 export function askFor(message: string, routerOut: { intent?: string; resultStatus?: string } | null, discovery: any): { ask: SearchAsk; append: boolean; explain?: boolean } | null {
   // Spec 2.3: a correction ("remote only", "only individual-contributor roles") replaces the constraint of the last search;
   // the router's own reading of it (a search for the role "remote only") is not used.

@@ -660,6 +660,13 @@ async function handleKind(o: { g: Exclude<Awaited<ReturnType<FileService["get"]>
       const r = await run(u, frec, fields, d.now()).catch(() => ({ ok: false, title: "Not done", lines: ["It could not be checked just now, so nothing was changed or sent. Try again in a minute."] }));
       return o.state(r.title, r.lines, r.ok ? 200 : 409);
     }
+    // S3: a GET this live File's records answer with a real file (the F-07 document's bytes). It changes nothing.
+    const getKey = rec.data.live === true && req.method === "GET" ? Object.keys(src?.get ?? {}).find((k) => fields.has(k)) : undefined;
+    if (getKey) {
+      const f = await src!.get![getKey](u, frec, fields).catch(() => null);
+      if (!f) return o.state("Nothing to download", ["That file isn't on record, so nothing was downloaded. Nothing was sent."], 404);
+      return new Response(new Uint8Array(f.bytes), { status: 200, headers: { "content-type": f.mime, "content-disposition": `attachment; filename="${f.filename.replace(/[^A-Za-z0-9._-]+/g, "_")}"`, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+    }
     const live = rec.data.live === true ? (src ? await src.load(u, frec).catch(() => null) : null) : { view: rec.data.view, asOf: null };
     const tz = d.timeZone ? await d.timeZone(u).catch(() => null) : null;
     if (!live) return o.html(familyStatePage({ state: "error", family: fam === "F-14n" ? "F-14" : fam, recover: bot ? { label: "Back to chat", effect: "open", href: bot } : null }, { now: d.now(), tz }), 503);
@@ -667,7 +674,8 @@ async function handleKind(o: { g: Exclude<Awaited<ReturnType<FileService["get"]>
     if (fields.get("format") === "json") return new Response(JSON.stringify({ family: fam, title: rec.data.title ?? null, view: live.view ?? null }, null, 2), { status: 200, headers: { ...(await headers("application/json; charset=utf-8", d.env)), "content-disposition": `attachment; filename="trainee-file-${rec.id}.json"` } });
     // A listed post is drawn as a form only when this File's records answer it: a live (ref) File whose family has that post handler.
     const answers = (a: string) => rec.data.live === true && typeof src?.post?.[a] === "function";
-    return o.html(familyPage(servedFamilyFile(fam, live.view, { bot, token: src?.post && rec.data.live === true ? token : null, answers }), { now: d.now(), tz }));
+    const gets = (k: string) => rec.data.live === true && typeof src?.get?.[k] === "function";
+    return o.html(familyPage(servedFamilyFile(fam, live.view, { bot, token: src?.post && rec.data.live === true ? token : null, answers, gets }), { now: d.now(), tz }));
   }
   if (action === "remove") {
     const done = await files.revoke(u, rec.id).catch(() => false);

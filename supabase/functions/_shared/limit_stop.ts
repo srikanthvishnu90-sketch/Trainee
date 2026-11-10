@@ -13,12 +13,15 @@
 //   paused        the owner switched the AI off for a while (MODEL_BUDGET_PAUSED or its database twin)
 //   unchecked     the budget could not be read, so no call was made
 //   rate_limit    the AI provider refused for rate (HTTP 429) or was overloaded (529); its retry-after, when it gave one
-// Any other model failure is an outage, not a limit, and is answered as before. Nothing here changes any limit.
+// Any other model failure is an outage, not a limit (stop "outage", below): the router answers when it has a real intent for
+// the message, else the turn is held the same way (architect amendment, r-states 2026-11-10). Nothing here changes any limit.
 import { ModelBudgetBlockedError, ModelUnavailableError } from "./model_calls.ts";
 import { BUDGET_ERROR_TYPE, BUDGET_TIME_ZONE, chicagoDay } from "./model_budget.ts";
 import type { PersonZone } from "./person_zone.ts";
 
-export type LimitStop = "global" | "budget_day" | "budget_after" | "budget_before" | "paused" | "unchecked" | "rate_limit";
+// outage: not a limit (stopOfError never returns it); the model call failed. Architect amendment (r-states, 2026-11-10): the
+// turn is held the same way, so the router's catch-all never answers a different question.
+export type LimitStop = "global" | "budget_day" | "budget_after" | "budget_before" | "paused" | "unchecked" | "rate_limit" | "outage";
 export const HELD_INTENT = "career_limit_held";
 
 export function stopOfError(e: unknown): LimitStop | null {
@@ -77,6 +80,7 @@ export function nextStepOf(stop: LimitStop, zone: PersonZone | null, retryAt: nu
     case "budget_before": return `Trainee's AI budget hasn't opened yet. Once it opens, say "continue" and I'll pick it up.`;
     case "paused": return `Trainee's AI is switched off for a short while. Say "continue" later and I'll pick it up.`;
     case "unchecked": return `I couldn't check Trainee's AI budget, so I made no AI call. Say "continue" later and I'll pick it up.`;
+    case "outage": return `The AI service failed on this one (an error on its side, not a limit). Say "continue" in a minute and I'll pick it up.`;
   }
 }
 

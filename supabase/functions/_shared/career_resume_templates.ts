@@ -316,7 +316,18 @@ export function templatePdf(R: any, set: TSet): Uint8Array {
     objects.push([pageIds[p], P.bytes(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE_W} ${PAGE_H}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${contentIds[p]} 0 R >>`)]);
     const ops = [
       ...set.rules.filter((r) => r.page === p).map((r) => `q ${rgb(r.color)} RG ${r.w} w ${g.x.left} ${r.y} m ${g.x.right} ${r.y} l S Q`),
-      ...set.lines.filter((l) => l.page === p).flatMap((l) => l.runs.map((r) => `BT /${fid(r.face)} ${r.size} Tf ${rgb(r.color)} rg 1 0 0 1 ${r.x} ${l.y} Tm ${P.pdfLiteral(P.encodeWinAnsi(r.text, bad))} Tj ET`)),
+      ...set.lines.filter((l) => l.page === p).flatMap((l) => l.runs.map((r, i) => {
+        const head = `BT /${fid(r.face)} ${r.size} Tf ${rgb(r.color)} rg 1 0 0 1 ${r.x} ${l.y} Tm ${P.pdfLiteral(P.encodeWinAnsi(r.text, bad))} Tj`;
+        const next = l.runs[i + 1];
+        if (next?.role !== "date") return `${head} ET`;
+        // ATS ORDER (r-resume-design, 2026-11-10): a flush-right date drawn alone is read by text parsers that follow
+        // the glyphs (pdfminer, PDFium) as its own column, after the whole section, cut from its entry. The entry's run
+        // ends with plain spaces, word-spaced to stop exactly where the date starts, so those parsers read one line: the
+        // title, then its dates. Same faces, nothing visible changes, and the date keeps its own run.
+        const from = r.x + textWidth(r.text, r.face, r.size), gap = next.x - from, sp = textWidth(" ", r.face, r.size);
+        const n = Math.max(1, Math.floor(gap / sp)), tw = Math.floor(((gap - n * sp) / n) * 1000) / 1000;
+        return `${head} ${tw} Tw (${" ".repeat(n)}) Tj 0 Tw ET`;
+      })),
     ].join("\n");
     const stream = P.deflate(P.bytes(ops, "latin1"));
     objects.push([contentIds[p], P.concat([P.bytes(`<< /Length ${stream.length} /Filter /FlateDecode >>\nstream\n`, "latin1"), stream, P.bytes("\nendstream", "latin1")])]);

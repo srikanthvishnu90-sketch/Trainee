@@ -71,7 +71,8 @@ export function resumeLabelOf(m: ResumeMeta, tz?: string | null): string {
 }
 export interface ReviewItem {
   id: string; job_id: string | null; employer: string; role: string | null; url: string | null; destination: string | null;
-  resume: { label: string; sha12: string; meta?: ResumeMeta } | null; files: string[];
+  resume: { label: string; sha12: string } | null; files: string[];
+  resume_meta?: ResumeMeta; // item 6 S1: the resume in words (name, version, target, date) for the F-09 page
   answers: { question: string; answer: string; sensitive: Sensitive | null; source?: string }[];
   payload_hash?: string; // item 6 S1: the full hash the review File's Approve is bound to (D-MS-1)
   unresolved: { question: string; fact: Sensitive | null; ask: string }[];
@@ -99,7 +100,7 @@ export function reviewOf(x: ReviewInput): ReviewItem {
   const name = one(label.replace(/, tailored for this role$/, ""), 120);
   const meta: ResumeMeta = { name, version: x.resume_version ? `version ${x.resume_version.n}` : tailored ? "version not recorded" : "your base resume",
     target: tailored ? `tailored for ${one(x.title, 120) || "this role"} at ${employer}` : "not tailored for this role", at: x.resume_version?.at ?? null };
-  const resume = /^[0-9a-f]{64}$/.test(sha) ? { label: name, sha12: sha.slice(0, 12), meta } : null;
+  const resume = /^[0-9a-f]{64}$/.test(sha) ? { label: name, sha12: sha.slice(0, 12) } : null;
   const files = [...(resume ? [`Resume: ${resume.label}`] : []), ...(p.cover_note && typeof p.cover_note === "object" && p.cover_note.text ? ["Cover note (its full text is under the answers)"] : [])];
   if (p.cover_note?.text) answers.push({ question: "Cover note", answer: one(p.cover_note.text, 4000), sensitive: null, source: "Drafted by Trainee; your yes approves this exact text" });
   const page_fields = Array.isArray(p.page_field_names) ? p.page_field_names.map((s: unknown) => one(s, 80)) : [];
@@ -110,7 +111,7 @@ export function reviewOf(x: ReviewInput): ReviewItem {
     `${answers.length} answer${answers.length === 1 ? "" : "s"}, word for word as shown`, ...(page_fields.length ? [`the fields the employer's page sets: ${page_fields.join(", ")}`] : [])];
   const expires_at = Number.isFinite(Date.parse(String(p.expires_at ?? ""))) ? new Date(Date.parse(p.expires_at)).toISOString() : null;
   return { id: x.id, job_id: one(p.job_id, 200) || null, employer, role, url, destination, resume, files, answers, unresolved, page_fields, hash12, approvable: !!resume && !unresolved.length, covers, expires_at, letter: !!p.cover_note?.text,
-    ...(/^[0-9a-f]{64}$/.test(String(x.payload_hash ?? "")) ? { payload_hash: String(x.payload_hash) } : {}) };
+    ...(resume ? { resume_meta: meta } : {}), ...(/^[0-9a-f]{64}$/.test(String(x.payload_hash ?? "")) ? { payload_hash: String(x.payload_hash) } : {}) };
 }
 
 // The review in words: the card's "full review" and the plain-text twin of the review File. Nothing here is a success word.

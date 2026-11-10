@@ -1,6 +1,6 @@
 // Item 6, S1 (VERIFICATION-15 item 6; coordinator brief f-s1): the live F-09 Application review File, through the one S0 hook
-// (file_family_serve.ts FamilyRecords; FileDeps.familyRecords["F-09"]). The File stores no view: it names one prepared application
-// (createFamily(userId, "F-09", title, null, { ref: { prepared, job } })), and every GET builds the page from the records as they are
+// (file_family_serve.ts FamilyRecords; FileDeps.familyRecords["F-09"]). The File (file_service.ts createReview, the card's review link)
+// names one prepared application (data.ref { prepared, job }, live), and every GET builds the page from the records as they are
 // now: the prepared application row (career_apply_prepared), the posting's title, the posting's still-open required questions, the
 // person's resume-version record, and the application record (career_apply_jobs) for where it stands. Nothing on it is a model's words.
 //
@@ -57,7 +57,7 @@ async function itemOf(userId: string, ref: Record<string, string> | null | undef
 // The F-09 builder's input (file_family_apply.ts applicationReviewFile), from the review item and where the application stands.
 export function reviewView(item: ReviewItem, hash: string, o: { stage: Stage | null; replaced?: boolean; preparedAt?: string | null; tz?: string | null }): ApplicationReview {
   const role = item.role, company = item.employer, stage = o.stage ?? "prepared";
-  const resume = item.resume?.meta ? resumeLabelOf(item.resume.meta, o.tz) : item.resume?.label ?? null;
+  const resume = item.resume && item.resume_meta ? resumeLabelOf(item.resume_meta, o.tz) : item.resume?.label ?? null;
   const pkg: KV[] = [
     { k: "Role", v: role, src: role ? { label: "The posting" } : null, missing: "Not on the posting record" },
     { k: "Company", v: company, src: { label: "The prepared application" } },
@@ -145,8 +145,10 @@ export async function checkReviewed(userId: string, rec: FamilyRec, fields: URLS
 export function reviewRecords(d: ReviewRecordDeps, now: () => number = Date.now): FamilyRecords {
   return {
     async load(userId, rec) {
+      // A read that fails throws (the handler shows the error state); a prepared application no longer on record is the C.24
+      // expired state: this review is gone, ask for a new one. Never a stale page.
       const got = await itemOf(userId, rec.data.ref, d);
-      if (!got) return null;
+      if (!got) return { state: { state: "expired", family: "F-09" }, asOf: new Date(now()).toISOString() };
       const job = String(got.item.job_id ?? "");
       const [record, current] = job ? await Promise.all([d.appRow(userId, job, got.item.url ?? undefined), d.current(userId, job).catch(() => null)]) : [null, null];
       const replaced = !record && !!current && current.id !== got.item.id;

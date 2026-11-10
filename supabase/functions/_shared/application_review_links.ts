@@ -24,8 +24,7 @@ export function supabaseReviewDeps(admin: any, userId: string, env: { get(k: str
       const files = r.data?.value?.files;
       return files && typeof files === "object" ? files : {};
     },
-    // Item 6 S1: the live F-09 page (file_family_review.ts): it stores no view, only the prepared application it names; every GET reads it now.
-    create: async (item) => { const r = await files.createFamily!(userId, "F-09", "Application review", null, { ref: { prepared: item.id, ...(item.job_id ? { job: item.job_id } : {}) } }); return r.ok ? { url: r.url ?? r.webApp } : null; },
+    create: async (item) => { const r = await files.createReview!(userId, item); return r.ok ? { url: r.url ?? r.webApp } : null; },
   };
 }
 // deno-lint-ignore no-explicit-any

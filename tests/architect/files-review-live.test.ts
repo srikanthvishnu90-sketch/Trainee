@@ -1,6 +1,6 @@
 // F-09 LIVE (item 6, S1): the Application review File served by the real File server (trainee-file/handler.ts handleFile, the real
 // file service over the in-memory store, a real signed-in phone session) through the S0 hook: the File names one prepared application
-// (FileService.createFamily(..., { ref: { prepared, job } }), as application_review_links.ts makes it) and FileDeps.familyRecords["F-09"]
+// (FileService.createReview over reviewOf, as application_review_links.ts makes it for every card) and FileDeps.familyRecords["F-09"]
 // (file_family_review.ts reviewRecords) reads the prepared application row, the posting's title, its open questions, the resume-version
 // record and the application record on every GET.
 //
@@ -18,6 +18,7 @@
 // Check: deno test -A --no-check tests/architect/files-review-live.test.ts
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
+import { reviewOf } from "../../supabase/functions/_shared/application_review.ts";
 import { reviewRecords } from "../../supabase/functions/_shared/file_family_review.ts";
 import { SERVED_POSTS } from "../../supabase/functions/_shared/file_family_serve.ts";
 import { createFileService, memoryFileStore } from "../../supabase/functions/_shared/file_service.ts";
@@ -64,14 +65,15 @@ async function world(o: { ready?: boolean } = {}) {
     current: async () => prepared as never, appRow: async () => app as never, cards: cards as never,
   }, () => NOW);
   const deps: FileDeps = { ...A.deps, store, now: () => NOW, env: { get: (k) => ENV[k] }, cards: cards as never, tap: {} as never, files, familyRecords: { "F-09": records } };
-  const made = await files.createFamily!(U, "F-09", "Application review", null, { ref: { prepared: PREP, job: JOB } });
+  // The review File exactly as the card's link makes it (application_review_links.ts: reviewOf over the prepared row, createReview).
+  const made = await files.createReview!(U, reviewOf({ ...prepared, title: "Operations Associate", open: o.ready ? [] : [{ label: "Earliest start date" }] }));
   if (!made.ok) throw new Error(made.error);
   const sid = await A.tok(U, made.id, NOW);
   const rows = async () => JSON.stringify([kinds.all(), app, await A.store.session(await sha256(sid))]);
   const serve = (url: string, init: { method?: string; body?: string | null } = {}) =>
     handleFile(new Request(url, { method: init.method ?? "GET", headers: { cookie: `tf_s=${sid}`, origin: new URL(BASE).origin, ...(init.method === "POST" ? { "content-type": "application/x-www-form-urlencoded" } : {}) }, body: init.method === "POST" ? init.body ?? "" : undefined }), deps);
   const post = async (f: Record<string, string>) => handleFile(new Request(BASE, await phonePost({ t: sid, ...f }, ENV.TRAINEE_FILE_LINK_SECRET, { headers: { origin: new URL(BASE).origin } })), deps);
-  return { sid, serve, post, rows, confirms, change: (h: string) => { prepared = { ...prepared, payload_hash: h }; }, app: () => app };
+  return { sid, serve, post, rows, confirms, change: (h: string) => { prepared = { ...prepared, payload_hash: h }; }, app: () => app, gone: () => { prepared = { ...prepared, id: "gone" }; } };
 }
 const visible = (html: string) => html.replace(/<style[\s\S]*?<\/style>/g, "").replace(/<[^>]+>/g, " ").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ");
 
@@ -135,6 +137,16 @@ Deno.test("F-09 LIVE: Check status reads the record and changes nothing", async 
   assert.equal(r.status, 200);
   assert.match(visible(await r.text()), /Checked now: Ready for review, not submitted.*Nothing was changed/);
   assert.equal(await w.rows(), before);
+});
+
+Deno.test("F-09 LIVE: a prepared application no longer on record is the expired state, and Approve is refused", async () => {
+  const w = await world({ ready: true });
+  w.gone();
+  const r = await w.serve(BASE), html = await r.text();
+  assert.equal(r.status, 200); assert.match(html, /data-state="expired"/); assert.doesNotMatch(html, /name="action" value="approveapp"/);
+  const a = await w.post({ action: "approveapp", app: PREP, hash: H1 });
+  assert.equal(a.status, 409); assert.match(visible(await a.text()), /no longer on record.*Nothing was approved or sent/);
+  assert.equal(w.confirms.length, 0);
 });
 
 // ---------------------------------------------------------------- the Files loop's rules, on the served page

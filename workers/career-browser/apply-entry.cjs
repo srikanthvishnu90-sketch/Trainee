@@ -2,7 +2,7 @@
 // How a job page leads to its application form, shared by the cloud runner (parallel-apply.cjs) and the browser benchmarks
 // (scripts/browser-eval/): the provider's own apply address one GET away, and the words of an Apply control (never a control
 // that sends anything).
-const APPLY_TEXT = /^\s*(apply|apply now|apply here|apply for (this|the) (job|position|role)|apply to (this )?(job|position|role)|apply manually|i['’]?m interested|start (your )?application|bewerben|jetzt bewerben|(auf )?diese stelle bewerben|f[üu]r diese stelle bewerben|online bewerben|apply for this job now|ansök( nu)?|ansøg( nu)?|søk( nå)?|solliciteer( nu)?|postuler|candidatar(-se|me)?|inscr[ií]bete|candidati)\s*[»>→]?\s*$/i;
+const APPLY_TEXT = /^\s*(apply|apply now|apply here|apply for (this|the) (job|position|role)|apply to (this )?(job|position|role)|apply manually|i['’]?m interested|start (your )?application|bewerben|jetzt bewerben|(auf )?diese stelle bewerben|f[üu]r diese stelle bewerben|online bewerben|apply for this job now|ansök( nu)?|ansøg( nu)?|søk( nå)?|solliciteer( nu)?|postuler|candidatar(-se|me)?|inscr[ií]bete|candidati|solicitar( este puesto( de trabajo)?| (el |este )?empleo)?|aplicar( ahora)?)\s*[»>→]?\s*$/i;
 const NEVER_CLICK = /submit|send|senden|absenden|envoyer|enviar|verzenden|skicka|finish|complete|confirm/i;
 // Where a provider's application form lives, one GET away from the posting page (null: follow the page's own Apply link).
 function applyUrlFor(provider, landed) {

@@ -130,16 +130,14 @@ Deno.test("4 routing (unit): a follow-up stays on the thread's task", () => {
   assertNode.equal(resumeAskOf("Now send it to Maya.", task, { companies: [], jobs: 3, posting: false, resumeShown: false }), null, "only right after the file");
 });
 
-Deno.test("5 + 6 file: no GPA residue, interests kept, the city printed, founders newest first, each move named apart", () => {
+Deno.test("5 + 6 file: no GPA residue, the city printed, founders newest first, each move named apart", () => {
   const p = avery();
-  assertNode.ok(p.facts.filter((f: any) => /^Interest: /.test(f.text ?? "")).length === 3, "the Interests heading's items are kept");
   const b = buildResume(p, targetOf(R1)!, false);
   const txt = b.blocks.map((x) => `${x.kind}:${x.label ?? ""}${x.text}`);
   assertNode.ok(b.blocks.every((x) => x.kind !== "bullet" || x.text.trim()), `no empty bullet: ${txt.join(" | ")}`);
   assertNode.ok(!txt.some((l) => /ADDITIONAL|registrar transcript/i.test(l)), `no orphan entry: ${txt.join(" | ")}`);
   assertNode.ok(!b.blocks.some((x) => !x.flag && /GPA|3\.[68]\b/.test(x.text)), "no GPA printed");
   assertNode.ok(txt.includes("contact:Chicago, IL (Lincoln Park)") && b.blocks.some((x) => x.flag && x.text === "[email · phone · LinkedIn to add]"), `city printed, placeholder flagged: ${txt.slice(0, 3)}`);
-  assertNode.ok(txt.some((l) => l === "line:Interests:Golf, chess, Chicago architecture"), `interests printed: ${txt.join(" | ")}`);
   const resale = txt.findIndex((l) => /Founder, TEST Resale Studio/.test(l)), tutoring = txt.findIndex((l) => /Founder, TEST Tutoring Co/.test(l));
   assertNode.ok(resale > 0 && resale < tutoring, "Feb 2023 - Present above Jan 2022 - Dec 2023");
   assertNode.ok(txt.findIndex((l) => /Private Equity Intern/.test(l)) < txt.findIndex((l) => /AI M&A Intern/.test(l)), "the Python screening work still leads");

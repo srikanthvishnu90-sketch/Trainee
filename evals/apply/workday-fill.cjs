@@ -42,6 +42,18 @@ function playwright() {
   throw Error("PLAYWRIGHT_UNRESOLVABLE: set UPMORE_PLAYWRIGHT_PATH; nothing was downloaded");
 }
 
+// D-MS-1 (x-audit, 2026-11-10): the shipped extension types nothing before the tap (extension/config.js prefill: false).
+// This harness measures the fill engine, and its Chromium resolves only the TEST world's hosts, so it loads a copy with
+// prefill switched on (as tests/career-extension-browser.test.cjs does); the copy is removed on close.
+function prefillCopy() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trainee-wd-ext-prefill-"));
+  fs.cpSync(EXT, dir, { recursive: true });
+  const cfg = path.join(dir, "config.js"), src = fs.readFileSync(cfg, "utf8"), on = src.replace(/prefill:\s*false/, "prefill: true");
+  if (on === src) throw Error("config.js has no prefill: false to switch");
+  fs.writeFileSync(cfg, on);
+  return dir;
+}
+
 // The extension, unpacked, in a Chromium that resolves only the TEST world's hosts.
 async function launch(world) {
   const pw = playwright();
@@ -52,14 +64,15 @@ async function launch(world) {
   const chrome = [process.env.UPMORE_EXTENSION_CHROMIUM_PATH, auto, "/opt/pw-browsers/chromium", process.env.UPMORE_CHROMIUM_PATH].find((p) => p && fs.existsSync(p));
   const sandboxOff = process.env.UPMORE_CHROMIUM_SANDBOX === "off";
   const ud = fs.mkdtempSync(path.join(os.tmpdir(), "trainee-wd-profile-"));
+  const ext = prefillCopy();
   const ctx = await pw.chromium.launchPersistentContext(ud, {
     headless: true, ...(chrome ? { executablePath: chrome } : {}), ...(sandboxOff ? {} : { chromiumSandbox: true }), viewport: { width: 1280, height: 900 },
-    args: [`--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`, `--host-resolver-rules=${world.hostRules}`, "--ignore-certificate-errors", "--no-proxy-server",
+    args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`, `--host-resolver-rules=${world.hostRules}`, "--ignore-certificate-errors", "--no-proxy-server",
       ...(sandboxOff ? ["--no-sandbox"] : [])],
   });
   let sw = ctx.serviceWorkers()[0];
   if (!sw) sw = await ctx.waitForEvent("serviceworker", { timeout: 15000 });
-  return { ctx, sw, close: async () => (await ctx.close().catch(() => {}), fs.rmSync(ud, { recursive: true, force: true })) };
+  return { ctx, sw, close: async () => (await ctx.close().catch(() => {}), fs.rmSync(ud, { recursive: true, force: true }), fs.rmSync(ext, { recursive: true, force: true })) };
 }
 async function openPanel(ctx, sw, tabId) {
   const url = `chrome-extension://${new URL(sw.url()).host}/panel.html` + (tabId === null ? "" : `?tab=${tabId}`);

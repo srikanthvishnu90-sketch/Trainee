@@ -9,7 +9,7 @@
 // every posting. With nothing open, every queued posting is prepared again, as before. The card still waits for the whole
 // batch (cloud_prepare.ts holds it while a question is open), so the reply never says a card is coming sooner.
 import { kickPrepare, prepareConfigured } from "./career_apply_from_chat.ts";
-import { batchNeeds, type NeedRow, readyPostings, stillNeed } from "./batch_needs.ts";
+import { batchNeeds, endSentence, type NeedRow, readyPostings, stillNeed } from "./batch_needs.ts";
 
 const ON_COMPUTER = /(They go on the forms|It goes on the form) the next time you prepare applications on your computer\./;
 
@@ -64,8 +64,8 @@ export async function prepareAfterAnswers(asked: { reply: string; status?: strin
       ? "I'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready."
       : "Preparing it again hasn't started yet; it waits in your queue.")
     : (k === "started"
-      ? `I'm preparing ${n} again now with these answers; ${still}. The card with every exact answer comes here once those are answered too.`
-      : `Preparing ${n} again hasn't started yet; ${take.length === 1 ? "it waits" : "they wait"} in your queue. ${still[0].toUpperCase()}${still.slice(1)}.`);
+      ? `${endSentence(`I'm preparing ${n} again now with these answers; ${still}`)} The card with every exact answer comes here once those are answered too.`
+      : `Preparing ${n} again hasn't started yet; ${take.length === 1 ? "it waits" : "they wait"} in your queue. ${endSentence(`${still[0].toUpperCase()}${still.slice(1)}`)}`);
   if (done) asked.reply = asked.reply.replace(ON_COMPUTER, said);
   else if (asked.reply.includes("\n\nNext: ")) asked.reply = asked.reply.replace("\n\nNext: ", `\n${said}\n\nNext: `);
   return k;

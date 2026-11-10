@@ -117,7 +117,9 @@ export function batchReadyText(o: { ready: number; total: number; still: string[
   const { ready, total } = o, k = total - ready;
   if (total < 1 || ready < 0 || ready > total) return "";
   if (k === 0) return total === 1 ? "Your application is ready to send. Reply yes to send it." : `All ${total} are ready to send. Reply yes to send all ${total}.`;
-  return `${ready} of ${total} are ready; ${stillNeed(k, o.still)}.`;
+  return endSentence(`${ready} of ${total} are ready; ${stillNeed(k, o.still)}`);
 }
+// A sentence ends once: a question named last keeps its own question mark.
+export const endSentence = (s: string) => (/[.?!]$/.test(s) ? s : `${s}.`);
 // "K still need(s) you: <the questions>", the questions named in the employer's own words.
 export const stillNeed = (k: number, still: string[]) => `${k} still need${k === 1 ? "s" : ""} you${still.length ? `: ${list(still)}` : ""}`;

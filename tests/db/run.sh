@@ -1197,14 +1197,14 @@ echo "== career_apply_handoff_finish.test.sql (a wall the person submitted is su
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261109150000_career_apply_handoff_finish.sql"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_handoff_finish.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
 echo "  ok   rollback restores the old index and history; up again"
-# Item 6 S3 (20261110120000): search plans and material versions, approveplan and approvedoc bound to the payload hash. The main
+# Item 6 S3 (20261110160000): search plans and material versions, approveplan and approvedoc bound to the payload hash. The main
 # loop applied it once; once more (idempotent), its test, the rollback, up again and the test again.
-"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261110120000_career_file_plans_materials.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261110160000_career_file_plans_materials.sql"
 echo "== career_file_plans_materials.test.sql (versions never overwritten; right hash approves, stale changes nothing; an approved document is kept)"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_file_plans_materials.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
-"${QUIET[@]}" -f "$ROOT/supabase/rollbacks/20261110120000_career_file_plans_materials.down.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/rollbacks/20261110160000_career_file_plans_materials.down.sql"
 [[ "$("${PSQL[@]}" -tAc "select to_regclass('public.career_search_plans') is null and to_regclass('public.career_material_versions') is null")" == "t" ]] || { echo "FAIL career_file_plans_materials rollback"; exit 1; }
-"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261110120000_career_file_plans_materials.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261110160000_career_file_plans_materials.sql"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_file_plans_materials.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
 echo "  ok   rollback drops both tables; up again"
 # LAUNCH READINESS B1 (2026-10-26, audit PR #192): the definer lockdown, last, on the schema every phase above left

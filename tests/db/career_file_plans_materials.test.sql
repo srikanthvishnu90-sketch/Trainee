@@ -1,4 +1,4 @@
--- Item 6 S3 (20261110120000_career_file_plans_materials.sql): search plans and material versions are versions, never overwrites;
+-- Item 6 S3 (20261110160000_career_file_plans_materials.sql): search plans and material versions are versions, never overwrites;
 -- an approval binds the exact payload hash (right hash approves, a stale hash changes nothing); an approved version is never
 -- changed or deleted while its owner exists; a document approval covers its own role only; the owner reads only their own rows,
 -- anon reads nothing, and no client writes. Everything rolls back.

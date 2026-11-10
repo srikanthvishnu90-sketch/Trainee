@@ -14,7 +14,7 @@ const os = require("node:os");
 const path = require("node:path");
 const http = require("node:http");
 const lib = require("../scripts/browser-eval/eval-lib.cjs");
-const { strictPosting, paceKey } = require("../scripts/browser-eval/strict.cjs");
+const { strictPosting, paceKey, falsePass } = require("../scripts/browser-eval/strict.cjs");
 const { factValue } = require("../workers/career-browser/ats-fill.cjs");
 const { APPLY_TEXT, NEVER_CLICK, SEND_APPLY } = require("../workers/career-browser/apply-entry.cjs");
 
@@ -47,6 +47,11 @@ const routes = {
   "/tt/jobs/1-es": () => TT_JOB("Enviar solicitud"),
   "/tt/jobs/2-sv": () => TT_JOB("Skicka ansökan"),
   "/tt/jobs/3-connect-only": () => page(`<h1>Puesto</h1>${CONNECT("Email address without domain")}`),
+  // Teamtailor's real form: the file box hands the file to a presigned upload (a POST the dry run aborts) and goes away.
+  "/tt/jobs/4-upload": () => page(`<form action="/applications" method="post"><label for="fn">First name*</label><input id="fn" name="candidate[first_name]" required>
+    <label for="em">Email*</label><input id="em" type="email" name="candidate[email]" required>
+    <div class="up"><label for="cv">Upload CV*Required</label><input id="cv" type="file" required style="opacity:0;width:600px;height:60px"></div><button type="submit">Send application</button></form>
+    <script>document.getElementById("cv").addEventListener("change", (e) => { fetch("/uploads/presigned_data", { method: "POST", body: "{}" }).catch(() => {}); e.target.remove(); });</script>`),
   "/o/nl": () => page(`<h1>Vacature</h1><button type="button">Solliciteren</button>`),
   "/o/nl/c/new": () => RC_FORM(NL),
   "/o/lv": () => page(`<h1>Vakance</h1>`),
@@ -128,4 +133,23 @@ test("apply words: send-worded Apply is only the two Teamtailor phrases; a Submi
   for (const t of ["Enviar", "Enviar candidatura", "Skicka", "Submit application", "Send"]) { assert.ok(NEVER_CLICK.test(t), t); assert.ok(!SEND_APPLY.test(t), t); }
   assert.equal(paceKey("acme.recruitee.com"), "recruitee.com");
   assert.equal(paceKey("jobs.demv-systems.de"), "jobs.demv-systems.de");
+});
+
+test("a board that uploads the resume before Submit is 'ready except upload', never a pass; the upload POST is aborted", { skip }, async () => {
+  const r = await run("teamtailor", "/tt/jobs/4-upload");
+  assert.equal(r.result, "ready_except_upload", JSON.stringify(r));
+  assert.ok(r.sent_blocked >= 1);
+  assert.deepEqual(posts, []);
+});
+
+test("a stop at Submit is a pass only with a person field read back, a Submit that is no login, and no password box", () => {
+  const facts = lib.TEST_FACTS;
+  const email = { source: "fact", approved: facts.email, held: facts.email };
+  assert.equal(falsePass({ fields: [email], submit: "Send application", password_field: false }, facts), null);
+  assert.equal(falsePass({ fields: [], submit: "Log in", password_field: false }, facts), "no_person_field_read_back");
+  assert.equal(falsePass({ fields: [{ ...email, held: "" }], submit: "Send", password_field: false }, facts), "no_person_field_read_back");
+  assert.equal(falsePass({ fields: [{ source: "resume", approved: "cv.pdf", held: "cv.pdf" }], submit: "Send", password_field: false }, facts), "no_person_field_read_back");
+  for (const w of ["Log in", "Iniciar sesión", "Sign in", "Prisijungti", "Anmelden"]) assert.equal(falsePass({ fields: [email], submit: w, password_field: false }, facts), "submit_is_login", w);
+  assert.equal(falsePass({ fields: [email], submit: "Submit", password_field: true }, facts), "password_field_shown");
+  assert.equal(falsePass(undefined, facts), "no_audit");
 });

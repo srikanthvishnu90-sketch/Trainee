@@ -9,7 +9,9 @@
    The fix is a bundle-legal pure-JS zlib + SHA-256 fallback INSIDE 148,
    used only when the Node captures are absent; the Node path keeps the
    real zlib/crypto, so its bytes stay byte-identical (golden-pinned in
-   the control test at the bottom — green before and after).
+   the control test at the bottom — green before and after). Since #673
+   (2026-11-10) every runtime compresses with 148's deterministic deflate,
+   so the Node bytes are pinned to that codec; the content is unchanged.
 
    The edge realm here is Deno-shaped, faithfully: Buffer exists (Deno
    exposes it as a global — verified on deno 2.9.7), require and module
@@ -55,10 +57,12 @@ function loadEdgeRender() {
 }
 
 const sha256Hex = (buf) => crypto.createHash("sha256").update(buf).digest("hex");
-// Node-path goldens on the pristine base tree (bf12dbaa), computed from
-// this exact fixture: renderPdf 1,706 bytes / renderDocx 2,436 bytes.
-const GOLDEN_PDF_SHA256 = "89317f470703d55f7e5f763ec2e8891e83567d75b7fb30fd01ea08b281acd20e";
-const GOLDEN_DOCX_SHA256 = "28f5b1dd103708ffc818dce684aee7595fd214bb8266571347603022e51daadc";
+// Node-path goldens for this exact fixture. Re-pinned 2026-11-10 (#673, architect ruling): 148 now compresses with its own
+// deterministic deflate on every runtime, so Node and Deno write the same bytes. Only the compression moved: the inflated
+// PDF content stream and every DOCX part are identical to the base tree's (bf12dbaa goldens 89317f47.../28f5b1dd...,
+// 1,706 / 2,436 bytes). Now renderPdf 1,926 bytes / renderDocx 2,782 bytes.
+const GOLDEN_PDF_SHA256 = "a03a0de9ebd039cfb65fbf2224157d17e013cc78055844058de16f7e46395cc1";
+const GOLDEN_DOCX_SHA256 = "293f712875d87e17f5d82d9436fe012a71330e74ea992cd5e27571d5a5538ca9";
 
 test("edge realm (no require): renderPdf produces a real PDF instead of refusing", () => {
   const Edge = loadEdgeRender();

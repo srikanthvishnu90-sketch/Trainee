@@ -131,7 +131,9 @@ Nothing comes after the decision: no tails, no offers of more help, no capabilit
    scenario battery over B.6 continuations 1 to 4, run turn by turn, asserting the carried values.
 2. File serving and the chat card (C.1, C.2): `file_family.ts` defines the families and helpers, but serving every family and
    the chat card are not shipped (WO-E branches e4 to e8). Until they ship, replies that should point to a File fall back to
-   inline text, which breaks R2 for long results.
+   inline text, which breaks R2 for long results. Measured by `tests/architect/files-actions-loop.test.ts` (every family,
+   state and the live roles page at 390 px, every control pressed): 0 dead controls and 0 C.1 or C.24 failures are asserted;
+   the actions no File server answers yet are counted as "unserved" (99 of 226 at trunk 3d4e1361; the live roles page 0 of 61).
 3. E2 numbered references across a constraint change.
 4. R9 interim bubbles: the rubric sees only the final reply.
 5. E6 parallel progress after a blocker.

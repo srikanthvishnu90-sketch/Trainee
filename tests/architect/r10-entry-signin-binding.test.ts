@@ -12,7 +12,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { postgrestDouble } from "../flow/postgrest.ts";
 import { mintFileToken } from "../../supabase/functions/_shared/file_link.ts";
-import { sha256 } from "../../supabase/functions/_shared/file_session.ts";
+import { pageTokenOf, SESSION_TTL_MS, sha256 } from "../../supabase/functions/_shared/file_session.ts";
 import { handleFile, type FileDeps, type FileStore } from "../../supabase/functions/trainee-file/handler.ts";
 import { supabaseSessionStore } from "../../supabase/functions/trainee-file/store.ts";
 import { jobViewOf, refOf } from "../../supabase/functions/_shared/telegram_jobs.ts";
@@ -187,7 +187,14 @@ Deno.test({ name: "R10 fix 10 recovery: an expired, invalid, used or bare link s
 
 Deno.test("R10 fix 10 the results list: 'Signed in' and Sign out from the verified session; signing out makes the list unavailable", async () => {
   const R = await import("../helpers/results_world.ts");
-  const w = R.world(); const r = await R.made(w); const s = await w.A.tok(R.U, r.listId, R.NOW);
+  const w = R.world(); const r = await R.made(w);
+  // A fixed session id, opened the way w.A.tok opens one (the phone session store), instead of a random one: the page carries
+  // the session's page token (an HMAC of the id), and a random 64-hex token sometimes held "1000", the fake phone's last 4 digits,
+  // which failed the check below by chance (CI run 42719744871). Neither the fixed id nor its page token contains a run of the
+  // number's last 4, checked first so a change to the secret or the token's shape cannot bring the flake back unseen.
+  const s = `fs1.${"ab".repeat(32)}`, last4 = w.A.phoneOf(R.U).slice(-4);
+  await w.A.store.createSession({ idHash: await sha256(s), userId: R.U, via: "phone", phone: w.A.phoneOf(R.U), telegramId: null, list: r.listId, at: R.NOW, expiresAt: R.NOW + SESSION_TTL_MS });
+  assert(!s.includes(last4) && !(await pageTokenOf(await sha256(s), R.SECRET) ?? "").includes(last4), "the fixed test token holds none of the phone's digits");
   const html = await (await R.get(w, s)).text();
   const bar = html.match(/<div class="signedin" role="status">[\s\S]*?<\/div>/)?.[0] ?? "";
   assert(bar.includes("Signed in with your phone number") && />Sign out</.test(bar), bar || "no signed-in bar on the results list");

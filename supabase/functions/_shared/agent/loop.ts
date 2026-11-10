@@ -48,13 +48,13 @@ export interface TurnResult {
   fileLinks?: string[]; // FILE KINDS: links to the files create_file made this turn, minted by code; the channel sends them, the model never writes them
 }
 
-export const MAX_STEPS_REPLY = "I couldn't finish that in one go, so I stopped partway. Nothing was sent or submitted. Tell me which part to do first.";
+export const MAX_STEPS_REPLY = "I couldn't finish that in one reply because it needed more steps than one reply allows, so I stopped partway. Nothing was sent or submitted. Tell me which part to do first.";
 export const MODEL_ERROR_REPLY = "I can't answer right now because the AI service isn't responding. Nothing was sent, saved or submitted. Try again in a minute.";
 // When a turn saved something before it stopped, it says so: "nothing saved" would be false.
-export const MAX_STEPS_AFTER_SAVE_REPLY = "I saved what you told me, but couldn't finish the rest in one go, so I stopped partway. Nothing was sent or submitted. Tell me which part to do next.";
-export const MODEL_ERROR_AFTER_SAVE_REPLY = "I saved what you told me, but the AI service stopped responding before I could finish. Nothing was sent or submitted. Try again in a minute.";
-export const INCOMPLETE_REPLY = "I couldn't produce a complete answer, so I stopped. Nothing was sent, saved or submitted. Please try again.";
-export const INCOMPLETE_AFTER_SAVE_REPLY = "I saved what you told me, but couldn't produce a complete answer. Nothing was sent or submitted. Please try again.";
+export const MAX_STEPS_AFTER_SAVE_REPLY = "I couldn't finish all of that because it needed more steps than one reply allows; what you told me is saved. Nothing was sent or submitted. Tell me which part to do next.";
+export const MODEL_ERROR_AFTER_SAVE_REPLY = "I couldn't finish because the AI service stopped responding; what you told me is saved. Nothing was sent or submitted. Try again in a minute.";
+export const INCOMPLETE_REPLY = "I couldn't produce a complete answer because the AI's reply came back unfinished, so I stopped. Nothing was sent, saved or submitted. Please try again.";
+export const INCOMPLETE_AFTER_SAVE_REPLY = "I couldn't produce a complete answer because the AI's reply came back unfinished; what you told me is saved. Nothing was sent or submitted. Please try again.";
 // WO-077: a reply never claims a change that did not happen this turn (battery run 39485101366, T12: "Kept for good" after
 // only a read). Each kind of claim names the tools that make it true. WO-091a (audit chat-brain F5; battery run
 // 39500971945, BR-062/036/042): a claim is first-person past or present-perfect action language ("I've set…", "I saved…",
@@ -64,7 +64,7 @@ export const INCOMPLETE_AFTER_SAVE_REPLY = "I saved what you told me, but couldn
 // nothing left, the reply is this line: it promises nothing, because code cannot know a tool could do it.
 export const CLAIM_UNBACKED_REPLY = "I didn't change anything this time.";
 // A reply whose every sentence carried a key-shaped string (ADVERSARIAL ROUND 2): nothing of it is shown.
-export const SECRET_DROPPED_REPLY = "I can't share keys, tokens or passwords, and I didn't change anything.";
+export const SECRET_DROPPED_REPLY = "I can't share keys, tokens or passwords because they never go through chat, and I didn't change anything.";
 const ALERT_NOUN = "(?:(?:an?|your|the|new|these|those|\\d+) )?(?:(?:job|daily|instant|new) )?(?:alerts?|job watch(?:es)?)\\b";
 const I_HAVE = "\\bi(?:'ve| have)? (?:just |now |also )?";
 const CLAIMS: { kind: string; said: RegExp; by: string[] | "any_write" }[] = [

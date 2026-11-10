@@ -11,6 +11,15 @@ Wired in `career_resume_design.ts` (renderDesigned), `career_tailor.ts` and `age
 Tests: `tests/architect/r10-resume-templates-20261108.test.ts`; corpus `tests/helpers/resume_corpus.ts`; round trip
 `scripts/resume-roundtrip.py`; gallery `tests/architect/snapshots/resume-templates/` (`scripts/resume-template-gallery.ts`);
 recruiter judge `evals/career/resume-judge/` (paid, run by the architect only).
+Delivered-file loop (release item 3): `scripts/resume-loop.ts` and `tests/architect/r10-resume-loop-20261109.test.ts` make 9 TEST
+profiles x 3 roles x 3 layouts through `tailor_resume`, open every attached PDF and DOCX with outside tools
+(`scripts/resume-loop-extract.py`) and count opened, invented facts, page fit and target carried. The plain layout sends the
+Word copy with the PDF too (1.1: Trainee keeps sending both). Architect ruling 2026-11-10: a skill the person listed in their
+own confirmed Skills is a confirmed fact (D-007) and is shown on every file; a skill only the posting names stays off; the
+Skills section never disappears while they have one (`career_tailor.ts` `listedSkillsProven`, `withListedSkills`; bar in
+`tests/architect/r10-resume-listed-skills-20261110.test.ts`, "confirmed listed skills shown" 100%). Every PDF and DOCX stream
+is compressed by 148's own deterministic deflate (`deflateFixed`) on Node and Deno alike, so a document is the same bytes on
+both (`scripts/resume-bytes-parity.ts`, `tests/architect/r10-resume-bytes-parity-20261110.test.ts`: 27/27, was 14/27).
 
 ## 1. Evidence
 

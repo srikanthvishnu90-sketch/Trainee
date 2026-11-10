@@ -397,7 +397,11 @@ export function askFromRouter(message: string, routerOut: { intent?: string } | 
   if (!routerOut || !SEARCH_INTENTS.has(String(routerOut.intent ?? ""))) return null;
   const p = discovery?.lastParams;
   if (!p || typeof p.ask !== "string" || p.ask !== String(message ?? "").slice(0, 200)) return null;
-  const role = typeof p.roleText === "string" ? p.roleText : "";
+  // agent2 response sweep (2026-11-09): the router's role text can carry the count asked for ("five data analyst") or the start
+  // of "do not apply" ("data analyst do"); neither is part of the role, and the reply read them back as if they were.
+  const role = (typeof p.roleText === "string" ? p.roleText : "")
+    .replace(/^\s*(?:the\s+)?(?:top\s+)?(?:\d{1,2}|two|three|four|five|six|seven|eight|nine|ten)\s+/i, "")
+    .replace(/\s+(?:do|don'?t|dont|but|and|please)\s*$/i, "");
   if (!searchWords(role).length) return null;
   return { role, place: typeof p.whereText === "string" && p.whereText.trim() ? p.whereText.trim() : null, remote: !!p.remote };
 }

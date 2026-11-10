@@ -4,6 +4,8 @@ import { deliverDue } from "./channel.ts";
 import { supabaseChannelStore } from "./channel_store.ts";
 import { adaptersFromEnv } from "./channel_registry.ts";
 import { shapeReply } from "./channel_shape.ts";
+import { type CardResolver, fileCardResolver } from "./file_card.ts";
+import { fileCardReads } from "./file_card_reads.ts"; // the card's reads only: file_service.ts carries the router bundle
 import { telegramPacerFromEnv } from "./channel_pacer.ts"; // every Telegram send takes its token from the one shared bucket
 
 // The turn runs as the person through agent-chat's service-role path, so history, erase, the host's STOP and pause,
@@ -67,6 +69,13 @@ export function chatThroughAgent(url: string, key: string, o: { retryDelayMs?: n
 
 // One request's head-start sender. The adapters are made once per request, so the parts of one reply share Telegram's
 // pacing (one message a second to a chat) instead of each part starting a fresh clock.
+// SPEC C.2 / D-049: the File card's resolver over the File store (read only: files.get for the account in the link's token).
+// deno-lint-ignore no-explicit-any
+export function fileCardsFor(admin: any, env: { get(k: string): string | undefined }, now: () => number): CardResolver {
+  const { files } = fileCardReads(admin, now);
+  return fileCardResolver({ env, now, files });
+}
+
 // key: one row (a reply, or one part of it); wholeUser: everything due for the person, oldest first (WhatsApp: what
 // waited for the window, then the answer).
 // clock/sleep (tests only): the pacing's clock, in process and in the shared bucket (channel_pacer.ts `now`); fetch (tests
@@ -76,7 +85,8 @@ export function chatThroughAgent(url: string, key: string, o: { retryDelayMs?: n
 export function deliverer(admin: any, env: { get(k: string): string | undefined }, o: { clock?: () => number; sleep?: (ms: number) => Promise<void>; fetch?: typeof fetch } = {}) {
   let adapters: ReturnType<typeof adaptersFromEnv> | null = null;
   return async (a: { userId: string; key?: string; now: number; wholeUser?: boolean }) => {
-    adapters ??= adaptersFromEnv(env, { fetch: o.fetch, clock: o.clock, sleep: o.sleep, sharedPace: telegramPacerFromEnv(env, admin, { sleep: o.sleep, now: o.clock }) });
+    adapters ??= adaptersFromEnv(env, { fetch: o.fetch, clock: o.clock, sleep: o.sleep, sharedPace: telegramPacerFromEnv(env, admin, { sleep: o.sleep, now: o.clock }),
+      fileCards: fileCardsFor(admin, env, o.clock ?? Date.now) }); // SPEC C.2: the File card (CAREER_FILE_CARD)
     const store = supabaseChannelStore(admin, a.wholeUser ? { user: a.userId } : { only: { userId: a.userId, key: a.key! } });
     const r = await deliverDue({ store, adapters, now: a.now, limit: a.wholeUser ? 40 : 1 });
     await store.release();

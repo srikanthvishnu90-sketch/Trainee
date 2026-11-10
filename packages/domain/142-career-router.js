@@ -11258,10 +11258,46 @@ const CareerRouter = (() => {
     const named = labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(", ")} or ${labels[labels.length - 1]}`;
     const facts = [];
     if (added.length) facts.push(`Noted: ${added.map((f) => String(factLine(f)).replace(/[.\s]+$/, "")).join("; ")}.`);
-    facts.push(fields.length > 1 ? `I'll ask you for each one, one at a time; I can help with how an answer is worded, but the answer itself is yours.` : "I can help with how an answer is worded, but the answer itself is yours.");
+    // D-055 (M04): with more than one field, every field is named as an ask in this reply (what is needed, in order), and only
+    // the first is asked as a question; the rest follow one at a time.
+    const needs = fields.map((f) => (company && f.key === "salary" ? `${f.label} for ${company}` : f.label));
+    const needList = needs.length > 2 ? `${needs.slice(0, -1).join(", ")}, then ${needs[needs.length - 1]}` : needs.join(", then ");
+    facts.push(fields.length > 1 ? `I need ${fields.length === 2 ? "both" : `all ${fields.length}`} from you, one at a time: ${needList}. I can help with how an answer is worded, but the answer itself is yours.` : "I can help with how an answer is worded, but the answer itself is yours.");
     try { const m = threadMirrorForWrite(ctx); if (m) m.sensitiveAsk = { company, fields: fields.map((f) => f.key), total: fields.length, at: nowOf(ctx) }; } catch { /* the reply still asks the first one */ }
     const reply = compose({ headline: `I can't pick ${named}${company ? ` for the ${company} application` : ""}: ${fields.length === 1 ? "that has" : "those have"} to be your own answer${fields.length === 1 ? "" : "s"}, so I won't fill ${fields.length === 1 ? "it" : "them"} in.`, facts, nextStep: sensitiveQuestion(fields[0], company, 1, fields.length) });
     return { intent: "sensitive_answer_ask", resultStatus: "awaiting_user", reply, sends: 0, asked: [fields[0].key], open: fields.map((f) => f.key), company, stated_facts: added.length ? statedFactsOf(ctx) : undefined };
+  }
+  // D-055 (M09): "use the answers from my last application for the Brightwave Labs one". Answers are never carried over
+  // unseen: when the account's own records say there is nothing to reuse (the apply ledger the handler reads, every part of
+  // it readable, holds no application, request or tracked row; the tracker is empty; no sensitive answer is on file), the
+  // reply says so, fills nothing in, and asks the sensitive answers for this application one at a time, through the same
+  // thread list as an ask to pick them (mirror.sensitiveAsk). With anything on file, or no ledger to read, it answers nothing.
+  const REUSE_ANSWERS = /\b(?:use|reuse|re-use|copy|carry over|bring over|same)\b[^.?!]{0,40}\banswers?\b[^.?!]{0,60}\b(?:last|previous|earlier|prior|other|old)\b[^.?!]{0,20}\bapplications?\b/;
+  const REUSE_FIELDS = ["work_authorization", "sponsorship", "graduation_date", "salary"];
+  function handleAnswerReuse(text, ctx) {
+    const t = lc(text);
+    if (!REUSE_ANSWERS.test(t)) return null;
+    const L = ctx && ctx.applyLedger && typeof ctx.applyLedger === "object" ? ctx.applyLedger : null;
+    if (!L || (Array.isArray(L.unreadable) && L.unreadable.length)) return null;
+    if ((Array.isArray(L.tasks) ? L.tasks : []).some((x) => x && ["application", "apply_request", "tracked"].includes(x.kind))) return null;
+    let tracked = 0;
+    try { const st = ctx.trackStore; tracked = st && Array.isArray(st.rows) ? st.rows.length : 0; } catch { tracked = 0; }
+    if (tracked) return null;
+    const kinds = new Set(Object.values(FIELD_FACT_KIND).concat(["citizenship", "work_auth", "visa"]));
+    const prof = ctx && ctx.profile;
+    const onFile = statedFactsOf(ctx).concat(prof && Array.isArray(prof.facts) ? prof.facts : []).some((f) => f && (kinds.has(s(f.kind)) || /citizen|sponsor|work_?auth|eligib|salary|graduat/.test(s(f.kind))));
+    if (onFile) return null;
+    const coM = s(text).match(/\b[Ff]or (?:the|my)\s+([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})\s+(?:one|application|role|job|internship|posting|position)\b/);
+    const company = coM ? coM[1] : null;
+    const fields = REUSE_FIELDS.map((k) => PICK_FIELDS.find((f) => f.key === k)).filter(Boolean);
+    const needs = fields.map((f) => (company && f.key === "salary" ? `${f.label} for ${company}` : f.label));
+    try { const m = threadMirrorForWrite(ctx); if (m) m.sensitiveAsk = { company, fields: fields.map((f) => f.key), total: fields.length, at: nowOf(ctx) }; } catch { /* the reply still asks the first one */ }
+    const reply = compose({
+      headline: `There's no earlier application of yours on file, so I have no answers to reuse${company ? ` for the ${company} application` : ""}, and I won't fill any in.`,
+      facts: [`These answers are yours to give for each application, one at a time: ${needs.slice(0, -1).join(", ")}, then ${needs[needs.length - 1]}.`],
+      nextStep: sensitiveQuestion(fields[0], company, 1, fields.length),
+    });
+    return { intent: "sensitive_answer_ask", resultStatus: "awaiting_user", reply, sends: 0, asked: [fields[0].key], open: fields.map((f) => f.key), company };
   }
   // The person's answer to the open field: recorded in their words, then the next field, or the end of the list.
   function sensitiveAnswerValue(key, raw) {
@@ -11761,6 +11797,7 @@ const CareerRouter = (() => {
       || handleSensitiveAskAnswer(text, c)
       || handleSensitiveCorrection(text, c)
       || handleSensitivePick(text, c)
+      || handleAnswerReuse(text, c)
       || handleQueueCancel(text, c)
       || handleDoorstepCancel(text, c)
       || handlePacketValidity(text, c)

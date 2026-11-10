@@ -130,8 +130,10 @@ Deno.test("4 routing (unit): a follow-up stays on the thread's task", () => {
   assertNode.equal(resumeAskOf("Now send it to Maya.", task, { companies: [], jobs: 3, posting: false, resumeShown: false }), null, "only right after the file");
 });
 
-Deno.test("5 + 6 file: no GPA residue, the city printed, founders newest first, each move named apart", () => {
+Deno.test("5 + 6 file: no GPA residue, interests kept, the city printed, founders newest first, each move named apart", () => {
   const p = avery();
+  // D-052 (owner ruling, PR #742): the Interests heading's items are kept as facts and printed on one "Interests:" line.
+  assertNode.ok(p.facts.filter((f: any) => /^Interest: /.test(f.text ?? "")).length === 3, "the Interests heading's items are kept");
   const b = buildResume(p, targetOf(R1)!, false);
   const txt = b.blocks.map((x) => `${x.kind}:${x.label ?? ""}${x.text}`);
   assertNode.ok(b.blocks.every((x) => x.kind !== "bullet" || x.text.trim()), `no empty bullet: ${txt.join(" | ")}`);
@@ -139,9 +141,26 @@ Deno.test("5 + 6 file: no GPA residue, the city printed, founders newest first, 
   assertNode.ok(!b.blocks.some((x) => !x.flag && /GPA|3\.[68]\b/.test(x.text)), "no GPA printed");
   assertNode.ok(txt.includes("contact:Chicago, IL (Lincoln Park)") && b.blocks.some((x) => x.flag && x.text === "[email · phone · LinkedIn to add]"), `city printed, placeholder flagged: ${txt.slice(0, 3)}`);
   const resale = txt.findIndex((l) => /Founder, TEST Resale Studio/.test(l)), tutoring = txt.findIndex((l) => /Founder, TEST Tutoring Co/.test(l));
+  assertNode.ok(txt.some((l) => l === "line:Interests:Golf, chess, Chicago architecture"), `interests printed (D-052): ${txt.join(" | ")}`);
   assertNode.ok(resale > 0 && resale < tutoring, "Feb 2023 - Present above Jan 2022 - Dec 2023");
   assertNode.ok(txt.findIndex((l) => /Private Equity Intern/.test(l)) < txt.findIndex((l) => /AI M&A Intern/.test(l)), "the Python screening work still leads");
   assertNode.deepStrictEqual(b.moved, ["Private Equity Intern above AI M&A Intern", "Founder, TEST Resale Studio above Founder, TEST Tutoring Co"]);
+});
+
+Deno.test("D-052: interest headings read as draft facts, printed only once confirmed; Summary, Objective and Relevant Coursework stay unread", () => {
+  for (const h of ["INTERESTS", "Interests", "Hobbies", "HOBBIES & INTERESTS", "Personal Interests", "Interests and Hobbies"]) {
+    const { drafts, unread } = CareerProfile.parseResumeSections(`EDUCATION\nLakeview College (TEST), B.S. Statistics, 2027\n\n${h}\n- Golf, chess\n\nSUMMARY\nCurious analyst.\n\nRelevant Coursework\nEconometrics\n\nOBJECTIVE\nA summer internship.`);
+    const interests = drafts.filter((d: any) => d.section === "interests");
+    assertNode.deepStrictEqual(interests.map((d: any) => [d.kind, d.text, d.needs_confirmation, d.status]), [["other", "Interest: Golf", true, "draft"], ["other", "Interest: chess", true, "draft"]], h);
+    assertNode.deepStrictEqual(unread, ["SUMMARY", "Relevant Coursework", "OBJECTIVE"], h);
+  }
+  // Never used before it is confirmed (D-007): the same resume with nothing confirmed prints no Interests line.
+  const p: any = CareerProfile.createProfile({});
+  CareerProfile.ingestResume(p, { text: AVERY, fileName: "avery.txt" });
+  for (const f of p.facts) if (!/^Interest: /.test(f.text ?? "")) CareerProfile.confirmFact(p, f.id);
+  p.resume_header = { name: "AVERY FIXTURE", email: null, location: "Chicago, IL (Lincoln Park)", links: {}, confirmed_at: "2026-11-01T00:00:00.000Z" };
+  const txt = buildResume(p, targetOf(R1)!, false).blocks.map((x) => `${x.kind}:${x.label ?? ""}${x.text}`);
+  assertNode.ok(!txt.some((l) => /Interests|Golf|Chicago architecture/.test(l)), `an unconfirmed interest printed: ${txt.join(" | ")}`);
 });
 
 Deno.test({
@@ -165,7 +184,8 @@ Deno.test({
       const person = async (before: string[]) => {
         const p = await w.person();
         await p.say(AVERY);
-        assertNode.match((await p.say("Yes, that's my resume")).reply, /10 facts/);
+        // D-052 (owner ruling, PR #742): the three interests are facts again (10 + 3).
+        assertNode.match((await p.say("Yes, that's my resume")).reply, /13 facts/);
         for (const m of before) await p.say(m);
         return p;
       };

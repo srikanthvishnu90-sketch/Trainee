@@ -40,7 +40,7 @@ import { byHandUrl, FEED_ROWS, foreignFact, hashTag, isSecretField, NOT_YOURS, l
 import { checkedAt, studentWindowOf } from "../_shared/search_shortlist.ts"; // R10 WO-C
 import { submitLabel } from "../_shared/submit_capability.ts"; // R10 owner ruling
 import { familyPage, familyStatePage } from "../_shared/file_family.ts";
-import { type FamilyRecordsByFamily, isServedFamily, SERVED_POSTS, type ServedFamily, servedFamilyFile } from "../_shared/file_family_serve.ts";
+import { type FamilyRecordsByFamily, isServedFamily, SERVED_POSTS, type ServedFamily, servedFamilyFile, servedState } from "../_shared/file_family_serve.ts";
 
 export type { AppRow } from "../_shared/file_page.ts";
 export interface FileStore extends JobStore {
@@ -663,6 +663,7 @@ async function handleKind(o: { g: Exclude<Awaited<ReturnType<FileService["get"]>
     const live = rec.data.live === true ? (src ? await src.load(u, frec).catch(() => null) : null) : { view: rec.data.view, asOf: null };
     const tz = d.timeZone ? await d.timeZone(u).catch(() => null) : null;
     if (!live) return o.html(familyStatePage({ state: "error", family: fam === "F-14n" ? "F-14" : fam, recover: bot ? { label: "Back to chat", effect: "open", href: bot } : null }, { now: d.now(), tz }), 503);
+    if ("state" in live) return o.html(familyStatePage(servedState(live.state, { bot }), { now: d.now(), tz }));
     if (fields.get("format") === "json") return new Response(JSON.stringify({ family: fam, title: rec.data.title ?? null, view: live.view ?? null }, null, 2), { status: 200, headers: { ...(await headers("application/json; charset=utf-8", d.env)), "content-disposition": `attachment; filename="trainee-file-${rec.id}.json"` } });
     // A listed post is drawn as a form only when this File's records answer it: a live (ref) File whose family has that post handler.
     const answers = (a: string) => rec.data.live === true && typeof src?.post?.[a] === "function";

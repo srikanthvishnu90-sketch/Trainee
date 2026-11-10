@@ -11,7 +11,7 @@
 //   an employer or source page      unchanged (an https link).
 //   anything else                   shown off, with the reason: a state change or approval this File cannot do yet (S1-S6 serve them
 //                                   as POST forms with the page token; approvals bind the payload hash, D-MS-1, D-MN-2).
-import { type Act, type Block, FAMILIES, type FamilyFile, type FamilyId, type Part } from "./file_family.ts";
+import { type Act, type Block, FAMILIES, type FamilyFile, type FamilyId, type Part, type StateInput } from "./file_family.ts";
 import { answerLibraryFile, careerBriefFile, materialsFile, pathComparisonFile, profileFactsFile, roleWorkspaceFile, searchPlanFile } from "./file_family_plan.ts";
 import { applicationReviewFile, batchFile, interviewHubFile, messageReviewFile, negotiationFile, offerComparisonFile, pipelineFile, weeklyBriefFile } from "./file_family_apply.ts";
 
@@ -58,7 +58,9 @@ export const SERVED_POSTS: Record<ServedFamily, ReadonlySet<string>> = {
 export interface FamilyRec { id: string; data: { family: ServedFamily; title?: string; ref?: Record<string, string> | null } }
 export interface FamilyPostResult { ok: boolean; title: string; lines: string[] }
 export interface FamilyRecords {
-  load(userId: string, rec: FamilyRec): Promise<{ view: unknown; asOf: string | null } | null>;
+  // { state }: nothing on record to draw the family from (f-s5): the page is that C.24 state (servedState), never an invented File
+  // and never the error state.
+  load(userId: string, rec: FamilyRec): Promise<{ view: unknown; asOf: string | null } | { state: StateInput; asOf: string | null } | null>;
   post?: Record<string, (userId: string, rec: FamilyRec, fields: URLSearchParams, now: number) => Promise<FamilyPostResult>>;
 }
 export type FamilyRecordsByFamily = Partial<Record<ServedFamily, FamilyRecords>>;
@@ -116,4 +118,11 @@ export function servedFamilyFile(family: ServedFamily, view: unknown, o: { bot: 
     segments: f.segments?.map((s) => ({ ...s, href: null })), blocks: f.blocks.map((b) => servedBlock(b, c)),
     actions: f.actions && { ...f.actions, primary: f.actions.primary ? servedAct(f.actions.primary, c, null) : f.actions.primary, secondary: f.actions.secondary?.map((s) => servedAct(s, c, null)) },
   };
+}
+
+// A family's C.24 state page (nothing on record yet), its controls served the same way: a decision opens the chat with the question
+// filled in; anything else is shown off with its reason (f-s5).
+export function servedState(s: StateInput, o: { bot: string | null }): StateInput {
+  const c: ServeCtx = { bot: o.bot, title: FAMILIES[s.family].header };
+  return { ...s, next: s.next ? servedAct(s.next, c, null) : s.next, recover: s.recover ? servedAct(s.recover, c, null) : s.recover };
 }

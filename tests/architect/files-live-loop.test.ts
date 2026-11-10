@@ -175,7 +175,7 @@ Deno.test("FILES LIVE LOOP: the S0 hooks: a live view is read every time, a null
   const spec = FILE_FAMILIES.find((f) => f.id === "F-04")!.specimen as any;
   let current: unknown = spec, calls: string[] = [];
   const familyRecords = { "F-04": {
-    async load(_u: string, rec: { data: { ref?: Record<string, string> | null } }) { calls.push(`view ${rec.data.ref?.plan}`); return current ? { view: current, asOf: null } : null; },
+    async load(_u: string, rec: { data: { ref?: Record<string, string> | null } }) { calls.push(`view ${rec.data.ref?.plan}`); return current ? ((current as any).state ? { state: (current as any).state, asOf: null } : { view: current, asOf: null }) : null; },
     post: { async approveplan(_u: string, _r: unknown, f: URLSearchParams) { calls.push(`approveplan ${f.get("h")}`); return f.get("h") === "h-now" ? { ok: true, title: "Approved", lines: ["Approved exactly v1."] } : { ok: false, title: "Not approved", lines: ["The plan changed since you saw it (h-old is not h-now), so nothing was approved."] }; } },
   } };
   const deps: FileDeps = { ...A.deps, store: stub(), now: () => SPECIMEN_NOW, env: { get: (k) => ENV[k] }, cards: {} as never, tap: {} as never, files, familyRecords };
@@ -208,6 +208,11 @@ Deno.test("FILES LIVE LOOP: the S0 hooks: a live view is read every time, a null
     assert.equal(ok.status, 200); assert.match(await ok.text(), /Approved exactly v1/);
     assert.equal(stale.status, 409); assert.match(await stale.text(), /h-old is not h-now/);
     assert.equal(other.status, 400);
+    // Nothing on record (f-s5): the family's C.24 empty state, its decision opening the chat; never the error state.
+    current = { state: { state: "empty", family: "F-04", scope: "your saved searches", next: { label: "Adjust plan", effect: "decide", href: "?plan" } } };
+    const empty = await get(), eh = await empty.text();
+    assert.equal(empty.status, 200); assert.match(eh, /data-state="empty"/); assert.doesNotMatch(eh, /Could not load this page/);
+    assert.match(eh, /href="https:\/\/t\.me\/TraineeBot\?text=About\+my\+Search\+plan/, "the empty state's decision opens the chat");
     current = null;
     const gone = await get();
     assert.equal(gone.status, 503); const g = await gone.text();

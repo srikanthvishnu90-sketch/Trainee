@@ -15,7 +15,9 @@ import { HELP_URL, RECOVERY_WORDS } from "../../supabase/functions/_shared/file_
 import { handleFile, type FileDeps, type FileStore } from "../../supabase/functions/trainee-file/handler.ts";
 import { supabasePhoneAuth } from "../../supabase/functions/trainee-file/store.ts";
 import { jobViewOf, refOf } from "../../supabase/functions/_shared/telegram_jobs.ts";
-import { mintConnectToken } from "../../supabase/functions/_shared/connect_link.ts";
+import { connectPageToken, mintConnectToken } from "../../supabase/functions/_shared/connect_link.ts";
+import { connectLanding } from "../../supabase/functions/_shared/connect_landing.ts";
+import { disconnectOf } from "../../supabase/functions/_shared/connector_words.ts";
 import { handleConnect, type ConnectDeps, type ProviderId, type ProviderState } from "../../supabase/functions/trainee-connect/handler.ts";
 import { codeInChat } from "../../supabase/functions/_shared/career_code_in_chat.ts";
 import { resumeTaskTurn } from "../../supabase/functions/_shared/career_resume_task.ts";
@@ -349,7 +351,13 @@ async function connectWalks(bot: boolean) {
   check("unrefused", open.r.status === 303 && w.jar.has("tc_s") && open.r.headers.get("location") === "/connect", `${tag} link: one session cookie, a clean URL`);
   const consent = await w.go("");
   // The session lives in the HttpOnly tc_s cookie; a page that prints it hands it to anything that reads or saves the page.
-  if (consent.html.includes(w.jar.get("tc_s") ?? "\u0000")) ruling.push(`${tag} consent: the page's forms carry the tc_s session itself, not a page token (pinned: connect-page.test.ts posts the scraped t without the cookie)`);
+  // The session lives in the HttpOnly tc_s cookie; the forms carry a page token bound to it (architect amendment, security, 2026-11-10).
+  check("leaks", !consent.html.includes(w.jar.get("tc_s") ?? "\u0000") && /name="t" value="cp1\./.test(consent.html), `${tag} consent: the forms carry a page token, never the session`);
+  { const t0 = consent.html.match(/name="t" value="([^"]+)"/)?.[1] ?? ""; const keep = new Map(w.jar);
+    w.jar.clear(); const scraped = await w.go("", { t: t0, action: "start", provider: "google" }); check("unrefused", scraped.r.status === 401 && !scraped.r.headers.get("location"), `${tag} a scraped page token without the cookie: refused (${scraped.r.status})`);
+    for (const [k, v] of keep) w.jar.set(k, v);
+    const bare = await w.go("", { action: "start", provider: "google" }); check("unrefused", bare.r.status === 403 && !bare.r.headers.get("location"), `${tag} the cookie without the page token: refused (${bare.r.status})`);
+    const raw = await w.go("", { t: w.jar.get("tc_s") ?? "", action: "start", provider: "google" }); check("unrefused", raw.r.status === 401, `${tag} the session value posted in a form: refused (${raw.r.status})`); }
   check("dead", /<h1>Connect your email<\/h1>/.test(consent.html) && /Continue with Google/.test(consent.html), `${tag} consent: Connect your email, Continue with Google`);
   // Every post the consent page draws must answer (start leads to the provider's own sign-in page).
   for (const m of consent.html.matchAll(/<form method="post"[^>]*>([\s\S]*?)<\/form>/g)) {
@@ -364,12 +372,41 @@ async function connectWalks(bot: boolean) {
     const r = await w.go("", f); check("dead", r.r.status < 500 && !/not something this page can do/i.test(r.html), `${tag} unfinished: the "${f.action}" form answers (${r.r.status})`);
   }
   for (const m of unfinished.html.matchAll(/<a [^>]*href="([^"]+)"/g)) check("dead", m[1] === BOT_URL || m[1].startsWith("/") || m[1].startsWith("#"), `${tag} unfinished: the link ${m[1]} leads to a page`);
-  // connected: Disconnect answers, and leaves nothing connected
+  // connected, opened from a link (ruling 2026-11-10: a forwarded, unused link may be opened by anyone): the address masked, no
+  // Disconnect here, and the chat's words for it, which the chat really answers
   w.conn[U] = { google: { state: "connected", email: "ada.fictional@example.test" }, microsoft: { state: "not_connected", email: null } };
   const connected = await w.go("");
-  const disc = [...connected.html.matchAll(/<form method="post"[^>]*>([\s\S]*?)<\/form>/g)].map((m) => Object.fromEntries([...m[1].matchAll(/<input type="hidden" name="([^"]+)" value="([^"]*)">/g)].map((x) => [x[1], x[2]]))).find((f) => f.action === "disconnect");
-  check("dead", !!disc, `${tag} connected: a Disconnect control`);
-  if (disc) { const r = await w.go("", disc); check("dead", r.r.status === 200 && w.conn[U].google.state === "not_connected", `${tag} Disconnect: done`); }
+  check("leaks", !connected.html.includes("ada.fictional@example.test") && plain(connected.html).includes("Connected as a***@e***.test"), `${tag} connected from a link: the address masked`);
+  const words = plain(connected.html).match(/Reply (DISCONNECT \w+) in your chat with Trainee to disconnect\./)?.[1] ?? "";
+  check("dead", disconnectOf(words) === "gmail" && !/name="action" value="disconnect"/.test(connected.html), `${tag} connected from a link: the chat's own words ("${words}") instead of a Disconnect`);
+  const forced = await w.go("", { t: (await connectPageToken(w.jar.get("tc_s") ?? "", CONNECT_SECRET))!, action: "disconnect", provider: "google" });
+  check("unrefused", forced.r.status === 403 && w.conn[U].google.state === "connected" && /Reply DISCONNECT GMAIL/.test(plain(forced.html)), `${tag} a disconnect posted from a link's page: changes nothing, says how`);
+  // identified by Telegram (Mini App): the address and a Disconnect that works, only with fresh signed data on the post
+  { const jarBefore = new Map(w.jar); w.jar.clear();
+    const mini = await w.go("", { init: await signedInit("7101", T0 / 1000, BOT_TOKEN), w: "replies" });
+    check("unrefused", plain(mini.html).includes("Connected as ada.fictional@example.test") && !/c1\./.test(mini.html), `${tag} Mini App: the address, and no session in the page`);
+    const f = [...mini.html.matchAll(/<form method="post"[^>]*>([\s\S]*?)<\/form>/g)].map((m) => Object.fromEntries([...m[1].matchAll(/<input type="hidden" name="([^"]+)" value="([^"]*)">/g)].map((x) => [x[1], x[2]]))).find((x) => x.action === "disconnect");
+    check("dead", !!f, `${tag} Mini App connected: a Disconnect control`);
+    if (f) {
+      const noInit = await w.go("", f); check("unrefused", noInit.r.status === 401 && w.conn[U].google.state === "connected", `${tag} Mini App page token without Telegram's data: refused`);
+      const other = await w.go("", { ...f, init: await signedInit("7102", T0 / 1000, BOT_TOKEN) }); check("unrefused", other.r.status === 401 && w.conn[U].google.state === "connected", `${tag} Mini App page token with another person's Telegram: refused`);
+      const ok = await w.go("", { ...f, init: await signedInit("7101", T0 / 1000, BOT_TOKEN) }); check("dead", ok.r.status === 200 && w.conn[U].google.state === "not_connected", `${tag} Mini App Disconnect: done`);
+    }
+    for (const [k, v] of jarBefore) w.jar.set(k, v); }
+  // the OAuth landing: its Disconnect carries a disconnect-only token for that provider (never a session), and it works
+  { w.conn[U] = { google: { state: "connected", email: "ada.fictional@example.test" }, microsoft: { state: "not_connected", email: null } };
+    const land = await (await connectLanding(w.d.env, { provider: "google", ok: true, denied: false, email: "ada.fictional@example.test", userId: U, scopes: ["openid"], now: T0 })!).text();
+    const f = [...land.matchAll(/<form method="post"[^>]*>([\s\S]*?)<\/form>/g)].map((m) => Object.fromEntries([...m[1].matchAll(/<input type="hidden" name="([^"]+)" value="([^"]*)">/g)].map((x) => [x[1], x[2]]))).find((x) => x.action === "disconnect");
+    check("dead", !!f, `${tag} landing: a Disconnect control`);
+    if (f) {
+      SECRETS.add(f.t);
+      const jarBefore = new Map(w.jar); w.jar.clear();
+      const start = await w.go("", { ...f, action: "start" }); check("unrefused", start.r.status >= 400 && !start.r.headers.get("location"), `${tag} the landing's token cannot start a connection (${start.r.status})`);
+      const ms = await w.go("", { ...f, provider: "microsoft" }); check("unrefused", ms.r.status >= 400, `${tag} the landing's token cannot disconnect another provider (${ms.r.status})`);
+      const ok = await w.go("", f); check("dead", ok.r.status === 200 && w.conn[U].google.state === "not_connected", `${tag} landing Disconnect: done`);
+      for (const [k, v] of jarBefore) w.jar.set(k, v);
+    }
+  }
   // the used link again, in another browser
   w.jar.clear();
   const again = await w.go(`?t=${encodeURIComponent(t)}`); connectRefused(w, again.html, again.r.status, `${tag} the used link`);

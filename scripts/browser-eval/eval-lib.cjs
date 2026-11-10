@@ -267,6 +267,8 @@ async function evalPosting(browser, item, o) {
     if (!w) { r.error = "page_unreadable"; return r; }
     if (stopWall(w)) return r; // stopped before anything was typed
     if (w.inputs < 2) { if (w.login_text) r.walls.push("login"); return r; }
+    // x-audit: a read-only look at the form as found, before anything is typed (hidden-twice.cjs reads its hidden fields).
+    if (o.onForm) await o.onForm(page, r).catch(() => {});
     // Fill with the synthetic TEST person only. Custom questions get no answer: they are what the person would be asked.
     const fr = await fillForm(page, { ats: item.provider, facts: TEST_FACTS, answers: {}, resumePath: o.resumePath });
     const qs = fr.map;

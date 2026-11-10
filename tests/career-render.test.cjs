@@ -167,9 +167,12 @@ test("R6 standard fonts, 10–12pt only, in both formats", () => {
   const r = tailoredSwe();
   const pc = Render.parseCheck({ resume: r.resume, pdf: Buffer.from(r.rendered.pdf.base64, "base64"), docx: Buffer.from(r.rendered.docx.base64, "base64") });
   assert.ok(pc.checks.pdf.fonts.every((f) => ["Helvetica", "Helvetica-Bold"].includes(f)), JSON.stringify(pc.checks.pdf.fonts));
-  assert.ok(pc.checks.pdf.fontSizesPt.every((s) => s >= 10 && s <= 12), JSON.stringify(pc.checks.pdf.fontSizesPt));
+  // R6 scoped (release 10, architect ruling 2026-11-08): body and headings 10-12 pt; the name line 10-18 pt.
+  assert.ok(pc.checks.pdf.bodySizesPt.every((s) => s >= 10 && s <= 12), JSON.stringify(pc.checks.pdf.bodySizesPt));
+  assert.ok(pc.checks.pdf.nameSizesPt.every((s) => s >= 10 && s <= 18), JSON.stringify(pc.checks.pdf.nameSizesPt));
   assert.ok(pc.checks.docx.fonts.every((f) => ["Calibri", "Arial", "Georgia", "Times New Roman", "Cambria", "Helvetica"].includes(f)), JSON.stringify(pc.checks.docx.fonts));
-  assert.ok(pc.checks.docx.fontSizesPt.every((s) => s >= 10 && s <= 12), JSON.stringify(pc.checks.docx.fontSizesPt));
+  assert.ok(pc.checks.docx.bodySizesPt.every((s) => s >= 10 && s <= 12), JSON.stringify(pc.checks.docx.bodySizesPt));
+  assert.ok(pc.checks.docx.nameSizesPt.every((s) => s >= 10 && s <= 18), JSON.stringify(pc.checks.docx.nameSizesPt));
 });
 
 test("R7 one date format: 'Mon YYYY' is clean; numeric/mixed date formats make the parse-check WARN", () => {

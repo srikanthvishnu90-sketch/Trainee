@@ -2,6 +2,8 @@
 // `facts` is the person's CONFIRMED facts (the same source trainee-telegram's job cards use: supabaseConfirmedFacts), so the
 // list page's Apply runs the posting screen's knock-outs on real facts instead of holding every posting that needs one.
 import { supabaseTapStore } from "../_shared/channel_card_tap.ts";
+import { recordsFamilies, supabaseDigestWriter } from "../_shared/file_family_actions.ts";
+import { supabaseRecords } from "../_shared/file_family_records.ts";
 import { supabaseEventStore } from "../_shared/agent/timeline.ts";
 import { supabaseCardStore } from "../_shared/career_apply_cards.ts";
 import { supabaseAccountStamp, supabaseConfirmedFacts } from "../_shared/telegram_jobs.ts";
@@ -38,6 +40,7 @@ export function buildFileDeps(admin: any, env: FileDeps["env"], now: () => numbe
     // Item 6: each File family's records and posts (file_family_serve.ts FamilyRecords). One line per family; each builder adds only its
     // own line (an absent family loads nothing: a ref File shows the C.24 error state, and no post is dispatched).
     familyRecords: {
+      ...recordsFamilies({ read: supabaseRecords(admin), digest: supabaseDigestWriter(admin), now, timeZone: supabaseTimeZone(admin) }), // f-s5: F-01 F-02 F-03 F-08 F-13 F-14 F-14n F-15
       // S1: the live Application review, read from the prepared application and its record on every GET (file_family_review.ts).
       "F-09": (() => { const st = supabaseFileStore(admin); return reviewRecords({ review: (u) => supabaseReviewDeps(admin, u, env), current: (u, j) => st.prepared(u, j), appRow: (u, j, url) => st.appRow(u, j, url), cards: supabaseCardStore(admin), account: supabaseAccountStamp(admin), events: supabaseEventStore(admin) }, now); })(),
       // S3: the search plan and materials Files, from career_search_plans and career_material_versions (file_family_records_materials.ts).

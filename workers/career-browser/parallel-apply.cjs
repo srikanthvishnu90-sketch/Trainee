@@ -308,7 +308,22 @@ async function attempt(browser, p, opts, timing) {
       }
       return false;
     });
-    const hasForm = async () => !!(await page.$(FIELD_SEL)) && (await markSubmit());
+    // A form shown in steps (Breezy: strict benchmark run 42735825405, 4 postings): one visible "Continue" (type=button, so pressing
+    // it posts nothing; the page's own script shows the next step) with the form's Submit drawn but hidden until the last step.
+    // Marked data-upmore-next. Two such controls, a submit-typed one, or no hidden Submit beside it: not a step form.
+    const markNext = () => page.evaluate(() => {
+      const vis = (e) => !!(e.offsetWidth || e.offsetHeight) && getComputedStyle(e).visibility !== "hidden";
+      for (const e of document.querySelectorAll("[data-upmore-next]")) e.removeAttribute("data-upmore-next");
+      const next = /^\s*(continue|next|next step|weiter|suivant|siguiente|volgende|avanti|pr[oó]ximo)\s*[›»>→]?\s*$/i;
+      const submitWord = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$/i;
+      for (const f of [...document.querySelectorAll("form")].filter((x) => x.querySelector("input, select, textarea"))) {
+        const nexts = [...f.querySelectorAll("button, [role=button], input[type=button]")].filter((b) => vis(b) && next.test(b.innerText || b.value || ""));
+        const hiddenSubmit = [...f.querySelectorAll("button, input[type=submit], input[type=button]")].some((b) => !vis(b) && submitWord.test(b.innerText || b.value || ""));
+        if (nexts.length === 1 && hiddenSubmit && (nexts[0].tagName !== "BUTTON" || nexts[0].getAttribute("type") === "button") && nexts[0].getAttribute("type") !== "submit") { nexts[0].setAttribute("data-upmore-next", "1"); return true; }
+      }
+      return false;
+    });
+    const hasForm = async () => !!(await page.$(FIELD_SEL)) && ((await markSubmit()) || (await markNext()));
     // A board whose form lives at its own apply address one GET away (Lever /apply, Ashby /application, ...): loaded once,
     // through the same host rules, and checked like the first load.
     if (!(await page.waitForSelector(FIELD_SEL, { timeout: 5000 }).catch(() => null))) {
@@ -332,7 +347,25 @@ async function attempt(browser, p, opts, timing) {
     if (!(await hasForm())) throw new NeedsUser("no_application_form_found", p.url);
     // The page's own questions, answered only from the approved facts / answers (ats-fill.cjs), each read back. A required
     // question with no confirmed answer, or one that could not be set and checked, stops the run: the person is asked.
-    const fr = await fillForm(page, { ats: p.ats, facts: p.facts, answers: p.answers || {}, resumePath: p.resume.path });
+    // A step form is filled one step at a time: each step's questions answered and read back, then its one Continue pressed, until
+    // the step with the Submit control. A step with anything handed back stops there, as on a one-page form. At most 8 steps.
+    const fr = { map: [], filled: [], needsUser: [], failed: [], invalid: [] };
+    for (let step = 0; ; step++) {
+      const r = await fillForm(page, { ats: p.ats, facts: p.facts, answers: p.answers || {}, resumePath: p.resume.path });
+      for (const k of Object.keys(fr)) fr[k].push(...(r[k] || []));
+      if (fr.needsUser.length || fr.invalid.length || fr.failed.length || (await markSubmit())) break;
+      if (step >= 7 || !(await markNext())) throw new NeedsUser("no_submit_control", p.url);
+      onAllowedHost();
+      { const shown = await botCheck(page); if (shown) { const e = new NeedsUser("bot_check", p.url); e.detail = shown; throw e; } }
+      await stopAtWall(page, p.url);
+      const before = await page.evaluate(() => [...document.querySelectorAll("input, select, textarea")].filter((e) => e.offsetWidth || e.offsetHeight).length + "|" + (document.body.innerText || "").length);
+      await page.click("[data-upmore-next]");
+      const moved = await page.waitForFunction((b) => [...document.querySelectorAll("input, select, textarea")].filter((e) => e.offsetWidth || e.offsetHeight).length + "|" + (document.body.innerText || "").length !== b, before, { timeout: 5000 }).then(() => true, () => false);
+      // The page did not move on (its own check held the step back): handed back, never pressed again.
+      if (!moved) { const e = new NeedsUser("field_not_filled", "step_did_not_advance"); e.needs = [{ label: "step_did_not_advance", reason: "form_rejects_value" }]; throw e; }
+      await page.waitForTimeout(300);
+      onAllowedHost();
+    }
     if (fr.needsUser.length) {
       const first = fr.needsUser[0];
       const e = new NeedsUser(first.reason === "no_confirmed_answer" || /^(agreement|eeo|upload)_/.test(first.reason) || first.reason === "no_resume" ? "missing_required_answer" : "field_not_filled", first.label);

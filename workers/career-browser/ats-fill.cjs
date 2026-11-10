@@ -41,6 +41,9 @@ function EXTRACT() {
     }
     return null;
   };
+  // Breezy asks each custom question in its own list item, the question in that item's one heading (strict benchmark run
+  // 42735825405: "section_1760116069653_question_0" was all the runner could name).
+  const itemHeading = (el) => { const li = el.closest("li"); if (!li) return null; const hs = li.querySelectorAll("h3"); return hs.length === 1 && !hs[0].contains(el) && nodeText(hs[0]) ? hs[0] : null; };
   const labelNode = (el) => {
     if (el.id) { const l = rootOf(el).querySelector(`label[for="${CSS.escape(el.id)}"]`); if (l && nodeText(l)) return l; }
     const lb = el.getAttribute("aria-labelledby");
@@ -49,10 +52,12 @@ function EXTRACT() {
     if (cl && nodeText(cl)) return cl;
     const g = groupLabelNode(el);
     if (g) return g;
-    return null;
+    return itemHeading(el);
   };
   const isReq = (els, node) => {
     if (els.some((e) => e.required || e.getAttribute("aria-required") === "true")) return true;
+    // Workable's dropdown: the visible combobox carries no flag; the hidden input that holds its value in the same widget is required.
+    if (els.some((e) => e.getAttribute("role") === "combobox" && e.closest("[data-ui]") && e.closest("[data-ui]").querySelector("input[required][aria-hidden='true']"))) return true;
     if (!node) return false;
     if (/[*✱]\s*$/.test(squash(node.textContent))) return true;
     return /required/i.test(node.className || "") || !!node.querySelector(".required, [class*='required' i]");
@@ -70,8 +75,10 @@ function EXTRACT() {
 
   const out = [];
   const seen = new Set();
-  let qn = 0;
-  const push = (d) => { d.q = qn++; out.push(d); return d.q; };
+  // A control keeps the tag an earlier read gave it, and new ones are numbered after every tag on the page: a form shown in steps
+  // (Breezy) is read once per step, and a question filled on step 1 must still be the one its tag names at the last look.
+  let qn = 1 + Math.max(-1, ...deepAll(document, "[data-upmore-q]").map((e) => Number(e.getAttribute("data-upmore-q")) || 0));
+  const push = (d, el) => { const had = el && el.getAttribute("data-upmore-q"); d.q = had !== null && had !== undefined && had !== "" ? Number(had) : qn++; out.push(d); return d.q; };
   const all = deepAll(scope, "input, select, textarea");
 
   // Yes/No button pairs (Ashby): the hidden checkbox inside them is not a question of its own.
@@ -79,7 +86,7 @@ function EXTRACT() {
     const btns = [...box.querySelectorAll("button")];
     const node = groupLabelNode(box);
     const label = node ? nodeText(node) : "";
-    const q = push({ kind: "buttons", label, required: isReq([], node), eeo: eeoOf(box, label), options: btns.map((b, i) => ({ i, label: squash(b.textContent) })) });
+    const q = push({ kind: "buttons", label, required: isReq([], node), eeo: eeoOf(box, label), options: btns.map((b, i) => ({ i, label: squash(b.textContent) })) }, btns[0]);
     btns.forEach((b, i) => { b.setAttribute("data-upmore-q", q); b.setAttribute("data-upmore-o", i); });
     box.querySelectorAll("input").forEach((x) => seen.add(x));
   }
@@ -90,7 +97,10 @@ function EXTRACT() {
     if (["hidden", "submit", "button", "image", "reset"].includes(type)) continue;
     if (type === "search" && !shown(el)) continue;
     if (!shown(el)) continue;
-    if (el.closest("[aria-hidden='true'], [hidden]") && type !== "file") continue;
+    // Workable draws each choice as a role=radio option around its own radio input, which it marks aria-hidden (strict benchmark
+    // run 42735825405: every Yes/No question, e.g. "Are you authorized to work in the U.S.?"). That input is the question's control.
+    const drawnChoice = (type === "radio" || type === "checkbox") && el.closest("[role=radio], [role=checkbox]") && el.closest("[role=radiogroup], [role=group], fieldset");
+    if (el.closest("[aria-hidden='true'], [hidden]") && type !== "file" && !(drawnChoice && !el.closest("[role=radio], [role=checkbox]").closest("[aria-hidden='true'], [hidden]"))) continue;
     // A phone widget's country flag picker takes its dial code from the number typed; an "autofill from resume" drop zone is
     // the site's own shortcut, not a question. Neither is a question we fill.
     if (el.closest(".iti__country-container, .iti__flag-container, .iti__dropdown-content") || (el.getAttribute("role") === "combobox" && el.closest(".iti") && !el.classList.contains("iti__tel-input"))) continue;
@@ -99,9 +109,11 @@ function EXTRACT() {
       const fs = el.closest("fieldset");
       const mates = all.filter((x) => x.type === type && !seen.has(x) && (fs ? x.closest("fieldset") === fs : x.name === el.name));
       mates.forEach((x) => seen.add(x));
-      const node = (fs && fs.querySelector("legend")) || groupLabelNode(el);
+      const byId = (ids) => (ids || "").split(/\s+/).map((id) => id && (rootOf(el).getElementById ? rootOf(el).getElementById(id) : document.getElementById(id))).find((n) => n && nodeText(n));
+      const group = el.closest("[role=radiogroup], [role=group]");
+      const node = (fs && fs.querySelector("legend")) || (group && byId(group.getAttribute("aria-labelledby"))) || groupLabelNode(el) || itemHeading(el);
       const label = node ? nodeText(node) : clean(el.name);
-      const q = push({ kind: type === "radio" ? "radio" : "checkgroup", label, name: el.name || "", required: isReq(mates, node), eeo: eeoOf(el, label), options: mates.map((m, i) => ({ i, label: optLabel(m) })) });
+      const q = push({ kind: type === "radio" ? "radio" : "checkgroup", label, name: el.name || "", required: isReq(mates, node), eeo: eeoOf(el, label), options: mates.map((m, i) => ({ i, label: optLabel(m) })) }, mates[0]);
       mates.forEach((m, i) => { m.setAttribute("data-upmore-q", q); m.setAttribute("data-upmore-o", i); });
       continue;
     }
@@ -114,7 +126,7 @@ function EXTRACT() {
       const hay = `${label} ${el.name} ${el.id}`;
       d = { ...base, kind: "file", accept: el.accept || "", role: /cover/i.test(hay) ? "cover" : /resume|\bcv\b|curriculum/i.test(hay) ? "resume" : "other" };
     } else if (el.tagName === "SELECT") {
-      const opts = [...el.options].map((o, i) => ({ i, label: squash(o.textContent), value: o.value })).filter((o) => o.value !== "" && !/^(please )?select\b|^choose\b|^--/i.test(o.label));
+      const opts = [...el.options].map((o, i) => ({ i, label: squash(o.textContent), value: o.value })).filter((o) => o.value !== "" && !/^\? .* \?$/.test(o.value) && !/^(please )?select\b|^choose\b|^--/i.test(o.label));
       d = { ...base, kind: "select", options: opts };
     } else if (el.getAttribute("role") === "combobox") {
       d = { ...base, kind: "combobox" };
@@ -125,7 +137,7 @@ function EXTRACT() {
     } else {
       d = { ...base, kind: "text", inputType: type };
     }
-    const q = push(d);
+    const q = push(d, el);
     el.setAttribute("data-upmore-q", q);
   }
   return out;
@@ -140,7 +152,8 @@ function STATE(qs) {
     const el = els[0];
     if (!el) return { q: d.q, filled: false, text: "", gone: true };
     switch (d.kind) {
-      case "select": { const o = el.options[el.selectedIndex]; const ph = !el.value; return { q: d.q, filled: !ph, text: ph ? "" : squash(o && o.textContent) }; }
+      // AngularJS (Breezy) shows an unset model as its own "? undefined:undefined ?" option: nothing is chosen.
+      case "select": { const o = el.options[el.selectedIndex]; const ph = !el.value || /^\? .* \?$/.test(el.value); return { q: d.q, filled: !ph, text: ph ? "" : squash(o && o.textContent) }; }
       case "radio": case "checkgroup": { const on = els.filter((e) => e.checked); return { q: d.q, filled: on.length > 0, picked: on.map((e) => e.getAttribute("data-upmore-o")) }; }
       case "buttons": { const on = els.filter((e) => e.getAttribute("aria-pressed") === "true"); return { q: d.q, filled: on.length > 0, picked: on.map((e) => e.getAttribute("data-upmore-o")) }; }
       case "checkbox": return { q: d.q, filled: !!el.checked, text: el.checked ? "checked" : "" };
@@ -148,7 +161,8 @@ function STATE(qs) {
       case "combobox": {
         const w = el.closest(".select-shell, .select__container, .field-wrapper, [class*='combobox' i]") || el.parentElement;
         const v = w && w.querySelector(".select__single-value, [class*='single-value' i], [class*='singleValue' i], [data-combobox-value]");
-        const t = squash(v ? v.textContent : "");
+        // Workable's dropdown is a read-only box that shows the chosen option as its own value (never typed into).
+        const t = squash(v ? v.textContent : el.readOnly ? el.value : "");
         return { q: d.q, filled: !!t, text: t };
       }
       default: return { q: d.q, filled: String(el.value || "").trim() !== "", text: String(el.value || "") };

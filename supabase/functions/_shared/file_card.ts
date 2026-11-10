@@ -13,10 +13,15 @@
 // at release 10: moving it into RELEASE_FLAGS is the architect's amendment of tests/architect/release-flags.test.ts (D-049).
 import type { Button, DeliveryAdapter, SendOptions, SendResult } from "./channel_adapters.ts";
 import { escapeHtml } from "./channel_voice.ts";
-import { FAMILIES, type FamilyId } from "./file_family.ts";
-import type { FileRecord } from "./file_kinds.ts";
 import { fileAppFor, verifyFileToken } from "./file_link.ts";
-import type { Spec } from "./results_spec.ts";
+
+// The delivery run (trainee-deliver) imports this module, so it imports nothing heavy: the family ids and names, a File record and
+// a role's state are written here as the few fields the card reads (file_family.ts FAMILIES, file_kinds.ts FileRecord,
+// results_spec.ts Spec); tests/architect/file-card.test.ts holds them to those modules.
+export type FamilyId = "F-01" | "F-02" | "F-03" | "F-04" | "F-05" | "F-06" | "F-07" | "F-08" | "F-09" | "F-10" | "F-11" | "F-12" | "F-13" | "F-14" | "F-15";
+// deno-lint-ignore no-explicit-any
+export interface CardRecord { kind: string; data: any; state: Record<string, any> | null; created_at: number }
+export interface RoleSpec { bucket: "ready" | "needs" | "preparing" | "notprep" | "progress" | "done" | "blocked"; key: string }
 
 export const FILE_CARD_ENV = "CAREER_FILE_CARD";
 export const fileCardOn = (env: { get(k: string): string | undefined }) => (env.get(FILE_CARD_ENV) ?? "").trim().toLowerCase() === "on";
@@ -32,24 +37,24 @@ const TONE: Record<CardBucket, ChipTone> = { ready: "good", review: "plum", need
 const LINE: Record<CardBucket, string> = { ready: "ready", review: "waiting for your yes", needs: "need answers", progress: "in progress", done: "done", closed: "closed" };
 const CHIP: Record<CardBucket, string> = { ready: "ready", review: "for your yes", needs: "need you", progress: "in progress", done: "done", closed: "closed" };
 
-interface FamilyCard { kicker: string; noun: [string, string]; button: string; line?: Partial<Record<CardBucket, string>> }
-// The kicker is the family's own header in caps (file_family.ts FAMILIES); the button names what the File is for.
+interface FamilyCard { name: string; kicker: string; noun: [string, string]; button: string; line?: Partial<Record<CardBucket, string>> }
+// name: the family's name (file_family.ts FAMILIES); the kicker is the family's own header in caps; the button names what the File is for.
 export const FAMILY_CARD: Record<FamilyId, FamilyCard> = {
-  "F-01": { kicker: "CAREER BRIEF", noun: ["item", "items"], button: "Open brief" },
-  "F-02": { kicker: "PROFILE FACTS", noun: ["fact", "facts"], button: "Review facts" },
-  "F-03": { kicker: "PATH COMPARISON", noun: ["path", "paths"], button: "Compare paths" },
-  "F-04": { kicker: "SEARCH PLAN", noun: ["step", "steps"], button: "Review plan" },
-  "F-05": { kicker: "ROLES FILE", noun: ["role", "roles"], button: "Review roles", line: { ready: "ready to prepare" } },
-  "F-06": { kicker: "ROLE WORKSPACE", noun: ["requirement", "requirements"], button: "Open role" },
-  "F-07": { kicker: "MATERIALS STUDIO", noun: ["document", "documents"], button: "Review materials" },
-  "F-08": { kicker: "ANSWER LIBRARY", noun: ["answer", "answers"], button: "Review answers" },
-  "F-09": { kicker: "APPLICATION REVIEW", noun: ["answer", "answers"], button: "Review application" },
-  "F-10": { kicker: "BATCH FILE", noun: ["role", "roles"], button: "Review batch", line: { ready: "ready to prepare" } },
-  "F-11": { kicker: "PIPELINE", noun: ["application", "applications"], button: "Open pipeline" },
-  "F-12": { kicker: "MESSAGE REVIEW", noun: ["message", "messages"], button: "Review message" },
-  "F-13": { kicker: "INTERVIEW HUB", noun: ["item", "items"], button: "Open interview hub" },
-  "F-14": { kicker: "WEEKLY BRIEF", noun: ["item", "items"], button: "Open weekly brief" },
-  "F-15": { kicker: "OFFER COMPARISON", noun: ["offer", "offers"], button: "Compare offers" },
+  "F-01": { name: "Career brief", kicker: "CAREER BRIEF", noun: ["item", "items"], button: "Open brief" },
+  "F-02": { name: "Profile facts", kicker: "PROFILE FACTS", noun: ["fact", "facts"], button: "Review facts" },
+  "F-03": { name: "Path comparison", kicker: "PATH COMPARISON", noun: ["path", "paths"], button: "Compare paths" },
+  "F-04": { name: "Search plan", kicker: "SEARCH PLAN", noun: ["step", "steps"], button: "Review plan" },
+  "F-05": { name: "Roles shortlist", kicker: "ROLES FILE", noun: ["role", "roles"], button: "Review roles", line: { ready: "ready to prepare" } },
+  "F-06": { name: "Role workspace", kicker: "ROLE WORKSPACE", noun: ["requirement", "requirements"], button: "Open role" },
+  "F-07": { name: "Materials studio", kicker: "MATERIALS STUDIO", noun: ["document", "documents"], button: "Review materials" },
+  "F-08": { name: "Answer library", kicker: "ANSWER LIBRARY", noun: ["answer", "answers"], button: "Review answers" },
+  "F-09": { name: "Application review", kicker: "APPLICATION REVIEW", noun: ["answer", "answers"], button: "Review application" },
+  "F-10": { name: "Batch File", kicker: "BATCH FILE", noun: ["role", "roles"], button: "Review batch", line: { ready: "ready to prepare" } },
+  "F-11": { name: "Pipeline", kicker: "PIPELINE", noun: ["application", "applications"], button: "Open pipeline" },
+  "F-12": { name: "People and messages", kicker: "MESSAGE REVIEW", noun: ["message", "messages"], button: "Review message" },
+  "F-13": { name: "Interview hub", kicker: "INTERVIEW HUB", noun: ["item", "items"], button: "Open interview hub" },
+  "F-14": { name: "Plan and weekly brief", kicker: "WEEKLY BRIEF", noun: ["item", "items"], button: "Open weekly brief" },
+  "F-15": { name: "Offer comparison", kicker: "OFFER COMPARISON", noun: ["offer", "offers"], button: "Compare offers" },
 };
 
 export interface CardInput { family: FamilyId; title: string; batch?: string | null; updatedAt: number; tz?: string | null; items: readonly { state: CardBucket }[]; url: string; webApp?: string | null }
@@ -86,7 +91,7 @@ export function fileCard(i: CardInput): FileCardData | null {
     : going ? `${say(going)} ${noun(going)} ${going === 1 ? "is" : "are"} in progress. Nothing needs you right now.`
     : "Nothing needs you right now.";
   const batch = clean(i.batch, 24).toUpperCase();
-  return { type: "file_card", family: i.family, kicker: batch ? `${f.kicker} - ${batch}` : f.kicker, title: clean(i.title, 80) || FAMILIES[i.family].name, freshness: line,
+  return { type: "file_card", family: i.family, kicker: batch ? `${f.kicker} - ${batch}` : f.kicker, title: clean(i.title, 80) || f.name, freshness: line,
     counts, total, chips, button: { label: f.button, url: i.url, webApp: i.webApp && /^https:\/\/\S+$/.test(i.webApp) ? i.webApp : null }, caption: CARD_CAPTION, followup };
 }
 
@@ -118,7 +123,7 @@ export function cardHtml(c: FileCardData): string {
 
 // ---------------------------------------------------------------- what a File's items are
 // Roles (F-05, F-10): one bucket per role, from its one primary state (results_spec.ts specOf).
-export function bucketOfRole(s: Pick<Spec, "bucket" | "key">): CardBucket {
+export function bucketOfRole(s: RoleSpec): CardBucket {
   switch (s.bucket) {
     case "notprep": return "ready";
     case "ready": return "review";
@@ -130,7 +135,7 @@ export function bucketOfRole(s: Pick<Spec, "bucket" | "key">): CardBucket {
 }
 // A stored File of the other kinds: its family and its items' states, from the record only. null: the kind has no family card
 // (the research brief), and its link goes as before.
-export function cardSourceOf(rec: FileRecord): { family: FamilyId; title: string; items: { state: CardBucket }[] } | null {
+export function cardSourceOf(rec: CardRecord): { family: FamilyId; title: string; items: { state: CardBucket }[] } | null {
   // deno-lint-ignore no-explicit-any
   const d: any = rec.data ?? {}, st = rec.state ?? {};
   const arr = (v: unknown) => (Array.isArray(v) ? v : []);
@@ -198,7 +203,7 @@ export function withFileCards<A extends DeliveryAdapter>(adapter: A, resolve: Ca
 // The resolver the outbox uses: a link counts only when it is one of OUR File links (TRAINEE_FILE_BASE_URL, signature checked, a
 // link token, not expired), and the card is drawn from that link's own record, read for the account in the token. A File that is
 // missing, expired, revoked or of a kind with no family card: null, the link goes alone as before.
-export function fileCardResolver(o: { env: { get(k: string): string | undefined }; now: () => number; files: { get(userId: string, id: string): Promise<{ state: string; rec?: FileRecord }> } }): CardResolver {
+export function fileCardResolver(o: { env: { get(k: string): string | undefined }; now: () => number; files: { get(userId: string, id: string): Promise<{ state: string; rec?: CardRecord }> } }): CardResolver {
   return async (link) => {
     const base = (o.env.get("TRAINEE_FILE_BASE_URL") || "").trim();
     if (!/^https:\/\/[^\s?#]+$/.test(base) || !link.startsWith(`${base}?t=`)) return null;

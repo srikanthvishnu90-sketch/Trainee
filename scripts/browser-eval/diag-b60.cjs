@@ -19,8 +19,14 @@ function DUMP(names) {
   for (const n of names) {
     const el = [...document.querySelectorAll("input, select, textarea")].find((e) => e.name === n || e.id === n);
     if (!el) { out.named.push({ n, html: "not found" }); continue; }
-    let a = el; for (let i = 0; i < 4 && a.parentElement; i++) { a = a.parentElement; if (a.tagName === "LI" && a.querySelector("h3,legend,label")) break; }
-    out.named.push({ n, html: cutp(a.outerHTML, 2000) });
+    const path = []; let a = el;
+    for (let i = 0; i < 9 && a.parentElement; i++) {
+      const par = a.parentElement, prev = [];
+      for (let c = a.previousElementSibling; c && prev.length < 4; c = c.previousElementSibling) prev.push(`${c.tagName}.${cutp(c.className, 40)}[${cutp(c.getAttribute("ng-bind-html") || c.getAttribute("ng-bind") || "", 40)}] "${cutp(c.innerText, 120)}"`);
+      path.push(`${par.tagName}.${cutp(par.className, 60)} <- prev: ${prev.join(" || ")}`);
+      a = par;
+    }
+    out.named.push({ n, tag: el.tagName + "." + el.type + " id=" + el.id, path });
   }
   return out;
 }

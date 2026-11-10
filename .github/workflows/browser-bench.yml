@@ -25,8 +25,6 @@ jobs:
       - name: Diagnose (dry run)
         run: |
           node scripts/browser-eval/diag-b60.cjs \
-            https://otonomee.jobs.personio.de/job/2881499 https://youhamburg.jobs.personio.de/job/2305011 https://eqqo-gmbh-1.jobs.personio.de/job/1968877 \
-            https://job-boards.greenhouse.io/calm/jobs/8912981002 \
             https://slim-in.breezy.hr/p/10b30ab33f7d-psychologist-intervention-delivery https://montage-marketing.breezy.hr/p/83dfe68a44c501-associate-client-success \
-            https://arch.breezy.hr/p/d82dc84842bf-devops-engineer https://molecular-sound.breezy.hr/p/df101307b9f7-head-of-production-maternity-cover \
-            https://jobs.lever.co/lendbuzz/dea174f7-a905-442d-a684-bca2b341fb63 https://jobs.lever.co/confluera/60caa9d6-f12b-4e0e-b359-db7e60644bc5
+            https://arch.breezy.hr/p/d82dc84842bf-devops-engineer https://associated-services-inspections.breezy.hr/p/913460a2bba7-san-diego-ca-loss-control-field-inspector-independent-contractor \
+            https://youhamburg.jobs.personio.de/job/2305011

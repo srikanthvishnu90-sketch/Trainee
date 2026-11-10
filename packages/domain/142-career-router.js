@@ -2269,7 +2269,8 @@ const CareerRouter = (() => {
         const mail = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/.exec(seg);
         if (mail && !h.email) h.email = mail[0];
         else if (url) { const key = (/^([A-Za-z]+)\s*:/.exec(seg) || [null, "link"])[1].toLowerCase(); if (!h.links[key]) h.links[key] = url[0].replace(/[.,;]+$/, ""); }
-        else if (!h.location && /^[\p{L} .'-]+,\s*[\p{L} .'-]+(?:\s*\(TEST\))?$/u.test(seg)) h.location = seg;
+        // H2H fix 5 (item 3, check 8): the neighbourhood in parentheses is part of the place ("Chicago, IL (Lincoln Park)").
+        else if (!h.location && /^[\p{L} .'-]+,\s*[\p{L} .'-]+(?:\s*\([\p{L} .'-]{2,40}\))?$/u.test(seg)) h.location = seg;
       }
     }
     return h;

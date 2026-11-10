@@ -92,6 +92,7 @@ export function searchSentence(raw: string): string {
   return all.find((s) => JOB_NOUN.test(s) && /\b(?:find|search|show me|look(?:ing)? for|get me|pull up|list|want|need|include|add)\b/i.test(s))
     ?? all.find((s) => JOB_NOUN.test(s)) ?? String(raw ?? "");
 }
+const COUNT_WORD = /^(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|dozen|few|couple|several)$/;
 export function searchTextOf(message: string): SearchText {
   const raw = String(message ?? "").replace(/\s+/g, " ").trim();
   let t = lc(raw);
@@ -126,6 +127,9 @@ export function searchTextOf(message: string): SearchText {
   t = t.replace(/(?<![\p{L}\p{N}])(?:in\s+)?(?:the\s+)?(?:u\.\s?s\.?(?:a\.?)?|us|usa|united states|america)(?![\p{L}\p{N}])/gu, " ")
     .replace(/\b(?:the\s+)?(?:greater\s+)?(?:area|metro(?:politan)?|suburbs?|region|nationwide|anywhere)\b/g, " ");
   const words = t.split(/[^a-z0-9+#-]+/).filter((w) => w && !ROLE_NOISE.has(w) && !/^\d+$/.test(w)).map((w) => EXPAND[w] ?? w);
+  // H2H fix 3 (docs/architect/INSTINCT-HEAD-TO-HEAD.md C2 turn 1): "find me five data analyst internships" is a count, as "find me
+  // 5" is; the count word leading the role was searched as part of the title ("five data analyst"), which no posting holds.
+  while (words.length > 1 && COUNT_WORD.test(words[0])) words.shift();
   return { role: [...new Set(words.join(" ").split(" "))].join(" ").trim(), place, remote, limits };
 }
 

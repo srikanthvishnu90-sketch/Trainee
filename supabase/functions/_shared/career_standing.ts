@@ -123,10 +123,11 @@ const missing = (s: Standing, which: ("mail" | "tracker")[]) => which.filter((w)
 
 // The queue's own wording for the ask, byte for byte (career_apply_status.ts): for a company asked in a phrasing that turn
 // does not parse ("where do I stand with Acme"), the same one-employer wording through the ask it does.
-const queueText = (message: string, s: Standing, company: string | null, now: number) =>
-  (statusReply(message, s.jobs, now) ?? statusReply(company ? `did my application to ${company} go through` : "where are my applications", s.jobs, now))!.reply;
+const queueReply = (message: string, s: Standing, company: string | null, now: number) =>
+  (statusReply(message, s.jobs, now) ?? statusReply(company ? `did my application to ${company} go through` : "where are my applications", s.jobs, now))!;
 function statusText(message: string, s: Standing, company: string | null, now: number): string {
-  const lines = [queueText(message, s, company, now)];
+  const base = queueReply(message, s, company, now);
+  const lines = [base.reply];
   if (company) {
     const { tracker, mail } = of(s, company);
     for (const a of tracker) lines.push(`You told Trainee: ${trackerLine(a)}${a.role ? ` (${a.role})` : ""}.`);
@@ -144,6 +145,8 @@ function statusText(message: string, s: Standing, company: string | null, now: n
     if (s.receipts.length) lines.push(`Receipts on record for: ${s.receipts.slice(0, 8).join(", ")}. Ask "show me the receipt for ${s.receipts[0]}" to see exactly what was sent.`);
   }
   lines.push(...missing(s, ["tracker", "mail"]));
+  // Item 12: one next action, last, from the queue's record (career_apply_status.ts nextAction); none when it was unread.
+  if (base.next) lines.push(base.next);
   return lines.join("\n");
 }
 

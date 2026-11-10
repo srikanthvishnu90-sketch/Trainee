@@ -20,6 +20,23 @@ export interface AppRow {
   id: string; company: string; state: string; reason?: string | null; confirmation_id?: string | null;
   email_confirmed_at?: string | null; created_at: string; updated_at: string; title?: string | null; url?: string | null;
   job_id?: string | null;
+  // Item 12 (tracking): the message that confirmed it (WO-039; the database sets it with email_confirmed_at, never alone), and
+  // the employer's latest answer about this application, from the mail run's record (career_mail_events under job:<id>, not
+  // flagged): a rejection, an interview or assessment invitation, an offer, or a reply. A receipt is not an answer.
+  confirmation_mail_hash?: string | null;
+  employer?: EmployerAnswer | null;
+}
+export interface EmployerAnswer { kind: "rejection" | "interview" | "assessment" | "offer" | "recruiter_reply"; at: string }
+export const ANSWER_KINDS: EmployerAnswer["kind"][] = ["rejection", "interview", "assessment", "offer", "recruiter_reply"];
+// The latest answer per application, from the mail events (application_ref job:<id>, flagged ones left out).
+export function employerAnswers(events: { application_ref: string; kind: string; mail_at: string; flagged?: boolean | null }[]): Map<string, EmployerAnswer> {
+  const out = new Map<string, EmployerAnswer>();
+  for (const e of events) {
+    if (e.flagged || !String(e.application_ref ?? "").startsWith("job:") || !(ANSWER_KINDS as string[]).includes(e.kind) || !Number.isFinite(Date.parse(e.mail_at))) continue;
+    const k = e.application_ref.slice(4), had = out.get(k);
+    if (!had || Date.parse(e.mail_at) >= Date.parse(had.at)) out.set(k, { kind: e.kind as EmployerAnswer["kind"], at: e.mail_at });
+  }
+  return out;
 }
 export type ReadApplications = (userId: string) => Promise<AppRow[]>;
 
@@ -27,10 +44,15 @@ export type ReadApplications = (userId: string) => Promise<AppRow[]>;
 // deno-lint-ignore no-explicit-any
 export function supabaseApplications(admin: any): ReadApplications {
   return async (userId) => {
-    const r = await admin.from("career_apply_jobs").select("id,job_id,company,url,state,reason,confirmation_id,email_confirmed_at,created_at,updated_at,title:payload->>title")
+    const r = await admin.from("career_apply_jobs").select("id,job_id,company,url,state,reason,confirmation_id,email_confirmed_at,confirmation_mail_hash,created_at,updated_at,title:payload->>title")
       .eq("user_id", userId).order("updated_at", { ascending: false }).limit(500);
     if (r.error) throw new Error(`read the applications: ${r.error.message}`);
-    return (r.data ?? []) as AppRow[];
+    // Item 12: what each employer answered. Unread, the applications are unread too: a rejection must never read as "confirmed".
+    const e = await admin.from("career_mail_events").select("application_ref,kind,mail_at,flagged").eq("user_id", userId).like("application_ref", "job:%")
+      .in("kind", ANSWER_KINDS).order("mail_at", { ascending: false }).limit(2000);
+    if (e.error) throw new Error(`read the employers' answers: ${e.error.message}`);
+    const answers = employerAnswers(e.data ?? []);
+    return ((r.data ?? []) as AppRow[]).map((a) => ({ ...a, employer: answers.get(String(a.id)) ?? null }));
   };
 }
 
@@ -135,13 +157,23 @@ export function reasonWords(state: string, reason: string | null | undefined): s
   if (state === "needs_user") return "it needs you at the employer's page; it was not sent";
   return `it stopped before it could be sent; ${NOTHING_SENT}`;
 }
+// Item 12: the employer's answer, in the person's words; an application they answered was received, whatever it said.
+const ANSWER_WORDS: Record<EmployerAnswer["kind"], string> = {
+  rejection: "turned it down", interview: "invited you to interview", assessment: "sent you an assessment", offer: "made you an offer", recruiter_reply: "wrote back to you",
+};
+const SENT_STATES = new Set(["confirmed", "submitted_unconfirmed", "unknown_outcome", "driving"]);
+const answered = (a: AppRow) => (a.employer && SENT_STATES.has(a.state) && ANSWER_WORDS[a.employer.kind] ? a.employer : null);
 export function statusLine(a: AppRow): string {
   const who = a.company || "An employer", name = `${who}${a.title ? ` (${a.title})` : ""}`, on = date(a.updated_at), conf = a.confirmation_id;
+  // Item 12: their latest answer is what stands, never "confirmed it" over a rejection or an interview invitation.
+  const ans = answered(a);
+  if (ans) return `${name}: submitted; ${who} ${ANSWER_WORDS[ans.kind]} (their email${date(ans.at) ? `, ${date(ans.at)}` : ""}).`;
   switch (a.state) {
     case "confirmed":
       // Architect ruling 13-Obs (2026-11-09, D-024): a page reference alone is never "confirmed by the employer"; only their
-      // email matched to the row is (career_apply_confirm_as sets email_confirmed_at with the mail's hash).
-      if (!a.email_confirmed_at) return `${name}: submitted; ${conf ? `their page showed ${conf}; ` : ""}${who} has not confirmed it by email yet.`;
+      // email matched to the row is (career_apply_confirm_as sets email_confirmed_at with the mail's hash; item 12: a hash read
+      // back as missing is no confirmation either).
+      if (!a.email_confirmed_at || a.confirmation_mail_hash === null) return `${name}: submitted; ${conf ? `their page showed ${conf}; ` : ""}${who} has not confirmed it by email yet.`;
       return `${name}: submitted, and ${who} confirmed it${conf ? ` (confirmation ${conf})` : ""}.`;
     case "submitted_unconfirmed":
       return `${name}: submitted${on ? ` on ${on}` : ""}; ${who} has not confirmed it yet${conf ? ` (their page showed ${conf})` : ""}.`;
@@ -175,43 +207,76 @@ export function liveRows(rows: AppRow[]): AppRow[] {
   const history = (a: AppRow) => a.state === "not_submitted" && a.reason === "needs_answers";
   return rows.filter((a) => !(history(a) && !!a.job_id && rows.some((b) => b !== a && b.job_id === a.job_id && Date.parse(b.created_at) > Date.parse(a.created_at))));
 }
-export function statusReply(message: string, rows: AppRow[] | null, now: number): { reply: string; status: string; intent: string; summary?: ApplySummary } | null {
+export function statusReply(message: string, rows: AppRow[] | null, now: number): { reply: string; status: string; intent: string; summary?: ApplySummary; next?: string } | null {
   const ask = statusAsk(message);
   if (!ask) return null;
   if (!rows) return { reply: "I couldn't read your applications just now, so I can't say whether any were sent. Ask me again in a minute.", status: "unreadable", intent: STATUS_INTENT };
   rows = liveRows(rows);
   const r = statusReplyFor(ask, rows, now);
   // Spec 6.5: the counts a reply may state, from the rows' own states (all of the person's live rows; "applied" only for a confirmed one).
-  return { ...r, summary: applySummary(rows) };
+  // Item 12: `next`, the one next action for the applications this reply is about; the chat turns say it after the reply.
+  return { reply: r.reply, status: r.status, intent: r.intent, summary: applySummary(rows), next: nextAction(r.about) };
 }
-function statusReplyFor(ask: NonNullable<ReturnType<typeof statusAsk>>, rows: AppRow[], now: number): { reply: string; status: string; intent: string } {
+function statusReplyFor(ask: NonNullable<ReturnType<typeof statusAsk>>, rows: AppRow[], now: number): { reply: string; status: string; intent: string; about: AppRow[] } {
   if (ask.latest) {
     const last = [...rows].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))[0];
-    if (!last) return { reply: "I have no application on record for you, so nothing was sent through Trainee.", status: "none", intent: STATUS_INTENT };
-    return { reply: statusLine(last), status: "shown", intent: STATUS_INTENT };
+    if (!last) return { reply: "I have no application on record for you, so nothing was sent through Trainee.", status: "none", intent: STATUS_INTENT, about: [] };
+    return { reply: statusLine(last), status: "shown", intent: STATUS_INTENT, about: [last] };
   }
   if (ask.company) {
     const mine = rows.filter((a) => sameCompany(a.company, ask.company));
     if (!mine.length) {
-      return { reply: `I have no application to ${ask.company} on record, so I can't say it went through. Nothing was sent to ${ask.company} through Trainee.`, status: "none", intent: STATUS_INTENT };
+      return { reply: `I have no application to ${ask.company} on record, so I can't say it went through. Nothing was sent to ${ask.company} through Trainee.`, status: "none", intent: STATUS_INTENT, about: [] };
     }
-    return { reply: mine.slice(0, MAX_LISTED).map(statusLine).join("\n"), status: "shown", intent: STATUS_INTENT };
+    return { reply: mine.slice(0, MAX_LISTED).map(statusLine).join("\n"), status: "shown", intent: STATUS_INTENT, about: mine.slice(0, MAX_LISTED) };
   }
   const recent = rows.filter((a) => Date.parse(a.updated_at) >= now - RECENT_DAYS * 86_400_000 || ["queued", "driving", "needs_user"].includes(a.state));
-  if (!recent.length) return { reply: `No applications are on record from the last ${RECENT_DAYS} days: nothing was sent for you through Trainee.`, status: "none", intent: STATUS_INTENT };
+  if (!recent.length) return { reply: `No applications are on record from the last ${RECENT_DAYS} days: nothing was sent for you through Trainee.`, status: "none", intent: STATUS_INTENT, about: [] };
   const more = recent.length > MAX_LISTED ? `\n…and ${recent.length - MAX_LISTED} more.` : "";
   // MASS APPLY (2026-11-01): a batch is summed up first, every application counted by what happened, and the ones waiting
-  // on the person listed first, so none of those is ever below the cut.
+  // on the person listed first, so none of those is ever below the cut. Item 12: an employer's invitation, offer or reply
+  // waits on the person too.
   const head = recent.length > 1 ? `${countsLine(recent)}\n` : "";
-  const waiting = (a: AppRow) => (a.state === "needs_user" ? 0 : 1);
+  const waiting = (a: AppRow) => (a.state === "needs_user" || urgency(a) <= 3 ? 0 : 1);
   const listed = [...recent].sort((a, b) => waiting(a) - waiting(b));
-  return { reply: `${head}Your applications, ${recent.some((a) => a.state === "needs_user") ? "the ones waiting on you first, then " : ""}newest first:\n${listed.slice(0, MAX_LISTED).map((a) => `- ${statusLine(a)}`).join("\n")}${more}`, status: "shown", intent: STATUS_INTENT };
+  return { reply: `${head}Your applications, ${recent.some((a) => waiting(a) === 0) ? "the ones waiting on you first, then " : ""}newest first:\n${listed.slice(0, MAX_LISTED).map((a) => `- ${statusLine(a)}`).join("\n")}${more}`, status: "shown", intent: STATUS_INTENT, about: recent };
+}
+
+// Item 12: the one thing to do next, for the applications a reply is about: the most pressing one only, from the record.
+// 0 offer, 1 interview, 2 assessment, 3 a reply to answer, 4 a stop that needs the person, 5 on its way, 6 sent and
+// waiting on the employer, 7 nothing left to do (turned down, not sent).
+function urgency(a: AppRow): number {
+  const ans = answered(a);
+  if (ans) return { offer: 0, interview: 1, assessment: 2, recruiter_reply: 3, rejection: 7 }[ans.kind];
+  if (a.state === "needs_user") return 4;
+  if (a.state === "queued" || a.state === "driving") return 5;
+  if (a.state === "confirmed" || a.state === "submitted_unconfirmed" || a.state === "unknown_outcome") return 6;
+  return 7;
+}
+export function nextAction(about: AppRow[]): string {
+  if (!about.length) return `Next: tell me what roles to look for, and I'll find postings for you to approve.`;
+  const top = [...about].sort((a, b) => urgency(a) - urgency(b))[0], who = top.company || "the employer";
+  switch (urgency(top)) {
+    case 0: return `Next: read ${who}'s offer email and answer them yourself.`;
+    case 1: return `Next: answer ${who}'s email to set up your interview.`;
+    case 2: return `Next: take ${who}'s assessment from the link in their email.`;
+    case 3: return `Next: read ${who}'s email and reply to them.`;
+    case 4: return top.reason === "email_code" ? `Next: type the code ${who} emailed you on their page.` : `Next: finish ${who}'s application at its link; it is waiting on you.`;
+    case 5: return `Next: nothing for you; ${who}'s application is approved and on its way.`;
+    case 6: return `Next: nothing for you now; ${about.length > 1 ? "the employers have" : `${who} has`} your application.`;
+    default: return `Next: nothing left to do on ${about.length > 1 ? "these" : "this one"}; tell me when you want new roles.`;
+  }
 }
 
 // "12 applications: 7 submitted, 1 waiting on you, 3 not sent, 1 approved and not sent yet." (states as recorded).
 export function countsLine(rows: AppRow[]): string {
-  const n = (f: (a: AppRow) => boolean) => rows.filter(f).length;
+  // Item 12: an application the employer answered is counted by their answer, once; the rest by their recorded state.
+  const ans = (k: EmployerAnswer["kind"]) => rows.filter((a) => answered(a)?.kind === k).length;
+  const rest = rows.filter((a) => !answered(a));
+  const n = (f: (a: AppRow) => boolean) => rest.filter(f).length;
   const parts: [number, string][] = [
+    [ans("offer"), "offer"], [ans("interview"), "interview invitation"], [ans("assessment"), "assessment"], [ans("recruiter_reply"), "employer reply"],
+    [ans("rejection"), "turned down by the employer"],
     [n((a) => a.state === "confirmed" && !!a.email_confirmed_at), "confirmed by the employer"],
     [n((a) => a.state === "confirmed" && !a.email_confirmed_at), "page reference only"],
     [n((a) => a.state === "submitted_unconfirmed"), "submitted"],
@@ -238,5 +303,7 @@ export async function applicationsTurn(o: { message: string; userId: string; now
     console.error("applications status:", e instanceof Error ? e.message : String(e));
     rows = null;
   }
-  return statusReply(o.message, rows, o.now);
+  const r = statusReply(o.message, rows, o.now);
+  // Item 12: the reply ends with its one next action (none when the record could not be read).
+  return r && r.next ? { ...r, reply: `${r.reply}\n${r.next}` } : r;
 }

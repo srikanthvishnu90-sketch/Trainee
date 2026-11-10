@@ -96,7 +96,7 @@ async function strictPosting(browser, item, o) {
     if (sim) { if (req.method() === "POST") r.upload_simulated++; return { fulfill: sim }; }
     if (!/^(GET|HEAD|OPTIONS)$/.test(req.method())) {
       if (graphqlRead(req)) { r.graphql_reads++; }
-      else { r.sent_blocked++; if ((r.blocked = r.blocked || []).length < 6) r.blocked.push(`${req.method()} ${u.host}${u.pathname.slice(0, 60)}`); return false; }
+      else { r.sent_blocked++; if ((r.blocked = r.blocked || []).length < 8) r.blocked.push(`${req.method()} ${u.host}${u.pathname.slice(0, 60)}${u.search.slice(0, 40)}`); return false; }
     }
     if (["image", "media", "font"].includes(req.resourceType())) return false;
     // Polite pacing is per page load (1 a second per host), not per script or stylesheet a page loads with it.
@@ -154,7 +154,7 @@ async function main() {
     const x = rows[i]; console.log(["STRICT", x.provider, x.result, x.reason, x.field || x.error || "", `blocked=${x.sent_blocked}`, `gql=${x.graphql_reads}`, `upload_simulated=${x.upload_simulated}`, `${(x.ms / 1000).toFixed(1)}s`, x.url].join(" | "));
     if (x.result !== "pass" && (x.diag || x.check)) console.log("DIAG | " + x.provider + " | " + JSON.stringify({ check: x.check, blocked: x.blocked || [], ...x.diag }));
     // Why each field was handed back, and the options a choice offered (the posting's own words), for the record.
-    if (x.result !== "pass" && x.needs) console.log("NEEDS | " + x.provider + " | " + x.url + " | " + JSON.stringify([...x.needs].sort((m, n) => (m.reason === "no_confirmed_answer") - (n.reason === "no_confirmed_answer")).slice(0, 6).map((n) => ({ label: String(n.label || "").slice(0, 60), reason: n.reason, ...(n.detail ? { detail: String(n.detail).slice(0, 160) } : {}), ...(n.options ? { options: n.options.slice(0, 12).map((o) => String(o).slice(0, 40)) } : {}) })))); } }));
+    if (x.result !== "pass" && x.needs) console.log("NEEDS | " + x.provider + " | " + x.url + " | " + JSON.stringify([...x.needs].sort((m, n) => (m.reason === "no_confirmed_answer") - (n.reason === "no_confirmed_answer")).slice(0, 12).map((n) => ({ label: String(n.label || "").slice(0, 60), reason: n.reason, ...(n.kind ? { kind: n.kind } : {}), ...(n.detail ? { detail: String(n.detail).slice(0, 160) } : {}), ...(n.options ? { options: n.options.slice(0, 12).map((o) => String(o).slice(0, 40)) } : {}) })))); } }));
   await browser.close();
   const s = summarize(rows);
   fs.writeFileSync(path.join(out, "strict.jsonl"), rows.map((x) => JSON.stringify(x)).join("\n") + "\n");

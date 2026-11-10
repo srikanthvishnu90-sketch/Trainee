@@ -342,10 +342,15 @@ export const AUTH_FACTS = new Set(["work_authorization", "sponsorship", "us_pers
 // WO-053: work rights "in the country where this job is located" (or "...in which you are applying") are the person's US
 // ones only when the posting's own location is in the US; abroad or unsettled, asked.
 export const RELATIVE_PLACE = /\b(country|location)\b.{0,60}\b(this|the) (job|role|position|opportunity|vacancy)\b|\b(country|location)\b.{0,40}\b(you are|you're|you have been|you've been|are you) apply|\b(country|location) (in which|to which|for which|where) you (are )?apply|\bstated location of this role\b|\bin this country\b/i;
+// Interim ruling (architect, 2026-11-10, pending the owner): a date of birth is asked only when the employer's form requires
+// it, per application, and is never kept for reuse or guessed. Keyed by its wording, one answer filled the same question at
+// every later employer; keyed by this posting, it is this application's answer only.
+export const DATE_OF_BIRTH = /\b(?:date of birth|birth ?date|day of birth|dob|d\.o\.b\.?)\b/i;
 export function answerKey(q: Question, jobId: string, o: { haveFact?: boolean; here?: boolean } = {}): string {
   const m = mapQuestion(q);
   const words = norm(q.label);
   const job = `job:${h16(`${jobId}\n${words}`)}`, wording = `label:${h16(words)}`;
+  if (DATE_OF_BIRTH.test(String(q.label ?? ""))) return job;
   if (m.kind === "fact") {
     // ROUND 4 (2026-11-05): a self-identification answer (gender, race, ethnicity, veteran or disability status) is given to
     // one employer (extension apply_core.ts staysWithPosting). Kept as the one `fact:eeo`, a "No" to "Do you have a

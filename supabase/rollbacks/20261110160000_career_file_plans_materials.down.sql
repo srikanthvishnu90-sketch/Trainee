@@ -1,4 +1,4 @@
--- Rollback of 20261110120000_career_file_plans_materials.sql (item 6 S3). Drops the search plans and material versions and their
+-- Rollback of 20261110160000_career_file_plans_materials.sql (item 6 S3). Drops the search plans and material versions and their
 -- approve functions. The F-04 and F-07 Files then have no record to be drawn from and show nothing to approve.
 -- Refuses while any version is approved: an approved document or plan is the person's and is never dropped by a rollback (E.4 40).
 do $d$ begin

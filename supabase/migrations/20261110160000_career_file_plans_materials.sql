@@ -12,7 +12,7 @@
 -- payload_hash is computed here, on insert, from the row's content (sha256 of the canonical jsonb text). An approval is the
 -- *_approve_as function with the exact hash the person saw: a different hash is 'stale' and changes nothing; an older version
 -- of a plan than the newest is 'superseded'; a document approval names its role and covers no other ('wrong_role').
--- Additive and reversible (supabase/rollbacks/20261110120000_career_file_plans_materials.down.sql). Idempotent.
+-- Additive and reversible (supabase/rollbacks/20261110160000_career_file_plans_materials.down.sql). Idempotent.
 
 create table if not exists public.career_search_plans (
  id bigserial primary key,

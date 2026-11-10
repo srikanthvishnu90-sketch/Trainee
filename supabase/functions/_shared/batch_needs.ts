@@ -117,6 +117,7 @@ export function batchReadyText(o: { ready: number; total: number; still: string[
   const { ready, total } = o, k = total - ready;
   if (total < 1 || ready < 0 || ready > total) return "";
   if (k === 0) return total === 1 ? "Your application is ready to send. Reply yes to send it." : `All ${total} are ready to send. Reply yes to send all ${total}.`;
-  const why = o.still.length ? `: ${list(o.still)}` : "";
-  return `${ready} of ${total} are ready; ${k} still need${k === 1 ? "s" : ""} you${why}.`;
+  return `${ready} of ${total} are ready; ${stillNeed(k, o.still)}.`;
 }
+// "K still need(s) you: <the questions>", the questions named in the employer's own words.
+export const stillNeed = (k: number, still: string[]) => `${k} still need${k === 1 ? "s" : ""} you${still.length ? `: ${list(still)}` : ""}`;

@@ -564,6 +564,13 @@ const NOTHING_SENT_MANY = (prepares = true) => (prepares
   " Each application goes to its employer only when you approve it on the card that shows it exactly; once they're prepared, \"show my applications\" shows them all on one card, and one yes to that card approves exactly what it shows.";
 const nameOf = (p: { title?: string | null; company?: string | null }) =>
   !p.company && /^#\d+$/.test(String(p.title ?? "")) ? String(p.title) : `${p.title || "the posting"} at ${p.company || "an employer not on record"}`;
+// Tone gate (tests/architect/instinct-tone-gate.test.ts): one reason shared by several postings is said once, after their names
+// ("A and B: not a ... link I can open yet"), never repeated for each.
+const byReason = (rs: { title?: string | null; company?: string | null; reason: string; said?: string }[]) => {
+  const groups = new Map<string, string[]>();
+  for (const r of rs) { const why = r.said ?? r.reason; groups.set(why, [...(groups.get(why) ?? []), nameOf(r)]); }
+  return [...groups].map(([why, names]) => `${names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0]}: ${why}`);
+};
 const listed = (names: string[], max = 12) => names.length <= max ? names.join("; ") : `${names.slice(0, max).join("; ")}; and ${names.length - max} more`;
 
 // The batch ask over the thread's last listed postings: null with no ask, or no list (the router's turn, as before).
@@ -696,7 +703,7 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
   // The batch summary of the screen: counts and short reasons; held postings and the one question per missing fact.
   const gs = gateSummary(screened.gate, nameOf);
   const shownRefused = refused.filter((r) => !/^(screened out|held, not guessed)/.test(r.reason));
-  if (shownRefused.length) parts.push(`Not queued: ${listed(shownRefused.map((r) => `${nameOf(r)}: ${r.said ?? r.reason}`), 8)}.`);
+  if (shownRefused.length) parts.push(`Not queued: ${listed(byReason(shownRefused), 8)}.`);
   if (gs) parts.push(gs);
   if (asking.length) parts.push(askText(asking.map((r) => r.posting), o.facts ?? []));
   const status = queued.length ? "queued" : already ? "already" : asking.length ? "asking_employer" : "refused";

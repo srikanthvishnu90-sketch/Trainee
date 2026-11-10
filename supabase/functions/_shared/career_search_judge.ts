@@ -444,6 +444,7 @@ function inPlace(p: SourcePosting, ask: SearchAsk): boolean {
 }
 // "data internships" finds "Data Intern" titles: the shared stem of the two.
 const roleWordsOf = (role: string) => [...new Set(searchWords(role).map((w) => /^intern(ship)?s?$/.test(w) ? "intern" : w))];
+const RANKED_BY_FIT = "Ranked by how well each matches what you've confirmed.";
 const asked = (ask: SearchAsk) => {
   const lim = ask.limits && hasLimits(ask.limits) ? limitsLine(ask.limits) : "";
   const list = (ask.roles?.length ? ask.roles : [ask.role]).map((r) => r.replace(/\s+(roles|jobs|openings|positions)$/i, ""));
@@ -615,7 +616,7 @@ export async function searchJudgeTurn(o: {
     // OWNER LIST #6: no internal words ("the model judge is off") in the reply.
     header = found.ranked_by === "newest"
       ? "You have no confirmed facts yet, so these are newest first."
-      : "Ranked by how well each matches what you've confirmed.";
+      : RANKED_BY_FIT;
   }
   // R10 owner ruling: within equal fit, the postings Trainee can submit itself come first; a better fit is never moved down.
   const caps = await capabilitiesOf(rows.map((r) => ({ job_id: r.h.job_id, url: r.h.url || null, company: r.h.company || null, title: r.h.title })), o.canSubmit);
@@ -651,11 +652,13 @@ export async function searchJudgeTurn(o: {
       : `I verified ${plural(live, "open match", "open matches")}${unchecked.length ? `, and listed ${unchecked.length} more I could not re-check because ${because}` : ""}.`}${counts}${short}${closed}${zone}${notIntern ? ` ${plural(notIntern, "posting")} left out: not stated as an internship.` : ""} Nothing was applied for.`;
     if (summary) lines.push(summary);
   }
-  if (ask.limits && hasLimits(ask.limits)) {
+  // Tone gate: the limits already show in the first line ("... (internships)"); they are said again only with what they left out.
+  if (ask.limits && hasLimits(ask.limits) && (droppedLine(held.dropped) || held.noPay)) {
     const out = droppedLine(held.dropped);
     lines.push(`Held to what you asked (${limitsLine(ask.limits)}).${out ? ` Left out: ${out}.` : ""}${held.noPay ? ` ${held.noPay} of those list no pay, so the floor could not be checked on them.` : ""}`);
   }
-  lines.push(header);
+  // A ranking is news only when there is more than one row to order.
+  if (listed.length > 1 || header !== RANKED_BY_FIT) lines.push(header);
   if (listed.length) lines.push(...listed.map((r, i) => lineOf(r.h, i, r.tail)));
   else lines.push(`None of the ${top.length} judged came out ${[...KEPT_VERDICTS].join(" or ")}, so none is listed.`);
   if (more > 0) lines.push(`${more} more ${more === 1 ? "is" : "are"} not shown.`);

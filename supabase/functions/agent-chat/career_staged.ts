@@ -512,7 +512,7 @@ export const CODE_OWNED_INTENTS: ReadonlySet<string> = new Set([
   "outreach_draft", "negotiation_draft", "negotiation_revision", "career_tailor", "career_tailor_diff", "tailor_needs_posting", "career_essay",
   "career_document_delivery", "calendar_proposal", "graph_intro", "graph_blurb", "profile_export",
   // writes to the person's record, onboarding, and the account's controls
-  "onboarding", "onboarding_answer", "career_onboarding_needs", "profile_correction", "intent_sensitive_correction", "career_resume_ingest",
+  "onboarding", "onboarding_answer", "career_onboarding_needs", "profile_correction", "intent_sensitive_correction", "sensitive_answer_ask", "career_resume_ingest",
   "career_resume_correction", "career_resume_update", "career_resume_disowned", "career_resume_dispute", "career_goal_record",
   "career_erase_confirm", "career_erase_status", "career_profile_erased", "disconnect", "connect_google", "connect_browser_source",
   "paused_hold", "pause_status", "people_matching_stop", "intent_opt_out", "career_paused", "career_resumed", "career_preference_corrected", "career_os_wins_log",

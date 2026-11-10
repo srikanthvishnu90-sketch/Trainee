@@ -249,7 +249,9 @@ const CareerHost = (() => {
     // containment swallowed the ReferenceError — host suite caught it).
     if (!Reply140 || typeof Reply140.ensureNextStep !== "function") return r;
     const specific = typeof r.nextStep === "string" ? r.nextStep : (typeof r.next_step === "string" ? r.next_step : null);
-    r.reply = Reply140.ensureNextStep(r.reply, specific ? { nextStep: specific } : undefined);
+    // D-054 (RESPONSE-RULES R10): the reply ends at the decision; the generic closer is never added (140 endAtDecision).
+    const end = typeof Reply140.endAtDecision === "function" ? Reply140.endAtDecision : Reply140.ensureNextStep;
+    r.reply = end(r.reply, specific ? { nextStep: specific } : undefined);
     return r;
   }
 

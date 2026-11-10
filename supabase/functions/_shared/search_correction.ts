@@ -22,10 +22,16 @@ const CONTRIB = new RegExp(LEAD + "(?:(?:only|just)\\s+(?:individual[- ]contribu
 // "only individual contributor roles, no manager roles" is one correction.
 
 // Whether this message corrects the previous search (null: it is not a correction, so nothing here applies).
+// D-054 (R05): a correction often carries its reason: "actually remote only, I can't commute", "remote only since I'm moving".
+// The reason changes nothing, so it is set aside before the WHOLE-message forms below are read; anything else after the
+// correction ("remote only, and find me nurse jobs too") still makes the message something other than a correction.
+const REASON_TAIL = /\s*(?:[,;:]|\s-|\s—)?\s+(?:because|since|cause|cuz|as|i\s+(?:can'?t|cannot|can\s+not|don'?t|do\s+not|won'?t|will\s+not|am\s+not|'m\s+not)|i'?m|i\s+am|i\s+have|i've|i\s+live|i\s+moved|i\s+(?:want|prefer|need)|i'd|my|no\s+car)\b[^?]*$/;
 export function correctionOf(message: string): Correction | null {
-  const t = lc(message);
-  if (!t || t.length > 120 || /\?\s*$/.test(t)) return null;
+  const whole = lc(message);
+  if (!whole || whole.length > 120 || /\?\s*$/.test(whole)) return null;
   const c: Correction = {};
+  const bare = whole.replace(REASON_TAIL, "").trim();
+  const t = bare && bare !== whole && (REMOTE_ONLY.test(bare) || NOT_REMOTE.test(bare)) ? bare : whole;
   if (REMOTE_ONLY.test(t)) c.remoteOnly = true;
   else if (NOT_REMOTE.test(t)) c.notRemote = true;
   if (CONTRIB.test(t)) c.contributorOnly = true;

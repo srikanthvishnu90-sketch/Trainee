@@ -229,9 +229,37 @@ jobs:
           rm -f "$RUNNER_TEMP/sealed.json"
           git config user.name "brain-eval[ci]"
           git config user.email "brain-eval@users.noreply.github.com"
-          git add evals/career/results/ evals/career/SCORE-LOG.md evals/career/sealed/RUNS.json evals/career/sealed/recipient.json evals/career/tasks/results/ || true
-          git commit -m "brain-eval data: run ${{ github.run_id }} ($(head -1 "$RUNNER_TEMP/verdict.txt" 2>/dev/null || echo "${{ steps.req.outputs.action }}"))" || exit 0
-          git push origin HEAD:ci/brain-eval
+          # D-055 (run 42897333579): `git add` of a missing path (evals/career/sealed/RUNS.json, absent from a tree not built on
+          # ci/brain-eval) failed, `|| true` hid it, and `git commit ... || exit 0` then committed nothing: five result files were
+          # lost with a green step. Now every path that exists is added (a failing add fails the step), what exists is still
+          # committed and pushed, and the step fails loudly when a path is missing or this run's own result files are not in
+          # the commit.
+          set -euo pipefail
+          fail=0
+          paths=()
+          for p in evals/career/results evals/career/SCORE-LOG.md evals/career/sealed/RUNS.json evals/career/sealed/recipient.json evals/career/tasks/results; do
+            if [ -e "$p" ]; then paths+=("$p"); else echo "::error::brain-eval data: $p is missing from this checkout (is it built on ci/brain-eval?); it is not committed"; fail=1; fi
+          done
+          if [ "${#paths[@]}" -gt 0 ]; then git add -- "${paths[@]}"; fi
+          # This run's own result files: the pass files of an eval, the task results of a task eval, the re-judged passes.
+          case "${{ steps.req.outputs.action }}/${{ steps.req.outputs.suite }}" in
+            eval/heldout) want="evals/career/results/${{ steps.req.outputs.set }}-*-${{ github.run_id }}-p*.json" ;;
+            eval/tasks) want="evals/career/tasks/results/*${{ github.run_id }}*" ;;
+            rejudge/*) want="evals/career/results/*${{ github.run_id }}*" ;;
+            *) want="" ;;
+          esac
+          if [ -n "$want" ]; then
+            made=$(git ls-files --others --modified --cached -- $want | wc -l)
+            staged=$(git diff --cached --name-only -- $want | wc -l)
+            if [ "$made" -eq 0 ] || [ "$staged" -eq 0 ]; then echo "::error::brain-eval data: no result file of run ${{ github.run_id }} ($want) is in the commit (written: $made, staged: $staged)"; fail=1; fi
+          fi
+          if git diff --cached --quiet; then
+            echo "brain-eval data: nothing to commit"
+          else
+            git commit -m "brain-eval data: run ${{ github.run_id }} ($(head -1 "$RUNNER_TEMP/verdict.txt" 2>/dev/null || echo "${{ steps.req.outputs.action }}"))"
+            git push origin HEAD:ci/brain-eval
+          fi
+          exit "$fail"
       - name: The verdict decides the job
         if: always() && steps.req.outputs.action == 'eval' && steps.req.outputs.suite == 'heldout'
         run: |

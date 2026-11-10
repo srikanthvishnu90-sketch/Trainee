@@ -15,7 +15,7 @@
 //     no `mutation`), which some boards use to load the form; each one is logged;
 //   - a page script cancels every form submit, form.submit() and requestSubmit(), and counts the attempt;
 //   - the runner is stopped before its click, with retries 0; robots.txt is obeyed; 1 page load a second per host.
-//   node scripts/browser-eval/strict.cjs --sample scripts/browser-eval/sample.csv --label strict-1 [--max-per-provider 20]
+//   node scripts/browser-eval/strict.cjs --sample scripts/browser-eval/sample.csv --label strict-1 [--max-per-provider 20] [--providers workable,breezy]
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
@@ -114,7 +114,7 @@ async function main() {
   const label = String(arg("label", "strict")).replace(/[^A-Za-z0-9._-]/g, "-");
   const out = path.resolve(arg("out", path.join("artifacts", "browser-eval", label)));
   fs.mkdirSync(out, { recursive: true });
-  const items = lib.readSample(fs.readFileSync(arg("sample"), "utf8"), { max: arg("max-per-provider", 20) });
+  const items = lib.readSample(fs.readFileSync(arg("sample"), "utf8"), { max: arg("max-per-provider", 20), providers: arg("providers", "") ? String(arg("providers")).toLowerCase().split(",").map((x) => x.trim()).filter(Boolean) : null });
   let pw; for (const id of [process.env.UPMORE_PLAYWRIGHT_PATH, "playwright"]) { if (!id) continue; try { pw = require(id); break; } catch { /* next */ } }
   if (!pw) { console.error("playwright not found (set UPMORE_PLAYWRIGHT_PATH)"); process.exit(2); }
   const browser = await pw.chromium.launch({ headless: true });

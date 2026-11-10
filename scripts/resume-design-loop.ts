@@ -157,7 +157,7 @@ export async function runDesign(opts: { out?: string } = {}) {
     const p = PROFILES.find((x) => x.id === c.profile)!;
     const prof = CareerProfile.createProfile({ basics: { name: p.name, email: p.email, location: p.location } });
     CareerProfile.ingestResume(prof, { text: p.text, fileName: `${p.id}-test-resume.txt` });
-    for (const f of prof.facts) CareerProfile.confirmFact(prof, f.id);
+    for (const f of prof.facts as any[]) CareerProfile.confirmFact(prof, f.id);
     const ts = targetSkills(p.targets.find((t) => t.role === c.role)!.posting, prof);
     const promised = c.files[0]?.promised ?? 1;
     const row: any = byId.get(stem(c));

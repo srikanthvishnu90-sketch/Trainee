@@ -812,7 +812,7 @@ async function fillForm(page, ctx0) {
 
 // What each filled question holds right now, in the page's own words (a choice: its option labels), for a last look before the
 // click. Read only.
-async function heldNow(page, filled) {
+async function heldNow(page, filled, { menus = true } = {}) {
   const ds = filled.map((f) => f.d);
   const st = ds.length ? await page.evaluate(STATE, ds) : [];
   // An upload whose input the board swapped for a chip (fillFile) is read from that chip: the resume's own name, or nothing.
@@ -830,12 +830,38 @@ async function heldNow(page, filled) {
   // The phone's country picker shows only the dial code ("+1", which Canada shares): what it holds is the option its menu marks
   // as selected, read as fillCombo read it, and only while the box still shows what it showed then.
   for (const [i, f] of filled.entries()) {
-    if (!f.d.phoneCountry || out[i].gone || !out[i].held) continue;
+    if (!menus || !f.d.phoneCountry || out[i].gone || !out[i].held) continue;
     const sel1 = await menuSelected(page, f.d).catch(() => []);
     const now = (await stateOf(page, f.d).catch(() => ({}))).text;
     if (sel1.length === 1 && norm(now) === norm(out[i].held)) out[i].held = sel1[0];
   }
   return out;
+}
+// The last look before the click (parallel-apply.cjs, every run, not only a dry run's audit): once the page has settled (its
+// requests done, then a moment), every filled question must still hold something. A board that re-mounts its inputs after
+// they were set (batch of 60, run on ag/batch60-fixes: two Personio forms held "Vorname", "Nachname", "E-Mail" empty at the
+// instant before Submit, after the resume upload) gets each dropped value set once more from the same approved value and read
+// back; a question still empty after that, or an upload no longer held, is returned by label: the run stops there, unsent.
+async function recheckFilled(page, filled, ctx0, { settleMs = 300 } = {}) {
+  const ctx = { facts: {}, answers: {}, ...ctx0 };
+  ctx.facts = factsFrom(ctx.facts, ctx.answers);
+  const settle = async () => { await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {}); await page.waitForTimeout(settleMs); };
+  const empty = (h) => h.gone || h.held === null || h.held === undefined || (Array.isArray(h.held) ? h.held.length === 0 : String(h.held).trim() === "");
+  const dropped = async () => { const held = await heldNow(page, filled, { menus: false }); return filled.filter((f, i) => empty(held[i] || { gone: true })); };
+  await settle();
+  let lost = await dropped();
+  if (!lost.length) return [];
+  const qs = await page.evaluate(EXTRACT).catch(() => []);
+  for (const f of lost) {
+    if (!["text", "textarea", "select"].includes(f.kind)) continue;
+    const now = qs.find((x) => x.label === f.d.label && x.kind === f.d.kind && x.name === f.d.name);
+    if (!now) continue;
+    let r; try { r = await doFill(page, now, { status: "fill", value: f.value, source: f.source }, ctx); } catch { r = { ok: false }; }
+    if (r.ok) { f.d = now; f.refilled = true; }
+  }
+  await settle();
+  lost = await dropped();
+  return lost.map((f) => f.label);
 }
 // Does a field's one held value say the approved answer, by the same exact rule the fill chose it by? A country by its name or
 // its listed other spellings, a place as the same city, state and country (matchPlace), a state by name or postal code, the
@@ -853,4 +879,4 @@ function holdsApproved(f, want, facts = {}) {
   if (key === "state") return !matchState([held], want).error;
   return false;
 }
-module.exports = { heldNow, holdsApproved, factsFrom, fillForm, matchOption, matchPlace, matchState, countryNames, phoneCountryMatch, factKey, factValue, answerFor, decide, labelCounts, labelKinds, norm, EXTRACT, STATE, DECLINE };
+module.exports = { heldNow, recheckFilled, holdsApproved, factsFrom, fillForm, matchOption, matchPlace, matchState, countryNames, phoneCountryMatch, factKey, factValue, answerFor, decide, labelCounts, labelKinds, norm, EXTRACT, STATE, DECLINE };

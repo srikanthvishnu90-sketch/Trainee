@@ -115,8 +115,9 @@ before(async () => {
   server = http.createServer((req, res) => {
     const u = new URL(req.url, "http://x");
     if (req.method !== "GET") { posts.push(`${req.method} ${req.url}`); return res.writeHead(200, { "content-type": "text/html" }).end("<h1>Thank you for applying</h1>"); }
+    if (u.pathname === "/slow-upload") return void setTimeout(() => res.writeHead(200, { "content-type": "text/plain" }).end("ok"), 700);
     if (u.pathname === "/searchLocations") return res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify((u.searchParams.get("text") || "").toLowerCase().startsWith("chic") ? [{ name: "Chicago, Illinois, United States", id: "c1" }, { name: "Chicago Heights, Illinois, United States", id: "c3" }] : []));
-    const page = { "/gh": GH, "/breezy": BREEZY, "/lever": LEVER }[u.pathname];
+    const page = { "/gh": GH, "/breezy": BREEZY, "/lever": LEVER, "/personio-remount": PERSONIO(false, "once"), "/personio-always": PERSONIO(false, "always") }[u.pathname];
     if (page) return res.writeHead(200, { "content-type": "text/html" }).end(page);
     if (u.pathname === "/lever/gone") return res.writeHead(410, { "content-type": "text/html" }).end("<h1>Gone</h1>");
     res.writeHead(404, { "content-type": "text/html" }).end("<h1>Sorry, we couldn't find anything here</h1>");
@@ -230,7 +231,11 @@ test("Breezy: held questions are named in the form's own words (its heading, its
 // The CV block as the batch's Personio postings draw it (diag run on otonomee/2881499: after the upload the board replaces the
 // file input with a fresh empty one for another file and shows "resume.pdf ×" in the block; the input the fill tagged is gone).
 // ?lost: the board then drops the file again (the chip disappears): the upload is not held, and the read-back says so.
-const PERSONIO = (lost) => `<!doctype html><html><head><meta charset="utf-8"><title>TEST Personio</title></head><body><form class="DynamicForm_formContainer__PHnT_"><fieldset>
+// remount: as on two Personio forms of the r2 rerun (eqqo-gmbh-1/1968877, braun-hamburg/2804926), the board re-mounts its text
+// inputs empty once its upload request has come back (here a GET the server answers after 700 ms); "always": it then keeps
+// emptying them.
+const PERSONIO = (lost, remount) => `<!doctype html><html><head><meta charset="utf-8"><title>TEST Personio</title></head><body><form class="DynamicForm_formContainer__PHnT_" action="/submit/personio" method="post"><fieldset>
+<div class="DynamicForm_halfWidth__qgqPh"><label for="field-first_name" class="sr-only">Vorname</label><input id="field-first_name" type="text" class="name-group-input" placeholder="Vorname" name="first_name" value=""></div>
 <div class="DynamicForm_fullWidth__vAHrb"><div class="DynamicForm_fieldWrapper__bb5uT"><label for="field-email" class="DynamicForm_formLabel__aTROQ form-label">Email<span aria-hidden="true">*</span><span class="sr-only"> (required)</span></label><div class="form-control"><input id="field-email" type="email" name="email" value=""></div></div></div>
 <div class="DynamicForm_documentCategoryWrapper__Hwpk_ document-field-wrapper"><span class="form-label">CV<span aria-hidden="true">*</span><span class="sr-only"> (required)</span></span>
 <div class="document-input-wrapper"><label for="cv" class="sr-only">Upload CV</label><input id="cv" type="file" name="cv" required><button type="button">Add file</button></div></div>
@@ -239,7 +244,9 @@ const wire = (inp) => inp.addEventListener("change", (e) => { const f = e.target
   const w = document.querySelector(".document-input-wrapper"), fresh = document.createElement("input"); fresh.type = "file"; fresh.id = "cv"; fresh.name = "cv";
   const chip = document.createElement("div"); chip.className = "document-chip"; chip.innerHTML = "<span>" + f.name + "</span><button type=button aria-label=Remove>×</button>";
   inp.replaceWith(fresh); w.prepend(chip); wire(fresh);
-  ${lost ? 'setTimeout(() => chip.remove(), 400);' : ""} }, 150); });
+  ${lost ? 'setTimeout(() => chip.remove(), 400);' : ""}
+  ${remount ? `const again = () => { for (const old of document.querySelectorAll("#field-first_name, #field-email")) { const n = old.cloneNode(false); n.value = ""; n.removeAttribute("data-upmore-q"); old.replaceWith(n); } };
+  fetch("/slow-upload").then(() => { again(); ${remount === "always" ? "setInterval(again, 150);" : ""} });` : ""} }, 150); });
 wire(document.getElementById("cv"));
 </script></body></html>`;
 
@@ -274,6 +281,37 @@ test("Personio: a resume the board dropped again (no chip, no input holding it) 
     assert.equal(f.gone, true);
     assert.equal(fieldMismatch(f, { facts: {}, answers: ANSWERS, resume: { path: resume } }), "field_gone");
   } finally { await page.close(); }
+});
+
+test("Personio: inputs the board re-mounts empty after the upload are set again from the approved values before Submit; every field holds the payload", { skip, timeout: 60000 }, async () => {
+  const n = posts.length;
+  const p = vmPool("personio-remount", ANSWERS, "personio");
+  let audit = null, onPage = null;
+  const r = await applyOne(browser, p, { stepTimeoutMs: 8000, retries: 0, audit: true, onPhase: async (ph, a) => {
+    if (ph !== "submitting") return;
+    audit = a;
+    // What the form holds once the board's upload has come back (the page of this run is the only one with this address).
+    await new Promise((res) => setTimeout(res, 1200));
+    const pg = browser.contexts().flatMap((c) => c.pages()).find((x) => x.url().endsWith("/personio-remount"));
+    onPage = await pg.evaluate(() => [document.getElementById("field-first_name").value, document.getElementById("field-email").value]);
+    throw new NeedsUser("dry_run_stopped_before_submit");
+  } });
+  assert.equal(r.reason, "dry_run_stopped_before_submit", JSON.stringify({ reason: r.reason, needs: r.needs }));
+  assert.deepEqual(onPage, ["Testy", "dry-run@example.invalid"]);
+  assert.deepEqual(audit.fields.map((f) => f.label).sort(), ["Email", "Upload CV", "Vorname"]);
+  assert.deepEqual(audit.fields.map((f) => [f.label, fieldMismatch(f, p)]).filter(([, w]) => w), []);
+  assert.equal(posts.length, n);
+});
+
+test("Personio: a board that keeps emptying the approved values stops before Submit, naming them; nothing is clicked or posted", { skip, timeout: 60000 }, async () => {
+  const n = posts.length;
+  let reached = 0;
+  const r = await applyOne(browser, vmPool("personio-always", ANSWERS, "personio"), { stepTimeoutMs: 8000, retries: 0, onPhase: async (ph) => { if (ph === "submitting") reached++; } });
+  assert.equal(reached, 0, "never at the click");
+  assert.equal(r.status, "not_submitted");
+  assert.equal(r.reason, "field_not_filled");
+  assert.deepEqual((r.needs || []).map((x) => [x.label, x.reason]).sort(), [["Email", "value_dropped_before_submit"], ["Vorname", "value_dropped_before_submit"]]);
+  assert.equal(posts.length, n);
 });
 
 // ---- 5. a posting whose page is gone ------------------------------------------------------------------------------------------

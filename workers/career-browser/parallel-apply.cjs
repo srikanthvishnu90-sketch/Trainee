@@ -30,7 +30,7 @@
 //  - local only by default: only loopback hosts are driven. Real employer hosts need `allowHosts` from the caller
 //    (the owner-run approve-first path), and this module never discovers or logs in anywhere.
 const fs = require("node:fs");
-const { fillForm, heldNow } = require("./ats-fill.cjs");
+const { fillForm, heldNow, recheckFilled } = require("./ats-fill.cjs");
 const { APPLY_TEXT, NEVER_CLICK, applyUrlFor } = require("./apply-entry.cjs");
 const crypto = require("node:crypto");
 
@@ -406,6 +406,9 @@ async function attempt(browser, p, opts, timing) {
     // question to skip: the field may hold something the person never approved. Handed back like a required one; nothing is sent
     // (independent review of #340: Submit used to go with such a field).
     if (fr.failed && fr.failed.length) { const e = new NeedsUser("field_not_filled", fr.failed[0].label); e.needs = fr.failed.map((n) => ({ label: n.label, reason: n.reason, ...(n.detail ? { detail: String(n.detail).slice(0, 200) } : {}) })); throw e; }
+    // Every filled question still holds its approved value once the page has settled (ats-fill recheckFilled): a value the board
+    // dropped is set once more and read back; one still empty stops the run here, unsent, named.
+    { const lost = await recheckFilled(page, fr.filled, { facts: p.facts, answers: p.answers || {}, resumePath: p.resume.path }); if (lost.length) { const e = new NeedsUser("field_not_filled", lost[0]); e.needs = lost.map((l) => ({ label: l, reason: "value_dropped_before_submit" })); throw e; } }
     const filled = fr.filled.map((f) => ({ field: f.label, source: f.source }));
     timing.fill = Date.now() - t1;
     // Last checks before the click, on what is actually on the page now: still an allowed host, no bot check that appeared

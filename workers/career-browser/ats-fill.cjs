@@ -431,7 +431,7 @@ async function fillForm(page, ctx0) {
       let r;
       try { r = await doFill(page, d, dec, ctx); } catch (e) { r = { ok: false, reason: "fill_error", detail: String(e.message).split("\n")[0].slice(0, 120) }; }
       if (r.ok) {
-        entry.status = "filled"; filled.push({ label: d.label, source: dec.source, kind: d.kind });
+        entry.status = "filled"; filled.push({ label: d.label, source: dec.source, kind: d.kind, value: dec.pick === "decline" ? "decline" : dec.source === "resume" ? require("node:path").basename(ctx.resumePath) : dec.value, d });
         // What a choice question now holds, in the form's own option words (never a typed answer's text).
         if (["select", "radio", "checkgroup", "buttons", "combobox"].includes(d.kind)) {
           const st = await stateOf(page, d);
@@ -462,4 +462,19 @@ async function fillForm(page, ctx0) {
   return { map, filled, needsUser, failed, invalid };
 }
 
-module.exports = { fillForm, matchOption, factValue, answerFor, decide, labelCounts, norm, EXTRACT, STATE, DECLINE };
+// What each filled question holds right now, in the page's own words (a choice: its option labels), for a last look before the
+// click. Read only.
+async function heldNow(page, filled) {
+  const ds = filled.map((f) => f.d);
+  const st = ds.length ? await page.evaluate(STATE, ds) : [];
+  // An upload whose input the board swapped for a chip (fillFile) is read from that chip: the resume's own name, or nothing.
+  const chips = await page.evaluate((qs) => qs.map(([q, n]) => { const b = document.querySelector(`[data-upmore-fbox="${q}"]`); return !!b && (b.innerText || "").includes(n); }),
+    filled.map((f) => [f.d.q, String(f.value)])).catch(() => []);
+  return filled.map((f, i) => {
+    const s = { ...(st[i] || {}) };
+    if (f.kind === "file" && !s.text && chips[i]) s.text = String(f.value);
+    const held = s.picked ? s.picked.map((o) => ((f.d.options || [])[Number(o)] || {}).label) : s.text;
+    return { label: f.label, kind: f.kind, source: f.source, approved: f.value, held: held === undefined ? null : held, gone: !!s.gone };
+  });
+}
+module.exports = { heldNow, fillForm, matchOption, factValue, answerFor, decide, labelCounts, norm, EXTRACT, STATE, DECLINE };

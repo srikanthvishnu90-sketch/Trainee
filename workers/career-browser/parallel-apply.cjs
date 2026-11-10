@@ -30,7 +30,7 @@
 //  - local only by default: only loopback hosts are driven. Real employer hosts need `allowHosts` from the caller
 //    (the owner-run approve-first path), and this module never discovers or logs in anywhere.
 const fs = require("node:fs");
-const { fillForm } = require("./ats-fill.cjs");
+const { fillForm, heldNow } = require("./ats-fill.cjs");
 const { APPLY_TEXT, NEVER_CLICK, applyUrlFor } = require("./apply-entry.cjs");
 const crypto = require("node:crypto");
 
@@ -361,7 +361,8 @@ async function attempt(browser, p, opts, timing) {
     if (!hasApproval(p)) throw new NeedsUser("not_approved", "payload changed after approval");
     if (opts.shotBefore) await page.screenshot({ path: opts.shotBefore, fullPage: true });
     // The caller records "submitting" (and re-checks its lease and kill switch) BEFORE the click; a refusal stops here, unsent.
-    if (opts.onPhase) await opts.onPhase("submitting");
+    // A dry run's audit (opts.audit) also gets what each filled question holds at this instant; production passes only the phase.
+    if (opts.onPhase) await opts.onPhase("submitting", opts.audit ? { id: p.id, fields: await heldNow(page, fr.filled) } : undefined);
     // Past this line nothing is retried: the employer may have received it.
     const t2 = Date.now();
     timing.submitClicked = true;

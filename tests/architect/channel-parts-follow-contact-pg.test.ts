@@ -1,5 +1,5 @@
 // Parts follow the contact (s-release, 2026-11-10): the CI flake of flow-scenarios-channel-r4 on 3645456a ("digest:r4c20-103
-// delivered whole"), reproduced locally once in about 100 runs and fixed by 20261110180000_career_outbox_parts_follow_contact.sql.
+// delivered whole"), reproduced locally once in about 100 runs and fixed by 20261110190000_career_outbox_parts_follow_contact.sql.
 // Here with nothing left to chance, through the real delivery handler (trainee-deliver's handleDeliver over supabaseChannelStore
 // with the two-lane claim) on Postgres 16 with every migration and the PostgREST double, fake providers at the HTTP boundary:
 //   a digest that Telegram renders as two messages sends the first, the second gets a 502; the person unlinks Telegram; the row

@@ -297,7 +297,7 @@ MIGRATIONS=(
   20261109120000_career_pause_send_paths.sql
   20261109130000_career_outbox_interim.sql
   20261109150000_career_apply_handoff_finish.sql
-  20261110180000_career_outbox_parts_follow_contact.sql
+  20261110190000_career_outbox_parts_follow_contact.sql
 )
 MIGRATION_MARK=(
   "to_regclass('public.channel_threads') is not null"

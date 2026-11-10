@@ -126,9 +126,9 @@ function EXTRACT() {
     } else {
       d = { ...base, kind: "text", inputType: type };
       // Lever's "Current location": a text box whose value counts only once one of Lever's own places is picked from its list
-      // (the pick fills the hidden selectedLocation beside it).
+      // (the pick fills the hidden selectedLocation beside it). A box without that list is typed into as any other.
       const li = el.closest("li, .application-question");
-      if (el.classList.contains("location-input") || (el.name === "location" && li && li.querySelector("input[name='selectedLocation']"))) d.place = true;
+      if ((el.classList.contains("location-input") || el.name === "location") && li && li.querySelector(".dropdown-results")) d.place = true;
     }
     const q = push(d);
     el.setAttribute("data-upmore-q", q);
@@ -372,15 +372,16 @@ function matchPlace(labels, value) {
 }
 async function fillPlace(page, d, value) {
   const input = page.locator(sel(d.q)).first();
-  const item = page.locator(`li:has(${sel(d.q)}) .dropdown-results > *:visible, .application-question:has(${sel(d.q)}) .dropdown-results > *:visible`);
+  // Only this question's own result list (the .dropdown-results inside the question that holds the box).
+  const opts = () => page.locator(`li:has(${sel(d.q)}) .dropdown-results > *:visible`);
   await input.fill("");
   await input.pressSequentially(String(value), { delay: 25 });
   let list = [];
-  for (let i = 0; i < 30 && !list.length; i++) { await page.waitForTimeout(200); list = (await item.allInnerTexts().catch(() => [])).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean); }
+  for (let i = 0; i < 30 && !list.length; i++) { await page.waitForTimeout(200); list = (await opts().allInnerTexts().catch(() => [])).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean); }
   if (!list.length) return { ok: false, reason: "place_not_offered" };
   const m = matchPlace(list, value);
   if (m.error) return { ok: false, reason: m.error, options: list.slice(0, 12) };
-  await item.nth(m.index).click();
+  await pickOption(opts, m);
   const held = await page.evaluate(([q]) => {
     const el = document.querySelector(`[data-upmore-q="${q}"]`);
     const box = el && el.closest("li, .application-question");
@@ -409,11 +410,14 @@ async function fillCombo(page, d, value, pick) {
   if (!list.length) { await input.press("Escape").catch(() => {}); return { ok: false, reason: "options_not_readable" }; }
   const m = pick === "decline" ? (() => { const i = list.findIndex((o) => DECLINE.test(norm(o))); return i < 0 ? { error: "no_decline_option" } : { index: i }; })() : matchOption(list, value);
   if (m.error) { await input.press("Escape").catch(() => {}); return { ok: false, reason: m.error, options: list.slice(0, 40) }; }
-  await opts().nth(m.index).click();
+  await pickOption(opts, m);
   const s = await stateOf(page, d);
   return s.filled && norm(s.text) === norm(list[m.index]) ? { ok: true } : { ok: false, reason: "readback_mismatch" };
 }
 
+// The one click on a list option: `opts` is always the question's own list (a combobox's aria-controls list or its shell; Lever's
+// location results inside the question's own <li>), never another list on the page.
+async function pickOption(opts, m) { await opts().nth(m.index).click(); }
 const labelCounts = (qs) => { const m = new Map(); for (const d of qs) if (d.kind !== "file") m.set(norm(d.label), (m.get(norm(d.label)) || 0) + 1); return m; };
 // Decide what to do with one question. status: fill | ask | skip. Never invents a value.
 function decide(d, ctx) {

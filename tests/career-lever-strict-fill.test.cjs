@@ -105,3 +105,12 @@ test("a required Country select listing 'USA' takes the confirmed 'United States
   assert.equal(r.result, "pass", JSON.stringify({ ...r, diag: undefined }));
   assert.deepEqual(posts, []);
 });
+
+test("source: Lever's place results are read and clicked only inside the question's own <li>", () => {
+  const src = fs.readFileSync(path.join(__dirname, "../workers/career-browser/ats-fill.cjs"), "utf8");
+  const body = src.slice(src.indexOf("async function fillPlace"), src.indexOf("\n}\n", src.indexOf("async function fillPlace")));
+  assert.match(body, /const opts = \(\) => page\.locator\(`li:has\(\$\{sel\(d\.q\)\}\) \.dropdown-results > \*:visible`\);/);
+  assert.match(body, /await pickOption\(opts, m\);/);
+  assert.doesNotMatch(body, /\.click\(/, "the only click is pickOption's");
+  assert.match(src, /async function pickOption\(opts, m\) \{ await opts\(\)\.nth\(m\.index\)\.click\(\); \}/);
+});

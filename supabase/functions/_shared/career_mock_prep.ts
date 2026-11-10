@@ -427,7 +427,7 @@ export interface MockPrep {
   // The posting on file for this company and role: the person's applications, then their last search.
   posting(userId: string, threadId: string, want: { role: string; company: string | null; job_id?: string | null }): Promise<PostingOnFile | null>;
   // LOOP 11: the person's upcoming interviews as the invite stated them (career_interviews), soonest first.
-  interviews?(userId: string): Promise<InterviewOnFile[]>;
+  interviews?(userId: string, now: number): Promise<InterviewOnFile[]>;
   // The person's finished mocks, newest first (career_events, kind mock_done).
   history(userId: string): Promise<EventLike[]>;
   // One finished mock, written as a mock_done event. Never fails the turn.
@@ -566,8 +566,8 @@ export function supabaseMockPrep(admin: any, env: { get(k: string): string | und
       }
       return null;
     },
-    async interviews(userId) {
-      const today = new Date().toISOString().slice(0, 10);
+    async interviews(userId, now) {
+      const today = new Date(now).toISOString().slice(0, 10);
       const r = await admin.from("career_interviews").select("company,role,application_ref,when_said,interview_date,format,interviewers,cancelled_at,seen_at")
         .eq("user_id", userId).is("cancelled_at", null).order("interview_date", { ascending: true, nullsFirst: false }).limit(20);
       if (r.error) throw new Error(`read the interviews: ${r.error.message}`);

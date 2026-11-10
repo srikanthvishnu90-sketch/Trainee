@@ -745,7 +745,7 @@ async function prepTurn(o: TurnIn, prep: MockPrep): Promise<TurnOut | null> {
   // invite stated it) names the company, the role and the posting, and the mock is built from that posting.
   if (prep.interviews && isInterviewPrepAsk(o.message)) {
     let ivs: InterviewOnFile[] = [];
-    try { ivs = await prep.interviews(o.userId); } catch (e) { console.error("mock: interviews not read", e instanceof Error ? e.message : String(e)); }
+    try { ivs = await prep.interviews(o.userId, o.now); } catch (e) { console.error("mock: interviews not read", e instanceof Error ? e.message : String(e)); }
     const pick = pickInterview(o.message, ivs);
     if (pick.why === "several") return { reply: whichInterviewText(ivs), status: "which_interview", intent: MOCK_DONE_INTENT };
     if (pick.iv) {
@@ -818,7 +818,7 @@ export async function mockTurn(
     // FEATURE 11: a posting on file for this company and role binds the mock to it.
     let iv: InterviewOnFile | null = null;
     if (o.store.prep?.interviews && cmd.company) {
-      try { iv = pickInterview(cmd.company, await o.store.prep.interviews(o.userId)).iv; } catch (e) { console.error("mock: interviews not read", e instanceof Error ? e.message : String(e)); }
+      try { iv = pickInterview(cmd.company, await o.store.prep.interviews(o.userId, o.now)).iv; } catch (e) { console.error("mock: interviews not read", e instanceof Error ? e.message : String(e)); }
     }
     const s = (o.store.prep ? await boundStart(o, o.store.prep, iv?.job_id ? { ...cmd, job_id: iv.job_id } : cmd, null, iv) : null) ?? start({ role: cmd.role, company: cmd.company, minutes: cmd.minutes, now: o.now });
     await o.store.save(o.userId, o.threadId, s.state);

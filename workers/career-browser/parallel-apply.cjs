@@ -362,7 +362,14 @@ async function attempt(browser, p, opts, timing) {
       await page.click("[data-upmore-next]");
       const moved = await page.waitForFunction((b) => [...document.querySelectorAll("input, select, textarea")].filter((e) => e.offsetWidth || e.offsetHeight).length + "|" + (document.body.innerText || "").length !== b, before, { timeout: 5000 }).then(() => true, () => false);
       // The page did not move on (its own check held the step back): handed back, never pressed again.
-      if (!moved) { const e = new NeedsUser("field_not_filled", "step_did_not_advance"); e.needs = [{ label: "step_did_not_advance", reason: "form_rejects_value" }]; throw e; }
+      if (!moved) {
+        // What the page says held it back, in its own visible words (an error line on the step), for the person and the record.
+        const said = await page.evaluate(() => [...document.querySelectorAll("form [class*='error' i], form [role=alert]")].filter((e) => (e.offsetWidth || e.offsetHeight) && !e.querySelector("[class*='error' i]"))
+          .map((e) => (e.innerText || "").replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 3).map((t) => t.slice(0, 60))).catch(() => []);
+        const e = new NeedsUser("field_not_filled", "step_did_not_advance");
+        e.needs = [{ label: said.length ? `step_did_not_advance: ${said.join(" / ")}` : "step_did_not_advance", reason: "form_rejects_value" }];
+        throw e;
+      }
       await page.waitForTimeout(300);
       onAllowedHost();
     }

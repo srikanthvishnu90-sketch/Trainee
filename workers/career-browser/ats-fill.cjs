@@ -120,7 +120,10 @@ function EXTRACT() {
     seen.add(el);
     const node = labelNode(el);
     const label = node ? nodeText(node) : clean(el.getAttribute("aria-label") || el.getAttribute("placeholder") || el.name || "");
-    const base = { label, name: el.name || "", required: isReq([el], node), eeo: eeoOf(el, label) };
+    // A file box under a question's heading (Breezy: an optional attachment beside a required written answer) is required only
+    // when it says so itself; the heading's star is the written answer's.
+    const fromHeading = node && type === "file" && node === itemHeading(el);
+    const base = { label, name: el.name || "", required: fromHeading ? isReq([el], null) : isReq([el], node), eeo: eeoOf(el, label) };
     let d;
     if (type === "file") {
       const hay = `${label} ${el.name} ${el.id}`;

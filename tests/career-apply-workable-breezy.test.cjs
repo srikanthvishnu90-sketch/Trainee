@@ -55,18 +55,18 @@ const breezy = (k) => `<!doctype html><html><head><style>.ng-hide{display:none!i
 <h3><span class="polygot">Full Name</span><span class="required" title="Required">*</span></h3><input class="polygot" required ng-model="candidate.name" placeholder="Full Name" type="text" name="cName">
 <h3><span class="polygot">Email Address</span><span class="required" title="Required">*</span></h3><input class="email-address polygot" required placeholder="Email Address" type="email" name="cEmail">
 <h3><span class="polygot">Phone Number</span><span class="required" title="Required">*</span></h3><input class="phone-number polygot" required placeholder="Phone Number" type="text" name="cPhoneNumber"></div></div>
-${k === "breezy_question" ? `<div data-section="q1" class="ng-hide"><ul><li><h3><span>How many years have you worked in total?</span><span class="required" title="Required">*</span></h3><select name="section_1790498884469_question_0" required><option value="? undefined:undefined ?"></option><option value="&lt;2">&lt;2</option><option value="3 to 5">3 to 5</option></select></li></ul></div>` : ""}
+${k === "breezy_question" ? `<div data-section="q1" class="ng-hide"><ul><li><h3><span>What is your dream job?</span><span class="required" title="Required">*</span></h3><textarea name="section_1790498884469_question_1" required></textarea><input type="file" name="section_1790498884469_question_1_file" style="display:none"></li><li><h3><span>How many years have you worked in total?</span><span class="required" title="Required">*</span></h3><select name="section_1790498884469_question_0" required><option value="? undefined:undefined ?"></option><option value="&lt;2">&lt;2</option><option value="3 to 5">3 to 5</option></select></li></ul></div>` : ""}
 <div data-section="submission" class="ng-hide"><h2><span class="polygot">You're nearly done</span></h2><div class="section-body">Click the Submit button below to finish.</div></div>
 <div class="apply-container"><ul class="navigation-buttons">
 <li class="apply-button ng-hide" id="li-back"><button class="button green large bzyButtonColor" type="button"><span class="polygot">Back</span></button></li>
 <li class="apply-button" id="li-next"><button id="next" class="button green large bzyButtonColor" type="button"><span class="polygot">Continue</span></button></li>
-<li class="apply-button ng-hide" id="li-submit"><button id="go" class="button green large bzyButtonColor" type="button"><span class="polygot">Submit Application</span></button></li></ul></div></form>
+<li class="apply-button ng-hide" id="li-submit"><button id="go" class="button green large bzyButtonColor" type="button"><span class="polygot">Submit Application</span></button></li></ul><div id="err" class="ng-hide error-container"><span class="error polygot">A resume is required</span></div></div></form>
 <script>
 // nextSection(): the page's own script checks the shown step and shows the next one; nothing is sent until apply().
 const secs = [...document.querySelectorAll("[data-section]")];
 let cur = 0;
 document.getElementById("next").onclick = () => {
-  ${k === "breezy_stuck" ? "return;" : ""}
+  ${k === "breezy_stuck" ? 'document.getElementById("err").classList.remove("ng-hide"); return;' : ""}
   if ([...secs[cur].querySelectorAll("[required]")].some((e) => e.type === "file" ? !e.files.length : !e.value || /undefined/.test(e.value))) return;
   secs[cur].classList.add("ng-hide"); cur++; secs[cur].classList.remove("ng-hide");
   if (cur === secs.length - 1) { document.getElementById("li-next").classList.add("ng-hide"); document.getElementById("li-submit").classList.remove("ng-hide"); }
@@ -157,7 +157,8 @@ test("Breezy step form: a later step's required question with no confirmed answe
   const r = await applyOne(browser, job("breezy_question", "breezy"), { stepTimeoutMs: 8000, retries: 0 });
   assert.equal(sent(n, "breezy_question").length, 0, "nothing may be sent");
   assert.equal(r.reason, "missing_required_answer", JSON.stringify(r));
-  assert.deepEqual(r.needs.map((x) => x.label), ["How many years have you worked in total?"]);
+  // The written answer is asked by its heading; the optional attachment beside it is not a required upload.
+  assert.deepEqual(r.needs.map((x) => [x.label, x.reason]), [["What is your dream job?", "no_confirmed_answer"], ["How many years have you worked in total?", "no_confirmed_answer"]]);
 });
 
 test("Breezy step form whose Continue does not advance: handed back, Continue not pressed again, nothing sent", { skip, timeout: 60000 }, async () => {
@@ -167,4 +168,5 @@ test("Breezy step form whose Continue does not advance: handed back, Continue no
   assert.equal(r.status, "not_submitted");
   assert.equal(r.reason, "field_not_filled", JSON.stringify(r));
   assert.equal(r.field, "step_did_not_advance");
+  assert.deepEqual(r.needs, [{ label: "step_did_not_advance: A resume is required", reason: "form_rejects_value" }]);
 });

@@ -154,6 +154,11 @@ function APPLY_CANDIDATES(args) {
 const TEST_FACTS = { first_name: "Testy", last_name: "Example", full_name: "Testy Example", email: "dry-run@example.invalid", phone: "+1 555 0100", location: "Chicago, IL", country: "United States", eeo_policy: "decline",
   // Coordinator ruling 2026-11-10 (b-ashby): a synthetic profile URL, typed into fields only, never opened.
   linkedin_url: "https://www.linkedin.com/in/testy-example-dry-run" };
+// The strict bench's second, separate column (never in place of TEST_FACTS): the same synthetic person with every fact a real
+// applicant confirms before a first application: the city and state they live in, US work authorization and no sponsorship
+// need. Synthetic, typed into the dry-run form only. The resume is the same synthetic file.
+const FULL_FACTS = Object.freeze({ ...TEST_FACTS, city: "Chicago", state: "Illinois", work_authorization: "Yes", sponsorship: "No" });
+const PERSONAS = Object.freeze({ default: TEST_FACTS, full: FULL_FACTS });
 function syntheticResume(dir) {
   fs.mkdirSync(dir, { recursive: true });
   const p = path.join(dir, "TEST-synthetic-resume.pdf");
@@ -321,4 +326,4 @@ function markdown(rows, meta = {}) {
   return lines.join("\n") + "\n";
 }
 
-module.exports = { SUBMIT_TRAP, MAX_PER_PROVIDER, UA_TOKEN, readSample, parseRobots, robotsAllows, createPacer, applyUrlFor, schemaKeyOf, evalPosting, summarize, markdown, syntheticResume, TEST_FACTS, APPLY_TEXT, NEVER_CLICK };
+module.exports = { SUBMIT_TRAP, MAX_PER_PROVIDER, UA_TOKEN, readSample, parseRobots, robotsAllows, createPacer, applyUrlFor, schemaKeyOf, evalPosting, summarize, markdown, syntheticResume, TEST_FACTS, FULL_FACTS, PERSONAS, APPLY_TEXT, NEVER_CLICK };

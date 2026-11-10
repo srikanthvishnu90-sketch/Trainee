@@ -15,7 +15,9 @@
 //     no `mutation`), which some boards use to load the form; each one is logged;
 //   - a page script cancels every form submit, form.submit() and requestSubmit(), and counts the attempt;
 //   - the runner is stopped before its click, with retries 0; robots.txt is obeyed; 1 page load a second per host.
-//   node scripts/browser-eval/strict.cjs --sample scripts/browser-eval/sample.csv --label strict-1 [--max-per-provider 20] [--providers greenhouse,lever,workable,breezy,ashby]
+//   node scripts/browser-eval/strict.cjs --sample scripts/browser-eval/sample.csv --label strict-1 [--max-per-provider 20] [--providers greenhouse,lever,workable,breezy,ashby] [--persona default|full]
+// --persona full (eval-lib FULL_FACTS) is a separate run and a separate column: the same synthetic person with the facts a real
+// applicant confirms (city, state, US work authorization, no sponsorship need). The default persona's number is never replaced.
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
@@ -80,14 +82,16 @@ async function robotsOk(url, cache, ua) {
 }
 
 async function strictPosting(browser, item, o) {
-  const r = { provider: item.provider, url: item.url, result: "fail", reason: null, field: null, needs: null, sent_blocked: 0, upload_simulated: 0, graphql_reads: 0, submit_attempts: 0, ms: 0 };
+  const persona = o.persona || "default";
+  if (!lib.PERSONAS[persona]) throw new Error(`unknown persona: ${persona}`);
+  const r = { provider: item.provider, url: item.url, persona, result: "fail", reason: null, field: null, needs: null, sent_blocked: 0, upload_simulated: 0, graphql_reads: 0, submit_attempts: 0, ms: 0 };
   const t0 = Date.now();
   const rb = await robotsOk(item.url, o.robots, o.ua);
   if (rb !== true) { r.reason = rb === "unreachable" ? "host_unreachable" : "robots_disallowed"; r.ms = Date.now() - t0; return r; }
   const host = new URL(item.url).hostname.toLowerCase();
   const allowHosts = [...new Set([host, ...(PROVIDER_HOSTS[item.provider] || [])])];
   const resumeSha = crypto.createHash("sha256").update(fs.readFileSync(o.resumePath)).digest("hex");
-  const p = { id: `${item.provider}-${item.n ?? ""}`, ats: item.provider, url: item.url, facts: lib.TEST_FACTS, answers: {}, resume: { path: o.resumePath, sha256: resumeSha, preparedWithSha256: resumeSha } };
+  const p = { id: `${item.provider}-${item.n ?? ""}`, ats: item.provider, url: item.url, facts: lib.PERSONAS[persona], answers: {}, resume: { path: o.resumePath, sha256: resumeSha, preparedWithSha256: resumeSha } };
   p.approval = { approval_id: "strict-dry-run", hash: payloadHash(p) };
   const gate = async (req) => {
     let u; try { u = new URL(req.url()); } catch { return false; }
@@ -127,9 +131,9 @@ function summarize(rows) {
   return { all, prov };
 }
 
-function markdown(label, s) {
+function markdown(label, s, persona = "default") {
   const pct = (a, b) => (b ? `${((100 * a) / b).toFixed(1)}%` : "-");
-  const L = [`# Strict browser benchmark ${label}`, "", `Pass = the production runner reached the instant before Submit with every required field filled and read back (synthetic person, no custom answers). Denominator = every sampled posting.`, "",
+  const L = [`# Strict browser benchmark ${label} (persona: ${persona})`, "", `Pass = the production runner reached the instant before Submit with every required field filled and read back (synthetic person${persona === "full" ? " with the full confirmed profile: city, state, US work authorization, no sponsorship need" : ""}, no custom answers). Denominator = every sampled posting.`, "",
     `**Pass: ${s.all.pass} / ${s.all.sampled} (${pct(s.all.pass, s.all.sampled)}).** Ready if answered (not a pass): ${s.all.ready_if_answered}. Ready except upload (not a pass; the resume upload was simulated in the browser and needs the person's yes): ${s.all.ready_except_upload} (uploads simulated: ${s.all.uploads_simulated}). Sends blocked in the browser: ${s.all.sends_blocked}. GraphQL reads allowed: ${s.all.graphql_reads}. Breaches (anything reported as sent): ${s.all.breaches}.`, "",
     "| provider | sampled | pass | pass % | ready if answered | ready except upload | fail | top failure reasons |", "|---|---|---|---|---|---|---|---|"];
   for (const x of s.prov) L.push(`| ${x.provider} | ${x.sampled} | ${x.pass} | ${pct(x.pass, x.sampled)} | ${x.ready_if_answered} | ${x.ready_except_upload} | ${x.fail} | ${x.top_fail.map(([k, n]) => `${k} ${n}`).join("; ")} |`);
@@ -147,20 +151,22 @@ async function main() {
   let pw; for (const id of [process.env.UPMORE_PLAYWRIGHT_PATH, "playwright"]) { if (!id) continue; try { pw = require(id); break; } catch { /* next */ } }
   if (!pw) { console.error("playwright not found (set UPMORE_PLAYWRIGHT_PATH)"); process.exit(2); }
   const browser = await pw.chromium.launch({ headless: true });
-  const o = { robots: new Map(), pacer: lib.createPacer(), ua: `Mozilla/5.0 ${lib.UA_TOKEN}`, resumePath: lib.syntheticResume(path.join(out, "fixtures")) };
+  const persona = String(arg("persona", "default"));
+  if (!lib.PERSONAS[persona]) { console.error(`unknown --persona ${persona} (default|full)`); process.exit(2); }
+  const o = { persona, robots: new Map(), pacer: lib.createPacer(), ua: `Mozilla/5.0 ${lib.UA_TOKEN}`, resumePath: lib.syntheticResume(path.join(out, "fixtures")) };
   const rows = new Array(items.length); let next = 0;
   const conc = Math.max(1, Number(arg("concurrency", 6)));
   await Promise.all(Array.from({ length: conc }, async () => { while (next < items.length) { const i = next++; rows[i] = await strictPosting(browser, items[i], o);
-    const x = rows[i]; console.log(["STRICT", x.provider, x.result, x.reason, x.field || x.error || "", `blocked=${x.sent_blocked}`, `gql=${x.graphql_reads}`, `upload_simulated=${x.upload_simulated}`, `${(x.ms / 1000).toFixed(1)}s`, x.url].join(" | "));
+    const x = rows[i]; console.log(["STRICT", x.provider, x.result, x.reason, x.field || x.error || "", `blocked=${x.sent_blocked}`, `gql=${x.graphql_reads}`, `upload_simulated=${x.upload_simulated}`, `${(x.ms / 1000).toFixed(1)}s`, x.url, `persona=${x.persona}`].join(" | "));
     if (x.result !== "pass" && (x.diag || x.check)) console.log("DIAG | " + x.provider + " | " + JSON.stringify({ check: x.check, blocked: x.blocked || [], ...x.diag }));
     // Why each field was handed back, and the options a choice offered (the posting's own words), for the record.
     if (x.result !== "pass" && x.needs) console.log("NEEDS | " + x.provider + " | " + x.url + " | " + JSON.stringify([...x.needs].sort((m, n) => (m.reason === "no_confirmed_answer") - (n.reason === "no_confirmed_answer")).slice(0, 12).map((n) => ({ label: String(n.label || "").slice(0, 60), reason: n.reason, ...(n.kind ? { kind: n.kind } : {}), ...(n.detail ? { detail: String(n.detail).slice(0, 160) } : {}), ...(n.options ? { options: n.options.slice(0, 12).map((o) => String(o).slice(0, 40)) } : {}) })))); } }));
   await browser.close();
-  const s = summarize(rows);
+  const s = summarize(rows); s.persona = persona;
   fs.writeFileSync(path.join(out, "strict.jsonl"), rows.map((x) => JSON.stringify(x)).join("\n") + "\n");
   fs.writeFileSync(path.join(out, "strict-summary.json"), JSON.stringify(s, null, 2));
-  fs.writeFileSync(path.join(out, "strict-summary.md"), markdown(label, s));
-  process.stdout.write(markdown(label, s));
+  fs.writeFileSync(path.join(out, "strict-summary.md"), markdown(label, s, persona));
+  process.stdout.write(markdown(label, s, persona));
   if (s.all.breaches) process.exit(3);
 }
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });

@@ -217,7 +217,16 @@ const FACT_RULES = [
   // One "Address" box (Breezy asks it on many forms) takes the person's confirmed full address; a street line takes the street.
   [/^(your )?(home |mailing |postal |residential )?address$/, "full_address"],
   [/^(your )?(residential )?street address$|^address line 1$/, "street_address"],
+  // A "State" question takes the confirmed state ("Illinois" or "IL"); a select picks it by name or by its postal code (matchState).
+  [/^(state|state province|state or province|state region|state of residence|province)$/, "state"],
+  // Two eligibility questions a person confirms once, answered only on a Yes/No choice (CHOICE_FACTS), never typed: work
+  // authorization only where the question names the United States, sponsorship only where it names no other country.
+  [/^(are you )?(currently )?(legally )?(authori[sz]ed|eligible|permitted) to (legally )?work (lawfully )?in the (u s|us|usa|united states)( of america)?$/, "work_authorization"],
+  [/^(will|do|would) you (now or in the future |now or at any point in the future |in the future )?(require|need) (visa )?(employment )?sponsorship( (for|to obtain) (an )?(employment )?(visa|work) (status|visa|permit))?( (to work )?in the (u s|us|usa|united states)( of america)?)?$/, "sponsorship"],
 ];
+// Facts that answer only a Yes/No choice (radio, buttons, select, combobox): typed into a text box they would be another answer.
+const CHOICE_FACTS = new Set(["work_authorization", "sponsorship"]);
+const CHOICE_KINDS = ["radio", "buttons", "select", "combobox"];
 // ROUND 3: the person's own contact facts never answer a question about someone else ("Phone number of your reference",
 // "Email of the person who referred you"): the same rule as career_apply.ts SOMEONE_ELSE.
 const SOMEONE_ELSE = /\breferr|\breferen|\bteam member|\breferee|\bemergency|\bmanager|\bsupervisor|\brecruiter|\bspouse|\bparent|\bguardian|\bemployee who/;
@@ -236,6 +245,10 @@ function factValue(label, facts) {
   for (const [re, key] of FACT_RULES) {
     if (!re.test(n)) continue;
     if (key === "full_name") return facts.full_name || (facts.first_name && facts.last_name ? `${facts.first_name} ${facts.last_name}` : undefined);
+    // "City" alone asks for the city: the confirmed city when there is one, else the confirmed place as before.
+    if (key === "location" && /^(current |your )?city$/.test(n) && !blank(facts.city)) return facts.city;
+    // An eligibility fact is only ever a confirmed Yes or No.
+    if (CHOICE_FACTS.has(key)) return /^(yes|no)$/i.test(String(facts[key] || "").trim()) ? (/^y/i.test(String(facts[key]).trim()) ? "Yes" : "No") : undefined;
     return facts[key];
   }
   return undefined;
@@ -408,19 +421,46 @@ function phoneCountryMatch(labels, country, phone) {
 // A place the person confirmed ("Chicago, IL") is one of the board's places only when the city is the same and the next part is
 // the same region, by name or by its US postal code ("Chicago, Illinois, United States"). Exactly one such place, or none.
 const US_STATES = { al: "alabama", ak: "alaska", az: "arizona", ar: "arkansas", ca: "california", co: "colorado", ct: "connecticut", de: "delaware", dc: "district of columbia", fl: "florida", ga: "georgia", hi: "hawaii", id: "idaho", il: "illinois", in: "indiana", ia: "iowa", ks: "kansas", ky: "kentucky", la: "louisiana", me: "maine", md: "maryland", ma: "massachusetts", mi: "michigan", mn: "minnesota", ms: "mississippi", mo: "missouri", mt: "montana", ne: "nebraska", nv: "nevada", nh: "new hampshire", nj: "new jersey", nm: "new mexico", ny: "new york", nc: "north carolina", nd: "north dakota", oh: "ohio", ok: "oklahoma", or: "oregon", pa: "pennsylvania", ri: "rhode island", sc: "south carolina", sd: "south dakota", tn: "tennessee", tx: "texas", ut: "utah", vt: "vermont", va: "virginia", wa: "washington", wv: "west virginia", wi: "wisconsin", wy: "wyoming" };
+const US_CODE = Object.fromEntries(Object.entries(US_STATES).map(([k, v]) => [v, k]));
+const isUS = (c) => { const n = norm(c); return n === "united states" || (COUNTRY_NAMES[0] || []).includes(n); };
+// The same US state by name or by its postal code ("IL", "Illinois"); anything else is itself (normalised).
 const region = (s) => { const n = norm(s); return US_STATES[n] || n; };
-function matchPlace(labels, value) {
+const isState = (x) => US_STATES[norm(x)] !== undefined || US_CODE[norm(x)] !== undefined;
+// A confirmed place ("Chicago, IL") onto a board's places ("Chicago, Illinois, United States"). The option that is the place's
+// own text wins. Else exactly one option whose city is the same and whose region is the same (word for word, or the same US
+// state by name or postal code), and whose country, when the option names one, is the country: the place's own third part or
+// the person's confirmed `country`. `country` "" means none is confirmed, so an option naming a country is refused (Ashby);
+// `country` undefined (a caller with no country to check, Lever's list) accepts only the United States after a US state.
+// Never another state, never a guess between two: "Chicago, Indiana" is not "Chicago, IL", "Paris, Ile-de-France, France" is
+// not "Paris, TX", and "Chicago, Illinois, United States" beside "Chicago, IL, USA" is ambiguous.
+function matchPlace(labels, value, country) {
   const exact = matchOption(labels, value);
   if (!exact.error) return exact;
   const want = String(value).split(",").map((x) => x.trim()).filter(Boolean);
-  if (want.length < 2) return { error: "no_matching_option" };
+  if (want.length < 2 || want.length > 3) return { error: "no_matching_option" };
+  const wantCountry = want[2] || (country === undefined || country === null ? undefined : String(country).trim());
+  const sameCountry = (c) => (wantCountry === undefined ? isUS(c) && isState(want[1]) : !!wantCountry && (norm(c) === norm(wantCountry) || countryNames(wantCountry).includes(norm(c))));
   const ix = labels.map((l, i) => {
-    const got = String(l).split(",").map((x) => x.trim());
-    return got.length >= 2 && norm(got[0]) === norm(want[0]) && region(got[1]) === region(want[1]) && (want.length < 3 || got.length >= 3 && norm(got[2]) === norm(want[2])) ? i : -1;
+    const got = String(l).split(",").map((x) => x.trim()).filter(Boolean);
+    if (got.length < 2 || got.length > 3 || norm(got[0]) !== norm(want[0])) return -1;
+    if (got.length === 3 && !sameCountry(got[2])) return -1;
+    if (norm(got[1]) === norm(want[1])) return i;
+    const usOk = (got.length < 3 || isUS(got[2])) && (!wantCountry || isUS(wantCountry));
+    return usOk && isState(got[1]) && isState(want[1]) && region(got[1]) === region(want[1]) ? i : -1;
   }).filter((i) => i >= 0);
   return ix.length === 1 ? { index: ix[0] } : { error: ix.length ? "ambiguous_option" : "no_matching_option" };
 }
-async function fillPlace(page, d, value) {
+// A confirmed US state ("IL" or "Illinois") onto a state list: the option that is its own text first, else the one option that
+// is the same state by name or postal code. Never another state, never a guess between two.
+function matchState(labels, value) {
+  const exact = matchOption(labels, value);
+  if (!exact.error) return exact;
+  const v = norm(value);
+  if (!isState(v)) return { error: "no_matching_option" };
+  const ix = labels.map((l, i) => (isState(l) && region(l) === region(v) ? i : -1)).filter((i) => i >= 0);
+  return ix.length === 1 ? { index: ix[0] } : { error: ix.length ? "ambiguous_option" : "no_matching_option" };
+}
+async function fillPlace(page, d, value, country) {
   const input = page.locator(sel(d.q)).first();
   // Only this question's own result list (the .dropdown-results inside the question that holds the box).
   const opts = () => page.locator(`li:has(${sel(d.q)}) .dropdown-results > *:visible`);
@@ -429,7 +469,7 @@ async function fillPlace(page, d, value) {
   let list = [];
   for (let i = 0; i < 30 && !list.length; i++) { await page.waitForTimeout(200); list = (await opts().allInnerTexts().catch(() => [])).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean); }
   if (!list.length) return { ok: false, reason: "place_not_offered" };
-  const m = matchPlace(list, value);
+  const m = matchPlace(list, value, country);
   if (m.error) return { ok: false, reason: m.error, options: list.slice(0, 12) };
   await pickOption(opts, m);
   const held = await page.evaluate(([q]) => {
@@ -445,7 +485,7 @@ async function fillPlace(page, d, value) {
 const COUNTRY_NAMES = [["united states", "united states of america", "usa", "us", "u s a", "u s"], ["united kingdom", "uk", "great britain"]];
 const countryNames = (v) => (COUNTRY_NAMES.find((g) => g.includes(norm(v))) || []).filter((x) => x !== norm(v));
 
-async function fillCombo(page, d, value, pick, phone) {
+async function fillCombo(page, d, value, pick, phone, country) {
   const input = page.locator(sel(d.q)).first();
   // Only this dropdown's own options: its aria-controls list, else the options inside its own shell. A phone widget's country
   // list, or any other list on the page, is never searched for an answer.
@@ -473,7 +513,9 @@ async function fillCombo(page, d, value, pick, phone) {
     return { ok: false, reason: "options_not_readable", ...(seen ? { detail: seen } : {}) };
   }
   const m = pick === "decline" ? (() => { const i = list.findIndex((o) => DECLINE.test(norm(o))); return i < 0 ? { error: "no_decline_option" } : { index: i }; })()
-    : d.phoneCountry && pick === "phone_country" ? phoneCountryMatch(list, value, phone) : matchOption(list, value);
+    : d.phoneCountry && pick === "phone_country" ? phoneCountryMatch(list, value, phone)
+    : pick === "state" ? matchState(list, value)
+    : ashPlaces && pick === "value" ? matchPlace(list, value, blank(country) ? "" : country) : matchOption(list, value);
   if (m.error) { await input.press("Escape").catch(() => {}); return { ok: false, reason: m.error, options: list.slice(0, 40), ...(d.phoneCountry || pick === "phone_country" ? { detail: `options: ${list.slice(0, 6).join(" / ").slice(0, 140)}` } : {}) }; }
   await pickOption(opts, m);
   const s = await stateOf(page, d);
@@ -507,7 +549,7 @@ async function pickOption(opts, m) { await opts().nth(m.index).click(); }
 // label. Ashby puts its "Phone" label over the number box and over a Yes/No texting consent (strict benchmark run 42719264485:
 // 5 of 20 postings stopped on label_on_form_twice); the consent can never hold the number, so the number box is not ambiguous.
 const labelKinds = (qs) => { const m = new Map(); for (const d of qs) if (d.kind !== "file") { const k = labelKey(d); if (!m.has(k)) m.set(k, []); m.get(k).push(d.kind); } return m; };
-const takesFact = (kind, label) => ["text", "textarea", "select"].includes(kind) || (kind === "combobox" && /location|city/i.test(label));
+const takesFact = (kind, label) => CHOICE_FACTS.has(factKey(label)) ? CHOICE_KINDS.includes(kind) : ["text", "textarea", "select"].includes(kind) || (kind === "combobox" && /location|city|state/i.test(label));
 // Decide what to do with one question. status: fill | ask | skip. Never invents a value.
 function decide(d, ctx) {
   const { facts, answers, resumePath } = ctx;
@@ -534,7 +576,10 @@ function decide(d, ctx) {
     if (!blank(facts && facts.country) && !blank(facts && facts.phone)) return { status: "fill", value: String(facts.country), pick: "phone_country", source: "fact", soft: true };
     return d.required ? { status: "ask", reason: "no_confirmed_answer" } : { status: "skip", reason: "optional_left_blank" };
   }
-  const f = ["text", "textarea", "select"].includes(d.kind) ? factValue(d.label, facts || {}) : d.kind === "combobox" && /location|city|country/i.test(d.label) ? factValue(d.label, facts || {}) : undefined;
+  // A Yes/No eligibility fact goes only onto a choice; any other fact into a box, a select, or a place/country combobox.
+  const ck = factKey(d.label);
+  const f = CHOICE_FACTS.has(ck) ? (CHOICE_KINDS.includes(d.kind) ? factValue(d.label, facts || {}) : undefined)
+    : ["text", "textarea", "select"].includes(d.kind) ? factValue(d.label, facts || {}) : d.kind === "combobox" && /location|city|country|state/i.test(d.label) ? factValue(d.label, facts || {}) : undefined;
   // A country dropdown is tried with the confirmed country; when none of its options is exactly that country it goes back to
   // the person as an unanswered question (soft), the same as before it was tried.
   if (!blank(f)) return { status: "fill", value: String(f), source: "fact", ...(d.kind === "combobox" && /country/i.test(d.label) && !/location|city/i.test(d.label) ? { soft: true } : {}) };
@@ -556,13 +601,19 @@ async function doFill(page, d, dec, ctx) {
     const labels = d.options.map((o) => o.label);
     if (matchOption(labels, v).error) { const alt = countryNames(v).find((x) => !matchOption(labels, x).error); if (alt) return d.kind === "select" ? fillSelect(page, d, labels[matchOption(labels, alt).index]) : fillChoice(page, d, labels[matchOption(labels, alt).index], false); }
   }
-  if (d.place && dec.source === "fact") return fillPlace(page, d, v);
+  if (d.place && dec.source === "fact") return fillPlace(page, d, v, ctx.facts && ctx.facts.country);
+  // A state select offers the state by name or by code: the exact option first, else the one option that is the same US state.
+  if (dec.source === "fact" && factKey(d.label) === "state" && d.kind === "select") {
+    const m = matchState(d.options.map((o) => o.label), v);
+    if (m.error) return { ok: false, reason: m.error, options: d.options.map((o) => o.label) };
+    return fillSelect(page, d, d.options[m.index].label);
+  }
   switch (d.kind) {
     case "select": return fillSelect(page, d, v);
     case "radio": case "buttons": return fillChoice(page, d, v, false);
     case "checkgroup": return fillChoice(page, d, v, true);
     case "checkbox": return YES.test(norm(v)) || /^(checked|agree|i agree|accept)/.test(norm(v)) ? fillCheckbox(page, d) : { ok: false, reason: "not_agreed" };
-    case "combobox": return fillCombo(page, d, v, dec.pick === "phone_country" ? "phone_country" : "value", ctx.facts && ctx.facts.phone);
+    case "combobox": return fillCombo(page, d, v, dec.pick === "phone_country" ? "phone_country" : dec.source === "fact" && factKey(d.label) === "state" ? "state" : "value", ctx.facts && ctx.facts.phone, ctx.facts && ctx.facts.country);
     default: return fillText(page, d, v);
   }
 }
@@ -654,4 +705,4 @@ async function heldNow(page, filled) {
     return { label: f.label, kind: f.kind, source: f.source, approved: f.value, held: held === undefined ? null : held, gone: !!s.gone };
   });
 }
-module.exports = { heldNow, fillForm, matchOption, matchPlace, countryNames, phoneCountryMatch, factKey, factValue, answerFor, decide, labelCounts, labelKinds, norm, EXTRACT, STATE, DECLINE };
+module.exports = { heldNow, fillForm, matchOption, matchPlace, matchState, countryNames, phoneCountryMatch, factKey, factValue, answerFor, decide, labelCounts, labelKinds, norm, EXTRACT, STATE, DECLINE };

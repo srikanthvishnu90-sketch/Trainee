@@ -151,7 +151,9 @@ function APPLY_CANDIDATES(args) {
 }
 
 // ---------------------------------------------------------------------------------------------------------- one posting
-const TEST_FACTS = { first_name: "Testy", last_name: "Example", full_name: "Testy Example", email: "dry-run@example.invalid", phone: "+1 555 0100", location: "Chicago, IL", country: "United States", eeo_policy: "decline" };
+const TEST_FACTS = { first_name: "Testy", last_name: "Example", full_name: "Testy Example", email: "dry-run@example.invalid", phone: "+1 555 0100", location: "Chicago, IL", country: "United States", eeo_policy: "decline",
+  // Coordinator ruling 2026-11-10 (b-ashby): a synthetic profile URL, typed into fields only, never opened.
+  linkedin_url: "https://www.linkedin.com/in/testy-example-dry-run" };
 function syntheticResume(dir) {
   fs.mkdirSync(dir, { recursive: true });
   const p = path.join(dir, "TEST-synthetic-resume.pdf");

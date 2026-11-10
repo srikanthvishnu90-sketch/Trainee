@@ -15,7 +15,7 @@
 //     no `mutation`), which some boards use to load the form; each one is logged;
 //   - a page script cancels every form submit, form.submit() and requestSubmit(), and counts the attempt;
 //   - the runner is stopped before its click, with retries 0; robots.txt is obeyed; 1 page load a second per host.
-//   node scripts/browser-eval/strict.cjs --sample scripts/browser-eval/sample.csv --label strict-1 [--max-per-provider 20]
+//   node scripts/browser-eval/strict.cjs --sample scripts/browser-eval/sample.csv --label strict-1 [--max-per-provider 20] [--providers ashby,lever]
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
@@ -69,7 +69,7 @@ async function strictPosting(browser, item, o) {
     if (/^(data|blob|about):$/.test(u.protocol)) return true;
     if (!/^(GET|HEAD|OPTIONS)$/.test(req.method())) {
       if (graphqlRead(req)) { r.graphql_reads++; }
-      else { r.sent_blocked++; return false; }
+      else { r.sent_blocked++; if ((r.blocked_paths = r.blocked_paths || []).length < 8) r.blocked_paths.push(`${req.method()} ${u.host}${u.pathname.slice(0, 60)}${u.search.slice(0, 40)}`); return false; }
     }
     if (["image", "media", "font"].includes(req.resourceType())) return false;
     // Polite pacing is per page load (1 a second per host), not per script or stylesheet a page loads with it.
@@ -114,7 +114,7 @@ async function main() {
   const label = String(arg("label", "strict")).replace(/[^A-Za-z0-9._-]/g, "-");
   const out = path.resolve(arg("out", path.join("artifacts", "browser-eval", label)));
   fs.mkdirSync(out, { recursive: true });
-  const items = lib.readSample(fs.readFileSync(arg("sample"), "utf8"), { max: arg("max-per-provider", 20) });
+  const items = lib.readSample(fs.readFileSync(arg("sample"), "utf8"), { max: arg("max-per-provider", 20), providers: arg("providers") ? String(arg("providers")).toLowerCase().split(",").map((x) => x.trim()).filter(Boolean) : null });
   let pw; for (const id of [process.env.UPMORE_PLAYWRIGHT_PATH, "playwright"]) { if (!id) continue; try { pw = require(id); break; } catch { /* next */ } }
   if (!pw) { console.error("playwright not found (set UPMORE_PLAYWRIGHT_PATH)"); process.exit(2); }
   const browser = await pw.chromium.launch({ headless: true });
@@ -123,9 +123,10 @@ async function main() {
   const conc = Math.max(1, Number(arg("concurrency", 6)));
   await Promise.all(Array.from({ length: conc }, async () => { while (next < items.length) { const i = next++; rows[i] = await strictPosting(browser, items[i], o);
     const x = rows[i]; console.log(["STRICT", x.provider, x.result, x.reason, x.field || x.error || "", `blocked=${x.sent_blocked}`, `gql=${x.graphql_reads}`, `${(x.ms / 1000).toFixed(1)}s`, x.url].join(" | "));
+    if (x.blocked_paths) console.log("BLOCKED | " + x.provider + " | " + x.url + " | " + x.blocked_paths.join(" ; "));
     if (x.result !== "pass" && (x.diag || x.check)) console.log("DIAG | " + x.provider + " | " + JSON.stringify({ check: x.check, ...x.diag }));
     // Why each field was handed back, and the options a choice offered (the posting's own words), for the record.
-    if (x.result !== "pass" && x.needs) console.log("NEEDS | " + x.provider + " | " + x.url + " | " + JSON.stringify(x.needs.slice(0, 6).map((n) => ({ label: String(n.label || "").slice(0, 60), reason: n.reason, ...(n.options ? { options: n.options.slice(0, 12).map((o) => String(o).slice(0, 40)) } : {}) })))); } }));
+    if (x.result !== "pass" && x.needs) console.log("NEEDS | " + x.provider + " | " + x.url + " | " + JSON.stringify(x.needs.slice(0, 12).map((n) => ({ label: String(n.label || "").slice(0, 60), reason: n.reason, ...(n.kind ? { kind: n.kind } : {}), ...(n.detail ? { detail: n.detail } : {}), ...(n.options ? { options: n.options.slice(0, 12).map((o) => String(o).slice(0, 40)) } : {}) })))); } }));
   await browser.close();
   const s = summarize(rows);
   fs.writeFileSync(path.join(out, "strict.jsonl"), rows.map((x) => JSON.stringify(x)).join("\n") + "\n");

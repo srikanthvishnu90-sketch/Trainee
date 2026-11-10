@@ -148,7 +148,10 @@ function STATE(qs) {
       case "combobox": {
         const w = el.closest(".select-shell, .select__container, .field-wrapper, [class*='combobox' i]") || el.parentElement;
         const v = w && w.querySelector(".select__single-value, [class*='single-value' i], [class*='singleValue' i], [data-combobox-value]");
-        const t = squash(v ? v.textContent : "");
+        // Ashby's location autocomplete has no value chip: the place picked from its list is written into the box itself
+        // (strict benchmark run 42719264485). Read from the box only there, and only once its list is closed.
+        const ash = !v && el.classList.contains("ashby-application-form-input-autocomplete") && el.getAttribute("aria-expanded") !== "true";
+        const t = squash(v ? v.textContent : ash ? el.value : "");
         return { q: d.q, filled: !!t, text: t };
       }
       default: return { q: d.q, filled: String(el.value || "").trim() !== "", text: String(el.value || "") };
@@ -189,9 +192,12 @@ const FACT_RULES = [
 // ROUND 3: the person's own contact facts never answer a question about someone else ("Phone number of your reference",
 // "Email of the person who referred you"): the same rule as career_apply.ts SOMEONE_ELSE.
 const SOMEONE_ELSE = /\breferr|\breferen|\bteam member|\breferee|\bemergency|\bmanager|\bsupervisor|\brecruiter|\bspouse|\bparent|\bguardian|\bemployee who/;
+// A standard question asked as a sentence ("What's your phone number?", "Your Full Name", "Please enter your email": Ashby
+// lets each employer word its system fields, strict benchmark run 42719264485) is the same question without its lead-in.
+const ASKED_AS = /^(?:(?:what is|what s|whats|please (?:enter|provide|share|give us|tell us)|enter|provide) )?(?:your )?/;
 function factValue(label, facts) {
-  const n = norm(label);
-  if (SOMEONE_ELSE.test(n)) return undefined;
+  const n = norm(label).replace(ASKED_AS, "");
+  if (!n || SOMEONE_ELSE.test(n)) return undefined;
   for (const [re, key] of FACT_RULES) {
     if (!re.test(n)) continue;
     if (key === "full_name") return facts.full_name || (facts.first_name && facts.last_name ? `${facts.first_name} ${facts.last_name}` : undefined);
@@ -258,7 +264,7 @@ async function fillText(page, d, value) {
 // approved digits, or the approved digits less a dial code that the field's own country picker shows. Any other digit is a
 // mismatch: nothing but the approved number is ever accepted.
 const digitsOf = (v) => String(v || "").replace(/\D/g, "");
-const isPhone = (d, value) => (d.inputType === "tel" || /^(phone|mobile|telephone|cell|telefon|telefoon|handy|mobil)/.test(norm(d.label)))
+const isPhone = (d, value) => (d.inputType === "tel" || /^(phone|mobile|telephone|cell|telefon|telefoon|handy|mobil)/.test(norm(d.label).replace(ASKED_AS, "")))
   && /^\+?[\d\s().\-\/]{6,}$/.test(String(value).trim());
 async function phoneSame(page, d, value, text) {
   const want = digitsOf(value), got = digitsOf(text);
@@ -348,15 +354,28 @@ async function fillCombo(page, d, value, pick) {
   const input = page.locator(sel(d.q)).first();
   // Only this dropdown's own options: its aria-controls list, else the options inside its own shell. A phone widget's country
   // list, or any other list on the page, is never searched for an answer.
-  const ctl = await input.getAttribute("aria-controls");
-  const shell = input.locator('xpath=ancestor::*[contains(@class,"select-shell") or contains(@class,"select__container") or @data-combobox][1]');
-  const opts = () => (ctl ? page.locator(`[id="${ctl.replace(/"/g, "")}"] [role="option"]:visible`) : shell.locator('[role="option"]:visible'));
+  const ctl = (await input.getAttribute("aria-controls")) || (await input.getAttribute("aria-owns"));
+  const shell = input.locator('xpath=ancestor::*[contains(@class,"select-shell") or contains(@class,"select__container") or @data-combobox or contains(@class,"ashby-application-form-field-entry")][1]');
+  // Ashby's place box draws its list in a floating layer outside the field (strict benchmark run 42739040932): only that
+  // box's own result rows (Ashby's autocomplete class, under a listbox) are read, never any other list on the page.
+  const ashPlaces = !ctl && (await input.evaluate((e) => e.classList.contains("ashby-application-form-input-autocomplete")).catch(() => false));
+  const opts = () => (ctl ? page.locator(`[id="${ctl.replace(/"/g, "")}"] [role="option"]:visible`)
+    : ashPlaces ? page.locator('[role="listbox"] [role="option"][class*="ashby-application-form-input-autocomplete-"]:visible')
+    : shell.locator('[role="option"]:visible'));
   const optionsNow = async () => (await opts().allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean);
   await input.click();
   let list = await optionsNow();
   if (!list.length) { await page.waitForTimeout(120); list = await optionsNow(); }
-  if (!list.length && pick !== "decline") { await input.fill(String(value).slice(0, 40)); await page.waitForTimeout(150); list = await optionsNow(); }
-  if (!list.length) { await input.press("Escape").catch(() => {}); return { ok: false, reason: "options_not_readable" }; }
+  // Ashby's place box fills its list from a lookup as you type: it gets up to 3 seconds to show. Any other box, 150 ms.
+  const lookup = ashPlaces || (await input.evaluate((e) => e.classList.contains("ashby-application-form-input-autocomplete")).catch(() => false));
+  if (!list.length && pick !== "decline") { await input.fill(String(value).slice(0, 40)); for (let i = 0; i < (lookup ? 20 : 1) && !list.length; i++) { await page.waitForTimeout(150); list = await optionsNow(); } }
+  if (!list.length) {
+    // What the page drew as a list after typing, for the record (tags and classes only, cut short): never an answer.
+    const seen = await page.evaluate(() => [...document.querySelectorAll("[role=listbox], [role=option], [class*='option' i], [class*='suggest' i], [class*='result' i], [class*='menu' i]")]
+      .filter((e) => e.offsetWidth || e.offsetHeight).slice(0, 6).map((e) => `${e.tagName}.${String(e.className || "").slice(0, 60)}[role=${e.getAttribute("role") || ""}] n=${e.children.length}`).join(" ; ").slice(0, 400)).catch(() => "");
+    await input.press("Escape").catch(() => {});
+    return { ok: false, reason: "options_not_readable", ...(seen ? { detail: seen } : {}) };
+  }
   const m = pick === "decline" ? (() => { const i = list.findIndex((o) => DECLINE.test(norm(o))); return i < 0 ? { error: "no_decline_option" } : { index: i }; })() : matchOption(list, value);
   if (m.error) { await input.press("Escape").catch(() => {}); return { ok: false, reason: m.error, options: list.slice(0, 40) }; }
   await opts().nth(m.index).click();
@@ -365,6 +384,11 @@ async function fillCombo(page, d, value, pick) {
 }
 
 const labelCounts = (qs) => { const m = new Map(); for (const d of qs) if (d.kind !== "file") m.set(norm(d.label), (m.get(norm(d.label)) || 0) + 1); return m; };
+// The kinds of question under each label, so a fact is held back only when two questions that could each take it share the
+// label. Ashby puts its "Phone" label over the number box and over a Yes/No texting consent (strict benchmark run 42719264485:
+// 5 of 20 postings stopped on label_on_form_twice); the consent can never hold the number, so the number box is not ambiguous.
+const labelKinds = (qs) => { const m = new Map(); for (const d of qs) if (d.kind !== "file") { const k = norm(d.label); if (!m.has(k)) m.set(k, []); m.get(k).push(d.kind); } return m; };
+const takesFact = (kind, label) => ["text", "textarea", "select"].includes(kind) || (kind === "combobox" && /location|city/i.test(label));
 // Decide what to do with one question. status: fill | ask | skip. Never invents a value.
 function decide(d, ctx) {
   const { facts, answers, resumePath } = ctx;
@@ -375,7 +399,11 @@ function decide(d, ctx) {
   }
   // ROUND 3: one label on two questions of this form (a second "Phone" in a references block): the approved answer belongs
   // to at most one of them, so neither is filled from it; the person is asked (as the extension's planForm does).
-  if (ctx.labelCount && (ctx.labelCount.get(norm(d.label)) || 0) > 1 && (!blank(answerFor(d.label, answers)) || !blank(factValue(d.label, facts || {})))) return { status: "ask", reason: "label_on_form_twice" };
+  if (ctx.labelCount && (ctx.labelCount.get(norm(d.label)) || 0) > 1) {
+    if (!blank(answerFor(d.label, answers))) return { status: "ask", reason: "label_on_form_twice" };
+    const kinds = ctx.labelKinds && ctx.labelKinds.get(norm(d.label));
+    if (!blank(factValue(d.label, facts || {})) && (!kinds || (takesFact(d.kind, d.label) && kinds.filter((k) => takesFact(k, d.label)).length > 1))) return { status: "ask", reason: "label_on_form_twice" };
+  }
   const a = answerFor(d.label, answers);
   if (!blank(a)) return { status: "fill", value: String(a), source: "answer" };
   if (d.eeo) {
@@ -416,6 +444,7 @@ async function fillForm(page, ctx0) {
   for (let pass = 0; pass < 3; pass++) {
     const qs = await page.evaluate(EXTRACT);
     ctx.labelCount = labelCounts(qs);
+    ctx.labelKinds = labelKinds(qs);
     const fresh = qs.filter((d) => !handled.has(`${d.label}|${d.kind}|${d.name}`));
     if (!fresh.length) break;
     for (const d of fresh) {
@@ -427,7 +456,7 @@ async function fillForm(page, ctx0) {
       entry.source = dec.source;
       if (before.filled && d.kind !== "file" && dec.status !== "fill") { entry.status = "prefilled"; continue; }
       if (dec.status === "skip") { entry.status = "skipped"; entry.reason = dec.reason; continue; }
-      if (dec.status === "ask") { entry.status = "needs_user"; entry.reason = dec.reason; needsUser.push({ label: d.label, reason: dec.reason, ...(d.options ? { options: d.options.map((o) => o.label).slice(0, 40) } : {}) }); continue; }
+      if (dec.status === "ask") { entry.status = "needs_user"; entry.reason = dec.reason; needsUser.push({ label: d.label, reason: dec.reason, kind: d.kind, ...(d.options ? { options: d.options.map((o) => o.label).slice(0, 40) } : {}) }); continue; }
       let r;
       try { r = await doFill(page, d, dec, ctx); } catch (e) { r = { ok: false, reason: "fill_error", detail: String(e.message).split("\n")[0].slice(0, 120) }; }
       if (r.ok) {
@@ -447,7 +476,7 @@ async function fillForm(page, ctx0) {
       entry.reason = r.reason;
       if (r.detail) entry.detail = r.detail;
       // A required question we could not set is handed back with the reason; the person is asked, nothing is guessed.
-      (ask ? needsUser : failed).push({ label: d.label, reason: r.reason, ...(r.options ? { options: r.options } : {}) });
+      (ask ? needsUser : failed).push({ label: d.label, reason: r.reason, kind: d.kind, ...(r.detail ? { detail: r.detail } : {}), ...(r.options ? { options: r.options } : {}) });
     }
   }
   // Sweep: a required question still empty that we did not already account for is handed back, not ignored.
@@ -456,7 +485,7 @@ async function fillForm(page, ctx0) {
   const states = qsNow.length ? await page.evaluate(STATE, qsNow) : [];
   for (const d of qsNow) {
     const s = states.find((x) => x.q === d.q);
-    if (d.required && s && !s.filled && !accounted.has(d.label)) { needsUser.push({ label: d.label, reason: "still_empty_after_fill" }); accounted.add(d.label); }
+    if (d.required && s && !s.filled && !accounted.has(d.label)) { needsUser.push({ label: d.label, reason: "still_empty_after_fill", kind: d.kind }); accounted.add(d.label); }
   }
   const invalid = await page.evaluate(INVALID).catch(() => []);
   return { map, filled, needsUser, failed, invalid };
@@ -477,4 +506,4 @@ async function heldNow(page, filled) {
     return { label: f.label, kind: f.kind, source: f.source, approved: f.value, held: held === undefined ? null : held, gone: !!s.gone };
   });
 }
-module.exports = { heldNow, fillForm, matchOption, factValue, answerFor, decide, labelCounts, norm, EXTRACT, STATE, DECLINE };
+module.exports = { heldNow, fillForm, matchOption, factValue, answerFor, decide, labelCounts, labelKinds, norm, EXTRACT, STATE, DECLINE };

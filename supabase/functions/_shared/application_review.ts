@@ -93,7 +93,8 @@ export function reviewOf(x: ReviewInput): ReviewItem {
     const question = one(q.label, 200);
     if (!unresolved.some((u) => u.question === question)) unresolved.push({ question, fact: sensitiveOf(question), ask: narrowQuestion({ label: question, company: employer, options: q.options }) });
   }
-  // The resume line the card already carries (career_prepared_card.ts resumeCardLine): "Resume: <name> (<sha12>)".
+  // The resume line the card already carries (career_prepared_card.ts resumeCardLine): "Resume: <name>" (before R6, with
+  // "(<sha12>)" after it, which a card prepared earlier may still carry).
   const line = (x.card_lines ?? []).find((l) => /^Resume: /.test(String(l)));
   const label = line ? String(line).replace(/^Resume: /, "").replace(/\s*\([0-9a-f]{12}\)$/, "") : "your confirmed resume";
   const tailored = /, tailored for this role$/.test(label) || p.resume_tailored === true;

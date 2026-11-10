@@ -1,4 +1,4 @@
-// LOOP 05, release item 5 (networking and email): 26 outreach journeys (20 from fixture pages, 6 person-supplied) through the REAL career handler on Postgres 16 with
+// LOOP 05, release item 5 (networking and email): 27 outreach journeys (20 from fixture pages, 7 person-supplied) through the REAL career handler on Postgres 16 with
 // every migration (tests/flow/handler.ts), a scripted Anthropic endpoint (no spend) and a fake Gmail at the HTTP boundary
 // (tests/flow/send-rail-fixture.ts). No real message is ever sent: every send goes through the rail's worker to the fake
 // Gmail, and test mode (CAREER_CONTACT_TEST_RECIPIENTS) addresses every card to the owner's test address only.
@@ -207,12 +207,20 @@ const JOURNEYS: J[] = [
     run: async (x) => { await showOnly(x, "email Omar Haddad at omar@nomail-s4.example about the analyst role"); await showOnly(x, "yes"); } },
   { id: 25, what: "another turn between the read-back and the yes: nothing saved", company: SUPPLIED, supplied: true, ask: {}, expect: "none", changed: true,
     run: async (x) => { await showOnly(x, "email Lena Ruiz at lena@acme-s1.example about the analyst role"); await x.say("actually what time is it in Chicago"); await showOnly(x, "yes"); } },
+  { id: 27, what: "a draft to someone in no contact list, then their address: read back, confirmed, card, yes", company: SUPPLIED, supplied: true, ask: {}, expect: "send",
+    run: async (x) => {
+      const d = await x.say("draft a note to Maya at Acme about the analyst role");
+      x.note(`unaddressed: ${d.intent}/${d.resultStatus}${/Recipient not set/.test(d.reply) && /\nHi Maya,/.test(d.reply) && !/@/.test(d.reply) ? " drafted" : " NOT drafted"}`);
+      if (!/Recipient not set/.test(d.reply) || /@/.test(d.reply)) return;
+      await showOnly(x, "email Maya Chen at maya.chen@acme-s1.example about the analyst role");
+      await showYes(x, "yes");
+    } },
   { id: 26, what: "a company name and no address: nothing read back, nothing saved (E.4 41)", company: SUPPLIED, supplied: true, ask: {}, expect: "none",
     run: async (x) => { await showOnly(x, "email Initrode about the data engineering internship"); await x.say("yes"); } },
 ];
 
 // ------------------------------------------------------------------------------------------------ the run
-Deno.test({ name: "loop 05: 26 outreach journeys through the real handler, scored (0 invented, 0 guessed, 100% exact sends)", sanitizeResources: false, sanitizeOps: false, async fn() {
+Deno.test({ name: "loop 05: 27 outreach journeys through the real handler, scored (0 invented, 0 guessed, 100% exact sends)", sanitizeResources: false, sanitizeOps: false, async fn() {
   if (!pgBinDir()) { if (CI) throw new Error("needs Postgres 16 in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
   const ENV: Record<string, string> = { CAREER_CONTACT_OUTREACH: "on", CAREER_CONTACT_TEST_RECIPIENTS: `Owner <${OWNER}>`, CAREER_SENDER_POSTAL_ADDRESS: POSTAL, ANTHROPIC_API_KEY: "sk-test-fake" };
   const diagnostic = Deno.env.get("LOOP05_PEOPLE_SEARCH") === "on";

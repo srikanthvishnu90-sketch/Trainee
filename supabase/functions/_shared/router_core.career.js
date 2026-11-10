@@ -14839,9 +14839,9 @@ const CareerRouter = (() => {
     }
     if (!art && /\bpacket\b/.test(t) && !/\b(resume|cv|cover letter|pdf|docx)\b/.test(t)) {
       const reply = compose({
-        headline: "There's no application packet in this chat yet, so there's nothing to send.",
-        facts: ["When you pick a role, I prepare its packet for you to review: the job and the resume for it. Nothing is submitted until you approve it."],
-        nextStep: "Which role should I prepare it for?",
+        headline: "There's no application packet in this chat yet.",
+        facts: ["Pick a role and I'll prepare one for you to review: the job and the resume for it. Nothing is submitted until you approve it."],
+        nextStep: "Which role should it be for?",
       });
       return { intent: "career_packet_absent", reply, resultStatus: "awaiting_user", sends: 0, documents: [] };
     }
@@ -24852,7 +24852,7 @@ const CareerRouter = (() => {
     } else {
       facts.push("It turns on the posting's hard requirements, such as a license, a degree, years of experience or work authorization; none is assumed.");
     }
-    const reply = compose({ headline: "I can't say yet whether you qualify because I haven't read that posting's requirements in this chat.", facts, nextStep: "Send me the posting's link or its text, and I'll check each requirement against what you've confirmed." });
+    const reply = compose({ headline: "No, not confirmed yet: I haven't read that posting's requirements in this chat.", facts, nextStep: "Send me the posting's link or its text, and I'll check each requirement against what you've confirmed." });
     return { intent: "eligibility_check", reply, resultStatus: "awaiting_user", sends: 0 };
   }
   function handleRecordRecall(text, ctx) {

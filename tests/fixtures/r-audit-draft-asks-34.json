@@ -1,0 +1,243 @@
+{
+ "source": "r-audit ask battery (tests/architect/helpers/ask_battery.ts on ag/r-audit, PR #706), seed 20261110: every ask its run routed to career_networking_draft",
+ "asks": [
+  {
+   "id": "A0451",
+   "kind": "phrasing",
+   "resume": true,
+   "setup": [],
+   "say": "draft a note to Elena at Northline Health Data about the software engineering intern role"
+  },
+  {
+   "id": "A0454",
+   "kind": "phrasing",
+   "resume": true,
+   "setup": [],
+   "say": "so draft an intro to Elena at Lakefront Transit Analytics please"
+  },
+  {
+   "id": "A0455",
+   "kind": "phrasing",
+   "resume": true,
+   "setup": [],
+   "say": "write a message to Jordan about the software engineering intern role"
+  },
+  {
+   "id": "A0456",
+   "kind": "typo",
+   "resume": false,
+   "setup": [],
+   "say": "draft a note to elena at stripe about the data scientist role"
+  },
+  {
+   "id": "A0459",
+   "kind": "typo",
+   "resume": true,
+   "setup": [],
+   "say": "hey write a message to Maya about the marketing coordinator role"
+  },
+  {
+   "id": "A0460",
+   "kind": "phrasing",
+   "resume": true,
+   "setup": [],
+   "say": "draft an intro to Maya at Stripe thanks"
+  },
+  {
+   "id": "A0461",
+   "kind": "phrasing",
+   "resume": false,
+   "setup": [],
+   "say": "draft an intro to Sam at Northline Health Data"
+  },
+  {
+   "id": "A0464",
+   "kind": "phrasing",
+   "resume": false,
+   "setup": [],
+   "say": "so draft a note to Elena at Stripe about the software engineering intern role for me"
+  },
+  {
+   "id": "A0467",
+   "kind": "phrasing",
+   "resume": true,
+   "setup": [],
+   "say": "quick question: draft an intro to Sam at Lakefront Transit Analytics for me"
+  },
+  {
+   "id": "A0468",
+   "kind": "typo",
+   "resume": false,
+   "setup": [],
+   "say": "DRAFT A NOTE TO MARCUS AT NORTHLINE HEALTH DATA ABOUT THE PRODUCT ANALYST ROLE"
+  },
+  {
+   "id": "A0469",
+   "kind": "phrasing",
+   "resume": true,
+   "setup": [],
+   "say": "quick question: write a message to Jordan about the software engineering intern role thanks"
+  },
+  {
+   "id": "A0472",
+   "kind": "phrasing",
+   "resume": false,
+   "setup": [],
+   "say": "draft an intro to Jordan at Prairie Ledger"
+  },
+  {
+   "id": "A0479",
+   "kind": "phrasing",
+   "resume": true,
+   "setup": [],
+   "say": "write a message to Sam about the marketing coordinator role please"
+  },
+  {
+   "id": "A0609",
+   "kind": "multi",
+   "resume": false,
+   "setup": [],
+   "say": "draft a note to Priya at Stripe about the marketing coordinator role. Also, i want my resume to read like a marketing coordinator resume"
+  },
+  {
+   "id": "A0640",
+   "kind": "multi",
+   "resume": true,
+   "setup": [],
+   "say": "draft a note to Jordan at Lakefront Transit Analytics about the data analyst role, and also i want my resume to read like a data analyst resume"
+  },
+  {
+   "id": "A0642",
+   "kind": "multi",
+   "resume": false,
+   "setup": [],
+   "say": "write a message to Marcus about the business analyst role and then can you make the first bullet less wordy?"
+  },
+  {
+   "id": "A0663",
+   "kind": "multi",
+   "resume": true,
+   "setup": [],
+   "say": "write a message to Sam about the UX designer role. Also, why didn't you include Stripe?"
+  },
+  {
+   "id": "A0681",
+   "kind": "multi",
+   "resume": false,
+   "setup": [],
+   "say": "draft an intro to Elena at Stripe; rewrite my second bullet"
+  },
+  {
+   "id": "A0690",
+   "kind": "multi",
+   "resume": false,
+   "setup": [],
+   "say": "write a message to Elena about the marketing coordinator role, and also tell me about Contoso"
+  },
+  {
+   "id": "A0699",
+   "kind": "multi",
+   "resume": true,
+   "setup": [],
+   "say": "draft a note to Jordan at Contoso about the data analyst role, and also lighthouse keeper jobs in Juneau please"
+  },
+  {
+   "id": "A0706",
+   "kind": "multi",
+   "resume": false,
+   "setup": [],
+   "say": "draft an intro to Maya at Northline Health Data; what about Northline Health Data, why skip it?"
+  },
+  {
+   "id": "A0715",
+   "kind": "multi",
+   "resume": true,
+   "setup": [],
+   "say": "draft a note to Elena at Stripe about the data analyst role and then can you tailor my resume toward data analyst roles"
+  },
+  {
+   "id": "A0719",
+   "kind": "multi",
+   "resume": false,
+   "setup": [],
+   "say": "write a message to Marcus about the UX designer role + what's Contoso like to work for?"
+  },
+  {
+   "id": "A0723",
+   "kind": "multi",
+   "resume": true,
+   "setup": [],
+   "say": "draft a note to Priya at Prairie Ledger about the marketing coordinator role + give me a brief on Prairie Ledger"
+  },
+  {
+   "id": "A0730",
+   "kind": "multi",
+   "resume": true,
+   "setup": [],
+   "say": "draft a note to Sam at Prairie Ledger about the business analyst role + why is Prairie Ledger not on the list"
+  },
+  {
+   "id": "A0731",
+   "kind": "multi",
+   "resume": false,
+   "setup": [],
+   "say": "draft a note to Sam at Prairie Ledger about the marketing coordinator role + what about Prairie Ledger, why skip it?"
+  },
+  {
+   "id": "A0737",
+   "kind": "multi",
+   "resume": false,
+   "setup": [],
+   "say": "write a message to Elena about the software engineering intern role; shorten bullet one"
+  },
+  {
+   "id": "A0758",
+   "kind": "multi",
+   "resume": false,
+   "setup": [],
+   "say": "draft an intro to Maya at Stripe and then what's Stripe like to work for?"
+  },
+  {
+   "id": "A0796",
+   "kind": "multi",
+   "resume": true,
+   "setup": [],
+   "say": "draft an intro to Maya at Lakefront Transit Analytics. after that can you tailor my resume toward data analyst roles"
+  },
+  {
+   "id": "A0961",
+   "kind": "limit",
+   "resume": true,
+   "setup": [],
+   "say": "draft an intro to Elena at Northline Health Data (again)"
+  },
+  {
+   "id": "A0975",
+   "kind": "limit",
+   "resume": true,
+   "setup": [],
+   "say": "draft an intro to Elena at Contoso (again)"
+  },
+  {
+   "id": "A0983",
+   "kind": "limit",
+   "resume": true,
+   "setup": [],
+   "say": "draft a note to Jordan at Northline Health Data about the software engineering intern role (again)"
+  },
+  {
+   "id": "A0990",
+   "kind": "limit",
+   "resume": true,
+   "setup": [],
+   "say": "draft an intro to Marcus at Stripe"
+  },
+  {
+   "id": "A0991",
+   "kind": "limit",
+   "resume": true,
+   "setup": [],
+   "say": "write a message to Marcus about the data analyst role (again)"
+  }
+ ]
+}

@@ -41,6 +41,8 @@ import { CODE_IN_CHAT_REPLY } from "../../supabase/functions/_shared/career_code
 import { FILE_APP_BUTTON } from "../../supabase/functions/_shared/telegram.ts";
 import { RELEASE_FLAGS, RELEASE_NEVER_ON, RELEASE_PENDING } from "../../supabase/functions/agent-chat/release_config.ts";
 import { anthropicWire } from "./helpers/anthropic_wire.ts";
+// architect amendment E.21 (2026-11-10): a search's posting-page checks are held to helpers/posting_checks.ts (no board listing, at most N for the N shown, never over 10); every other off-machine request is still a fault.
+import { postingChecks } from "./helpers/posting_checks.ts";
 
 const CI = Deno.env.get("CI") === "true";
 const ROOT = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
@@ -107,7 +109,7 @@ Deno.test({
         }
         return completion(body, { role: "assistant", content: "Subject: A quick question\n\nHi there,\n\nWould you be open to a short call?" });
       };
-      const viaDouble = globalThis.fetch, outbound: string[] = [];
+      const viaDouble = globalThis.fetch, outbound: string[] = [], checks = postingChecks();
       globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
         const req = input instanceof Request && !init ? input : new Request(input as any, init);
         const u = new URL(req.url);
@@ -128,6 +130,7 @@ Deno.test({
           return await bot.fetch(req);
         }
         if (u.host === "api.anthropic.com") return anthropicWire(req, (chat) => fakeModel(chat));
+        if (checks.take(req.method, req.url)) throw new TypeError(`network refused: ${u.host}`);
         outbound.push(`${req.method} ${u.host}${u.pathname}`);
         throw new TypeError(`network refused: ${u.host}`);
       }) as typeof fetch;
@@ -152,9 +155,9 @@ Deno.test({
         if (o.secret !== null) headers["x-telegram-bot-api-secret-token"] = o.secret ?? SECRET;
         const before = bot.msgs.length;
         const deliverNow = deliverer(admin, Deno.env, pace);
-        const res = await handleTelegram(new Request(`${SUPABASE_URL}/functions/v1/trainee-telegram`, { method: "POST", headers, body: JSON.stringify({ update_id: id, ...body }) }),
+        const res = await checks.turn(`update ${id}`, () => handleTelegram(new Request(`${SUPABASE_URL}/functions/v1/trainee-telegram`, { method: "POST", headers, body: JSON.stringify({ update_id: id, ...body }) }),
           { env: Deno.env, now: Date.now, store: () => supabaseInboundStore(admin), chat: chatThroughAgent(SUPABASE_URL, SERVICE_KEY, { channel: "telegram" }), admin,
-            deliver: (a) => deliverNow({ userId: a.userId, key: a.key, now: a.now }) });
+            deliver: (a) => deliverNow({ userId: a.userId, key: a.key, now: a.now }) }), () => bot.msgs.slice(before).filter((m) => m.chat === String(chat)).map(plainOf).join("\n"));
         const text = await res.text();
         if ([TOKEN, SECRET, DELIVER, LINK_SECRET, API_KEY, SERVICE_KEY].some((s) => text.includes(s))) fail(conv, `a secret in the webhook response for update ${id}`);
         const said = bot.msgs.slice(before).filter((m) => m.chat === String(chat)).map(plainOf);
@@ -494,6 +497,7 @@ Deno.test({
         const stuck = await sql(`select count(*) from public.career_outbox where key like 'reply:tg:%' and (status in ('queued', 'held') or (status = 'failed' and retry_at is not null))`);
         if (stuck !== "0") fail("bar", `${stuck} reply rows left queued`);
         if (outbound.length) fail("network", outbound.join(", "));
+        for (const f of checks.faults) fail("network", f);
         const turns = log.filter((x) => x.expect === "turn").length;
         console.log(`TELEGRAM_LOOP conversations=${convs.length} updates=${log.length} turns=${turns} reply_rows=${rows.length} exactly_once=${exactly}/${rows.length - blockedHeld} blocked_held=${blockedHeld} double_sends=${doubles} secrets=${secrets} bubble_violations=${bot.violations.length} longest_bubble=${longest} dropped=${dropped} messages=${bot.msgs.length} model_calls=${model.calls} failures=${failures.length}`);
       });

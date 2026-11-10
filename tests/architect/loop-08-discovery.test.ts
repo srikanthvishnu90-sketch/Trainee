@@ -168,6 +168,24 @@ Deno.test("loop 8 scorer: invented, dead, unmarked and dishonest counts are caug
   assertNode.ok(POSTINGS.filter((p) => p.truth === "blocked").length >= 4 && POSTINGS.filter((p) => p.truth === "dead").length >= 8, "the fixture has every kind");
 });
 
+Deno.test("E.21 searchCheck: only shown postings are read, a closed one is replaced by the next, never more than 10 reads", async () => {
+  const { searchCheck } = await import("../../supabase/functions/_shared/link_check.ts");
+  const hits = Array.from({ length: 15 }, (_, i) => ({ job_id: `greenhouse:b:${i}` }));
+  const run = async (n: number, dead: (i: number) => boolean) => {
+    const read: number[] = [];
+    const r = await searchCheck(hits, async (j) => { const i = Number(String(j.job_id).split(":")[2]); read.push(i); return dead(i) ? "dead" : "live"; }, n);
+    return { read, shown: r.shown.map((h) => h.job_id), dead: r.dead, checked: r.checked };
+  };
+  const a = await run(3, () => false);
+  assertNode.deepEqual([a.read.length, a.shown.length], [3, 3], "3 asked, 3 open: 3 reads");
+  const b = await run(3, (i) => i < 2);
+  assertNode.deepEqual([b.read.sort((x, y) => x - y), b.shown], [[0, 1, 2, 3, 4], ["greenhouse:b:2", "greenhouse:b:3", "greenhouse:b:4"]], "2 closed: replaced by the next 2");
+  const c = await run(5, () => true);
+  assertNode.deepEqual([c.read.length, c.shown.length, c.dead, c.checked], [10, 0, 10, 10], "all closed: the 10-read cap holds, nothing padded");
+  const d = await run(25, () => false);
+  assertNode.deepEqual([d.read.length, d.shown.length], [10, 10], "never more than 10 shown or read");
+});
+
 Deno.test({
   name: "loop 8: job discovery through the real handler: 0 invented or dead postings, honest counts, empty results give their scope",
   sanitizeResources: false,

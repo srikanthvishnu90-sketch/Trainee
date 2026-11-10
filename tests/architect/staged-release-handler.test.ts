@@ -16,11 +16,8 @@ import { careerHandler, type Chat, SUPABASE_URL, supabaseParity, type Turn } fro
 import { confirmedResumeSql } from "../flow/resume-seed.ts";
 import { crisisReply } from "../../supabase/functions/agent-chat/crisis.ts";
 import { anthropicWire } from "./helpers/anthropic_wire.ts";
-// Architect amendment: E.21 open check on shown postings. A search now re-checks the postings it shows, each on its own posting
-// page by id; it never reads a board listing. Such a check is counted per turn (at most N for the N shown, never over 10) and
-// refused like any other request; every other request off the machine, a board listing included, is still a fault.
-const POSTING_PAGE = /^https:\/\/(?:boards-api\.greenhouse\.io\/v1\/boards\/[^/]+\/jobs\/\d+|api\.lever\.co\/v0\/postings\/[^/]+\/[0-9a-f-]{8,}|api\.smartrecruiters\.com\/v1\/companies\/[^/]+\/postings\/\d+|jobs\.ashbyhq\.com\/[^/]+\/[0-9a-f-]{8,})$/i;
-const shownIn = (reply: string) => reply.split("\n").filter((l) => /^\d+\. /.test(l)).length;
+// architect amendment E.21 (2026-11-10): a search's posting-page checks are held to helpers/posting_checks.ts (no board listing, at most N for the N shown, never over 10); every other off-machine request is still a fault.
+import { postingChecks } from "./helpers/posting_checks.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -72,20 +69,18 @@ Deno.test({ name: "D-035: with CAREER_BRAIN unset (staged), code keeps judge pro
       insert into public.career_kb_postings (posting_key, source, board, company, title, location, url, posted_at, text_excerpt, content_hash) values
       ${POSTINGS.map((p, i) => `('${p.key}', 'greenhouse', '${p.board}', '${p.company}', 'Data Analyst', 'Chicago, IL', '${p.url}', now() - interval '${i} hours', '${desc}', 'd35${i}')`).join(",")};`);
     h = await careerHandler(pg, PEOPLE);
-    const viaDouble = globalThis.fetch, outbound: string[] = [], pageChecks: string[] = [], checkFaults: string[] = [];
+    const viaDouble = globalThis.fetch, outbound: string[] = [], checks = postingChecks();
     globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
       const req = input instanceof Request && !init ? input : new Request(input as any, init);
       const u = new URL(req.url);
       if (u.host === "api.anthropic.com") return anthropicWire(req, (chat) => fakeModel(chat));
-      if (req.method === "GET" && POSTING_PAGE.test(`${u.origin}${u.pathname}`)) { pageChecks.push(u.href); throw new TypeError(`network refused: ${u.host}`); }
+      if (checks.take(req.method, req.url)) throw new TypeError(`network refused: ${u.host}`);
       if (u.origin !== new URL(SUPABASE_URL).origin) { outbound.push(`${req.method} ${u.host}`); throw new TypeError(`network refused: ${u.host}`); }
       return await viaDouble(req);
     }) as typeof fetch;
     const sayAs = (c: Chat, id: string) => async (m: string): Promise<Turn> => {
       await pg.sql(`delete from public.agent_rate_limits where user_id = '${id}'`);
-      pageChecks.length = 0;
-      const r = await c.say(m); eq(r.status, 200, `${m}: ${r.reply}`);
-      if (pageChecks.length > Math.min(shownIn(r.reply), 10)) checkFaults.push(`${m}: ${pageChecks.length} posting pages checked for ${shownIn(r.reply)} shown`);
+      const r = await checks.turn(m, () => c.say(m), (t) => t.reply); eq(r.status, 200, `${m}: ${r.reply}`);
       return r;
     };
 
@@ -197,7 +192,7 @@ Deno.test({ name: "D-035: with CAREER_BRAIN unset (staged), code keeps judge pro
       eq(brainCalls, b + 1);
     });
     eq(outbound, [], "no network beyond the double and the scripted model");
-    eq(checkFaults, [], "a search checks at most the postings it shows, each on its own page");
+    eq(checks.faults, [], "a search checks at most the postings it shows, each on its own page");
   } finally {
     for (const [k, v] of Object.entries(saved)) { if (v === undefined) Deno.env.delete(k); else Deno.env.set(k, v); }
     h?.restore();

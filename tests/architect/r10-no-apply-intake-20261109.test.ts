@@ -10,6 +10,8 @@ import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, SUPABASE_URL, supabaseParity } from "../flow/handler.ts";
 import { anthropicWire } from "./helpers/anthropic_wire.ts";
+// architect amendment E.21 (2026-11-10): a search's posting-page checks are held to helpers/posting_checks.ts (no board listing, at most N for the N shown, never over 10); every other off-machine request is still a fault.
+import { postingChecks } from "./helpers/posting_checks.ts";
 import { CareerProfile, CareerRouter } from "../../supabase/functions/_shared/router_core.career.js";
 import { buildResume, resumeTaskTurn, targetOf } from "../../supabase/functions/_shared/career_resume_task.ts";
 import { createFileService, memoryFileStore } from "../../supabase/functions/_shared/file_service.ts";
@@ -49,12 +51,13 @@ Deno.test({
         insert into public.career_kb_postings (posting_key, source, board, company, title, location, url, posted_at, text_excerpt, content_hash) values
         ${POSTINGS.map(([b, c, t, l], i) => `('greenhouse:${b}:${i + 1}', 'greenhouse', '${b}', '${c}', '${t}', '${l}', 'https://boards.greenhouse.io/${b}/jobs/${i + 1}', now(), 'Requirements: SQL', 'r10na${i}')`).join(",")};`);
       h = await careerHandler(pg, { "tok-a": P[0], "tok-b": P[1] });
-      const viaDouble = globalThis.fetch, outbound: string[] = [];
+      const viaDouble = globalThis.fetch, outbound: string[] = [], checks = postingChecks();
       globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
         // deno-lint-ignore no-explicit-any
         const req = input instanceof Request && !init ? input : new Request(input as any, init);
         const u = new URL(req.url);
         if (u.host === "api.anthropic.com") return anthropicWire(req, (chat) => new Response(JSON.stringify({ id: "chatcmpl-test", model: chat.model, choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: "{}" } }], usage: { prompt_tokens: 10, completion_tokens: 1 } }), { headers: { "content-type": "application/json" } }));
+        if (checks.take(req.method, req.url)) throw new TypeError(`network refused: ${u.host}`);
         if (u.origin !== new URL(SUPABASE_URL).origin) { outbound.push(u.host); throw new TypeError(`network refused: ${u.host}`); }
         return await viaDouble(req);
       }) as typeof fetch;
@@ -70,7 +73,7 @@ Deno.test({
         const chat = h!.chat(tok);
         for (const m of [`here is my resume:\n${RESUME}`, "yes, that's my resume", list, ask]) {
           await pg.sql(`delete from public.agent_rate_limits where user_id = '${who}'`);
-          const r = await chat.say(m);
+          const r = await checks.turn(m, () => chat.say(m), (t) => t.reply);
           assertNode.equal(r.status, 200, r.reply);
           if (m === ask) {
             assertNode.ok(!/applications ready|haven't started that batch|apply list:|queued/i.test(r.reply) || /haven't applied/.test(r.reply), `${ask.slice(0, 40)}: no apply or batch reply: ${r.reply}`);
@@ -88,12 +91,13 @@ Deno.test({
       const c = h!.chat("tok-a");
       for (const extra of [{}, { career_batch: { action: "approve", runId: "batch-r10-test-1", eventId: "evt-r10-1", cardSha256: "a".repeat(64) } }]) {
         await pg.sql(`delete from public.agent_rate_limits where user_id = '${P[0]}'`);
-        const r = await c.say(SAVE, extra);
+        const r = await checks.turn(SAVE, () => c.say(SAVE, extra), (t) => t.reply);
         assertNode.ok(!["career_batch_apply", "career_apply_queue"].includes(String(r.intent)) && !/applications ready/i.test(r.reply), `${JSON.stringify(extra)}: ${r.intent}: ${r.reply}`);
         await nothing(P[0], `${SAVE} ${Object.keys(extra).join("")}`);
         assertNode.equal(await pg.sql(`select count(*) from public.career_batch_intents_v1 where user_id = '${P[0]}'`), "0", "no batch intent committed");
       }
       assertNode.deepEqual(outbound, [], "no network");
+      assertNode.deepEqual(checks.faults, [], "a search checks at most the postings it shows, each on its own page");
     } finally {
       globalThis.fetch = realFetch;
       for (const [k, v] of Object.entries(saved)) v === undefined ? Deno.env.delete(k) : Deno.env.set(k, v);

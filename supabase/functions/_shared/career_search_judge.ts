@@ -25,7 +25,7 @@ import { searchWords, wordStem } from "./career_ingest.ts";
 import { correctedAsk } from "./search_correction.ts";
 import { blockerAsk, inMetro, METRO, remoteInUs, widenedAsk, withScope } from "./search_widen.ts";
 import { arrangementOf, checkedAt, nextWidening, placesLine, roleVariants, studentWindowOf, wantOf } from "./search_shortlist.ts";
-import { apiUrlFor, ashbyBoardFor, type LinkCheck, liveOnly, searchCheck } from "./link_check.ts";
+import { apiUrlFor, ashbyBoardFor, type LinkCheck, liveOnly, SEARCH_CHECK_MAX, searchCheck } from "./link_check.ts";
 import { type CanSubmit, capabilitiesOf, rankBySubmit, submitLabel } from "./submit_capability.ts";
 import { hasLimits, type Limits, limitsLine, outsideLimits, REASON_WORDS, type Reason, searchTextOf, statedBand, statedPay } from "./posting_constraints.ts";
 import { CareerPool } from "./career_pool.js";
@@ -540,6 +540,8 @@ export async function searchJudgeTurn(o: {
   const linkOf = new Map(checked.shown.map((h) => [h.job_id, h.link]));
   if (o.openCheck) hits = checked.shown;
   const at = checkedAt(o.now, o.tz);
+  // E.21 ruling 1: the 10-page cap was reached with closed roles to replace: fewer are shown, and the reply says how many were read.
+  const capLine = o.openCheck && checked.dead && checked.checked >= SEARCH_CHECK_MAX ? ` I checked ${checked.checked} application pages, the most I read for one search.` : "";
   if (!hits.length) {
     // A source that could not be read is not evidence of no postings: the router's own reply stands.
     if (snapshotFailed || (source === "none" && liveRows === null)) return null;
@@ -550,7 +552,7 @@ export async function searchJudgeTurn(o: {
     const scope = `I checked ${variants.join(", ")}${internOnly ? " internships" : ""} in ${placesLine(ask)}, on the live board${age} and the saved snapshot of job boards`;
     const why = checked.dead && !checked.shown.length ? `${plural(checked.dead, "matching role was", "matching roles were")} found, but ${checked.dead === 1 ? "its application page shows it" : "their application pages show them"} closed when I checked (${at.text})`
       : notIntern ? `${plural(notIntern, "posting")} matched the place but ${notIntern === 1 ? "does" : "do"} not say ${notIntern === 1 ? "it is an internship" : "they are internships"}` : `none was found (${liveNote}, and the saved snapshot has none either)`;
-    const reply = `${scope}: ${why}.${leftOut} Nothing was invented to fill the list, and nothing was applied for. The most useful widening is ${nextWidening(ask)}, and I'll search again.`;
+    const reply = `${scope}: ${why}.${capLine}${leftOut} Nothing was invented to fill the list, and nothing was applied for. The most useful widening is ${nextWidening(ask)}, and I'll search again.`;
     return { reply, status: "none", source: "none", shortlist: [], accounting: null, modelCalled: false, blocker: checked.dead && !checked.shown.length ? "all_closed" : "no_roles" };
   }
   const byId = new Map(pool.map((p) => [p.job_id, p]));
@@ -630,7 +632,7 @@ export async function searchJudgeTurn(o: {
     const local = ask.place ? listed.filter((r) => inPlace({ location: where(r.h) } as SourcePosting, { ...ask, remote: false, remoteOnly: false })).length : 0;
     const counts = ask.place && ask.remote ? ` ${local} ${local === 1 ? "is" : "are"} in ${placesLine({ ...ask, remote: false }).replace(/ \(.*\)$/, "")} and ${listed.length - local} ${listed.length - local === 1 ? "is" : "are"} ${ask.remoteRegion === "us" ? "remote in the US" : "remote"}.` : "";
     const short = o.want && listed.length < o.want ? ` I did not find ${o.want} within the scope checked.` : "";
-    const closed = checked.dead ? ` ${plural(checked.dead, "role was", "roles were")} left out: closed when checked.` : "";
+    const closed = checked.dead ? ` ${plural(checked.dead, "role was", "roles were")} left out: closed when checked.${capLine}` : "";
     const zone = o.openCheck && live && !at.zoneKnown ? " Times are UTC: I don't know your time zone." : "";
     // Spec B.2: "I verified [count] open matches. [count] are in Chicago and [count] are remote US; I did not find five within the scope checked."
     // E.21: none verified reads as before ("N listed, not re-checked."; each row says it). Beside verified ones, the rest are

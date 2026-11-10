@@ -10,7 +10,7 @@ const os = require("node:os");
 const path = require("node:path");
 const http = require("node:http");
 const lib = require("../scripts/browser-eval/eval-lib.cjs");
-const { strictPosting } = require("../scripts/browser-eval/strict.cjs");
+const { strictPosting, summarize, markdown } = require("../scripts/browser-eval/strict.cjs");
 const { phoneCountryMatch, fillForm, labelCounts, decide } = require("../workers/career-browser/ats-fill.cjs");
 
 let pw = null;
@@ -24,7 +24,7 @@ before(async () => {
   server = http.createServer((req, res) => {
     if (req.method !== "GET") { posts.push(`${req.method} ${req.url}`); return res.writeHead(200).end("ok"); }
     if (req.url === "/robots.txt") return res.writeHead(200, { "content-type": "text/plain" }).end("User-agent: *\nAllow: /\n");
-    if (req.url === "/gh") return res.writeHead(200, { "content-type": "text/html" }).end(html);
+    if (req.url === "/gh" || req.url === "/gh?s3") return res.writeHead(200, { "content-type": "text/html" }).end(html);
     res.writeHead(404).end();
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
@@ -73,4 +73,23 @@ test("job-boards form: a +44 number with a US country leaves the phone's Country
     const held = await page.evaluate(() => document.querySelector(".phone-input .select__single-value"));
     assert.equal(held, null);
   } finally { await page.close(); }
+});
+
+test("a resume that goes to the board's S3 bucket: the upload is answered inside the browser, and the posting is 'ready except upload', never a pass; nothing leaves", { skip }, async () => {
+  const r = await strictPosting(browser, { provider: "greenhouse", url: `${base}/gh?s3` }, { robots: new Map(), pacer: lib.createPacer({ gapMs: 0 }), ua: "test", resumePath: resume() });
+  assert.equal(r.result, "ready_except_upload", JSON.stringify({ reason: r.reason, field: r.field, needs: r.needs }));
+  assert.equal(r.reason, "strict_reached_submit");
+  assert.equal(r.upload_simulated, 1);
+  assert.deepEqual(posts, []);
+  const s = summarize([r, { provider: "greenhouse", result: "pass", reason: "strict_reached_submit", sent_blocked: 0, graphql_reads: 0, upload_simulated: 0 }]);
+  assert.equal(s.all.pass, 1); assert.equal(s.all.ready_except_upload, 1); assert.equal(s.prov[0].ready_except_upload, 1);
+  assert.match(markdown("t", s), /\| greenhouse \| 2 \| 1 \| 50\.0% \| 0 \| 1 \| 0 \|/);
+});
+
+test("the same upload on another provider, another path or another host is not simulated: it is blocked, and the resume is not read back", { skip }, async () => {
+  const r = await strictPosting(browser, { provider: "lever", url: `${base}/gh?s3` }, { robots: new Map(), pacer: lib.createPacer({ gapMs: 0 }), ua: "test", resumePath: resume() });
+  assert.notEqual(r.result, "pass"); assert.notEqual(r.result, "ready_except_upload");
+  assert.equal(r.upload_simulated, 0);
+  assert.ok(r.sent_blocked >= 1);
+  assert.deepEqual(posts, []);
 });

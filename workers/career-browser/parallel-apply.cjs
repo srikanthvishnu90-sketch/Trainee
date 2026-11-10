@@ -251,7 +251,8 @@ async function attempt(browser, p, opts, timing) {
   if (opts.initScript) await ctx.addInitScript(opts.initScript);
   await ctx.route("**/*", async (route) => {
     const req = route.request();
-    if (opts.requestGate && !(await opts.requestGate(req))) return route.abort("blockedbyclient");
+    // A gate may answer a request inside the browser itself (the strict benchmark's simulated resume upload): nothing is sent.
+    if (opts.requestGate) { const g = await opts.requestGate(req); if (g && typeof g === "object" && g.fulfill) return route.fulfill(g.fulfill); if (!g) return route.abort("blockedbyclient"); }
     // Every top-level navigation, of this page or of any tab it tries to open, is checked.
     if (req.isNavigationRequest() && !req.frame().parentFrame()) {
       const g = urlVerdict(req.url(), allow);

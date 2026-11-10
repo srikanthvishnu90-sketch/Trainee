@@ -37,24 +37,25 @@ export function unaddressedDraft(u: Unaddressed): { subject: string; body: strin
   const role = /\b(role|position|job|internship|opening)\b/i.test(topic);
   const subject = thanks ? `Thank you` : role ? cap(`${topic}${at}`) : topic ? cap(topic) : firm ? `A question about ${firm}` : "A short question";
   const open = thanks ? `Thank you for [what they did for you].`
-    : role ? `I'm interested in ${/^(?:the|a|an|your)\b/i.test(topic) ? topic : `the ${topic}`}${at}, and I'm reaching out to learn more about it.`
+    : role ? `I'm interested in ${/^(?:the|a|an|your)\b/i.test(topic) ? topic : `the ${topic}`}${at}, and would like to learn more.`
     : advice ? `I'm reaching out${firm ? ` because of your work${at}` : ""} to ask for a little advice${topic && !/^asking for advice$/i.test(topic) ? ` on ${topic.replace(/^asking for advice\s*(?:on|about)?\s*/i, "")}` : ""}.`
     : `I'm reaching out${firm ? ` because I'm interested in the work${at}` : ""}${topic ? ` about ${topic}` : ""}.`;
   const ask = thanks ? `[One line on what it meant to you.]` : `Would you be open to a short conversation in the next few weeks?`;
-  const body = `Hi ${first},\n\n${open} [One line about you: your school, your role or what you're working on.]\n\n${ask}\n\nThanks,\n${clean(u.signature) || "[Your name]"}`;
+  const body = `Hi ${first},\n\n${open} [One line about you: school, role or current work.]\n\n${ask}\n\nThanks,\n${clean(u.signature) || "[Your name]"}`;
   return { subject, body, text: `Subject: ${subject}\n\n${body}` };
 }
 
 // The whole reply: the draft, its state, and the one question. lead is what the contacts lookup found (or "").
 export function unaddressedReply(u: Unaddressed, lead: string): string {
-  const d = unaddressedDraft(u), who = titled(clean(u.name)), firm = titled(clip(u.firm)), at = firm ? ` at ${firm}` : "";
+  const d = unaddressedDraft(u), who = titled(clean(u.name));
   return [
     lead,
-    `Here's a draft to ${who}${at}. Recipient not set: I don't have ${who}'s address and won't guess one, so nothing is saved or sent. Fill in the [brackets] first.`,
+    // The first sentence is the result and its state, not the ask read back (the firm and the topic are in the draft itself).
+    `Your draft to ${who} is below. Recipient not set: I have no address for ${who} and won't guess one, so nothing is saved or sent.`,
     "",
     d.text,
     "",
     // The question is the last thing read (RESPONSE-RULES: the decision ends the reply); the answer's shape comes before it.
-    `Reply like "email ${who} <last name> at <their work email>" and I'll read it back before anything is written to them. What are ${who}'s full name and work email?`,
+    `Reply "email ${who} <last name> at <address>" and I'll read it back to you first. What are ${who}'s full name and work email?`,
   ].filter((x, i) => i !== 0 || x).join("\n");
 }

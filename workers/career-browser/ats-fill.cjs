@@ -55,7 +55,8 @@ function EXTRACT() {
     return null;
   };
   const ownControls = (a) => [...a.querySelectorAll("input, select, textarea")].filter((x) => x.type !== "hidden" && shown(x)).length;
-  // A box alone in its section under the section's own heading (Breezy's "Experience Summary" over the cSummary box): that heading.
+  // A box alone in its section under the section's own heading (Breezy's "Experience Summary" over the cSummary box), when the box
+  // has no name of its own: that heading.
   const HEAD = "h1, h2, h3, h4, .section-header";
   const sectionHeading = (el) => {
     for (let a = el, i = 0; a && a.parentElement && i < 3 && ownControls(a.parentElement) === 1; a = a.parentElement, i++) {
@@ -88,7 +89,7 @@ function EXTRACT() {
     if (cl && nodeText(cl)) return cl;
     const g = groupLabelNode(el);
     if (g) return g;
-    return itemHeading(el) || sectionHeading(el);
+    return itemHeading(el);
   };
   const isReq = (els, node) => {
     if (els.some((e) => e.required || e.getAttribute("aria-required") === "true")) return true;
@@ -165,8 +166,10 @@ function EXTRACT() {
       continue;
     }
     seen.add(el);
-    const node = labelNode(el);
-    const label = node ? nodeText(node) : clean(el.getAttribute("aria-label") || el.getAttribute("placeholder") || el.name || "");
+    // The box's own name (aria-label, placeholder) comes before a section's heading; the heading before the bare field id.
+    const own = clean(el.getAttribute("aria-label") || el.getAttribute("placeholder") || "");
+    const node = labelNode(el) || (own ? null : sectionHeading(el));
+    const label = node ? nodeText(node) : own || clean(el.name || "");
     // A file box under a question's heading (Breezy: an optional attachment beside a required written answer) is required only
     // when it says so itself; the heading's star is the written answer's.
     const fromHeading = node && type === "file" && node === itemHeading(el);

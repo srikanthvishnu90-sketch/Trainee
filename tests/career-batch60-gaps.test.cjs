@@ -16,7 +16,7 @@ const os = require("node:os");
 const path = require("node:path");
 const http = require("node:http");
 const crypto = require("node:crypto");
-const { factsFrom, factValue, decide, holdsApproved, fillForm, heldNow } = require("../workers/career-browser/ats-fill.cjs");
+const { factsFrom, factValue, decide, holdsApproved, fillForm, heldNow, EXTRACT } = require("../workers/career-browser/ats-fill.cjs");
 const { applyOne, payloadHash, NeedsUser } = require("../workers/career-browser/parallel-apply.cjs");
 const { createWorker, queueHash } = require("../workers/career-browser/apply-vm.cjs");
 const { fieldMismatch } = require("../scripts/browser-eval/pool.cjs");
@@ -224,6 +224,17 @@ test("Breezy: held questions are named in the form's own words (its heading, its
     assert.deepEqual(fr.needsUser.find((n) => n.label === "Education").options, ["Bachelors", "Masters"]);
     assert.ok(fr.needsUser.find((n) => n.label === "Race or Ethnicity").reason === "eeo_needs_your_choice");
     assert.deepEqual(fr.filled, [], "nothing is answered for the person");
+  } finally { await page.close(); }
+});
+
+test("a box's own name (placeholder, aria-label) comes before a section heading; the heading only names a box with none", { skip, timeout: 30000 }, async () => {
+  const page = await browser.newPage();
+  try {
+    // Teamtailor's job page (strict r12 first run): an email box under "Already working at Acme?" keeps its own "Email".
+    await page.setContent(`<div><h3>Already working at Acme?</h3><form><input type="email" name="candidate[email]" placeholder="Email" required><button type="submit">Log in</button></form></div>`);
+    assert.deepEqual((await page.evaluate(EXTRACT)).map((q) => q.label), ["Email"]);
+    await page.setContent(`<form><div class="section"><div class="section-header">Experience Summary*</div><textarea name="cSummary" required></textarea></div></form>`);
+    assert.deepEqual((await page.evaluate(EXTRACT)).map((q) => [q.label, q.required]), [["Experience Summary", true]]);
   } finally { await page.close(); }
 });
 

@@ -15,7 +15,7 @@
 //     no `mutation`), which some boards use to load the form; each one is logged;
 //   - a page script cancels every form submit, form.submit() and requestSubmit(), and counts the attempt;
 //   - the runner is stopped before its click, with retries 0; robots.txt is obeyed; 1 page load a second per host.
-//   node scripts/browser-eval/strict.cjs --sample scripts/browser-eval/sample.csv --label strict-1 [--max-per-provider 20]
+//   node scripts/browser-eval/strict.cjs --sample scripts/browser-eval/sample.csv --label strict-1 [--max-per-provider 20] [--providers a,b]
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
@@ -29,6 +29,14 @@ const PROVIDER_HOSTS = {
   recruitee: [], teamtailor: [], personio: [], bamboohr: [], breezy: [], workday: [],
 };
 const CUSTOM_ONLY = (needs) => Array.isArray(needs) && needs.length > 0 && needs.every((n) => n.reason === "no_confirmed_answer");
+
+// A board that serves every employer from subdomains of one domain (acme.recruitee.com, beta.recruitee.com) rate-limits that
+// domain as a whole (run 42719264485: four Recruitee postings got 429 at 1 page a second per subdomain): paced as one host.
+const SHARED_DOMAINS = ["recruitee.com"];
+function paceKey(host) {
+  const h = String(host).toLowerCase();
+  return SHARED_DOMAINS.find((d) => h === d || h.endsWith(`.${d}`)) || h;
+}
 
 function graphqlRead(req) {
   if (req.method() !== "POST") return false;
@@ -73,7 +81,7 @@ async function strictPosting(browser, item, o) {
     }
     if (["image", "media", "font"].includes(req.resourceType())) return false;
     // Polite pacing is per page load (1 a second per host), not per script or stylesheet a page loads with it.
-    if (req.isNavigationRequest()) await o.pacer.wait(u.host);
+    if (req.isNavigationRequest()) await o.pacer.wait(paceKey(u.host));
     return true;
   };
   const stop = async (phase) => { if (phase === "submitting") throw new NeedsUser("strict_reached_submit"); };
@@ -114,7 +122,9 @@ async function main() {
   const label = String(arg("label", "strict")).replace(/[^A-Za-z0-9._-]/g, "-");
   const out = path.resolve(arg("out", path.join("artifacts", "browser-eval", label)));
   fs.mkdirSync(out, { recursive: true });
-  const items = lib.readSample(fs.readFileSync(arg("sample"), "utf8"), { max: arg("max-per-provider", 20) });
+  // --providers recruitee,teamtailor: bench only those boards (the denominator is then their sampled postings).
+  const providers = arg("providers", "") ? String(arg("providers")).toLowerCase().split(",").map((x) => x.trim()).filter(Boolean) : null;
+  const items = lib.readSample(fs.readFileSync(arg("sample"), "utf8"), { max: arg("max-per-provider", 20), providers });
   let pw; for (const id of [process.env.UPMORE_PLAYWRIGHT_PATH, "playwright"]) { if (!id) continue; try { pw = require(id); break; } catch { /* next */ } }
   if (!pw) { console.error("playwright not found (set UPMORE_PLAYWRIGHT_PATH)"); process.exit(2); }
   const browser = await pw.chromium.launch({ headless: true });
@@ -135,4 +145,4 @@ async function main() {
   if (s.all.breaches) process.exit(3);
 }
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
-module.exports = { strictPosting, graphqlRead, robotsOk, summarize, markdown, CUSTOM_ONLY, PROVIDER_HOSTS };
+module.exports = { strictPosting, graphqlRead, paceKey, robotsOk, summarize, markdown, CUSTOM_ONLY, PROVIDER_HOSTS };

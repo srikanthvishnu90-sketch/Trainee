@@ -314,8 +314,11 @@ async function attempt(browser, p, opts, timing) {
     if (!(await page.waitForSelector(FIELD_SEL, { timeout: 5000 }).catch(() => null))) {
       const direct = applyUrlFor(p.ats, page.url());
       if (direct) {
-        try { await page.goto(direct, { waitUntil: "domcontentloaded" }); } catch (e) { onAllowedHost(); throw e; }
+        let dr;
+        try { dr = await page.goto(direct, { waitUntil: "domcontentloaded" }); } catch (e) { onAllowedHost(); throw e; }
         onAllowedHost();
+        // The apply address refused the load (Recruitee /c/new 429, run 42719264485): that, not "no form", is the outcome.
+        if (dr && dr.status() >= 400) throw new Error(`page_load_${dr.status()}`);
         await page.waitForSelector(FIELD_SEL, { timeout: 8000 }).catch(() => null);
         { const shown = await botCheck(page); if (shown) { const e = new NeedsUser("bot_check", p.url); e.detail = shown; throw e; } }
         await stopAtWall(page, p.url);

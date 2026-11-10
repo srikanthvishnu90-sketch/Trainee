@@ -1496,9 +1496,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
                 n: Number(Deno.env.get("CAREER_JUDGE_N")) || undefined, standing: () => supabaseMemoryStore(admin).standing(user.id) },
               // R10 WO-C (fix 6): each role's application page is re-checked before it is shown (Greenhouse, Lever, Ashby and
               // SmartRecruiters public boards by id; any other link by fetching it). The checked time is said in the person's zone.
-              // Only when the person asked for open or verified roles (SearchAsk.verify); otherwise each is said to be not re-checked.
+              // Architect ruling E.21 (release item 8; tests/architect/loop-08-discovery.test.ts): EVERY search re-checks the postings
+              // it shows, only those (at most the count asked, never more than 10; a closed one's place goes to the next one, at most
+              // 10 pages read), each on its own posting page by id; no board listing is read (Ashby by its posting page). None is
+              // called open unless its check passed.
               canSubmit: canSubmitByHost, // R10 owner ruling (apply by message and yes): the posting's own host decides the label
-              openCheck: f5Ask.verify ? linkChecker(fetch, { userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }) : null,
+              openCheck: linkChecker(fetch, { ashby: "posting", userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }),
               tz: f5Zone?.tz ?? null, want: f5Ask.want ?? wantOf(message) }));
             // F.1: the blocker question gets the evidenced blocker: a source that could not be read is a connection problem.
             if (!found && f5Said?.explain) out = { ...out, intent: "career_discovery", resultStatus: "blocked", handler: "search_judge",

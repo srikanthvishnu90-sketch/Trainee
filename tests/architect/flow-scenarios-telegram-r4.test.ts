@@ -38,6 +38,8 @@ import { telegramAdapter } from "../../supabase/functions/_shared/telegram.ts";
 import { CHANNEL_REPLIES } from "../../supabase/functions/_shared/channel.ts";
 import { hashTag, refOf } from "../../supabase/functions/_shared/telegram_jobs.ts";
 import * as AY from "../../supabase/functions/_shared/apply_all_yes.ts";
+// architect amendment E.21 (2026-11-10): a search's posting-page checks are held to helpers/posting_checks.ts (no board listing, at most N for the N shown, never over 10); every other off-machine request is still a fault.
+import { postingChecks } from "./helpers/posting_checks.ts";
 
 const STOPPED_AFTER_OFFER_REPLY = (AY as Record<string, unknown>).STOPPED_AFTER_OFFER_REPLY as string ?? "(no answer for a yes after STOP)";
 const CI = Deno.env.get("CI") === "true";
@@ -98,7 +100,7 @@ Deno.test({
       const clock = { get t() { return now(); } };
       const sleep = async (ms: number) => { skew += ms; };
       const B = bot(clock as { t: number });
-      const viaDouble = globalThis.fetch, outbound: string[] = [];
+      const viaDouble = globalThis.fetch, outbound: string[] = [], checks = postingChecks();
       let modelCalls = 0;
       globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
         const req = input instanceof Request && !init ? input : new Request(input as any, init);
@@ -107,6 +109,7 @@ Deno.test({
         if (u.origin === new URL(SUPABASE_URL).origin) return await viaDouble(req);
         if (u.host === "api.telegram.org") return await B.fetch(req.url, { method: req.method, headers: req.headers, body: await req.text() });
         if (u.host === "api.openai.com" || u.host === "api.anthropic.com") { modelCalls++; throw new TypeError("no model in this test"); }
+        if (checks.take(req.method, req.url)) throw new TypeError(`network refused: ${u.host}`);
         outbound.push(u.host);
         throw new TypeError(`network refused: ${u.host}`);
       }) as typeof fetch;
@@ -140,8 +143,10 @@ Deno.test({
       const post = async (body: Record<string, unknown>) => {
         await sql("delete from public.agent_rate_limits");
         const raw = JSON.stringify({ update_id: ++upd, ...body });
-        const res = await handleTelegram(new Request(`${SUPABASE_URL}/functions/v1/trainee-telegram`, { method: "POST", headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": SECRET }, body: raw }),
-          { env, now, store: () => supabaseInboundStore(admin), chat, admin, deliver, adapter: adapterOf });
+        const chatOf = (raw: string) => { try { const b = JSON.parse(raw); return Number((b.message ?? b.edited_message ?? b.callback_query?.message)?.chat?.id ?? 0); } catch { return 0; } };
+        const c = chatOf(raw), k = B.to(c).length;
+        const res = await checks.turn(`update ${upd}`, () => handleTelegram(new Request(`${SUPABASE_URL}/functions/v1/trainee-telegram`, { method: "POST", headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": SECRET }, body: raw }),
+          { env, now, store: () => supabaseInboundStore(admin), chat, admin, deliver, adapter: adapterOf }), () => B.to(c).slice(k).map(plainOf).join("\n"));
         const text = await res.text();
         if (res.status !== 200) fail("webhook", `HTTP ${res.status} ${text.slice(0, 160)}`);
         if (text.includes(TOKEN) || text.includes(SECRET)) fail("webhook", "a response carries a secret");
@@ -296,6 +301,7 @@ Deno.test({
         for (const id of [...ids, ...LIVE.map((p) => p.id)]) if (t.includes(id)) { fail("text", `an internal id in a message: ${id.slice(0, 18)} in ${JSON.stringify(t.slice(0, 160))}`); break; }
       }
       if (outbound.length) fail("network", [...new Set(outbound)].join(", "));
+      for (const f of checks.faults) fail("network", f);
       const secrets = logged.filter((l) => l.includes(TOKEN) || l.includes(SECRET));
       if (secrets.length) fail("logs", `${secrets.length} log lines carry a secret`);
       for (const k of Object.keys(realLog) as (keyof typeof realLog)[]) console[k] = realLog[k];

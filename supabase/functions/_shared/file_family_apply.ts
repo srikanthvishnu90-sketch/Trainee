@@ -167,10 +167,12 @@ export function negotiationFile(d: Negotiation): FamilyFile {
 }
 
 // ---------------------------------------------------------------- F-15 offer comparison (C.18)
-export interface OfferComparison { offers: { letter: string; company: string; rows: KV[] }[]; deadline: { company: string; at: string | null }; priorities?: string | null; acts?: Acts }
+// deadline null: no dated deadline (LOOP 13: an offer told in chat has a deadline in words, a row); basis: where the figures came
+// from when they are not all from documents ("as you told me").
+export interface OfferComparison { offers: { letter: string; company: string; rows: KV[] }[]; deadline: { company: string; at: string | null } | null; priorities?: string | null; acts?: Acts; basis?: string }
 export function offerComparisonFile(d: OfferComparison): FamilyFile {
   return {
-    family: "F-15", hero: { kicker: `${n(d.offers.length, "offer")} - from actual documents`, title: d.offers.map((o) => o.company).join(" vs "), meta: [{ label: `${d.deadline.company} deadline:`, at: d.deadline.at, future: true }] },
+    family: "F-15", hero: { kicker: `${n(d.offers.length, "offer")} - ${d.basis ?? "from actual documents"}`, title: d.offers.map((o) => o.company).join(" vs "), meta: d.deadline ? [{ label: `${d.deadline.company} deadline:`, at: d.deadline.at, future: true }] : [] },
     blocks: [
       ...d.offers.map((o): Block => ({ b: "card", parts: [{ p: "heading", title: `${o.letter} - ${o.company}` }, { p: "kv", rows: o.rows.filter((r) => !/\btotal\b/i.test(r.k)) }] })),
       ...(d.priorities ? [note("info", "Your priorities applied.", `${d.priorities} Choosing a favorite here accepts nothing and withdraws nothing.`)] : []),

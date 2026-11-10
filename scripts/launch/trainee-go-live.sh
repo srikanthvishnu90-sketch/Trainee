@@ -132,6 +132,7 @@ fi
 # reads PACE_RE in either function (tests/db/rehearse_live_migrations.sh reads every mark after a full apply).
 # 20261019020000_site_capture.sql is main's landing-page capture, already live (WO-081): its mark skips it there. Trunk's
 # channel delivery moved to 20261019020001 so the two never share a version.
+# 20261110120000 (release item 2): the VM drives Personio and Breezy by exact host. Rollback: supabase/rollbacks/20261110120000_career_apply_vm_boards.down.sql.
 MIGRATIONS=(
   20261019000000_channel_threads.sql
   20261019000001_career_postings.sql
@@ -297,6 +298,7 @@ MIGRATIONS=(
   20261109120000_career_pause_send_paths.sql
   20261109130000_career_outbox_interim.sql
   20261109150000_career_apply_handoff_finish.sql
+  20261110120000_career_apply_vm_boards.sql
   20261110150000_career_mail_unclear.sql
   20261110160000_career_file_plans_materials.sql
   20261110190000_career_outbox_parts_follow_contact.sql
@@ -466,6 +468,7 @@ MIGRATION_MARK=(
   "exists (select 1 from pg_proc where proname = 'career_outreach_action_claim' and prosrc like '%career_user_quiet%') and exists (select 1 from pg_proc where proname = 'career_send_go' and prosrc like '%career_user_quiet%')"
   "exists (select 1 from pg_constraint where conname = 'career_outbox_kind_check' and pg_get_constraintdef(oid) like '%interim%')"
   "exists (select 1 from pg_proc where proname = 'career_apply_person_finished_as')"
+  "exists (select 1 from pg_proc where proname = 'career_apply_vm_family' and prosrc like '%breezy%') and exists (select 1 from pg_proc where proname = 'career_apply_vm_claimable' and prosrc like '%personio%')"
   "exists (select 1 from pg_constraint where conname = 'career_mail_events_unclear_flagged')"
   "to_regclass('public.career_search_plans') is not null and to_regclass('public.career_material_versions') is not null"
   "exists (select 1 from pg_trigger where tgname = 'career_outbox_parts_follow_contact')"

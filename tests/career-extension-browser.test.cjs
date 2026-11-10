@@ -23,6 +23,17 @@ const { startWorld } = require("./fixtures/extension/world.cjs");
 
 const ROOT = path.join(__dirname, "..");
 const EXT = path.join(ROOT, "extension");
+// D-MS-1 (x-audit, 2026-11-10): the shipped extension types nothing before the tap (config.js prefill: false); this test
+// drives the fill engine itself, so it loads a copy with prefill switched on.
+const EXT_RUN = (() => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trainee-ext-prefill-"));
+  fs.cpSync(EXT, dir, { recursive: true });
+  const cfg = path.join(dir, "config.js"), src = fs.readFileSync(cfg, "utf8"), on = src.replace(/prefill:\s*false/, "prefill: true");
+  if (on === src) throw Error("config.js has no prefill: false to switch");
+  fs.writeFileSync(cfg, on);
+  process.on("exit", () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* gone */ } });
+  return dir;
+})();
 const KEY = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/extension/answer-key.json"), "utf8"));
 const RESUME = { name: "test-person-resume.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n% TEST resume for WO-031, not a real person\n") };
 
@@ -57,7 +68,7 @@ async function launch() {
     ...(SANDBOX_OFF ? {} : { chromiumSandbox: true }),
     viewport: { width: 1280, height: 900 },
     args: [
-      `--disable-extensions-except=${EXT}`, `--load-extension=${EXT}`, `--host-resolver-rules=${world.hostRules}`,
+      `--disable-extensions-except=${EXT_RUN}`, `--load-extension=${EXT_RUN}`, `--host-resolver-rules=${world.hostRules}`,
       "--ignore-certificate-errors", "--no-proxy-server", ...(SANDBOX_OFF ? ["--no-sandbox"] : []),
     ],
   });

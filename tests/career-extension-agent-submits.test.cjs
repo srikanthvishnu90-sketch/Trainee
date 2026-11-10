@@ -54,7 +54,11 @@ function agentCopy() {
   const src = fs.readFileSync(cfg, "utf8");
   const on = src.replace(/agentSubmits:\s*false/, "agentSubmits: true");
   if (on === src) throw Error("config.js has no agentSubmits: false to switch");
-  fs.writeFileSync(cfg, on);
+  // D-MS-1 (x-audit, 2026-11-10): the shipped extension types nothing before the tap (prefill: false); this test drives the
+  // fill engine, so its copy switches prefill on too.
+  const filled = on.replace(/prefill:\s*false/, "prefill: true");
+  if (filled === on) throw Error("config.js has no prefill: false to switch");
+  fs.writeFileSync(cfg, filled);
   return dir;
 }
 async function openPanel(tabId) {

@@ -6,7 +6,8 @@
 //   2. CAREER_BRAIN=staged: an advice question goes to the brain (the fake model's words are the reply, the tools offered
 //      exclude the actions code owns); an apply ask, a card ask and a job search stay code's, with no model call; a class
 //      the owner keeps (CAREER_BRAIN_ROUTER_INTENTS) stays on the router.
-//   3. The model fails: the router answers, exactly as it would have.
+//   3. The model fails: the router answers when it has a real intent for the message; its catch-all is replaced by the held
+//      reply (architect amendment, r-states 2026-11-10).
 //   4. D-035, the code-enforced rules under the release default: crisis text gets code's 988 reply (no model call); a
 //      fact the model invents about the person is not delivered (the fact lock, D-007); STOP and the pause are the host's;
 //      a resume's facts are confirmed only by the person's own yes to the exact facts shown (router, no model call).
@@ -189,13 +190,24 @@ Deno.test({ name: "F13: the staged brain release at the real handler", sanitizeR
       eq(calls.length, n, "kept on the router: no model call");
     });
 
-    await t.step("staged, the model fails: the router answers exactly as it would have", async () => {
+    await t.step("staged, the model fails: held, never the catch-all; a real router intent still answers", async () => {
       setBrain("staged");
       mode = "fail";
       const n = calls.length;
       const r = await say(handler!.chat("tok-f13e"), ADVICE);
       assert(calls.length > n, "the brain was tried");
-      eq([r.reply, r.intent, r.body.meta.brain], [routerReply(PEOPLE["tok-f13e"], ADVICE).reply, "career_catchall", undefined], "the router's reply");
+      // Architect amendment (r-states, 2026-11-10; R4, R9, E.6 54): the router's catch-all never answers a different question at
+      // an outage; the turn is held (what stopped, the task kept, "continue"), as at a limit (ruling 3).
+      eq([r.intent, r.body.meta.limit_stop], ["career_limit_held", "outage"], JSON.stringify(r.body.meta));
+      // architect amendment (2026-11-10, #706 no-echo ruling): the task named, never the ask word for word.
+      assert(/^I couldn't finish [^"]+ without the AI: it is kept\. The AI service failed on this one/.test(r.reply) && !r.reply.includes(ADVICE), r.reply);
+      assert(r.reply !== routerReply(PEOPLE["tok-f13e"], ADVICE).reply, "not the catch-all");
+      // A message the router has a real intent for is still answered by the router when the model fails.
+      const m = calls.length;
+      const wear = await say(handler!.chat("tok-f13e"), "what should I wear to a video interview?");
+      assert(calls.length > m, "the brain was tried");
+      assert(wear.intent !== "career_limit_held" && wear.intent !== "career_catchall" && wear.body.meta.brain === undefined, JSON.stringify([wear.intent, wear.body.meta]));
+      assertNode.match(wear.reply, /\b(?:wear|dress)\b/i, "the router's own answer about what to wear");
     });
   } finally {
     mode = "answer";

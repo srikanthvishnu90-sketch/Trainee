@@ -129,17 +129,18 @@ Deno.test({
       // Each write was tried by the page and stopped by the engine (not merely never made): the resume upload too, so the
       //    engine did put the file on the form.
       const marks = (k: string) => employer.seen.filter((x) => x.path === `/${k}`).map((x) => new URLSearchParams(x.query).get("what")).sort();
-      eq(marks("stopped"), ["other-origin", "post-autosave", "put-autosave", "upload"], "every write the page tried was stopped");
-      eq(marks("went"), ["get-autosave"], "the only one that went is the GET");
-      // 2. What a dry run does send the employer: GETs. The page itself (one load here), and every same-origin GET the
-      //    page's own scripts make, including one that carries a typed value in its query string. The engine does not
-      //    stop a same-origin GET.
+      // architect amendment (2026-11-10, #703 D-MS-1): the GET autosave was the one gap this test recorded ("REAL GAP");
+      // #703 closes it. Now every request the page makes that carries a typed value is stopped, GET included, and the
+      // employer sees only the page load. This is stricter than before: the gap is asserted closed.
+      eq(marks("stopped"), ["get-autosave", "other-origin", "post-autosave", "put-autosave", "upload"], "every write the page tried was stopped");
+      eq(marks("went"), [], "nothing the page tried went");
+      // 2. What a dry run does send the employer: the page itself (one load here) and nothing else; no GET carries a
+      //    typed value.
       const gets = employer.seen.filter((x) => x.method === "GET");
       eq(gets.filter((x) => x.path === "/apply").length, 1, "the page is loaded once");
-      eq([...new Set(gets.map((x) => x.path))].filter((p) => !["/apply", "/went", "/stopped"].includes(p)).sort(), ["/autosave-get"],
-        "apart from the page and the test's own marks, the employer saw only the page's GET autosave");
-      assert(gets.some((x) => x.path === "/autosave-get" && x.query.includes("first_name=Dryrun")),
-        "REAL GAP: a GET autosave carries the typed first name to the employer during a dry run");
+      eq([...new Set(gets.map((x) => x.path))].filter((p) => !["/apply", "/went", "/stopped"].includes(p)).sort(), [],
+        "apart from the page and the test's own marks, the employer saw nothing");
+      assert(!employer.seen.some((x) => /Dryrun|dryrun@/i.test(x.query)), "no request carries a typed value to the employer during a dry run");
       // 3. Another origin: the image the page loads before anything is filled is fetched; once the form is filled, every
       //    request to another origin is stopped (scripts/apply.ts: populated && !same), the typed email with it.
       assert(third.seen.some((x) => x.path === "/before-fill.png"), "a resource from another origin, before the form is filled");

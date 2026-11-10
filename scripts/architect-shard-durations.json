@@ -658,6 +658,7 @@
     "tests/architect/loop-09-memory-apply.test.ts": 38,
     "tests/architect/loop-09-memory.test.ts": 12,
     "tests/architect/loop-13-offers.test.ts": 14,
-    "tests/architect/channel-parity-acceptance.test.ts": 15
+    "tests/architect/channel-parity-acceptance.test.ts": 15,
+    "tests/architect/r10-resume-design-loop-20261110.test.ts": 42
   }
 }

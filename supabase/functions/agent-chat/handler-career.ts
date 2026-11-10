@@ -1528,7 +1528,11 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
                   // owner 2026-11-01/02: on every channel the list itself is the hosted page).
                   if (why) made.parts[0] = `${why.trim()}\n${made.parts[0]}`;
                   // R10 fix 8 (architect ruling 2026-11-09): the roles by number beside the File link, so one can be chosen in chat.
-                  if (made.lines.length) made.parts[0] = [made.parts[0], ...made.lines].join("\n");
+                  // Architect amendment, D-049 over E.2 #18's chat form: with the File card on, the lines keep the number, employer,
+                  // title, location and check state (a role is still chosen by number) and drop the posting links; each role's
+                  // inspected link is on the File (F-05), which the card opens. Off: the lines as before.
+                  const roleLines = fileCardOn(Deno.env) ? made.lines.map((l) => l.replace(/\)\s+https:\/\/\S+$/, ")")) : made.lines;
+                  if (roleLines.length) made.parts[0] = [made.parts[0], ...roleLines].join("\n");
                   out = { ...out, reply: [made.parts[0], made.parts[1]].join("\n") + resumeLine, parts: [made.parts[0], ...(resumeLine ? [resumeLine.trim()] : []), made.parts[1]] };
                   agentMeta = { ...(agentMeta || {}), results_file: made.listId };
                   f5Offer = { offer: made.offer, ask: made.offerAsk, resumeLine: !!resumeLine };

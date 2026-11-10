@@ -427,7 +427,7 @@ async function fillForm(page, ctx0) {
       entry.source = dec.source;
       if (before.filled && d.kind !== "file" && dec.status !== "fill") { entry.status = "prefilled"; continue; }
       if (dec.status === "skip") { entry.status = "skipped"; entry.reason = dec.reason; continue; }
-      if (dec.status === "ask") { entry.status = "needs_user"; entry.reason = dec.reason; needsUser.push({ label: d.label, reason: dec.reason, ...(d.options ? { options: d.options.map((o) => o.label).slice(0, 40) } : {}) }); continue; }
+      if (dec.status === "ask") { entry.status = "needs_user"; entry.reason = dec.reason; needsUser.push({ label: d.label, reason: dec.reason, kind: d.kind, ...(d.options ? { options: d.options.map((o) => o.label).slice(0, 40) } : {}) }); continue; }
       let r;
       try { r = await doFill(page, d, dec, ctx); } catch (e) { r = { ok: false, reason: "fill_error", detail: String(e.message).split("\n")[0].slice(0, 120) }; }
       if (r.ok) {
@@ -447,7 +447,7 @@ async function fillForm(page, ctx0) {
       entry.reason = r.reason;
       if (r.detail) entry.detail = r.detail;
       // A required question we could not set is handed back with the reason; the person is asked, nothing is guessed.
-      (ask ? needsUser : failed).push({ label: d.label, reason: r.reason, ...(r.options ? { options: r.options } : {}) });
+      (ask ? needsUser : failed).push({ label: d.label, reason: r.reason, kind: d.kind, ...(r.options ? { options: r.options } : {}) });
     }
   }
   // Sweep: a required question still empty that we did not already account for is handed back, not ignored.
@@ -456,7 +456,7 @@ async function fillForm(page, ctx0) {
   const states = qsNow.length ? await page.evaluate(STATE, qsNow) : [];
   for (const d of qsNow) {
     const s = states.find((x) => x.q === d.q);
-    if (d.required && s && !s.filled && !accounted.has(d.label)) { needsUser.push({ label: d.label, reason: "still_empty_after_fill" }); accounted.add(d.label); }
+    if (d.required && s && !s.filled && !accounted.has(d.label)) { needsUser.push({ label: d.label, reason: "still_empty_after_fill", kind: d.kind }); accounted.add(d.label); }
   }
   const invalid = await page.evaluate(INVALID).catch(() => []);
   return { map, filled, needsUser, failed, invalid };

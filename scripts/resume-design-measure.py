@@ -82,8 +82,8 @@ def ink(path, png_dir, stem):
     return res
 
 
-def poppler_text(path):
-    r = subprocess.run(["pdftotext", "-enc", "UTF-8", path, "-"], capture_output=True, text=True)
+def poppler_text(path, *flags):
+    r = subprocess.run(["pdftotext", *flags, "-enc", "UTF-8", path, "-"], capture_output=True, text=True)
     return r.stdout
 
 
@@ -114,7 +114,7 @@ def pdfium_text(path):
 def measure(path, png_dir, stem):
     pages, lines, sizes = lines_of(path)
     return {"text_pdfium": pdfium_text(path),"pages": pages, "lines": lines, "overlaps": overlaps(lines), "ink": ink(path, png_dir, stem),
-            "text_poppler": poppler_text(path), "text_pdfminer": extract_text(path)}
+            "text_poppler": poppler_text(path), "text_poppler_layout": poppler_text(path, "-layout"), "text_pdfminer": extract_text(path)}
 
 
 for case in json.load(sys.stdin):

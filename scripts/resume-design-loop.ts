@@ -16,8 +16,9 @@
 //                the same x (within 1.5 pt)
 //   chronology   every dated section lists its entries newest first (by start date)
 //   ATS order    the text a parser reads (PDF: pdfminer and PDFium; DOCX: its paragraphs in order) is the page's
-//                visual order, word for word. poppler's default mode is reported apart: it reads a flush-right date
-//                column after its section by geometry alone, whatever the file holds
+//                visual order, word for word. Reported apart (coordinator ruling 2026-11-10): the DOCX in entry order,
+//                poppler's layout mode, and poppler's default mode, which orders by geometry alone and reads a
+//                flush-right date after its entry's bullets or its section, whatever the file holds
 //   DOCX = PDF   the Word copy prints the same pages, the same words in the same order, the name and body within 1 pt,
 //                every heading within 18 pt of its place in the PDF
 //
@@ -32,7 +33,7 @@ import { CareerProfile } from "../supabase/functions/_shared/router_core.career.
 const ROOT = new URL("..", import.meta.url).pathname;
 export const CHECKS = ["onePage", "identity", "target", "readable", "noOverflow", "dates", "chronology", "atsOrder", "docxLikePdf"] as const;
 export type Check = typeof CHECKS[number];
-export interface DesignFile { id: string; profile: string; role: string; variant: string; kind: "pdf" | "docx"; png: string; checks: Record<Check, boolean>; notes: string[]; targetNA: boolean; popplerOrder: boolean }
+export interface DesignFile { id: string; profile: string; role: string; variant: string; kind: "pdf" | "docx"; png: string; checks: Record<Check, boolean>; notes: string[]; targetNA: boolean; popplerOrder: boolean; layoutOrder: boolean; docxEntryOrder: boolean }
 
 const words = (s: string) => s.toLowerCase().normalize("NFKC").replace(/[•·▪●◆♦]/g, " ").replace(/[^\p{L}\p{N}@.+%$-]+/gu, " ").replace(/\s+/g, " ").trim();
 const MONTHS_FULL = /\b(January|February|March|April|May|June|July|August|September|October|November|December)\b/;
@@ -47,7 +48,7 @@ function mode(xs: number[]): number {
 const visual = (lines: any[]) => [...lines].sort((a, b) => a.page - b.page || (Math.abs(a.top - b.top) < 3 ? a.x0 - b.x0 : a.top - b.top));
 const isHeading = (l: any) => /^[A-Z][A-Za-z &/]+$/.test(l.text) && l.text.length < 40 && l.bold > 0.9 && !DATE_ONLY.test(l.text) && l.text.split(" ").length <= 4;
 
-export function checkOne(m: any, twin: any, ctx0: { promised: number; name: string; email: string; proven: string[]; listed: string[] }): { checks: Record<Check, boolean>; notes: string[]; targetNA: boolean; popplerOrder: boolean } {
+export function checkOne(m: any, twin: any, ctx0: { promised: number; name: string; email: string; proven: string[]; listed: string[] }): { checks: Record<Check, boolean>; notes: string[]; targetNA: boolean; popplerOrder: boolean; layoutOrder: boolean; docxEntryOrder: boolean } {
   const notes: string[] = [];
   const lines = visual(m.lines);
   // Placement, not selection: a skill the person only listed counts when this file prints it (whether it must is the
@@ -110,9 +111,14 @@ export function checkOne(m: any, twin: any, ctx0: { promised: number; name: stri
   const reads: [string, string][] = m.text_xml !== undefined ? [["docx paragraphs", m.text_xml]] : [["pdfminer", m.text_pdfminer], ["pdfium", m.text_pdfium ?? ""]];
   const atsOrder = reads.every(([, t]) => words(t) === seen);
   if (!atsOrder) notes.push(`ATS order: ${reads.map(([k, t]) => `${k} ${words(t) === seen ? "=" : "≠"}`).join(", ")} visual`);
-  // Reported, not a bar (pending the coordinator's ruling): poppler's default pdftotext mode finds columns by geometry
-  // alone, so a flush-right date column is read after its section whatever the file holds; only inline dates pass it.
+  // Reported, not a bar (coordinator ruling 2026-11-10: flush-right dates stay, A.4): poppler's default pdftotext mode
+  // finds columns by geometry alone, so a flush-right date column is read after its section whatever the file holds; only inline dates pass it.
   const popplerOrder = m.text_xml !== undefined || words(m.text_poppler) === seen;
+  // Reported (coordinator ruling 2026-11-10): poppler's layout mode, and the Word copy's own paragraph order (each entry's
+  // title, then its dates, then its bullets: the logical order an ATS reading the DOCX gets), for the case of this file.
+  const layoutOrder = m.text_xml !== undefined || words(m.text_poppler_layout ?? "") === seen;
+  const docxXml = m.text_xml ?? twin?.text_xml;
+  const docxEntryOrder = docxXml !== undefined && words(docxXml) === words(visual(m.text_xml !== undefined ? m.lines : twin.lines).map((l: any) => l.text).join(" "));
 
   let docxLikePdf = false;
   if (twin) {
@@ -125,7 +131,7 @@ export function checkOne(m: any, twin: any, ctx0: { promised: number; name: stri
     docxLikePdf = twin.pages.length === m.pages.length && sameWords && Math.abs(tName - (first?.size ?? 0)) <= 1 && Math.abs(tBody - body) <= 1 && headsOk;
     if (!docxLikePdf) notes.push(`docx vs pdf: pages ${twin.pages.length}/${m.pages.length}, words ${sameWords ? "=" : "≠"}, name ${tName}/${first?.size}, body ${tBody}/${body}, headings ${headsOk ? "ok" : `${JSON.stringify(theads.map((h: any) => [h.text, h.top]))} vs ${JSON.stringify(heads.map((h: any) => [h.text, h.top]))}`}`);
   } else notes.push("docx vs pdf: no twin");
-  return { checks: { onePage, identity, target, readable, noOverflow, dates, chronology, atsOrder, docxLikePdf }, notes, targetNA, popplerOrder };
+  return { checks: { onePage, identity, target, readable, noOverflow, dates, chronology, atsOrder, docxLikePdf }, notes, targetNA, popplerOrder, layoutOrder, docxEntryOrder };
 }
 
 async function soffice(dir: string, docx: string[]): Promise<void> {
@@ -165,15 +171,15 @@ export async function runDesign(opts: { out?: string } = {}) {
       const base = { id: stem(c), profile: c.profile, role: c.role, variant: c.variant, kind, png: `${dir}/png/${stem(c)}/${kind}-1.png` };
       const m = row?.[kind], twin = row?.[kind === "pdf" ? "docx" : "pdf"];
       if (!c.made || !row || row.error || !m) {
-        out.push({ ...base, checks: Object.fromEntries(CHECKS.map((k) => [k, false])) as Record<Check, boolean>, notes: [c.refused ?? row?.error ?? `no ${kind}`], targetNA: false, popplerOrder: false });
+        out.push({ ...base, checks: Object.fromEntries(CHECKS.map((k) => [k, false])) as Record<Check, boolean>, notes: [c.refused ?? row?.error ?? `no ${kind}`], targetNA: false, popplerOrder: false, layoutOrder: false, docxEntryOrder: false });
         continue;
       }
       out.push({ ...base, ...checkOne(m, twin, { promised, name: p.name, email: p.email, proven: ts.proven, listed: ts.listedOnly }) });
     }
   }
   const tally = Object.fromEntries(CHECKS.map((k) => [k, out.filter((f) => f.checks[k]).length])) as Record<Check, number>;
-  const na = out.filter((f) => f.targetNA).length, pop = out.filter((f) => f.popplerOrder).length;
-  const line = `RESUME DESIGN: ${out.length} files (${loop.summary.cases} cases x PDF + DOCX); ${CHECKS.map((k) => `${k} ${tally[k]}/${out.length}`).join(", ")}; target by first entry (no posting skill on the record) ${na}; reported (no bar): poppler default-mode order ${pop}/${out.length}`;
+  const na = out.filter((f) => f.targetNA).length, pop = out.filter((f) => f.popplerOrder).length, lay = out.filter((f) => f.layoutOrder).length, dxo = out.filter((f) => f.docxEntryOrder).length;
+  const line = `RESUME DESIGN: ${out.length} files (${loop.summary.cases} cases x PDF + DOCX); ${CHECKS.map((k) => `${k} ${tally[k]}/${out.length}`).join(", ")}; target by first entry (no posting skill on the record) ${na}; reported (no bar): DOCX reads in entry order ${dxo}/${out.length}, poppler layout-mode order ${lay}/${out.length}, poppler default-mode order ${pop}/${out.length}`;
   return { files: out, tally, line, dir };
 }
 

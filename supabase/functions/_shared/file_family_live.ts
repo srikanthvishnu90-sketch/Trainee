@@ -58,7 +58,7 @@ export function liveShortlistFile(feed: ResultsFeed, o: LiveOpts = {}): FamilyFi
   // "Apply to all N ready": the one hash-bound approval (handler applyall). It approves sends, so it is a filled approve, never "prepare".
   if (feed.all && !paused) head.push({ b: "card", label: "Approve this batch", parts: [{ p: "html", html: `${actHtml({ label: `Apply to all ${feed.all.size} ready`, effect: "approve", post: { token: feed.token, action: "applyall", fields: { set: feed.all.hash }, id: "ff-all" } })}<p class="ff-p ff-mute">Approves ${feed.all.filtered ? `all ${feed.all.size} ready roles on the whole list, not only the roles your filters show` : `the ${feed.all.size} ready roles on this list`}, each exactly as its What will be sent shows. Dismissed roles and roles that aren't ready are left out. If anything changes first, nothing is approved. Review <span class="ff-id">${esc(feed.all.hash.slice(0, 8))}</span>.</p>` }] });
   // Item 6 S4: the same list as a Batch File (F-10) and a Pipeline (F-11), drawn from the same records.
-  if (feed.total > 0) head.push({ b: "html", html: `<nav class="ff-p" aria-label="Other views of this list"><a href="?view=batch">Batch File</a> · <a href="?view=pipeline">Pipeline</a></nav>` });
+  if (feed.total > 0) head.push({ b: "html", html: `<nav class="ff-p ff-views" aria-label="Other views of this list"><a href="?view=batch">Batch File</a> · <a href="?view=pipeline">Pipeline</a></nav>` });
   if (feed.total > 0) head.push({ b: "html", html: filtersHtml(feed) });
   if (shown.rows.length < feed.total) head.push({ b: "html", html: `<p class="ff-p">Showing ${shown.rows.length} of ${feed.total}. <a href="?">Show all ${feed.total}</a></p>` });
   if (!shown.rows.length && feed.total > 0) head.push({ b: "html", html: `<p class="ff-p" role="status">No roles match these filters.</p>` });
@@ -81,6 +81,7 @@ export const LIVE_CSS = `
 .ff-fl{display:flex;flex-direction:column;gap:4px;font-size:14px;font-weight:600;color:var(--ff-mute);flex:1 1 140px;min-width:0}
 .ff-fl select{min-height:44px;width:100%;padding:6px 10px;border-radius:10px;border:1px solid var(--ff-line);background:var(--ff-card);color:var(--ff-ink);font:inherit;font-size:16px;font-weight:400}
 .ff-gone .ff-card{margin-top:10px}
+.ff-views a{display:inline-flex;align-items:center;min-height:44px}
 `;
 
 // The page: no roles at all is the shared empty state (C.24); filtered to none keeps the filter and Show all.

@@ -234,3 +234,13 @@ Deno.test("FILES RECORDS: F-10's yes approves exactly the ready set it drew, a c
   const none = await (await get(w, s, "role=ffffffffffff")).text();
   assert.match(none, /That role isn(?:'|&#39;)t on this list/);
 });
+
+// On a phone: the served F-06, F-10 and F-11 pages pass the R10 visual checker (r10-files-check.ts: 14 px text, 44 px taps, WCAG AA,
+// no overflow at 390 px, one column at 1280 px, sourced claims carry an https link and a time, approvals filled).
+Deno.test({ name: "FILES RECORDS: the served F-06, F-10 and F-11 pages pass the R10 visual checker at 390 and 1280 px", sanitizeResources: false, sanitizeOps: false, async fn(t) {
+  const { w, s, refs } = await scene();
+  const html: Record<string, string> = {};
+  for (const [k, q] of [["F-10-batch", "view=batch"], ["F-11-pipeline", "view=pipeline"], ...refs.map((r, i) => [`F-06-role-${i + 1}`, `role=${r}`])]) html[k] = await (await get(w, s, q)).text();
+  const { checkPages } = await import("./r10-files-check.ts");
+  await checkPages(t, Object.fromEntries(Object.entries(html).map(([k, v]) => [k, () => v])));
+} });

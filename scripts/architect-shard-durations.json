@@ -130,7 +130,7 @@
     "tests/architect/file-states-phone.test.ts": 0.8,
     "tests/architect/files-actions-loop.test.ts": 61,
     "tests/architect/files-live-loop.test.ts": 36,
-    "tests/architect/files-records-loop.test.ts": 19.1,
+    "tests/architect/files-records-loop.test.ts": 19.6,
     "tests/architect/flow-account-memory.test.ts": 7.7,
     "tests/architect/flow-apply-from-chat.test.ts": 46,
     "tests/architect/flow-apply-many.test.ts": 43,

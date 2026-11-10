@@ -176,12 +176,14 @@ PY
 # as above: the steps and their commands are unchanged, and the union of core and architect is the old core.
 browser_node_tests=(
   tests/career-apply-dryrun.test.cjs
+  tests/career-autosave-before-yes.test.cjs
   tests/career-apply-exact-option.test.cjs
   tests/career-apply-vm-needs-answers.test.cjs
   tests/career-approval-card-browser.test.cjs
   tests/career-browser-eval.test.cjs
   tests/career-challenge-shown.test.cjs
   tests/career-browser-strict.test.cjs
+  tests/career-browser-full-persona.test.cjs
   tests/career-dashboard-browser.test.cjs
   tests/career-extension-agent-submits.test.cjs
   tests/career-extension-browser.test.cjs
@@ -191,6 +193,7 @@ browser_node_tests=(
   tests/career-extension-yesno.test.cjs
   tests/career-fact-import-panel.test.cjs
   tests/career-greenhouse-savedform.test.cjs
+  tests/career-lever-strict-fill.test.cjs
   tests/career-owned-worker-browser.test.cjs
   tests/career-denylist-every-navigation.test.cjs
   tests/career-parallel-apply.test.cjs

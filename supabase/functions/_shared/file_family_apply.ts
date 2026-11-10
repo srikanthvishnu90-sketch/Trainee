@@ -156,11 +156,11 @@ export function weeklyBriefFile(d: WeeklyBrief): FamilyFile {
     actions: d.acts,
   };
 }
-export interface Negotiation { company: string; v: number; deadline: string | null; basis: string; position: KV[]; history: { v: string; written: boolean; text: string }[]; ask: { title: string; text: string; act?: Act }; acts?: Acts }
+export interface Negotiation { company: string; v: number | null; deadline: string | null; basis: string; position: KV[]; history: { v: string; written: boolean; text: string }[]; ask: { title: string; text: string; act?: Act }; acts?: Acts }
 export function negotiationFile(d: Negotiation): FamilyFile {
   return {
     family: "F-14", header: "Negotiation plan", boundary: "Plan File - nothing sent to any employer",
-    hero: { kicker: `Plan File - negotiation - v${d.v}`, title: `${d.company} offer`, meta: [{ label: "Deadline", at: d.deadline, future: true }, { label: "Based on", value: d.basis }] },
+    hero: { kicker: `Plan File - negotiation${d.v ? ` - v${d.v}` : ""}`, title: `${d.company} offer`, meta: [{ label: "Deadline", at: d.deadline, future: true }, { label: "Based on", value: d.basis }] },
     blocks: [
       card("Your position - confirmed with you", [{ p: "kv", rows: d.position }]),
       card("Term history - versions kept separate", d.history.map((h) => ({ p: "item" as const, title: h.v, chip: h.written ? { label: "Written", tone: "neutral" as const } : { label: "Verbal", tone: "attention" as const }, text: h.written ? h.text : `${h.text} - verbal claim, labeled verbal, not treated as a term` }))),

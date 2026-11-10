@@ -200,7 +200,8 @@ export function pauseCountLine(c: Counts): string {
 
 export function pauseReply(o: { counts: Counts }): string {
   return [
-    "Paused your account: the pause is saved and I read it back.",
+    // Coordinator ruling 2026-11-10 (r-audit battery, R1): the outcome first, in a word any pause ask shares.
+    "Done: your account is paused, and I read the pause back.",
     `While it is on, nothing new starts, and these refuse to send: ${PAUSE_HOLDS.join("; ")}.`,
     `Not covered by the pause today: ${PAUSE_GAPS.join("; ")}.`,
     pauseCountLine(o.counts),

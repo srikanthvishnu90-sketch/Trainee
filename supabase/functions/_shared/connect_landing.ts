@@ -1,7 +1,8 @@
 // The connect page's headers and the OAuth callbacks' landing, in _shared so gmail-oauth and outlook-oauth import nothing from
 // another function's folder (each function is bundled with its own folder and ../_shared).
 import { CONNECT_BOOT, CONNECT_SCRIPT, renderDone, type DoneWhy, type ProviderId } from "./connect_page.ts";
-import { CONNECT_SESSION_TTL_MS, connectSecret, mintConnectToken } from "./connect_link.ts";
+import { connectSecret, mintConnectToken } from "./connect_link.ts";
+export const LANDING_DISCONNECT_TTL_MS = 15 * 60_000;
 
 const sha = async (s: string) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, "0")).join("");
 const b64 = (h: string) => btoa(h.match(/../g)!.map((x) => String.fromCharCode(parseInt(x, 16))).join(""));
@@ -25,7 +26,9 @@ export function connectLanding(env: { get(k: string): string | undefined }, o: {
   const botUrl = (env.get("TRAINEE_BOT_URL") || "").trim();
   const outcome = o.ok ? "connected" : o.denied ? "denied" : "failed";
   return (async () => {
-    const token = o.ok && o.userId ? await mintConnectToken({ secret: connectSecret(env), userId: o.userId, reason: "", channel: "web", now: o.now ?? Date.now(), ttlMs: CONNECT_SESSION_TTL_MS, kind: "s" }) : null;
+    // Not a session (item 14, architect amendment, security): a token that can only disconnect this provider, for a few minutes. The
+    // landing is the page of the person who just finished the provider's own sign-in for this address.
+    const token = o.ok && o.userId ? await mintConnectToken({ secret: connectSecret(env), userId: o.userId, reason: "", channel: o.provider, now: o.now ?? Date.now(), ttlMs: LANDING_DISCONNECT_TTL_MS, kind: "d" }) : null;
     const h = await connectHeaders("text/html; charset=utf-8", token ? new URL(base).origin : "");
     return new Response(renderDone({ outcome, provider: o.provider, email: o.email, botUrl: /^https:\/\//.test(botUrl) ? botUrl : null, why: o.why, scopes: o.scopes,
       manage: token ? { action: base, token } : null, connectUrl: o.ok ? null : base }), { status: o.ok || o.denied ? 200 : 400, headers: h });

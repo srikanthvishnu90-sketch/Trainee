@@ -44,14 +44,23 @@ const queueHash = (payload) => sha256(Buffer.from(canonical(payload), "utf8"));
 
 const REFUSED = /(^|\.)(linkedin\.com|lnkd\.in|indeed\.com|joinhandshake\.com|handshake\.com)$/;
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+// The boards the VM drives: only those the strict browser benchmark shows the runner completes (architect ruling 2026-11-10,
+// release item 2), each by an exact host pattern; the same patterns as career_apply_vm_family (20261110120000). REFUSED wins.
+const LABEL = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
+const BOARDS = [
+  ["greenhouse", /^(?:boards|job-boards)\.greenhouse\.io$/],
+  ["lever", /^jobs\.lever\.co$/],
+  ["personio", new RegExp(`^${LABEL}\\.jobs\\.personio\\.de$`)],
+  ["breezy", new RegExp(`^${LABEL}\\.breezy\\.hr$`)],
+];
 function atsOf(url) {
   let u;
   try { u = new URL(url); } catch { return { refuse: "invalid_url" }; }
   const host = u.hostname.toLowerCase().replace(/^www\./, "");
   if (REFUSED.test(host)) return { refuse: "site_not_supported" };
   if (LOOPBACK.has(host)) { const m = /^\/(greenhouse|lever)\//.exec(u.pathname); return m ? { ats: m[1], host: u.host, local: true } : { refuse: "site_not_supported" }; }
-  if (host === "boards.greenhouse.io" || host === "job-boards.greenhouse.io") return { ats: "greenhouse", host: u.host };
-  if (host === "jobs.lever.co") return { ats: "lever", host: u.host };
+  if (u.port) return { refuse: "site_not_supported" };
+  for (const [ats, re] of BOARDS) if (re.test(host)) return { ats, host: u.host };
   return { refuse: "site_not_supported" };
 }
 
@@ -262,4 +271,4 @@ function createWorker(o) {
   return { run, tick, stop() { stopping = true; }, stats, cfg, inflight, pct: (p) => pct(stats.ms, p) };
 }
 
-module.exports = { createWorker, restRpc, queueHash, canonical, atsOf, machineSlots };
+module.exports = { createWorker, restRpc, queueHash, canonical, atsOf, machineSlots, BOARDS };

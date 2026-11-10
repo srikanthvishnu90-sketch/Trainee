@@ -47,20 +47,34 @@ function world() {
 }
 const link = (u = U, now = NOW, ttlMs?: number) => mintConnectToken({ secret: SECRET, userId: u, reason: "replies", channel: "telegram", now, kind: "l", ttlMs });
 const get = (d: ConnectDeps, url: string, headers: Record<string, string> = {}) => handleConnect(new Request(url, { headers: { "user-agent": BROWSER, ...headers } }), d);
+// Architect amendment, security (item 14, 2026-11-10): the page's forms carry a page token bound to the HttpOnly cookie, so a form is
+// posted with the browser's cookie, as a browser does (the cookie of the last page opened, unless one is given).
+let jar = "";
+// Architect amendment, security: link scanners (x-audit, coordinator ruling 2026-11-10). A GET of the link draws the open page
+// (200, nothing used up); its one button POSTs the link with the page token, which takes the link: 303 + cookie, once.
+async function tap(d: ConnectDeps, url: string) {
+  const shown = await get(d, url);
+  if (shown.status !== 200) return shown;
+  const html = await shown.text();
+  const link = /name="link" value="([^"]+)"/.exec(html)?.[1], pt = /name="pt" value="([^"]+)"/.exec(html)?.[1];
+  if (!link || !pt) return new Response(html, { status: 299 });
+  return handleConnect(new Request(url.split("?")[0], { method: "POST", headers: { "user-agent": BROWSER, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ link, pt }).toString() }), d);
+}
 async function open(d: ConnectDeps, t?: string) {
-  const first = await get(d, `${BASE}?t=${encodeURIComponent(t ?? (await link())!)}`);
+  const first = await tap(d, `${BASE}?t=${encodeURIComponent(t ?? (await link())!)}`);
   const cookie = (first.headers.get("set-cookie") ?? "").split(";")[0];
+  jar = cookie;
   return await (await get(d, BASE, { cookie })).text();
 }
 // Posts a form exactly as the page drew it (its action and its hidden fields), the way a browser submits it.
-async function submit(d: ConnectDeps, html: string, button: RegExp) {
+async function submit(d: ConnectDeps, html: string, button: RegExp, cookie = jar) {
   const forms = [...html.matchAll(/<form method="post"( action="([^"]*)")?[^>]*>([\s\S]*?)<\/form>/g)];
   const f = forms.find((m) => button.test(m[3]));
   assert(f, `a form whose button is ${button}`);
   const fields = Object.fromEntries([...f![3].matchAll(/<input type="hidden" name="([^"]+)" value="([^"]*)">/g)].map((m) => [m[1], m[2].replace(/&amp;/g, "&")]));
   const to = f![2] ?? BASE;
   eq(new URL(to).origin, new URL(BASE).origin, "it posts to the connect page");
-  return await handleConnect(new Request(to, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", "user-agent": BROWSER }, body: new URLSearchParams(fields).toString() }), d);
+  return await handleConnect(new Request(to, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", "user-agent": BROWSER, ...(cookie ? { cookie } : {}) }, body: new URLSearchParams(fields).toString() }), d);
 }
 
 Deno.test("R10 fix 11 consent: before the provider's page, the account, the purpose and the exact scopes, with read, send and delete as separate effects", async () => {
@@ -96,11 +110,14 @@ Deno.test("R10 fix 11 success: only a stored grant reads connected, names the ad
   assert(/<h1>Gmail disconnected<\/h1>/.test(await done.text()));
   eq(w.log.disconnected, [`google:${U}`], "disconnected exactly this person's Gmail");
   eq((await w.d.status(U)).google.state, "not_connected");
-  // and the connect page's own Disconnect, for an account connected before
+  // and the connect page, for an account connected before. Architect ruling 2026-11-10: opened from a link (which may have been
+  // forwarded) it names the account masked and sends Disconnect to the chat; it changes nothing itself.
   w.connect(U, "microsoft", ADDR);
   const page = await open(w.d);
-  assert(/Your email is connected/.test(page) && plain(page).includes(`Connected as ${ADDR}`));
-  eq((await submit(w.d, page, />Disconnect</)).status, 200);
+  assert(/Your email is connected/.test(page) && plain(page).includes("Connected as a***@e***.test") && !page.includes(ADDR), "masked");
+  assert(plain(page).includes("Reply DISCONNECT OUTLOOK in your chat with Trainee to disconnect.") && !/>Disconnect</.test(page), "the chat disconnects");
+  eq(w.log.disconnected, [`google:${U}`]);
+  await w.d.disconnect("microsoft", U); // what the chat's "disconnect outlook" does (connectors.ts, the same disconnect)
   eq(w.log.disconnected, [`google:${U}`, `microsoft:${U}`]);
   assert(/Connect your email/.test(await open(w.d)), "after disconnecting, the page offers to connect again");
 });
@@ -136,7 +153,7 @@ Deno.test("R10 fix 11 opening a link without sign-in never shows an address or a
   const pages: [string, Response][] = [
     ["bare /connect", await get(w.d, BASE)],
     ["expired", await get(w.d, `${BASE}?t=${encodeURIComponent(expired)}`)],
-    ["used", await get(w.d, `${BASE}?t=${encodeURIComponent(once)}`)],
+    ["used", await tap(w.d, `${BASE}?t=${encodeURIComponent(once)}`)],
     ["tampered", await get(w.d, `${BASE}?t=${encodeURIComponent(once.slice(0, -4) + "AAAA")}`)],
     ["a link preview", await handleConnect(new Request(`${BASE}?t=${encodeURIComponent((await link())!)}`, { headers: { "user-agent": "TelegramBot (like TwitterBot)" } }), w.d)],
     ["a session for someone else", await get(w.d, BASE, { cookie: `tc_s=${await mintConnectToken({ secret: SECRET, userId: V, reason: "replies", channel: "telegram", now: NOW, kind: "s" })}` })],
@@ -154,11 +171,11 @@ Deno.test("R10 fix 11 opening a link without sign-in never shows an address or a
 
 Deno.test("R10 fix 11 a consent started and never finished: coming back says 'Connecting didn't finish' with Resume and Cancel; Resume starts it again, Cancel clears it", async () => {
   const w = world();
-  const first = await get(w.d, `${BASE}?t=${encodeURIComponent((await link())!)}`);
+  const first = await tap(w.d, `${BASE}?t=${encodeURIComponent((await link())!)}`);
   const session = (first.headers.get("set-cookie") ?? "").split(";")[0];
   const consent = await (await get(w.d, BASE, { cookie: session })).text();
   // Continue with Google: off to Google, and the page remembers the consent was started
-  const go = await submit(w.d, consent, />Continue with Google</);
+  const go = await submit(w.d, consent, />Continue with Google</, session);
   eq(go.status, 303);
   const pending = (go.headers.get("set-cookie") ?? "").split(";")[0];
   assert(/^tc_p=google$/.test(pending) && /HttpOnly/.test(go.headers.get("set-cookie") ?? ""), "the started consent is remembered in an HttpOnly cookie");
@@ -170,10 +187,10 @@ Deno.test("R10 fix 11 a consent started and never finished: coming back says 'Co
   assert(/>Resume connecting Gmail</.test(back) && />Cancel</.test(back) && /Back to Telegram/.test(back), "resume, cancel, and the way back");
   assert(!/Connected as/.test(t));
   // Resume: the same consent again
-  eq((await submit(w.d, back, />Resume connecting Gmail</)).status, 303);
+  eq((await submit(w.d, back, />Resume connecting Gmail</, session)).status, 303);
   eq(w.log.started, [`google:${U}`, `google:${U}`]);
   // Cancel: nothing connected, the reminder cleared, the page is the plain consent again
-  const cancel = await submit(w.d, back, />Cancel</);
+  const cancel = await submit(w.d, back, />Cancel</, session);
   eq(cancel.status, 200);
   assert(/You cancelled connecting Gmail\. No access was saved\./.test(plain(await cancel.text())));
   assert(/^tc_p=;/.test(cancel.headers.get("set-cookie") ?? "") && /Max-Age=0/.test(cancel.headers.get("set-cookie") ?? ""), "the reminder is cleared");

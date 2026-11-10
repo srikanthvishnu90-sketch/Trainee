@@ -7,7 +7,7 @@ import assertNode from "node:assert/strict";
 import { createRequire } from "node:module";
 import { contrast, DARK, LIGHT, readablePairs, TOKENS_CSS } from "../../supabase/functions/_shared/brand.ts";
 import { CONNECT_CSS, renderBootstrap, renderConnect, renderDone, renderPreview, renderState, previewOg, type ProviderView } from "../../supabase/functions/_shared/connect_page.ts";
-import { connectLine, connectUrlsFor, mintConnectToken, REASONS, reasonKey, verifyConnectToken } from "../../supabase/functions/_shared/connect_link.ts";
+import { connectLine, connectUrlsFor, mintConnectToken, REASONS, reasonKey, verifyConnectToken, connectPageToken } from "../../supabase/functions/_shared/connect_link.ts";
 import { confirmMailAsk } from "../../supabase/functions/_shared/connectors.ts";
 import { handleConnect, type ConnectDeps, type ProviderId, type ProviderInfo, type ProviderState } from "../../supabase/functions/trainee-connect/handler.ts";
 
@@ -190,8 +190,9 @@ Deno.test("Continue starts consent from the session only and answers JSON for th
   const d = mem();
   const tok = (await mintConnectToken({ secret: SECRET, userId: U, reason: "confirm", channel: "telegram", now: NOW, kind: "l" }))!;
   const cookie = ((await get(d, `${BASE}?t=${encodeURIComponent(tok)}`)).headers.get("set-cookie") ?? "").split(";")[0];
-  const session = cookie.slice("tc_s=".length);
-  const r = await handleConnect(new Request(BASE, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" }, body: new URLSearchParams({ t: session, action: "start", provider: "google" }).toString() }), d);
+  // Architect amendment, security (item 14, 2026-11-10): the page's forms carry a page token bound to the HttpOnly cookie, posted with it.
+  const pageToken = (await connectPageToken(cookie.slice("tc_s=".length), SECRET))!;
+  const r = await handleConnect(new Request(BASE, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json", cookie }, body: new URLSearchParams({ t: pageToken, action: "start", provider: "google" }).toString() }), d);
   eq(r.status, 200);
   const j = await r.json() as { url: string };
   assert(/^https:\/\/accounts\.example\/google\/consent/.test(j.url) && !j.url.includes("c1."), j.url);
@@ -307,7 +308,8 @@ Deno.test({
     try {
       const variants: [string, Partial<Record<ProviderId, ProviderState>>, RegExp][] = [
         ["not connected", {}, /Continue with Google/],
-        ["connected", { google: { state: "connected", email: "ada@gmail.example" } }, /Connected as ada@gmail\.example/],
+        // Architect ruling 2026-11-10 (item 14): a page opened from a link shows the address masked.
+        ["connected", { google: { state: "connected", email: "ada@gmail.example" } }, /Connected as a\*\*\*@g\*\*\*\.example/],
         ["needs reconnecting", { google: { state: "needs_reconnect", email: "ada@gmail.example" } }, /Reconnect Google/],
       ];
       for (const scheme of ["light", "dark"] as const) {

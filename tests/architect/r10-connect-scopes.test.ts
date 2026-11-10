@@ -151,17 +151,21 @@ function sendWorld(gmail: { email: string | null; canSend?: boolean }) {
     claimLink: async () => true, disconnect: async () => ({ ok: true, reply: "" }) };
   return { d, started };
 }
+// Architect amendment, security (item 14, 2026-11-10): the page's forms carry a page token bound to the HttpOnly cookie, so a form is
+// posted with the cookie of the page it came from, as a browser does.
+let jar = "";
 async function openWith(d: ConnectDeps, reason: string) {
   const t = (await mintConnectToken({ secret: SECRET, userId: U, reason, channel: "telegram", now: NOW, kind: "l" }))!;
   const first = await handleConnect(new Request(`${BASE}?t=${encodeURIComponent(t)}`, { headers: { "user-agent": BROWSER } }), d);
   const cookie = (first.headers.get("set-cookie") ?? "").split(";")[0];
+  jar = cookie;
   return await (await handleConnect(new Request(BASE, { headers: { "user-agent": BROWSER, cookie } }), d)).text();
 }
 async function post(d: ConnectDeps, html: string, button: RegExp) {
   const f = [...html.matchAll(/<form method="post"[^>]*>([\s\S]*?)<\/form>/g)].find((m) => button.test(m[1]))!;
   assert(f, `a form for ${button}`);
   const fields = Object.fromEntries([...f[1].matchAll(/<input type="hidden" name="([^"]+)" value="([^"]*)">/g)].map((m) => [m[1], m[2]]));
-  return await handleConnect(new Request(BASE, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", "user-agent": BROWSER }, body: new URLSearchParams(fields).toString() }), d);
+  return await handleConnect(new Request(BASE, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", "user-agent": BROWSER, cookie: jar }, body: new URLSearchParams(fields).toString() }), d);
 }
 
 Deno.test("N4: an allow-sending link (reason=send) for a connected Gmail that can't send is 'Allow sending' asking exactly gmail.send on that account; not connected, the purpose line never promises sending", async () => {
@@ -169,7 +173,8 @@ Deno.test("N4: an allow-sending link (reason=send) for a connected Gmail that ca
   const html = await openWith(w.d, "send");
   const t = plain(html);
   assert(/<h1>Allow sending from your email<\/h1>/.test(html) && />Allow sending</.test(html), "the allow-sending state, not a dead end");
-  assert(/Account: ada\.fictional@example\.test\. Google's page asks for this same account/.test(t), "the bound account");
+  // Architect ruling 2026-11-10 (item 14): opened from a link, which may have been forwarded, the address is masked.
+  assert(/Account: a\*\*\*@e\*\*\*\.test\. Google's page asks for this same account/.test(t) && !html.includes("ada.fictional@example.test"), "the bound account, masked");
   assert(/Send email Only a message you approve word for word/.test(t) && /Delete email No/.test(t), t);
   for (const s of SEND_CONSENT_SCOPES) assert(html.includes(`<code>${s}</code>`), `asks ${s}`);
   assert(!html.includes(`<code>${"https://www.googleapis.com/auth/gmail.readonly"}</code>`), "the exact list is what this consent asks, not the earlier grant");

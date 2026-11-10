@@ -71,8 +71,16 @@ function EXTRACT() {
 
   const out = [];
   const seen = new Set();
-  let qn = 0;
-  const push = (d) => { d.q = qn++; out.push(d); return d.q; };
+  // A question keeps the number it was first tagged with: a later read (a field that appears after an upload, the sweep) never
+  // renumbers the page under answers already filled, so their last look reads their own boxes.
+  const tagged = deepAll(document, "[data-upmore-q]").map((e) => Number(e.getAttribute("data-upmore-q"))).filter(Number.isFinite);
+  let qn = tagged.length ? Math.max(...tagged) + 1 : 0;
+  const used = new Set();
+  const push = (d, els) => {
+    const had = els.map((e) => e.getAttribute("data-upmore-q")).find((v) => v != null);
+    d.q = had != null && !used.has(Number(had)) ? Number(had) : qn++;
+    used.add(d.q); out.push(d); return d.q;
+  };
   const all = deepAll(scope, "input, select, textarea");
 
   // Yes/No button pairs (Ashby): the hidden checkbox inside them is not a question of its own.
@@ -80,7 +88,7 @@ function EXTRACT() {
     const btns = [...box.querySelectorAll("button")];
     const node = groupLabelNode(box);
     const label = node ? nodeText(node) : "";
-    const q = push({ kind: "buttons", label, required: isReq([], node), eeo: eeoOf(box, label), options: btns.map((b, i) => ({ i, label: squash(b.textContent) })) });
+    const q = push({ kind: "buttons", label, required: isReq([], node), eeo: eeoOf(box, label), options: btns.map((b, i) => ({ i, label: squash(b.textContent) })) }, btns);
     btns.forEach((b, i) => { b.setAttribute("data-upmore-q", q); b.setAttribute("data-upmore-o", i); });
     box.querySelectorAll("input").forEach((x) => seen.add(x));
   }
@@ -104,7 +112,7 @@ function EXTRACT() {
       mates.forEach((x) => seen.add(x));
       const node = (fs && fs.querySelector("legend")) || groupLabelNode(el);
       const label = node ? nodeText(node) : clean(el.name);
-      const q = push({ kind: type === "radio" ? "radio" : "checkgroup", label, name: el.name || "", required: isReq(mates, node), eeo: eeoOf(el, label), options: mates.map((m, i) => ({ i, label: optLabel(m) })) });
+      const q = push({ kind: type === "radio" ? "radio" : "checkgroup", label, name: el.name || "", required: isReq(mates, node), eeo: eeoOf(el, label), options: mates.map((m, i) => ({ i, label: optLabel(m) })) }, mates);
       mates.forEach((m, i) => { m.setAttribute("data-upmore-q", q); m.setAttribute("data-upmore-o", i); });
       continue;
     }
@@ -128,7 +136,7 @@ function EXTRACT() {
     } else {
       d = { ...base, kind: "text", inputType: type };
     }
-    const q = push(d);
+    const q = push(d, [el]);
     el.setAttribute("data-upmore-q", q);
   }
   return out;

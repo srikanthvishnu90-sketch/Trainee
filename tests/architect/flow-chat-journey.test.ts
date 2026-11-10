@@ -31,6 +31,8 @@ import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, SUPABASE_URL, supabaseParity, type Turn } from "../flow/handler.ts";
 import { confirmedResumeSql } from "../flow/resume-seed.ts";
 import { anthropicWire } from "./helpers/anthropic_wire.ts";
+// architect amendment E.21 (2026-11-10): a search's posting-page checks are held to helpers/posting_checks.ts (no board listing, at most N for the N shown, never over 10); every other off-machine request is still a fault.
+import { postingChecks } from "./helpers/posting_checks.ts";
 
 const assert = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -92,11 +94,12 @@ Deno.test({
       h = await careerHandler(pg, { "tok-journey": PERSON });
       // No network: the Supabase double answers its own origin, the scripted model the Anthropic URL; anything else is refused.
       const viaDouble = globalThis.fetch;
-      const outbound: string[] = [];
+      const outbound: string[] = [], checks = postingChecks();
       globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
         const req = input instanceof Request && !init ? input : new Request(input as any, init);
         const u = new URL(req.url);
         if (u.host === "api.anthropic.com") return anthropicWire(req, (chat) => fakeModel(chat));
+        if (checks.take(req.method, req.url)) throw new TypeError(`network refused in the journey test: ${u.host}`);
         if (u.origin !== new URL(SUPABASE_URL).origin) { outbound.push(`${req.method} ${u.origin}${u.pathname}`); throw new TypeError(`network refused in the journey test: ${u.host}`); }
         return await viaDouble(req);
       }) as typeof fetch;
@@ -109,7 +112,7 @@ Deno.test({
         // One person's whole journey runs well past the chat's 60-per-hour abuse guard in seconds; that guard is not what
         // this test measures, so the person's window starts fresh each turn.
         await pg.sql(`delete from public.agent_rate_limits where user_id = '${PERSON}'`);
-        const r = await chat.say(message, extra);
+        const r = await checks.turn(message, () => chat.say(message, extra), (t) => t.reply);
         eq(r.status, 200, `${message}: ${r.reply}`);
         return r;
       };
@@ -453,6 +456,7 @@ Deno.test({
 
       await t.step("no network and no real model: every request stayed on the machine", () => {
         eq(outbound, [], "no request left for any host but the Supabase double and the scripted model");
+        eq(checks.faults, [], "a search checks at most the postings it shows, each on its own page");
       });
     } finally {
       console.error = realError;

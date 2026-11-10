@@ -693,6 +693,8 @@ export class Runner {
       }
     }
     if (Deno.env.get("JR2_TRACE")) for (const g of group) console.log(`--- journey ${g.j} (${g.p.spec.first} ${g.p.spec.last}${g.plan ? ", a plan" : ""})\n  ${g.p.log.join("\n  ")}`);
+    // architect amendment E.21 (2026-11-10): a search's posting-page checks are held to helpers/posting_checks.ts (no board listing, at most N for the N shown, never over 10); every other off-machine request is still a fault.
+    for (const f of w.checks.faults.splice(0)) this.stats.findings.push({ journey: -1, seed: this.seed, step: 0, action: "network", inv: "I7", why: `posting-page checks: ${f}`, trail: [] });
     if (w.outbound.length) this.stats.findings.push({ journey: -1, seed: this.seed, step: 0, action: "network", inv: "I7", why: `requests left the machine: ${w.outbound.slice(0, 5).join(", ")}`, trail: [] });
   }
 }

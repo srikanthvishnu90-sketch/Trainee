@@ -12,6 +12,7 @@
 // {prefixes}). The double answers its host over https and http alike, so a handler given the https project URL (as in
 // production, where a signed link must be https) and a test that hard-codes the http URL reach the same double.
 import type { Pg } from "./pg.ts";
+import { POSTING_PAGE } from "../architect/helpers/posting_checks.ts";
 
 export interface Double {
   fetch: (input: Request | URL | string, init?: RequestInit) => Promise<Response>;
@@ -373,6 +374,10 @@ commit;`);
     storage,
     fetch: async (input, init) => {
       const req = input instanceof Request && !init ? input : new Request(input as any, init);
+      // architect amendment E.21 (2026-11-10): a search's open check reads each shown posting's page by id. The double never
+      // lets that reach a real employer board (CI has the network; a fake posting id there is a 404, read as closed): it is
+      // refused, as the no-network tests refuse it, and the posting is shown as "not re-checked".
+      if (req.method === "GET" && POSTING_PAGE.test(req.url.replace(/[?#].*$/, ""))) throw new TypeError(`network refused by the flow double: ${new URL(req.url).host}`);
       if (!ours(new URL(req.url))) return await real(req);
       const res = await handle(req), entry = log.at(-1)!;
       entry.status = res.status;

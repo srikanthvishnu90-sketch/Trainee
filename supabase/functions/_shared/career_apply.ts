@@ -8,7 +8,7 @@
 //                     batches need nothing; the batch is admitted against the limits up front.
 // The worker (WO-009b) fills exactly the prepared fields by name, reads each back, and classifies the outcome here.
 import { overStatedLimit } from "./length_limit.ts";
-import { answerKey, AUTH_FACTS, FOREIGN, HONEYPOT, mapQuestion, NAMES_US, norm as normQuestion, RELATIVE_PLACE } from "./question_map.ts";
+import { answerKey, AUTH_FACTS, FOREIGN, HONEYPOT, mapQuestion, NAMES_US, norm as normQuestion, PAY_HISTORY_ASKED, RELATIVE_PLACE } from "./question_map.ts";
 import { rowAnswerKey } from "./row_answer.ts";
 import { chooseOption, levelOption, usCitizenChoice, yesNoFromFact, yesNoOf } from "./answer_options.ts";
 import { type PlacePart, postingAtHome, postingCountry, postingPlaces, STATE_NAMES } from "./posting_place.ts";
@@ -198,7 +198,7 @@ const KEYS: [RegExp, string][] = [
   [/gender|race|ethnicity|veteran|disability|hispanic|latino|lgbt|sexual orientation|heterosexual|bisexual|queer/i, "eeo"],
 ];
 // What a person was paid before, which only their own answer to that question may fill.
-export const PAY_HISTORY = /\b(salary|pay|compensation|wage)s? histor|\b(previous|prior|past|last|former|most recent)\b[^?.]{0,30}\b(salary|pay|compensation|wage|earnings)\b|\b(salary|pay|compensation|wage)\b[^?.]{0,40}\b(previous|prior|past|last|former) (job|position|role|employer)/i;
+export const PAY_HISTORY = PAY_HISTORY_ASKED; // one pattern: question_map.ts also keys these answers to the posting
 // A wrong mapping sends a wrong answer; an unknown only asks. So the person's own contact facts go only into a free-text
 // box (never a checkbox, radio or select, where "Do you own a smartphone?" or "Email me about other openings" would take
 // the person's number or address), and never into a question about someone else (a reference, a manager, an emergency

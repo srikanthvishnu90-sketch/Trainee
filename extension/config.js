@@ -19,4 +19,10 @@ globalThis.TRAINEE_DEFAULTS = {
   // How many tabs the agent sends on at once (each its own window). 1 by default; at most 3. More than one is untested on a
   // real desktop, where Chrome may throttle a hidden or minimized window (docs/apply/FIFTY-IN-THIRTY.md, wo/frs-fifty).
   agentTabs: 1,
+  // D-MS-1 (x-audit, coordinator ruling 2026-11-10): nothing is typed into an employer's page before the person's tap. An
+  // employer can save each field as it is typed (Ashby's ApiSetFormValue autosave), so a fill before the tap would send the
+  // answers before the yes, and the extension has no network guard. Off: the extension reads the form, plans and shows the
+  // card; the person types their own answers, and the card shows them as theirs. On only in a test world (the fill engine's
+  // tests load a copy with it switched on). Fixed here, never by storage (a page can write storage).
+  prefill: false,
 };

@@ -110,7 +110,10 @@ export function createFileService(o: { store: FileKindStore; env: Env; now: () =
       const id = [...crypto.getRandomValues(new Uint8Array(5))].map((b) => b.toString(16).padStart(2, "0")).join("");
       const links = await feedUrlsFor(o.env, userId, id, now);
       if (!links.url && !links.webApp) return { ok: false, error: "not created: file links aren't set up yet" };
-      await o.store.put({ id, userId, kind: "application_review", data: v.data, state: {}, tag: null, created_at: now, expires_at: now + ttlHours() * 3600_000, revoked_at: null });
+      // Item 6 S1: served as the live F-09 family page (file_family_review.ts through FileDeps.familyRecords["F-09"]): every GET reads the
+      // prepared application it names; the review kept here is the record of what was shown when the link was made.
+      const live = { family: "F-09", from_code: true, live: true, ref: { prepared: item.id, ...(item.job_id ? { job: item.job_id } : {}) } };
+      await o.store.put({ id, userId, kind: "application_review", data: { ...v.data, ...live }, state: {}, tag: null, created_at: now, expires_at: now + ttlHours() * 3600_000, revoked_at: null });
       return { ok: true, id, url: links.url, webApp: links.webApp };
     },
     // Item 6 S0: a File family's page, from view data built by code (never by a model: create() above validates a model's data

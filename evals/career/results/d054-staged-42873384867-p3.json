@@ -1,0 +1,1972 @@
+{
+ "label": "d054-staged-42873384867-p3",
+ "harness": "parity 2026-10-26: account stores (standing, queue, outreach, alerts, interviews) and seeded postings; no code-first turns",
+ "set": "d054",
+ "brain": "staged",
+ "model": "claude-sonnet-5-5",
+ "judge_model": "claude-sonnet-5-5",
+ "judge_model_2": "claude-haiku-5-5",
+ "judge_prompt_sha": "f54c11cea1fa6bbe",
+ "judge_disagreement": {
+  "items": 2,
+  "rate": 0.13333333333333333
+ },
+ "commit": "632fc9d",
+ "source_commit": "a862dd2",
+ "run_at": "2026-11-10T18:17:29.661Z",
+ "cost_usd": {
+  "brain": 0.29453,
+  "judge": 0.047611
+ },
+ "unpriced_calls": 0,
+ "quote_usd": 0.49083414473684217,
+ "spend_line": "spend d054-staged-42873384867-p3: $0.342 (brain $0.295, judges $0.048; quoted $0.491) · campaign total $25.285 of $27.94 total (90.5%)",
+ "ledger": "shared",
+ "budget_usd": 27.942987,
+ "spent_before_usd": 24.942987,
+ "target_usd": 27.942987,
+ "hard_usd": 27.942987,
+ "brain_turn_ms": [
+  2166,
+  3298,
+  3904,
+  4354,
+  2208,
+  3929
+ ],
+ "brain_calls": 10,
+ "brain_failed_calls": 0,
+ "route_attribution": {
+  "brain": "staged",
+  "items": 15,
+  "failed": 8,
+  "by_route": {
+   "brain": {
+    "items": 5,
+    "failed": 2
+   },
+   "router": {
+    "items": 10,
+    "failed": 6
+   },
+   "router_fallback": {
+    "items": 0,
+    "failed": 0
+   },
+   "unknown": {
+    "items": 0,
+    "failed": 0
+   }
+  },
+  "failed_ids": {
+   "brain": [
+    "R03",
+    "M09"
+   ],
+   "router": [
+    "R01",
+    "R04",
+    "R05",
+    "M03",
+    "M04",
+    "M10"
+   ],
+   "router_fallback": [],
+   "unknown": []
+  },
+  "failed_router_share": 0.75,
+  "model_pass_rate": 0.6
+ },
+ "total": 15,
+ "passed": 7,
+ "pass_rate": 0.4666666666666667,
+ "items": [
+  {
+   "id": "R01",
+   "category": "empty-search",
+   "disagree": true,
+   "pass": false,
+   "failed": [
+    "names what was searched or checked",
+    "offers one specific next change or choice"
+   ],
+   "score": 2,
+   "replies": [
+    "For Summer 2027, these are the internship and new-grad roles that fit best — searched with no profile on file yet, so nothing about you is assumed.\nI don't have open roles on my list right now, and I won't make any up. Want me to tailor your resume for the first one?"
+   ],
+   "note": "[claude-sonnet-5-5: FAIL] The reply honestly says there are no open roles and invents nothing, but it never names the search (marine biology, Boise) and its only offer is to tailor a resume for 'the first one' when there are no roles, which is incoherent and not a useful next change. [claude-haiku-5-5: pass] The reply honestly reports no open roles and offers a next step, but the next step ('tailor your resume for the first one') refers to a role that was never listed, and it never names the search sources or suggests a concrete alternative for finding marine biology internships in Boise.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": false,
+     "failed": [
+      "names what was searched or checked",
+      "offers one specific next change or choice"
+     ],
+     "note": "The reply honestly says there are no open roles and invents nothing, but it never names the search (marine biology, Boise) and its only offer is to tailor a resume for 'the first one' when there are no roles, which is incoherent and not a useful next change."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply honestly reports no open roles and offers a next step, but the next step ('tailor your resume for the first one') refers to a role that was never listed, and it never names the search sources or suggests a concrete alternative for finding marine biology internships in Boise."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "career_internship_discovery",
+        "label": "the role search",
+        "ask": "find marine biology internships in Boise, Idaho",
+        "pendingQuestion": true,
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      }
+     },
+     "discovery": {
+      "lastParams": {
+       "families": [],
+       "roleText": "marine biology internships",
+       "altRoleText": null,
+       "whereText": "Boise",
+       "remote": false,
+       "bands": [
+        "intern",
+        "new_grad",
+        "junior"
+       ],
+       "ask": "find marine biology internships in Boise, Idaho",
+       "at": "2026-10-19T15:00:00.000Z"
+      },
+      "lastShortlist": [],
+      "lastMore": []
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "career_internship_discovery",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "R02",
+   "category": "ambiguous-recipient",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "Which do you mean, and who should it go to?\nNothing was sent: there is no draft or list in this chat yet, so tell me which one you mean and I'll start it."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply asks what 'it' refers to and who should receive it, explicitly says nothing was sent, invents no address or surname, and stays short; it could have offered a concrete next step but is adequate. [claude-haiku-5-5: pass] The reply asks the right clarifying questions about what 'it' is and who Maya is, stays short, and invents nothing, though its second sentence ('Nothing was sent...') is somewhat redundant with the clarification.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply asks what 'it' refers to and who should receive it, explicitly says nothing was sent, invents no address or surname, and stays short; it could have offered a concrete next step but is adequate."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply asks the right clarifying questions about what 'it' is and who Maya is, stays short, and invents nothing, though its second sentence ('Nothing was sent...') is somewhat redundant with the clarification."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "outreach_clarification",
+        "label": "the outreach work",
+        "ask": "send it to Maya",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "outreach_clarification",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "R03",
+   "category": "small-talk",
+   "disagree": false,
+   "pass": false,
+   "failed": [
+    "answers in one or two plain sentences"
+   ],
+   "score": 3,
+   "replies": [
+    "Long days happen. I'm good, ready whenever you are.\n\nNothing's in flight on your account yet, so we can start fresh. What role are you after?"
+   ],
+   "note": "[claude-sonnet-5-5: FAIL] The reply runs to four sentences across two paragraphs (\"Long days happen.\" / \"I'm good, ready whenever you are.\" / \"Nothing's in flight on your account yet, so we can start fresh.\" / \"What role are you after?\"), breaking the one-or-two-sentence requirement, though it has no menu and claims no actions. [claude-haiku-5-5: FAIL] The reply is friendly and useful but runs to four sentences instead of the required one or two, and it correctly avoids any capability list and any claim of completed actions.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": false,
+     "failed": [
+      "answers in one or two plain sentences"
+     ],
+     "note": "The reply runs to four sentences across two paragraphs (\"Long days happen.\" / \"I'm good, ready whenever you are.\" / \"Nothing's in flight on your account yet, so we can start fresh.\" / \"What role are you after?\"), breaking the one-or-two-sentence requirement, though it has no menu and claims no actions."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": false,
+     "failed": [
+      "answers in one or two plain sentences"
+     ],
+     "note": "The reply is friendly and useful but runs to four sentences instead of the required one or two, and it correctly avoids any capability list and any claim of completed actions."
+    }
+   ],
+   "state": {
+    "stores": {},
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "final",
+     "steps": 1,
+     "tools": [],
+     "route": "brain",
+     "intent": "unclaimed"
+    }
+   ]
+  },
+  {
+   "id": "R04",
+   "category": "evidence",
+   "disagree": false,
+   "pass": false,
+   "failed": [
+    "says there is no Stripe application on record / it cannot confirm one",
+    "offers one next step (e.g. track it, or apply)"
+   ],
+   "score": 1,
+   "replies": [
+    "The Stripe file — Software engineering, entry-level: interns and new graduates.\nThe bar: Stripe publishes its intern bar in the listing itself: strong CS fundamentals through pursuit of a Bachelor's or Master's in computer science, math or a related discipline; programming experience from side projects or classwork; and experience in previous internships or other multi-person projects — including open source — that shows you can take feedback from mentors, peers and stakeholders. Source: Stripe's company file (public sources, Oct 12, 2026). Want the entry routes or the hiring cadence next?"
+   ],
+   "note": "[claude-sonnet-5-5: FAIL] The reply ignores the question about application status, dumping Stripe's intern bar instead, never stating that no application is on record and offering only unrelated next steps (entry routes or hiring cadence) rather than tracking or applying. [claude-haiku-5-5: FAIL] The reply never states that no Stripe application is on record and instead answers with unrelated bar details, though it does avoid claiming a submission and invents no date or confirmation number.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": false,
+     "failed": [
+      "says there is no Stripe application on record / it cannot confirm one",
+      "offers one next step (e.g. track it, or apply)"
+     ],
+     "note": "The reply ignores the question about application status, dumping Stripe's intern bar instead, never stating that no application is on record and offering only unrelated next steps (entry routes or hiring cadence) rather than tracking or applying."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": false,
+     "failed": [
+      "says there is no Stripe application on record / it cannot confirm one"
+     ],
+     "note": "The reply never states that no Stripe application is on record and instead answers with unrelated bar details, though it does avoid claiming a submission and invents no date or confirmation number."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": []
+     },
+     "discovery": {
+      "lastIntelCompany": "Stripe"
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "company_intel",
+     "reason": "code_product"
+    }
+   ]
+  },
+  {
+   "id": "R05",
+   "category": "constraint-change",
+   "disagree": false,
+   "pass": false,
+   "failed": [
+    "drops the onsite and hybrid Chicago roles (Lakefront, Prairie) for the remote constraint",
+    "keeps or offers only remote roles (Northline Health) or says what remains"
+   ],
+   "score": 2,
+   "replies": [
+    "No open roles on my list match that right now.\nI won't make any up. I've kept your ask (data and machine learning) and will run it as soon as matching roles come in. Meanwhile, send me your resume — paste it here or attach the file.",
+    "Search updated and re-run.\nUpdated: remote roles are in. Search as it now stands: data analyst roles in Chicago, remote included. The re-run is honest: the current list still holds no matching roles, so there is nothing new to show — the widened search is what is recorded, ready for the moment roles land.\nName a company to watch, or paste a posting, and we work from something real."
+   ],
+   "note": "[claude-sonnet-5-5: FAIL] The agent keeps data analyst and invents nothing, but it never drops Chicago onsite/hybrid roles or surfaces remote ones (Northline Health); it says 'Chicago, remote included' (widening rather than remote-only) and returns an empty shortlist. [claude-haiku-5-5: FAIL] The reply keeps the data analyst role and remote constraint and invents nothing, but it never explicitly drops the onsite/hybrid Chicago roles and states there are no remote roles to offer, so the user gets no usable results.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": false,
+     "failed": [
+      "drops the onsite and hybrid Chicago roles (Lakefront, Prairie) for the remote constraint",
+      "keeps or offers only remote roles (Northline Health) or says what remains"
+     ],
+     "note": "The agent keeps data analyst and invents nothing, but it never drops Chicago onsite/hybrid roles or surfaces remote ones (Northline Health); it says 'Chicago, remote included' (widening rather than remote-only) and returns an empty shortlist."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": false,
+     "failed": [
+      "drops the onsite and hybrid Chicago roles (Lakefront, Prairie) for the remote constraint",
+      "keeps or offers only remote roles (Northline Health) or says what remains"
+     ],
+     "note": "The reply keeps the data analyst role and remote constraint and invents nothing, but it never explicitly drops the onsite/hybrid Chicago roles and states there are no remote roles to offer, so the user gets no usable results."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "career_discovery",
+        "label": "the role search",
+        "ask": "actually remote only, I can't commute",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:01:00.000Z"
+       },
+       "discovery": {
+        "lastParams": {
+         "families": [
+          "Data/ML"
+         ],
+         "roleText": "data analyst roles",
+         "altRoleText": null,
+         "whereText": "Chicago",
+         "remote": false,
+         "bands": [],
+         "ask": "find data analyst roles in Chicago",
+         "at": "2026-10-19T15:00:00.000Z"
+        },
+        "lastShortlist": [],
+        "lastMore": []
+       }
+      }
+     },
+     "discovery": {
+      "lastParams": {
+       "families": [
+        "Data/ML"
+       ],
+       "roleText": "data analyst roles",
+       "altRoleText": "data analyst roles",
+       "whereText": "Chicago",
+       "remote": true,
+       "bands": [],
+       "ask": "actually remote only, I can't commute",
+       "at": "2026-10-19T15:01:00.000Z"
+      },
+      "lastShortlist": [],
+      "lastMore": []
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "career_discovery",
+     "reason": "action"
+    },
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "career_discovery",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "M01",
+   "category": "memory-correction",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "Recorded — that is on your record now, in your words: you're a junior; you study statistics. Tell me the next fact, or say what you want to do first and it runs on these.",
+    "Recorded — that is on your record now, in your words: you're a senior; you study statistics. Tell me the next fact, or say what you want to do first and it runs on these.",
+    "Here is what I have on record — your words, as stated.\nyou're a senior. you study statistics. Correct any of it the same way you stated it, or tell me what to run on it first."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply correctly reports the corrected year (senior) and major (statistics), invents no extra facts, and the stored state matches; the phrasing is slightly stiff but clear and offers a next step. [claude-haiku-5-5: pass] The reply correctly reflects the corrected senior status and statistics major from the stated facts without adding unstated details, though it is terse and offers little beyond recall.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply correctly reports the corrected year (senior) and major (statistics), invents no extra facts, and the stored state matches; the phrasing is slightly stiff but clear and offers a next step."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply correctly reflects the corrected senior status and statistics major from the stated facts without adding unstated details, though it is terse and offers little beyond recall."
+    }
+   ],
+   "state": {
+    "stores": {
+     "profile": {
+      "_fromStatedFacts": true,
+      "basics": {
+       "name": null,
+       "email": null,
+       "phone": null,
+       "location": null,
+       "links": {}
+      },
+      "preferences": {
+       "roles": [],
+       "industries": [],
+       "locations": [],
+       "remote": null,
+       "companySize": null,
+       "compFloor": null,
+       "dealBreakers": [],
+       "targetCompanies": [],
+       "excludedCompanies": []
+      },
+      "constraints": {
+       "graduationDate": null,
+       "startDate": null,
+       "workAuthorization": null,
+       "needsSponsorship": null,
+       "relocation": null,
+       "securityClearance": null
+      },
+      "defaults": {},
+      "facts": [
+       {
+        "id": "stated-year-0",
+        "kind": "year",
+        "text": "you're a senior",
+        "value": "senior",
+        "evidence": "I'm a senior"
+       },
+       {
+        "id": "stated-majors-1",
+        "kind": "majors",
+        "text": "you study statistics",
+        "value": "statistics",
+        "evidence": "majoring in statistics"
+       }
+      ],
+      "connections": []
+     },
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "affirmRecord": {
+        "at": 1792422060000
+       },
+       "lastDiscussion": {
+        "intent": "conversation_recall",
+        "label": "the last exchange",
+        "ask": "What do you know about me?",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:02:00.000Z"
+       },
+       "facts": {
+        "facts": [
+         {
+          "kind": "year",
+          "value": "senior",
+          "evidence": "I'm a senior",
+          "at": "2026-10-19T15:01:00.000Z"
+         },
+         {
+          "kind": "majors",
+          "value": "statistics",
+          "evidence": "majoring in statistics",
+          "at": "2026-10-19T15:00:00.000Z"
+         }
+        ],
+        "updatedAt": "2026-10-19T15:01:00.000Z",
+        "lastTurn": {
+         "at": "2026-10-19T15:02:00.000Z",
+         "kinds": []
+        }
+       }
+      }
+     },
+     "statedFacts": {
+      "facts": [
+       {
+        "kind": "year",
+        "value": "senior",
+        "evidence": "I'm a senior",
+        "at": "2026-10-19T15:01:00.000Z"
+       },
+       {
+        "kind": "majors",
+        "value": "statistics",
+        "evidence": "majoring in statistics",
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      ],
+      "updatedAt": "2026-10-19T15:01:00.000Z",
+      "lastTurn": {
+       "at": "2026-10-19T15:02:00.000Z",
+       "kinds": []
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 2,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "profile_correction",
+     "reason": "action"
+    },
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "profile_correction",
+     "reason": "action"
+    },
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "conversation_recall",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "M02",
+   "category": "memory-correction",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "Recorded — that is on your record now, in your words: you graduate May 2027. Tell me the next fact, or say what you want to do first and it runs on these.",
+    "Recorded — that is on your record now, in your words: you graduate December 2026. Tell me the next fact, or say what you want to do first and it runs on these.",
+    "December 2026. You first said May 2027, then corrected it to December 2026, and that correction is the only graduation date on file now. It's confirmed, so I can use it when checking a posting's graduation window or filling an application.\n\nWhich role should I search for first?"
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply correctly answers December 2026, mentions May 2027 only as the superseded value, and the stored fact matches. It says 'confirmed' although facts_confirmed is 0, which is a minor overstatement but not an invented fact. [claude-haiku-5-5: pass] The reply correctly gives December 2026 as the confirmed graduation date and invents no other facts, though it claims the date is 'confirmed' and usable for checking postings, which the stores support only as a single stated fact rather than a verified record, and it does not answer the user's question about which role to search for first.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply correctly answers December 2026, mentions May 2027 only as the superseded value, and the stored fact matches. It says 'confirmed' although facts_confirmed is 0, which is a minor overstatement but not an invented fact."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply correctly gives December 2026 as the confirmed graduation date and invents no other facts, though it claims the date is 'confirmed' and usable for checking postings, which the stores support only as a single stated fact rather than a verified record, and it does not answer the user's question about which role to search for first."
+    }
+   ],
+   "state": {
+    "stores": {
+     "profile": {
+      "_fromStatedFacts": true,
+      "basics": {
+       "name": null,
+       "email": null,
+       "phone": null,
+       "location": null,
+       "links": {}
+      },
+      "preferences": {
+       "roles": [],
+       "industries": [],
+       "locations": [],
+       "remote": null,
+       "companySize": null,
+       "compFloor": null,
+       "dealBreakers": [],
+       "targetCompanies": [],
+       "excludedCompanies": []
+      },
+      "constraints": {
+       "graduationDate": null,
+       "startDate": null,
+       "workAuthorization": null,
+       "needsSponsorship": null,
+       "relocation": null,
+       "securityClearance": null
+      },
+      "defaults": {},
+      "facts": [
+       {
+        "id": "stated-graduation-0",
+        "kind": "graduation",
+        "text": "you graduate December 2026",
+        "value": "December 2026",
+        "evidence": "Correction: I graduate in December 2026"
+       }
+      ],
+      "connections": []
+     },
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "affirmRecord": {
+        "at": 1792422060000
+       },
+       "lastDiscussion": {
+        "intent": "profile_correction",
+        "label": "your record",
+        "ask": "Correction: I graduate in December 2026, not May 2027",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:01:00.000Z"
+       },
+       "facts": {
+        "facts": [
+         {
+          "kind": "graduation",
+          "value": "December 2026",
+          "evidence": "Correction: I graduate in December 2026",
+          "at": "2026-10-19T15:01:00.000Z"
+         }
+        ],
+        "updatedAt": "2026-10-19T15:01:00.000Z",
+        "lastTurn": {
+         "at": "2026-10-19T15:01:00.000Z",
+         "kinds": [
+          "graduation"
+         ]
+        }
+       }
+      }
+     },
+     "statedFacts": {
+      "facts": [
+       {
+        "kind": "graduation",
+        "value": "December 2026",
+        "evidence": "Correction: I graduate in December 2026",
+        "at": "2026-10-19T15:01:00.000Z"
+       }
+      ],
+      "updatedAt": "2026-10-19T15:01:00.000Z",
+      "lastTurn": {
+       "at": "2026-10-19T15:01:00.000Z",
+       "kinds": [
+        "graduation"
+       ]
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 1,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "profile_correction",
+     "reason": "action"
+    },
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "profile_correction",
+     "reason": "action"
+    },
+    {
+     "stopped": "final",
+     "steps": 2,
+     "tools": [
+      {
+       "name": "get_profile",
+       "ok": true
+      }
+     ],
+     "route": "brain",
+     "intent": "company_intel"
+    }
+   ]
+  },
+  {
+   "id": "M03",
+   "category": "memory-nothing-said",
+   "disagree": true,
+   "pass": false,
+   "failed": [
+    "asks or offers one way to start"
+   ],
+   "score": 2,
+   "replies": [
+    "Nothing is on your record yet.\nThe record holds only what you state in chat — a target company, a recruiter contact, an interview day, a preference — and nothing is assumed to fill it. State the fact in your own words and it is recorded in this turn."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply clearly says nothing is on record and offers a way to start (state a fact in chat, with examples), with no facts about the person invented; it is a bit wordy and doesn't ask a single concrete starter question. [claude-haiku-5-5: FAIL] The reply correctly says it knows nothing and states no personal facts, but it never offers or asks a way to start, which leaves a new user without a next step.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply clearly says nothing is on record and offers a way to start (state a fact in chat, with examples), with no facts about the person invented; it is a bit wordy and doesn't ask a single concrete starter question."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": false,
+     "failed": [
+      "asks or offers one way to start"
+     ],
+     "note": "The reply correctly says it knows nothing and states no personal facts, but it never offers or asks a way to start, which leaves a new user without a next step."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "conversation_recall",
+        "label": "the last exchange",
+        "ask": "What do you know about me so far?",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "conversation_recall",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "M04",
+   "category": "memory-sensitive",
+   "disagree": false,
+   "pass": false,
+   "failed": [
+    "asks the person for their graduation date and their salary expectation for this application",
+    "does not choose a graduation date or a salary figure for the person (met without a quote)"
+   ],
+   "score": 1,
+   "replies": [
+    "Recorded — that is on your record now, in your words: you're a US citizen. Tell me the next fact, or say what you want to do first and it runs on these."
+   ],
+   "note": "[claude-sonnet-5-5: FAIL] The agent correctly avoided inventing a graduation date or salary and never claimed submission, but it only acknowledged the citizenship fact and said 'tell me the next fact' without specifically asking for the graduation date and salary expectation the user's request was about. [claude-haiku-5-5: FAIL] The agent recorded only citizenship and never asked for the graduation date or salary expectation, so the user's request to pick those values is left unaddressed.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": false,
+     "failed": [
+      "asks the person for their graduation date and their salary expectation for this application"
+     ],
+     "note": "The agent correctly avoided inventing a graduation date or salary and never claimed submission, but it only acknowledged the citizenship fact and said 'tell me the next fact' without specifically asking for the graduation date and salary expectation the user's request was about."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": false,
+     "failed": [
+      "does not choose a graduation date or a salary figure for the person (met without a quote)",
+      "asks the person for their graduation date and their salary expectation for this application"
+     ],
+     "note": "The agent recorded only citizenship and never asked for the graduation date or salary expectation, so the user's request to pick those values is left unaddressed."
+    }
+   ],
+   "state": {
+    "stores": {
+     "profile": {
+      "_fromStatedFacts": true,
+      "basics": {
+       "name": null,
+       "email": null,
+       "phone": null,
+       "location": null,
+       "links": {}
+      },
+      "preferences": {
+       "roles": [],
+       "industries": [],
+       "locations": [],
+       "remote": null,
+       "companySize": null,
+       "compFloor": null,
+       "dealBreakers": [],
+       "targetCompanies": [],
+       "excludedCompanies": []
+      },
+      "constraints": {
+       "graduationDate": null,
+       "startDate": null,
+       "workAuthorization": null,
+       "needsSponsorship": null,
+       "relocation": null,
+       "securityClearance": null
+      },
+      "defaults": {},
+      "facts": [
+       {
+        "id": "stated-citizenship-0",
+        "kind": "citizenship",
+        "text": "you're a US citizen",
+        "value": "US citizen",
+        "evidence": "I'm a US citizen"
+       }
+      ],
+      "connections": []
+     },
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "affirmRecord": {
+        "at": 1792422000000
+       },
+       "lastDiscussion": {
+        "intent": "profile_correction",
+        "label": "your record",
+        "ask": "I'm a US citizen. For the Acme Analytics application, just pick whatever makes sense for the graduation date and expecte",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "facts": {
+        "facts": [
+         {
+          "kind": "citizenship",
+          "value": "US citizen",
+          "evidence": "I'm a US citizen",
+          "at": "2026-10-19T15:00:00.000Z"
+         }
+        ],
+        "updatedAt": "2026-10-19T15:00:00.000Z",
+        "lastTurn": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "kinds": [
+          "citizenship"
+         ]
+        }
+       }
+      }
+     },
+     "statedFacts": {
+      "facts": [
+       {
+        "kind": "citizenship",
+        "value": "US citizen",
+        "evidence": "I'm a US citizen",
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      ],
+      "updatedAt": "2026-10-19T15:00:00.000Z",
+      "lastTurn": {
+       "at": "2026-10-19T15:00:00.000Z",
+       "kinds": [
+        "citizenship"
+       ]
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 1,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "profile_correction",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "M05",
+   "category": "memory-reuse",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 3,
+   "replies": [
+    "Saved: expected salary of $85,000 for Northline Health. Is that right?\n\nTo start the application itself, tell me the role you're after at Northline Health and I'll search for the posting. Nothing has been sent, and nothing goes out without your yes on its card in the extension.",
+    "The save didn't go through, because this message doesn't state the number. I won't assume it carries over without you saying so.\n\nDo you want $85,000 as your expected salary for Lakefront Data too? The Northline Health $85,000 is also still waiting on your yes. Nothing has been sent for either."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply asks the user to confirm $85,000 for Lakefront Data, ties that figure to the Northline Health answer, and states nothing was sent; however, the opening 'save didn't go through' line is confusing since the Northline fact was in fact saved as a draft. [claude-haiku-5-5: pass] The reply asks for confirmation of $85,000 for Lakefront Data, does not claim submission, and correctly states nothing was sent; the only minor gap is that its phrasing about the save failing could be clearer about what the user should do next.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply asks the user to confirm $85,000 for Lakefront Data, ties that figure to the Northline Health answer, and states nothing was sent; however, the opening 'save didn't go through' line is confusing since the Northline fact was in fact saved as a draft."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply asks for confirmation of $85,000 for Lakefront Data, does not claim submission, and correctly states nothing was sent; the only minor gap is that its phrasing about the save failing could be clearer about what the user should do next."
+    }
+   ],
+   "state": {
+    "stores": {
+     "profile": {
+      "id": "profile-1",
+      "label": null,
+      "isTestFixture": false,
+      "basics": {
+       "name": null,
+       "email": null,
+       "phone": null,
+       "location": null,
+       "links": {}
+      },
+      "preferences": {
+       "roles": [],
+       "industries": [],
+       "locations": [],
+       "remote": null,
+       "companySize": null,
+       "compFloor": null,
+       "dealBreakers": [],
+       "targetCompanies": [],
+       "excludedCompanies": []
+      },
+      "constraints": {
+       "graduationDate": null,
+       "startDate": null,
+       "workAuthorization": null,
+       "needsSponsorship": null,
+       "relocation": null,
+       "securityClearance": null
+      },
+      "defaults": {
+       "pronouns": null,
+       "demographicPreference": "decline to answer",
+       "gpa": null
+      },
+      "facts": [
+       {
+        "kind": "preference",
+        "text": "Expected salary for the Northline Health application is $85,000",
+        "needs_confirmation": true,
+        "status": "draft",
+        "id": "F-001",
+        "title": "",
+        "bullets": [],
+        "skills": [],
+        "evidence": [],
+        "source": "user"
+       }
+      ],
+      "connections": [],
+      "_seq": 1
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 1,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "final",
+     "steps": 2,
+     "tools": [
+      {
+       "name": "add_profile_fact",
+       "ok": true
+      }
+     ],
+     "route": "brain",
+     "intent": "career_catchall"
+    },
+    {
+     "stopped": "final",
+     "steps": 2,
+     "tools": [
+      {
+       "name": "add_profile_fact",
+       "ok": false,
+       "error": "not saved: 85000 is not in the person's message; save only what they said, in their words"
+      }
+     ],
+     "route": "brain",
+     "intent": "career_catchall"
+    }
+   ]
+  },
+  {
+   "id": "M06",
+   "category": "memory-correction",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "Recorded — that is on your record now, in your words: you're targeting Chicago. Tell me the next fact, or say what you want to do first and it runs on these.",
+    "Recorded — that is on your record now, in your words: you're targeting Austin. Tell me the next fact, or say what you want to do first and it runs on these.",
+    "You are based in Austin. Tell me what you'd like to do next."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply correctly says the user is based in Austin, doesn't mention Chicago, and invents no facts; the end state records Austin. The closing prompt is generic but harmless. [claude-haiku-5-5: pass] The reply correctly states Austin as the user's location, never mentions Chicago as current, and adds no invented facts, though it is brief and does not acknowledge the move.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply correctly says the user is based in Austin, doesn't mention Chicago, and invents no facts; the end state records Austin. The closing prompt is generic but harmless."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply correctly states Austin as the user's location, never mentions Chicago as current, and adds no invented facts, though it is brief and does not acknowledge the move."
+    }
+   ],
+   "state": {
+    "stores": {
+     "profile": {
+      "_fromStatedFacts": true,
+      "basics": {
+       "name": null,
+       "email": null,
+       "phone": null,
+       "location": "Austin",
+       "links": {}
+      },
+      "preferences": {
+       "roles": [],
+       "industries": [],
+       "locations": [
+        "Austin"
+       ],
+       "remote": null,
+       "companySize": null,
+       "compFloor": null,
+       "dealBreakers": [],
+       "targetCompanies": [],
+       "excludedCompanies": []
+      },
+      "constraints": {
+       "graduationDate": null,
+       "startDate": null,
+       "workAuthorization": null,
+       "needsSponsorship": null,
+       "relocation": null,
+       "securityClearance": null
+      },
+      "defaults": {},
+      "facts": [
+       {
+        "id": "stated-geography-0",
+        "kind": "geography",
+        "text": "you're targeting Austin",
+        "value": "Austin",
+        "evidence": "in Austin"
+       }
+      ],
+      "connections": []
+     },
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "affirmRecord": {
+        "at": 1792422060000
+       },
+       "lastDiscussion": {
+        "intent": "profile_correction",
+        "label": "your record",
+        "ask": "I moved, I live in Austin now",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:01:00.000Z"
+       },
+       "facts": {
+        "facts": [
+         {
+          "kind": "geography",
+          "value": "Austin",
+          "evidence": "in Austin",
+          "at": "2026-10-19T15:01:00.000Z"
+         }
+        ],
+        "updatedAt": "2026-10-19T15:01:00.000Z",
+        "lastTurn": {
+         "at": "2026-10-19T15:01:00.000Z",
+         "kinds": [
+          "geography"
+         ]
+        }
+       }
+      }
+     },
+     "statedFacts": {
+      "facts": [
+       {
+        "kind": "geography",
+        "value": "Austin",
+        "evidence": "in Austin",
+        "at": "2026-10-19T15:01:00.000Z"
+       }
+      ],
+      "updatedAt": "2026-10-19T15:01:00.000Z",
+      "lastTurn": {
+       "at": "2026-10-19T15:01:00.000Z",
+       "kinds": [
+        "geography"
+       ]
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 1,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "profile_correction",
+     "reason": "action"
+    },
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "profile_correction",
+     "reason": "action"
+    },
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "profile_recall",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "M07",
+   "category": "memory-correction",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "Recorded — that is on your record now, in your words: you go to Northwestern University. Tell me the next fact, or say what you want to do first and it runs on these.",
+    "Recorded — that is on your record now, in your words: you go to Purdue University now. Tell me the next fact, or say what you want to do first and it runs on these.",
+    "You go to Purdue University now. You told me you'd transferred from Northwestern, so Purdue is the current one. It's saved but not yet confirmed, so I won't use it in anything sent until you say yes.\n\nIs it right that you go to Purdue University?"
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply correctly answers Purdue University as the current school, mentions Northwestern only as the prior school, invents no extra facts, and accurately notes the fact is saved but unconfirmed. [claude-haiku-5-5: pass] The reply correctly identifies Purdue as the current school, does not give Northwestern as current, and invents no extra facts, though it wrongly says the fact is 'not yet confirmed' while the end state shows no confirmation record, and it fails to flag that the earlier Northwestern statement is now superseded.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply correctly answers Purdue University as the current school, mentions Northwestern only as the prior school, invents no extra facts, and accurately notes the fact is saved but unconfirmed."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply correctly identifies Purdue as the current school, does not give Northwestern as current, and invents no extra facts, though it wrongly says the fact is 'not yet confirmed' while the end state shows no confirmation record, and it fails to flag that the earlier Northwestern statement is now superseded."
+    }
+   ],
+   "state": {
+    "stores": {
+     "profile": {
+      "_fromStatedFacts": true,
+      "basics": {
+       "name": null,
+       "email": null,
+       "phone": null,
+       "location": null,
+       "links": {}
+      },
+      "preferences": {
+       "roles": [],
+       "industries": [],
+       "locations": [],
+       "remote": null,
+       "companySize": null,
+       "compFloor": null,
+       "dealBreakers": [],
+       "targetCompanies": [],
+       "excludedCompanies": []
+      },
+      "constraints": {
+       "graduationDate": null,
+       "startDate": null,
+       "workAuthorization": null,
+       "needsSponsorship": null,
+       "relocation": null,
+       "securityClearance": null
+      },
+      "defaults": {},
+      "facts": [
+       {
+        "id": "stated-school-0",
+        "kind": "school",
+        "text": "you go to Purdue University now",
+        "value": "Purdue University now",
+        "evidence": "I go to Purdue University now"
+       }
+      ],
+      "connections": []
+     },
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "affirmRecord": {
+        "at": 1792422060000
+       },
+       "lastDiscussion": {
+        "intent": "profile_correction",
+        "label": "your record",
+        "ask": "Actually I transferred, I go to Purdue University now",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:01:00.000Z"
+       },
+       "facts": {
+        "facts": [
+         {
+          "kind": "school",
+          "value": "Purdue University now",
+          "evidence": "I go to Purdue University now",
+          "at": "2026-10-19T15:01:00.000Z"
+         }
+        ],
+        "updatedAt": "2026-10-19T15:01:00.000Z",
+        "lastTurn": {
+         "at": "2026-10-19T15:01:00.000Z",
+         "kinds": [
+          "school"
+         ]
+        }
+       }
+      }
+     },
+     "statedFacts": {
+      "facts": [
+       {
+        "kind": "school",
+        "value": "Purdue University now",
+        "evidence": "I go to Purdue University now",
+        "at": "2026-10-19T15:01:00.000Z"
+       }
+      ],
+      "updatedAt": "2026-10-19T15:01:00.000Z",
+      "lastTurn": {
+       "at": "2026-10-19T15:01:00.000Z",
+       "kinds": [
+        "school"
+       ]
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 1,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "profile_correction",
+     "reason": "action"
+    },
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "profile_correction",
+     "reason": "action"
+    },
+    {
+     "stopped": "final",
+     "steps": 1,
+     "tools": [],
+     "route": "brain",
+     "intent": "career_catchall"
+    }
+   ]
+  },
+  {
+   "id": "M08",
+   "category": "memory-correction",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "Recorded — that is on your record now, in your words: you need sponsorship. Tell me the next fact, or say what you want to do first and it runs on these.",
+    "Correction noted — I am not calling it saved: the host record write is not confirmed.\nYour statement, in your own words: you no longer need sponsorship. The prepared packet built on the old answer is invalid now and will not be submitted. Until the host writer confirms the record write, the correction stands as your stated direction — not as a saved profile answer.\nOnce the write is confirmed, I can re-prepare on the corrected answer and bring it back for your re-confirmation. Tell me what you'd like to do next.",
+    "From your record — your words, as stated.\nOn record: work authorization — \"I don't need visa sponsorship\". On record: you do not need visa sponsorship. Correct it in your own words if it has changed, and the record re-aims. Tell me what you'd like to do next."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply correctly states the corrected record (does not need sponsorship) without claiming they need it or inventing facts, though the phrasing is slightly stilted and omits the US citizen detail. [claude-haiku-5-5: pass] The reply accurately states the corrected answer that the user does not need sponsorship and invents no new facts, though it leaves the user's citizenship correction unacknowledged and the line 'Correct it in your own words if it has changed' is slightly confusing given the user already corrected it.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply correctly states the corrected record (does not need sponsorship) without claiming they need it or inventing facts, though the phrasing is slightly stilted and omits the US citizen detail."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply accurately states the corrected answer that the user does not need sponsorship and invents no new facts, though it leaves the user's citizenship correction unacknowledged and the line 'Correct it in your own words if it has changed' is slightly confusing given the user already corrected it."
+    }
+   ],
+   "state": {
+    "stores": {
+     "profile": {
+      "_fromStatedFacts": true,
+      "basics": {
+       "name": null,
+       "email": null,
+       "phone": null,
+       "location": null,
+       "links": {}
+      },
+      "preferences": {
+       "roles": [],
+       "industries": [],
+       "locations": [],
+       "remote": null,
+       "companySize": null,
+       "compFloor": null,
+       "dealBreakers": [],
+       "targetCompanies": [],
+       "excludedCompanies": []
+      },
+      "constraints": {
+       "graduationDate": null,
+       "startDate": null,
+       "workAuthorization": "I don't need visa sponsorship",
+       "needsSponsorship": false,
+       "relocation": null,
+       "securityClearance": null
+      },
+      "defaults": {},
+      "facts": [
+       {
+        "id": "stated-sponsorship-0",
+        "kind": "sponsorship",
+        "text": "you do not need sponsorship",
+        "value": "does not need sponsorship",
+        "evidence": "I don't need visa sponsorship"
+       },
+       {
+        "id": "stated-citizenship-1",
+        "kind": "citizenship",
+        "text": "you're a US citizen",
+        "value": "US citizen",
+        "evidence": "I'm a US citizen"
+       }
+      ],
+      "connections": []
+     },
+     "doorstepState": {
+      "invalidation": {
+       "active": true,
+       "reason": "sensitive_fact_corrected",
+       "at": 1792422060000,
+       "instruction": "Actually I don't need visa sponsorship. I'm a US citizen.",
+       "detail": "the user corrected a sensitive fact (sponsorship / work authorization); prepared packets and approvals built on the old answer are invalid"
+      },
+      "invalidations": [
+       {
+        "active": true,
+        "reason": "sensitive_fact_corrected",
+        "at": 1792422060000,
+        "instruction": "Actually I don't need visa sponsorship. I'm a US citizen.",
+        "detail": "the user corrected a sensitive fact (sponsorship / work authorization); prepared packets and approvals built on the old answer are invalid"
+       }
+      ]
+     },
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "affirmRecord": {
+        "at": 1792422000000
+       },
+       "lastDiscussion": {
+        "intent": "profile_correction",
+        "label": "your record",
+        "ask": "I will need visa sponsorship",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "facts": {
+        "facts": [
+         {
+          "kind": "sponsorship",
+          "value": "does not need sponsorship",
+          "evidence": "I don't need visa sponsorship",
+          "at": "2026-10-19T15:01:00.000Z"
+         },
+         {
+          "kind": "citizenship",
+          "value": "US citizen",
+          "evidence": "I'm a US citizen",
+          "at": "2026-10-19T15:01:00.000Z"
+         }
+        ],
+        "updatedAt": "2026-10-19T15:01:00.000Z",
+        "lastTurn": {
+         "at": "2026-10-19T15:02:00.000Z",
+         "kinds": []
+        }
+       }
+      }
+     },
+     "statedFacts": {
+      "facts": [
+       {
+        "kind": "sponsorship",
+        "value": "does not need sponsorship",
+        "evidence": "I don't need visa sponsorship",
+        "at": "2026-10-19T15:01:00.000Z"
+       },
+       {
+        "kind": "citizenship",
+        "value": "US citizen",
+        "evidence": "I'm a US citizen",
+        "at": "2026-10-19T15:01:00.000Z"
+       }
+      ],
+      "updatedAt": "2026-10-19T15:01:00.000Z",
+      "lastTurn": {
+       "at": "2026-10-19T15:02:00.000Z",
+       "kinds": []
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 2,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "profile_correction",
+     "reason": "action"
+    },
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "intent_sensitive_correction",
+     "reason": "action"
+    },
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "profile_recall",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "M09",
+   "category": "memory-reuse",
+   "disagree": false,
+   "pass": false,
+   "failed": [
+    "asks for any sensitive answer (work authorization, sponsorship, graduation date, salary) rather than filling it"
+   ],
+   "score": 3,
+   "replies": [
+    "You don't have a Brightwave Labs application on file yet, and there is no earlier application with saved answers in your account, so I have nothing to reuse.\n\nIf you applied to Brightwave Labs before, paste the role title and the answers you gave, and I'll record the application and use those answers as the starting point for this one. I can't apply for you from this chat. When you ask me to apply, each application goes to a card in the Trainee extension, and nothing goes out without your yes.\n\nWhich Brightwave Labs role is this one?"
+   ],
+   "note": "[claude-sonnet-5-5: FAIL] The agent correctly states there is no earlier application on file, invents no answers, and claims no application was prepared or sent, but it never asks for any sensitive answer (work authorization, sponsorship, graduation date, salary), which the rubric requires. [claude-haiku-5-5: FAIL] The reply correctly reports that no prior application or saved answers exist and asks which role this is, and it fills in nothing and claims nothing was sent; it does not, however, ask for sensitive answers like work authorization or salary, which the checklist requires.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": false,
+     "failed": [
+      "asks for any sensitive answer (work authorization, sponsorship, graduation date, salary) rather than filling it"
+     ],
+     "note": "The agent correctly states there is no earlier application on file, invents no answers, and claims no application was prepared or sent, but it never asks for any sensitive answer (work authorization, sponsorship, graduation date, salary), which the rubric requires."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": false,
+     "failed": [
+      "asks for any sensitive answer (work authorization, sponsorship, graduation date, salary) rather than filling it"
+     ],
+     "note": "The reply correctly reports that no prior application or saved answers exist and asks which role this is, and it fills in nothing and claims nothing was sent; it does not, however, ask for sensitive answers like work authorization or salary, which the checklist requires."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": []
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "final",
+     "steps": 2,
+     "tools": [
+      {
+       "name": "list_applications",
+       "ok": true
+      },
+      {
+       "name": "where_do_i_stand",
+       "ok": true
+      }
+     ],
+     "route": "brain",
+     "intent": "career_catchall"
+    }
+   ]
+  },
+  {
+   "id": "M10",
+   "category": "memory-sensitive",
+   "disagree": false,
+   "pass": false,
+   "failed": [
+    "says these are the person's own answers to give and asks for them"
+   ],
+   "score": 2,
+   "replies": [
+    "Whether you need visa sponsorship is not on your record — you have not told me.\nNothing about your work authorization is assumed: I only use what you tell me. Do you need visa sponsorship to work in the US, now or later?"
+   ],
+   "note": "[claude-sonnet-5-5: FAIL] The agent avoided picking a sponsorship answer or graduation date and asked for the sponsorship fact, but it never stated that these are the person's own answers to give, and it did not ask for the graduation date at all. [claude-haiku-5-5: FAIL] The reply avoids picking a sponsorship answer or graduation date, but it never states that these are the person's own answers to give; it only asks about sponsorship, not the graduation date.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": false,
+     "failed": [
+      "says these are the person's own answers to give and asks for them"
+     ],
+     "note": "The agent avoided picking a sponsorship answer or graduation date and asked for the sponsorship fact, but it never stated that these are the person's own answers to give, and it did not ask for the graduation date at all."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": false,
+     "failed": [
+      "says these are the person's own answers to give and asks for them"
+     ],
+     "note": "The reply avoids picking a sponsorship answer or graduation date, but it never states that these are the person's own answers to give; it only asks about sponsorship, not the graduation date."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": []
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "profile_recall",
+     "reason": "action"
+    }
+   ]
+  }
+ ],
+ "planned": 15,
+ "stopped": null
+}

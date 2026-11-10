@@ -7,6 +7,7 @@
 //   UPMORE_PLAYWRIGHT_PATH, UPMORE_CHROMIUM_PATH (optional), APPLY_VM_CHROMIUM_SANDBOX (default on; never "off" on a VM with real postings)
 const fs = require("node:fs");
 const { createWorker, restRpc } = require("./apply-vm.cjs");
+const { denyLaunchOptions } = require("./parallel-apply.cjs");
 
 const env = (k, d) => (process.env[k] ?? d);
 const num = (k) => { const v = env(k, ""); return /^\d{1,9}$/.test(v) ? Number(v) : undefined; };
@@ -20,7 +21,8 @@ function need(k) { const v = env(k, ""); if (!v) { console.error(`MISSING_ENV ${
   const sandbox = env("APPLY_VM_CHROMIUM_SANDBOX", "on") !== "off";
   const evidenceDir = env("APPLY_VM_EVIDENCE_DIR", "/var/lib/apply-vm/evidence");
   fs.mkdirSync(evidenceDir, { recursive: true, mode: 0o700 });
-  const browser = await pw.chromium.launch({ headless: true, chromiumSandbox: sandbox, ...(env("UPMORE_CHROMIUM_PATH") ? { executablePath: env("UPMORE_CHROMIUM_PATH") } : {}) });
+  // Denied hosts (LinkedIn, Indeed, Handshake) do not resolve in this browser, on any hop (parallel-apply.cjs, x-audit).
+  const browser = await pw.chromium.launch(denyLaunchOptions({ headless: true, chromiumSandbox: sandbox, ...(env("UPMORE_CHROMIUM_PATH") ? { executablePath: env("UPMORE_CHROMIUM_PATH") } : {}) }));
   const worker = createWorker({
     rpc: restRpc({ url, key }), browser, evidenceDir,
     workerId: env("APPLY_VM_WORKER_ID") || undefined, concurrency: num("APPLY_VM_CONCURRENCY"), perUser: num("APPLY_VM_PER_USER"),

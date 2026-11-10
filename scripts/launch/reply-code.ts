@@ -95,6 +95,9 @@ export const RELEASE_FLAG_PATHS = [
   "supabase/functions/_shared/career_inbox_followups.ts",
   // Release 9 E (proposal D-043): the contact connector's switches (CAREER_PEOPLE_SEARCH + CAREER_CONTACT_OUTREACH) are read here only.
   "supabase/functions/_shared/career_contact_pipeline.ts",
+  // D-049: the chat File card (CAREER_FILE_CARD) and the outbox's resolver for it.
+  "supabase/functions/_shared/file_card.ts",
+  "supabase/functions/_shared/channel_runtime.ts",
 ] as const;
 
 // Every reply-code path, repository-relative, sorted. Git pathspecs: a directory covers everything under it.

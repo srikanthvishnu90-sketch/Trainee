@@ -307,3 +307,29 @@ Pinned in `tests/architect/h2h-leftovers-20261110.test.ts`.
 - **Item 9 copy.** An answer keyed to one posting (`job:`, other than an essay) is "Saved for your <company> application
   only; it isn't reused for another employer", and its question no longer promises "Answer it once and I won't ask
   again". Answers that travel keep "I won't ask this again".
+
+## Tone gate (branch `ag/tone-gate`, 2026-11-10)
+
+The owner asked whether Trainee answers as concisely as Instinct, in the same tone. `tests/architect/instinct-tone-gate.test.ts`
+measures it: the same turns as above (A.2 as one thread, then B.6 continuations 1-5 in the head-to-head contexts) through the
+real handler, staged brain on the scripted model, each reply scored against Instinct's reply for that turn. Rules: prose (list
+items and bare links excluded) at most 1.2x Instinct's or Instinct's + 40; no internal words (the rubric's `internal` plus "the
+record", "host", "write is not confirmed", and "packet" unless the person said it); no `boilerplate_tail`; no "I can't" /
+"I couldn't" opener where Instinct's reply does the thing; `answers_first` reported. A.2 search turn 2 is not scored
+(Instinct's reply is its daily AI limit, which Trainee does not have). Bar: every turn within length, 0 internal, 0 filler,
+0 refusals; the turns still over the length bar are listed by name in the test's `OPEN`, asserted exactly.
+
+| | TONE-GATE |
+|---|---|
+| Before (trunk `9ce8fbd4`) | `turns=34 within_length=24/34 internal=0 filler=0 refusals=2 answers_first=33/34 mean_chars=227 vs instinct=202` |
+| After | `turns=34 within_length=32/34 internal=0 filler=0 refusals=0 answers_first=33/34 mean_chars=203 vs instinct=202` (the two open turns below) |
+
+What changed in product code: the resume task says the general-version caveat, the GPA conflict and the contact question in
+fewer words, and a correction no longer repeats the open questions; a bullet rewrite that fails its audit leads with the
+outcome ("It stays as written: ..."); "send it to Maya" asks "Which Maya do you mean, and where should I send the resume
+PDF?"; the send-choice question drops "Do you mean submit an application for"; the search list drops "Held to what you asked"
+when nothing was left out and "Ranked by ..." when one row is listed; the apply queue says a reason shared by several postings
+once; the no-packet reply is shorter; the eligibility answer opens "No, not confirmed yet" instead of "I can't say yet".
+
+Open (named in the test): A.2 resume turn 3, where Instinct's 102 characters neither re-send the file nor answer the link ask;
+C2 t3, the empty remote search, whose reply (R01 scope, R05 remote-only) is being rewritten on `ag/d054-fixes`.

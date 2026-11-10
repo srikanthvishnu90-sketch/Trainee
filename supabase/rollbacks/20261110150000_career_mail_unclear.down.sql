@@ -1,4 +1,4 @@
--- Reverses 20261110120000_career_mail_unclear.sql. Refuses while an unclear email is on record (the old kind check cannot
+-- Reverses 20261110150000_career_mail_unclear.sql. Refuses while an unclear email is on record (the old kind check cannot
 -- hold then); those rows are the person's mail record and are not deleted here: resolve them first, by hand.
 do $d$ begin
  if exists (select from public.career_mail_events where kind = 'unclear') then

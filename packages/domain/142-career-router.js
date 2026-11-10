@@ -2049,6 +2049,17 @@ const CareerRouter = (() => {
       const a = stash[i];
       if (a && a.pdf && typeof a.pdf.base64 === "string" && a.pdf.base64) { art = a; break; }
     }
+    // H2H leftovers 3 (docs/architect/INSTINCT-HEAD-TO-HEAD.md C3 t6, "Never mind, just send me the packet."): a packet asked
+    // for, with no document in the thread, was answered about a resume. No packet exists here: that is said, with what can be
+    // done (handlePacket prepares one for a role), and nothing is claimed sent.
+    if (!art && /\bpacket\b/.test(t) && !/\b(resume|cv|cover letter|pdf|docx)\b/.test(t)) {
+      const reply = compose({
+        headline: "There's no application packet in this chat yet, so there's nothing to send.",
+        facts: ["When you pick a role, I prepare its packet for you to review: the job and the resume for it. Nothing is submitted until you approve it."],
+        nextStep: "Which role should I prepare it for?",
+      });
+      return { intent: "career_packet_absent", reply, resultStatus: "awaiting_user", sends: 0, documents: [] };
+    }
     if (!art) {
       // No byte-carrying document exists on this thread: say exactly
       // that, in product voice, and offer the step that creates one.

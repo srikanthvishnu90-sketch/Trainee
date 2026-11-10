@@ -218,9 +218,11 @@ export function questionsText(
   const take = ask.slice(0, PER_TEXT), q = take[0];
   // An identity-number question is never asked by text, so it is not counted among the ones asked.
   const all = Math.max(total - (qs.length - ask.length), 1), rest = all - 1;
+  // H2H leftovers 4: an answer to a question one posting keeps (onePosting) is not reused elsewhere, so no "once" is promised.
+  const once = onePosting(q) ? `Your answer is for ${forWhere([q])}.` : "Answer it once and I won't ask again.";
   const head = all === 1
-    ? "One question only you can answer is holding up your applications. Answer it once and I won't ask again."
-    : `Question 1 of ${all} only you can answer, one at a time. Answer it once and I won't ask again.`;
+    ? `One question only you can answer is holding up your applications. ${once}`
+    : `Question 1 of ${all} only you can answer, one at a time. ${once}`;
   const foot = [
     "Just reply with your answer.",
     offerDraft(q) ? `For a written answer, say "draft 1" and I'll draft it from your confirmed facts for you to check first.` : "",
@@ -235,6 +237,25 @@ const said = (q: OpenQuestion, value: string) => {
   const v = q.kind === "essay" || value.length > 80 ? `"${value.slice(0, 60)}${value.length > 60 ? "..." : ""}" (kept word for word)` : value;
   return `${short}: ${v}`;
 };
+
+// H2H leftovers 4: an answer keyed to one posting (question_map.ts answerKey "job:": a self-identification answer, a question
+// about this job) is used for that application only, and is never reused for another employer. "I won't ask this
+// again" is said only of answers that travel. An essay is one posting's too, but its question names that employer and is
+// never asked again as it was, so it keeps the promise.
+const onePosting = (q: OpenQuestion) => q.key.startsWith("job:") && q.kind !== "essay";
+const forWhere = (qs: OpenQuestion[]) => {
+  const cs = [...new Set(qs.map((q) => q.company).filter((c): c is string => !!c))];
+  return cs.length === 1 ? `your ${cs[0]} application only` : qs.length === 1 ? "this application only" : "those applications only";
+};
+// The lines that open a reply after answers were saved: what travels, then what stays with one posting, each with its scope.
+function savedHead(items: { q: OpenQuestion; text: string }[], o: { drafted?: boolean } = {}): string[] {
+  const keep = items.filter((x) => !onePosting(x.q)), one = items.filter((x) => onePosting(x.q));
+  const saved = o.drafted ? "Saved, as drafted." : "Saved.";
+  return [
+    ...(keep.length ? [`${saved} I won't ask ${keep.length === 1 ? "this" : "these"} again:`, ...keep.map((x) => x.text)] : []),
+    ...(one.length ? [`${keep.length ? "Saved" : saved.replace(/\.$/, "")} for ${forWhere(one.map((x) => x.q))}; it isn't reused for another employer:`, ...one.map((x) => x.text)] : []),
+  ];
+}
 
 // The first open question, shown as the questions turn shows it (with its draft offers), and recorded as the one the
 // next message answers. Null when none is open.
@@ -323,7 +344,7 @@ export async function questionsTurn(
     return { reply: `Those questions are more than a day old, so nothing was saved. Say "what do you need from me" to see them again.`, status: "expired" };
   }
   const byId = new Map((await o.store.get(o.userId, shown.ids)).map((q) => [q.id, q]));
-  const saved: string[] = [], open: string[] = [];
+  const saved: string[] = [], open: string[] = [], savedQs: OpenQuestion[] = [];
   for (const [n, raw] of [...parts.entries()].sort((a, b) => a[0] - b[0])) {
     const q = byId.get(shown.ids[n - 1]);
     if (!q) { open.push(`${n}: that question is gone (the application was removed).`); continue; }
@@ -338,6 +359,7 @@ export async function questionsTurn(
     if (!c.ok) { open.push(`${n} ${c.why}.`); continue; }
     await o.store.answer(o.userId, q.id, c.value);
     saved.push(`${n}. ${said(q, c.value)}`);
+    savedQs.push(q);
     if (shown.drafts?.[q.id]) delete shown.drafts[q.id]; // their own words replace a draft they did not use
   }
   if (shown.drafts && saved.length) await o.store.setShown(o.userId, shown);
@@ -347,12 +369,11 @@ export async function questionsTurn(
   if (saved.length && !open.length && left > 0) {
     const next = await present(o, (shown.skipped ?? []).filter((id) => !shown!.ids.includes(id)));
     if (next) {
-      return { reply: [`Saved. I won't ask this again:`, ...saved.map((x) => x.replace(/^\d+\. /, "")), "", `Next: ${next}`].join("\n"), status: "answered_next" };
+      return { reply: [...savedHead(saved.map((x, i) => ({ q: savedQs[i], text: x.replace(/^\d+\. /, "") }))), "", `Next: ${next}`].join("\n"), status: "answered_next" };
     }
   }
   const reply = [
-    saved.length ? `Saved. I won't ask ${saved.length === 1 ? "this" : "these"} again:` : "Nothing was saved.",
-    ...saved,
+    ...(saved.length ? savedHead(saved.map((x, i) => ({ q: savedQs[i], text: x }))) : ["Nothing was saved."]),
     ...(open.length ? ["Still open:", ...open] : []),
     saved.length ? "They go on the forms the next time you prepare applications on your computer." : "",
     left > 0 && !open.length ? `${left} more question${left === 1 ? "" : "s"} waiting; say "what do you need from me" for ${left === 1 ? "it" : "them"}.` : "",
@@ -448,12 +469,11 @@ async function draftTurn(
     // One at a time: the draft saved, the next open question is asked in the same reply.
     if (!still && shown.ids.length === 1 && (await o.store.countOpen(o.userId)) > 0) {
       const next = await present(o, (shown.skipped ?? []).filter((x) => !shown.ids.includes(x)));
-      if (next) return { reply: ["Saved, as drafted. I won't ask this again:", said(q, c.value), "", `Next: ${next}`].join("\n"), status: "answered_next" };
+      if (next) return { reply: [...savedHead([{ q, text: said(q, c.value) }], { drafted: true }), "", `Next: ${next}`].join("\n"), status: "answered_next" };
     }
     return {
       reply: [
-        "Saved, as drafted. I won't ask this again:",
-        `${n}. ${said(q, c.value)}`,
+        ...savedHead([{ q, text: `${n}. ${said(q, c.value)}` }], { drafted: true }),
         "It goes on the form the next time you prepare applications on your computer.",
         still ? `${still} of the questions above ${still === 1 ? "is" : "are"} still open; answer by number as before.` : "",
       ].filter(Boolean).join("\n"),

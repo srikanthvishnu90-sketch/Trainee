@@ -21,7 +21,7 @@
 import { CareerProfile, CareerRender } from "./router_core.career.js";
 import { type Block, renderBlocks, splitDates } from "./career_resume_design.ts";
 import { auditRewrite } from "./career_tailor_rewrite.ts";
-import { CONTACT_QUESTION, resumeContact } from "./career_tailor.ts";
+import { contactQuestion, resumeContact } from "./career_tailor.ts";
 
 export const RESUME_TASK_INTENT = "career_resume_task";
 export const RESUME_CLARIFY_INTENT = "career_resume_clarify";
@@ -615,7 +615,9 @@ async function resumeTaskTurnInner(o: { message: string; ctx: any; userId: strin
   if (task.limits.includes("one_page") && out.fit.pages > 1) say.push(`It runs to ${out.fit.pages} pages even with the least relevant bullets off; I set nothing below 10 pt.`);
   const questions: [string, string][] = [];
   if (built.gpaConflict) questions.push(["gpa", `Your GPA is left off because your resume shows two values (${built.gpaConflict.join(" and ")}). Which one is right?`]);
-  if (built.contactMissing) questions.push(["contact", `Your name and contact details aren't on file, so the top shows placeholders. ${CONTACT_QUESTION}`]);
+  // H2H leftovers 1: the same question tailor_resume asks: only the piece the confirmed resume header lacks (its name prints).
+  const typed = profile?.basics?.name || profile?.basics?.email, top = typed ? { name: null, email: null } : resumeContact(profile, "confirmed");
+  if (built.contactMissing) questions.push(["contact", top.name || top.email ? `Your ${top.name ? "email" : "name"} isn't on file, so the top shows a placeholder for it. ${contactQuestion(top)}` : `Your name and contact details aren't on file, so the top shows placeholders. ${contactQuestion(top)}`]);
   if (built.unconfirmed) questions.push(["confirm", `These facts are still unconfirmed. Are they right as written?`]);
   const asking = /\bask me\b/.test(t) || ask === "make" && !prior;
   for (const [k, q] of questions) {

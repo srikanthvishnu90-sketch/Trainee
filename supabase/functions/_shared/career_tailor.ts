@@ -81,14 +81,21 @@ function withResumeHeader(p: any, from: any): any {
   if (h && typeof h === "object" && typeof h.name === "string" && h.name.trim() && typeof h.confirmed_at === "string" && h.confirmed_at) p.resume_header = clone(h);
   return p;
 }
-// The name and email at the top of the file: the ones typed for the resume, else (only when no name was typed) the header
-// the person confirmed with it. 123's headerOf rule, so what is checked here is what prints. contact "typed" takes only the
-// typed ones (prepare-ahead: the form needs the first name, last name and email as answers, and asks for them once).
+// The name and email at the top of the file: the ones typed for the resume, else the header the person confirmed with it,
+// piece by piece (H2H leftovers 1: a confirmed header with a name and no email kept its name, and only the email was asked).
+// 123's headerOf rule, so what is checked here is what prints. A header counts only once confirmed (its confirmed_at).
+// contact "typed" takes only the typed ones (prepare-ahead: the form needs the first name, last name and email as answers,
+// and asks for them once).
 // deno-lint-ignore no-explicit-any
 export function resumeContact(p: any, contact: "typed" | "confirmed" = "confirmed"): { name: string | null; email: string | null } {
-  const b = p?.basics || {}, h = contact === "confirmed" ? p?.resume_header : null;
-  if (!b.name && h && h.name) return { name: String(h.name), email: h.email ? String(h.email) : null };
-  return { name: b.name ? String(b.name) : null, email: b.email ? String(b.email) : null };
+  const b = p?.basics || {}, rh = contact === "confirmed" ? p?.resume_header : null;
+  const h = rh && typeof rh === "object" && rh.confirmed_at ? rh : null;
+  const name = b.name || h?.name || null, email = b.email || h?.email || null;
+  return { name: name ? String(name) : null, email: email ? String(email) : null };
+}
+// The question for exactly what is missing at the top of the resume: both, or the one piece.
+export function contactQuestion(top: { name: string | null; email: string | null }): string {
+  return !top.name && !top.email ? CONTACT_QUESTION : !top.email ? EMAIL_QUESTION : NAME_QUESTION;
 }
 
 const HEADING: Record<string, string> = { experience: "Experience", project: "Projects", education: "Education", leadership: "Leadership", certification: "Certifications" };
@@ -114,6 +121,8 @@ export function baseResume(profile: any): { sections: { heading: string; lines: 
 // Only what the person typed this turn (D-007): never the account email, never a guess. The email must appear exactly
 // (any case) and the name as typed (any case, spaces normalized).
 export const CONTACT_QUESTION = "What name and email should go at the top of your resume?";
+export const EMAIL_QUESTION = "What email should go at the top of your resume?";
+export const NAME_QUESTION = "What name should go at the top of your resume?";
 const EMAIL = /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.[A-Za-z]{2,24}$/;
 const NAME = /^[\p{L}][\p{L}' -]*[\p{L}]$/u;
 const squash = (s: string) => s.replace(/\s+/g, " ").trim();
@@ -124,12 +133,13 @@ const tokenIn = (hay: string, needle: string, edge: RegExp) => {
   }
   return false;
 };
-export function contactFromMessage(message: string, name: unknown, email: unknown): { ok: true; name: string; email: string } | { ok: false; error: string } {
+// o.only: the one piece typed this message (H2H leftovers 1: the other is already on the confirmed record and is not asked).
+export function contactFromMessage(message: string, name: unknown, email: unknown, o: { only?: "name" | "email" } = {}): { ok: true; name: string; email: string } | { ok: false; error: string } {
   const n = squash(String(name ?? "")), e = String(email ?? "").trim(), m = squash(String(message ?? ""));
-  if (n.length < 2 || n.length > 80 || !NAME.test(n)) return { ok: false, error: "the name must be 2 to 80 letters, spaces, hyphens or apostrophes" };
-  if (!EMAIL.test(e)) return { ok: false, error: "that is not a valid email address" };
-  if (!tokenIn(m, e, /[A-Za-z0-9._%+@-]/)) return { ok: false, error: "the person did not type that email in this message; they must type it themselves" };
-  if (!tokenIn(m, n, /\p{L}/u)) return { ok: false, error: "the person did not type that name in this message; they must type it themselves" };
+  if (o.only !== "email" && (n.length < 2 || n.length > 80 || !NAME.test(n))) return { ok: false, error: "the name must be 2 to 80 letters, spaces, hyphens or apostrophes" };
+  if (o.only !== "name" && !EMAIL.test(e)) return { ok: false, error: "that is not a valid email address" };
+  if (o.only !== "name" && !tokenIn(m, e, /[A-Za-z0-9._%+@-]/)) return { ok: false, error: "the person did not type that email in this message; they must type it themselves" };
+  if (o.only !== "email" && !tokenIn(m, n, /\p{L}/u)) return { ok: false, error: "the person did not type that name in this message; they must type it themselves" };
   return { ok: true, name: n, email: e };
 }
 
@@ -463,7 +473,16 @@ export async function tailorForPosting(o: {
   const clean = confirmedOnly(o.profile);
   if (!(clean.facts || []).some((f: any) => HEADING[f.kind])) return { ok: false, refused: "no_confirmed_facts", reason: "there are no confirmed experience, project or education facts on file to build a resume from", ms: ms() };
   const top = resumeContact(clean, o.contact ?? "confirmed");
-  if (!top.name || !top.email) return { ok: false, refused: "no_contact", reason: `your name and email are not on your profile yet, and an employer's system reads them from the top of the resume. Ask exactly: "${CONTACT_QUESTION}"`, ms: ms() };
+  if (!top.name || !top.email) {
+    // H2H leftovers 1: a piece the confirmed resume header holds is not asked again; only the missing one is. A name or email
+    // typed for the resume with the other missing is still asked as both (pinned: tests/architect/wo-028-tailor.test.ts WO-028/3).
+    const b = clean.basics || {};
+    const fromHeader = !b.name && !b.email ? top : { name: null, email: null };
+    const missing = !fromHeader.name && !fromHeader.email ? "your name and email are not on your profile yet, and an employer's system reads them"
+      : !fromHeader.email ? `your email is not on your profile yet (the name, ${top.name}, is from the resume you confirmed), and an employer's system reads it`
+      : "your name is not on your profile yet (the email is from the resume you confirmed), and an employer's system reads it";
+    return { ok: false, refused: "no_contact", reason: `${missing} from the top of the resume. Ask exactly: "${contactQuestion(fromHeader)}"`, ms: ms() };
+  }
   const persona = o.persona ?? null;
   const hidden = persona ? persona.hide.filter((id) => CareerProfile.getFact(clean, id)) : [];
   const picked = hidden.length ? withResumeHeader(CareerProfile.createProfile({ id: clean.id, basics: clean.basics, facts: clean.facts.filter((f: any) => !hidden.includes(f.id)) }), clean) : clean;

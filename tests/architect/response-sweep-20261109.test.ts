@@ -11,6 +11,7 @@
 // The run prints one line: RESPONSE SWEEP: <replies> replies, <rows> rows, <violations> violations.
 import assertNode from "node:assert/strict";
 import { checkReply, describe, type RubricInput } from "../../supabase/functions/_shared/reply_rubric.ts";
+import { anthropicWire } from "./helpers/anthropic_wire.ts";
 import { canRun, openWorld, ZONE } from "./helpers/response_world.ts";
 
 // ------------------------------------------------------------------------------------------------ handler rows (2, 3)
@@ -139,14 +140,12 @@ export const NOT_SCORED: [string, string][] = [
   ["5 CUT_NOTE (conversation.ts)", "a suffix appended after a cut, scored with the reply it ends in the handler rows"],
 ];
 
-// Violations a fix cannot reach without changing wording an existing test pins. Each waits on the architect's ruling
-// (RESPONSE-RULES: pinned wording that blocks a rule fix goes back to the architect). The sweep still counts and prints them;
-// it fails on any violation not listed here, and on a listed one that no longer happens (so the list only shrinks).
-export const BLOCKED: { row: string; rule: string; pin: string }[] = [
-  { row: "2a erase / stop / pause", rule: "channel_length", pin: "tests/architect/stop-pause-truth-20261109.test.ts:144-147 and :109-114 pin the four count lines and the hold/gap lines verbatim, about 700 characters before anything else" },
-  { row: "2a conversation / catch-all", rule: "answers_first", pin: "a bare thanks on a new thread is the unmatched fallback (140-career-reply.js FALLBACKS.unmatched, matched by FALLBACK_TEXT_RE and about 20 node tests); tests/career-textpath-catchall-reach-20261024.test.cjs:153 pins that the catch-all must not take it. In production the staged brain answers it." },
-];
-const blockedKey = (row: string, rule: string) => `${row}|${rule}`;
+// Rows production serves through the staged brain (career_staged.ts STAGED_BRAIN_INTENTS), not through a template
+// (architect ruling 2026-11-10 on #672): scored on the staged path, as production serves them. The scripted model's words are
+// the test's, so what this checks is that the turn reaches the model and nothing the code adds breaks the rubric. The
+// router-only reply is printed apart, as "not served in production", and is not counted.
+export const STAGED_ROWS = new Set(["2a conversation / catch-all"]);
+const STAGED_ANSWER = "Anytime — what role should I look for next?";
 
 interface Scored { row: string; kind: "handler" | "direct"; ask: string; reply: string; intent?: string | null; lines: string[] }
 
@@ -159,20 +158,39 @@ Deno.test({
   sanitizeResources: false,
   sanitizeOps: false,
   async fn() {
-    const scored: Scored[] = [];
+    const scored: Scored[] = [], notServed: Scored[] = [];
     for (const [row, ask, reply] of DIRECT_ROWS) scored.push(score(row, "direct", { ask, reply }));
     const skip = canRun();
     if (skip === "FAIL") throw new Error("needs Postgres 16 binaries in CI");
     if (skip) console.log(`${skip}: the handler rows were not run`);
     else {
-      const w = await openWorld(HANDLER_ROWS.length + 1);
+      let modelCalls = 0;
+      const w = await openWorld(HANDLER_ROWS.length + STAGED_ROWS.size + 1, {
+        model: (req) => anthropicWire(req, (chat: any) => {
+          modelCalls++;
+          return Response.json({ id: "chatcmpl-sweep", model: chat.model, choices: [{ index: 0, message: { role: "assistant", content: chat.response_format ? "{}" : STAGED_ANSWER }, finish_reason: "stop" }], usage: { prompt_tokens: 300, completion_tokens: 20 } });
+        }),
+      });
       try {
         for (const [row, resume, asks] of HANDLER_ROWS) {
           const p = await w.person({ resume });
           for (const ask of asks) {
             const r = await p.say(ask);
             assertNode.equal(r.status, 200, `${row}: ${ask}: HTTP ${r.status}`);
-            scored.push(score(row, "handler", { ask, reply: r.reply, intent: r.intent, timeZone: ZONE }));
+            const one = score(row, "handler", { ask, reply: r.reply, intent: r.intent, timeZone: ZONE });
+            if (STAGED_ROWS.has(row)) notServed.push(one); else scored.push(one);
+          }
+        }
+        Deno.env.set("CAREER_BRAIN", "staged");
+        Deno.env.set("ANTHROPIC_API_KEY", "sk-test-not-real");
+        for (const [row, resume, asks] of HANDLER_ROWS.filter(([row]) => STAGED_ROWS.has(row))) {
+          const p = await w.person({ resume });
+          for (const ask of asks) {
+            const before = modelCalls;
+            const r = await p.say(ask);
+            assertNode.equal(r.status, 200, `${row} (staged): ${ask}: HTTP ${r.status}`);
+            assertNode.ok(modelCalls > before, `${row} (staged): "${ask}" never reached the model (${r.intent}): ${r.reply}`);
+            scored.push(score(`${row} (staged)`, "handler", { ask, reply: r.reply, intent: r.intent, timeZone: ZONE }));
           }
         }
         assertNode.deepStrictEqual(w.outbound, [], "no request left the machine");
@@ -185,12 +203,8 @@ Deno.test({
     console.log(`RESPONSE SWEEP: ${scored.length} replies, ${rows} rows (${NOT_SCORED.length} listed not scored), ${violations} violations in ${bad.length} replies`);
     const out = Deno.env.get("RESPONSE_SWEEP_OUT");
     if (out) Deno.writeTextFileSync(out, JSON.stringify({ replies: scored.length, rows, violations, scored }, null, 1));
-    const seen = new Set(bad.flatMap((x) => x.lines.map((l) => blockedKey(x.row, l.split(":")[0]))));
-    const allowed = new Set(BLOCKED.map((b) => blockedKey(b.row, b.rule)));
-    const unblocked = bad.flatMap((x) => x.lines.filter((l) => !allowed.has(blockedKey(x.row, l.split(":")[0]))).map((l) => `[${x.row}] ${l}`));
-    console.log(`RESPONSE SWEEP: ${violations} violations, ${violations - unblocked.length} of them blocked by pinned wording (BLOCKED), ${unblocked.length} not blocked`);
-    assertNode.deepStrictEqual(unblocked, [], "rubric violations a template fix can reach (listed above)");
-    // Only when the handler rows ran (CI always runs them): a BLOCKED entry that no longer happens is removed from the list.
-    if (!skip) assertNode.deepStrictEqual(BLOCKED.filter((b) => !seen.has(blockedKey(b.row, b.rule))), [], "BLOCKED entries that no longer happen: remove them");
+    for (const s of notServed) console.log(`[not served in production: ${s.row}, router only] "${s.ask}" (${s.intent}): ${s.reply.replace(/\n/g, " / ").slice(0, 200)}\n  ${s.lines.join("\n  ") || "no violations"}`);
+    console.log(`RESPONSE SWEEP (router only, not served in production): ${notServed.reduce((n, s) => n + s.lines.length, 0)} violations in ${notServed.length} replies, not counted`);
+    assertNode.equal(violations, 0, `${violations} rubric violations (listed above)`);
   },
 });

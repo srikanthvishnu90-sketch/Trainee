@@ -177,12 +177,33 @@ export function workflowReply(o: { stop: StopControl; hold: Hold; counts: Counts
   return lines.join("\n");
 }
 
+// The same counts as countLines, said once for a pause (RESPONSE-RULES R2: a two-word ask gets about 600 characters): what
+// already went out, what is still waiting, what is unverified, and each record that could not be read. Zeros are not listed.
+export function pauseCountLine(c: Counts): string {
+  const out: string[] = [], waiting: string[] = [], unsure: string[] = [], unread: string[] = [];
+  const add = (to: string[], k: number, one: string, many: string) => { if (k > 0) to.push(n(k, one, many)); };
+  if (c.drafts) { add(out, c.drafts.out, "outreach email", "outreach emails"); add(waiting, c.drafts.waiting, "draft waiting for your yes", "drafts waiting for your yes"); add(waiting, c.drafts.approved, "approved draft", "approved drafts"); add(unsure, c.drafts.sending, "draft sending", "drafts sending"); }
+  else unread.push("outreach drafts");
+  if (c.emails) { add(out, c.emails.out, "email from the send rail", "emails from the send rail"); add(waiting, c.emails.queued, "queued email", "queued emails"); add(unsure, c.emails.sending, "email sending", "emails sending"); }
+  else unread.push("the send rail");
+  if (c.applications) { add(out, c.applications.submitted, "application confirmed by the employer", "applications confirmed by the employer"); add(waiting, c.applications.waiting, "application waiting", "applications waiting"); add(waiting, c.applications.inProgress, "application in progress", "applications in progress"); add(unsure, c.applications.uncertain, "application with the outcome unknown", "applications with the outcome unknown"); }
+  else unread.push("applications");
+  if (c.actions) { add(out, c.actions.done, "follow-up or call invite done", "follow-ups and call invites done"); add(waiting, c.actions.waiting, "follow-up or call invite waiting for your yes", "follow-ups and call invites waiting for your yes"); add(waiting, c.actions.approved, "approved follow-up or call invite", "approved follow-ups and call invites"); add(unsure, c.actions.running, "follow-up or call invite being carried out", "follow-ups and call invites being carried out"); }
+  else unread.push("follow-ups and call invites");
+  const parts: string[] = [];
+  parts.push(out.length ? `Already out: ${out.join(", ")}.` : "Nothing had gone out.");
+  parts.push(waiting.length ? `Still waiting: ${waiting.join(", ")}.` : "Nothing was waiting.");
+  if (unsure.length) parts.push(`Outcome not yet known: ${unsure.join(", ")}.`);
+  if (unread.length) parts.push(`I could not read ${unread.join(", ")}, so those counts are unknown.`);
+  return parts.join(" ");
+}
+
 export function pauseReply(o: { counts: Counts }): string {
   return [
     "Paused your account: the pause is saved and I read it back.",
     `While it is on, nothing new starts, and these refuse to send: ${PAUSE_HOLDS.join("; ")}.`,
     `Not covered by the pause today: ${PAUSE_GAPS.join("; ")}.`,
-    ...countLines(o.counts),
+    pauseCountLine(o.counts),
     "It stays on until you text \"resume career work\".",
   ].join("\n");
 }

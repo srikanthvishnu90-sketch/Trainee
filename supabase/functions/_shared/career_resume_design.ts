@@ -63,6 +63,38 @@ export function splitDates(text: string): { text: string; right?: string } {
   const m = TRAILING_DATES.exec(String(text).trim());
   return m ? { text: m[1], right: m[2] } : { text: String(text) };
 }
+// REVERSE CHRONOLOGICAL (r-resume-design, 2026-11-10; RESUME-TEMPLATES E5, APP-LAYER-15-FIXES A.4): the tailor ranks
+// entries by fit to the posting, which put a 2014 role above a 2019 one on 16 of 162 loop files. Within each section whose
+// entries ALL end in dates, the entries (each with its own bullets) go newest start first; ties keep the tailor's order. A
+// section with an undated entry is left as it is. Lines are moved whole, never changed.
+const MONTH_N: Record<string, number> = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+export function entryStart(text: string): number | null {
+  const right = splitDates(String(text ?? "")).right;
+  const m = right ? /^(?:([A-Za-z]{3})[a-z]*\.? )?(\d{4})/.exec(right) : null;
+  return m ? Number(m[2]) * 12 + (m[1] ? MONTH_N[m[1].toLowerCase()] ?? 0 : 0) : null;
+}
+// deno-lint-ignore no-explicit-any
+export function newestFirst(resume: any): any {
+  if (!Array.isArray(resume?.sections)) return resume;
+  let moved = false;
+  // deno-lint-ignore no-explicit-any
+  const sections = resume.sections.map((s: any) => {
+    // deno-lint-ignore no-explicit-any
+    const blocks: any[][] = [];
+    for (const l of s.lines || []) { if (l?.type === "entry" || !blocks.length) blocks.push([l]); else blocks[blocks.length - 1].push(l); }
+    const entries = blocks.filter((b) => b[0]?.type === "entry");
+    if (entries.length < 2 || blocks[0][0]?.type !== "entry" || entries.some((b) => entryStart(b[0].text) === null)) return s;
+    const keyed = blocks.map((b, i) => ({ b, i, k: entryStart(b[0].text)! }));
+    keyed.sort((x, y) => y.k - x.k || x.i - y.i);
+    if (keyed.every((x, i) => x.i === i)) return s;
+    moved = true;
+    return { ...s, lines: keyed.flatMap((x) => x.b) };
+  });
+  if (!moved) return resume;
+  // deno-lint-ignore no-explicit-any
+  return { ...resume, sections, lines: sections.flatMap((s: any) => (s.lines || []).filter((l: any) => l.type !== "note" && l.type !== "gap").map((l: any) => ({ ...l, section: s.heading }))) };
+}
+
 // deno-lint-ignore no-explicit-any
 export function traineeBlocks(resume: any): Block[] {
   return ((CareerRender as any).sourceLines(resume) as { text: string; kind: string }[]).map((l) => {

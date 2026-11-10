@@ -342,15 +342,32 @@ export const AUTH_FACTS = new Set(["work_authorization", "sponsorship", "us_pers
 // WO-053: work rights "in the country where this job is located" (or "...in which you are applying") are the person's US
 // ones only when the posting's own location is in the US; abroad or unsettled, asked.
 export const RELATIVE_PLACE = /\b(country|location)\b.{0,60}\b(this|the) (job|role|position|opportunity|vacancy)\b|\b(country|location)\b.{0,40}\b(you are|you're|you have been|you've been|are you) apply|\b(country|location) (in which|to which|for which|where) you (are )?apply|\bstated location of this role\b|\bin this country\b/i;
-// Interim ruling (architect, 2026-11-10, pending the owner): a date of birth is asked only when the employer's form requires
-// it, per application, and is never kept for reuse or guessed. Keyed by its wording, one answer filled the same question at
-// every later employer; keyed by this posting, it is this application's answer only.
-export const DATE_OF_BIRTH = /\b(?:date of birth|birth ?date|day of birth|dob|d\.o\.b\.?)\b/i;
+// a-sensitive (interim ruling, 2026-11-10): a date of birth is asked only when the form requires it, for that application,
+// and never stored for reuse: its answer is the posting's alone (answerKey `job:`), never a wording that travels.
+// Interim ruling (architect, 2026-11-10, pending the owner): keyed by its wording, one answer filled the same question at
+// every later employer; keyed by this posting, it is this application's answer only. One pattern holds both lists of wordings.
+export const BIRTH_DATE = /\b(?:date of birth|birth ?date|day of birth|dob|d\.o\.b\.?|date de naissance|fecha de nacimiento|geburtsdatum)\b/i;
+export const DATE_OF_BIRTH = BIRTH_DATE;
+// a-sensitive: the person's own "prefer not to say", in any of its usual wordings (the whole answer, nothing more), and an
+// employer's option that offers it ("Decline to self-identify", "I do not want to answer", "Prefer not to answer").
+export const DECLINE_ANSWER = /^\s*(i\s*)?(would\s+|'d\s+)?(prefer not to (say|answer|disclose|specify|identify|self[- ]identify)|rather not (say|answer)|decline( to (answer|state|disclose|specify|self[- ]identify))?|do not wish to (answer|disclose|self[- ]identify)|don'?t wish to (answer|disclose)|choose not to (answer|disclose|identify|self[- ]identify)|do not want to answer|don'?t want to answer)\s*[.!]?\s*$/i;
+export const DECLINE_OPTION = /\bdecline\b|\bprefer not\b|\bdo(?: not|n'?t) wish\b|\bchoose not\b|\bnot to (?:answer|disclose|say|identify|specify|self[- ]identify)\b|\bi do(?: not|n'?t) want to (?:answer|disclose|identify|self)/i;
+// The one option a decline lands on: exactly one offered, else none (the person is asked).
+export function declineOption<T extends { label: string }>(answer: string, options: T[]): T | null {
+  if (!DECLINE_ANSWER.test(String(answer ?? ""))) return null;
+  const d = options.filter((o) => DECLINE_OPTION.test(String(o.label)));
+  return d.length === 1 ? d[0] : null;
+}
+// Release item 9 loop (tests/architect/loop-09-memory-apply.test.ts): what the person was PAID before ("What was your salary at
+// your previous job?", "Salary history") is theirs to give to each employer, as a date of birth is. Keyed by its wording, the
+// first employer's answer filled the same question at every later one without asking. career_apply.ts PAY_HISTORY is this
+// same pattern.
+export const PAY_HISTORY_ASKED = /\b(salary|pay|compensation|wage)s? histor|\b(previous|prior|past|last|former|most recent)\b[^?.]{0,30}\b(salary|pay|compensation|wage|earnings)\b|\b(salary|pay|compensation|wage)\b[^?.]{0,40}\b(previous|prior|past|last|former) (job|position|role|employer)/i;
 export function answerKey(q: Question, jobId: string, o: { haveFact?: boolean; here?: boolean } = {}): string {
   const m = mapQuestion(q);
   const words = norm(q.label);
   const job = `job:${h16(`${jobId}\n${words}`)}`, wording = `label:${h16(words)}`;
-  if (DATE_OF_BIRTH.test(String(q.label ?? ""))) return job;
+  if (BIRTH_DATE.test(String(q.label ?? "")) || PAY_HISTORY_ASKED.test(String(q.label ?? ""))) return job;
   if (m.kind === "fact") {
     // ROUND 4 (2026-11-05): a self-identification answer (gender, race, ethnicity, veteran or disability status) is given to
     // one employer (extension apply_core.ts staysWithPosting). Kept as the one `fact:eeo`, a "No" to "Do you have a

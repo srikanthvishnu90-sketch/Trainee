@@ -13,12 +13,15 @@
 //   paused        the owner switched the AI off for a while (MODEL_BUDGET_PAUSED or its database twin)
 //   unchecked     the budget could not be read, so no call was made
 //   rate_limit    the AI provider refused for rate (HTTP 429) or was overloaded (529); its retry-after, when it gave one
-// Any other model failure is an outage, not a limit, and is answered as before. Nothing here changes any limit.
+// Any other model failure is an outage, not a limit (stop "outage", below): the router answers when it has a real intent for
+// the message, else the turn is held the same way (architect amendment, r-states 2026-11-10). Nothing here changes any limit.
 import { ModelBudgetBlockedError, ModelUnavailableError } from "./model_calls.ts";
 import { BUDGET_ERROR_TYPE, BUDGET_TIME_ZONE, chicagoDay } from "./model_budget.ts";
 import type { PersonZone } from "./person_zone.ts";
 
-export type LimitStop = "global" | "budget_day" | "budget_after" | "budget_before" | "paused" | "unchecked" | "rate_limit";
+// outage: not a limit (stopOfError never returns it); the model call failed. Architect amendment (r-states, 2026-11-10): the
+// turn is held the same way, so the router's catch-all never answers a different question.
+export type LimitStop = "global" | "budget_day" | "budget_after" | "budget_before" | "paused" | "unchecked" | "rate_limit" | "outage";
 export const HELD_INTENT = "career_limit_held";
 
 export function stopOfError(e: unknown): LimitStop | null {
@@ -77,14 +80,31 @@ export function nextStepOf(stop: LimitStop, zone: PersonZone | null, retryAt: nu
     case "budget_before": return `Trainee's AI budget hasn't opened yet. Once it opens, say "continue" and I'll pick it up.`;
     case "paused": return `Trainee's AI is switched off for a short while. Say "continue" later and I'll pick it up.`;
     case "unchecked": return `I couldn't check Trainee's AI budget, so I made no AI call. Say "continue" later and I'll pick it up.`;
+    case "outage": return `The AI service failed on this one (an error on its side, not a limit). Say "continue" in a minute and I'll pick it up.`;
   }
 }
 
-// The reply in place of an answer the AI could not give: the ask in the person's words, the next step, nothing applied for.
+// The kept task in a few words of the person's own ask, never a verbatim echo and never with a question mark (coordinator
+// ruling 2026-11-10, r-audit #706: R2 no echo; an echoed "?" mid-reply also buried the decision, R10).
+export function taskOf(message: string): string {
+  const raw = String(message ?? "").replace(/\s+/g, " ").trim();
+  const t = raw.toLowerCase();
+  const name = (/\b(?:at|about|on|for|with|to|of)\s+((?:[A-Z][\w&'.-]*)(?:\s+[A-Z][\w&'.-]*){0,3})/.exec(raw)?.[1]
+    ?? /\b(?:my|the|a|an|include)\s+((?:[A-Z][\w&'.-]*)(?:\s+[A-Z][\w&'.-]*){0,3})/.exec(raw)?.[1] ?? "").replace(/[.,!?;:]+$/, "");
+  const of = name && !/^(?:I|AI|Trainee)$/.test(name) ? `${name} ` : "";
+  if (/\bfollow(?:ing)?[- ]?up\b/.test(t)) return `your ${/\binterview\b/.test(t) ? "interview " : ""}follow-up question`;
+  if (/\b(?:interview|prep(?:are)?)\b/.test(t)) return `your ${of}interview prep`;
+  if (/\b(?:qualify|eligib\w*|requirements)\b/.test(t)) return `your eligibility question${of ? ` about ${of.trim()}` : ""}`;
+  if (/\b(?:draft|write|note|message|email|intro)\b/.test(t)) return `the message${of ? ` to ${of.trim()}` : " draft"}`;
+  if (/\b(?:resume|cv)\b/.test(t)) return "your resume edit";
+  if (/\b(?:research|tell me about|like to work|brief|why not|why didn'?t|include)\b/.test(t)) return of ? `your question about ${of.trim()}` : "your research question";
+  if (/\b(?:find|search|look(?:ing)? for|jobs?|roles?|internships?|openings?|positions?)\b/.test(t)) return "your job search";
+  return of ? `your question about ${of.trim()}` : "your last request";
+}
+
+// The reply in place of an answer the AI could not give: the kept task named, the next step, nothing applied for.
 export function heldReply(message: string, stop: LimitStop, zone: PersonZone | null, retryAt: number | null = null): string {
-  const ask = String(message ?? "").replace(/\s+/g, " ").trim();
-  const said = ask.length > 120 ? `${ask.slice(0, 117).replace(/\s+\S*$/, "")}...` : ask;
-  return `I couldn't finish this without the AI: "${said}". I kept it. ${nextStepOf(stop, zone, retryAt)} Nothing was applied for, and searching postings still works now.`;
+  return `I couldn't finish ${taskOf(message)} without the AI: it is kept. ${nextStepOf(stop, zone, retryAt)} Nothing was applied for, and searching postings still works now.`;
 }
 
 // The task a limit stopped, kept on the thread (discovery.heldAtLimit), and the message that resumes it, once a minute has

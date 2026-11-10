@@ -27,7 +27,7 @@ Plus five rules that apply to every surface (D.4):
 | R6 | No internal vocabulary: no "runner", "parse check PASS", "record", queue codes, ids, "as of" dates or flag names. | `internal`; `tests/architect/reply-jargon-guard.test.ts` |
 | R7 | Times are given in the person's own zone, with the real time ("resets at 6 pm Chicago time"), never UTC or a stale date. | `time_zone`; `tests/architect/r10-wo-d-limits-replay.test.ts` |
 | R8 | At most one apology, and never again on the next turn. Repeating a failure in new words is not progress (B.7). | `apology_loop` |
-| R9 | No progress bubble that says nothing changed. One interim message is allowed only when work takes long enough to need one, and the next reply must hold the result or a concrete blocker (B.6 continuation 2, turn 1). | GAP: the rubric does not see interim bubbles |
+| R9 | No progress bubble that says nothing changed. One interim message is allowed only when work takes long enough to need one, and the next reply must hold the result or a concrete blocker (B.6 continuation 2, turn 1). Section 3.5 gives the rules in full. | `tests/architect/r-states-bubbles-loop.test.ts` (every bubble scored through the real webhook and handler); `tests/architect/telegram-typing-ack.test.ts`; `tests/architect/f13-staged-brain-handler.test.ts` (architect amendments, 2026-11-10). |
 | R10 | The reply ends at the decision. If the person must choose, that choice is the last sentence and it is answerable in a word or a number. | `ends_at_decision` |
 
 ---
@@ -57,8 +57,13 @@ do. "File" names the File family in `supabase/functions/_shared/file_family.ts` 
 | Draft a message, then restyle it | The full draft each time, changed only in style. | Recipient state and attachment name. | Invent a meeting, referral or relationship. | F-12 |
 | Company research ("Stripe analyst interview") | Ask for the team if it changes the answer; otherwise the thesis first, then sourced facts, then questions to ask. Label interpretation as interpretation; keep volume distinct from revenue and a forecast distinct from a result. | Sources beside facts; dated recent items. | A list of links with no synthesis; an invented initiative, quote or metric (E.5). | F-01 / research brief |
 | "Does this mean I qualify?" | "No. The inspected page has a specific graduation window and office locations. I have not confirmed your graduation date…" | What is unknown. | Imply eligibility. | none |
-| Stop or pause ("pause everything") | The state actually reached, read back: "I paused your account: [what stopped, what was already sent]." If the state cannot be read: "I have not paused your account. I could not read the queue's own records…" | Real state. | Claim a global pause that did not happen (F.3). | none |
-| AI-answer limit reached | "I hit the daily AI-answer limit, so I cannot finish this search right now. It resets at [time, the person's zone] today; I have not applied anywhere." | What stopped, the kept task, the real reset time. | Unrelated templates or old dates (E.6 50). | none |
+| Stop or pause ("pause everything") | The state actually reached, read back: "I paused your account: [what stopped, what was already sent]." If the state cannot be read: "I couldn't pause everything yet, because I couldn't check what has already gone out or what is waiting, so that is unverified…" (plain words, coordinator rulings 2026-11-10) | Real state. | Claim a global pause that did not happen (F.3). | none |
+| AI-answer limit reached | "I couldn't finish your [what the ask was about, never the ask word for word] without the AI: it is kept. Trainee's AI budget for today is used up. It resets at midnight Chicago time; say "continue" after that and I'll pick it up. Nothing was applied for, and searching postings still works now." | What stopped, the kept task, the real reset time in the person's zone, and what still works (E6). The day's cap resets when the budget day turns (midnight US Central, said in the person's zone: "which is 10 PM Los Angeles time"). A provider refusal gives the time only when the provider gave a retry-after. The $70 total and the pause have no reset time, so none is given; the next step is the owner's approval or "later". UTC only when the zone is unknown, and then the reply says so. | Unrelated templates, old dates, or a made-up time (E.6 50). | none; `limit_stop.ts`; `tests/architect/r10-wo-d-limits-replay.test.ts`, `tests/architect/r-states-bubbles-loop.test.ts`; no verbatim echo of the ask (#706) |
+| A turn that runs long | One interim after 6 s that says what Trainee is doing ("on it — looking for roles now"), then the result. | Exactly one interim, then the result or a named blocker. | A second interim; an interim on a fast turn; an interim that claims a result. | none |
+| The model fails (outage) | The router answers only when it has a real intent for this message. Otherwise: "I couldn't finish this without the AI: "[the ask]". I kept it. The AI service failed on this one (an error on its side, not a limit). Say "continue" in a minute and I'll pick it up." | What stopped, the kept task, one next step. | The router's catch-all answering a different question (architect amendment, 2026-11-10). | none |
+| agent-chat fails after the interim | "I couldn't finish "[the ask]": Trainee hit an error on its side, so I can't confirm how far it got. Send it again and I'll retry." A second failure in a row is said as the second. A fast failure with no interim keeps "I couldn't answer that just now". | The blocker, the ask, no claim about what got done, one next step. | The bare "couldn't answer" after "on it". | none |
+| The turn runs past 2 minutes | "I couldn't finish this in time: it ran past 2 minutes, so I stopped waiting, and I can't confirm how far it got. Send it again and I'll retry." A second time-out in a row: "That ran past 2 minutes again…" with one way to make it finish. | What stopped; that the outcome is unconfirmed (D-024). | "I couldn't answer that just now"; the same words for the second failure. | none |
+| A batch partly fails | The yes: "N approved exactly as shown; M of the T not sent, each below with why", one line per item. The closeout, from the records: each item in its one state (section 3.5), the held one with its one question. | Every item's real state; the items the blocker does not touch go ahead (E6). | One failure holding back the rest; a failed item shown as sent. | F-10 |
 | Off-topic or small talk | One plain sentence, then back to the open decision if one exists. | Nothing else. | A menu of capabilities. | none |
 
 ---
@@ -98,6 +103,36 @@ Kicker, title, a freshness line with real counts ("Updated 9:40 AM - 14 ready to
 three state chips, one button ("Review roles"), and the caption "Opens your private File - nothing is submitted from chat."
 The chat bubble after it names the exact decision ("Two roles need one answer from you. The File shows exactly which.").
 
+### 3.5 Progress bubbles and state messages in chat (R9, C.24)
+
+Every message a person sees counts, not only the final reply. `tests/architect/r-states-bubbles-loop.test.ts` drives slow
+tools, a time-out, every limit, a provider error and a partly failed batch through the Telegram webhook, the real inbound core
+and the real agent-chat handler, and scores each bubble. Its bar is 0 on each count below.
+
+| Count | Rule |
+|---|---|
+| empty | No bubble without words. |
+| repeated | No bubble twice in a turn. An interim is never the reply. The same interim and the same reply as the turn before means nothing changed, so a failure that repeats is said as repeated. |
+| extra | At most one interim a turn, even when a file is read first. |
+| early | No interim on a turn that finishes inside the 6 s budget (`FAST_ACK_MS`). |
+| hollow | After an interim, the reply holds the result or names what stopped. "I couldn't answer that just now" is not a blocker. |
+| no_reset | A daily-limit reply gives the real reset time in the person's zone. A limit with no known reset gives no time. UTC never goes to a person whose zone is known. |
+| not_kept | A limit reply says the task is kept and what still works (E6). |
+
+The chat words for each C.24 state:
+
+| State | What the chat says | Never | Enforcement |
+|---|---|---|---|
+| Loading | The one interim: what Trainee is doing (`ackFor`). | A result, a count, or "one sec". | `telegram-typing-ack.test.ts`; the loop |
+| Empty | The scope checked and one specific change (section 2, empty search). | A bare "widen the search". | `r10-files-shell.test.ts` |
+| Needs input | One fact, by name, with why it matters; the prepared draft stays (E3, E4). | Two questions, or a discarded draft. | `r10-fix-12-review.test.ts` (pending) |
+| Prepared | Ready for review, not sent. | "Submitted" or "done". | `wo-g-application-review.test.ts` |
+| In progress | "approved; it is sent next" (`career_apply_cards.ts` RESULT). | A green badge, or "sent" before the send. | `mass-submit-handler-pg.test.ts`; the loop's batch test |
+| Uncertain | Sent but not confirmed, with the proof to look for; no blind retry. | "Confirmed" from a page alone. | `wo-g-batch-closeout-pg.test.ts` |
+| Confirmed | Only with the employer's email (`email_confirmed_at` and the mail hash). | A page reference alone (ruling 13-Obs). | `apply-outcomes.test.ts` |
+| Error | The step that failed and what is unconfirmed (time-out, outage, a file not made). | "Attached" with no file; "couldn't answer" with no cause. | the loop; `channel-inbound.test.ts` |
+| Expired | Why it lapsed: the card or the posting changed or went out of date, so the old yes does not cover it. | Sending on an old yes. | `wo-022-cards.test.ts` (stale and out-of-date cards); `mass-submit-handler-pg.test.ts` |
+
 ---
 
 ## 4. Making any action easy
@@ -109,7 +144,7 @@ The chat bubble after it names the exact decision ("Two roles need one answer fr
 | E3 | A question is narrow: one fact, by name, with why it matters ("Graduation date needed: the posting requires December 2027 or later"). Two concrete choices beat an open question. | `blocker_named`; GAP for the "why it matters" clause |
 | E4 | Asking never discards work: the prepared draft stays visible while one field is missing (C.24 Needs input). | `tests/architect/pending/r10-app-layer/r10-fix-12-review.test.ts` |
 | E5 | Applying needs only a chat message and a yes; the cloud browser does the rest. Nothing is downloaded or installed (D-050). An employer account is created only after the yes to that exact application (D-051, pending the owner's wording). | `supabase/functions/_shared/submit_capability.ts` (host list in #666) |
-| E6 | Work that does not depend on a blocker keeps moving; the reply says so. | GAP |
+| E6 | Work that does not depend on a blocker keeps moving; the reply says so. At a limit the reply keeps the task and says what still works ("searching postings still works now"); in a batch the items a question does not hold are sent and each held one is named with its question. | `not_kept` in `tests/architect/r-states-bubbles-loop.test.ts` (live at every limit); the batch test there over `answerText` and `batchCloseoutText`; `tests/architect/wo-g-batch-closeout-pg.test.ts` |
 | E7 | A link in chat is a File link or an inspected employer link. No bearer link is sent when files are attached (ruling on #634). | `tests/architect/r9-resume-fit-send-20261108.test.ts` |
 
 ---
@@ -142,8 +177,9 @@ Nothing comes after the decision: no tails, no offers of more help, no capabilit
    payload hash the page showed (a stale hash is a 409 that reads back both approval ids), and Check status reads the record.
    Measured by `tests/architect/files-review-live.test.ts` (dead 0, unserved 0, C.1 0, right and stale hash).
 3. E2 numbered references across a constraint change. Closed 2026-11-10: `tests/architect/ask-to-queue-20261110.test.ts`.
-4. R9 interim bubbles: the rubric sees only the final reply.
-5. E6 parallel progress after a blocker.
+4. R9 and E6 are closed (sections 3.5 and 4): the loop scores 0 on every count. Architect amendments of 2026-11-10 changed two
+   pinned assertions: after an interim, a failure names what stopped (`telegram-typing-ack.test.ts`); a model outage is held,
+   never answered by the router's catch-all (`f13-staged-brain-handler.test.ts`).
 
 A rubric sweep over every templated reply in `RESPONSE-LAYER.md` sections 2 to 6 is the measurement:
 `tests/architect/response-sweep-20261109.test.ts` (46 inventory rows, 99 replies, the real handler on Postgres plus the fixed
@@ -151,6 +187,12 @@ constants a chat turn cannot reach). Baseline 63 violations in 51 replies; now 0
 brain (a bare "thanks" on a new thread) is scored on the staged path, as production serves it; its router-only reply is printed
 apart as "not served in production" (architect ruling 2026-11-10). Each violation becomes a fix in the file that writes the
 text, never an exception added to the rubric.
+
+The 1,000-ask battery extends the sweep to the section 2 table (`tests/architect/response-battery-20261110.test.ts`, asks from
+`tests/architect/helpers/ask_battery.ts`, seed 20261110): every intent row in varied phrasings, typos, two intents in one
+message, corrections (role, place, date, recipient; R3), off-topic asks and asks sent while the AI is switched off. Each reply
+is scored with `checkReply` and the row's Must and Never columns. Staged brain with a scripted model (targets clean on their
+own): baseline 123 rubric violations and 3 Never hits; bar 0 and 0. Router only is a recorded ceiling (baseline 513 and 18).
 
 Gap 1 now has its battery: `tests/architect/response-b6-replay-20261109.test.ts` replays B.6 continuations 1 to 5 turn by turn.
 With the staged brain answering as the spec's target replies, the product delivers 0 rubric violations and 0 carry failures

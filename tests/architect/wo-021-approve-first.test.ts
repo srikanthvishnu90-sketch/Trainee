@@ -56,7 +56,11 @@ Deno.test("WO-021/1 a prepared application carries every answer on its card and 
   eq(r.payload.privacy_epoch, 3);
   eq(r.payload.expires_at, "2026-10-21T00:00:00.000Z");
   eq(r.hash, await hashApplyPayload(r.payload), "the queue's approval is the hash of exactly this payload");
-  for (const f of evidence.fields) assert(r.card.some((l) => l === `${f.label}: ${f.value}`), "card shows " + f.label);
+  // architect amendment, D.4 6 source label (WO-122): the reused work-rights answer says where it came from
+  for (const f of evidence.fields) {
+    const from = f.name === "q1" ? " (from your confirmed facts)" : "";
+    assert(r.card.some((l) => l === `${f.label}: ${f.value}${from}`), "card shows " + f.label);
+  }
   eq(r.card.filter((l) => l.startsWith("Resume")).length, 1, "the resume appears once, by name");
   assert(
     r.card.some((l) => l.includes("set by the employer's page") && l.includes("accountId")),

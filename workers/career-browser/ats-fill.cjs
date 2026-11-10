@@ -22,7 +22,8 @@ const norm = (s) => String(s == null ? "" : s).toLowerCase().replace(/[*✱]/g, 
 function EXTRACT() {
   const squash = (s) => String(s || "").replace(/\s+/g, " ").trim();
   const clean = (s) => squash(s).replace(/\(required\)/i, "").replace(/\s*[*✱]+\s*$/, "").replace(/\s*[*✱]+\s*$/, "").trim();
-  const scope = document.querySelector("form") || document.body;
+  // The form the runner chose (data-upmore-form, the one with its Submit), else the first form: never a sign-in form beside it.
+  const scope = document.querySelector("form[data-upmore-form]") || document.querySelector("form") || document.body;
   // Every match under a root, in document order, descending into open shadow roots (SmartRecruiters' components).
   const deepAll = (root, sel) => { const out = []; const walk = (n) => { for (const c of n.children) { if (c.matches(sel)) out.push(c); if (c.shadowRoot) walk(c.shadowRoot); walk(c); } }; walk(root); return out; };
   const rootOf = (el) => (el.getRootNode ? el.getRootNode() : document);
@@ -95,6 +96,8 @@ function EXTRACT() {
     // the site's own shortcut, not a question. Neither is a question we fill.
     if (el.closest(".iti__country-container, .iti__flag-container, .iti__dropdown-content") || (el.getAttribute("role") === "combobox" && el.closest(".iti") && !el.classList.contains("iti__tel-input"))) continue;
     if (el.closest("[class*='autofill' i]")) continue;
+    // A honeypot (a typed box at opacity 0 out of the tab order: Teamtailor's "email without domain") is no question; left empty.
+    if (/^(text|email|tel|url|number|)$/.test(type) && el.tabIndex < 0 && Number(getComputedStyle(el).opacity) === 0) continue;
     if (type === "radio" || (type === "checkbox" && (el.closest("fieldset") || (el.name && rootOf(el).querySelectorAll(`input[type="checkbox"][name="${CSS.escape(el.name)}"]`).length > 1)))) {
       const fs = el.closest("fieldset");
       const mates = all.filter((x) => x.type === type && !seen.has(x) && (fs ? x.closest("fieldset") === fs : x.name === el.name));
@@ -162,7 +165,8 @@ function INVALID() {
   // A required checkbox group is "at least one" in the site's own script; the browser marks each box invalid. One ticked is enough.
   const deepAll = (root, sel) => { const out = []; const walk = (n) => { for (const c of n.children) { if (c.matches(sel)) out.push(c); if (c.shadowRoot) walk(c.shadowRoot); walk(c); } }; walk(root); return out; };
   const groupTicked = (e) => e.type === "checkbox" && e.name && deepAll(document, `input[type="checkbox"]`).some((x) => x.name === e.name && x.checked);
-  return deepAll(document, "input:invalid, select:invalid, textarea:invalid").filter((e) => !groupTicked(e)).filter((e) => e.type === "file" || e.offsetWidth || e.offsetHeight || e.getClientRects().length).map((e) => ({
+  const root = document.querySelector("form[data-upmore-form]") || document;
+  return deepAll(root, "input:invalid, select:invalid, textarea:invalid").filter((e) => !groupTicked(e)).filter((e) => e.type === "file" || e.offsetWidth || e.offsetHeight || e.getClientRects().length).map((e) => ({
     q: e.getAttribute("data-upmore-q"), name: e.name || e.id || "", message: squash(e.validationMessage).slice(0, 80),
   }));
 }
@@ -174,11 +178,11 @@ const FACT_RULES = [
   [/^preferred (first )?name\b/, "preferred_name"],
   [/^(full |legal |your )?name$|^full legal name\b/, "full_name"],
   // The same question in the languages the benchmark's boards ask it in (German, Dutch, Spanish, French, Portuguese, Swedish).
-  [/^(vor und nachname|vollst ndiger name|volledige naam|nombre completo|nombre y apellidos?|nom complet|nome completo|fullst ndigt namn|namn)$/, "full_name"],
-  [/^e ?mail\b|^(e ?mail adresse|e ?mail adres|correo electr nico|direcci n de correo electr nico|adresse e ?mail|adresse (de )?courriel|e ?post(adress)?)$/, "email"],
+  [/^(vor und nachname|vollst ndiger name|volledige naam|nombre completo|nombre y apellidos?|nom complet|nome completo|fullst ndigt namn|namn|v rds uzv rds|vardas pavard)$/, "full_name"],
+  [/^e ?mail\b|^(e ?mail ?adres(se)?|e ?pasta adrese|e ?pasts|el pa to adresas|correo electr nico|direcci n de correo electr nico|adresse e ?mail|adresse (de )?courriel|e ?post(adress)?)$/, "email"],
   // R9: SmartRecruiters (and others) ask for the address twice; the second box takes the same confirmed address.
   [/^(confirm|re ?enter|retype|repeat|verify) (your )?e ?mail( address)?$/, "email"],
-  [/^(phone|mobile|telephone|cell)\b|^(telefon(nummer)?|telefoonnummer|tel fono|t l phone|handynummer|mobilnummer)$/, "phone"],
+  [/^(phone|mobile|telephone|cell)\b|^(telefon(nummer)?|telefoonnummer|tel fono|t l phone|handynummer|mobilnummer|t lru a numurs|telefono numeris)$/, "phone"],
   [/^(country|country of residence|land|pays|pa s)$/, "country"],
   [/^(current )?(company|employer|organi[sz]ation)\b/, "current_company"],
   [/^(current )?(job )?title\b/, "current_title"],

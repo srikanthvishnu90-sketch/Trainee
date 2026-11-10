@@ -33,7 +33,7 @@ export function careerBriefFile(d: CareerBrief): FamilyFile {
 }
 
 // ---------------------------------------------------------------- F-02 profile facts (C.4)
-export type FactKind = "confirmed" | "estimate" | "inferred" | "review";
+export type FactKind = "confirmed" | "estimate" | "inferred" | "review" | "unknown";
 export interface ProfileFact { k: string; v: string | null; kind: FactKind; src: Src | null; correct?: Act }
 export interface ProfileFacts { facts: ProfileFact[]; conflict?: { text: string } | null; acts?: Acts }
 export function profileFactsFile(d: ProfileFacts): FamilyFile {
@@ -45,6 +45,9 @@ export function profileFactsFile(d: ProfileFacts): FamilyFile {
     blocks: [
       ...(d.conflict ? [note("danger", "Conflict to resolve.", d.conflict.text)] : []),
       ...(c("confirmed").length + c("estimate").length ? [card("Confirmed facts - sample", [{ p: "kv", rows: kv([...c("confirmed"), ...c("estimate")]) }])] : []),
+      // Item 6 (f-s5): a fact the person hasn't given says "Unknown", by name, and a resume draft says it is never used; neither is
+      // counted as confirmed.
+      ...(c("unknown").length ? [card("Not confirmed - unknown or draft", [{ p: "kv", rows: c("unknown").map((f) => ({ k: f.k, v: f.v, src: f.src, missing: "Unknown - not confirmed by you" })) }])] : []),
       ...(c("inferred").length ? [card("Inferred preferences - not attestations", c("inferred").map((f) => ({ p: "item" as const, title: f.v ?? f.k, text: `Working interpretation from ${f.k} - never sent to employers.`, act: f.correct })))] : []),
       card("Sensitive fields", [{ p: "tile", icon: "lock", title: "Work authorization, veteran status, demographics", text: "Answered per application, only by you. Never guessed, never reused silently. \"Prefer not to say\" is respected." }]),
     ],

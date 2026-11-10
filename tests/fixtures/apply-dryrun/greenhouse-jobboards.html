@@ -59,12 +59,19 @@ for (const shell of document.querySelectorAll(".select-shell")) {
 }
 // React re-renders the upload: once a file is chosen the Attach button group is unmounted and the file name shown in its place
 // (the input itself is gone).
+// With ?s3 the file goes first to the board's S3 bucket, as job-boards.greenhouse.io does (strict run 42736815031: a POST to
+// grnhse-prod-jben-us-west-2.s3.us-west-2.amazonaws.com/), and the name is shown only once that upload succeeded.
+const S3 = "https://grnhse-prod-jben-us-west-2.s3.us-west-2.amazonaws.com/";
+const showChip = (f) => {
+  const w = document.getElementById("resume-wrap");
+  const chip = document.createElement("div"); chip.className = "file-upload__filename"; chip.innerHTML = `<span>${f.name}</span><button type="button" aria-label="Remove file">x</button>`;
+  w.replaceWith(chip);
+};
 document.getElementById("resume").addEventListener("change", (e) => {
   const f = e.target.files[0]; if (!f) return;
-  setTimeout(() => {
-    const w = document.getElementById("resume-wrap");
-    const chip = document.createElement("div"); chip.className = "file-upload__filename"; chip.innerHTML = `<span>${f.name}</span><button type="button" aria-label="Remove file">x</button>`;
-    w.replaceWith(chip);
-  }, 300);
+  if (!location.search.includes("s3")) { setTimeout(() => showChip(f), 300); return; }
+  const fd = new FormData(); fd.append("key", "uploads/${filename}"); fd.append("success_action_status", "201"); fd.append("file", f);
+  fetch(S3, { method: "POST", body: fd }).then((r) => { if (r.ok) showChip(f); else throw new Error(String(r.status)); })
+    .catch(() => { e.target.value = ""; const err = document.createElement("p"); err.textContent = "There was an error uploading your file"; document.getElementById("resume-wrap").append(err); });
 });
 </script></body></html>

@@ -32,6 +32,10 @@ export function buildFileDeps(admin: any, env: FileDeps["env"], now: () => numbe
     pace: phonePace(PHONE_STEP_FLOOR_MS), background: edgeBackground,
     // The other file kinds. No fileEffects: until a sender is wired, an approved introduction honestly says it was not sent.
     files: createFileService({ store: supabaseFileKindStore(admin), env, now }),
+    // Item 6: each File family's records and posts (file_family_serve.ts FamilyRecords). One line per family; each builder adds only its
+    // own line (an absent family loads nothing: a ref File shows the C.24 error state, and no post is dispatched).
+    familyRecords: {
+    },
     // A results card that isn't ready: the employer's open questions (asked on the page, saved the way the chat saves them), then
     // the queued applications prepared again, and where each one stands.
     questions: supabaseQuestionStore(admin), reprepare: (userId) => reprepareQueued({ admin, userId, env, fetch: globalThis.fetch.bind(globalThis) }),

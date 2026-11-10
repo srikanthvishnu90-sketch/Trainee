@@ -1,6 +1,6 @@
 # S2 ledger DRAFT for the coordinator (s-release, 2026-11-10). NOT approvals: a line here approves nothing until a reviewer
 # who reviewed that PR at that head replaces <REVIEWER> and <risk/note>, and it lands in docs/architect/approvals.txt.
-# Deployed (release/production): 7d2e8ee1d1dbdb9831e29c7fbd1f0838976de11f. Trunk tip read: 2af8f1be1b00e55db3ecf0b5b3dd7597a07af0b0.
+# Deployed (release/production): 7d2e8ee1d1dbdb9831e29c7fbd1f0838976de11f. Trunk tip read: 2af8f1be1b00e55db3ecf0b5b3dd7597a07af0b0, then 5aa29fa94 (section A2).
 # deploy-standard.ts --checks S2 on that tip (read only, 2026-11-10 01:3x UTC): FAIL, 45/46 merges lack an approval;
 # only #625 passes (ledger-only, exempt). None of the 45 has a GitHub APPROVED review or a ledger line.
 # Head SHA = the merge commit's second parent, checked equal to the PR's head.sha from the GitHub API for all 45.
@@ -30,6 +30,20 @@
 # #659 WO-L b,d: a sign-in-wall application the person finishes is recorded (career_apply_person_finished_as)
 #   files,+,-: 6, 391, 5; mig=1; arch_mod=0
 659 e6733e23643c6c0e63bd6f881e1b87bbe23d754a <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+#
+# --- A2. merged after the draft was first written (2af8f1be..5aa29fa9, read 2026-11-10 ~03:00 UTC) ---
+# #669 docs: 15-item release verification ledger
+#   files,+,-: 1, 40; mig=0; arch_mod=0
+669 c0943826306124f4065600ad33f75e1169387cac <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #668 WO-M: Lever's invisible hCaptcha is not a shown check; strict browser benchmark of the production runner
+#   files,+,-: 18, 1035, 61; mig=0; arch_mod=0
+668 2d840b43311e4289112d513e922670bb531fd292 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #673 Resume: show every skill the person listed and confirmed
+#   files,+,-: 14, 541, 201; mig=0; arch_mod=2 (M:resume-design.test.ts M:snapshots/resume-templates/manifest.json)
+673 82d10b41d7a3f340ff9b12d0d63c2fb1d1a66017 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #677 docs: compare public web-agent benchmarks with the strict browser benchmark
+#   files,+,-: 1, 228; mig=0; arch_mod=0
+677 d1c7b1465b21fb9eafea1f3b762c29343900d10d <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
 #
 # --- B. merged between release 9 (7d2e8ee1) and 1a69ec9f: also unapproved, and S2 counts every merge since the deploy ---
 # #664 

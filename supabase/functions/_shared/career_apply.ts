@@ -8,7 +8,7 @@
 //                     batches need nothing; the batch is admitted against the limits up front.
 // The worker (WO-009b) fills exactly the prepared fields by name, reads each back, and classifies the outcome here.
 import { overStatedLimit } from "./length_limit.ts";
-import { answerKey, AUTH_FACTS, BIRTH_DATE, declineOption, FOREIGN, HONEYPOT, mapQuestion, NAMES_US, norm as normQuestion, PAY_HISTORY_ASKED, RELATIVE_PLACE } from "./question_map.ts";
+import { answerKey, AUTH_FACTS, BIRTH_DATE, declineOption, FOREIGN, HONEYPOT, mapQuestion, NAMES_US, norm as normQuestion, PAY_HISTORY_ASKED, RELATIVE_PLACE, salaryExpectationAsked } from "./question_map.ts";
 import { rowAnswerKey } from "./row_answer.ts";
 import { chooseOption, levelOption, usCitizenChoice, yesNoFromFact, yesNoOf } from "./answer_options.ts";
 import { type PlacePart, postingAtHome, postingCountry, postingPlaces, STATE_NAMES } from "./posting_place.ts";
@@ -971,6 +971,15 @@ function nationalNumber(value: string, dial: string): string | null {
   const rest = digits.slice(code.length).replace(/^[\s)\-.]+/, "").trim();
   return /\d{4,}/.test(rest.replace(/[^\d]/g, "")) ? rest : null;
 }
+// D-053: the facts a salary-expectation question may be answered from: every confirmed fact but a salary expectation that
+// is an answer texted to an earlier employer's question (`text-answer:`, the answer library's rows).
+const EARLIER_ANSWER = /^text-answer:/;
+function withoutEarlierAnswers(answers: Record<string, Answer>): Record<string, Answer> {
+  const a = answers?.salary_expectation;
+  if (!a || !EARLIER_ANSWER.test(String(a.factId ?? ""))) return answers;
+  const { salary_expectation: _earlier, ...rest } = answers;
+  return rest;
+}
 export function planBatch(o: { userId: string; postings: PlanPosting[]; answers: Record<string, Answer>; saved: Record<string, Answer>; log: LogRow[]; now: number; limits?: Limits }) {
   const ready: { job_id: string; company: string; title: string; fields: PlannedField[] }[] = [];
   const needs = new Map<string, { label: string; key: string; required: boolean; job_ids: string[]; field_name?: string }>();
@@ -1025,21 +1034,28 @@ export function planBatch(o: { userId: string; postings: PlanPosting[]; answers:
       const here = factStaysHere(f, p.location, o.answers);
       // a-sensitive: an answer saved under the bare wording (the oldest key) never travels for a date of birth or a
       // self-identification question: those are each application's own.
-      const legacy: Answer | undefined = BIRTH_DATE.test(f.label) || key === "eeo" || mapQuestion(f).fact === "eeo" ? undefined : o.saved[normLabel(f.label)];
+      // D-053 (owner, 2026-11-10): a salary expectation is each application's own. An answer the person gave another
+      // employer never fills it: not one saved under the wording (the oldest key), not one texted to an earlier form's
+      // question (a `text-answer:` row, which before D-053 was kept as the fact `salary_expectation`). The answer given for
+      // this posting (answerKey `job:`) does; a salary expectation the person stated as their own confirmed fact, given for
+      // no posting, is not an answer to another employer and is used as before.
+      const perApp = salaryExpectationAsked(f);
+      const facts = perApp ? withoutEarlierAnswers(o.answers) : o.answers;
+      const legacy: Answer | undefined = BIRTH_DATE.test(f.label) || perApp || key === "eeo" || mapQuestion(f).fact === "eeo" ? undefined : o.saved[normLabel(f.label)];
       const own: Answer | undefined = o.saved[answerKey(f, p.job_id, { haveFact: true, here })] ?? o.saved[answerKey(f, p.job_id, { here })] ?? legacy;
       const direct: Answer | undefined = o.saved[answerKey(f, p.job_id, { haveFact: true, here })] ?? o.saved[answerKey(f, p.job_id, { here })] ??
-        (key !== "unknown" && key !== "eeo" && !followUp && !otherCountry(key, placeText(f), p.location, homeInUs(o.answers)) && !beyondFact(key, f) ? o.answers[key] : undefined) ?? legacy;
+        (key !== "unknown" && key !== "eeo" && !followUp && !otherCountry(key, placeText(f), p.location, homeInUs(o.answers)) && !beyondFact(key, f) ? facts[key] : undefined) ?? legacy;
       let a: Answer | undefined = direct;
       let value: string | null = a ? String(a.value) : null;
-      if (value !== null && f.options.length) value = matchOption(value, f.options) ?? (key !== "unknown" && direct === o.answers[key] ? chooseOption(...placeFact(key, value, o.answers), f.options, f.label) : null);
+      if (value !== null && f.options.length) value = matchOption(value, f.options) ?? (key !== "unknown" && direct === facts[key] ? chooseOption(...placeFact(key, value, o.answers), f.options, f.label) : null);
       if (value === null && !direct) {
         const e = educationEnd(f, p.fields, o.answers);
         if (e) { a = e; value = f.options.length ? matchOption(e.value, f.options) : e.value; }
       }
       // A fact the keyword classifier picked that fits none of the options (the long "U.S. person" explanation names
       // "citizen") gives way to the meaning map, as no answer at all does (WO-042, Snowflake).
-      if (value === null && (!direct || direct === o.answers[key]) && !followUp) {
-        const m = byMeaning(f, p.company, o.answers, places, where, p.location);
+      if (value === null && (!direct || direct === facts[key]) && !followUp) {
+        const m = byMeaning(f, p.company, facts, places, where, p.location);
         if (m) { a = m; value = m.value; }
       }
       if (value !== null && f.dial !== undefined && a !== own && (key === "phone" || mapQuestion(f).fact === "phone")) value = nationalNumber(value, f.dial);

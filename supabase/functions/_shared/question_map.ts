@@ -364,11 +364,37 @@ export function declineOption<T extends { label: string }>(answer: string, optio
 // first employer's answer filled the same question at every later one without asking. career_apply.ts PAY_HISTORY is this
 // same pattern.
 export const PAY_HISTORY_ASKED = /\b(salary|pay|compensation|wage)s? histor|\b(previous|prior|past|last|former|most recent)\b[^?.]{0,30}\b(salary|pay|compensation|wage|earnings)\b|\b(salary|pay|compensation|wage)\b[^?.]{0,40}\b(previous|prior|past|last|former) (job|position|role|employer)/i;
+// D-053 (owner, 2026-11-10): what the person EXPECTS to be paid is asked per application too. Keyed as a fact
+// (`fact:salary_expectation`) or by its wording, the first employer's answer filled every later employer's form; keyed by
+// the posting, each application asks again. The wordings: English, French, Spanish, Dutch, German and Japanese forms.
+// (Accented words end without \b: in a JavaScript regex an accented letter is not a word character.)
+export const SALARY_EXPECTATION_ASKED = new RegExp([
+  String.raw`\b(expected|desired|target|ideal|requested|preferred)\s+((annual|annualized|base|total|yearly|hourly|monthly|gross|starting)\s+){0,2}(salary|compensation|pay|ctc|wages?|remuneration|(hourly|daily|day) rate)\b`,
+  String.raw`\bminimum (acceptable |annual |base )?(salary|compensation)\b`,
+  String.raw`\b(salary|compensation|pay|wage|remuneration)\s+(expectations?|requirements?|expected|desired)\b`,
+  String.raw`\b(expectations?|requirements?) (for|regarding|on|around) (the |your )?(salary|compensation|pay)\b`,
+  String.raw`\b(salary|compensation|pay)\b[^?.]{0,30}\b(do you|would you|you) (expect|require|want|seek|desire)\b`,
+  String.raw`\b(salary|compensation|pay)\b[^?.]{0,30}\b(are you|you are|you're) (seeking|looking for|expecting|asking for|targeting)\b`,
+  String.raw`\bprétentions? salariales?|\battentes? salariales?|\b(salaire|rémunération|remuneration)s? (souhaitée?s?|attendue?s?|désirée?s?|demandée?s?)`,
+  String.raw`\bpretensi(ón|on|ones) salarial(es)?\b|\bexpectativas? salarial(es)?\b|\baspiraci(ón|on|ones) salarial(es)?\b|\bsalario (deseado|esperado|pretendido)\b`,
+  String.raw`\bsalarisverwachting(en)?\b|\bgewenst(e)? salaris\b|\bgehalts(vorstellung|wunsch|erwartung)(en)?\b|\bwunschgehalt\b|希望(年収|給与|給料|月収)`,
+].join("|"), "i");
+// Is this question the salary expectation? Never salary history (its own rule above, #731), never the current pay or its
+// currency. A box asking for "Salary" by that word alone ("Salary (USD)", "Annual salary") is the expectation, as
+// career_apply.ts classifyField reads it; the planner fills it only from an answer given for this posting.
+export function salaryExpectationAsked(q: Question): boolean {
+  const label = String(q.label ?? ""), t = norm(label);
+  if (PAY_HISTORY_ASKED.test(label)) return false;
+  if (SALARY_EXPECTATION_ASKED.test(t)) return true;
+  const m = mapQuestion(q);
+  if (m.fact === "salary_expectation") return true;
+  return m.fact === "unknown" && /\bsalary\b/.test(t) && !/\b(current|currently|present|currency|paid|earn(ed|ing)?)\b/.test(t);
+}
 export function answerKey(q: Question, jobId: string, o: { haveFact?: boolean; here?: boolean } = {}): string {
   const m = mapQuestion(q);
   const words = norm(q.label);
   const job = `job:${h16(`${jobId}\n${words}`)}`, wording = `label:${h16(words)}`;
-  if (BIRTH_DATE.test(String(q.label ?? "")) || PAY_HISTORY_ASKED.test(String(q.label ?? ""))) return job;
+  if (BIRTH_DATE.test(String(q.label ?? "")) || PAY_HISTORY_ASKED.test(String(q.label ?? "")) || salaryExpectationAsked(q)) return job;
   if (m.kind === "fact") {
     // ROUND 4 (2026-11-05): a self-identification answer (gender, race, ethnicity, veteran or disability status) is given to
     // one employer (extension apply_core.ts staysWithPosting). Kept as the one `fact:eeo`, a "No" to "Do you have a

@@ -175,10 +175,13 @@ Deno.test("loop 9 applications, pure parts: which statements reopen an answer, a
   assertNode.deepStrictEqual(entryCorrectionFacts([ev("education", "May 2027", "December 2026"), ev("leadership", "May 2026", "June 2026"), ev("education", "Stats", "Math")]), [{ kind: "graduation", value: "December 2026" }]);
   assertNode.equal(reopenedLine({ reopened: [], expired: 0, stopped: 0 }), null, "nothing reopened, nothing said");
   assertNode.match(reopenedLine({ reopened: [{ label: Q.sponsor, answer: "No" }], expired: 1, stopped: 1 })!, /you had answered "No".*1 prepared application.*1 approved application not yet sent .* was stopped; nothing was sent/);
-  // What they were paid is this employer's answer, as a date of birth is; what they expect stays a fact (by design).
+  // What they were paid is this employer's answer, as a date of birth is; what they expect is too (D-053, below).
   const k = (label: string, job: string) => answerKey({ label, type: "input_text", options: [] } as any, job);
   for (const l of [Q.paid, "Salary history", Q.dob]) assertNode.notEqual(k(l, "greenhouse:a:1"), k(l, "greenhouse:b:2"), l);
-  assertNode.equal(k("What are your salary expectations?", "greenhouse:a:1"), "fact:salary_expectation");
+  // architect amendment D-053 (owner, 2026-11-10): salary expectation is asked per application, keyed to the posting.
+  // Before: k("What are your salary expectations?", a) === "fact:salary_expectation". After: a job: key, another employer's differs.
+  assertNode.match(k("What are your salary expectations?", "greenhouse:a:1"), /^job:[0-9a-f]{16}$/);
+  assertNode.notEqual(k("What are your salary expectations?", "greenhouse:a:1"), k("What are your salary expectations?", "greenhouse:b:2"));
 });
 
 Deno.test({

@@ -116,8 +116,14 @@ function EXTRACT() {
       const group = el.closest("[role=radiogroup], [role=group]");
       const node = (fs && fs.querySelector("legend")) || (group && byId(group.getAttribute("aria-labelledby"))) || groupLabelNode(el) || itemHeading(el);
       const label = node ? nodeText(node) : clean(el.name);
-      const q = push({ kind: type === "radio" ? "radio" : "checkgroup", label, name: el.name || "", required: isReq(mates, node), eeo: eeoOf(el, label), options: mates.map((m, i) => ({ i, label: optLabel(m) })) }, mates[0]);
+      const q = push({ kind: type === "radio" ? "radio" : "checkgroup", label, name: el.name || "", required: isReq(mates, node), eeo: eeoOf(el, label), options: mates.map((m, i) => ({ i, label: optLabel(m) })), ...(drawnChoice ? { drawn: true } : {}) }, mates[0]);
       mates.forEach((m, i) => { m.setAttribute("data-upmore-q", q); m.setAttribute("data-upmore-o", i); });
+      // A drawn choice (Workable's role=radio option around its aria-hidden input) is chosen where the person chooses it: the
+      // option's shown words (the first text element inside its role=radio option, else the option itself) carry the option tag
+      // in place of the input, so the one choice step (fillChoice) clicks them where a person clicks; the input's state, or the
+      // option's aria-checked, is read back (strict run 42773229260: a forced click on the 1px hidden input never changed it,
+      // and a click on a <label> is retargeted onto that input).
+      if (drawnChoice) mates.forEach((m, i) => { const w = m.closest("[role=radio], [role=checkbox]"); const txt = w && w.contains(m) ? [...w.querySelectorAll("*")].find((e) => e !== m && !e.contains(m) && e.children.length === 0 && squash(e.textContent)) : null; const t = txt || (w && w.contains(m) ? w : null); if (t) { t.setAttribute("data-upmore-q", q); t.setAttribute("data-upmore-o", i); m.removeAttribute("data-upmore-o"); m.setAttribute("data-upmore-io", i); } });
       continue;
     }
     seen.add(el);
@@ -166,7 +172,7 @@ function STATE(qs) {
     switch (d.kind) {
       // AngularJS (Breezy) shows an unset model as its own "? undefined:undefined ?" option: nothing is chosen.
       case "select": { const o = el.options[el.selectedIndex]; const ph = !el.value || /^\? .* \?$/.test(el.value); return { q: d.q, filled: !ph, text: ph ? "" : squash(o && o.textContent) }; }
-      case "radio": case "checkgroup": { const on = els.filter((e) => e.checked); return { q: d.q, filled: on.length > 0, picked: on.map((e) => e.getAttribute("data-upmore-o")) }; }
+      case "radio": case "checkgroup": { const on = els.filter((e) => e.checked || (!("checked" in e) && e.getAttribute("aria-checked") === "true")); const picked = [...new Set(on.map((e) => e.getAttribute("data-upmore-o") ?? e.getAttribute("data-upmore-io")))]; return { q: d.q, filled: picked.length > 0, picked }; }
       case "buttons": { const on = els.filter((e) => e.getAttribute("aria-pressed") === "true"); return { q: d.q, filled: on.length > 0, picked: on.map((e) => e.getAttribute("data-upmore-o")) }; }
       case "checkbox": return { q: d.q, filled: !!el.checked, text: el.checked ? "checked" : "" };
       case "file": return { q: d.q, filled: !!(el.files && el.files.length), text: el.files && el.files[0] ? el.files[0].name : "" };
@@ -214,6 +220,8 @@ const FACT_RULES = [
   [/linkedin/, "linkedin_url"], [/github/, "github_url"],
   [/^(portfolio|website|personal (site|website)|your website)\b/, "website_url"],
   [/^(current |your )?(location|city)( of residence)?$|^where are you (currently )?(located|based)$/, "location"],
+  // Greenhouse job-boards' own place lookup ("Location (City)"): the confirmed place, picked from its list (matchPlace).
+  [/^location city$/, "location"],
   // One "Address" box (Breezy asks it on many forms) takes the person's confirmed full address; a street line takes the street.
   [/^(your )?(home |mailing |postal |residential )?address$/, "full_address"],
   [/^(your )?(residential )?street address$|^address line 1$/, "street_address"],
@@ -222,7 +230,7 @@ const FACT_RULES = [
   // Two eligibility questions a person confirms once, answered only on a Yes/No choice (CHOICE_FACTS), never typed: work
   // authorization only where the question names the United States, sponsorship only where it names no other country.
   [/^(are you )?(currently )?(legally )?(authori[sz]ed|eligible|permitted) to (legally )?work (lawfully )?in the (u s|us|usa|united states)( of america)?$/, "work_authorization"],
-  [/^(will|do|would) you (now or in the future |now or at any point in the future |in the future )?(require|need) (visa )?(employment )?sponsorship( (for|to obtain) (an )?(employment )?(visa|work) (status|visa|permit))?( (to work )?in the (u s|us|usa|united states)( of america)?)?$/, "sponsorship"],
+  [/^(will|do|would) you (currently |now )?((now )?(or|and) (will you )?(now |in the future |at any (point|time) in the future )|in the future )?(require|need) ((visa|employment|immigration|work) ){0,3}sponsorship( (for|to obtain|in order to obtain) (an )?((employment|work|h 1b) ){0,2}(visa|status|permit|visa status))?( (by|from) (our company|the company|us|this company))?( (to (legally )?work )?in the (u s|us|usa|united states)( of america)?)?( for (this|the) (role|position|job))?$/, "sponsorship"],
 ];
 // Facts that answer only a Yes/No choice (radio, buttons, select, combobox): typed into a text box they would be another answer.
 const CHOICE_FACTS = new Set(["work_authorization", "sponsorship"]);
@@ -359,8 +367,10 @@ async function fillChoice(page, d, value, multi) {
   }
   for (const i of idx) {
     const loc = page.locator(sel(d.q, i)).first();
-    if (d.kind === "buttons") await loc.click();
-    else await loc.check({ force: true });
+    // A drawn choice's tagged option (its shown words, see EXTRACT) is clicked as a person clicks it; check() would retarget
+    // the click onto the hidden input, which such a board ignores. An option already chosen is not clicked again.
+    if (d.kind === "buttons" || (d.drawn && !(await page.evaluate(STATE, [d]).then((x) => (x[0].picked || []).includes(String(i))).catch(() => false)))) await loc.click();
+    else if (!d.drawn) await loc.check({ force: true });
   }
   const s = await stateOf(page, d);
   const want = idx.map(String).sort().join(","), got = (s.picked || []).slice().sort().join(",");
@@ -503,7 +513,7 @@ async function fillCombo(page, d, value, pick, phone, country) {
   if (!list.length) { await page.waitForTimeout(120); list = await optionsNow(); }
   // A country picker lists every country: the confirmed name is typed so the site's own filter narrows it before matching.
   // Ashby's place box fills its list from a lookup as you type: it gets up to 3 seconds to show. Any other box, 150 ms.
-  const lookup = ashPlaces || (await input.evaluate((e) => e.classList.contains("ashby-application-form-input-autocomplete")).catch(() => false));
+  const lookup = ashPlaces || pick === "place" || (await input.evaluate((e) => e.classList.contains("ashby-application-form-input-autocomplete")).catch(() => false));
   if ((!list.length || d.phoneCountry) && pick !== "decline") { await input.fill(String(value).slice(0, 40)); list = []; for (let i = 0; i < (lookup ? 20 : 1) && !list.length; i++) { await page.waitForTimeout(150); list = await optionsNow(); } }
   if (!list.length) {
     // What the page drew as a list after typing, for the record (tags and classes only, cut short): never an answer.
@@ -515,7 +525,9 @@ async function fillCombo(page, d, value, pick, phone, country) {
   const m = pick === "decline" ? (() => { const i = list.findIndex((o) => DECLINE.test(norm(o))); return i < 0 ? { error: "no_decline_option" } : { index: i }; })()
     : d.phoneCountry && pick === "phone_country" ? phoneCountryMatch(list, value, phone)
     : pick === "state" ? matchState(list, value)
-    : ashPlaces && pick === "value" ? matchPlace(list, value, blank(country) ? "" : country) : matchOption(list, value);
+    : (ashPlaces && pick === "value") || pick === "place" ? matchPlace(list, value, blank(country) ? "" : country)
+    : pick === "country" ? (() => { const x = matchOption(list, value); if (!x.error) return x; const alt = countryNames(value).find((n) => !matchOption(list, n).error); return alt ? matchOption(list, alt) : x; })()
+    : matchOption(list, value);
   if (m.error) { await input.press("Escape").catch(() => {}); return { ok: false, reason: m.error, options: list.slice(0, 40), ...(d.phoneCountry || pick === "phone_country" ? { detail: `options: ${list.slice(0, 6).join(" / ").slice(0, 140)}` } : {}) }; }
   await pickOption(opts, m);
   const s = await stateOf(page, d);
@@ -613,7 +625,11 @@ async function doFill(page, d, dec, ctx) {
     case "radio": case "buttons": return fillChoice(page, d, v, false);
     case "checkgroup": return fillChoice(page, d, v, true);
     case "checkbox": return YES.test(norm(v)) || /^(checked|agree|i agree|accept)/.test(norm(v)) ? fillCheckbox(page, d) : { ok: false, reason: "not_agreed" };
-    case "combobox": return fillCombo(page, d, v, dec.pick === "phone_country" ? "phone_country" : dec.source === "fact" && factKey(d.label) === "state" ? "state" : "value", ctx.facts && ctx.facts.phone, ctx.facts && ctx.facts.country);
+    case "combobox": {
+      const fk = dec.source === "fact" ? factKey(d.label) : undefined;
+      const pick = dec.pick === "phone_country" ? "phone_country" : fk === "state" ? "state" : fk === "location" ? "place" : fk === "country" ? "country" : "value";
+      return fillCombo(page, d, v, pick, ctx.facts && ctx.facts.phone, ctx.facts && ctx.facts.country);
+    }
     default: return fillText(page, d, v);
   }
 }

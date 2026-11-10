@@ -58,6 +58,13 @@ test("eligibility facts: US work authorization and the sponsorship need answer o
   assert.equal(factKey("Will you now or in the future require sponsorship to work in the UK?"), undefined);
   assert.equal(factKey("Do you have a visa that does not require sponsorship?"), undefined);
   assert.equal(factKey("Will you require sponsorship? We do not sponsor visas."), undefined);
+  // The wordings the strict bench met (runs 42773229260, 42777082059): each still one question about this person and the US.
+  assert.equal(factKey("Do you currently, or will you in the future, require visa sponsorship?"), "sponsorship");
+  assert.equal(factKey("Will you now or in the future require employment visa sponsorship?"), "sponsorship");
+  assert.equal(factKey("Will you now require immigration sponsorship by our company?"), "sponsorship");
+  assert.equal(factKey("Will you now or in the future require sponsorship for a different employer?"), undefined);
+  assert.equal(factKey("Does your spouse require sponsorship?"), undefined);
+  assert.equal(factKey("Location (City)"), "location");
   assert.equal(factValue("Do you require sponsorship?", facts), "No");
   assert.equal(factValue("Do you require sponsorship?", { sponsorship: "maybe" }), undefined, "only a confirmed yes or no");
   const opts = [{ label: "Yes" }, { label: "No" }];
@@ -103,6 +110,29 @@ setTimeout(() => {
 }, 200);
 </script></body></html>`;
 
+// Workable (strict run 42773229260): each choice is a role=radio option around an aria-hidden 1px input. As on the real board, a
+// click on the hidden input itself changes nothing; the option the page draws is what takes the choice.
+const WRADIO = (name, label) => `<fieldset role="radiogroup" aria-labelledby="${name}_l"><span id="${name}_l"><strong>${label}</strong> *</span>` + ["YES", "NO"].map((t, i) => `<div role="radio" aria-checked="false" tabindex="0" class="opt" style="padding:6px;border:1px solid #888;width:120px"><label><input type="radio" name="${name}" value="${i ? "false" : "true"}" required aria-hidden="true" tabindex="-1" style="position:absolute;opacity:0;width:1px;height:1px"><span>${t}</span></label></div>`).join("") + `</fieldset>`;
+const WORKABLE = `<!doctype html><html><body><h1>Therapist - Application</h1><form id="f" action="/submit/workable" method="post">
+<label for="fn">First name*</label><input id="fn" name="firstname" required><label for="ln">Last name*</label><input id="ln" name="lastname" required>
+<label for="em">Email*</label><input id="em" name="email" type="email" required>${WRADIO("QA_1", "Are you authorized to work in the U.S.?")}
+<button type="submit">Submit application</button></form><script>
+for (const w of document.querySelectorAll("[role=radio]")) w.addEventListener("click", (e) => {
+  e.preventDefault(); if (e.target.tagName === "INPUT") return;
+  for (const o of w.parentElement.querySelectorAll("[role=radio]")) { const on = o === w; o.setAttribute("aria-checked", String(on)); o.querySelector("input").checked = on; }
+});
+</script></body></html>`;
+// Greenhouse job-boards' "Location (City)": a combobox whose own list fills from a lookup a moment after typing.
+const GHLOC = `<!doctype html><html><body><h1>Engineer</h1><form action="/submit/ghloc" method="post">
+<label for="em">Email*</label><input id="em" name="email" type="email" required>
+<div class="select__container"><label id="loc_l" for="loc">Location (City)*</label><input id="loc" role="combobox" aria-labelledby="loc_l" aria-required="true" aria-controls="loc_list" aria-expanded="false"><div class="select__single-value" id="sv"></div><div id="loc_list" role="listbox"></div></div>
+<button type="submit">Submit application</button></form><script>
+const loc = document.getElementById("loc"), list = document.getElementById("loc_list"); let t = null;
+loc.addEventListener("input", () => { clearTimeout(t); list.innerHTML = ""; t = setTimeout(() => {
+  list.innerHTML = ["Chicago, Illinois, United States", "Chicago Ridge, Illinois, United States", "Chicago, Indiana, United States"].filter((p) => p.toLowerCase().startsWith(loc.value.toLowerCase().slice(0, 4))).map((p) => '<div role="option">' + p + '</div>').join("");
+  for (const o of list.children) o.addEventListener("click", () => { document.getElementById("sv").textContent = o.textContent; loc.value = ""; list.innerHTML = ""; });
+}, 900); });
+</script></body></html>`;
 let browser, server, base, resume, rsha;
 const posts = [];
 before(async () => {
@@ -114,6 +144,8 @@ before(async () => {
       return;
     }
     if (req.url === "/robots.txt") return res.writeHead(200, { "content-type": "text/plain" }).end("User-agent: *\nAllow: /\n");
+    if (req.url === "/workable") return res.writeHead(200, { "content-type": "text/html" }).end(WORKABLE);
+    if (req.url === "/ghloc") return res.writeHead(200, { "content-type": "text/html" }).end(GHLOC);
     if (req.url === "/elig") return res.writeHead(200, { "content-type": "text/html" }).end(ELIG);
     if (req.url === "/ashby") return res.writeHead(200, { "content-type": "text/html" }).end(ASHBY(PLACES));
     if (req.url === "/ashby-indiana") return res.writeHead(200, { "content-type": "text/html" }).end(ASHBY(["Chicago, Indiana, United States"]));
@@ -178,4 +210,19 @@ test("runner: a request whose judging fails (a page or context closing under it)
     await new Promise((res) => setTimeout(res, 200));
     assert.deepEqual(seen, []);
   } finally { process.off("unhandledRejection", onRej); }
+});
+
+test("Workable: a drawn Yes/No option takes the confirmed US work authorization and is read back; the strict bench passes, nothing posted", { skip, timeout: 60000 }, async () => {
+  const n = posts.length;
+  const full = await strictPosting(browser, { provider: "workable", url: `${base}/workable` }, opts("full"));
+  assert.equal(full.result, "pass", JSON.stringify({ ...full, diag: undefined }));
+  const def = await strictPosting(browser, { provider: "workable", url: `${base}/workable` }, opts("default"));
+  assert.equal(def.result, "ready_if_answered", JSON.stringify({ ...def, diag: undefined }));
+  assert.equal(posts.length, n);
+});
+
+test("Greenhouse 'Location (City)': the confirmed place is picked from the lookup's own list as the same city, state and country", { skip, timeout: 60000 }, async () => {
+  const r = await strictPosting(browser, { provider: "greenhouse", url: `${base}/ghloc` }, opts("default"));
+  assert.equal(r.result, "pass", JSON.stringify({ ...r, diag: undefined }));
+  assert.deepEqual(posts.filter((p) => p.url === "/submit/ghloc"), [], "nothing posted");
 });

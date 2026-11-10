@@ -21222,7 +21222,7 @@ const CareerRouter = (() => {
       return { intent: "intent_sensitive_correction", resultStatus: "awaiting_user", reply, correction: parsed, invalidation: inv };
     }
     const factSentence = parsed.kind === "future_need" ? "Got it: you will need visa sponsorship in the future." : "Got it: you don't need visa sponsorship.";
-    const reply = compose({ headline: factSentence, facts: ["I'll use this answer from now on instead of your earlier one; the change to your profile is not confirmed yet.", "Any application prepared with your earlier answer will not be submitted; it will be prepared again with this one and shown to you before anything is sent."] });
+    const reply = compose({ headline: factSentence, facts: ["I'll use this answer from now on instead of your earlier one; the change to your profile is not confirmed yet.", "Any application prepared with your earlier answer is no longer valid and will not be submitted; it will be prepared again with this one and shown to you before anything is sent."] });
     return { intent: "intent_sensitive_correction", resultStatus: "completed", reply, correction: { kind: parsed.kind, needsSponsorship: parsed.needsSponsorship, clause: parsed.clause }, audit, invalidation: inv };
   }
 

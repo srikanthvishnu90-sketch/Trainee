@@ -31,6 +31,7 @@ import { fakeLoop } from "./scenarios/loopmessage-api.ts";
 import { hexResumePdf } from "./scenarios/pdf-hex-fixture.ts";
 import { handleTelegram } from "../../supabase/functions/trainee-telegram/handler.ts";
 import { handleInbound } from "../../supabase/functions/trainee-inbound/handler.ts";
+import { postingChecks } from "./helpers/posting_checks.ts"; // architect amendment E.21 (2026-11-10, D-051)
 import { loopSend } from "../../supabase/functions/_shared/loopmessage.ts";
 import { chatThroughAgent, deliverer } from "../../supabase/functions/_shared/channel_runtime.ts";
 import { supabaseInboundStore } from "../../supabase/functions/trainee-inbound/store.ts";
@@ -139,7 +140,7 @@ Deno.test({
         return f === "retryable" ? new Response("busy", { status: 503 }) : new Response("unauthorized", { status: 401 });
       } });
       const files = new Map<string, Uint8Array>();
-      const viaDouble = globalThis.fetch, outbound: string[] = [];
+      const viaDouble = globalThis.fetch, outbound: string[] = [], checks = postingChecks(); // E.21: posting-page reads held per turn
       globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
         const req = input instanceof Request && !init ? input : new Request(input as any, init);
         const u = new URL(req.url);
@@ -156,6 +157,7 @@ Deno.test({
         if (u.host === "api.telegram.org") return await bot.fetch(req);
         if (u.host === "a.loopmessage.com") return await loop.fetch(req);
         if (u.host === "api.anthropic.com") return anthropicWire(req, (chat) => fakeModel(chat));
+        if (checks.take(req.method, req.url)) throw new TypeError(`network refused: ${u.host}`); // architect amendment E.21
         outbound.push(`${req.method} ${u.host}${u.pathname}`);
         throw new TypeError(`network refused: ${u.host}`);
       }) as typeof fetch;
@@ -193,9 +195,9 @@ Deno.test({
       async function tgPost(n: number, body: Record<string, unknown>, id: string, secret = TG_SECRET): Promise<Got> {
         await sql("delete from public.agent_rate_limits");
         const before = tg.seen(n).length, deliverNow = deliverer(admin, Deno.env, pace);
-        const res = await handleTelegram(new Request(`${SUPABASE_URL}/functions/v1/trainee-telegram`, { method: "POST", headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": secret }, body: JSON.stringify({ update_id: Number(id), ...body }) }),
+        const res = await checks.turn(`tg ${id}`, () => handleTelegram(new Request(`${SUPABASE_URL}/functions/v1/trainee-telegram`, { method: "POST", headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": secret }, body: JSON.stringify({ update_id: Number(id), ...body }) }),
           { env: Deno.env, now: Date.now, store: () => supabaseInboundStore(admin), chat: chatThroughAgent(SUPABASE_URL, SERVICE_KEY, { channel: "telegram" }), admin,
-            deliver: (a) => deliverNow({ userId: a.userId, key: a.key, now: a.now }) });
+            deliver: (a) => deliverNow({ userId: a.userId, key: a.key, now: a.now }) }), () => tg.seen(n).slice(before).map((m) => m.text).join("\n"));
         return await finish(res, before, tg, n, id);
       }
       const im: Driver = {
@@ -214,9 +216,9 @@ Deno.test({
         await sql("delete from public.agent_rate_limits");
         const before = im.seen(n).length, deliverNow = deliverer(admin, Deno.env, pace);
         // As trainee-inbound/index.ts composes it (a real 250 ms between bubbles of a direct answer, as LoopMessage keeps order).
-        const res = await handleInbound(new Request(`${SUPABASE_URL}/functions/v1/trainee-inbound?secret=${encodeURIComponent(secret)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+        const res = await checks.turn(`im ${String(body.message_id ?? "")}`, () => handleInbound(new Request(`${SUPABASE_URL}/functions/v1/trainee-inbound?secret=${encodeURIComponent(secret)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
           { env: Deno.env, now: Date.now, store: () => supabaseInboundStore(admin), send: (apiKey) => loopSend({ apiKey }), chat: chatThroughAgent(SUPABASE_URL, SERVICE_KEY),
-            deliverReply: (a) => deliverNow({ userId: a.userId, key: a.key, now: a.now }) });
+            deliverReply: (a) => deliverNow({ userId: a.userId, key: a.key, now: a.now }) }), () => im.seen(n).slice(before).map((m) => m.text).join("\n"));
         return await finish(res, before, im, n, String(body.message_id ?? ""));
       }
 
@@ -500,7 +502,8 @@ Deno.test({
       for (const p of parity) if (p.same && PARITY_GAP[p.id] !== undefined) console.log(`CHANNEL_PARITY PARITY_GAP ${p.id} NOW MATCHES: remove it (the list only shrinks)`);
       eq(leaks, [], "0 secrets");
       eq(violations, [], "every message valid for its provider");
-      eq(outbound, [], "nothing left the machine");
+      eq(outbound, [], "nothing left the machine but a shown posting's own page (E.21)");
+      eq(checks.faults, [], "posting-page reads only on the turn that shows them, at most one per posting shown, never over 10 (E.21)");
       eq(results.filter((r) => r.outcome === "FAIL").map((r) => `${r.ch} ${r.id}: ${r.why}`), [], "every script passes on every channel, with the same outcome");
     } finally {
       globalThis.fetch = realFetch;

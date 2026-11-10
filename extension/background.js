@@ -925,7 +925,7 @@ async function handle(m, sender) {
       const f = await facts(a.user_id);
       const resume = await get(L, "resume", null);
       return { signedIn: true, userId: a.user_id, ...f, resume, account, queued: q.running && inLane(q, tabId), pending: p && !p.finished ? p : null, personSubmits: !!(await config()).personSubmits,
-        agentSubmits: !!(await config()).agentSubmits };
+        agentSubmits: !!(await config()).agentSubmits, prefill: (await config()).prefill === true };
     }
     case "queued": {
       const q = await queueState();

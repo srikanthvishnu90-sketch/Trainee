@@ -1,4 +1,4 @@
-// Item 6, S5 (task f-s5): seven File families drawn from the person's real records, read when the page is served, never from a
+// Item 6, S5 (task f-s5): seven File families and the F-14n negotiation variant drawn from the person's real records, read when the page is served, never from a
 // stored copy. F-01 Career brief, F-02 Profile facts, F-03 Path comparison, F-08 Answer library, F-13 Interview hub, F-14 Weekly
 // brief, F-15 Offer comparison. Each view is the input of the family's own builder (file_family_plan.ts, file_family_apply.ts).
 //
@@ -17,10 +17,10 @@
 // With no record to draw from, a family is a C.24 state page saying what is missing and what to tell Trainee; never an invented File.
 import type { Act, KV, Src, StateInput } from "./file_family.ts";
 import type { AnswerLibrary, CareerBrief, PathComparison, ProfileFact, ProfileFacts } from "./file_family_plan.ts";
-import type { InterviewHub, OfferComparison, WeeklyBrief } from "./file_family_apply.ts";
+import type { InterviewHub, Negotiation, OfferComparison, WeeklyBrief } from "./file_family_apply.ts";
 
-export type LiveFamily = "F-01" | "F-02" | "F-03" | "F-08" | "F-13" | "F-14" | "F-15";
-export const LIVE_FAMILIES: LiveFamily[] = ["F-01", "F-02", "F-03", "F-08", "F-13", "F-14", "F-15"];
+export type LiveFamily = "F-01" | "F-02" | "F-03" | "F-08" | "F-13" | "F-14" | "F-14n" | "F-15";
+export const LIVE_FAMILIES: LiveFamily[] = ["F-01", "F-02", "F-03", "F-08", "F-13", "F-14", "F-14n", "F-15"];
 export const isLiveFamily = (x: unknown): x is LiveFamily => typeof x === "string" && (LIVE_FAMILIES as string[]).includes(x);
 
 export interface QuestionRow { key: string; kind: string; label: string; company: string | null; state: string; answer: string | null; answered_at: string | null }
@@ -39,7 +39,7 @@ export interface Records {
 export type Source = "account" | "standing" | "questions" | "interviews" | "digest" | "events" | "offers";
 export const READS: Record<LiveFamily, Source[]> = {
   "F-01": ["account", "standing", "events"], "F-02": ["account", "standing"], "F-03": ["account"], "F-08": ["questions"],
-  "F-13": ["interviews"], "F-14": ["digest", "events", "questions", "interviews"], "F-15": ["offers"],
+  "F-13": ["interviews"], "F-14": ["digest", "events", "questions", "interviews"], "F-14n": ["offers"], "F-15": ["offers"],
 };
 export type FamilyView = { view: unknown } | { state: StateInput };
 
@@ -51,7 +51,7 @@ const iso = (t: unknown): string | null => {
 };
 const clean = (s: unknown, max = 160) => typeof s === "string" ? s.replace(/\s+/g, " ").trim().slice(0, max) : "";
 const SAID = (at: unknown): Src => ({ label: "You said in chat", at: iso(at) });
-const missingState = (family: LiveFamily, title: string, name: string, why: string, next: Act): FamilyView => ({ state: { state: "needs_input", family, title, field: { name, why }, next } });
+const missingState = (family: Exclude<LiveFamily, "F-14n">, title: string, name: string, why: string, next: Act): FamilyView => ({ state: { state: "needs_input", family, title, field: { name, why }, next } });
 
 // ---------------------------------------------------------------- the person's own facts (account record)
 // The stated-fact kinds a File may show, with their label. Sponsorship, citizenship and graduation year are sensitive: they are
@@ -213,6 +213,25 @@ export function offerComparisonView(r: Records): FamilyView {
   return { view: d };
 }
 
+// ---------------------------------------------------------------- F-14n Negotiation plan (the F-14 variant)
+// From the newest offer on file. What the person told Trainee in chat is drawn as verbal (it is not a written term); their position
+// (walk-away number, what matters most) is Unknown until they say it; no counter is drafted here, and no competing offer, deadline or
+// acceptance intent is added (E-77). Approving nothing here sends anything: the counter goes through the message review (F-12).
+export function negotiationView(r: Records): FamilyView {
+  const newest = [...r.offers].filter((o) => clean(o?.offer?.company)).sort((a, b) => b.at - a.at)[0];
+  if (!newest) return missingState("F-14", "No offer to plan a negotiation for", "Nothing accepted", "A negotiation plan starts from an offer you tell Trainee about. None is on record, and nothing has been accepted or sent.", ask("start", "Tell Trainee about an offer"));
+  const x = newest.offer, company = clean(x.company, 60);
+  const terms = [x.role ? clean(x.role, 60) : null, money(x.base) ? `base ${money(x.base)}` : null, money(x.signing) ? `signing ${money(x.signing)}` : null,
+    money(x.bonus) ? `bonus ${money(x.bonus)}` : typeof x.bonus_pct === "number" ? `bonus ${x.bonus_pct}% target` : null, clean(newest.equity, 80) ? `equity ${clean(newest.equity, 80)}` : null].filter(Boolean).join(", ");
+  const d: Negotiation = { company, v: null, deadline: null, basis: "your words in chat",
+    position: [{ k: "Walk-away number", v: null, missing: "Unknown - you haven't said" }, { k: "What matters most", v: null, missing: "Unknown - you haven't said" },
+      { k: "Deadline", v: clean(x.deadline?.text, 60) || null, src: clean(x.deadline?.text) ? SAID(newest.at) : null, missing: "Not stated" }],
+    history: [{ v: `As you told it (${iso(newest.at)?.slice(0, 10) ?? "date unknown"})`, written: false, text: terms || "Terms not stated" }],
+    ask: { title: "No counter drafted yet", text: "Trainee drafts one only when you ask, from the terms you gave.", act: ask("negotiate", "Ask Trainee to draft a counter") },
+    acts: { primary: ask("priorities", "Tell Trainee what matters most"), secondary: [ask("decision", "Talk through the decision")], caption: "Nothing here accepts, declines or sends anything." } };
+  return { view: d };
+}
+
 export function viewOf(family: LiveFamily, r: Records, o: { token?: string | null } = {}): FamilyView {
   switch (family) {
     case "F-01": return careerBriefView(r);
@@ -221,6 +240,7 @@ export function viewOf(family: LiveFamily, r: Records, o: { token?: string | nul
     case "F-08": return answerLibraryView(r);
     case "F-13": return interviewHubView(r);
     case "F-14": return weeklyBriefView(r, o.token ?? null);
+    case "F-14n": return negotiationView(r);
     case "F-15": return offerComparisonView(r);
   }
 }

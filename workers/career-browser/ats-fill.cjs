@@ -361,8 +361,9 @@ async function fillCombo(page, d, value, pick) {
   await input.click();
   let list = await optionsNow();
   if (!list.length) { await page.waitForTimeout(120); list = await optionsNow(); }
-  // A list filled by a lookup as you type (Ashby's places come from a GraphQL read) gets up to 3 seconds to show.
-  if (!list.length && pick !== "decline") { await input.fill(String(value).slice(0, 40)); for (let i = 0; i < 20 && !list.length; i++) { await page.waitForTimeout(150); list = await optionsNow(); } }
+  // Ashby's place box fills its list from a lookup as you type: it gets up to 3 seconds to show. Any other box, 150 ms.
+  const lookup = await input.evaluate((e) => e.classList.contains("ashby-application-form-input-autocomplete")).catch(() => false);
+  if (!list.length && pick !== "decline") { await input.fill(String(value).slice(0, 40)); for (let i = 0; i < (lookup ? 20 : 1) && !list.length; i++) { await page.waitForTimeout(150); list = await optionsNow(); } }
   if (!list.length) { await input.press("Escape").catch(() => {}); return { ok: false, reason: "options_not_readable" }; }
   const m = pick === "decline" ? (() => { const i = list.findIndex((o) => DECLINE.test(norm(o))); return i < 0 ? { error: "no_decline_option" } : { index: i }; })() : matchOption(list, value);
   if (m.error) { await input.press("Escape").catch(() => {}); return { ok: false, reason: m.error, options: list.slice(0, 40) }; }

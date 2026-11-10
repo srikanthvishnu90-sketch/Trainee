@@ -421,6 +421,8 @@
     "tests/architect/task-planner-handler-pg.test.ts": 12,
     "tests/architect/task-planner-turn.test.ts": 0.1,
     "tests/architect/telegram-acceptance.test.ts": 9,
+    "tests/architect/telegram-loop-30.test.ts": 16,
+    "tests/architect/search-greeting-role.test.ts": 0.1,
     "tests/architect/telegram-global-pacer.test.ts": 2.6,
     "tests/architect/telegram-job-cards-exact-screen.test.ts": 0.1,
     "tests/architect/telegram-job-cards-secrets-facts.test.ts": 0.1,

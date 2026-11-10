@@ -449,6 +449,19 @@ export async function runMail(o: {
       } finally { reserved -= want; }
     }
     const plan = planUpdates(r.mails, apps, o.now, decided);
+    // Item 12 (coordinator ruling 2026-11-10, D-024): an email the rules could not read (unclear) and the model's second pass
+    // did not label is filed, flagged and stageless, as "unclear" under the one sent application it fits, by the confirmation's
+    // strict match (that employer's own authenticated mail). Its status then says the employer wrote and shows the email; it
+    // never guesses what they asked. No application, or more than one: it is filed under none.
+    for (const m of r.mails) {
+      const d = decided.get(m.hash);
+      if (!d || d.kind !== "other" || !d.ambiguous || plan.events.some((e) => e.hash === m.hash) || !Number.isFinite(Date.parse(m.date))) continue;
+      const c = decidedAs(m, "recruiter_reply", "unclear");
+      const hits = candidates(c, apps).filter((a) => a.source === "queue" && a.ref.startsWith("job:") && fromEmployer(c, a, m.from, m.auth));
+      if (hits.length !== 1) continue;
+      plan.events.push({ hash: m.hash, ref: hits[0].ref, kind: "unclear" as StatusEvent["kind"], company: hits[0].company, role: hits[0].role, stage: null, flagged: true,
+        evidence: `unclear: subject "${clip(m.subject, 160)}"`, at: new Date(Date.parse(m.date)).toISOString(), new_app: false });
+    }
     // Google verification (2026-10-26): the Gmail was read before this point; if the person disconnected it meanwhile, nothing
     // read from it is saved or said (checked again before each kind of write below). A store that cannot tell never skips.
     const gone = async () => o.store.stillConnected ? !(await o.store.stillConnected(p.user_id)) : false;

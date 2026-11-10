@@ -1671,12 +1671,13 @@
     const d = options.filter((o) => DECLINE_OPTION.test(String(o.label)));
     return d.length === 1 ? d[0] : null;
   }
+  var PAY_HISTORY_ASKED = /\b(salary|pay|compensation|wage)s? histor|\b(previous|prior|past|last|former|most recent)\b[^?.]{0,30}\b(salary|pay|compensation|wage|earnings)\b|\b(salary|pay|compensation|wage)\b[^?.]{0,40}\b(previous|prior|past|last|former) (job|position|role|employer)/i;
   function answerKey(q, jobId, o = {}) {
     const m = mapQuestion(q);
     const words = norm(q.label);
     const job = `job:${h16(`${jobId}
 ${words}`)}`, wording = `label:${h16(words)}`;
-    if (BIRTH_DATE.test(String(q.label ?? ""))) return job;
+    if (BIRTH_DATE.test(String(q.label ?? "")) || PAY_HISTORY_ASKED.test(String(q.label ?? ""))) return job;
     if (m.kind === "fact") {
       if (m.fact === "eeo") return job;
       if (o.here) return job;
@@ -2933,7 +2934,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       "eeo"
     ]
   ];
-  var PAY_HISTORY = /\b(salary|pay|compensation|wage)s? histor|\b(previous|prior|past|last|former|most recent)\b[^?.]{0,30}\b(salary|pay|compensation|wage|earnings)\b|\b(salary|pay|compensation|wage)\b[^?.]{0,40}\b(previous|prior|past|last|former) (job|position|role|employer)/i;
+  var PAY_HISTORY = PAY_HISTORY_ASKED;
   var CONTACT = /* @__PURE__ */ new Set([
     "first_name",
     "last_name",

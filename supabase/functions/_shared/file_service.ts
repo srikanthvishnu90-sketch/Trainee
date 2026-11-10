@@ -6,6 +6,14 @@ import { evidenceOf, type ReviewItem, stageOf } from "./application_review.ts";
 import { reasonWords } from "./career_apply_status.ts";
 
 export const DEFAULT_TTL_HOURS = 168; // a week; TRAINEE_FILE_TTL_HOURS sets it (1 to 720)
+// H2H fix 1 (docs/architect/INSTINCT-HEAD-TO-HEAD.md, A.2 resume turn 3): create()'s errors are written for the model that called
+// the tool ("so the person could not open it. Tell them it isn't available yet; do not claim it was made."). Code that puts the
+// reason in a reply the person reads takes it through here: the "not created:" lead and every clause addressed to the model go.
+const TO_THE_MODEL = /(?:,\s*so\s+)?\bthe (?:person|user)\b[^.;]*|\b(?:tell|ask) (?:them|the (?:person|user))\b[^.;]*|\b(?:do not|don'?t|never) (?:claim|describe|say|mention)\b[^.;]*/gi;
+export function personFacingError(error: string): string {
+  return String(error ?? "").replace(/^not created:\s*/i, "").replace(TO_THE_MODEL, "").replace(/\s*[.;]\s*(?=[.;]|$)/g, "").replace(/\s{2,}/g, " ")
+    .replace(/[\s,;.]+$/, "").trim();
+}
 // Every read and write is keyed by the user id, so one person can never read, change or revoke another's file.
 export interface FileKindStore {
   put(rec: FileRecord): Promise<void>;

@@ -51,11 +51,12 @@ Deno.test({ name: "WO-107: status, inbox and due follow-ups from one read model 
       assert(/Added to your tracker: Vandelay Industries/.test(logged.reply), logged.reply);
       const all = await say(chat, "where are my applications?");
       eq(all.intent, "career_apply_status", all.reply);
-      for (const w of [/Acme[^:\n]*: submitted; their page showed ACME-1; Acme has not confirmed it by email yet\./, /Globex has not confirmed it yet/, /can't tell whether it reached Initech/, /Umbrella[^:\n]*: approved, not sent yet/, /Hooli[^:\n]*: not sent/]) assert(w.test(all.reply), `${w}: ${all.reply}`);
+      for (const w of [/Acme[^:\n]*: submitted; their page showed ACME-1; Acme has not confirmed it by email yet\./, /Globex invited you to interview/, /can't tell whether it reached Initech/, /Umbrella[^:\n]*: approved, not sent yet/, /Hooli[^:\n]*: not sent/]) assert(w.test(all.reply), `${w}: ${all.reply}`);
       assert(/Also on your tracker \(what you told Trainee\): Vandelay Industries \([^)]*Data Analyst[^)]*\): you told Trainee you applied on \w+ \d+; stage \w+/.test(all.reply), all.reply);
       assert(/Employer email on record \(last 30 days\): Stark Industries: recruiter reply on/.test(all.reply) && /Globex \(Data Analyst\): interview invitation on/.test(all.reply), all.reply);
       const one = await say(chat, "did my application to Globex go through?");
-      assert(/Globex has not confirmed it yet/.test(one.reply) && /Globex's email: interview invitation on .* \(stage: Interview rounds\)/.test(one.reply) && !/Stark|Vandelay|Acme/.test(one.reply), one.reply);
+      // Architect amendment, D-024 status truth (coordinator ruling 2026-11-10): the line says the employer's latest answer.
+      assert(/Globex invited you to interview/.test(one.reply) && /Globex's email: interview invitation on .* \(stage: Interview rounds\)/.test(one.reply) && !/Stark|Vandelay|Acme/.test(one.reply), one.reply);
       const stand = await say(chat, "where do I stand with Vandelay Industries?");
       eq(stand.intent, "career_apply_status", stand.reply);
       assert(/no application to Vandelay Industries on record/.test(stand.reply) && /You told Trainee: applied on \w+ \d+; stage \w+/.test(stand.reply) && /No email from Vandelay Industries in the mail Trainee has read/.test(stand.reply), stand.reply);

@@ -12,7 +12,7 @@
 //               is due over the merged applications and not drafted yet; the text is shown so it is ready to send; nothing
 //               is sent or saved by this turn.
 // A record that cannot be read is named and never guessed; a missing mail record never lets a follow-up be called due.
-import { type AppRow, type ReadApplications, statusAsk, statusReply, supabaseApplications } from "./career_apply_status.ts";
+import { type AppRow, employerAnswers, type ReadApplications, statusAsk, statusReply, supabaseApplications } from "./career_apply_status.ts";
 import { appsFromQueue, appsFromTracker } from "./career_mail_store.ts";
 import { receiptCompanies } from "./career_apply_receipt_read.ts";
 import { type Draft, FOLLOW_UP_DAYS, foldEvents, followUps, mergeApps, sameCompany, type StatusEvent, THANK_YOU_DAYS, type TrackedApp } from "./career_mail.ts";
@@ -32,6 +32,12 @@ export type ReadStanding = (userId: string) => Promise<StandingRows>;
 export interface Standing { jobs: AppRow[] | null; apps: TrackedApp[]; tracker: TrackedApp[]; mail: StatusEvent[]; drafts: DraftRow[]; sent?: DraftRow[]; due: Draft[]; read_through: string | null; receipts: string[]; unreadable: string[] }
 
 export function standingFrom(r: StandingRows, now: number): Standing {
+  // Item 12: each application carries its employer's latest answer from the mail record (a rejection, an invitation, an
+  // offer, a reply), so its line says that answer and never "confirmed it" over it. Unread mail joins nothing.
+  if (r.jobs && r.mail) {
+    const answers = employerAnswers(r.mail.map((e) => ({ application_ref: e.ref, kind: e.kind, mail_at: e.at, flagged: e.flagged, evidence: e.evidence })));
+    r = { ...r, jobs: r.jobs.map((a) => ({ ...a, employer: answers.get(String(a.id)) ?? null })) };
+  }
   const queue = appsFromQueue(r.jobs ?? []), tracker = appsFromTracker(r.tracker ?? []);
   const merged = mergeApps(queue, tracker);
   // A tracker row the merge read as the queue's own application still carries what the person reported about it (an
@@ -110,7 +116,7 @@ export function standingAsk(message: string): StandingAsk | null {
 
 // ------------------------------------------------------------------------------------------------ the replies
 const day = (iso: string | null | undefined) => iso && Number.isFinite(Date.parse(iso)) ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : null;
-const KIND_WORDS: Record<string, string> = { received: "confirmation they received it", rejection: "rejection", interview: "interview invitation", assessment: "assessment invitation", offer: "offer", recruiter_reply: "recruiter reply" };
+const KIND_WORDS: Record<string, string> = { received: "confirmation they received it", rejection: "rejection", interview: "interview invitation", assessment: "assessment invitation", offer: "offer", recruiter_reply: "recruiter reply", unclear: "an email I couldn't read as a status" };
 const withRole = (company: string, role?: string | null) => `${company}${role ? ` (${role})` : ""}`;
 const mailLine = (e: StatusEvent) => `${withRole(e.company, e.role)}: ${KIND_WORDS[e.kind] ?? e.kind} on ${day(e.at) ?? "a date not on record"}${e.stage ? ` (stage: ${e.stage})` : ""}${e.flagged ? "; noted, not applied to the stage" : ""}`;
 const readNote = (s: Standing) => s.read_through ? ` (read through ${day(s.read_through)})` : " (Trainee has not read your mail yet: it reads it only with your Google connection, once the mail check has run)";
@@ -123,10 +129,11 @@ const missing = (s: Standing, which: ("mail" | "tracker")[]) => which.filter((w)
 
 // The queue's own wording for the ask, byte for byte (career_apply_status.ts): for a company asked in a phrasing that turn
 // does not parse ("where do I stand with Acme"), the same one-employer wording through the ask it does.
-const queueText = (message: string, s: Standing, company: string | null, now: number) =>
-  (statusReply(message, s.jobs, now) ?? statusReply(company ? `did my application to ${company} go through` : "where are my applications", s.jobs, now))!.reply;
+const queueReply = (message: string, s: Standing, company: string | null, now: number) =>
+  (statusReply(message, s.jobs, now) ?? statusReply(company ? `did my application to ${company} go through` : "where are my applications", s.jobs, now))!;
 function statusText(message: string, s: Standing, company: string | null, now: number): string {
-  const lines = [queueText(message, s, company, now)];
+  const base = queueReply(message, s, company, now);
+  const lines = [base.reply];
   if (company) {
     const { tracker, mail } = of(s, company);
     for (const a of tracker) lines.push(`You told Trainee: ${trackerLine(a)}${a.role ? ` (${a.role})` : ""}.`);
@@ -144,6 +151,8 @@ function statusText(message: string, s: Standing, company: string | null, now: n
     if (s.receipts.length) lines.push(`Receipts on record for: ${s.receipts.slice(0, 8).join(", ")}. Ask "show me the receipt for ${s.receipts[0]}" to see exactly what was sent.`);
   }
   lines.push(...missing(s, ["tracker", "mail"]));
+  // Item 12: one next action, last, from the queue's record (career_apply_status.ts nextAction); none when it was unread.
+  if (base.next) lines.push(base.next);
   return lines.join("\n");
 }
 

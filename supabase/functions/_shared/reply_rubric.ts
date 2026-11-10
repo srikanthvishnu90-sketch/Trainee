@@ -24,11 +24,12 @@ export type RuleId =
   | "boilerplate_tail" // no resume-confirmation tail, "let me know if", catch-all next-step filler (F.1; A.2)
   | "internal" // no internal ids, queue codes or system words (D.4 9; A.5 pattern 3)
   | "channel_length" // fits the channel's bubble limits; short asks get short replies (E.6 52)
-  | "time_zone"; // clock times in the person's own zone, never UTC or a stale "as of" date (E.6 50; D.4 9)
+  | "time_zone" // clock times in the person's own zone, never UTC or a stale "as of" date (E.6 50; D.4 9)
+  | "leaked_instruction"; // no text addressed to the model (a tool note: "tell them ...", "do not claim ...") in a reply (H2H fix 1)
 
 export const RULES: readonly RuleId[] = [
   "answers_first", "ends_at_decision", "unproven_action", "invented_fact", "blocker_named", "repeats_ask", "apology_loop",
-  "boilerplate_tail", "internal", "channel_length", "time_zone",
+  "boilerplate_tail", "internal", "channel_length", "time_zone", "leaked_instruction",
 ];
 
 // What happened this turn, with proof (a tool result, a row read back, an employer receipt). Only these may be claimed.
@@ -400,6 +401,26 @@ export function timeZoneRule(i: RubricInput): Violation[] {
   return dedupe(out);
 }
 
+// 10. No instruction meant for the model (H2H fix 1, docs/architect/INSTINCT-HEAD-TO-HEAD.md A.2 resume turn 3: a tool's error
+// note, "so the person could not open it. Tell them it isn't available yet; do not claim it was made.", was shown as is). The
+// person is "you" in a reply: a sentence about "the person" or "the user", or one telling the writer what to tell "them" or what
+// not to claim, is the tool talking to the model. Advice to the person ("tell them you're interested") is theirs and passes.
+const TO_MODEL: [string, RegExp][] = [
+  ["the reader in the third person", /\bthe (?:person|user)\b(?:['’]s)?\s+(?:could(?:n['’]t| not)?|can(?:['’]t|not)?|cannot|will|would|should|did(?:n['’]t)?|does(?:n['’]t)?|is(?:n['’]t)?|has(?:n['’]t)?|was(?:n['’]t)?|needs?|must|asked|said|wants?|gave|confirmed)\b/i],
+  ["an instruction to tell them", /\b(?:tell|inform) (?:them|the (?:person|user)) (?:it|that|this|nothing)\b(?![^.;]{0,30}\b(?:you|your|you're|i'm)\b)/i],
+  ["an instruction not to claim", /\b(?:do not|don't|never) (?:claim|describe) (?:it|that|this)\b(?! (?:you|your)\b)(?:\s+(?:was|is|has|were|exists))?/i],
+  ["a note to the model", /\b(?:note to (?:the )?(?:model|assistant)|as an ai\b|the (?:model|assistant) (?:should|must)\b|\binstructions? for the (?:model|assistant)\b)/i],
+];
+export function leakedInstruction(i: RubricInput): Violation[] {
+  const body = plainQuotes(clean(i.reply));
+  const out: Violation[] = [];
+  for (const [name, rx] of TO_MODEL) {
+    const m = rx.exec(body);
+    if (m) out.push({ rule: "leaked_instruction", detail: name, quote: m[0].trim() });
+  }
+  return out;
+}
+
 // ----------------------------------------------------------------------------------------------------------- the checker
 const dedupe = (vs: Violation[]) => { const seen = new Set<string>(); return vs.filter((v) => { const k = `${v.rule}|${v.detail}|${v.quote ?? ""}`; if (seen.has(k)) return false; seen.add(k); return true; }); };
 
@@ -410,7 +431,7 @@ export function checkReply(i: RubricInput): RubricResult {
   if (!i.timeZone) skipped.push("time_zone"); // UTC and raw timestamps are still flagged; another zone's clock is not judged
   const violations = [
     ...answersFirst(i), ...endsAtDecision(i), ...unprovenActions(i), ...inventedFacts(i), ...blockerNamed(i), ...repeatsAsk(i),
-    ...apologyLoop(i), ...boilerplateTails(i), ...internalWords(i), ...channelLength(i), ...timeZoneRule(i),
+    ...apologyLoop(i), ...boilerplateTails(i), ...internalWords(i), ...channelLength(i), ...timeZoneRule(i), ...leakedInstruction(i),
   ];
   return { ok: violations.length === 0, violations, skipped };
 }

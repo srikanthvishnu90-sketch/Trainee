@@ -55152,36 +55152,80 @@ const CareerRender = (() => {
   // synchronously), so async platform compression cannot serve it
   // either. The bundle-legal primitive is plain JS, vendored here as
   // ordinary source: an RFC 1950/1951 codec plus SHA-256.
-  //   - DEFLATE writer: stored (uncompressed) blocks — always-valid
-  //     deflate, fully deterministic; the streams it serves are a few
-  //     KB of PDF text operators / DOCX parts.
+  //   - DEFLATE writer: deflateFixed below (fixed Huffman, greedy
+  //     LZ77). Since #673 it writes EVERY stream on every runtime, Node
+  //     included, so rendered bytes are identical on Node and Deno.
   //   - Inflater: a full RFC 1951 decoder (stored + fixed + dynamic
-  //     Huffman), so parse-check also reads Node-produced files.
-  // These run ONLY when the Node captures are absent. On Node, `zlib`
-  // and `crypto` below ARE the platform modules and rendered bytes stay
-  // byte-identical (golden-pinned in tests/career-render-edge-pdf.test.cjs;
+  //     Huffman), so parse-check also reads files made elsewhere.
+  // The inflater and SHA-256 run ONLY when the Node captures are absent.
+  // On Node, `zlib` (for reading) and `crypto` below are the platform
+  // modules (golden-pinned in tests/career-render-edge-pdf.test.cjs;
   // staged-bundle proof in tests/edge/edge-pdf-renderer.test.ts).
   function adler32(data) {
     let a = 1, b = 0;
     for (let i = 0; i < data.length; i++) { a = (a + data[i]) % 65521; b = (b + a) % 65521; }
     return ((b << 16) | a) >>> 0;
   }
-  function deflateStored(data) {
-    const chunks = [];
-    let off = 0;
-    do {
-      const len = Math.min(65535, data.length - off);
-      const head = Bytes.alloc(5);
-      head[0] = off + len >= data.length ? 1 : 0; // BFINAL, BTYPE=00, then byte-aligned
-      head.writeUInt16LE(len, 1);
-      head.writeUInt16LE((~len) & 0xffff, 3);
-      chunks.push(head, Bytes.from(data.subarray(off, off + len)));
-      off += len;
-    } while (off < data.length);
-    return Bytes.concat(chunks);
+  // DETERMINISTIC DEFLATE (architect ruling 2026-11-10, #673): every file this module writes (PDF content streams, DOCX
+  // zip entries, the templates' streams) is compressed by THIS function, on Node and on Deno alike, so the same document
+  // is the same bytes everywhere. Before, each runtime used its own zlib: Deno's node:zlib and Node's zlib agreed on only
+  // 14 of 27 plain-layout PDFs (WO-028/5). Fixed settings, never tuned per call: one final block with the fixed Huffman
+  // codes (RFC 1951 3.2.6), greedy LZ77 over a 32 KiB window, minimum match 3, maximum 258, a 15-bit hash of the next
+  // three bytes, and at most DEFLATE_CHAIN candidates per position. Any standard inflater reads it.
+  const DEFLATE_CHAIN = 64;
+  const LEN_BASE = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
+  const LEN_EXTRA = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0];
+  const DIST_BASE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577];
+  const DIST_EXTRA = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13];
+  function deflateFixed(input) {
+    const d = input instanceof Uint8Array ? input : Bytes.from(input);
+    const n = d.length, out = [];
+    let buf = 0, cnt = 0;
+    const put = (v, bits) => { buf |= v << cnt; cnt += bits; while (cnt >= 8) { out.push(buf & 0xff); buf >>>= 8; cnt -= 8; } };
+    const rev = (c, bits) => { let r = 0; for (let i = 0; i < bits; i++) { r = (r << 1) | (c & 1); c >>= 1; } return r; };
+    const sym = (s) => {
+      if (s < 144) put(rev(0x30 + s, 8), 8);
+      else if (s < 256) put(rev(0x190 + s - 144, 9), 9);
+      else if (s < 280) put(rev(s - 256, 7), 7);
+      else put(rev(0xc0 + s - 280, 8), 8);
+    };
+    const below = (table, v) => { let k = 0; while (k + 1 < table.length && table[k + 1] <= v) k++; return k; };
+    put(1, 1); put(1, 2); // BFINAL = 1, BTYPE = 01 (fixed Huffman)
+    const MASK = 0x7fff, head = new Int32Array(MASK + 1).fill(-1), prev = new Int32Array(MASK + 1).fill(-1);
+    const hashAt = (p) => ((d[p] << 10) ^ (d[p + 1] << 5) ^ d[p + 2]) & MASK;
+    const insert = (p) => { if (p + 2 < n) { const h = hashAt(p); prev[p & MASK] = head[h]; head[h] = p; } };
+    let i = 0;
+    while (i < n) {
+      let best = 0, dist = 0;
+      if (i + 2 < n) {
+        const max = Math.min(258, n - i);
+        let j = head[hashAt(i)], chain = DEFLATE_CHAIN;
+        while (j >= 0 && i - j <= 32768 && chain-- > 0) {
+          let l = 0;
+          while (l < max && d[j + l] === d[i + l]) l++;
+          if (l > best) { best = l; dist = i - j; if (l === max) break; }
+          const next = prev[j & MASK];
+          if (next >= j) break;
+          j = next;
+        }
+      }
+      if (best >= 3) {
+        const k = below(LEN_BASE, best);
+        sym(257 + k); put(best - LEN_BASE[k], LEN_EXTRA[k]);
+        const c = below(DIST_BASE, dist);
+        put(rev(c, 5), 5); put(dist - DIST_BASE[c], DIST_EXTRA[c]);
+        for (let p = i; p < i + best; p++) insert(p);
+        i += best;
+      } else {
+        sym(d[i]); insert(i); i++;
+      }
+    }
+    sym(256);
+    if (cnt > 0) out.push(buf & 0xff);
+    return Bytes.from(out);
   }
-  function zlibDeflate(data) {
-    const body = deflateStored(data);
+  function zlibDeflateFixed(data) {
+    const body = deflateFixed(data);
     const out = Bytes.alloc(2 + body.length + 4);
     out[0] = 0x78; out[1] = 0x01; // CMF/FLG: deflate, 32K window; (0x78*256+0x01) % 31 === 0
     body.copy(out, 2);
@@ -55302,8 +55346,8 @@ const CareerRender = (() => {
     return core.buffer;
   }
   const pureZlib = {
-    deflateSync: (data) => zlibDeflate(data),
-    deflateRawSync: (data) => deflateStored(data),
+    deflateSync: (data) => zlibDeflateFixed(data),
+    deflateRawSync: (data) => deflateFixed(data),
     inflateSync: (data, opts) => zlibInflate(data, opts),
     inflateRawSync: (data, opts) => inflateRaw(data, opts),
   };
@@ -55442,7 +55486,7 @@ const CareerRender = (() => {
     for (const entry of entries) {
       const nameBuf = Bytes.from(entry.name, "utf8");
       const data = Bytes.isBuffer(entry.data) ? entry.data : Bytes.from(String(entry.data), "utf8");
-      const compressed = zlib.deflateRawSync(data);
+      const compressed = deflateFixed(data); // deterministic on every runtime (#673)
       const crc = crc32(data);
       const local = Bytes.alloc(30);
       local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0x0800, 6);
@@ -55669,7 +55713,7 @@ const CareerRender = (() => {
     pages.forEach((lines, i) => {
       objects.push([pageIds[i], Bytes.from(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE.w} ${PAGE.h}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${contentIds[i]} 0 R >>`)]);
       const ops = lines.map((l) => `BT /${l.font} ${l.size} Tf 1 0 0 1 ${l.x} ${l.y} Tm ${pdfLiteral(encodeWinAnsi(l.text, unencodable))} Tj ET`).join("\n");
-      const stream = zlib.deflateSync(Bytes.from(ops, "latin1"));
+      const stream = zlibDeflateFixed(Bytes.from(ops, "latin1")); // deterministic on every runtime (#673)
       const head = Bytes.from(`<< /Length ${stream.length} /Filter /FlateDecode >>\nstream\n`, "latin1");
       objects.push([contentIds[i], Bytes.concat([head, stream, Bytes.from("\nendstream", "latin1")])]);
     });
@@ -56216,7 +56260,7 @@ const CareerRender = (() => {
 
   const runtime = { zlib: !!rt.zlib, crypto: !!rt.crypto, Buffer: !!Buffer, codec: rt.zlib && rt.crypto ? "platform" : zlib && crypto ? "vendored" : "none" };
   // RELEASE 9: the byte primitives career_resume_design.ts builds its two layouts with (same codec, same ZIP writer).
-  const primitives = { zipBuffer, unzipParts, encodeWinAnsi, pdfLiteral, escXml, deflate: (b) => zlib.deflateSync(Bytes.from(b)), bytes: (x, enc) => Bytes.from(x, enc), concat: (xs) => Bytes.concat(xs) };
+  const primitives = { zipBuffer, unzipParts, encodeWinAnsi, pdfLiteral, escXml, deflate: (b) => zlibDeflateFixed(Bytes.from(b)), bytes: (x, enc) => Bytes.from(x, enc), concat: (xs) => Bytes.concat(xs) };
   return { primitives, renderPdf, renderDocx, parseCheck, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
   }
   return make(NODE_RUNTIME);

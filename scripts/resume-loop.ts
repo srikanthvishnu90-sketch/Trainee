@@ -23,7 +23,7 @@ const NOW = Date.UTC(2026, 10, 9, 15);
 const LAYOUT_WORDS = new Set(["experience", "education", "projects", "project", "leadership", "skills", "certifications", "awards", "coursework", "summary",
   "research", "publications", "additional", "present", "professional", "technical", "work", "and", "selected", "core", "competencies", "profile"]);
 
-export interface FileCheck { kind: "pdf" | "docx"; ok: boolean; pages: number; promised: number; pageFit: boolean; invented: string[]; targetCarried: boolean; targetMissing: string[]; chronological: boolean; error?: string }
+export interface FileCheck { kind: "pdf" | "docx"; ok: boolean; pages: number; promised: number; pageFit: boolean; invented: string[]; targetCarried: boolean; targetMissing: string[]; chronological: boolean; listedSkills: number; listedShown: number; listedMissing: string[]; error?: string }
 export interface CaseResult { profile: string; shape: string; role: string; variant: string; made: boolean; refused?: string; files: FileCheck[]; template: string | null; listedOnly: string[] }
 
 function profileOf(p: LoopProfile): any {
@@ -79,10 +79,11 @@ async function extract(paths: string[]): Promise<any[]> {
   return out;
 }
 
-// The target is carried when the file holds what the posting asks for that the person's confirmed record proves: every skill
-// the posting names that a confirmed experience, project or education fact shows (CareerProfile.skillEvidence) is printed.
-// A skill the person only listed, with no fact showing it, is left off by the tailor's proof rule (123 skillFactProven,
-// BUG-211); those are counted apart ("listed only"), not as a miss. A resume never prints the posting's title as theirs.
+// The target is carried when the file holds what the posting asks for that is on the person's confirmed record: every skill
+// the posting names that a confirmed fact shows (CareerProfile.skillEvidence) or that the person listed in their own
+// confirmed Skills (architect ruling 2026-11-10: a listed, confirmed skill is a confirmed fact, D-007). A skill only the
+// posting names stays off. "listedOnly" (listed, no other fact shows it) is still reported. A resume never prints the
+// posting's title as theirs.
 export function targetSkills(posting: string, profile: any): { proven: string[]; listedOnly: string[] } {
   const names = (CareerTailor as any).skillsInText(posting) as string[];
   const clean = confirmedOnly(profile), hay = confirmedHaystack(profile);
@@ -91,6 +92,12 @@ export function targetSkills(posting: string, profile: any): { proven: string[];
   return { proven, listedOnly: names.filter((sk) => !proven.includes(sk) && has(sk)) };
 }
 const MONTH_N: Record<string, number> = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+// The skills the person listed and confirmed (their skill facts). Architect ruling 2026-11-10: each is shown on every file,
+// and the Skills section never disappears while they have one.
+export function listedSkills(profile: any): string[] {
+  const names = (confirmedOnly(profile).facts ?? []).filter((f: any) => f.kind === "skill").map((f: any) => String(f.name || f.title || "").trim()).filter(Boolean);
+  return [...new Set(names)];
+}
 // Reverse chronological (RESUME-TEMPLATES E5): within the experience section, each entry's start is no later than the one
 // above it. Reported, not a bar (the tailor may lead with the most relevant entry).
 export function chronological(text: string): boolean {
@@ -103,6 +110,7 @@ export function chronological(text: string): boolean {
 
 const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 const carried = (text: string, wanted: string[]) => { const w = ` ${words(text)} `, miss = wanted.filter((sk) => !w.includes(` ${words(sk)} `)); return { targetCarried: miss.length === 0, targetMissing: miss }; };
+const shown = (text: string, listed: string[]) => { const w = ` ${words(text)} `, miss = listed.filter((sk) => !w.includes(` ${words(sk)} `)); return { listedSkills: listed.length, listedShown: listed.length - miss.length, listedMissing: miss }; };
 const words = (s: string) => s.toLowerCase().normalize("NFC").replace(/[^\p{L}\p{N} ]+/gu, " ").replace(/\s+/g, " ").trim();
 
 // The variants a person meets: the default ("make me a resume for this one"), and a template they ask for by number (the
@@ -118,9 +126,10 @@ export async function runLoop(opts: { out?: string } = {}): Promise<{ cases: Cas
   await Deno.mkdir(dir, { recursive: true });
   const cases: CaseResult[] = [];
   for (const p of PROFILES) {
-    const haystack = confirmedHaystack(profileOf(p));
+    const haystack = confirmedHaystack(profileOf(p)), listed = listedSkills(profileOf(p));
     for (const target of p.targets) {
-      const { proven: wanted, listedOnly } = targetSkills(target.posting, profileOf(p));
+      const { proven, listedOnly } = targetSkills(target.posting, profileOf(p));
+      const wanted = [...proven, ...listedOnly];
       for (const v of VARIANTS) {
         const delivered: { format: string; filename: string; base64: string }[] = [];
         const tools = Object.fromEntries(careerTools({
@@ -147,10 +156,10 @@ export async function runLoop(opts: { out?: string } = {}): Promise<{ cases: Cas
         for (const f of opened) {
           const text = String(f.text ?? "");
           const inv = f.ok ? [...new Set([...inventedIn(text, haystack), ...(f.text_pdfminer ? inventedIn(String(f.text_pdfminer), haystack) : [])])] : [];
-          c.files.push({ kind: f.kind, ok: !!f.ok, pages: Number(f.pages ?? 0), promised, pageFit: !!f.ok && Number(f.pages) >= 1 && Number(f.pages) <= promised, invented: inv, ...carried(text, wanted), chronological: chronological(text), ...(f.error ? { error: f.error } : {}) });
+          c.files.push({ kind: f.kind, ok: !!f.ok, pages: Number(f.pages ?? 0), promised, pageFit: !!f.ok && Number(f.pages) >= 1 && Number(f.pages) <= promised, invented: inv, ...carried(text, wanted), chronological: chronological(text), ...shown(text, listed), ...(f.error ? { error: f.error } : {}) });
         }
         // A made resume must come as both files (spec RESUME-TEMPLATES 1.1: "Trainee keeps sending both").
-        if (c.made) for (const k of ["pdf", "docx"] as const) if (!c.files.some((f) => f.kind === k)) c.files.push({ kind: k, ok: false, pages: 0, promised, pageFit: false, invented: [], targetCarried: false, targetMissing: wanted, chronological: false, error: `no ${k.toUpperCase()} was delivered` });
+        if (c.made) for (const k of ["pdf", "docx"] as const) if (!c.files.some((f) => f.kind === k)) c.files.push({ kind: k, ok: false, pages: 0, promised, pageFit: false, invented: [], targetCarried: false, targetMissing: wanted, chronological: false, listedSkills: listed.length, listedShown: 0, listedMissing: listed, error: `no ${k.toUpperCase()} was delivered` });
         cases.push(c);
       }
     }
@@ -162,9 +171,10 @@ export async function runLoop(opts: { out?: string } = {}): Promise<{ cases: Cas
     opened: files.filter((f) => f.ok).length, invented: files.reduce((n, f) => n + f.invented.length, 0),
     pageFit: files.filter((f) => f.pageFit).length, targetCarried: files.filter((f) => f.targetCarried).length,
     chronological: files.filter((f) => f.chronological).length,
+    listedSkills: files.reduce((n, f) => n + f.listedSkills, 0), listedShown: files.reduce((n, f) => n + f.listedShown, 0),
     listedOnly: cases.filter((c) => c.variant === VARIANTS[0].name).reduce((n, c) => n + c.listedOnly.length, 0),
   };
-  const line = `RESUME LOOP: made ${summary.made}/${summary.cases} (${summary.profiles} profiles x ${summary.targets / summary.profiles} roles x ${VARIANTS.length} layouts), opened ${summary.opened}/${summary.files}, invented facts ${summary.invented}, page fit ${summary.pageFit}/${summary.files}, target carried ${summary.targetCarried}/${summary.files}; reported (no bar): reverse chronological ${summary.chronological}/${summary.files}, posting skills listed but not shown by any fact (left off) ${summary.listedOnly}`;
+  const line = `RESUME LOOP: made ${summary.made}/${summary.cases} (${summary.profiles} profiles x ${summary.targets / summary.profiles} roles x ${VARIANTS.length} layouts), opened ${summary.opened}/${summary.files}, invented facts ${summary.invented}, page fit ${summary.pageFit}/${summary.files}, target carried ${summary.targetCarried}/${summary.files}, confirmed listed skills shown ${summary.listedShown}/${summary.listedSkills}; reported (no bar): reverse chronological ${summary.chronological}/${summary.files}, posting skills listed but not shown by any other fact ${summary.listedOnly}`;
   return { cases, summary, line };
 }
 
@@ -172,9 +182,9 @@ if (import.meta.main) {
   const outAt = Deno.args.indexOf("--out");
   const r = await runLoop({ out: outAt >= 0 ? Deno.args[outAt + 1] : undefined });
   if (Deno.args.includes("--json")) console.log(JSON.stringify(r.cases, null, 1));
-  else for (const c of r.cases) for (const f of c.files) if (!f.ok || f.invented.length || !f.pageFit || !f.targetCarried || !f.chronological) console.log(`${c.profile} ${c.role} ${c.variant} ${f.kind}: ${[!f.ok && `not open (${f.error})`, f.invented.length && `invented ${f.invented.join(", ")}`, !f.pageFit && `pages ${f.pages}/${f.promised}`, !f.targetCarried && `target not carried (missing ${f.targetMissing.join(", ")})`, !f.chronological && "not reverse chronological (reported)"].filter(Boolean).join("; ")}`);
+  else for (const c of r.cases) for (const f of c.files) if (!f.ok || f.invented.length || !f.pageFit || !f.targetCarried || !f.chronological || f.listedMissing.length) console.log(`${c.profile} ${c.role} ${c.variant} ${f.kind}: ${[!f.ok && `not open (${f.error})`, f.invented.length && `invented ${f.invented.join(", ")}`, !f.pageFit && `pages ${f.pages}/${f.promised}`, !f.targetCarried && `target not carried (missing ${f.targetMissing.join(", ")})`, f.listedMissing.length && `listed skills not shown: ${f.listedMissing.join(", ")}`, !f.chronological && "not reverse chronological (reported)"].filter(Boolean).join("; ")}`);
   for (const c of r.cases) if (!c.made) console.log(`${c.profile} ${c.role} ${c.variant}: not made: ${c.refused}`);
   console.log(r.line);
   const s = r.summary;
-  Deno.exit(s.made === s.cases && s.opened === s.files && s.invented === 0 && s.pageFit === s.files && s.targetCarried === s.files ? 0 : 1);
+  Deno.exit(s.made === s.cases && s.opened === s.files && s.invented === 0 && s.pageFit === s.files && s.targetCarried === s.files && s.listedShown === s.listedSkills ? 0 : 1);
 }

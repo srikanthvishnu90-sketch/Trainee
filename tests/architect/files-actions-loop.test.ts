@@ -179,7 +179,9 @@ async function measure(pages: Page[]): Promise<{ pressed: Pressed[]; c1: string[
         if (c.inClosedMenu) { await loc.locator("xpath=ancestor::details[1]/summary").click({ timeout: 2000 }).catch(() => {}); requests = []; }
         const before = await pg.evaluate(SNAP); // after any menu holding it was opened: opening the menu is not this control's effect
         // A download starts after the click returns: wait for its event (up to 3 s) so it is not counted against the next control.
-        const dl = c.effect === "download" ? pg.waitForEvent("download", { timeout: 3000 }).catch(() => null) : Promise.resolve(null);
+        // architect amendment (2026-11-10): an export press may take more than 3 s to download under CI shard load (seen on #712:
+        // F-09 Export); a press that does nothing still fails, after 15 s.
+        const dl = c.effect === "download" ? pg.waitForEvent("download", { timeout: 15000 }).catch(() => null) : Promise.resolve(null);
         await loc.click({ timeout: 2000, noWaitAfter: true }).catch((e: Error) => { rec.dead = `could not be pressed: ${e.message.split("\n")[0]}`; });
         await dl;
         await pg.waitForTimeout(150);

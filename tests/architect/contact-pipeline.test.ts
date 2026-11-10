@@ -10,7 +10,7 @@ import type { Fetcher } from "../../supabase/functions/_shared/contact_sources/w
 import { contactGate, contactUserAgent, discover, neverSource, PoliteApi } from "../../supabase/functions/_shared/career_contact_sources.ts";
 import { FACT_MAX, keepFacts } from "../../supabase/functions/_shared/career_contact_facts.ts";
 import { findEmail, learnFormat, RCPT_PROBE_OFF, type RcptProbe, SCORE, SEND_MIN_SCORE } from "../../supabase/functions/_shared/career_contact_email.ts";
-import { contactOutreachOn, domainOf, memoryContactStore, resolveContact } from "../../supabase/functions/_shared/career_contact_pipeline.ts";
+import { contactOutreachOn, contactSendOn, domainOf, memoryContactStore, resolveContact } from "../../supabase/functions/_shared/career_contact_pipeline.ts";
 import { emailHash, supabaseContactStore } from "../../supabase/functions/_shared/career_contact_pipeline.ts";
 import { RELEASE_FLAGS, RELEASE_NEVER_ON } from "../../supabase/functions/agent-chat/release_config.ts";
 import { pgBinDir, startPg } from "../flow/pg.ts";
@@ -162,7 +162,11 @@ Deno.test("contact facts and sources: professional only, data never instructions
   const env = (m: Record<string, string>) => ({ get: (k: string) => m[k] });
   eq(contactOutreachOn(env({})), false, "off in production");
   eq(contactOutreachOn(env({ CAREER_PEOPLE_SEARCH: "on" })), false);
-  eq(contactOutreachOn(env({ CAREER_CONTACT_OUTREACH: "on" })), false);
+  eq(contactOutreachOn(env({ CAREER_CONTACT_OUTREACH: "on" })), false, "OUTREACH only: no resolution, no search (architect amendment, D-048 option a)");
+  eq([contactSendOn(env({ CAREER_CONTACT_OUTREACH: "on" }), "person"), contactSendOn(env({ CAREER_CONTACT_OUTREACH: "on" }), "search"), contactSendOn(env({ CAREER_CONTACT_OUTREACH: "on" }), undefined)],
+    [true, false, false], "OUTREACH only: on for person-supplied recipients, off for any contact found by search");
+  eq(contactSendOn(env({ CAREER_PEOPLE_SEARCH: "on" }), "person"), false, "PEOPLE_SEARCH alone sends nothing");
+  eq(contactSendOn(env({ CAREER_PEOPLE_SEARCH: "on", CAREER_CONTACT_OUTREACH: "on" }), "search"), true);
   eq(contactOutreachOn(env({ CAREER_PEOPLE_SEARCH: "on", CAREER_CONTACT_OUTREACH: "on" })), true);
   ok(RELEASE_NEVER_ON.includes("CAREER_CONTACT_OUTREACH") && !("CAREER_CONTACT_OUTREACH" in RELEASE_FLAGS), "the new flag is off until the owner accepts D-042");
   const decisions = await Deno.readTextFile(new URL("../../docs/architect/DECISIONS.md", import.meta.url));

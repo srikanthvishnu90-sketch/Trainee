@@ -641,7 +641,7 @@ async function whoTurn(o: NetworkingDeps, firmAsked: string): Promise<Networking
   const here = (await book.atFirm(firm)).filter((r) => !r.discovered); // people they know, not people discovery found
   if (!here.length) {
     const all = await book.total();
-    if (!all.total) return { reply: `You haven't sent me any contacts yet, so I can't say who you know at ${firm}. ${NO_FINDER} ${ADD_CONTACTS}`, intent: AT_INTENT, status: "no_contacts" };
+    if (!all.total) return { reply: `I can't say who you know at ${firm} because you haven't sent me any contacts yet. ${NO_FINDER} ${ADD_CONTACTS}`, intent: AT_INTENT, status: "no_contacts" };
     return { reply: `None of your ${plural(all.total, "contact")} (from ${all.files}) is at ${firm}. ${NO_FINDER} ${ADD_CONTACTS}`, intent: AT_INTENT, status: "none_at_firm" };
   }
   const withEmail = here.filter((r) => r.email).length;

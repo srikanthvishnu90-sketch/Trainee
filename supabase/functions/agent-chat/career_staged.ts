@@ -354,7 +354,11 @@ const RESEARCH_OVER = new Set(["career_document_delivery", "profile_export"]);
 // overview." A named company's interview (a capitalized name before "interview") with what to know or ask is company research
 // (research_company), not the router's company-intel recipe. "What should I ask in my interview?" names no company and stays prep.
 const INTERVIEW_AT = /\b(?:have|got|landed)\s+(?:an?\s+)?(.{2,48}?)\s+interviews?\b/i;
-const KNOW_OR_ASK = /\bwhat\s+(?:i\s+should|should\s+i|to|i\s+need\s+to|do\s+i\s+need\s+to)\s+(?:know|ask)\b|\b(?:research|brief\s+me\s+on|tell\s+me\s+about)\b/i;
+// Item 10 loop: also "... and 5 good questions to ask" and "what they do, what's new".
+const KNOW_OR_ASK = /\bwhat\s+(?:i\s+should|should\s+i|to|i\s+need\s+to|do\s+i\s+need\s+to)\s+(?:know|ask)\b|\b(?:research|brief\s+me\s+on|tell\s+me\s+about)\b|\bquestions?\s+(?:to|i\s+(?:should|could)|should\s+i)\s+ask\b/i;
+// Item 10 loop: "what should I ask the hiring manager at Orbit Freight?", "what should I ask in my Orbit Freight interview?": a question
+// to ask a named company's people is company research. "What should I ask in my interview?" names no company and stays prep.
+const ASK_AT = /\b[Ww]hat\s+(?:should|could|do)\s+[Ii]\s+ask\b[^?!.]{0,60}?\b(?:at|in\s+my|for\s+my|with)\s+(\p{Lu}[\p{L}&.-]+)/u;
 // Review F2 (item 6): also "an interview at/with <Name>" ("I have an interview at Stripe next week, what should I know?") and research
 // about a named company before the interview ("Tell me about Stripe's business before my interview, do not apply").
 const INTERVIEW_WITH = /\binterview(?:s|ing)?\s+(?:at|with)\s+(\p{Lu}[\p{L}&.-]+)/u;
@@ -364,6 +368,8 @@ export function companyInterviewAsk(message: string): boolean {
   if (hit && /(?<![\p{L}])\p{Lu}[\p{L}&.-]+/u.test(hit[1]) && KNOW_OR_ASK.test(m)) return true;
   const w = INTERVIEW_WITH.exec(m);
   if (w && !/^(?:I|My|The|A|An)$/.test(w[1]) && (KNOW_OR_ASK.test(m) || /\b(?:prepare|prep|ready)\b/i.test(m))) return true;
+  const at = ASK_AT.exec(m);
+  if (at && !/^(?:I|My|The|A|An)$/.test(at[1])) return true;
   const b = ABOUT_BEFORE.exec(m);
   return !!b && /^\p{Lu}/u.test(b[1]) && !/^(?:I|My|The|A|An)$/.test(b[1]);
 }

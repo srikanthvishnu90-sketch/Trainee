@@ -159,6 +159,7 @@ import { APPLY_ALL_INTENT, type ApplyAllOffer, applyAllYesTurn, isApplyAllYes, i
 import { applyAllYesOn } from "./release_config.ts";
 import { supabaseTapStore } from "../_shared/channel_card_tap.ts";
 import { feedUrlsFor } from "../_shared/file_link.ts";
+import { fileCard, fileCardOn, rolesCardSource } from "../_shared/file_card.ts"; // SPEC C.2 / D-049: the chat File card
 import { vaultRefreshWrite } from "../_shared/oauth_vault_refresh.ts";
 import { reminderTurn, supabaseReminderStore } from "../_shared/career_reminders.ts"; // REQS DOC 2: reminders
 import { overviewTurn } from "../_shared/career_overview.ts"; // REQS DOC 2: "any update?", "what's waiting on me?"
@@ -1531,6 +1532,13 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
                   out = { ...out, reply: [made.parts[0], made.parts[1]].join("\n") + resumeLine, parts: [made.parts[0], ...(resumeLine ? [resumeLine.trim()] : []), made.parts[1]] };
                   agentMeta = { ...(agentMeta || {}), results_file: made.listId };
                   f5Offer = { offer: made.offer, ask: made.offerAsk, resumeLine: !!resumeLine };
+                  // SPEC C.2 / D-049: the web chat gets the results page as its File card (the texting channels get it at delivery,
+                  // file_card.ts withFileCards); counts from each listed role's own state, read now.
+                  if (fileCardOn(Deno.env)) {
+                    const src = await rolesCardSource(supabaseJobStore(admin), user.id, made.listId).catch(() => null);
+                    const card = src ? fileCard({ ...src, url: made.url }) : null;
+                    if (card) (out as any).fileCards = [card];
+                  }
                 }
               }
               // SPEC 2.2 (apply_readiness.ts): what an application still needs, from CONFIRMED facts only, handed to the model as data.
@@ -1815,7 +1823,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         const visibleReply = [reply, ...reminderLines].join("\n");
         // The same reply as separate messages for a texting channel: the note, each part whole, then the reminders.
         const parts = out.parts ? [...(flowCtx.note ? [flowCtx.note] : []), ...out.parts, ...(artifactNote ? [artifactNote] : []), ...reminderLines] : null;
-        return { thread_id: tid, reply: visibleReply, action: null, capabilities: out.capabilities, turn_key: turnKey, reminders, ...(out.task ? { task: out.task } : {}), ...(out.batch ? { batch: out.batch } : {}), ...(parts ? { parts } : {}), ...(artifactsField ? { artifacts: artifactsField } : {}), ...(turnPostings.length ? { postings: turnPostings } : {}), ...(shapeField ? { shape: shapeField } : {}), meta: { career: true, intent: out.intent, result_status: out.resultStatus, contained: out.contained, ...(agentMeta || {}) } };
+        return { thread_id: tid, reply: visibleReply, action: null, capabilities: out.capabilities, turn_key: turnKey, reminders, ...(out.task ? { task: out.task } : {}), ...(out.batch ? { batch: out.batch } : {}), ...(parts ? { parts } : {}), ...(artifactsField ? { artifacts: artifactsField } : {}), ...((out as any).fileCards?.length ? { file_cards: (out as any).fileCards } : {}), ...(turnPostings.length ? { postings: turnPostings } : {}), ...(shapeField ? { shape: shapeField } : {}), meta: { career: true, intent: out.intent, result_status: out.resultStatus, contained: out.contained, ...(agentMeta || {}) } };
       };
       const commitTurn = (events: unknown[]) => clock.wait("commit", () => persistence.commit({ userId: user.id, threadId: tid, turnKey, requestHash, revision: loaded.revision, accountVersion: loaded.accountVersion, snapshot: clock.sync("snapshot_extract", () => host.extractSnapshot(ctx)), patch: ctx._hostPatch, input: userContent, response: clock.sync("respond", respond), taskIntent, batchIntent, events }));
       clockTag = { intent: out.intent ?? null, handler: out.handler ?? null };

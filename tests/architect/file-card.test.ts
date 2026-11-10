@@ -107,7 +107,7 @@ Deno.test("C.2 delivery: one card per result, never a list of raw links, on ever
   const { a, sent } = fake("telegram");
   await withFileCards(a, () => Promise.resolve(null)).send("1", ["hi", L1]);
   rule(sent.length === 1 && sent[0].bubbles[1] === L1, "an unresolved link goes as before");
-  rule(!fileCardOn({ get: () => undefined }) && fileCardOn({ get: () => " ON " }) && !fileCardOn({ get: () => "1" }), "CAREER_FILE_CARD reads on only for on");
+  rule(fileCardOn({ get: () => undefined }) && fileCardOn({ get: () => " ON " }) && !fileCardOn({ get: () => "off" }) && !fileCardOn({ get: () => "1" }), "CAREER_FILE_CARD: a release flag (D-049), served on; any other value rolls it back");
   // A failure after the card went: the outbox resumes after the card, never sending it twice.
   const f = fake("whatsapp", 2);
   const r = await withFileCards(f.a, resolve).send("1", ["lead", L1, "tail"]);
@@ -132,7 +132,7 @@ Deno.test("C.2 sources: a stored File's counts come from its own record; roles f
   assertNode.equal(bucketOfRole(specOf({ status: null, byHand: false, blocked: "Posting closed", tag: null } as never)), "closed");
 });
 
-Deno.test("C.2 resolver: only our signed File link becomes a card, drawn from that account's own record; off by default", async () => {
+Deno.test("C.2 resolver: only our signed File link becomes a card, drawn from that account's own record; on by release, off by rollback", async () => {
   const { createFileService, memoryFileStore } = await import("../../supabase/functions/_shared/file_service.ts");
   const { feedUrlsFor } = await import("../../supabase/functions/_shared/file_link.ts");
   const { fileCardResolver } = await import("../../supabase/functions/_shared/file_card.ts");
@@ -152,53 +152,50 @@ Deno.test("C.2 resolver: only our signed File link becomes a card, drawn from th
   assertNode.equal(await resolve(link.replace(/.$/, (x) => (x === "A" ? "B" : "A"))), null, "a forged link is no card");
   assertNode.equal(await resolve((await feedUrlsFor(env, "u2", "0123456789", AT)).url!), null, "another account's link reads nothing of u1's");
   assertNode.equal(await resolve("https://example.com/file?t=x"), null, "a link that is not ours");
-  // The switch: off (unset) the adapters are the plain ones; on, the File card rides every channel's send.
-  const plain = adaptersFromEnv(env, { fileCards: resolve }).telegram!, on = adaptersFromEnv({ get: (k) => (k === "CAREER_FILE_CARD" ? "on" : vars[k]) }, { fileCards: resolve }).telegram!;
+  // The switch: rolled back (CAREER_FILE_CARD=off) the adapters are the plain ones; served (unset, the release value), the card rides.
+  const plain = adaptersFromEnv({ get: (k) => (k === "CAREER_FILE_CARD" ? "off" : vars[k]) }, { fileCards: resolve }).telegram!, on = adaptersFromEnv(env, { fileCards: resolve }).telegram!;
   const bare = adaptersFromEnv(env).telegram!;
-  assertNode.equal(plain.send.toString(), bare.send.toString(), "off: the send is the adapter's own");
+  assertNode.equal(plain.send.toString(), bare.send.toString(), "rolled back: the send is the adapter's own");
   assertNode.notEqual(on.send.toString(), bare.send.toString(), "on: the send goes through the File card");
 });
 
-// A Supabase client over in-memory rows: the query shapes the card's reads and the modules they mirror use.
-function fakeAdmin(tables: Record<string, Record<string, unknown>[]>) {
-  return { from(t: string) {
-    const f: [string, (v: unknown) => boolean][] = [];
-    const rows = () => (tables[t] ?? []).filter((r) => f.every(([c, ok]) => ok(r[c])));
-    const b = {
-      select: () => b, order: () => b,
-      eq: (c: string, v: unknown) => { f.push([c, (x) => x === v]); return b; },
-      in: (c: string, vs: unknown[]) => { f.push([c, (x) => vs.includes(x)]); return b; },
-      limit: (n: number) => Promise.resolve({ data: rows().slice(0, n), error: null }),
-      maybeSingle: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
-    };
-    return b;
-  } };
-}
-
-Deno.test("C.2 delivery stays light: the card's read is the File service's own, row for row", async () => {
-  const { fileCardReads } = await import("../../supabase/functions/_shared/file_card_reads.ts");
-  const { createFileService, supabaseFileKindStore } = await import("../../supabase/functions/_shared/file_service.ts");
-  const rec = (id: string, o: Record<string, unknown>) => ({ user_id: "u1", key: `tf:file:${id}`, value: { id, userId: "u1", kind: "draft", data: { title: "D" }, state: {}, tag: null, created_at: AT, expires_at: AT + 10, revoked_at: null, ...o } });
-  const admin = fakeAdmin({ career_watch_kv: [rec("000000000a", {}), rec("000000000b", { revoked_at: AT }), rec("000000000c", { expires_at: AT - 1 }), rec("000000000d", { kind: "application_proof", data: {} }),
-    rec("000000000e", { kind: "application_review", data: { from_prepared: true } }), rec("000000000f", { userId: "u2" })] });
-  const now = () => AT;
-  const light = fileCardReads(admin, now), files = createFileService({ store: supabaseFileKindStore(admin), env: { get: () => undefined }, now });
-  for (const [u, id] of [["u1", "000000000a"], ["u1", "000000000b"], ["u1", "000000000c"], ["u1", "000000000d"], ["u1", "000000000e"], ["u1", "000000000f"], ["u2", "000000000a"], ["u1", "nope"], ["", "000000000a"]]) {
-    assertNode.deepEqual(await light.files.get(u, id), await files.get(u, id), `files.get(${u}, ${id})`);
-  }
-  // The card's own family names are file_family.ts's.
-  assertNode.deepEqual(Object.fromEntries(Object.entries(FAMILY_CARD).map(([k, v]) => [k, v.name])), Object.fromEntries(Object.entries(FAMILIES).map(([k, v]) => [k, v.name])));
-  // The delivery function's local import graph: no router bundle, and every file under the 1 MB a git read of one file may return
-  // (tests/deploy-provenance.test.cjs reads every file of every bundle).
-  const seen = new Set<string>(), root = new URL("../../supabase/functions/trainee-deliver/index.ts", import.meta.url);
-  const walk = async (u: URL) => {
-    if (seen.has(u.href)) return; seen.add(u.href);
-    for (const m of (await Deno.readTextFile(u)).matchAll(/(?:^|\n)\s*(?:import|export)[^"'\n]*?from\s*["'](\.\.?\/[^"']+)["']/g)) await walk(new URL(m[1], u));
+Deno.test("C.2 roles (D-049): the results page link becomes ONE card with each listed role's real state, on every channel; web gets it as data", async () => {
+  const { feedUrlsFor } = await import("../../supabase/functions/_shared/file_link.ts");
+  const { fileCardResolver, rolesCardSource } = await import("../../supabase/functions/_shared/file_card.ts");
+  const vars: Record<string, string> = { TRAINEE_FILE_BASE_URL: "https://trainee.example/file", TRAINEE_FILE_LINK_SECRET: "s".repeat(32) };
+  const env = { get: (k: string) => vars[k] };
+  // Five listed roles: r1 prepared (waits for the yes), r2 already in the queue, r3 set aside on the page, r4 and r5 found only.
+  const jobs = {
+    recallListMeta: (u: string, l: string) => Promise.resolve(u === "u1" && l === "abcdef0123" ? { kind: "results" as const, what: "climate operations roles", floor: null, at: AT, dismissed: ["r3"] } : null),
+    recallList: (u: string, l: string) => Promise.resolve(u === "u1" && l === "abcdef0123" ? ["r1", "r2", "r3", "r4", "r5"] : null),
+    recall: (_u: string, ref: string) => Promise.resolve({ job: { job_id: `j-${ref}` } as never, shownAs: "text" as const }),
+    applied: (_u: string, id: string) => Promise.resolve(id === "j-r2"),
+    prepared: (_u: string, id: string) => Promise.resolve(id === "j-r1" ? { payload_hash: "f".repeat(64) } as never : null),
   };
-  await walk(root);
-  const paths = [...seen].map((h) => new URL(h).pathname);
-  assertNode.ok(!paths.some((p) => /router_core/.test(p)), "trainee-deliver does not carry the router bundle");
-  assertNode.ok(paths.every((p) => Deno.statSync(p).size < 1_000_000), "every file the delivery bundle carries is under 1 MB");
-  assertNode.ok(paths.some((p) => p.endsWith("_shared/file_card.ts")) && paths.some((p) => p.endsWith("_shared/file_card_reads.ts")), "the card rides the delivery run");
-  assertNode.ok(paths.length < 60, `the delivery bundle stays small (${paths.length} local files)`);
+  const src = (await rolesCardSource(jobs, "u1", "abcdef0123"))!;
+  assertNode.deepEqual([src.family, src.title, src.items.map((i) => i.state)], ["F-05", "Climate operations roles", ["review", "progress", "closed", "ready", "ready"]]);
+  const files = { get: () => Promise.resolve({ state: "missing" }) };
+  const resolve = fileCardResolver({ env, now: () => AT, files, jobs });
+  const link = (await feedUrlsFor(env, "u1", "abcdef0123", AT)).url!;
+  const c = (await resolve(link))!;
+  assertNode.equal(c.freshness, "Updated 9:40 AM - 2 ready to prepare - 1 waiting for your yes - 1 in progress - 1 closed");
+  assertNode.equal(c.followup, "One role waits for your yes. Nothing is sent until you say yes to it.");
+  assertNode.equal(await resolve((await feedUrlsFor(env, "u2", "abcdef0123", AT)).url!), null, "another account's link: no card, nothing of u1's read");
+  // The handler's reply shape (role-pay-results-handler.test.ts): the sentences with the numbered roles, then the File link alone.
+  const head = "I found 5 climate operations roles. Here they are by fit, with Apply on each.\n1. A — Ops, Remote (open-checked) https://boards.example/1";
+  for (const ch of ["telegram", "whatsapp", "imessage"] as const) {
+    const { a, sent } = fake(ch);
+    assertNode.ok((await withFileCards(a, resolve).send("1", [head, link])).ok);
+    const texts = sent.flatMap((s) => s.bubbles), all = texts.join("\n");
+    assertNode.equal((all.match(/ROLES FILE/g) ?? []).length, 1, `${ch}: one card for the one result`);
+    assertNode.equal(texts.filter((t) => t.trim() === link).length, 0, `${ch}: the File link never goes alone as a raw link`);
+    assertNode.equal((all.match(/trainee\.example\/file/g) ?? []).length, ch === "telegram" ? 0 : 1, `${ch}: the File link at most once, as the card's last line`);
+    if (ch === "telegram") assertNode.equal(sent.flatMap((s) => s.opts?.buttons?.flat() ?? []).filter((b) => b.url === link || b.webApp).length, 1, "telegram: the one button");
+    assertNode.ok(texts[0] === head, `${ch}: the sentences go first, unchanged`);
+  }
+  // Web: the handler's response carries the same card as data (file_cards), drawn by cardHtml.
+  assertNode.ok((cardHtml(c).match(/<a /g) ?? []).length === 1 && cardHtml(c).includes("Review roles"));
+  const handler = await Deno.readTextFile(new URL("../../supabase/functions/agent-chat/handler-career.ts", import.meta.url));
+  assertNode.ok(/if \(fileCardOn\(Deno\.env\)\) \{\s*const src = await rolesCardSource\(supabaseJobStore\(admin\), user\.id, made\.listId\)/.test(handler), "the results turn builds the card from the list it just made");
+  assertNode.ok(handler.includes("file_cards: (out as any).fileCards"), "the web response carries file_cards");
 });

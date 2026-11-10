@@ -25,3 +25,6 @@ language sql stable security definer set search_path = public, pg_temp as $$
   when 'local' then coalesce((select value = 'on' from public.career_cloud_settings where key = 'APPLY_VM_ALLOW_LOCAL'), false)
   else false end
 $$;
+-- Launch readiness B1: a SECURITY DEFINER function's file revokes it from public and anon (tests/career-definer-revoke.test.cjs).
+-- Postgres keeps the earlier service_role grant (20261028180000) on replace; this re-states the revoke only.
+revoke all on function public.career_apply_vm_claimable(text) from public, anon, authenticated;

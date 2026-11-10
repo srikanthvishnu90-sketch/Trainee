@@ -423,6 +423,7 @@ const NOTHING_SENT = (company: string, prepares = true) => prepares
   ? `Nothing is sent and nothing is filled yet: I prepare it before you ask, from the facts you confirmed and a resume tailored to it; if the form asks something you haven't told me, I'll ask you here. The exact application goes to ${company} only when you approve it on the card that shows it exactly.`
   : `Nothing is sent and nothing is filled yet: it's in your queue to be prepared. The exact application goes to ${company} only when you approve it on the card that shows it exactly.`;
 
+const BARE_NUMBER = /^(?:please\s+)?apply\s+(?:me\s+)?(?:to|for)\s+(\d{1,2})(?:\s+please)?[.!]?$/i;
 export async function applyTurn(o: ApplyChatDeps): Promise<ApplyChatResult | null> {
   // FEATURE E2E: a pasted posting link, or a role named by the company's possessive, read from the ATS on demand
   // (career_apply_link.ts); only with the link deps wired (agent-chat), otherwise as before.
@@ -437,6 +438,11 @@ export async function applyTurn(o: ApplyChatDeps): Promise<ApplyChatResult | nul
   if (named) return await namedApplyTurn(o, named);
   // The batch ask first: applyAsk's employer grammar is case-blind, so "apply to the top 2" would read as an employer.
   if (applyManyAsk(o.message)) return applyManyTurn(o);
+  // a-ask-to-queue (2026-11-10, RESPONSE-RULES E2): a bare "apply to 3" right after a numbered list is #3 of that list, as the
+  // router reads it. It went to the router, which checks only this thread's resume facts, so a person whose confirmed resume
+  // is on file was told "I need your resume first" and nothing was queued. Without a list it stays out (a count or a name).
+  const bare = BARE_NUMBER.exec(String(o.message ?? "").trim());
+  if (bare && (o.shortlist ?? []).some((e) => e && (e.url || e.id))) return applyManyTurn({ ...o, message: `apply to #${bare[1]}` });
   const ask = applyAsk(o.message);
   if (!ask) return null;
   const intent = APPLY_QUEUE_INTENT;

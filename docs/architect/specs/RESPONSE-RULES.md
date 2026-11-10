@@ -105,7 +105,7 @@ The chat bubble after it names the exact decision ("Two roles need one answer fr
 | # | Rule | Enforcement |
 |---|---|---|
 | E1 | One yes approves exactly what was shown, by payload hash. A batch yes approves every application in the batch shown and sends all of them; each gets its own receipt and the batch gets one closeout (owner ruling; D-MS-1, D-MN-2). | approval hash tests; `tests/architect/wo-g-batch-closeout-pg.test.ts` |
-| E2 | Numbered references persist: "apply to 2 and 4" means items 2 and 4 of the list last shown, until a new list is shown. | GAP: no test pins persistence across a constraint change |
+| E2 | Numbered references persist: "apply to 2 and 4" means items 2 and 4 of the list last shown, until a new list is shown. | `tests/architect/ask-to-queue-20261110.test.ts` (40 scripts through the real handler on Postgres 16: after a widened or new search, an unrelated turn, and the same or overlapping asks) |
 | E3 | A question is narrow: one fact, by name, with why it matters ("Graduation date needed: the posting requires December 2027 or later"). Two concrete choices beat an open question. | `blocker_named`; GAP for the "why it matters" clause |
 | E4 | Asking never discards work: the prepared draft stays visible while one field is missing (C.24 Needs input). | `tests/architect/pending/r10-app-layer/r10-fix-12-review.test.ts` |
 | E5 | Applying needs only a chat message and a yes; the cloud browser does the rest. Nothing is downloaded or installed (D-050). An employer account is created only after the yes to that exact application (D-051, pending the owner's wording). | `supabase/functions/_shared/submit_capability.ts` (host list in #666) |
@@ -134,7 +134,7 @@ Nothing comes after the decision: no tails, no offers of more help, no capabilit
    inline text, which breaks R2 for long results. Measured by `tests/architect/files-actions-loop.test.ts` (every family,
    state and the live roles page at 390 px, every control pressed): 0 dead controls and 0 C.1 or C.24 failures are asserted;
    the actions no File server answers yet are counted as "unserved" (99 of 226 at trunk 3d4e1361; the live roles page 0 of 61).
-3. E2 numbered references across a constraint change.
+3. E2 numbered references across a constraint change. Closed 2026-11-10: `tests/architect/ask-to-queue-20261110.test.ts`.
 4. R9 interim bubbles: the rubric sees only the final reply.
 5. E6 parallel progress after a blocker.
 

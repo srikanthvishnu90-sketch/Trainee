@@ -3823,10 +3823,8 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     const rest = digits.slice(code.length).replace(/^[\s)\-.]+/, "").trim();
     return /\d{4,}/.test(rest.replace(/[^\d]/g, "")) ? rest : null;
   }
-  var EARLIER_ANSWER = /^text-answer:/;
   function withoutEarlierAnswers(answers) {
-    const a = answers?.salary_expectation;
-    if (!a || !EARLIER_ANSWER.test(String(a.factId ?? ""))) return answers;
+    if (!answers?.salary_expectation) return answers;
     const { salary_expectation: _earlier, ...rest } = answers;
     return rest;
   }
@@ -3901,8 +3899,8 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         const followUp = FOLLOW_UP.test(f.label);
         const here = factStaysHere(f, p.location, o.answers);
         const perApp = salaryExpectationAsked(f);
-        const facts = perApp ? withoutEarlierAnswers(o.answers) : o.answers;
-        const legacy = BIRTH_DATE.test(f.label) || perApp || key === "eeo" || mapQuestion(f).fact === "eeo" ? void 0 : o.saved[normLabel(f.label)];
+        const facts = perApp || key === "salary_expectation" ? withoutEarlierAnswers(o.answers) : o.answers;
+        const legacy = BIRTH_DATE.test(f.label) || PAY_HISTORY.test(f.label) || perApp || key === "eeo" || mapQuestion(f).fact === "eeo" ? void 0 : o.saved[normLabel(f.label)];
         const own = o.saved[answerKey(f, p.job_id, {
           haveFact: true,
           here
@@ -4361,9 +4359,12 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     }
   }
   function reusedSourceSuffix(field, _postingJobId, tz) {
+    const label = String(field?.label ?? "");
     if (!SENSITIVE.has(mapQuestion({
-      label: String(field?.label ?? "")
-    }).fact)) return "";
+      label
+    }).fact) && !salaryExpectationAsked({
+      label
+    })) return "";
     const id = String(field?.factId ?? ""), src = field?.source && typeof field.source === "object" ? field.source : {};
     if (!id || /^(approved-local-resume|essay-draft):/.test(id) || String(src.key ?? "").startsWith("job:")) return "";
     if (id.startsWith("text-answer:")) {

@@ -22,7 +22,8 @@
 import { chooseOption, yesNoOf } from "./answer_options.ts";
 import { decodeRowQuestionType } from "./row_answer.ts";
 import { matchOption, typedFieldProblem } from "./career_apply.ts";
-import { factType, mapQuestion, NEVER_BY_TEXT } from "./question_map.ts";
+import { factType, mapQuestion, NEVER_BY_TEXT, salaryExpectationAsked } from "./question_map.ts";
+import { reusedSourceSuffix } from "./career_prepared_card.ts";
 import { readAiPolicy } from "./ai_policy.ts";
 import { checkDraft, type DraftDeps, draftEssay, draftReply, parseDraftCommand } from "./essay_draft.ts";
 import { needsText, type Situation } from "./career_situation.ts";
@@ -66,7 +67,12 @@ export interface QuestionStore {
   // Batch needs (2026-11-10): the postings of the person's batch (their queue), so a question says how many of them it is
   // needed for and the one needed by most is asked first. Without it, the postings each question names are counted.
   batch?(userId: string): Promise<string[]>;
+  // D-053: the salary expectations the person has on file (answers to earlier postings' questions, a confirmed fact), newest
+  // first, and their IANA zone when known. Only ever OFFERED beside a posting's salary question, never filled. Without it,
+  // nothing is offered.
+  earlierSalary?(userId: string): Promise<{ answers: EarlierSalary[]; tz?: string }>;
 }
+export interface EarlierSalary { value: string; factId: string; at?: string; job_ids: string[] }
 
 export const QUESTIONS_INTENT = "career_apply_questions";
 // One question per message, on every channel (owner, 2026-10-31): the next is asked after the answer, and the card is
@@ -274,10 +280,13 @@ async function present(o: { userId: string; threadId: string; now: number; store
   const later = all.filter((q) => !skipped.includes(q.id)), open = orderAsks(later.length ? later : all, batch);
   if (!later.length) skipped = [];
   const offers = await eligibilityOffers(o.store, o.userId, open);
+  const pay = await salaryOffers(o.store, o.userId, open);
   const ahead = await aheadDrafts(o.store, o.userId, open);
   const t = questionsText(open, Math.max(total, open.length), (q, n) => {
     const d = offers.get(q.id);
     if (d) return draftNote(d.draft, d.value, n);
+    const s = pay.get(q.id);
+    if (s) return s.note(n);
     return ahead.has(q.id) && offerDraft(q)
       ? `   A draft of ${n} is ready, written only from your confirmed facts. Say "draft ${n}" to read it; nothing is saved until you say "use ${n}".`
       : null;
@@ -287,7 +296,7 @@ async function present(o: { userId: string; threadId: string; now: number; store
   // G2: an offered draft waits beside the question shown, and only "use N" saves it (draftTurn), as an essay draft does.
   const drafts: Record<string, PendingDraft> = {};
   t.take.forEach((q, i) => {
-    const d = offers.get(q.id);
+    const d = offers.get(q.id) ?? pay.get(q.id);
     if (d) drafts[q.id] = { text: d.value, at, n: i + 1 };
   });
   await o.store.setShown(o.userId, { thread: o.threadId, ids: t.take.map((q) => q.id), at, ...(Object.keys(drafts).length ? { drafts } : {}),
@@ -423,6 +432,38 @@ async function eligibilityOffers(store: QuestionStore, userId: string, open: Ope
     if (!draft) continue;
     const c = checkAnswer(q, draft.value);
     if (c.ok) out.set(q.id, { draft, value: c.value });
+  }
+  return out;
+}
+
+// D-053 (owner) and the architect's ruling on it (2026-11-10): a salary expectation is asked per application, and one on
+// file (an earlier posting's answer, a confirmed fact) is never filled. It may be offered beside this posting's question as
+// a suggestion: the value, labelled with where it came from (WO-122 reusedSourceSuffix, the card's own formatter), saved
+// only by the person's "use N" (draftTurn), for this posting only. Never from this posting's own answer (that one already
+// fills it), never for salary history, never by text for a question that is never asked by text. A reader that fails
+// offers nothing; the question is shown as before.
+async function salaryOffers(store: QuestionStore, userId: string, open: OpenQuestion[]) {
+  const out = new Map<string, { value: string; note: (n: number) => string }>();
+  const asked = open.filter((q) => !NEVER_BY_TEXT.test(q.label) && salaryExpectationAsked({ label: q.label, type: q.type }));
+  if (!asked.length || !store.earlierSalary) return out;
+  let onFile: { answers: EarlierSalary[]; tz?: string };
+  try {
+    onFile = await store.earlierSalary(userId);
+  } catch (e) {
+    console.error("questions: salary on file not read", e instanceof Error ? e.message : String(e));
+    return out;
+  }
+  for (const q of asked) {
+    const e = (onFile.answers ?? []).find((x) => typeof x?.value === "string" && x.value.trim() && !(x.job_ids ?? []).some((j) => q.job_ids.includes(j)));
+    if (!e) continue;
+    const c = checkAnswer(q, e.value);
+    if (!c.ok) continue;
+    const from = reusedSourceSuffix({ label: q.label, factId: e.factId, source: { for_posting: false, ...(e.at ? { at: e.at } : {}) } }, null, onFile.tz);
+    const shown = c.value.length > 80 ? `${c.value.slice(0, 77)}...` : c.value;
+    out.set(q.id, {
+      value: c.value,
+      note: (n) => `   On file: ${shown}${from}. It is not used for this application unless you say "use ${n}"; or answer it yourself.`,
+    });
   }
   return out;
 }
@@ -603,6 +644,19 @@ export function supabaseQuestionStore(admin: any): QuestionStore {
         "read the person's own statements",
       ) ?? [];
       return rows.filter((r: any) => typeof r.content === "string" && r.created_at).map((r: any) => ({ text: r.content, at: String(r.created_at) }));
+    },
+    // D-053: the person's answered salary-expectation questions (any key: an old fact:salary_expectation row or a posting's
+    // job: row), newest first; offered beside another posting's salary question, never filled.
+    async earlierSalary(userId) {
+      const rows = must(
+        await admin.from("career_apply_questions").select("id,label,type,answer,answered_at,job_ids").eq("user_id", userId).eq("state", "answered")
+          .order("answered_at", { ascending: false, nullsFirst: false }).limit(200),
+        "read the salary answers on file",
+      ) ?? [];
+      return {
+        answers: rows.filter((r: any) => typeof r.answer === "string" && r.answer.trim() && salaryExpectationAsked({ label: String(r.label ?? ""), type: String(r.type ?? "") }))
+          .map((r: any) => ({ value: String(r.answer), factId: `text-answer:${r.id}`, ...(r.answered_at ? { at: String(r.answered_at) } : {}), job_ids: (r.job_ids ?? []).map(String) })),
+      };
     },
     // G4: the drafts written ahead (prepare-ahead.ts) for these of the person's open questions.
     async drafted(userId, ids) {

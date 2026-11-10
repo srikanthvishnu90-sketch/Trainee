@@ -148,7 +148,9 @@ Deno.test("WO-048/4 field shapes Workday asks: national number beside its countr
   eq(valueOf(plan([field("pt", "Phone Device Type", { type: "select", options: opts("Home", "Work") })]), "pt"), null);
   // A salary range list takes the one range the stated amount is in; two ranges sharing the amount is asked.
   const sal = opts("$40,000 - $59,999", "$60,000 - $79,999", "$80,000 - $99,999", "$100,000 - $119,999", "$120,000+");
-  eq(valueOf(plan([field("s", "What are your base salary expectations (USD)?", { type: "select", options: sal })]), "s"), "$80,000 - $99,999");
+  // architect amendment D-053 (owner, 2026-11-10): the salary expectation is asked per application, never filled from the
+  // persona's fact. Before: "$80,000 - $99,999". After: null (asked). The range choice itself is held by chooseOption below.
+  eq(valueOf(plan([field("s", "What are your base salary expectations (USD)?", { type: "select", options: sal })]), "s"), null);
   eq(chooseOption("salary_expectation", "95000", opts("$80,000 - $95,000", "$95,000 - $110,000")), null, "an edge shared by two ranges: asked");
   eq(chooseOption("salary_expectation", "95000", opts("80k - 100k", "100k+")), "80k - 100k");
   eq(chooseOption("salary_expectation", "competitive", sal), null);

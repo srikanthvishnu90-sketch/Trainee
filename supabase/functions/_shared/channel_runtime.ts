@@ -7,6 +7,7 @@ import { shapeReply } from "./channel_shape.ts";
 import { type CardResolver, fileCardResolver } from "./file_card.ts";
 import { fileCardReads } from "./file_card_reads.ts"; // the card's reads only: file_service.ts and telegram_jobs.ts carry the router bundle
 import { telegramPacerFromEnv } from "./channel_pacer.ts"; // every Telegram send takes its token from the one shared bucket
+import { CHAT_WAIT_MS } from "./channel_inbound.ts"; // r-states: the wait the time-out reply states
 
 // The turn runs as the person through agent-chat's service-role path, so history, erase, the host's STOP and pause,
 // persistence and the hourly turn limit are the chat's own. The channel is never sent: the brain is channel-blind.
@@ -21,7 +22,7 @@ export function chatThroughAgent(url: string, key: string, o: { retryDelayMs?: n
     let res: Response, body: Record<string, unknown>;
     for (let attempt = 0; ; attempt++) {
       res = await fetch(`${url}/functions/v1/agent-chat`, {
-        method: "POST", signal: AbortSignal.timeout(120000),
+        method: "POST", signal: AbortSignal.timeout(CHAT_WAIT_MS),
         headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
         // SERIAL-1462: the provider's reply-to id travels to the turn; a card's text yes counts only in reply to the card.
         body: JSON.stringify({ as_user_id: a.userId, message: a.message, turn_key: a.turnKey, ...(a.threadId ? { thread_id: a.threadId } : {}),

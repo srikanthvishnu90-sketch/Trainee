@@ -194,7 +194,7 @@ Deno.test("N12: a resume file read slowly, then a slow chat: ONE interim (readin
   eq(h.timers.pending(), 0, "nothing left armed");
 });
 
-Deno.test("N12: a failed typing call never touches the turn; a turn that fails after the interim says it could not answer", async () => {
+Deno.test("N12: a failed typing call never touches the turn; a turn that fails after the interim names what stopped", async () => {
   const h = world({ turnMs: 1000, typingStatus: 500 });
   await h.post("hello");
   eq(sends(h.events), [h.reply], "the answer still goes when typing fails");
@@ -204,7 +204,16 @@ Deno.test("N12: a failed typing call never touches the turn; a turn that fails a
   eq(sends(busy.events), [busy.reply], "the answer goes");
   const k = world({ turnMs: 7000, chatThrows: true });
   await k.post("find me jobs in Austin");
-  eq(sends(k.events), [ackFor("find me jobs in Austin"), CHAT_DOWN_REPLY], "the interim, then the plain failure line; no result is claimed");
+  // Architect amendment (r-states, 2026-11-10; R4, R9): after the interim, the failure names the blocker, claims nothing, keeps
+  // the ask in view and gives one next step (never the bare CHAT_DOWN_REPLY).
+  const said = sends(k.events);
+  eq(said.length, 2, JSON.stringify(said));
+  eq(said[0], ackFor("find me jobs in Austin"), "the interim first");
+  assert(said[1] !== CHAT_DOWN_REPLY, "not the bare failure line");
+  assert(/error on its side/.test(said[1]!), `names the blocker: ${said[1]}`);
+  assert(said[1]!.includes('"find me jobs in Austin"'), `keeps the ask: ${said[1]}`);
+  assert(/can't confirm how far it got/.test(said[1]!) && !/\b(?:found|sent|submitted|applied|done)\b/i.test(said[1]!), `no claim about what got done: ${said[1]}`);
+  assert(/Send it again/.test(said[1]!), `one next step: ${said[1]}`);
 });
 
 Deno.test("N12: an interim still on its way when the turn ends reaches the person BEFORE the answer, never after it", async () => {

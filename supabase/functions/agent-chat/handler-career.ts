@@ -1433,28 +1433,29 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         await ledger.record(meter);
         // Architect ruling 3 (2026-11-09): at a limit, the router's own answer stands when it chose a specific intent for THIS message
         // ("what should I wear to a video interview?" -> its interview prep); only its catch-alls and fallback templates are replaced.
+        // Architect amendment (r-states, 2026-11-10; R4, R9, E.6 54): a model outage is held the same way. The router answers only
+        // when it chose a specific intent for this message; its catch-all never answers a different question.
+        const failedTurn = turn.stopped === "model_error" && !turn.tool_calls.some((t) => t.ok && t.effect === "write_own");
+        const heldStop: LimitStop | null = failedTurn ? (limitStop ?? "outage") : null;
         let routedAtLimit: typeof out | null = null;
-        if (turn.stopped === "model_error" && limitStop && !turn.tool_calls.some((t) => t.ok && t.effect === "write_own")) {
+        if (heldStop) {
           await ensurePool();
           const routed = clock.sync("router", () => host.runTurn(message, ctx));
           if (routed.intent && !NOT_AN_ANSWER_AT_LIMIT.has(routed.intent)) routedAtLimit = routed;
         }
         if (routedAtLimit) {
           out = routedAtLimit;
-          agentMeta = { brain: staged.chosen ? "staged" : "agent", stopped: turn.stopped, limit_stop: limitStop, limit_answer: "router", ...replyFlagsMeta(turn as { flags?: unknown }) };
-        } else if (turn.stopped === "model_error" && limitStop && !turn.tool_calls.some((t) => t.ok && t.effect === "write_own")) {
-          // R10 WO-D: a limit, not an outage: what stopped, the task kept for "continue", the next step in the person's zone.
-          // "continue" while the limit still holds keeps the task it already holds.
+          if (limitStop) agentMeta = { brain: staged.chosen ? "staged" : "agent", stopped: turn.stopped, limit_stop: limitStop, limit_answer: "router", ...replyFlagsMeta(turn as { flags?: unknown }) };
+          else console.error("agent brain: model unavailable, answering with the router");
+        } else if (heldStop) {
+          // R10 WO-D: what stopped (a limit, or the outage), the task kept for "continue", the next step in the person's zone.
+          // "continue" while it still holds keeps the task it already holds.
           const kept = (ctx as any).discovery?.heldAtLimit;
           const task = kept?.message && isResume(typedMessage) ? String(kept.message) : String(typedMessage);
           const zone = await readPersonZone(admin, user.id, (ctx as any).profile ?? null);
-          out = { reply: limitHeldReply(task, limitStop, zone, limitRetryAt), intent: HELD_INTENT, resultStatus: "held", contained: false, handler: "limit_held" };
-          (ctx as any).discovery = { ...((ctx as any).discovery ?? {}), heldAtLimit: { message: task.slice(0, 1000), at: Date.now(), stop: limitStop } };
-          agentMeta = { brain: staged.chosen ? "staged" : "agent", stopped: turn.stopped, limit_stop: limitStop, ...replyFlagsMeta(turn as { flags?: unknown }) };
-        } else if (turn.stopped === "model_error" && !turn.tool_calls.some((t) => t.ok && t.effect === "write_own")) {
-          console.error("agent brain: model unavailable, answering with the router");
-          await ensurePool();
-          out = clock.sync("router", () => host.runTurn(message, ctx));
+          out = { reply: limitHeldReply(task, heldStop, zone, limitRetryAt), intent: HELD_INTENT, resultStatus: "held", contained: false, handler: "limit_held" };
+          (ctx as any).discovery = { ...((ctx as any).discovery ?? {}), heldAtLimit: { message: task.slice(0, 1000), at: Date.now(), stop: heldStop } };
+          agentMeta = { brain: staged.chosen ? "staged" : "agent", stopped: turn.stopped, limit_stop: heldStop, ...replyFlagsMeta(turn as { flags?: unknown }) };
         } else {
           // A batch of outreach drafts is shown by code, and its intent makes the next text an answer to it.
           turnPostings = Array.isArray(turn.postings) ? turn.postings : [];
@@ -1496,9 +1497,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
                 n: Number(Deno.env.get("CAREER_JUDGE_N")) || undefined, standing: () => supabaseMemoryStore(admin).standing(user.id) },
               // R10 WO-C (fix 6): each role's application page is re-checked before it is shown (Greenhouse, Lever, Ashby and
               // SmartRecruiters public boards by id; any other link by fetching it). The checked time is said in the person's zone.
-              // Only when the person asked for open or verified roles (SearchAsk.verify); otherwise each is said to be not re-checked.
+              // Architect ruling E.21 (release item 8; tests/architect/loop-08-discovery.test.ts): EVERY search re-checks the postings
+              // it shows, only those (at most the count asked, never more than 10; a closed one's place goes to the next one, at most
+              // 10 pages read), each on its own posting page by id; no board listing is read (Ashby by its posting page). None is
+              // called open unless its check passed.
               canSubmit: canSubmitByHost, // R10 owner ruling (apply by message and yes): the posting's own host decides the label
-              openCheck: f5Ask.verify ? linkChecker(fetch, { userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }) : null,
+              openCheck: linkChecker(fetch, { ashby: "posting", userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }),
               tz: f5Zone?.tz ?? null, want: f5Ask.want ?? wantOf(message) }));
             // F.1: the blocker question gets the evidenced blocker: a source that could not be read is a connection problem.
             if (!found && f5Said?.explain) out = { ...out, intent: "career_discovery", resultStatus: "blocked", handler: "search_judge",

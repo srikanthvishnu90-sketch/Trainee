@@ -1,0 +1,33 @@
+# Strict browser benchmark (r11), on a push to bench/browser-*: real public postings, dry run (non-GET aborted except GraphQL
+# reads, submits trapped, stopped before the click), robots.txt obeyed. No secrets. One job per sample and persona.
+name: browser-bench
+on:
+  push:
+    branches: ["bench/browser-*"]
+permissions:
+  contents: read
+jobs:
+  strict:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        sample: [sample, heldout]
+        persona: [default]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22.23.3" }
+      - name: Playwright and its Chromium
+        run: |
+          npm ci --prefix tools --no-audit --no-fund
+          (cd tools && npx --no-install playwright install --with-deps chromium)
+          echo "UPMORE_PLAYWRIGHT_PATH=$GITHUB_WORKSPACE/tools/node_modules/playwright" >> "$GITHUB_ENV"
+      - name: Strict benchmark (nothing is submitted)
+        run: |
+          label="r11-${{ matrix.sample }}-${{ matrix.persona }}-$(printf '%s' "$GITHUB_SHA" | cut -c1-8)"
+          extra=""; [ "${{ matrix.persona }}" != "default" ] && extra="--persona ${{ matrix.persona }}"
+          node scripts/browser-eval/strict.cjs --sample "scripts/browser-eval/${{ matrix.sample }}.csv" --label "$label" --max-per-provider 20 $extra
+          cat "artifacts/browser-eval/$label/strict-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          node -e 'const s=require(process.argv[1]); console.log(`BOTH | ${process.argv[2]} | pass ${s.all.pass} / ${s.all.sampled} | ready_if_answered ${s.all.ready_if_answered} | ready_except_upload ${s.all.ready_except_upload} | breaches ${s.all.breaches}`); for (const p of s.prov) console.log(`PROV | ${process.argv[2]} | ${p.provider} | pass ${p.pass} | ria ${p.ready_if_answered} | reu ${p.ready_except_upload} | fail ${p.fail} | ${p.top_fail.map(([k,n])=>k+" "+n).join("; ")}`)' "$PWD/artifacts/browser-eval/$label/strict-summary.json" "${{ matrix.sample }}-${{ matrix.persona }}"

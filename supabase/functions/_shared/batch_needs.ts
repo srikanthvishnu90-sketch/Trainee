@@ -66,17 +66,19 @@ export function batchNeeds(rows: NeedRow[], batchJobIds: Iterable<string>): Batc
   return { items, onForm, batch: batch.size };
 }
 
-// The same order for the questions a text asks next (career_apply_questions.ts present): most postings first, a
-// per-application one last, otherwise oldest first. Without the batch, every posting a question names counts.
-export function orderAsks<T extends NeedRow>(qs: T[], batchJobIds?: Iterable<string> | null): T[] {
+// The order for the questions a text asks next (career_apply_questions.ts present): most postings first, otherwise oldest
+// first; with perApplicationLast, a per-application one after every reusable one (batchNeeds' order). Without the batch,
+// every posting a question names counts. The questions turn asks by postings only: its architect tests pin oldest-first
+// between a per-application question and a reusable one (wo-029-ask-once WO-029/5, wo-030-essay-drafts WO-030/2).
+export function orderAsks<T extends NeedRow>(qs: T[], batchJobIds?: Iterable<string> | null, o: { perApplicationLast?: boolean } = {}): T[] {
   const batch = batchJobIds ? new Set([...batchJobIds].map(String)) : null;
   const n = (q: T) => {
     const ids = Array.isArray(q.job_ids) ? q.job_ids.map(String) : [];
     const inBatch = batch ? ids.filter((j) => batch.has(j)).length : 0;
     return inBatch || ids.length;
   };
-  return qs.map((q, at) => ({ q, at })).sort((a, b) =>
-    Number(!isReusable(a.q.key)) - Number(!isReusable(b.q.key)) || n(b.q) - n(a.q) || a.at - b.at).map((x) => x.q);
+  const last = (q: T) => (o.perApplicationLast && !isReusable(q.key) ? 1 : 0);
+  return qs.map((q, at) => ({ q, at })).sort((a, b) => last(a.q) - last(b.q) || n(b.q) - n(a.q) || a.at - b.at).map((x) => x.q);
 }
 
 // The one plain sentence a question is asked with: how many applications it is needed for.

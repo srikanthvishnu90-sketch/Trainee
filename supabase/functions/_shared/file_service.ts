@@ -4,6 +4,7 @@ import { feedUrlsFor } from "./file_link.ts";
 import { KIND_LABEL, tagOf, validateKind, type FileRecord, type KindId } from "./file_kinds.ts";
 import { evidenceOf, type ReviewItem, stageOf } from "./application_review.ts";
 import { reasonWords } from "./career_apply_status.ts";
+import type { ServedFamily } from "./file_family_serve.ts";
 
 export const DEFAULT_TTL_HOURS = 168; // a week; TRAINEE_FILE_TTL_HOURS sets it (1 to 720)
 // Every read and write is keyed by the user id, so one person can never read, change or revoke another's file.
@@ -30,6 +31,8 @@ export interface FileService {
   claim(userId: string, id: string, name: string): Promise<boolean>;
   // WO-G: the review File of one prepared application, from code-built data only (reviewFromItem). Never reachable from a model.
   createReview?(userId: string, item: ReviewItem): Promise<{ ok: true; id: string; url: string | null; webApp: string | null } | { ok: false; error: string }>;
+  // Item 6 S0: a File family's page from code-built view data (file_family_serve.ts). Never reachable from a model.
+  createFamily?(userId: string, family: ServedFamily, title: string, view: unknown): Promise<{ ok: true; id: string; url: string | null; webApp: string | null } | { ok: false; error: string }>;
 }
 
 const STATUS: Record<string, string> = { queued: "queued", driving: "prepared", needs_user: "prepared", submitted_unconfirmed: "submitted", unknown_outcome: "uncertain", confirmed: "confirmed", failed: "failed", not_submitted: "failed" };
@@ -109,6 +112,17 @@ export function createFileService(o: { store: FileKindStore; env: Env; now: () =
       const links = await feedUrlsFor(o.env, userId, id, now);
       if (!links.url && !links.webApp) return { ok: false, error: "not created: file links aren't set up yet" };
       await o.store.put({ id, userId, kind: "application_review", data: v.data, state: {}, tag: null, created_at: now, expires_at: now + ttlHours() * 3600_000, revoked_at: null });
+      return { ok: true, id, url: links.url, webApp: links.webApp };
+    },
+    // Item 6 S0: a File family's page, from view data built by code (never by a model: create() above validates a model's data
+    // against its kind and never keeps from_code). The family's builder draws it when served (file_family_serve.ts).
+    async createFamily(userId, family, title, view) {
+      if (!userId) return { ok: false, error: "not created: no person to make it for" };
+      const now = o.now();
+      const id = [...crypto.getRandomValues(new Uint8Array(5))].map((b) => b.toString(16).padStart(2, "0")).join("");
+      const links = await feedUrlsFor(o.env, userId, id, now);
+      if (!links.url && !links.webApp) return { ok: false, error: "not created: file links aren't set up yet" };
+      await o.store.put({ id, userId, kind: "plan_review", data: { title: title.slice(0, 80), family, view, from_code: true }, state: {}, tag: null, created_at: now, expires_at: now + ttlHours() * 3600_000, revoked_at: null });
       return { ok: true, id, url: links.url, webApp: links.webApp };
     },
     revoke: (userId, id) => o.store.revoke(userId, id, o.now()),

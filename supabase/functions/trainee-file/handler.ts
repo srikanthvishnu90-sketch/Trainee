@@ -39,6 +39,8 @@ import { fileShellHtml, firstNameOf, freshnessStamp, madeForLine, stateHtml } fr
 import { byHandUrl, FEED_ROWS, foreignFact, hashTag, isSecretField, NOT_YOURS, logoDomain, postingVerdict, secretFields, secretKey, tapJob, unsendable, type JobDeps, type JobSender, type JobStore, type JobView, type PostingRow, type PreparedRow } from "../_shared/telegram_jobs.ts";
 import { checkedAt, studentWindowOf } from "../_shared/search_shortlist.ts"; // R10 WO-C
 import { submitLabel } from "../_shared/submit_capability.ts"; // R10 owner ruling
+import { familyPage } from "../_shared/file_family.ts";
+import { isServedFamily, servedFamilyFile } from "../_shared/file_family_serve.ts";
 
 export type { AppRow } from "../_shared/file_page.ts";
 export interface FileStore extends JobStore {
@@ -644,6 +646,14 @@ async function handleKind(o: { g: Exclude<Awaited<ReturnType<FileService["get"]>
   if (o.g.state === "expired") return o.state("This file has expired", [`Files last ${files.ttlHours()} hours so a forwarded link stops working. Ask Trainee in Telegram to make it again.`], 410);
   if (o.g.state === "revoked") return o.state("This file was removed", ["It is no longer available. Ask Trainee in Telegram if you need it again."], 410);
   let rec: FileRecord = o.g.rec, note = "";
+  // Item 6 S0: a File family drawn from its stored view data (file_family_serve.ts). Its page changes nothing: every control is the
+  // chat, this File's export, a source page, or shown off with its reason until its own POST (S1-S6) is served.
+  if (rec.data?.from_code === true && isServedFamily(rec.data?.family)) {
+    if (action) return o.state("Not done", ["That is not something this page can do yet. Nothing was changed or sent."], 400);
+    if (fields.get("format") === "json") return new Response(JSON.stringify({ family: rec.data.family, title: rec.data.title ?? null, view: rec.data.view ?? null }, null, 2), { status: 200, headers: { ...(await headers("application/json; charset=utf-8", d.env)), "content-disposition": `attachment; filename="trainee-file-${rec.id}.json"` } });
+    const botUrl = (d.env.get("TRAINEE_BOT_URL") || "").trim(), tz = d.timeZone ? await d.timeZone(u).catch(() => null) : null;
+    return o.html(familyPage(servedFamilyFile(rec.data.family, rec.data.view, { bot: /^https:\/\//.test(botUrl) ? botUrl : null }), { now: d.now(), tz }));
+  }
   if (action === "remove") {
     const done = await files.revoke(u, rec.id).catch(() => false);
     if (!done) return o.state("Couldn't remove this file", ["It was not removed and its link still works. Try again in a minute."], 500);

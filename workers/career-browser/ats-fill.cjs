@@ -380,7 +380,9 @@ async function fillChoice(page, d, value, multi) {
         // else (a banner, a dialog, another control) is reported, never clicked.
         await loc.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
         const hit = await loc.evaluate((e) => { const r = e.getBoundingClientRect(), w = e.closest("[role=radio], [role=checkbox]"), h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-          return !h ? "nothing" : w && w.contains(h) ? "own" : `${h.tagName.toLowerCase()}.${String(h.className || "").slice(0, 40)}`; }).catch(() => "unreadable");
+          // What is on top is this option's own (inside it, or the option's own box that holds no other option).
+          const own = w && h && (w.contains(h) || (h.contains(w) && h.querySelectorAll("[role=radio], [role=checkbox]").length === 1 && !h.querySelector("button, a[href], select, textarea, input:not([type=radio]):not([type=checkbox])")));
+          return !h ? "nothing" : own ? "own" : `${h.tagName.toLowerCase()}.${String(h.className || "").slice(0, 40)} ${h.contains(w) ? "around" : w && w.parentElement && w.parentElement.contains(h) ? "beside" : "elsewhere"}`; }).catch(() => "unreadable");
         if (hit !== "own") return { ok: false, reason: "option_covered", detail: `drawn there: ${hit}` };
       }
       await loc.click(d.drawn ? { force: true, timeout: 5000 } : {});
@@ -547,7 +549,10 @@ async function fillCombo(page, d, value, pick, phone, country) {
     : matchOption(list, value);
   if (m.error) { await input.press("Escape").catch(() => {}); return { ok: false, reason: m.error, options: list.slice(0, 40), ...(d.phoneCountry || pick === "phone_country" ? { detail: `options: ${list.slice(0, 6).join(" / ").slice(0, 140)}` } : {}) }; }
   await pickOption(opts, m);
-  const s = await stateOf(page, d);
+  // A board that writes the pick into the box a moment later (Ashby's place box, strict run 42782536964: read back empty while
+  // its list was still closing) is read again for up to 1.5 s before the pick counts as not held.
+  let s = await stateOf(page, d);
+  for (let k = 0; k < 10 && !s.filled; k++) { await page.waitForTimeout(150); s = await stateOf(page, d); }
   if (s.filled && norm(s.text) === norm(list[m.index])) return { ok: true };
   // The phone's country picker shows its choice in its own words ("United States" for the option "United States +1"): it
   // holds the approved country when that shown value is itself the confirmed country, alone or with the phone's dial code.

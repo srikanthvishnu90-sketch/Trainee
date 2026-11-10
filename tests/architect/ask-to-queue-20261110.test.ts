@@ -100,8 +100,12 @@ export const SCRIPTS: Script[] = [
 export function listedIn(reply: string): string[] {
   const out: string[] = [];
   for (const line of reply.split("\n")) {
+    // A numbered line names one posting: by its own link, or (File card on, D-049: the links live on the File, one link
+    // under the list) by the line's exact "N. <company> — <title>" head. Numbers must run 1, 2, 3 in order.
     const n = /^(\d+)\. /.exec(line), url = (line.match(/https:\/\/[^\s)]+/g) ?? []).map((x) => x.replace(/[.,]+$/, "")).find((x) => BY_URL.has(x));
-    if (n && url && Number(n[1]) === out.length + 1) out.push(BY_URL.get(url)!);
+    const head = n ? BOARD.filter((b) => line.startsWith(`${n[1]}. ${b.co} — ${b.t}`)) : [];
+    const id = url ? BY_URL.get(url)! : head.length === 1 ? head[0].id : null;
+    if (n && id && Number(n[1]) === out.length + 1) out.push(id);
   }
   return out;
 }

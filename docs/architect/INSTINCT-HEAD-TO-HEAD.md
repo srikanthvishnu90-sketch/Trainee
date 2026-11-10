@@ -271,9 +271,12 @@ checked on that turn (shortfall 11).
 ### Item 3 after the fixes
 
 The A.2 resume turn 1 file now prints the city line ("Chicago, IL (Lincoln Park)") above the amber placeholder. It has no
-empty Education bullet and no "ADDITIONAL / (registrar transcript)" entry, its Interests line is under Skills, and its founder
-roles run newest first (Feb 2023 - Present above Jan 2022 - Dec 2023). It is still one page, US Letter (pdfinfo). Checks 4, 6, 8 and
-10 now pass: **12 of 13**. Check 13 (`tailor_resume` refuses without a typed name and email) is unchanged. The resume
+empty Education bullet and no "ADDITIONAL / (registrar transcript)" entry, and its founder roles run newest first
+(Feb 2023 - Present above Jan 2022 - Dec 2023). It is still one page, US Letter (pdfinfo). Checks 4, 6 and 8 now pass:
+**11 of 13**. Check 10 (Interests) is open again: reading an INTERESTS heading as entries broke the pinned onboarding
+battery, which holds that heading as an unread section (840 of 1500 journeys failed on CI), so the change was withdrawn.
+Keeping interests needs an owner ruling and a battery update first. Check 13 (`tailor_resume` refuses without a typed name
+and email) is unchanged. The resume
 loop's `chronological()` is still false on this file, because the Python screening internship (Jan 2025) leads the AI M&A
 internship (Jun 2025) by relevance. That is by design: the loop reports it and does not set a bar on it. The resume loop
 stays at 81/81 made and 162/162 opened.

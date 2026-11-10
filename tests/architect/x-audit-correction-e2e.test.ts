@@ -10,12 +10,12 @@
 //   next card     "show my applications" after the correction never shows the old date
 //   library       the answer the person gave once to "Expected graduation date" (career_apply_questions, the answer
 //                 library every later form is filled from): not reused with the old date
-// Pending until the answer library is covered by the correction (6/7 on trunk: the library keeps the old answer).
-// Run: deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/pending/x-audit-correction-e2e.test.ts
+// 6/7 on trunk (the answer library kept the old answer); 7/7 with 20261110200000.
+// Run: deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/x-audit-correction-e2e.test.ts
 import assertNode from "node:assert/strict";
-import { pgBinDir } from "../../flow/pg.ts";
-import { CI, emailOf, POSTINGS, resumeOf, startWorld, tokenOf, uidOf, type Person, type World } from "../scenarios/journeys-r2-world.ts";
-import { ENTRY_CORRECTION_VIA } from "../../../supabase/functions/_shared/career_router_evidence.ts";
+import { pgBinDir } from "../flow/pg.ts";
+import { CI, emailOf, POSTINGS, resumeOf, startWorld, tokenOf, uidOf, type Person, type World } from "./scenarios/journeys-r2-world.ts";
+import { ENTRY_CORRECTION_VIA } from "../../supabase/functions/_shared/career_router_evidence.ts";
 
 const q = (s: string) => `'${s.replace(/'/g, "''")}'`;
 const OLD = "May 2026", NEW = "May 2027";

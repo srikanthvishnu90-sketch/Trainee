@@ -109,12 +109,13 @@ Deno.test("design/3 snapshot: the fixture renders the same bytes every time, and
   const part = (n: string) => Buffer.from(R.docxPart(Buffer.from(a.docx), n)).toString("utf8");
   const h = (x: string) => crypto.createHash("sha256").update(x).digest("hex");
   eq([h(ops(a.pdf)), h(part("word/document.xml")), h(part("word/styles.xml"))], [
-    "5394e887daf19e2df728cb7196b6172ea5a5ae100b0ad6fe721793c45b6d7ae0",
-    "e7b16b27c137dcc16cdfd397282805fbb758ffeec90586ab9fda22a2f609681a",
+    // Architect design amendment 2026-11-10 (#673, D-007 confirmed skills): the Skills line's order moved; nothing else.
+    "bb6bfcc5eef6d948015098c379d0542c0ffbca0e321079f8b95d4d811226a893",
+    "ba5a4a59c33c89a13da0f68b1e1f56abec3ac8310f531e725d2a6ae44d7786ef",
     "f38c7e3b4664373bf51bc36dc19e2b3f9b4895497f133c0f096a5f760358a35d",
   ], "the layout snapshot");
   eq(a.lines, [
-    "Alex Testcase", "alex.testcase@example.test | Chicago, IL", "SKILLS", "Python, PostgreSQL, React, Kubernetes, Statistics, Probability, Data Structures, Algorithms",
+    "Alex Testcase", "alex.testcase@example.test | Chicago, IL", "SKILLS", "Python, React, Kubernetes, PostgreSQL, Statistics, Probability, Data Structures, Algorithms",
     "PROJECTS", "DeployBoard (TEST project)", "• Built DeployBoard in Go to deploy containerised apps on Kubernetes, deployed on AWS EKS for 12 student teams",
     "EXPERIENCE", "Software Engineering Intern, TEST Systems Inc, June 2025 - August 2025",
     "• Built a reporting dashboard in React and Python used by 200 internal users",
@@ -159,7 +160,7 @@ Deno.test("design/5 the parse-check stays strict: a layout's lines must be the s
   eq(sameText(R, d.pdf, new Uint8Array(cut)), false);
   assert(R.parseCheck({ resume: doc, docx: cut }, { expected: { docx: d.lines } }).reasons.some((r: any) => r.check === "missing_content"), "the dropped line is missing");
   // A run past x 100 that is not a date on an entry's line is a second column.
-  const two = Buffer.from(ops(d.pdf).replace(/1 0 0 1 54 ([\d.]+) Tm \(Python, PostgreSQL/, "1 0 0 1 320 $1 Tm (Python, PostgreSQL"));
+  const two = Buffer.from(ops(d.pdf).replace(/1 0 0 1 54 ([\d.]+) Tm \(Python, React/, "1 0 0 1 320 $1 Tm (Python, React"));
   const s = Buffer.from(d.pdf).toString("latin1"), body = zlib.deflateSync(two);
   const swapped = Buffer.from(s.replace(/<< \/Length \d+ \/Filter \/FlateDecode >>\nstream\n[\s\S]*?\nendstream/, `<< /Length ${body.length} /Filter /FlateDecode >>\nstream\n${body.toString("latin1")}\nendstream`), "latin1");
   assert(!R.parseCheck({ resume: doc, pdf: swapped }).checks.pdf.singleColumn, "not one column");

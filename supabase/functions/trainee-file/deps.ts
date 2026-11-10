@@ -7,6 +7,7 @@ import { supabaseCardStore } from "../_shared/career_apply_cards.ts";
 import { supabaseAccountStamp, supabaseConfirmedFacts } from "../_shared/telegram_jobs.ts";
 import { supabaseFileStore, supabasePhoneAuth, supabaseSessionStore, supabaseTimeZone, supabaseUserOfTelegram } from "./store.ts";
 import { createFileService, supabaseFileKindStore } from "../_shared/file_service.ts";
+import { planMaterialRecords, supabasePlanMaterialStore } from "../_shared/file_family_records.ts";
 import { supabaseQuestionStore } from "../_shared/career_apply_questions.ts";
 import { pendingRows, reprepareQueued } from "../_shared/career_hosted_prepare.ts";
 import { resumeOnFileReader } from "../_shared/career_apply_from_chat.ts";
@@ -35,6 +36,8 @@ export function buildFileDeps(admin: any, env: FileDeps["env"], now: () => numbe
     // Item 6: each File family's records and posts (file_family_serve.ts FamilyRecords). One line per family; each builder adds only its
     // own line (an absent family loads nothing: a ref File shows the C.24 error state, and no post is dispatched).
     familyRecords: {
+      // S3: the search plan and materials Files, from career_search_plans and career_material_versions (file_family_records.ts).
+      ...planMaterialRecords(supabasePlanMaterialStore(admin), now),
     },
     // A results card that isn't ready: the employer's open questions (asked on the page, saved the way the chat saves them), then
     // the queued applications prepared again, and where each one stands.

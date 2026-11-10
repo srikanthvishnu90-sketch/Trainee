@@ -111,14 +111,17 @@ export type ChangeKind = "Emphasis" | "Wording" | "Fact needed";
 export interface Materials {
   rid: string; docTitle: string; base: string; approved?: string | null; draft: string; updatedAt: string | null;
   changes: { kind: ChangeKind; before?: string | null; after: string; text: string; lead?: string }[]; format: string | null; usedBy: string; download: Act; acts?: Acts;
+  // Item 6 S3: the document's kind for the header ("Resume"), and every version named by its human label (E.4 40).
+  kind?: string; versions?: { v: string; label: string; state: string }[];
 }
 export function materialsFile(d: Materials): FamilyFile {
   const needs = d.changes.filter((c) => c.kind === "Fact needed").length;
   return {
-    family: "F-07", boundary: `${d.docTitle.split(" - ")[0]} - for ${d.rid} - nothing sent`,
+    family: "F-07", boundary: `${d.kind ?? d.docTitle.split(" - ")[0]} - for ${d.rid} - nothing sent`,
     hero: { kicker: "Materials studio", title: d.docTitle, meta: [{ label: "Based on", value: d.base }, { label: `${d.approved ? `${d.approved} approved` : "No version approved"} - ${d.draft}`, value: "draft" }, { label: "Updated", at: d.updatedAt }] },
     blocks: [
       card(`Change summary - ${d.approved ?? "master"} → ${d.draft}${needs ? ` - ${n(needs, "fact")} needed` : ""}`, d.changes.map((c) => ({ p: "diff" as const, before: c.before, after: c.after, text: c.text, lead: c.lead, chip: { label: c.kind, tone: c.kind === "Fact needed" ? "attention" as const : "neutral" as const } }))),
+      ...(d.versions?.length ? [card("Versions", [{ p: "kv" as const, rows: d.versions.map((x) => ({ k: `${x.v} - ${x.label}`, v: x.state, src: { label: "your version record" } })) }])] : []),
       note("danger", "Never fabricated.", "No invented metrics, titles, tools, or employers. A missing achievement becomes a question to you, not a sentence in the resume."),
       { b: "card", parts: [{ p: "kv", rows: [{ k: "Format check", v: d.format, src: d.format ? { label: "checked on the file" } : null, missing: "Not checked yet" }, { k: "Used by", v: d.usedBy, src: { label: "approving here covers no other role" } }] }] },
     ],

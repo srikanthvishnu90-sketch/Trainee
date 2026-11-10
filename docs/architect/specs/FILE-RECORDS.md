@@ -3,8 +3,9 @@
 R10 fix 9 (WO-E), architect order of 2026-11-09. A File family is served from data that already exists wherever it can be
 (read adapters, the next WO-E PR). Four families have no store anywhere: the search plan (F-04), the per-role workspace (F-06),
 the answer library (F-08) and the plan Files (F-14 weekly brief, F-14n negotiation plan). This document designs those stores so
-the architect can assign the migrations. Until they exist, `approveplan` and `approvedoc` stay disabled on every page
-(the no-dead-buttons guard, `_shared/file_routes.ts`, landing with the WO-E stack).
+the architect can assign the migrations. Sections 1 and 5 are built (item 6 S3, migration 20261110120000; the F-04 and F-07 Files
+are drawn from those rows by `_shared/file_family_records.ts`, and `approveplan` and `approvedoc` are served there). The others
+stay disabled on every page until their stores exist.
 
 ## Rules every table here follows
 
@@ -39,6 +40,9 @@ the architect can assign the migrations. Until they exist, `approveplan` and `ap
 | approved_hash | text | the hash approved; must equal payload_hash |
 | created_at | timestamptz default now() | |
 
+- **Built** (20261110120000): as above, with `watch` stored as `{ text, active }`; `payload_hash` is computed on insert from the
+  content; `career_search_plan_approve_as` answers `approved`, `already`, `stale` (another hash), `superseded` (a newer version
+  exists) or `missing`. The plan-step writer is not built yet.
 - **Writes:** the career brain's plan step (agent-chat) inserts a new version; the File's `approveplan` action sets
   `approved_at`/`approved_hash` for that exact version through the trainee-file handler (it changes only this person's
   own row - the architect's condition for `approveplan` being WO-E's).
@@ -107,10 +111,15 @@ the architect can assign the migrations. Until they exist, `approveplan` and `ap
 
 ## 5. Material versions and `approvedoc` (F-07)
 
-F-07 reads the resume and letter versions WO-B is adding (`career_resume_versions`, E-40 version labels). `approvedoc`
-needs one column there, not a new table: `approved_at timestamptz` and `approved_hash text` on the version row, set only by
-the File's `approvedoc` action for that exact version and role (`role_job_id text`). The apply engine sends the approved
-version for that role, never the newest. Until WO-B's table lands, `approvedoc` stays disabled.
+Built (item 6 S3, migration 20261110120000): WO-B's versions table never landed, so the versions live in
+`career_material_versions` (one row per version of one document `doc_key`: `doc_kind` resume or letter, `version`, a human
+`label` such as "the one-page data analyst draft" (E.4 40), `based_on`, `role_job_id` and `rid`, the `changes` summary,
+`format_check`, the file (`file_name`, `file_bytes`, `file_sha256`, checked against the bytes), `payload_hash` computed on
+insert from the content, and `approved_at`/`approved_hash`/`approved_role`). A row's content never changes after insert, and an
+approved row is never changed or deleted while its owner exists (a trigger). `approvedoc` (`career_material_version_approve_as`)
+approves the exact version for the role it was made for: a stale hash is `stale`, another role `wrong_role`, and approving a
+newer version leaves every approved one as it was. The apply engine must send the approved version for that role, never the
+newest (wiring the engine to read it is not part of S3).
 
 ## Order of work (proposal)
 

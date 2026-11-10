@@ -304,7 +304,7 @@ const passed = (iso: string | null | undefined, now: number) => {
   const t = Date.parse(String(iso ?? ""));
   return Number.isFinite(t) && t <= now ? day(t) : null;
 };
-const NOT_SUBSCRIBED = `You're not subscribed, so you're not paying anything. Trainee is $${PLAN_PRICE_CENTS / 100}/month.`;
+const NOT_SUBSCRIBED = `Trainee is $${PLAN_PRICE_CENTS / 100}/month. You're not subscribed, so you're not paying anything.`;
 const LIVE = new Set(["active", "trialing", "past_due", "unpaid"]);
 const ending = (s: Subscription) => s.cancel_at_period_end === true && LIVE.has(s.status);
 const notStarted = (s: Subscription | null) => !s || ["incomplete", "incomplete_expired"].includes(s.status);
@@ -404,7 +404,7 @@ export async function billingTurn(o: { message: string; userId: string; threadId
   if (answer === "unsure") {
     return { reply: `Nothing is cancelled. ${effect(end)} Say "yes" to cancel, or "no" to keep your plan.`, intent: BILLING_CANCEL_INTENT, status: "waiting", meta: { billing_cancel: pending! } };
   }
-  if (!sub?.stripe_subscription_id) return { reply: NOT_SUBSCRIBED.replace("so you're not paying anything", "so there's nothing to cancel"), intent: BILLING_INTENT, status: "none" };
+  if (!sub?.stripe_subscription_id) return { reply: `You're not subscribed, so there's nothing to cancel. Trainee is $${PLAN_PRICE_CENTS / 100}/month.`, intent: BILLING_INTENT, status: "none" };
   if (sub.status === "canceled" || ending(sub)) return { reply: already(sub, o.now), intent: BILLING_INTENT, status: "already" };
   const hash = await cancelHash(sub.stripe_subscription_id, sub.current_period_end);
   if (hash !== pending!.hash || sub.stripe_subscription_id !== pending!.subscription_id) {

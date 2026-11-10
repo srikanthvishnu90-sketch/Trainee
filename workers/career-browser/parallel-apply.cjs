@@ -30,7 +30,8 @@
 //  - local only by default: only loopback hosts are driven. Real employer hosts need `allowHosts` from the caller
 //    (the owner-run approve-first path), and this module never discovers or logs in anywhere.
 const fs = require("node:fs");
-const { fillForm } = require("./ats-fill.cjs");
+const { fillForm, heldNow } = require("./ats-fill.cjs");
+const { APPLY_TEXT, NEVER_CLICK, applyUrlFor } = require("./apply-entry.cjs");
 const crypto = require("node:crypto");
 
 const sha256 = (b) => crypto.createHash("sha256").update(b).digest("hex");
@@ -64,19 +65,53 @@ function urlVerdict(u, allowHosts = []) {
 // Still never solved, never submitted past: a shown check stops the run as needs_user / bot_check.
 function SHOWN_CHECK() {
   const vis = (e) => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+  // Shown means a person can see it: at least 60x40 of it on the page (scrolling allowed), and neither it nor any parent hidden, collapsed or
+  // transparent. reCAPTCHA keeps its challenge frame (bframe) on every page, hidden and off-screen until it raises one (every
+  // Ashby form, strict benchmark run 42707036468).
+  const onScreen = (e) => {
+    // On the page, not parked above or left of it (a person scrolls down to a check below the fold; never to top:-10000px).
+    const r = e.getBoundingClientRect(), top = r.top + scrollY, left = r.left + scrollX;
+    const pageW = Math.max(document.documentElement.scrollWidth, innerWidth);
+    if (r.width <= 60 || r.height <= 40 || top + r.height <= 0 || left + r.width <= 0 || left >= pageW) return false;
+    for (let n = e; n && n.nodeType === 1; n = n.parentElement) {
+      const cs = getComputedStyle(n);
+      if (cs.display === "none" || cs.visibility === "hidden" || cs.visibility === "collapse" || Number(cs.opacity) < 0.05) return false;
+    }
+    return true;
+  };
   const text = ((document.body && document.body.innerText) || "").slice(0, 20000);
   if (/verify\s+(?:that\s+)?you(?:\s+are|['\u2019]re)\s+(?:a\s+)?(?:human|not a robot)|are you a robot|i['\u2019]?m not a robot|complete the (security )?check|press (and|&) hold/i.test(text)) return "text";
   if (/^(just a moment|attention required)/i.test(document.title || "")) return "interstitial";
+  // A reCAPTCHA or hCaptcha container the page runs invisibly at its own click is not shown either: a hidden *-captcha-response
+  // field with a hidden submit button in the same form (every captured Lever form), or the reCAPTCHA badge (Greenhouse, Ashby).
+  // The 2026-11-09 benchmark (run 42676274898) saw 0 shown checks on these boards (architect ruling of 2026-10-19).
+  const hiddenEl = (b) => !vis(b) || b.hidden || /(^|\s)hidden(\s|$)/.test(b.className || "");
+  const runsInvisibly = (e) => {
+    if (!e.matches(".g-recaptcha, .h-captcha")) return false;
+    const scope = e.closest("form") || document;
+    const token = [...scope.querySelectorAll("[name$='-captcha-response']")].some((t) => t.type === "hidden" || !vis(t));
+    const hiddenSubmit = [...scope.querySelectorAll("button[type=submit], input[type=submit]")].some(hiddenEl);
+    return (token && hiddenSubmit) || (e.matches(".g-recaptcha") && !!document.querySelector(".grecaptcha-badge"));
+  };
   const widget = [...document.querySelectorAll(".g-recaptcha, .h-captcha, .cf-turnstile, #challenge-form, #cf-challenge-running")]
-    .find((e) => (e.getAttribute("data-size") || "").toLowerCase() !== "invisible" && !/invisible/i.test(e.getAttribute("data-badge") || ""));
-  if (widget) return "widget";
+    .find((e) => (e.getAttribute("data-size") || "").toLowerCase() !== "invisible" && !/invisible/i.test(e.getAttribute("data-badge") || "") && !runsInvisibly(e)
+      // A reCAPTCHA or hCaptcha container is shown only once it has drawn its checkbox: an empty 680x0 box (every live Lever
+      // form, strict benchmark run 42696835430) is not something a person can see or tick.
+      && (!e.matches(".g-recaptcha, .h-captcha") || onScreen(e)));
+  const desc = (e) => `${e.tagName.toLowerCase()}${e.id ? "#" + e.id : ""}${[...e.classList].slice(0, 3).map((c) => "." + c).join("")} ${e.offsetWidth}x${e.offsetHeight}${e.getAttribute("data-size") ? " size=" + e.getAttribute("data-size") : ""}${e.children.length ? " children=" + e.children.length : ""}`;
+  if (widget) return `widget ${desc(widget)}`;
   const frame = [...document.querySelectorAll("iframe")].find((f) => {
     const src = f.src || "";
-    if (!/recaptcha\/(?:api2|enterprise)\/(?:anchor|bframe)|\/recaptcha\/anchor|hcaptcha\.com\/captcha|challenges\.cloudflare\.com/i.test(src)) return false;
+    if (!/recaptcha\/(?:api2|enterprise)\/(?:anchor|bframe)|\/recaptcha\/anchor|hcaptcha\.com\/captcha|challenges\.cloudflare\.com|captcha-delivery\.com/i.test(src)) return false;
     if (/[?&]size=invisible\b/i.test(src)) return false;
-    return vis(f) && f.offsetWidth > 60 && f.offsetHeight > 40;
+    // hCaptcha's enclave frame (hcaptcha-enclave.html, #frame=enclave) is its background scoring frame on every Lever form, never
+    // a challenge (strict benchmark run 42707036468); its checkbox and challenge frames are.
+    if (/hcaptcha-enclave\.html|[#&]frame=enclave\b/i.test(src)) return false;
+    return onScreen(f);
   });
-  return frame ? "frame" : null;
+  if (!frame) return null;
+  let src = ""; try { const u = new URL(frame.src); src = u.host + u.pathname.slice(0, 50); } catch { /* opaque */ }
+  return `frame ${src} ${frame.offsetWidth}x${frame.offsetHeight}`;
 }
 // The needs_user reasons a sign-in or verification wall gives, in every runner (apply-vm.cjs, scripts/apply.ts).
 const HANDOFF_REASONS = ["login_required", "bot_check", "email_code"];
@@ -119,17 +154,35 @@ async function stopAtWall(page, url) {
 }
 // The one "Apply" control on a job page that has no form yet: opened (never a control inside a form, never a new tab), so
 // the wall or the form behind it can be read. Opening it sends nothing; the same host rules guard where it leads.
+// A field of an application: inside a form, or (a board without a <form>, Ashby) the resume upload or an email box on the page.
+const FIELD_SEL = "form input, form select, form textarea, input[type=file], input[type=email]";
 async function openApply(page, timeout) {
-  const h = (await page.evaluateHandle(() => {
-    const re = /^\s*(?:apply|apply now|apply for this (?:job|role|position)|apply to this (?:job|role)|start (?:your |my )?application)\s*$/i;
-    const c = [...document.querySelectorAll("a, button, [role=button]")]
-      .filter((e) => !e.closest("form") && (e.offsetWidth || e.offsetHeight) && re.test(e.innerText || e.getAttribute("aria-label") || ""));
-    if (c.length !== 1) return null;
-    c[0].removeAttribute("target");
-    return c[0];
-  })).asElement();
+  // Job pages repeat their Apply control (top and bottom of the posting): several controls are one control when they all lead
+  // to the same address. Controls that lead to different places, or buttons with no address, stay ambiguous unless there is one.
+  const h = (await page.evaluateHandle(([at, nc]) => {
+    const re = new RegExp(at, "i"), never = new RegExp(nc, "i");
+    const c = [...document.querySelectorAll("a, button, [role=button]")].filter((e) => {
+      const t = (e.innerText || e.getAttribute("aria-label") || "").trim();
+      return !e.closest("form") && (e.offsetWidth || e.offsetHeight) && re.test(t) && !never.test(t);
+    });
+    if (!c.length) return null;
+    // Repeats of one control: every link goes to the same address and every button carries a link's words (Personio), or
+    // there are no links and every button says the same thing (BambooHR). Anything else is ambiguous and is not clicked.
+    const words = (e) => (e.innerText || e.getAttribute("aria-label") || "").trim().toLowerCase();
+    const links = c.filter((e) => e.tagName === "A" && e.href), buttons = c.filter((e) => !(e.tagName === "A" && e.href));
+    let pick = null;
+    if (links.length) {
+      const hrefs = new Set(links.map((e) => e.href)), lw = new Set(links.map(words));
+      if (hrefs.size === 1 && buttons.every((b) => lw.has(words(b)))) pick = links[0];
+    } else if (new Set(buttons.map(words)).size === 1) pick = buttons[0];
+    if (!pick) return null;
+    pick.removeAttribute("target");
+    return pick;
+  }, [APPLY_TEXT.source, NEVER_CLICK.source])).asElement();
   if (!h) return false;
   await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded", timeout }).catch(() => null), h.click()]);
+  // A board that renders its form in place (no navigation) gets a moment to draw it.
+  await page.waitForSelector(FIELD_SEL, { timeout: Math.min(timeout, 8000) }).catch(() => null);
   return true;
 }
 async function botCheck(page) {
@@ -138,7 +191,7 @@ async function botCheck(page) {
   for (const f of page.frames()) {
     if (f !== page.mainFrame() && /recaptcha|hcaptcha|challenges\.cloudflare\.com|turnstile/i.test(f.url())) continue;
     const shown = await f.evaluate(SHOWN_CHECK).catch(() => null);
-    if (shown) return true;
+    if (shown) return String(shown).slice(0, 160); // what was shown, for the record (truthy)
   }
   return false;
 }
@@ -159,6 +212,27 @@ function checkPayload(p, { allowHosts = [] } = {}) {
 }
 
 // One attempt in its own fresh context. Returns a result; throws NeedsUser for a stop, Error for a retryable failure.
+// What a page showed when the run stopped, for a benchmark's record only: the control the stop names, the apply controls, the
+// forms, frames and captcha containers on the page. Plain data, cut short; nothing typed by the person is on a benchmark page.
+function DIAG(field) {
+  const cut = (x, n = 300) => String(x || "").replace(/\s+/g, " ").slice(0, n);
+  const out = { url: location.href.slice(0, 120), title: cut(document.title, 80), forms: document.forms.length,
+    inputs: document.querySelectorAll("input:not([type=hidden]), textarea, select").length };
+  if (field && !/^https?:/.test(field)) {
+    const want = field.toLowerCase().slice(0, 30);
+    const cands = [...document.querySelectorAll("label, legend, [id*=label], .application-label")].filter((e) => (e.innerText || "").toLowerCase().includes(want));
+    const lab = cands.sort((a, b) => (a.innerText || "").length - (b.innerText || "").length)[0];
+    const box = lab && (lab.closest(".application-question, .field, .form-group, li, fieldset") || lab.parentElement);
+    if (box && box.outerHTML.length > 4000) out.field_note = "container too large; label only";
+    out.field = cut(box ? box.outerHTML : lab ? lab.outerHTML : "", 600);
+  }
+  out.captcha = [...document.querySelectorAll(".g-recaptcha, .h-captcha, .cf-turnstile, iframe[src*=captcha], iframe[src*=challenges]")].slice(0, 3)
+    .map((e) => cut(`${e.tagName} ${e.className || ""} ${e.getAttribute("src") || ""} ${e.offsetWidth}x${e.offsetHeight} vis=${getComputedStyle(e).visibility}`, 160));
+  out.apply = [...document.querySelectorAll("a, button, [role=button]")].filter((e) => /apply|bewerb|postul|solicit|interest|candidat/i.test(e.innerText || ""))
+    .slice(0, 5).map((e) => cut(`${e.tagName} "${(e.innerText || "").trim()}" ${e.getAttribute("href") || ""} ${e.offsetWidth}x${e.offsetHeight}`, 140));
+  out.frames = [...document.querySelectorAll("iframe")].slice(0, 4).map((f) => cut(f.getAttribute("src"), 100));
+  return out;
+}
 async function attempt(browser, p, opts, timing) {
   const ctx = await browser.newContext({ viewport: { width: 900, height: 1100 } });
   const page = await ctx.newPage();
@@ -172,8 +246,12 @@ async function attempt(browser, p, opts, timing) {
   // GET navigations are fetched with redirects off so the Location of each hop is checked BEFORE the browser requests it
   // (a browser-followed redirect would already have reached the other host); the 3xx is handed back and the next hop comes
   // through this same handler.
+  // A benchmark's dry run (scripts/browser-eval/strict.cjs) adds its own guard on every request and a page script that cancels
+  // any form submit; production passes neither.
+  if (opts.initScript) await ctx.addInitScript(opts.initScript);
   await ctx.route("**/*", async (route) => {
     const req = route.request();
+    if (opts.requestGate && !(await opts.requestGate(req))) return route.abort("blockedbyclient");
     // Every top-level navigation, of this page or of any tab it tries to open, is checked.
     if (req.isNavigationRequest() && !req.frame().parentFrame()) {
       const g = urlVerdict(req.url(), allow);
@@ -204,14 +282,49 @@ async function attempt(browser, p, opts, timing) {
     try { resp = await page.goto(p.url, { waitUntil: "domcontentloaded" }); } catch (e) { onAllowedHost(); throw e; }
     onAllowedHost();
     if (!resp || resp.status() >= 400) throw new Error(`page_load_${resp ? resp.status() : "none"}`);
-    if (await botCheck(page)) throw new NeedsUser("bot_check", p.url);
+    { const shown = await botCheck(page); if (shown) { const e = new NeedsUser("bot_check", p.url); e.detail = shown; throw e; } }
     // An employer that wants the person to sign in first: never signed into, never given a password (the person does that).
     await stopAtWall(page, p.url);
-    const hasForm = async () => !!(await page.$("form input, form select, form textarea")) && !!(await page.$('form button[type="submit"]'));
+    // The form's own Submit control, as a person would press it: the visible one. A <button> with no type submits its form
+    // (Breezy); Lever's visible "Submit application" is type="button" beside a hidden type="submit" its script presses
+    // after the hCaptcha token. Marked data-upmore-submit, so the check below and the click use that same control.
+    const markSubmit = () => page.evaluate(() => {
+      const vis = (e) => !!(e.offsetWidth || e.offsetHeight) && getComputedStyle(e).visibility !== "hidden";
+      for (const e of document.querySelectorAll("[data-upmore-submit]")) e.removeAttribute("data-upmore-submit");
+      const forms = [...document.querySelectorAll("form")].filter((f) => f.querySelector("input, select, textarea"));
+      const word = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$|^\s*(bewerbung )?(absenden|senden)\s*$|^\s*(envoyer|enviar|verzenden|skicka)( .{0,20})?$/i;
+      for (const f of forms) {
+        const typed = [...f.querySelectorAll("button[type=submit], button:not([type]), input[type=submit]")].filter(vis);
+        const worded = [...f.querySelectorAll("button, [role=button], input[type=button]")].filter((b) => vis(b) && word.test(b.innerText || b.value || ""));
+        const pick = worded.length === 1 ? worded[0] : typed.length === 1 ? typed[0] : worded.find((b) => typed.includes(b)) || null;
+        if (pick) { pick.setAttribute("data-upmore-submit", "1"); return true; }
+      }
+      // A board that builds its application without a <form> (Ashby: every posting, strict benchmark run 42712892939, forms=0 with
+      // 19 to 48 fields): the page is the form when it has no form of its own, asks for a file or an email, and has exactly one
+      // visible control in the Submit words. Two or none: no Submit is pressed.
+      if (!forms.length && document.querySelector("input[type=file], input[type=email]")) {
+        const worded = [...document.querySelectorAll("button, [role=button], input[type=button], input[type=submit]")].filter((b) => vis(b) && word.test(b.innerText || b.value || ""));
+        if (worded.length === 1) { worded[0].setAttribute("data-upmore-submit", "1"); return true; }
+      }
+      return false;
+    });
+    const hasForm = async () => !!(await page.$(FIELD_SEL)) && (await markSubmit());
+    // A board whose form lives at its own apply address one GET away (Lever /apply, Ashby /application, ...): loaded once,
+    // through the same host rules, and checked like the first load.
+    if (!(await page.waitForSelector(FIELD_SEL, { timeout: 5000 }).catch(() => null))) {
+      const direct = applyUrlFor(p.ats, page.url());
+      if (direct) {
+        try { await page.goto(direct, { waitUntil: "domcontentloaded" }); } catch (e) { onAllowedHost(); throw e; }
+        onAllowedHost();
+        await page.waitForSelector(FIELD_SEL, { timeout: 8000 }).catch(() => null);
+        { const shown = await botCheck(page); if (shown) { const e = new NeedsUser("bot_check", p.url); e.detail = shown; throw e; } }
+        await stopAtWall(page, p.url);
+      }
+    }
     // A job page whose form is behind its "Apply" control: opened once, and what it leads to is checked like the first load.
     if (!(await hasForm()) && (await openApply(page, opts.stepTimeoutMs || 15000))) {
       onAllowedHost();
-      if (await botCheck(page)) throw new NeedsUser("bot_check", p.url);
+      { const shown = await botCheck(page); if (shown) { const e = new NeedsUser("bot_check", p.url); e.detail = shown; throw e; } }
       await stopAtWall(page, p.url);
     }
     timing.load = Date.now() - t0;
@@ -236,9 +349,10 @@ async function attempt(browser, p, opts, timing) {
     // Last checks before the click, on what is actually on the page now: still an allowed host, no bot check that appeared
     // while filling, the form posts to an allowed host, and the payload still hashes to what was approved.
     onAllowedHost();
-    if (await botCheck(page)) throw new NeedsUser("bot_check", p.url);
+    { const shown = await botCheck(page); if (shown) { const e = new NeedsUser("bot_check", p.url); e.detail = shown; throw e; } }
     await stopAtWall(page, p.url);
-    const action = await page.$eval('form button[type="submit"]', (b) => {
+    if (!(await markSubmit())) throw new NeedsUser("no_submit_control", p.url);
+    const action = await page.$eval("[data-upmore-submit]", (b) => {
       const a = b.getAttribute("formaction") ?? (b.form && b.form.getAttribute("action"));
       return new URL(a || location.href, document.baseURI).href;
     });
@@ -247,12 +361,13 @@ async function attempt(browser, p, opts, timing) {
     if (!hasApproval(p)) throw new NeedsUser("not_approved", "payload changed after approval");
     if (opts.shotBefore) await page.screenshot({ path: opts.shotBefore, fullPage: true });
     // The caller records "submitting" (and re-checks its lease and kill switch) BEFORE the click; a refusal stops here, unsent.
-    if (opts.onPhase) await opts.onPhase("submitting");
+    // A dry run's audit (opts.audit) also gets what each filled question holds at this instant; production passes only the phase.
+    if (opts.onPhase) await opts.onPhase("submitting", opts.audit ? { id: p.id, fields: await heldNow(page, fr.filled) } : undefined);
     // Past this line nothing is retried: the employer may have received it.
     const t2 = Date.now();
     timing.submitClicked = true;
     try {
-      await Promise.all([page.waitForLoadState("domcontentloaded"), page.click('button[type="submit"]')]);
+      await Promise.all([page.waitForLoadState("domcontentloaded"), page.click("[data-upmore-submit]")]);
       await page.waitForSelector("#confirmation, h1", { timeout: opts.stepTimeoutMs || 15000 });
       if (blocked.length) return { status: "unknown_outcome", reason: `after submit: navigation to a disallowed host was refused (${blocked[0]})`, filled };
     } catch (e) {
@@ -261,9 +376,17 @@ async function attempt(browser, p, opts, timing) {
     timing.submit = Date.now() - t2;
     const text = (await page.textContent("body")) || "";
     if (opts.shotAfter) await page.screenshot({ path: opts.shotAfter, fullPage: true });
-    if (!CONFIRM_RE.test(text)) return { status: "unknown_outcome", reason: "no confirmation text on the page after submit", filled };
+    if (!CONFIRM_RE.test(text)) {
+      // The page's own check can become a shown challenge at the click: the person finishes it; it is never solved or retried.
+      if (await botCheck(page)) return { status: "unknown_outcome", reason: "after submit: the page showed a verification check; nothing is confirmed until you finish it", filled };
+      return { status: "unknown_outcome", reason: "no confirmation text on the page after submit", filled };
+    }
     const code = /\b(?:GH|LV)-[A-Z0-9-]+/.exec(text);
     return { status: "submitted_page_confirmed", confirmation: code ? code[0] : null, filled };
+  } catch (e) {
+    // A benchmark's dry run asks what the page showed at a stop (opts.diag); production never does.
+    if (opts.diag && e instanceof NeedsUser) e.diag = await page.evaluate(DIAG, e.field || "").catch(() => null);
+    throw e;
   } finally {
     await ctx.close();
   }
@@ -287,7 +410,7 @@ async function applyOne(browser, p, opts = {}) {
       const r = await attempt(browser, p, { ...opts, shotBefore: opts.shotDir && `${opts.shotDir}/${p.id}-1-filled.png`, shotAfter: opts.shotDir && `${opts.shotDir}/${p.id}-2-confirmation.png` }, t);
       return { ...out, ...r, timing: t, ms: Date.now() - started };
     } catch (e) {
-      if (e instanceof NeedsUser && !t.submitClicked) return { ...out, status: HANDOFF_REASONS.includes(e.reason) ? "needs_user" : "not_submitted", reason: e.reason, field: e.field, wall: e.wall || undefined, needs: e.needs || undefined, ms: Date.now() - started };
+      if (e instanceof NeedsUser && !t.submitClicked) return { ...out, ...(e.detail ? { check: e.detail } : {}), ...(e.diag ? { diag: e.diag } : {}), status: HANDOFF_REASONS.includes(e.reason) ? "needs_user" : "not_submitted", reason: e.reason, field: e.field, wall: e.wall || undefined, needs: e.needs || undefined, ms: Date.now() - started };
       if (t.submitClicked) return { ...out, status: "unknown_outcome", reason: e.message, ms: Date.now() - started };
       out.lastError = e.message.split("\n")[0];
       if (out.lastError === "page_load_429") break; // the portal said slow down: not asked again by this run
@@ -312,4 +435,4 @@ async function runPool(browser, payloads, opts = {}) {
   return { results, wallMs: Date.now() - started, concurrency };
 }
 
-module.exports = { applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, HANDOFF_REASONS, NeedsUser };
+module.exports = { botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, HANDOFF_REASONS, NeedsUser };

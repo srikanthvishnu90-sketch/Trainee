@@ -22,6 +22,8 @@
 // C.24 (asserted 0 failures on the state pages): exactly one state; Prepared never reads as submitted; In progress has no green
 // badge; Uncertain keeps the retry off; Confirmed shows green only with employer evidence, and a Confirmed page without it says so.
 //
+// These are the specimens' own (fixture) targets. What the File server serves is measured on the served pages by
+// tests/architect/files-live-loop.test.ts (item 6 S0 onward), where unserved is asserted 0.
 // Output: one line "FILES LOOP: families X, pages P, actions pressed Y, dead Z, unserved U, C.1 failures A, C.24 failures B", then
 // each dead, unserved and failing item. Check: deno test -A --no-check tests/architect/files-actions-loop.test.ts
 import assert from "node:assert/strict";

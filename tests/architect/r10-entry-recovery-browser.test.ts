@@ -278,10 +278,16 @@ Deno.test({ name: "R10 fixes 10-11 in Chromium: every entry, recovery and connec
         await check(s3.page, "connect-unfinished", vp, { action: "form.go button.primary", title: /^Connecting didn.t finish$/, secret: PRIVATE });
         cw.conn.google = { state: "connected", email: ADDR };
         await s3.page.goto(`${SITE}/connect`);
-        await check(s3.page, "connect-connected", vp, { action: "form.disc button", title: /^Your email is connected$/ });
-        await s3.page.click("form.disc button");
+        // Architect ruling 2026-11-10 (item 14): opened from a link, which may have been forwarded, the address is masked and the
+        // chat disconnects; the page itself changes nothing.
+        const cm = await check(s3.page, "connect-connected", vp, { action: "a.primary", title: /^Your email is connected$/, secret: [ADDR] });
+        if (!/Connected as a\*\*\*@e\*\*\*\.test/.test(cm.text) || !/Reply DISCONNECT GMAIL in your chat with Trainee to disconnect\./.test(cm.text.replace(/\s+/g, " "))) problems.push(`connected @${vp.width}: not masked, or no way to disconnect`);
+        // The disconnected screen, from the OAuth landing's Disconnect (its disconnect-only token, posted to this site's /connect).
+        const landEnv = { get: (k: string) => ({ TRAINEE_CONNECT_LINK_SECRET: SECRET, TRAINEE_BOT_URL: BOT_URL, TRAINEE_CONNECT_BASE_URL: `${SITE}/connect` } as Record<string, string>)[k] };
+        await s3.page.setContent(await (await connectLanding(landEnv, { provider: "google", ok: true, denied: false, email: ADDR, userId: U, scopes: ["openid"], now: NOW })!).text());
+        await s3.page.click("form button.lnk");
         await check(s3.page, "connect-disconnected", vp, { action: "a.primary", title: /^Gmail disconnected$/, secret: [ADDR] });
-        if (cw.conn.google.state !== "not_connected") problems.push("Disconnect on the page did not disconnect");
+        if (cw.conn.google.state !== "not_connected") problems.push("Disconnect from the landing did not disconnect");
         await s3.ctx.close();
       }
       // ---- the OAuth callback's landings (served from the function's own origin; drawn here as the browser gets them)

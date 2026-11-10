@@ -60,7 +60,7 @@ Status: Not verified. Bars: loop 05, baseline (both flags on) 6 invented mails s
 0 guessed, 11/11 exact sends (#695), then 12/12 over 27 journeys (#722); drafts for unknown recipients 0/34 to 34/34 (#722).
 - Person: `draft a note to Elena at Northline Health Data about the software engineering intern role` (#722 demo)
   - Before (#706, #722): "You haven't sent me any contacts yet", and no draft.
-  - After (#722): "Here's a draft to Elena at Northline Health Data. Recipient not set: I don't have Elena's address and I won't guess one, so nothing is saved or sent. Fill in the [brackets] before it goes anywhere. … What are Elena's full name and work email? Reply like "email Elena <last name> at <their work email>" and I'll read it back to you before anything is written to them."
+  - After (#722): "Here's a draft to Elena at Northline Health Data. Recipient not set: I don't have Elena's address and won't guess one, so nothing is saved or sent. Fill in the [brackets] first. … Reply like "email Elena <last name> at <their work email>" and I'll read it back before anything is written to them. What are Elena's full name and work email?"
 - Person: `email Maya Chen at maya.chen@acme-s1.example about the analyst role` (#695, journey J21)
   - Before (#695 baseline, both flags on): drafts saying "It was great meeting you at the … meetup" or "As your former colleague" passed every check and reached Gmail.
   - After (#695): "Before I write anything, check this is right: Maya Chen · maya.chen@acme-s1.example (about the analyst role). Say yes and I'll save them as your contact and draft the email for you to approve; nothing is sent until you approve that exact email."

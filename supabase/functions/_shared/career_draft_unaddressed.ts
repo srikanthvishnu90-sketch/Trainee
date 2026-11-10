@@ -50,10 +50,11 @@ export function unaddressedReply(u: Unaddressed, lead: string): string {
   const d = unaddressedDraft(u), who = titled(clean(u.name)), firm = titled(clip(u.firm)), at = firm ? ` at ${firm}` : "";
   return [
     lead,
-    `Here's a draft to ${who}${at}. Recipient not set: I don't have ${who}'s address and I won't guess one, so nothing is saved or sent. Fill in the [brackets] before it goes anywhere.`,
+    `Here's a draft to ${who}${at}. Recipient not set: I don't have ${who}'s address and won't guess one, so nothing is saved or sent. Fill in the [brackets] first.`,
     "",
     d.text,
     "",
-    `What are ${who}'s full name and work email? Reply like "email ${who} <last name> at <their work email>" and I'll read it back to you before anything is written to them.`,
+    // The question is the last thing read (RESPONSE-RULES: the decision ends the reply); the answer's shape comes before it.
+    `Reply like "email ${who} <last name> at <their work email>" and I'll read it back before anything is written to them. What are ${who}'s full name and work email?`,
   ].filter((x, i) => i !== 0 || x).join("\n");
 }

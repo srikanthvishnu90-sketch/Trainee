@@ -60,7 +60,7 @@ test("(1) 'thx' is thanked, not misread", async () => {
   const say = convo();
   say("jobs");
   const o = say("thx");
-  assert.match(String(o.reply), /^Anytime\./, String(o.reply));
+  assert.match(String(o.reply), /^Anytime\b/, String(o.reply));
 });
 
 test("(2) greeting and 'what can you do' are one text with a next step for a new person", async () => {

@@ -575,7 +575,7 @@ export async function searchJudgeTurn(o: {
   // when, in the person's zone), the application link, and the student window in the posting's own words, or that it states none.
   const lineOf = (h: SearchHit, i: number, tail: string | null) => {
     const desc = byId.get(h.job_id)?.description ?? "", arr = arrangementOf(where(h), desc), win = studentWindowOf(desc), link = linkOf.get(h.job_id);
-    const open = link === "live" ? `Checked: open on the ${boardName(h.job_id)} board, ${at.text}` : offBoard.has(h.job_id) ? "Checked: not re-checked, it is not on a public job board I can check" : link === "unknown" ? "Checked: not re-checked, its application page did not answer" : "Checked: not re-checked";
+    const open = link === "live" ? `Checked: open on the ${boardName(h.job_id)} board, ${at.text}` : offBoard.has(h.job_id) ? "Checked: not re-checked" : link === "unknown" ? "Checked: not re-checked, its application page did not answer" : "Checked: not re-checked";
     // The link stays on the numbered line, in parentheses (the texting channel puts it right under its posting; D-036).
     return `${i + 1}. ${h.title} at ${h.company || "an employer the posting does not name"} — ${where(h) || "location not stated"}, ${arr ?? "arrangement not stated"}${h.url ? ` (${h.url})` : " (the posting gives no application link)"}${noLevel(h) ? " [level not stated]" : ""}${tail ? `. ${tail}` : ""}${/[.!?]$/.test(tail ?? "") ? "" : "."}`
       + `\n   Student window: ${win ? `"${win.replace(/[.]$/, "")}"` : "not stated in the posting"}.${win && !gradKnown ? `\n   Uncertain: your graduation date isn't confirmed, so eligibility isn't decided.` : ""}`
@@ -633,7 +633,16 @@ export async function searchJudgeTurn(o: {
     const closed = checked.dead ? ` ${plural(checked.dead, "role was", "roles were")} left out: closed when checked.` : "";
     const zone = o.openCheck && live && !at.zoneKnown ? " Times are UTC: I don't know your time zone." : "";
     // Spec B.2: "I verified [count] open matches. [count] are in Chicago and [count] are remote US; I did not find five within the scope checked."
-    if (listed.length) summary = `${o.openCheck ? `I verified ${plural(live, "open match", "open matches")}${listed.length > live ? `, and listed ${listed.length - live} more I could not re-check` : ""}.` : `${listed.length} listed, not re-checked.`}${counts}${short}${closed}${zone}${notIntern ? ` ${plural(notIntern, "posting")} left out: not stated as an internship.` : ""} Nothing was applied for.`;
+    // E.21: none verified reads as before ("N listed, not re-checked."; each row says it). Beside verified ones, the rest are
+    // said with their reason (the page did not answer, or the posting is on no public board, where no check runs at all).
+    const unchecked = listed.filter((r) => linkOf.get(r.h.job_id) !== "live"), off = unchecked.filter((r) => offBoard.has(r.h.job_id)).length;
+    const one = unchecked.length === 1;
+    const because = off === unchecked.length ? (one ? "it is not on a public job board I can check" : "they are not on a public job board I can check")
+      : off ? "their application pages did not answer or are not on a public job board I can check"
+      : one ? "its application page did not answer" : "their application pages did not answer";
+    if (listed.length) summary = `${!o.openCheck ? `${listed.length} listed, not re-checked.`
+      : !live ? `${listed.length} listed, not re-checked.`
+      : `I verified ${plural(live, "open match", "open matches")}${unchecked.length ? `, and listed ${unchecked.length} more I could not re-check because ${because}` : ""}.`}${counts}${short}${closed}${zone}${notIntern ? ` ${plural(notIntern, "posting")} left out: not stated as an internship.` : ""} Nothing was applied for.`;
     if (summary) lines.push(summary);
   }
   if (ask.limits && hasLimits(ask.limits)) {

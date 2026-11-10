@@ -34,14 +34,16 @@ function page(k) {
   const places = k === "place_not_offered" ? ["Chicago, Illinois, United States"] : PLACES;
   return `<!doctype html><html><body><h1>Engineer @ Acme</h1><div id="app"></div><script>
 setTimeout(() => {
+  document.body.insertAdjacentHTML("afterbegin", '<div role="listbox" aria-label="Other"><div role="option">Chicago, IL</div></div>');
   document.getElementById("app").innerHTML = ${JSON.stringify(`<div class="ashby-application-form-container">${fields}<button type="button" id="go" class="ashby-application-form-submit-button">Submit Application</button></div>`)};
   for (const b of document.querySelectorAll(".yn")) b.onclick = () => { for (const x of b.parentElement.querySelectorAll(".yn")) x.setAttribute("aria-pressed", String(x === b)); };
-  const loc = document.getElementById("_systemfield_location"), list = loc.parentElement.querySelector(".list");
+  // As on Ashby (strict benchmark run 42739040932): the place list floats in a layer at the end of the page, outside the field.
+  const loc = document.getElementById("_systemfield_location"), list = document.createElement("div"); document.body.appendChild(list);
   let t = null;
   loc.oninput = () => { clearTimeout(t); list.innerHTML = ""; loc.setAttribute("aria-expanded", "false");
     // The places arrive from a lookup, a moment after typing.
     t = setTimeout(() => { const q = loc.value.toLowerCase().slice(0, 4);
-      list.innerHTML = '<div role="listbox">' + ${JSON.stringify(places)}.filter((p) => p.toLowerCase().startsWith(q)).map((p) => '<div role="option">' + p + '</div>').join("") + '</div>';
+      list.innerHTML = '<div class="_floatingContainer" role="listbox"><div class="_resultContainer">' + ${JSON.stringify(places)}.filter((p) => p.toLowerCase().startsWith(q)).map((p) => '<div role="option" class="_result ashby-application-form-input-autocomplete-result">' + p + '</div>').join("") + '</div></div>';
       loc.setAttribute("aria-expanded", "true");
       for (const o of list.querySelectorAll("[role=option]")) o.onmousedown = o.onclick = () => { loc.value = o.textContent; list.innerHTML = ""; loc.setAttribute("aria-expanded", "false"); };
     }, 700); };

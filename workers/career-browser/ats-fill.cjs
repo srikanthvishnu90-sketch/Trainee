@@ -356,13 +356,18 @@ async function fillCombo(page, d, value, pick) {
   // list, or any other list on the page, is never searched for an answer.
   const ctl = (await input.getAttribute("aria-controls")) || (await input.getAttribute("aria-owns"));
   const shell = input.locator('xpath=ancestor::*[contains(@class,"select-shell") or contains(@class,"select__container") or @data-combobox or contains(@class,"ashby-application-form-field-entry")][1]');
-  const opts = () => (ctl ? page.locator(`[id="${ctl.replace(/"/g, "")}"] [role="option"]:visible`) : shell.locator('[role="option"]:visible'));
+  // Ashby's place box draws its list in a floating layer outside the field (strict benchmark run 42739040932): only that
+  // box's own result rows (Ashby's autocomplete class, under a listbox) are read, never any other list on the page.
+  const ashPlaces = !ctl && (await input.evaluate((e) => e.classList.contains("ashby-application-form-input-autocomplete")).catch(() => false));
+  const opts = () => (ctl ? page.locator(`[id="${ctl.replace(/"/g, "")}"] [role="option"]:visible`)
+    : ashPlaces ? page.locator('[role="listbox"] [role="option"][class*="ashby-application-form-input-autocomplete-"]:visible')
+    : shell.locator('[role="option"]:visible'));
   const optionsNow = async () => (await opts().allInnerTexts()).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean);
   await input.click();
   let list = await optionsNow();
   if (!list.length) { await page.waitForTimeout(120); list = await optionsNow(); }
   // Ashby's place box fills its list from a lookup as you type: it gets up to 3 seconds to show. Any other box, 150 ms.
-  const lookup = await input.evaluate((e) => e.classList.contains("ashby-application-form-input-autocomplete")).catch(() => false);
+  const lookup = ashPlaces || (await input.evaluate((e) => e.classList.contains("ashby-application-form-input-autocomplete")).catch(() => false));
   if (!list.length && pick !== "decline") { await input.fill(String(value).slice(0, 40)); for (let i = 0; i < (lookup ? 20 : 1) && !list.length; i++) { await page.waitForTimeout(150); list = await optionsNow(); } }
   if (!list.length) {
     // What the page drew as a list after typing, for the record (tags and classes only, cut short): never an answer.

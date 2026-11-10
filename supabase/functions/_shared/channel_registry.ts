@@ -10,6 +10,7 @@ import type { Channel, ChannelAdapter } from "./channel_adapters.ts";
 import { loopMessageAdapter } from "./loopmessage_adapter.ts";
 import { telegramAdapter } from "./telegram.ts";
 import { fileAppFor } from "./file_link.ts"; // BETA B1: the Mini App URL for a File link
+import { type CardResolver, fileCardOn, withFileCards } from "./file_card.ts"; // SPEC C.2 / D-049: the chat File card
 import { DEFAULT_DAILY_TEMPLATES, whatsappAdapter } from "./whatsapp.ts";
 import type { SharedPace } from "./channel_pacer.ts";
 import { textingNativeOn } from "./channel_voice.ts"; // V1 TEXTING VOICE: CAREER_TEXTING_NATIVE=on splits and formats per channel
@@ -32,7 +33,8 @@ export function wiredChannels(env: Env): Channel[] {
 }
 
 // Every wired channel's adapter. A bad number setting throws (the function answers 503 with it, sending nothing).
-export function adaptersFromEnv(env: Env, o: { fetch?: typeof fetch; clock?: () => number; sleep?: (ms: number) => Promise<void>; sharedPace?: SharedPace } = {}): Partial<Record<Channel, ChannelAdapter>> {
+// fileCards (SPEC C.2, D-049): with CAREER_FILE_CARD=on, a message that is exactly one File link goes as its File card (file_card.ts).
+export function adaptersFromEnv(env: Env, o: { fetch?: typeof fetch; clock?: () => number; sleep?: (ms: number) => Promise<void>; sharedPace?: SharedPace; fileCards?: CardResolver } = {}): Partial<Record<Channel, ChannelAdapter>> {
   const out: Partial<Record<Channel, ChannelAdapter>> = {};
   const wired = wiredChannels(env);
   if (wired.includes("imessage")) {
@@ -55,5 +57,6 @@ export function adaptersFromEnv(env: Env, o: { fetch?: typeof fetch; clock?: () 
       fetch: o.fetch, clock: o.clock, sleep: o.sleep, native: textingNativeOn(env),
     });
   }
+  if (o.fileCards && fileCardOn(env)) for (const k of Object.keys(out) as Channel[]) out[k] = withFileCards(out[k]!, o.fileCards);
   return out;
 }

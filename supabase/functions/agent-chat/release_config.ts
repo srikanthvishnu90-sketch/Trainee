@@ -116,6 +116,9 @@ export const RELEASE_FLAGS: Readonly<Record<string, string>> = Object.freeze({
   // D-047 amended (architect ruling 2026-11-09): the research brief File ships with the reply (rubric 30/30, F.2 review); rolled
   // back with CAREER_RESEARCH_BRIEF=off, the answer is given in chat with its sources instead.
   CAREER_RESEARCH_BRIEF: "on",
+  // D-049 (architect ruling 2026-11-09): the chat File card of spec C.2 (_shared/file_card.ts): a message that is exactly one File
+  // link goes as one card with real counts and one button. Rolled back with CAREER_FILE_CARD=off: the link goes alone, as before.
+  CAREER_FILE_CARD: "on",
 });
 
 // APPLY ALL BY YES (owner, 2026-11-02 17:10 CT; _shared/apply_all_yes.ts): not a release flag. It adds no new way to send: a bare yes

@@ -30,7 +30,8 @@ function EXTRACT() {
   const shown = (e) => e.type === "file" || !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
   const nodeText = (n) => {
     const c = n.cloneNode(true);
-    c.querySelectorAll("input,select,textarea,button,.filename,.default-label,svg,script,style").forEach((x) => x.remove());
+    // Lever's location box keeps its result list ("No location found. Try entering a different location") inside the label.
+    c.querySelectorAll("input,select,textarea,button,.filename,.default-label,svg,script,style,.dropdown-container,.dropdown-results,.dropdown-no-results,.dropdown-loading-results").forEach((x) => x.remove());
     return clean(c.textContent);
   };
   const LABEL_SEL = "legend, .application-label, .ashby-application-form-question-title, label.label, .select__label, .c-spl-form-field__label";
@@ -124,6 +125,10 @@ function EXTRACT() {
       d = { ...base, kind: "textarea" };
     } else {
       d = { ...base, kind: "text", inputType: type };
+      // Lever's "Current location": a text box whose value counts only once one of Lever's own places is picked from its list
+      // (the pick fills the hidden selectedLocation beside it).
+      const li = el.closest("li, .application-question");
+      if (el.classList.contains("location-input") || (el.name === "location" && li && li.querySelector("input[name='selectedLocation']"))) d.place = true;
     }
     const q = push(d);
     el.setAttribute("data-upmore-q", q);
@@ -189,6 +194,12 @@ const FACT_RULES = [
 // ROUND 3: the person's own contact facts never answer a question about someone else ("Phone number of your reference",
 // "Email of the person who referred you"): the same rule as career_apply.ts SOMEONE_ELSE.
 const SOMEONE_ELSE = /\breferr|\breferen|\bteam member|\breferee|\bemergency|\bmanager|\bsupervisor|\brecruiter|\bspouse|\bparent|\bguardian|\bemployee who/;
+function factKey(label) {
+  const n = norm(label);
+  if (SOMEONE_ELSE.test(n)) return undefined;
+  for (const [re, key] of FACT_RULES) if (re.test(n)) return key;
+  return undefined;
+}
 function factValue(label, facts) {
   const n = norm(label);
   if (SOMEONE_ELSE.test(n)) return undefined;
@@ -344,6 +355,45 @@ async function fillFile(page, d, path) {
   }
   return { ok: false, reason: "upload_not_accepted" };
 }
+// A place the person confirmed ("Chicago, IL") is one of the board's places only when the city is the same and the next part is
+// the same region, by name or by its US postal code ("Chicago, Illinois, United States"). Exactly one such place, or none.
+const US_STATES = { al: "alabama", ak: "alaska", az: "arizona", ar: "arkansas", ca: "california", co: "colorado", ct: "connecticut", de: "delaware", dc: "district of columbia", fl: "florida", ga: "georgia", hi: "hawaii", id: "idaho", il: "illinois", in: "indiana", ia: "iowa", ks: "kansas", ky: "kentucky", la: "louisiana", me: "maine", md: "maryland", ma: "massachusetts", mi: "michigan", mn: "minnesota", ms: "mississippi", mo: "missouri", mt: "montana", ne: "nebraska", nv: "nevada", nh: "new hampshire", nj: "new jersey", nm: "new mexico", ny: "new york", nc: "north carolina", nd: "north dakota", oh: "ohio", ok: "oklahoma", or: "oregon", pa: "pennsylvania", ri: "rhode island", sc: "south carolina", sd: "south dakota", tn: "tennessee", tx: "texas", ut: "utah", vt: "vermont", va: "virginia", wa: "washington", wv: "west virginia", wi: "wisconsin", wy: "wyoming" };
+const region = (s) => { const n = norm(s); return US_STATES[n] || n; };
+function matchPlace(labels, value) {
+  const exact = matchOption(labels, value);
+  if (!exact.error) return exact;
+  const want = String(value).split(",").map((x) => x.trim()).filter(Boolean);
+  if (want.length < 2) return { error: "no_matching_option" };
+  const ix = labels.map((l, i) => {
+    const got = String(l).split(",").map((x) => x.trim());
+    return got.length >= 2 && norm(got[0]) === norm(want[0]) && region(got[1]) === region(want[1]) && (want.length < 3 || got.length >= 3 && norm(got[2]) === norm(want[2])) ? i : -1;
+  }).filter((i) => i >= 0);
+  return ix.length === 1 ? { index: ix[0] } : { error: ix.length ? "ambiguous_option" : "no_matching_option" };
+}
+async function fillPlace(page, d, value) {
+  const input = page.locator(sel(d.q)).first();
+  const item = page.locator(`li:has(${sel(d.q)}) .dropdown-results > *:visible, .application-question:has(${sel(d.q)}) .dropdown-results > *:visible`);
+  await input.fill("");
+  await input.pressSequentially(String(value), { delay: 25 });
+  let list = [];
+  for (let i = 0; i < 30 && !list.length; i++) { await page.waitForTimeout(200); list = (await item.allInnerTexts().catch(() => [])).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean); }
+  if (!list.length) return { ok: false, reason: "place_not_offered" };
+  const m = matchPlace(list, value);
+  if (m.error) return { ok: false, reason: m.error, options: list.slice(0, 12) };
+  await item.nth(m.index).click();
+  const held = await page.evaluate(([q]) => {
+    const el = document.querySelector(`[data-upmore-q="${q}"]`);
+    const box = el && el.closest("li, .application-question");
+    const h = box && box.querySelector("input[name='selectedLocation']");
+    return { text: el ? el.value : "", picked: h ? h.value : "" };
+  }, [d.q]);
+  return norm(held.text) === norm(list[m.index]) && String(held.picked).trim() ? { ok: true, held: list[m.index] } : { ok: false, reason: "readback_mismatch" };
+}
+// The same country under the names boards list it by ("USA" for a confirmed "United States"). Only these spellings, and only
+// when the confirmed name itself is not offered.
+const COUNTRY_NAMES = [["united states", "united states of america", "usa", "us", "u s a", "u s"], ["united kingdom", "uk", "great britain"]];
+const countryNames = (v) => (COUNTRY_NAMES.find((g) => g.includes(norm(v))) || []).filter((x) => x !== norm(v));
+
 async function fillCombo(page, d, value, pick) {
   const input = page.locator(sel(d.q)).first();
   // Only this dropdown's own options: its aria-controls list, else the options inside its own shell. A phone widget's country
@@ -398,6 +448,11 @@ async function doFill(page, d, dec, ctx) {
     return d.kind === "select" ? fillSelect(page, d, labels[ix]) : fillChoice(page, d, labels[ix], false);
   }
   const v = dec.value;
+  if (dec.source === "fact" && factKey(d.label) === "country" && ["select", "radio"].includes(d.kind)) {
+    const labels = d.options.map((o) => o.label);
+    if (matchOption(labels, v).error) { const alt = countryNames(v).find((x) => !matchOption(labels, x).error); if (alt) return d.kind === "select" ? fillSelect(page, d, labels[matchOption(labels, alt).index]) : fillChoice(page, d, labels[matchOption(labels, alt).index], false); }
+  }
+  if (d.place && dec.source === "fact") return fillPlace(page, d, v);
   switch (d.kind) {
     case "select": return fillSelect(page, d, v);
     case "radio": case "buttons": return fillChoice(page, d, v, false);
@@ -441,6 +496,8 @@ async function fillForm(page, ctx0) {
       }
       // #340: an approved answer or fact that is not exactly one of the page's options is handed back even when the question is
       // optional: leaving it out, or picking another option, would post something other than what was approved.
+      // An optional demographic question with no way to decline is left blank: a blank is the decline (boxlunch, strict run 6).
+      if (r.reason === "no_decline_option" && !d.required && d.eeo) { entry.status = "skipped"; entry.reason = "eeo_left_blank_no_decline_option"; continue; }
       const notOffered = (r.reason === "no_matching_option" || r.reason === "ambiguous_option");
       const ask = d.required || notOffered;
       entry.status = ask ? "needs_user" : "failed";
@@ -477,4 +534,4 @@ async function heldNow(page, filled) {
     return { label: f.label, kind: f.kind, source: f.source, approved: f.value, held: held === undefined ? null : held, gone: !!s.gone };
   });
 }
-module.exports = { heldNow, fillForm, matchOption, factValue, answerFor, decide, labelCounts, norm, EXTRACT, STATE, DECLINE };
+module.exports = { heldNow, fillForm, matchOption, matchPlace, countryNames, factKey, factValue, answerFor, decide, labelCounts, norm, EXTRACT, STATE, DECLINE };

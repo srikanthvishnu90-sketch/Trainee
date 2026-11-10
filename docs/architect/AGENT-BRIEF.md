@@ -40,3 +40,9 @@ the Trainee repo. The goal: bring each of the owner's 15 release items to its ba
   (`session_01PFWkFRmxppF9Hk2WkfDZbA`) is the browser lead and owns PR #668.
 - Agent 2 (`session_01PFWkFSfWut8Y4gSxdVB6YG`) owns responses, resumes, Files serving S0 and the app-layer loop
   (#672, #673, #674). Agent 3 (`session_01PFWkFRgXQKXEahCp963ZTU`) owns discovery (8) and memory (9).
+
+## Merge tips (added 2026-11-10 01:37)
+- Every PR that adds an architect test conflicts on the shard durations table. Resolve it with `git checkout --theirs` on the
+  table, then `architect-shards.ts update <your jsonl>`, then rebuild the router bundles if you touched packages/domain
+  (`python3 scripts/build-router-core.py`), and push.
+- Merged so far today: #666, #667, #670, #671, #673, #675, #677. Rebase on trunk before you open or update a PR.

@@ -335,6 +335,9 @@ Deno.test({
           const pg = await ctx.newPage();
           try {
             await pg.goto(`${origin}/?t=${encodeURIComponent(link)}`);
+            // Architect amendment, security: link scanners (x-audit, coordinator ruling 2026-11-10): the link opens a page with one
+            // button and uses nothing up; the person's tap on it takes the link (303 to the clean URL).
+            await Promise.all([pg.waitForNavigation({ waitUntil: "domcontentloaded" }), pg.click("form.open button.primary")]);
             assert(!pg.url().includes("c1."), `the token is not left in the address bar (${pg.url()})`);
             assert(expect.test(await pg.textContent("main") ?? ""), `${label}: ${expect}`);
             const m = await pg.evaluate(MEASURE), bad: string[] = [];

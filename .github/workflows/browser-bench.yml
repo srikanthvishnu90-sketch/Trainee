@@ -1,0 +1,27 @@
+# Bench only (task b-workable-breezy): GET-only markup capture of the Workable / Breezy postings the strict runner stopped on,
+# then the strict benchmark on those two boards. Nothing is submitted (strict.cjs rules; capture.cjs aborts every non-GET).
+name: browser-bench
+on:
+  push:
+    branches: ["bench/browser-wb-*"]
+permissions:
+  contents: read
+jobs:
+  eval:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22.23.3" }
+      - name: Playwright and its Chromium
+        run: |
+          npm ci --prefix tools --no-audit --no-fund
+          (cd tools && npx --no-install playwright install --with-deps chromium)
+          echo "UPMORE_PLAYWRIGHT_PATH=$GITHUB_WORKSPACE/tools/node_modules/playwright" >> "$GITHUB_ENV"
+      - name: Capture the resume-upload request (aborted, GET only)
+        run: |
+          node scripts/browser-eval/capture-upload.cjs \
+            https://north-wind-group.breezy.hr/p/ec078fe1ad56-mechanical-design-engineer-nws-00948/apply \
+            https://katapult.breezy.hr/p/5f19dfaee2c3-scheduling-coordinator-entry-level/apply
+

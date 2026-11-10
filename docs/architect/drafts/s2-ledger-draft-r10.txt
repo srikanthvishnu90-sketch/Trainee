@@ -1,0 +1,178 @@
+# S2 ledger DRAFT for the coordinator (s-release, 2026-11-10). NOT approvals: a line here approves nothing until a reviewer
+# who reviewed that PR at that head replaces <REVIEWER> and <risk/note>, and it lands in docs/architect/approvals.txt.
+# Deployed (release/production): 7d2e8ee1d1dbdb9831e29c7fbd1f0838976de11f. Trunk tip read: 2af8f1be1b00e55db3ecf0b5b3dd7597a07af0b0, then 5aa29fa94 (section A2).
+# deploy-standard.ts --checks S2 on that tip (read only, 2026-11-10 01:3x UTC): FAIL, 45/46 merges lack an approval;
+# only #625 passes (ledger-only, exempt). None of the 45 has a GitHub APPROVED review or a ledger line.
+# Head SHA = the merge commit's second parent, checked equal to the PR's head.sha from the GitHub API for all 45.
+# Author and merger of every PR: srikanthvishnu90-sketch, so that account can never be the reviewer (ledgerApproves).
+# Facts line per PR: files changed, +/-, migrations added, architect tests modified or deleted (non-additive; check each
+# was a ruled change: CLAUDE.md 'never edit an architect test to pass it').
+#
+# --- A. merged since 1a69ec9f (the task's scope) ---
+# #675 Flake fix: fixed session token in the results-list sign-in test
+#   files,+,-: 1, 9, 2; mig=0; arch_mod=1
+675 a3c40d3e1fb5200e17533ac19ecc1edd84e6d923 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #671 Files loop: press every action on every File family at phone width
+#   files,+,-: 2, 257, 1; mig=0; arch_mod=0
+671 5ca6c2112b936701f973ba1f4c8556609ce49d5e <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #670 Resume loop: every delivered PDF and DOCX opened and checked against confirmed facts
+#   files,+,-: 7, 606, 6; mig=0; arch_mod=0
+670 292daab7d734459cfd116b63b4a95c059ec10961 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #666 Submit capability labels from the posting's host (apply by message and yes)
+#   files,+,-: 4, 59, 3; mig=0; arch_mod=0
+666 e99f243e2689532344a6a301a394adbd0441b0be <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #667 docs: response rules (how Trainee answers a text, File creation, one-step actions)
+#   files,+,-: 1, 148; mig=0; arch_mod=0
+667 9384e45a8a03c37a83263dc0fd4cd48c50d4b395 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #658 WO-M: apply VM stop rules (missing answers re-prepare; stop only at a shown captcha)
+#   files,+,-: 7, 183, 12; mig=0; arch_mod=0
+658 50c2bcdc8f983e7c979ade0b1ffcf9e3ed5a7eb5 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #659 WO-L b,d: a sign-in-wall application the person finishes is recorded (career_apply_person_finished_as)
+#   files,+,-: 6, 391, 5; mig=1; arch_mod=0
+659 e6733e23643c6c0e63bd6f881e1b87bbe23d754a <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+#
+# --- A2. merged after the draft was first written (2af8f1be..5aa29fa9, read 2026-11-10 ~03:00 UTC) ---
+# #669 docs: 15-item release verification ledger
+#   files,+,-: 1, 40; mig=0; arch_mod=0
+669 c0943826306124f4065600ad33f75e1169387cac <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #668 WO-M: Lever's invisible hCaptcha is not a shown check; strict browser benchmark of the production runner
+#   files,+,-: 18, 1035, 61; mig=0; arch_mod=0
+668 2d840b43311e4289112d513e922670bb531fd292 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #673 Resume: show every skill the person listed and confirmed
+#   files,+,-: 14, 541, 201; mig=0; arch_mod=2 (M:resume-design.test.ts M:snapshots/resume-templates/manifest.json)
+673 82d10b41d7a3f340ff9b12d0d63c2fb1d1a66017 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #677 docs: compare public web-agent benchmarks with the strict browser benchmark
+#   files,+,-: 1, 228; mig=0; arch_mod=0
+677 d1c7b1465b21fb9eafea1f3b762c29343900d10d <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+#
+# --- B. merged between release 9 (7d2e8ee1) and 1a69ec9f: also unapproved, and S2 counts every merge since the deploy ---
+# #664 
+#   files,+,-: mig=0; arch_mod=0; Back-merge release/production (release 9) into trunk
+664 e231c677d58b3217f5e21cfd5476da5f8db3ead0 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #632 WO-G: application review is the exact approval artifact; states and proof match reality (R10 fixes 12, 13)
+#   files,+,-: 50, 1555, 97; mig=0; arch_mod=10
+632 291ff805a99d7ce2194c51f6bad2d09f60ff086a <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #663 trainee-file: pace hook accepts phone_resend (fixes trunk typecheck)
+#   files,+,-: 1, 1, 1; mig=0; arch_mod=0
+663 6e77a6ed374bc58988da40d9cbb616409de256d6 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #643 WO-H fix 14b: follow-up and thank-you drafts, checked in code before they are shown
+#   files,+,-: 11, 301, 5; mig=0; arch_mod=1
+643 24390ae02ba7c2ce5a75ca47002744721b8cc1c0 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #638 WO-H fix 14a: company research before an interview, as a sourced brief File
+#   files,+,-: 37, 1234, 38; mig=0; arch_mod=9
+638 678ee5dd617d348baaebcb86da2c5349fbd6e653 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #652 WO-F follow-up: tests for spec E-59 and E-56 (sign-in privacy and the 390 px entry states)
+#   files,+,-: 5, 189, 3; mig=0; arch_mod=0
+652 bc58e5998674ebdf8d55aa3f4579f3683edf00b7 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #637 WO-D (R10): at a real AI limit, say what stopped, keep the task, next step in the person's zone
+#   files,+,-: 8, 418, 11; mig=0; arch_mod=0
+637 6f2200d43c1abd194cfbc7893ba1475c130b8818 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #650 R10 F.3: a stop's reply states only the effect written and read back
+#   files,+,-: 10, 630, 15; mig=0; arch_mod=0
+650 4aa6c17425fe752d7da85858aea61a4210937fe9 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #661 WO-N PR2: RESPONSE-LAYER.md, the inventory of every place a reply's words come from
+#   files,+,-: 1, 279; mig=0; arch_mod=0
+661 cda5e6c0e1177e43752fd1974431a45238b18daa <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #645 D-046 and D-047: the owner's rulings of 2026-11-09
+#   files,+,-: 1, 5; mig=0; arch_mod=0
+645 50f4f19c3d37790ec9bfa6e2bc0d41909fe3433f <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #641 WO-F evidence: screenshots of every entry, recovery and connection state
+#   files,+,-: 51, 0, 0; mig=0; arch_mod=0
+641 6d48eff993ea2deaf1c3b2ea42614acc5c7fa8f3 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #636 WO-C (R10): job search returns a usable, re-checked shortlist
+#   files,+,-: 30, 1076, 51; mig=1; arch_mod=1
+636 229d78beef3b71b13acecac85d4b92da69d34959 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #655 WO-M: browser coverage inventory and real-site dry-run eval
+#   files,+,-: 8, 994; mig=0; arch_mod=0
+655 98f3384e6803409cd465621473f8e708e56c9c45 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #634 WO-A+B (R10): the resume task keeps its target, repairs corrections, delivers real files
+#   files,+,-: 17, 1699, 31; mig=0; arch_mod=1
+634 67e1cb5dbcb49676fda33ff1ea7a406e7a1f2c1a <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #620 R10: fifteen resume templates as exact geometry, with a format rater and a pixel-perfect checker
+#   files,+,-: 98, 27053, 45; mig=1; arch_mod=0
+620 6721051dd964e4d5b131657df9944744187db81f <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #662 WO-I: R10 conformance tests for the B.6 worked examples
+#   files,+,-: 2, 89, 2; mig=0; arch_mod=0
+662 301c8e20227f5431c5aae777a55fee8fd8e85653 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #640 WO-F: entry, recovery and connections (R10 fixes 10 and 11)
+#   files,+,-: 16, 1142, 79; mig=0; arch_mod=1
+640 37270cb58e3d28f462495c646be61ed2439a2fbe <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #654 WO-L a: employer sign-in walls (SSO, password, create-account, emailed code) are needs_user, nothing sent
+#   files,+,-: 5, 304, 13; mig=0; arch_mod=0
+654 f8d3c89c0d19826ac92d0f0d26c0d3103dca2d8a <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #635 WO-E 3/3: File families F-09 to F-15
+#   files,+,-: 23, 490, 75; mig=0; arch_mod=1
+635 21da13ebab7240104451d3ace7a862c866b70f4f <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #630 R10 research split 4/4: the harness, fixtures and $0 File quality check
+#   files,+,-: 68, 1476, 12; mig=0; arch_mod=0
+630 42492f85535e3ca7006c53f107cf6214071b06d5 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #629 R10 research split 3/4: the brief (gaps, cited thesis, form-name guard, disagreeing sources)
+#   files,+,-: 6, 226, 21; mig=0; arch_mod=1
+629 524afeebc1bc5d06d7179aa4cc76df33373f3bbd <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #633 WO-E 2/3: File families F-01 to F-04 and F-06 to F-08
+#   files,+,-: 19, 310, 7; mig=0; arch_mod=0
+633 097836b67057d389627bc3afb3ecfcf55780a8c7 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #647 WO-E 1b/3: F-05 draws the live roles feed with every control today's page has
+#   files,+,-: 13, 214, 12; mig=0; arch_mod=2
+647 192ee1debae4f01c04745b6d938f715d914ae9a0 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #660 WO-N PR1: reply rubric as code, unit-tested on the spec's own replies
+#   files,+,-: 3, 606; mig=0; arch_mod=0
+660 1ad1c2f216f7abb111da4376f99f50e7c8e196af <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #653 WO-I: post-deploy live replay of the observed turns (script, manual workflow, runbook)
+#   files,+,-: 4, 665; mig=0; arch_mod=0
+653 81b04ee2dff4682a42fd636008758410eb951c59 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #651 WO-I: R10 coverage matrix, its completeness check, and the internal loop
+#   files,+,-: 4, 421; mig=0; arch_mod=0
+651 c933ee72c3f0afa8a4718f15207e58e31d7a298b <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #649 WO-I PR3: R10 acceptance tests for fixes 9-14, with the scripted source double
+#   files,+,-: 9, 572, 10; mig=0; arch_mod=2
+649 90906083fc748f902cec88337f70b9680374ff36 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #648 WO-I PR2: R10 acceptance tests for fixes 1-8
+#   files,+,-: 9, 397, 5; mig=0; arch_mod=0
+648 1ce08bc70b61800bc0b5f42e17ba5d17602dea45 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #631 WO-E 1/3: File family shell, shared states and F-05 roles shortlist
+#   files,+,-: 29, 883, 1; mig=0; arch_mod=0
+631 6e2567d0f4eb697844d4f9923a56cf4d5e895fad <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #646 D-046 follow-up: people-search model guard; v203 is not a Trainee rollback
+#   files,+,-: 6, 79, 13; mig=0; arch_mod=0
+646 f37c9ff4f5c4d0319c7e88e0929f807ba56125f6 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #657 R10 F.3 send paths: a pause stops a claimed email batch and the replies lane's approved actions
+#   files,+,-: 6, 422, 4; mig=1; arch_mod=0
+657 ee8113781b11a2a3ed73b5147b1b9178b66a12d4 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #656 WO-E: FILE-RECORDS.md - the stores the File families still lack
+#   files,+,-: 1, 124; mig=0; arch_mod=0
+656 1f6280ea38eced765fdebbdc7e408c376e4c4ee1 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #623 R10: wire the contact connector into the chat turn behind its flags
+#   files,+,-: 7, 601, 6; mig=0; arch_mod=0
+623 cc1108f4d10c702115534f8e49bda6a9541e7381 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #628 R10 research split 2/4: free first-party sources and the reader
+#   files,+,-: 14, 1044, 55; mig=0; arch_mod=1
+628 e85f9e48219d6f7d1abe9894672d8f60b774cf70 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #639 WO-I PR1: R10 acceptance harness, observed replay (spec A.2 + F), per-item report
+#   files,+,-: 7, 1182; mig=0; arch_mod=0
+639 ea798a2bc37f187e1db4ccd43e2e33410acb6e28 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #642 R10: Sonnet 5.5 is the only product model, no per-person AI cap (D-046)
+#   files,+,-: 37, 487, 397; mig=0; arch_mod=17
+642 3f88e2d4b4b99ae0950580a8dbbe52ac75c10e55 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #627 R10 research split 1/4: the #589 review fixes (effect, DNS rebinding, own-record asks)
+#   files,+,-: 10, 190, 10; mig=0; arch_mod=0
+627 31b3a6365b444211ac6c024abd7cf14b1f8acada <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #626 docs: R10 application-layer spec and work orders (owner's 15 fixes)
+#   files,+,-: 57, 1442; mig=0; arch_mod=0
+626 875766c26370e9b85fd3bbf4f0fa9a55d05a90d2 <REVIEWER> risk=<low|medium|high> note=<what-was-checked>
+# #664 is a back-merge whose diff vs trunk is empty: S2 reads its files list as empty (FAIL, not exempt), so it needs a line too.
+#
+# Architect tests modified (M) or deleted (D) per PR (git diff <merge>^1 <merge> -- tests/architect, pending excluded):
+#   #675 M:r10-entry-signin-binding.test.ts 
+#   #632 M:file-kinds-review.test.ts M:file-kinds.test.ts M:flow-scenarios-apply-r4.test.ts M:flow-standing.test.ts M:mass-apply-summary.test.ts M:reqs-doc2-followthrough.test.ts M:scenarios-apply-r4-battery.ts M:wo-021-receipts.test.ts M:wo-022-cards.test.ts M:wo-107-standing.test.ts 
+#   #643 M:wo-002-career-tools.test.ts 
+#   #638 M:apply-here.test.ts M:brain-decides-questions.test.ts M:release-flags.test.ts M:research-market-reply.test.ts M:research-routing-20261107.test.ts M:research-routing-employer-20261108.test.ts M:scenarios/router-routes-landing.ts M:snapshots/research-brief-market.html M:stop-pause-truth-20261109.test.ts 
+#   #636 M:role-pay-results-handler.test.ts 
+#   #634 M:r9-resume-fit-send-20261108.test.ts 
+#   #640 M:snapshots/research-brief-market.html 
+#   #635 M:r10-files-fixtures-2.ts 
+#   #629 M:snapshots/research-brief-market.html 
+#   #647 M:snapshots/r10-files/F-05-roles-shortlist-1280.png M:snapshots/r10-files/F-05-roles-shortlist-390.png 
+#   #649 M:helpers/r10_inspect.ts M:helpers/r10_world.ts 
+#   #628 M:research-review-fixes-589.test.ts 
+#   #642 D:cap-views-20261106.test.ts M:claude-only-evals.test.ts M:claude-only-no-openai.test.ts M:claude-only-readers.test.ts M:d038-career-model.test.ts M:f04-tailor-rewrite-handler.test.ts M:f05-search-judge-handler.test.ts M:f11-mock-prep.test.ts M:flow-scenarios-people-drafts-r3.test.ts M:launch-readiness-handler.test.ts M:launch-readiness-units.test.ts M:m5-outreach-replies.test.ts M:people-provider-unit.test.ts M:scenarios/people-drafts-r3.ts M:turn-cost-always-recorded.test.ts M:wo-040-mail-accuracy.test.ts M:wo-049-essay-card.test.ts 

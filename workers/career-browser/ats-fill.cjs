@@ -372,8 +372,19 @@ async function fillChoice(page, d, value, multi) {
     const loc = page.locator(sel(d.q, i)).first();
     // A drawn choice's tagged option (its shown words, see EXTRACT) is clicked as a person clicks it; check() would retarget
     // the click onto the hidden input, which such a board ignores. An option already chosen is not clicked again.
-    if (d.kind === "buttons" || (d.drawn && !(await page.evaluate(STATE, [d]).then((x) => (x[0].picked || []).includes(String(i))).catch(() => false)))) await loc.click();
-    else if (!d.drawn) await loc.check({ force: true });
+    if (d.kind !== "buttons" && !d.drawn) await loc.check({ force: true });
+    else if (d.kind === "buttons" || !(await page.evaluate(STATE, [d]).then((x) => (x[0].picked || []).includes(String(i))).catch(() => false))) {
+      if (d.drawn) {
+        // The board may draw its own layer over the option's words (strict run 42780366348: a 20 s actionability wait). The
+        // click goes to the point a person would click only when what is drawn there belongs to this same option; anything
+        // else (a banner, a dialog, another control) is reported, never clicked.
+        await loc.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+        const hit = await loc.evaluate((e) => { const r = e.getBoundingClientRect(), w = e.closest("[role=radio], [role=checkbox]"), h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+          return !h ? "nothing" : w && w.contains(h) ? "own" : `${h.tagName.toLowerCase()}.${String(h.className || "").slice(0, 40)}`; }).catch(() => "unreadable");
+        if (hit !== "own") return { ok: false, reason: "option_covered", detail: `drawn there: ${hit}` };
+      }
+      await loc.click(d.drawn ? { force: true, timeout: 5000 } : {});
+    }
   }
   const s = await stateOf(page, d);
   const want = idx.map(String).sort().join(","), got = (s.picked || []).slice().sort().join(",");
@@ -461,6 +472,9 @@ function matchPlace(labels, value, country) {
     const usOk = (got.length < 3 || isUS(got[2])) && (!wantCountry || isUS(wantCountry));
     return usOk && isState(got[1]) && isState(want[1]) && region(got[1]) === region(want[1]) ? i : -1;
   }).filter((i) => i >= 0);
+  // A lookup that lists the very same words twice (Greenhouse's "Chicago, Illinois, United States" twice, strict run
+  // 42780366348) offers one answer: its first row. Two different texts stay the person's choice.
+  if (ix.length > 1 && ix.every((j) => norm(labels[j]) === norm(labels[ix[0]]))) return { index: ix[0] };
   return ix.length === 1 ? { index: ix[0] } : { error: ix.length ? "ambiguous_option" : "no_matching_option" };
 }
 // A confirmed US state ("IL" or "Illinois") onto a state list: the option that is its own text first, else the one option that

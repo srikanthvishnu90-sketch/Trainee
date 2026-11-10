@@ -37,6 +37,8 @@ test("place: the option that is the place's own text first, else the same city, 
   assert.deepEqual(matchPlace(["Chicago, Illinois, United States"], "Chicago, IL"), { index: 0 });
   assert.equal(matchPlace(["Chicago, Illinois, Canada"], "Chicago, IL").error, "no_matching_option");
   assert.equal(matchPlace(["Chicago, Illinois, United States", "Chicago, Illinois, United States of America"], "Chicago, IL", US).error, "ambiguous_option");
+  // The same words listed twice are one answer (Greenhouse's lookup, strict run 42780366348); its first row is taken.
+  assert.deepEqual(matchPlace(["Chicago, Illinois, United States", "North Chicago, Illinois, United States", "Chicago, Illinois, United States"], "Chicago, IL", US), { index: 0 });
 });
 
 test("state: the exact option first, else the one option that is the same state by name or postal code; never a neighbour", () => {
@@ -113,6 +115,8 @@ setTimeout(() => {
 // Workable (strict run 42773229260): each choice is a role=radio option around an aria-hidden 1px input. As on the real board, a
 // click on the hidden input itself changes nothing; the option the page draws is what takes the choice.
 const WRADIO = (name, label) => `<fieldset role="radiogroup" aria-labelledby="${name}_l"><span id="${name}_l"><strong>${label}</strong> *</span>` + ["YES", "NO"].map((t, i) => `<div role="radio" aria-checked="false" tabindex="0" class="opt" style="padding:6px;border:1px solid #888;width:120px"><label><input type="radio" name="${name}" value="${i ? "false" : "true"}" required aria-hidden="true" tabindex="-1" style="position:absolute;opacity:0;width:1px;height:1px"><span>${t}</span></label></div>`).join("") + `</fieldset>`;
+const WCOVER = `<!doctype html><html><body><h1>Therapist</h1><form action="/submit/wcover" method="post"><label for="em">Email*</label><input id="em" name="email" type="email" required>${WRADIO("QA_1", "Are you authorized to work in the U.S.?")}<button type="submit">Submit application</button></form>
+<div style="position:fixed;inset:0;background:rgba(0,0,0,.01)" id="banner">Cookies</div></body></html>`;
 const WORKABLE = `<!doctype html><html><body><h1>Therapist - Application</h1><form id="f" action="/submit/workable" method="post">
 <label for="fn">First name*</label><input id="fn" name="firstname" required><label for="ln">Last name*</label><input id="ln" name="lastname" required>
 <label for="em">Email*</label><input id="em" name="email" type="email" required>${WRADIO("QA_1", "Are you authorized to work in the U.S.?")}
@@ -144,6 +148,7 @@ before(async () => {
       return;
     }
     if (req.url === "/robots.txt") return res.writeHead(200, { "content-type": "text/plain" }).end("User-agent: *\nAllow: /\n");
+    if (req.url === "/wcover") return res.writeHead(200, { "content-type": "text/html" }).end(WCOVER);
     if (req.url === "/workable") return res.writeHead(200, { "content-type": "text/html" }).end(WORKABLE);
     if (req.url === "/ghloc") return res.writeHead(200, { "content-type": "text/html" }).end(GHLOC);
     if (req.url === "/elig") return res.writeHead(200, { "content-type": "text/html" }).end(ELIG);
@@ -235,4 +240,13 @@ test("Workable: drawn checkboxes in one role=group are one question's options, n
     const qs = await page.evaluate(EXTRACT);
     assert.deepEqual(qs.map((q) => [q.kind, q.label, q.options.map((o) => o.label)]), [["checkgroup", "Job type", ["Permanent - Full-time", "Remote", "On-site"]]]);
   } finally { await page.close(); }
+});
+
+test("Workable: an option another layer covers is reported with what covers it, never clicked through", { skip, timeout: 60000 }, async () => {
+  const r = await strictPosting(browser, { provider: "workable", url: `${base}/wcover` }, opts("full"));
+  assert.notEqual(r.result, "pass");
+  const n = (r.needs || []).find((x) => /authorized to work/.test(x.label));
+  assert.ok(n, JSON.stringify({ ...r, diag: undefined }));
+  assert.equal(n.reason, "option_covered");
+  assert.match(n.detail, /drawn there: div/);
 });

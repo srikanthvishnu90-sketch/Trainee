@@ -659,6 +659,8 @@
     "tests/architect/loop-13-offers.test.ts": 14,
     "tests/architect/channel-parity-acceptance.test.ts": 15,
     "tests/architect/r10-resume-design-loop-20261110.test.ts": 42,
+    "tests/architect/accounts-loop.test.ts": 11,
+    "tests/architect/connect-chat-disconnect.test.ts": 10,
     "tests/architect/h2h-leftovers-20261110.test.ts": 2.3
   }
 }

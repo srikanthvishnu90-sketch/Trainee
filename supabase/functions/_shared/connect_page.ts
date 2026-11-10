@@ -5,14 +5,18 @@
 // caller passes them from the code that builds it); an unconfigured provider has no button; "Connected as" is written only for
 // a connection that exists; an address is untrusted text and always escaped; no secret, client id or token is ever rendered.
 import { BRAND, esc, layout, TG_READY, type Og } from "./file_page.ts";
-import { reasonKey, REASONS } from "./connect_link.ts";
+import { maskEmail, reasonKey, REASONS } from "./connect_link.ts";
 
 export type ProviderId = "google" | "microsoft";
 export type PState = "not_connected" | "connected" | "needs_reconnect";
 // canSend: a connected account already granted sending (from the grant's own scopes); sendScopes: what an "Allow sending"
 // consent asks for on top (store.ts consentScopes(google, "send", connected)), present only where that consent exists.
 export interface ProviderView { id: ProviderId; configured: boolean; state: PState; email: string | null; scopes: string[]; canSend?: boolean; sendScopes?: string[] }
-export interface ConnectModel { token: string; reason: string; providers: ProviderView[]; botUrl: string | null }
+// masked: a page opened from a link (the link is the credential, so a forwarded one may be opened by anyone): addresses show only their
+// first letters and there is no Disconnect here; the chat does it (spec ruling 2026-11-10). Absent: the person is identified (Telegram).
+export interface ConnectModel { token: string; reason: string; providers: ProviderView[]; botUrl: string | null; masked?: boolean }
+// The chat's own words for a disconnect (connector_words.ts disconnectOf answers "disconnect gmail" / "disconnect outlook").
+export const DISCONNECT_IN_CHAT = (p: ProviderId) => `Reply DISCONNECT ${p === "google" ? "GMAIL" : "OUTLOOK"} in your chat with Trainee to disconnect.`;
 export const NAMES: Record<ProviderId, { brand: string; mail: string }> = { google: { brand: "Google", mail: "Gmail" }, microsoft: { brand: "Microsoft", mail: "Outlook" } };
 
 // ---------------------------------------------------------------- what the scopes mean, in plain words
@@ -94,7 +98,7 @@ export const CONNECT_CSS = `
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 `;
 
-export const CONNECT_SCRIPT = `(function(){${TG_READY}var w=window.Telegram&&window.Telegram.WebApp;var inTg=!!(w&&w.initData);function open(u){if(inTg&&w.openLink){w.openLink(u)}else{location.href=u}}document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a.notnow,a.tgback");if(a&&inTg&&w.close){e.preventDefault();w.close()}});document.addEventListener("submit",function(e){var f=e.target;if(!f.classList||!f.classList.contains("go")||!window.fetch)return;e.preventDefault();var b=f.querySelector("button");if(b)b.disabled=true;fetch(f.action||location.href,{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded",accept:"application/json"},body:new URLSearchParams(new FormData(f)).toString(),credentials:"same-origin"}).then(function(r){return r.ok?r.json():null}).then(function(j){if(j&&j.url){open(j.url);if(b)b.disabled=false}else{f.submit()}}).catch(function(){f.submit()})})})();`;
+export const CONNECT_SCRIPT = `(function(){${TG_READY}var w=window.Telegram&&window.Telegram.WebApp;var inTg=!!(w&&w.initData);function open(u){if(inTg&&w.openLink){w.openLink(u)}else{location.href=u}}document.addEventListener("click",function(e){var a=e.target.closest&&e.target.closest("a.notnow,a.tgback");if(a&&inTg&&w.close){e.preventDefault();w.close()}});document.addEventListener("submit",function(e){var f=e.target;if(inTg&&f.querySelector&&!f.querySelector('input[name="init"]')){var i=document.createElement("input");i.type="hidden";i.name="init";i.value=w.initData;f.appendChild(i)}if(!f.classList||!f.classList.contains("go")||!window.fetch)return;e.preventDefault();var b=f.querySelector("button");if(b)b.disabled=true;fetch(f.action||location.href,{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded",accept:"application/json"},body:new URLSearchParams(new FormData(f)).toString(),credentials:"same-origin"}).then(function(r){return r.ok?r.json():null}).then(function(j){if(j&&j.url){open(j.url);if(b)b.disabled=false}else{f.submit()}}).catch(function(){f.submit()})})})();`;
 export const CONNECT_BOOT = `(function(){${TG_READY}var p=new URLSearchParams(location.hash.slice(1)),d=p.get("tgWebAppData");if(!d){document.getElementById("nodata").hidden=false;return}var f=document.createElement("form");f.method="post";function a(n,v){var i=document.createElement("input");i.type="hidden";i.name=n;i.value=v;f.appendChild(i)}a("init",d);a("w",document.body.getAttribute("data-w"));document.body.appendChild(f);f.submit()})();`;
 
 const hidden = (token: string, action: string, provider: string) => `<input type="hidden" name="t" value="${esc(token)}"><input type="hidden" name="action" value="${action}"><input type="hidden" name="provider" value="${provider}">`;
@@ -102,7 +106,8 @@ const back = (botUrl: string | null, cls = "primary") => (botUrl ? `<a class="${
 const page = (title: string, inner: string, o: { og?: Og; script?: string; tg?: boolean; lede?: string; bodyAttrs?: string } = {}) =>
   layout(`${title} - Trainee`, `<div id="root" class="connect"><header>${BRAND}<h1>${esc(title)}</h1>${o.lede ? `<p class="lede">${esc(o.lede)}</p>` : ""}</header><main id="main">${inner}</main></div>`, { script: o.script, tg: o.tg, og: o.og, bodyAttrs: o.bodyAttrs, css: CONNECT_CSS });
 
-export function renderConnect(m: ConnectModel): string {
+export function renderConnect(m0: ConnectModel): string {
+  const m = m0.masked ? { ...m0, providers: m0.providers.map((p) => ({ ...p, email: maskEmail(p.email) })) } : m0;
   const reason = REASONS[reasonKey(m.reason)];
   const shown = m.providers.filter((p) => p.state !== "not_connected" || p.configured);
   const connected = m.providers.filter((p) => p.state === "connected");
@@ -112,7 +117,7 @@ export function renderConnect(m: ConnectModel): string {
   if (!shown.length) {
     return page("Not available yet", `<p class="line">Connecting your email isn't switched on yet, so nothing can be connected. Nothing was read or sent.</p><div class="actions">${back(m.botUrl, "back")}</div>`, { script: CONNECT_SCRIPT, tg: true });
   }
-  const disc = (p: ProviderView) => `<form method="post" class="disc">${hidden(m.token, "disconnect", p.id)}<button type="submit" class="lnk danger" aria-label="Disconnect ${NAMES[p.id].mail}">Disconnect</button></form>`;
+  const disc = (p: ProviderView) => m.masked ? `<p class="fine">${esc(DISCONNECT_IN_CHAT(p.id))}</p>` : `<form method="post" class="disc">${hidden(m.token, "disconnect", p.id)}<button type="submit" class="lnk danger" aria-label="Disconnect ${NAMES[p.id].mail}">Disconnect</button></form>`;
   const acct = (p: ProviderView) => `<section class="acct"><span class="chip t-confirmed">Connected</span><p class="who">Connected as ${esc(p.email ?? NAMES[p.id].mail)}</p><p class="muted">${NAMES[p.id].mail}. Disconnecting removes Trainee's access and what it read from it.</p>${disc(p)}</section>`;
   if (revoked.length) {
     const p = revoked[0], n = NAMES[p.id];

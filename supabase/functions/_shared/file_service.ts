@@ -4,7 +4,6 @@ import { feedUrlsFor } from "./file_link.ts";
 import { KIND_LABEL, tagOf, validateKind, type FileRecord, type KindId } from "./file_kinds.ts";
 import { evidenceOf, type ReviewItem, stageOf } from "./application_review.ts";
 import { reasonWords } from "./career_apply_status.ts";
-import type { ServedFamily } from "./file_family_serve.ts";
 
 export const DEFAULT_TTL_HOURS = 168; // a week; TRAINEE_FILE_TTL_HOURS sets it (1 to 720)
 // Every read and write is keyed by the user id, so one person can never read, change or revoke another's file.
@@ -32,7 +31,7 @@ export interface FileService {
   // WO-G: the review File of one prepared application, from code-built data only (reviewFromItem). Never reachable from a model.
   createReview?(userId: string, item: ReviewItem): Promise<{ ok: true; id: string; url: string | null; webApp: string | null } | { ok: false; error: string }>;
   // Item 6 S0: a File family's page from code-built view data (file_family_serve.ts). Never reachable from a model.
-  createFamily?(userId: string, family: ServedFamily, title: string, view: unknown, o?: { ref?: Record<string, string> }): Promise<{ ok: true; id: string; url: string | null; webApp: string | null } | { ok: false; error: string }>;
+  createFamily?(userId: string, family: string, title: string, view: unknown, o?: { ref?: Record<string, string> }): Promise<{ ok: true; id: string; url: string | null; webApp: string | null } | { ok: false; error: string }>;
 }
 
 const STATUS: Record<string, string> = { queued: "queued", driving: "prepared", needs_user: "prepared", submitted_unconfirmed: "submitted", unknown_outcome: "uncertain", confirmed: "confirmed", failed: "failed", not_submitted: "failed" };

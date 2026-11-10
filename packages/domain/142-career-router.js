@@ -16522,7 +16522,7 @@ const CareerRouter = (() => {
         // old ending offered nothing to do). career_account_memory.ts reads the empty headline to add the account's own record.
         const reply = company
           ? compose({ headline: `Nothing is on your record about ${company} yet.`, facts: ["I only know what you tell me, and nothing is assumed."], nextStep: `What should I know about your ${company} plans?` })
-          : compose({ headline: "Nothing about you so far: you haven't told me anything about yourself yet.", facts: ["I only use what you tell me, and nothing is assumed."], nextStep: resumeOnRecord(ctx) ? "What role are you looking for?" : "Want to start with your resume, or the role you're looking for?" });
+          : compose({ headline: "Nothing is on your record so far, because you haven't told me anything about yourself.", facts: ["I only use what you tell me, and nothing is assumed."], nextStep: resumeOnRecord(ctx) ? "What role are you looking for?" : "Want to start with your resume, or the role you're looking for?" });
         return { intent: "conversation_recall", reply, resultStatus: "awaiting_user", sends: 0 };
       }
       const lines = pool.map((f) => `${factLine(f)}.`);

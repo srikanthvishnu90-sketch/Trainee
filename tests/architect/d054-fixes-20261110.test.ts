@@ -128,7 +128,8 @@ Deno.test("tail and internal words: the router's recall and correction replies e
     eq(rubric(ask, r.reply), [], r.reply);
   }
   assert(/^No: you told me you don't need visa sponsorship\./.test(m08[2].reply), m08[2].reply);
-  assert(/^Nothing about you so far: you haven't told me anything/.test(m03.reply) && /\?$/.test(m03.reply.trim()), m03.reply);
+  // Pinned wording (flow-chat-journey: "nothing is on your record"): "your record" is the person's own record, not internal.
+  assert(/^Nothing is on your record so far, because you haven't told me anything/.test(m03.reply) && /\?$/.test(m03.reply.trim()), m03.reply);
 });
 
 Deno.test("M08 router: a sponsorship correction is said in plain terms, claims no save and names no packet", () => {
@@ -232,7 +233,7 @@ Deno.test({
       assert(!/Lakefront Data|Prairie Analytics/.test(r05.reply), `onsite and hybrid Chicago roles are dropped: ${r05.reply}`);
       assert(/data analyst/i.test(r05.reply) && !/actually only|can t commute/i.test(r05.reply), r05.reply);
       const [m03] = await talk("M03", [EVAL.M03]);
-      assert(/^Nothing about you so far: you haven't told me anything/.test(m03.reply) && !INTERNAL.test(m03.reply), m03.reply);
+      assert(/^Nothing is on your record so far, because you haven't told me anything/.test(m03.reply) && !INTERNAL.test(m03.reply), m03.reply);
       const m04s = await talk("M04", [EVAL.M04, "May 2027", "$85,000"]);
       const m04 = m04s[0];
       eq(m04s.map((r) => r.intent), ["sensitive_answer_ask", "sensitive_answer_ask", "sensitive_answer_ask"], m04s.map((r) => r.reply).join(" | "));

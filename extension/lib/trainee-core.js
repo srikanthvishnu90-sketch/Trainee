@@ -1462,9 +1462,10 @@
       /\b(personal data|your data|data from your application)\b/
     ],
     // The application and this employer.
+    // "Referrals" is read as "Referral" is (H2H leftovers 2: the plural mapped to no rule).
     [
       "referral",
-      /\breferr(ed|al|ing)\b/,
+      /\breferr(ed|als?|ing)\b/,
       (q, t) => !/government official|public official|politically exposed|public function|personally know|know (anyone|someone|a current)|acquainted/.test(t)
     ],
     [

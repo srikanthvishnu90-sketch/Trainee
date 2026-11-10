@@ -11,6 +11,8 @@ import { supabaseQuestionStore } from "../_shared/career_apply_questions.ts";
 import { pendingRows, reprepareQueued } from "../_shared/career_hosted_prepare.ts";
 import { resumeOnFileReader } from "../_shared/career_apply_from_chat.ts";
 import type { FileDeps } from "./handler.ts";
+import { messageRecords, outreachDrafts } from "../_shared/file_family_message.ts";
+import { sendRailOn } from "../_shared/career_send_rail.ts";
 import { PHONE_STEP_FLOOR_MS, phonePace } from "../_shared/file_session.ts";
 import { supabaseResumeRates } from "../_shared/career_resume_outcomes.ts";
 
@@ -35,6 +37,7 @@ export function buildFileDeps(admin: any, env: FileDeps["env"], now: () => numbe
     // Item 6: each File family's records and posts (file_family_serve.ts FamilyRecords). One line per family; each builder adds only its
     // own line (an absent family loads nothing: a ref File shows the C.24 error state, and no post is dispatched).
     familyRecords: {
+      "F-12": messageRecords({ store: outreachDrafts(admin), rail: sendRailOn(env) ? { rpc: (name: string, args: { p: unknown }) => admin.rpc(name, args), drafts: (u: string, ids: string[]) => outreachDrafts(admin).drafts(u, ids) } : null }),
     },
     // A results card that isn't ready: the employer's open questions (asked on the page, saved the way the chat saves them), then
     // the queued applications prepared again, and where each one stands.

@@ -50,7 +50,14 @@ export const FORMS: Record<string, { title: string; company: string; parts: stri
   // Self-identification and a date of birth: never filled from anything but this application's own answer.
   eeo: { title: "Reporting Analyst", company: "TEST Cedar Health", parts: [...BASE, GENDER, select("race", "Race or ethnicity (voluntary)", ["Asian", "Black or African American", "Hispanic or Latino", "White", "Decline to self-identify"], false), input("dob", "Date of birth", "required"), RESUME] },
   relocate: { title: "Junior Data Analyst", company: "TEST Birch Logistics", parts: [...BASE, select("relocate", "Are you willing to relocate?", ["Yes", "No"]), AUTH, RESUME] },
+  // Interim ruling (d): a date of birth is asked only when the form requires it, per application, never reused or guessed.
+  dobopt: { title: "Insights Analyst", company: "TEST Alder Retail", parts: [...BASE, input("dob", "Date of birth (optional)"), RESUME] },
+  dob2: { title: "Claims Data Analyst", company: "TEST Spruce Insurance", parts: [...BASE, input("dob", "Date of birth", "required"), RESUME] },
 };
+// The posting a person asks for in chat (the step from "apply to ..." to the queue): a board link, served locally to the engine.
+const CHATQ = { id: "greenhouse:testjuniper:9101", url: "https://boards.greenhouse.io/testjuniper/jobs/9101", title: "Data Analyst", company: "TEST Juniper Insights", form: { title: "Data Analyst", parts: [...BASE, AUTH, RESUME] } };
+// The date of birth one person gives for one application (TEST Avery Quill at TEST Cedar Health), and only for it.
+const DOB_GIVEN = { person: "00000000-0000-4000-8000-0000000a0001", form: "eeo", value: "1999-04-02" };
 const page = (f: { title: string; parts: string[] }) => `<!doctype html><h1>${f.title}</h1><form method="post" action="/submit" enctype="multipart/form-data">${f.parts.join("")}<button type="submit">Submit application</button></form>`;
 
 // ------------------------------------------------------------------------------------------------- the synthetic people
@@ -105,6 +112,7 @@ Deno.test({
     const server = Deno.serve({ hostname: "127.0.0.1", port: 0, onListen: () => {} }, (req) => {
       const k = new URL(req.url).pathname.split("/")[2] ?? "";
       if (req.method !== "GET") return new Response("this test page takes no submission", { status: 405 }); // the dry run never posts
+      if (k === "chatq") return new Response(page(CHATQ.form), { headers: { "content-type": "text/html" } });
       return FORMS[k] ? new Response(page(FORMS[k]), { headers: { "content-type": "text/html" } }) : new Response("no such job", { status: 404 });
     });
     const port = (server.addr as Deno.NetAddr).port;
@@ -141,21 +149,33 @@ Deno.test({
       const json = async (sql: string) => JSON.parse((await pg.sql(sql)) || "null");
       const asked = async (u: string) => (await json(`select coalesce(jsonb_agg(jsonb_build_object('id', id, 'key', key, 'label', label, 'state', state, 'company', company, 'kind', kind)), '[]') from public.career_apply_questions where user_id = '${u}'`)) as any[];
 
+      const postingSql = (id: string, f: { title: string; company: string }, url: string) =>
+        `insert into public.career_postings (job_id, provider, board, company, title, location, url, description, first_seen_at, last_seen_at)
+         values (${lit(id)}, 'greenhouse', 'test', ${lit(f.company)}, ${lit(f.title)}, 'Chicago, IL', ${lit(url)}, ${lit(f.title)}, now() - interval '1 day', now()) on conflict do nothing`;
+      // Each fixture posting is a board posting (its job id and link as the boards give them); the engine reads it from the
+      // local page standing in for that link (prepareOne's urlFor), so nothing leaves the machine.
+      const postingOf = (k: string, p: Profile) => ({ id: `greenhouse:test${k}:${Number(p.id.slice(-4))}`, url: `https://boards.greenhouse.io/test${k}/jobs/${Number(p.id.slice(-4))}` });
+      for (const p of PROFILES) for (const [k, f] of Object.entries(FORMS)) await pg.sql(postingSql(postingOf(k, p).id, f, postingOf(k, p).url));
+      const chatq: { queued: number; candidate: number; outcome: string; asked: string } = { queued: 0, candidate: 0, outcome: "not run", asked: "" };
+      const dob = { requiredAsked: 0, requiredForms: 0, optionalAsked: 0, reusedElsewhere: 0, keys: 0, keysPerApplication: 0 };
+
       await t.step("prepare every profile x form through prepareOne and the real engine", async () => {
         for (const p of PROFILES) {
           for (const [k, f] of Object.entries(FORMS)) {
             const url = `http://127.0.0.1:${port}/job/${k}`;
-            const c: Candidate = { user_id: p.id, job_id: `test:${k}:${p.id.slice(-4)}`, company: f.company, title: f.title, url, location: "Chicago, IL", description: f.title, epoch: 0, version: 0 } as Candidate;
-            const deps: any = { db: admin, runEngine: engine, profileFor: storedProfile(admin), resumeFor: async () => ({ ...resumes.get(p.id)!, tag: null }), now: () => Date.now(), tmpRoot: work };
+            const c: Candidate = { user_id: p.id, job_id: postingOf(k, p).id, company: f.company, title: f.title, url: postingOf(k, p).url, location: "Chicago, IL", description: f.title, epoch: 0, version: 0 } as Candidate;
+            const deps: any = { db: admin, runEngine: engine, profileFor: storedProfile(admin), resumeFor: async () => ({ ...resumes.get(p.id)!, tag: null }), now: () => Date.now(), tmpRoot: work, urlFor: () => url };
             let r = await prepareOne(deps, c);
             // Ask once: a question this person already answered elsewhere is answered from that answer, then prepared again.
             for (let round = 0; round < 2 && r.outcome === "asked"; round++) {
               let answered = 0;
               for (const q of await asked(p.id)) {
                 if (q.state !== "open") continue;
-                const a = p.answers.find(([rx]) => rx.test(String(q.label)));
+                // A date of birth: given only by the one person, only for the one application it was asked for.
+                const own = /date of birth/i.test(String(q.label)) ? (p.id === DOB_GIVEN.person && k === DOB_GIVEN.form && norm(q.company) === norm(f.company) ? DOB_GIVEN.value : null) : null;
+                const a = own ? [null, null, own] as const : p.answers.find(([rx]) => rx.test(String(q.label)));
                 if (!a) continue;
-                await pg.sql(`update public.career_apply_questions set state = 'answered', answer = ${lit(a[2])}, answered_at = now() where id = '${q.id}'`);
+                await pg.sql(`update public.career_apply_questions set state = 'answered', answer = ${lit(String(a[2]))}, answered_at = now() where id = '${q.id}'`);
                 answered++;
               }
               if (!answered) break;
@@ -165,16 +185,49 @@ Deno.test({
             const row = r.prepared_id ? (await json(`select jsonb_build_object('payload', payload, 'hash', payload_hash, 'lines', card_lines,
               'hash_ok', payload_hash = encode(sha256(convert_to(public.career_apply_canonical(payload), 'UTF8')), 'hex')) from public.career_apply_prepared where id = '${r.prepared_id}'`)) : null;
             const answers: Case["answers"] = [];
+            const given = p.id === DOB_GIVEN.person && k === DOB_GIVEN.form ? [DOB_GIVEN.value] : [];
             let resumeOk = true, targetOk = true;
             if (row) {
               assert(row.hash_ok, `the stored hash is the payload's own (${p.name} ${k})`);
-              answers.push(...traceCard(row.lines as string[], row.payload, p.answers.map(([, , v]) => v)));
+              answers.push(...traceCard(row.lines as string[], row.payload, [...p.answers.map(([, , v]) => v), ...given]));
               resumeOk = row.payload.resume_sha256 === resumes.get(p.id)!.sha256 && (row.lines as string[]).filter((l) => /^Resume\b/.test(l)).length === 1;
               targetOk = row.payload.url === url && norm(row.payload.company) === norm(f.company);
             }
             cases.push({ person: p.name, form: k, outcome: r.outcome, detail: r.detail, asked: open, answers, resumeOk, targetOk, preparedId: r.prepared_id, hash: row?.hash });
+            // (d) the date of birth: asked where the form requires it, never where it is optional, never filled from another
+            // application's answer, and always kept as this application's own answer (job key), never as a fact.
+            const dobAsked = open.some((l) => /date of birth/i.test(l)), dobOnCard = answers.some((a) => /date of birth/i.test(a.label));
+            const requires = f.parts.some((x) => /name="dob"[^>]*required/.test(x));
+            if (requires) { dob.requiredForms++; if (dobAsked || (dobOnCard && given.length)) dob.requiredAsked++; }
+            if (!requires && f.parts.some((x) => /name="dob"/.test(x)) && (dobAsked || dobOnCard)) dob.optionalAsked++;
+            if (dobOnCard && !(p.id === DOB_GIVEN.person && k === DOB_GIVEN.form)) dob.reusedElsewhere++;
           }
         }
+        for (const p of PROFILES) for (const q of await asked(p.id)) if (/date of birth/i.test(String(q.label))) { dob.keys++; if (String(q.key).startsWith("job:")) dob.keysPerApplication++; }
+      });
+
+      await t.step("from the chat ask to the queue: \"apply to ...\" queues the posting, the preparation takes it, the card shows it", async () => {
+        const p = PROFILES[0];
+        await pg.sql(postingSql(CHATQ.id, CHATQ, CHATQ.url));
+        const chat = h!.chat("tok-al-0");
+        await pg.sql(`delete from public.agent_rate_limits`);
+        const r = await chat.say(`apply to the ${CHATQ.title} role at ${CHATQ.company}`);
+        const wanted = Number(await pg.sql(`select count(*) from public.career_apply_wanted where user_id = '${p.id}' and posting_key = ${lit(CHATQ.id)} and state = 'waiting'`));
+        chatq.asked = r.reply.slice(0, 300);
+        chatq.queued = wanted;
+        const cands = (await admin.rpc("career_apply_prepare_candidates_for", { p_user: p.id, p_now: new Date().toISOString(), p_per_person: 25, p_limit: 500 })).data ?? [];
+        const cand = (cands as any[]).find((c) => c.job_id === CHATQ.id);
+        chatq.candidate = cand ? 1 : 0;
+        if (!cand) return;
+        const local = `http://127.0.0.1:${port}/job/chatq`;
+        const deps: any = { db: admin, runEngine: engine, profileFor: storedProfile(admin), resumeFor: async () => ({ ...resumes.get(p.id)!, tag: null }), now: () => Date.now(), tmpRoot: work, urlFor: () => local };
+        const out = await prepareOne(deps, cand as Candidate);
+        chatq.outcome = out.outcome;
+        if (!out.prepared_id) return;
+        const row = await json(`select jsonb_build_object('payload', payload, 'hash', payload_hash, 'lines', card_lines) from public.career_apply_prepared where id = '${out.prepared_id}'`);
+        const answers = traceCard(row.lines, row.payload, p.answers.map(([, , v]) => v));
+        cases.push({ person: p.name, form: "chatq", outcome: out.outcome, detail: out.detail, asked: [], answers, resumeOk: row.payload.resume_sha256 === resumes.get(p.id)!.sha256,
+          targetOk: norm(row.payload.company) === norm(CHATQ.company), preparedId: out.prepared_id, hash: row.hash });
       });
 
       const approvals = { checked: 0, matched: 0, staleTried: 0, staleRefused: 0, changedTried: 0, changedRefused: 0, cardLineMissing: 0 };
@@ -216,7 +269,7 @@ Deno.test({
           }
           // Measured, not yet a bar (each needs a change outside this loop's files, named in the PR): C.11 asks for the exact
           // role, the resume by a human label, and the questions still open named on the review.
-          for (const c of ready) { review.shown++; if (shown.reply.includes(FORMS[c.form].title)) review.role++; }
+          for (const c of ready) { review.shown++; if (shown.reply.includes(`${c.form === "chatq" ? CHATQ.company : FORMS[c.form].company} — ${c.form === "chatq" ? CHATQ.title : FORMS[c.form].title}`)) review.role++; }
           review.resumeLines += (shown.reply.match(/^\s*Resume: .*$/gm) ?? []).length;
           review.resumeHex += (shown.reply.match(/^\s*Resume: .*\([0-9a-f]{12}\)\s*$/gm) ?? []).length;
           const openHere = cases.filter((c) => c.person === p.name && c.asked.length).flatMap((c) => c.asked);
@@ -237,22 +290,35 @@ Deno.test({
         realLog(`[${c.person} / ${c.form}] ${c.outcome}${c.asked.length ? ` asked: ${c.asked.join(" | ")}` : ""}${bad.length ? ` INVENTED: ${bad.map((a) => `${a.label}=${a.value}`).join("; ")}` : ""}${c.resumeOk ? "" : " RESUME WRONG"}${c.targetOk ? "" : " TARGET WRONG"}${c.outcome !== "ready" ? ` (${c.detail.slice(0, 120)})` : ""}`);
       }
       const ready = cases.filter((c) => c.outcome === "ready").length;
-      const sensitiveFilled = cases.filter((c) => c.answers.some((a) => /social security|gender|race|ethnicity|date of birth/i.test(a.label))).length;
+      const sensitiveFilled = cases.filter((c) => c.answers.some((a) => /social security|gender|race|ethnicity/i.test(a.label))).length;
       const unknownFilled = cases.filter((c) => (c.form === "unknown" || c.form === "essay") && c.outcome === "ready").length;
       const summary = `APP-LAYER LOOP: cases ${cases.length}, ready ${ready}, answers ${answers.length}, traced ${traced}, invented ${answers.length - traced}, ` +
         `unknown or essay filled ${unknownFilled}, sensitive filled ${sensitiveFilled}, resume right ${cases.filter((c) => c.outcome === "ready" && c.resumeOk).length}/${ready}, ` +
         `target right ${cases.filter((c) => c.outcome === "ready" && c.targetOk).length}/${ready}, hash match ${approvals.matched}/${approvals.checked}, ` +
         `stale-yes refused ${approvals.staleRefused}/${approvals.staleTried}, changed-payload yes refused ${approvals.changedRefused}/${approvals.changedTried}, card lines missing from the shown card ${approvals.cardLineMissing}`;
       realLog(summary);
-      realLog(`APP-LAYER REVIEW (measured, no bar yet): role named on the card ${review.role}/${review.shown}, resume lines showing a hash prefix ${review.resumeHex}/${review.resumeLines}, ` +
-        `people with an open question who see it named on the review ${review.openNamed}/${review.withOpen}`);
+      const reviewLine = `APP-LAYER REVIEW: role named on the card ${review.role}/${review.shown}, resume lines showing a hash prefix ${review.resumeHex}/${review.resumeLines}, ` +
+        `people with an open question who see it named on the card ${review.openNamed}/${review.withOpen}`;
+      const dobLine = `APP-LAYER DOB: asked where the form requires it ${dob.requiredAsked}/${dob.requiredForms}, asked where optional ${dob.optionalAsked}, ` +
+        `filled from another application ${dob.reusedElsewhere}, kept per application ${dob.keysPerApplication}/${dob.keys}`;
+      const chatLine = `APP-LAYER CHAT->QUEUE: queued ${chatq.queued}, a preparation candidate ${chatq.candidate}, prepared ${chatq.outcome}, on the card and approved by the yes ${cases.some((c) => c.form === "chatq" && c.preparedId) ? "see hash match" : "no"}`;
+      realLog(reviewLine);
+      realLog(dobLine);
+      realLog(chatLine);
+      if (!chatq.queued) realLog(`[chat ask] ${chatq.asked}`);
       const out = Deno.env.get("APP_LAYER_LOOP_OUT");
-      if (out) Deno.writeTextFileSync(out, JSON.stringify({ summary, cases, approvals, review }, null, 1));
+      if (out) Deno.writeTextFileSync(out, JSON.stringify({ summary, reviewLine, dobLine, chatLine, cases, approvals, review, dob, chatq }, null, 1));
       assert(answers.length - traced === 0, `invented answers on a card (listed above): ${summary}`);
       assert(unknownFilled === 0 && sensitiveFilled === 0, `an unknown, essay or sensitive question was filled: ${summary}`);
       assert(ready > 0 && cases.every((c) => c.outcome !== "ready" || (c.resumeOk && c.targetOk)), `resume or target wrong: ${summary}`);
       assert(approvals.checked > 0 && approvals.matched === approvals.checked && approvals.cardLineMissing === 0, `hash match / card shown: ${summary}`);
       assert(approvals.staleRefused === approvals.staleTried && approvals.changedRefused === approvals.changedTried, `stale or changed yes: ${summary}`);
+      // Architect rulings on #674: (a) the role on every card, (b) no hash prefix on the card, (c) every open question named.
+      assert(review.shown > 0 && review.role === review.shown && review.resumeHex === 0 && review.openNamed === review.withOpen, reviewLine);
+      // (d) the date of birth.
+      assert(dob.requiredAsked === dob.requiredForms && dob.optionalAsked === 0 && dob.reusedElsewhere === 0 && dob.keysPerApplication === dob.keys, dobLine);
+      // From the chat ask: queued, taken by the preparation, prepared, and on the card the yes approved (counted in hash match).
+      assert(chatq.queued === 1 && chatq.candidate === 1 && chatq.outcome === "ready", chatLine);
       assert(await pg.sql(`select count(*) from public.career_apply_jobs where state not in ('queued')`) === "0", "nothing beyond the queue: no application ran");
     } finally {
       console.error = realError;

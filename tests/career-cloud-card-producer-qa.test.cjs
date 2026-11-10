@@ -90,7 +90,8 @@ const runEngine = async (args: string[]) => {
   const fields = contract.fill, destination = url + "/submit", schemaHash = await hashApplyPayload(schema);
   const readback = Object.fromEntries(fields.map((f: any) => [f.name, f.name === "yes" ? true : f.name === "no" ? false : f.name === "resume" ? "INTERNAL_FILE_TOKEN" : f.value]));
   const approval = await applicationApprovalHash({ userId: owner, posting, destination, fields, resumeSha256: sha,
-    schemaHash, pageFieldNames: ["employer_hidden"], manifest: m });
+    // The engine binds the employer's hidden values too (x-audit, 20261110170000), as scripts/apply.ts computes it.
+    schemaHash, pageFieldNames: ["employer_hidden"], pageFieldValues: { employer_hidden: "SYNTHETIC_EMPLOYER_VALUE" }, manifest: m });
   return { result: { state: "not_submitted", reason: "dry_run" }, evidence: {
     fields, schema, readback, approval_hash: approval, sources: m.byFactId, replay_sources: Object.values(m.byFactId),
     trust: { quarantine_version: m.version, manifest_hash: m.hash },

@@ -188,7 +188,13 @@ export const titleShaped = (message: string) => {
   if (s.split(/\s+/).length === 1) return ROLE_WORD.test(lc(s));
   return ROLE_WORD.test(lc(s)) || /^[A-Z][\w&.'-]*(?:\s+(?:of|&|[A-Z][\w&.'-]*)){0,4}(?:,?\s+(?:since|from|starting|started)\b.*)?$/.test(s);
 };
-export type ResumeAsk = "target_which" | "target_field" | "target_company" | "fact_detail" | "submit_job" | "new_fact" | "make" | "correct" | "link" | "ask_send" | "send_pdf" | "explain" | "edit" | "restyle" | "approve_edit" | "why_contact" | "apply_which" | null;
+// H2H fixes 2 and 4 (docs/architect/INSTINCT-HEAD-TO-HEAD.md C1 turn 4, C4 turn 3): with this task's file on hand, "give me the
+// PDF" is that file again (it was answered "no resume has been tailored in this chat" after two PDFs were sent), and "now send
+// it to Maya" right after it is a send of that file to someone, asked about before anything is drafted or sent.
+const PDF_AGAIN = /\b(?:give|send|share|attach)\s+(?:me\s+)?(?:the|my|that|this)\s+(?:revised\s+|new\s+|updated\s+|resume\s+)?(?:pdf|file)\b(?!\s+to\s+(?!me\b))/;
+const SEND_TO = /^\s*(?:ok(?:ay)?,?\s+|now\s+|and\s+|then\s+|please\s+)*(?:send|forward|share|email)\s+(?:it|this|that|the (?:pdf|resume|file))\s+to\s+(\p{Lu}[\p{L}'-]+)(?:\s+\p{Lu}[\p{L}'-]+)?\s*[.!]?\s*$/u;
+const sendTo = (m: string) => SEND_TO.exec(String(m).replace(/^\s*\S+/, (w) => w.toLowerCase()))?.[1] ?? null;
+export type ResumeAsk = "target_which" | "target_field" | "target_company" | "fact_detail" | "submit_job" | "new_fact" | "make" | "correct" | "link" | "ask_send" | "send_pdf" | "explain" | "edit" | "restyle" | "approve_edit" | "why_contact" | "apply_which" | "send_to" | null;
 export function resumeAskOf(message: string, task: ResumeTask | null, view: { companies: string[]; employers?: string[]; jobs: number; posting: boolean; lastFile?: boolean; resumeShown?: boolean }): ResumeAsk {
   // A pasted resume or posting is material, not an ask about the resume task (its own words say "for", "file", "update").
   if (message.length > 600 || message.split("\n").filter((l) => l.trim()).length > 4 || /^\s*(here'?s|here is|this is|my) (my |the )?(resume|cv)\b/i.test(message)) return null;
@@ -209,6 +215,8 @@ export function resumeAskOf(message: string, task: ResumeTask | null, view: { co
   }
   if (AMBIGUOUS.test(t) && task?.file) return view.jobs > 0 || task.limits.includes("no_apply") ? "ask_send" : "send_pdf";
   if (task?.proposed && (task.lastAsk === "edit" || task.lastAsk === "restyle") && view.resumeShown && /\b(fine|good|ok(ay)?|yes|use (it|that)|approve)\b/.test(t) && !/\b(no|not|don'?t)\b/.test(t)) return "approve_edit";
+  if (task?.file && PDF_AGAIN.test(t) && !/\b(apply|submit)\b/.test(t)) return "send_pdf";
+  if (task?.file && view.resumeShown && sendTo(message)) return "send_to";
   if (task?.file && /\bbullet\b/.test(t) && /\b(less wordy|shorter|shorten|tighten|trim|concise|simplify)\b/.test(t)) return "edit";
   // A bare follow-up ("Make it warmer.") right after the resume was shown is about that resume, never a fresh tailor.
   if (task?.file && view.resumeShown && RESTYLE.test(t)) return "restyle";
@@ -281,6 +289,21 @@ function skillLines(skills: Fact[]): { label?: string; text: string; group: stri
   // A.4's run-in labels (Technical:, Certifications:, Interests:); a lone group of plain skills needs none.
   return [...groups].map(([k, v]) => ({ group: k, text: v.join(", "), ...(groups.size === 1 && k === "Skills" ? {} : { label: `${k === "Skills" ? "Technical" : k}:` }) }));
 }
+// H2H fix 5 (docs/architect/INSTINCT-HEAD-TO-HEAD.md item 3, checks 4, 6, 8): what the intake left behind is not an entry. A
+// line that is a section heading alone ("ADDITIONAL", read as an entry with nothing under it) and a line that was only a GPA
+// (left as "(registrar transcript)" once the GPA is off) print nothing; within the same relevance, the newest entry leads.
+const HEADING_ONLY = /^(?:additional(?: information)?|other|misc(?:ellaneous)?|more|details|information|extras?)$/i;
+const residue = (s: string) => !s.replace(/\([^)]*\)/g, " ").replace(/[^\p{L}\p{N}]+/gu, "");
+const MONTH_N: Record<string, number> = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+// The month an entry started (its dates as written, "Feb 2023 - Present", "2022 - 2023"); an entry still running ends latest.
+function startOf(f: Fact): { start: number; open: boolean } | null {
+  const right = splitDates(String(f.title || f.text || "")).right;
+  const m = right ? /^(?:([A-Za-z]{3})[a-z]*\.?\s+)?(\d{4})/.exec(right) : null;
+  return m ? { start: Number(m[2]) * 12 + (m[1] ? MONTH_N[m[1].toLowerCase()] ?? 0 : 0), open: /present|current|now/i.test(right!) } : null;
+}
+const newer = (a: Fact, b: Fact) => { const x = startOf(a), y = startOf(b); return x && y ? (Number(y.open) - Number(x.open)) || y.start - x.start : 0; };
+// "Founder above Founder" (H2H fix 6): an entry is named by its title, and by its employer too when another entry has that title.
+const nameIn = (f: Fact, all: Fact[]) => { const n = short(f.title || f.text); return all.filter((g) => short(g.title || g.text) === n).length > 1 ? splitDates(String(f.title || f.text)).text.replace(/,\s*$/, "") : n; };
 const printedOf = (bs: Block[]) => bs.flatMap((b) => [...(b.label ? [b.label] : []), b.text, ...(b.right ? [b.right] : [])]);
 export interface Built { blocks: Block[]; lines: string[]; gpaConflict: string[] | null; contactMissing: boolean; unconfirmed: boolean; left: string[]; moved: string[]; facts: { text: string; fact: Fact }[] }
 const short = (s: string) => String(s).split(/,| - | \(/)[0].trim();
@@ -300,22 +323,32 @@ export function buildResume(profile: any, target: Target, uploaded: boolean, o: 
   const contactMissing = !top.name || !top.email;
   const blocks: Block[] = [], moved: string[] = [], bullets: { text: string; fact: Fact }[] = [];
   blocks.push(top.name ? { kind: "name", text: top.name } : { kind: "name", text: "[Your name]", flag: true });
-  const line = profile?.resume_header?.contactLine || [profile?.basics?.location, top.email, profile?.basics?.phone].filter(Boolean).join(" | ");
+  const place = profile?.basics?.location || profile?.resume_header?.location || null;
+  const line = profile?.resume_header?.contactLine || [place, top.email, profile?.basics?.phone].filter(Boolean).join(" | ");
   if (!contactMissing && line) blocks.push({ kind: "contact", text: String(line) });
-  else blocks.push({ kind: "contact", text: "[email · phone · LinkedIn to add]", flag: true });
+  else {
+    // The city the person gave prints as theirs; only what is missing is the flagged placeholder (H2H fix 5, check 8).
+    if (place) blocks.push({ kind: "contact", text: String(place) });
+    blocks.push({ kind: "contact", text: "[email · phone · LinkedIn to add]", flag: true });
+  }
   const score = scorer(target);
   // A student target leads with education; everything else leads with experience. Within a section, the entries that show
   // the target's work come first (a stable order otherwise: the person's own).
   const order = target.level === "internship" ? ["education", "experience", "project", "leadership"] : ["experience", "project", "education", "leadership"];
   for (const kind of order) {
-    const xs = facts.filter((f) => f.kind === kind).map((f, i) => ({ f, i, s: score(f) })).sort((a, b) => b.s - a.s || a.i - b.i);
+    const kept = facts.filter((f) => f.kind === kind).filter((f) => {
+      const t = String(f.title || f.text || "").trim(), bs = (f.bullets ?? []).map((b: string) => asWritten(String(b))).filter((b: string) => !residue(b));
+      return !(HEADING_ONLY.test(t) && !bs.length) && !(residue(asWritten(t)) && !bs.length);
+    });
+    const xs = kept.map((f, i) => ({ f, i, s: score(f) })).sort((a, b) => b.s - a.s || newer(a.f, b.f) || a.i - b.i);
     if (!xs.length) continue;
-    xs.forEach((x, k) => { if (x.i > k) moved.push(`${short(x.f.title || x.f.text)} above ${short(xs.find((y) => y.i === k)!.f.title || "")}`); });
+    xs.forEach((x, k) => { if (x.i > k) moved.push(`${nameIn(x.f, kept)} above ${nameIn(xs.find((y) => y.i === k)!.f, kept)}`); });
     blocks.push({ kind: "heading", text: SECTION[kind] });
     for (const { f } of xs) {
       blocks.push({ kind: "entry", ...splitDates(asWritten(String(f.title || f.text))) });
       for (const b of (f.bullets?.length ? f.bullets : (f.text && f.text !== f.title ? [f.text] : []))) {
         const own = asWritten(String(b)), swap = (o.swaps ?? []).find((x) => x.before === own);
+        if (residue(own)) continue;
         blocks.push({ kind: "bullet", text: swap ? swap.after : own });
         if (kind !== "education") bullets.push({ text: swap ? swap.after : own, fact: f });
       }
@@ -487,7 +520,7 @@ async function resumeTaskTurnInner(o: { message: string; ctx: any; userId: strin
       : "Your contact details are on file and printed at the top; nothing there is a placeholder now.", RESUME_TASK_INTENT, now.contactMissing ? "awaiting_user" : "completed");
     if (ask === "apply_which") return reply(`Which role should this go to? Before anything is sent, I'll show you the target, the final resume and the exact application answers.${open.length ? ` The draft still needs ${open.join(" and ")}, so it isn't ready to submit.` : ""}`, RESUME_CLARIFY_INTENT);
     if (ask === "explain") {
-      const moves = task.moved?.length ? `I moved ${task.moved.join("; and ")}.` : "I kept the order of your intake; nothing was moved.";
+      const moves = task.moved?.length ? `I moved ${task.moved.length > 1 ? `${task.moved.slice(0, -1).join(", ")} and ${task.moved.at(-1)}` : task.moved[0]}.` : "I kept the order of your intake; nothing was moved.";
       return reply([moves, `I did not add a new job, tool, result or credential.${(task.swaps ?? []).length ? ` I used the shorter wording you approved for ${task.swaps!.length === 1 ? "one bullet" : `${task.swaps!.length} bullets`}.` : ""}`,
         ...(noGpa ? ["GPA stays off."] : []), ...(now.contactMissing ? ["Contact details are still placeholders."] : [])].join(" "), RESUME_TASK_INTENT, "completed");
     }
@@ -518,6 +551,10 @@ async function resumeTaskTurnInner(o: { message: string; ctx: any; userId: strin
     task.proposed = [{ before: pick.text, after: clean }]; task.proposedHash = await proposalHash(task.proposed);
     const nums = (clean.match(/\d[\d,.]*\+?%?/g) ?? []).filter((n) => pick.text.includes(n.replace(/\+$/, "")));
     return reply([`Proposed replacement: ${clean}`, `Now: ${pick.text}`, ...nums.slice(0, 1).map((n) => `This keeps the ${n} already in your intake. If ${n} is not accurate, tell me the supported number before we use it.`), "Say if it's fine and I'll put it in the PDF."].join("\n"));
+  }
+  if (ask === "send_to") {
+    const who = sendTo(o.message)!;
+    return reply(`Which ${who} do you mean, and where should the resume PDF for ${task.file!.label} go to reach them: an email address, or a conversation you have with them?`, RESUME_CLARIFY_INTENT);
   }
   if (ask === "ask_send") {
     task.pending = "send_choice";

@@ -1,0 +1,25 @@
+# b-lever: strict browser benchmark on the Lever postings only (dry run: non-GET aborted, submits trapped, stopped before the click).
+name: browser-bench
+on:
+  push:
+    branches: ["bench/browser-*"]
+permissions:
+  contents: read
+jobs:
+  eval:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22.23.3" }
+      - name: Playwright and its Chromium
+        run: |
+          npm ci --prefix tools --no-audit --no-fund
+          (cd tools && npx --no-install playwright install --with-deps chromium)
+          echo "UPMORE_PLAYWRIGHT_PATH=$GITHUB_WORKSPACE/tools/node_modules/playwright" >> "$GITHUB_ENV"
+      - name: Strict benchmark, Lever only (nothing is submitted)
+        run: |
+          label="lever-${GITHUB_SHA}"
+          node scripts/browser-eval/strict.cjs --sample scripts/browser-eval/sample.csv --label "$label" --max-per-provider 20 --providers lever
+          cat "artifacts/browser-eval/$label/strict-summary.md" >> "$GITHUB_STEP_SUMMARY"

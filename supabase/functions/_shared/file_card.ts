@@ -14,11 +14,22 @@
 import type { Button, DeliveryAdapter, SendOptions, SendResult } from "./channel_adapters.ts";
 import { escapeHtml } from "./channel_voice.ts";
 import { releaseFlagOn } from "../agent-chat/release_config.ts";
-import { FAMILIES, type FamilyId } from "./file_family.ts";
-import type { FileRecord } from "./file_kinds.ts";
 import { fileAppFor, verifyFileToken } from "./file_link.ts";
-import type { Spec } from "./results_spec.ts";
-import type { JobStore } from "./telegram_jobs.ts";
+
+// The delivery run (trainee-deliver) imports this module, so it imports nothing heavy: the family ids and names, a File record and
+// a role's state are written here as the few fields the card reads (file_family.ts FAMILIES, file_kinds.ts FileRecord,
+// results_spec.ts Spec, telegram_jobs.ts JobStore); tests/architect/file-card.test.ts holds them to those modules.
+export type FamilyId = "F-01" | "F-02" | "F-03" | "F-04" | "F-05" | "F-06" | "F-07" | "F-08" | "F-09" | "F-10" | "F-11" | "F-12" | "F-13" | "F-14" | "F-15";
+// deno-lint-ignore no-explicit-any
+export interface CardRecord { kind: string; data: any; state: Record<string, any> | null; created_at: number }
+export interface RoleSpec { bucket: "ready" | "needs" | "preparing" | "notprep" | "progress" | "done" | "blocked"; key: string }
+export interface RolesReads {
+  recallListMeta?(userId: string, listId: string): Promise<{ kind: string; what: string; at: number; dismissed?: string[] } | null>;
+  recallList(userId: string, listId: string): Promise<string[] | null>;
+  recall(userId: string, ref: string): Promise<{ job: { job_id: string } } | null>;
+  applied(userId: string, jobId: string): Promise<boolean>;
+  prepared(userId: string, jobId: string): Promise<{ payload_hash?: string | null } | null>;
+}
 
 export const FILE_CARD_ENV = "CAREER_FILE_CARD";
 export const fileCardOn = (env: { get(k: string): string | undefined }) => releaseFlagOn(env, "CAREER_FILE_CARD");
@@ -163,7 +174,7 @@ export function cardSourceOf(rec: CardRecord): { family: FamilyId; title: string
 // A roles results list (F-05; role_results.ts, the "I want X roles" page): one item per listed role, read from the person's own records
 // at the time the card is drawn: already in their applications queue (applied) is in progress; a prepared application waits for their
 // yes; a role they set aside on the page is closed; any other role is ready to prepare. Nothing here counts a tap. null: not a results list.
-export async function rolesCardSource(store: Pick<JobStore, "recallList" | "recall" | "prepared" | "applied" | "recallListMeta">, userId: string, listId: string): Promise<{ family: FamilyId; title: string; updatedAt: number; items: { state: CardBucket }[] } | null> {
+export async function rolesCardSource(store: RolesReads, userId: string, listId: string): Promise<{ family: FamilyId; title: string; updatedAt: number; items: { state: CardBucket }[] } | null> {
   const meta = store.recallListMeta ? await store.recallListMeta(userId, listId) : null;
   const refs = meta?.kind === "results" ? await store.recallList(userId, listId) : null;
   if (!meta || !refs?.length) return null;
@@ -176,7 +187,7 @@ export async function rolesCardSource(store: Pick<JobStore, "recallList" | "reca
     return { state: (await store.prepared(userId, job.job_id))?.payload_hash ? "review" : "ready" };
   }));
   const what = clean(meta.what, 80);
-  return { family: "F-05", title: what ? what.charAt(0).toUpperCase() + what.slice(1) : FAMILIES["F-05"].name, updatedAt: meta.at, items };
+  return { family: "F-05", title: what ? what.charAt(0).toUpperCase() + what.slice(1) : FAMILY_CARD["F-05"].name, updatedAt: meta.at, items };
 }
 
 // ---------------------------------------------------------------- delivery
@@ -220,7 +231,7 @@ export function withFileCards<A extends DeliveryAdapter>(adapter: A, resolve: Ca
 // link token, not expired), and the card is drawn from that link's own record, read for the account in the token. A File that is
 // missing, expired, revoked or of a kind with no family card: null, the link goes alone as before.
 // jobs: the roles results lists (rolesCardSource), read when the link names no stored File.
-export function fileCardResolver(o: { env: { get(k: string): string | undefined }; now: () => number; files: { get(userId: string, id: string): Promise<{ state: string; rec?: FileRecord }> }; jobs?: Parameters<typeof rolesCardSource>[0] }): CardResolver {
+export function fileCardResolver(o: { env: { get(k: string): string | undefined }; now: () => number; files: { get(userId: string, id: string): Promise<{ state: string; rec?: CardRecord }> }; jobs?: RolesReads }): CardResolver {
   return async (link) => {
     const base = (o.env.get("TRAINEE_FILE_BASE_URL") || "").trim();
     if (!/^https:\/\/[^\s?#]+$/.test(base) || !link.startsWith(`${base}?t=`)) return null;

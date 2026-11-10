@@ -199,3 +199,63 @@ Deno.test("C.2 roles (D-049): the results page link becomes ONE card with each l
   assertNode.ok(/if \(fileCardOn\(Deno\.env\)\) \{\s*const src = await rolesCardSource\(supabaseJobStore\(admin\), user\.id, made\.listId\)/.test(handler), "the results turn builds the card from the list it just made");
   assertNode.ok(handler.includes("file_cards: (out as any).fileCards"), "the web response carries file_cards");
 });
+
+// A Supabase client over in-memory rows: the query shapes the card's reads and the modules they mirror use.
+function fakeAdmin(tables: Record<string, Record<string, unknown>[]>) {
+  return { from(t: string) {
+    const f: [string, (v: unknown) => boolean][] = [];
+    const rows = () => (tables[t] ?? []).filter((r) => f.every(([c, ok]) => ok(r[c])));
+    const b = {
+      select: () => b, order: () => b,
+      eq: (c: string, v: unknown) => { f.push([c, (x) => x === v]); return b; },
+      in: (c: string, vs: unknown[]) => { f.push([c, (x) => vs.includes(x)]); return b; },
+      limit: (n: number) => Promise.resolve({ data: rows().slice(0, n), error: null }),
+      maybeSingle: () => Promise.resolve({ data: rows()[0] ?? null, error: null }),
+    };
+    return b;
+  } };
+}
+
+Deno.test("C.2 delivery stays light: the card's reads are the File service's and the job store's own, row for row", async () => {
+  const { fileCardReads } = await import("../../supabase/functions/_shared/file_card_reads.ts");
+  const { createFileService, supabaseFileKindStore } = await import("../../supabase/functions/_shared/file_service.ts");
+  const { supabaseJobStore } = await import("../../supabase/functions/_shared/telegram_jobs.ts");
+  const rec = (id: string, o: Record<string, unknown>) => ({ user_id: "u1", key: `tf:file:${id}`, value: { id, userId: "u1", kind: "draft", data: { title: "D" }, state: {}, tag: null, created_at: AT, expires_at: AT + 10, revoked_at: null, ...o } });
+  const admin = fakeAdmin({
+    career_watch_kv: [rec("000000000a", {}), rec("000000000b", { revoked_at: AT }), rec("000000000c", { expires_at: AT - 1 }), rec("000000000d", { kind: "application_proof", data: {} }),
+      rec("000000000e", { kind: "application_review", data: { from_prepared: true } }), rec("000000000f", { userId: "u2" }),
+      { user_id: "u1", key: "tg:list:abcdef0123", value: ["r1", "r2"] }, { user_id: "u1", key: "tg:listmeta:abcdef0123", value: { kind: "results", what: "x", at: AT } },
+      { user_id: "u1", key: "tg:listmeta:abcdef0124", value: { kind: "other" } }, { user_id: "u1", key: "tg:job:r1", value: { job: { job_id: "j1" }, shownAs: "text" } }],
+    career_apply_prepared: [{ user_id: "u1", job_id: "j1", state: "ready", payload_hash: "h1", created_at: 1 }, { user_id: "u1", job_id: "j2", state: "sent", payload_hash: "h2", created_at: 1 }],
+    career_apply_jobs: [{ user_id: "u1", job_id: "j2" }],
+  });
+  const now = () => AT;
+  const light = fileCardReads(admin, now), files = createFileService({ store: supabaseFileKindStore(admin), env: { get: () => undefined }, now }), jobs = supabaseJobStore(admin);
+  for (const [u, id] of [["u1", "000000000a"], ["u1", "000000000b"], ["u1", "000000000c"], ["u1", "000000000d"], ["u1", "000000000e"], ["u1", "000000000f"], ["u2", "000000000a"], ["u1", "nope"], ["", "000000000a"]]) {
+    assertNode.deepEqual(await light.files.get(u, id), await files.get(u, id), `files.get(${u}, ${id})`);
+  }
+  for (const l of ["abcdef0123", "abcdef0124", "ffffffffff"]) {
+    assertNode.deepEqual(await light.jobs.recallList("u1", l), await jobs.recallList("u1", l));
+    assertNode.deepEqual(await light.jobs.recallListMeta!("u1", l), await jobs.recallListMeta!("u1", l));
+  }
+  for (const r of ["r1", "r2"]) assertNode.deepEqual((await light.jobs.recall("u1", r))?.job, (await jobs.recall("u1", r))?.job);
+  for (const j of ["j1", "j2", "j3"]) {
+    assertNode.deepEqual(await light.jobs.prepared("u1", j), await jobs.prepared("u1", j), `prepared ${j}`);
+    assertNode.equal(await light.jobs.applied("u1", j), await jobs.applied("u1", j), `applied ${j}`);
+  }
+  // The card's own family names are file_family.ts's.
+  assertNode.deepEqual(Object.fromEntries(Object.entries(FAMILY_CARD).map(([k, v]) => [k, v.name])), Object.fromEntries(Object.entries(FAMILIES).map(([k, v]) => [k, v.name])));
+  // The delivery function's local import graph: no router bundle, and well under the 1 MB a git read of one file may return
+  // (tests/deploy-provenance.test.cjs reads every file of every bundle).
+  const seen = new Set<string>(), root = new URL("../../supabase/functions/trainee-deliver/index.ts", import.meta.url);
+  const walk = async (u: URL) => {
+    if (seen.has(u.href)) return; seen.add(u.href);
+    for (const m of (await Deno.readTextFile(u)).matchAll(/(?:^|\n)\s*(?:import|export)[^"'\n]*?from\s*["'](\.\.?\/[^"']+)["']/g)) await walk(new URL(m[1], u));
+  };
+  await walk(root);
+  const files2 = [...seen].map((h) => new URL(h).pathname);
+  assertNode.ok(!files2.some((p) => /router_core/.test(p)), "trainee-deliver does not carry the router bundle");
+  assertNode.ok(files2.every((p) => Deno.statSync(p).size < 1_000_000), "every file the delivery bundle carries is under 1 MB");
+  assertNode.ok(files2.some((p) => p.endsWith("_shared/file_card.ts")) && files2.some((p) => p.endsWith("_shared/file_card_reads.ts")), "the card rides the delivery run");
+  assertNode.ok(files2.length < 60, `the delivery bundle stays small (${files2.length} local files)`);
+});

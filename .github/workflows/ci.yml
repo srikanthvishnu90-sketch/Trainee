@@ -321,7 +321,10 @@ jobs:
           # Release item 3 (resume design loop, tests/architect/r10-resume-design-loop-20261110.test.ts): every resume is
           # printed to PNG and measured (Pillow), and each Word copy is printed by LibreOffice the way a reader opens it.
           "$RUNNER_TEMP/py/bin/pip" install --quiet pillow==12.3.0
-          if [ "${GATE_PARTITION:-}" = "architect" ] || [ -z "${GATE_PARTITION:-}" ]; then command -v soffice >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libreoffice-writer-nogui fonts-liberation); fi
+          # The Word copies name Inter (the trainee layout; career_resume_design.ts condenses for Inter 4.0's widths) and Calibri
+          # (the generated and real fixtures, Carlito is its metric twin): without those faces LibreOffice substitutes a wider one
+          # and the parity checks (r9 parity/2, r8 R8C-7) see extra lines and pages that a reader with the fonts never sees.
+          if [ "${GATE_PARTITION:-}" = "architect" ] || [ -z "${GATE_PARTITION:-}" ]; then (command -v soffice >/dev/null && fc-list | grep -q "Inter" && fc-list | grep -q "Carlito") || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends libreoffice-writer-nogui fonts-liberation fonts-inter fonts-crosextra-carlito fonts-crosextra-caladea); fi
           echo "$RUNNER_TEMP/py/bin" >> "$GITHUB_PATH"
       - name: Allow sandboxed Chromium user namespaces for this gate job
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0

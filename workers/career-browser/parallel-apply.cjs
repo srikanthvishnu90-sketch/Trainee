@@ -336,7 +336,7 @@ async function attempt(browser, p, opts, timing) {
     if (fr.needsUser.length) {
       const first = fr.needsUser[0];
       const e = new NeedsUser(first.reason === "no_confirmed_answer" || /^(agreement|eeo|upload)_/.test(first.reason) || first.reason === "no_resume" ? "missing_required_answer" : "field_not_filled", first.label);
-      e.needs = fr.needsUser.map((n) => ({ label: n.label, reason: n.reason, ...(Array.isArray(n.options) ? { options: n.options.slice(0, 60) } : {}) }));
+      e.needs = fr.needsUser.map((n) => ({ label: n.label, reason: n.reason, ...(Array.isArray(n.options) ? { options: n.options.slice(0, 60) } : {}), ...(n.detail ? { detail: String(n.detail).slice(0, 200) } : {}) }));
       throw e;
     }
     if (fr.invalid.length) { const e = new NeedsUser("field_not_filled", fr.invalid[0].name); e.needs = fr.invalid.map((n) => ({ label: n.name, reason: "form_rejects_value" })); throw e; }

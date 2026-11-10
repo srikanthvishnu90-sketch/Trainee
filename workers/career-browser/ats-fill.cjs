@@ -117,7 +117,9 @@ function EXTRACT() {
       const opts = [...el.options].map((o, i) => ({ i, label: squash(o.textContent), value: o.value })).filter((o) => o.value !== "" && !/^(please )?select\b|^choose\b|^--/i.test(o.label));
       d = { ...base, kind: "select", options: opts };
     } else if (el.getAttribute("role") === "combobox") {
-      d = { ...base, kind: "combobox" };
+      // Greenhouse's job-boards form puts a "Country" dial-code picker inside the phone fieldset (fieldset.phone-input >
+      // .phone-input__country); it is the phone's own country, not a second "Country" question.
+      d = { ...base, kind: "combobox", ...(el.closest(".phone-input__country, fieldset.phone-input") ? { phoneCountry: true } : {}) };
     } else if (type === "checkbox") {
       d = { ...base, kind: "checkbox" };
     } else if (el.tagName === "TEXTAREA") {
@@ -322,29 +324,49 @@ async function fillFile(page, d, path) {
   // benchmark run 42712892939) is read back from that chip. Only the resume's own file name, in that block, counts.
   await page.evaluate(([q]) => {
     const el = document.querySelector(`[data-upmore-q="${q}"]`);
+    // Every level of that block is marked: a board that re-renders the inner wrapper (job-boards.greenhouse.io swaps the
+    // Attach button group for the file name) keeps the outer levels, and the chip is read from whichever is still there.
     let box = el && el.parentElement;
-    for (let i = 0; box && i < 3; i++) {
+    for (let i = 0; box && i < 6; i++) {
+      box.setAttribute("data-upmore-fbox", q);
       const up = box.parentElement;
       if (!up || up.querySelectorAll("[data-upmore-q]").length > 1 || up.querySelectorAll("input[type=file]").length > 1) break;
       box = up;
     }
-    if (box) box.setAttribute("data-upmore-fbox", q);
   }, [d.q]).catch(() => {});
   await page.locator(sel(d.q)).first().setInputFiles(path);
   const name = require("node:path").basename(path);
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 20; i++) {
     const s = await stateOf(page, d);
     if (s.filled) return { ok: true };
-    const chip = await page.evaluate(([q, n]) => {
-      const b = document.querySelector(`[data-upmore-fbox="${q}"]`);
-      return !!b && (b.innerText || "").includes(n);
-    }, [d.q, name]).catch(() => false);
-    if (chip) return { ok: true };
+    if (await page.evaluate(CHIP, [[d.q, name]]).then((x) => x[0]).catch(() => false)) return { ok: true };
     await page.waitForTimeout(200);
   }
-  return { ok: false, reason: "upload_not_accepted" };
+  // What the upload's block shows now (the board's own words: an error, a chip with another name), for the record.
+  const detail = await page.evaluate(([q, n]) => {
+    const bs = [...document.querySelectorAll(`[data-upmore-fbox="${q}"]`)];
+    const b = bs[0], el = document.querySelector(`[data-upmore-q="${q}"]`);
+    return `boxes=${bs.length} input=${el ? (el.files ? el.files.length : "?") : "gone"} name_on_page=${(document.body.innerText || "").includes(n)} shows=${String(b ? b.innerText : "").replace(/\s+/g, " ").trim().slice(0, 100)}`;
+  }, [d.q, name]).catch(() => "");
+  return { ok: false, reason: "upload_not_accepted", detail };
 }
-async function fillCombo(page, d, value, pick) {
+// Is the resume's file name shown in its upload block (any marked level still on the page)? One answer per [q, name] pair.
+function CHIP(pairs) { return pairs.map(([q, n]) => [...document.querySelectorAll(`[data-upmore-fbox="${q}"]`)].some((b) => (b.innerText || "").includes(n))); }
+// The phone widget's country picker (d.phoneCountry): the confirmed country, as the option's own name alone or followed only
+// by a dial code that the approved phone number itself starts with ("United States +1" for "+1 312 555 0100"). One option or
+// nothing: "Canada +1" is not "United States", and "United States +1" is not chosen for a "+44" number.
+function phoneCountryMatch(labels, country, phone) {
+  const c = norm(country), digits = String(phone || "").trim().startsWith("+") ? digitsOf(phone) : "";
+  if (!c) return { error: "no_matching_option" };
+  const ix = labels.map((l, i) => {
+    const n = norm(l);
+    if (n === c) return i;
+    const m = new RegExp(`^${c.replace(/[^a-z0-9 ]/g, "")} (\\d{1,4})$`).exec(n);
+    return m && digits && digits.startsWith(m[1]) && /\+\s?\d/.test(l) ? i : -1;
+  }).filter((i) => i >= 0);
+  return ix.length === 1 ? { index: ix[0] } : { error: ix.length > 1 ? "ambiguous_option" : "no_matching_option" };
+}
+async function fillCombo(page, d, value, pick, phone) {
   const input = page.locator(sel(d.q)).first();
   // Only this dropdown's own options: its aria-controls list, else the options inside its own shell. A phone widget's country
   // list, or any other list on the page, is never searched for an answer.
@@ -355,16 +377,20 @@ async function fillCombo(page, d, value, pick) {
   await input.click();
   let list = await optionsNow();
   if (!list.length) { await page.waitForTimeout(120); list = await optionsNow(); }
-  if (!list.length && pick !== "decline") { await input.fill(String(value).slice(0, 40)); await page.waitForTimeout(150); list = await optionsNow(); }
+  // A country picker lists every country: the confirmed name is typed so the site's own filter narrows it before matching.
+  if ((!list.length || d.phoneCountry) && pick !== "decline") { await input.fill(String(value).slice(0, 40)); await page.waitForTimeout(150); list = await optionsNow(); }
   if (!list.length) { await input.press("Escape").catch(() => {}); return { ok: false, reason: "options_not_readable" }; }
-  const m = pick === "decline" ? (() => { const i = list.findIndex((o) => DECLINE.test(norm(o))); return i < 0 ? { error: "no_decline_option" } : { index: i }; })() : matchOption(list, value);
+  const m = pick === "decline" ? (() => { const i = list.findIndex((o) => DECLINE.test(norm(o))); return i < 0 ? { error: "no_decline_option" } : { index: i }; })()
+    : d.phoneCountry && pick === "phone_country" ? phoneCountryMatch(list, value, phone) : matchOption(list, value);
   if (m.error) { await input.press("Escape").catch(() => {}); return { ok: false, reason: m.error, options: list.slice(0, 40) }; }
   await opts().nth(m.index).click();
   const s = await stateOf(page, d);
   return s.filled && norm(s.text) === norm(list[m.index]) ? { ok: true } : { ok: false, reason: "readback_mismatch" };
 }
 
-const labelCounts = (qs) => { const m = new Map(); for (const d of qs) if (d.kind !== "file") m.set(norm(d.label), (m.get(norm(d.label)) || 0) + 1); return m; };
+// The phone widget's own country picker is counted apart from a "Country" question of the form (it is the phone's country).
+const labelKey = (d) => (d.phoneCountry ? `phone country|${norm(d.label)}` : norm(d.label));
+const labelCounts = (qs) => { const m = new Map(); for (const d of qs) if (d.kind !== "file") m.set(labelKey(d), (m.get(labelKey(d)) || 0) + 1); return m; };
 // Decide what to do with one question. status: fill | ask | skip. Never invents a value.
 function decide(d, ctx) {
   const { facts, answers, resumePath } = ctx;
@@ -375,15 +401,22 @@ function decide(d, ctx) {
   }
   // ROUND 3: one label on two questions of this form (a second "Phone" in a references block): the approved answer belongs
   // to at most one of them, so neither is filled from it; the person is asked (as the extension's planForm does).
-  if (ctx.labelCount && (ctx.labelCount.get(norm(d.label)) || 0) > 1 && (!blank(answerFor(d.label, answers)) || !blank(factValue(d.label, facts || {})))) return { status: "ask", reason: "label_on_form_twice" };
+  if (ctx.labelCount && (ctx.labelCount.get(labelKey(d)) || 0) > 1 && (!blank(answerFor(d.label, answers)) || !blank(factValue(d.label, facts || {})))) return { status: "ask", reason: "label_on_form_twice" };
   const a = answerFor(d.label, answers);
   if (!blank(a)) return { status: "fill", value: String(a), source: "answer" };
   if (d.eeo) {
     if (facts && facts.eeo_policy === "decline" && ["select", "combobox", "radio", "buttons"].includes(d.kind)) return { status: "fill", pick: "decline", source: "eeo_policy" };
     return d.required ? { status: "ask", reason: "eeo_needs_your_choice" } : { status: "skip", reason: "eeo_left_blank" };
   }
-  const f = ["text", "textarea", "select"].includes(d.kind) ? factValue(d.label, facts || {}) : d.kind === "combobox" && /location|city/i.test(d.label) ? factValue(d.label, facts || {}) : undefined;
-  if (!blank(f)) return { status: "fill", value: String(f), source: "fact" };
+  // The phone's country picker takes the confirmed country, checked against the approved phone's own dial code (fillCombo).
+  if (d.kind === "combobox" && d.phoneCountry) {
+    if (!blank(facts && facts.country) && !blank(facts && facts.phone)) return { status: "fill", value: String(facts.country), pick: "phone_country", source: "fact", soft: true };
+    return d.required ? { status: "ask", reason: "no_confirmed_answer" } : { status: "skip", reason: "optional_left_blank" };
+  }
+  const f = ["text", "textarea", "select"].includes(d.kind) ? factValue(d.label, facts || {}) : d.kind === "combobox" && /location|city|country/i.test(d.label) ? factValue(d.label, facts || {}) : undefined;
+  // A country dropdown is tried with the confirmed country; when none of its options is exactly that country it goes back to
+  // the person as an unanswered question (soft), the same as before it was tried.
+  if (!blank(f)) return { status: "fill", value: String(f), source: "fact", ...(d.kind === "combobox" && /country/i.test(d.label) && !/location|city/i.test(d.label) ? { soft: true } : {}) };
   if (d.kind === "checkbox") return d.required ? { status: "ask", reason: "agreement_needs_you" } : { status: "skip", reason: "optional_left_unchecked" };
   return d.required ? { status: "ask", reason: "no_confirmed_answer" } : { status: "skip", reason: "optional_left_blank" };
 }
@@ -403,7 +436,7 @@ async function doFill(page, d, dec, ctx) {
     case "radio": case "buttons": return fillChoice(page, d, v, false);
     case "checkgroup": return fillChoice(page, d, v, true);
     case "checkbox": return YES.test(norm(v)) || /^(checked|agree|i agree|accept)/.test(norm(v)) ? fillCheckbox(page, d) : { ok: false, reason: "not_agreed" };
-    case "combobox": return fillCombo(page, d, v, "value");
+    case "combobox": return fillCombo(page, d, v, dec.pick === "phone_country" ? "phone_country" : "value", ctx.facts && ctx.facts.phone);
     default: return fillText(page, d, v);
   }
 }
@@ -441,13 +474,15 @@ async function fillForm(page, ctx0) {
       }
       // #340: an approved answer or fact that is not exactly one of the page's options is handed back even when the question is
       // optional: leaving it out, or picking another option, would post something other than what was approved.
+      // A soft try (a country picker from the confirmed country) that did not take is the question still unanswered.
+      if (dec.soft) { r = { ...r, detail: r.detail || `fact_not_set: ${r.reason}`, reason: d.required ? "no_confirmed_answer" : r.reason, options: undefined }; if (!d.required) { entry.status = "skipped"; entry.reason = "optional_left_blank"; continue; } }
       const notOffered = (r.reason === "no_matching_option" || r.reason === "ambiguous_option");
       const ask = d.required || notOffered;
       entry.status = ask ? "needs_user" : "failed";
       entry.reason = r.reason;
       if (r.detail) entry.detail = r.detail;
       // A required question we could not set is handed back with the reason; the person is asked, nothing is guessed.
-      (ask ? needsUser : failed).push({ label: d.label, reason: r.reason, ...(r.options ? { options: r.options } : {}) });
+      (ask ? needsUser : failed).push({ label: d.label, reason: r.reason, ...(r.options ? { options: r.options } : {}), ...(r.detail ? { detail: r.detail } : {}) });
     }
   }
   // Sweep: a required question still empty that we did not already account for is handed back, not ignored.
@@ -468,8 +503,7 @@ async function heldNow(page, filled) {
   const ds = filled.map((f) => f.d);
   const st = ds.length ? await page.evaluate(STATE, ds) : [];
   // An upload whose input the board swapped for a chip (fillFile) is read from that chip: the resume's own name, or nothing.
-  const chips = await page.evaluate((qs) => qs.map(([q, n]) => { const b = document.querySelector(`[data-upmore-fbox="${q}"]`); return !!b && (b.innerText || "").includes(n); }),
-    filled.map((f) => [f.d.q, String(f.value)])).catch(() => []);
+  const chips = await page.evaluate(CHIP, filled.map((f) => [f.d.q, String(f.value)])).catch(() => []);
   return filled.map((f, i) => {
     const s = { ...(st[i] || {}) };
     if (f.kind === "file" && !s.text && chips[i]) s.text = String(f.value);
@@ -477,4 +511,4 @@ async function heldNow(page, filled) {
     return { label: f.label, kind: f.kind, source: f.source, approved: f.value, held: held === undefined ? null : held, gone: !!s.gone };
   });
 }
-module.exports = { heldNow, fillForm, matchOption, factValue, answerFor, decide, labelCounts, norm, EXTRACT, STATE, DECLINE };
+module.exports = { heldNow, fillForm, matchOption, phoneCountryMatch, factValue, answerFor, decide, labelCounts, norm, EXTRACT, STATE, DECLINE };

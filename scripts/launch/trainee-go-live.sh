@@ -298,6 +298,7 @@ MIGRATIONS=(
   20261109130000_career_outbox_interim.sql
   20261109150000_career_apply_handoff_finish.sql
   20261110130000_career_contact_supplied_by.sql
+  20261110150000_career_mail_unclear.sql
   20261110160000_career_file_plans_materials.sql
 )
 MIGRATION_MARK=(
@@ -466,6 +467,7 @@ MIGRATION_MARK=(
   "exists (select 1 from pg_constraint where conname = 'career_outbox_kind_check' and pg_get_constraintdef(oid) like '%interim%')"
   "exists (select 1 from pg_proc where proname = 'career_apply_person_finished_as')"
   "exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'career_contact_profiles' and column_name = 'supplied_by')"
+  "exists (select 1 from pg_constraint where conname = 'career_mail_events_unclear_flagged')"
   "to_regclass('public.career_search_plans') is not null and to_regclass('public.career_material_versions') is not null"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.

@@ -77,6 +77,7 @@ function placeOf(t: string): string | null {
   return best ? ALIAS[best] ?? best : null;
 }
 const CUE = /^(?:(?:please|hey|hi|ok|okay|so|and|also|can you|could you|can u|would you)\s+)*(?:(?:find|show|get|give|search(?: for)?|look(?:ing)? for|help me find|pull up|list)(?:\s+me)?|i(?:'m| am)? ?(?:looking for|searching for|seeking|want|need|would like|'d like)|i(?:'d| would) like|my goal is|any|are there any|do you have)\s*/i;
+const GREETING = /^(?:(?:(?:hello|hey|hi|hiya|howdy|yo|greetings)(?:\s+there)?|good\s+(?:morning|afternoon|evening|day))(?:\s+trainee)?(?:[\s,!.:;-]+|$))+/;
 const EXPAND: Record<string, string> = { swe: "software engineer", sde: "software engineer", pm: "product manager", ml: "machine learning", ds: "data science" };
 const ROLE_NOISE = new Set(["me", "some", "any", "a", "an", "the", "jobs", "job", "roles", "role", "positions", "position", "openings", "opening", "opportunities", "opportunity", "work", "to", "i", "im", "am", "my", "of", "for", "paying", "pay", "pays", "salary", "make", "making", "earn", "at", "least", "over", "above", "under", "minimum", "min", "more", "or", "and", "in", "near", "around", "with", "no", "not", "non", "need", "needed", "visa", "sponsorship", "sponsor", "remote", "please", "per", "an", "hr", "hour", "hourly", "year", "yearly", "starting", "start", "season", "that", "are", "is", "will", "be", "who", "which", "interested", "good", "fit", "fits", "career", "new", "level", "grad", "graduate", "recent", "entry", "early", "junior", "jr", "senior", "sr", "intern", "interns", "internship", "internships", "coop", "co-op", "wage", "hiring"]);
 
@@ -105,6 +106,9 @@ export function searchTextOf(message: string): SearchText {
   t = lc(searchSentence(raw));
   // What the roles must be ("that are actually open", "verified open") is how to check them, not words of the role.
   t = t.replace(/\b(?:that|which)\s+(?:are|is|were|was)\b[^,.;]*/g, " ").replace(/\b(?:(?:actually|currently|still|verified|real)\s+)+(?:open|live|available)\b|\bverified\b/g, " ");
+  // TELEGRAM LOOP (2026-11-10, item 14): a greeting before the ask is not the role. "hello, I need a job" was searched as the
+  // role "hello", "good morning, I need an internship" as "morning", "hey there, looking for a job" as "hey there looking".
+  t = t.replace(GREETING, "");
   t = t.replace(CUE, "").replace(CUE, "");
   // KNOWN GAPS (2026-10-30, #317): the ask to apply is not part of the role. "apply to jobs for me" was searched as the role
   // "apply", and "apply to data analyst jobs" as "apply data analyst". ("applied scientist" is a role: only the verb goes.)

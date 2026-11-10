@@ -238,9 +238,11 @@ Deno.test("WO-028/7 personas pick and order the same confirmed facts, never othe
 });
 
 Deno.test("WO-028/8 the approval card says a tailored resume and its persona; the payload is tagged; an untailored one is unchanged", async () => {
-  eq(resumeCardLine("r.pdf", "b".repeat(64), { tailored: true, persona: "banking" }), `Resume: banking, tailored for this role (${"b".repeat(12)})`);
-  eq(resumeCardLine("r.pdf", "b".repeat(64), { tailored: true, persona: null }), `Resume: your base resume, tailored for this role (${"b".repeat(12)})`);
-  eq(resumeCardLine("r.pdf", "b".repeat(64), null), `Resume: r.pdf (${"b".repeat(12)})`);
+  // Architect amendment R6 (2026-11-10): the card names the resume in human terms; its hash is not on the card (it binds
+  // the payload and the approval, asserted by the stored-approval tests).
+  eq(resumeCardLine("r.pdf", "b".repeat(64), { tailored: true, persona: "banking" }), "Resume: banking, tailored for this role");
+  eq(resumeCardLine("r.pdf", "b".repeat(64), { tailored: true, persona: null }), "Resume: your base resume, tailored for this role");
+  eq(resumeCardLine("r.pdf", "b".repeat(64), null), "Resume: r.pdf");
   eq(takeResumeTag(["--tailored-resume", "banking", "--headed"]), { tag: { tailored: true, persona: "banking" }, rest: ["--headed"] });
   eq(takeResumeTag(["--tailored-resume", "base"]).tag, { tailored: true, persona: null });
   eq(takeResumeTag(["--headed"]), { tag: null, rest: ["--headed"] });
@@ -253,11 +255,12 @@ Deno.test("WO-028/8 the approval card says a tailored resume and its persona; th
   const tailored = await prepare({ ...base, resumeTag: { tailored: true, persona: "banking" } });
   const plain = await prepare(base);
   assert(tailored.ready && plain.ready);
-  assert(tailored.card.includes(`Resume: banking, tailored for this role (${"c".repeat(12)})`), "the card line");
+  // Architect amendment R6 (same test as the lines above): the card line names the resume, the hash is in the payload.
+  assert(tailored.card.includes("Resume: banking, tailored for this role") && tailored.payload.resume_sha256 === "c".repeat(64), "the card line");
   eq([tailored.payload.resume_tailored, tailored.payload.resume_persona], [true, "banking"]);
   eq(tailored.hash, await hashApplyPayload(tailored.payload), "the tag is inside what is approved");
   assert(!("resume_tailored" in plain.payload) && !("resume_persona" in plain.payload), "an untailored payload is exactly as before");
-  assert(plain.card.includes(`Resume: Alex_Testcase_Resume.pdf (${"c".repeat(12)})`));
+  assert(plain.card.includes("Resume: Alex_Testcase_Resume.pdf") && plain.payload.resume_sha256 === "c".repeat(64));
 });
 
 Deno.test("WO-028/9 callbackRate: tailored vs untailored with counts, sent applications only, NOT enough data under 30 per arm", () => {

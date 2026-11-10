@@ -340,7 +340,7 @@ export async function connectorChatTurn(d: TurnIn): Promise<ChatOut | null> {
     const pageReply = c.wired(d.env) ? await connectPageReply(d, { userId: d.userId, channel, reason: "replies" }) : null;
     if (pageReply) return out(d, pageReply.reply, `career_${c.id}_connect`, "link", pageReply.meta);
     const url = await c.issueLink(d, { userId: d.userId, threadId: d.threadId, channel });
-    if (!url) return out(d, `Connecting ${c.label} isn't switched on in Trainee yet, so I can't make a link. Nothing was connected.`, `career_${c.id}_connect`, "not_wired");
+    if (!url) return out(d, `I can't make a ${c.label} link yet because Trainee's ${c.label} connection isn't set up on this service. Nothing was connected.`, `career_${c.id}_connect`, "not_wired");
     const r = linkReply(c, url, channel, `Here's a one-time link to connect your ${c.label}.`,
       ["With it, Trainee reads the codes and replies employers email you (sender, subject and preview only). It never sends anything you haven't approved word for word."]);
     return out(d, r.reply, `career_${c.id}_connect`, "link", r.meta);
@@ -373,7 +373,7 @@ export async function connectorChatTurn(d: TurnIn): Promise<ChatOut | null> {
   const pageReply = await connectPageReply(d, { userId: d.userId, channel, reason: "replies" });
   if (pageReply) return out(d, pageReply.reply, "career_connector_need", "asked", pageReply.meta);
   const url = await pick.issueLink(d, { userId: d.userId, threadId: d.threadId, channel });
-  if (!url) return out(d, `Connecting ${pick.label} isn't switched on in Trainee yet, so I can't make a link. Nothing was read.`, "career_connector_need", "not_wired");
+  if (!url) return out(d, `I can't make a ${pick.label} link yet because Trainee's ${pick.label} connection isn't set up on this service. Nothing was read.`, "career_connector_need", "not_wired");
   const reconnect = s.find((x) => x.id === pick.id)?.state === "needs_reconnect";
   const alt = ask.need === "mail" && pick.id === "gmail" && outlook.wired(d.env) ? [`Use Outlook instead? Text "${outlook.connectAsk}".`] : [];
   const r = linkReply(pick, url, channel,

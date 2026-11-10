@@ -106,9 +106,15 @@ async function getBoard(boardId) {
         }
       } catch (e) { /* frame may be gone; the final-URL gate still decides */ }
     });
+    // x-audit (2026-11-10): a new tab (target=_blank, window.open) is never driven or loaded. It is closed at once, and
+    // every navigation it makes is refused below, so a LinkedIn tab opened by an Apply control never reaches LinkedIn.
+    context.on("page", (other) => { if (other !== page) other.close().catch(() => {}); });
     await context.route("**/*", async (route) => {
       try {
         const req = route.request();
+        let otherTab = false;
+        try { otherTab = req.isNavigationRequest() && req.frame().page() !== page; } catch (e) { otherTab = false; }
+        if (otherTab) { await route.abort("blockedbyclient"); return; }
         if (req.isNavigationRequest() && req.frame() === page.mainFrame() && !navAllowed(req.url())) {
           entry.blockedNav = req.url();
           await route.abort("blockedbyclient");

@@ -16,13 +16,12 @@ import { type Ask, battery, bringsBack, SETUP_TARGETS } from "./helpers/ask_batt
 import { canRun, openWorld, type World, ZONE } from "./helpers/response_world.ts";
 
 // R's counts when this test was written. Lower them when a fix lands; never raise them.
-const ROUTER_CEILING = { rubric: 391, never: 0 };
+const ROUTER_CEILING = { rubric: 390, never: 0 };
 // S: the bar is 0 and 0. Never is at its bar. The rubric count left (2026-11-10) is a ratchet, not an allowance: 5 are code
 // products longer than a short ask allows (company file and interview brief), which RESPONSE-RULES 3.1 puts in a File, not
-// served yet (section 6 gap 2; the coordinator keeps them counted until File serving and the card land), and 1 is the
-// coordinator's own plain-words queue-halt reply ("I have not paused your account. ..."), whose lead R1 does not read as an
-// answer to "stop everything for now??". Lower it as each lands; never raise it.
-const STAGED_CEILING = { rubric: 6, never: 0 };
+// served yet (section 6 gap 2; the coordinator keeps them counted until File serving and the card land). Lower it as each
+// lands; never raise it.
+const STAGED_CEILING = { rubric: 5, never: 0 };
 
 const ASKS = battery();
 const PAIRS: [string, string][] = [...ASKS.flatMap((a) => [[a.say, a.target] as [string, string], ...a.setup.map((s) => [s.say, s.target] as [string, string])])];

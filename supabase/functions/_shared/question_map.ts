@@ -342,10 +342,24 @@ export const AUTH_FACTS = new Set(["work_authorization", "sponsorship", "us_pers
 // WO-053: work rights "in the country where this job is located" (or "...in which you are applying") are the person's US
 // ones only when the posting's own location is in the US; abroad or unsettled, asked.
 export const RELATIVE_PLACE = /\b(country|location)\b.{0,60}\b(this|the) (job|role|position|opportunity|vacancy)\b|\b(country|location)\b.{0,40}\b(you are|you're|you have been|you've been|are you) apply|\b(country|location) (in which|to which|for which|where) you (are )?apply|\bstated location of this role\b|\bin this country\b/i;
+// a-sensitive (interim ruling, 2026-11-10): a date of birth is asked only when the form requires it, for that application,
+// and never stored for reuse: its answer is the posting's alone (answerKey `job:`), never a wording that travels.
+export const BIRTH_DATE = /\bdate of birth\b|\bbirth ?date\b|\bdob\b|\bdate de naissance\b|\bfecha de nacimiento\b|\bgeburtsdatum\b/i;
+// a-sensitive: the person's own "prefer not to say", in any of its usual wordings (the whole answer, nothing more), and an
+// employer's option that offers it ("Decline to self-identify", "I do not want to answer", "Prefer not to answer").
+export const DECLINE_ANSWER = /^\s*(i\s*)?(would\s+|'d\s+)?(prefer not to (say|answer|disclose|specify|identify|self[- ]identify)|rather not (say|answer)|decline( to (answer|state|disclose|specify|self[- ]identify))?|do not wish to (answer|disclose|self[- ]identify)|don'?t wish to (answer|disclose)|choose not to (answer|disclose|identify|self[- ]identify)|do not want to answer|don'?t want to answer)\s*[.!]?\s*$/i;
+export const DECLINE_OPTION = /\bdecline\b|\bprefer not\b|\bdo(?: not|n'?t) wish\b|\bchoose not\b|\bnot to (?:answer|disclose|say|identify|specify|self[- ]identify)\b|\bi do(?: not|n'?t) want to (?:answer|disclose|identify|self)/i;
+// The one option a decline lands on: exactly one offered, else none (the person is asked).
+export function declineOption<T extends { label: string }>(answer: string, options: T[]): T | null {
+  if (!DECLINE_ANSWER.test(String(answer ?? ""))) return null;
+  const d = options.filter((o) => DECLINE_OPTION.test(String(o.label)));
+  return d.length === 1 ? d[0] : null;
+}
 export function answerKey(q: Question, jobId: string, o: { haveFact?: boolean; here?: boolean } = {}): string {
   const m = mapQuestion(q);
   const words = norm(q.label);
   const job = `job:${h16(`${jobId}\n${words}`)}`, wording = `label:${h16(words)}`;
+  if (BIRTH_DATE.test(q.label)) return job;
   if (m.kind === "fact") {
     // ROUND 4 (2026-11-05): a self-identification answer (gender, race, ethnicity, veteran or disability status) is given to
     // one employer (extension apply_core.ts staysWithPosting). Kept as the one `fact:eeo`, a "No" to "Do you have a

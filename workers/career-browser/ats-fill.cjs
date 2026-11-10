@@ -59,7 +59,7 @@ function EXTRACT() {
   };
   const eeoOf = (el, label) =>
     !!el.closest(".eeoc__container,[class*='eeo' i],#eeoc_fields,[data-qa*='eeo' i],[class*='demographic' i],[class*='voluntary' i],[class*='self-id' i]") ||
-    /\b(gender|race|ethnicity|hispanic|latino|veteran|disabilit|sexual orientation|transgender|protected)\b/i.test(label);
+    /\b(gender|race|ethnicity|hispanic|latino|veteran|disabilit(?:y|ies)|sexual orientation|transgender|lgbt\w*|protected)\b/i.test(label);
   const optLabel = (inp) => {
     if (inp.id) { const l = rootOf(inp).querySelector(`label[for="${CSS.escape(inp.id)}"]`); if (l) return nodeText(l); }
     const cl = inp.closest("label");
@@ -224,8 +224,17 @@ function sameWithClarification(raw, value) {
   if (/\b(interim|in progress|pending|expired|inactive|lapsed|former|previous|previously|incomplete|expected|pursuing|current|currently|not|non|no|partial|provisional|temporary)\b/.test(rest)) return false;
   return rest === "" || /^\([^()]*\)$/.test(rest);
 }
+// a-sensitive (2026-11-10): the person's own "prefer not to say" (the whole answer, in its usual wordings) lands on the form's
+// one way not to answer ("Decline to self-identify", "I do not want to answer"); two such options, or none: asked. The same
+// rule as question_map.ts declineOption.
+const DECLINE_ANSWER = /^(i )?(would |d )?(prefer not to (say|answer|disclose|specify|identify|self identify)|rather not (say|answer)|decline( to (answer|state|disclose|specify|self identify))?|do not wish to (answer|disclose|self identify)|don t wish to (answer|disclose)|choose not to (answer|disclose|identify|self identify)|do not want to answer|don t want to answer)$/;
+const DECLINE_OPTION = /\bdecline\b|\bprefer not\b|\bdo(?: not|n t) wish\b|\bchoose not\b|\bnot to (?:answer|disclose|say|identify|specify|self identify)\b|\bi do(?: not|n t) want to (?:answer|disclose|identify|self)/;
 function matchOption(labels, value) {
   const v = norm(value), ns = labels.map(norm);
+  if (DECLINE_ANSWER.test(v) && !ns.includes(v)) {
+    const ix = ns.map((l, i) => (DECLINE_OPTION.test(l) ? i : -1)).filter((i) => i >= 0);
+    return ix.length === 1 ? { index: ix[0] } : { error: ix.length ? "ambiguous_option" : "no_matching_option" };
+  }
   const one = (pred) => { const ix = ns.map((l, i) => (pred(l, i) ? i : -1)).filter((i) => i >= 0); return ix.length === 1 ? { index: ix[0] } : ix.length > 1 ? { error: "ambiguous_option" } : null; };
   const exact = ns.map((l, i) => (l === v ? i : -1)).filter((i) => i >= 0);
   if (exact.length === 1) return { index: exact[0] };

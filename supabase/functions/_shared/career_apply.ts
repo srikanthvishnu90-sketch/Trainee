@@ -8,7 +8,7 @@
 //                     batches need nothing; the batch is admitted against the limits up front.
 // The worker (WO-009b) fills exactly the prepared fields by name, reads each back, and classifies the outcome here.
 import { overStatedLimit } from "./length_limit.ts";
-import { answerKey, AUTH_FACTS, FOREIGN, HONEYPOT, mapQuestion, NAMES_US, norm as normQuestion, RELATIVE_PLACE } from "./question_map.ts";
+import { answerKey, AUTH_FACTS, BIRTH_DATE, declineOption, FOREIGN, HONEYPOT, mapQuestion, NAMES_US, norm as normQuestion, RELATIVE_PLACE } from "./question_map.ts";
 import { rowAnswerKey } from "./row_answer.ts";
 import { chooseOption, levelOption, usCitizenChoice, yesNoFromFact, yesNoOf } from "./answer_options.ts";
 import { type PlacePart, postingAtHome, postingCountry, postingPlaces, STATE_NAMES } from "./posting_place.ts";
@@ -274,6 +274,9 @@ export function matchOption(value: string, options: { label: string; value: stri
   const v = value.trim().toLowerCase();
   const exact = options.find((o) => o.label.trim().toLowerCase() === v || o.value.trim().toLowerCase() === v);
   if (exact) return exact.value;
+  // a-sensitive: the person's "Prefer not to say" is the form's one way not to answer ("Decline to self-identify").
+  const decline = declineOption(value, options);
+  if (decline) return decline.value;
   const yn = yesNo(value);
   if (yn) { const o = options.find((x) => yesNo(x.label) === yn); if (o) return o.value; }
   return null;
@@ -597,6 +600,12 @@ function byMeaning(f: FormField, company: string, answers: Record<string, Answer
     return yn ? { value: yn, factId: a.factId } : null;
   }
   if (TEXT_FACTS.has(m.fact) && !FREE_TEXT.test(f.type)) return null;
+  // a-sensitive (strict run 42719264485, STR): a country of citizenship is no answer to a yes/no question typed in a box
+  // ("Are you a Dual citizen?" took "United States"): asked. A stated US citizenship answers "Are you a US Citizen?" yes.
+  if (m.fact === "citizenship" && ASKED_YES_NO.test(normQuestion(askedPart(f.label))) && !yesNoOf(a.value)) {
+    const usOnly = /\b(u\.?s\.?a?|united states|american) citizen\b/i.test(f.label) && !/\b(dual|other|another|second|also|any)\b/i.test(f.label);
+    return usOnly && NAMES_US.test(String(a.value)) ? { value: "Yes", factId: a.factId } : null;
+  }
   return { value: String(a.value), factId: a.factId };
 }
 
@@ -1014,9 +1023,12 @@ export function planBatch(o: { userId: string; postings: PlanPosting[]; answers:
       // An answer the person texted for this question (ask once) comes first, under the key that says how far it may go:
       // this posting, then this wording (a fact for every employer arrives in `answers` instead).
       const here = factStaysHere(f, p.location, o.answers);
-      const own: Answer | undefined = o.saved[answerKey(f, p.job_id, { haveFact: true, here })] ?? o.saved[answerKey(f, p.job_id, { here })] ?? o.saved[normLabel(f.label)];
+      // a-sensitive: an answer saved under the bare wording (the oldest key) never travels for a date of birth or a
+      // self-identification question: those are each application's own.
+      const legacy: Answer | undefined = BIRTH_DATE.test(f.label) || key === "eeo" || mapQuestion(f).fact === "eeo" ? undefined : o.saved[normLabel(f.label)];
+      const own: Answer | undefined = o.saved[answerKey(f, p.job_id, { haveFact: true, here })] ?? o.saved[answerKey(f, p.job_id, { here })] ?? legacy;
       const direct: Answer | undefined = o.saved[answerKey(f, p.job_id, { haveFact: true, here })] ?? o.saved[answerKey(f, p.job_id, { here })] ??
-        (key !== "unknown" && key !== "eeo" && !followUp && !otherCountry(key, placeText(f), p.location, homeInUs(o.answers)) && !beyondFact(key, f) ? o.answers[key] : undefined) ?? o.saved[normLabel(f.label)];
+        (key !== "unknown" && key !== "eeo" && !followUp && !otherCountry(key, placeText(f), p.location, homeInUs(o.answers)) && !beyondFact(key, f) ? o.answers[key] : undefined) ?? legacy;
       let a: Answer | undefined = direct;
       let value: string | null = a ? String(a.value) : null;
       if (value !== null && f.options.length) value = matchOption(value, f.options) ?? (key !== "unknown" && direct === o.answers[key] ? chooseOption(...placeFact(key, value, o.answers), f.options, f.label) : null);

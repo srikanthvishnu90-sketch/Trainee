@@ -29,6 +29,9 @@ async function dryRunForm({ browser, id, ats, url, facts = {}, answers = {}, res
     if (!local || !/^(GET|HEAD)$/.test(req.method())) { log.requests_blocked.push(`${req.method()} ${local ? u.pathname : u.hostname}`.slice(0, 120)); return route.abort("blockedbyclient"); }
     return route.continue();
   });
+  // x-audit (D-MS-1): a WebSocket never passes through the route above, so a form that autosaves over one would send what is
+  // typed. Every socket is closed before it opens, and counted.
+  if (typeof ctx.routeWebSocket === "function") await ctx.routeWebSocket(/.*/, (ws) => { log.requests_blocked.push(`WS ${new URL(ws.url()).pathname}`.slice(0, 120)); ws.close(); });
   try {
     const resp = await page.goto(url, { waitUntil: "domcontentloaded" });
     if (!resp || resp.status() >= 400) { log.reason = `page_load_${resp ? resp.status() : "none"}`; return finish(log, outDir, t0); }

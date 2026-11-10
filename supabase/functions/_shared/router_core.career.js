@@ -2177,9 +2177,9 @@ const CareerTailor = (() => {
   function headerOf(profile) {
     const b = profile.basics, rh = profile.resume_header, typed = b.name;
     if (!typed && rh && typeof rh === "object" && rh.name) {
-      return { name: rh.name, email: rh.email || null, location: rh.location || null, links: rh.links || {}, contactLine: rh.contactLine || null, linksLine: rh.linksLine || null, from: "resume" };
+      return { name: rh.name, email: rh.email || b.email || null, location: rh.location || null, links: rh.links || {}, contactLine: rh.contactLine || null, linksLine: rh.linksLine || null, from: "resume" };
     }
-    return { name: b.name, email: b.email, location: b.location, links: b.links || {} };
+    return { name: b.name, email: b.email || (rh && typeof rh === "object" && rh.confirmed_at && rh.email) || b.email, location: b.location, links: b.links || {} };
   }
   function entryTextFor(fact) {
     const title = (fact && fact.title) || "";
@@ -14792,6 +14792,14 @@ const CareerRouter = (() => {
     for (let i = stash.length - 1; i >= 0; i--) {
       const a = stash[i];
       if (a && a.pdf && typeof a.pdf.base64 === "string" && a.pdf.base64) { art = a; break; }
+    }
+    if (!art && /\bpacket\b/.test(t) && !/\b(resume|cv|cover letter|pdf|docx)\b/.test(t)) {
+      const reply = compose({
+        headline: "There's no application packet in this chat yet, so there's nothing to send.",
+        facts: ["When you pick a role, I prepare its packet for you to review: the job and the resume for it. Nothing is submitted until you approve it."],
+        nextStep: "Which role should I prepare it for?",
+      });
+      return { intent: "career_packet_absent", reply, resultStatus: "awaiting_user", sends: 0, documents: [] };
     }
     if (!art) {
       const reply = compose({

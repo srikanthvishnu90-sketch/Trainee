@@ -96,7 +96,9 @@ Deno.test({ name: "FILES LIVE LOOP: every File family served by the File server 
         const loc = pg.locator(CONTROLS).nth(c.i);
         if (c.inClosedMenu) { await loc.locator("xpath=ancestor::details[1]/summary").click({ timeout: 2000 }).catch(() => {}); requests.length = 0; }
         const before = await pg.evaluate(SNAP), rowsBefore = await w.rows();
-        const dl = /format=json/.test(c.href ?? "") ? pg.waitForEvent("download", { timeout: 3000 }).catch(() => null) : Promise.resolve(null);
+        // architect amendment (2026-11-10): an export press may take more than 3 s to download under CI shard load (seen on #693
+        // and #700, 129-415 ms locally); a press that does nothing still fails, after 15 s.
+        const dl = /format=json/.test(c.href ?? "") ? pg.waitForEvent("download", { timeout: 15000 }).catch(() => null) : Promise.resolve(null);
         await loc.click({ timeout: 2000, noWaitAfter: true }).catch((e: Error) => { rec.why = `could not be pressed: ${e.message.split("\n")[0]}`; });
         await dl; await pg.waitForTimeout(150);
         const after = await pg.evaluate(SNAP).catch(() => "navigated"), q = requests[0];

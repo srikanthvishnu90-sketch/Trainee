@@ -287,3 +287,23 @@ Fixed: 1 (thread's own file), 2 (leaked instruction), 3 (count word), 4 (the fiv
 and the instruction half of 10 (`leaked_instruction`). Open: 5 (orphan sentence after unsourced numbers), 6 (apply queue
 wording), 7's `tailor_resume` refusal, 9 (router-only fallback), 10's contradiction-with-history rule, and 11 (a real Claude
 run).
+
+## Leftovers (branch `ag/h2h-leftovers`, 2026-11-10)
+
+Pinned in `tests/architect/h2h-leftovers-20261110.test.ts`.
+
+- **Check 13 (`tailor_resume` and the confirmed header).** The name and email at the top now come from the typed ones, else
+  the confirmed resume header, piece by piece (`career_tailor.ts resumeContact`, 123 `headerOf`). A header with a name and no
+  email (A.4's shape) keeps its name, and the tool asks only "What email should go at the top of your resume?";
+  `set_resume_contact` takes the email alone when the confirmed record holds the name. With neither, both are asked, as
+  before. The chat path asks the same piece. An unconfirmed header still counts for nothing. A name typed in chat with no
+  email is still asked as both (WO-028/3 pins that sentence; open for an architect ruling).
+- **"referrals".** The form-question map (`question_map.ts`, and the extension bundle built from it) and the introductions ask
+  (`career_connector.ts`) read the plural as the singular.
+- **C3 t6 ("Never mind, just send me the packet." with no packet).** The router answers it as code's
+  (`career_packet_absent`, a code-owned intent in `career_staged.ts`): there is no application packet in this chat yet, and
+  it prepares one for the role the person picks. The turn no longer reaches the model, so no model can say "Here is the
+  review packet" on either path.
+- **Item 9 copy.** An answer keyed to one posting (`job:`, other than an essay) is "Saved for your <company> application
+  only; it isn't reused for another employer", and its question no longer promises "Answer it once and I won't ask
+  again". Answers that travel keep "I won't ask this again".

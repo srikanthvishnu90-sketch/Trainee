@@ -56,7 +56,7 @@ Deno.test("CIC-4 the reply is fixed safety text; the note keeps only what was re
   ok(/If your Gmail is connected, Trainee reads an employer's emailed code itself, and only during an application you approved/.test(CODE_IN_CHAT_REPLY));
   ok(/type the code into the employer's portal yourself/.test(CODE_IN_CHAT_REPLY));
   const note = noteForCodeTurn(redactionNote(["code"]));
-  eq(note, "(I removed the one-time code from your message and didn't keep it. Upmore never needs it here.)");
+  eq(note, "(I removed the one-time code from your message and didn't keep it. Trainee never needs it here.)");
   eq(noteForCodeTurn(redactionNote(["card"])), redactionNote(["card"]), "a note with nothing to trim is unchanged");
   eq(noteForCodeTurn(null), null);
 });

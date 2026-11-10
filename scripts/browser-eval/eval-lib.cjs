@@ -20,11 +20,10 @@ const { atsOf } = require("../../workers/career-browser/apply-vm.cjs");
 
 const MAX_PER_PROVIDER = 20;
 const UA_TOKEN = "TraineeBrowserEval/1 (dry run; never submits)";
-// The runner's own captcha words (parallel-apply.cjs BOT_RE): measured here to show what the VM would do with the page.
-const RUNNER_BOT_RE = /verify\s+(?:that\s+)?you(?:\s+are|(?:'|’|&#0*39;|&rsquo;|&apos;)re)\s+(?:a\s+)?(?:human|not a robot)|captcha|turnstile|challenges\.cloudflare\.com|are you a robot|not a robot/i;
+// What the runner does with the page: its own shown-check test (workers/career-browser/parallel-apply.cjs botCheck).
+const { botCheck: runnerBotCheck } = require("../../workers/career-browser/parallel-apply.cjs");
+const { APPLY_TEXT, NEVER_CLICK, applyUrlFor } = require("../../workers/career-browser/apply-entry.cjs");
 const SEND_METHODS = /^(GET|HEAD|OPTIONS)$/;
-const APPLY_TEXT = /^\s*(apply|apply now|apply here|apply for (this|the) (job|position|role)|apply to (this )?(job|position|role)|apply manually|i['’]?m interested|start (your )?application|bewerben|jetzt bewerben|ansök( nu)?|ansøg( nu)?|søk( nå)?|solliciteer( nu)?|postuler|candidatar(-se|me)?|inscr[ií]bete|candidati)\s*[»>→]?\s*$/i;
-const NEVER_CLICK = /submit|send|senden|absenden|envoyer|enviar|verzenden|skicka|finish|complete|confirm/i;
 
 // ---------------------------------------------------------------------------------------------------------- sample
 // CSV: provider,url (a header line is optional). Deterministic: input order, capped per provider.
@@ -96,20 +95,6 @@ function createPacer({ gapMs = 1000, now = () => Date.now(), sleep = (ms) => new
 }
 
 // ---------------------------------------------------------------------------------------------------------- providers
-// Where a provider's application form lives, one GET away from the posting page (null: follow the page's own Apply link).
-function applyUrlFor(provider, landed) {
-  let u;
-  try { u = new URL(landed); } catch { return null; }
-  const p = u.pathname.replace(/\/+$/, "");
-  switch (provider) {
-    case "lever": return /^\/[^/]+\/[0-9a-f-]{36}$/i.test(p) ? `${u.origin}${p}/apply` : null;
-    case "ashby": return /^\/[^/]+\/[0-9a-f-]{36}$/i.test(p) ? `${u.origin}${p}/application` : null;
-    case "breezy": return /^\/p\/[^/]+$/.test(p) ? `${u.origin}${p}/apply` : null;
-    case "workable": return /^\/[^/]+\/j\/[A-Z0-9]+$/i.test(p) ? `${u.origin}${p}/apply/` : null;
-    case "recruitee": return /^\/o\/[^/]+$/.test(p) ? `${u.origin}${p}/c/new` : null;
-    default: return null;
-  }
-}
 // The schema key an approved answer would come from, for one question the page asked (ats-fill's own decision).
 const FACT_KEYS = ["first_name", "last_name", "preferred_name", "full_name", "email", "phone", "current_company", "current_title", "linkedin_url", "github_url", "website_url", "location"];
 const PROBE = Object.fromEntries(FACT_KEYS.map((k) => [k, `@${k}`]));
@@ -166,7 +151,7 @@ function APPLY_CANDIDATES(args) {
 }
 
 // ---------------------------------------------------------------------------------------------------------- one posting
-const TEST_FACTS = { first_name: "Testy", last_name: "Example", full_name: "Testy Example", email: "dry-run@example.invalid", phone: "+1 555 0100", location: "Test City", eeo_policy: "decline" };
+const TEST_FACTS = { first_name: "Testy", last_name: "Example", full_name: "Testy Example", email: "dry-run@example.invalid", phone: "+1 555 0100", location: "Chicago, IL", country: "United States", eeo_policy: "decline" };
 function syntheticResume(dir) {
   fs.mkdirSync(dir, { recursive: true });
   const p = path.join(dir, "TEST-synthetic-resume.pdf");
@@ -222,8 +207,7 @@ async function evalPosting(browser, item, o) {
   const walls = async () => {
     const w = await page.evaluate(WALLS).catch(() => null);
     if (!w) return null;
-    const content = await page.content().catch(() => "");
-    r.runner_bot_re = r.runner_bot_re || RUNNER_BOT_RE.test(content) || page.frames().some((f) => RUNNER_BOT_RE.test(f.url()));
+    r.runner_bot_re = r.runner_bot_re || (await runnerBotCheck(page).catch(() => false));
     for (const k of ["password", "email_code", "sso", "captcha_challenge", "captcha_script", "closed"]) if (w[k] && !r.walls.includes(k)) r.walls.push(k);
     return w;
   };
@@ -328,7 +312,7 @@ function summarize(results) {
   return rows;
 }
 function markdown(rows, meta = {}) {
-  const h = "| provider | sampled | opened | form found | guest-fillable | ready if answered | questions (med) | required unanswerable (med) | fill failed | resume attached | login | sso | email code | captcha shown | captcha script | runner BOT_RE stops | closed | robots no | VM today | median s | p90 s |";
+  const h = "| provider | sampled | opened | form found | guest-fillable | ready if answered | questions (med) | required unanswerable (med) | fill failed | resume attached | login | sso | email code | captcha shown | captcha script | runner check stops | closed | robots no | VM today | median s | p90 s |";
   const lines = [`# Browser dry-run eval ${meta.label || ""}`, "", `Run ${meta.started || ""}; ${meta.note || "dry run, nothing submitted"}.`, "", h, "|" + h.split("|").slice(1, -1).map(() => "---").join("|") + "|"];
   for (const x of rows) lines.push(`| ${x.provider} | ${x.sampled} | ${x.opened} | ${x.form_found} | ${x.guest_fillable} | ${x.ready_if_answered} | ${x.questions_median ?? "-"} | ${x.unanswerable_required_median ?? "-"} | ${x.fill_failed_postings} | ${x.resume_attached} | ${x.walls.login + x.walls.password} | ${x.walls.sso} | ${x.walls.email_code} | ${x.walls.captcha_challenge} | ${x.walls.captcha_script} | ${x.runner_bot_re_stops} | ${x.walls.closed} | ${x.robots_disallowed} | ${x.vm_today} | ${x.ms_median == null ? "-" : (x.ms_median / 1000).toFixed(1)} | ${x.ms_p90 == null ? "-" : (x.ms_p90 / 1000).toFixed(1)} |`);
   lines.push("", `Requests that would have sent something and were aborted in the browser: ${rows.reduce((a, x) => a + x.posts_blocked, 0)}. Submit clicks: ${rows.reduce((a, x) => a + x.submit_clicked, 0)}. Form submits the page attempted, cancelled in the page: ${rows.reduce((a, x) => a + x.submit_attempts, 0)}. Postings whose host could not be reached (not opened, not counted as robots refusals): ${rows.reduce((a, x) => a + x.unreachable, 0)}.`);

@@ -153,6 +153,6 @@ Deno.test("an agent failure is spoken in product voice, once", async () => {
   const { d, calls } = deps(() => ({ __status: 500, body: { error: "internal" } }), false);
   const res = await handleWhatsappWebhook(await waReq("find roles"), d);
   assertEq(res.status, 500);
-  const errs = sendForms(calls).filter((f) => (f.get("Body") ?? "").includes("Something went wrong on my side"));
+  const errs = sendForms(calls).filter((f) => (f.get("Body") ?? "").includes("the request failed on Trainee's side"));
   assertEq(errs.length, 1, "one plain error with a next step");
 });

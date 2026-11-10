@@ -233,7 +233,7 @@ Deno.test("an agent failure is spoken in product voice, once", async () => {
   const { d, calls } = deps(() => ({ __status: 500, body: { error: "internal" } }), { seedRun: false });
   const res = await handleTelegramWebhook(tgReq(textUpdate("find roles")), d);
   assertEq(res.status, 500);
-  const errSends = sendBodies(calls).filter((b) => String(b.text).includes("Something went wrong on my side"));
+  const errSends = sendBodies(calls).filter((b) => String(b.text).includes("the request failed on Trainee's side"));
   assertEq(errSends.length, 1, "the user hears one plain error with a next step");
   assert(String(errSends[0].text).includes("nothing was changed"), "the error names the state honestly");
 });
@@ -246,7 +246,7 @@ Deno.test("an hourly-limit 429 is spoken as the limit, not as a failure", async 
   const res = await handleTelegramWebhook(tgReq(textUpdate("/start")), d);
   assertEq(res.status, 200, "a limit is handled; Telegram must not retry it as a failure");
   const texts = sendBodies(calls).map((b) => String(b.text));
-  assertEq(texts.filter((t) => t.includes("Something went wrong")).length, 0, "no false 'went wrong'");
+  assertEq(texts.filter((t) => t.includes("the request failed on Trainee's side")).length, 0, "no false error reply");
   const limit = texts.filter((t) => t.includes("didn't read that message"));
   assertEq(limit.length, 1, "one limit message");
   assert(limit[0].includes("60 messages an hour") && limit[0].includes("send it again"), "names the limit and the next step");

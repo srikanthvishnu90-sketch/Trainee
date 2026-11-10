@@ -10,8 +10,9 @@ export type Change = "remote_only" | "not_remote" | "individual_contributor" | "
 export interface Correction { remoteOnly?: true; notRemote?: true; contributorOnly?: true }
 
 const lc = (s: unknown) => String(s ?? "").toLowerCase().replace(/[’`]/g, "'").replace(/\s+/g, " ").trim();
-const REMOTE_ONLY = /^(?:(?:ok|okay|actually|sorry|wait|hmm|no|and|also|please)[,!:]?\s+)*(?:(?:only|just)\s+(?:show\s+(?:me\s+)?)?(?:fully\s+)?remote(?:\s+(?:roles?|jobs?|positions?|ones|work|postings?))?|remote\s+(?:only|roles? only|jobs? only)|(?:make|keep) it remote(?: only)?|(?:fully )?remote please)(?:\s+(?:please|thanks|pls))?[.!]*$/;
-const NOT_REMOTE = /^(?:(?:ok|okay|actually|sorry|wait|hmm|no|and|also|please)[,!:]?\s+)*(?:no remote(?: roles?| jobs?)?|not remote|(?:only|just)\s+(?:on-?site|in[- ]person)(?:\s+(?:roles?|jobs?))?|(?:on-?site|in[- ]person) only)(?:\s+(?:please|thanks|pls))?[.!]*$/;
+// "I need remote only" / "I want only remote roles" (B.6 continuation 2, turn 3) is the same correction, said as a need.
+const REMOTE_ONLY = /^(?:(?:ok|okay|actually|sorry|wait|hmm|no|and|also|please)[,!:]?\s+)*(?:i\s+(?:need|want|only want|would like|'d like)\s+)?(?:(?:only|just)\s+(?:show\s+(?:me\s+)?)?(?:fully\s+)?remote(?:\s+(?:roles?|jobs?|positions?|ones|work|postings?))?|remote\s+(?:only|roles? only|jobs? only)|(?:make|keep) it remote(?: only)?|(?:fully )?remote please)(?:\s+(?:please|thanks|pls))?[.!]*$/;
+const NOT_REMOTE = /^(?:(?:ok|okay|actually|sorry|wait|hmm|no|and|also|please)[,!:]?\s+)*(?:i\s+(?:need|want|only want|would like|'d like)\s+)?(?:no remote(?: roles?| jobs?)?|not remote|(?:only|just)\s+(?:on-?site|in[- ]person)(?:\s+(?:roles?|jobs?))?|(?:on-?site|in[- ]person) only)(?:\s+(?:please|thanks|pls))?[.!]*$/;
 const LEAD = "^(?:(?:ok|okay|actually|sorry|wait|hmm|no|and|also|please)[,!:]?\\s+)*";
 const TAIL = "(?:\\s+(?:please|thanks|pls))?[.!]*$";
 // The WHOLE message must be the correction: "no management consulting", "not a manager yet", "no director of engineering" or

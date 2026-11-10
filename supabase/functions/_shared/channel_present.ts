@@ -74,15 +74,15 @@ import type { ChannelDeps } from "./channel_bridge.ts";
 // pinned by fixtures in both places.)
 export const VOICE = {
   empty: "(I didn't get a reply — try again.)",
-  error: "Something went wrong on my side — nothing was changed. Give me a moment and send that again.",
+  error: "I couldn't finish that because the request failed on Trainee's side, so nothing was changed. Send it again in a moment.",
   rateLimited:
     "You've reached the limit of 60 messages an hour, so I didn't read that message and nothing was changed. The limit resets within the hour; send it again then.",
-  dismiss: "Okay — nothing was approved. The batch stays right where it is.",
+  dismiss: "The batch stays right where it is: nothing was approved.",
   approvalAck: "Got it ✓",
-  approvalDeclined: "Not approved — nothing was sent.",
-  buttonExpired: "That button has expired — ask for the batch status and I'll show you a fresh card.",
-  choiceExpired: "That choice has expired — ask for the batch status and I'll show you a fresh card.",
-  buttonForeign: "That button isn't for this chat.",
+  approvalDeclined: "Declined: nothing was sent.",
+  buttonExpired: "That button has expired, so nothing was approved — ask for the batch status and I'll show you a fresh card.",
+  choiceExpired: "That choice has expired, so nothing was approved — ask for the batch status and I'll show you a fresh card.",
+  buttonForeign: "Nothing was approved: that button isn't for this chat.",
   approvalPrompt: (runId: string) => `Batch ${runId} is waiting on your yes.`,
   choiceFooter: "Reply with a number:\n1 — Approve this batch\n2 — Not now",
   approveButton: "Approve this batch",

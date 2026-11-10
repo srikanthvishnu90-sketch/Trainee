@@ -25,6 +25,8 @@ import { messageOf, type ModelFn, type OutreachStore, payloadHash, type Recipien
 import { automatedInbox, AUTOMATED_WHY } from "./automated_inbox.ts";
 import type { QueueDeps } from "./career_send_rail.ts";
 import { YES_WINDOW_MS } from "./career_apply_cards.ts";
+import type { MxResolver } from "./career_contacts.ts";
+import { confirmCard, parseSupplied, type Supplied, suppliedContact, suppliedProblem, SUPPLY_CONFIRM_INTENT } from "./career_contact_supply.ts";
 
 export const CONTACT_CARD_INTENT = "career_contact_card", CONTACT_SEND_INTENT = "career_contact_send";
 type Card = Extract<ContactCard, { ok: true }>;
@@ -32,7 +34,8 @@ export interface ShownCard { contact_id: string; hook: number; card: Card }
 export interface ContactTurnOut { reply: string; intent: string; status: string; meta?: Record<string, unknown> }
 export interface ContactTurnDeps {
   env: (k: string) => string | undefined; // read at every call: never cached
-  contacts: Pick<ContactStore, "get" | "suppressed"> & { byName(userId: string, name: string, company?: string | null): Promise<string[]> };
+  mx: MxResolver; // the recipient domain's mail server, asked when the person confirms an address they gave
+  contacts: Pick<ContactStore, "get" | "suppressed" | "save"> & { byName(userId: string, name: string, company?: string | null): Promise<string[]> };
   model: ModelFn;
   senderFacts: () => unknown[] | Promise<unknown[]>;
   signature: (userId: string) => Promise<string | null>;
@@ -120,11 +123,22 @@ const toContactIn = (r: { person: any; facts: any[]; email: any; expires_at: str
 
 export async function contactTurn(o: { message: string; userId: string; now: number; deps: ContactTurnDeps }): Promise<ContactTurnOut | null> {
   const d = o.deps, on = contactAskOn({ get: d.env });
+  // A recipient the person wrote in this message (career_contact_supply.ts): read back for their confirmation first.
+  const supplied = parseSupplied(o.message);
+  if (supplied) {
+    if (!on) return null;
+    const bad = suppliedProblem(supplied);
+    if (bad) return { reply: bad, intent: SUPPLY_CONFIRM_INTENT, status: "not_a_person" };
+    const c = confirmCard(supplied);
+    return { reply: c.reply, intent: SUPPLY_CONFIRM_INTENT, status: "awaiting_confirm", meta: c.meta };
+  }
   const ask = contactAsk(o.message);
   if (ask) return on ? await show(o, ask) : null;
   const yes = contactYes(o.message);
   if (!yes) return null;
   const last = await d.lastCard();
+  const supply = (last?.meta as any)?.contact_supply as Supplied | undefined;
+  if (last && supply && typeof supply === "object") return await confirmSupplied(o, supply, last.at, yes.code);
   const shown = (last?.meta as any)?.contact_card as ShownCard | undefined;
   if (!last || !shown || typeof shown !== "object" || !shown.card || typeof shown.contact_id !== "string") return null;
   const refuse = (status: string, reply: string): ContactTurnOut => ({ reply, intent: CONTACT_SEND_INTENT, status });
@@ -152,9 +166,28 @@ export async function contactTurn(o: { message: string; userId: string; now: num
   return { reply: `Queued ${r.queued.length} email${r.queued.length > 1 ? "s" : ""} to ${shown.card.to} from your own ${box}: ${when}. Say "where are my emails" to check on them.`, intent: CONTACT_SEND_INTENT, status: "queued" };
 }
 
-async function show(o: { userId: string; now: number; deps: ContactTurnDeps }, ask: NonNullable<ReturnType<typeof contactAsk>>): Promise<ContactTurnOut | null> {
+// The yes to a read-back recipient: checked again, saved as the person's own contact (supplied_by 'person'), then drafted
+// and put on a card exactly as "email <name>" would. A recipient read back from anything but the person's own message (a
+// row whose fields do not parse as a name and an address on that address's domain) is refused.
+async function confirmSupplied(o: { message: string; userId: string; now: number; deps: ContactTurnDeps }, s: Supplied, at: number, code: string | null): Promise<ContactTurnOut> {
+  const d = o.deps, refuse = (status: string, reply: string): ContactTurnOut => ({ reply, intent: SUPPLY_CONFIRM_INTENT, status });
+  if (!contactAskOn({ get: d.env })) return refuse("off", "Contact outreach is switched off, so nothing was saved or sent.");
+  if (code) return refuse("changed", "That code isn't for this; say yes to save the contact I read back, or send it again corrected.");
+  if (o.now - at > YES_WINDOW_MS || o.now < at) return refuse("expired", "That was too long ago to confirm with a text, so nothing was saved. Send me the name and address again.");
+  const again = parseSupplied(`email ${s.name} at ${s.email}`);
+  if (!again || again.email !== s.email || again.domain !== s.domain || again.name !== s.name) return refuse("not_a_person", "I can't read that contact back as a name and an address, so nothing was saved.");
+  const bad = suppliedProblem(s);
+  if (bad) return refuse("not_a_person", `${bad} Nothing was saved.`);
+  const contact = await suppliedContact(s, d.mx, o.now);
+  if (!contact.email.approvable) return refuse("unconfirmed", `${s.domain} has no mail server I can find, so I won't send to ${s.email}. Nothing was saved. Check the address and send it again.`);
+  const id = await d.contacts.save(o.userId, { ok: true, dropped: [], runs: [], ...contact } as any);
+  const out = await show(o, { name: s.name, company: null, followups: s.followups }, id);
+  return out ?? refuse("gone", "I saved the contact but couldn't read it back, so there's nothing to approve yet. Ask me to email them again.");
+}
+
+async function show(o: { userId: string; now: number; deps: ContactTurnDeps }, ask: NonNullable<ReturnType<typeof contactAsk>>, savedId?: string): Promise<ContactTurnOut | null> {
   const d = o.deps;
-  const ids = await d.contacts.byName(o.userId, ask.name, ask.company);
+  const ids = savedId ? [savedId] : await d.contacts.byName(o.userId, ask.name, ask.company);
   if (!ids.length) return null; // not a contact this person resolved: not this turn's
   const row = await d.contacts.get(o.userId, ids[0]);
   if (!row) return null;

@@ -4,11 +4,36 @@
 --   supplied_by  'search'  found by the pipeline's own resolution or search (the default, and every row saved before this)
 --                'person'  the person typed the address or gave the page that names them
 -- career_contact_save reads person.supplied_by (absent: 'search'); career_contact_get returns it in person. Idempotent.
+-- A person-supplied contact is saved by the chat ingress (career_contact_supply.ts) only after the person confirms it.
 -- Rollback: supabase/rollbacks/20261110130000_career_contact_supplied_by.down.sql.
 
 alter table public.career_contact_profiles add column if not exists supplied_by text not null default 'search';
 alter table public.career_contact_profiles drop constraint if exists career_contact_profiles_supplied_by_check;
 alter table public.career_contact_profiles add constraint career_contact_profiles_supplied_by_check check (supplied_by in ('search', 'person'));
+
+-- What the person said is kept as what they said, never dressed up as a web source:
+--   career_contact_profiles / career_contact_facts.source_type 'person_stated'  their own words about the recipient (a title line from a pasted
+--                                                     signature) or what they want to ask; source_url is '' for these
+--   career_contact_email_evidence.method 'person_supplied'  an address the person typed and confirmed (score 95, and
+--                                                     approvable only with the domain's mail server confirmed, as before)
+alter table public.career_contact_profiles drop constraint if exists career_contact_profiles_source_type_check;
+alter table public.career_contact_profiles add constraint career_contact_profiles_source_type_check check (source_type in ('company_page', 'sec_edgar', 'person_stated'));
+alter table public.career_contact_profiles drop constraint if exists career_contact_profiles_source_url_check;
+alter table public.career_contact_profiles add constraint career_contact_profiles_source_url_check
+  check ((length(source_url) <= 2048 and source_url ~ '^https://') or (source_type = 'person_stated' and source_url = ''));
+alter table public.career_contact_facts drop constraint if exists career_contact_facts_source_type_check;
+alter table public.career_contact_facts add constraint career_contact_facts_source_type_check
+  check (source_type in ('company_page', 'personal_page', 'sec_edgar', 'github', 'openalex', 'semantic_scholar', 'uspto', 'conference', 'news', 'person_stated'));
+alter table public.career_contact_facts drop constraint if exists career_contact_facts_source_url_check;
+alter table public.career_contact_facts add constraint career_contact_facts_source_url_check
+  check ((length(source_url) <= 2048 and source_url ~ '^https://') or (source_type = 'person_stated' and source_url = ''));
+alter table public.career_contact_email_evidence drop constraint if exists career_contact_email_evidence_method_check;
+alter table public.career_contact_email_evidence add constraint career_contact_email_evidence_method_check
+  check (method in ('first_party_published', 'github_public', 'pattern_rcpt_valid', 'finder_verified', 'pattern_unverified', 'guess', 'person_supplied'));
+alter table public.career_contact_email_evidence drop constraint if exists career_contact_email_evidence_score_check;
+alter table public.career_contact_email_evidence add constraint career_contact_email_evidence_score_check
+  check (score = 0 or score = case method when 'first_party_published' then 95 when 'person_supplied' then 95 when 'github_public' then 90
+    when 'pattern_rcpt_valid' then 80 when 'finder_verified' then 75 when 'pattern_unverified' then 50 when 'guess' then 30 end);
 
 create or replace function public.career_contact_save(p jsonb) returns uuid
 language plpgsql security invoker set search_path = public, pg_temp as $$

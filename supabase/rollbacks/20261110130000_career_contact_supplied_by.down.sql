@@ -1,5 +1,23 @@
 -- Reverses 20261110130000_career_contact_supplied_by.sql: save and get as 20261107120200 wrote them, then the column goes
 -- (every contact reads as found by search again, which the contact turn sends to only with CAREER_PEOPLE_SEARCH on).
+-- Person-supplied contacts go first: their facts and evidence use the values the old checks refuse. The send log stays.
+delete from public.career_contact_profiles where supplied_by = 'person';
+alter table public.career_contact_profiles drop constraint if exists career_contact_profiles_source_type_check;
+alter table public.career_contact_profiles add constraint career_contact_profiles_source_type_check check (source_type in ('company_page', 'sec_edgar'));
+alter table public.career_contact_profiles drop constraint if exists career_contact_profiles_source_url_check;
+alter table public.career_contact_profiles add constraint career_contact_profiles_source_url_check check (length(source_url) <= 2048 and source_url ~ '^https://');
+alter table public.career_contact_facts drop constraint if exists career_contact_facts_source_type_check;
+alter table public.career_contact_facts add constraint career_contact_facts_source_type_check
+  check (source_type in ('company_page', 'personal_page', 'sec_edgar', 'github', 'openalex', 'semantic_scholar', 'uspto', 'conference', 'news'));
+alter table public.career_contact_facts drop constraint if exists career_contact_facts_source_url_check;
+alter table public.career_contact_facts add constraint career_contact_facts_source_url_check check (length(source_url) <= 2048 and source_url ~ '^https://');
+alter table public.career_contact_email_evidence drop constraint if exists career_contact_email_evidence_method_check;
+alter table public.career_contact_email_evidence add constraint career_contact_email_evidence_method_check
+  check (method in ('first_party_published', 'github_public', 'pattern_rcpt_valid', 'finder_verified', 'pattern_unverified', 'guess'));
+alter table public.career_contact_email_evidence drop constraint if exists career_contact_email_evidence_score_check;
+alter table public.career_contact_email_evidence add constraint career_contact_email_evidence_score_check
+  check (score = 0 or score = case method when 'first_party_published' then 95 when 'github_public' then 90 when 'pattern_rcpt_valid' then 80
+    when 'finder_verified' then 75 when 'pattern_unverified' then 50 when 'guess' then 30 end);
 create or replace function public.career_contact_save(p jsonb) returns uuid
 language plpgsql security invoker set search_path = public, pg_temp as $$
 declare u uuid := (p->>'user')::uuid; id_ uuid; e jsonb := p->'email'; exp timestamptz := coalesce((p->>'expires_at')::timestamptz, now() + interval '90 days');

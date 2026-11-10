@@ -1,4 +1,4 @@
-// LOOP 05, release item 5 (networking and email): 20 outreach journeys through the REAL career handler on Postgres 16 with
+// LOOP 05, release item 5 (networking and email): 26 outreach journeys (20 from fixture pages, 6 person-supplied) through the REAL career handler on Postgres 16 with
 // every migration (tests/flow/handler.ts), a scripted Anthropic endpoint (no spend) and a fake Gmail at the HTTP boundary
 // (tests/flow/send-rail-fixture.ts). No real message is ever sent: every send goes through the rail's worker to the fake
 // Gmail, and test mode (CAREER_CONTACT_TEST_RECIPIENTS) addresses every card to the owner's test address only.
@@ -19,6 +19,7 @@
 // The flag configuration is D-048 option (a) (architect amendment 2026-11-10): CAREER_CONTACT_OUTREACH on, in test mode;
 // CAREER_PEOPLE_SEARCH stays off, so only person-supplied recipients can be sent to.
 // LOOP05_PEOPLE_SEARCH=on adds CAREER_PEOPLE_SEARCH for a diagnostic run (not the scored configuration).
+// LOOP05_TRANSCRIPT=<journey id> prints that journey's turns (the demo).
 // Run: deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/loop-05-outreach.test.ts
 // deno-lint-ignore-file no-explicit-any
 import assertNode from "node:assert/strict";
@@ -89,6 +90,11 @@ const triesBy: Record<string, number> = {};
 function draftText(user: string): string {
   const name = /THE RECIPIENT: ([^,]+),/.exec(user)?.[1] ?? "there";
   const facts: { n: number; claim: string }[] = JSON.parse(/\n(\[\{[\s\S]*?\}\])\n?/.exec(user)?.[1] ?? "[]");
+  const asked = facts.find((f) => /^You want to ask them about /.test(f.claim));
+  if (asked) { // a person-supplied recipient: the hook is what the person said they want to ask
+    const about = asked.claim.replace(/^You want to ask them about /, "");
+    return `Hook: ${asked.n}\nSubject: About ${about}\n\nHi ${name.split(" ")[0]},\n\nI'm writing about ${about}.\n\nWould you share what you look for in people who apply for ${about}?`;
+  }
   const hook = facts.find((f) => /leads the/.test(f.claim)) ?? facts[0];
   const topic = /leads the (.+?) team/.exec(hook?.claim ?? "")?.[1] ?? "platform";
   const first = name.split(" ")[0];
@@ -108,7 +114,7 @@ const model = (chat: any) => {
 
 // ------------------------------------------------------------------------------------------------ the journeys
 // expect: "send" (a card the person approves is sent), "none" (nothing may be queued or sent).
-interface J { id: number; what: string; company: Co; ask: { name?: string; title?: string }; style?: Style; expect: "send" | "none"; changed?: boolean;
+interface J { id: number; what: string; company: Co; supplied?: boolean; ask: { name?: string; title?: string }; style?: Style; expect: "send" | "none"; changed?: boolean;
   run: (x: Ctx) => Promise<void> }
 interface Ctx { chat: Chat; u: string; say: (m: string) => Promise<any>; cards: any[]; approved: any[]; note: (s: string) => void; sql: (s: string) => Promise<string>; forge: (meta: unknown) => Promise<void> }
 const ask = (name: string, extra = "") => `email ${name}${extra}`;
@@ -127,6 +133,9 @@ const showOnly = async (x: Ctx, msg: string) => {
   x.note(`${s.intent}/${s.resultStatus}`);
   return s;
 };
+const SUPPLIED: Co = { name: "(person-supplied)", domain: "none.example", mx: "other", people: [], topic: "" };
+// The fixture DNS (dohMx on cloudflare-dns.com): these domains have a mail server; any other has none.
+const MX_HOSTS: Record<string, string> = { "acme-s1.example": "mx1.acme-s1.example", "initrode-s2.example": "mx1.initrode-s2.example" };
 const JOURNEYS: J[] = [
   { id: 1, what: "published address, no follow-ups", company: co(1, { target: "Ada Quill", mailto: "published", mx: "google" }), ask: { name: "Ada Quill" }, expect: "send", run: (x) => showYes(x, ask("Ada Quill")) },
   { id: 2, what: "pattern + RCPT, 2 follow-ups", company: co(2, { target: "Ben Ortiz" }), ask: { title: "Engineering Manager" }, expect: "send", run: (x) => showYes(x, ask("Ben Ortiz", " with 2 follow-ups")) },
@@ -186,10 +195,24 @@ const JOURNEYS: J[] = [
       const y = await x.say("yes");
       x.note(`edited card: ${y.resultStatus}`);
     } },
+  // The person-supplied recipient (career_contact_supply.ts): typed or pasted in this message, read back, confirmed, saved
+  // with supplied_by 'person', then the same card, exact-hash yes and send.
+  { id: 21, what: "typed name and address with a topic: read back, confirmed, card, yes", company: SUPPLIED, supplied: true, ask: {}, expect: "send",
+    run: async (x) => { await showOnly(x, "email Maya Chen at maya.chen@acme-s1.example about the analyst role"); await showYes(x, "yes"); } },
+  { id: 22, what: "a pasted signature with a title, 1 follow-up", company: SUPPLIED, supplied: true, ask: {}, expect: "send",
+    run: async (x) => { await showOnly(x, "email her about the data engineering internship with 1 follow-up\nPriya Nair\nStaff Engineer, Initrode\npriya@initrode-s2.example"); await showYes(x, "yes"); } },
+  { id: 23, what: "a typed role inbox is refused at the read-back", company: SUPPLIED, supplied: true, ask: {}, expect: "none",
+    run: async (x) => { await showOnly(x, "email Hiring Team at careers@acme-s1.example about the analyst role"); await x.say("yes"); } },
+  { id: 24, what: "a typed address whose domain has no mail server", company: SUPPLIED, supplied: true, ask: {}, expect: "none",
+    run: async (x) => { await showOnly(x, "email Omar Haddad at omar@nomail-s4.example about the analyst role"); await showOnly(x, "yes"); } },
+  { id: 25, what: "another turn between the read-back and the yes: nothing saved", company: SUPPLIED, supplied: true, ask: {}, expect: "none", changed: true,
+    run: async (x) => { await showOnly(x, "email Lena Ruiz at lena@acme-s1.example about the analyst role"); await x.say("actually what time is it in Chicago"); await showOnly(x, "yes"); } },
+  { id: 26, what: "a company name and no address: nothing read back, nothing saved (E.4 41)", company: SUPPLIED, supplied: true, ask: {}, expect: "none",
+    run: async (x) => { await showOnly(x, "email Initrode about the data engineering internship"); await x.say("yes"); } },
 ];
 
 // ------------------------------------------------------------------------------------------------ the run
-Deno.test({ name: "loop 05: 20 outreach journeys through the real handler, scored (0 invented, 0 guessed, 100% exact sends)", sanitizeResources: false, sanitizeOps: false, async fn() {
+Deno.test({ name: "loop 05: 26 outreach journeys through the real handler, scored (0 invented, 0 guessed, 100% exact sends)", sanitizeResources: false, sanitizeOps: false, async fn() {
   if (!pgBinDir()) { if (CI) throw new Error("needs Postgres 16 in CI"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
   const ENV: Record<string, string> = { CAREER_CONTACT_OUTREACH: "on", CAREER_CONTACT_TEST_RECIPIENTS: `Owner <${OWNER}>`, CAREER_SENDER_POSTAL_ADDRESS: POSTAL, ANTHROPIC_API_KEY: "sk-test-fake" };
   const diagnostic = Deno.env.get("LOOP05_PEOPLE_SEARCH") === "on";
@@ -215,6 +238,10 @@ Deno.test({ name: "loop 05: 20 outreach journeys through the real handler, score
       const req = input instanceof Request && !init ? input : new Request(input, init);
       const host = new URL(req.url).host;
       if (host === "api.anthropic.com") return anthropicWire(req, model);
+      if (host === "cloudflare-dns.com") {
+        const name = new URL(req.url).searchParams.get("name") ?? "";
+        return Response.json(MX_HOSTS[name] ? { Status: 0, Answer: [{ name, type: 15, data: `10 ${MX_HOSTS[name]}.` }] } : { Status: 3 });
+      }
       if (!/^supabase\.test$|^localhost|^127\./.test(host)) { leaked.push(req.url); throw new Error(`a call left the test: ${req.url}`); }
       return viaDouble(req);
     }) as typeof fetch;
@@ -231,20 +258,25 @@ Deno.test({ name: "loop 05: 20 outreach journeys through the real handler, score
       const token = `tok-l5-${j.id}`, u = PEOPLE[token], chat = h.chat(token);
       if (j.company.target) STYLE[j.company.target] = j.style ?? "clean";
       const notes: string[] = [];
-      const say = async (m: string) => { const r = await chat.say(m); assertNode.equal(r.status, 200, `J${j.id} "${m}": ${r.reply}`); return r; };
+      const said: string[] = [];
+      const say = async (m: string) => { said.push(m); const r = await chat.say(m);
+        if (Deno.env.get("LOOP05_TRANSCRIPT") === String(j.id)) console.log(`LOOP05 T J${j.id}\n  person: ${m.replace(/\n/g, " / ").slice(0, 160)}\n  trainee [${r.intent}/${r.resultStatus}]: ${r.reply}`); assertNode.equal(r.status, 200, `J${j.id} "${m}": ${r.reply}`); return r; };
       eq2(await say(`here is my resume:\n${RESUME}`), "career_resume_ingest", j.id);
       await say("yes, that's my resume");
       // The person's contact, from the company's own page (or nobody, when the page names nobody who fits).
       const w = world(j.company);
-      const r = await resolveContact({ company: j.company.name, domain: j.company.domain, name: j.ask.name ?? null, title: j.ask.title ?? null, employees: j.company.employees ?? null }, w.deps);
+      const r = j.supplied ? { ok: false as const, why: "person-supplied" } : await resolveContact({ company: j.company.name, domain: j.company.domain, name: j.ask.name ?? null, title: j.ask.title ?? null, employees: j.company.employees ?? null }, w.deps);
       const saved: any[] = [];
       if (r.ok) {
         const id = (await svc.rpc("career_contact_save", { p: { user: u, person: { ...r.person, supplied_by: "person" }, facts: r.facts, email: r.email, expires_at: r.expires_at } })).data as string;
         saved.push({ id, ...r });
-      } else notes.push(`resolve: ${r.why}`);
+      } else if (!j.supplied) notes.push(`resolve: ${r.why}`);
       const x: Ctx = { chat, u, say, cards: [], approved: [], note: (s) => notes.push(s), sql,
         forge: async (meta) => { await sql(`insert into public.agent_messages (thread_id, role, content, meta) values ('${chat.thread()}', 'assistant', 'card', '${JSON.stringify(meta).replace(/'/g, "''")}'::jsonb)`); } };
       await j.run(x);
+      if (j.supplied) for (const id of JSON.parse(await sql(`select coalesce(jsonb_agg(id), '[]') from public.career_contact_profiles where user_id = '${u}'`))) {
+        saved.push({ id, supplied: true, ...(await svc.rpc("career_contact_get", { p: { user: u, id } })).data });
+      }
       // Send what was queued; then let the follow-ups' days pass and send those too.
       await runSendWorker(railDeps({} as any, conn, gmail), { worker: `w-l5-${j.id}a`, accounts: 30, perAccount: 10 });
       await sql(`update public.career_send_queue set next_at = now() - interval '1 minute' where user_id = '${u}' and state = 'queued'`);
@@ -256,18 +288,23 @@ Deno.test({ name: "loop 05: 20 outreach journeys through the real handler, score
       const drafts = JSON.parse(await sql(`select coalesce(jsonb_agg(to_jsonb(d) order by d.created_at, d.n), '[]') from (select recipient_email, subject, body, footer, hash, approved_hash, status, created_at, n from public.career_outreach_drafts where user_id = '${u}') d`));
       const profiles = JSON.parse(await sql(`select coalesce(jsonb_agg(to_jsonb(p)), '[]') from (select * from public.career_contact_profiles where user_id = '${u}') p`));
       // sourced: every saved person is named on the fixture page they cite.
-      const sourced = saved.every((s) => (w.pages[s.person.source_url] ?? "").includes(s.person.name)) && profiles.length === saved.length;
+      // A person-supplied contact: saved as theirs, its name and address exactly as they wrote them in a message of theirs.
+      const sourced = saved.every((s) => s.supplied
+        ? s.person.supplied_by === "person" && said.some((m) => m.includes(s.person.name) && m.toLowerCase().includes(String(s.email.email)))
+        : (w.pages[s.person.source_url] ?? "").includes(s.person.name)) && profiles.length === saved.length
+        && (!(j.supplied && j.expect === "none") || saved.length === 0); // a refused read-back saves nothing
       // guessed: any address on a card, in the queue or sent that is neither the owner's test address nor evidenced.
       const evidenced = (e: string) => {
         const s = saved.find((c) => String(c.email.email ?? "").toLowerCase() === e);
         if (!s) return false;
+        if (s.supplied) return s.email.method === "person_supplied" && said.some((m) => m.toLowerCase().includes(e));
         const published = Object.values(w.pages).some((p) => p.includes(`mailto:${e}"`));
         const rcpt = s.email.method === "pattern_rcpt_valid" && s.email.rcpt === "accept" && s.email.catch_all === false && Number(s.email.format_evidence ?? 0) >= 2;
         return published || rcpt;
       };
       const addrs = new Set<string>([...x.cards.flatMap((c) => [c.to, c.found]), ...queue.map((q: any) => q.recipient_email), ...sent.map((m) => m.to), ...drafts.map((d: any) => d.recipient_email)]
         .filter(Boolean).map((e) => String(e).toLowerCase()));
-      const guessed = [...addrs].filter((e) => e !== OWNER && !evidenced(e)).length + (j.id === 12 && addrs.size ? addrs.size : 0);
+      const guessed = [...addrs].filter((e) => e !== OWNER && !evidenced(e)).length + ([12, 26].includes(j.id) && (addrs.size || saved.length) ? addrs.size + saved.length : 0);
       // invented: a meeting, referral or relationship in any mail shown or sent.
       const invented = [...x.cards.flatMap((c) => c.mails.map((m: any) => m.text)), ...sent.map((m) => m.text)].filter((t) => INVENTED.test(t)).length;
       // approval: every queued mail approved by its own exact hash, to its exact recipient.
@@ -313,13 +350,13 @@ Deno.test({ name: "loop 05: 20 outreach journeys through the real handler, score
     const tot = { invented: rows.reduce((a, r) => a + r.invented, 0), guessed: rows.reduce((a, r) => a + r.guessed, 0), exact: sendJ.filter((r) => r.exact).length,
       sourced: rows.filter((r) => r.sourced).length, approval: rows.filter((r) => r.approval).length, newYes: rows.filter((r) => r.newYes).length, none: rows.filter((r) => r.expect === "none" && r.exact).length };
     const exactPct = Math.round((100 * tot.exact) / sendJ.length);
-    console.log(`LOOP05 TOTAL invented=${tot.invented} guessed=${tot.guessed} exact_sends=${tot.exact}/${sendJ.length} (${exactPct}%) nothing_sent_when_refused=${tot.none}/${rows.length - sendJ.length} sourced=${tot.sourced}/20 approval=${tot.approval}/20 new_yes=${tot.newYes}/20 leaked_calls=${leaked.length} search_found=${searchOff}`);
+    console.log(`LOOP05 TOTAL invented=${tot.invented} guessed=${tot.guessed} exact_sends=${tot.exact}/${sendJ.length} (${exactPct}%) nothing_sent_when_refused=${tot.none}/${rows.length - sendJ.length} sourced=${tot.sourced}/${rows.length} approval=${tot.approval}/${rows.length} new_yes=${tot.newYes}/${rows.length} leaked_calls=${leaked.length} search_found=${searchOff}`);
     ok(diagnostic || /^search_off\/[^/]+\/queued\+0$/.test(searchOff), `a search-found contact is refused with people search off: ${searchOff}`);
     ok(rows.every((r) => r.onlyOwner), "test mode: nothing went anywhere but the owner's test address");
     ok(!leaked.length, `no call left the test: ${leaked.join(", ")}`);
     ok(tot.invented <= BAR.invented, `invented ${tot.invented}`);
     ok(tot.guessed <= BAR.guessed, `guessed ${tot.guessed}`);
-    ok(tot.sourced === 20 && tot.approval === 20 && tot.newYes === 20, "every journey: sourced, approval exact, a changed draft needs a new yes");
+    ok(tot.sourced === rows.length && tot.approval === rows.length && tot.newYes === rows.length, "every journey: sourced, approval exact, a changed draft needs a new yes");
     ok(tot.none === rows.length - sendJ.length, "every refused journey queued and sent nothing");
     ok(exactPct >= BAR.exactPct, `exact-match sends ${tot.exact}/${sendJ.length}`);
   } finally {

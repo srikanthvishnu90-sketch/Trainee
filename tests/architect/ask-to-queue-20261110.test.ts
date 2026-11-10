@@ -5,7 +5,7 @@
 // prepared payload hash), once; a yes after the list or a payload changed, after another turn, or after the offer went stale
 // approves nothing of the old offer. Agent 2's app-layer loop (#674) covers prepare, the card and the card's yes.
 //
-// 40 scripts, one synthetic TEST person each, through the REAL agent-chat handler (handler-career.ts handleChat on tests/flow:
+// 50 scripts, one synthetic TEST person each, through the REAL agent-chat handler (handler-career.ts handleChat on tests/flow:
 // real supabase-js over the PostgREST double, Postgres 16 with every migration), the staged brain released and a scripted $0
 // model on the Anthropic wire. The expected set of each script is read from what the person was shown: the numbered lines of
 // the last list in a reply (each line's link names its posting), resolved by the positions the person typed. E2: a number
@@ -20,6 +20,7 @@ import { careerHandler, SUPABASE_URL, supabaseParity } from "../flow/handler.ts"
 import { confirmedResumeSql } from "../flow/resume-seed.ts";
 import { anthropicWire } from "./helpers/anthropic_wire.ts";
 import { payloadOf, RESUME_A } from "./scenarios-apply-r3-battery.ts";
+import { nothingNewLine, widenedAsk } from "../../supabase/functions/_shared/search_widen.ts";
 
 const CI = Deno.env.get("CI") === "true";
 const lit = (v: string) => { const t = `q${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`; return `$${t}$${v}$${t}$`; };
@@ -39,10 +40,17 @@ const ENVK: Record<string, string> = { TRAINEE_FILE_LINK_SECRET: "TEST-ask-to-qu
 // approve nothing of the earlier offer it is not an answer to. `then`: a change in the world after the turn.
 type Pos = number[] | "all";
 interface Ctx { u: string; lists: string[][]; prepare: (jobIdx: number) => Promise<void>; sql: (q: string) => Promise<string> }
-interface Step { say: string; queue?: Pos; approve?: Pos; stale?: true; concurrent?: true; then?: (s: Ctx) => Promise<void> }
+// `listed`: the reply lists exactly this many roles; `kept`: the reply shows no new list, so the list last shown stands;
+// `has` / `never`: what the reply must say, and must never say.
+interface Step { say: string; queue?: Pos; approve?: Pos; stale?: true; concurrent?: true; then?: (s: Ctx) => Promise<void>; listed?: number; kept?: true; has?: RegExp; never?: RegExp }
 interface Script { name: string; prepared?: number[] | "all"; steps: Step[] }
 const R = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 const ASK = (say: string, queue: Pos): Script => ({ name: say, steps: [{ say: SEARCH }, { say, queue }] });
+// A widening is never read as a role made of its cue words ("include too", "add as well"), and never a fresh search.
+const NOT_A_ROLE = /\b(?:include|add|plus|also)\b[^.\n]{0,20}\b(?:too|as well)\b internships|I checked (?:include|add|also|plus)\b/i;
+const OTHER = "what should my cover letter say?";
+// A turn the router answers that is not a search (a list reference): it ends the search a correction could amend (spec 2.3).
+const REF = "tell me more about the second one";
 
 export const SCRIPTS: Script[] = [
   // ---- ask to queue, one ask after the shortlist (5 listed)
@@ -94,6 +102,22 @@ export const SCRIPTS: Script[] = [
       { say: "yes", approve: [], stale: true }] },
   { name: "stale: another turn came between the offer and the yes", prepared: "all", steps: [{ say: SEARCH }, { say: "what should my cover letter say?" }, { say: "yes", approve: [], stale: true }] },
   { name: "stale: an apply ask came between the offer and the yes", prepared: "all", steps: [{ say: SEARCH }, { say: "apply to 2 and 4", queue: [2, 4] }, { say: "yes", approve: [], stale: true }] },
+  // ---- 41-50: a widening after a turn that was not a search widens the last real search (coordinator, 2026-11-10)
+  { name: "widen after a list reference, then 2 and 4 of the widened list", steps: [{ say: SEARCH }, { say: REF }, { say: WIDEN, listed: 7, never: NOT_A_ROLE }, { say: "apply to 2 and 4", queue: [2, 4] }] },
+  { name: "widen after an apply ask", steps: [{ say: SEARCH }, { say: "apply to 1", queue: [1] }, { say: "also add remote US internships", listed: 7, never: NOT_A_ROLE }, { say: "apply to 3", queue: [3] }] },
+  { name: "'plus remote roles in the US' after a list reference", steps: [{ say: SEARCH }, { say: REF }, { say: "plus remote roles in the US", listed: 7, never: NOT_A_ROLE }, { say: "apply to the top three", queue: [1, 2, 3] }] },
+  { name: "a list reference and an unrelated turn, then the widening", steps: [{ say: SEARCH }, { say: REF }, { say: OTHER }, { say: WIDEN, listed: 7, never: NOT_A_ROLE }, { say: "apply to 6 and 7", queue: [6, 7] }] },
+  { name: "'add remote internships in the US as well', then all of them", steps: [{ say: SEARCH }, { say: OTHER }, { say: "add remote internships in the US as well", listed: 7, never: NOT_A_ROLE }, { say: "apply to all of them", queue: "all" }] },
+  { name: "a widening that finds nothing new keeps the list and says so", steps: [{ say: SEARCH }, { say: REF }, { say: "include business analyst internships too", kept: true, never: NOT_A_ROLE, has: /nothing new|no new/i }, { say: "apply to 5", queue: [5] }] },
+  { name: "nothing new after a real widening keeps the widened list", steps: [{ say: SEARCH }, { say: OTHER }, { say: WIDEN, listed: 7 }, { say: "include business analyst internships too", kept: true, never: NOT_A_ROLE, has: /nothing new|no new/i }, { say: "apply to 7", queue: [7] }] },
+  { name: "a widening of an empty search names its scope, never 'include too'", steps: [{ say: "Find me economist internships in Peoria." }, { say: "thanks" }, { say: WIDEN, never: NOT_A_ROLE, has: /economist/i }] },
+  { name: "widen after a list reference, then a number past the end", steps: [{ say: SEARCH }, { say: REF }, { say: WIDEN, listed: 7, never: NOT_A_ROLE }, { say: "apply to 9", queue: [] }, { say: "apply to 2 and 9", queue: [2] }] },
+  // Every listed role closes on its board before the widening, so it finds nothing at all: the list shown still stands.
+  { name: "a widening that finds nothing at all never wipes the list shown", steps: [
+    { say: SEARCH, then: (s) => s.sql(`update public.career_postings set closed_at = now() where job_id in (${s.lists.at(-1)!.map(lit).join(", ")})`).then(() => {}) },
+    { say: REF },
+    { say: "include business analyst internships too", kept: true, never: NOT_A_ROLE, has: /nothing new/i, then: (s) => s.sql(`update public.career_postings set closed_at = null`).then(() => {}) },
+    { say: "apply to 2 and 3", queue: [2, 3] }] },
 ];
 
 // The postings a reply listed, in its order: each numbered line's link names its posting.
@@ -112,11 +136,27 @@ Deno.test("ask-to-queue self-check: the list is read from the reply's numbered l
   assertNode.deepEqual(listedIn(reply), [BOARD[0].id, BOARD[3].id]);
   assertNode.deepEqual(at(listedIn(reply), [2, 9]), [BOARD[3].id]);
   assertNode.deepEqual(listedIn(`1. TEST Queue A — Data Analyst Intern, Chicago, IL (not re-checked) ${BOARD[0].url}\n2. TEST Queue C — Data Analyst Intern (not re-checked) ${BOARD[2].url}`), [BOARD[0].id, BOARD[2].id], "the iMessage form");
-  assertNode.equal(SCRIPTS.length, 40);
+  assertNode.equal(SCRIPTS.length, 50);
+  assertNode.ok(NOT_A_ROLE.test("I checked include too internships in Chicago") && !NOT_A_ROLE.test("I found 7 data analyst internships in Chicago and remote in the US"));
+});
+
+Deno.test("widening units: the last real search is widened after a turn that cleared it; nothing new is said, with what was added", () => {
+  const ask = { role: "data analyst", place: "chicago", remote: false, limits: { bands: ["intern" as const], pay: null, company: null, term: null, needsSponsor: false } };
+  const cleared = { lastAsk: null, lastAskAt: null, lastSearch: { ask, at: 1000 }, lastShortlist: [{ id: "a" }, { id: "b" }] };
+  const w = widenedAsk(WIDEN, cleared, 2000)!;
+  assertNode.deepEqual([w.ask.role, w.ask.place, w.ask.remote, w.ask.remoteRegion, w.ask.keep], ["data analyst", "chicago", true, "us", ["a", "b"]]);
+  assertNode.deepEqual(w.added, ["remote roles in the US"]);
+  assertNode.equal(widenedAsk(WIDEN, cleared, 1000 + 31 * 60_000), null, "an old search is not widened");
+  assertNode.equal(widenedAsk(WIDEN, { lastAsk: null, lastAskAt: null }, 2000), null, "no search to widen: not a widening");
+  assertNode.deepEqual(widenedAsk("include business analyst internships too", { lastAsk: ask, lastAskAt: 1000 }, 2000)!.added, ["business analyst"]);
+  assertNode.equal(nothingNewLine(["business analyst"], ["a", "b"], ["a", "b"]), "Widening to include business analyst found nothing new: no other open role matched, so the 2 I listed before stand, under the same numbers.");
+  assertNode.ok(nothingNewLine(["business analyst"], ["a", "b"], []), "found nothing at all: said too");
+  assertNode.equal(nothingNewLine(["remote roles in the US"], ["a"], ["a", "c"]), null, "something new: not said");
+  assertNode.equal(nothingNewLine(["remote roles in the US"], [], []), null, "no list before: the search's own empty reply speaks");
 });
 
 Deno.test({
-  name: "ask to queue: 40 scripts through the real handler on Postgres 16; exactly the named set queued or approved, once; a stale yes refused",
+  name: "ask to queue: 50 scripts through the real handler on Postgres 16; exactly the named set queued or approved, once; a stale yes refused",
   sanitizeResources: false,
   sanitizeOps: false,
   async fn() {
@@ -175,7 +215,7 @@ Deno.test({
         const u = people[i], chat = h.chat(`atq-${i}`);
         const s: Ctx = { u, lists: [], prepare: prepareFor(u), sql };
         if (sc.prepared) for (const idx of sc.prepared === "all" ? R(0, BOARD.length - 1) : sc.prepared) await s.prepare(idx);
-        const wantQ = new Set<string>(), wantA = new Set<string>(), staleOld = new Set<string>(), transcript: string[] = [];
+        const wantQ = new Set<string>(), wantA = new Set<string>(), staleOld = new Set<string>(), transcript: string[] = [], said: string[] = [];
         let stale = false;
         for (const st of sc.steps) {
           await sql(`delete from public.agent_rate_limits`);
@@ -186,6 +226,10 @@ Deno.test({
           const r = st.concurrent ? (await Promise.all([say(), say()]))[0] : await say();
           transcript.push(`> ${st.say}\n[${r.intent}] ${r.reply.slice(0, 700)}`);
           const listed = listedIn(r.reply);
+          if (st.listed !== undefined && listed.length !== st.listed) said.push(`"${st.say}" listed ${listed.length}, not ${st.listed}`);
+          if (st.kept && listed.length && JSON.stringify(listed) !== JSON.stringify(shown)) said.push(`"${st.say}" replaced the list shown`);
+          if (st.has && !st.has.test(r.reply)) said.push(`"${st.say}" does not say ${st.has}`);
+          if (st.never && st.never.test(r.reply)) said.push(`"${st.say}" says ${st.never}`);
           if (listed.length) s.lists.push(listed);
           if (st.queue) for (const j of at(shown, st.queue)) wantQ.add(j);
           if (st.approve) for (const j of at(shown, st.approve)) if (preparedNow.has(j)) wantA.add(j);
@@ -196,20 +240,23 @@ Deno.test({
         const queued = await rows("career_apply_wanted", u, "posting_key"), approved = await rows("career_apply_jobs", u, "job_id");
         const qSet = new Set(queued), aSet = new Set(approved);
         const dup = (queued.length - qSet.size) + (approved.length - aSet.size);
-        const ok = same(qSet, wantQ) && same(aSet, wantA) && dup === 0;
+        const ok = same(qSet, wantQ) && same(aSet, wantA) && dup === 0 && !said.length;
         const hashOk = Number(await sql(`select count(distinct j.id) from public.career_apply_jobs j join public.career_apply_prepared p on p.user_id = j.user_id and p.job_id = j.job_id
           and p.payload_hash = j.payload_hash and p.state <> 'expired' where j.user_id = '${u}'`));
         sum.scripts++; if (ok) sum.exact++;
         sum.queued += queued.length; sum.queuedWant += wantQ.size; sum.approved += approved.length; sum.approvedWant += wantA.size; sum.dup += dup; sum.hashOk += hashOk;
         if (stale) { sum.staleTried++; if (![...staleOld].some((j) => aSet.has(j))) sum.staleRefused++; }
-        if (!ok) fails.push(`[${i + 1}] ${sc.name}: queued ${JSON.stringify(queued)} want ${JSON.stringify([...wantQ])}; approved ${JSON.stringify(approved)} want ${JSON.stringify([...wantA])}; dup ${dup}\n${transcript.join("\n")}`);
+        if (!ok) fails.push(`[${i + 1}] ${sc.name}: queued ${JSON.stringify(queued)} want ${JSON.stringify([...wantQ])}; approved ${JSON.stringify(approved)} want ${JSON.stringify([...wantA])}; dup ${dup}${said.length ? `; ${said.join("; ")}` : ""}\n${transcript.join("\n")}`);
       }
       for (const f of fails) realLog(`--- MISMATCH ${f}`);
       const line = `ASK-TO-QUEUE: scripts ${sum.scripts}, exact ${sum.exact}/${sum.scripts}, queued rows ${sum.queued} (expected ${sum.queuedWant}), approved rows ${sum.approved} (expected ${sum.approvedWant}), ` +
         `duplicates ${sum.dup}, stale yes refused ${sum.staleRefused}/${sum.staleTried}, hash match ${sum.hashOk}/${sum.approved}`;
       realLog(line);
       assertNode.deepEqual(outbound, [], "no request left but the fake boards");
-      assertNode.equal(await sql(`select count(*) from public.career_apply_jobs where state <> 'queued'`), "0", "nothing ran past the queue");
+      // Nothing was driven or sent. Script 50 closes the shared postings for a moment, and the queue rightly ends the other
+      // people's approved jobs for them as not submitted (posting closed): that is the only state allowed past "queued".
+      assertNode.equal(await sql(`select count(*) from public.career_apply_jobs where state <> 'queued' and not (state = 'not_submitted' and evidence->>'closed' = 'posting_closed')`), "0",
+        `nothing ran past the queue: ${await sql(`select string_agg(distinct state || ' ' || left(evidence::text, 200), ' | ') from public.career_apply_jobs where state <> 'queued'`)}`);
       assertNode.ok(sum.exact === sum.scripts && sum.dup === 0 && sum.staleRefused === sum.staleTried && sum.hashOk === sum.approved, line);
     } finally {
       console.error = realError;

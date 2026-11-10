@@ -113,7 +113,7 @@ import { missingIntegration } from "../_shared/agent/integrations.ts";
 import { documentsOf, materializeArtifacts } from "../_shared/channel_artifacts.ts";
 import { scoredN } from "../_shared/career_search.ts";
 import { askFor, isJudgePromptAsk, judgePromptTurn, searchJudgeTurn, supabaseJudgeCache, supabaseSearchSources } from "../_shared/career_search_judge.ts"; // FEATURE 5
-import { blockerAsk, widenedAsk } from "../_shared/search_widen.ts"; // R10 WO-C
+import { blockerAsk, nothingNewLine, widenedAsk } from "../_shared/search_widen.ts"; // R10 WO-C
 // R10 WO-D: router outcomes that are not an answer to the message (its catch-alls and the company-intel fallback that sent the
 // graduation-window template on production): at a limit these are replaced by the held reply.
 const NOT_AN_ANSWER_AT_LIMIT = new Set(["unclaimed", "career_catchall", "career_fallback", "company_intel", "honest_unavailable"]);
@@ -1502,13 +1502,16 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
               const why = !f5Said?.explain ? "" : found.blocker === "none"
                 ? `Nothing is blocking it: ${found.shortlist.length} open ${found.shortlist.length === 1 ? "role is" : "roles are"} listed below. Your resume isn't confirmed, and that doesn't block a search: listing roles never needs it, and eligibility isn't decided here.\n`
                 : `What blocked it: ${found.blocker === "all_closed" ? "the matching roles I found were closed when I checked their application pages" : "no open roles were found in the scope I checked"}. It was not a connection problem (the job boards were read), and not your resume (listing roles never needs a confirmed resume).\n`;
-              out = { ...out, reply: why + (f5Said?.append ? `${out.reply}\n\n${found.reply}` : found.reply) + resumeLine, resultStatus: found.status, handler: "search_judge",
+              const f5Prior = (ctx as any).discovery ?? {};
+              // a-widen-after-turn: a widening that found nothing beyond the list says so; an empty one never wipes the list.
+              const f5Before = (Array.isArray(f5Prior.lastShortlist) ? f5Prior.lastShortlist : []).map((e: any) => String(e?.id ?? "")).filter(Boolean);
+              const f5Same = (f5Widen as any)?.added ? nothingNewLine((f5Widen as any).added, f5Before, found.shortlist.map((e: any) => String(e?.id ?? ""))) : null;
+              out = { ...out, reply: (f5Same ? `${f5Same}\n` : "") + why + (f5Said?.append ? `${out.reply}\n\n${found.reply}` : found.reply) + resumeLine, resultStatus: found.status, handler: "search_judge",
                 // R10 WO-C: a widened search is a search, whatever the router took the words for (a graduation-window question).
                 ...(f5Widen ? { intent: "career_discovery" } : {}) };
-              const f5Prior = (ctx as any).discovery ?? {};
               // Spec 2.3: the ask this list was made for is kept on the thread (a later correction starts from it), and after a
               // correction the router's own record of the search (it read "remote only" as a role) is replaced by the corrected one.
-              (ctx as any).discovery = { ...f5Prior, lastShortlist: found.shortlist, lastSource: found.source, lastAsk: f5Ask, lastAskAt: Date.now(),
+              (ctx as any).discovery = { ...f5Prior, lastShortlist: f5Same && !found.shortlist.length ? f5Prior.lastShortlist : found.shortlist, lastSource: found.source, lastAsk: f5Ask, lastAskAt: Date.now(),
                 ...(correctedAsk(message, f5Prior) ? { lastParams: { ...(f5Prior.lastParams ?? {}), ask: String(message).slice(0, 200), roleText: f5Ask.role, whereText: f5Ask.place, remote: f5Ask.remote } } : {}) };
               // ROLE RESULTS PAGE (owner, 2026-11-01 and 11-02): a role ask ("I want X roles that pay $Y", "find me 10 SWE intern roles")
               // on EVERY channel gets one or two plain sentences and then the results page's link ALONE as its own message
@@ -1526,6 +1529,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
                   // F.1: the blocker question's answer leads the results message (the page's own two sentences and link stay as they are;
                   // owner 2026-11-01/02: on every channel the list itself is the hosted page).
                   if (why) made.parts[0] = `${why.trim()}\n${made.parts[0]}`;
+                  if (f5Same) made.parts[0] = `${f5Same}\n${made.parts[0]}`; // a-widen-after-turn: the page's reply says it too
                   // R10 fix 8 (architect ruling 2026-11-09): the roles by number beside the File link, so one can be chosen in chat.
                   if (made.lines.length) made.parts[0] = [made.parts[0], ...made.lines].join("\n");
                   out = { ...out, reply: [made.parts[0], made.parts[1]].join("\n") + resumeLine, parts: [made.parts[0], ...(resumeLine ? [resumeLine.trim()] : []), made.parts[1]] };
@@ -1566,7 +1570,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           await ledger.record(f5Meter);
         } else if (f5Free && (ctx as any).discovery?.lastAsk) {
           // Spec 2.3: a turn that was not a search ends the search a correction could amend ("only remote" three messages later is not one).
-          (ctx as any).discovery = { ...(ctx as any).discovery, lastAsk: null, lastAskAt: null };
+          // A widening later still widens it (search_widen.ts widenedAsk reads lastSearch).
+          const d5 = (ctx as any).discovery;
+          (ctx as any).discovery = { ...d5, lastAsk: null, lastAskAt: null, lastSearch: { ask: d5.lastAsk, at: d5.lastAskAt } };
         }
         // FEATURE 5 (end)
         // D-035: a crisis message the staged route kept off the brain gets code's crisis reply (crisis.ts: the core's own

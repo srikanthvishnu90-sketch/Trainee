@@ -41,11 +41,14 @@ function rolesNamed(s: string, fresh = false): string[] {
     .filter((x) => x && x.split(" ").length <= 4 && !/\b(?:us|u\.s|usa|area)\b/.test(x));
 }
 
-export function widenedAsk(message: string, discovery: unknown, now: number = Date.now()): { ask: SearchAsk; changes: Widening[] } | null {
-  const d = discovery as { lastAsk?: SearchAsk; lastAskAt?: number; lastShortlist?: { id?: string | null }[] } | null;
-  const prev = d?.lastAsk;
+export function widenedAsk(message: string, discovery: unknown, now: number = Date.now()): { ask: SearchAsk; changes: Widening[]; added: string[] } | null {
+  const d = discovery as { lastAsk?: SearchAsk | null; lastAskAt?: number | null; lastSearch?: { ask?: SearchAsk; at?: number } | null; lastShortlist?: { id?: string | null }[] } | null;
+  // a-widen-after-turn (2026-11-10): a turn that was not a search ends the search a correction could amend (spec 2.3), but an
+  // explicit widening ("include remote US internships too", "also add X", "plus Y") still widens the last real search, kept
+  // as discovery.lastSearch when that turn cleared lastAsk. Without it the widening was searched as the role "include too".
+  const prev = d?.lastAsk ?? d?.lastSearch?.ask, prevAt = d?.lastAsk ? d?.lastAskAt : d?.lastSearch?.at;
   if (!prev || typeof prev !== "object" || typeof prev.role !== "string") return null;
-  if (typeof d?.lastAskAt !== "number" || now - d.lastAskAt > CORRECTION_WINDOW_MS || now < d.lastAskAt) return null;
+  if (typeof prevAt !== "number" || now - prevAt > CORRECTION_WINDOW_MS || now < prevAt) return null;
   const t = lc(message);
   if (!t || t.length > 400 || !CUE.test(t)) return null;
   const s = lc(searchSentence(String(message ?? "")));
@@ -65,7 +68,10 @@ export function widenedAsk(message: string, discovery: unknown, now: number = Da
   }
   if (!changes.length) return null;
   const keep = (d?.lastShortlist ?? []).map((e) => String(e?.id ?? "")).filter(Boolean);
-  return { ask: { ...prev, roles, place, area, remote, remoteOnly: false, remoteRegion, keep: [...new Set([...(prev.keep ?? []), ...keep])] }, changes };
+  // What this widening added, in words, for the reply when it finds nothing new.
+  const added = [...roles.slice(had.length), ...(changes.includes("area") ? [`the ${place} area`] : []),
+    ...(changes.includes("remote_us") ? ["remote roles in the US"] : changes.includes("remote") ? ["remote roles"] : [])];
+  return { ask: { ...prev, roles, place, area, remote, remoteOnly: false, remoteRegion, keep: [...new Set([...(prev.keep ?? []), ...keep])] }, changes, added };
 }
 
 // "the Chicago area", "greater Chicago", "Chicago suburbs" -> "chicago"
@@ -99,4 +105,14 @@ export function blockerAsk(message: string, discovery: unknown, now: number = Da
   if (!isBlockerAsk(message) || !d?.lastAsk || typeof d.lastAsk.role !== "string") return null;
   if (typeof d.lastAskAt !== "number" || now - d.lastAskAt > 2 * CORRECTION_WINDOW_MS || now < d.lastAskAt) return null;
   return d.lastAsk;
+}
+
+// a-widen-after-turn (2026-11-10): a widening that found no role beyond the ones already listed says so, with what it added,
+// and the list keeps its numbers; one that found nothing at all leaves the earlier list standing. null: it found something new.
+export function nothingNewLine(added: string[], before: string[], after: string[]): string | null {
+  if (!before.length || !added.length) return null;
+  const was = new Set(before);
+  if (after.some((id) => !was.has(id))) return null;
+  const scope = added.length === 1 ? added[0] : `${added.slice(0, -1).join(", ")} and ${added.at(-1)}`;
+  return `Widening to include ${scope} found nothing new: no other open role matched, so the ${before.length} I listed before stand, under the same numbers.`;
 }

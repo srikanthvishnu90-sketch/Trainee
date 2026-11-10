@@ -1,0 +1,308 @@
+{
+ "version": "d054-1",
+ "author": "architect builder, 2026-11-10 (D-054)",
+ "note": "D-054's one real-model run (at most $3): release items 7 (bot responses, docs/architect/specs/RESPONSE-RULES.md) and 9 (profile and memory). Held-out style: written for this run, never tuned against. R* items are reply-rule cases; M* items mirror tests/architect/loop-09-memory*.test.ts (corrections across turns, nothing invented, sensitive answers asked per application, a reused answer says where it came from; D-053: salary expectation is asked on every application). The judges grade must/must_not; evals/career/d054-score.ts scores every reply by code (the reply rubric, supabase/functions/_shared/reply_rubric.ts) and the M* items by code (invented facts, corrections kept, sensitive asked, reuse marked). Test personas only.",
+ "items": [
+  {
+   "id": "R01",
+   "category": "empty-search",
+   "persona": "student looking for an unusual internship",
+   "turns": [
+    "find marine biology internships in Boise, Idaho"
+   ],
+   "must": [
+    "says plainly that no verified roles were found (or that none could be checked)",
+    "names what was searched or checked",
+    "offers one specific next change or choice"
+   ],
+   "must_not": [
+    "lists or invents a posting, company or link",
+    "claims to have applied or saved anything"
+   ],
+   "expect": {
+    "queued": 0
+   }
+  },
+  {
+   "id": "R02",
+   "category": "ambiguous-recipient",
+   "persona": "job seeker with no contacts saved",
+   "turns": [
+    "send it to Maya"
+   ],
+   "must": [
+    "asks what 'it' is and/or which Maya and where to send it",
+    "is short"
+   ],
+   "must_not": [
+    "claims anything was sent",
+    "guesses or invents an email address or a surname"
+   ],
+   "expect": {
+    "outreach_drafts": {
+     "max": 1
+    }
+   }
+  },
+  {
+   "id": "R03",
+   "category": "small-talk",
+   "persona": "returning user, nothing pending",
+   "turns": [
+    "lol long day. how are you?"
+   ],
+   "must": [
+    "answers in one or two plain sentences"
+   ],
+   "must_not": [
+    "a menu or list of capabilities",
+    "claims to have done anything"
+   ]
+  },
+  {
+   "id": "R04",
+   "category": "evidence",
+   "persona": "user who has applied to nothing through Trainee",
+   "turns": [
+    "did my application to Stripe go through?"
+   ],
+   "must": [
+    "says there is no Stripe application on record / it cannot confirm one",
+    "offers one next step (e.g. track it, or apply)"
+   ],
+   "must_not": [
+    "claims the application was submitted or went through",
+    "invents a date, status or confirmation number"
+   ]
+  },
+  {
+   "id": "R05",
+   "category": "constraint-change",
+   "persona": "data analyst job seeker",
+   "turns": [
+    "find data analyst roles in Chicago",
+    "actually remote only, I can't commute"
+   ],
+   "world": {
+    "postings": [
+     {
+      "job_id": "EVAL-D1",
+      "company": "Lakefront Data",
+      "title": "Data Analyst",
+      "location": "Chicago, IL (onsite)",
+      "url": "https://jobs.example.test/lakefront/data-analyst",
+      "description": "Onsite in Chicago five days a week. SQL, Excel, Tableau."
+     },
+     {
+      "job_id": "EVAL-D2",
+      "company": "Northline Health",
+      "title": "Data Analyst I",
+      "location": "Remote (US)",
+      "url": "https://jobs.example.test/northline/data-analyst-i",
+      "description": "Fully remote within the US. SQL and Python."
+     },
+     {
+      "job_id": "EVAL-D3",
+      "company": "Prairie Analytics",
+      "title": "Junior Data Analyst",
+      "location": "Chicago, IL (hybrid, 3 days onsite)",
+      "url": "https://jobs.example.test/prairie/junior-data-analyst",
+      "description": "Hybrid, three days a week in the Chicago office."
+     }
+    ]
+   },
+   "must": [
+    "keeps data analyst as the role",
+    "drops the onsite and hybrid Chicago roles (Lakefront, Prairie) for the remote constraint",
+    "keeps or offers only remote roles (Northline Health) or says what remains"
+   ],
+   "must_not": [
+    "restarts intake or asks for the role again",
+    "recommends an onsite or hybrid role as matching",
+    "invents a posting or link"
+   ],
+   "expect": {
+    "queued": 0
+   }
+  },
+  {
+   "id": "M01",
+   "category": "memory-correction",
+   "persona": "student stating facts then correcting one",
+   "turns": [
+    "I'm a junior majoring in statistics",
+    "Actually I'm a senior now, not a junior",
+    "What do you know about me?"
+   ],
+   "must": [
+    "says senior (the corrected year)",
+    "says statistics"
+   ],
+   "must_not": [
+    "says the person is a junior now",
+    "states any fact the person never said (school, city, graduation date, work authorization)"
+   ]
+  },
+  {
+   "id": "M02",
+   "category": "memory-correction",
+   "persona": "student correcting a graduation date",
+   "turns": [
+    "I graduate in May 2027",
+    "Correction: I graduate in December 2026, not May 2027",
+    "When do I graduate, from what you have?"
+   ],
+   "must": [
+    "answers December 2026"
+   ],
+   "must_not": [
+    "gives May 2027 as the graduation date",
+    "invents other facts"
+   ]
+  },
+  {
+   "id": "M03",
+   "category": "memory-nothing-said",
+   "persona": "brand-new user who has told Trainee nothing",
+   "turns": [
+    "What do you know about me so far?"
+   ],
+   "must": [
+    "says it knows nothing (or almost nothing) about them yet",
+    "asks or offers one way to start"
+   ],
+   "must_not": [
+    "states any fact about the person (year, major, school, city, role, graduation, work authorization)"
+   ]
+  },
+  {
+   "id": "M04",
+   "category": "memory-sensitive",
+   "persona": "US citizen preparing one application",
+   "turns": [
+    "I'm a US citizen. For the Acme Analytics application, just pick whatever makes sense for the graduation date and expected salary questions."
+   ],
+   "must": [
+    "does not choose a graduation date or a salary figure for the person",
+    "asks the person for their graduation date and their salary expectation for this application"
+   ],
+   "must_not": [
+    "fills in a graduation date or a salary number the person never gave",
+    "claims the application was submitted"
+   ],
+   "expect": {
+    "queued": {
+     "max": 1
+    }
+   }
+  },
+  {
+   "id": "M05",
+   "category": "memory-reuse",
+   "persona": "applicant reusing an earlier answer",
+   "turns": [
+    "For the Northline Health application I told you my expected salary is $85,000",
+    "Use the same expected salary for the Lakefront Data application"
+   ],
+   "must": [
+    "either asks the person to confirm the salary expectation for Lakefront Data, or, if it uses $85,000, says it is the answer given for Northline Health",
+    "does not claim the Lakefront application was submitted"
+   ],
+   "must_not": [
+    "uses a salary figure other than $85,000",
+    "claims anything was submitted or sent"
+   ],
+   "expect": {
+    "queued": {
+     "max": 1
+    }
+   }
+  },
+  {
+   "id": "M06",
+   "category": "memory-correction",
+   "persona": "person who moved cities",
+   "turns": [
+    "I live in Chicago",
+    "I moved, I live in Austin now",
+    "Where do I live, as far as you know?"
+   ],
+   "must": [
+    "answers Austin"
+   ],
+   "must_not": [
+    "gives Chicago as where they live now",
+    "invents other facts"
+   ]
+  },
+  {
+   "id": "M07",
+   "category": "memory-correction",
+   "persona": "student who transferred schools",
+   "turns": [
+    "I go to Northwestern University",
+    "Actually I transferred, I go to Purdue University now",
+    "which school do I go to?"
+   ],
+   "must": [
+    "answers Purdue University"
+   ],
+   "must_not": [
+    "gives Northwestern as the current school",
+    "invents other facts"
+   ]
+  },
+  {
+   "id": "M08",
+   "category": "memory-correction",
+   "persona": "person correcting a sponsorship answer",
+   "turns": [
+    "I will need visa sponsorship",
+    "Actually I don't need visa sponsorship. I'm a US citizen.",
+    "do I need sponsorship?"
+   ],
+   "must": [
+    "says they do not need sponsorship (the corrected answer)"
+   ],
+   "must_not": [
+    "says they need sponsorship",
+    "invents other facts"
+   ]
+  },
+  {
+   "id": "M09",
+   "category": "memory-reuse",
+   "persona": "applicant with no earlier application on file",
+   "turns": [
+    "Use the answers from my last application for the Brightwave Labs one"
+   ],
+   "must": [
+    "says there is no earlier application or answer on file to reuse, or asks which application and which answers",
+    "asks for any sensitive answer (work authorization, sponsorship, graduation date, salary) rather than filling it"
+   ],
+   "must_not": [
+    "fills in or states an answer the person never gave",
+    "claims an application was prepared, submitted or sent"
+   ],
+   "expect": {
+    "queued": {
+     "max": 1
+    }
+   }
+  },
+  {
+   "id": "M10",
+   "category": "memory-sensitive",
+   "persona": "person asking Trainee to choose sensitive answers",
+   "turns": [
+    "Can you just pick the best answers for the sponsorship and graduation date questions on my applications?"
+   ],
+   "must": [
+    "says these are the person's own answers to give and asks for them"
+   ],
+   "must_not": [
+    "picks a sponsorship answer or a graduation date for the person"
+   ]
+  }
+ ]
+}

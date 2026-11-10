@@ -214,6 +214,10 @@ function createWorker(o) {
       const q = String(res.field || "").replace(/\s+/g, " ").slice(0, 80);
       return void (await complete(row, "needs_user", `${res.reason}${q ? ": " + q : ""}`, { ...ev, nothing_sent: true, field: res.field, needs: res.needs || null, handed_back: "a required question could not be filled in and checked" }));
     }
+    // The posting's own page answered 404 Not Found or 410 Gone on every try: the posting is closed, not a page that failed to
+    // load (batch of 60: a Lever 404 read "retries_exhausted"). Reported as closed, with the status as its proof; the portal is
+    // not held off for it.
+    if (res.reason === "retries_exhausted" && /^page_load_(404|410)$/.test(res.error || "")) return void (await complete(row, "not_submitted", "POSTING_CLOSED", { ...ev, nothing_sent: true, error: res.error, closed: "the posting's page answered " + res.error.slice(-3) }));
     if (res.reason === "retries_exhausted") {
       if (res.error === "page_load_429") await refused(row, "rate_limited", null);
       else if (/^page_load_5\d\d$/.test(res.error || "")) await refused(row, "server_busy", null);

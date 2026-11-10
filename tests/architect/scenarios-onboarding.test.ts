@@ -243,6 +243,11 @@ Deno.test(`brain: ${BRAIN.length} replies to a fact shown: the agent's confirm_p
 
 Deno.test("the generators cover every shape (resume families, reply kinds, journey steps)", () => {
   for (const f of ["first", "second", "first+unread", "second+unread"]) assertNode.ok(RESUMES.some((r) => r.family === f), f);
+  // Architect amendment D-052 (owner ruling, PR #742): resumes with an INTERESTS section (read as interest entries) and with
+  // a Relevant Coursework section (still unread) are both generated, in single resumes and in journeys.
+  assertNode.ok(RESUMES.some((r) => r.entries.some((e) => e.kind === "other")), "a resume with interests");
+  assertNode.ok(RESUMES.some((r) => r.unread.includes("Relevant Coursework")), "a resume with Relevant Coursework unread");
+  assertNode.ok(JOURNEYS.some((j: Journey) => j.a.entries.some((e) => e.kind === "other")), "a journey whose resume has interests");
   for (const k of ["ssn", "password", "card"]) assertNode.ok(SECRETS.some((r) => r.secret?.kind === k), k);
   for (const k of ["yes", "unclear", "no", "correction", "other"]) assertNode.ok(REPLIES.filter((c) => c.kind === k).length >= 50, k);
   const steps = new Set(JOURNEYS.flatMap((j: Journey) => j.steps.map((s) => s.t === "paste" ? `paste:${s.which}` : s.t === "correct" ? `correct:${s.target}` : s.t)));

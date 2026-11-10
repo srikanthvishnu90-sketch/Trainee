@@ -266,7 +266,12 @@ async function attempt(browser, p, opts, timing) {
   // A benchmark's dry run (scripts/browser-eval/strict.cjs) adds its own guard on every request and a page script that cancels
   // any form submit; production passes neither.
   if (opts.initScript) await ctx.addInitScript(opts.initScript);
-  await ctx.route("**/*", async (route) => {
+  // A request still being judged when its page or context closes (a timeout's teardown) rejects inside the route handler: that
+  // request is dropped (aborted, never continued), and the rejection never escapes as an unhandled one that would end the
+  // whole worker process with every other posting it holds (strict heldout run 42772190953: "route.fetch: Request context
+  // disposed").
+  await ctx.route("**/*", (route) => guardRoute(route).catch(() => route.abort("blockedbyclient").catch(() => {})));
+  async function guardRoute(route) {
     const req = route.request();
     // A gate may answer a request inside the browser itself (the strict benchmark's simulated resume upload): nothing is sent.
     if (opts.requestGate) { const gv = await opts.requestGate(req); if (gv && typeof gv === "object" && gv.fulfill) return route.fulfill(gv.fulfill); if (!gv) return route.abort("blockedbyclient"); }
@@ -285,7 +290,7 @@ async function attempt(browser, p, opts, timing) {
       if (!next.ok) { blocked.push(next.host); blockedUrls.push(to); return route.abort("blockedbyclient"); }
     }
     return route.fulfill({ response: resp });
-  });
+  }
   const onAllowedHost = () => {
     // An employer that sends the candidate to its SSO: a sign-in wall the person finishes themselves, not a refused host.
     if (blocked.length && ssoSignIn(blockedUrls[0])) throw new NeedsUser("login_required", blocked[0], "sso_redirect");

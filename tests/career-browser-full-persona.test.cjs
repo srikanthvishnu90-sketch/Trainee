@@ -166,3 +166,16 @@ test("Ashby place: a list with only another state is handed back with its option
   assert.equal(loc.reason, "no_matching_option");
   assert.deepEqual(loc.options, ["Chicago, Indiana, United States"]);
 });
+
+test("runner: a request whose judging fails (a page or context closing under it) is dropped, never an unhandled rejection", { skip, timeout: 60000 }, async () => {
+  const seen = []; const onRej = (e) => seen.push(e); process.on("unhandledRejection", onRej);
+  try {
+    const n = posts.length;
+    const gate = async (req) => { if (req.isNavigationRequest()) throw new Error("Request context disposed."); return true; };
+    const r = await applyOne(browser, job("ashby", FACTS), { stepTimeoutMs: 4000, retries: 0, requestGate: gate });
+    assert.notEqual(r.status, "submitted_page_confirmed", JSON.stringify(r));
+    assert.equal(posts.length, n, "nothing sent");
+    await new Promise((res) => setTimeout(res, 200));
+    assert.deepEqual(seen, []);
+  } finally { process.off("unhandledRejection", onRej); }
+});

@@ -14,6 +14,7 @@ import { careerHandler, SERVICE_KEY, SUPABASE_URL, supabaseParity } from "../flo
 import { buildFileDeps } from "../../supabase/functions/trainee-file/deps.ts";
 import { handleFile } from "../../supabase/functions/trainee-file/handler.ts";
 import { verifyFileToken } from "../../supabase/functions/_shared/file_link.ts";
+import { fileCardOn } from "../../supabase/functions/_shared/file_card.ts";
 import { MARKDOWN } from "../../supabase/functions/_shared/role_pay.ts";
 import { phonePost, signedIn } from "./file-session-fakes.ts";
 
@@ -81,7 +82,10 @@ Deno.test({ name: "results (handler): iMessage 'frontend internships that pay $3
   const lines = t.reply.split("\n");
   eq(lines.length, 5, t.reply);
   eq(lines[0], "I found 2 frontend internships that list pay of $30/hr or more, plus 1 that doesn't list pay, so I couldn't check it. Here they are by fit, with Apply on each.");
-  assert(lines.slice(1, 4).every((l, i) => new RegExp(`^${i + 1}\\. TEST Pay \\w+ — [^()]+, [^()]+ \\((?:open-checked|not re-checked)\\) https://\\S+$`).test(l)), t.reply);
+  // Architect amendment, D-049 over E.2 #18 chat form: with the File card on, the numbered lines end at the check state (no posting link;
+  // each role's inspected link is in the File, checked below); off, each line ends in its posting link as before.
+  const cardOn = fileCardOn({ get: (k) => Deno.env.get(k) });
+  assert(lines.slice(1, 4).every((l, i) => new RegExp(`^${i + 1}\\. TEST Pay \\w+ — [^()]+, [^()]+ \\((?:open-checked|not re-checked)\\)${cardOn ? "" : " https://\\S+"}$`).test(l)), t.reply);
   eq(t.body.parts, [lines.slice(0, 4).join("\n"), lines[4]], "sent as two messages: the sentences with the numbered roles, then the link alone");
   assert(/^https:\/\/trainee\.example\/file\?t=v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]{43}$/.test(lines[4]), `the link alone on its own line: ${lines[4]}`);
   assert(!MARKDOWN.test(t.reply), "no markdown on iMessage");
@@ -99,6 +103,11 @@ Deno.test({ name: "results (handler): iMessage 'frontend internships that pay $3
   const page = await handleFile(new Request(`${BASE}`, { headers: { cookie: `tf_s=${s}` } }), d);
   eq(page.status, 200);
   const html = await page.text(), p = plain(html);
+  // D-049 over E.2 #18: every role in the chat list has its inspected posting link in the File (the card opens it).
+  for (const l of lines.slice(1, 4)) {
+    const title = /^\d+\. [^—]+ — ([^,]+),/.exec(l)?.[1] ?? "";
+    assert(title && new RegExp(`<a href="https://[^"]+" rel="noopener noreferrer" aria-label="View role: ${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} on `).test(html), `the File holds the inspected link for: ${l}`);
+  }
   assert(/Frontend internships, \$30\/hr or more/.test(p), p);
   assert(/Lists \$30\/hr or more \(2\)[\s\S]*TEST Pay (Web|Design)[\s\S]*TEST Pay (Web|Design)[\s\S]*Pay not listed \(1\)[\s\S]*TEST Pay Quiet/.test(p), p);
   assert(/Pay \$35-40\/hr · listed on the posting/.test(p) && /Pay \$30\/hr · listed on the posting/.test(p), p);
@@ -128,7 +137,9 @@ Deno.test({ name: "results (handler): the same ask on Telegram or the web, and a
     assert(/^https:\/\/trainee\.example\/file\?t=v1\./.test(parts[1]) && !/trainee\.example\/file/.test(parts[0]), `${channel ?? "web"}: the File link is its own message`);
     // Architect ruling (R10 fix 8): the roles by number, short (no pay, no posting text), no markdown.
     const listed = parts[0].split("\n").slice(1);
-    assert(listed.length >= 1 && listed.every((l, i) => l.startsWith(`${i + 1}. `) && /\((?:open-checked|not re-checked)\) https:\/\/\S+$/.test(l) && !/Pay \$/.test(l)) && !MARKDOWN.test(t.reply), `${channel ?? "web"}: numbered short roles with their links, no markdown: ${t.reply}`);
+    // Architect amendment, D-049 over E.2 #18 chat form: card on, the lines end at the check state; off, at the posting link.
+    const end = fileCardOn({ get: (k) => Deno.env.get(k) }) ? /\((?:open-checked|not re-checked)\)$/ : /\((?:open-checked|not re-checked)\) https:\/\/\S+$/;
+    assert(listed.length >= 1 && listed.every((l, i) => l.startsWith(`${i + 1}. `) && end.test(l) && !/Pay \$/.test(l)) && !MARKDOWN.test(t.reply), `${channel ?? "web"}: numbered short roles, no markdown: ${t.reply}`);
   }
   });
 } });

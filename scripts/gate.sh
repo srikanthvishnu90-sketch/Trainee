@@ -193,8 +193,10 @@ browser_node_tests=(
   tests/career-fact-import-panel.test.cjs
   tests/career-greenhouse-savedform.test.cjs
   tests/career-owned-worker-browser.test.cjs
+  tests/career-denylist-every-navigation.test.cjs
   tests/career-parallel-apply.test.cjs
   tests/career-portal-browser.test.cjs
+  tests/career-portal-popup-gate.test.cjs
   tests/career-portal-lever-radio.test.cjs
   tests/career-portal-submit-integrity.test.cjs
   tests/career-posting-location.test.cjs

@@ -37,7 +37,7 @@ export function buildFileDeps(admin: any, env: FileDeps["env"], now: () => numbe
     // Item 6: each File family's records and posts (file_family_serve.ts FamilyRecords). One line per family; each builder adds only its
     // own line (an absent family loads nothing: a ref File shows the C.24 error state, and no post is dispatched).
     familyRecords: {
-      ...recordsFamilies({ read: supabaseRecords(admin), digest: supabaseDigestWriter(admin), now, timeZone: supabaseTimeZone(admin) }), // f-s5: F-01 F-02 F-03 F-08 F-13 F-14 F-15
+      ...recordsFamilies({ read: supabaseRecords(admin), digest: supabaseDigestWriter(admin), now, timeZone: supabaseTimeZone(admin) }), // f-s5: F-01 F-02 F-03 F-08 F-13 F-14 F-14n F-15
     },
     // A results card that isn't ready: the employer's open questions (asked on the page, saved the way the chat saves them), then
     // the queued applications prepared again, and where each one stands.

@@ -1,4 +1,4 @@
-// FILES LIVE LOOP, record-backed families (item 6, S5): F-01 F-02 F-03 F-08 F-13 F-14 F-15 served by the real File server
+// FILES LIVE LOOP, record-backed families (item 6, S5): F-01 F-02 F-03 F-08 F-13 F-14 F-14n F-15 served by the real File server
 // (trainee-file/handler.ts handleFile, the real file service over the in-memory store, a real signed-in phone session) from the
 // person's records read at serve time (FileDeps.families: file_family_actions.ts familySource over file_family_records.ts), loaded
 // in Chromium at 390 x 844, and every control pressed on a fresh load. Two people: one with records, one with none.
@@ -57,7 +57,7 @@ const READ = `[...document.querySelectorAll(${JSON.stringify(CONTROLS)})].map((e
 const SNAP = `document.body.innerHTML.length + ":" + [...document.querySelectorAll("details")].map((d) => d.open ? 1 : 0).join("") + ":" + location.href`;
 interface Press { family: string; who: string; label: string; result: "served" | "post" | "chat" | "source" | "change" | "off" | "dead" | "unserved"; why?: string }
 
-Deno.test({ name: "FILES LIVE RECORDS LOOP: the seven record-backed families served from records at 390 px: none dead, none unserved, none shown off", sanitizeResources: false, sanitizeOps: false, async fn() {
+Deno.test({ name: "FILES LIVE RECORDS LOOP: the eight record-backed families (seven, and the F-14 negotiation variant) served from records at 390 px: none dead, none unserved, none shown off", sanitizeResources: false, sanitizeOps: false, async fn() {
   const pw = playwright();
   if (!pw) { if (CI) throw Error("the Files live loop needs the gate's Playwright browser in CI"); console.log("NOT_RUN locally: no Playwright"); return; }
   const w = await world();
@@ -80,7 +80,7 @@ Deno.test({ name: "FILES LIVE RECORDS LOOP: the seven record-backed families ser
       sid = p.sid;
       const load = async () => { w.enabled.clear(); await pg.goto(BASE, { waitUntil: "load" }); requests = []; };
       await load();
-      assert.match(await pg.content(), new RegExp(`data-family="${p.family}"`), `${p.family} (${p.who}): the File server drew the family page`);
+      assert.match(await pg.content(), new RegExp(`data-family="${p.family === "F-14n" ? "F-14" : p.family}"`), `${p.family} (${p.who}): the File server drew the family page`);
       for (const c of await pg.evaluate(READ) as any[]) {
         const rec: Press = { family: p.family, who: p.who, label: c.label, result: "dead" };
         out.push(rec);

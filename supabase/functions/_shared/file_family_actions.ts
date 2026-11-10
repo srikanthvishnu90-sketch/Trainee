@@ -1,4 +1,4 @@
-// Item 6, S5 (task f-s5): the File server's side of the seven record-backed families (file_family_records.ts), in the shared S0 hook's
+// Item 6, S5 (task f-s5): the File server's side of the record-backed families (F-01 F-02 F-03 F-08 F-13 F-14 F-14n F-15) (file_family_records.ts), in the shared S0 hook's
 // shape (file_family_serve.ts FamilyRecords, one per family in FileDeps.familyRecords).
 //   load(userId, rec)  the family's view, read from the person's records now (never a stored copy). With nothing on record, a C.24
 //     state ({ state }) that says what is missing and opens the chat. Unreadable records: null (the hook draws the error state).
@@ -43,7 +43,7 @@ export function recordsFamily(family: LiveFamily, d: RecordsDeps): FamilyRecords
     ...(family === "F-14" ? { post: { briefpause: (u: string) => brief(d, u, false), briefresume: (u: string) => brief(d, u, true) } } : {}),
   };
 }
-// The seven lines for FileDeps.familyRecords.
+// The lines for FileDeps.familyRecords.
 export const recordsFamilies = (d: RecordsDeps): Record<LiveFamily, FamilyRecords> =>
   Object.fromEntries(LIVE_FAMILIES.map((f) => [f, recordsFamily(f, d)])) as Record<LiveFamily, FamilyRecords>;
 

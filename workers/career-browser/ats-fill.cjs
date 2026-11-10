@@ -169,14 +169,17 @@ function INVALID() {
 
 // ---- answers ---------------------------------------------------------------------------------------------------------------
 const FACT_RULES = [
-  [/^first name\b|^given name\b/, "first_name"],
-  [/^last name\b|^surname\b|^family name\b/, "last_name"],
+  [/^first name\b|^given name\b|^vorname\b|^voornaam\b|^pr nom\b|^nombre$/, "first_name"],
+  [/^last name\b|^surname\b|^family name\b|^nachname\b|^achternaam\b|^apellidos?\b|^nom de famille\b/, "last_name"],
   [/^preferred (first )?name\b/, "preferred_name"],
   [/^(full |legal |your )?name$|^full legal name\b/, "full_name"],
-  [/^e ?mail\b/, "email"],
+  // The same question in the languages the benchmark's boards ask it in (German, Dutch, Spanish, French, Portuguese, Swedish).
+  [/^(vor und nachname|vollst ndiger name|volledige naam|nombre completo|nombre y apellidos?|nom complet|nome completo|fullst ndigt namn|namn)$/, "full_name"],
+  [/^e ?mail\b|^(e ?mail adresse|e ?mail adres|correo electr nico|direcci n de correo electr nico|adresse e ?mail|adresse (de )?courriel|e ?post(adress)?)$/, "email"],
   // R9: SmartRecruiters (and others) ask for the address twice; the second box takes the same confirmed address.
   [/^(confirm|re ?enter|retype|repeat|verify) (your )?e ?mail( address)?$/, "email"],
-  [/^(phone|mobile|telephone|cell)\b/, "phone"],
+  [/^(phone|mobile|telephone|cell)\b|^(telefon(nummer)?|telefoonnummer|tel fono|t l phone|handynummer|mobilnummer)$/, "phone"],
+  [/^(country|country of residence|land|pays|pa s)$/, "country"],
   [/^(current )?(company|employer|organi[sz]ation)\b/, "current_company"],
   [/^(current )?(job )?title\b/, "current_title"],
   [/linkedin/, "linkedin_url"], [/github/, "github_url"],
@@ -255,7 +258,40 @@ async function fillText(page, d, value) {
   if (d.inputType === "number" && !Number.isFinite(Number(String(value).trim()))) return { ok: false, reason: "answer_not_a_number" };
   await page.locator(sel(d.q)).first().fill(String(value));
   const s = await stateOf(page, d);
-  return String(s.text).trim() === String(value).trim() ? { ok: true } : { ok: false, reason: "readback_mismatch" };
+  if (String(s.text).trim() === String(value).trim()) return { ok: true };
+  if (isPhone(d, value) && await phoneSame(page, d, value, s.text)) return { ok: true };
+  return { ok: false, reason: "readback_mismatch" };
+}
+// A phone box that reformats what is typed (Workable, intl-tel-input: "+1 312 555 0100" reads back as "(312) 555-0100" beside a
+// "+1" country picker; strict benchmark run 42707036468, 12 Workable forms) holds the same number when its digits are the
+// approved digits, or the approved digits less a dial code that the field's own country picker shows. Any other digit is a
+// mismatch: nothing but the approved number is ever accepted.
+const digitsOf = (v) => String(v || "").replace(/\D/g, "");
+const isPhone = (d, value) => (d.inputType === "tel" || /^(phone|mobile|telephone|cell|telefon|telefoon|handy|mobil)/.test(norm(d.label)))
+  && /^\+?[\d\s().\-\/]{6,}$/.test(String(value).trim());
+async function phoneSame(page, d, value, text) {
+  const want = digitsOf(value), got = digitsOf(text);
+  if (!got) return false;
+  if (got === want) return true;
+  if (!String(value).trim().startsWith("+") || got.length >= want.length || !want.endsWith(got)) return false;
+  const dial = want.slice(0, want.length - got.length);
+  if (dial.length > 3) return false;
+  const shown = await page.evaluate(([q]) => {
+    const el = document.querySelector(`[data-upmore-q="${q}"]`);
+    if (!el) return "";
+    // The phone field's own shell: never one that holds another question (its country picker is not one of ours).
+    let box = el.closest(".iti, [class*='phone' i]");
+    if (!box || box.querySelectorAll("[data-upmore-q]").length > 1) box = el.parentElement;
+    const bits = [];
+    for (const n of (box ? [box, ...box.querySelectorAll("*")] : [])) {
+      if (n === el || n.tagName === "OPTION") continue;
+      if (n.matches && n.matches("ul, [role=listbox], .iti__country-list, .iti__dropdown-content")) continue;
+      if (n.closest && n.closest("ul, [role=listbox], .iti__country-list, .iti__dropdown-content")) continue;
+      bits.push(n.getAttribute("aria-label") || "", n.getAttribute("title") || "", n.children.length ? "" : n.textContent || "", n.tagName === "SELECT" ? (n.options[n.selectedIndex] || {}).textContent || "" : "");
+    }
+    return bits.join(" | ");
+  }, [d.q]).catch(() => "");
+  return new RegExp(`\\+\\s?${dial}(?!\\d)`).test(shown);
 }
 async function fillSelect(page, d, value) {
   const m = matchOption(d.options.map((o) => o.label), value);
@@ -290,8 +326,32 @@ async function fillCheckbox(page, d) {
   return (await stateOf(page, d)).filled ? { ok: true } : { ok: false, reason: "readback_mismatch" };
 }
 async function fillFile(page, d, path) {
+  // The upload's own block (the input's nearest ancestor that holds no other question), marked before the file is set: a board
+  // that swaps the input for a chip naming the file once it has it (Greenhouse's "Attach": the input is replaced, strict
+  // benchmark run 42712892939) is read back from that chip. Only the resume's own file name, in that block, counts.
+  await page.evaluate(([q]) => {
+    const el = document.querySelector(`[data-upmore-q="${q}"]`);
+    let box = el && el.parentElement;
+    for (let i = 0; box && i < 3; i++) {
+      const up = box.parentElement;
+      if (!up || up.querySelectorAll("[data-upmore-q]").length > 1 || up.querySelectorAll("input[type=file]").length > 1) break;
+      box = up;
+    }
+    if (box) box.setAttribute("data-upmore-fbox", q);
+  }, [d.q]).catch(() => {});
   await page.locator(sel(d.q)).first().setInputFiles(path);
-  return (await stateOf(page, d)).filled ? { ok: true } : { ok: false, reason: "upload_not_accepted" };
+  const name = require("node:path").basename(path);
+  for (let i = 0; i < 8; i++) {
+    const s = await stateOf(page, d);
+    if (s.filled) return { ok: true };
+    const chip = await page.evaluate(([q, n]) => {
+      const b = document.querySelector(`[data-upmore-fbox="${q}"]`);
+      return !!b && (b.innerText || "").includes(n);
+    }, [d.q, name]).catch(() => false);
+    if (chip) return { ok: true };
+    await page.waitForTimeout(200);
+  }
+  return { ok: false, reason: "upload_not_accepted" };
 }
 async function fillCombo(page, d, value, pick) {
   const input = page.locator(sel(d.q)).first();
@@ -380,7 +440,7 @@ async function fillForm(page, ctx0) {
       let r;
       try { r = await doFill(page, d, dec, ctx); } catch (e) { r = { ok: false, reason: "fill_error", detail: String(e.message).split("\n")[0].slice(0, 120) }; }
       if (r.ok) {
-        entry.status = "filled"; filled.push({ label: d.label, source: dec.source, kind: d.kind });
+        entry.status = "filled"; filled.push({ label: d.label, source: dec.source, kind: d.kind, value: dec.pick === "decline" ? "decline" : dec.source === "resume" ? require("node:path").basename(ctx.resumePath) : dec.value, d });
         // What a choice question now holds, in the form's own option words (never a typed answer's text).
         if (["select", "radio", "checkgroup", "buttons", "combobox"].includes(d.kind)) {
           const st = await stateOf(page, d);
@@ -411,4 +471,19 @@ async function fillForm(page, ctx0) {
   return { map, filled, needsUser, failed, invalid };
 }
 
-module.exports = { fillForm, matchOption, factValue, answerFor, decide, labelCounts, norm, EXTRACT, STATE, DECLINE };
+// What each filled question holds right now, in the page's own words (a choice: its option labels), for a last look before the
+// click. Read only.
+async function heldNow(page, filled) {
+  const ds = filled.map((f) => f.d);
+  const st = ds.length ? await page.evaluate(STATE, ds) : [];
+  // An upload whose input the board swapped for a chip (fillFile) is read from that chip: the resume's own name, or nothing.
+  const chips = await page.evaluate((qs) => qs.map(([q, n]) => { const b = document.querySelector(`[data-upmore-fbox="${q}"]`); return !!b && (b.innerText || "").includes(n); }),
+    filled.map((f) => [f.d.q, String(f.value)])).catch(() => []);
+  return filled.map((f, i) => {
+    const s = { ...(st[i] || {}) };
+    if (f.kind === "file" && !s.text && chips[i]) s.text = String(f.value);
+    const held = s.picked ? s.picked.map((o) => ((f.d.options || [])[Number(o)] || {}).label) : s.text;
+    return { label: f.label, kind: f.kind, source: f.source, approved: f.value, held: held === undefined ? null : held, gone: !!s.gone };
+  });
+}
+module.exports = { heldNow, fillForm, matchOption, factValue, answerFor, decide, labelCounts, norm, EXTRACT, STATE, DECLINE };

@@ -1663,7 +1663,7 @@
     "us_person"
   ]);
   var RELATIVE_PLACE = /\b(country|location)\b.{0,60}\b(this|the) (job|role|position|opportunity|vacancy)\b|\b(country|location)\b.{0,40}\b(you are|you're|you have been|you've been|are you) apply|\b(country|location) (in which|to which|for which|where) you (are )?apply|\bstated location of this role\b|\bin this country\b/i;
-  var BIRTH_DATE = /\bdate of birth\b|\bbirth ?date\b|\bdob\b|\bdate de naissance\b|\bfecha de nacimiento\b|\bgeburtsdatum\b/i;
+  var BIRTH_DATE = /\b(?:date of birth|birth ?date|day of birth|dob|d\.o\.b\.?|date de naissance|fecha de nacimiento|geburtsdatum)\b/i;
   var DECLINE_ANSWER = /^\s*(i\s*)?(would\s+|'d\s+)?(prefer not to (say|answer|disclose|specify|identify|self[- ]identify)|rather not (say|answer)|decline( to (answer|state|disclose|specify|self[- ]identify))?|do not wish to (answer|disclose|self[- ]identify)|don'?t wish to (answer|disclose)|choose not to (answer|disclose|identify|self[- ]identify)|do not want to answer|don'?t want to answer)\s*[.!]?\s*$/i;
   var DECLINE_OPTION = /\bdecline\b|\bprefer not\b|\bdo(?: not|n'?t) wish\b|\bchoose not\b|\bnot to (?:answer|disclose|say|identify|specify|self[- ]identify)\b|\bi do(?: not|n'?t) want to (?:answer|disclose|identify|self)/i;
   function declineOption(answer, options) {
@@ -1676,7 +1676,7 @@
     const words = norm(q.label);
     const job = `job:${h16(`${jobId}
 ${words}`)}`, wording = `label:${h16(words)}`;
-    if (BIRTH_DATE.test(q.label)) return job;
+    if (BIRTH_DATE.test(String(q.label ?? ""))) return job;
     if (m.kind === "fact") {
       if (m.fact === "eeo") return job;
       if (o.here) return job;

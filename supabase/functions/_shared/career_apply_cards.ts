@@ -30,6 +30,9 @@ export interface Prepared {
   card_lines: string[];
   created_at?: string;
   resume_sha256?: string | null; // the payload's resume hash, when the store reads it (OWNER RULE 2026-10-26)
+  // Architect ruling on #674 (a): the role, read from the posting row the application was prepared for (career_postings, by the
+  // payload's job id), when its employer is this application's. Shown beside the employer; null when it cannot be read.
+  role?: string | null;
 }
 export interface Card {
   id: string;
@@ -50,6 +53,8 @@ export interface CardStore {
   // card closes the person's other open cards, so an open and an answer in two calls let two approvals at once close each
   // other's card and both approve nothing. Throws card_changed (a hash differs) or invalid card (no longer open to approve).
   confirm?(userId: string, ids: string[], hashes: string[]): Promise<{ card: Card; results: CardResult[] }>;
+  // Architect ruling on #674 (c): the questions still open for this person (career_apply_questions), named on the card.
+  openQuestions?(userId: string): Promise<{ label: string; company: string | null }[]>;
   latestOpen(userId: string): Promise<Card | null>;
   // R9-G2: the open card when it was pushed in pages (career_apply_cards.pages), else null.
   latestOpenPaged?(userId: string): Promise<Card | null>;
@@ -292,8 +297,25 @@ export function isApproval(r: CardReply | null): boolean {
 
 const one = (p: Prepared, n: number) => {
   const [head, ...rest] = p.card_lines.map((l) => String(l).replace(/\s+/g, " ").trim()).filter(Boolean);
-  return [`${n}. ${head ?? p.company}`, ...rest.map((l) => `   ${l}`)].join("\n");
+  const first = head ?? p.company, role = String(p.role ?? "").replace(/\s+/g, " ").trim().slice(0, 160);
+  // The card line stays whole (the database checks the card carries every line); the role is said after it.
+  return [`${n}. ${role && first === p.company ? `${first} — ${role}` : first}`, ...rest.map((l) => `   ${l}`)].join("\n");
 };
+// Architect ruling on #674 (c): "Needs you: ..." names each question still open, in the form's words, with its employer, so
+// asking for one answer never hides the work waiting on it (C.24 Needs input; RESPONSE-RULES E4). At most 5, then a count.
+export function needsLine(open: { label: string; company: string | null }[]): string | null {
+  const seen = new Set<string>(), items: string[] = [];
+  for (const q of open) {
+    const label = String(q.label ?? "").replace(/\s+/g, " ").trim().slice(0, 160), co = String(q.company ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
+    const item = co ? `${label} (${co})` : label;
+    if (!label || seen.has(item)) continue;
+    seen.add(item);
+    items.push(item);
+  }
+  if (!items.length) return null;
+  const shown = items.slice(0, 5), more = items.length - shown.length;
+  return `Needs you before more can be prepared: ${shown.join("; ")}${more > 0 ? `; and ${more} more` : ""}.`;
+}
 const HEAD = (count: number) =>
   `${count === 1 ? "1 application is" : `${count} applications are`} ready. Every answer below goes exactly as shown.`;
 const FOOT = (count: number) =>
@@ -303,21 +325,21 @@ const FOOT = (count: number) =>
 
 // The pushed card (one text): how many of the pending applications fit, at most 8, under 1,600 characters with two or
 // more, and the first always (alone up to 4,000; an answer is never cut). The chat's own "show" uses batchFor.
-export function cardFor(pending: Prepared[]): { take: Prepared[]; text: string } | { tooLong: Prepared } | null {
+export function cardFor(pending: Prepared[], needs: string | null = null): { take: Prepared[]; text: string } | { tooLong: Prepared } | null {
   if (!pending.length) return null;
   const take: Prepared[] = [];
   for (const p of pending.slice(0, MAX_PER_CARD)) {
     const next = [...take, p];
-    const text = render(next);
+    const text = render(next, needs);
     if (take.length && text.length > CARD_CHAR_BUDGET) break;
     take.push(p);
   }
-  const text = render(take);
+  const text = render(take, needs);
   if (text.length > CARD_HARD_LIMIT) return { tooLong: take[0] };
   return { take, text };
 }
-function render(list: Prepared[]) {
-  return [HEAD(list.length), ...list.map((p, i) => one(p, i + 1)), FOOT(list.length)].join("\n\n");
+function render(list: Prepared[], needs: string | null = null) {
+  return [HEAD(list.length), ...list.map((p, i) => one(p, i + 1)), ...(needs ? [needs] : []), FOOT(list.length)].join("\n\n");
 }
 
 // D-MS-1 / D-MS-2: the whole batch on one card, every line of every application verbatim, numbered 1..N, paged into
@@ -337,7 +359,7 @@ export interface Batch {
   more: number; // ready but not on this card (only while the database's bound applies)
   skipped: Prepared[]; // too long for a text: left for the app
 }
-export function batchFor(pending: Prepared[], o: { max?: number } = {}): Batch | { tooLong: Prepared } | null {
+export function batchFor(pending: Prepared[], o: { max?: number; needs?: string | null } = {}): Batch | { tooLong: Prepared } | null {
   if (!pending.length) return null;
   const roomFor = PAGE_CHARS - BATCH_HEAD(9999, 99).length - 2;
   const fits = pending.filter((p) => one(p, 9999).length <= roomFor);
@@ -352,6 +374,7 @@ export function batchFor(pending: Prepared[], o: { max?: number } = {}): Batch |
       ...(skipped.length
         ? [`Too long to show in a text, so not on this card: ${skipped.map((p) => p.company).join("; ")}. Open ${skipped.length === 1 ? "it" : "them"} in the app.`]
         : []),
+      ...(o.needs ? [o.needs] : []),
       BATCH_FOOT(k),
     ].join("\n\n");
     const blocks = [BATCH_HEAD(k, pagesGuess), ...take.map((p, i) => one(p, i + 1)), tail];
@@ -515,7 +538,8 @@ export async function cardTurn(
     }
     // OWNER RULE (2026-10-26): only applications that send a resume are ever on a card (sendsResume, fail closed).
     const pending = (await o.store.pending(o.userId)).filter(sendsResume);
-    let c = batchFor(pending);
+    const needs = o.store.openQuestions ? needsLine(await o.store.openQuestions(o.userId).catch(() => [])) : null;
+    let c = batchFor(pending, { needs });
     // E-39 only reviews a card that exists: with none prepared, "apply to #9" / "submit job 2" is another handler's turn
     // (the job list's own numbering, or the apply queue), never "nothing is ready".
     if (!c && lead) return null;
@@ -548,7 +572,7 @@ export async function cardTurn(
       // Before builder A's D-MS-2 migration the database refuses a card of more than 8: the first 8 are shown and the
       // reply says how many more wait. Any other refusal is the turn's error, as before.
       if (!(c.take.length > DB_CARD_MAX_BEFORE_DMS2 && /invalid card/.test(String((e as Error)?.message ?? e)))) throw e;
-      const smaller = batchFor(pending, { max: DB_CARD_MAX_BEFORE_DMS2 });
+      const smaller = batchFor(pending, { max: DB_CARD_MAX_BEFORE_DMS2, needs });
       if (!smaller || "tooLong" in smaller) throw e;
       c = smaller;
       opened = await o.store.open(o.userId, c.take.map((p) => p.id));
@@ -738,15 +762,20 @@ export function supabaseCardStore(admin: any): CardStore {
       // D-MS-2 and NO LIMITS: the whole batch, read in pages (PostgREST returns at most its max-rows per request), never cut.
       const out: Prepared[] = [];
       for (let from = 0; ; from += PENDING_PAGE) {
-      const rows: Prepared[] = must(
-        await admin.from("career_apply_prepared").select("id,company,card_lines,created_at,resume_sha256:payload->>resume_sha256").eq("user_id", userId)
+      const rows: (Prepared & { job_id?: string | null })[] = must(
+        await admin.from("career_apply_prepared").select("id,company,card_lines,created_at,resume_sha256:payload->>resume_sha256,job_id:payload->>job_id").eq("user_id", userId)
           .in("state", ["ready", "shown"]).order("created_at", { ascending: true }).order("id", { ascending: true })
           .range(from, from + PENDING_PAGE - 1),
         "read prepared applications",
       ) ?? [];
-      out.push(...rows);
+      out.push(...await withRoles(admin, userId, rows));
       if (rows.length < PENDING_PAGE) return out;
     }
+    },
+    async openQuestions(userId) {
+      const rows = must(await admin.from("career_apply_questions").select("label,company,created_at").eq("user_id", userId).eq("state", "open")
+        .order("created_at", { ascending: true }).limit(50), "read open questions") ?? [];
+      return rows.map((r: any) => ({ label: String(r.label ?? ""), company: r.company ? String(r.company) : null }));
     },
     async open(userId, ids) {
       return must(await admin.rpc("career_apply_card_open_as", { p_user: userId, p_ids: ids }), "open a card");
@@ -837,4 +866,30 @@ export function supabaseCardStore(admin: any): CardStore {
       return typeof row.key === "string" && row.key.startsWith("card:") ? row.key.slice(5) : null;
     },
   };
+}
+
+// Architect ruling on #674 (a): each prepared application's role, from the posting row its payload's job id points to; when
+// the engine named the application otherwise (a page outside the boards), the posting the preparation was recorded against
+// (career_apply_prepare_attempts.prepared_id). Only a posting of the same employer gives the role; anything unreadable gives
+// none, and the card is shown as before. Never fails the card.
+// deno-lint-ignore no-explicit-any
+async function withRoles(admin: any, userId: string, rows: (Prepared & { job_id?: string | null })[]): Promise<Prepared[]> {
+  const strip = ({ job_id: _j, ...p }: Prepared & { job_id?: string | null }): Prepared => p;
+  if (!rows.length) return rows.map(strip);
+  try {
+    const norm = (s: unknown) => String(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+    const byPrepared = new Map<string, string>();
+    for (const r of rows) if (r.job_id) byPrepared.set(r.id, String(r.job_id));
+    const att = await admin.from("career_apply_prepare_attempts").select("prepared_id,posting_job_id").eq("user_id", userId).in("prepared_id", rows.map((r) => r.id));
+    const viaAttempt = new Map<string, string>((att?.data ?? []).map((a: any) => [String(a.prepared_id), String(a.posting_job_id)]));
+    const jobs = [...new Set([...byPrepared.values(), ...viaAttempt.values()])].slice(0, 500);
+    const got = jobs.length ? await admin.from("career_postings").select("job_id,title,company").in("job_id", jobs) : { data: [] };
+    const posting = new Map<string, { title: string; company: string }>((got?.data ?? []).map((p: any) => [String(p.job_id), { title: String(p.title ?? ""), company: String(p.company ?? "") }]));
+    return rows.map((r) => {
+      const hit = [byPrepared.get(r.id), viaAttempt.get(r.id)].map((j) => (j ? posting.get(j) : undefined)).find((p) => p && p.title && norm(p.company) === norm(r.company));
+      return { ...strip(r), role: hit ? hit.title : null };
+    });
+  } catch {
+    return rows.map(strip);
+  }
 }

@@ -13,7 +13,6 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { fillForm } = require("./ats-fill.cjs");
 
-const BOT_RE = /verify\s+(?:that\s+)?you(?:\s+are|(?:'|’|&#0*39;|&rsquo;|&apos;)re)\s+(?:a\s+)?(?:human|not a robot)|captcha|turnstile|challenges\.cloudflare\.com|are you a robot|not a robot/i;
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 const sha256 = (b) => crypto.createHash("sha256").update(b).digest("hex");
 
@@ -33,7 +32,7 @@ async function dryRunForm({ browser, id, ats, url, facts = {}, answers = {}, res
   try {
     const resp = await page.goto(url, { waitUntil: "domcontentloaded" });
     if (!resp || resp.status() >= 400) { log.reason = `page_load_${resp ? resp.status() : "none"}`; return finish(log, outDir, t0); }
-    log.bot_check = BOT_RE.test(await page.content()) || page.frames().some((f) => BOT_RE.test(f.url()));
+    { const shown = await require("./parallel-apply.cjs").botCheck(page); log.bot_check = !!shown; if (shown) log.bot_check_shown = shown; } // the runner's own shown-check test
     if (await page.$('input[type="password"]')) { log.outcome = "needs_you"; log.reason = "login_required"; return finish(log, outDir, t0); }
     const r = await fillForm(page, { ats, facts, answers, resumePath });
     log.field_map = r.map; log.needs_you = r.needsUser; log.failed_fields = r.failed; log.invalid_after_fill = r.invalid;

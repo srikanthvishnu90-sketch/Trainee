@@ -1366,6 +1366,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       } else if (offerAns) { // FEATURE 12: the offer turn's answer; the counter's card rides the reply's meta.
         out = { reply: offerAns.reply, intent: offerAns.intent, resultStatus: offerAns.status, contained: false, handler: "offer", parts: offerAns.parts };
         if (offerAns.card) agentMeta = { offer_card: offerAns.card };
+        if (offerAns.comparison) agentMeta = { ...(agentMeta || {}), offer_comparison: offerAns.comparison }; // LOOP 13: the F-15 File's data
       } else if (outreachStatus) {
         out = { reply: outreachStatus.reply, intent: outreachStatus.intent, resultStatus: outreachStatus.status, contained: false, handler: "outreach_status" };
       } else if (!careerTask && !careerBatch && !researchReplyOn(Deno.env) && researchOverAction(message) && !host.isHostControlled(message, ctx)) {

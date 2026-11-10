@@ -655,6 +655,7 @@
     "tests/architect/wo-l-signin-walls.test.ts": 3,
     "tests/architect/h2h-fixes-20261110.test.ts": 12,
     "tests/architect/loop-09-memory-apply.test.ts": 38,
-    "tests/architect/loop-09-memory.test.ts": 12
+    "tests/architect/loop-09-memory.test.ts": 12,
+    "tests/architect/loop-13-offers.test.ts": 14
   }
 }

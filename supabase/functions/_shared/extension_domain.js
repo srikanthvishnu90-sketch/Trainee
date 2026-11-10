@@ -404,7 +404,11 @@ const CareerProfile = (() => {
       if (head) {
         flush();
         lastWasMore = false;
-        if (head.skip) { section = null; if (!unread.includes(head.label)) unread.push(head.label); } else section = head.kind;
+        // D-052 (owner, PR #742): an "Interests" or "Hobbies" heading holds the person's interests. Each item is a draft fact
+        // ("Interest: <name>") awaiting the person's yes like every other resume fact, printed on one "Interests:" line once
+        // confirmed; it is no longer an unread section. Summary, Objective and Relevant Coursework stay unread.
+        if (head.skip && /^(?:(?:personal |other )?interests|hobbies(?: (?:&|and) interests)?|interests (?:&|and) hobbies)$/i.test(head.label.trim())) section = "interest";
+        else if (head.skip) { section = null; if (!unread.includes(head.label)) unread.push(head.label); } else section = head.kind;
         continue;
       }
       // R10 (fix 3): a labelled line ("Skills: Python, SQL", "Certifications: ...", "Interests: Golf"), under its own heading,
@@ -423,6 +427,12 @@ const CareerProfile = (() => {
         continue;
       }
       if (!section) continue; // header/contact block (or a section that holds no entries) is not a fact
+      if (section === "interest") {
+        for (const name of line.replace(/^[-•*]\s*/, "").split(/[,;•|·]/).map((x) => x.trim()).filter(Boolean)) {
+          drafts.push({ kind: "other", section: "interests", name, title: name, text: `Interest: ${name}`, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
+        }
+        continue;
+      }
       if (section === "skill") {
         for (const name of line.split(/[,;•|·]/).map((x) => x.trim()).filter(Boolean)) {
           drafts.push({ kind: "skill", name, title: name, text: `Skill: ${name}`, skills: [name], evidence: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });

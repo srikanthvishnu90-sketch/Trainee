@@ -1,6 +1,6 @@
 // FILES S3 (item 6; task f-s3): the F-04 Search plan and F-07 Materials studio Files SERVED by the real File server
 // (trainee-file/handler.ts handleFile, the real file service, a real signed-in phone session) from their real records
-// (career_search_plans, career_material_versions: file_family_records.ts; the in-memory store keeps the database's rules, which
+// (career_search_plans, career_material_versions: file_family_records_materials.ts; the in-memory store keeps the database's rules, which
 // tests/db/career_file_plans_materials.test.sql checks on Postgres).
 //
 // The bar: both live pages loaded in Chromium at 390 x 844 through that server, every control pressed on a fresh world:
@@ -14,7 +14,7 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { createFileService, memoryFileStore } from "../../supabase/functions/_shared/file_service.ts";
-import { memoryPlanMaterialStore, planMaterialRecords } from "../../supabase/functions/_shared/file_family_records.ts";
+import { memoryPlanMaterialStore, planMaterialRecords } from "../../supabase/functions/_shared/file_family_records_materials.ts";
 import { handleFile, type FileDeps, type FileStore } from "../../supabase/functions/trainee-file/handler.ts";
 import { phonePost, sha256, signedIn } from "./file-session-fakes.ts";
 import { CI, playwright } from "./r10-files-check.ts";
@@ -214,4 +214,39 @@ Deno.test("FILES S3: a File with nothing on record is the C.24 empty state; a pa
   const before = await w.rows();
   const r = await w.post(w.page("F-07").sid, { action: "approvedoc", doc: "operations-resume", v: "3", role: "job-r07", h: "0".repeat(64) }, t04);
   assert.ok(r.status >= 400); assert.equal(await w.rows(), before);
+});
+
+// S0 amendment (FamilyRecords.get, spec agreed with Agent 2): the download is drawn only on a live File, and a GET for another
+// person's document gives no bytes.
+Deno.test("FILES S3: the document download is drawn only on a live File; another person's document is a 404 with no bytes", async () => {
+  const w = await world(), p = w.page("F-07");
+  // another person, signed in, with their own live F-07 File naming the same document key: none of U's bytes
+  const B = "55555555-5555-4555-8555-555555555555", A = signedIn(), store = memoryFileStore();
+  const files = createFileService({ store, env: { get: (k) => ENV[k] }, now: () => NOW });
+  const deps: FileDeps = { ...A.deps, store: stub(), now: () => NOW, env: { get: (k) => ENV[k] }, cards: {} as never, tap: {} as never, files, familyRecords: planMaterialRecords(w.recs, () => NOW) };
+  const theirs = await files.createFamily!(B, "F-07", "Operations resume", null, { ref: { doc: "operations-resume" } });
+  assert.ok(theirs.ok);
+  if (theirs.ok) {
+    const sid = await A.tok(B, theirs.id, NOW);
+    const r = await handleFile(new Request(`${BASE}?download=operations-resume&v=3`, { headers: { cookie: `tf_s=${sid}` } }), deps);
+    const body = new Uint8Array(await r.arrayBuffer());
+    assert.equal(r.status, 404, "another person's document was downloadable");
+    assert.ok(!new TextDecoder().decode(body).includes("%PDF"), "another person's bytes were served");
+    assert.doesNotMatch(r.headers.get("content-disposition") ?? "", /attachment/);
+  }
+  // a stored view (not live) with the same materials: the download is this File's export, never the ?download= route
+  const view = { rid: "R-07", docTitle: "Operations resume - v3", base: "master v6", draft: "v3", updatedAt: null, changes: [], format: null, usedBy: "R-07 only",
+    download: { label: "Download v3", effect: "download", href: "?download=operations-resume&v=3" } };
+  const stored = await files.createFamily!(B, "F-07", "Stored", view);
+  assert.ok(stored.ok);
+  if (stored.ok) {
+    const sid = await A.tok(B, stored.id, NOW);
+    const html = await (await handleFile(new Request(BASE, { headers: { cookie: `tf_s=${sid}` } }), deps)).text();
+    assert.doesNotMatch(html, /href="\?download=/, "a stored view drew the real-file download");
+    assert.match(html, /href="\?format=json"[^>]*download/, "a stored view's download is the File's export");
+    const g = await handleFile(new Request(`${BASE}?download=operations-resume&v=3`, { headers: { cookie: `tf_s=${sid}` } }), deps);
+    assert.doesNotMatch(g.headers.get("content-disposition") ?? "", /operations-resume/, "a stored view answered the real-file GET");
+  }
+  // and on the live page it is drawn
+  assert.match(await (await w.serve(BASE, p.sid)).text(), /href="\?download=operations-resume&amp;v=3"/);
 });

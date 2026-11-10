@@ -37,8 +37,8 @@ export const SERVED_POSTS: Record<ServedFamily, ReadonlySet<string>> = {
   "F-01": new Set(),
   "F-02": new Set(),
   "F-03": new Set(),
-  "F-04": new Set(["approveplan"]), // S3: file_family_records.ts
-  "F-07": new Set(["approvedoc"]), // S3: file_family_records.ts
+  "F-04": new Set(["approveplan"]), // S3: file_family_records_materials.ts
+  "F-07": new Set(["approvedoc"]), // S3: file_family_records_materials.ts
   "F-08": new Set(),
   "F-09": new Set(),
   "F-12": new Set(),

@@ -1,5 +1,5 @@
 // Item 6 S3: the F-04 Search plan and F-07 Materials studio Files drawn from their real records (career_search_plans,
-// career_material_versions; 20261110120000, FILE-RECORDS.md 1 and 5), and the two approvals they serve.
+// career_material_versions; 20261110160000, FILE-RECORDS.md 1 and 5), and the two approvals they serve.
 //
 //   approveplan  approves the exact plan version shown, bound to its payload hash (fields v, h). Approval authorizes searching and
 //                shortlisting only: nothing here can queue, prepare or send an application.

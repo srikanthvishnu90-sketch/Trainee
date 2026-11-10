@@ -102,6 +102,7 @@ async function strictPosting(browser, item, o) {
   const stop = async (phase, audit) => {
     if (phase !== "submitting") return;
     const why = falsePass(audit, p.facts);
+    if (why) r.audit = audit ? { submit: audit.submit, password_field: audit.password_field, fields: (audit.fields || []).map((f) => ({ label: String(f.label || "").slice(0, 40), kind: f.kind, source: f.source, held: f.held == null ? null : String(f.held).slice(0, 40), gone: f.gone })) } : null;
     throw new NeedsUser(why ? `strict_false_pass:${why}` : "strict_reached_submit", audit && audit.submit);
   };
   const out = await applyOne(browser, p, { allowHosts, retries: 0, diag: true, audit: true, stepTimeoutMs: 20000, requestGate: gate, initScript: lib.SUBMIT_TRAP, onPhase: stop }).catch((e) => ({ status: "error", reason: `driver_error: ${String(e && e.message).split("\n")[0].slice(0, 140)}` }));
@@ -157,6 +158,7 @@ async function main() {
   const conc = Math.max(1, Number(arg("concurrency", 6)));
   await Promise.all(Array.from({ length: conc }, async () => { while (next < items.length) { const i = next++; rows[i] = await strictPosting(browser, items[i], o);
     const x = rows[i]; console.log(["STRICT", x.provider, x.result, x.reason, x.field || x.error || "", `blocked=${x.sent_blocked}`, `gql=${x.graphql_reads}`, `${(x.ms / 1000).toFixed(1)}s`, x.url].join(" | "));
+    if (x.audit) console.log("AUDIT | " + x.provider + " | " + x.url + " | " + JSON.stringify(x.audit));
     if (x.result !== "pass" && (x.diag || x.check)) console.log("DIAG | " + x.provider + " | " + JSON.stringify({ check: x.check, ...x.diag }));
     // Why each field was handed back, and the options a choice offered (the posting's own words), for the record.
     if (x.result !== "pass" && x.needs) console.log("NEEDS | " + x.provider + " | " + x.url + " | " + JSON.stringify(x.needs.slice(0, 6).map((n) => ({ label: String(n.label || "").slice(0, 60), reason: n.reason, ...(n.options ? { options: n.options.slice(0, 12).map((o) => String(o).slice(0, 40)) } : {}) })))); } }));

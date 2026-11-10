@@ -87,6 +87,17 @@ export async function samePageToken(given: string, session: string, secret: stri
   const want = await connectPageToken(session, secret);
   return !!want && same(given, want);
 }
+// x-audit (2026-11-10, architect amendment, security: link scanners): the open page a GET of the link draws, before any
+// cookie exists. Its one button posts the link with this token, bound to that one link's id; a different label from
+// connectPageToken, so the two can never stand in for each other.
+export async function connectOpenToken(jti: string, secret: string | undefined): Promise<string | null> {
+  if (!secret || secret.length < SECRET_MIN || !/^[0-9a-f]{16}$/.test(jti)) return null;
+  return `co1.${await sign(secret, `connect-open|${jti}`)}`;
+}
+export async function sameOpenToken(given: string, jti: string, secret: string | undefined): Promise<boolean> {
+  const want = await connectOpenToken(jti, secret);
+  return !!want && same(given, want);
+}
 // A Mini App session has no cookie: its forms carry this token, which names the account and the Telegram user and opens nothing
 // without Telegram's fresh signed data for that same user on the same post (the page's script adds it to every post).
 export interface MiniClaims { u: string; w: string; tg: string; e: number }

@@ -142,7 +142,8 @@ Deno.test({
         const p = await w.addPerson(ids[2], 2);
         const r = await pause(p);
         const lines = r.reply.split("\n");
-        eq(lines[0], "Paused your account: the pause is saved and I read it back.");
+        // Architect amendment (coordinator ruling 2026-11-10, r-audit #706): the outcome first; still says paused and read back.
+        eq(lines[0], "Done: your account is paused, and I read the pause back.");
         eq(lines[1], `While it is on, nothing new starts, and these refuse to send: ${PAUSE_HOLDS.join("; ")}.`);
         eq(lines[2], `Not covered by the pause today: ${PAUSE_GAPS.join("; ")}.`);
         for (const re of FALSE_CLAIMS) assert(!re.test(r.reply), r.reply);
@@ -255,7 +256,7 @@ Deno.test({
         try {
           const r = await w.web(p, "pause everything");
           assert(/^I could not confirm the pause: the account record does not show the pause\. Treat your account as NOT paused/.test(r.reply), r.reply);
-          assert(!/Paused your account/.test(r.reply), r.reply);
+          assert(!/Paused your account|your account is paused/i.test(r.reply), r.reply);
           eq(await quiet(p), false);
           // What is stored is what was sent: the thread's message and the receipt a replay of this turn returns.
           eq(await w.sql(`select content from public.agent_messages where thread_id = ${q(p.web.thread!)} and role = 'assistant' order by id desc limit 1`), r.reply, "the thread shows the reply sent");

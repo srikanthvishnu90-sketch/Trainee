@@ -971,12 +971,12 @@ function nationalNumber(value: string, dial: string): string | null {
   const rest = digits.slice(code.length).replace(/^[\s)\-.]+/, "").trim();
   return /\d{4,}/.test(rest.replace(/[^\d]/g, "")) ? rest : null;
 }
-// D-053: the facts a salary-expectation question may be answered from: every confirmed fact but a salary expectation that
-// is an answer texted to an earlier employer's question (`text-answer:`, the answer library's rows).
-const EARLIER_ANSWER = /^text-answer:/;
+// D-053 (owner) and the architect's ruling on it (2026-11-10): the facts a salary-expectation question may be answered from
+// are every confirmed fact but the salary expectation itself. Any salary expectation on file (an answer texted to an earlier
+// employer's question, kept as the fact, or a confirmed profile fact) is an earlier answer: it is never filled, only
+// offered beside this posting's question for the person to confirm (career_apply_questions.ts salaryOffers).
 function withoutEarlierAnswers(answers: Record<string, Answer>): Record<string, Answer> {
-  const a = answers?.salary_expectation;
-  if (!a || !EARLIER_ANSWER.test(String(a.factId ?? ""))) return answers;
+  if (!answers?.salary_expectation) return answers;
   const { salary_expectation: _earlier, ...rest } = answers;
   return rest;
 }
@@ -1034,14 +1034,13 @@ export function planBatch(o: { userId: string; postings: PlanPosting[]; answers:
       const here = factStaysHere(f, p.location, o.answers);
       // a-sensitive: an answer saved under the bare wording (the oldest key) never travels for a date of birth or a
       // self-identification question: those are each application's own.
-      // D-053 (owner, 2026-11-10): a salary expectation is each application's own. An answer the person gave another
-      // employer never fills it: not one saved under the wording (the oldest key), not one texted to an earlier form's
-      // question (a `text-answer:` row, which before D-053 was kept as the fact `salary_expectation`). The answer given for
-      // this posting (answerKey `job:`) does; a salary expectation the person stated as their own confirmed fact, given for
-      // no posting, is not an answer to another employer and is used as before.
+      // D-053 (owner, 2026-11-10): a salary expectation is each application's own. Only the answer given for this posting
+      // (answerKey `job:`) fills it: never one saved under the wording (the oldest key), never a salary expectation kept as a
+      // fact, whether texted to an earlier form or confirmed in the profile (the architect's ruling: the hosted and extension
+      // paths do not differ). Salary history's wording key is closed too, as a date of birth's is (#731).
       const perApp = salaryExpectationAsked(f);
-      const facts = perApp ? withoutEarlierAnswers(o.answers) : o.answers;
-      const legacy: Answer | undefined = BIRTH_DATE.test(f.label) || perApp || key === "eeo" || mapQuestion(f).fact === "eeo" ? undefined : o.saved[normLabel(f.label)];
+      const facts = perApp || key === "salary_expectation" ? withoutEarlierAnswers(o.answers) : o.answers;
+      const legacy: Answer | undefined = BIRTH_DATE.test(f.label) || PAY_HISTORY.test(f.label) || perApp || key === "eeo" || mapQuestion(f).fact === "eeo" ? undefined : o.saved[normLabel(f.label)];
       const own: Answer | undefined = o.saved[answerKey(f, p.job_id, { haveFact: true, here })] ?? o.saved[answerKey(f, p.job_id, { here })] ?? legacy;
       const direct: Answer | undefined = o.saved[answerKey(f, p.job_id, { haveFact: true, here })] ?? o.saved[answerKey(f, p.job_id, { here })] ??
         (key !== "unknown" && key !== "eeo" && !followUp && !otherCountry(key, placeText(f), p.location, homeInUs(o.answers)) && !beyondFact(key, f) ? facts[key] : undefined) ?? legacy;

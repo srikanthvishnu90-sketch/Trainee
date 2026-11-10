@@ -2,8 +2,8 @@
 // to the posting it was given for, like a date of birth and a salary history (#731): it is never filled into another
 // employer's form from an earlier answer (an answer texted for another posting, an answer saved under the question's
 // wording, or one kept as the fact `salary_expectation` by the answer library before D-053); each application asks again.
-// Read here as written: the ruling is about ANSWERS given for a posting. A salary expectation the person stated as their
-// own confirmed fact (given for no posting) is not such an answer and fills as before (D-053/4 pins both sides). The earlier answer may only ever be shown
+// The architect's ruling on it (2026-11-10): a confirmed profile fact of salary expectation IS an earlier answer, and asked
+// too (D-053/4; tests/architect/d053b-hosted-salary.test.ts for the hosted path). The earlier answer may only ever be shown
 // as a suggestion the person confirms, labelled with its source (WO-122); nothing here fills one.
 // What does not change: salary history and date of birth stay per posting (#731); the current salary, the currency, the
 // years of experience, the GPA and the graduation date keep the keys they had.
@@ -114,11 +114,11 @@ Deno.test("D-053/4 no other earlier answer fills it either: not a wording-keyed 
     assertNode.equal(r.ready.length, 0, why);
     assertNode.deepStrictEqual(r.needs.map((n: any) => n.label), [label], why);
   }
-  // A salary expectation the person stated as their own confirmed fact (not an answer to any employer's question) is
-  // unchanged by D-053: it fills, citing that fact.
+  // architect amendment D-053 (owner, 2026-11-10): the architect's ruling on D-053 makes a confirmed profile fact of salary
+  // expectation an earlier answer too. Before: ready 1, the salary filled citing F-030. After: asked.
   const stated = planBatch({ userId: "u1", postings: [posting("gh:beta:2", "Beta")], answers: { ...facts, salary_expectation: { value: "$85,000", factId: "F-030" } }, saved: {}, log: [], now: T0 });
-  assertNode.equal(stated.ready.length, 1);
-  assertNode.deepStrictEqual(stated.ready[0].fields.find((f: any) => f.name === "salary")!.factId, "F-030");
+  assertNode.equal(stated.ready.length, 0);
+  assertNode.deepStrictEqual(stated.needs.map((n: any) => n.label), [label]);
   // Through the trust contract too: a library row stored under the old fact key (before D-053) reaches the planner as a
   // fact; it is still not used for the salary expectation, while the shared facts beside it still are.
   const m = trustedManifest({ owner: "u1", file: { user_id: "u1", answers: {} }, resume: null, rows: [

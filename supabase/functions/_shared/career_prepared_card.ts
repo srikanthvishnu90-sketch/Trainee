@@ -16,7 +16,7 @@
 //   WO-122 (D.4 6, never reused silently): a reused sensitive answer's line ends with reusedSourceSuffix, and no other does
 // What the server cannot check: which option code of a select stands for the answer shown (only the page knows); the
 // shown text is held to the person's own answer for that field, never free text.
-import { mapQuestion } from "./question_map.ts";
+import { mapQuestion, salaryExpectationAsked } from "./question_map.ts";
 
 export const CARD_MARK: Record<string, string> = { consent: "You agree: ", attestation: "Your statement: ", screen: "About this job: " };
 export const cardFieldPrefix = (label: string) => `${CARD_MARK[mapQuestion({ label }).kind] ?? ""}${label}: `;
@@ -36,7 +36,9 @@ function personTz(tz: unknown): string | null {
 // deno-lint-ignore no-explicit-any
 // `_postingJobId` is the posting the card is for; freshness is the field's own for_posting, judged against it at preparation.
 export function reusedSourceSuffix(field: any, _postingJobId: unknown, tz?: unknown): string {
-  if (!SENSITIVE.has(mapQuestion({ label: String(field?.label ?? "") }).fact)) return "";
+  // D-053: a salary expectation is labelled too (it is only ever offered from an earlier answer, never filled from one).
+  const label = String(field?.label ?? "");
+  if (!SENSITIVE.has(mapQuestion({ label }).fact) && !salaryExpectationAsked({ label })) return "";
   const id = String(field?.factId ?? ""), src = field?.source && typeof field.source === "object" ? field.source : {};
   if (!id || /^(approved-local-resume|essay-draft):/.test(id) || String(src.key ?? "").startsWith("job:")) return "";
   if (id.startsWith("text-answer:")) {

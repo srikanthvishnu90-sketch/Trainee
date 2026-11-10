@@ -48,7 +48,9 @@ Deno.test("WO-055/2 a job abroad: work rights and pay there are asked; a questio
   eq(fill("Are you authorized to work in your country of residence (Canada)?", "Toronto, Canada"), "ASKED");
   // Pay: a bare number in a box at a job abroad reads as that country's currency.
   eq(fill("What is your salary expectation?", "London", []), "ASKED", "Faculty AI");
-  eq(fill("What is your salary expectation?", "Chicago, IL", []), "95000");
+  // architect amendment D-053 (owner, 2026-11-10): a salary expectation is asked per application, never filled from the persona's fact.
+  // Before: "95000". After: "ASKED".
+  eq(fill("What is your salary expectation?", "Chicago, IL", []), "ASKED");
   eq(fill("What is your current compensation? (e.g. JPY XXX,XXX x 12months + performance bonus)", undefined, []), "ASKED", "Blue Bottle: another currency");
   eq(fill("What is your expected salary bracket?", undefined, []), "ASKED", "Carwow: a bracket is not a number");
   eq(fill("Variable Salary", undefined, []), "ASKED", "variable pay is not the expected salary");
@@ -61,9 +63,11 @@ Deno.test("WO-055/2 a job abroad: work rights and pay there are asked; a questio
 
 Deno.test("WO-055/3 the pay rules stop at the question asked: examples and notes around it are not the ask", () => {
   // FiscalNote (Washington, DC): the example list after the question names commission; the question is the expectation.
+  // architect amendment D-053 (owner, 2026-11-10): a salary expectation is asked per application, never filled from the persona's fact.
+  // Before: "95000 USD" and "95000". After: both "ASKED" (the otherCountry reading below is unchanged).
   eq(fill("Please share your compensation expectations (including currency) and please be as specific as possible. [Example: base salary, annual commission for relevant positions, etc]:",
-    "Washington, DC", [], { type: "textarea" }), "95000 USD");
-  eq(fill("What is your expected yearly salary? In USD", undefined, [], { type: "textarea" }), "95000", "Wing Assistant");
+    "Washington, DC", [], { type: "textarea" }), "ASKED");
+  eq(fill("What is your expected yearly salary? In USD", undefined, [], { type: "textarea" }), "ASKED", "Wing Assistant");
   eq(otherCountry("salary_expectation", "What are your base salary expectations for your next role? Please note that we utilize geographic pay structures based on local market rates, and our final offers factor in total compensation including equity, bonus structures", "Salt Lake City, UT"), false, "Filevine: a note about pay, not the ask");
 });
 

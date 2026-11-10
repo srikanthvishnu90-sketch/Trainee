@@ -81,6 +81,7 @@
     "tests/architect/d046-people-model-and-v203.test.ts": 0.1,
     "tests/architect/d046-sonnet-only-no-person-cap.test.ts": 0.2,
     "tests/architect/d053-salary-expectation.test.ts": 0.1,
+    "tests/architect/d053b-hosted-salary.test.ts": 0.1,
     "tests/architect/date-components.test.ts": 0.1,
     "tests/architect/delivery-throughput-pg.test.ts": 10,
     "tests/architect/delivery-throughput.test.ts": 0.3,

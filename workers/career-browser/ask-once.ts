@@ -9,7 +9,17 @@ import { decodeRowQuestionType } from "../../supabase/functions/_shared/row_answ
 // Ask once: the answers the person texted, as the engine's confirmed facts for the next preparation. A fact for every
 // employer goes under the fact's name (their own facts file wins when it states the same fact); an answer for one wording
 // or one posting goes under its key, which planBatch reads for that question only. Each is marked as a texted answer.
-export interface TextAnswer { id: string; key: string; kind: string; answer: string }
+// WO-122: `at` is when it was answered (answered_at, ISO 8601) and `job_ids` the postings its question was asked for
+// (career_apply_answers_own_v2; absent under v1). Both travel to the card's source label, never into the facts.
+export interface TextAnswer { id: string; key: string; kind: string; answer: string; at?: string; job_ids?: string[] }
+// deno-lint-ignore no-explicit-any
+export function textAnswerRows(data: any): TextAnswer[] {
+  return (Array.isArray(data) ? data : []).filter((r) => r && typeof r === "object").map((r) => ({
+    ...r,
+    ...(typeof r.answered_at === "string" && Number.isFinite(Date.parse(r.answered_at)) ? { at: r.answered_at } : {}),
+    ...(Array.isArray(r.job_ids) ? { job_ids: r.job_ids.map(String).slice(0, 200) } : {}),
+  }));
+}
 export function factsWithTextAnswers(facts: any, rows: TextAnswer[]) {
   const answers = { ...(facts?.answers || {}) }, saved = { ...(facts?.saved || {}) };
   for (const r of rows || []) {

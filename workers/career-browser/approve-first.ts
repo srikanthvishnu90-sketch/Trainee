@@ -8,7 +8,7 @@
 // (APPROVED_APPLICATION_CHANGED, nothing sent). The outcome goes back with career_apply_finish; an engine that gave no
 // result is recorded unknown_outcome and never retried.
 import { mapQuestion } from "../../supabase/functions/_shared/question_map.ts";
-import { CARD_MARK, resumeCardLine as sharedResumeCardLine } from "../../supabase/functions/_shared/career_prepared_card.ts";
+import { CARD_MARK, resumeCardLine as sharedResumeCardLine, reusedSourceSuffix } from "../../supabase/functions/_shared/career_prepared_card.ts";
 import { createRequire } from "node:module";
 import { normLabel, questionFieldType } from "../../supabase/functions/_shared/career_apply.ts";
 import { hashApplyPayload } from "../../supabase/functions/_shared/career_apply_store.ts";
@@ -88,6 +88,7 @@ export async function prepare(o: {
   ttlHours?: number;
   runEngine: RunEngine;
   resumeTag?: ResumeTag | null;
+  tz?: string | null; // WO-122: the person's own IANA zone, for the date a reused answer was given (R7); never UTC
 }) {
   const run = await o.runEngine(["--url", o.url, "--facts", o.factsPath, "--resume", o.resumePath]);
   if (!run || run.result.reason !== "dry_run" || !run.evidence?.approval_hash) {
@@ -96,7 +97,8 @@ export async function prepare(o: {
   const ev = run.evidence;
   // WO-102: each answer goes with the source the engine's contract judged it by (the event that confirmed it, its
   // provenance, whether it may attest, and where a texted answer was kept), so the approved run is judged again on it.
-  const fields = ev.fields.map((f: any) => ({ name: f.name, label: f.label, value: f.value, factId: f.factId, ...sourceOf(ev.sources?.[f.factId]) }));
+  const posting = String(ev.payload.posting);
+  const fields = ev.fields.map((f: any) => ({ name: f.name, label: f.label, value: f.value, factId: f.factId, ...sourceOf(ev.sources?.[f.factId], posting) }));
   const payload = {
     version: 1,
     user_id: ev.payload.user_id,
@@ -107,13 +109,15 @@ export async function prepare(o: {
     destination: ev.payload.destination,
     resume_sha256: ev.payload.resume.sha256,
     page_field_names: Object.keys(ev.payload.page_fields || {}).sort(),
+    ...(o.tz ? { tz: o.tz } : {}),
     engine_approval: ev.approval_hash,
     ...(typeof ev.payload.schema_hash === "string" ? { schema_hash: ev.payload.schema_hash } : {}),
     privacy_epoch: o.account.epoch,
     account_version: o.account.version,
     expires_at: new Date(o.now + (o.ttlHours ?? 24) * 3600_000).toISOString(),
     ...(ev.trust?.quarantine_version ? { quarantine_version: String(ev.trust.quarantine_version), manifest_hash: String(ev.trust.manifest_hash ?? "") } : {}),
-    ...(ev.trust?.manifest_hash ? { replay_sources: Array.isArray(ev.replay_sources) ? ev.replay_sources : Object.values(ev.sources ?? {}) } : {}),
+    // WO-122 ruling: the question's postings (job_ids) stay on this computer; the payload carries for_posting only.
+    ...(ev.trust?.manifest_hash ? { replay_sources: (Array.isArray(ev.replay_sources) ? ev.replay_sources : Object.values(ev.sources ?? {})).map((s: any) => forPosting(s, posting)) } : {}),
     ...(o.resumeTag?.tailored
       ? { resume_tailored: true, ...(o.resumeTag.persona ? { resume_persona: o.resumeTag.persona } : {}) }
       : {}),
@@ -127,7 +131,9 @@ export async function prepare(o: {
   };
   const card = [
     payload.company,
-    ...fields.filter((f: any) => f.value !== payload.resume_sha256).map((f: any) => `${MARK[mapQuestion({ label: f.label }).kind] ?? ""}${f.label}: ${shown(f)}`),
+    ...fields.filter((f: any) => f.value !== payload.resume_sha256).map((f: any) =>
+      `${MARK[mapQuestion({ label: f.label }).kind] ?? ""}${f.label}: ${shown(f)}${reusedSourceSuffix(f, payload.job_id, payload.tz)}`
+    ),
     resumeCardLine(ev.payload.resume.filename, payload.resume_sha256, o.resumeTag),
     ...(payload.page_field_names.length
       ? [`Also sent, set by the employer's page, unchanged: ${payload.page_field_names.join(", ")}`]
@@ -198,7 +204,10 @@ export function factsFromPayload(payload: any) {
       }
       bindings.set(coordinate, binding); metadata.set(coordinate, evidence); ids.set(id, coordinate);
       if (id.startsWith("text-answer:") && f.confirmation_event_id === id && f.provenance === `owner answered this question (${id})`) {
-        text_answers.push({ id: id.slice("text-answer:".length), key: source.table === "answers" ? `fact:${source.key}` : source.key, kind: "", answer: source.value });
+        text_answers.push({ id: id.slice("text-answer:".length), key: source.table === "answers" ? `fact:${source.key}` : source.key, kind: "", answer: source.value,
+          ...(typeof source.at === "string" ? { at: source.at } : {}),
+          // for_posting back as the one posting it was asked for (or none), so the approval's for_posting comes out the same
+          ...(typeof source.for_posting === "boolean" ? { job_ids: source.for_posting ? [String(payload.job_id)] : [] } : {}) });
       } else {
         (source.table === "answers" ? answers : saved)[source.key] = {
           value: source.value, factId: f.factId, confirmed: true,
@@ -229,12 +238,20 @@ export function factsFromPayload(payload: any) {
   return { user_id: payload.user_id, answers, saved, ...(text_answers.length ? { text_answers } : {}) };
 }
 // The source an answer was approved on, from the engine's manifest entry (evidence.sources), for the payload.
-function sourceOf(tf: any) {
+function sourceOf(tf: any, posting?: string) {
   if (!tf || typeof tf !== "object") return {};
+  const s = forPosting(tf, posting);
   return {
     provenance: String(tf.provenance ?? ""), confirmation_event_id: String(tf.event ?? ""), ...(tf.authorizes === true ? { authorizes: true } : {}),
-    source: { table: tf.table, key: tf.key, value: tf.value },
+    source: { table: tf.table, key: tf.key, value: tf.value, ...(s.at ? { at: s.at } : {}), ...(typeof s.for_posting === "boolean" ? { for_posting: s.for_posting } : {}) },
   };
+}
+// WO-122 ruling: a texted answer's question postings become one boolean at preparation, whether this posting's own question
+// was among them; the list never enters the payload or its hash.
+function forPosting(tf: any, posting?: string) {
+  if (!tf || typeof tf !== "object" || !Array.isArray(tf.job_ids)) return tf;
+  const { job_ids, ...rest } = tf;
+  return posting === undefined ? rest : { ...rest, for_posting: job_ids.map(String).includes(posting) };
 }
 // The engine's canonical approval identity (scripts/apply.ts): validate the queued field/source/schema binding
 // before reconstructing facts. Otherwise a changed payload could silently re-create an older approved answer.
@@ -324,8 +341,9 @@ export function engineFacts(facts: any, rows: TextAnswer[]) {
 }
 
 // Ask once and the service-key check live in ask-once.ts, shared with the browser extension (WO-031).
-import { factsWithTextAnswers, jwtRole, questionsToStore, type TextAnswer } from "./ask-once.ts";
-export { factsWithTextAnswers, jwtRole, questionsToStore, type TextAnswer };
+import { factsWithTextAnswers, jwtRole, questionsToStore, type TextAnswer, textAnswerRows } from "./ask-once.ts";
+import { personZone } from "../../supabase/functions/_shared/person_zone.ts";
+export { factsWithTextAnswers, jwtRole, questionsToStore, type TextAnswer, textAnswerRows };
 
 export async function runApproved(d: {
   claim: () => Promise<Job[]>;
@@ -979,9 +997,15 @@ if (import.meta.main) {
     // Ask once: what the person already answered by text goes in beside their facts file as their own answers, in a file
     // only they can read, removed when the batch ends. WO-102: the engine's contract keeps what agrees and asks again
     // where a texted answer and the file disagree (engineFacts; never factsWithTextAnswers, where the file silently won).
-    const texted = await client.rpc("career_apply_answers_own");
+    // WO-122: v2 adds the postings each question was asked for (a reused answer's card says where it came from); before
+    // v2 is deployed, v1, and a texted answer's line takes no source label.
+    let texted = await client.rpc("career_apply_answers_own_v2");
+    if (texted.error) texted = await client.rpc("career_apply_answers_own");
     if (texted.error) console.log(`Your texted answers could not be read (${texted.error.message}); preparing without them.`);
-    const rows: TextAnswer[] = texted.error ? [] : texted.data ?? [];
+    const rows: TextAnswer[] = texted.error ? [] : textAnswerRows(texted.data);
+    // The person's own zone (their alert settings), for the date on a reused answer's line; unknown says no date.
+    const prefs = await client.from("career_alert_prefs").select("tz").maybeSingle().then((r: any) => r, () => null);
+    const tz = personZone({ alertTz: prefs?.data?.tz ?? null })?.tz ?? null;
     const merged = engineFacts(JSON.parse(await Deno.readTextFile(facts)), rows);
     // The facts the contract keeps decide how far a new question's answer may travel (questionsToStore's haveFact).
     const trusted = trustedManifest({ owner: merged.user_id, file: merged, rows, resume: null }).answers;
@@ -1005,6 +1029,7 @@ if (import.meta.main) {
           now: Date.now(),
           runEngine: engineRunner({ root, extra }),
           resumeTag: tag,
+          tz,
         }).catch((e) => ({ ready: false as const, result: { state: "not_submitted", reason: String(e?.message ?? e).slice(0, 200) } as any }));
         if (!r.ready) {
           const q = (r.result as any).fields?.length ? `: ${(r.result as any).fields.join("; ")}` : "";

@@ -20,6 +20,13 @@ import { type EmailEvidence, findEmail, type Finder, type RcptProbe } from "./ca
 
 type Env = { get(k: string): string | undefined };
 export const contactOutreachOn = (env: Env) => releaseFlagOn(env, "CAREER_PEOPLE_SEARCH") && releaseFlagOn(env, "CAREER_CONTACT_OUTREACH");
+// D-048 option (a), architect amendment (2026-11-10): CAREER_CONTACT_OUTREACH alone puts an email on a card and sends it,
+// but only to a recipient the person supplied or confirmed (supplied_by "person": an address they typed, or a person on a
+// page they gave). A contact the pipeline found itself (supplied_by "search", the default) also needs CAREER_PEOPLE_SEARCH,
+// and resolution, people search and web search stay behind CAREER_PEOPLE_SEARCH whatever the recipient.
+export type SuppliedBy = "search" | "person";
+export const contactAskOn = (env: Env) => releaseFlagOn(env, "CAREER_CONTACT_OUTREACH");
+export const contactSendOn = (env: Env, suppliedBy: unknown) => contactAskOn(env) && (suppliedBy === "person" || releaseFlagOn(env, "CAREER_PEOPLE_SEARCH"));
 
 // Every applicant-tracking system and job board a posting link can sit on: a link on one of these says nothing about the
 // employer (acme.teamtailor.com is Teamtailor's host), so no domain comes from it.
@@ -38,7 +45,7 @@ export function domainOf(post: { company_url?: string | null; url?: string | nul
   return null;
 }
 
-export interface Person { name: string; title: string; company: string; domain: string; source_url: string; source_type: FoundPerson["source_type"] }
+export interface Person { name: string; title: string; company: string; domain: string; source_url: string; source_type: FoundPerson["source_type"]; supplied_by?: SuppliedBy }
 export interface Resolved { ok: true; person: Person; facts: ContactFact[]; dropped: { why: string; claim: string }[]; email: EmailEvidence; runs: SourceRun[]; expires_at: string }
 export type ResolveOut = Resolved | { ok: false; why: "no_domain" | "no_person"; runs: SourceRun[] };
 export interface ResolveDeps { gate: WebGate; api: PoliteApi; mx: MxResolver; now: () => number; search?: DiscoverySearch | null; probe?: RcptProbe; finder?: Finder | null }

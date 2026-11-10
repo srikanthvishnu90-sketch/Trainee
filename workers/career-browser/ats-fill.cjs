@@ -462,6 +462,27 @@ async function fillForm(page, ctx0) {
       (ask ? needsUser : failed).push({ label: d.label, reason: r.reason, ...(r.options ? { options: r.options } : {}) });
     }
   }
+  // Settle: a form that redraws or clears its boxes after an upload (Personio: name and email read "" at the last look, strict
+  // run 42741525726) would post them empty. An approved answer the page wiped is filled once more from the same approved value
+  // and read back; one that will not stay is handed back. Only answers already decided are touched: nothing new is filled here.
+  await page.waitForTimeout(400);
+  {
+    const qsNow = await page.evaluate(EXTRACT).catch(() => []);
+    const byKey = new Map(qsNow.map((d) => [`${d.label}|${d.kind}|${d.name}`, d]));
+    for (const f of filled) {
+      if (!["text", "textarea"].includes(f.kind) || f.source === "resume") continue;
+      const st = await stateOf(page, f.d).catch(() => ({ gone: true }));
+      if (!st.gone && String(st.text || "").trim() === String(f.value).trim()) continue;
+      if (!st.gone && f.d.inputType === "tel" && st.filled) continue; // a phone box shows its own format; it was matched at fill
+      const d = st.gone ? byKey.get(`${f.d.label}|${f.d.kind}|${f.d.name}`) : f.d;
+      let r = { ok: false, reason: "answer_did_not_stay" };
+      if (d) { try { r = await fillText(page, d, f.value); } catch (e) { r = { ok: false, reason: "answer_did_not_stay" }; } }
+      // It has to stay, not only read back the instant after typing.
+      if (r.ok) { await page.waitForTimeout(400); const again = await stateOf(page, d).catch(() => ({ gone: true })); if (again.gone || String(again.text || "").trim() !== String(f.value).trim()) r = { ok: false, reason: "answer_did_not_stay" }; }
+      if (r.ok) { f.d = d; continue; }
+      needsUser.push({ label: f.label, reason: "answer_did_not_stay" });
+    }
+  }
   // Sweep: a required question still empty that we did not already account for is handed back, not ignored.
   const accounted = new Set([...needsUser, ...failed].map((x) => x.label));
   const qsNow = await page.evaluate(EXTRACT).catch(() => []);

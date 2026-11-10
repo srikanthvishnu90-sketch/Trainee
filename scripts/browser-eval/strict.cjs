@@ -36,6 +36,9 @@ function falsePass(audit, facts) {
   const person = new Set([facts.full_name, facts.first_name, facts.last_name, facts.email].filter(Boolean).map((v) => String(v).trim()));
   const ok = (audit.fields || []).some((f) => f.source === "fact" && person.has(String(f.approved).trim()) && String(f.held == null ? "" : f.held).trim() === String(f.approved).trim());
   if (!ok) return "no_person_field_read_back";
+  // Every typed answer still holds its approved text at the click (a phone box shows its own format and was matched at fill).
+  const typed = (audit.fields || []).filter((f) => (f.kind === "text" || f.kind === "textarea") && !/^\+?[\d\s().\-\/]{6,}$/.test(String(f.approved || "").trim()));
+  if (typed.some((f) => f.gone || String(f.held == null ? "" : f.held).trim() !== String(f.approved).trim())) return "answer_changed_before_submit";
   if (LOGIN_WORDS.test(audit.submit || "")) return "submit_is_login";
   if (audit.password_field) return "password_field_shown";
   return null;

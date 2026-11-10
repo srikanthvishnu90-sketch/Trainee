@@ -57,6 +57,13 @@ const routes = {
     <label for="c">E-Mail *</label><input id="c" type="email" name="email" required><label for="cv">Lebenslauf *</label><input id="cv" type="file" name="cv" required>
     <button type="submit">Bewerbung senden</button></form>
     <script>document.getElementById("cv").addEventListener("change", () => { const l = document.createElement("label"); l.htmlFor = "x"; l.textContent = "Weitere Dokumente"; const i = document.createElement("input"); i.id = "x"; i.name = "other"; const f = document.getElementById("f"); f.prepend(i); f.prepend(l); });</script>`),
+  // Personio-like: attaching the resume clears the boxes already typed (once), or every time anything is typed (always).
+  "/job/99/apply": () => page(`<form><label for="a">Vorname *</label><input id="a" name="first_name" required><label for="c">E-Mail *</label><input id="c" type="email" name="email" required>
+    <label for="cv">Lebenslauf *</label><input id="cv" type="file" name="cv" required><button type="submit">Bewerbung senden</button></form>
+    <script>let once = true; document.getElementById("cv").addEventListener("change", () => setTimeout(() => { if (!once) return; once = false; for (const id of ["a", "c"]) document.getElementById(id).value = ""; }, 100));</script>`),
+  "/job/98/apply": () => page(`<form><label for="a">Vorname</label><input id="a" name="first_name"><label for="c">E-Mail *</label><input id="c" type="email" name="email" required>
+    <label for="cv">Lebenslauf *</label><input id="cv" type="file" name="cv" required><button type="submit">Bewerbung senden</button></form>
+    <script>setInterval(() => { const a = document.getElementById("a"); if (a.value) a.value = ""; }, 150);</script>`),
   "/o/nl": () => page(`<h1>Vacature</h1><button type="button">Solliciteren</button>`),
   "/o/nl/c/new": () => RC_FORM(NL),
   "/o/lv": () => page(`<h1>Vakance</h1>`),
@@ -157,10 +164,21 @@ test("a stop at Submit is a pass only with a person field read back, a Submit th
   for (const w of ["Log in", "Iniciar sesión", "Sign in", "Prisijungti", "Anmelden"]) assert.equal(falsePass({ fields: [email], submit: w, password_field: false }, facts), "submit_is_login", w);
   assert.equal(falsePass({ fields: [email], submit: "Submit", password_field: true }, facts), "password_field_shown");
   assert.equal(falsePass(undefined, facts), "no_audit");
+  assert.equal(falsePass({ fields: [email, { kind: "text", source: "fact", approved: facts.first_name, held: "" }], submit: "Send", password_field: false }, facts), "answer_changed_before_submit");
+  assert.equal(falsePass({ fields: [{ ...email, kind: "text" }, { kind: "text", source: "fact", approved: facts.phone, held: "(555) 0100" }], submit: "Send", password_field: false }, facts), null);
 });
 
 test("a box that appears after the upload does not renumber filled answers: the last look reads the person's own fields", { skip }, async () => {
   const r = await run("personio", "/job/88/apply");
   assert.equal(r.result, "pass", JSON.stringify({ reason: r.reason, audit: r.audit }));
+  assert.deepEqual(posts, []);
+});
+
+test("answers the page wipes after the upload are filled once more and read back; one that will not stay is handed back", { skip }, async () => {
+  const ok = await run("personio", "/job/99/apply");
+  assert.equal(ok.result, "pass", JSON.stringify({ reason: ok.reason, audit: ok.audit }));
+  const no = await run("personio", "/job/98/apply");
+  assert.notEqual(no.result, "pass", JSON.stringify(no));
+  assert.ok((no.needs || []).some((n) => n.reason === "answer_did_not_stay") || no.reason === "strict_false_pass:answer_changed_before_submit", JSON.stringify(no));
   assert.deepEqual(posts, []);
 });

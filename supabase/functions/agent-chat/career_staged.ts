@@ -413,6 +413,17 @@ export function marketResearchAsk(env: Env, message: string, intent: string | nu
 }
 // The router's own outreach and networking intents (R9 outreach routing leaves them to their rules).
 const OUTREACH_OWN = /^(?:outreach|career_outreach|career_networking|career_people|networking)/;
+const LIST_FOLLOWUP = /^\s*(?:(?:and|so|but|ok(?:ay)?),?\s+)?why\s+(?:not|didn't\s+you\s+(?:include|list|show|pick))\s+(?:that|the|this)\s+[^?.!]{1,40}?\s*one\b/i;
+const QUESTION_TO_ASK = /\b(?:won't|will\s+not|wouldn't|would\s+not|doesn't|does\s+not|not)\s+sound\s+(?:copied|generic|canned|scripted|rehearsed|memori[sz]ed)\b|\bquestions?\b[^.?!]{0,30}\b(?:to\s+ask|i\s+(?:can|could|should)\s+ask|for\s+(?:them|the\s+(?:interviewer|panel|recruiter|hiring\s+manager)))\b/i;
+const PACKET_ASK = /\b(?:packet|application|answers?)\b/i, RESUME_FILE = /\b(?:r[eé]sum[eé]|cv|pdf|docx)\b/i;
+export function followupOffTask(message: string, intent: string, result: unknown, ctx: Record<string, unknown>): boolean {
+  const m = String(message ?? "").replace(/[\u2019`]/g, "'"), r = (result && typeof result === "object" ? result : {}) as Record<string, any>;
+  const d = (ctx as any)?.discovery;
+  if (intent === "company_intel") return LIST_FOLLOWUP.test(m) && !!(d?.lastParams || (Array.isArray(d?.lastShortlist) && d.lastShortlist.length));
+  if (intent === "prep_brief") return r.question?.kind === "bank_question" && QUESTION_TO_ASK.test(m) && !/\b(?:mock|practi[cs]e|drill|quiz)\b/i.test(m);
+  if (intent === "career_document_delivery") return !(Array.isArray(r.documents) && r.documents.length) && PACKET_ASK.test(m) && !RESUME_FILE.test(m);
+  return false;
+}
 export function stagedDecision(o: { env: Env; message: string; ctx: Record<string, unknown>; host: Host; structured: boolean; clock?: TurnClock }): StagedDecision {
   const clock = o.clock ?? NO_CLOCK;
   const mode = brainMode(o.env);
@@ -440,6 +451,11 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (routerKept(o.env).has(intent)) return { brain: false, mode, intent, reason: "kept_on_router" };
   if (marketResearchAsk(o.env, o.message, intent)) return { brain: true, mode, intent, reason: "market_research" };
   if ((!CODE_OWNED_INTENTS.has(intent) || intent === "tracking_log") && followupDraftAsk(o.message)) return { brain: true, mode, intent, reason: "followup_draft" };
+  // H2H fix 4 (docs/architect/INSTINCT-HEAD-TO-HEAD.md C2 t5, C5 t4, C3 t6): a follow-up stays on the thread's current task. The
+  // router read each from a keyword and answered a different ask: "Why not that Stripe one?" after a search got Stripe's
+  // software-engineering file; "Give me one question that will not sound copied" during interview research got a mock-interview
+  // question; "just send me the packet" with no file got "no resume has been tailored". Each is the brain's, which has the thread.
+  if (followupOffTask(o.message, intent, probe.result, o.ctx)) return { brain: true, mode, intent, reason: "followup_on_task", router: routerAnswer(intent, probe) };
   // A change or send ask about the draft just shown (the handler marks the turn: ctx._draftThread, from the thread's last reply).
   // "Make it warmer." is career_tailor's resume draft only when no follow-up draft was just shown; other exact payloads stay code's.
   if ((o.ctx as any)._draftThread === true && draftContinuation(o.message) && (!PAYLOAD_INTENTS.has(intent) || intent === "career_tailor")) return { brain: true, mode, intent, reason: "draft_continuation" };

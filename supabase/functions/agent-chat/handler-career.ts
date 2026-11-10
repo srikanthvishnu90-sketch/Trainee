@@ -180,12 +180,12 @@ export { CONFLICT_REPLY, refusedSaveReply };
 
 // R10 WO-H, spec F.2 (d): the specific blocker when company research is asked for while research is switched off on this service.
 export const RESEARCH_OFF_REPLY = "I can't do that company research here yet: research with checked sources is switched off on this service, so I won't give you facts from memory. Nothing was applied for and no one was contacted.";
-export const UNSAVED_REPLY = "I couldn't confirm this reply was saved. Send your message again; nothing goes to an employer or a contact until you approve exactly what is sent.";
+export const UNSAVED_REPLY = "I couldn't confirm this reply was saved because saving it to your account failed. Send your message again; nothing goes to an employer or a contact until you approve exactly what is sent.";
 // MASS APPLY END TO END (2026-11-04): the batch stack's executor is not deployed (CAREER_BATCH_EXECUTOR, D-037), so its ask is
 // not started, said plainly; the reply names the ask that does run on the deployed path (the queue, server preparation, the
 // card, the person's yes to its exact payload, the cloud submitter: D-041), in the person's own words where it can. The old
 // text sent people to the browser extension, which is no longer the only way an application is prepared or sent.
-export const BATCH_NOT_STARTED_REPLY = "I haven't started that batch: nothing was searched, prepared or sent, because the runner for that kind of ask is not switched on. What does run: say \"apply to the top 10 <role> jobs in <city>\", or pick from a list I showed (\"apply to all of them\", \"apply to 1 and 3\"), and I put those postings on your apply list; each one is prepared, shown to you exactly as it would be sent, and goes to the employer only after your yes to that card.";
+export const BATCH_NOT_STARTED_REPLY = "I can't start that batch because open-ended batches aren't available yet, so nothing was searched, prepared or sent. What does run: say \"apply to the top <number> <role> jobs in <city>\", or pick from a list I showed (\"apply to all of them\", \"apply to 1 and 3\"), and I put those postings on your apply list; each one is prepared, shown to you exactly as it would be sent, and goes to the employer only after your yes to that card.";
 // The same, with the ask that runs written from theirs ("apply to 15 software engineering intern roles" -> "apply to the top
 // 15 software engineering intern roles"), offered only when the deployed parser takes it as a search.
 // MASS APPLY STATE (review of #496): the receipts the database wrote when each application finished (career_apply_receipts),
@@ -202,7 +202,7 @@ export function batchNotStartedReply(message: string): string {
   const said = m ? `apply to the top ${m[1]} ${m[2].trim()}` : null;
   const ask = said ? applyManyAsk(said) : null;
   if (!said || !ask || ask.kind !== "first" || !ask.what) return BATCH_NOT_STARTED_REPLY;
-  return `I haven't started that batch: nothing was searched, prepared or sent, because the runner for that kind of ask is not switched on. What does run: say "${said}" and I search the postings on file and put the best fits on your apply list; each one is prepared, shown to you exactly as it would be sent, and goes to the employer only after your yes to that card.`;
+  return `I can't start that batch because open-ended batches aren't available yet, so nothing was searched, prepared or sent. What does run: say "${said}" and I search the postings on file and put the best fits on your apply list; each one is prepared, shown to you exactly as it would be sent, and goes to the employer only after your yes to that card.`;
 }
 const MAX_MESSAGE_LEN = 4000; // M2: cap input size (same cap as handler.ts)
 

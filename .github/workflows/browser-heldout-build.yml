@@ -1,0 +1,18 @@
+# Builds scripts/browser-eval/heldout.csv from CI (the sandboxes cannot reach job sites). Reads public board feeds only;
+# nothing is submitted. Runs on a push to bench/browser-heldout-build; the CSV is printed in the job log.
+name: browser-heldout-build
+on:
+  push:
+    branches: ["bench/browser-heldout-build"]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22.23.3" }
+      - name: Collect 20 open postings per site, none of sample.csv's URLs or companies
+        run: node scripts/browser-eval/build-heldout.cjs --per 20 --seed heldout-1 --out "$RUNNER_TEMP/heldout.csv"

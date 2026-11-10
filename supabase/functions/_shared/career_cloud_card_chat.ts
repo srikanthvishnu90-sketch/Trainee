@@ -28,7 +28,7 @@ export interface CloudCardChatStore {
 }
 export type CardYes = { reply: string; status: "open_card" | "closed" | "unreadable"; card_id: string };
 
-export const TAP_TO_SEND = "A text yes doesn't send anything. Tap Approve on the card above to send exactly what it shows; nothing goes until you do.";
+export const TAP_TO_SEND = "I didn't send it because a text yes can't approve this card. Tap Approve on the card above to send exactly what it shows; nothing goes until you do.";
 
 export async function cloudCardYesTurn(o: { message: string; threadId: string; ownSession: boolean; store: CloudCardChatStore }): Promise<CardYes | null> {
   if (!o.ownSession || !parseCardYes(o.message)) return null;

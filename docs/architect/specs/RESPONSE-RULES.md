@@ -138,9 +138,21 @@ Nothing comes after the decision: no tails, no offers of more help, no capabilit
 4. R9 interim bubbles: the rubric sees only the final reply.
 5. E6 parallel progress after a blocker.
 
-A rubric sweep over every templated reply in `RESPONSE-LAYER.md` sections 2 to 6 is the measurement. It is blocked locally
-by disk space and will run in CI. Each violation becomes a fix in the file that writes the text, never an exception added to
-the rubric.
+A rubric sweep over every templated reply in `RESPONSE-LAYER.md` sections 2 to 6 is the measurement:
+`tests/architect/response-sweep-20261109.test.ts` (46 inventory rows, 99 replies, the real handler on Postgres plus the fixed
+constants a chat turn cannot reach). Baseline 63 violations in 51 replies; now 0. A row production serves through the staged
+brain (a bare "thanks" on a new thread) is scored on the staged path, as production serves it; its router-only reply is printed
+apart as "not served in production" (architect ruling 2026-11-10). Each violation becomes a fix in the file that writes the
+text, never an exception added to the rubric.
+
+Gap 1 now has its battery: `tests/architect/response-b6-replay-20261109.test.ts` replays B.6 continuations 1 to 5 turn by turn.
+With the staged brain answering as the spec's target replies, the product delivers 0 rubric violations and 0 carry failures
+(the measure of what code does around a good model answer). With no model (router only) it is 16 violations and 3 carry
+failures, recorded as a ceiling: the catch-all and unmatched fallback answer turns that need the brain.
+
+Where a B.6 target reply itself breaks this rubric, the rubric wins (architect ruling 2026-11-10): the spec's targets are
+illustrative. Continuation 4 turn 4 ("I still need the exact recipient or the conversation you mean. I can draft a short note
+while you find it.") breaks R1 and R10; the replay counts it apart from the product's violations.
 
 ## 7. What does not count as a pass
 

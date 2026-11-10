@@ -315,7 +315,12 @@ export function renderWith(R: any, where: string): ResumeRenderer {
     const r = R.renderPdf(resume);
     if (!r.ok) return { ok: false, where, reason: r.reason || "the PDF could not be rendered" };
     const pdf = new Uint8Array(r.buffer);
-    return { ok: true, pdf, sha256: R.sha256(r.buffer), filename: r.filename, ats: atsHarness(R, resume, pdf), where };
+    // The Word copy rides with the PDF on the plain path too (RESUME-TEMPLATES 1.1: "Trainee keeps sending both"; the resume
+    // loop found the default "make me a resume" sent the PDF alone). Same document, same words; a Word copy that cannot be
+    // made is left out, never faked.
+    const d = R.renderDocx(resume);
+    const docx = d?.ok && d.buffer ? new Uint8Array(d.buffer) : undefined;
+    return { ok: true, pdf, sha256: R.sha256(r.buffer), filename: r.filename, ats: atsHarness(R, resume, pdf), where, ...(docx ? { docx } : {}) };
   };
 }
 // The edge (Deno): 148 over Deno's own node: built-ins, loaded once, on the first render.

@@ -18,8 +18,8 @@ import { hostEnv, supabaseVoiceLinks, type VoiceLinks } from "./career_voice_lin
 import { redactIdentity } from "./identity_redact.ts";
 // FEATURE 11: posting-bound mocks, grading against the answer key and the posting, weak spots kept and drilled.
 import {
-  type BoundPosting, debriefTail, drillQuestions, type Fit, fitLine, fitOf, isDrillAsk, isWeakListAsk, judgedFit, mockEvent, type MockPrep,
-  pastedJd, postingPlan, requirementsOf, supabaseMockPrep, weakListText, weakSpots, type ModelCall,
+  type BoundPosting, debriefTail, drillQuestions, type Fit, fitLine, fitOf, interviewLine, type InterviewOnFile, isDrillAsk, isInterviewPrepAsk, isWeakListAsk,
+  judgedFit, mockEvent, type MockPrep, pastedJd, pickInterview, postingPlan, requirementsOf, supabaseMockPrep, weakListText, weakSpots, whichInterviewText, type ModelCall,
 } from "./career_mock_prep.ts";
 
 export const MOCK_INTENT = "career_mock"; // the mock asked a question and waits for the answer
@@ -691,11 +691,11 @@ type TurnOut = { reply: string; status: string; intent: string };
 const SOURCE_WORDS: Record<string, string> = { application: "on your applications", search: "from your last search", pasted: "you pasted" };
 // A mock bound to the posting on file for this company and role, or null when there is none (or it names no skill this
 // code can test), so the role mock runs as before.
-async function boundStart(o: TurnIn, prep: MockPrep, a: { role: string; company: string | null; minutes: number }, pasted: { title: string; company: string; text: string } | null): Promise<{ state: MockState; reply: string } | null> {
+async function boundStart(o: TurnIn, prep: MockPrep, a: { role: string; company: string | null; minutes: number; job_id?: string | null }, pasted: { title: string; company: string; text: string } | null, iv: InterviewOnFile | null = null): Promise<{ state: MockState; reply: string } | null> {
   let found: Awaited<ReturnType<MockPrep["posting"]>> = null;
   if (pasted) found = { ...pasted, job_id: null, url: null, source: "pasted" };
-  else if (a.role || a.company) {
-    try { found = await prep.posting(o.userId, o.threadId, { role: a.role, company: a.company }); } catch (e) { console.error("mock: posting not read", e instanceof Error ? e.message : String(e)); }
+  else if (a.role || a.company || a.job_id) {
+    try { found = await prep.posting(o.userId, o.threadId, { role: a.role, company: a.company, job_id: a.job_id ?? null }); } catch (e) { console.error("mock: posting not read", e instanceof Error ? e.message : String(e)); }
   }
   if (!found) return null;
   const requirements = requirementsOf(found.text || found.title);
@@ -709,11 +709,16 @@ async function boundStart(o: TurnIn, prep: MockPrep, a: { role: string; company:
   const asked = requirements.filter((r) => questions.some((q) => q.req?.includes(r.key))).map((r) => r.label);
   const lines = [
     `Mock interview: ${posting.title}${state.company ? ` at ${state.company}` : ""}, built from the posting ${SOURCE_WORDS[posting.source]}. About ${state.minutes} minutes, ${questions.length} questions, by text.`,
+    ...(iv ? [interviewLine(iv)] : []),
     `The posting names ${requirements.map((r) => r.label).join(", ")}. ${tech} technical and ${beh} behavioral question${tech + beh === 1 ? "" : "s"} test${asked.length ? ` ${asked.join(", ")}` : " the role"}.`,
     `Each answer gets a score out of 15 for structure, evidence and detail, and a check against the answer key and the posting. Text "end mock" any time.`,
     "", ask(state, 0),
   ];
   return { state, reply: lines.join("\n") };
+}
+// "Data Analyst, Growth" -> "data analyst": the role words of an invite's role, for the role's question bank.
+function roleOfInterview(role: string | null): string {
+  return clean(role ?? "").split(/[,(|]| - /)[0].trim().toLowerCase();
 }
 async function prepTurn(o: TurnIn, prep: MockPrep): Promise<TurnOut | null> {
   if (isWeakListAsk(o.message) || isDrillAsk(o.message)) {
@@ -735,6 +740,29 @@ async function prepTurn(o: TurnIn, prep: MockPrep): Promise<TurnOut | null> {
       "", ask(state, 0),
     ].join("\n");
     return { reply, status: "drill_started", intent: MOCK_INTENT };
+  }
+  // LOOP 11: "help me prep for my interview at Acme", "mock me for my interview on Thursday": the interview on file (as its
+  // invite stated it) names the company, the role and the posting, and the mock is built from that posting.
+  if (prep.interviews && isInterviewPrepAsk(o.message)) {
+    let ivs: InterviewOnFile[] = [];
+    try { ivs = await prep.interviews(o.userId); } catch (e) { console.error("mock: interviews not read", e instanceof Error ? e.message : String(e)); }
+    const pick = pickInterview(o.message, ivs);
+    if (pick.why === "several") return { reply: whichInterviewText(ivs), status: "which_interview", intent: MOCK_DONE_INTENT };
+    if (pick.iv) {
+      const iv = pick.iv, minutes = DEFAULT_MINUTES;
+      const prev = await o.store.get(o.userId, o.threadId).catch(() => null);
+      const role = roleOfInterview(iv.role);
+      const b = await boundStart(o, prep, { role, company: iv.company, minutes, job_id: iv.job_id }, null, iv);
+      let s = b;
+      if (!s) {
+        const r = start({ role, company: iv.company, minutes, now: o.now });
+        const [first, ...rest] = r.reply.split("\n");
+        s = { state: r.state, reply: [first, interviewLine(iv), ...rest].join("\n") };
+      }
+      await o.store.save(o.userId, o.threadId, s.state);
+      const dropped = prev && prev.status === "running" && !idle(prev, o.now) ? "The earlier mock was dropped. " : "";
+      return { reply: dropped + s.reply, status: "started", intent: MOCK_INTENT };
+    }
   }
   const pj = pastedJd(o.message);
   const cmd = pj ? parseMockCommand(pj.ask) : null;
@@ -788,7 +816,11 @@ export async function mockTurn(
   if (cmd?.kind === "start") {
     const prev = await o.store.get(o.userId, o.threadId);
     // FEATURE 11: a posting on file for this company and role binds the mock to it.
-    const s = (o.store.prep ? await boundStart(o, o.store.prep, cmd, null) : null) ?? start({ role: cmd.role, company: cmd.company, minutes: cmd.minutes, now: o.now });
+    let iv: InterviewOnFile | null = null;
+    if (o.store.prep?.interviews && cmd.company) {
+      try { iv = pickInterview(cmd.company, await o.store.prep.interviews(o.userId)).iv; } catch (e) { console.error("mock: interviews not read", e instanceof Error ? e.message : String(e)); }
+    }
+    const s = (o.store.prep ? await boundStart(o, o.store.prep, iv?.job_id ? { ...cmd, job_id: iv.job_id } : cmd, null, iv) : null) ?? start({ role: cmd.role, company: cmd.company, minutes: cmd.minutes, now: o.now });
     await o.store.save(o.userId, o.threadId, s.state);
     const dropped = prev && prev.status === "running" && !idle(prev, o.now) ? "The earlier mock was dropped. " : "";
     return { reply: dropped + s.reply, status: "started", intent: MOCK_INTENT };

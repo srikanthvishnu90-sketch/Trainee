@@ -12,6 +12,10 @@
 //     The weak-spot list is read back from those rows (the newest result for a skill wins), so "drill my weak spots" works
 //     in any thread and runs a short mock on just those skills.
 // (d) The debrief ends with concrete next steps, one per weak spot, from the missed key points.
+// (e) LOOP 11: a practice ask about the person's own interview ("prep me for my upcoming interview", "mock me for my
+//     interview at Acme") reads the interview on file (career_interviews, as the invite stated it), binds the posting of the
+//     application the invite names (or the one matching its company and role), and says the interview's time only in the
+//     invite's own words. A practice time is only ever suggested, never booked. Several interviews and none named: asks which.
 //
 // Code picks the questions and grades; a model never writes a question, a score, or anything about the person.
 import { CareerPrep } from "./router_core.career.js";
@@ -421,12 +425,76 @@ export function weakListText(spots: WeakSpot[]): string {
 // ---------- The hooks the mock calls (career_mock.ts mockTurn) ----------
 export interface MockPrep {
   // The posting on file for this company and role: the person's applications, then their last search.
-  posting(userId: string, threadId: string, want: { role: string; company: string | null }): Promise<PostingOnFile | null>;
+  posting(userId: string, threadId: string, want: { role: string; company: string | null; job_id?: string | null }): Promise<PostingOnFile | null>;
+  // LOOP 11: the person's upcoming interviews as the invite stated them (career_interviews), soonest first.
+  interviews?(userId: string): Promise<InterviewOnFile[]>;
   // The person's finished mocks, newest first (career_events, kind mock_done).
   history(userId: string): Promise<EventLike[]>;
   // One finished mock, written as a mock_done event. Never fails the turn.
   record(userId: string, e: { subject: string; detail: Record<string, unknown> }): Promise<void>;
   judge?: Judge | null; // only with CAREER_MOCK_JUDGE=on
+}
+
+// ---------- LOOP 11: the scheduled interview ----------
+// An interview on file, only as its invite stated it (career_interviews, WO-034): the company, the role, the invite's
+// own words for when, the format, who the person meets. Nothing here is looked up or completed.
+export interface InterviewOnFile { company: string | null; role: string | null; job_id: string | null; when_said: string[]; date: string | null; format: string | null; interviewers: { name: string; title: string | null }[] }
+// The interviews still ahead (a dated one from today on; an undated one seen in the last 30 days), soonest first.
+export function upcomingInterviews(rows: any[], today: string): InterviewOnFile[] {
+  const seenFloor = new Date(Date.parse(`${today}T00:00:00Z`) - 30 * 86400000).toISOString();
+  return rows
+    .filter((x) => x && !x.cancelled_at && (x.interview_date ? String(x.interview_date) >= today : String(x.seen_at ?? "") >= seenFloor))
+    .sort((a, b) => (a.interview_date ?? "9999") < (b.interview_date ?? "9999") ? -1 : (a.interview_date ?? "9999") > (b.interview_date ?? "9999") ? 1 : 0)
+    .map((x) => ({
+      company: x.company ? clean(x.company) : null, role: x.role ? clean(x.role) : null,
+      job_id: /^job:/.test(String(x.application_ref ?? "")) ? String(x.application_ref).slice(4) : null,
+      when_said: Array.isArray(x.when_said) ? x.when_said.map((w: unknown) => clean(w)).filter(Boolean).slice(0, 3) : [],
+      date: x.interview_date ? String(x.interview_date).slice(0, 10) : null, format: x.format ? String(x.format) : null,
+      interviewers: Array.isArray(x.interviewers) ? x.interviewers.filter((p: any) => p && typeof p.name === "string").map((p: any) => ({ name: clean(p.name), title: p.title ? clean(p.title) : null })).slice(0, 6) : [],
+    }));
+}
+// "help me prep for my interview at Acme", "mock me for my interview on Thursday", "get me ready for my Umbrella Health
+// interview", "I have an interview with Hooli on Friday, can you run a practice interview": a prep ask about the person's
+// own interview (not "a practice interview for data analyst at Acme", which names the role to practice).
+const PREP_WORD = /\b(?:prep|prepare|preparing|practi[cs]e|mock|rehearse|ready|drill|run through|go over)\b/i;
+const OWN_INTERVIEW = /\bmy (?:upcoming |next |real |actual )?(?:[\w&.'-]+ ){0,4}interview\b|\b(?:i have|i've got|i got|i'?ve) an? (?:[\w&.'-]+ ){0,3}interview\b|\b(?:upcoming|next) (?:[\w&.'-]+ ){0,3}interview\b/i;
+export function isInterviewPrepAsk(text: string): boolean {
+  const t = String(text ?? "").replace(/\s+/g, " ").trim();
+  if (!t || t.length > 240 || /\n/.test(String(text ?? "").trim())) return false;
+  if (/\b(?:i'?m|i am|im) (?:in|on) (?:an?|my|the) (?:real |actual |live )?interview\b/i.test(t)) return false; // D-015: never during one
+  // A plan, advice, a how-to question, a brief, research or another task named with it is not a request to practice now.
+  if (NOT_PRACTICE.test(t)) return false;
+  return PREP_WORD.test(t) && OWN_INTERVIEW.test(t);
+}
+const NOT_PRACTICE = /\b(?:plan|schedule|tips?|advice|checklist|brief|research|how (?:do|should|can|would) i|what should i|should i|add (?:it|this)|track(?:er)?|remind(?:er)?|calendar|starts?|starting|thank[- ]you|follow[- ]?up|email|outfit|wear)\b/i;
+const companyWords = (c: string) => c.toLowerCase().split(/[^a-z0-9&]+/).filter((w) => w.length >= 3 && !["inc", "llc", "ltd", "the", "corp", "company", "group", "labs", "analytics", "industries", "health", "technologies"].includes(w));
+// Which interview the ask is about: the one whose company it names; with none named, the only one ahead. Null with a
+// reason when it names a company with no interview on file, or there are several and it names none.
+export function pickInterview(text: string, ivs: InterviewOnFile[]): { iv: InterviewOnFile | null; why: "none" | "several" | "other_company" | null } {
+  const low = ` ${String(text ?? "").toLowerCase().replace(/[^a-z0-9& ]+/g, " ")} `;
+  const named = ivs.filter((iv) => iv.company && (low.includes(` ${iv.company.toLowerCase().replace(/[^a-z0-9& ]+/g, " ").trim()} `) || companyWords(iv.company).some((w) => low.includes(` ${w} `))));
+  if (named.length) return { iv: named[0], why: null };
+  // A capitalized name after with/at/for that matches no interview on file is another company.
+  const other = /\b(?:with|at|for)\s+([A-Z][\w&.'-]+)/.exec(String(text ?? ""));
+  if (other && !/^(?:my|the|an?|this|next|upcoming)$/i.test(other[1])) return { iv: null, why: "other_company" };
+  if (!ivs.length) return { iv: null, why: "none" };
+  if (ivs.length === 1) return { iv: ivs[0], why: null };
+  return { iv: null, why: "several" };
+}
+// The line under the mock's first line: the interview as the invite stated it, and a suggestion that is never booked.
+export function interviewLine(iv: InterviewOnFile): string {
+  const what = `your ${iv.company ?? "upcoming"} interview${iv.role ? ` for ${iv.role}` : ""}`;
+  const when = iv.when_said.length ? `the invite says ${iv.when_said.map((w) => `"${w}"`).join(" and ")}` : "the invite states no time";
+  const fmt = iv.format ? `, ${iv.format}` : "";
+  const who = iv.interviewers.length
+    ? ` It names ${iv.interviewers.map((p) => p.title ? `${p.name} (${p.title})` : p.name).join(", ")}; I only know what the invite says about who you're meeting.`
+    : "";
+  return `This is practice for ${what}: ${when}${fmt}.${who} A suggestion, not booked anywhere: finish this mock, then text "drill my weak spots" once before the interview.`;
+}
+export function whichInterviewText(ivs: InterviewOnFile[]): string {
+  return [`You have ${ivs.length} interviews on file. Which one should we practice for?`,
+    ...ivs.slice(0, 5).map((iv, i) => `${i + 1}. ${iv.company ?? "A company"}${iv.role ? `, ${iv.role}` : ""}${iv.when_said[0] ? `: the invite says "${iv.when_said[0]}"` : ""}.`),
+    `Text "prep me for my ${ivs[0].company ?? "next"} interview" (the company's name).`].join("\n");
 }
 
 // ---------- The production store ----------
@@ -475,7 +543,13 @@ export function supabaseMockPrep(admin: any, env: { get(k: string): string | und
         const r = await admin.from("career_apply_wanted").select("posting_key,company,title,url").eq("user_id", userId).order("queued_at", { ascending: false }).limit(200);
         if (!r.error) for (const x of r.data ?? []) apps.push({ company: x.company ?? "", title: x.title ?? "", job_id: x.posting_key ?? null, url: x.url ?? null });
       } catch (e) { console.error("mock prep: apply queue", (e as Error)?.message ?? e); }
-      const app = matchPosting(apps, want);
+      // LOOP 11: an interview whose invite names the application (application_ref job:<id>) binds that posting.
+      const named = want.job_id ? apps.find((x) => x.job_id === want.job_id) ?? null : null;
+      if (want.job_id && !named) {
+        const text = await textOf(want.job_id);
+        if (text) return { title: clean(want.role), company: clean(want.company), job_id: want.job_id, url: null, source: "application", text };
+      }
+      const app = named ?? matchPosting(apps, want);
       if (app) return { title: clean(app.title) || want.role, company: clean(app.company), job_id: app.job_id, url: app.url, source: "application", text: await textOf(app.job_id) };
       const lists: any[][] = [];
       try {
@@ -491,6 +565,13 @@ export function supabaseMockPrep(admin: any, env: { get(k: string): string | und
         if (hit) return { title: clean(hit.title) || want.role, company: clean(hit.company), job_id: hit.id ? String(hit.id) : null, url: hit.url ? String(hit.url) : null, source: "search", text: await textOf(hit.id ? String(hit.id) : null) };
       }
       return null;
+    },
+    async interviews(userId) {
+      const today = new Date().toISOString().slice(0, 10);
+      const r = await admin.from("career_interviews").select("company,role,application_ref,when_said,interview_date,format,interviewers,cancelled_at,seen_at")
+        .eq("user_id", userId).is("cancelled_at", null).order("interview_date", { ascending: true, nullsFirst: false }).limit(20);
+      if (r.error) throw new Error(`read the interviews: ${r.error.message}`);
+      return upcomingInterviews((r.data ?? []) as any[], today);
     },
     async history(userId) {
       const r = await admin.from("career_events").select("at,kind,subject,detail").eq("user_id", userId).eq("kind", "mock_done").order("at", { ascending: false }).limit(30);

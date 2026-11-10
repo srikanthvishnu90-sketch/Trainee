@@ -242,6 +242,7 @@
     "tests/architect/known-gaps-sweep.test.ts": 0.2,
     "tests/architect/launch-readiness-handler.test.ts": 8,
     "tests/architect/launch-readiness-units.test.ts": 0.1,
+    "tests/architect/loop-11-interview.test.ts": 12,
     "tests/architect/m4-outlook-connector.test.ts": 7,
     "tests/architect/m5-outreach-replies.test.ts": 0.2,
     "tests/architect/m5-replies-rail-pg.test.ts": 9,

@@ -40,7 +40,7 @@ export function parseSupplied(message: string): Supplied | null {
   const text = String(message ?? "");
   const all = text.match(ADDRS) ?? [];
   if (new Set(all.map((a) => a.toLowerCase())).size !== 1) return null;
-  const email = all[0].toLowerCase(), domain = domainOfAddr(email);
+  const email = all[0]!.toLowerCase(), domain = domainOfAddr(email);
   const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   const t = lines.length === 1 ? TYPED.exec(lines[0]) : null;
   if (t) return { name: clean(t[1]), email, title: "", company: domain, domain, topic: topicOf(t[3]), followups: t[4] ? NUM[t[4].toLowerCase()] ?? 0 : 0 };

@@ -176,6 +176,7 @@ PY
 # as above: the steps and their commands are unchanged, and the union of core and architect is the old core.
 browser_node_tests=(
   tests/career-apply-dryrun.test.cjs
+  tests/career-autosave-before-yes.test.cjs
   tests/career-apply-exact-option.test.cjs
   tests/career-apply-vm-needs-answers.test.cjs
   tests/career-approval-card-browser.test.cjs

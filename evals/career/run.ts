@@ -301,7 +301,9 @@ if (import.meta.main) {
   else if (setName === "official") setPath = new URL("./messages.json", import.meta.url);
   // D-038: a fresh, unsealed held-out set written by another agent; its results are redacted like the sealed set's.
   else if (setName === "fresh") setPath = new URL("./fresh-heldout.json", import.meta.url);
-  else { console.log(`NOT RUN: --set must be dev, heldout, official or sealed (got ${setName}).`); Deno.exit(2); }
+  // D-054: the one real-model run for release items 7 and 9 (evals/career/d054-items-7-9.json; scored by d054-score.ts).
+  else if (setName === "d054") setPath = new URL("./d054-items-7-9.json", import.meta.url);
+  else { console.log(`NOT RUN: --set must be dev, heldout, official, fresh, d054 or sealed (got ${setName}).`); Deno.exit(2); }
   const set = JSON.parse(await Deno.readTextFile(setPath));
   const only = opt("--only");
   if (only && (setName === "sealed" || setName === "heldout")) { console.log("NOT RUN: --only is refused on the sealed set (a sealed run scores every item)."); Deno.exit(2); }

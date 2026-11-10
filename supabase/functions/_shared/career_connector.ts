@@ -468,7 +468,7 @@ export function parseConnectorAsk(text: string): ConnectorAsk | null {
   if ((m = t.match(new RegExp(`^${pre}(?:connect|introduce) me (?:with|to) (?:someone|somebody|anyone) who (?:has )?interviewed (?:at|with) (.+)$`)))) {
     return { kind: "connect", need: "intel", value: firmName(said(m[1])) };
   }
-  if ((m = t.match(new RegExp(`^${pre}(?:get me a referral|find (?:me )?someone (?:who can|to) refer me|connect me with someone who can refer me) (?:at|to) (.+)$`)))) {
+  if ((m = t.match(new RegExp(`^${pre}(?:get me (?:a referral|referrals)|find (?:me )?someone (?:who can|to) refer me|connect me with someone who can refer me) (?:at|to) (.+)$`)))) {
     return { kind: "connect", need: "referral", value: firmName(said(m[1])) };
   }
   if ((m = t.match(new RegExp(`^${pre}(?:find|get|match) me (?:with )?an? (?:prep|study|practice|mock interview) (?:partner|group|buddy) (?:for|in) (.+?)(?: interviews?)?$`)))) {
@@ -486,7 +486,7 @@ export function parseConnectorAsk(text: string): ConnectorAsk | null {
   if ((m = t.match(/^i can (?:talk|chat|speak) (?:to|with) (?:students|people|candidates|job seekers|anyone) about (?:my work at |working at |my job at )?(.+)$/))) {
     return { kind: "offer", offer: "advice", value: firmName(said(m[1])) };
   }
-  if ((m = t.match(/^i can (?:refer|give referrals to) (?:people|students|candidates|someone) (?:at|to) (.+)$/))) {
+  if ((m = t.match(/^i can (?:refer|give (?:a referral|referrals) to) (?:people|students|candidates|someone) (?:at|to) (.+)$/))) {
     return { kind: "offer", offer: "referral", value: firmName(said(m[1])) };
   }
   if ((m = t.match(/^i can share (?:my |what my )?(.+?) interviews?(?: experience| were like| was like| tips)?$/))) {

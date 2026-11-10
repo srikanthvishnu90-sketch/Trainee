@@ -501,6 +501,8 @@ export const CODE_OWNED_INTENTS: ReadonlySet<string> = new Set([
   // applying: the queue, a named posting, the packet, the doorstep, the halt and resume
   "career_batch_apply", "named_role_apply", "named_role_link", "doorstep_submit", "doorstep_fill", "doorstep_status",
   "application_packet", "application_packet_walkthrough", "career_packet", "packet_prep", "packet_refused", "packet_needs_role",
+  // H2H leftovers 3: "send me the packet" with no packet in the thread is code's answer (142 handleDocumentDelivery), never a model's "here is".
+  "career_packet_absent",
   "intent_packet_validity", "queue_halt", "queue_resume", "captcha_handoff", "portal_account", "portal_accounts",
   // watches and alerts
   "career_watch", "career_watch_create", "career_watch_manage", "career_watch_affirm", "career_os_watch",

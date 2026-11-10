@@ -14,6 +14,8 @@ import { supabaseQuestionStore } from "../_shared/career_apply_questions.ts";
 import { pendingRows, reprepareQueued } from "../_shared/career_hosted_prepare.ts";
 import { resumeOnFileReader } from "../_shared/career_apply_from_chat.ts";
 import type { FileDeps } from "./handler.ts";
+import { messageRecords, outreachDrafts } from "../_shared/file_family_message.ts";
+import { sendRailOn } from "../_shared/career_send_rail.ts";
 import { PHONE_STEP_FLOOR_MS, phonePace } from "../_shared/file_session.ts";
 import { supabaseResumeRates } from "../_shared/career_resume_outcomes.ts";
 import { reviewRecords } from "../_shared/file_family_review.ts";
@@ -45,6 +47,7 @@ export function buildFileDeps(admin: any, env: FileDeps["env"], now: () => numbe
       "F-09": (() => { const st = supabaseFileStore(admin); return reviewRecords({ review: (u) => supabaseReviewDeps(admin, u, env), current: (u, j) => st.prepared(u, j), appRow: (u, j, url) => st.appRow(u, j, url), cards: supabaseCardStore(admin), account: supabaseAccountStamp(admin), events: supabaseEventStore(admin) }, now); })(),
       // S3: the search plan and materials Files, from career_search_plans and career_material_versions (file_family_records_materials.ts).
       ...planMaterialRecords(supabasePlanMaterialStore(admin), now),
+      "F-12": messageRecords({ store: outreachDrafts(admin), rail: sendRailOn(env) ? { rpc: (name: string, args: { p: unknown }) => admin.rpc(name, args), drafts: (u: string, ids: string[]) => outreachDrafts(admin).drafts(u, ids) } : null }),
     },
     // A results card that isn't ready: the employer's open questions (asked on the page, saved the way the chat saves them), then
     // the queued applications prepared again, and where each one stands.

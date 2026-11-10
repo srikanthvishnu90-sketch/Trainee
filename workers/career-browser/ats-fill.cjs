@@ -22,7 +22,8 @@ const norm = (s) => String(s == null ? "" : s).toLowerCase().replace(/[*✱]/g, 
 function EXTRACT() {
   const squash = (s) => String(s || "").replace(/\s+/g, " ").trim();
   const clean = (s) => squash(s).replace(/\(required\)/i, "").replace(/\s*[*✱]+\s*$/, "").replace(/\s*[*✱]+\s*$/, "").trim();
-  const scope = document.querySelector("form") || document.body;
+  // The form the runner chose (data-upmore-form, the one with its Submit), else the first form: never a sign-in form beside it.
+  const scope = document.querySelector("form[data-upmore-form]") || document.querySelector("form") || document.body;
   // Every match under a root, in document order, descending into open shadow roots (SmartRecruiters' components).
   const deepAll = (root, sel) => { const out = []; const walk = (n) => { for (const c of n.children) { if (c.matches(sel)) out.push(c); if (c.shadowRoot) walk(c.shadowRoot); walk(c); } }; walk(root); return out; };
   const rootOf = (el) => (el.getRootNode ? el.getRootNode() : document);
@@ -70,8 +71,16 @@ function EXTRACT() {
 
   const out = [];
   const seen = new Set();
-  let qn = 0;
-  const push = (d) => { d.q = qn++; out.push(d); return d.q; };
+  // A question keeps the number it was first tagged with: a later read (a field that appears after an upload, the sweep) never
+  // renumbers the page under answers already filled, so their last look reads their own boxes.
+  const tagged = deepAll(document, "[data-upmore-q]").map((e) => Number(e.getAttribute("data-upmore-q"))).filter(Number.isFinite);
+  let qn = tagged.length ? Math.max(...tagged) + 1 : 0;
+  const used = new Set();
+  const push = (d, els) => {
+    const had = els.map((e) => e.getAttribute("data-upmore-q")).find((v) => v != null);
+    d.q = had != null && !used.has(Number(had)) ? Number(had) : qn++;
+    used.add(d.q); out.push(d); return d.q;
+  };
   const all = deepAll(scope, "input, select, textarea");
 
   // Yes/No button pairs (Ashby): the hidden checkbox inside them is not a question of its own.
@@ -79,7 +88,7 @@ function EXTRACT() {
     const btns = [...box.querySelectorAll("button")];
     const node = groupLabelNode(box);
     const label = node ? nodeText(node) : "";
-    const q = push({ kind: "buttons", label, required: isReq([], node), eeo: eeoOf(box, label), options: btns.map((b, i) => ({ i, label: squash(b.textContent) })) });
+    const q = push({ kind: "buttons", label, required: isReq([], node), eeo: eeoOf(box, label), options: btns.map((b, i) => ({ i, label: squash(b.textContent) })) }, btns);
     btns.forEach((b, i) => { b.setAttribute("data-upmore-q", q); b.setAttribute("data-upmore-o", i); });
     box.querySelectorAll("input").forEach((x) => seen.add(x));
   }
@@ -95,13 +104,15 @@ function EXTRACT() {
     // the site's own shortcut, not a question. Neither is a question we fill.
     if (el.closest(".iti__country-container, .iti__flag-container, .iti__dropdown-content") || (el.getAttribute("role") === "combobox" && el.closest(".iti") && !el.classList.contains("iti__tel-input"))) continue;
     if (el.closest("[class*='autofill' i]")) continue;
+    // A honeypot (a typed box at opacity 0 out of the tab order: Teamtailor's "email without domain") is no question; left empty.
+    if (/^(text|email|tel|url|number|)$/.test(type) && el.tabIndex < 0 && Number(getComputedStyle(el).opacity) === 0) continue;
     if (type === "radio" || (type === "checkbox" && (el.closest("fieldset") || (el.name && rootOf(el).querySelectorAll(`input[type="checkbox"][name="${CSS.escape(el.name)}"]`).length > 1)))) {
       const fs = el.closest("fieldset");
       const mates = all.filter((x) => x.type === type && !seen.has(x) && (fs ? x.closest("fieldset") === fs : x.name === el.name));
       mates.forEach((x) => seen.add(x));
       const node = (fs && fs.querySelector("legend")) || groupLabelNode(el);
       const label = node ? nodeText(node) : clean(el.name);
-      const q = push({ kind: type === "radio" ? "radio" : "checkgroup", label, name: el.name || "", required: isReq(mates, node), eeo: eeoOf(el, label), options: mates.map((m, i) => ({ i, label: optLabel(m) })) });
+      const q = push({ kind: type === "radio" ? "radio" : "checkgroup", label, name: el.name || "", required: isReq(mates, node), eeo: eeoOf(el, label), options: mates.map((m, i) => ({ i, label: optLabel(m) })) }, mates);
       mates.forEach((m, i) => { m.setAttribute("data-upmore-q", q); m.setAttribute("data-upmore-o", i); });
       continue;
     }
@@ -125,7 +136,7 @@ function EXTRACT() {
     } else {
       d = { ...base, kind: "text", inputType: type };
     }
-    const q = push(d);
+    const q = push(d, [el]);
     el.setAttribute("data-upmore-q", q);
   }
   return out;
@@ -162,7 +173,8 @@ function INVALID() {
   // A required checkbox group is "at least one" in the site's own script; the browser marks each box invalid. One ticked is enough.
   const deepAll = (root, sel) => { const out = []; const walk = (n) => { for (const c of n.children) { if (c.matches(sel)) out.push(c); if (c.shadowRoot) walk(c.shadowRoot); walk(c); } }; walk(root); return out; };
   const groupTicked = (e) => e.type === "checkbox" && e.name && deepAll(document, `input[type="checkbox"]`).some((x) => x.name === e.name && x.checked);
-  return deepAll(document, "input:invalid, select:invalid, textarea:invalid").filter((e) => !groupTicked(e)).filter((e) => e.type === "file" || e.offsetWidth || e.offsetHeight || e.getClientRects().length).map((e) => ({
+  const root = document.querySelector("form[data-upmore-form]") || document;
+  return deepAll(root, "input:invalid, select:invalid, textarea:invalid").filter((e) => !groupTicked(e)).filter((e) => e.type === "file" || e.offsetWidth || e.offsetHeight || e.getClientRects().length).map((e) => ({
     q: e.getAttribute("data-upmore-q"), name: e.name || e.id || "", message: squash(e.validationMessage).slice(0, 80),
   }));
 }
@@ -174,11 +186,11 @@ const FACT_RULES = [
   [/^preferred (first )?name\b/, "preferred_name"],
   [/^(full |legal |your )?name$|^full legal name\b/, "full_name"],
   // The same question in the languages the benchmark's boards ask it in (German, Dutch, Spanish, French, Portuguese, Swedish).
-  [/^(vor und nachname|vollst ndiger name|volledige naam|nombre completo|nombre y apellidos?|nom complet|nome completo|fullst ndigt namn|namn)$/, "full_name"],
-  [/^e ?mail\b|^(e ?mail adresse|e ?mail adres|correo electr nico|direcci n de correo electr nico|adresse e ?mail|adresse (de )?courriel|e ?post(adress)?)$/, "email"],
+  [/^(vor und nachname|vollst ndiger name|volledige naam|nombre completo|nombre y apellidos?|nom complet|nome completo|fullst ndigt namn|namn|v rds uzv rds|vardas pavard)$/, "full_name"],
+  [/^e ?mail\b|^(e ?mail ?adres(se)?|e ?pasta adrese|e ?pasts|el pa to adresas|correo electr nico|direcci n de correo electr nico|adresse e ?mail|adresse (de )?courriel|e ?post(adress)?)$/, "email"],
   // R9: SmartRecruiters (and others) ask for the address twice; the second box takes the same confirmed address.
   [/^(confirm|re ?enter|retype|repeat|verify) (your )?e ?mail( address)?$/, "email"],
-  [/^(phone|mobile|telephone|cell)\b|^(telefon(nummer)?|telefoonnummer|tel fono|t l phone|handynummer|mobilnummer)$/, "phone"],
+  [/^(phone|mobile|telephone|cell)\b|^(telefon(nummer)?|telefoonnummer|tel fono|t l phone|handynummer|mobilnummer|t lru a numurs|telefono numeris)$/, "phone"],
   [/^(country|country of residence|land|pays|pa s)$/, "country"],
   [/^(current )?(company|employer|organi[sz]ation)\b/, "current_company"],
   [/^(current )?(job )?title\b/, "current_title"],
@@ -448,6 +460,27 @@ async function fillForm(page, ctx0) {
       if (r.detail) entry.detail = r.detail;
       // A required question we could not set is handed back with the reason; the person is asked, nothing is guessed.
       (ask ? needsUser : failed).push({ label: d.label, reason: r.reason, ...(r.options ? { options: r.options } : {}) });
+    }
+  }
+  // Settle: a form that redraws or clears its boxes after an upload (Personio: name and email read "" at the last look, strict
+  // run 42741525726) would post them empty. An approved answer the page wiped is filled once more from the same approved value
+  // and read back; one that will not stay is handed back. Only answers already decided are touched: nothing new is filled here.
+  await page.waitForTimeout(400);
+  {
+    const qsNow = await page.evaluate(EXTRACT).catch(() => []);
+    const byKey = new Map(qsNow.map((d) => [`${d.label}|${d.kind}|${d.name}`, d]));
+    for (const f of filled) {
+      if (!["text", "textarea"].includes(f.kind) || f.source === "resume") continue;
+      const st = await stateOf(page, f.d).catch(() => ({ gone: true }));
+      if (!st.gone && String(st.text || "").trim() === String(f.value).trim()) continue;
+      if (!st.gone && f.d.inputType === "tel" && st.filled) continue; // a phone box shows its own format; it was matched at fill
+      const d = st.gone ? byKey.get(`${f.d.label}|${f.d.kind}|${f.d.name}`) : f.d;
+      let r = { ok: false, reason: "answer_did_not_stay" };
+      if (d) { try { r = await fillText(page, d, f.value); } catch (e) { r = { ok: false, reason: "answer_did_not_stay" }; } }
+      // It has to stay, not only read back the instant after typing.
+      if (r.ok) { await page.waitForTimeout(400); const again = await stateOf(page, d).catch(() => ({ gone: true })); if (again.gone || String(again.text || "").trim() !== String(f.value).trim()) r = { ok: false, reason: "answer_did_not_stay" }; }
+      if (r.ok) { f.d = d; continue; }
+      needsUser.push({ label: f.label, reason: "answer_did_not_stay" });
     }
   }
   // Sweep: a required question still empty that we did not already account for is handed back, not ignored.

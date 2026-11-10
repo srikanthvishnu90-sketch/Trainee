@@ -31,7 +31,7 @@
 //    (the owner-run approve-first path), and this module never discovers or logs in anywhere.
 const fs = require("node:fs");
 const { fillForm, heldNow } = require("./ats-fill.cjs");
-const { APPLY_TEXT, NEVER_CLICK, applyUrlFor } = require("./apply-entry.cjs");
+const { APPLY_TEXT, NEVER_CLICK, SEND_APPLY, applyUrlFor } = require("./apply-entry.cjs");
 const crypto = require("node:crypto");
 
 const sha256 = (b) => crypto.createHash("sha256").update(b).digest("hex");
@@ -159,11 +159,12 @@ const FIELD_SEL = "form input, form select, form textarea, input[type=file], inp
 async function openApply(page, timeout) {
   // Job pages repeat their Apply control (top and bottom of the posting): several controls are one control when they all lead
   // to the same address. Controls that lead to different places, or buttons with no address, stay ambiguous unless there is one.
-  const h = (await page.evaluateHandle(([at, nc]) => {
-    const re = new RegExp(at, "i"), never = new RegExp(nc, "i");
+  const h = (await page.evaluateHandle(([at, nc, sa]) => {
+    const re = new RegExp(at, "i"), never = new RegExp(nc, "i"), so = new RegExp(sa, "i");
     const c = [...document.querySelectorAll("a, button, [role=button]")].filter((e) => {
       const t = (e.innerText || e.getAttribute("aria-label") || "").trim();
-      return !e.closest("form") && (e.offsetWidth || e.offsetHeight) && re.test(t) && !never.test(t);
+      // A control with no form owner cannot send one; Teamtailor words its Apply "Enviar solicitud" / "Skicka ansökan".
+      return !e.closest("form") && !e.form && (e.offsetWidth || e.offsetHeight) && re.test(t) && (!never.test(t) || so.test(t));
     });
     if (!c.length) return null;
     // Repeats of one control: every link goes to the same address and every button carries a link's words (Personio), or
@@ -178,7 +179,7 @@ async function openApply(page, timeout) {
     if (!pick) return null;
     pick.removeAttribute("target");
     return pick;
-  }, [APPLY_TEXT.source, NEVER_CLICK.source])).asElement();
+  }, [APPLY_TEXT.source, NEVER_CLICK.source, SEND_APPLY.source])).asElement();
   if (!h) return false;
   await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded", timeout }).catch(() => null), h.click()]);
   // A board that renders its form in place (no navigation) gets a moment to draw it.
@@ -291,13 +292,19 @@ async function attempt(browser, p, opts, timing) {
     const markSubmit = () => page.evaluate(() => {
       const vis = (e) => !!(e.offsetWidth || e.offsetHeight) && getComputedStyle(e).visibility !== "hidden";
       for (const e of document.querySelectorAll("[data-upmore-submit]")) e.removeAttribute("data-upmore-submit");
-      const forms = [...document.querySelectorAll("form")].filter((f) => f.querySelector("input, select, textarea"));
-      const word = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$|^\s*(bewerbung )?(absenden|senden)\s*$|^\s*(envoyer|enviar|verzenden|skicka)( .{0,20})?$/i;
+      // A form is an application only when it shows a field a person fills: Teamtailor's Connect sign-in form (hidden token, a
+      // "Log in" button and a honeypot box at opacity 0 out of the tab order; DOM dump run 42735927546) is not one.
+      for (const e of document.querySelectorAll("[data-upmore-form]")) e.removeAttribute("data-upmore-form");
+      const honeypot = (e) => e.tabIndex < 0 && Number(getComputedStyle(e).opacity) === 0 && e.type !== "file";
+      const fieldShown = (e) => e.type !== "hidden" && (e.type === "file" || (vis(e) && !honeypot(e)));
+      const forms = [...document.querySelectorAll("form")].filter((f) => [...f.querySelectorAll("input, select, textarea")].some(fieldShown));
+      // The Send words in the boards' own languages (Recruitee "Versturen", "Sūtīt"; strict run 42719264485, form found but no Submit).
+      const word = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$|^\s*(bewerbung )?(absenden|senden)\s*$|^\s*(envoyer|enviar|verzenden|skicka)( .{0,20})?$|^\s*(versturen|verstuur|indienen|s[uū]t[iī]t|iesniegt|si[uų]sti|pateikti)\s*$/i;
       for (const f of forms) {
         const typed = [...f.querySelectorAll("button[type=submit], button:not([type]), input[type=submit]")].filter(vis);
         const worded = [...f.querySelectorAll("button, [role=button], input[type=button]")].filter((b) => vis(b) && word.test(b.innerText || b.value || ""));
         const pick = worded.length === 1 ? worded[0] : typed.length === 1 ? typed[0] : worded.find((b) => typed.includes(b)) || null;
-        if (pick) { pick.setAttribute("data-upmore-submit", "1"); return true; }
+        if (pick) { pick.setAttribute("data-upmore-submit", "1"); f.setAttribute("data-upmore-form", "1"); return true; }
       }
       // A board that builds its application without a <form> (Ashby: every posting, strict benchmark run 42712892939, forms=0 with
       // 19 to 48 fields): the page is the form when it has no form of its own, asks for a file or an email, and has exactly one
@@ -314,8 +321,11 @@ async function attempt(browser, p, opts, timing) {
     if (!(await page.waitForSelector(FIELD_SEL, { timeout: 5000 }).catch(() => null))) {
       const direct = applyUrlFor(p.ats, page.url());
       if (direct) {
-        try { await page.goto(direct, { waitUntil: "domcontentloaded" }); } catch (e) { onAllowedHost(); throw e; }
+        let dr;
+        try { dr = await page.goto(direct, { waitUntil: "domcontentloaded" }); } catch (e) { onAllowedHost(); throw e; }
         onAllowedHost();
+        // The apply address refused the load (Recruitee /c/new 429, run 42719264485): that, not "no form", is the outcome.
+        if (dr && dr.status() >= 400) throw new Error(`page_load_${dr.status()}`);
         await page.waitForSelector(FIELD_SEL, { timeout: 8000 }).catch(() => null);
         { const shown = await botCheck(page); if (shown) { const e = new NeedsUser("bot_check", p.url); e.detail = shown; throw e; } }
         await stopAtWall(page, p.url);
@@ -339,6 +349,8 @@ async function attempt(browser, p, opts, timing) {
       e.needs = fr.needsUser.map((n) => ({ label: n.label, reason: n.reason, ...(Array.isArray(n.options) ? { options: n.options.slice(0, 60) } : {}) }));
       throw e;
     }
+    // A form where nothing was filled is not an application (Teamtailor's sign-in form passed strict run 42719264485 this way).
+    if (!fr.filled.length) throw new NeedsUser("no_application_form_found", p.url);
     if (fr.invalid.length) { const e = new NeedsUser("field_not_filled", fr.invalid[0].name); e.needs = fr.invalid.map((n) => ({ label: n.name, reason: "form_rejects_value" })); throw e; }
     // An optional question whose approved answer could not be set and read back (readback_mismatch, fill_error) is not a
     // question to skip: the field may hold something the person never approved. Handed back like a required one; nothing is sent
@@ -362,7 +374,12 @@ async function attempt(browser, p, opts, timing) {
     if (opts.shotBefore) await page.screenshot({ path: opts.shotBefore, fullPage: true });
     // The caller records "submitting" (and re-checks its lease and kill switch) BEFORE the click; a refusal stops here, unsent.
     // A dry run's audit (opts.audit) also gets what each filled question holds at this instant; production passes only the phase.
-    if (opts.onPhase) await opts.onPhase("submitting", opts.audit ? { id: p.id, fields: await heldNow(page, fr.filled) } : undefined);
+    // The audit also names the control about to be pressed and whether the page shows a password box (strict: a login is no Submit).
+    if (opts.onPhase) await opts.onPhase("submitting", opts.audit ? { id: p.id, fields: await heldNow(page, fr.filled), ...(await page.evaluate(() => {
+      const b = document.querySelector("[data-upmore-submit]");
+      const shown = (e) => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+      return { submit: String((b && (b.innerText || b.value || b.getAttribute("aria-label"))) || "").replace(/\s+/g, " ").trim().slice(0, 80), password_field: [...document.querySelectorAll("input[type=password]")].some(shown) };
+    }).catch(() => ({ submit: "", password_field: null }))) } : undefined);
     // Past this line nothing is retried: the employer may have received it.
     const t2 = Date.now();
     timing.submitClicked = true;

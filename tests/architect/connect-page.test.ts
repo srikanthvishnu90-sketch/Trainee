@@ -55,9 +55,19 @@ const get = (d: ConnectDeps, url: string, headers: Record<string, string> = {}) 
 let jar = "";
 const post = (d: ConnectDeps, fields: Record<string, string>, headers: Record<string, string> = {}) =>
   handleConnect(new Request(BASE, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", ...(jar ? { cookie: jar } : {}), ...headers }, body: new URLSearchParams(fields).toString() }), d);
-// Opens the single-use link the way a browser does: GET ?t= -> 303 + cookie -> GET with the cookie.
+// Architect amendment, security: link scanners (x-audit, coordinator ruling 2026-11-10). A GET ?t= draws the open page and
+// uses nothing up; its one button POSTs the link with the page token, which takes the link (303 + cookie); a second POST is
+// 410. Opens the single-use link the way a person does: GET ?t= -> 200 page -> POST its form -> 303 + cookie -> GET with it.
+async function tap(d: ConnectDeps, t: string) {
+  const shown = await get(d, `${BASE}?t=${encodeURIComponent(t)}`);
+  if (shown.status !== 200) return shown;
+  const html = await shown.text();
+  const f = { link: /name="link" value="([^"]+)"/.exec(html)?.[1] ?? "", pt: /name="pt" value="([^"]+)"/.exec(html)?.[1] ?? "" };
+  if (!f.link) return new Response(html, { status: 299 }); // not the open page (a preview card): no button to press
+  return post(d, f);
+}
 async function open(d: ConnectDeps, t?: string) {
-  const first = await get(d, `${BASE}?t=${encodeURIComponent(t ?? (await link())!)}`);
+  const first = await tap(d, t ?? (await link())!);
   if (first.status !== 303) return { first, page: first, html: await first.text(), cookie: "" };
   const cookie = (first.headers.get("set-cookie") ?? "").split(";")[0];
   const page = await get(d, BASE, { cookie });
@@ -165,8 +175,8 @@ Deno.test("the signed link works once; a second use, an expired one and a tamper
   assert(prev.includes('property="og:title"') && prev.includes('property="og:description"'), "the preview card");
   assert(/so I can/i.test(prev) || /replies/i.test(prev), "the card says why");
   assert(!prev.includes(U) && !/class="primary"/.test(prev), "nothing about the person, no action");
-  eq((await get(d, `${BASE}?t=${encodeURIComponent(t)}`)).status, 303, "the crawler did not use it up");
-  const again = await get(d, `${BASE}?t=${encodeURIComponent(t)}`);
+  eq((await tap(d, t)).status, 303, "the crawler did not use it up");
+  const again = await tap(d, t);
   eq(again.status, 410); assert(/already used/i.test(await again.text()));
   const old = await link(U, "replies", NOW - CONNECT_TTL_MS - 5000);
   const exp = await get(d, `${BASE}?t=${encodeURIComponent(old!)}`);
@@ -175,7 +185,7 @@ Deno.test("the signed link works once; a second use, an expired one and a tamper
   eq((await get(d, `${BASE}?t=${encodeURIComponent(t.slice(0, -3) + "AAA")}`)).status, 403);
   eq((await get(d, BASE)).status, 403, "no link, no cookie: nothing");
   eq((await get(d, BASE, { cookie: "tc_s=garbage" })).status, 403);
-  eq((await get(mem().d, `${BASE}?t=${encodeURIComponent(t)}`)).status, 303, "a fresh store has not seen it");
+  eq((await tap(mem().d, t)).status, 303, "a fresh store has not seen it");
   // not configured: no secret
   const bare = mem().d; bare.env = { get: () => undefined };
   eq((await get(bare, `${BASE}?t=${encodeURIComponent(t)}`)).status, 503);
@@ -357,7 +367,7 @@ Deno.test("the OAuth callbacks land on the page's done state once it is switched
   assert(/landing: \(o\) => connectLanding\(Deno\.env, \{ provider: "microsoft"/.test(o));
 });
 
-Deno.test("the one-time link survives HEAD, scanners and fetchers with no browser identity; only a browser GET takes it", async () => {
+Deno.test("the one-time link survives HEAD, scanners and fetchers with no browser identity; only the page's button takes it", async () => {
   const { d } = mem();
   const t = (await link())!, u = `${BASE}?t=${encodeURIComponent(t)}`;
   const head = await handleConnect(new Request(u, { method: "HEAD", headers: { "user-agent": BROWSER } }), d);
@@ -367,8 +377,8 @@ Deno.test("the one-time link survives HEAD, scanners and fetchers with no browse
     eq(r.status, 200, `scanner "${ua}" gets the preview`);
     assert(!/class="primary"/.test(await r.text()), "and no action");
   }
-  eq((await get(d, u)).status, 303, "after all that, the person's own tap still works");
-  eq((await get(d, u)).status, 410, "and only once");
+  eq((await tap(d, t)).status, 303, "after all that, the person's own tap still works");
+  eq((await tap(d, t)).status, 410, "and only once");
 });
 
 Deno.test("an error is logged without the link token", async () => {
@@ -429,4 +439,30 @@ Deno.test("the page never prints its session: a scraped page token without the c
   eq((await raw({ t: mt, init: await signedInit("778", NOW / 1000 - 30), action: "start", provider: "google" })).status, 401, "another Telegram user's data");
   eq(log.started.length, 1, "only the one start with its own cookie");
   eq((await raw({ t: mt, init: await signedInit("777", NOW / 1000 - 30), action: "start", provider: "google" })).status, 303, "with its own Telegram data");
+});
+
+// x-audit (2026-11-10), architect amendment, security: link scanners. A scanner that looks exactly like a browser (Safe
+// Links, Defender, Proofpoint detonation) fetches the link any number of times; the link stays the person's to use.
+Deno.test("any number of GETs, even with a browser's identity, use nothing up; only the page's POST with its token takes the link, once", async () => {
+  const { d } = mem();
+  const t = (await link())!, u = `${BASE}?t=${encodeURIComponent(t)}`;
+  let shown = "";
+  for (let i = 0; i < 25; i++) {
+    const r = await get(d, u);
+    eq(r.status, 200, `GET ${i + 1} draws the page`);
+    shown = await r.text();
+    assert(!r.headers.get("set-cookie"), "a GET never signs anyone in");
+  }
+  eq(count(shown, /class="primary"/g), 1, "one button");
+  const pt = /name="pt" value="([^"]+)"/.exec(shown)![1];
+  eq((await post(d, { link: t })).status, 403, "the link without the page token takes nothing");
+  eq((await post(d, { link: t, pt: pt.slice(0, -2) + "xx" })).status, 403, "a forged page token takes nothing");
+  const other = (await link())!;
+  eq((await post(d, { link: other, pt })).status, 403, "a page token is for its own link only");
+  const ok = await post(d, { link: t, pt });
+  eq(ok.status, 303, "the button takes the link");
+  assert(/^tc_s=/.test(ok.headers.get("set-cookie") ?? "") && /HttpOnly/.test(ok.headers.get("set-cookie") ?? ""), "and signs in with an HttpOnly cookie");
+  assert(!(ok.headers.get("location") ?? "").includes("c1."), "the token never stays in the URL");
+  eq((await post(d, { link: t, pt })).status, 410, "a second POST: already used");
+  eq((await get(d, u)).status, 200, "a GET after it still uses nothing (and says nothing new)");
 });

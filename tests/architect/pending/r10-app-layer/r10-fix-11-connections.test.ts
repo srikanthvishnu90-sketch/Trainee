@@ -34,7 +34,11 @@ const keep = (res: Response) => { const r = relayPageCsp(res); CSP = pageCsp(r.h
 const shot = (h: string, name: string) => renderPhone(h, name, undefined, { csp: CSP });
 async function session(d: ConnectDeps) {
   const t = await mintConnectToken({ secret: SECRET, userId: U, reason: "replies", channel: "telegram", now: Date.now(), kind: "l" });
-  const first = await handleConnect(new Request(`${BASE}?t=${encodeURIComponent(t!)}`, { headers: { "user-agent": BROWSER } }), d);
+  // Architect amendment, security: link scanners (x-audit, coordinator ruling 2026-11-10): the GET draws the open page (nothing
+  // used up); its one button posts the link with the page token, which takes the link (303 + cookie).
+  const shown = await (await handleConnect(new Request(`${BASE}?t=${encodeURIComponent(t!)}`, { headers: { "user-agent": BROWSER } }), d)).text();
+  const first = await handleConnect(new Request(BASE, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", "user-agent": BROWSER },
+    body: new URLSearchParams({ link: /name="link" value="([^"]+)"/.exec(shown)?.[1] ?? "", pt: /name="pt" value="([^"]+)"/.exec(shown)?.[1] ?? "" }).toString() }), d);
   if (first.status !== 303) return { html: await first.text(), cookie: "" };
   const cookie = (first.headers.get("set-cookie") ?? "").split(";")[0];
   return { html: await keep(await handleConnect(new Request(BASE, { headers: { "user-agent": BROWSER, cookie } }), d)).text(), cookie };

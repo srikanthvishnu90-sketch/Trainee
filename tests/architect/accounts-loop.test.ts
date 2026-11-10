@@ -347,7 +347,12 @@ async function connectWalks(bot: boolean) {
   const t = await w.link(U);
   const preview = await w.go(`?t=${encodeURIComponent(t)}`, undefined, "TelegramBot (like TwitterBot)");
   check("unrefused", preview.r.status === 200 && !w.jar.has("tc_s") && !/Continue with/.test(preview.html), `${tag} a link preview: the card, the link not used up`);
-  const open = await w.go(`?t=${encodeURIComponent(t)}`);
+  // Architect amendment, security: link scanners (x-audit, coordinator ruling 2026-11-10): a GET of the link draws the open page
+  // and uses nothing up; its one button posts the link with the page token, which takes the link.
+  const shown = await w.go(`?t=${encodeURIComponent(t)}`);
+  check("unrefused", shown.r.status === 200 && !w.jar.has("tc_s") && /name="pt" value="co1\./.test(shown.html), `${tag} link: the open page, nothing used up`);
+  const button = { link: shown.html.match(/name="link" value="([^"]+)"/)?.[1] ?? "", pt: shown.html.match(/name="pt" value="([^"]+)"/)?.[1] ?? "" };
+  const open = await w.go("", button);
   check("unrefused", open.r.status === 303 && w.jar.has("tc_s") && open.r.headers.get("location") === "/connect", `${tag} link: one session cookie, a clean URL`);
   const consent = await w.go("");
   // The session lives in the HttpOnly tc_s cookie; a page that prints it hands it to anything that reads or saves the page.
@@ -409,7 +414,10 @@ async function connectWalks(bot: boolean) {
   }
   // the used link again, in another browser
   w.jar.clear();
-  const again = await w.go(`?t=${encodeURIComponent(t)}`); connectRefused(w, again.html, again.r.status, `${tag} the used link`);
+  // Architect amendment, security: link scanners (2026-11-10): a GET draws the open page; its button is refused once the link is used.
+  const againShown = await w.go(`?t=${encodeURIComponent(t)}`);
+  const again = await w.go("", { link: againShown.html.match(/name="link" value="([^"]+)"/)?.[1] ?? "", pt: againShown.html.match(/name="pt" value="([^"]+)"/)?.[1] ?? "" });
+  connectRefused(w, again.html, again.r.status, `${tag} the used link`);
   // the Mini App: unsigned and unlinked open nothing
   const un = await w.go("", { init: "user=%7B%22id%22%3A7101%7D&hash=00" }); connectRefused(w, un.html, un.r.status, `${tag} Mini App: unsigned data`);
   const ul = await w.go("", { init: await signedInit("7999", T0 / 1000, BOT_TOKEN) }); check("unrefused", ul.r.status === 403 && !/Continue with/.test(ul.html), `${tag} Mini App: an unlinked Telegram account`);

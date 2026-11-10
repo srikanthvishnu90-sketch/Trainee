@@ -68,9 +68,100 @@ async function getBrowser() {
     ...(process.env.UPMORE_CHROMIUM_PATH ? { executablePath: process.env.UPMORE_CHROMIUM_PATH } : {}) };
   if (SANDBOX_OFF) { launchOpts.args = ["--no-sandbox"]; }
   else { launchOpts.chromiumSandbox = true; }
-  browser = await pw.chromium.launch(launchOpts);
+  const launched = await pw.chromium.launch(launchOpts);
+  // No context exists before the tab guard holds: a browser without it is never handed out.
+  try { tabGuard = await installTabGuard(launched); } catch (e) { await launched.close().catch(() => {}); throw e; }
+  browser = launched;
   return browser;
 }
+// Tab guard (x-audit follow-up, 2026-11-10): only a driven page (one per board) loads anything. A tab the page opens
+// (target=_blank, window.open, window.open("") then location) never reaches the network, at the BROWSER level.
+// Why not context.route alone: Playwright intercepts a new tab on that tab's own DevTools session, and closing the tab
+// (the helper does at once; a page can too, w.close()) tears that session down. Chromium then lets the request it held
+// go, and it can reach the host before the navigation is cancelled. Measured under CPU load on Chrome: about 1 in 13
+// runs of tests/career-portal-popup-gate.test.cjs reached /jobs/view/1?w=2, and the route never saw that request.
+// This layer is a Fetch interception on the browser target, enabled before any context exists. No tab owns it, so no
+// tab closing can release a request it holds. It decides by frame:
+//   - a driven page's main frame (its frame id is its target id): continue; context.route below still applies;
+//   - the main frame of any other tab (a page target the guard saw created; targets are announced before their
+//     requests, on this same session): refused;
+//   - a subframe: refused when it sits in another live tab's frame tree (or that tab can't be read), else continue.
+// A refused request ends here; it is never continued, so nothing from another tab leaves the machine.
+async function installTabGuard(b) {
+  const cdp = await b.newBrowserCDPSession();
+  const driven = new Set();      // target ids of driven pages
+  const otherTabs = new Set();   // target ids of every other page target ever seen (never removed)
+  const liveOther = new Set();   // the ones not yet destroyed
+  const frameVerdict = new Map(); // subframe id -> "ok" | "refuse" (a frame never moves to another tab)
+  let msgId = 0;
+  const notePage = (info) => {
+    if (!info || info.type !== "page" || driven.has(info.targetId)) return;
+    otherTabs.add(info.targetId); liveOther.add(info.targetId);
+  };
+  cdp.on("Target.targetCreated", (e) => notePage(e.targetInfo));
+  cdp.on("Target.targetInfoChanged", (e) => notePage(e.targetInfo));
+  cdp.on("Target.targetDestroyed", (e) => { liveOther.delete(e.targetId); });
+  // The frame ids in another tab, read on a short-lived session of its own (it cannot affect that tab's requests).
+  const framesOf = async (targetId) => {
+    const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: false });
+    try {
+      const id = ++msgId;
+      const reply = new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { cdp.off("Target.receivedMessageFromTarget", on); reject(new Error("FRAME_TREE_TIMEOUT")); }, 1000);
+        const on = (m) => {
+          if (m.sessionId !== sessionId) return;
+          let msg; try { msg = JSON.parse(m.message); } catch (e) { return; }
+          if (msg.id !== id) return;
+          clearTimeout(timer); cdp.off("Target.receivedMessageFromTarget", on);
+          if (msg.error || !msg.result) reject(new Error("FRAME_TREE_UNREADABLE")); else resolve(msg.result.frameTree);
+        };
+        cdp.on("Target.receivedMessageFromTarget", on);
+      });
+      await cdp.send("Target.sendMessageToTarget", { sessionId, message: JSON.stringify({ id, method: "Page.getFrameTree" }) });
+      const ids = [];
+      const walk = (n) => { ids.push(n.frame.id); (n.childFrames || []).forEach(walk); };
+      walk(await reply);
+      return ids;
+    } finally { cdp.send("Target.detachFromTarget", { sessionId }).catch(() => {}); }
+  };
+  const allowed = async (frameId) => {
+    if (driven.has(frameId)) return true;
+    if (otherTabs.has(frameId)) return false;
+    // Not a tab announced on this session: re-read the targets once (they are browser-side and answer at once).
+    try { for (const t of (await cdp.send("Target.getTargets")).targetInfos) notePage(t); } catch (e) { return false; }
+    if (driven.has(frameId)) return true;
+    if (otherTabs.has(frameId)) return false;
+    if (!frameId) return false;
+    if (frameVerdict.has(frameId)) return frameVerdict.get(frameId) === "ok";
+    for (const tab of [...liveOther]) {
+      let ids;
+      try { ids = await framesOf(tab); } catch (e) { if (!liveOther.has(tab)) continue; return false; }
+      if (ids.includes(frameId)) { frameVerdict.set(frameId, "refuse"); return false; }
+    }
+    frameVerdict.set(frameId, "ok");
+    return true;
+  };
+  cdp.on("Fetch.requestPaused", (e) => {
+    allowed(e.frameId).catch(() => false).then((ok) => ok
+      ? cdp.send("Fetch.continueRequest", { requestId: e.requestId })
+      : cdp.send("Fetch.failRequest", { requestId: e.requestId, errorReason: "BlockedByClient" })).catch(() => {});
+  });
+  await cdp.send("Target.setDiscoverTargets", { discover: true });
+  await cdp.send("Fetch.enable", { patterns: [{ urlPattern: "*", requestStage: "Request" }] });
+  return {
+    // Called before the driven page makes its first request (a new page is about:blank until the board opens a URL).
+    async drive(page) {
+      const s = await page.context().newCDPSession(page);
+      try {
+        const { targetInfo } = await s.send("Target.getTargetInfo");
+        driven.add(targetInfo.targetId); otherTabs.delete(targetInfo.targetId); liveOther.delete(targetInfo.targetId);
+        return targetInfo.targetId;
+      } finally { await s.detach().catch(() => {}); }
+    },
+    release(targetId) { driven.delete(targetId); },
+  };
+}
+let tabGuard = null;
 // §6.3 hop gate (BUG-060 / D1): the allowlist holds on EVERY main-frame
 // navigation, not just the URL module 150 was asked to open. Boards
 // redirect off their own host (Greenhouse -> the employer's site); the
@@ -92,7 +183,10 @@ async function getBoard(boardId) {
     const b = await getBrowser();
     const context = await b.newContext({ viewport: { width: 1280, height: 900 }, serviceWorkers: "block" });
     const page = await context.newPage();
-    const entry = { context, page, url: null, blockedNav: null, submitInProgress: false, scope: null, mutationSent: false };
+    // The tab guard learns this page is the board's driven tab before it can make a request (getBrowser above).
+    let guardId;
+    try { guardId = await tabGuard.drive(page); } catch (e) { await context.close().catch(() => {}); throw e; }
+    const entry = { context, page, guardId, url: null, blockedNav: null, submitInProgress: false, scope: null, mutationSent: false };
     boards.set(boardId, entry);
     // Redirect hops never pass through page.route (a 302 target is part
     // of the initial request chain in Chromium/Playwright), but they DO
@@ -107,7 +201,8 @@ async function getBoard(boardId) {
       } catch (e) { /* frame may be gone; the final-URL gate still decides */ }
     });
     // x-audit (2026-11-10): a new tab (target=_blank, window.open) is never driven or loaded. It is closed at once, and
-    // every navigation it makes is refused below, so a LinkedIn tab opened by an Apply control never reaches LinkedIn.
+    // every request it makes is refused by the browser-level tab guard (installTabGuard), which closing cannot undo; the
+    // route below refuses them too, so a LinkedIn tab opened by an Apply control never reaches LinkedIn.
     context.on("page", (other) => { if (other !== page) other.close().catch(() => {}); });
     await context.route("**/*", async (route) => {
       try {
@@ -1101,7 +1196,7 @@ async function execute(boardId, cmd) {
     case "review": return await cmdReview(board, cmd);
     case "submit_and_capture": return await cmdSubmitCapture(board, cmd);
     case "screenshot": await board.page.screenshot({ path: cmd.path, fullPage: true, ...maskedShot(board.page) }); return { path: cmd.path };
-    case "close": await board.context.close().catch(() => {}); boards.delete(boardId); return { ok: true };
+    case "close": await board.context.close().catch(() => {}); if (tabGuard) tabGuard.release(board.guardId); boards.delete(boardId); return { ok: true };
     default: throw Object.assign(new Error("unknown command " + cmd.type), { code: "BAD_COMMAND" });
   }
 }
@@ -1143,7 +1238,7 @@ module.exports.createSession = async () => {
   return {
     send: cmd => { active();if (cmd.type === "shutdown") throw new Error("SESSION_COMMAND_REFUSED");return execute(boardId, { ...cmd, boardId }); },
     page: async () => { active();return (await getBoard(boardId)).page; },
-    async close() { if (closed) return;closed = true;if (boards.has(boardId)) await execute(boardId, { type: "close", boardId });if (!boards.size && browser) { await browser.close();browser = null; } },
+    async close() { if (closed) return;closed = true;if (boards.has(boardId)) await execute(boardId, { type: "close", boardId });if (!boards.size && browser) { await browser.close();browser = null;tabGuard = null; } },
   };
 };
 if (require.main === module) {

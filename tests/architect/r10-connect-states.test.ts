@@ -50,8 +50,18 @@ const get = (d: ConnectDeps, url: string, headers: Record<string, string> = {}) 
 // Architect amendment, security (item 14, 2026-11-10): the page's forms carry a page token bound to the HttpOnly cookie, so a form is
 // posted with the browser's cookie, as a browser does (the cookie of the last page opened, unless one is given).
 let jar = "";
+// Architect amendment, security: link scanners (x-audit, coordinator ruling 2026-11-10). A GET of the link draws the open page
+// (200, nothing used up); its one button POSTs the link with the page token, which takes the link: 303 + cookie, once.
+async function tap(d: ConnectDeps, url: string) {
+  const shown = await get(d, url);
+  if (shown.status !== 200) return shown;
+  const html = await shown.text();
+  const link = /name="link" value="([^"]+)"/.exec(html)?.[1], pt = /name="pt" value="([^"]+)"/.exec(html)?.[1];
+  if (!link || !pt) return new Response(html, { status: 299 });
+  return handleConnect(new Request(url.split("?")[0], { method: "POST", headers: { "user-agent": BROWSER, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ link, pt }).toString() }), d);
+}
 async function open(d: ConnectDeps, t?: string) {
-  const first = await get(d, `${BASE}?t=${encodeURIComponent(t ?? (await link())!)}`);
+  const first = await tap(d, `${BASE}?t=${encodeURIComponent(t ?? (await link())!)}`);
   const cookie = (first.headers.get("set-cookie") ?? "").split(";")[0];
   jar = cookie;
   return await (await get(d, BASE, { cookie })).text();
@@ -143,7 +153,7 @@ Deno.test("R10 fix 11 opening a link without sign-in never shows an address or a
   const pages: [string, Response][] = [
     ["bare /connect", await get(w.d, BASE)],
     ["expired", await get(w.d, `${BASE}?t=${encodeURIComponent(expired)}`)],
-    ["used", await get(w.d, `${BASE}?t=${encodeURIComponent(once)}`)],
+    ["used", await tap(w.d, `${BASE}?t=${encodeURIComponent(once)}`)],
     ["tampered", await get(w.d, `${BASE}?t=${encodeURIComponent(once.slice(0, -4) + "AAAA")}`)],
     ["a link preview", await handleConnect(new Request(`${BASE}?t=${encodeURIComponent((await link())!)}`, { headers: { "user-agent": "TelegramBot (like TwitterBot)" } }), w.d)],
     ["a session for someone else", await get(w.d, BASE, { cookie: `tc_s=${await mintConnectToken({ secret: SECRET, userId: V, reason: "replies", channel: "telegram", now: NOW, kind: "s" })}` })],
@@ -161,7 +171,7 @@ Deno.test("R10 fix 11 opening a link without sign-in never shows an address or a
 
 Deno.test("R10 fix 11 a consent started and never finished: coming back says 'Connecting didn't finish' with Resume and Cancel; Resume starts it again, Cancel clears it", async () => {
   const w = world();
-  const first = await get(w.d, `${BASE}?t=${encodeURIComponent((await link())!)}`);
+  const first = await tap(w.d, `${BASE}?t=${encodeURIComponent((await link())!)}`);
   const session = (first.headers.get("set-cookie") ?? "").split(";")[0];
   const consent = await (await get(w.d, BASE, { cookie: session })).text();
   // Continue with Google: off to Google, and the page remembers the consent was started

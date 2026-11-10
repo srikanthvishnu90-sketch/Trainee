@@ -266,9 +266,15 @@ async function attempt(browser, p, opts, timing) {
   // A benchmark's dry run (scripts/browser-eval/strict.cjs) adds its own guard on every request and a page script that cancels
   // any form submit; production passes neither.
   if (opts.initScript) await ctx.addInitScript(opts.initScript);
-  await ctx.route("**/*", async (route) => {
+  // A request still being judged when its page or context closes (a timeout's teardown) rejects inside the route handler: that
+  // request is dropped (aborted, never continued), and the rejection never escapes as an unhandled one that would end the
+  // whole worker process with every other posting it holds (strict heldout run 42772190953: "route.fetch: Request context
+  // disposed").
+  await ctx.route("**/*", (route) => guardRoute(route).catch(() => route.abort("blockedbyclient").catch(() => {})));
+  async function guardRoute(route) {
     const req = route.request();
-    if (opts.requestGate && !(await opts.requestGate(req))) return route.abort("blockedbyclient");
+    // A gate may answer a request inside the browser itself (the strict benchmark's simulated resume upload): nothing is sent.
+    if (opts.requestGate) { const gv = await opts.requestGate(req); if (gv && typeof gv === "object" && gv.fulfill) return route.fulfill(gv.fulfill); if (!gv) return route.abort("blockedbyclient"); }
     if (!req.isNavigationRequest()) return route.continue();
     let sub = false;
     try { sub = !!req.frame().parentFrame(); } catch { /* no frame (service worker): judged as top-level */ }
@@ -284,7 +290,7 @@ async function attempt(browser, p, opts, timing) {
       if (!next.ok) { blocked.push(next.host); blockedUrls.push(to); return route.abort("blockedbyclient"); }
     }
     return route.fulfill({ response: resp });
-  });
+  }
   const onAllowedHost = () => {
     // An employer that sends the candidate to its SSO: a sign-in wall the person finishes themselves, not a refused host.
     if (blocked.length && ssoSignIn(blockedUrls[0])) throw new NeedsUser("login_required", blocked[0], "sso_redirect");
@@ -324,7 +330,22 @@ async function attempt(browser, p, opts, timing) {
       }
       return false;
     });
-    const hasForm = async () => !!(await page.$(FIELD_SEL)) && (await markSubmit());
+    // A form shown in steps (Breezy: strict benchmark run 42735825405, 4 postings): one visible "Continue" (type=button, so pressing
+    // it posts nothing; the page's own script shows the next step) with the form's Submit drawn but hidden until the last step.
+    // Marked data-upmore-next. Two such controls, a submit-typed one, or no hidden Submit beside it: not a step form.
+    const markNext = () => page.evaluate(() => {
+      const vis = (e) => !!(e.offsetWidth || e.offsetHeight) && getComputedStyle(e).visibility !== "hidden";
+      for (const e of document.querySelectorAll("[data-upmore-next]")) e.removeAttribute("data-upmore-next");
+      const next = /^\s*(continue|next|next step|weiter|suivant|siguiente|volgende|avanti|pr[oó]ximo)\s*[›»>→]?\s*$/i;
+      const submitWord = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$/i;
+      for (const f of [...document.querySelectorAll("form")].filter((x) => x.querySelector("input, select, textarea"))) {
+        const nexts = [...f.querySelectorAll("button, [role=button], input[type=button]")].filter((b) => vis(b) && next.test(b.innerText || b.value || ""));
+        const hiddenSubmit = [...f.querySelectorAll("button, input[type=submit], input[type=button]")].some((b) => !vis(b) && submitWord.test(b.innerText || b.value || ""));
+        if (nexts.length === 1 && hiddenSubmit && (nexts[0].tagName !== "BUTTON" || nexts[0].getAttribute("type") === "button") && nexts[0].getAttribute("type") !== "submit") { nexts[0].setAttribute("data-upmore-next", "1"); return true; }
+      }
+      return false;
+    });
+    const hasForm = async () => !!(await page.$(FIELD_SEL)) && ((await markSubmit()) || (await markNext()));
     // A board whose form lives at its own apply address one GET away (Lever /apply, Ashby /application, ...): loaded once,
     // through the same host rules, and checked like the first load.
     if (!(await page.waitForSelector(FIELD_SEL, { timeout: 5000 }).catch(() => null))) {
@@ -348,18 +369,43 @@ async function attempt(browser, p, opts, timing) {
     if (!(await hasForm())) throw new NeedsUser("no_application_form_found", p.url);
     // The page's own questions, answered only from the approved facts / answers (ats-fill.cjs), each read back. A required
     // question with no confirmed answer, or one that could not be set and checked, stops the run: the person is asked.
-    const fr = await fillForm(page, { ats: p.ats, facts: p.facts, answers: p.answers || {}, resumePath: p.resume.path });
+    // A step form is filled one step at a time: each step's questions answered and read back, then its one Continue pressed, until
+    // the step with the Submit control. A step with anything handed back stops there, as on a one-page form. At most 8 steps.
+    const fr = { map: [], filled: [], needsUser: [], failed: [], invalid: [] };
+    for (let step = 0; ; step++) {
+      const r = await fillForm(page, { ats: p.ats, facts: p.facts, answers: p.answers || {}, resumePath: p.resume.path });
+      for (const k of Object.keys(fr)) fr[k].push(...(r[k] || []));
+      if (fr.needsUser.length || fr.invalid.length || fr.failed.length || (await markSubmit())) break;
+      if (step >= 7 || !(await markNext())) throw new NeedsUser("no_submit_control", p.url);
+      onAllowedHost();
+      { const shown = await botCheck(page); if (shown) { const e = new NeedsUser("bot_check", p.url); e.detail = shown; throw e; } }
+      await stopAtWall(page, p.url);
+      const before = await page.evaluate(() => [...document.querySelectorAll("input, select, textarea")].filter((e) => e.offsetWidth || e.offsetHeight).length + "|" + (document.body.innerText || "").length);
+      await page.click("[data-upmore-next]");
+      const moved = await page.waitForFunction((b) => [...document.querySelectorAll("input, select, textarea")].filter((e) => e.offsetWidth || e.offsetHeight).length + "|" + (document.body.innerText || "").length !== b, before, { timeout: 5000 }).then(() => true, () => false);
+      // The page did not move on (its own check held the step back): handed back, never pressed again.
+      if (!moved) {
+        // What the page says held it back, in its own visible words (an error line on the step), for the person and the record.
+        const said = await page.evaluate(() => [...document.querySelectorAll("form [class*='error' i], form [role=alert]")].filter((e) => (e.offsetWidth || e.offsetHeight) && !e.querySelector("[class*='error' i]"))
+          .map((e) => (e.innerText || "").replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 3).map((t) => t.slice(0, 60))).catch(() => []);
+        const e = new NeedsUser("field_not_filled", "step_did_not_advance");
+        e.needs = [{ label: said.length ? `step_did_not_advance: ${said.join(" / ")}` : "step_did_not_advance", reason: "form_rejects_value" }];
+        throw e;
+      }
+      await page.waitForTimeout(300);
+      onAllowedHost();
+    }
     if (fr.needsUser.length) {
       const first = fr.needsUser[0];
       const e = new NeedsUser(first.reason === "no_confirmed_answer" || /^(agreement|eeo|upload)_/.test(first.reason) || first.reason === "no_resume" ? "missing_required_answer" : "field_not_filled", first.label);
-      e.needs = fr.needsUser.map((n) => ({ label: n.label, reason: n.reason, ...(Array.isArray(n.options) ? { options: n.options.slice(0, 60) } : {}) }));
+      e.needs = fr.needsUser.map((n) => ({ label: n.label, reason: n.reason, ...(n.kind ? { kind: n.kind } : {}), ...(n.detail ? { detail: String(n.detail).slice(0, 400) } : {}), ...(Array.isArray(n.options) ? { options: n.options.slice(0, 60) } : {}) }));
       throw e;
     }
     if (fr.invalid.length) { const e = new NeedsUser("field_not_filled", fr.invalid[0].name); e.needs = fr.invalid.map((n) => ({ label: n.name, reason: "form_rejects_value" })); throw e; }
     // An optional question whose approved answer could not be set and read back (readback_mismatch, fill_error) is not a
     // question to skip: the field may hold something the person never approved. Handed back like a required one; nothing is sent
     // (independent review of #340: Submit used to go with such a field).
-    if (fr.failed && fr.failed.length) { const e = new NeedsUser("field_not_filled", fr.failed[0].label); e.needs = fr.failed.map((n) => ({ label: n.label, reason: n.reason })); throw e; }
+    if (fr.failed && fr.failed.length) { const e = new NeedsUser("field_not_filled", fr.failed[0].label); e.needs = fr.failed.map((n) => ({ label: n.label, reason: n.reason, ...(n.detail ? { detail: String(n.detail).slice(0, 200) } : {}) })); throw e; }
     const filled = fr.filled.map((f) => ({ field: f.label, source: f.source }));
     timing.fill = Date.now() - t1;
     // Last checks before the click, on what is actually on the page now: still an allowed host, no bot check that appeared

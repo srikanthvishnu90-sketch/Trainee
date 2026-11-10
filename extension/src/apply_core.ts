@@ -6,8 +6,9 @@
 //   questionsToStore            workers/career-browser/ask-once.ts (ask once, shared with the desktop runner)
 // Bundled into extension/lib/trainee-core.js by extension/build.ts; tested by tests/architect/wo-031-extension.test.ts.
 import { canonicalTypedValue, classifyField, classifyOutcome, fileAlternative, type FormField, normLabel, type Observation, planBatch, questionFieldType } from "../../supabase/functions/_shared/career_apply.ts";
-import { mapQuestion, NEVER_BY_TEXT } from "../../supabase/functions/_shared/question_map.ts";
+import { BIRTH_DATE, mapQuestion, NEVER_BY_TEXT } from "../../supabase/functions/_shared/question_map.ts";
 import { hashApplyPayload } from "../../supabase/functions/_shared/career_apply_store.ts";
+import { reusedSourceSuffix } from "../../supabase/functions/_shared/career_prepared_card.ts";
 import { questionsToStore } from "../../workers/career-browser/ask-once.ts";
 import { assertsSeparateSponsorshipPosition, assertsSponsorshipNeed, howHeardChannel, yesNoOf } from "../../supabase/functions/_shared/answer_options.ts";
 import { readAiPolicy } from "../../supabase/functions/_shared/ai_policy.ts";
@@ -186,6 +187,8 @@ export function questionsForTrainee(o: { jobId: string; company: string; locatio
 const AGREEMENT = /^\s*(i|we)\s+(hereby\s+)?(understand|acknowledge|agree|confirm|certify|consent|accept|attest|authori[sz]e|have read|declare)\b/i;
 const staysWithPosting = (row: { kind: string; label: string; type: string; options: string[] }) => {
   if (row.kind === "consent" || row.kind === "attestation" || AGREEMENT.test(row.label)) return true;
+  // a-sensitive (interim ruling, 2026-11-10): a date of birth is given to one application and never kept for reuse.
+  if (BIRTH_DATE.test(row.label)) return true;
   const m = mapQuestion({ label: row.label, type: row.type, options: row.options.map((l) => ({ label: l })) }) as { fact?: string };
   return m.fact === "eeo" || classifyField(row.label, row.type) === "eeo";
 };
@@ -420,7 +423,10 @@ export function cardLines(o: {
     // WO-054: an answer the person gave in the panel before the session says so, so they check it here.
     const from = f.source === "trainee" ? (o.before?.includes(f.name) ? " (your answer, answered before the session)" : "") : f.source === "you" ? " (typed by you)" : f.source === "fixed" ? " (set by the employer's page, read-only)"
       : f.source === "drafted" ? ` (drafted by Trainee from your confirmed facts${ids.length ? ` ${ids.join(", ")}` : ""}; put on the form by you)` : " (set by the page)";
-    lines.push(`${MARK[mapQuestion({ label: f.label }).kind] ?? ""}${shortLabel(f.label)}: ${f.value}${from}`);
+    // WO-122: a sensitive answer Trainee reused says where it came from (the shared formatter; the panel's payload carries
+    // no answer date or zone, so a texted one's freshness is unknown and it takes none).
+    const reused = f.source === "trainee" ? reusedSourceSuffix({ label: f.label, factId: f.factId }, o.payload.job_id) : "";
+    lines.push(`${MARK[mapQuestion({ label: f.label }).kind] ?? ""}${shortLabel(f.label)}: ${f.value}${reused}${from}`);
   }
   lines.push(`Resume: ${o.payload.resume_name ?? "none attached"}`);
   // FRS: a cover-letter upload is the person's to attach (never asked by text, never the resume); an optional one left empty says so.
@@ -645,12 +651,14 @@ export function draftProvenance(fields: { name: string; value: string; source: s
 export const QUARANTINE_VERSION = "d007-v1";
 const POSITIVE = /^owner (stated|confirmed|typed|answered|gave|provided|picked)\b/i;
 const RESERVED = /^(text-answer:|approved-local-resume:|essay-draft:)/;
-export interface TrustedFact { table: "answers" | "saved"; key: string; value: string; factId: string; event: string; provenance: string; authorizes: boolean }
+// WO-122: a texted answer keeps when it was answered (`at`) and the postings its question was asked for (`job_ids`), for
+// the card's source label. Neither is in the manifest's hash nor its identity: they say where, never what, it is.
+export interface TrustedFact { table: "answers" | "saved"; key: string; value: string; factId: string; event: string; provenance: string; authorizes: boolean; at?: string; job_ids?: string[] }
 export interface Manifest {
   answers: Record<string, Answer>; saved: Record<string, Answer>; byFactId: Record<string, TrustedFact>;
   excluded: { key: string; factId: string; why: string }[]; conflicts: { key: string; factIds: string[] }[]; hash: string; version: string;
 }
-export function trustedManifest(o: { owner: string; file: any; rows: { id: string; key: string; kind?: string; answer: string }[]; resume: { sha256: string } | null }): Manifest {
+export function trustedManifest(o: { owner: string; file: any; rows: { id: string; key: string; kind?: string; answer: string; at?: string; job_ids?: string[] }[]; resume: { sha256: string } | null }): Manifest {
   const excluded: Manifest["excluded"] = [], conflicts: Manifest["conflicts"] = [];
   const kept = new Map<string, TrustedFact>(); // table + key -> fact
   const file = o.file && typeof o.file === "object" ? o.file : null;
@@ -711,7 +719,9 @@ export function trustedManifest(o: { owner: string; file: any; rows: { id: strin
     if (!t) continue;
     const key = t === "answers" ? r.key.slice(5) : r.key;
     const tf: TrustedFact = { table: t, key, value: r.answer, factId: `text-answer:${r.id}`, event: `text-answer:${r.id}`,
-      provenance: `owner answered this question (text-answer:${r.id})`, authorizes: t === "saved" };
+      provenance: `owner answered this question (text-answer:${r.id})`, authorizes: t === "saved",
+      ...(typeof r.at === "string" && Number.isFinite(Date.parse(r.at)) ? { at: r.at } : {}),
+      ...(Array.isArray(r.job_ids) ? { job_ids: r.job_ids.map(String).slice(0, 200) } : {}) };
     const prior = kept.get(t + "\n" + key);
     if (!prior) kept.set(t + "\n" + key, tf);
     else if (n(prior.value) !== n(tf.value)) {

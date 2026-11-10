@@ -84,11 +84,27 @@ export function nextStepOf(stop: LimitStop, zone: PersonZone | null, retryAt: nu
   }
 }
 
-// The reply in place of an answer the AI could not give: the ask in the person's words, the next step, nothing applied for.
+// The kept task in a few words of the person's own ask, never a verbatim echo and never with a question mark (coordinator
+// ruling 2026-11-10, r-audit #706: R2 no echo; an echoed "?" mid-reply also buried the decision, R10).
+export function taskOf(message: string): string {
+  const raw = String(message ?? "").replace(/\s+/g, " ").trim();
+  const t = raw.toLowerCase();
+  const name = (/\b(?:at|about|on|for|with|to|of)\s+((?:[A-Z][\w&'.-]*)(?:\s+[A-Z][\w&'.-]*){0,3})/.exec(raw)?.[1]
+    ?? /\b(?:my|the|a|an|include)\s+((?:[A-Z][\w&'.-]*)(?:\s+[A-Z][\w&'.-]*){0,3})/.exec(raw)?.[1] ?? "").replace(/[.,!?;:]+$/, "");
+  const of = name && !/^(?:I|AI|Trainee)$/.test(name) ? `${name} ` : "";
+  if (/\bfollow(?:ing)?[- ]?up\b/.test(t)) return `your ${/\binterview\b/.test(t) ? "interview " : ""}follow-up question`;
+  if (/\b(?:interview|prep(?:are)?)\b/.test(t)) return `your ${of}interview prep`;
+  if (/\b(?:qualify|eligib\w*|requirements)\b/.test(t)) return `your eligibility question${of ? ` about ${of.trim()}` : ""}`;
+  if (/\b(?:draft|write|note|message|email|intro)\b/.test(t)) return `the message${of ? ` to ${of.trim()}` : " draft"}`;
+  if (/\b(?:resume|cv)\b/.test(t)) return "your resume edit";
+  if (/\b(?:research|tell me about|like to work|brief|why not|why didn'?t|include)\b/.test(t)) return of ? `your question about ${of.trim()}` : "your research question";
+  if (/\b(?:find|search|look(?:ing)? for|jobs?|roles?|internships?|openings?|positions?)\b/.test(t)) return "your job search";
+  return of ? `your question about ${of.trim()}` : "your last request";
+}
+
+// The reply in place of an answer the AI could not give: the kept task named, the next step, nothing applied for.
 export function heldReply(message: string, stop: LimitStop, zone: PersonZone | null, retryAt: number | null = null): string {
-  const ask = String(message ?? "").replace(/\s+/g, " ").trim();
-  const said = ask.length > 120 ? `${ask.slice(0, 117).replace(/\s+\S*$/, "")}...` : ask;
-  return `I couldn't finish this without the AI: "${said}". I kept it. ${nextStepOf(stop, zone, retryAt)} Nothing was applied for, and searching postings still works now.`;
+  return `I couldn't finish ${taskOf(message)} without the AI: it is kept. ${nextStepOf(stop, zone, retryAt)} Nothing was applied for, and searching postings still works now.`;
 }
 
 // The task a limit stopped, kept on the thread (discovery.heldAtLimit), and the message that resumes it, once a minute has

@@ -43,7 +43,7 @@ export const SERVED_POSTS: Record<ServedFamily, ReadonlySet<string>> = {
   "F-09": new Set(["approveapp", "checkstatus"]), // S1: file_family_review.ts
   "F-12": new Set(["approvesend"]), // S2: file_family_message.ts approveSend (the exact approved words, D-MN-2)
   "F-13": new Set(),
-  "F-14": new Set(),
+  "F-14": new Set(["briefpause", "briefresume"]), // f-s5: pause or resume the weekly brief (file_family_actions.ts)
   "F-14n": new Set(),
   "F-15": new Set(),
 };

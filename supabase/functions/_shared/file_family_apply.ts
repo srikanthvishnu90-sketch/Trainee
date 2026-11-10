@@ -157,11 +157,11 @@ export function weeklyBriefFile(d: WeeklyBrief): FamilyFile {
     actions: d.acts,
   };
 }
-export interface Negotiation { company: string; v: number; deadline: string | null; basis: string; position: KV[]; history: { v: string; written: boolean; text: string }[]; ask: { title: string; text: string; act?: Act }; acts?: Acts }
+export interface Negotiation { company: string; v: number | null; deadline: string | null; basis: string; position: KV[]; history: { v: string; written: boolean; text: string }[]; ask: { title: string; text: string; act?: Act }; acts?: Acts }
 export function negotiationFile(d: Negotiation): FamilyFile {
   return {
     family: "F-14", header: "Negotiation plan", boundary: "Plan File - nothing sent to any employer",
-    hero: { kicker: `Plan File - negotiation - v${d.v}`, title: `${d.company} offer`, meta: [{ label: "Deadline", at: d.deadline, future: true }, { label: "Based on", value: d.basis }] },
+    hero: { kicker: `Plan File - negotiation${d.v ? ` - v${d.v}` : ""}`, title: `${d.company} offer`, meta: [{ label: "Deadline", at: d.deadline, future: true }, { label: "Based on", value: d.basis }] },
     blocks: [
       card("Your position - confirmed with you", [{ p: "kv", rows: d.position }]),
       card("Term history - versions kept separate", d.history.map((h) => ({ p: "item" as const, title: h.v, chip: h.written ? { label: "Written", tone: "neutral" as const } : { label: "Verbal", tone: "attention" as const }, text: h.written ? h.text : `${h.text} - verbal claim, labeled verbal, not treated as a term` }))),
@@ -173,10 +173,12 @@ export function negotiationFile(d: Negotiation): FamilyFile {
 }
 
 // ---------------------------------------------------------------- F-15 offer comparison (C.18)
-export interface OfferComparison { offers: { letter: string; company: string; rows: KV[] }[]; deadline: { company: string; at: string | null; text?: string | null }; priorities?: string | null; basis?: string; acts?: Acts }
+// deadline null: no dated deadline (LOOP 13: an offer told in chat has a deadline in words, a row); text: a deadline in words
+// shown as written (item 6 S5); basis: where the figures came from when they are not all from documents ("as you told me").
+export interface OfferComparison { offers: { letter: string; company: string; rows: KV[] }[]; deadline: { company: string; at: string | null; text?: string | null } | null; priorities?: string | null; basis?: string; acts?: Acts }
 export function offerComparisonFile(d: OfferComparison): FamilyFile {
   return {
-    family: "F-15", hero: { kicker: `${n(d.offers.length, "offer")} - ${d.basis ?? "from actual documents"}`, title: d.offers.map((o) => o.company).join(" vs "), meta: [d.deadline.text ? { label: `${d.deadline.company} deadline:`, value: d.deadline.text } : { label: `${d.deadline.company} deadline:`, at: d.deadline.at, future: true }] },
+    family: "F-15", hero: { kicker: `${n(d.offers.length, "offer")} - ${d.basis ?? "from actual documents"}`, title: d.offers.map((o) => o.company).join(" vs "), meta: d.deadline ? [d.deadline.text ? { label: `${d.deadline.company} deadline:`, value: d.deadline.text } : { label: `${d.deadline.company} deadline:`, at: d.deadline.at, future: true }] : [] },
     blocks: [
       ...d.offers.map((o): Block => ({ b: "card", parts: [{ p: "heading", title: `${o.letter} - ${o.company}` }, { p: "kv", rows: o.rows.filter((r) => !/\btotal\b/i.test(r.k)) }] })),
       ...(d.priorities ? [note("info", "Your priorities applied.", `${d.priorities} Choosing a favorite here accepts nothing and withdraws nothing.`)] : [note("info", "Nothing accepted.", "Comparing offers here accepts nothing, declines nothing and sends nothing to any employer.")]),

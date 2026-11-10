@@ -25,7 +25,7 @@ import { searchWords, wordStem } from "./career_ingest.ts";
 import { correctedAsk } from "./search_correction.ts";
 import { blockerAsk, inMetro, METRO, remoteInUs, widenedAsk, withScope } from "./search_widen.ts";
 import { arrangementOf, checkedAt, nextWidening, placesLine, roleVariants, studentWindowOf, wantOf } from "./search_shortlist.ts";
-import { apiUrlFor, ashbyBoardFor, type LinkCheck, liveOnly } from "./link_check.ts";
+import { apiUrlFor, ashbyBoardFor, type LinkCheck, liveOnly, SEARCH_CHECK_MAX, searchCheck } from "./link_check.ts";
 import { type CanSubmit, capabilitiesOf, rankBySubmit, submitLabel } from "./submit_capability.ts";
 import { hasLimits, type Limits, limitsLine, outsideLimits, REASON_WORDS, type Reason, searchTextOf, statedBand, statedPay } from "./posting_constraints.ts";
 import { CareerPool } from "./career_pool.js";
@@ -423,6 +423,10 @@ export function searchAskFromMessage(message: string, routerOut: { intent?: stri
   const ask = enrich(text, null);
   if (!ask || searchWords(ask.role).length > 6) return null;
   if (!SEARCH_CUE.test(text) && !ask.place && !ask.limits?.bands) return null;
+  // Release item 9 loop: a statement the router recorded as a fact ("I live in Chicago", "I'm a sophomore majoring in
+  // economics") names a place or a level but asks for nothing; it was also searched ("I checked live in Chicago"). With a
+  // fact recorded, only a search word makes it a search too ("new grad backend, no sponsorship needed" still is).
+  if (also && !SEARCH_CUE.test(text)) return null;
   // Said with nothing that makes it a search for work (no level, pay, place, remote, employer or job word): not a search.
   if (!ask.limits?.bands && !ask.limits?.pay && !ask.place && !ask.remote && !/\b(?:jobs?|roles?|positions?|openings?|interns?(?:hips?)?)\b/i.test(text)) return null;
   return { ask, append: also };
@@ -534,11 +538,14 @@ export async function searchJudgeTurn(o: {
     if (apiUrlFor(String(j.job_id ?? "")) || ashbyBoardFor(String(j.job_id ?? ""))) return await o.openCheck!(j);
     offBoard.add(String(j.job_id ?? "")); return "unknown";
   } : null;
-  // At most want x 3 pages are checked (liveOnly), want being the roles asked for or shown.
-  const checked = await liveOnly(hits, check, Math.max(1, Math.min(JUDGE_MAX_N, o.want ?? show)));
+  // Architect ruling E.21: only the postings to be shown are checked (searchCheck): at most the count asked (or shown), never
+  // more than 10; a closed one is left out and the next one down takes its place, at most 10 pages read in all.
+  const checked = check ? await searchCheck(hits, check, o.want ? Math.min(show, o.want) : show) : await liveOnly(hits, null, Math.max(1, Math.min(JUDGE_MAX_N, o.want ?? show)));
   const linkOf = new Map(checked.shown.map((h) => [h.job_id, h.link]));
   if (o.openCheck) hits = checked.shown;
   const at = checkedAt(o.now, o.tz);
+  // E.21 ruling 1: the 10-page cap was reached with closed roles to replace: fewer are shown, and the reply says how many were read.
+  const capLine = o.openCheck && checked.dead && checked.checked >= SEARCH_CHECK_MAX ? ` I checked ${checked.checked} application pages, the most I read for one search.` : "";
   if (!hits.length) {
     // A source that could not be read is not evidence of no postings: the router's own reply stands.
     if (snapshotFailed || (source === "none" && liveRows === null)) return null;
@@ -549,7 +556,7 @@ export async function searchJudgeTurn(o: {
     const scope = `I checked ${variants.join(", ")}${internOnly ? " internships" : ""} in ${placesLine(ask)}, on the live board${age} and the saved snapshot of job boards`;
     const why = checked.dead && !checked.shown.length ? `${plural(checked.dead, "matching role was", "matching roles were")} found, but ${checked.dead === 1 ? "its application page shows it" : "their application pages show them"} closed when I checked (${at.text})`
       : notIntern ? `${plural(notIntern, "posting")} matched the place but ${notIntern === 1 ? "does" : "do"} not say ${notIntern === 1 ? "it is an internship" : "they are internships"}` : `none was found (${liveNote}, and the saved snapshot has none either)`;
-    const reply = `${scope}: ${why}.${leftOut} Nothing was invented to fill the list, and nothing was applied for. The most useful widening is ${nextWidening(ask)}, and I'll search again.`;
+    const reply = `${scope}: ${why}.${capLine}${leftOut} Nothing was invented to fill the list, and nothing was applied for. The most useful widening is ${nextWidening(ask)}, and I'll search again.`;
     return { reply, status: "none", source: "none", shortlist: [], accounting: null, modelCalled: false, blocker: checked.dead && !checked.shown.length ? "all_closed" : "no_roles" };
   }
   const byId = new Map(pool.map((p) => [p.job_id, p]));
@@ -574,7 +581,7 @@ export async function searchJudgeTurn(o: {
   // when, in the person's zone), the application link, and the student window in the posting's own words, or that it states none.
   const lineOf = (h: SearchHit, i: number, tail: string | null) => {
     const desc = byId.get(h.job_id)?.description ?? "", arr = arrangementOf(where(h), desc), win = studentWindowOf(desc), link = linkOf.get(h.job_id);
-    const open = link === "live" ? `Checked: open on the ${boardName(h.job_id)} board, ${at.text}` : offBoard.has(h.job_id) ? "Checked: not re-checked, it is not on a public job board I can check" : link === "unknown" ? "Checked: not re-checked, its application page did not answer" : "Checked: not re-checked";
+    const open = link === "live" ? `Checked: open on the ${boardName(h.job_id)} board, ${at.text}` : offBoard.has(h.job_id) ? "Checked: not re-checked" : link === "unknown" ? "Checked: not re-checked, its application page did not answer" : "Checked: not re-checked";
     // The link stays on the numbered line, in parentheses (the texting channel puts it right under its posting; D-036).
     return `${i + 1}. ${h.title} at ${h.company || "an employer the posting does not name"} — ${where(h) || "location not stated"}, ${arr ?? "arrangement not stated"}${h.url ? ` (${h.url})` : " (the posting gives no application link)"}${noLevel(h) ? " [level not stated]" : ""}${tail ? `. ${tail}` : ""}${/[.!?]$/.test(tail ?? "") ? "" : "."}`
       + `\n   Student window: ${win ? `"${win.replace(/[.]$/, "")}"` : "not stated in the posting"}.${win && !gradKnown ? `\n   Uncertain: your graduation date isn't confirmed, so eligibility isn't decided.` : ""}`
@@ -618,7 +625,8 @@ export async function searchJudgeTurn(o: {
     return !f ? 0 : f.excluded ? -1 : f.score == null ? 0 : f.score >= 75 ? 3 : f.score >= 55 ? 2 : 1;
   };
   rows = rankBySubmit(rows, tierOf, (r) => r.h.job_id, caps);
-  const listed = rows.slice(0, show);
+  // Release item 8 loop: never more rows than the person asked for ("Find 2" listed 3).
+  const listed = rows.slice(0, o.want ? Math.min(show, o.want) : show);
   const more = rows.length - listed.length;
   const lines = [freshness];
   let summary = "";
@@ -628,10 +636,19 @@ export async function searchJudgeTurn(o: {
     const local = ask.place ? listed.filter((r) => inPlace({ location: where(r.h) } as SourcePosting, { ...ask, remote: false, remoteOnly: false })).length : 0;
     const counts = ask.place && ask.remote ? ` ${local} ${local === 1 ? "is" : "are"} in ${placesLine({ ...ask, remote: false }).replace(/ \(.*\)$/, "")} and ${listed.length - local} ${listed.length - local === 1 ? "is" : "are"} ${ask.remoteRegion === "us" ? "remote in the US" : "remote"}.` : "";
     const short = o.want && listed.length < o.want ? ` I did not find ${o.want} within the scope checked.` : "";
-    const closed = checked.dead ? ` ${plural(checked.dead, "role was", "roles were")} left out: closed when checked.` : "";
+    const closed = checked.dead ? ` ${plural(checked.dead, "role was", "roles were")} left out: closed when checked.${capLine}` : "";
     const zone = o.openCheck && live && !at.zoneKnown ? " Times are UTC: I don't know your time zone." : "";
     // Spec B.2: "I verified [count] open matches. [count] are in Chicago and [count] are remote US; I did not find five within the scope checked."
-    if (listed.length) summary = `${o.openCheck ? `I verified ${plural(live, "open match", "open matches")}${listed.length > live ? `, and listed ${listed.length - live} more I could not re-check` : ""}.` : `${listed.length} listed, not re-checked.`}${counts}${short}${closed}${zone}${notIntern ? ` ${plural(notIntern, "posting")} left out: not stated as an internship.` : ""} Nothing was applied for.`;
+    // E.21: none verified reads as before ("N listed, not re-checked."; each row says it). Beside verified ones, the rest are
+    // said with their reason (the page did not answer, or the posting is on no public board, where no check runs at all).
+    const unchecked = listed.filter((r) => linkOf.get(r.h.job_id) !== "live"), off = unchecked.filter((r) => offBoard.has(r.h.job_id)).length;
+    const one = unchecked.length === 1;
+    const because = off === unchecked.length ? (one ? "it is not on a public job board I can check" : "they are not on a public job board I can check")
+      : off ? "their application pages did not answer or are not on a public job board I can check"
+      : one ? "its application page did not answer" : "their application pages did not answer";
+    if (listed.length) summary = `${!o.openCheck ? `${listed.length} listed, not re-checked.`
+      : !live ? `${listed.length} listed, not re-checked.`
+      : `I verified ${plural(live, "open match", "open matches")}${unchecked.length ? `, and listed ${unchecked.length} more I could not re-check because ${because}` : ""}.`}${counts}${short}${closed}${zone}${notIntern ? ` ${plural(notIntern, "posting")} left out: not stated as an internship.` : ""} Nothing was applied for.`;
     if (summary) lines.push(summary);
   }
   if (ask.limits && hasLimits(ask.limits)) {

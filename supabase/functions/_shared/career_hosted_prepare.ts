@@ -1,43 +1,73 @@
 // FEATURE 17 (2026-10-26): after the person answers the questions a hosted preparation asked (the questions turn,
 // career_apply_questions.ts), their queued postings are prepared again at once, through the same door the apply turn
 // kicks (career_apply_from_chat.ts kickPrepare, CAREER_PREPARE_AHEAD_URL), and the reply says so instead of "the next
-// time you prepare applications on your computer", which is not true for a person with only a phone. Only when every
-// open question is answered (a preparation still waiting on one would only stop on it again), and only for postings in
+// time you prepare applications on your computer", which is not true for a person with only a phone. Only for postings in
 // their own queue (the door takes nothing else). Nothing is approved, queued or sent here.
+// Batch needs (2026-11-10): per posting, not all or nothing. When an answer is saved (the reply that asks the next question
+// too), every queued posting that answer was for and that now waits on no open question is prepared again; a posting
+// still waiting on one is left (it would only stop on it again). An open question whose postings cannot be read holds
+// every posting. With nothing open, every queued posting is prepared again, as before. The card still waits for the whole
+// batch (cloud_prepare.ts holds it while a question is open), so the reply never says a card is coming sooner.
 import { kickPrepare, prepareConfigured } from "./career_apply_from_chat.ts";
+import { batchNeeds, endSentence, type NeedRow, readyPostings, stillNeed } from "./batch_needs.ts";
 
 const ON_COMPUTER = /(They go on the forms|It goes on the form) the next time you prepare applications on your computer\./;
 
 // deno-lint-ignore no-explicit-any
-export async function prepareAfterAnswers(asked: { reply: string; status?: string } | null, o: { admin: any; userId: string; env: { get(k: string): string | undefined }; fetch: typeof fetch;
+async function pages<T>(read: (from: number, to: number) => Promise<{ data: any[] | null; error: unknown }>, map: (r: any) => T): Promise<T[] | null> {
+  const out: T[] = [];
+  for (let from = 0; ; from += 1000) {
+    const r = await read(from, from + 999);
+    if (r.error) return null;
+    const page = (r.data ?? []).map(map);
+    out.push(...page);
+    if (page.length < 1000) return out;
+  }
+}
+
+// deno-lint-ignore no-explicit-any
+export async function prepareAfterAnswers(asked: { reply: string; status?: string; jobs?: string[] } | null, o: { admin: any; userId: string; env: { get(k: string): string | undefined }; fetch: typeof fetch;
   // The results page answers one role at a time: that role is prepared again when ITS questions are done, whatever other roles still ask.
   // The preparation leaves a posting alone while a question of its own is open (career_apply_prepare_candidates*: an "asked" try stands).
   roleDone?: boolean }): Promise<"started" | "failed" | "off" | "skipped"> {
-  if (!asked || asked.status !== "answered" || !ON_COMPUTER.test(asked.reply)) return "skipped";
+  if (!asked) return "skipped";
+  const done = asked.status === "answered" && ON_COMPUTER.test(asked.reply);
+  // The reply that saved an answer and asks the next question: only the postings that answer was for.
+  const next = asked.status === "answered_next" && Array.isArray(asked.jobs) && asked.jobs.length > 0;
+  if (!done && !next) return "skipped";
   if (!prepareConfigured(o.env)) return "off";
   const open = await o.admin.rpc("career_apply_questions_open_as", { p_user: o.userId, p_limit: 1 });
   if (open.error) return "skipped";
-  if ((open.data ?? []).length && !o.roleDone) {
-    // More are waiting: the application is prepared again here once those are answered, not "on your computer".
-    asked.reply = asked.reply.replace(ON_COMPUTER, "Once the rest are answered, I'll prepare your application again here.");
-    return "skipped";
-  }
+  const anyOpen = (open.data ?? []).length > 0 && !o.roleDone;
+  const wait = () => { if (done) asked.reply = asked.reply.replace(ON_COMPUTER, "Once the rest are answered, I'll prepare your application again here."); };
   // Every posting waiting in their queue (NO LIMITS: read page by page, never cut at a number).
-  const ids: string[] = [];
-  for (let from = 0; ; from += 1000) {
-    const w = await o.admin.from("career_apply_wanted").select("posting_key").eq("user_id", o.userId).eq("state", "waiting")
-      .order("posting_key", { ascending: true }).range(from, from + 999);
-    if (w.error) break;
-    const page = (w.data ?? []).map((r: { posting_key: string }) => String(r.posting_key));
-    ids.push(...page);
-    if (page.length < 1000) break;
-  }
+  const ids = await pages((a, b) => o.admin.from("career_apply_wanted").select("posting_key").eq("user_id", o.userId).eq("state", "waiting")
+    .order("posting_key", { ascending: true }).range(a, b), (r: { posting_key: string }) => String(r.posting_key)) ?? [];
+  if (anyOpen && !ids.length) { wait(); return "skipped"; }
   if (!ids.length) return "skipped";
-  const k = await kickPrepare({ env: o.env, fetch: o.fetch, userId: o.userId, jobIds: ids });
+  let take = ids, still = "";
+  if (anyOpen) {
+    // Every open question with the postings it holds (page by page). Unreadable: nothing is prepared again yet.
+    const rows = await pages<NeedRow>((a, b) => o.admin.from("career_apply_questions").select("key,label,job_ids,state").eq("user_id", o.userId).eq("state", "open")
+      .order("created_at", { ascending: true }).range(a, b), (r: NeedRow) => r);
+    const touched = new Set((asked.jobs ?? []).map(String));
+    take = rows ? readyPostings(rows, ids).filter((j) => touched.has(j)) : [];
+    if (!take.length) { wait(); return "skipped"; }
+    const needs = batchNeeds(rows!, ids), held = ids.length - readyPostings(rows!, ids).length;
+    still = stillNeed(held, [...needs.items.map((n) => n.question), ...needs.onForm.map((n) => `${n.question} (type it on the form yourself)`)]);
+  }
+  const k = await kickPrepare({ env: o.env, fetch: o.fetch, userId: o.userId, jobIds: take });
   if (k === "off") return "off";
-  asked.reply = asked.reply.replace(ON_COMPUTER, k === "started"
-    ? "I'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready."
-    : "Preparing it again hasn't started yet; it waits in your queue.");
+  const n = take.length === 1 ? "1 of your applications" : `${take.length} of your applications`;
+  const said = !anyOpen
+    ? (k === "started"
+      ? "I'm preparing your application again now with these answers; the card with every exact answer comes here when it's ready."
+      : "Preparing it again hasn't started yet; it waits in your queue.")
+    : (k === "started"
+      ? `${endSentence(`I'm preparing ${n} again now with these answers; ${still}`)} The card with every exact answer comes here once those are answered too.`
+      : `Preparing ${n} again hasn't started yet; ${take.length === 1 ? "it waits" : "they wait"} in your queue. ${endSentence(`${still[0].toUpperCase()}${still.slice(1)}`)}`);
+  if (done) asked.reply = asked.reply.replace(ON_COMPUTER, said);
+  else if (asked.reply.includes("\n\nNext: ")) asked.reply = asked.reply.replace("\n\nNext: ", `\n${said}\n\nNext: `);
   return k;
 }
 

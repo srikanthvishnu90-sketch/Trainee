@@ -38,7 +38,7 @@ export function channelCommand(text: string, channel?: Channel | "sms"): Channel
 }
 export const CHANNEL_REPLIES: Record<ChannelCommand, string> = {
   // After STOP nothing goes out on Trainee's own (alerts, reports, nudges); a message the person starts is still answered.
-  stop: "Messages stop now: Trainee won't message you on its own again, alerts and reports included; it only answers if you text it. Text START to turn messages back on.",
+  stop: "You're unsubscribed, so messages stop now: Trainee won't message you on its own again, alerts and reports included; it only answers if you text it. Text START to turn messages back on.",
   start: "Started again: you're back on. Text STOP any time and every message stops.",
   help: "Here's how Trainee works: it's a job-search agent you text for real postings, alerts, applications you approve and interview practice. Text STOP to stop all messages.",
 };

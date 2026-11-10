@@ -268,7 +268,8 @@ async function attempt(browser, p, opts, timing) {
   if (opts.initScript) await ctx.addInitScript(opts.initScript);
   await ctx.route("**/*", async (route) => {
     const req = route.request();
-    if (opts.requestGate && !(await opts.requestGate(req))) return route.abort("blockedbyclient");
+    // A gate may answer a request inside the browser itself (the strict benchmark's simulated resume upload): nothing is sent.
+    if (opts.requestGate) { const gv = await opts.requestGate(req); if (gv && typeof gv === "object" && gv.fulfill) return route.fulfill(gv.fulfill); if (!gv) return route.abort("blockedbyclient"); }
     if (!req.isNavigationRequest()) return route.continue();
     let sub = false;
     try { sub = !!req.frame().parentFrame(); } catch { /* no frame (service worker): judged as top-level */ }
@@ -352,14 +353,14 @@ async function attempt(browser, p, opts, timing) {
     if (fr.needsUser.length) {
       const first = fr.needsUser[0];
       const e = new NeedsUser(first.reason === "no_confirmed_answer" || /^(agreement|eeo|upload)_/.test(first.reason) || first.reason === "no_resume" ? "missing_required_answer" : "field_not_filled", first.label);
-      e.needs = fr.needsUser.map((n) => ({ label: n.label, reason: n.reason, ...(Array.isArray(n.options) ? { options: n.options.slice(0, 60) } : {}) }));
+      e.needs = fr.needsUser.map((n) => ({ label: n.label, reason: n.reason, ...(Array.isArray(n.options) ? { options: n.options.slice(0, 60) } : {}), ...(n.detail ? { detail: String(n.detail).slice(0, 200) } : {}) }));
       throw e;
     }
     if (fr.invalid.length) { const e = new NeedsUser("field_not_filled", fr.invalid[0].name); e.needs = fr.invalid.map((n) => ({ label: n.name, reason: "form_rejects_value" })); throw e; }
     // An optional question whose approved answer could not be set and read back (readback_mismatch, fill_error) is not a
     // question to skip: the field may hold something the person never approved. Handed back like a required one; nothing is sent
     // (independent review of #340: Submit used to go with such a field).
-    if (fr.failed && fr.failed.length) { const e = new NeedsUser("field_not_filled", fr.failed[0].label); e.needs = fr.failed.map((n) => ({ label: n.label, reason: n.reason })); throw e; }
+    if (fr.failed && fr.failed.length) { const e = new NeedsUser("field_not_filled", fr.failed[0].label); e.needs = fr.failed.map((n) => ({ label: n.label, reason: n.reason, ...(n.detail ? { detail: String(n.detail).slice(0, 200) } : {}) })); throw e; }
     const filled = fr.filled.map((f) => ({ field: f.label, source: f.source }));
     timing.fill = Date.now() - t1;
     // Last checks before the click, on what is actually on the page now: still an allowed host, no bot check that appeared

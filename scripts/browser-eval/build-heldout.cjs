@@ -46,8 +46,9 @@ async function req(url, { method = "GET", body, accept = "application/json", red
         headers: { "user-agent": UA, accept, ...(body ? { "content-type": "application/json" } : {}) } });
       const text = await res.text();
       if (res.status === 429 && attempt === 0) { await sleep(5000); continue; }
+      if (res.status !== 200 || process.env.HELDOUT_DEBUG) console.log(`HTTP | ${method} ${res.status} | ${text.length}b | ${url.slice(0, 110)}${res.url !== url ? " -> " + res.url.slice(0, 80) : ""}`);
       return { status: res.status, text, url: res.url };
-    } catch (e) { if (attempt) return { status: 0, text: "", url, error: String(e && e.message || e).slice(0, 100) }; await sleep(1000); }
+    } catch (e) { if (attempt) { console.log(`HTTP | ${method} 0 | ${String(e && e.cause && e.cause.code || e && e.message || e).slice(0, 80)} | ${url.slice(0, 110)}`); return { status: 0, text: "", url, error: String(e && e.message || e).slice(0, 100) }; } await sleep(1000); }
   }
 }
 const json = (t) => { try { return JSON.parse(t); } catch { return undefined; } };

@@ -656,6 +656,7 @@
     "tests/architect/h2h-fixes-20261110.test.ts": 12,
     "tests/architect/loop-09-memory-apply.test.ts": 38,
     "tests/architect/loop-09-memory.test.ts": 12,
-    "tests/architect/loop-13-offers.test.ts": 14
+    "tests/architect/loop-13-offers.test.ts": 14,
+    "tests/architect/channel-parity-acceptance.test.ts": 15
   }
 }

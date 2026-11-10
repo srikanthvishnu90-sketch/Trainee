@@ -1,0 +1,32 @@
+# Diagnostic only (branch bench/browser-item2-diag, never a PR): a few held-out postings from the batch of 60 through applyOne
+# as batch60 drives them (DRY RUN: non-GET aborted, submits trapped, stopped before the click, robots.txt obeyed, paced), printing
+# the markup around the resume upload and around held questions. Synthetic TEST person. No secrets. Nothing is submitted.
+name: browser-bench
+on:
+  push:
+    branches: ["bench/browser-*"]
+permissions:
+  contents: read
+jobs:
+  diag:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22.23.3" }
+      - name: Playwright and its Chromium
+        run: |
+          npm ci --prefix tools --no-audit --no-fund
+          (cd tools && npx --no-install playwright install --with-deps chromium)
+          echo "UPMORE_PLAYWRIGHT_PATH=$GITHUB_WORKSPACE/tools/node_modules/playwright" >> "$GITHUB_ENV"
+      - name: Allow sandboxed Chromium user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - name: Diagnose (dry run)
+        run: |
+          node scripts/browser-eval/diag-b60.cjs \
+            https://otonomee.jobs.personio.de/job/2881499 https://youhamburg.jobs.personio.de/job/2305011 https://eqqo-gmbh-1.jobs.personio.de/job/1968877 \
+            https://job-boards.greenhouse.io/calm/jobs/8912981002 \
+            https://slim-in.breezy.hr/p/10b30ab33f7d-psychologist-intervention-delivery https://montage-marketing.breezy.hr/p/83dfe68a44c501-associate-client-success \
+            https://arch.breezy.hr/p/d82dc84842bf-devops-engineer https://molecular-sound.breezy.hr/p/df101307b9f7-head-of-production-maternity-cover \
+            https://jobs.lever.co/lendbuzz/dea174f7-a905-442d-a684-bca2b341fb63 https://jobs.lever.co/confluera/60caa9d6-f12b-4e0e-b359-db7e60644bc5

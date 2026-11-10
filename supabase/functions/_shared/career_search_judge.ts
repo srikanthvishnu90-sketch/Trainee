@@ -419,6 +419,10 @@ export function searchAskFromMessage(message: string, routerOut: { intent?: stri
   const ask = enrich(text, null);
   if (!ask || searchWords(ask.role).length > 6) return null;
   if (!SEARCH_CUE.test(text) && !ask.place && !ask.limits?.bands) return null;
+  // Release item 9 loop: a statement the router recorded as a fact ("I live in Chicago", "I'm a sophomore majoring in
+  // economics") names a place or a level but asks for nothing; it was also searched ("I checked live in Chicago"). With a
+  // fact recorded, only a search word makes it a search too ("new grad backend, no sponsorship needed" still is).
+  if (also && !SEARCH_CUE.test(text)) return null;
   // Said with nothing that makes it a search for work (no level, pay, place, remote, employer or job word): not a search.
   if (!ask.limits?.bands && !ask.limits?.pay && !ask.place && !ask.remote && !/\b(?:jobs?|roles?|positions?|openings?|interns?(?:hips?)?)\b/i.test(text)) return null;
   return { ask, append: also };

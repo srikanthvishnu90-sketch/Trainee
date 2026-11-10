@@ -27,7 +27,7 @@ import {
   type OutreachStore, payloadHash, recordOutreach, SIGNATURE_ASK, guardRecipient,
 } from "../career_outreach.ts";
 import { legacyRows, REFERRAL_ASK, referralMap, targetFirms } from "../career_referrals.ts";
-import { CONTACT_QUESTION, contactFromMessage, namedIn, type PersonaStore, type ResumeRenderer, type ResumeStore, restatePersona, savePersona, tailorForPosting, validPersonaName } from "../career_tailor.ts";
+import { CONTACT_QUESTION, confirmedOnly, contactFromMessage, contactQuestion, namedIn, resumeContact, type PersonaStore, type ResumeRenderer, type ResumeStore, restatePersona, savePersona, tailorForPosting, validPersonaName } from "../career_tailor.ts";
 import { recordVersion, type ResumeVersionLog } from "../career_resume_outcomes.ts";
 import { planLayout } from "../career_resume_rater.ts"; // RELEASE 10
 import { templateId } from "../career_resume_templates.ts"; // RELEASE 10
@@ -835,15 +835,22 @@ export function careerTools(deps: {
     },
     {
       name: "set_resume_contact", effect: "write_own",
-      description: "Save the name and email for the top of the person's resume, only as they typed both in this message. Never use the account email or a guess; if they have not typed them, ask: \"What name and email should go at the top of your resume?\"",
-      input_schema: obj({ name: str("Their name exactly as they typed it"), email: str("Their email exactly as they typed it") }, ["name", "email"]),
+      description: "Save the name and email for the top of the person's resume, only as they typed them in this message; leave one out only when their confirmed resume already holds it. Never use the account email or a guess; if they have not typed them, ask the question tailor_resume gave.",
+      input_schema: obj({ name: str("Their name exactly as they typed it"), email: str("Their email exactly as they typed it") }, []),
       run: async (i, c) => {
-        if (!c.turn) throw new Error(`not saved: ask them: "${CONTACT_QUESTION}"`);
-        const r = contactFromMessage(c.turn.message, i.name, i.email);
-        if (!r.ok) throw new Error(`not saved: ${r.error}. Ask them: "${CONTACT_QUESTION}"`);
         const p = profileOf(c);
-        p.basics = { ...(p.basics || {}), name: r.name, email: r.email };
-        return { saved: { name: r.name, email: r.email }, restated: `Your resume will show ${r.name} and ${r.email} at the top.` };
+        // H2H leftovers 1: a piece already on the confirmed record (the resume header they confirmed) is not asked again.
+        const known = resumeContact(confirmedOnly(p));
+        const hasName = String(i.name ?? "").trim() !== "", hasEmail = String(i.email ?? "").trim() !== "";
+        const only = hasName && hasEmail ? undefined : hasEmail && known.name ? "email" : hasName && known.email ? "name" : null;
+        const question = !known.name || !known.email ? contactQuestion(known) : CONTACT_QUESTION;
+        if (!c.turn) throw new Error(`not saved: ask them: "${question}"`);
+        if (only === null) throw new Error(`not saved: ${hasEmail ? "no name is on their confirmed record either, so their name must be typed too" : hasName ? "no email is on their confirmed record either, so their email must be typed too" : "nothing was typed"}. Ask them: "${question}"`);
+        const r = contactFromMessage(c.turn.message, i.name, i.email, only ? { only } : {});
+        if (!r.ok) throw new Error(`not saved: ${r.error}. Ask them: "${question}"`);
+        p.basics = { ...(p.basics || {}), ...(only !== "email" ? { name: r.name } : {}), ...(only !== "name" ? { email: r.email } : {}) };
+        const shown = resumeContact(confirmedOnly(p));
+        return { saved: { ...(only !== "email" ? { name: r.name } : {}), ...(only !== "name" ? { email: r.email } : {}) }, restated: `Your resume will show ${shown.name} and ${shown.email} at the top.` };
       },
     },
     {

@@ -1,6 +1,7 @@
 {
   "default_s": 5,
   "files": {
+    "tests/architect/gmail-oauth-wrapper-ci.test.ts": 0.6,
     "tests/architect/account-memory-unit.test.ts": 0.1,
     "tests/architect/advice-wide.test.ts": 6.2,
     "tests/architect/alerts-chain-pg.test.ts": 11,

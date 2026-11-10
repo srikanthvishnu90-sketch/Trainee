@@ -23,6 +23,9 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const lib = require("./eval-lib.cjs");
 const { applyOne, payloadHash, NeedsUser } = require("../../workers/career-browser/parallel-apply.cjs");
+// The apply VM's own verdict on the link (atsOf): a pass on a board the VM refuses is not one production can reach.
+const { atsOf } = require("../../workers/career-browser/apply-vm.cjs");
+const vmVerdict = (url) => atsOf(url).refuse || "drives";
 
 // The hosts each provider's postings and forms live on; a redirect anywhere else is a failure (redirect_not_allowed).
 const PROVIDER_HOSTS = {
@@ -84,7 +87,7 @@ async function robotsOk(url, cache, ua) {
 async function strictPosting(browser, item, o) {
   const persona = o.persona || "default";
   if (!lib.PERSONAS[persona]) throw new Error(`unknown persona: ${persona}`);
-  const r = { provider: item.provider, url: item.url, persona, result: "fail", reason: null, field: null, needs: null, sent_blocked: 0, upload_simulated: 0, graphql_reads: 0, submit_attempts: 0, ms: 0 };
+  const r = { provider: item.provider, url: item.url, persona, vm: vmVerdict(item.url), result: "fail", reason: null, field: null, needs: null, sent_blocked: 0, upload_simulated: 0, graphql_reads: 0, submit_attempts: 0, ms: 0 };
   const t0 = Date.now();
   const rb = await robotsOk(item.url, o.robots, o.ua);
   if (rb !== true) { r.reason = rb === "unreachable" ? "host_unreachable" : "robots_disallowed"; r.ms = Date.now() - t0; return r; }
@@ -123,8 +126,10 @@ function summarize(rows) {
   for (const x of rows) { if (!by.has(x.provider)) by.set(x.provider, []); by.get(x.provider).push(x); }
   const reasons = (rs) => Object.entries(rs.filter((x) => x.result === "fail").reduce((m, x) => ((m[x.reason] = (m[x.reason] || 0) + 1), m), {})).sort((a, b) => b[1] - a[1]);
   const prov = [...by].sort().map(([provider, rs]) => ({ provider, sampled: rs.length, pass: rs.filter((x) => x.result === "pass").length,
-    ready_if_answered: rs.filter((x) => x.result === "ready_if_answered").length, ready_except_upload: rs.filter((x) => x.result === "ready_except_upload").length, fail: rs.filter((x) => x.result === "fail").length, top_fail: reasons(rs).slice(0, 3) }));
-  const all = { sampled: rows.length, pass: rows.filter((x) => x.result === "pass").length, ready_if_answered: rows.filter((x) => x.result === "ready_if_answered").length,
+    ready_if_answered: rs.filter((x) => x.result === "ready_if_answered").length, ready_except_upload: rs.filter((x) => x.result === "ready_except_upload").length, fail: rs.filter((x) => x.result === "fail").length, top_fail: reasons(rs).slice(0, 3),
+    vm_drives: rs.filter((x) => (x.vm || vmVerdict(x.url)) === "drives").length, vm_pass: rs.filter((x) => x.result === "pass" && (x.vm || vmVerdict(x.url)) === "drives").length }));
+  const all = { sampled: rows.length, pass: rows.filter((x) => x.result === "pass").length,
+    vm_pass: rows.filter((x) => x.result === "pass" && (x.vm || vmVerdict(x.url)) === "drives").length, ready_if_answered: rows.filter((x) => x.result === "ready_if_answered").length,
     ready_except_upload: rows.filter((x) => x.result === "ready_except_upload").length, uploads_simulated: rows.reduce((a, x) => a + (x.upload_simulated || 0), 0),
     sends_blocked: rows.reduce((a, x) => a + x.sent_blocked, 0), graphql_reads: rows.reduce((a, x) => a + x.graphql_reads, 0),
     breaches: rows.filter((x) => /^BREACH/.test(x.reason || "")).length, top_fail: reasons(rows).slice(0, 8) };
@@ -134,9 +139,9 @@ function summarize(rows) {
 function markdown(label, s, persona = "default") {
   const pct = (a, b) => (b ? `${((100 * a) / b).toFixed(1)}%` : "-");
   const L = [`# Strict browser benchmark ${label} (persona: ${persona})`, "", `Pass = the production runner reached the instant before Submit with every required field filled and read back (synthetic person${persona === "full" ? " with the full confirmed profile: city, state, US work authorization, no sponsorship need" : ""}, no custom answers). Denominator = every sampled posting.`, "",
-    `**Pass: ${s.all.pass} / ${s.all.sampled} (${pct(s.all.pass, s.all.sampled)}).** Ready if answered (not a pass): ${s.all.ready_if_answered}. Ready except upload (not a pass; the resume upload was simulated in the browser and needs the person's yes): ${s.all.ready_except_upload} (uploads simulated: ${s.all.uploads_simulated}). Sends blocked in the browser: ${s.all.sends_blocked}. GraphQL reads allowed: ${s.all.graphql_reads}. Breaches (anything reported as sent): ${s.all.breaches}.`, "",
-    "| provider | sampled | pass | pass % | ready if answered | ready except upload | fail | top failure reasons |", "|---|---|---|---|---|---|---|---|"];
-  for (const x of s.prov) L.push(`| ${x.provider} | ${x.sampled} | ${x.pass} | ${pct(x.pass, x.sampled)} | ${x.ready_if_answered} | ${x.ready_except_upload} | ${x.fail} | ${x.top_fail.map(([k, n]) => `${k} ${n}`).join("; ")} |`);
+    `**Pass: ${s.all.pass} / ${s.all.sampled} (${pct(s.all.pass, s.all.sampled)}). Pass the apply VM drives today (production-reachable): ${s.all.vm_pass} / ${s.all.sampled} (${pct(s.all.vm_pass, s.all.sampled)}).** Ready if answered (not a pass): ${s.all.ready_if_answered}. Ready except upload (not a pass; the resume upload was simulated in the browser and needs the person's yes): ${s.all.ready_except_upload} (uploads simulated: ${s.all.uploads_simulated}). Sends blocked in the browser: ${s.all.sends_blocked}. GraphQL reads allowed: ${s.all.graphql_reads}. Breaches (anything reported as sent): ${s.all.breaches}.`, "",
+    "| provider | sampled | pass | pass % | ready if answered | ready except upload | fail | VM today | pass the VM drives | top failure reasons |", "|---|---|---|---|---|---|---|---|---|---|"];
+  for (const x of s.prov) L.push(`| ${x.provider} | ${x.sampled} | ${x.pass} | ${pct(x.pass, x.sampled)} | ${x.ready_if_answered} | ${x.ready_except_upload} | ${x.fail} | ${x.vm_drives === x.sampled ? "drives" : x.vm_drives ? `drives ${x.vm_drives}/${x.sampled}` : "refuses"} | ${x.vm_pass} | ${x.top_fail.map(([k, n]) => `${k} ${n}`).join("; ")} |`);
   L.push("", "Failure reasons overall: " + s.all.top_fail.map(([k, n]) => `${k} ${n}`).join("; "));
   return L.join("\n") + "\n";
 }
@@ -157,7 +162,7 @@ async function main() {
   const rows = new Array(items.length); let next = 0;
   const conc = Math.max(1, Number(arg("concurrency", 6)));
   await Promise.all(Array.from({ length: conc }, async () => { while (next < items.length) { const i = next++; rows[i] = await strictPosting(browser, items[i], o);
-    const x = rows[i]; console.log(["STRICT", x.provider, x.result, x.reason, x.field || x.error || "", `blocked=${x.sent_blocked}`, `gql=${x.graphql_reads}`, `upload_simulated=${x.upload_simulated}`, `${(x.ms / 1000).toFixed(1)}s`, x.url, `persona=${x.persona}`].join(" | "));
+    const x = rows[i]; console.log(["STRICT", x.provider, x.result, `vm=${x.vm}`, x.reason, x.field || x.error || "", `blocked=${x.sent_blocked}`, `gql=${x.graphql_reads}`, `upload_simulated=${x.upload_simulated}`, `${(x.ms / 1000).toFixed(1)}s`, x.url, `persona=${x.persona}`].join(" | "));
     if (x.result !== "pass" && (x.diag || x.check)) console.log("DIAG | " + x.provider + " | " + JSON.stringify({ check: x.check, blocked: x.blocked || [], ...x.diag }));
     // Why each field was handed back, and the options a choice offered (the posting's own words), for the record.
     if (x.result !== "pass" && x.needs) console.log("NEEDS | " + x.provider + " | " + x.url + " | " + JSON.stringify([...x.needs].sort((m, n) => (m.reason === "no_confirmed_answer") - (n.reason === "no_confirmed_answer")).slice(0, 12).map((n) => ({ label: String(n.label || "").slice(0, 60), reason: n.reason, ...(n.kind ? { kind: n.kind } : {}), ...(n.detail ? { detail: String(n.detail).slice(0, 160) } : {}), ...(n.options ? { options: n.options.slice(0, 12).map((o) => String(o).slice(0, 40)) } : {}) })))); } }));

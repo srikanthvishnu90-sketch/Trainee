@@ -143,6 +143,12 @@ brain (a bare "thanks" on a new thread) is scored on the staged path, as product
 apart as "not served in production" (architect ruling 2026-11-10). Each violation becomes a fix in the file that writes the
 text, never an exception added to the rubric.
 
+The 1,000-ask battery extends the sweep to the section 2 table (`tests/architect/response-battery-20261110.test.ts`, asks from
+`tests/architect/helpers/ask_battery.ts`, seed 20261110): every intent row in varied phrasings, typos, two intents in one
+message, corrections (role, place, date, recipient; R3), off-topic asks and asks sent while the AI is switched off. Each reply
+is scored with `checkReply` and the row's Must and Never columns. Staged brain with a scripted model (targets clean on their
+own): baseline 123 rubric violations and 3 Never hits; bar 0 and 0. Router only is a recorded ceiling (baseline 513 and 18).
+
 Gap 1 now has its battery: `tests/architect/response-b6-replay-20261109.test.ts` replays B.6 continuations 1 to 5 turn by turn.
 With the staged brain answering as the spec's target replies, the product delivers 0 rubric violations and 0 carry failures
 (the measure of what code does around a good model answer). With no model (router only) it is 16 violations and 3 carry

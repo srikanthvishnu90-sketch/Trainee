@@ -130,7 +130,8 @@ async function prepared(url = base) {
 test("prepare, approve, run: the employer receives exactly the approved answers, once, with no second question", async () => {
   const { prep, state, err } = await prepared();
   assert.equal(prep.ready, true, JSON.stringify(prep) + err.slice(-300));
-  assert.ok(prep.card.includes("Are you authorized to work in the United States?: Yes"), prep.card.join(" | "));
+  // architect amendment, D.4 6 source label (WO-122): the reused work-rights answer says where it came from
+  assert.ok(prep.card.includes("Are you authorized to work in the United States?: Yes (from your confirmed facts)"), prep.card.join(" | "));
   assert.ok(!prep.card.some((l) => /: 1$/.test(l)), "a select reads as the person chose it, never its internal value");
   assert.equal(prep.card.filter((l) => l.startsWith("Resume")).length, 1, "the resume once, by name");
   const file = path.join(root, "payload-ok.json");

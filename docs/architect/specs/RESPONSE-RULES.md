@@ -138,7 +138,7 @@ Nothing comes after the decision: no tails, no offers of more help, no capabilit
    pages are measured by `tests/architect/files-live-loop.test.ts` (unserved 0 and dead 0 asserted; decisions open the chat
    with the question filled in; the state changes and approvals still to serve are shown off with their reason and counted).
    Since item 6 S4 the Role workspace (F-06, `?role=<ref>`), the Batch File (F-10, `?view=batch`) and the Pipeline (F-11,
-   `?view=pipeline`) are drawn live from the results list's own records (`file_family_records.ts`), beside the roles page (F-05);
+   `?view=pipeline`) are drawn live from the results list's own records (`file_family_records_feed.ts`), beside the roles page (F-05);
    every state change on them is a POST with the page token to an action the roles page already serves, and the batch yes is
    `applyall` bound to the hash of the exact ready set drawn. Measured by `tests/architect/files-records-loop.test.ts` (dead 0,
    unserved 0, C.1 0 asserted on F-06, F-10 and F-11; F-10 counts exclusive and summing to the roles).

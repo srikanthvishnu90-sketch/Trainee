@@ -41,7 +41,7 @@ import { checkedAt, studentWindowOf } from "../_shared/search_shortlist.ts"; // 
 import { submitLabel } from "../_shared/submit_capability.ts"; // R10 owner ruling
 import { familyPage, familyStatePage } from "../_shared/file_family.ts";
 import { type FamilyRecordsByFamily, isServedFamily, SERVED_POSTS, type ServedFamily, servedFamilyFile, servedState } from "../_shared/file_family_serve.ts";
-import { liveBatchPage, livePipelinePage, liveRolePage, parseView } from "../_shared/file_family_records.ts"; // item 6 S4
+import { liveBatchPage, livePipelinePage, liveRolePage, parseView } from "../_shared/file_family_records_feed.ts"; // item 6 S4
 
 export type { AppRow } from "../_shared/file_page.ts";
 export interface FileStore extends JobStore {
@@ -987,7 +987,7 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
     paused: !!meta.paused, updated, dismissed: gone,
     all: applyAllYesEnabled(d.env) && !meta.paused && readySet(keep, new Set()).length >= 2 ? { hash: await setHashOf(readySet(keep, new Set())), size: readySet(keep, new Set()).length, filtered: filters.pay !== "any" || !!filters.where || !!filters.state } : null };
   // Item 6 S4: the Role workspace (?role=<ref>), the Batch File (?view=batch) and the Pipeline (?view=pipeline), drawn from the same
-  // records as this page (file_family_records.ts). Their forms post to the same URL, so a post lands back on the view it came from.
+  // records as this page (file_family_records_feed.ts). Their forms post to the same URL, so a post lands back on the view it came from.
   const view = parseView(o.url.searchParams.get("view")), roleRef = o.url.searchParams.get("role");
   const bot = (d.env.get("TRAINEE_BOT_URL") || "").trim(), ro = { bot: /^https:\/\//.test(bot) ? bot : null, checkedAt: seenAt }, rc = { now: d.now(), tz: ztz };
   const role = roleRef ? all.find((r) => r.ref === roleRef) : null;

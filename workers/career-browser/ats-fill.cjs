@@ -350,9 +350,9 @@ async function fillFile(page, d, path) {
   const detail = await page.evaluate(([q, n]) => {
     const bs = [...document.querySelectorAll(`[data-upmore-fbox="${q}"]`)];
     const b = bs[0], el = document.querySelector(`[data-upmore-q="${q}"]`);
-    return `boxes=${bs.length} input=${el ? (el.files ? el.files.length : "?") : "gone"} name_on_page=${(document.body.innerText || "").includes(n)} shows=${String(b ? b.innerText : "").replace(/\s+/g, " ").trim().slice(0, 100)}`;
+    return `id=${el ? el.id : ""} boxes=${bs.length} input=${el ? (el.files ? el.files.length : "?") : "gone"} name_on_page=${(document.body.innerText || "").includes(n)} shows=${String(b ? b.innerText : "").replace(/\s+/g, " ").trim().slice(0, 100)}`;
   }, [d.q, name]).catch((e) => `detail_error: ${String(e && e.message).split("\n")[0].slice(0, 80)}`);
-  return { ok: false, reason: "upload_not_accepted", detail };
+  return { ok: false, reason: "upload_not_accepted", detail: `role=${d.role} required=${!!d.required} ${detail}` };
 }
 // Is the resume's file name shown in its upload block (any marked level still on the page)? One answer per [q, name] pair.
 function CHIP(pairs) { return pairs.map(([q, n]) => [...document.querySelectorAll(`[data-upmore-fbox="${q}"]`)].some((b) => (b.innerText || "").includes(n))); }

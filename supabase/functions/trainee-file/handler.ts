@@ -655,7 +655,7 @@ async function handleKind(o: { g: Exclude<Awaited<ReturnType<FileService["get"]>
     const fam = rec.data.family as ServedFamily, src = d.familyRecords?.[fam], frec = { id: rec.id, data: rec.data };
     const botUrl = (d.env.get("TRAINEE_BOT_URL") || "").trim(), bot = /^https:\/\//.test(botUrl) ? botUrl : null;
     if (action) {
-      const run = SERVED_POSTS[fam].has(action) ? src?.post?.[action] : undefined;
+      const run = SERVED_POSTS[fam].has(action) && rec.data.live === true ? src?.post?.[action] : undefined; // a stored view answers no post
       if (!run) return o.state("Not done", ["That is not something this page can do yet. Nothing was changed or sent."], 400);
       const r = await run(u, frec, fields, d.now()).catch(() => ({ ok: false, title: "Not done", lines: ["It could not be checked just now, so nothing was changed or sent. Try again in a minute."] }));
       return o.state(r.title, r.lines, r.ok ? 200 : 409);
@@ -664,7 +664,9 @@ async function handleKind(o: { g: Exclude<Awaited<ReturnType<FileService["get"]>
     const tz = d.timeZone ? await d.timeZone(u).catch(() => null) : null;
     if (!live) return o.html(familyStatePage({ state: "error", family: fam === "F-14n" ? "F-14" : fam, recover: bot ? { label: "Back to chat", effect: "open", href: bot } : null }, { now: d.now(), tz }), 503);
     if (fields.get("format") === "json") return new Response(JSON.stringify({ family: fam, title: rec.data.title ?? null, view: live.view ?? null }, null, 2), { status: 200, headers: { ...(await headers("application/json; charset=utf-8", d.env)), "content-disposition": `attachment; filename="trainee-file-${rec.id}.json"` } });
-    return o.html(familyPage(servedFamilyFile(fam, live.view, { bot, token }), { now: d.now(), tz }));
+    // A listed post is drawn as a form only when this File's records answer it: a live (ref) File whose family has that post handler.
+    const answers = (a: string) => rec.data.live === true && typeof src?.post?.[a] === "function";
+    return o.html(familyPage(servedFamilyFile(fam, live.view, { bot, token: src?.post && rec.data.live === true ? token : null, answers }), { now: d.now(), tz }));
   }
   if (action === "remove") {
     const done = await files.revoke(u, rec.id).catch(() => false);

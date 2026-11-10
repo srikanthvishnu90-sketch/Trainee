@@ -71,12 +71,20 @@ Deno.test({ name: "FILES LIVE LOOP: every File family served by the File server 
       if (req.url() === loaded && req.method() === "GET") { const res = await w.serve(req.url(), sid); return r.fulfill({ status: res.status, contentType: res.headers.get("content-type") ?? "text/html", body: Buffer.from(await res.arrayBuffer()) }); }
       return r.abort();
     });
-    const pg = await ctx.newPage();
-    pg.on("request", (q: any) => { if (q.url() !== loaded || q.method() !== "GET") requests.push({ method: q.method(), url: q.url(), body: q.postData() }); });
-    pg.on("download", (d: any) => { if (!requests.some((x) => x.url === d.url())) requests.push({ method: "GET", url: d.url(), body: null }); d.cancel().catch(() => {}); });
+    // Every press gets a fresh page with its own listeners, so a late request or download of one press (a navigation still in flight,
+    // a download event after the wait) can never be counted against the next one (f-s2 saw one such miscount on a rerun).
+    let pg: any = null;
+    const load = async () => {
+      if (pg) await pg.close().catch(() => {});
+      pg = await ctx.newPage();
+      const mine: typeof requests = [];
+      requests = mine;
+      await pg.goto(loaded, { waitUntil: "load" });
+      pg.on("request", (q: any) => { if (q.url() !== loaded || q.method() !== "GET") mine.push({ method: q.method(), url: q.url(), body: q.postData() }); });
+      pg.on("download", (d: any) => { if (!mine.some((x) => x.url === d.url())) mine.push({ method: "GET", url: d.url(), body: null }); d.cancel().catch(() => {}); });
+    };
     for (const p of w.pages) {
       sid = p.sid; loaded = BASE;
-      const load = async () => { await pg.goto(loaded, { waitUntil: "load" }); requests = []; };
       await load();
       assert.match(await pg.content(), new RegExp(`data-family="${p.family === "F-14n" ? "F-14" : p.family}"`), `${p.family}: the File server drew the family page`);
       const controls: any[] = await pg.evaluate(READ);
@@ -86,7 +94,7 @@ Deno.test({ name: "FILES LIVE LOOP: every File family served by the File server 
         if (c.disabled) { if (c.off) rec.result = "off", rec.why = c.off; else rec.why = "disabled with no reason drawn beside it"; continue; }
         await load();
         const loc = pg.locator(CONTROLS).nth(c.i);
-        if (c.inClosedMenu) { await loc.locator("xpath=ancestor::details[1]/summary").click({ timeout: 2000 }).catch(() => {}); requests = []; }
+        if (c.inClosedMenu) { await loc.locator("xpath=ancestor::details[1]/summary").click({ timeout: 2000 }).catch(() => {}); requests.length = 0; }
         const before = await pg.evaluate(SNAP), rowsBefore = await w.rows();
         const dl = /format=json/.test(c.href ?? "") ? pg.waitForEvent("download", { timeout: 3000 }).catch(() => null) : Promise.resolve(null);
         await loc.click({ timeout: 2000, noWaitAfter: true }).catch((e: Error) => { rec.why = `could not be pressed: ${e.message.split("\n")[0]}`; });
@@ -110,6 +118,7 @@ Deno.test({ name: "FILES LIVE LOOP: every File family served by the File server 
         else rec.why = `not https: ${q.url}`;
       }
     }
+    await pg?.close().catch(() => {});
     await ctx.close();
   } finally { await browser.close(); }
 
@@ -183,6 +192,18 @@ Deno.test("FILES LIVE LOOP: the S0 hooks: a live view is read every time, a null
     served.add("approveplan");
     h = await (await get()).text();
     assert.match(h, /<form method="post"[^>]*><input type="hidden" name="t" value="fp1\.[0-9a-f]{64}"><input type="hidden" name="action" value="approveplan">/, "listed: a form with this page's token");
+    // The gap f-s2 found: a listed post on a stored-view File (no records behind it) is drawn off, never as a form that would fail,
+    // and a post to it is refused before any handler runs.
+    const stored = await files.createFamily!(U, "F-04", "Search plan", spec);
+    assert.ok(stored.ok);
+    if (stored.ok) {
+      const ssid = await A.tok(U, stored.id, SPECIMEN_NOW);
+      const sh = await (await handleFile(new Request(BASE, { headers: { cookie: `tf_s=${ssid}` } }), deps)).text();
+      assert.doesNotMatch(sh, /name="action" value="approveplan"/, "a listed post with no records behind it is not drawn as a form");
+      assert.match(sh, /Approve search scope[\s\S]{0,200}Not available on this page yet/, "it is shown off with the reason");
+      const sp = await handleFile(new Request(BASE, await phonePost({ t: ssid, action: "approveplan", h: "h-now" }, ENV.TRAINEE_FILE_LINK_SECRET, { headers: { origin: new URL(BASE).origin } })), deps);
+      assert.equal(sp.status, 400, "a post to a stored view is refused");
+    }
     const ok = await post({ action: "approveplan", h: "h-now" }), stale = await post({ action: "approveplan", h: "h-old" }), other = await post({ action: "tighten" });
     assert.equal(ok.status, 200); assert.match(await ok.text(), /Approved exactly v1/);
     assert.equal(stale.status, 409); assert.match(await stale.text(), /h-old is not h-now/);

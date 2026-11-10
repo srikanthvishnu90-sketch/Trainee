@@ -78,13 +78,15 @@ export function chatAsk(bot: string | null, text: string): string | null {
 // The exact words the chat opens with: the File, the item it is about, and the decision (ruling 2).
 export const askText = (fileTitle: string, item: string | null, label: string) => `About my ${fileTitle}${item ? `, "${item}"` : ""}: ${label}. `;
 
-export interface ServeCtx { bot: string | null; title: string; family?: ServedFamily; token?: string | null }
+export interface ServeCtx { bot: string | null; title: string; family?: ServedFamily; token?: string | null; answers?: (action: string) => boolean }
 // One control, as served. item: the File item it sits on (its title), when it has one.
 export function servedAct(a: Act, c: ServeCtx, item: string | null): Act {
   if (a.off) return a;
   const href = a.href ?? "";
   // A post this family serves keeps its form, with this page's token; any other is shown off (S1-S6 serve each one).
-  if (a.post) return c.token && c.family && SERVED_POSTS[c.family].has(a.post.action) ? { ...a, post: { ...a.post, token: c.token } } : { ...a, post: undefined, href: null, off: NOT_YET };
+  // It is drawn as a form only when it is listed AND this page's records answer it (o.answers): a listed post on a page with no source
+  // behind it (a stored view) would post and fail, so it is shown off instead.
+  if (a.post) return c.token && c.family && SERVED_POSTS[c.family].has(a.post.action) && c.answers?.(a.post.action) ? { ...a, post: { ...a.post, token: c.token } } : { ...a, post: undefined, href: null, off: NOT_YET };
   if (/^https:\/\//i.test(href)) return a;
   if (a.effect === "download" || /^\/files\//.test(href)) return { ...a, effect: "download", href: "?format=json" };
   if (href === "/f" || a.label === "Close this File") { const h = c.bot; return h ? { ...a, effect: "open", href: h, label: "Back to chat" } : { ...a, href: null, off: NO_CHAT }; }
@@ -103,10 +105,11 @@ function servedBlock(b: Block, c: ServeCtx): Block {
   return b;
 }
 // The family File as served: built from the record's view data, every control made servable or shown off.
-// o.token: this page's token (the handler's), so a post in SERVED_POSTS can be drawn; without it every post is shown off.
-export function servedFamilyFile(family: ServedFamily, view: unknown, o: { bot: string | null; token?: string | null }): FamilyFile {
+// o.token: this page's token (the handler's); o.answers: whether this page's records answer a post. A post in SERVED_POSTS is drawn as a
+// form only with both; otherwise every post is shown off.
+export function servedFamilyFile(family: ServedFamily, view: unknown, o: { bot: string | null; token?: string | null; answers?: (action: string) => boolean }): FamilyFile {
   const f = BUILD[family](view);
-  const c: ServeCtx = { bot: o.bot, title: f.header ?? (FAMILIES[family as FamilyId] ?? FAMILIES["F-14"]).header, family, token: o.token ?? null };
+  const c: ServeCtx = { bot: o.bot, title: f.header ?? (FAMILIES[family as FamilyId] ?? FAMILIES["F-14"]).header, family, token: o.token ?? null, answers: o.answers };
   const menu: Act[] = [{ label: "Export", effect: "download", href: "?format=json" }, ...(o.bot ? [{ label: "Back to chat", effect: "open" as const, href: o.bot }] : [])];
   return {
     ...f, back: o.bot, menu: f.pause ? undefined : menu, pause: f.pause ? servedAct(f.pause, c, null) : f.pause,

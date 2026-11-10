@@ -1065,6 +1065,18 @@ echo "== trainee_file_erase_r4.test.sql (an erase signs every file page out, use
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261105160000_channel_delivery_r4.sql"
 echo "== channel_delivery_r4.test.sql (an unlinked, released or moved chat's STOP stays on the person's other contacts; START clears it; erase cascades; no one calls the trigger)"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/channel_delivery_r4.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
+# PARTS FOLLOW THE CONTACT (20261110120000; the CI flake of flow-scenarios-channel-r4 on 3645456a): a row part sent to one
+# chat and claimed for another goes whole there. After 20261102180000 (whose two-lane claim its check goes through, applied
+# above). Twice (idempotent), its check, the rollback (the trigger and its function gone), up again, check again.
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261110120000_career_outbox_parts_follow_contact.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261110120000_career_outbox_parts_follow_contact.sql"
+echo "== career_outbox_parts_follow_contact.check.sql (a row claimed for another chat goes whole; the same chat resumes after its parts)"
+"${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_outbox_parts_follow_contact.check.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
+"${QUIET[@]}" -f "$ROOT/supabase/rollbacks/20261110120000_career_outbox_parts_follow_contact.down.sql"
+[[ "$("${PSQL[@]}" -tAc "select (count(*) = 0)::text from pg_trigger where tgname = 'career_outbox_parts_follow_contact'")" == "true" && "$("${PSQL[@]}" -tAc "select (to_regprocedure('public.career_outbox_parts_follow_contact()') is null and not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'career_outbox' and column_name = 'parts_contact'))::text")" == "true" ]] || { echo "FAIL career_outbox_parts_follow_contact rollback left its trigger, function or column"; exit 1; }
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261110120000_career_outbox_parts_follow_contact.sql"
+"${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_outbox_parts_follow_contact.check.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
+echo "  ok   career_outbox_parts_follow_contact rollback removes its trigger, function and column, and it applies again"
 # OUTREACH CLAIM DEADLOCK (20261105180000): career_outreach_action_claim reads each person's rows under that person's claim
 # lock (two claims never meet on one person's rows, so a claim never locks another worker's leased row) and never waits
 # while it holds rows. Twice (idempotent), then its tests: alone, then concurrent (the interleaving that deadlocked every

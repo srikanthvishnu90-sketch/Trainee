@@ -10584,7 +10584,7 @@ const CareerDoorstep = (() => {
         global_pause_set: true, pause_flag_set: true, global_pause: pause,
         halted_count: null, sent_count: null, in_flight_count: null, already_stopped_count: null, queue_total: null,
         queue_state: null,
-        reply: "No, nothing is paused yet. I couldn't check what has already gone out or what is waiting, so that is unverified. Next step: say \"pause everything\" to pause your account, or name the one task to stop.",
+        reply: "I couldn't pause everything yet, because I couldn't check what has already gone out or what is waiting, so that is unverified. Next step: say \"pause everything\" to pause your account, or name the one task to stop.",
       };
     }
     const TERMINAL = new Set(["halted", "suppressed", "cancelled", "canceled", "bounced", "failed", "completed"]);

@@ -47,12 +47,8 @@ export function supabaseApplications(admin: any): ReadApplications {
     const r = await admin.from("career_apply_jobs").select("id,job_id,company,url,state,reason,confirmation_id,email_confirmed_at,confirmation_mail_hash,created_at,updated_at,title:payload->>title")
       .eq("user_id", userId).order("updated_at", { ascending: false }).limit(500);
     if (r.error) throw new Error(`read the applications: ${r.error.message}`);
-    // Item 12: what each employer answered. Unread, the applications are unread too: a rejection must never read as "confirmed".
-    const e = await admin.from("career_mail_events").select("application_ref,kind,mail_at,flagged").eq("user_id", userId).like("application_ref", "job:%")
-      .in("kind", ANSWER_KINDS).order("mail_at", { ascending: false }).limit(2000);
-    if (e.error) throw new Error(`read the employers' answers: ${e.error.message}`);
-    const answers = employerAnswers(e.data ?? []);
-    return ((r.data ?? []) as AppRow[]).map((a) => ({ ...a, employer: answers.get(String(a.id)) ?? null }));
+    // Item 12: the employer's answers are joined by the standing read model (career_standing.ts), which reads the mail events.
+    return (r.data ?? []) as AppRow[];
   };
 }
 

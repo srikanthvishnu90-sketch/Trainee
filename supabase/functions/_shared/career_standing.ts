@@ -12,7 +12,7 @@
 //               is due over the merged applications and not drafted yet; the text is shown so it is ready to send; nothing
 //               is sent or saved by this turn.
 // A record that cannot be read is named and never guessed; a missing mail record never lets a follow-up be called due.
-import { type AppRow, type ReadApplications, statusAsk, statusReply, supabaseApplications } from "./career_apply_status.ts";
+import { type AppRow, employerAnswers, type ReadApplications, statusAsk, statusReply, supabaseApplications } from "./career_apply_status.ts";
 import { appsFromQueue, appsFromTracker } from "./career_mail_store.ts";
 import { receiptCompanies } from "./career_apply_receipt_read.ts";
 import { type Draft, FOLLOW_UP_DAYS, foldEvents, followUps, mergeApps, sameCompany, type StatusEvent, THANK_YOU_DAYS, type TrackedApp } from "./career_mail.ts";
@@ -32,6 +32,12 @@ export type ReadStanding = (userId: string) => Promise<StandingRows>;
 export interface Standing { jobs: AppRow[] | null; apps: TrackedApp[]; tracker: TrackedApp[]; mail: StatusEvent[]; drafts: DraftRow[]; sent?: DraftRow[]; due: Draft[]; read_through: string | null; receipts: string[]; unreadable: string[] }
 
 export function standingFrom(r: StandingRows, now: number): Standing {
+  // Item 12: each application carries its employer's latest answer from the mail record (a rejection, an invitation, an
+  // offer, a reply), so its line says that answer and never "confirmed it" over it. Unread mail joins nothing.
+  if (r.jobs && r.mail) {
+    const answers = employerAnswers(r.mail.map((e) => ({ application_ref: e.ref, kind: e.kind, mail_at: e.at, flagged: e.flagged })));
+    r = { ...r, jobs: r.jobs.map((a) => ({ ...a, employer: answers.get(String(a.id)) ?? null })) };
+  }
   const queue = appsFromQueue(r.jobs ?? []), tracker = appsFromTracker(r.tracker ?? []);
   const merged = mergeApps(queue, tracker);
   // A tracker row the merge read as the queue's own application still carries what the person reported about it (an

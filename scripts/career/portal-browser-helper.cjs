@@ -112,9 +112,13 @@ async function getBoard(boardId) {
     await context.route("**/*", async (route) => {
       try {
         const req = route.request();
-        let otherTab = false;
-        try { otherTab = req.isNavigationRequest() && req.frame().page() !== page; } catch (e) { otherTab = false; }
-        if (otherTab) { await route.abort("blockedbyclient"); return; }
+        // Fail closed (x-audit follow-up, 2026-11-10): a request whose tab cannot be named is refused when it is a
+        // navigation, and any request from another tab is refused. A blank tab being closed while the page sends it
+        // elsewhere (window.open(""), then location) has a frame whose page() throws; that used to fall through to
+        // route.continue() and load the off-list host (seen once on CI: /jobs/view/1?w=2).
+        let owner = null, named = true;
+        try { owner = req.frame().page(); } catch (e) { named = false; }
+        if ((!named && req.isNavigationRequest()) || (named && owner !== page)) { await route.abort("blockedbyclient"); return; }
         if (req.isNavigationRequest() && req.frame() === page.mainFrame() && !navAllowed(req.url())) {
           entry.blockedNav = req.url();
           await route.abort("blockedbyclient");

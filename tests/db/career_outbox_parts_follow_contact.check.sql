@@ -1,4 +1,4 @@
--- 20261110120000_career_outbox_parts_follow_contact.sql: a row some of whose messages went to one chat, claimed again for
+-- 20261110180000_career_outbox_parts_follow_contact.sql: a row some of whose messages went to one chat, claimed again for
 -- another chat (Telegram unlinked, the row follows the person to iMessage), goes whole there: the claim's new contact clears
 -- the earlier chat's sent_parts and provider_ids. Claimed again for the same chat, it resumes after its parts as before.
 -- Through the real two-lane claim (career_outbox_claim_lane). Everything rolls back.

@@ -19,7 +19,7 @@ import { redactIdentity } from "./identity_redact.ts";
 // FEATURE 11: posting-bound mocks, grading against the answer key and the posting, weak spots kept and drilled.
 import {
   type BoundPosting, debriefTail, drillQuestions, type Fit, fitLine, fitOf, interviewLine, type InterviewOnFile, isDrillAsk, isInterviewPrepAsk, isWeakListAsk,
-  judgedFit, mockEvent, type MockPrep, pastedJd, pickInterview, postingPlan, requirementsOf, supabaseMockPrep, weakListText, weakSpots, whichInterviewText, type ModelCall,
+  judgedFit, mockEvent, type MockPrep, noMatchNote, pastedJd, pickInterview, postingPlan, requirementsOf, supabaseMockPrep, weakListText, weakSpots, whichInterviewText, type ModelCall,
 } from "./career_mock_prep.ts";
 
 export const MOCK_INTENT = "career_mock"; // the mock asked a question and waits for the answer
@@ -799,6 +799,22 @@ async function closed(o: TurnIn, s: MockState, reply: string): Promise<string> {
   if (d.answered) await prep.record(o.userId, mockEvent(s, d));
   const tail = debriefTail(s);
   return tail ? `${reply}\n${tail}` : reply;
+}
+
+// LOOP 11: a practice ask about an interview at a company with no interview on file is not the mock's turn (mockTurn
+// returns null and the router's brief answers); this is the note that goes ahead of that reply, naming the interviews
+// that are on file. Null for anything else.
+export async function mockPassNote(o: { message: string; userId: string; now: number; store: MockStore }): Promise<string | null> {
+  const prep = o.store.prep;
+  if (!prep?.interviews || !isInterviewPrepAsk(o.message)) return null;
+  try {
+    const ivs = await prep.interviews(o.userId, o.now);
+    const pick = pickInterview(o.message, ivs);
+    return pick.why === "other_company" ? noMatchNote(pick.named ?? "that company", ivs) : null;
+  } catch (e) {
+    console.error("mock: interviews not read", e instanceof Error ? e.message : String(e));
+    return null;
+  }
 }
 
 // One turn, before any brain, right after the card hook. Returns null when the text is not for the mock, so the turn

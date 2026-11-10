@@ -470,14 +470,14 @@ const NOT_PRACTICE = /\b(?:plan|schedule|tips?|advice|checklist|brief|research|h
 const companyWords = (c: string) => c.toLowerCase().split(/[^a-z0-9&]+/).filter((w) => w.length >= 3 && !["inc", "llc", "ltd", "the", "corp", "company", "group", "labs", "analytics", "industries", "health", "technologies"].includes(w));
 // Which interview the ask is about: the one whose company it names; with none named, the only one ahead. Null with a
 // reason when it names a company with no interview on file, or there are several and it names none.
-export function pickInterview(text: string, ivs: InterviewOnFile[]): { iv: InterviewOnFile | null; why: "none" | "several" | "other_company" | null } {
+export function pickInterview(text: string, ivs: InterviewOnFile[]): { iv: InterviewOnFile | null; why: "none" | "several" | "other_company" | null; named?: string } {
   const low = ` ${String(text ?? "").toLowerCase().replace(/[^a-z0-9& ]+/g, " ")} `;
   const named = ivs.filter((iv) => iv.company && (low.includes(` ${iv.company.toLowerCase().replace(/[^a-z0-9& ]+/g, " ").trim()} `) || companyWords(iv.company).some((w) => low.includes(` ${w} `))));
   if (named.length) return { iv: named[0], why: null };
   // A capitalized name after with/at/for that matches no interview on file is another company.
   const other = /\b(?:with|at|for)\s+([A-Z][\w&.'-]+)/.exec(String(text ?? ""));
-  if (other && !/^(?:my|the|an?|this|next|upcoming)$/i.test(other[1])) return { iv: null, why: "other_company" };
   if (!ivs.length) return { iv: null, why: "none" };
+  if (other && !/^(?:my|the|an?|this|next|upcoming)$/i.test(other[1])) return { iv: null, why: "other_company", named: other[1] };
   if (ivs.length === 1) return { iv: ivs[0], why: null };
   return { iv: null, why: "several" };
 }
@@ -490,6 +490,11 @@ export function interviewLine(iv: InterviewOnFile): string {
     ? ` It names ${iv.interviewers.map((p) => p.title ? `${p.name} (${p.title})` : p.name).join(", ")}; I only know what the invite says about who you're meeting.`
     : "";
   return `This is practice for ${what}: ${when}${fmt}.${who} A suggestion, not booked anywhere: finish this mock, then text "drill my weak spots" once before the interview.`;
+}
+// The note ahead of the router's brief when the ask names a company with no interview on file: the interviews that are.
+export function noMatchNote(named: string, ivs: InterviewOnFile[]): string {
+  const list = ivs.slice(0, 3).map((iv) => `${iv.company ?? "a company"}${iv.role ? ` (${iv.role})` : ""}${iv.when_said[0] ? `, the invite says "${iv.when_said[0]}"` : ""}`).join("; ");
+  return `I don't see an interview with ${named} on file. On file: ${list}. Text "prep me for my ${ivs[0].company ?? "next"} interview" to practice for ${ivs.length === 1 ? "it" : "one of those"}.`;
 }
 export function whichInterviewText(ivs: InterviewOnFile[]): string {
   return [`You have ${ivs.length} interviews on file. Which one should we practice for?`,

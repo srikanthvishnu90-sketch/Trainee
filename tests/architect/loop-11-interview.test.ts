@@ -262,6 +262,30 @@ Deno.test({ name: "LOOP 11: twelve interview-prep journeys with a posting, a con
         if (ok) passed.push(j.id);
       });
     }
+    // Coordinator ruling (2026-11-10): a company with no interview on file keeps the router's brief, with a note naming the
+    // interviews on file; two interviews on file and none named asks which, by company and the invite's time.
+    await t.step("no match: an interview at a company with none on file keeps the brief and names the interviews on file", async () => {
+      const w = whenOf(J[0].inDays, J[0].hour), c = handler!.chat("tok-1");
+      const r = await c.say("help me prep for my interview at Hooli");
+      assertNode.equal(r.status, 200, r.reply);
+      assertNode.notEqual(r.intent, "career_mock", r.reply);
+      assertNode.ok(r.reply.startsWith(`I don't see an interview with Hooli on file. On file: Acme Analytics (Data Analyst, Growth), the invite says "${w.said}".`), r.reply);
+      assertNode.ok(!/built from the posting|Q1 of/.test(r.reply), r.reply);
+      const e = await c.say("end mock");
+      assertNode.ok(/^No mock is running/.test(e.reply), e.reply);
+    });
+    await t.step("two interviews on file and none named: asks which, by company and the invite's time", async () => {
+      const j = J[8], c = handler!.chat(`tok-${j.id}`);
+      const a = whenOf(j.other!.inDays, 10), b = whenOf(j.inDays, j.hour);
+      const r = await c.say("prep me for my upcoming interview");
+      assertNode.notEqual(r.intent, "career_mock", r.reply);
+      assertNode.ok(r.reply.startsWith("You have 2 interviews on file. Which one should we practice for?"), r.reply);
+      assertNode.ok(r.reply.includes(`1. Pied Piper, Data Engineer: the invite says "${a.said}".`) && r.reply.includes(`2. Wayne Analytics, Marketing Analyst: the invite says "${b.said}".`), r.reply);
+      const m = await c.say("prep me for my Pied Piper interview");
+      assertNode.equal(m.intent, "career_mock", m.reply);
+      assertNode.ok(m.reply.includes(`This is practice for your Pied Piper interview for Data Engineer: the invite says "${a.said}"`), m.reply);
+      await c.say("end mock");
+    });
     const pct = (a: number, b: number) => (b ? (100 * a / b).toFixed(1) : "0.0");
     console.log([...S.untied, ...S.fbBad, ...S.invented, ...S.booked, ...S.continues].map((x) => `  - ${x}`).join("\n"));
     console.log(`LOOP-11 journeys ${passed.length}/12 | questions tied ${S.tied}/${S.asked} (${pct(S.tied, S.asked)}%) | feedback tied ${S.fbOk}/${S.answers} (${pct(S.fbOk, S.answers)}%) | invented ${S.invented.length} | booked ${S.booked.length} | continuity misses ${S.continues.length}`);

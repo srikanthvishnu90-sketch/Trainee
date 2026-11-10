@@ -66,7 +66,7 @@ import { CODE_IN_CHAT_INTENT, CODE_IN_CHAT_REPLY, codeInChat, noteForCodeTurn } 
 import { supabaseEventStore } from "../_shared/agent/timeline.ts";
 import { CARD_ANSWER_INTENT, CARD_NEEDS_REPLY_STATUS, cardIntent, cardTurn, cardWaiting, supabaseCardStore } from "../_shared/career_apply_cards.ts";
 import { billingTurn, PAY_BY_CHECKOUT, stripeFromEnv, supabaseBillingStore } from "../_shared/career_billing.ts";
-import { mockTurn, supabaseMockStore as supabaseMockStoreUncapped } from "../_shared/career_mock.ts";
+import { mockPassNote, mockTurn, supabaseMockStore as supabaseMockStoreUncapped } from "../_shared/career_mock.ts";
 import { hiredSourceFromEnv } from "../_shared/career_hired.ts";
 import { askNextOpenQuestion, QUESTIONS_INTENT, questionsTurn, supabaseQuestionStore } from "../_shared/career_apply_questions.ts";
 import { applicationsTurn, supabaseApplications } from "../_shared/career_apply_status.ts";
@@ -688,6 +688,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       const mock = !card && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await mockTurn({ message, userId: user.id, threadId: tid, now: Date.now(), store: supabaseMockStore(admin) })
         : null;
+      // LOOP 11: a prep ask naming a company with no interview on file is not the mock's: the turn goes on, and the reply
+      // that answers it starts with a note naming the interviews that are on file.
+      if (!mock && !card && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)) {
+        const note = await mockPassNote({ message, userId: user.id, now: Date.now(), store: supabaseMockStore(admin) });
+        if (note) flowCtx.note = flowCtx.note ? `${flowCtx.note} ${note}` : note;
+      }
       // TASK PLANNER (career_planner.ts; CAREER_PLANNER=on with the brain released, default off): a message asking for two or
       // more actions is planned into steps, and each step runs through the code path that already does that one thing (the
       // router, the apply turn, the networking turn, the tracker and standing-instruction tools, the reminder store), on

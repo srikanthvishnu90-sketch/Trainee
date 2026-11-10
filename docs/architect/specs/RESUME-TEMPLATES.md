@@ -14,7 +14,10 @@ recruiter judge `evals/career/resume-judge/` (paid, run by the architect only).
 Delivered-file loop (release item 3): `scripts/resume-loop.ts` and `tests/architect/r10-resume-loop-20261109.test.ts` make 9 TEST
 profiles x 3 roles x 3 layouts through `tailor_resume`, open every attached PDF and DOCX with outside tools
 (`scripts/resume-loop-extract.py`) and count opened, invented facts, page fit and target carried. The plain layout sends the
-Word copy with the PDF too (1.1: Trainee keeps sending both).
+Word copy with the PDF too (1.1: Trainee keeps sending both). Architect ruling 2026-11-10: a skill the person listed in their
+own confirmed Skills is a confirmed fact (D-007) and is shown on every file; a skill only the posting names stays off; the
+Skills section never disappears while they have one (`career_tailor.ts` `listedSkillsProven`, `withListedSkills`; bar in
+`tests/architect/r10-resume-listed-skills-20261110.test.ts`, "confirmed listed skills shown" 100%).
 
 ## 1. Evidence
 

@@ -732,9 +732,9 @@
         "$110,000 - $129,999",
         "$130,000 or more"
       ],
-      "should": "fill",
+      "should": "ask",
       "expected": "$90,000 - $109,999",
-      "note": "Persona expectation is 95,000 USD."
+      "note": "architect amendment D-053 (owner, 2026-11-10): salary expectation is asked per application; before: should fill from the persona's fact:salary_expectation, after: should ask (expected is the person's answer for this posting). Before the amendment: Persona expectation is 95,000 USD."
     },
     {
       "page": "3-questions",

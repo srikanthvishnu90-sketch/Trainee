@@ -22,7 +22,7 @@ import { questionsToStore } from "../../workers/career-browser/ask-once.ts";
 import { formAnswersToKeep } from "../../extension/src/apply_core.ts";
 import { postingCountry, postingPlaces } from "../../supabase/functions/_shared/posting_place.ts";
 import { PERSONA } from "./fill-coverage.ts";
-import { cardFieldPrefix, preparedCardProblem, resumeCardLine } from "../../supabase/functions/_shared/career_prepared_card.ts";
+import { cardFieldPrefix, preparedCardProblem, resumeCardLine, reusedSourceSuffix } from "../../supabase/functions/_shared/career_prepared_card.ts";
 import { hashApplyPayload } from "../../supabase/functions/_shared/career_apply_store.ts";
 import FIXTURE from "../../tests/fixtures/apply/sensitive-questions.json" with { type: "json" };
 
@@ -132,24 +132,28 @@ export function check(q: Q) {
 
 // Coordinator ruling (2026-11-10): a confirmed answer that travels (work rights, GPA, graduation) is never reused silently.
 // Each one filled into an application is on that application's card (the server's own check, career_prepared_card.ts,
-// refuses a card that leaves it out) and inside the payload hash the yes approves (another value, another hash). `labelled`:
-// whether its card line names where the answer came from; reported apart, since the card carries no source words yet.
+// refuses a card that leaves it out) and inside the payload hash the yes approves (another value, another hash). `labelled`
+// (WO-122): the answer was texted for application A on Nov 9 (the person's zone, Chicago) and is reused at B; its line on
+// B's card says so, "(from your answer on Nov 9)", the server accepts that line and refuses the same card without it.
 const TRAVELS = new Set(["work_authorization", "sponsorship", "gpa", "graduation_date"]);
 const SHA = "a".repeat(64);
 export async function reuseOnCard(q: Q) {
   if (!TRAVELS.has(q.category)) return null;
   const f = plan(q, `A-${q.id}`, q.company ?? "Example Co", PERSONA, {}, true);
   if (!f.filled) return null; // asked: nothing reused
-  const field = { name: "q", label: q.label, value: String(f.value), factId: `fact:${q.category}`, source: { table: "answers", key: q.category, value: String(f.value) } };
-  const payload = { company: q.company ?? "Example Co", fields: [field], resume_sha256: SHA, destination: "https://example.test/apply" };
-  const line = `${cardFieldPrefix(q.label)}${field.value}`;
+  const field = { name: "q", label: q.label, value: String(f.value), factId: `text-answer:${q.id}`,
+    source: { table: "answers", key: q.category, value: String(f.value), at: "2026-11-10T03:30:00Z", job_ids: [`A-${q.id}`] } };
+  const payload = { company: q.company ?? "Example Co", job_id: `B-${q.id}`, tz: "America/Chicago", fields: [field], resume_sha256: SHA, destination: "https://example.test/apply" };
+  const plain = `${cardFieldPrefix(q.label)}${field.value}`, line = plain + reusedSourceSuffix(field, payload.job_id, payload.tz);
   const card = [payload.company, line, resumeCardLine("resume.pdf", SHA), `Sends to ${payload.destination}`];
   const fails: string[] = [];
   if (preparedCardProblem(payload, card, { filename: "resume.pdf" }) !== null) fails.push("card: the reused answer's card is refused");
   if (preparedCardProblem(payload, card.filter((l) => l !== line), { filename: "resume.pdf" }) === null) fails.push("card: a card without the reused answer is accepted");
   const other = { ...payload, fields: [{ ...field, value: field.value + " (changed)" }] };
   if (await hashApplyPayload(other) === await hashApplyPayload(payload)) fails.push("hash: the payload hash does not cover the reused answer");
-  return { fails, labelled: /\((from )?your (answer|confirmed)/i.test(line) };
+  const labelled = line === `${plain} (from your answer on Nov 9)` && preparedCardProblem(payload, card, { filename: "resume.pdf" }) === null &&
+    preparedCardProblem(payload, card.map((l) => (l === line ? plain : l)), { filename: "resume.pdf" }) !== null;
+  return { fails, labelled };
 }
 
 if (import.meta.main) {

@@ -239,13 +239,16 @@ export function planApplication(o: {
   return { ready: true, fields: c.fill, dropped: c.dropped };
 }
 // What the approval binds beside the answers (WO-102): each answer's fact, the event that confirmed it, its provenance,
-// whether it may attest, and the quarantine rules it was judged under. Any change is another application.
+// whether it may attest, the quarantine rules it was judged under, and for a texted answer when it was given. Any change is
+// another application.
 export function approvalSources(fields: { name: string; factId: string }[], m: Manifest) {
   return fields.map((f) => {
     const tf = m.byFactId[f.factId];
     if (!tf) throw fail("UNTRUSTED_ANSWER: " + f.name);
     return { name: f.name, factId: f.factId, event: tf.event, provenance: tf.provenance, authorizes: tf.authorizes, quarantine_version: m.version,
-      table: tf.table, key: tf.key, value: tf.value };
+      table: tf.table, key: tf.key, value: tf.value,
+      // WO-122: a texted answer's date and the postings it was asked for are bound too (the card's source label).
+      ...(tf.at ? { at: tf.at } : {}), ...(tf.job_ids ? { job_ids: tf.job_ids } : {}) };
   }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 export async function applicationApprovalHash(o: {

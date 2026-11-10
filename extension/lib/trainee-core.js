@@ -4310,6 +4310,48 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     workdaySubmitLine: () => workdaySubmitLine
   });
 
+  // supabase/functions/_shared/career_prepared_card.ts
+  var SENSITIVE = /* @__PURE__ */ new Set([
+    "work_authorization",
+    "sponsorship",
+    "us_person",
+    "citizenship",
+    "gpa",
+    "graduation_date"
+  ]);
+  var UTC_ALIAS = /^(etc\/)?(utc|uct|gmt|zulu|universal|greenwich)([+-]?0)?$/i;
+  function personTz(tz) {
+    if (typeof tz !== "string" || !/^[A-Za-z_]+(\/[A-Za-z_+-]+){0,2}$/.test(tz) || tz.length > 64 || UTC_ALIAS.test(tz)) return null;
+    try {
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: tz
+      });
+      return tz;
+    } catch {
+      return null;
+    }
+  }
+  function reusedSourceSuffix(field, postingJobId, tz) {
+    if (!SENSITIVE.has(mapQuestion({
+      label: String(field?.label ?? "")
+    }).fact)) return "";
+    const id = String(field?.factId ?? ""), src = field?.source && typeof field.source === "object" ? field.source : {};
+    if (!id || /^(approved-local-resume|essay-draft):/.test(id) || String(src.key ?? "").startsWith("job:")) return "";
+    if (id.startsWith("text-answer:")) {
+      if (!Array.isArray(src.job_ids)) return "";
+      if (src.job_ids.map(String).includes(String(postingJobId ?? ""))) return "";
+      const zone = personTz(tz), at = typeof src.at === "string" ? Date.parse(src.at) : NaN;
+      if (zone && Number.isFinite(at)) {
+        return ` (from your answer on ${new Intl.DateTimeFormat("en-US", {
+          timeZone: zone,
+          month: "short",
+          day: "numeric"
+        }).format(new Date(at))})`;
+      }
+    }
+    return " (from your confirmed facts)";
+  }
+
   // supabase/functions/_shared/fact_quarantine.ts
   function quarantinedFact(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -5011,9 +5053,13 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     for (const f of o.payload.fields) {
       const ids = draftFactIds(f.factId);
       const from = f.source === "trainee" ? o.before?.includes(f.name) ? " (your answer, answered before the session)" : "" : f.source === "you" ? " (typed by you)" : f.source === "fixed" ? " (set by the employer's page, read-only)" : f.source === "drafted" ? ` (drafted by Trainee from your confirmed facts${ids.length ? ` ${ids.join(", ")}` : ""}; put on the form by you)` : " (set by the page)";
+      const reused = f.source === "trainee" ? reusedSourceSuffix({
+        label: f.label,
+        factId: f.factId
+      }, o.payload.job_id) : "";
       lines.push(`${MARK[mapQuestion({
         label: f.label
-      }).kind] ?? ""}${shortLabel(f.label)}: ${f.value}${from}`);
+      }).kind] ?? ""}${shortLabel(f.label)}: ${f.value}${reused}${from}`);
     }
     lines.push(`Resume: ${o.payload.resume_name ?? "none attached"}`);
     const covers = (o.coverFiles ?? []).filter((c) => !c.attached && !c.pasted);
@@ -5351,7 +5397,13 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         factId: `text-answer:${r.id}`,
         event: `text-answer:${r.id}`,
         provenance: `owner answered this question (text-answer:${r.id})`,
-        authorizes: t === "saved"
+        authorizes: t === "saved",
+        ...typeof r.at === "string" && Number.isFinite(Date.parse(r.at)) ? {
+          at: r.at
+        } : {},
+        ...Array.isArray(r.job_ids) ? {
+          job_ids: r.job_ids.map(String).slice(0, 200)
+        } : {}
       };
       const prior = kept.get(t + "\n" + key);
       if (!prior) kept.set(t + "\n" + key, tf);

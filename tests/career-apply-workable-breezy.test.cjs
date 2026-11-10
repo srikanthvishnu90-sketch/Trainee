@@ -170,3 +170,12 @@ test("Breezy step form whose Continue does not advance: handed back, Continue no
   assert.equal(r.field, "step_did_not_advance");
   assert.deepEqual(r.needs, [{ label: "step_did_not_advance: A resume is required", reason: "form_rejects_value" }]);
 });
+
+test("an Address box takes only the person's confirmed address fact, never another fact in its place", () => {
+  const { factValue } = require("../workers/career-browser/ats-fill.cjs");
+  assert.equal(factValue("Address", { full_address: "1 Main St, Chicago, IL 60601", location: "Chicago, IL" }), "1 Main St, Chicago, IL 60601");
+  assert.equal(factValue("Address", { location: "Chicago, IL", street_address: "1 Main St" }), undefined, "no full address confirmed: asked");
+  assert.equal(factValue("Your residential street address", { street_address: "1 Main St" }), "1 Main St");
+  assert.equal(factValue("Email address", { email: "a@b.c", full_address: "x" }), "a@b.c");
+  assert.equal(factValue("Address of your reference", { full_address: "x" }), undefined);
+});

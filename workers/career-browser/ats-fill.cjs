@@ -202,6 +202,9 @@ const FACT_RULES = [
   [/linkedin/, "linkedin_url"], [/github/, "github_url"],
   [/^(portfolio|website|personal (site|website)|your website)\b/, "website_url"],
   [/^(current |your )?(location|city)( of residence)?$|^where are you (currently )?(located|based)$/, "location"],
+  // One "Address" box (Breezy asks it on many forms) takes the person's confirmed full address; a street line takes the street.
+  [/^(your )?(home |mailing |postal |residential )?address$/, "full_address"],
+  [/^(your )?(residential )?street address$|^address line 1$/, "street_address"],
 ];
 // ROUND 3: the person's own contact facts never answer a question about someone else ("Phone number of your reference",
 // "Email of the person who referred you"): the same rule as career_apply.ts SOMEONE_ELSE.

@@ -792,7 +792,7 @@ const CareerDoorstep = (() => {
         global_pause_set: true, pause_flag_set: true, global_pause: pause,
         halted_count: null, sent_count: null, in_flight_count: null, already_stopped_count: null, queue_total: null,
         queue_state: null,
-        reply: "I have not paused your account. I could not read the queue's own records in this session, so what already went out and what is waiting is unverified. Next step: say \"pause everything\" to pause your account, or name the one task to stop.",
+        reply: "I have not paused your account. I couldn't check what has already gone out or what is waiting, so that is unverified. Next step: say \"pause everything\" to pause your account, or name the one task to stop.",
       };
     }
     // Item accounting — every item lands in exactly one bucket, so the

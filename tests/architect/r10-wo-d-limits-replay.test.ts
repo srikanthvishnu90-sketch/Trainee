@@ -49,7 +49,12 @@ Deno.test("WO-D units: which refusals are limits; the next step in the person's 
   assertNode.equal(nextStepOf("rate_limit", CHI, null), `The AI service is turning requests away for now and didn't say when it will take them again. Say "continue" later and I'll pick it up.`);
   assertNode.match(nextStepOf("global", CHI), /used up, and more needs the owner's approval/);
   assertNode.ok(!/\d:\d\d|minutes?/.test(nextStepOf("unchecked", CHI)), "no invented time when the budget could not be read");
-  assertNode.equal(heldReply(ADVICE, "paused", CHI), `I couldn't finish this without the AI: "how should I follow up after an interview?". I kept it. Trainee's AI is switched off for a short while. Say "continue" later and I'll pick it up. Nothing was applied for, and searching postings still works now.`);
+  // Architect amendment (coordinator ruling 2026-11-10, r-audit #706): the held reply names the kept task in a short
+  // paraphrase (no verbatim echo, no "?"), what stopped, the real reset time when one is known, and that nothing was applied.
+  const held1 = heldReply(ADVICE, "paused", CHI);
+  assertNode.equal(held1, `I couldn't finish your interview follow-up question without the AI: it is kept. Trainee's AI is switched off for a short while. Say "continue" later and I'll pick it up. Nothing was applied for, and searching postings still works now.`);
+  assertNode.ok(!held1.includes(ADVICE) && !held1.includes("?"), "no verbatim echo of the ask, no question mark");
+  assertNode.match(heldReply(ADVICE, "budget_day", CHI, at + 3600_000), /^I couldn't finish your interview follow-up question without the AI: it is kept\. .*resets at midnight Chicago time.*Nothing was applied for/);
   const held = { heldAtLimit: { message: ADVICE, at, stop: "rate_limit" } };
   assertNode.equal(resumedTask(held, "continue", at + 30_000), null, "too soon");
   assertNode.deepEqual(resumedTask(held, "ok, go ahead", at + 120_000), held.heldAtLimit);
@@ -168,7 +173,9 @@ Deno.test({
         console.log(`--- L3 paused (${r.intent})\n${r.reply}`);
         assertNode.equal(r.intent, "career_limit_held");
         assertNode.equal(r.body.meta?.limit_stop, "paused");
-        assertNode.match(r.reply, /^I couldn't finish this without the AI: "how should I follow up after an interview\?"\. I kept it\. Trainee's AI is switched off for a short while\./);
+        // Architect amendment (ruling 2026-11-10, #706): the kept task named, what stopped; no verbatim echo of the ask.
+        assertNode.match(r.reply, /^I couldn't finish your interview follow-up question without the AI: it is kept\. Trainee's AI is switched off for a short while\./);
+        assertNode.ok(!r.reply.includes(ADVICE), r.reply);
         assertNode.match(r.reply, /Nothing was applied for/);
         assertNode.ok(!TEMPLATE.test(r.reply) && !r.reply.includes(ANSWER), r.reply);
       });
@@ -187,7 +194,7 @@ Deno.test({
         Deno.env.delete("MODEL_BUDGET_TARGET_USD"); Deno.env.delete("MODEL_BUDGET_HARD_USD");
         assertNode.equal(attire.body.meta?.limit_answer, "router", JSON.stringify(attire.body.meta));
         assertNode.notEqual(attire.intent, "career_limit_held");
-        assertNode.ok(!/^I couldn't finish this without the AI/.test(attire.reply), "the router's interview-prep answer stands");
+        assertNode.ok(!/^I couldn't finish .* without the AI/.test(attire.reply), "the router's interview-prep answer stands");
         assertNode.match(attire.reply, /\b(?:wear|dress)\b/i, "an answer about what to wear");
         assertNode.match(attire.reply, /Trainee has used up its AI budget/, "and the budget note says the AI was not used");
         assertNode.ok(!TEMPLATE.test(attire.reply), attire.reply);
@@ -206,7 +213,7 @@ Deno.test({
       await t.step("L6: 'continue' while it still holds keeps the same task", async () => {
         const r = await say(me, "continue");
         console.log(`--- L6 (${r.intent})\n${r.reply}`);
-        assertNode.match(r.reply, /^I couldn't finish this without the AI: "how should I follow up after an interview\?"/);
+        assertNode.match(r.reply, /^I couldn't finish your interview follow-up question without the AI: it is kept\./); // amended 2026-11-10 (#706)
         assertNode.ok(!/^Picking up/.test(r.reply));
       });
 

@@ -31,7 +31,7 @@ protection):
 | `SUPABASE_DB_URL` | Supabase > Connect (top bar) > Connection string > **Session pooler** URI (port 5432; GitHub's runners have no IPv6, so not the direct `db.<ref>.supabase.co` one), password filled in. A forgotten password: Project Settings > Database > Reset database password |
 | `TRAINEE_INBOUND_SECRET` | the `?secret=` value in LoopMessage's webhook URL. Required unless it is already set on the project (it is never generated here: a new one would break LoopMessage's URL unseen) |
 | `CAREER_INGEST_SECRET`, `CAREER_PROACTIVE_SECRET`, `TRAINEE_DELIVER_SECRET` | the values already live, readable only by you in Supabase > SQL Editor: `select name, decrypted_secret from vault.decrypted_secrets where name like 'trainee_%_secret'`. Leave unset to keep them: a secret already on the project is kept, its pg_cron job and Vault copy untouched, and the smoke skips its gate |
-| `OPENAI_API_KEY` | platform.openai.com > the project > API keys > Create new secret key. Unset keeps the one on the project |
+| `ANTHROPIC_API_KEY` | console.anthropic.com > API keys > Create key. Unset keeps the one on the project (Claude only, D-038a) |
 | `LOOPMESSAGE_API_KEY` | LoopMessage dashboard. Unset keeps the one on the project |
 | optional: `INGEST_CONTACT_EMAIL`, `TRAINEE_ALLOWED_CONTACTS`, `LOOPMESSAGE_DAILY_CONTACTS`, `PDL_API_KEY`, `UPMORE_TEST_JWT`, the `WHATSAPP_*` ones | as in "What you are asked for" below; unset keeps what the project has |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_BOT_USERNAME` | **leave unset** for now (Telegram, below) |
@@ -97,7 +97,7 @@ read from the environment or asked on a hidden prompt; none is echoed, written t
 | `SUPABASE_PROJECT_REF`, `SUPABASE_DB_URL` | the project (20 letters) and its database URI | nowhere (this process only) |
 | `CAREER_INGEST_SECRET`, `CAREER_PROACTIVE_SECRET`, `TRAINEE_DELIVER_SECRET`, `TRAINEE_INBOUND_SECRET` | 32+ characters of `A-Z a-z 0-9 . _ ~ -`; Enter generates 48 (`openssl rand -hex 24`), shown once on the terminal only if you say yes | function secrets; the first three also in Vault for pg_cron; the inbound one in LoopMessage's webhook URL |
 | `TRAINEE_ROTATE_INBOUND=1` | only when replacing the inbound secret on purpose | on a re-run, Enter for `TRAINEE_INBOUND_SECRET` stops the run if one is already set (a new one would silently break LoopMessage's webhook URL); give the same value, or set this and paste the new URL into LoopMessage |
-| `LOOPMESSAGE_API_KEY`, `OPENAI_API_KEY` | Enter keeps the one already set | function secrets (`MODEL_PROVIDER=openai` with the OpenAI key) |
+| `LOOPMESSAGE_API_KEY`, `ANTHROPIC_API_KEY` | Enter keeps the one already set | function secrets (Claude only: the Anthropic key alone, no `MODEL_PROVIDER` is set) |
 | `INGEST_CONTACT_EMAIL` | the contact job boards see in the User-Agent; career-ingest answers 503 without it | function secret |
 | `TRAINEE_ALLOWED_CONTACTS` | comma-separated numbers allowed to sign up (sign-up is closed by default: `TRAINEE_SIGNUP` is not touched) | function secret |
 | `LOOPMESSAGE_DAILY_CONTACTS` | your plan's contacts a day (unset means 300) | function secret |
@@ -111,9 +111,18 @@ read from the environment or asked on a hidden prompt; none is echoed, written t
 | `WHATSAPP_TEMPLATE_UPDATES`, `WHATSAPP_TEMPLATE_LANGUAGE` | the approved template's name (`trainee_updates`) and language (`en_US`). Unset: outside WhatsApp's 24-hour window nothing is sent; messages wait for the person's next message | function secrets |
 | `WHATSAPP_DAILY_TEMPLATES` | your WhatsApp messaging limit, templates a day (unset means 250, a new account's tier) | function secret |
 | `CAREER_PREPARE_AHEAD_URL`, `CAREER_PREPARE_AHEAD_TOKEN` (optional, both or neither) | the preparation host's door, `https://<host>/prepare`, and that host's own token (section "Running mass submission" below). Left empty, phone-only preparation stays `NOT_WIRED` and the smoke says so | function secrets (agent-chat kicks the host with them; the smoke reads the host's `/status`) |
-| `TRAINEE_FILE_LINK_SECRET`, `OPS_MONITOR_TOKEN` (set on the project by the owner, never by this script) | the signing secret of `trainee-file`'s hosted list page, and `ops-monitor`'s bearer token. Step 4 deploys `trainee-file` / `ops-monitor` (both `--no-verify-jwt`; the link or token authenticates) only when its secret is already among the project's function secrets (a dry run: given in the environment). Absent: it is skipped with a `gated: ... SKIPPED` log line, never a failure, and it is not in the provenance manifest | function secrets |
+| `TRAINEE_FILE_LINK_SECRET`, `OPS_MONITOR_TOKEN` (set on the project by the owner, never by this script) | the signing secret of `trainee-file`'s hosted list page, and `ops-monitor`'s bearer token. Step 4 deploys `trainee-file` / `trainee-connect` (the `/connect` page; gated on the same `TRAINEE_FILE_LINK_SECRET` because its links fall back to it) / `ops-monitor` (all `--no-verify-jwt`; the link or token authenticates) only when its secret is already among the project's function secrets (a dry run: given in the environment). Absent: it is skipped with a `gated: ... SKIPPED` log line, never a failure, and it is not in the provenance manifest | function secrets |
 
 Function secrets are project-wide in Supabase: every function sees every one.
+
+**Model and AI spend (D-046, 2026-11-09).** Trainee uses `claude-sonnet-5-5` for everything it writes or decides; it is in
+the deployed code, not a secret. `CAREER_REPLY_MODEL` and `CAREER_MODEL` cannot move it (any other value is ignored and
+logged once); unset them if they are still set. There is no per-person AI cap: `CAREER_MODEL_DAILY_USD` and
+`CAREER_MODEL_DAILY_CALLS` are ignored (logged once while set; `supabase secrets unset CAREER_MODEL_DAILY_USD
+CAREER_MODEL_DAILY_CALLS --project-ref <ref>` removes the log line). The global model budget still stops every call at the $70
+total (`MODEL_BUDGET_TARGET_USD` / `MODEL_BUDGET_HARD_USD`; `MODEL_BUDGET_PAUSED=on` stops all model calls at once), and the
+reply then says the AI budget is used up. Sonnet 5.5 is $2 / $10 per million input / output tokens (about 20 times Haiku
+5.5), so a typical brain turn is estimated at $0.03 to $0.09 before prompt caching.
 
 ## The steps and what each changes
 
@@ -308,7 +317,7 @@ given, derives `CLOUD_BRIDGE_URL` and `CAREER_PREPARE_AHEAD_URL` from the projec
 per-person or per-site number only when one is given (none by default: the owner's NO LIMITS rule, 2026-10-27), and schedules the two minute ticks (`scripts/launch/schedule-career-cloud.sql`). It never
 turns anything on by itself: `CLOUD_RUNNER_ENABLED=on` / `CLOUD_PREPARE_ENABLED=on` only when given, and the database's
 `CAREER_AGENT_SUBMIT` / `CAREER_CLOUD_APPLY` / `CAREER_CLOUD_TEXT_CARDS` only by the owner's SQL. Everything else (the route, the limits, the
-recommended first-wave numbers, the gate): docs/launch/CLOUD-RUNNER.md. The owner's first run: docs/launch/RAMP-FIRST-RUN.md.
+recommended first-wave numbers, the gate): docs/launch/CLOUD-RUNNER.md. `CAREER_CLOUD_TEXT_CARDS` is also in the release switch set (`release-db-switches.sql`): a plain go-live writes it `on` only when its row is missing and keeps an existing row, and with `CAREER_AGENT_SUBMIT` or `CAREER_CLOUD_APPLY` off the route stays closed. `trainee-go-live.sh --verify` and `secrets-audit.sh` end with a hosted-apply block (`scripts/launch/hosted-apply-setup.cjs`, names only): "off by design" when a switch is not `on`; "ON but NOT READY" (verify fails) when all three are on and a prerequisite is missing. The owner's first run: docs/launch/RAMP-FIRST-RUN.md.
 ## Running mass submission
 
 There is no volume number of Trainee's own (owner, 2026-10-27). Every executor runs as many applications as its machine
@@ -347,5 +356,8 @@ its rows is a separate decision of yours, never part of a rollback.
   write `[functions.agent-chat]` / `verify_jwt = true` to `/tmp/rb/supabase/config.toml`, then
   `cd /tmp/rb && supabase functions deploy agent-chat --project-ref <ref>`.
 - **The router brain back**: `supabase secrets unset CAREER_BRAIN --project-ref <ref>`.
+- **Never `scripts/launch/rollback/agent-chat-v203/`**: that is the Upmore-era agent-chat (frozen archive, D-006). It
+  calls Anthropic directly, outside Trainee's gateway and budget, on a Haiku default, so it is not a Trainee rollback. On
+  a project that holds Trainee's secrets it answers every request with 503 `not_a_trainee_rollback` (D-046).
 - **Remove the new functions** (after unscheduling): `supabase functions delete <name> --project-ref <ref>` for
   `career-ingest`, `career-proactive`, `trainee-deliver`, `trainee-inbound`, `trainee-telegram`, `trainee-whatsapp`.

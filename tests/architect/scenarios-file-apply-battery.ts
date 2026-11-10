@@ -420,7 +420,8 @@ function printReport(label: string, rep: Report): number {
   return failed;
 }
 
-const LOGO_SRC = (tpl: string, dom: string) => (tpl || "https://www.google.com/s2/favicons?sz=128&domain={domain}").split("{domain}").join(encodeURIComponent(dom));
+// R16: employer-domain default. With no provider configured the logo is the employer's own domain through the page's own origin.
+const LOGO_SRC = (tpl: string, dom: string) => tpl ? tpl.split("{domain}").join(encodeURIComponent(dom)) : `?logo=${encodeURIComponent(dom)}`;
 const ALLOWED_TAGS = new Set(["html", "head", "meta", "link", "title", "style", "body", "div", "header", "svg", "rect", "text", "span", "h1", "p", "form", "input", "button", "main", "ul", "li", "img", "details", "summary", "a", "strong", "footer", "script"]);
 const CODES = /\b(duplicate_job|daily_cap|no_resume|pace_unreadable|company_cooldown|not_submitted|needs_user|unknown_outcome|submitted_unconfirmed|invalid card)\b/;
 
@@ -718,7 +719,7 @@ later([1], { name: "file apply battery regressions: secrets, what we send, statu
       want: (seen, w) => [0, 1, 2].every((i) => rowOf(seen, i)?.link !== null && rowOf(seen, i)?.tag === null) && rowOf(seen, 3)?.link === null && !/javascript:/.test(seen!.html) && w.wantCalls.length === 0 },
     { name: "a posting on acme.bamboohr.com, on remoteok.com or news.ycombinator.com gets the lettermark; one on the employer's own careers host gets its logo (was: the ATS's or board's favicon)",
       s: SC(910_008, [POST(1, { url: "ats_other", slug: "marrowbyte" }), POST(2, { url: "board", boardHost: "news.ycombinator.com" }), POST(3, { url: "own_gh", slug: "oskarion" })], [{ k: "get" }]),
-      want: (seen) => rowOf(seen, 0)?.img === null && rowOf(seen, 1)?.img === null && /domain=oskarion\.com/.test(rowOf(seen, 2)?.img ?? "") },
+      want: (seen) => rowOf(seen, 0)?.img === null && rowOf(seen, 1)?.img === null && /(?:domain|logo)=oskarion\.com/.test(rowOf(seen, 2)?.img ?? "") },
     { name: "bidi overrides in a company, a title and a location never reach the page (was: rendered, reversing 'Reported, not verified')",
       s: SC(910_009, [POST(1, { company: "Evil‮gnp.exe Ltd", title: "Planner ‮reganam", rowLoc: "Lisbon ‮PT" })], [{ k: "get" }, { k: "text" }]),
       want: (seen) => !/[‪-‮⁦-⁩]/.test(seen!.html) && rowOf(seen, 0)!.name === "Evilgnp.exe Ltd" },
@@ -759,7 +760,11 @@ later([1], "secretFields: a resume hash or an account id with a long card-like r
 });
 
 later([1], "want: the queue's refusal codes reach the person as words, never as a code (was: 'Not queued: duplicate_job')", async () => {
-  const admin = { rpc: async () => ({ data: { added: [], refused: [{ posting_key: "greenhouse:acme:1", reason: "duplicate_job" }] }, error: null }) };
+  // The person has a confirmed resume and the account is not paused (the tap's own checks before the queue, journeys r2), so the
+  // queue's answer is what reaches them.
+  const kv = { select: () => kv, eq: () => kv, maybeSingle: async () => ({ data: { value: { paused: false } }, error: null }) };
+  const admin = { from: () => kv, rpc: async (name: string) => name === "career_resume_on_file" ? { data: true, error: null }
+    : ({ data: { added: [], refused: [{ posting_key: "greenhouse:acme:1", reason: "duplicate_job" }] }, error: null }) };
   const store = supabaseJobStore(admin);
   const r = await store.want(U, { job_id: "greenhouse:acme:1", url: "https://boards.greenhouse.io/acme/jobs/1", company: "Acme", title: "Analyst" } as JobView, T0);
   eq(r.result, "refused");

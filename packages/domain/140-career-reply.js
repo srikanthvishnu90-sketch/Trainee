@@ -393,7 +393,21 @@ const CareerReply = (() => {
     if (specific) return `${trimmed} ${specific}`;
     return `${trimmed} ${GENERIC_CLOSER}`;
   }
+  // D-054 (RESPONSE-RULES R10 and section 5, 2026-11-10): the reply ends at the decision, and nothing comes after it. The
+  // delivery seams (142's compose and the host's ending guarantee) use this one: a handler's specific next step is still
+  // appended to a reply that lacks one, and a generic closer already stamped on is removed, but the generic closer is never
+  // added. A reply that answers a question with no decision open ends at the answer ("You live in Austin."), not at
+  // "Tell me what you'd like to do next." ensureNextStep keeps the older H-12 guarantee for the callers that still want it.
+  function endAtDecision(text, opts) {
+    const raw = String(text == null ? "" : text);
+    if (!raw.trim()) return raw;
+    const out = ensureNextStep(raw, opts);
+    const trimmed = out.replace(/\s+$/, "");
+    if (!trimmed.endsWith(GENERIC_CLOSER)) return out;
+    const before = trimmed.slice(0, trimmed.length - GENERIC_CLOSER.length).replace(/\s+$/, "");
+    return before || out;
+  }
 
-  return { MAX_SENTENCES_PER_BUBBLE, composeText, composeResult, fallback, isFallbackText, FALLBACK_TEXT_RE, lint, splitBubbles, GENERIC_CLOSER, endsWithNextStep, ensureNextStep };
+  return { MAX_SENTENCES_PER_BUBBLE, composeText, composeResult, fallback, isFallbackText, FALLBACK_TEXT_RE, lint, splitBubbles, GENERIC_CLOSER, endsWithNextStep, ensureNextStep, endAtDecision };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerReply;

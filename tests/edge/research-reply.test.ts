@@ -204,7 +204,8 @@ Deno.test("failed delivery: a file that didn't go is recorded and said; an answe
 Deno.test("flag: off (default), no model call and no research reply; on, a scripted model drafts and code checks it", async () => {
   const { f } = fakeWeb();
   const { m, seen } = scripted(goodDraft());
-  const off = await researchTurn({ env: env({}), question: Q, candidates: [A, B], fetchSources: (u) => fetchSources(u, { fetch: f }), model: m });
+  const off = await researchTurn({ env: env({ CAREER_RESEARCH_REPLY: "off" }), // D-047: off is the rollback, named explicitly
+ question: Q, candidates: [A, B], fetchSources: (u) => fetchSources(u, { fetch: f }), model: m });
   assertEquals([off, seen.length], [null, 0]);
   const on = await researchTurn({ env: env({ CAREER_RESEARCH_REPLY: "on" }), question: Q, candidates: [A, B], fetchSources: (u) => fetchSources(u, { fetch: f }), model: m });
   assertEquals(seen.length, 1);

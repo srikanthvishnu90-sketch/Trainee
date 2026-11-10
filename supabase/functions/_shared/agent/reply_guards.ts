@@ -546,3 +546,28 @@ export const missingAck = (userMessage: string, reply: string): boolean => {
   const first = pieces(String(reply ?? "").trim())[0]?.text ?? "";
   return !ACK.test(first);
 };
+
+// D-054 (R03; RESPONSE-RULES section 2, "Off-topic or small talk": one plain sentence, then back to the open decision if one
+// exists; never a menu of capabilities). The real-model run answered "lol long day. how are you?" with "I'm Trainee, your career
+// agent: I find jobs, prepare applications you approve, track where you stand, and run interview practice. ... What role are you
+// after?" (0 of 5). A small-talk message is short, carries no career ask, and is about the day or the person; the sentences of a
+// reply to it that introduce Trainee, list what it does or ask for a role or a search are returned, for the model's one rewrite
+// (FLAG ONLY, #540: code never cuts the model's answer).
+const SMALL_TALK = /\b(?:how (?:are|r) (?:you|u|ya)|how(?:'s| is) it going|how(?:'s| is) your day|what'?s up|wassup|sup\b|long day|rough day|tough day|busy day|lol|lmao|haha+|good (?:morning|night|afternoon|evening)|happy (?:friday|monday|weekend)|tired|exhausted|just saying hi|how have you been)\b/i;
+const CAREER_ASK = /\b(?:jobs?|roles?|intern(?:ship)?s?|apply|applied|application|resume|cv|interview|search|find|posting|offer|salary|recruiter|career|hire|hiring|company|companies|draft|email|network|status|help me|can you|could you|should i)\b/i;
+export function smallTalk(message: string): boolean {
+  const m = plainQuotes(String(message ?? "")).trim();
+  if (!m || m.split(/\s+/).length > 14) return false;
+  return SMALL_TALK.test(m) && !CAREER_ASK.test(m);
+}
+const PITCH = /\b(?:i'?m|i am|this is) trainee\b|\byour career agent\b|\bhere'?s what i (?:can )?do\b|\bi can (?:help (?:you )?(?:with|find)|find (?:you )?(?:jobs|roles))\b|\b(?:what|which) (?:role|job|kind of (?:role|job)|position)s? (?:are you|do you|you'?re)\b|\btell me (?:the|what) (?:role|job)\b|\b(?:pull up|search for|find) (?:live )?(?:postings|roles|jobs) (?:that|for)\b|\bquick start\b/i;
+const VERBS = /\b(?:find|search|prepare|tailor|track|practice|draft|apply|run|write)\w*\b/gi;
+export function smallTalkPitch(message: string, reply: string): number[] {
+  if (!smallTalk(message)) return [];
+  const out: number[] = [];
+  pieces(plainQuotes(String(reply ?? ""))).forEach((p, k) => {
+    const verbs = new Set((p.text.match(VERBS) ?? []).map((v) => v.toLowerCase().slice(0, 5)));
+    if (PITCH.test(p.text) || verbs.size >= 3) out.push(k);
+  });
+  return out;
+}

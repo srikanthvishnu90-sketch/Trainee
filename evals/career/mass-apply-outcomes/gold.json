@@ -1,0 +1,352 @@
+{
+ "version": 1,
+ "labeled_at": "2026-11-05",
+ "labeler": "architect agent, written from each field's label and options and the two personas BEFORE the planner was run on this set (blind to its output; the planner's code was not read for these labels)",
+ "grammar": {
+  "fill:V1|V2": "the field must be filled with one of these values (option label for a field with options; `$fact` is that persona's confirmed value; `@resume` is the person's resume; `Prefix*` matches an option label by prefix). Asking instead is an unnecessary question; leaving it empty is a miss; any other value is a WRONG answer.",
+  "either:V1|V2": "filling with one of these, or asking / leaving it empty, are both correct; any other value is a WRONG answer. `either:*` accepts any value.",
+  "ask": "nothing the person confirmed answers it: it must not be filled. Required: it must be asked. Optional: left empty. Any fill is a WRONG answer.",
+  "alt": "Greenhouse's paste box beside its upload: not graded on its own",
+  "e / A / B": "the expectation for both personas, or per persona",
+  "ko": "a screening / knockout question (work authorization, sponsorship, export control, onsite or relocation, clearance)",
+  "contested": "a fill here is reported as contested, not counted as wrong: a second reading is plausible (note says why)"
+ },
+ "postings": [
+  {
+   "id": "greenhouse-stripe-8172510", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "fill:$first_name", "1": "fill:$last_name", "2": "fill:$email", "3": "fill:$phone",
+    "4": "fill:@resume", "5": "alt",
+    "6": {"e": "ask", "contested": true, "note": "a cover letter is not a confirmed fact; a drafted one would need the person's own yes"}, "7": "alt",
+    "8": {"A": "fill:$current_employer", "B": "ask"},
+    "9": {"A": "fill:$current_title", "B": "ask"},
+    "10": "fill:US",
+    "11": {"e": "either:US", "note": "the role is US-only and the person lives in the US"},
+    "12": {"e": "fill:Yes", "ko": true},
+    "13": {"A": "fill:No", "B": "fill:Yes", "ko": true},
+    "14": "ask",
+    "15": {"A": "either:No", "B": "ask", "note": "A's employer list is confirmed and has no Stripe"},
+    "16": {"A": "either:No", "B": "ask", "note": "A declined text-message contact"},
+    "17": "fill:$location|Chicago, Illinois|Austin, Texas"
+   }
+  },
+  {
+   "id": "greenhouse-doordashusa-8139265", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "fill:$first_name", "1": "fill:$last_name", "2": "fill:$email", "3": "fill:$phone",
+    "4": "fill:@resume", "5": "alt", "6": {"e": "ask", "contested": true}, "7": "alt",
+    "8": {"A": "fill:$linkedin", "B": "ask"},
+    "9": {"e": "fill:Yes", "ko": true},
+    "10": {"A": "fill:No", "B": "ask", "ko": true, "note": "B's sponsorship fact is now-or-future; whether B needs it NOW is not confirmed (B is authorized today on OPT), so it must be asked"},
+    "11": {"A": "fill:No", "B": "fill:Yes", "ko": true},
+    "12": {"A": "either:I have not worked at DoorDash", "B": "ask"},
+    "13": {"A": "fill:Yes", "B": "ask"},
+    "14": {"A": "fill:No", "B": "ask"}
+   }
+  },
+  {
+   "id": "greenhouse-datadog-8257324", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "fill:$first_name", "1": "fill:$last_name",
+    "2": {"A": "fill:$preferred_name", "B": "either:$first_name"},
+    "3": "fill:$email", "4": "fill:$phone", "5": "fill:@resume", "6": "alt",
+    "7": {"A": "fill:$linkedin", "B": "ask"}, "8": "ask",
+    "9": {"A": "fill:Yes", "B": "ask"},
+    "10": {"A": "fill:Yes", "B": "ask"},
+    "11": {"A": "fill:Yes, no restriction*", "B": "either:Yes, but I will need sponsorship*", "ko": true},
+    "12": {"e": "ask", "contested": true, "note": "where the person is available to work is not confirmed; their home city is a plausible reading"},
+    "13": {"A": "fill:English", "B": "either:English|Hindi"},
+    "14": "ask"
+   }
+  },
+  {
+   "id": "greenhouse-toast-8054004", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "fill:$first_name", "1": "fill:$last_name",
+    "2": {"A": "fill:$preferred_name", "B": "either:$first_name"},
+    "3": "fill:$email", "4": "fill:$phone", "5": "fill:@resume", "6": "alt",
+    "7": {"A": "fill:$linkedin", "B": "ask"}, "8": "ask",
+    "9": {"e": "fill:Yes", "ko": true},
+    "10": {"A": "fill:No", "B": "fill:Yes", "ko": true},
+    "11": {"A": "fill:I agree", "B": "ask"},
+    "12": {"A": "fill:$postal_code", "B": "ask"}
+   }
+  },
+  {
+   "id": "greenhouse-elastic-8148720", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "fill:$first_name", "1": "fill:$last_name",
+    "2": {"A": "fill:$preferred_name", "B": "either:$first_name"},
+    "3": "fill:$email", "4": "fill:$phone", "5": "fill:@resume", "6": "alt",
+    "7": {"e": "ask", "contested": true}, "8": "alt",
+    "9": {"A": "fill:$linkedin", "B": "ask"},
+    "10": {"A": "fill:No", "B": "fill:Yes", "ko": true},
+    "11": {"A": "fill:United States|USA|US|United States of America|U.S.", "B": "ask", "ko": true, "note": "B is authorized in the US only on OPT: not unrestricted; 'United States' would be false for B"},
+    "12": "ask",
+    "13": {"A": "fill:I acknowledge", "B": "ask"},
+    "14": "ask",
+    "15": "ask", "16": "ask", "17": "ask"
+   }
+  },
+  {
+   "id": "greenhouse-medelitellc-4815180008", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "fill:$first_name", "1": "fill:$last_name", "2": "fill:$email", "3": "fill:$phone",
+    "4": "fill:@resume", "5": "alt", "6": {"e": "ask", "contested": true}, "7": "alt",
+    "8": "ask",
+    "9": {"e": "ask", "contested": true, "note": "A has a bachelor's degree but its field is not confirmed"},
+    "10": {"A": "fill:No", "B": "ask"}
+   }
+  },
+  {
+   "id": "greenhouse-okx-7608993003", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "fill:$first_name", "1": "fill:$last_name",
+    "2": {"A": "fill:$preferred_name", "B": "either:$first_name"},
+    "3": "fill:$email", "4": "fill:$phone", "5": "fill:@resume", "6": "alt", "7": {"e": "ask", "contested": true}, "8": "alt",
+    "9": {"A": "either:No", "B": "ask", "ko": true, "note": "A lives in Chicago and will not relocate; B's willingness is unknown"},
+    "10": {"A": "fill:$current_employer", "B": "ask"},
+    "11": "ask",
+    "12": {"A": "fill:English", "B": "either:English|Hindi"},
+    "13": {"A": "fill:$linkedin", "B": "ask"},
+    "14": "ask",
+    "15": {"e": "fill:Yes", "ko": true},
+    "16": {"A": "fill:No", "B": "fill:Yes", "ko": true}
+   }
+  },
+  {
+   "id": "greenhouse-relativity-8615771002", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "fill:$first_name", "1": "fill:$last_name",
+    "2": {"A": "fill:$preferred_name", "B": "either:$first_name"},
+    "3": "fill:$email", "4": "fill:$phone", "5": "fill:@resume", "6": "alt", "7": {"e": "ask", "contested": true}, "8": "alt",
+    "9": {"A": "fill:$linkedin", "B": "ask"},
+    "10": "ask",
+    "11": {"A": "either:No", "B": "ask", "ko": true, "contested": true, "note": "A will not relocate; a bare No to a question that asks for an explanation is a plausible reading"},
+    "12": "ask",
+    "13": {"A": "fill:I am currently*", "B": "fill:I am not*", "ko": true},
+    "14": "ask"
+   }
+  },
+  {
+   "id": "lever-cgsfederal-0130d854-9bae-48d4-8ef0-e9da1ee778a5", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "ask",
+    "1": "fill:@resume", "2": "fill:$full_name", "3": "ask", "4": "ask", "5": "fill:$email", "6": "fill:$phone",
+    "7": "fill:$location|Chicago, Illinois|Austin, Texas",
+    "8": {"A": "fill:$current_employer", "B": "ask"},
+    "9": {"A": "fill:$linkedin", "B": "ask"}, "10": "ask",
+    "11": {"A": "fill:$full_address", "B": "ask"},
+    "12": {"A": "fill:No*", "B": "ask", "ko": true},
+    "13": {"A": "fill:I am a U.S Citizen*", "B": "either:Non-Citizen allowed to work for any*", "ko": true},
+    "14": "ask",
+    "15": {"A": "either:No|None", "B": "ask", "ko": true}
+   }
+  },
+  {
+   "id": "lever-veeva-9ac55b31-df46-4acb-b305-2c0b7ed56027", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "fill:@resume", "1": "fill:$full_name", "2": "fill:$email", "3": "fill:$phone",
+    "4": "fill:$location|Chicago, Illinois|Austin, Texas",
+    "5": {"A": "fill:$current_employer", "B": "ask"},
+    "6": {"A": "fill:$linkedin", "B": "ask"},
+    "7": {"A": "fill:No", "B": "fill:Yes", "ko": true},
+    "8": {"A": "fill:Yes", "B": "either:No", "ko": true, "note": "OPT is not an unrestricted right to work: Yes would be false for B"},
+    "9": {"A": "either:*", "B": "either:*", "note": "an instruction to safelist an address; ticking it states nothing about the person"},
+    "10": "either:Decline to self-identify", "11": "either:Decline to self-identify", "12": "either:Decline to self-identify"
+   }
+  },
+  {
+   "id": "lever-zoox-e8a190f0-7a89-4c11-a6a0-452ff6234749", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "fill:@resume", "1": "fill:$full_name", "2": "ask", "3": "ask", "4": "fill:$email", "5": "fill:$phone",
+    "6": "fill:$location|Chicago, Illinois|Austin, Texas",
+    "7": {"A": "fill:$current_employer", "B": "ask"},
+    "8": {"A": "fill:$linkedin", "B": "ask"}, "9": "ask",
+    "10": "either:$full_name",
+    "11": {"A": "either:United States*|USA*|US*|U.S.*", "B": "either:India*", "ko": true, "note": "citizenship is confirmed; when it was obtained is not"},
+    "12": {"A": "fill:No", "B": "fill:Yes", "ko": true},
+    "13": "ask", "14": "ask",
+    "15": "either:Decline to self-identify", "16": "either:Decline to self-identify", "17": "either:Decline to self-identify"
+   }
+  },
+  {
+   "id": "lever-filevine-e1b6b715-a715-453e-82ea-e20d59ed6865", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "fill:@resume", "1": "fill:$full_name", "2": "fill:$email", "3": "fill:$phone",
+    "4": "fill:$location|Chicago, Illinois|Austin, Texas",
+    "5": {"A": "fill:$current_employer", "B": "ask"},
+    "6": {"A": "fill:$linkedin", "B": "ask"}, "7": "ask", "8": "ask", "9": "ask",
+    "10": {"e": "fill:Yes", "ko": true},
+    "11": {"A": "fill:No", "B": "fill:Yes", "ko": true},
+    "12": "ask",
+    "13": "either:Prefer not to answer",
+    "14": {"e": "ask", "note": "this form offers no way to decline; EEO is decline-by-default, so it stays empty"},
+    "15": "either:Decline to self-identify", "16": "either:Decline to self-identify"
+   }
+  },
+  {
+   "id": "lever-wachter-62f44c16-1fea-4b9f-9123-f6b8db84ef77", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "ask", "1": "fill:@resume", "2": "fill:$full_name", "3": "fill:$email", "4": "fill:$phone",
+    "5": "fill:$location|Chicago, Illinois|Austin, Texas",
+    "6": {"A": "fill:$current_employer", "B": "ask"},
+    "7": {"A": "fill:$linkedin", "B": "ask"}, "8": "ask", "9": "ask", "10": "ask", "11": "ask",
+    "12": "ask", "13": "ask",
+    "14": "either:Decline to self-identify", "15": "either:Decline to self-identify", "16": "either:Decline to self-identify"
+   }
+  },
+  {
+   "id": "lever-cesiumastro-a49693f9-2066-43b3-972a-cdd3a62fbbce", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "fill:@resume", "1": "fill:$full_name", "2": "fill:$email", "3": "fill:$phone",
+    "4": "fill:$location|Chicago, Illinois|Austin, Texas",
+    "5": {"A": "fill:$current_employer", "B": "ask"},
+    "6": {"A": "fill:$linkedin", "B": "ask"},
+    "7": {"A": "fill:Yes", "B": "ask", "ko": true, "contested": true, "note": "B is not a U.S. person; whether B can obtain an export license is not known, so No is unsupported; a reading of the question as 'are you a U.S. person' makes No plausible"},
+    "8": {"A": "fill:No", "B": "fill:Yes", "ko": true},
+    "9": "ask", "10": "ask",
+    "11": "fill:$legal_name",
+    "12": {"A": "fill:Bachelor*", "B": "ask"},
+    "13": {"A": "either:I do not, nor have I ever*", "B": "ask", "ko": true},
+    "14": {"A": "fill:*", "B": "ask", "note": "A confirmed the standing truthfulness attestation"},
+    "15": {"e": "ask", "contested": true, "note": "an agreement to be legally bound by the employer's terms is more than the truthfulness attestation A gave"},
+    "16": "either:Decline to self-identify", "17": "either:Decline to self-identify",
+    "18": "either:I decline*", "19": "either:I do not want to answer",
+    "20": "either:$full_name", "21": "either:*"
+   }
+  },
+  {
+   "id": "lever-cfsenergy-195a6795-0b2a-4b8f-bd39-9d522efcba61", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "fill:@resume", "1": "fill:$full_name", "2": "ask", "3": "ask", "4": "fill:$email", "5": "fill:$phone",
+    "6": "fill:$location|Chicago, Illinois|Austin, Texas",
+    "7": {"A": "fill:$current_employer", "B": "ask"},
+    "8": {"A": "fill:$linkedin", "B": "ask"}, "9": "ask", "10": "ask", "11": "ask", "12": "ask",
+    "13": {"e": "ask", "contested": true},
+    "14": "ask", "15": "ask", "16": "ask",
+    "17": {"A": "fill:Yes", "B": "fill:No", "ko": true},
+    "18": {"A": "either:N/A*|NA|United States*", "B": "either:India*", "ko": true},
+    "19": "either:Decline to self-identify", "20": "either:Decline to self-identify", "21": "either:Decline to self-identify"
+   }
+  },
+  {
+   "id": "lever-arcteryx-com-41ce19dd-c609-438b-a40c-fd5841d63011", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "ask", "1": "fill:@resume", "2": "fill:$full_name", "3": "ask", "4": "ask", "5": "fill:$email", "6": "fill:$phone",
+    "7": "fill:$location|Chicago, Illinois|Austin, Texas",
+    "8": {"A": "fill:$current_employer", "B": "ask"},
+    "9": {"A": "fill:$linkedin", "B": "ask"}, "10": "ask", "11": "ask", "12": "ask", "13": "ask",
+    "14": "ask",
+    "15": {"e": "ask", "ko": true, "contested": true, "note": "remote vs moving is the person's choice; A's no-relocation is a plausible partial reading"},
+    "16": "ask",
+    "17": {"e": "fill:Yes", "ko": true},
+    "18": {"A": "fill:No", "B": "fill:Yes", "ko": true},
+    "19": {"A": "either:No", "B": "ask"},
+    "20": "either:Decline to self-identify", "21": "either:Decline to self-identify", "22": "either:Decline to self-identify"
+   }
+  },
+  {
+   "id": "ashby-openai-8fb1615c-34bf-47c4-a1d1-b7b2f836bbd3", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "fill:$legal_name",
+    "1": {"A": "either:$preferred_name", "B": "either:$first_name"},
+    "2": "fill:$email", "3": "fill:@resume", "4": "fill:$phone",
+    "5": {"e": "fill:Yes", "ko": true},
+    "6": {"A": "fill:No", "B": "fill:Yes", "ko": true},
+    "7": {"e": "ask", "ko": true, "contested": true, "note": "A will not relocate; 'No' is a plausible reading for A"},
+    "8": "ask",
+    "9": {"e": "ask", "contested": true, "note": "an arbitration agreement is not a standing consent"},
+    "10": {"e": "ask", "contested": true},
+    "11": "either:Decline to self-identify", "12": "either:Decline to self-identify", "13": "either:I decline*",
+    "14": "ask"
+   }
+  },
+  {
+   "id": "ashby-crusoe-b1b99030-d393-4329-80fe-5bc2e4c93b03", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "fill:$full_name", "1": "fill:$email", "2": "fill:$phone",
+    "3": {"A": "fill:No - I do not consent*", "B": "ask"},
+    "4": "fill:@resume",
+    "5": {"A": "fill:No", "B": "fill:Yes", "ko": true},
+    "6": {"A": "either:No", "B": "ask"},
+    "7": {"A": "fill:$linkedin", "B": "ask"}, "8": "ask", "9": "ask",
+    "10": "either:Decline to self-identify", "11": "either:Decline to self-identify", "12": "either:I decline*",
+    "13": "ask"
+   }
+  },
+  {
+   "id": "ashby-harvey-977e6184-2dc4-422b-8ab3-bc26bb73f778", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "fill:$legal_name",
+    "1": {"A": "fill:$preferred_name", "B": "either:$first_name"},
+    "2": "either:$last_name",
+    "3": "fill:$email", "4": "fill:$phone",
+    "5": {"A": "fill:$current_employer", "B": "ask"},
+    "6": {"A": "fill:$school", "B": "ask"},
+    "7": "ask",
+    "8": {"A": "fill:Yes", "B": "either:Yes", "ko": true, "note": "OPT allows work for any employer in the field; B's yes is plausible, a No would be false"},
+    "9": {"A": "fill:No, I do not require*", "B": "fill:Yes, I will require*", "ko": true},
+    "10": {"e": "ask", "ko": true, "contested": true},
+    "11": "ask",
+    "12": {"A": "fill:$linkedin", "B": "ask"},
+    "13": "fill:@resume",
+    "14": "ask"
+   }
+  },
+  {
+   "id": "ashby-clera-54fc9546-f535-4def-b9c0-dd4e18f02c4b", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "fill:$full_name", "1": "fill:$email", "2": "fill:@resume",
+    "3": {"A": "fill:$linkedin", "B": "ask"},
+    "4": {"e": "fill:Yes", "ko": true},
+    "5": "ask"
+   }
+  },
+  {
+   "id": "ashby-saronic-d3ad80db-8508-4677-95d6-93c5d7a33815", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "fill:$full_name", "1": "fill:$email", "2": "fill:@resume",
+    "3": {"A": "fill:$linkedin", "B": "ask"}, "4": "ask", "5": "ask",
+    "6": {"e": "ask", "ko": true},
+    "7": {"e": "ask", "note": "A confirmed no government employment, but the question also asks about U.S. military service, which nobody confirmed"},
+    "8": {"A": "fill:Yes", "B": "fill:No", "ko": true},
+    "9": "ask", "10": "ask",
+    "11": "either:Decline to self-identify", "12": "either:Decline to self-identify", "13": "either:I decline*",
+    "14": "ask"
+   }
+  },
+  {
+   "id": "ashby-whoop-1356adce-d85e-41b8-b6fe-14e6866c7aca", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "fill:$full_name", "1": "fill:$email", "2": "fill:$phone", "3": "fill:@resume",
+    "4": {"A": "either:$linkedin", "B": "ask"},
+    "5": {"e": "fill:Yes", "ko": true},
+    "6": {"A": "fill:No", "B": "fill:Yes", "ko": true},
+    "7": {"e": "ask", "ko": true},
+    "8": "ask", "9": "ask", "10": "ask", "11": "ask"
+   }
+  },
+  {
+   "id": "ashby-perplexity-d5bc2302-202f-4596-9c4d-8720d1e79064", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "fill:$full_name", "1": "fill:$email", "2": "fill:$phone", "3": "fill:@resume",
+    "4": {"A": "fill:No", "B": "fill:Yes", "ko": true},
+    "5": {"e": "ask", "ko": true},
+    "6": "ask", "7": "ask", "8": "ask",
+    "9": {"e": "ask", "contested": true},
+    "10": "ask"
+   }
+  },
+  {
+   "id": "ashby-skydio-134f29cc-da9f-4214-9d9c-d044f93af39e", "set": "evals/apply/questions-ci.json",
+   "fields": {
+    "0": "fill:$full_name", "1": "fill:$email", "2": "fill:$phone", "3": "fill:@resume",
+    "4": {"A": "fill:$linkedin", "B": "ask"}, "5": "ask",
+    "6": {"A": "fill:No", "B": "ask"},
+    "7": "either:Decline to self-identify", "8": "either:Decline to self-identify", "9": "either:I decline*",
+    "10": "ask"
+   }
+  }
+ ]
+}

@@ -1,0 +1,75 @@
+# PR hygiene (docs/architect/PROCESS.md): labels and comments only. It never closes, merges, edits or rebases a PR, and it
+# is never a required check (S1 reads only ci.yml and deploy-preflight.yml, so nothing here can block a deploy).
+#   open PRs (daily, and on demand): stale (no commit in 7 days), conflicting, stacked (base not trunk),
+#     based-on-red-trunk, oversize; one comment per newly added label (scripts/ci/pr-hygiene.cjs open).
+#   S2 at merge (every push to trunk, and daily): scripts/launch/deploy-standard.ts --checks S2 on the trunk tip, read only;
+#     every merged PR it lists without an approval at its merged head gets needs-s2-approval, so the approval is written
+#     when the PR merges, not backfilled at release. The deploy standard itself is unchanged and still judges at release.
+name: pr-hygiene
+on:
+  schedule:
+    - cron: "17 13 * * *"
+  push:
+    branches: [trunk]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Print what would be labelled; write nothing"
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency:
+  group: pr-hygiene-${{ github.event_name }}
+  cancel-in-progress: true
+jobs:
+  open-prs:
+    name: hygiene (open PRs)
+    if: github.event_name != 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      checks: read
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22.23.3" }
+      - name: Label open PRs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DRY: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '--dry-run' || '' }}
+        run: node scripts/ci/pr-hygiene.cjs open $DRY | tee -a "$GITHUB_STEP_SUMMARY"
+  s2-at-merge:
+    name: hygiene (S2 approvals since the last deploy)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      actions: read
+      checks: read
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0, persist-credentials: false }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22.23.3" }
+      - uses: denoland/setup-deno@v2
+        with: { deno-version: "v2.9.6" }
+      - name: S2 on the trunk tip (read only; its verdict gates nothing here)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          tip=$(git rev-parse origin/trunk)
+          deno run -A scripts/launch/deploy-standard.ts --sha "$tip" --checks S2 > "$RUNNER_TEMP/s2.txt" 2>&1 || true
+          cat "$RUNNER_TEMP/s2.txt" | tee -a "$GITHUB_STEP_SUMMARY"
+          grep -q '^S2 PASS' "$RUNNER_TEMP/s2.txt" || echo "::warning title=S2 approvals missing::merged PRs lack an approval at their merged head; see the needs-s2-approval label"
+      - name: Label merged PRs that lack an approval
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DRY: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && '--dry-run' || '' }}
+        run: node scripts/ci/pr-hygiene.cjs s2 "$RUNNER_TEMP/s2.txt" $DRY | tee -a "$GITHUB_STEP_SUMMARY"

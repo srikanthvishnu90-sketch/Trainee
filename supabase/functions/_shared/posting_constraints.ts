@@ -7,7 +7,7 @@
 // states the opposite (pay below the floor, another season, "unable to sponsor"). A posting that says nothing on a
 // parameter stays and is counted ("pay not listed") so the reply can say so.
 import { CareerJobs } from "./router_core.career.js";
-import { ABROAD, US_CITIES } from "./posting_place.ts";
+import { ABROAD, STATE_NAMES, US_CITIES } from "./posting_place.ts";
 import { payCurrency, payFrom, payPeriod } from "./posting_pay.ts";
 
 export type BandName = "intern" | "new_grad" | "junior" | "mid" | "senior" | "staff" | "manager" | "director";
@@ -121,6 +121,13 @@ export function searchTextOf(message: string): SearchText {
   // RESEARCH ROUND 3: the employer named is never a role word, whatever follows it ("jobs at Ford Motor Company please"
   // searched the role "software engineer ford motor company").
   if (limits.company) t = t.replace(new RegExp(`(?<![\\p{L}\\p{N}])(?:at|for|with)\\s+${limits.company.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "gu"), " ");
+  // D-054 (R01): the state written after the city is the place too ("in Boise, Idaho" was searched as the role "marine biology
+  // idaho", "in Austin, TX" as "nurse tx"), so the empty reply named a role nobody asked for.
+  if (place) {
+    const esc = place.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const states = Object.entries(STATE_NAMES).flatMap(([c, n]) => [c, n]).sort((a, b) => b.length - a.length).map((x) => x.replace(/ /g, "\\s+")).join("|");
+    t = t.replace(new RegExp(`\\b${esc}\\s*,\\s*(?:${states})\\b`, "g"), place);
+  }
   if (place) t = t.replace(new RegExp(`\\b(?:in|near|around|based in|located in)\\s+${place.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g"), " ").replace(new RegExp(`\\b${place.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g"), " ");
   for (const [k, v] of Object.entries(ALIAS)) if (v === place) t = t.replace(new RegExp(`\\b${k}\\b`, "g"), " ");
   // R10 WO-C (architect, 2026-11-09): region and area words are the place, never the role ("data analyst area u s", "us analytics").

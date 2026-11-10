@@ -44,12 +44,19 @@ const PENDING = ["CAREER_BATCH_EXECUTOR", "CAREER_CRISIS_MODERATION", "CAREER_PL
 const REAL_SUBMIT = { UPMORE_SCRIPT_SUBMIT_LIVE: "1", CLOUD_RUNNER_ENABLED: "on", CLOUD_PREPARE_ENABLED: "on" };
 const SEND_AS_PERSON = { CAREER_EMAIL_SEND: "on", CAREER_OUTREACH_SEND: "on", CAREER_SEND_RAIL: "on" };
 const D037: Record<string, string> = { ...REAL_SUBMIT, ...SEND_AS_PERSON };
-const ALL = [...ON, ...Object.keys(D037)].sort();
+// D-047 (architect ruling 2026-11-09, on the owner's order that research work in production): research answers in chat.
+// D-047 amended (2026-11-09): the research brief File (CAREER_RESEARCH_BRIEF) ships with the reply.
+const D047: Record<string, string> = { CAREER_RESEARCH_REPLY: "on", CAREER_RESEARCH_BRIEF: "on" };
+// D-049 (architect ruling 2026-11-09; architect amendment): the chat File card (spec C.2) ships on.
+const D049: Record<string, string> = { CAREER_FILE_CARD: "on" };
+const ALL = [...ON, ...Object.keys(D037), ...Object.keys(D047), ...Object.keys(D049)].sort();
 const UNMEASURED = ["CAREER_REPLY_WRITER", "CAREER_KNOWLEDGE", "CAREER_JUDGE"];
 
 Deno.test("D-036: production serves exactly the release flags on, with the staged brain", () => {
   eq(Object.keys(RELEASE_FLAGS).sort(), ALL);
   for (const [f, v] of Object.entries(D037)) eq(releaseValue(PROD, f), v, `D-037: ${f} is served ${v} in production`);
+  for (const [f, v] of Object.entries(D047)) { eq(releaseValue(PROD, f), v, `D-047: ${f} is served ${v} in production`); eq(releaseValue(envOf({ [f]: "off" }), f), "off", `D-047: ${f}=off rolls it back`); }
+  ok(!RELEASE_NEVER_ON.includes("CAREER_RESEARCH_BRIEF"), "D-047 amended: the research brief File is a release flag");
   ok(sendRailOn(PROD), "D-037: the sending rail is on");
   eq(sandboxHostOptions((k) => releaseValue(PROD, k) ?? "", fetch).scriptSubmitLive, true, "D-037: the cloud sandbox submits approved applications");
   for (const f of ON) {

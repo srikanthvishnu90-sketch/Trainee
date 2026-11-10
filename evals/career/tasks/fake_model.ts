@@ -9,6 +9,9 @@
 // deno-lint-ignore-file no-explicit-any
 
 const POSTINGS: any[] = JSON.parse(await Deno.readTextFile(new URL("./tasks.json", import.meta.url))).postings;
+// The end-to-end eval's scaled set (e2e/generate.ts) brings its own postings: added before its run, so a pick from a search
+// result is completed from them as from the task eval's own.
+export function addPostings(ps: any[]) { const have = new Set(POSTINGS.map((p) => p.job_id)); for (const p of ps) if (!have.has(p.job_id)) { POSTINGS.push(p); have.add(p.job_id); } }
 export type OracleStep = { capability: string; text: string; args?: Record<string, any> };
 const oracle = new Map<string, OracleStep[]>();
 export const calls: { kind: "plan" | "agent" | "draft" | "other"; user: string }[] = [];
@@ -50,6 +53,9 @@ function agentActions(steps: OracleStep[], results: { name: string; out: any }[]
     else if (s.capability === "tracker.update") acts.push({ name: "track_application", input: { company: a.company, ...(a.role ? { role: a.role } : {}), stage: a.stage ?? "Saved", ...(a.when ? { when: a.when } : {}) } });
     else if (s.capability === "interview.prep") acts.push({ name: "interview_brief", input: { company: a.company ?? "", ...(a.role ? { role: a.role } : {}) } });
     else if (s.capability === "alerts.watch") acts.push({ name: "set_job_alerts", input: { keywords: a.keywords ?? [s.text], locations: a.locations ?? [] } });
+    // research.market (R9-F): the research tool as the brain calls it (career_tools.ts research_market): the person's question,
+    // the format (a File when they asked for one), search queries and the site domains to read.
+    else if (s.capability === "research.market") acts.push({ name: "research_market", input: { question: a.question ?? s.text, format: a.format ?? "file", queries: a.queries ?? [s.text], ...(a.sites ? { sites: a.sites } : {}), ...(a.companies ? { companies: a.companies } : {}) } });
     else if (s.capability === "instruction.remember") acts.push({ name: "remember_instruction", input: { instruction: a.instruction ?? s.text, quote: a.quote ?? s.text } });
     // reminder.set: the agent brain has no reminder tool.
   }
@@ -85,6 +91,13 @@ export async function fakeAnthropic(req: Request): Promise<Response> {
     const next = acts[results.length];
     return next ? tool(body, next.name, next.input) : text(body, "Here is where that stands.");
   }
+  // The research tool's draft (research/market.ts marketDraftPayload): a deterministic reading of the PAGES it was given. A sentence
+  // with a figure becomes a summary fact quoted word for word from its page; the first sentence without one is the thesis, the next
+  // ones the conditions and the risks, each naming its page. Nothing is added that a page does not say.
+  if (/You answer a market research question from the PAGES/.test(Array.isArray(body.system) ? body.system.map((b: any) => b?.text ?? "").join("") : String(body.system ?? ""))) {
+    calls.push({ kind: "other", user });
+    return text(body, JSON.stringify(marketDraft(user)));
+  }
   if (/- name: /.test(user)) {
     calls.push({ kind: "draft", user });
     const first = /- name: (\S+)/.exec(user)?.[1] ?? "there", topic = /ASK ABOUT[^\n]*\n- (.+)/.exec(user)?.[1];
@@ -92,4 +105,31 @@ export async function fakeAnthropic(req: Request): Promise<Response> {
   }
   calls.push({ kind: "other", user });
   return text(body, "Here is what I can tell you.");
+}
+
+// R9 free sources (2026-11-08): the summary takes one fact from each page in turn (the first fact of every page, then the second,
+// ...), as a model citing every source it was given would, so each free source's fixture (e2e/web.ts) reaches a brief. The thesis,
+// conditions and risks are read from the site the question named (the pages with an "About:" page beside them), else any page.
+export function marketDraft(user: string) {
+  const raw = [...user.matchAll(/^PAGE \d+\nurl: (\S+)\ntitle: ([^\n]*)\n([\s\S]*?)(?=\n\nPAGE \d+\n|(?![\s\S]))/gm)].map((m) => ({ url: m[1], raw: m[2], title: m[2].replace(/^About:\s*/, "").trim(), text: m[3] }));
+  const host = (u: string) => { try { return new URL(u).hostname; } catch { return ""; } };
+  const sites = new Set(raw.filter((p) => /^About:/.test(p.raw)).map((p) => host(p.url)));
+  const pages = raw;
+  const sentences = (t: string) => t.split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter((x) => /[.!?]$/.test(x) && x.length >= 12);
+  // Within a page, the facts that share the most words with the question come first (a metro wage table's row for the role asked).
+  const qWords = new Set((/QUESTION:\n([^\n]*)/.exec(user)?.[1] ?? "").toLowerCase().match(/[a-z]{4,}/g) ?? []);
+  const overlap = (x: string) => (x.toLowerCase().match(/[a-z]{4,}/g) ?? []).filter((w) => qWords.has(w)).length;
+  const perPage: { text: string; quote: string; url: string }[][] = [], readings: { text: string; url: string }[] = [];
+  for (const p of pages) {
+    const fs: { text: string; quote: string; url: string }[] = [];
+    // A figure, not a form name: "10-K" and "8-K" in a filing's heading are not facts.
+    for (const x of sentences(p.text)) { if (/\d/.test(x.replace(/\b\d+-[A-Z]\b/g, ""))) fs.push({ text: x, quote: x, url: p.url }); else if (!sites.size || sites.has(host(p.url))) readings.push({ text: x, url: p.url }); }
+    perPage.push(fs.map((f, i) => ({ f, i, n: overlap(f.text) })).sort((a, b) => b.n - a.n || a.i - b.i).map((x) => x.f));
+  }
+  const facts: { text: string; quote: string; url: string }[] = [];
+  for (let i = 0; facts.length < 5 && perPage.some((f) => f[i]); i++) for (const f of perPage) if (f[i] && facts.length < 5) facts.push(f[i]);
+  const [thesis, ...rest] = readings;
+  const first = pages.find((p) => !sites.size || sites.has(host(p.url)));
+  return { title: first?.title ?? "", thesis: thesis?.text ?? "", summary: facts, comparison: null,
+    conditions: rest.slice(0, 1).map((r) => ({ text: r.text, urls: [r.url] })), risks: rest.slice(1, 3).map((r) => ({ text: r.text, urls: [r.url] })) };
 }

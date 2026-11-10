@@ -61,3 +61,164 @@
 355 e7256358f761c639a65515f7dc964ca7da2cc154 independent-review-agent-rv19 risk=high
 362 6fe093be955b4f1d026d1e33dcbd720aab3f6a94 independent-review-agent-rv21 risk=high
 386 34b6661d28cc05d08c4bc04b8d43824cc8a80867 independent-review-agent-rv32 risk=low note=merged-before-CI-to-unbreak-trunk
+385 368a61684d72716e8c2e3208a13ba1628c4e69f1 independent-review-agent-rv40 risk=med
+451 73e0e84a52ab87c2814c8df776b386da163ab0dd independent-review-agent-rv40 risk=med note=prod-service-role-key-in-eval-ci
+224 82501c1507fe551c9d5180a7756ec03054742283 independent-review-agent-rv40 risk=low note=stale-openai-references-in-specs
+430 39f00d742e13f6826ad82c3025e688d807ffe4bb independent-review-agent-rv40 risk=high note=page-apply-all-skips-blank-sensitive-holdback
+447 e03da8398bd8b44ef8814f3fbf1ba6a198273042 independent-review-agent-rv40 risk=high note=total-70-stop-pauses-production-and-tests-not-fully-read
+432 32f76d61d11f3e59efec7fd80030ba49c530f180 independent-review-agent-rv40 risk=med note=30x-runner-defaults-and-go-live-overwrites-set-values
+450 30aee24f696ce536fbb1d08b59eb8b600c2735ed independent-review-agent-rv40 risk=low
+449 c2aec85f58ff69d2d1dee909452b157464cd2119 independent-review-agent-rv40 risk=med note=waitlist-without-privacy-link-owner-decision-open
+440 25a6fdb955c67c9a9c1dbc7eb9250823e3622fec independent-review-agent-rv40 risk=med note=restored-policy-text-stale-flagged-for-owner
+434 95276f20e28a91ccc87fc1f039dfad394d6c7cb6 independent-review-agent-rv40 risk=low note=doc-stale-after-447
+431 6213cb3fc25e14d5c52e6f68119c0f34dd7427be independent-review-agent-rv40 risk=med note=confirm-email-wording-slightly-overstates
+428 e1a0eb47080fee1108bc3e3b1f5ba4c860058f08 independent-review-agent-rv40 risk=low note=in-applications-labelled-in-progress
+429 1f65d7b5a876d52da5b6fa4742c59215a249d7b8 independent-review-agent-rv41 risk=low note=sql-never-executed-doc-step5-stale-after-424
+433 e95d3cb9e10a8332329a035762e72727dda3b62a independent-review-agent-rv41 risk=med
+441 6cb73709fcb5c289e51fa620d40ff1c84fe96c15 independent-review-agent-rv41 risk=low
+423 9597485cdc2c966627c203c924764c8357ce8bd6 independent-review-agent-rv41 risk=med note=reply-code-list-lacks-readiness-modules-flag-off-body-counts-stale
+427 cdded165c813c691fe8de45a38e311f8b408a8cc independent-review-agent-rv41 risk=med
+422 56cf65d282f076900ba570d7769d12d722c2fd24 independent-review-agent-rv41 risk=med note=pause-is-page-scoped-browser-tests-ci-only
+426 3b2ca95314f56b41e4d849c22ffe2a9bc442dd1d independent-review-agent-rv41 risk=low
+425 b752cc5a4c5d5915b75ab351d28510c003615d7b independent-review-agent-rv41 risk=low
+420 f3234d915177bb013061283c1a92b950d7e0a057 independent-review-agent-rv41 risk=med note=no-rollback-file-for-constraint-relax-wo033-assert-adapted
+424 729f485885f74799e3ad1837e11400e047fa84fa independent-review-agent-rv41 risk=low note=unmentioned-runbook-doc-F2-stale
+421 ecd3751d94ae1a998cf79195f88068c267190db4 independent-review-agent-rv41 risk=high note=risk-surface-reviewed-not-line-by-line
+418 93d4f8f2683614efd3240919e730fccde1742316 independent-review-agent-rv41 risk=med
+417 46cf09a79c7a68f737dccec68dd69fd71d0f7856 independent-review-agent-rv42 risk=med note=tightens-reply-guards-needs-s3-remeasure
+416 69df84d20402b826f2d5059c06a6c4ce26bf9dca independent-review-agent-rv42 risk=high
+415 d3a364cff92ddb9282a4330d4b60dac1b36a7cfb independent-review-agent-rv42 risk=high note=no-origin-post-allowed-and-account-cap-window-approximate
+403 c736b0a19ba534642cc3da4348c27992ec9c4916 independent-review-agent-rv42 risk=high note=thread-facts-authority-trigger-assumes-career-account-row-exists
+383 ba308c43a847518b50abe3b670aa57e1e29ac17b independent-review-agent-rv42 risk=med note=stale-null-url-text-possible-at-delivery
+411 4ccd97a77b096cf2ebd800b7ee53dc81a1c42f15 independent-review-agent-rv42 risk=med note=reverses-350-gpa-assertion-per-372-contract
+379 f5545a2493f5847dfc940648820f890c2da358af independent-review-agent-rv42 risk=high note=state-burned-before-exchange-and-null-email-skips-uniqueness
+372 3e2e79dd9dff8ce57e0c12b7a647786481e85e29 independent-review-agent-rv42 risk=high note=correction-leaves-original-resume-file-stale-and-swapin-replaces-all-occurrences
+340 85ec78aa2fcd8c1a47b407cbd9ce500a9b310bcb independent-review-agent-rv42 risk=high note=optional-field-fill-failures-do-not-block-submit
+394 121ec587fb126b275eb244886cd2e099c099d7e5 independent-review-agent-rv43 risk=med note=mini-app-logo-requests-may-403-unverified-live
+458 e05d99b95bfff862a3f2a0844a78e7a935fa55e2 independent-review-agent-rv43 risk=low note=confirm-ask-rows-survive-disconnect
+460 e7e96bb4358ed15ffbe33cc002c1cdfddfebe776 independent-review-agent-rv43 risk=low
+456 4d769e5fca7cc069d90bf8f17fee56d0a19f0caa independent-review-agent-rv43 risk=low
+461 4862e0c72518686495a8dc6ba2e16970af120883 independent-review-agent-rv44 risk=low note=intent-assertion-dropped
+462 af7263f9841f1e9f2e21a4877a5b5bc76ef4ec52 independent-review-agent-rv44 risk=med note=waiver-not-pinned-to-brain-or-set-and-passed-gt-size-unchecked
+463 72c990a6b5289b5112c68003798238f158da3627 independent-review-agent-rv44 risk=low
+464 e334f084bbfc2d427ec20b3667733ea4a507a761 independent-review-agent-rv44 risk=med note=optional-fill-failures-now-block
+465 33229e9b47b6577888dea4e902b946a1d14a4098 independent-review-agent-rv44 risk=med note=h018-trigger-regex-broad
+467 1086461144d0858b2bd54736cb8a5226f66bfc6d independent-review-agent-rv44 risk=med note=waiver-failure-message-misleading-and-brain-not-pinned
+348 53e84b28af365fcf662dc1ddee60f4630ccacb35 independent-review-agent-rv45 risk=high note=defect-fixed-on-trunk-by-telegram-link-reply-code-migration
+454 ddfac1510e0ee9a7f7ee253f8188c1231fa58175 independent-review-agent-rv45 risk=med note=defect-fixed-in-463
+455 792230b1271da77af4cf0df87c60303f347190de independent-review-agent-rv45 risk=med note=defect-fixed-in-463
+437 ec239c145bfc06ce0edd9a6a6f435e638fd2170c independent-review-agent-rv45 risk=med note=defect-fixed-in-463
+453 263f254787ae0bb9e25e66715b98bf0d02e3a2cf independent-review-agent-rv45 risk=low
+472 7e9c4821def7984edc3db6eb6438bcd62a5dbd00 independent-review-agent-rv44 risk=med note=stale-90pct-comment-and-brain-not-pinned
+477 3cf40f2f3ae573244f40fb3406264ab5a92e391a independent-review-agent-rv44 risk=low note=new-public-function-gated-on-file-secret
+471 8398090e394a1b83f97e96eb1e046b672cdf6cd1 independent-review-agent-rv44 risk=low
+457 af355a6d3072af869026444915ac77c8cbbcd105 independent-review-agent-rv44 risk=low note=release-merge-tree-identical-to-approved-trunk-head
+469 8840311e284c753e9dac75fa7274b3b96c3dab05 independent-review-agent-rv44 risk=low note=release-merge-tree-identical-to-approved-trunk-head
+474 7731d4d259bf788d3787c619866b4d55dcb54a1a independent-review-agent-rv44 risk=low note=release-merge-tree-identical-to-approved-trunk-head
+479 90320f93a1eb5ead4f0d1a6d80b01fd16f30733d independent-review-agent-rv44 risk=low note=release-merge-tree-identical-to-approved-trunk-head
+445 fa6c2e4614091e39b4f87ec9370ef413a382cc18 independent-review-agent-rv45 risk=medium note=approve-delivery-throughput-sql-read-not-run-pg-tests-not-run-locally
+475 706e82025f518512bc282ca5c03ea4416218355f independent-review-agent-rv46 risk=low note=approve-situational-examples-analog-of-dev-cases-watch-leakage
+448 567477214ebd665a20fb45b047187d6330f36822 independent-review-agent-rv50 risk=low note=all-3-findings-resolved-on-trunk-by-483-and-485-no-new-issues
+482 e5c54d69d497d10ac9ad1ccf731940703f190330 independent-review-agent-rv47 risk=low-medium note=fix-correct-no-test-adds-supabase-cli-dependency-to-only-smoke
+483 ff0d78c4b9fe26d9d2a7370dea5ef32789dfe59f independent-review-agent-rv47 risk=low note=deletes-stray-sed-backup-file-nothing-references-it
+485 7a44ea910029a73df4b55fb019ef1378557e1c2b independent-review-agent-rv48 risk=medium note=approve-d041-go-live-restores-d037-guards-intact
+476 07bfff6d13bddf16a7afe88ed15a0c599c733218 independent-review-agent-rv49 risk=low note=presentation-only-empty-states-dismiss-fix-skip-link-no-action-paths-touched
+234 061b6334bfbd5d0d411a1daaf09e5f7b2dce149f independent-review-agent-rv49 risk=low note=additive-security-invoker-view-verified-locally-sql-untested-in-ci
+489 a989e93c2479428ff192cfa239f610fb47806141 independent-review-agent-rv51 risk=low note=release-merge-tree-identical-to-approved-trunk-head
+491 9b69bb9457dc1a0b5bb56937fd29999f95c9e2fb independent-review-agent-rv52 risk=low note=drop-one-time-real-submit-on-so-owner-off-survives-go-live-reviewed-after-merge-2026-11-05
+488 b86621eff526f7a94d130df0a72d4b1fa5554131 independent-review-agent-rv52 risk=low note=process-flow-doc-pr-template-label-only-hygiene-merge-group-trigger-reviewed-after-merge-2026-11-05
+504 d4e6821547cab4e7098106e15409c3574ace23ce independent-review-agent-rv55 risk=medium note=channel-r4-run-failure-putback-credential-down-stop-carry-trigger-reviewed-after-merge-2026-11-05
+505 888e906e699ddcd04061066196f34f9bb87aa1f4 independent-review-agent-rv55 risk=medium note=proactive-r4-zone-west-daycount-applied-jobs-supersede-past-interview-reviewed-after-merge-2026-11-05
+508 c93a50abe3609c86f6f2ede657eefce36c2e0811 independent-review-agent-rv55 risk=low note=channel-r4-run-failure-retry-uses-last-error-test-fetch-injected-reviewed-after-merge-2026-11-05
+435 51e1461fbff07189fd65dbee5bf1a71a0eadb6cf independent-review-agent-rv53 risk=medium note=correction-trigger-and-apply-tap-gates-ok-needs_user-and-requeued-driving-gap-reviewed-after-merge-2026-11-05
+492 f34bff9136327433fed30e11ba75e1c31a4121d4 independent-review-agent-rv53 risk=medium note=outreach-one-sender-on-rail-bounce-list-and-approval-time-optout-ok-stale-rail-row-liveness-gap-reviewed-after-merge-2026-11-05
+498 e9f75dee34cb3f6d4e0f1cae4ea3882f24836782 independent-review-agent-rv53 risk=low note=telegram-pacer-injected-clock-tests-only-prod-unchanged-reviewed-after-merge-2026-11-05
+499 9d71c08a0f98a2deeef0dd423613404c0d1cdda7 independent-review-agent-rv53 risk=medium note=telegram-r4-stop-ends-offer-pause-holds-payload-page-hides-internal-ids-code-fences-whole-reviewed-after-merge-2026-11-05
+500 aeae27a572207d58ca6594504d30d9ec34fc655d independent-review-agent-rv54 risk=medium note=apply-r4-submit-guards-duplicate-resume-vm-runner-rollback-reviewed-after-merge-2026-11-05
+501 6e054d294cfc37ab5e93a89b9b47d76fea926db1 independent-review-agent-rv54 risk=medium note=connectors-r4-disconnect-texts-grant-stamp-mailbox-bound-writes-reviewed-after-merge-2026-11-05
+502 b11a47842cdc9553cdb65f7248b7cff8fc452555 independent-review-agent-rv54 risk=low note=onboarding-r4-disown-resume-major-words-replace-counts-file-names-reviewed-after-merge-2026-11-05
+503 66a76a2865114027e317fea60e57e35536faf01b independent-review-agent-rv54 risk=low note=file-signin-r4-oracle-lock-erase-trigger-logos-uuid-not-card-reviewed-after-merge-2026-11-05
+414 7253eff25be36d1a62c01e52d8259f1be3085b6c independent-review-agent-rv56 risk=medium note=ci-minutes-path-filter-with-open-trace-proof-and-timeouts-architect-timeout-restored-reviewed-after-merge-2026-11-05-fixed-forward-by-510
+487 8bca30451ef9752fef316da2ca1a985a2c292721 independent-review-agent-rv56 risk=medium note=waitlist-survey-and-admin-viewer-key-and-pii-issues-fixed-in-510-live-deploy-before-review-is-owner-question-reviewed-after-merge-2026-11-05-fixed-forward-by-510
+509 03edad41f357247db2cc4037434aed718b285b2f independent-review-agent-rv57 risk=low note=backmerge-no-content-change-release-ancestor-of-trunk-reviewed-after-merge-2026-11-05
+510 97925046743979f4e7177158b14e2b28b1bace70 independent-review-agent-rv56 risk=low note=architect-shard-timeout-45-admin-key-header-only-constant-time-no-store-survey-pii-out-of-url-waitlist-and-duplicate-guard
+506 26bf0eb9573a6d75915fb73ae6659adfbf63511b independent-review-agent-rv57 risk=medium note=per-person-claim-lock-deferred-thread-update-rollback-exact-wiring-ok
+511 51f3e5bc6baa6d4fd11af9cc88574ba4d9ffb2f4 independent-review-agent-rv57 risk=low note=outbox-attempts-capped-at-10-paced-final-no-unknown-outcome-supersede-keeps-final
+514 6c03c4787f983ce77ad1c30aa296caa9a6a8c2e7 independent-review-agent-rv58 risk=medium note=identity-and-screening-claims-refused-in-any-phrasing-with-production-03edad41f-floor-on-claimProblems-factLock-checkDraft-draftEssay-no-regression-vs-production
+507 66faf5c328b790d7bbc6c3cea70ed6cff5bec97e independent-review-agent-rv58 risk=medium note=tailoring-round-4-identity-screening-false-accepts-and-factLock-decimal-change-floored-by-production-baseline-reviewed-after-merge-2026-11-05-fixed-forward-by-514
+493 ea7989373ad424f1d43100c73231e5e15a1822f1 independent-review-agent-rv53 risk=low note=C01-ledger-finish-restored-env-restored-142-equiv-tested-bundles-faithful-CI-cold-161-172ms
+520 3defbcfb1afd0665b067a57d0cdeec87e268d4a8 independent-review-agent-rv59 risk=medium note=release-tree-identical-to-trunk-3defbcf-S2-pass-9-migrations
+496 e24f20a3376a2a9e1cdd53ca61a7710d9b4a29b6 independent-review-agent-rv56 risk=low note=portal-asks-back-to-governed-flow-ledger-only-answers-the-rest
+519 5d060294ea207d660f1d780eef7593312fd46634 independent-review-agent-rv61 risk=low note=gold-fixed-ratchet-defeat-attempt-caught-judge-preflight-ok
+516 d7ca89ba207e3be163fdb453366ade3eaa91c229 independent-review-agent-rv57 risk=low note=brain-never-delivered-22.1-18.3-reproduced-judge-gated-no-retry
+497 b93c364a4fc2f062487486e4f21acd1cde5dcaf0 independent-review-agent-rv62 risk=low note=md-check-skips-__-only-inside-a-url-token-all-else-still-flagged
+495 43743fde408c1a3ceccc97f8ddbb41eb3fb34bd9 independent-review-agent-rv62 risk=low note=fake-digest-is-non-hex-assertion-unchanged-false-positive-gone
+527 76c07988849bd05e5c0ed6a48a89ab90d0c65647 independent-review-agent-rv63 risk=medium note=release-tree-identical-to-trunk-76c0798-S2-pass-9-migrations-S3-likely-fail-95.3-vs-96.8
+525 13a96e55c80757655e97db1c4dae86cba8b6b09b independent-review-agent-rv64 risk=low note=role-counter-reads-tg-list-refs-matches-product-store-only-a9.2-moves
+529 299e1d4f8a25c2c7095f986c0858046a26da6a7a independent-review-agent-rv67 risk=low note=empty-search-note-is-model-guidance-loop-claim-true-tests-green-measured-187-of-190
+530 e5198d59cb36302fb5b743c45e9710c7a94ecd3f independent-review-agent-rv67 risk=low note=personsFriday-matches-product-every-minute-incl-9am-and-dst-only-turn-latency-race-left
+494 15c71848c77a5959e7b9798ef87abf740f5ef586 independent-review-agent-rv69 risk=low note=prep-chips-on-label-row-all-visible-360-light-dark-only-red-was-trunk-clock-bomb-530
+532 9469676235ec0a66787cd06372046122501493e1 independent-review-agent-rv70 risk=medium note=tree-identical-to-trunk-9469676-s2-pass-9-migrations-494-reply-code-unmeasured
+534 514a455af75f695d4f7cda9e2f6760494028449e independent-review-agent-rv71 risk=low note=prompt-only-one-question-opener-and-which-ones-list-ref-S3-187of190-ci-green
+535 f922e0a5bc35f8b58c5f90134c71a6147bc92e75 independent-review-agent-rv72 risk=medium note=tree-identical-to-trunk-f922e0a-r4-plus-534-prompt-only-s2-ok-pending-534-535-9-migrations-s3-remeasure-on-merge
+538 3e694d62f553788fbac677446a10ec9ff17a2f85 independent-review-agent-rv74 risk=low note=s2-wait-only-for-wholly-missing-lines-same-ledgerApproves-rule-trunk-contents-read-default-off-merge-after-gate-green
+539 5fc5e46868e48800aae6c700d838864296f2bd95 independent-review-agent-rv75 risk=low note=page-csp-relay-shape-checked-telegram-miniapp-button-scoped-bundle-regenerated-gate-pending
+540 1183675de405e880124d8dbf888e5cb5ebb526ab independent-review-agent-rv76 risk=low note=writer-skips-brain-replies-user-words-allowed-for-names-only-lossless-4-part-telegram-answers-fuzzed-4000
+541 24b136bfba864cc44b9edd28737e3e2ee0933ccb independent-review-agent-rv77 risk=medium note=lineage-4-merges-heads-match-second-parents-bundles-verified-no-secrets-no-migrations-ci-green
+544 75b69d7910e3b10ef794a422ba724c58f6158137 independent-review-agent-rv78c risk=low note=brain-gets-question-and-negation-turns-withheld-tools-unchanged-bare-yes-stop-status-stay-code-code-detector-no-false-positives-on-money-gpa-zip-phone
+542 ab65b063830f8a9c670601916b5e5e5ae52cbaa1 independent-review-agent-rv79 risk=low note=v3-snapshot-expiration-0-means-never-per-vercel-docs-three-files-checks-green
+545 1b7c2005dea175d49bbabb59145cf20a0a0993fd independent-review-agent-rv80 risk=low note=offer-vs-ask-figures-split-counter-never-asks-offered-rate-placeholder-held-no-card-bundles-verified-rebase-additive
+546 67d480fa071e81a1b86c9845cfa4deff2084315f independent-review-agent-rv81b risk=low note=cap-views-rules-text-each-claim-traced-to-code-zero-model-calls-over-cap-crisis-first
+548 c1c84ae7669b574a51606a51c4780cbfea6d189f independent-review-agent-rv82b risk=low note=filter-before-score-ranked-identical-21-asks-fitcache-per-turn-weakmap-bundles-verified-counts-only-logging
+547 4e7eec12c0707e4af19013b2f7ca2eaee13f2c5b independent-review-agent-rv83b risk=medium note=backfill-default-account-row-on-conflict-nothing-ensure-fn-service-role-only-five-bodies-literal-diffed-live-check-0-intents-for-rowless-users
+549 df319d15ffa00d7c8d166ee0ceca4704f1533a66 independent-review-agent-rv84 risk=medium note=seven-merges-second-parents-match-reviewed-heads-one-migration-wired-rehearsal-passed-no-secrets-ci-green
+555 a2298e73861657561e043434e859a40a071c15b8 independent-review-agent-rv86b risk=medium note=opt-out-checked-under-user-lock-both-put-paths-no-row-still-allowed-recovery-ordered-by-user-id-no-lock-cycle
+554 574ba83ee0c84b00d86c87fc65afdf1509f05491 independent-review-agent-rv87b risk=medium note=redacts-at-least-trunk-3000-random-strings-0-weaker-frozen-trunk-copy-verified-title-hash-split-codes
+556 01970ce5a49b082b1669f144819b1d3328b29372 independent-review-agent-rv85d risk=low note=flag-only-practice-labels-narrowed-generic-question-labels-count
+559 d1541a74873c7a9d2b6e6f29ccbde7f1372f686b independent-review-agent-rv89 risk=low note=ack-check-on-own-words-affective-regex-f13-fixture-authorized-no-gaps-without-resume
+561 f9f228916306dad72a77fb25861a10f6ba39aac4 independent-review-agent-rv90b risk=low note=overwhelmed-handoff-no-city-asks-city-first-s3-99.5-h025-5-of-5
+557 0ad04b65c057a0e43315d963350df517696f1cee independent-review-agent-rv88c risk=low note=offer-vs-ask-separated-market-figures-held-for-brain-allowlist-titles-no-wrong-save-fuzz-6069-unchanged
+562 ab63fc517b4ea0fcd2b1206d473a8834ab58b23d independent-review-agent-rv91 risk=low note=bounded-minted-token-shapes-only-readable-urls-still-flagged-real-mints-tested-greptile-5
+565 ad15266a962920cddad01c90521d739fc868d34d independent-review-agent-rv93 risk=low note=hash-after-every-redaction-one-snapshot-lead-in-lookup-retry-replays-site-names-quotes-and-numbered-no-keep-sentences
+567 edbf1b3eccf71b344685ff8012a863ad7116f700 independent-review-agent-rv94 risk=low note=line-broken-crlf-nbsp-tab-endash-codes-removed-in-chat-and-raw-redaction-reply-flags-saved-one-normaliser-resume-hash-matches
+569 1ed8aa35ad53d4fd6403659968763f6f09ac22af independent-review-agent-rv95 risk=low note=uploaded-resume-text-skips-code-pass-owner-accepted-indented-line-broken-codes-removed
+571 fab6e54634258cc3ce7960cde95b67a2f8d79740 independent-review-agent-rv96 risk=low note=held-offer-detail-turns-record-nothing-and-go-to-the-brain-no-real-offer-dropped
+573 4c2719e4d4bca8f720ce6d42bfc0f3bbe4ea4969 independent-review-agent-rv97 risk=medium note=pending-only-split-code-removal-3+3-ranges-over-redacted-while-pending-known-tradeoff
+575 8f8ab132f45caa9e5ab6dc8cd46892b3372fe21a independent-review-agent-rv98 risk=medium note=reconcile-101-records-file-gate-fail-closed-hidden-parts-real-docx-kept-corpus-219-handovers-351-lines-rechecked-rv63
+578 0e2d8eade6042a22156284c5dc67316fcfd2c1cc independent-review-agent-rv99 risk=medium note=hidden-word-part-reader-utf16-cdata-prefix-fallback-vml-loose-runs-unreadable-part-refuses-greptile-p1s-fixed
+580 af9a658b5c358f1adb2abada139cfbbfcadc341f independent-review-agent-rv100 risk=medium note=approved-at-74103b70-identical-content-quotes-prefixes-props-per-line-mime-decoded-txt-literal-textpath-quotes-known-limit-sharepoint-props-refused
+582 4efe45772711fbbd44d4ed990693db6029122f83 independent-review-agent-rv102 risk=medium note=prerelease-batch-clean-docx-copy-chat-label-and-salary-counter-revisions-take-revoke-reviewed-by-four-agents
+583 f2c482b9a6adc7596ccb9003d41d9189ad84f4a9 architect-composition-check risk=medium note=release-8-composition-of-reviewed-prs-554-to-582-prerelease-review-by-four-agents-greptile-last
+584 f6239614a8634d4aac61bd0f88a0fec178500fc4 independent-review-agent-rv103 risk=low note=one-expanded-size-budget-per-word-upload-duplicate-central-directory-names-refused-early-code-removal-noted
+586 eb8814b7ee1a15b37120492acd3be304e519fb5f architect-composition-check risk=medium note=release-8-plus-584-composition-of-reviewed-prs-554-to-584-one-deploy-greptile-last
+588 c304ba9d754ef13efecc42954fd743b4094bd9c1 independent-review-agent-r9a risk=low note=market-brief-variant-validates-https-sources-and-cites-every-source-static-og-card-no-brief-content-to-crawler
+589 44690fd6941a0fb9f5fe2bb6d6f0e5abf8ffa9ac independent-review-agent-r9a risk=medium note=research-market-reply-path-behind-never-on-flags-code-enforced-citations-blocked-hosts-and-private-ips-refused
+592 4bb12e6446157dab862bc267f8c3e5fa0316eb28 independent-review-agent-r9a risk=low note=research-routing-regexes-flag-gated-only-overrides-document-delivery-and-profile-export-own-papers-excluded
+591 c50afe3e6b53a6e8e2f4d71d86164174ba0e9d45 independent-review-agent-r9a risk=low note=e2e-eval-fake-model-default-paid-run-needs-budget-s6-off-unless-S6_REQUIRED-default-checks-unchanged
+599 ec6ac9720f70313abea8204ae6ef59d3bff6e89f independent-review-agent-r9a risk=low note=generated-1000-task-eval-and-scaled-s6-behind-S6_SCALE-fake-rows-cannot-satisfy-s6-model-claude-required
+601 695fa48a02149b96c3dc9274ab8d6cc8d6e08df9 independent-review-agent-r9a risk=low note=eval-world-opens-greenhouse-gate-via-its-own-rule-judge-accepts-posting-tailored-resume-only-with-confirmed-resume
+606 a1898880f9da72d2f3f4ab5bb8a95d2659cafaac independent-review-agent-r9a risk=low note=one-line-eval-gate-tester-uid-moved-above-generated-person-range
+610 fe4b3fce83584ad9955d8b7040f32e2b49f7dd7d independent-review-agent-r9a risk=low note=test-double-only-in-memory-storage-and-https-project-url-no-product-code
+594 3d68ec8ddecce03562a58b439e6fc5f7d0bdce75 independent-review-agent-r9b risk=medium note=exact-card-hash-covers-followups-test-mode-fails-closed-rail-rehashes-tz-day-and-on-recheck-fixed-in-connector-s2-followup
+595 08c6e47dedde9d343ef1d92c5a769591791d02e3 independent-review-agent-r9b risk=low note=multi-target-asks-reuse-per-target-holds-one-batch-one-hash-each-contacts-only-no-new-send-path
+607 faca9a45e106f1bd9e39251f72c978fa02853a06 independent-review-agent-r9b risk=medium note=noreply-role-ats-guard-at-draft-approve-queue-and-sendone-employer-exception-label-exact-board-tld-followup
+612 d330fe0c766c6ac4339ac7d2b92c1d615ff07596 independent-review-agent-r9b risk=low note=parsing-only-es-hi-apply-and-email-and-reach-typos-each-half-keeps-its-own-approval
+593 12042fee63cd2db1e1e49d6e0f23d503d487f768 independent-review-agent-r9c risk=medium note=pace-caps-hold-in-process-executor-gate-closed-hash-rechecked-db-backed-caps-before-executor-on
+598 228cab6a1a22d6eef963527728388bfa371dc7f1 independent-review-agent-r9c risk=low note=one-approved-sources-definition-full-name-only-from-confirmed-first-last-routing-queues-only-no-approve-or-send
+600 7ce2a0ede1534f0292890f8343b217ce7d9cde83 independent-review-agent-r9c risk=medium note=paged-yes-needs-all-pages-delivered-and-set-hash-tailored-resume-bound-by-payload-sha-rollbacks-tested-twice
+608 c7f022d23a65aea0fdfe9a7d0ca88a5e67c2cae7 independent-review-agent-r9c risk=low note=hex-digest-32plus-stripped-before-luhn-card-check-real-cards-ssn-keys-still-caught
+609 52775dcee61cae0d20bc2a06b158936ebcc95157 independent-review-agent-r9c risk=medium note=sr-gate-stays-closed-canon-never-approves-eval-apply-all-fair-sr-migration-db-rehearsal-in-followup
+596 41f0d319715f2a9dffb6acea7f106bc412ffa645 independent-review-agent-r9d risk=medium note=confirmed-header-only-no-invented-facts-empty-top-asks-contact-rollback-present-two-role-parse-ok
+597 27d7d856828304fe460660324df123325d5b1716 independent-review-agent-r9d risk=low note=greptile-config-only-skipreview-automatic-no-code-touched
+590 62edbd38d9912e80b8d0a9922fff1c56a5f54187 independent-review-agent-r9b risk=high note=connector-pipeline-blocking-findings-erase-cap-reset-and-off-domain-published-fixed-in-613-flags-off-not-wired
+613 6e9fa21e15da7772feef2b96c2e71787b3076562 independent-review-agent-r9e+architect-delta risk=medium note=erase-keeps-send-log-published-on-domain-utc-cap-off-recheck-page-shows-followups-one-sequence-per-address-ever
+605 4052d4b61f6381dff1b6102deeeb94665332b550 independent-review-agent-r9d risk=medium note=whitelist-reader-it-scope-widening-found-in-review-fixed-in-614-reviewed-500-probes
+611 38f2f002a343c9413f2b28c1dc703f0cca935a5f independent-review-agent-r9d risk=medium note=d044-owner-confirmed-negations-devanagari-billing-en-fold-widening-found-in-review-fixed-in-614
+614 2154612e7071372a0497f7d8cbe60676c9c97779 independent-review-agent-r9f risk=low note=it-scope-one-item-fold-english-only-one-language-prototype-free-tables-count-kept-500-probes-no-widening
+618 9f89893657ae062a8399f28e65076fb52413f015 architect-review risk=low note=two-own-key-lookups-ordinal-word-and-billing-typos-object-hasown-no-behaviour-change-for-real-words
+616 72bf0e77a1d9997d06a7c62e12856385a4b4e845 independent-review-agent-r9g risk=low note=posted-false-only-pre-click-codes-restart-guarded-rollback-exact-runsh-additive-golive-sorted
+617 1e33585954dd7e56797e3f601a084d559490cdb9 independent-review-agent-r9g risk=low note=judge-still-binds-sent-mail-to-own-approved-hash-yes-batch-same-length-s6-floor-150-all-held-off-by-default
+619 0ba04c3766990c36ea297edffcb7245035189de3 independent-review-agent-r9g risk=low note=one-row-d045-flags-stay-never-on-until-wiring-review-merged-after-616
+622 31dd253614d7cd83a8bb10592e4dfbb39b1261e4 independent-review-agent-r9h risk=low note=pure-backmerge-tree-equals-trunk-release-8-merge-commit-onto-trunk
+613 6e9fa21e15da7772feef2b96c2e71787b3076562 architect-review-r9e-delta risk=medium note=replaces-malformed-reviewer-token-line-one-sequence-per-address-ever-delta-6e9fa21e-reviewed
+624 931c570071e0e06c52a799dfeb288850dea6999e owner-release-approval risk=high note=release-9-composition-of-independently-reviewed-prs-588-to-622-full-96.8-adversarial-162-heldout-98-s3-100

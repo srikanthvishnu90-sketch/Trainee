@@ -1,10 +1,10 @@
 {
- "note": "D-054 (owner, 2026-11-10): one real-model run of at most $3 for release items 7 and 9; measure the second parent",
+ "note": "D-055 / D-055a (owner, 2026-11-10): one more real-model run of the D-054 set, capped at $2.50; measure the second parent",
  "action": "eval",
  "set": "d054",
  "brains": [
   "staged"
  ],
  "passes": 5,
- "budget_usd": 3
+ "budget_usd": 2.5
 }

@@ -21,7 +21,7 @@
 import { CareerProfile, CareerRender } from "./router_core.career.js";
 import { type Block, renderBlocks, splitDates } from "./career_resume_design.ts";
 import { auditRewrite } from "./career_tailor_rewrite.ts";
-import { CONTACT_QUESTION, resumeContact } from "./career_tailor.ts";
+import { contactQuestion, resumeContact } from "./career_tailor.ts";
 
 export const RESUME_TASK_INTENT = "career_resume_task";
 export const RESUME_CLARIFY_INTENT = "career_resume_clarify";
@@ -547,14 +547,15 @@ async function resumeTaskTurnInner(o: { message: string; ctx: any; userId: strin
     const after = await (o.deps.rewrite?.(pick.text, o.message) ?? Promise.resolve(null)).catch(() => null);
     const clean = after ? after.replace(/^[-•\s"]+|["\s]+$/g, "").replace(/\s+/g, " ") : "";
     const audit = clean && clean !== pick.text ? auditRewrite({ original: pick.text, proposed: clean, fact: pick.fact, profile }) : { ok: false, reasons: [] };
-    if (!audit.ok) return reply(`I couldn't shorten it without changing what it says, so it stays as written: "${pick.text}".`, RESUME_TASK_INTENT, "completed");
+    // Tone gate (tests/architect/instinct-tone-gate.test.ts): the outcome first, then why; not a refusal opener.
+    if (!audit.ok) return reply(`It stays as written: "${pick.text}". A shorter version changed what it says, so I didn't use it.`, RESUME_TASK_INTENT, "completed");
     task.proposed = [{ before: pick.text, after: clean }]; task.proposedHash = await proposalHash(task.proposed);
     const nums = (clean.match(/\d[\d,.]*\+?%?/g) ?? []).filter((n) => pick.text.includes(n.replace(/\+$/, "")));
     return reply([`Proposed replacement: ${clean}`, `Now: ${pick.text}`, ...nums.slice(0, 1).map((n) => `This keeps the ${n} already in your intake. If ${n} is not accurate, tell me the supported number before we use it.`), "Say if it's fine and I'll put it in the PDF."].join("\n"));
   }
   if (ask === "send_to") {
     const who = sendTo(o.message)!;
-    return reply(`Which ${who} do you mean, and where should the resume PDF for ${task.file!.label} go to reach them: an email address, or a conversation you have with them?`, RESUME_CLARIFY_INTENT);
+    return reply(`Which ${who} do you mean, and where should I send the resume PDF?`, RESUME_CLARIFY_INTENT);
   }
   if (ask === "ask_send") {
     task.pending = "send_choice";
@@ -562,7 +563,7 @@ async function resumeTaskTurnInner(o: { message: string; ctx: any; userId: strin
     const n = shortlist.length;
     const which = n === 0 ? "the application on your card" : n === 1 ? "the job I listed" : `one of the ${n} jobs I listed`;
     const held = task.limits.includes("no_apply") ? " You asked me not to apply, so I haven't approved anything." : "";
-    return { reply: `Do you mean submit ${n === 0 ? which : `an application for ${which}`}, or send you the resume PDF for ${task.file!.label}?${held} Nothing is sent until you say.`, intent: RESUME_CLARIFY_INTENT, resultStatus: "awaiting_user", documents: [], link: null, task };
+    return { reply: `${n === 0 ? `Submit ${which}` : `Apply to ${which}`}, or send you the resume PDF for ${task.file!.label}?${held} Nothing is sent until you say.`, intent: RESUME_CLARIFY_INTENT, resultStatus: "awaiting_user", documents: [], link: null, task };
   }
   // The last resume file this person was given, by its target: ours, or the posting tailor's (142 _careerRouterArtifacts).
   const lastWasOther = ask === "correct" && (routerLast && (!prior?.file || Date.parse(routerLast.at || routerLast.created_at || "") > Date.parse(prior.at)) || (prior?.file && prior.file.label !== target.label));
@@ -606,7 +607,7 @@ async function resumeTaskTurnInner(o: { message: string; ctx: any; userId: strin
   } else if (ask === "make" || ask === "send_pdf") say.push(documents.length > 1 ? `Here are the PDF and Word (DOCX) files of your resume for ${target.label}.`
     : ask === "send_pdf" || prior?.file?.label === target.label && !named ? `Here is the resume PDF for ${target.label}.` : `Here is your ${pages} resume PDF for ${target.label}.`);
   else if (ask === "link" && !say.length) say.push(`Here is the resume PDF for ${target.label} again.`);
-  if (!task.said.includes("general") && ask !== "send_pdf") { say.push("It's a general version, not written for one posting; send me a posting and I'll tailor it to that."); task.said.push("general"); }
+  if (!task.said.includes("general") && ask !== "send_pdf") { say.push("It's a general version; send me a posting and I'll tailor it to that."); task.said.push("general"); }
   if (!task.said.includes("source")) {
     say.push(`I used ${source}${built.unconfirmed ? " (not yet confirmed by you)" : ""}, kept every fact as written and added no experience.`);
     task.said.push("source");
@@ -614,14 +615,18 @@ async function resumeTaskTurnInner(o: { message: string; ctx: any; userId: strin
   if (built.left.length) say.push(`To fit ${task.limits.includes("one_page") ? "one page" : "two pages"} I left off ${built.left.length === 1 ? "one bullet" : `${built.left.length} bullets`}: "${built.left[0]}"${built.left.length > 1 ? " and the next least relevant" : ""}.`);
   if (task.limits.includes("one_page") && out.fit.pages > 1) say.push(`It runs to ${out.fit.pages} pages even with the least relevant bullets off; I set nothing below 10 pt.`);
   const questions: [string, string][] = [];
-  if (built.gpaConflict) questions.push(["gpa", `Your GPA is left off because your resume shows two values (${built.gpaConflict.join(" and ")}). Which one is right?`]);
-  if (built.contactMissing) questions.push(["contact", `Your name and contact details aren't on file, so the top shows placeholders. ${CONTACT_QUESTION}`]);
+  if (built.gpaConflict) questions.push(["gpa", `GPA is left off: your resume shows ${built.gpaConflict.join(" and ")}. Which one is right?`]);
+  // H2H leftovers 1: the same question tailor_resume asks: only the piece the confirmed resume header lacks (its name prints).
+  const typed = profile?.basics?.name || profile?.basics?.email, top = typed ? { name: null, email: null } : resumeContact(profile, "confirmed");
+  // Tone gate: the question names what is missing and where it goes; the amber placeholder in the file shows the rest.
+  if (built.contactMissing) questions.push(["contact", contactQuestion(top)]);
   if (built.unconfirmed) questions.push(["confirm", `These facts are still unconfirmed. Are they right as written?`]);
   const asking = /\bask me\b/.test(t) || ask === "make" && !prior;
   for (const [k, q] of questions) {
     if (!task.asked.includes(k) || asking) { say.push(q); if (!task.asked.includes(k)) task.asked.push(k); }
   }
-  if (questions.length && !say.some((s) => s.endsWith("?")) && ask !== "send_pdf" && ask !== "approve_edit") say.push(`I still need ${questions.map(([k]) => k === "gpa" ? "your correct GPA" : k === "contact" ? "your contact details" : "your confirmation of the facts").join(" and ")} before this is ready to send outside this chat.`);
+  // A correction answers the correction (the open questions were asked when the file was first sent).
+  if (questions.length && !say.some((s) => s.endsWith("?")) && ask !== "send_pdf" && ask !== "approve_edit" && ask !== "correct") say.push(`I still need ${questions.map(([k]) => k === "gpa" ? "your correct GPA" : k === "contact" ? "your contact details" : "your confirmation of the facts").join(" and ")} before this is ready to send outside this chat.`);
   if (limitsOf(o.message).includes("no_apply")) say.push("I haven't applied to anything.");
   if (link) say.push(`Download it from your private File page (you sign in to open it):\n${link}`);
   // Re-review of #644 (4): what failed is said, not a generic "couldn't".

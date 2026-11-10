@@ -239,13 +239,18 @@ export function planApplication(o: {
   return { ready: true, fields: c.fill, dropped: c.dropped };
 }
 // What the approval binds beside the answers (WO-102): each answer's fact, the event that confirmed it, its provenance,
-// whether it may attest, and the quarantine rules it was judged under. Any change is another application.
-export function approvalSources(fields: { name: string; factId: string }[], m: Manifest) {
+// whether it may attest, the quarantine rules it was judged under, and for a texted answer when it was given. Any change is
+// another application.
+// WO-122 ruling: a texted answer's question postings (job_ids) never enter the hash; only whether it was given for this
+// posting (for_posting), judged once here against the posting the approval is for.
+export function approvalSources(fields: { name: string; factId: string }[], m: Manifest, posting?: string) {
   return fields.map((f) => {
     const tf = m.byFactId[f.factId];
     if (!tf) throw fail("UNTRUSTED_ANSWER: " + f.name);
     return { name: f.name, factId: f.factId, event: tf.event, provenance: tf.provenance, authorizes: tf.authorizes, quarantine_version: m.version,
-      table: tf.table, key: tf.key, value: tf.value };
+      table: tf.table, key: tf.key, value: tf.value,
+      // WO-122: a texted answer's date and whether it was given for this posting are bound too (the card's source label).
+      ...(tf.at ? { at: tf.at } : {}), ...(tf.job_ids && posting !== undefined ? { for_posting: tf.job_ids.includes(posting) } : {}) };
   }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 export async function applicationApprovalHash(o: {
@@ -255,7 +260,7 @@ export async function applicationApprovalHash(o: {
   return await hashApplyPayload({ user_id: o.userId, posting: o.posting, destination: o.destination,
     fields: o.fields.map((f) => ({ name: f.name, label: f.label, value: f.value, factId: f.factId })), resume: o.resumeSha256,
     schema_hash: o.schemaHash, page_field_names: o.pageFieldNames, manifest_hash: o.manifest.hash,
-    sources: approvalSources(o.fields, o.manifest) });
+    sources: approvalSources(o.fields, o.manifest, o.posting) });
 }
 const trustRecord = (m: Manifest) => ({
   quarantine_version: m.version, manifest_hash: m.hash, excluded: m.excluded.slice(0, 200), conflicts: m.conflicts.slice(0, 200),
@@ -427,6 +432,7 @@ export async function runApply(args: string[]) {
     fenced = false,
     denied = false,
     allowSubmit = false,
+    saidYes = false,
     populated = false,
     mutations = 0,
     postStatus = 0,
@@ -623,8 +629,62 @@ export async function runApply(args: string[]) {
   try {
     session = await helper.createSession();
     page = await session.page();
+    // D-MS-1 (x-audit, coordinator ruling 2026-11-10): before the person's yes, no value typed into the form leaves the
+    // browser on any channel. A page can autosave as it is typed (Ashby's ApiSetFormValue mutation, a fetch, a beacon, a
+    // WebSocket, an EventSource, a GET pixel); before the yes every request of any method whose URL or body carries a value
+    // of 4 or more characters this run may type (raw, URL-encoded or base64) is aborted, every WebSocket is closed, every
+    // EventSource is refused and sendBeacon sends nothing. After the yes (--approved, or the person's yes in this run) the
+    // values are the approved payload and the checks below apply as before.
+    // The yes is a latch: once the person said yes and the approved click went out, the run stays after the yes (the code
+    // window that re-sends the approved application runs with allowSubmit back off).
+    const preYes = () => !o.approved && !saidYes;
+    const typedValues = (() => {
+      const out = new Set<string>();
+      const walk = (x: any) => {
+        if (!x || typeof x !== "object") return;
+        if (typeof x.value === "string" && x.value.trim().length >= 4) out.add(x.value.trim());
+        for (const v of Object.values(x)) walk(v);
+      };
+      walk(facts);
+      return out;
+    })();
+    const forms = (v: string) => {
+      const b64 = (t: string) => { try { return btoa(String.fromCharCode(...new TextEncoder().encode(t))); } catch { return ""; } };
+      return [v, encodeURIComponent(v), encodeURIComponent(v).replace(/%20/g, "+"), b64(v).replace(/=+$/, "")].filter((x) => x.length >= 4);
+    };
+    const carriesTyped = (req: any) => {
+      const vals = [...typedValues, ...Object.values(wire).filter((v): v is string => typeof v === "string" && v.trim().length >= 4).map((v) => v.trim())];
+      if (!vals.length) return false;
+      let text = req.url();
+      try { const b = req.postDataBuffer(); if (b) text += " " + new TextDecoder().decode(b); } catch { /* no body */ }
+      let decoded = text;
+      try { decoded = decodeURIComponent(text.replace(/\+/g, " ")); } catch { /* not URL-encoded */ }
+      return vals.some((v) => forms(v).some((f) => text.includes(f)) || decoded.includes(v));
+    };
+    let typedBlocked = 0;
+    // A page object without addInitScript (a driver with no in-page scripts) cannot send a beacon either; the route below
+    // still stops every request that carries a typed value, a beacon's included.
+    if (typeof page.addInitScript === "function") {
+      await page.addInitScript(() => {
+        // Before the yes a beacon would go out unseen after the page unloads: it sends nothing (the route stops the rest).
+        try { Object.defineProperty(navigator, "sendBeacon", { value: () => false, configurable: true }); } catch { /* read-only */ }
+      }).catch(() => {});
+    }
+    if (typeof page.routeWebSocket === "function") {
+      await page.routeWebSocket(/.*/, (ws: any) => {
+        if (preYes()) { typedBlocked++; evidence.typed_value_guard = { blocked: typedBlocked }; ws.close(); return; }
+        ws.connectToServer();
+      });
+    }
     await page.route("**/*", async (route: any) => {
-      const req = route.request(),
+      const req0 = route.request();
+      if (preYes() && (req0.resourceType?.() === "eventsource" || carriesTyped(req0))) {
+        typedBlocked++;
+        evidence.typed_value_guard = { blocked: typedBlocked };
+        await route.abort("blockedbyclient");
+        return;
+      }
+      const req = req0,
         url = new URL(req.url()),
         main = req.isNavigationRequest() && req.frame() === page.mainFrame();
       const same = url.origin === u.origin;
@@ -1190,6 +1250,7 @@ export async function runApply(args: string[]) {
       // The click's place in this run's own order: after the before picture, before the after picture.
       evidence.proof.click = Object.freeze({ seq: ++proofSeq, at: clickAt });
       allowSubmit = true;
+      saidYes = true;
       let cap: any;
       if (personSubmits) {
         // The person presses Submit in the window; Trainee clicks nothing. The route lets exactly one write through,

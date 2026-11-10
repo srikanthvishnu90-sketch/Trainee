@@ -17,6 +17,15 @@ handler, so the planner, texting-native delivery and the drafting features are n
 the task eval (`evals/career/tasks/run.ts`, real handler), delivery and the approval paths by the acceptance suite. Features
 that would change reply words with nothing measuring them stay OFF (reply writer, knowledge library, search judge).
 
+**Model and caps (D-046, owner, 2026-11-09).** Every model call that produces Trainee's output or decides what it does uses
+`claude-sonnet-5-5` (`_shared/model_gateway.ts` `TRAINEE_MODEL`; `agent-chat/release_model.ts` `CAREER_MODEL_DEFAULT`, whose
+`ROLLBACK_MODELS` is Sonnet 5.5 alone; `_shared/career_reader_model.ts`). `CAREER_REPLY_MODEL`, `CAREER_MODEL`,
+`MODEL_PROVIDER` and `ANTHROPIC_MODEL` naming anything else are ignored with one log line; nothing falls back to Haiku. There
+is no per-person AI cap: `CAREER_MODEL_DAILY_USD` and `CAREER_MODEL_DAILY_CALLS` are ignored (one log line if set). What
+stays: the global $70 model budget (D-038a: a reservation before every call, the hard stop, `MODEL_BUDGET_PAUSED`) and the
+safety limits on external actions (200 applications a day, D-R9-1; the per-employer pace; 20 new contacts a day and 2
+follow-ups, D-043). Tested by `tests/architect/d046-sonnet-only-no-person-cap.test.ts`.
+
 Columns: default before D-036 → served now; what it enables; what it needs; risk; class.
 (a) = ON for end-to-end testing; (a′) = pending; (b) = stays OFF; (c) = unchanged default, not a release flag.
 
@@ -26,6 +35,7 @@ Columns: default before D-036 → served now; what it enables; what it needs; ri
 |---|---|---|---|---|
 | `CAREER_BRAIN` | router → staged (D-035) | question/advice turns to the model; actions stay code's | `OPENAI_API_KEY` (present; without it the router answers) | S3-measured; rollback `CAREER_BRAIN=router` |
 | `CAREER_TEXTING_NATIVE` | off → on | channel-native delivery: split like a person texts, links on their own line, typing indicator, "on it" interim | none | shapes and paces what is already sent; words unchanged |
+| `CAREER_FILE_CARD` | off → on (D-049, architect ruling 2026-11-09; architect amendment of `tests/architect/release-flags.test.ts`) | the chat File card of spec C.2 (`_shared/file_card.ts`): a message that is exactly one File link goes as one card (caps kicker, title, freshness line with real counts, up to 3 chips, one button, "Opens your private File - nothing is submitted from chat") and a follow-up naming the decision; Telegram carries the link as the one inline button, WhatsApp and iMessage as the plain last line, the web chat gets the card as data; rollback `CAREER_FILE_CARD=off` (the link alone, as before) | `TRAINEE_FILE_BASE_URL`, `TRAINEE_FILE_LINK_SECRET` (no link, no card) | shapes what is already sent; counts read from the File's own record, never from taps |
 | `CAREER_NETWORKING_DRAFT` | off → on | model drafts outreach under the fact-lock | model key | approved by the hash of the exact text; delivered by the person (copy or mailto); never sent by Trainee |
 | `CAREER_TAILOR_REWRITE` | off → on | truthful bullet rewrite toward a posting | model key | each bullet audited against its one confirmed fact; failing bullets keep their words; the resume is approved as an exact payload |
 | `CAREER_MOCK_JUDGE` | off → on | the model grades the person's own mock-interview answers | model key | feedback to the person only; no fact about them is written |
@@ -39,8 +49,24 @@ Columns: default before D-036 → served now; what it enables; what it needs; ri
 | Switch | Enables | Waits for |
 |---|---|---|
 | `CAREER_PLANNER` | compound asks ("find 5, tailor 2, apply, remind me Friday") planned into steps over existing code paths | the task eval (`brain-eval` suite=tasks), planner on against off, no worse; and #371's fix (a crisis message with two asks gets the 988 reply before the planner; planner reminders are delivered) |
-| `CAREER_BATCH_EXECUTOR` | batch asks handed to the worker's executor | the executor deployed: nothing in production loads `workers/career-browser/batch-executor.cjs`, so a batch ask would commit an intent nobody runs (D-007, WO-106) |
+| `CAREER_BATCH_EXECUTOR` | batch asks handed to the worker's executor | the executor deployed: nothing in production loads `workers/career-browser/batch-executor.cjs`, so a batch ask would commit an intent nobody runs (D-007, WO-106). The entry point now exists (`scripts/career/batch-executor-main.cjs`, 2026-11-04) but nothing in production runs it; until it does, a batch ask commits no intent and the reply says the batch was not started and names the ask that runs on the deployed path ("apply to the top N <role> in <city>", or a pick from a list). Owner's switch: see "Turning on the batch executor" below |
 | `CAREER_CRISIS_MODERATION` | the gateway's moderation screen on each turn (second crisis layer; code's `agent-chat/crisis.ts` is always on) | its reader, which lands with #354 (no code reads it at this SHA) |
+
+### Turning on the batch executor (owner only; MASS APPLY END TO END, 2026-11-04)
+
+Nothing here is done by an agent. Every guard still decides each application: the exact card set hash on the approve
+intent (`APPROVAL_SET_CHANGED` otherwise), 149's re-verify of each payload at click time, captchas handed to the person,
+LinkedIn, Indeed and Handshake dropped from the pool and refused by 149, the database kill switches.
+1. On the worker host (beside the board service), with its own environment: `CAREER_BATCH_EXECUTOR=on`, `SUPABASE_URL`,
+   `SUPABASE_SERVICE_ROLE_KEY`, `UPMORE_CAREER_WORKER_URL`, `UPMORE_CAREER_WORKER_SECRET` (optional
+   `BATCH_EXECUTOR_INTERVAL_MS`, default 15000; `0` drains once), then run `node scripts/career/batch-executor-main.cjs`
+   as a service. Without `CAREER_BATCH_EXECUTOR=on` it exits having claimed nothing; a missing setting stops it at start.
+2. In the same release commit, wire that service into a production entry point (a `workers/` service file or workflow) and
+   move `CAREER_BATCH_EXECUTOR` from `RELEASE_PENDING` into `RELEASE_FLAGS` (`release_config.ts`).
+   `tests/architect/d037-live-effects.test.ts` (D-037/1e) fails until both are true together, by design.
+3. Release through `release/production` (D-034). Rollback: `supabase secrets set CAREER_BATCH_EXECUTOR=off` for agent-chat
+   (no new intents; batch asks get the not-started reply again) and stop the service (SIGTERM: no new claims; an execute
+   intent in flight finishes and is recorded, never re-driven).
 
 ## (a2) ON by D-037 (owner, 2026-11-01 20:04 CT: "turn these on: Real submissions … Sending email as the person … Reply rewriters")
 
@@ -80,12 +106,13 @@ Nothing sends from Trainee's own identity and there is no switch that could. `ve
 | `CAREER_KNOWLEDGE` | knowledge library and grounded web research in the brain | D-037 (3): same rule; not measured yet | the measurement |
 | `CAREER_JUDGE` | model-judged search ranking | D-037 (3): same rule; not measured yet | the measurement |
 | `CAREER_MAIL_MODEL` | the model reads ambiguous mail | sends mail bodies to the model; the Google verification data-use statement (#196) must name it first | owner |
-| `CAREER_PEOPLE_SEARCH` | model web search for people | D-033: Trainee does no web search for people | owner |
+| `CAREER_PEOPLE_SEARCH` | model web search for people | D-033: Trainee does no web search for people; D-043 (proposed) would turn it on for the free-first contact connector | owner |
+| `CAREER_CONTACT_OUTREACH` | the contact connector: public professional facts, a scored work address, a cited draft, sent from the person's own Gmail or Outlook on the send rail after their yes to that exact card (`_shared/career_contact_*.ts`; the chat turn is `career_contact_turn.ts`, read fresh every turn: off, a yes to a card shown earlier is refused) | D-043 is a proposal; read only together with `CAREER_PEOPLE_SEARCH`; migration 20261107120200's tables are empty and unread while it is off | owner (accept D-043, apply the migration, set the postal address) |
 | `CAREER_PEOPLE_SWEEP` | scheduled Gmail people sweeps | the chat never arms a sweep (handler passes no `sweepPush`): half-wired | after the chat side is wired |
 | `CAREER_PDL` | hired-candidate aggregates from People Data Labs | licensed people source (D-018a); needs `PDL_API_KEY` (paid) | owner |
 | `CAREER_VOICE` | voice practice calls | voice minutes cost far more than text; no per-minute ceiling set | owner (spend) |
 | `CAREER_PREPARE_AHEAD`, `CAREER_PREPARE_AHEAD_COVER` | the worker prepares applications ahead | runs on the worker host; needs `CAREER_PREPARE_AHEAD_URL`, `CAREER_PREPARE_AHEAD_TOKEN` | owner (host) |
-| `CAREER_RESEARCH_REPLY`, `CAREER_RESEARCH_BRIEF` | research answer layout | no deployed caller (research_reply.ts is not on the reply path) | when wired |
+| `CAREER_RESEARCH_REPLY`, `CAREER_RESEARCH_BRIEF` | market and company research on the reply path (R9-C; R10 WO-H): the staged brain takes research asks and has `research_market` and `research_company` (free first-party sources, every point cited to a page fetched this turn, through the facts guard); `CAREER_RESEARCH_BRIEF` adds the research brief File | `CAREER_RESEARCH_REPLY`: **on since D-047** (architect ruling 2026-11-09 on the owner's order that research work in production; verified by the post-deploy production replay, WO-I; rollback `CAREER_RESEARCH_REPLY=off`). `CAREER_RESEARCH_BRIEF`: **on since D-047 amended** (architect ruling 2026-11-09: the File ships with the reply; rubric 30/30; rollback `CAREER_RESEARCH_BRIEF=off`, then the answer is given in chat with its sources) | both: verified by the post-deploy production replay (WO-I) |
 | `TRAINEE_LOGO_GUESS` | logo guessed from a company name | can show another company's logo | — |
 | `CHANNEL_UNKNOWN_REPLY` | a "not authorized" text to unknown senders | messages strangers; no gain for signed-up testers | owner |
 | `TRAINEE_SIGNUP` | open sign-up (default `closed`, allowlist `TRAINEE_ALLOWED_CONTACTS`) | who may use the product is the owner's call | owner |
@@ -100,7 +127,8 @@ Nothing sends from Trainee's own identity and there is no switch that could. `ve
 | `CAREER_APPLY_HERE`, `CAREER_APPLY_LINK` | on (`off` disables) | already on |
 | `CAREER_ACCOUNT_MEMORY` | auto (on for texting-linked people) | `off` is its kill switch |
 | `CAREER_BRAIN_ROUTER_INTENTS`, `CAREER_PLANNER_USERS` | unset | per-class and per-person limits, still honored |
-| `CHANNEL_APPROVAL_TTL_MIN`, `CAREER_MODEL*`, `CAREER_MODEL_DAILY_*`, `INGEST_*`, `LOOPMESSAGE_DAILY_CONTACTS`, `WHATSAPP_DAILY_TEMPLATES`, `CAREER_SEND_BOUNCE_*`, `CAREER_PEOPLE_CACHE_DAYS`, `CLOUD_MAX_*`, `CLOUD_PREPARE_*` limits | tuning values | not switches |
+| `CAREER_MODEL`, `CAREER_REPLY_MODEL`, `CAREER_MODEL_DAILY_*` | ignored (D-046) | the model is always `claude-sonnet-5-5`; no per-person cap; one log line when set |
+| `CHANNEL_APPROVAL_TTL_MIN`, `INGEST_*`, `LOOPMESSAGE_DAILY_CONTACTS`, `WHATSAPP_DAILY_TEMPLATES`, `CAREER_SEND_BOUNCE_*`, `CAREER_PEOPLE_CACHE_DAYS`, `CLOUD_MAX_*`, `CLOUD_PREPARE_*` limits | tuning values | not switches |
 | Secrets (`OPENAI_API_KEY`, `TELEGRAM_*`, `LOOPMESSAGE_*`, `WHATSAPP_*`, `GOOGLE_OAUTH_*`, `STRIPE_*`, `HUNTER_API_KEY`, ...) | per `scripts/launch/secrets-audit.sh` | their presence wires a feature (S5); none is set by this change |
 
 Not in the deployed code at this SHA (so nothing to switch here): an outreach personalization default and the results

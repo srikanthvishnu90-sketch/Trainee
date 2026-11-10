@@ -39,12 +39,15 @@ test("R-A4 unreadable queue (no queue state in ctx): global pause is set, reply 
   assert.equal(r.resultStatus, "completed");
   assert.equal(r.counts_verified, false, "counts are explicitly UNVERIFIED when the queue cannot be read");
   assert.doesNotMatch(r.reply, NO_OP, "the old no-op wording is gone");
-  assert.match(r.reply, /global pause/i, "reply states the global pause is set");
+  // architect ruling F.3 (2026-11-09): the reply never claims an account pause it did not write; it says so and names "pause everything".
+  assert.doesNotMatch(r.reply, /pause is (now )?set|(?<!not )paused your account/i, "no claim of an account pause");
+  assert.match(r.reply, /pause everything/i, "names how to pause the account");
   // MI-048 triage (2026-10-15): the halt sentence was reworded ("blocks
   // every send path this product controls"); every semantic element of
   // the R-A4 contract is present — the pin follows the current wording.
-  assert.match(r.reply, /blocks every send path/i, "reply states nothing can start or continue");
-  assert.match(r.reply, /could not read/i, "reply states the queue's own records could not be read");
+  // Coordinator ruling 2026-11-10 (r-audit #706): the same facts in plain words (no "the queue's own records").
+  assert.match(r.reply, /what has already gone out/i, "architect ruling F.3: with the queue unread, the reply says the counts are unknown (it no longer claims every send path is blocked)");
+  assert.match(r.reply, /couldn't check/i, "reply states the queue's state could not be checked");
   assert.match(r.reply, /unverified/i, "reply states the exact counts are unverified");
   assert.equal((r.reply.match(/next step/gi) || []).length, 1, "reply gives exactly one next step");
 });
@@ -59,7 +62,8 @@ test("R-A4 missing-file queueStatePath: same honest halt, and loadQueueState nev
   assert.equal(r.resultStatus, "completed");
   assert.equal(r.counts_verified, false);
   assert.doesNotMatch(r.reply, NO_OP);
-  assert.match(r.reply, /global pause/i);
+  assert.doesNotMatch(r.reply, /pause is (now )?set|(?<!not )paused your account/i); // architect ruling F.3 (2026-11-09)
+  assert.match(r.reply, /pause everything/i);
 });
 
 test("R-A4 unreadable-file queueStatePath (invalid JSON): same honest halt, no throw", () => {

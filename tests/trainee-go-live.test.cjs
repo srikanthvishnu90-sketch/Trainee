@@ -314,7 +314,7 @@ function stubbed(env) {
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'trainee-go-live-bin-'));
   const calls = path.join(bin, 'calls.log');
   const stub = (name, body) => { fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\necho "${name} $*" >> "${calls}"\n${body}\n`); fs.chmodSync(path.join(bin, name), 0o755); };
-  stub('supabase', 'if [[ "$1 $2" == "secrets list" ]]; then printf "NAME | DIGEST\\nTRAINEE_INBOUND_SECRET | 0f0f\\n"; fi; exit 0');
+  stub('supabase', 'if [[ "$1 $2" == "secrets list" ]]; then printf "NAME | DIGEST\\nTRAINEE_INBOUND_SECRET | zzNOTAHEXDIGESTzz\\n"; fi; exit 0');
   stub('psql', 'exit 0'); stub('deno', 'exit 0');
   // WO-093: a real run ships exactly --sha (HEAD here) from git archive, so git and node are the real ones, but for a
   // clean tree (this checkout may have edits) and the smoke (no network in a test).
@@ -342,7 +342,7 @@ function nonint(args, env, { live = ['TRAINEE_INBOUND_SECRET'], listFails = fals
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'trainee-go-live-nonint-'));
   const calls = path.join(bin, 'calls.log');
   const stub = (name, body) => { fs.writeFileSync(path.join(bin, name), `#!/usr/bin/env bash\necho "${name} $*" >> "${calls}"\n${body}\n`); fs.chmodSync(path.join(bin, name), 0o755); };
-  const rows = live.map((n) => `${n} | 0f0f`).join('\\n');
+  const rows = live.map((n) => `${n} | zzNOTAHEXDIGESTzz`).join('\\n');
   stub('supabase', `if [[ "$1 $2" == "secrets list" ]]; then ${listFails ? 'echo "Access token not provided" >&2; exit 1' : `printf "NAME | DIGEST\\n${rows}\\n"`}; fi; exit 0`);
   stub('psql', 'exit 0'); stub('deno', 'exit 0');
   if (bundleOk) stub('python3', 'exit 0'); // the router-bundle freshness check is not what this case tests
@@ -389,7 +389,7 @@ test('--non-interactive: a function secret set on the project is kept (never gen
   assert.match(r.calls, /trainee-smoke\.cjs --kept CAREER_INGEST_SECRET,TRAINEE_INBOUND_SECRET --wait-runs 420/);
   assert.equal((r.calls.match(/secrets list/g) || []).length, 1, 'the names are read once');
   for (const v of [...SECRET_VALUES, CI_ENV.SUPABASE_ACCESS_TOKEN]) assert.ok(!r.out.includes(v) && !r.log.includes(v), `${v.slice(0, 12)}… is not printed or logged`);
-  assert.doesNotMatch(r.out + r.log, /0f0f/, 'the secrets list itself is never printed');
+  assert.doesNotMatch(r.out + r.log, /zzNOTAHEXDIGESTzz/, 'the secrets list itself is never printed');
 });
 
 test('--non-interactive: a secret that also lives outside the project is never generated; an unreadable secrets list stops the run', () => {
@@ -633,35 +633,41 @@ test('FEATURE 17: the cloud schedule reads CLOUD_DISPATCH_SECRET into Vault and 
   }
   const snap = fs.readFileSync(path.join(root, 'scripts/cloud-runner/build-snapshot.ts'), 'utf8');
   assert.match(snap, /deno cache [^"]*workers\/career-cloud\/prepare-runner\.ts/, 'the snapshot caches the preparation runner too');
+  assert.match(snap, /\/snapshot`, \{ expiration: 0 \}\)/, 'the snapshot never expires (the 7-day default deleted the last one)');
 });
 
 // trainee-file (hosted list page) and ops-monitor are public (verify_jwt = false in supabase/config.toml) and secret-gated:
 // deployed only when TRAINEE_FILE_LINK_SECRET / OPS_MONITOR_TOKEN is among the function secrets; absent = skipped, never a failure.
 test('gated functions: deployed with --no-verify-jwt only when their secret is set; absent is a log line, not a failure', () => {
   const cfg = fs.readFileSync(path.join(root, 'supabase/config.toml'), 'utf8');
-  for (const fn of ['trainee-file', 'ops-monitor']) assert.match(cfg, new RegExp(`\\[functions\\.${fn}\\]\\nverify_jwt = false`));
+  for (const fn of ['trainee-file', 'trainee-connect', 'ops-monitor']) assert.match(cfg, new RegExp(`\\[functions\\.${fn}\\]\\nverify_jwt = false`));
   const off = dry();
   assert.equal(off.code, 0, off.out);
   assert.match(off.out, /gated: trainee-file SKIPPED \(TRAINEE_FILE_LINK_SECRET is not among the function secrets\)/);
+  assert.match(off.out, /gated: trainee-connect SKIPPED \(TRAINEE_FILE_LINK_SECRET is not among the function secrets\)/);
   assert.match(off.out, /gated: ops-monitor SKIPPED \(OPS_MONITOR_TOKEN is not among the function secrets\)/);
-  assert.doesNotMatch(off.out, /functions deploy (trainee-file|ops-monitor)/);
+  assert.doesNotMatch(off.out, /functions deploy (trainee-file|trainee-connect|ops-monitor)/);
   const on = dry([], { ...FAKE, TRAINEE_FILE_LINK_SECRET: 'fake-file-link-secret-0000-FFFFFFFFFFFFFFFF', OPS_MONITOR_TOKEN: 'fake-ops-monitor-token-0000-OOOOOOOOOOOOOOO' });
   assert.equal(on.code, 0, on.out);
   assert.match(on.out, /supabase functions deploy trainee-file --project-ref \S+ --no-verify-jwt --use-docker/);
+  // The connect page (/connect proxy -> trainee-connect) signs links with TRAINEE_CONNECT_LINK_SECRET, else TRAINEE_FILE_LINK_SECRET,
+  // and is deployed with the file page under the same secret (it used to be missing here, so /connect had no function behind it).
+  assert.match(on.out, /supabase functions deploy trainee-connect --project-ref \S+ --no-verify-jwt --use-docker/);
   assert.match(on.out, /supabase functions deploy ops-monitor --project-ref \S+ --no-verify-jwt --use-docker/);
-  assert.match(on.out, /deno check [^\n]*trainee-file\/index\.ts [^\n]*ops-monitor\/index\.ts/);
-  assert.doesNotMatch(on.out, /trainee-connect/);
+  assert.match(on.out, /deno check [^\n]*trainee-file\/index\.ts [^\n]*trainee-connect\/index\.ts [^\n]*ops-monitor\/index\.ts/);
   const only = dry([], { ...FAKE, OPS_MONITOR_TOKEN: 'fake-ops-monitor-token-0000-OOOOOOOOOOOOOOO' });
   assert.match(only.out, /gated: trainee-file SKIPPED/);
+  assert.match(only.out, /gated: trainee-connect SKIPPED/);
   assert.match(only.out, /functions deploy ops-monitor /);
-  assert.doesNotMatch(only.out, /functions deploy trainee-file/);
+  assert.doesNotMatch(only.out, /functions deploy (trainee-file|trainee-connect)/);
 });
 
 test('gated functions: a failed secrets listing skips both with a log line, never deploys them ungated, and does not abort the run', () => {
   const r = nonint(['--sha', HEAD_SHA, '--skip-migrations'], CI_ENV, { listFails: true, bundleOk: true });
   assert.match(r.out, /gated: trainee-file SKIPPED \(secrets list unavailable\)/, r.out);
+  assert.match(r.out, /gated: trainee-connect SKIPPED \(secrets list unavailable\)/);
   assert.match(r.out, /gated: ops-monitor SKIPPED \(secrets list unavailable\)/);
-  assert.doesNotMatch(r.calls, /functions deploy (trainee-file|ops-monitor)/);
+  assert.doesNotMatch(r.calls, /functions deploy (trainee-file|trainee-connect|ops-monitor)/);
   assert.doesNotMatch(r.out, /gated: \S+ will be deployed/);
 });
 

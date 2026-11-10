@@ -137,6 +137,7 @@ edge_tests=(
   tests/edge/career-ask-once.test.ts
   tests/edge/control-state.test.ts
   tests/edge/fact-quarantine.test.ts
+  tests/edge/reply-rubric.test.ts
 )
 
 portable_test_paths() {
@@ -175,8 +176,14 @@ PY
 # as above: the steps and their commands are unchanged, and the union of core and architect is the old core.
 browser_node_tests=(
   tests/career-apply-dryrun.test.cjs
+  tests/career-autosave-before-yes.test.cjs
   tests/career-apply-exact-option.test.cjs
+  tests/career-apply-vm-needs-answers.test.cjs
   tests/career-approval-card-browser.test.cjs
+  tests/career-browser-eval.test.cjs
+  tests/career-challenge-shown.test.cjs
+  tests/career-browser-strict.test.cjs
+  tests/career-browser-full-persona.test.cjs
   tests/career-dashboard-browser.test.cjs
   tests/career-extension-agent-submits.test.cjs
   tests/career-extension-browser.test.cjs
@@ -186,9 +193,12 @@ browser_node_tests=(
   tests/career-extension-yesno.test.cjs
   tests/career-fact-import-panel.test.cjs
   tests/career-greenhouse-savedform.test.cjs
+  tests/career-lever-strict-fill.test.cjs
   tests/career-owned-worker-browser.test.cjs
+  tests/career-denylist-every-navigation.test.cjs
   tests/career-parallel-apply.test.cjs
   tests/career-portal-browser.test.cjs
+  tests/career-portal-popup-gate.test.cjs
   tests/career-portal-lever-radio.test.cjs
   tests/career-portal-submit-integrity.test.cjs
   tests/career-posting-location.test.cjs
@@ -282,6 +292,11 @@ if [[ $partition == all || $partition == architect ]]; then
     if [[ $shard == 1 ]]; then step apply-cli-typecheck deno check scripts/apply.ts; fi
   fi
 fi
+# GATE_TRACE_OPENS=<file> (CI's coverage job): the coverage suite runs under scripts/ci/trace-opens.py, which records
+# every repo file it opened, so ci.yml can prove the suite read nothing outside its inputs in scripts/ci/job-inputs.json
+# (the list that lets a pull request skip it). Only the coverage suite's own command is traced, not the shared steps.
+coverage_trace=()
+if [[ -n ${GATE_TRACE_OPENS:-} ]]; then coverage_trace=(python3 scripts/ci/trace-opens.py "$GATE_TRACE_OPENS" --); fi
 if [[ $partition == all ]]; then
   step career-and-shared-tests node --test --test-concurrency=2 "${node_all_tests[@]}"
 elif [[ $partition == core ]]; then
@@ -295,7 +310,7 @@ elif [[ $partition == architect ]]; then
 elif [[ $partition == browser ]]; then
   step career-and-shared-tests-browser node --test --test-concurrency=2 "${node_reporters[@]}" "${node_browser_tests[@]}"
 elif [[ -z ${GATE_COVERAGE_SHARD:-} ]]; then
-  step career-and-shared-tests-coverage node --test --test-concurrency=2 "${node_coverage_tests[@]}"
+  step career-and-shared-tests-coverage "${coverage_trace[@]}" node --test --test-concurrency=2 "${node_coverage_tests[@]}"
 else
   # Coverage shards (2026-10-26): GATE_COVERAGE_SHARD=i/n runs shard i of n of the forms-ci suite's tests in this
   # job, selected by node's own test-name patterns (scripts/forms-ci-shards.cjs holds the table and its
@@ -310,7 +325,7 @@ else
   shard_list=$(node scripts/forms-ci-shards.cjs args "${GATE_COVERAGE_SHARD%/*}" "${GATE_COVERAGE_SHARD#*/}")
   mapfile -t shard_args <<<"$shard_list"
   printf 'GATE COVERAGE SHARD %s: %s\n' "$GATE_COVERAGE_SHARD" "${shard_args[*]}"
-  step "career-and-shared-tests-coverage-shard-${GATE_COVERAGE_SHARD%/*}" node --test --test-concurrency=2 "${shard_args[@]}" "${node_coverage_tests[@]}"
+  step "career-and-shared-tests-coverage-shard-${GATE_COVERAGE_SHARD%/*}" "${coverage_trace[@]}" node --test --test-concurrency=2 "${shard_args[@]}" "${node_coverage_tests[@]}"
 fi
 if [[ $partition == all || ( $partition == core && $core_shard == 1 ) ]]; then
   step career-edge-tests deno test -A --no-check "${edge_tests[@]}"

@@ -123,7 +123,8 @@ Deno.test("flow: link -> phone number -> code texted to the account's own phone 
   const html = await feed.text();
   for (const c of ["Acme", "Ramp", "Figma"]) assert(html.includes(c), `${c} is listed`);
   assert(/Data Analyst 1/.test(html) && /Austin, TX/.test(html) && /Build dashboards/.test(html) && /3 years of SQL/.test(html), "roles and details");
-  assert(/s2\/favicons\?sz=128&amp;domain=acme\.com/.test(html), "the employer's logo from its own domain");
+  // R16: employer-domain default. The employer's own domain, through this page's own origin; no third-party favicon service.
+  assert(html.includes(`<img src="?logo=acme.com"`) && !/s2\/favicons/.test(html), "the employer's logo from its own domain");
   assert(/Sign out everywhere/.test(html));
   // Apply: the hash the row shows, the session's page token in the form (never its id: that is in the HttpOnly cookie only)
   const t = fieldT(html), tag = tagOf(html, "Acme"), ref = refIn(html, "Acme");
@@ -186,7 +187,10 @@ Deno.test("wrong account: a browser signed in as V opens U's link and sees nothi
   eq(other.status, 403);
   const h = await other.text();
   assert(/This link is for a different Trainee account/.test(plain(h)));
-  for (const p of PRIVATE) assert(!h.includes(p), `nothing of U (${p})`);
+  // The page carries V's own random page token (fp1. + 64 hex), which by chance can contain "0100" (about 1 run in 1000);
+  // U's private words are checked on the page without that token, which can hold no word of U's.
+  const shown = h.replace(/fp1\.[0-9a-f]{64}/g, "fp1.<token>");
+  for (const p of PRIVATE) assert(!shown.includes(p), `nothing of U (${p})`);
   assert((await (await b.open("/file")).text()).includes("Vcorp"), "still V's own list");
   // a fresh browser: U's link, V types V's own number -> no text; V's valid code from V's own link -> refused
   const b2 = browser(w.d);

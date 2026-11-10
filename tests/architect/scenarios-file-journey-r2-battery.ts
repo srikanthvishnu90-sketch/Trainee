@@ -380,7 +380,7 @@ function checkFeed(rep: Report, where: string, html: string, w: World, T: Truth)
     if (!li.includes(`<span class="lettermark" aria-hidden="true">${escH(initialOf(p.job.company))}</span>`)) fail("lettermark is not the company's first whole character", `${id} ${JSON.stringify(/lettermark" aria-hidden="true">([^<]*)</.exec(li)?.[1])} vs ${JSON.stringify(initialOf(p.job.company))}`);
     if (!li.includes(`<span class="name">${escH(p.job.company)}</span>`)) fail("company not shown whole and escaped", id);
     if (!li.includes(`<span class="role">${escH(p.job.title)}</span>`)) fail("title not shown whole and escaped", id);
-    for (const img of li.matchAll(/<img src="([^"]*)"/g)) { const u = unesc(img[1]); const want = w.deps.env.get("TRAINEE_LOGO_URL") ? "https://logos.example" : "https://www.google.com"; if (!u.startsWith(`${want}/`)) fail("a logo from somewhere other than the configured provider", u); }
+    for (const img of li.matchAll(/<img src="([^"]*)"/g)) { const u = unesc(img[1]); const want = w.deps.env.get("TRAINEE_LOGO_URL") ? "https://logos.example/" : "?logo="; /* R16: employer-domain default */ if (!u.startsWith(want)) fail("a logo from somewhere other than the configured provider", u); }
     if (p.spec.logo === "hostile" && /<img /.test(li)) fail("a logo for a hostile domain", id);
     const chip = /<span class="chip [a-z-]+" role="status">([^<]*)<\/span>/.exec(li)?.[1] ?? null;
     if (chip !== e.chip) fail("status chip is not the posting's truth", `${id} ${chip} vs ${e.chip}`);

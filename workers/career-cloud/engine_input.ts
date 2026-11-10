@@ -10,6 +10,7 @@
 // and a chat fact and a texted answer that disagree exclude each other there (asked again). Rows of another person, rows
 // not answered and malformed rows are left out and named in `skipped`, never repaired.
 import { trustedManifest } from "../../extension/src/apply_core.ts";
+import { approvedTextAnswers } from "../career-browser/approved_sources.ts";
 
 export interface AnswerRow { id: string; key: string; kind: string; answer: string }
 export interface EngineFacts {
@@ -34,7 +35,7 @@ const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v ===
 export function engineInput(o: { owner: string; profile: unknown; rows: unknown[]; resumeSha256?: string }): EngineInput {
   if (typeof o.owner !== "string" || !UUID.test(o.owner)) throw Error("ENGINE_INPUT_OWNER");
   const skipped: EngineInput["skipped"] = [];
-  const text_answers: AnswerRow[] = [];
+  const given: AnswerRow[] = [];
   for (const r of Array.isArray(o.rows) ? o.rows : []) {
     const id = object(r) && typeof r.id === "string" ? r.id : "";
     const why = !object(r) ? "not a row" : !UUID.test(id) ? "no row id"
@@ -44,9 +45,12 @@ export function engineInput(o: { owner: string; profile: unknown; rows: unknown[
       : typeof r.answer !== "string" || !r.answer.trim() || r.answer.length > 2000 ? "no answer" : "";
     if (why) { skipped.push({ id, why }); continue; }
     const row = r as Record<string, string>;
-    text_answers.push({ id: row.id, key: row.key, kind: String(row.kind ?? ""), answer: row.answer });
+    given.push({ id: row.id, key: row.key, kind: String(row.kind ?? ""), answer: row.answer });
   }
-  text_answers.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  given.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  // The same approved sources the preparation built the card from (approved_sources.ts): a source derived there and not
+  // here read as withdrawn at send, so every hosted application that used a derived full name was refused.
+  const text_answers = approvedTextAnswers(given);
   const p = object(o.profile) ? o.profile : {};
   // A profile stored for another person contributes nothing (the projection refuses it too; this keeps it out of the file).
   const own = p.user_id === undefined || p.user_id === o.owner;

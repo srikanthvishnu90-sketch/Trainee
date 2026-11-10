@@ -26,7 +26,7 @@ const T = Date.parse("2026-10-20T12:00:00Z");
 Deno.test("WO-021/R1 each outcome reads as it ended; confirmed only with the employer's confirmation, not sent says nothing reached them", () => {
   const confirmed = receiptText(row("confirmed", { confirmation_id: "TEST-C-77" }));
   assert(
-    confirmed.includes("the employer confirmed it on their page (confirmation TEST-C-77)") && confirmed.endsWith(URL_),
+    confirmed.includes("their page showed TEST-C-77; ") && / has not confirmed it by email yet\./.test(confirmed) && !/^Applied to/.test(confirmed) && confirmed.endsWith(URL_),
     confirmed,
   );
   assert(/has not confirmed it yet/.test(receiptText(row("submitted_unconfirmed"))));

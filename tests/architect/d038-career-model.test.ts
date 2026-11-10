@@ -25,9 +25,9 @@ Deno.test("D-038: the default is one quoted line, priced from the provider's own
   assert(row, `the default ${CAREER_MODEL_DEFAULT} has a price row`);
   assert(/^https:\/\//.test(row.source) && /^\d{4}-\d{2}-\d{2}$/.test(row.checked_on), "the row names its source URL and date");
   eq(careerModel(env({})), CAREER_MODEL_DEFAULT, "unset: the default");
-  eq(CAREER_MODEL_DEFAULT, "claude-haiku-5-5", "Haiku 5.5 is the committed default");
-  eq([...ROLLBACK_MODELS], ["claude-haiku-5-5", "claude-sonnet-5-5"], "no non-Claude model is a rollback");
-  eq(careerModel(env({ ANTHROPIC_API_KEY: "a" })), "claude-haiku-5-5", "a key alone never selects Sonnet: only the owner's explicit CAREER_REPLY_MODEL does");
+  eq(CAREER_MODEL_DEFAULT, "claude-sonnet-5-5", "Sonnet 5.5 is the committed default (architect ruling D-046)");
+  eq([...ROLLBACK_MODELS], ["claude-sonnet-5-5"], "Sonnet 5.5 is the only rollback (D-046): no Haiku, no non-Claude model");
+  eq(careerModel(env({ ANTHROPIC_API_KEY: "a" })), "claude-sonnet-5-5", "a key alone serves the committed default, Sonnet 5.5");
 });
 
 Deno.test("D-038: every career call site reads the one default; no stray model id or CAREER_MODEL read on the chat path", () => {
@@ -54,7 +54,7 @@ Deno.test("D-038: every career call site reads the one default; no stray model i
 
 Deno.test("D-038: CAREER_REPLY_MODEL rolls back only to a listed, priced, keyed Claude model; any other id serves the default", () => {
   const key = { ANTHROPIC_API_KEY: "a" };
-  eq(careerModel(env({ ...key, CAREER_REPLY_MODEL: "claude-haiku-5-5" })), "claude-haiku-5-5", "a listed, keyed rollback is honoured");
+  eq(careerModel(env({ ...key, CAREER_REPLY_MODEL: "claude-haiku-5-5" })), "claude-sonnet-5-5", "D-046: a Haiku rollback is ignored, Sonnet 5.5 is served");
   eq(careerModel(env({ ...key, CAREER_REPLY_MODEL: " claude-sonnet-5-5 " })), "claude-sonnet-5-5", "Sonnet 5.5 when the owner sets it explicitly (trimmed)");
   eq(careerModel(env({ CAREER_REPLY_MODEL: "claude-sonnet-5-5" })), CAREER_MODEL_DEFAULT, "no Anthropic key: the default");
   eq(careerModel(env({ ...key, CAREER_REPLY_MODEL: "gpt-5-mini" })), CAREER_MODEL_DEFAULT, "a gpt id is never honoured");
@@ -64,20 +64,21 @@ Deno.test("D-038: CAREER_REPLY_MODEL rolls back only to a listed, priced, keyed 
   const a = careerModelConfig(env({ ...key, CAREER_REPLY_MODEL: "claude-sonnet-5-5" }));
   eq([a.provider, a.model, a.apiKey], ["anthropic", "claude-sonnet-5-5", "a"]);
   const d = careerModelConfig(env(key));
-  eq([d.provider, d.model, d.apiKey], ["anthropic", "claude-haiku-5-5", "a"]);
+  eq([d.provider, d.model, d.apiKey], ["anthropic", "claude-sonnet-5-5", "a"]);
   eq([providerFor("claude-sonnet-5-5"), providerFor("claude-haiku-5-5")], ["anthropic", "anthropic"]);
   let err: any = null; try { providerFor("gpt-5-mini"); } catch (e) { err = e; }
   assert(err && err.type === "not_configured", "gpt-5-mini is refused");
   // Q3/SEC11: no secret switches the model or provider of the default config.
   const m = modelConfig(env({ ...key, MODEL_PROVIDER: "x", ANTHROPIC_MODEL: "claude-sonnet-5-5", OPENAI_MODEL: "gpt-5" }));
-  eq([m.provider, m.model], ["anthropic", "claude-haiku-5-5"]);
+  eq([m.provider, m.model], ["anthropic", "claude-sonnet-5-5"]);
 });
 
-Deno.test("D-038 review: the background readers' model is a priced Claude id (CAREER_MODEL) or Haiku 5.5; anything else is ignored", () => {
+Deno.test("D-038 review (D-046): the background readers' model is Sonnet 5.5; any other CAREER_MODEL is ignored", () => {
   eq(readerModel(env({ CAREER_MODEL: "claude-sonnet-5-5" })), "claude-sonnet-5-5");
-  eq(readerModel(env({ CAREER_MODEL: "gpt-4.1-mini" })), "claude-haiku-5-5", "a gpt id is ignored");
-  eq(readerModel(env({ CAREER_MODEL: "claude-unpriced-9" })), "claude-haiku-5-5", "an unpriced id is ignored");
-  eq(readerModel(env({})), "claude-haiku-5-5");
+  eq(readerModel(env({ CAREER_MODEL: "gpt-4.1-mini" })), "claude-sonnet-5-5", "a gpt id is ignored");
+  eq(readerModel(env({ CAREER_MODEL: "claude-unpriced-9" })), "claude-sonnet-5-5", "an unpriced id is ignored");
+  eq(readerModel(env({ CAREER_MODEL: "claude-haiku-5-5" })), "claude-sonnet-5-5", "a Haiku id is ignored (D-046)");
+  eq(readerModel(env({})), "claude-sonnet-5-5");
 });
 
 Deno.test("D-038 review: the date of every price row is a real check, from 2026-10-01 to today", () => {
@@ -148,8 +149,8 @@ Deno.test("D-038: a Claude call goes to Anthropic with its key, is reserved and 
   eq(out.content, [{ type: "text", text: "ok" }]);
   eq([seen[0].url, seen[0].key, seen[0].auth], ["https://api.anthropic.com/v1/messages", "test-anthropic-key", undefined], "Anthropic's URL and key");
   assert(!("temperature" in seen[0].body), "no temperature sent");
-  eq([meter.calls, meter.usd_micros, meter.provider], [1, 150, "anthropic"], "metered at the verified price");
-  eq(gate.snapshot().spent, 150, "the budget settles to the proven cost");
+  eq([meter.calls, meter.usd_micros, meter.provider], [1, 3000, "anthropic"], "metered at the verified Sonnet 5.5 price (D-046: 1,000 in x $2 + 100 out x $10)");
+  eq(gate.snapshot().spent, 3000, "the budget settles to the proven cost");
   const missing = modelConfigFor(env({}), "claude-haiku-5-5");
   let err: any = null; try { await callModel(missing, { messages: [] }, { request: (async () => { throw new Error("must not send"); }) as any, budget: gate }); } catch (e) { err = e; }
   assert(err && err.type === "not_configured", "no ANTHROPIC_API_KEY: not configured, nothing sent");
@@ -157,7 +158,7 @@ Deno.test("D-038: a Claude call goes to Anthropic with its key, is reserved and 
 Deno.test("owner directive 2026-11-02: the four background readers (mail, essay, mock judge, outreach replies) are Claude-only; CAREER_MODEL never sends a gpt id anywhere", () => {
   const claude = env({ OPENAI_API_KEY: "o", ANTHROPIC_API_KEY: "a", CAREER_MODEL: "claude-sonnet-5-5" });
   const gpt = env({ OPENAI_API_KEY: "o", ANTHROPIC_API_KEY: "a", CAREER_MODEL: "gpt-4.1-mini" });
-  eq([readerModel(claude), readerModel(gpt), readerModel(env({}))], ["claude-sonnet-5-5", "claude-haiku-5-5", "claude-haiku-5-5"]);
+  eq([readerModel(claude), readerModel(gpt), readerModel(env({}))], ["claude-sonnet-5-5", "claude-sonnet-5-5", "claude-sonnet-5-5"]); // D-046
   for (const e of [claude, gpt, env({ OPENAI_API_KEY: "o", ANTHROPIC_API_KEY: "a" })]) {
     const mail = mailModelConfig(e), essay = essayModelConfig(e);
     eq([mail.provider, providerFor(mail.model), mail.apiKey], ["anthropic", "anthropic", "a"], "mail");

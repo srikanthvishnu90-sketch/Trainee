@@ -1478,7 +1478,8 @@ const CareerProfile = (() => {
       if (head) {
         flush();
         lastWasMore = false;
-        if (head.skip) { section = null; if (!unread.includes(head.label)) unread.push(head.label); } else section = head.kind;
+        if (head.skip && /^(?:(?:personal |other )?interests|hobbies(?: (?:&|and) interests)?|interests (?:&|and) hobbies)$/i.test(head.label.trim())) section = "interest";
+        else if (head.skip) { section = null; if (!unread.includes(head.label)) unread.push(head.label); } else section = head.kind;
         continue;
       }
       const labelled = line.match(/^(?:[-•*]\s*)?(skills?|technical(?: skills)?|tools|technologies|certifications?|certificates?|licen[cs]es?|interests?|hobbies)\s*:\s*(.+)$/i);
@@ -1494,6 +1495,12 @@ const CareerProfile = (() => {
         continue;
       }
       if (!section) continue;
+      if (section === "interest") {
+        for (const name of line.replace(/^[-•*]\s*/, "").split(/[,;•|·]/).map((x) => x.trim()).filter(Boolean)) {
+          drafts.push({ kind: "other", section: "interests", name, title: name, text: `Interest: ${name}`, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
+        }
+        continue;
+      }
       if (section === "skill") {
         for (const name of line.split(/[,;•|·]/).map((x) => x.trim()).filter(Boolean)) {
           drafts.push({ kind: "skill", name, title: name, text: `Skill: ${name}`, skills: [name], evidence: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
@@ -2177,9 +2184,9 @@ const CareerTailor = (() => {
   function headerOf(profile) {
     const b = profile.basics, rh = profile.resume_header, typed = b.name;
     if (!typed && rh && typeof rh === "object" && rh.name) {
-      return { name: rh.name, email: rh.email || null, location: rh.location || null, links: rh.links || {}, contactLine: rh.contactLine || null, linksLine: rh.linksLine || null, from: "resume" };
+      return { name: rh.name, email: rh.email || b.email || null, location: rh.location || null, links: rh.links || {}, contactLine: rh.contactLine || null, linksLine: rh.linksLine || null, from: "resume" };
     }
-    return { name: b.name, email: b.email, location: b.location, links: b.links || {} };
+    return { name: b.name, email: b.email || (rh && typeof rh === "object" && rh.confirmed_at && rh.email) || b.email, location: b.location, links: b.links || {} };
   }
   function entryTextFor(fact) {
     const title = (fact && fact.title) || "";
@@ -10024,8 +10031,17 @@ const CareerReply = (() => {
     if (specific) return `${trimmed} ${specific}`;
     return `${trimmed} ${GENERIC_CLOSER}`;
   }
+  function endAtDecision(text, opts) {
+    const raw = String(text == null ? "" : text);
+    if (!raw.trim()) return raw;
+    const out = ensureNextStep(raw, opts);
+    const trimmed = out.replace(/\s+$/, "");
+    if (!trimmed.endsWith(GENERIC_CLOSER)) return out;
+    const before = trimmed.slice(0, trimmed.length - GENERIC_CLOSER.length).replace(/\s+$/, "");
+    return before || out;
+  }
 
-  return { MAX_SENTENCES_PER_BUBBLE, composeText, composeResult, fallback, isFallbackText, FALLBACK_TEXT_RE, lint, splitBubbles, GENERIC_CLOSER, endsWithNextStep, ensureNextStep };
+  return { MAX_SENTENCES_PER_BUBBLE, composeText, composeResult, fallback, isFallbackText, FALLBACK_TEXT_RE, lint, splitBubbles, GENERIC_CLOSER, endsWithNextStep, ensureNextStep, endAtDecision };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerReply;
 
@@ -13689,7 +13705,7 @@ const CareerRouter = (() => {
   }
 
   function ensureNextStepText(joined) {
-    return Reply.ensureNextStep(joined);
+    return typeof Reply.endAtDecision === "function" ? Reply.endAtDecision(joined) : Reply.ensureNextStep(joined);
   }
   function asOfDay(d) {
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || ""));
@@ -13724,6 +13740,14 @@ const CareerRouter = (() => {
   const employerKey = (x) => lc(s(x)).normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/['’]/g, "").replace(/[^a-z0-9]+/g, " ")
     .replace(/\b(?:inc|llc|ltd|co|corp|corporation|company|the|plc|gmbh|sa)\b/g, " ").replace(/\s+/g, " ").trim();
   function sameEmployer(a, b) { const x = employerKey(a), y = employerKey(b); return !!x && x === y; }
+  function emptySearchScope(lp, o, namedRole) {
+    const internship = (o && o.intent) === "career_internship_discovery";
+    const roleText = s(lp && lp.roleText).trim();
+    const role = (namedRole || internship) && roleText ? roleText : internship ? "internships" : null;
+    if (!role && !(lp && lp.remoteOnly)) return null;
+    const where = lp && lp.remoteOnly ? ", remote only" : lp && lp.whereText ? ` in ${lp.whereText}` : "";
+    return `${role || "roles"}${where}`;
+  }
   function handleDiscovery(text, ctx, opts) {
     const o = opts || {};
     const profile = ctx.profile;
@@ -13743,8 +13767,9 @@ const CareerRouter = (() => {
         families: (fams || []).slice(),
         roleText: roleM ? `${roleM[1].trim()} ${roleM[2]}` : (prevP ? prevP.roleText : null),
         altRoleText: prevP ? prevP.roleText : null,
-        whereText: whereM ? whereM[1] : (prevP ? prevP.whereText : null),
+        whereText: o.remoteOnly ? null : whereM ? whereM[1] : (prevP ? prevP.whereText : null),
         remote: /\bremote\b/i.test(text) || (prevP ? !!prevP.remote : false),
+        remoteOnly: !!o.remoteOnly,
         bands: o.bands ? Array.from(o.bands) : (prevP ? prevP.bands : []),
         ask: s(text).slice(0, 200), at: new Date(nowOf(ctx)).toISOString(),
       } });
@@ -13766,10 +13791,13 @@ const CareerRouter = (() => {
     if (!top.length && dedupedTo === 0 && !ranked.length) {
       const lp = (ctx.discovery && ctx.discovery.lastParams) || {};
       const namedRole = !o.headline && lp.ask === s(text).slice(0, 200) && (!!s(lp.whereText) && /\bin\s+[A-Z]/.test(s(text)) || /\b(?:analyst|engineer|developer|designer|scientist|coordinator|manager|intern|associate|consultant|marketing|product|data|finance|financial|software|ux|operations|sales|nurse|teacher)\b/i.test(s(lp.roleText)));
-      const facts = [namedRole ? "I won't make any up." : "I don't have open roles on my list right now, and I won't make any up."];
+      const scope = emptySearchScope(lp, o, namedRole);
+      const facts = [scope ? "The postings I have on hand right now hold none, and I won't make any up." : namedRole ? "I won't make any up." : "I don't have open roles on my list right now, and I won't make any up."];
       if (fams && fams.length) facts.push(`I've kept your ask (${fams.map(familyLabel).join(" + ")}) and will run it as soon as matching roles come in.`);
       const newPerson = !(profile && (profile.facts || []).length);
-      const reply = compose({ headline: o.headline || (namedRole ? "No open roles on my list match that right now." : "Nothing to show yet."), facts, nextStep: o.nextStep || (newPerson ? "Meanwhile, send me your resume — paste it here or attach the file." : "Paste a posting you found, or name a company to watch, and I'll start there.") });
+      const widen = scope && lp.whereText && !lp.remoteOnly ? `Want me to look beyond ${lp.whereText}, remote roles included?` : null;
+      const headline = scope ? `No open ${scope} on my list right now.` : (o.headline || (namedRole ? "No open roles on my list match that right now." : "Nothing to show yet."));
+      const reply = compose({ headline, facts, nextStep: (scope ? widen : null) || (scope ? null : o.nextStep) || (newPerson ? "Meanwhile, send me your resume — paste it here or attach the file." : "Paste a posting you found, or name a company to watch, and I'll start there.") });
       return Object.assign({ intent: o.intent || "career_discovery", reply, requested_families: fams || [] }, publicFacts);
     }
     if (!top.length && fams && fams.length && family && family.onList > 0) {
@@ -13823,6 +13851,7 @@ const CareerRouter = (() => {
     return handleDiscovery(text, ctx, { employer: (more && more.employer) || null, intent: "career_internship_discovery", limit: 4, locations: locations.size ? locations : null, bands, headline, nextStep: "Want me to tailor your resume for the first one?" });
   }
 
+  const REMOTE_ONLY_ASK = /\bremote only\b|\bonly remote\b|\bjust remote\b|\bfully remote\b|\bremote[- ]only\b|\bcan(?:'|no)?t commute\b|\bcannot commute\b|\bno commut(?:e|ing)\b|\bnothing (?:on-?site|in[- ]person|hybrid)\b/;
   function handleDiscoveryDelta(text, ctx) {
     const prev = ctx.discovery && ctx.discovery.lastParams;
     if (!prev) return null;
@@ -13847,14 +13876,20 @@ const CareerRouter = (() => {
       roleText = `${prev.altRoleText} and ${roleText || "the corrected role"}`;
       changes.push("both searches run together");
     }
-    if (/\bremote\b/.test(t) && !remote) { remote = true; changes.push("remote roles are in"); }
+    const remoteOnly = REMOTE_ONLY_ASK.test(t);
+    let droppedPlace = null;
+    if (remoteOnly) {
+      if (whereText) { droppedPlace = whereText; whereText = null; }
+      remote = true;
+      changes.push(droppedPlace ? `remote roles only, so ${droppedPlace} is dropped (a remote role has no commute)` : "remote roles only");
+    } else if (/\bremote\b/.test(t) && !remote) { remote = true; changes.push("remote roles are in"); }
     const anyM = t.match(/\banywhere in\s+([a-z ]{3,24}?)(?:\s+works|\s+is fine|[.!?]|$)/) || t.match(/\banywhere in\s+([a-z ]{3,24})/);
     if (anyM) { whereText = anyM[1].trim().replace(/\b\w/g, (ch) => ch.toUpperCase()); changes.push(`the map widened to anywhere in ${whereText}`); }
     if (/\binternships?\b[^.]*\bfine too\b|\binternships are fine\b/.test(t) && !bands.includes("intern")) { bands = bands.concat(["intern"]); changes.push("internships that convert are in alongside the new-grad roles"); }
     const recapOnly = /\bwhat did you find\b|\bback to (the )?jobs\b/.test(t) && !changes.length;
     if (!changes.length && !recapOnly) return null;
-    const scopeLine = `Search as it now stands: ${roleText || (fams.length ? fams.map(familyLabel).join(" + ") + " roles" : "your earlier ask")}${whereText ? ` in ${whereText}` : ""}${remote ? ", remote included" : ""}${bands.includes("intern") ? ", internships included" : ""}.`;
-    const res = handleDiscovery(text, ctx, { families: fams, bands: bands.length ? new Set(bands) : undefined });
+    const scopeLine = `Search as it now stands: ${roleText || (fams.length ? fams.map(familyLabel).join(" + ") + " roles" : "your earlier ask")}${whereText ? ` in ${whereText}` : ""}${remoteOnly ? ", remote only" : remote ? ", remote included" : ""}${bands.includes("intern") ? ", internships included" : ""}.`;
+    const res = handleDiscovery(text, ctx, Object.assign({ families: fams, bands: bands.length ? new Set(bands) : undefined }, remoteOnly ? { remoteOnly: true, locations: new Set(["remote"]) } : {}));
     if (!res) return null;
     if (recapOnly) {
       const reply = compose({ headline: "Back to the search you already ran.", facts: [scopeLine, res.shortlist && res.shortlist.length ? `It holds ${res.shortlist.length} roles — the top of the list is unchanged.` : "It still holds no matching roles — the list itself is the limit today, not the search."], nextStep: "Widen the role or the map, or paste a posting, and the search moves." });
@@ -13863,7 +13898,16 @@ const CareerRouter = (() => {
     const changeLine = `Updated: ${changes.join("; ")}.`;
     const facts = [changeLine, scopeLine];
     if (!(res.shortlist && res.shortlist.length)) facts.push("The re-run is honest: the current list still holds no matching roles, so there is nothing new to show — the widened search is what is recorded, ready for the moment roles land.");
-    const reply = compose({ headline: "Search updated and re-run.", facts, nextStep: res.shortlist && res.shortlist.length ? "Tell me one to tailor your resume for, and I will do that next." : "Name a company to watch, or paste a posting, and we work from something real." });
+    let headline = "Search updated and re-run.";
+    if (remoteOnly) {
+      const role = roleText || "roles";
+      const n = (res.shortlist || []).length;
+      headline = `Remote only now: ${droppedPlace ? `${droppedPlace} is dropped, and ` : ""}${n ? `${n} remote ${role} remain${n === 1 ? "s" : ""} on my list` : `no remote ${role} are on my list right now`}.`;
+      facts.splice(0, facts.length, scopeLine);
+      if (n) facts.push(...(res.shortlist || []).slice(0, 5).map((r, k) => `${k + 1}. ${r.title} at ${r.company}${r.location ? ` — ${r.location}` : ""}${r.url ? ` (${r.url})` : ""}.`));
+      else facts.push("I won't fill the list with onsite or hybrid roles.");
+    }
+    const reply = compose({ headline, facts, nextStep: res.shortlist && res.shortlist.length ? "Tell me one to tailor your resume for, and I will do that next." : "Name a company to watch, or paste a posting, and we work from something real." });
     return Object.assign({}, res, { reply });
   }
 
@@ -14792,6 +14836,14 @@ const CareerRouter = (() => {
     for (let i = stash.length - 1; i >= 0; i--) {
       const a = stash[i];
       if (a && a.pdf && typeof a.pdf.base64 === "string" && a.pdf.base64) { art = a; break; }
+    }
+    if (!art && /\bpacket\b/.test(t) && !/\b(resume|cv|cover letter|pdf|docx)\b/.test(t)) {
+      const reply = compose({
+        headline: "There's no application packet in this chat yet.",
+        facts: ["Pick a role and I'll prepare one for you to review: the job and the resume for it. Nothing is submitted until you approve it."],
+        nextStep: "Which role should it be for?",
+      });
+      return { intent: "career_packet_absent", reply, resultStatus: "awaiting_user", sends: 0, documents: [] };
     }
     if (!art) {
       const reply = compose({
@@ -20375,6 +20427,7 @@ const CareerRouter = (() => {
     const aRec = Object.assign({ kind: "rejection_autopsy" }, a);
     return { intent: "tracking_status", reply, resultStatus: "prepared", sends: 0, autopsy: a, payload: aRec, artifact: aRec };
   }
+  const APPLICATION_WENT_THROUGH = /\bmy (?:job |internship )?application\b[^.?!]{0,60}\b(?:go|gone|went|get|got|make it|made it) (?:through|in|out)\b|\bmy (?:job |internship )?application\b[^.?!]{0,60}\b(?:submitted|sent|received|delivered|accepted)\b|\b(?:did|has|have|was|were)\b[^.?!]{0,40}\bmy\b[^.?!]{0,30}\bapplication\b[^.?!]{0,30}\b(?:go through|get through|submitted|sent|received|delivered)\b/;
   function handleApplicationStatus(text, ctx) {
     if (!Apply3 || !Apply3.statusAnswer) return null;
     let company = companyFromText(text, ctx);
@@ -21172,12 +21225,104 @@ const CareerRouter = (() => {
     if (parsed.kind !== "unspecified" && profile && typeof profile === "object") audit = writeSensitiveCorrection(profile, parsed, text, ctx);
     const inv = recordInvalidation(ctx, "sensitive_fact_corrected", text, "the user corrected a sensitive fact (sponsorship / work authorization); prepared packets and approvals built on the old answer are invalid");
     if (parsed.kind === "unspecified") {
-      const reply = compose({ headline: "I will hold that packet while you confirm the new answer.", facts: ["Tell me the new work authorization answer in your own words; it goes to the record write exactly as you say it, and I will call it saved only when that write is confirmed.", "Until then the prepared packet counts as stale, because the fact it was built on is changing."], nextStep: "State the new answer and it is put through the record write; re-preparing waits for the confirmed write." });
+      const reply = compose({ headline: "Any application prepared with your old work authorization answer is held until you give me the new one.", facts: ["I'll use the new answer exactly as you say it."], nextStep: "What is your work authorization now, in your own words?" });
       return { intent: "intent_sensitive_correction", resultStatus: "awaiting_user", reply, correction: parsed, invalidation: inv };
     }
-    const factSentence = parsed.kind === "future_need" ? "Your statement, in your own words: you will need sponsorship in the future." : "Your statement, in your own words: you no longer need sponsorship.";
-    const reply = compose({ headline: "Correction noted — I am not calling it saved: the host record write is not confirmed.", facts: [factSentence, "The prepared packet built on the old answer is invalid now and will not be submitted.", "Until the host writer confirms the record write, the correction stands as your stated direction — not as a saved profile answer."], nextStep: "Once the write is confirmed, I can re-prepare on the corrected answer and bring it back for your re-confirmation." });
+    const factSentence = parsed.kind === "future_need" ? "Got it: you will need visa sponsorship in the future." : "Got it: you don't need visa sponsorship.";
+    const reply = compose({ headline: factSentence, facts: ["I'll use this answer from now on instead of your earlier one; the change to your profile is not confirmed yet.", "Any application prepared with your earlier answer is no longer valid and will not be submitted; it will be prepared again with this one and shown to you before anything is sent."] });
     return { intent: "intent_sensitive_correction", resultStatus: "completed", reply, correction: { kind: parsed.kind, needsSponsorship: parsed.needsSponsorship, clause: parsed.clause }, audit, invalidation: inv };
+  }
+
+  const PICK_FOR_ME = /\b(?:pick|choose|decide|fill(?: in| out)?|make up|guess|select|put)\b[^.?!]{0,80}\b(?:for me|whatever|best|something|anything|makes sense|you think)\b|\bwhatever makes sense\b|\byou (?:pick|choose|decide)\b|\bup to you\b/;
+  const PICK_FIELDS = [
+    { key: "sponsorship", rx: /\bsponsor(?:ship)?\b|\bvisa\b/, label: "whether you need visa sponsorship", ask: "do you need visa sponsorship to work in the US, now or later" },
+    { key: "work_authorization", rx: /\bwork authori[sz]ation\b|\bauthori[sz]ed to work\b|\bwork status\b|\blegal status\b|\bcitizenship question/, label: "your work authorization", ask: "what is your work authorization" },
+    { key: "graduation_date", rx: /\bgraduat\w*/, label: "your graduation date", ask: "when do you graduate" },
+    { key: "salary", rx: /\b(?:expected )?(?:salary|pay|compensation)(?: expectations?)?\b/, label: "your expected salary", ask: "what salary do you expect" },
+    { key: "gpa", rx: /\bgpa\b/, label: "your GPA", ask: "what is your GPA" },
+    { key: "start_date", rx: /\bstart date\b|\bwhen (?:i|you) can start\b/, label: "your start date", ask: "when can you start" },
+  ];
+  const SENSITIVE_ASK_TTL_MS = 24 * 60 * 60 * 1000;
+  const FIELD_FACT_KIND = { sponsorship: "sponsorship", work_authorization: "work_authorization", graduation_date: "graduation", salary: "salary_expectation", gpa: "gpa", start_date: "start_date" };
+  function sensitiveQuestion(f, company, k, n) {
+    let q = f.ask;
+    if (company && f.key === "salary") q = `what salary do you expect for the ${company} role`;
+    q = `${q.charAt(0).toUpperCase()}${q.slice(1)}?`;
+    return n > 1 ? `${k} of ${n}: ${q}` : q;
+  }
+  function handleSensitivePick(text, ctx) {
+    const t = lc(text);
+    if (!PICK_FOR_ME.test(t)) return null;
+    if (!/\b(?:questions?|answers?|applications?|forms?|fields?)\b/.test(t)) return null;
+    if (/\b(?:offer|counter|negotiat\w*|signing bonus)\b/.test(t)) return null;
+    const added = (ctx && ctx._factsAddedThisTurn) || [];
+    const statedAuth = added.some((f) => f && /citizen|sponsor|work_?auth|eligib/.test(s(f.kind)));
+    const fields = PICK_FIELDS.filter((f) => f.rx.test(t) && !(f.key === "work_authorization" && statedAuth));
+    if (!fields.length) return null;
+    const coM = s(text).match(/\b[Ff]or (?:the|my)\s+([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})\s+(?:application|role|job|internship|posting|position)\b/);
+    const company = coM ? coM[1] : null;
+    const labels = fields.map((f) => f.label);
+    const named = labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(", ")} or ${labels[labels.length - 1]}`;
+    const facts = [];
+    if (added.length) facts.push(`Noted: ${added.map((f) => String(factLine(f)).replace(/[.\s]+$/, "")).join("; ")}.`);
+    facts.push(fields.length > 1 ? `I'll ask you for each one, one at a time; I can help with how an answer is worded, but the answer itself is yours.` : "I can help with how an answer is worded, but the answer itself is yours.");
+    try { const m = threadMirrorForWrite(ctx); if (m) m.sensitiveAsk = { company, fields: fields.map((f) => f.key), total: fields.length, at: nowOf(ctx) }; } catch {   }
+    const reply = compose({ headline: `I can't pick ${named}${company ? ` for the ${company} application` : ""}: ${fields.length === 1 ? "that has" : "those have"} to be your own answer${fields.length === 1 ? "" : "s"}, so I won't fill ${fields.length === 1 ? "it" : "them"} in.`, facts, nextStep: sensitiveQuestion(fields[0], company, 1, fields.length) });
+    return { intent: "sensitive_answer_ask", resultStatus: "awaiting_user", reply, sends: 0, asked: [fields[0].key], open: fields.map((f) => f.key), company, stated_facts: added.length ? statedFactsOf(ctx) : undefined };
+  }
+  function sensitiveAnswerValue(key, raw) {
+    const v = s(raw).replace(/\s+/g, " ").replace(/[.!]+$/, "").trim();
+    if (key === "sponsorship") {
+      const l = lc(v);
+      if (/\b(?:no|nope|don'?t|do not|won'?t|will not|never|not)\b|\bcitizen\b|\bgreen card\b|\bpermanent resident\b/.test(l)) return "does not need sponsorship";
+      if (/\b(?:yes|yep|yeah|i do|i will|need|require|h-?1b|f-?1|opt)\b/.test(l)) return "needs sponsorship";
+      return null;
+    }
+    const bare = v.replace(/^(?:(?:it'?s|it is|i graduate(?: in)?|graduating(?: in)?|my graduation (?:date )?is|graduation(?: date)?(?: is)?|i expect(?: about| around)?|about|around|my gpa is|i can start(?: on| in)?)\s+)/i, "").trim();
+    return bare || null;
+  }
+  function handleSensitiveAskAnswer(text, ctx) {
+    const mir = threadMirrorOf(ctx);
+    const st = mir && mir.sensitiveAsk;
+    if (!st || !Array.isArray(st.fields) || !st.fields.length) return null;
+    const at = typeof st.at === "number" ? st.at : Date.parse(st.at || "");
+    const wm = threadMirrorForWrite(ctx);
+    if (!(at && nowOf(ctx) - at <= SENSITIVE_ASK_TTL_MS)) { if (wm) delete wm.sensitiveAsk; return null; }
+    const raw = s(text).trim(), t = lc(raw);
+    if (!raw || /\?\s*$/.test(raw) || raw.split(/\s+/).length > 25 || /^(?:find|search|show|apply|stop|pause|cancel|never ?mind|forget it|tailor|draft|send|help)\b/.test(t)) { if (wm) delete wm.sensitiveAsk; return null; }
+    const key = st.fields[0], field = PICK_FIELDS.find((f) => f.key === key);
+    if (!field) { if (wm) delete wm.sensitiveAsk; return null; }
+    const total = st.total || st.fields.length, k = total - st.fields.length + 1;
+    const skipped = /^(?:skip|pass|leave it blank|i'?d rather not say|rather not say|prefer not to say)\b/.test(t);
+    const value = skipped ? null : sensitiveAnswerValue(key, raw);
+    if (!skipped && !value) {
+      const reply = compose({ headline: `I didn't catch ${field.label} in that, so nothing was kept for it.`, nextStep: sensitiveQuestion(field, st.company, k, total) });
+      return { intent: "sensitive_answer_ask", resultStatus: "awaiting_user", reply, sends: 0, asked: [key], open: st.fields.slice(), company: st.company || null };
+    }
+    let said = null;
+    if (value) {
+      const kind = FIELD_FACT_KIND[key];
+      recordThreadFact(ctx, kind, value, raw);
+      const prof = ctx && ctx.profile;
+      if (key === "sponsorship" && prof && typeof prof === "object" && !prof._fromStatedFacts) {
+        const need = value === "needs sponsorship", before = prof.constraints ? prof.constraints.needsSponsorship : null;
+        try { writeSensitiveCorrection(prof, { kind: need ? "future_need" : "no_longer_needed", needsSponsorship: need, clause: raw }, raw, ctx); } catch {   }
+        if (before === true || before === false) { if (before !== need) recordInvalidation(ctx, "sensitive_fact_corrected", raw, "the user answered the sponsorship question differently from the earlier answer; prepared packets and approvals built on the old answer are invalid"); }
+      }
+      const f = statedFactsOf(ctx).filter((x) => x.kind === kind).pop();
+      if (f && st.company && key === "salary") f.key = st.company;
+      said = f ? String(factLine(f)).replace(/[.\s]+$/, "") : `${field.label}: ${value}`;
+    }
+    const rest = st.fields.slice(1);
+    if (wm) { if (rest.length) wm.sensitiveAsk = Object.assign({}, st, { fields: rest }); else delete wm.sensitiveAsk; }
+    const head = said ? `Noted, in your words: ${said}.` : `Skipped: ${field.label} stays blank, and I won't fill it in.`;
+    if (rest.length) {
+      const next = PICK_FIELDS.find((f) => f.key === rest[0]);
+      const reply = compose({ headline: head, nextStep: sensitiveQuestion(next, st.company, k + 1, total) });
+      return { intent: "sensitive_answer_ask", resultStatus: "awaiting_user", reply, sends: 0, asked: [rest[0]], open: rest.slice(), company: st.company || null, stated_facts: statedFactsOf(ctx) };
+    }
+    const reply = compose({ headline: head, facts: [`That's all ${total === 1 ? "of it" : `${total} answers`}${st.company ? ` for the ${st.company} application` : ""}; each is used exactly as you gave it, and nothing was chosen for you.`] });
+    return { intent: "sensitive_answer_ask", resultStatus: "completed", reply, sends: 0, asked: [], open: [], company: st.company || null, stated_facts: statedFactsOf(ctx) };
   }
 
   const CANCEL_RE = /\bcancel\b|\bcancelled\b|\bcall (it|them|this|that) off\b|\bhold off\b|\bnever mind\b|\bscrap\b|\bstop\b|\bhalt\b|\bdo not submit\b|\bdon'?t submit\b|\bchanged my mind\b/;
@@ -21510,7 +21655,9 @@ const CareerRouter = (() => {
       || handleUserSuppression(text, c)
       || handleRoleClosure(text, c)
       || handlePriorApplication(text, c)
+      || handleSensitiveAskAnswer(text, c)
       || handleSensitiveCorrection(text, c)
+      || handleSensitivePick(text, c)
       || handleQueueCancel(text, c)
       || handleDoorstepCancel(text, c)
       || handlePacketValidity(text, c)
@@ -23526,7 +23673,7 @@ const CareerRouter = (() => {
         const flagRec = report || flagCir || { kind: "advice_report", status: "flagged_for_reverification", company_file_named: false };
         return { intent: "company_intel", reply, resultStatus: "prepared", sends: 0, report: report || undefined, payload: flagRec, artifact: flagRec, blocker: report ? undefined : { code: "no_company_file_named", reason: "no company file is named or on record for this report, so no re-verification log can be opened" } };
       }
-      if (/\bwhere(?:'s| is)? my application\b|\bmy application\b[^.]*\b(status|stage|happened|update)\b|\bwhat happened with my\b[^.]*\bapplication\b|\bapplication status\b|\bstatus of my\b[^?!]*\bapplication\b/.test(t)) {
+      if (/\bwhere(?:'s| is)? my application\b|\bmy application\b[^.]*\b(status|stage|happened|update)\b|\bwhat happened with my\b[^.]*\bapplication\b|\bapplication status\b|\bstatus of my\b[^?!]*\bapplication\b/.test(t) || APPLICATION_WENT_THROUGH.test(t)) {
         const sa = handleApplicationStatus(text, c);
         if (sa) return sa;
       }
@@ -23567,7 +23714,7 @@ const CareerRouter = (() => {
       const tl = handleTrackLog(text, c);
       if (tl) return tl;
     }
-    if (/\bmy application\b[^.]*\b(status|stage|happened|update)\b|\bwhat happened with my\b[^.]*\bapplication\b|\bapplication status\b|\bstatus of my\b[^?!]*\bapplication\b|\bdid\b[^.]*\b(reject|respond|get back)\b/.test(t)) {
+    if (/\bmy application\b[^.]*\b(status|stage|happened|update)\b|\bwhat happened with my\b[^.]*\bapplication\b|\bapplication status\b|\bstatus of my\b[^?!]*\bapplication\b|\bdid\b[^.]*\b(reject|respond|get back)\b/.test(t) || APPLICATION_WENT_THROUGH.test(t)) {
       const sa = handleApplicationStatus(text, c);
       if (sa) return sa;
     }
@@ -24306,7 +24453,7 @@ const CareerRouter = (() => {
     return { intent: "conversation_recall", reply, resultStatus: status, sends: 0 };
   }
   function factLine(f) {
-    return { name: `your name is ${f.value}`, year: `you're a ${f.value}`, majors: `you study ${f.value}`, geography: `you're targeting ${f.value}`, experience: experienceLine(f), school: `you go to ${f.value}`, target_firm: `your target firm is ${f.value}`, level: `you want ${f.value} first`, excluded_level: `not ${f.value}`, tone: `the tone is ${f.value} from here`, target_role: `your dream role is ${f.value}`, recruiter_contact: `your recruiter contact${f.key ? ` at ${f.key}` : ""} is ${f.value}`, hiring_manager: `the hiring manager${f.key ? ` at ${f.key}` : ""} is ${f.value}`, interview_day: `your interview${f.key ? ` at ${f.key}` : ""} is on ${f.value}`, company_preference: `for ${f.key || "that company"} you only want ${f.value}`, sponsorship: f.value === "does not need sponsorship" ? "you do not need sponsorship" : "you need sponsorship", citizenship: f.value === "not a US citizen" ? "you're not a US citizen" : "you're a US citizen", interview_company: `you have an interview at ${f.value}`, goal: `your career goal is ${f.value}`, graduation: `you graduate ${f.value}` }[f.kind] || `${f.kind}: ${f.value}`;
+    return { name: `your name is ${f.value}`, year: `you're a ${f.value}`, majors: `you study ${f.value}`, geography: `you're targeting ${f.value}`, experience: experienceLine(f), school: `you go to ${f.value}`, target_firm: `your target firm is ${f.value}`, level: `you want ${f.value} first`, excluded_level: `not ${f.value}`, tone: `the tone is ${f.value} from here`, target_role: `your dream role is ${f.value}`, recruiter_contact: `your recruiter contact${f.key ? ` at ${f.key}` : ""} is ${f.value}`, hiring_manager: `the hiring manager${f.key ? ` at ${f.key}` : ""} is ${f.value}`, interview_day: `your interview${f.key ? ` at ${f.key}` : ""} is on ${f.value}`, company_preference: `for ${f.key || "that company"} you only want ${f.value}`, sponsorship: f.value === "does not need sponsorship" ? "you do not need sponsorship" : "you need sponsorship", citizenship: f.value === "not a US citizen" ? "you're not a US citizen" : "you're a US citizen", interview_company: `you have an interview at ${f.value}`, goal: `your career goal is ${f.value}`, graduation: `you graduate ${f.value}`, salary_expectation: `you expect ${f.value}${f.key ? ` for ${f.key}` : ""}`, work_authorization: `your work authorization is ${f.value}`, gpa: `your GPA is ${f.value}`, start_date: `you can start ${f.value}` }[f.kind] || `${f.kind}: ${f.value}`;
   }
   function profileFromStatedFacts(ctx) {
     const facts = statedFactsOf(ctx);
@@ -24436,7 +24583,7 @@ const CareerRouter = (() => {
     const coKey = (v) => s(v || "").toLowerCase().replace(/\s*\(fictional\)\s*/gi, "").trim();
     if (/\bfirst thing\b/.test(t) && /\b(told|said|mentioned|gave|shared)\b/.test(t)) {
       if (!all.length) {
-        const reply = compose({ headline: "Nothing is on your record yet in this conversation.", facts: ["The record holds only what you state — tell me a fact (a target company, an interview day, a contact) and it is recorded in this turn."], nextStep: "State the first fact you want on record." });
+        const reply = compose({ headline: "Nothing is on your record yet in this conversation.", facts: ["I only keep what you tell me: a target company, an interview day, a contact."], nextStep: "What's the first thing you want me to know?" });
         return { intent: "conversation_recall", reply, resultStatus: "awaiting_user", sends: 0 };
       }
       const first = all.slice().sort((a, b) => String(a.at || "").localeCompare(String(b.at || "")))[0];
@@ -24497,7 +24644,9 @@ const CareerRouter = (() => {
         }
       }
       if (!pool.length) {
-        const reply = compose({ headline: company ? `Nothing is on your record about ${company} yet.` : "Nothing is on your record yet.", facts: ["The record holds only what you state in chat — a target company, a recruiter contact, an interview day, a preference — and nothing is assumed to fill it."], nextStep: "State the fact in your own words and it is recorded in this turn." });
+        const reply = company
+          ? compose({ headline: `Nothing is on your record about ${company} yet.`, facts: ["I only know what you tell me, and nothing is assumed."], nextStep: `What should I know about your ${company} plans?` })
+          : compose({ headline: "Nothing is on your record so far, because you haven't told me anything about yourself.", facts: ["I only use what you tell me, and nothing is assumed."], nextStep: resumeOnRecord(ctx) ? "What role are you looking for?" : "Want to start with your resume, or the role you're looking for?" });
         return { intent: "conversation_recall", reply, resultStatus: "awaiting_user", sends: 0 };
       }
       const lines = pool.map((f) => `${factLine(f)}.`);
@@ -24639,7 +24788,14 @@ const CareerRouter = (() => {
     if (waQuestion && !eligWord && !namesPosting) {
       const what = /\b(sponsor|sponsorship|visa)\b/.test(t) ? "whether you need visa sponsorship" : "your work authorization";
       if (waRecord.length) {
-        const reply = compose({ headline: "From your record — your words, as stated.", facts: waRecord.slice(0, 2).map((x) => `On record: ${x}.`), nextStep: "Correct it in your own words if it has changed, and the record re-aims." });
+        const need = profile && profile.constraints ? profile.constraints.needsSponsorship : null;
+        const sponsorAsk = /\b(sponsor|sponsorship|visa)\b/.test(t);
+        const NO_NEED = /\b(?:do not|don'?t|does not|doesn'?t|no longer|won'?t|will not|never) (?:need|require)|\bno sponsorship\b|\bcitizen\b|\bgreen card\b|\bpermanent resident\b/i;
+        const agrees = (no) => waRecord.every((x) => !/sponsor|visa|citizen|green card|permanent resident/i.test(x) || NO_NEED.test(x) === no);
+        const headline = sponsorAsk && need === false && agrees(true) ? "No: you told me you don't need visa sponsorship."
+          : sponsorAsk && need === true && agrees(false) ? "Yes: you told me you need visa sponsorship."
+          : "Here is what you told me about your work authorization.";
+        const reply = compose({ headline, facts: waRecord.slice(0, 2).map((x) => `On record: ${x}.`) });
         return { intent: "profile_recall", reply, resultStatus: "completed", sends: 0 };
       }
       const label = what.charAt(0).toUpperCase() + what.slice(1);
@@ -24696,7 +24852,7 @@ const CareerRouter = (() => {
     } else {
       facts.push("It turns on the posting's hard requirements, such as a license, a degree, years of experience or work authorization; none is assumed.");
     }
-    const reply = compose({ headline: "I can't say yet whether you qualify because I haven't read that posting's requirements in this chat.", facts, nextStep: "Send me the posting's link or its text, and I'll check each requirement against what you've confirmed." });
+    const reply = compose({ headline: "No, not confirmed yet: I haven't read that posting's requirements in this chat.", facts, nextStep: "Send me the posting's link or its text, and I'll check each requirement against what you've confirmed." });
     return { intent: "eligibility_check", reply, resultStatus: "awaiting_user", sends: 0 };
   }
   function handleRecordRecall(text, ctx) {

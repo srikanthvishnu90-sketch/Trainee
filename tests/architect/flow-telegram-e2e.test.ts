@@ -27,6 +27,7 @@
 import assertNode from "node:assert/strict";
 import { deflateSync } from "node:zlib";
 import { pgBinDir, startPg } from "../flow/pg.ts";
+import { virtualClock } from "../flow/virtual-clock.ts";
 import { engineRunner, ownQueue, runApproved } from "../../workers/career-browser/approve-first.ts";
 import { prepareAhead, storedProfile, tailoredResume } from "../../workers/career-browser/prepare-ahead.ts";
 import { edgeRenderer, memoryResumeStore, type ResumeStore } from "../../supabase/functions/_shared/career_tailor.ts";
@@ -218,9 +219,10 @@ Deno.test({
       const { createClient } = await import("https://esm.sh/@supabase/supabase-js@2.117.1");
       const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false } });
       // The webhook, composed as supabase/functions/trainee-telegram/index.ts composes it.
+      const pace = virtualClock(); // the send pacing's clock (tests/flow/virtual-clock.ts): Telegram's one-a-second per chat is still computed and waited, on this clock, not the wall
       let update = 900;
       const post = async (body: Record<string, unknown>, id = ++update) => {
-        const deliverNow = deliverer(admin, Deno.env);
+        const deliverNow = deliverer(admin, Deno.env, pace);
         const res = await handleTelegram(new Request(`${SUPABASE_URL}/functions/v1/trainee-telegram`, {
           method: "POST", headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": SECRET }, body: JSON.stringify({ update_id: id, ...body }),
         }), { env: Deno.env, now: Date.now, store: () => supabaseInboundStore(admin), chat: chatThroughAgent(SUPABASE_URL, SERVICE_KEY), admin,
@@ -347,7 +349,9 @@ Deno.test({
         for (const f of prepared.payload.fields.filter((x: any) => typeof x.value === "string" && x.name !== "_systemfield_resume")) {
           assert(r.reply.includes(f.value), `the card shows ${f.label} = ${f.value}: ${r.reply}`);
         }
-        assert(/Resume: .*tailored for this role \([0-9a-f]{12}\)/.test(r.reply), r.reply);
+        // Architect amendment R6 (2026-11-10): the resume in human terms on the card, no hash prefix; the hash is in the stored approval.
+        assert(/Resume: .*tailored for this role/.test(r.reply) && !/\([0-9a-f]{12}\)/.test(r.reply), r.reply);
+        assert(/^[0-9a-f]{64}$/.test(String(prepared.payload.resume_sha256)), "the resume's hash is in the approved payload");
         const last = r.calls.at(-1)!;
         buttons = last.body.reply_markup?.inline_keyboard?.flat() ?? [];
         const d = await cardDigest(card);

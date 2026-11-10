@@ -239,7 +239,8 @@ const RULES: Rule[] = [
   ["unknown", /\b(personal data|your data|data from your application)\b/],
 
   // The application and this employer.
-  ["referral", /\breferr(ed|al|ing)\b/, (q, t) => !/government official|public official|politically exposed|public function|personally know|know (anyone|someone|a current)|acquainted/.test(t)],
+  // "Referrals" is read as "Referral" is (H2H leftovers 2: the plural mapped to no rule).
+  ["referral", /\breferr(ed|als?|ing)\b/, (q, t) => !/government official|public official|politically exposed|public function|personally know|know (anyone|someone|a current)|acquainted/.test(t)],
   ["relative_here", /\b(relatives?|family members?|spouses?|related to|in-laws|anyone you live with)\b/, (q, t) => !/friend|household|supplier|vendor|partner|personal (or social )?relationship|social relationship|\bcontacts?\b|practic|profession|occupation|health ?care|purchase|customer|official/.test(t)],
   ["applied_before", /\b(applied|interviewed) (to|for|at|with)?\b.*\b(before|past|previously|within the past)\b|\bhave you (ever )?(previously )?(applied|interviewed)\b|\bpast or existing job application\b/],
   // WO-052: "Are you currently or have you ever been a One Medical Employee?", "Are you now or have you ever been a Penumbra

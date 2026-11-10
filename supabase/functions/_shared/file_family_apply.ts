@@ -99,12 +99,13 @@ export function pipelineFile(d: Pipeline): FamilyFile {
 export interface MessageReview {
   kind: string; recipient: { initials: string; name: string; basis: string; resolved: boolean; relation?: string | null }; to: string | null; words: string;
   channel: "email" | "copy"; attachments: string | null; followUp: string; approve: Act; acts?: Acts;
+  boundary?: string; // where the message stands, from its own row (S2); absent: "<kind> - not sent"
 }
 export function messageReviewFile(d: MessageReview): FamilyFile {
   const ok = d.recipient.resolved && (d.channel === "copy" || !!d.to);
   const approve = ok ? d.approve : { ...d.approve, off: "The recipient is not resolved, so nothing can be approved yet. No address is guessed." };
   return {
-    family: "F-12", boundary: `${d.kind} - not sent`, hero: null, title: "Message review", // p-74: the recipient card comes first
+    family: "F-12", boundary: d.boundary ?? `${d.kind} - not sent`, hero: null, title: "Message review", // p-74: the recipient card comes first
     blocks: [
       { b: "card", parts: [{ p: "person", initials: d.recipient.initials, name: `${d.recipient.name} - ${d.recipient.resolved ? "recipient verified" : "recipient not resolved"}`, text: d.recipient.basis, chip: d.recipient.resolved ? { label: "Verified", tone: "confirmed" } : { label: "Not resolved", tone: "attention" } }] },
       card(d.channel === "email" ? "Exact words - sent as you, from your account" : "Exact words - you copy and send them", [{ p: "quote", text: `"${d.words}"` },

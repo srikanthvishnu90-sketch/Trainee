@@ -4,7 +4,8 @@
 // Postgres).
 //   resumes   a synthetic person's resume in many shapes: heading spellings ("PROFESSIONAL EXPERIENCE", "Work History",
 //             "Education:", "VOLUNTEER EXPERIENCE", "HONORS & AWARDS"), sections that hold no entries (SUMMARY, OBJECTIVE,
-//             INTERESTS, Relevant Coursework), entry and bullet styles, an optional secret typed into it (an SSN, a
+//             Relevant Coursework), an INTERESTS section (architect amendment D-052: each item an interest draft fact),
+//             entry and bullet styles, an optional secret typed into it (an SSN, a
 //             password, a card number). Each comes with its truth: every entry's kind and first line, the sections not read
 //   replies   what a person answers when shown their entries: plain yeses in many spellings; ambiguous replies that must
 //             confirm nothing (a question, a hedge, a pause, an emoji, a bare "ok", a yes carrying more); noes;
@@ -51,8 +52,11 @@ const SKILLS = ["Python", "SQL", "Excel", "Tableau", "R", "JavaScript", "React",
 const AWARDS = [["Dean's List (TEST) 2024", "Hackathon Winner (TEST) 2025"], ["Merit Scholarship (TEST) 2023", "Case Competition Finalist (TEST) 2025"]];
 const MONTHS = ["Jan", "May", "June", "Aug", "Sept"];
 
-export type Kind = "education" | "experience" | "project" | "leadership" | "award" | "skill";
-export const HEADINGS: Record<Kind | "skip", string[]> = {
+// "other": an interest under an INTERESTS heading (architect amendment D-052, owner ruling PR #742). The product keeps each
+// item as a draft fact { kind: "other", section: "interests", title: <item>, text: "Interest: <item>" } awaiting the
+// person's yes like every other entry; it was held here as an unread section until that ruling.
+export type Kind = "education" | "experience" | "project" | "leadership" | "award" | "skill" | "other";
+export const HEADINGS: Record<Exclude<Kind, "other"> | "skip", string[]> = {
   education: ["EDUCATION", "Education", "Education:", "ACADEMIC BACKGROUND"],
   experience: ["EXPERIENCE", "Experience", "WORK EXPERIENCE", "Professional Experience", "PROFESSIONAL EXPERIENCE", "Work History", "RELEVANT EXPERIENCE", "Internships", "EMPLOYMENT HISTORY", "Experience:"],
   project: ["PROJECTS", "Projects", "Personal Projects", "ACADEMIC PROJECTS", "SELECTED PROJECTS"],
@@ -61,6 +65,9 @@ export const HEADINGS: Record<Kind | "skip", string[]> = {
   skill: ["SKILLS", "Skills", "TECHNICAL SKILLS", "Skills:"],
   skip: ["SUMMARY", "Summary", "OBJECTIVE", "INTERESTS", "Professional Summary", "Relevant Coursework"],
 };
+// Architect amendment D-052: the body under an INTERESTS heading is a list of interests, one entry each. Same length as
+// SKIP_BODY, so every seeded resume draws exactly as before.
+const INTEREST_BODY = ["Chess, trail running, film photography", "Golf; jazz piano", "Rock climbing | baking | chess", "Film photography"];
 const SKIP_BODY = ["Curious analyst who likes clean data and clear writing.", "Seeking a summer 2027 internship in analytics.", "Chess, trail running, film photography.", "Data Structures, Statistics, Econometrics"];
 
 export interface Entry { kind: Kind; title: string; bullets: string[] }
@@ -112,7 +119,7 @@ export function resume(r: R, set: 0 | 1 = 0, o: { secret?: boolean; skipSections
   if (r.next() < 0.4) entries.push({ kind: "award", title: r.pick(AWARDS[set]), bullets: [] });
   const skills = Array.from({ length: r.int(3, 6) }, () => r.pick(SKILLS)).filter((s, k, a) => a.indexOf(s) === k);
   // Sections in a shuffled order (education and experience first most of the time), each under one spelling of its heading.
-  const order: Kind[] = ["education", "experience", "project", "leadership", "award"].filter((k) => entries.some((e) => e.kind === k)) as Kind[];
+  const order = (["education", "experience", "project", "leadership", "award"] as const).filter((k) => entries.some((e) => e.kind === k));
   if (r.next() < 0.3) order.reverse();
   const unread: string[] = [];
   const out: string[] = [name, `${r.pick(["Chicago, IL", "Austin, TX", "Remote"])} | ${name.split(" ")[0].toLowerCase()}@example.test | +1 555-01${r.int(10, 99)} (TEST)`];
@@ -131,7 +138,16 @@ export function resume(r: R, set: 0 | 1 = 0, o: { secret?: boolean; skipSections
     for (const e of entries.filter((x) => x.kind === k)) { out.push(e.title); for (const b of e.bullets) out.push(`${bulletMark(r)}${b}`); }
     out.push("");
   }
-  if (skipSections && r.next() < 0.5) { const h = r.pick(["INTERESTS", "Relevant Coursework"]); unread.push(h); out.push(h, r.pick(SKIP_BODY), ""); }
+  if (skipSections && r.next() < 0.5) {
+    const h = r.pick(["INTERESTS", "Relevant Coursework"]);
+    // Architect amendment D-052 (owner ruling, PR #742): INTERESTS is read, each item an interest entry awaiting the yes,
+    // never unread; Relevant Coursework (like Summary and Objective) stays unread and named.
+    if (h === "INTERESTS") {
+      const body = r.pick(INTEREST_BODY);
+      out.push(h, body, "");
+      for (const name of body.split(/[,;|]/).map((x) => x.trim()).filter(Boolean)) entries.push({ kind: "other", title: name, bullets: [] });
+    } else { unread.push(h); out.push(h, r.pick(SKIP_BODY), ""); }
+  }
   out.push(r.pick(HEADINGS.skill), skills.join(r.pick([", ", ", ", "; ", " | "])));
   for (const s of skills) entries.push({ kind: "skill", title: s, bullets: [] });
   const family = `${set ? "second" : "first"}${skipSections ? "+unread" : ""}${secret ? `+${secret.kind}` : ""}`;
@@ -161,7 +177,11 @@ const UNCLEAR = [
   // a yes carrying more
   "yes but", "yes except the dates", "yeah mostly", "yes, one thing though", "yes, though the dates are off", "yes and no",
 ];
-const NO = ["no", "No.", "nope", "NOPE", "nah", "that's wrong", "not mine", "that's not my resume", "wrong", "incorrect", "not quite", "no, that's wrong", "not right"];
+// ONBOARDING ROUND 4 (2026-11-05): "not mine" and "that's not my resume" left this list. They say the resume is not the
+// person's, and the round-4 fix sets it aside (its drafts removed, no later yes confirms them: scenarios-onboarding-r4.test.ts
+// disown); this model kept them as drafts a later yes confirmed. Two other plain no's take their places (same list length,
+// so every seeded journey is otherwise the same).
+const NO = ["no", "No.", "nope", "NOPE", "nah", "that's wrong", "not correct", "that's not right", "wrong", "incorrect", "not quite", "no, that's wrong", "not right"];
 const OTHER = ["find data analyst jobs in Chicago", "what jobs are open at Northwind?", "how do I prep for a case interview?", "write a cover letter for Contoso Labs",
   "apply to the analyst job at Fabrikam", "tell me about Litware", "what can you do?", "show me remote internships", "remind me tomorrow to follow up", "track my application to Ramp"];
 // Corrections: {to} is what it should say, {from} what it says now.

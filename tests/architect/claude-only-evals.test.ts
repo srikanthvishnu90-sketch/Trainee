@@ -212,9 +212,9 @@ Deno.test("assertRunMayStart: an eval run is refused before it spends when the l
   if (!/^NOT RUN: /.test(msg)) throw new Error("no gate means no run");
 });
 
-Deno.test("CO/gate the workflow: Haiku is the only candidate reply model, a sealed request names its release brain, no Sonnet-if-Haiku-is-poor rule", async () => {
+Deno.test("CO/gate the workflow: no candidate reply model but the committed Sonnet 5.5 (D-046), a sealed request names its release brain, no Sonnet-if-Haiku-is-poor rule", async () => {
   const wf = await Deno.readTextFile(".github/workflows/brain-eval.yml");
-  assert(/const MODELS = \["claude-haiku-5-5"\];/.test(wf), "the model allowlist is Haiku only (Sonnet is Judge A, never a candidate reply model)");
+  assert(/const MODELS = \[\];/.test(wf), "D-046: the allowlist is empty, so the brain is measured only as served (claude-sonnet-5-5)");
   assert(!/below 90|under 90|only if Haiku|if Haiku/i.test(wf), "no Sonnet fallback rule in the workflow");
   assert(/release_brain/.test(wf) && /NOT RUN: a sealed request names its release_brain/.test(wf), "a sealed request must name its release brain");
   assert(/--release-brain \$\{\{ steps\.req\.outputs\.release_brain \}\}/.test(wf), "verdict.ts reads the same release brain");

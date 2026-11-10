@@ -79,7 +79,8 @@ jobs:
     # Runs when the measurement failed too: S3 then says what is missing. A failed preflight still stops it.
     if: ${{ !cancelled() && needs.preflight.result == 'success' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    # 150: S1's 90-minute wait for CI (--wait-checks 90) + S2's 30-minute ledger wait (--wait-ledger 30) + 30 for S1-S4 themselves.
+    timeout-minutes: 150
     outputs:
       deployed_sha: ${{ steps.judge.outputs.deployed_sha }}
     steps:
@@ -99,7 +100,7 @@ jobs:
         id: judge
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: deno run -A scripts/launch/deploy-standard.ts --sha "$GITHUB_SHA" --checks S1,S2,S3,S4 --exclude-run "$GITHUB_RUN_ID" --wait-checks 90
+        run: deno run -A scripts/launch/deploy-standard.ts --sha "$GITHUB_SHA" --checks S1,S2,S3,S4 --exclude-run "$GITHUB_RUN_ID" --wait-checks 90 --wait-ledger 30
   deploy:
     name: deploy (production)
     needs: standard
@@ -193,6 +194,8 @@ jobs:
           mkdir -p "$RUNNER_TEMP/go-live"
           # The script prints each secret as *** and passes every command's output through its own mask; GitHub masks
           # the secrets above in this log as well.
+          # D-041: the one-time --real-submit on ran in run 41906548656 (rows on 2026-11-04 21:29 UTC); a plain go-live now keeps
+          # whatever the rows hold, so an owner's "off" survives every later deploy.
           bash scripts/launch/trainee-go-live.sh --sha "$GITHUB_SHA" --non-interactive --label "$TRAINEE_DEPLOY_LABEL"
       # S6: the live smoke again, on its own, after go-live finished (go-live's step 6 already ran it once): the health of
       # every function, trainee-telegram's webhook, and one synthetic "hi" turn of agent-chat for the test account
@@ -213,9 +216,17 @@ jobs:
           TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
           WHATSAPP_VERIFY_TOKEN: ${{ secrets.WHATSAPP_VERIFY_TOKEN }}
           TRAINEE_GO_LIVE_LOG: ${{ runner.temp }}/go-live/smoke.log
+          # R10 (WO-I, LR-3): the R10 smoke (scripts/launch/r10-live-replay.ts --smoke: the inbound path, the File link signed out
+          # and in, a resume PDF link's bytes, for a synthetic test person; one model turn, its own $1 guard). Part of S6, so its
+          # FAIL rolls back like the smoke's. Runs only when the repository variable R10_DEPLOY_SMOKE is "on": until the R10 fixes
+          # are deployed its PDF check fails on production, and every deploy would roll back.
+          R10_DEPLOY_SMOKE: ${{ vars.R10_DEPLOY_SMOKE }}
         run: |
           set -o pipefail
           bash scripts/launch/trainee-go-live.sh --sha "$GITHUB_SHA" --only-smoke --no-wait --non-interactive --label "github-actions run ${{ github.run_id }} smoke"
+          if [ "${R10_DEPLOY_SMOKE:-}" = on ]; then
+            deno run -A --import-map=tests/flow/supabase-npm.json scripts/launch/r10-live-replay.ts --smoke --sha "$GITHUB_SHA" --out "$RUNNER_TEMP/go-live/r10-smoke" --cleanup-stale
+          else echo "R10 smoke: not run (vars.R10_DEPLOY_SMOKE is not \"on\")"; fi
       # Rollback: go-live started and the commit did not end live and smoked (go-live or the smoke failed, was cancelled or
       # timed out) after the standard passed. The previous successful production deploy's SHA
       # (the standard job read it from this workflow's runs) is deployed again from its own checkout, exactly as

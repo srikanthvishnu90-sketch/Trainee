@@ -83,24 +83,24 @@ Deno.test("freshness: unreadable and future timestamps are not checks; none left
 
 // ================================================================== unknowns are values; verified is labelled, never colour alone
 Deno.test("values: blank is the named unknown, never an empty cell; verified carries the word Verified; stated is plain", () => {
-  for (const b of [null, undefined, "", "   ", "‮"]) eq(valueOf(b as string, { verified: true, missing: UNKNOWN.payNotListed }), unknown(UNKNOWN.payNotListed));
-  eq(valueOf("$90k", { verified: true, missing: "x" }), verified("$90k"));
-  eq(valueOf("$90k", { verified: false, missing: "x" }), stated("$90k"));
-  ok(/class="v v-verified" data-v="verified">\$90k <span class="vtag">Verified<\/span><\/span>/.test(valueHtml(verified("$90k"))));
-  ok(!valueHtml(stated("$90k")).includes("Verified") && !valueHtml(unknown("Closed")).includes("vtag"));
+  for (const b of [null, undefined, "", "   ", "‮"]) eq(valueOf(b as string, { verified: true, missing: UNKNOWN.payNotListed, source: "From the posting" }), unknown(UNKNOWN.payNotListed));
+  eq(valueOf("$90k", { verified: true, missing: "x", source: "From the posting" }), verified("$90k", "From the posting"));
+  eq(valueOf("$90k", { verified: false, missing: "x", source: "From the posting" }), stated("$90k", "From the posting"));
+  ok(/class="v v-verified" data-v="verified">\$90k <span class="vtag">Verified<\/span><span class="fsrc">From the posting<\/span><\/span>/.test(valueHtml(verified("$90k", "From the posting"))));
+  ok(!valueHtml(stated("$90k", "From the posting")).includes("Verified") && !valueHtml(unknown("Closed")).includes("vtag"));
   eq(valueHtml(unknown("")), `<span class="v v-unknown" data-v="unknown">Unverified</span>`, "an unknown with no words still says Unverified");
-  ok(valueHtml(stated("<b>")).includes("&lt;b&gt;"));
+  ok(valueHtml(stated("<b>", "From the posting")).includes("&lt;b&gt;"));
   for (const s of ["a‮b<x>'\"&", "\uD800z", "plain"]) eq(escDesign(s), escPage(s), "the design module escapes exactly as file_page.ts");
 });
 
 Deno.test("rows: numbered, bold name, gray detail, the value at the right; unknowns sit in the value slot", () => {
-  const h = rowsHtml([{ name: "Acme", detail: "Data Analyst", value: verified("$95k") }, { name: "Globex", detail: null, value: unknown(UNKNOWN.payNotListed) }, { name: "Initech", value: unknown(UNKNOWN.closed) }]);
+  const h = rowsHtml([{ name: "Acme", detail: "Data Analyst", value: verified("$95k", "From the posting") }, { name: "Globex", detail: null, value: unknown(UNKNOWN.payNotListed) }, { name: "Initech", value: unknown(UNKNOWN.closed) }]);
   eq((h.match(/<li class="nrow">/g) ?? []).length, 3);
   ok(/<span class="nnum" aria-hidden="true">1<\/span>.*<span class="nname">Acme<\/span><span class="ndetail">Data Analyst<\/span>.*data-v="verified">\$95k/.test(h));
   ok(/nname">Globex<\/span><\/span><span class="v v-unknown" data-v="unknown">Pay not listed<\/span>/.test(h), "no empty detail, the unknown is the value");
   ok(h.includes(">Closed</span>"));
   ok(!/<span class="v[^"]*"[^>]*><\/span>/.test(h), "no empty value cell");
-  ok(!rowsHtml([{ name: "x", value: stated("y"), href: "javascript:alert(1)" }]).includes("javascript:"), "a row link is https only");
+  ok(!rowsHtml([{ name: "x", value: stated("y", "From the posting"), href: "javascript:alert(1)" }]).includes("javascript:"), "a row link is https only");
 });
 
 Deno.test("caveat: inside the section it qualifies, directly above the rows, never a footer", () => {
@@ -122,7 +122,7 @@ Deno.test("evidence: the snippet, its source and its time in the person's zone, 
 });
 
 Deno.test("job card: logo or lettermark, role, company, the three deciding facts as values, one fit line, ONE action at the bottom", () => {
-  const c = jobCardHtml({ company: "Acme Analytics", title: "Data Analyst Intern", logo: null, pay: unknown(UNKNOWN.payNotListed), location: stated("Chicago, IL"), posted: verified("Oct 30"),
+  const c = jobCardHtml({ company: "Acme Analytics", title: "Data Analyst Intern", logo: null, pay: unknown(UNKNOWN.payNotListed), location: stated("Chicago, IL", "From the posting"), posted: verified("Oct 30", "From the posting"),
     fit: "You asked for SQL-heavy roles in Chicago.", action: { href: "https://boards.greenhouse.io/acme/jobs/1", label: "Apply" } });
   ok(c.includes(`<span class="lettermark" aria-hidden="true">A</span>`) && !c.includes("<img"), "no logo source: the lettermark, no hotlink");
   const order = ["jlogo", "jrole\">Data Analyst Intern", "jco\">Acme Analytics", ">Pay</dt>", ">Location</dt>", ">Posted</dt>", "jfit", "jact"].map((k) => c.indexOf(k));

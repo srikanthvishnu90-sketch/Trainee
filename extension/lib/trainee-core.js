@@ -1396,7 +1396,7 @@
     ],
     [
       "eeo",
-      /\btransitioning service member\b|\bveteran\b|\bdisability\b|\bgender\b|\bethnicity\b|\brace\b|\bhispanic\b|\blatin[oax]\b|\bsexual orientation\b|\bgender identity\b|\btransgender\b|^tu es\b/
+      /\btransitioning service member\b|\bveteran\b|\bdisability\b|\bgender\b|\bethnicity\b|\brace\b|\bhispanic\b|\blatin[oax]\b|\bsexual orientation\b|\bgender identity\b|\btransgender\b|^tu es\b|\blgbtq|\blgbt\b|\bheterosexual\b|\bbisexual\b|\bqueer\b/
     ],
     // Legal attestations.
     // WO-052: the person's "no" to criminal history is about convictions. Drug use, a court order, a commitment, a
@@ -1430,9 +1430,10 @@
       "unknown",
       /\b(consent|agree|authori[sz]e|permit|allow)\b.{0,40}\bshar(e|ing)\b.{0,80}\b(with|to)\b/
     ],
+    // R9 (scorecard, MedeliteLLC): "receive updates from a recruiter ... via SMS" names the channel after the updates.
     [
       "sms_opt_in",
-      /\b(text|sms|whatsapp)\b.*\b(message|communication|update|opt|consent|contact)|\bopt[- ]in to (text|receive text)|\bsms consent\b|\bcontact you by text\b/
+      /\b(text|sms|whatsapp)\b.*\b(message|communication|update|opt|consent|contact)|\b(updates?|messages?|notifications?|communications?|alerts?)\b.{0,80}\b(via|by|through|over) (text|sms|whatsapp)\b|\bopt[- ]in to (text|receive text)|\bsms consent\b|\bcontact you by text\b/
     ],
     [
       "marketing_opt_in",
@@ -1461,9 +1462,10 @@
       /\b(personal data|your data|data from your application)\b/
     ],
     // The application and this employer.
+    // "Referrals" is read as "Referral" is (H2H leftovers 2: the plural mapped to no rule).
     [
       "referral",
-      /\breferr(ed|al|ing)\b/,
+      /\breferr(ed|als?|ing)\b/,
       (q, t) => !/government official|public official|politically exposed|public function|personally know|know (anyone|someone|a current)|acquainted/.test(t)
     ],
     [
@@ -1662,12 +1664,23 @@
     "us_person"
   ]);
   var RELATIVE_PLACE = /\b(country|location)\b.{0,60}\b(this|the) (job|role|position|opportunity|vacancy)\b|\b(country|location)\b.{0,40}\b(you are|you're|you have been|you've been|are you) apply|\b(country|location) (in which|to which|for which|where) you (are )?apply|\bstated location of this role\b|\bin this country\b/i;
+  var BIRTH_DATE = /\b(?:date of birth|birth ?date|day of birth|dob|d\.o\.b\.?|date de naissance|fecha de nacimiento|geburtsdatum)\b/i;
+  var DECLINE_ANSWER = /^\s*(i\s*)?(would\s+|'d\s+)?(prefer not to (say|answer|disclose|specify|identify|self[- ]identify)|rather not (say|answer)|decline( to (answer|state|disclose|specify|self[- ]identify))?|do not wish to (answer|disclose|self[- ]identify)|don'?t wish to (answer|disclose)|choose not to (answer|disclose|identify|self[- ]identify)|do not want to answer|don'?t want to answer)\s*[.!]?\s*$/i;
+  var DECLINE_OPTION = /\bdecline\b|\bprefer not\b|\bdo(?: not|n'?t) wish\b|\bchoose not\b|\bnot to (?:answer|disclose|say|identify|specify|self[- ]identify)\b|\bi do(?: not|n'?t) want to (?:answer|disclose|identify|self)/i;
+  function declineOption(answer, options) {
+    if (!DECLINE_ANSWER.test(String(answer ?? ""))) return null;
+    const d = options.filter((o) => DECLINE_OPTION.test(String(o.label)));
+    return d.length === 1 ? d[0] : null;
+  }
+  var PAY_HISTORY_ASKED = /\b(salary|pay|compensation|wage)s? histor|\b(previous|prior|past|last|former|most recent)\b[^?.]{0,30}\b(salary|pay|compensation|wage|earnings)\b|\b(salary|pay|compensation|wage)\b[^?.]{0,40}\b(previous|prior|past|last|former) (job|position|role|employer)/i;
   function answerKey(q, jobId, o = {}) {
     const m = mapQuestion(q);
     const words = norm(q.label);
     const job = `job:${h16(`${jobId}
 ${words}`)}`, wording = `label:${h16(words)}`;
+    if (BIRTH_DATE.test(String(q.label ?? "")) || PAY_HISTORY_ASKED.test(String(q.label ?? ""))) return job;
     if (m.kind === "fact") {
+      if (m.fact === "eeo") return job;
       if (o.here) return job;
       if (AUTH_FACTS.has(m.fact) && RELATIVE_PLACE.test(q.label)) return job;
       if (AUTH_FACTS.has(m.fact) && FOREIGN.test(q.label) && (m.fact === "sponsorship" || !NAMES_US.test(q.label))) return wording;
@@ -2530,6 +2543,14 @@ ${words}`)}`, wording = `label:${h16(words)}`;
   var COUNTRY_ONLY = /^(afghanistan|albania|algeria|andorra|angola|armenia|azerbaijan|bahrain|bangladesh|belarus|bolivia|bosnia|botswana|bulgaria|cambodia|cameroon|costa rica|croatia|cyprus|dominican republic|ecuador|el salvador|estonia|ethiopia|ghana|guatemala|honduras|iceland|iran|iraq|jamaica|kazakhstan|kosovo|kuwait|latvia|lithuania|luxembourg|malta|mauritius|moldova|mongolia|montenegro|morocco|mozambique|myanmar|namibia|nepal|nicaragua|north macedonia|oman|pakistan|paraguay|rwanda|senegal|serbia|slovakia|slovenia|sri lanka|tanzania|tunisia|uganda|ukraine|uruguay|uzbekistan|venezuela|zambia|zimbabwe|bahamas|barbados|bermuda|cayman islands|trinidad and tobago|canada|united kingdom|uk|great britain|england|scotland|wales|ireland|germany|deutschland|france|spain|españa|portugal|italy|netherlands|belgium|switzerland|austria|sweden|norway|denmark|finland|poland|czechia|czech republic|hungary|romania|greece|israel|india|china|taiwan|japan|south korea|korea|australia|new zealand|mexico|méxico|brazil|brasil|argentina|colombia|chile|peru|philippines|indonesia|malaysia|vietnam|thailand|uae|united arab emirates|saudi arabia|ksa|qatar|south africa|nigeria|kenya|egypt|turkey|türkiye|emea|apac|latam|europe|asia|africa)$/i;
   var NAMES_US2 = /^(us|u\.s\.?|usa|u\.s\.a\.?|united states( of america)?|america)$/i;
   var WAY_OF_WORK = /^(remote|hybrid|on[- ]?site|in[- ]?office|office|anywhere|flexible|distributed|virtual|wfh|work from home|field|travel|multiple locations|various( locations)?|world ?wide|global|home based)$/i;
+  var TIME_ZONE = /^(?:(?:[PMCEA][SD]?T|HST|AKST|AKDT|GMT|UTC|CET|CEST|EET|EEST|WET|WEST|BST|IST|SGT|JST|KST|AEST|AEDT|NZST|BRT|ART)(?:\s*(?:[+-−]|\+\/-)\s*\d{1,2}(?::?\d{2})?)?(?:\s+(?:time(?:\s*zones?)?|hours|overlap|preferred))?|(?:pacific|eastern|central|mountain|atlantic|alaska|hawaii)(?:\s+(?:standard|daylight))?(?:\s+time)?(?:\s*zones?)?(?:\s+hours)?|(?:us|north american?|european|americas?)\s+time\s*zones?|time\s*zones?.*|[+-]\s*\d{1,2}\s*(?:hours?|h)?)$/i;
+  var ZONE_OR_PLACE = /* @__PURE__ */ new Set([
+    "pt",
+    "et",
+    "ct",
+    "mt"
+  ]);
+  var CONTINENT = /^(?:the\s+)?(?:north\s+|south\s+|latin\s+|central\s+)?americas?$/i;
   var AMBIGUOUS_CODE = /* @__PURE__ */ new Set([
     "al",
     "ar",
@@ -2566,9 +2587,14 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     for (const chunk of String(text ?? "").split(/\s*(?:;|\||•|·|\n)\s*/)) {
       const head = chunk.replace(/:.*$/, "");
       for (const seg of head.split(/\s+\/\s*|\s*\/\s+|(?<=[a-z])\/(?=[A-Z])|\s+or\s+|\s+&\s+/i)) {
-        let tokens = seg.split(/\s*(?:,|\(|\)|\s-\s|^([A-Z]{2})-|-(?=[A-Z][a-z]))\s*/).filter((t) => t && t.trim()).map((t) => t.replace(/\s+/g, " ").trim());
+        let tokens = seg.split(/\s*(?:,|\(|\)|\s[-–—]\s|^([A-Z]{2})-|-(?=[A-Z][a-z]))\s*/).filter((t) => t && t.trim()).map((t) => t.replace(/\s+/g, " ").trim());
         tokens = tokens.flatMap((t) => {
           const x = t.replace(/\s+\d{5}(-\d{4})?$/, "");
+          const r = /^(.*?\S)[\s-]+(remote|anywhere)$/i.exec(x);
+          if (r && !/^(fully|full|100%|partially|partly|hybrid|or|not|non|no|never|semi|mostly|largely|mainly|primarily|rarely|occasionally|limited|onsite|on-site|in-office|office)$/i.test(r[1])) return [
+            r[1],
+            r[2]
+          ];
           const m = /^(.*?\S)\s+([A-Z]{2}|USA|US)$/.exec(x);
           return m && (STATE_NAMES[m[2].toLowerCase()] || NAMES_US2.test(m[2])) && !/^(remote|anywhere)$/i.test(m[1]) ? [
             m[1],
@@ -2577,6 +2603,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
             x
           ];
         });
+        tokens = tokens.filter((t) => !TIME_ZONE.test(t) && !CONTINENT.test(t));
         const places = tokens.filter((t) => !WAY_OF_WORK.test(t) && !/^(remote|anywhere)$/i.test(t));
         if (places.length >= 2 && places.every(knownCity)) {
           for (const t of places) {
@@ -2598,14 +2625,19 @@ ${words}`)}`, wording = `label:${h16(words)}`;
           remote: false
         };
         let abroadCity = false, ambiguousState = "";
+        const remoteOnly = tokens.some((t) => /^(remote|anywhere)\b/i.test(t)) && !tokens.some((t) => !/^(remote|anywhere)\b/i.test(t) && !/^[A-Z]{2}$/.test(t) && !NAMES_US2.test(t) && !WAY_OF_WORK.test(t));
+        let unsettled = false;
         const isState = (t) => /^[A-Z]{2}$/.test(t) && !!STATE_NAMES[t.toLowerCase()] || !!STATE_BY_NAME[t.toLowerCase()];
         tokens.forEach((t, i) => {
           const low2 = t.toLowerCase();
           if (/^(remote|anywhere)\b/i.test(t)) {
             p.remote = true;
-            const rest = t.replace(/^(remote|anywhere)\b[\s:-]*(in\s+(the\s+)?)?/i, "");
+            const rest = t.replace(/^(remote|anywhere)\b[\s:–—-]*(in\s+(the\s+)?)?/i, "");
             if (rest && NAMES_US2.test(rest)) p.country ||= "us";
-            else if (rest && (ABROAD.test(rest) || ABROAD_CODE.test(rest))) p.country = "abroad";
+            else if (rest && STATE_BY_NAME[rest.toLowerCase()]) {
+              p.state ||= STATE_BY_NAME[rest.toLowerCase()];
+              p.country ||= "us";
+            } else if (rest && (ABROAD.test(rest) || ABROAD_CODE.test(rest))) p.country = "abroad";
             return;
           }
           if (WAY_OF_WORK.test(t)) return;
@@ -2619,6 +2651,10 @@ ${words}`)}`, wording = `label:${h16(words)}`;
             return;
           }
           if (/^[A-Z]{2}$/.test(t)) {
+            if (remoteOnly && (ZONE_OR_PLACE.has(low2) || AMBIGUOUS_CODE.has(low2) && !tokens.some((x) => NAMES_US2.test(x)))) {
+              unsettled = true;
+              return;
+            }
             if (STATE_NAMES[low2]) {
               p.state ||= low2;
               if (AMBIGUOUS_CODE.has(low2)) ambiguousState = low2;
@@ -2659,6 +2695,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         if (abroadCity && p.country !== "us") p.country = "abroad";
         if (ambiguousState && p.country !== "abroad") p.country = abroadCity ? "abroad" : "us";
         if (p.city && !p.country && US_CITIES.has(p.city)) p.country = "us";
+        if (unsettled && !p.city && !p.state) p.country = "";
         if (p.city === "nyc") p.city = "new york";
         if (p.city === "sf") p.city = "san francisco";
         if (p.city || p.state || p.country || p.remote) out.push(p);
@@ -2777,8 +2814,10 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     const h = m[1].replace(/^www\./, "").replace(/:(80|443)$/, "");
     let p = (m[2] ?? "").replace(/\/+$/, "");
     if (/^\/[^/]+\/.+\/(apply|application)$/.test(p)) p = p.replace(/\/(apply|application)$/, "").replace(/\/+$/, "");
+    const ghJid = /[?&]gh_jid=([0-9]+)/.exec(m[3] ?? "")?.[1];
+    if (ghJid) return "greenhouse.io/jobs/" + ghJid;
     if (/(^|\.)greenhouse\.io$/.test(h)) {
-      const jid = /[?&]gh_jid=([0-9]+)/.exec(m[3] ?? "")?.[1] ?? /\/jobs\/([0-9]+)$/.exec(p)?.[1];
+      const jid = /\/jobs\/([0-9]+)$/.exec(p)?.[1];
       if (jid) return "greenhouse.io/jobs/" + jid;
     }
     const q = (m[3] ?? "").slice(1).split("&").filter((x) => x !== "" && !/^(utm_[a-z_]*|gh_src|src|source|ref|referrer|lever-[a-z-]*)(=|$)/.test(x)).sort((a, b) => a < b ? -1 : a > b ? 1 : 0).join("&");
@@ -2892,11 +2931,11 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       "salary_expectation"
     ],
     [
-      /gender|race|ethnicity|veteran|disability|hispanic|latino/i,
+      /gender|race|ethnicity|veteran|disability|hispanic|latino|lgbt|sexual orientation|heterosexual|bisexual|queer/i,
       "eeo"
     ]
   ];
-  var PAY_HISTORY = /\b(salary|pay|compensation|wage)s? histor|\b(previous|prior|past|last|former|most recent)\b[^?.]{0,30}\b(salary|pay|compensation|wage|earnings)\b|\b(salary|pay|compensation|wage)\b[^?.]{0,40}\b(previous|prior|past|last|former) (job|position|role|employer)/i;
+  var PAY_HISTORY = PAY_HISTORY_ASKED;
   var CONTACT = /* @__PURE__ */ new Set([
     "first_name",
     "last_name",
@@ -2942,12 +2981,14 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     const base = /^(.+)_text$/.exec(String(f.name || ""))?.[1];
     return !!base && !/file/.test(f.type) && fields.some((x) => x.name === base && /file/.test(x.type));
   }
-  var normLabel = (l) => String(l || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+  var normLabel = (l) => String(l || "").toLowerCase().replace(/\+\+/g, " plusplus ").replace(/\+/g, " plus ").replace(/#/g, " sharp ").replace(/\$/g, " usd ").replace(/€/g, " eur ").replace(/£/g, " gbp ").replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
   var yesNo = (v) => /^(y|yes|true)$/i.test(v.trim()) ? "yes" : /^(n|no|false)$/i.test(v.trim()) ? "no" : null;
   function matchOption(value, options) {
     const v = value.trim().toLowerCase();
     const exact = options.find((o) => o.label.trim().toLowerCase() === v || o.value.trim().toLowerCase() === v);
     if (exact) return exact.value;
+    const decline = declineOption(value, options);
+    if (decline) return decline.value;
     const yn = yesNo(value);
     if (yn) {
       const o = options.find((x) => yesNo(x.label) === yn);
@@ -3012,6 +3053,14 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     return fact === "sponsorship" || !NAMES_US.test(label);
   }
   var BEYOND_FACT = [
+    // R9 (scorecard, Saronic): "no government employment" says nothing about service in the military, which the same
+    // question may also ask ("... a USG official, employee, or member of the U.S. military?").
+    [
+      [
+        "government_employment"
+      ],
+      /\bmember of the (u\.?s\.? )?(military|armed forces)\b|\bmilitary service\b|\bserved in the (u\.?s\.? )?(military|armed forces)\b/i
+    ],
     // the person's visa type; a sponsorship question that lists OPT among its examples is still the sponsorship question
     [
       [
@@ -3070,6 +3119,21 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         "government_employment"
       ],
       /\brepresentative of\b|\bpolitical party\b/i
+    ],
+    // ROUND 4 (2026-11-05): a yes to one thing is no yes to two. "Do you have a valid driver's license and reliable
+    // transportation?", "... with a clean driving record?", "Are you at least 18 and able to lift 50 pounds?" ask more than the
+    // fact says; a commercial licence (CDL, Class A/B/C) or a motorcycle endorsement is another licence.
+    [
+      [
+        "drivers_license"
+      ],
+      /\bcommercial\b|\bcdl\b|\bclass [abcm]\b|\bchauffeur|\bmotorcycle\b|\bendorsement|\b(?:and|with|plus|as well as|along with)\b[^?]{0,60}\b(?:transportation|vehicle|car|insurance|record|history|points|violations?|accidents?|own)\b/i
+    ],
+    [
+      [
+        "over_18"
+      ],
+      /\b(?:and|as well as|plus|along with)\b(?!\s+(?:older|over|above|up)\b)\s+\S/i
     ],
     [
       [
@@ -3157,6 +3221,35 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     const parts = kept.split(/(?<=[.?!])\s+/).filter((x) => x.trim()).map((x) => x.replace(/\u2024/g, "."));
     return parts.filter((x) => /\?/.test(x)).pop() ?? parts.pop() ?? label;
   };
+  var NOW_ONLY = /\bnow\b/i;
+  var NOT_ONLY_NOW = /\bfuture\b|\bever\b|\bat any (point|time)\b|\blater\b|\beventually\b/i;
+  var UNRESTRICTED = /\bunrestricted\b|\bwithout (any )?restrictions?\b|\bno restrictions?\b|\bfor any employer\b/i;
+  var NO_SPONSOR_OPTION = /\bno restrictions?\b|\bunrestricted\b|\bwithout (the need for |requiring |needing )?(a |any )?(visa |employer |immigration )?sponsor|\b(do not|don'?t|will not|won'?t|never) (need|require) (a |any )?(visa |employer |immigration )?sponsor/i;
+  var NEEDS_SPONSOR_OPTION = /\b(need|needs|require|requires|requiring|needing)( a| any)?( visa| employer| immigration)? sponsorship\b/i;
+  function factFallsShort(facts, f, value, answers) {
+    const auth = facts.some((x) => x === "sponsorship" || x === "work_authorization");
+    if (!auth) return false;
+    const asked = askedPart(f.label);
+    const shown2 = f.options.find((o) => o.value === value)?.label ?? value;
+    const yn = yesNoOf(shown2);
+    const sponsor = yesNoOf(String(answers.sponsorship?.value ?? ""));
+    if (facts.includes("sponsorship") && /\bsponsor/i.test(asked) && yn === "yes" && NOW_ONLY.test(asked) && !NOT_ONLY_NOW.test(asked)) return true;
+    if (UNRESTRICTED.test(asked) && yn === "yes" && sponsor !== "no") return true;
+    if (f.options.length && NO_SPONSOR_OPTION.test(shown2) && sponsor !== "no") return true;
+    if (f.options.length && !NO_SPONSOR_OPTION.test(shown2) && NEEDS_SPONSOR_OPTION.test(shown2) && sponsor === "no") return true;
+    return false;
+  }
+  function distinctOptions(f) {
+    const values = f.options.map((o) => o.value);
+    if (new Set(values).size === values.length) return f;
+    return {
+      ...f,
+      options: f.options.map((o) => values.filter((v) => v === o.value).length > 1 ? {
+        ...o,
+        value: o.label
+      } : o)
+    };
+  }
   function authorizedWithoutSponsorship(answers) {
     const w = answers.work_authorization, sp = answers.sponsorship;
     if (!w || !sp) return null;
@@ -3289,6 +3382,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       };
     }
     if (!a) return null;
+    if (m.fact === "eeo" && yesNoOf(a.value)) return null;
     const choice = f.options.length ? chooseOption(...placeFact(m.fact, String(a.value), answers), f.options, f.label) : null;
     if (f.options.length) return choice === null ? null : {
       value: choice,
@@ -3302,6 +3396,13 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       } : null;
     }
     if (TEXT_FACTS.has(m.fact) && !FREE_TEXT.test(f.type)) return null;
+    if (m.fact === "citizenship" && ASKED_YES_NO.test(norm(askedPart(f.label))) && !yesNoOf(a.value)) {
+      const usOnly = /\b(u\.?s\.?a?|united states|american) citizen\b/i.test(f.label) && !/\b(dual|other|another|second|also|any)\b/i.test(f.label);
+      return usOnly && NAMES_US.test(String(a.value)) ? {
+        value: "Yes",
+        factId: a.factId
+      } : null;
+    }
     return {
       value: String(a.value),
       factId: a.factId
@@ -3736,7 +3837,8 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         })), o.answers, p.fields));
       }
       const places = formPlaces(p.fields, p.company), where = postingPlaces(p.location ?? "");
-      for (const f of p.fields) {
+      for (const f0 of p.fields) {
+        const f = distinctOptions(f0);
         if (fileAlternative(f, p.fields)) continue;
         if (f.personal) continue;
         if (f.section || rowPartName(f)) {
@@ -3772,18 +3874,19 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         const key = keyed === "full_name" && /^\s*name\s*[*:]?\s*$/i.test(f.label) && p.fields.some((x) => x !== f && classifyField(x.label, x.type) === "last_name") ? "first_name" : keyed;
         const followUp = FOLLOW_UP.test(f.label);
         const here = factStaysHere(f, p.location, o.answers);
+        const legacy = BIRTH_DATE.test(f.label) || key === "eeo" || mapQuestion(f).fact === "eeo" ? void 0 : o.saved[normLabel(f.label)];
         const own = o.saved[answerKey(f, p.job_id, {
           haveFact: true,
           here
         })] ?? o.saved[answerKey(f, p.job_id, {
           here
-        })] ?? o.saved[normLabel(f.label)];
+        })] ?? legacy;
         const direct = o.saved[answerKey(f, p.job_id, {
           haveFact: true,
           here
         })] ?? o.saved[answerKey(f, p.job_id, {
           here
-        })] ?? (key !== "unknown" && key !== "eeo" && !followUp && !otherCountry(key, placeText(f), p.location, homeInUs(o.answers)) && !beyondFact(key, f) ? o.answers[key] : void 0) ?? o.saved[normLabel(f.label)];
+        })] ?? (key !== "unknown" && key !== "eeo" && !followUp && !otherCountry(key, placeText(f), p.location, homeInUs(o.answers)) && !beyondFact(key, f) ? o.answers[key] : void 0) ?? legacy;
         let a = direct;
         let value = a ? String(a.value) : null;
         if (value !== null && f.options.length) value = matchOption(value, f.options) ?? (key !== "unknown" && direct === o.answers[key] ? chooseOption(...placeFact(key, value, o.answers), f.options, f.label) : null);
@@ -3807,6 +3910,16 @@ ${words}`)}`, wording = `label:${h16(words)}`;
           const code = /\(\s*\+\s*(\d{1,4})\s*\)/.exec(shown2)?.[1];
           const phone = String(o.answers.phone?.value ?? "").trim();
           if (!code || !phone.startsWith("+") || !phone.replace(/\D/g, "").startsWith(code)) value = null;
+        }
+        if (value !== null && a !== own && factFallsShort([
+          key,
+          mapQuestion(f).fact
+        ], f, value, o.answers)) {
+          value = null;
+          if (own) {
+            a = own;
+            value = f.options.length ? matchOption(String(own.value), f.options) : f.type === "checkbox" ? yesNo(String(own.value)) : String(own.value);
+          }
         }
         if (value !== null && a !== own && !f.options.length) value = payShape(f, value, key !== "unknown" ? key : mapQuestion(f).fact, o.answers);
         const shaped = value !== null && value !== "" && fitsField(f, value, a === own) ? canonicalTypedValue(f, value) : null;
@@ -3985,14 +4098,14 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     };
     const aiPolicy = aiPolicyStatements(Array.isArray(result?.ai_policy) ? result.ai_policy : []).join("\n").slice(0, 1200);
     for (const q of Array.isArray(result?.questions) ? result.questions : []) {
-      const label = String(q?.label ?? "").replace(/\s+/g, " ").trim().slice(0, 600);
-      if (!label || NEVER_BY_TEXT.test(label)) continue;
+      const full = String(q?.label ?? "").replace(/\s+/g, " ").trim(), label = full.slice(0, 600);
+      if (!label || NEVER_BY_TEXT.test(full)) continue;
       const options = (Array.isArray(q.options) ? q.options : []).map((x) => String(x).slice(0, 300)).slice(0, 60);
       const rawType = String(q.type || "input_text"), row = decodeRowQuestionType(rawType);
       if (rawType.startsWith("row:") && !row) continue;
       const type = rawType.slice(0, 40);
       const shape = {
-        label,
+        label: full,
         type,
         options: options.map((l) => ({
           label: l
@@ -4198,6 +4311,47 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     workdaySubmitLine: () => workdaySubmitLine
   });
 
+  // supabase/functions/_shared/career_prepared_card.ts
+  var SENSITIVE = /* @__PURE__ */ new Set([
+    "work_authorization",
+    "sponsorship",
+    "us_person",
+    "citizenship",
+    "gpa",
+    "graduation_date"
+  ]);
+  var UTC_ALIAS = /^(etc\/)?(utc|uct|gmt|zulu|universal|greenwich)([+-]?0)?$/i;
+  function personTz(tz) {
+    if (typeof tz !== "string" || !/^[A-Za-z_]+(\/[A-Za-z_+-]+){0,2}$/.test(tz) || tz.length > 64 || UTC_ALIAS.test(tz)) return null;
+    try {
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: tz
+      });
+      return tz;
+    } catch {
+      return null;
+    }
+  }
+  function reusedSourceSuffix(field, _postingJobId, tz) {
+    if (!SENSITIVE.has(mapQuestion({
+      label: String(field?.label ?? "")
+    }).fact)) return "";
+    const id = String(field?.factId ?? ""), src = field?.source && typeof field.source === "object" ? field.source : {};
+    if (!id || /^(approved-local-resume|essay-draft):/.test(id) || String(src.key ?? "").startsWith("job:")) return "";
+    if (id.startsWith("text-answer:")) {
+      if (src.for_posting !== false) return "";
+      const zone = personTz(tz), at = typeof src.at === "string" ? Date.parse(src.at) : NaN;
+      if (zone && Number.isFinite(at)) {
+        return ` (from your answer on ${new Intl.DateTimeFormat("en-US", {
+          timeZone: zone,
+          month: "short",
+          day: "numeric"
+        }).format(new Date(at))})`;
+      }
+    }
+    return " (from your confirmed facts)";
+  }
+
   // supabase/functions/_shared/fact_quarantine.ts
   function quarantinedFact(value) {
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -4367,6 +4521,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
   var GREENHOUSE = /^(job-boards|boards)(\.eu)?\.greenhouse\.io$/;
   var LEVER = /^jobs(\.eu)?\.lever\.co$/;
   var ASHBY = /^jobs\.ashbyhq\.com$/;
+  var SMARTRECRUITERS = /^jobs\.smartrecruiters\.com$/;
   var WORKDAY = /(^|\.)(myworkdayjobs\.com|myworkdaysite\.com|myworkday\.com)$/;
   function detectPortal(href) {
     let u;
@@ -4389,6 +4544,10 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       family: "ashby",
       embedded: false
     };
+    if (SMARTRECRUITERS.test(h)) return {
+      family: "smartrecruiters",
+      embedded: false
+    };
     if (WORKDAY.test(h)) return {
       family: "workday",
       embedded: false
@@ -4405,6 +4564,10 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     }
     if (p.family === "lever" || p.family === "ashby") {
       return seg[0] && seg[1] && /^[0-9a-f-]{8,}$/i.test(seg[1]) ? `${p.family}:${seg[0]}:${seg[1].toLowerCase()}` : null;
+    }
+    if (p.family === "smartrecruiters") {
+      const id = seg[1]?.match(/^\d+/)?.[0];
+      return seg[0] && id ? `smartrecruiters:${seg[0]}:${id}` : null;
     }
     const at = seg.findIndex((s) => /^apply$/i.test(s));
     const last = at > 0 ? seg[at - 1] : seg.filter((s) => !/^(apply|applyManually|autofillWithResume)$/i.test(s)).at(-1);
@@ -4612,6 +4775,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
   var AGREEMENT = /^\s*(i|we)\s+(hereby\s+)?(understand|acknowledge|agree|confirm|certify|consent|accept|attest|authori[sz]e|have read|declare)\b/i;
   var staysWithPosting = (row) => {
     if (row.kind === "consent" || row.kind === "attestation" || AGREEMENT.test(row.label)) return true;
+    if (BIRTH_DATE.test(row.label)) return true;
     const m = mapQuestion({
       label: row.label,
       type: row.type,
@@ -4889,9 +5053,13 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     for (const f of o.payload.fields) {
       const ids = draftFactIds(f.factId);
       const from = f.source === "trainee" ? o.before?.includes(f.name) ? " (your answer, answered before the session)" : "" : f.source === "you" ? " (typed by you)" : f.source === "fixed" ? " (set by the employer's page, read-only)" : f.source === "drafted" ? ` (drafted by Trainee from your confirmed facts${ids.length ? ` ${ids.join(", ")}` : ""}; put on the form by you)` : " (set by the page)";
+      const reused = f.source === "trainee" ? reusedSourceSuffix({
+        label: f.label,
+        factId: f.factId
+      }, o.payload.job_id) : "";
       lines.push(`${MARK[mapQuestion({
         label: f.label
-      }).kind] ?? ""}${shortLabel(f.label)}: ${f.value}${from}`);
+      }).kind] ?? ""}${shortLabel(f.label)}: ${f.value}${reused}${from}`);
     }
     lines.push(`Resume: ${o.payload.resume_name ?? "none attached"}`);
     const covers = (o.coverFiles ?? []).filter((c) => !c.attached && !c.pasted);
@@ -5229,7 +5397,13 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         factId: `text-answer:${r.id}`,
         event: `text-answer:${r.id}`,
         provenance: `owner answered this question (text-answer:${r.id})`,
-        authorizes: t === "saved"
+        authorizes: t === "saved",
+        ...typeof r.at === "string" && Number.isFinite(Date.parse(r.at)) ? {
+          at: r.at
+        } : {},
+        ...Array.isArray(r.job_ids) ? {
+          job_ids: r.job_ids.map(String).slice(0, 200)
+        } : {}
       };
       const prior = kept.get(t + "\n" + key);
       if (!prior) kept.set(t + "\n" + key, tf);

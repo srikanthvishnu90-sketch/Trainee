@@ -501,6 +501,8 @@ export const CODE_OWNED_INTENTS: ReadonlySet<string> = new Set([
   // applying: the queue, a named posting, the packet, the doorstep, the halt and resume
   "career_batch_apply", "named_role_apply", "named_role_link", "doorstep_submit", "doorstep_fill", "doorstep_status",
   "application_packet", "application_packet_walkthrough", "career_packet", "packet_prep", "packet_refused", "packet_needs_role",
+  // H2H leftovers 3: "send me the packet" with no packet in the thread is code's answer (142 handleDocumentDelivery), never a model's "here is".
+  "career_packet_absent",
   "intent_packet_validity", "queue_halt", "queue_resume", "captcha_handoff", "portal_account", "portal_accounts",
   // watches and alerts
   "career_watch", "career_watch_create", "career_watch_manage", "career_watch_affirm", "career_os_watch",
@@ -510,7 +512,7 @@ export const CODE_OWNED_INTENTS: ReadonlySet<string> = new Set([
   "outreach_draft", "negotiation_draft", "negotiation_revision", "career_tailor", "career_tailor_diff", "tailor_needs_posting", "career_essay",
   "career_document_delivery", "calendar_proposal", "graph_intro", "graph_blurb", "profile_export",
   // writes to the person's record, onboarding, and the account's controls
-  "onboarding", "onboarding_answer", "career_onboarding_needs", "profile_correction", "intent_sensitive_correction", "career_resume_ingest",
+  "onboarding", "onboarding_answer", "career_onboarding_needs", "profile_correction", "intent_sensitive_correction", "sensitive_answer_ask", "career_resume_ingest",
   "career_resume_correction", "career_resume_update", "career_resume_disowned", "career_resume_dispute", "career_goal_record",
   "career_erase_confirm", "career_erase_status", "career_profile_erased", "disconnect", "connect_google", "connect_browser_source",
   "paused_hold", "pause_status", "people_matching_stop", "intent_opt_out", "career_paused", "career_resumed", "career_preference_corrected", "career_os_wins_log",

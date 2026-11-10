@@ -19,13 +19,14 @@
 // One long-lived psql session for the checks (tests/flow/psql-session.ts).
 import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
+import { virtualClock } from "../flow/virtual-clock.ts";
 import { psqlSession } from "../flow/psql-session.ts";
 import { careerHandler, SERVICE_KEY, SUPABASE_URL, supabaseParity } from "../flow/handler.ts";
 import { fakeBot, plainOf } from "./scenarios/telegram-bot-api.ts";
 import { handleTelegram } from "../../supabase/functions/trainee-telegram/handler.ts";
 import { chatThroughAgent, deliverer } from "../../supabase/functions/_shared/channel_runtime.ts";
 import { supabaseInboundStore } from "../../supabase/functions/trainee-inbound/store.ts";
-import { FILE_DAMAGED_REPLY, sha256Bytes } from "../../supabase/functions/_shared/channel_resume_upload.ts";
+import { cleanDocx, FILE_DAMAGED_REPLY, sha256Bytes } from "../../supabase/functions/_shared/channel_resume_upload.ts";
 import { ENTRY_CORRECTION_VIA } from "../../supabase/functions/_shared/career_router_evidence.ts";
 import { DOCX, docxBytes, PDF, pdfBytes } from "./scenarios/onboarding-r2-generator.ts";
 import { entriesOf, INJECTIONS_R3, linesOf, OTHER_FIRST, person, type Person, rng, sig } from "./scenarios/onboarding-r3-generator.ts";
@@ -75,7 +76,8 @@ Deno.test({
       const fast: Pg = { ...pg, sql: async (text: string) => (await session.q(text)).join("\n").trim() };
       h = await careerHandler(fast, {});
       const { handleChat } = await import("../../supabase/functions/agent-chat/handler-career.ts");
-      const bot = fakeBot({ token: TOKEN, now: Date.now });
+      const pace = virtualClock(); // the send pacing's clock (tests/flow/virtual-clock.ts): Telegram's one-a-second per chat is still computed and waited, on this clock, not the wall
+      const bot = fakeBot({ token: TOKEN, now: pace.clock });
       const files = new Map<string, { bytes: Uint8Array; size: number }>();
       const viaDouble = globalThis.fetch, outbound: string[] = [];
       globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
@@ -107,7 +109,7 @@ Deno.test({
       let upd = 9000, mid = 100, fid = 0;
       const post = async (body: Record<string, unknown>) => {
         await sql("delete from public.agent_rate_limits");
-        const deliverNow = deliverer(admin, Deno.env);
+        const deliverNow = deliverer(admin, Deno.env, pace);
         const res = await handleTelegram(new Request(`${SUPABASE_URL}/functions/v1/trainee-telegram`, { method: "POST", headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": SECRET }, body: JSON.stringify({ update_id: ++upd, ...body }) }),
           { env: Deno.env, now: Date.now, store: () => supabaseInboundStore(admin), chat: chatThroughAgent(SUPABASE_URL, SERVICE_KEY, { channel: "telegram" }), admin,
             deliver: (a) => deliverNow({ userId: a.userId, key: a.key, now: a.now }) });
@@ -250,7 +252,8 @@ Deno.test({
             if (Number(mid.prepared) !== 1 || mid.record?.sha256 !== shaA) fail(`person ${i}`, `a newer resume not yet confirmed moved what is on file: ${JSON.stringify(mid.record)} prepared ${mid.prepared}: ${who()}`);
             await say("yes, that's my resume");
             const st = await state(u);
-            if (st.record?.sha256 !== await sha256Bytes(b)) fail(`person ${i}`, `the new resume is not the record: ${who()}`);
+            // the stored file is the cleaned copy (owner decision, release 8)
+            if (st.record?.sha256 !== await sha256Bytes(await cleanDocx(b))) fail(`person ${i}`, `the new resume is not the record: ${who()}`);
             if (Number(st.prepared) !== 0) fail(`person ${i}`, `an application prepared with the replaced resume is still there to approve: ${who()}`);
             // deno-lint-ignore no-explicit-any
             const apply = factSig((st.apply as any[]).filter((x) => RESUME_KINDS.has(x.kind)));

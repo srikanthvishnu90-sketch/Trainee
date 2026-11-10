@@ -110,14 +110,26 @@ const listen = (host) => new Promise((resolve) => {
 const noBrowser = { newContext() { throw new Error("a browser context was opened: the run was not refused before navigation"); } };
 const bare = (url, over = {}) => { const p = { id: "x", ats: "greenhouse", url, facts, answers: {}, resume: { path: "/nonexistent", sha256: "0".repeat(64), preparedWithSha256: "0".repeat(64) }, ...over }; p.approval = { approval_id: "a1", hash: payloadHash(p) }; return p; };
 
-test("a bot check inside a REAL form (recaptcha, hcaptcha, turnstile, text, iframe) is handed back: nothing filled, nothing submitted", { skip }, async () => {
-  for (const kind of ["recaptcha", "hcaptcha", "turnstile", "text", "iframe"]) {
+// WO-M (architect ruling 2026-11-09): a check is a stop only when it is SHOWN. A page that only loads a captcha script
+// ("hcaptcha" below is a lone <script src=.../hcaptcha/api.js>) or carries an invisible reCAPTCHA is filled like any other;
+// before, the word "captcha" in its source stopped it unfilled. The four shown kinds still stop, unfilled.
+test("a bot check SHOWN inside a REAL form (recaptcha widget, turnstile widget, text, challenge iframe) is handed back: nothing filled, nothing submitted", { skip }, async () => {
+  for (const kind of ["recaptcha", "turnstile", "text", "iframe"]) {
     const r = await applyOne(browser, mk("greenhouse", `captchaform-${kind}`));
     assert.equal(r.status, "needs_user", kind);
     assert.equal(r.reason, "bot_check", kind);
     assert.equal(r.filled, undefined, `${kind}: nothing was filled`);
   }
   assert.equal(mock.submissions.some((s) => s.job.startsWith("captchaform")), false);
+});
+
+test("a captcha script alone, or an invisible reCAPTCHA, is not a shown check: the form is filled (WO-M)", { skip }, async () => {
+  for (const kind of ["hcaptcha", "invisible"]) {
+    const r = await applyOne(browser, mk("greenhouse", `captchaform-${kind}`));
+    assert.notEqual(r.reason, "bot_check", kind);
+    assert.equal(r.status, "submitted_page_confirmed", `${kind}: the approved application went as approved on the local mock`);
+    assert.ok(r.filled.length >= 4, `${kind}: filled ${r.filled.length}`);
+  }
 });
 
 test("linkedin.com, indeed.com, joinhandshake.com and their subdomains are refused before any navigation, even when allow-listed", async () => {

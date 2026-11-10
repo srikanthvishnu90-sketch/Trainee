@@ -2,8 +2,8 @@
 // x-audit (D-MS-1, coordinator priority, 2026-11-10): no value typed into an employer's form reaches the employer before
 // the person's yes. Ashby autosaves every field with an ApiSetFormValue GraphQL mutation as it is typed; a form can do the
 // same with a fetch POST, a beacon or a WebSocket. tests/fixtures/autosave-ats.cjs does all four (and a GET pixel) and
-// counts what arrives. Measured per path that opens or fills a form before the yes: receipts that carry a typed value over
-// anything but a plain GET. The bar is 0.
+// counts what arrives. Measured per path that opens or fills a form before the yes: receipts that carry a typed value on
+// ANY channel, GET included (coordinator ruling, 2026-11-10). The bar is 0.
 //   control   a browser with no guard fills the form: every channel arrives (proves the mock autosaves).
 //   engine    scripts/apply.ts without --submit: the dry run every preparation runs (approve-first.ts prepare,
 //             prepare-ahead.ts prepareOne, workers/career-cloud/prepare.ts, the cloud engine's review step).
@@ -69,7 +69,7 @@ test("engine dry run (scripts/apply.ts, no --submit): 0 typed values reach the e
     const result = out.split("\n").filter((l) => l.startsWith("RESULT ")).at(-1);
     assert.ok(result && /"dry_run"/.test(result), `the dry run reached review: ${(result || out).slice(-400)}`);
     console.log(`ENGINE receipts carrying a typed value, by channel: ${JSON.stringify(ats.byChannel())}`);
-    assert.deepEqual(ats.writes().map((r) => r.channel), [], `typed values reached the employer before the yes: ${JSON.stringify(ats.byChannel())}`);
+    assert.deepEqual(ats.anyChannel().map((r) => r.channel), [], `typed values reached the employer before the yes: ${JSON.stringify(ats.byChannel())}`);
   } finally { await ats.close(); }
 });
 
@@ -80,7 +80,7 @@ test("dry-run harness (workers/career-browser/dry-run.cjs): 0 typed values reach
     const log = await dryRunForm({ browser, id: "autosave", ats: "greenhouse", url: `${ats.base}/form`, facts: FACTS, answers: {}, resumePath: resume, outDir: path.join(dir, "harness") });
     await settle();
     assert.ok(log.field_map.length >= 3, "the form was filled");
-    assert.deepEqual(ats.writes().map((r) => r.channel), [], `typed values reached the employer: ${JSON.stringify(ats.byChannel())}`);
+    assert.deepEqual(ats.anyChannel().map((r) => r.channel), [], `typed values reached the employer: ${JSON.stringify(ats.byChannel())}`);
   } finally { await ats.close(); }
 });
 

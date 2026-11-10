@@ -2,7 +2,7 @@
 // x-audit (D-MS-1, 2026-11-10): a mock employer form that autosaves every field AS IT IS TYPED, the way Ashby's
 // ApiSetFormValue mutation does, over every channel a page has: a GraphQL mutation, a plain fetch POST, a sendBeacon, a
 // WebSocket message and a GET pixel. The server counts every receipt that carries a value typed into the form, by channel.
-// Before the person's yes the count of non-GET receipts must be 0 on every path that opens or fills a form.
+// Before the person's yes the count of receipts carrying a typed value, on ANY channel, must be 0 (coordinator ruling).
 // Test only: listens on 127.0.0.1, never contacts anything.
 const http = require("node:http");
 const crypto = require("node:crypto");
@@ -92,6 +92,8 @@ async function startAutosaveAts({ typed = [] } = {}) {
     base, receipts,
     // Receipts that are not a plain GET: the ones D-MS-1 forbids before the yes.
     writes: () => receipts.filter((r) => r.carries && r.channel !== "get_pixel" && r.channel !== "submit"),
+    // Every receipt that carries a typed value, on any channel (GET pixel included): the D-MS-1 bar before the yes.
+    anyChannel: () => receipts.filter((r) => r.carries && r.channel !== "submit"),
     byChannel: () => receipts.filter((r) => r.carries).reduce((a, r) => ((a[r.channel] = (a[r.channel] || 0) + 1), a), {}),
     // An upgraded socket is not one of the server's connections: destroyed here, or close() would wait for it forever.
     close: () => new Promise((r) => { for (const s of sockets) s.destroy(); server.closeAllConnections?.(); server.close(r); }),

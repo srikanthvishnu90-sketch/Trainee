@@ -32,8 +32,9 @@ const PROVIDER_HOSTS = {
 // path, is answered inside the browser with a fake success (nothing leaves the browser) and logged as upload_simulated. A
 // posting that needed one is never a pass: it is "ready except upload (needs the person's yes)", in its own column.
 const SIMULATED_UPLOADS = [
-  // job-boards.greenhouse.io posts the resume straight to its S3 bucket (strict run 42736815031).
-  { provider: "greenhouse", host: /^grnhse-prod-jben-[a-z0-9-]+\.s3\.[a-z0-9-]+\.amazonaws\.com$/, path: /^\/$/, methods: ["POST", "OPTIONS"] },
+  // job-boards.greenhouse.io posts the resume straight to its S3 bucket (strict runs 42736815031, 42737911402:
+  // grnhse-prod-jben-us-east-1.s3.amazonaws.com, grnhse-prod-jben-eu-west-1.s3.eu-west-1.amazonaws.com).
+  { provider: "greenhouse", host: /^grnhse-prod-jben-[a-z0-9-]+\.s3(?:\.[a-z0-9-]+)?\.amazonaws\.com$/, path: /^\/$/, methods: ["POST", "OPTIONS"] },
 ];
 function simulatedUpload(req, provider) {
   let u; try { u = new URL(req.url()); } catch { return null; }

@@ -43,10 +43,13 @@ for (const shell of document.querySelectorAll(".select-shell")) {
       const o = document.createElement("div"); o.setAttribute("role", "option"); o.className = "select__option";
       const name = t.replace(/ \+\d+$/, ""), dial = (t.match(/\+\d+$/) || [""])[0];
       o.innerHTML = dial ? `<span>${name}</span> <span class="dial">${dial}</span>` : name;
+      o.setAttribute("aria-selected", t === shell.dataset.sel ? "true" : "false");
       o.addEventListener("mousedown", (e) => e.preventDefault());
       o.addEventListener("click", () => {
         const ph = vc.querySelector(".select__placeholder, .select__single-value"); if (ph) ph.remove();
-        const v = document.createElement("div"); v.className = "select__single-value"; v.textContent = t; vc.prepend(v);
+        // As on job-boards.greenhouse.io (strict run 42737911402), the phone picker shows only the dial code once chosen.
+        shell.dataset.sel = t;
+        const v = document.createElement("div"); v.className = "select__single-value"; v.textContent = dial || t; vc.prepend(v);
         input.value = ""; close();
       });
       menu.append(o);
@@ -55,10 +58,19 @@ for (const shell of document.querySelectorAll(".select-shell")) {
     shell.append(menu);
   };
   input.addEventListener("mousedown", open); input.addEventListener("focus", open); input.addEventListener("input", open);
-  input.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+  input.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); if (e.key === "ArrowDown" && !menu) open(); });
 }
 // React re-renders the upload: once a file is chosen the Attach button group is unmounted and the file name shown in its place
 // (the input itself is gone).
+// With ?remount the First Name input is replaced by a fresh, empty one shortly after it is first typed into (React re-mounting
+// the field after hydration).
+if (location.search.includes("remount")) {
+  let done = false;
+  document.getElementById("first_name").addEventListener("input", () => {
+    if (done) return; done = true;
+    setTimeout(() => { const old = document.getElementById("first_name"); const n = old.cloneNode(false); n.value = ""; n.removeAttribute("data-upmore-q"); old.replaceWith(n); }, 200);
+  });
+}
 // With ?s3 the file goes first to the board's S3 bucket, as job-boards.greenhouse.io does (strict run 42736815031: a POST to
 // grnhse-prod-jben-us-west-2.s3.us-west-2.amazonaws.com/), and the name is shown only once that upload succeeded.
 const S3 = "https://grnhse-prod-jben-us-west-2.s3.us-west-2.amazonaws.com/";

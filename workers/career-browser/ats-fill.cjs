@@ -44,7 +44,42 @@ function EXTRACT() {
   };
   // Breezy asks each custom question in its own list item, the question in that item's one heading (strict benchmark run
   // 42735825405: "section_1760116069653_question_0" was all the runner could name).
-  const itemHeading = (el) => { const li = el.closest("li"); if (!li) return null; const hs = li.querySelectorAll("h3"); return hs.length === 1 && !hs[0].contains(el) && nodeText(hs[0]) ? hs[0] : null; };
+  // A choice's own option sits in a list item of its own (li.option inside the question's li.question, batch of 60: Breezy held
+  // "section_..._question_0" for "Education"): the nearest enclosing item with exactly one heading is the question's.
+  const itemHeading = (el) => {
+    for (let li = el.closest("li"); li; li = li.parentElement && li.parentElement.closest("li")) {
+      const hs = li.querySelectorAll("h3");
+      if (hs.length === 1 && !hs[0].contains(el) && nodeText(hs[0])) return hs[0];
+      if (hs.length > 1) return null;
+    }
+    return null;
+  };
+  const ownControls = (a) => [...a.querySelectorAll("input, select, textarea")].filter((x) => x.type !== "hidden" && shown(x)).length;
+  // A box alone in its section under the section's own heading (Breezy's "Experience Summary" over the cSummary box): that heading.
+  const HEAD = "h1, h2, h3, h4, .section-header";
+  const sectionHeading = (el) => {
+    for (let a = el, i = 0; a && a.parentElement && i < 3 && ownControls(a.parentElement) === 1; a = a.parentElement, i++) {
+      for (let c = a.previousElementSibling; c; c = c.previousElementSibling) if (c.matches(HEAD) && nodeText(c)) return c;
+    }
+    return null;
+  };
+  // A choice with no heading of its own (Breezy's veteran status: a list of boxes after the survey's paragraphs): the words just
+  // before its list, after the nearest heading above them when there is one ("Veteran Status: Please check one of the boxes below").
+  const wordsBefore = (el) => {
+    const list = el.closest("ul, ol") || el.parentElement;
+    for (let a = list, i = 0; a && i < 3; a = a.parentElement, i++) {
+      let words = "", head = "";
+      for (let c = a.previousElementSibling, k = 0; c && k < 8; c = c.previousElementSibling, k++) {
+        if (c.querySelector("input, select, textarea") || !shown(c)) continue;
+        const t = nodeText(c);
+        if (!t) continue;
+        if (c.matches(HEAD)) { head = t; break; }
+        if (!words) words = t;
+      }
+      if (words || head) return clean(head && words && head !== words ? `${head}: ${words}` : head || words).slice(0, 200);
+    }
+    return "";
+  };
   const labelNode = (el) => {
     if (el.id) { const l = rootOf(el).querySelector(`label[for="${CSS.escape(el.id)}"]`); if (l && nodeText(l)) return l; }
     const lb = el.getAttribute("aria-labelledby");
@@ -53,7 +88,7 @@ function EXTRACT() {
     if (cl && nodeText(cl)) return cl;
     const g = groupLabelNode(el);
     if (g) return g;
-    return itemHeading(el);
+    return itemHeading(el) || sectionHeading(el);
   };
   const isReq = (els, node) => {
     if (els.some((e) => e.required || e.getAttribute("aria-required") === "true")) return true;
@@ -118,7 +153,7 @@ function EXTRACT() {
       const byId = (ids) => (ids || "").split(/\s+/).map((id) => id && (rootOf(el).getElementById ? rootOf(el).getElementById(id) : document.getElementById(id))).find((n) => n && nodeText(n));
       const group = el.closest("[role=radiogroup], [role=group]");
       const node = (fs && fs.querySelector("legend")) || (group && byId(group.getAttribute("aria-labelledby"))) || groupLabelNode(el) || itemHeading(el);
-      const label = node ? nodeText(node) : clean(el.name);
+      const label = node ? nodeText(node) : (wordsBefore(el) || clean(el.name));
       const q = push({ kind: type === "radio" ? "radio" : "checkgroup", label, name: el.name || "", required: isReq(mates, node), eeo: eeoOf(el, label), options: mates.map((m, i) => ({ i, label: optLabel(m) })), ...(drawnChoice ? { drawn: true } : {}) }, mates[0]);
       mates.forEach((m, i) => { m.setAttribute("data-upmore-q", q); m.setAttribute("data-upmore-o", i); });
       // A drawn choice (Workable's role=radio option around its aria-hidden input) is chosen where the person chooses it: the
@@ -268,6 +303,27 @@ function answerFor(label, answers) {
   const n = norm(label);
   for (const k of Object.keys(answers || {})) if (norm(k) === n) return answers[k];
   return undefined;
+}
+// Item 2 batch of 60 (run 42854228451): the apply VM carries the person's approved answers by the label they were confirmed
+// under ("Email", "Phone", "Location", "Country") and no facts, so a form that words the same contact question its own way
+// ("Email Address", "Phone Number", "Current location"; Breezy, Lever) re-asked what the person had already confirmed. An
+// approved answer whose own label is one of the contact facts (factKey) is that confirmed fact: email only to an email question,
+// phone only to a phone question, a place only to a location question, and so on, by the same FACT_RULES as a confirmed fact.
+// Two approved answers that name one fact with different values name none. A fact the person confirmed outright wins.
+// Nothing new is ever made up: "Address" is answered only from a confirmed address, never from the place.
+function factsFrom(facts, answers) {
+  const derived = {}, clash = new Set();
+  for (const [k, v] of Object.entries(answers || {})) {
+    if (blank(v)) continue;
+    const key = factKey(k);
+    if (!key) continue;
+    if (derived[key] !== undefined && String(derived[key]).trim() !== String(v).trim()) clash.add(key);
+    else derived[key] = String(v);
+  }
+  for (const k of clash) delete derived[k];
+  const out = { ...derived };
+  for (const [k, v] of Object.entries(facts || {})) if (!blank(v) || !(k in out)) out[k] = v;
+  return out;
 }
 const DECLINE = /decline|prefer not|do(?: not|n t) wish|choose not|not to (?:answer|disclose|say|identify|specify)|i do(?: not|n t) want/;
 const YES = /^(yes|y|true)$/; // an agreement checkbox only
@@ -524,6 +580,19 @@ async function fillPlace(page, d, value, country) {
 const COUNTRY_NAMES = [["united states", "united states of america", "usa", "us", "u s a", "u s"], ["united kingdom", "uk", "great britain"]];
 const countryNames = (v) => (COUNTRY_NAMES.find((g) => g.includes(norm(v))) || []).filter((x) => x !== norm(v));
 
+// The option a react-select menu marks as selected, read by opening the menu (ArrowDown opens it without choosing anything) and
+// closing it again (Escape). Used where the box shows less than the option (Greenhouse's phone picker shows only "+1").
+async function menuSelected(page, d, ctl0) {
+  const input = page.locator(sel(d.q)).first();
+  const shell = input.locator('xpath=ancestor::*[contains(@class,"select-shell") or contains(@class,"select__container") or @data-combobox or contains(@class,"ashby-application-form-field-entry")][1]');
+  await input.press("ArrowDown").catch(() => {});
+  await page.waitForTimeout(120);
+  const ctl = (await input.getAttribute("aria-controls").catch(() => null)) || ctl0;
+  const loc = ctl ? page.locator(`[id="${ctl.replace(/"/g, "")}"] [role="option"][aria-selected="true"]`) : shell.locator('[role="option"][aria-selected="true"]');
+  const held = (await loc.allInnerTexts().catch(() => [])).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean);
+  await input.press("Escape").catch(() => {});
+  return held;
+}
 async function fillCombo(page, d, value, pick, phone, country) {
   const input = page.locator(sel(d.q)).first();
   // Only this dropdown's own options: its aria-controls list, else the options inside its own shell. A phone widget's country
@@ -570,12 +639,7 @@ async function fillCombo(page, d, value, pick, phone, country) {
   // Greenhouse's phone picker shows only the dial code ("+1", which Canada shares): the choice is read back from the option
   // the reopened menu marks as selected, which must be the one picked; the menu is closed again without choosing anything.
   if (s.filled && pick === "phone_country") {
-    await input.press("ArrowDown").catch(() => {}); // opens a react-select menu without choosing anything
-    await page.waitForTimeout(120);
-    const selected = ctl0 => (ctl0 ? page.locator(`[id="${ctl0.replace(/"/g, "")}"] [role="option"][aria-selected="true"]`) : shell.locator('[role="option"][aria-selected="true"]'));
-    const ctl2 = await input.getAttribute("aria-controls").catch(() => null);
-    const held = (await selected(ctl2 || ctl).allInnerTexts().catch(() => [])).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean);
-    await input.press("Escape").catch(() => {});
+    const held = await menuSelected(page, d, ctl);
     const s2 = await stateOf(page, d);
     if (held.length === 1 && norm(held[0]) === norm(list[m.index]) && s2.filled && norm(s2.text) === norm(s.text)) return { ok: true };
     return { ok: false, reason: "readback_mismatch", detail: `picked: ${String(list[m.index]).slice(0, 60)} | shows: ${String(s.text || "").slice(0, 30)} | menu selected: ${held.join(" / ").slice(0, 60)}` };
@@ -609,16 +673,19 @@ function decide(d, ctx) {
     const kinds = ctx.labelKinds && ctx.labelKinds.get(labelKey(d));
     if (!blank(factValue(d.label, facts || {})) && (!kinds || (takesFact(d.kind, d.label) && kinds.filter((k) => takesFact(k, d.label)).length > 1))) return { status: "ask", reason: "label_on_form_twice" };
   }
+  // The phone's country picker takes the confirmed country (an approved "Country" answer, else the country fact), checked
+  // against the approved phone's own dial code (fillCombo): its options are "United States +1", never the bare name, so the
+  // answer is never matched against them as plain text (batch of 60: 14 of 15 Greenhouse postings held "Country").
+  if (d.kind === "combobox" && d.phoneCountry) {
+    const ac = answerFor(d.label, answers), c = !blank(ac) ? ac : facts && facts.country;
+    if (!blank(c) && !blank(facts && facts.phone)) return { status: "fill", value: String(c), pick: "phone_country", source: !blank(ac) ? "answer" : "fact", soft: true };
+    return d.required ? { status: "ask", reason: "no_confirmed_answer" } : { status: "skip", reason: "optional_left_blank" };
+  }
   const a = answerFor(d.label, answers);
   if (!blank(a)) return { status: "fill", value: String(a), source: "answer" };
   if (d.eeo) {
     if (facts && facts.eeo_policy === "decline" && ["select", "combobox", "radio", "buttons"].includes(d.kind)) return { status: "fill", pick: "decline", source: "eeo_policy" };
     return d.required ? { status: "ask", reason: "eeo_needs_your_choice" } : { status: "skip", reason: "eeo_left_blank" };
-  }
-  // The phone's country picker takes the confirmed country, checked against the approved phone's own dial code (fillCombo).
-  if (d.kind === "combobox" && d.phoneCountry) {
-    if (!blank(facts && facts.country) && !blank(facts && facts.phone)) return { status: "fill", value: String(facts.country), pick: "phone_country", source: "fact", soft: true };
-    return d.required ? { status: "ask", reason: "no_confirmed_answer" } : { status: "skip", reason: "optional_left_blank" };
   }
   // A Yes/No eligibility fact goes only onto a choice; any other fact into a box, a select, or a place/country combobox.
   const ck = factKey(d.label);
@@ -641,13 +708,16 @@ async function doFill(page, d, dec, ctx) {
     return d.kind === "select" ? fillSelect(page, d, labels[ix]) : fillChoice(page, d, labels[ix], false);
   }
   const v = dec.value;
-  if (dec.source === "fact" && factKey(d.label) === "country" && ["select", "radio"].includes(d.kind)) {
+  // A confirmed fact, or an approved answer to the same question, is picked by the same exact rules (a country by its name or
+  // its other spellings, a place as the same city, state and country, a state by name or postal code).
+  const semantic = dec.source === "fact" || dec.source === "answer";
+  if (semantic && factKey(d.label) === "country" && ["select", "radio"].includes(d.kind)) {
     const labels = d.options.map((o) => o.label);
     if (matchOption(labels, v).error) { const alt = countryNames(v).find((x) => !matchOption(labels, x).error); if (alt) return d.kind === "select" ? fillSelect(page, d, labels[matchOption(labels, alt).index]) : fillChoice(page, d, labels[matchOption(labels, alt).index], false); }
   }
-  if (d.place && dec.source === "fact") return fillPlace(page, d, v, ctx.facts && ctx.facts.country);
+  if (d.place && semantic) return fillPlace(page, d, v, ctx.facts && ctx.facts.country);
   // A state select offers the state by name or by code: the exact option first, else the one option that is the same US state.
-  if (dec.source === "fact" && factKey(d.label) === "state" && d.kind === "select") {
+  if (semantic && factKey(d.label) === "state" && d.kind === "select") {
     const m = matchState(d.options.map((o) => o.label), v);
     if (m.error) return { ok: false, reason: m.error, options: d.options.map((o) => o.label) };
     return fillSelect(page, d, d.options[m.index].label);
@@ -658,7 +728,7 @@ async function doFill(page, d, dec, ctx) {
     case "checkgroup": return fillChoice(page, d, v, true);
     case "checkbox": return YES.test(norm(v)) || /^(checked|agree|i agree|accept)/.test(norm(v)) ? fillCheckbox(page, d) : { ok: false, reason: "not_agreed" };
     case "combobox": {
-      const fk = dec.source === "fact" ? factKey(d.label) : undefined;
+      const fk = semantic ? factKey(d.label) : undefined;
       const pick = dec.pick === "phone_country" ? "phone_country" : fk === "state" ? "state" : fk === "location" ? "place" : fk === "country" ? "country" : "value";
       return fillCombo(page, d, v, pick, ctx.facts && ctx.facts.phone, ctx.facts && ctx.facts.country);
     }
@@ -669,6 +739,7 @@ async function doFill(page, d, dec, ctx) {
 // ctx: { ats, facts, answers, resumePath }. Returns { map, filled, needsUser, failed, invalid }.
 async function fillForm(page, ctx0) {
   const ctx = { facts: {}, answers: {}, ...ctx0 };
+  ctx.facts = factsFrom(ctx.facts, ctx.answers);
   const map = [], filled = [], needsUser = [], failed = [];
   const handled = new Set();
   for (let pass = 0; pass < 3; pass++) {
@@ -746,11 +817,40 @@ async function heldNow(page, filled) {
   const st = ds.length ? await page.evaluate(STATE, ds) : [];
   // An upload whose input the board swapped for a chip (fillFile) is read from that chip: the resume's own name, or nothing.
   const chips = await page.evaluate(CHIP, filled.map((f) => [f.d.q, String(f.value)])).catch(() => []);
-  return filled.map((f, i) => {
+  const out = filled.map((f, i) => {
     const s = { ...(st[i] || {}) };
-    if (f.kind === "file" && !s.text && chips[i]) s.text = String(f.value);
+    // The board's own chip naming the resume's file stands for the upload once the board has swapped its input for it: the
+    // upload is held (not gone). No chip and no input: gone.
+    const chip = f.kind === "file" && !s.text && chips[i];
+    if (chip) s.text = String(f.value);
     const held = s.picked ? s.picked.map((o) => ((f.d.options || [])[Number(o)] || {}).label) : s.text;
-    return { label: f.label, kind: f.kind, source: f.source, approved: f.value, held: held === undefined ? null : held, gone: !!s.gone };
+    return { label: f.label, kind: f.kind, source: f.source, approved: f.value, held: held === undefined ? null : held, gone: !!s.gone && !chip,
+      ...(f.d.phoneCountry ? { phoneCountry: true } : {}), ...(f.d.place ? { place: true } : {}) };
   });
+  // The phone's country picker shows only the dial code ("+1", which Canada shares): what it holds is the option its menu marks
+  // as selected, read as fillCombo read it, and only while the box still shows what it showed then.
+  for (const [i, f] of filled.entries()) {
+    if (!f.d.phoneCountry || out[i].gone || !out[i].held) continue;
+    const sel1 = await menuSelected(page, f.d).catch(() => []);
+    const now = (await stateOf(page, f.d).catch(() => ({}))).text;
+    if (sel1.length === 1 && norm(now) === norm(out[i].held)) out[i].held = sel1[0];
+  }
+  return out;
 }
-module.exports = { heldNow, fillForm, matchOption, matchPlace, matchState, countryNames, phoneCountryMatch, factKey, factValue, answerFor, decide, labelCounts, labelKinds, norm, EXTRACT, STATE, DECLINE };
+// Does a field's one held value say the approved answer, by the same exact rule the fill chose it by? A country by its name or
+// its listed other spellings, a place as the same city, state and country (matchPlace), a state by name or postal code, the
+// phone's country picker as the country with the approved phone's own dial code. Anything else: only the same words.
+function holdsApproved(f, want, facts = {}) {
+  const h = Array.isArray(f.held) ? f.held : [f.held];
+  if (h.length !== 1 || blank(h[0]) || blank(want)) return false;
+  const held = String(h[0]);
+  if (norm(held) === norm(want)) return true;
+  if (f.phoneCountry) return !phoneCountryMatch([held], want, facts.phone).error;
+  const key = factKey(f.label);
+  if (key === "location" && f.place) return !matchPlace([held], want, facts.country).error;
+  if (key === "location" && f.kind === "combobox") return !matchPlace([held], want, blank(facts.country) ? "" : facts.country).error;
+  if (key === "country") return !matchOption([held], want).error || countryNames(want).some((n) => !matchOption([held], n).error);
+  if (key === "state") return !matchState([held], want).error;
+  return false;
+}
+module.exports = { heldNow, holdsApproved, factsFrom, fillForm, matchOption, matchPlace, matchState, countryNames, phoneCountryMatch, factKey, factValue, answerFor, decide, labelCounts, labelKinds, norm, EXTRACT, STATE, DECLINE };

@@ -46,3 +46,9 @@ the Trainee repo. The goal: bring each of the owner's 15 release items to its ba
   table, then `architect-shards.ts update <your jsonl>`, then rebuild the router bundles if you touched packages/domain
   (`python3 scripts/build-router-core.py`), and push.
 - Merged so far today: #666, #667, #670, #671, #673, #675, #677. Rebase on trunk before you open or update a PR.
+
+## CI is the bottleneck (added 01:58): 36 runs queued, 5 running
+- Push to a PR only when its local tests pass and it is ready for review. No push to save work in progress; batch your commits.
+- Browser benchmark runs: only Agent 1 starts full-220 runs. Provider agents bench with `--providers <one>` and at most one
+  bench run in flight per agent.
+- Do not push an empty commit just to re-trigger CI while a run on that PR is still queued.

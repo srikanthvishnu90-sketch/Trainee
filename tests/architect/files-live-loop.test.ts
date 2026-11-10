@@ -17,7 +17,7 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import { FILE_FAMILIES, SPECIMEN_NOW } from "../../supabase/functions/_shared/file_family_specimens.ts";
-import { isServedFamily, SERVED_FAMILIES } from "../../supabase/functions/_shared/file_family_serve.ts";
+import { isServedFamily, SERVED_FAMILIES, SERVED_POSTS } from "../../supabase/functions/_shared/file_family_serve.ts";
 import { createFileService, memoryFileStore } from "../../supabase/functions/_shared/file_service.ts";
 import { handleFile, type FileDeps, type FileStore } from "../../supabase/functions/trainee-file/handler.ts";
 import { phonePost, sha256, signedIn } from "./file-session-fakes.ts";
@@ -156,4 +156,42 @@ Deno.test("FILES LIVE LOOP: a model cannot make a family page; a GET changes not
     const r = await handleFile(new Request(BASE, { headers: { cookie: `tf_s=${await A.tok(U, made.id, SPECIMEN_NOW)}` } }), deps);
     assert.doesNotMatch(await r.text(), /data-family=/, "a model-made File was drawn as a family page");
   }
+});
+
+// The S0 hooks the family builders stack on (S1-S6): a live family reads its view from its source on every GET (none read: the C.24
+// error state, never a stored view); a post in SERVED_POSTS is drawn as a form with this page's token and reaches only that family's
+// source; an action not listed is refused unchanged; a source's refusal (a stale hash) is a 409 with its reason.
+Deno.test("FILES LIVE LOOP: the S0 hooks: a live view is read every time, a null view is the error state, a served post reaches only its source", async () => {
+  const A = signedIn(), store = memoryFileStore(), files = createFileService({ store, env: { get: (k) => ENV[k] }, now: () => SPECIMEN_NOW });
+  const spec = FILE_FAMILIES.find((f) => f.id === "F-04")!.specimen as any;
+  let current: unknown = spec, calls: string[] = [];
+  const familyRecords = { "F-04": {
+    async load(_u: string, rec: { data: { ref?: Record<string, string> | null } }) { calls.push(`view ${rec.data.ref?.plan}`); return current ? { view: current, asOf: null } : null; },
+    post: { async approveplan(_u: string, _r: unknown, f: URLSearchParams) { calls.push(`approveplan ${f.get("h")}`); return f.get("h") === "h-now" ? { ok: true, title: "Approved", lines: ["Approved exactly v1."] } : { ok: false, title: "Not approved", lines: ["The plan changed since you saw it (h-old is not h-now), so nothing was approved."] }; } },
+  } };
+  const deps: FileDeps = { ...A.deps, store: stub(), now: () => SPECIMEN_NOW, env: { get: (k) => ENV[k] }, cards: {} as never, tap: {} as never, files, familyRecords };
+  const made = await files.createFamily!(U, "F-04", "Search plan", null, { ref: { plan: "p-1" } });
+  assert.ok(made.ok);
+  if (!made.ok) return;
+  assert.ok(!("view" in store.all()[0].data), "a live family stores no view");
+  const sid = await A.tok(U, made.id, SPECIMEN_NOW), get = async () => await handleFile(new Request(BASE, { headers: { cookie: `tf_s=${sid}` } }), deps);
+  const post = async (f: Record<string, string>) => await handleFile(new Request(BASE, await phonePost({ t: sid, ...f }, ENV.TRAINEE_FILE_LINK_SECRET, { headers: { origin: new URL(BASE).origin } })), deps);
+  const served = SERVED_POSTS["F-04"] as Set<string>;
+  try {
+    let h = await (await get()).text();
+    assert.match(h, /data-family="F-04"/); assert.doesNotMatch(h, /name="action" value="approveplan"/, "not listed: shown off");
+    served.add("approveplan");
+    h = await (await get()).text();
+    assert.match(h, /<form method="post"[^>]*><input type="hidden" name="t" value="fp1\.[0-9a-f]{64}"><input type="hidden" name="action" value="approveplan">/, "listed: a form with this page's token");
+    const ok = await post({ action: "approveplan", h: "h-now" }), stale = await post({ action: "approveplan", h: "h-old" }), other = await post({ action: "tighten" });
+    assert.equal(ok.status, 200); assert.match(await ok.text(), /Approved exactly v1/);
+    assert.equal(stale.status, 409); assert.match(await stale.text(), /h-old is not h-now/);
+    assert.equal(other.status, 400);
+    current = null;
+    const gone = await get();
+    assert.equal(gone.status, 503); const g = await gone.text();
+    assert.match(g, /data-state="error"/); assert.doesNotMatch(g, /class="ff-hero"|Approve search scope/, "no stored or stale view in its place");
+    assert.deepEqual(calls.filter((c) => !c.startsWith("view")), ["approveplan h-now", "approveplan h-old"], "only listed posts reach the source");
+    assert.ok(calls.filter((c) => c === "view p-1").length >= 3, "the view is read on every GET, by the File's ref");
+  } finally { served.delete("approveplan"); }
 });

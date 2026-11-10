@@ -39,8 +39,8 @@ import { fileShellHtml, firstNameOf, freshnessStamp, madeForLine, stateHtml } fr
 import { byHandUrl, FEED_ROWS, foreignFact, hashTag, isSecretField, NOT_YOURS, logoDomain, postingVerdict, secretFields, secretKey, tapJob, unsendable, type JobDeps, type JobSender, type JobStore, type JobView, type PostingRow, type PreparedRow } from "../_shared/telegram_jobs.ts";
 import { checkedAt, studentWindowOf } from "../_shared/search_shortlist.ts"; // R10 WO-C
 import { submitLabel } from "../_shared/submit_capability.ts"; // R10 owner ruling
-import { familyPage } from "../_shared/file_family.ts";
-import { isServedFamily, servedFamilyFile } from "../_shared/file_family_serve.ts";
+import { familyPage, familyStatePage } from "../_shared/file_family.ts";
+import { type FamilyRecordsByFamily, isServedFamily, SERVED_POSTS, type ServedFamily, servedFamilyFile } from "../_shared/file_family_serve.ts";
 
 export type { AppRow } from "../_shared/file_page.ts";
 export interface FileStore extends JobStore {
@@ -59,6 +59,7 @@ export interface FileDeps extends Omit<JobDeps, "store"> {
   phone?: PhoneAuth; // the account's confirmed phone and the texted code; absent, phone sign-in is off
   files?: FileService; // the other file kinds (introduction, proof, plan, comparison, draft, brief); an id not found there is a jobs list
   fileEffects?: Effects; // what Introduce really does (send); absent, an approved introduction says it was not sent
+  familyRecords?: FamilyRecordsByFamily; // item 6: each File family's records and posts (file_family_serve.ts FamilyRecords), one per family
   logoFetch?: typeof fetch; // TRAINEE_LOGO_URL=self: how the server fetches an employer's own logo (tests pass a fake; default fetch)
   logoCache?: LogoCache; // and where it keeps them (default: one in-memory cache per instance)
   resumeRates?: (userId: string) => Promise<RateRow[]>; // RELEASE 9: the person's rates by resume version (read only); absent or unreadable, no section
@@ -648,11 +649,22 @@ async function handleKind(o: { g: Exclude<Awaited<ReturnType<FileService["get"]>
   let rec: FileRecord = o.g.rec, note = "";
   // Item 6 S0: a File family drawn from its stored view data (file_family_serve.ts). Its page changes nothing: every control is the
   // chat, this File's export, a source page, or shown off with its reason until its own POST (S1-S6) is served.
+  // A family made with a ref (rec.data.live) loads its view now (d.familyRecords); a stored view is never shown in its place.
+  // A post reaches only that family's own handler, and only for an action it serves (SERVED_POSTS); any other is refused, unchanged.
   if (rec.data?.from_code === true && isServedFamily(rec.data?.family)) {
-    if (action) return o.state("Not done", ["That is not something this page can do yet. Nothing was changed or sent."], 400);
-    if (fields.get("format") === "json") return new Response(JSON.stringify({ family: rec.data.family, title: rec.data.title ?? null, view: rec.data.view ?? null }, null, 2), { status: 200, headers: { ...(await headers("application/json; charset=utf-8", d.env)), "content-disposition": `attachment; filename="trainee-file-${rec.id}.json"` } });
-    const botUrl = (d.env.get("TRAINEE_BOT_URL") || "").trim(), tz = d.timeZone ? await d.timeZone(u).catch(() => null) : null;
-    return o.html(familyPage(servedFamilyFile(rec.data.family, rec.data.view, { bot: /^https:\/\//.test(botUrl) ? botUrl : null }), { now: d.now(), tz }));
+    const fam = rec.data.family as ServedFamily, src = d.familyRecords?.[fam], frec = { id: rec.id, data: rec.data };
+    const botUrl = (d.env.get("TRAINEE_BOT_URL") || "").trim(), bot = /^https:\/\//.test(botUrl) ? botUrl : null;
+    if (action) {
+      const run = SERVED_POSTS[fam].has(action) ? src?.post?.[action] : undefined;
+      if (!run) return o.state("Not done", ["That is not something this page can do yet. Nothing was changed or sent."], 400);
+      const r = await run(u, frec, fields, d.now()).catch(() => ({ ok: false, title: "Not done", lines: ["It could not be checked just now, so nothing was changed or sent. Try again in a minute."] }));
+      return o.state(r.title, r.lines, r.ok ? 200 : 409);
+    }
+    const live = rec.data.live === true ? (src ? await src.load(u, frec).catch(() => null) : null) : { view: rec.data.view, asOf: null };
+    const tz = d.timeZone ? await d.timeZone(u).catch(() => null) : null;
+    if (!live) return o.html(familyStatePage({ state: "error", family: fam === "F-14n" ? "F-14" : fam, recover: bot ? { label: "Back to chat", effect: "open", href: bot } : null }, { now: d.now(), tz }), 503);
+    if (fields.get("format") === "json") return new Response(JSON.stringify({ family: fam, title: rec.data.title ?? null, view: live.view ?? null }, null, 2), { status: 200, headers: { ...(await headers("application/json; charset=utf-8", d.env)), "content-disposition": `attachment; filename="trainee-file-${rec.id}.json"` } });
+    return o.html(familyPage(servedFamilyFile(fam, live.view, { bot, token }), { now: d.now(), tz }));
   }
   if (action === "remove") {
     const done = await files.revoke(u, rec.id).catch(() => false);

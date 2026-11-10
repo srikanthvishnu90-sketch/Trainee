@@ -149,9 +149,48 @@ Defined in `scripts/browser-eval/strict.cjs` (branch `bench/browser-strict5`):
   4.6 33.3%, GLM-5 24.2%, Gemini 3 Flash 19.0%, GPT-5.4 6.5% ([R]). The paper notes the same models score 65-75% on
   OSWorld and WebArena ([S], https://arxiv.org/abs/2604.08523).
 - **Unlike ours:** the method is the same idea (live site, block the final write, grade what would have been sent), and
-  its strict score for the best model (24.6%) sits near our 37/220 (16.8%). Differences: a general agent and an LLM
+  its strict score for the best model is 24.6% over 130 general tasks, against our 37/220 (16.8%) on job applications only, so the two do not rank each other. Differences: a general agent and an LLM
   judge, not a production runner and code checks; tasks were filtered to remove paid, geo-restricted and dead sites
   ([S]); job applications are one category among 15, not the whole set.
+
+### ClawBench's job-related tasks, mapped against what our runner may run
+
+Read from the task files in `test-cases/v1` and `test-cases/v2` of https://github.com/reacher-z/ClawBench at commit
+`c8409629` (2026-11-05) ([R]). Licence: Apache-2.0, plus an MIT-licensed task subset (repo `LICENSE`, `NOTICE`), so
+running it is allowed. The 26 tasks are every task whose `metaclass` is `job-search-hr`, `nonprofit-charity` or `jobs`.
+
+| Task (V1 / V2) | What it asks | In scope? | Rule that excludes it |
+|---|---|---|---|
+| 086 / v2-086 | Fill the CodePath Senior Software Engineer application on `job-boards.greenhouse.io` (job 4526154007) from a resume | **yes (1 task, in both versions)** | none: a candidate application on a Greenhouse board our runner opens |
+| 091 / v2-091 | Search Indeed, apply to the top listing | no | never automate Indeed (CLAUDE.md) |
+| 089 / v2-089 | Auto-fill an Amazon application with the Simplify Jobs extension | no | needs a third-party extension; it measures Simplify, not a runner |
+| 565 | Create a Jopwell profile, apply to a fellowship | no | needs an account created; a sign-in is the person's own |
+| 774 / v2-774 | Create a Charity Village account, apply to a job | no | needs an account; the graded request is the sign-in callback itself |
+| 776 / v2-776 | Find a role on Idealist and apply | no | needs an account (graded request is the user dashboard) |
+| 569 | Upload a resume to CareerBuilder, set an alert, complete a profile | no | profile and alert, not an application; needs an account |
+| 570 | Create a Hired candidate profile | no | profile, not an application; needs an account |
+| 566 | Register an employer on ZipRecruiter, post a job | no | employer-side job posting |
+| 571 / v2-571 | Workable free trial, publish a job | no | employer-side job posting |
+| v2-1045, v2-1144, v2-1145 | Post a job on We Work Remotely | no | employer-side job posting |
+| v2-1146 | Save a job on We Work Remotely | no | not an application |
+| 770 | Make-A-Wish volunteer form (Airtable) | no | volunteer form, not a job application |
+| 766, 778 | Donate on MSF, GlobalGiving | no | payment, not an application |
+| 768 | Back an ioby project | no | payment, not an application |
+| v2-1088, v2-1112 | Start or update a Change.org petition | no | not an application |
+
+**The two grader conflicts:**
+1. ClawBench Stage 1 scores a run only when the agent clicks Submit and the final request goes out, where ClawBench's
+   interceptor blocks it and matches it to `eval_schema` (`eval/scoring.md`, [R]). Our dry run stops before the click
+   (agent brief; `strict.cjs`). Scoring it their way means clicking with sends blocked at the network layer, which the
+   brief does not allow. Coordinator ruling 2026-11-10: do not click.
+2. Stage 2's default judge is `deepseek-v4-pro` (`eval/scoring.md`, [R]); our model rule is Claude only. A Claude
+   judge would not be their grader. Coordinator ruling: do not use their judge.
+
+**Conclusion:** ClawBench's job-application slice is one task (086), which cannot support a rate, so no CI run was spent
+on it (coordinator ruling, 2026-11-10). Its 24.6% headline (Claude Opus 4.7, V2, strict rubric) is a general score
+across 130 everyday write tasks (shopping, booking, email and others), graded by an LLM; it is not a job-application
+score and does not rank our runner. The comparable measure stays our strict benchmark over 220 real postings, plus
+the held-out 220 being built (coordinator, 2026-11-10).
 
 ## Commercial job-apply agents: what they publish
 
@@ -174,9 +213,9 @@ stalled on a field, or were handed back. A count with no denominator cannot be c
 1. **No public number is comparable with 37/220.** Every public web benchmark either uses sandbox sites, removes
    impossible tasks, grades with an LLM or a human reading the trajectory, or grades read-only answers. Ours keeps every
    sampled posting in the denominator, grades with code, and requires every filled field read back.
-2. **ClawBench is the one to cite beside ours.** It also blocks the final write on live sites and grades the request,
-   and its strict rubric gives the best model 24.6% (58 of 130 judged). Running our runner on its job-application tasks
-   (if their terms allow) would give the one outside comparison that means something.
+2. **ClawBench is the method to cite, not the number.** It also blocks the final write on live sites and grades the
+   request, but its job-application slice is one task (see the mapping above), and its 24.6% is a general score over
+   130 everyday tasks. Our strict 220, plus the held-out 220 being built, is the comparable measure.
 3. **Report ours in two lines, the way ClawBench does:** strict pass over every sampled posting, and pass over postings
    that were open and reachable. The second number is the one closest in spirit to the public benchmarks that drop
    dead tasks; the first stays the bar.

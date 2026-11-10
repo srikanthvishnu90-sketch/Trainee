@@ -80,6 +80,7 @@ import { APPLY_QUEUE_INTENT, applyManyAsk, applyTurn, EMPLOYER_ANSWER_INTENT, EM
 import { confirmNotRecordedReply, correctionNotRecordedReply, type EvidenceResult, evidenceEntryCorrections, evidenceResumeConfirmation, heldEvents, heldReply, resumeConfirmationContext } from "../_shared/career_router_evidence.ts";
 // FEATURE 9: account memory (stated-fact provenance, standing needs on the router path).
 import { accountMemoryAfterTurn, accountMemoryOn, statedFactsBefore } from "../_shared/career_account_memory.ts";
+import { entryCorrectionFacts, freshStatedFacts, reopenContradicted, reopenedLine } from "../_shared/career_stated_answers.ts";
 import { cloudTurn, supabaseCloudOptinStore } from "../_shared/career_cloud_optin.ts";
 import { CLOUD_CARD_INTENT, cloudCardYesTurn, personCloudCardStore } from "../_shared/career_cloud_card_chat.ts";
 import { boardFetchFeed, supabasePostingsDb, searchWords } from "../_shared/career_ingest.ts"; // FEATURE E2E: boardFetchFeed
@@ -1365,6 +1366,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       } else if (offerAns) { // FEATURE 12: the offer turn's answer; the counter's card rides the reply's meta.
         out = { reply: offerAns.reply, intent: offerAns.intent, resultStatus: offerAns.status, contained: false, handler: "offer", parts: offerAns.parts };
         if (offerAns.card) agentMeta = { offer_card: offerAns.card };
+        if (offerAns.comparison) agentMeta = { ...(agentMeta || {}), offer_comparison: offerAns.comparison }; // LOOP 13: the F-15 File's data
       } else if (outreachStatus) {
         out = { reply: outreachStatus.reply, intent: outreachStatus.intent, resultStatus: outreachStatus.status, contained: false, handler: "outreach_status" };
       } else if (!careerTask && !careerBatch && !researchReplyOn(Deno.env) && researchOverAction(message) && !host.isHostControlled(message, ctx)) {
@@ -1431,28 +1433,29 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         await ledger.record(meter);
         // Architect ruling 3 (2026-11-09): at a limit, the router's own answer stands when it chose a specific intent for THIS message
         // ("what should I wear to a video interview?" -> its interview prep); only its catch-alls and fallback templates are replaced.
+        // Architect amendment (r-states, 2026-11-10; R4, R9, E.6 54): a model outage is held the same way. The router answers only
+        // when it chose a specific intent for this message; its catch-all never answers a different question.
+        const failedTurn = turn.stopped === "model_error" && !turn.tool_calls.some((t) => t.ok && t.effect === "write_own");
+        const heldStop: LimitStop | null = failedTurn ? (limitStop ?? "outage") : null;
         let routedAtLimit: typeof out | null = null;
-        if (turn.stopped === "model_error" && limitStop && !turn.tool_calls.some((t) => t.ok && t.effect === "write_own")) {
+        if (heldStop) {
           await ensurePool();
           const routed = clock.sync("router", () => host.runTurn(message, ctx));
           if (routed.intent && !NOT_AN_ANSWER_AT_LIMIT.has(routed.intent)) routedAtLimit = routed;
         }
         if (routedAtLimit) {
           out = routedAtLimit;
-          agentMeta = { brain: staged.chosen ? "staged" : "agent", stopped: turn.stopped, limit_stop: limitStop, limit_answer: "router", ...replyFlagsMeta(turn as { flags?: unknown }) };
-        } else if (turn.stopped === "model_error" && limitStop && !turn.tool_calls.some((t) => t.ok && t.effect === "write_own")) {
-          // R10 WO-D: a limit, not an outage: what stopped, the task kept for "continue", the next step in the person's zone.
-          // "continue" while the limit still holds keeps the task it already holds.
+          if (limitStop) agentMeta = { brain: staged.chosen ? "staged" : "agent", stopped: turn.stopped, limit_stop: limitStop, limit_answer: "router", ...replyFlagsMeta(turn as { flags?: unknown }) };
+          else console.error("agent brain: model unavailable, answering with the router");
+        } else if (heldStop) {
+          // R10 WO-D: what stopped (a limit, or the outage), the task kept for "continue", the next step in the person's zone.
+          // "continue" while it still holds keeps the task it already holds.
           const kept = (ctx as any).discovery?.heldAtLimit;
           const task = kept?.message && isResume(typedMessage) ? String(kept.message) : String(typedMessage);
           const zone = await readPersonZone(admin, user.id, (ctx as any).profile ?? null);
-          out = { reply: limitHeldReply(task, limitStop, zone, limitRetryAt), intent: HELD_INTENT, resultStatus: "held", contained: false, handler: "limit_held" };
-          (ctx as any).discovery = { ...((ctx as any).discovery ?? {}), heldAtLimit: { message: task.slice(0, 1000), at: Date.now(), stop: limitStop } };
-          agentMeta = { brain: staged.chosen ? "staged" : "agent", stopped: turn.stopped, limit_stop: limitStop, ...replyFlagsMeta(turn as { flags?: unknown }) };
-        } else if (turn.stopped === "model_error" && !turn.tool_calls.some((t) => t.ok && t.effect === "write_own")) {
-          console.error("agent brain: model unavailable, answering with the router");
-          await ensurePool();
-          out = clock.sync("router", () => host.runTurn(message, ctx));
+          out = { reply: limitHeldReply(task, heldStop, zone, limitRetryAt), intent: HELD_INTENT, resultStatus: "held", contained: false, handler: "limit_held" };
+          (ctx as any).discovery = { ...((ctx as any).discovery ?? {}), heldAtLimit: { message: task.slice(0, 1000), at: Date.now(), stop: heldStop } };
+          agentMeta = { brain: staged.chosen ? "staged" : "agent", stopped: turn.stopped, limit_stop: heldStop, ...replyFlagsMeta(turn as { flags?: unknown }) };
         } else {
           // A batch of outreach drafts is shown by code, and its intent makes the next text an answer to it.
           turnPostings = Array.isArray(turn.postings) ? turn.postings : [];
@@ -1494,9 +1497,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
                 n: Number(Deno.env.get("CAREER_JUDGE_N")) || undefined, standing: () => supabaseMemoryStore(admin).standing(user.id) },
               // R10 WO-C (fix 6): each role's application page is re-checked before it is shown (Greenhouse, Lever, Ashby and
               // SmartRecruiters public boards by id; any other link by fetching it). The checked time is said in the person's zone.
-              // Only when the person asked for open or verified roles (SearchAsk.verify); otherwise each is said to be not re-checked.
+              // Architect ruling E.21 (release item 8; tests/architect/loop-08-discovery.test.ts): EVERY search re-checks the postings
+              // it shows, only those (at most the count asked, never more than 10; a closed one's place goes to the next one, at most
+              // 10 pages read), each on its own posting page by id; no board listing is read (Ashby by its posting page). None is
+              // called open unless its check passed.
               canSubmit: canSubmitByHost, // R10 owner ruling (apply by message and yes): the posting's own host decides the label
-              openCheck: f5Ask.verify ? linkChecker(fetch, { userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }) : null,
+              openCheck: linkChecker(fetch, { ashby: "posting", userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }),
               tz: f5Zone?.tz ?? null, want: f5Ask.want ?? wantOf(message) }));
             // F.1: the blocker question gets the evidenced blocker: a source that could not be read is a connection problem.
             if (!found && f5Said?.explain) out = { ...out, intent: "career_discovery", resultStatus: "blocked", handler: "search_judge",
@@ -1683,6 +1689,16 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         if (mem?.patch) out = { ...out, ...mem.patch };
       }
       // END FEATURE 9
+      // Release item 9: a fact this turn recorded (sponsorship or graduation date said in chat, or a confirmed education entry's
+      // date corrected) that contradicts the person's earlier answer to an employer's question reopens that answer, so it is
+      // asked again and never reused (career_stated_answers.ts).
+      if (out.handler !== "agent") {
+        const fresh = [...freshStatedFacts(statedFactsBefore(loaded.account, loaded.snapshot), (ctx as any).statedFacts?.facts), ...entryCorrectionFacts(confirmEvents.rows())];
+        if (fresh.length) {
+          const line = reopenedLine(await reopenContradicted(admin, user.id, fresh, Date.now()).catch((e) => { console.error("career stated answers:", e?.message ?? e); return null; }));
+          if (line) out = { ...out, reply: `${out.reply}\n${line}`, ...(out.parts ? { parts: [...out.parts, line] } : {}) };
+        }
+      }
       // BETA C03 / A15.1 (career_prep_file.ts): the router's interview prep File (result.file) is stored as a File for this person
       // and its signed link is sent after the summary; when it cannot be made, the reply says so and gives the page as text.
       if (out.handler !== "agent" && !careerTask && !careerBatch) {

@@ -40,6 +40,8 @@ import { telegramAdapter } from "../../supabase/functions/_shared/telegram.ts";
 import { textingNativeOn } from "../../supabase/functions/_shared/channel_voice.ts";
 import * as IN from "../../supabase/functions/_shared/channel_inbound.ts";
 import { hashTag, refOf } from "../../supabase/functions/_shared/telegram_jobs.ts";
+// architect amendment E.21 (2026-11-10): a search's posting-page checks are held to helpers/posting_checks.ts (no board listing, at most N for the N shown, never over 10); every other off-machine request is still a fault.
+import { postingChecks } from "./helpers/posting_checks.ts";
 
 const CI = Deno.env.get("CI") === "true";
 const N = Number(Deno.env.get("TG3_FLOW_N") || 55);
@@ -82,11 +84,12 @@ Deno.test({
       const clock = { get t() { return now(); } };
       const sleep = async (ms: number) => { skew += ms; };
       const B = bot(clock as { t: number });
-      const viaDouble = globalThis.fetch, outbound: string[] = [];
+      const viaDouble = globalThis.fetch, outbound: string[] = [], checks = postingChecks();
       globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
         const u = new URL(input instanceof Request ? input.url : String(input));
         if (u.origin === new URL(SUPABASE_URL).origin) return await viaDouble(input as any, init);
         if (u.host === "api.telegram.org") return await B.fetch(input as any, init);
+        if (checks.take(init?.method ?? (input instanceof Request ? input.method : "GET"), u.href)) throw new TypeError(`network refused: ${u.host}`);
         outbound.push(`${u.host}`);
         throw new TypeError(`network refused: ${u.host}`);
       }) as typeof fetch;
@@ -124,8 +127,10 @@ Deno.test({
         const id = again ?? ++upd;
         const raw = again ? raws.get(again)! : JSON.stringify({ update_id: id, ...body });
         raws.set(id, raw);
-        const res = await handleTelegram(new Request(`${SUPABASE_URL}/functions/v1/trainee-telegram`, { method: "POST", headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": SECRET }, body: raw }),
-          { env, now, store: () => supabaseInboundStore(admin), chat, admin, deliver, adapter: adapterOf });
+        const chatOf = (raw: string) => { try { const b = JSON.parse(raw); return Number((b.message ?? b.edited_message ?? b.callback_query?.message)?.chat?.id ?? 0); } catch { return 0; } };
+        const c = chatOf(raw), k = B.to(c).length;
+        const res = await checks.turn(`update ${id}`, () => handleTelegram(new Request(`${SUPABASE_URL}/functions/v1/trainee-telegram`, { method: "POST", headers: { "content-type": "application/json", "x-telegram-bot-api-secret-token": SECRET }, body: raw }),
+          { env, now, store: () => supabaseInboundStore(admin), chat, admin, deliver, adapter: adapterOf }), () => B.to(c).slice(k).map(plainOf).join("\n"));
         const text = await res.text();
         if (res.status !== 200) fail("webhook", `HTTP ${res.status} ${text.slice(0, 160)}`);
         if (text.includes(TOKEN) || text.includes(SECRET)) fail("webhook", "a response carries a secret");
@@ -294,6 +299,7 @@ Deno.test({
       for (const v of B.problems()) fail("Bot API", v);
       if (B.msgs.some((x) => Number(x.chat) < 0)) fail("Bot API", "a message to a group");
       if (outbound.length) fail("network", [...new Set(outbound)].join(", "));
+      for (const f of checks.faults) fail("network", f);
       const secrets = logged.filter((l) => l.includes(TOKEN) || l.includes(SECRET));
       if (secrets.length) fail("logs", `${secrets.length} log lines carry a secret`);
       for (const k of Object.keys(realLog) as (keyof typeof realLog)[]) console[k] = realLog[k];

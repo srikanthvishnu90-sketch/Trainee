@@ -32,6 +32,8 @@ import { chatThroughAgent, deliverer } from "../../supabase/functions/_shared/ch
 import { supabaseInboundStore } from "../../supabase/functions/trainee-inbound/store.ts";
 import { RELEASE_FLAGS, RELEASE_NEVER_ON, RELEASE_PENDING, releaseFlagOn, releaseValue } from "../../supabase/functions/agent-chat/release_config.ts";
 import { anthropicWire } from "./helpers/anthropic_wire.ts";
+// architect amendment E.21 (2026-11-10): a search's posting-page checks are held to helpers/posting_checks.ts (no board listing, at most N for the N shown, never over 10); every other off-machine request is still a fault.
+import { postingChecks } from "./helpers/posting_checks.ts";
 
 // Steps the code cannot pass yet (shrink-only; each names what fails today).
 export const KNOWN_GAP: readonly string[] = [
@@ -107,7 +109,7 @@ Deno.test({
       const { handleChat } = await import("../../supabase/functions/agent-chat/handler-career.ts");
       const pace = virtualClock(); // the send pacing's clock (tests/flow/virtual-clock.ts): Telegram's one-a-second per chat is still computed and waited, on this clock, not the wall
       const bot = fakeBot({ token: TOKEN, now: pace.clock });
-      const viaDouble = globalThis.fetch, outbound: string[] = [];
+      const viaDouble = globalThis.fetch, outbound: string[] = [], checks = postingChecks();
       globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
         const req = input instanceof Request && !init ? input : new Request(input as any, init);
         const u = new URL(req.url);
@@ -115,6 +117,7 @@ Deno.test({
         if (u.origin === new URL(SUPABASE_URL).origin) return await viaDouble(req);
         if (u.host === "api.telegram.org") return await bot.fetch(req);
         if (u.host === "api.anthropic.com") return anthropicWire(req, (chat) => fakeModel(chat));
+        if (checks.take(req.method, req.url)) throw new TypeError(`network refused: ${u.host}`);
         outbound.push(`${req.method} ${u.host}${u.pathname}`);
         throw new TypeError(`network refused: ${u.host}`);
       }) as typeof fetch;
@@ -150,7 +153,7 @@ Deno.test({
       };
       const say = async (words: string) => {
         const before = bot.to(CHAT).length;
-        const id = await post({ message: { message_id: ++mid, chat: { id: CHAT, type: "private" }, from: { id: CHAT, is_bot: false, first_name: "TEST" }, date: 1, text: words } });
+        const id = await checks.turn(words, () => post({ message: { message_id: ++mid, chat: { id: CHAT, type: "private" }, from: { id: CHAT, is_bot: false, first_name: "TEST" }, date: 1, text: words } }), () => bot.to(CHAT).slice(before).map(plainOf).join("\n\n"));
         const msgs = bot.to(CHAT).slice(before);
         ok(msgs.length >= 1, `Trainee answered "${words.slice(0, 60)}"`);
         return { id, msgs, reply: msgs.map(plainOf).join("\n\n"), buttons: msgs.flatMap((m) => m.buttons) as { text: string; callback_data?: string; url?: string }[] };
@@ -267,7 +270,7 @@ Deno.test({
         Deno.env.set("TRAINEE_ALLOWED_CONTACTS", `telegram:${CHAT},telegram:${other}`);
         const send = async (words: string) => {
           const before = bot.to(other).length;
-          await post({ message: { message_id: ++mid, chat: { id: other, type: "private" }, from: { id: other, is_bot: false, first_name: "TEST" }, date: 1, text: words } });
+          await checks.turn(words, () => post({ message: { message_id: ++mid, chat: { id: other, type: "private" }, from: { id: other, is_bot: false, first_name: "TEST" }, date: 1, text: words } }), () => bot.to(other).slice(before).map(plainOf).join("\n\n"));
           return bot.to(other).slice(before).map(plainOf).join("\n\n");
         };
         await send("hi");
@@ -406,6 +409,7 @@ Deno.test({
 
       ok(bot.violations.length === 0, `every message valid for Telegram: ${bot.violations.slice(0, 3).join(" | ")}`);
       eq(outbound, [], "nothing left the machine");
+      eq(checks.faults, [], "a search checks at most the postings it shows, each on its own page");
     } finally {
       for (const r of results) console.log(`TELEGRAM_ACCEPTANCE ${r.id} ${r.outcome}${r.why ? `: ${r.why}` : ""}`);
       const gapsNowPassing = results.filter((r) => r.outcome === "KNOWN_GAP NOW PASSES").map((r) => r.id);

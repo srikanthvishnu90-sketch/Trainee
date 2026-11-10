@@ -147,11 +147,21 @@ function mem(state: Partial<Record<ProviderId, ProviderState>> = {}) {
   return d;
 }
 const get = (d: ConnectDeps, url: string, headers: Record<string, string> = {}) => handleConnect(new Request(url, { headers: { "user-agent": BROWSER, ...headers } }), d);
+// Architect amendment, security: link scanners (x-audit, coordinator ruling 2026-11-10). A GET of the link draws the open page
+// (200, nothing used up); its one button POSTs the link with the page token, which takes the link: 303 + cookie, once.
+async function tap(d: ConnectDeps, url: string) {
+  const shown = await get(d, url);
+  if (shown.status !== 200) return shown;
+  const html = await shown.text();
+  const link = /name="link" value="([^"]+)"/.exec(html)?.[1], pt = /name="pt" value="([^"]+)"/.exec(html)?.[1];
+  if (!link || !pt) return new Response(html, { status: 299 });
+  return handleConnect(new Request(url.split("?")[0], { method: "POST", headers: { "user-agent": BROWSER, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ link, pt }).toString() }), d);
+}
 
 Deno.test("every page the handler serves wears the design, with the same safe headers; a link opens once and never stays in the URL", async () => {
   const d = mem();
   const tok = (await mintConnectToken({ secret: SECRET, userId: U, reason: "confirm", channel: "telegram", now: NOW, kind: "l" }))!;
-  const first = await get(d, `${BASE}?t=${encodeURIComponent(tok)}`);
+  const first = await tap(d, `${BASE}?t=${encodeURIComponent(tok)}`);
   eq(first.status, 303);
   eq(first.headers.get("location"), "/connect", "redirected to a clean URL");
   assert(!(first.headers.get("location") ?? "").includes("c1.") && /HttpOnly/.test(first.headers.get("set-cookie") ?? ""));
@@ -165,7 +175,7 @@ Deno.test("every page the handler serves wears the design, with the same safe he
   eq(page.headers.get("referrer-policy"), "no-referrer");
   eq(page.headers.get("cache-control"), "no-store");
   // The states a handler answers with: each wears the design and has no button.
-  const used = await get(d, `${BASE}?t=${encodeURIComponent(tok)}`);
+  const used = await tap(d, `${BASE}?t=${encodeURIComponent(tok)}`);
   eq(used.status, 410);
   const usedHtml = await used.text();
   assert(usedHtml.includes(CONNECT_CSS) && /already used/.test(usedHtml) && !/<button/.test(usedHtml) && /Ask Trainee in Telegram/.test(usedHtml), "a used link: the reason and the way forward in plain words");
@@ -183,13 +193,13 @@ Deno.test("every page the handler serves wears the design, with the same safe he
   const crawl = await handleConnect(new Request(`${BASE}?t=${encodeURIComponent(tok2)}`, { headers: { "user-agent": "TelegramBot (like TwitterBot)" } }), d);
   const crawlHtml = await crawl.text();
   assert(crawl.status === 200 && crawlHtml.includes(CONNECT_CSS) && /Submitted - confirmed/.test(crawlHtml) && !crawlHtml.includes(tok2), "the preview card: no token, no person");
-  eq((await get(d, `${BASE}?t=${encodeURIComponent(tok2)}`)).status, 303, "and it still opens afterward");
+  eq((await tap(d, `${BASE}?t=${encodeURIComponent(tok2)}`)).status, 303, "and it still opens afterward");
 });
 
 Deno.test("Continue starts consent from the session only and answers JSON for the page's script; the provider's URL carries no Trainee token", async () => {
   const d = mem();
   const tok = (await mintConnectToken({ secret: SECRET, userId: U, reason: "confirm", channel: "telegram", now: NOW, kind: "l" }))!;
-  const cookie = ((await get(d, `${BASE}?t=${encodeURIComponent(tok)}`)).headers.get("set-cookie") ?? "").split(";")[0];
+  const cookie = ((await tap(d, `${BASE}?t=${encodeURIComponent(tok)}`)).headers.get("set-cookie") ?? "").split(";")[0];
   // Architect amendment, security (item 14, 2026-11-10): the page's forms carry a page token bound to the HttpOnly cookie, posted with it.
   const pageToken = (await connectPageToken(cookie.slice("tc_s=".length), SECRET))!;
   const r = await handleConnect(new Request(BASE, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json", cookie }, body: new URLSearchParams({ t: pageToken, action: "start", provider: "google" }).toString() }), d);
@@ -325,6 +335,9 @@ Deno.test({
           const pg = await ctx.newPage();
           try {
             await pg.goto(`${origin}/?t=${encodeURIComponent(link)}`);
+            // Architect amendment, security: link scanners (x-audit, coordinator ruling 2026-11-10): the link opens a page with one
+            // button and uses nothing up; the person's tap on it takes the link (303 to the clean URL).
+            await Promise.all([pg.waitForNavigation({ waitUntil: "domcontentloaded" }), pg.click("form.open button.primary")]);
             assert(!pg.url().includes("c1."), `the token is not left in the address bar (${pg.url()})`);
             assert(expect.test(await pg.textContent("main") ?? ""), `${label}: ${expect}`);
             const m = await pg.evaluate(MEASURE), bad: string[] = [];

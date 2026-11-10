@@ -2,8 +2,10 @@
 // every migration (tests/flow/handler.ts), a scripted Anthropic endpoint (no spend) and a fake Gmail at the HTTP boundary
 // (tests/flow/send-rail-fixture.ts). No real message is ever sent: every send goes through the rail's worker to the fake
 // Gmail, and test mode (CAREER_CONTACT_TEST_RECIPIENTS) addresses every card to the owner's test address only.
-// People come from fixture sources: each company's own team page, read by the real pipeline (career_contact_pipeline.ts
-// resolveContact) through the real web gate (robots.txt first), its fixture MX and RCPT answers. No web search is wired.
+// People come from fixture sources: each company's own team page, a page the person gave (supplied_by "person"), read by
+// the real pipeline (career_contact_pipeline.ts resolveContact) through the real web gate (robots.txt first), its fixture
+// MX and RCPT answers. No web search is wired. A contact the pipeline found itself (supplied_by "search") is refused while
+// CAREER_PEOPLE_SEARCH is off; the last step checks that.
 //
 // Each journey is scored on six properties; the bar is in BAR below and printed as one line per journey plus a total:
 //   sourced    every contact saved names a person found on the page it cites (no person from nowhere)
@@ -14,25 +16,26 @@
 //   new yes    a draft that changed after it was shown is never sent on the earlier yes
 //   exact      every sent mail's sha256([to, subject, text]) is the approved hash and its bytes are the card's: bar 100%
 //
-// The flag configuration is D-048 option (a): CAREER_CONTACT_OUTREACH on, in test mode; CAREER_PEOPLE_SEARCH stays off.
+// The flag configuration is D-048 option (a) (architect amendment 2026-11-10): CAREER_CONTACT_OUTREACH on, in test mode;
+// CAREER_PEOPLE_SEARCH stays off, so only person-supplied recipients can be sent to.
 // LOOP05_PEOPLE_SEARCH=on adds CAREER_PEOPLE_SEARCH for a diagnostic run (not the scored configuration).
-// Run: deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/pending/loop-05-outreach.test.ts
+// Run: deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/loop-05-outreach.test.ts
 // deno-lint-ignore-file no-explicit-any
 import assertNode from "node:assert/strict";
-import { pgBinDir, type Pg, startPg } from "../../flow/pg.ts";
-import { careerHandler, type Chat, supabaseParity } from "../../flow/handler.ts";
-import { PgConn } from "../../flow/pgwire.ts";
-import { FakeGmail, railDeps } from "../../flow/send-rail-fixture.ts";
-import { anthropicWire } from "../helpers/anthropic_wire.ts";
-import type { Fetcher } from "../../../supabase/functions/_shared/contact_sources/web_gate.ts";
-import { runSendWorker } from "../../../supabase/functions/_shared/career_send_rail.ts";
-import { contactGate, contactUserAgent, PoliteApi } from "../../../supabase/functions/_shared/career_contact_sources.ts";
-import { resolveContact } from "../../../supabase/functions/_shared/career_contact_pipeline.ts";
-import type { RcptProbe } from "../../../supabase/functions/_shared/career_contact_email.ts";
+import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
+import { careerHandler, type Chat, supabaseParity } from "../flow/handler.ts";
+import { PgConn } from "../flow/pgwire.ts";
+import { FakeGmail, railDeps } from "../flow/send-rail-fixture.ts";
+import { anthropicWire } from "./helpers/anthropic_wire.ts";
+import type { Fetcher } from "../../supabase/functions/_shared/contact_sources/web_gate.ts";
+import { runSendWorker } from "../../supabase/functions/_shared/career_send_rail.ts";
+import { contactGate, contactUserAgent, PoliteApi } from "../../supabase/functions/_shared/career_contact_sources.ts";
+import { resolveContact } from "../../supabase/functions/_shared/career_contact_pipeline.ts";
+import type { RcptProbe } from "../../supabase/functions/_shared/career_contact_email.ts";
 
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
 const CI = Deno.env.get("CI") === "true";
-const ROOT = new URL("../../..", import.meta.url).pathname.replace(/\/$/, "");
+const ROOT = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
 const RESUME = await Deno.readTextFile(`${ROOT}/packages/career-data/fixtures/test-resume.txt`);
 const POSTAL = "Trainee test sender, 100 Main St, Chicago, IL 60601";
 const SIG = "Alex Testcase";
@@ -236,7 +239,7 @@ Deno.test({ name: "loop 05: 20 outreach journeys through the real handler, score
       const r = await resolveContact({ company: j.company.name, domain: j.company.domain, name: j.ask.name ?? null, title: j.ask.title ?? null, employees: j.company.employees ?? null }, w.deps);
       const saved: any[] = [];
       if (r.ok) {
-        const id = (await svc.rpc("career_contact_save", { p: { user: u, person: r.person, facts: r.facts, email: r.email, expires_at: r.expires_at } })).data as string;
+        const id = (await svc.rpc("career_contact_save", { p: { user: u, person: { ...r.person, supplied_by: "person" }, facts: r.facts, email: r.email, expires_at: r.expires_at } })).data as string;
         saved.push({ id, ...r });
       } else notes.push(`resolve: ${r.why}`);
       const x: Ctx = { chat, u, say, cards: [], approved: [], note: (s) => notes.push(s), sql,
@@ -286,6 +289,21 @@ Deno.test({ name: "loop 05: 20 outreach journeys through the real handler, score
       const onlyOwner = sent.every((m) => m.to === OWNER);
       rows.push({ id: j.id, what: j.what, expect: j.expect, sourced, guessed, invented, approval, newYes, exact, onlyOwner, sent: sent.length, wantSends, notes });
     }
+    // A contact the pipeline found by itself (supplied_by "search"): with people search off, no card and nothing queued.
+    let searchOff = "not run";
+    {
+      const token = "tok-l5-1", u = PEOPLE[token], chat = h.chat(token);
+      const c = co(21, { target: "Uma Reed", mailto: "published" }), w = world(c);
+      const r = await resolveContact({ company: c.name, domain: c.domain, name: "Uma Reed" }, w.deps);
+      if (r.ok) {
+        await svc.rpc("career_contact_save", { p: { user: u, person: r.person, facts: r.facts, email: r.email, expires_at: r.expires_at } });
+        const before = Number(await sql(`select count(*) from public.career_send_queue where user_id = '${u}'`));
+        const s = await chat.say("email Uma Reed");
+        const y = await chat.say("yes");
+        const after = Number(await sql(`select count(*) from public.career_send_queue where user_id = '${u}'`));
+        searchOff = `${s.resultStatus}/${y.resultStatus ?? y.intent}/queued+${after - before}`;
+      }
+    }
     // ---- report
     console.log(`LOOP05 config: CAREER_CONTACT_OUTREACH=on, CAREER_PEOPLE_SEARCH=${diagnostic ? "on (diagnostic)" : "off"}, test mode to ${OWNER}`);
     for (const r of rows) {
@@ -295,7 +313,8 @@ Deno.test({ name: "loop 05: 20 outreach journeys through the real handler, score
     const tot = { invented: rows.reduce((a, r) => a + r.invented, 0), guessed: rows.reduce((a, r) => a + r.guessed, 0), exact: sendJ.filter((r) => r.exact).length,
       sourced: rows.filter((r) => r.sourced).length, approval: rows.filter((r) => r.approval).length, newYes: rows.filter((r) => r.newYes).length, none: rows.filter((r) => r.expect === "none" && r.exact).length };
     const exactPct = Math.round((100 * tot.exact) / sendJ.length);
-    console.log(`LOOP05 TOTAL invented=${tot.invented} guessed=${tot.guessed} exact_sends=${tot.exact}/${sendJ.length} (${exactPct}%) nothing_sent_when_refused=${tot.none}/${rows.length - sendJ.length} sourced=${tot.sourced}/20 approval=${tot.approval}/20 new_yes=${tot.newYes}/20 leaked_calls=${leaked.length}`);
+    console.log(`LOOP05 TOTAL invented=${tot.invented} guessed=${tot.guessed} exact_sends=${tot.exact}/${sendJ.length} (${exactPct}%) nothing_sent_when_refused=${tot.none}/${rows.length - sendJ.length} sourced=${tot.sourced}/20 approval=${tot.approval}/20 new_yes=${tot.newYes}/20 leaked_calls=${leaked.length} search_found=${searchOff}`);
+    ok(diagnostic || /^search_off\/[^/]+\/queued\+0$/.test(searchOff), `a search-found contact is refused with people search off: ${searchOff}`);
     ok(rows.every((r) => r.onlyOwner), "test mode: nothing went anywhere but the owner's test address");
     ok(!leaked.length, `no call left the test: ${leaked.join(", ")}`);
     ok(tot.invented <= BAR.invented, `invented ${tot.invented}`);

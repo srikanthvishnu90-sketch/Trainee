@@ -1,7 +1,7 @@
 // CONTACT OUTREACH, release 10 (connector wiring): the chat turn that puts a stored contact's email on a card and sends
-// exactly that card on the person's yes. Behind CAREER_PEOPLE_SEARCH and CAREER_CONTACT_OUTREACH (both, RELEASE_NEVER_ON:
-// off until the owner turns them on). Off, the turn claims nothing except a yes to a card shown while it was on, and that
-// yes is refused: nothing is saved, queued or sent.
+// exactly that card on the person's yes. Behind CAREER_CONTACT_OUTREACH; a contact the pipeline found itself also needs
+// CAREER_PEOPLE_SEARCH, and one the person supplied (supplied_by "person") does not (D-048 option a, contactSendOn). Off, the
+// turn claims nothing except a yes to a card shown while it was on, and that yes is refused: nothing is saved, queued or sent.
 //   show   "email Jane Doe" / "email Jane Doe at Acme with 2 follow-ups": a contact the person resolved earlier
 //          (career_contact_profiles, by name), drafted from cited facts and the person's confirmed facts only
 //          (career_contact_draft.ts), put on a card (career_contact_send.ts contactCard). The card rides the reply's meta
@@ -18,7 +18,7 @@
 //          sends from Trainee's own identity. Never to a no-reply, role or ATS/job-board inbox (automated_inbox.ts), and
 //          never to an address off the contact's own company domain.
 // Every failure fails closed: an unreadable store, a model error, a check that does not pass, a rail refusal.
-import { contactOutreachOn, type ContactStore, emailHash } from "./career_contact_pipeline.ts";
+import { contactAskOn, type ContactStore, contactSendOn, emailHash } from "./career_contact_pipeline.ts";
 import { approveContactCard, cardHash, type ContactCard, contactCard, FOLLOWUPS_MAX, followupOk, footerFor, sendConfig, type SendConfig, type SendLimits } from "./career_contact_send.ts";
 import { asData, checkContactDraft, type ContactDraft, type ContactIn, draftContactEmail, PROMPT_FACTS } from "./career_contact_draft.ts";
 import { messageOf, type ModelFn, type OutreachStore, payloadHash, type Recipient } from "./career_outreach.ts";
@@ -114,10 +114,12 @@ async function stale(shown: ShownCard, c: ContactIn, cfg: SendConfig, signature:
   return card.hash === (await cardHash(mails)) ? null : "changed";
 }
 
+// A contact the pipeline found itself, while people search is switched off (D-048 option a).
+const SEARCH_OFF = (name: string, tail: string) => `I found ${name} by searching, and searching for people is switched off here, so I won't email them. ${tail} If you have their work address or a page that names them, send it to me.`;
 const toContactIn = (r: { person: any; facts: any[]; email: any; expires_at: string }): ContactIn => ({ person: r.person, facts: r.facts ?? [], email: r.email ?? { email: null, method: null, score: 0, approvable: false, why: "" }, expires_at: r.expires_at });
 
 export async function contactTurn(o: { message: string; userId: string; now: number; deps: ContactTurnDeps }): Promise<ContactTurnOut | null> {
-  const d = o.deps, on = contactOutreachOn({ get: d.env });
+  const d = o.deps, on = contactAskOn({ get: d.env });
   const ask = contactAsk(o.message);
   if (ask) return on ? await show(o, ask) : null;
   const yes = contactYes(o.message);
@@ -127,13 +129,14 @@ export async function contactTurn(o: { message: string; userId: string; now: num
   if (!last || !shown || typeof shown !== "object" || !shown.card || typeof shown.contact_id !== "string") return null;
   const refuse = (status: string, reply: string): ContactTurnOut => ({ reply, intent: CONTACT_SEND_INTENT, status });
   // Read fresh at the yes: a switch turned off since the card was shown refuses it.
-  const cfg = sendConfig(d.env, on);
   if (!on) return refuse("off", "Contact outreach is switched off, so nothing was sent.");
   if (yes.code && !String(shown.card.hash ?? "").startsWith(yes.code)) return refuse("changed", "That code isn't the card I showed last, so nothing was sent.");
   if (o.now - last.at > YES_WINDOW_MS || o.now < last.at) return refuse("expired", `That card was shown too long ago to approve with a text, so nothing was sent. Ask me to email ${shown.card.found ? "them" : "this person"} again for a fresh card.`);
   const row = await d.contacts.get(o.userId, shown.contact_id);
   if (!row) return refuse("gone", "I no longer have that contact, so nothing was sent.");
   const contact = toContactIn(row);
+  if (!contactSendOn({ get: d.env }, row.person?.supplied_by)) return refuse("off", SEARCH_OFF(contact.person.name, "Nothing was sent."));
+  const cfg = sendConfig(d.env, true);
   const bad = addressProblem(contact);
   if (bad) return refuse("not_a_person", `${bad} Nothing was sent.`);
   if (await stale(shown, contact, cfg, await d.signature(o.userId), await d.senderFacts())) {
@@ -157,6 +160,7 @@ async function show(o: { userId: string; now: number; deps: ContactTurnDeps }, a
   if (!row) return null;
   const contact = toContactIn(row);
   const card = (status: string, reply: string): ContactTurnOut => ({ reply, intent: CONTACT_CARD_INTENT, status });
+  if (!contactSendOn({ get: d.env }, row.person?.supplied_by)) return card("search_off", SEARCH_OFF(contact.person.name, "There's nothing to approve."));
   const bad = addressProblem(contact);
   if (bad) return card("not_a_person", bad);
   const seen = contact.email.email ? await d.limits.sentOn(o.userId, await emailHash(contact.email.email)) : null;
@@ -166,7 +170,7 @@ async function show(o: { userId: string; now: number; deps: ContactTurnDeps }, a
   if (!drafted.ok) return card(`draft_${drafted.why}`, `I couldn't write an email to ${contact.person.name} that passes every check (${drafted.detail.slice(0, 3).join("; ")}), so there's nothing to approve.`);
   const fus = await draftFollowups(d.model, contact, drafted.draft, ask.followups);
   if (!fus) return card("bad_followup", "I couldn't write follow-ups that pass the rules (short, one question, no links or sales words), so there's nothing to approve.");
-  const made = await contactCard({ contact, draft: drafted.draft, signature: await d.signature(o.userId), followups: fus, config: sendConfig(d.env, contactOutreachOn({ get: d.env })), suppressed: (es) => d.contacts.suppressed(es) });
+  const made = await contactCard({ contact, draft: drafted.draft, signature: await d.signature(o.userId), followups: fus, config: sendConfig(d.env, contactSendOn({ get: d.env }, row.person?.supplied_by)), suppressed: (es) => d.contacts.suppressed(es) });
   if (!made.ok) return card(made.why, made.reply);
   const boxes = await d.mailboxes(o.userId);
   const shown: ShownCard = { contact_id: ids[0], hook: drafted.draft.hook, card: made };

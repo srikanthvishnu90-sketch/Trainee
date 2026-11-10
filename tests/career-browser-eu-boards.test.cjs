@@ -52,6 +52,11 @@ const routes = {
     <label for="em">Email*</label><input id="em" type="email" name="candidate[email]" required>
     <div class="up"><label for="cv">Upload CV*Required</label><input id="cv" type="file" required style="opacity:0;width:600px;height:60px"></div><button type="submit">Send application</button></form>
     <script>document.getElementById("cv").addEventListener("change", (e) => { fetch("/uploads/presigned_data", { method: "POST", body: "{}" }).catch(() => {}); e.target.remove(); });</script>`),
+  // Personio-like: once the resume is attached the form inserts a box at its top; answers already filled keep their numbers.
+  "/job/88/apply": () => page(`<form id="f"><label for="a">Vorname *</label><input id="a" name="first_name" required><label for="b">Nachname *</label><input id="b" name="last_name" required>
+    <label for="c">E-Mail *</label><input id="c" type="email" name="email" required><label for="cv">Lebenslauf *</label><input id="cv" type="file" name="cv" required>
+    <button type="submit">Bewerbung senden</button></form>
+    <script>document.getElementById("cv").addEventListener("change", () => { const l = document.createElement("label"); l.htmlFor = "x"; l.textContent = "Weitere Dokumente"; const i = document.createElement("input"); i.id = "x"; i.name = "other"; const f = document.getElementById("f"); f.prepend(i); f.prepend(l); });</script>`),
   "/o/nl": () => page(`<h1>Vacature</h1><button type="button">Solliciteren</button>`),
   "/o/nl/c/new": () => RC_FORM(NL),
   "/o/lv": () => page(`<h1>Vakance</h1>`),
@@ -152,4 +157,10 @@ test("a stop at Submit is a pass only with a person field read back, a Submit th
   for (const w of ["Log in", "Iniciar sesión", "Sign in", "Prisijungti", "Anmelden"]) assert.equal(falsePass({ fields: [email], submit: w, password_field: false }, facts), "submit_is_login", w);
   assert.equal(falsePass({ fields: [email], submit: "Submit", password_field: true }, facts), "password_field_shown");
   assert.equal(falsePass(undefined, facts), "no_audit");
+});
+
+test("a box that appears after the upload does not renumber filled answers: the last look reads the person's own fields", { skip }, async () => {
+  const r = await run("personio", "/job/88/apply");
+  assert.equal(r.result, "pass", JSON.stringify({ reason: r.reason, audit: r.audit }));
+  assert.deepEqual(posts, []);
 });

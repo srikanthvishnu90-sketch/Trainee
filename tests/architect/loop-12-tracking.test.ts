@@ -35,7 +35,7 @@ const hex = async (s: string) => [...new Uint8Array(await crypto.subtle.digest("
 const lit = (s: string | null) => (s === null ? "null" : `'${s.replace(/'/g, "''")}'`);
 
 // ---------------------------------------------------------------------------------------------- the applications
-type Want = "confirmed" | "rejected" | "interview" | "replied" | "submitted" | "page_only" | "unknown" | "not_sent";
+type Want = "confirmed" | "rejected" | "interview" | "replied" | "submitted" | "page_only" | "unknown" | "not_sent" | "approved" | "sending" | "needs_you" | "code";
 interface App { key: string; id: string; company: string; title: string; state: string; reason?: string; confirmation_id?: string; want: Want }
 const id = (n: number) => `00000000-0000-4000-8000-0000000c12${String(n).padStart(2, "0")}`;
 const APPS: App[] = [
@@ -49,6 +49,14 @@ const APPS: App[] = [
   { key: "grove", id: id(8), company: "Grove Bank", title: "Risk Analyst", state: "unknown_outcome", want: "unknown" },
   { key: "hazel", id: id(9), company: "Hazel Foods", title: "Supply Chain Analyst", state: "not_submitted", reason: "POSTING_CLOSED", want: "not_sent" },
   { key: "iris", id: id(10), company: "Iris Labs", title: "Research Assistant", state: "submitted_unconfirmed", want: "submitted" },
+  // From Agent 3's draft: the states before and around a send, and a sender that only looks like the employer.
+  { key: "juniper", id: id(11), company: "Juniper Co", title: "Data Engineer", state: "queued", want: "approved" },
+  { key: "kapok", id: id(12), company: "Kapok Co", title: "Junior Analyst", state: "driving", want: "sending" },
+  { key: "larch", id: id(13), company: "Larch Co", title: "Pricing Analyst", state: "needs_user", reason: "captcha", want: "needs_you" },
+  { key: "maple", id: id(14), company: "Maple Works", title: "Analytics Engineer", state: "needs_user", reason: "email_code", want: "code" },
+  { key: "nutmeg", id: id(15), company: "Nutmeg Co", title: "Finance Analyst", state: "failed", reason: "no_application_form_found", want: "not_sent" },
+  { key: "oak_a", id: id(16), company: "Oak Partners", title: "Supply Chain Analyst", state: "submitted_unconfirmed", want: "submitted" },
+  { key: "oak_b", id: id(17), company: "Oak Partners", title: "Demand Planning Analyst", state: "submitted_unconfirmed", want: "submitted" },
 ];
 const SENT_AT = NOW - 4 * DAY;
 
@@ -72,6 +80,12 @@ const MAILS: Mail[] = [
     snippet: "Could you send us a copy of your unofficial transcript so we can continue reviewing your application for the Research Assistant role?", at: NOW - 1 * DAY, to: null },
   { key: "hazel_rejection", ...viaAts("Hazel Foods"), subject: "Your application to Hazel Foods",
     snippet: "Thank you for your interest in the Supply Chain Analyst position. Unfortunately, we have decided to move forward with other candidates.", at: NOW - 2 * DAY, to: null },
+  // A receipt that names no role fits both Oak Partners applications: neither is confirmed (the person is asked which).
+  { key: "oak_receipt", ...viaAts("Oak Partners"), subject: "Thank you for applying to Oak Partners",
+    snippet: "We have received your application and will review it shortly.", at: NOW - 3 * DAY, to: null },
+  // A Gmail address using Elm Retail's name: nothing vouches for it, so it confirms nothing.
+  { key: "elm_lookalike", from: "Elm Retail Careers <elmretail.careers@gmail.com>", auth: authFor("gmail.com"), subject: "Thank you for applying to Elm Retail",
+    snippet: "We have received your application for the UX Designer role and will review it shortly.", at: NOW - 3 * DAY, to: null },
   { key: "newsletter", from: "Hollow Weekly <news@hollowweekly.example>", auth: authFor("hollowweekly.example"), subject: "This week's top 10 productivity tips",
     snippet: "Read our latest blog posts and unsubscribe any time.", at: NOW - 2 * DAY, to: null },
   { key: "job_alert", from: "Job Alerts <alerts@jobboard.example>", auth: authFor("jobboard.example"), subject: "New jobs for Data Analyst near you",
@@ -81,6 +95,10 @@ const MAILS: Mail[] = [
 // ---------------------------------------------------------------------------------------------- reading a reply
 // What one line says about one application. The most specific reading wins; a line that says none of these is "unread".
 function said(line: string): Want | "unread" {
+  if (/: approved, not sent yet/.test(line)) return "approved";
+  if (/: being sent now; not submitted yet/.test(line)) return "sending";
+  if (/emailed you a code to finish it/.test(line)) return "code";
+  if (/: stopped before it was sent; it needs you/.test(line)) return "needs_you";
   if (/turned (?:it|you) down|said no\b|not moving forward|decided to move forward with other/i.test(line)) return "rejected";
   if (/invited you to (?:an )?interview|asked you to interview/i.test(line)) return "interview";
   if (/wrote back to you/i.test(line)) return "replied";
@@ -94,7 +112,8 @@ function said(line: string): Want | "unread" {
 // The line for one application in a reply: the queue's line names the employer and the role ("Acme Analytics
 // (Operations Analyst): ...").
 const lineFor = (reply: string, a: App) => reply.split("\n").map((l) => l.replace(/^- /, "")).find((l) => l.startsWith(`${a.company} (${a.title}):`)) ?? null;
-const nextCount = (reply: string) => reply.split("\n").filter((l) => /^Next: \S/.test(l)).length;
+// One next action, and it is the reply's last line.
+const nextCount = (reply: string) => { const n = reply.split("\n").filter((l) => /^Next: \S/.test(l)).length; return n === 1 && /^Next: \S/.test(reply.trim().split("\n").at(-1)!) ? 1 : n || 0; };
 
 Deno.test({
   name: "loop 12: tracking: employer mail filed to the right application, every status as recorded, one next action, nothing confirmed without the employer's email",
@@ -118,10 +137,10 @@ Deno.test({
         const payload = JSON.stringify({ version: 1, user_id: U, job_id: `greenhouse:${a.key}:12`, company: a.company, title: a.title, url });
         const h = await hex(payload);
         rows.push(`('${a.id}', '${U}', 'greenhouse:${a.key}:12', ${lit(a.company)}, '${url}', ${lit(payload)}::jsonb, '${h}', '${h}', '${a.state}', ${lit(a.reason ?? null)},
-          ${lit(a.confirmation_id ?? null)}, ${a.state === "not_submitted" || a.state === "queued" ? 0 : 1}, '${iso(SENT_AT)}', '${iso(SENT_AT - 600_000)}', '${iso(SENT_AT + 60_000)}')`);
+          ${lit(a.confirmation_id ?? null)}, ${a.state === "not_submitted" || a.state === "queued" ? 0 : 1}, ${a.state === "driving" ? "gen_random_uuid()" : "null"}, ${a.state === "queued" ? "null" : `'${iso(SENT_AT)}'`}, '${iso(SENT_AT - 600_000)}', '${iso(SENT_AT + 60_000)}')`);
       }
       await pg.sql(`set session_replication_role = replica;
-        insert into public.career_apply_jobs (id, user_id, job_id, company, url, payload, payload_hash, approval_hash, state, reason, confirmation_id, attempts, claimed_at, created_at, updated_at)
+        insert into public.career_apply_jobs (id, user_id, job_id, company, url, payload, payload_hash, approval_hash, state, reason, confirmation_id, attempts, lease_token, claimed_at, created_at, updated_at)
         values ${rows.join(",\n")};
         set session_replication_role = origin;`);
 

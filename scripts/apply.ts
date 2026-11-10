@@ -427,6 +427,7 @@ export async function runApply(args: string[]) {
     fenced = false,
     denied = false,
     allowSubmit = false,
+    saidYes = false,
     populated = false,
     mutations = 0,
     postStatus = 0,
@@ -629,7 +630,9 @@ export async function runApply(args: string[]) {
     // of 4 or more characters this run may type (raw, URL-encoded or base64) is aborted, every WebSocket is closed, every
     // EventSource is refused and sendBeacon sends nothing. After the yes (--approved, or the person's yes in this run) the
     // values are the approved payload and the checks below apply as before.
-    const preYes = () => !o.approved && !allowSubmit;
+    // The yes is a latch: once the person said yes and the approved click went out, the run stays after the yes (the code
+    // window that re-sends the approved application runs with allowSubmit back off).
+    const preYes = () => !o.approved && !saidYes;
     const typedValues = (() => {
       const out = new Set<string>();
       const walk = (x: any) => {
@@ -654,10 +657,14 @@ export async function runApply(args: string[]) {
       return vals.some((v) => forms(v).some((f) => text.includes(f)) || decoded.includes(v));
     };
     let typedBlocked = 0;
-    await page.addInitScript(() => {
-      // Before the yes a beacon would go out unseen after the page unloads: it sends nothing (the route stops the rest).
-      try { Object.defineProperty(navigator, "sendBeacon", { value: () => false, configurable: true }); } catch { /* read-only */ }
-    }).catch(() => {});
+    // A page object without addInitScript (a driver with no in-page scripts) cannot send a beacon either; the route below
+    // still stops every request that carries a typed value, a beacon's included.
+    if (typeof page.addInitScript === "function") {
+      await page.addInitScript(() => {
+        // Before the yes a beacon would go out unseen after the page unloads: it sends nothing (the route stops the rest).
+        try { Object.defineProperty(navigator, "sendBeacon", { value: () => false, configurable: true }); } catch { /* read-only */ }
+      }).catch(() => {});
+    }
     if (typeof page.routeWebSocket === "function") {
       await page.routeWebSocket(/.*/, (ws: any) => {
         if (preYes()) { typedBlocked++; evidence.typed_value_guard = { blocked: typedBlocked }; ws.close(); return; }
@@ -666,7 +673,7 @@ export async function runApply(args: string[]) {
     }
     await page.route("**/*", async (route: any) => {
       const req0 = route.request();
-      if (preYes() && (req0.resourceType() === "eventsource" || carriesTyped(req0))) {
+      if (preYes() && (req0.resourceType?.() === "eventsource" || carriesTyped(req0))) {
         typedBlocked++;
         evidence.typed_value_guard = { blocked: typedBlocked };
         await route.abort("blockedbyclient");
@@ -1238,6 +1245,7 @@ export async function runApply(args: string[]) {
       // The click's place in this run's own order: after the before picture, before the after picture.
       evidence.proof.click = Object.freeze({ seq: ++proofSeq, at: clickAt });
       allowSubmit = true;
+      saidYes = true;
       let cap: any;
       if (personSubmits) {
         // The person presses Submit in the window; Trainee clicks nothing. The route lets exactly one write through,

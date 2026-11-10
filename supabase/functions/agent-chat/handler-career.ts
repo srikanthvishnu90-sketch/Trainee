@@ -584,6 +584,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       };
       // WO-100: module 120's "what's connected" reads the live grants, the extension and the phone link (no address).
       if (situation) ctx.statusRecords = statusRecordsFrom(situation.capabilities);
+      // a-resume-on-record (2026-11-10): the router's "send your resume" offers read the confirmed resume on the person's account
+      // (career_resume_on_file), not only this thread's facts. Runtime only: not a STATE_KEYS entry, never persisted; unread is false.
+      (ctx as any).resumeOnFile = (await resumeOnFileReader(admin, user.id)().catch(() => null)) === true;
       // R10 WO-D: a task a limit stopped is picked up by "continue" once the limit can have cleared: this turn is that task.
       let resumedNote = "", resumedTaskNote = "";
       {

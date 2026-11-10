@@ -15904,6 +15904,7 @@ const CareerRouter = (() => {
   }
 
   function resumeOnRecord(ctx) {
+    if (ctx && ctx.resumeOnFile === true) return true;
     try {
       const facts = ProfileMod && ProfileMod.confirmedFacts ? ProfileMod.confirmedFacts(ctx && ctx.profile) : [];
       return facts.some((f) => f && ["education", "experience", "project", "leadership", "skill"].includes(f.kind));

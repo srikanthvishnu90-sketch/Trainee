@@ -40537,6 +40537,9 @@ const CareerRouter = (() => {
   // PRODUCT AUDIT 2026-10-28: whether the person has confirmed resume entries (education, work, projects, skills) on
   // their profile; a stated goal or preference alone is not a resume.
   function resumeOnRecord(ctx) {
+    // a-resume-on-record (2026-11-10): a resume confirmed on the person's account (career_resume_on_file, read by the host each
+    // turn as ctx.resumeOnFile) is on record even when this thread's facts do not hold it; nobody with one is asked to send it.
+    if (ctx && ctx.resumeOnFile === true) return true;
     try {
       const facts = ProfileMod && ProfileMod.confirmedFacts ? ProfileMod.confirmedFacts(ctx && ctx.profile) : [];
       return facts.some((f) => f && ["education", "experience", "project", "leadership", "skill"].includes(f.kind));

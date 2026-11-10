@@ -5,7 +5,7 @@
 // prepared payload hash), once; a yes after the list or a payload changed, after another turn, or after the offer went stale
 // approves nothing of the old offer. Agent 2's app-layer loop (#674) covers prepare, the card and the card's yes.
 //
-// 50 scripts, one synthetic TEST person each, through the REAL agent-chat handler (handler-career.ts handleChat on tests/flow:
+// 56 scripts, one synthetic TEST person each, through the REAL agent-chat handler (handler-career.ts handleChat on tests/flow:
 // real supabase-js over the PostgREST double, Postgres 16 with every migration), the staged brain released and a scripted $0
 // model on the Anthropic wire. The expected set of each script is read from what the person was shown: the numbered lines of
 // the last list in a reply (each line's link names its posting), resolved by the positions the person typed. E2: a number
@@ -43,7 +43,7 @@ interface Ctx { u: string; lists: string[][]; prepare: (jobIdx: number) => Promi
 // `listed`: the reply lists exactly this many roles; `kept`: the reply shows no new list, so the list last shown stands;
 // `has` / `never`: what the reply must say, and must never say.
 interface Step { say: string; queue?: Pos; approve?: Pos; stale?: true; concurrent?: true; then?: (s: Ctx) => Promise<void>; listed?: number; kept?: true; has?: RegExp; never?: RegExp }
-interface Script { name: string; prepared?: number[] | "all"; steps: Step[] }
+interface Script { name: string; prepared?: number[] | "all"; noResume?: true; steps: Step[] }
 const R = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 const ASK = (say: string, queue: Pos): Script => ({ name: say, steps: [{ say: SEARCH }, { say, queue }] });
 // A widening is never read as a role made of its cue words ("include too", "add as well"), and never a fresh search.
@@ -51,6 +51,8 @@ const NOT_A_ROLE = /\b(?:include|add|plus|also)\b[^.\n]{0,20}\b(?:too|as well)\b
 const OTHER = "what should my cover letter say?";
 // A turn the router answers that is not a search (a list reference): it ends the search a correction could amend (spec 2.3).
 const REF = "tell me more about the second one";
+// An offer to send a resume, made to someone whose confirmed resume is on their account (coordinator, 2026-11-10).
+const RESUME_ASK = /send (?:me )?your resume|paste your resume|I need your resume first|Want to send it now|Want to start with your resume/i;
 
 export const SCRIPTS: Script[] = [
   // ---- ask to queue, one ask after the shortlist (5 listed)
@@ -118,6 +120,14 @@ export const SCRIPTS: Script[] = [
     { say: REF },
     { say: "include business analyst internships too", kept: true, never: NOT_A_ROLE, has: /nothing new/i, then: (s) => s.sql(`update public.career_postings set closed_at = null`).then(() => {}) },
     { say: "apply to 2 and 3", queue: [2, 3] }] },
+  // ---- 51-56: a confirmed resume on the person's account is on record; nobody who has one is asked to send it
+  { name: "a list reference never asks for the resume on file", steps: [{ say: SEARCH }, { say: REF, never: RESUME_ASK, has: /TEST Queue B/ }] },
+  { name: "'show me the first one' never asks for it", steps: [{ say: SEARCH }, { say: "show me the first one", never: RESUME_ASK, has: /TEST Queue A/ }] },
+  { name: "'show me more' never asks for it", steps: [{ say: SEARCH }, { say: "show me more", never: RESUME_ASK }] },
+  { name: "an introduction never asks for it", steps: [{ say: "my name is TEST Avery", never: RESUME_ASK }] },
+  { name: "/start never asks for it", steps: [{ say: "/start", never: RESUME_ASK }] },
+  // Control: with no resume anywhere, the same list reference does offer to take one (the check above can fail).
+  { name: "control: no resume on file, the list reference asks for it", noResume: true, steps: [{ say: SEARCH }, { say: REF, has: RESUME_ASK }] },
 ];
 
 // The postings a reply listed, in its order: each numbered line's link names its posting.
@@ -136,7 +146,7 @@ Deno.test("ask-to-queue self-check: the list is read from the reply's numbered l
   assertNode.deepEqual(listedIn(reply), [BOARD[0].id, BOARD[3].id]);
   assertNode.deepEqual(at(listedIn(reply), [2, 9]), [BOARD[3].id]);
   assertNode.deepEqual(listedIn(`1. TEST Queue A — Data Analyst Intern, Chicago, IL (not re-checked) ${BOARD[0].url}\n2. TEST Queue C — Data Analyst Intern (not re-checked) ${BOARD[2].url}`), [BOARD[0].id, BOARD[2].id], "the iMessage form");
-  assertNode.equal(SCRIPTS.length, 50);
+  assertNode.equal(SCRIPTS.length, 56);
   assertNode.ok(NOT_A_ROLE.test("I checked include too internships in Chicago") && !NOT_A_ROLE.test("I found 7 data analyst internships in Chicago and remote in the US"));
 });
 
@@ -156,7 +166,7 @@ Deno.test("widening units: the last real search is widened after a turn that cle
 });
 
 Deno.test({
-  name: "ask to queue: 50 scripts through the real handler on Postgres 16; exactly the named set queued or approved, once; a stale yes refused",
+  name: "ask to queue: 56 scripts through the real handler on Postgres 16; exactly the named set queued or approved, once; a stale yes refused",
   sanitizeResources: false,
   sanitizeOps: false,
   async fn() {
@@ -175,11 +185,11 @@ Deno.test({
       const sql = (q: string) => pg.sql(q);
       await sql(`insert into public.career_postings (job_id, provider, board, company, title, location, url, description, posted_at, first_seen_at, last_seen_at) values
         ${BOARD.map((b, i) => `(${lit(b.id)}, 'greenhouse', ${lit(b.id.split(":")[1])}, ${lit(b.co)}, ${lit(b.t)}, ${lit(b.loc)}, ${lit(b.url)}, ${lit(b.d)}, now() - interval '${i + 1} hours', now() - interval '${i + 1} hours', now())`).join(",\n")};`);
-      for (const u of people) {
+      for (const [i, u] of people.entries()) {
         await sql(`insert into auth.users (id, email) values ('${u}', '${u}@example.test'); insert into public.profiles (id) values ('${u}');
           insert into public.career_watch_kv (user_id, key, value) values ('${u}', 'career:account', '{"epoch":0,"version":0,"paused":false}');
-          ${confirmedResumeSql(u, RESUME_A)}
-          insert into public.career_resume_devices (user_id, sha256, at) values ('${u}', encode(sha256(convert_to(${lit(RESUME_A)}, 'UTF8')), 'hex'), now());`);
+          ${SCRIPTS[i].noResume ? "" : `${confirmedResumeSql(u, RESUME_A)}
+          insert into public.career_resume_devices (user_id, sha256, at) values ('${u}', encode(sha256(convert_to(${lit(RESUME_A)}, 'UTF8')), 'hex'), now());`}`);
       }
       const sha = (await sql(`select encode(sha256(convert_to(${lit(RESUME_A)}, 'UTF8')), 'hex')`)).trim();
       let ver = 0;

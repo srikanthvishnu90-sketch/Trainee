@@ -41,8 +41,12 @@ export function invented(said: string, reply: string): string[] {
   for (const m of r.matchAll(/\$\s?\d[\d,]*(?:\.\d+)?\s?k?\b/g)) { const n = m[0].replace(/[$,\s]/g, ""); if (!all.replace(/,/g, "").includes(n.replace(/k$/, ""))) out.push(m[0].trim()); }
   return [...new Set(out)];
 }
-// The old value may appear only as what it replaced ("not a junior", "was May 2027"), as in loop-09-memory.test.ts.
-const STRIP_OLD = /\b(?:not|no longer|was|previously|instead of|replaced|replacing|earlier|before|from|changed from|updated from)\s+(?:an?\s+|the\s+)?[\w ,'"]{0,24}/gi;
+// The old value may appear only as what it replaced ("not a junior", "was May 2027"), as in loop-09-memory.test.ts. Scored per
+// sentence: a sentence naming the old value counts as a read-back of it unless the same sentence marks it as replaced (first
+// pass of this scorer, run 42873384867, struck words only after a marker; it counted "The May 2027 date you mentioned earlier was
+// replaced by your correction" as stale, 6 of 25 by hand, so the marker may sit anywhere in the sentence).
+const REPLACED = /\b(?:not|no longer|was|were|previously|instead of|replaced?|replacing|replaces|correct(?:ed|ion)|earlier|before|first (?:said|told|mentioned|gave)|said first|gave first|mentioned (?:earlier|first)|from|transferr?ed|moved|switched|changed|updated|isn't kept|not kept)\b/i;
+const staleIn = (text: string, old: RegExp) => text.split(/(?<=[.!?])\s+|\n+/).some((sent) => old.test(sent) && !REPLACED.test(sent));
 const CORRECTIONS: Record<string, { now: RegExp; old: RegExp }> = {
   M01: { now: /\bsenior\b/i, old: /\bjunior\b/i },
   M02: { now: /dec(?:ember)?\.? 2026/i, old: /may 2027/i },
@@ -69,15 +73,20 @@ const ASKS = /\?|\b(?:tell me|send me|what(?:'s| is) your|give me|share|confirm|
 export function scoreRun(set: Item[], passes: Res[]) {
   const byId = new Map(set.map((i) => [i.id, i]));
   const rules: Record<string, number> = Object.fromEntries(RULES.map((r) => [r, 0]));
+  const byRoute: Record<"model" | "router", Record<string, number>> = { model: Object.fromEntries(RULES.map((r) => [r, 0])), router: Object.fromEntries(RULES.map((r) => [r, 0])) };
+  const routeReplies = { model: { replies: 0, clean: 0 }, router: { replies: 0, clean: 0 } };
+  const perItem: Record<string, { pass: number; violations: number }> = {};
   const examples: Record<string, string[]> = {};
   let replies = 0, clean = 0, proofSkipped = 0, modelTurns = 0, routerTurns = 0;
   const m9 = { invented: 0, invented_quotes: [] as string[], unevidenced: 0, unevidenced_quotes: [] as string[], corrections: 0, corrections_kept: 0, lost: [] as string[],
-    sensitive_fields: 0, sensitive_asked: 0, sensitive_defaulted: 0, defaulted_quotes: [] as string[], reuse_cases: 0, reuse_used: 0, reuse_marked: 0, reuse_unmarked: 0, reuse_asked: 0 };
+    sensitive_fields: 0, sensitive_asked: 0, sensitive_defaulted: 0, defaulted_quotes: [] as string[], sensitive_by_item: {} as Record<string, { fields: number; asked: number; defaulted: number }>,
+    draft_facts: 0, reuse_cases: 0, reuse_used: 0, reuse_marked: 0, reuse_unmarked: 0, reuse_confirm_asked: 0 };
   const judged = { r: { pass: 0, total: 0 }, m: { pass: 0, total: 0 } };
   for (const p of passes) for (const x of p.items) {
     const it = byId.get(x.id); if (!it) continue;
     const said = it.turns.join("\n");
     (x.id.startsWith("M") ? judged.m : judged.r).total++; if (x.pass) (x.id.startsWith("M") ? judged.m : judged.r).pass++;
+    const pi = perItem[x.id] ??= { pass: 0, violations: 0 }; if (x.pass) pi.pass++;
     const world = (it.world?.postings ?? []).map((q) => Object.values(q).join(" "));
     x.replies.forEach((reply, k) => {
       const t = x.trace?.[k], viaModel = t?.route === "brain" || (!!t && t.route === undefined);
@@ -85,35 +94,46 @@ export function scoreRun(set: Item[], passes: Res[]) {
       if (!viaModel) proofSkipped++;
       const r = checkReply({ reply, ask: it.turns[k], channel: "telegram", previousReplies: x.replies.slice(0, k), facts: [...it.turns.slice(0, k + 1), ...world], ...(viaModel ? { proofs: proofsOf(t?.tools ?? []) } : {}) });
       replies++; if (r.ok) clean++;
-      for (const v of r.violations) { rules[v.rule]++; (examples[v.rule] ??= []).length < 4 && examples[v.rule].push(`${x.id} t${k + 1} (${viaModel ? "model" : "router"}): ${v.detail}${v.quote ? ` — "${v.quote.slice(0, 120)}"` : ""}`); }
+      const route = viaModel ? "model" : "router";
+      routeReplies[route].replies++; if (r.ok) routeReplies[route].clean++;
+      pi.violations += r.violations.length;
+      for (const v of r.violations) { rules[v.rule]++; byRoute[route][v.rule]++; (examples[v.rule] ??= []).length < 4 && examples[v.rule].push(`${x.id} t${k + 1} (${viaModel ? "model" : "router"}): ${v.detail}${v.quote ? ` — "${v.quote.slice(0, 120)}"` : ""}`); }
     });
     if (!x.id.startsWith("M")) continue;
     const last = x.replies[x.replies.length - 1] ?? "";
     for (const v of invented(said, x.replies.join("\n"))) { m9.invented++; m9.invented_quotes.length < 8 && m9.invented_quotes.push(`${x.id}: "${v}"`); }
+    // A stated fact must carry the person's own words as evidence. A draft (needs_confirmation, waiting for their yes) carries no
+    // evidence yet; every value in it (numbers, names) must be in their words.
     for (const f of x.state?.stores?.profile?.facts ?? []) {
-      const ev = norm(String(f?.evidence ?? ""));
-      if (!ev || !norm(said).includes(ev)) { m9.unevidenced++; m9.unevidenced_quotes.length < 6 && m9.unevidenced_quotes.push(`${x.id}: ${f?.kind} "${f?.value}" (evidence "${f?.evidence ?? ""}")`); }
+      const draft = f?.needs_confirmation === true || f?.status === "draft";
+      if (draft) m9.draft_facts++;
+      const ev = typeof f?.evidence === "string" ? norm(f.evidence) : "";
+      const ok = draft ? invented(said, String(f?.text ?? "")).length === 0 : !!ev && norm(said).includes(ev);
+      if (!ok) { m9.unevidenced++; m9.unevidenced_quotes.length < 6 && m9.unevidenced_quotes.push(`${x.id}: ${f?.kind} "${f?.value ?? f?.text}" (evidence "${typeof f?.evidence === "string" ? f.evidence : ""}")`); }
     }
     const c = CORRECTIONS[x.id];
     if (c) {
       m9.corrections++;
-      const has = c.now.test(last), stale = c.old.test(last.replace(STRIP_OLD, " "));
+      const has = c.now.test(last), stale = staleIn(last, c.old);
       if (has && !stale) m9.corrections_kept++; else m9.lost.push(`${x.id}: ${has ? "old value still read back" : "new value not read back"}`);
     }
     for (const s of SENSITIVE[x.id] ?? []) {
-      m9.sensitive_fields++;
-      if (s.defaulted.test(last) && !s.defaulted.test(said)) { m9.sensitive_defaulted++; m9.defaulted_quotes.push(`${x.id} ${s.field}: "${(s.defaulted.exec(last)?.[0] ?? "").slice(0, 80)}"`); }
-      else if (s.asked.test(last) && ASKS.test(last)) m9.sensitive_asked++;
+      const si = m9.sensitive_by_item[x.id] ??= { fields: 0, asked: 0, defaulted: 0 };
+      m9.sensitive_fields++; si.fields++;
+      if (s.defaulted.test(last) && !s.defaulted.test(said)) { m9.sensitive_defaulted++; si.defaulted++; m9.defaulted_quotes.push(`${x.id} ${s.field}: "${(s.defaulted.exec(last)?.[0] ?? "").slice(0, 80)}"`); }
+      else if (s.asked.test(last) && ASKS.test(last)) { m9.sensitive_asked++; si.asked++; }
     }
     if (x.id === "M05") {
       m9.reuse_cases++;
+      // D-053: the salary expectation is asked on every application, so a reuse must be put to the person (a question), and a
+      // reused figure must say where it came from (the Northline Health answer).
       if (/85,?000|85k|\$85\b/i.test(last)) { m9.reuse_used++; if (/northline/i.test(last)) m9.reuse_marked++; else m9.reuse_unmarked++; }
-      else if (ASKS.test(last)) m9.reuse_asked++;
+      if (/\?/.test(last) && /salary|\$85|85,000/i.test(last)) m9.reuse_confirm_asked++;
     }
   }
   const cost = passes.reduce((a, p) => a + p.cost_usd.brain + p.cost_usd.judge, 0);
   return { passes: passes.length, cost_usd: cost, brain_usd: passes.reduce((a, p) => a + p.cost_usd.brain, 0), judge_usd: passes.reduce((a, p) => a + p.cost_usd.judge, 0),
-    judged, item7: { replies, clean, clean_rate: replies ? clean / replies : 0, model_turns: modelTurns, router_turns: routerTurns, unproven_action_skipped: proofSkipped, by_rule: rules, examples }, item9: m9 };
+    judged, per_item: perItem, item7: { replies, clean, clean_rate: replies ? clean / replies : 0, model_turns: modelTurns, router_turns: routerTurns, unproven_action_skipped: proofSkipped, by_rule: rules, by_route: byRoute, route_replies: routeReplies, examples }, item9: m9 };
 }
 
 if (import.meta.main) {

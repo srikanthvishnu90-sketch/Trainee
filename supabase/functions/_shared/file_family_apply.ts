@@ -20,20 +20,25 @@ const external = (s: Src | null | undefined) => !!s && !!s.href && !!s.at;
 
 // ---------------------------------------------------------------- F-09 application review (C.11)
 export interface ApplicationReview {
-  appId: string; rid: string; title: string; company: string; destination: Src; pkg: KV[]; answers: { q: string; a: string | null; required: boolean }[];
+  appId: string; rid: string; title: string; company: string; destination: Src; pkg: KV[]; answers: { q: string; a: string | null; required: boolean; src?: Src | null }[];
   conditions: string[]; approve: Act; edit: Act; cancel: Act;
+  // Item 6 S1 (the live page, file_family_review.ts): the hero's time label when the destination was not re-verified, the open
+  // required questions in the form's own words, and where the application stands with its Check status post.
+  destinationMeta?: string; open?: { q: string; ask: string; act?: Act }[]; status?: { tone: "info" | "caution" | "danger"; label: string; text: string; act?: Act };
 }
 export function applicationReviewFile(d: ApplicationReview): FamilyFile {
   const open = d.answers.filter((x) => x.required && !x.a).length;
   const approve: Act = open ? { ...d.approve, off: `${n(open, "required answer")} not entered. Approval stays off until you answer.` } : d.approve;
   return {
     family: "F-09", mono: `${d.appId} - ${d.rid}`, boundary: undefined,
-    hero: { kicker: "Final review - approval covers exactly this", title: d.title, meta: [{ label: "", value: d.company }, { label: "Destination verified", at: d.destination.at ?? null }] },
+    hero: { kicker: "Final review - approval covers exactly this", title: d.title, meta: [{ label: "", value: d.company }, { label: d.destinationMeta ?? "Destination verified", at: d.destination.at ?? null }] },
     blocks: [
       card("The package", [{ p: "kv", rows: [...d.pkg, { k: "Destination", v: "Employer application page", src: d.destination }] }]),
-      card("Exact answers - sent word for word", [{ p: "kv", rows: d.answers.map((x) => ({ k: x.q, v: x.a, src: x.a ? { label: "You approved this wording" } : null, missing: x.required ? "Not entered - required" : "Not entered - optional" })) }]),
+      card("Exact answers - sent word for word", [{ p: "kv", rows: d.answers.map((x) => ({ k: x.q, v: x.a, src: x.a ? (x.src ?? { label: "You approved this wording" }) : null, missing: x.required ? "Not entered - required" : "Not entered - optional" })) }]),
+      ...(d.open?.length ? [card(`Open questions - ${n(d.open.length, "required answer")} not entered, nothing is sent until you answer`, d.open.map((o) => ({ p: "item" as const, title: o.q, text: o.ask, ...(o.act ? { act: o.act } : {}) })))] : []),
       card("Conditions - in plain words", [{ p: "check", items: d.conditions.map((t) => ({ state: "met" as const, text: t })) }]),
       note("info", "What happens after approval.", "Trainee fills the reviewed answers on the verified page and submits once. You then see the employer's own confirmation - a click alone never counts as submitted."),
+      ...(d.status ? [note(d.status.tone, d.status.label, d.status.text, d.status.act)] : []),
     ],
     actions: { primary: approve, secondary: [d.edit, { ...d.cancel, effect: "danger" }] },
   };

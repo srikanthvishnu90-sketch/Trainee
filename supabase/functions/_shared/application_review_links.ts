@@ -5,6 +5,7 @@
 // code from the prepared payload, the posting's own title and the posting's still-open required questions
 // (application_review.ts reviewOf, file_service.ts createReview). A review that cannot be made never changes the card.
 import { openQuestionsFor, reviewLinksFor, type ReviewDeps, withLinks } from "./application_review.ts";
+import { VERSIONS_KEY } from "./career_resume_outcomes.ts";
 import { createFileService, supabaseFileKindStore } from "./file_service.ts";
 
 export type ReviewLinks = (userId: string, preparedIds: string[]) => Promise<string | null>;
@@ -14,10 +15,17 @@ export function supabaseReviewDeps(admin: any, userId: string, env: { get(k: str
   const must = (r: any, what: string) => { if (r.error) throw new Error(`${what}: ${r.error.message}`); return r.data ?? []; };
   const files = createFileService({ store: supabaseFileKindStore(admin), env, now: Date.now });
   return {
-    prepared: async (ids) => must(await admin.from("career_apply_prepared").select("id,job_id,payload,payload_hash,card_lines").eq("user_id", userId).in("id", ids), "read the prepared applications"),
+    prepared: async (ids) => must(await admin.from("career_apply_prepared").select("id,job_id,payload,payload_hash,card_lines,created_at").eq("user_id", userId).in("id", ids), "read the prepared applications"),
     titles: async (jobIds) => new Map<string, string>((must(await admin.from("career_postings").select("job_id,title").in("job_id", jobIds), "read the postings") as { job_id: string; title: string }[]).map((r) => [r.job_id, r.title])),
     open: (jobIds) => openQuestionsFor(admin, userId, jobIds),
-    create: async (item) => { const r = await files.createReview!(userId, item); return r.ok ? { url: r.url ?? r.webApp } : null; },
+    versions: async () => {
+      const r = await admin.from("career_watch_kv").select("value").eq("user_id", userId).eq("key", VERSIONS_KEY).maybeSingle();
+      if (r.error) throw new Error(`read the resume versions: ${r.error.message}`);
+      const files = r.data?.value?.files;
+      return files && typeof files === "object" ? files : {};
+    },
+    // Item 6 S1: the live F-09 page (file_family_review.ts): it stores no view, only the prepared application it names; every GET reads it now.
+    create: async (item) => { const r = await files.createFamily!(userId, "F-09", "Application review", null, { ref: { prepared: item.id, ...(item.job_id ? { job: item.job_id } : {}) } }); return r.ok ? { url: r.url ?? r.webApp } : null; },
   };
 }
 // deno-lint-ignore no-explicit-any

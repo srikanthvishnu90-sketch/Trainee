@@ -1,0 +1,1620 @@
+{
+ "version": 1,
+ "note": "Real employer questions about sensitive and identity facts (task a-sensitive, 2026-11-10). forms-ci: read from the captured pages by ats-fill's own EXTRACT, options from greenhouse-options.json for comboboxes; strict-run: NEEDS lines of strict benchmark run 42719264485 whose label was not cut (under 60 characters), location from the posting title; questions-ci*: evals/apply captured postings. No date-of-birth question occurs in any of these captures.",
+ "questions": [
+  {
+   "id": "S01",
+   "category": "sponsorship",
+   "source": "forms-ci:ashby-crusoe-b1b99030-d393-4329-80fe-5bc2e4c93b03",
+   "company": "Crusoe",
+   "location": "San Francisco, CA - US",
+   "label": "Will you now or in the future require immigration sponsorship to work for Crusoe?",
+   "kind": "buttons",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  },
+  {
+   "id": "S02",
+   "category": "gender",
+   "source": "forms-ci:ashby-crusoe-b1b99030-d393-4329-80fe-5bc2e4c93b03",
+   "company": "Crusoe",
+   "location": "San Francisco, CA - US",
+   "label": "Gender",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "Male",
+    "Female",
+    "Decline to self-identify"
+   ]
+  },
+  {
+   "id": "S03",
+   "category": "race_ethnicity",
+   "source": "forms-ci:ashby-crusoe-b1b99030-d393-4329-80fe-5bc2e4c93b03",
+   "company": "Crusoe",
+   "location": "San Francisco, CA - US",
+   "label": "Race",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "Hispanic or Latino",
+    "White (Not Hispanic or Latino)",
+    "Black or African American (Not Hispanic or Latino)",
+    "Native Hawaiian or Other Pacific Islander (Not Hispanic or Latino)",
+    "Asian (Not Hispanic or Latino)",
+    "American Indian or Alaska Native (Not Hispanic or Latino)",
+    "Two or More Races (Not Hispanic or Latino)",
+    "Decline to self-identify"
+   ]
+  },
+  {
+   "id": "S04",
+   "category": "veteran",
+   "source": "forms-ci:ashby-crusoe-b1b99030-d393-4329-80fe-5bc2e4c93b03",
+   "company": "Crusoe",
+   "location": "San Francisco, CA - US",
+   "label": "Veteran Status",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "I identify as one or more of the classifications of protected veteran listed above",
+    "I am not a protected veteran",
+    "I decline to self-identify for protected veteran status"
+   ]
+  },
+  {
+   "id": "S05",
+   "category": "work_authorization",
+   "source": "forms-ci:ashby-harvey-977e6184-2dc4-422b-8ab3-bc26bb73f778",
+   "company": "Harvey",
+   "location": "San Francisco",
+   "label": "Are you legally authorized to work in the country where this role is located, for any employer?",
+   "kind": "buttons",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  },
+  {
+   "id": "S06",
+   "category": "pronouns",
+   "source": "forms-ci:ashby-harvey-977e6184-2dc4-422b-8ab3-bc26bb73f778",
+   "company": "Harvey",
+   "location": "San Francisco",
+   "label": "Pronouns",
+   "kind": "text",
+   "type": "input_text",
+   "required": false,
+   "eeo": false,
+   "options": []
+  },
+  {
+   "id": "S07",
+   "category": "sponsorship",
+   "source": "forms-ci:ashby-harvey-977e6184-2dc4-422b-8ab3-bc26bb73f778",
+   "company": "Harvey",
+   "location": "San Francisco",
+   "label": "Will you now or will you in the future require employment visa sponsorship?",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes, I will require Harvey to sponsor my employment",
+    "No, I do not require sponsorship to work in the country where this role is located"
+   ]
+  },
+  {
+   "id": "S08",
+   "category": "work_authorization",
+   "source": "forms-ci:ashby-openai-8fb1615c-34bf-47c4-a1d1-b7b2f836bbd3",
+   "company": "openai",
+   "location": "San Francisco",
+   "label": "Are you authorized to work in the country where the job is located?",
+   "kind": "buttons",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  },
+  {
+   "id": "S09",
+   "category": "sponsorship",
+   "source": "forms-ci:ashby-openai-8fb1615c-34bf-47c4-a1d1-b7b2f836bbd3",
+   "company": "openai",
+   "location": "San Francisco",
+   "label": "Will you now or in the future require sponsorship for employment visa status in this country?",
+   "kind": "buttons",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  },
+  {
+   "id": "S10",
+   "category": "gender",
+   "source": "forms-ci:ashby-openai-8fb1615c-34bf-47c4-a1d1-b7b2f836bbd3",
+   "company": "openai",
+   "location": "San Francisco",
+   "label": "Gender",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "Male",
+    "Female",
+    "Decline to self-identify"
+   ]
+  },
+  {
+   "id": "S11",
+   "category": "race_ethnicity",
+   "source": "forms-ci:ashby-openai-8fb1615c-34bf-47c4-a1d1-b7b2f836bbd3",
+   "company": "openai",
+   "location": "San Francisco",
+   "label": "Race",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "Hispanic or Latino",
+    "White (Not Hispanic or Latino)",
+    "Black or African American (Not Hispanic or Latino)",
+    "Native Hawaiian or Other Pacific Islander (Not Hispanic or Latino)",
+    "Asian (Not Hispanic or Latino)",
+    "American Indian or Alaska Native (Not Hispanic or Latino)",
+    "Two or More Races (Not Hispanic or Latino)",
+    "Decline to self-identify"
+   ]
+  },
+  {
+   "id": "S12",
+   "category": "veteran",
+   "source": "forms-ci:ashby-openai-8fb1615c-34bf-47c4-a1d1-b7b2f836bbd3",
+   "company": "openai",
+   "location": "San Francisco",
+   "label": "Veteran Status",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "I identify as one or more of the classifications of protected veteran listed above",
+    "I am not a protected veteran",
+    "I decline to self-identify for protected veteran status"
+   ]
+  },
+  {
+   "id": "S13",
+   "category": "sponsorship",
+   "source": "forms-ci:ashby-snowflake-479e06f1-273d-4a1b-af56-6543761ebd75",
+   "company": "Snowflake",
+   "location": "GB-London",
+   "label": "Will you require company sponsorship now or in the future to maintain or extend your current work authorization status?",
+   "kind": "buttons",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  },
+  {
+   "id": "S14",
+   "category": "work_authorization",
+   "source": "forms-ci:ashby-snowflake-479e06f1-273d-4a1b-af56-6543761ebd75",
+   "company": "Snowflake",
+   "location": "GB-London",
+   "label": "For Snowflake to anticipate possible immigration timelines and obligations, could you confirm you are currently authorized to work in the country to which you are applying?",
+   "kind": "buttons",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  },
+  {
+   "id": "S15",
+   "category": "work_authorization",
+   "source": "forms-ci:ashby-snowflake-479e06f1-273d-4a1b-af56-6543761ebd75",
+   "company": "Snowflake",
+   "location": "GB-London",
+   "label": "A “U.S. person” is a citizen, legal permanent resident, or legal temporary resident (i.e., a refugee or asylee) of the United States. Which of the following best describes your “U.S. person” status?",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "I am a U.S. person",
+    "I am a citizen of Cuba, Iran, North Korea, or Syria AND I am NOT a U.S. person",
+    "None of the above; I am a citizen of a different country"
+   ]
+  },
+  {
+   "id": "S16",
+   "category": "work_authorization",
+   "source": "forms-ci:greenhouse-andurilindustries-4802172007",
+   "company": "Anduril",
+   "location": "Costa Mesa, California, United States; Fort Collins, Colorado, United States",
+   "label": "CLEARANCE ELIGIBILITY - This position may require eligibility to obtain and maintain a U.S. security clearance.",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes, I hold an active U.S. security clearance",
+    "Yes, I am eligible for a U.S. security clearance",
+    "No"
+   ]
+  },
+  {
+   "id": "S17",
+   "category": "work_authorization",
+   "source": "forms-ci:greenhouse-andurilindustries-4802172007",
+   "company": "Anduril",
+   "location": "Costa Mesa, California, United States; Fort Collins, Colorado, United States",
+   "label": "EXPORT CONTROLS - This position requires access to information and technology that is subject to U.S. export controls. Your responses to the questions below will be used solely to determine your eligibility under U.S. law to receive information and materials subject to U.S. export controls.",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "A United States citizen or national",
+    "A person lawfully admitted for permanent residence of the United States (i.e., “Green Card” holder)",
+    "A person admitted as a refugee to the United States under 8 U.S.C. 1157",
+    "A person admitted as an asylee to the United States under 8 U.S.C. 1158",
+    "None of the above"
+   ]
+  },
+  {
+   "id": "S18",
+   "category": "work_authorization",
+   "source": "forms-ci:greenhouse-andurilindustries-4802172007",
+   "company": "Anduril",
+   "location": "Costa Mesa, California, United States; Fort Collins, Colorado, United States",
+   "label": "U.S. WORK AUTHORIZATION",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  },
+  {
+   "id": "S19",
+   "category": "sponsorship",
+   "source": "forms-ci:greenhouse-andurilindustries-4802172007",
+   "company": "Anduril",
+   "location": "Costa Mesa, California, United States; Fort Collins, Colorado, United States",
+   "label": "Will you require sponsorship from Anduril for employment now or in the future (e.g, H1B visa)?",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  },
+  {
+   "id": "S20",
+   "category": "work_authorization",
+   "source": "forms-ci:greenhouse-andurilindustries-4802172007",
+   "company": "Anduril",
+   "location": "Costa Mesa, California, United States; Fort Collins, Colorado, United States",
+   "label": "U.S. Person status and/or U.S. clearance eligibility is required for this role due to access requirements for U.S. export-controlled information/facilities and/or depending on program, are you eligible to meet this requirement?",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  },
+  {
+   "id": "S21",
+   "category": "gender",
+   "source": "forms-ci:greenhouse-andurilindustries-4802172007",
+   "company": "Anduril",
+   "location": "Costa Mesa, California, United States; Fort Collins, Colorado, United States",
+   "label": "Gender",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "Decline To Self Identify",
+    "Female",
+    "Male"
+   ]
+  },
+  {
+   "id": "S22",
+   "category": "race_ethnicity",
+   "source": "forms-ci:greenhouse-andurilindustries-4802172007",
+   "company": "Anduril",
+   "location": "Costa Mesa, California, United States; Fort Collins, Colorado, United States",
+   "label": "Are you Hispanic/Latino?",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": []
+  },
+  {
+   "id": "S23",
+   "category": "veteran",
+   "source": "forms-ci:greenhouse-andurilindustries-4802172007",
+   "company": "Anduril",
+   "location": "Costa Mesa, California, United States; Fort Collins, Colorado, United States",
+   "label": "Veteran Status",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": []
+  },
+  {
+   "id": "S24",
+   "category": "work_authorization",
+   "source": "forms-ci:greenhouse-eosfitness-4336050009",
+   "company": "EOS Fitness",
+   "location": null,
+   "label": "If hired, can you show proof of authorization to work in the United States?",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  },
+  {
+   "id": "S25",
+   "category": "work_authorization",
+   "source": "forms-ci:greenhouse-eosfitness-4336050009",
+   "company": "EOS Fitness",
+   "location": null,
+   "label": "If no, please describe your work authorization status.",
+   "kind": "textarea",
+   "type": "textarea",
+   "required": false,
+   "eeo": false,
+   "options": []
+  },
+  {
+   "id": "S26",
+   "category": "work_authorization",
+   "source": "forms-ci:greenhouse-prolificacademicltd-4979452101",
+   "company": "Prolific",
+   "location": "Germany",
+   "label": "Are you currently based in and can verify right to work from one of the following countries?",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Australia",
+    "Austria",
+    "Belgium",
+    "Canada",
+    "Chile",
+    "Croatia",
+    "Czech Republic",
+    "Denmark",
+    "Estonia",
+    "Finland",
+    "France",
+    "Germany",
+    "Greece",
+    "Hungary",
+    "Iceland",
+    "Ireland",
+    "Israel",
+    "Italy",
+    "Japan",
+    "Korea",
+    "Latvia",
+    "Luxembourg",
+    "Mexico",
+    "Netherlands",
+    "New Zealand",
+    "Norway",
+    "Poland",
+    "Portugal",
+    "Slovakia",
+    "Slovenia",
+    "South Africa",
+    "Spain",
+    "Sweden",
+    "Switzerland",
+    "United Kingdom",
+    "United States",
+    "REST OF WORLD"
+   ]
+  },
+  {
+   "id": "S27",
+   "category": "gpa",
+   "source": "forms-ci:greenhouse-spacex-8643277002",
+   "company": "spacex",
+   "location": "Hawthorne, CA",
+   "label": "GPA (Undergraduate)",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Not applicable/Do not recall",
+    "4.0 out of 4.0",
+    "3.9 out of 4.0",
+    "3.8 out of 4.0",
+    "3.7 out of 4.0",
+    "3.6 out of 4.0",
+    "3.5 out of 4.0",
+    "3.4 out of 4.0",
+    "3.3 out of 4.0",
+    "3.2 out of 4.0",
+    "3.1 out of 4.0",
+    "3.0 out of 4.0",
+    "Below 3.0 out of 4.0"
+   ]
+  },
+  {
+   "id": "S28",
+   "category": "gpa",
+   "source": "forms-ci:greenhouse-spacex-8643277002",
+   "company": "spacex",
+   "location": "Hawthorne, CA",
+   "label": "GPA (Graduate)",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Other/Not Applicable",
+    "4.0 out of 4.0",
+    "3.9 out of 4.0",
+    "3.8 out of 4.0",
+    "3.7 out of 4.0",
+    "3.6 out of 4.0",
+    "3.5 out of 4.0",
+    "3.4 out of 4.0",
+    "3.3 out of 4.0",
+    "3.2 out of 4.0",
+    "3.1 out of 4.0",
+    "3.0 out of 4.0",
+    "Below 3.0 out of 4.0"
+   ]
+  },
+  {
+   "id": "S29",
+   "category": "gpa",
+   "source": "forms-ci:greenhouse-spacex-8643277002",
+   "company": "spacex",
+   "location": "Hawthorne, CA",
+   "label": "GPA (Doctorate)",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Not applicable/Do not recall",
+    "4.0 out of 4.0",
+    "3.9 out of 4.0",
+    "3.8 out of 4.0",
+    "3.7 out of 4.0",
+    "3.6 out of 4.0",
+    "3.5 out of 4.0",
+    "3.4 out of 4.0",
+    "3.3 out of 4.0",
+    "3.2 out of 4.0",
+    "3.1 out of 4.0",
+    "3.0 out of 4.0",
+    "Below 3.0 out of 4.0"
+   ]
+  },
+  {
+   "id": "S30",
+   "category": "work_authorization",
+   "source": "forms-ci:greenhouse-spacex-8643277002",
+   "company": "spacex",
+   "location": "Hawthorne, CA",
+   "label": "Are you legally authorized to work in the United States?",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "I am authorized to work in the United States for any employer",
+    "I am authorized to work in the United States for my present employer only",
+    "I require sponsorship to work in the United States",
+    "I am not authorized to work in the United States",
+    "My status to work in the United States is unknown"
+   ]
+  },
+  {
+   "id": "S31",
+   "category": "work_authorization",
+   "source": "forms-ci:greenhouse-spacex-8643277002",
+   "company": "spacex",
+   "location": "Hawthorne, CA",
+   "label": "Citizenship Status",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "(a) U.S. citizen or national of the United States",
+    "(b) U.S. lawful permanent resident",
+    "(c) Refugee under 8 U.S.C. 1157",
+    "(d) Asylee under 8 U.S.C. 1158",
+    "(e) Authorized to work in the United States under the Deferred Action for Childhood Arrivals (DACA) program",
+    "(f) Other (please explain)"
+   ]
+  },
+  {
+   "id": "S32",
+   "category": "gender",
+   "source": "forms-ci:greenhouse-spacex-8643277002",
+   "company": "spacex",
+   "location": "Hawthorne, CA",
+   "label": "Gender",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "Decline To Self Identify",
+    "Female",
+    "Male"
+   ]
+  },
+  {
+   "id": "S33",
+   "category": "race_ethnicity",
+   "source": "forms-ci:greenhouse-spacex-8643277002",
+   "company": "spacex",
+   "location": "Hawthorne, CA",
+   "label": "Are you Hispanic/Latino?",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": []
+  },
+  {
+   "id": "S34",
+   "category": "veteran",
+   "source": "forms-ci:greenhouse-spacex-8643277002",
+   "company": "spacex",
+   "location": "Hawthorne, CA",
+   "label": "Veteran Status",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": []
+  },
+  {
+   "id": "S35",
+   "category": "work_authorization",
+   "source": "forms-ci:greenhouse-wppmedia-5437567008",
+   "company": "WPP Media",
+   "location": "London, United Kingdom",
+   "label": "Are you lawfully authorized to work in the country where this job is located?",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  },
+  {
+   "id": "S36",
+   "category": "sponsorship",
+   "source": "forms-ci:greenhouse-wppmedia-5437567008",
+   "company": "WPP Media",
+   "location": "London, United Kingdom",
+   "label": "Will you now or at any point in the future require sponsorship to maintain lawful employment in the country where this job is located?",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  },
+  {
+   "id": "S37",
+   "category": "gender",
+   "source": "forms-ci:greenhouse-wppmedia-5437567008",
+   "company": "WPP Media",
+   "location": "London, United Kingdom",
+   "label": "What gender identity do you most closely identify with?",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "Female",
+    "Male",
+    "Non-Binary",
+    "I don't wish to answer",
+    "Prefer to self-describe"
+   ]
+  },
+  {
+   "id": "S38",
+   "category": "orientation",
+   "source": "forms-ci:greenhouse-wppmedia-5437567008",
+   "company": "WPP Media",
+   "location": "London, United Kingdom",
+   "label": "What is your sexual orientation?",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "Heterosexual",
+    "Bisexual",
+    "Homosexual",
+    "Pansexual",
+    "Asexual",
+    "Prefer to self-describe",
+    "I don't wish to answer"
+   ]
+  },
+  {
+   "id": "S39",
+   "category": "race_ethnicity",
+   "source": "forms-ci:greenhouse-wppmedia-5437567008",
+   "company": "WPP Media",
+   "location": "London, United Kingdom",
+   "label": "I identify my race/ethnicity as (select all that apply)",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "English/Welsh/Scottish/Northern",
+    "Irish/British",
+    "Irish",
+    "Any other White Background",
+    "White and Black Caribbean",
+    "White and Black African",
+    "White and Asian",
+    "Any Other Mixed/Multiple Ethnic Background",
+    "Indian",
+    "Pakistani",
+    "Bangladeshi",
+    "Chinese",
+    "Any Other Asian Background African Caribbean",
+    "Any other Black/African/Caribbean Background",
+    "Arab",
+    "Any other ethnic group",
+    "Prefer to self-describe",
+    "I don't wish to answer"
+   ]
+  },
+  {
+   "id": "S40",
+   "category": "disability",
+   "source": "forms-ci:greenhouse-wppmedia-5437567008",
+   "company": "WPP Media",
+   "location": "London, United Kingdom",
+   "label": "Do you consider yourself to have a disability, impairment or long-term health condition",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "Yes",
+    "No",
+    "I don't wish to answer"
+   ]
+  },
+  {
+   "id": "S41",
+   "category": "disability",
+   "source": "forms-ci:greenhouse-wppmedia-5437567008",
+   "company": "WPP Media",
+   "location": "London, United Kingdom",
+   "label": "If you answered 'Yes', please select the option(s) that best describe your disability, impairment, or long-term health condition. (Select all that apply)",
+   "kind": "combobox",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "Physical disability/impairment (e.g., mobility, dexterity)",
+    "Sensory impairment (e.g., visual impairment, hearing impairment)",
+    "Learning disability/difficulty (e.g., dyslexia, dyspraxia, ADHD, autism spectrum condition)",
+    "Mental health condition (e.g., depression, anxiety, bipolar disorder)",
+    "Long-term illness/health condition (e.g., diabetes, epilepsy, chronic fatigue syndrome, cancer, heart condition)",
+    "Neurological condition (e.g., multiple sclerosis, Parkinson's disease, stroke)",
+    "Prefer not to say",
+    "Other (Please Self-Describe)"
+   ]
+  },
+  {
+   "id": "S42",
+   "category": "pronouns",
+   "source": "forms-ci:lever-cgsfederal-0130d854-9bae-48d4-8ef0-e9da1ee778a5",
+   "company": "CGS Federal (Contact Government Services)",
+   "location": "Atlanta, GA; Hybrid; Remote; Charlotte, NC",
+   "label": "Pronouns",
+   "kind": "checkgroup",
+   "type": "multi_value_multi_select",
+   "required": false,
+   "eeo": false,
+   "options": [
+    "He/him",
+    "She/her",
+    "They/them",
+    "Xe/xem",
+    "Ze/hir",
+    "Ey/em",
+    "Hir/hir",
+    "Fae/faer",
+    "Hu/hu",
+    "Use name only"
+   ]
+  },
+  {
+   "id": "S43",
+   "category": "work_authorization",
+   "source": "forms-ci:lever-cgsfederal-0130d854-9bae-48d4-8ef0-e9da1ee778a5",
+   "company": "CGS Federal (Contact Government Services)",
+   "location": "Atlanta, GA; Hybrid; Remote; Charlotte, NC",
+   "label": "What's your citizenship / employment eligibility?",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "I am a U.S Citizen / Permanent Resident.",
+    "Non-Citizen allowed to work for any employer.",
+    "Non-Citizen allowed to work for current employer.",
+    "Non-Citizen seeking work Authorization."
+   ]
+  },
+  {
+   "id": "S44",
+   "category": "pronouns",
+   "source": "forms-ci:lever-lyrahealth-35bffe8b-ac9f-4749-ba4c-5f3a4d2bd77d",
+   "company": "Lyra Health",
+   "location": "United States",
+   "label": "Pronouns",
+   "kind": "checkgroup",
+   "type": "multi_value_multi_select",
+   "required": false,
+   "eeo": false,
+   "options": [
+    "He/him",
+    "She/her",
+    "They/them",
+    "Xe/xem",
+    "Ze/hir",
+    "Ey/em",
+    "Hir/hir",
+    "Fae/faer",
+    "Hu/hu",
+    "Use name only"
+   ]
+  },
+  {
+   "id": "S45",
+   "category": "work_authorization",
+   "source": "forms-ci:lever-lyrahealth-35bffe8b-ac9f-4749-ba4c-5f3a4d2bd77d",
+   "company": "Lyra Health",
+   "location": "United States",
+   "label": "Are you legally authorized to work in the United States for our Company?",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  },
+  {
+   "id": "S46",
+   "category": "sponsorship",
+   "source": "forms-ci:lever-lyrahealth-35bffe8b-ac9f-4749-ba4c-5f3a4d2bd77d",
+   "company": "Lyra Health",
+   "location": "United States",
+   "label": "Do you now, or will you in the future, require sponsorship for employment visa status (e.g., H-1B visa status, etc.) to work legally for our Company in the United States?",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  },
+  {
+   "id": "S47",
+   "category": "gender",
+   "source": "forms-ci:lever-lyrahealth-35bffe8b-ac9f-4749-ba4c-5f3a4d2bd77d",
+   "company": "Lyra Health",
+   "location": "United States",
+   "label": "Gender",
+   "kind": "select",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "Male",
+    "Female",
+    "Decline to self-identify"
+   ]
+  },
+  {
+   "id": "S48",
+   "category": "race_ethnicity",
+   "source": "forms-ci:lever-lyrahealth-35bffe8b-ac9f-4749-ba4c-5f3a4d2bd77d",
+   "company": "Lyra Health",
+   "location": "United States",
+   "label": "RaceHispanic or LatinoA person of Cuban, Mexican, Puerto Rican, South or Central American, or other Spanish culture or origin regardless of race.White (Not Hispanic or Latino)A person having origins in any of the original peoples of Europe, the Middle East, or North Africa.Black or African American (Not Hispanic or Latino)A person having origins in any of the black racial groups of Africa.Native Hawaiian or Other Pacific Islander (Not Hispanic or Latino)A person having origins in any of the peoples of Hawaii, Guam, Samoa, or other Pacific Islands.Asian (Not Hispanic or Latino)A person having origins in any of the original peoples of the Far East, Southeast Asia, or the Indian Subcontinent, including, for example, Cambodia, China, India, Japan, Korea, Malaysia, Pakistan, the Philippine Islands, Thailand, and Vietnam.American Indian or Alaska Native (Not Hispanic or Latino)A person having origins in any of the original peoples of North and South America (including Central America), and who maintain tribal affiliation or community attachment.Two or More Races (Not Hispanic or Latino)All persons who identify with more than one of the above five races.",
+   "kind": "select",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "Hispanic or Latino",
+    "White (Not Hispanic or Latino)",
+    "Black or African American (Not Hispanic or Latino)",
+    "Native Hawaiian or Other Pacific Islander (Not Hispanic or Latino)",
+    "Asian (Not Hispanic or Latino)",
+    "American Indian or Alaska Native (Not Hispanic or Latino)",
+    "Two or More Races (Not Hispanic or Latino)",
+    "Decline to self-identify"
+   ]
+  },
+  {
+   "id": "S49",
+   "category": "veteran",
+   "source": "forms-ci:lever-lyrahealth-35bffe8b-ac9f-4749-ba4c-5f3a4d2bd77d",
+   "company": "Lyra Health",
+   "location": "United States",
+   "label": "Veteran status",
+   "kind": "select",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "I am a veteran",
+    "I am not a veteran",
+    "Decline to self-identify"
+   ]
+  },
+  {
+   "id": "S50",
+   "category": "gender",
+   "source": "forms-ci:lever-lyrahealth-35bffe8b-ac9f-4749-ba4c-5f3a4d2bd77d",
+   "company": "Lyra Health",
+   "location": "United States",
+   "label": "To which gender identity do you most identify?",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "Agender",
+    "Gender non-conforming",
+    "Genderqueer",
+    "Intersex",
+    "Man",
+    "Non-binary",
+    "Two-spirit",
+    "Transgender",
+    "Woman",
+    "Prefer not to answer"
+   ]
+  },
+  {
+   "id": "S51",
+   "category": "orientation",
+   "source": "forms-ci:lever-lyrahealth-35bffe8b-ac9f-4749-ba4c-5f3a4d2bd77d",
+   "company": "Lyra Health",
+   "location": "United States",
+   "label": "To which sexual orientation do you most identify?",
+   "kind": "checkgroup",
+   "type": "multi_value_multi_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "Asexual",
+    "Bisexual",
+    "Fluid",
+    "Gay",
+    "Lesbian",
+    "Pansexual",
+    "Queer",
+    "Questioning or unsure",
+    "Straight (Heterosexual)",
+    "Prefer not to answer"
+   ]
+  },
+  {
+   "id": "S52",
+   "category": "disability",
+   "source": "forms-ci:lever-lyrahealth-35bffe8b-ac9f-4749-ba4c-5f3a4d2bd77d",
+   "company": "Lyra Health",
+   "location": "United States",
+   "label": "Do you identify as a person living with a disability?",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No",
+    "Prefer not to answer"
+   ]
+  },
+  {
+   "id": "S53",
+   "category": "orientation",
+   "source": "forms-ci:lever-lyrahealth-35bffe8b-ac9f-4749-ba4c-5f3a4d2bd77d",
+   "company": "Lyra Health",
+   "location": "United States",
+   "label": "Do you identify as LGBTQIA+?",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No",
+    "Prefer not to answer"
+   ]
+  },
+  {
+   "id": "S54",
+   "category": "gender",
+   "source": "forms-ci:lever-shieldai-ba945088-38ec-4e58-8f66-01c0497a3bd3",
+   "company": "Shield AI",
+   "location": "Abu Dhabi",
+   "label": "Gender",
+   "kind": "select",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "Male",
+    "Female",
+    "Decline to self-identify"
+   ]
+  },
+  {
+   "id": "S55",
+   "category": "race_ethnicity",
+   "source": "forms-ci:lever-shieldai-ba945088-38ec-4e58-8f66-01c0497a3bd3",
+   "company": "Shield AI",
+   "location": "Abu Dhabi",
+   "label": "Race",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "Hispanic or LatinoA person of Cuban, Mexican, Puerto Rican, South or Central American, or other Spanish culture or origin regardless of race.",
+    "White (Not Hispanic or Latino)A person having origins in any of the original peoples of Europe, the Middle East, or North Africa.",
+    "Black or African American (Not Hispanic or Latino)A person having origins in any of the black racial groups of Africa.",
+    "Native Hawaiian or Other Pacific Islander (Not Hispanic or Latino)A person having origins in any of the peoples of Hawaii, Guam, Samoa, or other Pacific Islands.",
+    "Asian (Not Hispanic or Latino)A person having origins in any of the original peoples of the Far East, Southeast Asia, or the Indian Subcontinent, including, for example, Cambodia, China, India, Japan, Korea, Malaysia, Pakistan, the Philippine Islands, Thailand, and Vietnam.",
+    "American Indian or Alaska Native (Not Hispanic or Latino)A person having origins in any of the original peoples of North and South America (including Central America), and who maintain tribal affiliation or community attachment.",
+    "Two or More Races (Not Hispanic or Latino)All persons who identify with more than one of the above five races.",
+    "Decline to self-identify"
+   ]
+  },
+  {
+   "id": "S56",
+   "category": "veteran",
+   "source": "forms-ci:lever-shieldai-ba945088-38ec-4e58-8f66-01c0497a3bd3",
+   "company": "Shield AI",
+   "location": "Abu Dhabi",
+   "label": "Veteran status",
+   "kind": "select",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "I identify as one or more of the classifications of protected veteran listed above",
+    "I am not a protected veteran",
+    "I decline to self-identify for protected veteran status"
+   ]
+  },
+  {
+   "id": "S57",
+   "category": "disability",
+   "source": "forms-ci:lever-shieldai-ba945088-38ec-4e58-8f66-01c0497a3bd3",
+   "company": "Shield AI",
+   "location": "Abu Dhabi",
+   "label": "Disability status",
+   "kind": "select",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "Yes, I have a disability, or have had one in the past",
+    "No, I do not have a disability and have not had one in the past",
+    "I do not want to answer"
+   ]
+  },
+  {
+   "id": "S58",
+   "category": "gender",
+   "source": "forms-ci:lever-tsmg-9e43a7f6-3476-482f-9cdd-ed5b73fb9df7",
+   "company": "TSMG",
+   "location": "Riyadh",
+   "label": "Gender",
+   "kind": "select",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "Male",
+    "Female",
+    "Decline to self-identify"
+   ]
+  },
+  {
+   "id": "S59",
+   "category": "race_ethnicity",
+   "source": "forms-ci:lever-tsmg-9e43a7f6-3476-482f-9cdd-ed5b73fb9df7",
+   "company": "TSMG",
+   "location": "Riyadh",
+   "label": "RaceHispanic or LatinoA person of Cuban, Mexican, Puerto Rican, South or Central American, or other Spanish culture or origin regardless of race.White (Not Hispanic or Latino)A person having origins in any of the original peoples of Europe, the Middle East, or North Africa.Black or African American (Not Hispanic or Latino)A person having origins in any of the black racial groups of Africa.Native Hawaiian or Other Pacific Islander (Not Hispanic or Latino)A person having origins in any of the peoples of Hawaii, Guam, Samoa, or other Pacific Islands.Asian (Not Hispanic or Latino)A person having origins in any of the original peoples of the Far East, Southeast Asia, or the Indian Subcontinent, including, for example, Cambodia, China, India, Japan, Korea, Malaysia, Pakistan, the Philippine Islands, Thailand, and Vietnam.American Indian or Alaska Native (Not Hispanic or Latino)A person having origins in any of the original peoples of North and South America (including Central America), and who maintain tribal affiliation or community attachment.Two or More Races (Not Hispanic or Latino)All persons who identify with more than one of the above five races.",
+   "kind": "select",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "Hispanic or Latino",
+    "White (Not Hispanic or Latino)",
+    "Black or African American (Not Hispanic or Latino)",
+    "Native Hawaiian or Other Pacific Islander (Not Hispanic or Latino)",
+    "Asian (Not Hispanic or Latino)",
+    "American Indian or Alaska Native (Not Hispanic or Latino)",
+    "Two or More Races (Not Hispanic or Latino)",
+    "Decline to self-identify"
+   ]
+  },
+  {
+   "id": "S60",
+   "category": "veteran",
+   "source": "forms-ci:lever-tsmg-9e43a7f6-3476-482f-9cdd-ed5b73fb9df7",
+   "company": "TSMG",
+   "location": "Riyadh",
+   "label": "Veteran status",
+   "kind": "select",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "I am a veteran",
+    "I am not a veteran",
+    "Decline to self-identify"
+   ]
+  },
+  {
+   "id": "S61",
+   "category": "sponsorship",
+   "source": "forms-ci:lever-veeva-9ac55b31-df46-4acb-b305-2c0b7ed56027",
+   "company": "Veeva",
+   "location": "New Jersey - Lyndhurst",
+   "label": "Do you now, or in the future require sponsorship?",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  },
+  {
+   "id": "S62",
+   "category": "work_authorization",
+   "source": "forms-ci:lever-veeva-9ac55b31-df46-4acb-b305-2c0b7ed56027",
+   "company": "Veeva",
+   "location": "New Jersey - Lyndhurst",
+   "label": "Do you have the unrestricted right to work in the United States?",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  },
+  {
+   "id": "S63",
+   "category": "gender",
+   "source": "forms-ci:lever-veeva-9ac55b31-df46-4acb-b305-2c0b7ed56027",
+   "company": "Veeva",
+   "location": "New Jersey - Lyndhurst",
+   "label": "Gender",
+   "kind": "select",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "Male",
+    "Female",
+    "Decline to self-identify"
+   ]
+  },
+  {
+   "id": "S64",
+   "category": "race_ethnicity",
+   "source": "forms-ci:lever-veeva-9ac55b31-df46-4acb-b305-2c0b7ed56027",
+   "company": "Veeva",
+   "location": "New Jersey - Lyndhurst",
+   "label": "RaceHispanic or LatinoA person of Cuban, Mexican, Puerto Rican, South or Central American, or other Spanish culture or origin regardless of race.White (Not Hispanic or Latino)A person having origins in any of the original peoples of Europe, the Middle East, or North Africa.Black or African American (Not Hispanic or Latino)A person having origins in any of the black racial groups of Africa.Native Hawaiian or Other Pacific Islander (Not Hispanic or Latino)A person having origins in any of the peoples of Hawaii, Guam, Samoa, or other Pacific Islands.Asian (Not Hispanic or Latino)A person having origins in any of the original peoples of the Far East, Southeast Asia, or the Indian Subcontinent, including, for example, Cambodia, China, India, Japan, Korea, Malaysia, Pakistan, the Philippine Islands, Thailand, and Vietnam.American Indian or Alaska Native (Not Hispanic or Latino)A person having origins in any of the original peoples of North and South America (including Central America), and who maintain tribal affiliation or community attachment.Two or More Races (Not Hispanic or Latino)All persons who identify with more than one of the above five races.",
+   "kind": "select",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "Hispanic or Latino",
+    "White (Not Hispanic or Latino)",
+    "Black or African American (Not Hispanic or Latino)",
+    "Native Hawaiian or Other Pacific Islander (Not Hispanic or Latino)",
+    "Asian (Not Hispanic or Latino)",
+    "American Indian or Alaska Native (Not Hispanic or Latino)",
+    "Two or More Races (Not Hispanic or Latino)",
+    "Decline to self-identify"
+   ]
+  },
+  {
+   "id": "S65",
+   "category": "veteran",
+   "source": "forms-ci:lever-veeva-9ac55b31-df46-4acb-b305-2c0b7ed56027",
+   "company": "Veeva",
+   "location": "New Jersey - Lyndhurst",
+   "label": "Veteran status",
+   "kind": "select",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "I am a veteran",
+    "I am not a veteran",
+    "Decline to self-identify"
+   ]
+  },
+  {
+   "id": "S66",
+   "category": "gender",
+   "source": "forms-ci:lever-weloglobal-6e0ac589-3fba-429a-8ce4-5c48a2cf0e2d",
+   "company": "Welo Global",
+   "location": "Brazil",
+   "label": "Gender",
+   "kind": "select",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "Male",
+    "Female",
+    "Decline to self-identify"
+   ]
+  },
+  {
+   "id": "S67",
+   "category": "race_ethnicity",
+   "source": "forms-ci:lever-weloglobal-6e0ac589-3fba-429a-8ce4-5c48a2cf0e2d",
+   "company": "Welo Global",
+   "location": "Brazil",
+   "label": "RaceHispanic or LatinoA person of Cuban, Mexican, Puerto Rican, South or Central American, or other Spanish culture or origin regardless of race.White (Not Hispanic or Latino)A person having origins in any of the original peoples of Europe, the Middle East, or North Africa.Black or African American (Not Hispanic or Latino)A person having origins in any of the black racial groups of Africa.Native Hawaiian or Other Pacific Islander (Not Hispanic or Latino)A person having origins in any of the peoples of Hawaii, Guam, Samoa, or other Pacific Islands.Asian (Not Hispanic or Latino)A person having origins in any of the original peoples of the Far East, Southeast Asia, or the Indian Subcontinent, including, for example, Cambodia, China, India, Japan, Korea, Malaysia, Pakistan, the Philippine Islands, Thailand, and Vietnam.American Indian or Alaska Native (Not Hispanic or Latino)A person having origins in any of the original peoples of North and South America (including Central America), and who maintain tribal affiliation or community attachment.Two or More Races (Not Hispanic or Latino)All persons who identify with more than one of the above five races.",
+   "kind": "select",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "Hispanic or Latino",
+    "White (Not Hispanic or Latino)",
+    "Black or African American (Not Hispanic or Latino)",
+    "Native Hawaiian or Other Pacific Islander (Not Hispanic or Latino)",
+    "Asian (Not Hispanic or Latino)",
+    "American Indian or Alaska Native (Not Hispanic or Latino)",
+    "Two or More Races (Not Hispanic or Latino)",
+    "Decline to self-identify"
+   ]
+  },
+  {
+   "id": "S68",
+   "category": "veteran",
+   "source": "forms-ci:lever-weloglobal-6e0ac589-3fba-429a-8ce4-5c48a2cf0e2d",
+   "company": "Welo Global",
+   "location": "Brazil",
+   "label": "Veteran status",
+   "kind": "select",
+   "type": "multi_value_single_select",
+   "required": false,
+   "eeo": true,
+   "options": [
+    "I am a veteran",
+    "I am not a veteran",
+    "Decline to self-identify"
+   ]
+  },
+  {
+   "id": "S69",
+   "category": "sponsorship",
+   "source": "strict-run-42719264485:https://jobs.ashbyhq.com/vanta/4ecbf29d-7566-471a-96de-d604489ae5d0",
+   "company": "Vanta",
+   "location": null,
+   "label": "Will you now or in the future require visa sponsorship?",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  },
+  {
+   "id": "S70",
+   "category": "work_authorization",
+   "source": "strict-run-42719264485:https://jobs.ashbyhq.com/hiya/38ae71d2-46c0-4f08-8693-faeb7227d017",
+   "company": "Hiya",
+   "location": "Toronto, Canada",
+   "label": "Are you legally eligible to work in Canada?",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  },
+  {
+   "id": "S71",
+   "category": "work_authorization",
+   "source": "strict-run-42719264485:https://jobs.ashbyhq.com/harmattan-ai/67f26f68-0ebb-453b-8fe6-db39f3279c5f",
+   "company": "Harmattan AI",
+   "location": null,
+   "label": "Do you have the Right to Work in France?",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  },
+  {
+   "id": "S72",
+   "category": "sponsorship",
+   "source": "strict-run-42719264485:https://jobs.ashbyhq.com/algo1/04f4a41e-f52b-4980-ab2d-d4690134ae65",
+   "company": "algo1",
+   "location": "London",
+   "label": "Do you require UK Visa Sponsorship?",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  },
+  {
+   "id": "S73",
+   "category": "work_authorization",
+   "source": "strict-run-42719264485:https://jobs.ashbyhq.com/finni-health/87df9618-ed8c-4c99-ac12-0a3c4f8ee83a",
+   "company": "Finni Health",
+   "location": null,
+   "label": "Are you authorized to work in the United States?",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  },
+  {
+   "id": "S74",
+   "category": "work_authorization",
+   "source": "strict-run-42719264485:https://job-boards.greenhouse.io/anc/jobs/4379455009",
+   "company": "ARCO National Construction",
+   "location": null,
+   "label": "Are you legally authorized to work in the United States?",
+   "kind": "text",
+   "type": "input_text",
+   "required": true,
+   "eeo": false,
+   "options": []
+  },
+  {
+   "id": "S75",
+   "category": "work_authorization",
+   "source": "strict-run-42719264485:https://job-boards.greenhouse.io/systemstechnologyresearch/jobs/4716432006",
+   "company": "STR (Systems & Technology Research)",
+   "location": null,
+   "label": "Are you a US Citizen?",
+   "kind": "text",
+   "type": "input_text",
+   "required": true,
+   "eeo": false,
+   "options": []
+  },
+  {
+   "id": "S76",
+   "category": "work_authorization",
+   "source": "strict-run-42719264485:https://job-boards.greenhouse.io/systemstechnologyresearch/jobs/4716432006",
+   "company": "STR (Systems & Technology Research)",
+   "location": null,
+   "label": "Are you a Dual citizen?",
+   "kind": "text",
+   "type": "input_text",
+   "required": true,
+   "eeo": false,
+   "options": []
+  },
+  {
+   "id": "S77",
+   "category": "gender",
+   "source": "strict-run-42719264485:https://jobs.lever.co/boxlunch/bc3bda8b-1e7c-44cb-9aa4-998ebd168726",
+   "company": "BoxLunch",
+   "location": null,
+   "label": "What gender do you identify as?",
+   "kind": "text",
+   "type": "input_text",
+   "required": true,
+   "eeo": false,
+   "options": []
+  },
+  {
+   "id": "S78",
+   "category": "gpa",
+   "source": "questions-ci-b.json:greenhouse-universityofchicago-8034881003",
+   "company": "University of Chicago",
+   "location": null,
+   "label": "Undergraduate GPA (please use 4.0 scale)",
+   "kind": "text",
+   "type": "input_text",
+   "required": true,
+   "eeo": false,
+   "options": []
+  },
+  {
+   "id": "S79",
+   "category": "gpa",
+   "source": "questions-ci-b.json:greenhouse-universityofchicago-8034881003",
+   "company": "University of Chicago",
+   "location": null,
+   "label": "Graduate GPA (if applicable)",
+   "kind": "text",
+   "type": "input_text",
+   "required": false,
+   "eeo": false,
+   "options": []
+  },
+  {
+   "id": "S80",
+   "category": "graduation_date",
+   "source": "questions-ci-b.json:ashby-aurelian-883521f3-577c-4fdd-b47c-0c170936de59",
+   "company": "Aurelian",
+   "location": "Seattle",
+   "label": "Have you graduated yet? We are not considering upcoming at grads at this time",
+   "kind": "checkbox",
+   "type": "checkbox",
+   "required": true,
+   "eeo": false,
+   "options": []
+  },
+  {
+   "id": "S81",
+   "category": "graduation_date",
+   "source": "questions-ci-c.json:greenhouse-mthreerecruitingportal-4683660006",
+   "company": "mthree",
+   "location": "Toronto, Ontario, Canada",
+   "label": "Avez-vous obtenu un diplôme avec une note de 2,75+ (ou équivalent)? / Have you graduated with a grade of 2.75+? (or equivalent)",
+   "kind": "select",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  },
+  {
+   "id": "S82",
+   "category": "graduation_date",
+   "source": "questions-ci-c.json:greenhouse-mthreerecruitingportal-4683660006",
+   "company": "mthree",
+   "location": "Toronto, Ontario, Canada",
+   "label": "Date de fin d'études / Graduation end date",
+   "kind": "select",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Before 2025",
+    "2025",
+    "2026",
+    "2027",
+    "After 2028"
+   ]
+  },
+  {
+   "id": "S83",
+   "category": "gpa",
+   "source": "questions-ci-c.json:greenhouse-ieqcapital-7833474003",
+   "company": "IEQ Capital",
+   "location": "Los Angeles, CA",
+   "label": "GPA",
+   "kind": "select",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "<3.1",
+    "3.2",
+    "3.3",
+    "3.4",
+    "3.5",
+    "3.6",
+    "3.7",
+    "3.8",
+    "3.9",
+    "4.0"
+   ]
+  },
+  {
+   "id": "S84",
+   "category": "graduation_date",
+   "source": "questions-ci-c.json:greenhouse-intersystems-7827897003",
+   "company": "InterSystems",
+   "location": "Boston, MA",
+   "label": "Are you graduating between December 2026 and August 2027?",
+   "kind": "select",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  },
+  {
+   "id": "S85",
+   "category": "graduation_date",
+   "source": "questions-ci-c.json:greenhouse-janestreet-8844412002",
+   "company": "janestreet",
+   "location": "London, England, United Kingdom",
+   "label": "What year did you graduate high school?",
+   "kind": "text",
+   "type": "input_text",
+   "required": false,
+   "eeo": false,
+   "options": []
+  },
+  {
+   "id": "S86",
+   "category": "graduation_date",
+   "source": "questions-ci-c.json:lever-demiurgestudios-85f401d2-5242-4096-b852-2947492d0035",
+   "company": "Demiurge Studios",
+   "location": "Remote",
+   "label": "What is your expected year of graduation?",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "2026",
+    "2027",
+    "2028 or later",
+    "I am not currently enrolled"
+   ]
+  },
+  {
+   "id": "S87",
+   "category": "graduation_date",
+   "source": "questions-ci-c.json:lever-demiurgestudios-85f401d2-5242-4096-b852-2947492d0035",
+   "company": "Demiurge Studios",
+   "location": "Remote",
+   "label": "What is your expected month of graduation?",
+   "kind": "radio",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "January - March",
+    "April - June",
+    "July - September",
+    "October - December",
+    "I am not currently enrolled"
+   ]
+  },
+  {
+   "id": "S88",
+   "category": "gpa",
+   "source": "questions-ci-c.json:lever-demiurgestudios-85f401d2-5242-4096-b852-2947492d0035",
+   "company": "Demiurge Studios",
+   "location": "Remote",
+   "label": "What is your Grade Point Average (GPA)?",
+   "kind": "text",
+   "type": "input_text",
+   "required": false,
+   "eeo": false,
+   "options": []
+  },
+  {
+   "id": "S89",
+   "category": "gpa",
+   "source": "questions-ci-c.json:lever-hive-e3d7abc3-bb37-4e21-8701-5b26782ab156",
+   "company": "Hive",
+   "location": "Seattle",
+   "label": "What is/was your GPA?",
+   "kind": "textarea",
+   "type": "textarea",
+   "required": true,
+   "eeo": false,
+   "options": []
+  },
+  {
+   "id": "S90",
+   "category": "graduation_date",
+   "source": "questions-ci-d.json:greenhouse-charlesriverassociates-8249052",
+   "company": "Charles River Associates (CRA)",
+   "location": "Cambridge, Cambridgeshire, England, United Kingdom; London, United Kingdom",
+   "label": "Can you confirm that you will be graduating in 2027 or 2028?",
+   "kind": "select",
+   "type": "multi_value_single_select",
+   "required": true,
+   "eeo": false,
+   "options": [
+    "Yes",
+    "No"
+   ]
+  }
+ ]
+}

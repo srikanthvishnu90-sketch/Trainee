@@ -211,6 +211,13 @@ export function renderBootstrap(reason: string): string {
   return page("Connect your email", `<p class="line">Signing you in with Telegram.</p><p class="line" id="nodata" hidden>Open this page from the button in Telegram, or use the link Trainee sent you.</p><noscript><p class="line">This needs JavaScript. Use the link Trainee sent you instead.</p></noscript>`, { script: CONNECT_BOOT, tg: true, bodyAttrs: `data-w="${esc(reasonKey(reason))}"` });
 }
 
+// x-audit (2026-11-10, architect amendment, security: link scanners): the link the bot sends opens this page and uses
+// nothing up. Only its one button (a POST carrying the link and this page's token) takes the link, so a mail or chat
+// scanner that fetches the link, even with a browser's identity and JavaScript, never spends it.
+export function renderOpenLink(m: { link: string; pageToken: string; reason: string }): string {
+  return page("Connect your email", `<p class="line">${esc(previewOg(m.reason).description)}</p><form method="post" class="open"><input type="hidden" name="link" value="${esc(m.link)}"><input type="hidden" name="pt" value="${esc(m.pageToken)}"><div class="actions"><button type="submit" class="primary">Open the connect page</button></div></form>`, { script: CONNECT_SCRIPT, tg: true });
+}
+
 // The preview card a chat shows under the link: the brand and the reason; nothing about any person.
 export const previewOg = (reason: string, image: string | null = null): Og => ({ title: "Connect your email to Trainee", description: `So I can ${REASONS[reasonKey(reason)]}. One tap; nothing is sent without your approval.`, image });
 export function renderPreview(og: Og): string {

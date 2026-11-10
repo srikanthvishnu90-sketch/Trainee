@@ -347,6 +347,7 @@
     "tests/architect/research-reply-on-d047.test.ts": 0.1,
     "tests/architect/research-review-fixes-589.test.ts": 0.1,
     "tests/architect/response-b6-replay-20261109.test.ts": 12,
+    "tests/architect/response-battery-20261110.test.ts": 160.1,
     "tests/architect/response-sweep-20261109.test.ts": 14,
     "tests/architect/results-batch-file.test.ts": 0.1,
     "tests/architect/results-page-design.test.ts": 0.1,
@@ -661,6 +662,7 @@
     "tests/architect/r10-resume-design-loop-20261110.test.ts": 42,
     "tests/architect/accounts-loop.test.ts": 11,
     "tests/architect/connect-chat-disconnect.test.ts": 10,
+    "tests/architect/a-sensitive.test.ts": 0.2,
     "tests/architect/h2h-leftovers-20261110.test.ts": 2.3
   }
 }

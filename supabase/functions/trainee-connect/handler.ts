@@ -7,10 +7,10 @@
 // Login is the jobs page's (trainee-file): Telegram's signed Mini App initData mapped to the linked account, or the signed,
 // expiring, single-use link (../_shared/connect_link.ts) exchanged once for an HttpOnly session cookie. Every read and action is
 // scoped to the user id inside the verified claims; a user id in a form is never read.
-import { CONNECT_SESSION_TTL_MS, connectPageToken, connectSecret, mintConnectToken, mintMiniToken, reasonKey, samePageToken, verifyConnectToken, verifyMiniToken, type ConnectClaims } from "../_shared/connect_link.ts";
+import { CONNECT_SESSION_TTL_MS, connectOpenToken, connectPageToken, connectSecret, mintConnectToken, mintMiniToken, reasonKey, sameOpenToken, samePageToken, verifyConnectToken, verifyMiniToken, type ConnectClaims } from "../_shared/connect_link.ts";
 import { verifyInitData } from "../_shared/telegram_webapp.ts";
 import { connectHeaders as headers } from "../_shared/connect_landing.ts";
-import { DISCONNECT_IN_CHAT, previewOg, renderBootstrap, renderConnect, renderDone, renderPreview, renderState, renderUnfinished, type PState, type ProviderId, type ProviderView } from "../_shared/connect_page.ts";
+import { DISCONNECT_IN_CHAT, previewOg, renderBootstrap, renderConnect, renderDone, renderOpenLink, renderPreview, renderState, renderUnfinished, type PState, type ProviderId, type ProviderView } from "../_shared/connect_page.ts";
 
 export type { ProviderId } from "../_shared/connect_page.ts";
 export { connectLanding } from "../_shared/connect_landing.ts";
@@ -84,6 +84,21 @@ export async function handleConnect(req: Request, d: ConnectDeps): Promise<Respo
     if (c.claims.k !== "s") return bad("malformed");
     return c.claims;
   };
+  const linkField = req.method === "POST" ? (fields.get("link") ?? "") : "";
+  if (linkField) {
+    // The open page's button: the link, taken ONCE, exchanged for an HttpOnly session cookie, then redirected to a clean URL.
+    // Only a POST carrying the page token drawn for this link takes it (a GET never does: link scanners, x-audit).
+    const c = await verifyConnectToken(linkField, secret, d.now());
+    if (!c.ok) return bad(c.why);
+    if (c.claims.k !== "l") return bad("malformed");
+    if (!(await sameOpenToken(fields.get("pt") ?? "", c.claims.j, secret))) return bad("malformed");
+    const first = await d.claimLink(c.claims.u, c.claims.j, d.now()).catch(() => null);
+    if (first === null) return state("Couldn't open this just now", ["Nothing was used up. Try the link again in a minute."], 503);
+    if (!first) return state("This link was already used", ["A link opens this page once, so a forwarded copy can't. " + NEW_LINK], 410);
+    const session = await mintConnectToken({ secret, userId: c.claims.u, reason: c.claims.w, channel: c.claims.ch, now: d.now(), ttlMs: CONNECT_SESSION_TTL_MS, kind: "s" });
+    if (!session) return bad("not_configured");
+    return html("", 303, { location: url.pathname, "set-cookie": `tc_s=${session}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${Math.floor(CONNECT_SESSION_TTL_MS / 1000)}` });
+  }
   if (req.method === "POST") {
     if (given.startsWith("cp1.")) {
       const cookie = cookieOf(req, "tc_s");
@@ -116,20 +131,18 @@ export async function handleConnect(req: Request, d: ConnectDeps): Promise<Respo
       claims = { u: who.u, w: reasonKey(fields.get("w")), ch: "telegram", k: "s", j: "0".repeat(16), i: d.now(), e: d.now() + CONNECT_SESSION_TTL_MS }; viewer = "telegram"; pageTok = minted;
     }
   } else if (given) {
-    // The link: taken ONCE, exchanged for an HttpOnly session cookie, then redirected to a clean URL. The token never stays in a URL.
+    // The link: a GET only draws the page with its one button; it never uses the link up (x-audit, 2026-11-10: a mail
+    // scanner that sends a browser's identity used to spend it). The button's POST takes it (above).
     const c = await verifyConnectToken(given, secret, d.now());
     if (!c.ok) return bad(c.why);
     if (c.claims.k !== "l") return bad("malformed");
     if (looksAutomated(req)) {
-      // A link preview fetch must not use up the link: it gets the preview card and nothing about any person.
+      // A link preview fetch gets the preview card and nothing about any person.
       return html(renderPreview(previewOg(c.claims.w)));
     }
-    const first = await d.claimLink(c.claims.u, c.claims.j, d.now()).catch(() => null);
-    if (first === null) return state("Couldn't open this just now", ["Nothing was used up. Try the link again in a minute."], 503);
-    if (!first) return state("This link was already used", ["A link opens this page once, so a forwarded copy can't. " + NEW_LINK], 410);
-    const session = await mintConnectToken({ secret, userId: c.claims.u, reason: c.claims.w, channel: c.claims.ch, now: d.now(), ttlMs: CONNECT_SESSION_TTL_MS, kind: "s" });
-    if (!session) return bad("not_configured");
-    return html("", 303, { location: url.pathname, "set-cookie": `tc_s=${session}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${Math.floor(CONNECT_SESSION_TTL_MS / 1000)}` });
+    const pt = await connectOpenToken(c.claims.j, secret);
+    if (!pt) return bad("not_configured");
+    return html(renderOpenLink({ link: given, pageToken: pt, reason: c.claims.w }));
   } else {
     if (url.searchParams.has("w")) return html(renderBootstrap(url.searchParams.get("w") ?? "")); // the Mini App page: reads Telegram's signed data and posts it back
     const cookie = cookieOf(req, "tc_s");

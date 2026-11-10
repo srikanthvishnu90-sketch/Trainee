@@ -6,7 +6,7 @@
 //   questionsToStore            workers/career-browser/ask-once.ts (ask once, shared with the desktop runner)
 // Bundled into extension/lib/trainee-core.js by extension/build.ts; tested by tests/architect/wo-031-extension.test.ts.
 import { canonicalTypedValue, classifyField, classifyOutcome, fileAlternative, type FormField, normLabel, type Observation, planBatch, questionFieldType } from "../../supabase/functions/_shared/career_apply.ts";
-import { mapQuestion, NEVER_BY_TEXT } from "../../supabase/functions/_shared/question_map.ts";
+import { BIRTH_DATE, mapQuestion, NEVER_BY_TEXT } from "../../supabase/functions/_shared/question_map.ts";
 import { hashApplyPayload } from "../../supabase/functions/_shared/career_apply_store.ts";
 import { questionsToStore } from "../../workers/career-browser/ask-once.ts";
 import { assertsSeparateSponsorshipPosition, assertsSponsorshipNeed, howHeardChannel, yesNoOf } from "../../supabase/functions/_shared/answer_options.ts";
@@ -186,6 +186,8 @@ export function questionsForTrainee(o: { jobId: string; company: string; locatio
 const AGREEMENT = /^\s*(i|we)\s+(hereby\s+)?(understand|acknowledge|agree|confirm|certify|consent|accept|attest|authori[sz]e|have read|declare)\b/i;
 const staysWithPosting = (row: { kind: string; label: string; type: string; options: string[] }) => {
   if (row.kind === "consent" || row.kind === "attestation" || AGREEMENT.test(row.label)) return true;
+  // a-sensitive (interim ruling, 2026-11-10): a date of birth is given to one application and never kept for reuse.
+  if (BIRTH_DATE.test(row.label)) return true;
   const m = mapQuestion({ label: row.label, type: row.type, options: row.options.map((l) => ({ label: l })) }) as { fact?: string };
   return m.fact === "eeo" || classifyField(row.label, row.type) === "eeo";
 };

@@ -73,7 +73,8 @@ export function scoreTurns(turns: TurnSeen[]): Score {
       if (!known && CLOCK.test(reply)) bad("no_reset", t, `a time where none is known: ${reply.slice(0, 120)}`);
       if (t.zone && /\bUTC\b/.test(reply)) bad("no_reset", t, "UTC to a person whose zone is known");
       if (t.zone && known && t.zone.city && !reply.includes(`${t.zone.city} time`)) bad("no_reset", t, `not in ${t.zone.city} time: ${reply.slice(0, 160)}`);
-      if (!/I kept it/.test(reply) || !/still works/.test(reply)) bad("not_kept", t, reply.slice(0, 120));
+      // architect amendment (2026-11-10, #706 no-echo ruling): the held reply says "it is kept" (no verbatim ask); same bar.
+      if (!/I kept it|it is kept/.test(reply) || !/still works/.test(reply)) bad("not_kept", t, reply.slice(0, 120));
     }
     prev = { interim: interims[0] ?? null, reply };
   }
@@ -235,7 +236,8 @@ Deno.test({
       });
       await t.step("provider errors: the model 500s after 8 s (held, the task kept); agent-chat itself fails after the interim (named)", async () => {
         const r = await text(CHAT, ADVICE, { modelMs: 8000, model: "500" }, undefined, new RegExp(ANSWER));
-        assertNode.match(r.bubbles.at(-1)!, /^I couldn't finish this without the AI: ".+"\. I kept it\. The AI service failed on this one/);
+        // architect amendment (2026-11-10, #706 no-echo ruling): the held reply names the task, never the ask word for word.
+        assertNode.match(r.bubbles.at(-1)!, /^I couldn't finish [^"]+ without the AI: it is kept\. The AI service failed on this one/);
         // agent-chat itself failing after the interim: the blocker named, the ask kept, one next step; a second, said as the second.
         const one = await text(CHAT, SEARCH, { chatFails: true }), two = await text(CHAT, SEARCH, { chatFails: true });
         assertNode.deepEqual([one.bubbles, two.bubbles], [[ackFor(SEARCH), chatErrorReply(SEARCH)], [ackFor(SEARCH), CHAT_ERROR_AGAIN_REPLY]]);

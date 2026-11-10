@@ -20,20 +20,25 @@ const external = (s: Src | null | undefined) => !!s && !!s.href && !!s.at;
 
 // ---------------------------------------------------------------- F-09 application review (C.11)
 export interface ApplicationReview {
-  appId: string; rid: string; title: string; company: string; destination: Src; pkg: KV[]; answers: { q: string; a: string | null; required: boolean }[];
+  appId: string; rid: string; title: string; company: string; destination: Src; pkg: KV[]; answers: { q: string; a: string | null; required: boolean; src?: Src | null }[];
   conditions: string[]; approve: Act; edit: Act; cancel: Act;
+  // Item 6 S1 (the live page, file_family_review.ts): the hero's time label when the destination was not re-verified, the open
+  // required questions in the form's own words, and where the application stands with its Check status post.
+  destinationMeta?: string; open?: { q: string; ask: string; act?: Act }[]; status?: { tone: "info" | "caution" | "danger"; label: string; text: string; act?: Act };
 }
 export function applicationReviewFile(d: ApplicationReview): FamilyFile {
   const open = d.answers.filter((x) => x.required && !x.a).length;
   const approve: Act = open ? { ...d.approve, off: `${n(open, "required answer")} not entered. Approval stays off until you answer.` } : d.approve;
   return {
     family: "F-09", mono: `${d.appId} - ${d.rid}`, boundary: undefined,
-    hero: { kicker: "Final review - approval covers exactly this", title: d.title, meta: [{ label: "", value: d.company }, { label: "Destination verified", at: d.destination.at ?? null }] },
+    hero: { kicker: "Final review - approval covers exactly this", title: d.title, meta: [{ label: "", value: d.company }, { label: d.destinationMeta ?? "Destination verified", at: d.destination.at ?? null }] },
     blocks: [
       card("The package", [{ p: "kv", rows: [...d.pkg, { k: "Destination", v: "Employer application page", src: d.destination }] }]),
-      card("Exact answers - sent word for word", [{ p: "kv", rows: d.answers.map((x) => ({ k: x.q, v: x.a, src: x.a ? { label: "You approved this wording" } : null, missing: x.required ? "Not entered - required" : "Not entered - optional" })) }]),
+      card("Exact answers - sent word for word", [{ p: "kv", rows: d.answers.map((x) => ({ k: x.q, v: x.a, src: x.a ? (x.src ?? { label: "You approved this wording" }) : null, missing: x.required ? "Not entered - required" : "Not entered - optional" })) }]),
+      ...(d.open?.length ? [card(`Open questions - ${n(d.open.length, "required answer")} not entered, nothing is sent until you answer`, d.open.map((o) => ({ p: "item" as const, title: o.q, text: o.ask, ...(o.act ? { act: o.act } : {}) })))] : []),
       card("Conditions - in plain words", [{ p: "check", items: d.conditions.map((t) => ({ state: "met" as const, text: t })) }]),
       note("info", "What happens after approval.", "Trainee fills the reviewed answers on the verified page and submits once. You then see the employer's own confirmation - a click alone never counts as submitted."),
+      ...(d.status ? [note(d.status.tone, d.status.label, d.status.text, d.status.act)] : []),
     ],
     actions: { primary: approve, secondary: [d.edit, { ...d.cancel, effect: "danger" }] },
   };
@@ -115,7 +120,7 @@ export function messageReviewFile(d: MessageReview): FamilyFile {
 
 // ---------------------------------------------------------------- F-13 interview hub (C.15)
 export interface InterviewHub {
-  company: string; stage: string; at: string; tz: string; interviewerTz?: string | null; minutes: number; medium: string; booked: boolean; calendarVerified: boolean;
+  company: string; stage: string; at: string; tz: string; interviewerTz?: string | null; minutes: number | null; medium: string; booked: boolean; calendarVerified: boolean;
   person: { initials: string; name: string; role: string; verified: boolean; basis: string }; prep: { done: boolean; lead?: string; text: string }[]; acts?: Acts;
 }
 // One absolute time, as p-76 writes it: "Tue Nov 10 - 2:00 PM CST" (the person's zone); time only for the interviewer's zone.
@@ -125,7 +130,7 @@ export function interviewHubFile(d: InterviewHub): FamilyFile {
   return {
     family: "F-13", boundary: `${d.company} - ${d.stage}`,
     hero: { kicker: d.booked ? "Confirmed logistics" : "Suggested time - not booked", title: clock(d.at, d.tz), meta: [
-      ...(d.interviewerTz ? [{ label: "For the interviewer:", value: clock(d.at, d.interviewerTz, false) }] : []), { label: `${d.minutes} min -`, value: d.medium },
+      ...(d.interviewerTz ? [{ label: "For the interviewer:", value: clock(d.at, d.interviewerTz, false) }] : []), { label: d.minutes ? `${d.minutes} min -` : "Length not stated -", value: d.medium },
       { label: d.calendarVerified ? "Calendar verified" : "Calendar not checked" }] },
     blocks: [
       card("Who you're meeting", [{ p: "person", initials: d.person.initials, name: `${d.person.name} - ${d.person.role}`, text: d.person.basis, chip: d.person.verified ? { label: "Verified", tone: "confirmed" } : { label: "Not verified", tone: "attention" } }]),
@@ -138,10 +143,10 @@ export function interviewHubFile(d: InterviewHub): FamilyFile {
 }
 
 // ---------------------------------------------------------------- F-14 weekly brief (C.16) and negotiation plan (C.17)
-export interface WeeklyBrief { week: string; n: number; generatedAt: string | null; cadence: string; changed: string[]; decisions: { title: string; text: string; act?: Act }[]; blockers: string[]; acts?: Acts }
+export interface WeeklyBrief { week: string; n: number | null; generatedAt: string | null; cadence: string; changed: string[]; decisions: { title: string; text: string; act?: Act }[]; blockers: string[]; acts?: Acts }
 export function weeklyBriefFile(d: WeeklyBrief): FamilyFile {
   return {
-    family: "F-14", hero: { kicker: `Week of ${d.week} - brief ${d.n}`, title: "Your week in careers", meta: [{ label: "Generated", at: d.generatedAt }, { label: "Cadence:", value: `${d.cadence} - change anytime` }] },
+    family: "F-14", hero: { kicker: `Week of ${d.week}${d.n ? ` - brief ${d.n}` : ""}`, title: "Your week in careers", meta: [{ label: "Generated", at: d.generatedAt }, { label: "Cadence:", value: `${d.cadence} - change anytime` }] },
     blocks: [
       card("What actually changed", d.changed.length ? [{ p: "check", items: d.changed.map((t) => ({ state: "done" as const, text: t })) }] : [{ p: "text", lead: "Quiet week.", text: "Nothing changed that Trainee can show evidence for." }]),
       ...(d.decisions.length ? [card("Decisions only you can make", d.decisions.map((x) => ({ p: "item" as const, title: x.title, text: x.text, act: x.act })))] : []),
@@ -151,11 +156,11 @@ export function weeklyBriefFile(d: WeeklyBrief): FamilyFile {
     actions: d.acts,
   };
 }
-export interface Negotiation { company: string; v: number; deadline: string | null; basis: string; position: KV[]; history: { v: string; written: boolean; text: string }[]; ask: { title: string; text: string; act?: Act }; acts?: Acts }
+export interface Negotiation { company: string; v: number | null; deadline: string | null; basis: string; position: KV[]; history: { v: string; written: boolean; text: string }[]; ask: { title: string; text: string; act?: Act }; acts?: Acts }
 export function negotiationFile(d: Negotiation): FamilyFile {
   return {
     family: "F-14", header: "Negotiation plan", boundary: "Plan File - nothing sent to any employer",
-    hero: { kicker: `Plan File - negotiation - v${d.v}`, title: `${d.company} offer`, meta: [{ label: "Deadline", at: d.deadline, future: true }, { label: "Based on", value: d.basis }] },
+    hero: { kicker: `Plan File - negotiation${d.v ? ` - v${d.v}` : ""}`, title: `${d.company} offer`, meta: [{ label: "Deadline", at: d.deadline, future: true }, { label: "Based on", value: d.basis }] },
     blocks: [
       card("Your position - confirmed with you", [{ p: "kv", rows: d.position }]),
       card("Term history - versions kept separate", d.history.map((h) => ({ p: "item" as const, title: h.v, chip: h.written ? { label: "Written", tone: "neutral" as const } : { label: "Verbal", tone: "attention" as const }, text: h.written ? h.text : `${h.text} - verbal claim, labeled verbal, not treated as a term` }))),
@@ -167,13 +172,15 @@ export function negotiationFile(d: Negotiation): FamilyFile {
 }
 
 // ---------------------------------------------------------------- F-15 offer comparison (C.18)
-export interface OfferComparison { offers: { letter: string; company: string; rows: KV[] }[]; deadline: { company: string; at: string | null }; priorities?: string | null; acts?: Acts }
+// deadline null: no dated deadline (LOOP 13: an offer told in chat has a deadline in words, a row); text: a deadline in words
+// shown as written (item 6 S5); basis: where the figures came from when they are not all from documents ("as you told me").
+export interface OfferComparison { offers: { letter: string; company: string; rows: KV[] }[]; deadline: { company: string; at: string | null; text?: string | null } | null; priorities?: string | null; basis?: string; acts?: Acts }
 export function offerComparisonFile(d: OfferComparison): FamilyFile {
   return {
-    family: "F-15", hero: { kicker: `${n(d.offers.length, "offer")} - from actual documents`, title: d.offers.map((o) => o.company).join(" vs "), meta: [{ label: `${d.deadline.company} deadline:`, at: d.deadline.at, future: true }] },
+    family: "F-15", hero: { kicker: `${n(d.offers.length, "offer")} - ${d.basis ?? "from actual documents"}`, title: d.offers.map((o) => o.company).join(" vs "), meta: d.deadline ? [d.deadline.text ? { label: `${d.deadline.company} deadline:`, value: d.deadline.text } : { label: `${d.deadline.company} deadline:`, at: d.deadline.at, future: true }] : [] },
     blocks: [
       ...d.offers.map((o): Block => ({ b: "card", parts: [{ p: "heading", title: `${o.letter} - ${o.company}` }, { p: "kv", rows: o.rows.filter((r) => !/\btotal\b/i.test(r.k)) }] })),
-      ...(d.priorities ? [note("info", "Your priorities applied.", `${d.priorities} Choosing a favorite here accepts nothing and withdraws nothing.`)] : []),
+      ...(d.priorities ? [note("info", "Your priorities applied.", `${d.priorities} Choosing a favorite here accepts nothing and withdraws nothing.`)] : [note("info", "Nothing accepted.", "Comparing offers here accepts nothing, declines nothing and sends nothing to any employer.")]),
       note("caution", "Kept honest.", "Equity is never added to cash as one \"total\". Verbal claims stay separate from written terms. Tax and legal questions go to qualified professionals."),
     ],
     actions: d.acts,

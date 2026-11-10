@@ -154,7 +154,7 @@ export async function makeBrain(o: { name: BrainName; model: ModelFn | null; env
   const core = await import("../../supabase/functions/_shared/router_core.career.js");
   const { CareerHost } = await import("../../supabase/functions/_shared/career_host.js");
   const { agentTurn } = await import("../../supabase/functions/agent-chat/career_brain.ts");
-  const { stagedDecision, STAGED_TOOL_POLICY } = await import("../../supabase/functions/agent-chat/career_staged.ts");
+  const { stagedDecision, stagedToolPolicy } = await import("../../supabase/functions/agent-chat/career_staged.ts");
   const { memoryAlertStore } = await import("../../supabase/functions/_shared/career_alert_store.ts");
   const { situationFrom } = await import("../../supabase/functions/_shared/career_situation.ts");
   const { memoryBriefStores } = await import("../../supabase/functions/_shared/career_brief_store.ts");
@@ -205,7 +205,7 @@ export async function makeBrain(o: { name: BrainName; model: ModelFn | null; env
           memory, wants, posting: (id: string) => board.get(id), postings: (q: string) => board.search(searchWords(q), 150),
           outreach: { store: outreach, model } as any,
           known: { standing: await memory.standing(a.userId), alerts: row ? { prefs: row.prefs, tz: row.tz } : null, pipeline: null, situation },
-          ...(stagedPick ? { toolPolicy: STAGED_TOOL_POLICY } : {}) });
+          ...(stagedPick ? { toolPolicy: stagedToolPolicy(stagedPick) } : {}) });  // as the handler: the router's answer rides as data
         BRAIN_TURN_MS.push(Math.round(performance.now() - t0));
         trace.push({ stopped: String(t.stopped), steps: Number(t.steps ?? 0), tools: (t.tool_calls ?? []).map((c: any) => ({ name: c.name, ok: !!c.ok, ...(c.error ? { error: String(c.error).slice(0, 200) } : {}) })), ...(errors.length ? { errors } : {}),
           ...(stagedPick ? { route: "brain", intent: stagedPick.intent } : {}) });
@@ -267,8 +267,8 @@ if (import.meta.main) {
   const meter = newMeter(), judgeMeter = newMeter();
   // D-038: the measured commit's committed reply model (agent-chat/release_model.ts) or the request's model (CAREER_REPLY_MODEL).
   const rm: any = await import("../../supabase/functions/agent-chat/release_model.ts").catch(() => null);
-  const brainCfg = rm ? rm.careerModelConfig(Deno.env) : modelConfigFor(Deno.env, get("CAREER_REPLY_MODEL") || "claude-haiku-5-5");
-  const committedModel: string = rm ? rm.CAREER_MODEL_DEFAULT : "claude-haiku-5-5";
+  const brainCfg = rm ? rm.careerModelConfig(Deno.env) : modelConfigFor(Deno.env, get("CAREER_REPLY_MODEL") || "claude-sonnet-5-5");
+  const committedModel: string = rm ? rm.CAREER_MODEL_DEFAULT : "claude-sonnet-5-5";
   if (usesModel && !isClaude(brainCfg.model)) { console.log(`NOT RUN: the brain model ${brainCfg.model} is not a claude- model (Trainee is Claude only); name one with CAREER_REPLY_MODEL.`); Deno.exit(2); }
   const brainLabel = usesModel && brainCfg.model !== committedModel ? `${brainName}:${brainCfg.model}` : brainName;
   const judgeCfg = modelConfigFor(Deno.env, judgeAModel), judge2Cfg = modelConfigFor(Deno.env, judgeBModel);
@@ -301,7 +301,9 @@ if (import.meta.main) {
   else if (setName === "official") setPath = new URL("./messages.json", import.meta.url);
   // D-038: a fresh, unsealed held-out set written by another agent; its results are redacted like the sealed set's.
   else if (setName === "fresh") setPath = new URL("./fresh-heldout.json", import.meta.url);
-  else { console.log(`NOT RUN: --set must be dev, heldout, official or sealed (got ${setName}).`); Deno.exit(2); }
+  // D-054: the one real-model run for release items 7 and 9 (evals/career/d054-items-7-9.json; scored by d054-score.ts).
+  else if (setName === "d054") setPath = new URL("./d054-items-7-9.json", import.meta.url);
+  else { console.log(`NOT RUN: --set must be dev, heldout, official, fresh, d054 or sealed (got ${setName}).`); Deno.exit(2); }
   const set = JSON.parse(await Deno.readTextFile(setPath));
   const only = opt("--only");
   if (only && (setName === "sealed" || setName === "heldout")) { console.log("NOT RUN: --only is refused on the sealed set (a sealed run scores every item)."); Deno.exit(2); }

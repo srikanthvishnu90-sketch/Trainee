@@ -1,9 +1,10 @@
 {
- "note": "deploy standard S3 (scripts/launch/measure-reply.sh): measure the second parent",
+ "note": "D-054 (owner, 2026-11-10): one real-model run of at most $3 for release items 7 and 9; measure the second parent",
  "action": "eval",
- "set": "dev",
+ "set": "d054",
  "brains": [
   "staged"
  ],
- "passes": 5
+ "passes": 5,
+ "budget_usd": 3
 }

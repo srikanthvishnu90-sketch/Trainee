@@ -10584,7 +10584,7 @@ const CareerDoorstep = (() => {
         global_pause_set: true, pause_flag_set: true, global_pause: pause,
         halted_count: null, sent_count: null, in_flight_count: null, already_stopped_count: null, queue_total: null,
         queue_state: null,
-        reply: "I have not paused your account. I could not read the queue's own records in this session, so what already went out and what is waiting is unverified. Next step: say \"pause everything\" to pause your account, or name the one task to stop.",
+        reply: "I couldn't pause everything yet, because I couldn't check what has already gone out or what is waiting, so that is unverified. Next step: say \"pause everything\" to pause your account, or name the one task to stop.",
       };
     }
     const TERMINAL = new Set(["halted", "suppressed", "cancelled", "canceled", "bounced", "failed", "completed"]);
@@ -13453,7 +13453,7 @@ const CareerRouter = (() => {
       .replace(/[\s,]+(?:pls|plz|please)\s*([.!?]*)\s*$/i, "$1");
   }
   const nowOf = (ctx) => { const n = ctx && ctx.now; const ms = n == null ? Date.now() : (typeof n === "number" ? n : Date.parse(n)); return Number.isFinite(ms) ? ms : Date.now(); };
-  const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const asOfMonthYear = (ctx) => { const d = new Date(nowOf(ctx || {})); return `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`; };
 
   function sha256(ascii) {
@@ -13691,6 +13691,12 @@ const CareerRouter = (() => {
   function ensureNextStepText(joined) {
     return Reply.ensureNextStep(joined);
   }
+  function asOfDay(d) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || ""));
+    if (!m) return String(d || "");
+    const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    return `${MONTHS[Number(m[2]) - 1]} ${Number(m[3])}, ${m[1]}`;
+  }
   function compose(result) {
     if (!Reply) return result.reply || "";
     const c = Reply.composeResult(result);
@@ -13758,10 +13764,12 @@ const CareerRouter = (() => {
       return Object.assign({ intent: o.intent || "career_discovery", reply, requested_families: fams || [], employer: o.employer }, publicFacts);
     }
     if (!top.length && dedupedTo === 0 && !ranked.length) {
-      const facts = ["I don't have open roles on my list right now, and I won't make any up."];
+      const lp = (ctx.discovery && ctx.discovery.lastParams) || {};
+      const namedRole = !o.headline && lp.ask === s(text).slice(0, 200) && (!!s(lp.whereText) && /\bin\s+[A-Z]/.test(s(text)) || /\b(?:analyst|engineer|developer|designer|scientist|coordinator|manager|intern|associate|consultant|marketing|product|data|finance|financial|software|ux|operations|sales|nurse|teacher)\b/i.test(s(lp.roleText)));
+      const facts = [namedRole ? "I won't make any up." : "I don't have open roles on my list right now, and I won't make any up."];
       if (fams && fams.length) facts.push(`I've kept your ask (${fams.map(familyLabel).join(" + ")}) and will run it as soon as matching roles come in.`);
       const newPerson = !(profile && (profile.facts || []).length);
-      const reply = compose({ headline: o.headline || "Nothing to show yet.", facts, nextStep: o.nextStep || (newPerson ? "Meanwhile, send me your resume — paste it here or attach the file." : "Paste a posting you found, or name a company to watch, and I'll start there.") });
+      const reply = compose({ headline: o.headline || (namedRole ? "No open roles on my list match that right now." : "Nothing to show yet."), facts, nextStep: o.nextStep || (newPerson ? "Meanwhile, send me your resume — paste it here or attach the file." : "Paste a posting you found, or name a company to watch, and I'll start there.") });
       return Object.assign({ intent: o.intent || "career_discovery", reply, requested_families: fams || [] }, publicFacts);
     }
     if (!top.length && fams && fams.length && family && family.onList > 0) {
@@ -14422,8 +14430,10 @@ const CareerRouter = (() => {
 
   function handleOutreach(text, ctx) {
     const profile = ctx.profile || {};
-    const nameM = s(text).match(/\b(?:send|email|message|write to)\s+(?:to\s+)?([A-Za-z][a-z]+)\b/i);
-    const firstName = nameM ? nameM[1] : null;
+    const NOT_A_NAME = /^(?:the|a|an|my|your|our|their|his|her|him|them|it|this|that|these|those|me|us|someone|somebody|resume|cv|note|message|email|letter|draft|file|pdf|packet|cover|intro)$/i;
+    const nameM = [/\b(?:send|email|forward|message|write|draft)\b[^.?!]*?\bto\s+([A-Za-z][a-z]+)\b/i, /\b(?:email|message|write to)\s+([A-Za-z][a-z]+)\b/i, /\b(?:send|forward)\s+([A-Za-z][a-z]+)\b/i]
+      .map((rx) => s(text).match(rx)).find((mm) => mm && !NOT_A_NAME.test(mm[1]));
+    const firstName = nameM ? nameM[1].charAt(0).toUpperCase() + nameM[1].slice(1) : null;
     const contacts = (ctx.contacts || ctx.outreachContacts || (profile.connections || [])).map((c) => ({ name: c.name || c.full_name || "", kind: c.kind || "", email: c.email || c.work_email || null, relationship: c.relationship || c.relationship_to_user || "", company: c.company || c.current_firm || "", title: c.title || "" }));
     const matches = firstName ? contacts.filter((c) => lc(c.name).split(/\s+/)[0] === lc(firstName)) : [];
     const accounts = ctx.sendingAccounts || [];
@@ -14441,12 +14451,12 @@ const CareerRouter = (() => {
       else if (!matches.length) facts.push(`No single contact named ${who} is identified on file.`);
       const asks = [];
       if (missing.includes("recipient")) asks.push(`which ${who} do you mean`);
-      if (missing.includes("account")) asks.push(accounts.length > 1 ? `which account it should come from (${accounts.map((a) => a.kind || a.email).join(" or ")})` : "which account it should come from");
-      if (missing.includes("purpose")) asks.push("what the purpose is (a referral ask, an introduction, or something else)");
-      if (missing.includes("attachment")) asks.push("which resume version to attach");
-      facts.push(`Before anything is drafted, tell me in one reply: ${asks.join("; ")}.`);
-      facts.push("Zero messages have gone out, and no draft exists yet.");
-      const reply = compose({ headline: `I need one clarification before I draft anything to ${who}.`, facts });
+      if (missing.includes("account")) asks.push(accounts.length > 1 ? `which account should it come from (${accounts.map((a) => a.kind || a.email).join(" or ")})` : "which account should it come from");
+      if (missing.includes("purpose")) asks.push("is it a referral ask, an introduction or something else");
+      if (missing.includes("attachment")) asks.push("which resume version should I attach");
+      facts.push("Nothing has gone out, and no draft exists yet.");
+      const ask1 = asks.length > 1 ? `${asks.slice(0, -1).join(", ")}, and ${asks[asks.length - 1]}` : asks[0];
+      const reply = compose({ headline: `Before I draft anything to ${who}, I need a few answers.`, facts, nextStep: `${ask1.charAt(0).toUpperCase()}${ask1.slice(1)}?` });
       return { intent: "outreach_clarification", reply, resultStatus: "awaiting_user", clarifications: 1, missing, sends: 0, draft: null, matches: matches.map((m) => ({ name: m.name, kind: m.kind })) };
     }
     const contact = matches[0];
@@ -14729,7 +14739,7 @@ const CareerRouter = (() => {
     if (!draft) {
       const fr = frameMarksOf(ctx);
       if (fr.draft && typeof fr.draft === "object") return null;
-      const reply = compose({ headline: "There is no draft in this conversation to revise yet.", facts: ["No letter or outreach draft has been produced here — the cover-letter ask is still waiting on the facts it is written from, and no outreach draft has been drafted from the plan.", "The moment a draft exists, revisions like shorter or more casual apply to it directly, and the original is kept on the record."], nextStep: "Give me the facts for the letter, or say 'draft the first one' on the plan, and revision has something real to work on." });
+      const reply = compose({ headline: "I can't revise anything yet because there's no draft in this chat.", facts: ["The cover-letter ask is still waiting on the facts it is written from, and no outreach draft has been drafted from the plan; once one exists, a change like shorter or more casual applies to it and the original is kept."], nextStep: "Give me the facts for the letter, or say 'draft the first one' on the plan, and revision has something real to work on." });
       return { intent: "career_tailor", reply, resultStatus: "awaiting_user", sends: 0 };
     }
     const lines = s(draft.text).split("\n");
@@ -14785,9 +14795,9 @@ const CareerRouter = (() => {
     }
     if (!art) {
       const reply = compose({
-        headline: "There is no document file on this conversation yet to send you.",
-        facts: ["A file exists here only once a resume has been tailored in this chat — tailoring renders the PDF from your confirmed facts, and the file then rides with my reply."],
-        nextStep: "Name the role (or paste the posting) and I will tailor your resume and send the PDF here.",
+        headline: "I can't send you a file yet because no resume has been tailored in this chat.",
+        facts: ["Tailoring renders the PDF from your confirmed facts, and the file then comes with my reply."],
+        nextStep: "Which role should I tailor it for? I'll send the PDF here when it's done.",
       });
       return { intent: "career_document_delivery", reply, resultStatus: "awaiting_user", sends: 0, documents: [] };
     }
@@ -14904,7 +14914,7 @@ const CareerRouter = (() => {
         const mail = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/.exec(seg);
         if (mail && !h.email) h.email = mail[0];
         else if (url) { const key = (/^([A-Za-z]+)\s*:/.exec(seg) || [null, "link"])[1].toLowerCase(); if (!h.links[key]) h.links[key] = url[0].replace(/[.,;]+$/, ""); }
-        else if (!h.location && /^[\p{L} .'-]+,\s*[\p{L} .'-]+(?:\s*\(TEST\))?$/u.test(seg)) h.location = seg;
+        else if (!h.location && /^[\p{L} .'-]+,\s*[\p{L} .'-]+(?:\s*\([\p{L} .'-]{2,40}\))?$/u.test(seg)) h.location = seg;
       }
     }
     return h;
@@ -15926,7 +15936,7 @@ const CareerRouter = (() => {
       return named ? say(`Your name is ${named.value} — that's what you told me.`, "Want me to change it?") : say("You haven't told me your name yet.", "What should I call you?");
     }
     if (/^(thx|thanks|thank you|thank u|ty|tysm|cool|nice|great|awesome|perfect|lol|lmao|haha|ok|okay|k|kk|got it|sounds good|alright|nvm|never ?mind|nevermind)\b/.test(t)) {
-      return say("Anytime.", next);
+      return say(`Anytime — ${next.charAt(0).toLowerCase()}${next.slice(1)}`, "");
     }
     if (/^(yes|yeah|yep|yup|sure|no|nope|nah|idk|i don'?t know|not sure|maybe)\b/.test(t)) {
       return say(waiting ? "I didn't take that as confirming anything — your resume's entries are still drafts." : "No problem — there's nothing waiting on your answer right now.", next);
@@ -16015,7 +16025,7 @@ const CareerRouter = (() => {
     const all = statedFactsOf(ctx);
     const wmir = threadMirrorForWrite(ctx);
     if (wmir) delete wmir.affirmRecord;
-    const reply = compose({ headline: "Confirmed — your record stands exactly as read back.", facts: all.length ? [`On record: ${all.map(factLine).join("; ")}.`] : ["Your record stands as stated; nothing was added or changed by the yes."], nextStep: "Tell me what to run on it first — a search, a watch, a draft — and it runs on these facts." });
+    const reply = compose({ headline: all.length ? `On record: ${all.map(factLine).join("; ")}.` : "Confirmed — your record stands exactly as read back.", facts: all.length ? ["Confirmed — your record stands exactly as read back."] : ["Your record stands as stated; nothing was added or changed by the yes."], nextStep: "Tell me what to run on it first — a search, a watch, a draft — and it runs on these facts." });
     return { intent: "profile_correction", reply, resultStatus: "completed", sends: 0, stated_facts: all };
   }
   function bulletClauseOf(fact, label) {
@@ -16084,6 +16094,9 @@ const CareerRouter = (() => {
     if (Doorstep && Doorstep.PAUSED_PHRASES) {   }
     const plan = ctx.plan && ctx.plan.kind === "campaign_plan" ? ctx.plan : null;
     const draft = planDraftOf(ctx);
+    if (!draft && !plan && !frameMarksOf(ctx).draft) {
+      return { intent: "outreach_clarification", reply: compose({ headline: "Which do you mean, and who should it go to?", facts: ["Nothing was sent: there is no draft or list in this chat yet, so tell me which one you mean and I'll start it."], nextStep: "" }), resultStatus: "awaiting_user", sends: 0 };
+    }
     const facts = [];
     if (draft) facts.push("What exists is the held sample draft you just reviewed — it has no named recipient yet, because the list it sends to has not been built, and a sample with a bracketed name cannot send to anyone.");
     else if (plan) facts.push("What exists is the plan — its list has not been built, no draft has been approved, and there is no wave standing ready to go.");
@@ -17276,6 +17289,10 @@ const CareerRouter = (() => {
     }
     const rm = lc(s(text)).match(/\b(?:for|to)\s+(?:a|an|the|this|that)\s+([a-z][a-z /&-]{1,40}?)\s+(role|job|position|internship|opening)\b/);
     if (rm) return { label: `the ${rm[1].trim()} ${rm[2]}`, cir: null, company: null };
+    const rk = lc(s(text)).match(/\b(?:like|into|as|for)\s+(?:a|an)\s+([a-z][a-z /&-]{1,40}?)\s+(?:resume|cv)\b/);
+    if (rk && !/^(?:better|good|great|real|proper|new|clean|nice|stronger|one[- ]page|professional)$/.test(rk[1].trim())) return { label: `the ${rk[1].trim()} role`, cir: null, company: null };
+    const rp = lc(s(text)).match(/\b(?:toward|towards|for|at|fits?)\s+([a-z][a-z /&-]{1,40}?)\s+(?:roles|jobs|positions|internships|openings)\b/);
+    if (rp && /\b(?:analyst|engineer|engineering|developer|designer|scientist|coordinator|manager|intern|associate|consultant|marketing|product|data|finance|financial|software|ux|operations|sales)\b/.test(rp[1])) return { label: `the ${rp[1].trim()} role`, cir: null, company: null };
     return { label: null, cir: null, company: null };
   }
   function handleTailorNeedsFacts(text, ctx) {
@@ -17337,7 +17354,7 @@ const CareerRouter = (() => {
     if (!list.length) {
       const goal = statedFactsOf(ctx).find((f) => f.kind === "goal");
       if (goal) offerNext(ctx, `find ${goal.value}`);
-      return done("I haven't shown you a list of roles yet, so there's nothing to pick from.", moreAsk ? [] : ["There is no list, so nothing has been prepared from one."], goal ? `Want me to search for ${goal.value} now?` : "What role should I search for, and which city or remote?");
+      return done("No list yet: I haven't shown you a list of roles in this chat.", moreAsk ? [] : ["There is no list, so nothing has been prepared from one."], goal ? `Want me to search for ${goal.value} now?` : "What role should I search for, and which city or remote?");
     }
     if (moreAsk) {
       const more = Array.isArray(disc.lastMore) ? disc.lastMore.filter((r) => r && r.title) : [];
@@ -18534,7 +18551,7 @@ const CareerRouter = (() => {
           const cult = lensFacts ? null : firstOf(cir.values_culture_signals || cir.culture_notes); if (cult) facts.push(`On culture: ${cult}`);
           facts.push(`${other} has no company file in the library, so its culture, hours, deal flow, and exits cannot be compared from record — anything said about them here would be invention.`);
           if (lensFacts) facts.push(...lensFacts);
-          if (cir.as_of) facts.push(`Source: the ${name} company file (public sources), as of ${cir.as_of}.`);
+          if (cir.as_of) facts.push(`Source: the ${name} company file (public sources, ${asOfDay(cir.as_of)}).`);
           const reply = compose({ headline: `${name} versus ${other}: one side of this comparison exists on record; the other does not.`, facts, nextStep: `Want the ${name} side deepened, or ${other}'s file built from public sources first?` });
           return { intent: "company_intel", reply, resultStatus: "prepared", sends: 0, company: name, payload: { kind: "company_compare_partial", filed: name, unfiled: other }, artifact: { kind: "company_compare_partial", filed: name, unfiled: other } };
         }
@@ -18548,7 +18565,7 @@ const CareerRouter = (() => {
           const facts = cm.rows.slice(0, 2).map((r) => `${r.dimension}: you — ${r.user}; the typical hire — ${r.cohort}`.split(/(?<=[.!?])\s/)[0]);
           const hlf = cm.highest_leverage_fix && cm.highest_leverage_fix.fix ? s(cm.highest_leverage_fix.fix).split(/(?<=[.!?])\s/)[0] : null;
           if (hlf) facts.push(`This month's plan, from the table's highest-leverage fix (${cm.highest_leverage_fix.dimension || "the top gap"}): ${hlf}`);
-          facts.push(cir.as_of ? `Source: the ${name} company file (public sources), as of ${cir.as_of}.` : `Source: the ${name} company file (public sources); the file carries no as-of date, so none is claimed.`);
+          facts.push(cir.as_of ? `Source: the ${name} company file (public sources, ${asOfDay(cir.as_of)}).` : `Source: the ${name} company file (public sources); the file carries no as-of date, so none is claimed.`);
           const reply = compose({ headline: `You versus the average ${name} hire — the table, the gaps, the plan.`, facts, nextStep: "Want me to pull the reachable employers for that first internship next?" });
           const payload = { text: cm.highest_leverage_fix && cm.highest_leverage_fix.fix ? cm.highest_leverage_fix.fix : facts[0], sources: cir.data_sources || [], as_of: cir.as_of || null, plan: fixes, comparison: cm };
           return { intent: "company_intel", reply, resultStatus: "prepared", sends: 0, company: name, comparison: cm, payload, artifact: payload };
@@ -18576,7 +18593,7 @@ const CareerRouter = (() => {
       } catch { askedRole = null; lens = null; roleAns = null; }
       if (roleAns && roleAns.text) {
         const facts = [...sentsOf(roleAns.text)];
-        facts.push(cir.as_of ? `Source: the ${name} company file (public sources), as of ${cir.as_of}; role statistics from the career knowledge library, each cited with its sample size.` : `Source: the ${name} company file (public sources); the file carries no as-of date, so none is claimed. Role statistics from the career knowledge library, each cited with its sample size.`);
+        facts.push(cir.as_of ? `Source: the ${name} company file (public sources, ${asOfDay(cir.as_of)}); role statistics from the career knowledge library, each cited with its sample size.` : `Source: the ${name} company file (public sources); the file carries no as-of date, so none is claimed. Role statistics from the career knowledge library, each cited with its sample size.`);
         const reply = compose({ headline: `${name} for ${askedRole.label} — the asked role's own evidence, not the file's headline cohort.`, facts, nextStep: "Want your own record read against this role's bar next?" });
         return { intent: "company_intel", reply, resultStatus: "prepared", sends: 0, company: name, payload: { kind: "role_intel", company: name, role: askedRole.label, lens_status: lens.status }, artifact: { kind: "role_intel", company: name, role: askedRole.label } };
       }
@@ -18673,7 +18690,7 @@ const CareerRouter = (() => {
         if (byKey.cadence) facts.push(`Cadence: ${byKey.cadence.text}`);
         facts.push("The other side of this comparison has no company file of its own, so nothing is quoted for it — firms of that kind differ too much to borrow one file's numbers.");
       }
-      facts.push(cir.as_of ? `Source: the ${name} company file (public sources), as of ${cir.as_of}.` : `Source: the ${name} company file (public sources); the file carries no as-of date, so none is claimed.`);
+      facts.push(cir.as_of ? `Source: the ${name} company file (public sources, ${asOfDay(cir.as_of)}).` : `Source: the ${name} company file (public sources); the file carries no as-of date, so none is claimed.`);
       const reply = compose({ headline: `${name} against the alternative you named — what its file supports.`, facts, nextStep: other ? "Want your gaps against both files next?" : /\bboutique\b/.test(t) ? "Want your gaps read against Goldman's file and the boutique archetype next?" : "Tell me the other firm's name and I will pull its file for the two-sided read." });
       return { intent: "company_intel", reply, resultStatus: "prepared", sends: 0, company: name, payload: cir, artifact: cir };
     }
@@ -18731,7 +18748,18 @@ const CareerRouter = (() => {
       const bias = cirFieldText(cir.known_biases_of_data);
       if (bias) facts.push(`On sample size, the file states its own limit: ${bias.split(/(?<=[.!?])\s/)[0]}`);
     }
-    facts.push(cir.as_of ? `Source: the ${name} company file (public sources), as of ${cir.as_of}.` : `Source: the ${name} company file (public sources); the file carries no as-of date, so none is claimed.`);
+    if (s(text).split(/\s+/).filter(Boolean).length <= 25) {
+      const firstOf = (f) => String(f).split(/(?<=[.!?])\s/)[0];
+      const budget = 600 - headline.length - 260;
+      let used = 0, keep = 0;
+      for (const f of facts) { const n = firstOf(f).length + 1; if (keep && used + n > budget) break; used += n; keep++; }
+      if (keep < facts.length) {
+        const kept = new Set(facts.slice(0, keep));
+        chosen = chosen.filter((x) => kept.has(x.label ? `${x.label}: ${x.text}` : x.text));
+        facts.length = keep;
+      }
+    }
+    facts.push(cir.as_of ? `Source: ${name}'s company file (public sources, ${asOfDay(cir.as_of)}).` : `Source: ${name}'s company file (public sources), undated.`);
     const shownKeys = new Set(chosen.map((x) => x.key));
     const remaining = sections.filter((x) => !shownKeys.has(x.key)).map((x) => x.offerName).filter(Boolean);
     const nextStep = remaining.length >= 2 ? `Want ${remaining[0]} or ${remaining[1]} next?` : remaining.length === 1 ? `Want ${remaining[0]} next?` : "Want your gaps against this file next?";
@@ -19325,12 +19353,13 @@ const CareerRouter = (() => {
         try {
           const offerObj = { company: thread.firm || null, descriptor: thread.descriptor || null, role: thread.role || null, base_salary: thread.amount, signing_bonus: thread.signing || null };
           const strat = Negotiation.counterStrategy(offerObj, bench, {});
+          const offerLine = `an offer${offerObj.company ? ` from ${offerObj.company}` : offerObj.descriptor ? ` from ${offerObj.descriptor}` : ""} at $${Number(thread.amount).toLocaleString()} base${thread.deadline ? `, with an answer wanted by ${thread.deadline}` : ""}${thread.signing ? `, plus a $${Number(thread.signing).toLocaleString()} signing bonus` : ""}`;
+          const asksWhether = /\bshould i (?:negotiate|counter|ask for more)\b/.test(typoNorm(text));
           const facts = [];
-          facts.push(`On the record from your words: an offer${offerObj.company ? ` from ${offerObj.company}` : offerObj.descriptor ? ` from ${offerObj.descriptor}` : ""} at $${Number(thread.amount).toLocaleString()} base${thread.deadline ? `, with an answer wanted by ${thread.deadline}` : ""}${thread.signing ? `, plus a $${Number(thread.signing).toLocaleString()} signing bonus` : ""}.`);
-          facts.push(bench && bench.text ? s(bench.text).split(/(?<=[.!?])\s/)[0] : benchSentence);
           if (strat && strat.text) facts.push(s(strat.text).split(/(?<=[.!?])\s/)[0]);
-          facts.push("The sequence from here: the extension first if the deadline is tight, one written counter second, and no bridges burned with your other processes until you sign.");
-          const reply = compose({ headline: "Your offer, parsed from your words — here is the plan.", facts, nextStep: thread.deadline ? "Want the extension drafted first, or the counter?" : "Tell me the decision deadline and I will sequence the extension and the counter around it." });
+          else facts.push(bench && bench.text ? s(bench.text).split(/(?<=[.!?])\s/)[0] : benchSentence);
+          facts.push("The plan: the extension first if the deadline is tight, then one written counter, and no bridges burned with your other processes until you sign.");
+          const reply = compose({ headline: asksWhether ? `Yes, one written counter is worth it on ${offerLine}.` : `Here is the plan for ${offerLine}.`, facts, nextStep: thread.deadline ? "Want the extension drafted first, or the counter?" : "When do you have to answer them?" });
           return { intent: "negotiation_plan", reply, resultStatus: "prepared", sends: 0, offer: offerObj, strategy: strat, bench, payload: offerObj };
         } catch {   }
       }
@@ -21210,6 +21239,8 @@ const CareerRouter = (() => {
     if (interrogativeTurn(text) && !/^\s*(send|switch|change)\b/i.test(s(text))) return null;
     const m = s(text).match(/\bto\s+([A-Z][a-z]+)\s+instead\b/) || s(text).match(/\brecipient to\s+([A-Z][a-z]+)\b/i) || s(text).match(/\bsend it to\s+([A-Z][a-z]+)\b/);
     if (!m) return null;
+    const cityRe = new RegExp(`^(?:${[...WATCH_CITIES, ...FACT_CITIES].map((c) => c.split(" ")[0]).join("|")})$`, "i");
+    if (cityRe.test(m[1]) || cityRe.test((s(text).match(/\binstead of\s+([A-Z][a-z]+)\b/) || [])[1] || "")) return null;
     const contacts = ((ctx && (ctx.contacts || ctx.outreachContacts)) || []).map((c) => ({ name: c.name || c.full_name || "" }));
     const byFirst = (first) => contacts.find((c) => lc(c.name).split(/\s+/)[0] === lc(first || ""));
     const newContact = byFirst(m[1]);
@@ -21220,7 +21251,7 @@ const CareerRouter = (() => {
     const change = { from: oldName, to: newName, at: nowOf(ctx || {}), instruction: s(text) };
     const profile = ctx && ctx.profile;
     if (profile && typeof profile === "object") profile._careerRouterOutreach = { recipient_change: change, draft_superseded: true };
-    const reply = compose({ headline: `Switched — this now needs a draft for ${newName}, not the one for ${oldName}.`, facts: ["The earlier draft is superseded and carries no approval over to the new recipient.", "Nothing has been sent."], nextStep: `I will draft the ${newName.split(/\s+/)[0]} version for your review, and it needs your fresh approval before anything goes out.` });
+    const reply = compose({ headline: `Switched — this now needs a draft for ${newName}, not the one for ${oldName}.`, facts: ["The earlier draft is superseded and carries no approval over to the new recipient.", "Nothing has been sent, and the new draft needs your fresh approval before anything goes out."], nextStep: `Should I draft the ${newName.split(/\s+/)[0]} version now?` });
     return { intent: "intent_recipient_change", resultStatus: "awaiting_user", reply, sends: 0, draft: null, recipient_change: change };
   }
 
@@ -21718,9 +21749,9 @@ const CareerRouter = (() => {
     if (!resumeOnRecord(ctx)) missing.push("your resume");
     if (!(interest.filters.locations || []).length && !homeKnown) missing.push("the city you want to work in");
     const nextStep = missing.length
-      ? `To rank matches for you, send ${missing.join(" and ")} — anything that needs ${missing.length > 1 ? "them" : "it"}, like tailoring or applying, waits until then.`
+      ? `Can you send ${missing.join(" and ")} so I can rank matches for you?`
       : "Want another role watched, or the list of what you are watching now?";
-    const reply = compose({ headline: `Watch set: ${role.title}.`, facts, nextStep });
+    const reply = compose({ headline: `Watch set: ${role.title}.`, facts: facts.filter((f) => !/^It's saved to your account/.test(f)), nextStep });
     return { intent: "career_watch_create", reply, resultStatus: "prepared", sends: 0, watch_profile: wp, payload: wp, artifact: wp };
   }
   function watchOptOutResult(ctx, wp, mode, note) {
@@ -22434,7 +22465,7 @@ const CareerRouter = (() => {
       return handleDiscovery(text, ctx, {});
     }
     if (!FAM_CAREER.test(t) && /\b(weather|forecast|poems?|poetry|songs?|lyrics|jokes?|riddles?|recipes?|bake|baking|cook|cooking|restaurants?|pizza|movies?|films?|tv shows?|netflix|who won|the score|scores?|super bowl|nba|nfl|mlb|lakers|homework|calculus|algebra|equations?|capital of|trivia|horoscope)\b/.test(t)) {
-      const reply = compose({ headline: "That is outside what I can help with.", facts: ["I'm Trainee, a career agent: I find roles, prepare and track your applications, and get you ready for interviews."], nextStep: "Is there something in your job search I can take on?" });
+      const reply = compose({ headline: "I can't help with that because it's outside what I do: I work only on your job search, finding roles, preparing and tracking your applications, and getting you ready for interviews.", facts: [], nextStep: "Is there something in your job search I can take on?" });
       return { intent: "career_out_of_scope", reply, resultStatus: "awaiting_user", sends: 0 };
     }
     return null;
@@ -22453,11 +22484,11 @@ const CareerRouter = (() => {
   function greetingResult(ctx) {
     const hasResume = resumeOnRecord(ctx);
     const reply = compose({
-      headline: "Hi — I'm Trainee, your career agent.",
-      facts: ["I find jobs that fit you, get your applications ready for your OK, and prep you for interviews, all by text."],
+      headline: hasResume ? "Hi, what role should I look for — and where, or remote?" : "Hi, what role are you looking for?",
+      facts: ["I'm Trainee, your career agent: I find jobs that fit you, get applications ready for your OK and prep you for interviews, by text."],
       nextStep: hasResume
-        ? "What role should I look for — and where, or remote?"
-        : "To start, paste your resume or attach the file — or just tell me the role you want.",
+        ? "Tell me the role and the place, and I'll start the search."
+        : "Paste your resume here or attach the file to start.",
     });
     return { intent: "career_greeting", reply, resultStatus: "awaiting_user", sends: 0 };
   }
@@ -24056,13 +24087,14 @@ const CareerRouter = (() => {
       const u = unquotedText(raw);
       const materialsAsk = /\b(put|write|add|say|state|claim|list|mark|include|change|make)\b[^.]*\b(resume|cv|cover letter|application|form|letter|profile)\b/i.test(u);
       if (u.length <= 200 && u.split(/\n/).length <= 2 && !materialsAsk && !/\?/.test(u) && !resumeGraduationCorrection(raw, ctx)) {
-        const LEAD = "^(?:(?:so|and|also|btw|oh|well|yeah|yes|ok|okay|actually|correction|sorry|wait|no|hi|hey)[\\s,:!-]+)*";
+        const LEAD = "^(?:(?:so|and|also|btw|oh|well|yeah|yes|ok|okay|actually|correction|sorry|wait|no|hi|hey|right|um|one more thing|quick question)[\\s,:!-]+)*";
         const sentences = u.split(/[.!;]+(?=\s|$)|\n|\s+[—–-]\s+/).map((x) => x.trim()).filter(Boolean);
         const MON = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|spring|summer|fall|winter)";
         const HEDGE = /\b(?:i think|i thought|i believe|i guess|i suppose|i assume|i reckon|idk|i dont know|i don'?t know|dunno|not sure|unsure|prob|probs|prolly|probably|tentative(?:ly)?|maybe|possibly|likely|roughly|around|approximately|about|ish|tbd|or so|or later|or earlier|or thereabouts|give or take)\b/i;
         const ALTERNATIVES = new RegExp(`\\b(?:${MON}\\s+)?20\\d\\d\\s*(?:\\bor\\b|/)\\s*(?:${MON}\\s+)?(?:20\\d\\d|later|earlier|after|before)|\\b${MON}\\s*(?:\\bor\\b|/)\\s*${MON}\\b|\\b(?:or|/)\\s*${MON}(?:\\s+'?\\d\\d(?:\\d\\d)?)?\\b`, "i");
         const definiteSentence = (x) => !/\b(?:not|never|no longer|don'?t|dont|doesn'?t|won'?t|wont|didn'?t|can'?t|cant|isn'?t|aren'?t)\b|n't\b/i.test(x) && !/\b(?:if|unless|might|could|would|maybe|perhaps|probably|hope|hoping|hopefully|ideally|assuming|supposedly|wish|plan(?:ning)? to|trying to|supposed to|should)\b/i.test(x) && !HEDGE.test(x) && !ALTERNATIVES.test(x);
-        const wholeDefinite = definiteSentence(u.replace(/[.!?;:\n\u2014\u2013-]+/g, " "));
+        const CONTRAST = new RegExp(`,?\\s*(?:and\\s+)?(?:not|instead of|rather than)\\s+(?:in\\s+|on\\s+)?(?:${MON}\\s+)?20\\d\\d\\b`, "gi");
+        const wholeDefinite = definiteSentence(u.replace(CONTRAST, "").replace(/[.!?;:\n\u2014\u2013-]+/g, " "));
         const definite = (x) => wholeDefinite && definiteSentence(x);
         let m2;
         if ((m2 = sentences.map((x) => x.match(new RegExp(`${LEAD}my\\s+(?:e-?mail(?:\\s+address)?)\\s+is\\s+(?:actually\\s+|now\\s+)?([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,})\\b`, "i"))).find(Boolean))) ctx._contactStatedThisTurn = { kind: "email", value: m2[1] };
@@ -24070,9 +24102,16 @@ const CareerRouter = (() => {
         const gm = threadMirrorOf(ctx), askedAt = gm && typeof gm.gradAskedAt === "number" ? gm.gradAskedAt : null;
         const bare = askedAt != null && nowOf(ctx) - askedAt <= 30 * 60 * 1000 && nowOf(ctx) >= askedAt - 60 * 1000 && !statedFactsOf(ctx).some((f) => f.kind === "graduation")
           ? u.trim().match(new RegExp(`^(?:(?:in|it'?s|its|i graduate(?:\\s+in)?|graduating(?:\\s+in)?)\\s+)?(${MON}\\s+20\\d\\d|20\\d\\d)[.!]*$`, "i")) : null;
+        const GRAD_MY = new RegExp(`${LEAD}my\\s+graduation(?:\\s+date)?\\s+is\\s+(?:actually\\s+|now\\s+)?(${MON}\\s+20\\d\\d|20\\d\\d)\\b`, "i");
+        const onRecord = statedFactsOf(ctx).find((f) => f.kind === "graduation");
+        const corr = onRecord ? u.trim().match(new RegExp(`${LEAD}(?:it'?s\\s+|its\\s+|i graduate(?:\\s+in)?\\s+)?(${MON}\\s+)?(20\\d\\d)\\s*,?\\s+not\\s+(?:${MON}\\s+)?(20\\d\\d)[.!]*$`, "i")) : null;
+        const corrOk = corr && corr[2] !== corr[3] && new RegExp(`\\b${corr[3]}\\b`).test(s(onRecord.value));
         if (bare) push("graduation", bare[1].replace(/\b[a-z]/g, (c) => c.toUpperCase()), bare[0]);
-        else if ((m2 = sentences.filter(definite).map((x) => x.match(GRAD)).find(Boolean))) {
+        else if ((m2 = sentences.map((x) => x.replace(CONTRAST, "")).filter(definite).map((x) => x.match(GRAD) || x.match(GRAD_MY)).find(Boolean))) {
           push("graduation", m2[1].replace(/\b[a-z]/g, (c) => c.toUpperCase()), m2[0]);
+        } else if (corrOk) {
+          const mon = corr[1] ? corr[1].trim() : (s(onRecord.value).match(new RegExp(`^${MON}`, "i")) || [""])[0];
+          push("graduation", `${mon ? `${mon} ` : ""}${corr[2]}`.replace(/\b[a-z]/g, (c) => c.toUpperCase()), corr[0]);
         } else if (sentences.some((x) => /\bgraduat\w*\b.*\b20\d\d\b|\bclass\s+of\s+20\d\d\b/i.test(x))) {
           ctx._gradUnsavedThisTurn = true;
         }
@@ -24086,7 +24125,9 @@ const CareerRouter = (() => {
       if ((m = cl.match(/\b(?:i'?m|i am|im)\s+a\s+(first|second|third|fourth)[- ]year\b/i))) push("year", { first: "freshman", second: "sophomore", third: "junior", fourth: "senior" }[m[1].toLowerCase()], m[0]);
       else if ((m = cl.match(/\b(?:i'?m|i am|im)\s+(?:a\s+(?:[a-z][a-z&/-]{0,20}\s+)?)?(?:rising\s+)?(sophomore|junior|senior|freshman|frosh|grad student|graduate student)\b/i))) push("year", m[1].toLowerCase(), m[0]);
       else if ((m = cl.match(/^(?:so|ok|okay|yeah|and)?\s*(sophomore|junior|senior|freshman)\b/i))) push("year", m[1].toLowerCase(), m[0]);
-      if ((m = cl.match(/\b(?:i\s+)?(?:study|studying|majoring in|major in)\s+([a-z][a-z &]{2,40})/i))) pushMajors(m[1], m[0]);
+      if ((m = cl.match(/\b(?:switch(?:ed|ing)?|chang(?:ed|ing|e))\s+(?:my\s+)?majors?\s+(?:over\s+)?to\s+([a-z][a-z &]{2,40})/i)) && !/\b(?:not|never|might|thinking|considering|maybe|if)\b/i.test(cl)) pushMajors(m[1], m[0]);
+      else if ((m = cl.match(/\bmy majors?\s+(?:is|are)\s+now\s+([a-z][a-z &,]{2,40})/i))) pushMajors(m[1], m[0]);
+      else if ((m = cl.match(/\b(?:i\s+)?(?:study|studying|majoring in|major in)\s+([a-z][a-z &]{2,40})/i))) pushMajors(m[1], m[0]);
       else if ((m = cl.match(/\bmy majors?\s+(?:is|are)\s+([a-z][a-z &,]{2,40})/i))) pushMajors(m[1], m[0]);
       else if ((m = cl.match(/^([a-z][a-z &,]{2,40}?)\s+(?:is|are)\s+my\s+majors?\b/i))) pushMajors(m[1], m[0]);
       else if ((m = cl.match(/\b([a-z][a-z &]{2,30}?)\s+major\b/i)) && !/^(what|which|the|a|my)\b/i.test(m[1].trim())
@@ -24328,7 +24369,7 @@ const CareerRouter = (() => {
       return { intent: "profile_correction", reply, resultStatus: "completed", sends: 0, stated_facts: all };
     }
     try { const m = threadMirrorForWrite(ctx); if (m) m.affirmRecord = { at: nowOf(ctx) }; } catch {   }
-    const reply = compose({ headline: "Recorded — that is on your record now, in your words.", facts: [`On record so far: ${all.map(factLine).join("; ")}.`, "These facts are what your searches, drafts, and prep are built from — nothing about you is assumed beyond what you state, and you can correct any of it the same way you stated it."], nextStep: "Tell me the next fact, or say what you want to do first and it runs on these." });
+    const reply = compose({ headline: `Recorded — that is on your record now, in your words: ${all.map((f) => String(factLine(f)).replace(/[.\s]+$/, "")).join("; ")}.`, facts: [], nextStep: "Tell me the next fact, or say what you want to do first and it runs on these." });
     return { intent: "profile_correction", reply, resultStatus: "completed", sends: 0, stated_facts: all };
   }
   function handleTailorDiffAsk(text, ctx) {
@@ -24644,7 +24685,7 @@ const CareerRouter = (() => {
     const hay = [];
     if (profile) { for (const f of profile.facts || []) hay.push(s(f.text || f.value || "")); if (profile.basics) hay.push(s(profile.basics.location || "")); }
     for (const f of statedFactsOf(ctx)) hay.push(`${f.value} ${f.evidence || ""}`);
-    const facts = ["Eligibility is judged requirement by requirement from the posting's own text — the same grading the tailored packet prints — and with no posting on this thread there is nothing honest to grade yet, so no verdict will be guessed."];
+    const facts = [];
     if (classes.length) {
       for (const cl of classes.slice(0, 2)) {
         const hit = cl.probe ? hay.find((h) => cl.probe.test(lc(h))) : null;
@@ -24653,9 +24694,9 @@ const CareerRouter = (() => {
           : `The fact this turns on: ${cl.name} — your record does not show it, so if you hold it, state it in your own words and it is recorded in this turn; if you don't, that one requirement by itself decides this posting.`);
       }
     } else {
-      facts.push("What it will turn on is the posting's hard requirements — a license or certification, a degree, years of experience, work authorization — each one checked against your record, none of them assumed.");
+      facts.push("It turns on the posting's hard requirements, such as a license, a degree, years of experience or work authorization; none is assumed.");
     }
-    const reply = compose({ headline: "Eligibility can't be graded without the posting — here is exactly what it takes.", facts, nextStep: "Paste the posting text, or name the company and role and I'll take the posting from the board list — the verdict is graded and spoken in that turn." });
+    const reply = compose({ headline: "I can't say yet whether you qualify because I haven't read that posting's requirements in this chat.", facts, nextStep: "Send me the posting's link or its text, and I'll check each requirement against what you've confirmed." });
     return { intent: "eligibility_check", reply, resultStatus: "awaiting_user", sends: 0 };
   }
   function handleRecordRecall(text, ctx) {
@@ -25269,9 +25310,12 @@ const CareerRouter = (() => {
     if (res && typeof res.reply === "string" && res.reply && res.intent !== "career_fallback" && res.intent !== "honest_unavailable" && !/\bresume\b/i.test(res.reply) && !resumeOnRecord(c)) {
       const ask = lc(s(text)).replace(/[’]/g, "'").replace(/\b(?:don't|do not|never|not|without|no need to)\s+(?:\w+\s+){0,2}?(?:apply|applying|submit\w*)\b[^.?!]*/g, " ");
       if (!/\?\s*$/.test(ask) && /\bapply\s+(?:to|for|at|me|on|now)\b|\bapply\b[^.?!]{0,40}\b(?:jobs?|roles?|postings?|positions?|internships?|openings?)\b|\bsubmit (?:my|an?) applications?\b/.test(ask)) {
-        res.reply = `${res.reply}\n\n${resumeDraftsPending(c).length
+        const pending = resumeDraftsPending(c).length;
+        const line = pending
           ? "And nothing is sent anywhere before your resume is confirmed: its entries are waiting for your word (reply \"yes, that's my resume\" if they're right)."
-          : "And nothing is sent anywhere before your resume is confirmed: paste or attach it, confirm it, then ask again."}`;
+          : "Applying also needs your resume, and no application goes out before your resume is confirmed: paste or attach it here.";
+        const q = pending ? null : /(?:^|\n|(?<=[.!]) )([^.!?\n]*\?)\s*$/.exec(res.reply);
+        res.reply = q ? `${res.reply.slice(0, q.index).replace(/\s+$/, "")}\n\n${line}\n${q[1].trim()}` : `${res.reply}\n\n${line}`;
       }
     }
     if (res && typeof res.reply === "string" && res.reply && res.intent !== "career_fallback" && res.intent !== "honest_unavailable") res.reply = ensureNextStepText(res.reply);
@@ -25776,22 +25820,60 @@ const CareerRender = (() => {
     for (let i = 0; i < data.length; i++) { a = (a + data[i]) % 65521; b = (b + a) % 65521; }
     return ((b << 16) | a) >>> 0;
   }
-  function deflateStored(data) {
-    const chunks = [];
-    let off = 0;
-    do {
-      const len = Math.min(65535, data.length - off);
-      const head = Bytes.alloc(5);
-      head[0] = off + len >= data.length ? 1 : 0;
-      head.writeUInt16LE(len, 1);
-      head.writeUInt16LE((~len) & 0xffff, 3);
-      chunks.push(head, Bytes.from(data.subarray(off, off + len)));
-      off += len;
-    } while (off < data.length);
-    return Bytes.concat(chunks);
+  const DEFLATE_CHAIN = 64;
+  const LEN_BASE = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
+  const LEN_EXTRA = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0];
+  const DIST_BASE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577];
+  const DIST_EXTRA = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13];
+  function deflateFixed(input) {
+    const d = input instanceof Uint8Array ? input : Bytes.from(input);
+    const n = d.length, out = [];
+    let buf = 0, cnt = 0;
+    const put = (v, bits) => { buf |= v << cnt; cnt += bits; while (cnt >= 8) { out.push(buf & 0xff); buf >>>= 8; cnt -= 8; } };
+    const rev = (c, bits) => { let r = 0; for (let i = 0; i < bits; i++) { r = (r << 1) | (c & 1); c >>= 1; } return r; };
+    const sym = (s) => {
+      if (s < 144) put(rev(0x30 + s, 8), 8);
+      else if (s < 256) put(rev(0x190 + s - 144, 9), 9);
+      else if (s < 280) put(rev(s - 256, 7), 7);
+      else put(rev(0xc0 + s - 280, 8), 8);
+    };
+    const below = (table, v) => { let k = 0; while (k + 1 < table.length && table[k + 1] <= v) k++; return k; };
+    put(1, 1); put(1, 2);
+    const MASK = 0x7fff, head = new Int32Array(MASK + 1).fill(-1), prev = new Int32Array(MASK + 1).fill(-1);
+    const hashAt = (p) => ((d[p] << 10) ^ (d[p + 1] << 5) ^ d[p + 2]) & MASK;
+    const insert = (p) => { if (p + 2 < n) { const h = hashAt(p); prev[p & MASK] = head[h]; head[h] = p; } };
+    let i = 0;
+    while (i < n) {
+      let best = 0, dist = 0;
+      if (i + 2 < n) {
+        const max = Math.min(258, n - i);
+        let j = head[hashAt(i)], chain = DEFLATE_CHAIN;
+        while (j >= 0 && i - j <= 32768 && chain-- > 0) {
+          let l = 0;
+          while (l < max && d[j + l] === d[i + l]) l++;
+          if (l > best) { best = l; dist = i - j; if (l === max) break; }
+          const next = prev[j & MASK];
+          if (next >= j) break;
+          j = next;
+        }
+      }
+      if (best >= 3) {
+        const k = below(LEN_BASE, best);
+        sym(257 + k); put(best - LEN_BASE[k], LEN_EXTRA[k]);
+        const c = below(DIST_BASE, dist);
+        put(rev(c, 5), 5); put(dist - DIST_BASE[c], DIST_EXTRA[c]);
+        for (let p = i; p < i + best; p++) insert(p);
+        i += best;
+      } else {
+        sym(d[i]); insert(i); i++;
+      }
+    }
+    sym(256);
+    if (cnt > 0) out.push(buf & 0xff);
+    return Bytes.from(out);
   }
-  function zlibDeflate(data) {
-    const body = deflateStored(data);
+  function zlibDeflateFixed(data) {
+    const body = deflateFixed(data);
     const out = Bytes.alloc(2 + body.length + 4);
     out[0] = 0x78; out[1] = 0x01;
     body.copy(out, 2);
@@ -25905,8 +25987,8 @@ const CareerRender = (() => {
     return core.buffer;
   }
   const pureZlib = {
-    deflateSync: (data) => zlibDeflate(data),
-    deflateRawSync: (data) => deflateStored(data),
+    deflateSync: (data) => zlibDeflateFixed(data),
+    deflateRawSync: (data) => deflateFixed(data),
     inflateSync: (data, opts) => zlibInflate(data, opts),
     inflateRawSync: (data, opts) => inflateRaw(data, opts),
   };
@@ -26033,7 +26115,7 @@ const CareerRender = (() => {
     for (const entry of entries) {
       const nameBuf = Bytes.from(entry.name, "utf8");
       const data = Bytes.isBuffer(entry.data) ? entry.data : Bytes.from(String(entry.data), "utf8");
-      const compressed = zlib.deflateRawSync(data);
+      const compressed = deflateFixed(data);
       const crc = crc32(data);
       const local = Bytes.alloc(30);
       local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0x0800, 6);
@@ -26109,7 +26191,8 @@ const CareerRender = (() => {
   }
   const DOCX_CONTENT_TYPES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>`;
   const DOCX_RELS_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`;
-  const DOCX_STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="120" w:line="276" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style><w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:before="0" w:after="80"/></w:pPr><w:rPr><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before="280" w:after="100"/><w:outlineLvl w:val="0"/></w:pPr><w:rPr><w:b/><w:caps/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="ListBullet"><w:name w:val="List Bullet"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:after="60"/><w:ind w:left="360" w:hanging="180"/></w:pPr></w:style></w:styles>`;
+  const DOCX_DOC_RELS_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
+  const DOCX_STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:before="0" w:after="0" w:line="276" w:lineRule="exact"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style><w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:before="0" w:after="0" w:line="400" w:lineRule="exact"/></w:pPr><w:rPr><w:b/><w:sz w:val="32"/><w:szCs w:val="32"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before="180" w:after="0" w:line="300" w:lineRule="exact"/><w:outlineLvl w:val="0"/></w:pPr><w:rPr><w:b/><w:caps/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="ListBullet"><w:name w:val="List Bullet"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:after="0"/></w:pPr></w:style></w:styles>`;
   function docxDocumentXml(resume) {
     const body = toBlocks(resume).map((b) => {
       if (b.style === "name") return paragraph("Title", b.text);
@@ -26129,6 +26212,7 @@ const CareerRender = (() => {
     const buffer = zipBuffer([
       { name: "[Content_Types].xml", data: DOCX_CONTENT_TYPES_XML },
       { name: "_rels/.rels", data: DOCX_RELS_XML },
+      { name: "word/_rels/document.xml.rels", data: DOCX_DOC_RELS_XML },
       { name: "word/document.xml", data: docxDocumentXml(resume) },
       { name: "word/styles.xml", data: DOCX_STYLES_XML },
     ]);
@@ -26168,8 +26252,8 @@ const CareerRender = (() => {
 
   const PAGE = { w: 612, h: 792, margin: 54, top: 738, bottom: 56 };
   const FONT_FOR = { name: "F2", heading: "F2", entry: "F2", contact: "F1", links: "F1", bullet: "F1", line: "F1" };
-  const SIZE_FOR = { name: 12, heading: 11, entry: 11, contact: 11, links: 11, bullet: 11, line: 11 };
-  const LEAD_FOR = { name: 16, heading: 15, entry: 13.8, contact: 13.5, links: 13.5, bullet: 13.8, line: 13.8 };
+  const SIZE_FOR = { name: 16, heading: 11, entry: 11, contact: 11, links: 11, bullet: 11, line: 11 };
+  const LEAD_FOR = { name: 20, heading: 15, entry: 13.8, contact: 13.5, links: 13.5, bullet: 13.8, line: 13.8 };
   const GAP_BEFORE = { heading: 9 };
   function estWidthPt(text, sizePt) {
     let em = 0;
@@ -26241,7 +26325,7 @@ const CareerRender = (() => {
     pages.forEach((lines, i) => {
       objects.push([pageIds[i], Bytes.from(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE.w} ${PAGE.h}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${contentIds[i]} 0 R >>`)]);
       const ops = lines.map((l) => `BT /${l.font} ${l.size} Tf 1 0 0 1 ${l.x} ${l.y} Tm ${pdfLiteral(encodeWinAnsi(l.text, unencodable))} Tj ET`).join("\n");
-      const stream = zlib.deflateSync(Bytes.from(ops, "latin1"));
+      const stream = zlibDeflateFixed(Bytes.from(ops, "latin1"));
       const head = Bytes.from(`<< /Length ${stream.length} /Filter /FlateDecode >>\nstream\n`, "latin1");
       objects.push([contentIds[i], Bytes.concat([head, stream, Bytes.from("\nendstream", "latin1")])]);
     });
@@ -26719,7 +26803,7 @@ const CareerRender = (() => {
   }
 
   const runtime = { zlib: !!rt.zlib, crypto: !!rt.crypto, Buffer: !!Buffer, codec: rt.zlib && rt.crypto ? "platform" : zlib && crypto ? "vendored" : "none" };
-  const primitives = { zipBuffer, unzipParts, encodeWinAnsi, pdfLiteral, escXml, deflate: (b) => zlib.deflateSync(Bytes.from(b)), bytes: (x, enc) => Bytes.from(x, enc), concat: (xs) => Bytes.concat(xs) };
+  const primitives = { zipBuffer, unzipParts, encodeWinAnsi, pdfLiteral, escXml, deflate: (b) => zlibDeflateFixed(Bytes.from(b)), bytes: (x, enc) => Bytes.from(x, enc), concat: (xs) => Bytes.concat(xs) };
   return { primitives, renderPdf, renderDocx, parseCheck, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
   }
   return make(NODE_RUNTIME);

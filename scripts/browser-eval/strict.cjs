@@ -15,7 +15,7 @@
 //     no `mutation`), which some boards use to load the form; each one is logged;
 //   - a page script cancels every form submit, form.submit() and requestSubmit(), and counts the attempt;
 //   - the runner is stopped before its click, with retries 0; robots.txt is obeyed; 1 page load a second per host.
-//   node scripts/browser-eval/strict.cjs --sample scripts/browser-eval/sample.csv --label strict-1 [--max-per-provider 20] [--providers greenhouse,lever]
+//   node scripts/browser-eval/strict.cjs --sample scripts/browser-eval/sample.csv --label strict-1 [--max-per-provider 20] [--providers greenhouse,lever,workable,breezy,ashby]
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");

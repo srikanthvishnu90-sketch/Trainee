@@ -134,5 +134,7 @@ async function main() {
   process.stdout.write(markdown(label, s));
   if (s.all.breaches) process.exit(3);
 }
+// Bench-only (r11 baseline): trunk's runner lets a route.fetch rejection escape when a context closes under it; log it, keep going.
+if (require.main === module) process.on("unhandledRejection", (e) => console.log("UNHANDLED | " + String(e && e.message).split("\n")[0].slice(0, 160)));
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
 module.exports = { strictPosting, graphqlRead, robotsOk, summarize, markdown, CUSTOM_ONLY, PROVIDER_HOSTS };

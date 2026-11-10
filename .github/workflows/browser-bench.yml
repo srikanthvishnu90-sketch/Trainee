@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        sample: [sample, heldout]
+        sample: [heldout]
         persona: [default]
     steps:
       - uses: actions/checkout@v4

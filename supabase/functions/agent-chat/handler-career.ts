@@ -143,7 +143,7 @@ import { outlookAsk, outlookChatTurn } from "../_shared/outlook_connector.ts"; /
 import { shapeForTurn } from "../_shared/channel_shape.ts"; // REPLY SHAPE
 import { applyHereTurn } from "../_shared/apply_here.ts"; // APPLY HERE: a pasted link or "apply to this" -> one line + one Apply button
 import { supabaseFileStore } from "../trainee-file/store.ts";
-import { createFileService, supabaseFileKindStore } from "../_shared/file_service.ts"; // FILE KINDS
+import { createFileService, personFacingError, supabaseFileKindStore } from "../_shared/file_service.ts"; // FILE KINDS
 import { researchBriefOn, researchReplyOn } from "../_shared/research_reply.ts"; // R9-C
 import { dnsProbe } from "../_shared/research_dns.ts";
 import { researchSearchFor } from "../_shared/research_free_sources.ts";
@@ -726,7 +726,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             loadPool: () => readPool(message, true),
             // The privacy ruling: the resume opens only on the signed-in File page (a code-built draft File), never a bearer link.
             file: async (data) => { const r = await createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }).create(user.id, "draft", data, { trusted: true });
-              return !r.ok ? { error: r.error } : r.url ? { url: r.url } : { error: "links to File pages aren't set up" }; },
+              return !r.ok ? { error: personFacingError(r.error) } : r.url ? { url: r.url } : { error: "links to File pages aren't set up" }; },
             // B.6 continuation 1: "make the first bullet less wordy" is the model's wording, metered like every model call
             // here; the module audits it against the bullet's own fact and shows it beside the old one before it is used.
             rewrite: careerModelConfig(Deno.env).apiKey ? async (bullet: string, ask: string) => {
@@ -953,7 +953,14 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       const employerAsk = supabaseEmployerAskStore(admin);
       // Review F2 (item 8): a change or send ask right after a draft was shown stays with that draft (career_staged.ts
       // draftContinuation). Read only for such a message: the thread's last reply, and whether it was a follow-up draft.
-      const draftThread = draftContinuation(message) ? (await employerAsk.lastAssistant(tid).catch(() => null))?.intent === FOLLOWUP_INTENT : false;
+      // H2H fix 4 (docs/architect/INSTINCT-HEAD-TO-HEAD.md C4 t6): a draft the brain itself showed ("Draft: Hi Maya, ...") is the
+      // draft too; "Make it warmer." was answered "there's no draft in this chat" with a cover letter brought in.
+      const draftThread = draftContinuation(message) ? await (async () => {
+        const r = await admin.from("agent_messages").select("meta,content").eq("thread_id", tid).eq("role", "assistant").order("id", { ascending: false }).limit(1);
+        const last = r.error ? null : r.data?.[0];
+        const intent = last?.meta?.intent ?? null;
+        return intent === FOLLOWUP_INTENT || intent === "agent" && /^\s*draft\s*:/i.test(String(last?.content ?? ""));
+      })().catch(() => false) : false;
       if (draftThread) (ctx as any)._draftThread = true;
       // SERIAL-1490/1491: "is X where you work now?" is answered by the next yes or no while that question is this thread's
       // last word: no queues exactly that posting once, yes keeps it out; the same answer again is told it stands.

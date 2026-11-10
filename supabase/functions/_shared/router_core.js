@@ -22038,7 +22038,10 @@ const CareerProfile = (() => {
       if (head) {
         flush();
         lastWasMore = false;
-        if (head.skip) { section = null; if (!unread.includes(head.label)) unread.push(head.label); } else section = head.kind;
+        // H2H fix 5 (docs/architect/INSTINCT-HEAD-TO-HEAD.md item 3, check 10): an "Interests" or "Hobbies" heading holds the
+        // person's interests, kept as they are under "Interests:" on one line; they were dropped as an unread section.
+        if (head.skip && /^(?:(?:personal |other )?interests|hobbies(?: (?:&|and) interests)?|interests (?:&|and) hobbies)$/i.test(head.label.trim())) section = "interest";
+        else if (head.skip) { section = null; if (!unread.includes(head.label)) unread.push(head.label); } else section = head.kind;
         continue;
       }
       // R10 (fix 3): a labelled line ("Skills: Python, SQL", "Certifications: ...", "Interests: Golf"), under its own heading,
@@ -22057,6 +22060,12 @@ const CareerProfile = (() => {
         continue;
       }
       if (!section) continue; // header/contact block (or a section that holds no entries) is not a fact
+      if (section === "interest") {
+        for (const name of line.replace(/^[-•*]\s*/, "").split(/[,;•|·]/).map((x) => x.trim()).filter(Boolean)) {
+          drafts.push({ kind: "other", section: "interests", name, title: name, text: `Interest: ${name}`, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
+        }
+        continue;
+      }
       if (section === "skill") {
         for (const name of line.split(/[,;•|·]/).map((x) => x.trim()).filter(Boolean)) {
           drafts.push({ kind: "skill", name, title: name, text: `Skill: ${name}`, skills: [name], evidence: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
@@ -39181,7 +39190,8 @@ const CareerRouter = (() => {
         const mail = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/.exec(seg);
         if (mail && !h.email) h.email = mail[0];
         else if (url) { const key = (/^([A-Za-z]+)\s*:/.exec(seg) || [null, "link"])[1].toLowerCase(); if (!h.links[key]) h.links[key] = url[0].replace(/[.,;]+$/, ""); }
-        else if (!h.location && /^[\p{L} .'-]+,\s*[\p{L} .'-]+(?:\s*\(TEST\))?$/u.test(seg)) h.location = seg;
+        // H2H fix 5 (item 3, check 8): the neighbourhood in parentheses is part of the place ("Chicago, IL (Lincoln Park)").
+        else if (!h.location && /^[\p{L} .'-]+,\s*[\p{L} .'-]+(?:\s*\([\p{L} .'-]{2,40}\))?$/u.test(seg)) h.location = seg;
       }
     }
     return h;

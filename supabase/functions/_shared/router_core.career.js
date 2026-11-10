@@ -1478,7 +1478,8 @@ const CareerProfile = (() => {
       if (head) {
         flush();
         lastWasMore = false;
-        if (head.skip) { section = null; if (!unread.includes(head.label)) unread.push(head.label); } else section = head.kind;
+        if (head.skip && /^(?:(?:personal |other )?interests|hobbies(?: (?:&|and) interests)?|interests (?:&|and) hobbies)$/i.test(head.label.trim())) section = "interest";
+        else if (head.skip) { section = null; if (!unread.includes(head.label)) unread.push(head.label); } else section = head.kind;
         continue;
       }
       const labelled = line.match(/^(?:[-•*]\s*)?(skills?|technical(?: skills)?|tools|technologies|certifications?|certificates?|licen[cs]es?|interests?|hobbies)\s*:\s*(.+)$/i);
@@ -1494,6 +1495,12 @@ const CareerProfile = (() => {
         continue;
       }
       if (!section) continue;
+      if (section === "interest") {
+        for (const name of line.replace(/^[-•*]\s*/, "").split(/[,;•|·]/).map((x) => x.trim()).filter(Boolean)) {
+          drafts.push({ kind: "other", section: "interests", name, title: name, text: `Interest: ${name}`, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
+        }
+        continue;
+      }
       if (section === "skill") {
         for (const name of line.split(/[,;•|·]/).map((x) => x.trim()).filter(Boolean)) {
           drafts.push({ kind: "skill", name, title: name, text: `Skill: ${name}`, skills: [name], evidence: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
@@ -14904,7 +14911,7 @@ const CareerRouter = (() => {
         const mail = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/.exec(seg);
         if (mail && !h.email) h.email = mail[0];
         else if (url) { const key = (/^([A-Za-z]+)\s*:/.exec(seg) || [null, "link"])[1].toLowerCase(); if (!h.links[key]) h.links[key] = url[0].replace(/[.,;]+$/, ""); }
-        else if (!h.location && /^[\p{L} .'-]+,\s*[\p{L} .'-]+(?:\s*\(TEST\))?$/u.test(seg)) h.location = seg;
+        else if (!h.location && /^[\p{L} .'-]+,\s*[\p{L} .'-]+(?:\s*\([\p{L} .'-]{2,40}\))?$/u.test(seg)) h.location = seg;
       }
     }
     return h;

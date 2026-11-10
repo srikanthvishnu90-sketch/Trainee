@@ -26,10 +26,51 @@ export const PERSONAS_KEY = "career:resume-personas";
 // ---------------------------------------------------------------- the confirmed-only record
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v ?? null));
 // A fresh profile holding only the person's confirmed facts: a draft is not in it at all, so it cannot support a line,
-// vouch for a skill name, or be picked.
+// vouch for a skill name, or be picked. A skill the person listed and confirmed is its own proof (listedSkillsProven).
 export function confirmedOnly(profile: any): any {
   const facts = (CareerProfile.confirmedFacts(profile || {}) as any[]).filter((f) => f.status !== "draft").map(clone);
-  return withResumeHeader(CareerProfile.createProfile({ id: profile?.id, basics: clone(profile?.basics || {}), facts }), profile);
+  return listedSkillsProven(withResumeHeader(CareerProfile.createProfile({ id: profile?.id, basics: clone(profile?.basics || {}), facts }), profile));
+}
+// Architect ruling 2026-11-10 (resume loop): a skill the person listed in their own confirmed Skills is a confirmed fact
+// (D-007), so it is its own proof and is shown; 123's proof rule (skillFactProven, BUG-211) otherwise left every bare listed
+// skill off, and the Skills section vanished. Only confirmed skill facts are marked (a draft is not in this profile at all),
+// and a skill only the posting names has no fact here, so it stays off.
+// deno-lint-ignore no-explicit-any
+export function listedSkillsProven(p: any): any {
+  for (const f of p?.facts || []) {
+    if (f?.kind !== "skill" || f.needs_confirmation || f.status === "draft" || !String(f.name || f.title || "").trim()) continue;
+    if (!(f.evidence || []).length) f.evidence = [String(f.id)];
+    f.unproven = false;
+  }
+  return p;
+}
+// The same ruling on the printed page: 123 scopes the Skills line to the posting's family (BUG-273), which dropped the
+// person's own listed skills and, with none in scope, the whole section. The posting's skills keep leading; every other
+// confirmed listed skill follows on the same line, each cited to its own fact; a Skills section is added when the tailor
+// left none. Nothing but the person's confirmed skill facts is ever added.
+// deno-lint-ignore no-explicit-any
+export function withListedSkills(resume: any, p: any): any {
+  const own = (p?.facts || []).filter((f: any) => f?.kind === "skill" && !f.needs_confirmation && f.status !== "draft" && String(f.name || f.title || "").trim());
+  if (!own.length) return resume;
+  const out = clone(resume);
+  out.sections = out.sections || [];
+  let line = out.sections.flatMap((s: any) => s.lines || []).find((l: any) => l?.type === "skills");
+  if (!line) {
+    line = { text: "", factIds: [], type: "skills" };
+    out.sections.push({ heading: "Skills", lines: [line] });
+  }
+  const norm = (s: string) => ` ${String(s).toLowerCase().replace(/[^\p{L}\p{N}+#]+/gu, " ").trim()} `;
+  const named = String(line.text || "");
+  const add: string[] = [];
+  for (const f of own) {
+    const name = String(f.name || f.title).trim();
+    if (norm(named).includes(norm(name)) || add.some((a) => norm(a) === norm(name))) continue;
+    add.push(name);
+    line.factIds = [...new Set([...(line.factIds || []), String(f.id)])];
+  }
+  if (add.length) line.text = named.trim() ? `${named.trim()}, ${add.join(", ")}` : add.join(", ");
+  if (Array.isArray(out.lines)) out.lines = out.sections.flatMap((s: any) => (s.lines || []).map((l: any) => ({ ...l, section: s.heading })));
+  return out;
 }
 // RELEASE 9: the header the person confirmed with their resume (142 confirmResumeHeader: shown word for word with the
 // entries, recorded only at their yes, with its time) travels with the confirmed record; one never confirmed does not.
@@ -315,7 +356,12 @@ export function renderWith(R: any, where: string): ResumeRenderer {
     const r = R.renderPdf(resume);
     if (!r.ok) return { ok: false, where, reason: r.reason || "the PDF could not be rendered" };
     const pdf = new Uint8Array(r.buffer);
-    return { ok: true, pdf, sha256: R.sha256(r.buffer), filename: r.filename, ats: atsHarness(R, resume, pdf), where };
+    // The Word copy rides with the PDF on the plain path too (RESUME-TEMPLATES 1.1: "Trainee keeps sending both"; the resume
+    // loop found the default "make me a resume" sent the PDF alone). Same document, same words; a Word copy that cannot be
+    // made is left out, never faked.
+    const d = R.renderDocx(resume);
+    const docx = d?.ok && d.buffer ? new Uint8Array(d.buffer) : undefined;
+    return { ok: true, pdf, sha256: R.sha256(r.buffer), filename: r.filename, ats: atsHarness(R, resume, pdf), where, ...(docx ? { docx } : {}) };
   };
 }
 // The edge (Deno): 148 over Deno's own node: built-ins, loaded once, on the first render.
@@ -426,7 +472,8 @@ export async function tailorForPosting(o: {
   if (!t.ok) return { ok: false, refused: "truth_audit", reason: `the truth check refused it: ${(t.violations || []).slice(0, 3).map((v: any) => v.reason).join("; ")}`, ms: ms() };
   if (t.mode !== "full" || !t.resume) return { ok: false, refused: "truth_audit", reason: t.reason || "no resume was assembled", ms: ms() };
   const lead = persona ? persona.lead.filter((id) => CareerProfile.getFact(picked, id)) : [];
-  const ordered = applyPersonaOrder(t.resume, lead);
+  // `picked`, not `clean`: a skill a persona hides stays hidden.
+  const ordered = withListedSkills(applyPersonaOrder(t.resume, lead), picked);
   const doc = submissionResume(ordered);
   // The hard gate again, on exactly what will print: every line cited to a confirmed fact that supports it.
   const audit = CareerTailor.auditResume(doc, clean);

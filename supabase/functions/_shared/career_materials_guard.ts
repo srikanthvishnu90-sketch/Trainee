@@ -54,12 +54,12 @@ export function lineProblems(text: string, rec: Record_, factIds?: string[]): st
   // A secret is refused by name; its digits are never quoted back in a reason.
   const secret = claimProblems(t, { record: [] }).filter((x) => x.startsWith("it holds a"));
   if (secret.length) return secret;
-  const scoped = factIds?.length
-    ? lc([...factIds.map((id) => rec.byFact.get(String(id)) ?? ""), rec.own].join(" "))
-    : rec.lower;
+  const scopedRaw = factIds?.length ? [...factIds.map((id) => rec.byFact.get(String(id)) ?? ""), rec.own].join(" \n ") : "";
+  const scoped = factIds?.length ? lc(scopedRaw) : rec.lower;
   const reasons: string[] = [];
-  // Numbers and dates (a year is a number): every one on the record.
-  const nums = factIds?.length ? new Set(numbersIn(scoped)) : rec.numbers;
+  // Numbers and dates (a year is a number): every one on the record. They are read from the cited facts' own words, not the
+  // lowercased word list (which turns "$8,000" into "8 000" and would refuse the person's own "$8,000"; resume loop).
+  const nums = factIds?.length ? new Set(numbersIn(scopedRaw)) : rec.numbers;
   for (const n of numbersIn(t)) if (!nums.has(n)) reasons.push(/^(19|20)\d\d$/.test(n) ? `date "${n}" is not on your record` : `number "${n}" is not on your record`);
   // "N years": a claim of time only as the person stated it (their years fact, or the same words on the record).
   for (const m of t.matchAll(/\b(\d{1,2})\s*\+?\s*(?:years?|yrs?)\b/gi)) {

@@ -25,6 +25,9 @@ export interface Offer {
   city: string | null; metro: string | null; metro_label: string | null; remote: boolean;
   role: string | null; occupation: { key: string; soc: string; soc_title: string; bls_national: string | null } | null;
   competing: Competing[]; deadline: { text: string } | null;
+  // LOOP 13: a bonus amount said as a target ("a $15k target bonus") is not guaranteed cash; and the clause each figure was
+  // read from, so the reply can say where it came from (offer letter, verbal, the person's estimate).
+  bonus_target?: number | null; from?: Partial<Record<"base" | "signing" | "bonus" | "bonus_pct" | "bonus_target", string>>;
 }
 export interface Bench {
   kind: "lca" | "oews" | "bls_national";
@@ -69,6 +72,8 @@ function amounts(clause: string): Amount[] {
     if (unit === "k" || unit === "thousand") v *= 1000;
     else if (unit === "m") v *= 1_000_000;
     const dollar = m[0].includes("$");
+    // "401k", "403(b)", "457b" name a retirement plan, never pay (LOOP 13: "a 4% 401k match" was read as a $401,000 base).
+    if (!dollar && /^(?:401|403|457)$/.test(m[1]) && /^\s?\(?[kb]\)?/i.test(clause.slice((m.index ?? 0) + m[0].indexOf(m[1]) + m[1].length))) continue;
     // A bare small number is a count or a date, not pay: pay is "110k", "$110,000", "110000" or "$45/hr".
     if (!hourly && v < 1000) continue;
     if (hourly && (v < 7 || v > 1000)) continue;
@@ -91,7 +96,8 @@ export function firmIn(text: string): any | null {
 // A company not in the guide, named the way people say it: "Acme offered", "offer from Acme", "at Acme".
 function namedCompany(text: string): string | null {
   const m = text.match(/\b([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})\s+(?:offered|is offering|gave me|made me an offer)/) ||
-    text.match(/\boffer (?:from|at)\s+([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})/);
+    text.match(/\b([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})\s+(?:will|might|may|could|should|is going to|is likely to) offer\b/) ||
+    text.match(/\boffer (?:letter )?(?:from|at)\s+([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})/);
   if (!m) return null;
   const name = m[1].replace(/^(?:I|My|The|An?|They|We)\s+/, "").trim();
   return name && !/^(I|My|The|They|We|So|Just|Also)$/.test(name) ? name : null;
@@ -120,6 +126,9 @@ function occupationFor(role: string | null, sector: string | null, maps: any): O
   return best ? { key: best.key, soc: best.soc, soc_title: best.soc_title, bls_national: best.bls_national ?? null } : null;
 }
 const DEADLINE = /\b(?:deadline(?: is)?|expires?(?: on)?|due|(?:answer|respond|reply|decide|sign|accept)(?: back)? by|need to (?:answer|decide|respond|reply|sign|accept)(?: by)?|have until|by)\s+((?:next |this )?(?:mon|tues|wednes|thurs|fri|satur|sun)day|tomorrow|end of (?:the )?(?:day|week|month)|eod|eow|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.? \d{1,2}(?:st|nd|rd|th)?|\d{1,2}\/\d{1,2})/i;
+const BENEFIT = /\b(relocation|reloc|stipend|allowance|tuition|(?:401|403|457)\s?\(?[kb]\)?)(?![\w])/i;
+// An amount followed by a benefit's name ("$3,000 relocation") inside a clause that also states the pay.
+const BENEFIT_AMOUNT = /^\s*(?:in |of |for )?(?:relocation|reloc|stipend|allowance|tuition|(?:401|403|457)\s?\(?[kb]\)?)/i;
 const COMPETING = /\b(another offer|competing offer|other offer|second offer|also (?:have|got) an offer|also offered|offer from .+ too)\b/i;
 
 // One message, or one piece of it, read into an offer. Clauses are read one at a time so "110k base, 15k signing" puts
@@ -147,14 +156,21 @@ export function parseOfferWords(text: string, data: OfferData = payData()): Offe
   const firm = firmIn(body);
   if (firm) { offer.company = firm.name; offer.firm_id = firm.firm_id; offer.lca_company_id = firm.lca_company_id ?? null; offer.sector = firm.sector ?? null; }
   else offer.company = namedCompany(body);
+  const from: NonNullable<Offer["from"]> = {};
+  offer.from = from;
+  offer.bonus_target = null;
   for (const c of main) {
-    const as = amounts(c);
-    if (!as.length) { const p = c.match(/(\d{1,2}(?:\.\d+)?)\s?%\s*(?:target )?bonus|bonus(?: of)? (\d{1,2}(?:\.\d+)?)\s?%/i); if (p) offer.bonus_pct = Number(p[1] ?? p[2]); continue; }
+    const as = amounts(c).filter((a) => !BENEFIT_AMOUNT.test(c.slice(a.end, a.end + 40)));
+    if (!as.length) { const p = c.match(/(\d{1,2}(?:\.\d+)?)\s?%\s*(?:target )?bonus|bonus(?: target)?(?: of)? (\d{1,2}(?:\.\d+)?)\s?%/i); if (p) { offer.bonus_pct = Number(p[1] ?? p[2]); from.bonus_pct = c; } continue; }
+    // A relocation, a stipend or a retirement match is a benefit, never the base or a bonus (LOOP 13).
+    if (BENEFIT.test(c) && !/\b(base|salary)\b/i.test(c)) continue;
     const a = as[0];
-    if (/sign(?:ing|-on| on)/i.test(c)) offer.signing = a.value;
-    else if (/bonus/i.test(c)) offer.bonus = a.value;
+    if (/sign(?:ing|-on| on)/i.test(c)) { offer.signing = a.value; from.signing = c; }
+    else if (/bonus/i.test(c) && /\btarget\b/i.test(c)) { offer.bonus_target = a.value; from.bonus_target = c; }
+    else if (/bonus/i.test(c)) { offer.bonus = a.value; from.bonus = c; }
     else if (/\b(base|salary|pay|offered|offer of|offering|comp|per year|a year|annual|\/yr)\b/i.test(c) || a.hourly || offer.base == null) {
       if (a.hourly) { offer.hourly = a.value; offer.base = Math.round(a.value * 2080); } else offer.base = a.value;
+      from.base = c;
     }
   }
   const metro = metroIn(body, maps);
@@ -175,6 +191,7 @@ export function mergeOffers(a: Offer, b: Offer, data: OfferData = payData()): Of
     if (v !== null && v !== false && !(Array.isArray(v) && !v.length)) out[k] = v;
   }
   out.competing = [...a.competing, ...b.competing];
+  out.from = { ...(a.from ?? {}), ...(b.from ?? {}) };
   out.occupation = occupationFor(out.role, out.sector, data?.maps);
   return out as Offer;
 }

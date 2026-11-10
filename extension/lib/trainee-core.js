@@ -1663,11 +1663,21 @@
     "us_person"
   ]);
   var RELATIVE_PLACE = /\b(country|location)\b.{0,60}\b(this|the) (job|role|position|opportunity|vacancy)\b|\b(country|location)\b.{0,40}\b(you are|you're|you have been|you've been|are you) apply|\b(country|location) (in which|to which|for which|where) you (are )?apply|\bstated location of this role\b|\bin this country\b/i;
+  var BIRTH_DATE = /\b(?:date of birth|birth ?date|day of birth|dob|d\.o\.b\.?|date de naissance|fecha de nacimiento|geburtsdatum)\b/i;
+  var DECLINE_ANSWER = /^\s*(i\s*)?(would\s+|'d\s+)?(prefer not to (say|answer|disclose|specify|identify|self[- ]identify)|rather not (say|answer)|decline( to (answer|state|disclose|specify|self[- ]identify))?|do not wish to (answer|disclose|self[- ]identify)|don'?t wish to (answer|disclose)|choose not to (answer|disclose|identify|self[- ]identify)|do not want to answer|don'?t want to answer)\s*[.!]?\s*$/i;
+  var DECLINE_OPTION = /\bdecline\b|\bprefer not\b|\bdo(?: not|n'?t) wish\b|\bchoose not\b|\bnot to (?:answer|disclose|say|identify|specify|self[- ]identify)\b|\bi do(?: not|n'?t) want to (?:answer|disclose|identify|self)/i;
+  function declineOption(answer, options) {
+    if (!DECLINE_ANSWER.test(String(answer ?? ""))) return null;
+    const d = options.filter((o) => DECLINE_OPTION.test(String(o.label)));
+    return d.length === 1 ? d[0] : null;
+  }
+  var PAY_HISTORY_ASKED = /\b(salary|pay|compensation|wage)s? histor|\b(previous|prior|past|last|former|most recent)\b[^?.]{0,30}\b(salary|pay|compensation|wage|earnings)\b|\b(salary|pay|compensation|wage)\b[^?.]{0,40}\b(previous|prior|past|last|former) (job|position|role|employer)/i;
   function answerKey(q, jobId, o = {}) {
     const m = mapQuestion(q);
     const words = norm(q.label);
     const job = `job:${h16(`${jobId}
 ${words}`)}`, wording = `label:${h16(words)}`;
+    if (BIRTH_DATE.test(String(q.label ?? "")) || PAY_HISTORY_ASKED.test(String(q.label ?? ""))) return job;
     if (m.kind === "fact") {
       if (m.fact === "eeo") return job;
       if (o.here) return job;
@@ -2924,7 +2934,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       "eeo"
     ]
   ];
-  var PAY_HISTORY = /\b(salary|pay|compensation|wage)s? histor|\b(previous|prior|past|last|former|most recent)\b[^?.]{0,30}\b(salary|pay|compensation|wage|earnings)\b|\b(salary|pay|compensation|wage)\b[^?.]{0,40}\b(previous|prior|past|last|former) (job|position|role|employer)/i;
+  var PAY_HISTORY = PAY_HISTORY_ASKED;
   var CONTACT = /* @__PURE__ */ new Set([
     "first_name",
     "last_name",
@@ -2976,6 +2986,8 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     const v = value.trim().toLowerCase();
     const exact = options.find((o) => o.label.trim().toLowerCase() === v || o.value.trim().toLowerCase() === v);
     if (exact) return exact.value;
+    const decline = declineOption(value, options);
+    if (decline) return decline.value;
     const yn = yesNo(value);
     if (yn) {
       const o = options.find((x) => yesNo(x.label) === yn);
@@ -3383,6 +3395,13 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       } : null;
     }
     if (TEXT_FACTS.has(m.fact) && !FREE_TEXT.test(f.type)) return null;
+    if (m.fact === "citizenship" && ASKED_YES_NO.test(norm(askedPart(f.label))) && !yesNoOf(a.value)) {
+      const usOnly = /\b(u\.?s\.?a?|united states|american) citizen\b/i.test(f.label) && !/\b(dual|other|another|second|also|any)\b/i.test(f.label);
+      return usOnly && NAMES_US.test(String(a.value)) ? {
+        value: "Yes",
+        factId: a.factId
+      } : null;
+    }
     return {
       value: String(a.value),
       factId: a.factId
@@ -3854,18 +3873,19 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         const key = keyed === "full_name" && /^\s*name\s*[*:]?\s*$/i.test(f.label) && p.fields.some((x) => x !== f && classifyField(x.label, x.type) === "last_name") ? "first_name" : keyed;
         const followUp = FOLLOW_UP.test(f.label);
         const here = factStaysHere(f, p.location, o.answers);
+        const legacy = BIRTH_DATE.test(f.label) || key === "eeo" || mapQuestion(f).fact === "eeo" ? void 0 : o.saved[normLabel(f.label)];
         const own = o.saved[answerKey(f, p.job_id, {
           haveFact: true,
           here
         })] ?? o.saved[answerKey(f, p.job_id, {
           here
-        })] ?? o.saved[normLabel(f.label)];
+        })] ?? legacy;
         const direct = o.saved[answerKey(f, p.job_id, {
           haveFact: true,
           here
         })] ?? o.saved[answerKey(f, p.job_id, {
           here
-        })] ?? (key !== "unknown" && key !== "eeo" && !followUp && !otherCountry(key, placeText(f), p.location, homeInUs(o.answers)) && !beyondFact(key, f) ? o.answers[key] : void 0) ?? o.saved[normLabel(f.label)];
+        })] ?? (key !== "unknown" && key !== "eeo" && !followUp && !otherCountry(key, placeText(f), p.location, homeInUs(o.answers)) && !beyondFact(key, f) ? o.answers[key] : void 0) ?? legacy;
         let a = direct;
         let value = a ? String(a.value) : null;
         if (value !== null && f.options.length) value = matchOption(value, f.options) ?? (key !== "unknown" && direct === o.answers[key] ? chooseOption(...placeFact(key, value, o.answers), f.options, f.label) : null);
@@ -4077,14 +4097,14 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     };
     const aiPolicy = aiPolicyStatements(Array.isArray(result?.ai_policy) ? result.ai_policy : []).join("\n").slice(0, 1200);
     for (const q of Array.isArray(result?.questions) ? result.questions : []) {
-      const label = String(q?.label ?? "").replace(/\s+/g, " ").trim().slice(0, 600);
-      if (!label || NEVER_BY_TEXT.test(label)) continue;
+      const full = String(q?.label ?? "").replace(/\s+/g, " ").trim(), label = full.slice(0, 600);
+      if (!label || NEVER_BY_TEXT.test(full)) continue;
       const options = (Array.isArray(q.options) ? q.options : []).map((x) => String(x).slice(0, 300)).slice(0, 60);
       const rawType = String(q.type || "input_text"), row = decodeRowQuestionType(rawType);
       if (rawType.startsWith("row:") && !row) continue;
       const type = rawType.slice(0, 40);
       const shape = {
-        label,
+        label: full,
         type,
         options: options.map((l) => ({
           label: l
@@ -4713,6 +4733,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
   var AGREEMENT = /^\s*(i|we)\s+(hereby\s+)?(understand|acknowledge|agree|confirm|certify|consent|accept|attest|authori[sz]e|have read|declare)\b/i;
   var staysWithPosting = (row) => {
     if (row.kind === "consent" || row.kind === "attestation" || AGREEMENT.test(row.label)) return true;
+    if (BIRTH_DATE.test(row.label)) return true;
     const m = mapQuestion({
       label: row.label,
       type: row.type,

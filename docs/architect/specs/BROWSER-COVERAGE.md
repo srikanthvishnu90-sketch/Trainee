@@ -58,6 +58,10 @@ exists for the seven other providers.
 5. **The VM's captcha test reads the whole page source** (`BOT_RE.test(page.content())`): any page that only *loads* an
    invisible reCAPTCHA script contains the word "captcha" and stops as `needs_user` / `bot_check` before filling. The eval
    counts this as "runner BOT_RE stops" next to "captcha shown", so the gap is measured, not assumed.
+   **Update 2026-11-09:** #658 made the runner judge only a shown check (SHOWN_CHECK). The 220-posting benchmark (run
+   42676274898) still showed every Lever posting stopping, because Lever's hCaptcha container runs invisibly at the click and
+   carries no data-size. SHOWN_CHECK now skips a container the page runs invisibly (a hidden *-captcha-response field with a
+   hidden submit button, or the reCAPTCHA badge), and the eval and the dry-run worker measure with the runner's own botCheck.
 
 ## The dry-run eval (`scripts/browser-eval/`)
 
@@ -96,3 +100,14 @@ and media are not fetched; at most 20 postings per provider per run.
 
 Not run yet: the build sessions' network denies every employer host (proxy 403); the first run is the `browser-eval`
 workflow. The table goes here with the run's date and label, and each fix PR quotes its before/after line.
+
+## The strict benchmark (`scripts/browser-eval/strict.cjs`, owner 2026-11-09: "the benchmarks need to be strict")
+
+It grades the production runner (`parallel-apply.cjs` `applyOne`), not the eval's own fill path. A posting passes only when
+the runner reaches the instant before its Submit click: allowed host, no shown check or sign-in wall, the form found, every
+filled field read back, nothing required left empty, the form posting to an allowed host, and the approval hash still
+matching. The denominator is every sampled posting, including closed, unreachable and robots-refused ones. "Ready if
+answered" (stopped only for custom questions the person would answer) is reported beside a pass and never counted as one.
+Nothing is sent: every request but GET/HEAD/OPTIONS is aborted except a GraphQL read (no `mutation`), a page script cancels
+every form submit, the runner is stopped before its click with no retries, robots.txt is obeyed, 1 request a second per host.
+A result the runner reports as sent is a breach and fails the job. Production passes neither `requestGate` nor `initScript`.

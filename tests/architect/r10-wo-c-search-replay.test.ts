@@ -58,6 +58,14 @@ function board(u: URL): Response | null {
   if (u.host === "boards-api.greenhouse.io") { boardReads.push(u.pathname); return /\/(108)$/.test(u.pathname) ? new Response("{}", { status: 404 }) : Response.json({ id: Number(u.pathname.split("/").at(-1)) }); }
   if (u.host === "api.lever.co") { boardReads.push(u.pathname); return Response.json({ id: u.pathname.split("/").at(-1) }); }
   if (u.host === "api.ashbyhq.com") { boardReads.push(u.pathname); return Response.json({ jobs: /northbeam/.test(u.pathname) ? [{ id: NB }] : /maple/.test(u.pathname) ? [{ id: MAPLE }] : [] }); }
+  // architect amendment E.21 (2026-11-10): a search checks an Ashby posting on its own page by id, never the board listing. The
+  // posting page answers from the same truth as the listing above (open while the listing holds its id, else 404).
+  if (u.host === "jobs.ashbyhq.com") {
+    boardReads.push(u.pathname);
+    const [, b, id] = u.pathname.split("/");
+    const listed = b === "northbeam" ? [NB] : b === "maple" ? [MAPLE] : [];
+    return listed.some((x) => x.toLowerCase() === String(id ?? "").toLowerCase()) ? new Response("<html>open</html>") : new Response("", { status: 404 });
+  }
   if (u.host === "api.smartrecruiters.com") { boardReads.push(u.pathname); return new Response("{}", { status: 404 }); }
   return null;
 }

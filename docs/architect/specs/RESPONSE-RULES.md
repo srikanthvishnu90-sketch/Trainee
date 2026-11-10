@@ -105,7 +105,7 @@ The chat bubble after it names the exact decision ("Two roles need one answer fr
 | # | Rule | Enforcement |
 |---|---|---|
 | E1 | One yes approves exactly what was shown, by payload hash. A batch yes approves every application in the batch shown and sends all of them; each gets its own receipt and the batch gets one closeout (owner ruling; D-MS-1, D-MN-2). | approval hash tests; `tests/architect/wo-g-batch-closeout-pg.test.ts` |
-| E2 | Numbered references persist: "apply to 2 and 4" means items 2 and 4 of the list last shown, until a new list is shown. | GAP: no test pins persistence across a constraint change |
+| E2 | Numbered references persist: "apply to 2 and 4" means items 2 and 4 of the list last shown, until a new list is shown. | `tests/architect/ask-to-queue-20261110.test.ts` (40 scripts through the real handler on Postgres 16: after a widened or new search, an unrelated turn, and the same or overlapping asks) |
 | E3 | A question is narrow: one fact, by name, with why it matters ("Graduation date needed: the posting requires December 2027 or later"). Two concrete choices beat an open question. | `blocker_named`; GAP for the "why it matters" clause |
 | E4 | Asking never discards work: the prepared draft stays visible while one field is missing (C.24 Needs input). | `tests/architect/pending/r10-app-layer/r10-fix-12-review.test.ts` |
 | E5 | Applying needs only a chat message and a yes; the cloud browser does the rest. Nothing is downloaded or installed (D-050). An employer account is created only after the yes to that exact application (D-051, pending the owner's wording). | `supabase/functions/_shared/submit_capability.ts` (host list in #666) |
@@ -134,13 +134,32 @@ Nothing comes after the decision: no tails, no offers of more help, no capabilit
    inline text, which breaks R2 for long results. Measured by `tests/architect/files-actions-loop.test.ts` (every family,
    state and the live roles page at 390 px, every control pressed): 0 dead controls and 0 C.1 or C.24 failures are asserted;
    the actions no File server answers yet are counted as "unserved" (99 of 226 at trunk 3d4e1361; the live roles page 0 of 61).
-3. E2 numbered references across a constraint change.
+   Since item 6 S0 the File server draws every other family from a code-built record (`file_family_serve.ts`); the served
+   pages are measured by `tests/architect/files-live-loop.test.ts` (unserved 0 and dead 0 asserted; decisions open the chat
+   with the question filled in; the state changes and approvals still to serve are shown off with their reason and counted).
+   Since item 6 S1 the F-09 Application review is served live (`file_family_review.ts`, `FileDeps.familyRecords["F-09"]`): every
+   GET reads the prepared application, its posting, its open questions and its record; Approve (`approveapp`) approves only the
+   payload hash the page showed (a stale hash is a 409 that reads back both approval ids), and Check status reads the record.
+   Measured by `tests/architect/files-review-live.test.ts` (dead 0, unserved 0, C.1 0, right and stale hash).
+3. E2 numbered references across a constraint change. Closed 2026-11-10: `tests/architect/ask-to-queue-20261110.test.ts`.
 4. R9 interim bubbles: the rubric sees only the final reply.
 5. E6 parallel progress after a blocker.
 
-A rubric sweep over every templated reply in `RESPONSE-LAYER.md` sections 2 to 6 is the measurement. It is blocked locally
-by disk space and will run in CI. Each violation becomes a fix in the file that writes the text, never an exception added to
-the rubric.
+A rubric sweep over every templated reply in `RESPONSE-LAYER.md` sections 2 to 6 is the measurement:
+`tests/architect/response-sweep-20261109.test.ts` (46 inventory rows, 99 replies, the real handler on Postgres plus the fixed
+constants a chat turn cannot reach). Baseline 63 violations in 51 replies; now 0. A row production serves through the staged
+brain (a bare "thanks" on a new thread) is scored on the staged path, as production serves it; its router-only reply is printed
+apart as "not served in production" (architect ruling 2026-11-10). Each violation becomes a fix in the file that writes the
+text, never an exception added to the rubric.
+
+Gap 1 now has its battery: `tests/architect/response-b6-replay-20261109.test.ts` replays B.6 continuations 1 to 5 turn by turn.
+With the staged brain answering as the spec's target replies, the product delivers 0 rubric violations and 0 carry failures
+(the measure of what code does around a good model answer). With no model (router only) it is 16 violations and 3 carry
+failures, recorded as a ceiling: the catch-all and unmatched fallback answer turns that need the brain.
+
+Where a B.6 target reply itself breaks this rubric, the rubric wins (architect ruling 2026-11-10): the spec's targets are
+illustrative. Continuation 4 turn 4 ("I still need the exact recipient or the conversation you mean. I can draft a short note
+while you find it.") breaks R1 and R10; the replay counts it apart from the product's violations.
 
 ## 7. What does not count as a pass
 

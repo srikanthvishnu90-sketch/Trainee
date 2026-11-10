@@ -145,6 +145,7 @@
     "tests/architect/flow-mass-apply-telegram.test.ts": 100,
     "tests/architect/flow-networking.test.ts": 10,
     "tests/architect/flow-offer-benchmark.test.ts": 7,
+    "tests/architect/loop-13-offers.test.ts": 14,
     "tests/architect/flow-one-resume.test.ts": 10,
     "tests/architect/flow-people-finding.test.ts": 9,
     "tests/architect/flow-people-provider.test.ts": 10,

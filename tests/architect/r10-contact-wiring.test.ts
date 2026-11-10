@@ -6,7 +6,8 @@
 //   1. a yes sends exactly the mails shown, follow-ups included, from the person's own Gmail
 //   2. a repeat approval of the same address is refused, even after "forget everything" (the send log outlives it)
 //   3. the daily cap holds across a time zone change (the server's UTC day, never the person's)
-//   4. turning the flag off refuses a card already shown
+//   4. turning the flag off refuses a card already shown; CAREER_PEOPLE_SEARCH off refuses resolution and search, not a
+//      person-supplied send (architect amendment, D-048 option a)
 //   5. test mode reaches only the test recipients
 //   6. an off-domain address is never sent to, even on a card forged into the thread
 // Run: deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/r10-contact-wiring.test.ts
@@ -246,7 +247,7 @@ Deno.test({ name: "R10 contact outreach through the real handler: card, yes, rai
       Deno.env.delete("CAREER_CONTACT_DAILY_MAX");
     });
 
-    await t.step("4. turning the flag off refuses a card already shown", async () => {
+    await t.step("4. turning the flag off refuses a card already shown; PEOPLE_SEARCH off refuses resolution and search, not a person-supplied send", async () => {
       const u = PEOPLE["tok-c"], chat = h!.chat("tok-c");
       await onboard(chat);
       await save(u, resolved("Jane Poe", "jane.poe@acme.io"));
@@ -259,14 +260,25 @@ Deno.test({ name: "R10 contact outreach through the real handler: card, yes, rai
       const asked = await say(chat, "email Jane Poe");
       ok(asked.intent !== "career_contact_card", "off: no card is shown");
       Deno.env.set("CAREER_CONTACT_OUTREACH", "on");
-      Deno.env.delete("CAREER_PEOPLE_SEARCH"); // either switch off is off
+      Deno.env.delete("CAREER_PEOPLE_SEARCH"); // OUTREACH off is off; PEOPLE_SEARCH off is off for a contact found by search
       eq((await say(chat, "yes")).intent === "career_contact_send", false, "no card waiting");
       Deno.env.set("CAREER_PEOPLE_SEARCH", "on");
       eq((await say(chat, "email Jane Poe")).resultStatus, "shown");
       Deno.env.delete("CAREER_PEOPLE_SEARCH");
-      eq((await say(chat, "yes")).resultStatus, "off", "CAREER_PEOPLE_SEARCH off refuses it too");
+      eq((await say(chat, "yes")).resultStatus, "off", "CAREER_PEOPLE_SEARCH off refuses a contact found by search");
       Deno.env.set("CAREER_PEOPLE_SEARCH", "on");
       eq(await queued(u), 0);
+      // D-048 option (a): with only CAREER_CONTACT_OUTREACH on, a recipient the person supplied (a page they gave) is sent to,
+      // in test mode here so the mail goes only to the test recipient.
+      Deno.env.delete("CAREER_PEOPLE_SEARCH");
+      Deno.env.set("CAREER_CONTACT_TEST_RECIPIENTS", "owner.r10@trainee.example");
+      const own = resolved("June Poe", "june.poe@acme.io");
+      await save(u, { ...own, person: { ...own.person, supplied_by: "person" } } as any);
+      eq((await say(chat, "email June Poe")).resultStatus, "shown", "a person-supplied recipient gets a card with people search off");
+      eq((await say(chat, "yes")).resultStatus, "queued", "and the yes queues it");
+      eq(await queued(u), 1);
+      Deno.env.delete("CAREER_CONTACT_TEST_RECIPIENTS");
+      Deno.env.set("CAREER_PEOPLE_SEARCH", "on");
     });
 
     await t.step("5. test mode reaches only the test recipients", async () => {

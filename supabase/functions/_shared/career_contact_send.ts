@@ -20,7 +20,7 @@
 //                      the thread first).
 import { emailHash as hashOf, messageOf, OPT_OUT_LINE, type OutreachDraft, type OutreachStore, payloadHash, type Recipient } from "./career_outreach.ts";
 import { type AddressType, type QueueDeps, queueApproved, type QueueResult } from "./career_send_rail.ts";
-import { type ContactDraft, type ContactIn, SPAM_PHRASES } from "./career_contact_draft.ts";
+import { type ContactDraft, type ContactIn, CLAIMED_TIE, SPAM_PHRASES } from "./career_contact_draft.ts";
 
 export const SEND_MIN_SCORE = 70, DAILY_NEW_DEFAULT = 20, SPREAD_MINUTES_DEFAULT = 20, FOLLOWUPS_MAX = 2, FOLLOWUP_DAYS = 5, FOLLOWUP_MIN_DAYS = 4, FOLLOWUP_MAX_DAYS = 7;
 export const UNCONFIRMED = "I can't confirm this address, so I won't send to it. Try an introduction through someone you know there, or the company's own contact form.";
@@ -64,7 +64,7 @@ export const cardHash = async (mails: Pick<CardMail, "hash" | "after_days">[]) =
   [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(["contact-card/1", mails.map((m) => [m.hash, m.after_days])]))))]
     .map((b) => b.toString(16).padStart(2, "0")).join("");
 // A follow-up's own checks: short, at most one question, no spam phrase, no link.
-export const followupOk = (b: string) => b.split(/\s+/).filter(Boolean).length <= 80 && (b.match(/\?/g) ?? []).length <= 1 && !SPAM_PHRASES.some((p) => b.toLowerCase().includes(p)) && !/https?:\/\/|www\./i.test(b);
+export const followupOk = (b: string) => b.split(/\s+/).filter(Boolean).length <= 80 && (b.match(/\?/g) ?? []).length <= 1 && !SPAM_PHRASES.some((p) => b.toLowerCase().includes(p)) && !/https?:\/\/|www\./i.test(b) && !CLAIMED_TIE.test(b);
 export async function contactCard(o: { contact: ContactIn; draft: ContactDraft; signature: string | null; followups?: string[]; config: SendConfig; suppressed: (emails: string[]) => Promise<Set<string>> }): Promise<ContactCard> {
   const c = o.config, e = o.contact.email;
   if (!c.on) return { ok: false, why: "off", reply: "Contact outreach is not switched on." };
@@ -75,7 +75,7 @@ export async function contactCard(o: { contact: ContactIn; draft: ContactDraft; 
   const found = e.email.toLowerCase(), to = c.testRecipients.length ? c.testRecipients[0] : found;
   if ((await o.suppressed([found, to])).size) return { ok: false, why: "suppressed", reply: `${o.contact.person.name} asked not to be contacted, or that address bounced, so no one emails it.` };
   const fus = (o.followups ?? []).slice(0, FOLLOWUPS_MAX);
-  if (!fus.every(followupOk)) return { ok: false, why: "bad_followup", reply: "A follow-up broke the rules (at most 80 words, one question, no links or sales words)." };
+  if (!fus.every(followupOk)) return { ok: false, why: "bad_followup", reply: "A follow-up broke the rules (at most 80 words, one question, no links, sales words or claimed meetings)." };
   const footer = footerFor(o.signature, c.postalAddress);
   const parts = [{ subject: o.draft.subject, body: o.draft.body, after_days: 0 }, ...fus.map((b, i) => ({ subject: `Re: ${o.draft.subject}`, body: b, after_days: c.followupDays * (i + 1) }))];
   const mails: CardMail[] = [];

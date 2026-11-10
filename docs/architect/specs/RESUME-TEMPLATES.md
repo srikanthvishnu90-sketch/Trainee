@@ -17,7 +17,9 @@ profiles x 3 roles x 3 layouts through `tailor_resume`, open every attached PDF 
 Word copy with the PDF too (1.1: Trainee keeps sending both). Architect ruling 2026-11-10: a skill the person listed in their
 own confirmed Skills is a confirmed fact (D-007) and is shown on every file; a skill only the posting names stays off; the
 Skills section never disappears while they have one (`career_tailor.ts` `listedSkillsProven`, `withListedSkills`; bar in
-`tests/architect/r10-resume-listed-skills-20261110.test.ts`, "confirmed listed skills shown" 100%).
+`tests/architect/r10-resume-listed-skills-20261110.test.ts`, "confirmed listed skills shown" 100%). Every PDF and DOCX stream
+is compressed by 148's own deterministic deflate (`deflateFixed`) on Node and Deno alike, so a document is the same bytes on
+both (`scripts/resume-bytes-parity.ts`, `tests/architect/r10-resume-bytes-parity-20261110.test.ts`: 27/27, was 14/27).
 
 ## 1. Evidence
 

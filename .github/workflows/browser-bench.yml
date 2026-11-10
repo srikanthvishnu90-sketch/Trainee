@@ -1,0 +1,29 @@
+# WO-M: the real-site browser DRY-RUN eval (scripts/browser-eval/). The build sandboxes cannot reach job sites; CI can.
+# Run by hand only (Actions > browser-eval > Run workflow): never on a push or a pull request. It opens real public postings
+# from scripts/browser-eval/sample.csv, fills a synthetic TEST person and resume, and stops before Submit. Every request but
+# GET/HEAD/OPTIONS is aborted inside the browser, no submit control is clicked, a shown captcha / password / code field stops
+# the posting, robots.txt is obeyed, 1 request a second per host. No secrets. The report is uploaded as an artifact.
+name: browser-bench
+on:
+  push:
+    branches: ["bench/browser-*"]
+permissions:
+  contents: read
+jobs:
+  eval:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22.23.3" }
+      - name: Playwright and its Chromium
+        run: |
+          npm ci --prefix tools --no-audit --no-fund
+          (cd tools && npx --no-install playwright install --with-deps chromium)
+          echo "UPMORE_PLAYWRIGHT_PATH=$GITHUB_WORKSPACE/tools/node_modules/playwright" >> "$GITHUB_ENV"
+      - name: Strict benchmark, all providers, base runner, re-scored under the false-pass rule (nothing is submitted)
+        run: |
+          node scripts/browser-eval/strict.cjs --sample scripts/browser-eval/sample.csv --label "rescore-${{ github.sha }}" --max-per-provider 20
+          cat "artifacts/browser-eval/rescore-${{ github.sha }}/strict-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          node -e 'for (const l of require("fs").readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean)) { const r = JSON.parse(l); if (/^strict_false_pass/.test(r.reason || "") || r.result !== "fail") console.log(["SCORE", r.provider, r.result, r.reason, r.field || "", r.url].join(" | ")); }' "artifacts/browser-eval/rescore-${{ github.sha }}/strict.jsonl"

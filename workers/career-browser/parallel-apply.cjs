@@ -362,7 +362,12 @@ async function attempt(browser, p, opts, timing) {
     if (opts.shotBefore) await page.screenshot({ path: opts.shotBefore, fullPage: true });
     // The caller records "submitting" (and re-checks its lease and kill switch) BEFORE the click; a refusal stops here, unsent.
     // A dry run's audit (opts.audit) also gets what each filled question holds at this instant; production passes only the phase.
-    if (opts.onPhase) await opts.onPhase("submitting", opts.audit ? { id: p.id, fields: await heldNow(page, fr.filled) } : undefined);
+    // The audit also names the control about to be pressed and whether the page shows a password box (strict: a login is no Submit).
+    if (opts.onPhase) await opts.onPhase("submitting", opts.audit ? { id: p.id, fields: await heldNow(page, fr.filled), ...(await page.evaluate(() => {
+      const b = document.querySelector("[data-upmore-submit]");
+      const shown = (e) => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+      return { submit: String((b && (b.innerText || b.value || b.getAttribute("aria-label"))) || "").replace(/\s+/g, " ").trim().slice(0, 80), password_field: [...document.querySelectorAll("input[type=password]")].some(shown) };
+    }).catch(() => ({ submit: "", password_field: null }))) } : undefined);
     // Past this line nothing is retried: the employer may have received it.
     const t2 = Date.now();
     timing.submitClicked = true;

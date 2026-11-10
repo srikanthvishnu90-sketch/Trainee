@@ -134,6 +134,13 @@ Nothing comes after the decision: no tails, no offers of more help, no capabilit
    inline text, which breaks R2 for long results. Measured by `tests/architect/files-actions-loop.test.ts` (every family,
    state and the live roles page at 390 px, every control pressed): 0 dead controls and 0 C.1 or C.24 failures are asserted;
    the actions no File server answers yet are counted as "unserved" (99 of 226 at trunk 3d4e1361; the live roles page 0 of 61).
+   Since item 6 S0 the File server draws every other family from a code-built record (`file_family_serve.ts`); the served
+   pages are measured by `tests/architect/files-live-loop.test.ts` (unserved 0 and dead 0 asserted; decisions open the chat
+   with the question filled in; the state changes and approvals still to serve are shown off with their reason and counted).
+   Since item 6 S1 the F-09 Application review is served live (`file_family_review.ts`, `FileDeps.familyRecords["F-09"]`): every
+   GET reads the prepared application, its posting, its open questions and its record; Approve (`approveapp`) approves only the
+   payload hash the page showed (a stale hash is a 409 that reads back both approval ids), and Check status reads the record.
+   Measured by `tests/architect/files-review-live.test.ts` (dead 0, unserved 0, C.1 0, right and stale hash).
 3. E2 numbered references across a constraint change.
 4. R9 interim bubbles: the rubric sees only the final reply.
 5. E6 parallel progress after a blocker.

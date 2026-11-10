@@ -24,7 +24,7 @@ export interface ConversationStore {
   drainProactive(now: number): Promise<Outbound[]>;
 }
 
-export const SAFE_ERROR_REPLY = "Something went wrong on my side, so nothing was saved, sent or submitted. Send that again in a minute.";
+export const SAFE_ERROR_REPLY = "I couldn't finish that because my answer failed partway on Trainee's side, so nothing was saved, sent or submitted. Send that again in a minute.";
 export const HISTORY_TURNS = 20;
 // Nothing the outbox holds (at most OUTBOX_CHARS) is ever cut: an approval card is approved whole, so it must arrive
 // whole, and a daily report keeps every posting it lists. MAX_BUBBLES is the proven bound for OUTBOX_CHARS at

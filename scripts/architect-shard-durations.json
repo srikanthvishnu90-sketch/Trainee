@@ -1,11 +1,13 @@
 {
   "default_s": 5,
   "files": {
+    "tests/architect/gmail-oauth-wrapper-ci.test.ts": 0.6,
     "tests/architect/account-memory-unit.test.ts": 0.1,
     "tests/architect/advice-wide.test.ts": 6.2,
     "tests/architect/alerts-chain-pg.test.ts": 11,
     "tests/architect/alerts-owner-pins.test.ts": 0.3,
     "tests/architect/alerts-remote-region.test.ts": 0.1,
+    "tests/architect/app-layer-review-loop-20261110.test.ts": 150,
     "tests/architect/apply-chat-employer.test.ts": 0.1,
     "tests/architect/apply-chat-many.test.ts": 0.1,
     "tests/architect/apply-chat-pace-set.test.ts": 0.1,
@@ -24,6 +26,7 @@
     "tests/architect/ashby-location-ask.test.ts": 0.1,
     "tests/architect/ashby-yesno.test.ts": 0.1,
     "tests/architect/ask-never-guess.test.ts": 0.1,
+    "tests/architect/ask-to-queue-20261110.test.ts": 13,
     "tests/architect/billing-by-text.test.ts": 0.1,
     "tests/architect/bound-row-answers.test.ts": 0.1,
     "tests/architect/bound-row-question-roundtrip.test.ts": 0.1,

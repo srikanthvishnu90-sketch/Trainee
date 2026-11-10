@@ -37,8 +37,8 @@ export const SERVED_POSTS: Record<ServedFamily, ReadonlySet<string>> = {
   "F-01": new Set(),
   "F-02": new Set(),
   "F-03": new Set(),
-  "F-04": new Set(),
-  "F-07": new Set(),
+  "F-04": new Set(["approveplan"]), // S3: file_family_records_materials.ts
+  "F-07": new Set(["approvedoc"]), // S3: file_family_records_materials.ts
   "F-08": new Set(),
   "F-09": new Set(["approveapp", "checkstatus"]), // S1: file_family_review.ts
   "F-12": new Set(["approvesend"]), // S2: file_family_message.ts approveSend (the exact approved words, D-MN-2)
@@ -56,11 +56,16 @@ export const SERVED_POSTS: Record<ServedFamily, ReadonlySet<string>> = {
 //         409 whose lines say what was not done and why. An approval approves only the exact payload hash shown (D-MS-1, D-MN-2).
 export interface FamilyRec { id: string; data: { family: ServedFamily; title?: string; ref?: Record<string, string> | null } }
 export interface FamilyPostResult { ok: boolean; title: string; lines: string[] }
+// get (S3): a GET this family's records answer with a real file (the F-07 document's own bytes), keyed by its query key ("download").
+// A download control whose href starts with ?<key>= is kept as it is only when this page's records answer that key; otherwise it is
+// this File's export (?format=json), as before. null: not on record (404). A GET never changes a row.
+export interface FamilyGetResult { mime: string; filename: string; bytes: Uint8Array }
 export interface FamilyRecords {
   // { state }: nothing on record to draw the family from (f-s5): the page is that C.24 state (servedState), never an invented File
   // and never the error state.
   load(userId: string, rec: FamilyRec): Promise<{ view: unknown; asOf: string | null } | { state: StateInput; asOf: string | null } | null>;
   post?: Record<string, (userId: string, rec: FamilyRec, fields: URLSearchParams, now: number) => Promise<FamilyPostResult>>;
+  get?: Record<string, (userId: string, rec: FamilyRec, fields: URLSearchParams) => Promise<FamilyGetResult | null>>;
 }
 export type FamilyRecordsByFamily = Partial<Record<ServedFamily, FamilyRecords>>;
 export const NOT_YET = "Not available on this page yet. Ask Trainee in the chat.";
@@ -79,7 +84,7 @@ export function chatAsk(bot: string | null, text: string): string | null {
 // The exact words the chat opens with: the File, the item it is about, and the decision (ruling 2).
 export const askText = (fileTitle: string, item: string | null, label: string) => `About my ${fileTitle}${item ? `, "${item}"` : ""}: ${label}. `;
 
-export interface ServeCtx { bot: string | null; title: string; family?: ServedFamily; token?: string | null; answers?: (action: string) => boolean }
+export interface ServeCtx { bot: string | null; title: string; family?: ServedFamily; token?: string | null; answers?: (action: string) => boolean; gets?: (key: string) => boolean }
 // One control, as served. item: the File item it sits on (its title), when it has one.
 export function servedAct(a: Act, c: ServeCtx, item: string | null): Act {
   if (a.off) return a;
@@ -89,6 +94,7 @@ export function servedAct(a: Act, c: ServeCtx, item: string | null): Act {
   // behind it (a stored view) would post and fail, so it is shown off instead.
   if (a.post) return c.token && c.family && SERVED_POSTS[c.family].has(a.post.action) && c.answers?.(a.post.action) ? { ...a, post: { ...a.post, token: c.token } } : { ...a, post: undefined, href: null, off: NOT_YET };
   if (/^https:\/\//i.test(href)) return a;
+  if (a.effect === "download" && href.startsWith("?") && c.gets?.([...new URLSearchParams(href.slice(1)).keys()][0] ?? "")) return a; // S3: the real file
   if (a.effect === "download" || /^\/files\//.test(href)) return { ...a, effect: "download", href: "?format=json" };
   if (href === "/f" || a.label === "Close this File") { const h = c.bot; return h ? { ...a, effect: "open", href: h, label: "Back to chat" } : { ...a, href: null, off: NO_CHAT }; }
   const key = href.startsWith("?") ? [...new URLSearchParams(href.slice(1)).keys()][0] ?? "" : "";
@@ -108,9 +114,9 @@ function servedBlock(b: Block, c: ServeCtx): Block {
 // The family File as served: built from the record's view data, every control made servable or shown off.
 // o.token: this page's token (the handler's); o.answers: whether this page's records answer a post. A post in SERVED_POSTS is drawn as a
 // form only with both; otherwise every post is shown off.
-export function servedFamilyFile(family: ServedFamily, view: unknown, o: { bot: string | null; token?: string | null; answers?: (action: string) => boolean }): FamilyFile {
+export function servedFamilyFile(family: ServedFamily, view: unknown, o: { bot: string | null; token?: string | null; answers?: (action: string) => boolean; gets?: (key: string) => boolean }): FamilyFile {
   const f = BUILD[family](view);
-  const c: ServeCtx = { bot: o.bot, title: f.header ?? (FAMILIES[family as FamilyId] ?? FAMILIES["F-14"]).header, family, token: o.token ?? null, answers: o.answers };
+  const c: ServeCtx = { bot: o.bot, title: f.header ?? (FAMILIES[family as FamilyId] ?? FAMILIES["F-14"]).header, family, token: o.token ?? null, answers: o.answers, gets: o.gets };
   const menu: Act[] = [{ label: "Export", effect: "download", href: "?format=json" }, ...(o.bot ? [{ label: "Back to chat", effect: "open" as const, href: o.bot }] : [])];
   return {
     ...f, back: o.bot, menu: f.pause ? undefined : menu, pause: f.pause ? servedAct(f.pause, c, null) : f.pause,

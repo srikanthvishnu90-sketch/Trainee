@@ -9,6 +9,7 @@ import { supabaseCardStore } from "../_shared/career_apply_cards.ts";
 import { supabaseAccountStamp, supabaseConfirmedFacts } from "../_shared/telegram_jobs.ts";
 import { supabaseFileStore, supabasePhoneAuth, supabaseSessionStore, supabaseTimeZone, supabaseUserOfTelegram } from "./store.ts";
 import { createFileService, supabaseFileKindStore } from "../_shared/file_service.ts";
+import { planMaterialRecords, supabasePlanMaterialStore } from "../_shared/file_family_records_materials.ts";
 import { supabaseQuestionStore } from "../_shared/career_apply_questions.ts";
 import { pendingRows, reprepareQueued } from "../_shared/career_hosted_prepare.ts";
 import { resumeOnFileReader } from "../_shared/career_apply_from_chat.ts";
@@ -44,6 +45,8 @@ export function buildFileDeps(admin: any, env: FileDeps["env"], now: () => numbe
       ...recordsFamilies({ read: supabaseRecords(admin), digest: supabaseDigestWriter(admin), now, timeZone: supabaseTimeZone(admin) }), // f-s5: F-01 F-02 F-03 F-08 F-13 F-14 F-14n F-15
       // S1: the live Application review, read from the prepared application and its record on every GET (file_family_review.ts).
       "F-09": (() => { const st = supabaseFileStore(admin); return reviewRecords({ review: (u) => supabaseReviewDeps(admin, u, env), current: (u, j) => st.prepared(u, j), appRow: (u, j, url) => st.appRow(u, j, url), cards: supabaseCardStore(admin), account: supabaseAccountStamp(admin), events: supabaseEventStore(admin) }, now); })(),
+      // S3: the search plan and materials Files, from career_search_plans and career_material_versions (file_family_records_materials.ts).
+      ...planMaterialRecords(supabasePlanMaterialStore(admin), now),
       "F-12": messageRecords({ store: outreachDrafts(admin), rail: sendRailOn(env) ? { rpc: (name: string, args: { p: unknown }) => admin.rpc(name, args), drafts: (u: string, ids: string[]) => outreachDrafts(admin).drafts(u, ids) } : null }),
     },
     // A results card that isn't ready: the employer's open questions (asked on the page, saved the way the chat saves them), then

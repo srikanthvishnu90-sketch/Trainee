@@ -54,6 +54,7 @@ const CSS = `
 .quick h2{margin:0 0 6px;font-size:15px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--mute)}
 .quick p{margin:4px 0 0;font-size:16px;line-height:1.5}
 .lede{margin:8px 0 0;font-size:16px;color:var(--mute)}
+.views{margin:14px 0 0;font-size:16px}.views a{display:inline-flex;align-items:center;min-height:44px}
 .filters{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin:18px 0 6px;padding:14px;border-radius:14px;background:var(--panel)}
 .filters label{display:flex;flex-direction:column;gap:4px;font-size:15px;font-weight:600;flex:1 1 140px;min-width:0}
 .filters select{min-height:44px;width:100%;padding:6px 10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit;font-size:16px}
@@ -138,7 +139,7 @@ function card(r: ResultRow, f: ResultsFeed): string {
   const guide = !r.status && !r.byHand && !r.blocked && r.guide ? `<p class="guide">${esc(r.guide)}${r.openQs ? ` <a href="?things=${esc(r.ref)}">Answer them now</a>` : ""}</p>` : "";
   const note = f.notes?.[r.ref] ?? r.note;
   const said = note ? `<p class="note" role="status">${esc(note)}</p>` : r.status ? `<p class="note">${esc(r.status.word === "preparing" ? r.guide || "Getting your application ready. Nothing has been sent." : r.status.detail)}</p>` : r.byHand ? `<p class="note">Not applied for automatically on this site.</p>` : r.blocked ? `<p class="note">Not offered: ${esc(r.blocked)}</p>` : "";
-  return `<li class="card" id="r-${esc(r.ref)}"><p class="state">${r.rid ? `<span class="rid">${esc(r.rid)}</span>` : "<span></span>"}${specChip(r)}</p><div class="head">${logoOf(r)}<div class="ttl"><h3 class="title">${esc(j.title)}</h3><p class="co">${esc(j.company)}</p></div></div>${facts}${fit}${more}${sends}${guide}${acts ? `<div class="acts">${acts}</div>` : ""}${help}${said}<div class="more">${open}${markForm(r, f, "dismiss")}</div></li>`;
+  return `<li class="card" id="r-${esc(r.ref)}"><p class="state">${r.rid ? `<span class="rid">${esc(r.rid)}</span>` : "<span></span>"}${specChip(r)}</p><div class="head">${logoOf(r)}<div class="ttl"><h3 class="title">${esc(j.title)}</h3><p class="co">${esc(j.company)}</p></div></div>${facts}${fit}${more}${sends}${guide}${acts ? `<div class="acts">${acts}</div>` : ""}${help}${said}<div class="more">${open}<p class="open"><a href="?role=${esc(encodeURIComponent(r.ref))}" aria-label="Role workspace: ${label}">Role workspace</a></p>${markForm(r, f, "dismiss")}</div></li>`;
 }
 
 export function renderResults(f: ResultsFeed): string {
@@ -186,7 +187,7 @@ export function renderResults(f: ResultsFeed): string {
       : open ? `<div class="pausebar"><p><b>Pause on this page</b> (button at the bottom) stops this page from approving or starting anything new. It does not stop Telegram: the buttons there still work. Applications already approved or in progress are not cancelled and may still finish.</p></div>` : "")
     + `</section>`;
   const gone = f.dismissed?.length ? `<details class="gone"><summary>Dismissed (${f.dismissed.length})</summary><ul class="cards">${f.dismissed.map((r) => `<li class="card" id="r-${esc(r.ref)}"><p class="state">${r.rid ? `<span class="rid">${esc(r.rid)}</span>` : "<span></span>"}${chipOf(stateOfDismissed(), "dismissed")}</p><div class="head">${logoOf(r)}<div class="ttl"><h3 class="title">${esc(r.job.title)}</h3><p class="co">${esc(r.job.company)}</p></div></div><p class="markhelp">Dismissed by you. Private and reversible. No application was touched. Current state: ${esc(specOf(r).label)}.</p>${markForm(r, f, "restore")}</li>`).join("")}</ul></details>` : "";
-  const inner = `<div id="root" class="results"><a class="skip" href="#main">Skip to the roles</a>${BRAND}${f.signedIn ? signedInBar(f.signedIn, f.token) : ""}<header class="filehead">${headTop}${renderBatchHead(f)}${topBlock}</header>${quick}${f.total === 0 ? "" : filters}${shown}${renderStateFilters(f)}${renderExceptions(f)}${renderApprove(f)}${renderPauseNote(f)}${selhelp}${actionbar}<main id="main">${top}${body}${gone}</main></div>`;
+  const inner = `<div id="root" class="results"><a class="skip" href="#main">Skip to the roles</a>${BRAND}${f.signedIn ? signedInBar(f.signedIn, f.token) : ""}<header class="filehead">${headTop}${renderBatchHead(f)}${topBlock}</header>${quick}${f.total === 0 ? "" : `<nav class="views" aria-label="Other views of this list"><a class="back" href="?view=batch">Batch File</a> · <a class="back" href="?view=pipeline">Pipeline</a></nav>`}${f.total === 0 ? "" : filters}${shown}${renderStateFilters(f)}${renderExceptions(f)}${renderApprove(f)}${renderPauseNote(f)}${selhelp}${actionbar}<main id="main">${top}${body}${gone}</main></div>`;
   return layout(`${cap1(f.title)} - Trainee`, inner, { css: CSS, head: DESIGN_FONT_LINK });
 }
 

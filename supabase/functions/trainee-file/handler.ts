@@ -23,7 +23,7 @@ import { researchOgImage } from "../_shared/research_og.ts";
 import { actOn, bodyHtml, COPY_SCRIPT, KIND_CSS, KIND_LABEL, textOf, type Effects, type FileRecord } from "../_shared/file_kinds.ts";
 import type { FileService } from "../_shared/file_service.ts";
 import { fetchLogo, memoryLogoCache, validDomain, type LogoCache } from "../_shared/logo_cache.ts";
-import { renderResults, renderThings, type PayFilter, type ResultRow, type ThingQuestion } from "../_shared/results_page.ts";
+import { renderResults, type ResultsFeed, renderThings, type PayFilter, type ResultRow, type ThingQuestion } from "../_shared/results_page.ts";
 import { parseStateFilter } from "../_shared/results_batch.ts";
 import { conversionNote, floorText, type Pay, payGroup, payText, startsBelow } from "../_shared/role_pay.ts";
 import { checkAnswer, type OpenQuestion, type QuestionStore } from "../_shared/career_apply_questions.ts";
@@ -41,6 +41,7 @@ import { checkedAt, studentWindowOf } from "../_shared/search_shortlist.ts"; // 
 import { submitLabel } from "../_shared/submit_capability.ts"; // R10 owner ruling
 import { familyPage, familyStatePage } from "../_shared/file_family.ts";
 import { type FamilyRecordsByFamily, isServedFamily, SERVED_POSTS, type ServedFamily, servedFamilyFile, servedState } from "../_shared/file_family_serve.ts";
+import { liveBatchPage, livePipelinePage, liveRolePage, parseView } from "../_shared/file_family_records.ts"; // item 6 S4
 
 export type { AppRow } from "../_shared/file_page.ts";
 export interface FileStore extends JobStore {
@@ -981,8 +982,18 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
     fl ? `${nMeets} of ${keep.length} list ${fl} or more${nUnlisted ? `; ${nUnlisted} ${nUnlisted === 1 ? "doesn't" : "don't"} list pay` : ""}${nOther ? `; ${nOther} can't be compared` : ""}${nBelow ? `; ${nBelow} now list less` : ""}.` : `${keep.length} ${keep.length === 1 ? "role" : "roles"}, sorted by fit.`,
     `Next: tap Apply on a role. A ready one is sent exactly as its What will be sent shows; one that isn't ready asks for what it needs first. ${coverage(all) === NOTHING_SENT ? "Nothing is sent until you tap Apply." : "Each new send needs your tap on Apply."}`,
   ].filter(Boolean);
-  return o.html(renderResults({ signedIn: o.who, token, title, floor: fl, rows, coverRows: all, countRows: keep, total: all.length, filters, places, top, notes,
+  const rf: ResultsFeed = { signedIn: o.who, token, title, floor: fl, rows, coverRows: all, countRows: keep, total: all.length, filters, places, top, notes,
     madeFor: `Made for ${meta.name ?? "you"} · ${day}`, stamp: await stampOf(rows), caveat, quick,
     paused: !!meta.paused, updated, dismissed: gone,
-    all: applyAllYesEnabled(d.env) && !meta.paused && readySet(keep, new Set()).length >= 2 ? { hash: await setHashOf(readySet(keep, new Set())), size: readySet(keep, new Set()).length, filtered: filters.pay !== "any" || !!filters.where || !!filters.state } : null }));
+    all: applyAllYesEnabled(d.env) && !meta.paused && readySet(keep, new Set()).length >= 2 ? { hash: await setHashOf(readySet(keep, new Set())), size: readySet(keep, new Set()).length, filtered: filters.pay !== "any" || !!filters.where || !!filters.state } : null };
+  // Item 6 S4: the Role workspace (?role=<ref>), the Batch File (?view=batch) and the Pipeline (?view=pipeline), drawn from the same
+  // records as this page (file_family_records.ts). Their forms post to the same URL, so a post lands back on the view it came from.
+  const view = parseView(o.url.searchParams.get("view")), roleRef = o.url.searchParams.get("role");
+  const bot = (d.env.get("TRAINEE_BOT_URL") || "").trim(), ro = { bot: /^https:\/\//.test(bot) ? bot : null, checkedAt: seenAt }, rc = { now: d.now(), tz: ztz };
+  const role = roleRef ? all.find((r) => r.ref === roleRef) : null;
+  if (role) return o.html(liveRolePage(rf, role, rc, ro));
+  if (view === "batch") return o.html(liveBatchPage(rf, rc, ro));
+  if (view === "pipeline") return o.html(livePipelinePage(rf, rc, ro));
+  if (roleRef) rf.top = "That role isn't on this list. Nothing changed.";
+  return o.html(renderResults(rf));
 }

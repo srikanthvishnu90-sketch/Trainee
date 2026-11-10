@@ -244,3 +244,19 @@ Deno.test({ name: "FILES RECORDS: the served F-06, F-10 and F-11 pages pass the 
   const { checkPages } = await import("./r10-files-check.ts");
   await checkPages(t, Object.fromEntries(Object.entries(html).map(([k, v]) => [k, () => v])));
 } });
+
+// F-05 as served (renderResults, coordinator ruling 2026-11-10: kept for this release): the content rules the Files loop holds it to.
+// Freshness said (a check time, or "Check time unknown" as a value); the counts strip one state per role and summing to the roles; one
+// filled action in the page's action bar; every role names its state; every page link above is served (the loop, dead 0, unserved 0).
+Deno.test("FILES RECORDS: the served F-05 states freshness, counts that sum to the roles, one filled bar action and each role's state", async () => {
+  const { w, s, refs } = await scene();
+  const html = await (await get(w, s)).text();
+  assert.match(html, /<p class="stamp"[^>]*>(?:<[^>]+>)*[^<]*(Postings checked|Check time unknown)/, "freshness");
+  const strip = /<ul class="counts">(.*?)<\/ul>/s.exec(html)![1];
+  const sum = [...strip.matchAll(/<b>(\d+)<\/b>/g)].reduce((a, m) => a + +m[1], 0);
+  assert.equal(sum, refs.length, `counts ${sum} sum to ${refs.length} roles`);
+  assert.match(html, new RegExp(`${refs.length} roles in total; each is in exactly one state`));
+  const bar = /<div class="actionbar"[^>]*>(.*?)<\/div><\/div>/s.exec(html)?.[1] ?? "";
+  assert.equal([...bar.matchAll(/class="apply"/g)].length, 1, "one filled action in the bar");
+  for (const r of refs) assert.match(html, new RegExp(`<li class="card" id="r-${r}"><p class="state"><span class="rid">R-\\d+</span><span class="chip [^"]*" role="status">[A-Z]`), `role ${r} names its state`);
+});

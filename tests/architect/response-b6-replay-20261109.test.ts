@@ -96,6 +96,9 @@ Deno.test({
       });
       assertNode.deepStrictEqual(w.outbound, [], "no request left the machine");
     } finally {
+      // Phase S set a model key and the brain switch: unset here (w.close() then restores what was set before).
+      Deno.env.delete("ANTHROPIC_API_KEY");
+      Deno.env.delete("CAREER_BRAIN");
       const out = Deno.env.get("B6_REPLAY_OUT");
       if (out) Deno.writeTextFileSync(out, JSON.stringify(result, null, 1));
       await w.close();

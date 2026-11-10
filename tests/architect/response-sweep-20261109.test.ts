@@ -194,7 +194,12 @@ Deno.test({
           }
         }
         assertNode.deepStrictEqual(w.outbound, [], "no request left the machine");
-      } finally { await w.close(); }
+      } finally {
+        // The staged rows set a model key and the brain switch: unset here (w.close() then restores what was set before).
+        Deno.env.delete("ANTHROPIC_API_KEY");
+        Deno.env.delete("CAREER_BRAIN");
+        await w.close();
+      }
     }
     const bad = scored.filter((s) => s.lines.length);
     const violations = bad.reduce((n, s) => n + s.lines.length, 0);

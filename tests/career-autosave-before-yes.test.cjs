@@ -68,6 +68,7 @@ test("engine dry run (scripts/apply.ts, no --submit): 0 typed values reach the e
     await settle();
     const result = out.split("\n").filter((l) => l.startsWith("RESULT ")).at(-1);
     assert.ok(result && /"dry_run"/.test(result), `the dry run reached review: ${(result || out).slice(-400)}`);
+    console.log(`ENGINE receipts carrying a typed value, by channel: ${JSON.stringify(ats.byChannel())}`);
     assert.deepEqual(ats.writes().map((r) => r.channel), [], `typed values reached the employer before the yes: ${JSON.stringify(ats.byChannel())}`);
   } finally { await ats.close(); }
 });
@@ -97,7 +98,10 @@ test("after the yes, a run stopped midway leaves only approved values on the emp
     assert.notEqual(out.status, "submitted_page_confirmed", "stopped before Submit");
     const approved = new Set(Object.values(p.facts));
     const autosaved = ats.receipts.filter((r) => r.channel !== "submit" && r.channel !== "get_pixel");
-    const foreign = autosaved.filter((r) => { const m = /"value":"([^"]*)"|=([^&]*)$/.exec(r.raw); const v = m ? (m[1] ?? m[2]) : null; return v !== null && !approved.has(v.trim()); });
+    // The value each autosave carried: JSON's "value" (GraphQL, WebSocket), else the form body's name=value.
+    const valueOf = (r) => { const j = /"value":"([^"]*)"/.exec(r.raw); if (j) return j[1]; const f = /\b[a-z_]+=([^&]*)\s*$/.exec(r.raw); return f ? f[1] : null; };
+    const foreign = autosaved.filter((r) => { const v = valueOf(r); return v !== null && !approved.has(v.trim()); });
+    assert.ok(autosaved.length > 0, "the form autosaved the approved values (the check is not vacuous)");
     assert.equal(ats.receipts.filter((r) => r.channel === "submit").length, 0, "nothing submitted");
     assert.deepEqual(foreign.map((r) => `${r.channel}: ${r.raw.slice(0, 80)}`), [], "every autosaved value is an approved one");
   } finally { await ats.close(); }

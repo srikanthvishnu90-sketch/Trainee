@@ -29,7 +29,8 @@ const PAGE = (port) => `<!doctype html><html><head><meta charset="utf-8"><title>
     try { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ field: name, value: value })); } catch (e) {}
     new Image().src = "/pixel?" + name + "=" + encodeURIComponent(value);
   }
-  document.addEventListener("input", function (e) { if (e.target && e.target.name) save(e.target.name, e.target.value); }, true);
+  // A file input's value is the browser's "C:\\fakepath\\..." placeholder, not something typed: not autosaved here.
+  document.addEventListener("input", function (e) { if (e.target && e.target.name && e.target.type !== "file") save(e.target.name, e.target.value); }, true);
   document.addEventListener("change", function (e) { if (e.target && e.target.name && e.target.type !== "file") save(e.target.name, e.target.value); }, true);
 })();
 </script></body></html>`;
@@ -75,7 +76,10 @@ async function startAutosaveAts({ typed = [] } = {}) {
       res.end(u.pathname === "/pixel" ? undefined : "{}");
     });
   });
+  const sockets = new Set();
   server.on("upgrade", (req, socket) => {
+    sockets.add(socket);
+    socket.on("close", () => sockets.delete(socket));
     const key = req.headers["sec-websocket-key"];
     const accept = crypto.createHash("sha1").update(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64");
     socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
@@ -89,7 +93,8 @@ async function startAutosaveAts({ typed = [] } = {}) {
     // Receipts that are not a plain GET: the ones D-MS-1 forbids before the yes.
     writes: () => receipts.filter((r) => r.carries && r.channel !== "get_pixel" && r.channel !== "submit"),
     byChannel: () => receipts.filter((r) => r.carries).reduce((a, r) => ((a[r.channel] = (a[r.channel] || 0) + 1), a), {}),
-    close: () => new Promise((r) => { server.closeAllConnections?.(); server.close(r); }),
+    // An upgraded socket is not one of the server's connections: destroyed here, or close() would wait for it forever.
+    close: () => new Promise((r) => { for (const s of sockets) s.destroy(); server.closeAllConnections?.(); server.close(r); }),
   };
 }
 

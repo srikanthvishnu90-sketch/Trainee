@@ -11232,6 +11232,17 @@ const CareerRouter = (() => {
     { key: "gpa", rx: /\bgpa\b/, label: "your GPA", ask: "what is your GPA" },
     { key: "start_date", rx: /\bstart date\b|\bwhen (?:i|you) can start\b/, label: "your start date", ask: "when can you start" },
   ];
+  // Architect ruling on #745 (RESPONSE-RULES E3, C.24 Needs input): ONE open field per reply, with how many remain ("1 of 2"); the
+  // rest are kept on the thread (mirror.sensitiveAsk) and the next one is asked once the person answers this one. An answer is
+  // kept in the person's own words as a stated fact; nothing is ever chosen for them.
+  const SENSITIVE_ASK_TTL_MS = 24 * 60 * 60 * 1000;
+  const FIELD_FACT_KIND = { sponsorship: "sponsorship", work_authorization: "work_authorization", graduation_date: "graduation", salary: "salary_expectation", gpa: "gpa", start_date: "start_date" };
+  function sensitiveQuestion(f, company, k, n) {
+    let q = f.ask;
+    if (company && f.key === "salary") q = `what salary do you expect for the ${company} role`;
+    q = `${q.charAt(0).toUpperCase()}${q.slice(1)}?`;
+    return n > 1 ? `${k} of ${n}: ${q}` : q;
+  }
   function handleSensitivePick(text, ctx) {
     const t = lc(text);
     if (!PICK_FOR_ME.test(t)) return null;
@@ -11245,15 +11256,70 @@ const CareerRouter = (() => {
     const company = coM ? coM[1] : null;
     const labels = fields.map((f) => f.label);
     const named = labels.length === 1 ? labels[0] : `${labels.slice(0, -1).join(", ")} or ${labels[labels.length - 1]}`;
-    const asks = fields.map((f) => f.ask);
-    let question = asks.length === 1 ? asks[0] : `${asks.slice(0, -1).join(", ")}, and ${asks[asks.length - 1]}`;
-    if (company && fields.some((f) => f.key === "salary")) question = question.replace("what salary do you expect", `what salary do you expect for the ${company} role`);
-    question = `${question.charAt(0).toUpperCase()}${question.slice(1)}?`;
     const facts = [];
     if (added.length) facts.push(`Noted: ${added.map((f) => String(factLine(f)).replace(/[.\s]+$/, "")).join("; ")}.`);
-    facts.push("I can help with how an answer is worded, but the answer itself is yours.");
-    const reply = compose({ headline: `I can't pick ${named}${company ? ` for the ${company} application` : ""}: ${fields.length === 1 ? "that has" : "those have"} to be your own answer${fields.length === 1 ? "" : "s"}, so I won't fill ${fields.length === 1 ? "it" : "them"} in.`, facts, nextStep: question });
-    return { intent: "sensitive_answer_ask", resultStatus: "awaiting_user", reply, sends: 0, asked: fields.map((f) => f.key), company, stated_facts: added.length ? statedFactsOf(ctx) : undefined };
+    facts.push(fields.length > 1 ? `I'll ask you for each one, one at a time; I can help with how an answer is worded, but the answer itself is yours.` : "I can help with how an answer is worded, but the answer itself is yours.");
+    try { const m = threadMirrorForWrite(ctx); if (m) m.sensitiveAsk = { company, fields: fields.map((f) => f.key), total: fields.length, at: nowOf(ctx) }; } catch { /* the reply still asks the first one */ }
+    const reply = compose({ headline: `I can't pick ${named}${company ? ` for the ${company} application` : ""}: ${fields.length === 1 ? "that has" : "those have"} to be your own answer${fields.length === 1 ? "" : "s"}, so I won't fill ${fields.length === 1 ? "it" : "them"} in.`, facts, nextStep: sensitiveQuestion(fields[0], company, 1, fields.length) });
+    return { intent: "sensitive_answer_ask", resultStatus: "awaiting_user", reply, sends: 0, asked: [fields[0].key], open: fields.map((f) => f.key), company, stated_facts: added.length ? statedFactsOf(ctx) : undefined };
+  }
+  // The person's answer to the open field: recorded in their words, then the next field, or the end of the list.
+  function sensitiveAnswerValue(key, raw) {
+    const v = s(raw).replace(/\s+/g, " ").replace(/[.!]+$/, "").trim();
+    if (key === "sponsorship") {
+      const l = lc(v);
+      if (/\b(?:no|nope|don'?t|do not|won'?t|will not|never|not)\b|\bcitizen\b|\bgreen card\b|\bpermanent resident\b/.test(l)) return "does not need sponsorship";
+      if (/\b(?:yes|yep|yeah|i do|i will|need|require|h-?1b|f-?1|opt)\b/.test(l)) return "needs sponsorship";
+      return null;
+    }
+    const bare = v.replace(/^(?:(?:it'?s|it is|i graduate(?: in)?|graduating(?: in)?|my graduation (?:date )?is|graduation(?: date)?(?: is)?|i expect(?: about| around)?|about|around|my gpa is|i can start(?: on| in)?)\s+)/i, "").trim();
+    return bare || null;
+  }
+  function handleSensitiveAskAnswer(text, ctx) {
+    const mir = threadMirrorOf(ctx);
+    const st = mir && mir.sensitiveAsk;
+    if (!st || !Array.isArray(st.fields) || !st.fields.length) return null;
+    const at = typeof st.at === "number" ? st.at : Date.parse(st.at || "");
+    const wm = threadMirrorForWrite(ctx);
+    if (!(at && nowOf(ctx) - at <= SENSITIVE_ASK_TTL_MS)) { if (wm) delete wm.sensitiveAsk; return null; }
+    const raw = s(text).trim(), t = lc(raw);
+    // Another ask ends the list (it is not an answer): a question, a command, or a long message.
+    if (!raw || /\?\s*$/.test(raw) || raw.split(/\s+/).length > 25 || /^(?:find|search|show|apply|stop|pause|cancel|never ?mind|forget it|tailor|draft|send|help)\b/.test(t)) { if (wm) delete wm.sensitiveAsk; return null; }
+    const key = st.fields[0], field = PICK_FIELDS.find((f) => f.key === key);
+    if (!field) { if (wm) delete wm.sensitiveAsk; return null; }
+    const total = st.total || st.fields.length, k = total - st.fields.length + 1;
+    const skipped = /^(?:skip|pass|leave it blank|i'?d rather not say|rather not say|prefer not to say)\b/.test(t);
+    const value = skipped ? null : sensitiveAnswerValue(key, raw);
+    if (!skipped && !value) {
+      const reply = compose({ headline: `I didn't catch ${field.label} in that, so nothing was kept for it.`, nextStep: sensitiveQuestion(field, st.company, k, total) });
+      return { intent: "sensitive_answer_ask", resultStatus: "awaiting_user", reply, sends: 0, asked: [key], open: st.fields.slice(), company: st.company || null };
+    }
+    let said = null;
+    if (value) {
+      const kind = FIELD_FACT_KIND[key];
+      recordThreadFact(ctx, kind, value, raw);
+      // A sponsorship answer is written through the same path as a sponsorship correction, so a different earlier answer
+      // still invalidates what was prepared on it.
+      const prof = ctx && ctx.profile;
+      if (key === "sponsorship" && prof && typeof prof === "object" && !prof._fromStatedFacts) {
+        const need = value === "needs sponsorship", before = prof.constraints ? prof.constraints.needsSponsorship : null;
+        try { writeSensitiveCorrection(prof, { kind: need ? "future_need" : "no_longer_needed", needsSponsorship: need, clause: raw }, raw, ctx); } catch { /* the stated fact stands */ }
+        if (before === true || before === false) { if (before !== need) recordInvalidation(ctx, "sensitive_fact_corrected", raw, "the user answered the sponsorship question differently from the earlier answer; prepared packets and approvals built on the old answer are invalid"); }
+      }
+      const f = statedFactsOf(ctx).filter((x) => x.kind === kind).pop();
+      if (f && st.company && key === "salary") f.key = st.company;
+      said = f ? String(factLine(f)).replace(/[.\s]+$/, "") : `${field.label}: ${value}`;
+    }
+    const rest = st.fields.slice(1);
+    if (wm) { if (rest.length) wm.sensitiveAsk = Object.assign({}, st, { fields: rest }); else delete wm.sensitiveAsk; }
+    const head = said ? `Noted, in your words: ${said}.` : `Skipped: ${field.label} stays blank, and I won't fill it in.`;
+    if (rest.length) {
+      const next = PICK_FIELDS.find((f) => f.key === rest[0]);
+      const reply = compose({ headline: head, nextStep: sensitiveQuestion(next, st.company, k + 1, total) });
+      return { intent: "sensitive_answer_ask", resultStatus: "awaiting_user", reply, sends: 0, asked: [rest[0]], open: rest.slice(), company: st.company || null, stated_facts: statedFactsOf(ctx) };
+    }
+    const reply = compose({ headline: head, facts: [`That's all ${total === 1 ? "of it" : `${total} answers`}${st.company ? ` for the ${st.company} application` : ""}; each is used exactly as you gave it, and nothing was chosen for you.`] });
+    return { intent: "sensitive_answer_ask", resultStatus: "completed", reply, sends: 0, asked: [], open: [], company: st.company || null, stated_facts: statedFactsOf(ctx) };
   }
 
   // ---- (b) cancel / stop intents (DD-2 + DD-3; AP17, NW18, AP18) ----
@@ -11692,6 +11758,7 @@ const CareerRouter = (() => {
       || handleUserSuppression(text, c)
       || handleRoleClosure(text, c)
       || handlePriorApplication(text, c)
+      || handleSensitiveAskAnswer(text, c)
       || handleSensitiveCorrection(text, c)
       || handleSensitivePick(text, c)
       || handleQueueCancel(text, c)
@@ -16160,7 +16227,7 @@ const CareerRouter = (() => {
     return { intent: "conversation_recall", reply, resultStatus: status, sends: 0 };
   }
   function factLine(f) {
-    return { name: `your name is ${f.value}`, year: `you're a ${f.value}`, majors: `you study ${f.value}`, geography: `you're targeting ${f.value}`, experience: experienceLine(f), school: `you go to ${f.value}`, target_firm: `your target firm is ${f.value}`, level: `you want ${f.value} first`, excluded_level: `not ${f.value}`, tone: `the tone is ${f.value} from here`, target_role: `your dream role is ${f.value}`, recruiter_contact: `your recruiter contact${f.key ? ` at ${f.key}` : ""} is ${f.value}`, hiring_manager: `the hiring manager${f.key ? ` at ${f.key}` : ""} is ${f.value}`, interview_day: `your interview${f.key ? ` at ${f.key}` : ""} is on ${f.value}`, company_preference: `for ${f.key || "that company"} you only want ${f.value}`, sponsorship: f.value === "does not need sponsorship" ? "you do not need sponsorship" : "you need sponsorship", citizenship: f.value === "not a US citizen" ? "you're not a US citizen" : "you're a US citizen", interview_company: `you have an interview at ${f.value}`, goal: `your career goal is ${f.value}`, graduation: `you graduate ${f.value}` }[f.kind] || `${f.kind}: ${f.value}`;
+    return { name: `your name is ${f.value}`, year: `you're a ${f.value}`, majors: `you study ${f.value}`, geography: `you're targeting ${f.value}`, experience: experienceLine(f), school: `you go to ${f.value}`, target_firm: `your target firm is ${f.value}`, level: `you want ${f.value} first`, excluded_level: `not ${f.value}`, tone: `the tone is ${f.value} from here`, target_role: `your dream role is ${f.value}`, recruiter_contact: `your recruiter contact${f.key ? ` at ${f.key}` : ""} is ${f.value}`, hiring_manager: `the hiring manager${f.key ? ` at ${f.key}` : ""} is ${f.value}`, interview_day: `your interview${f.key ? ` at ${f.key}` : ""} is on ${f.value}`, company_preference: `for ${f.key || "that company"} you only want ${f.value}`, sponsorship: f.value === "does not need sponsorship" ? "you do not need sponsorship" : "you need sponsorship", citizenship: f.value === "not a US citizen" ? "you're not a US citizen" : "you're a US citizen", interview_company: `you have an interview at ${f.value}`, goal: `your career goal is ${f.value}`, graduation: `you graduate ${f.value}`, salary_expectation: `you expect ${f.value}${f.key ? ` for ${f.key}` : ""}`, work_authorization: `your work authorization is ${f.value}`, gpa: `your GPA is ${f.value}`, start_date: `you can start ${f.value}` }[f.kind] || `${f.kind}: ${f.value}`;
   }
   // DEPTH LANE A (MI-013): the stated-facts -> profile bridge. Facts
   // the user states in chat were captured into ctx.statedFacts but

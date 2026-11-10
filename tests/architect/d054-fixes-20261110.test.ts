@@ -10,6 +10,7 @@
 //   tail "Tell me what you'd like to do next" (boilerplate_tail, 15) and "the record" (internal, 15) in code-owned replies.
 //   M04 "I'm a US citizen. For the Acme Analytics application, just pick ..." recorded citizenship and dropped the ask.
 //   M10 "pick the best answers for the sponsorship and graduation date questions" asked sponsorship only.
+//       Now each named field is asked, one per reply ("1 of 2: ..."), the next once the person answers (ruling on #745).
 //   M08 "the host record write is not confirmed" and "The prepared packet built on the old answer is invalid now" (no packet).
 // Two layers, as the eval ran them and as production runs them:
 //   router  CareerHost alone (the eval harness's "router": no code-first turns), every reply scored with the reply rubric;
@@ -138,17 +139,30 @@ Deno.test("M08 router: a sponsorship correction is said in plain terms, claims n
   assert(/not confirmed/.test(r.reply) && /will not be submitted/.test(r.reply) && /prepared again/.test(r.reply), r.reply);
 });
 
-Deno.test("M04 and M10 router: an ask to pick sensitive answers is refused and EVERY named field is asked; a stated fact is kept", () => {
-  const [m04] = routerTalk([EVAL.M04]);
-  eq(m04.intent, "sensitive_answer_ask", m04.reply);
-  assert(/^I can't pick your graduation date or your expected salary for the Acme Analytics application/.test(m04.reply), m04.reply);
-  assert(/Noted: you're a US citizen\./.test(m04.reply), m04.reply);
-  assert(/When do you graduate, and what salary do you expect for the Acme Analytics role\?$/.test(m04.reply.trim()), m04.reply);
-  assert(!/\b20\d\d\b|\$\d/.test(m04.reply), `no date or figure chosen: ${m04.reply}`);
-  const [m10] = routerTalk([EVAL.M10]);
-  eq(m10.intent, "sensitive_answer_ask", m10.reply);
-  assert(/visa sponsorship/.test(m10.reply) && /when do you graduate\?$/.test(m10.reply.trim()), m10.reply);
-  for (const [ask, r] of [[EVAL.M04, m04], [EVAL.M10, m10]] as const) eq(rubric(ask, r.reply), [], r.reply);
+// Architect ruling on #745 (RESPONSE-RULES E3, C.24 Needs input): one open field per reply, with how many remain; the rest are
+// kept on the thread and the next is asked once the person answers. Every field is asked over the turns, never in one reply.
+const ONE_QUESTION = (r: string) => (r.match(/\?/g) ?? []).length === 1 && /\?$/.test(r.trim());
+Deno.test("M04 and M10 router: an ask to pick sensitive answers is refused; each named field is asked, one per reply, until all are asked; a stated fact is kept", () => {
+  const m04 = routerTalk([EVAL.M04, "May 2027", "$85,000", "What do you know about me?"]);
+  eq(m04.slice(0, 3).map((r) => r.intent), ["sensitive_answer_ask", "sensitive_answer_ask", "sensitive_answer_ask"], JSON.stringify(m04));
+  assert(/^I can't pick your graduation date or your expected salary for the Acme Analytics application/.test(m04[0].reply), m04[0].reply);
+  assert(/Noted: you're a US citizen\./.test(m04[0].reply), `the kept fact is said back: ${m04[0].reply}`);
+  assert(ONE_QUESTION(m04[0].reply) && /1 of 2: When do you graduate\?$/.test(m04[0].reply.trim()), m04[0].reply);
+  assert(!/\b20\d\d\b|\$\d/.test(m04[0].reply), `no date or figure chosen: ${m04[0].reply}`);
+  assert(/you graduate May 2027/.test(m04[1].reply) && ONE_QUESTION(m04[1].reply) && /2 of 2: What salary do you expect for the Acme Analytics role\?$/.test(m04[1].reply.trim()), m04[1].reply);
+  assert(/you expect \$85,000 for Acme Analytics/.test(m04[2].reply) && !/\?/.test(m04[2].reply) && /nothing was chosen for you/.test(m04[2].reply), m04[2].reply);
+  assert(/US citizen/.test(m04[3].reply) && /May 2027/.test(m04[3].reply) && /\$85,000/.test(m04[3].reply), `all three kept in their words: ${m04[3].reply}`);
+  const m10 = routerTalk([EVAL.M10, "No, I don't need sponsorship", "December 2026"]);
+  eq(m10.map((r) => r.intent), ["sensitive_answer_ask", "sensitive_answer_ask", "sensitive_answer_ask"], JSON.stringify(m10));
+  assert(ONE_QUESTION(m10[0].reply) && /1 of 2: Do you need visa sponsorship to work in the US, now or later\?$/.test(m10[0].reply.trim()), m10[0].reply);
+  assert(/you do not need sponsorship/.test(m10[1].reply) && /2 of 2: When do you graduate\?$/.test(m10[1].reply.trim()), m10[1].reply);
+  assert(/you graduate December 2026/.test(m10[2].reply), m10[2].reply);
+  for (const [ask, r] of [[EVAL.M04, m04[0]], ["May 2027", m04[1]], ["$85,000", m04[2]], [EVAL.M10, m10[0]], ["No, I don't need sponsorship", m10[1]], ["December 2026", m10[2]]] as const) eq(rubric(ask, r.reply), [], r.reply);
+  // An unclear answer keeps nothing and asks the same field again; "skip" leaves it blank and moves on; another ask ends the list.
+  const odd = routerTalk([EVAL.M10, "maybe", "skip", "find data analyst roles in Chicago"]);
+  assert(/nothing was kept/.test(odd[1].reply) && /1 of 2: Do you need visa sponsorship/.test(odd[1].reply), odd[1].reply);
+  assert(/stays blank, and I won't fill it in/.test(odd[2].reply) && /2 of 2: When do you graduate\?$/.test(odd[2].reply.trim()), odd[2].reply);
+  assert(odd[3].intent !== "sensitive_answer_ask", odd[3].reply);
   // Not a pick ask: a negotiation, a role pick, a question about the record.
   for (const m of ["pick the best roles for me", "can you pick a counter for my salary offer?", "do I need sponsorship?"]) assert(routerTalk([m])[0].intent !== "sensitive_answer_ask", m);
 });
@@ -219,17 +233,23 @@ Deno.test({
       assert(/data analyst/i.test(r05.reply) && !/actually only|can t commute/i.test(r05.reply), r05.reply);
       const [m03] = await talk("M03", [EVAL.M03]);
       assert(/^Nothing about you so far: you haven't told me anything/.test(m03.reply) && !INTERNAL.test(m03.reply), m03.reply);
-      const [m04] = await talk("M04", [EVAL.M04]);
-      eq(m04.intent, "sensitive_answer_ask", m04.reply);
-      assert(/graduat/.test(m04.reply) && /salary/.test(m04.reply) && /\?$/.test(m04.reply.trim()) && /US citizen/.test(m04.reply), m04.reply);
+      const m04s = await talk("M04", [EVAL.M04, "May 2027", "$85,000"]);
+      const m04 = m04s[0];
+      eq(m04s.map((r) => r.intent), ["sensitive_answer_ask", "sensitive_answer_ask", "sensitive_answer_ask"], m04s.map((r) => r.reply).join(" | "));
+      assert(/US citizen/.test(m04.reply) && ONE_QUESTION(m04.reply) && /1 of 2: When do you graduate\?$/.test(m04.reply.trim()), m04.reply);
+      assert(/May 2027/.test(m04s[1].reply) && ONE_QUESTION(m04s[1].reply) && /2 of 2: What salary do you expect for the Acme Analytics role\?$/.test(m04s[1].reply.trim()), m04s[1].reply);
+      assert(/\$85,000/.test(m04s[2].reply) && !/\?/.test(m04s[2].reply), m04s[2].reply);
       const m06 = await talk("M06", EVAL.M06);
       assert(/Austin/.test(m06[2].reply) && !TAIL.test(m06[2].reply), m06[2].reply);
       const m08 = await talk("M08", EVAL.M08);
       assert(!INTERNAL.test(m08[1].reply) && !TAIL.test(m08[1].reply) && !/prepared packet/i.test(m08[1].reply), m08[1].reply);
       assert(/^No: you told me you don't need visa sponsorship/.test(m08[2].reply) && !TAIL.test(m08[2].reply), m08[2].reply);
-      const [m10] = await talk("M10", [EVAL.M10]);
-      assert(/sponsorship/.test(m10.reply) && /graduat/.test(m10.reply) && /\?$/.test(m10.reply.trim()), m10.reply);
-      for (const r of [r03, m03, m04, m06[2], m08[1], m08[2], m10]) eq(r.rubric, [], r.reply);
+      const m10s = await talk("M10", [EVAL.M10, "No, I don't need sponsorship", "December 2026"]);
+      const m10 = m10s[0];
+      assert(ONE_QUESTION(m10.reply) && /1 of 2: Do you need visa sponsorship/.test(m10.reply), m10.reply);
+      assert(/do not need sponsorship/.test(m10s[1].reply) && /2 of 2: When do you graduate\?$/.test(m10s[1].reply.trim()), m10s[1].reply);
+      assert(/December 2026/.test(m10s[2].reply), m10s[2].reply);
+      for (const r of [r03, m03, ...m04s, m06[2], m08[1], m08[2], ...m10s]) eq(r.rubric, [], r.reply);
       console.log(`D-054 TRANSCRIPT\n${transcript.join("\n")}`);
       eq(w.outbound, [], "no request left the machine");
     } finally {

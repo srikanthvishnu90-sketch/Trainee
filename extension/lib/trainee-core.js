@@ -556,7 +556,7 @@
         "kind": "screen",
         "type": "yesno",
         "group": "pay",
-        "note": "the posted range meets their floor: derived from salary_expectation against the posting's range, else asked"
+        "note": "the posted range meets their expectations: asked per application (D-053c); never from salary_expectation, a pay_range_ok fact or another posting's answer"
       },
       "work_history": {
         "kind": "fact",
@@ -1684,9 +1684,16 @@
     String.raw`\bpretensi(ón|on|ones) salarial(es)?\b|\bexpectativas? salarial(es)?\b|\baspiraci(ón|on|ones) salarial(es)?\b|\bsalario (deseado|esperado|pretendido)\b`,
     String.raw`\bsalarisverwachting(en)?\b|\bgewenst(e)? salaris\b|\bgehalts(vorstellung|wunsch|erwartung)(en)?\b|\bwunschgehalt\b|希望(年収|給与|給料|月収)`
   ].join("|"), "i");
+  var PAY_RANGE_ASKED = /\b(range|band|rate)\b[^?]{0,60}\b(meets?|align(s|ed)?|in line|within|fits?|match(es)?|acceptable|agreeable|works? for)\b|\b(align(s|ed)?|in line|within|meets?|match(es)?|fits?)\b[^?]{0,30}\b(posted|stated|listed|advertised|above|this|the|our) ((salary|pay|compensation|base) )?(range|band)\b/;
+  function payRangeAsked(q) {
+    if (mapQuestion(q).fact === "pay_range_ok") return true;
+    const t = norm(String(q.label ?? ""));
+    return PAY_RANGE_ASKED.test(t) && !/\b(what|how much|please|if (not|no))\b/.test(t);
+  }
   function salaryExpectationAsked(q) {
     const label = String(q.label ?? ""), t = norm(label);
     if (PAY_HISTORY_ASKED.test(label)) return false;
+    if (payRangeAsked(q)) return false;
     if (SALARY_EXPECTATION_ASKED.test(t)) return true;
     const m = mapQuestion(q);
     if (m.fact === "salary_expectation") return true;
@@ -1697,7 +1704,7 @@
     const words = norm(q.label);
     const job = `job:${h16(`${jobId}
 ${words}`)}`, wording = `label:${h16(words)}`;
-    if (BIRTH_DATE.test(String(q.label ?? "")) || PAY_HISTORY_ASKED.test(String(q.label ?? "")) || salaryExpectationAsked(q)) return job;
+    if (BIRTH_DATE.test(String(q.label ?? "")) || PAY_HISTORY_ASKED.test(String(q.label ?? "")) || salaryExpectationAsked(q) || payRangeAsked(q)) return job;
     if (m.kind === "fact") {
       if (m.fact === "eeo") return job;
       if (o.here) return job;
@@ -3823,9 +3830,10 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     const rest = digits.slice(code.length).replace(/^[\s)\-.]+/, "").trim();
     return /\d{4,}/.test(rest.replace(/[^\d]/g, "")) ? rest : null;
   }
-  function withoutEarlierAnswers(answers) {
-    if (!answers?.salary_expectation) return answers;
+  function withoutEarlierAnswers(answers, range = false) {
+    if (!answers?.salary_expectation && !(range && answers?.pay_range_ok)) return answers;
     const { salary_expectation: _earlier, ...rest } = answers;
+    if (range) delete rest.pay_range_ok;
     return rest;
   }
   function planBatch(o) {
@@ -3898,8 +3906,9 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         const key = keyed === "full_name" && /^\s*name\s*[*:]?\s*$/i.test(f.label) && p.fields.some((x) => x !== f && classifyField(x.label, x.type) === "last_name") ? "first_name" : keyed;
         const followUp = FOLLOW_UP.test(f.label);
         const here = factStaysHere(f, p.location, o.answers);
-        const perApp = salaryExpectationAsked(f);
-        const facts = perApp || key === "salary_expectation" ? withoutEarlierAnswers(o.answers) : o.answers;
+        const range = payRangeAsked(f);
+        const perApp = salaryExpectationAsked(f) || range;
+        const facts = perApp || key === "salary_expectation" ? withoutEarlierAnswers(o.answers, range) : o.answers;
         const legacy = BIRTH_DATE.test(f.label) || PAY_HISTORY.test(f.label) || perApp || key === "eeo" || mapQuestion(f).fact === "eeo" ? void 0 : o.saved[normLabel(f.label)];
         const own = o.saved[answerKey(f, p.job_id, {
           haveFact: true,

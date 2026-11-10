@@ -382,9 +382,22 @@ export const SALARY_EXPECTATION_ASKED = new RegExp([
 // Is this question the salary expectation? Never salary history (its own rule above, #731), never the current pay or its
 // currency. A box asking for "Salary" by that word alone ("Salary (USD)", "Annual salary") is the expectation, as
 // career_apply.ts classifyField reads it; the planner fills it only from an answer given for this posting.
+// D-053c (architect ruling under D-053, 2026-11-10): "does the posted range meet your expectations?" (`pay_range_ok`) is the
+// salary expectation asked as a yes or no about this posting's own range or rate: asked per application too, never answered
+// from the salary-expectation fact or an earlier answer. Its wordings beside the question map's own: the range (or band, or
+// rate) said to meet, align with, fit or be within the person's expectations, or to be acceptable. A question that asks for
+// the amount ("What is your expected salary range?", "If not, please share your expectations") is not this one.
+export const PAY_RANGE_ASKED = /\b(range|band|rate)\b[^?]{0,60}\b(meets?|align(s|ed)?|in line|within|fits?|match(es)?|acceptable|agreeable|works? for)\b|\b(align(s|ed)?|in line|within|meets?|match(es)?|fits?)\b[^?]{0,30}\b(posted|stated|listed|advertised|above|this|the|our) ((salary|pay|compensation|base) )?(range|band)\b/;
+export function payRangeAsked(q: Question): boolean {
+  if (mapQuestion(q).fact === "pay_range_ok") return true;
+  const t = norm(String(q.label ?? ""));
+  return PAY_RANGE_ASKED.test(t) && !/\b(what|how much|please|if (not|no))\b/.test(t);
+}
 export function salaryExpectationAsked(q: Question): boolean {
   const label = String(q.label ?? ""), t = norm(label);
   if (PAY_HISTORY_ASKED.test(label)) return false;
+  // D-053c: a yes or no about the posting's range is its own per-application question, not the amount (never offered one).
+  if (payRangeAsked(q)) return false;
   if (SALARY_EXPECTATION_ASKED.test(t)) return true;
   const m = mapQuestion(q);
   if (m.fact === "salary_expectation") return true;
@@ -394,7 +407,7 @@ export function answerKey(q: Question, jobId: string, o: { haveFact?: boolean; h
   const m = mapQuestion(q);
   const words = norm(q.label);
   const job = `job:${h16(`${jobId}\n${words}`)}`, wording = `label:${h16(words)}`;
-  if (BIRTH_DATE.test(String(q.label ?? "")) || PAY_HISTORY_ASKED.test(String(q.label ?? "")) || salaryExpectationAsked(q)) return job;
+  if (BIRTH_DATE.test(String(q.label ?? "")) || PAY_HISTORY_ASKED.test(String(q.label ?? "")) || salaryExpectationAsked(q) || payRangeAsked(q)) return job;
   if (m.kind === "fact") {
     // ROUND 4 (2026-11-05): a self-identification answer (gender, race, ethnicity, veteran or disability status) is given to
     // one employer (extension apply_core.ts staysWithPosting). Kept as the one `fact:eeo`, a "No" to "Do you have a

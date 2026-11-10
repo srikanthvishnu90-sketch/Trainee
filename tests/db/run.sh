@@ -1209,6 +1209,31 @@ echo "== career_apply_handoff_finish.test.sql (a wall the person submitted is su
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261109150000_career_apply_handoff_finish.sql"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_handoff_finish.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
 echo "  ok   rollback restores the old index and history; up again"
+# RELEASE 10 rollbacks (s-release, 2026-11-10): the two release-10 migrations whose owner's rollback no step above ran.
+# 20261109120000 (a pause stops the email batch and the replies lane): the main loop applied it; up again (idempotent),
+# the rollback (career_send_go and career_outreach_action_claim as before, neither reading the pause), and up again.
+pause_reads="select (select count(*) from pg_proc where proname in ('career_send_go', 'career_outreach_action_claim') and prosrc like '%career_user_quiet%')::text"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261109120000_career_pause_send_paths.sql"
+[[ "$("${PSQL[@]}" -tAc "$pause_reads")" == "2" ]] || { echo "FAIL career_pause_send_paths: both send paths read the pause"; exit 1; }
+"${QUIET[@]}" -f "$ROOT/supabase/rollbacks/20261109120000_career_pause_send_paths.down.sql"
+[[ "$("${PSQL[@]}" -tAc "$pause_reads")" == "0" ]] || { echo "FAIL career_pause_send_paths rollback left a send path reading the pause"; exit 1; }
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261109120000_career_pause_send_paths.sql"
+[[ "$("${PSQL[@]}" -tAc "$pause_reads")" == "2" ]] || { echo "FAIL career_pause_send_paths did not apply again"; exit 1; }
+echo "  ok   career_pause_send_paths rollback restores both send paths without the pause read, and it applies again"
+# 20261109130000 (the interim line recorded in career_outbox): up again (idempotent), an interim row is accepted; the
+# rollback deletes interim rows and restores both checks without it (an interim row is then refused); up again.
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261109130000_career_outbox_interim.sql"
+interim_user=$("${PSQL[@]}" -tAc "select id from auth.users order by id limit 1")
+[[ -n "$interim_user" ]] || { echo "FAIL career_outbox_interim: no user to write an interim row for"; exit 1; }
+"${QUIET[@]}" -c "insert into public.career_outbox(user_id, key, kind, text, deliver_at) values ('$interim_user', 'interim:s-release-rollback', 'interim', 'on it', now())"
+"${QUIET[@]}" -f "$ROOT/supabase/rollbacks/20261109130000_career_outbox_interim.down.sql"
+[[ "$("${PSQL[@]}" -tAc "select count(*) from public.career_outbox where kind = 'interim' or key like 'interim:%'")" == "0" ]] || { echo "FAIL career_outbox_interim rollback left an interim row"; exit 1; }
+if "${PSQL[@]}" -tAc "insert into public.career_outbox(user_id, key, kind, text, deliver_at) values ('$interim_user', 'interim:s-release-rollback', 'interim', 'on it', now())" >/dev/null 2>&1; then
+  echo "FAIL career_outbox_interim rollback still accepts an interim row"; exit 1
+fi
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261109130000_career_outbox_interim.sql"
+[[ "$("${PSQL[@]}" -tAc "select (pg_get_constraintdef(oid) like '%interim%')::text from pg_constraint where conname = 'career_outbox_kind_check'")" == "true" ]] || { echo "FAIL career_outbox_interim did not apply again"; exit 1; }
+echo "  ok   career_outbox_interim rollback removes interim rows and the kind, and it applies again"
 # Item 6 S3 (20261110160000): search plans and material versions, approveplan and approvedoc bound to the payload hash. The main
 # loop applied it once; once more (idempotent), its test, the rollback, up again and the test again.
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261110160000_career_file_plans_materials.sql"

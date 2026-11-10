@@ -216,6 +216,6 @@ export function redactionNote(removed: Redaction["removed"]): string | null {
   const what = removed.map((r) => NAMES[r]);
   const list = what.length === 1 ? what[0] : `${what.slice(0, -1).join(", ")} and ${what[what.length - 1]}`;
   // A password or code also gets the way it should go: never in a message, only on the company's own page or the secure link.
-  const how = removed.some((r) => r === "password" || r === "code") ? " Never send passwords or codes in a message: you sign in yourself on the company's own page, and anything else sensitive goes on Upmore's secure link." : "";
-  return `(I removed the ${list} from your message and didn't keep it. Upmore never needs it here.)${how}`;
+  const how = removed.some((r) => r === "password" || r === "code") ? " Never send passwords or codes in a message: you sign in yourself on the company's own page, and anything else sensitive goes on Trainee's secure link." : "";
+  return `(I removed the ${list} from your message and didn't keep it. Trainee never needs it here.)${how}`;
 }

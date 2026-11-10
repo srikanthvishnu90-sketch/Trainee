@@ -20,8 +20,10 @@
 //   off_scope           a posting outside the asked role, level or place (E.14)              reported
 //   missed              in-scope open postings not shown while the reply listed fewer than asked   reported
 //
-// Two passes over the same battery: as shipped (the open check only when the person says "open" or "verified"), reported;
-// and with CAREER_SEARCH_OPEN_CHECK=always (every search re-checked, spec E.21), which must meet every bar.
+// Architect ruling E.21 (the default): every search re-checks the postings it shows, only those, at most the count asked and
+// never more than 10, each on its own posting page by id, and never reads a board listing (a closed one's place goes to the
+// next posting, which is then checked; at most 10 pages per search). The battery runs as shipped and must meet every bar; each
+// search's page reads are counted (at most the rows shown plus the closed ones said left out, never over 10).
 //
 // Run: deno test -A --no-check tests/architect/loop-08-discovery.test.ts (Postgres 16; LOOP_OUT=<dir> keeps the transcripts).
 // Nothing is applied for, queued or sent.
@@ -181,7 +183,7 @@ Deno.test({
     let h: Awaited<ReturnType<typeof careerHandler>> | null = null;
     const realFetch = globalThis.fetch, realError = console.error;
     const ASKS = asks();
-    const MODES = ["asked", "always"] as const;
+    const MODES = ["shipped"] as const;
     const people = Object.fromEntries(MODES.flatMap((m, k) => ASKS.map((_, i) => [`${m}${i}`, `8e0f8f8e-6a43-4a49-9d2c-${String(800000000000 + k * 100 + i)}`])));
     try {
       await supabaseParity(pg);
@@ -197,10 +199,11 @@ Deno.test({
             'A senior role.', now() - (g || ' seconds')::interval, now()
           from generate_series(1, 2000) g;`);
       h = await careerHandler(pg, people);
-      const viaDouble = globalThis.fetch, outbound: string[] = [];
+      const viaDouble = globalThis.fetch, outbound: string[] = [], pageReads: string[] = [], checkFaults: string[] = [];
       globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
         const req = input instanceof Request && !init ? input : new Request(input as any, init);
         const u = new URL(req.url);
+        if (u.host !== new URL(SUPABASE_URL).host && u.host !== "api.anthropic.com") pageReads.push(u.href);
         if (u.host === "api.anthropic.com") return anthropicWire(req, (b: any) => Response.json({ id: "c", model: b.model, choices: [{ index: 0, message: { role: "assistant", content: "A model reply." }, finish_reason: "stop" }], usage: { prompt_tokens: 30, completion_tokens: 4 } }));
         const ats = board(u);
         if (ats) return ats;
@@ -218,14 +221,21 @@ Deno.test({
       const zero = await effects();
 
       const pass = async (mode: typeof MODES[number]) => {
-        if (mode === "always") Deno.env.set("CAREER_SEARCH_OPEN_CHECK", "always"); else Deno.env.delete("CAREER_SEARCH_OPEN_CHECK");
         const totals: Record<string, number> = { cases: ASKS.length, shown: 0, invented: 0, dead: 0, unmarked_unchecked: 0, count_dishonest: 0, empty_no_scope: 0, off_scope: 0, missed: 0, checked_open: 0 };
         const cases: LoopCase[] = [];
         for (const [i, a] of ASKS.entries()) {
           await pg.sql(`delete from public.agent_rate_limits`);
+          pageReads.length = 0;
           const r = await h!.chat(`${mode}${i}`).say(a.text);
           assertNode.equal(r.status, 200, r.reply);
           const s = score(a, r.reply);
+          // E.21: one page per posting about to be shown: at most the rows shown plus the closed ones said left out (each place
+          // goes to the next posting), never more than 10 pages, and never a board's listing (the Ashby job-board list).
+          const closedSaid = Number(/(\d+) (?:matching )?roles? (?:was|were) (?:left out: closed when checked|found, but)/.exec(r.reply)?.[1] ?? 0);
+          const cap = Math.min(s.n.shown + closedSaid, 10), lists = pageReads.filter((u) => /\/posting-api\/job-board\//.test(u));
+          if (pageReads.length > cap) s.faults.push(`checks: ${pageReads.length} pages read for at most ${cap}`);
+          if (lists.length) s.faults.push(`board listing read: ${lists.join(" ")}`);
+          if (pageReads.length > cap || lists.length) checkFaults.push(`${a.id}: ${pageReads.length} pages, ${lists.length} listings`);
           for (const [k, v] of Object.entries(s.n)) totals[k] += v;
           cases.push({ id: `${mode}/${a.id}`, asked: a.text, reply: r.reply, intent: r.intent, faults: s.faults });
         }
@@ -233,10 +243,8 @@ Deno.test({
         await reportLoop({ item: 8, file: `8-${mode}`, name: `discovery-open-check-${mode}`, numbers: totals, bar: "invented+dead+unmarked_unchecked+count_dishonest+empty_no_scope == 0", pass: ok, cases });
         return totals;
       };
-      const shipped = await pass("asked");
-      const totals = await pass("always");
-      assertNode.equal(shipped.invented, 0, "as shipped: 0 invented postings");
-      assertNode.equal(shipped.unmarked_unchecked, 0, "as shipped: a posting not re-checked is never called checked");
+      const totals = await pass("shipped");
+      assertNode.deepStrictEqual(checkFaults, [], "each search checks only the postings it shows, by page, and reads no board listing");
       assertNode.deepStrictEqual(await effects(), zero, "nothing applied for, queued or sent");
       assertNode.deepStrictEqual(outbound, [], "no request left but the fake boards");
       assertNode.ok(totals.shown > 0, "the battery listed postings at all");

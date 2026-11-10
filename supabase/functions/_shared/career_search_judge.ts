@@ -25,7 +25,7 @@ import { searchWords, wordStem } from "./career_ingest.ts";
 import { correctedAsk } from "./search_correction.ts";
 import { blockerAsk, inMetro, METRO, remoteInUs, widenedAsk, withScope } from "./search_widen.ts";
 import { arrangementOf, checkedAt, nextWidening, placesLine, roleVariants, studentWindowOf, wantOf } from "./search_shortlist.ts";
-import { apiUrlFor, ashbyBoardFor, type LinkCheck, liveOnly } from "./link_check.ts";
+import { apiUrlFor, ashbyBoardFor, type LinkCheck, liveOnly, searchCheck } from "./link_check.ts";
 import { type CanSubmit, capabilitiesOf, rankBySubmit, submitLabel } from "./submit_capability.ts";
 import { hasLimits, type Limits, limitsLine, outsideLimits, REASON_WORDS, type Reason, searchTextOf, statedBand, statedPay } from "./posting_constraints.ts";
 import { CareerPool } from "./career_pool.js";
@@ -534,8 +534,9 @@ export async function searchJudgeTurn(o: {
     if (apiUrlFor(String(j.job_id ?? "")) || ashbyBoardFor(String(j.job_id ?? ""))) return await o.openCheck!(j);
     offBoard.add(String(j.job_id ?? "")); return "unknown";
   } : null;
-  // At most want x 3 pages are checked (liveOnly), want being the roles asked for or shown.
-  const checked = await liveOnly(hits, check, Math.max(1, Math.min(JUDGE_MAX_N, o.want ?? show)));
+  // Architect ruling E.21: only the postings to be shown are checked (searchCheck): at most the count asked (or shown), never
+  // more than 10; a closed one is left out and the next one down takes its place, at most 10 pages read in all.
+  const checked = check ? await searchCheck(hits, check, o.want ? Math.min(show, o.want) : show) : await liveOnly(hits, null, Math.max(1, Math.min(JUDGE_MAX_N, o.want ?? show)));
   const linkOf = new Map(checked.shown.map((h) => [h.job_id, h.link]));
   if (o.openCheck) hits = checked.shown;
   const at = checkedAt(o.now, o.tz);

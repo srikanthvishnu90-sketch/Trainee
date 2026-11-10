@@ -6,8 +6,9 @@
 //   seed    application rows written straight in with the triggers off (session_replication_role = replica), in every
 //           state an answer has to tell apart; the database's own check constraints still hold
 //   mail    an employer's receipt, a rejection, a receipt then an interview invitation, a recruiter's request for more
-//           information (from a person, and through the ATS: the rules read that one as unclear, so it is filed under
-//           nothing here and goes to the mail model's second look in production, asserted below), a rejection for an application that never went, a
+//           information (from a person, and through the ATS: the rules cannot read that one and no model runs here, so
+//           it is filed as "unclear" under its application and the status says the employer wrote, never a guess:
+//           coordinator ruling 2026-11-10), a rejection for an application that never went, a
 //           receipt for one of two roles at one employer, a newsletter and a job-board alert
 //   asks    "did my application to <employer> go through?" for each employer and "where are my applications?"
 // The bar (one number each, all 0):
@@ -35,7 +36,7 @@ const hex = async (s: string) => [...new Uint8Array(await crypto.subtle.digest("
 const lit = (s: string | null) => (s === null ? "null" : `'${s.replace(/'/g, "''")}'`);
 
 // ---------------------------------------------------------------------------------------------- the applications
-type Want = "confirmed" | "rejected" | "interview" | "replied" | "submitted" | "page_only" | "unknown" | "not_sent" | "approved" | "sending" | "needs_you" | "code";
+type Want = "confirmed" | "rejected" | "interview" | "replied" | "submitted" | "page_only" | "unknown" | "not_sent" | "approved" | "sending" | "needs_you" | "code" | "unclear";
 interface App { key: string; id: string; company: string; title: string; state: string; reason?: string; confirmation_id?: string; want: Want }
 const id = (n: number) => `00000000-0000-4000-8000-0000000c12${String(n).padStart(2, "0")}`;
 const APPS: App[] = [
@@ -48,7 +49,7 @@ const APPS: App[] = [
   { key: "fjord", id: id(7), company: "Fjord Media", title: "Content Strategist", state: "confirmed", confirmation_id: "FJ-1001", want: "page_only" },
   { key: "grove", id: id(8), company: "Grove Bank", title: "Risk Analyst", state: "unknown_outcome", want: "unknown" },
   { key: "hazel", id: id(9), company: "Hazel Foods", title: "Supply Chain Analyst", state: "not_submitted", reason: "POSTING_CLOSED", want: "not_sent" },
-  { key: "iris", id: id(10), company: "Iris Labs", title: "Research Assistant", state: "submitted_unconfirmed", want: "submitted" },
+  { key: "iris", id: id(10), company: "Iris Labs", title: "Research Assistant", state: "submitted_unconfirmed", want: "unclear" },
   // From Agent 3's draft: the states before and around a send, and a sender that only looks like the employer.
   { key: "juniper", id: id(11), company: "Juniper Co", title: "Data Engineer", state: "queued", want: "approved" },
   { key: "kapok", id: id(12), company: "Kapok Co", title: "Junior Analyst", state: "driving", want: "sending" },
@@ -77,7 +78,7 @@ const MAILS: Mail[] = [
   { key: "dune_info", from: "Priya Shah <priya.shah@dunehealth.example>", auth: authFor("dunehealth.example"), subject: "Product Analyst application: one more thing",
     snippet: "Hi Ada, could you share your expected graduation date and your work authorization status? We need it to move your application for the Product Analyst role forward.", at: NOW - 1 * DAY, to: "dune" },
   { key: "iris_info", ...viaAts("Iris Labs"), subject: "Your application for Research Assistant at Iris Labs",
-    snippet: "Could you send us a copy of your unofficial transcript so we can continue reviewing your application for the Research Assistant role?", at: NOW - 1 * DAY, to: null },
+    snippet: "Could you send us a copy of your unofficial transcript so we can continue reviewing your application for the Research Assistant role?", at: NOW - 1 * DAY, to: "iris" },
   { key: "hazel_rejection", ...viaAts("Hazel Foods"), subject: "Your application to Hazel Foods",
     snippet: "Thank you for your interest in the Supply Chain Analyst position. Unfortunately, we have decided to move forward with other candidates.", at: NOW - 2 * DAY, to: null },
   // A receipt that names no role fits both Oak Partners applications: neither is confirmed (the person is asked which).
@@ -95,6 +96,7 @@ const MAILS: Mail[] = [
 // ---------------------------------------------------------------------------------------------- reading a reply
 // What one line says about one application. The most specific reading wins; a line that says none of these is "unread".
 function said(line: string): Want | "unread" {
+  if (/emailed you about this application.*I couldn't tell what they're asking; here's the email: ".+"/.test(line)) return "unclear";
   if (/: approved, not sent yet/.test(line)) return "approved";
   if (/: being sent now; not submitted yet/.test(line)) return "sending";
   if (/emailed you a code to finish it/.test(line)) return "code";
@@ -154,7 +156,9 @@ Deno.test({
         read: async () => ({ status: "ok", mails, readThrough: NOW, listed: mails.length }) });
       assert(ran.status === "ok", `the mail run: ${JSON.stringify(ran)}`);
       const iris = mails[MAILS.findIndex((m) => m.key === "iris_info")];
-      assert(classifyMail(iris).ambiguous === true, "the ATS's request for a transcript is unclear to the rules: the mail model's second look reads it");
+      assert(classifyMail(iris).ambiguous === true && classifyMail(iris).kind === "other", "the ATS's request for a transcript is unclear to the rules");
+      const unclear = (await pg.sql(`select kind || '|' || flagged || '|' || coalesce(stage, '-') from public.career_mail_events where user_id = '${U}' and message_hash = '${iris.hash}'`)).trim();
+      assert(unclear === "unclear|true|-", `an unclear email is filed flagged and stageless: ${unclear}`);
 
       // mismatched_mail: each email under the right application, or none.
       const filed = JSON.parse((await pg.sql(`select coalesce(json_agg(json_build_object('h', message_hash, 'ref', application_ref, 'kind', kind)), '[]')::text from public.career_mail_events where user_id = '${U}'`)).trim());
@@ -185,7 +189,7 @@ Deno.test({
         for (const a of r.apps) {
           const line = lineFor(r.reply, a);
           // The whole list shows 8 lines and counts the rest ("…and 2 more."); one waiting on the person is never below the cut.
-          if (!line && r.apps === APPS && /\n…and \d+ more\./.test(r.reply) && !["interview", "replied"].includes(a.want)) continue;
+          if (!line && r.apps === APPS && /\n…and \d+ more\./.test(r.reply) && !["interview", "replied", "unclear"].includes(a.want)) continue;
           const got = line ? said(line) : "unread";
           if (got !== a.want) { wrong++; problems.push(`"${r.ask}" ${a.key}: says ${got}, want ${a.want}: ${line ?? "(no line)"}`); }
           if (got === "confirmed") {

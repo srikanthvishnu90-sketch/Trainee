@@ -26,15 +26,19 @@ export interface AppRow {
   confirmation_mail_hash?: string | null;
   employer?: EmployerAnswer | null;
 }
-export interface EmployerAnswer { kind: "rejection" | "interview" | "assessment" | "offer" | "recruiter_reply"; at: string }
-export const ANSWER_KINDS: EmployerAnswer["kind"][] = ["rejection", "interview", "assessment", "offer", "recruiter_reply"];
-// The latest answer per application, from the mail events (application_ref job:<id>, flagged ones left out).
-export function employerAnswers(events: { application_ref: string; kind: string; mail_at: string; flagged?: boolean | null }[]): Map<string, EmployerAnswer> {
+// "unclear" (coordinator ruling 2026-11-10): an email from that employer about this application that neither the rules nor
+// the mail model read as a status; `subject` is the email's subject line, shown so the person reads it themselves.
+export interface EmployerAnswer { kind: "rejection" | "interview" | "assessment" | "offer" | "recruiter_reply" | "unclear"; at: string; subject?: string | null }
+export const ANSWER_KINDS: EmployerAnswer["kind"][] = ["rejection", "interview", "assessment", "offer", "recruiter_reply", "unclear"];
+// The latest answer per application, from the mail events (application_ref job:<id>; flagged ones left out, except an unclear
+// one, which is always flagged so no stage moves on it).
+export function employerAnswers(events: { application_ref: string; kind: string; mail_at: string; flagged?: boolean | null; evidence?: string | null }[]): Map<string, EmployerAnswer> {
   const out = new Map<string, EmployerAnswer>();
   for (const e of events) {
-    if (e.flagged || !String(e.application_ref ?? "").startsWith("job:") || !(ANSWER_KINDS as string[]).includes(e.kind) || !Number.isFinite(Date.parse(e.mail_at))) continue;
+    if ((e.flagged && e.kind !== "unclear") || !String(e.application_ref ?? "").startsWith("job:") || !(ANSWER_KINDS as string[]).includes(e.kind) || !Number.isFinite(Date.parse(e.mail_at))) continue;
     const k = e.application_ref.slice(4), had = out.get(k);
-    if (!had || Date.parse(e.mail_at) >= Date.parse(had.at)) out.set(k, { kind: e.kind as EmployerAnswer["kind"], at: e.mail_at });
+    const subject = e.kind === "unclear" ? /^unclear: subject "(.*)"$/.exec(String(e.evidence ?? ""))?.[1] ?? null : null;
+    if (!had || Date.parse(e.mail_at) >= Date.parse(had.at)) out.set(k, { kind: e.kind as EmployerAnswer["kind"], at: e.mail_at, ...(subject ? { subject } : {}) });
   }
   return out;
 }
@@ -156,6 +160,7 @@ export function reasonWords(state: string, reason: string | null | undefined): s
 // Item 12: the employer's answer, in the person's words; an application they answered was received, whatever it said.
 const ANSWER_WORDS: Record<EmployerAnswer["kind"], string> = {
   rejection: "turned it down", interview: "invited you to interview", assessment: "sent you an assessment", offer: "made you an offer", recruiter_reply: "wrote back to you",
+  unclear: "emailed you about this application",
 };
 const SENT_STATES = new Set(["confirmed", "submitted_unconfirmed", "unknown_outcome", "driving"]);
 const answered = (a: AppRow) => (a.employer && SENT_STATES.has(a.state) && ANSWER_WORDS[a.employer.kind] ? a.employer : null);
@@ -163,6 +168,9 @@ export function statusLine(a: AppRow): string {
   const who = a.company || "An employer", name = `${who}${a.title ? ` (${a.title})` : ""}`, on = date(a.updated_at), conf = a.confirmation_id;
   // Item 12: their latest answer is what stands, never "confirmed it" over a rejection or an interview invitation.
   const ans = answered(a);
+  if (ans?.kind === "unclear") {
+    return `${name}: submitted; ${who} ${ANSWER_WORDS.unclear}${date(ans.at) ? ` on ${date(ans.at)}` : ""}. I couldn't tell what they're asking; here's the email: "${ans.subject ?? "(no subject)"}".`;
+  }
   if (ans) return `${name}: submitted; ${who} ${ANSWER_WORDS[ans.kind]} (their email${date(ans.at) ? `, ${date(ans.at)}` : ""}).`;
   switch (a.state) {
     case "confirmed":
@@ -243,7 +251,7 @@ function statusReplyFor(ask: NonNullable<ReturnType<typeof statusAsk>>, rows: Ap
 // waiting on the employer, 7 nothing left to do (turned down, not sent).
 function urgency(a: AppRow): number {
   const ans = answered(a);
-  if (ans) return { offer: 0, interview: 1, assessment: 2, recruiter_reply: 3, rejection: 7 }[ans.kind];
+  if (ans) return { offer: 0, interview: 1, assessment: 2, recruiter_reply: 3, unclear: 3, rejection: 7 }[ans.kind];
   if (a.state === "needs_user") return 4;
   if (a.state === "queued" || a.state === "driving") return 5;
   if (a.state === "confirmed" || a.state === "submitted_unconfirmed" || a.state === "unknown_outcome") return 6;
@@ -271,7 +279,7 @@ export function countsLine(rows: AppRow[]): string {
   const rest = rows.filter((a) => !answered(a));
   const n = (f: (a: AppRow) => boolean) => rest.filter(f).length;
   const parts: [number, string][] = [
-    [ans("offer"), "offer"], [ans("interview"), "interview invitation"], [ans("assessment"), "assessment"], [ans("recruiter_reply"), "employer reply"],
+    [ans("offer"), "offer"], [ans("interview"), "interview invitation"], [ans("assessment"), "assessment"], [ans("recruiter_reply"), "employer reply"], [ans("unclear"), "employer email to read"],
     [ans("rejection"), "turned down by the employer"],
     [n((a) => a.state === "confirmed" && !!a.email_confirmed_at), "confirmed by the employer"],
     [n((a) => a.state === "confirmed" && !a.email_confirmed_at), "page reference only"],

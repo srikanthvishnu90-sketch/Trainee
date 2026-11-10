@@ -35,7 +35,7 @@ export function standingFrom(r: StandingRows, now: number): Standing {
   // Item 12: each application carries its employer's latest answer from the mail record (a rejection, an invitation, an
   // offer, a reply), so its line says that answer and never "confirmed it" over it. Unread mail joins nothing.
   if (r.jobs && r.mail) {
-    const answers = employerAnswers(r.mail.map((e) => ({ application_ref: e.ref, kind: e.kind, mail_at: e.at, flagged: e.flagged })));
+    const answers = employerAnswers(r.mail.map((e) => ({ application_ref: e.ref, kind: e.kind, mail_at: e.at, flagged: e.flagged, evidence: e.evidence })));
     r = { ...r, jobs: r.jobs.map((a) => ({ ...a, employer: answers.get(String(a.id)) ?? null })) };
   }
   const queue = appsFromQueue(r.jobs ?? []), tracker = appsFromTracker(r.tracker ?? []);
@@ -116,7 +116,7 @@ export function standingAsk(message: string): StandingAsk | null {
 
 // ------------------------------------------------------------------------------------------------ the replies
 const day = (iso: string | null | undefined) => iso && Number.isFinite(Date.parse(iso)) ? new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }) : null;
-const KIND_WORDS: Record<string, string> = { received: "confirmation they received it", rejection: "rejection", interview: "interview invitation", assessment: "assessment invitation", offer: "offer", recruiter_reply: "recruiter reply" };
+const KIND_WORDS: Record<string, string> = { received: "confirmation they received it", rejection: "rejection", interview: "interview invitation", assessment: "assessment invitation", offer: "offer", recruiter_reply: "recruiter reply", unclear: "an email I couldn't read as a status" };
 const withRole = (company: string, role?: string | null) => `${company}${role ? ` (${role})` : ""}`;
 const mailLine = (e: StatusEvent) => `${withRole(e.company, e.role)}: ${KIND_WORDS[e.kind] ?? e.kind} on ${day(e.at) ?? "a date not on record"}${e.stage ? ` (stage: ${e.stage})` : ""}${e.flagged ? "; noted, not applied to the stage" : ""}`;
 const readNote = (s: Standing) => s.read_through ? ` (read through ${day(s.read_through)})` : " (Trainee has not read your mail yet: it reads it only with your Google connection, once the mail check has run)";

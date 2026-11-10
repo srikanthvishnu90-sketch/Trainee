@@ -120,7 +120,8 @@ Deno.test({ name: "FEATURE 8: check my email now, the employer's email everywher
       eq(await q(`select state || '|' || (email_confirmed_at is not null) from public.career_apply_jobs where user_id = '${me}' and company = 'Globex'`), "confirmed|true", "the queue row is confirmed by the employer's email");
       const stand = await say(chat, "where do I stand with Globex?");
       eq(stand.intent, "career_apply_status", stand.reply);
-      assert(/Globex confirmed it/.test(stand.reply) && /Globex's email: interview invitation on \w+ \d+ \(stage: Interview rounds\)/.test(stand.reply), stand.reply);
+      // Architect amendment, D-024 status truth (coordinator ruling 2026-11-10): the interview email is what the line says.
+      assert(/Globex invited you to interview/.test(stand.reply) && !/Globex confirmed it/.test(stand.reply) && /Globex's email: interview invitation on \w+ \d+ \(stage: Interview rounds\)/.test(stand.reply), stand.reply);
       const who = await say(chat, "any news from Globex?");
       assert(/Globex \(Data Analyst\): interview invitation on/.test(who.reply), who.reply);
       const due = await say(chat, "what follow-ups are due?");

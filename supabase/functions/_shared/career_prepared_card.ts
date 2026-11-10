@@ -20,10 +20,13 @@ import { mapQuestion } from "./question_map.ts";
 export const CARD_MARK: Record<string, string> = { consent: "You agree: ", attestation: "Your statement: ", screen: "About this job: " };
 export const cardFieldPrefix = (label: string) => `${CARD_MARK[mapQuestion({ label }).kind] ?? ""}${label}: `;
 export interface ResumeTag { tailored: true; persona: string | null }
-export function resumeCardLine(filename: string, sha256: string, tag?: ResumeTag | null): string {
+// Architect ruling R6 (2026-11-10): the resume is named in human terms only (its name, or that it is tailored for this role);
+// the hash it is bound by stays in the payload and the approval, never on the card. Nothing is said that is not known: no
+// version or date is invented. `sha256` stays a parameter so every caller names the same file it binds.
+export function resumeCardLine(filename: string, _sha256: string, tag?: ResumeTag | null): string {
   return tag?.tailored
-    ? `Resume: ${tag.persona ?? "your base resume"}, tailored for this role (${sha256.slice(0, 12)})`
-    : `Resume: ${filename} (${sha256.slice(0, 12)})`;
+    ? `Resume: ${tag.persona ?? "your base resume"}, tailored for this role`
+    : `Resume: ${filename}`;
 }
 const VERIFY = /^The page runs a verification check \(([a-z0-9 ,._-]{1,120})\); its token carries none of your answers$/i;
 const norm = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim().toLowerCase();

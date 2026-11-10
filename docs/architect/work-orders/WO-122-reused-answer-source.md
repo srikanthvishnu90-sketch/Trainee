@@ -48,8 +48,8 @@ before the engine sees it.
      a date that is not the field's own `source.at`.
 4. **Which answers are fresh.**
    - A new additive function, `career_apply_answers_own_v2()`, returns `job_ids` beside the v1 columns. v1 is
-     unchanged. The migration is approved under this order (coordinator, 2026-11-10). It is timestamped after
-     20261110130000, and it ships with a rollback, a db test (`tests/db/`) and a go-live MIGRATIONS entry with its
+     unchanged. The migration is approved under this order (coordinator, 2026-11-10). Its timestamp is
+     20261110180000 (registry; f-s3 #699 holds 20261110160000), and it ships with a rollback, a db test (`tests/db/`) and a go-live MIGRATIONS entry with its
      mark. Agents never apply it live.
    - The worker reads v2 and falls back to v1 when v2 is not deployed. Under v1, a texted answer's freshness is
      unknown, so its line takes no suffix (it fails toward the ruling's "fresh takes none"). The loop reports that
@@ -62,7 +62,7 @@ before the engine sees it.
 - `supabase/functions/_shared/career_prepared_card.ts`
 - `extension/src/apply_core.ts`, plus the regenerated `extension/lib/trainee-core.js`
 - `evals/apply/sensitive-loop.ts`
-- one migration, `supabase/migrations/<ts>_career_apply_answers_own_v2.sql` (ts after 20261110130000), with its
+- one migration, `supabase/migrations/20261110180000_career_apply_answers_own_v2.sql`, with its
   rollback, its db test and its go-live MIGRATIONS entry and mark. It is additive and applies to no live database
   without the owner.
 - tests below

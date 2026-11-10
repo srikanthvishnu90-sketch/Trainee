@@ -346,11 +346,16 @@ export const RELATIVE_PLACE = /\b(country|location)\b.{0,60}\b(this|the) (job|ro
 // it, per application, and is never kept for reuse or guessed. Keyed by its wording, one answer filled the same question at
 // every later employer; keyed by this posting, it is this application's answer only.
 export const DATE_OF_BIRTH = /\b(?:date of birth|birth ?date|day of birth|dob|d\.o\.b\.?)\b/i;
+// Release item 9 loop (tests/architect/loop-09-memory-apply.test.ts): what the person was PAID before ("What was your salary at
+// your previous job?", "Salary history") is theirs to give to each employer, as a date of birth is. Keyed by its wording, the
+// first employer's answer filled the same question at every later one without asking. career_apply.ts PAY_HISTORY is this
+// same pattern.
+export const PAY_HISTORY_ASKED = /\b(salary|pay|compensation|wage)s? histor|\b(previous|prior|past|last|former|most recent)\b[^?.]{0,30}\b(salary|pay|compensation|wage|earnings)\b|\b(salary|pay|compensation|wage)\b[^?.]{0,40}\b(previous|prior|past|last|former) (job|position|role|employer)/i;
 export function answerKey(q: Question, jobId: string, o: { haveFact?: boolean; here?: boolean } = {}): string {
   const m = mapQuestion(q);
   const words = norm(q.label);
   const job = `job:${h16(`${jobId}\n${words}`)}`, wording = `label:${h16(words)}`;
-  if (DATE_OF_BIRTH.test(String(q.label ?? ""))) return job;
+  if (DATE_OF_BIRTH.test(String(q.label ?? "")) || PAY_HISTORY_ASKED.test(String(q.label ?? ""))) return job;
   if (m.kind === "fact") {
     // ROUND 4 (2026-11-05): a self-identification answer (gender, race, ethnicity, veteran or disability status) is given to
     // one employer (extension apply_core.ts staysWithPosting). Kept as the one `fact:eeo`, a "No" to "Do you have a

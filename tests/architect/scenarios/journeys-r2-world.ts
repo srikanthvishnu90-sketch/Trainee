@@ -40,6 +40,8 @@ import { buildFileDeps } from "../../../supabase/functions/trainee-file/deps.ts"
 import { pageTokenOf, sha256, startSession } from "../../../supabase/functions/_shared/file_session.ts";
 import { supabaseSessionStore } from "../../../supabase/functions/trainee-file/store.ts";
 import { fakePhone } from "../file-session-fakes.ts";
+// architect amendment E.21 (2026-11-10): a search's posting-page checks are held to helpers/posting_checks.ts (no board listing, at most N for the N shown, never over 10); every other off-machine request is still a fault.
+import { postingChecks } from "../helpers/posting_checks.ts";
 
 export const CI = Deno.env.get("CI") === "true";
 export const ROOT = new URL("../../..", import.meta.url).pathname;
@@ -111,7 +113,7 @@ export interface Person {
 export interface World {
   pg: Pg; sql: (s: string) => Promise<string>; json: <T = any>(s: string) => Promise<T>; admin: any; conn: PgConn;
   bot: ReturnType<typeof fakeBot>; gmail: FakeGmail; stripe: FakeStripe;
-  revokes: string[]; outbound: string[]; modelCalls: { at: number; user: string; brain: boolean }[]; logged: string[];
+  revokes: string[]; outbound: string[]; checks: ReturnType<typeof postingChecks>; modelCalls: { at: number; user: string; brain: boolean }[]; logged: string[];
   clock: { skew: number }; now: () => number;
   people: Person[];
   addPerson(i: number, slot: number): Promise<Person>;
@@ -146,7 +148,7 @@ export async function startWorld(o: { tokens: Record<string, string> }): Promise
   const bot = fakeBot({ token: TG_TOKEN, now });
   const gmail = new FakeGmail();
   const stripe = new FakeStripe();
-  const revokes: string[] = [], outbound: string[] = [], modelCalls: { at: number; user: string; brain: boolean }[] = [];
+  const revokes: string[] = [], outbound: string[] = [], checks = postingChecks(), modelCalls: { at: number; user: string; brain: boolean }[] = [];
   // Whose step a model call belongs to: people's steps run concurrently, so each step runs inside its own context.
   const whose = new AsyncLocalStorage<string>();
   let modelTurn = 0;
@@ -208,6 +210,7 @@ export async function startWorld(o: { tokens: Record<string, string> }): Promise
     if (u.host === "api.stripe.com") return await stripe.fetch(req);
     if (req.url === GOOGLE_REVOKE) { revokes.push(new URLSearchParams(await req.text()).get("token") ?? ""); return new Response("", { status: 200 }); }
     if (u.host === "gmail.googleapis.com") return await gmail.fetch(req);
+    if (checks.take(req.method, req.url)) throw new TypeError(`network refused in the journeys: ${u.host}`);
     outbound.push(`${req.method} ${u.host}${u.pathname}`);
     throw new TypeError(`network refused in the journeys: ${u.host}`);
   }) as typeof fetch;
@@ -279,7 +282,7 @@ export async function startWorld(o: { tokens: Record<string, string> }): Promise
   };
 
   const w: World = {
-    pg, sql, json: json as any, admin, conn, bot, gmail, stripe, revokes, outbound, modelCalls, logged, clock, now, people,
+    pg, sql, json: json as any, admin, conn, bot, gmail, stripe, revokes, outbound, checks, modelCalls, logged, clock, now, people,
     async addPerson(i, slot) {
       const spec = personSpec(i, slot);
       const uid = uidOf(i), token = tokenOf(i), tg = tgOf(i);
@@ -296,7 +299,7 @@ export async function startWorld(o: { tokens: Record<string, string> }): Promise
     async web(p, message, extra = {}) {
       await sql(`delete from public.agent_rate_limits where user_id = ${q(p.uid)}`);
       modelTurn++;
-      const r = await chats.get(p.uid)!.say(message, extra);
+      const r = await checks.turn(message, () => chats.get(p.uid)!.say(message, extra), (x) => x.reply);
       p.web.thread = chats.get(p.uid)!.thread();
       return r;
     },
@@ -304,7 +307,7 @@ export async function startWorld(o: { tokens: Record<string, string> }): Promise
       await sql(`delete from public.agent_rate_limits where user_id = ${q(p.uid)}`);
       modelTurn++;
       const b = bot.to(p.tg).length;
-      const status = await post({ message: { message_id: ++mid, ...from(p.tg), text } });
+      const status = await checks.turn(text, () => post({ message: { message_id: ++mid, ...from(p.tg), text } }), () => bot.to(p.tg).slice(b).map(plainOf).join("\n"));
       return { status, said: bot.to(p.tg).slice(b).map(plainOf) };
     },
     // The resume sent as a PDF on Telegram (read by the product's own reader), so its confirmation names the file.
@@ -315,7 +318,7 @@ export async function startWorld(o: { tokens: Record<string, string> }): Promise
       const id = `F${++fid}`;
       files.set(id, bytes);
       const b = bot.to(p.tg).length;
-      const status = await post({ message: { message_id: ++mid, ...from(p.tg), document: { file_id: id, file_unique_id: `u${id}`, file_name: "resume.pdf", mime_type: PDF, file_size: bytes.length } } });
+      const status = await checks.turn("resume.pdf", () => post({ message: { message_id: ++mid, ...from(p.tg), document: { file_id: id, file_unique_id: `u${id}`, file_name: "resume.pdf", mime_type: PDF, file_size: bytes.length } } }), () => bot.to(p.tg).slice(b).map(plainOf).join("\n"));
       return { status, said: bot.to(p.tg).slice(b).map(plainOf) };
     },
     async filePage(p) {

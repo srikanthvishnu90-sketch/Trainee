@@ -21,6 +21,8 @@ import * as zlib from "node:zlib";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, type Chat, SUPABASE_URL, supabaseParity, type Turn } from "../flow/handler.ts";
 import { anthropicWire } from "./helpers/anthropic_wire.ts";
+// architect amendment E.21 (2026-11-10): a search's posting-page checks are held to helpers/posting_checks.ts (no board listing, at most N for the N shown, never over 10); every other off-machine request is still a fault.
+import { postingChecks } from "./helpers/posting_checks.ts";
 import { CareerProfile } from "../../supabase/functions/_shared/router_core.career.js";
 import { buildResume, holdsCardApproval, jobNumberOf, parseCheckWords, readTarget, resumeAskOf, resumeTaskTurn, targetOf, titleShaped } from "../../supabase/functions/_shared/career_resume_task.ts";
 
@@ -119,7 +121,7 @@ Deno.test({
         insert into public.career_kb_postings (posting_key, source, board, company, title, location, url, posted_at, text_excerpt, content_hash) values
         ${OLD.map((p, i) => `('${p.key}', 'greenhouse', '${p.board}', '${p.company}', '${p.title}', '${p.location}', '${p.url}', now() - interval '${i} hours', '${desc}', 'r10old${i}')`).join(",")};`);
       h = await careerHandler(pg, { "tok-a": A, "tok-b": B });
-      const viaDouble = globalThis.fetch, outbound: string[] = [];
+      const viaDouble = globalThis.fetch, outbound: string[] = [], checks = postingChecks();
       let modelCalls = 0, otherCalls = 0;
       globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
         // deno-lint-ignore no-explicit-any
@@ -135,6 +137,7 @@ Deno.test({
           const content = !/Rewrite one resume bullet/.test(sys) ? "{}" : /warmer/i.test(asked) && asked.includes(SHORTER) ? WARMER : SHORTER;
           return new Response(JSON.stringify({ id: "chatcmpl-test", model: chat.model, choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content } }], usage: { prompt_tokens: 10, completion_tokens: 1 } }), { headers: { "content-type": "application/json" } });
         });
+        if (checks.take(req.method, req.url)) throw new TypeError(`network refused: ${u.host}`);
         if (u.origin !== new URL(SUPABASE_URL).origin) { outbound.push(`${req.method} ${u.host}`); throw new TypeError(`network refused: ${u.host}`); }
         return await viaDouble(req);
       }) as typeof fetch;
@@ -144,7 +147,7 @@ Deno.test({
       const transcript: string[] = [];
       const turn = (chat: Chat, who: string) => async (m: string): Promise<Turn> => {
         await pg.sql(`delete from public.agent_rate_limits where user_id = '${who}'`);
-        const r = await chat.say(m);
+        const r = await checks.turn(m, () => chat.say(m), (t) => t.reply);
         assertNode.equal(r.status, 200, r.reply);
         transcript.push(`USER: ${m}\nTRAINEE [${r.intent}]: ${r.reply}\nFILES: ${JSON.stringify((r.body.artifacts ?? []).map((a: { filename: string }) => a.filename))}`);
         return r;
@@ -371,6 +374,7 @@ Deno.test({
 
       console.log(`r10-resume-task transcript:\n${transcript.join("\n\n")}\nmodel calls ${modelCalls}; refused reads: ${outbound.join("; ") || "none"}`);
       eq(outbound, [], "no network");
+      eq(checks.faults, [], "a search checks at most the postings it shows, each on its own page");
     } finally {
       globalThis.fetch = realFetch;
       for (const [k, v] of Object.entries(saved)) v === undefined ? Deno.env.delete(k) : Deno.env.set(k, v);

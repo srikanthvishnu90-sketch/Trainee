@@ -191,6 +191,7 @@ browser_node_tests=(
   tests/career-extension-yesno.test.cjs
   tests/career-fact-import-panel.test.cjs
   tests/career-greenhouse-savedform.test.cjs
+  tests/career-lever-strict-fill.test.cjs
   tests/career-owned-worker-browser.test.cjs
   tests/career-denylist-every-navigation.test.cjs
   tests/career-parallel-apply.test.cjs

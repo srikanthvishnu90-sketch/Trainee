@@ -209,3 +209,19 @@ test("source: the only clicks are on tagged Apply candidates and tagged question
   assert.match(cand, /\.toLowerCase\(\) === "submit" \|\| \(e\.tagName === "BUTTON" && e\.form && \(e\.type \|\| "submit"\) === "submit"\)\) return;/);
   assert.match(cand, /NEVER\.test\(t\)\) return;/);
 });
+
+// b-lever (coordinator ruling, 2026-11-10): Lever's "Current location" result click (fillPlace) goes through the same pickOption
+// helper as a combobox option, so the pinned click list above is unchanged. Its list is only the question's own Lever results
+// (the .dropdown-results inside the <li> holding the tagged box), and nothing it can click is a Submit, send or next control.
+test("source: Lever's place click is inside its own question only, and never a Submit, send or next control", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "workers/career-browser/ats-fill.cjs"), "utf8");
+  const start = src.indexOf("async function fillPlace");
+  const body = src.slice(start, src.indexOf("\n}\n", start));
+  assert.ok(start > 0, "fillPlace exists");
+  const lists = [...body.matchAll(/page\.locator\(`([^`]*)`\)/g)].map((m) => m[1]);
+  assert.deepEqual(lists, ["li:has(${sel(d.q)}) .dropdown-results > *:visible"], "the only list read or clicked is the question's own Lever results");
+  assert.doesNotMatch(body, /\.click\(|dispatchEvent|\.press\(|requestSubmit|\.submit\(/, "no click but pickOption's, no key press, no submit");
+  assert.match(body, /await pickOption\(opts, m\);/);
+  assert.doesNotMatch(lists.join(" "), /button|submit|type=|role=|send|next|continue|apply/i, "the list selector names no control");
+  assert.match(src, /async function pickOption\(opts, m\) \{ await opts\(\)\.nth\(m\.index\)\.click\(\); \}/);
+});

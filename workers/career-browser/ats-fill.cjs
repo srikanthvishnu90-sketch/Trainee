@@ -30,7 +30,8 @@ function EXTRACT() {
   const shown = (e) => e.type === "file" || !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
   const nodeText = (n) => {
     const c = n.cloneNode(true);
-    c.querySelectorAll("input,select,textarea,button,.filename,.default-label,svg,script,style").forEach((x) => x.remove());
+    // Lever's location box keeps its result list ("No location found. Try entering a different location") inside the label.
+    c.querySelectorAll("input,select,textarea,button,.filename,.default-label,svg,script,style,.dropdown-container,.dropdown-results,.dropdown-no-results,.dropdown-loading-results").forEach((x) => x.remove());
     return clean(c.textContent);
   };
   const LABEL_SEL = "legend, .application-label, .ashby-application-form-question-title, label.label, .select__label, .c-spl-form-field__label";
@@ -130,6 +131,10 @@ function EXTRACT() {
       d = { ...base, kind: "textarea" };
     } else {
       d = { ...base, kind: "text", inputType: type };
+      // Lever's "Current location": a text box whose value counts only once one of Lever's own places is picked from its list
+      // (the pick fills the hidden selectedLocation beside it). A box without that list is typed into as any other.
+      const li = el.closest("li, .application-question");
+      if ((el.classList.contains("location-input") || el.name === "location") && li && li.querySelector(".dropdown-results")) d.place = true;
     }
     const q = push(d, el);
     el.setAttribute("data-upmore-q", q);
@@ -195,6 +200,12 @@ const FACT_RULES = [
 // ROUND 3: the person's own contact facts never answer a question about someone else ("Phone number of your reference",
 // "Email of the person who referred you"): the same rule as career_apply.ts SOMEONE_ELSE.
 const SOMEONE_ELSE = /\breferr|\breferen|\bteam member|\breferee|\bemergency|\bmanager|\bsupervisor|\brecruiter|\bspouse|\bparent|\bguardian|\bemployee who/;
+function factKey(label) {
+  const n = norm(label);
+  if (SOMEONE_ELSE.test(n)) return undefined;
+  for (const [re, key] of FACT_RULES) if (re.test(n)) return key;
+  return undefined;
+}
 function factValue(label, facts) {
   const n = norm(label);
   if (SOMEONE_ELSE.test(n)) return undefined;
@@ -370,6 +381,46 @@ function phoneCountryMatch(labels, country, phone) {
   }).filter((i) => i >= 0);
   return ix.length === 1 ? { index: ix[0] } : { error: ix.length > 1 ? "ambiguous_option" : "no_matching_option" };
 }
+// A place the person confirmed ("Chicago, IL") is one of the board's places only when the city is the same and the next part is
+// the same region, by name or by its US postal code ("Chicago, Illinois, United States"). Exactly one such place, or none.
+const US_STATES = { al: "alabama", ak: "alaska", az: "arizona", ar: "arkansas", ca: "california", co: "colorado", ct: "connecticut", de: "delaware", dc: "district of columbia", fl: "florida", ga: "georgia", hi: "hawaii", id: "idaho", il: "illinois", in: "indiana", ia: "iowa", ks: "kansas", ky: "kentucky", la: "louisiana", me: "maine", md: "maryland", ma: "massachusetts", mi: "michigan", mn: "minnesota", ms: "mississippi", mo: "missouri", mt: "montana", ne: "nebraska", nv: "nevada", nh: "new hampshire", nj: "new jersey", nm: "new mexico", ny: "new york", nc: "north carolina", nd: "north dakota", oh: "ohio", ok: "oklahoma", or: "oregon", pa: "pennsylvania", ri: "rhode island", sc: "south carolina", sd: "south dakota", tn: "tennessee", tx: "texas", ut: "utah", vt: "vermont", va: "virginia", wa: "washington", wv: "west virginia", wi: "wisconsin", wy: "wyoming" };
+const region = (s) => { const n = norm(s); return US_STATES[n] || n; };
+function matchPlace(labels, value) {
+  const exact = matchOption(labels, value);
+  if (!exact.error) return exact;
+  const want = String(value).split(",").map((x) => x.trim()).filter(Boolean);
+  if (want.length < 2) return { error: "no_matching_option" };
+  const ix = labels.map((l, i) => {
+    const got = String(l).split(",").map((x) => x.trim());
+    return got.length >= 2 && norm(got[0]) === norm(want[0]) && region(got[1]) === region(want[1]) && (want.length < 3 || got.length >= 3 && norm(got[2]) === norm(want[2])) ? i : -1;
+  }).filter((i) => i >= 0);
+  return ix.length === 1 ? { index: ix[0] } : { error: ix.length ? "ambiguous_option" : "no_matching_option" };
+}
+async function fillPlace(page, d, value) {
+  const input = page.locator(sel(d.q)).first();
+  // Only this question's own result list (the .dropdown-results inside the question that holds the box).
+  const opts = () => page.locator(`li:has(${sel(d.q)}) .dropdown-results > *:visible`);
+  await input.fill("");
+  await input.pressSequentially(String(value), { delay: 25 });
+  let list = [];
+  for (let i = 0; i < 30 && !list.length; i++) { await page.waitForTimeout(200); list = (await opts().allInnerTexts().catch(() => [])).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean); }
+  if (!list.length) return { ok: false, reason: "place_not_offered" };
+  const m = matchPlace(list, value);
+  if (m.error) return { ok: false, reason: m.error, options: list.slice(0, 12) };
+  await pickOption(opts, m);
+  const held = await page.evaluate(([q]) => {
+    const el = document.querySelector(`[data-upmore-q="${q}"]`);
+    const box = el && el.closest("li, .application-question");
+    const h = box && box.querySelector("input[name='selectedLocation']");
+    return { text: el ? el.value : "", picked: h ? h.value : "" };
+  }, [d.q]);
+  return norm(held.text) === norm(list[m.index]) && String(held.picked).trim() ? { ok: true, held: list[m.index] } : { ok: false, reason: "readback_mismatch" };
+}
+// The same country under the names boards list it by ("USA" for a confirmed "United States"). Only these spellings, and only
+// when the confirmed name itself is not offered.
+const COUNTRY_NAMES = [["united states", "united states of america", "usa", "us", "u s a", "u s"], ["united kingdom", "uk", "great britain"]];
+const countryNames = (v) => (COUNTRY_NAMES.find((g) => g.includes(norm(v))) || []).filter((x) => x !== norm(v));
+
 async function fillCombo(page, d, value, pick, phone) {
   const input = page.locator(sel(d.q)).first();
   // Only this dropdown's own options: its aria-controls list, else the options inside its own shell. A phone widget's country
@@ -387,7 +438,7 @@ async function fillCombo(page, d, value, pick, phone) {
   const m = pick === "decline" ? (() => { const i = list.findIndex((o) => DECLINE.test(norm(o))); return i < 0 ? { error: "no_decline_option" } : { index: i }; })()
     : d.phoneCountry && pick === "phone_country" ? phoneCountryMatch(list, value, phone) : matchOption(list, value);
   if (m.error) { await input.press("Escape").catch(() => {}); return { ok: false, reason: m.error, options: list.slice(0, 40), ...(d.phoneCountry || pick === "phone_country" ? { detail: `options: ${list.slice(0, 6).join(" / ").slice(0, 140)}` } : {}) }; }
-  await opts().nth(m.index).click();
+  await pickOption(opts, m);
   const s = await stateOf(page, d);
   if (s.filled && norm(s.text) === norm(list[m.index])) return { ok: true };
   // The phone's country picker shows its choice in its own words ("United States" for the option "United States +1"): it
@@ -412,6 +463,9 @@ async function fillCombo(page, d, value, pick, phone) {
 // The phone widget's own country picker is counted apart from a "Country" question of the form (it is the phone's country).
 const labelKey = (d) => (d.phoneCountry ? `phone country|${norm(d.label)}` : norm(d.label));
 const labelCounts = (qs) => { const m = new Map(); for (const d of qs) if (d.kind !== "file") m.set(labelKey(d), (m.get(labelKey(d)) || 0) + 1); return m; };
+// The one click on a list option: `opts` is always the question's own list (a combobox's aria-controls list or its shell; Lever's
+// location results inside the question's own <li>), never another list on the page.
+async function pickOption(opts, m) { await opts().nth(m.index).click(); }
 // Decide what to do with one question. status: fill | ask | skip. Never invents a value.
 function decide(d, ctx) {
   const { facts, answers, resumePath } = ctx;
@@ -452,6 +506,11 @@ async function doFill(page, d, dec, ctx) {
     return d.kind === "select" ? fillSelect(page, d, labels[ix]) : fillChoice(page, d, labels[ix], false);
   }
   const v = dec.value;
+  if (dec.source === "fact" && factKey(d.label) === "country" && ["select", "radio"].includes(d.kind)) {
+    const labels = d.options.map((o) => o.label);
+    if (matchOption(labels, v).error) { const alt = countryNames(v).find((x) => !matchOption(labels, x).error); if (alt) return d.kind === "select" ? fillSelect(page, d, labels[matchOption(labels, alt).index]) : fillChoice(page, d, labels[matchOption(labels, alt).index], false); }
+  }
+  if (d.place && dec.source === "fact") return fillPlace(page, d, v);
   switch (d.kind) {
     case "select": return fillSelect(page, d, v);
     case "radio": case "buttons": return fillChoice(page, d, v, false);
@@ -497,6 +556,8 @@ async function fillForm(page, ctx0) {
       // optional: leaving it out, or picking another option, would post something other than what was approved.
       // A soft try (a country picker from the confirmed country) that did not take is the question still unanswered.
       if (dec.soft) { r = { ...r, detail: `fact_not_set: ${r.reason}${r.detail ? ` | ${r.detail}` : ""}`, reason: d.required ? "no_confirmed_answer" : r.reason, options: undefined }; if (!d.required) { entry.status = "skipped"; entry.reason = "optional_left_blank"; continue; } }
+      // An optional demographic question with no way to decline is left blank: a blank is the decline (boxlunch, strict run 6).
+      if (r.reason === "no_decline_option" && !d.required && d.eeo) { entry.status = "skipped"; entry.reason = "eeo_left_blank_no_decline_option"; continue; }
       const notOffered = (r.reason === "no_matching_option" || r.reason === "ambiguous_option");
       const ask = d.required || notOffered;
       entry.status = ask ? "needs_user" : "failed";
@@ -546,4 +607,4 @@ async function heldNow(page, filled) {
     return { label: f.label, kind: f.kind, source: f.source, approved: f.value, held: held === undefined ? null : held, gone: !!s.gone };
   });
 }
-module.exports = { heldNow, fillForm, matchOption, phoneCountryMatch, factValue, answerFor, decide, labelCounts, norm, EXTRACT, STATE, DECLINE };
+module.exports = { heldNow, fillForm, matchOption, matchPlace, countryNames, phoneCountryMatch, factKey, factValue, answerFor, decide, labelCounts, norm, EXTRACT, STATE, DECLINE };

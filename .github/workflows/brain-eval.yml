@@ -124,11 +124,15 @@ jobs:
             if (model && (!MODELS.includes(model) || suite !== "heldout" || set === "sealed")) { console.log(`NOT RUN: model ${model} needs the allowlist (${MODELS.join(", ")}), the heldout suite and a set other than sealed`); Deno.exit(2); }
             if (set === "sealed" && (!brains.includes(releaseBrain) || !["router", "staged", "agent"].includes(releaseBrain))) { console.log(`NOT RUN: a sealed request names its release_brain (${releaseBrain || "missing"}), and it must be one of the brains measured (${brains})`); Deno.exit(2); }
             if (!["heldout", "tasks"].includes(suite) || (suite === "tasks" && (action !== "eval" || set !== "dev"))) { console.log(`NOT RUN: bad suite ${suite} (heldout, or tasks with action eval on the dev set)`); Deno.exit(2); }
-            if (!["dev", "sealed", "fresh"].includes(set) || !brains.length || brains.some((b) => !["router", "staged", "agent"].includes(b)) || !["eval", "pubkey", "rejudge"].includes(action) || passes !== 5 || (action === "rejudge" && !/^[0-9]+$/.test(rejudgeRun))) {
+            // D-054 (owner, 2026-11-10): budget_usd caps the total spend of one run (all passes and judges) at the shared ledger. Optional; at most $70.
+            const runBudget = f.budget_usd === undefined || ev ? "" : String(f.budget_usd);
+            if (runBudget && !(/^[0-9]{1,2}(\.[0-9]{1,2})?$/.test(runBudget) && Number(runBudget) > 0 && Number(runBudget) <= 70)) { console.log(`NOT RUN: budget_usd ${runBudget} must be a positive number of dollars, at most 70`); Deno.exit(2); }
+            if (set === "d054" && (!runBudget || Number(runBudget) > 3)) { console.log("NOT RUN: the d054 set runs only under the D-054 cap: budget_usd 3 or less"); Deno.exit(2); }
+            if (!["dev", "sealed", "fresh", "d054"].includes(set) || !brains.length || brains.some((b) => !["router", "staged", "agent"].includes(b)) || !["eval", "pubkey", "rejudge"].includes(action) || passes !== 5 || (action === "rejudge" && !/^[0-9]+$/.test(rejudgeRun))) {
               console.log(`NOT RUN: bad request (set ${set}, brains ${brains}, action ${action}, rejudge run ${rejudgeRun}, passes ${passes}; the owner requires five passes)`); Deno.exit(2);
             }
-            Deno.writeTextFileSync(Deno.env.get("GITHUB_OUTPUT"), `set=${set}\nbrains=${brains.join(" ")}\nbrains_csv=${brains.join(",")}\naction=${action}\npasses=${passes}\nrelease_brain=${releaseBrain || "agent"}\nsuite=${suite}\nmodel=${model}\nrejudge_run=${rejudgeRun}\n`, { append: true });
-            console.log(suite === "tasks" ? "measuring: the task eval (router, staged, planner, agent; $2 each)" : `measuring: action ${action}, set ${set}, brains ${brains.join(", ")}, ${passes} passes, model ${model || "the committed default"}`);
+            Deno.writeTextFileSync(Deno.env.get("GITHUB_OUTPUT"), `set=${set}\nbrains=${brains.join(" ")}\nbrains_csv=${brains.join(",")}\naction=${action}\npasses=${passes}\nrelease_brain=${releaseBrain || "agent"}\nsuite=${suite}\nmodel=${model}\nrejudge_run=${rejudgeRun}\nbudget=${runBudget}\n`, { append: true });
+            console.log(suite === "tasks" ? "measuring: the task eval (router, staged, planner, agent; $2 each)" : `measuring: action ${action}, set ${set}, brains ${brains.join(", ")}, ${passes} passes, model ${model || "the committed default"}${runBudget ? `, run budget $${runBudget}` : ""}`);
           '
         env:
           IN_SET: ${{ inputs.set }}
@@ -136,6 +140,24 @@ jobs:
           IN_ACTION: ${{ inputs.action }}
           IN_REJUDGE_RUN: ${{ inputs.rejudge_run }}
           IN_RELEASE_BRAIN: ${{ inputs.release_brain }}
+      # D-054: a request with budget_usd caps this run at the shared ledger itself: the ledger's target and hard max for this job
+      # become what is recorded now plus budget_usd (never above $70), so run.ts's preflight refuses a quote (all parallel passes)
+      # over budget_usd, and the ledger refuses any call that would take this run's spend past it. No model call here.
+      - name: Run budget at the shared ledger (budget_usd)
+        if: steps.req.outputs.budget != ''
+        env: { RUN_BUDGET_USD: "${{ steps.req.outputs.budget }}" }
+        run: |
+          deno eval '
+            const bud = await import("file://" + Deno.cwd() + "/supabase/functions/_shared/model_budget.ts");
+            const gate = bud.resolveBudgetGate(undefined, (k) => Deno.env.get(k));
+            const st = gate?.status ? await gate.status() : null;
+            if (!st) { console.log("NOT RUN: the shared budget ledger could not be read; no model call was made."); Deno.exit(2); }
+            const cap = Math.min(70 * 1e6, st.total + Math.round(Number(Deno.env.get("RUN_BUDGET_USD")) * 1e6));
+            if (cap <= st.total) { console.log(`NOT RUN: nothing remains of the $70 (recorded $${(st.total / 1e6).toFixed(6)})`); Deno.exit(2); }
+            const usd = (Math.floor(cap) / 1e6).toFixed(6);
+            Deno.writeTextFileSync(Deno.env.get("GITHUB_ENV"), `MODEL_BUDGET_TARGET_USD=${usd}\nMODEL_BUDGET_HARD_USD=${usd}\n`, { append: true });
+            console.log(`run budget: $${((cap - st.total) / 1e6).toFixed(3)} on top of $${(st.total / 1e6).toFixed(6)} recorded; the ledger target and hard max for this job are $${usd}`);
+          '
       # The sealed set's recipient key: derived from the CI secret, its public half committed so the set can be sealed to
       # it. The secret's value never leaves the runner.
       - name: Recipient key for the sealed set (no model call)
@@ -161,7 +183,7 @@ jobs:
         run: |
           # --set heldout is the sealed held-out set (the bar); --set dev is the 38 in heldout-live.json.
           # D-038: fresh is an unsealed held-out set (evals/career/fresh-heldout.json), its results redacted like the sealed set's.
-          case "${{ steps.req.outputs.set }}" in sealed) S="--set heldout" ;; fresh) S="--set fresh" ;; *) S="--set dev" ;; esac
+          case "${{ steps.req.outputs.set }}" in sealed) S="--set heldout" ;; fresh) S="--set fresh" ;; d054) S="--set d054" ;; *) S="--set dev" ;; esac
           for b in ${{ steps.req.outputs.brains }}; do
             for p in 1 2 3 4 5; do deno run -A evals/career/run.ts --brain "$b" $S --label "${{ steps.req.outputs.set }}-$b-${{ github.run_id }}-p$p" > "$RUNNER_TEMP/$b-$p.txt" 2>&1 & done
             wait

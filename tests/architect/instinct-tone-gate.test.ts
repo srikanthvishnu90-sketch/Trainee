@@ -163,7 +163,7 @@ Deno.test({
       const person = async (before: string[]) => {
         const p = await w.person();
         await p.say(AVERY);
-        assertNode.match((await p.say("Yes, that's my resume")).reply, /10 facts/);
+        assertNode.match((await p.say("Yes, that's my resume")).reply, /13 facts/); // D-052 (#744): resume Interests are kept as facts, so the setup check reads 13, not 10
         for (const m of before) await p.say(m);
         return p;
       };

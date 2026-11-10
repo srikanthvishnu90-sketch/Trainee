@@ -22,7 +22,8 @@ const norm = (s) => String(s == null ? "" : s).toLowerCase().replace(/[*✱]/g, 
 function EXTRACT() {
   const squash = (s) => String(s || "").replace(/\s+/g, " ").trim();
   const clean = (s) => squash(s).replace(/\(required\)/i, "").replace(/\s*[*✱]+\s*$/, "").replace(/\s*[*✱]+\s*$/, "").trim();
-  const scope = document.querySelector("form") || document.body;
+  // An employee sign-in form (MARK_SIGNIN: Teamtailor's "Already working at X?") is never the application's scope or questions.
+  const scope = document.querySelector("form:not([data-upmore-signin])") || document.body;
   // Every match under a root, in document order, descending into open shadow roots (SmartRecruiters' components).
   const deepAll = (root, sel) => { const out = []; const walk = (n) => { for (const c of n.children) { if (c.matches(sel)) out.push(c); if (c.shadowRoot) walk(c.shadowRoot); walk(c); } }; walk(root); return out; };
   const rootOf = (el) => (el.getRootNode ? el.getRootNode() : document);
@@ -118,7 +119,7 @@ function EXTRACT() {
   const tagOf = (el) => (el && el.hasAttribute("data-upmore-q") ? Number(el.getAttribute("data-upmore-q")) : null);
   let qn = 1 + deepAll(document, "[data-upmore-q]").reduce((m, e) => Math.max(m, Number(e.getAttribute("data-upmore-q")) || 0), -1);
   const push = (d, el) => { const t = tagOf(el); d.q = t !== null && !out.some((x) => x.q === t) ? t : qn++; out.push(d); return d.q; };
-  const all = deepAll(scope, "input, select, textarea");
+  const all = deepAll(scope, "input, select, textarea").filter((e) => !e.closest("[data-upmore-signin]"));
 
   // Yes/No button pairs (Ashby): the hidden checkbox inside them is not a question of its own.
   for (const box of scope.querySelectorAll(".ashby-application-form-input-yesno")) {
@@ -202,6 +203,28 @@ function EXTRACT() {
   return out;
 }
 
+// ---- page side: mark every sign-in form on the page (data-upmore-signin), so it is never taken for the application ------
+// Architect ruling on #741: Teamtailor puts an "Already working at X?" employee sign-in form (action /auto_join; an email box,
+// or only "Log in") on every job page, ahead of the application that appears after "Apply for this job". A form is a sign-in
+// form when it posts to a sign-in address, or when it has no upload, asks for nothing but an email / user name / password, and
+// its only Submit says log in in one of the boards' languages. Returns how many there are.
+function MARK_SIGNIN() {
+  const vis = (e) => !!(e.offsetWidth || e.offsetHeight || e.getClientRects().length);
+  const words = /^\s*(log ?in|sign ?in|anmelden|einloggen|logga in|logg inn|log ind|inloggen|se connecter|connexion|iniciar sesi[oó]n|accedi|kirjaudu)\s*$/i;
+  let n = 0;
+  for (const f of document.querySelectorAll("form")) {
+    let action = "";
+    try { action = new URL(f.getAttribute("action") || "", location.href).pathname; } catch { /* none */ }
+    const byAction = /(^|\/)(auto_join|connect\/login|login|log_in|signin|sign_in)\/?$/i.test(action);
+    const fields = [...f.querySelectorAll("input, select, textarea")].filter((x) => !["hidden", "submit", "button", "image", "reset"].includes(x.type));
+    const loginOnly = fields.every((x) => x.type === "email" || x.type === "password" || /e-?mail|user|login/i.test(`${x.name} ${x.getAttribute("aria-label") || ""} ${x.autocomplete || ""}`));
+    const submits = [...f.querySelectorAll("button, input[type=submit]")].filter((b) => vis(b) && (b.tagName !== "BUTTON" || (b.getAttribute("type") || "submit") === "submit"));
+    const byWords = !f.querySelector("input[type=file]") && loginOnly && submits.length > 0 && submits.every((b) => words.test(b.innerText || b.value || ""));
+    if (byAction || byWords) { f.setAttribute("data-upmore-signin", action || "1"); n++; } else f.removeAttribute("data-upmore-signin");
+  }
+  return n;
+}
+
 // ---- page side: what each tagged question holds right now ------------------------------------------------------------
 function STATE(qs) {
   const squash = (s) => String(s || "").replace(/\s+/g, " ").trim();
@@ -238,7 +261,8 @@ function INVALID() {
   // A required checkbox group is "at least one" in the site's own script; the browser marks each box invalid. One ticked is enough.
   const deepAll = (root, sel) => { const out = []; const walk = (n) => { for (const c of n.children) { if (c.matches(sel)) out.push(c); if (c.shadowRoot) walk(c.shadowRoot); walk(c); } }; walk(root); return out; };
   const groupTicked = (e) => e.type === "checkbox" && e.name && deepAll(document, `input[type="checkbox"]`).some((x) => x.name === e.name && x.checked);
-  return deepAll(document, "input:invalid, select:invalid, textarea:invalid").filter((e) => !groupTicked(e)).filter((e) => e.type === "file" || e.offsetWidth || e.offsetHeight || e.getClientRects().length).map((e) => ({
+  // An employee sign-in form (MARK_SIGNIN) is not the application: its own empty required box is not one of ours.
+  return deepAll(document, "input:invalid, select:invalid, textarea:invalid").filter((e) => !groupTicked(e) && !e.closest("[data-upmore-signin]")).filter((e) => e.type === "file" || e.offsetWidth || e.offsetHeight || e.getClientRects().length).map((e) => ({
     q: e.getAttribute("data-upmore-q"), name: e.name || e.id || "", message: squash(e.validationMessage).slice(0, 80),
   }));
 }
@@ -882,4 +906,4 @@ function holdsApproved(f, want, facts = {}) {
   if (key === "state") return !matchState([held], want).error;
   return false;
 }
-module.exports = { heldNow, recheckFilled, holdsApproved, factsFrom, fillForm, matchOption, matchPlace, matchState, countryNames, phoneCountryMatch, factKey, factValue, answerFor, decide, labelCounts, labelKinds, norm, EXTRACT, STATE, DECLINE };
+module.exports = { MARK_SIGNIN, heldNow, recheckFilled, holdsApproved, factsFrom, fillForm, matchOption, matchPlace, matchState, countryNames, phoneCountryMatch, factKey, factValue, answerFor, decide, labelCounts, labelKinds, norm, EXTRACT, STATE, DECLINE };

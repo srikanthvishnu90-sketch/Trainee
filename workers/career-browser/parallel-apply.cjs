@@ -30,7 +30,7 @@
 //  - local only by default: only loopback hosts are driven. Real employer hosts need `allowHosts` from the caller
 //    (the owner-run approve-first path), and this module never discovers or logs in anywhere.
 const fs = require("node:fs");
-const { fillForm, heldNow, recheckFilled } = require("./ats-fill.cjs");
+const { fillForm, heldNow, recheckFilled, MARK_SIGNIN } = require("./ats-fill.cjs");
 const { APPLY_TEXT, NEVER_CLICK, applyUrlFor } = require("./apply-entry.cjs");
 const crypto = require("node:crypto");
 
@@ -310,10 +310,12 @@ async function attempt(browser, p, opts, timing) {
     // The form's own Submit control, as a person would press it: the visible one. A <button> with no type submits its form
     // (Breezy); Lever's visible "Submit application" is type="button" beside a hidden type="submit" its script presses
     // after the hCaptcha token. Marked data-upmore-submit, so the check below and the click use that same control.
-    const markSubmit = () => page.evaluate(() => {
+    // An employee sign-in form (ats-fill MARK_SIGNIN: Teamtailor's "Already working at X?") is never the application: its
+    // controls are never marked, filled or pressed (architect ruling on #741: a Submit reached there was a false pass).
+    const markSubmit = async () => { await page.evaluate(MARK_SIGNIN).catch(() => 0); return page.evaluate(() => {
       const vis = (e) => !!(e.offsetWidth || e.offsetHeight) && getComputedStyle(e).visibility !== "hidden";
       for (const e of document.querySelectorAll("[data-upmore-submit]")) e.removeAttribute("data-upmore-submit");
-      const forms = [...document.querySelectorAll("form")].filter((f) => f.querySelector("input, select, textarea"));
+      const forms = [...document.querySelectorAll("form")].filter((f) => f.querySelector("input, select, textarea") && !f.hasAttribute("data-upmore-signin"));
       const word = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$|^\s*(bewerbung )?(absenden|senden)\s*$|^\s*(envoyer|enviar|verzenden|skicka)( .{0,20})?$/i;
       for (const f of forms) {
         const typed = [...f.querySelectorAll("button[type=submit], button:not([type]), input[type=submit]")].filter(vis);
@@ -324,12 +326,13 @@ async function attempt(browser, p, opts, timing) {
       // A board that builds its application without a <form> (Ashby: every posting, strict benchmark run 42712892939, forms=0 with
       // 19 to 48 fields): the page is the form when it has no form of its own, asks for a file or an email, and has exactly one
       // visible control in the Submit words. Two or none: no Submit is pressed.
-      if (!forms.length && document.querySelector("input[type=file], input[type=email]")) {
-        const worded = [...document.querySelectorAll("button, [role=button], input[type=button], input[type=submit]")].filter((b) => vis(b) && word.test(b.innerText || b.value || ""));
+      const outside = (e) => !e.closest("[data-upmore-signin]");
+      if (!forms.length && [...document.querySelectorAll("input[type=file], input[type=email]")].some(outside)) {
+        const worded = [...document.querySelectorAll("button, [role=button], input[type=button], input[type=submit]")].filter((b) => vis(b) && outside(b) && word.test(b.innerText || b.value || ""));
         if (worded.length === 1) { worded[0].setAttribute("data-upmore-submit", "1"); return true; }
       }
       return false;
-    });
+    }); };
     // A form shown in steps (Breezy: strict benchmark run 42735825405, 4 postings): one visible "Continue" (type=button, so pressing
     // it posts nothing; the page's own script shows the next step) with the form's Submit drawn but hidden until the last step.
     // Marked data-upmore-next. Two such controls, a submit-typed one, or no hidden Submit beside it: not a step form.
@@ -338,7 +341,7 @@ async function attempt(browser, p, opts, timing) {
       for (const e of document.querySelectorAll("[data-upmore-next]")) e.removeAttribute("data-upmore-next");
       const next = /^\s*(continue|next|next step|weiter|suivant|siguiente|volgende|avanti|pr[oó]ximo)\s*[›»>→]?\s*$/i;
       const submitWord = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$/i;
-      for (const f of [...document.querySelectorAll("form")].filter((x) => x.querySelector("input, select, textarea"))) {
+      for (const f of [...document.querySelectorAll("form")].filter((x) => x.querySelector("input, select, textarea") && !x.hasAttribute("data-upmore-signin"))) {
         const nexts = [...f.querySelectorAll("button, [role=button], input[type=button]")].filter((b) => vis(b) && next.test(b.innerText || b.value || ""));
         const hiddenSubmit = [...f.querySelectorAll("button, input[type=submit], input[type=button]")].some((b) => !vis(b) && submitWord.test(b.innerText || b.value || ""));
         if (nexts.length === 1 && hiddenSubmit && (nexts[0].tagName !== "BUTTON" || nexts[0].getAttribute("type") === "button") && nexts[0].getAttribute("type") !== "submit") { nexts[0].setAttribute("data-upmore-next", "1"); return true; }
@@ -366,7 +369,11 @@ async function attempt(browser, p, opts, timing) {
     }
     timing.load = Date.now() - t0;
     const t1 = Date.now();
-    if (!(await hasForm())) throw new NeedsUser("no_application_form_found", p.url);
+    if (!(await hasForm())) {
+      // The page's only form is an employee sign-in form: a sign-in wall the person finishes themselves (WO-L), nothing typed.
+      if (await page.evaluate(MARK_SIGNIN).catch(() => 0)) throw new NeedsUser("login_required", p.url, "employee_sign_in");
+      throw new NeedsUser("no_application_form_found", p.url);
+    }
     // The page's own questions, answered only from the approved facts / answers (ats-fill.cjs), each read back. A required
     // question with no confirmed answer, or one that could not be set and checked, stops the run: the person is asked.
     // A step form is filled one step at a time: each step's questions answered and read back, then its one Continue pressed, until
@@ -427,7 +434,9 @@ async function attempt(browser, p, opts, timing) {
     if (opts.shotBefore) await page.screenshot({ path: opts.shotBefore, fullPage: true });
     // The caller records "submitting" (and re-checks its lease and kill switch) BEFORE the click; a refusal stops here, unsent.
     // A dry run's audit (opts.audit) also gets what each filled question holds at this instant; production passes only the phase.
-    if (opts.onPhase) await opts.onPhase("submitting", opts.audit ? { id: p.id, fields: await heldNow(page, fr.filled) } : undefined);
+    // The control about to be pressed, for the caller's own check (the strict bench refuses one inside a sign-in form).
+    const submitInfo = await page.$eval("[data-upmore-submit]", (b) => { const f = b.closest("form"); return { signin: !!b.closest("[data-upmore-signin]"), form: f ? f.getAttribute("action") || "" : null }; }).catch(() => ({ signin: false, form: null }));
+    if (opts.onPhase) await opts.onPhase("submitting", opts.audit ? { id: p.id, fields: await heldNow(page, fr.filled) } : undefined, submitInfo);
     // Past this line nothing is retried: the employer may have received it.
     const t2 = Date.now();
     timing.submitClicked = true;

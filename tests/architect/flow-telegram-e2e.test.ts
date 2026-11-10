@@ -349,7 +349,9 @@ Deno.test({
         for (const f of prepared.payload.fields.filter((x: any) => typeof x.value === "string" && x.name !== "_systemfield_resume")) {
           assert(r.reply.includes(f.value), `the card shows ${f.label} = ${f.value}: ${r.reply}`);
         }
-        assert(/Resume: .*tailored for this role \([0-9a-f]{12}\)/.test(r.reply), r.reply);
+        // Architect amendment R6 (2026-11-10): the resume in human terms on the card, no hash prefix; the hash is in the stored approval.
+        assert(/Resume: .*tailored for this role/.test(r.reply) && !/\([0-9a-f]{12}\)/.test(r.reply), r.reply);
+        assert(/^[0-9a-f]{64}$/.test(String(prepared.payload.resume_sha256)), "the resume's hash is in the approved payload");
         const last = r.calls.at(-1)!;
         buttons = last.body.reply_markup?.inline_keyboard?.flat() ?? [];
         const d = await cardDigest(card);

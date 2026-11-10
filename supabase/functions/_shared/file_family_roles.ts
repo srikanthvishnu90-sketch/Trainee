@@ -65,6 +65,8 @@ function roleCard(r: ShortRole, rid: string, f: ShortlistInput, c: Ctx): string 
   // Select carries the exact payload tag its card shows (none: prepare only), as the live page's Select does (results_page.ts).
   if (approvable && !paused && (f.live || !r.tag)) more.push(`<label class="ff-pick"><input type="checkbox" form="ff-sel" name="pick" value="${esc(`${r.ref}:${tag}`)}" aria-label="Select ${esc(label)}"> Select</label>`);
   if (link && !r.blocked && !r.byHand) more.push(actHtml({ label: `View posting on ${host}`, effect: "open", href: link, ghost: true, aria: `View posting: ${label} on ${host}` }));
+  // Item 6 S4: the live page links each role to its Role workspace (F-06), drawn from the same records.
+  if (f.live) more.push(actHtml({ label: "Role workspace", effect: "navigate", href: `?role=${encodeURIComponent(r.ref)}`, ghost: true, aria: `Role workspace: ${label}` }));
   more.push(`<form method="post" class="ff-act">${hidden({ t: f.token, action: "dismiss", ref: r.ref })}<button type="submit" class="ff-btn ff-ghost" data-effect="decide" aria-label="Dismiss ${esc(label)}">Dismiss</button><span class="ff-off">Hides this role from your list. Private and reversible; no application is touched.</span></form>`);
   let main = "";
   // What will be sent: only a prepared application has one, and it is exactly what its Submit approves (its payload tag).

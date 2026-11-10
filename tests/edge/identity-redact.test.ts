@@ -24,9 +24,9 @@ Deno.test("the chat input carries only the redacted text, and the person is told
   assert(i.ok);
   assert(!i.message.includes("6789") && !i.userContent.includes("6789"));
   assertEquals(i.redacted, ["ssn"]);
-  assertEquals(redactionNote(i.redacted), "(I removed the Social Security number from your message and didn't keep it. Upmore never needs it here.)");
+  assertEquals(redactionNote(i.redacted), "(I removed the Social Security number from your message and didn't keep it. Trainee never needs it here.)");
   assertEquals(redactionNote([]), null);
-  assertEquals(redactionNote(["ssn", "card"]), "(I removed the Social Security number and card number from your message and didn't keep it. Upmore never needs it here.)");
+  assertEquals(redactionNote(["ssn", "card"]), "(I removed the Social Security number and card number from your message and didn't keep it. Trainee never needs it here.)");
 });
 // The handler wiring is checked in tests/model-guards-wiring.test.cjs (it reads the source; edge tests run without permissions).
 
@@ -41,5 +41,5 @@ Deno.test("a password and a labeled one-time code are removed; words that descri
   assertEquals(redactIdentity(`otp: ${CODE.slice(0, 3)} ${CODE.slice(3)}`).text, "otp: [code removed]");
   assertEquals(redactIdentity("cvv 123").text, "cvv [security code removed]");
   for (const t of ["my password is wrong", "my password is broken, help", "I forgot my password", "reset my password please", "what is a strong password", "the password for fidelity is correct", CODE, "confirmation number 12345678", "send mike 40"]) assertEquals(redactIdentity(t), { text: t, removed: [] }, t);
-  assertEquals(redactionNote(["password"]), "(I removed the password from your message and didn't keep it. Upmore never needs it here.) Never send passwords or codes in a message: you sign in yourself on the company's own page, and anything else sensitive goes on Upmore's secure link.");
+  assertEquals(redactionNote(["password"]), "(I removed the password from your message and didn't keep it. Trainee never needs it here.) Never send passwords or codes in a message: you sign in yourself on the company's own page, and anything else sensitive goes on Trainee's secure link.");
 });

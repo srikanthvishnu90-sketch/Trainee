@@ -176,10 +176,10 @@ test("BUG-271: the merge record's verbatim turn — a deflection naming the miss
   const { say } = makeWorld();
   const out = say("u-271a", "t", "there's a posting for a licensed insurance adjuster — am I eligible for that?").out;
   assert.equal(out.intent, "eligibility_check");
-  assert.match(out.reply, /can't be graded without the posting/, "the missing input is named: the posting");
+  assert.match(out.reply, /haven't read that posting/, "the missing input is named: the posting");
   assert.match(out.reply, /insurance adjuster license/, "the specific fact the named requirement turns on is named");
   assert.match(out.reply, /does not show it/, "the record's state for that fact is spoken");
-  assert.match(out.reply, /Paste the posting text/, "the closest path is offered");
+  assert.match(out.reply, /Send me the posting's link or its text/, "the closest path is offered");
   assert.ok(!/That is not on your record/.test(out.reply), "never the self-check non-sequitur again");
   assert.ok(!/Verdict:/.test(out.reply), "no verdict is invented without a posting");
 });
@@ -189,7 +189,7 @@ test("BUG-271: the bare ask names the requirement classes it will turn on — st
   const out = say("u-271b", "t", "am I eligible?").out;
   assert.equal(out.intent, "eligibility_check");
   assert.match(out.reply, /hard requirements/);
-  assert.match(out.reply, /license or certification, a degree, years of experience, work authorization/);
+  assert.match(out.reply, /a license, a degree, years of experience or work authorization/);
   assert.ok(!/Verdict:/.test(out.reply));
   assert.ok(!/That is not on your record/.test(out.reply));
 });

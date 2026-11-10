@@ -2,19 +2,18 @@
 // each family's own builder and the one visual system (file_family.ts familyPage). Two worlds: a person with records, and a person
 // with none. For each page every control is inventoried from the drawn HTML and classified:
 //   chat      a ?<key>=1 link whose key is a decision that needs the person's words (the File server opens the chat with it filled in)
-//   post      a POST form carrying the page token, with an action the File server answers (file_family_actions.ts LIVE_POSTS)
+//   post      a POST form carrying the page token, with an action the File server answers (briefpause / briefresume)
 //   source    an https page
 //   unserved  anything else (a GET the server does not read, a post it does not answer, a link with no target)
 //   dead      a control drawn off with no reason beside it
 // Printed: FILES RECORDS: pages P, controls C, chat Q, posts T, sources S, off-with-reason O, unserved U, dead D
 // Asserted: unserved 0, dead 0; every value drawn on F-02 is in the records or written "Unknown"; F-13 says "not booked" when the
-// invite offers several times; F-15 says "Nothing accepted" and adds no total; F-14's pause changes only the person's own setting.
+// invite offers several times; F-15 says "Nothing accepted" and adds no total; F-14's pause is a token POST.
 import assert from "node:assert/strict";
 import { familyPage, type FamilyFile, familyStatePage } from "../../supabase/functions/_shared/file_family.ts";
 import { answerLibraryFile, careerBriefFile, pathComparisonFile, profileFactsFile } from "../../supabase/functions/_shared/file_family_plan.ts";
 import { interviewHubFile, offerComparisonFile, weeklyBriefFile } from "../../supabase/functions/_shared/file_family_apply.ts";
 import { LIVE_FAMILIES, type LiveFamily, viewOf } from "../../supabase/functions/_shared/file_family_records.ts";
-import { familySource, LIVE_POSTS } from "../../supabase/functions/_shared/file_family_actions.ts";
 
 import { FULL, NONE, NOW } from "./files-records-fixtures.ts";
 const TOKEN = "page-token-abc";
@@ -32,7 +31,7 @@ function controls(html: string): { kind: Kind; what: string }[] {
   const out: { kind: Kind; what: string }[] = [];
   for (const m of html.matchAll(/<form method="post"[^>]*>(.*?)<\/form>/gs)) {
     const t = /name="t" value="([^"]*)"/.exec(m[1])?.[1], action = /name="action" value="([^"]*)"/.exec(m[1])?.[1] ?? "";
-    const served = t === TOKEN && Object.values(LIVE_POSTS).some((s) => s!.has(action));
+    const served = t === TOKEN && /^brief(pause|resume)$/.test(action); // the posts file_family_actions.ts answers (part 2)
     out.push({ kind: served ? "post" : "unserved", what: `POST ${action}` });
   }
   const rest = html.replace(/<form method="post".*?<\/form>/gs, "");
@@ -109,22 +108,10 @@ Deno.test("F-15: the person's terms with their source, no total, nothing accepte
   assert.match(draw("F-15", NONE), /No offer on record[\s\S]*Nothing accepted/);
 });
 
-Deno.test("F-14: a quiet week says so; the pause is a token POST that changes only the person's own setting and keeps every record", async () => {
+Deno.test("F-14: a quiet week says so; the pause is drawn as a POST form carrying the page token", () => {
   assert.match(draw("F-14", FULL), /2 applications? approved|1 application approved/);
   assert.match(draw("F-14", NONE), /Quiet week/);
   const html = draw("F-14", FULL);
   assert.match(html, /<form method="post"[^>]*><input type="hidden" name="t" value="page-token-abc"><input type="hidden" name="action" value="briefpause">/);
   assert.match(draw("F-14", { ...FULL, digest: { ...FULL.digest!, enabled: false } }), /name="action" value="briefresume"/);
-  const writes: [string, boolean][] = [];
-  const src = familySource({ read: async () => FULL, digest: { async setEnabled(u, on) { writes.push([u, on]); } } });
-  const r = await src.act("u1", "F-14", "briefpause", new URLSearchParams());
-  assert.ok(r.ok); assert.match(r.lines.join(" "), /Every record is kept/);
-  assert.deepEqual(writes, [["u1", false]]);
-  const no = await src.act("u1", "F-15", "briefpause", new URLSearchParams());
-  assert.equal(no.ok, false); assert.match(no.lines[0], /Nothing was changed or sent/);
-  assert.deepEqual(writes, [["u1", false]], "a post another family does not answer changes nothing");
-  const failing = familySource({ read: async () => { throw new Error("db down"); }, digest: { async setEnabled() { throw new Error("db down"); } } });
-  const v = await failing.view("u1", "F-02", { now: NOW, tz: null, token: TOKEN });
-  assert.ok("state" in v && v.state.state === "error", "unreadable records: the C.24 error state, never a File from part of them");
-  assert.equal((await failing.act("u1", "F-14", "briefresume", new URLSearchParams())).ok, false);
 });

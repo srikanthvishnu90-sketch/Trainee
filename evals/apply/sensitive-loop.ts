@@ -22,6 +22,8 @@ import { questionsToStore } from "../../workers/career-browser/ask-once.ts";
 import { formAnswersToKeep } from "../../extension/src/apply_core.ts";
 import { postingCountry, postingPlaces } from "../../supabase/functions/_shared/posting_place.ts";
 import { PERSONA } from "./fill-coverage.ts";
+import { cardFieldPrefix, preparedCardProblem, resumeCardLine } from "../../supabase/functions/_shared/career_prepared_card.ts";
+import { hashApplyPayload } from "../../supabase/functions/_shared/career_apply_store.ts";
 import FIXTURE from "../../tests/fixtures/apply/sensitive-questions.json" with { type: "json" };
 
 const require = createRequire(import.meta.url);
@@ -128,6 +130,28 @@ export function check(q: Q) {
   return fails;
 }
 
+// Coordinator ruling (2026-11-10): a confirmed answer that travels (work rights, GPA, graduation) is never reused silently.
+// Each one filled into an application is on that application's card (the server's own check, career_prepared_card.ts,
+// refuses a card that leaves it out) and inside the payload hash the yes approves (another value, another hash). `labelled`:
+// whether its card line names where the answer came from; reported apart, since the card carries no source words yet.
+const TRAVELS = new Set(["work_authorization", "sponsorship", "gpa", "graduation_date"]);
+const SHA = "a".repeat(64);
+export async function reuseOnCard(q: Q) {
+  if (!TRAVELS.has(q.category)) return null;
+  const f = plan(q, `A-${q.id}`, q.company ?? "Example Co", PERSONA, {}, true);
+  if (!f.filled) return null; // asked: nothing reused
+  const field = { name: "q", label: q.label, value: String(f.value), factId: `fact:${q.category}`, source: { table: "answers", key: q.category, value: String(f.value) } };
+  const payload = { company: q.company ?? "Example Co", fields: [field], resume_sha256: SHA, destination: "https://example.test/apply" };
+  const line = `${cardFieldPrefix(q.label)}${field.value}`;
+  const card = [payload.company, line, resumeCardLine("resume.pdf", SHA), `Sends to ${payload.destination}`];
+  const fails: string[] = [];
+  if (preparedCardProblem(payload, card, { filename: "resume.pdf" }) !== null) fails.push("card: the reused answer's card is refused");
+  if (preparedCardProblem(payload, card.filter((l) => l !== line), { filename: "resume.pdf" }) === null) fails.push("card: a card without the reused answer is accepted");
+  const other = { ...payload, fields: [{ ...field, value: field.value + " (changed)" }] };
+  if (await hashApplyPayload(other) === await hashApplyPayload(payload)) fails.push("hash: the payload hash does not cover the reused answer");
+  return { fails, labelled: /\((from )?your (answer|confirmed)/i.test(line) };
+}
+
 if (import.meta.main) {
   const real = (FIXTURE as any).questions as Q[];
   const out = (qs: Q[]) => qs.map((q) => ({ q, fails: check(q) }));
@@ -137,5 +161,8 @@ if (import.meta.main) {
   if (Deno.args.includes("--json")) console.log(JSON.stringify({ real: r.map((x) => ({ id: x.q.id, fails: x.fails })), dob: s.map((x) => ({ id: x.q.id, fails: x.fails })) }, null, 1));
   else for (const { q, fails } of [...r, ...s]) if (fails.length) console.log(`${q.id} [${q.category}] ${q.company} @ ${q.location ?? "-"}: ${q.label.slice(0, 90)}\n   ${fails.join("\n   ")}`);
   console.log("by category:", Object.entries(byCat).map(([k, [a, b]]) => `${k} ${a}/${b}`).join(", "));
+  const reused = (await Promise.all(real.map(async (q) => ({ q, r: await reuseOnCard(q) })))).filter((x) => x.r);
+  for (const { q, r } of reused) if (r!.fails.length) console.log(`${q.id} [${q.category}] ${q.label.slice(0, 90)}\n   ${r!.fails.join("\n   ")}`);
+  console.log(`REUSED on card and in hash ${reused.filter((x) => !x.r!.fails.length).length}/${reused.length}  labelled with source ${reused.filter((x) => x.r!.labelled).length}/${reused.length}`);
   console.log(`SENSITIVE real ${r.filter((x) => !x.fails.length).length}/${r.length}  date-of-birth (written) ${s.filter((x) => !x.fails.length).length}/${s.length}`);
 }

@@ -34,13 +34,15 @@ export function questionsToStore(result: any, o: { facts: Record<string, unknown
   // drafts one, even when a standing consent already answered that statement on the form.
   const aiPolicy = aiPolicyStatements(Array.isArray(result?.ai_policy) ? result.ai_policy : []).join("\n").slice(0, 1200);
   for (const q of Array.isArray(result?.questions) ? result.questions : []) {
-    const label = String(q?.label ?? "").replace(/\s+/g, " ").trim().slice(0, 600);
-    if (!label || NEVER_BY_TEXT.test(label)) continue;
+    // a-sensitive: the key is the full label's (the planner reads it so); only the stored text is cut. A cut label's key
+    // was one the planner never reads (Lever's 1,165-character "Race" question was asked again after every answer).
+    const full = String(q?.label ?? "").replace(/\s+/g, " ").trim(), label = full.slice(0, 600);
+    if (!label || NEVER_BY_TEXT.test(full)) continue;
     const options = (Array.isArray(q.options) ? q.options : []).map((x: unknown) => String(x).slice(0, 300)).slice(0, 60);
     const rawType = String(q.type || "input_text"), row = decodeRowQuestionType(rawType);
     if (rawType.startsWith("row:") && !row) continue; // malformed/unbound rows never become generic label answers
     const type = rawType.slice(0, 40);
-    const shape = { label, type, options: options.map((l: string) => ({ label: l })) };
+    const shape = { label: full, type, options: options.map((l: string) => ({ label: l })) };
     const m = row ? { kind: "unknown", fact: "unknown" } : mapQuestion(shape);
     // WO-055: the posting's location (as its page shows it) decides whether an answer may become the person's fact.
     const here = factStaysHere(shape, result?.location ? String(result.location) : undefined, o.facts);

@@ -156,7 +156,11 @@ function sendWorld(gmail: { email: string | null; canSend?: boolean }) {
 let jar = "";
 async function openWith(d: ConnectDeps, reason: string) {
   const t = (await mintConnectToken({ secret: SECRET, userId: U, reason, channel: "telegram", now: NOW, kind: "l" }))!;
-  const first = await handleConnect(new Request(`${BASE}?t=${encodeURIComponent(t)}`, { headers: { "user-agent": BROWSER } }), d);
+  // Architect amendment, security: link scanners (x-audit, coordinator ruling 2026-11-10): the GET draws the open page (200,
+  // nothing used up); its one button POSTs the link with the page token, which takes the link (303 + cookie).
+  const shown = await (await handleConnect(new Request(`${BASE}?t=${encodeURIComponent(t)}`, { headers: { "user-agent": BROWSER } }), d)).text();
+  const link = /name="link" value="([^"]+)"/.exec(shown)?.[1] ?? "", pt = /name="pt" value="([^"]+)"/.exec(shown)?.[1] ?? "";
+  const first = await handleConnect(new Request(BASE, { method: "POST", headers: { "user-agent": BROWSER, "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ link, pt }).toString() }), d);
   const cookie = (first.headers.get("set-cookie") ?? "").split(";")[0];
   jar = cookie;
   return await (await handleConnect(new Request(BASE, { headers: { "user-agent": BROWSER, cookie } }), d)).text();

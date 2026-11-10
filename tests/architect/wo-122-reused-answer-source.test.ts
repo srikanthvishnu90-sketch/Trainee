@@ -59,6 +59,11 @@ Deno.test("sources and dates: B's card says where each reused sensitive answer c
   assertEquals(line(card, HEARD), `${HEARD}: A friend`);
   const sponsor = payload.fields.find((f: any) => f.label === SPONSOR);
   assertEquals(sponsor.source.at, "2026-11-10T03:30:00Z");
+  // Ruling on #718: the question's postings never enter the payload or its hash; one boolean, judged at preparation.
+  assertEquals(sponsor.source.for_posting, false);
+  assertEquals(payload.fields.find((f: any) => f.label === CITY).source.for_posting, false);
+  assert(!JSON.stringify(payload).includes("job_ids"), "no job_ids array anywhere in the payload");
+  assert(!JSON.stringify(payload).includes(A), "no other posting's key in the payload");
   assertEquals(payload.tz, "America/Chicago");
   assertEquals(preparedCardProblem(payload, card, { filename: "resume.pdf" }), null);
 });
@@ -76,12 +81,15 @@ Deno.test("sources and dates: with no zone stored, no date is shown (a UTC date 
 Deno.test("sources and dates: the same answer given for B itself takes no suffix", async () => {
   const { payload, card } = await prepared({ rows: [ROW({ job_ids: [A, B] }), CITY_ROW] });
   assertEquals(line(card, SPONSOR), `${SPONSOR}: No`);
+  assertEquals(payload.fields.find((f: any) => f.label === SPONSOR).source.for_posting, true);
+  assert(!JSON.stringify(payload).includes("job_ids"), "no job_ids array anywhere in the payload");
   assertEquals(preparedCardProblem(payload, card, { filename: "resume.pdf" }), null);
 });
 
 Deno.test("sources and dates: under v1 (no job_ids) a texted answer's freshness is unknown, and it takes no suffix", async () => {
-  const { card } = await prepared({ rows: [ROW({ job_ids: undefined }), CITY_ROW] });
+  const { payload, card } = await prepared({ rows: [ROW({ job_ids: undefined }), CITY_ROW] });
   assertEquals(line(card, SPONSOR), `${SPONSOR}: No`);
+  assertEquals(payload.fields.find((f: any) => f.label === SPONSOR).source.for_posting, undefined);
   assertEquals(line(card, GPA), `${GPA}: 3.8 (from your confirmed facts)`);
 });
 
@@ -94,7 +102,13 @@ Deno.test("hash: source.at is inside the payload hash and the engine approval ha
     else if (f?.at) f.at = "2026-11-01T15:00:00Z";
   }
   assertNotEquals(await hashApplyPayload(moved), await hashApplyPayload(payload));
-  assertNotEquals(await engineApprovalFromPayload(moved), payload.engine_approval);
+  assertNotEquals(await engineApprovalFromPayload(moved), payload.engine_approval);  const flipped = structuredClone(payload);
+  for (const f of [...flipped.fields, ...flipped.replay_sources]) {
+    if (f?.source?.for_posting === false) f.source.for_posting = true;
+    else if (f?.for_posting === false) f.for_posting = true;
+  }
+  assertNotEquals(await hashApplyPayload(flipped), await hashApplyPayload(payload));
+  assertNotEquals(await engineApprovalFromPayload(flipped), payload.engine_approval);
 });
 
 Deno.test("hash: a payload prepared before WO-122 (no at, no job_ids) still validates", async () => {

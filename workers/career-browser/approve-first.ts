@@ -97,7 +97,8 @@ export async function prepare(o: {
   const ev = run.evidence;
   // WO-102: each answer goes with the source the engine's contract judged it by (the event that confirmed it, its
   // provenance, whether it may attest, and where a texted answer was kept), so the approved run is judged again on it.
-  const fields = ev.fields.map((f: any) => ({ name: f.name, label: f.label, value: f.value, factId: f.factId, ...sourceOf(ev.sources?.[f.factId]) }));
+  const posting = String(ev.payload.posting);
+  const fields = ev.fields.map((f: any) => ({ name: f.name, label: f.label, value: f.value, factId: f.factId, ...sourceOf(ev.sources?.[f.factId], posting) }));
   const payload = {
     version: 1,
     user_id: ev.payload.user_id,
@@ -115,7 +116,8 @@ export async function prepare(o: {
     account_version: o.account.version,
     expires_at: new Date(o.now + (o.ttlHours ?? 24) * 3600_000).toISOString(),
     ...(ev.trust?.quarantine_version ? { quarantine_version: String(ev.trust.quarantine_version), manifest_hash: String(ev.trust.manifest_hash ?? "") } : {}),
-    ...(ev.trust?.manifest_hash ? { replay_sources: Array.isArray(ev.replay_sources) ? ev.replay_sources : Object.values(ev.sources ?? {}) } : {}),
+    // WO-122 ruling: the question's postings (job_ids) stay on this computer; the payload carries for_posting only.
+    ...(ev.trust?.manifest_hash ? { replay_sources: (Array.isArray(ev.replay_sources) ? ev.replay_sources : Object.values(ev.sources ?? {})).map((s: any) => forPosting(s, posting)) } : {}),
     ...(o.resumeTag?.tailored
       ? { resume_tailored: true, ...(o.resumeTag.persona ? { resume_persona: o.resumeTag.persona } : {}) }
       : {}),
@@ -203,7 +205,9 @@ export function factsFromPayload(payload: any) {
       bindings.set(coordinate, binding); metadata.set(coordinate, evidence); ids.set(id, coordinate);
       if (id.startsWith("text-answer:") && f.confirmation_event_id === id && f.provenance === `owner answered this question (${id})`) {
         text_answers.push({ id: id.slice("text-answer:".length), key: source.table === "answers" ? `fact:${source.key}` : source.key, kind: "", answer: source.value,
-          ...(typeof source.at === "string" ? { at: source.at } : {}), ...(Array.isArray(source.job_ids) ? { job_ids: source.job_ids } : {}) });
+          ...(typeof source.at === "string" ? { at: source.at } : {}),
+          // for_posting back as the one posting it was asked for (or none), so the approval's for_posting comes out the same
+          ...(typeof source.for_posting === "boolean" ? { job_ids: source.for_posting ? [String(payload.job_id)] : [] } : {}) });
       } else {
         (source.table === "answers" ? answers : saved)[source.key] = {
           value: source.value, factId: f.factId, confirmed: true,
@@ -234,12 +238,20 @@ export function factsFromPayload(payload: any) {
   return { user_id: payload.user_id, answers, saved, ...(text_answers.length ? { text_answers } : {}) };
 }
 // The source an answer was approved on, from the engine's manifest entry (evidence.sources), for the payload.
-function sourceOf(tf: any) {
+function sourceOf(tf: any, posting?: string) {
   if (!tf || typeof tf !== "object") return {};
+  const s = forPosting(tf, posting);
   return {
     provenance: String(tf.provenance ?? ""), confirmation_event_id: String(tf.event ?? ""), ...(tf.authorizes === true ? { authorizes: true } : {}),
-    source: { table: tf.table, key: tf.key, value: tf.value, ...(tf.at ? { at: tf.at } : {}), ...(Array.isArray(tf.job_ids) ? { job_ids: tf.job_ids } : {}) },
+    source: { table: tf.table, key: tf.key, value: tf.value, ...(s.at ? { at: s.at } : {}), ...(typeof s.for_posting === "boolean" ? { for_posting: s.for_posting } : {}) },
   };
+}
+// WO-122 ruling: a texted answer's question postings become one boolean at preparation, whether this posting's own question
+// was among them; the list never enters the payload or its hash.
+function forPosting(tf: any, posting?: string) {
+  if (!tf || typeof tf !== "object" || !Array.isArray(tf.job_ids)) return tf;
+  const { job_ids, ...rest } = tf;
+  return posting === undefined ? rest : { ...rest, for_posting: job_ids.map(String).includes(posting) };
 }
 // The engine's canonical approval identity (scripts/apply.ts): validate the queued field/source/schema binding
 // before reconstructing facts. Otherwise a changed payload could silently re-create an older approved answer.

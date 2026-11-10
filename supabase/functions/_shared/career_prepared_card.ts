@@ -21,9 +21,10 @@ import { mapQuestion } from "./question_map.ts";
 export const CARD_MARK: Record<string, string> = { consent: "You agree: ", attestation: "Your statement: ", screen: "About this job: " };
 export const cardFieldPrefix = (label: string) => `${CARD_MARK[mapQuestion({ label }).kind] ?? ""}${label}: `;
 // WO-122: a sensitive answer (work rights, GPA, graduation) not given for this application says where it came from. It is
-// reused when it comes from the person's confirmed-facts file, or from an answer they texted whose question row
-// (source.job_ids, career_apply_answers_own_v2) does not list this posting; a texted answer whose row is unknown (v1, no
-// job_ids) or one kept for this posting only (a job: key) is fresh and takes none. The date is the answer's own
+// reused when it comes from the person's confirmed-facts file, or from an answer they texted that was not given for this
+// posting (source.for_posting false: judged at preparation from the question row's job_ids, career_apply_answers_own_v2,
+// which never enter the payload); a texted answer whose row is unknown (v1, no for_posting) or one kept for this posting
+// only (a job: key) is fresh and takes none. The date is the answer's own
 // (source.at), in the person's own IANA zone (payload.tz, R7); with no zone, or no date, no date is said: a UTC day can
 // be the wrong day. The only formatter of the suffix, for the worker's card, the extension's card and the server's check.
 const SENSITIVE = new Set(["work_authorization", "sponsorship", "us_person", "citizenship", "gpa", "graduation_date"]);
@@ -33,13 +34,13 @@ function personTz(tz: unknown): string | null {
   try { new Intl.DateTimeFormat("en-US", { timeZone: tz }); return tz; } catch { return null; }
 }
 // deno-lint-ignore no-explicit-any
-export function reusedSourceSuffix(field: any, postingJobId: unknown, tz?: unknown): string {
+// `_postingJobId` is the posting the card is for; freshness is the field's own for_posting, judged against it at preparation.
+export function reusedSourceSuffix(field: any, _postingJobId: unknown, tz?: unknown): string {
   if (!SENSITIVE.has(mapQuestion({ label: String(field?.label ?? "") }).fact)) return "";
   const id = String(field?.factId ?? ""), src = field?.source && typeof field.source === "object" ? field.source : {};
   if (!id || /^(approved-local-resume|essay-draft):/.test(id) || String(src.key ?? "").startsWith("job:")) return "";
   if (id.startsWith("text-answer:")) {
-    if (!Array.isArray(src.job_ids)) return ""; // freshness unknown: fails toward "fresh takes none"
-    if (src.job_ids.map(String).includes(String(postingJobId ?? ""))) return "";
+    if (src.for_posting !== false) return ""; // given for this posting, or unknown (fails toward "fresh takes none")
     const zone = personTz(tz), at = typeof src.at === "string" ? Date.parse(src.at) : NaN;
     if (zone && Number.isFinite(at)) {
       return ` (from your answer on ${new Intl.DateTimeFormat("en-US", { timeZone: zone, month: "short", day: "numeric" }).format(new Date(at))})`;

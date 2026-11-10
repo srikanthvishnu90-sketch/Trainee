@@ -133,7 +133,8 @@ export function check(q: Q) {
 // Coordinator ruling (2026-11-10): a confirmed answer that travels (work rights, GPA, graduation) is never reused silently.
 // Each one filled into an application is on that application's card (the server's own check, career_prepared_card.ts,
 // refuses a card that leaves it out) and inside the payload hash the yes approves (another value, another hash). `labelled`
-// (WO-122): the answer was texted for application A on Nov 9 (the person's zone, Chicago) and is reused at B; its line on
+// (WO-122): the answer was texted for application A on Nov 9 (the person's zone, Chicago) and is reused at B (not given
+// for B: for_posting false, the one value the payload carries for it); its line on
 // B's card says so, "(from your answer on Nov 9)", the server accepts that line and refuses the same card without it.
 const TRAVELS = new Set(["work_authorization", "sponsorship", "gpa", "graduation_date"]);
 const SHA = "a".repeat(64);
@@ -142,7 +143,7 @@ export async function reuseOnCard(q: Q) {
   const f = plan(q, `A-${q.id}`, q.company ?? "Example Co", PERSONA, {}, true);
   if (!f.filled) return null; // asked: nothing reused
   const field = { name: "q", label: q.label, value: String(f.value), factId: `text-answer:${q.id}`,
-    source: { table: "answers", key: q.category, value: String(f.value), at: "2026-11-10T03:30:00Z", job_ids: [`A-${q.id}`] } };
+    source: { table: "answers", key: q.category, value: String(f.value), at: "2026-11-10T03:30:00Z", for_posting: false } };
   const payload = { company: q.company ?? "Example Co", job_id: `B-${q.id}`, tz: "America/Chicago", fields: [field], resume_sha256: SHA, destination: "https://example.test/apply" };
   const plain = `${cardFieldPrefix(q.label)}${field.value}`, line = plain + reusedSourceSuffix(field, payload.job_id, payload.tz);
   const card = [payload.company, line, resumeCardLine("resume.pdf", SHA), `Sends to ${payload.destination}`];

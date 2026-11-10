@@ -241,14 +241,16 @@ export function planApplication(o: {
 // What the approval binds beside the answers (WO-102): each answer's fact, the event that confirmed it, its provenance,
 // whether it may attest, the quarantine rules it was judged under, and for a texted answer when it was given. Any change is
 // another application.
-export function approvalSources(fields: { name: string; factId: string }[], m: Manifest) {
+// WO-122 ruling: a texted answer's question postings (job_ids) never enter the hash; only whether it was given for this
+// posting (for_posting), judged once here against the posting the approval is for.
+export function approvalSources(fields: { name: string; factId: string }[], m: Manifest, posting?: string) {
   return fields.map((f) => {
     const tf = m.byFactId[f.factId];
     if (!tf) throw fail("UNTRUSTED_ANSWER: " + f.name);
     return { name: f.name, factId: f.factId, event: tf.event, provenance: tf.provenance, authorizes: tf.authorizes, quarantine_version: m.version,
       table: tf.table, key: tf.key, value: tf.value,
-      // WO-122: a texted answer's date and the postings it was asked for are bound too (the card's source label).
-      ...(tf.at ? { at: tf.at } : {}), ...(tf.job_ids ? { job_ids: tf.job_ids } : {}) };
+      // WO-122: a texted answer's date and whether it was given for this posting are bound too (the card's source label).
+      ...(tf.at ? { at: tf.at } : {}), ...(tf.job_ids && posting !== undefined ? { for_posting: tf.job_ids.includes(posting) } : {}) };
   }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 export async function applicationApprovalHash(o: {
@@ -258,7 +260,7 @@ export async function applicationApprovalHash(o: {
   return await hashApplyPayload({ user_id: o.userId, posting: o.posting, destination: o.destination,
     fields: o.fields.map((f) => ({ name: f.name, label: f.label, value: f.value, factId: f.factId })), resume: o.resumeSha256,
     schema_hash: o.schemaHash, page_field_names: o.pageFieldNames, manifest_hash: o.manifest.hash,
-    sources: approvalSources(o.fields, o.manifest) });
+    sources: approvalSources(o.fields, o.manifest, o.posting) });
 }
 const trustRecord = (m: Manifest) => ({
   quarantine_version: m.version, manifest_hash: m.hash, excluded: m.excluded.slice(0, 200), conflicts: m.conflicts.slice(0, 200),

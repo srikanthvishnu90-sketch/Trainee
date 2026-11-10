@@ -4331,15 +4331,14 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       return null;
     }
   }
-  function reusedSourceSuffix(field, postingJobId, tz) {
+  function reusedSourceSuffix(field, _postingJobId, tz) {
     if (!SENSITIVE.has(mapQuestion({
       label: String(field?.label ?? "")
     }).fact)) return "";
     const id = String(field?.factId ?? ""), src = field?.source && typeof field.source === "object" ? field.source : {};
     if (!id || /^(approved-local-resume|essay-draft):/.test(id) || String(src.key ?? "").startsWith("job:")) return "";
     if (id.startsWith("text-answer:")) {
-      if (!Array.isArray(src.job_ids)) return "";
-      if (src.job_ids.map(String).includes(String(postingJobId ?? ""))) return "";
+      if (src.for_posting !== false) return "";
       const zone = personTz(tz), at = typeof src.at === "string" ? Date.parse(src.at) : NaN;
       if (zone && Number.isFinite(at)) {
         return ` (from your answer on ${new Intl.DateTimeFormat("en-US", {

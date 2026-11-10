@@ -364,7 +364,13 @@ async function fillCombo(page, d, value, pick) {
   // Ashby's place box fills its list from a lookup as you type: it gets up to 3 seconds to show. Any other box, 150 ms.
   const lookup = await input.evaluate((e) => e.classList.contains("ashby-application-form-input-autocomplete")).catch(() => false);
   if (!list.length && pick !== "decline") { await input.fill(String(value).slice(0, 40)); for (let i = 0; i < (lookup ? 20 : 1) && !list.length; i++) { await page.waitForTimeout(150); list = await optionsNow(); } }
-  if (!list.length) { await input.press("Escape").catch(() => {}); return { ok: false, reason: "options_not_readable" }; }
+  if (!list.length) {
+    // What the page drew as a list after typing, for the record (tags and classes only, cut short): never an answer.
+    const seen = await page.evaluate(() => [...document.querySelectorAll("[role=listbox], [role=option], [class*='option' i], [class*='suggest' i], [class*='result' i], [class*='menu' i]")]
+      .filter((e) => e.offsetWidth || e.offsetHeight).slice(0, 6).map((e) => `${e.tagName}.${String(e.className || "").slice(0, 60)}[role=${e.getAttribute("role") || ""}] n=${e.children.length}`).join(" ; ").slice(0, 400)).catch(() => "");
+    await input.press("Escape").catch(() => {});
+    return { ok: false, reason: "options_not_readable", ...(seen ? { detail: seen } : {}) };
+  }
   const m = pick === "decline" ? (() => { const i = list.findIndex((o) => DECLINE.test(norm(o))); return i < 0 ? { error: "no_decline_option" } : { index: i }; })() : matchOption(list, value);
   if (m.error) { await input.press("Escape").catch(() => {}); return { ok: false, reason: m.error, options: list.slice(0, 40) }; }
   await opts().nth(m.index).click();
@@ -465,7 +471,7 @@ async function fillForm(page, ctx0) {
       entry.reason = r.reason;
       if (r.detail) entry.detail = r.detail;
       // A required question we could not set is handed back with the reason; the person is asked, nothing is guessed.
-      (ask ? needsUser : failed).push({ label: d.label, reason: r.reason, kind: d.kind, ...(r.options ? { options: r.options } : {}) });
+      (ask ? needsUser : failed).push({ label: d.label, reason: r.reason, kind: d.kind, ...(r.detail ? { detail: r.detail } : {}), ...(r.options ? { options: r.options } : {}) });
     }
   }
   // Sweep: a required question still empty that we did not already account for is handed back, not ignored.

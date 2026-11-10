@@ -126,7 +126,7 @@ async function main() {
     if (x.blocked_paths) console.log("BLOCKED | " + x.provider + " | " + x.url + " | " + x.blocked_paths.join(" ; "));
     if (x.result !== "pass" && (x.diag || x.check)) console.log("DIAG | " + x.provider + " | " + JSON.stringify({ check: x.check, ...x.diag }));
     // Why each field was handed back, and the options a choice offered (the posting's own words), for the record.
-    if (x.result !== "pass" && x.needs) console.log("NEEDS | " + x.provider + " | " + x.url + " | " + JSON.stringify(x.needs.slice(0, 12).map((n) => ({ label: String(n.label || "").slice(0, 60), reason: n.reason, ...(n.kind ? { kind: n.kind } : {}), ...(n.options ? { options: n.options.slice(0, 12).map((o) => String(o).slice(0, 40)) } : {}) })))); } }));
+    if (x.result !== "pass" && x.needs) console.log("NEEDS | " + x.provider + " | " + x.url + " | " + JSON.stringify(x.needs.slice(0, 12).map((n) => ({ label: String(n.label || "").slice(0, 60), reason: n.reason, ...(n.kind ? { kind: n.kind } : {}), ...(n.detail ? { detail: n.detail } : {}), ...(n.options ? { options: n.options.slice(0, 12).map((o) => String(o).slice(0, 40)) } : {}) })))); } }));
   await browser.close();
   const s = summarize(rows);
   fs.writeFileSync(path.join(out, "strict.jsonl"), rows.map((x) => JSON.stringify(x)).join("\n") + "\n");

@@ -14,7 +14,7 @@ import { normLabel, questionFieldType } from "../../supabase/functions/_shared/c
 import { hashApplyPayload } from "../../supabase/functions/_shared/career_apply_store.ts";
 // WO-102: the submission-quality contract, the extension's own functions (never copied).
 import { QUARANTINE_VERSION, quarantinedFact, trustedManifest } from "../../extension/src/apply_core.ts";
-import { applicationApprovalHash } from "../../scripts/apply.ts";
+import { applicationApprovalHash, boundPageValues } from "../../scripts/apply.ts";
 import { factDependencies } from "../../supabase/functions/_shared/fact_quarantine.ts";
 import { rowQuestionLabel, rowQuestionType } from "../../supabase/functions/_shared/row_answer.ts";
 import { fileJournal, handBack, type HostGate, type Journal, massRun, PacedLimiter, type Pacing, pacingFrom, requeueMissing, sentNothingRefusal, unstartedWhy } from "./mass-run.ts";
@@ -107,6 +107,9 @@ export async function prepare(o: {
     destination: ev.payload.destination,
     resume_sha256: ev.payload.resume.sha256,
     page_field_names: Object.keys(ev.payload.page_fields || {}).sort(),
+    // x-audit (ruling 2026-11-10): the values of the employer's hidden fields the approval binds (all but per-load tokens),
+    // kept so the hash can be checked again before the run (engineApprovalFromPayload). Absent when there are none.
+    ...(Object.keys(boundPageValues(ev.payload.page_fields)).length ? { page_field_values: boundPageValues(ev.payload.page_fields) } : {}),
     engine_approval: ev.approval_hash,
     ...(typeof ev.payload.schema_hash === "string" ? { schema_hash: ev.payload.schema_hash } : {}),
     privacy_epoch: o.account.epoch,
@@ -251,7 +254,7 @@ export async function engineApprovalFromPayload(payload: any): Promise<string | 
   if (manifest.hash !== payload.manifest_hash) throw Error("APPROVED_MANIFEST_CHANGED");
   return await applicationApprovalHash({ userId: payload.user_id, posting: payload.job_id, destination: payload.destination,
     fields: payload.fields, resumeSha256: payload.resume_sha256, schemaHash: payload.schema_hash,
-    pageFieldNames: payload.page_field_names, manifest });
+    pageFieldNames: payload.page_field_names, pageFieldValues: payload.page_field_values ?? null, manifest });
 }
 // WO-102, before an approved run starts: what in this payload the contract can never send, whatever the engine finds.
 // An answer from a quarantined fact (D-007: F-027..F-079, the answer-all delegation) or derived from one, a texted answer

@@ -248,13 +248,23 @@ export function approvalSources(fields: { name: string; factId: string }[], m: M
       table: tf.table, key: tf.key, value: tf.value };
   }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
+// x-audit (coordinator ruling 2026-11-10): the employer's hidden fields whose values change with every page load and carry
+// none of the person's answers (anti-forgery tokens, nonces, captcha responses) are bound by name only; every other hidden
+// value is bound by value too (pageFieldValues), so a source, referrer or job id the page changes after the approval stops
+// the run as APPROVED_APPLICATION_CHANGED instead of going out unapproved.
+export const PER_LOAD_TOKEN = /csrf|xsrf|authenticity|nonce|(^|_)token$|captcha|recaptcha|turnstile|-captcha-response$/i;
+export const boundPageValues = (pageFields: Record<string, string> | null | undefined): Record<string, string> =>
+  Object.fromEntries(Object.entries(pageFields || {}).filter(([k]) => !PER_LOAD_TOKEN.test(k)).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 export async function applicationApprovalHash(o: {
   userId: string; posting: string; destination: string; fields: any[]; resumeSha256: string; schemaHash: string;
-  pageFieldNames: string[]; manifest: Manifest;
+  pageFieldNames: string[]; manifest: Manifest; pageFieldValues?: Record<string, string> | null;
 }) {
+  // Only when there is a value to bind: an application whose page sets no such field hashes exactly as before, and one
+  // approved before this change whose page does set one no longer matches, so it is approved again, never sent uncovered.
+  const values = o.pageFieldValues && Object.keys(o.pageFieldValues).length ? { page_field_values: o.pageFieldValues } : {};
   return await hashApplyPayload({ user_id: o.userId, posting: o.posting, destination: o.destination,
     fields: o.fields.map((f) => ({ name: f.name, label: f.label, value: f.value, factId: f.factId })), resume: o.resumeSha256,
-    schema_hash: o.schemaHash, page_field_names: o.pageFieldNames, manifest_hash: o.manifest.hash,
+    schema_hash: o.schemaHash, page_field_names: o.pageFieldNames, ...values, manifest_hash: o.manifest.hash,
     sources: approvalSources(o.fields, o.manifest) });
 }
 const trustRecord = (m: Manifest) => ({
@@ -836,9 +846,10 @@ export async function runApply(args: string[]) {
             if (!Object.hasOwn(wire, name)) {
               if (
                 typeof value === "string" &&
-                (value === "" ||
-                  /^(csrf(?:_token)?|authenticity_token|_token|utf8|job_?id|posting_?id|locale|source|referrer|commit|submit)$/i
-                    .test(name))
+                // A per-load token (bound by name), the charset marker, or the clicked button's own name. Every other
+                // field the page set must carry exactly the value it had (the first check above); a source, referrer,
+                // job or posting id or locale with another value stops the send (x-audit, ruling 2026-11-10).
+                (value === "" || PER_LOAD_TOKEN.test(name) || /^(utf8|commit|submit)$/i.test(name))
               ) continue;
               if (typeof value !== "string" && value.size === 0 && value.name === "") continue;
               throw Error();
@@ -1068,6 +1079,7 @@ export async function runApply(args: string[]) {
         resumeSha256: artifact.sha256,
         schemaHash: before,
         pageFieldNames: Object.keys(pageFields || {}).sort(),
+        pageFieldValues: boundPageValues(pageFields),
         // WO-102: the facts behind the answers (fact, event, provenance) and the quarantine rules they were judged under.
         manifest,
       });

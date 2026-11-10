@@ -13,7 +13,8 @@ import crypto from "node:crypto";
 
 const sha = (b: Uint8Array) => crypto.createHash("sha256").update(b).digest("hex");
 
-export type Got = { strings: string[]; files: string[]; keyed: [string, string][] };
+// uploads: the SHA-256 of every non-empty multipart file part, the files that actually leave as files (x-audit).
+export type Got = { strings: string[]; files: string[]; keyed: [string, string][]; uploads?: string[] };
 export type Wire = Record<string, string | null | { filename: string; sha256: string }>;
 export type Binding = { inputType?: string; options?: { value: string; label: string }[] };
 
@@ -48,7 +49,7 @@ export function bodyShape(type: string, body: Uint8Array, form: FormData | null)
 }
 
 export async function bodyContents(type: string, body: Uint8Array, form: FormData | null): Promise<Got> {
-  const strings: string[] = [], files: string[] = [], keyed: [string, string][] = [];
+  const strings: string[] = [], files: string[] = [], keyed: [string, string][] = [], uploads: string[] = [];
   const text = (key: string, v: unknown) => {
     if (v === null || v === undefined) return;
     const s = String(v);
@@ -63,23 +64,31 @@ export async function bodyContents(type: string, body: Uint8Array, form: FormDat
   };
   if (form) {
     for (const [k, v] of form.entries()) {
-      if (typeof v !== "string") files.push(sha(new Uint8Array(await v.arrayBuffer())));
+      if (typeof v !== "string") {
+        const b = new Uint8Array(await v.arrayBuffer());
+        files.push(sha(b));
+        if (b.length) uploads.push(sha(b)); // an empty part is a file input left empty, not a file sent
+      }
       else if (k === "operations") {
         try { for (const [p, x] of leaves(JSON.parse(v))) text(p, x); } catch { strings.push(v); keyed.push([k, v]); }
       } else { strings.push(v); keyed.push([k, v]); }
     }
-    return { strings, files, keyed };
+    return { strings, files, keyed, uploads };
   }
   const j = jsonOf(type, body);
   if (j !== undefined) for (const [p, x] of leaves(j)) text(p, x);
-  return { strings, files, keyed };
+  return { strings, files, keyed, uploads };
 }
 
 // The field name a key path ends in: "fields.email" -> "email", "answers[].question_1" -> "question_1".
 const lastKey = (k: string) => k.split(".").pop()!.replace(/(\[\])+$/, "");
 
-// Throws Error(<field name>) for the first approved answer the body does not carry as approved.
+// Throws Error(<field name>) for the first approved answer the body does not carry as approved, and
+// Error("unapproved_file") when a file goes out that the person did not approve (x-audit, 2026-11-10: a second upload,
+// such as a cover letter attached by the employer's script, used to go out beside the approved resume).
 export function carriesApproved(got: Got, wire: Wire, bindings: Record<string, Binding> = {}) {
+  const approvedFiles = new Set(Object.values(wire).flatMap((w) => (w && typeof w === "object" ? [w.sha256] : [])));
+  for (const u of got.uploads ?? []) if (!approvedFiles.has(u)) throw Error("unapproved_file");
   const accepted = (name: string, want: string) => {
     const b = bindings[name], opt = b?.options?.find((x) => x.value === want);
     return (v: string) => v === want || (!!opt && v === String(opt.label)) || (b?.inputType === "checkbox" && v === "true");

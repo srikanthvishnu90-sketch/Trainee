@@ -12,14 +12,16 @@
 //   anything else                   shown off, with the reason: a state change or approval this File cannot do yet (S1-S6 serve them
 //                                   as POST forms with the page token; approvals bind the payload hash, D-MS-1, D-MN-2).
 import { type Act, type Block, FAMILIES, type FamilyFile, type FamilyId, type Part, type StateInput } from "./file_family.ts";
-import { answerLibraryFile, careerBriefFile, materialsFile, pathComparisonFile, profileFactsFile, roleWorkspaceFile, searchPlanFile } from "./file_family_plan.ts";
-import { applicationReviewFile, batchFile, interviewHubFile, messageReviewFile, negotiationFile, offerComparisonFile, pipelineFile, weeklyBriefFile } from "./file_family_apply.ts";
+import { answerLibraryFile, careerBriefFile, materialsFile, pathComparisonFile, profileFactsFile, searchPlanFile } from "./file_family_plan.ts";
+import { applicationReviewFile, interviewHubFile, messageReviewFile, negotiationFile, offerComparisonFile, weeklyBriefFile } from "./file_family_apply.ts";
 
-export type ServedFamily = Exclude<FamilyId, "F-05"> | "F-14n"; // F-05 is served by the results page (file_family_live.ts)
+// F-05, F-06, F-10 and F-11 are served from the results list's own live views (file_family_live.ts; f-s4's ?role=, ?view=batch,
+// ?view=pipeline; coordinator ruling 2026-11-10 01:48), never from a stored record: their specimens stay test fixtures.
+export type ServedFamily = Exclude<FamilyId, "F-05" | "F-06" | "F-10" | "F-11"> | "F-14n";
 // deno-lint-ignore no-explicit-any
 const BUILD: Record<ServedFamily, (v: any) => FamilyFile> = {
-  "F-01": careerBriefFile, "F-02": profileFactsFile, "F-03": pathComparisonFile, "F-04": searchPlanFile, "F-06": roleWorkspaceFile, "F-07": materialsFile,
-  "F-08": answerLibraryFile, "F-09": applicationReviewFile, "F-10": batchFile, "F-11": pipelineFile, "F-12": messageReviewFile, "F-13": interviewHubFile,
+  "F-01": careerBriefFile, "F-02": profileFactsFile, "F-03": pathComparisonFile, "F-04": searchPlanFile, "F-07": materialsFile,
+  "F-08": answerLibraryFile, "F-09": applicationReviewFile, "F-12": messageReviewFile, "F-13": interviewHubFile,
   "F-14": weeklyBriefFile, "F-14n": negotiationFile, "F-15": offerComparisonFile,
 };
 export const SERVED_FAMILIES = Object.keys(BUILD) as ServedFamily[];
@@ -36,12 +38,9 @@ export const SERVED_POSTS: Record<ServedFamily, ReadonlySet<string>> = {
   "F-02": new Set(),
   "F-03": new Set(),
   "F-04": new Set(),
-  "F-06": new Set(),
   "F-07": new Set(),
   "F-08": new Set(),
   "F-09": new Set(),
-  "F-10": new Set(),
-  "F-11": new Set(),
   "F-12": new Set(),
   "F-13": new Set(),
   "F-14": new Set(["briefpause", "briefresume"]), // f-s5: pause or resume the weekly brief (file_family_actions.ts)

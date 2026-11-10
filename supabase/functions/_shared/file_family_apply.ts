@@ -115,7 +115,7 @@ export function messageReviewFile(d: MessageReview): FamilyFile {
 
 // ---------------------------------------------------------------- F-13 interview hub (C.15)
 export interface InterviewHub {
-  company: string; stage: string; at: string; tz: string; interviewerTz?: string | null; minutes: number; medium: string; booked: boolean; calendarVerified: boolean;
+  company: string; stage: string; at: string; tz: string; interviewerTz?: string | null; minutes: number | null; medium: string; booked: boolean; calendarVerified: boolean;
   person: { initials: string; name: string; role: string; verified: boolean; basis: string }; prep: { done: boolean; lead?: string; text: string }[]; acts?: Acts;
 }
 // One absolute time, as p-76 writes it: "Tue Nov 10 - 2:00 PM CST" (the person's zone); time only for the interviewer's zone.
@@ -125,7 +125,7 @@ export function interviewHubFile(d: InterviewHub): FamilyFile {
   return {
     family: "F-13", boundary: `${d.company} - ${d.stage}`,
     hero: { kicker: d.booked ? "Confirmed logistics" : "Suggested time - not booked", title: clock(d.at, d.tz), meta: [
-      ...(d.interviewerTz ? [{ label: "For the interviewer:", value: clock(d.at, d.interviewerTz, false) }] : []), { label: `${d.minutes} min -`, value: d.medium },
+      ...(d.interviewerTz ? [{ label: "For the interviewer:", value: clock(d.at, d.interviewerTz, false) }] : []), { label: d.minutes ? `${d.minutes} min -` : "Length not stated -", value: d.medium },
       { label: d.calendarVerified ? "Calendar verified" : "Calendar not checked" }] },
     blocks: [
       card("Who you're meeting", [{ p: "person", initials: d.person.initials, name: `${d.person.name} - ${d.person.role}`, text: d.person.basis, chip: d.person.verified ? { label: "Verified", tone: "confirmed" } : { label: "Not verified", tone: "attention" } }]),
@@ -138,10 +138,10 @@ export function interviewHubFile(d: InterviewHub): FamilyFile {
 }
 
 // ---------------------------------------------------------------- F-14 weekly brief (C.16) and negotiation plan (C.17)
-export interface WeeklyBrief { week: string; n: number; generatedAt: string | null; cadence: string; changed: string[]; decisions: { title: string; text: string; act?: Act }[]; blockers: string[]; acts?: Acts }
+export interface WeeklyBrief { week: string; n: number | null; generatedAt: string | null; cadence: string; changed: string[]; decisions: { title: string; text: string; act?: Act }[]; blockers: string[]; acts?: Acts }
 export function weeklyBriefFile(d: WeeklyBrief): FamilyFile {
   return {
-    family: "F-14", hero: { kicker: `Week of ${d.week} - brief ${d.n}`, title: "Your week in careers", meta: [{ label: "Generated", at: d.generatedAt }, { label: "Cadence:", value: `${d.cadence} - change anytime` }] },
+    family: "F-14", hero: { kicker: `Week of ${d.week}${d.n ? ` - brief ${d.n}` : ""}`, title: "Your week in careers", meta: [{ label: "Generated", at: d.generatedAt }, { label: "Cadence:", value: `${d.cadence} - change anytime` }] },
     blocks: [
       card("What actually changed", d.changed.length ? [{ p: "check", items: d.changed.map((t) => ({ state: "done" as const, text: t })) }] : [{ p: "text", lead: "Quiet week.", text: "Nothing changed that Trainee can show evidence for." }]),
       ...(d.decisions.length ? [card("Decisions only you can make", d.decisions.map((x) => ({ p: "item" as const, title: x.title, text: x.text, act: x.act })))] : []),
@@ -167,13 +167,13 @@ export function negotiationFile(d: Negotiation): FamilyFile {
 }
 
 // ---------------------------------------------------------------- F-15 offer comparison (C.18)
-export interface OfferComparison { offers: { letter: string; company: string; rows: KV[] }[]; deadline: { company: string; at: string | null }; priorities?: string | null; acts?: Acts }
+export interface OfferComparison { offers: { letter: string; company: string; rows: KV[] }[]; deadline: { company: string; at: string | null; text?: string | null }; priorities?: string | null; basis?: string; acts?: Acts }
 export function offerComparisonFile(d: OfferComparison): FamilyFile {
   return {
-    family: "F-15", hero: { kicker: `${n(d.offers.length, "offer")} - from actual documents`, title: d.offers.map((o) => o.company).join(" vs "), meta: [{ label: `${d.deadline.company} deadline:`, at: d.deadline.at, future: true }] },
+    family: "F-15", hero: { kicker: `${n(d.offers.length, "offer")} - ${d.basis ?? "from actual documents"}`, title: d.offers.map((o) => o.company).join(" vs "), meta: [d.deadline.text ? { label: `${d.deadline.company} deadline:`, value: d.deadline.text } : { label: `${d.deadline.company} deadline:`, at: d.deadline.at, future: true }] },
     blocks: [
       ...d.offers.map((o): Block => ({ b: "card", parts: [{ p: "heading", title: `${o.letter} - ${o.company}` }, { p: "kv", rows: o.rows.filter((r) => !/\btotal\b/i.test(r.k)) }] })),
-      ...(d.priorities ? [note("info", "Your priorities applied.", `${d.priorities} Choosing a favorite here accepts nothing and withdraws nothing.`)] : []),
+      ...(d.priorities ? [note("info", "Your priorities applied.", `${d.priorities} Choosing a favorite here accepts nothing and withdraws nothing.`)] : [note("info", "Nothing accepted.", "Comparing offers here accepts nothing, declines nothing and sends nothing to any employer.")]),
       note("caution", "Kept honest.", "Equity is never added to cash as one \"total\". Verbal claims stay separate from written terms. Tax and legal questions go to qualified professionals."),
     ],
     actions: d.acts,

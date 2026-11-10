@@ -1,0 +1,29 @@
+# Diagnostic only (branch bench/browser-tt-diag, never a PR): Teamtailor job pages (forms before and after the Apply control) and
+# Workable's resume upload requests. DRY RUN: every non-GET aborted, submits trapped, robots.txt obeyed, paced. No secrets.
+# Nothing is submitted.
+name: browser-bench
+on:
+  push:
+    branches: ["bench/browser-*"]
+permissions:
+  contents: read
+jobs:
+  diag:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22.23.3" }
+      - name: Playwright and its Chromium
+        run: |
+          npm ci --prefix tools --no-audit --no-fund
+          (cd tools && npx --no-install playwright install --with-deps chromium)
+          echo "UPMORE_PLAYWRIGHT_PATH=$GITHUB_WORKSPACE/tools/node_modules/playwright" >> "$GITHUB_ENV"
+      - name: Diagnose (dry run)
+        run: |
+          node scripts/browser-eval/diag-tt.cjs \
+            https://aafdinair.teamtailor.com/jobs/8585213-produktansvarig https://approvalmax.teamtailor.com/jobs/8653872-revenue-operations-specialist \
+            https://careers.askattest.com/jobs/8689227-head-of-sales https://virtasant.teamtailor.com/jobs/7064368-senior-backend-product-engineer-finops-ai-cost-intelligence-platform \
+            https://karriere.bearingpoint.com/jobs/4773581-junior-consultant-digitale-loesungen-m-w-d \
+            https://apply.workable.com/j/3D961625B0 https://apply.workable.com/j/6251F67BC8

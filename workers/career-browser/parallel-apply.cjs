@@ -41,7 +41,21 @@ function payloadHash(p) {
   return sha256(canonical({ url: p.url, ats: p.ats, facts: p.facts, answers: p.answers || {}, resume: p.resume && p.resume.sha256 }));
 }
 
-const DENY_HOSTS = ["linkedin.com", "indeed.com", "joinhandshake.com"];
+// The same hosts as apply-vm.cjs REFUSED and apply-scheduler.cjs NEVER_HOSTS (lnkd.in is LinkedIn's link shortener).
+const DENY_HOSTS = ["linkedin.com", "lnkd.in", "indeed.com", "joinhandshake.com", "handshake.com"];
+// The browser itself cannot resolve a denied host (x-audit, 2026-11-10): every request to one, including a redirect hop
+// the route handler never sees (a POST's 303, a hop inside a frame), fails with ERR_NAME_NOT_RESOLVED before it leaves the
+// machine. Every runner that launches Chromium for an application launches it with denyLaunchOptions(). A proxy would
+// resolve names itself, so the denied hosts also bypass any proxy (a --proxy-server flag, or the https_proxy environment
+// Chromium reads on Linux): Chromium resolves them here, and they do not resolve.
+const DENY_HOST_RULES = DENY_HOSTS.flatMap((d) => [`MAP ${d} ~NOTFOUND`, `MAP *.${d} ~NOTFOUND`]).join(", ");
+const DENY_LAUNCH_ARGS = [`--host-resolver-rules=${DENY_HOST_RULES}`,
+  `--proxy-bypass-list=${DENY_HOSTS.flatMap((d) => [d, `*.${d}`]).join(";")}`];
+function denyLaunchOptions(o = {}, env = process.env) {
+  const base = o.env || env;
+  const noProxy = [base.no_proxy || base.NO_PROXY || "", ...DENY_HOSTS, ...DENY_HOSTS.map((d) => `.${d}`)].filter(Boolean).join(",");
+  return { ...o, args: [...(o.args || []), ...DENY_LAUNCH_ARGS], env: { ...base, no_proxy: noProxy, NO_PROXY: noProxy } };
+}
 const LOOPBACK = ["127.0.0.1", "localhost", "::1", "[::1]"];
 const normHost = (h) => String(h || "").toLowerCase().replace(/\.+$/, "");
 const isDeniedHost = (h) => { const n = normHost(h); return DENY_HOSTS.some((d) => n === d || n.endsWith(`.${d}`)); };
@@ -245,29 +259,31 @@ async function attempt(browser, p, opts, timing) {
   // are aborted before a request leaves the browser.
   // GET navigations are fetched with redirects off so the Location of each hop is checked BEFORE the browser requests it
   // (a browser-followed redirect would already have reached the other host); the 3xx is handed back and the next hop comes
-  // through this same handler.
+  // through this same handler. A POST (the Submit click) is continued untouched: route.fetch drops a multipart file body,
+  // so its redirect hops are guarded by denyLaunchOptions() at the browser's resolver instead (x-audit, 2026-11-10).
+  // A frame inside the page is never loaded from a denied host (x-audit: an embedded linkedin.com frame used to load). It
+  // is refused quietly: the employer's form around it is still the person's approved application.
   // A benchmark's dry run (scripts/browser-eval/strict.cjs) adds its own guard on every request and a page script that cancels
   // any form submit; production passes neither.
   if (opts.initScript) await ctx.addInitScript(opts.initScript);
   await ctx.route("**/*", async (route) => {
     const req = route.request();
     if (opts.requestGate && !(await opts.requestGate(req))) return route.abort("blockedbyclient");
-    // Every top-level navigation, of this page or of any tab it tries to open, is checked.
-    if (req.isNavigationRequest() && !req.frame().parentFrame()) {
-      const g = urlVerdict(req.url(), allow);
-      if (!g.ok) { blocked.push(g.host); blockedUrls.push(req.url()); return route.abort("blockedbyclient"); }
-      if (req.method() === "GET") {
-        const resp = await route.fetch({ maxRedirects: 0 });
-        const loc = resp.status() >= 300 && resp.status() < 400 ? resp.headers().location : null;
-        if (loc) {
-          const to = new URL(loc, req.url()).href;
-          const next = urlVerdict(to, allow);
-          if (!next.ok) { blocked.push(next.host); blockedUrls.push(to); return route.abort("blockedbyclient"); }
-        }
-        return route.fulfill({ response: resp });
-      }
+    if (!req.isNavigationRequest()) return route.continue();
+    let sub = false;
+    try { sub = !!req.frame().parentFrame(); } catch { /* no frame (service worker): judged as top-level */ }
+    if (sub) return isDeniedHost(new URL(req.url()).hostname) ? route.abort("blockedbyclient") : route.continue();
+    const g = urlVerdict(req.url(), allow);
+    if (!g.ok) { blocked.push(g.host); blockedUrls.push(req.url()); return route.abort("blockedbyclient"); }
+    if (req.method() !== "GET") return route.continue();
+    const resp = await route.fetch({ maxRedirects: 0 });
+    const loc = resp.status() >= 300 && resp.status() < 400 ? resp.headers().location : null;
+    if (loc) {
+      const to = new URL(loc, req.url()).href;
+      const next = urlVerdict(to, allow);
+      if (!next.ok) { blocked.push(next.host); blockedUrls.push(to); return route.abort("blockedbyclient"); }
     }
-    return route.continue();
+    return route.fulfill({ response: resp });
   });
   const onAllowedHost = () => {
     // An employer that sends the candidate to its SSO: a sign-in wall the person finishes themselves, not a refused host.
@@ -435,4 +451,4 @@ async function runPool(browser, payloads, opts = {}) {
   return { results, wallMs: Date.now() - started, concurrency };
 }
 
-module.exports = { botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, HANDOFF_REASONS, NeedsUser };
+module.exports = { botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };

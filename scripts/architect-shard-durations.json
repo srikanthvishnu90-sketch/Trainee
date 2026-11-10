@@ -232,6 +232,7 @@
     "tests/architect/handler-e2e-apply-phrasings.test.ts": 7,
     "tests/architect/handler-submit-path.test.ts": 13.7,
     "tests/architect/hosted-apply-unit.test.ts": 0.1,
+    "tests/architect/wo-122-reused-answer-source.test.ts": 0.1,
     "tests/architect/ingest-bounded-pg.test.ts": 14,
     "tests/architect/ingest-r2-pg.test.ts": 17,
     "tests/architect/ingest-r3-pg.test.ts": 21,
@@ -347,6 +348,7 @@
     "tests/architect/research-reply-on-d047.test.ts": 0.1,
     "tests/architect/research-review-fixes-589.test.ts": 0.1,
     "tests/architect/response-b6-replay-20261109.test.ts": 12,
+    "tests/architect/response-battery-20261110.test.ts": 160.1,
     "tests/architect/response-sweep-20261109.test.ts": 14,
     "tests/architect/results-batch-file.test.ts": 0.1,
     "tests/architect/results-page-design.test.ts": 0.1,
@@ -661,6 +663,10 @@
     "tests/architect/r10-resume-design-loop-20261110.test.ts": 42,
     "tests/architect/accounts-loop.test.ts": 11,
     "tests/architect/connect-chat-disconnect.test.ts": 10,
+    "tests/architect/a-sensitive.test.ts": 0.2,
+    "tests/architect/contact-draft-claimed-tie.test.ts": 0.1,
+    "tests/architect/contact-supply.test.ts": 0.1,
+    "tests/architect/loop-05-outreach.test.ts": 13.6,
     "tests/architect/files-s3-plan-materials.test.ts": 4
   }
 }

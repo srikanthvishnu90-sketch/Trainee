@@ -199,7 +199,8 @@ Deno.test({ name: "F13: the staged brain release at the real handler", sanitizeR
       // Architect amendment (r-states, 2026-11-10; R4, R9, E.6 54): the router's catch-all never answers a different question at
       // an outage; the turn is held (what stopped, the task kept, "continue"), as at a limit (ruling 3).
       eq([r.intent, r.body.meta.limit_stop], ["career_limit_held", "outage"], JSON.stringify(r.body.meta));
-      assert(r.reply.startsWith(`I couldn't finish this without the AI: "${ADVICE}". I kept it. The AI service failed on this one`), r.reply);
+      // architect amendment (2026-11-10, #706 no-echo ruling): the task named, never the ask word for word.
+      assert(/^I couldn't finish [^"]+ without the AI: it is kept\. The AI service failed on this one/.test(r.reply) && !r.reply.includes(ADVICE), r.reply);
       assert(r.reply !== routerReply(PEOPLE["tok-f13e"], ADVICE).reply, "not the catch-all");
       // A message the router has a real intent for is still answered by the router when the model fails.
       const m = calls.length;

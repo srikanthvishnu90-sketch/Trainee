@@ -9,7 +9,17 @@ import { decodeRowQuestionType } from "../../supabase/functions/_shared/row_answ
 // Ask once: the answers the person texted, as the engine's confirmed facts for the next preparation. A fact for every
 // employer goes under the fact's name (their own facts file wins when it states the same fact); an answer for one wording
 // or one posting goes under its key, which planBatch reads for that question only. Each is marked as a texted answer.
-export interface TextAnswer { id: string; key: string; kind: string; answer: string }
+// WO-122: `at` is when it was answered (answered_at, ISO 8601) and `job_ids` the postings its question was asked for
+// (career_apply_answers_own_v2; absent under v1). Both travel to the card's source label, never into the facts.
+export interface TextAnswer { id: string; key: string; kind: string; answer: string; at?: string; job_ids?: string[] }
+// deno-lint-ignore no-explicit-any
+export function textAnswerRows(data: any): TextAnswer[] {
+  return (Array.isArray(data) ? data : []).filter((r) => r && typeof r === "object").map((r) => ({
+    ...r,
+    ...(typeof r.answered_at === "string" && Number.isFinite(Date.parse(r.answered_at)) ? { at: r.answered_at } : {}),
+    ...(Array.isArray(r.job_ids) ? { job_ids: r.job_ids.map(String).slice(0, 200) } : {}),
+  }));
+}
 export function factsWithTextAnswers(facts: any, rows: TextAnswer[]) {
   const answers = { ...(facts?.answers || {}) }, saved = { ...(facts?.saved || {}) };
   for (const r of rows || []) {
@@ -34,13 +44,15 @@ export function questionsToStore(result: any, o: { facts: Record<string, unknown
   // drafts one, even when a standing consent already answered that statement on the form.
   const aiPolicy = aiPolicyStatements(Array.isArray(result?.ai_policy) ? result.ai_policy : []).join("\n").slice(0, 1200);
   for (const q of Array.isArray(result?.questions) ? result.questions : []) {
-    const label = String(q?.label ?? "").replace(/\s+/g, " ").trim().slice(0, 600);
-    if (!label || NEVER_BY_TEXT.test(label)) continue;
+    // a-sensitive: the key is the full label's (the planner reads it so); only the stored text is cut. A cut label's key
+    // was one the planner never reads (Lever's 1,165-character "Race" question was asked again after every answer).
+    const full = String(q?.label ?? "").replace(/\s+/g, " ").trim(), label = full.slice(0, 600);
+    if (!label || NEVER_BY_TEXT.test(full)) continue;
     const options = (Array.isArray(q.options) ? q.options : []).map((x: unknown) => String(x).slice(0, 300)).slice(0, 60);
     const rawType = String(q.type || "input_text"), row = decodeRowQuestionType(rawType);
     if (rawType.startsWith("row:") && !row) continue; // malformed/unbound rows never become generic label answers
     const type = rawType.slice(0, 40);
-    const shape = { label, type, options: options.map((l: string) => ({ label: l })) };
+    const shape = { label: full, type, options: options.map((l: string) => ({ label: l })) };
     const m = row ? { kind: "unknown", fact: "unknown" } : mapQuestion(shape);
     // WO-055: the posting's location (as its page shows it) decides whether an answer may become the person's fact.
     const here = factStaysHere(shape, result?.location ? String(result.location) : undefined, o.facts);

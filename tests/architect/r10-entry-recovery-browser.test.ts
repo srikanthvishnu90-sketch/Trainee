@@ -267,6 +267,9 @@ Deno.test({ name: "R10 fixes 10-11 in Chromium: every entry, recovery and connec
         await check(s2.page, "connect-expired", vp, { action: ".recovery a.primary", title: /expired/, secret: PRIVATE }); await s2.ctx.close();
         const t = (await mintConnectToken({ secret: SECRET, userId: U, reason: "confirmations", channel: "telegram", now: NOW, kind: "l" }))!;
         const s3 = await session(vp); await s3.page.goto(`${SITE}/connect?t=${encodeURIComponent(t)}`);
+        // Architect amendment, security: link scanners (x-audit, coordinator ruling 2026-11-10): the link opens a page with one
+        // button and uses nothing up; the person's tap on it takes the link and opens the consent.
+        await Promise.all([s3.page.waitForNavigation({ waitUntil: "domcontentloaded" }), s3.page.click("form.open button.primary")]);
         // the consent reads its permissions first (owner review R11): the first panel is in the first screen, Continue right after it
         const m = await check(s3.page, "connect-consent", vp, { action: "section.perms p.who", title: /^Connect your email$/, secret: PRIVATE });
         if (!/Exact permissions requested: openid email https:\/\/www\.googleapis\.com\/auth\/gmail\.readonly/.test(m.text.replace(/\s+/g, " "))) problems.push(`consent @${vp.width}: the exact scopes are not shown`);

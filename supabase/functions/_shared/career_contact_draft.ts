@@ -21,6 +21,11 @@ export interface ContactDraft { subject: string; body: string; hook: number; hoo
 export const DRAFT_MAX_WORDS = 120, SUBJECT_MAX = 80, PROMPT_FACTS = 12;
 export const SPAM_PHRASES = ["act now", "limited time", "100% free", "risk-free", "click here", "guaranteed", "no obligation", "urgent", "winner", "congratulations you",
   "buy now", "special promotion", "earn money", "cash bonus", "dear friend", "to whom it may concern", "just checking in", "touching base", "quick favor", "!!!"];
+// A claimed tie between the seeker and the recipient: a meeting, a talk, a referral or introduction, a shared past. No
+// confirmed fact ever says one (D-007: the seeker's facts are their own resume and answers), so a draft that claims one is
+// never shown, whatever words around it trace (loop 05: "great meeting you at the ... meetup" and "as your former colleague"
+// passed every other check).
+export const CLAIMED_TIE = /\b(?:we|I)\s+(?:met|spoke|talked|chatted|connected|worked together)\b|\bmeeting you\b|\b(?:great|nice|good|lovely|pleasure)\s+(?:to\s+)?(?:meet(?:ing)?|see(?:ing)?|talk(?:ing)?|chat(?:ting)?|speak(?:ing)?)\b|\bwhen we (?:met|spoke|talked)\b|\b(?:referred|recommended|pointed) me\b|\bsuggested (?:that )?I\b|\bintroduced (?:me|us)\b|\b(?:former|old|fellow|ex-?)\s*(?:colleague|co-?worker|classmate|teammate|manager|boss)s?\b|\bour (?:call|chat|conversation|meeting|last)\b|\bas (?:we )?discussed\b|\bmutual (?:friend|connection|contact)s?\b|\bworked together\b|\breconnect(?:ing)?\b|\bremember me\b/i;
 const DRAFTER_ADDRESSED = /\b(?:ignore|disregard)\b|\b(?:ai|llm|assistant|model|chatgpt|claude|gpt)s?\b[^.]{0,30}\b(?:reading|writing|should|must|please)\b|\b(?:send|forward|bcc|cc|reply)\b[^.]{0,40}@|\[\/?inst\]|<\/?system>/i;
 export const asData = (facts: ContactFactIn[]) => facts.filter((f) => !readsAsInstruction(f.claim) && !readsAsInstruction(f.quote_snippet) && !DRAFTER_ADDRESSED.test(`${f.claim} ${f.quote_snippet}`));
 const words = (s: string) => s.split(/\s+/).filter(Boolean);
@@ -66,6 +71,7 @@ export function checkContactDraft(d: { subject: string; body: string; hook: numb
   const spam = SPAM_PHRASES.filter((p) => low.includes(p));
   if (spam.length) out.push(`no spam phrases (${spam.join(", ")})`);
   if (/https?:\/\/|www\.|[^\s@]+@[^\s@]+\.[a-z]{2,}/i.test(d.body)) out.push("no link or email address in the body");
+  if (CLAIMED_TIE.test(`${d.subject}\n${d.body}`)) out.push("no claimed meeting, referral or relationship: none is on record");
   const hook = o.facts[d.hook - 1];
   if (!hook) out.push("the hook names a fact that is not in the list");
   else {

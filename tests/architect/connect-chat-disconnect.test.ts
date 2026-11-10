@@ -66,7 +66,11 @@ Deno.test({ name: "item 14: a link's page never disconnects (even after Start), 
 
     // A forwarded link, opened by whoever has it: the account masked, no Disconnect, the chat's words
     const link = (await mintConnectToken({ secret: SECRET, userId: G, reason: "replies", channel: "telegram", now: NOW, kind: "l" }))!;
-    eq((await go(undefined, `?t=${encodeURIComponent(link)}`)).r.status, 303);
+    // Architect amendment, security: link scanners (x-audit, coordinator ruling 2026-11-10): the GET draws the open page and
+    // uses nothing up; its one button posts the link with the page token, which takes it.
+    const shown = await go(undefined, `?t=${encodeURIComponent(link)}`);
+    eq(shown.r.status, 200);
+    eq((await go({ link: /name="link" value="([^"]+)"/.exec(shown.html)?.[1] ?? "", pt: /name="pt" value="([^"]+)"/.exec(shown.html)?.[1] ?? "" })).r.status, 303);
     const page = await go();
     eq(page.r.status, 200);
     const t = plain(page.html);

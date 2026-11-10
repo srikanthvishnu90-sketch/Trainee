@@ -382,10 +382,14 @@ async function fillCombo(page, d, value, pick, phone) {
   if (!list.length) { await input.press("Escape").catch(() => {}); return { ok: false, reason: "options_not_readable" }; }
   const m = pick === "decline" ? (() => { const i = list.findIndex((o) => DECLINE.test(norm(o))); return i < 0 ? { error: "no_decline_option" } : { index: i }; })()
     : d.phoneCountry && pick === "phone_country" ? phoneCountryMatch(list, value, phone) : matchOption(list, value);
-  if (m.error) { await input.press("Escape").catch(() => {}); return { ok: false, reason: m.error, options: list.slice(0, 40) }; }
+  if (m.error) { await input.press("Escape").catch(() => {}); return { ok: false, reason: m.error, options: list.slice(0, 40), ...(d.phoneCountry || pick === "phone_country" ? { detail: `options: ${list.slice(0, 6).join(" / ").slice(0, 140)}` } : {}) }; }
   await opts().nth(m.index).click();
   const s = await stateOf(page, d);
-  return s.filled && norm(s.text) === norm(list[m.index]) ? { ok: true } : { ok: false, reason: "readback_mismatch" };
+  if (s.filled && norm(s.text) === norm(list[m.index])) return { ok: true };
+  // The phone's country picker shows its choice in its own words ("United States" for the option "United States +1"): it
+  // holds the approved country when that shown value is itself the confirmed country, alone or with the phone's dial code.
+  if (s.filled && pick === "phone_country" && !phoneCountryMatch([s.text], value, phone).error) return { ok: true };
+  return { ok: false, reason: "readback_mismatch", detail: `picked: ${String(list[m.index]).slice(0, 60)} | shows: ${String(s.text || "").slice(0, 60)}` };
 }
 
 // The phone widget's own country picker is counted apart from a "Country" question of the form (it is the phone's country).
@@ -475,7 +479,7 @@ async function fillForm(page, ctx0) {
       // #340: an approved answer or fact that is not exactly one of the page's options is handed back even when the question is
       // optional: leaving it out, or picking another option, would post something other than what was approved.
       // A soft try (a country picker from the confirmed country) that did not take is the question still unanswered.
-      if (dec.soft) { r = { ...r, detail: r.detail || `fact_not_set: ${r.reason}`, reason: d.required ? "no_confirmed_answer" : r.reason, options: undefined }; if (!d.required) { entry.status = "skipped"; entry.reason = "optional_left_blank"; continue; } }
+      if (dec.soft) { r = { ...r, detail: `fact_not_set: ${r.reason}${r.detail ? ` | ${r.detail}` : ""}`, reason: d.required ? "no_confirmed_answer" : r.reason, options: undefined }; if (!d.required) { entry.status = "skipped"; entry.reason = "optional_left_blank"; continue; } }
       const notOffered = (r.reason === "no_matching_option" || r.reason === "ambiguous_option");
       const ask = d.required || notOffered;
       entry.status = ask ? "needs_user" : "failed";

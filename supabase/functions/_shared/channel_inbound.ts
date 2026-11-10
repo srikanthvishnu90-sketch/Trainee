@@ -114,7 +114,7 @@ export const isDecisionEdit = (text: string) => { const t = String(text ?? "").t
 // TELEGRAM ROUND 3: "/start <code>" from a chat already linked to an account, with a code that is used, expired or forged, was
 // told to text "connect telegram" where they already use Trainee for a new link, though this chat already is their account.
 export const TELEGRAM_LINK_INVALID_LINKED_REPLY = "That link has expired or was already used, and this chat is already linked to your Trainee account, so nothing changed.";
-export const DOC_NOT_SENT_REPLY = "The file wasn't sent because this chat refused the attachment just now. Ask me to send it again.";
+export const DOC_NOT_SENT_REPLY = "I couldn't attach the file here just now because this chat refused it, so it wasn't sent. Ask me to send it again.";
 // FEATURE 16 (owner decision 2026-10-26): Telegram's own login links a chat to an account (TELEGRAM_LOGIN_URL: the web
 // page, telegram-link.html, on the domain set with BotFather /setdomain).
 export const LINK_BUTTON = "Link your Trainee account";

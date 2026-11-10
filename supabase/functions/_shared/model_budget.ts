@@ -52,7 +52,7 @@ export const GLOBAL_LIMIT_REPLY = "Trainee has used up its AI budget, so I didn'
 export const BUDGET_BEFORE_REPLY = "Trainee's AI budget hasn't opened yet, so I didn't use the AI for this reply.";
 export const BUDGET_AFTER_REPLY = "Trainee's AI budget has ended and needs the owner's approval before it can be used again, so I didn't use the AI for this reply.";
 export const BUDGET_PAUSED_REPLY = "Trainee's AI is switched off for a short while, so I didn't use it for this reply. Please try again later.";
-export const BUDGET_UNAVAILABLE_REPLY = "I didn't use the AI for this reply because today's AI budget couldn't be read. Please try again in a few minutes.";
+export const BUDGET_UNAVAILABLE_REPLY = "I didn't use the AI for this reply because I couldn't check today's AI budget. Please try again in a few minutes.";
 export type BudgetBlock = "limit" | "paused" | "unavailable" | "before" | "after";
 export const BUDGET_ERROR_TYPE: Record<BudgetBlock, string> = { limit: "global_daily_limit", paused: "budget_paused", unavailable: "budget_unavailable", before: "budget_not_open", after: "budget_ended" };
 export const budgetReply = (b: BudgetBlock) => b === "limit" ? GLOBAL_LIMIT_REPLY : b === "paused" ? BUDGET_PAUSED_REPLY : b === "before" ? BUDGET_BEFORE_REPLY : b === "after" ? BUDGET_AFTER_REPLY : BUDGET_UNAVAILABLE_REPLY;

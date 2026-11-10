@@ -39,6 +39,12 @@ export const CHAT_WAIT_MS = 120_000;
 export const CHAT_TIMEOUT_REPLY = "I couldn't finish this in time: it ran past 2 minutes, so I stopped waiting, and I can't confirm how far it got. Send it again and I'll retry.";
 export const CHAT_TIMEOUT_AGAIN_REPLY = "That ran past 2 minutes again, so I stopped waiting a second time and still can't confirm how far it got. A narrower ask, such as one role or one city, finishes sooner.";
 const timedOut = (e: unknown) => (e as { name?: unknown } | null)?.name === "TimeoutError";
+// Architect amendment (r-states, 2026-11-10; R4, R9): any other failure after the interim names the blocker, makes no claim
+// about what got done, keeps the ask in view and gives one next step. Before an interim (a fast failure) CHAT_DOWN_REPLY stands.
+const quoted = (ask: string) => { const a = String(ask ?? "").replace(/\s+/g, " ").trim(); return a.length > 120 ? `${a.slice(0, 117).replace(/\s+\S*$/, "")}...` : a; };
+export const chatErrorReply = (ask: string) => `I couldn't finish "${quoted(ask)}": Trainee hit an error on its side, so I can't confirm how far it got. Send it again and I'll retry.`;
+export const CHAT_ERROR_AGAIN_REPLY = "That hit an error on Trainee's side again, so I still can't confirm how far it got. It is not something you did; try it again in a few minutes.";
+const isErrorReply = (t: string | null) => !!t && (/: Trainee hit an error on its side, so I can't confirm how far it got\./.test(t) || t === CHAT_ERROR_AGAIN_REPLY);
 // The owner's wording for the question on the channel already linked (WO-038).
 export const linkAskText = (newChannel: Channel) => `Someone texted Trainee on ${CHANNEL_NAME[newChannel]} from your number. Reply yes to link it.`;
 export const linkPendingReply = (linkedOn: Channel) => `This number already has a Trainee account on ${CHANNEL_NAME[linkedOn]}. Reply yes there and this chat is linked to it.`;
@@ -627,8 +633,11 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
       if (out.threadId && out.threadId !== person.threadId) await store.setThread(contact, out.threadId, person.userId);
     } catch (e) {
       console.error("inbound: chat failed:", e instanceof Error ? e.message : String(e));
-      const last = timedOut(e) && store.lastReply ? await store.lastReply(person.userId).catch(() => null) : null;
-      reply = !timedOut(e) ? CHAT_DOWN_REPLY : last === CHAT_TIMEOUT_REPLY || last === CHAT_TIMEOUT_AGAIN_REPLY ? CHAT_TIMEOUT_AGAIN_REPLY : CHAT_TIMEOUT_REPLY;
+      const interimWent = working ? await working.stop() : false;
+      const last = (timedOut(e) || interimWent) && store.lastReply ? await store.lastReply(person.userId).catch(() => null) : null;
+      reply = timedOut(e) ? (last === CHAT_TIMEOUT_REPLY || last === CHAT_TIMEOUT_AGAIN_REPLY ? CHAT_TIMEOUT_AGAIN_REPLY : CHAT_TIMEOUT_REPLY)
+        : interimWent ? (isErrorReply(last) ? CHAT_ERROR_AGAIN_REPLY : chatErrorReply(msg.text || "that"))
+        : CHAT_DOWN_REPLY;
     }
     // The turn is over: no interim after this point, and one already going reaches the person before the answer.
     if (working) await working.stop();

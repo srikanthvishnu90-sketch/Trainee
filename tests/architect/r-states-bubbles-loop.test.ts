@@ -29,7 +29,7 @@ import { handleTelegram } from "../../supabase/functions/trainee-telegram/handle
 import { chatThroughAgent, deliverer } from "../../supabase/functions/_shared/channel_runtime.ts";
 import { supabaseInboundStore } from "../../supabase/functions/trainee-inbound/store.ts";
 import { ackFor, FAST_ACK_MS } from "../../supabase/functions/_shared/channel_voice.ts";
-import { CHAT_DOWN_REPLY, CHAT_TIMEOUT_AGAIN_REPLY, CHAT_TIMEOUT_REPLY } from "../../supabase/functions/_shared/channel_inbound.ts";
+import { CHAT_DOWN_REPLY, CHAT_ERROR_AGAIN_REPLY, CHAT_TIMEOUT_AGAIN_REPLY, CHAT_TIMEOUT_REPLY, chatErrorReply } from "../../supabase/functions/_shared/channel_inbound.ts";
 import { virtualClock } from "../flow/virtual-clock.ts";
 import { answerText } from "../../supabase/functions/_shared/career_apply_cards.ts";
 import { batchCloseoutText } from "../../supabase/functions/_shared/batch_closeout.ts";
@@ -47,7 +47,7 @@ export type Score = Record<"bubbles" | "empty" | "repeated" | "extra" | "early" 
 const INTERIM = /^on it — /;
 const norm = (s: string) => s.replace(/\s+/g, " ").trim().toLowerCase();
 // A concrete blocker names what stopped (R4): a limit, the budget, the AI service, a time-out, a named failing step.
-const BLOCKER = /\b(?:limit|budget|AI service|AI is switched off|took (?:more|longer) than|stopped waiting|timed out|couldn't (?:reach|read|check|finish)|didn't (?:finish|answer) in time)\b/i;
+const BLOCKER = /\b(?:limit|budget|AI service|AI is switched off|took (?:more|longer) than|stopped waiting|timed out|error on (?:its|Trainee's) side|couldn't (?:reach|read|check|finish)|didn't (?:finish|answer) in time)\b/i;
 const CLOCK = /\b(?:midnight|noon|\d{1,2}(?::\d\d)? [AP]M)\b/;
 export function scoreTurns(turns: TurnSeen[]): Score {
   const s: Score = { bubbles: 0, empty: 0, repeated: 0, extra: 0, early: 0, hollow: 0, no_reset: 0, not_kept: 0, why: [] };
@@ -124,7 +124,7 @@ Deno.test("r-states: a batch that partly fails: every item's real state, the hel
 });
 
 // ------------------------------------------------------------------------------------------------ the live loop
-type Mode = { modelMs: number; model: "answer" | "500" | "429" | "429_bare" | "hang"; boardMs: number; chatTimeout?: boolean };
+type Mode = { modelMs: number; model: "answer" | "500" | "429" | "429_bare" | "hang"; boardMs: number; chatTimeout?: boolean; chatFails?: boolean };
 Deno.test({
   name: "r-states loop: slow tools, a time-out, limits, provider errors through the Telegram webhook and the real handler; every bubble scored",
   sanitizeResources: false, sanitizeOps: false,
@@ -173,6 +173,7 @@ Deno.test({
         if (u.origin === new URL(SUPABASE_URL).origin && u.pathname === "/functions/v1/agent-chat") {
           // A turn that runs past chatThroughAgent's 120 s: its AbortSignal.timeout fires, as it does in production.
           if (mode.chatTimeout) { await advance(120_000); throw new DOMException("The signal has been aborted", "TimeoutError"); }
+          if (mode.chatFails) { await advance(7_000); return Response.json({ error: "internal" }, { status: 500 }); }
           return await handleChat(req);
         }
         if (u.origin === new URL(SUPABASE_URL).origin) return double(req);
@@ -232,8 +233,12 @@ Deno.test({
         assertNode.match(s.bubbles.slice(1).join("\n"), /Data Analyst Intern/);
         assertNode.ok(a.bubbles.some((b) => b.includes(ANSWER)), a.bubbles.join(" | "));
       });
-      await t.step("provider errors: the model answers 500 after 8 s; the reply is an answer, never the interim again", async () => {
-        await text(CHAT, ADVICE, { modelMs: 8000, model: "500" }, undefined, new RegExp(ANSWER));
+      await t.step("provider errors: the model 500s after 8 s (held, the task kept); agent-chat itself fails after the interim (named)", async () => {
+        const r = await text(CHAT, ADVICE, { modelMs: 8000, model: "500" }, undefined, new RegExp(ANSWER));
+        assertNode.match(r.bubbles.at(-1)!, /^I couldn't finish this without the AI: ".+"\. I kept it\. The AI service failed on this one/);
+        // agent-chat itself failing after the interim: the blocker named, the ask kept, one next step; a second, said as the second.
+        const one = await text(CHAT, SEARCH, { chatFails: true }), two = await text(CHAT, SEARCH, { chatFails: true });
+        assertNode.deepEqual([one.bubbles, two.bubbles], [[ackFor(SEARCH), chatErrorReply(SEARCH)], [ackFor(SEARCH), CHAT_ERROR_AGAIN_REPLY]]);
       });
       await t.step("time-out: the turn runs past 120 s; the reply after the interim names what stopped", async () => {
         const a = await text(CHAT, SEARCH, { chatTimeout: true }, undefined, /^1\. Data Analyst Intern/m);
@@ -263,10 +268,8 @@ Deno.test({
       console.log(`${line(score)}\n${score.why.join("\n")}`);
       assertNode.equal(score.empty + score.repeated + score.no_reset, 0, `the bar: ${score.why.join("\n")}`);
       assertNode.equal(score.extra + score.early + score.not_kept, 0, score.why.join("\n"));
-      // PENDING RULING (sent to the coordinator 2026-11-10): the model's 500 is answered by the router's catch-all, pinned by
-      // tests/architect/f13-staged-brain-handler.test.ts ("staged, the model fails: the router answers exactly as it would have").
-      // That one case is the only hollow turn left; any other is a regression.
-      assertNode.deepEqual(score.why.filter((w) => w.startsWith("hollow")), [`hollow: "${ADVICE.slice(0, 40)}": after "on it — working on that now": I can help you reach people at the companies you want. Which company should we s`], score.why.join("\n"));
+      // Architect amendment (r-states, 2026-11-10): the model outage is held too, so no hollow turn is left.
+      assertNode.equal(score.hollow, 0, score.why.join("\n"));
     } finally {
       console.error = realError;
       globalThis.fetch = realFetch;

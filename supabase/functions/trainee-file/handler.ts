@@ -185,7 +185,7 @@ const ogImageOf = (kind: string, env: { get(k: string): string | undefined }) =>
 // the cover note, the page-set fields, every other key of the payload, and the destination. A secret-looking field or key (the same
 // rule the Telegram card's Confirm uses: telegram_jobs.ts isSecretField / secretKey / secretFields) is shown as "Needs you", never its
 // value, and makes the row unapprovable here. The payload's own bookkeeping (who, which posting, epochs, expiry) is not sent to anyone.
-const BOOKKEEPING = new Set(["version", "user_id", "job_id", "company", "url", "title", "fields", "resume_sha256", "resume_name", "resume_file", "cover_note", "page_field_names",
+const BOOKKEEPING = new Set(["version", "user_id", "job_id", "company", "url", "title", "fields", "resume_sha256", "resume_name", "resume_file", "cover_note", "page_field_names", "page_field_values",
   "destination", "privacy_epoch", "account_version", "expires_at", "kind", "resume_tailored", "resume_persona"]);
 const shownValue = (v: unknown) => v === "" || v === null || v === undefined ? "(empty)" : typeof v === "object" ? JSON.stringify(v) : String(v);
 function sendOf(p: PreparedRow): { items: { label: string; value: string; needs?: boolean }[]; secret: string | null; answers: boolean; cover: boolean } {

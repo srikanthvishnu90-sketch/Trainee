@@ -101,7 +101,8 @@ export function dayOnPage(x: Day, page: string): boolean {
     : [`${full} ${x.d}, ${x.y}`, `${short} ${x.d}, ${x.y}`, `${short}. ${x.d}, ${x.y}`, `${x.d} ${full} ${x.y}`, `${full} ${x.d} ${x.y}`, `${x.y}-${mm}-${String(x.d).padStart(2, "0")}`];
   return forms.some((f) => t.includes(f));
 }
-const VOLUME = /\b(?:total\s+(?:payment\s+)?volume|payment\s+volume|tpv|gmv|gross\s+merchandise|processed|volume)\b/i;
+// Item 10 loop: bookings ("shippers booked $3.2 billion of freight"), installs and shipments are volume too, never revenue.
+const VOLUME = /\b(?:total\s+(?:payment\s+)?volume|payment\s+volume|tpv|gmv|gross\s+merchandise|gross\s+bookings|processed|volume|booked|bookings|installed|installations|shipped|shipments|units\s+sold)\b/i;
 const REVENUE = /\b(?:revenue|revenues|sales|income|earnings|profit)\b/i;
 const FORECAST = /\b(?:on\s+track|expects?|expected|forecasts?|projected|projects|anticipates?|aims?\s+to|plans?\s+to|targets?|guidance|outlook|will\s+(?:reach|exceed|hit|grow)|on\s+pace)\b/i;
 // The claim keeps the quote's meaning: never revenue for volume, never a result for a forecast.
@@ -110,6 +111,25 @@ export function meaningKept(claim: string, quote: string): { ok: boolean; measur
   if (vol && REVENUE.test(claim.replace(/\brevenue\s+suite\b/gi, ""))) return { ok: false, measure: "volume" };
   if (fc && !FORECAST.test(claim)) return { ok: false, measure: "forecast" };
   return { ok: true, measure: fc ? "forecast" : vol ? "volume" : null };
+}
+
+// Item 10 loop (E.48): a sentence that announces an initiative (a launch, a push, an expansion, a new product, a deal) stands only when
+// every content word of it is on its sources: "Lumen Pay's new crypto lending push" on pages that never say "crypto" is invented.
+export const INITIATIVE = /\b(?:launch(?:es|ed|ing)?|initiatives?|rolls?\s+out|rolling\s+out|roll-?out|expan(?:ds?|ding|sion)\s+into|enter(?:s|ing)?\s+(?:the\s+)?\w+\s+market|acquir(?:e|es|ed|ing)|acquisition|partner(?:s|ed|ing)?\s+with|partnership|pivot(?:s|ed|ing)?|unveil(?:s|ed|ing)?|debut(?:s|ed|ing)?|piloting|new\s+(?:\w+\s+){0,2}(?:push|product|business|line|unit|offering|venture|bet))\b/i;
+const OPINION = new Set([..."way useful read understand easier best most think view lens company role".split(" ").flatMap((w) => [...contentWords(w)])]);
+export function initiativeStated(text: string, support: string): boolean {
+  if (!INITIATIVE.test(text)) return true;
+  const have = contentWords(support);
+  return [...contentWords(text)].every((w) => have.has(w) || OPINION.has(w));
+}
+// Item 10 loop (E.49): a reply sentence keeps the meaning of the kept line its figure comes from: volume is never called revenue, and
+// a forecast keeps a forecast word. With no kept line carrying the figure, the figure check above already removes it.
+function figureMeaningKept(sentence: string, lines: string[]): boolean {
+  for (const n of figuresIn(sentence)) {
+    const carriers = lines.filter((l) => figuresIn(l).some((x) => numEq(x, n)));
+    if (carriers.length && !carriers.some((l) => meaningKept(sentence, l).ok)) return false;
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------- source limits
@@ -208,7 +228,7 @@ export async function researchCompany(i: { company: string; role?: string | null
   if (focus === "all" && d.frame) {
     const t = squash(d.frame.text), ps = arr(d.frame.urls, 4).map(pageOf).filter(Boolean) as SourcePage[];
     const nums = ps.flatMap((p) => figuresIn(p.text.slice(0, 60000)));
-    if (t && t.length <= 300 && linkFree(t) && ps.length && figuresIn(t).every((n) => nums.some((y) => numEq(y, n)))) frame = { text: t, cite: [...new Set(ps.map(num))] };
+    if (t && t.length <= 300 && linkFree(t) && ps.length && figuresIn(t).every((n) => nums.some((y) => numEq(y, n))) && initiativeStated(t, ps.map((p) => p.text.slice(0, 60000)).join("\n"))) frame = { text: t, cite: [...new Set(ps.map(num))] };
     else dropped++;
   }
   const cited = order.map((k) => byUrl.get(k)!);
@@ -295,7 +315,8 @@ export function enforceCompanyReply(reply: string, r: CompanyResult): string {
   const inline = r.format === "inline", max = r.sources.length;
   const facts: Cited[] = [...r.business, ...r.developments, ...r.competitors.map((x) => ({ text: `${x.name} ${x.text}`, cite: x.cite })), ...r.role_asks];
   const cleaned = inline ? stripUrls(reply).replace(/\[(\d+)\]/g, (m, n) => Number(n) >= 1 && Number(n) <= max ? m : "") : stripUrls(reply).replace(/\s*\[\d+\]/g, "");
-  const body = cleaned.split(/(?<=[.!?])\s+/).filter((s) => {
+  // A line left with only list markers once its link is removed ("- https://..." -> "-") is no sentence.
+  const body0 = cleaned.split("\n").filter((l) => /[\p{L}\p{N}]/u.test(l)).join("\n").split(/(?<=[.!?])\s+/).filter((s) => {
     if (!s.trim()) return false;
     if (/\?\s*$/.test(s)) { // a question to the person
       if (!r.ask) return !numbersIn(s).length && specifics(s).names.every((n) => word(n, known));
@@ -304,6 +325,7 @@ export function enforceCompanyReply(reply: string, r: CompanyResult): string {
     }
     const plain = s.replace(/\s*\[\d+\]/g, "").trim();
     if (!(numbersIn(plain).every((n) => nums.some((x) => numEq(x, n))) && specifics(plain).names.every((n) => word(n, known)))) return false;
+    if (!figureMeaningKept(plain, lines) || !initiativeStated(plain, all)) return false;
     if (!inline) return true;
     // In chat, a factual sentence cites a source, and says what a kept line citing that source says (review F2, item 5): "Stripe has
     // a demanding culture [3]" never stands on a page [3] that says nothing about culture.
@@ -316,8 +338,13 @@ export function enforceCompanyReply(reply: string, r: CompanyResult): string {
       .map((x) => `source [${x!.n}] is ${x!.limit}${x!.dated ? `, newest date ${x!.dated}` : ""}`);
     return lim.length ? `${s.replace(/\s*$/, "")} (${lim.join("; ")})` : s;
   }).join(" ").trim();
+  // Item 10 loop (E.46): a reply with no sentence of its own left (a list of links under "Here are the sources:") is no synthesis; the
+  // kept lines answer instead, and a question to the person stays.
+  const prose = body0.split(/(?<=[.!?])\s+|\n+/).some((s) => !/[?:]\s*$/.test(s) && (s.match(/\p{L}{2,}/gu) ?? []).length >= 2);
+  const body = prose ? body0 : body0.split(/(?<=[.!?])\s+|\n+/).filter((s) => /\?\s*$/.test(s)).join(" ");
   // Nothing of the reply stood: the kept lines themselves (in chat, each with its source numbers).
-  const text = body || (inline ? facts.slice(0, 3).map((f) => `${f.text.replace(/[.]?$/, "")} ${f.cite.map((n) => `[${n}]`).join("")}.`).join(" ") : lines.filter(Boolean).slice(0, 2).join(" "));
+  const lead = inline ? facts.slice(0, 3).map((f) => `${f.text.replace(/[.]?$/, "")} ${f.cite.map((n) => `[${n}]`).join("")}.`).join(" ") : lines.filter((l) => l && l !== r.frame?.text).slice(0, 2).join(" "); // the reading is never stated as a fact
+  const text = prose ? body : [lead, body].filter(Boolean).join(" ");
   if (!inline) return text;
   // The chat answer's evidence, from the result only: the reading (labelled), the grounded questions, what the sources cannot
   // establish (with each limited or unopened source), and the numbered sources with their read dates.

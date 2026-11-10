@@ -1,0 +1,26 @@
+# WO-M: the real-site browser DRY-RUN eval (scripts/browser-eval/). The build sandboxes cannot reach job sites; CI can.
+# Run by hand only (Actions > browser-eval > Run workflow): never on a push or a pull request. It opens real public postings
+# from scripts/browser-eval/sample.csv, fills a synthetic TEST person and resume, and stops before Submit. Every request but
+# GET/HEAD/OPTIONS is aborted inside the browser, no submit control is clicked, a shown captcha / password / code field stops
+# the posting, robots.txt is obeyed, 1 request a second per host. No secrets. The report is uploaded as an artifact.
+name: browser-bench
+on:
+  push:
+    branches: ["bench/browser-*"]
+permissions:
+  contents: read
+jobs:
+  eval:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22.23.3" }
+      - name: Playwright and its Chromium
+        run: |
+          npm ci --prefix tools --no-audit --no-fund
+          (cd tools && npx --no-install playwright install --with-deps chromium)
+          echo "UPMORE_PLAYWRIGHT_PATH=$GITHUB_WORKSPACE/tools/node_modules/playwright" >> "$GITHUB_ENV"
+      - name: DOM dump of failing EU postings (read only; nothing is sent)
+        run: node scripts/browser-eval/dom-dump.cjs https://cvonlinelatvia.recruitee.com/o/it-administrators-e-1/c/new https://fridayrecruitment.recruitee.com/o/medior-business-intelligence-consultant/c/new https://careers.circet-benelux.eu/o/ict-monteur-buitendienst-1/c/new https://korfinancial.recruitee.com/o/client-success-manager-director-emeauk/c/new https://ambit.teamtailor.com/jobs/8519263-ot-computer-systems-specialist-pharma https://karjera.bite.lt/jobs/8609229-qa-engineer https://virtasant.teamtailor.com/jobs/7064368-senior-backend-product-engineer-finops-ai-cost-intelligence-platform https://careers.bwbconsulting.com/jobs/6487258-civil-engineer https://ashka.teamtailor.com/jobs/4052668-employe-polyvalent-en-restauration-h-f https://assisteraskandinavienab.teamtailor.com/jobs/5239977-personlig-assistent-till-kund-i-umea https://jobb.a-hub.se/jobs/8510421-senior-systems-hardware-engineer-to-global-company https://grupoenhol.jobs.personio.de/job/2831159

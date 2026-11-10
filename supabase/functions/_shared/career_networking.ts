@@ -14,6 +14,7 @@
 // The model writes only when the caller passes one (CAREER_NETWORKING_DRAFT=on, metered); without it the reply names who
 // would be written to and that nothing was drafted.
 import { AUTOMATED_WHY, automatedInbox } from "./automated_inbox.ts";
+import { unaddressedReply } from "./career_draft_unaddressed.ts";
 import { nearWord } from "./outreach_ask.ts";
 import { type ContactRow, contactsOf, firmKey, importContactsCsv, importContactsFile, MX_NOT_WIRED, type MxResolver, normalizeFirm, sameFirm, verifyRows } from "./career_contacts.ts";
 import { legacyRows } from "./career_referrals.ts";
@@ -710,8 +711,11 @@ async function draftTurn(o: NetworkingDeps, ask: Extract<Ask, { kind: "draft" }>
     // The address they typed picks one of two people with the same name (never a third row made up for it).
     if (typedEmail && pool.length > 1 && pool.some((r) => (r.email ?? "").toLowerCase() === typedEmail)) pool = pool.filter((r) => (r.email ?? "").toLowerCase() === typedEmail);
     label = `${t.name}${firmName ? ` at ${firmName}` : ""}`;
-    if (!pool.length && await none()) return noneYet;
-    if (!pool.length) return { reply: `No one named ${t.name}${firmName ? ` at ${firmName}` : ""} is in your contacts${atThatFirm.length ? ` (your contacts there: ${atThatFirm.slice(0, 5).map((r) => r.name).join(", ")})` : ""}. ${NO_FINDER} ${ADD_CONTACTS}`, intent: DRAFT_INTENT, status: "not_in_contacts" };
+    // The person asked for a draft to someone in none of their contacts: the draft, marked "Recipient not set", and one
+    // question for the address (career_draft_unaddressed.ts). Nothing stored; never an address from a name or a firm.
+    const unaddressed = async (lead: string) => unaddressedReply({ name: t.name, firm: t.firm || null, topic: ask.topic, signature: (await o.store.prefs(o.userId).catch(() => null))?.signature ?? null }, lead);
+    if (!pool.length && await none()) return { ...noneYet, reply: await unaddressed("") };
+    if (!pool.length) return { reply: await unaddressed(`No one named ${t.name}${firmName ? ` at ${firmName}` : ""} is in your contacts${atThatFirm.length ? ` (your contacts there: ${atThatFirm.slice(0, 5).map((r) => r.name).join(", ")})` : ""}.`), intent: DRAFT_INTENT, status: "not_in_contacts" };
     if (pool.length > 1) {
       // Two people with one name at one firm differ only by address: say which by it.
       const sameNameFirm = new Set(pool.map((r) => `${nameKey(r.name)}@${plain(r.firm)}`)).size === 1;

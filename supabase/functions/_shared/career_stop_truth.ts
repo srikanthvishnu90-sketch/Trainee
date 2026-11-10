@@ -13,11 +13,11 @@
 // The account control contract (career_user_quiet and career_apply_current, both reading career:account paused), audited
 // 2026-11-09 against the latest migration of each function. Only the paths that refuse while paused are named as held.
 export const PAUSE_HOLDS = [
-  "new applications and cloud applications (enqueue, claim and the check before submit)",
-  "outreach emails (checked again right before each one goes, so a batch already started stops too)",
+  "new applications, cloud ones included",
+  "outreach emails, even in a batch already started",
   "follow-ups",
-  "calendar invites for meetings you approved from a reply",
-  "job alerts, job cards and other messages I send on my own",
+  "calendar invites from a reply you approved",
+  "job alerts and other messages I send on my own",
   "reminders",
 ] as const;
 // What the pause cannot reach: an email already handed to the mail provider when the pause lands is out of Trainee's

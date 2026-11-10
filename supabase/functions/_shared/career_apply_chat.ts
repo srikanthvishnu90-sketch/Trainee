@@ -581,7 +581,7 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
     return { reply: `${coverageLine(0, given.missing.length)} Not queued: ${listed(given.missing.map((r) => `${r.title}: ${r.reason}`), 8)}.`, status: "none", intent, queued: [], refused: given.missing, coverage: { queued: 0, total: given.missing.length } };
   }
   if (!list.length) {
-    return { reply: `I haven't listed any postings in this thread yet, so there is nothing for "these" to mean; nothing was queued. Say "find <role> jobs in <place>" first and then "apply to these", or name one: "apply to the <role> role at <Company>".`, status: "no_list", intent, queued: [], refused: [] };
+    return { reply: `I can't apply to those yet because I haven't shown you a list of roles in this chat, so nothing was queued. Name one ("apply to the <role> role at <Company>"), or say "find <role> jobs in <place>" and then "apply to these". Which role should I search for?`, status: "no_list", intent, queued: [], refused: [] };
   }
   let slice: ShortlistEntry[], note = given?.note ?? "", numbered = "";
   const missing: Missing[] = given ? given.missing.slice() : [];

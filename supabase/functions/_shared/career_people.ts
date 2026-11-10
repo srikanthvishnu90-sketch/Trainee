@@ -46,9 +46,9 @@ export const PAGE = 200, IMPORT_PART = 2000;
 export const LINKEDIN_FILE = "Connections.csv";
 export const NO_FINDER = "I don't have a people database or an email finder, and I won't guess names or addresses.";
 export const NO_SEARCH = "I can't search the web, so I don't look up a company's pages myself.";
-export const PASTE_HOW = "Attaching a file isn't available in this chat yet, so open the file, copy everything and paste it here; about 40 rows fit in one message (fewer by text message), so send a long file in parts, the header line first.";
+export const PASTE_HOW = "Attaching a file isn't available in this chat yet, so paste its text here, header line first.";
 // The one ask, with why and how (LinkedIn's help page "Export connections from LinkedIn", a566336, via enrow.io).
-export const EXPORT_STEPS = `I find people through your own network, and LinkedIn only lets you download it (I never open LinkedIn for you): 1) on LinkedIn: Me, Settings & Privacy, Data privacy, Get a copy of your data, Connections, Request archive; 2) open the download link LinkedIn emails you (the link lasts 72 hours) and save the file; 3) send me Connections.csv here. ${PASTE_HOW}`;
+export const EXPORT_STEPS = `I never open LinkedIn for you: 1) on LinkedIn: Me, Settings & Privacy, Data privacy, Get a copy of your data, Connections, Request archive; 2) save the file LinkedIn emails you; 3) send me Connections.csv here. ${PASTE_HOW}`;
 export const EXPORT_AGAIN = `Send me your LinkedIn Connections.csv (the steps are in my earlier message: LinkedIn, Settings & Privacy, Data privacy, Get a copy of your data, Connections). ${PASTE_HOW}`;
 
 export type Source = "linkedin_export" | "gmail" | "company_page" | "provider";
@@ -638,7 +638,7 @@ function moreNote(w: SweepOutcome | null, what: string, push: boolean | undefine
   return "";
 }
 const gmailNote = (s: string, firm: string, w: SweepOutcome | null = null, push?: boolean) =>
-  s === "not_connected" ? `Your Gmail isn't connected, so I didn't check who you've emailed at ${firm}. To include them, connect it (read-only):\n${connectUrl("gmail")}`
+  s === "not_connected" ? `Your Gmail isn't connected, so I didn't check who you've emailed at ${firm}; connect it (read-only) to include them:\n${connectUrl("gmail")}`
   : s === "error" ? "I couldn't read your Gmail just now, so people you've emailed aren't included."
   : moreNote(w, `with ${firm}`, push);
 
@@ -660,7 +660,7 @@ async function whoTurn(o: PeopleTurnIn, d: PeopleDeps, firmAsked: string): Promi
   if (!people.length) {
     const none = total + listed.length
       ? `None of your ${plural(total + listed.length, "contact")} is at ${firm}.`
-      : `You haven't sent me any contacts yet, so I can't say who you know at ${firm}.`;
+      : `I can't say who you know at ${firm} because you haven't sent me any contacts yet.`;
     const ask = counts.linkedin_export ? `If ${firm} publishes a team page, send me its link and I'll read the names it lists. ${NO_SEARCH}` : await askForExport(o, d);
     return { reply: [none, NO_FINDER, ask, gmailNote(gmail, firm, sweep, d.sweepPush)].filter(Boolean).join(" ").replace(/ (Your Gmail isn't connected)/, "\n\n$1"), intent: AT_INTENT, status: total + listed.length ? "none_at_firm" : "no_contacts" };
   }

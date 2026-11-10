@@ -136,9 +136,16 @@ Nothing comes after the decision: no tails, no offers of more help, no capabilit
 4. R9 interim bubbles: the rubric sees only the final reply.
 5. E6 parallel progress after a blocker.
 
-A rubric sweep over every templated reply in `RESPONSE-LAYER.md` sections 2 to 6 is the measurement. It is blocked locally
-by disk space and will run in CI. Each violation becomes a fix in the file that writes the text, never an exception added to
-the rubric.
+A rubric sweep over every templated reply in `RESPONSE-LAYER.md` sections 2 to 6 is the measurement:
+`tests/architect/response-sweep-20261109.test.ts` (46 inventory rows, 99 replies, the real handler on Postgres plus the fixed
+constants a chat turn cannot reach). Baseline 63 violations in 51 replies; now 2, both blocked by wording an existing test pins
+(listed in the test's `BLOCKED` with the pin, for an architect ruling). Each violation becomes a fix in the file that writes the
+text, never an exception added to the rubric.
+
+Gap 1 now has its battery: `tests/architect/response-b6-replay-20261109.test.ts` replays B.6 continuations 1 to 5 turn by turn.
+With the staged brain answering as the spec's target replies, the product delivers 0 rubric violations and 0 carry failures
+(the measure of what code does around a good model answer). With no model (router only) it is 16 violations and 3 carry
+failures, recorded as a ceiling: the catch-all and unmatched fallback answer turns that need the brain.
 
 ## 7. What does not count as a pass
 

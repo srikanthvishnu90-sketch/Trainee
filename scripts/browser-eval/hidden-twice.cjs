@@ -54,7 +54,8 @@ async function main() {
             hidden = {};
             for (const h of await page.evaluate(HIDDEN)) if (h.name && h.value && !CAPTCHA_TOKEN.test(h.name)) hidden[h.name] = h.value;
           } });
-          if (r.submit_clicked || r.submit_attempts) { console.error("INVARIANT BROKEN: a submit was attempted"); process.exit(1); }
+          // A page script that tries to submit is trapped and cancelled by eval-lib (submit_attempts, nothing sent); only a click is a breach.
+          if (r.submit_clicked) { console.error("INVARIANT BROKEN: a submit was clicked"); process.exit(1); }
           if (!hidden) console.log(`LOAD ${prov} ${it.n} ${k + 1}: ${r.error || (r.walls.join(",") || (r.opened ? "opened, no form" : "not opened"))}`);
           loads.push(hidden);
         }

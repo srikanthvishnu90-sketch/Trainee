@@ -25,7 +25,7 @@ import { neverOpen } from "./career_people_sites.ts";
 import { formerTitle, type PageRead, readPage, type Resolver } from "./career_people_page.ts";
 import { domainLabelOf, registrable } from "./career_people_gmail.ts";
 import { dohMx, isRoleAddress, isTeamName, type MxResolver } from "./career_contacts.ts";
-import { assertProductModel, CLAUDE_DEFAULT_MODEL, modelConfig, PRODUCT_MODELS, WEB_SEARCH_AVAILABLE, warnIgnoredOnce, webSearch } from "./model_gateway.ts";
+import { assertProductModel, CLAUDE_DEFAULT_MODEL, modelConfig, PRODUCT_MODELS, warnIgnoredOnce, webSearch } from "./model_gateway.ts";
 
 export type ProviderName = "web";
 export const LABEL: Record<ProviderName, string> = { web: "web search" };
@@ -55,13 +55,16 @@ export interface ProviderConfig { provider: ProviderName | null; apiKey: string 
 // claude-sonnet-5-5 only (D-046): CAREER_PEOPLE_SEARCH_MODEL naming anything else is ignored with one log line, and the
 // config goes through assertProductModel, so a stale secret can never switch web search on with another model; CAREER_PEOPLE_CACHE_DAYS
 // (default 30) is how long one company's discovery is reused for everyone.
+// D-060 turned the gateway's web search on (WEB_SEARCH_AVAILABLE) for research only; people search was not approved, so its key
+// stays unwired here whatever the gateway says.
+export const PEOPLE_WEB_SEARCH_WIRED = false;
 export function providerConfig(env: (k: string) => string | undefined): ProviderConfig {
   const switchedOn = (env("CAREER_PEOPLE_SEARCH") ?? "").trim().toLowerCase() === "on";
   const gw = modelConfig({ get: env });
   const asked = (env("CAREER_PEOPLE_SEARCH_MODEL") ?? "").trim();
   if (asked && !PRODUCT_MODELS.includes(asked)) warnIgnoredOnce("CAREER_PEOPLE_SEARCH_MODEL", asked, "Trainee serves claude-sonnet-5-5 only (D-046)");
   const model = assertProductModel({ ...gw, model: DEFAULT_SEARCH_MODEL }).model;
-  const key = WEB_SEARCH_AVAILABLE && gw.apiKey ? gw.apiKey : null;
+  const key = PEOPLE_WEB_SEARCH_WIRED && gw.apiKey ? gw.apiKey : null;
   const days = Number(env("CAREER_PEOPLE_CACHE_DAYS"));
   return {
     provider: switchedOn && key ? "web" : null, apiKey: switchedOn ? key : null, switchedOn,
@@ -104,12 +107,12 @@ export function searchRecipe(company: string, titles: string[]): string[] {
   const roles = titles.length ? titles.map((t) => `${c} ${cleanCell(t, 80)}`) : [`${c} team`];
   return [...new Set([...roles, `${c} team page`, `${c} engineering blog author`, `${c} campus recruiting recruiter`, `${c} conference speaker`, `${c} press contact`])];
 }
-// The search is dark (owner directive 2026-11-02: Claude-only; Claude web search is not verified on these models). The
-// gateway's web-search door answers "not available", nothing is sent or spent, and the provider reports not_wired.
+// The search is dark. D-060 turned Claude web search on for research only: the owner did not approve people search, so this
+// searcher still asks the gateway's door with no query (nothing is reserved, sent or spent) and the provider reports not_wired.
 export function gatewaySearch(): SearchFn {
   return async () => {
     const r = await webSearch();
-    return { status: "not_wired", reason: r.detail };
+    return { status: "not_wired", reason: r.available ? "people search is not switched on (D-060 left it off)" : r.detail };
   };
 }
 

@@ -7,7 +7,8 @@
 //                    page: every question with its label, required mark and options).
 //   Ashby            GET jobs.ashbyhq.com/<board>/<id> (the posting page's data) and ONE read-only GraphQL query, the one the
 //                    page itself makes for an anonymous visitor (op ApiJobPosting: the form's fields; a fixed query string,
-//                    never a mutation).
+//                    never a mutation). ON under D-062 (1a) (architect ruling, 2026-11-11: "Ashby's public question query,
+//                    read-only").
 //   SmartRecruiters  GET api.smartrecruiters.com/v1/companies/<company>/postings/<id> (the posting). Its application questions
 //                    are not public (its application API needs a partner key; the form page is behind a bot wall): said so.
 //   Workday          workday_posting.ts (the posting's CXS data). Its application's questions are behind the person's own
@@ -31,7 +32,7 @@ export interface ApplyFlow {
   status: "ok" | "unknown" | "not_readable";
   board: Board | null;
   url: string;
-  posting: { title: string; company: string | null; location: string | null; pay: string | null; deadline: string | null; deadline_text: string | null; state: "open" | "closed" | "unknown" } | null;
+  posting: { title: string; company: string | null; location: string | null; pay: string | null; pay_by_place?: { place: string; pay: string }[]; deadline: string | null; deadline_text: string | null; state: "open" | "closed" | "unknown" } | null;
   requirements: Requirements;
   questions: Question[] | null;
   questions_read: QuestionsRead;
@@ -186,7 +187,7 @@ export async function readApplyFlow(href: string, d: ReadDeps): Promise<ApplyFlo
     const p = w?.posting;
     return {
       ...out, status: p ? "ok" : "unknown", why: w?.why ?? "",
-      posting: p ? { title: p.title, company: p.company, location: p.location, pay: p.pay, deadline: p.deadline, deadline_text: p.deadline_text, state: w!.state } : null,
+      posting: p ? { title: p.title, company: p.company, location: p.location, pay: p.pay, ...(p.pays.length ? { pay_by_place: p.pays } : {}), deadline: p.deadline, deadline_text: p.deadline_text, state: w!.state } : null,
       requirements: p ? requirementsFrom(p.description_html) : out.requirements,
       questions: null, questions_read: "behind_sign_in",
       questions_why: `Workday shows an application's questions only after the person signs in to (or creates) their own careers account on ${w?.url.host ?? host}${p?.questionnaire ? "; this posting has employer questions of its own" : ""}. They were not read, and are not known.`,

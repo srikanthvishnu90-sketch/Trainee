@@ -74,7 +74,8 @@ export interface WorkdayPosting {
   start_date: string | null;
   deadline: string | null; // YYYY-MM-DD, only when the posting states one
   deadline_text: string | null; // the posting's own words ("End Date: November 13, 2026", "15 days left to apply")
-  pay: string | null; // only as the posting's text states it (posting_pay.ts payFrom)
+  pay: string | null; // only as the posting's text states it (posting_pay.ts payFrom): the first range it states
+  pays: { place: string; pay: string }[]; // a range stated per place ("Chicago, Illinois | ($28- $49 Hourly)"), each as written
   description_html: string;
   text: string; // plain text, with any sentence written to an AI removed (posting_pay.ts postingTextForModel)
   can_apply: boolean | null;
@@ -90,6 +91,16 @@ const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 const day = (v: unknown) => { const s = str(v).slice(0, 10); return ISO_DAY.test(s) && !Number.isNaN(Date.parse(s)) ? s : null; };
 const company = (v: unknown) => str(v).replace(/^\d{2,}\s+/, "") || null;
 
+// Pay a posting states for each place, in its own words: "<City>, <Region> | (<range>)" (Workday's pay-by-location table).
+export function paysByPlace(text: string): { place: string; pay: string }[] {
+  const out: { place: string; pay: string }[] = [];
+  for (const m of String(text ?? "").matchAll(/([A-Z][A-Za-z.'-]+(?: [A-Z][A-Za-z.'-]+)*, [A-Z][A-Za-z]+(?: [A-Z][A-Za-z]+)*)\s*\|\s*\(([^()|]{3,60})\)/g)) {
+    const pay = payFrom(m[2]);
+    if (pay && !out.some((x) => x.place === m[1])) out.push({ place: m[1], pay });
+    if (out.length >= 12) break;
+  }
+  return out;
+}
 // A CXS job answer -> the posting, or null when it carries none.
 export function parseWorkdayCxs(json: unknown, pageUrl: string): WorkdayPosting | null {
   const j: any = (json as any)?.jobPostingInfo;
@@ -97,13 +108,16 @@ export function parseWorkdayCxs(json: unknown, pageUrl: string): WorkdayPosting 
   const html = str(j.jobDescription);
   const full = postingTextForModel(htmlToText(html), Infinity);
   const extra = Array.isArray(j.additionalLocations) ? j.additionalLocations.map(str).filter(Boolean) : [];
-  const deadlineText = [str(j.jobPostingEndDateAsText), str(j.timeLeftToApply)].filter(Boolean).join("; ") || null;
+  // The deadline in the posting's own words: Workday's end-date fields, else the sentence of its text that states one
+  // ("Applications will be accepted through Sunday, December 6th, 2026"). The end date (endDate) decides closed.
+  const said = /[^.\n]*\b(?:applications? (?:will be )?accepted (?:through|until)|apply by|application deadline|deadline to apply)\b[^.\n]*/i.exec(htmlToText(html))?.[0]?.replace(/^[-\s]+/, "").trim();
+  const deadlineText = [str(j.jobPostingEndDateAsText), str(j.timeLeftToApply)].filter(Boolean).join("; ") || (said ? said.slice(0, 160) : null);
   return {
     source: "cxs", url: str(j.externalUrl) || pageUrl, title: str(j.title), company: company((json as any)?.hiringOrganization?.name),
     location: str(j.location) || null, locations: [str(j.location), ...extra].filter(Boolean),
     req_id: str(j.jobReqId) || null, time_type: str(j.timeType) || null, remote_type: str(j.remoteType) || null,
     posted: str(j.postedOn) || null, start_date: day(j.startDate), deadline: day(j.endDate), deadline_text: deadlineText,
-    pay: payFrom(full.text), description_html: html, text: postingTextForModel(htmlToText(html)).text,
+    pay: payFrom(full.text), pays: paysByPlace(full.text), description_html: html, text: postingTextForModel(htmlToText(html)).text,
     can_apply: typeof j.canApply === "boolean" ? j.canApply : null, questionnaire: !!str(j.questionnaireId),
   };
 }
@@ -123,7 +137,7 @@ export function parseWorkdayPage(html: string, pageUrl: string): WorkdayPosting 
       source: "page", url: canonical || pageUrl, title: str(jp.title), company: company(jp.hiringOrganization?.name), location: loc || null, locations: loc ? [loc] : [],
       req_id: str(jp.identifier?.value) || null, time_type: str(jp.employmentType) || null, remote_type: str(jp.jobLocationType) || null,
       posted: day(jp.datePosted), start_date: null, deadline: day(jp.validThrough), deadline_text: day(jp.validThrough) ? `validThrough ${day(jp.validThrough)}` : null,
-      pay: payFrom(postingTextForModel(desc, Infinity).text), description_html: desc, text: postingTextForModel(desc).text, can_apply: null, questionnaire: false,
+      pay: payFrom(postingTextForModel(desc, Infinity).text), pays: paysByPlace(postingTextForModel(desc, Infinity).text), description_html: desc, text: postingTextForModel(desc).text, can_apply: null, questionnaire: false,
     };
   }
   return null;

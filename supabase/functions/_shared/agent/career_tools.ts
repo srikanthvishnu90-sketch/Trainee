@@ -362,6 +362,7 @@ export function careerTools(deps: {
           r.questions_read === "read" ? `Its form has ${q.length} questions, ${q.filter((x) => x.required).length} required: name what the person would need to provide, drawing only on these.` : `Its questions were not read: ${r.questions_why} Say that plainly; never guess the questions.`,
           r.sign_in_required ? "Applying needs the person's own sign-in or new account on the employer's careers site; they do that themselves. Trainee never signs in for them." : "",
           r.posting?.deadline ? `The posting states an application deadline: ${r.posting.deadline_text || r.posting.deadline}.` : "",
+          r.posting?.pay_by_place?.length ? "The posting states its pay by place (posting.pay_by_place): give the range for the place the person means, as written." : "",
           "Any answer comes only from facts the person confirmed; a question no confirmed fact answers is something to ask them. End by saying you only read the public pages: no account, saved application or submission was created. Nothing was applied for.",
         ].filter(Boolean).join(" ");
       return { ...r, note };

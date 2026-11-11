@@ -2,6 +2,19 @@
  "note": "Recorded public pages for tests/architect/workday-posting-d062.test.ts (D-062 (1)). No sign-in, account or application was involved in any recording. Not recordings (in the test, marked SYNTHETIC): a removed Workday posting's answers, HTTP 404 and errorCode S22 with HTTP 403. The S21/S22 codes are as documented by a third party's liveness checker (github.com/Tailrd-Org/Tailrd backend/services/platform_liveness.py: 'errorCode S21 (never existed) / S22 (unpublished) = gone. The public page can't tell.'); not verified live here.",
  "sources": [
   {
+   "file": "workday-paypal-R0138586.cxs.json",
+   "request": "GET https://paypal.wd1.myworkdayjobs.com/wday/cxs/paypal/jobs/job/Software-Engineer-Intern---Summer-2027_R0138586",
+   "posting": "https://paypal.wd1.myworkdayjobs.com/en-US/jobs/job/Software-Engineer-Intern---Summer-2027_R0138586 (the benchmark's posting)",
+   "how": "Recorded HERE 2026-11-11 22:26:59 UTC, after paypal.wd1.myworkdayjobs.com was allowed for this environment, by one request with the user agent 'Trainee posting reader (contact: unset)'; stored byte for byte.",
+   "sha256": "61d97083c19b881480ca4b4b3e1e241b710f3526d3f54dc70debab7f9a5c1677"
+  },
+  {
+   "file": "workday-paypal-search-intern.page0.json",
+   "request": "POST https://paypal.wd1.myworkdayjobs.com/wday/cxs/paypal/jobs/jobs body {\"appliedFacets\":{},\"limit\":20,\"offset\":0,\"searchText\":\"intern\"} (the tenant's public search, one page)",
+   "how": "Recorded HERE 2026-11-11 22:26:59 UTC, after paypal.wd1.myworkdayjobs.com was allowed for this environment, by one request with the user agent 'Trainee posting reader (contact: unset)'; stored byte for byte.",
+   "sha256": "1907245c0cb404ea9082bfb540f1a611e75641d844a7c78dd0f4dc0e5ebbb9f6"
+  },
+  {
    "file": "greenhouse-stripe-8194287.questions.json",
    "request": "GET https://boards-api.greenhouse.io/v1/boards/stripe/jobs/8194287?questions=true&pay_transparency=true",
    "posting": "https://job-boards.greenhouse.io/stripe/jobs/8194287",

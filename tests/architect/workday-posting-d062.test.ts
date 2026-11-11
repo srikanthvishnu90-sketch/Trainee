@@ -23,8 +23,8 @@ const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a,
 const FX = new URL("../fixtures/posting-reads/", import.meta.url);
 const fx = (f: string) => Deno.readTextFileSync(new URL(f, FX));
 
-// The benchmark's posting (evals/mirror/instinct-wa-batch1/): its page is on Workday; no recording of it exists here (this
-// environment's proxy refuses *.myworkdayjobs.com), so on the handler it is read with the network refused.
+// The benchmark's posting (evals/mirror/instinct-wa-batch1/): its page is on Workday. Recorded here (W8); on the handler (MP-W (a))
+// it is read with the network refused, so the result does not depend on the date the test runs (its end date is 2026-12-07).
 const PAYPAL_WD = "https://paypal.wd1.myworkdayjobs.com/en-US/jobs/job/Software-Engineer-Intern---Summer-2027_R0138586";
 const PAYPAL_CXS = "https://paypal.wd1.myworkdayjobs.com/wday/cxs/paypal/jobs/job/Software-Engineer-Intern---Summer-2027_R0138586";
 // Recorded Workday postings (real public CXS answers; sources.json).
@@ -212,6 +212,42 @@ Deno.test("D-062/W7 Workday discovery: the tenant's public search, paced, capped
   eq(r.reads, Array(3).fill("POST https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/External/jobs"));
   const limited = await searchWorkdayBoard({ host: "acme.wd5.myworkdayjobs.com", tenant: "acme", site: "External", fetch: (async () => new Response("slow down", { status: 429, headers: { "retry-after": "30" } })) as any, sleep: async () => {} });
   eq([limited.postings.length, limited.stopped, limited.retry_after_s, limited.reads.length], [0, "HTTP 429", 30, 1]);
+});
+
+// The benchmark's own posting, recorded HERE once the environment allowed paypal.wd1.myworkdayjobs.com (2026-11-11 22:26 UTC,
+// sources.json): the CXS job answer and the first page of the tenant's search for "intern".
+const PAYPAL_PAGE = "https://paypal.wd1.myworkdayjobs.com/jobs/job/Software-Engineer-Intern---Summer-2027_R0138586";
+const PAYPAL_REC = { [`GET ${PAYPAL_CXS}`]: () => new Response(fx("workday-paypal-R0138586.cxs.json"), { headers: { "content-type": "application/json" } }) };
+Deno.test("D-062/W8 the benchmark's PayPal posting, recorded here: open, its stated deadline, pay as stated, requirements; questions behind sign-in", async () => {
+  const r = recorded(PAYPAL_REC);
+  const w = (await readWorkdayPosting(PAYPAL_WD, { fetch: r.f, now: () => NOV11 }))!;
+  eq([w.state, w.posting?.title, w.posting?.req_id, w.posting?.deadline, w.posting?.deadline_text, w.posting?.can_apply, w.posting?.questionnaire],
+    ["open", "Software Engineer Intern - Summer 2027", "R0138586", "2026-12-07", "Applications will be accepted through Sunday, December 6th, 2026", true, true]);
+  // The posting states a range per place: the first (its primary place, San Jose) is `pay`; each place's range is in `pays`.
+  eq(w.posting?.pay, "$32 - $55 Hourly");
+  ok(w.posting!.pays.some((x) => x.place === "Chicago, Illinois" && x.pay === "$28- $49 Hourly"), `Chicago's range as the posting states it: ${JSON.stringify(w.posting!.pays)}`);
+  ok(w.posting!.locations.includes("Chicago, Illinois, United States of America"), JSON.stringify(w.posting!.locations));
+  const req = requirementsFrom(w.posting!.description_html).required;
+  ok(req.includes("Must be returning to school in Fall 2027.") && req.includes("Must be legally authorized to work in the U.S. without sponsorship."), JSON.stringify(req));
+  eq(w.reads, [`GET ${PAYPAL_CXS}`]);
+  // After the stated end date it is closed, by the posting's own data.
+  eq((await readWorkdayPosting(PAYPAL_WD, { fetch: recorded(PAYPAL_REC).f, now: () => Date.parse("2026-12-08T12:00:00Z") }))!.state, "closed");
+  // C18: the re-check gives the posting's own deadline words.
+  const tool = careerTools({ postings: async () => [], postingRecheck: (url: string) => recheckPosting(url, linkChecker(r.f), () => NOV11, { workday: (u: string) => readWorkdayPosting(u, { fetch: r.f, now: () => NOV11 }) }) } as any).find((t) => t.name === "check_posting_open")!;
+  const g: any = await tool.run({ url: PAYPAL_WD }, {} as any);
+  ok(g.state === "open" && /Applications will be accepted through Sunday, December 6th, 2026/.test(g.note), g.note);
+  // C11: requirements read, questions behind the person's own sign-in.
+  const a = await readApplyFlow(PAYPAL_WD, { fetch: r.f, now: () => NOV11 });
+  eq([a.board, a.posting?.state, a.questions_read, a.sign_in_required], ["Workday", "open", "behind_sign_in", true]);
+  ok(a.posting?.pay_by_place?.some((x) => x.place === "Chicago, Illinois"), JSON.stringify(a.posting));
+  ok(/this posting has employer questions of its own/.test(a.questions_why), a.questions_why);
+  neverWrites(r.sent);
+  // Discovery: one page of the tenant's search (recorded), read-only, the total as Workday states it.
+  const s = await searchWorkdayBoard({ host: "paypal.wd1.myworkdayjobs.com", tenant: "paypal", site: "jobs", text: "intern", maxPages: 1,
+    fetch: (async () => new Response(fx("workday-paypal-search-intern.page0.json"), { headers: { "content-type": "application/json" } })) as any, sleep: async () => {} });
+  eq([s.postings.length, s.total, s.complete, s.reads], [20, 193, false, ["POST https://paypal.wd1.myworkdayjobs.com/wday/cxs/paypal/jobs/jobs"]]);
+  ok(s.postings.every((x) => x.url.startsWith("https://paypal.wd1.myworkdayjobs.com/jobs/job/")), JSON.stringify(s.postings[0]));
+  eq(PAYPAL_PAGE, workdayUrl(PAYPAL_WD)!.page);
 });
 
 // ------------------------------------------------------------------------------------------------ through the real handler

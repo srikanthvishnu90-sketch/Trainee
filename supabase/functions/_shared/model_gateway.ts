@@ -336,8 +336,8 @@ export interface WebSearchHit { url: string; title: string; page_age: string | n
 export interface WebCitation { url: string; title: string; cited_text: string }
 export type WebSearchResult =
   | { available: false; reason: "not_available" | "refused" | "error"; detail: string; results: [] }
-  | { available: true; query: string; results: WebSearchHit[]; citations: WebCitation[]; answer: string; searches: number; errors: string[]; cost_usd: number | null; usage: any; stop_reason: string | null };
-export interface WebSearchOptions { cfg?: ModelConfig; maxUses?: number; request?: typeof fetch; meter?: TurnMeter; budget?: BudgetGate; timeoutMs?: number; allowedDomains?: string[]; blockedDomains?: string[]; system?: string }
+  | { available: true; query: string; results: WebSearchHit[]; citations: WebCitation[]; answer: string; searches: number; errors: string[]; cost_usd: number | null; usage: any; stop_reason: string | null; shape: string[] };
+export interface WebSearchOptions { tool?: "web_search_20260209" | "web_search_20250305"; cfg?: ModelConfig; maxUses?: number; request?: typeof fetch; meter?: TurnMeter; budget?: BudgetGate; timeoutMs?: number; allowedDomains?: string[]; blockedDomains?: string[]; system?: string }
 const WEB_SEARCH_SYSTEM = [
   "You research one question on the web for a career assistant. Search, then answer in at most six short sentences, citing the results.",
   "Prefer official sources first (the employer's own site and job postings, government data), then reputable reporting; label forum posts and anonymous reviews as anecdotes.",
@@ -349,7 +349,7 @@ export async function webSearch(query?: string, opts: WebSearchOptions = {}): Pr
   if (!q || !opts.cfg || !opts.cfg.apiKey) return { available: false, reason: "not_available", detail: !q ? "web search needs a query" : "web search is not configured (no model key)", results: [] };
   const cfg = assertProductModel(opts.cfg);
   const maxUses = Math.max(1, Math.min(WEB_SEARCH_MAX_USES, Math.floor(Number(opts.maxUses) || WEB_SEARCH_MAX_USES)));
-  const tool: any = { type: WEB_SEARCH_TOOL, name: "web_search", max_uses: maxUses };
+  const tool: any = { type: opts.tool ?? WEB_SEARCH_TOOL, name: "web_search", max_uses: maxUses };
   if (opts.allowedDomains?.length) tool.allowed_domains = opts.allowedDomains.slice(0, 20);
   else if (opts.blockedDomains?.length) tool.blocked_domains = opts.blockedDomains.slice(0, 20);
   const price = PRICES[cfg.model];
@@ -362,9 +362,11 @@ export async function webSearch(query?: string, opts: WebSearchOptions = {}): Pr
     const budget = e instanceof ModelBudgetBlockedError;
     return { available: false, reason: budget || (e instanceof ModelUnavailableError && [400, 401, 403].includes(e.status)) ? "refused" : "error", detail: (e instanceof Error ? e.message : String(e)).slice(0, 300), results: [] };
   }
-  const results: WebSearchHit[] = [], citations: WebCitation[] = [], errors: string[] = [], text: string[] = [];
+  const results: WebSearchHit[] = [], citations: WebCitation[] = [], errors: string[] = [], text: string[] = [], shape: string[] = [];
   const https = (u: unknown) => typeof u === "string" && /^https:\/\//i.test(u);
   for (const b of Array.isArray(msg?.content) ? msg.content : []) {
+    // The answer's shape, for the record: each block's type, and a text block's citation types.
+    shape.push(`${String(b?.type ?? "?")}${b?.type === "server_tool_use" ? `:${String(b?.name ?? "")}` : ""}${Array.isArray(b?.citations) && b.citations.length ? `[${[...new Set(b.citations.map((c: any) => String(c?.type)))].join(",")}]` : ""}`.slice(0, 120));
     if (b?.type === "web_search_tool_result") {
       if (Array.isArray(b.content)) {
         for (const r of b.content) if (r?.type === "web_search_result" && https(r.url) && !results.some((x) => x.url === r.url)) results.push({ url: r.url, title: squashText(r.title).slice(0, 200), page_age: r.page_age ? squashText(r.page_age).slice(0, 40) : null });
@@ -380,5 +382,5 @@ export async function webSearch(query?: string, opts: WebSearchOptions = {}): Pr
   }
   const searches = Math.max(0, Number(msg?.usage?.server_tool_use?.web_search_requests) || 0);
   const cost = costMicros(cfg.model, msg?.usage);
-  return { available: true, query: q, results, citations, answer: squashText(text.join("")).slice(0, 2000), searches, errors, cost_usd: cost === null ? null : cost / 1e6, usage: msg?.usage ?? null, stop_reason: msg?.stop_reason ?? null };
+  return { available: true, query: q, results, citations, answer: squashText(text.join("")).slice(0, 2000), searches, errors, cost_usd: cost === null ? null : cost / 1e6, usage: msg?.usage ?? null, stop_reason: msg?.stop_reason ?? null, shape };
 }

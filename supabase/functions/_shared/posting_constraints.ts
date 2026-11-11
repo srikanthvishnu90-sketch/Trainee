@@ -56,6 +56,11 @@ const COMPANY_STOP = /^(summer|fall|spring|winter|autumn|january|february|march|
 function companyOf(message: string): string | null {
   // RESEARCH ROUND 3: a name with an accent or an apostrophe is the whole name ("Société Générale", "Nestlé", "L'Oréal"),
   // not "Soci", "Nestl" or "L".
+  // MIRROR-1000: "check Lyft's careers page", "is Duolingo hiring any", "what roles does Notion have open" name the employer too.
+  const named = /(?<![\p{L}\p{N}])(\p{Lu}[\p{L}\p{N}&.]*(?:\s+\p{Lu}[\p{L}\p{N}&.]*){0,2})['’]s\s+careers?\s+(?:page|site)\b/u.exec(message)
+    ?? /\b[Ii]s\s+(\p{Lu}[\p{L}\p{N}&.]*(?:\s+\p{Lu}[\p{L}\p{N}&.]*){0,2})\s+hiring\b/u.exec(message)
+    ?? /\b(?:does|do)\s+(\p{Lu}[\p{L}\p{N}&.]*(?:\s+\p{Lu}[\p{L}\p{N}&.]*){0,2})\s+have\b/u.exec(message);
+  if (named && !COMPANY_STOP.test(named[1]) && !US_CITIES.has(lc(named[1]))) return named[1];
   const m = /(?<![\p{L}\p{N}])(?:at|for|with)\s+(\p{Lu}[\p{L}\p{N}&.]*(?:['’]\p{L}[\p{L}\p{N}&.]*)?(?:\s+\p{Lu}[\p{L}\p{N}&.]*(?:['’]\p{L}[\p{L}\p{N}&.]*)?){0,2})/u.exec(message);
   if (!m) return null;
   const words = m[1].split(/\s+/).filter((w, i) => !(i > 0 && COMPANY_STOP.test(w)));
@@ -65,10 +70,11 @@ function companyOf(message: string): string | null {
 }
 const ALIAS: Record<string, string> = { nyc: "new york", sf: "san francisco", "new york city": "new york", "bay area": "san francisco" };
 function placeOf(t: string): string | null {
-  const m = /\b(?:in|near|around|based in|located in)\s+([a-z][a-z .'-]{1,30}?)(?=\s+(?:for|with|paying|that|who|where|at|over|under|above|or|and|starting|summer|fall|spring|winter|autumn|sponsorship|please)\b|[,.;?!]|$)/.exec(t);
+  const m = /\b(?:in|near|around|based in|located in)\s+([a-z][a-z .'-]{1,30}?)(?=\s+(?:for|with|paying|that|who|where|at|over|under|above|or|and|starting|summer|fall|spring|winter|autumn|sponsorship|please|right|now|only|also|posted|hybrid|remote|but|so|then|just|today|this|next)\b|[,.;?!]|\s+[—–-]\s|$)/.exec(t);
   const cand = m ? m[1].trim() : "";
   const known = (x: string) => US_CITIES.has(x) || new RegExp(`^(?:${ABROAD.source})$`, "i").test(x);
-  if (cand && !/^(the|a|an|my|your|this|that|person|general|case)\b/.test(cand) && cand.split(" ").length <= 3 && (known(cand) || !/\b(remote|intern|engineer|analyst)\b/.test(cand))) return ALIAS[cand] ?? cand;
+  // MIRROR-1000: an industry ("in gaming") or a month ("starting in December") is not a place.
+  if (cand && !INDUSTRY.test(cand) && !NOT_A_PLACE.test(cand) && !/^(the|a|an|my|your|this|that|person|general|case)\b/.test(cand) && cand.split(" ").length <= 3 && (known(cand) || !/\b(remote|intern|engineer|analyst)\b/.test(cand))) return ALIAS[cand] ?? cand;
   // No "in": a city or country named anywhere ("SWE internship Chicago summer 2027"), longest name first.
   let best = "";
   for (const c of US_CITIES) if (c.length > best.length && new RegExp(`(^|[^a-z])${c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^a-z])`).test(t)) best = c;
@@ -80,6 +86,8 @@ const CUE = /^(?:(?:please|hey|hi|ok|okay|so|and|also|can you|could you|can u|wo
 const GREETING = /^(?:(?:(?:hello|hey|hi|hiya|howdy|yo|greetings)(?:\s+there)?|good\s+(?:morning|afternoon|evening|day))(?:\s+trainee)?(?:[\s,!.:;-]+|$))+/;
 const EXPAND: Record<string, string> = { swe: "software engineer", sde: "software engineer", pm: "product manager", ml: "machine learning", ds: "data science" };
 const ROLE_NOISE = new Set(["me", "some", "any", "a", "an", "the", "jobs", "job", "roles", "role", "positions", "position", "openings", "opening", "opportunities", "opportunity", "work", "to", "i", "im", "am", "my", "of", "for", "paying", "pay", "pays", "salary", "make", "making", "earn", "at", "least", "over", "above", "under", "minimum", "min", "more", "or", "and", "in", "near", "around", "with", "no", "not", "non", "need", "needed", "visa", "sponsorship", "sponsor", "remote", "please", "per", "an", "hr", "hour", "hourly", "year", "yearly", "starting", "start", "season", "that", "are", "is", "will", "be", "who", "which", "interested", "good", "fit", "fits", "career", "new", "level", "grad", "graduate", "recent", "entry", "early", "junior", "jr", "senior", "sr", "intern", "interns", "internship", "internships", "coop", "co-op", "wage", "hiring",
+  // MIRROR-1000: the words of asking, never of a role (what is left of "don't", "I'll", "I'm", "Lyft's" once split).
+  "what", "which", "where", "open", "also", "just", "only", "yet", "now", "right", "someone", "like", "them", "it", "has", "does", "do", "don", "t", "ll", "m", "s", "d", "ve", "re", "so", "then", "use", "using", "uses", "skill", "skills", "exactly", "give", "top", "must", "something", "anything", "things", "companies", "company", "there", "any", "find", "search", "show", "look", "up", "list", "check", "have", "can", "could", "you", "together", "onsite", "on-site", "hybrid", "in-person", "wfh",
   // MIRROR WA-1 (2026-11-11, benchmark C3): "find me 5 swe internships i could actually apply to right now" was searched as the
   // role "software engineer could actually right now". Hedges and time words are how the person talks, never a title.
   "could", "can", "should", "would", "actually", "really", "realistically", "just", "right", "now", "rn", "asap", "today", "currently"]);
@@ -96,6 +104,55 @@ export function searchSentence(raw: string): string {
     ?? all.find((s) => JOB_NOUN.test(s)) ?? String(raw ?? "");
 }
 const COUNT_WORD = /^(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|dozen|few|couple|several)$/;
+
+// MIRROR-1000 router fixes (2026-11-11, evals/mirror): a search message carries more than the role. The guard ("don't apply",
+// "I'll decide on applying later", "search only, nothing submitted"), how to answer ("just the top 3", "tell me where you
+// looked", "keep it short") and the constraints read elsewhere ("posted in the last week", "hybrid ok, not fully onsite",
+// "evenings and weekends only", "startups under 200 people", "I can't start before July") were all searched as role words,
+// so the empty reply read back a role nobody asked for ("I checked just show don t mid-level accountant posted recently").
+// These are taken out of the role text by what they are, whatever the role; the role words themselves are never matched.
+const EFFECT = /\b(?:apply|applying|applied|applications?|submit\w*|queue\w*|send|sending|sent|on my behalf|behalf)\b/;
+const HOLD = /\b(?:don'?t|do not|not|no|nothing|never|without|later|yet|hold|only|just|decide)\b/;
+// A clause that only says how to answer, or that the person is only looking.
+const ANSWER_CLAUSE = /^(?:(?:and|also|then|but|so|first|second|plus)\s+)*(?:(?:two|three|a couple of|quick pair of) (?:things|asks)|(?:i'?m |i am )?(?:just|only) (?:looking|searching|browsing|show(?:ing)? me|tell(?:ing)? me)(?: for now)?|(?:search(?:ing)?|looking) only|only looking(?: for now)?|just searching|list them|number them(?: so i can pick)?|show (?:me )?the links?|(?:keep it|make it) (?:short|brief)|short version|bullets? only|(?:in )?(?:one or two|one|two|three) (?:lines?|sentences?)|(?:tell|show) me (?:where|which|what|how|why)\b.*|say (?:which|where|what)\b.*|(?:give me |show me )?(?:exactly|no more than|at most|just|only) (?:the )?(?:top )?(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)|(?:just )?the top (?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)|if (?:(?:there'?s|there is|it'?s|it is) )?(?:nothing|empty)\b.*|how would you\b.*|(?:show |give |tell )?(?:me )?the nearest real alternative|what(?:'s| is) the closest\b.*|what would you watch\b.*|it has to be (?=remote|hybrid|onsite)|it'?s fine,? really)$/;
+// A stated limit that is read elsewhere (arrangement, freshness, hours, size, start date, experience, exclusions), as a phrase.
+const LIMIT_PHRASE = new RegExp([
+  String.raw`\bposted (?:in the (?:last|past) (?:\w+ )?(?:days?|weeks?|months?|hours?)|recently|today|yesterday|this week|last week|since [^,.;]*)`,
+  String.raw`\b(?:hybrid(?: is)? (?:ok|okay|fine)(?: but [^,.;]*)?|not fully (?:onsite|on-site|in[- ]office|remote)|fully (?:remote|onsite|on-site|in[- ]office)|no office days|(?:no more than|at most) (?:\w+ )?office days?|(?:it )?has to be (?=remote|hybrid))`,
+  String.raw`\bevenings? (?:and|&) weekends?(?: only)?|\bpart[- ]time(?:,? (?:under|up to|at most) \d+ hours(?: a| per)? week)?|\b(?:under|up to|at most) \d+ hours(?: a| per)? week|\b\d-day week`,
+  String.raw`\b(?:startups?|companies|firms?) (?:under|over|with(?: fewer than| more than)?|below|above) [\d,]+\+? (?:people|employees|staff)|\b(?:big|large|small) (?:companies|firms)(?: only)?|\b[\d,]+\+? (?:people|employees)\b`,
+  String.raw`\bleave out [^,.;]*|\bskip anything [^,.;]*|\bnothing that (?:asks|requires|needs|wants) [^,.;]*|\b(?:and )?no more than (?:one|two|three|\d+) (?:years?|yrs?)[^,.;]*|\b(?:i )?can'?t start (?:before|until) [^,.;]*|\bstarting (?:in |on )?(?:january|february|march|april|may|june|july|august|september|october|november|december|tomorrow|next \w+|soon)\b|\bonly if [^,.;]*`,
+  String.raw`\bwithin (?:a |an )?[\w-]+ (?:minute |mile )?commute[^,.;]*|\bnear(?:by)? public transit|\bpublic transit\b|\bthey must [^,.;]*|\b(?:visa )?sponsorship is a must[^,.;]*|\bnot [^,.;]*, i already talked to them|\bi already talked to them|\bfully funded relocation`,
+  String.raw`\bif (?:it'?s|it is|there'?s|there is) (?:empty|nothing)\b[^,.;]*|\b(?:january|february|march|april|may|june|july|august|september|october|november|december) 20\d\d\b|\bright now\b|\b(?:or )?nearby\b|\bfor someone like me\b|\bfor me\b|\bon my behalf\b|\bfor now\b|\bfor (?:next|this) (?:spring|summer|fall|autumn|winter)\b|\b(?:next|this) (?:spring|summer|fall|autumn|winter)\b`,
+].join("|"), "g");
+// Ways of asking that are not the role ("what X jobs are open", "is Stripe hiring any X", "check Lyft's careers page for X").
+const ASK_PHRASE = new RegExp([
+  String.raw`^(?:quick question|what|which|where|are there|first|second|then|also)\b`, String.raw`\b(?:are|is) (?:open|hiring|available)\b`, String.raw`\bwhat open\b`, String.raw`\bopen\b(?= (?:\S+ ){0,4}(?:jobs?|roles?|positions?|openings?|internships?))`,
+  String.raw`\b(?:jobs?|roles?) (?:that|which|where) (?:use|uses|need|needs)\b`, String.raw`\bwhere\b`, String.raw`\bis the main skill\b`, String.raw`\bmain skill\b`,
+  String.raw`\b(?:i'?m|i am) good at\b`, String.raw`\bwhat (?:open )?(?:jobs?|roles?) fit that\b`, String.raw`\bfit that\b`, String.raw`\b(?:could )?use my\b`,
+  String.raw`\b(?:check|look at|search) [\p{L}\p{N}&.'’ ]+?['’]s careers? (?:page|site)\b`, String.raw`\b[\p{L}\p{N}&.]+['’]s careers? (?:page|site)\b`, String.raw`\bcareers? (?:page|site)\b`,
+  String.raw`\bis [\p{L}\p{N}&.]+(?: [\p{L}\p{N}&.]+){0,2} hiring(?: any)?\b`, String.raw`\bdoes [\p{L}\p{N}&.]+(?: [\p{L}\p{N}&.]+){0,2} have\b`, String.raw`\bwhich companies have\b`,
+  String.raw`\b(?:look(?:ing)? up|search for|search|find me|find|show me|show|get me|list|check)\b`,
+].join("|"), "gu");
+// Industry words are what kind of employer, never a place ("UX designer jobs in gaming" is not a city called Gaming).
+export const INDUSTRY = /^(?:gaming|games|media|retail|nonprofit|non-profit|insurance|healthcare|health care|fintech|finance|banking|government|aerospace|climate|energy|education|edtech|consulting|tech|technology|biotech|pharma|hospitality|manufacturing|logistics|real estate|entertainment|sports|automotive|telecom|legal|publishing|advertising|crypto|defense|agriculture|food|fashion|travel|security|cybersecurity|ai|saas|startups?)$/;
+const NOT_A_PLACE = /^(?:january|february|march|april|may|june|july|august|september|october|november|december|spring|summer|fall|autumn|winter|person|office|the office|hybrid|downtown)$/;
+export function roleTextOf(text: string): string {
+  // Abbreviations are not sentence ends ("St. Louis", "Ft. Worth").
+  const clauses = String(text ?? "").toLowerCase().replace(/[’]/g, "'")
+    .split(/\s*(?:[:;,()]|\s[—–-]\s|[—–]|(?<!\b(?:st|ft|mt))[.?!](?:\s|$))\s*/).map((c) => c.trim()).filter(Boolean);
+  const kept = clauses.filter((c) => {
+    if (ANSWER_CLAUSE.test(c)) return false;
+    // A guard: an effect named with a hold ("don't apply", "no applying yet", "nothing submitted", "I'll decide on applying later").
+    if (EFFECT.test(c) && HOLD.test(c) && (!JOB_NOUN.test(c) || /^(?:please )?(?:don'?t|do not|never|no|nothing)\b/.test(c))) return false;
+    if (/^(?:hypothetically|draft only|search only|only searching|just checking)$/.test(c)) return false;
+    // An exclusion ("not Capital One, I already talked to them", "not fully onsite") is a limit, never the role.
+    if (/^(?:and |also |but )?not\s/.test(c) && !JOB_NOUN.test(c)) return false;
+    return true;
+  });
+  const ind = INDUSTRY.source.slice(4, -2);
+  return kept.map((c) => c.replace(new RegExp(`\\b(?:i )?only want (?:${ind})\\b|\\b(?:in|at) (?:the )?(?:${ind})(?: (?:companies|firms|startups|industry|sector))?\\b|\\b(?:${ind}) (?:companies|firms|startups|industry|sector)\\b`, "g"), " ").replace(LIMIT_PHRASE, " ").replace(ASK_PHRASE, " ").replace(/\b(?:companies|firms) for\b/g, " ").replace(/\bfor (\w+(?: \w+)?) (?:students|majors)\b/g, " $1 ").replace(/\b(?:students|majors)\b/g, " ")).join(", ");
+}
 export function searchTextOf(message: string): SearchText {
   const raw = String(message ?? "").replace(/\s+/g, " ").trim();
   let t = lc(raw);
@@ -108,6 +165,8 @@ export function searchTextOf(message: string): SearchText {
   // company, role, location, and application link." was searched as the role "let s leave resume now find data analyst
   // actually open show company location application link don t yet", which no title holds, so nothing was ever found.
   t = lc(searchSentence(raw));
+  // MIRROR-1000: the guard, how to answer and the limits read elsewhere are not role words (roleTextOf, above).
+  t = roleTextOf(t);
   // What the roles must be ("that are actually open", "verified open") is how to check them, not words of the role.
   t = t.replace(/\b(?:that|which)\s+(?:are|is|were|was)\b[^,.;]*/g, " ").replace(/\b(?:(?:actually|currently|still|verified|real)\s+)+(?:open|live|available)\b|\bverified\b/g, " ");
   // TELEGRAM LOOP (2026-11-10, item 14): a greeting before the ask is not the role. "hello, I need a job" was searched as the

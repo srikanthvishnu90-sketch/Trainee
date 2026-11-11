@@ -341,6 +341,9 @@ export function parsePeopleAsk(message: string): Ask | null {
   if (m) return { kind: "school_set", name: m[1], school: m[2].replace(/^the\s+/i, "").trim() };
   // alumni
   m = /^(?:(?:find|show|list|who are|any|are there(?: any)?)(?:\s+me)?(?:\s+(?:the|my|any|some))?\s+)?(?:(.+?)\s+)?(?:alumni|alums?|alumnae|grads|graduates)(?:\s+(?:from|of)\s+(.+?))?\s+(?:at|in|working at|who work at|that work at)\s+(.+)$/i.exec(t);
+  // MIRROR-1000 (2026-11-11): "write to Yusuf Demir, an alum from Northbrook who works at Tesla, asking for 15 minutes" is a
+  // message to that one person, not a list of alumni at Tesla.
+  if (m && /\b(?:write|draft|compose)\s+(?:to|a (?:note|message|email) to)\b/i.test(t)) m = null;
   if (m) {
     const firm = firmText(m[3]);
     const lead = (m[1] ?? "").replace(/^(?:the|my|any|some|fellow|our)\s*/i, "").trim();

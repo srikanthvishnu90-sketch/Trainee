@@ -676,7 +676,7 @@ const CareerHost = (() => {
         // batch seam (155) is the wired drive path.
         result = { ...result, worker: workerCapabilities.portal_browser,
           // MIRROR-1000 (2026-11-11): said plainly, right after the answer's first line, never in the handler's own words ("not wired in this handler").
-          reply: boardFor ? result.reply : String(result.reply ?? "").replace(/^([^\n]*)(\n|$)/, (_, head, nl) => `${head}\nThe browser that fills employer forms is not wired up here, so no employer form has been opened or submitted: I prepare the application, and it goes to an employer only after you approve that exact one.${nl}`) };
+          reply: boardFor ? result.reply : String(result.reply ?? "").replace(/^([^\n]*)(\n|$)/, (_, head, nl) => `${head}\nThe browser that fills employer forms isn't connected here, so no employer form has been opened or submitted: I prepare the application, and it goes to an employer only after you approve that exact one.${nl}`) };
       }
       return {
         reply: CareerContainment.extractReplyText(result),

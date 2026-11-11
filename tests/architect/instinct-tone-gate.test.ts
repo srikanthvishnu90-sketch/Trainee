@@ -6,7 +6,9 @@
 // that test does). Code-first turns never reach the model, so their reply is the router's own words on either path. Each
 // Trainee reply is scored against Instinct's reply for the same turn: Instinct's style is the bar, never its wording.
 //   length    the reply's prose (list items and bare link lines are the content asked for, as in the rubric's channel_length) is
-//             at most 1.2 x Instinct's, or Instinct's + 40 characters for a very short one
+//             the same length as Instinct's: within +/-10% of Instinct's characters, or +/-6 characters when Instinct's prose is
+//             under 60. Longer and shorter both miss. Architect amendment (owner, 2026-11-11: same length as Instinct); the bar was
+//             "at most 1.2 x Instinct's, or Instinct's + 40". Every other bar is unchanged.
 //   internal  the rubric's `internal` rule plus the words the head-to-head saw: "the record", "packet" when the person did not
 //             say it, "host", "write is not confirmed"
 //   filler    the rubric's `boilerplate_tail`
@@ -70,15 +72,19 @@ const A2 = [
 ];
 const [R1, , , S1, S2] = A2.map((t) => t.say);
 
-// Turns still over the length bar, each with why (open work, not a pass). Only the length bar may be open.
+// Turns still outside the length window, each with why (open work, not a pass). Only the length bar may be open.
 const OPEN: Record<string, string> = {
-  "A2.R3": "Instinct's reply (102 characters) answers neither the download-link ask nor re-sends the file (A.5 fails it on O); Trainee re-sends the PDF, says nothing was applied for and answers the link ask, which takes more than 142 characters",
-  "C2.t3": "the empty-search reply (career_search_judge.ts, R01 empty-search scope and R05 remote-only) is being rewritten on branch ag/d054-fixes; left to that branch so the two do not collide",
+  "A2.R3": "Instinct's reply (102 characters) answers neither the download-link ask nor re-sends the file (A.5 fails it on O); Trainee re-sends the PDF, says nothing was applied for and answers the link ask, which takes more than the 112 the window allows",
+  "A2.S1": "Instinct's reply (155) is a plan with no result; Trainee returns the result, and every clause of its 187-character summary is pinned by another architect test (the freshness line, f05-search-judge; \"1 listed, not re-checked\", loop-08-discovery; \"I did not find 5 within the scope checked\", r10-wo-c-search-replay; \"Nothing was applied for\", r10-wo-c and r10-wo-d); cutting 16 characters needs an architect ruling on which clause goes",
+  "C2.t1": "the same pinned 187-character search summary as A2.S1, 5 over Instinct's 165 + 10%; the same ruling closes both",
+  "C2.t3": "the remote-only empty search (career_search_judge.ts) is 592 against Instinct's 244: its scope, refresh time and widening are pinned (r10-wo-c-search-replay, loop-08-discovery) and \"Nothing was invented\" by f05-search-judge; Instinct's reply names the roles the change removes, which this world's list (one onsite role) cannot; needs a ruling on the short empty-search form",
+  "C3.t2": "Instinct prepares a packet for its fictional role; here the C3.t1 queue opened no application link, so Trainee names the role and offers to tailor the resume (154 against 182 to 222); padding it would add no information",
+  "C5.t5": "Instinct's 291 characters are three sourced figures; in this run no research result holds them, so the staged brain keeps only the sentence without an unsourced figure (35) rather than state a number it cannot source (D-007)",
 };
 
 // ------------------------------------------------------------------------------------------------------------- the scorer
 export interface ToneTurn { id: string; ask: string; instinct: string; reply: string }
-export interface ToneScore { id: string; chars: number; instinctChars: number; allowed: number; withinLength: boolean; internal: string[]; filler: string[]; refusal: boolean; answersFirst: boolean }
+export interface ToneScore { id: string; chars: number; instinctChars: number; allowed: number; least: number; withinLength: boolean; internal: string[]; filler: string[]; refusal: boolean; answersFirst: boolean }
 
 const isListLine = (l: string) => /^\s*(?:\d{1,2}[.)]|[-*•])\s/.test(l);
 const isUrlLine = (l: string) => /^\s*(?:[-*•]\s*)?https?:\/\/\S+\s*$/.test(l);
@@ -96,7 +102,10 @@ export function proseOf(s: string) {
   }
   return out.join(" ");
 }
-export const allowedFor = (instinctChars: number) => Math.max(Math.round(instinctChars * 1.2), instinctChars + 40);
+// Architect amendment (owner, 2026-11-11: same length as Instinct): the window is +/-10% of Instinct's characters, +/-6 under 60.
+export const slackFor = (instinctChars: number) => instinctChars < 60 ? 6 : Math.round(instinctChars * 0.1);
+export const allowedFor = (instinctChars: number) => instinctChars + slackFor(instinctChars);
+export const leastFor = (instinctChars: number) => Math.max(0, instinctChars - slackFor(instinctChars));
 // Words the head-to-head saw that the rubric's `internal` rule does not hold yet.
 const OBSERVED: [string, RegExp][] = [
   ["the record", /\bthe record\b/i],
@@ -107,7 +116,7 @@ const REFUSAL = /^(?:i can['’]?t|i couldn['’]?t|i cannot|i could not|i'm una
 const firstLine = (s: string) => String(s ?? "").trim().split(/(?<=[.!?])\s|\n/)[0] ?? "";
 
 export function scoreTone(t: ToneTurn): ToneScore {
-  const chars = proseOf(t.reply).length, instinctChars = proseOf(t.instinct).length, allowed = allowedFor(instinctChars);
+  const chars = proseOf(t.reply).length, instinctChars = proseOf(t.instinct).length, allowed = allowedFor(instinctChars), least = leastFor(instinctChars);
   const internal = [
     ...internalWords({ ask: t.ask, reply: t.reply }).map((v) => `${v.detail}: ${v.quote}`),
     ...OBSERVED.filter(([, rx]) => rx.test(t.reply)).map(([n]) => n),
@@ -116,7 +125,7 @@ export function scoreTone(t: ToneTurn): ToneScore {
   ];
   const filler = boilerplateTails({ ask: t.ask, reply: t.reply }).map((v) => `${v.detail}: ${v.quote}`);
   const refusal = REFUSAL.test(firstLine(t.reply)) && !REFUSAL.test(firstLine(t.instinct));
-  return { id: t.id, chars, instinctChars, allowed, withinLength: chars <= allowed, internal: [...new Set(internal)], filler, refusal, answersFirst: !answersFirst({ ask: t.ask, reply: t.reply }).length };
+  return { id: t.id, chars, instinctChars, allowed, least, withinLength: chars >= least && chars <= allowed, internal: [...new Set(internal)], filler, refusal, answersFirst: !answersFirst({ ask: t.ask, reply: t.reply }).length };
 }
 
 export function toneLine(s: ToneScore[]) {
@@ -125,13 +134,22 @@ export function toneLine(s: ToneScore[]) {
 }
 
 Deno.test("tone scorer: each rule on its own", () => {
-  const ok = scoreTone({ id: "u", ask: "Find me five data analyst internships", instinct: "I will look for open roles and return up to five.", reply: "One data analyst internship is open.\n1. Data Analyst Intern at Lakefront\nhttps://example.test/a" });
+  // (architect amendment, owner 2026-11-11: this fixture's Instinct line is shortened to 39 characters so the 36-character reply
+  // sits inside the same-length window; under the old bar it passed at 50.)
+  const ok = scoreTone({ id: "u", ask: "Find me five data analyst internships", instinct: "I will look for open roles, up to five.", reply: "One data analyst internship is open.\n1. Data Analyst Intern at Lakefront\nhttps://example.test/a" });
   assertNode.ok(ok.withinLength && !ok.internal.length && !ok.filler.length && !ok.refusal && ok.answersFirst, JSON.stringify(ok));
   assertNode.equal(proseOf("Two found.\n1. A at B\n   Student window: not stated.\n2. C at D\nhttps://x.test/a\nWhich one?"), "Two found. Which one?");
-  assertNode.equal(allowedFor(100), 140);
-  assertNode.equal(allowedFor(300), 360);
+  // Architect amendment (owner, 2026-11-11: same length as Instinct): +/-10%, +/-6 under 60; longer and shorter both miss.
+  assertNode.equal(allowedFor(100), 110);
+  assertNode.equal(leastFor(100), 90);
+  assertNode.equal(allowedFor(300), 330);
+  assertNode.equal(leastFor(300), 270);
+  assertNode.equal(allowedFor(50), 56);
+  assertNode.equal(leastFor(50), 44);
   const long = scoreTone({ id: "u", ask: "x", instinct: "Here it is.", reply: "Here it is. ".repeat(10) });
   assertNode.ok(!long.withinLength);
+  const short = scoreTone({ id: "u", ask: "x", instinct: "Here it is. ".repeat(10).trim(), reply: "Here it is." });
+  assertNode.ok(!short.withinLength, "shorter misses too");
   assertNode.deepStrictEqual(scoreTone({ id: "u", ask: "what is saved?", instinct: "Your GPA.", reply: "The record holds your GPA." }).internal, ["system words: The record", "the record"]);
   assertNode.ok(scoreTone({ id: "u", ask: "what next?", instinct: "Done.", reply: "The host record write is not confirmed." }).internal.includes("host"));
   assertNode.ok(scoreTone({ id: "u", ask: "apply", instinct: "Ready.", reply: "Your packet is ready." }).internal.includes("packet"));
@@ -189,7 +207,7 @@ Deno.test({
     }
     const scores = turns.map(scoreTone);
     for (const [k, s] of scores.entries()) {
-      const why = [!s.withinLength && `long ${s.chars}>${s.allowed}`, s.internal.length && `internal [${s.internal.join("; ")}]`, s.filler.length && `filler [${s.filler.join("; ")}]`, s.refusal && "needless refusal", !s.answersFirst && "not answer-first"].filter(Boolean);
+      const why = [s.chars > s.allowed && `long ${s.chars}>${s.allowed}`, s.chars < s.least && `short ${s.chars}<${s.least}`, s.internal.length && `internal [${s.internal.join("; ")}]`, s.filler.length && `filler [${s.filler.join("; ")}]`, s.refusal && "needless refusal", !s.answersFirst && "not answer-first"].filter(Boolean);
       console.log(`TONE ${s.id.padEnd(6)} ${String(s.chars).padStart(4)}/${String(s.instinctChars).padStart(3)} ${why.length ? why.join(", ") : "ok"} | ${turns[k].reply.replace(/\s+/g, " ")}`);
     }
     const line = toneLine(scores);

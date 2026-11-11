@@ -2110,7 +2110,7 @@ const CareerRouter = (() => {
     if (!art && /\bpacket\b/.test(t) && !/\b(resume|cv|cover letter|pdf|docx)\b/.test(t)) {
       const reply = compose({
         headline: "There's no application packet in this chat yet.",
-        facts: ["Pick a role and I'll prepare one for you to review: the job and the resume for it. Nothing is submitted until you approve it."],
+        facts: ["Pick a role and I'll prepare one for you to review. Nothing is submitted until you approve it."],
         nextStep: "Which role should it be for?",
       });
       return { intent: "career_packet_absent", reply, resultStatus: "awaiting_user", sends: 0, documents: [] };

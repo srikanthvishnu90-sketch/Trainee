@@ -419,6 +419,16 @@ export const S3_WAIVER = { deployed: "33f7d00d1fce216153c431f6881e3922151ce4f8",
 export const waiverApplies = (deployed: string | null) => deployed === S3_WAIVER.deployed;
 export const meetsWaiverBar = (worst: number, size: number) => Number.isInteger(worst) && Number.isInteger(size) && size > 0 && worst * 100 >= size * S3_WAIVER.barPercent;
 
+// OWNER RULING D-056 (owner, 2026-11-10, in chat: chose "B: 95% on every pass" for release 11). The deployed SHA 7d2e8ee1
+// (release 9) was measured 190/190 when the staged brain ran on Haiku; since D-046 it runs on Sonnet, so that baseline does
+// not measure the model the candidate serves. For THIS deployed SHA only, S3 passes when the candidate's measurement is
+// complete (five passes, the dev set, at least 30 cases) and EVERY pass is at least 95% (exact integer counts: 37/38). Bound
+// to that exact SHA: the next production deploy changes the deployed SHA and the ruling stops applying by itself; the
+// candidate is then compared with its measured baseline as before (no tolerance). Any other deployed SHA: no ruling.
+export const S3_RULING_D056 = { deployed: "7d2e8ee1d1dbdb9831e29c7fbd1f0838976de11f", barPercent: 95, minSetSize: 30 } as const;
+export const d056Applies = (deployed: string | null) => deployed === S3_RULING_D056.deployed;
+export const meetsD056Bar = (worst: number, size: number) => Number.isInteger(worst) && Number.isInteger(size) && size > 0 && worst * 100 >= size * S3_RULING_D056.barPercent;
+
 export async function s3(src: Sources, sha: string, deployed: string | null): Promise<Result> {
   const evidence: string[] = [];
   if (!deployed) return { id: "S3", pass: false, summary: "no successful production deploy found: nothing to compare with", evidence };
@@ -433,6 +443,11 @@ export async function s3(src: Sources, sha: string, deployed: string | null): Pr
   evidence.push(`candidate ${short(sha)}: ${(cand.m.rate * 100).toFixed(1)}% (${cb}, ${cand.m.set}/${cand.m.size}, mean of ${cand.m.passes} passes of CI run ${cand.m.run}, brain commit ${cand.m.commit})`);
   // The deployed side is measured on the candidate's set, size, harness and judges, with the brain it served: only those rows count.
   const dep = await measurementOf(src, deployed, comparable(rows, cand.m), db);
+  if (d056Applies(deployed)) {
+    const ok = cand.m.passes === MEASUREMENT_PASSES && cand.m.size >= S3_RULING_D056.minSetSize && cand.m.set === "dev" && meetsD056Bar(cand.m.worst, cand.m.size);
+    evidence.push(`deployed ${short(deployed)}: ${dep.m ? `${(dep.m.rate * 100).toFixed(1)}% (${db}, CI run ${dep.m.run}), measured on the Haiku-era brain` : "no comparable measurement"}; owner ruling D-056 applies: every pass of the candidate must be >= ${S3_RULING_D056.barPercent}% (worst pass ${cand.m.worst}/${cand.m.size})`, served);
+    return { id: "S3", pass: ok, summary: `OWNER RULING D-056 for deployed ${short(deployed)}: ${cb} worst pass ${cand.m.worst}/${cand.m.size} ${ok ? ">=" : "<"} ${S3_RULING_D056.barPercent}% (mean ${(cand.m.rate * 100).toFixed(1)}%)`, evidence };
+  }
   if (!dep.m && waiverApplies(deployed)) {
     const ok = cand.m.passes === MEASUREMENT_PASSES && cand.m.size >= S3_WAIVER.minSetSize && cand.m.set === "dev" && meetsWaiverBar(cand.m.worst, cand.m.size);
     evidence.push(`deployed ${short(deployed)}: no comparable measurement can exist (OpenAI-era reply code); one-time owner waiver S3_WAIVER applies: every pass of the candidate must be >= ${S3_WAIVER.barPercent}% (worst pass ${cand.m.worst}/${cand.m.size})`, served);
@@ -460,6 +475,7 @@ export async function missingMeasurement(src: Sources, sha: string, deployed: st
   const db = await servedBrainAt(src, deployed);
   const dep = await measurementOf(src, deployed, comparable(rows, cand.m), db);
   if (!dep.m && waiverApplies(deployed)) return { sha: null, brain: null, why: `candidate measured by CI run ${cand.m.run}; the deployed SHA cannot be measured and S3 is waived once for it (S3_WAIVER)` };
+  if (d056Applies(deployed)) return { sha: null, brain: null, why: `candidate measured by CI run ${cand.m.run}; owner ruling D-056 judges it on its own passes (>= ${S3_RULING_D056.barPercent}% each), so the deployed SHA needs no new measurement` };
   if (!dep.m) return { sha: deployed, brain: db, why: `deployed: ${dep.why} on ${onWhat(cand.m)}` };
   return { sha: null, brain: null, why: `both measured: candidate by CI run ${cand.m.run}, deployed by CI run ${dep.m.run} (served brains: candidate ${cb}, deployed ${db})` };
 }

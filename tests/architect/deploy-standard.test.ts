@@ -7,7 +7,7 @@ import assertNode from "node:assert/strict";
 import { parse as parseYaml } from "npm:yaml@2.9.1";
 import {
   ACCEPTANCE_CHECK, ACCEPTANCE_FILE, type CheckId, type CheckRun, evaluate, jobCheckNames, knownGaps, LEDGER, parseLedger, parseScoreLog, prOf, type PullFile, report, type Review,
-  ledgerApproves, ledgerOnly, S3_WAIVER, s2, type Sources, stepIds,
+  ledgerApproves, ledgerOnly, S3_RULING_D056, S3_WAIVER, s2, type Sources, stepIds,
 } from "../../scripts/launch/deploy-standard.ts";
 
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -377,6 +377,41 @@ Deno.test("S3 waiver mutation: an unmeasured candidate is still a failure", asyn
   const w = base(); deployedIsTheWaivedSha(w);
   w.log = LOG_HEAD;
   await onlyFails(w, "S3", /candidate: no router measurement/);
+});
+// ---- owner ruling D-056 (owner, 2026-11-10): release 9's baseline (7d2e8ee1) was measured on the Haiku-era brain; for THAT
+// deployed SHA only, every one of the candidate's five passes must be at least 95% (37/38 on the dev set), whatever the baseline.
+function deployedIsTheD056Sha(w: World): string {
+  const W = S3_RULING_D056.deployed;
+  for (const [k, v] of [...w.files]) if (k.startsWith(`${D}:`)) w.files.set(`${W}:${k.slice(D.length + 1)}`, v);
+  w.parents[B] = W; w.parents[W] = A; w.trees[W] = w.trees[D];
+  for (const k of Object.keys(w.ancestors)) w.ancestors[k] = w.ancestors[k].map((x) => (x === D ? W : x));
+  w.ancestors[W] = [A]; w.deployed = W;
+  return W;
+}
+Deno.test("S3 D-056: the ruled deployed SHA, a 100% baseline, and a candidate whose every pass is >= 95% (37/38) passes", async () => {
+  const w = base(); const W = deployedIsTheD056Sha(w);
+  w.log = LOG_HEAD + run5(W, "router", [38, 38, 38, 38, 38], "100") + run5(C, "router", [37, 38, 37, 38, 37], "200");
+  const { v, text } = await verdicts(w);
+  eq(v.S3, true, text); ok(/S3 PASS: OWNER RULING D-056 for .*worst pass 37\/38 >= 95%/.test(text), text);
+});
+Deno.test("S3 D-056 mutation: one pass of 36/38 (94.7%) fails, whatever the mean", async () => {
+  const w = base(); const W = deployedIsTheD056Sha(w);
+  w.log = LOG_HEAD + run5(W, "router", [38, 38, 38, 38, 38], "100") + run5(C, "router", [37, 36, 37, 36, 37], "200"); // trunk 1a69ec9f's real passes
+  await onlyFails(w, "S3", /OWNER RULING D-056 .*worst pass 36\/38 < 95%/);
+});
+Deno.test("S3 D-056 mutation: it does not apply to any other deployed SHA (the exact baseline comparison holds)", async () => {
+  const w = base();
+  w.log = LOG_HEAD + run5(D, "router", [38, 38, 38, 38, 38], "100") + run5(C, "router", [37, 38, 37, 38, 37], "200");
+  await onlyFails(w, "S3", /router pass rate 98\.4% < deployed 100\.0%/);
+});
+Deno.test("S3 D-056 mutation: an unmeasured candidate, four passes, or a tiny set still fails", async () => {
+  const w = base(); deployedIsTheD056Sha(w);
+  w.log = LOG_HEAD;
+  await onlyFails(w, "S3", /candidate: no router measurement/);
+  w.log = LOG_HEAD + run5(C, "router", [38, 38, 38, 38], "200");
+  await onlyFails(w, "S3", /candidate: .*has 4 qualifying passes, not 5/);
+  w.log = LOG_HEAD + run5(C, "router", [10, 10, 10, 10, 10], "200", { size: 10 });
+  const { v } = await verdicts(w); eq(v.S3, false);
 });
 Deno.test("S3 mutation: the deployed SHA measured only on another set", async () => {
   const w = base(); w.log = LOG_HEAD + run5(D, "router", [22, 22, 22, 22, 22], "100", { set: "heldout" }) + run5(C, "router", [23, 23, 23, 23, 23], "200");

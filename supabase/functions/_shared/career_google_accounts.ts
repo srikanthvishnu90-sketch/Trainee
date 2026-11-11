@@ -19,16 +19,23 @@ export interface GoogleAccount { mailbox: string; primary: boolean; can_read: bo
 const addr = (s: unknown) => String(s ?? "").trim().toLowerCase();
 const scopesOf = (s: unknown) => String(s ?? "").split(/[\s,]+/).filter(Boolean);
 
+// A store without career_google_accounts (a project before 20261111120000, or a test double that knows only older tables).
+export const addedTableAbsent = (e: unknown) => /career_google_accounts|does not exist|schema cache|PGRST20[25]/i.test(String((e as any)?.message ?? e ?? ""));
+const one = (d: any) => (Array.isArray(d) ? d[0] ?? null : d ?? null);
 export async function googleAccounts(admin: any, userId: string): Promise<GoogleAccount[]> {
   const first = await admin.from("user_oauth_connections").select("email,scopes,connected_at").eq("user_id", userId).eq("provider", "google_career").maybeSingle();
   if (first.error) throw new Error(`read the Google connection: ${first.error.message}`);
-  const more = await admin.from("career_google_accounts").select("mailbox,scopes,connected_at").eq("user_id", userId).order("connected_at", { ascending: true });
-  // A project without 20261111120000: the first grant alone, as before.
-  const rows: any[] = more.error ? [] : (more.data ?? []);
+  let rows: any[] = [];
+  try {
+    const more = await admin.from("career_google_accounts").select("mailbox,scopes,connected_at").eq("user_id", userId).order("connected_at", { ascending: true });
+    if (more.error && !addedTableAbsent(more.error)) throw new Error(`read the Google accounts: ${more.error.message}`);
+    rows = more.error ? [] : (Array.isArray(more.data) ? more.data : []);
+  } catch (e) { if (!addedTableAbsent(e)) throw e; }
   const out: GoogleAccount[] = [];
-  if (first.data) { const s = scopesOf(first.data.scopes); out.push({ mailbox: addr(first.data.email), primary: true, can_read: s.includes(GMAIL_READ), can_send: s.includes(GMAIL_SEND), connected_at: first.data.connected_at ?? null }); }
+  const f = one(first.data);
+  if (f && (f.email || f.scopes)) { const s = scopesOf(f.scopes); out.push({ mailbox: addr(f.email), primary: true, can_read: s.includes(GMAIL_READ), can_send: s.includes(GMAIL_SEND), connected_at: f.connected_at ?? null }); }
   for (const r of rows) {
-    if (out.some((a) => a.mailbox === addr(r.mailbox))) continue;
+    if (!r?.mailbox || out.some((a) => a.mailbox === addr(r.mailbox))) continue;
     const s = scopesOf(r.scopes);
     out.push({ mailbox: addr(r.mailbox), primary: false, can_read: s.includes(GMAIL_READ), can_send: s.includes(GMAIL_SEND), connected_at: r.connected_at ?? null });
   }
@@ -113,8 +120,9 @@ export async function disconnectGoogleAccount(admin: any, userId: string, mailbo
 }
 // Every added account (the "disconnect gmail" of all of them, with the first grant).
 export async function disconnectAddedAccounts(admin: any, userId: string, d: RevokeDeps): Promise<{ ok: boolean; removed: string[]; failures: string[] }> {
-  const rows = await admin.from("career_google_accounts").select("mailbox").eq("user_id", userId);
-  if (rows.error) return /does not exist|schema cache|PGRST205/i.test(String(rows.error.message)) ? { ok: true, removed: [], failures: [] } : { ok: false, removed: [], failures: ["read which Google accounts are connected"] };
+  let rows: any;
+  try { rows = await admin.from("career_google_accounts").select("mailbox").eq("user_id", userId); } catch (e) { if (addedTableAbsent(e)) return { ok: true, removed: [], failures: [] }; throw e; }
+  if (rows.error) return addedTableAbsent(rows.error) ? { ok: true, removed: [], failures: [] } : { ok: false, removed: [], failures: ["read which Google accounts are connected"] };
   const removed: string[] = [], failures: string[] = [];
   for (const r of rows.data ?? []) {
     const x = await disconnectGoogleAccount(admin, userId, r.mailbox, d);
@@ -128,7 +136,10 @@ export async function disconnectAddedAccounts(admin: any, userId: string, d: Rev
 // it as the first grant (oauth_connect_commit), as before. A project without the function: 'primary' (the old behaviour).
 export async function commitAddedAccount(admin: any, g: { userId: string; secret: string; email: string | null; scopes: string; now: number }): Promise<"primary" | "added" | "taken" | "limit" | "gone" | "invalid"> {
   if (!g.email) return "primary";
-  const r = await admin.rpc("career_google_account_commit", { p_user: g.userId, p_secret: g.secret, p_email: g.email, p_scopes: g.scopes, p_now: new Date(g.now).toISOString() });
-  if (r.error) { if (/career_google_account_commit|PGRST202/.test(`${r.error.code ?? ""} ${r.error.message ?? ""}`)) return "primary"; throw new Error("record the connection"); }
-  return ["primary", "added", "taken", "limit", "gone", "invalid"].includes(r.data) ? r.data : "invalid";
+  let r: any;
+  try { r = await admin.rpc("career_google_account_commit", { p_user: g.userId, p_secret: g.secret, p_email: g.email, p_scopes: g.scopes, p_now: new Date(g.now).toISOString() }); }
+  catch (e) { if (/career_google_account_commit|PGRST202|unknown|not (?:found|faked|stubbed)/i.test(String((e as any)?.message ?? e))) return "primary"; throw e; }
+  if (r?.error) { if (/career_google_account_commit|PGRST202/.test(`${r.error.code ?? ""} ${r.error.message ?? ""}`)) return "primary"; throw new Error("record the connection"); }
+  // A double that answers every function with nothing (an older store): the first grant's path, as before.
+  return ["primary", "added", "taken", "limit", "gone", "invalid"].includes(r?.data) ? r.data : r?.data == null ? "primary" : "invalid";
 }

@@ -183,7 +183,7 @@ export async function statuses(d: Deps, userId: string): Promise<Status[]> {
   // D-062: every Google account the person connected (the first grant and each one added beside it, or only added ones).
   const g = out.find((x) => x.id === "gmail")!;
   const all = await googleAccounts(d.admin, userId).catch(() => null);
-  if (all && all.length) {
+  if (all && all.some((a) => a.mailbox)) {
     g.accounts = all.map((a) => a.mailbox).filter(Boolean);
     if (g.state === "not_connected") { g.state = "connected"; g.email = g.accounts[0] ?? null; g.uses = CONNECTORS.gmail.uses(all.some((a) => a.can_send) ? ["https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/gmail.send"] : ["https://www.googleapis.com/auth/gmail.readonly"]); }
   }

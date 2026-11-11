@@ -134,8 +134,8 @@ export function supabaseMailStore(admin: any): MailStore {
       const conns = must<any[]>(await admin.from("user_oauth_connections").select("user_id,email").eq("provider", "google_career").limit(5000), "read career grants") ?? [];
       for (const c of conns) mailbox.set(c.user_id, addr(c.email));
       // D-062: a person whose only Google accounts are ones added beside a first grant they disconnected is read too.
-      const more = await admin.from("career_google_accounts").select("user_id").limit(5000);
-      const ids = [...new Set([...conns.map((c) => c.user_id), ...(more.error ? [] : (more.data ?? []).map((r: any) => r.user_id))])];
+      const more = await Promise.resolve(admin.from("career_google_accounts").select("user_id").limit(5000)).catch((e: unknown) => ({ error: e, data: null }));
+      const ids = [...new Set([...conns.map((c) => c.user_id), ...(more.error || !Array.isArray(more.data) ? [] : more.data.map((r: any) => r.user_id))])];
       if (!ids.length) return [];
       const acct = await admin.from("career_watch_kv").select("user_id,value").eq("key", "career:account").in("user_id", ids);
       if (!acct.error) {
@@ -211,8 +211,8 @@ export function supabaseMailStore(admin: any): MailStore {
       const r = must<any[]>(await admin.from("user_oauth_connections").select("provider,email").eq("user_id", u).eq("provider", "google_career").limit(1), "read the career grant") ?? [];
       if (!r.length) {
         // D-062: only accounts added beside a first grant that is gone: still connected while one of them is.
-        const more = await admin.from("career_google_accounts").select("mailbox").eq("user_id", u).limit(1);
-        if (more.error || !(more.data ?? []).length) return false;
+        const more = await Promise.resolve(admin.from("career_google_accounts").select("mailbox").eq("user_id", u).limit(1)).catch((e: unknown) => ({ error: e, data: null }));
+        if (more.error || !Array.isArray(more.data) || !more.data.length) return false;
         if (mailbox.has(u)) { epochs.set(u, Number.POSITIVE_INFINITY); return false; }
         return true;
       }

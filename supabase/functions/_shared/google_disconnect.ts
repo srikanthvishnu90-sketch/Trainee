@@ -118,8 +118,10 @@ export async function disconnectGoogle(admin: any, userId: string, d: RevokeDeps
   // revoked at Google, its row deleted (its token and the events read from it go with the row), read back below.
   let added: string[] = [];
   if (mailChecked) {
-    const more = await admin.from("career_google_accounts").select("mailbox").eq("user_id", userId);
-    if (!more.error) {
+    let more: any;
+    try { more = await admin.from("career_google_accounts").select("mailbox").eq("user_id", userId); }
+    catch (e) { more = { error: { message: String((e as any)?.message ?? e) } }; }
+    if (!more.error && Array.isArray(more.data)) {
       added = (more.data ?? []).map((r: any) => String(r.mailbox));
       for (const m of added) {
         const v = await admin.rpc("career_google_account_vault_read", { p_user: userId, p_mailbox: m });
@@ -130,7 +132,7 @@ export async function disconnectGoogle(admin: any, userId: string, d: RevokeDeps
         if (del.error) failures.push("delete the Google connection");
         had.push(...added.map((m) => `google_career:${m}`));
       }
-    } else if (!/does not exist|schema cache|PGRST205/i.test(String(more.error.message))) failures.push("read which Google accounts are connected");
+    } else if (more.error && !/career_google_accounts|does not exist|schema cache|PGRST20[25]/i.test(String(more.error.message))) failures.push("read which Google accounts are connected");
   }
   // The migration's trigger deletes these with the career row; deleting them here too means a disconnect does not depend on
   // the order the code and the migration were deployed in, and clears what a mail check left after the connection was gone.

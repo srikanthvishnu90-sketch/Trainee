@@ -61,7 +61,7 @@ The loop, reusable for any reference (Instinct batch 2, another assistant, a hum
 | C1 | OFF | `CAREER_REPLY_WRITER`: one File with the checked postings and a weekly plan comes only from `create_file` (`plan_review`), offered only with the reply writer on Telegram; the D-060 plan page has no postings |
 | C2 | EXISTS | (D-059, this PR: no recipient named is drafted with placeholders) |
 | C3 | EXISTS | |
-| C4 | MISSING | built (D-063): `research_career_question` kind `advice`, one cited source on its own line; its steps pass in `pending/mirror-process-blocked.test.ts`, and it moves to EXISTS at the architect's review |
+| C4 | EXISTS | (D-063: `research_career_question` kind `advice`, one cited guide, its link on its own line; the header education line read as drafts) |
 | C5 | EXISTS | |
 | C6 | MISSING | email-confirmation evidence in the record reply; researched roles separated from applications |
 | C5f1 | EXISTS | |
@@ -69,7 +69,7 @@ The loop, reusable for any reference (Instinct batch 2, another assistant, a hum
 | C7 | EXISTS | |
 | C8 | EXISTS | |
 | C9 | EXISTS | (D-060 web research: `research_market` with Claude's web search) |
-| C10 | MISSING | built (D-063): no email on the confirmed resume or typed prints a visible `[your email]` placeholder in a chat review draft (never the account's); steps pass in pending, moves to EXISTS at review |
+| C10 | EXISTS | (D-063: no email on the confirmed resume or typed prints a visible `[your email]` placeholder in a chat review draft, never the account's) |
 | C11 | MISSING | a read-only reader of a posting's apply entry flow and questions |
 | C12 | EXISTS | |
 | C13 | EXISTS | (D-059) |
@@ -79,15 +79,15 @@ The loop, reusable for any reference (Instinct batch 2, another assistant, a hum
 | C17 | EXISTS | |
 | C18 | EXISTS | (D-060 `check_posting_open`; a Workday page is named as not readable, never guessed) |
 | C19 | OFF | `CAREER_PEOPLE_SEARCH`, `CAREER_CONTACT_OUTREACH` (D-043 not accepted) |
-| C20 | MISSING | built (D-063): `tailor_resume` `edits` (condense, expand from confirmed details only), a v2 PDF; steps pass in pending, moves to EXISTS at review |
+| C20 | EXISTS | (D-063: `tailor_resume` `edits`, condense and expand from confirmed details only, a v2 PDF) |
 | C21 | EXISTS | |
 | C22 | EXISTS | (D-060: `get_posting` pay, then `research_market`, self-reported figures labelled) |
 | C21f | EXISTS | |
 | C23 | EXISTS | (D-060: the earlier search from the cache, same source; and this PR: a link Trainee already showed is kept on recall) |
 
-18 EXISTS, 8 blocked (2 OFF, 6 MISSING), after D-060 (web research on, merged 2026-11-11) was verified turn by turn here: C9,
+21 EXISTS, 5 blocked (2 OFF, 3 MISSING) after D-063 (C4, C10 and C20 moved to EXISTS, asserted in MP-1). Before it: 18 EXISTS, 8 blocked, after D-060 (web research on, merged 2026-11-11) was verified turn by turn here: C9,
 C22 and C23 moved to EXISTS; C4 did not (the research path answers a different question); C1's plan page is not the File
-Instinct made. The deploy the owner asked to hold waits on the 8.
+Instinct made. The deploy the owner asked to hold waits on the 5 still blocked.
 
 ## Rules every turn keeps
 
@@ -134,19 +134,21 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
   `TRAINEE_FILE_BASE_URL`) - EXISTS. (4) an honest count when fewer than 5 are found - EXISTS.
 - **Artifact:** the results File. **Boundary:** "Nothing was applied for" (code).
 
-### C4 "what should i put at the very top of my resume for swe roles, be specific" (MISSING)
+### C4 "what should i put at the very top of my resume for swe roles, be specific" (EXISTS)
 - **Instinct:** name and contacts, then school, degree and graduation date, then a skills line; leave the outdated 3.9 off; one
   cited guide page.
 - **Steps:** (1) the brain with the confirmed profile in its prompt (`memory.ts personBlock`) and `get_profile` - EXISTS.
   (2) the outdated GPA flagged from what the person said - EXISTS (the conversation; the GPA correction is in the window).
-  (3) one cited source for the advice - **MISSING**. Verified after D-060 at $0 with a stubbed search: `research_career_question`
+  (3) one cited source for the advice - EXISTS since D-063 (was MISSING). Verified after D-060 at $0 with a stubbed search: `research_career_question`
   is now offered, but it answers the question as a career-entry plan ("the way in is shipped projects ... This week: build one
   small tool") with no source link, i.e. a different task; `research_market` is market research. Needed: a sourced answer to a
   specific advice question (one guide, its link).
   **D-063:** `research_career_question` with `kind: "advice"` (the model's choice, G1): one web search (D-060's searcher, cached),
   passages kept by the guard, one source chosen by code (school, government, non-profit guides first), the answer first and the
   source link alone on the last line, written by code (`research/advice.ts`, `career_brain.ts`). With no source, no link and the
-  answer says it is judgement.
+  answer says it is judgement. The persona's education line, which sits under the name with no "Education" heading, is now
+  read as education and GPA drafts for the person's yes (`122-career-profile.js headerEducation`), so the school, degree and
+  date the answer names are confirmed facts.
 - **Artifact:** none. **Boundary:** none needed.
 
 ### C5 "quiz me on a python question like it's a real interview, one at a time" (EXISTS)
@@ -193,12 +195,12 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
   EXISTS. Asserted in MP-1 with a stubbed search.
 - **Artifact:** none. **Boundary:** none needed.
 
-### C10 "can you make me a tailored resume for that paypal internship, like an actual file i can download. don't apply anywhere" (MISSING)
+### C10 "can you make me a tailored resume for that paypal internship, like an actual file i can download. don't apply anywhere" (EXISTS)
 - **Instinct:** a one-page PDF for the posting, GPA corrected, skills reordered, labelled a review draft with the unresolved
   details named; nothing submitted.
 - **Steps:** (1) the posting the conversation listed handed to the brain (`turn_notes.ts postingNote`) - EXISTS.
   (2) `tailor_resume` (ON, `CAREER_TAILOR_REWRITE`) from confirmed facts, a PDF attached - EXISTS. (3) the email at the top of
-  the resume - **MISSING for this persona**: Instinct used the linked account's email; Trainee takes only an email the person
+  the resume - EXISTS since D-063 (was MISSING for this persona): Instinct used the linked account's email; Trainee takes only an email the person
   typed (`set_resume_contact` never uses the account email), so `tailor_resume` asks for it and makes no file. Either the
   persona types one, or the owner rules on the account email.
   **D-063 (architect ruling):** the email is the confirmed resume's or one the person typed, never the channel's or the account's;
@@ -252,9 +254,9 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
 - **Steps:** public people search - **OFF**: `CAREER_PEOPLE_SEARCH` and `CAREER_CONTACT_OUTREACH` (`RELEASE_NEVER_ON`, D-043
   not accepted). Today code answers with a list plan (`outreach_clarification`) and finds no one.
 
-### C20 "actually for that paypal resume, condense the pixelforge stuff to one line and expand the waypoint part more" (MISSING)
+### C20 "actually for that paypal resume, condense the pixelforge stuff to one line and expand the waypoint part more" (EXISTS)
 - **Instinct:** a v2 PDF with both edits, honest wording about Waypoint, still a review draft.
-- **Steps:** `tailor_resume` with edits - **MISSING**: it takes no edit instructions; `save_resume_persona` only orders or hides
+- **Steps:** `tailor_resume` with edits - EXISTS since D-063 (was MISSING): it takes no edit instructions; `save_resume_persona` only orders or hides
   facts. (Also needs C10's PDF.)
   **D-063:** `tailor_resume` takes `edits` (`[{ role, lines }]`): an entry condensed to N detail lines, or expanded (and led) from
   its own confirmed details only; when the record holds fewer than asked it says so (`expand_short`) and nothing is written; the

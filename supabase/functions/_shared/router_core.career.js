@@ -1436,6 +1436,27 @@ const CareerProfile = (() => {
   const DEGREE_ANY = /\b(?:bachelor|master|associate|doctor|degree|diploma|ph\.?\s?d|mba|bba|b\.?sc|m\.?sc)\b|\b[bm]\.\s?[as]\./i;
   const DEGREE_LINE = /^(?:(?:bachelor|master|associate|doctor|b\.?sc|m\.?sc|ph\.?\s?d|mba|bba)\b|(?:[bm]\.?\s?[as]\.?|[bm]\.?\s?b\.?\s?a\.?)(?=\s|,|$))/i;
   function parseResumeText(text) { return parseResumeSections(text).drafts; }
+  const HEAD_SCHOOL = /\b(?:university|college|institute of technology|polytechnic|academy|school of [a-z]+|[a-z]+ school)\b/i;
+  const HEAD_DEGREE = /\b(?:[Bb]achelor|[Mm]aster|[Aa]ssociate|[Dd]octor|[Dd]egree|[Dd]iploma|[Pp]h\.?\s?[Dd]|MBA|BBA|B\.Sc|M\.Sc|B\.Eng|M\.Eng)\b|\b[BbMm]\.\s?[AaSs]\.|\b(?:BS|BA|BSc|BSE|BBA|MS|MA|MSc|MEng|BEng|AB|SB)\b/;
+  const HEAD_MONTH = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|spring|summer|fall|autumn|winter)";
+  const HEAD_DATE = new RegExp(String.raw`\b(?:(expected|anticipated|graduating|graduation|grad\.?|class of)\s*:?\s*)?((?:${HEAD_MONTH}\.?\s+)?(?:19|20)\d{2})\b`, "i");
+  const HEAD_GPA = /[,;.|]?\s*\(?\b(?:cumulative\s+|overall\s+)?gpa\s*:?\s*([0-4]\.\d{1,2})(?:\s*\/\s*4(?:\.0+)?)?\)?|[,;.|]?\s*\b([0-4]\.\d{1,2})(?:\s*\/\s*4(?:\.0+)?)?\s+gpa\b/i;
+  function headerEducation(line) {
+    const raw = String(line || "").trim();
+    if (!raw || raw.length > 220 || /@|https?:|www\.|\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}/.test(raw) || !HEAD_SCHOOL.test(raw)) return null;
+    const date = raw.match(HEAD_DATE);
+    if (!HEAD_DEGREE.test(raw) && !(date && date[1])) return null;
+    const g = raw.match(HEAD_GPA);
+    const title = (g ? raw.replace(g[0], "") : raw).replace(/\s{2,}/g, " ").replace(/[\s,;|.]+$/, "").trim();
+    const parts = title.split(/\s*[,|–—]\s*|\s+-\s+/).map((x) => x.trim()).filter(Boolean);
+    const school = parts.find((x) => HEAD_SCHOOL.test(x)) || null;
+    const degree = parts.find((x) => x !== school && HEAD_DEGREE.test(x)) || null;
+    const d = title.match(HEAD_DATE);
+    const out = [{ kind: "education", title, text: title, bullets: [], school, degree, end: d ? d[2] : null, expected: !!(d && d[1] && /expect|anticipat|graduating/i.test(d[1])), source: "resume-ingest", needs_confirmation: true, status: "draft" }];
+    const gpa = g ? (g[1] || g[2]) : null;
+    if (gpa) out.push({ kind: "other", section: "gpa", name: "GPA", title: `GPA ${gpa}`, text: `GPA: ${gpa}`, gpa, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
+    return out;
+  }
   function parseResumeSections(text) {
     const markerKeys = [...Object.keys(SECTION_KIND), "summary", "objective"].sort((a, b) => b.length - a.length).map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
     const markerRe = new RegExp(`(^|[.!?]\\s+|\\s)(${markerKeys.join("|")})\\s*:`, "gi");
@@ -1463,7 +1484,7 @@ const CareerProfile = (() => {
       }
     }
     const drafts = [], unread = [];
-    let section = null, current = null, lastWasMore = false, leadDate = null;
+    let section = null, current = null, lastWasMore = false, leadDate = null, seenHeading = false;
     const flush = () => {
       if (current) { drafts.push(current); current = null; }
       if (leadDate) { drafts.push({ kind: section || "experience", title: leadDate, text: leadDate, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" }); leadDate = null; }
@@ -1476,6 +1497,7 @@ const CareerProfile = (() => {
       if (aiDirected(line)) { if (!unread.includes(AI_DIRECTED_LABEL)) unread.push(AI_DIRECTED_LABEL); continue; }
       const head = sectionOf(line);
       if (head) {
+        seenHeading = true;
         flush();
         lastWasMore = false;
         if (head.skip && /^(?:(?:personal |other )?interests|hobbies(?: (?:&|and) interests)?|interests (?:&|and) hobbies)$/i.test(head.label.trim())) section = "interest";
@@ -1494,7 +1516,11 @@ const CareerProfile = (() => {
         }
         continue;
       }
-      if (!section) continue;
+      if (!section) {
+        const edu = !seenHeading ? headerEducation(line) : null;
+        if (edu) drafts.push(...edu);
+        continue;
+      }
       if (section === "interest") {
         for (const name of line.replace(/^[-•*]\s*/, "").split(/[,;•|·]/).map((x) => x.trim()).filter(Boolean)) {
           drafts.push({ kind: "other", section: "interests", name, title: name, text: `Interest: ${name}`, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });

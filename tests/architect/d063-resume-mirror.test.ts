@@ -175,3 +175,39 @@ Deno.test("D-063/8 advice: an injected or contact passage is not a source; no so
   const f = await researchAdvice({ question: "q about resumes", deps: { search: searcher({ fail: true }) }, now: NOW });
   eq([f.source, f.not_verified], [null, "the search did not finish"]);
 });
+
+// ------------------------------------------------------------------------------------------------ the education line in the header
+// D-063 follow-up: an education line with no "Education" heading, under the name (the benchmark persona's shape, and many real
+// pastes), was dropped with the contact block. It is read as drafts: the entry in the person's own words with its school, degree and
+// date as fields, and the GPA as its own draft. Nothing is confirmed until the person's yes.
+const { CareerProfile } = await import("../../supabase/functions/_shared/router_core.career.js");
+const ingest = (text: string) => { const p = CareerProfile.createProfile({}); const r = CareerProfile.ingestResume(p, { text, fileName: "resume.txt" }); return { p, r }; };
+Deno.test("D-063/9 a header education line becomes education and GPA drafts awaiting the person's yes; never confirmed by code", () => {
+  const ctx: any = { now: NOW, thread: {} };
+  CareerRouter.handleChat(PERSONA.setup[0], ctx);
+  const drafts = ctx.profile.facts.filter((f: any) => f.source === "resume-ingest");
+  const edu = drafts.find((f: any) => f.kind === "education"), gpa = drafts.find((f: any) => f.section === "gpa");
+  eq([edu?.title, edu?.school, edu?.degree, edu?.end, edu?.expected], ["Lakeshore University, BS Computer Science and Finance, Expected June 2029", "Lakeshore University", "BS Computer Science and Finance", "June 2029", true]);
+  eq([gpa?.kind, gpa?.title, gpa?.gpa], ["other", "GPA 3.9", "3.9"]);
+  ok([edu, gpa].every((f) => f.needs_confirmation === true && f.status === "draft"), "drafts until the yes");
+  ok(!drafts.some((f: any) => /Sam Rivera/.test(f.title)), "the name line is still not a fact");
+  CareerRouter.handleChat(PERSONA.setup[1], ctx);
+  const after = ctx.profile.facts.find((f: any) => f.id === edu.id);
+  ok(after && !after.needs_confirmation && after.status !== "draft", "confirmed only by the person's yes");
+  // The GPA never prints on the education line of a tailored resume (it is its own fact, not an entry).
+  ok(!/GPA/.test(edu.title));
+});
+Deno.test("D-063/10 header education shapes: pipes, a class-of year; contact lines, a job at a university, and lines under a heading are unchanged", () => {
+  const a = ingest("Riley Fixture (TEST)\nTEST State College | B.A. Economics | May 2027 | GPA: 3.6/4.0\nEXPERIENCE\nAnalyst Intern, TEST Co, Jun 2025 - Aug 2025\n- Built a dashboard").p.facts;
+  const ea = a.find((f: any) => f.kind === "education");
+  eq([ea?.title, ea?.school, ea?.degree, ea?.end], ["TEST State College | B.A. Economics | May 2027", "TEST State College", "B.A. Economics", "May 2027"]);
+  eq(a.find((f: any) => f.section === "gpa")?.gpa, "3.6");
+  const b = ingest("Jo Fixture\nWestfield High School, Class of 2026\nEXPERIENCE\nCashier, TEST Market, 2025").p.facts;
+  eq(b.filter((f: any) => f.kind === "education").map((f: any) => [f.title, f.end]), [["Westfield High School, Class of 2026", "2026"]]);
+  for (const head of ["jo.fixture@lakeshore.example.edu | Lakeshore University", "Research Assistant, Lakeshore University Press, 2024", "(312) 555-0100 | Chicago, IL"]) {
+    const c = ingest(`Jo Fixture\n${head}\nEXPERIENCE\nCashier, TEST Market, 2025`).p.facts;
+    eq(c.filter((f: any) => f.kind === "education" || f.section === "gpa").length, 0, head);
+  }
+  const d = ingest("Jo Fixture\nEDUCATION\nLakeshore University, BS Computer Science, Expected June 2029. GPA 3.9").p.facts;
+  eq(d.filter((f: any) => f.kind === "education").map((f: any) => f.title), ["Lakeshore University, BS Computer Science, Expected June 2029. GPA 3.9"], "under a heading: as before");
+});

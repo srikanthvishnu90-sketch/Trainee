@@ -445,6 +445,8 @@ export function searchAskFromMessage(message: string, routerOut: { intent?: stri
 }
 // MIRROR-1000: where a search looked, as words ("in Chicago"; a remote-only search is "(remote)", never "in remote").
 // D-058: one widening offer, the command first ("Say "include remote US" to widen to remote roles in the US.").
+// D-064: what an empty search never read, said beside the claim (true whatever boards are added).
+export const SEARCH_NOT_CHECKED = "Other career sites were not checked.";
 export function wideningOffer(w: string): string {
   const m = /^(.*?): say "([^"]+)"$/.exec(w);
   return m ? `Say "${m[2]}" to widen to ${m[1].replace(/\s*\([^)]*\)$/, "")}.` : `Want ${w.replace(/: say which$/, "")}? Say which.`;
@@ -601,7 +603,8 @@ export async function searchJudgeTurn(o: {
     // of scope (what was checked, and why nothing qualified) and one widening offer. The limits kept and the postings left out
     // stay (they are what was checked). The refresh time, "Nothing was invented" and "nothing was applied for" move to the
     // turn's proof (D-024), below.
-    const reply = `I checked ${variants.join(", ")}${internOnly ? " internships" : ""} ${whereOf(ask)} on the live board and the saved job-board snapshot: ${whyShort}.${capLine}${leftOut}${keptLine} ${wideningOffer(nextWidening(ask))}`;
+    // D-064 (G5 over G3): "no open roles" holds for the boards read; the one short clause of what was not read follows the claim.
+    const reply = `I checked ${variants.join(", ")}${internOnly ? " internships" : ""} ${whereOf(ask)} on the live board and the saved job-board snapshot: ${whyShort}. ${SEARCH_NOT_CHECKED}${capLine}${leftOut}${keptLine} ${wideningOffer(nextWidening(ask))}`;
     const proof = { checked: scope, refreshed_at: refreshed ?? null, result: why, invented: "Nothing was invented to fill the list.", applied: "Nothing was applied for." };
     return { reply, status: "none", source: "none", shortlist: [], accounting: null, modelCalled: false, blocker: checked.dead && !checked.shown.length ? "all_closed" : "no_roles", proof };
   }

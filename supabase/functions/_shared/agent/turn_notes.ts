@@ -180,3 +180,8 @@ export function correctionNote(c: Correction): string {
 export function multiAskNote(): string {
   return "THIS MESSAGE MAKES SEVERAL ASKS (code read it from their words): answer each one, in the order asked, each with its own answer; asks that share one deliverable may share it, and then say it covers both. Do not answer only the first.";
 }
+// D-064 (G13, Instinct C1 + C3): a message the person sent while their previous turn was still running.
+export function whileWorkingNote(previous: string): string {
+  return "THIS MESSAGE ARRIVED WHILE YOU WERE STILL WORKING ON THEIR PREVIOUS ONE (code read it from the turn order): " + JSON.stringify(String(previous ?? "").slice(0, 400)) + ". " +
+    "Your reply to that one is above in this conversation. Answer this message now. If the two asks are related, answer them as one deliverable and say plainly that it covers both; if not, answer this one on its own. Do not repeat the earlier reply.";
+}

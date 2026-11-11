@@ -738,7 +738,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // message with several asks is the brain's, whatever words code's flows below match: those flows (networking drafts, the
       // offer turn, the record reads) stand down on it, and the router's answer reaches the brain as data (career_staged.ts
       // g1CodeAnswers). Payload intents, approvals, the account's controls and bare answers to code's questions run before.
-      const g1Brain = !careerTask && !careerBatch && (hypotheticalOf(message) !== null || correctionOf(message) === "trainee" || severalAsks(message));
+      // D-064 (G13: several messages while work runs): the turn gate (career_turn_gate.ts) is the per-conversation in-flight marker,
+      // taken at turn start and given back after the reply's commit. A turn that had to wait on it arrived while the person's previous
+      // turn was still running: it is a second ask, the brain's, which answers it and says whether it shares the previous deliverable.
+      const whileWorking = !careerTask && !careerBatch && (gate?.outcome === "waited" || gate?.outcome === "timed_out");
+      if (whileWorking) (ctx as any)._whileWorking = true;
+      const g1Brain = !careerTask && !careerBatch && (whileWorking || hypotheticalOf(message) !== null || correctionOf(message) === "trainee" || severalAsks(message));
       const batchBefore = JSON.stringify((ctx as any).batchApplyState ?? null);
       // D-061 G1: a question about resumes in general ("is one page still the rule for nursing?"), with no resume task open and no
       // ask to make, change or send one, is the brain's question, not code's resume build.
@@ -1487,7 +1492,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           // from public pages only (posting_requirements.ts); never an account, a saved application or a submission.
           applyFlow: (url: string) => readApplyFlow(url, { fetch, userAgent: `Trainee posting reader (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }),
           research: webResearchOn(Deno.env) && cfg.apiKey ? { search: gatewayGroundSearch((q, w) => webSearch(q, { cfg, meter, ...w })), cache: researchCache, publish: fileKindPublisher(createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }), user.id), derive: modelDerive(async (system, user) => { const r = await callModel(cfg, { system, messages: [{ role: "user", content: [{ type: "text", text: user }] }], max_tokens: 200 }, { meter, role: "chat" }); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); }) } : null,
-          known: { standing, alerts: alertRow ? { prefs: alertRow.prefs, tz: alertRow.tz } : null, pipeline: null, situation }, memory });
+          known: { standing, alerts: alertRow ? { prefs: alertRow.prefs, tz: alertRow.tz } : null, pipeline: null, situation }, memory,
+          // D-064 (G13): the person's previous message, when this one arrived while that turn was still running.
+          whileWorking: (ctx as any)._whileWorking ? ([...history].reverse().find((m) => m.role === "user")?.content ?? "") : null });
         await ledger.record(meter);
         // Architect ruling 3 (2026-11-09): at a limit, the router's own answer stands when it chose a specific intent for THIS message
         // ("what should I wear to a video interview?" -> its interview prep); only its catch-alls and fallback templates are replaced.

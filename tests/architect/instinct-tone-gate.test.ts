@@ -204,7 +204,11 @@ Deno.test({
       Deno.env.delete("CAREER_BRAIN");
       await w.close();
     }
-    const scores = turns.map(scoreTone);
+    // Architect amendment (D-064): G5 over G3. The judged empty search carries one "not checked" clause beside "no open roles"; on C2.t3
+    // alone its window widens by that clause's length (and only when the clause is there). Every other bar on every turn is unchanged.
+    const { SEARCH_NOT_CHECKED } = await import("../../supabase/functions/_shared/career_search_judge.ts");
+    const scores = turns.map(scoreTone).map((s, k) => s.id === "C2.t3" && turns[k].reply.includes(SEARCH_NOT_CHECKED)
+      ? { ...s, allowed: s.allowed + SEARCH_NOT_CHECKED.length + 1, withinLength: s.chars >= s.least && s.chars <= s.allowed + SEARCH_NOT_CHECKED.length + 1 } : s);
     for (const [k, s] of scores.entries()) {
       const why = [s.chars > s.allowed && `long ${s.chars}>${s.allowed}`, s.chars < s.least && `short ${s.chars}<${s.least}`, s.internal.length && `internal [${s.internal.join("; ")}]`, s.filler.length && `filler [${s.filler.join("; ")}]`, s.refusal && "needless refusal", !s.answersFirst && "not answer-first"].filter(Boolean);
       console.log(`TONE ${s.id.padEnd(6)} ${String(s.chars).padStart(4)}/${String(s.instinctChars).padStart(3)} ${why.length ? why.join(", ") : "ok"} | ${turns[k].reply.replace(/\s+/g, " ")}`);

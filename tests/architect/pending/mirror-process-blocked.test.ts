@@ -7,14 +7,20 @@
 import assertNode from "node:assert/strict";
 import { canRun } from "../helpers/response_world.ts";
 import { effectRows, runConversation, type Step } from "../helpers/mirror_process.ts";
+// Architect amendment (D-062; owner, 2026-11-11: "be able to answer emails, find alumni, do all of it"): C6, C16 and C19 are scripted
+// like the other turns (the brain calls the tool the process names and replies from what it returned) and the people search is
+// stubbed on the Anthropic wire. Every check below is unchanged; nothing is sent, queued or contacted (effectRows).
+import { C16_STEPS, C19_STEPS, C6_STEPS, isPeopleSearch, peopleSearchAnswer } from "../helpers/d062_fixtures.ts";
 
 const SCRIPT: Record<string, Step[]> = {
   // Architect amendment (D-063): C4, C10 and C20 passed here and moved to EXISTS (MP-1, tests/architect/mirror-wa-batch1-process.test.ts).
+  // Architect amendment (D-062): the capability turns.
+  C6: C6_STEPS, C16: C16_STEPS, C19: C19_STEPS,
 };
 
 Deno.test({ name: "MP-BLOCKED the turns blocked on a missing or off capability follow Instinct's full process", sanitizeOps: false, sanitizeResources: false, ignore: canRun() !== null && canRun() !== "FAIL", fn: async () => {
   if (canRun() === "FAIL") throw new Error("MP-BLOCKED needs Postgres 16 in CI");
-  const { seen, world, person, close } = await runConversation(SCRIPT);
+  const { seen, world, person, close } = await runConversation(SCRIPT, { web: (body) => isPeopleSearch(body) ? peopleSearchAnswer(body) : null }); // Architect amendment (D-062): the people search stub
   const fails: string[] = [];
   const check = (id: string, cond: boolean, what: string) => { if (!cond) fails.push(`${id}: ${what}`); };
   try {

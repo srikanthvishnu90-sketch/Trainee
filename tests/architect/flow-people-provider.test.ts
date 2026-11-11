@@ -89,7 +89,8 @@ Deno.test({ name: "people discovery on real Postgres: NOT_WIRED, discover, publi
     assert(!imp.error, JSON.stringify(imp.error));
 
     await t.step("not switched on: NOT_WIRED in plain words, no call, nothing queued, own contacts still answered", async () => {
-      const r = await findTargets(A, EM("Stripe"), deps(providerConfig((k) => ({ ANTHROPIC_API_KEY: "sk-test-not-real" } as Record<string, string>)[k])));
+      // Architect amendment (D-062): CAREER_PEOPLE_SEARCH is a release flag now (on when unset); "off" is its rollback, so the off case sets it.
+      const r = await findTargets(A, EM("Stripe"), deps(providerConfig((k) => ({ ANTHROPIC_API_KEY: "sk-test-not-real", CAREER_PEOPLE_SEARCH: "off" } as Record<string, string>)[k])));
       eq(r.status, "NOT_WIRED");
       assert(/isn't switched on yet/.test(r.reply) && !/NOT_WIRED|ANTHROPIC/.test(r.reply), r.reply);
       eq(r.candidates.map((c) => c.name).sort(), ["Ada Lovelace", "Al Turing", "Grace Hopper"]);
@@ -222,7 +223,8 @@ Deno.test({ name: "people discovery on real Postgres: NOT_WIRED, discover, publi
         people: { store: supabasePeopleStore(pg.asService()), gmail: null, fetch: net(n), targets: deps(cfg) } });
       const k = n.calls.length;
       // D has nothing yet; discovery off: said plainly, nothing searched, nothing queued, nothing invented
-      const off = await turn(D, "find me engineering managers at Stripe", providerConfig((x) => ({ ANTHROPIC_API_KEY: "sk-test-not-real" } as Record<string, string>)[x]));
+      // Architect amendment (D-062): CAREER_PEOPLE_SEARCH is a release flag now (on when unset); "off" is its rollback, so the off case sets it.
+      const off = await turn(D, "find me engineering managers at Stripe", providerConfig((x) => ({ ANTHROPIC_API_KEY: "sk-test-not-real", CAREER_PEOPLE_SEARCH: "off" } as Record<string, string>)[x]));
       eq([off!.intent, off!.status], [TARGETS_INTENT, "NOT_WIRED"]);
       assert(/^No one matching at Stripe yet\. Searching the web for new people isn't switched on yet/.test(off!.reply), off!.reply);
       eq(await q(`select count(*) from career_people where user_id = '${D}'`), "0");

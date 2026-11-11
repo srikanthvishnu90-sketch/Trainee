@@ -170,7 +170,8 @@ Deno.test("D-060 C18: a posting is re-checked live only on the boards Trainee re
 Deno.test("D-060 release: web research is on at the release value and off with CAREER_KNOWLEDGE=off; people search stays off", () => {
   eq(RELEASE_FLAGS.CAREER_KNOWLEDGE, "on");
   ok(webResearchOn(env({})) && !webResearchOn(env({ CAREER_KNOWLEDGE: "off" })));
-  ok(RELEASE_NEVER_ON.includes("CAREER_PEOPLE_SEARCH") && !("CAREER_PEOPLE_SEARCH" in RELEASE_FLAGS), "people search was not approved");
+  // Architect amendment (D-062; owner, 2026-11-11: "find alumni"): people search was approved after D-060, as its own release flag.
+  ok(!RELEASE_NEVER_ON.includes("CAREER_PEOPLE_SEARCH") && RELEASE_FLAGS.CAREER_PEOPLE_SEARCH === "on", "people search is D-062's release flag");
 });
 
 // ------------------------------------------------------------------------------------------------ the real handler

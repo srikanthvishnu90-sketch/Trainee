@@ -21,11 +21,13 @@ const RECORDS: Source = "From Trainee's records";
 export const MADE: Source = "Made by Trainee";
 const MADE_OK = new Set<string>(["plan_review"]);
 export const RESUME_B64_MAX = 400_000; // about 290 KB of PDF
-export const KIND_IDS = ["job_list", "introduction", "application_proof", "application_review", "plan_review", "comparison", "draft", "research_brief"] as const;
+export const KIND_IDS = ["job_list", "introduction", "application_proof", "application_review", "plan_review", "comparison", "draft", "research_brief", "tracker"] as const;
 export type KindId = typeof KIND_IDS[number];
-export const KIND_LABEL: Record<KindId, string> = { job_list: "Your jobs", introduction: "Introduction", application_proof: "Application proof", application_review: "Application review", plan_review: "Plan review", comparison: "Comparison", draft: "Draft", research_brief: "Research brief" };
+export const KIND_LABEL: Record<KindId, string> = { job_list: "Your jobs", introduction: "Introduction", application_proof: "Application proof", application_review: "Application review", plan_review: "Plan review", comparison: "Comparison", draft: "Draft", research_brief: "Research brief", tracker: "Application tracker" };
 // WO-G: the application review (spec C.11 F-09) is built by code from a prepared application only, never by a model.
-export const MODEL_KINDS = KIND_IDS.filter((k) => k !== "job_list" && k !== "application_review");
+// D-062 (MIRROR-PROCESS C16): the application tracker is built by code from the person's records and Gmail confirmations only
+// (_shared/career_application_record.ts trackerData, the export_tracker tool), never by a model.
+export const MODEL_KINDS = KIND_IDS.filter((k) => k !== "job_list" && k !== "application_review" && k !== "tracker");
 
 export interface FileRecord {
   id: string; userId: string; kind: KindId; data: any; state: Record<string, any>;
@@ -206,6 +208,25 @@ const KINDS: Record<Exclude<KindId, "job_list">, (raw: unknown, v: V) => any> = 
     }
     return { title: v.str(x.title, "title", { max: 80 }), type: v.one(x.type, "type", ["email", "cover_letter", "message"] as const), to: v.str(x.to, "to", { max: 120, opt: true }), subject: v.str(x.subject, "subject", { max: 140, opt: true, templ: true }),
       body: v.str(x.body, "body", { max: 4000, multi: true, templ: true }), basis: v.list(x.basis ?? [], "basis", 0, 10).map((f, i) => v.fact(f, `basis[${i}]`)) };
+  },
+  // D-062 (C16): code-built only (trusted). Past applications with their evidence and dates, researched roles, unsubmitted drafts,
+  // each with its status, and what the record covers (Gmail-based). Every value is read from a record; nothing is a model's.
+  tracker(raw, v) {
+    const x = v.obj(raw, "data");
+    if (!v.trusted) { v.err("data", "an application tracker is built by Trainee from your records and Gmail confirmations, not by create_file"); return {}; }
+    const day = (t: unknown, path: string) => (t === undefined ? {} : typeof t === "string" && /^\d{4}-\d{2}-\d{2}$/.test(t) ? { [path]: t } : (v.err(path, "is a date like 2026-11-11"), {}));
+    const applied = v.list(x.applied ?? [], "applied", 0, 60).map((r, i) => { const q = v.obj(r, `applied[${i}]`); const p = `applied[${i}]`;
+      return { company: v.str(q.company, `${p}.company`, { max: 120, fact: true, links: false }), ...(q.role !== undefined ? { role: v.str(q.role, `${p}.role`, { max: 160, fact: true, links: false }) } : {}),
+        ...day(q.applied_on, "applied_on"), status: v.str(q.status, `${p}.status`, { max: 120 }), source: v.one(q.source, `${p}.source`, ["employer email", "Trainee's submission record", "your word"] as const),
+        evidence: v.list(q.evidence ?? [], `${p}.evidence`, 0, 6).map((e, j) => { const z = v.obj(e, `${p}.evidence[${j}]`); return { what: v.str(z.what, `${p}.evidence[${j}].what`, { max: 120 }), ...day(z.on, "on"), ...(z.text !== undefined ? { text: v.str(z.text, `${p}.evidence[${j}].text`, { max: 200, links: false }) } : {}) }; }) }; });
+    const researched = v.list(x.researched ?? [], "researched", 0, 30).map((r, i) => { const q = v.obj(r, `researched[${i}]`); const p = `researched[${i}]`;
+      return { company: v.str(q.company, `${p}.company`, { max: 120, fact: true, links: false }), ...(q.role !== undefined ? { role: v.str(q.role, `${p}.role`, { max: 160, fact: true, links: false }) } : {}),
+        ...(q.url !== undefined ? { url: v.https(q.url, `${p}.url`) } : {}), status: v.str(q.status, `${p}.status`, { max: 80 }) }; });
+    const drafts = v.list(x.drafts ?? [], "drafts", 0, 30).map((r, i) => { const q = v.obj(r, `drafts[${i}]`); const p = `drafts[${i}]`;
+      return { ...(q.company !== undefined ? { company: v.str(q.company, `${p}.company`, { max: 120, links: false }) } : {}), what: v.str(q.what, `${p}.what`, { max: 120 }), status: v.str(q.status, `${p}.status`, { max: 120 }), ...day(q.since, "since") }; });
+    return { title: v.str(x.title, "title", { max: 80 }), as_of: v.time(x.as_of, "as_of", false), applied, researched, drafts,
+      coverage: v.list(x.coverage, "coverage", 1, 8).map((c, i) => v.str(c, `coverage[${i}]`, { max: 300 })),
+      ...(x.changes !== undefined ? { changes: v.list(x.changes, "changes", 1, 10).map((c, i) => v.str(c, `changes[${i}]`, { max: 300 })) } : {}) };
   },
   research_brief(raw, v) {
     const x = v.obj(raw, "data");
@@ -543,6 +564,17 @@ export function bodyHtml(rec: FileRecord, token: string, o: { tz?: string | null
         + sec("What it says about you", dl(Fs(d.basis).map((f) => factHtml(f, f.label)).join("")))
         + `<p class="meta">This page cannot send it. To send it, ask Trainee in Telegram; you approve the exact message first.</p>`;
       break;
+    case "tracker": {
+      const tr = (cells: string[]) => `<tr>${cells.map((c) => `<td>${c}</td>`).join("")}</tr>`;
+      const table = (label: string, head: string[], rows: string[]) => rows.length ? `<div class="tbl" tabindex="0" role="region" aria-label="${esc(label)}"><table><thead><tr>${head.map((h) => `<th scope="col">${esc(h)}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table></div>` : `<p class="meta">None on record.</p>`;
+      main = (d.changes?.length ? sec("Corrected since last time", `<ul class="why">${d.changes.map((c: string) => `<li>${esc(c)}</li>`).join("")}</ul>`) : "")
+        + sec("Applications", table("Applications", ["Company", "Role", "Applied", "Status", "Evidence"], (d.applied ?? []).map((a: any) => tr([esc(a.company), esc(a.role ?? ""), esc(a.applied_on ?? ""), `${esc(a.status)}<br><span class="meta">${esc(a.source)}</span>`,
+          (a.evidence ?? []).map((e: any) => `${esc(e.what)}${e.on ? ` (${esc(e.on)})` : ""}${e.text ? `: ${esc(e.text)}` : ""}`).join("<br>")]))))
+        + sec("Researched, not applied", table("Researched roles", ["Company", "Role", "Status"], (d.researched ?? []).map((r: any) => tr([esc(r.company), r.url ? linkHtml(r.url, r.role ?? "posting") : esc(r.role ?? ""), esc(r.status)]))))
+        + sec("Drafts, not submitted or sent", table("Drafts", ["Company", "What", "Status", "Since"], (d.drafts ?? []).map((x: any) => tr([esc(x.company ?? ""), esc(x.what), esc(x.status), esc(x.since ?? "")]))))
+        + sec("What this covers", `<ul class="why">${(d.coverage ?? []).map((c: string) => `<li>${esc(c)}</li>`).join("")}</ul>`);
+      break;
+    }
     case "research_brief":
       if (d.variant === "market") { main = marketHtml(d); break; }
       if (d.variant === "company") { main = companyHtml(d); break; }
@@ -708,6 +740,16 @@ export function textOf(rec: FileRecord, o: { now: number; url?: string }): strin
       L.push(`${cap1(String(d.type).replace("_", " "))}${d.to ? ` to ${d.to}` : ""}`); if (d.subject) L.push(`Subject: ${d.subject}`); L.push("", d.body, "");
       if (Fs(d.basis).length) { h("What it says about you"); Fs(d.basis).forEach((f) => L.push(factText(f, f.label))); L.push(""); }
       L.push("Sending: not from this file. Ask Trainee in Telegram; you approve the exact message first.", "");
+      break;
+    case "tracker":
+      if (d.changes?.length) { h("Corrected since last time"); d.changes.forEach((c: string) => L.push(`- ${c}`)); L.push(""); }
+      h("Applications"); if (!(d.applied ?? []).length) L.push("None on record.");
+      (d.applied ?? []).forEach((a: any) => { L.push(`- ${a.company}${a.role ? `, ${a.role}` : ""}${a.applied_on ? `, applied ${a.applied_on}` : ""}: ${a.status} [${a.source}]`); (a.evidence ?? []).forEach((e: any) => L.push(`  - ${e.what}${e.on ? ` (${e.on})` : ""}${e.text ? `: ${e.text}` : ""}`)); });
+      L.push(""); h("Researched, not applied"); if (!(d.researched ?? []).length) L.push("None on record.");
+      (d.researched ?? []).forEach((r: any) => L.push(`- ${r.company}${r.role ? `, ${r.role}` : ""}: ${r.status}${r.url ? ` ${r.url}` : ""}`));
+      L.push(""); h("Drafts, not submitted or sent"); if (!(d.drafts ?? []).length) L.push("None on record.");
+      (d.drafts ?? []).forEach((x: any) => L.push(`- ${x.company ? `${x.company}: ` : ""}${x.what}, ${x.status}${x.since ? ` (since ${x.since})` : ""}`));
+      L.push(""); h("What this covers"); (d.coverage ?? []).forEach((c: string) => L.push(`- ${c}`)); L.push("");
       break;
     case "research_brief":
       if (d.variant === "market") { marketText(d, L); break; }

@@ -147,7 +147,8 @@ export async function agentTurn(o: {
     notes.push(csv ? `[Attached file: ${(await importContactsFile(o.stores, f, o.mx ?? MX_NOT_WIRED)).note}]` : f.text !== null ? `[Attached file: ${f.name}]\n${f.text}` : `[Attached file: ${f.name} (${f.mime}): this file type can't be read yet]`);
   }
   const know: Knowledge | null = o.knowledge
-    ? knowledgeFor({ profile: o.stores.profile, standing: o.known?.standing, alertsLine: o.known ? alertLine(o.known.alerts) : null, situation: o.known?.situation ?? null, history: o.history, message: o.message })
+    // D-060 (knowledge on): a hypothetical person is answered without their saved facts here too (MIRROR WA-1 gaps).
+    ? knowledgeFor(hypo === "persona" ? { profile: null, standing: null, alertsLine: null, situation: null, history: [], message: o.message } as any : { profile: o.stores.profile, standing: o.known?.standing, alertsLine: o.known ? alertLine(o.known.alerts) : null, situation: o.known?.situation ?? null, history: o.history, message: o.message })
     : null;
   // D-060: trace.m keeps the turn's sourced result: a later research call that found nothing (the turn's one web search was
   // already used) never replaces it.

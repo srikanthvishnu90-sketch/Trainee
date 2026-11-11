@@ -69,7 +69,10 @@ const lines: string[] = [];
 const t0 = performance.now();
 let stopped: string | null = null;
 try {
-  Deno.env.set("CAREER_BRAIN", "staged");
+  Deno.env.set("CAREER_BRAIN", "staged"); // production's brain (PRODUCTION_BRAIN)
+  // Owner, 2026-11-11: "Make sure everything is turned on in production, whenever testing." The world turns mail tracking off for
+  // the $0 response sweep (response_world.ts); a mirror run serves every release flag at its release value, as production does.
+  Deno.env.delete("CAREER_MAIL_TRACKING");
   Deno.env.set("ANTHROPIC_API_KEY", dry ? "sk-test-not-real" : LIVE_KEY);
   const cols = new Set((await w.pg.sql(`select table_name from information_schema.columns where table_schema = 'public' and column_name = 'user_id'`)).split("\n").map((s) => s.trim()));
   const tables = ACTION_TABLES.filter(([t]) => cols.has(t));

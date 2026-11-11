@@ -303,7 +303,8 @@ export function enforceMarketReply(reply: string, r: MarketResult): string {
   const said = (name: string, text: string) => new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(text);
   const onRecord = (s: string) => numsOf(s).every((n) => items.some((p) => p.nums.some((x) => numEq(x, n))));
   // D-060 (C22): "median", "average" or "mean" only when a point it stands on says so; a range from postings is a benchmark.
-  const statOk = (s: string, on: { text: string }[]) => [...s.matchAll(STAT_WORD)].every((m) => on.some((p) => new RegExp(`\\b${m[1]}`, "i").test(p.text)));
+  // An average is a mean (a BLS "annual mean wage" may be called an average); a median is only a median.
+  const statOk = (s: string, on: { text: string }[]) => [...s.matchAll(STAT_WORD)].every((m) => on.some((p) => (/^median$/i.test(m[1]) ? /\bmedian\b/i : /\b(?:mean|average)\b/i).test(p.text)));
   // D-060 (C9): a sentence that stands only on self-reported or anecdotal sources says so.
   const kindOf = (n: number) => r.sources.find((x) => x.n === n)?.kind;
   const labelOk = (s: string) => { const cs = citesOf(s); return !cs.length || cs.some((c) => { const k = kindOf(c); return !k || k === "official" || k === "reported"; }) || UNVERIFIED_LABEL.test(s); };

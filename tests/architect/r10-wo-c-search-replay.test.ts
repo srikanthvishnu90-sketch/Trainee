@@ -235,9 +235,16 @@ Deno.test({
       await t.step("E: an empty search names the scope checked, why nothing qualified, and the most useful widening", async () => {
         const r = await say(h!.chat("other"), "Find me 3 economist internships in Peoria. Show the links.");
         console.log(`--- E reply (${r.intent})\n${r.reply}`);
-        assertNode.match(r.reply, /^I checked economist internships in Peoria, on the live board \(last refreshed [A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d\d [AP]M UTC\) and the saved snapshot of job boards: none was found/);
-        assertNode.match(r.reply, /The most useful widening is remote roles in the US/);
-        assertNode.match(r.reply, /nothing was applied for/);
+        // Architect amendment (D-058, 2026-11-11, owner's "same length as Instinct"): the short empty-search form: one clause of scope and one widening offer
+        // in the reply; the refresh time, "Nothing was invented" and "nothing was applied for" are the turn's proof (D-024), asserted here.
+        assertNode.match(r.reply, /^I checked economist internships in Peoria on the live board and the saved job-board snapshot: no open roles\./);
+        assertNode.match(r.reply, /Say "include remote US" to widen to remote roles in the US\./);
+        const proof = r.body?.meta?.search_proof;
+        assertNode.match(String(proof?.checked), /^I checked economist internships in Peoria, on the live board \(last refreshed [A-Z][a-z]{2} \d{1,2}, \d{1,2}:\d\d [AP]M UTC\) and the saved snapshot of job boards$/);
+        assertNode.match(String(proof?.result), /^none was found/);
+        assertNode.equal(proof?.invented, "Nothing was invented to fill the list.");
+        assertNode.equal(proof?.applied, "Nothing was applied for.");
+        assertNode.ok(!/applied|submitted|queued/i.test(r.reply.replace(/\bapplication\b/gi, "")), "the reply claims no action");
         assertNode.equal(items(r.reply).length, 0);
       });
 

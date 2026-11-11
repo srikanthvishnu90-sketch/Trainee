@@ -145,6 +145,18 @@ all 1,000 prompts, $0, 0 external requests: the router answered 443 and the scri
 router-answered turns was 383/443 (was 303/467), and 732/1,000 over every turn (was 635). 24 prompts moved from the router to
 the model, all drafts to a named person that the router had read as a file ask, an alumni list or a missing recipient; no
 prompt that passed before fails now. Replies with internal words fell from 16 to 10, and "not wired in this handler" from 6 to 0.
+After the mirror gap fixes (branch `ag/mirror-length-and-gaps`, 2026-11-11;
+`tests/architect/mirror-length-and-gaps-20261111.test.ts`), all 1,000 prompts, $0, 0 external requests: the router answered
+447 and the scripted model 553. Trainee task_ok on router-answered turns was 413/447 (was 383/443), and 759/1,000 over every
+turn (was 732); no prompt that passed before fails now. A dry run has no Instinct side, so mirror_match and length_match are
+measured only once `instinct.jsonl` exists; on the tone gate's head-to-head turns 28 of 34 are within the same-length window.
+After D-058 (the architect's three same-length rulings, 2026-11-11; `tests/architect/d058-rulings-20261111.test.ts`), all
+1,000 prompts, $0, 0 external requests: the router answered 431 and the scripted model 569. Trainee task_ok on router-answered
+turns was 404/431, and 751/1,000 over every turn (was 759). The only changes are the 21 two-ask (multi_part) prompts now
+answered by the model (16 moved there, 2 stay code's: a mock start and a held apply). The dry run's scripted model only names
+the task ("Dry run, no model."), so 8 multi_part prompts that the router half-answered no longer pass here: an artifact of the
+$0 run, not a measure of the model's answers. No other prompt changed route or result. On the tone gate's turns 31 of 34 are
+within the window.
 `results/trainee-dry-50.jsonl` is still the d1f0d450 run.
 
 **Real-model pass (one pass, after the owner's written approval):**
@@ -184,7 +196,11 @@ For each prompt, the scorer reports:
   sides doing the task.
 - **shape**: what each reply is (declined, question, list, draft or answer).
 - **rubric**: the `reply_rubric.ts` rules, applied to Trainee's reply. Instinct's reply is scored too, for reference.
-- **length**: Trainee's prose against max(1.2x, +40 characters) of Instinct's, the tone gate's bar.
+- **length_match**: Trainee's prose is the same length as Instinct's (owner, 2026-11-11: "Trainee's reply should be the same
+  length"): within ±10% of Instinct's characters, or ±6 when Instinct's prose is under 60. Longer and shorter both miss. The
+  tone gate (`tests/architect/instinct-tone-gate.test.ts`) uses the same window.
+- **mirror_match**: the overall mirror: same_task AND length_match AND answers-first AND no internal words AND no refusal or
+  action mismatch (one side declines and the other does not, a needless refusal, or different external actions).
 - **needless refusal**: Trainee opens with a refusal where Instinct did not, outside the refusal categories.
 - **internal words** and **answers-first**.
 

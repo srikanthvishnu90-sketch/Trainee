@@ -50,6 +50,7 @@ const CHECK = /\b(is|are|would|was)\b[^?.!]*\b(good|fair|low|lowball|high|enough
 const COMPARE = /\bcompare\b[^.?!]*\boffers?\b|\bwhich offer\b|\boffers?\b[^.?!]*\b(?:side by side|compared?)\b|\bwhich (?:one )?(?:is|pays) better\b/i;
 const NEGOTIATE = /\bnegotiat\w*|\bcounter(?:[- ]?offer)?\b|\bask(?:ing)? for more\b/i;
 // Other asks that name a role and a place ("find data analyst jobs in Chicago") are never an offer's missing piece.
+export const HYPOTHETICAL = /\b(?:hypothetical(?:ly)?|in theory|imagine|suppose|supposing|pretend|let'?s say|say i(?:'?d)? (?:had|got|get|have)|if i (?:had|got|were to get|ever got)|what if i (?:had|got|get))\b/i;
 const OTHER_ASK = /\b(find|search|apply|jobs?|openings|postings|watch|alert|tailor|resume|cover letter|interview|mock)\b/i;
 const EQUITY = /\b(equity|rsus?|stock|options|shares|vest\w*|cliff)\b/i;
 const CLAUSES = /[;\n]|,(?!\d{3})|\.(?=\s|$)|\s+(?:and|but|plus|with)\s+/i;
@@ -408,6 +409,10 @@ export async function offerChatTurn(o: { message: string; state: OfferChatState 
   const pending = prior && Array.isArray(prior.pieces) && prior.pieces.length && Array.isArray(prior.asked) && prior.asked.length && o.now - prior.at < ASK_TTL_MS ? prior : null;
   const unchanged: OfferChatState | null = prior ? { ...state, offers: state.offers } : null;
   if (!message) return { answer: null, state: unchanged };
+  // MIRROR WA-1 (2026-11-11, the owner's WhatsApp benchmark C7): "hypothetically if i had two offers, 120k in chicago vs 140k
+  // in nyc, how would you think about it" was taken as a real offer ("Got it: Chicago metro, $120,000") and the job title
+  // asked for. An offer the person says is hypothetical is not theirs: nothing is kept, and the turn goes on (the brain answers it).
+  if (HYPOTHETICAL.test(message)) return { answer: null, state: unchanged };
   const negotiate = NEGOTIATE.test(message);
 
   // 1. The answer to the one question asked about a half-told offer.

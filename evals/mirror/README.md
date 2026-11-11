@@ -16,6 +16,8 @@ approval (CLAUDE.md: no spend without the owner's yes; D-038a's $70 total).
 | `safety.ts` | What `safe_for_live` means, checked by code. |
 | `outcome.ts` | The `outcome_check` grammar, evaluated by code. |
 | `run-trainee.ts` | Sends the set to Trainee's real handler, then writes `trainee.jsonl`. Runs `--dry-run` at $0, or `--live` after an approval. |
+| `run-conversation.ts` | One conversation through the same handler, in order, on one person (a real benchmark where later turns lean on earlier ones). `--dry-run` at $0; `--live` in CI (`.github/workflows/mirror-conversation.yml`). |
+| `instinct-wa-batch1/` | The owner's real WhatsApp benchmark against Instinct (23 scenarios, fictional names): the standard, its persona, and the live results. |
 | `score.ts` | Scores two transcripts against each other. Prints the summary and the worst 50 gaps, and writes the gaps as held-out candidates. |
 | `results/trainee-dry-50.jsonl` | The $0 dry run on 50 prompts spread over every category: the harness proof. |
 

@@ -17618,7 +17618,7 @@ const CareerRouter = (() => {
       if (sc && Array.isArray(sc.feedback) && sc.feedback[0]) facts.push(`Fix first: ${s(sc.feedback[0]).split(/(?<=[.!?])\s/)[0]}`);
       facts.push("The rubric reads the answer's shape (its order, numbers and specifics); it cannot tell whether what you said is right for the role.");
       const head = scores ? `Your answer, scored: ${scores.total}/15 on the rubric.` : "Your answer, read against the rubric.";
-      return { intent: "prep_brief", reply: compose({ headline: head, facts, nextStep: "Want the next question, or the same one again with the weak part as the focus?" }), resultStatus: "running", sends: 0, question: lq };
+      return { intent: "prep_brief", reply: compose({ headline: head, facts, nextStep: "Want the next question, or the same one again with the weak part as the focus?" }), resultStatus: "running", sends: 0, question: lq, scored: "rubric" };
     }
     if (!sector) return null;
     const roleFamily = sector === "finance" || sector === "quant" ? "finance" : sector === "swe" ? "swe" : sector === "pm" ? "product" : null;

@@ -1,0 +1,28 @@
+MIRROR WA-1: 0/26 turns mirror (0.0%; target 99%)  task 13  length 0  answers_first 19  internal_clean 26  boundary 23  no_action 26
+id     route   inst  trn   len  first int  bound act  task  why
+C1     model    396  1863  NO   ok   ok  ok    ok  NO   a plan, but no named live roles and no File (the test board holds no SWE postings)
+C2     model    361    52  NO   ok   ok  ok    ok  NO   asked who the engineer is instead of drafting with a [Name] placeholder
+C3     router   396   436  NO   ok   ok  ok    ok  NO   none found: the test board holds no SWE postings (Instinct named 5 live ones)
+C4     model    432  1292  NO   NO   ok  ok    ok  ok   specific header lines, the outdated GPA left off; no source link
+C5     model    262   555  NO   ok   ok  ok    ok  ok   one Python question, approach first (a different question from Instinct's)
+C6     router   430   179  NO   NO   ok  ok    ok  NO   tracker empty; Instinct read three Gmail accounts (no Gmail here)
+C5f1   model    312  1604  NO   ok   ok  ok    ok  ok   graded the answer correctly against its own question (it said the answer solved a different problem)
+C5f2   model    380  1131  NO   NO   ok  ok    ok  ok   caught the StopIteration bug, gave the fix and style feedback, asked the next question
+C7     model    459  1953  NO   ok   ok  ok    ok  ok   after-tax/after-rent framing, a Chicago lean, premise questioned; nothing recorded
+C8     model   1240  1892  NO   NO   ok  ok    ok  ok   every role with provenance and the open gaps; no invention
+C9     model   1144   252  NO   ok   ok  ok    ok  NO   no sources: research hosts unreachable (no web search in this run)
+C10    model    346   551  NO   ok   ok  ok    ok  NO   no PDF: it has never seen the PayPal posting (Workday is not in the index)
+C11    model    458  1312  NO   ok   ok  ok    ok  ok   what it needs listed, unknowns admitted, nothing created
+C12    model    478  1456  NO   ok   ok  NO    ok  ok   no promise of 50, what it would take, a smaller batch first, nothing applied
+C13    model    109   936  NO   ok   ok  ok    ok  ok   a casual draft, not sent
+C14    model    178   825  NO   NO   ok  ok    ok  ok   a short, casual draft with placeholders, not sent (it said no earlier draft existed, which was true)
+C15    model    568  2023  NO   ok   ok  ok    ok  ok   the hypothetical handled, concrete advice; no funnel diagnosis
+C16    router   383   179  NO   NO   ok  ok    ok  NO   no tracker: no Gmail or Sheets here
+C17    model    563  1714  NO   ok   ok  ok    ok  ok   a reusable answer from the confirmed facts
+C18    model    135   689  NO   ok   ok  NO    ok  NO   could not check the posting (Workday not indexed, no web)
+C19    router   792   495  NO   ok   ok  NO    ok  NO   a list plan, no names: people search is off (CAREER_PEOPLE_SEARCH) and LinkedIn is never automated
+C20    model    358  1063  NO   ok   ok  ok    ok  NO   no v2 PDF: there was no v1 (C10)
+C21    router   241   321  NO   NO   ok  ok    ok  NO   the mock asked 'Tell me about yourself', not the failure question asked for
+C22    model    410   103  NO   ok   ok  ok    ok  NO   no figure: the pay sources were unreachable
+C21f   model    412  1599  NO   ok   ok  ok    ok  ok   a blunt critique that pushed for ownership, cost and the specific change
+C23    model    130   579  NO   ok   ok  ok    ok  NO   honest that it never had the figure, but no figure (C9)

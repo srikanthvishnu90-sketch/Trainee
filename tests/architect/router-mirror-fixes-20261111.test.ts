@@ -82,10 +82,13 @@ Deno.test({
       // 1 + 2: the empty search names the role asked for, keeps the stated limits, and says it plainly.
       const e = await ask("Search only, nothing submitted: find biomedical engineer roles in Tulsa, posted in the last week, hybrid is fine.");
       assertNode.ok(!e.model, "a search is the router's");
-      assertNode.match(e.reply, /^I checked biomedical engineer in Tulsa, on the live board/, e.reply);
-      assertNode.match(e.reply, /none was found/);
-      assertNode.match(e.reply, /none was found, so I have no open roles to list/);
-      assertNode.match(e.reply, /Nothing was invented to fill the list, and nothing was applied for/);
+      // Architect amendment (D-058, 2026-11-11, owner's "same length as Instinct"): the short empty-search form says the scope
+      // and "no open roles" plainly; the refresh time, "Nothing was invented" and "nothing was applied for" are the turn's proof.
+      assertNode.match(e.reply, /^I checked biomedical engineer in Tulsa on the live board and the saved job-board snapshot: no open roles\./, e.reply);
+      const proof = (e as any).body?.meta?.search_proof;
+      assertNode.match(String(proof?.result), /none was found, so I have no open roles to list/);
+      assertNode.equal(proof?.invented, "Nothing was invented to fill the list.");
+      assertNode.equal(proof?.applied, "Nothing was applied for.");
       assertNode.match(e.reply, /when it was posted/);
       assertNode.match(e.reply, /hybrid or office days/);
       assertNode.ok(!/nothing submitted|search only|posted in the last week in|hybrid is fine/i.test(e.reply.split(":")[0]), `the scope is the role and the place only: ${e.reply}`);
@@ -97,7 +100,8 @@ Deno.test({
       // 3: the person's own guard is not an ask to apply in bulk.
       assertNode.notEqual(d.intent, "intent_refusal", d.reply);
       assertNode.ok(!/Applying in bulk/.test(d.reply), d.reply);
-      assertNode.match(d.reply, /^I checked forklift operator in Fresno, on the live board/, d.reply);
+      // Architect amendment (D-058): the short empty-search form (no comma before "on the live board").
+      assertNode.match(d.reply, /^I checked forklift operator in Fresno on the live board/, d.reply);
       // 2: a short ask gets the short answer.
       const sh = await ask("find geologist roles in Reno, keep it short. Don't apply.");
       assertNode.match(sh.reply, /^I checked geologist in Reno on the live board/, sh.reply);

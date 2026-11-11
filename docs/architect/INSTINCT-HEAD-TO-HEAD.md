@@ -335,3 +335,29 @@ once; the no-packet reply is shorter; the eligibility answer opens "No, not conf
 
 Open (named in the test): A.2 resume turn 3, where Instinct's 102 characters neither re-send the file nor answer the link ask;
 C2 t3, the empty remote search, whose reply (R01 scope, R05 remote-only) is being rewritten on `ag/d054-fixes`.
+
+### Same length as Instinct (branch `ag/mirror-length-and-gaps`, 2026-11-11)
+
+Owner (2026-11-11): "Trainee's reply should be the same length" as Instinct's. The length bar is now a window, longer and
+shorter both missing: prose within ±10% of Instinct's characters, or ±6 when Instinct's is under 60 (architect amendment to
+the tone gate; `evals/mirror/score.ts` `length_match` uses the same window). Every other bar is unchanged.
+
+| | TONE-GATE |
+|---|---|
+| Before (the new window on `ag/router-mirror-fixes`) | `turns=34 within_length=20/34 internal=0 filler=0 refusals=0 answers_first=33/34 mean_chars=207 vs instinct=202` |
+| After | `turns=34 within_length=28/34 internal=0 filler=0 refusals=0 answers_first=33/34 mean_chars=210 vs instinct=202` |
+
+Fixed in product code: a plain "give me the PDF" says what is still open on it and that it is a review draft; a pick of the PDF
+from the two choices just asked gets only the file; an edit re-make names its source; a bullet kept as written names the count
+to confirm; "send it to Maya" asks "Which Maya, and where should I send it?"; the two-choice question and the no-packet reply
+lose their extra clause; the first PDF's general-version note is one short clause.
+
+Open (named in the test's `OPEN`, each with its reason): A.2 R3 (Instinct's reply skips the link ask); A.2 S1 and C2 t1 (the
+search summary's clauses are each pinned by another architect test: a ruling is needed on which goes); C2 t3 (the remote-only
+empty search, pinned the same way); C3 t2 (Instinct prepares a packet this world cannot); C5 t5 (Instinct's figures have no
+source in this run, D-007).
+
+D-058 (architect, 2026-11-11) closed three of them: the search summary drops its freshness clause (on the File and in the turn's
+proof), and the empty search takes the short form (scope and one widening; the refresh time and "Nothing was invented" in the
+proof). `TONE-GATE turns=34 within_length=31/34 internal=0 filler=0 refusals=0 answers_first=33/34 mean_chars=198 vs
+instinct=202`. Still open: A.2 R3, C3 t2, C5 t5, for the reasons above.

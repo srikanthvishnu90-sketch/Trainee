@@ -20,7 +20,7 @@
 //                      the thread first).
 import { emailHash as hashOf, messageOf, OPT_OUT_LINE, type OutreachDraft, type OutreachStore, payloadHash, type Recipient } from "./career_outreach.ts";
 import { type AddressType, type QueueDeps, queueApproved, type QueueResult } from "./career_send_rail.ts";
-import { type ContactDraft, type ContactIn, SPAM_PHRASES } from "./career_contact_draft.ts";
+import { type ContactDraft, type ContactIn, CLAIMED_TIE, SPAM_PHRASES } from "./career_contact_draft.ts";
 
 export const SEND_MIN_SCORE = 70, DAILY_NEW_DEFAULT = 20, SPREAD_MINUTES_DEFAULT = 20, FOLLOWUPS_MAX = 2, FOLLOWUP_DAYS = 5, FOLLOWUP_MIN_DAYS = 4, FOLLOWUP_MAX_DAYS = 7;
 export const UNCONFIRMED = "I can't confirm this address, so I won't send to it. Try an introduction through someone you know there, or the company's own contact form.";
@@ -64,7 +64,7 @@ export const cardHash = async (mails: Pick<CardMail, "hash" | "after_days">[]) =
   [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(["contact-card/1", mails.map((m) => [m.hash, m.after_days])]))))]
     .map((b) => b.toString(16).padStart(2, "0")).join("");
 // A follow-up's own checks: short, at most one question, no spam phrase, no link.
-const followupOk = (b: string) => b.split(/\s+/).filter(Boolean).length <= 80 && (b.match(/\?/g) ?? []).length <= 1 && !SPAM_PHRASES.some((p) => b.toLowerCase().includes(p)) && !/https?:\/\/|www\./i.test(b);
+export const followupOk = (b: string) => b.split(/\s+/).filter(Boolean).length <= 80 && (b.match(/\?/g) ?? []).length <= 1 && !SPAM_PHRASES.some((p) => b.toLowerCase().includes(p)) && !/https?:\/\/|www\./i.test(b) && !CLAIMED_TIE.test(b);
 export async function contactCard(o: { contact: ContactIn; draft: ContactDraft; signature: string | null; followups?: string[]; config: SendConfig; suppressed: (emails: string[]) => Promise<Set<string>> }): Promise<ContactCard> {
   const c = o.config, e = o.contact.email;
   if (!c.on) return { ok: false, why: "off", reply: "Contact outreach is not switched on." };
@@ -75,7 +75,7 @@ export async function contactCard(o: { contact: ContactIn; draft: ContactDraft; 
   const found = e.email.toLowerCase(), to = c.testRecipients.length ? c.testRecipients[0] : found;
   if ((await o.suppressed([found, to])).size) return { ok: false, why: "suppressed", reply: `${o.contact.person.name} asked not to be contacted, or that address bounced, so no one emails it.` };
   const fus = (o.followups ?? []).slice(0, FOLLOWUPS_MAX);
-  if (!fus.every(followupOk)) return { ok: false, why: "bad_followup", reply: "A follow-up broke the rules (at most 80 words, one question, no links or sales words)." };
+  if (!fus.every(followupOk)) return { ok: false, why: "bad_followup", reply: "A follow-up broke the rules (at most 80 words, one question, no links, sales words or claimed meetings)." };
   const footer = footerFor(o.signature, c.postalAddress);
   const parts = [{ subject: o.draft.subject, body: o.draft.body, after_days: 0 }, ...fus.map((b, i) => ({ subject: `Re: ${o.draft.subject}`, body: b, after_days: c.followupDays * (i + 1) }))];
   const mails: CardMail[] = [];
@@ -102,6 +102,41 @@ export function memorySendLimits(): SendLimits {
       if (rows.some((r) => r.user === p.user && r.email_hash === p.email_hash && r.step === p.step)) return "already_recorded";
       if (p.step === 0 && rows.filter((r) => r.user === p.user && r.day === p.day && r.step === 0).length >= p.cap) return "daily_limit";
       rows.push({ user: p.user, email_hash: p.email_hash, step: p.step, day: p.day }); return "recorded";
+    },
+  };
+}
+// Over the service role (career_contact_sends, 20261107120200; row security on, no policies: only the service role reads
+// or writes it). The log outlives "forget" and "forget everything" (20261108130500), so an address once emailed stays
+// emailed. Every read or write that fails throws: the approval then refuses, and nothing is saved or queued.
+//   sentOn  the earliest day of any row (any step) for this person and address hash, or null.
+//   record  one row per step through career_contact_record_send, which takes the person's lock and refuses a step 0 once
+//           the day holds `cap` first emails. The day is the server's UTC day (capDay of this server's clock), never the
+//           caller's: a caller's day that is not today's is refused as "daily_limit", so no time zone re-opens the cap.
+// deno-lint-ignore no-explicit-any
+type Admin = { rpc: (f: string, a: { p: unknown }) => PromiseLike<{ data: any; error: any }>; from: (t: string) => any };
+export function supabaseSendLimits(admin: Admin, o: { now?: () => number } = {}): SendLimits {
+  const now = o.now ?? Date.now;
+  const fail = (what: string, e: any) => new Error(`career_contact_sends ${what}: ${e?.message ?? e}`);
+  return {
+    async countToday(u, day) {
+      const r = await admin.from("career_contact_sends").select("id", { count: "exact", head: true }).eq("user_id", u).eq("day", day).eq("step", 0);
+      if (r.error) throw fail("count", r.error);
+      if (typeof r.count !== "number") throw fail("count", "no count");
+      return r.count;
+    },
+    async sentOn(u, h) {
+      const r = await admin.from("career_contact_sends").select("day").eq("user_id", u).eq("email_hash", h).order("day", { ascending: true }).limit(1);
+      if (r.error) throw fail("read", r.error);
+      const d = r.data?.[0]?.day;
+      return d ? String(d).slice(0, 10) : null;
+    },
+    async record(p) {
+      const day = capDay(now());
+      if (p.day !== day) return "daily_limit";
+      const r = await admin.rpc("career_contact_record_send", { p: { user: p.user, email_hash: p.email_hash, step: p.step, day, cap: p.cap, queue_id: p.queue_id ?? null } });
+      if (r.error) throw fail("record", r.error);
+      if (r.data === "recorded" || r.data === "already_recorded" || r.data === "daily_limit") return r.data;
+      throw fail("record", `unexpected answer ${JSON.stringify(r.data)}`);
     },
   };
 }

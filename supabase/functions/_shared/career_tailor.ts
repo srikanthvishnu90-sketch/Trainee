@@ -13,7 +13,8 @@
 // tool refuses; nothing is stored or linked.
 import { CareerProfile, CareerRender, CareerTailor } from "./router_core.career.js";
 import { documentLines, guardMaterials } from "./career_materials_guard.ts";
-import { type Fit, type FitRecord, fitRecord, type LayoutName, renderDesigned, type Swap } from "./career_resume_design.ts";
+import { type DesignLayout, type Fit, type FitRecord, fitRecord, newestFirst, type OwnFact, renderDesigned, type Swap } from "./career_resume_design.ts";
+import type { TemplateId, TemplateSpec } from "./career_resume_templates.ts";
 import { gapAnalysis, type GapReport, previewText } from "./career_resume_gaps.ts";
 
 export const RESUME_BUCKET = "career-resumes";
@@ -25,10 +26,51 @@ export const PERSONAS_KEY = "career:resume-personas";
 // ---------------------------------------------------------------- the confirmed-only record
 const clone = <T>(v: T): T => JSON.parse(JSON.stringify(v ?? null));
 // A fresh profile holding only the person's confirmed facts: a draft is not in it at all, so it cannot support a line,
-// vouch for a skill name, or be picked.
+// vouch for a skill name, or be picked. A skill the person listed and confirmed is its own proof (listedSkillsProven).
 export function confirmedOnly(profile: any): any {
   const facts = (CareerProfile.confirmedFacts(profile || {}) as any[]).filter((f) => f.status !== "draft").map(clone);
-  return withResumeHeader(CareerProfile.createProfile({ id: profile?.id, basics: clone(profile?.basics || {}), facts }), profile);
+  return listedSkillsProven(withResumeHeader(CareerProfile.createProfile({ id: profile?.id, basics: clone(profile?.basics || {}), facts }), profile));
+}
+// Architect ruling 2026-11-10 (resume loop): a skill the person listed in their own confirmed Skills is a confirmed fact
+// (D-007), so it is its own proof and is shown; 123's proof rule (skillFactProven, BUG-211) otherwise left every bare listed
+// skill off, and the Skills section vanished. Only confirmed skill facts are marked (a draft is not in this profile at all),
+// and a skill only the posting names has no fact here, so it stays off.
+// deno-lint-ignore no-explicit-any
+export function listedSkillsProven(p: any): any {
+  for (const f of p?.facts || []) {
+    if (f?.kind !== "skill" || f.needs_confirmation || f.status === "draft" || !String(f.name || f.title || "").trim()) continue;
+    if (!(f.evidence || []).length) f.evidence = [String(f.id)];
+    f.unproven = false;
+  }
+  return p;
+}
+// The same ruling on the printed page: 123 scopes the Skills line to the posting's family (BUG-273), which dropped the
+// person's own listed skills and, with none in scope, the whole section. The posting's skills keep leading; every other
+// confirmed listed skill follows on the same line, each cited to its own fact; a Skills section is added when the tailor
+// left none. Nothing but the person's confirmed skill facts is ever added.
+// deno-lint-ignore no-explicit-any
+export function withListedSkills(resume: any, p: any): any {
+  const own = (p?.facts || []).filter((f: any) => f?.kind === "skill" && !f.needs_confirmation && f.status !== "draft" && String(f.name || f.title || "").trim());
+  if (!own.length) return resume;
+  const out = clone(resume);
+  out.sections = out.sections || [];
+  let line = out.sections.flatMap((s: any) => s.lines || []).find((l: any) => l?.type === "skills");
+  if (!line) {
+    line = { text: "", factIds: [], type: "skills" };
+    out.sections.push({ heading: "Skills", lines: [line] });
+  }
+  const norm = (s: string) => ` ${String(s).toLowerCase().replace(/[^\p{L}\p{N}+#]+/gu, " ").trim()} `;
+  const named = String(line.text || "");
+  const add: string[] = [];
+  for (const f of own) {
+    const name = String(f.name || f.title).trim();
+    if (norm(named).includes(norm(name)) || add.some((a) => norm(a) === norm(name))) continue;
+    add.push(name);
+    line.factIds = [...new Set([...(line.factIds || []), String(f.id)])];
+  }
+  if (add.length) line.text = named.trim() ? `${named.trim()}, ${add.join(", ")}` : add.join(", ");
+  if (Array.isArray(out.lines)) out.lines = out.sections.flatMap((s: any) => (s.lines || []).map((l: any) => ({ ...l, section: s.heading })));
+  return out;
 }
 // RELEASE 9: the header the person confirmed with their resume (142 confirmResumeHeader: shown word for word with the
 // entries, recorded only at their yes, with its time) travels with the confirmed record; one never confirmed does not.
@@ -39,14 +81,21 @@ function withResumeHeader(p: any, from: any): any {
   if (h && typeof h === "object" && typeof h.name === "string" && h.name.trim() && typeof h.confirmed_at === "string" && h.confirmed_at) p.resume_header = clone(h);
   return p;
 }
-// The name and email at the top of the file: the ones typed for the resume, else (only when no name was typed) the header
-// the person confirmed with it. 123's headerOf rule, so what is checked here is what prints. contact "typed" takes only the
-// typed ones (prepare-ahead: the form needs the first name, last name and email as answers, and asks for them once).
+// The name and email at the top of the file: the ones typed for the resume, else the header the person confirmed with it,
+// piece by piece (H2H leftovers 1: a confirmed header with a name and no email kept its name, and only the email was asked).
+// 123's headerOf rule, so what is checked here is what prints. A header counts only once confirmed (its confirmed_at).
+// contact "typed" takes only the typed ones (prepare-ahead: the form needs the first name, last name and email as answers,
+// and asks for them once).
 // deno-lint-ignore no-explicit-any
 export function resumeContact(p: any, contact: "typed" | "confirmed" = "confirmed"): { name: string | null; email: string | null } {
-  const b = p?.basics || {}, h = contact === "confirmed" ? p?.resume_header : null;
-  if (!b.name && h && h.name) return { name: String(h.name), email: h.email ? String(h.email) : null };
-  return { name: b.name ? String(b.name) : null, email: b.email ? String(b.email) : null };
+  const b = p?.basics || {}, rh = contact === "confirmed" ? p?.resume_header : null;
+  const h = rh && typeof rh === "object" && rh.confirmed_at ? rh : null;
+  const name = b.name || h?.name || null, email = b.email || h?.email || null;
+  return { name: name ? String(name) : null, email: email ? String(email) : null };
+}
+// The question for exactly what is missing at the top of the resume: both, or the one piece.
+export function contactQuestion(top: { name: string | null; email: string | null }): string {
+  return !top.name && !top.email ? CONTACT_QUESTION : !top.email ? EMAIL_QUESTION : NAME_QUESTION;
 }
 
 const HEADING: Record<string, string> = { experience: "Experience", project: "Projects", education: "Education", leadership: "Leadership", certification: "Certifications" };
@@ -72,6 +121,8 @@ export function baseResume(profile: any): { sections: { heading: string; lines: 
 // Only what the person typed this turn (D-007): never the account email, never a guess. The email must appear exactly
 // (any case) and the name as typed (any case, spaces normalized).
 export const CONTACT_QUESTION = "What name and email should go at the top of your resume?";
+export const EMAIL_QUESTION = "What email should go at the top of your resume?";
+export const NAME_QUESTION = "What name should go at the top of your resume?";
 const EMAIL = /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.[A-Za-z]{2,24}$/;
 const NAME = /^[\p{L}][\p{L}' -]*[\p{L}]$/u;
 const squash = (s: string) => s.replace(/\s+/g, " ").trim();
@@ -82,12 +133,13 @@ const tokenIn = (hay: string, needle: string, edge: RegExp) => {
   }
   return false;
 };
-export function contactFromMessage(message: string, name: unknown, email: unknown): { ok: true; name: string; email: string } | { ok: false; error: string } {
+// o.only: the one piece typed this message (H2H leftovers 1: the other is already on the confirmed record and is not asked).
+export function contactFromMessage(message: string, name: unknown, email: unknown, o: { only?: "name" | "email" } = {}): { ok: true; name: string; email: string } | { ok: false; error: string } {
   const n = squash(String(name ?? "")), e = String(email ?? "").trim(), m = squash(String(message ?? ""));
-  if (n.length < 2 || n.length > 80 || !NAME.test(n)) return { ok: false, error: "the name must be 2 to 80 letters, spaces, hyphens or apostrophes" };
-  if (!EMAIL.test(e)) return { ok: false, error: "that is not a valid email address" };
-  if (!tokenIn(m, e, /[A-Za-z0-9._%+@-]/)) return { ok: false, error: "the person did not type that email in this message; they must type it themselves" };
-  if (!tokenIn(m, n, /\p{L}/u)) return { ok: false, error: "the person did not type that name in this message; they must type it themselves" };
+  if (o.only !== "email" && (n.length < 2 || n.length > 80 || !NAME.test(n))) return { ok: false, error: "the name must be 2 to 80 letters, spaces, hyphens or apostrophes" };
+  if (o.only !== "name" && !EMAIL.test(e)) return { ok: false, error: "that is not a valid email address" };
+  if (o.only !== "name" && !tokenIn(m, e, /[A-Za-z0-9._%+@-]/)) return { ok: false, error: "the person did not type that email in this message; they must type it themselves" };
+  if (o.only !== "email" && !tokenIn(m, n, /\p{L}/u)) return { ok: false, error: "the person did not type that name in this message; they must type it themselves" };
   return { ok: true, name: n, email: e };
 }
 
@@ -150,8 +202,10 @@ export function supabasePersonaStore(admin: any): PersonaStore {
 }
 
 // A persona picks (hide) before tailoring and orders (lead) after it. Leading moves whole entries (the entry and its
-// own bullets) and the sections that hold them; it never changes a line.
-export function applyPersonaOrder(resume: any, lead: string[]): any {
+// own bullets) and the sections that hold them; it never changes a line. Entries start newest first (newestFirst, RESUME-
+// TEMPLATES E5); a lead the person chose still goes first.
+export function applyPersonaOrder(resume0: any, lead: string[]): any {
+  const resume = newestFirst(resume0);
   if (!lead.length) return resume;
   const rank = (ids: string[]) => Math.min(...(ids || []).map((id) => { const i = lead.indexOf(id); return i < 0 ? Infinity : i; }));
   const sections = resume.sections.map((s: any) => {
@@ -296,24 +350,30 @@ function contactProblems(R: any, resume: any, buf: any): string[] {
 }
 // RELEASE 9: a layout (career_resume_design.ts) renders the PDF and the DOCX together; the DOCX, the page fit and the
 // printed lines ride the result. With no layout asked for, the renderer is exactly WO-028's (148's own PDF).
-export interface RenderOpts { layout?: LayoutName | null; ownDocx?: Uint8Array | null; swaps?: Swap[] }
-export type RenderOut = { ok: true; pdf: Uint8Array; sha256: string; filename: string; ats: AtsVerdict; where: string; layout?: LayoutName; docx?: Uint8Array; fit?: Fit; lines?: string[]; replaced?: number; missing?: string[] } | { ok: false; reason: string; where: string };
+// RELEASE 10: a template (one of the fifteen, branded or neutral), or "own" from the person's PDF rebuilt from its geometry.
+export interface RenderOpts { layout?: DesignLayout | null; ownDocx?: Uint8Array | null; swaps?: Swap[]; template?: TemplateId | null; branded?: boolean; ownPdfSpec?: TemplateSpec | null; ownFacts?: OwnFact[] | null }
+export type RenderOut = { ok: true; pdf: Uint8Array; sha256: string; filename: string; ats: AtsVerdict; where: string; layout?: DesignLayout; template?: TemplateId | null; docx?: Uint8Array; fit?: Fit; lines?: string[]; replaced?: number; missing?: string[] } | { ok: false; reason: string; where: string };
 export type ResumeRenderer = (resume: any, opts?: RenderOpts) => Promise<RenderOut>;
 export function renderWith(R: any, where: string): ResumeRenderer {
   return async (resume, opts) => {
     if (!R?.runtime?.zlib || !R?.runtime?.crypto) return { ok: false, where, reason: `the PDF renderer needs zlib and crypto, which ${where} does not provide` };
     if (opts?.layout) {
-      const d = renderDesigned(R, resume, { layout: opts.layout, ownDocx: opts.ownDocx ?? null, swaps: opts.swaps ?? [] });
+      const d = renderDesigned(R, resume, { layout: opts.layout, ownDocx: opts.ownDocx ?? null, swaps: opts.swaps, template: opts.template ?? null, branded: !!opts.branded, ownPdfSpec: opts.ownPdfSpec ?? null, ownFacts: opts.ownFacts ?? null });
       if (!d.ok) return { ok: false, where, reason: d.reason };
       const buf = R.toBuffer(d.pdf);
       const reasons = [...d.parseCheck.fails, ...contactProblems(R, resume, buf)];
       const ats: AtsVerdict = { pass: reasons.length === 0, status: reasons.length ? "FAIL" : d.parseCheck.status, reasons, warnings: d.parseCheck.warnings };
-      return { ok: true, pdf: d.pdf, sha256: R.sha256(buf), filename: R.filenameFor(resume?.header?.name, "pdf"), ats, where, layout: d.layout, docx: d.docx, fit: d.fit, lines: d.lines, ...(d.replaced !== undefined ? { replaced: d.replaced, missing: d.missing } : {}) };
+      return { ok: true, pdf: d.pdf, sha256: R.sha256(buf), filename: R.filenameFor(resume?.header?.name, "pdf"), ats, where, layout: d.layout, template: d.template ?? null, docx: d.docx, fit: d.fit, lines: d.lines, ...(d.replaced !== undefined ? { replaced: d.replaced, missing: d.missing } : {}) };
     }
     const r = R.renderPdf(resume);
     if (!r.ok) return { ok: false, where, reason: r.reason || "the PDF could not be rendered" };
     const pdf = new Uint8Array(r.buffer);
-    return { ok: true, pdf, sha256: R.sha256(r.buffer), filename: r.filename, ats: atsHarness(R, resume, pdf), where };
+    // The Word copy rides with the PDF on the plain path too (RESUME-TEMPLATES 1.1: "Trainee keeps sending both"; the resume
+    // loop found the default "make me a resume" sent the PDF alone). Same document, same words; a Word copy that cannot be
+    // made is left out, never faked.
+    const d = R.renderDocx(resume);
+    const docx = d?.ok && d.buffer ? new Uint8Array(d.buffer) : undefined;
+    return { ok: true, pdf, sha256: R.sha256(r.buffer), filename: r.filename, ats: atsHarness(R, resume, pdf), where, ...(docx ? { docx } : {}) };
   };
 }
 // The edge (Deno): 148 over Deno's own node: built-ins, loaded once, on the first render.
@@ -401,12 +461,13 @@ export type TailorOut = {
   not_on_your_record: string[]; lead_not_picked: string[]; rendered_in: string; ms: number; detail: { doc: any; base: any; diff: any; docx: Uint8Array | null; pdf: Uint8Array };
   // RELEASE 9: the posting against the resume (missing, weak, emphasise) and the top of the file as it prints, both for the
   // chat before the file is sent; the layout and its page fit when one was asked for.
-  gaps: GapReport; preview: string; layout: LayoutName | "plain"; fit: FitRecord | null; own_layout?: { replaced: number; missing: string[] };
+  gaps: GapReport; preview: string; layout: DesignLayout | "plain"; template: TemplateId | null; fit: FitRecord | null; own_layout?: { replaced: number; missing: string[] };
 } | { ok: false; refused: "no_confirmed_facts" | "no_contact" | "truth_audit" | "render" | "ats_parse" | "link"; reason: string; ms: number };
 
 export async function tailorForPosting(o: {
   userId: string; profile: any; posting: { text: string; job_id?: string | null; company?: string | null };
-  persona?: Persona | null; deps: TailorDeps; now: number; layout?: LayoutName | null; ownDocx?: Uint8Array | null; swaps?: Swap[];
+  persona?: Persona | null; deps: TailorDeps; now: number; layout?: DesignLayout | null; ownDocx?: Uint8Array | null; swaps?: Swap[];
+  template?: TemplateId | null; branded?: boolean; ownPdfSpec?: TemplateSpec | null;
   contact?: "typed" | "confirmed";
 }): Promise<TailorOut> {
   const t0 = performance.now();
@@ -414,7 +475,16 @@ export async function tailorForPosting(o: {
   const clean = confirmedOnly(o.profile);
   if (!(clean.facts || []).some((f: any) => HEADING[f.kind])) return { ok: false, refused: "no_confirmed_facts", reason: "there are no confirmed experience, project or education facts on file to build a resume from", ms: ms() };
   const top = resumeContact(clean, o.contact ?? "confirmed");
-  if (!top.name || !top.email) return { ok: false, refused: "no_contact", reason: `your name and email are not on your profile yet, and an employer's system reads them from the top of the resume. Ask exactly: "${CONTACT_QUESTION}"`, ms: ms() };
+  if (!top.name || !top.email) {
+    // H2H leftovers 1: a piece the confirmed resume header holds is not asked again; only the missing one is. A name or email
+    // typed for the resume with the other missing is still asked as both (pinned: tests/architect/wo-028-tailor.test.ts WO-028/3).
+    const b = clean.basics || {};
+    const fromHeader = !b.name && !b.email ? top : { name: null, email: null };
+    const missing = !fromHeader.name && !fromHeader.email ? "your name and email are not on your profile yet, and an employer's system reads them"
+      : !fromHeader.email ? `your email is not on your profile yet (the name, ${top.name}, is from the resume you confirmed), and an employer's system reads it`
+      : "your name is not on your profile yet (the email is from the resume you confirmed), and an employer's system reads it";
+    return { ok: false, refused: "no_contact", reason: `${missing} from the top of the resume. Ask exactly: "${contactQuestion(fromHeader)}"`, ms: ms() };
+  }
   const persona = o.persona ?? null;
   const hidden = persona ? persona.hide.filter((id) => CareerProfile.getFact(clean, id)) : [];
   const picked = hidden.length ? withResumeHeader(CareerProfile.createProfile({ id: clean.id, basics: clean.basics, facts: clean.facts.filter((f: any) => !hidden.includes(f.id)) }), clean) : clean;
@@ -423,7 +493,8 @@ export async function tailorForPosting(o: {
   if (!t.ok) return { ok: false, refused: "truth_audit", reason: `the truth check refused it: ${(t.violations || []).slice(0, 3).map((v: any) => v.reason).join("; ")}`, ms: ms() };
   if (t.mode !== "full" || !t.resume) return { ok: false, refused: "truth_audit", reason: t.reason || "no resume was assembled", ms: ms() };
   const lead = persona ? persona.lead.filter((id) => CareerProfile.getFact(picked, id)) : [];
-  const ordered = applyPersonaOrder(t.resume, lead);
+  // `picked`, not `clean`: a skill a persona hides stays hidden.
+  const ordered = withListedSkills(applyPersonaOrder(t.resume, lead), picked);
   const doc = submissionResume(ordered);
   // The hard gate again, on exactly what will print: every line cited to a confirmed fact that supports it.
   const audit = CareerTailor.auditResume(doc, clean);
@@ -431,8 +502,17 @@ export async function tailorForPosting(o: {
   // G5/B2: no skill, employer, title, date or number the person did not confirm, on any printed line.
   const guard = guardMaterials(documentLines(doc), clean);
   if (!guard.ok) return { ok: false, refused: "truth_audit", reason: `the truth check refused it: ${guard.refused.flatMap((x) => x.reasons).slice(0, 3).join("; ")}`, ms: ms() };
-  const r = o.layout ? await o.deps.render(doc, { layout: o.layout, ownDocx: o.ownDocx ?? null, swaps: o.swaps ?? [] }) : await o.deps.render(doc);
+  // RELEASE 10: their own Word file, with no hand-made swaps, gets the tailored lines from the confirmed facts it was read
+  // from (career_resume_design.ts planOwnEdits); the printed lines are then held to this document (verifyOwnPrinted).
+  const ownFacts = o.layout === "own" && o.ownDocx?.length && !o.swaps ? (clean.facts || []).map((f: any) => ({ id: String(f.id), title: f.title, text: f.text, bullets: f.bullets })) : null;
+  const r = o.layout ? await o.deps.render(doc, { layout: o.layout, ownDocx: o.ownDocx ?? null, swaps: o.swaps, template: o.template ?? null, branded: !!o.branded, ownPdfSpec: o.ownPdfSpec ?? null, ownFacts }) : await o.deps.render(doc);
   if (!r.ok) return { ok: false, refused: "render", reason: `the PDF could not be made: ${r.reason}`, ms: ms() };
+  // The truth check on exactly what prints: a kept file's own lines (its header and headings included) pass the same
+  // materials guard as the document above.
+  if (r.layout === "own" && r.lines?.length) {
+    const g2 = guardMaterials(r.lines, clean);
+    if (!g2.ok) return { ok: false, refused: "truth_audit", reason: `the truth check refused your own file's printed lines: ${g2.refused.flatMap((x) => x.reasons).slice(0, 3).join("; ")}`, ms: ms() };
+  }
   if (!r.ats.pass) return { ok: false, refused: "ats_parse", reason: `it failed the ATS parse check: ${r.ats.reasons.slice(0, 3).join("; ")}`, ms: ms() };
   const path = resumePath(o.userId, r.sha256);
   await o.deps.resumes.put(path, r.pdf);
@@ -452,7 +532,7 @@ export async function tailorForPosting(o: {
     ats: { status: r.ats.status, warnings: r.ats.warnings }, not_on_your_record: (t.requiredGaps || []).map((g: any) => g.requirement),
     lead_not_picked: lead.filter((id) => !selected.has(id)), rendered_in: r.where, ms: ms(), detail: { doc, base, diff, docx: r.docx ?? null, pdf: r.pdf },
     gaps: gapAnalysis({ jd, profile: clean, doc, gaps: t.gaps || [] }), preview: previewText(r.lines ?? ((CareerRender as any).sourceLines(doc) as { text: string }[]).map((l) => l.text)),
-    layout: r.layout ?? "plain", fit: r.fit ? fitRecord(r.fit) : null, ...(r.replaced !== undefined ? { own_layout: { replaced: r.replaced, missing: r.missing ?? [] } } : {}),
+    layout: r.layout ?? "plain", template: r.template ?? null, fit: r.fit ? fitRecord(r.fit) : null, ...(r.replaced !== undefined ? { own_layout: { replaced: r.replaced, missing: r.missing ?? [] } } : {}),
   };
 }
 

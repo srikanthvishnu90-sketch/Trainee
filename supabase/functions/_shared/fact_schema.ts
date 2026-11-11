@@ -233,7 +233,7 @@ export const FACT_SCHEMA = {
    "kind": "screen",
    "type": "yesno",
    "group": "pay",
-   "note": "the posted range meets their floor: derived from salary_expectation against the posting's range, else asked"
+   "note": "the posted range meets their expectations: asked per application (D-053c); never from salary_expectation, a pay_range_ok fact or another posting's answer"
   },
   "work_history": {
    "kind": "fact",

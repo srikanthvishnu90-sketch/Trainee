@@ -23,15 +23,28 @@ import { safeCut } from "./channel_text.ts";
 import { redactIdentity } from "./identity_redact.ts";
 import { ackFor, ackOnce, typingLoop } from "./channel_voice.ts";
 
-export const SIGNUP_CLOSED_REPLY = "Trainee is invite-only right now, so I can't set you up yet. Nothing about you was saved except that you texted.";
+export const SIGNUP_CLOSED_REPLY = "I can't set you up yet because Trainee is invite-only right now. Nothing about you was saved except that you texted.";
 // PHONE LOGIN (owner, 2026-10-28): Telegram's own verified number, shared with one tap. Trainee never asks for a password or a
 // code in chat.
 export const SHARE_PHONE_BUTTON = "Share my phone number";
 export const SHARE_PHONE_ASK = "You can also share your phone number with the button below. Telegram has already verified it, so there is no password or code to type, and I never ask for either in chat.";
-export const PHONE_NOT_YOURS_REPLY = "That's someone else's contact, so I can't use it. Tap the button to share your own number.";
+export const PHONE_NOT_YOURS_REPLY = "I can't use that number because it's someone else's contact. Tap the button to share your own number.";
 export const PHONE_ALREADY_REPLY = "This chat is already linked to your Trainee account, so nothing changed.";
-export const PHONE_NO_ACCOUNT_REPLY = "Thanks. I don't have a Trainee account with that number yet. If you use Trainee on iMessage or WhatsApp with this number, text me there; otherwise sign in with the link below.";
-export const CHAT_DOWN_REPLY = "I couldn't answer that just now. Try again in a minute.";
+export const PHONE_NO_ACCOUNT_REPLY = "I don't have a Trainee account with that number yet. If you use Trainee on iMessage or WhatsApp with this number, text me there; otherwise sign in with the link below.";
+export const CHAT_DOWN_REPLY = "I couldn't answer that because Trainee didn't return a reply just now. Try again in a minute.";
+// r-states (RESPONSE-RULES R9, R8, R4): a turn that ran past CHAT_WAIT_MS (chatThroughAgent's wait) is not "couldn't answer":
+// the reply names what stopped and that how far it got is unconfirmed (D-024; it may still finish). Sent again and timed out
+// again, it says so instead of the same words twice.
+export const CHAT_WAIT_MS = 120_000;
+export const CHAT_TIMEOUT_REPLY = "I couldn't finish this in time: it ran past 2 minutes, so I stopped waiting, and I can't confirm how far it got. Send it again and I'll retry.";
+export const CHAT_TIMEOUT_AGAIN_REPLY = "That ran past 2 minutes again, so I stopped waiting a second time and still can't confirm how far it got. A narrower ask, such as one role or one city, finishes sooner.";
+const timedOut = (e: unknown) => (e as { name?: unknown } | null)?.name === "TimeoutError";
+// Architect amendment (r-states, 2026-11-10; R4, R9): any other failure after the interim names the blocker, makes no claim
+// about what got done, keeps the ask in view and gives one next step. Before an interim (a fast failure) CHAT_DOWN_REPLY stands.
+const quoted = (ask: string) => { const a = String(ask ?? "").replace(/\s+/g, " ").trim(); return a.length > 120 ? `${a.slice(0, 117).replace(/\s+\S*$/, "")}...` : a; };
+export const chatErrorReply = (ask: string) => `I couldn't finish "${quoted(ask)}": Trainee hit an error on its side, so I can't confirm how far it got. Send it again and I'll retry.`;
+export const CHAT_ERROR_AGAIN_REPLY = "That hit an error on Trainee's side again, so I still can't confirm how far it got. It is not something you did; try it again in a few minutes.";
+const isErrorReply = (t: string | null) => !!t && (/: Trainee hit an error on its side, so I can't confirm how far it got\./.test(t) || t === CHAT_ERROR_AGAIN_REPLY);
 // The owner's wording for the question on the channel already linked (WO-038).
 export const linkAskText = (newChannel: Channel) => `Someone texted Trainee on ${CHANNEL_NAME[newChannel]} from your number. Reply yes to link it.`;
 export const linkPendingReply = (linkedOn: Channel) => `This number already has a Trainee account on ${CHANNEL_NAME[linkedOn]}. Reply yes there and this chat is linked to it.`;
@@ -69,16 +82,16 @@ export const telegramLinkAskText = (handle?: string | null, contact?: string | n
   const who = handle && /^[A-Za-z0-9_]{5,32}$/.test(handle) ? `@${handle}` : id ? `(no username; Telegram id ${id})` : "(an account with no username)";
   return `Someone wants to link Telegram ${who} to your Trainee. To allow it, reply LINK ${LINK_CODE_SLOT} here within 15 minutes. A plain yes does not link it; ignore this if it wasn't you.`;
 };
-export const TELEGRAM_LINK_CONFIRM_REPLY = "Almost done. I sent a LINK code to the Trainee chat you already use: reply there with it within 15 minutes. Until then this chat can't see or do anything in a Trainee account.";
-export const TELEGRAM_LINK_WAITING_REPLY = "This chat isn't linked yet: it's waiting for the LINK code to be sent back in the Trainee chat you already use. Until then it can't see or do anything in a Trainee account.";
+export const TELEGRAM_LINK_CONFIRM_REPLY = "I sent a LINK code to the Trainee chat you already use: reply there with it within 15 minutes to link this chat. Until then this chat has no access to your Trainee account.";
+export const TELEGRAM_LINK_WAITING_REPLY = "I can't answer here yet because this chat isn't linked: it's waiting for the LINK code to be sent back in the Trainee chat you already use. Until then this chat has no access to your Trainee account.";
 export const TELEGRAM_LINK_BUSY_REPLY = "Too many Telegram link requests are waiting for this Trainee account, so I haven't asked again and this chat isn't linked. Try again in 15 minutes.";
 export const LINK_CODE_NO_MATCH_REPLY = "That LINK code doesn't match a Telegram link request waiting for your answer, so nothing was linked.";
-export const TELEGRAM_LINK_CANT_ASK_REPLY = "I couldn't ask for a YES in the Trainee chat you already use (there isn't one, or Trainee is stopped there), so this chat isn't linked. If you stopped Trainee there, text START there, then text \"connect telegram\" for a new link.";
+export const TELEGRAM_LINK_CANT_ASK_REPLY = "This chat isn't linked because I couldn't ask for a YES in the Trainee chat you already use: there isn't one, or Trainee is stopped there. If you stopped Trainee there, text START there, then text \"connect telegram\" for a new link.";
 export const LINK_AMBIGUOUS_REPLY = "Two different chats asked to link to your Trainee account at the same time, so I linked neither. If one of them was you, text \"connect telegram\" for a new link and open it yourself.";
-export const FILE_NOT_READ_REPLY = "I can't open files sent here yet, so I haven't read that one. Paste your resume as text in this chat and I'll read it now.";
+export const FILE_NOT_READ_REPLY = "I haven't read that file because I can't open files sent here yet. Paste your resume as text in this chat and I'll read it now.";
 // FEATURE 16 (Telegram, where a PDF or Word file is read): what a photo or a voice message is told instead.
-export const PHOTO_NOT_READ_REPLY = "I can't read photos, so I haven't read that one. Send your resume as a PDF or Word file, or paste the text here.";
-export const VOICE_NOT_READ_REPLY = "I can't listen to voice, audio or video messages here, so I haven't heard that one. Type it as a message and I'll answer.";
+export const PHOTO_NOT_READ_REPLY = "I haven't read that photo because I can't read images. Send your resume as a PDF or Word file, or paste the text here.";
+export const VOICE_NOT_READ_REPLY = "I haven't heard that voice message because I can't play voice, audio or video here. Type it as a message and I'll answer.";
 // TELEGRAM ROUND 2 (2026-10-30): the words sent with a photo, a video or a GIF are read; the picture itself is not, and the
 // answer says so first.
 export const MEDIA_CAPTION_NOTE = "I can't see or play what you attached, so I read only the words sent with it.";
@@ -114,13 +127,13 @@ export const isDecisionEdit = (text: string) => { const t = String(text ?? "").t
 // TELEGRAM ROUND 3: "/start <code>" from a chat already linked to an account, with a code that is used, expired or forged, was
 // told to text "connect telegram" where they already use Trainee for a new link, though this chat already is their account.
 export const TELEGRAM_LINK_INVALID_LINKED_REPLY = "That link has expired or was already used, and this chat is already linked to your Trainee account, so nothing changed.";
-export const DOC_NOT_SENT_REPLY = "I couldn't attach the file here just now, so it wasn't sent. Ask me to send it again.";
+export const DOC_NOT_SENT_REPLY = "I couldn't attach the file here just now because this chat refused it, so it wasn't sent. Ask me to send it again.";
 // FEATURE 16 (owner decision 2026-10-26): Telegram's own login links a chat to an account (TELEGRAM_LOGIN_URL: the web
 // page, telegram-link.html, on the domain set with BotFather /setdomain).
 export const LINK_BUTTON = "Link your Trainee account";
-export const TELEGRAM_LINK_REPLY = "To use Trainee in this chat, link your Trainee account: tap the button below and sign in to Trainee. Telegram tells Trainee only your Telegram name and id.";
+export const TELEGRAM_LINK_REPLY = "I can't do that here yet because this chat isn't linked to a Trainee account. Tap the button below and sign in to Trainee to link it; Telegram tells Trainee only your Telegram name and id.";
 export const TELEGRAM_UNLINKED_REPLY = "Telegram is unlinked from your Trainee account. Nothing from this chat reaches that account now.";
-export const TELEGRAM_CHANNEL_ONLY_REPLY = "This chat is your Trainee account, so it can't be unlinked. Nothing changed.";
+export const TELEGRAM_CHANNEL_ONLY_REPLY = "This chat can't be unlinked because it is your Trainee account. Nothing changed.";
 const LINK_ASK = /^(link|connect) (my (trainee )?account|telegram|this chat)[.!]*$/i, UNLINK_ASK = /^unlink (telegram|this chat|my account)[.!]*$/i;
 export const LINK_NONCE_MS = 10 * 60000;
 export const LINK_ASK_MS = 60 * 60000; // a yes counts for an hour after the question
@@ -139,6 +152,11 @@ export interface InboundStore {
   setThread(contact: string, threadId: string, userId?: string): Promise<void>; // one thread per person, every channel
   setOptOut(contact: string, out: boolean, at: number): Promise<void>;
   enqueueReply(userId: string, key: string, text: string, at: number, channel?: Channel, part?: { of: string; n: number }, cardId?: string | null): Promise<boolean>;
+  // R10 (2026-11-09, optional): the interim line of a slow turn, sent straight to the chat, recorded as already delivered
+  // (kind 'interim', the exact text sent) so it is never sent again and a replay reads what the person saw.
+  recordInterim?(userId: string, key: string, text: string, at: number, channel?: Channel): Promise<void>;
+  // r-states (optional): the text of the person's latest queued reply, so a failure repeated on the next turn is said as repeated.
+  lastReply?(userId: string): Promise<string | null>;
   // WO-038 (optional, so a store written for WO-013 still runs the LoopMessage path unchanged):
   sawInbound?(contact: string, at: number, o: { alias?: string | null; phone?: string | null }): Promise<void>;
   // optedOut (IDENTITY SCENARIOS, 2026-10-30): the account is stopped (a STOP on any of its contacts), so a question there
@@ -285,8 +303,15 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
   };
   // N12: the one interim line of a slow turn (armed by interim(), at most once per message; stopped before the answer).
   let working: ReturnType<typeof ackOnce> | null = null;
-  const interim = (text: string) => {
-    const w = ackOnce({ afterMs: d.ackAfterMs, ack: () => say(contact, d.render(text)), ...(d.timers ? { setTimer: d.timers.set, clearTimer: d.timers.clear } : {}) });
+  const interim = (text: string, userId: string) => {
+    const ack = async () => {
+      const bubbles = d.render(text);
+      const r = await say(contact, bubbles);
+      // R10: recorded only once it went out; a failed record never stops the turn.
+      if (r.ok && store.recordInterim) await store.recordInterim(userId, `interim:${scoped(msg)}`, bubbles.join("\n\n"), d.now(), msg.channel).catch((e) => console.error("inbound: interim not recorded:", e instanceof Error ? e.message : String(e)));
+      return r;
+    };
+    const w = ackOnce({ afterMs: d.ackAfterMs, ack, ...(d.timers ? { setTimer: d.timers.set, clearTimer: d.timers.clear } : {}) });
     w.start();
     return w;
   };
@@ -520,7 +545,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
     let fileMessage: string | null = null, fileNote: string | null = null;
     if (msg.document) {
       if (!d.resumeFile) return await answer(FILE_NOT_READ_REPLY, { ignored: "a file (not read here)" });
-      working = interim(ackFor("resume"));
+      working = interim(ackFor("resume"), person.userId);
       const got = await d.resumeFile({ userId: person.userId, doc: msg.document, now });
       if (!got.ok) { await working.stop(); return await answer(got.reply, { file: "not read" }); }
       fileMessage = got.message;
@@ -585,7 +610,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
       if (fileNote) notes.push(fileNote);
       if (msg.caption && msg.media && !fileMessage) notes.unshift(MEDIA_CAPTION_NOTE);
       // N12: one interim if the turn runs past the budget (already armed when a file was being read: still one).
-      working ??= interim(ackFor(said));
+      working ??= interim(ackFor(said), person.userId);
       // The brain gets the person, the thread, the words and a turn key, and the reply-to id only when the platform gave one.
       const out = await d.chat({ userId: person.userId, threadId: person.threadId, message: fitted.text, turnKey, ...(msg.replyToMessageId ? { replyToMessageId: msg.replyToMessageId } : {}), ...(screenTap ? { screenTap } : {}) });
       reply = out.reply.trim() || CHAT_DOWN_REPLY;
@@ -608,7 +633,11 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
       if (out.threadId && out.threadId !== person.threadId) await store.setThread(contact, out.threadId, person.userId);
     } catch (e) {
       console.error("inbound: chat failed:", e instanceof Error ? e.message : String(e));
-      reply = CHAT_DOWN_REPLY;
+      const interimWent = working ? await working.stop() : false;
+      const last = (timedOut(e) || interimWent) && store.lastReply ? await store.lastReply(person.userId).catch(() => null) : null;
+      reply = timedOut(e) ? (last === CHAT_TIMEOUT_REPLY || last === CHAT_TIMEOUT_AGAIN_REPLY ? CHAT_TIMEOUT_AGAIN_REPLY : CHAT_TIMEOUT_REPLY)
+        : interimWent ? (isErrorReply(last) ? CHAT_ERROR_AGAIN_REPLY : chatErrorReply(msg.text || "that"))
+        : CHAT_DOWN_REPLY;
     }
     // The turn is over: no interim after this point, and one already going reaches the person before the answer.
     if (working) await working.stop();

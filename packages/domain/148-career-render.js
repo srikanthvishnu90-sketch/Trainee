@@ -189,36 +189,80 @@ const CareerRender = (() => {
   // synchronously), so async platform compression cannot serve it
   // either. The bundle-legal primitive is plain JS, vendored here as
   // ordinary source: an RFC 1950/1951 codec plus SHA-256.
-  //   - DEFLATE writer: stored (uncompressed) blocks — always-valid
-  //     deflate, fully deterministic; the streams it serves are a few
-  //     KB of PDF text operators / DOCX parts.
+  //   - DEFLATE writer: deflateFixed below (fixed Huffman, greedy
+  //     LZ77). Since #673 it writes EVERY stream on every runtime, Node
+  //     included, so rendered bytes are identical on Node and Deno.
   //   - Inflater: a full RFC 1951 decoder (stored + fixed + dynamic
-  //     Huffman), so parse-check also reads Node-produced files.
-  // These run ONLY when the Node captures are absent. On Node, `zlib`
-  // and `crypto` below ARE the platform modules and rendered bytes stay
-  // byte-identical (golden-pinned in tests/career-render-edge-pdf.test.cjs;
+  //     Huffman), so parse-check also reads files made elsewhere.
+  // The inflater and SHA-256 run ONLY when the Node captures are absent.
+  // On Node, `zlib` (for reading) and `crypto` below are the platform
+  // modules (golden-pinned in tests/career-render-edge-pdf.test.cjs;
   // staged-bundle proof in tests/edge/edge-pdf-renderer.test.ts).
   function adler32(data) {
     let a = 1, b = 0;
     for (let i = 0; i < data.length; i++) { a = (a + data[i]) % 65521; b = (b + a) % 65521; }
     return ((b << 16) | a) >>> 0;
   }
-  function deflateStored(data) {
-    const chunks = [];
-    let off = 0;
-    do {
-      const len = Math.min(65535, data.length - off);
-      const head = Bytes.alloc(5);
-      head[0] = off + len >= data.length ? 1 : 0; // BFINAL, BTYPE=00, then byte-aligned
-      head.writeUInt16LE(len, 1);
-      head.writeUInt16LE((~len) & 0xffff, 3);
-      chunks.push(head, Bytes.from(data.subarray(off, off + len)));
-      off += len;
-    } while (off < data.length);
-    return Bytes.concat(chunks);
+  // DETERMINISTIC DEFLATE (architect ruling 2026-11-10, #673): every file this module writes (PDF content streams, DOCX
+  // zip entries, the templates' streams) is compressed by THIS function, on Node and on Deno alike, so the same document
+  // is the same bytes everywhere. Before, each runtime used its own zlib: Deno's node:zlib and Node's zlib agreed on only
+  // 14 of 27 plain-layout PDFs (WO-028/5). Fixed settings, never tuned per call: one final block with the fixed Huffman
+  // codes (RFC 1951 3.2.6), greedy LZ77 over a 32 KiB window, minimum match 3, maximum 258, a 15-bit hash of the next
+  // three bytes, and at most DEFLATE_CHAIN candidates per position. Any standard inflater reads it.
+  const DEFLATE_CHAIN = 64;
+  const LEN_BASE = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
+  const LEN_EXTRA = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0];
+  const DIST_BASE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577];
+  const DIST_EXTRA = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13];
+  function deflateFixed(input) {
+    const d = input instanceof Uint8Array ? input : Bytes.from(input);
+    const n = d.length, out = [];
+    let buf = 0, cnt = 0;
+    const put = (v, bits) => { buf |= v << cnt; cnt += bits; while (cnt >= 8) { out.push(buf & 0xff); buf >>>= 8; cnt -= 8; } };
+    const rev = (c, bits) => { let r = 0; for (let i = 0; i < bits; i++) { r = (r << 1) | (c & 1); c >>= 1; } return r; };
+    const sym = (s) => {
+      if (s < 144) put(rev(0x30 + s, 8), 8);
+      else if (s < 256) put(rev(0x190 + s - 144, 9), 9);
+      else if (s < 280) put(rev(s - 256, 7), 7);
+      else put(rev(0xc0 + s - 280, 8), 8);
+    };
+    const below = (table, v) => { let k = 0; while (k + 1 < table.length && table[k + 1] <= v) k++; return k; };
+    put(1, 1); put(1, 2); // BFINAL = 1, BTYPE = 01 (fixed Huffman)
+    const MASK = 0x7fff, head = new Int32Array(MASK + 1).fill(-1), prev = new Int32Array(MASK + 1).fill(-1);
+    const hashAt = (p) => ((d[p] << 10) ^ (d[p + 1] << 5) ^ d[p + 2]) & MASK;
+    const insert = (p) => { if (p + 2 < n) { const h = hashAt(p); prev[p & MASK] = head[h]; head[h] = p; } };
+    let i = 0;
+    while (i < n) {
+      let best = 0, dist = 0;
+      if (i + 2 < n) {
+        const max = Math.min(258, n - i);
+        let j = head[hashAt(i)], chain = DEFLATE_CHAIN;
+        while (j >= 0 && i - j <= 32768 && chain-- > 0) {
+          let l = 0;
+          while (l < max && d[j + l] === d[i + l]) l++;
+          if (l > best) { best = l; dist = i - j; if (l === max) break; }
+          const next = prev[j & MASK];
+          if (next >= j) break;
+          j = next;
+        }
+      }
+      if (best >= 3) {
+        const k = below(LEN_BASE, best);
+        sym(257 + k); put(best - LEN_BASE[k], LEN_EXTRA[k]);
+        const c = below(DIST_BASE, dist);
+        put(rev(c, 5), 5); put(dist - DIST_BASE[c], DIST_EXTRA[c]);
+        for (let p = i; p < i + best; p++) insert(p);
+        i += best;
+      } else {
+        sym(d[i]); insert(i); i++;
+      }
+    }
+    sym(256);
+    if (cnt > 0) out.push(buf & 0xff);
+    return Bytes.from(out);
   }
-  function zlibDeflate(data) {
-    const body = deflateStored(data);
+  function zlibDeflateFixed(data) {
+    const body = deflateFixed(data);
     const out = Bytes.alloc(2 + body.length + 4);
     out[0] = 0x78; out[1] = 0x01; // CMF/FLG: deflate, 32K window; (0x78*256+0x01) % 31 === 0
     body.copy(out, 2);
@@ -339,8 +383,8 @@ const CareerRender = (() => {
     return core.buffer;
   }
   const pureZlib = {
-    deflateSync: (data) => zlibDeflate(data),
-    deflateRawSync: (data) => deflateStored(data),
+    deflateSync: (data) => zlibDeflateFixed(data),
+    deflateRawSync: (data) => deflateFixed(data),
     inflateSync: (data, opts) => zlibInflate(data, opts),
     inflateRawSync: (data, opts) => inflateRaw(data, opts),
   };
@@ -479,7 +523,7 @@ const CareerRender = (() => {
     for (const entry of entries) {
       const nameBuf = Bytes.from(entry.name, "utf8");
       const data = Bytes.isBuffer(entry.data) ? entry.data : Bytes.from(String(entry.data), "utf8");
-      const compressed = zlib.deflateRawSync(data);
+      const compressed = deflateFixed(data); // deterministic on every runtime (#673)
       const crc = crc32(data);
       const local = Bytes.alloc(30);
       local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0x0800, 6);
@@ -563,9 +607,12 @@ const CareerRender = (() => {
   }
   const DOCX_CONTENT_TYPES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>`;
   const DOCX_RELS_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>`;
-  // R6: one standard font (Calibri), every size inside 10–12pt
-  // (w:sz is half-points: 22 = 11pt body, 24 = 12pt name).
-  const DOCX_STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="120" w:line="276" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style><w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:before="0" w:after="80"/></w:pPr><w:rPr><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before="280" w:after="100"/><w:outlineLvl w:val="0"/></w:pPr><w:rPr><w:b/><w:caps/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="ListBullet"><w:name w:val="List Bullet"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:after="60"/><w:ind w:left="360" w:hanging="180"/></w:pPr></w:style></w:styles>`;
+  const DOCX_DOC_RELS_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
+  // R6: one standard font, every body size inside 10–12pt. The Word copy prints like the PDF (r-resume-design, 2026-11-10):
+  // Arial (Helvetica's metrics), the PDF's sizes (w:sz is half-points: 22 = 11pt body, 32 = 16pt name) and its exact
+  // leading (13.8 pt body, 20 pt name, 15 pt heading after a 9 pt gap), no paragraph gaps the PDF does not have. The styles part is linked from
+  // word/_rels/document.xml.rels: without that link Word and LibreOffice ignore it (r-resume-design, 2026-11-10).
+  const DOCX_STYLES_XML = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:before="0" w:after="0" w:line="276" w:lineRule="exact"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style><w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:before="0" w:after="0" w:line="400" w:lineRule="exact"/></w:pPr><w:rPr><w:b/><w:sz w:val="32"/><w:szCs w:val="32"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before="180" w:after="0" w:line="300" w:lineRule="exact"/><w:outlineLvl w:val="0"/></w:pPr><w:rPr><w:b/><w:caps/><w:sz w:val="22"/><w:szCs w:val="22"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="ListBullet"><w:name w:val="List Bullet"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:qFormat/><w:pPr><w:spacing w:after="0"/></w:pPr></w:style></w:styles>`;
   function docxDocumentXml(resume) {
     const body = toBlocks(resume).map((b) => {
       if (b.style === "name") return paragraph("Title", b.text);
@@ -585,6 +632,7 @@ const CareerRender = (() => {
     const buffer = zipBuffer([
       { name: "[Content_Types].xml", data: DOCX_CONTENT_TYPES_XML },
       { name: "_rels/.rels", data: DOCX_RELS_XML },
+      { name: "word/_rels/document.xml.rels", data: DOCX_DOC_RELS_XML },
       { name: "word/document.xml", data: docxDocumentXml(resume) },
       { name: "word/styles.xml", data: DOCX_STYLES_XML },
     ]);
@@ -628,8 +676,8 @@ const CareerRender = (() => {
   // ================= PDF layout + writer =================
   const PAGE = { w: 612, h: 792, margin: 54, top: 738, bottom: 56 };
   const FONT_FOR = { name: "F2", heading: "F2", entry: "F2", contact: "F1", links: "F1", bullet: "F1", line: "F1" };
-  const SIZE_FOR = { name: 12, heading: 11, entry: 11, contact: 11, links: 11, bullet: 11, line: 11 };
-  const LEAD_FOR = { name: 16, heading: 15, entry: 13.8, contact: 13.5, links: 13.5, bullet: 13.8, line: 13.8 };
+  const SIZE_FOR = { name: 16, heading: 11, entry: 11, contact: 11, links: 11, bullet: 11, line: 11 };
+  const LEAD_FOR = { name: 20, heading: 15, entry: 13.8, contact: 13.5, links: 13.5, bullet: 13.8, line: 13.8 };
   const GAP_BEFORE = { heading: 9 };
   // Conservative Helvetica advance estimate (em fractions by char class);
   // the wrap budget stays well inside the column so nothing overflows.
@@ -706,7 +754,7 @@ const CareerRender = (() => {
     pages.forEach((lines, i) => {
       objects.push([pageIds[i], Bytes.from(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PAGE.w} ${PAGE.h}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${contentIds[i]} 0 R >>`)]);
       const ops = lines.map((l) => `BT /${l.font} ${l.size} Tf 1 0 0 1 ${l.x} ${l.y} Tm ${pdfLiteral(encodeWinAnsi(l.text, unencodable))} Tj ET`).join("\n");
-      const stream = zlib.deflateSync(Bytes.from(ops, "latin1"));
+      const stream = zlibDeflateFixed(Bytes.from(ops, "latin1")); // deterministic on every runtime (#673)
       const head = Bytes.from(`<< /Length ${stream.length} /Filter /FlateDecode >>\nstream\n`, "latin1");
       objects.push([contentIds[i], Bytes.concat([head, stream, Bytes.from("\nendstream", "latin1")])]);
     });
@@ -963,11 +1011,18 @@ const CareerRender = (() => {
     const pages = (s.match(/\/Type\s*\/Page(?![a-zA-Z])/g) || []).length;
     const runs = extractPdfRuns(buf);
     const sizes = [...new Set(runs.map((r) => r.size).filter(Boolean))].sort((a, b) => a - b);
+    // RELEASE 10 (architect ruling 2026-11-08, R6 scoped): the name, the first line of page one, may be set larger (14-18 pt:
+    // the career-center guides and the eye-tracking study support a name that stands out); body and headings stay 10-12 pt.
+    const first = runs.filter((r) => r.page === 0);
+    const topY = first.length ? Math.max(...first.map((r) => r.y)) : null;
+    const nameRuns = topY === null ? [] : first.filter((r) => Math.abs(r.y - topY) < 0.5);
+    const nameSizes = [...new Set(nameRuns.map((r) => r.size).filter(Boolean))];
+    const bodySizes = [...new Set(runs.filter((r) => !nameRuns.includes(r)).map((r) => r.size).filter(Boolean))].sort((a, b) => a - b);
     // RELEASE 9: an entry's dates set flush right on the entry's own baseline (a run that is only a date or a date range,
     // beside a run that starts at the left margin) are part of that line, not a second column. Anything else past x 100 is.
     const rightDate = (r) => DATE_ONLY_RE.test(String(r.text).trim()) && runs.some((o) => o !== r && o.page === r.page && Math.abs(o.y - r.y) < 0.5 && o.x <= 100);
     const xs = [...new Set(runs.filter((r) => r.x <= 100 || !rightDate(r)).map((r) => Math.round(r.x)))];
-    return { bytes: Bytes.isBuffer(buf) ? buf.length : 0, pages, fonts, fontSizesPt: sizes, images, singleColumn: runs.length > 0 && xs.every((x) => x <= 100), rightAlignedDates: runs.filter((r) => r.x > 100 && rightDate(r)).length, headings: [] };
+    return { bytes: Bytes.isBuffer(buf) ? buf.length : 0, pages, fonts, fontSizesPt: sizes, bodySizesPt: bodySizes, nameSizesPt: nameSizes, images, singleColumn: runs.length > 0 && xs.every((x) => x <= 100), rightAlignedDates: runs.filter((r) => r.x > 100 && rightDate(r)).length, headings: [] };
   }
   // External parser B (poppler) — used when the caller opts in.
   function extractPdfPoppler(buf) {
@@ -1023,12 +1078,28 @@ const CareerRender = (() => {
     const stylesXml = (parts.get("word/styles.xml") || Bytes.alloc(0)).toString("utf8");
     const fonts = [...new Set([...stylesXml.matchAll(/w:ascii="([^"]+)"/g)].map((m) => m[1]))];
     const sizes = [...new Set([...stylesXml.matchAll(/<w:sz w:val="(\d+)"/g)].map((m) => parseInt(m[1], 10) / 2))].sort((a, b) => a - b);
+    // RELEASE 10 (R6 scoped): the style of the document's first paragraph (the name), when no other paragraph uses it, is the
+    // name's size; every other style size is body (10-12 pt).
+    const firstStyle = (/<w:p[\s>][\s\S]*?<w:pStyle w:val="([^"]+)"[\s\S]*?<\/w:p>/.exec(docXml.slice(0, (docXml.indexOf("</w:p>") + 6) || 0)) || [])[1] || null;
+    const styleUses = firstStyle ? (docXml.match(new RegExp(`<w:pStyle w:val="${firstStyle.replace(/[^\w-]/g, "")}"`, "g")) || []).length : 0;
+    const styleSz = (id) => { const m = new RegExp(`<w:style\\b[^>]*w:styleId="${id.replace(/[^\w-]/g, "")}"[^>]*>([\\s\\S]*?)<\\/w:style>`).exec(stylesXml); return m ? [...m[1].matchAll(/<w:sz w:val="(\d+)"/g)].map((x) => parseInt(x[1], 10) / 2) : []; };
+    const nameSizes = firstStyle && styleUses === 1 ? [...new Set(styleSz(firstStyle))] : [];
+    // Only the styles the document uses count (review of #620: Word's built-in template carries Title 26 pt, Heading 14 pt,
+    // footnote 8 pt ... whether or not a paragraph uses them): the default paragraph and character styles, every style a
+    // paragraph or run names, and the styles those are based on.
+    const styleDefs = new Map([...stylesXml.matchAll(/<w:style\b([^>]*)>([\s\S]*?)<\/w:style>/g)].map((m) => [(/w:styleId="([^"]+)"/.exec(m[1]) || [])[1], { attrs: m[1], body: m[2] }]).filter(([id]) => id));
+    const used = new Set([...docXml.matchAll(/<w:(?:pStyle|rStyle|tblStyle) w:val="([^"]+)"/g)].map((m) => m[1]));
+    for (const [id, d] of styleDefs) if (/w:default="(?:1|true)"/.test(d.attrs) && /w:type="(?:paragraph|character)"/.test(d.attrs)) used.add(id);
+    for (const id of [...used]) { let cur = id, n = 0; while (cur && n++ < 20) { used.add(cur); const b = styleDefs.get(cur); cur = b ? ((/<w:basedOn w:val="([^"]+)"/.exec(b.body) || [])[1] || null) : null; } }
+    const otherSizes = [...styleDefs].filter(([id]) => used.has(id) && !(nameSizes.length && id === firstStyle)).flatMap(([, d]) => [...d.body.matchAll(/<w:sz w:val="(\d+)"/g)].map((x) => parseInt(x[1], 10) / 2));
+    const defaults = [...(/<w:docDefaults>[\s\S]*?<\/w:docDefaults>/.exec(stylesXml) || [""])[0].matchAll(/<w:sz w:val="(\d+)"/g)].map((x) => parseInt(x[1], 10) / 2);
+    const bodySizes = [...new Set([...defaults, ...otherSizes])].sort((a, b) => a - b);
     const mediaParts = names.filter((k) => k.startsWith("word/media/")).length;
     const images = mediaParts + (docXml.match(/<w:drawing|<a:blip|<w:pict/g) || []).length;
     const tables = (docXml.match(/<w:tbl[\s>]/g) || []).length;
     const textFrames = (docXml.match(/txbxContent/g) || []).length;
     const headerFooterParts = names.filter((k) => /word\/(header|footer)\d*\.xml/.test(k)).length;
-    return { bytes: Bytes.isBuffer(buf) ? buf.length : 0, fonts, fontSizesPt: sizes, images, tables, textFrames, headerFooterParts, headings: [] };
+    return { bytes: Bytes.isBuffer(buf) ? buf.length : 0, fonts, fontSizesPt: sizes, bodySizesPt: bodySizes, nameSizesPt: nameSizes, images, tables, textFrames, headerFooterParts, headings: [] };
   }
   // External parser B (python-docx) — used when the caller opts in.
   function extractDocxPython(buf) {
@@ -1166,16 +1237,21 @@ const CareerRender = (() => {
         if (!st.singleColumn) add("single_column", "fail", "PDF text does not start in a single column — R1");
         const badFonts = st.fonts.filter((f) => !["Helvetica", "Helvetica-Bold", "Times-Roman", "Times-Bold", "Courier", "Courier-Bold"].includes(f));
         if (badFonts.length) add("fonts", "fail", `non-standard PDF font(s): ${badFonts.join(", ")} — R6`);
-        const badSizes = st.fontSizesPt.filter((s) => s < 10 || s > 12);
+        // R6, scoped (release 10): body and headings 10-12 pt; the name line 10-18 pt.
+        const badSizes = st.bodySizesPt.filter((s) => s < 10 || s > 12);
         if (badSizes.length) add("fonts", "fail", `PDF font size(s) outside 10–12pt: ${badSizes.join(", ")} — R6`);
+        const badName = st.nameSizesPt.filter((s) => s < 10 || s > 18);
+        if (badName.length) add("fonts", "fail", `PDF name size(s) outside 10–18pt: ${badName.join(", ")} — R6`);
         if (o.pageLimit && st.pages > o.pageLimit) add("page_count", "warn", `PDF runs ${st.pages} pages; this role family's limit is ${o.pageLimit} (123 conventions)`);
       } else {
         if (st.images > 0) add("images", "fail", `DOCX contains ${st.images} image/media part(s) — R2`);
         if (st.tables > 0) add("tables", "fail", `DOCX uses ${st.tables} layout table(s) — R1: no layout tables`);
         if (st.textFrames > 0) add("text_frames", "fail", `DOCX contains ${st.textFrames} text frame(s) — R1: no text boxes/frames`);
         if (st.headerFooterParts > 0) add("contact_in_body", "warn", `DOCX has ${st.headerFooterParts} header/footer part(s); contact info belongs in the body — R4`);
-        const badSizes = st.fontSizesPt.filter((s) => s < 10 || s > 12);
+        const badSizes = st.bodySizesPt.filter((s) => s < 10 || s > 12);
         if (badSizes.length) add("fonts", "fail", `DOCX font size(s) outside 10–12pt: ${badSizes.join(", ")} — R6`);
+        const badName = st.nameSizesPt.filter((s) => s < 10 || s > 18);
+        if (badName.length) add("fonts", "fail", `DOCX name size(s) outside 10–18pt: ${badName.join(", ")} — R6`);
       }
       const aLines = extractA(buf);
       let bLines = extractB(buf);
@@ -1225,7 +1301,7 @@ const CareerRender = (() => {
 
   const runtime = { zlib: !!rt.zlib, crypto: !!rt.crypto, Buffer: !!Buffer, codec: rt.zlib && rt.crypto ? "platform" : zlib && crypto ? "vendored" : "none" };
   // RELEASE 9: the byte primitives career_resume_design.ts builds its two layouts with (same codec, same ZIP writer).
-  const primitives = { zipBuffer, unzipParts, encodeWinAnsi, pdfLiteral, escXml, deflate: (b) => zlib.deflateSync(Bytes.from(b)), bytes: (x, enc) => Bytes.from(x, enc), concat: (xs) => Bytes.concat(xs) };
+  const primitives = { zipBuffer, unzipParts, encodeWinAnsi, pdfLiteral, escXml, deflate: (b) => zlibDeflateFixed(Bytes.from(b)), bytes: (x, enc) => Bytes.from(x, enc), concat: (xs) => Bytes.concat(xs) };
   return { primitives, renderPdf, renderDocx, parseCheck, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
   }
   return make(NODE_RUNTIME);

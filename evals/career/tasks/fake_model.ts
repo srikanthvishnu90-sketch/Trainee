@@ -107,12 +107,29 @@ export async function fakeAnthropic(req: Request): Promise<Response> {
   return text(body, "Here is what I can tell you.");
 }
 
+// R9 free sources (2026-11-08): the summary takes one fact from each page in turn (the first fact of every page, then the second,
+// ...), as a model citing every source it was given would, so each free source's fixture (e2e/web.ts) reaches a brief. The thesis,
+// conditions and risks are read from the site the question named (the pages with an "About:" page beside them), else any page.
 export function marketDraft(user: string) {
-  const pages = [...user.matchAll(/^PAGE \d+\nurl: (\S+)\ntitle: ([^\n]*)\n([\s\S]*?)(?=\n\nPAGE \d+\n|(?![\s\S]))/gm)].map((m) => ({ url: m[1], title: m[2].replace(/^About:\s*/, "").trim(), text: m[3] }));
+  const raw = [...user.matchAll(/^PAGE \d+\nurl: (\S+)\ntitle: ([^\n]*)\n([\s\S]*?)(?=\n\nPAGE \d+\n|(?![\s\S]))/gm)].map((m) => ({ url: m[1], raw: m[2], title: m[2].replace(/^About:\s*/, "").trim(), text: m[3] }));
+  const host = (u: string) => { try { return new URL(u).hostname; } catch { return ""; } };
+  const sites = new Set(raw.filter((p) => /^About:/.test(p.raw)).map((p) => host(p.url)));
+  const pages = raw;
   const sentences = (t: string) => t.split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter((x) => /[.!?]$/.test(x) && x.length >= 12);
-  const facts: { text: string; quote: string; url: string }[] = [], readings: { text: string; url: string }[] = [];
-  for (const p of pages) for (const x of sentences(p.text)) (/\d/.test(x) ? facts.push({ text: x, quote: x, url: p.url }) : readings.push({ text: x, url: p.url }));
+  // Within a page, the facts that share the most words with the question come first (a metro wage table's row for the role asked).
+  const qWords = new Set((/QUESTION:\n([^\n]*)/.exec(user)?.[1] ?? "").toLowerCase().match(/[a-z]{4,}/g) ?? []);
+  const overlap = (x: string) => (x.toLowerCase().match(/[a-z]{4,}/g) ?? []).filter((w) => qWords.has(w)).length;
+  const perPage: { text: string; quote: string; url: string }[][] = [], readings: { text: string; url: string }[] = [];
+  for (const p of pages) {
+    const fs: { text: string; quote: string; url: string }[] = [];
+    // A figure, not a form name: "10-K" and "8-K" in a filing's heading are not facts.
+    for (const x of sentences(p.text)) { if (/\d/.test(x.replace(/\b\d+-[A-Z]\b/g, ""))) fs.push({ text: x, quote: x, url: p.url }); else if (!sites.size || sites.has(host(p.url))) readings.push({ text: x, url: p.url }); }
+    perPage.push(fs.map((f, i) => ({ f, i, n: overlap(f.text) })).sort((a, b) => b.n - a.n || a.i - b.i).map((x) => x.f));
+  }
+  const facts: { text: string; quote: string; url: string }[] = [];
+  for (let i = 0; facts.length < 5 && perPage.some((f) => f[i]); i++) for (const f of perPage) if (f[i] && facts.length < 5) facts.push(f[i]);
   const [thesis, ...rest] = readings;
-  return { title: pages[0]?.title ?? "", thesis: thesis?.text ?? "", summary: facts.slice(0, 5), comparison: null,
+  const first = pages.find((p) => !sites.size || sites.has(host(p.url)));
+  return { title: first?.title ?? "", thesis: thesis?.text ?? "", summary: facts, comparison: null,
     conditions: rest.slice(0, 1).map((r) => ({ text: r.text, urls: [r.url] })), risks: rest.slice(1, 3).map((r) => ({ text: r.text, urls: [r.url] })) };
 }

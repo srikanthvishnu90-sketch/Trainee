@@ -45,7 +45,7 @@ const LV = (job) => page("Mock Lever Co - Software Engineer Intern", `
 <label for="comments">Additional information</label><textarea id="comments" name="comments"></textarea>
 <button type="submit" id="btn-submit">Submit application</button></form>`);
 
-const BOT = () => page("Verify you are human", `<h1>Please verify you are human</h1><div class="g-recaptcha" data-sitekey="TEST-NEVER-SOLVED"></div><p>This page has no application form until the check passes.</p>`);
+const BOT = () => page("Verify you are human", `<h1>Please verify you are human</h1><div class="g-recaptcha" data-sitekey="TEST-NEVER-SOLVED" style="width:304px;height:78px"></div><p>This page has no application form until the check passes.</p>`);
 
 function parseMultipart(buf, contentType) {
   const boundary = /boundary=(.+)$/.exec(contentType || "")?.[1];
@@ -82,9 +82,12 @@ function startMockAts({ port = 0 } = {}) {
       if (job.startsWith("redir")) { res.writeHead(302, { location: url.searchParams.get("to") || "/" }); return res.end(); }
       if (job.startsWith("captchaform")) {
         const kind = job.split("-")[1];
-        const extra = { recaptcha: '<div class="g-recaptcha" data-sitekey="TEST-NEVER-SOLVED"></div>',
+        const extra = { recaptcha: '<div class="g-recaptcha" data-sitekey="TEST-NEVER-SOLVED" style="width:304px;height:78px"></div>', // a drawn checkbox (the size a shown widget takes)
           hcaptcha: '<script src="/static/hcaptcha/api.js"></script>', turnstile: '<div class="cf-turnstile" data-sitekey="TEST-NEVER-SOLVED"></div>',
-          text: "<p>Please verify you are human before applying.</p>", iframe: '<iframe src="/static/recaptcha/anchor" title="check"></iframe>' }[kind] || "";
+          text: "<p>Please verify you are human before applying.</p>", iframe: '<iframe src="/static/recaptcha/anchor" title="check"></iframe>',
+          // WO-M: what Greenhouse and Ashby forms carry: an invisible reCAPTCHA (its script, an invisible widget and its badge frame).
+          // Nothing is shown to the person; it is not a check to stop at.
+          invisible: '<script src="/static/recaptcha/api.js"></script><div class="g-recaptcha" data-size="invisible" data-sitekey="TEST-NEVER-SOLVED"></div><iframe src="/static/recaptcha/api2/anchor?k=TEST&size=invisible" title="reCAPTCHA" width="256" height="60"></iframe>' }[kind] || "";
         return send(200, GH(job, { extra }));
       }
       if (job.startsWith("login")) return send(200, page("Sign in", `<h1>Sign in to apply</h1><form method="post" action="/${ats}/${job}/login"><input type="text" name="user"><input type="password" name="pw"><button type="submit">Sign in</button></form>`));

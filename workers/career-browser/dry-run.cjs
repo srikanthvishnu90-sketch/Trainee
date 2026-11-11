@@ -13,7 +13,6 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const { fillForm } = require("./ats-fill.cjs");
 
-const BOT_RE = /verify\s+(?:that\s+)?you(?:\s+are|(?:'|’|&#0*39;|&rsquo;|&apos;)re)\s+(?:a\s+)?(?:human|not a robot)|captcha|turnstile|challenges\.cloudflare\.com|are you a robot|not a robot/i;
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 const sha256 = (b) => crypto.createHash("sha256").update(b).digest("hex");
 
@@ -24,16 +23,33 @@ async function dryRunForm({ browser, id, ats, url, facts = {}, answers = {}, res
   const ctx = await browser.newContext({ viewport: { width: 900, height: 1200 } });
   const page = await ctx.newPage();
   page.setDefaultTimeout(stepTimeoutMs);
+  // x-audit (D-MS-1): no value this run types leaves the browser on any channel, a GET included (an autosave pixel, a
+  // typeahead): every request whose URL or body carries one (4+ characters, raw, URL-encoded or base64) is aborted, an
+  // EventSource is refused and sendBeacon sends nothing.
+  const typed = [...Object.values(facts), ...Object.values(answers)].filter((v) => typeof v === "string" && v.trim().length >= 4).map((v) => v.trim());
+  const encodings = (v) => [v, encodeURIComponent(v), encodeURIComponent(v).replace(/%20/g, "+"), Buffer.from(v).toString("base64").replace(/=+$/, "")];
+  const carriesTyped = (req) => {
+    let text = req.url();
+    try { const b = req.postDataBuffer(); if (b) text += " " + b.toString("utf8"); } catch { /* no body */ }
+    let dec = text;
+    try { dec = decodeURIComponent(text.replace(/\+/g, " ")); } catch { /* not encoded */ }
+    return typed.some((v) => encodings(v).some((f) => text.includes(f)) || dec.includes(v));
+  };
+  await ctx.addInitScript(() => { try { Object.defineProperty(navigator, "sendBeacon", { value: () => false, configurable: true }); } catch { /* read-only */ } });
   await ctx.route("**/*", (route) => {
     const req = route.request(), u = new URL(req.url());
+    if (req.resourceType() === "eventsource" || carriesTyped(req)) { log.requests_blocked.push(`TYPED ${req.method()} ${u.pathname}`.slice(0, 120)); return route.abort("blockedbyclient"); }
     const local = LOOPBACK.has(u.hostname) || /^(data|blob|about):$/.test(u.protocol);
     if (!local || !/^(GET|HEAD)$/.test(req.method())) { log.requests_blocked.push(`${req.method()} ${local ? u.pathname : u.hostname}`.slice(0, 120)); return route.abort("blockedbyclient"); }
     return route.continue();
   });
+  // x-audit (D-MS-1): a WebSocket never passes through the route above, so a form that autosaves over one would send what is
+  // typed. Every socket is closed before it opens, and counted.
+  if (typeof ctx.routeWebSocket === "function") await ctx.routeWebSocket(/.*/, (ws) => { log.requests_blocked.push(`WS ${new URL(ws.url()).pathname}`.slice(0, 120)); ws.close(); });
   try {
     const resp = await page.goto(url, { waitUntil: "domcontentloaded" });
     if (!resp || resp.status() >= 400) { log.reason = `page_load_${resp ? resp.status() : "none"}`; return finish(log, outDir, t0); }
-    log.bot_check = BOT_RE.test(await page.content()) || page.frames().some((f) => BOT_RE.test(f.url()));
+    { const shown = await require("./parallel-apply.cjs").botCheck(page); log.bot_check = !!shown; if (shown) log.bot_check_shown = shown; } // the runner's own shown-check test
     if (await page.$('input[type="password"]')) { log.outcome = "needs_you"; log.reason = "login_required"; return finish(log, outDir, t0); }
     const r = await fillForm(page, { ats, facts, answers, resumePath });
     log.field_map = r.map; log.needs_you = r.needsUser; log.failed_fields = r.failed; log.invalid_after_fill = r.invalid;

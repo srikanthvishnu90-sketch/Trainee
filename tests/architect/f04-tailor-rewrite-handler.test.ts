@@ -107,7 +107,7 @@ Deno.test({ name: "FEATURE 4: tailor my resume for the X role at Y -> bullets re
       console.log("FLAG ON:", r.intent, r.resultStatus, r.reply, JSON.stringify(r.body.artifacts ?? null), JSON.stringify(r.body.meta));
       eq(r.intent, "career_tailor", r.reply);
       eq(calls.length, n + 1, "one model call rewrites the selected bullets");
-      eq(calls.at(-1).model, "claude-haiku-5-5");
+      eq(calls.at(-1).model, "claude-sonnet-5-5");
       const lines = (await pdfOf(pg, r.body, PEOPLE["tok-a"])).join("\n");
       assert(lines.includes("Built a Python and React reporting dashboard used by 200 internal users"), `the faithful rewrite is in the PDF:\n${lines}`);
       assert(!lines.includes("Built a reporting dashboard in React and Python used by 200 internal users"), "the original wording of the rewritten bullet is replaced");
@@ -123,7 +123,7 @@ Deno.test({ name: "FEATURE 4: tailor my resume for the X role at Y -> bullets re
       assert(/Goldman/.test(reasons), reasons);
       assert(/Tableau/.test(reasons), reasons);
       const cost = await pg.sql(`select calls || ':' || array_to_string(models, ',') from public.agent_turn_costs where user_id = '${PEOPLE["tok-a"]}' order by id desc limit 1`);
-      assert(/^1:claude-haiku-5-5/.test(cost.trim()), `metered: ${cost}`);
+      assert(/^1:claude-sonnet-5-5/.test(cost.trim()), `metered: ${cost}`);
     });
 
     await t.step("other phrasings reach the same rewrite", async () => {

@@ -18,7 +18,7 @@ import { CARD_INTENT, type CardStore, cardTurn, cardWaiting, type Prepared } fro
 import { hashApplyPayload } from "../../../supabase/functions/_shared/career_apply_store.ts";
 import { receiptText } from "../../../supabase/functions/_shared/career_apply_receipts.ts";
 import { planConfirmations } from "../../../supabase/functions/_shared/career_apply_confirm.ts";
-import { mapQuestion } from "../../../supabase/functions/_shared/question_map.ts";
+import { answerKey, mapQuestion, salaryExpectationAsked } from "../../../supabase/functions/_shared/question_map.ts";
 import { postingLocation } from "../../apply/fill-coverage.ts";
 
 export const HERE = new URL("./", import.meta.url);
@@ -217,6 +217,9 @@ export function personAnswers(posting: Posting, needs: { label: string }[], tag:
       : /salary|compensation|pay\b|\$/i.test(f.label) ? "95000"
       : "TEST answer";
     saved[normLabel(f.label)] = { value, factId: `${tag}:answered` };
+    // D-053: a salary expectation is answered for this posting and saved under its key (answerKey `job:`), as the product
+    // saves it; the wording key above no longer fills it.
+    if (salaryExpectationAsked(f)) saved[answerKey(f, posting.id)] = { value, factId: `${tag}:answered` };
   }
   return saved;
 }

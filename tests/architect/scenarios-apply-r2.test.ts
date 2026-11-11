@@ -30,7 +30,7 @@
 import assertNode from "node:assert/strict";
 import { CHANGES, type Change, formCase, KILL_POINTS, type KillPoint, labelCases, NOW, outcomeCases, rng, sample, scalePostings, SEED } from "./scenarios/apply-r2-generator.ts";
 import { classifyField, classifyOutcome, COUNTED_STATES, outcomeAfterSend, planBatch, postingKey } from "../../supabase/functions/_shared/career_apply.ts";
-import { mapQuestion, NEVER_BY_TEXT } from "../../supabase/functions/_shared/question_map.ts";
+import { mapQuestion, NEVER_BY_TEXT, salaryExpectationAsked } from "../../supabase/functions/_shared/question_map.ts";
 import { isIdentityField, outcomeAfterClick } from "../../extension/src/apply_core.ts";
 import { type Job, ownQueue, prepare, questionsToStore, runApproved, runLoop } from "../../workers/career-browser/approve-first.ts";
 import { type CloudJob, type CloudQueue, runCloudJob, settle } from "../../workers/career-cloud/worker.ts";
@@ -106,6 +106,13 @@ Deno.test(`labels: ${LABELS.length} questions: identity numbers never asked by t
       if (c.family === "honeypot") check(rep, classifyField(c.label, "text") === "unknown" && mapQuestion({ label: c.label, type: "text", options: [] }).fact === "unknown", "a honeypot maps to a fact", name);
     } else {
       check(rep, !NEVER_BY_TEXT.test(c.label) && !isIdentityField({ label: c.label }), "an ordinary question read as an identity number", name);
+      // architect amendment D-053 (owner, 2026-11-10): a salary expectation is asked per application, never filled from the
+      // salary_expectation fact. Before: "Desired salary" / "Salary expectations" filled with $95,000 like any control label.
+      // After: those rows are not filled, and asked when required.
+      if (salaryExpectationAsked({ label: c.label, type: "text" })) {
+        check(rep, !filled && (!c.required || plan.needs.some((n: any) => n.label === c.label)), "a salary expectation was filled from a fact instead of asked", () => `${name()} -> ${JSON.stringify(filled ?? plan.needs)}`);
+        continue;
+      }
       check(rep, !!filled && Object.values(ALL_FACTS).includes(String(filled.value)), "an ordinary question the person answered was not filled", () => `${name()} -> ${JSON.stringify(plan.needs ?? plan)}`);
     }
   }

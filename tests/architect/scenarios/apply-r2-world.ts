@@ -8,6 +8,7 @@ import { type FakeSite, type Received, type Served, sha256, textDoc, useSite } f
 import { type FieldSpec, type FormCase, THANKS } from "./apply-r2-generator.ts";
 import { runApply } from "../../../scripts/apply.ts";
 import { normLabel } from "../../../supabase/functions/_shared/career_apply.ts";
+import { answerKey, salaryExpectationAsked } from "../../../supabase/functions/_shared/question_map.ts";
 import type { EngineControls, EngineResult, RunEngine } from "../../../workers/career-browser/approve-first.ts";
 
 export interface World {
@@ -25,6 +26,14 @@ export function factsFile(c: FormCase, edit = false) {
   const saved: Record<string, unknown> = {};
   const why = c.fields.find((f) => f.kind === "why");
   if (why && c.why) saved[normLabel(why.label)] = { value: c.why, factId: `F-why-${c.n}`, confirmed: true, user_id: c.person.id, provenance: "owner typed this answer in chat", confirmation_event_id: `evt-why-${c.n}` };
+  // architect amendment D-053 (owner, 2026-11-10): a salary expectation is asked per application and never filled from the
+  // salary_expectation fact. Before: the fact alone filled the form's salary question. After: the person's answer to this
+  // posting's salary question (the same amount) is saved under this posting's key (answerKey job:, the engine's posting key).
+  const posting = (() => { try { const u = new URL(c.posting); return u.origin + u.pathname; } catch { return null; } })();
+  for (const f of c.fields) {
+    if (!posting || !c.person.facts.salary_expectation || !salaryExpectationAsked({ label: f.label, type: f.type })) continue;
+    saved[answerKey({ label: f.label, type: f.type, options: (f.options ?? []).map((o) => ({ label: o.label })) }, posting)] = { value: c.person.facts.salary_expectation, factId: `F-salary-${c.n}`, confirmed: true, user_id: c.person.id, provenance: "owner typed this answer in chat", confirmation_event_id: `evt-salary-${c.n}` };
+  }
   return { user_id: c.person.id, answers, saved };
 }
 // The person's choice for a select or radio, as the form's own option (what the employer should receive).

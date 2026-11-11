@@ -556,7 +556,7 @@
         "kind": "screen",
         "type": "yesno",
         "group": "pay",
-        "note": "the posted range meets their floor: derived from salary_expectation against the posting's range, else asked"
+        "note": "the posted range meets their expectations: asked per application (D-053c); never from salary_expectation, a pay_range_ok fact or another posting's answer"
       },
       "work_history": {
         "kind": "fact",
@@ -1462,9 +1462,10 @@
       /\b(personal data|your data|data from your application)\b/
     ],
     // The application and this employer.
+    // "Referrals" is read as "Referral" is (H2H leftovers 2: the plural mapped to no rule).
     [
       "referral",
-      /\breferr(ed|al|ing)\b/,
+      /\breferr(ed|als?|ing)\b/,
       (q, t) => !/government official|public official|politically exposed|public function|personally know|know (anyone|someone|a current)|acquainted/.test(t)
     ],
     [
@@ -1663,11 +1664,47 @@
     "us_person"
   ]);
   var RELATIVE_PLACE = /\b(country|location)\b.{0,60}\b(this|the) (job|role|position|opportunity|vacancy)\b|\b(country|location)\b.{0,40}\b(you are|you're|you have been|you've been|are you) apply|\b(country|location) (in which|to which|for which|where) you (are )?apply|\bstated location of this role\b|\bin this country\b/i;
+  var BIRTH_DATE = /\b(?:date of birth|birth ?date|day of birth|dob|d\.o\.b\.?|date de naissance|fecha de nacimiento|geburtsdatum)\b/i;
+  var DECLINE_ANSWER = /^\s*(i\s*)?(would\s+|'d\s+)?(prefer not to (say|answer|disclose|specify|identify|self[- ]identify)|rather not (say|answer)|decline( to (answer|state|disclose|specify|self[- ]identify))?|do not wish to (answer|disclose|self[- ]identify)|don'?t wish to (answer|disclose)|choose not to (answer|disclose|identify|self[- ]identify)|do not want to answer|don'?t want to answer)\s*[.!]?\s*$/i;
+  var DECLINE_OPTION = /\bdecline\b|\bprefer not\b|\bdo(?: not|n'?t) wish\b|\bchoose not\b|\bnot to (?:answer|disclose|say|identify|specify|self[- ]identify)\b|\bi do(?: not|n'?t) want to (?:answer|disclose|identify|self)/i;
+  function declineOption(answer, options) {
+    if (!DECLINE_ANSWER.test(String(answer ?? ""))) return null;
+    const d = options.filter((o) => DECLINE_OPTION.test(String(o.label)));
+    return d.length === 1 ? d[0] : null;
+  }
+  var PAY_HISTORY_ASKED = /\b(salary|pay|compensation|wage)s? histor|\b(previous|prior|past|last|former|most recent)\b[^?.]{0,30}\b(salary|pay|compensation|wage|earnings)\b|\b(salary|pay|compensation|wage)\b[^?.]{0,40}\b(previous|prior|past|last|former) (job|position|role|employer)/i;
+  var SALARY_EXPECTATION_ASKED = new RegExp([
+    String.raw`\b(expected|desired|target|ideal|requested|preferred)\s+((annual|annualized|base|total|yearly|hourly|monthly|gross|starting)\s+){0,2}(salary|compensation|pay|ctc|wages?|remuneration|(hourly|daily|day) rate)\b`,
+    String.raw`\bminimum (acceptable |annual |base )?(salary|compensation)\b`,
+    String.raw`\b(salary|compensation|pay|wage|remuneration)\s+(expectations?|requirements?|expected|desired)\b`,
+    String.raw`\b(expectations?|requirements?) (for|regarding|on|around) (the |your )?(salary|compensation|pay)\b`,
+    String.raw`\b(salary|compensation|pay)\b[^?.]{0,30}\b(do you|would you|you) (expect|require|want|seek|desire)\b`,
+    String.raw`\b(salary|compensation|pay)\b[^?.]{0,30}\b(are you|you are|you're) (seeking|looking for|expecting|asking for|targeting)\b`,
+    String.raw`\bprétentions? salariales?|\battentes? salariales?|\b(salaire|rémunération|remuneration)s? (souhaitée?s?|attendue?s?|désirée?s?|demandée?s?)`,
+    String.raw`\bpretensi(ón|on|ones) salarial(es)?\b|\bexpectativas? salarial(es)?\b|\baspiraci(ón|on|ones) salarial(es)?\b|\bsalario (deseado|esperado|pretendido)\b`,
+    String.raw`\bsalarisverwachting(en)?\b|\bgewenst(e)? salaris\b|\bgehalts(vorstellung|wunsch|erwartung)(en)?\b|\bwunschgehalt\b|希望(年収|給与|給料|月収)`
+  ].join("|"), "i");
+  var PAY_RANGE_ASKED = /\b(range|band|rate)\b[^?]{0,60}\b(meets?|align(s|ed)?|in line|within|fits?|match(es)?|acceptable|agreeable|works? for)\b|\b(align(s|ed)?|in line|within|meets?|match(es)?|fits?)\b[^?]{0,30}\b(posted|stated|listed|advertised|above|this|the|our) ((salary|pay|compensation|base) )?(range|band)\b/;
+  function payRangeAsked(q) {
+    if (mapQuestion(q).fact === "pay_range_ok") return true;
+    const t = norm(String(q.label ?? ""));
+    return PAY_RANGE_ASKED.test(t) && !/\b(what|how much|please|if (not|no))\b/.test(t);
+  }
+  function salaryExpectationAsked(q) {
+    const label = String(q.label ?? ""), t = norm(label);
+    if (PAY_HISTORY_ASKED.test(label)) return false;
+    if (payRangeAsked(q)) return false;
+    if (SALARY_EXPECTATION_ASKED.test(t)) return true;
+    const m = mapQuestion(q);
+    if (m.fact === "salary_expectation") return true;
+    return m.fact === "unknown" && /\bsalary\b/.test(t) && !/\b(current|currently|present|currency|paid|earn(ed|ing)?)\b/.test(t);
+  }
   function answerKey(q, jobId, o = {}) {
     const m = mapQuestion(q);
     const words = norm(q.label);
     const job = `job:${h16(`${jobId}
 ${words}`)}`, wording = `label:${h16(words)}`;
+    if (BIRTH_DATE.test(String(q.label ?? "")) || PAY_HISTORY_ASKED.test(String(q.label ?? "")) || salaryExpectationAsked(q) || payRangeAsked(q)) return job;
     if (m.kind === "fact") {
       if (m.fact === "eeo") return job;
       if (o.here) return job;
@@ -2924,7 +2961,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       "eeo"
     ]
   ];
-  var PAY_HISTORY = /\b(salary|pay|compensation|wage)s? histor|\b(previous|prior|past|last|former|most recent)\b[^?.]{0,30}\b(salary|pay|compensation|wage|earnings)\b|\b(salary|pay|compensation|wage)\b[^?.]{0,40}\b(previous|prior|past|last|former) (job|position|role|employer)/i;
+  var PAY_HISTORY = PAY_HISTORY_ASKED;
   var CONTACT = /* @__PURE__ */ new Set([
     "first_name",
     "last_name",
@@ -2976,6 +3013,8 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     const v = value.trim().toLowerCase();
     const exact = options.find((o) => o.label.trim().toLowerCase() === v || o.value.trim().toLowerCase() === v);
     if (exact) return exact.value;
+    const decline = declineOption(value, options);
+    if (decline) return decline.value;
     const yn = yesNo(value);
     if (yn) {
       const o = options.find((x) => yesNo(x.label) === yn);
@@ -3383,6 +3422,13 @@ ${words}`)}`, wording = `label:${h16(words)}`;
       } : null;
     }
     if (TEXT_FACTS.has(m.fact) && !FREE_TEXT.test(f.type)) return null;
+    if (m.fact === "citizenship" && ASKED_YES_NO.test(norm(askedPart(f.label))) && !yesNoOf(a.value)) {
+      const usOnly = /\b(u\.?s\.?a?|united states|american) citizen\b/i.test(f.label) && !/\b(dual|other|another|second|also|any)\b/i.test(f.label);
+      return usOnly && NAMES_US.test(String(a.value)) ? {
+        value: "Yes",
+        factId: a.factId
+      } : null;
+    }
     return {
       value: String(a.value),
       factId: a.factId
@@ -3784,6 +3830,12 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     const rest = digits.slice(code.length).replace(/^[\s)\-.]+/, "").trim();
     return /\d{4,}/.test(rest.replace(/[^\d]/g, "")) ? rest : null;
   }
+  function withoutEarlierAnswers(answers, range = false) {
+    if (!answers?.salary_expectation && !(range && answers?.pay_range_ok)) return answers;
+    const { salary_expectation: _earlier, ...rest } = answers;
+    if (range) delete rest.pay_range_ok;
+    return rest;
+  }
   function planBatch(o) {
     const ready = [];
     const needs = /* @__PURE__ */ new Map();
@@ -3854,21 +3906,25 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         const key = keyed === "full_name" && /^\s*name\s*[*:]?\s*$/i.test(f.label) && p.fields.some((x) => x !== f && classifyField(x.label, x.type) === "last_name") ? "first_name" : keyed;
         const followUp = FOLLOW_UP.test(f.label);
         const here = factStaysHere(f, p.location, o.answers);
+        const range = payRangeAsked(f);
+        const perApp = salaryExpectationAsked(f) || range;
+        const facts = perApp || key === "salary_expectation" ? withoutEarlierAnswers(o.answers, range) : o.answers;
+        const legacy = BIRTH_DATE.test(f.label) || PAY_HISTORY.test(f.label) || perApp || key === "eeo" || mapQuestion(f).fact === "eeo" ? void 0 : o.saved[normLabel(f.label)];
         const own = o.saved[answerKey(f, p.job_id, {
           haveFact: true,
           here
         })] ?? o.saved[answerKey(f, p.job_id, {
           here
-        })] ?? o.saved[normLabel(f.label)];
+        })] ?? legacy;
         const direct = o.saved[answerKey(f, p.job_id, {
           haveFact: true,
           here
         })] ?? o.saved[answerKey(f, p.job_id, {
           here
-        })] ?? (key !== "unknown" && key !== "eeo" && !followUp && !otherCountry(key, placeText(f), p.location, homeInUs(o.answers)) && !beyondFact(key, f) ? o.answers[key] : void 0) ?? o.saved[normLabel(f.label)];
+        })] ?? (key !== "unknown" && key !== "eeo" && !followUp && !otherCountry(key, placeText(f), p.location, homeInUs(o.answers)) && !beyondFact(key, f) ? facts[key] : void 0) ?? legacy;
         let a = direct;
         let value = a ? String(a.value) : null;
-        if (value !== null && f.options.length) value = matchOption(value, f.options) ?? (key !== "unknown" && direct === o.answers[key] ? chooseOption(...placeFact(key, value, o.answers), f.options, f.label) : null);
+        if (value !== null && f.options.length) value = matchOption(value, f.options) ?? (key !== "unknown" && direct === facts[key] ? chooseOption(...placeFact(key, value, o.answers), f.options, f.label) : null);
         if (value === null && !direct) {
           const e = educationEnd(f, p.fields, o.answers);
           if (e) {
@@ -3876,8 +3932,8 @@ ${words}`)}`, wording = `label:${h16(words)}`;
             value = f.options.length ? matchOption(e.value, f.options) : e.value;
           }
         }
-        if (value === null && (!direct || direct === o.answers[key]) && !followUp) {
-          const m = byMeaning(f, p.company, o.answers, places, where, p.location);
+        if (value === null && (!direct || direct === facts[key]) && !followUp) {
+          const m = byMeaning(f, p.company, facts, places, where, p.location);
           if (m) {
             a = m;
             value = m.value;
@@ -4077,14 +4133,14 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     };
     const aiPolicy = aiPolicyStatements(Array.isArray(result?.ai_policy) ? result.ai_policy : []).join("\n").slice(0, 1200);
     for (const q of Array.isArray(result?.questions) ? result.questions : []) {
-      const label = String(q?.label ?? "").replace(/\s+/g, " ").trim().slice(0, 600);
-      if (!label || NEVER_BY_TEXT.test(label)) continue;
+      const full = String(q?.label ?? "").replace(/\s+/g, " ").trim(), label = full.slice(0, 600);
+      if (!label || NEVER_BY_TEXT.test(full)) continue;
       const options = (Array.isArray(q.options) ? q.options : []).map((x) => String(x).slice(0, 300)).slice(0, 60);
       const rawType = String(q.type || "input_text"), row = decodeRowQuestionType(rawType);
       if (rawType.startsWith("row:") && !row) continue;
       const type = rawType.slice(0, 40);
       const shape = {
-        label,
+        label: full,
         type,
         options: options.map((l) => ({
           label: l
@@ -4289,6 +4345,50 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     workdaySignIn: () => workdaySignIn,
     workdaySubmitLine: () => workdaySubmitLine
   });
+
+  // supabase/functions/_shared/career_prepared_card.ts
+  var SENSITIVE = /* @__PURE__ */ new Set([
+    "work_authorization",
+    "sponsorship",
+    "us_person",
+    "citizenship",
+    "gpa",
+    "graduation_date"
+  ]);
+  var UTC_ALIAS = /^(etc\/)?(utc|uct|gmt|zulu|universal|greenwich)([+-]?0)?$/i;
+  function personTz(tz) {
+    if (typeof tz !== "string" || !/^[A-Za-z_]+(\/[A-Za-z_+-]+){0,2}$/.test(tz) || tz.length > 64 || UTC_ALIAS.test(tz)) return null;
+    try {
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: tz
+      });
+      return tz;
+    } catch {
+      return null;
+    }
+  }
+  function reusedSourceSuffix(field, _postingJobId, tz) {
+    const label = String(field?.label ?? "");
+    if (!SENSITIVE.has(mapQuestion({
+      label
+    }).fact) && !salaryExpectationAsked({
+      label
+    })) return "";
+    const id = String(field?.factId ?? ""), src = field?.source && typeof field.source === "object" ? field.source : {};
+    if (!id || /^(approved-local-resume|essay-draft):/.test(id) || String(src.key ?? "").startsWith("job:")) return "";
+    if (id.startsWith("text-answer:")) {
+      if (src.for_posting !== false) return "";
+      const zone = personTz(tz), at = typeof src.at === "string" ? Date.parse(src.at) : NaN;
+      if (zone && Number.isFinite(at)) {
+        return ` (from your answer on ${new Intl.DateTimeFormat("en-US", {
+          timeZone: zone,
+          month: "short",
+          day: "numeric"
+        }).format(new Date(at))})`;
+      }
+    }
+    return " (from your confirmed facts)";
+  }
 
   // supabase/functions/_shared/fact_quarantine.ts
   function quarantinedFact(value) {
@@ -4713,6 +4813,7 @@ ${words}`)}`, wording = `label:${h16(words)}`;
   var AGREEMENT = /^\s*(i|we)\s+(hereby\s+)?(understand|acknowledge|agree|confirm|certify|consent|accept|attest|authori[sz]e|have read|declare)\b/i;
   var staysWithPosting = (row) => {
     if (row.kind === "consent" || row.kind === "attestation" || AGREEMENT.test(row.label)) return true;
+    if (BIRTH_DATE.test(row.label)) return true;
     const m = mapQuestion({
       label: row.label,
       type: row.type,
@@ -4990,9 +5091,13 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     for (const f of o.payload.fields) {
       const ids = draftFactIds(f.factId);
       const from = f.source === "trainee" ? o.before?.includes(f.name) ? " (your answer, answered before the session)" : "" : f.source === "you" ? " (typed by you)" : f.source === "fixed" ? " (set by the employer's page, read-only)" : f.source === "drafted" ? ` (drafted by Trainee from your confirmed facts${ids.length ? ` ${ids.join(", ")}` : ""}; put on the form by you)` : " (set by the page)";
+      const reused = f.source === "trainee" ? reusedSourceSuffix({
+        label: f.label,
+        factId: f.factId
+      }, o.payload.job_id) : "";
       lines.push(`${MARK[mapQuestion({
         label: f.label
-      }).kind] ?? ""}${shortLabel(f.label)}: ${f.value}${from}`);
+      }).kind] ?? ""}${shortLabel(f.label)}: ${f.value}${reused}${from}`);
     }
     lines.push(`Resume: ${o.payload.resume_name ?? "none attached"}`);
     const covers = (o.coverFiles ?? []).filter((c) => !c.attached && !c.pasted);
@@ -5330,7 +5435,13 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         factId: `text-answer:${r.id}`,
         event: `text-answer:${r.id}`,
         provenance: `owner answered this question (text-answer:${r.id})`,
-        authorizes: t === "saved"
+        authorizes: t === "saved",
+        ...typeof r.at === "string" && Number.isFinite(Date.parse(r.at)) ? {
+          at: r.at
+        } : {},
+        ...Array.isArray(r.job_ids) ? {
+          job_ids: r.job_ids.map(String).slice(0, 200)
+        } : {}
       };
       const prior = kept.get(t + "\n" + key);
       if (!prior) kept.set(t + "\n" + key, tf);

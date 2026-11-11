@@ -21,13 +21,13 @@ export interface EvalItem { id: string; persona: string; turns: string[]; must: 
 // it is there so a failure reply (the step-limit text) can be traced to its cause instead of guessed.
 // FEATURE 13: under --brain staged each turn also says where it went (brain, router, or router_fallback after a model
 // failure) and the router class that decided it.
-export type Trace = { stopped: string; steps: number; tools: { name: string; ok: boolean; error?: string }[]; errors?: string[]; route?: string; intent?: string | null; reason?: string }[];
+export type Trace = { stopped: string; steps: number; tools: { name: string; ok: boolean; error?: string }[]; errors?: string[]; route?: string; intent?: string | null; reason?: string; searched?: boolean }[];
 export type Brain = (turns: string[], item?: EvalItem) => Promise<{ replies: string[]; state: unknown; trace?: Trace }>;
 export type Judge = (item: EvalItem, lastReply: string, state: unknown) => Promise<{ pass: boolean; failed: string[]; score: number; note: string }>;
 export interface EvalItemResult { id: string; disagree?: boolean; category?: string; outcome?: unknown; state_check?: { ok: boolean; failed: string[] }; pass: boolean; failed: string[]; score: number; replies: string[]; note: string; state?: unknown; trace?: Trace; judges?: { model: string; pass: boolean; failed: string[]; note: string }[] }
 export interface EvalResult { total: number; passed: number; pass_rate: number; items: EvalItemResult[]; planned: number; stopped: string | null }
 
-import { type BrainName, checkExpect, HARNESS, type ModelFn, outcomeOf } from "./harness.ts";
+import { type BrainName, checkExpect, HARNESS, type ModelFn, outcomeOf, searchStep } from "./harness.ts";
 import { isClaude, JUDGE_A_MAX_TOKENS, JUDGE_A_MODEL, JUDGE_A_SYSTEM, JUDGE_B_MAX_TOKENS, JUDGE_B_MODEL, JUDGE_B_SYSTEM, judgeBPrompt, judgeFingerprint, judgeModelProblem, parseJudgeB } from "./judges.ts";
 import { attribute, attributionLines } from "./attribution.ts";
 import { budgetTargets, claudeSpentUsd, ledgerSpentUsd, openGate, preflight, quoteRun, spendLine } from "./eval_budget.ts";
@@ -185,19 +185,24 @@ export async function makeBrain(o: { name: BrainName; model: ModelFn | null; env
     const turnFn = async (a: any) => {
       const ctx: any = host.createTurnCtx({ userId: a.userId, threadId: a.userId, now, snapshot: a.stores.snapshot ?? null });
       let reply: string;
+      // The situation agent-chat reads before every turn (handler-career.ts): the brain's context, and, as ctx.applyLedger,
+      // the router's read of the person's applications. D-055: the harness gave it to the brain only; the router saw no ledger.
+      const row = await alerts.get(a.userId);
+      const today = new Date(now - 86400000).toISOString();
+      const upcoming = (await interviews.list(a.userId))
+        .map((r) => ({ id: r.key, company: r.company, role: r.role, starts_at: r.starts_at, interview_date: r.date }))
+        .filter((r) => (r.starts_at != null && r.starts_at >= today) || (r.interview_date != null && r.interview_date >= today.slice(0, 10)));
+      const situation = situationFrom({ jobs: [], wanted: (await wants.list(a.userId)) as any[], prepared: [], card: null, questions: [], outreach: [], mail_drafts: [], interviews: upcoming,
+        alerts: row ? { prefs: row.prefs, tz: row.tz } : null, standing: await memory.standing(a.userId),
+        threads: [{ thread_id: a.userId, rows: a.stores?.snapshot?.stores?.trackStore?.rows ?? null }],
+        connections: [], cloud: null, channel: null, last_search: null, unreadable: [] } as any, now);
+      // As the handler: the application rows, the request rows and the tracker; no receipts here (nothing is sent in the harness).
+      ctx.applyLedger = { asOf: situation.as_of, tasks: situation.tasks.filter((t: any) => t.kind === "application" || t.kind === "apply_request" || t.kind === "tracked"),
+        receipts: [], unreadable: situation.unreadable.filter((u: string) => ["jobs", "wanted", "prepared", "threads"].includes(u)) };
       const stagedPick = o.name === "staged"
         ? stagedDecision({ env: { get: (k: string) => k === "CAREER_BRAIN" ? "staged" : o.env.get(k) }, message: a.message, ctx, host, structured: false })
         : null;
       if (o.name === "agent" || stagedPick?.brain) {
-        const row = await alerts.get(a.userId);
-        const today = new Date(now - 86400000).toISOString();
-        const upcoming = (await interviews.list(a.userId))
-          .map((r) => ({ id: r.key, company: r.company, role: r.role, starts_at: r.starts_at, interview_date: r.date }))
-          .filter((r) => (r.starts_at != null && r.starts_at >= today) || (r.interview_date != null && r.interview_date >= today.slice(0, 10)));
-        const situation = situationFrom({ jobs: [], wanted: [], prepared: [], card: null, questions: [], outreach: [], mail_drafts: [], interviews: upcoming,
-          alerts: row ? { prefs: row.prefs, tz: row.tz } : null, standing: await memory.standing(a.userId),
-          threads: [{ thread_id: a.userId, rows: a.stores?.snapshot?.stores?.trackStore?.rows ?? null }],
-          connections: [], cloud: null, channel: null, last_search: null, unreadable: [] } as any, now);
         const errors: string[] = [];
         const model = async (p: any) => { try { return await o.model!(p); } catch (e) { errors.push(String((e as any)?.summary?.() ?? e).slice(0, 300)); throw e; } };
         const t0 = performance.now();
@@ -215,8 +220,12 @@ export async function makeBrain(o: { name: BrainName; model: ModelFn | null; env
         } else if (t.stopped === "model_error") throw new Error("agent model unavailable");
         else reply = t.reply;
       } else {
-        reply = host.runTurn(a.message, ctx).reply;
-        if (stagedPick) trace.push({ stopped: "router", steps: 0, tools: [], route: "router", intent: stagedPick.intent, reason: stagedPick.reason });
+        // D-055: the router's answer goes through the handler's search step (harness.ts searchStep), as agent-chat sends it.
+        const before = ctx.discovery ?? null;
+        const routed = host.runTurn(a.message, ctx);
+        const step = await searchStep({ message: a.message, out: routed, ctx, before, board, userId: a.userId, now });
+        reply = step.reply;
+        if (stagedPick) trace.push({ stopped: "router", steps: 0, tools: [], route: "router", intent: stagedPick.intent, reason: stagedPick.reason, ...(step.searched ? { searched: true } : {}) });
       }
       return { reply, stores: { snapshot: host.extractSnapshot(ctx) } };
     };
@@ -267,8 +276,8 @@ if (import.meta.main) {
   const meter = newMeter(), judgeMeter = newMeter();
   // D-038: the measured commit's committed reply model (agent-chat/release_model.ts) or the request's model (CAREER_REPLY_MODEL).
   const rm: any = await import("../../supabase/functions/agent-chat/release_model.ts").catch(() => null);
-  const brainCfg = rm ? rm.careerModelConfig(Deno.env) : modelConfigFor(Deno.env, get("CAREER_REPLY_MODEL") || "claude-haiku-5-5");
-  const committedModel: string = rm ? rm.CAREER_MODEL_DEFAULT : "claude-haiku-5-5";
+  const brainCfg = rm ? rm.careerModelConfig(Deno.env) : modelConfigFor(Deno.env, get("CAREER_REPLY_MODEL") || "claude-sonnet-5-5");
+  const committedModel: string = rm ? rm.CAREER_MODEL_DEFAULT : "claude-sonnet-5-5";
   if (usesModel && !isClaude(brainCfg.model)) { console.log(`NOT RUN: the brain model ${brainCfg.model} is not a claude- model (Trainee is Claude only); name one with CAREER_REPLY_MODEL.`); Deno.exit(2); }
   const brainLabel = usesModel && brainCfg.model !== committedModel ? `${brainName}:${brainCfg.model}` : brainName;
   const judgeCfg = modelConfigFor(Deno.env, judgeAModel), judge2Cfg = modelConfigFor(Deno.env, judgeBModel);
@@ -301,7 +310,9 @@ if (import.meta.main) {
   else if (setName === "official") setPath = new URL("./messages.json", import.meta.url);
   // D-038: a fresh, unsealed held-out set written by another agent; its results are redacted like the sealed set's.
   else if (setName === "fresh") setPath = new URL("./fresh-heldout.json", import.meta.url);
-  else { console.log(`NOT RUN: --set must be dev, heldout, official or sealed (got ${setName}).`); Deno.exit(2); }
+  // D-054: the one real-model run for release items 7 and 9 (evals/career/d054-items-7-9.json; scored by d054-score.ts).
+  else if (setName === "d054") setPath = new URL("./d054-items-7-9.json", import.meta.url);
+  else { console.log(`NOT RUN: --set must be dev, heldout, official, fresh, d054 or sealed (got ${setName}).`); Deno.exit(2); }
   const set = JSON.parse(await Deno.readTextFile(setPath));
   const only = opt("--only");
   if (only && (setName === "sealed" || setName === "heldout")) { console.log("NOT RUN: --only is refused on the sealed set (a sealed run scores every item)."); Deno.exit(2); }

@@ -8,8 +8,10 @@
 // Provider: providerFor(model) accepts a `claude-` model id and REFUSES every other id with a clear error: it never falls open
 // to another provider (D-038, Claude-only). callModel refuses the same way before anything is reserved or sent, whatever
 // provider a caller put in its config. No secret switches a model on its own: MODEL_PROVIDER, ANTHROPIC_MODEL and
-// ANTHROPIC_ROUTER_MODEL are ignored (Q3, 2026-10-28; SEC11). The default model is CLAUDE_DEFAULT_MODEL (claude-haiku-5-5);
-// the career reply model is agent-chat/release_model.ts. A missing ANTHROPIC_API_KEY fails as "not configured" with the honest
+// ANTHROPIC_ROUTER_MODEL are ignored (Q3, 2026-10-28; SEC11). SONNET ONLY (owner, 2026-11-09, D-046): every model call that
+// produces Trainee's output or decides what Trainee does uses TRAINEE_MODEL (claude-sonnet-5-5); there is no Haiku default or
+// fallback in the product. The career reply model is agent-chat/release_model.ts, the readers' is readerModel below; both
+// resolve to TRAINEE_MODEL. The eval judges (evals/) are not Trainee output and name their own models. A missing ANTHROPIC_API_KEY fails as "not configured" with the honest
 // outage reply. Keys are read from the environment only and never logged.
 import { ModelBudgetBlockedError, ModelUnavailableError, providerError, recordModelUsage, reserveModelCall } from "./model_calls.ts";
 import { type BudgetGate, budgetBlockOfType, budgetPausedByEnv, budgetReply, denoEnvGet, REFUSED_BEFORE_GENERATION, resolveBudgetGate, usageProven, worstCaseMicros } from "./model_budget.ts";
@@ -19,14 +21,18 @@ export type ModelRole = "chat" | "router" | "planner" | "probe";
 export interface ModelConfig { provider: Provider; model: string; apiKey: string; reasoningEffort: string | null }
 type Env = { get(name: string): string | undefined };
 
-// The model for the router, planner, finance chat, health probe and every other caller that does not pick one. Haiku 5.5 takes a
-// forced tool_choice (the router and planner force one); Sonnet 5.5 does not (see toAnthropic).
-export const CLAUDE_DEFAULT_MODEL = "claude-haiku-5-5";
+// D-046 (owner, 2026-11-09: "Make sure sonnet 5.5 is the only model used for trainee's output"): the one model Trainee serves.
+// Sonnet 5.5 rejects a forced tool_choice and thinking disabled (both a 400); toAnthropic sends auto and between_tools instead.
+export const TRAINEE_MODEL = "claude-sonnet-5-5";
+// The models the product may serve: Sonnet 5.5 only. A setting that names any other model is ignored (warnIgnoredOnce).
+export const PRODUCT_MODELS: readonly string[] = [TRAINEE_MODEL];
+// The model for the router, planner, finance chat, health probe and every other caller that does not pick one.
+export const CLAUDE_DEFAULT_MODEL = TRAINEE_MODEL;
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const PROVIDER_NAME: Record<Provider, string> = { anthropic: "Anthropic" };
 
-// A model or provider setting that is set but not honoured (a gpt id left in a secret, a typo, an unkeyed id) falls back to
-// Haiku 5.5. It is said once per boot per variable on the error log, so a stale secret is visible and never silent. The value
+// A model or provider setting that is set but not honoured (a gpt id, a Haiku id, a typo, an unkeyed id) is ignored and
+// Sonnet 5.5 is used; it never falls back to Haiku (D-046). It is said once per boot per variable on the error log, so a stale secret is visible and never silent. The value
 // is cut to 60 characters and never a key.
 const ignoredSeen = new Set<string>();
 export function warnIgnoredOnce(name: string, value: string, why: string): void {
@@ -38,22 +44,30 @@ export const resetIgnoredWarnings = () => ignoredSeen.clear();
 export function modelConfig(env: Env, _role: ModelRole = "chat"): ModelConfig {
   const mp = (env.get("MODEL_PROVIDER") ?? "").trim();
   if (mp && mp.toLowerCase() !== "anthropic") warnIgnoredOnce("MODEL_PROVIDER", mp, "Claude is the only provider");
-  return modelConfigFor(env, CLAUDE_DEFAULT_MODEL);
+  return assertProductModel(modelConfigFor(env, CLAUDE_DEFAULT_MODEL));
 }
 export const providerName = (c: ModelConfig) => PROVIDER_NAME[c.provider];
+// D-046 runtime guard at the product doors (modelConfig here; careerModelConfig, readerModelConfig and readerCall): a config
+// for any model but Sonnet 5.5 is refused, with no exemption and no fallback. The raw callModel / modelConfigFor stay the eval
+// door (the judges name their own Claude models); tests/architect/d046-sonnet-only-no-person-cap.test.ts fails on any product
+// file that reaches them with a model of its own.
+export function assertProductModel(cfg: ModelConfig): ModelConfig {
+  if (PRODUCT_MODELS.includes(String(cfg?.model || ""))) return cfg;
+  throw new ModelUnavailableError(0, "not_product_model", `model "${String(cfg?.model || "").slice(0, 60)}" is not served: Trainee uses ${TRAINEE_MODEL} only (D-046)`);
+}
 // The provider a model name belongs to. Only Claude model ids are served; any other id is refused, never routed elsewhere.
 export function providerFor(model: string): Provider {
   const id = String(model || "");
   if (/^claude-/i.test(id)) return "anthropic";
   throw new ModelUnavailableError(0, "not_configured", `model "${id.slice(0, 60)}" is not served: Trainee uses Claude models only (ids starting "claude-")`);
 }
-// The model the background readers (mail, essay, mock prep, outreach replies) use: CAREER_MODEL when it names a priced Claude
-// model, otherwise `fallback` (Haiku 5.5). Any other value is ignored, never sent anywhere.
-export function readerModel(env: Env, fallback = CLAUDE_DEFAULT_MODEL): string {
+// The model the background readers (mail, essay, mock prep, outreach replies) use: always TRAINEE_MODEL (D-046). CAREER_MODEL
+// may still be set in production (agents never touch production env): a value other than Sonnet 5.5 (a Haiku id, a gpt id, a
+// typo) is ignored with one log line, never sent anywhere.
+export function readerModel(env: Env): string {
   const v = (env.get("CAREER_MODEL") ?? "").trim();
-  if (v && /^claude-/i.test(v) && PRICES[v]) return v;
-  if (v) warnIgnoredOnce("CAREER_MODEL", v, "not a priced Claude model");
-  return fallback;
+  if (v && !PRODUCT_MODELS.includes(v)) warnIgnoredOnce("CAREER_MODEL", v, "Trainee serves claude-sonnet-5-5 only (D-046)");
+  return TRAINEE_MODEL;
 }
 // A complete config for one named model: its provider, that provider's key, and its effort. Callers that pick a model
 // (the career reply model) use this instead of { ...modelConfig(env), model }.
@@ -123,7 +137,8 @@ export function fromAnthropic(body: any): any {
 // 5-minute write rate.
 export const PRICES: Record<string, { input: number; cached: number; cache_write: number; output: number; call_fee?: number; long_context?: { over_tokens: number; multiplier: number }; source: string; checked: "verified" | "third_party" | "unverified"; checked_on: string }> = {
   "claude-haiku-5-5": { input: 0.10, cached: 0.01, cache_write: 0.125, output: 0.50, long_context: { over_tokens: 100000, multiplier: 5 }, source: "https://platform.claude.com/docs/en/about-claude/pricing and https://platform.claude.com/docs/en/models/haiku-5-5/overview ($0.10 in, $0.125 5m write, $0.01 hit, $0.50 out up to 100,000 prompt tokens; 5x over; Active, retirement not sooner than 2027-10-07)", checked: "verified", checked_on: "2026-11-01" },
-  "claude-sonnet-5-5": { input: 2.00, cached: 0.10, cache_write: 2.50, output: 10.00, source: "https://platform.claude.com/docs/en/about-claude/pricing ($2 in, $2.50 5m write, $0.10 hit, $10 out; no long-context surcharge listed)", checked: "verified", checked_on: "2026-11-01" },
+  // Haiku stays priced only for the eval judges (Judge B, evals/); the product never serves it (D-046).
+  "claude-sonnet-5-5": { input: 2.00, cached: 0.10, cache_write: 2.50, output: 10.00, source: "https://platform.claude.com/docs/en/about-claude/pricing ($2 in, $2.50 5m write, $0.10 hit (0.05x base), $10 out; full 1M context at standard price, no long-context surcharge)", checked: "verified", checked_on: "2026-11-01" },
 };
 // Cost of one call in micro-dollars (1e-6 USD), from the tokens the provider reported. null when the model has no price.
 export function costMicros(model: string, usage: any): number | null {
@@ -226,7 +241,7 @@ export async function callModel(cfg: ModelConfig, payload: any, o: CallOptions =
   const got = await gate.reserve(worst, { model: cfg.model, role });
   if (!got.ok) {
     console.error(`[model] budget ${got.reason}${got.detail ? `: ${got.detail}` : ""}`);
-    throw new ModelBudgetBlockedError(got.reason, got.reason === "limit" ? "the global model budget is used up" : got.reason === "paused" ? "the model budget is switched off" : got.reason === "before" ? "the model budget window has not opened" : got.reason === "after" ? "the model budget window has ended and no new budget is approved" : `the model budget could not be checked${got.detail ? `: ${got.detail}` : ""}`);
+    throw new ModelBudgetBlockedError(got.reason, got.reason === "limit" ? (got.day ? `the model budget for ${got.day} is used up` : "the global model budget is used up") : got.reason === "paused" ? "the model budget is switched off" : got.reason === "before" ? "the model budget window has not opened" : got.reason === "after" ? "the model budget window has ended and no new budget is approved" : `the model budget could not be checked${got.detail ? `: ${got.detail}` : ""}`, got.reason === "limit" ? got.day ?? null : null);
   }
   // The total is $70: 80% ($56) warns; a reservation that does not fit (above) is refused and, at $70, the database pauses every
   // call. Eval and test runners also refuse new runs at the total (assertRunMayStart).

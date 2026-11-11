@@ -168,7 +168,7 @@ Deno.test({ name: "real handler: zero-call, one-call and sink-failure turns leav
       const r = await say(handler!.chat("tok-tc2"), ADVICE);
       assert(r.reply.includes(ANSWER), r.reply);
       eq(modelRequests - n, 1, "one model request");
-      eq(await rows(P(2)), [["metered", 1, ["claude-haiku-5-5"]]], "one row, no extra zero row beside it");
+      eq(await rows(P(2)), [["metered", 1, ["claude-sonnet-5-5"]]], "one row, no extra zero row beside it");
       const usd = Number(await pg.sql(`select usd_micros from public.agent_turn_costs where user_id = '${P(2)}'`));
       assert(usd > 0, `priced (${usd})`);
     });

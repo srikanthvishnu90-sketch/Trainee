@@ -29,7 +29,7 @@ import type { DigestStore, InterviewStore } from "./career_brief_store.ts";
 import { buildDigest, DEFAULT_DIGEST, digestDue } from "./career_digest.ts";
 import { type AheadCandidate, aheadCap, aheadCardText, type AheadOutcome, type AheadStore, AHEAD_WINDOW_MS, selectAhead, stopWhy } from "./career_prepare_ahead.ts";
 
-export interface RunStats { users: number; alerts: number; held: number; reports: number; duplicates: number; postings: number; receipts?: number; cards?: number; statuses?: number; followups?: number; briefs?: number; brief_ms_max?: number | null; digests?: number; questions?: number; confirmations?: number; asks?: number; mail_model?: string; mail_model_ask?: string; mail_model_calls?: number; mail_model_decided?: number; mail_model_capped?: number; below_threshold?: number; watch_off?: number; watch_unread?: number; ahead_people?: number; ahead_picked?: number; ahead_ready?: number; ahead_cards?: number; below_fit?: number; alerts_off?: number; fit_scored?: number; intro_reminders?: number; people_sweeps?: number }
+export interface RunStats { users: number; alerts: number; held: number; reports: number; duplicates: number; postings: number; receipts?: number; closeouts?: number; cards?: number; statuses?: number; followups?: number; briefs?: number; brief_ms_max?: number | null; digests?: number; questions?: number; confirmations?: number; asks?: number; mail_model?: string; mail_model_ask?: string; mail_model_calls?: number; mail_model_decided?: number; mail_model_capped?: number; below_threshold?: number; watch_off?: number; watch_unread?: number; ahead_people?: number; ahead_picked?: number; ahead_ready?: number; ahead_cards?: number; below_fit?: number; alerts_off?: number; fit_scored?: number; intro_reminders?: number; people_sweeps?: number }
 // WO-091c: a rail that failed for some people still reports what it did for the rest. The error carries that result as
 // `partial`, so the scheduled run records true counts beside the failure, and the message is unchanged.
 export function partialError<T>(message: string, partial: T): Error & { partial: T } {
@@ -449,6 +449,19 @@ export async function runMail(o: {
       } finally { reserved -= want; }
     }
     const plan = planUpdates(r.mails, apps, o.now, decided);
+    // Item 12 (coordinator ruling 2026-11-10, D-024): an email the rules could not read (unclear) and the model's second pass
+    // did not label is filed, flagged and stageless, as "unclear" under the one sent application it fits, by the confirmation's
+    // strict match (that employer's own authenticated mail). Its status then says the employer wrote and shows the email; it
+    // never guesses what they asked. No application, or more than one: it is filed under none.
+    for (const m of r.mails) {
+      const d = decided.get(m.hash);
+      if (!d || d.kind !== "other" || !d.ambiguous || plan.events.some((e) => e.hash === m.hash) || !Number.isFinite(Date.parse(m.date))) continue;
+      const c = decidedAs(m, "recruiter_reply", "unclear");
+      const hits = candidates(c, apps).filter((a) => a.source === "queue" && a.ref.startsWith("job:") && fromEmployer(c, a, m.from, m.auth));
+      if (hits.length !== 1) continue;
+      plan.events.push({ hash: m.hash, ref: hits[0].ref, kind: "unclear" as StatusEvent["kind"], company: hits[0].company, role: hits[0].role, stage: null, flagged: true,
+        evidence: `unclear: subject "${clip(m.subject, 160)}"`, at: new Date(Date.parse(m.date)).toISOString(), new_app: false });
+    }
     // Google verification (2026-10-26): the Gmail was read before this point; if the person disconnected it meanwhile, nothing
     // read from it is saved or said (checked again before each kind of write below). A store that cannot tell never skips.
     const gone = async () => o.store.stillConnected ? !(await o.store.stillConnected(p.user_id)) : false;

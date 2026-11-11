@@ -83,6 +83,14 @@ export function supabaseInboundStore(admin: any): InboundStore {
       must(r, "queue the reply");
       return true;
     },
+    async recordInterim(userId, key, text, at, channel) {
+      const r = await admin.from("career_outbox").insert({ user_id: userId, key, kind: "interim", text, deliver_at: iso(at), status: "delivered", delivered_at: iso(at), ...(channel ? { channel } : {}) });
+      if (!duplicate(r.error)) must(r, "record the interim line");
+    },
+    async lastReply(userId) {
+      const r = await admin.from("career_outbox").select("text").eq("user_id", userId).eq("kind", "reply").order("id", { ascending: false }).limit(1).maybeSingle();
+      return r.error ? null : (r.data?.text ?? null);
+    },
     async sawInbound(contact, at, o) {
       must(await admin.rpc("channel_inbound_seen", { p_contact: contact, p_at: iso(at), p_alias: o.alias ?? null, p_phone: o.phone ?? null }), "record the message time");
     },

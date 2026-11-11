@@ -12,6 +12,8 @@ import { alertLine, type MemoryStore, type Pipeline, personBlock, type Standing 
 import type { ResearchDeps, ResearchResult } from "../_shared/agent/research/index.ts";
 import { enforceResearchReply, stripUnseenLinks } from "../_shared/agent/research/reply.ts";
 import { enforceMarketReply, type MarketDeps, type MarketResult } from "../_shared/agent/research/market.ts";
+import { type CompanyResult, enforceCompanyReply } from "../_shared/agent/research/company.ts";
+import { enforceFollowupAsk } from "../_shared/followup_draft.ts";
 import { knowledgeFor, type Knowledge } from "../_shared/agent/knowledge/index.ts";
 import { styleBlock } from "../_shared/agent/style.ts";
 import type { AlertStore } from "../_shared/career_alert_store.ts";
@@ -135,7 +137,8 @@ export async function agentTurn(o: {
   const know: Knowledge | null = o.knowledge
     ? knowledgeFor({ profile: o.stores.profile, standing: o.known?.standing, alertsLine: o.known ? alertLine(o.known.alerts) : null, situation: o.known?.situation ?? null, history: o.history, message: o.message })
     : null;
-  const trace: { r?: Extract<ResearchResult, { status: "ok" }>; m?: MarketResult } = {};
+  const trace: { r?: Extract<ResearchResult, { status: "ok" }>; m?: MarketResult | CompanyResult } = {};
+  const ctx: any = { userId: o.userId, threadId: o.threadId, now: o.now, state: o.stores };
   let result = await runAgentTurn({
     system: careerSystemPrompt(localDay(o.now, o.tz)) + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
     history: o.history.slice(-HISTORY_WINDOW).map((m) => ({ role: m.role, content: String(m.content ?? "") })),
@@ -144,8 +147,11 @@ export async function agentTurn(o: {
     said: o.message,
     tools: [...withheld(o.toolPolicy?.withhold, careerTools({ postings: o.postings ?? (async () => []), alerts: o.alerts ?? null, memory: o.memory ?? null, events: o.events ?? null, confirmations: o.confirmations ?? null, tz: o.tz, mail: o.mail ?? null, interviews: o.interviews ?? null, digest: o.digest ?? null, outreach: o.outreach ?? null, verifier: o.verifier ?? null, tailor: o.tailor ?? null, hired: o.hired ?? null, wants: o.wants ?? null, limits: o.limits, posting: o.posting ?? null, situation: o.known?.situation ?? null, linkCheck: o.linkCheck ?? null, conversations: o.conversations ?? null, market: o.market ? { ...o.market, onResult: (r) => { trace.m = r; } } : null, research: o.knowledge && o.research ? { ...o.research, onResult: (r, m) => { if (r.status === "ok") trace.r = r; o.research?.onResult?.(r, m); } } : null })), ...(o.shape && attachAsked(o.message) ? [attachTool()] : []), ...(o.shape && o.files ? [createFileTool(o.files)] : [])],
     model: o.model,
-    ctx: { userId: o.userId, threadId: o.threadId, now: o.now, state: o.stores },
+    ctx,
   });
+  // R10 WO-H fix 14b: a draft that could not be written without settling which document or recipient: the reply is that one
+  // question, and nothing else (no draft, no second question). Without a question in the reply, it stands as written.
+  if (ctx.turn?.askOnly && !ctx.turn?.show && result.reply && result.stopped === "final") result = { ...result, reply: enforceFollowupAsk(result.reply) ?? result.reply };
   // An open career question: the reply is enforced in code, not just asked for in the tool note (research/reply.ts).
   if (trace.r && result.reply && result.stopped === "final") {
     const fixed = await enforceResearchReply({ reply: result.reply, result: trace.r, message: o.message, regenerate: async (problems) => {
@@ -156,7 +162,8 @@ export async function agentTurn(o: {
     result = { ...result, reply: fixed.reply };
   }
   // Market research: the sources or the file link come from code; the model's links and unsourced figures do not reach the person.
-  if (trace.m && !trace.r && result.reply && result.stopped === "final") result = { ...result, reply: enforceMarketReply(result.reply, trace.m) };
+  // R10 WO-H: company research has its own rules (one role question when the role is unknown; a focus keeps that area only).
+  if (trace.m && !trace.r && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? enforceCompanyReply(result.reply, trace.m) : enforceMarketReply(result.reply, trace.m as MarketResult) };
   // Not an open career question: any link the model wrote that the turn never saw is removed (links not on the turn's allow-list).
   else if (!trace.r && result.reply && result.stopped === "final") result = { ...result, reply: stripUnseenLinks(result.reply, [...(result.linksSeen ?? []), ...(result.fileLinks ?? [])]) };
   return know ? { ...result, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : result;

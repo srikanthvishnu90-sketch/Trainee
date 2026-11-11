@@ -17,7 +17,7 @@ const ROOT = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
 const job = (id: string, company: string, state: string, daysAgo: number, extra: Partial<AppRow> = {}): AppRow =>
   ({ id, company, state, reason: null, confirmation_id: null, email_confirmed_at: null, created_at: iso(NOW - daysAgo * DAY), updated_at: iso(NOW - daysAgo * DAY), title: null, ...extra });
 const JOBS: AppRow[] = [
-  job("j-acme", "Acme", "confirmed", 16, { confirmation_id: "ACME-1", title: "Data Analyst" }),
+  job("j-acme", "Acme", "confirmed", 16, { confirmation_id: "ACME-1", title: "Data Analyst", email_confirmed_at: "2026-10-24T15:00:00Z" }),
   job("j-globex", "Globex", "submitted_unconfirmed", 9, { confirmation_id: "CONF-4242" }),
   job("j-initech", "Initech", "unknown_outcome", 20),
   job("j-umbrella", "Umbrella", "queued", 1),
@@ -71,7 +71,9 @@ Deno.test("WO-107/1 the asks: status, inbox and due follow-ups; anything else is
 });
 
 Deno.test("WO-107/2 status: the queue's own wording stands, byte for byte, and the other records follow it, each named", async () => {
-  const base = statusReply("where are my applications?", JOBS, NOW)!;
+  // Architect amendment, D-024 status truth (coordinator ruling 2026-11-10): byte for byte over the rows with their answers joined.
+  const JOINED = standingFrom(rows(), NOW).jobs;
+  const base = statusReply("where are my applications?", JOINED, NOW)!;
   const all = (await turn("where are my applications?"))!;
   eq(all.intent, STANDING_INTENT);
   assert(all.reply.startsWith(base.reply), `the queue's lines first, unchanged:\n${all.reply}`);
@@ -79,7 +81,7 @@ Deno.test("WO-107/2 status: the queue's own wording stands, byte for byte, and t
   assert(/Globex: interview invitation .*Oct 20/.test(all.reply) && /Initech: rejection .*Oct 22/.test(all.reply), `the employer's mail, named: ${all.reply}`);
   assert(!/Acme.*you told Trainee you applied/.test(all.reply), "an employer the queue has is not repeated from the tracker");
   const one = (await turn("did my application to Globex go through?"))!;
-  const oneBase = statusReply("did my application to Globex go through?", JOBS, NOW)!;
+  const oneBase = statusReply("did my application to Globex go through?", JOINED, NOW)!;
   assert(one.reply.startsWith(oneBase.reply), one.reply);
   assert(/Globex's email: interview invitation on Oct 20 \(stage: Interview rounds\)/.test(one.reply), one.reply);
   assert(!/Initech|Vandelay/.test(one.reply), "one employer's answer names no other");

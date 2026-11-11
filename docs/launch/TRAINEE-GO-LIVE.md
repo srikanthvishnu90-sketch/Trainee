@@ -115,6 +115,15 @@ read from the environment or asked on a hidden prompt; none is echoed, written t
 
 Function secrets are project-wide in Supabase: every function sees every one.
 
+**Model and AI spend (D-046, 2026-11-09).** Trainee uses `claude-sonnet-5-5` for everything it writes or decides; it is in
+the deployed code, not a secret. `CAREER_REPLY_MODEL` and `CAREER_MODEL` cannot move it (any other value is ignored and
+logged once); unset them if they are still set. There is no per-person AI cap: `CAREER_MODEL_DAILY_USD` and
+`CAREER_MODEL_DAILY_CALLS` are ignored (logged once while set; `supabase secrets unset CAREER_MODEL_DAILY_USD
+CAREER_MODEL_DAILY_CALLS --project-ref <ref>` removes the log line). The global model budget still stops every call at the $70
+total (`MODEL_BUDGET_TARGET_USD` / `MODEL_BUDGET_HARD_USD`; `MODEL_BUDGET_PAUSED=on` stops all model calls at once), and the
+reply then says the AI budget is used up. Sonnet 5.5 is $2 / $10 per million input / output tokens (about 20 times Haiku
+5.5), so a typical brain turn is estimated at $0.03 to $0.09 before prompt caching.
+
 ## The steps and what each changes
 
 1. **preflight**: tools, inputs, a clean tree at `HEAD` = `--sha`, the commit staged from `git archive <sha>`, the two
@@ -347,5 +356,8 @@ its rows is a separate decision of yours, never part of a rollback.
   write `[functions.agent-chat]` / `verify_jwt = true` to `/tmp/rb/supabase/config.toml`, then
   `cd /tmp/rb && supabase functions deploy agent-chat --project-ref <ref>`.
 - **The router brain back**: `supabase secrets unset CAREER_BRAIN --project-ref <ref>`.
+- **Never `scripts/launch/rollback/agent-chat-v203/`**: that is the Upmore-era agent-chat (frozen archive, D-006). It
+  calls Anthropic directly, outside Trainee's gateway and budget, on a Haiku default, so it is not a Trainee rollback. On
+  a project that holds Trainee's secrets it answers every request with 503 `not_a_trainee_rollback` (D-046).
 - **Remove the new functions** (after unscheduling): `supabase functions delete <name> --project-ref <ref>` for
   `career-ingest`, `career-proactive`, `trainee-deliver`, `trainee-inbound`, `trainee-telegram`, `trainee-whatsapp`.

@@ -21,7 +21,7 @@ export const DEFAULT_REASON = "replies";
 export const reasonKey = (k: unknown): string => (typeof k === "string" && Object.hasOwn(REASONS, k) ? k : DEFAULT_REASON);
 export const connectLine = (reason: string, url: string) => `Connect your email so I can ${REASONS[reasonKey(reason)]}: ${url}`;
 
-export type ConnectKind = "l" | "s"; // l: the link the bot sends (single-use); s: a session (cookie or Mini App)
+export type ConnectKind = "l" | "s" | "d"; // l: the link the bot sends (single-use); s: a session (the HttpOnly cookie); d: the OAuth landing's Disconnect only (ch is the provider)
 export interface ConnectClaims { u: string; w: string; ch: string; k: ConnectKind; j: string; i: number; e: number }
 export type ConnectCheck = { ok: true; claims: ConnectClaims } | { ok: false; why: "malformed" | "bad_signature" | "expired" | "not_configured" };
 
@@ -62,7 +62,7 @@ export async function verifyConnectToken(token: unknown, secret: string | undefi
     if (!Array.isArray(a) || a.length !== 7) return { ok: false, why: "malformed" };
     c = { u: a[0], w: a[1], ch: a[2], k: a[3], j: a[4], i: a[5], e: a[6] };
   } catch { return { ok: false, why: "malformed" }; }
-  if (typeof c.u !== "string" || !c.u || !Object.hasOwn(REASONS, String(c.w)) || !CHANNEL.test(String(c.ch)) || (c.k !== "l" && c.k !== "s") || !/^[0-9a-f]{16}$/.test(String(c.j)) || !Number.isFinite(c.i) || !Number.isFinite(c.e)) return { ok: false, why: "malformed" };
+  if (typeof c.u !== "string" || !c.u || !Object.hasOwn(REASONS, String(c.w)) || !CHANNEL.test(String(c.ch)) || (c.k !== "l" && c.k !== "s" && c.k !== "d") || !/^[0-9a-f]{16}$/.test(String(c.j)) || !Number.isFinite(c.i) || !Number.isFinite(c.e)) return { ok: false, why: "malformed" };
   if (now >= (c.e as number) || (c.i as number) > now + 60_000) return { ok: false, why: "expired" };
   return { ok: true, claims: c as ConnectClaims };
 }
@@ -74,4 +74,54 @@ export async function connectUrlsFor(env: { get(k: string): string | undefined }
   if (!/^https:\/\/[^\s?#]+$/.test(base)) return { webApp: null, url: null };
   const t = await mintConnectToken({ secret: connectSecret(env), userId, reason, channel, now, kind: "l" });
   return { webApp: env.get("TELEGRAM_BOT_TOKEN") ? `${base}?w=${reasonKey(reason)}` : null, url: t ? `${base}?t=${t}` : null };
+}
+
+// Spec C.23 / item 14 (architect amendment, security, 2026-11-10): the page never prints its session. A cookie session's forms carry
+// this page token instead: drawn from the HttpOnly tc_s cookie, so it is useless without that cookie (a scraped, saved or shared page
+// opens nothing), and it ends with the session.
+export async function connectPageToken(session: string, secret: string | undefined): Promise<string | null> {
+  if (!secret || secret.length < SECRET_MIN || !session) return null;
+  return `cp1.${await sign(secret, `connect-page|${session}`)}`;
+}
+export async function samePageToken(given: string, session: string, secret: string | undefined): Promise<boolean> {
+  const want = await connectPageToken(session, secret);
+  return !!want && same(given, want);
+}
+// x-audit (2026-11-10, architect amendment, security: link scanners): the open page a GET of the link draws, before any
+// cookie exists. Its one button posts the link with this token, bound to that one link's id; a different label from
+// connectPageToken, so the two can never stand in for each other.
+export async function connectOpenToken(jti: string, secret: string | undefined): Promise<string | null> {
+  if (!secret || secret.length < SECRET_MIN || !/^[0-9a-f]{16}$/.test(jti)) return null;
+  return `co1.${await sign(secret, `connect-open|${jti}`)}`;
+}
+export async function sameOpenToken(given: string, jti: string, secret: string | undefined): Promise<boolean> {
+  const want = await connectOpenToken(jti, secret);
+  return !!want && same(given, want);
+}
+// A Mini App session has no cookie: its forms carry this token, which names the account and the Telegram user and opens nothing
+// without Telegram's fresh signed data for that same user on the same post (the page's script adds it to every post).
+export interface MiniClaims { u: string; w: string; tg: string; e: number }
+export async function mintMiniToken(o: { secret: string | undefined; userId: string; reason: string; telegramId: string; now: number; ttlMs: number }): Promise<string | null> {
+  if (!o.secret || o.secret.length < SECRET_MIN || !o.userId || !/^\d{1,20}$/.test(o.telegramId)) return null;
+  const body = b64(enc.encode(JSON.stringify([o.userId, reasonKey(o.reason), o.telegramId, o.now + o.ttlMs])));
+  return `cpm.${body}.${await sign(o.secret, `connect-mini|${body}`)}`;
+}
+export async function verifyMiniToken(token: string, secret: string | undefined, now: number): Promise<MiniClaims | null> {
+  if (!secret || secret.length < SECRET_MIN) return null;
+  const m = /^cpm\.([A-Za-z0-9_-]{10,1024})\.([A-Za-z0-9_-]{43})$/.exec(token);
+  if (!m || !same(await sign(secret, `connect-mini|${m[1]}`), m[2])) return null;
+  try {
+    const [u, w, tg, e] = JSON.parse(unb64(m[1]));
+    if (typeof u !== "string" || !u || typeof tg !== "string" || !Number.isFinite(e) || now >= e) return null;
+    return { u, w: reasonKey(w), tg, e };
+  } catch { return null; }
+}
+// What a page opened from a link shows of an address: its first letters only (j***@g***.com). Spec ruling 2026-11-10: a forwarded,
+// unused link is the credential, so whoever opens it sees only this.
+export function maskEmail(email: string | null): string | null {
+  if (!email) return null;
+  const at = email.lastIndexOf("@");
+  if (at < 1) return `${email.slice(0, 1)}***`;
+  const host = email.slice(at + 1), dot = host.lastIndexOf(".");
+  return `${email.slice(0, 1)}***@${host.slice(0, 1)}***${dot > 0 ? host.slice(dot) : ""}`;
 }

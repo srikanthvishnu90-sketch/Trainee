@@ -219,3 +219,6 @@
 616 72bf0e77a1d9997d06a7c62e12856385a4b4e845 independent-review-agent-r9g risk=low note=posted-false-only-pre-click-codes-restart-guarded-rollback-exact-runsh-additive-golive-sorted
 617 1e33585954dd7e56797e3f601a084d559490cdb9 independent-review-agent-r9g risk=low note=judge-still-binds-sent-mail-to-own-approved-hash-yes-batch-same-length-s6-floor-150-all-held-off-by-default
 619 0ba04c3766990c36ea297edffcb7245035189de3 independent-review-agent-r9g risk=low note=one-row-d045-flags-stay-never-on-until-wiring-review-merged-after-616
+622 31dd253614d7cd83a8bb10592e4dfbb39b1261e4 independent-review-agent-r9h risk=low note=pure-backmerge-tree-equals-trunk-release-8-merge-commit-onto-trunk
+613 6e9fa21e15da7772feef2b96c2e71787b3076562 architect-review-r9e-delta risk=medium note=replaces-malformed-reviewer-token-line-one-sequence-per-address-ever-delta-6e9fa21e-reviewed
+624 931c570071e0e06c52a799dfeb288850dea6999e owner-release-approval risk=high note=release-9-composition-of-independently-reviewed-prs-588-to-622-full-96.8-adversarial-162-heldout-98-s3-100

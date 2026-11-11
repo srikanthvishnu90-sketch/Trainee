@@ -249,20 +249,65 @@ const CareerHost = (() => {
     // containment swallowed the ReferenceError — host suite caught it).
     if (!Reply140 || typeof Reply140.ensureNextStep !== "function") return r;
     const specific = typeof r.nextStep === "string" ? r.nextStep : (typeof r.next_step === "string" ? r.next_step : null);
-    r.reply = Reply140.ensureNextStep(r.reply, specific ? { nextStep: specific } : undefined);
+    // D-054 (RESPONSE-RULES R10): the reply ends at the decision; the generic closer is never added (140 endAtDecision).
+    const end = typeof Reply140.endAtDecision === "function" ? Reply140.endAtDecision : Reply140.ensureNextStep;
+    r.reply = end(r.reply, specific ? { nextStep: specific } : undefined);
     return r;
   }
 
   // Exact first-person controls precede broad keyword routing. This patches
   // only Muse's existing profile/watch snapshot fields, never model authority.
   const PAUSE_RE = /^(?:STOP|UNSUBSCRIBE|stop everything|pause all career work)[.!]*$/i;
-  const RESUME_RE = /^(?:resume career work|resume all career work)[.!]*$/i;
+  const RESUME_RE = /^(?:resume career work|resume all career work|resume everything|unpause everything|unpause my account|resume (?:all )?sending)[.!]*$/i;
   const ERASE_RE = /^(?:forget|delete) my career profile[.!]*$/i;
   // True when this turn belongs to the host's account controls: a pause, resume or erase command, or any turn while
   // the account is paused. Any brain (the router or the agent) must hand such a turn to runTurn, before any model call.
+  // R10 F.3 (stop/pause truth, 2026-11-09): a stop is classified here so it is a host turn (no model call, no other edge
+  // handler); the chain below answers it as before, and the edge handler (agent-chat/handler-career.ts with
+  // _shared/career_stop_truth.ts) writes the effect, reads it back and replaces the reply with what it read. Two kinds,
+  // from the account control contract (career:account paused, read by career_user_quiet):
+  //   - account: an explicit account-wide stop ("pause everything", "stop all sending"): the account pause;
+  //   - workflow: a stop of a named workflow ("stop the people list") or a no-new-sends boundary ("don't contact anyone",
+  //     "leave everything unsent"): that workflow is cancelled and unsent drafts are held; the account is NOT paused.
+  // A question about stopping ("should I pause everything?"), a negated stop, and a pause scoped to the job alerts
+  // ("pause everything alert-wise": the alerts' own control, REGRESSION-1255) are none of these.
+  const ACCOUNT_STOP_RE = /\b(?:pause|stop|halt|freeze)\s+(?:everything|it all|all career work|all my career work|all (?:of )?(?:the )?(?:sending|sends|sendings|messages|messaging|emails|activity))\b/i;
+  const STOP_VERB_RE = /\b(?:stop|cancel|halt|pause|scrap|drop|kill)\b/i;
+  const WORKFLOWS = [
+    ["people_list", /\bpeople list\b|\b(?:analysts?|people|contacts?|names|founders|alumni) (?:list|to contact)\b|\blist of (?:people|analysts|contacts|names)\b|\b(?:the|that|this) list\b/i],
+    // Plurals and batches only: one named item ("cancel my application to Acme", "cancel draft 2") keeps its own handler.
+    ["drafts", /\b(?:the|all|any|my|those|these) drafts\b|\bany drafts\b/i],
+    ["application_batch", /\b(?:application|apply) batch\b|\bthe batch\b|\ball (?:my |the )?applications\b/i],
+    ["outreach", /\boutreach\b|\bfollow[- ]?ups\b|\b(?:all|the|my) (?:emails|messages)\b|\bthe queue\b/i],
+  ];
+  const BOUNDARY_RE = /\b(?:don'?t|do not|dont)\s+(?:contact|message|email|reach out to|text)\s+anyone\b|\bleave (?:everything|it all|them|it|all of it) unsent\b|\b(?:don'?t|do not|dont)\s+send\s+(?:anything|any of (?:it|them))\b|\b(?:don'?t|do not|dont)\s+start\s+(?:any(?:thing)?\s+)?new(?:\s+work)?\b/i;
+  const OTHER_ASK_RE = /\b(?:find|search|look for|get me|show me|apply to|draft|write|tell me about|what'?s|what is|how)\b/i;
+  const NEGATED_RE = /\b(?:don'?t|do not|dont|never|no need to)\s+(?:\w+\s+)?$/i;
+  const sentencesOf = (s) => s.split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
+  function stopControlOf(text) {
+    const ask = typeof text === "string" ? text.trim() : "";
+    if (!ask || ask.length > 2000) return null;
+    if (/\balerts?\b|\balert-wise\b|\bwatch(?:es|ing)?\b/i.test(ask)) return null;
+    const sentences = sentencesOf(ask).filter((x) => !/\?\s*$/.test(x));
+    const imperative = (re) => sentences.some((x) => { const m = re.exec(x); return !!m && !NEGATED_RE.test(x.slice(0, m.index)); });
+    if (imperative(ACCOUNT_STOP_RE)) return { kind: "account" };
+    const workflows = [];
+    for (const x of sentences) {
+      const v = STOP_VERB_RE.exec(x);
+      if (!v || NEGATED_RE.test(x.slice(0, v.index))) continue;
+      const rest = x.slice(v.index);
+      for (const [name, re] of WORKFLOWS) if (re.test(rest) && !workflows.includes(name)) workflows.push(name);
+    }
+    const boundary = imperative(BOUNDARY_RE);
+    if (!workflows.length && !(boundary && !OTHER_ASK_RE.test(ask))) return null;
+    // An ask the person says is still unanswered ("I asked for company research, and you haven't answered it").
+    const open = /\bi asked (?:for|about) ([^.,;!?]{3,80}?)(?:,| and)? (?:and )?you (?:haven'?t|have not|didn'?t|did not)\b/i.exec(ask);
+    return { kind: "workflow", workflows, boundary, outstanding: open ? open[1].trim() : null };
+  }
   function isHostControlled(text, ctx) {
     const ask = typeof text === "string" ? text.trim() : "";
     if (PAUSE_RE.test(ask) || RESUME_RE.test(ask) || ERASE_RE.test(ask)) return true;
+    if (stopControlOf(ask)) return true;
     return !!(ctx && ctx.globalPause && ctx.globalPause.set === true && ctx.globalPause.source === "account_control");
   }
   function applyHostControl(text, ctx) {
@@ -274,6 +319,8 @@ const CareerHost = (() => {
       return { intent: "career_paused", reply: "Career work is paused — I won't start anything new, and nothing unfinished will be retried on its own. Text \"resume career work\" when you want me back on it." }; // PRODUCT AUDIT 2026-10-28 (#10): plain words
     }
     if (RESUME_RE.test(ask)) {
+      const wasPaused = !!(ctx.globalPause && ctx.globalPause.set === true && ctx.globalPause.source === "account_control");
+      if (!wasPaused) return { intent: "career_not_paused", reply: "Career work was not paused, so there was nothing to resume. Nothing was changed." };
       ctx.globalPause = { set: false, source: "account_control" }; ctx._hostPatch = { paused: false };
       return { intent: "career_resumed", reply: "The account pause is lifted. Earlier cancelled or uncertain work was not restarted. Ask for the next action explicitly." };
     }
@@ -728,7 +775,7 @@ const CareerHost = (() => {
       return { v: 1, scope: { userId: ctx.userId }, stores, privacy_epoch: epoch, ...(accountBacked ? { account_memory: 1 } : {}) };
     }
 
-    return { createTurnCtx, runTurn, noteTurn, extractSnapshot, isHostControlled, STATE_KEYS: STATE_KEYS.slice() };
+    return { createTurnCtx, runTurn, noteTurn, extractSnapshot, isHostControlled, stopControlOf, STATE_KEYS: STATE_KEYS.slice() };
   }
 
   return { createCareerHost, STATE_KEYS: STATE_KEYS.slice() };

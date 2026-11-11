@@ -26,6 +26,7 @@ type Host = { runTurn(text: string, ctx: any): { intent: string | null; handler:
 import { correctedAsk } from "../_shared/search_correction.ts";
 import { askFor } from "../_shared/career_search_judge.ts";
 import { outreachAsk } from "../_shared/outreach_ask.ts";
+import { researchReplyOn } from "../_shared/research_reply.ts"; // D-047
 export type BrainMode = "router" | "agent" | "staged";
 // The served brain (release_config.ts): the committed PRODUCTION_BRAIN unless CAREER_BRAIN rolls it back to the router.
 // "agent" is never served from here (the full brain stays pinned off in career_brain.ts).
@@ -345,15 +346,65 @@ const RESEARCH_ASK: RegExp[] = [
 ];
 // The person's own papers (resume, cover letter, an application, an offer): a file of THOSE is a document, never research.
 const OWN_PAPERS = /\b(?:my|mine|our|the|that|this|these|those)\s+(?:tailored\s+|updated\s+|latest\s+|new\s+|current\s+|last\s+)?(?:r[eé]sum[eé]s?|cvs?|cover\s+letters?|transcripts?|portfolio|applications?|packets?|offers?|offer\s+letters?|essays?|drafts?|pdfs?|documents?|docs?|references?)\b/i;
+// Review of #589 (2026-11-08): the person's own record, as a whole ("give me an overview of everything I applied to", "a rundown
+// of all the jobs I've applied for", "a report on all my applications"), is an export, never market research.
+const OWN_RECORD = /\b(?:everything|all(?:\s+of)?(?:\s+(?:the|my))?(?:\s+(?:stuff|things|ones|jobs?|roles?|positions?|places|applications?|apps))?|each|every\s+(?:job|role|application|place))\s+(?:that\s+)?(?:i|we)(?:'ve|\s+have|\s+had|'d)?\s+(?:ever\s+)?(?:applied|sent|submitted|saved|done)\b|\b(?:brief|briefing|report|analysis|overview|rundown|write[\s-]?up|summary)\s+(?:on|about|of|for|covering)\s+(?:everything|all\s+(?:of\s+)?(?:my|mine|it))\b/i;
 const RESEARCH_OVER = new Set(["career_document_delivery", "profile_export"]);
+// R10 WO-H fix 14 (spec B.6 continuation 5): "I have a Stripe analyst interview. Tell me what I should know, not a generic company
+// overview." A named company's interview (a capitalized name before "interview") with what to know or ask is company research
+// (research_company), not the router's company-intel recipe. "What should I ask in my interview?" names no company and stays prep.
+const INTERVIEW_AT = /\b(?:have|got|landed)\s+(?:an?\s+)?(.{2,48}?)\s+interviews?\b/i;
+// Item 10 loop: also "... and 5 good questions to ask" and "what they do, what's new".
+const KNOW_OR_ASK = /\bwhat\s+(?:i\s+should|should\s+i|to|i\s+need\s+to|do\s+i\s+need\s+to)\s+(?:know|ask)\b|\b(?:research|brief\s+me\s+on|tell\s+me\s+about)\b|\bquestions?\s+(?:to|i\s+(?:should|could)|should\s+i)\s+ask\b/i;
+// Item 10 loop: "what should I ask the hiring manager at Orbit Freight?", "what should I ask in my Orbit Freight interview?": a question
+// to ask a named company's people is company research. "What should I ask in my interview?" names no company and stays prep.
+const ASK_AT = /\b[Ww]hat\s+(?:should|could|do)\s+[Ii]\s+ask\b[^?!.]{0,60}?\b(?:at|in\s+my|for\s+my|with)\s+(\p{Lu}[\p{L}&.-]+)/u;
+// Review F2 (item 6): also "an interview at/with <Name>" ("I have an interview at Stripe next week, what should I know?") and research
+// about a named company before the interview ("Tell me about Stripe's business before my interview, do not apply").
+const INTERVIEW_WITH = /\binterview(?:s|ing)?\s+(?:at|with)\s+(\p{Lu}[\p{L}&.-]+)/u;
+const ABOUT_BEFORE = /\b(?:tell\s+me\s+about|research|brief\s+me\s+on|what\s+should\s+i\s+know\s+about|look\s+into)\s+(\p{Lu}[\p{L}&.-]+)[^?!]{0,80}?\b(?:before|for|ahead\s+of)\s+(?:my|the|an?|this|that)\s+(?:\w+\s+){0,2}interview/iu;
+export function companyInterviewAsk(message: string): boolean {
+  const m = String(message ?? "").replace(/[\u2019`]/g, "'"), hit = INTERVIEW_AT.exec(m);
+  if (hit && /(?<![\p{L}])\p{Lu}[\p{L}&.-]+/u.test(hit[1]) && KNOW_OR_ASK.test(m)) return true;
+  const w = INTERVIEW_WITH.exec(m);
+  if (w && !/^(?:I|My|The|A|An)$/.test(w[1]) && (KNOW_OR_ASK.test(m) || /\b(?:prepare|prep|ready)\b/i.test(m))) return true;
+  const at = ASK_AT.exec(m);
+  if (at && !/^(?:I|My|The|A|An)$/.test(at[1])) return true;
+  const b = ABOUT_BEFORE.exec(m);
+  return !!b && /^\p{Lu}/u.test(b[1]) && !/^(?:I|My|The|A|An)$/.test(b[1]);
+}
+// R10 WO-H, spec F.2 (owner's production turns, 2026-11-08 6:03-6:04 pm): "What's Stripe like to work for as a data analyst intern?
+// Give me a useful company research answer ... Don't apply or contact anyone." was claimed as a batch apply (career_batch_apply ->
+// BATCH_NOT_STARTED_REPLY), and the correction "I'm not asking for an application batch. I only want company research about
+// Stripe ..." as a people list (outreach_clarification -> "Building the list now: 5 analysts at Stripe"). A research ask that sets
+// a no-action boundary ("don't apply or contact anyone", "I'm not asking for an application batch") is research, whatever the
+// router's keywords say: never applications, introductions or outreach. The boundary is the person's own words.
+const NO_ACTION = /\b(?:don'?t|do\s+not|never|without)\s+(?:apply(?:ing)?|contact(?:ing)?|email(?:ing)?|messag(?:e|ing)|reach(?:ing)?\s+out)\b|\bnot\s+asking\s+(?:you\s+)?(?:for|to)\s+(?:an?\s+)?(?:application|apply|batch|list|introductions?|outreach)/i;
+const COMPANY_RESEARCH = /\b(?:[Cc]ompany|[Ee]mployer)\s+research\b|\bresearch\s+(?:about|on|into)\s+\p{Lu}|\bwhat(?:'s|\s+is)\s+\p{Lu}[\p{L}&.-]*\s+like\s+to\s+work\s+(?:for|at)\b/u;
+export function researchOverAction(message: string): boolean {
+  const m = String(message ?? "").replace(/[\u2019`]/g, "'");
+  return NO_ACTION.test(m) && (COMPANY_RESEARCH.test(m) || researchAsk(m));
+}
+// R10 WO-H fix 14b: "write a thank-you note to Maya after my interview" was read as an application-tracking log (tracking_log),
+// and "draft a follow-up email for my Stripe interview" as a general question. An ask to write, draft or redo a thank-you or
+// follow-up message is the brain's draft_followup, which checks the draft in code before it is shown and sends nothing.
+const FOLLOWUP_DRAFT = /\b(?:write|draft|compose|help\s+me\s+(?:write|with)|redo|rewrite|make|send\s+me)\b[^?.!]{0,40}\b(?:thank[\s-]?you|follow[\s-]?up)\s*(?:note|email|e-mail|message|letter|text)?\b/i;
+export const followupDraftAsk = (message: string) => FOLLOWUP_DRAFT.test(String(message ?? "").replace(/[\u2019`]/g, "'"));
+// Review F2 (item 8, spec B.6 continuation 4): once the thread's last reply was a draft (career_followup_draft), a short change or send
+// ask about it stays with the draft: "Make it warmer.", "A little less formal.", "Send this one.", "Now send it to Maya.", "Maya at
+// the company.", "What would you say?". Without a draft as the last reply nothing changes ("make it warmer" is then the resume's).
+export const FOLLOWUP_INTENT = "career_followup_draft";
+const DRAFT_CONT = /^(?:ok(?:ay)?[,.]?\s+|now\s+|and\s+|please\s+)?(?:(?:make\s+it|a\s+(?:little|bit)|bit|slightly|more|less)\b.{0,30}\b(?:warm(?:er)?|friendl(?:y|ier)|formal|casual|short(?:er)?|long(?:er)?|soft(?:er)?|polite|direct|personal)|(?:send|share|forward)\s+(?:this|it|that)(?:\s+one)?(?:\s+to\s+.{1,40})?|(?:it'?s\s+for|to|for)\s+\p{Lu}[\p{L}'-]+.{0,40}|\p{Lu}[\p{L}'-]+\s+at\s+(?:the\s+)?.{1,40}|what\s+would\s+you\s+(?:say|write)|(?:shorter|warmer|friendlier|less\s+formal|more\s+casual))[.!?]?$/iu;
+export const draftContinuation = (message: string) => DRAFT_CONT.test(String(message ?? "").replace(/[\u2019`]/g, "'").trim());
 export function researchAsk(message: string): boolean {
   const m = String(message ?? "").replace(/[\u2019`]/g, "'");
-  return !OWN_PAPERS.test(m) && (RESEARCH_ASK.some((r) => r.test(m)) || MARKET_ASK.some((r) => r.test(m)));
+  return !OWN_PAPERS.test(m) && !OWN_RECORD.test(m) && (RESEARCH_ASK.some((r) => r.test(m)) || MARKET_ASK.some((r) => r.test(m)) || companyInterviewAsk(m));
 }
 const SEARCH_ASK = /\b(?:find|show|search|look\s+for|get|pull|list)\b[^?.!]{0,40}\b(?:jobs?|roles?|openings?|postings?|internships?|positions?)\b/i;
 const SEARCH_INTENTS = new Set(["career_discovery", "career_internship_discovery", "discovery_dead_board"]);
 export function marketResearchAsk(env: Env, message: string, intent: string | null): boolean {
-  if (env.get("CAREER_RESEARCH_REPLY") !== "on") return false;
+  if (!researchReplyOn(env)) return false;
+  if (OWN_RECORD.test(String(message ?? "").replace(/[\u2019`]/g, "'"))) return false;
   const market = MARKET_ASK.some((r) => r.test(message)), research = researchAsk(message);
   if (!market && !research) return false;
   if (intent && SEARCH_INTENTS.has(intent)) return !SEARCH_ASK.test(message);
@@ -362,6 +413,17 @@ export function marketResearchAsk(env: Env, message: string, intent: string | nu
 }
 // The router's own outreach and networking intents (R9 outreach routing leaves them to their rules).
 const OUTREACH_OWN = /^(?:outreach|career_outreach|career_networking|career_people|networking)/;
+const LIST_FOLLOWUP = /^\s*(?:(?:and|so|but|ok(?:ay)?),?\s+)?why\s+(?:not|didn't\s+you\s+(?:include|list|show|pick))\s+(?:that|the|this)\s+[^?.!]{1,40}?\s*one\b/i;
+const QUESTION_TO_ASK = /\b(?:won't|will\s+not|wouldn't|would\s+not|doesn't|does\s+not|not)\s+sound\s+(?:copied|generic|canned|scripted|rehearsed|memori[sz]ed)\b|\bquestions?\b[^.?!]{0,30}\b(?:to\s+ask|i\s+(?:can|could|should)\s+ask|for\s+(?:them|the\s+(?:interviewer|panel|recruiter|hiring\s+manager)))\b/i;
+const PACKET_ASK = /\b(?:packet|application|answers?)\b/i, RESUME_FILE = /\b(?:r[eé]sum[eé]|cv|pdf|docx)\b/i;
+export function followupOffTask(message: string, intent: string, result: unknown, ctx: Record<string, unknown>): boolean {
+  const m = String(message ?? "").replace(/[\u2019`]/g, "'"), r = (result && typeof result === "object" ? result : {}) as Record<string, any>;
+  const d = (ctx as any)?.discovery;
+  if (intent === "company_intel") return LIST_FOLLOWUP.test(m) && !!(d?.lastParams || (Array.isArray(d?.lastShortlist) && d.lastShortlist.length));
+  if (intent === "prep_brief") return r.question?.kind === "bank_question" && QUESTION_TO_ASK.test(m) && !/\b(?:mock|practi[cs]e|drill|quiz)\b/i.test(m);
+  if (intent === "career_document_delivery") return !(Array.isArray(r.documents) && r.documents.length) && PACKET_ASK.test(m) && !RESUME_FILE.test(m);
+  return false;
+}
 export function stagedDecision(o: { env: Env; message: string; ctx: Record<string, unknown>; host: Host; structured: boolean; clock?: TurnClock }): StagedDecision {
   const clock = o.clock ?? NO_CLOCK;
   const mode = brainMode(o.env);
@@ -384,8 +446,19 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
     intent = UNCLAIMED;
   } else intent = probe.intent ?? null;
   if (!intent) return { brain: false, mode, intent: null, reason: "router_claimed" };
+  // Spec F.2: research with a no-action boundary is the brain's research turn, before any rule that keeps the router's intent.
+  if (researchReplyOn(o.env) && researchOverAction(o.message)) return { brain: true, mode, intent, reason: "company_research" };
   if (routerKept(o.env).has(intent)) return { brain: false, mode, intent, reason: "kept_on_router" };
   if (marketResearchAsk(o.env, o.message, intent)) return { brain: true, mode, intent, reason: "market_research" };
+  if ((!CODE_OWNED_INTENTS.has(intent) || intent === "tracking_log") && followupDraftAsk(o.message)) return { brain: true, mode, intent, reason: "followup_draft" };
+  // H2H fix 4 (docs/architect/INSTINCT-HEAD-TO-HEAD.md C2 t5, C5 t4, C3 t6): a follow-up stays on the thread's current task. The
+  // router read each from a keyword and answered a different ask: "Why not that Stripe one?" after a search got Stripe's
+  // software-engineering file; "Give me one question that will not sound copied" during interview research got a mock-interview
+  // question; "just send me the packet" with no file got "no resume has been tailored". Each is the brain's, which has the thread.
+  if (followupOffTask(o.message, intent, probe.result, o.ctx)) return { brain: true, mode, intent, reason: "followup_on_task", router: routerAnswer(intent, probe) };
+  // A change or send ask about the draft just shown (the handler marks the turn: ctx._draftThread, from the thread's last reply).
+  // "Make it warmer." is career_tailor's resume draft only when no follow-up draft was just shown; other exact payloads stay code's.
+  if ((o.ctx as any)._draftThread === true && draftContinuation(o.message) && (!PAYLOAD_INTENTS.has(intent) || intent === "career_tailor")) return { brain: true, mode, intent, reason: "draft_continuation" };
   if (SEARCH_LIKE.has(intent) && filePageAsk(o.message, askFor(o.message, { intent, resultStatus: probe.result?.resultStatus }, o.ctx.discovery)?.ask)) return { brain: true, mode, intent, reason: "file_page_ask" };
   if (careerSwitcherOpenAsk(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "career_switcher_open_ask" };
   if (openCareerQuestion(o.env, o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "open_career_question" };
@@ -428,6 +501,8 @@ export const CODE_OWNED_INTENTS: ReadonlySet<string> = new Set([
   // applying: the queue, a named posting, the packet, the doorstep, the halt and resume
   "career_batch_apply", "named_role_apply", "named_role_link", "doorstep_submit", "doorstep_fill", "doorstep_status",
   "application_packet", "application_packet_walkthrough", "career_packet", "packet_prep", "packet_refused", "packet_needs_role",
+  // H2H leftovers 3: "send me the packet" with no packet in the thread is code's answer (142 handleDocumentDelivery), never a model's "here is".
+  "career_packet_absent",
   "intent_packet_validity", "queue_halt", "queue_resume", "captcha_handoff", "portal_account", "portal_accounts",
   // watches and alerts
   "career_watch", "career_watch_create", "career_watch_manage", "career_watch_affirm", "career_os_watch",
@@ -437,7 +512,7 @@ export const CODE_OWNED_INTENTS: ReadonlySet<string> = new Set([
   "outreach_draft", "negotiation_draft", "negotiation_revision", "career_tailor", "career_tailor_diff", "tailor_needs_posting", "career_essay",
   "career_document_delivery", "calendar_proposal", "graph_intro", "graph_blurb", "profile_export",
   // writes to the person's record, onboarding, and the account's controls
-  "onboarding", "onboarding_answer", "career_onboarding_needs", "profile_correction", "intent_sensitive_correction", "career_resume_ingest",
+  "onboarding", "onboarding_answer", "career_onboarding_needs", "profile_correction", "intent_sensitive_correction", "sensitive_answer_ask", "career_resume_ingest",
   "career_resume_correction", "career_resume_update", "career_resume_disowned", "career_resume_dispute", "career_goal_record",
   "career_erase_confirm", "career_erase_status", "career_profile_erased", "disconnect", "connect_google", "connect_browser_source",
   "paused_hold", "pause_status", "people_matching_stop", "intent_opt_out", "career_paused", "career_resumed", "career_preference_corrected", "career_os_wins_log",

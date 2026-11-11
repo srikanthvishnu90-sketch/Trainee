@@ -17,7 +17,7 @@ import { applyAllYesEnabled } from "../_shared/apply_all_yes_flag.ts";
 import { FILE_TTL_MS, verifyFileToken, type FileClaims } from "../_shared/file_link.ts";
 import { ACCOUNT_MAX_TRIES, checkSession, CLEAR_LOGIN, CLEAR_SESSION, codeOf, LOGIN_TTL_MS, loginCookie, MAX_CODE_SENDS, MAX_CODE_TRIES, normalizePhone, PAGE_TOKEN, pageTokenOf, sameToken, SESSION_ID, sessionCookie, sha256, startSession, type PhoneAuth, type SessionCheck, type SessionStore } from "../_shared/file_session.ts";
 import { verifyInitData } from "../_shared/telegram_webapp.ts";
-import { BOOT_SCRIPT, cut, FEED_SCRIPT, fullOf, hostOf, renderBootstrap, renderFeed, renderLinkState, renderPhoneLogin, renderPreview, renderText, signOutFoot, snippetOf, statusOf, type AppRow, type Feed, type Row } from "../_shared/file_page.ts";
+import { BOOT_SCRIPT, cut, FEED_SCRIPT, LOGIN_SCRIPT, fullOf, hostOf, renderBootstrap, renderFeed, renderLinkState, renderPhoneLogin, renderPreview, renderText, signedInWords, signOutFoot, snippetOf, statusOf, type AppRow, type Feed, type Row } from "../_shared/file_page.ts";
 import { dayOf, BRAND, esc, layout, postedLine, webUrl } from "../_shared/file_page.ts";
 import { researchOgImage } from "../_shared/research_og.ts";
 import { actOn, bodyHtml, COPY_SCRIPT, KIND_CSS, KIND_LABEL, textOf, type Effects, type FileRecord } from "../_shared/file_kinds.ts";
@@ -37,6 +37,10 @@ import type { ListMeta } from "../_shared/telegram_jobs.ts";
 import type { RateRow } from "../_shared/career_resume_outcomes.ts";
 import { fileShellHtml, firstNameOf, freshnessStamp, madeForLine, stateHtml } from "../_shared/file_design.ts";
 import { byHandUrl, FEED_ROWS, foreignFact, hashTag, isSecretField, NOT_YOURS, logoDomain, postingVerdict, secretFields, secretKey, tapJob, unsendable, type JobDeps, type JobSender, type JobStore, type JobView, type PostingRow, type PreparedRow } from "../_shared/telegram_jobs.ts";
+import { checkedAt, studentWindowOf } from "../_shared/search_shortlist.ts"; // R10 WO-C
+import { submitLabel } from "../_shared/submit_capability.ts"; // R10 owner ruling
+import { familyPage, familyStatePage } from "../_shared/file_family.ts";
+import { type FamilyRecordsByFamily, isServedFamily, SERVED_POSTS, type ServedFamily, servedFamilyFile, servedState } from "../_shared/file_family_serve.ts";
 
 export type { AppRow } from "../_shared/file_page.ts";
 export interface FileStore extends JobStore {
@@ -55,6 +59,7 @@ export interface FileDeps extends Omit<JobDeps, "store"> {
   phone?: PhoneAuth; // the account's confirmed phone and the texted code; absent, phone sign-in is off
   files?: FileService; // the other file kinds (introduction, proof, plan, comparison, draft, brief); an id not found there is a jobs list
   fileEffects?: Effects; // what Introduce really does (send); absent, an approved introduction says it was not sent
+  familyRecords?: FamilyRecordsByFamily; // item 6: each File family's records and posts (file_family_serve.ts FamilyRecords), one per family
   logoFetch?: typeof fetch; // TRAINEE_LOGO_URL=self: how the server fetches an employer's own logo (tests pass a fake; default fetch)
   logoCache?: LogoCache; // and where it keeps them (default: one in-memory cache per instance)
   resumeRates?: (userId: string) => Promise<RateRow[]>; // RELEASE 9: the person's rates by resume version (read only); absent or unreadable, no section
@@ -72,7 +77,7 @@ export interface FileDeps extends Omit<JobDeps, "store"> {
   pending?: (userId: string) => Promise<PendingRow[] | null>;
   // Every phone step (number, code) answers only after this resolves, given how long the step took: deps.ts pads to a floor
   // (file_session.ts PHONE_STEP_FLOOR_MS) so time cannot tell whether the typed number is the account's. Absent: no padding.
-  pace?: (step: "phone_start" | "phone_verify", elapsedMs: number) => Promise<void>;
+  pace?: (step: "phone_start" | "phone_verify" | "phone_resend", elapsedMs: number) => Promise<void>;
   // Work that outlives the answer (the sign-in text): the edge runtime keeps it alive (EdgeRuntime.waitUntil). Absent: it runs on.
   background?: (work: Promise<unknown>) => void;
 }
@@ -125,6 +130,8 @@ const b64 = (h: string) => btoa(h.match(/../g)!.map((x) => String.fromCharCode(p
 // The file kinds' page script: the same in-place form flip as the jobs list, plus the draft's Copy button.
 const KIND_SCRIPT = FEED_SCRIPT + COPY_SCRIPT;
 const scriptHashes = (async () => `'sha256-${b64(await sha(FEED_SCRIPT))}' 'sha256-${b64(await sha(BOOT_SCRIPT))}'`)();
+// The code step's "Signing you in" state (file_page.ts LOGIN_SCRIPT): allowed on the sign-in pages only, added to their policy.
+const loginScriptHash = (async () => `'sha256-${b64(await sha(LOGIN_SCRIPT))}'`)();
 const kindScriptHash = (async () => `'sha256-${b64(await sha(KIND_SCRIPT))}'`)();
 // frame-ancestors: Telegram's own web clients only (the Mini App is a frame inside web.telegram.org); nothing else may frame the page.
 // img-src: the logo provider's origin only (computed from config), never every https host.
@@ -269,6 +276,11 @@ async function loadFeed(claims: FileClaims, token: string, d: FileDeps, notes: R
     const stated = { ...job, location: post?.location ?? "", remote: post ? job.remote : null };
     return { ref, job, logo: rowLogo(job, d.env), snippet: snippetOf(stated, post?.description), full: fullOf(post?.description),
       status, inApps: !!app || away, tag, resume: app || away ? null : resumeOf(prep), byHand, blocked, note: notes[ref], ...metaOf(job, post), posted: postedLine({ posted_at: post?.posted_at ?? job.posted_at, first_seen_at: post?.first_seen_at ?? job.first_seen_at }, d.now(), tz), why: job.reasons.slice(0, 2),
+      // R10 WO-C: the student window in the posting's own words, and whether its application page was re-checked when listed.
+      ...(post ? { window: (() => { const w = studentWindowOf(post.description ?? ""); return w ? `Student window: "${w.replace(/[.]$/, "")}"` : "Student window: not stated in the posting"; })() } : {}),
+      ...(job.checked ? { openLine: job.checked.state === "live" ? `Open: application page checked ${checkedAt(job.checked.at, tz).text}` : "Not re-checked when listed" } : {}),
+      // R10 owner ruling: whether Trainee can submit it itself, as found when it was listed (never guessed here).
+      ...(job.submit ? { submitLine: (() => { const l = submitLabel(job.submit) ?? ""; return l.charAt(0).toUpperCase() + l.slice(1); })() } : {}),
       sends: sd && !sd.secret ? `Sends: ${[resumeOf(prep) ?? "no resume", sd.answers ? "your saved answers" : "", sd.cover ? "a cover note" : ""].filter(Boolean).join(" + ")}` : undefined, send: sd?.items };
   }));
   // The same posting twice on one list (the same link under two ids): only the first row offers Apply.
@@ -329,6 +341,7 @@ export async function handleFile(req: Request, d: FileDeps): Promise<Response> {
 async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
   const html = async (body: string, status = 200, extra: Record<string, string> = {}) => new Response(body, { status, headers: { ...(await headers("text/html; charset=utf-8", d.env)), ...extra } });
   const text = async (body: string, status = 200) => new Response(body, { status, headers: await headers("text/plain; charset=utf-8", d.env) });
+  const loginHtml = async (body: string, status = 200) => html(body, status, { "content-security-policy": (await headers("text/html", d.env))["content-security-policy"].replace("script-src ", `script-src ${await loginScriptHash} `) });
   if (req.method !== "GET" && req.method !== "HEAD" && req.method !== "POST") return html(renderLinkState("Not supported", ["This page only opens and answers."]), 405, { allow: ALLOWED_METHODS });
   // A HEAD (a link scanner, a preview, a prefetch) reads nothing and changes nothing: it never begins a link's sign-in (whose
   // 15 minutes would then run out before the person opens it) and never uses a link up (file page web-security round).
@@ -410,7 +423,7 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
   const locked = () => state("Too many wrong codes", ["This link is locked so nobody can guess the code. " + NEW_LINK], 429);
   // ---- phone sign-in steps (the pending link is in the HttpOnly tf_l cookie)
   if (action === "phone_reset") return phoneStep(action);
-  if (action === "phone_start" || action === "phone_verify") {
+  if (action === "phone_start" || action === "phone_verify" || action === "phone_resend") {
     // Every answer of these two steps is paced to the same floor, whatever the number and whatever was refused, so the time an
     // answer takes cannot say whether the typed number is the account's (only then is a code texted or checked).
     const began = performance.now();
@@ -427,15 +440,17 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
     if (row.done_at) return state("This link was already used", ["A link opens a sign-in once. " + NEW_LINK], 410);
     if (d.now() >= Date.parse(row.expires_at)) return state("This sign-in has expired", ["Codes must be typed within 15 minutes. " + NEW_LINK], 410);
     if (row.tries >= MAX_CODE_TRIES) return locked();
-    const page = (st: "phone" | "code", note?: string, status = 200) => html(renderPhoneLogin({ step: st, note, botUrl: bot }), status);
+    const page = (st: "phone" | "code" | "wrong_code", note?: string, status = 200) => loginHtml(renderPhoneLogin({ step: st, note, botUrl: bot }), status);
     const down = () => state("Couldn't open this just now", ["Nothing was sent. Try again in a minute."], 503);
     if (!d.phone) return state("Phone sign-in isn't switched on yet", ["Nothing was opened and nothing was sent."], 503);
     if (step === "phone_reset") { await sessions!.setPhone(row.jti, null, false).catch(() => {}); return page("phone"); }
+    // "Send a new code": the same step as typing the number again (same count, same cap, same answer for any number).
+    if (step === "phone_resend") { if (!row.phone) return page("phone"); fields.set("phone", row.phone); step = "phone_start"; }
     if (step === "phone_start") {
       const phone = normalizePhone(fields.get("phone"));
       if (!phone) return page("phone", "That doesn't look like a phone number. Include the country code if it's outside the US.", 400);
       // Whether texting is switched on is asked BEFORE the number is compared, so the answer cannot depend on the number.
-      if (d.phone.ready && !(await d.phone.ready().catch(() => false))) return state("Phone sign-in isn't switched on yet", ["No code was sent. Nothing was opened."], 503);
+      if (d.phone.ready && !(await d.phone.ready().catch(() => false))) return state("We could not send the code", ["Phone sign-in isn't switched on yet, so no code was sent. Nothing was opened."], 503);
       const own = await d.phone.accountPhone(row.user_id).catch(() => undefined);
       if (own === undefined) return down();
       const matched = !!own && own === phone;
@@ -474,7 +489,7 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
     const code = codeOf(fields.get("code"));
     const who = code && row.matched ? await d.phone.check(row.phone, code).catch(() => null) : null;
     const still = who === row.user_id ? await d.phone.accountPhone(row.user_id).catch(() => null) : null;
-    if (who !== row.user_id || still !== row.phone) return page("code", "That code didn't work. Check the latest text and try again.", 401);
+    if (who !== row.user_id || still !== row.phone) return page("wrong_code", "Check the latest code or request a new one.", 401);
     const finished = await sessions!.finishLogin(row.jti, d.now()).catch(() => null);
     if (finished === null) return down();
     if (!finished) return state("This link was already used", ["A link opens a sign-in once. " + NEW_LINK], 410);
@@ -527,14 +542,14 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
     } else return notHere();
   } else {
     const list = url.searchParams.get("list") ?? "";
-    if (/^[0-9a-f]{10}$/.test(list)) return html(renderBootstrap(list)); // the Mini App page: reads Telegram's signed data and posts it back
+    if (/^[0-9a-f]{10}$/.test(list)) return html(renderBootstrap(list, bot)); // the Mini App page: reads Telegram's signed data and posts it back
     const cookie = cookieOf(req, "tf_s");
     // A link opened on this browser that is waiting for the phone sign-in.
     const pending = async (): Promise<Response | null> => {
       const lt = await verifyFileToken(cookieOf(req, "tf_l"), secret, d.now());
       if (!lt.ok || lt.claims.k !== "l") return null;
       const row = await sessions.login(lt.claims.j).catch(() => null);
-      if (row && !row.done_at && row.user_id === lt.claims.u && d.now() < Date.parse(row.expires_at)) return row.tries >= MAX_CODE_TRIES ? locked() : html(renderPhoneLogin({ step: row.phone ? "code" : "phone", botUrl: bot }));
+      if (row && !row.done_at && row.user_id === lt.claims.u && d.now() < Date.parse(row.expires_at)) return row.tries >= MAX_CODE_TRIES ? locked() : loginHtml(renderPhoneLogin({ step: row.phone ? "code" : "phone", botUrl: bot }));
       return null;
     };
     if (!SESSION_ID.test(cookie)) return (await pending()) ?? state("This link isn't valid", ["It may be cut short or changed. " + NEW_LINK], 403);
@@ -560,6 +575,7 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
   }
   const claims = { u: s.userId, r: s.list, k: "s", j: "0".repeat(16), i: 0, e: Date.parse(s.row.expires_at) } as FileClaims;
   const { u } = claims;
+  const who = signedInWords(s.row); // only ever from this verified session
   // A logo for a row of THIS signed-in person's list, from that employer's own domain (TRAINEE_LOGO_URL=self). Any other domain: 404.
   if (req.method === "GET" && url.searchParams.has("logo")) return await logoOf(url.searchParams.get("logo") ?? "", claims, d);
   if (d.files) {
@@ -572,7 +588,7 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
   if (d.store.recallListMeta) {
     try { meta = await d.store.recallListMeta(u, claims.r); } catch { return state("Couldn't open this just now", ["Nothing was opened and nothing was sent. Try again in a minute."], 503); }
   }
-  if (meta) return handleResults({ meta, d, claims, token, action, fields, url, req, html, text, state });
+  if (meta) return handleResults({ meta, d, claims, token, action, fields, url, req, html, text, state, who });
   const notes: Record<string, string> = {};
   let top: string | undefined;
 
@@ -621,7 +637,7 @@ async function handleFileOnce(req: Request, d: FileDeps): Promise<Response> {
   const feed = await loadFeed(claims, token, d, notes, top);
   if (!feed) return state("This list is gone", ["It is no longer available. " + NEW_LINK], 404);
   if (req.method === "GET" && fields.get("format") === "text") return text(renderText(feed));
-  return html(renderFeed(feed));
+  return html(renderFeed({ ...feed, signedIn: who }));
 }
 
 // ---------------------------------------------------------------- the other kinds: one shell, the kind's body, the kind's actions
@@ -631,6 +647,36 @@ async function handleKind(o: { g: Exclude<Awaited<ReturnType<FileService["get"]>
   if (o.g.state === "expired") return o.state("This file has expired", [`Files last ${files.ttlHours()} hours so a forwarded link stops working. Ask Trainee in Telegram to make it again.`], 410);
   if (o.g.state === "revoked") return o.state("This file was removed", ["It is no longer available. Ask Trainee in Telegram if you need it again."], 410);
   let rec: FileRecord = o.g.rec, note = "";
+  // Item 6 S0: a File family drawn from its stored view data (file_family_serve.ts). Its page changes nothing: every control is the
+  // chat, this File's export, a source page, or shown off with its reason until its own POST (S1-S6) is served.
+  // A family made with a ref (rec.data.live) loads its view now (d.familyRecords); a stored view is never shown in its place.
+  // A post reaches only that family's own handler, and only for an action it serves (SERVED_POSTS); any other is refused, unchanged.
+  if (rec.data?.from_code === true && isServedFamily(rec.data?.family)) {
+    const fam = rec.data.family as ServedFamily, src = d.familyRecords?.[fam], frec = { id: rec.id, data: rec.data };
+    const botUrl = (d.env.get("TRAINEE_BOT_URL") || "").trim(), bot = /^https:\/\//.test(botUrl) ? botUrl : null;
+    if (action) {
+      const run = SERVED_POSTS[fam].has(action) && rec.data.live === true ? src?.post?.[action] : undefined; // a stored view answers no post
+      if (!run) return o.state("Not done", ["That is not something this page can do yet. Nothing was changed or sent."], 400);
+      const r = await run(u, frec, fields, d.now()).catch(() => ({ ok: false, title: "Not done", lines: ["It could not be checked just now, so nothing was changed or sent. Try again in a minute."] }));
+      return o.state(r.title, r.lines, r.ok ? 200 : 409);
+    }
+    // S3: a GET this live File's records answer with a real file (the F-07 document's bytes). It changes nothing.
+    const getKey = rec.data.live === true && req.method === "GET" ? Object.keys(src?.get ?? {}).find((k) => fields.has(k)) : undefined;
+    if (getKey) {
+      const f = await src!.get![getKey](u, frec, fields).catch(() => null);
+      if (!f) return o.state("Nothing to download", ["That file isn't on record, so nothing was downloaded. Nothing was sent."], 404);
+      return new Response(new Uint8Array(f.bytes), { status: 200, headers: { "content-type": f.mime, "content-disposition": `attachment; filename="${f.filename.replace(/[^A-Za-z0-9._-]+/g, "_")}"`, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+    }
+    const live = rec.data.live === true ? (src ? await src.load(u, frec).catch(() => null) : null) : { view: rec.data.view, asOf: null };
+    const tz = d.timeZone ? await d.timeZone(u).catch(() => null) : null;
+    if (!live) return o.html(familyStatePage({ state: "error", family: fam === "F-14n" ? "F-14" : fam, recover: bot ? { label: "Back to chat", effect: "open", href: bot } : null }, { now: d.now(), tz }), 503);
+    if ("state" in live) return o.html(familyStatePage(servedState(live.state, { bot }), { now: d.now(), tz }));
+    if (fields.get("format") === "json") return new Response(JSON.stringify({ family: fam, title: rec.data.title ?? null, view: live.view ?? null }, null, 2), { status: 200, headers: { ...(await headers("application/json; charset=utf-8", d.env)), "content-disposition": `attachment; filename="trainee-file-${rec.id}.json"` } });
+    // A listed post is drawn as a form only when this File's records answer it: a live (ref) File whose family has that post handler.
+    const answers = (a: string) => rec.data.live === true && typeof src?.post?.[a] === "function";
+    const gets = (k: string) => rec.data.live === true && typeof src?.get?.[k] === "function";
+    return o.html(familyPage(servedFamilyFile(fam, live.view, { bot, token: src?.post && rec.data.live === true ? token : null, answers, gets }), { now: d.now(), tz }));
+  }
   if (action === "remove") {
     const done = await files.revoke(u, rec.id).catch(() => false);
     if (!done) return o.state("Couldn't remove this file", ["It was not removed and its link still works. Try again in a minute."], 500);
@@ -639,6 +685,11 @@ async function handleKind(o: { g: Exclude<Awaited<ReturnType<FileService["get"]>
   if (action) {
     const r = await actOn(rec, action, fields, d.now(), d.fileEffects, (patch) => files.patchState(u, rec.id, patch), () => files.claim(u, rec.id, "choice"));
     if (r.status === 400) return o.state("Not done", [r.note], 400);
+    // The resume File's download: the owner's own PDF, after the sign-in above, never cached.
+    if (r.file) {
+      const bytes = Uint8Array.from(atob(r.file.base64), (c) => c.charCodeAt(0));
+      return new Response(bytes, { status: 200, headers: { "content-type": r.file.mime, "content-disposition": `attachment; filename="${r.file.filename.replace(/[^A-Za-z0-9._-]+/g, "_")}"`, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+    }
     if (r.patch) await files.patchState(u, rec.id, r.patch);
     note = r.note;
     const again = await files.get(u, rec.id);
@@ -649,10 +700,10 @@ async function handleKind(o: { g: Exclude<Awaited<ReturnType<FileService["get"]>
   // The shared File shell (file_design.ts): "Made for <first name> · <date>" above one card; the title, then when its facts were read
   // (the moment this File was built from them; an application proof reads the application record), in the person's zone.
   const [tz, facts] = await Promise.all([d.timeZone ? d.timeZone(u).catch(() => null) : null, d.facts ? d.facts(u).then((f) => f ?? [], () => []) : []]);
-  const stampLabel = rec.kind === "application_proof" ? "Application record read" : "Facts as of";
+  const stampLabel = rec.kind === "application_proof" ? "Application record read" : rec.kind === "application_review" ? "Prepared" : "Facts as of";
   const shots = evidenceOrigin(d.env);
   const body = `${note ? `<p class="note-top" role="status">${esc(note)}</p>` : ""}${bodyHtml(rec, token, { tz, evidenceImage: (x) => !!shots && originOf(x) === shots })}`;
-  const inner = `<div id="root">${fileShellHtml({ made: madeForLine(firstNameOf(facts), rec.created_at, tz), eyebrow: KIND_LABEL[rec.kind], title: String(rec.data?.title ?? KIND_LABEL[rec.kind]), stamp: freshnessStamp(stampLabel, [rec.created_at], { now: d.now(), tz }), body })}`
+  const inner = `<div id="root">${fileShellHtml({ made: madeForLine(firstNameOf(facts), rec.created_at, tz), eyebrow: rec.kind === "application_review" ? null : KIND_LABEL[rec.kind], title: String(rec.data?.title ?? KIND_LABEL[rec.kind]), stamp: freshnessStamp(stampLabel, [rec.created_at], { now: d.now(), tz }), body })}`
     + `<footer class="foot"><p>Expires ${esc(new Date(rec.expires_at).toISOString().slice(0, 16).replace("T", " "))} UTC. <a href="?format=text">Plain text version</a></p><form method="post"><input type="hidden" name="t" value="${esc(token)}"><input type="hidden" name="action" value="remove"><button type="submit" class="lnk">Remove this file</button></form></footer></div>`;
   let csp = (await headers("text/html", d.env))["content-security-policy"].replace("script-src ", `script-src ${await kindScriptHash} `);
   // A confirmation screenshot is shown inline only from the project's own storage origin; img-src then allows exactly that origin.
@@ -702,7 +753,7 @@ const kindOf = (q: OpenQuestion): ThingQuestion["kind"] => {
 };
 const qsFor = (all: OpenQuestion[] | null, r: Row) => (all ?? []).filter((q) => q.job_ids.includes(r.job.job_id));
 
-async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaims; token: string; action: string; fields: URLSearchParams; url: URL; req: Request;
+async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaims; token: string; action: string; fields: URLSearchParams; url: URL; req: Request; who?: string;
   html: (b: string, s?: number, e?: Record<string, string>) => Promise<Response>; text: (b: string, s?: number) => Promise<Response>; state: (t: string, p: string[], s: number) => Promise<Response> }): Promise<Response> {
   const { d, claims, token, action, fields } = o, u = claims.u;
   let meta = o.meta;
@@ -719,7 +770,7 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
   };
   const readQs = async () => d.questions ? await d.questions.open(u, 500).catch(() => null) : null;
   const thingsPage = async (row: Row, qs: OpenQuestion[], o2: { errs?: Record<string, string>; vals?: Record<string, string>; note?: string } = {}) =>
-    o.html(renderThings({ token, ref: row.ref, title: row.job.title, company: row.job.company, link: webUrl(row.job.url), stamp: await stampOf([row]), note: o2.note,
+    o.html(renderThings({ signedIn: o.who, token, ref: row.ref, title: row.job.title, company: row.job.company, link: webUrl(row.job.url), stamp: await stampOf([row]), note: o2.note,
       questions: qs.map((q) => ({ id: q.id, label: q.label, options: q.options, kind: kindOf(q), value: o2.vals?.[q.id], error: o2.errs?.[q.id] })) }));
   // One row, judged now against the page as it is (the same screen the list ran): the row to approve, the questions it still needs
   // answered, or why nothing goes for it. An unprepared row with no questions is queued to be prepared (nothing is sent by that).
@@ -938,7 +989,7 @@ async function handleResults(o: { meta: ListMeta; d: FileDeps; claims: FileClaim
     fl ? `${nMeets} of ${keep.length} list ${fl} or more${nUnlisted ? `; ${nUnlisted} ${nUnlisted === 1 ? "doesn't" : "don't"} list pay` : ""}${nOther ? `; ${nOther} can't be compared` : ""}${nBelow ? `; ${nBelow} now list less` : ""}.` : `${keep.length} ${keep.length === 1 ? "role" : "roles"}, sorted by fit.`,
     `Next: tap Apply on a role. A ready one is sent exactly as its What will be sent shows; one that isn't ready asks for what it needs first. ${coverage(all) === NOTHING_SENT ? "Nothing is sent until you tap Apply." : "Each new send needs your tap on Apply."}`,
   ].filter(Boolean);
-  return o.html(renderResults({ token, title, floor: fl, rows, coverRows: all, countRows: keep, total: all.length, filters, places, top, notes,
+  return o.html(renderResults({ signedIn: o.who, token, title, floor: fl, rows, coverRows: all, countRows: keep, total: all.length, filters, places, top, notes,
     madeFor: `Made for ${meta.name ?? "you"} · ${day}`, stamp: await stampOf(rows), caveat, quick,
     paused: !!meta.paused, updated, dismissed: gone,
     all: applyAllYesEnabled(d.env) && !meta.paused && readySet(keep, new Set()).length >= 2 ? { hash: await setHashOf(readySet(keep, new Set())), size: readySet(keep, new Set()).length, filtered: filters.pay !== "any" || !!filters.where || !!filters.state } : null }));

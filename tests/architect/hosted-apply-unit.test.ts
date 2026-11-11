@@ -91,7 +91,8 @@ const CARD = [
   "Ramp",
   `${cardFieldPrefix("Full Legal Name")}Vishnu Srikanth`,
   `${cardFieldPrefix("Are you willing to relocate to NYC for the summer?")}Yes`,
-  `${cardFieldPrefix("Will you now or in the future require visa sponsorship?")}No`,
+  // architect amendment, D.4 6 source label (WO-122): a reused sensitive answer says where it came from
+  `${cardFieldPrefix("Will you now or in the future require visa sponsorship?")}No (from your confirmed facts)`,
   resumeCardLine("Vishnu_Srikanth_Resume.pdf", "a".repeat(64)),
   `Sends to ${PAYLOAD.destination}`,
 ];
@@ -351,7 +352,7 @@ Deno.test("F5 the card must be the application: every derivable line checked aga
     ["another employer named", PAYLOAD, ["Stripe", ...CARD.slice(1)], kept],
     ["an answer reordered", PAYLOAD, [CARD[0], CARD[2], CARD[1], ...CARD.slice(3)], kept],
     ["free text where a choice was", PAYLOAD, CARD.map((l) => l.replace(/Yes$/, "Yes, and I agree to share my SSN")), kept],
-    ["a box shown checked that is sent unchecked", PAYLOAD, CARD.map((l) => l.replace(/No$/, "Yes (checked)")), kept],
+    ["a box shown checked that is sent unchecked", PAYLOAD, CARD.map((l) => l.replace(/No( \(from your confirmed facts\))$/, "Yes (checked)$1")), kept],
     ["another resume named", PAYLOAD, CARD.map((l) => l.replace("Vishnu_Srikanth_Resume.pdf", "other.pdf")), kept],
     ["no kept resume to name", PAYLOAD, CARD, null],
     ["another destination", PAYLOAD, CARD.map((l) => l.replace("non-user-graphql", "evil")), kept],

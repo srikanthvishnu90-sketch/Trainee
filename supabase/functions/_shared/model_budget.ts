@@ -33,7 +33,7 @@ export const BUDGET_WARN_FRACTION = 0.8;
 export const BUDGET_TIME_ZONE = "America/Chicago";
 
 // before / after: the budget window is not open (nothing is spent early; nothing is spent after it until the owner approves a new budget).
-export type ReserveResult = { ok: true; id: string; warn?: boolean; overTarget?: boolean } | { ok: false; reason: "limit" | "paused" | "unavailable" | "before" | "after"; detail?: string };
+export type ReserveResult = { ok: true; id: string; warn?: boolean; overTarget?: boolean } | { ok: false; reason: "limit" | "paused" | "unavailable" | "before" | "after"; detail?: string; day?: string };
 export interface BudgetMeta { model: string; role: string }
 export interface BudgetGate {
   reserve(micros: number, meta: BudgetMeta): Promise<ReserveResult>;
@@ -52,7 +52,7 @@ export const GLOBAL_LIMIT_REPLY = "Trainee has used up its AI budget, so I didn'
 export const BUDGET_BEFORE_REPLY = "Trainee's AI budget hasn't opened yet, so I didn't use the AI for this reply.";
 export const BUDGET_AFTER_REPLY = "Trainee's AI budget has ended and needs the owner's approval before it can be used again, so I didn't use the AI for this reply.";
 export const BUDGET_PAUSED_REPLY = "Trainee's AI is switched off for a short while, so I didn't use it for this reply. Please try again later.";
-export const BUDGET_UNAVAILABLE_REPLY = "I couldn't check today's AI budget, so I didn't use the AI for this reply. Please try again in a few minutes.";
+export const BUDGET_UNAVAILABLE_REPLY = "I didn't use the AI for this reply because I couldn't check today's AI budget. Please try again in a few minutes.";
 export type BudgetBlock = "limit" | "paused" | "unavailable" | "before" | "after";
 export const BUDGET_ERROR_TYPE: Record<BudgetBlock, string> = { limit: "global_daily_limit", paused: "budget_paused", unavailable: "budget_unavailable", before: "budget_not_open", after: "budget_ended" };
 export const budgetReply = (b: BudgetBlock) => b === "limit" ? GLOBAL_LIMIT_REPLY : b === "paused" ? BUDGET_PAUSED_REPLY : b === "before" ? BUDGET_BEFORE_REPLY : b === "after" ? BUDGET_AFTER_REPLY : BUDGET_UNAVAILABLE_REPLY;
@@ -100,7 +100,8 @@ export function rpcBudgetGate(rpc: Rpc, limits: BudgetLimits = { target: DEFAULT
         if (r.error) return { ok: false, reason: "unavailable", detail: String(r.error.message ?? r.error).slice(0, 200) };
         const d = r.data;
         if (d && d.ok === true && isUuid(d.id)) return { ok: true, id: d.id, ...(d.warn === true ? { warn: true } : {}), ...(d.over_target === true ? { overTarget: true } : {}) };
-        if (d && d.ok === false && d.state === "limit") return { ok: false, reason: "limit" };
+        // R10 WO-D: a refusal that names a day is that budget day's own cap (its window is open); the $70 total names none.
+        if (d && d.ok === false && d.state === "limit") return { ok: false, reason: "limit", ...(typeof d.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d.day) ? { day: d.day } : {}) };
         if (d && d.ok === false && d.state === "paused") return { ok: false, reason: "paused" };
         if (d && d.ok === false && d.state === "before_window") return { ok: false, reason: "before" };
         if (d && d.ok === false && (d.state === "after_window" || d.state === "no_budget")) return { ok: false, reason: "after" };
@@ -232,7 +233,7 @@ export function usageProven(provider: string, raw: any): boolean {
 
 // An eval or test runner calls this BEFORE starting any new run (owner, 2026-11-02): at or over the $70 total the run does not
 // start; and when the run's quoted worst case is given (micros) the ledger must be able to take it right now (it is reserved,
-// then released: a proven no-call). Production serving does not call it (its own per-person daily gate stays); every
+// then released: a proven no-call). Production serving does not call it (each of its calls reserves in callModel; no per-person gate, D-046); every
 // reservation still counts in the ledger. An unreadable ledger also refuses (fail closed). Throws ModelBudgetBlockedError
 // (message "NOT RUN: ..."); returns the status when the run may start.
 const notRun = (block: "limit" | "unavailable", detail: string) => { const e = new ModelBudgetBlockedError(block, detail); e.message = `NOT RUN: ${e.message}`; return e; };

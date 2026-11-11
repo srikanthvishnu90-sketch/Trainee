@@ -125,11 +125,14 @@ serve(async (req) => {
       const doneBase = (ok: boolean) =>
         purpose === "career" ? careerLanding(ok) : Response.redirect(`${APP_URL}/#you?gmail=${ok ? "connected" : "error"}`, 302);
       // The connect page's calm done state ("Connected as <email>", a way back to Telegram) once the owner has switched that page on.
-      let landEmail: string | null = null, denied = false;
-      const done = (ok: boolean) => (purpose === "career" ? connectLanding(Deno.env, { provider: "google", ok, denied, email: landEmail }) : null) ?? doneBase(ok);
+      // R10 fix 11: why (a different account, a consent that came back with an error other than "declined"), and the person and the
+      // granted scopes only once the grant is stored, so only a real success carries the page's Disconnect.
+      let landEmail: string | null = null, denied = false, why: "taken" | "other_account" | "incomplete" | undefined, landUser: string | undefined, landScopes: string[] | undefined;
+      const done = (ok: boolean) => (purpose === "career" ? connectLanding(Deno.env, { provider: "google", ok, denied, email: landEmail, why, userId: ok ? landUser : undefined, scopes: ok ? landScopes : undefined }) : null) ?? doneBase(ok);
       try {
         if (url.searchParams.get("error")) {
           denied = url.searchParams.get("error") === "access_denied";
+          if (!denied) why = "incomplete";
           // Which grant this was: the signed state says; an unreadable state is the legacy landing, as before.
           // Only with the connect page switched on: off, a denied consent lands exactly where it always did.
           if (connectPageOn(Deno.env)) try { purpose = (await verifyState(url.searchParams.get("state") || "", stateSecret)).purpose; } catch { /* legacy landing */ }
@@ -161,12 +164,14 @@ serve(async (req) => {
           }
           // D-037: an "allow sending" consent from another account, without a connection, or without every permission: refused,
           // the new grant revoked, the connection untouched, and the landing says which.
+          if (got.why === "send_other_account" || got.why === "taken") { why = got.why === "taken" ? "taken" : "other_account"; const page = purpose === "career" ? connectLanding(Deno.env, { provider: "google", ok: false, denied: false, email: landEmail, why }) : null; if (page) return page; }
           if (got.why === "send_no_connection" || got.why === "send_other_account" || got.why === "send_scopes") return careerLanding(false, SEND_REFUSED_WORDS(got.why, null));
           if (purpose === "career" && (got.why === "taken" || got.why === "replayed")) return careerLanding(false, got.why === "taken" ? TAKEN_WORDS("Gmail", got.email ?? null) : REPLAYED_WORDS);
           return done(false);
         }
         const email = got.email;
         const grantedScopes = got.scopes;
+        landUser = userId; landScopes = String(grantedScopes ?? "").split(/\s+/).filter(Boolean);
         if (purpose === "career") {
           // Task 3: told where the link came from, then the tasks that waited for Gmail resume, after the response.
           const run = chatThroughAgent(supabaseUrl, serviceKey);

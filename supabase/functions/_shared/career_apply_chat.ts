@@ -259,6 +259,7 @@ export function findThenApplyAsk(message: string): ManyWhat | null {
   const m = FIND_THEN_ALL.exec(t);
   return m ? manyWhatOf(m[1]) : null;
 }
+const LIST_REFERENT = /^(?:(?:from|on|of|in)\s+(?:that|the|this|my|your|our)\s+(?:short\s*)?list(?:\s+(?:you|we)\s+(?:just\s+)?(?:made|found|listed|showed|sent|agreed(?:\s+on)?)(?:\s+me)?)?|(?:you|we)\s+(?:just\s+)?(?:found|listed|showed|sent)(?:\s+me)?)\b/;
 export function applyManyAsk(message: string): ManyAsk | null {
   { const what = findThenApplyAsk(message); if (what) return { kind: "all", what }; }
   if (NOT_A_COMMAND.test(String(message ?? ""))) return null;
@@ -270,7 +271,9 @@ export function applyManyAsk(message: string): ManyAsk | null {
   let m = after.match(/^(?:the\s+)?(first|second|third|fourth|fifth)\s+one\b/);
   if (m) return { kind: "nth", i: ORD[m[1]] };
   m = after.match(/^(?:the\s+)?(?:top|first|best)\s+(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten)\b\s*(.*)$/);
-  if (m) { const what = manyWhatOf(m[2]); return what ? { kind: "first", n: numOf(m[1]), what } : { kind: "first", n: numOf(m[1]) }; }
+  // WO-G (fix 12): "the top three from that list" names the numbered shortlist this thread showed, never a search for a role
+  // called "from that list": the referent words are dropped before anything is read as a role.
+  if (m) { const what = manyWhatOf(m[2].replace(LIST_REFERENT, "").trim()); return what ? { kind: "first", n: numOf(m[1]), what } : { kind: "first", n: numOf(m[1]) }; }
   // A bare count of the listed postings ("3 roles", "2 of them"). A count with a role family in it ("15 software
   // engineering intern roles") is the broad ask, the batch delegation's (career_batch_apply), never this turn's.
   m = after.match(/^(?:all\s+)?(\d{1,3}|two|three|four|five|six|seven|eight|nine|ten)\s+(?:roles?|jobs?|postings?|positions?|internships?|openings?|of (?:them|these|those))\b/);
@@ -420,6 +423,7 @@ const NOTHING_SENT = (company: string, prepares = true) => prepares
   ? `Nothing is sent and nothing is filled yet: I prepare it before you ask, from the facts you confirmed and a resume tailored to it; if the form asks something you haven't told me, I'll ask you here. The exact application goes to ${company} only when you approve it on the card that shows it exactly.`
   : `Nothing is sent and nothing is filled yet: it's in your queue to be prepared. The exact application goes to ${company} only when you approve it on the card that shows it exactly.`;
 
+const BARE_NUMBER = /^(?:please\s+)?apply\s+(?:me\s+)?(?:to|for)\s+(\d{1,2})(?:\s+please)?[.!]?$/i;
 export async function applyTurn(o: ApplyChatDeps): Promise<ApplyChatResult | null> {
   // FEATURE E2E: a pasted posting link, or a role named by the company's possessive, read from the ATS on demand
   // (career_apply_link.ts); only with the link deps wired (agent-chat), otherwise as before.
@@ -434,6 +438,11 @@ export async function applyTurn(o: ApplyChatDeps): Promise<ApplyChatResult | nul
   if (named) return await namedApplyTurn(o, named);
   // The batch ask first: applyAsk's employer grammar is case-blind, so "apply to the top 2" would read as an employer.
   if (applyManyAsk(o.message)) return applyManyTurn(o);
+  // a-ask-to-queue (2026-11-10, RESPONSE-RULES E2): a bare "apply to 3" right after a numbered list is #3 of that list, as the
+  // router reads it. It went to the router, which checks only this thread's resume facts, so a person whose confirmed resume
+  // is on file was told "I need your resume first" and nothing was queued. Without a list it stays out (a count or a name).
+  const bare = BARE_NUMBER.exec(String(o.message ?? "").trim());
+  if (bare && (o.shortlist ?? []).some((e) => e && (e.url || e.id))) return applyManyTurn({ ...o, message: `apply to #${bare[1]}` });
   const ask = applyAsk(o.message);
   if (!ask) return null;
   const intent = APPLY_QUEUE_INTENT;
@@ -555,6 +564,13 @@ const NOTHING_SENT_MANY = (prepares = true) => (prepares
   " Each application goes to its employer only when you approve it on the card that shows it exactly; once they're prepared, \"show my applications\" shows them all on one card, and one yes to that card approves exactly what it shows.";
 const nameOf = (p: { title?: string | null; company?: string | null }) =>
   !p.company && /^#\d+$/.test(String(p.title ?? "")) ? String(p.title) : `${p.title || "the posting"} at ${p.company || "an employer not on record"}`;
+// Tone gate (tests/architect/instinct-tone-gate.test.ts): one reason shared by several postings is said once, after their names
+// ("A and B: not a ... link I can open yet"), never repeated for each.
+const byReason = (rs: { title?: string | null; company?: string | null; reason: string; said?: string }[]) => {
+  const groups = new Map<string, string[]>();
+  for (const r of rs) { const why = r.said ?? r.reason; groups.set(why, [...(groups.get(why) ?? []), nameOf(r)]); }
+  return [...groups].map(([why, names]) => `${names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names[0]}: ${why}`);
+};
 const listed = (names: string[], max = 12) => names.length <= max ? names.join("; ") : `${names.slice(0, max).join("; ")}; and ${names.length - max} more`;
 
 // The batch ask over the thread's last listed postings: null with no ask, or no list (the router's turn, as before).
@@ -578,9 +594,9 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
     return { reply: `${coverageLine(0, given.missing.length)} Not queued: ${listed(given.missing.map((r) => `${r.title}: ${r.reason}`), 8)}.`, status: "none", intent, queued: [], refused: given.missing, coverage: { queued: 0, total: given.missing.length } };
   }
   if (!list.length) {
-    return { reply: `I haven't listed any postings in this thread yet, so there is nothing for "these" to mean; nothing was queued. Say "find <role> jobs in <place>" first and then "apply to these", or name one: "apply to the <role> role at <Company>".`, status: "no_list", intent, queued: [], refused: [] };
+    return { reply: `I can't apply to those yet because there's no list of postings in this thread, so nothing was queued. Name one ("apply to the <role> role at <Company>"), or say "find <role> jobs in <place>" and then "apply to these". Which role should I search for?`, status: "no_list", intent, queued: [], refused: [] };
   }
-  let slice: ShortlistEntry[], note = given?.note ?? "";
+  let slice: ShortlistEntry[], note = given?.note ?? "", numbered = "";
   const missing: Missing[] = given ? given.missing.slice() : [];
   if (ask.kind === "nth") {
     if (ask.i > list.length) return { reply: `I listed ${list.length}, so there is no ${["first", "second", "third", "fourth", "fifth"][ask.i - 1] ?? `#${ask.i}`} one; nothing was queued. Say which of the ${list.length} you mean.`, status: "none", intent };
@@ -597,6 +613,9 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
     } else {
       slice = list.slice(0, ask.n);
       if (ask.n > list.length) note = `I listed ${list.length}, not ${ask.n}, so these ${list.length}. `;
+      // WO-G (fix 12): "top" is the order of the numbered list this thread showed; the targets are named by those numbers
+      // before anything is prepared, so the person sees exactly which postings the ask means.
+      if (slice.length <= 8) numbered = `From the list I showed, by its numbers: ${slice.map((e, i) => `#${i + 1} ${nameOf(e)}`).join("; ")}.`;
     }
   } else if (ask.kind === "pick") {
     // FEATURE 1: "apply to 1 and 3": the positions on the list; one past its end is named, never guessed.
@@ -676,6 +695,7 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
   // "at <company>": exactly that employer (our company records name no subsidiaries, so none are added); said by name.
   if (what?.company && queued.length) parts.push(`Companies included: ${[...new Set(queued.map((q) => q.company))].join(", ")} (only that employer; no subsidiaries are on record).`);
   if (queued.length) parts.push(`Queued ${queued.length}${total > queued.length ? ` of the ${total}` : ""}${given ? " you asked for" : ask.kind === "all" && !note ? " I listed" : ""}: ${listed(queued.map(nameOf))}.`);
+  if (numbered && queued.length) parts.push(numbered);
   const ahead = prepareSentence(kick, queued.length);
   if (ahead) parts.push(ahead);
   if (resumeMissing && queued.length) parts.push(NO_RESUME_WAIT);
@@ -683,7 +703,7 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
   // The batch summary of the screen: counts and short reasons; held postings and the one question per missing fact.
   const gs = gateSummary(screened.gate, nameOf);
   const shownRefused = refused.filter((r) => !/^(screened out|held, not guessed)/.test(r.reason));
-  if (shownRefused.length) parts.push(`Not queued: ${listed(shownRefused.map((r) => `${nameOf(r)}: ${r.said ?? r.reason}`), 8)}.`);
+  if (shownRefused.length) parts.push(`Not queued: ${listed(byReason(shownRefused), 8)}.`);
   if (gs) parts.push(gs);
   if (asking.length) parts.push(askText(asking.map((r) => r.posting), o.facts ?? []));
   const status = queued.length ? "queued" : already ? "already" : asking.length ? "asking_employer" : "refused";

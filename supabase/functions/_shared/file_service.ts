@@ -2,8 +2,18 @@
 // The link is minted here, in code. The agent tool never sees it and the model never writes it. Tests: tests/architect/file-kinds.test.ts.
 import { feedUrlsFor } from "./file_link.ts";
 import { KIND_LABEL, tagOf, validateKind, type FileRecord, type KindId } from "./file_kinds.ts";
+import { evidenceOf, type ReviewItem, stageOf } from "./application_review.ts";
+import { reasonWords } from "./career_apply_status.ts";
 
 export const DEFAULT_TTL_HOURS = 168; // a week; TRAINEE_FILE_TTL_HOURS sets it (1 to 720)
+// H2H fix 1 (docs/architect/INSTINCT-HEAD-TO-HEAD.md, A.2 resume turn 3): create()'s errors are written for the model that called
+// the tool ("so the person could not open it. Tell them it isn't available yet; do not claim it was made."). Code that puts the
+// reason in a reply the person reads takes it through here: the "not created:" lead and every clause addressed to the model go.
+const TO_THE_MODEL = /(?:,\s*so\s+)?\bthe (?:person|user)\b[^.;]*|\b(?:tell|ask) (?:them|the (?:person|user))\b[^.;]*|\b(?:do not|don'?t|never) (?:claim|describe|say|mention)\b[^.;]*/gi;
+export function personFacingError(error: string): string {
+  return String(error ?? "").replace(/^not created:\s*/i, "").replace(TO_THE_MODEL, "").replace(/\s*[.;]\s*(?=[.;]|$)/g, "").replace(/\s{2,}/g, " ")
+    .replace(/[\s,;.]+$/, "").trim();
+}
 // Every read and write is keyed by the user id, so one person can never read, change or revoke another's file.
 export interface FileKindStore {
   put(rec: FileRecord): Promise<void>;
@@ -14,7 +24,7 @@ export interface FileKindStore {
 }
 export type FileRead = { state: "ok"; rec: FileRecord } | { state: "expired" | "revoked"; rec: FileRecord } | { state: "missing" };
 // A row of the person's own application record (career_apply_jobs). The ONLY place "From Trainee's records" values come from.
-export interface ApplicationRow { state: string; reason: string | null; confirmation_id: string | null; created_at: string; updated_at: string; email_confirmed_at?: string | null; payload: Record<string, unknown>; company: string; url?: string }
+export interface ApplicationRow { state: string; reason: string | null; confirmation_id: string | null; created_at: string; updated_at: string; email_confirmed_at?: string | null; confirmation_mail_hash?: string | null; payload: Record<string, unknown>; company: string; url?: string }
 export interface Records { application(userId: string, id: string): Promise<ApplicationRow | null> }
 export type Env = { get(k: string): string | undefined };
 export interface FileService {
@@ -26,9 +36,13 @@ export interface FileService {
   revoke(userId: string, id: string): Promise<boolean>;
   ttlHours(): number;
   claim(userId: string, id: string, name: string): Promise<boolean>;
+  // WO-G: the review File of one prepared application, from code-built data only (reviewFromItem). Never reachable from a model.
+  createReview?(userId: string, item: ReviewItem): Promise<{ ok: true; id: string; url: string | null; webApp: string | null } | { ok: false; error: string }>;
+  // Item 6 S0: a File family's page from code-built view data (file_family_serve.ts). Never reachable from a model.
+  createFamily?(userId: string, family: string, title: string, view: unknown, o?: { ref?: Record<string, string> }): Promise<{ ok: true; id: string; url: string | null; webApp: string | null } | { ok: false; error: string }>;
 }
 
-const STATUS: Record<string, string> = { queued: "queued", driving: "prepared", needs_user: "prepared", submitted_unconfirmed: "submitted", confirmed: "confirmed", failed: "failed", not_submitted: "failed" };
+const STATUS: Record<string, string> = { queued: "queued", driving: "prepared", needs_user: "prepared", submitted_unconfirmed: "submitted", unknown_outcome: "uncertain", confirmed: "confirmed", failed: "failed", not_submitted: "failed" };
 const SECRETISH = /pass(?:word|wd|code)?\b|one[- ]?time|\botp\b|\bssn\b|social security|card number|\bcvv\b|\bpin\b|passport|api[-_ ]?key|secret|\btoken\b/i;
 // Everything on an application proof comes from the record, built here by code. The model supplies only the application id.
 export function proofFromRow(row: ApplicationRow, now: number): { ok: true; data: Record<string, unknown> } | { ok: false; error: string } {
@@ -38,13 +52,30 @@ export function proofFromRow(row: ApplicationRow, now: number): { ok: true; data
   const fields = (Array.isArray((row.payload as any)?.fields) ? (row.payload as any).fields : []) as any[];
   const answers = fields.filter((f) => f && !SECRETISH.test(`${f.name ?? ""} ${f.label ?? ""}`) && !/file/i.test(String(f.type ?? "")) && String(f.value ?? "").trim())
     .slice(0, 30).map((f) => ({ question: String(f.label ?? f.name ?? "Field").replace(/\s+/g, " ").trim().slice(0, 80), answer: String(f.value).replace(/\s+/g, " ").trim().slice(0, 500), source: "From Trainee's records" }));
-  const problems = status === "failed" && reason ? [{ item: "Submitting the application", outcome: "failed", reason: reason.slice(0, 300) }]
-    : row.state === "needs_user" && reason ? [{ item: "Waiting for you", outcome: "skipped", reason: reason.slice(0, 300) }] : [];
+  // 13-e: every reason in the person's words (career_apply_status.ts reasonWords), never the queue's code.
+  const words = reason ? reasonWords(row.state, reason).slice(0, 300) : "";
+  const problems = status === "failed" && words ? [{ item: "Submitting the application", outcome: "failed", reason: words }]
+    : row.state === "needs_user" && words ? [{ item: "Waiting for you", outcome: "skipped", reason: words }] : [];
   const rn = String((row.payload as any)?.resume_name ?? "").replace(/\s+/g, " ").trim().slice(0, 100);
   const dest = (() => { try { return new URL(String(row.url ?? "")).hostname.replace(/^www\./, ""); } catch { return ""; } })();
-  return { ok: true, data: { title: `Application to ${row.company}`.slice(0, 80), company: row.company, status, prepared_at: row.created_at, as_of: row.updated_at,
+  // WO-G (fix 13): the one visible stage beside the five status words: sending is not prepared, a queue entry is approved and not
+  // sent, and confirmed is said only with the employer's own evidence (their email, or the reference their page returned).
+  const stage = stageOf(row);
+  return { ok: true, data: { title: `Application to ${row.company}`.slice(0, 80), company: row.company, status, stage, prepared_at: row.created_at, as_of: row.updated_at,
+    ...(evidenceOf(row) ? { email_confirmed_at: row.email_confirmed_at } : {}),
     // No submit time: the row has none (claimed_at is when the drive started, not when it was sent), so the page says "Last updated".
     ...(status === "confirmed" && row.confirmation_id ? { confirmation: { id: row.confirmation_id } } : {}), ...(dest ? { destination: dest } : {}), ...(rn ? { resume: rn } : {}), answers, problems } };
+}
+
+// WO-G (fix 12, spec C.11 / C.21): the review File of prepared applications, built by code from the prepared payloads only
+// (application_review.ts reviewOf). One File per employer; nothing on it is a success word and nothing on it can submit.
+export function reviewFromItem(r: ReviewItem, now: number): Record<string, unknown> {
+  // The p-67 mono ids: this application (A-, its prepared id) and the posting (R-, its board's own id).
+  const ids = [`A-${r.id.replace(/[^0-9a-z]/gi, "").slice(0, 6).toUpperCase()}`, ...(r.job_id ? [`R-${(r.job_id.split(":").pop() ?? "").replace(/[^0-9a-z-]/gi, "").slice(0, 12)}`] : [])].join(" \u00B7 ");
+  return { title: "Application review", ids, company: r.employer, ...(r.role ? { role: r.role } : {}), ...(r.destination ? { destination: r.destination.slice(0, 120) } : {}),
+    status: "prepared", stage: "prepared", prepared_at: new Date(now).toISOString(), as_of: new Date(now).toISOString(), ...(r.resume ? { resume: r.resume.label.slice(0, 100) } : {}), answers: [], problems: [],
+    review: { url: r.url ?? undefined, hash12: r.hash12 || undefined, approvable: r.approvable, letter: r.letter, ...(r.expires_at ? { expires_at: r.expires_at } : {}), files: r.files, covers: r.covers,
+      answers: r.answers.map((a) => ({ question: a.question, answer: a.answer, sensitive: !!a.sensitive })), unresolved: r.unresolved.map((u) => ({ question: u.question, ask: u.ask })) } };
 }
 
 export function createFileService(o: { store: FileKindStore; env: Env; now: () => number; records?: Records | null }): FileService {
@@ -74,12 +105,37 @@ export function createFileService(o: { store: FileKindStore; env: Env; now: () =
     },
     async get(userId, id) {
       const rec = userId && /^[0-9a-f]{10}$/.test(id) ? await o.store.get(userId, id) : null;
-      if (!rec || rec.userId !== userId || (rec.kind === "application_proof" && rec.data?.from_record !== true)) return { state: "missing" };
+      if (!rec || rec.userId !== userId || (rec.kind === "application_proof" && rec.data?.from_record !== true) || (rec.kind === "application_review" && rec.data?.from_prepared !== true)) return { state: "missing" };
       if (rec.revoked_at !== null) return { state: "revoked", rec };
       return o.now() >= rec.expires_at ? { state: "expired", rec } : { state: "ok", rec };
     },
     patchState: (userId, id, state) => o.store.patch(userId, id, state),
     claim: (userId, id, name) => o.store.claim(userId, id, name, o.now()),
+    async createReview(userId, item) {
+      if (!userId) return { ok: false, error: "not created: no person to make it for" };
+      const now = o.now(), v = validateKind("application_review", reviewFromItem(item, now), { trusted: true, now });
+      if (!v.ok) return { ok: false, error: `not created: ${v.errors.join("; ")}` };
+      const id = [...crypto.getRandomValues(new Uint8Array(5))].map((b) => b.toString(16).padStart(2, "0")).join("");
+      const links = await feedUrlsFor(o.env, userId, id, now);
+      if (!links.url && !links.webApp) return { ok: false, error: "not created: file links aren't set up yet" };
+      // Item 6 S1: served as the live F-09 family page (file_family_review.ts through FileDeps.familyRecords["F-09"]): every GET reads the
+      // prepared application it names; the review kept here is the record of what was shown when the link was made.
+      const live = { family: "F-09", from_code: true, live: true, ref: { prepared: item.id, ...(item.job_id ? { job: item.job_id } : {}) } };
+      await o.store.put({ id, userId, kind: "application_review", data: { ...v.data, ...live }, state: {}, tag: null, created_at: now, expires_at: now + ttlHours() * 3600_000, revoked_at: null });
+      return { ok: true, id, url: links.url, webApp: links.webApp };
+    },
+    // Item 6 S0: a File family's page, from view data built by code (never by a model: create() above validates a model's data
+    // against its kind and never keeps from_code). The family's builder draws it when served (file_family_serve.ts).
+    // fo.ref: no view is stored; the page loads it on every GET from the family's records (FileDeps.familyRecords) by this ref.
+    async createFamily(userId, family, title, view, fo) {
+      if (!userId) return { ok: false, error: "not created: no person to make it for" };
+      const now = o.now();
+      const id = [...crypto.getRandomValues(new Uint8Array(5))].map((b) => b.toString(16).padStart(2, "0")).join("");
+      const links = await feedUrlsFor(o.env, userId, id, now);
+      if (!links.url && !links.webApp) return { ok: false, error: "not created: file links aren't set up yet" };
+      await o.store.put({ id, userId, kind: "plan_review", data: { title: title.slice(0, 80), family, from_code: true, ...(fo?.ref ? { live: true, ref: fo.ref } : { view }) }, state: {}, tag: null, created_at: now, expires_at: now + ttlHours() * 3600_000, revoked_at: null });
+      return { ok: true, id, url: links.url, webApp: links.webApp };
+    },
     revoke: (userId, id) => o.store.revoke(userId, id, o.now()),
   };
 }

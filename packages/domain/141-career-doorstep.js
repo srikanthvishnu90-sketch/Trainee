@@ -792,7 +792,7 @@ const CareerDoorstep = (() => {
         global_pause_set: true, pause_flag_set: true, global_pause: pause,
         halted_count: null, sent_count: null, in_flight_count: null, already_stopped_count: null, queue_total: null,
         queue_state: null,
-        reply: "Stopped everything I can reach: the global pause is now set for your account, which blocks every send path this product controls. I could not read the queue's own records in this session, so how many already went out and how many were waiting is unverified. Next step — the moment the queue records load, I reconcile them and report the exact counts here; you do not need to ask again.",
+        reply: "I couldn't pause everything yet, because I couldn't check what has already gone out or what is waiting, so that is unverified. Next step: say \"pause everything\" to pause your account, or name the one task to stop.",
       };
     }
     // Item accounting — every item lands in exactly one bucket, so the
@@ -836,7 +836,7 @@ const CareerDoorstep = (() => {
       sent_count: sentAlready.length, in_flight_count: inFlight.length, in_flight_unconfirmed_count: inFlight.length,
       already_stopped_count: alreadyStopped.length, queue_total: total,
       queue_state: q,
-      reply: `Stopped everything: the global pause is set, and ${pending.length} pending outreach item${pending.length === 1 ? " is" : "s are"} halted — the halt is saved so it survives a restart. Counts: ${sentAlready.length} already out, ${inFlight.length} in flight and unconfirmed, ${pending.length} halted${alreadyStopped.length ? `, ${alreadyStopped.length} already stopped` : ""} — ${total} in total, so every item is accounted for.${sentText}`,
+      reply: `I held the outreach queued in this conversation: ${pending.length} pending outreach item${pending.length === 1 ? " is" : "s are"} held. This is not an account pause; say "pause everything" to pause your account. Counts: ${sentAlready.length} already out, ${inFlight.length} in flight and unconfirmed, ${pending.length} halted${alreadyStopped.length ? `, ${alreadyStopped.length} already stopped` : ""} — ${total} in total, so every item is accounted for.${sentText}`,
     };
   }
   // Inbox-event hygiene for a (possibly halted) queue state: dedupe by

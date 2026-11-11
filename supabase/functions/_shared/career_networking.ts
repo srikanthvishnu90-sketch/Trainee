@@ -14,6 +14,7 @@
 // The model writes only when the caller passes one (CAREER_NETWORKING_DRAFT=on, metered); without it the reply names who
 // would be written to and that nothing was drafted.
 import { AUTOMATED_WHY, automatedInbox } from "./automated_inbox.ts";
+import { unaddressedReply } from "./career_draft_unaddressed.ts";
 import { nearWord } from "./outreach_ask.ts";
 import { type ContactRow, contactsOf, firmKey, importContactsCsv, importContactsFile, MX_NOT_WIRED, type MxResolver, normalizeFirm, sameFirm, verifyRows } from "./career_contacts.ts";
 import { legacyRows } from "./career_referrals.ts";
@@ -640,7 +641,7 @@ async function whoTurn(o: NetworkingDeps, firmAsked: string): Promise<Networking
   const here = (await book.atFirm(firm)).filter((r) => !r.discovered); // people they know, not people discovery found
   if (!here.length) {
     const all = await book.total();
-    if (!all.total) return { reply: `You haven't sent me any contacts yet, so I can't say who you know at ${firm}. ${NO_FINDER} ${ADD_CONTACTS}`, intent: AT_INTENT, status: "no_contacts" };
+    if (!all.total) return { reply: `I can't say who you know at ${firm} because you haven't sent me any contacts yet. ${NO_FINDER} ${ADD_CONTACTS}`, intent: AT_INTENT, status: "no_contacts" };
     return { reply: `None of your ${plural(all.total, "contact")} (from ${all.files}) is at ${firm}. ${NO_FINDER} ${ADD_CONTACTS}`, intent: AT_INTENT, status: "none_at_firm" };
   }
   const withEmail = here.filter((r) => r.email).length;
@@ -710,8 +711,11 @@ async function draftTurn(o: NetworkingDeps, ask: Extract<Ask, { kind: "draft" }>
     // The address they typed picks one of two people with the same name (never a third row made up for it).
     if (typedEmail && pool.length > 1 && pool.some((r) => (r.email ?? "").toLowerCase() === typedEmail)) pool = pool.filter((r) => (r.email ?? "").toLowerCase() === typedEmail);
     label = `${t.name}${firmName ? ` at ${firmName}` : ""}`;
-    if (!pool.length && await none()) return noneYet;
-    if (!pool.length) return { reply: `No one named ${t.name}${firmName ? ` at ${firmName}` : ""} is in your contacts${atThatFirm.length ? ` (your contacts there: ${atThatFirm.slice(0, 5).map((r) => r.name).join(", ")})` : ""}. ${NO_FINDER} ${ADD_CONTACTS}`, intent: DRAFT_INTENT, status: "not_in_contacts" };
+    // The person asked for a draft to someone in none of their contacts: the draft, marked "Recipient not set", and one
+    // question for the address (career_draft_unaddressed.ts). Nothing stored; never an address from a name or a firm.
+    const unaddressed = async (lead: string) => unaddressedReply({ name: t.name, firm: t.firm || null, topic: ask.topic, signature: (await o.store.prefs(o.userId).catch(() => null))?.signature ?? null }, lead);
+    if (!pool.length && await none()) return { ...noneYet, reply: await unaddressed("") };
+    if (!pool.length) return { reply: await unaddressed(`No one named ${t.name}${firmName ? ` at ${firmName}` : ""} is in your contacts${atThatFirm.length ? ` (your contacts there: ${atThatFirm.slice(0, 5).map((r) => r.name).join(", ")})` : ""}.`), intent: DRAFT_INTENT, status: "not_in_contacts" };
     if (pool.length > 1) {
       // Two people with one name at one firm differ only by address: say which by it.
       const sameNameFirm = new Set(pool.map((r) => `${nameKey(r.name)}@${plain(r.firm)}`)).size === 1;
@@ -781,9 +785,10 @@ async function writeBatch(o: NetworkingDeps, pick: ContactRow[], held: { name: s
   const footer = footerOf(signature), ok: Omit<OutreachDraft, "id" | "batch_id" | "thread_id">[] = [];
   const failed: { name: string; why: string }[] = [], limited: string[] = [];
   for (const [k, d] of results.entries()) {
-    // PEOPLE DRAFTS R3: a draft the day's AI limit stopped (career_spend_cap.ts: no request was made) is said as that, once
-    // for all of them; before, each read "the writing model didn't answer", as if the model had failed.
-    if (!d.ok && d.why === "model" && /daily_limit|global_daily_limit|budget_paused|budget_not_open|budget_ended/.test(d.detail.join(" "))) { limited.push(pick[k].name); continue; }
+    // PEOPLE DRAFTS R3: a draft the GLOBAL AI budget stopped (model_budget.ts: no request was made) is said as that, once
+    // for all of them; before, each read "the writing model didn't answer", as if the model had failed. There is no
+    // per-person daily limit (D-046).
+    if (!d.ok && d.why === "model" && /global_daily_limit|budget_paused|budget_not_open|budget_ended/.test(d.detail.join(" "))) { limited.push(pick[k].name); continue; }
     if (!d.ok) { failed.push({ name: pick[k].name, why: d.why === "unverified" ? `I couldn't write it without saying something not on record (${d.detail.slice(0, 2).join("; ")})` : d.why === "model" ? "the writing model didn't answer" : d.detail.join("; ") }); continue; }
     const draft = { n: ok.length + 1, recipient: recipientOf(pick[k]), subject: d.subject, body: d.body, footer, shared: d.shared, status: "shown" as const, hash: "",
       approved_hash: null, approved_at: null, sent_at: null, gmail_id: null, gmail_thread: null, result: null, created_at: new Date(o.now).toISOString() };
@@ -791,7 +796,7 @@ async function writeBatch(o: NetworkingDeps, pick: ContactRow[], held: { name: s
     ok.push(draft);
   }
   const notDone = [...held, ...failed];
-  const limitLine = limited.length ? `Not drafted yet: ${limited.length} (${limited.slice(0, LIST_MAX).join(", ")}${limited.length > LIST_MAX ? ` and ${limited.length - LIST_MAX} more` : ""}): you've reached today's limit on AI-written drafts, which resets at midnight UTC; ask again then and I'll write the rest.` : "";
+  const limitLine = limited.length ? `Not drafted yet: ${limited.length} (${limited.slice(0, LIST_MAX).join(", ")}${limited.length > LIST_MAX ? ` and ${limited.length - LIST_MAX} more` : ""}): Trainee's AI budget stopped them before any request was made; ask again once it's back and I'll write the rest.` : "";
   const notLine = [notDone.length ? `Not drafted: ${notDone.map((h) => `${h.name} (${h.why})`).join("; ")}.` : "", limitLine].filter(Boolean).join(" ");
   if (!ok.length) return { reply: `Nothing was drafted (0/${considered}). ${notLine}`, intent: DRAFT_INTENT, status: "not_drafted" };
   const saved = await o.store.saveBatch(o.userId, o.threadId, ok, o.now);

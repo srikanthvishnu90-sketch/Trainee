@@ -334,7 +334,9 @@ export function runWords(s: Extract<Scenario, { family: "words" }>): string[] {
   const NOW = Date.parse("2026-11-05T12:00:00Z");
   const rows: AppRow[] = s.rows.map((r, i) => ({ id: `J${i}`, job_id: `lever:w:${i}`, company: WORD_COMPANIES[r.company], state: r.state, reason: r.reason,
     created_at: new Date(NOW - r.ageD * 86_400_000).toISOString(), updated_at: new Date(NOW - r.ageD * 86_400_000).toISOString(),
-    confirmation_id: r.state === "confirmed" || r.state === "submitted_unconfirmed" ? (i % 2 ? `C-${i}` : null) : null }));
+    confirmation_id: r.state === "confirmed" || r.state === "submitted_unconfirmed" ? (i % 2 ? `C-${i}` : null) : null,
+    // architect ruling 13-Obs (2026-11-09): a "confirmed" row is confirmed by the employer's matched email (D-024).
+    email_confirmed_at: r.state === "confirmed" ? new Date(NOW - 3_600_000).toISOString() : null }));
   for (const a of rows) {
     const line = statusLine(a);
     const took = a.state === "confirmed" || a.state === "submitted_unconfirmed" || (a.state === "needs_user" && a.reason === "email_code");

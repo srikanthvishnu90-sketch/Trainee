@@ -7,7 +7,7 @@
 // states the opposite (pay below the floor, another season, "unable to sponsor"). A posting that says nothing on a
 // parameter stays and is counted ("pay not listed") so the reply can say so.
 import { CareerJobs } from "./router_core.career.js";
-import { ABROAD, US_CITIES } from "./posting_place.ts";
+import { ABROAD, STATE_NAMES, US_CITIES } from "./posting_place.ts";
 import { payCurrency, payFrom, payPeriod } from "./posting_pay.ts";
 
 export type BandName = "intern" | "new_grad" | "junior" | "mid" | "senior" | "staff" | "manager" | "director";
@@ -77,11 +77,22 @@ function placeOf(t: string): string | null {
   return best ? ALIAS[best] ?? best : null;
 }
 const CUE = /^(?:(?:please|hey|hi|ok|okay|so|and|also|can you|could you|can u|would you)\s+)*(?:(?:find|show|get|give|search(?: for)?|look(?:ing)? for|help me find|pull up|list)(?:\s+me)?|i(?:'m| am)? ?(?:looking for|searching for|seeking|want|need|would like|'d like)|i(?:'d| would) like|my goal is|any|are there any|do you have)\s*/i;
+const GREETING = /^(?:(?:(?:hello|hey|hi|hiya|howdy|yo|greetings)(?:\s+there)?|good\s+(?:morning|afternoon|evening|day))(?:\s+trainee)?(?:[\s,!.:;-]+|$))+/;
 const EXPAND: Record<string, string> = { swe: "software engineer", sde: "software engineer", pm: "product manager", ml: "machine learning", ds: "data science" };
 const ROLE_NOISE = new Set(["me", "some", "any", "a", "an", "the", "jobs", "job", "roles", "role", "positions", "position", "openings", "opening", "opportunities", "opportunity", "work", "to", "i", "im", "am", "my", "of", "for", "paying", "pay", "pays", "salary", "make", "making", "earn", "at", "least", "over", "above", "under", "minimum", "min", "more", "or", "and", "in", "near", "around", "with", "no", "not", "non", "need", "needed", "visa", "sponsorship", "sponsor", "remote", "please", "per", "an", "hr", "hour", "hourly", "year", "yearly", "starting", "start", "season", "that", "are", "is", "will", "be", "who", "which", "interested", "good", "fit", "fits", "career", "new", "level", "grad", "graduate", "recent", "entry", "early", "junior", "jr", "senior", "sr", "intern", "interns", "internship", "internships", "coop", "co-op", "wage", "hiring"]);
 
 // What a search message states: the role (level, pay, place, term and sponsorship words taken out), the place, remote,
 // and the limits. The role is empty when the message names none ("find me something remote").
+// The sentence of a longer message that asks for roles: a search verb and a job noun in one sentence ("Find me 5 data analyst
+// internships in Chicago"), else the first sentence with a job noun, else the whole message.
+const JOB_NOUN = /\b(?:jobs?|roles?|positions?|openings?|internships?|interns?|co-?ops?)\b/i;
+export function searchSentence(raw: string): string {
+  const all = String(raw ?? "").split(/(?<=[.!?])\s+(?=\S)/).map((s) => s.trim()).filter(Boolean);
+  if (all.length < 2) return String(raw ?? "");
+  return all.find((s) => JOB_NOUN.test(s) && /\b(?:find|search|show me|look(?:ing)? for|get me|pull up|list|want|need|include|add)\b/i.test(s))
+    ?? all.find((s) => JOB_NOUN.test(s)) ?? String(raw ?? "");
+}
+const COUNT_WORD = /^(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|dozen|few|couple|several)$/;
 export function searchTextOf(message: string): SearchText {
   const raw = String(message ?? "").replace(/\s+/g, " ").trim();
   let t = lc(raw);
@@ -89,6 +100,16 @@ export function searchTextOf(message: string): SearchText {
   const place = placeOf(t);
   const remote = /\bremote(?:ly)?\b|\bwork from home\b|\bwfh\b/.test(t);
   // The role: what is left when everything that is a parameter is taken out.
+  // R10 WO-C (2026-11-09, production S1): in a message of several sentences the role is read from the one that asks for the
+  // roles. "Let's leave the resume for now. Find me 5 data analyst internships in Chicago that are actually open. Show the
+  // company, role, location, and application link." was searched as the role "let s leave resume now find data analyst
+  // actually open show company location application link don t yet", which no title holds, so nothing was ever found.
+  t = lc(searchSentence(raw));
+  // What the roles must be ("that are actually open", "verified open") is how to check them, not words of the role.
+  t = t.replace(/\b(?:that|which)\s+(?:are|is|were|was)\b[^,.;]*/g, " ").replace(/\b(?:(?:actually|currently|still|verified|real)\s+)+(?:open|live|available)\b|\bverified\b/g, " ");
+  // TELEGRAM LOOP (2026-11-10, item 14): a greeting before the ask is not the role. "hello, I need a job" was searched as the
+  // role "hello", "good morning, I need an internship" as "morning", "hey there, looking for a job" as "hey there looking".
+  t = t.replace(GREETING, "");
   t = t.replace(CUE, "").replace(CUE, "");
   // KNOWN GAPS (2026-10-30, #317): the ask to apply is not part of the role. "apply to jobs for me" was searched as the role
   // "apply", and "apply to data analyst jobs" as "apply data analyst". ("applied scientist" is a role: only the verb goes.)
@@ -100,9 +121,22 @@ export function searchTextOf(message: string): SearchText {
   // RESEARCH ROUND 3: the employer named is never a role word, whatever follows it ("jobs at Ford Motor Company please"
   // searched the role "software engineer ford motor company").
   if (limits.company) t = t.replace(new RegExp(`(?<![\\p{L}\\p{N}])(?:at|for|with)\\s+${limits.company.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "gu"), " ");
+  // D-054 (R01): the state written after the city is the place too ("in Boise, Idaho" was searched as the role "marine biology
+  // idaho", "in Austin, TX" as "nurse tx"), so the empty reply named a role nobody asked for.
+  if (place) {
+    const esc = place.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const states = Object.entries(STATE_NAMES).flatMap(([c, n]) => [c, n]).sort((a, b) => b.length - a.length).map((x) => x.replace(/ /g, "\\s+")).join("|");
+    t = t.replace(new RegExp(`\\b${esc}\\s*,\\s*(?:${states})\\b`, "g"), place);
+  }
   if (place) t = t.replace(new RegExp(`\\b(?:in|near|around|based in|located in)\\s+${place.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g"), " ").replace(new RegExp(`\\b${place.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "g"), " ");
   for (const [k, v] of Object.entries(ALIAS)) if (v === place) t = t.replace(new RegExp(`\\b${k}\\b`, "g"), " ");
+  // R10 WO-C (architect, 2026-11-09): region and area words are the place, never the role ("data analyst area u s", "us analytics").
+  t = t.replace(/(?<![\p{L}\p{N}])(?:in\s+)?(?:the\s+)?(?:u\.\s?s\.?(?:a\.?)?|us|usa|united states|america)(?![\p{L}\p{N}])/gu, " ")
+    .replace(/\b(?:the\s+)?(?:greater\s+)?(?:area|metro(?:politan)?|suburbs?|region|nationwide|anywhere)\b/g, " ");
   const words = t.split(/[^a-z0-9+#-]+/).filter((w) => w && !ROLE_NOISE.has(w) && !/^\d+$/.test(w)).map((w) => EXPAND[w] ?? w);
+  // H2H fix 3 (docs/architect/INSTINCT-HEAD-TO-HEAD.md C2 turn 1): "find me five data analyst internships" is a count, as "find me
+  // 5" is; the count word leading the role was searched as part of the title ("five data analyst"), which no posting holds.
+  while (words.length > 1 && COUNT_WORD.test(words[0])) words.shift();
   return { role: [...new Set(words.join(" ").split(" "))].join(" ").trim(), place, remote, limits };
 }
 

@@ -207,7 +207,7 @@ test("A14: queue records: prepared, approved, submitted and confirmed are told a
   assert.equal(o.intent, "career_status_states", o.reply);
   assert.match(o.reply, /2 prepared and waiting for your approval/);
   assert.match(o.reply, /1 approved, not sent yet/);
-  assert.match(o.reply, /2 submitted \(1 confirmed by the employer, 2 with the receipt on record\)/);
+  assert.match(o.reply, /2 submitted \(1 page reference only, 2 with the receipt on record\)/);
   assert.match(o.reply, /1 on your tracker that you applied to yourself/);
   lintClean(o);
   const today = turn("What did you send today?", { ledger: LEDGER }).out;

@@ -5,7 +5,7 @@
 //   external   touches the world (send, submit, message); NEVER runs here. It becomes a pending approval the
 //              person approves on its exact payload (WO-005), and the model is told it is waiting.
 // Messages use the Anthropic block shape (text / tool_use / tool_result); _shared/model_gateway.ts converts to OpenAI.
-import { bracketUntraced, factSources, missingAck, multiAsk, unbackedPromises, secretIn, stripSecrets, leakedWords, pieces, plainQuotes, postingsOf, rebuild, stripLeaks, closedNotes, unsourcedFigures, untracedFacts, waiverSolicits } from "./reply_guards.ts";
+import { bracketUntraced, factSources, missingAck, multiAsk, unbackedPromises, secretIn, stripSecrets, leakedWords, pieces, plainQuotes, postingsOf, rebuild, stripLeaks, closedNotes, smallTalkPitch, unsourcedFigures, untracedFacts, waiverSolicits } from "./reply_guards.ts";
 import { urlsIn } from "../channel_shape.ts";
 import { STANDING_REFUSED, standingRefusal } from "./memory.ts";
 export type Effect = "read" | "write_own" | "external";
@@ -16,12 +16,15 @@ export type Effect = "read" | "write_own" | "external";
 // (WO-038's contract): the same text as separate messages, so a texting channel delivers each whole and in order.
 // `before` (WO-091b): the previous turn's reply as the person saw it ("" on a first turn), so a tool can check that "the
 // first one" is a posting that reply showed. Undefined only for a caller that runs a tool without the loop's history.
-export interface ToolCtx { userId: string; threadId: string; now: number; state: Record<string, unknown>; turn?: { message: string; added: string[]; before?: string; attached?: string; attachments?: { filename: string; content: string }[]; fileLinks?: string[]; guard?: (text: string) => string[]; seen?: string[]; show?: { intent: string; text: string; parts?: string[] } } }
+export interface ToolCtx { userId: string; threadId: string; now: number; state: Record<string, unknown>; turn?: { message: string; added: string[]; before?: string; attached?: string; attachments?: { filename: string; content: string }[]; fileLinks?: string[]; guard?: (text: string) => string[]; seen?: string[]; show?: { intent: string; text: string; parts?: string[] }; typed?: string; askOnly?: boolean } }
 export interface ToolSpec {
   name: string;
   description: string;
   input_schema: { type: "object"; properties: Record<string, unknown>; required: string[] };
   effect: Effect;
+  // The effect a call actually had, from its result, when it depends on what the call did (research_market: "write_own" only
+  // when it published a File). Absent: `effect`.
+  effectOf?: (out: unknown) => Effect;
   run(input: any, ctx: ToolCtx): Promise<unknown>;
 }
 export type ModelFn = (payload: { system: string; messages: any[]; tools: { name: string; description: string; input_schema: unknown }[]; max_tokens: number; tool_choice?: { type: "none" } }) =>
@@ -45,13 +48,13 @@ export interface TurnResult {
   fileLinks?: string[]; // FILE KINDS: links to the files create_file made this turn, minted by code; the channel sends them, the model never writes them
 }
 
-export const MAX_STEPS_REPLY = "I couldn't finish that in one go, so I stopped partway. Nothing was sent or submitted. Tell me which part to do first.";
+export const MAX_STEPS_REPLY = "I couldn't finish that in one reply because it needed more steps than one reply allows, so I stopped partway. Nothing was sent or submitted. Tell me which part to do first.";
 export const MODEL_ERROR_REPLY = "I can't answer right now because the AI service isn't responding. Nothing was sent, saved or submitted. Try again in a minute.";
 // When a turn saved something before it stopped, it says so: "nothing saved" would be false.
-export const MAX_STEPS_AFTER_SAVE_REPLY = "I saved what you told me, but couldn't finish the rest in one go, so I stopped partway. Nothing was sent or submitted. Tell me which part to do next.";
-export const MODEL_ERROR_AFTER_SAVE_REPLY = "I saved what you told me, but the AI service stopped responding before I could finish. Nothing was sent or submitted. Try again in a minute.";
-export const INCOMPLETE_REPLY = "I couldn't produce a complete answer, so I stopped. Nothing was sent, saved or submitted. Please try again.";
-export const INCOMPLETE_AFTER_SAVE_REPLY = "I saved what you told me, but couldn't produce a complete answer. Nothing was sent or submitted. Please try again.";
+export const MAX_STEPS_AFTER_SAVE_REPLY = "I couldn't finish all of that because it needed more steps than one reply allows; what you told me is saved. Nothing was sent or submitted. Tell me which part to do next.";
+export const MODEL_ERROR_AFTER_SAVE_REPLY = "I couldn't finish because the AI service stopped responding; what you told me is saved. Nothing was sent or submitted. Try again in a minute.";
+export const INCOMPLETE_REPLY = "I couldn't produce a complete answer because the AI's reply came back unfinished, so I stopped. Nothing was sent, saved or submitted. Please try again.";
+export const INCOMPLETE_AFTER_SAVE_REPLY = "I couldn't produce a complete answer because the AI's reply came back unfinished; what you told me is saved. Nothing was sent or submitted. Please try again.";
 // WO-077: a reply never claims a change that did not happen this turn (battery run 39485101366, T12: "Kept for good" after
 // only a read). Each kind of claim names the tools that make it true. WO-091a (audit chat-brain F5; battery run
 // 39500971945, BR-062/036/042): a claim is first-person past or present-perfect action language ("I've set…", "I saved…",
@@ -61,7 +64,7 @@ export const INCOMPLETE_AFTER_SAVE_REPLY = "I saved what you told me, but couldn
 // nothing left, the reply is this line: it promises nothing, because code cannot know a tool could do it.
 export const CLAIM_UNBACKED_REPLY = "I didn't change anything this time.";
 // A reply whose every sentence carried a key-shaped string (ADVERSARIAL ROUND 2): nothing of it is shown.
-export const SECRET_DROPPED_REPLY = "I can't share keys, tokens or passwords, and I didn't change anything.";
+export const SECRET_DROPPED_REPLY = "I can't share keys, tokens or passwords because they never go through chat, and I didn't change anything.";
 const ALERT_NOUN = "(?:(?:an?|your|the|new|these|those|\\d+) )?(?:(?:job|daily|instant|new) )?(?:alerts?|job watch(?:es)?)\\b";
 const I_HAVE = "\\bi(?:'ve| have)? (?:just |now |also )?";
 const CLAIMS: { kind: string; said: RegExp; by: string[] | "any_write" }[] = [
@@ -272,6 +275,8 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
   const said = o.said ?? o.message;
   o.ctx.turn = { message: said, added: [], before, attachments: [], seen, ...(said !== o.message ? { attached: o.message.startsWith(said) ? o.message.slice(said.length).trim() : o.message } : {}) };
   const typed = [said, ...o.history.filter((m: any) => m && m.role === "user").map((m: any) => typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""))].join("\n");
+  // R10 WO-H: everything the person typed in this conversation, for a draft's check that it states no history they never did.
+  o.ctx.turn.typed = typed;
   const toolNames = o.tools.map((t) => t.name);
   // FILE KINDS: the same fact guard attach_document uses, handed to create_file: what the person never said and no tool returned is refused.
   o.ctx.turn.guard = (t: string) => {
@@ -340,9 +345,12 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
       // FLAG ONLY (#540: code never cuts the model's answer): asked once; a draft that still violates is kept as written.
       const manyAsks = multiAsk(reply) || promises.length > 0;
       const noAck = missingAck(said, reply);
-      if ((claims.length || leaks.length || facts.length || money.length || waiver.length || manyAsks || noAck) && !checked && !repairing && steps < max) {
+      // D-054 (R03): small talk answered with a pitch (an introduction, a list of what Trainee does, an ask for a role).
+      const pitch = smallTalkPitch(said, reply);
+      if ((claims.length || leaks.length || facts.length || money.length || waiver.length || manyAsks || noAck || pitch.length) && !checked && !repairing && steps < max) {
         checked = true;
         const told = [
+          pitch.length ? `They made small talk. Answer it in one plain sentence, as a person would. Remove these sentences: ${pitch.map((k) => `"${pieces(reply.trim())[k]?.text ?? ""}"`).join(" ")}. No introduction, no list of what you do, no question about a role or a search; only if SITUATION shows something waiting on them, name that one thing as your last sentence.` : "",
           noAck ? `Your first sentence was: "${pieces(reply.trim())[0]?.text ?? ""}". They said they feel overwhelmed. Replace that opening with one short, warm sentence acknowledging how they feel; the nothing-sent line comes after it, never first.` : "",
           claims.length ? `Your reply says ${[...new Set(claims.map((c) => c.kind))].join(" and ")}, but no tool that does that succeeded this turn. Either call the tool now, or rewrite the reply without saying it happened.` : "",
           leaks.length ? `Your reply shows internal words the person must never see: ${leaks.join(", ")}. Say it in plain words; name a posting by its title and company.` : "",
@@ -387,7 +395,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         if (!out.trim()) repairNote = "Your last answer was empty. " + COMPLETENESS_REPAIR;
         continue;
       }
-      const flags = [...(missingAck(said, out) ? ["missing_ack"] : []), ...(multiAsk(out) ? ["many_asks"] : []), ...(unbackedPromises(out, tool_calls).length ? ["unbacked_promise"] : [])];
+      const flags = [...(missingAck(said, out) ? ["missing_ack"] : []), ...(multiAsk(out) ? ["many_asks"] : []), ...(unbackedPromises(out, tool_calls).length ? ["unbacked_promise"] : []), ...(smallTalkPitch(said, out).length ? ["small_talk_pitch"] : [])];
       return { reply: out, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), ...(flags.length ? { flags } : {}), stopped: "final" };
     }
     const pre = content.filter((b: any) => b && b.type === "text").map((b: any) => String(b.text ?? "")).join("").trim();
@@ -419,7 +427,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
           if (bad.length) { throw new Error(`not attached: the file states things no tool returned this turn and the person did not say: ${[...new Set(bad)].slice(0, 8).join(", ")}. Remove them or mark them "not verified", then attach again.`); }
           o.ctx.turn!.attachments!.push({ filename: att.filename, content: att.content });
         }
-        tool_calls.push({ name: t.name, ok: true, effect: t.effect });
+        tool_calls.push({ name: t.name, ok: true, effect: t.effectOf ? t.effectOf(out) : t.effect });
         results.push({ type: "tool_result", tool_use_id: u.id, content: resultText(out) });
         seen.push(resultText(out));
         if (u.name === "search_jobs" && out && Array.isArray((out as any).postings)) found = (out as any).postings.slice(0, 50);

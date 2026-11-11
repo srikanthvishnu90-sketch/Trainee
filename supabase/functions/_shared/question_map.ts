@@ -239,7 +239,8 @@ const RULES: Rule[] = [
   ["unknown", /\b(personal data|your data|data from your application)\b/],
 
   // The application and this employer.
-  ["referral", /\breferr(ed|al|ing)\b/, (q, t) => !/government official|public official|politically exposed|public function|personally know|know (anyone|someone|a current)|acquainted/.test(t)],
+  // "Referrals" is read as "Referral" is (H2H leftovers 2: the plural mapped to no rule).
+  ["referral", /\breferr(ed|als?|ing)\b/, (q, t) => !/government official|public official|politically exposed|public function|personally know|know (anyone|someone|a current)|acquainted/.test(t)],
   ["relative_here", /\b(relatives?|family members?|spouses?|related to|in-laws|anyone you live with)\b/, (q, t) => !/friend|household|supplier|vendor|partner|personal (or social )?relationship|social relationship|\bcontacts?\b|practic|profession|occupation|health ?care|purchase|customer|official/.test(t)],
   ["applied_before", /\b(applied|interviewed) (to|for|at|with)?\b.*\b(before|past|previously|within the past)\b|\bhave you (ever )?(previously )?(applied|interviewed)\b|\bpast or existing job application\b/],
   // WO-052: "Are you currently or have you ever been a One Medical Employee?", "Are you now or have you ever been a Penumbra
@@ -342,10 +343,71 @@ export const AUTH_FACTS = new Set(["work_authorization", "sponsorship", "us_pers
 // WO-053: work rights "in the country where this job is located" (or "...in which you are applying") are the person's US
 // ones only when the posting's own location is in the US; abroad or unsettled, asked.
 export const RELATIVE_PLACE = /\b(country|location)\b.{0,60}\b(this|the) (job|role|position|opportunity|vacancy)\b|\b(country|location)\b.{0,40}\b(you are|you're|you have been|you've been|are you) apply|\b(country|location) (in which|to which|for which|where) you (are )?apply|\bstated location of this role\b|\bin this country\b/i;
+// a-sensitive (interim ruling, 2026-11-10): a date of birth is asked only when the form requires it, for that application,
+// and never stored for reuse: its answer is the posting's alone (answerKey `job:`), never a wording that travels.
+// Interim ruling (architect, 2026-11-10, pending the owner): keyed by its wording, one answer filled the same question at
+// every later employer; keyed by this posting, it is this application's answer only. One pattern holds both lists of wordings.
+export const BIRTH_DATE = /\b(?:date of birth|birth ?date|day of birth|dob|d\.o\.b\.?|date de naissance|fecha de nacimiento|geburtsdatum)\b/i;
+export const DATE_OF_BIRTH = BIRTH_DATE;
+// a-sensitive: the person's own "prefer not to say", in any of its usual wordings (the whole answer, nothing more), and an
+// employer's option that offers it ("Decline to self-identify", "I do not want to answer", "Prefer not to answer").
+export const DECLINE_ANSWER = /^\s*(i\s*)?(would\s+|'d\s+)?(prefer not to (say|answer|disclose|specify|identify|self[- ]identify)|rather not (say|answer)|decline( to (answer|state|disclose|specify|self[- ]identify))?|do not wish to (answer|disclose|self[- ]identify)|don'?t wish to (answer|disclose)|choose not to (answer|disclose|identify|self[- ]identify)|do not want to answer|don'?t want to answer)\s*[.!]?\s*$/i;
+export const DECLINE_OPTION = /\bdecline\b|\bprefer not\b|\bdo(?: not|n'?t) wish\b|\bchoose not\b|\bnot to (?:answer|disclose|say|identify|specify|self[- ]identify)\b|\bi do(?: not|n'?t) want to (?:answer|disclose|identify|self)/i;
+// The one option a decline lands on: exactly one offered, else none (the person is asked).
+export function declineOption<T extends { label: string }>(answer: string, options: T[]): T | null {
+  if (!DECLINE_ANSWER.test(String(answer ?? ""))) return null;
+  const d = options.filter((o) => DECLINE_OPTION.test(String(o.label)));
+  return d.length === 1 ? d[0] : null;
+}
+// Release item 9 loop (tests/architect/loop-09-memory-apply.test.ts): what the person was PAID before ("What was your salary at
+// your previous job?", "Salary history") is theirs to give to each employer, as a date of birth is. Keyed by its wording, the
+// first employer's answer filled the same question at every later one without asking. career_apply.ts PAY_HISTORY is this
+// same pattern.
+export const PAY_HISTORY_ASKED = /\b(salary|pay|compensation|wage)s? histor|\b(previous|prior|past|last|former|most recent)\b[^?.]{0,30}\b(salary|pay|compensation|wage|earnings)\b|\b(salary|pay|compensation|wage)\b[^?.]{0,40}\b(previous|prior|past|last|former) (job|position|role|employer)/i;
+// D-053 (owner, 2026-11-10): what the person EXPECTS to be paid is asked per application too. Keyed as a fact
+// (`fact:salary_expectation`) or by its wording, the first employer's answer filled every later employer's form; keyed by
+// the posting, each application asks again. The wordings: English, French, Spanish, Dutch, German and Japanese forms.
+// (Accented words end without \b: in a JavaScript regex an accented letter is not a word character.)
+export const SALARY_EXPECTATION_ASKED = new RegExp([
+  String.raw`\b(expected|desired|target|ideal|requested|preferred)\s+((annual|annualized|base|total|yearly|hourly|monthly|gross|starting)\s+){0,2}(salary|compensation|pay|ctc|wages?|remuneration|(hourly|daily|day) rate)\b`,
+  String.raw`\bminimum (acceptable |annual |base )?(salary|compensation)\b`,
+  String.raw`\b(salary|compensation|pay|wage|remuneration)\s+(expectations?|requirements?|expected|desired)\b`,
+  String.raw`\b(expectations?|requirements?) (for|regarding|on|around) (the |your )?(salary|compensation|pay)\b`,
+  String.raw`\b(salary|compensation|pay)\b[^?.]{0,30}\b(do you|would you|you) (expect|require|want|seek|desire)\b`,
+  String.raw`\b(salary|compensation|pay)\b[^?.]{0,30}\b(are you|you are|you're) (seeking|looking for|expecting|asking for|targeting)\b`,
+  String.raw`\bprétentions? salariales?|\battentes? salariales?|\b(salaire|rémunération|remuneration)s? (souhaitée?s?|attendue?s?|désirée?s?|demandée?s?)`,
+  String.raw`\bpretensi(ón|on|ones) salarial(es)?\b|\bexpectativas? salarial(es)?\b|\baspiraci(ón|on|ones) salarial(es)?\b|\bsalario (deseado|esperado|pretendido)\b`,
+  String.raw`\bsalarisverwachting(en)?\b|\bgewenst(e)? salaris\b|\bgehalts(vorstellung|wunsch|erwartung)(en)?\b|\bwunschgehalt\b|希望(年収|給与|給料|月収)`,
+].join("|"), "i");
+// Is this question the salary expectation? Never salary history (its own rule above, #731), never the current pay or its
+// currency. A box asking for "Salary" by that word alone ("Salary (USD)", "Annual salary") is the expectation, as
+// career_apply.ts classifyField reads it; the planner fills it only from an answer given for this posting.
+// D-053c (architect ruling under D-053, 2026-11-10): "does the posted range meet your expectations?" (`pay_range_ok`) is the
+// salary expectation asked as a yes or no about this posting's own range or rate: asked per application too, never answered
+// from the salary-expectation fact or an earlier answer. Its wordings beside the question map's own: the range (or band, or
+// rate) said to meet, align with, fit or be within the person's expectations, or to be acceptable. A question that asks for
+// the amount ("What is your expected salary range?", "If not, please share your expectations") is not this one.
+export const PAY_RANGE_ASKED = /\b(range|band|rate)\b[^?]{0,60}\b(meets?|align(s|ed)?|in line|within|fits?|match(es)?|acceptable|agreeable|works? for)\b|\b(align(s|ed)?|in line|within|meets?|match(es)?|fits?)\b[^?]{0,30}\b(posted|stated|listed|advertised|above|this|the|our) ((salary|pay|compensation|base) )?(range|band)\b/;
+export function payRangeAsked(q: Question): boolean {
+  if (mapQuestion(q).fact === "pay_range_ok") return true;
+  const t = norm(String(q.label ?? ""));
+  return PAY_RANGE_ASKED.test(t) && !/\b(what|how much|please|if (not|no))\b/.test(t);
+}
+export function salaryExpectationAsked(q: Question): boolean {
+  const label = String(q.label ?? ""), t = norm(label);
+  if (PAY_HISTORY_ASKED.test(label)) return false;
+  // D-053c: a yes or no about the posting's range is its own per-application question, not the amount (never offered one).
+  if (payRangeAsked(q)) return false;
+  if (SALARY_EXPECTATION_ASKED.test(t)) return true;
+  const m = mapQuestion(q);
+  if (m.fact === "salary_expectation") return true;
+  return m.fact === "unknown" && /\bsalary\b/.test(t) && !/\b(current|currently|present|currency|paid|earn(ed|ing)?)\b/.test(t);
+}
 export function answerKey(q: Question, jobId: string, o: { haveFact?: boolean; here?: boolean } = {}): string {
   const m = mapQuestion(q);
   const words = norm(q.label);
   const job = `job:${h16(`${jobId}\n${words}`)}`, wording = `label:${h16(words)}`;
+  if (BIRTH_DATE.test(String(q.label ?? "")) || PAY_HISTORY_ASKED.test(String(q.label ?? "")) || salaryExpectationAsked(q) || payRangeAsked(q)) return job;
   if (m.kind === "fact") {
     // ROUND 4 (2026-11-05): a self-identification answer (gender, race, ethnicity, veteran or disability status) is given to
     // one employer (extension apply_core.ts staysWithPosting). Kept as the one `fact:eeo`, a "No" to "Do you have a

@@ -10,7 +10,8 @@
 //    VM's own allow-list (APPLY_VM_ALLOW_HOSTS) names them; loopback (mock forms) always passes for the dry run.
 //  - isolation: every attempt is a fresh browser context (no cookies or storage shared between people or attempts); the
 //    resume of one application is written to a private folder of its own and removed after.
-//  - a verification check (captcha) or a sign-in wall stops the item as 'needs you' with its link. Never solved, never signed in.
+//  - a verification check (captcha), a sign-in wall (SSO, password, create-account) or an emailed code stops the item as 'needs you'
+//    with its link and nothing_sent (WO-L). Never solved, never signed in.
 //  - retries only BEFORE Submit (in-process, and the database re-queues a worker that died before it); "submitting" is
 //    recorded in the database before the click, and nothing after it is ever re-sent.
 //  - no volume cap of ours (D-MS-2). Concurrency is the machine's capacity; a portal that refuses (429 / 503 / bot check)
@@ -20,6 +21,12 @@ const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { applyOne, payloadHash, NeedsUser } = require("./parallel-apply.cjs");
+// What the person is told was handed to them, per HANDOFF_REASONS (the same words as parallel-apply.cjs and scripts/apply.ts).
+const HANDED_BACK = {
+  login_required: "the employer asks the person to sign in; they finish it at the link",
+  bot_check: "a verification check appeared; the person finishes it at the link",
+  email_code: "the employer emailed the person a code; they finish it at the link",
+};
 
 const sha256 = (b) => crypto.createHash("sha256").update(b).digest("hex");
 // The same canonical JSON as supabase/functions/_shared/career_apply_store.ts and career_apply_canonical in SQL.
@@ -37,14 +44,23 @@ const queueHash = (payload) => sha256(Buffer.from(canonical(payload), "utf8"));
 
 const REFUSED = /(^|\.)(linkedin\.com|lnkd\.in|indeed\.com|joinhandshake\.com|handshake\.com)$/;
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+// The boards the VM drives: only those the strict browser benchmark shows the runner completes (architect ruling 2026-11-10,
+// release item 2), each by an exact host pattern; the same patterns as career_apply_vm_family (20261110120000). REFUSED wins.
+const LABEL = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
+const BOARDS = [
+  ["greenhouse", /^(?:boards|job-boards)\.greenhouse\.io$/],
+  ["lever", /^jobs\.lever\.co$/],
+  ["personio", new RegExp(`^${LABEL}\\.jobs\\.personio\\.de$`)],
+  ["breezy", new RegExp(`^${LABEL}\\.breezy\\.hr$`)],
+];
 function atsOf(url) {
   let u;
   try { u = new URL(url); } catch { return { refuse: "invalid_url" }; }
   const host = u.hostname.toLowerCase().replace(/^www\./, "");
   if (REFUSED.test(host)) return { refuse: "site_not_supported" };
   if (LOOPBACK.has(host)) { const m = /^\/(greenhouse|lever)\//.exec(u.pathname); return m ? { ats: m[1], host: u.host, local: true } : { refuse: "site_not_supported" }; }
-  if (host === "boards.greenhouse.io" || host === "job-boards.greenhouse.io") return { ats: "greenhouse", host: u.host };
-  if (host === "jobs.lever.co") return { ats: "lever", host: u.host };
+  if (u.port) return { refuse: "site_not_supported" };
+  for (const [ats, re] of BOARDS) if (re.test(host)) return { ats, host: u.host };
   return { refuse: "site_not_supported" };
 }
 
@@ -176,15 +192,32 @@ function createWorker(o) {
     }
     if (res.status === "needs_user") {
       if (res.reason === "bot_check") await refused(row, "bot_wall", null);
-      return void (await complete(row, "needs_user", res.reason, { ...ev, handed_back: res.reason === "bot_check" ? "a verification check appeared; the person finishes it at the link" : "the employer asks the person to sign in; they finish it at the link" }));
+      // A wall stops the run before Submit (parallel-apply never hands one back after the click): nothing was sent, which
+      // is what lets the person finish it themselves or have it prepared again (WO-L). The wall kind is kept; the page's
+      // contents are not.
+      return void (await complete(row, "needs_user", res.reason, { ...ev, nothing_sent: true, wall: res.wall || (res.reason === "bot_check" ? "bot_check" : null), handed_back: HANDED_BACK[res.reason] || HANDED_BACK.login_required }));
     }
     if (res.status === "unknown_outcome") return void (await complete(row, "unknown_outcome", "application outcome unknown: " + String(res.reason || "").slice(0, 80), ev));
     // not_submitted
-    // A required question the person has not answered (or one that could not be set and read back): handed back by name, never guessed.
-    if (res.reason === "missing_required_answer" || res.reason === "field_not_filled") {
-      const q = String(res.field || "").replace(/\s+/g, " ").slice(0, 80);
-      return void (await complete(row, "needs_user", `${res.reason}${q ? ": " + q : ""}`, { ...ev, nothing_sent: true, field: res.field, needs: res.needs || null, handed_back: res.reason === "missing_required_answer" ? "a required question has no confirmed answer" : "a required question could not be filled in and checked" }));
+    // WO-M fix a: a required question the person has not answered ends exactly as the cloud runner ends it (scripts/apply.ts):
+    // not_submitted / needs_answers, nothing sent. That is the one state the database re-prepares from
+    // (career_apply_reprepare_on_needs_answers, 20261101130000): the posting goes back in the person's queue, the question is
+    // asked, and the new answer goes only on a NEW card and a NEW approval. The questions travel in the evidence, in the form's
+    // own words and options, never in the reason (the trigger matches the reason exactly).
+    if (res.reason === "missing_required_answer") {
+      const needs = Array.isArray(res.needs) && res.needs.length ? res.needs : [{ label: res.field || "" }];
+      const questions = needs.map((n) => ({ label: String(n.label || "").replace(/\s+/g, " ").slice(0, 200), ...(Array.isArray(n.options) && n.options.length ? { options: n.options.map(String).slice(0, 60) } : {}) }));
+      return void (await complete(row, "not_submitted", "needs_answers", { ...ev, nothing_sent: true, field: res.field, fields: questions.map((q) => q.label), questions, needs: res.needs || null, handed_back: "a required question has no confirmed answer" }));
     }
+    // One that could not be set and read back: handed back by name, never guessed.
+    if (res.reason === "field_not_filled") {
+      const q = String(res.field || "").replace(/\s+/g, " ").slice(0, 80);
+      return void (await complete(row, "needs_user", `${res.reason}${q ? ": " + q : ""}`, { ...ev, nothing_sent: true, field: res.field, needs: res.needs || null, handed_back: "a required question could not be filled in and checked" }));
+    }
+    // The posting's own page answered 404 Not Found or 410 Gone on every try: the posting is closed, not a page that failed to
+    // load (batch of 60: a Lever 404 read "retries_exhausted"). Reported as closed, with the status as its proof; the portal is
+    // not held off for it.
+    if (res.reason === "retries_exhausted" && /^page_load_(404|410)$/.test(res.error || "")) return void (await complete(row, "not_submitted", "POSTING_CLOSED", { ...ev, nothing_sent: true, error: res.error, closed: "the posting's page answered " + res.error.slice(-3) }));
     if (res.reason === "retries_exhausted") {
       if (res.error === "page_load_429") await refused(row, "rate_limited", null);
       else if (/^page_load_5\d\d$/.test(res.error || "")) await refused(row, "server_busy", null);
@@ -242,4 +275,4 @@ function createWorker(o) {
   return { run, tick, stop() { stopping = true; }, stats, cfg, inflight, pct: (p) => pct(stats.ms, p) };
 }
 
-module.exports = { createWorker, restRpc, queueHash, canonical, atsOf, machineSlots };
+module.exports = { createWorker, restRpc, queueHash, canonical, atsOf, machineSlots, BOARDS };

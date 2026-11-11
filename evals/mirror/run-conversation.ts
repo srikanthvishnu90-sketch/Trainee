@@ -36,6 +36,7 @@ const out = opt("--out") ?? new URL(`./results/conversation-${dry ? "dry" : "liv
 const promptLog = opt("--prompt-log"); // dry run only: where to write the system prompt each model call saw (debugging)
 
 let modelCalls = 0, spent = 0, label = "";
+const modelErrors = new Map<number, string>();
 const prompts: string[] = [];
 const PRICE = { input: 2 / 1e6, output: 10 / 1e6, cacheRead: 0.1 / 1e6, cacheWrite: 2.5 / 1e6 };
 const scripted = (chat: any) => {
@@ -49,6 +50,8 @@ const model = async (req: Request): Promise<Response> => {
   if (spent >= budget) throw new Error(`budget reached: $${spent.toFixed(3)} of $${budget}`);
   modelCalls++;
   const res = await realFetch(req);
+  // A model error is the product's to handle (it falls back), but the run says what it was, once per status.
+  if (!res.ok && !modelErrors.has(res.status)) { modelErrors.set(res.status, (await res.clone().text()).slice(0, 300)); console.log(`model answered ${res.status}: ${modelErrors.get(res.status)}`); }
   try {
     const u = (await res.clone().json())?.usage ?? {};
     spent += (u.input_tokens ?? 0) * PRICE.input + (u.output_tokens ?? 0) * PRICE.output + (u.cache_read_input_tokens ?? 0) * PRICE.cacheRead + (u.cache_creation_input_tokens ?? 0) * PRICE.cacheWrite;

@@ -66,6 +66,8 @@ jobs:
           mkdir -p "$RUNNER_TEMP/out"
           deno run -A --no-check --import-map=tests/flow/supabase-npm.json evals/mirror/run-conversation.ts --live --budget-usd "${{ steps.req.outputs.budget }}" \
             --conv "${{ steps.req.outputs.conv }}" $P --out "$RUNNER_TEMP/out/trainee-${{ steps.req.outputs.label }}.jsonl" | tee "$RUNNER_TEMP/out/summary.txt"
+          # The persona and the prompts are fictional (evals/mirror/instinct-wa-batch1/README.md), so the transcript is printed.
+          cat "$RUNNER_TEMP/out/trainee-${{ steps.req.outputs.label }}.jsonl"
           spent=$(grep -o 'spent_usd=[0-9.]*' "$RUNNER_TEMP/out/summary.txt" | cut -d= -f2)
           echo "spent=${spent:-}" >> "$GITHUB_OUTPUT"
       - name: Settle the ledger to the metered cost

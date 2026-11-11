@@ -22,11 +22,12 @@ import { assessmentDeadline, type Deadline, type Draft, dueText as dueTextOf, sa
 import { careerTokenFor, CAREER_READ_SCOPE, type ReadResult, readMailSince, type TokenDeps } from "./career_mail_gmail.ts";
 import type { MailStore } from "./career_mail_store.ts";
 import { type Admit, dayStartOf, type Message, messageOf, type OutreachDraft, type OutreachStore, payloadHash, recordOutreach, type SendResult } from "./career_outreach.ts";
-import { ONE_ADDRESS } from "./career_outreach_gmail.ts";
+import { ONE_ADDRESS, type Threading } from "./career_outreach_gmail.ts";
 import { runMail } from "./career_proactive_run.ts";
 import { type DraftRow, type ReadStanding, standingFrom } from "./career_standing.ts";
 import { vaultRefreshWrite } from "./oauth_vault_refresh.ts";
 import { PARTIAL_WORDS } from "./oauth_connect.ts";
+import { MAIL_REPLY_CARD_INTENT, type ReplyCardMeta, replyAnswer } from "./career_mail_reply.ts"; // D-062: answering an email
 
 export const CHECK_INTENT = "career_inbox_check";
 export const FOLLOWUP_CARD_INTENT = "career_followup_card";
@@ -161,7 +162,7 @@ export interface FollowupDeps {
   name: () => string | null; // the person's own name on their profile, for the sign-off when no signature is set
   markSent: (userId: string, c: Card, outreachId: string, at: number) => Promise<void>;
   mailOn: boolean; readNow: (userId: string) => Promise<MailNow>;
-  sendOn: boolean; canSend: (userId: string) => Promise<boolean>; send: (userId: string, m: Message) => Promise<SendResult>;
+  sendOn: boolean; canSend: (userId: string) => Promise<boolean>; send: (userId: string, m: Message, t?: Threading | null) => Promise<SendResult>;
   connectAsk?: string;
   // D-037 (incremental authorization): the person's "allow sending" link (a connect link with reason "send" that asks Google
   // for gmail.send on top of their grant), or null when it can't be made. Offered only when a send was refused for want of it.
@@ -219,6 +220,11 @@ export async function followupTurn(o: { message: string; userId: string; threadI
   if (!ans) return null;
   let last: { intent: string | null; meta: Record<string, unknown> } | null;
   try { last = await o.deps.lastAssistant(o.threadId); } catch (e) { console.error("follow-up: last reply not read", e instanceof Error ? e.message : String(e)); return null; }
+  // D-062: the reply card for an email in the person's inbox (career_mail_reply.ts): a yes sends exactly it once, a no drops it.
+  if (last?.intent === MAIL_REPLY_CARD_INTENT && typeof last.meta?.mail_reply_card === "string" && last.meta?.mail_reply && (ans.kind === "yes" || ans.kind === "no")) {
+    return await replyAnswer({ userId: o.userId, now: o.now, answer: ans.kind, meta: last.meta as unknown as ReplyCardMeta,
+      deps: { outreach: o.deps.outreach, sendOn: o.deps.sendOn, canSend: o.deps.canSend, send: o.deps.send, sendConsent: o.deps.sendConsent } });
+  }
   if (!last || last.intent !== FOLLOWUP_CARD_INTENT) return null;
   if (last.meta?.followup_ask && typeof last.meta.followup_ask === "object") return await askAnswer(o, ans, last.meta.followup_ask as Card);
   if (typeof last.meta?.followup_card === "string") return await cardAnswer(o, ans, last.meta.followup_card, last.meta.followup as Card | undefined);

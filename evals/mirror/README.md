@@ -18,6 +18,7 @@ approval (CLAUDE.md: no spend without the owner's yes; D-038a's $70 total).
 | `run-trainee.ts` | Sends the set to Trainee's real handler, then writes `trainee.jsonl`. Runs `--dry-run` at $0, or `--live` after an approval. |
 | `run-conversation.ts` | One conversation through the same handler, in order, on one person (a real benchmark where later turns lean on earlier ones). `--dry-run` at $0; `--live` in CI (`.github/workflows/mirror-conversation.yml`). |
 | `instinct-wa-batch1/` | The owner's real WhatsApp benchmark against Instinct (23 scenarios, fictional names): the standard, its persona, and the live results. |
+| `heldout/` | P2 of the mirror rulings: 1,000 generated conversations (about 3,000 turns) in the ruling families, each turn with its expectation from the rulings, split dev 20% / held-out 80% (sealed), the $0 scorer through the real handler and the live scorer hook. Its README has the baseline. |
 | `score.ts` | Scores two transcripts against each other. Prints the summary and the worst 50 gaps, and writes the gaps as held-out candidates. |
 | `results/trainee-dry-50.jsonl` | The $0 dry run on 50 prompts spread over every category: the harness proof. |
 

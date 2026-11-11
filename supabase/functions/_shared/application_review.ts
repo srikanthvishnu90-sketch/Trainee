@@ -69,6 +69,12 @@ export function resumeLabelOf(m: ResumeMeta, tz?: string | null): string {
   const d = m.at && Number.isFinite(Date.parse(m.at)) ? (() => { const f = (timeZone: string) => new Date(Date.parse(m.at!)).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone }); try { return f(tz || "UTC"); } catch { return f("UTC"); } })() : null;
   return [m.name, m.version, m.target, d ? `made ${d}` : "date not on file"].join(" - ");
 }
+// The resume on the chat review line: its name, then which version it is and what it targets ("base version, not tailored for
+// this role"; "version 2, tailored for <role> at <employer>").
+export function resumeChatLabel(m: ResumeMeta): string {
+  const v = m.version === "your base resume" ? "base version" : m.version;
+  return `${m.name} (${v}, ${m.target})`;
+}
 export interface ReviewItem {
   id: string; job_id: string | null; employer: string; role: string | null; url: string | null; destination: string | null;
   resume: { label: string; sha12: string } | null; files: string[];
@@ -245,7 +251,10 @@ export async function reviewLinksFor(shown: { id: string }[], d: ReviewDeps): Pr
     const item = reviewOf({ ...r, title: titles.get(job) ?? null, open: open.filter((q) => job && (q.job_ids ?? []).includes(job)),
       resume_version: v && Number.isInteger(v.n) && v.n > 0 ? { n: v.n, at: typeof v.at === "string" ? v.at : null } : null });
     const made = await d.create(item).catch(() => null);
-    if (made?.url) lines.push(`${i + 1}. ${item.employer}${item.role ? `, ${item.role}` : ""}: ${made.url}`);
+    // R10 fix 12 (spec B.3, E.3 25): the chat names what the File holds for each one, not only its link: the employer's
+    // application page and the resume by a human label (never a hash prefix).
+    if (made?.url) lines.push([`${i + 1}. ${item.employer}${item.role ? `, ${item.role}` : ""}: ${made.url}`,
+      ...(item.url ? [`   Application page: ${item.url}`] : []), ...(item.resume_meta ? [`   Resume: ${resumeChatLabel(item.resume_meta)}`] : [])].join("\n"));
     // Owner clarification (2026-11-09, D-MS-1 item 4): one held for an unanswered required question stays out of the set a
     // yes approves, and the card says so, with the one narrow question.
     if (item.unresolved.length) held.push(`${i + 1}. ${item.employer}: held back, so a yes does not approve it. ${item.unresolved[0].ask}`);
@@ -253,6 +262,7 @@ export async function reviewLinksFor(shown: { id: string }[], d: ReviewDeps): Pr
   const out = [
     held.length ? `Not covered by a yes until you answer:\n${held.join("\n")}` : "",
     lines.length ? `The full review of each, with the application page, the resume file and exactly what your yes covers:\n${lines.join("\n")}` : "",
+    lines.length || held.length ? "Nothing is submitted until you reply \"yes\" to this card." : "",
   ].filter(Boolean);
   return out.length ? out.join("\n\n") : null;
 }

@@ -742,7 +742,7 @@ const G1_RECORD_READS: ReadonlySet<string> = new Set(["tracking_status", "tracki
   "campaign_digest", "season_dashboard", "intent_prior_application", "intent_role_closed", "career_resume_on_file", "career_resume_not_read",
   "graph_alumni", "graph_referral", "graph_keep_warm", "graph_paths", "career_list_reference", "profile_recall"]);
 // The message is about the person's own record ("have I", "my applications", "did my", "what do you know about me").
-const OWN_RECORD_ASK = /\b(?:my|mine|me|i'?ve|i\s+have|have\s+i|did\s+i|do\s+i\s+(?:have|know)|i\s+(?:applied|sent|know|asked|told))\b/i;
+const OWN_RECORD_ASK = /\b(?:my|mine|me|i'?ve|i\s+have|have\s+i|did\s+i|do\s+i\s+(?:have|know)|i\s+(?:applied|sent|know|asked|told))\b|\b(?:the|that|this|our)\s+(?:application\s+)?(?:tracker|applications?|pipeline)\b/i;
 // A File or document code built for the ask is the deliverable itself (G11): it goes to the person.
 const G1_DELIVERABLE = ["file", "documents", "document", "tailorDoc"];
 // D-061 G1 (the model decides; code guards): the turns code's rules above kept, which the ruling gives to the brain, go there
@@ -778,7 +778,10 @@ export function g1CodeAnswers(message: string, intent: string, result: unknown, 
   // A drill answer graded against the bank's own key is the answer to code's question; a rubric read is not (prepRubricRead).
   if (intent === "prep_brief" && r.scored && r.scored !== "rubric") return true;
   // An instruction (not a question, nothing forbidden) that code carried out with a product, or one to message or list people.
-  if (!questionShaped(m) && (G1_ACTION_PRODUCT.some((k) => has(r, k)) || LIST_OR_SEND.test(m) || ASK_TO_ACT.test(m) || G1_INSTRUCTION.test(m))) return true;
+  // A boundary ("just research, don't message anyone") limits the instruction, it does not make it a question; a draft asked for
+  // under "don't send" is the brain's to write (G10, D-059).
+  const asks = QUESTION_LEAD.test(m) || m.includes("?"), draftOnly = boundaryOf(m) === "send" && G1_PRODUCERS.has(intent);
+  if (!asks && !draftOnly && (G1_ACTION_PRODUCT.some((k) => has(r, k)) || LIST_OR_SEND.test(m) || ASK_TO_ACT.test(m) || G1_INSTRUCTION.test(m))) return true;
   // A sourced record behind the answer (a company file, a comparison, a benchmark with figures) stays code's (D-007), as
   // codeProduct keeps it on the staged list.
   if (has(r, "company") || has(r, "comparison") || (Array.isArray(r.bench?.figures) && r.bench.figures.length > 0)) return true;

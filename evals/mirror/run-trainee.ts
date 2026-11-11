@@ -56,7 +56,7 @@ const model = async (req: Request): Promise<Response> => {
   const res = await realFetch(req);
   try {
     const u = (await res.clone().json())?.usage ?? {};
-    spent += (u.input_tokens ?? 0) * PRICE.input + (u.output_tokens ?? 0) * PRICE.output + (u.cache_read_input_tokens ?? 0) * PRICE.cacheRead + (u.cache_creation_input_tokens ?? 0) * PRICE.cacheWrite;
+    spent += (u.input_tokens ?? 0) * PRICE.input + (u.output_tokens ?? 0) * PRICE.output + (u.cache_read_input_tokens ?? 0) * PRICE.cacheRead + (u.cache_creation_input_tokens ?? 0) * PRICE.cacheWrite + (u.server_tool_use?.web_search_requests ?? 0) * 0.01; // D-060: $0.01 a search
   } catch { /* a non-JSON answer is the product's to handle */ }
   return res;
 };

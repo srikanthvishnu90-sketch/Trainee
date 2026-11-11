@@ -1512,6 +1512,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             if (!found && f5Said?.explain) out = { ...out, intent: "career_discovery", resultStatus: "blocked", handler: "search_judge",
               reply: "What blocked it: a search connection problem. The job boards could not be read just now, so this says nothing about whether open roles exist. It is not your resume: listing roles never needs a confirmed resume. Nothing was applied for. Ask again in a few minutes and I'll run the same search." };
             if (found) {
+              // D-058: what the chat reply no longer says (refresh time, freshness, "Nothing was invented") is the turn's proof.
+              if (found.proof) agentMeta = { ...(agentMeta || {}), search_proof: found.proof };
               // ONBOARDING ROUND 2 and F.1: the resume line and the blocker answer (searchReplyParts, shared with the eval harness).
               const prof = (ctx as any).profile;
               const { why, resumeLine } = searchReplyParts({ message, said: f5Said, found, profile: prof, prior: f5Before });

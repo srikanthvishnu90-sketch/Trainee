@@ -48,7 +48,8 @@ Deno.test("R05 harness path: 'actually remote only' after the Chicago search kee
   // The first search lists the item's seeded Chicago roles (it used to say none were on the list).
   assert(/Lakefront Data/.test(first) && /Prairie Analytics/.test(first), first);
   eq(r.trace?.map((t) => [t.route, (t as any).searched === true]), [["router", true], ["router", true]], JSON.stringify(r.trace));
-  assert(/^Remote only now: Chicago is dropped, so the 2 Chicago roles I listed that aren't remote are off the list\./.test(last), last);
+  // Architect amendment (D-058, 2026-11-11, owner's "same length as Instinct"): the lead keeps the count of roles the change removed, in fewer words.
+  assert(/^Remote only now, so the 2 Chicago roles I listed are off the list\./.test(last), last);
   assert(/Northline Health/.test(last) && /remote data analyst/.test(last), `the remote role remains, the role is kept: ${last}`);
   assert(!/Lakefront|Prairie/.test(last), `no onsite or hybrid role is offered: ${last}`);
   assert(!/what role|which role|tell me the role/i.test(last), `intake is not restarted: ${last}`);
@@ -171,7 +172,8 @@ Deno.test({
         return out;
       };
       const [, r05] = await talk("R05", item("R05").turns);
-      assert(/^Remote only now: Chicago is dropped, so the \d Chicago roles? I listed that (?:aren't|isn't) remote (?:are|is) off the list\./.test(r05.reply), r05.reply);
+      // Architect amendment (D-058, 2026-11-11, owner's "same length as Instinct"): the same shorter lead.
+      assert(/^Remote only now, so the \d Chicago roles? I listed (?:are|is) off the list\./.test(r05.reply), r05.reply);
       assert(/Northline Health/.test(r05.reply) && !/Lakefront Data|Prairie Analytics/.test(r05.reply), r05.reply);
       const [m04] = await talk("M04", item("M04").turns);
       assert(/I need both from you, one at a time: your graduation date, then your expected salary for Acme Analytics\./.test(m04.reply) && ONE_QUESTION(m04.reply), m04.reply);

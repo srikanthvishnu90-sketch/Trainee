@@ -22,7 +22,7 @@
 import { newFitCache, searchPostings, type SearchHit } from "./career_search.ts";
 import { NO_CLOCK, type TurnClock } from "../agent-chat/turn_clock.ts";
 import { searchWords, wordStem } from "./career_ingest.ts";
-import { correctedAsk } from "./search_correction.ts";
+import { correctedAsk, refinedAsk } from "./search_correction.ts";
 import { blockerAsk, inMetro, METRO, remoteInUs, widenedAsk, withScope } from "./search_widen.ts";
 import { arrangementOf, checkedAt, nextWidening, placesLine, roleVariants, studentWindowOf, wantOf } from "./search_shortlist.ts";
 import { apiUrlFor, ashbyBoardFor, type LinkCheck, liveOnly, SEARCH_CHECK_MAX, searchCheck } from "./link_check.ts";
@@ -376,6 +376,10 @@ export interface SearchJudgeResult {
   summary?: string;
   // F.1: what kept the search from listing roles, from this run's own evidence ("none": roles are listed).
   blocker?: "none" | "no_roles" | "all_closed";
+  // D-058 (architect, 2026-11-11, under the owner's "same length as Instinct"): what the chat reply no longer says is kept here,
+  // the turn's proof (D-024): the full scope checked with the live board's refresh time, and that nothing was invented or
+  // applied for. The handler records it on the turn (agent meta `search_proof`); a listed search's freshness is on its File.
+  proof?: { checked: string; refreshed_at: string | null; result: string; invented: string; applied: string; freshness?: string | null };
 }
 export const SEARCH_INTENTS = new Set(["career_discovery", "career_internship_discovery"]);
 // The ask, as the router parsed it this turn (discovery.lastParams, written by its handleDiscovery for this very text).
@@ -439,9 +443,12 @@ export function searchAskFromMessage(message: string, routerOut: { intent?: stri
   return { ask, append: also };
 }
 // MIRROR-1000: where a search looked, as words ("in Chicago"; a remote-only search is "(remote)", never "in remote").
+// D-058: one widening offer, the command first ("Say "include remote US" to widen to remote roles in the US.").
+export function wideningOffer(w: string): string {
+  const m = /^(.*?): say "([^"]+)"$/.exec(w);
+  return m ? `Say "${m[2]}" to widen to ${m[1].replace(/\s*\([^)]*\)$/, "")}.` : `Want ${w.replace(/: say which$/, "")}? Say which.`;
+}
 const whereOf = (ask: SearchAsk) => { const p = placesLine(ask); return /^remote/.test(p) ? `(${p})` : `in ${p}`; };
-// MIRROR-1000: an ask for a short answer, in the person's words.
-const SHORT_ASK = /\b(?:keep it (?:short|brief)|short version|(?:in )?(?:one or two|one|two) (?:lines?|sentences?)|briefly|be brief|tl;?dr)\b/i;
 // MIRROR-1000: the limits a person stated that no posting field is read for here (freshness, arrangement, hours, size, start),
 // named back in their kind, so an empty answer shows they were heard and not silently dropped.
 export function statedNotesOf(message: string): string[] {
@@ -581,23 +588,31 @@ export async function searchJudgeTurn(o: {
     const scope = `I checked ${variants.join(", ")}${internOnly ? " internships" : ""} ${whereOf(ask)}, on the live board${age} and the saved snapshot of job boards`;
     const why = checked.dead && !checked.shown.length ? `${plural(checked.dead, "matching role was", "matching roles were")} found, but ${checked.dead === 1 ? "its application page shows it" : "their application pages show them"} closed when I checked (${at.text})`
       : notIntern ? `no open internships matched: ${plural(notIntern, "posting")} matched the place but ${notIntern === 1 ? "does" : "do"} not say ${notIntern === 1 ? "it is an internship" : "they are internships"}` : `none was found, so I have no open roles to list (${liveNote}, and the saved snapshot has none either)`;
+    const whyShort = checked.dead && !checked.shown.length ? `${plural(checked.dead, "matching role was", "matching roles were")} found, but ${checked.dead === 1 ? "it was" : "they were"} closed when I checked`
+      : notIntern ? `no open internships (${plural(notIntern, "posting")} in the place ${notIntern === 1 ? "doesn't" : "don't"} say ${notIntern === 1 ? "it is an internship" : "they are internships"})` : "no open roles";
     // MIRROR-1000 (2026-11-11): the limits the person stated are said back, so an empty answer shows they were kept, and the
     // empty result is said in plain words ("no open roles to list").
     const kept = ask.limits && hasLimits(ask.limits) ? limitsLine({ ...ask.limits, bands: internOnly ? null : ask.limits.bands }) : "";
     const unchecked = statedNotesOf(o.message);
     const keptLine = (kept ? ` I kept your limits: ${kept}.` : "") + (unchecked.length ? ` Your other limits (${unchecked.join(", ")}) are noted, and no posting was left out for them.` : "");
-    // A person who asked for a short answer ("keep it short", "one or two lines") gets the scope, the result and the widening only.
-    const reply = SHORT_ASK.test(o.message)
-      ? `I checked ${variants.join(", ")}${internOnly ? " internships" : ""} ${whereOf(ask)} on the live board and the saved snapshot of job boards: none was found, so I have no open roles to list, and nothing was applied for. The most useful widening is ${nextWidening(ask)}.`
-      : `${scope}: ${why}.${capLine}${leftOut}${keptLine} Nothing was invented to fill the list, and nothing was applied for. The most useful widening is ${nextWidening(ask)}, and I'll search again.`;
-    return { reply, status: "none", source: "none", shortlist: [], accounting: null, modelCalled: false, blocker: checked.dead && !checked.shown.length ? "all_closed" : "no_roles" };
+    // D-058 ruling 2 (architect, 2026-11-11, under the owner's "same length as Instinct"): the short empty-search form, one clause
+    // of scope (what was checked, and why nothing qualified) and one widening offer. The limits kept and the postings left out
+    // stay (they are what was checked). The refresh time, "Nothing was invented" and "nothing was applied for" move to the
+    // turn's proof (D-024), below.
+    const reply = `I checked ${variants.join(", ")}${internOnly ? " internships" : ""} ${whereOf(ask)} on the live board and the saved job-board snapshot: ${whyShort}.${capLine}${leftOut}${keptLine} ${wideningOffer(nextWidening(ask))}`;
+    const proof = { checked: scope, refreshed_at: refreshed ?? null, result: why, invented: "Nothing was invented to fill the list.", applied: "Nothing was applied for." };
+    return { reply, status: "none", source: "none", shortlist: [], accounting: null, modelCalled: false, blocker: checked.dead && !checked.shown.length ? "all_closed" : "no_roles", proof };
   }
   const byId = new Map(pool.map((p) => [p.job_id, p]));
+  let liveFresh: string | null = null;
   const freshness = source === "live"
     ? (() => {
       const oldest = Math.min(...pool.map((p) => Date.parse(String(p.first_seen_at ?? ""))).filter(Number.isFinite));
       const days = Number.isFinite(oldest) ? Math.max(1, Math.ceil((o.now - oldest) / DAY)) : null;
-      return `From ${plural(found.total, "live posting")} for ${asked(ask)}${days ? `, first seen in the last ${plural(days, "day")}` : ""}.`;
+      // D-058 ruling 1: the chat line keeps the count and the scope; how fresh ("first seen in the last N days") is on the File
+      // (each posting's first-seen date, role_results.ts) and in the turn's proof.
+      liveFresh = days ? `first seen in the last ${plural(days, "day")}` : null;
+      return `From ${plural(found.total, "live posting")} for ${asked(ask)}.`;
     })()
     : (() => {
       const fetched = pool.map((p) => String(p.fetched_on ?? "")).filter(Boolean).sort().at(-1);
@@ -699,7 +714,8 @@ export async function searchJudgeTurn(o: {
   if (!(listed.length && noApply)) lines.push(listed.length ? `Say "apply to these" to queue the ${listed.length === 1 ? "one" : listed.length} listed, or name one to tailor your resume for.` : "Widen the role or the place and I'll search again.");
   const shortlist = listed.map((r) => ({ id: r.h.job_id, title: r.h.title, company: r.h.company || null, location: where(r.h) || null, url: r.h.url || null }));
   const picked = rows.slice(0, 25).map((r) => ({ hit: r.h, posting: byId.get(r.h.job_id) ?? null, checked: { state: (linkOf.get(r.h.job_id) ?? "unchecked") as "live" | "unknown" | "unchecked", at: o.now }, submit: caps.get(r.h.job_id) ?? null }));
-  return { reply: lines.join("\n"), status: account ? "judged" : "ranked", source, shortlist, accounting: account, modelCalled, picked, summary, blocker: "none" };
+  return { reply: lines.join("\n"), status: account ? "judged" : "ranked", source, shortlist, accounting: account, modelCalled, picked, summary, blocker: "none",
+    proof: { checked: lines[0], refreshed_at: null, result: summary, invented: "Every row is a posting read this turn.", applied: "Nothing was applied for.", freshness: liveFresh } };
 }
 
 // The ask for this turn: the router's search with the message's own parameters added; a search the router ran but named no
@@ -714,13 +730,20 @@ export async function searchJudgeTurn(o: {
 // the dropped roles are not named again, so no onsite role reads as a match). `prior` is the thread's search state before this turn (discovery).
 export function correctionLead(message: string, prior: any, found: SearchJudgeResult): string {
   const fixed = correctedAsk(message, prior);
-  if (!fixed || !fixed.changes.includes("remote_only")) return "";
+  // MIRROR-1000 gaps (2026-11-11): a refinement that names no role says what was kept (a new place is named by the scope line
+  // itself; saying it first would restate the ask).
+  if (!fixed) {
+    const kept = refinedAsk(message, prior);
+    return kept ? `I kept the rest of your last search: ${kept.role}${kept.place ? ` in ${kept.place}` : kept.remoteOnly ? " (remote)" : ""}.\n` : "";
+  }
+  if (!fixed.changes.includes("remote_only")) return "";
   const was = String(prior?.lastAsk?.place ?? "").trim() || String(fixed.ask.prevPlace ?? "").trim();
   if (!was) return "";
   const now = new Set(found.shortlist.map((s) => String(s.id)));
   const gone = (Array.isArray(prior?.lastShortlist) ? prior.lastShortlist : []).filter((s: ShortlistEntry) => s && !now.has(String(s.id))).length;
   return gone
-    ? `Remote only now: ${was} is dropped, so the ${gone === 1 ? `${was} role I listed that isn't remote is` : `${gone} ${was} roles I listed that aren't remote are`} off the list.\n`
+    // D-058 ruling 2: the count of roles the change removed stays; "that isn't remote" is what "Remote only now" already says.
+    ? `Remote only now, so the ${gone === 1 ? `${was} role I listed is` : `${gone} ${was} roles I listed are`} off the list.\n`
     : `Remote only now: ${was} is dropped.\n`;
 }
 export function searchReplyParts(o: { message: string; said: { append?: boolean; explain?: boolean } | null; found: SearchJudgeResult; profile: any; prior?: any }): { why: string; resumeLine: string } {
@@ -750,6 +773,8 @@ export function askFor(message: string, routerOut: { intent?: string; resultStat
   // F.1: "what is actually blocking the search?" runs the last search again; the reply names the evidenced blocker.
   const again = blockerAsk(message, discovery);
   if (again) return { ask: again, append: false, explain: true };
+  const kept = refinedAsk(message, discovery);
+  if (kept) return { ask: kept, append: false };
   const said = askForMessage(message, routerOut, discovery);
   return said ? { ...said, ask: { ...withScope(said.ask, message), ...(VERIFY.test(message) ? { verify: true } : {}), want: wantOf(message) } } : null;
 }

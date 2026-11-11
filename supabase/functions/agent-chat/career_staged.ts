@@ -19,11 +19,12 @@ import { servedBrain } from "./release_config.ts";
 import { NO_CLOCK, type TurnClock } from "./turn_clock.ts";
 import { crisisReply } from "./crisis.ts";
 import { PAYLOAD_INTENTS } from "../_shared/career_reply_writer.ts";
+import { multiAsk, nonEnglishAsk } from "../_shared/ask_language.ts";
 
 type Env = { get(k: string): string | undefined };
 type Host = { runTurn(text: string, ctx: any): { intent: string | null; handler: string | null; reply?: string; contained?: boolean; result?: any }; isHostControlled(text: string, ctx: any): boolean };
 
-import { correctedAsk } from "../_shared/search_correction.ts";
+import { correctedAsk, refinedAsk } from "../_shared/search_correction.ts";
 import { askFor } from "../_shared/career_search_judge.ts";
 import { namedDraftAsk, outreachAsk } from "../_shared/outreach_ask.ts";
 import { researchReplyOn } from "../_shared/research_reply.ts"; // D-047
@@ -425,6 +426,7 @@ export function followupOffTask(message: string, intent: string, result: unknown
   if (intent === "career_document_delivery") return !(Array.isArray(r.documents) && r.documents.length) && PACKET_ASK.test(m) && !RESUME_FILE.test(m);
   return false;
 }
+const NON_ENGLISH_KEPT = /^(?:conversation_|intent_cancelled|intent_recipient_change|prep_mock|negotiation_roleplay|career_erase|career_profile_erased|career_paused|career_resumed|paused_|pause_status|career_pending_approvals|career_approval|career_batch_apply|doorstep_|queue_|captcha_|portal_|disconnect|connect_|intent_opt_out|people_matching_stop)/;
 export function stagedDecision(o: { env: Env; message: string; ctx: Record<string, unknown>; host: Host; structured: boolean; clock?: TurnClock }): StagedDecision {
   const clock = o.clock ?? NO_CLOCK;
   const mode = brainMode(o.env);
@@ -435,7 +437,7 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (crisisReply(o.message) !== null) return { brain: false, mode, intent: null, reason: "crisis" };
   // Spec 2.3: a correction to the last search ("remote only", "only individual-contributor roles") changes its constraints in
   // code (search_correction.ts) and the next results use them; it is not a question for the brain.
-  if (correctedAsk(o.message, o.ctx.discovery)) return { brain: false, mode, intent: null, reason: "search_correction" };
+  if (correctedAsk(o.message, o.ctx.discovery) || refinedAsk(o.message, o.ctx.discovery)) return { brain: false, mode, intent: null, reason: "search_correction" };
   let probe, records: any[] = [];
   try { const copy = clock.sync("staged_probe_copy", () => probeCtx(o.ctx)); probe = clock.sync("staged_probe_router", () => o.host.runTurn(o.message, copy)); records = Array.isArray(copy.containmentRecords) ? copy.containmentRecords as any[] : []; }
   catch { return { brain: false, mode, intent: null, reason: "probe_failed" }; }
@@ -451,6 +453,13 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (researchReplyOn(o.env) && researchOverAction(o.message)) return { brain: true, mode, intent, reason: "company_research" };
   if (routerKept(o.env).has(intent)) return { brain: false, mode, intent, reason: "kept_on_router" };
   if (marketResearchAsk(o.env, o.message, intent)) return { brain: true, mode, intent, reason: "market_research" };
+  // MIRROR-1000 gaps (2026-11-11): the router's words are English. A non-English ask it claimed from one English keyword is
+  // the brain's, which answers in the person's language (ask_language.ts). Payloads, bare replies, mock sessions and the
+  // account's controls stay code's.
+  if (nonEnglishAsk(o.message) && !PAYLOAD_INTENTS.has(intent) && !NON_ENGLISH_KEPT.test(intent)) return { brain: true, mode, intent, reason: "non_english" };
+  // D-058 ruling 3: two asks in one message are the model's, which answers both; the router keeps single asks, payload intents
+  // included. The account's controls, approvals and bare replies stay code's (the same set the non-English route keeps).
+  if (multiAsk(o.message) && !NON_ENGLISH_KEPT.test(intent)) return { brain: true, mode, intent, reason: "multi_part" };
   // MIRROR-1000: a draft to a named person that the router read as a file ask, an alumni list or a missing recipient is the
   // brain's drafting turn (outreach_ask.ts namedDraftAsk).
   if (DRAFT_MISREAD.has(intent) && namedDraftAsk(o.message)) return { brain: true, mode, intent, reason: "named_draft" };

@@ -14,10 +14,14 @@
 //   shape        what each reply is (declined, question, list, draft, answer); a different shape is reported
 //   rubric       supabase/functions/_shared/reply_rubric.ts checkReply on Trainee's reply (Instinct's is scored too, for
 //                reference), with the prompt, the setup turns and the persona as the facts
-//   length       Trainee's prose against Instinct's: over when longer than max(1.2x, +40 chars) (instinct-tone-gate's bar)
+//   length_match Trainee's prose is the same length as Instinct's (owner, 2026-11-11: "Trainee's reply should be the same
+//                length"): within +/-10% of Instinct's characters, or +/-6 characters when Instinct's reply is under 60.
+//                Longer and shorter both miss (length.over / length.under). The tone gate uses the same window.
 //   refusal      Trainee opens with a refusal where Instinct did not, outside the refusal categories (needless refusal)
 //   internal     the rubric's internal words plus the words the head-to-head saw ("the record", "host", "packet")
 //   answers      the rubric's answers_first on Trainee's reply
+//   mirror_match the overall mirror: same_task AND length_match AND answers_first AND no internal words AND no refusal or
+//                action mismatch (one side declines and the other does not, a needless refusal, or different external actions)
 // The worst gaps (Instinct did it and Trainee did not first, then the rest by weight) are printed, and with --gaps written as
 // candidate held-out cases in the d054 item shape, with every reply excerpt redacted (emails, links, phone numbers, long
 // numbers and any capitalized name the prompt did not contain), because Instinct runs on the owner's signed-in machine.
@@ -30,7 +34,14 @@ export const EXTERNAL = new Set(["submit", "apply", "send", "message", "email", 
 const PROOF: Record<string, ProofKind> = { submit: "submitted", apply: "submitted", send: "sent", message: "sent", email: "sent", file: "file", save: "saved", search: "searched", schedule: "scheduled", connect: "connected", pause: "paused", cancel: "cancelled", verify: "verified" };
 const REFUSAL_OPEN = /^(?:i can['’]?t|i couldn['’]?t|i cannot|i could not|i'm unable|i am unable|sorry,? (?:but )?i can['’]?t|i won['’]?t)\b/i;
 const OBSERVED: [string, RegExp][] = [["the record", /\bthe record\b/i], ["host", /\bhost\b/i], ["write is not confirmed", /\bwrite is not confirmed\b/i]];
-export const allowedFor = (instinctChars: number) => Math.max(Math.round(instinctChars * 1.2), instinctChars + 40);
+// The same-length window (owner, 2026-11-11): +/-10% of Instinct's prose characters, +/-6 when Instinct's is under 60.
+export function lengthWindow(instinctChars: number): { min: number; max: number } {
+  const slack = instinctChars < 60 ? 6 : Math.round(instinctChars * 0.1);
+  return { min: Math.max(0, instinctChars - slack), max: instinctChars + slack };
+}
+export const lengthMatch = (traineeChars: number, instinctChars: number) => { const w = lengthWindow(instinctChars); return traineeChars >= w.min && traineeChars <= w.max; };
+/** The longest a reply may be against Instinct's (the window's top). */
+export const allowedFor = (instinctChars: number) => lengthWindow(instinctChars).max;
 
 export function shapeOf(reply: string): string {
   const t = String(reply ?? "").trim();
@@ -49,8 +60,9 @@ export interface PromptScore {
   id: string; category: string; missing: string[];
   instinct_ok: boolean | null; trainee_ok: boolean | null; trainee_failed: string[]; instinct_failed: string[];
   same_task: boolean; mirror: boolean; shape: { instinct: string; trainee: string }; external: { instinct: string | null; trainee: string | null };
-  rubric: { trainee: string[]; instinct: string[] }; length: { trainee: number; instinct: number; ratio: number; over: boolean };
-  needless_refusal: boolean; internal: string[]; answers_first: boolean; gap: number; reasons: string[];
+  rubric: { trainee: string[]; instinct: string[] }; length: { trainee: number; instinct: number; ratio: number; min: number; max: number; over: boolean; under: boolean };
+  length_match: boolean; needless_refusal: boolean; refusal_mismatch: boolean; act_mismatch: boolean; internal: string[]; answers_first: boolean;
+  mirror_match: boolean; gap: number; reasons: string[];
 }
 
 export function scorePrompt(p: MirrorPrompt, inst?: Line, trn?: Line): PromptScore {
@@ -66,12 +78,19 @@ export function scorePrompt(p: MirrorPrompt, inst?: Line, trn?: Line): PromptSco
     ...(/\bpackets?\b/i.test(T.reply) && !/\bpackets?\b/i.test(p.prompt) ? ["packet"] : [])] : [];
   const refusal = !!trn && !!inst && !p.category.startsWith("refusal_") && REFUSAL_OPEN.test(T.reply.trim()) && !REFUSAL_OPEN.test(I.reply.trim());
   const af = !!trn && !answersFirst({ ask: p.prompt, reply: T.reply }).length;
+  const both = !!inst && !!trn, win = lengthWindow(li), lm = both && lengthMatch(lt, li);
+  const si = shapeOf(I.reply), st = shapeOf(T.reply);
+  const refusalMismatch = both && (refusal || (si === "declined") !== (st === "declined"));
+  const actMismatch = both && xi !== null && xt !== null && xi !== xt;
   const s: PromptScore = {
     id: p.id, category: p.category, missing, instinct_ok: inst ? ei.ok : null, trainee_ok: trn ? et.ok : null, trainee_failed: et.failed, instinct_failed: ei.failed,
-    same_task: same, mirror: same && ei.ok === true && et.ok === true, shape: { instinct: shapeOf(I.reply), trainee: shapeOf(T.reply) }, external: { instinct: xi, trainee: xt },
-    rubric: { trainee: trn ? rub(T) : [], instinct: inst ? rub(I) : [] }, length: { trainee: lt, instinct: li, ratio: li ? lt / li : lt ? Infinity : 1, over: !!inst && !!trn && lt > allowedFor(li) },
-    needless_refusal: refusal, internal: [...new Set(internal)], answers_first: af, gap: 0, reasons: [],
+    same_task: same, mirror: same && ei.ok === true && et.ok === true, shape: { instinct: si, trainee: st }, external: { instinct: xi, trainee: xt },
+    rubric: { trainee: trn ? rub(T) : [], instinct: inst ? rub(I) : [] },
+    length: { trainee: lt, instinct: li, ratio: li ? lt / li : lt ? Infinity : 1, min: win.min, max: win.max, over: both && lt > win.max, under: both && lt < win.min },
+    length_match: lm, needless_refusal: refusal, refusal_mismatch: refusalMismatch, act_mismatch: actMismatch, internal: [...new Set(internal)], answers_first: af,
+    mirror_match: false, gap: 0, reasons: [],
   };
+  s.mirror_match = same && lm && af && !s.internal.length && !refusalMismatch && !actMismatch;
   const R = s.reasons;
   if (missing.includes("trainee")) R.push("missing trainee");
   if (s.instinct_ok === true && s.trainee_ok === false) R.push(`task not done by Trainee (${et.failed.join("; ").slice(0, 160)})`);
@@ -79,12 +98,13 @@ export function scorePrompt(p: MirrorPrompt, inst?: Line, trn?: Line): PromptSco
   if (xi !== null && xt !== null && xi !== xt) R.push(`different external actions (instinct: ${xi || "none"}, trainee: ${xt || "none"})`);
   if (s.shape.instinct !== s.shape.trainee && !missing.length) R.push(`shape ${s.shape.instinct} vs ${s.shape.trainee}`);
   if (refusal) R.push("needless refusal");
-  if (s.length.over) R.push(`long ${lt} > ${allowedFor(li)}`);
+  if (s.length.over) R.push(`long ${lt} > ${win.max}`);
+  if (s.length.under) R.push(`short ${lt} < ${win.min}`);
   if (s.internal.length) R.push(`internal [${s.internal.join(", ")}]`);
   if (trn && !af) R.push("not answer-first");
   if (s.rubric.trainee.length) R.push(`rubric [${s.rubric.trainee.join(", ")}]`);
   s.gap = (s.instinct_ok === true && s.trainee_ok === false ? 10 : 0) + (xi !== null && xt !== null && xi !== xt ? 8 : 0) + (refusal ? 5 : 0) + (s.shape.instinct !== s.shape.trainee && !missing.length ? 2 : 0) +
-    (s.length.over ? 2 : 0) + (s.internal.length ? 3 : 0) + (trn && !af ? 1 : 0) + s.rubric.trainee.length * 0.5 + (missing.includes("trainee") ? 10 : 0);
+    (s.length.over ? 2 : 0) + (s.length.under ? 1 : 0) + (s.internal.length ? 3 : 0) + (trn && !af ? 1 : 0) + s.rubric.trainee.length * 0.5 + (missing.includes("trainee") ? 10 : 0);
   return s;
 }
 
@@ -99,8 +119,8 @@ export function redact(text: string, keep: string): string {
 
 export interface Summary {
   prompts: number; scored: number; trainee_answered: number; trainee_ok_by_route: Record<string, { n: number; ok: number }>; missing: { instinct: number; trainee: number };
-  task_ok: { instinct: number; trainee: number; manual: number }; same_task: number; mirror: number; mirror_rate: number;
-  needless_refusals: number; long: number; mean_length_ratio: number; internal: number; not_answers_first: number;
+  task_ok: { instinct: number; trainee: number; manual: number }; same_task: number; mirror: number; mirror_rate: number; mirror_match: number; mirror_match_rate: number;
+  needless_refusals: number; long: number; short: number; length_match: number; mean_length_ratio: number; internal: number; not_answers_first: number;
   rubric: { trainee: Record<string, number>; instinct: Record<string, number> }; by_category: Record<string, { n: number; mirror: number; trainee_ok: number; instinct_ok: number }>;
 }
 export function summarize(set: MirrorPrompt[], scores: PromptScore[], routes: Map<string, string | undefined> = new Map()): Summary {
@@ -108,12 +128,15 @@ export function summarize(set: MirrorPrompt[], scores: PromptScore[], routes: Ma
   const s: Summary = { prompts: set.length, scored: scores.filter((x) => !x.missing.length).length, trainee_answered: scores.filter((x) => !x.missing.includes("trainee")).length, trainee_ok_by_route: {}, missing: { instinct: scores.filter((x) => x.missing.includes("instinct")).length, trainee: scores.filter((x) => x.missing.includes("trainee")).length },
     task_ok: { instinct: scores.filter((x) => x.instinct_ok === true).length, trainee: scores.filter((x) => x.trainee_ok === true).length, manual: scores.filter((x) => x.trainee_ok === null && !x.missing.includes("trainee")).length },
     same_task: scores.filter((x) => x.same_task).length, mirror: scores.filter((x) => x.mirror).length, mirror_rate: 0,
-    needless_refusals: scores.filter((x) => x.needless_refusal).length, long: scores.filter((x) => x.length.over).length, mean_length_ratio: 0,
+    mirror_match: scores.filter((x) => x.mirror_match).length, mirror_match_rate: 0,
+    needless_refusals: scores.filter((x) => x.needless_refusal).length, long: scores.filter((x) => x.length.over).length, short: scores.filter((x) => x.length.under).length,
+    length_match: scores.filter((x) => x.length_match).length, mean_length_ratio: 0,
     internal: scores.filter((x) => x.internal.length).length, not_answers_first: scores.filter((x) => !x.missing.includes("trainee") && !x.answers_first).length,
     rubric: { trainee: rules(), instinct: rules() }, by_category: {} };
   const both = scores.filter((x) => !x.missing.length && Number.isFinite(x.length.ratio));
   s.mean_length_ratio = both.length ? both.reduce((a, x) => a + x.length.ratio, 0) / both.length : 0;
   s.mirror_rate = s.scored ? s.mirror / s.scored : 0;
+  s.mirror_match_rate = s.scored ? s.mirror_match / s.scored : 0;
   for (const x of scores) {
     if (!x.missing.includes("trainee")) { const k = routes.get(x.id) ?? "unknown", v = s.trainee_ok_by_route[k] ??= { n: 0, ok: 0 }; v.n++; if (x.trainee_ok) v.ok++; }
     for (const r of x.rubric.trainee) s.rubric.trainee[r]++;
@@ -154,7 +177,7 @@ if (import.meta.main) {
   const scores = pool.map((p) => scorePrompt(p, inst.get(p.id), trn.get(p.id)));
   const s = summarize(pool, scores, new Map([...trn].map(([k, v]) => [k, v.route])));
   console.log(`MIRROR prompts=${s.prompts} both_sides=${s.scored} trainee_answered=${s.trainee_answered} missing(instinct=${s.missing.instinct} trainee=${s.missing.trainee}) task_ok(instinct=${s.task_ok.instinct} trainee=${s.task_ok.trainee} manual=${s.task_ok.manual}) ` +
-    `same_task=${s.same_task} mirror=${s.mirror} (${(100 * s.mirror_rate).toFixed(1)}%) needless_refusals=${s.needless_refusals} long=${s.long} mean_length_ratio=${s.mean_length_ratio.toFixed(2)} internal=${s.internal} not_answers_first=${s.not_answers_first}`);
+    `same_task=${s.same_task} mirror=${s.mirror} (${(100 * s.mirror_rate).toFixed(1)}%) mirror_match=${s.mirror_match} (${(100 * s.mirror_match_rate).toFixed(1)}%) length_match=${s.length_match} long=${s.long} short=${s.short} needless_refusals=${s.needless_refusals} mean_length_ratio=${s.mean_length_ratio.toFixed(2)} internal=${s.internal} not_answers_first=${s.not_answers_first}`);
   console.log(`trainee task_ok by route: ${Object.entries(s.trainee_ok_by_route).map(([k, v]) => `${k} ${v.ok}/${v.n}`).join(", ")}`);
   console.log(`rubric (trainee): ${Object.entries(s.rubric.trainee).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join(" ") || "clean"}`);
   console.log(`rubric (instinct, reference): ${Object.entries(s.rubric.instinct).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join(" ") || "clean"}`);

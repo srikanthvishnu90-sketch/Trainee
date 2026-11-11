@@ -19,13 +19,14 @@ import { servedBrain } from "./release_config.ts";
 import { NO_CLOCK, type TurnClock } from "./turn_clock.ts";
 import { crisisReply } from "./crisis.ts";
 import { PAYLOAD_INTENTS } from "../_shared/career_reply_writer.ts";
+import { multiAsk, nonEnglishAsk } from "../_shared/ask_language.ts";
 
 type Env = { get(k: string): string | undefined };
 type Host = { runTurn(text: string, ctx: any): { intent: string | null; handler: string | null; reply?: string; contained?: boolean; result?: any }; isHostControlled(text: string, ctx: any): boolean };
 
-import { correctedAsk } from "../_shared/search_correction.ts";
+import { correctedAsk, refinedAsk } from "../_shared/search_correction.ts";
 import { askFor } from "../_shared/career_search_judge.ts";
-import { outreachAsk } from "../_shared/outreach_ask.ts";
+import { namedDraftAsk, outreachAsk } from "../_shared/outreach_ask.ts";
 import { researchReplyOn } from "../_shared/research_reply.ts"; // D-047
 export type BrainMode = "router" | "agent" | "staged";
 // The served brain (release_config.ts): the committed PRODUCTION_BRAIN unless CAREER_BRAIN rolls it back to the router.
@@ -412,6 +413,7 @@ export function marketResearchAsk(env: Env, message: string, intent: string | nu
   return !(intent && CODE_OWNED_INTENTS.has(intent));
 }
 // The router's own outreach and networking intents (R9 outreach routing leaves them to their rules).
+const DRAFT_MISREAD: ReadonlySet<string> = new Set(["career_document_delivery", "career_people_alumni", "outreach_clarification", "career_stop_workflow", "career_tailor", "career_fallback", "career_catchall"]);
 const OUTREACH_OWN = /^(?:outreach|career_outreach|career_networking|career_people|networking)/;
 const LIST_FOLLOWUP = /^\s*(?:(?:and|so|but|ok(?:ay)?),?\s+)?why\s+(?:not|didn't\s+you\s+(?:include|list|show|pick))\s+(?:that|the|this)\s+[^?.!]{1,40}?\s*one\b/i;
 const QUESTION_TO_ASK = /\b(?:won't|will\s+not|wouldn't|would\s+not|doesn't|does\s+not|not)\s+sound\s+(?:copied|generic|canned|scripted|rehearsed|memori[sz]ed)\b|\bquestions?\b[^.?!]{0,30}\b(?:to\s+ask|i\s+(?:can|could|should)\s+ask|for\s+(?:them|the\s+(?:interviewer|panel|recruiter|hiring\s+manager)))\b/i;
@@ -424,6 +426,7 @@ export function followupOffTask(message: string, intent: string, result: unknown
   if (intent === "career_document_delivery") return !(Array.isArray(r.documents) && r.documents.length) && PACKET_ASK.test(m) && !RESUME_FILE.test(m);
   return false;
 }
+const NON_ENGLISH_KEPT = /^(?:conversation_|intent_cancelled|intent_recipient_change|prep_mock|negotiation_roleplay|career_erase|career_profile_erased|career_paused|career_resumed|paused_|pause_status|career_pending_approvals|career_approval|career_batch_apply|doorstep_|queue_|captcha_|portal_|disconnect|connect_|intent_opt_out|people_matching_stop)/;
 export function stagedDecision(o: { env: Env; message: string; ctx: Record<string, unknown>; host: Host; structured: boolean; clock?: TurnClock }): StagedDecision {
   const clock = o.clock ?? NO_CLOCK;
   const mode = brainMode(o.env);
@@ -434,7 +437,7 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (crisisReply(o.message) !== null) return { brain: false, mode, intent: null, reason: "crisis" };
   // Spec 2.3: a correction to the last search ("remote only", "only individual-contributor roles") changes its constraints in
   // code (search_correction.ts) and the next results use them; it is not a question for the brain.
-  if (correctedAsk(o.message, o.ctx.discovery)) return { brain: false, mode, intent: null, reason: "search_correction" };
+  if (correctedAsk(o.message, o.ctx.discovery) || refinedAsk(o.message, o.ctx.discovery)) return { brain: false, mode, intent: null, reason: "search_correction" };
   let probe, records: any[] = [];
   try { const copy = clock.sync("staged_probe_copy", () => probeCtx(o.ctx)); probe = clock.sync("staged_probe_router", () => o.host.runTurn(o.message, copy)); records = Array.isArray(copy.containmentRecords) ? copy.containmentRecords as any[] : []; }
   catch { return { brain: false, mode, intent: null, reason: "probe_failed" }; }
@@ -450,6 +453,16 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (researchReplyOn(o.env) && researchOverAction(o.message)) return { brain: true, mode, intent, reason: "company_research" };
   if (routerKept(o.env).has(intent)) return { brain: false, mode, intent, reason: "kept_on_router" };
   if (marketResearchAsk(o.env, o.message, intent)) return { brain: true, mode, intent, reason: "market_research" };
+  // MIRROR-1000 gaps (2026-11-11): the router's words are English. A non-English ask it claimed from one English keyword is
+  // the brain's, which answers in the person's language (ask_language.ts). Payloads, bare replies, mock sessions and the
+  // account's controls stay code's.
+  if (nonEnglishAsk(o.message) && !PAYLOAD_INTENTS.has(intent) && !NON_ENGLISH_KEPT.test(intent)) return { brain: true, mode, intent, reason: "non_english" };
+  // D-058 ruling 3: two asks in one message are the model's, which answers both; the router keeps single asks, payload intents
+  // included. The account's controls, approvals and bare replies stay code's (the same set the non-English route keeps).
+  if (multiAsk(o.message) && !NON_ENGLISH_KEPT.test(intent)) return { brain: true, mode, intent, reason: "multi_part" };
+  // MIRROR-1000: a draft to a named person that the router read as a file ask, an alumni list or a missing recipient is the
+  // brain's drafting turn (outreach_ask.ts namedDraftAsk).
+  if (DRAFT_MISREAD.has(intent) && namedDraftAsk(o.message)) return { brain: true, mode, intent, reason: "named_draft" };
   if ((!CODE_OWNED_INTENTS.has(intent) || intent === "tracking_log") && followupDraftAsk(o.message)) return { brain: true, mode, intent, reason: "followup_draft" };
   // H2H fix 4 (docs/architect/INSTINCT-HEAD-TO-HEAD.md C2 t5, C5 t4, C3 t6): a follow-up stays on the thread's current task. The
   // router read each from a keyword and answered a different ask: "Why not that Stripe one?" after a search got Stripe's
@@ -472,6 +485,14 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   // message). The router's own outreach intents keep their rules (an instruction to email stays code's), and so does code's
   // own work (an exact payload, a card, the apply queue, a bare yes or no).
   if (!CODE_OWNED_INTENTS.has(intent) && !OUTREACH_OWN.test(intent) && outreachAsk(o.message)) return { brain: true, mode, intent, reason: "outreach_ask" };
+  // MIRROR WA-1 (2026-11-11, the owner's WhatsApp benchmark against Instinct): three router readings that answered a different
+  // task from the one asked (prepRubricRead, prepServeMismatch, namedApplicationNeeds, adviceOverSearch). Each is the
+  // brain's, with the router's reply as data.
+  if (prepRubricRead(intent, probe.result)) return { brain: true, mode, intent, reason: "prep_rubric_read", router: routerAnswer(intent, probe) };
+  if (prepServeMismatch(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "prep_serve_mismatch", router: routerAnswer(intent, probe) };
+  if (namedApplicationNeeds(o.message, intent)) return { brain: true, mode, intent, reason: "named_application_needs", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
+  if (mockQuotedQuestion(o.message, intent, probe.reply)) return { brain: true, mode, intent, reason: "mock_quoted_question", router: routerAnswer(intent, probe) };
+  if (adviceOverSearch(o.message, intent)) return { brain: true, mode, intent, reason: "advice_over_search", router: routerAnswer(intent, probe) };
   if (!STAGED_BRAIN_INTENTS.includes(intent)) {
     // Before the list: a turn that asks or forbids is the brain's unless its intent is code's own work (questionTurn).
     if (questionTurn(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "question_shaped", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
@@ -479,6 +500,60 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   }
   if (codeProduct(intent, probe.result)) return { brain: false, mode, intent, reason: "code_product" };
   return { brain: true, mode, intent, reason: "question", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
+}
+
+// MIRROR WA-1 (2026-11-11). The owner's WhatsApp benchmark (evals/mirror/instinct-wa-batch1/; tests/architect/mirror-wa-batch1.test.ts).
+// (1) A prep session's keyword-rubric read (142 handlePrepSession marks it scored: "rubric"). The rubric reads an answer's shape
+//     (order, numbers, specifics), so a Python answer, a line of code and every new ask sent while a question was waiting
+//     ("have i applied to anything yet?", "make that referral draft shorter", "is that posting still open?") came back as
+//     "Your answer, scored: 2/15". The brain reads it: a real answer is graded on what it says (the router's score as data), and a
+//     new ask is answered. A drill answer graded on the bank's own answer key stays code's (no "rubric" mark), as do the mocks.
+export function prepRubricRead(intent: string | null, result: unknown): boolean {
+  return intent === "prep_brief" && !!result && typeof result === "object" && (result as any).scored === "rubric" && ((result as any).sends ?? 0) === 0;
+}
+// (2) A prep serve that is not what was asked: "quiz me on a python question" served "Tell me about yourself"; "what's citadel
+//     like ... give me real sources" served a coding question; "give me a 'tell me about yourself' answer i can reuse" served the
+//     question instead of the answer. A served bank question is code's only when it is the kind asked for.
+const TECH_TOPIC = /\b(?:python|java(?:script)?|typescript|c\+\+|golang|rust|sql|coding|code|leetcode|algorithms?|data structures?|big[- ]o|complexity|system design|technical)\b/i;
+const ANSWER_ASK = /\b(?:give|write|draft|make|help me (?:write|with))\s+(?:me\s+)?(?:a|an|my)\b[^.?!]{0,60}?\banswer\b|\banswer\s+(?:i|that i)\s+(?:can|could)\s+(?:re)?use\b/i;
+const PRACTICE_ASK = /\b(?:quiz|drill|practi[cs]e|mock|ask me|another|next|one more|hit me|harder)\b/i;
+export function prepServeMismatch(message: string, intent: string | null, result: unknown): boolean {
+  if (intent !== "prep_brief" || !result || typeof result !== "object") return false;
+  const r = result as Record<string, any>, m = String(message ?? "").replace(/[\u2019`]/g, "'");
+  if (ARTIFACT_KEYS.some((k) => has(r, k)) || (r.sends ?? 0) > 0 || r.scored || !has(r, "question")) return false;
+  if (ANSWER_ASK.test(m)) return true;
+  const served = String(r.question?.q ?? r.question?.question ?? r.reply ?? "");
+  if (TECH_TOPIC.test(m) && !TECH_TOPIC.test(served)) return true;
+  // A question about a firm or a process (research), not a practice ask, answered with a practice question.
+  return questionShaped(m) && !PRACTICE_ASK.test(m);
+}
+// (3) "what would you need from me to actually submit that paypal application? don't apply yet just wanna know" got the generic
+//     onboarding list. A question about what one named application needs, with applying forbidden or only asked about, is the
+//     brain's (it reads the posting and the person's record); the bare "what do you need from me" stays code's onboarding.
+const SUBMIT_NEEDS = /\bwhat\b[^?.!]{0,40}\b(?:need|take|require)\b[^?.!]{0,40}\b(?:submit|apply|application)\b/i;
+export function namedApplicationNeeds(message: string, intent: string | null): boolean {
+  if (intent !== "career_onboarding_needs") return false;
+  const m = String(message ?? "").replace(/[\u2019`]/g, "'");
+  return SUBMIT_NEEDS.test(m) && (NEGATED_ACTION.test(m) || /\b(?:that|the|this|my)\s+[A-Za-z][\w&.-]*\s+(?:application|role|posting|internship|job)\b/i.test(m));
+}
+// (5) "ok behavioral round: ask me 'tell me about a time you failed' and then roast my answer" started code's mock on its first
+//     bank question ("Tell me about yourself and why this role"). A mock start that names the question to ask, in quotes, and
+//     whose reply does not ask it is the brain's: it asks that question and reads the answer.
+const QUOTED = /["\u201c']([^"\u201d']{12,140})["\u201d']/;
+export function mockQuotedQuestion(message: string, intent: string | null, reply: unknown): boolean {
+  if (intent !== "prep_mock_start") return false;
+  const q = QUOTED.exec(String(message ?? "").replace(/[\u2018\u2019`]/g, "'"))?.[1];
+  if (!q || !/\b(?:ask|give|quiz|start|run)\b/i.test(String(message ?? ""))) return false;
+  const words = q.toLowerCase().split(/[^a-z]+/).filter((w) => w.length > 3);
+  const r = String(reply ?? "").toLowerCase();
+  return words.length > 0 && words.filter((w) => r.includes(w)).length < Math.ceil(words.length * 0.8);
+}
+// (4) "what should i actually be doing rn to land a swe internship for next summer" ran a search for "lock what should
+//     actually doing rn land". An advice question that names no find/show ask is the brain's (it can still search with its
+//     read tools); "find me 5 swe internships" stays code's search.
+const ADVICE_Q = /\b(?:what\s+(?:should|do|can|must)\s+i\b|how\s+(?:do|can|should|would)\s+i\b|where\s+(?:should|do)\s+i\s+(?:start|begin|focus))/i;
+export function adviceOverSearch(message: string, intent: string | null): boolean {
+  return !!intent && SEARCH_INTENTS.has(intent) && ADVICE_Q.test(String(message ?? "").replace(/[\u2019`]/g, "'")) && !SEARCH_ASK.test(message);
 }
 
 // THE MODEL DECIDES QUESTION-SHAPED TURNS (2026-11-06; root-cause report PR-3 step A, beta C02/C08/C11). The router classes a

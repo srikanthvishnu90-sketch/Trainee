@@ -16,6 +16,7 @@ import { type CompanyResult, enforceCompanyReply } from "../_shared/agent/resear
 import { enforceFollowupAsk } from "../_shared/followup_draft.ts";
 import { knowledgeFor, type Knowledge } from "../_shared/agent/knowledge/index.ts";
 import { styleBlock } from "../_shared/agent/style.ts";
+import { HYPOTHETICAL_WITHHELD, hypotheticalNote, hypotheticalOf, lengthNote, PERSONA_WITHHELD, postingNote, postingRefOf, REPLY_LENGTH, replyLength, roastNote, roastOf } from "../_shared/agent/turn_notes.ts";
 import type { AlertStore } from "../_shared/career_alert_store.ts";
 import type { HiredSource } from "../_shared/career_hired.ts";
 import type { WantStore } from "../_shared/career_apply_want.ts";
@@ -128,7 +129,16 @@ export async function agentTurn(o: {
   // FILE KINDS: create_file (a page of one of the file kinds); present only with the shape on.
   files?: FileService | null;
 }): Promise<TurnResult & { knowledge?: { playbooks: string[]; unknown: string[]; stage: string | null } }> {
-  const block = o.known ? personBlock({ profile: o.stores.profile, ...o.known }) : null;
+  // MIRROR WA-1 gaps (turn_notes.ts): what code read from this message and this conversation, for this turn only. A hypothetical
+  // person is answered without their saved facts (the profile is left out of the block) and with every record tool withheld;
+  // a hypothetical situation writes nothing.
+  const hypo = hypotheticalOf(o.message);
+  const roast = roastOf(o.message, o.history);
+  const listed = (o.stores as any)?.discovery?.lastShortlist;
+  const meant = hypo === "persona" ? [] : postingRefOf(o.message, Array.isArray(listed) ? listed : [], o.history);
+  const turnNotes = [hypo ? hypotheticalNote(hypo) : "", roast ? roastNote(roast) : "", meant.length ? postingNote(meant) : "", lengthNote(replyLength(o.message))].filter(Boolean);
+  const hypoWithheld = hypo === "persona" ? PERSONA_WITHHELD : hypo ? HYPOTHETICAL_WITHHELD : [];
+  const block = o.known ? personBlock({ profile: hypo === "persona" ? null : o.stores.profile, ...o.known }) : null;
   const notes: string[] = [];
   for (const f of o.attachments ?? []) {
     const csv = /\.csv$/i.test(f.name) || /csv/.test(f.mime);
@@ -140,12 +150,12 @@ export async function agentTurn(o: {
   const trace: { r?: Extract<ResearchResult, { status: "ok" }>; m?: MarketResult | CompanyResult } = {};
   const ctx: any = { userId: o.userId, threadId: o.threadId, now: o.now, state: o.stores };
   let result = await runAgentTurn({
-    system: careerSystemPrompt(localDay(o.now, o.tz)) + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
+    system: careerSystemPrompt(localDay(o.now, o.tz)) + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + "\n\n" + turnNotes.join("\n\n") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
     history: o.history.slice(-HISTORY_WINDOW).map((m) => ({ role: m.role, content: String(m.content ?? "") })),
     message: [o.message, ...notes].filter(Boolean).join("\n\n"),
     // ADVERSARIAL ROUND 2: an attached file's name and text are not the person's words: no tool reads them as said.
     said: o.message,
-    tools: [...withheld(o.toolPolicy?.withhold, careerTools({ postings: o.postings ?? (async () => []), alerts: o.alerts ?? null, memory: o.memory ?? null, events: o.events ?? null, confirmations: o.confirmations ?? null, tz: o.tz, mail: o.mail ?? null, interviews: o.interviews ?? null, digest: o.digest ?? null, outreach: o.outreach ?? null, verifier: o.verifier ?? null, tailor: o.tailor ?? null, hired: o.hired ?? null, wants: o.wants ?? null, limits: o.limits, posting: o.posting ?? null, situation: o.known?.situation ?? null, linkCheck: o.linkCheck ?? null, conversations: o.conversations ?? null, market: o.market ? { ...o.market, onResult: (r) => { trace.m = r; } } : null, research: o.knowledge && o.research ? { ...o.research, onResult: (r, m) => { if (r.status === "ok") trace.r = r; o.research?.onResult?.(r, m); } } : null })), ...(o.shape && attachAsked(o.message) ? [attachTool()] : []), ...(o.shape && o.files ? [createFileTool(o.files)] : [])],
+    tools: [...withheld([...(o.toolPolicy?.withhold ?? []), ...hypoWithheld], careerTools({ postings: o.postings ?? (async () => []), alerts: o.alerts ?? null, memory: o.memory ?? null, events: o.events ?? null, confirmations: o.confirmations ?? null, tz: o.tz, mail: o.mail ?? null, interviews: o.interviews ?? null, digest: o.digest ?? null, outreach: o.outreach ?? null, verifier: o.verifier ?? null, tailor: o.tailor ?? null, hired: o.hired ?? null, wants: o.wants ?? null, limits: o.limits, posting: o.posting ?? null, situation: o.known?.situation ?? null, linkCheck: o.linkCheck ?? null, conversations: o.conversations ?? null, market: o.market ? { ...o.market, onResult: (r) => { trace.m = r; } } : null, research: o.knowledge && o.research ? { ...o.research, onResult: (r, m) => { if (r.status === "ok") trace.r = r; o.research?.onResult?.(r, m); } } : null })), ...(o.shape && attachAsked(o.message) ? [attachTool()] : []), ...(o.shape && o.files ? [createFileTool(o.files)] : [])],
     model: o.model,
     ctx,
   });
@@ -166,10 +176,74 @@ export async function agentTurn(o: {
   if (trace.m && !trace.r && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? enforceCompanyReply(result.reply, trace.m) : enforceMarketReply(result.reply, trace.m as MarketResult) };
   // Not an open career question: any link the model wrote that the turn never saw is removed (links not on the turn's allow-list).
   else if (!trace.r && result.reply && result.stopped === "final") result = { ...result, reply: stripUnseenLinks(result.reply, [...(result.linksSeen ?? []), ...(result.fileLinks ?? [])]) };
+  // MIRROR WA-1 (2026-11-11): the length of a text. On the owner's WhatsApp benchmark Instinct answered in one paragraph of about
+  // 400 characters (median 396; longer only to list everything it knew or a research answer in parts); Trainee's brain wrote
+  // 1,500 to 2,500 characters of numbered lists on the same asks. A reply over the limit is condensed once by the model, in
+  // its own words, under guards in code: every figure and link must come from the long reply, and a turn that showed an exact
+  // payload, holds an approval, carries code, or is a sourced research reply is never rewritten.
+  // A research, market or company reply was laid out and sourced in code above (its citations number its sources): never condensed.
+  if (result.reply && result.stopped === "final" && !trace.r && !trace.m) {
+    const limit = condenseLimit(o.message);
+    // An ask for everything, or for the detail ("give me a detailed plan for my whole job search, everything"; "like everything
+    // you remember") is a deliberate long deliverable: the channel lays it out in several messages (channel_shape.ts), and a
+    // rewrite to a text's length would drop what was asked for (tests/architect/telegram-loop-30.test.ts, long-reply-bubbles).
+    // Its length is the prompt's to guide, never the shortener's.
+    if (limit !== REPLY_TARGET.long && condensable(result, limit)) {
+      const short = await condenseReply(o.model, result.reply, limit);
+      if (short) result = { ...result, reply: short };
+    }
+  }
   return know ? { ...result, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : result;
 }
 
 // FEATURE 13: the tools left after a policy withholds some by name (none withheld: every tool).
 export function withheld<T extends { name: string }>(names: readonly string[] | undefined, tools: T[]): T[] {
   return names && names.length ? tools.filter((t) => !names.includes(t.name)) : tools;
+}
+
+// MIRROR WA-1: how long a text may be before it is condensed, and the condensing. EVERYTHING asks ("everything you remember",
+// "give me real sources", several topics in one ask) may run to a long text; everything else is one short paragraph.
+// MIRROR WA-1 gaps: by the kind of ask (turn_notes.ts replyLength, from Instinct's lengths per kind): a draft, a practice question
+// and a recall are shorter than an answer; "everything" and research are long.
+export const REPLY_TARGET = { short: REPLY_LENGTH.answer, long: REPLY_LENGTH.everything } as const;
+export function condenseLimit(message: string): { max: number; aim: string } {
+  const l = replyLength(String(message ?? ""));
+  return l.kind === "everything" ? REPLY_TARGET.long : l.kind === "answer" ? REPLY_TARGET.short : { max: l.max, aim: l.aim };
+}
+// A turn whose tools wrote anything (a draft, a fact, a file, a queue entry: any call with an effect, or any draft tool) is never
+// condensed: its reply can be the stored payload's own words, which the turn's commit checks against what was written.
+export function condensable(r: Pick<TurnResult, "reply" | "show" | "pending_approvals"> & { tool_calls?: TurnResult["tool_calls"] }, limit: { max: number }): boolean {
+  const reply = String(r.reply ?? "");
+  const wrote = (r.tool_calls ?? []).some((c) => c.effect !== null && c.effect !== undefined || /draft|tailor|file|attach|resume/i.test(c.name));
+  return reply.length > limit.max && !r.show && !(r.pending_approvals ?? []).length && !wrote && !/```/.test(reply);
+}
+const BOUNDARY = /\b(?:nothing|not|never|haven'?t|hasn'?t|didn'?t|wasn'?t|isn'?t|won'?t|no one|nobody)\b[^.!?\n]{0,60}\b(?:sent|submitted|applied|queued|contacted|messaged|emailed)\b|\b(?:sent|submitted|applied)\b[^.!?\n]{0,20}\b(?:nothing|nowhere)\b/i;
+const CAVEAT = /\b(?:not (?:verified|confirmed|guaranteed|listed|on file)|unverified|unconfirmed|(?:i )?(?:don'?t|do not|can'?t|cannot|couldn'?t) (?:have|verify|confirm|check|tell|find)|no verified)\b/i;
+const NUMBER = /\$?\d[\d,.]*(?:k|%)?/gi, LINK = /https?:\/\/\S+/g;
+// The condensed text, or null when it fails a guard (then the long reply stands): shorter, not empty, every number and link in
+// it was in the long reply, at most one question.
+export function condensedOk(long: string, short: string, limit: { max: number }): boolean {
+  const s = String(short ?? "").trim();
+  if (!s || s.length >= long.length || s.length > limit.max) return false;
+  const nums = new Set((long.match(NUMBER) ?? []).map((x) => x.replace(/[,.]$/, "")));
+  if ((s.match(NUMBER) ?? []).some((x) => !nums.has(x.replace(/[,.]$/, "")))) return false;
+  const links = new Set(long.match(LINK) ?? []);
+  if ((s.match(LINK) ?? []).some((x) => !links.has(x))) return false;
+  // MIRROR WA-1 gaps: what was not done and what is not known survive the shortening: a boundary ("nothing was sent", "not
+  // submitted") and a caveat ("not verified", "not confirmed", "I don't have") in the long reply must be in the short one.
+  for (const keep of [BOUNDARY, CAVEAT]) if (keep.test(long) && !keep.test(s)) return false;
+  return (s.match(/\?/g) ?? []).length <= 1;
+}
+export async function condenseReply(model: ModelFn, long: string, limit: { max: number; aim: string }): Promise<string | null> {
+  try {
+    const res = await model({
+      system: `Rewrite this text message from a career assistant so it reads like a text: ${limit.aim}, plain sentences, at most two short paragraphs. ` +
+        "Keep the direct answer first. Keep every name, figure, date and link exactly as written, and every statement of what was not done, not sent, not saved or not verified. " +
+        "A draft message the person can copy stays a draft they can copy: shorten it if it is long and keep its [brackets]. " +
+        "Drop numbered or bulleted lists (write sentences), headings, repeated points and advice they did not ask for. Add nothing that is not in the text. At most one question, at the end. Output the message only.",
+      messages: [{ role: "user", content: [{ type: "text", text: long }] }], tools: [], max_tokens: 600, tool_choice: { type: "none" },
+    } as any);
+    const out = ((res as any)?.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join("").trim();
+    return condensedOk(long, out, limit) ? out : null;
+  } catch { return null; }
 }

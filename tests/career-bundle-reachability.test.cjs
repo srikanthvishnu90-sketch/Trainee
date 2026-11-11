@@ -214,7 +214,8 @@ if (!vm.SourceTextModule) {
     const out = await app.chat("Apply on my behalf");
     assert.equal(out.meta.contained, false);
     assert.equal(out.capabilities.portal_browser.status, "NOT_WIRED");
-    assert.match(out.reply, /browser.*not wired/i);
+    // architect amendment (2026-11-11): plain words, no 'wired' jargon (was /browser.*not wired/i)
+    assert.match(out.reply, /browser .*(isn't|is not) (connected|available)/i);
     assert.doesNotMatch(out.reply, /successfully (submitted|applied)|application (was |has been )?submitted/i);
     const approved = await app.chat("Approve and submit");
     assert.notEqual(approved.meta.result_status, "completed", "a yes cannot create a missing worker or a submission");

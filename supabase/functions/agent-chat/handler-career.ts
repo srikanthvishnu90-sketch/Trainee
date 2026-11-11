@@ -114,7 +114,7 @@ import { missingIntegration } from "../_shared/agent/integrations.ts";
 import { documentsOf, materializeArtifacts } from "../_shared/channel_artifacts.ts";
 import { scoredN } from "../_shared/career_search.ts";
 import { askFor, isJudgePromptAsk, judgePromptTurn, searchJudgeTurn, searchReplyParts, supabaseJudgeCache, supabaseSearchSources } from "../_shared/career_search_judge.ts"; // FEATURE 5
-import { blockerAsk, widenedAsk } from "../_shared/search_widen.ts"; // R10 WO-C
+import { blockerAsk, METRO, widenedAsk } from "../_shared/search_widen.ts"; // R10 WO-C
 // R10 WO-D: router outcomes that are not an answer to the message (its catch-alls and the company-intel fallback that sent the
 // graduation-window template on production): at a limit these are replaced by the held reply.
 const NOT_AN_ANSWER_AT_LIMIT = new Set(["unclaimed", "career_catchall", "career_fallback", "company_intel", "honest_unavailable"]);
@@ -1091,6 +1091,21 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           shortlist: (loaded.snapshot as any)?.stores?.discovery?.lastShortlist ?? null,
           limits: paceReader(admin, user.id),
           employerAnswers: () => employerAsk.answers(tid),
+          // R10 fix 12: "the top three" from a shorter list: the thread's last city search, one step wider (its metro area),
+          // each role re-checked open on its own page; named beside the list, never queued (career_apply_chat.ts nearby).
+          nearby: async (want, listed) => {
+            const prev = (loaded.snapshot as any)?.stores?.discovery?.lastAsk;
+            if (!prev || typeof prev.role !== "string" || !prev.place || prev.area || prev.remoteOnly || !METRO[String(prev.place).toLowerCase()] || want < 1) return [];
+            const zone = await readPersonZone(admin, user.id, (ctx as any).profile ?? null).catch(() => null);
+            const n = Math.min(10, want + listed.length);
+            const found = await searchJudgeTurn({ clock, message, ask: { ...prev, area: true, keep: [], verify: true, want: n }, userId: user.id, now: Date.now(), profile: (ctx as any).profile ?? null,
+              sources: supabaseSearchSources(admin, { cpu: (stage, fn) => clock.sync(stage, fn), window: postings, jobs: { roleFamily: CareerJobs.roleFamily, seniorityBand: CareerJobs.seniorityBand, stripHtml: CareerJobs.stripHtml } }),
+              judge: { on: false }, canSubmit: canSubmitByHost, show: n, tz: zone?.tz ?? null, want: n,
+              openCheck: linkChecker(fetch, { ashby: "posting", userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }) });
+            const seen = new Set(listed.map((e) => String(e.id ?? "")).filter(Boolean));
+            return (found?.picked ?? []).filter((x) => x.posting && x.checked?.state === "live" && !seen.has(String(x.posting.job_id))).slice(0, want)
+              .map((x) => ({ id: x.posting!.job_id, title: x.posting!.title, company: x.posting!.company, location: x.posting!.location, url: x.posting!.url }));
+          },
         })
         : null;
       // FEATURE 14: receipts (D-024, G6). "show me the receipt for Stripe", "what did you send to Acme": the receipt the
@@ -1512,6 +1527,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             if (!found && f5Said?.explain) out = { ...out, intent: "career_discovery", resultStatus: "blocked", handler: "search_judge",
               reply: "What blocked it: a search connection problem. The job boards could not be read just now, so this says nothing about whether open roles exist. It is not your resume: listing roles never needs a confirmed resume. Nothing was applied for. Ask again in a few minutes and I'll run the same search." };
             if (found) {
+              // D-058: what the chat reply no longer says (refresh time, freshness, "Nothing was invented") is the turn's proof.
+              if (found.proof) agentMeta = { ...(agentMeta || {}), search_proof: found.proof };
               // ONBOARDING ROUND 2 and F.1: the resume line and the blocker answer (searchReplyParts, shared with the eval harness).
               const prof = (ctx as any).profile;
               const { why, resumeLine } = searchReplyParts({ message, said: f5Said, found, profile: prof, prior: f5Before });

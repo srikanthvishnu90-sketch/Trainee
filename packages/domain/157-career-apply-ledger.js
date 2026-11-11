@@ -209,7 +209,7 @@ const CareerApplyLedger = (() => {
       return { kind: "change_after_approval", attachment: /\battach(?:ment|ed)?\b|\bresume file\b/.test(t), email: /\be-?mail\b/.test(t) };
     }
     if (/\b(?:portal|site|website|employer|application|form|page|workday|greenhouse|lever|ashby|taleo|icims|smartrecruiters|ats)\b[^.?]*\b(?:requires?|required|needs?|asks? (?:for|me (?:to|for))|asking (?:for|me to)|wants?|makes? me|forces? me to|won'?t let me)\b[^.?]*\b(?:an? |my |another |their |its )?(?:accounts?|account'?s|sign[- ]?in|log[- ]?in|login|register|registration|sign[- ]?up|passwords?|username)\b/.test(t)
-      || /\b(?:do i|should i|will you|can you)\s+(?:need to\s+)?(?:create|make|open|register)\s+(?:an? )?account\b/.test(t)) return { kind: "portal_account", password: /\bpassword/.test(t) };
+      || /\b(?:do i|should i|will you|can you)\s+(?:need to\s+)?(?:create|make|open|register)\s+(?:an? )?account\b/.test(t)) return { kind: "portal_account", password: /\bpassword/.test(t), short: SHORT_ANSWER_RE.test(t) };
     if (/\b(?:distinguish|tell apart|tell the difference|difference between|differ|separate|keep apart)\b/.test(t) && /\b(?:prepared|submitted|approved|sent)\b/.test(t)) return { kind: "prepared_vs_submitted" };
     if (/\bprepared\b[^.?]*\b(?:vs\.?|versus|or|and|from)\b[^.?]*\b(?:submitted|sent)\b/.test(t)) return { kind: "prepared_vs_submitted" };
     if (/^(?:so |and |ok |okay |but )?(?:was|were|did|has|have|is)\b[^.?]{0,60}\b(?:the|my|that|this|it|any|those|these)?\s*(?:application|applications|apps?|it|that one|they|them)?\b[^.?]{0,30}\b(?:actually|really|truly|definitely|for real)\b[^.?]{0,20}\b(?:submitted|sent|go(?:ne)? through|get (?:sent|submitted)|been (?:sent|submitted)|land(?:ed)?)\b/.test(t)
@@ -248,6 +248,8 @@ const CareerApplyLedger = (() => {
     return n ? `text "show my applications" to open the card, then reply "only ${n}" (or "only" and the number the card shows for it)`
       : "text \"show my applications\" to open the card, then reply \"only\" and the number the card shows for it";
   }
+  // A person asking for a short answer ("in two lines", "short version", "keep it brief").
+  const SHORT_ANSWER_RE = /\b(?:keep it (?:short|brief)|short (?:version|answer)|(?:in )?(?:one or two|one|two) (?:lines?|sentences?)|briefly|be brief|tl;?dr)\b/;
   function answer(ask, ctx, trackRows) {
     const led = ledgerOf(ctx, trackRows);
     const facts = [];
@@ -298,11 +300,15 @@ const CareerApplyLedger = (() => {
         return out("career_answer_change_after_approval", "Changing anything after you approve cancels that approval; nothing changed is sent on the old yes.", live.length ? "Which answer should change, and to what?" : "Want to change an answer on an application?");
       }
       case "portal_account": {
-        push("I never create an account or sign in for you, and I never take a password in this chat.");
-        push("When an employer's site needs an account, that application stops at that step and comes back to you with its link; you sign in or create the account yourself, on their page.");
+        // MIRROR-1000 gaps (2026-11-11): "in two lines" / "short version" gets the two lines.
+        if (ask.short) push("I never sign in, create an account or take a password for you; a site that needs one stops that application and sends you its link.");
+        else {
+          push("I never create an account or sign in for you, and I never take a password in this chat.");
+          push("When an employer's site needs an account, that application stops at that step and comes back to you with its link; you sign in or create the account yourself, on their page.");
+        }
         const stopped = led.entries.filter((e) => e.state === "needs_you" && /login|sign|account/i.test(s(e.reason)));
         if (stopped.length) push(`Waiting on a sign-in now: ${stopped.map(nameOf).join("; ")}.`);
-        if (ask.password) push("If a site asks for another account's password, don't type it anywhere I can see it; that sign-in is yours alone.");
+        if (ask.password && !ask.short) push("If a site asks for another account's password, don't type it anywhere I can see it; that sign-in is yours alone.");
         return out("career_portal_account", "An employer account is yours to sign in to; I hand that step to you.", stopped.length ? "Open its link to sign in, then tell me when you're done?" : "Want me to keep going with the applications that don't need an account?");
       }
       case "prepared_vs_submitted": {

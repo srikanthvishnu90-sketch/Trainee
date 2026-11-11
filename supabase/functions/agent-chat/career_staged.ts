@@ -811,7 +811,7 @@ export function g1CodeAnswers(message: string, intent: string, result: unknown, 
   // An instruction (not a question, nothing forbidden) that code carried out with a product, or one to message or list people.
   // G10 (ask only what the action needs): "tailor my resume" with the role missing is an action the person asked for whose one
   // required slot is missing: code's tailor asks for that slot. A cover letter or a note is the brain's draft (D-059 placeholders).
-  if (intent === "career_tailor" && G1_RESUME.test(m) && !(QUESTION_LEAD.test(m) || m.includes("?")) && String(r.resultStatus ?? "") === "awaiting_user") return true;
+  if ((intent === "career_tailor" || intent === "tailor_needs_posting") && G1_RESUME.test(m) && !(QUESTION_LEAD.test(m) || m.includes("?"))) return true;
   // A boundary ("just research, don't message anyone") limits the instruction, it does not make it a question; a draft asked for
   // under "don't send" is the brain's to write (G10, D-059).
   const asks = QUESTION_LEAD.test(m) || m.includes("?"), draftOnly = boundaryOf(m) === "send" && G1_PRODUCERS.has(intent);

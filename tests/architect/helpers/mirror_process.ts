@@ -8,6 +8,7 @@
 import { anthropicWire } from "./anthropic_wire.ts";
 import { openWorld, type World } from "./response_world.ts";
 import { SUPABASE_URL } from "../../flow/handler.ts";
+import { PRODUCTION_BRAIN, RELEASE_FLAGS, RELEASE_NEVER_ON, releaseFlagOn, releaseValue } from "../../../supabase/functions/agent-chat/release_config.ts";
 
 const DIR = new URL("../../../evals/mirror/instinct-wa-batch1/", import.meta.url);
 const lines = (f: string) => Deno.readTextFileSync(new URL(f, DIR)).split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
@@ -28,10 +29,15 @@ export type Seen = {
   reply: string; intent: string | null; documents: any[];
   outbound: string[]; // off-machine requests made during this turn (method and full address), each refused
 };
+// The switches as the handler reads them at a turn: every release flag's served value, and whether any never-on switch is on.
+export type FlagsAtTurn = { release: Record<string, string | undefined>; neverOnOn: string[]; brain: string | undefined };
+export function flagsNow(): FlagsAtTurn {
+  return { release: Object.fromEntries(Object.keys(RELEASE_FLAGS).map((k) => [k, releaseValue(Deno.env, k)])), neverOnOn: RELEASE_NEVER_ON.filter((k) => releaseFlagOn(Deno.env, k)), brain: Deno.env.get("CAREER_BRAIN") };
+}
 // A step of a turn's script: a tool call (its input may read what earlier calls returned), or the final text.
 export type Step = { tool: string; input: Record<string, unknown> | ((calls: Call[]) => Record<string, unknown>) } | { text: string };
 
-export async function runConversation(script: Record<string, Step[]>, opts: { only?: string[] } = {}): Promise<{ seen: Record<string, Seen>; world: World; person: { id: string } ; close: () => Promise<void> }> {
+export async function runConversation(script: Record<string, Step[]>, opts: { only?: string[] } = {}): Promise<{ seen: Record<string, Seen>; flags: Record<string, FlagsAtTurn>; world: World; person: { id: string }; close: () => Promise<void> }> {
   let label = "";
   const seen: Record<string, Seen> = {};
   const fresh = (): Seen => ({ code: true, tools: [], schemas: {}, system: "", history: "", calls: [], reply: "", intent: null, documents: [], outbound: [] });
@@ -71,22 +77,30 @@ export async function runConversation(script: Record<string, Step[]>, opts: { on
     if (u.host !== "api.anthropic.com" && u.origin !== new URL(SUPABASE_URL).origin) (seen[label] ??= fresh()).outbound.push(`${req.method} ${u.origin}${u.pathname}`);
     return await refuse(req);
   }) as typeof fetch;
-  Deno.env.set("CAREER_BRAIN", "staged");
+  // PRODUCTION CONFIGURATION (owner, 2026-11-11: "Make sure everything is turned on in production, whenever testing"): the
+  // backtest runs with the release configuration exactly as release_config.ts ships it. The shared world turns
+  // CAREER_MAIL_TRACKING off for its own tests; here every release flag is left unset, so the handler serves its release value
+  // (releaseValue), no never-on switch is set, and the brain is PRODUCTION_BRAIN. The model key is a dummy (the model is scripted).
+  for (const k of Object.keys(RELEASE_FLAGS)) Deno.env.delete(k);
+  for (const k of RELEASE_NEVER_ON) Deno.env.delete(k);
+  Deno.env.set("CAREER_BRAIN", PRODUCTION_BRAIN);
   Deno.env.set("ANTHROPIC_API_KEY", "sk-test-not-real");
+  const flags: Record<string, FlagsAtTurn> = {};
   const close = async () => { globalThis.fetch = refuse; Deno.env.delete("CAREER_BRAIN"); Deno.env.delete("ANTHROPIC_API_KEY"); await world.close(); };
   try {
     await world.pg.sql(`insert into public.career_postings (job_id, provider, board, company, title, location, url, description, first_seen_at, last_seen_at) values
       ('${PAYPAL.id}', 'greenhouse', 'paypalwa1', 'PayPal', 'Software Engineer Intern', 'Chicago, IL', '${PAYPAL.url}', 'Summer 2027 software engineering internship. Python, Java, SQL. Pay: $28 - $49 per hour.', now() - interval '1 day', now())`);
     const person = await world.person({ resume: false });
-    for (const [k, s] of PERSONA.setup.entries()) { label = `setup${k}`; await person.say(s); }
+    for (const [k, s] of PERSONA.setup.entries()) { label = `setup${k}`; flags[label] = flagsNow(); await person.say(s); }
     for (const t of TURNS) {
       if (opts.only && !opts.only.includes(t.id)) continue;
       label = t.id;
+      flags[t.id] = flagsNow();
       const r: any = await person.say(t.prompt);
       const s = seen[t.id] ??= fresh();
       s.reply = String(r.reply ?? ""); s.intent = r.intent ?? null; s.documents = Array.isArray(r.body?.documents) ? r.body.documents : [];
     }
-    return { seen, world, person, close };
+    return { seen, flags, world, person, close };
   } catch (e) { await close(); throw e; }
 }
 

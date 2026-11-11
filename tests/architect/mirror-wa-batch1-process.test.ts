@@ -15,7 +15,7 @@ import assertNode from "node:assert/strict";
 import { canRun } from "./helpers/response_world.ts";
 import { type Call, effectRows, PAYPAL, runConversation, type Step, TURNS } from "./helpers/mirror_process.ts";
 import { agentTurn } from "../../supabase/functions/agent-chat/career_brain.ts";
-import { RELEASE_FLAGS, RELEASE_NEVER_ON } from "../../supabase/functions/agent-chat/release_config.ts";
+import { PRODUCTION_BRAIN, RELEASE_FLAGS, RELEASE_NEVER_ON } from "../../supabase/functions/agent-chat/release_config.ts";
 import { POSTING_PAGE } from "./helpers/posting_checks.ts";
 
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
@@ -83,8 +83,16 @@ const result = (calls: Call[], name: string) => { const c = calls.find((x) => x.
 
 Deno.test({ name: "MP-1 the EXISTS turns follow Instinct's process: the tools offered and called, the artifact, the boundary, nothing sent", sanitizeOps: false, sanitizeResources: false, ignore: canRun() !== null && canRun() !== "FAIL", fn: async () => {
   if (canRun() === "FAIL") throw new Error("MP-1 needs Postgres 16 in CI");
-  const { seen, world, person, close } = await runConversation(SCRIPT);
+  const { seen, flags, world, person, close } = await runConversation(SCRIPT);
   try {
+    // The backtest is production's configuration (owner, 2026-11-11): on every turn the handler's effective switches are
+    // RELEASE_FLAGS exactly as release_config.ts ships them, no never-on switch is on, and the brain is PRODUCTION_BRAIN.
+    eq(Object.keys(flags).length, 3 + 26, "flags read on every turn");
+    for (const [id, f] of Object.entries(flags)) {
+      eq(f.release, { ...RELEASE_FLAGS }, `${id}: effective release flags`);
+      eq(f.neverOnOn, [], `${id}: a never-on switch is on`);
+      eq(f.brain, PRODUCTION_BRAIN, `${id}: the served brain`);
+    }
     const brain = (id: string) => { ok(!seen[id].code, `${id} reached the brain (code answered: ${seen[id].reply.slice(0, 120)})`); return seen[id]; };
 
     // C2: a draft from the confirmed profile with placeholders, shown, not sent; no question about the recipient (D-059).

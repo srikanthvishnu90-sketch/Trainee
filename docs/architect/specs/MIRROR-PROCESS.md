@@ -19,6 +19,41 @@ What the benchmark could see of Instinct's process is its replies (the tools beh
 shows: a link, a File, a PDF, "nothing was submitted"). Where Instinct read something Trainee has no copy of here (the tester's
 Gmail, the web), `prompts.jsonl` marks the turn's `needs`.
 
+## The backtest is production's configuration
+
+Owner, 2026-11-11: "Make sure everything is turned on in production, whenever testing." Every mirror and process test, and
+every live mirror run, runs with the release configuration exactly as `release_config.ts` ships it: each `RELEASE_FLAGS` switch
+at its release value (read through `releaseValue` / `releaseFlagOn`, with no environment override in either direction), every
+`RELEASE_NEVER_ON` switch off, and the brain `PRODUCTION_BRAIN`. No test-only setting turns a production feature off or a
+never-on one on. `tests/architect/helpers/mirror_process.ts` clears every release and never-on switch before the conversation
+(the shared response world turns `CAREER_MAIL_TRACKING` off for its own tests; the mirror does not), and
+`mirror-wa-batch1-process.test.ts` asserts on every one of the 29 turns (3 setup, 26 scored) that the handler's effective flags
+equal `RELEASE_FLAGS`, that no never-on switch is on, and that the brain is `PRODUCTION_BRAIN`. What differs from production is
+only what a $0 run must replace: the model is scripted, and every host but the database double is refused (each refused request
+is recorded with its address). A turn that is blocked because a switch is off is blocked in production too: the blocker is
+named, never worked around by a test-only switch.
+
+## How we mirror a reference product
+
+The loop, reusable for any reference (Instinct batch 2, another assistant, a human expert's transcript):
+
+1. **Capture the reference transcript verbatim.** Every prompt in order with its timing, every reply message in order with its
+   latency, and what the reference knew going in (the persona). Personal details become fictional names in the repository; the
+   verbatim copy stays with the owner (`evals/mirror/instinct-wa-batch1/README.md`).
+2. **Write the per-turn process spec** (this file): what the reference visibly did on each turn, the steps Trainee must take
+   (tools, in order), the artifact, the boundary line, and each step's capability: EXISTS, OFF (the flag), or MISSING (what to
+   build or provide).
+3. **$0 process tests** through the real handler with a scripted model under production's configuration: the EXISTS turns'
+   process asserted (`mirror-wa-batch1-process.test.ts`); the blocked turns' full process in a pending test that fails until
+   each capability lands (`tests/architect/pending/mirror-process-blocked.test.ts`). Never ignored, never weakened.
+4. **Live run under production flags** with the real model, only on the owner's approved spend (D-057 style), through
+   `.github/workflows/mirror-conversation.yml`.
+5. **Score both the text and the process**: the reply against the reference's (`evals/mirror/score-conversation.ts`), and the
+   process (the tools called, the artifact made, the boundary said, nothing sent) against this spec.
+6. **Fix by cause**: routing, instructions, tool exposure or a missing capability. Never canned reply prose, never a test edited
+   to pass; an owner ruling where the reference's behaviour changes a rule (D-059).
+7. **Re-run** steps 3 to 5 until every turn matches. The deploy waits on the last blocked turn (owner, 2026-11-11).
+
 ## Summary
 
 | Turn | Status | Blocker (what is missing or off) |

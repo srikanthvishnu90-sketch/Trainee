@@ -140,6 +140,13 @@ Measured 2026-11-11 at trunk d1f0d450:
   invented_fact 658, mostly the fixture board's employer names) include the scripted lines, so they are a harness check, not
   a measurement of the product.
 
+After the router mirror fixes (branch `ag/router-mirror-fixes`, 2026-11-11; `tests/architect/router-mirror-fixes-20261111.test.ts`),
+all 1,000 prompts, $0, 0 external requests: the router answered 443 and the scripted model 557. Trainee task_ok on
+router-answered turns was 383/443 (was 303/467), and 732/1,000 over every turn (was 635). 24 prompts moved from the router to
+the model, all drafts to a named person that the router had read as a file ask, an alumni list or a missing recipient; no
+prompt that passed before fails now. Replies with internal words fell from 16 to 10, and "not wired in this handler" from 6 to 0.
+`results/trainee-dry-50.jsonl` is still the d1f0d450 run.
+
 **Real-model pass (one pass, after the owner's written approval):**
 
 ```

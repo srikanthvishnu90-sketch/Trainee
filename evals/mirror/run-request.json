@@ -1,1 +1,1 @@
-{ "label": "wa1-live-3", "approval": "D-057", "budget_usd": 2.2, "conv": "evals/mirror/instinct-wa-batch1/prompts.jsonl", "persona": "evals/mirror/instinct-wa-batch1/persona.json" }
+{"label": "wa1-live-4", "approval": "D-057", "budget_usd": 1.55, "conv": "evals/mirror/instinct-wa-batch1/prompts.jsonl", "persona": "evals/mirror/instinct-wa-batch1/persona.json"}

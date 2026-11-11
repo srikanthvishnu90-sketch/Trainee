@@ -736,13 +736,17 @@ const G1_ACTIONS: ReadonlySet<string> = new Set([
   "career_answer_change_after_approval", "career_apply_email_draft", "career_apply_email_explain", "career_apply_email_sender", "career_portal_account",
   "ai_use_answer", "eligibility_check", "disclosure_clarify", "career_os_review_packet", "calendar_proposal", "graph_intro", "graph_blurb", "profile_export",
   "access_log", "session_health", "connected_accounts",
+  // what the person told Trainee about themselves, read back from what they confirmed (D-007)
+  "profile_recall",
 ]);
 // Reads of the person's own record (applications, follow-ups, their people): code's when the message asks about that record.
 const G1_RECORD_READS: ReadonlySet<string> = new Set(["tracking_status", "tracking_digest", "career_status_states", "intent_followup_status",
   "campaign_digest", "season_dashboard", "intent_prior_application", "intent_role_closed", "career_resume_on_file", "career_resume_not_read",
-  "graph_alumni", "graph_referral", "graph_keep_warm", "graph_paths", "career_list_reference", "profile_recall"]);
+  "graph_alumni", "graph_referral", "graph_keep_warm", "graph_paths", "career_list_reference"]);
 // The message is about the person's own record ("have I", "my applications", "did my", "what do you know about me").
 const OWN_RECORD_ASK = /\b(?:my|mine|me|i'?ve|i\s+have|have\s+i|did\s+i|do\s+i\s+(?:have|know)|i\s+(?:applied|sent|know|asked|told))\b|\b(?:the|that|this|our)\s+(?:application\s+)?(?:tracker|applications?|pipeline)\b/i;
+const G1_RECALLS: ReadonlySet<string> = new Set(["conversation_recall", "career_goal_recall", "graph_memory", "negotiation_recall"]);
+const ABOUT_ME = /\b(?:about me|know about me|remember about me|my (?:profile|facts|info|details|background|goals?))\b|\bwho am i\b/i;
 // A File or document code built for the ask is the deliverable itself (G11): it goes to the person.
 const G1_DELIVERABLE = ["file", "documents", "document", "tailorDoc"];
 // D-061 G1 (the model decides; code guards): the turns code's rules above kept, which the ruling gives to the brain, go there
@@ -773,6 +777,9 @@ export function g1CodeAnswers(message: string, intent: string, result: unknown, 
   if (SEARCH_INTENTS.has(intent) && OTHER_DELIVERABLE.test(m) && !SEARCH_ASK.test(m)) return false;
   if (G1_ACTIONS.has(intent)) return true;
   if (G1_RECORD_READS.has(intent)) return OWN_RECORD_ASK.test(m);
+  // "What do you know about me?" is a read of their own record (D-007: from what they confirmed); "that X from earlier" is a
+  // recall of this conversation, the brain's (G7: the thread is memory).
+  if (G1_RECALLS.has(intent)) return ABOUT_ME.test(m);
   // G1 (b): the next ask inside a practice session code is running.
   if (/^prep_/.test(intent) && prepSessionOpen(ctx)) return true;
   // A drill answer graded against the bank's own key is the answer to code's question; a rubric read is not (prepRubricRead).

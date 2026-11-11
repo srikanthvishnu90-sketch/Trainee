@@ -164,12 +164,13 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
   researched roles; says what could be missing; offers a running tracker.
 - **Steps:** (1) the staged route sends the ask to the brain (`career_staged.ts applicationRecordAsk`, with
   `CAREER_MAIL_TRACKING` on). (2) `read_application_mail` (`_shared/agent/capability_tools.ts`,
-  `_shared/career_application_record.ts`): one mail run for this person now (the scheduled run's own code), then the
+  `_shared/career_application_record.ts`): one mail run for this person now over every connected account (the scheduled run's own code), then the
   applications with their evidence (the employer's email, Trainee's submission record, or the person's word), the roles this
   conversation listed kept apart as research, unsubmitted drafts, the coverage (one connected Gmail; another address or a
   portal-only status is missed), and what changed since last shown. (3) No Gmail connected: said, with the connect link (the
-  person signs in to Google themselves). **One Gmail account at a time**: the connector keeps one Google account per person
-  (connecting another replaces it), so Instinct's three-account read is not matched; the coverage says so.
+  person signs in to Google themselves). **Several Gmail accounts** (D-062, migration 20261111120000): connecting another
+  Google account adds it (`career_google_accounts`); every account is read, each piece of evidence names the account it came
+  from, and the coverage says how many accounts were read (`tests/architect/d062-google-accounts.test.ts`).
 - **Artifact:** none. **Boundary:** "tonight's roles were research only". Asserted in MP-1 (no Gmail) and in
   `tests/architect/d062-capabilities-process.test.ts` D62-1 (a stub Gmail with an employer's confirmation).
 

@@ -78,10 +78,12 @@ export interface DisconnectResult {
 }
 
 // admin: a service-role supabase-js client.
-export async function disconnectGoogle(admin: any, userId: string, d: RevokeDeps, providers: readonly string[] = GOOGLE_PROVIDERS): Promise<DisconnectResult> {
+// keepAdded (D-062): only the first grant goes ("disconnect sam@x.com" naming it); the accounts added beside it stay, with the
+// events read from them (the first grant's own events go with its row, 20261111120000).
+export async function disconnectGoogle(admin: any, userId: string, d: RevokeDeps, providers: readonly string[] = GOOGLE_PROVIDERS, o: { keepAdded?: boolean } = {}): Promise<DisconnectResult> {
   const failures: string[] = [], revoke: Record<string, RevokeOutcome> = {};
   // Mail tracking reads only through the career grant, so its rows are judged when that grant was asked to go.
-  const mailChecked = providers.includes("google_career");
+  const mailChecked = providers.includes("google_career") && !o.keepAdded;
   const rows = await admin.from("user_oauth_connections").select("provider").eq("user_id", userId).in("provider", [...providers]);
   if (rows.error) return { ok: false, had: [], mailChecked, mailErased: false, revoke, failures: ["read which Google accounts are connected"] };
   const had: string[] = (rows.data ?? []).map((r: any) => String(r.provider));
@@ -112,6 +114,24 @@ export async function disconnectGoogle(admin: any, userId: string, d: RevokeDeps
     const del = await admin.from("user_oauth_connections").delete().eq("user_id", userId).in("provider", had);
     if (del.error) failures.push("delete the Google connection");
   }
+  // D-062: every Google account the person added beside the first (career_google_accounts, 20261111120000) goes too: each
+  // revoked at Google, its row deleted (its token and the events read from it go with the row), read back below.
+  let added: string[] = [];
+  if (mailChecked) {
+    const more = await admin.from("career_google_accounts").select("mailbox").eq("user_id", userId);
+    if (!more.error) {
+      added = (more.data ?? []).map((r: any) => String(r.mailbox));
+      for (const m of added) {
+        const v = await admin.rpc("career_google_account_vault_read", { p_user: userId, p_mailbox: m });
+        revoke[`google_career:${m}`] = v.error ? "not_confirmed" : await revokeAtGoogle(d, typeof v.data === "string" ? v.data : null);
+      }
+      if (added.length) {
+        const del = await admin.from("career_google_accounts").delete().eq("user_id", userId);
+        if (del.error) failures.push("delete the Google connection");
+        had.push(...added.map((m) => `google_career:${m}`));
+      }
+    } else if (!/does not exist|schema cache|PGRST205/i.test(String(more.error.message))) failures.push("read which Google accounts are connected");
+  }
   // The migration's trigger deletes these with the career row; deleting them here too means a disconnect does not depend on
   // the order the code and the migration were deployed in, and clears what a mail check left after the connection was gone.
   if (mailChecked) {
@@ -128,7 +148,12 @@ export async function disconnectGoogle(admin: any, userId: string, d: RevokeDeps
     if ((left.data ?? []).length) failures.push("delete the Google connection");
     if (mailAfter) failures.push(MAIL_SAID);
   }
+  if (added.length) {
+    const more = await admin.from("career_google_accounts").select("mailbox").eq("user_id", userId);
+    if (more.error || (more.data ?? []).length) failures.push("delete the Google connection");
+  }
   for (const p of had) {
+    if (p.includes(":")) continue; // an added account: checked above by its row (its token goes with it)
     const still = await admin.rpc("oauth_vault_read", { p_name: `oauth_${p}_${userId}` });
     if (still.error) failures.push("check that everything was deleted");
     else if (still.data) failures.push("delete the stored Google tokens");

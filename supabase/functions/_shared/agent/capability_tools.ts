@@ -20,12 +20,14 @@ import { buildRecord, type MailCoverage, type Snapshot, snapshotOf, trackerData,
 import { type AlumniResult, searcher, type PeopleSearchFn } from "../career_alumni_search.ts";
 import { draftReply, type Inbox } from "../career_mail_reply.ts";
 import { confirmed, factText } from "../career_outreach.ts";
+import type { GoogleAccount } from "../career_google_accounts.ts";
 
 export interface CapabilityDeps {
   // C6 / C16
   mail: Pick<MailStore, "applications" | "events"> | null;
   tracking: boolean; // CAREER_MAIL_TRACKING
-  grant: ((userId: string) => Promise<{ status: "ok" | "not_connected" | "not_allowed"; mailbox: string | null }>) | null;
+  // D-062: every Google account the person connected (the first grant first), with whether each may read and send.
+  accounts: ((userId: string) => Promise<GoogleAccount[]>) | null;
   cursor: ((userId: string) => Promise<string | null>) | null;
   readNow: ((userId: string) => Promise<MailNow>) | null; // one mail run for this person before answering (career_inbox_followups.ts mailNow)
   connectUrl: string; // where the person connects Gmail themselves (they sign in to Google; no password in chat)
@@ -36,7 +38,7 @@ export interface CapabilityDeps {
   people: { on: boolean; search: PeopleSearchFn | null; cache?: Map<string, { at: number; out: AlumniResult }>; onResult?: (r: AlumniResult) => void } | null;
   // answering an email
   inbox: Inbox | null;
-  reply: { outreach: OutreachStore; sendOn: boolean; canSend: (userId: string) => Promise<boolean>; name: () => string | null } | null;
+  reply: { outreach: OutreachStore; sendOn: boolean; canSend: (userId: string, from?: string | null) => Promise<boolean>; name: () => string | null } | null;
 }
 
 const obj = (properties: Record<string, unknown> = {}, required: string[] = []) => ({ type: "object" as const, properties, required });
@@ -45,14 +47,15 @@ const profileOf = (c: ToolCtx): any => (c.state as any)?.profile ?? {};
 
 async function recordFor(d: CapabilityDeps, c: ToolCtx): Promise<ApplicationRecord> {
   const unreadable: string[] = [];
-  const g = d.grant ? await d.grant(c.userId).catch(() => null) : null;
-  const mail: MailCoverage = { tracking_on: d.tracking, gmail: g ? (g.status === "ok" ? "connected" : g.status) : "unknown", mailbox: g?.mailbox ?? null, read_through: null,
-    accounts_connected: g?.status === "ok" ? 1 : 0, multiple_accounts_supported: false };
-  // A live read of new mail first (the scheduled run's own code, for this person only), so the answer is as of now.
+  const all = d.accounts ? await d.accounts(c.userId).catch(() => null) : null;
+  const readable = (all ?? []).filter((a) => a.can_read);
+  const mail: MailCoverage = { tracking_on: d.tracking, gmail: all === null ? "unknown" : readable.length ? "connected" : all.length ? "not_allowed" : "not_connected",
+    mailbox: readable[0]?.mailbox ?? null, read_through: null, accounts_connected: (all ?? []).length, accounts: (all ?? []).map((a) => a.mailbox), accounts_read: [], multiple_accounts_supported: true };
+  // A live read of new mail first (the scheduled run's own code, for this person only, every account), so the answer is as of now.
   if (d.tracking && mail.gmail === "connected" && d.readNow) {
     const r = await d.readNow(c.userId).catch(() => null);
     mail.read_now = r?.status === "ok" ? "read" : r?.status === "ERROR" ? "error" : "not_read";
-    if (r?.status === "ok") mail.read_through = r.read_through;
+    if (r?.status === "ok") { mail.read_through = r.read_through; mail.accounts_read = (r as any).mailboxes ?? readable.map((a) => a.mailbox); }
   }
   if (!mail.read_through && d.cursor && mail.gmail === "connected") mail.read_through = await d.cursor(c.userId).catch(() => null);
   const here = appsFromTracker((c.state as any)?.trackStore?.rows ?? []);
@@ -69,8 +72,8 @@ const remember = async (d: CapabilityDeps, c: ToolCtx, r: ApplicationRecord) => 
 
 const RECORD_NOTE = "Answer from this record only. Keep three groups apart: applications that went (with the evidence for each: the employer's email, " +
   "Trainee's submission record, or their word), roles that were only researched in this conversation, and drafts not submitted or sent. " +
-  "Say what the record covers in the same reply (coverage): it is based on one connected Gmail, so an application confirmed to another address " +
-  "or a status shown only on an employer's portal is missed. If Gmail is not connected, say so and give connect_url so they can connect it " +
+  "Say what the record covers in the same reply (coverage): how many Gmail accounts were read (each piece of evidence names its account), and that an " +
+  "application confirmed to an address that is not connected, or a status shown only on an employer's portal, is missed. If Gmail is not connected, say so and give connect_url so they can connect it " +
   "themselves (they sign in to Google; never ask for a password). If changes is not empty, correct what you said before, naming what changed. " +
   "Offer to keep this as a running tracker (export_tracker) when they have not asked for one yet. Never add an application the record does not hold.";
 
@@ -124,7 +127,7 @@ export function capabilityTools(d: CapabilityDeps): ToolSpec[] {
     const inbox = d.inbox;
     tools.push({
       name: "find_email", effect: "read",
-      description: "Use when the person wants to answer or read an email in their inbox (\"reply to the recruiter from Acme\", \"answer Dana's email\"). With query (Gmail search words like a sender, company or subject), lists matching received emails: ref, sender, subject, date, snippet. With ref, reads that one email's text. Read only.",
+      description: "Use when the person wants to answer or read an email in their inbox (\"reply to the recruiter from Acme\", \"answer Dana's email\"). With query (Gmail search words like a sender, company or subject), lists matching received emails in every Gmail account they connected: ref, account (which of their addresses it reached), sender, subject, date, snippet. With ref, reads that one email's text. Read only.",
       input_schema: obj({ query: str("Gmail search words, e.g. 'from:acme.com' or 'Dana interview'"), ref: str("An email's ref from an earlier find_email result, to read it in full") }),
       run: async (i, c) => {
         if (i.ref) {
@@ -142,13 +145,15 @@ export function capabilityTools(d: CapabilityDeps): ToolSpec[] {
       tools.push({
         name: "draft_email_reply", effect: "write_own",
         description: "Write the person's reply to one email from their inbox (its ref from find_email). Body only (greeting to closing line, no signature): from their words in this conversation, their confirmed facts and the email itself; no invented meeting, offer, figure or commitment. Code shows the exact message as a card; it is sent from their Gmail only if they then say yes to that exact message. Nothing is sent by this tool.",
-        input_schema: obj({ ref: str("The email's ref from find_email"), body: str("The reply's text, greeting to closing line, without the signature") }, ["ref", "body"]),
+        input_schema: obj({ ref: str("The email's ref from find_email"), body: str("The reply's text, greeting to closing line, without the signature"),
+          send_from: str("Only if the person asked to send from another of their connected Gmail accounts: that address. By default the reply goes from the account the email reached") }, ["ref", "body"]),
         effectOf: (out) => ((out as any)?.status === "ok" ? "write_own" : "read"),
         run: async (i, c) => {
           const prefs = await rp.outreach.prefs(c.userId).catch(() => ({ signature: null }) as any);
           const out = await draftReply({ userId: c.userId, threadId: c.threadId, now: c.now, inbox, outreach: rp.outreach, ref: String(i.ref ?? ""), body: String(i.body ?? ""),
             said: c.turn?.typed ?? c.turn?.message ?? "", facts: confirmed(profileOf(c).facts || []).map(factText), signature: prefs?.signature || rp.name(),
-            canSend: async () => rp.sendOn && await rp.canSend(c.userId) });
+            canSend: async (from) => rp.sendOn && await rp.canSend(c.userId, from),
+            sendFrom: i.send_from ? String(i.send_from) : null, accounts: d.accounts ? (await d.accounts(c.userId).catch(() => [])).filter((a) => a.can_send || a.can_read).map((a) => a.mailbox) : [] });
           if (out.status === "ok" && c.turn) c.turn.show = out.show;
           return out.status === "ok" ? { status: "ok", to: out.to, subject: out.subject, note: out.note } : out;
         },

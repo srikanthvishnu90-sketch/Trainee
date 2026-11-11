@@ -59,6 +59,9 @@ const model = async (req: Request): Promise<Response> => {
   return res;
 };
 
+// Read before openWorld: it clears ANTHROPIC_API_KEY (response_world ENV_KEYS) so a test world never holds a real key; the first
+// live run (2026-11-11) sent the string "undefined" and every model call came back 401.
+const LIVE_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const ACTION_TABLES: [string, string][] = [["career_apply_receipts", "submit"], ["career_contact_sends", "send"], ["career_outbox", "send"], ["career_outlook_sends", "send"], ["career_apply_jobs", "queue"], ["career_apply_prepared", "prepare"]];
 const w = await openWorld(2, { model });
 const lines: string[] = [];
@@ -66,7 +69,7 @@ const t0 = performance.now();
 let stopped: string | null = null;
 try {
   Deno.env.set("CAREER_BRAIN", "staged");
-  Deno.env.set("ANTHROPIC_API_KEY", dry ? "sk-test-not-real" : Deno.env.get("ANTHROPIC_API_KEY")!);
+  Deno.env.set("ANTHROPIC_API_KEY", dry ? "sk-test-not-real" : LIVE_KEY);
   const cols = new Set((await w.pg.sql(`select table_name from information_schema.columns where table_schema = 'public' and column_name = 'user_id'`)).split("\n").map((s) => s.trim()));
   const tables = ACTION_TABLES.filter(([t]) => cols.has(t));
   const counts = async (u: string) => {

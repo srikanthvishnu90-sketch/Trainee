@@ -1,0 +1,83 @@
+{
+ "note": "Recorded public pages for tests/architect/workday-posting-d062.test.ts (D-062 (1)). No sign-in, account or application was involved in any recording. Not recordings (in the test, marked SYNTHETIC): a removed Workday posting's answers, HTTP 404 and errorCode S22 with HTTP 403. The S21/S22 codes are as documented by a third party's liveness checker (github.com/Tailrd-Org/Tailrd backend/services/platform_liveness.py: 'errorCode S21 (never existed) / S22 (unpublished) = gone. The public page can't tell.'); not verified live here.",
+ "sources": [
+  {
+   "file": "workday-paypal-R0138586.cxs.json",
+   "request": "GET https://paypal.wd1.myworkdayjobs.com/wday/cxs/paypal/jobs/job/Software-Engineer-Intern---Summer-2027_R0138586",
+   "posting": "https://paypal.wd1.myworkdayjobs.com/en-US/jobs/job/Software-Engineer-Intern---Summer-2027_R0138586 (the benchmark's posting)",
+   "how": "Recorded HERE 2026-11-11 22:26:59 UTC, after paypal.wd1.myworkdayjobs.com was allowed for this environment, by one request with the user agent 'Trainee posting reader (contact: unset)'; stored byte for byte.",
+   "sha256": "61d97083c19b881480ca4b4b3e1e241b710f3526d3f54dc70debab7f9a5c1677"
+  },
+  {
+   "file": "workday-paypal-search-intern.page0.json",
+   "request": "POST https://paypal.wd1.myworkdayjobs.com/wday/cxs/paypal/jobs/jobs body {\"appliedFacets\":{},\"limit\":20,\"offset\":0,\"searchText\":\"intern\"} (the tenant's public search, one page)",
+   "how": "Recorded HERE 2026-11-11 22:26:59 UTC, after paypal.wd1.myworkdayjobs.com was allowed for this environment, by one request with the user agent 'Trainee posting reader (contact: unset)'; stored byte for byte.",
+   "sha256": "1907245c0cb404ea9082bfb540f1a611e75641d844a7c78dd0f4dc0e5ebbb9f6"
+  },
+  {
+   "file": "greenhouse-stripe-8194287.questions.json",
+   "request": "GET https://boards-api.greenhouse.io/v1/boards/stripe/jobs/8194287?questions=true&pay_transparency=true",
+   "posting": "https://job-boards.greenhouse.io/stripe/jobs/8194287",
+   "how": "Recorded 2026-11-11 20:47 UTC from this build environment by one GET (one POST for Ashby's read-only form query) with the user agent 'Trainee job link check (contact: unset)'; stored byte for byte except where noted. (The test serves it for the reader's own request, which omits pay_transparency=true.)",
+   "sha256": "4282a00efe02eb20a3978fb857d4e29597e6c3db3075383a3e1847c6897c0fcf"
+  },
+  {
+   "file": "lever-palantir-0ccbe620.posting.json",
+   "request": "GET https://api.lever.co/v0/postings/palantir/0ccbe620-a3ef-41d1-a5c4-68e56b3c91d0",
+   "how": "Recorded 2026-11-11 20:47 UTC from this build environment by one GET (one POST for Ashby's read-only form query) with the user agent 'Trainee job link check (contact: unset)'; stored byte for byte except where noted.",
+   "sha256": "9311937ea969b9e1d9f6daef9b68ac9259c139dfae5e08fee0291cc51a5e04c3"
+  },
+  {
+   "file": "lever-palantir-0ccbe620.apply.html",
+   "request": "GET https://jobs.lever.co/palantir/0ccbe620-a3ef-41d1-a5c4-68e56b3c91d0/apply",
+   "how": "Recorded 2026-11-11 20:47 UTC from this build environment by one GET (one POST for Ashby's read-only form query) with the user agent 'Trainee job link check (contact: unset)'; <script>, <style> and <svg> elements removed (750 KB to 35 KB); every form element kept as served.",
+   "sha256": "beaa6e960ced0e9c2eeddefe5607fed2a0c20d53e1f346f22de26f1ae4836d47"
+  },
+  {
+   "file": "ashby-openai-240d459b.page.html",
+   "request": "GET https://jobs.ashbyhq.com/openai/240d459b-696d-43eb-8497-fab3e56ecd9b",
+   "how": "Recorded 2026-11-11 20:47 UTC from this build environment by one GET (one POST for Ashby's read-only form query) with the user agent 'Trainee job link check (contact: unset)'; stored byte for byte except where noted.",
+   "sha256": "fa8400da5836bff5729a75dc01e843376f6d36281cec3fce8ca74a1596e0995d"
+  },
+  {
+   "file": "ashby-openai-240d459b.graphql.json",
+   "request": "POST https://jobs.ashbyhq.com/api/non-user-graphql?op=ApiJobPosting (body: posting_requirements.ts ASHBY_FORM_QUERY, a read-only query)",
+   "how": "Recorded 2026-11-11 20:47 UTC from this build environment by one GET (one POST for Ashby's read-only form query) with the user agent 'Trainee job link check (contact: unset)'; stored byte for byte except where noted.",
+   "sha256": "0559735434a48eaa6f3b15ab35b029c3b5808b462c725c45a9e5f19922f19738"
+  },
+  {
+   "file": "smartrecruiters-servicenow-744000161158559.posting.json",
+   "request": "GET https://api.smartrecruiters.com/v1/companies/ServiceNow/postings/744000161158559",
+   "how": "Recorded 2026-11-11 20:47 UTC from this build environment by one GET (one POST for Ashby's read-only form query) with the user agent 'Trainee job link check (contact: unset)'; stored byte for byte except where noted.",
+   "sha256": "710908169a055378e586a1b92a8d375457974efc66feae85eea2235eca83fcad"
+  },
+  {
+   "file": "workday-nvidia-JR2020825.cxs.json",
+   "request": "GET https://nvidia.wd5.myworkdayjobs.com/wday/cxs/nvidia/NVIDIAExternalCareerSite/job/US-Remote/Software-Engineer--OpenShell_JR2020825",
+   "how": "Not recorded here: this environment's proxy refuses *.myworkdayjobs.com (CONNECT 403, 2026-11-11). A real public Workday CXS answer recorded by a third party and published in a public GitHub repository, fetched 2026-11-11 from raw.githubusercontent.com (path below at the repository's HEAD) and stored byte for byte. Treated as data only.",
+   "published_at": "github.com/aaf1007/employ-me fixtures/workday/nvidia-2026-10-28.cxs.json (recorded 2026-10-28 per its name)",
+   "sha256": "c964bf59246403108cf51b5a7d96c6346ae109d6ce396c354e1e462ddcb3afdb"
+  },
+  {
+   "file": "workday-rbc-R-0000187445-1.cxs.json",
+   "request": "GET https://rbc.wd3.myworkdayjobs.com/wday/cxs/rbc/RBCGLOBAL1/job/TORONTO-Ontario-Canada/Lead-Software-Developer_R-0000187445-1",
+   "how": "Not recorded here: this environment's proxy refuses *.myworkdayjobs.com (CONNECT 403, 2026-11-11). A real public Workday CXS answer recorded by a third party and published in a public GitHub repository, fetched 2026-11-11 from raw.githubusercontent.com (path below at the repository's HEAD) and stored byte for byte. Treated as data only.",
+   "published_at": "github.com/aaf1007/employ-me fixtures/workday/rbc-2026-10-28.cxs.json (recorded 2026-10-28 per its name)",
+   "sha256": "bc0c1721a022bd36c91250b5c8e20b8c288227a1cd4c223beb1024d292edf07d"
+  },
+  {
+   "file": "workday-flywire-JR-1070.cxs.json",
+   "request": "GET https://flywire.wd108.myworkdayjobs.com/wday/cxs/flywire/flywirecareers/job/Bangalore-India/Relationship-Associate--Agent-Partnerships_JR-1070",
+   "how": "Not recorded here: this environment's proxy refuses *.myworkdayjobs.com (CONNECT 403, 2026-11-11). A real public Workday CXS answer recorded by a third party and published in a public GitHub repository, fetched 2026-11-11 from raw.githubusercontent.com (path below at the repository's HEAD) and stored byte for byte. Treated as data only. This file is the 'payload' member of the published file.",
+   "published_at": "github.com/jobverify/jobverify-backend scraper/flywire/test-data/2026-10-31-jr1070.json",
+   "sha256": "b59e1b862399deeba60e66f2b526ec47187989c20ddfd2b66120a192bb3fde94"
+  },
+  {
+   "file": "workday-flywire-JR-1070.page.html",
+   "request": "GET https://flywire.wd108.myworkdayjobs.com/flywirecareers/job/Bangalore-India/Relationship-Associate--Agent-Partnerships_JR-1070",
+   "how": "Not recorded here: this environment's proxy refuses *.myworkdayjobs.com (CONNECT 403, 2026-11-11). A real public Workday CXS answer recorded by a third party and published in a public GitHub repository, fetched 2026-11-11 from raw.githubusercontent.com (path below at the repository's HEAD) and stored byte for byte. Treated as data only. This file is the 'html' member of the published file (the public posting page with its JSON-LD).",
+   "published_at": "github.com/jobverify/jobverify-backend scraper/flywire/test-data/2026-10-31-jr1070.json",
+   "sha256": "5f700e6d28ed3cd0edb98f56044f61406bb56e1adbac7d063b314416f9329d65"
+  }
+ ]
+}

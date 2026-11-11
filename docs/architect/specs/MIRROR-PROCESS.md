@@ -70,14 +70,14 @@ The loop, reusable for any reference (Instinct batch 2, another assistant, a hum
 | C8 | EXISTS | |
 | C9 | EXISTS | (D-060 web research: `research_market` with Claude's web search) |
 | C10 | MISSING | the resume's contact email: Instinct used the linked account's; Trainee takes only one the person typed |
-| C11 | MISSING | a read-only reader of a posting's apply entry flow and questions |
+| C11 | EXISTS | (D-062: `inspect_apply_flow`, the posting and its form read from public pages only; Workday's questions named as behind sign-in) |
 | C12 | EXISTS | |
 | C13 | EXISTS | (D-059) |
 | C14 | EXISTS | (D-059) |
 | C15 | EXISTS | |
 | C16 | EXISTS | D-062: `export_tracker` (the tracker File kind, built by code, corrections named) |
 | C17 | EXISTS | |
-| C18 | EXISTS | (D-060 `check_posting_open`; a Workday page is named as not readable, never guessed) |
+| C18 | EXISTS | (D-060 `check_posting_open`; since D-062 a Workday posting is read from its own CXS data, with its stated deadline) |
 | C19 | EXISTS | D-062: `find_people` (web search excerpts; `CAREER_PEOPLE_SEARCH` and `CAREER_CONTACT_OUTREACH` in RELEASE_FLAGS) |
 | C20 | MISSING | edits to a tailored resume (condense one role, expand another) |
 | C21 | EXISTS | |
@@ -85,16 +85,17 @@ The loop, reusable for any reference (Instinct batch 2, another assistant, a hum
 | C21f | EXISTS | |
 | C23 | EXISTS | (D-060: the earlier search from the cache, same source; and this PR: a link Trainee already showed is kept on recall) |
 
-18 EXISTS, 8 blocked (2 OFF, 6 MISSING), after D-060 (web research on, merged 2026-11-11) was verified turn by turn here: C9,
+19 EXISTS, 7 blocked (2 OFF, 5 MISSING), after D-060 (web research on, merged 2026-11-11) was verified turn by turn here: C9,
 C22 and C23 moved to EXISTS; C4 did not (the research path answers a different question); C1's plan page is not the File
-Instinct made. The deploy the owner asked to hold waits on the 8.
+Instinct made. D-062 (1) moved C11 to EXISTS (the read-only apply-flow reader). The deploy the owner asked to hold waits on the 7.
 
 ## Rules every turn keeps
 
 - Nothing is sent, submitted, queued or saved as an application on any of the 26 turns (every ask says don't send, don't apply,
   or just explain). The test holds `career_apply_*`, `career_outbox`, `career_contact_sends` and `career_outreach_drafts` empty.
-- The only requests that leave the machine are reads: posting-page reads of the open check (D-051), the search's (C3) and the
-  asked re-check (C18), and on the research turns (C9, C22, C23) the research reader's GETs of public pages and boards. In the $0
+- The only requests that leave the machine are reads: posting-page reads of the open check (D-051), the search's (C3), the
+  asked re-check (C18) and the apply-flow read (C11: the posting's own page and its public form; on Ashby the one read-only
+  GraphQL query its page makes), and on the research turns (C9, C22, C23) the research reader's GETs of public pages and boards. In the $0
   test each is refused and recorded, and the web search itself is a stub on the model host (D-060's live proof is
   `evals/research-live/`).
 - Facts about the person come only from confirmed facts and this conversation (D-007). A hypothetical (C7, C15) writes nothing.
@@ -204,12 +205,19 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
   persona types one, or the owner rules on the account email.
 - **Artifact:** a PDF. **Boundary:** "Nothing was submitted".
 
-### C11 "what would you need from me to actually submit that paypal application? don't apply yet just wanna know" (MISSING)
+### C11 "what would you need from me to actually submit that paypal application? don't apply yet just wanna know" (EXISTS)
 - **Instinct:** the final resume's approval, the email and address to use, a careers-account sign-in; the questions behind
   sign-in admitted unknown; "I only inspected the entry flow: no account, saved application or submission was created".
 - **Steps:** (1) the brain with the posting (`named_application_needs`) and `get_posting` - EXISTS. (2) the apply flow
-  inspected read only - **MISSING**: a posting's questions are known only after a preparation run (`career_apply_questions.ts`);
-  Workday is the person's own account (D-050).
+  inspected read only - EXISTS since D-062 (1): `inspect_apply_flow` (`_shared/posting_requirements.ts readApplyFlow`) reads the
+  posting and its form from public pages only: the requirements in the posting's words, every question the form shows without
+  signing in (Greenhouse's posting API with `questions=true`, Lever's apply page, Ashby's read-only `ApiJobPosting` query),
+  SmartRecruiters' questions named as not public, and on Workday (`_shared/workday_posting.ts`, the posting's CXS data: title,
+  places, pay as stated, requirements, deadline when stated, open/closed) the questions named as behind the person's own sign-in
+  on the employer's careers site (D-050), never guessed. Every request is returned with the result. (3) the boundary: the tool
+  says to end with "no account, saved application or submission was created". Asserted in MP-1 (the harness's Greenhouse posting,
+  network refused: the questions said to be not read) and on Workday from recorded public pages in
+  `tests/architect/workday-posting-d062.test.ts`.
 - **Boundary:** "no account, saved application or submission was created".
 
 ### C12 "could you realistically apply to like 50 internships for me in one night? ..." (EXISTS)
@@ -243,7 +251,9 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
 - **Instinct:** a live check on the official careers site, the closing date, the link; nothing submitted.
 - **Steps:** (1) the posting the conversation listed (`postingNote`) - EXISTS. (2) `check_posting_open` (D-060,
   `research_web.ts recheckPosting`): the posting checked live on the boards Trainee reads; a check that cannot finish is
-  "not known", and a host Trainee does not read (the benchmark's Workday page) is named, never guessed - EXISTS. (3) the link on
+  "not known", and a host Trainee does not read is named, never guessed - EXISTS. Since D-062 the benchmark's Workday page is
+  read: its CXS data by the posting's path (open, closed on HTTP 404/410 or Workday's errorCode S21/S22 or canApply false, and
+  the application deadline when the posting states one; `workday_posting.ts`), asserted in `workday-posting-d062.test.ts`. (3) the link on
   its own line and "nothing was applied for" - EXISTS. (This PR first added a `recheck` to `get_posting`; D-060's tool does the
   same job, so the `get_posting` change was dropped at the merge.)
 

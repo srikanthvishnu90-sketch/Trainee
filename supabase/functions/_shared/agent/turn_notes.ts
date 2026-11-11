@@ -162,7 +162,8 @@ export function boundaryNote(b: Boundary): string {
 // ------------------------------------------------------------------------------------------------ a correction (D-061 G9)
 // The person says Trainee got something wrong earlier ("you said X but ...", "earlier you told me ...", "that's wrong"), or
 // corrects their own fact ("actually I ..."). The reply names what changed, out loud.
-const SAYS_WRONG = /\b(?:you (?:said|told me|wrote|listed|gave|mentioned|claimed)|earlier you|before you said|that'?s (?:wrong|not right|incorrect|off)|that was (?:wrong|incorrect)|you got (?:it|that) wrong|you were wrong|which (?:one )?is right|correct (?:that|it|yourself))\b/;
+// D-061 G9, wider: "are you sure", "double-check that", "that doesn't match", "I see / a recruiter told me ... but / instead".
+const SAYS_WRONG = /\b(?:you (?:said|told me|wrote|listed|gave|mentioned|claimed)|earlier you|before you said|that'?s (?:wrong|not right|incorrect|off)|that was (?:wrong|incorrect)|you got (?:it|that) wrong|you were wrong|which (?:one )?is right|correct (?:that|it|yourself)|are you sure|double[- ]?check (?:that|it|this)|that (?:doesn'?t|does not) (?:match|sound right|seem right|add up))\b|\b(?:i (?:see|saw|read|heard)|(?:a|my|the) (?:recruiter|friend|classmate|mentor|professor|posting|website|site) (?:told me|says|said|shows|lists))\b[^.?!]{0,80}\b(?:but|instead|not|actually|different|which)\b/;
 const OWN_FIX = /^(?:actually|wait|correction|sorry)[,:]?\s+(?:i|my)\b|\b(?:i meant|i misspoke|scratch that)\b/;
 export type Correction = "trainee" | "person";
 export function correctionOf(message: string): Correction | null {

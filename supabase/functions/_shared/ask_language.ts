@@ -53,7 +53,7 @@ const REQUEST_HEAD = /^\s*(?:(?:please|can you|could you|pls)\s+)?(?:find|look|s
 // only, and nothing under $35" (conditions, no semicolon) and "find X, also give me exactly 3" stay one ask.
 const ASK_HEAD = String.raw`(?:what|what's|whats|which|how|is|are|can|could|should|do|does|did|have|has|will|would|when|where|who|why|draft|write|find|look|search|research|tell|give|show|send|log|track|prep|rework|make|list|check|fix|rewrite|help|explain)\b`;
 const COUNTED_SEMI = new RegExp(String.raw`\b(?:two|2|three|3|couple(?:\s+of)?|few)\s+(?:things|questions|asks|q's|qs)\s*[:.,-]?\s*[^;]{3,}?;\s*(?:and\s+|also\s+|then\s+)?${ASK_HEAD}`, "i");
-const AND_SECOND = new RegExp(String.raw`;\s*and\s+(?:also\s+)?${ASK_HEAD}|\band also,?\s+${ASK_HEAD}`, "i");
+const AND_SECOND = new RegExp(String.raw`;\s*and\s+(?:also\s+)?${ASK_HEAD}|\band also,?\s+${ASK_HEAD}|(?:[,.;:!?—-]\s*|\s)(?:oh and|btw|one more thing|another thing|separate question|unrelated)[,:]?\s+(?:can you\s+|could you\s+|also\s+)?${ASK_HEAD}`, "i");
 const QUESTION_SENTENCE = new RegExp(String.raw`^(?:(?:and|also|plus|oh|ok|so)[,\s]+)?${ASK_HEAD}[^?]{6,}\?$`, "i");
 const twoQuestions = (t: string) => t.split(/(?<=[.?!])\s+|\n+/).map((x) => x.trim()).filter((x) => QUESTION_SENTENCE.test(x)).length >= 2;
 // D-061 G13: D-058's markers, or the wider ones above. The handler and the brain's note read this; the staged route's

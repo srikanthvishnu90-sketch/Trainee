@@ -13815,7 +13815,7 @@ const CareerRouter = (() => {
       const lp = (ctx.discovery && ctx.discovery.lastParams) || {};
       const namedRole = !o.headline && lp.ask === s(text).slice(0, 200) && (!!s(lp.whereText) && /\bin\s+[A-Z]/.test(s(text)) || /\b(?:analyst|engineer|developer|designer|scientist|coordinator|manager|intern|associate|consultant|marketing|product|data|finance|financial|software|ux|operations|sales|nurse|teacher)\b/i.test(s(lp.roleText)));
       const scope = emptySearchScope(lp, o, namedRole);
-      const facts = [scope ? "I found no open roles for that in the postings I have on hand, and I won't make any up." : namedRole ? "I won't make any up." : "I have no open roles on my list right now, and I won't make any up."];
+      const facts = [scope ? "I checked the postings I have on hand and found no open roles for that (career sites outside them were not checked), and I won't make any up."   : namedRole ? "I won't make any up." : "I have no open roles on my list right now, and I won't make any up."];
       const kept = statedSearchLimits(text);
       if (kept.length) facts.push(`I kept your limits: ${kept.join("; ")}.`);
       if (fams && fams.length) facts.push(`I've kept your ask (${fams.map(familyLabel).join(" + ")}) and will run it as soon as matching roles come in.`);
@@ -19203,7 +19203,7 @@ const CareerRouter = (() => {
         try { sum0 = Track && Track.statusSummary ? Track.statusSummary(store) : null; } catch { sum0 = null; }
         return emitTrack(ctx, { intent: "tracking_status", reply, resultStatus: "prepared", sends: 0, counts: { total: 0 } }, sum0 ? { summary: sum0 } : { summary: { total: 0 } });
       }
-      const reply = compose({ headline: "No applications on record yet, per your application tracker: it is empty.", facts: ["Once you apply through me, each one shows up here with where it stands. If you applied somewhere on your own, tell me and I'll add it."], nextStep: "Say \"find jobs\" and I'll start a search." });
+      const reply = compose({ headline: "No applications on record yet, per your application tracker; ones you sent on your own are not checked here.", facts: ["Once you apply through me, each one shows up here with where it stands. If you applied somewhere on your own, tell me and I'll add it."], nextStep: "Say \"find jobs\" and I'll start a search." });
       let sum = null;
       try { sum = Track && Track.statusSummary ? Track.statusSummary(store) : null; } catch { sum = null; }
       return emitTrack(ctx, { intent: "tracking_status", reply, resultStatus: "prepared", sends: 0, counts: { total: 0 } }, sum ? { summary: sum } : { summary: { total: 0 } });

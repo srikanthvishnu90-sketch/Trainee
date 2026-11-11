@@ -41,6 +41,7 @@ import { type Situation, statusText } from "../career_situation.ts";
 import { researchCareerQuestion, type ResearchDeps } from "./research/index.ts";
 import { type MarketDeps, type MarketResult, researchMarket } from "./research/market.ts";
 import { type CompanyResult, FOCI, type Focus, researchCompany } from "./research/company.ts";
+import { type PostingRecheck, READABLE_BOARDS } from "../research_web.ts";
 import { checkFollowup } from "../followup_draft.ts";
 
 const obj = (properties: Record<string, unknown> = {}, required: string[] = []) => ({ type: "object" as const, properties, required });
@@ -254,6 +255,8 @@ export function careerTools(deps: {
   research?: ResearchDeps | null;
   // R9-C market research (CAREER_RESEARCH_REPLY=on): searched, fetched, cited pages; inline or a research brief File. Absent: no such tool.
   market?: (MarketDeps & { onResult?: (r: MarketResult | CompanyResult) => void }) | null;
+  // D-060 (C18) web research on: "is that posting still open? check now" re-checks the posting page live (research_web.ts). Absent: no such tool.
+  postingRecheck?: ((url: string) => Promise<PostingRecheck>) | null;
 }): ToolSpec[] {
   const alertsOf = () => { if (!deps.alerts) throw new Error("job alerts are not configured here"); return deps.alerts; };
   const outreachOf = () => { if (!deps.outreach) throw new Error("outreach is not set up here; say so, never pretend a draft or send happened"); return deps.outreach; };
@@ -272,7 +275,7 @@ export function careerTools(deps: {
     name: "research_market", effect: "read",
     // Review of #589: publishing a research brief File writes to the person's own account (a File row and its link).
     effectOf: (out) => (out as MarketResult | null)?.status === "ok" && !!(out as any).file_url ? "write_own" : "read",
-    description: "Use when the person asks for market research that needs current, cited sources: what would change a market or industry, how 2 to 4 companies compare, pay for a role in a place, a company's size or business. Not for job search and not for an open \"how do I become X\" question. It searches, opens each page itself and returns only points that a fetched page states, each with numbered sources. YOU choose the format: \"inline\" for a quick answer (one figure, one fact, a yes or no), \"file\" for a comparison, an outlook, or anything that needs more than about three points. Never answer such a question from memory; write no link (code adds the sources or the file link).",
+    description: "Use when the person asks for market research that needs current, cited sources: what would change a market or industry, how 2 to 4 companies compare, pay for a role in a place (the going rate), a company's size or business, or what an employer is like (culture, pay, interview process) with real sources. If they ask again about research from earlier in this conversation, call it again with the same queries: it returns the same sources. Not for job search and not for an open \"how do I become X\" question. It searches, opens each page itself and returns only points that a fetched page states, each with numbered sources. YOU choose the format: \"inline\" for a quick answer (one figure, one fact, a yes or no), \"file\" for a comparison, an outlook, or anything that needs more than about three points. Never answer such a question from memory; write no link (code adds the sources or the file link).",
     input_schema: obj({
       question: str("The person's question, in their words"),
       format: { type: "string", enum: ["inline", "file"], description: "inline: a short answer in chat. file: a research brief page (cover, summary, comparison, what would have to be true, risks, sources)" },
@@ -314,6 +317,19 @@ export function careerTools(deps: {
         plan: { queries: list(i.queries).slice(0, 3).concat(list(i.queries).length ? [] : [`${company} ${role ?? ""}`.trim()]), companies: company ? [company] : [], sites: list(i.sites) } });
       deps.market!.onResult?.(r);
       return r;
+    },
+  }] : [];
+  const recheckTools: ToolSpec[] = deps.postingRecheck ? [{
+    name: "check_posting_open", effect: "read",
+    description: `Use when the person asks whether a specific job posting is still open ("is that PayPal posting still open? check now"). Pass the posting's link exactly as it appeared earlier in this conversation or in a tool result (never guess one). It checks the posting live, now, on the job boards Trainee reads (${READABLE_BOARDS.join(", ")}). Nothing is applied for.`,
+    input_schema: obj({ url: str("The posting's link, exactly as shown earlier in this conversation or by a tool") }, ["url"]),
+    run: async (i) => {
+      const r = await deps.postingRecheck!(String(i.url ?? ""));
+      const note = r.state === "not_readable"
+        ? `Trainee does not read ${r.host} pages, so it could not check whether this posting is still open. Say exactly that in one sentence, then give the link on its own line so they can check it themselves. Do not say it is open or closed. Nothing was applied for.`
+        : r.state === "unknown" ? `The check on ${r.board} did not finish, so whether it is open is not known. Say so in one sentence, with the link on its own line. Do not guess.`
+        : `Checked live on ${r.board} just now: ${r.state === "open" ? "the posting is still open" : "the posting is closed (the board no longer lists it)"}. Say that in one sentence and that nothing was applied for, then the link on its own line. Give no deadline or other detail the check did not return.`;
+      return { ...r, note };
     },
   }] : [];
   // R10 WO-H fix 14b (spec B.6 continuation 4, E.4): a follow-up or thank-you draft, checked in code before it is shown.
@@ -358,6 +374,7 @@ export function careerTools(deps: {
     ...conversationTools,
     ...researchTools,
     ...marketTools,
+    ...recheckTools,
     ...followupTools,
     {
       name: "remember_instruction", effect: "write_own",

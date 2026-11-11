@@ -321,14 +321,17 @@ export async function chatReply(cfg: ModelConfig, payload: any, o: CallOptions =
 
 // Web search (D-060, owner 2026-11-11: "Web research"). Claude's web_search server tool, through callModel: the call is reserved
 // at its worst case (request bytes, output cap, and per search the fee plus the result content it may read) before anything is
-// sent, and settled to the provider's own usage, search fees included (costMicros). WEB_SEARCH_AVAILABLE is true because a live
-// call proved the tool, its price and its citation shape: evals/research-live/ (the run id is in DECISIONS.md D-060).
+// sent, and settled to the provider's own usage, search fees included (costMicros).
+// PROVEN LIVE (evals/research-live/, D-060): run 43068690887 (web_search_20260209: 2 searches, 9 result pages each, $0.2128, but
+// no citation blocks: its dynamic filtering reads the pages in code) and run 43069018220 (web_search_20250305: 1 search, 9 result
+// pages, 10 cited passages word for word from citadel.com and others, $0.0436). The product uses the basic version: it is the one
+// that returns quotable passages, at about a fifth of the cost.
 // What comes back is only what the provider returned: the result pages (url, title, page age) and the passages the answer cited
 // (cited_text, word for word from that page). The model's own prose is returned as `answer` for the record and is never shown to a
 // person by this module: callers build replies from the cited passages and the pages they read themselves.
 // Without a query, a config or a key, nothing is reserved, sent or spent ("not_available").
-export const WEB_SEARCH_AVAILABLE = false; // until the live proof (evals/research-live/) passes
-export const WEB_SEARCH_TOOL = "web_search_20260209";
+export const WEB_SEARCH_AVAILABLE = true;
+export const WEB_SEARCH_TOOL = "web_search_20250305";
 export const WEB_SEARCH_MAX_USES = 3; // per call, the per-turn cap: research_web.ts makes at most one call per turn
 // Reserved per search beyond the request: the fee and up to 25,000 tokens of result content at the input rate.
 export const WEB_SEARCH_WORST_RESULT_TOKENS = 25000;

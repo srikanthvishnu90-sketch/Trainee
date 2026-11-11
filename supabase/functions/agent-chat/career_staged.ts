@@ -28,6 +28,7 @@ import { correctedAsk, refinedAsk } from "../_shared/search_correction.ts";
 import { askFor } from "../_shared/career_search_judge.ts";
 import { namedDraftAsk, outreachAsk } from "../_shared/outreach_ask.ts";
 import { researchReplyOn } from "../_shared/research_reply.ts"; // D-047
+import { knowledgeOn } from "../_shared/agent/knowledge/index.ts"; // D-060
 export type BrainMode = "router" | "agent" | "staged";
 // The served brain (release_config.ts): the committed PRODUCTION_BRAIN unless CAREER_BRAIN rolls it back to the router.
 // "agent" is never served from here (the full brain stays pinned off in career_brain.ts).
@@ -196,7 +197,7 @@ export function namesSomeone(span: string): boolean {
 const OPEN_ENTRY = { test: (m: string) => OPEN_ENTRY_RES.some((r) => { const x = r.exec(m); return !!x && !namesSomeone(m.slice(x.index).split(/[?.!]/)[0]); }) };
 const OPEN_ENTRY_KINDS = new Set(["role_kb_stats", "role_kb_absent", "plan_paths"]);
 export function openCareerQuestion(env: Env, message: string, intent: string, result: unknown): boolean {
-  if (env.get("CAREER_KNOWLEDGE") !== "on") return false;
+  if (!knowledgeOn(env)) return false; // D-060: a release flag, read through releaseFlagOn
   // career_os_plan ("the path from freshman to null") and profile_recall (a self-statement such as "I'm on F-1" swallows the
   // question) are the router's generic misses on the same open questions: they carry no library answer, so the brain takes them.
   const GENERIC_MISS = intent === "career_os_plan" || intent === "profile_recall";

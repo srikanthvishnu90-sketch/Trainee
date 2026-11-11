@@ -1,9 +1,10 @@
-// Step 2: ground. Current real data through a web search (dark for now: see gatewayGroundSearch). Three limits keep it cheap:
+// Step 2: ground. Current real data through a web search (D-060: Claude web search, see gatewayGroundSearch). Three limits keep it cheap:
 //   cache      keyed by (field, stage, geography) with a TTL, so many similar questions share one set of searches; concurrent
 //              identical misses share one in-flight run;
 //   per answer at most MAX_SEARCHES searches and ANSWER_COST_CAP_USD counted at the worst case per search;
 //   daily      the gateway's reserve refuses a search when the day's cap is used up (the answer then says what it could not verify).
-import { webSearch } from "../../model_gateway.ts";
+import type { WebSearchResult } from "../../model_gateway.ts";
+import { isBlockedHost, NEVER_SEARCH_DOMAINS } from "../../research_never.ts";
 import type { Kind } from "./fields.ts";
 import type { Understanding } from "./understand.ts";
 import { acceptFacts, type Rejected } from "./guard.ts";
@@ -68,12 +69,19 @@ export async function groundFor(o: { u: Understanding; search: GroundSearch; cac
 }
 
 // ------------------------------------------------------------------------------------------------ the searcher
-// Research ships DARK (owner directive 2026-11-02: Claude-only; Claude web search is not verified on these models). The one
-// searcher asks the gateway's web-search door, which answers "not available": nothing is reserved, sent or spent, and groundFor
-// reports the search as not completed. The caller does not even offer research while WEB_SEARCH_AVAILABLE is false.
-export function gatewayGroundSearch(): GroundSearch {
-  return async () => {
-    const r = await webSearch();
-    return { status: "error", detail: r.detail.slice(0, 120) };
+// D-060 (owner 2026-11-11, "Web research"): the searcher is Claude's web search through the gateway's one door (webSearch, proven
+// live in evals/research-live/). A fact is a passage the search quoted word for word (cited_text) from the page at its URL; the
+// guard (acceptFacts) still decides what stands. The search model's own prose is never a fact. One call per plan, at most
+// GROUND_SEARCHES_PER_PLAN searches; groundFor's caps (MAX_SEARCHES, ANSWER_COST_CAP_USD) and cache are unchanged. The caller
+// offers research only while web research is on (research_web.ts webResearchOn).
+export const GROUND_SEARCHES_PER_PLAN = 1;
+export function gatewayGroundSearch(search?: (q: string, o: { maxUses: number; blockedDomains: string[] }) => Promise<WebSearchResult>): GroundSearch {
+  return async (plan) => {
+    if (!search) return { status: "error", detail: "web search is not available here: no searcher is wired (nothing was sent)" };
+    const r = await search(plan.q, { maxUses: GROUND_SEARCHES_PER_PLAN, blockedDomains: [...NEVER_SEARCH_DOMAINS] });
+    if (!r.available) return { status: r.reason === "refused" ? "blocked" : "error", detail: r.detail.slice(0, 120) };
+    const kind = plan.kinds[0];
+    const facts: Fact[] = r.citations.filter((c) => !isBlockedHost(c.url)).map((c, i) => ({ id: `W${i + 1}`, kind, text: c.cited_text, quote: c.cited_text, url: c.url, label: c.title || new URL(c.url).hostname }));
+    return { status: "ok", facts, urls: [...new Set(facts.map((f) => f.url))], cost_usd: r.cost_usd };
   };
 }

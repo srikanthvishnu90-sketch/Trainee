@@ -13,15 +13,21 @@ import type { SearchPlan, SearchProvider } from "../../research_search.ts";
 import { NO_SOURCES } from "../../research_reply.ts";
 import { contentWords, numbersIn, numEq, specifics } from "./guard.ts";
 import { stripUrls } from "./reply.ts";
+import { type SourceKind, sourceKind } from "../../research_web.ts";
 
 export interface MarketDeps {
   search: SearchProvider;
   read: (urls: string[]) => Promise<FetchedSources>; // fetchSources with the declared User-Agent
   draft: (payload: { system: string; messages: { role: "user"; content: string }[] }) => Promise<string>; // the model's text
   publish?: ((data: unknown) => Promise<{ url: string } | null>) | null; // CAREER_RESEARCH_BRIEF=on: files.create(user, "research_brief", data)
+  // D-060 web research on (research_web.ts): the inline answer is laid out as Instinct's in batch 1 (one topic per message, its
+  // link on its own line) and the note asks for its process (official first, anecdotes labelled, caveats, disambiguation).
+  layout?: "messages" | null;
 }
 type Cited = { text: string; cite: number[] };
-export interface MarketSource { n: number; url: string; title: string; fetched_at: string }
+// kind (D-060): official, reported, self_reported or anecdote (research_web.ts sourceKind); via "search_passage" when the page is the
+// passage the web search quoted (the reader could not open it); dated: the search's own age of the page, when it gave one.
+export interface MarketSource { n: number; url: string; title: string; fetched_at: string; kind?: SourceKind; via?: "search_passage"; dated?: string | null }
 export type MarketResult =
   | { status: "no_sources"; format: "inline"; notes: string[]; searched: string; note: string }
   | { status: "ok"; format: "inline" | "file"; asked: "inline" | "file"; title: string; thesis: string | null; points: Cited[]; conditions: Cited[]; risks: Cited[];
@@ -33,7 +39,7 @@ export type MarketResult =
       // cited sections below (thesis_summary). Code decides; the model never writes either.
       thesis_cite?: number[]; thesis_summary?: boolean;
       // Figures the cited sources give differently for the same thing: each value with its source (disagreementsIn).
-      disagreements?: Disagreement[] };
+      disagreements?: Disagreement[]; layout?: "messages" };
 
 const squash = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim();
 const norm = (s: string) => squash(s.normalize("NFC")).toLowerCase().replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
@@ -146,10 +152,32 @@ export function disagreementsIn(points: { text: string; cite: number[] }[]): Dis
 }
 const parse = (raw: string) => { try { return JSON.parse(raw.trim().replace(/^```(?:json)?\s*|\s*```$/g, "")); } catch { return null; } };
 
+// D-060: the process of Instinct's research answers in the owner's batch 1 (C9, C22, C23), asked of the model; code enforces what it
+// can (enforceMarketReply): the source numbers, the figures, the labels on self-reported and anecdotal sources, "median".
+export const WEB_NOTE = [
+  "Answer from the points above only, one topic per paragraph (for example pay, then the interview process, then culture), each paragraph one to three short sentences ending with its source number like [1]; separate paragraphs with a blank line. Write no link: code puts each paragraph's source link on its own line.",
+  "Official sources first: say what the employer's own page or posting says before anything else (sources of kind official).",
+  "A source of kind anecdote (forums, anonymous reviews) is an anecdote: say so in that sentence (\"anonymous accounts describe ...\", \"anecdotes, not proof\"). A source of kind self_reported (levels.fyi and similar) is self-reported and can lag: say so in that sentence.",
+  "Give the date a figure is from when the point or the source says it; if a source is old (its dated field or its own date), say so.",
+  "If two similarly named employers appear (Citadel and Citadel Securities, for example), say they are different employers and keep their figures apart.",
+  "A range built from a few postings or self-reports is a benchmark, never a median or an average: call it a benchmark unless a point itself says median or average.",
+  "If the person asks again about research from earlier in this conversation, answer from that same source (the search returns the same sources from its cache).",
+  "Use no figure, name or date that is not in the points.",
+].join(" ");
 export async function researchMarket(i: { question: string; format: "inline" | "file"; plan: SearchPlan; deps: MarketDeps; fileLinks?: string[] }): Promise<MarketResult> {
   const found = await i.deps.search.search(i.plan);
   const got = found.hits.length ? await i.deps.read(found.hits.map((h) => h.url)) : { verified: [], rejected: [] };
   const pages = got.verified.filter((v) => v.status === 200 && isHttps(v.url) && !isBlockedHost(v.url));
+  // D-060: a page the web search quoted word for word, which the reader could not open itself, stands on the quoted passages
+  // alone (its text is those passages; the guard still keeps a point only when its quote is in them).
+  const quoted = new Set<string>(), dated = new Map<string, string | null>();
+  for (const p of found.passages ?? []) {
+    const u = normalizeUrl(p.url);
+    dated.set(u, p.page_age ?? null);
+    if (!isHttps(u) || isBlockedHost(u) || pages.some((v) => normalizeUrl(v.url) === u) || !squash(p.text)) continue;
+    pages.push({ url: u, requested: u, status: 200, title: squash(p.title).slice(0, 200), text: String(p.text).slice(0, 8000), fetchedAt: found.hits.find((h) => normalizeUrl(h.url) === u)?.foundAt ?? Date.now() });
+    quoted.add(u);
+  }
   const notes = [...found.notes, ...(got.rejected.length ? [`${got.rejected.length} page(s) could not be opened and were not used`] : [])];
   const searched = found.provider;
   const lines = (xs: string[] | undefined) => [...new Set((xs ?? []).map(squash).filter((g) => g && g.length <= 240 && linkFree(g)))].slice(0, 8);
@@ -200,7 +228,10 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   const title = title0 && linkFree(title0) && numsOn(title0, cited) ? title0 : squash(i.question).replace(/[?]+$/, "").slice(0, 80);
   // The thesis's own sources: every cited page that holds all of its content words (and, by numsOn above, its numbers).
   const thesisCite = thesis ? cited.map((p, k) => ({ p, n: k + 1 })).filter(({ p }) => { const have = contentWords(p.text.slice(0, 60000)); return [...contentWords(thesis)].every((w) => have.has(w)); }).map(({ n }) => n) : [];
-  const sources = cited.map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || new URL(p.url).hostname, fetched_at: new Date(p.fetchedAt).toISOString() }));
+  const companies = i.plan.companies ?? [];
+  const sources: MarketSource[] = cited.map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || new URL(p.url).hostname, fetched_at: new Date(p.fetchedAt).toISOString(),
+    kind: sourceKind(p.url, companies), ...(quoted.has(normalizeUrl(p.url)) ? { via: "search_passage" as const } : {}), ...(dated.get(normalizeUrl(p.url)) ? { dated: dated.get(normalizeUrl(p.url)) } : {}) }));
+  const layout = i.deps.layout === "messages" ? "messages" as const : undefined;
 
   // The format: the brain's choice, kept unless a File cannot honestly be made.
   let file_url: string | null = null, why = "";
@@ -218,12 +249,33 @@ export async function researchMarket(i: { question: string; format: "inline" | "
     if (why) notes.push(`answered inline: ${why}`);
   }
   const format = file_url ? "file" : "inline";
-  return { status: "ok", format, asked: i.format, title, thesis, points, conditions, risks, comparison, sources, file_url, dropped, notes, searched, ...(gaps.length ? { gaps } : {}), ...(basis.length ? { basis } : {}), ...(disagreements.length ? { disagreements } : {}), ...(thesis ? (thesisCite.length ? { thesis_cite: thesisCite } : { thesis_summary: true }) : {}),
+  return { status: "ok", format, asked: i.format, title, thesis, points, conditions, risks, comparison, sources, file_url, dropped, notes, searched, ...(gaps.length ? { gaps } : {}), ...(basis.length ? { basis } : {}), ...(disagreements.length ? { disagreements } : {}), ...(thesis ? (thesisCite.length ? { thesis_cite: thesisCite } : { thesis_summary: true }) : {}), ...(layout ? { layout } : {}),
     note: format === "file"
       ? "Reply in one or two plain sentences: the thesis, then that the full brief with its sources is in the file. Write no link and no figure: code sends the file link."
+      : layout ? WEB_NOTE + (disagreements.length ? " The sources differ on a figure (see disagreements): give each value with its source number and say they differ; never pick one." : "")
       : `Reply in one to three short sentences using only the points above (and the comparison, if any). Put the source number after each claim, like [1]. Write no link: code adds the numbered sources after your reply. Use no figure, name or date that is not in the points.${disagreements.length ? " The sources differ on a figure (see disagreements): give each value with its source number and say they differ; never pick one." : ""}` };
 }
 
+const STAT_WORD = /\b(median|average|mean)\b/gi;
+// The words that tell the person a source is self-reported or anecdotal (C9: "anonymous accounts describe ...", "anecdotes, not
+// proof"; C22: "self-reported examples ..., though those reports can lag").
+export const UNVERIFIED_LABEL = /\b(?:anecdot\w*|self-reported|self reported|reported by (?:users|candidates|employees)|user-reported|candidates? (?:accounts?|reports?|describe|say)|anonymous|forum|reddit|reviews?|can lag|crowd-?sourced|accounts describe|not proof)\b/i;
+// D-060 (C9): Instinct's layout. The answer's paragraphs, each with its sources' links on their own lines after it, separated by a
+// blank line (each paragraph a message where the channel splits on blank lines). A paragraph is the model's own (it was asked for
+// one topic per paragraph); a sentence cites its sources [n], and a paragraph's links are the sources its sentences cite, in order.
+// The [n] markers are removed: the link under the paragraph is the citation.
+export function messagesLayout(body: string, sources: MarketSource[]): string {
+  const paras = body.split(/\n\s*\n/).map((x) => x.trim()).filter(Boolean);
+  const out: string[] = [];
+  for (const para of paras) {
+    const cs = [...new Set([...para.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1])))];
+    const text = para.replace(/\s*\[\d+\]/g, "").replace(/\s+([.,;:!?])/g, "$1").replace(/[ \t]{2,}/g, " ").trim();
+    if (!text) continue;
+    const links = cs.map((n) => sources.find((x) => x.n === n)?.url).filter(Boolean) as string[];
+    out.push([text, ...links].join("\n"));
+  }
+  return out.join("\n\n");
+}
 const SAYS_UNCONFIRMED = /\b(?:couldn['’]?t|could not|can['’]?t|cannot|unable to|wasn['’]?t able|was not able|not able to|don['’]?t have|do not have|no (?:source|page|verified))\b/i;
 const CLAIM_AFTER = /\b(?:but|however|although|though|yet|still|anyway)\b/i;
 // The reply, enforced in code: every link the model wrote is removed; a citation number with no source is removed; an inline
@@ -250,16 +302,27 @@ export function enforceMarketReply(reply: string, r: MarketResult): string {
   // (a company, a place) must be in such a point: "Globex Power installed 41,000 [1]" never stands on Acme's point [1].
   const said = (name: string, text: string) => new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(text);
   const onRecord = (s: string) => numsOf(s).every((n) => items.some((p) => p.nums.some((x) => numEq(x, n))));
+  // D-060 (C22): "median", "average" or "mean" only when a point it stands on says so; a range from postings is a benchmark.
+  const statOk = (s: string, on: { text: string }[]) => [...s.matchAll(STAT_WORD)].every((m) => on.some((p) => new RegExp(`\\b${m[1]}`, "i").test(p.text)));
+  // D-060 (C9): a sentence that stands only on self-reported or anecdotal sources says so.
+  const kindOf = (n: number) => r.sources.find((x) => x.n === n)?.kind;
+  const labelOk = (s: string) => { const cs = citesOf(s); return !cs.length || cs.some((c) => { const k = kindOf(c); return !k || k === "official" || k === "reported"; }) || UNVERIFIED_LABEL.test(s); };
   const supported = (s: string) => {
     const cs = citesOf(s);
     const mine = items.filter((p) => p.cite.some((c) => cs.includes(c)));
     return cs.length > 0 && numsOf(s).every((n) => mine.some((p) => p.nums.some((x) => numEq(x, n))))
-      && specifics(s.replace(/\[\d+\]/g, "")).names.every((w) => mine.some((p) => said(w, p.text)));
+      && specifics(s.replace(/\[\d+\]/g, "")).names.every((w) => mine.some((p) => said(w, p.text))) && statOk(s, mine) && labelOk(s);
   };
-  let body = stripUrls(reply).replace(/\[(\d+)\]/g, (m, n) => Number(n) >= 1 && Number(n) <= max ? m : "")
-    .split(/(?<=[.!?](?:\s*\[\d+\])*)\s+/).filter((s) => s.trim() && (r.format === "file" ? onRecord(s) : supported(s))).join(" ").trim();
-  if (!body) body = r.points.slice(0, 3).map((p) => `${p.text.replace(/[.]?$/, "")} ${p.cite.map((n) => `[${n}]`).join("")}.`).join(" ");
+  const keep = (t: string) => stripUrls(t).replace(/\[(\d+)\]/g, (m, n) => Number(n) >= 1 && Number(n) <= max ? m : "")
+    .split(/(?<=[.!?](?:\s*\[\d+\])*)\s+/).filter((s) => s.trim() && (r.format === "file" ? onRecord(s) && statOk(s, items) : supported(s))).join(" ").trim();
+  // D-060 (C9): in the messages layout the model's paragraphs (one topic each) are kept as paragraphs.
+  const paras = r.layout === "messages" && r.format !== "file";
+  let body = paras ? reply.split(/\n\s*\n/).map(keep).filter(Boolean).join("\n\n") : keep(reply);
+  if (!body) body = r.points.slice(0, 3).filter((p) => labelOk(`${p.text} ${p.cite.map((n) => `[${n}]`).join("")}`)).map((p) => `${p.text.replace(/[.]?$/, "")} ${p.cite.map((n) => `[${n}]`).join("")}.`).join(paras ? "\n\n" : " ");
+  if (!body && r.format !== "file") return NO_SOURCES;
   if (r.format === "file") return body;
+  if (r.layout === "messages") return messagesLayout(body, r.sources);
   const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
-  return `${body}\n\n${r.sources.map((s) => `[${s.n}] ${s.title}: ${s.url} (read ${day(s.fetched_at)})`).join("\n")}`;
+  const tag = (k?: SourceKind) => k === "anecdote" ? " (anecdote)" : k === "self_reported" ? " (self-reported)" : "";
+  return `${body}\n\n${r.sources.map((s) => `[${s.n}] ${s.title}${tag(s.kind)}: ${s.url} (read ${day(s.fetched_at)})`).join("\n")}`;
 }

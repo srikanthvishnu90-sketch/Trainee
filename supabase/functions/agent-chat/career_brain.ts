@@ -174,7 +174,11 @@ export async function agentTurn(o: {
   // A research, market or company reply was laid out and sourced in code above (its citations number its sources): never condensed.
   if (result.reply && result.stopped === "final" && !trace.r && !trace.m) {
     const limit = condenseLimit(o.message);
-    if (condensable(result, limit)) {
+    // An ask for everything, or for the detail ("give me a detailed plan for my whole job search, everything"; "like everything
+    // you remember") is a deliberate long deliverable: the channel lays it out in several messages (channel_shape.ts), and a
+    // rewrite to a text's length would drop what was asked for (tests/architect/telegram-loop-30.test.ts, long-reply-bubbles).
+    // Its length is the prompt's to guide, never the shortener's.
+    if (limit !== REPLY_TARGET.long && condensable(result, limit)) {
       const short = await condenseReply(o.model, result.reply, limit);
       if (short) result = { ...result, reply: short };
     }

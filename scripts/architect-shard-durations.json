@@ -682,6 +682,7 @@
     "tests/architect/mirror-wa-batch1-handler.test.ts": 16,
     "tests/architect/mirror-wa-batch1-gaps.test.ts": 0.1,
     "tests/architect/mirror-wa-batch1-gaps-handler.test.ts": 15,
+    "tests/architect/mirror-wa-batch1-process.test.ts": 15,
     "tests/architect/r10-app-layer/r10-fix-12-review.test.ts": 10
   }
 }

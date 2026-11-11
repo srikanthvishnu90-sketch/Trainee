@@ -373,7 +373,10 @@ Deno.test("D-037/2e: a send refused for want of gmail.send offers the person the
 
 // ------------------------------------------------------------------------------------------------ 3. reply rewriters
 Deno.test("D-037/3: a reply rewriter goes ON only after its measurement: no worse pass rate and no added invented-fact failure", () => {
-  for (const r of REWRITERS) {
+  // Architect amendment (D-060; owner, 2026-11-11, in chat: "Web research"): the owner turned CAREER_KNOWLEDGE on in writing; the
+  // other rewriters still go on only after their measurement.
+  ok(RELEASE_FLAGS.CAREER_KNOWLEDGE === "on" && !RELEASE_NEVER_ON.includes("CAREER_KNOWLEDGE"), "D-060: the knowledge layer is on by the owner's ruling");
+  for (const r of REWRITERS.filter((x) => x !== "CAREER_KNOWLEDGE")) {
     ok(RELEASE_NEVER_ON.includes(r) && !(r in RELEASE_FLAGS), `${r} stays off: not measured yet`);
   }
   const items = [{ id: "A", persona: "", turns: ["x"], must: ["m"], must_not: ["claims a degree not on the record"] },

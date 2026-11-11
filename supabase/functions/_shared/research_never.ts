@@ -7,6 +7,9 @@ const BLOCKED_DOMAINS = ["linkedin.com", "lnkd.in", "licdn.com", "indeed.com", "
 // www.ziprecruiter.ca, glassdoor.com.evil.example all refuse), the same names career_contact_sources.ts never opens.
 // Google Scholar is the label pair scholar.google on any suffix.
 const NEVER_LABELS = new Set(["linkedin", "lnkd", "licdn", "indeed", "indeedemail", "indeedmail", "joinhandshake", "glassdoor", "ziprecruiter", "crunchbase", "commoncrawl"]);
+// D-060: the same never-list handed to Claude's web search tool as blocked_domains, so a search never returns those sites at all
+// (the tool takes plain domains; isBlockedHost still checks every result on any TLD).
+export const NEVER_SEARCH_DOMAINS: readonly string[] = Object.freeze([...BLOCKED_DOMAINS.filter((d) => d !== "lnkd.in" && d !== "licdn.com"), "glassdoor.com", "ziprecruiter.com", "crunchbase.com"]);
 export function isBlockedHost(url: string): boolean {
   let host: string;
   try { host = new URL(url).hostname.toLowerCase().replace(/\.$/, ""); } catch { return true; }

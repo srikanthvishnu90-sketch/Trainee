@@ -509,7 +509,7 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   // turn: it reads official sources first (research_company, research_market, each reply enforced in code: enforceCompanyReply),
   // with the file's answer as data. With web research rolled back (CAREER_KNOWLEDGE=off), the sourced file stays code's (D-007).
   if (intent === "company_intel" && has((probe.result ?? {}) as Record<string, unknown>, "company") && codeProduct(intent, probe.result) && knowledgeOn(o.env) && researchReplyOn(o.env)) return g1Brain(o, intent, probe, clock);
-  if (codeProduct(intent, probe.result)) return g1Override(o.message) || (intent === "prep_brief" && !prepSessionOpen(o.ctx) && !G1_FILE_ASK.test(o.message)) ? g1Brain(o, intent, probe, clock) : { brain: false, mode, intent, reason: "code_product" };
+  if (codeProduct(intent, probe.result)) return g1Override(o.message) || (intent === "prep_brief" && !prepSessionOpen(o.ctx) && !G1_FILE_ASK.test(o.message) && G1_REQUEST.test(o.message)) ? g1Brain(o, intent, probe, clock) : { brain: false, mode, intent, reason: "code_product" };
   return { brain: true, mode, intent, reason: "question", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
 }
 
@@ -742,13 +742,14 @@ const G1_ACTIONS: ReadonlySet<string> = new Set([
   "career_answer_change_after_approval", "career_apply_email_draft", "career_apply_email_explain", "career_apply_email_sender", "career_portal_account",
   "ai_use_answer", "eligibility_check", "disclosure_clarify", "career_os_review_packet", "calendar_proposal", "graph_intro", "graph_blurb", "profile_export",
   "access_log", "session_health", "connected_accounts",
-  // what the person told Trainee about themselves, read back from what they confirmed (D-007)
-  "profile_recall",
+  // what the person told Trainee about themselves, read back from what they confirmed (D-007); "the first one" of the list code
+  // just showed (G1 b: the answer refers to code's own list)
+  "profile_recall", "career_list_reference",
 ]);
 // Reads of the person's own record (applications, follow-ups, their people): code's when the message asks about that record.
 const G1_RECORD_READS: ReadonlySet<string> = new Set(["tracking_status", "tracking_digest", "career_status_states", "intent_followup_status",
   "campaign_digest", "season_dashboard", "intent_prior_application", "intent_role_closed", "career_resume_on_file", "career_resume_not_read",
-  "graph_alumni", "graph_referral", "graph_keep_warm", "graph_paths", "career_list_reference"]);
+  "graph_alumni", "graph_referral", "graph_keep_warm", "graph_paths"]);
 // The message is about the person's own record ("have I", "my applications", "did my", "what do you know about me").
 const OWN_RECORD_ASK = /\b(?:my|mine|me|i'?ve|i\s+have|have\s+i|did\s+i|do\s+i\s+(?:have|know)|i\s+(?:applied|sent|know|asked|told))\b|\b(?:the|that|this|our)\s+(?:application\s+)?(?:tracker|applications?|pipeline)\b/i;
 const G1_RECALLS: ReadonlySet<string> = new Set(["conversation_recall", "career_goal_recall", "graph_memory", "negotiation_recall"]);
@@ -762,6 +763,9 @@ function g1Brain(o: { message: string; ctx: Record<string, unknown>; host: Host;
 }
 // An ask for a file, a document, a page or a plan to keep or open (G11).
 const G1_FILE_ASK = /\b(?:file|doc|docs|document|pdf|docx|page|sheet|one[- ]?pager|brief|briefing|plan|checklist|cheat ?sheet|download\w*|printable)\b|\b(?:prep|prepare)\s+me\b|\bhelp\s+me\s+(?:prep|prepare|get\s+ready)\b|\bget\s+me\s+ready\b/i;
+// A request for something specific ("give me three practice problems", "rate this answer", "walk me through ..."); a statement
+// of the situation alone ("I have an interview tomorrow and I'm nervous") keeps the router's prep plan.
+const G1_REQUEST = /\b(?:give|walk|help|turn|rate|ask|quiz|shape|show|tell|write|make|review|critique|grade|practice|practise|drill|explain|how|what|which|can you|could you)\b|\?/i;
 export const g1Override = (message: string) => { const m = String(message ?? "").replace(/[\u2019`]/g, "'"); return !!hypotheticalOf(m) || correctionOf(m) === "trainee" || severalAsks(m); };
 // A product code built for an instruction the person gave (a draft, a people list, a prep brief, a document, an offer card):
 // the instruction carried out. A sourced record (a company file, a benchmark, a comparison) is data for the brain's answer.

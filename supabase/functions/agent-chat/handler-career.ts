@@ -1462,7 +1462,6 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           // D-060 (C18): "is that posting still open?" re-checked live on the boards the product reads; any other host is named, not guessed.
           postingRecheck: webResearchOn(Deno.env) ? (url: string) => recheckPosting(url, linkChecker(fetch, { ashby: "posting", userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` })) : null,
           research: webResearchOn(Deno.env) && cfg.apiKey ? { search: gatewayGroundSearch((q, w) => webSearch(q, { cfg, meter, ...w })), cache: researchCache, publish: fileKindPublisher(createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }), user.id), derive: modelDerive(async (system, user) => { const r = await callModel(cfg, { system, messages: [{ role: "user", content: [{ type: "text", text: user }] }], max_tokens: 200 }, { meter, role: "chat" }); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); }) } : null,
-          known: { standing, alerts: alertRow ? { prefs: alertRow.prefs, tz: alertRow.tz } : null, pipeline: null, situation }, memory,
           // D-062 (owner, 2026-11-11: "be able to answer emails, find alumni, do all of it"): the person's Gmail confirmations and the
           // tracker File (CAREER_MAIL_TRACKING), answering an email from their own Gmail (a yes to the exact card sends it:
           // CAREER_EMAIL_SEND), and public people search from web search excerpts (CAREER_PEOPLE_SEARCH; never LinkedIn or Indeed).
@@ -1474,7 +1473,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             people: { on: releaseFlagOn(Deno.env, "CAREER_PEOPLE_SEARCH"), search: cfg.apiKey ? (q, w) => webSearch(q, { cfg, meter, ...w }) : null, cache: peopleSearchCache, onResult: (r) => { peopleTrace = r; } },
             inbox: chatSwitches(Deno.env).mailTracking ? inboxReader({ fetch, token: careerTokenFor(f08Grant, GMAIL_READONLY) }) : null,
             reply: { outreach: outreachStore, sendOn: chatSwitches(Deno.env).emailSend && sendRailOn(Deno.env), canSend: async (u) => !!(await sendToken(u)), name: () => ((ctx as any).profile?.basics?.name ?? null) },
-          }) });
+          }),
+          known: { standing, alerts: alertRow ? { prefs: alertRow.prefs, tz: alertRow.tz } : null, pipeline: null, situation }, memory });
         await ledger.record(meter);
         // Architect ruling 3 (2026-11-09): at a limit, the router's own answer stands when it chose a specific intent for THIS message
         // ("what should I wear to a video interview?" -> its interview prep); only its catch-alls and fallback templates are replaced.

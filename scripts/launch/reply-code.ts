@@ -99,7 +99,11 @@ export const RELEASE_FLAG_PATHS = [
   "supabase/functions/_shared/career_contact_pipeline.ts",
   // D-062 (2026-11-11): the capability tools' modules: the application record and tracker (CAREER_MAIL_TRACKING), public people
   // search (CAREER_PEOPLE_SEARCH), answering an email (CAREER_EMAIL_SEND), their stores, and the follow-up turn that takes the yes.
-  "career_application_record.ts", "career_alumni_search.ts", "career_mail_reply.ts", "career_capability_stores.ts", "career_inbox_followups.ts",
+  "supabase/functions/_shared/career_application_record.ts",
+  "supabase/functions/_shared/career_alumni_search.ts",
+  "supabase/functions/_shared/career_mail_reply.ts",
+  "supabase/functions/_shared/career_capability_stores.ts",
+  "supabase/functions/_shared/career_inbox_followups.ts",
   // D-049: the chat File card (CAREER_FILE_CARD) and the outbox's resolver for it.
   "supabase/functions/_shared/file_card.ts",
   "supabase/functions/_shared/channel_runtime.ts",

@@ -304,6 +304,7 @@ MIGRATIONS=(
   20261110160000_career_file_plans_materials.sql
   20261110180000_career_apply_answers_own_v2.sql
   20261110190000_career_outbox_parts_follow_contact.sql
+  20261111120000_career_google_accounts.sql
 )
 MIGRATION_MARK=(
   "to_regclass('public.channel_threads') is not null"
@@ -476,6 +477,7 @@ MIGRATION_MARK=(
   "to_regclass('public.career_search_plans') is not null and to_regclass('public.career_material_versions') is not null"
   "to_regprocedure('public.career_apply_answers_own_v2()') is not null"
   "exists (select 1 from pg_trigger where tgname = 'career_outbox_parts_follow_contact')"
+  "to_regclass('public.career_google_accounts') is not null and to_regprocedure('public.career_google_account_commit(uuid,text,text,text,timestamptz)') is not null"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.
 EARLIER=(20261015010000_career_knowledge_base.sql 20261015020000_career_watch_kv.sql 20261015234000_career_task_intents_v1.sql

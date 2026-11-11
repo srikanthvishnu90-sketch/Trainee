@@ -21,20 +21,18 @@ import { POSTING_PAGE } from "./helpers/posting_checks.ts";
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
 
-export const EXISTS = ["C2", "C3", "C5", "C5f1", "C5f2", "C7", "C8", "C12", "C13", "C14", "C15", "C17", "C18", "C21", "C21f", "C23"];
+export const EXISTS = ["C2", "C3", "C5", "C5f1", "C5f2", "C7", "C8", "C9", "C12", "C13", "C14", "C15", "C17", "C18", "C21", "C21f", "C22", "C23"];
 // The turns whose process needs a capability Trainee does not serve today. OFF: the code exists and a release switch keeps it off
 // (`flags`, none of which release_config.ts serves on). MISSING: what has to be built or provided.
 export const BLOCKED: Record<string, { status: "OFF" | "MISSING"; blocker: string; flags?: string[] }> = {
-  C1: { status: "OFF", flags: ["CAREER_REPLY_WRITER"], blocker: "the plan File (plan_review kind) is made only by create_file, which the brain is offered only with the reply writer on Telegram (career_brain.ts o.shape); WhatsApp gets no File for a plan" },
-  C4: { status: "OFF", flags: ["CAREER_KNOWLEDGE"], blocker: "a cited source for advice: research_career_question is offered only with CAREER_KNOWLEDGE on and the gateway's web search (model_gateway.ts WEB_SEARCH_AVAILABLE = false); research_market is market research, not resume advice" },
+  C1: { status: "OFF", flags: ["CAREER_REPLY_WRITER"], blocker: "one File with the checked postings and a weekly plan: create_file (the plan_review kind) is offered only with the reply writer on Telegram (career_brain.ts o.shape); research_career_question's plan page (D-060) has no postings in it" },
+  C4: { status: "MISSING", blocker: "a sourced answer to a specific advice question (what goes at the top of a resume, with one cited guide): with web research on (D-060), research_career_question answers it as a career-entry plan (\"this week: build a tool\") with no source link, and research_market is market research" },
   C6: { status: "MISSING", blocker: "evidence from the person's email confirmations in the record reply: CAREER_MAIL_TRACKING reads one connected Gmail, the record reply (tracking_status) does not read it or separate researched roles from applications, and the benchmark persona has no Gmail" },
-  C9: { status: "MISSING", blocker: "general web search for official, press and anecdotal pages with each source labelled official or anecdotal: research_market's free sources do not search forums or press, Brave runs only with the owner's BRAVE_SEARCH_API_KEY" },
   C10: { status: "MISSING", blocker: "the email at the top of the resume: Instinct used the linked account's email; tailor_resume refuses until the person types one (set_resume_contact never uses the account email), and the benchmark persona never typed one" },
   C11: { status: "MISSING", blocker: "a read-only reader of a posting's application entry flow and questions (Workday behind sign-in): questions are known only after a preparation run (career_apply_questions)" },
   C16: { status: "MISSING", blocker: "a tracker artifact (no tracker File kind in file_kinds.ts, no Sheets export) built from email confirmations; the record reply says the tracker is empty" },
   C19: { status: "OFF", flags: ["CAREER_PEOPLE_SEARCH", "CAREER_CONTACT_OUTREACH"], blocker: "public people search (D-043 not accepted; both in RELEASE_NEVER_ON): code's people-list reply plans a list and finds no one" },
   C20: { status: "MISSING", blocker: "edits to a tailored resume (condense one role to one line, expand another): tailor_resume takes no edit instructions; save_resume_persona only orders or hides facts" },
-  C22: { status: "MISSING", blocker: "self-reported intern pay (levels.fyi) needs general web search; research_market's free sources give BLS figures, not intern hourly pay" },
 };
 
 const NOTHING_SENT = /\b(?:nothing|not)\b[^.!?\n]{0,40}\b(?:sent|submitted|applied|queued|contacted)\b/i;
@@ -62,6 +60,33 @@ const C14_BODY = "Hey [Name], I'm a Lakeshore CS student interested in this Goog
 const C13_BODY = "Hey, quick question: is there any flexibility in the listed comp range for this role, or is it fixed? Thanks!";
 const C5_Q = "Given a list of integers, write a Python function that returns the first number that appears only once, or None if there isn't one. Talk me through your approach before writing code, including its time and space complexity.";
 const C21_Q = "Tell me about a time you failed: what were you responsible for, what went wrong, and what did you do afterward?";
+// D-060 web research at $0: a stubbed web search on the Anthropic wire (the shape the live proof recorded, evals/research-live/)
+// quoting these passages; the market draft (market.ts RULES) quotes them back word for word. The pages themselves are refused
+// like every other host, so each passage stands for its page (via "search_passage"), as D-060 allows.
+const C9_Q = "what's citadel like for new grad swe, culture pay interview process, give me real sources";
+const CITADEL_QUERIES = ["Citadel new grad software engineer pay", "Citadel engineering interview process", "Citadel culture hours"];
+const WEB: Record<string, { title: string; text: string }> = {
+  "https://www.citadel.com/careers/details/software-engineer-university-graduate-us": { title: "Software Engineer - University Graduate (US) - Citadel", text: "The base salary range for this role is $235,000 to $300,000, plus a discretionary bonus." },
+  "https://www.citadel.com/careers/career-perspectives/our-engineering-interview-process": { title: "Our Engineering Interview Process - Citadel", text: "At Citadel, the overall process takes roughly eight weeks from start to finish." },
+  "https://www.reddit.com/r/quant/comments/10d7lv1/why_do_people_say_citadel_has_bad_wlb": { title: "Why do people say Citadel has bad WLB? : quant", text: "Anonymous posters describe demanding hours and performance pressure at Citadel." },
+  "https://www.citadelsecurities.com/careers/engineering": { title: "Engineering at Citadel Securities", text: "Citadel Securities is a market maker, a separate firm from Citadel." },
+  "https://www.levels.fyi/internships/Relativity/Software-Engineer-Intern": { title: "Relativity Software Engineer Intern pay", text: "Relativity software engineer interns in Chicago report $32 per hour." },
+  "https://www.levels.fyi/internships/CME-Group/Software-Engineer-Intern": { title: "CME Group Software Engineer Intern pay", text: "CME Group software engineer interns in Chicago report $34 per hour." },
+};
+const WEB_BY_TURN: Record<string, string[]> = { C9: Object.keys(WEB).slice(0, 4), C23: Object.keys(WEB).slice(0, 4), C22: Object.keys(WEB).slice(4) };
+const web = (body: any, turn: string) => {
+  const urls = WEB_BY_TURN[turn] ?? [];
+  return { id: "msg_search", type: "message", role: "assistant", model: body.model, stop_reason: "end_turn", content: [
+    { type: "server_tool_use", id: "srvtoolu_mp", name: "web_search", input: { query: "q" } },
+    { type: "web_search_tool_result", tool_use_id: "srvtoolu_mp", content: urls.map((u) => ({ type: "web_search_result", url: u, title: WEB[u].title, encrypted_content: "x", page_age: "10 days ago" })) },
+    ...urls.map((u) => ({ type: "text", text: WEB[u].text, citations: [{ type: "web_search_result_location", url: u, title: WEB[u].title, cited_text: WEB[u].text, encrypted_index: "x" }] })),
+  ], usage: { input_tokens: 9000, output_tokens: 300, server_tool_use: { web_search_requests: 1 } } };
+};
+const draft = (system: string, user: string) => /^You answer a market research question from the PAGES/.test(system)
+  ? JSON.stringify({ title: "Research", summary: Object.entries(WEB).filter(([u]) => user.includes(u)).map(([url, p]) => ({ text: p.text.replace(/\.$/, ""), quote: p.text, url })) })
+  : null;
+// The source number research_market gave a page (by a piece of its address), for the brain's citation.
+const cite = (calls: Call[]) => { const r = JSON.parse(calls.find((c) => c.name === "research_market")?.result || "{}"); return (part: string) => (r.sources ?? []).find((x: any) => String(x.url).includes(part))?.n; };
 const SCRIPT: Record<string, Step[]> = {
   C2: [{ tool: "draft_followup", input: { kind: "note", recipient: "", body: C2_BODY } }, { text: "Here it is." }],
   C5: [{ text: C5_Q }],
@@ -74,16 +99,27 @@ const SCRIPT: Record<string, Step[]> = {
   C14: [{ tool: "draft_followup", input: { kind: "note", recipient: "", tone: "way shorter, less formal", body: C14_BODY } }, { text: "Here it is." }],
   C15: [{ tool: "add_profile_fact", input: { kind: "education", text: "new grad, zero internships, mid GPA" } }, { text: "In that situation, I'd build the resume around one or two projects you can demo." }],
   C17: [{ tool: "get_profile", input: {} }, { text: "I'm studying computer science and finance at Lakeshore; I started Pixelforge and built over 70 React websites, and now I'm building Waypoint." }],
-  C18: [{ tool: "get_posting", input: { job_id: PAYPAL.id, recheck: true } }, { text: `I couldn't re-check PayPal's posting just now, so I can't call it open. ${PAYPAL.url} Nothing was submitted.` }],
+  C18: [{ tool: "check_posting_open", input: { url: PAYPAL.url } }, { text: `I couldn't check PayPal's posting just now, so I can't call it open. Nothing was applied for.\n${PAYPAL.url}` }],
+  C9: [{ tool: "research_market", input: { question: C9_Q, format: "inline", companies: ["Citadel"], queries: CITADEL_QUERIES } }, { text: (calls) => {
+    const n = cite(calls);
+    return [`Pay: Citadel's posting lists a base salary range of $235,000 to $300,000, plus a discretionary bonus [${n("software-engineer-university-graduate")}].`,
+      `Interviews: the overall process takes roughly eight weeks [${n("our-engineering-interview-process")}].`,
+      `Culture: anonymous posters describe demanding hours and performance pressure at Citadel, anecdotes rather than proof [${n("reddit.com")}].`,
+      `Citadel and Citadel Securities are different employers, so keep their figures apart [${n("citadelsecurities.com")}].`].join("\n\n");
+  } }],
+  C22: [{ tool: "get_posting", input: { job_id: PAYPAL.id } }, { tool: "research_market", input: { question: "what's the going rate for swe interns in chicago, hourly", format: "inline", queries: ["software engineer intern hourly pay Chicago"] } }, { text: (calls) => {
+    const n = cite(calls);
+    return `Self-reported pay, which can lag: Relativity software engineer interns in Chicago report $32 per hour [${n("Relativity")}], and CME Group software engineer interns in Chicago report $34 per hour [${n("CME-Group")}].`;
+  } }],
   C21: [{ text: `${C21_Q} Give me the answer you'd actually say, and I'll be blunt.` }],
   C21f: [{ text: "Right now that's a plot summary, not an answer: what did YOU get wrong, and what did redoing it cost?" }],
-  C23: [{ text: "Roughly eight weeks end to end, per Citadel's engineering interview guide; not a guaranteed timeline." }],
+  C23: [{ tool: "research_market", input: { question: C9_Q, format: "inline", companies: ["Citadel"], queries: CITADEL_QUERIES } }, { text: (calls) => `At Citadel, the overall process takes roughly eight weeks [${cite(calls)("our-engineering-interview-process")}].` }],
 };
 const result = (calls: Call[], name: string) => { const c = calls.find((x) => x.name === name); return c ? c.result : ""; };
 
 Deno.test({ name: "MP-1 the EXISTS turns follow Instinct's process: the tools offered and called, the artifact, the boundary, nothing sent", sanitizeOps: false, sanitizeResources: false, ignore: canRun() !== null && canRun() !== "FAIL", fn: async () => {
   if (canRun() === "FAIL") throw new Error("MP-1 needs Postgres 16 in CI");
-  const { seen, flags, world, person, close } = await runConversation(SCRIPT);
+  const { seen, flags, world, person, close } = await runConversation(SCRIPT, { web, draft });
   try {
     // The backtest is production's configuration (owner, 2026-11-11): on every turn the handler's effective switches are
     // RELEASE_FLAGS exactly as release_config.ts ships them, no never-on switch is on, and the brain is PRODUCTION_BRAIN.
@@ -159,25 +195,53 @@ Deno.test({ name: "MP-1 the EXISTS turns follow Instinct's process: the tools of
     ok(C14_BODY.length < C2_BODY.length, "C14 is shorter");
     ok(/LENGTH OF THIS REPLY[^\n]*under about 200 characters/.test(seen.C14.system), "C14 is told to keep it short");
 
-    // C18: a live re-check of that one posting on its own page, with its link; never called open when the check could not finish.
-    const c18 = brain("C18"), g = result(c18.calls, "get_posting");
-    ok(/THE POSTING THEY MEAN/.test(c18.system) && c18.system.includes(PAYPAL.id), "C18: the posting the conversation listed");
-    ok(/"open_check":\{"state":"unknown"/.test(g), `C18 re-checked it now: ${g.slice(0, 300)}`);
-    eq(c18.outbound, [`GET https://boards-api.greenhouse.io/v1/boards/paypalwa1/jobs/9101`], "C18: one posting-page read, its own");
+    // C18: a live re-check of that one posting on its own board (D-060 check_posting_open, research_web.ts), with its link; never
+    // called open when the check could not finish.
+    const c18 = brain("C18"), g = result(c18.calls, "check_posting_open");
+    ok(/THE POSTING THEY MEAN/.test(c18.system) && c18.system.includes(PAYPAL.url), "C18: the posting the conversation listed");
+    ok(c18.tools.includes("check_posting_open"), "C18 offers the live re-check");
+    ok(/"state":"unknown"/.test(g) && /Do not guess/.test(g), `C18 re-checked it now: ${g.slice(0, 300)}`);
+    eq(c18.outbound, ["GET https://boards-api.greenhouse.io/v1/boards/paypalwa1/jobs/9101"], "C18: one posting-page read, its own");
     ok(c18.reply.includes(PAYPAL.url), "C18 gives the link");
     ok(!/\bstill open\b|\bis open\b/i.test(c18.reply), "C18 never calls an unchecked posting open");
+
+    // C9: one web search; official pages first, the forum labelled an anecdote, the two employers kept apart; one topic per message
+    // with its link on its own line; nothing sent.
+    const c9 = brain("C9"), m9 = JSON.parse(result(c9.calls, "research_market") || "{}");
+    eq(c9.searches, 1, "C9: one web search");
+    eq(m9.status, "ok", `C9 research: ${JSON.stringify(m9).slice(0, 300)}`);
+    ok(!m9.sources.some((x: any) => /citadelsecurities\.com/.test(x.url) && x.kind === "official"), "C9: Citadel Securities is not Citadel's official source");
+    ok(m9.sources.some((x: any) => x.kind === "official") && m9.sources.some((x: any) => x.kind === "anecdote"), `C9: official and anecdotal sources told apart: ${JSON.stringify(m9.sources.map((x: any) => [x.url, x.kind]))}`);
+    const parts9 = c9.reply.split(/\n\n+/);
+    ok(parts9.length >= 3 && parts9.every((p) => /\nhttps:\/\/\S+$/.test(p)), `C9: one topic per message, its link on its own line: ${c9.reply}`);
+    ok(/anecdotes? rather than proof|anecdotes?, not proof/i.test(c9.reply), "C9 labels the anecdote");
+    ok(c9.reply.includes("https://www.citadel.com/careers/career-perspectives/our-engineering-interview-process"), "C9 cites the interview guide");
+
+    // C22: the posting's own pay read, then self-reported figures from one web search, labelled self-reported, each with its link.
+    const c22 = brain("C22"), m22 = JSON.parse(result(c22.calls, "research_market") || "{}");
+    eq(c22.calls.map((c) => c.name), ["get_posting", "research_market"], "C22: the posting's pay, then the research");
+    ok(/\$28 - \$49 per hour/.test(result(c22.calls, "get_posting")), "C22: the posted pay is read");
+    eq(c22.searches, 1, "C22: one web search");
+    ok(m22.status === "ok" && m22.sources.every((x: any) => x.kind === "self_reported"), `C22 sources: ${JSON.stringify(m22.sources ?? m22)}`);
+    ok(/self-reported/i.test(c22.reply) && c22.reply.includes("levels.fyi/internships/Relativity"), `C22: ${c22.reply}`);
+    ok(!/\bmedian\b/i.test(c22.reply), "C22 never calls a benchmark a median");
 
     // C21, C21f: the question first; then the answer is roasted, never a template.
     eq(brain("C21").reply.startsWith(C21_Q), true);
     ok(/THEY ARE ANSWERING THE PRACTICE QUESTION THEY ASKED YOU TO ROAST/.test(brain("C21f").system), "C21f: the roast");
 
-    // C23: recall of the earlier research, short; the source is allowed again (MP-2 below).
-    ok(/LENGTH OF THIS REPLY[^\n]*one or two sentences/.test(brain("C23").system), "C23 one or two sentences");
+    // C23: recall of the earlier research, short, from the cache (no new search), with the same source as C9.
+    const c23 = brain("C23");
+    ok(/LENGTH OF THIS REPLY[^\n]*one or two sentences/.test(c23.system), "C23 one or two sentences");
+    eq(c23.searches, 0, "C23 is answered from the earlier search, unsearched");
+    ok(/eight weeks/.test(c23.reply) && c23.reply.includes("https://www.citadel.com/careers/career-perspectives/our-engineering-interview-process"), `C23 recalls with the same source: ${c23.reply}`);
 
     // The whole conversation: nothing queued, prepared, submitted or sent; off the machine only posting-page reads.
     for (const [t, n] of Object.entries(await effectRows(world, person.id))) eq(n, 0, `${t} has rows`);
+    // Off the machine: posting-page reads (C3, C18), and on the research turns (C9, C22, C23) the research reader's GETs of public
+    // pages and boards, each refused. Nothing else, and never a write.
     const off = Object.entries(seen).flatMap(([id, s]) => s.outbound.map((o) => `${id} ${o}`));
-    ok(off.every((o) => / GET /.test(o) && POSTING_PAGE.test(o.split(" GET ")[1])), `only posting-page reads left the machine: ${off.join(", ")}`);
+    ok(off.every((o) => / GET /.test(o) && (POSTING_PAGE.test(o.split(" GET ")[1]) || /^(?:C9|C22|C23) /.test(o))), `only reads left the machine: ${off.join(", ")}`);
     // Every EXISTS brain turn's boundary survives code's shaping where the script stated one.
     for (const id of ["C12", "C18"]) ok(NOTHING_SENT.test(seen[id].reply) || /nothing is being applied/i.test(seen[id].reply), `${id} boundary kept`);
   } finally {
@@ -185,9 +249,8 @@ Deno.test({ name: "MP-1 the EXISTS turns follow Instinct's process: the tools of
   }
 } });
 
-// C23 "that citadel process from earlier, how long was it again total?": Instinct recalled the figure with the SAME source it gave in
-// C9. The link was shown by Trainee's own earlier reply; recalling it later keeps it (career_brain.ts shownBefore), while a link
-// nobody showed is still removed.
+// C23 without a tool call: when the brain recalls "that citadel process from earlier" from the conversation rather than calling the
+// research again, the link Trainee's own earlier reply showed is kept (career_brain.ts shownBefore); a link nobody showed is not.
 Deno.test("MP-2 C23: the earlier reply's source is given again with the recalled figure; an unseen link is still removed", async () => {
   const SRC = "https://www.citadel.com/careers/career-perspectives/our-engineering-interview-process/";
   const history = [

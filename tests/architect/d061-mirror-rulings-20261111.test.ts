@@ -40,6 +40,10 @@ Deno.test("D061-G1 code answers alone only payloads, controls, bare answers, its
   const inSession = fresh();
   host.runTurn("quiz me on a sql question, one at a time", inSession);
   ok(g1CodeAnswers("another one", "prep_mock_start", {}, inSession), "the next ask in code's own session is code's");
+  // A posting link with a question or a boundary beside it is the brain's to read; a bare "apply here <link>" stays code's.
+  const WD = "https://example.wd5.myworkdayjobs.com/en-US/Careers/job/US-Remote/Data-Analyst-Intern_R0001";
+  for (const m of [`is this one still taking applications? ${WD}`, `don't apply yet, just tell me what it needs ${WD}`]) eq(decide(m).brain, true, `${m}: ${decide(m).intent}/${decide(m).reason}`);
+  eq(decide("apply here https://boards.greenhouse.io/example/jobs/1").brain, false, "a bare apply-here link is code's intake");
   // An action the message forbids is not asked for.
   ok(!g1CodeAnswers("what would applying to Ironstack take? don't apply", "named_role_apply", {}));
 });

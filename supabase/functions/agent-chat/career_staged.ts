@@ -766,6 +766,7 @@ const G1_FILE_ASK = /\b(?:file|doc|docs|document|pdf|docx|page|sheet|one[- ]?pag
 // A request for something specific ("give me three practice problems", "rate this answer", "walk me through ..."); a statement
 // of the situation alone ("I have an interview tomorrow and I'm nervous") keeps the router's prep plan.
 const G1_REQUEST = /\b(?:give|walk|help|turn|rate|ask|quiz|shape|show|tell|write|make|review|critique|grade|practice|practise|drill|explain|how|what|which|can you|could you)\b|\?/i;
+const G1_URL = /https?:\/\/\S+/i, G1_URL_ALL = /https?:\/\/\S+/gi;
 export const g1Override = (message: string) => { const m = String(message ?? "").replace(/[\u2019`]/g, "'"); return !!hypotheticalOf(m) || correctionOf(m) === "trainee" || severalAsks(m); };
 // A product code built for an instruction the person gave (a draft, a people list, a prep brief, a document, an offer card):
 // the instruction carried out. A sourced record (a company file, a benchmark, a comparison) is data for the brain's answer.
@@ -786,6 +787,10 @@ export function g1CodeAnswers(message: string, intent: string, result: unknown, 
   if (g1Override(m)) return false;
   // An action the message itself forbids ("don't apply", "don't submit") is not asked for.
   if (G1_BOUNDARY_SENSITIVE.has(intent) && boundaryOf(m) === "submit") return false;
+  // A posting link inside a message with a question or a boundary ("is this still open? <url>", "don't apply yet <url>"): the
+  // link is the subject, not search words or an apply command; the brain reads the posting (get_posting, the posting re-check)
+  // with the router's reading as data. A bare "apply here <url>" stays code's apply intake.
+  if (G1_URL.test(m) && (SEARCH_INTENTS.has(intent) || G1_APPLY_ACTIONS.has(intent)) && (QUESTION_LEAD.test(m.replace(G1_URL_ALL, " ")) || m.replace(G1_URL_ALL, " ").includes("?") || boundaryOf(m))) return false;
   // A search the router ran on words that ask for a different deliverable (a plan, a strategy, a timeline) and no find ask:
   // the deliverable asked for is the brain's, with the search as data (as adviceOverSearch does for an advice question).
   if (SEARCH_INTENTS.has(intent) && OTHER_DELIVERABLE.test(m) && !SEARCH_ASK.test(m)) return false;

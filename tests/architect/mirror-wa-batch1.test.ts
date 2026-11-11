@@ -141,3 +141,11 @@ Deno.test("WA1-9 a long text is condensed once, under code's guards", async () =
   const bad = async () => ({ content: [{ type: "text", text: "Pay is $99/hour." }] });
   eq(await condenseReply(bad as any, long, REPLY_TARGET.short), null, "a failed guard keeps the long reply");
 });
+
+Deno.test("WA1-10 a turn whose tools wrote anything is never condensed", async () => {
+  const { condensable, REPLY_TARGET } = await import("../../supabase/functions/agent-chat/career_brain.ts");
+  const long = "Hi Elena, I'm reaching out about the data scientist role. ".repeat(20);
+  ok(condensable({ reply: long, pending_approvals: [], tool_calls: [{ name: "search_jobs", ok: true, effect: null }] } as any, REPLY_TARGET.short), "a read-only turn is condensed");
+  ok(!condensable({ reply: long, pending_approvals: [], tool_calls: [{ name: "draft_outreach", ok: true, effect: null }] } as any, REPLY_TARGET.short), "a draft tool");
+  ok(!condensable({ reply: long, pending_approvals: [], tool_calls: [{ name: "add_profile_fact", ok: true, effect: { kind: "write" } }] } as any, REPLY_TARGET.short), "a write");
+});

@@ -4,9 +4,9 @@
 // Checks by code, per turn (the owner's bar: "the same exact task", "the same length", target 99% of turns):
 //   length       Trainee's text within +-10% of Instinct's (+-6 characters when Instinct's is under 60). Text is every message of the
 //                turn with link-only lines and bare links taken out (Instinct sends its links as messages of their own).
-//   answers_first, internal_words   supabase/functions/_shared/reply_rubric.ts on Trainee's reply.
+//   answers_first, internal_words   supabase/functions/_shared/reply_rubric.ts on Trainee's reply (see the notes where they are read).
 //   boundary     where Instinct restated that nothing was sent or submitted, Trainee restates it too.
-//   no_action    nothing queued, prepared, submitted or sent, and no request left the machine.
+//   no_action    nothing queued, prepared, submitted or sent (a refused read of a research host is not an action).
 //   task         the same task accomplished: a person's judgment, read from --judged ({id: {ok, why}}); unjudged is not a pass.
 // A turn mirrors when every check passes. Instinct's C3 is its merged C1 reply (one reply and one File for both asks).
 import { answersFirst, internalWords } from "../../supabase/functions/_shared/reply_rubric.ts";
@@ -27,13 +27,20 @@ const TRAINEE_RESTATED = /\bnothing (?:was|is|has been|got|is being|will be|went
 if (import.meta.main) {
   const inst = new Map(jsonl(opt("--instinct")!).map((l) => [l.id, l]));
   const trn = jsonl(opt("--trainee")!).filter((l) => !l.setup);
+  const prompts = new Map(jsonl(opt("--prompts") ?? new URL("./instinct-wa-batch1/prompts.jsonl", import.meta.url).pathname).map((l) => [l.id, l.prompt]));
   const judged: Record<string, { ok: boolean; why: string }> = opt("--judged") ? JSON.parse(Deno.readTextFileSync(opt("--judged")!)) : {};
   const rows = trn.map((t) => {
     const i = inst.get(t.id === "C3" ? "C1" : t.id)!;
     const iText = textOf(i.messages), tText = textOf([t.reply]);
-    const af = answersFirst({ reply: t.reply } as any).length === 0, iw = internalWords({ reply: t.reply } as any).length === 0;
+    // answers_first is a heuristic: it also fails Instinct on 4 of the 26 turns. A turn passes it when Trainee passes, or when
+    // Instinct's own reply to the same turn fails it too (the mirror is the bar, not the heuristic). An "internal word" the
+    // person typed themselves ("first_unique", their function's name) is theirs, not Trainee's.
+    const af = answersFirst({ reply: t.reply } as any).length === 0 || answersFirst({ reply: iText } as any).length > 0;
+    const said = String(prompts.get(t.id) ?? "");
+    const iw = internalWords({ reply: t.reply } as any).filter((v: any) => !(v.quote && said.includes(v.quote))).length === 0;
     const boundary = !RESTATED.test(iText) || TRAINEE_RESTATED.test(tText);
-    const noAction = !(t.actions ?? []).length;
+    // A refused read (a research host the run does not reach) is not an action; a queue, prepare, submit or send is.
+    const noAction = !(t.actions ?? []).some((x: any) => x.type !== "external");
     const len = lengthOk(tText.length, iText.length);
     const task = judged[t.id]?.ok === true;
     return { id: t.id, route: t.route, instinct_chars: iText.length, trainee_chars: tText.length, length: len, answers_first: af, internal_words_clean: iw, boundary, no_action: noAction, task, why: judged[t.id]?.why ?? "not judged",

@@ -194,9 +194,12 @@ const EVERYTHING_ASK = /\b(?:everything|all you (?:know|remember)|like everythin
 export function condenseLimit(message: string): { max: number; aim: string } {
   return EVERYTHING_ASK.test(String(message ?? "")) ? REPLY_TARGET.long : REPLY_TARGET.short;
 }
-export function condensable(r: Pick<TurnResult, "reply" | "show" | "pending_approvals">, limit: { max: number }): boolean {
+// A turn whose tools wrote anything (a draft, a fact, a file, a queue entry: any call with an effect, or any draft tool) is never
+// condensed: its reply can be the stored payload's own words, which the turn's commit checks against what was written.
+export function condensable(r: Pick<TurnResult, "reply" | "show" | "pending_approvals"> & { tool_calls?: TurnResult["tool_calls"] }, limit: { max: number }): boolean {
   const reply = String(r.reply ?? "");
-  return reply.length > limit.max && !r.show && !(r.pending_approvals ?? []).length && !/```/.test(reply);
+  const wrote = (r.tool_calls ?? []).some((c) => c.effect !== null && c.effect !== undefined || /draft|tailor|file|attach|resume/i.test(c.name));
+  return reply.length > limit.max && !r.show && !(r.pending_approvals ?? []).length && !wrote && !/```/.test(reply);
 }
 const NUMBER = /\$?\d[\d,.]*(?:k|%)?/gi, LINK = /https?:\/\/\S+/g;
 // The condensed text, or null when it fails a guard (then the long reply stands): shorter, not empty, every number and link in

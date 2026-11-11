@@ -42,6 +42,8 @@ import { createCareerPersistence, careerRequestHash } from "../_shared/career_pe
 import { holdUnsent, notConfirmedReply, pauseReply, readControl, reconcile, resumeReply, storeSentReply, unsavedStopReply, workflowReply, type Hold, type StopControl } from "../_shared/career_stop_truth.ts";
 import { callModel as callModelUncapped, newMeter, turnLedger, webSearch } from "../_shared/model_gateway.ts";
 import { claudeWebProvider, memoryWebCache, recheckPosting, webResearchOn, withWebSearch } from "../_shared/research_web.ts"; // D-060
+import { readWorkdayPosting } from "../_shared/workday_posting.ts"; // D-062
+import { readApplyFlow } from "../_shared/posting_requirements.ts"; // D-062
 import { careerModelConfig } from "./release_model.ts";
 // LAUNCH READINESS (2026-10-26): the per-turn model wrapper (no per-person cap since D-046), the per-person turn order, the pool read only when used.
 import { spendCap } from "../_shared/career_spend_cap.ts";
@@ -1036,6 +1038,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // It does NOT bring back attachments: the no-download default (attach_tool.ts, research_reply.ts attach) is separate and stays on.
       const hereOut = !noApply && Deno.env.get("CAREER_APPLY_HERE") !== "off" && writerChannel((body as any)?.channel) === "telegram" && !billing && !cancelled && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await applyHereTurn({ message, now: Date.now(), db: supabasePostingsDb(admin), fetchFeed: boardFetchFeed((i, init) => fetch(i, init), { timeoutMs: 8000 }),
+          readWorkday: (u) => readWorkdayPosting(u, { fetch, userAgent: `Trainee posting reader (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }), // D-062
             apps: () => supabaseApplications(admin)(user.id), facts: screenFacts,
             last: (() => { const l = (loaded.snapshot as any)?.stores?.discovery?.lastShortlist; return Array.isArray(l) && l.length === 1 ? l[0] : null; })() })
           .catch((e) => { console.error("apply here:", (e as Error)?.message ?? e); return null; })
@@ -1451,7 +1454,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             publish: researchBriefOn(Deno.env) ? async (data) => { const r = await createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }).create(user.id, "research_brief", data); return r.ok && r.url ? { url: r.url } : null; } : null,
           } : null,
           // D-060 (C18): "is that posting still open?" re-checked live on the boards the product reads; any other host is named, not guessed.
-          postingRecheck: webResearchOn(Deno.env) ? (url: string) => recheckPosting(url, linkChecker(fetch, { ashby: "posting", userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` })) : null,
+          // D-062: a Workday posting is read from its own CXS data (workday_posting.ts), with its stated deadline.
+          postingRecheck: webResearchOn(Deno.env) ? (url: string) => recheckPosting(url, linkChecker(fetch, { ashby: "posting", userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }), Date.now,
+            { workday: (u) => readWorkdayPosting(u, { fetch, userAgent: `Trainee posting reader (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }) }) : null,
+          // D-062 (1): "what would you need from me to apply?": the posting's requirements and its application's questions, read
+          // from public pages only (posting_requirements.ts); never an account, a saved application or a submission.
+          applyFlow: (url: string) => readApplyFlow(url, { fetch, userAgent: `Trainee posting reader (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }),
           research: webResearchOn(Deno.env) && cfg.apiKey ? { search: gatewayGroundSearch((q, w) => webSearch(q, { cfg, meter, ...w })), cache: researchCache, publish: fileKindPublisher(createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }), user.id), derive: modelDerive(async (system, user) => { const r = await callModel(cfg, { system, messages: [{ role: "user", content: [{ type: "text", text: user }] }], max_tokens: 200 }, { meter, role: "chat" }); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); }) } : null,
           known: { standing, alerts: alertRow ? { prefs: alertRow.prefs, tz: alertRow.tz } : null, pipeline: null, situation }, memory });
         await ledger.record(meter);

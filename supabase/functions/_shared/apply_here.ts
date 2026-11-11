@@ -18,6 +18,7 @@ import { contentOf } from "./career_apply_gate.ts";
 import { trackedFromRows } from "./career_apply_chat.ts";
 import type { AppRow } from "./career_apply_status.ts";
 import type { FetchFeed, PostingsDb } from "./career_ingest.ts";
+import { type WorkdayRead, workdayUrl } from "./workday_posting.ts";
 
 export const APPLY_HERE_MAX_LINKS = 25;
 const URL_IN = /https?:\/\/[^\s<>"'()]+/gi;
@@ -51,6 +52,9 @@ export const BLOCKED_SAY = (url: string) => `${hostOf(url)}: I don't apply on Li
 export async function applyHereTurn(o: {
   message: string; now: number; db: PostingsDb; fetchFeed: FetchFeed; apps: () => Promise<AppRow[]>; facts: any[];
   last?: { url?: string } | null;
+  // D-062: a pasted Workday link is read (workday_posting.ts: title, company, open or closed, the deadline it states) so the
+  // refusal names the posting; a Workday application is the person's own sign-in on the employer's site (D-013, D-050).
+  readWorkday?: ((url: string) => Promise<WorkdayRead | null>) | null;
 }): Promise<ApplyHereResult | null> {
   const ask = applyHereAsk(o.message, o.last ?? null);
   if (!ask) return null;
@@ -63,6 +67,12 @@ export async function applyHereTurn(o: {
   const urls = ask.urls.slice(0, APPLY_HERE_MAX_LINKS);
   for (const url of urls) {
     const la = linkOf(url);
+    if (!la && o.readWorkday && workdayUrl(url)) {
+      const w = await o.readWorkday(url).catch(() => null), p = w?.posting;
+      const what = p ? `${p.title}${p.company ? ` at ${p.company}` : ""} (${w!.state === "closed" ? "closed" : w!.state === "open" ? "open" : "open not confirmed"}${p.deadline && w!.state !== "closed" ? `, applications close ${p.deadline}` : ""})` : hostOf(url);
+      refused.push({ url, why: `${what}: a Workday application needs your own sign-in on the employer's site, so apply there yourself.` });
+      continue;
+    }
     if (!la) { refused.push({ url, why: `${hostOf(url) || "that site"}: I can only open Greenhouse, Lever and Ashby postings for you, so apply there yourself.` }); continue; }
     if (seen.has(la.key.toLowerCase())) continue;
     seen.add(la.key.toLowerCase());

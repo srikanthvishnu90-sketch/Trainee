@@ -8,7 +8,7 @@
 //                     batches need nothing; the batch is admitted against the limits up front.
 // The worker (WO-009b) fills exactly the prepared fields by name, reads each back, and classifies the outcome here.
 import { overStatedLimit } from "./length_limit.ts";
-import { answerKey, AUTH_FACTS, BIRTH_DATE, declineOption, FOREIGN, HONEYPOT, mapQuestion, NAMES_US, norm as normQuestion, PAY_HISTORY_ASKED, RELATIVE_PLACE, salaryExpectationAsked } from "./question_map.ts";
+import { answerKey, AUTH_FACTS, BIRTH_DATE, declineOption, FOREIGN, HONEYPOT, mapQuestion, NAMES_US, norm as normQuestion, PAY_HISTORY_ASKED, payRangeAsked, RELATIVE_PLACE, salaryExpectationAsked } from "./question_map.ts";
 import { rowAnswerKey } from "./row_answer.ts";
 import { chooseOption, levelOption, usCitizenChoice, yesNoFromFact, yesNoOf } from "./answer_options.ts";
 import { type PlacePart, postingAtHome, postingCountry, postingPlaces, STATE_NAMES } from "./posting_place.ts";
@@ -975,9 +975,12 @@ function nationalNumber(value: string, dial: string): string | null {
 // are every confirmed fact but the salary expectation itself. Any salary expectation on file (an answer texted to an earlier
 // employer's question, kept as the fact, or a confirmed profile fact) is an earlier answer: it is never filled, only
 // offered beside this posting's question for the person to confirm (career_apply_questions.ts salaryOffers).
-function withoutEarlierAnswers(answers: Record<string, Answer>): Record<string, Answer> {
-  if (!answers?.salary_expectation) return answers;
+// D-053c: the posted-range yes/no (`pay_range_ok`) is answered from neither the salary expectation nor a `pay_range_ok` fact
+// (an earlier employer's yes or no kept as a fact): only this posting's own answer fills it.
+function withoutEarlierAnswers(answers: Record<string, Answer>, range = false): Record<string, Answer> {
+  if (!answers?.salary_expectation && !(range && answers?.pay_range_ok)) return answers;
   const { salary_expectation: _earlier, ...rest } = answers;
+  if (range) delete rest.pay_range_ok;
   return rest;
 }
 export function planBatch(o: { userId: string; postings: PlanPosting[]; answers: Record<string, Answer>; saved: Record<string, Answer>; log: LogRow[]; now: number; limits?: Limits }) {
@@ -1038,8 +1041,10 @@ export function planBatch(o: { userId: string; postings: PlanPosting[]; answers:
       // (answerKey `job:`) fills it: never one saved under the wording (the oldest key), never a salary expectation kept as a
       // fact, whether texted to an earlier form or confirmed in the profile (the architect's ruling: the hosted and extension
       // paths do not differ). Salary history's wording key is closed too, as a date of birth's is (#731).
-      const perApp = salaryExpectationAsked(f);
-      const facts = perApp || key === "salary_expectation" ? withoutEarlierAnswers(o.answers) : o.answers;
+      // D-053c: the posted-range yes/no ("does the posted range meet your expectations?") is asked per application the same way.
+      const range = payRangeAsked(f);
+      const perApp = salaryExpectationAsked(f) || range;
+      const facts = perApp || key === "salary_expectation" ? withoutEarlierAnswers(o.answers, range) : o.answers;
       const legacy: Answer | undefined = BIRTH_DATE.test(f.label) || PAY_HISTORY.test(f.label) || perApp || key === "eeo" || mapQuestion(f).fact === "eeo" ? undefined : o.saved[normLabel(f.label)];
       const own: Answer | undefined = o.saved[answerKey(f, p.job_id, { haveFact: true, here })] ?? o.saved[answerKey(f, p.job_id, { here })] ?? legacy;
       const direct: Answer | undefined = o.saved[answerKey(f, p.job_id, { haveFact: true, here })] ?? o.saved[answerKey(f, p.job_id, { here })] ??

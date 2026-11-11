@@ -68,3 +68,28 @@ what the person confirmed or a cited source, no passwords in chat, no LinkedIn o
 | Public people search by web excerpts (no LinkedIn automation) | C19 | Not approved. |
 
 Without these the ceiling on batch 1 is 18 or 19 of 26, and the same share of any larger set that needs them.
+
+## D. Applied in product code (2026-11-11, D-061 stage 1 to 3)
+
+Each change names its ruling in a code comment (P3); none is keyed to a benchmark or held-out prompt's wording. Tuned on the
+dev split only (5%, 50 conversations); measured on the sealed held-out split (95%, seal `e72a2505…`) with
+`evals/mirror/heldout/run.ts` at $0 under production's release flags (P4).
+
+| Ruling | What changed | Where |
+|---|---|---|
+| G1 | The router's reading is data for the brain, not the answer, unless the turn is code's to answer alone: payload intents and approvals, a bare answer or a running session, the account's controls, refusals, an action the person asked for and did not forbid, a read of their own record, a File code built for the ask (`g1CodeAnswers`). A practice-session start, a draft code would write from words, a thread recall, a search run on a plan ask, a prep File built for a different request, and (web research on) a firm's company file go to the brain with code's answer as data. A boundary phrase inside an ask is not a stop (`career_host.js` `stopControlOf`). | `agent-chat/career_staged.ts`, `_shared/career_host.js`, `agent-chat/handler-career.ts` |
+| G6 | One boundary reader (`boundaryOf`); the brain is told to restate it (`boundaryNote`); a code turn that moved nothing carries "Nothing was sent." / "Nothing was submitted." when its reply does not already say so. A "draft ..., don't send" ask is the brain's draft, not code's send-ready batch. | `_shared/agent/turn_notes.ts`, `agent-chat/handler-career.ts` |
+| G8 | Hypotheticals read by grammar: someone else's situation, texting spellings, eight languages; on one, code's offer, record and networking flows stand down and the brain gets no record writer. | `_shared/agent/turn_notes.ts`, `agent-chat/handler-career.ts`, `agent-chat/career_staged.ts` |
+| G9, G13 | A correction of Trainee and several asks (`severalAsks`, wider than D-058's `multiAsk`) are the brain's, with a turn note each. | `_shared/agent/turn_notes.ts`, `_shared/ask_language.ts`, `agent-chat/career_brain.ts` |
+| G11 | `create_file` is offered wherever a File link can be made (`TRAINEE_FILE_BASE_URL` and its secret), not only with the reply writer on; `CAREER_REPLY_WRITER` stays in `RELEASE_NEVER_ON`. | `agent-chat/career_brain.ts`, `agent-chat/handler-career.ts` |
+| G2 to G14 | The brain's instructions state every check (`MIRROR_RULES`); the empty tracker's reply answers first and names its source. | `_shared/agent/prompt.ts`, `packages/domain/142-career-router.js` |
+
+Held-out, $0, trunk `cf25cd69` against this branch (pass / scored, "model" turns excluded as the README explains):
+
+| | G1 | G2 | G3 | G4 | G5 | G6 | G7 | G8 | G9 | G10 | G11 | G12 | G13 | G14 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| trunk | 73.3% | 97.9% | 38.3% | 84.0% | 0.9% | 57.2% | 100% | 71.8% | 0.0% | 97.3% | 36.4% | 100% | 0.0% | 76.2% |
+| D-061 applied | 93.8% | 98.8% | 46.6% | 93.4% | 1.6% | 92.9% | 100% | 100% | 0.0% | 100% | 86.3% | 100% | 0.0% | 93.3% |
+
+The text rulings (G2 to G5, G7, G9, G10, G12) are scored at $0 only on the turns code still answers; the brain's words are the
+live hook's to score (`live.ts`, not run). G9 and G13 stay at 0% on the few turns code still answers (1 and 22).

@@ -58,17 +58,17 @@ The loop, reusable for any reference (Instinct batch 2, another assistant, a hum
 
 | Turn | Status | Blocker (what is missing or off) |
 |---|---|---|
-| C1 | OFF | `CAREER_REPLY_WRITER`: the plan File (`plan_review`) comes only from `create_file`, offered only with the reply writer on Telegram |
+| C1 | OFF | `CAREER_REPLY_WRITER`: one File with the checked postings and a weekly plan comes only from `create_file` (`plan_review`), offered only with the reply writer on Telegram; the D-060 plan page has no postings |
 | C2 | EXISTS | (D-059, this PR: no recipient named is drafted with placeholders) |
 | C3 | EXISTS | |
-| C4 | OFF | `CAREER_KNOWLEDGE` and the gateway's web search (`WEB_SEARCH_AVAILABLE = false`): no tool cites a source for advice |
+| C4 | MISSING | a sourced answer to a specific advice question: with web research on (D-060), `research_career_question` answers it as a career-entry plan with no source link |
 | C5 | EXISTS | |
 | C6 | MISSING | email-confirmation evidence in the record reply; researched roles separated from applications |
 | C5f1 | EXISTS | |
 | C5f2 | EXISTS | |
 | C7 | EXISTS | |
 | C8 | EXISTS | |
-| C9 | MISSING | general web search (press, forums) with each source labelled official or anecdotal |
+| C9 | EXISTS | (D-060 web research: `research_market` with Claude's web search) |
 | C10 | MISSING | the resume's contact email: Instinct used the linked account's; Trainee takes only one the person typed |
 | C11 | MISSING | a read-only reader of a posting's apply entry flow and questions |
 | C12 | EXISTS | |
@@ -77,22 +77,26 @@ The loop, reusable for any reference (Instinct batch 2, another assistant, a hum
 | C15 | EXISTS | |
 | C16 | MISSING | a tracker artifact (no tracker File kind, no Sheets export) built from email confirmations |
 | C17 | EXISTS | |
-| C18 | EXISTS | (this PR: `get_posting` `recheck` reads the posting's own page now) |
+| C18 | EXISTS | (D-060 `check_posting_open`; a Workday page is named as not readable, never guessed) |
 | C19 | OFF | `CAREER_PEOPLE_SEARCH`, `CAREER_CONTACT_OUTREACH` (D-043 not accepted) |
 | C20 | MISSING | edits to a tailored resume (condense one role, expand another) |
 | C21 | EXISTS | |
-| C22 | MISSING | self-reported intern pay (levels.fyi) through general web search |
+| C22 | EXISTS | (D-060: `get_posting` pay, then `research_market`, self-reported figures labelled) |
 | C21f | EXISTS | |
-| C23 | EXISTS | (this PR: a link Trainee already showed may be given again); its source comes from C9, blocked |
+| C23 | EXISTS | (D-060: the earlier search from the cache, same source; and this PR: a link Trainee already showed is kept on recall) |
 
-16 EXISTS, 10 blocked (3 OFF, 7 MISSING). The deploy the owner asked to hold waits on the 10.
+18 EXISTS, 8 blocked (2 OFF, 6 MISSING), after D-060 (web research on, merged 2026-11-11) was verified turn by turn here: C9,
+C22 and C23 moved to EXISTS; C4 did not (the research path answers a different question); C1's plan page is not the File
+Instinct made. The deploy the owner asked to hold waits on the 8.
 
 ## Rules every turn keeps
 
 - Nothing is sent, submitted, queued or saved as an application on any of the 26 turns (every ask says don't send, don't apply,
   or just explain). The test holds `career_apply_*`, `career_outbox`, `career_contact_sends` and `career_outreach_drafts` empty.
-- The only requests that leave the machine are posting-page reads of the open check (D-051): the search's (C3) and the asked
-  re-check (C18).
+- The only requests that leave the machine are reads: posting-page reads of the open check (D-051), the search's (C3) and the
+  asked re-check (C18), and on the research turns (C9, C22, C23) the research reader's GETs of public pages and boards. In the $0
+  test each is refused and recorded, and the web search itself is a stub on the model host (D-060's live proof is
+  `evals/research-live/`).
 - Facts about the person come only from confirmed facts and this conversation (D-007). A hypothetical (C7, C15) writes nothing.
 - "Boundary line": the sentence that says what was not done ("Nothing was submitted", "Nobody was contacted", "not sent"). Where
   code writes it, it is asserted; where the brain writes it, the prompt asks for it and the condenser keeps it
@@ -108,8 +112,9 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
   apply to these), the stretch role labelled; a File with the links and a weekly plan.
 - **Steps:** (1) the brain (staged; reason `question`) - EXISTS. (2) `search_jobs` with the person's goal - EXISTS
   (`career_tools.ts`). (3) each posting re-checked before it is shown - EXISTS (`link_check.ts liveOnly`, WO-106/D-051).
-  (4) the plan File with the links and a weekly plan - **OFF**: the `plan_review` kind exists (`file_kinds.ts`), but `create_file`
-  is offered only when `o.shape` (Telegram and `CAREER_REPLY_WRITER=on`, which is in `RELEASE_NEVER_ON`).
+  (4) one File with the links and a weekly plan - **OFF**: the `plan_review` kind exists (`file_kinds.ts`), but `create_file`
+  is offered only when `o.shape` (Telegram and `CAREER_REPLY_WRITER=on`, which is in `RELEASE_NEVER_ON`). Since D-060
+  `research_career_question` is offered and publishes a plan page, but that page holds no postings.
 - **Artifact:** a plan File. **Boundary:** nothing applied.
 
 ### C2 "draft a cold message to a google swe asking for a referral, don't send anything" (EXISTS)
@@ -129,14 +134,15 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
   `TRAINEE_FILE_BASE_URL`) - EXISTS. (4) an honest count when fewer than 5 are found - EXISTS.
 - **Artifact:** the results File. **Boundary:** "Nothing was applied for" (code).
 
-### C4 "what should i put at the very top of my resume for swe roles, be specific" (OFF)
+### C4 "what should i put at the very top of my resume for swe roles, be specific" (MISSING)
 - **Instinct:** name and contacts, then school, degree and graduation date, then a skills line; leave the outdated 3.9 off; one
   cited guide page.
 - **Steps:** (1) the brain with the confirmed profile in its prompt (`memory.ts personBlock`) and `get_profile` - EXISTS.
   (2) the outdated GPA flagged from what the person said - EXISTS (the conversation; the GPA correction is in the window).
-  (3) one cited source for the advice - **OFF**: `research_career_question` is offered only with `CAREER_KNOWLEDGE=on`
-  (`RELEASE_NEVER_ON`) and the gateway's web search (`model_gateway.ts WEB_SEARCH_AVAILABLE = false`). `research_market` is
-  market research and is not for this.
+  (3) one cited source for the advice - **MISSING**. Verified after D-060 at $0 with a stubbed search: `research_career_question`
+  is now offered, but it answers the question as a career-entry plan ("the way in is shipped projects ... This week: build one
+  small tool") with no source link, i.e. a different task; `research_market` is market research. Needed: a sourced answer to a
+  specific advice question (one guide, its link).
 - **Artifact:** none. **Boundary:** none needed.
 
 ### C5 "quiz me on a python question like it's a real interview, one at a time" (EXISTS)
@@ -173,14 +179,15 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
 - **Steps:** the brain with the confirmed record in its prompt and `get_profile`, each fact with its `provenance` - EXISTS; the
   corrections are in the conversation; length "everything" (900 to 1,200 characters).
 
-### C9 "what's citadel like for new grad swe, culture pay interview process, give me real sources" (MISSING)
+### C9 "what's citadel like for new grad swe, culture pay interview process, give me real sources" (EXISTS)
 - **Instinct:** four messages, each with its source: pay from the official posting, the process from Citadel's interview guide,
   culture from anonymous accounts labelled anecdotal, and the Citadel / Citadel Securities distinction from press.
-- **Steps:** (1) `research_market` (ON, `CAREER_RESEARCH_REPLY`) - EXISTS, with the free first-party sources
-  (`research_free_sources.ts`: company sites, SEC, BLS, ATS boards, Wikipedia, news headlines). (2) forum and press pages -
-  **MISSING**: the free sources do not search them; Brave runs only with the owner's `BRAVE_SEARCH_API_KEY`. (3) each source
-  labelled official or anecdotal, and the two employers kept apart - **MISSING**. (4) one message per part - EXISTS
-  (`CAREER_TEXTING_NATIVE`, channel splitting).
+- **Steps:** (1) the brain - EXISTS. (2) `research_market` (inline) with Claude's web search (D-060, `research_web.ts`): one
+  search per turn, official sources first - EXISTS. (3) each source typed `official`, `anecdote`, `self_reported` or other
+  (`sourceKind`; Citadel Securities is not Citadel's official source) and the reply rules (anecdotes labelled, the two employers
+  kept apart) - EXISTS. (4) one topic per message with its link on its own line (`enforceMarketReply`, `layout: "messages"`) -
+  EXISTS. Asserted in MP-1 with a stubbed search.
+- **Artifact:** none. **Boundary:** none needed.
 
 ### C10 "can you make me a tailored resume for that paypal internship, like an actual file i can download. don't apply anywhere" (MISSING)
 - **Instinct:** a one-page PDF for the posting, GPA corrected, skills reordered, labelled a review draft with the unresolved
@@ -226,10 +233,11 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
 
 ### C18 "is that paypal internship posting still open? check rn" (EXISTS)
 - **Instinct:** a live check on the official careers site, the closing date, the link; nothing submitted.
-- **Steps:** (1) the posting the conversation listed (`postingNote`) - EXISTS. (2) `get_posting` with `recheck: true`: its own
-  posting page read now (`link_check.ts`, the same check as every search), `open_check.state` live, closed or unknown -
-  EXISTS (this PR; before, `get_posting` read only the stored row). (3) the link in the reply - EXISTS. A check that could not
-  finish is never called open. (The benchmark's posting is on Workday, which the checker fetches as a plain page.)
+- **Steps:** (1) the posting the conversation listed (`postingNote`) - EXISTS. (2) `check_posting_open` (D-060,
+  `research_web.ts recheckPosting`): the posting checked live on the boards Trainee reads; a check that cannot finish is
+  "not known", and a host Trainee does not read (the benchmark's Workday page) is named, never guessed - EXISTS. (3) the link on
+  its own line and "nothing was applied for" - EXISTS. (This PR first added a `recheck` to `get_posting`; D-060's tool does the
+  same job, so the `get_posting` change was dropped at the merge.)
 
 ### C19 "find me 3 lakeshore alumni working at google or trading firms ... just research don't message anyone" (OFF)
 - **Instinct:** three leads from public profile search excerpts, a caveat that current employment is unverified; nobody contacted.
@@ -244,16 +252,16 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
 ### C21 "ok behavioral round: ask me 'tell me about a time you failed' and then roast my answer" (EXISTS)
 - **Steps:** the brain asks the question; nothing is scored - EXISTS.
 
-### C22 "what's the going rate for swe interns in chicago, hourly" (MISSING)
+### C22 "what's the going rate for swe interns in chicago, hourly" (EXISTS)
 - **Instinct:** a practical range, PayPal's posted pay, three self-reported figures from levels.fyi, caveats; four links.
-- **Steps:** (1) `get_posting` pay - EXISTS. (2) `research_market` - EXISTS (BLS figures, not intern pay). (3) self-reported
-  intern pay - **MISSING**: needs general web search (see C9).
+- **Steps:** (1) `get_posting` for the posting's own pay - EXISTS. (2) `research_market` with one web search (D-060) - EXISTS;
+  self-reported sources typed `self_reported` and said to lag, a range called a benchmark, never a median - EXISTS.
 
 ### C21f "uhh probably when one of my first agency clients didn't like the site i made ..." (EXISTS)
 - **Steps:** the brain told this is the answer to roast (`turn_notes.ts roastOf`), bluntly, on ownership and cost - EXISTS.
 
 ### C23 "that citadel process from earlier, how long was it again total?" (EXISTS)
 - **Instinct:** "roughly eight weeks", the caveat, the same source link as C9.
-- **Steps:** the brain with C9's reply in its history; length one or two sentences - EXISTS. The same link - EXISTS (this PR:
-  a link Trainee's own earlier reply showed is not removed when recalled, `career_brain.ts shownBefore`; a link nobody showed
-  still is). The source itself comes from C9, which is blocked.
+- **Steps:** the brain calls `research_market` again; the earlier search answers from the cache (no new search) with the same
+  source (D-060) - EXISTS. If the brain recalls it from the conversation instead, the link Trainee's own earlier reply showed is
+  kept (`career_brain.ts shownBefore`, this PR); a link nobody showed is still removed.

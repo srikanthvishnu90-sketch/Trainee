@@ -28,6 +28,7 @@ export type Seen = {
   calls: Call[]; // the tool calls the script made, with what each returned
   reply: string; intent: string | null; documents: any[];
   outbound: string[]; // off-machine requests made during this turn (method and full address), each refused
+  searches: number; // web searches (the web_search server tool) requested on this turn
 };
 // The switches as the handler reads them at a turn: every release flag's served value, and whether any never-on switch is on.
 export type FlagsAtTurn = { release: Record<string, string | undefined>; neverOnOn: string[]; brain: string | undefined };
@@ -35,17 +36,25 @@ export function flagsNow(): FlagsAtTurn {
   return { release: Object.fromEntries(Object.keys(RELEASE_FLAGS).map((k) => [k, releaseValue(Deno.env, k)])), neverOnOn: RELEASE_NEVER_ON.filter((k) => releaseFlagOn(Deno.env, k)), brain: Deno.env.get("CAREER_BRAIN") };
 }
 // A step of a turn's script: a tool call (its input may read what earlier calls returned), or the final text.
-export type Step = { tool: string; input: Record<string, unknown> | ((calls: Call[]) => Record<string, unknown>) } | { text: string };
+export type Step = { tool: string; input: Record<string, unknown> | ((calls: Call[]) => Record<string, unknown>) } | { text: string | ((calls: Call[]) => string) };
 
-export async function runConversation(script: Record<string, Step[]>, opts: { only?: string[] } = {}): Promise<{ seen: Record<string, Seen>; flags: Record<string, FlagsAtTurn>; world: World; person: { id: string }; close: () => Promise<void> }> {
+// web: a stubbed web search on the Anthropic wire (D-060's search goes to the model host with the web_search server tool): given the
+// request body and the turn, the search answer (the shape the live proof recorded, evals/research-live/). Absent, a search gets an
+// empty result. Nothing leaves the machine; each search is counted on its turn (Seen.searches). draft: the scripted answer to a
+// model call made without tools (e.g. the market research draft, market.ts RULES); null leaves the default.
+export async function runConversation(script: Record<string, Step[]>, opts: { only?: string[]; web?: (body: any, turn: string) => any; draft?: (system: string, user: string, turn: string) => string | null } = {}): Promise<{ seen: Record<string, Seen>; flags: Record<string, FlagsAtTurn>; world: World; person: { id: string }; close: () => Promise<void> }> {
   let label = "";
   const seen: Record<string, Seen> = {};
-  const fresh = (): Seen => ({ code: true, tools: [], schemas: {}, system: "", history: "", calls: [], reply: "", intent: null, documents: [], outbound: [] });
+  const fresh = (): Seen => ({ code: true, tools: [], schemas: {}, system: "", history: "", calls: [], reply: "", intent: null, documents: [], outbound: [], searches: 0 });
   const scripted = (chat: any) => {
     const msgs: any[] = chat.messages ?? [];
     const reply = (content: string, tool_calls?: unknown[]) => Response.json({ id: "mp", model: chat.model, choices: [{ index: 0, message: { role: "assistant", content, ...(tool_calls ? { tool_calls } : {}) }, finish_reason: tool_calls ? "tool_calls" : "stop" }], usage: { prompt_tokens: 10, completion_tokens: 10 } });
     // A call with no tools (a structured read, the condenser, a rewrite): no script.
-    if (!Array.isArray(chat.tools) || !chat.tools.length) return reply(chat.response_format ? "{}" : `scripted (${label})`);
+    if (!Array.isArray(chat.tools) || !chat.tools.length) {
+      const sys = String(msgs[0]?.role === "system" ? msgs[0].content : "");
+      const own = opts.draft?.(sys, String(msgs.at(-1)?.content ?? ""), label);
+      return reply(own ?? (chat.response_format ? "{}" : `scripted (${label})`));
+    }
     const s = seen[label] ??= fresh();
     if (s.code) {
       s.code = false;
@@ -65,10 +74,19 @@ export async function runConversation(script: Record<string, Step[]>, opts: { on
       s.calls.push({ name: step.tool, input, result: "" });
       return reply("", [{ id: `toolu_mp_${s.calls.length}`, type: "function", function: { name: step.tool, arguments: JSON.stringify(input) } }]);
     }
-    const text = steps.find((x): x is { text: string } => "text" in x)?.text;
-    return reply(text ?? `scripted (${label})`);
+    const t = steps.find((x): x is Extract<Step, { text: unknown }> => "text" in x)?.text;
+    return reply((typeof t === "function" ? t(s.calls) : t) ?? `scripted (${label})`);
   };
-  const world = await openWorld(2, { model: (req) => anthropicWire(req, scripted) });
+  const model = async (req: Request) => {
+    const body = await req.clone().json().catch(() => ({}));
+    if ((body.tools ?? []).some((t: any) => /^web_search_/.test(String(t?.type ?? "")))) {
+      (seen[label] ??= fresh()).searches++;
+      const answer = opts.web?.(body, label) ?? { id: "msg_search", type: "message", role: "assistant", model: body.model, stop_reason: "end_turn", content: [], usage: { input_tokens: 10, output_tokens: 10, server_tool_use: { web_search_requests: 1 } } };
+      return Response.json(answer);
+    }
+    return anthropicWire(req, scripted);
+  };
+  const world = await openWorld(2, { model });
   // Every off-machine request, with its full address, on the turn that made it (the world's double refuses it after).
   const refuse = globalThis.fetch;
   globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {

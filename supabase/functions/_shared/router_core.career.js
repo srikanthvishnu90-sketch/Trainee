@@ -19203,7 +19203,7 @@ const CareerRouter = (() => {
         try { sum0 = Track && Track.statusSummary ? Track.statusSummary(store) : null; } catch { sum0 = null; }
         return emitTrack(ctx, { intent: "tracking_status", reply, resultStatus: "prepared", sends: 0, counts: { total: 0 } }, sum0 ? { summary: sum0 } : { summary: { total: 0 } });
       }
-      const reply = compose({ headline: "Your application tracker is empty — no applications on record yet.", facts: ["Once you apply through me, each one shows up here with where it stands. If you applied somewhere on your own, tell me and I'll add it."], nextStep: "Say \"find jobs\" and I'll start a search." });
+      const reply = compose({ headline: "No applications on record yet, per your application tracker: it is empty.", facts: ["Once you apply through me, each one shows up here with where it stands. If you applied somewhere on your own, tell me and I'll add it."], nextStep: "Say \"find jobs\" and I'll start a search." });
       let sum = null;
       try { sum = Track && Track.statusSummary ? Track.statusSummary(store) : null; } catch { sum = null; }
       return emitTrack(ctx, { intent: "tracking_status", reply, resultStatus: "prepared", sends: 0, counts: { total: 0 } }, sum ? { summary: sum } : { summary: { total: 0 } });

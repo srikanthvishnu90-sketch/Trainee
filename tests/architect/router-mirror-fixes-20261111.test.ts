@@ -147,9 +147,10 @@ Deno.test({
       assertNode.ok(!/^No employer form/.test(ds.reply), `the answer leads: ${ds.reply.slice(0, 200)}`);
 
       // 10: the practice question waits for an answer, as a question.
+      // Architect amendment (D-061): G1 and G12: a practice ask is the brain's, which asks one question and waits, like an interviewer.
       const q = await ask("ask me one behavioral question and wait for my answer.");
-      assertNode.match(q.reply, /^Here is your question: /, q.reply);
-      assertNode.match(q.reply, /What is your answer\?/, q.reply);
+      assertNode.ok(q.model, `the brain asks the practice question: ${q.reply}`);
+      assertNode.ok(!/^Here is your question: /.test(q.reply), `not code's bank serve: ${q.reply}`);
 
       assertNode.deepStrictEqual(w.outbound, [], "no request left but the database double and the scripted model");
     } finally {

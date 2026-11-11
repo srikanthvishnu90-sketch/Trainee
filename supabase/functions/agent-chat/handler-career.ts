@@ -60,11 +60,13 @@ const webResearchCache = memoryWebCache(); // D-060: per instance, like research
 // when it cannot, the research reader reads nothing (fails closed) instead of fetching without the resolved-address check.
 if (researchReplyOn(Deno.env)) void dnsProbe();
 import { AGENT_BRAIN_RELEASED, chooseBrain, agentTurn, HISTORY_WINDOW, historyWindow, summaryFor } from "./career_brain.ts";
-import { brainMode, draftContinuation, FOLLOWUP_INTENT, researchOverAction, stagedRoute, stagedToolPolicy } from "./career_staged.ts";
+import { brainMode, draftContinuation, FOLLOWUP_INTENT, questionShaped, researchOverAction, stagedRoute, stagedToolPolicy } from "./career_staged.ts";
 import { BOUNDARY_LINE, BOUNDARY_SAID, boundaryOf, correctionOf, hypotheticalOf } from "../_shared/agent/turn_notes.ts"; // D-061 G1, G6, G8, G9
 import { severalAsks } from "../_shared/ask_language.ts"; // D-061 G13
 // D-061 G6: a write that moves toward an external effect (a queued or prepared application, a receipt, an email on the rail).
 const fileLinksSet = (env: { get(k: string): string | undefined }) => /^https:\/\/[^\s?#]+$/.test((env.get("TRAINEE_FILE_BASE_URL") || "").trim()) && !!env.get("TRAINEE_FILE_LINK_SECRET");
+// D-061 G1: an ask to make, change, send or export a document.
+const G1_MAKE_ASK = /\b(?:make|build|write|tailor|create|update|edit|change|fix|redo|rewrite|send|give me|generate|export|download|turn|convert|shorten|cut|add|remove|swap|use)\b/i;
 // D-061 G10: an ask to write something ("draft a note to ...", "write a short intro message ...").
 const G1_WRITE_ASK = /\b(?:draft|write|compose|rewrite|redo)\s+(?:me\s+|up\s+)?(?:a|an|the|my|that|this|short|quick|cold|brief)\b/i;
 const G6_EFFECT_WRITE = /apply_jobs|apply_receipts|apply_prepared|apply_prepare|apply_wanted|send_queue|outbox|contact_sends|outlook_sends|card_answer|batch_approv/;
@@ -736,7 +738,10 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // g1CodeAnswers). Payload intents, approvals, the account's controls and bare answers to code's questions run before.
       const g1Brain = !careerTask && !careerBatch && (hypotheticalOf(message) !== null || correctionOf(message) === "trainee" || severalAsks(message));
       const batchBefore = JSON.stringify((ctx as any).batchApplyState ?? null);
-      const resumeAns = !crisisText && !codeTurn && !tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      // D-061 G1: a question about resumes in general ("is one page still the rule for nursing?"), with no resume task open and no
+      // ask to make, change or send one, is the brain's question, not code's resume build.
+      const g1ResumeQuestion = !(ctx as any)?.profile?._resumeTask && questionShaped(message) && !G1_MAKE_ASK.test(message);
+      const resumeAns = !g1ResumeQuestion && !crisisText && !codeTurn && !tapIn && !connAns && !outlookAns && !siteNo && !card && !mock && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await resumeTaskTurn({ message, ctx, userId: user.id, now: Date.now(), deps: {
             // An unknown word in the stated target may be an employer in the pool ("the quillstone ... role"): read it then.
             loadPool: () => readPool(message, true),

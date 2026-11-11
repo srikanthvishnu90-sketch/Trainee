@@ -503,7 +503,13 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   }
   // A sourced record behind the answer (a company file, a benchmark with figures, the person's offer) stays code's (D-007), unless
   // the turn is a hypothetical, a correction of Trainee or several asks (D-061 G8, G9, G13): then the record is the brain's data.
-  if (codeProduct(intent, probe.result)) return g1Override(o.message) ? g1Brain(o, intent, probe, clock) : { brain: false, mode, intent, reason: "code_product" };
+  // D-061 G1, G11: a prep File or brief the router built for an ask that asked for no file or plan (practice problems, a STAR story,
+  // rating an answer) answered a different task: the ask is the brain's, with the router's prep as data.
+  // D-061 G1, G4, G14 (D-060 web research on): an ask about a firm that code answers from its company file is the brain's research
+  // turn: it reads official sources first (research_company, research_market, each reply enforced in code: enforceCompanyReply),
+  // with the file's answer as data. With web research rolled back (CAREER_KNOWLEDGE=off), the sourced file stays code's (D-007).
+  if (intent === "company_intel" && has((probe.result ?? {}) as Record<string, unknown>, "company") && codeProduct(intent, probe.result) && knowledgeOn(o.env) && researchReplyOn(o.env)) return g1Brain(o, intent, probe, clock);
+  if (codeProduct(intent, probe.result)) return g1Override(o.message) || (intent === "prep_brief" && !prepSessionOpen(o.ctx) && !G1_FILE_ASK.test(o.message)) ? g1Brain(o, intent, probe, clock) : { brain: false, mode, intent, reason: "code_product" };
   return { brain: true, mode, intent, reason: "question", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
 }
 
@@ -722,7 +728,7 @@ const G1_CONTROL: ReadonlySet<string> = new Set([
 // that very action ("don't apply") or is a hypothetical, a correction or several asks.
 const G1_APPLY_ACTIONS: ReadonlySet<string> = new Set(["career_batch_apply", "named_role_apply", "named_role_link", "doorstep_submit", "doorstep_fill"]);
 // ... and the onboarding list, which answers "what do you need from me" with the facts to start applying.
-const G1_BOUNDARY_SENSITIVE: ReadonlySet<string> = new Set([...G1_APPLY_ACTIONS, "career_onboarding_needs"]);
+const G1_BOUNDARY_SENSITIVE: ReadonlySet<string> = new Set([...G1_APPLY_ACTIONS, "career_onboarding_needs", "profile_recall"]);
 const G1_ACTIONS: ReadonlySet<string> = new Set([
   ...G1_APPLY_ACTIONS, "doorstep_status", "application_packet", "application_packet_walkthrough", "career_packet", "career_packet_absent", "packet_prep",
   "packet_needs_role", "intent_packet_validity", "career_watch", "career_watch_create", "career_watch_affirm", "career_os_watch",
@@ -754,6 +760,8 @@ const G1_DELIVERABLE = ["file", "documents", "document", "tailorDoc"];
 function g1Brain(o: { message: string; ctx: Record<string, unknown>; host: Host; env: Env }, intent: string, probe: { reply?: unknown }, clock: TurnClock): StagedDecision {
   return { brain: true, mode: brainMode(o.env), intent, reason: "g1_model_decides", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
 }
+// An ask for a file, a document, a page or a plan to keep or open (G11).
+const G1_FILE_ASK = /\b(?:file|doc|docs|document|pdf|docx|page|sheet|one[- ]?pager|brief|briefing|plan|checklist|cheat ?sheet|download\w*|printable)\b|\b(?:prep|prepare)\s+me\b|\bhelp\s+me\s+(?:prep|prepare|get\s+ready)\b|\bget\s+me\s+ready\b/i;
 export const g1Override = (message: string) => { const m = String(message ?? "").replace(/[\u2019`]/g, "'"); return !!hypotheticalOf(m) || correctionOf(m) === "trainee" || severalAsks(m); };
 // A product code built for an instruction the person gave (a draft, a people list, a prep brief, a document, an offer card):
 // the instruction carried out. A sourced record (a company file, a benchmark, a comparison) is data for the brain's answer.
@@ -765,6 +773,8 @@ const G1_ACTION_PRODUCT = ["draft", "target", "brief", "offer", "documents", "do
 const prepSessionOpen = (ctx: Record<string, unknown> | undefined) => !!(ctx as any)?.trackStore?._careerThread?.prep?.lastQ || !!(ctx as any)?.mockSession;
 export function g1CodeAnswers(message: string, intent: string, result: unknown, ctx?: Record<string, unknown>): boolean {
   const m = String(message ?? "").replace(/[’`]/g, "'");
+  // A question about a watch ("what happens if I turn off alerts?") is not the control itself (G1): the brain answers it.
+  if (intent === "career_watch_manage" && (QUESTION_LEAD.test(m) || m.includes("?"))) return false;
   if (G1_CONTROL.has(intent) || PAYLOAD_INTENTS.has(intent) && !G1_PRODUCERS.has(intent)) return true;
   const r = (result && typeof result === "object" ? result : {}) as Record<string, any>;
   if (G1_DELIVERABLE.some((k) => has(r, k)) || has(r, "artifact") && (has(r.artifact, "pdf") || has(r.artifact, "url"))) return true;
@@ -781,7 +791,8 @@ export function g1CodeAnswers(message: string, intent: string, result: unknown, 
   // recall of this conversation, the brain's (G7: the thread is memory).
   if (G1_RECALLS.has(intent)) return ABOUT_ME.test(m);
   // G1 (b): the next ask inside a practice session code is running.
-  if (/^prep_/.test(intent) && prepSessionOpen(ctx)) return true;
+  // A new ask inside it ("a harder one", "ask me another") served from the bank is not an answer: prep_brief's serve is the brain's.
+  if (intent === "prep_mock_start" && prepSessionOpen(ctx)) return true;
   // A drill answer graded against the bank's own key is the answer to code's question; a rubric read is not (prepRubricRead).
   if (intent === "prep_brief" && r.scored && r.scored !== "rubric") return true;
   // An instruction (not a question, nothing forbidden) that code carried out with a product, or one to message or list people.

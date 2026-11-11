@@ -56,6 +56,9 @@ export const SHARED_REPLY_MODULES = [
   "research_free_sources.ts", "research_never.ts",
   // D-060 (2026-11-11): web research (CAREER_KNOWLEDGE): Claude's web search as a search provider, source kinds, the posting re-check.
   "research_web.ts",
+  // D-062 (2026-11-11): any posting's requirements: the Workday posting reader (check_posting_open, the search's open check) and
+  // the read-only apply-flow reader (inspect_apply_flow), with the form schema reader it builds on.
+  "workday_posting.ts", "posting_requirements.ts", "posting_schema.ts",
   // R10 WO-H fix 14b (2026-11-09): the follow-up and thank-you draft check (draft_followup).
   "followup_draft.ts",
   // R9 outreach (2026-11-08): who may be written to (no-reply, role and ATS/job-board inboxes never) and the staged route's

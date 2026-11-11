@@ -36,6 +36,7 @@ import { findFirm, pathAnswer } from "../career_path.ts";
 import type { HiredResult, HiredSource } from "../career_hired.ts";
 import { queueWants, refusal, resolvePicks, screenPicks, type Pick as WantPick, type Refusal, type WantStore } from "../career_apply_want.ts";
 import { payFrom, postingTextForModel } from "../posting_pay.ts";
+import type { ApplyFlow } from "../posting_requirements.ts";
 import type { Limits } from "../career_apply.ts";
 import { type Situation, statusText } from "../career_situation.ts";
 import { researchCareerQuestion, type ResearchDeps } from "./research/index.ts";
@@ -257,6 +258,9 @@ export function careerTools(deps: {
   market?: (MarketDeps & { onResult?: (r: MarketResult | CompanyResult) => void }) | null;
   // D-060 (C18) web research on: "is that posting still open? check now" re-checks the posting page live (research_web.ts). Absent: no such tool.
   postingRecheck?: ((url: string) => Promise<PostingRecheck>) | null;
+  // D-062 (1): what a posting requires and what its application asks, read from public pages only (posting_requirements.ts
+  // readApplyFlow). Absent: no such tool.
+  applyFlow?: ((url: string) => Promise<ApplyFlow>) | null;
 }): ToolSpec[] {
   const alertsOf = () => { if (!deps.alerts) throw new Error("job alerts are not configured here"); return deps.alerts; };
   const outreachOf = () => { if (!deps.outreach) throw new Error("outreach is not set up here; say so, never pretend a draft or send happened"); return deps.outreach; };
@@ -328,7 +332,39 @@ export function careerTools(deps: {
       const note = r.state === "not_readable"
         ? `Trainee does not read ${r.host} pages, so it could not check whether this posting is still open. Say exactly that in one sentence, then give the link on its own line so they can check it themselves. Do not say it is open or closed. Nothing was applied for.`
         : r.state === "unknown" ? `The check on ${r.board} did not finish, so whether it is open is not known. Say so in one sentence, with the link on its own line. Do not guess.`
-        : `Checked live on ${r.board} just now: ${r.state === "open" ? "the posting is still open" : "the posting is closed (the board no longer lists it)"}. Say that in one sentence and that nothing was applied for, then the link on its own line. Give no deadline or other detail the check did not return.`;
+        : `Checked live on ${r.board} just now: ${r.state === "open" ? "the posting is still open" : "the posting is closed (the board no longer lists it)"}.${r.deadline ? ` The posting states its application deadline: ${r.deadline_text || r.deadline}; give that date.` : ""} Say that in one sentence and that nothing was applied for, then the link on its own line. Give no deadline or other detail the check did not return.`;
+      return { ...r, note };
+    },
+  }] : [];
+  // D-062 (1), benchmark C11 ("what would you need from me to actually submit that application? don't apply yet"): the posting's
+  // requirements and its application's questions as far as public pages show them, the entry flow, and what is behind the
+  // person's own sign-in (Workday), named as not known. Read only: no account, saved application or submission is created.
+  const applyFlowTools: ToolSpec[] = deps.applyFlow ? [{
+    name: "inspect_apply_flow", effect: "read",
+    description: "Use when the person asks what a posting requires, what its application asks, or what you would need from them to apply (\"what would you need from me to submit that application? don't apply yet\"). Pass the posting's job_id from search_jobs or a tool, or its link exactly as it appeared in this conversation (never guess one). It reads the posting and its application form from public pages only, now: the requirements in the posting's words, every question the form shows without signing in (Greenhouse, Lever, Ashby), and, where the questions are behind the person's own sign-in (Workday) or not public (SmartRecruiters), says so. It never creates an account, a saved application or a submission, and never applies.",
+    input_schema: obj({ job_id: str("The posting's job_id, from search_jobs or another tool"), url: str("The posting's link, exactly as shown earlier in this conversation or by a tool") }),
+    run: async (i) => {
+      let url = String(i.url ?? "").trim();
+      if (!url && i.job_id) {
+        const get = deps.posting ?? (deps.tailor ? deps.tailor.posting : null);
+        const p = get ? await get(String(i.job_id)).catch(() => null) : null;
+        url = String(p?.url ?? "");
+        if (!url) throw new Error(`no posting ${String(i.job_id)} on file with a link; ask which posting, or search again`);
+      }
+      if (!url) throw new Error("pass the posting's job_id or its link");
+      const r = await deps.applyFlow!(url);
+      const q = r.questions ?? [];
+      const note = r.status === "not_readable"
+        ? `${r.why}, so its requirements and questions could not be read. Say exactly that in one sentence, then give the link on its own line. Do not guess what it asks.`
+        : [
+          r.posting ? `Read now from ${r.board}: ${r.posting.state === "closed" ? "the posting is CLOSED; say so first" : r.posting.state === "open" ? "the posting is open" : "whether it is still open was not confirmed by this read"}.` : `The posting itself could not be read (${r.why}); say so.`,
+          r.requirements.required.length ? "Give its requirements in its own words (requirements.required; requirements.preferred as nice to have)." : "The posting lists no requirement section this reader found; do not invent requirements.",
+          r.questions_read === "read" ? `Its form has ${q.length} questions, ${q.filter((x) => x.required).length} required: name what the person would need to provide, drawing only on these.` : `Its questions were not read: ${r.questions_why} Say that plainly; never guess the questions.`,
+          r.sign_in_required ? "Applying needs the person's own sign-in or new account on the employer's careers site; they do that themselves. Trainee never signs in for them." : "",
+          r.posting?.deadline ? `The posting states an application deadline: ${r.posting.deadline_text || r.posting.deadline}.` : "",
+          r.posting?.pay_by_place?.length ? "The posting states its pay by place (posting.pay_by_place): give the range for the place the person means, as written." : "",
+          "Any answer comes only from facts the person confirmed; a question no confirmed fact answers is something to ask them. End by saying you only read the public pages: no account, saved application or submission was created. Nothing was applied for.",
+        ].filter(Boolean).join(" ");
       return { ...r, note };
     },
   }] : [];
@@ -376,6 +412,7 @@ export function careerTools(deps: {
     ...researchTools,
     ...marketTools,
     ...recheckTools,
+    ...applyFlowTools,
     ...followupTools,
     {
       name: "remember_instruction", effect: "write_own",

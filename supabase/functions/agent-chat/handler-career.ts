@@ -113,7 +113,7 @@ import { GMAIL_SEND_SCOPE } from "../_shared/career_outreach_gmail.ts";
 import { missingIntegration } from "../_shared/agent/integrations.ts";
 import { documentsOf, materializeArtifacts } from "../_shared/channel_artifacts.ts";
 import { scoredN } from "../_shared/career_search.ts";
-import { askFor, isJudgePromptAsk, judgePromptTurn, searchJudgeTurn, supabaseJudgeCache, supabaseSearchSources } from "../_shared/career_search_judge.ts"; // FEATURE 5
+import { askFor, isJudgePromptAsk, judgePromptTurn, searchJudgeTurn, searchReplyParts, supabaseJudgeCache, supabaseSearchSources } from "../_shared/career_search_judge.ts"; // FEATURE 5
 import { blockerAsk, widenedAsk } from "../_shared/search_widen.ts"; // R10 WO-C
 // R10 WO-D: router outcomes that are not an answer to the message (its catch-alls and the company-intel fallback that sent the
 // graduation-window template on production): at a limit these are replaced by the held reply.
@@ -1479,6 +1479,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         const f5JudgeOn = Deno.env.get("CAREER_JUDGE") === "on";
         const f5Prompt = f5Free ? await judgePromptTurn({ message, userId: user.id, now: Date.now(), memory: supabaseMemoryStore(admin), judgeOn: f5JudgeOn }) : null;
         if (!f5Prompt) await ensurePool();
+        // D-055: the thread's search as it stood before the router ran (the router's own search rewrites lastShortlist), so a
+        // correction can say which listed roles it drops (correctionLead).
+        const f5Before = (ctx as any).discovery ?? null;
         out = f5Prompt
           ? { reply: f5Prompt.reply, intent: f5Prompt.intent, resultStatus: f5Prompt.status, contained: false, handler: "judge_prompt" }
           : clock.sync("router", () => host.runTurn(message, ctx));
@@ -1509,20 +1512,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             if (!found && f5Said?.explain) out = { ...out, intent: "career_discovery", resultStatus: "blocked", handler: "search_judge",
               reply: "What blocked it: a search connection problem. The job boards could not be read just now, so this says nothing about whether open roles exist. It is not your resume: listing roles never needs a confirmed resume. Nothing was applied for. Ask again in a few minutes and I'll run the same search." };
             if (found) {
-              // ONBOARDING ROUND 2: the router's line that nothing is sent before the resume is confirmed (an apply ask with
-              // no confirmed resume) stays with the search's own reply.
-              const prof = (ctx as any).profile, facts: any[] = Array.isArray(prof?.facts) && !prof?._fromStatedFacts ? prof.facts : [];
-              const confirmedResume = facts.some((f) => f && ["education", "experience", "project", "leadership", "skill"].includes(f.kind) && f.needs_confirmation !== true && (f.status == null || f.status === "confirmed"));
-              // F.1: "Don't apply to anything" is not an apply ask: a search never needs a confirmed resume to list roles.
-              const askText = String(message ?? "").toLowerCase().replace(/[’]/g, "'").replace(/\b(?:don't|do not|never|not|without|no need to)\s+(?:\w+\s+){0,2}?(?:apply|applying|submit\w*)\b[^.?!]*/g, " ");
-              const applyAsk = !/\?\s*$/.test(askText) && /\bapply\s+(?:to|for|at|me|on|now)\b|\bapply\b[^.?!]{0,40}\b(?:jobs?|roles?|postings?|positions?|internships?|openings?)\b|\bsubmit (?:my|an?) applications?\b/.test(askText);
-              const resumeLine = f5Said?.append || confirmedResume || !applyAsk || /\bresume\b/i.test(found.reply) ? ""
-                : facts.some((f) => f && f.source === "resume-ingest" && f.needs_confirmation === true)
-                ? "\n\nAnd nothing is sent anywhere before your resume is confirmed: its entries are waiting for your word (reply \"yes, that's my resume\" if they're right)."
-                : "\n\nAnd nothing is sent anywhere before your resume is confirmed: paste or attach it, confirm it, then ask again.";
-              const why = !f5Said?.explain ? "" : found.blocker === "none"
-                ? `Nothing is blocking it: ${found.shortlist.length} open ${found.shortlist.length === 1 ? "role is" : "roles are"} listed below. Your resume isn't confirmed, and that doesn't block a search: listing roles never needs it, and eligibility isn't decided here.\n`
-                : `What blocked it: ${found.blocker === "all_closed" ? "the matching roles I found were closed when I checked their application pages" : "no open roles were found in the scope I checked"}. It was not a connection problem (the job boards were read), and not your resume (listing roles never needs a confirmed resume).\n`;
+              // ONBOARDING ROUND 2 and F.1: the resume line and the blocker answer (searchReplyParts, shared with the eval harness).
+              const prof = (ctx as any).profile;
+              const { why, resumeLine } = searchReplyParts({ message, said: f5Said, found, profile: prof, prior: f5Before });
               out = { ...out, reply: why + (f5Said?.append ? `${out.reply}\n\n${found.reply}` : found.reply) + resumeLine, resultStatus: found.status, handler: "search_judge",
                 // R10 WO-C: a widened search is a search, whatever the router took the words for (a graduation-window question).
                 ...(f5Widen ? { intent: "career_discovery" } : {}) };

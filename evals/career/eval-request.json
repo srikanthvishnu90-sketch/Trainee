@@ -1,10 +1,9 @@
 {
- "note": "D-055 / D-055a (owner, 2026-11-10): one more real-model run of the D-054 set, capped at $2.50; measure the second parent",
+ "note": "deploy standard S3 (scripts/launch/measure-reply.sh): measure the second parent",
  "action": "eval",
- "set": "d054",
+ "set": "dev",
  "brains": [
   "staged"
  ],
- "passes": 5,
- "budget_usd": 2.5
+ "passes": 5
 }

@@ -8,7 +8,7 @@
 //                     batches need nothing; the batch is admitted against the limits up front.
 // The worker (WO-009b) fills exactly the prepared fields by name, reads each back, and classifies the outcome here.
 import { overStatedLimit } from "./length_limit.ts";
-import { answerKey, AUTH_FACTS, BIRTH_DATE, declineOption, FOREIGN, HONEYPOT, mapQuestion, NAMES_US, norm as normQuestion, PAY_HISTORY_ASKED, RELATIVE_PLACE } from "./question_map.ts";
+import { answerKey, AUTH_FACTS, BIRTH_DATE, declineOption, FOREIGN, HONEYPOT, mapQuestion, NAMES_US, norm as normQuestion, PAY_HISTORY_ASKED, payRangeAsked, RELATIVE_PLACE, salaryExpectationAsked } from "./question_map.ts";
 import { rowAnswerKey } from "./row_answer.ts";
 import { chooseOption, levelOption, usCitizenChoice, yesNoFromFact, yesNoOf } from "./answer_options.ts";
 import { type PlacePart, postingAtHome, postingCountry, postingPlaces, STATE_NAMES } from "./posting_place.ts";
@@ -971,6 +971,18 @@ function nationalNumber(value: string, dial: string): string | null {
   const rest = digits.slice(code.length).replace(/^[\s)\-.]+/, "").trim();
   return /\d{4,}/.test(rest.replace(/[^\d]/g, "")) ? rest : null;
 }
+// D-053 (owner) and the architect's ruling on it (2026-11-10): the facts a salary-expectation question may be answered from
+// are every confirmed fact but the salary expectation itself. Any salary expectation on file (an answer texted to an earlier
+// employer's question, kept as the fact, or a confirmed profile fact) is an earlier answer: it is never filled, only
+// offered beside this posting's question for the person to confirm (career_apply_questions.ts salaryOffers).
+// D-053c: the posted-range yes/no (`pay_range_ok`) is answered from neither the salary expectation nor a `pay_range_ok` fact
+// (an earlier employer's yes or no kept as a fact): only this posting's own answer fills it.
+function withoutEarlierAnswers(answers: Record<string, Answer>, range = false): Record<string, Answer> {
+  if (!answers?.salary_expectation && !(range && answers?.pay_range_ok)) return answers;
+  const { salary_expectation: _earlier, ...rest } = answers;
+  if (range) delete rest.pay_range_ok;
+  return rest;
+}
 export function planBatch(o: { userId: string; postings: PlanPosting[]; answers: Record<string, Answer>; saved: Record<string, Answer>; log: LogRow[]; now: number; limits?: Limits }) {
   const ready: { job_id: string; company: string; title: string; fields: PlannedField[] }[] = [];
   const needs = new Map<string, { label: string; key: string; required: boolean; job_ids: string[]; field_name?: string }>();
@@ -1025,21 +1037,29 @@ export function planBatch(o: { userId: string; postings: PlanPosting[]; answers:
       const here = factStaysHere(f, p.location, o.answers);
       // a-sensitive: an answer saved under the bare wording (the oldest key) never travels for a date of birth or a
       // self-identification question: those are each application's own.
-      const legacy: Answer | undefined = BIRTH_DATE.test(f.label) || key === "eeo" || mapQuestion(f).fact === "eeo" ? undefined : o.saved[normLabel(f.label)];
+      // D-053 (owner, 2026-11-10): a salary expectation is each application's own. Only the answer given for this posting
+      // (answerKey `job:`) fills it: never one saved under the wording (the oldest key), never a salary expectation kept as a
+      // fact, whether texted to an earlier form or confirmed in the profile (the architect's ruling: the hosted and extension
+      // paths do not differ). Salary history's wording key is closed too, as a date of birth's is (#731).
+      // D-053c: the posted-range yes/no ("does the posted range meet your expectations?") is asked per application the same way.
+      const range = payRangeAsked(f);
+      const perApp = salaryExpectationAsked(f) || range;
+      const facts = perApp || key === "salary_expectation" ? withoutEarlierAnswers(o.answers, range) : o.answers;
+      const legacy: Answer | undefined = BIRTH_DATE.test(f.label) || PAY_HISTORY.test(f.label) || perApp || key === "eeo" || mapQuestion(f).fact === "eeo" ? undefined : o.saved[normLabel(f.label)];
       const own: Answer | undefined = o.saved[answerKey(f, p.job_id, { haveFact: true, here })] ?? o.saved[answerKey(f, p.job_id, { here })] ?? legacy;
       const direct: Answer | undefined = o.saved[answerKey(f, p.job_id, { haveFact: true, here })] ?? o.saved[answerKey(f, p.job_id, { here })] ??
-        (key !== "unknown" && key !== "eeo" && !followUp && !otherCountry(key, placeText(f), p.location, homeInUs(o.answers)) && !beyondFact(key, f) ? o.answers[key] : undefined) ?? legacy;
+        (key !== "unknown" && key !== "eeo" && !followUp && !otherCountry(key, placeText(f), p.location, homeInUs(o.answers)) && !beyondFact(key, f) ? facts[key] : undefined) ?? legacy;
       let a: Answer | undefined = direct;
       let value: string | null = a ? String(a.value) : null;
-      if (value !== null && f.options.length) value = matchOption(value, f.options) ?? (key !== "unknown" && direct === o.answers[key] ? chooseOption(...placeFact(key, value, o.answers), f.options, f.label) : null);
+      if (value !== null && f.options.length) value = matchOption(value, f.options) ?? (key !== "unknown" && direct === facts[key] ? chooseOption(...placeFact(key, value, o.answers), f.options, f.label) : null);
       if (value === null && !direct) {
         const e = educationEnd(f, p.fields, o.answers);
         if (e) { a = e; value = f.options.length ? matchOption(e.value, f.options) : e.value; }
       }
       // A fact the keyword classifier picked that fits none of the options (the long "U.S. person" explanation names
       // "citizen") gives way to the meaning map, as no answer at all does (WO-042, Snowflake).
-      if (value === null && (!direct || direct === o.answers[key]) && !followUp) {
-        const m = byMeaning(f, p.company, o.answers, places, where, p.location);
+      if (value === null && (!direct || direct === facts[key]) && !followUp) {
+        const m = byMeaning(f, p.company, facts, places, where, p.location);
         if (m) { a = m; value = m.value; }
       }
       if (value !== null && f.dial !== undefined && a !== own && (key === "phone" || mapQuestion(f).fact === "phone")) value = nationalNumber(value, f.dial);

@@ -181,7 +181,7 @@ Deno.test("D-063/8 advice: an injected or contact passage is not a source; no so
 // pastes), was dropped with the contact block. It is read as drafts: the entry in the person's own words with its school, degree and
 // date as fields, and the GPA as its own draft. Nothing is confirmed until the person's yes.
 const { CareerProfile } = await import("../../supabase/functions/_shared/router_core.career.js");
-const ingest = (text: string) => { const p = CareerProfile.createProfile({}); const r = CareerProfile.ingestResume(p, { text, fileName: "resume.txt" }); return { p, r }; };
+const ingest = (text: string): { p: any; r: any } => { const p: any = CareerProfile.createProfile({}); const r = CareerProfile.ingestResume(p, { text, fileName: "resume.txt" }); return { p, r }; };
 Deno.test("D-063/9 a header education line becomes education and GPA drafts awaiting the person's yes; never confirmed by code", () => {
   const ctx: any = { now: NOW, thread: {} };
   CareerRouter.handleChat(PERSONA.setup[0], ctx);

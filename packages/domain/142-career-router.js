@@ -5002,7 +5002,10 @@ const CareerRouter = (() => {
     const barePluralMass = /\b(applications|jobs|roles)\b/.test(t) && noReview && !/\?\s*$/.test(t) && !/^(did|have|has|do|does|were|was|are)\b/.test(t);
     const massObject = /\b(everything|every job|all jobs|all of them|every role|all roles)\b/.test(t) || /\b(\d{2,})\s*(jobs|applications|roles)\b/.test(t) || barePluralMass;
     const massCount = Number((t.match(/\b(\d{2,})\s*(jobs|applications|roles)\b/) || [])[1]) || 0;
-    const massApply = /\b(apply|submit|send in)\b/.test(t) && massObject && (noReview || massCount >= 50);
+    // MIRROR-1000 (2026-11-11): the person's own guard ("don't apply to anything", "do not apply on my behalf") is not the ask
+    // to apply: "what backend developer jobs are open in Detroit right now ... Don't apply to anything" was refused as bulk apply.
+    const applyAsked = /\b(apply|submit|send in)\b/.test(t.replace(/\b(?:don'?t|do not|never|not|no|nothing)\s+(?:\w+\s+){0,3}?(?:apply|submit|send in)\b[^.;:!?]*/g, " "));
+    const massApply = applyAsked && massObject && (noReview || massCount >= 50);
     // HELD-OUT (2026-10-24): the insistence shape — "nobody checks
     // anyway, just add one at a bank". The fabrication's object is
     // carried by the conversation (the internship just refused);
@@ -5864,7 +5867,7 @@ const CareerRouter = (() => {
     } catch { /* the question stands without the record */ }
     const facts = ["Answer it the way you would in the room — out loud, structured, numbers before adjectives.", "I will score the answer against the rubric and drill the weakest part next; that loop is the prep."];
     if (cycled) facts.unshift("You have answered every question I have for this, so this one comes round again.");
-    const reply = compose({ headline: `Here is your question: ${q}`, facts, nextStep: "Give me your answer and I will score it." });
+    const reply = compose({ headline: `Here is your question: ${q}`, facts, nextStep: "What is your answer? I will score it." });
     return { intent: "prep_brief", reply, resultStatus: "running", sends: 0, question: { kind: "bank_question", q } };
   }
   // ======================================================================
@@ -13268,7 +13271,7 @@ const CareerRouter = (() => {
       if (tgt.company) { const mir = threadMirrorForWrite(ctx); if (mir) mir.namedApply = { company: tgt.company, role: tgt.role || null }; }
       const worker = ctx.workerCapabilities && ctx.workerCapabilities.portal_browser;
       const facts = [`I can apply only to a posting I have on file or one you paste. The ${tgt.role || "role"} posting at ${tgt.company || "that company"} is not on file, and I won't make one up.`];
-      { const L = getApplyLedger(); const f = L && L.submitFact(ctx); if (!f && worker && worker.status === "NOT_WIRED" && !ctx.liveSwitches) facts.push("The browser worker that executes applications is also not wired in this handler — even a listed role would stop at preparation here."); }
+      { const L = getApplyLedger(); const f = L && L.submitFact(ctx); if (!f && worker && worker.status === "NOT_WIRED" && !ctx.liveSwitches) facts.push("Here a listed role would also stop at preparation: I prepare it, and nothing is submitted from this chat."); }
       const reply = compose({ headline: `I can't apply to the ${tgt.role || "role"} at ${tgt.company || "that company"} yet — that posting is not in the list I can work from.`, facts, nextStep: "Paste the posting or its link and I will prepare the application from it in this turn." });
       return { intent: "named_role_apply", reply, resultStatus: "blocked", sends: 0 };
     }
@@ -15851,7 +15854,8 @@ const CareerRouter = (() => {
         // Release item 9 loop (tests/architect/loop-09-memory.test.ts): a correction names the date it replaces ("I graduate in
         // December 2026, not May 2027", "..., instead of May 2027"). That trailing contrast is not a negation of the new date:
         // it is left out before the negation check. "I don't graduate in 2027" is still a negation.
-        const CONTRAST = new RegExp(`,?\\s*(?:and\\s+)?(?:not|instead of|rather than)\\s+(?:in\\s+|on\\s+)?(?:${MON}\\s+)?20\\d\\d\\b`, "gi");
+        // MIRROR-1000: the replaced date may be a month alone ("my graduation is December 2028, not May").
+        const CONTRAST = new RegExp(`,?\\s*(?:and\\s+)?(?:not|instead of|rather than)\\s+(?:in\\s+|on\\s+)?(?:(?:${MON})(?:\\s+20\\d\\d)?|20\\d\\d)\\b`, "gi");
         const wholeDefinite = definiteSentence(u.replace(CONTRAST, "").replace(/[.!?;:\n\u2014\u2013-]+/g, " "));
         const definite = (x) => wholeDefinite && definiteSentence(x);
         let m2;

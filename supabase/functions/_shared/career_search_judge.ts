@@ -410,16 +410,23 @@ export function askFromRouter(message: string, routerOut: { intent?: string } | 
 // needed" was taken as a correction and never searched). `append`: the router's own reply is kept and the search follows it.
 const UNCLAIMED = new Set(["", "undefined", "career_fallback", "career_catchall"]);
 const ALSO = new Set(["career_goal_record", "intent_sensitive_correction", "profile_correction"]);
+const HIRING_ASK = /\bis\s+\p{Lu}[\p{L}\p{N}&.]*(?:\s+\p{Lu}[\p{L}\p{N}&.]*){0,2}\s+hiring\b|['’]s\s+careers?\s+(?:page|site)\b|\b(?:openings?|jobs?|roles?|positions?|internships?)\s+at\s+\p{Lu}|\bdoes\s+\p{Lu}[\p{L}\p{N}&.]*(?:\s+\p{Lu}[\p{L}\p{N}&.]*){0,2}\s+have\s+(?:any\s+)?(?:open|[\w-]+\s+(?:jobs?|roles?|internships?|openings?))/iu;
 const SEARCH_CUE = /\b(?:find|search|show|looking|look|want|need|seeking|hiring|openings?|jobs?|roles?|positions?|interns?(?:hips?)?|new[- ]?grad|entry[- ]level|remote)\b|\$\s?\d/i;
 export function searchAskFromMessage(message: string, routerOut: { intent?: string; resultStatus?: string } | null): { ask: SearchAsk; append: boolean } | null {
   const intent = String(routerOut?.intent ?? "");
   // ROUTER ROUTING ROUND (2026-11-02): a search the router ran on its routing copy (a trailing "please" dropped, a typo
   // repaired, shorthand spelled out) records that copy, not the message, so askFromRouter does not match it: the message is
   // read here instead ("data analyst jobs at Generali please" searched nothing once the router took it as a search).
-  const open = UNCLAIMED.has(intent) || SEARCH_INTENTS.has(intent), also = ALSO.has(intent) && String(routerOut?.resultStatus ?? "") === "completed";
+  // MIRROR-1000 (2026-11-11): "is Duolingo hiring any biostatisticians", "check Amazon's careers page for backend developer
+  // openings", "find openings at Lakefront Transit Analytics for sales development reps" ask for that employer's open roles; the
+  // router answered each with the company file ("the headcount figure the file holds"). The search at that employer answers.
+  const hiring = intent === "company_intel" && HIRING_ASK.test(String(message ?? ""));
+  const open = UNCLAIMED.has(intent) || SEARCH_INTENTS.has(intent) || hiring, also = ALSO.has(intent) && String(routerOut?.resultStatus ?? "") === "completed";
   if (!open && !also) return null;
-  const text = String(message ?? "").trim();
-  if (!text || text.length > 200 || /\?\s*$/.test(text)) return null;
+  const text = hiring ? String(message ?? "").trim().slice(0, 200) : String(message ?? "").trim();
+  if (!text || text.length > 200 || (!hiring && /\?\s*$/.test(text))) return null;
+  // MIRROR-1000: an edit to the person's own document ("add numbers to my bullets so it fits healthcare roles") is not a search.
+  if (/\b(?:my|the|this)\s+(?:resume|cv|bullets?|cover letter|summary|draft)\b/i.test(text) && !/\b(?:find|search|look(?:ing)? for|show me (?:\w+ ){0,3}(?:jobs?|roles?|openings?))\b/i.test(text)) return null;
   const ask = enrich(text, null);
   if (!ask || searchWords(ask.role).length > 6) return null;
   if (!SEARCH_CUE.test(text) && !ask.place && !ask.limits?.bands) return null;
@@ -428,8 +435,25 @@ export function searchAskFromMessage(message: string, routerOut: { intent?: stri
   // fact recorded, only a search word makes it a search too ("new grad backend, no sponsorship needed" still is).
   if (also && !SEARCH_CUE.test(text)) return null;
   // Said with nothing that makes it a search for work (no level, pay, place, remote, employer or job word): not a search.
-  if (!ask.limits?.bands && !ask.limits?.pay && !ask.place && !ask.remote && !/\b(?:jobs?|roles?|positions?|openings?|interns?(?:hips?)?)\b/i.test(text)) return null;
+  if (!hiring && !ask.limits?.bands && !ask.limits?.pay && !ask.place && !ask.remote && !/\b(?:jobs?|roles?|positions?|openings?|interns?(?:hips?)?)\b/i.test(text)) return null;
   return { ask, append: also };
+}
+// MIRROR-1000: where a search looked, as words ("in Chicago"; a remote-only search is "(remote)", never "in remote").
+const whereOf = (ask: SearchAsk) => { const p = placesLine(ask); return /^remote/.test(p) ? `(${p})` : `in ${p}`; };
+// MIRROR-1000: an ask for a short answer, in the person's words.
+const SHORT_ASK = /\b(?:keep it (?:short|brief)|short version|(?:in )?(?:one or two|one|two) (?:lines?|sentences?)|briefly|be brief|tl;?dr)\b/i;
+// MIRROR-1000: the limits a person stated that no posting field is read for here (freshness, arrangement, hours, size, start),
+// named back in their kind, so an empty answer shows they were heard and not silently dropped.
+export function statedNotesOf(message: string): string[] {
+  const t = String(message ?? "").toLowerCase(), out: string[] = [];
+  if (/\bposted\b|\bfresh postings?\b|\bnew(?:est)? postings?\b/.test(t)) out.push("when it was posted");
+  if (/\bhybrid\b|\bonsite\b|\bon-site\b|\boffice days?\b|\bin[- ]office\b/.test(t)) out.push("hybrid or office days");
+  if (/\bpart[- ]time\b|\bhours (?:a|per) week\b|\bevenings?\b|\bweekends?\b/.test(t)) out.push("hours");
+  if (/\b(?:people|employees)\b|\bstartups?\b|\bbig compan/.test(t)) out.push("company size");
+  if (/\bcan'?t start (?:before|until)\b|\bstart(?:ing)? (?:in|on|tomorrow)\b/.test(t)) out.push("start date");
+  if (/\bcommute\b|\bpublic transit\b/.test(t)) out.push("commute");
+  if (/\b(?:years?|yrs?) of experience\b|\bexperience required\b|\basks? for \d\+? years\b/.test(t)) out.push("years of experience");
+  return out;
 }
 const DAY = 86400000;
 const where = (p: { location?: string | null }) => String(p.location ?? "").trim();
@@ -554,10 +578,18 @@ export async function searchJudgeTurn(o: {
     // R10 WO-C (fix 5): an empty search says the scope it checked, why nothing qualified, and the one most useful widening.
     const refreshed = o.sources.refreshedAt ? await o.sources.refreshedAt().catch(() => null) : null;
     const age = refreshed && Number.isFinite(Date.parse(refreshed)) ? ` (last refreshed ${checkedAt(Date.parse(refreshed), o.tz).text})` : "";
-    const scope = `I checked ${variants.join(", ")}${internOnly ? " internships" : ""} in ${placesLine(ask)}, on the live board${age} and the saved snapshot of job boards`;
+    const scope = `I checked ${variants.join(", ")}${internOnly ? " internships" : ""} ${whereOf(ask)}, on the live board${age} and the saved snapshot of job boards`;
     const why = checked.dead && !checked.shown.length ? `${plural(checked.dead, "matching role was", "matching roles were")} found, but ${checked.dead === 1 ? "its application page shows it" : "their application pages show them"} closed when I checked (${at.text})`
-      : notIntern ? `${plural(notIntern, "posting")} matched the place but ${notIntern === 1 ? "does" : "do"} not say ${notIntern === 1 ? "it is an internship" : "they are internships"}` : `none was found (${liveNote}, and the saved snapshot has none either)`;
-    const reply = `${scope}: ${why}.${capLine}${leftOut} Nothing was invented to fill the list, and nothing was applied for. The most useful widening is ${nextWidening(ask)}, and I'll search again.`;
+      : notIntern ? `no open internships matched: ${plural(notIntern, "posting")} matched the place but ${notIntern === 1 ? "does" : "do"} not say ${notIntern === 1 ? "it is an internship" : "they are internships"}` : `none was found, so I have no open roles to list (${liveNote}, and the saved snapshot has none either)`;
+    // MIRROR-1000 (2026-11-11): the limits the person stated are said back, so an empty answer shows they were kept, and the
+    // empty result is said in plain words ("no open roles to list").
+    const kept = ask.limits && hasLimits(ask.limits) ? limitsLine({ ...ask.limits, bands: internOnly ? null : ask.limits.bands }) : "";
+    const unchecked = statedNotesOf(o.message);
+    const keptLine = (kept ? ` I kept your limits: ${kept}.` : "") + (unchecked.length ? ` Your other limits (${unchecked.join(", ")}) are noted, and no posting was left out for them.` : "");
+    // A person who asked for a short answer ("keep it short", "one or two lines") gets the scope, the result and the widening only.
+    const reply = SHORT_ASK.test(o.message)
+      ? `I checked ${variants.join(", ")}${internOnly ? " internships" : ""} ${whereOf(ask)} on the live board and the saved snapshot of job boards: none was found, so I have no open roles to list, and nothing was applied for. The most useful widening is ${nextWidening(ask)}.`
+      : `${scope}: ${why}.${capLine}${leftOut}${keptLine} Nothing was invented to fill the list, and nothing was applied for. The most useful widening is ${nextWidening(ask)}, and I'll search again.`;
     return { reply, status: "none", source: "none", shortlist: [], accounting: null, modelCalled: false, blocker: checked.dead && !checked.shown.length ? "all_closed" : "no_roles" };
   }
   const byId = new Map(pool.map((p) => [p.job_id, p]));

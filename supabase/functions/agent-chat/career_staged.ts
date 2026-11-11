@@ -776,12 +776,15 @@ const G1_INSTRUCTION = /(?:^|[.:;!]\s*)(?:please\s+)?(?:send|email|message|text|
 const G1_ACTION_PRODUCT = ["draft", "target", "brief", "offer", "documents", "document", "file"];
 // A practice session code is running (a question of its own is waiting): the next ask in it is the session's.
 const prepSessionOpen = (ctx: Record<string, unknown> | undefined) => !!(ctx as any)?.trackStore?._careerThread?.prep?.lastQ || !!(ctx as any)?.mockSession;
+const mockWaiting = (ctx: Record<string, unknown> | undefined) => { const pm = (ctx as any)?.trackStore?._careerThread?.prep?.prepMock; return !!pm && pm.phase === "question" && !!pm.currentQ; };
 export function g1CodeAnswers(message: string, intent: string, result: unknown, ctx?: Record<string, unknown>): boolean {
   const m = String(message ?? "").replace(/[’`]/g, "'");
   // A question about a watch ("what happens if I turn off alerts?") is not the control itself (G1): the brain answers it.
   if (intent === "career_watch_manage" && (QUESTION_LEAD.test(m) || m.includes("?"))) return false;
   if (G1_CONTROL.has(intent) || PAYLOAD_INTENTS.has(intent) && !G1_PRODUCERS.has(intent)) return true;
   const r = (result && typeof result === "object" ? result : {}) as Record<string, any>;
+  // G1 (b): code's mock asked a question and is waiting: this message is the answer to it, whatever the router read.
+  if (mockWaiting(ctx)) return true;
   if (G1_DELIVERABLE.some((k) => has(r, k)) || has(r, "artifact") && (has(r.artifact, "pdf") || has(r.artifact, "url"))) return true;
   // G8, G9, G13: a hypothetical, a correction of Trainee and several asks are the brain's.
   if (g1Override(m)) return false;

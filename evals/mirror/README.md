@@ -147,7 +147,7 @@ the model, all drafts to a named person that the router had read as a file ask, 
 prompt that passed before fails now. Replies with internal words fell from 16 to 10, and "not wired in this handler" from 6 to 0.
 After the mirror gap fixes (branch `ag/mirror-length-and-gaps`, 2026-11-11;
 `tests/architect/mirror-length-and-gaps-20261111.test.ts`), all 1,000 prompts, $0, 0 external requests: the router answered
-447 and the scripted model 553. Trainee task_ok on router-answered turns was 412/447 (was 383/443), and 758/1,000 over every
+447 and the scripted model 553. Trainee task_ok on router-answered turns was 413/447 (was 383/443), and 759/1,000 over every
 turn (was 732); no prompt that passed before fails now. A dry run has no Instinct side, so mirror_match and length_match are
 measured only once `instinct.jsonl` exists; on the tone gate's head-to-head turns 28 of 34 are within the same-length window.
 `results/trainee-dry-50.jsonl` is still the d1f0d450 run.

@@ -139,5 +139,7 @@ export function refinedAsk(message: string, discovery: unknown, now: number = Da
   const body = withoutAsides(message);
   if (body.length > 160 || /\?\s*$/.test(body) || ROLE_WORD.test(body) || !REFINE_CUE.test(body) || NOT_REFINE.test(body)) return null;
   if (/\b(?:find|search|look for|show me|apply|queue|line up|submit|prepare|cover letters?|resume|answer|question|tailor|draft|send|message|email)\b/i.test(body)) return null;
-  return { ...prev };
+  // A new place said beside the refinement ("wrong city, I meant Berlin, only paid roles") replaces the old one.
+  const place = body.split(/\s*,\s*/).map((x) => replacementOf(x).place).find(Boolean);
+  return place ? { ...prev, place, remote: false, remoteOnly: false } : { ...prev };
 }

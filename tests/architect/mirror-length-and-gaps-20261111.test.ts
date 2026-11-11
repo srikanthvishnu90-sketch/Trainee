@@ -68,6 +68,7 @@ Deno.test("2 refine (unit): a guard and how to answer ride along with a correcti
   for (const m of ["why isn't Kaiser on that list, only advice", "compare number 2 and number 5, just one line each", "which answers are you missing, short answers only",
     "the level doesn't matter anymore, find data analyst roles", "did anyone reply, only the ones waiting on me"]) assertNode.equal(refinedAsk(m, d), null, m);
   assertNode.equal(refinedAsk("the start date doesn't matter anymore", { lastAsk: d.lastAsk, lastAskAt: Date.now() - 2 * 60 * 60 * 1000 }), null, "an old search is not refined");
+  assertNode.equal(refinedAsk("Don't apply: wrong city, I meant Spokane, only paid roles.", d)?.place, "Spokane", "a new place said beside it replaces the old one");
 });
 
 Deno.test("6 language (unit): a non-English ask is read as one; English asks, with names and stray words, are not", async () => {

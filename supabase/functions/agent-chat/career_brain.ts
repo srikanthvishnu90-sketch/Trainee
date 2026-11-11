@@ -14,6 +14,7 @@ import { enforceResearchReply, stripUnseenLinks } from "../_shared/agent/researc
 import { enforceMarketReply, type MarketDeps, type MarketResult } from "../_shared/agent/research/market.ts";
 import { type CompanyResult, enforceCompanyReply } from "../_shared/agent/research/company.ts";
 import { enforceFollowupAsk } from "../_shared/followup_draft.ts";
+import { urlsIn } from "../_shared/channel_shape.ts";
 import { knowledgeFor, type Knowledge } from "../_shared/agent/knowledge/index.ts";
 import { styleBlock } from "../_shared/agent/style.ts";
 import { HYPOTHETICAL_WITHHELD, hypotheticalNote, hypotheticalOf, lengthNote, PERSONA_WITHHELD, postingNote, postingRefOf, REPLY_LENGTH, replyLength, roastNote, roastOf } from "../_shared/agent/turn_notes.ts";
@@ -180,7 +181,10 @@ export async function agentTurn(o: {
   // R10 WO-H: company research has its own rules (one role question when the role is unknown; a focus keeps that area only).
   if (trace.m && !trace.r && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? enforceCompanyReply(result.reply, trace.m) : enforceMarketReply(result.reply, trace.m as MarketResult) };
   // Not an open career question: any link the model wrote that the turn never saw is removed (links not on the turn's allow-list).
-  else if (!trace.r && result.reply && result.stopped === "final") result = { ...result, reply: stripUnseenLinks(result.reply, [...(result.linksSeen ?? []), ...(result.fileLinks ?? [])]) };
+  // MIRROR PROCESS (C23, docs/architect/specs/MIRROR-PROCESS.md): a link Trainee itself already showed in this conversation (an
+  // earlier reply's source, e.g. the research answer "that citadel process from earlier" recalls) may be given again with the
+  // recalled figure; it passed this same check, or was written by code, when it was first shown.
+  else if (!trace.r && result.reply && result.stopped === "final") result = { ...result, reply: stripUnseenLinks(result.reply, [...(result.linksSeen ?? []), ...(result.fileLinks ?? []), ...shownBefore(o.history)]) };
   // MIRROR WA-1 (2026-11-11): the length of a text. On the owner's WhatsApp benchmark Instinct answered in one paragraph of about
   // 400 characters (median 396; longer only to list everything it knew or a research answer in parts); Trainee's brain wrote
   // 1,500 to 2,500 characters of numbered lists on the same asks. A reply over the limit is condensed once by the model, in
@@ -199,6 +203,12 @@ export async function agentTurn(o: {
     }
   }
   return know ? { ...result, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : result;
+}
+
+// The links Trainee's own earlier replies in the window showed the person (assistant messages only; never a link the person typed,
+// which linksSeen already holds, and never one from a tool the model saw but did not show).
+export function shownBefore(history: { role: string; content: unknown }[]): string[] {
+  return history.filter((m) => m?.role === "assistant" && typeof m.content === "string").flatMap((m) => urlsIn(m.content as string));
 }
 
 // FEATURE 13: the tools left after a policy withholds some by name (none withheld: every tool).

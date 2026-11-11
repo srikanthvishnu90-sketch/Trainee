@@ -21,6 +21,7 @@
 import { anthropicWire } from "../../tests/architect/helpers/anthropic_wire.ts";
 import { openWorld } from "../../tests/architect/helpers/response_world.ts";
 import { loadSet, SET_PATH, type MirrorPrompt } from "./distinct.ts";
+import { PRODUCTION_BRAIN, RELEASE_FLAGS, RELEASE_NEVER_ON, releaseFlagOn, releaseValue } from "../../supabase/functions/agent-chat/release_config.ts";
 
 const realFetch = globalThis.fetch;
 const a = Deno.args, opt = (n: string) => { const i = a.indexOf(n); return i >= 0 ? a[i + 1] : undefined; };
@@ -69,10 +70,14 @@ const lines: string[] = [];
 const t0 = performance.now();
 let stopped: string | null = null;
 try {
-  Deno.env.set("CAREER_BRAIN", "staged"); // production's brain (PRODUCTION_BRAIN)
-  // Owner, 2026-11-11: "Make sure everything is turned on in production, whenever testing." The world turns mail tracking off for
-  // the $0 response sweep (response_world.ts); a mirror run serves every release flag at its release value, as production does.
-  Deno.env.delete("CAREER_MAIL_TRACKING");
+  // PRODUCTION CONFIGURATION (owner, 2026-11-11: "Make sure everything is turned on in production, whenever testing"): the run
+  // serves the release configuration exactly as release_config.ts ships it. The test world turns CAREER_MAIL_TRACKING off for its
+  // own tests; here every release flag and never-on switch is cleared (each release flag then serves its release value, each
+  // never-on switch is off), and the brain is PRODUCTION_BRAIN. docs/architect/specs/MIRROR-PROCESS.md.
+  for (const k of [...Object.keys(RELEASE_FLAGS), ...RELEASE_NEVER_ON]) Deno.env.delete(k);
+  Deno.env.set("CAREER_BRAIN", PRODUCTION_BRAIN);
+  const served = { release: Object.fromEntries(Object.keys(RELEASE_FLAGS).map((k) => [k, releaseValue(Deno.env, k)])), never_on_on: RELEASE_NEVER_ON.filter((k) => releaseFlagOn(Deno.env, k)) };
+  if (JSON.stringify(served.release) !== JSON.stringify({ ...RELEASE_FLAGS }) || served.never_on_on.length) throw new Error(`not production's configuration: ${JSON.stringify(served)}`);
   Deno.env.set("ANTHROPIC_API_KEY", dry ? "sk-test-not-real" : LIVE_KEY);
   const cols = new Set((await w.pg.sql(`select table_name from information_schema.columns where table_schema = 'public' and column_name = 'user_id'`)).split("\n").map((s) => s.trim()));
   const tables = ACTION_TABLES.filter(([t]) => cols.has(t));

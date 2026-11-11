@@ -335,10 +335,10 @@ export function careerTools(deps: {
   // R10 WO-H fix 14b (spec B.6 continuation 4, E.4): a follow-up or thank-you draft, checked in code before it is shown.
   const followupTools: ToolSpec[] = [{
     name: "draft_followup", effect: "read",
-    description: "Use when the person asks to write or change a follow-up, thank-you or short note (\"write a thank-you to Maya after my interview\", \"make it warmer\"). Write the body from their confirmed facts and this conversation only: never invent a meeting, offer, referral or relationship, never guess an address. If the recipient or document is unclear, leave it empty and list the options. Nothing is sent.",
+    description: "Write or change a follow-up, thank-you, note, or one-off message (\"cold message to a google engineer for a referral\", \"message to a recruiter\", \"make it shorter\"). Body from confirmed facts and this conversation only: no invented meeting, offer, referral or relationship, no guessed address. No recipient named: placeholders like [Name], draft now. Nothing is sent.",
     input_schema: obj({
       kind: { type: "string", enum: ["thank_you", "follow_up", "note"], description: "What kind of message" },
-      recipient: str("Who it is to, as the person named them (a first name is enough); empty if they named no one"),
+      recipient: str("Who it is to, as the person named them (a first name is enough); empty if they named no one (the draft then greets a placeholder like [Name])"),
       recipient_options: strs("When the name fits more than one person in this conversation or their contacts: each of them"),
       document: str("The document it is about or attaches, when the person made clear which"),
       documents: strs("When 'this' or 'it' could be more than one document from this conversation: each candidate"),
@@ -351,7 +351,8 @@ export function careerTools(deps: {
         document: i.document ? String(i.document) : null, documents: list(i.documents), body: String(i.body ?? ""), tone: i.tone ? String(i.tone) : null },
         { said: c.turn?.typed ?? c.turn?.message ?? "", facts: confirmed(profileOf(c).facts || []).map(factText) });
       if (out.status === "ask" && c.turn) c.turn.askOnly = true;
-      if (out.status === "ok" && c.turn) c.turn.show = { intent: "career_followup_draft", text: `Draft for ${out.to}${out.attachment ? `, with ${out.attachment}` : ""}, not sent:\n\n${out.body}` };
+      // D-059: with no recipient named the draft is shown with its placeholders ("Draft, not sent:"), the same way.
+      if (out.status === "ok" && c.turn) c.turn.show = { intent: "career_followup_draft", text: `Draft${out.to ? ` for ${out.to}` : ""}${out.attachment ? `, with ${out.attachment}` : ""}, not sent:\n\n${out.body}` };
       return out;
     },
   }];

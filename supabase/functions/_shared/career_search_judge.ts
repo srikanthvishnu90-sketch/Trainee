@@ -22,7 +22,7 @@
 import { newFitCache, searchPostings, type SearchHit } from "./career_search.ts";
 import { NO_CLOCK, type TurnClock } from "../agent-chat/turn_clock.ts";
 import { searchWords, wordStem } from "./career_ingest.ts";
-import { correctedAsk } from "./search_correction.ts";
+import { correctedAsk, refinedAsk } from "./search_correction.ts";
 import { blockerAsk, inMetro, METRO, remoteInUs, widenedAsk, withScope } from "./search_widen.ts";
 import { arrangementOf, checkedAt, nextWidening, placesLine, roleVariants, studentWindowOf, wantOf } from "./search_shortlist.ts";
 import { apiUrlFor, ashbyBoardFor, type LinkCheck, liveOnly, SEARCH_CHECK_MAX, searchCheck } from "./link_check.ts";
@@ -714,7 +714,14 @@ export async function searchJudgeTurn(o: {
 // the dropped roles are not named again, so no onsite role reads as a match). `prior` is the thread's search state before this turn (discovery).
 export function correctionLead(message: string, prior: any, found: SearchJudgeResult): string {
   const fixed = correctedAsk(message, prior);
-  if (!fixed || !fixed.changes.includes("remote_only")) return "";
+  // MIRROR-1000 gaps (2026-11-11): a new place says what it replaced; a refinement that names no role says what was kept.
+  if (fixed && fixed.changes.includes("place_changed") && String(prior?.lastAsk?.place ?? "").trim() && !fixed.changes.includes("remote_only"))
+    return `${fixed.ask.place} instead of ${String(prior.lastAsk.place).trim()} now.\n`;
+  if (!fixed) {
+    const kept = refinedAsk(message, prior);
+    return kept ? `I kept the rest of your last search: ${kept.role}${kept.place ? ` in ${kept.place}` : kept.remoteOnly ? " (remote)" : ""}.\n` : "";
+  }
+  if (!fixed.changes.includes("remote_only")) return "";
   const was = String(prior?.lastAsk?.place ?? "").trim() || String(fixed.ask.prevPlace ?? "").trim();
   if (!was) return "";
   const now = new Set(found.shortlist.map((s) => String(s.id)));
@@ -750,6 +757,8 @@ export function askFor(message: string, routerOut: { intent?: string; resultStat
   // F.1: "what is actually blocking the search?" runs the last search again; the reply names the evidenced blocker.
   const again = blockerAsk(message, discovery);
   if (again) return { ask: again, append: false, explain: true };
+  const kept = refinedAsk(message, discovery);
+  if (kept) return { ask: kept, append: false };
   const said = askForMessage(message, routerOut, discovery);
   return said ? { ...said, ask: { ...withScope(said.ask, message), ...(VERIFY.test(message) ? { verify: true } : {}), want: wantOf(message) } } : null;
 }

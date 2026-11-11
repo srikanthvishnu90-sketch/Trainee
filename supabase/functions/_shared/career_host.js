@@ -281,7 +281,11 @@ const CareerHost = (() => {
     ["outreach", /\boutreach\b|\bfollow[- ]?ups\b|\b(?:all|the|my) (?:emails|messages)\b|\bthe queue\b/i],
   ];
   const BOUNDARY_RE = /\b(?:don'?t|do not|dont)\s+(?:contact|message|email|reach out to|text)\s+anyone\b|\bleave (?:everything|it all|them|it|all of it) unsent\b|\b(?:don'?t|do not|dont)\s+send\s+(?:anything|any of (?:it|them))\b|\b(?:don'?t|do not|dont)\s+start\s+(?:any(?:thing)?\s+)?new(?:\s+work)?\b/i;
-  const OTHER_ASK_RE = /\b(?:find|search|look for|get me|show me|apply to|draft|write|tell me about|what'?s|what is|how)\b/i;
+  // MIRROR-1000 gaps (2026-11-11): "Don't send anything yet: get that over to Marcus" hands a message to someone; the guard
+  // holds the send, and the hand-off is the ask (it is not a stop).
+  const ASK_WORD_RE = /\b(?:find|search|look for|get me|show me|apply to|draft|write|tell me about|what'?s|what is|how)\b/i;
+  const HANDOFF_RE = /\b(?:[Ss]end|[Gg]et|[Ff]orward|[Pp]ass)\s+(?:it|this|that|them)\s+(?:over\s+|along\s+|on\s+)?to\s+[A-Z]/;
+  const OTHER_ASK_RE = { test: (x) => ASK_WORD_RE.test(x) || HANDOFF_RE.test(x) };
   const NEGATED_RE = /\b(?:don'?t|do not|dont|never|no need to)\s+(?:\w+\s+)?$/i;
   const sentencesOf = (s) => s.split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
   const HYPOTHETICAL_STOP_RE = /\bhypothetic|\bif i (?:said|say|were to|wanted to|asked you to|told you to)\b|\bwhat (?:would )?happens? if\b|\bwhat would (?:it|that|pausing|a pause|stopping) do\b|\b(?:just|only) (?:explain|tell me)\b[^.!?]*\b(?:don'?t|do not) do it\b|\bonly tell me what it would do\b/i;

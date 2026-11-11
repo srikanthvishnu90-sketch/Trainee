@@ -237,6 +237,7 @@
     "tests/architect/hosted-apply-unit.test.ts": 0.1,
     "tests/architect/mirror-set.test.ts": 21,
     "tests/architect/router-mirror-fixes-20261111.test.ts": 12.4,
+    "tests/architect/mirror-length-and-gaps-20261111.test.ts": 9.5,
     "tests/architect/wo-122-reused-answer-source.test.ts": 0.1,
     "tests/architect/ingest-bounded-pg.test.ts": 14,
     "tests/architect/ingest-r2-pg.test.ts": 17,

@@ -3,6 +3,7 @@
 // any other link is fetched and a 404 or 410, or Greenhouse's redirect to "?error=true", is dead. A check that cannot finish
 // (timeout, network) is "unknown": never called live, never hidden as dead. Wrong is worse than empty: a dead link is never
 // shown.
+import { workdayUrl } from "./workday_posting.ts";
 export type LinkState = "live" | "dead" | "unknown";
 // Architect ruling E.21 (release item 8): every search re-checks the postings it shows, and only those (searchCheck below):
 // at most the count asked, never more than SEARCH_CHECK_MAX, each on its own posting page by id. No board listing is read.
@@ -67,6 +68,22 @@ export function linkChecker(f: typeof fetch, o: { timeoutMs?: number; userAgent?
       } catch {
         return "unknown";
       }
+    }
+    // D-062: a Workday posting is asked of its own CXS endpoint by its path (workday_posting.ts). Its public page is the same app
+    // shell (HTTP 200) for a live and a removed posting, so the page itself is never the check. Gone: HTTP 404 or 410, or
+    // errorCode S21 / S22; open: the answer holds the posting and does not say canApply false; anything else is unknown.
+    const wd = workdayUrl(String(job.url ?? ""));
+    if (wd) {
+      try {
+        const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), timeoutMs);
+        try {
+          const r = await f(wd.cxs, { method: "GET", signal: ctl.signal, headers: { "user-agent": ua, accept: "application/json" } });
+          const body: any = await r.json().catch(() => null);
+          if (r.status === 404 || r.status === 410 || body?.errorCode === "S21" || body?.errorCode === "S22") return "dead";
+          if (r.ok && body?.jobPostingInfo?.title) return body.jobPostingInfo.canApply === false ? "dead" : "live";
+          return "unknown";
+        } finally { clearTimeout(timer); }
+      } catch { return "unknown"; }
     }
     const ashby = ashbyBoardFor(String(job.job_id ?? ""));
     if (ashby) {

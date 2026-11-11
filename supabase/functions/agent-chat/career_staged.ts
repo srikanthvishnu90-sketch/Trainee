@@ -451,12 +451,12 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (!intent) return { brain: false, mode, intent: null, reason: "router_claimed" };
   // Spec F.2: research with a no-action boundary is the brain's research turn, before any rule that keeps the router's intent.
   if (researchReplyOn(o.env) && researchOverAction(o.message)) return { brain: true, mode, intent, reason: "company_research" };
+  if (routerKept(o.env).has(intent)) return { brain: false, mode, intent, reason: "kept_on_router" };
+  if (marketResearchAsk(o.env, o.message, intent)) return { brain: true, mode, intent, reason: "market_research" };
   // MIRROR-1000 gaps (2026-11-11): the router's words are English. A non-English ask it claimed from one English keyword is
   // the brain's, which answers in the person's language (ask_language.ts). Payloads, bare replies, mock sessions and the
   // account's controls stay code's.
   if (nonEnglishAsk(o.message) && !PAYLOAD_INTENTS.has(intent) && !NON_ENGLISH_KEPT.test(intent)) return { brain: true, mode, intent, reason: "non_english" };
-  if (routerKept(o.env).has(intent)) return { brain: false, mode, intent, reason: "kept_on_router" };
-  if (marketResearchAsk(o.env, o.message, intent)) return { brain: true, mode, intent, reason: "market_research" };
   // MIRROR-1000: a draft to a named person that the router read as a file ask, an alumni list or a missing recipient is the
   // brain's drafting turn (outreach_ask.ts namedDraftAsk).
   if (DRAFT_MISREAD.has(intent) && namedDraftAsk(o.message)) return { brain: true, mode, intent, reason: "named_draft" };

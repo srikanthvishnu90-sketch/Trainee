@@ -714,9 +714,8 @@ export async function searchJudgeTurn(o: {
 // the dropped roles are not named again, so no onsite role reads as a match). `prior` is the thread's search state before this turn (discovery).
 export function correctionLead(message: string, prior: any, found: SearchJudgeResult): string {
   const fixed = correctedAsk(message, prior);
-  // MIRROR-1000 gaps (2026-11-11): a new place says what it replaced; a refinement that names no role says what was kept.
-  if (fixed && fixed.changes.includes("place_changed") && String(prior?.lastAsk?.place ?? "").trim() && !fixed.changes.includes("remote_only"))
-    return `${fixed.ask.place} instead of ${String(prior.lastAsk.place).trim()} now.\n`;
+  // MIRROR-1000 gaps (2026-11-11): a refinement that names no role says what was kept (a new place is named by the scope line
+  // itself; saying it first would restate the ask).
   if (!fixed) {
     const kept = refinedAsk(message, prior);
     return kept ? `I kept the rest of your last search: ${kept.role}${kept.place ? ` in ${kept.place}` : kept.remoteOnly ? " (remote)" : ""}.\n` : "";

@@ -356,3 +356,8 @@ Open (named in the test's `OPEN`, each with its reason): A.2 R3 (Instinct's repl
 search summary's clauses are each pinned by another architect test: a ruling is needed on which goes); C2 t3 (the remote-only
 empty search, pinned the same way); C3 t2 (Instinct prepares a packet this world cannot); C5 t5 (Instinct's figures have no
 source in this run, D-007).
+
+D-058 (architect, 2026-11-11) closed three of them: the search summary drops its freshness clause (on the File and in the turn's
+proof), and the empty search takes the short form (scope and one widening; the refresh time and "Nothing was invented" in the
+proof). `TONE-GATE turns=34 within_length=31/34 internal=0 filler=0 refusals=0 answers_first=33/34 mean_chars=198 vs
+instinct=202`. Still open: A.2 R3, C3 t2, C5 t5, for the reasons above.

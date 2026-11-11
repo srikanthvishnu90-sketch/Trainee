@@ -19,7 +19,7 @@ import { servedBrain } from "./release_config.ts";
 import { NO_CLOCK, type TurnClock } from "./turn_clock.ts";
 import { crisisReply } from "./crisis.ts";
 import { PAYLOAD_INTENTS } from "../_shared/career_reply_writer.ts";
-import { nonEnglishAsk } from "../_shared/ask_language.ts";
+import { multiAsk, nonEnglishAsk } from "../_shared/ask_language.ts";
 
 type Env = { get(k: string): string | undefined };
 type Host = { runTurn(text: string, ctx: any): { intent: string | null; handler: string | null; reply?: string; contained?: boolean; result?: any }; isHostControlled(text: string, ctx: any): boolean };
@@ -457,6 +457,9 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   // the brain's, which answers in the person's language (ask_language.ts). Payloads, bare replies, mock sessions and the
   // account's controls stay code's.
   if (nonEnglishAsk(o.message) && !PAYLOAD_INTENTS.has(intent) && !NON_ENGLISH_KEPT.test(intent)) return { brain: true, mode, intent, reason: "non_english" };
+  // D-058 ruling 3: two asks in one message are the model's, which answers both; the router keeps single asks, payload intents
+  // included. The account's controls, approvals and bare replies stay code's (the same set the non-English route keeps).
+  if (multiAsk(o.message) && !NON_ENGLISH_KEPT.test(intent)) return { brain: true, mode, intent, reason: "multi_part" };
   // MIRROR-1000: a draft to a named person that the router read as a file ask, an alumni list or a missing recipient is the
   // brain's drafting turn (outreach_ask.ts namedDraftAsk).
   if (DRAFT_MISREAD.has(intent) && namedDraftAsk(o.message)) return { brain: true, mode, intent, reason: "named_draft" };

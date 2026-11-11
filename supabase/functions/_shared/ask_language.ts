@@ -36,3 +36,21 @@ export function nonEnglishAsk(message: string): boolean {
   const foreign = words.filter((w) => FOREIGN.has(w)).length, english = words.filter((w) => ENGLISH.has(w)).length;
   return foreign >= 3 && foreign > english;
 }
+
+// D-058 ruling 3 (architect, 2026-11-11, under the owner's "same length as Instinct"): a message that makes two asks goes to the
+// model, which answers both; no splitting layer. Two asks are said by their own markers ("Two things. First, ... Second, ...",
+// "1) ... 2) ...", "Quick pair of asks", "Then, unrelated:", "Also, separately:") or by a second request after a sentence end
+// (". Also, draft ...", "; research Stripe ..."; "I only want media; find ..." is one ask). "Two things:" before a list of limits ("Two things: remote only, and ...") is one
+// ask with two conditions, not two asks.
+const TWO_ASK_MARKER = /\b(?:two things[.:]\s*(?:1\)|first\b)|quick pair of asks|pair of questions|then,?\s+unrelated\b|also,?\s+separately\b|separately:)|(?:^|[\s:])1\)\s[^]*?\s2\)\s/i;
+const SECOND_REQUEST = /(?:[.?!]\s*|;\s*|,\s*and\s+)also,?\s+(?:draft|write|find|look|search|research|tell|give|show|send|log|track|prep|rework|any|what|which|is|are|can|could)\b/i;
+// "X; research Stripe" is two asks only when X is itself a request ("rework my resume ...; research Stripe"): "They pay $26/hr at
+// my job; draft a counter" is one ask with its context first.
+const SEMI_SECOND = /;\s*(?:research|tell me about|draft|write|prep me)\b/i;
+const REQUEST_HEAD = /^\s*(?:(?:please|can you|could you|pls)\s+)?(?:find|look|search|show|give|tell|draft|write|rework|tailor|update|edit|make|research|prep|send|list|check|fix|rewrite)\b|\?\s*$/i;
+export function multiAsk(message: string): boolean {
+  const t = String(message ?? "").replace(/[’]/g, "'");
+  if (TWO_ASK_MARKER.test(t) || SECOND_REQUEST.test(t)) return true;
+  const semi = SEMI_SECOND.exec(t);
+  return !!semi && REQUEST_HEAD.test(t.slice(0, semi.index));
+}

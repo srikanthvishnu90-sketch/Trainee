@@ -73,11 +73,10 @@ const A2 = [
 const [R1, , , S1, S2] = A2.map((t) => t.say);
 
 // Turns still outside the length window, each with why (open work, not a pass). Only the length bar may be open.
+// Architect amendment (D-058, 2026-11-11, under the owner's "same length as Instinct"): A2.S1, C2.t1 and C2.t3 leave OPEN; the
+// search summary drops its freshness clause (it is on the File) and the empty search takes the short form (scope, one widening).
 const OPEN: Record<string, string> = {
   "A2.R3": "Instinct's reply (102 characters) answers neither the download-link ask nor re-sends the file (A.5 fails it on O); Trainee re-sends the PDF, says nothing was applied for and answers the link ask, which takes more than the 112 the window allows",
-  "A2.S1": "Instinct's reply (155) is a plan with no result; Trainee returns the result, and every clause of its 187-character summary is pinned by another architect test (the freshness line, f05-search-judge; \"1 listed, not re-checked\", loop-08-discovery; \"I did not find 5 within the scope checked\", r10-wo-c-search-replay; \"Nothing was applied for\", r10-wo-c and r10-wo-d); cutting 16 characters needs an architect ruling on which clause goes",
-  "C2.t1": "the same pinned 187-character search summary as A2.S1, 5 over Instinct's 165 + 10%; the same ruling closes both",
-  "C2.t3": "the remote-only empty search (career_search_judge.ts) is 592 against Instinct's 244: its scope, refresh time and widening are pinned (r10-wo-c-search-replay, loop-08-discovery) and \"Nothing was invented\" by f05-search-judge; Instinct's reply names the roles the change removes, which this world's list (one onsite role) cannot; needs a ruling on the short empty-search form",
   "C3.t2": "Instinct prepares a packet for its fictional role; here the C3.t1 queue opened no application link, so Trainee names the role and offers to tailor the resume (154 against 182 to 222); padding it would add no information",
   "C5.t5": "Instinct's 291 characters are three sourced figures; in this run no research result holds them, so the staged brain keeps only the sentence without an unsourced figure (35) rather than state a number it cannot source (D-007)",
 };

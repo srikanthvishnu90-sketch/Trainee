@@ -1,6 +1,6 @@
 // MIRROR HELD-OUT (P2, docs/architect/specs/MIRROR-RULINGS.md), the set itself (architect, 2026-11-11). $0, no database, no
 // model. Pins: the committed files are a fresh deterministic build; the held-out file is the sealed one (README.md's sha256)
-// and a changed copy is refused; 1,000 conversations in the ruling families, about 3,000 turns, split 20/80 per family; every
+// and a changed copy is refused; 1,000 conversations in the ruling families, about 3,000 turns, split dev 5% / held-out 95% per family (owner, 2026-11-11), every family and ruling with dev turns; every
 // turn and setup turn is live-safe (evals/mirror/safety.ts); every turn carries an expectation from the rulings, and every
 // ruling G1 to G14 is exercised. Distinctness (evals/mirror/distinct.ts over the whole set, about 4 minutes) is run by
 // `deno run -A evals/mirror/heldout/generate.ts --check`; the build itself redraws any conversation within 0.4 Jaccard or
@@ -8,7 +8,7 @@
 //   deno test -A --no-check tests/architect/mirror-heldout-set.test.ts
 import assertNode from "node:assert/strict";
 import { unsafeReasons } from "../../evals/mirror/safety.ts";
-import { build, type Conversation, DEV_PATH, FAMILIES, HELDOUT_PATH, jsonl, loadSplit, sealInReadme, sha256 } from "../../evals/mirror/heldout/generate.ts";
+import { build, type Conversation, DEV_PATH, devCounts, FAMILIES, HELDOUT_PATH, jsonl, loadSplit, sealInReadme, sha256 } from "../../evals/mirror/heldout/generate.ts";
 import { RULINGS } from "../../evals/mirror/heldout/expect.ts";
 
 const read = (p: string) => Deno.readTextFileSync(p);
@@ -31,16 +31,21 @@ Deno.test("HO-2 a changed held-out file is refused", async () => {
   } finally { await Deno.remove(dir, { recursive: true }); }
 });
 
-Deno.test("HO-3 1,000 conversations in the ruling families, split 20/80, every turn live-safe and expected", () => {
+Deno.test("HO-3 1,000 conversations in the ruling families, split 5/95, every turn live-safe and expected", () => {
   const dev = parse(read(DEV_PATH)), ho = parse(read(HELDOUT_PATH)), all = [...dev, ...ho];
   assertNode.equal(all.length, 1000);
   const turns = all.flatMap((c) => c.turns);
   assertNode.ok(turns.length >= 2800 && turns.length <= 3200, `${turns.length} turns`);
   assertNode.equal(new Set(all.map((c) => c.id)).size, 1000);
+  assertNode.equal(dev.length, 50, "dev is 5% of the set");
+  const quota = devCounts();
   for (const [fam, n] of Object.entries(FAMILIES)) {
     assertNode.equal(all.filter((c) => c.family === fam).length, n, fam);
-    assertNode.equal(dev.filter((c) => c.family === fam).length, Math.round(n * 0.2), `${fam} dev share`);
+    assertNode.equal(dev.filter((c) => c.family === fam).length, quota[fam], `${fam} dev share`);
+    assertNode.ok(quota[fam] >= 2, `${fam} has fewer than 2 dev conversations`);
   }
+  const devTurns = dev.flatMap((c) => c.turns);
+  for (const g of RULINGS) assertNode.ok(devTurns.some((t) => t.expect.rulings.includes(g)), `${g} has no dev turn`);
   assertNode.ok(dev.every((c) => c.split === "dev") && ho.every((c) => c.split === "heldout"));
   for (const c of all) {
     for (const t of [...c.turns.map((x) => x.prompt), ...c.setup.turns]) {

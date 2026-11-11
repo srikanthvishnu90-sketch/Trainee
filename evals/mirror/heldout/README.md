@@ -4,7 +4,7 @@ Ruling P2 (`docs/architect/specs/MIRROR-RULINGS.md`, D-061): "Generalisation is 
 set. A held-out set is generated per ruling family … and is never used to tune. A fix counts only if the held-out score does
 not drop." This folder is that set, the expectation of every turn, a $0 scorer through the real handler, and the live hook.
 
-heldout.jsonl sha256: `01f60e156e6b1043285ec0261d63a408cf387eb6fa666b1977bd2e028859b0be`
+heldout.jsonl sha256: `e72a250563e953f7e893ac689d8cf5bf75c903d327e9c8319a1b660399673e02`
 
 **The seal.** `heldout.jsonl` is sealed by the hash above. `run.ts` and `live.ts` refuse a held-out file with any other hash,
 and `tests/architect/mirror-heldout-set.test.ts` fails when the committed file is not a fresh build or does not match the seal.
@@ -16,7 +16,7 @@ splits and report the held-out number. Per-turn held-out results are git-ignored
 | `generate.ts` | The deterministic generator (seed 20261111). `--check` proves the committed files are a fresh build, distinct and sealed. |
 | `templates.ts` | What it composes from: the 23 batch-1 tasks as paraphrase families, the ruling-family tasks, ten fields, fictional people and schools, eight languages. |
 | `expect.ts` | The per-turn expectation, derived from the rulings and the turn's kind and features, never from its words. |
-| `dev.jsonl`, `heldout.jsonl` | 200 and 800 conversations. One line per conversation: `{id, family, split, persona, setup, turns: [{id, prompt, gap_s, task, expect}], …}`. It also carries the `distinct.ts` fields (`category`, `prompt`, `task.must_do`). |
+| `dev.jsonl`, `heldout.jsonl` | 50 and 950 conversations. One line per conversation: `{id, family, split, persona, setup, turns: [{id, prompt, gap_s, task, expect}], …}`. It also carries the `distinct.ts` fields (`category`, `prompt`, `task.must_do`). |
 | `harness.ts` | Runs conversations through the real handler under production's flags and records what code decided on each turn. |
 | `score.ts` | Scores a turn against its expectation (dry: code's decisions; live: also the text). |
 | `run.ts` | The $0 run with a scripted model. |
@@ -25,7 +25,15 @@ splits and report the held-out number. Per-turn held-out results are git-ignored
 
 ## The set
 
-There are 1,000 conversations with 2,951 scored turns (dev: 200 conversations and 590 turns; held-out: 800 and 2,361). They
+There are 1,000 conversations with 2,951 scored turns (dev: 50 conversations and 149 turns; held-out: 950 and 2,802).
+
+**The split.** The owner set it on 2026-11-11: "don't make it 80% make it 95%". So dev is 5% and held-out 95%, stratified by
+family. Each family's dev count is the floor of 5% of its size; the 3 places left go by largest remainder. That gives
+paraphrase 6, persona_swap 6, reorder 3, long_gap 4, typos 4, language 4, multi_ask 4, hypothetical 4, boundary 4, file_ask
+4, practice 3, correction 2 and capability 2. A family under 2 would get 2, taken from the largest families, but none was:
+the rule did not apply. Every ruling has dev turns; G9 has 2.
+
+They
 also carry 2,052 unscored setup turns: a short fictional resume pasted and confirmed, the way a person gives one, or batch 1's
 own persona for the paraphrase family. The families, as P2 lists them:
 
@@ -107,58 +115,65 @@ those rulings, because the live run scores them. Each rate below is pass / (pass
 
 ## Baseline, trunk 0e2287e8 (2026-11-11), $0
 
-| | dev (200 conversations, 590 turns) | held-out (800, 2,361) |
+| | dev (50 conversations, 149 turns) | held-out (950, 2,802) |
 |---|---|---|
-| nothing sent, queued or requested off the machine | 590 / 590 | 2,361 / 2,361 |
-| code answered (no model call) | 194 | 752 |
-| G1 strict (the brain on every turn) | 67.1% | 68.1% |
-| code answered a different task (wrong flow, a canned question) | 79 | 264 |
+| nothing sent, queued or requested off the machine | 149 / 149 | 2,802 / 2,802 |
+| code answered (no model call) | 50 | 896 |
+| G1 strict (the brain on every turn) | 66.4% | 68.0% |
+| code answered a different task (wrong flow, a canned question) | 17 | 326 |
 
 | Ruling | dev: rate (pass/scored), left to the model | held-out |
 |---|---|---|
-| G1 the model decides | 72.0% (425/590) | 73.6% (1,738/2,361) |
-| G2 answer first | 97.9% (190/194), 396 model | 97.9% (736/752), 1,609 model |
-| G3 length by kind | 40.7% (50/123), 334 model | 37.8% (183/484), 1,367 model |
-| G4 source tier | 81.5% (66/81), 159 model | 84.6% (252/298), 648 model |
-| G5 unverified said | 1.4% (1/72), 117 model | 0.8% (2/266), 469 model |
-| G6 boundary (process, and code's line) | 58.4% (125/214) | 56.6% (467/825) |
-| G7 the thread is memory | 100.0% (22/22), 40 model | 100.0% (74/74), 133 model |
-| G8 hypotheticals never touch the record | 62.9% (39/62) | 73.5% (205/279) |
-| G9 corrections out loud | 0.0% (0/4), 6 model | 0.0% (0/5), 35 model |
-| G10 work before asking | 97.6% (82/84), 133 model | 97.0% (296/305), 508 model |
-| G11 a file ask gets the file | 39.3% (35/89) | 35.2% (107/304) |
-| G12 practice like an interviewer | 100.0% (29/29), 75 model | 100.0% (136/136), 323 model |
-| G13 several asks | 0.0% (0/11), 10 model | 0.0% (0/37), 52 model |
-| G14 capability parity | 74.3% (113/152), 32 model | 76.7% (439/572), 145 model |
+| G1 the model decides | 73.8% (110/149) | 73.3% (2,053/2,802) |
+| G2 answer first | 98.0% (49/50), 99 model | 97.9% (877/896), 1,906 model |
+| G3 length by kind | 40.7% (11/27), 84 model | 38.3% (222/580), 1,617 model |
+| G4 source tier | 82.6% (19/23), 42 model | 84.0% (299/356), 765 model |
+| G5 unverified said | 0.0% (0/22), 29 model | 0.9% (3/316), 557 model |
+| G6 boundary (process, and code's line) | 52.9% (27/51) | 57.2% (565/988) |
+| G7 the thread is memory | 100.0% (4/4), 11 model | 100.0% (92/92), 162 model |
+| G8 hypotheticals never touch the record | 66.7% (12/18) | 71.8% (232/323) |
+| G9 corrections out loud | 0.0% (0/2) | 0.0% (0/7), 41 model |
+| G10 work before asking | 95.0% (19/20), 31 model | 97.3% (359/369), 610 model |
+| G11 a file ask gets the file | 31.8% (7/22) | 36.4% (135/371) |
+| G12 practice like an interviewer | 100.0% (8/8), 18 model | 100.0% (157/157), 380 model |
+| G13 several asks | 0.0% (0/2), 3 model | 0.0% (0/46), 59 model |
+| G14 capability parity | 76.9% (30/39), 10 model | 76.2% (522/685), 167 model |
 
-G1 by family on held-out: paraphrase 258/298, persona_swap 209/296, reorder 126/168, long_gap 129/200, typos 178/215,
-language 121/129, multi_ask 110/149, hypothetical 137/156, boundary 118/223, file_ask 71/137, practice 124/199, correction
-90/103 and capability 67/88. The persona swap (70.6%) is well below its own batch-1 paraphrase (86.6%). That gap is the
+With 149 turns, dev is a tuning aid, not a measurement: its rates move several points on one fix. The held-out column is the
+number P2 reports.
+
+G1 by family on held-out: paraphrase 305/354, persona_swap 247/349, reorder 147/197, long_gap 156/238, typos 204/254,
+language 144/155, multi_ask 126/177, hypothetical 163/187, boundary 143/263, file_ask 82/164, practice 151/237, correction
+106/122 and capability 79/105. The persona swap (70.8%) is well below its own batch-1 paraphrase (86.2%). That gap is the
 generalisation P2 measures.
 
 **What fails, by code's decision** (held-out counts):
 
-- **G11 (35%).** A file ask that reaches the brain is never handed a file tool. `create_file` and `attach_document` are
+- **G11 (36%).** A file ask that reaches the brain is never handed a file tool. `create_file` and `attach_document` are
   offered only when the reply writer is on and the channel is Telegram (`career_brain.ts`), and the release serves the writer
-  off. So 57 file asks and 46 plans get no File. Code-answered file asks (`career_resume_update`, a tailoring flow) come back
+  off. So 65 file asks and 53 plans get no File. Code-answered file asks (`career_tailor`, `career_resume_update`) come back
   with no File either.
-- **G6 (57%).** Nothing was ever sent, queued or carded. Every failure is code answering a turn that set a boundary without
-  restating it: `career_discovery` and `career_internship_discovery` (98), `named_role_apply`, `graph_referral`,
-  `career_onboarding_needs`.
-- **G1 (74%).**
-  - Practice asks go to the router's mock and prep flows (`prep_brief` 48, `prep_mock_start` 46). Their canned opening
+- **G6 (57%).** Nothing was ever sent, queued or carded. All 423 failures are code answering a turn that set a boundary
+  without restating it: `career_discovery` 73, `career_tailor` 60, `career_internship_discovery` 55, `named_role_apply` 31,
+  `company_intel` 30, `career_networking_draft` 25.
+- **G1 (73%).** Code answered 749 turns it should not have:
+  - `company_intel` took 118 research asks.
+  - Practice asks go to the router's prep and mock flows (`prep_brief` 103, `prep_mock_start` 57). Their canned opening
     ("Your mock starts now … scored feedback at the end") is also outside G3's window.
-  - Drafts are held by `outreach_clarification` (39) instead of produced (G10).
+  - Drafts are held by `outreach_clarification` (82) instead of produced (G10).
+  - `career_tailor` took 71 turns, `tracking_status` 34 and `named_role_apply` 31.
+  - `career_stop_workflow` answered 22 alumni asks that end "don't reach out to anyone". It read the guard as a cancel:
+    "No people list was being built … none to cancel".
   - Thread recalls ("that X from earlier") are answered by `conversation_recall` with the resume's entry count.
   - Hypothetical offers go to `career_offer_ask` and `negotiation_plan`.
-- **G8 (74%).** There are 74 failures in two groups.
-  - 47 keep the record writers offered, because code did not read the turn as a hypothetical: a friend's situation, typos
+- **G8 (72%).** There are 91 failures in two groups.
+  - 57 keep the record writers offered, because code did not read the turn as a hypothetical: a friend's situation, typos
     ("say im"), non-English.
-  - 27 have the hypothetical offer's figures reach the record through code's offer flows, even when the message says
-    "hypothetically" or "not real": `negotiation_plan` saved 15 and `career_offer_ask` saved 8. The other 4 are brain turns
+  - 34 have the hypothetical offer's figures reach the record through code's offer flows, even when the message says
+    "hypothetically" or "not real": `negotiation_plan` saved 18 and `career_offer_ask` saved 10. The other 6 are brain turns
     whose figure the same conversation's offer flow saved; the record is checked once per conversation.
 
-  Non-English hypotheticals fail 17 of 20.
+  Non-English hypotheticals fail 20 of 25.
 - **G13 (0%).** Every turn with several asks that code answered was answered with one flow.
 - **G5 (1%) and G9 (0%).** Code's own replies almost never say what they did not verify, and never name a correction.
 

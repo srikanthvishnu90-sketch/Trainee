@@ -3,7 +3,7 @@
 // held to. This runs it at $0: every migration on a throwaway Postgres 16, the real career handler, a SCRIPTED model, every host
 // but the database double refused. It cannot judge what the model says (the live run does: evals/mirror/instinct-wa-batch1/
 // results/), so it pins what code decides, where the dry run of 2026-11-11 showed code answering a different task:
-//   - which turns code answers: only the search (C3), the record reads (C6, C16), the people list (C19) and the mock (C21);
+//   - which turns code answers: only the search (C3), the record reads (C6, C16), and the people list (C19);
 //     every other turn reaches the brain (before: 18 of 26 were code's, 11 of them scored as interview answers);
 //   - no reply is a keyword-rubric score ("Your answer, scored: 2/15") and none serves a practice question for a research ask;
 //   - the hypothetical offer (C7) records no offer; the search's scope names the title, not "could actually right now";
@@ -17,7 +17,7 @@ const DIR = new URL("../../evals/mirror/instinct-wa-batch1/", import.meta.url);
 const lines = (f: string) => Deno.readTextFileSync(new URL(f, DIR)).split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
 const turns: { id: string; prompt: string }[] = lines("prompts.jsonl");
 const persona: { setup: string[] } = JSON.parse(Deno.readTextFileSync(new URL("persona.json", DIR)));
-const CODE_TURNS = ["C3", "C6", "C16", "C19", "C21"];
+const CODE_TURNS = ["C3", "C6", "C16", "C19"];
 
 Deno.test({ name: "WA1-H the benchmark conversation: code answers only its own work, and nothing acts", sanitizeOps: false, sanitizeResources: false, ignore: canRun() !== null && canRun() !== "FAIL", fn: async () => {
   if (canRun() === "FAIL") throw new Error("WA1-H needs Postgres 16 in CI");

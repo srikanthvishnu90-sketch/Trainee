@@ -166,10 +166,60 @@ export async function agentTurn(o: {
   if (trace.m && !trace.r && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? enforceCompanyReply(result.reply, trace.m) : enforceMarketReply(result.reply, trace.m as MarketResult) };
   // Not an open career question: any link the model wrote that the turn never saw is removed (links not on the turn's allow-list).
   else if (!trace.r && result.reply && result.stopped === "final") result = { ...result, reply: stripUnseenLinks(result.reply, [...(result.linksSeen ?? []), ...(result.fileLinks ?? [])]) };
+  // MIRROR WA-1 (2026-11-11): the length of a text. On the owner's WhatsApp benchmark Instinct answered in one paragraph of about
+  // 400 characters (median 396; longer only to list everything it knew or a research answer in parts); Trainee's brain wrote
+  // 1,500 to 2,500 characters of numbered lists on the same asks. A reply over the limit is condensed once by the model, in
+  // its own words, under guards in code: every figure and link must come from the long reply, and a turn that showed an exact
+  // payload, holds an approval, carries code, or is a sourced research reply is never rewritten.
+  // A research, market or company reply was laid out and sourced in code above (its citations number its sources): never condensed.
+  if (result.reply && result.stopped === "final" && !trace.r && !trace.m) {
+    const limit = condenseLimit(o.message);
+    if (condensable(result, limit)) {
+      const short = await condenseReply(o.model, result.reply, limit);
+      if (short) result = { ...result, reply: short };
+    }
+  }
   return know ? { ...result, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : result;
 }
 
 // FEATURE 13: the tools left after a policy withholds some by name (none withheld: every tool).
 export function withheld<T extends { name: string }>(names: readonly string[] | undefined, tools: T[]): T[] {
   return names && names.length ? tools.filter((t) => !names.includes(t.name)) : tools;
+}
+
+// MIRROR WA-1: how long a text may be before it is condensed, and the condensing. EVERYTHING asks ("everything you remember",
+// "give me real sources", several topics in one ask) may run to a long text; everything else is one short paragraph.
+export const REPLY_TARGET = { short: { max: 700, aim: "about 300 to 550 characters" }, long: { max: 1400, aim: "about 900 to 1,200 characters" } } as const;
+const EVERYTHING_ASK = /\b(?:everything|all you (?:know|remember)|like everything|full (?:list|picture|breakdown)|real sources|in detail)\b|,[^,]+,[^,]+\b(?:and|&)\b/i;
+export function condenseLimit(message: string): { max: number; aim: string } {
+  return EVERYTHING_ASK.test(String(message ?? "")) ? REPLY_TARGET.long : REPLY_TARGET.short;
+}
+export function condensable(r: Pick<TurnResult, "reply" | "show" | "pending_approvals">, limit: { max: number }): boolean {
+  const reply = String(r.reply ?? "");
+  return reply.length > limit.max && !r.show && !(r.pending_approvals ?? []).length && !/```/.test(reply);
+}
+const NUMBER = /\$?\d[\d,.]*(?:k|%)?/gi, LINK = /https?:\/\/\S+/g;
+// The condensed text, or null when it fails a guard (then the long reply stands): shorter, not empty, every number and link in
+// it was in the long reply, at most one question.
+export function condensedOk(long: string, short: string, limit: { max: number }): boolean {
+  const s = String(short ?? "").trim();
+  if (!s || s.length >= long.length || s.length > limit.max) return false;
+  const nums = new Set((long.match(NUMBER) ?? []).map((x) => x.replace(/[,.]$/, "")));
+  if ((s.match(NUMBER) ?? []).some((x) => !nums.has(x.replace(/[,.]$/, "")))) return false;
+  const links = new Set(long.match(LINK) ?? []);
+  if ((s.match(LINK) ?? []).some((x) => !links.has(x))) return false;
+  return (s.match(/\?/g) ?? []).length <= 1;
+}
+export async function condenseReply(model: ModelFn, long: string, limit: { max: number; aim: string }): Promise<string | null> {
+  try {
+    const res = await model({
+      system: `Rewrite this text message from a career assistant so it reads like a text: ${limit.aim}, plain sentences, at most two short paragraphs. ` +
+        "Keep the direct answer first. Keep every name, figure, date and link exactly as written, and every statement of what was not done, not sent, not saved or not verified. " +
+        "A draft message the person can copy stays a draft they can copy: shorten it if it is long and keep its [brackets]. " +
+        "Drop numbered or bulleted lists (write sentences), headings, repeated points and advice they did not ask for. Add nothing that is not in the text. At most one question, at the end. Output the message only.",
+      messages: [{ role: "user", content: [{ type: "text", text: long }] }], tools: [], max_tokens: 600, tool_choice: { type: "none" },
+    } as any);
+    const out = ((res as any)?.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join("").trim();
+    return condensedOk(long, out, limit) ? out : null;
+  } catch { return null; }
 }

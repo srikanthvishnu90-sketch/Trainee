@@ -112,3 +112,32 @@ Deno.test("WA1-7 a search's role is the title, not the way the person talks", as
   eq(searchTextOf(C3).role, "software engineer");
   eq(searchTextOf("find me 5 data analyst internships in Chicago").role, "data analyst");
 });
+
+Deno.test("WA1-8 a mock start that names its question asks that question (the brain's); a plain mock start stays code's", () => {
+  const C21 = "ok behavioral round: ask me 'tell me about a time you failed' and then roast my answer";
+  const d = decide(C21);
+  ok(d.brain, `${d.intent}/${d.reason}`);
+  const plain = decide("mock interview me for a data analyst role");
+  eq(plain.brain, false, `${plain.intent}/${plain.reason}`);
+});
+
+Deno.test("WA1-9 a long text is condensed once, under code's guards", async () => {
+  const { condenseLimit, condensable, condensedOk, condenseReply, REPLY_TARGET } = await import("../../supabase/functions/agent-chat/career_brain.ts");
+  eq(condenseLimit("what do you actually know about my work experience so far? like everything you remember"), REPLY_TARGET.long);
+  eq(condenseLimit("what's citadel like for new grad swe, culture pay interview process, give me real sources"), REPLY_TARGET.long);
+  eq(condenseLimit("what should i put at the very top of my resume for swe roles, be specific"), REPLY_TARGET.short);
+  const long = "Start with PayPal and Pinterest. ".repeat(25) + "Pay is $28-$49/hour per the posting https://example.test/p. Nothing was sent. Want the plan?";
+  ok(condensable({ reply: long, show: undefined, pending_approvals: [] } as any, REPLY_TARGET.short));
+  ok(!condensable({ reply: long + "\n```py\nx=1\n```", show: undefined, pending_approvals: [] } as any, REPLY_TARGET.short), "code is never rewritten");
+  ok(!condensable({ reply: long, show: { intent: "x", text: long }, pending_approvals: [] } as any, REPLY_TARGET.short), "a shown payload is never rewritten");
+  ok(!condensable({ reply: long, show: undefined, pending_approvals: [{ tool: "t", input: {}, summary: "s" }] } as any, REPLY_TARGET.short), "an approval is never rewritten");
+  ok(condensedOk(long, "Start with PayPal and Pinterest; the posting lists $28-$49/hour https://example.test/p. Nothing was sent. Want the plan?", REPLY_TARGET.short));
+  ok(!condensedOk(long, "Start with PayPal; pay is $60/hour. Nothing was sent.", REPLY_TARGET.short), "a figure not in the long reply");
+  ok(!condensedOk(long, "Start with PayPal https://other.test. Nothing was sent.", REPLY_TARGET.short), "a link not in the long reply");
+  ok(!condensedOk(long, "Start with PayPal? Or Pinterest? Nothing was sent.", REPLY_TARGET.short), "two questions");
+  ok(!condensedOk(long, "", REPLY_TARGET.short), "empty");
+  const model = async () => ({ content: [{ type: "text", text: "Start with PayPal and Pinterest; the posting lists $28-$49/hour. Nothing was sent. Want the plan?" }] });
+  eq(await condenseReply(model as any, long, REPLY_TARGET.short), "Start with PayPal and Pinterest; the posting lists $28-$49/hour. Nothing was sent. Want the plan?");
+  const bad = async () => ({ content: [{ type: "text", text: "Pay is $99/hour." }] });
+  eq(await condenseReply(bad as any, long, REPLY_TARGET.short), null, "a failed guard keeps the long reply");
+});

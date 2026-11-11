@@ -1,178 +1,178 @@
 {
  "dev": {
   "split": "dev",
-  "conversations": 200,
-  "turns": 590,
-  "code_turns": 194,
-  "brain_turns": 396,
-  "nothing_sent": 590,
-  "g1_strict": 396,
-  "wrong_task": 79,
+  "conversations": 50,
+  "turns": 149,
+  "code_turns": 50,
+  "brain_turns": 99,
+  "nothing_sent": 149,
+  "g1_strict": 99,
+  "wrong_task": 17,
   "rulings": {
    "G1": {
-    "exercised": 590,
-    "pass": 425,
-    "fail": 165,
+    "exercised": 149,
+    "pass": 110,
+    "fail": 39,
     "model": 0,
-    "rate": 0.72
+    "rate": 0.738
    },
    "G2": {
-    "exercised": 590,
-    "pass": 190,
-    "fail": 4,
-    "model": 396,
-    "rate": 0.979
+    "exercised": 149,
+    "pass": 49,
+    "fail": 1,
+    "model": 99,
+    "rate": 0.98
    },
    "G3": {
-    "exercised": 457,
-    "pass": 50,
-    "fail": 73,
-    "model": 334,
+    "exercised": 111,
+    "pass": 11,
+    "fail": 16,
+    "model": 84,
     "rate": 0.407
    },
    "G4": {
-    "exercised": 240,
-    "pass": 66,
-    "fail": 15,
-    "model": 159,
-    "rate": 0.815
+    "exercised": 65,
+    "pass": 19,
+    "fail": 4,
+    "model": 42,
+    "rate": 0.826
    },
    "G5": {
-    "exercised": 189,
-    "pass": 1,
-    "fail": 71,
-    "model": 117,
-    "rate": 0.014
+    "exercised": 51,
+    "pass": 0,
+    "fail": 22,
+    "model": 29,
+    "rate": 0
    },
    "G6": {
-    "exercised": 214,
-    "pass": 125,
-    "fail": 89,
+    "exercised": 51,
+    "pass": 27,
+    "fail": 24,
     "model": 0,
-    "rate": 0.584
+    "rate": 0.529
    },
    "G7": {
-    "exercised": 62,
-    "pass": 22,
+    "exercised": 15,
+    "pass": 4,
     "fail": 0,
-    "model": 40,
+    "model": 11,
     "rate": 1
    },
    "G8": {
-    "exercised": 62,
-    "pass": 39,
-    "fail": 23,
+    "exercised": 18,
+    "pass": 12,
+    "fail": 6,
     "model": 0,
-    "rate": 0.629
+    "rate": 0.667
    },
    "G9": {
-    "exercised": 10,
+    "exercised": 2,
     "pass": 0,
-    "fail": 4,
-    "model": 6,
+    "fail": 2,
+    "model": 0,
     "rate": 0
    },
    "G10": {
-    "exercised": 217,
-    "pass": 82,
-    "fail": 2,
-    "model": 133,
-    "rate": 0.976
+    "exercised": 51,
+    "pass": 19,
+    "fail": 1,
+    "model": 31,
+    "rate": 0.95
    },
    "G11": {
-    "exercised": 89,
-    "pass": 35,
-    "fail": 54,
+    "exercised": 22,
+    "pass": 7,
+    "fail": 15,
     "model": 0,
-    "rate": 0.393
+    "rate": 0.318
    },
    "G12": {
-    "exercised": 104,
-    "pass": 29,
+    "exercised": 26,
+    "pass": 8,
     "fail": 0,
-    "model": 75,
+    "model": 18,
     "rate": 1
    },
    "G13": {
-    "exercised": 21,
+    "exercised": 5,
     "pass": 0,
-    "fail": 11,
-    "model": 10,
+    "fail": 2,
+    "model": 3,
     "rate": 0
    },
    "G14": {
-    "exercised": 184,
-    "pass": 113,
-    "fail": 39,
-    "model": 32,
-    "rate": 0.743
+    "exercised": 49,
+    "pass": 30,
+    "fail": 9,
+    "model": 10,
+    "rate": 0.769
    }
   },
   "families": {
    "paraphrase": {
-    "turns": 74,
-    "g1": 63,
-    "fails": 17
+    "turns": 18,
+    "g1": 16,
+    "fails": 2
    },
    "persona_swap": {
-    "turns": 74,
-    "g1": 56,
-    "fails": 24
+    "turns": 21,
+    "g1": 18,
+    "fails": 5
    },
    "reorder": {
-    "turns": 38,
-    "g1": 28,
-    "fails": 14
+    "turns": 9,
+    "g1": 7,
+    "fails": 4
    },
    "long_gap": {
-    "turns": 50,
-    "g1": 36,
-    "fails": 19
+    "turns": 12,
+    "g1": 9,
+    "fails": 5
    },
    "typos": {
-    "turns": 53,
-    "g1": 35,
-    "fails": 24
+    "turns": 14,
+    "g1": 9,
+    "fails": 8
    },
    "language": {
-    "turns": 35,
-    "g1": 32,
-    "fails": 6
+    "turns": 9,
+    "g1": 9,
+    "fails": 2
    },
    "multi_ask": {
-    "turns": 37,
-    "g1": 24,
-    "fails": 19
+    "turns": 9,
+    "g1": 8,
+    "fails": 5
    },
    "hypothetical": {
-    "turns": 41,
-    "g1": 35,
-    "fails": 19
+    "turns": 10,
+    "g1": 9,
+    "fails": 4
    },
    "boundary": {
-    "turns": 55,
-    "g1": 34,
-    "fails": 23
+    "turns": 15,
+    "g1": 9,
+    "fails": 6
    },
    "file_ask": {
-    "turns": 39,
-    "g1": 17,
-    "fails": 34
+    "turns": 12,
+    "g1": 6,
+    "fails": 10
    },
    "practice": {
-    "turns": 49,
-    "g1": 33,
-    "fails": 16
+    "turns": 11,
+    "g1": 6,
+    "fails": 5
    },
    "correction": {
-    "turns": 24,
-    "g1": 18,
-    "fails": 9
+    "turns": 5,
+    "g1": 2,
+    "fails": 4
    },
    "capability": {
-    "turns": 21,
-    "g1": 14,
-    "fails": 9
+    "turns": 4,
+    "g1": 2,
+    "fails": 2
    }
   },
   "worst": [
@@ -180,283 +180,283 @@
     "kind": "search",
     "intent": "career_discovery",
     "rulings": "G6,G5",
-    "n": 15,
-    "example": "HO-0025.t1"
+    "n": 5,
+    "example": "HO-0153.t3"
+   },
+   {
+    "kind": "practice_question",
+    "intent": "prep_brief",
+    "rulings": "G1",
+    "n": 4,
+    "example": "HO-0122.t2"
+   },
+   {
+    "kind": "file",
+    "intent": "agent",
+    "rulings": "G11",
+    "n": 4,
+    "example": "HO-0762.t1"
    },
    {
     "kind": "practice_question",
     "intent": "prep_mock_start",
     "rulings": "G1,G3",
-    "n": 14,
+    "n": 3,
     "example": "HO-0010.t1"
-   },
-   {
-    "kind": "hypothetical_advice",
-    "intent": "agent",
-    "rulings": "G8",
-    "n": 12,
-    "example": "HO-0442.t3"
-   },
-   {
-    "kind": "file",
-    "intent": "agent",
-    "rulings": "G11",
-    "n": 12,
-    "example": "HO-0762.t1"
-   },
-   {
-    "kind": "plan",
-    "intent": "agent",
-    "rulings": "G11",
-    "n": 10,
-    "example": "HO-0047.t3"
-   },
-   {
-    "kind": "practice_question",
-    "intent": "prep_brief",
-    "rulings": "G1",
-    "n": 10,
-    "example": "HO-0122.t2"
-   },
-   {
-    "kind": "draft",
-    "intent": "named_role_apply",
-    "rulings": "G1,G6",
-    "n": 9,
-    "example": "HO-0683.t2"
-   },
-   {
-    "kind": "research",
-    "intent": "company_intel",
-    "rulings": "G1,G14,G3,G5",
-    "n": 8,
-    "example": "HO-0132.t1"
-   },
-   {
-    "kind": "draft",
-    "intent": "outreach_clarification",
-    "rulings": "G1",
-    "n": 8,
-    "example": "HO-0161.t1"
    },
    {
     "kind": "search",
     "intent": "career_internship_discovery",
     "rulings": "G6,G5",
-    "n": 7,
+    "n": 3,
     "example": "HO-0224.t1"
    },
    {
+    "kind": "research",
+    "intent": "company_intel",
+    "rulings": "G1,G14,G3,G5",
+    "n": 3,
+    "example": "HO-0246.t2"
+   },
+   {
+    "kind": "hypothetical_advice",
+    "intent": "agent",
+    "rulings": "G8",
+    "n": 3,
+    "example": "HO-0480.t2"
+   },
+   {
+    "kind": "plan",
+    "intent": "agent",
+    "rulings": "G11",
+    "n": 3,
+    "example": "HO-0560.t1"
+   },
+   {
     "kind": "file",
-    "intent": "career_tailor",
+    "intent": "named_role_apply",
     "rulings": "G1,G6,G11",
-    "n": 7,
-    "example": "HO-0770.t1"
+    "n": 2,
+    "example": "HO-0122.t4"
    },
    {
     "kind": "draft",
-    "intent": "career_networking_draft",
+    "intent": "career_tailor",
     "rulings": "G1,G6,G3",
-    "n": 6,
-    "example": "HO-0335.t1"
+    "n": 2,
+    "example": "HO-0436.t1"
+   },
+   {
+    "kind": "offer_compare",
+    "intent": "agent",
+    "rulings": "G8",
+    "n": 2,
+    "example": "HO-0485.t2"
+   },
+   {
+    "kind": "draft",
+    "intent": "named_role_apply",
+    "rulings": "G1,G6",
+    "n": 2,
+    "example": "HO-0683.t2"
+   },
+   {
+    "kind": "draft",
+    "intent": "outreach_clarification",
+    "rulings": "G1",
+    "n": 2,
+    "example": "HO-0699.t3"
    },
    {
     "kind": "file",
     "intent": "prep_brief",
     "rulings": "G1",
-    "n": 6,
+    "n": 2,
     "example": "HO-0762.t3"
    },
    {
-    "kind": "plan",
-    "intent": "career_internship_discovery",
-    "rulings": "G1,G11,G14,G3,G5",
-    "n": 5,
-    "example": "HO-0076.t2"
-   },
-   {
-    "kind": "thread_recall",
-    "intent": "company_intel",
-    "rulings": "G1,G3",
-    "n": 5,
-    "example": "HO-0132.t2"
+    "kind": "file",
+    "intent": "career_tailor",
+    "rulings": "G1,G6,G11",
+    "n": 2,
+    "example": "HO-0770.t1"
    }
   ]
  },
  "heldout": {
   "split": "heldout",
-  "conversations": 800,
-  "turns": 2361,
-  "code_turns": 752,
-  "brain_turns": 1609,
-  "nothing_sent": 2361,
-  "g1_strict": 1609,
-  "wrong_task": 264,
+  "conversations": 950,
+  "turns": 2802,
+  "code_turns": 896,
+  "brain_turns": 1906,
+  "nothing_sent": 2802,
+  "g1_strict": 1906,
+  "wrong_task": 326,
   "rulings": {
    "G1": {
-    "exercised": 2361,
-    "pass": 1738,
-    "fail": 623,
+    "exercised": 2802,
+    "pass": 2053,
+    "fail": 749,
     "model": 0,
-    "rate": 0.736
+    "rate": 0.733
    },
    "G2": {
-    "exercised": 2361,
-    "pass": 736,
-    "fail": 16,
-    "model": 1609,
+    "exercised": 2802,
+    "pass": 877,
+    "fail": 19,
+    "model": 1906,
     "rate": 0.979
    },
    "G3": {
-    "exercised": 1851,
-    "pass": 183,
-    "fail": 301,
-    "model": 1367,
-    "rate": 0.378
+    "exercised": 2197,
+    "pass": 222,
+    "fail": 358,
+    "model": 1617,
+    "rate": 0.383
    },
    "G4": {
-    "exercised": 946,
-    "pass": 252,
-    "fail": 46,
-    "model": 648,
-    "rate": 0.846
+    "exercised": 1121,
+    "pass": 299,
+    "fail": 57,
+    "model": 765,
+    "rate": 0.84
    },
    "G5": {
-    "exercised": 735,
-    "pass": 2,
-    "fail": 264,
-    "model": 469,
-    "rate": 0.008
+    "exercised": 873,
+    "pass": 3,
+    "fail": 313,
+    "model": 557,
+    "rate": 0.009
    },
    "G6": {
-    "exercised": 825,
-    "pass": 467,
-    "fail": 358,
+    "exercised": 988,
+    "pass": 565,
+    "fail": 423,
     "model": 0,
-    "rate": 0.566
+    "rate": 0.572
    },
    "G7": {
-    "exercised": 207,
-    "pass": 74,
+    "exercised": 254,
+    "pass": 92,
     "fail": 0,
-    "model": 133,
+    "model": 162,
     "rate": 1
    },
    "G8": {
-    "exercised": 279,
-    "pass": 205,
-    "fail": 74,
+    "exercised": 323,
+    "pass": 232,
+    "fail": 91,
     "model": 0,
-    "rate": 0.735
+    "rate": 0.718
    },
    "G9": {
-    "exercised": 40,
+    "exercised": 48,
     "pass": 0,
-    "fail": 5,
-    "model": 35,
+    "fail": 7,
+    "model": 41,
     "rate": 0
    },
    "G10": {
-    "exercised": 813,
-    "pass": 296,
-    "fail": 9,
-    "model": 508,
-    "rate": 0.97
+    "exercised": 979,
+    "pass": 359,
+    "fail": 10,
+    "model": 610,
+    "rate": 0.973
    },
    "G11": {
-    "exercised": 304,
-    "pass": 107,
-    "fail": 197,
+    "exercised": 371,
+    "pass": 135,
+    "fail": 236,
     "model": 0,
-    "rate": 0.352
+    "rate": 0.364
    },
    "G12": {
-    "exercised": 459,
-    "pass": 136,
+    "exercised": 537,
+    "pass": 157,
     "fail": 0,
-    "model": 323,
+    "model": 380,
     "rate": 1
    },
    "G13": {
-    "exercised": 89,
+    "exercised": 105,
     "pass": 0,
-    "fail": 37,
-    "model": 52,
+    "fail": 46,
+    "model": 59,
     "rate": 0
    },
    "G14": {
-    "exercised": 717,
-    "pass": 439,
-    "fail": 133,
-    "model": 145,
-    "rate": 0.767
+    "exercised": 852,
+    "pass": 522,
+    "fail": 163,
+    "model": 167,
+    "rate": 0.762
    }
   },
   "families": {
    "paraphrase": {
-    "turns": 298,
-    "g1": 258,
-    "fails": 89
+    "turns": 354,
+    "g1": 305,
+    "fails": 104
    },
    "persona_swap": {
-    "turns": 296,
-    "g1": 209,
-    "fails": 106
+    "turns": 349,
+    "g1": 247,
+    "fails": 125
    },
    "reorder": {
-    "turns": 168,
-    "g1": 126,
-    "fails": 55
+    "turns": 197,
+    "g1": 147,
+    "fails": 65
    },
    "long_gap": {
-    "turns": 200,
-    "g1": 129,
-    "fails": 79
+    "turns": 238,
+    "g1": 156,
+    "fails": 93
    },
    "typos": {
-    "turns": 215,
-    "g1": 178,
-    "fails": 69
+    "turns": 254,
+    "g1": 204,
+    "fails": 85
    },
    "language": {
-    "turns": 129,
-    "g1": 121,
-    "fails": 17
+    "turns": 155,
+    "g1": 144,
+    "fails": 21
    },
    "multi_ask": {
-    "turns": 149,
-    "g1": 110,
-    "fails": 60
+    "turns": 177,
+    "g1": 126,
+    "fails": 74
    },
    "hypothetical": {
-    "turns": 156,
-    "g1": 137,
-    "fails": 58
+    "turns": 187,
+    "g1": 163,
+    "fails": 73
    },
    "boundary": {
-    "turns": 223,
-    "g1": 118,
-    "fails": 121
+    "turns": 263,
+    "g1": 143,
+    "fails": 138
    },
    "file_ask": {
-    "turns": 137,
-    "g1": 71,
-    "fails": 123
+    "turns": 164,
+    "g1": 82,
+    "fails": 147
    },
    "practice": {
-    "turns": 199,
-    "g1": 124,
-    "fails": 75
+    "turns": 237,
+    "g1": 151,
+    "fails": 86
    },
    "correction": {
-    "turns": 103,
-    "g1": 90,
-    "fails": 23
+    "turns": 122,
+    "g1": 106,
+    "fails": 28
    },
    "capability": {
-    "turns": 88,
-    "g1": 67,
-    "fails": 32
+    "turns": 105,
+    "g1": 79,
+    "fails": 39
    }
   },
   "worst": [
@@ -464,106 +464,106 @@
     "kind": "file",
     "intent": "agent",
     "rulings": "G11",
-    "n": 57,
+    "n": 65,
     "example": "HO-0761.t2"
    },
    {
     "kind": "search",
     "intent": "career_discovery",
     "rulings": "G6,G5",
-    "n": 51,
-    "example": "HO-0051.t2"
-   },
-   {
-    "kind": "practice_question",
-    "intent": "prep_brief",
-    "rulings": "G1",
-    "n": 48,
-    "example": "HO-0152.t1"
-   },
-   {
-    "kind": "search",
-    "intent": "career_internship_discovery",
-    "rulings": "G6,G5",
-    "n": 47,
-    "example": "HO-0007.t4"
-   },
-   {
-    "kind": "plan",
-    "intent": "agent",
-    "rulings": "G11",
-    "n": 46,
-    "example": "HO-0003.t2"
+    "n": 61,
+    "example": "HO-0025.t1"
    },
    {
     "kind": "practice_question",
     "intent": "prep_mock_start",
     "rulings": "G1,G3",
-    "n": 46,
+    "n": 57,
     "example": "HO-0009.t3"
+   },
+   {
+    "kind": "practice_question",
+    "intent": "prep_brief",
+    "rulings": "G1",
+    "n": 54,
+    "example": "HO-0139.t4"
+   },
+   {
+    "kind": "plan",
+    "intent": "agent",
+    "rulings": "G11",
+    "n": 53,
+    "example": "HO-0003.t2"
+   },
+   {
+    "kind": "search",
+    "intent": "career_internship_discovery",
+    "rulings": "G6,G5",
+    "n": 51,
+    "example": "HO-0007.t4"
    },
    {
     "kind": "hypothetical_advice",
     "intent": "agent",
     "rulings": "G8",
-    "n": 41,
+    "n": 50,
     "example": "HO-0388.t3"
    },
    {
     "kind": "draft",
     "intent": "outreach_clarification",
     "rulings": "G1",
-    "n": 39,
+    "n": 45,
     "example": "HO-0021.t1"
    },
    {
     "kind": "research",
     "intent": "company_intel",
     "rulings": "G1,G14,G3,G5",
-    "n": 34,
+    "n": 39,
     "example": "HO-0126.t3"
    },
    {
     "kind": "draft",
     "intent": "career_tailor",
     "rulings": "G1,G6,G3",
-    "n": 31,
+    "n": 34,
     "example": "HO-0031.t2"
    },
    {
     "kind": "file",
     "intent": "career_tailor",
     "rulings": "G1,G6,G11",
-    "n": 21,
+    "n": 26,
     "example": "HO-0772.t1"
    },
    {
     "kind": "draft",
     "intent": "career_networking_draft",
     "rulings": "G1,G6,G3",
-    "n": 20,
+    "n": 25,
     "example": "HO-0292.t1"
    },
    {
     "kind": "people_search",
     "intent": "company_intel",
     "rulings": "G1,G6,G14,G5",
-    "n": 19,
+    "n": 23,
     "example": "HO-0014.t2"
-   },
-   {
-    "kind": "file",
-    "intent": "prep_brief",
-    "rulings": "G1",
-    "n": 18,
-    "example": "HO-0761.t1"
    },
    {
     "kind": "thread_recall",
     "intent": "company_intel",
     "rulings": "G1,G3",
-    "n": 17,
-    "example": "HO-0138.t3"
+    "n": 22,
+    "example": "HO-0132.t2"
+   },
+   {
+    "kind": "file",
+    "intent": "prep_brief",
+    "rulings": "G1",
+    "n": 22,
+    "example": "HO-0761.t1"
    }
   ]
  }

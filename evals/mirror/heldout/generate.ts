@@ -1,7 +1,7 @@
 // MIRROR HELD-OUT (P2): the generalisation set (architect builder, 2026-11-11). Deterministic (seed 20261111): the same
 // command writes the same bytes. It builds 1,000 scenario CONVERSATIONS (about 3,000 scored turns) in the ruling families of
 // docs/architect/specs/MIRROR-RULINGS.md P2, gives every turn its expectation (expect.ts: from the rulings, never from the
-// words), checks the set distinct (distinct.ts) and live-safe (safety.ts), and splits it dev 20% / held-out 80% per family.
+// words), checks the set distinct (distinct.ts) and live-safe (safety.ts), and splits it dev 5% / held-out 95% per family.
 //
 //   deno run -A evals/mirror/heldout/generate.ts            write dev.jsonl and heldout.jsonl, print the counts and the seal
 //   deno run -A evals/mirror/heldout/generate.ts --check    exit 1 unless both files are a fresh build and the seal in
@@ -24,6 +24,21 @@ export const FAMILIES: Record<string, number> = {
   paraphrase: 120, persona_swap: 110, reorder: 60, long_gap: 80, typos: 80, language: 70, multi_ask: 80,
   hypothetical: 80, boundary: 80, file_ask: 70, practice: 70, correction: 50, capability: 50,
 };
+// The split (owner, 2026-11-11: "don't make it 80% make it 95%"): dev 5%, held-out 95%, stratified by family. Each family gets
+// floor(5% of its size), then the remaining dev places go by largest remainder (ties: the larger family, then this table's
+// order). A family below DEV_MIN gets DEV_MIN, taken one at a time from the family with the most dev conversations.
+export const DEV_SHARE = 0.05, DEV_MIN = 2;
+export function devCounts(fams: Record<string, number> = FAMILIES): Record<string, number> {
+  const names = Object.keys(fams), total = names.reduce((a, f) => a + fams[f], 0), target = Math.round(total * DEV_SHARE);
+  const q: Record<string, number> = Object.fromEntries(names.map((f) => [f, Math.floor(fams[f] * DEV_SHARE)]));
+  const order = [...names].sort((a, b) => (fams[b] * DEV_SHARE % 1) - (fams[a] * DEV_SHARE % 1) || fams[b] - fams[a] || names.indexOf(a) - names.indexOf(b));
+  for (let i = 0, left = target - names.reduce((a, f) => a + q[f], 0); left > 0; i++, left--) q[order[i % order.length]]++;
+  for (const f of names) while (q[f] < DEV_MIN) {
+    const donor = names.filter((x) => x !== f && q[x] > DEV_MIN).sort((a, b) => q[b] - q[a] || fams[b] - fams[a])[0];
+    q[f]++; if (donor) q[donor]--;
+  }
+  return q;
+}
 // A candidate conversation is redrawn when its text is this close to one already accepted (distinct.ts rejects at 0.5).
 const JACCARD_BUILD = 0.4, EDIT_BUILD = 0.75;
 
@@ -298,12 +313,12 @@ export async function build(): Promise<{ dev: Conversation[]; heldout: Conversat
       made++;
     }
   }
-  // split per family: a seeded shuffle, the first 20% dev
-  const rs = mulberry32(SEED + 1);
+  // split per family: a seeded shuffle, the first devCounts()[family] dev (5% overall, at least 2 per family)
+  const rs = mulberry32(SEED + 1), quota = devCounts();
   for (const fam of Object.keys(FAMILIES)) {
     const xs = accepted.filter((c) => c.family === fam);
     for (let i = xs.length - 1; i > 0; i--) { const j = Math.floor(rs() * (i + 1)); [xs[i], xs[j]] = [xs[j], xs[i]]; }
-    xs.slice(0, Math.round(xs.length * 0.2)).forEach((c) => (c.split = "dev"));
+    xs.slice(0, quota[fam]).forEach((c) => (c.split = "dev"));
   }
   const turns = accepted.flatMap((c) => c.turns);
   const stats = {

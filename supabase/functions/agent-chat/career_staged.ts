@@ -767,6 +767,7 @@ const G1_FILE_ASK = /\b(?:file|doc|docs|document|pdf|docx|page|sheet|one[- ]?pag
 // of the situation alone ("I have an interview tomorrow and I'm nervous") keeps the router's prep plan.
 const G1_REQUEST = /\b(?:give|walk|help|turn|rate|ask|quiz|shape|show|tell|write|make|review|critique|grade|practice|practise|drill|explain|how|what|which|can you|could you)\b|\?/i;
 const G1_URL = /https?:\/\/\S+/i, G1_URL_ALL = /https?:\/\/\S+/gi;
+const G1_RESUME = /\b(?:r[eé]sum[eé]s?|cvs?)\b/i;
 export const g1Override = (message: string) => { const m = String(message ?? "").replace(/[\u2019`]/g, "'"); return !!hypotheticalOf(m) || correctionOf(m) === "trainee" || severalAsks(m); };
 // A product code built for an instruction the person gave (a draft, a people list, a prep brief, a document, an offer card):
 // the instruction carried out. A sourced record (a company file, a benchmark, a comparison) is data for the brain's answer.
@@ -808,6 +809,9 @@ export function g1CodeAnswers(message: string, intent: string, result: unknown, 
   // A drill answer graded against the bank's own key is the answer to code's question; a rubric read is not (prepRubricRead).
   if (intent === "prep_brief" && r.scored && r.scored !== "rubric") return true;
   // An instruction (not a question, nothing forbidden) that code carried out with a product, or one to message or list people.
+  // G10 (ask only what the action needs): "tailor my resume" with the role missing is an action the person asked for whose one
+  // required slot is missing: code's tailor asks for that slot. A cover letter or a note is the brain's draft (D-059 placeholders).
+  if (intent === "career_tailor" && G1_RESUME.test(m) && !(QUESTION_LEAD.test(m) || m.includes("?")) && String(r.resultStatus ?? "") === "awaiting_user") return true;
   // A boundary ("just research, don't message anyone") limits the instruction, it does not make it a question; a draft asked for
   // under "don't send" is the brain's to write (G10, D-059).
   const asks = QUESTION_LEAD.test(m) || m.includes("?"), draftOnly = boundaryOf(m) === "send" && G1_PRODUCERS.has(intent);

@@ -25,7 +25,7 @@ type Host = { runTurn(text: string, ctx: any): { intent: string | null; handler:
 
 import { correctedAsk } from "../_shared/search_correction.ts";
 import { askFor } from "../_shared/career_search_judge.ts";
-import { outreachAsk } from "../_shared/outreach_ask.ts";
+import { namedDraftAsk, outreachAsk } from "../_shared/outreach_ask.ts";
 import { researchReplyOn } from "../_shared/research_reply.ts"; // D-047
 export type BrainMode = "router" | "agent" | "staged";
 // The served brain (release_config.ts): the committed PRODUCTION_BRAIN unless CAREER_BRAIN rolls it back to the router.
@@ -412,6 +412,7 @@ export function marketResearchAsk(env: Env, message: string, intent: string | nu
   return !(intent && CODE_OWNED_INTENTS.has(intent));
 }
 // The router's own outreach and networking intents (R9 outreach routing leaves them to their rules).
+const DRAFT_MISREAD: ReadonlySet<string> = new Set(["career_document_delivery", "career_people_alumni", "outreach_clarification", "career_stop_workflow", "career_tailor", "career_fallback", "career_catchall"]);
 const OUTREACH_OWN = /^(?:outreach|career_outreach|career_networking|career_people|networking)/;
 const LIST_FOLLOWUP = /^\s*(?:(?:and|so|but|ok(?:ay)?),?\s+)?why\s+(?:not|didn't\s+you\s+(?:include|list|show|pick))\s+(?:that|the|this)\s+[^?.!]{1,40}?\s*one\b/i;
 const QUESTION_TO_ASK = /\b(?:won't|will\s+not|wouldn't|would\s+not|doesn't|does\s+not|not)\s+sound\s+(?:copied|generic|canned|scripted|rehearsed|memori[sz]ed)\b|\bquestions?\b[^.?!]{0,30}\b(?:to\s+ask|i\s+(?:can|could|should)\s+ask|for\s+(?:them|the\s+(?:interviewer|panel|recruiter|hiring\s+manager)))\b/i;
@@ -450,6 +451,9 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (researchReplyOn(o.env) && researchOverAction(o.message)) return { brain: true, mode, intent, reason: "company_research" };
   if (routerKept(o.env).has(intent)) return { brain: false, mode, intent, reason: "kept_on_router" };
   if (marketResearchAsk(o.env, o.message, intent)) return { brain: true, mode, intent, reason: "market_research" };
+  // MIRROR-1000: a draft to a named person that the router read as a file ask, an alumni list or a missing recipient is the
+  // brain's drafting turn (outreach_ask.ts namedDraftAsk).
+  if (DRAFT_MISREAD.has(intent) && namedDraftAsk(o.message)) return { brain: true, mode, intent, reason: "named_draft" };
   if ((!CODE_OWNED_INTENTS.has(intent) || intent === "tracking_log") && followupDraftAsk(o.message)) return { brain: true, mode, intent, reason: "followup_draft" };
   // H2H fix 4 (docs/architect/INSTINCT-HEAD-TO-HEAD.md C2 t5, C5 t4, C3 t6): a follow-up stays on the thread's current task. The
   // router read each from a keyword and answered a different ask: "Why not that Stripe one?" after a search got Stripe's

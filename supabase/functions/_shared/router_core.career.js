@@ -329,7 +329,7 @@
       const doorstep = { family: "application", driven_by: "agent", gap, state: "AWAITING_COMMIT", committed: false, step_log: stepLog, payload, payload_sha256: hash, proof: { step_log: stepLog, payload_snapshot: payload, payload_sha256: hash } };
       return {
         intent: "captcha_handoff", family: "access", resultStatus: "awaiting_user", sends: 0, submits: 0, artifact: payload, payload, doorstep,
-        reply: "A CAPTCHA is a step only you can do: I hand you the tap on the real page, you finish that one step, and the run resumes right where it stopped. No solver services are used, ever — that is a hard rule, not a preference. No stop is recorded for this session yet, so no ticket exists to hand you — the moment a run actually stops on one, the ticket is minted and the link is yours. Next step — tap the handoff link when it appears and the application continues from the exact field it stopped on.",
+        reply: "I won't solve a CAPTCHA, and no solver service is used. It is a step only you can do: I hand you the tap on the real page, you finish that one step, and the run resumes right where it stopped. That is a hard rule, not a preference. No stop is recorded for this session yet, so no ticket exists to hand you — the moment a run actually stops on one, the ticket is minted and the link is yours. Next step — tap the handoff link when it appears and the application continues from the exact field it stopped on.",
       };
     }
     const ACCESS_VOCAB = new Set(["connect", "disconnect", "gmail", "google", "calendar", "linkedin", "handshake", "export", "upload", "accounts", "account", "consent", "password", "portal", "access", "audit", "actions", "login", "browser", "source", "session", "event", "email"]);
@@ -16872,7 +16872,8 @@ const CareerRouter = (() => {
     const barePluralMass = /\b(applications|jobs|roles)\b/.test(t) && noReview && !/\?\s*$/.test(t) && !/^(did|have|has|do|does|were|was|are)\b/.test(t);
     const massObject = /\b(everything|every job|all jobs|all of them|every role|all roles)\b/.test(t) || /\b(\d{2,})\s*(jobs|applications|roles)\b/.test(t) || barePluralMass;
     const massCount = Number((t.match(/\b(\d{2,})\s*(jobs|applications|roles)\b/) || [])[1]) || 0;
-    const massApply = /\b(apply|submit|send in)\b/.test(t) && massObject && (noReview || massCount >= 50);
+    const applyAsked = /\b(apply|submit|send in)\b/.test(t.replace(/\b(?:don'?t|do not|never|not|no|nothing)\s+(?:\w+\s+){0,3}?(?:apply|submit|send in)\b[^.;:!?]*/g, " "));
+    const massApply = applyAsked && massObject && (noReview || massCount >= 50);
     const dismissal = /\b(nobody|no one)\s+(checks|verifies|verified|will (check|verify|verified|find out|know))\b|\bthey (never|don'?t)\s+(check|verify|verified)\b|\bnever (checked|verified)\b/.test(t);
     const dismissalFabricate = dismissal && /\b(add|put|write|include)\b/.test(t);
     if (!falseClaim && !blast && !fabricate && !unverifiedClaim && !massApply && !dismissalFabricate) return null;
@@ -17499,7 +17500,7 @@ const CareerRouter = (() => {
     } catch {   }
     const facts = ["Answer it the way you would in the room — out loud, structured, numbers before adjectives.", "I will score the answer against the rubric and drill the weakest part next; that loop is the prep."];
     if (cycled) facts.unshift("You have answered every question I have for this, so this one comes round again.");
-    const reply = compose({ headline: `Here is your question: ${q}`, facts, nextStep: "Give me your answer and I will score it." });
+    const reply = compose({ headline: `Here is your question: ${q}`, facts, nextStep: "What is your answer? I will score it." });
     return { intent: "prep_brief", reply, resultStatus: "running", sends: 0, question: { kind: "bank_question", q } };
   }
   function prepSectorOf(tn, raw, ctx) {
@@ -22720,7 +22721,7 @@ const CareerRouter = (() => {
       if (tgt.company) { const mir = threadMirrorForWrite(ctx); if (mir) mir.namedApply = { company: tgt.company, role: tgt.role || null }; }
       const worker = ctx.workerCapabilities && ctx.workerCapabilities.portal_browser;
       const facts = [`I can apply only to a posting I have on file or one you paste. The ${tgt.role || "role"} posting at ${tgt.company || "that company"} is not on file, and I won't make one up.`];
-      { const L = getApplyLedger(); const f = L && L.submitFact(ctx); if (!f && worker && worker.status === "NOT_WIRED" && !ctx.liveSwitches) facts.push("The browser worker that executes applications is also not wired in this handler — even a listed role would stop at preparation here."); }
+      { const L = getApplyLedger(); const f = L && L.submitFact(ctx); if (!f && worker && worker.status === "NOT_WIRED" && !ctx.liveSwitches) facts.push("Here a listed role would also stop at preparation: I prepare it, and nothing is submitted from this chat."); }
       const reply = compose({ headline: `I can't apply to the ${tgt.role || "role"} at ${tgt.company || "that company"} yet — that posting is not in the list I can work from.`, facts, nextStep: "Paste the posting or its link and I will prepare the application from it in this turn." });
       return { intent: "named_role_apply", reply, resultStatus: "blocked", sends: 0 };
     }
@@ -24270,7 +24271,7 @@ const CareerRouter = (() => {
         const HEDGE = /\b(?:i think|i thought|i believe|i guess|i suppose|i assume|i reckon|idk|i dont know|i don'?t know|dunno|not sure|unsure|prob|probs|prolly|probably|tentative(?:ly)?|maybe|possibly|likely|roughly|around|approximately|about|ish|tbd|or so|or later|or earlier|or thereabouts|give or take)\b/i;
         const ALTERNATIVES = new RegExp(`\\b(?:${MON}\\s+)?20\\d\\d\\s*(?:\\bor\\b|/)\\s*(?:${MON}\\s+)?(?:20\\d\\d|later|earlier|after|before)|\\b${MON}\\s*(?:\\bor\\b|/)\\s*${MON}\\b|\\b(?:or|/)\\s*${MON}(?:\\s+'?\\d\\d(?:\\d\\d)?)?\\b`, "i");
         const definiteSentence = (x) => !/\b(?:not|never|no longer|don'?t|dont|doesn'?t|won'?t|wont|didn'?t|can'?t|cant|isn'?t|aren'?t)\b|n't\b/i.test(x) && !/\b(?:if|unless|might|could|would|maybe|perhaps|probably|hope|hoping|hopefully|ideally|assuming|supposedly|wish|plan(?:ning)? to|trying to|supposed to|should)\b/i.test(x) && !HEDGE.test(x) && !ALTERNATIVES.test(x);
-        const CONTRAST = new RegExp(`,?\\s*(?:and\\s+)?(?:not|instead of|rather than)\\s+(?:in\\s+|on\\s+)?(?:${MON}\\s+)?20\\d\\d\\b`, "gi");
+        const CONTRAST = new RegExp(`,?\\s*(?:and\\s+)?(?:not|instead of|rather than)\\s+(?:in\\s+|on\\s+)?(?:(?:${MON})(?:\\s+20\\d\\d)?|20\\d\\d)\\b`, "gi");
         const wholeDefinite = definiteSentence(u.replace(CONTRAST, "").replace(/[.!?;:\n\u2014\u2013-]+/g, " "));
         const definite = (x) => wholeDefinite && definiteSentence(x);
         let m2;

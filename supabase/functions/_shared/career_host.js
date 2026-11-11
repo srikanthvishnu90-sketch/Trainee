@@ -284,10 +284,14 @@ const CareerHost = (() => {
   const OTHER_ASK_RE = /\b(?:find|search|look for|get me|show me|apply to|draft|write|tell me about|what'?s|what is|how)\b/i;
   const NEGATED_RE = /\b(?:don'?t|do not|dont|never|no need to)\s+(?:\w+\s+)?$/i;
   const sentencesOf = (s) => s.split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
+  const HYPOTHETICAL_STOP_RE = /\bhypothetic|\bif i (?:said|say|were to|wanted to|asked you to|told you to)\b|\bwhat (?:would )?happens? if\b|\bwhat would (?:it|that|pausing|a pause|stopping) do\b|\b(?:just|only) (?:explain|tell me)\b[^.!?]*\b(?:don'?t|do not) do it\b|\bonly tell me what it would do\b/i;
   function stopControlOf(text) {
     const ask = typeof text === "string" ? text.trim() : "";
     if (!ask || ask.length > 2000) return null;
     if (/\balerts?\b|\balert-wise\b|\bwatch(?:es|ing)?\b/i.test(ask)) return null;
+    // MIRROR-1000 (2026-11-11): a question about what a stop WOULD do is not a stop. "If I said pause everything, what happens
+    // to what's in flight? Just explain, don't do it" paused the account and answered "Done: your account is paused".
+    if (HYPOTHETICAL_STOP_RE.test(ask)) return null;
     const sentences = sentencesOf(ask).filter((x) => !/\?\s*$/.test(x));
     const imperative = (re) => sentences.some((x) => { const m = re.exec(x); return !!m && !NEGATED_RE.test(x.slice(0, m.index)); });
     if (imperative(ACCOUNT_STOP_RE)) return { kind: "account" };
@@ -671,7 +675,8 @@ const CareerHost = (() => {
         // these 141 results remain local preparation either way, and the
         // batch seam (155) is the wired drive path.
         result = { ...result, worker: workerCapabilities.portal_browser,
-          reply: boardFor ? result.reply : `Live browser execution is not wired in this handler; no employer form has been opened or submitted.\n${result.reply}` };
+          // MIRROR-1000 (2026-11-11): said plainly, right after the answer's first line, never in the handler's own words ("not wired in this handler").
+          reply: boardFor ? result.reply : String(result.reply ?? "").replace(/^([^\n]*)(\n|$)/, (_, head, nl) => `${head}\nThe browser that fills employer forms is not wired up here, so no employer form has been opened or submitted: I prepare the application, and it goes to an employer only after you approve that exact one.${nl}`) };
       }
       return {
         reply: CareerContainment.extractReplyText(result),

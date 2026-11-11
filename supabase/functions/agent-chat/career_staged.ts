@@ -472,6 +472,13 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   // message). The router's own outreach intents keep their rules (an instruction to email stays code's), and so does code's
   // own work (an exact payload, a card, the apply queue, a bare yes or no).
   if (!CODE_OWNED_INTENTS.has(intent) && !OUTREACH_OWN.test(intent) && outreachAsk(o.message)) return { brain: true, mode, intent, reason: "outreach_ask" };
+  // MIRROR WA-1 (2026-11-11, the owner's WhatsApp benchmark against Instinct): three router readings that answered a different
+  // task from the one asked (prepRubricRead, prepServeMismatch, namedApplicationNeeds, adviceOverSearch). Each is the
+  // brain's, with the router's reply as data.
+  if (prepRubricRead(intent, probe.result)) return { brain: true, mode, intent, reason: "prep_rubric_read", router: routerAnswer(intent, probe) };
+  if (prepServeMismatch(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "prep_serve_mismatch", router: routerAnswer(intent, probe) };
+  if (namedApplicationNeeds(o.message, intent)) return { brain: true, mode, intent, reason: "named_application_needs", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
+  if (adviceOverSearch(o.message, intent)) return { brain: true, mode, intent, reason: "advice_over_search", router: routerAnswer(intent, probe) };
   if (!STAGED_BRAIN_INTENTS.includes(intent)) {
     // Before the list: a turn that asks or forbids is the brain's unless its intent is code's own work (questionTurn).
     if (questionTurn(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "question_shaped", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
@@ -479,6 +486,48 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   }
   if (codeProduct(intent, probe.result)) return { brain: false, mode, intent, reason: "code_product" };
   return { brain: true, mode, intent, reason: "question", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
+}
+
+// MIRROR WA-1 (2026-11-11). The owner's WhatsApp benchmark (evals/mirror/instinct-wa-batch1/; tests/architect/mirror-wa-batch1.test.ts).
+// (1) A prep session's keyword-rubric read (142 handlePrepSession marks it scored: "rubric"). The rubric reads an answer's shape
+//     (order, numbers, specifics), so a Python answer, a line of code and every new ask sent while a question was waiting
+//     ("have i applied to anything yet?", "make that referral draft shorter", "is that posting still open?") came back as
+//     "Your answer, scored: 2/15". The brain reads it: a real answer is graded on what it says (the router's score as data), and a
+//     new ask is answered. A drill answer graded on the bank's own answer key stays code's (no "rubric" mark), as do the mocks.
+export function prepRubricRead(intent: string | null, result: unknown): boolean {
+  return intent === "prep_brief" && !!result && typeof result === "object" && (result as any).scored === "rubric" && ((result as any).sends ?? 0) === 0;
+}
+// (2) A prep serve that is not what was asked: "quiz me on a python question" served "Tell me about yourself"; "what's citadel
+//     like ... give me real sources" served a coding question; "give me a 'tell me about yourself' answer i can reuse" served the
+//     question instead of the answer. A served bank question is code's only when it is the kind asked for.
+const TECH_TOPIC = /\b(?:python|java(?:script)?|typescript|c\+\+|golang|rust|sql|coding|code|leetcode|algorithms?|data structures?|big[- ]o|complexity|system design|technical)\b/i;
+const ANSWER_ASK = /\b(?:give|write|draft|make|help me (?:write|with))\s+(?:me\s+)?(?:a|an|my)\b[^.?!]{0,60}?\banswer\b|\banswer\s+(?:i|that i)\s+(?:can|could)\s+(?:re)?use\b/i;
+const PRACTICE_ASK = /\b(?:quiz|drill|practi[cs]e|mock|ask me|another|next|one more|hit me|harder)\b/i;
+export function prepServeMismatch(message: string, intent: string | null, result: unknown): boolean {
+  if (intent !== "prep_brief" || !result || typeof result !== "object") return false;
+  const r = result as Record<string, any>, m = String(message ?? "").replace(/[\u2019`]/g, "'");
+  if (ARTIFACT_KEYS.some((k) => has(r, k)) || (r.sends ?? 0) > 0 || r.scored || !has(r, "question")) return false;
+  if (ANSWER_ASK.test(m)) return true;
+  const served = String(r.question?.q ?? r.question?.question ?? r.reply ?? "");
+  if (TECH_TOPIC.test(m) && !TECH_TOPIC.test(served)) return true;
+  // A question about a firm or a process (research), not a practice ask, answered with a practice question.
+  return questionShaped(m) && !PRACTICE_ASK.test(m);
+}
+// (3) "what would you need from me to actually submit that paypal application? don't apply yet just wanna know" got the generic
+//     onboarding list. A question about what one named application needs, with applying forbidden or only asked about, is the
+//     brain's (it reads the posting and the person's record); the bare "what do you need from me" stays code's onboarding.
+const SUBMIT_NEEDS = /\bwhat\b[^?.!]{0,40}\b(?:need|take|require)\b[^?.!]{0,40}\b(?:submit|apply|application)\b/i;
+export function namedApplicationNeeds(message: string, intent: string | null): boolean {
+  if (intent !== "career_onboarding_needs") return false;
+  const m = String(message ?? "").replace(/[\u2019`]/g, "'");
+  return SUBMIT_NEEDS.test(m) && (NEGATED_ACTION.test(m) || /\b(?:that|the|this|my)\s+[A-Za-z][\w&.-]*\s+(?:application|role|posting|internship|job)\b/i.test(m));
+}
+// (4) "what should i actually be doing rn to land a swe internship for next summer" ran a search for "lock what should
+//     actually doing rn land". An advice question that names no find/show ask is the brain's (it can still search with its
+//     read tools); "find me 5 swe internships" stays code's search.
+const ADVICE_Q = /\b(?:what\s+(?:should|do|can|must)\s+i\b|how\s+(?:do|can|should|would)\s+i\b|where\s+(?:should|do)\s+i\s+(?:start|begin|focus))/i;
+export function adviceOverSearch(message: string, intent: string | null): boolean {
+  return !!intent && SEARCH_INTENTS.has(intent) && ADVICE_Q.test(String(message ?? "").replace(/[\u2019`]/g, "'")) && !SEARCH_ASK.test(message);
 }
 
 // THE MODEL DECIDES QUESTION-SHAPED TURNS (2026-11-06; root-cause report PR-3 step A, beta C02/C08/C11). The router classes a

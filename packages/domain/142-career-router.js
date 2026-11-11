@@ -5997,7 +5997,9 @@ const CareerRouter = (() => {
       if (sc && Array.isArray(sc.feedback) && sc.feedback[0]) facts.push(`Fix first: ${s(sc.feedback[0]).split(/(?<=[.!?])\s/)[0]}`);
       facts.push("The rubric reads the answer's shape (its order, numbers and specifics); it cannot tell whether what you said is right for the role.");
       const head = scores ? `Your answer, scored: ${scores.total}/15 on the rubric.` : "Your answer, read against the rubric.";
-      return { intent: "prep_brief", reply: compose({ headline: head, facts, nextStep: "Want the next question, or the same one again with the weak part as the focus?" }), resultStatus: "running", sends: 0, question: lq };
+      // MIRROR WA-1 (2026-11-11): marked as a keyword-rubric read, so the staged release can tell it from a drill key's grade
+      // (career_staged.ts prepRubricRead): the rubric reads shape, not the answer, and it also catches a new ask sent mid-session.
+      return { intent: "prep_brief", reply: compose({ headline: head, facts, nextStep: "Want the next question, or the same one again with the weak part as the focus?" }), resultStatus: "running", sends: 0, question: lq, scored: "rubric" };
     }
     // (3) Serve the next question from the sector's bank.
     if (!sector) return null;

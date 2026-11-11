@@ -1,0 +1,97 @@
+# MIRROR, one conversation, real model (architect, 2026-11-11). Runs evals/mirror/run-conversation.ts --live on the benchmark the
+# request file names, through the real career handler on a throwaway Postgres 16, and uploads the transcript. It runs only on a
+# push to ci/mirror-conversation that changes evals/mirror/**, so nothing on trunk or a PR ever spends.
+# Spend: the owner's written approval is the request's `approval` (a DECISIONS.md line, D-057 for the mirror pilot: at most $3 in
+# total, on prompts Instinct answered). The run is capped at the request's budget_usd: the shared $70 ledger is reserved for
+# that cap BEFORE the run (refused if it does not fit what remains) and settled to the metered cost after it. The ledger secrets
+# are given only to those two steps, never to the run, so the handler's own model calls are counted once (by the runner's meter).
+# Every host but the model and the database double is refused inside the run: nothing can be submitted or sent.
+name: mirror-conversation
+on:
+  push:
+    branches: [ci/mirror-conversation]
+    paths: [evals/mirror/**, .github/workflows/mirror-conversation.yml]
+permissions:
+  contents: read
+concurrency: { group: mirror-conversation, cancel-in-progress: false }
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with: { deno-version: "v2.9.6" }
+      - name: The request
+        id: req
+        run: |
+          deno eval '
+            const f = JSON.parse(Deno.readTextFileSync("evals/mirror/run-request.json"));
+            const ok = /^D-\d{3}[a-z]?$/.test(f.approval ?? "") && Number(f.budget_usd) > 0 && Number(f.budget_usd) <= 3 && typeof f.conv === "string" && typeof f.label === "string" && /^[a-z0-9-]{3,60}$/.test(f.label);
+            if (!ok) { console.log("NOT RUN: bad request (approval D-xxx, 0 < budget_usd <= 3, conv, label)", JSON.stringify(f)); Deno.exit(2); }
+            Deno.writeTextFileSync(Deno.env.get("GITHUB_OUTPUT"), `approval=${f.approval}\nbudget=${f.budget_usd}\nconv=${f.conv}\npersona=${f.persona ?? ""}\nlabel=${f.label}\n`, { append: true });
+            console.log(`request: ${f.label}, ${f.conv}, cap $${f.budget_usd} under ${f.approval}`);
+          '
+      - name: Reserve the cap at the shared ledger
+        id: reserve
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          EVAL_LEDGER: shared
+          MODEL_BUDGET_TARGET_USD: "70"
+          MODEL_BUDGET_HARD_USD: "70"
+          CAP_USD: ${{ steps.req.outputs.budget }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then echo "NOT RUN: a secret is missing (ANTHROPIC_API_KEY or the shared ledger); no model call was made"; exit 2; fi
+          deno eval '
+            const bud = await import("file://" + Deno.cwd() + "/supabase/functions/_shared/model_budget.ts");
+            const gate = bud.resolveBudgetGate(undefined, (k) => Deno.env.get(k));
+            if (!gate) { console.log("NOT RUN: the shared ledger could not be opened"); Deno.exit(2); }
+            const st = await gate.status();
+            const r = await gate.reserve(Math.round(Number(Deno.env.get("CAP_USD")) * 1e6), { model: "claude-sonnet-5-5", role: "eval" });
+            if (!r?.ok || !r.id) { console.log(`NOT RUN: the ledger refused the cap (recorded $${(st.total / 1e6).toFixed(4)} of $70):`, JSON.stringify(r)); Deno.exit(2); }
+            Deno.writeTextFileSync(Deno.env.get("GITHUB_OUTPUT"), `id=${r.id}\n`, { append: true });
+            console.log(`reserved $${Deno.env.get("CAP_USD")} (recorded before: $${(st.total / 1e6).toFixed(4)} of $70)`);
+          '
+      - name: The conversation, real model
+        id: run
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          MIRROR_SPEND_APPROVED: ${{ steps.req.outputs.approval }}
+          CI: "true"
+        run: |
+          export PGBIN=/usr/lib/postgresql/16/bin PATH=/usr/lib/postgresql/16/bin:$PATH
+          P=""; if [ -n "${{ steps.req.outputs.persona }}" ]; then P="--persona ${{ steps.req.outputs.persona }}"; fi
+          mkdir -p "$RUNNER_TEMP/out"
+          deno run -A --no-check --import-map=tests/flow/supabase-npm.json evals/mirror/run-conversation.ts --live --budget-usd "${{ steps.req.outputs.budget }}" \
+            --conv "${{ steps.req.outputs.conv }}" $P --out "$RUNNER_TEMP/out/trainee-${{ steps.req.outputs.label }}.jsonl" | tee "$RUNNER_TEMP/out/summary.txt"
+          spent=$(grep -o 'spent_usd=[0-9.]*' "$RUNNER_TEMP/out/summary.txt" | cut -d= -f2)
+          echo "spent=${spent:-}" >> "$GITHUB_OUTPUT"
+      - name: Settle the ledger to the metered cost
+        if: always() && steps.reserve.outputs.id != ''
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          EVAL_LEDGER: shared
+          MODEL_BUDGET_TARGET_USD: "70"
+          MODEL_BUDGET_HARD_USD: "70"
+          ID: ${{ steps.reserve.outputs.id }}
+          SPENT: ${{ steps.run.outputs.spent }}
+        run: |
+          deno eval '
+            const bud = await import("file://" + Deno.cwd() + "/supabase/functions/_shared/model_budget.ts");
+            const gate = bud.resolveBudgetGate(undefined, (k) => Deno.env.get(k));
+            const spent = Deno.env.get("SPENT");
+            // Not metered (the run died before its summary): the whole reservation stays spent (settle null).
+            const micros = spent && /^[0-9.]+$/.test(spent) ? Math.ceil(Number(spent) * 1e6) : null;
+            const ok = await gate.settle(Deno.env.get("ID"), micros);
+            const st = await gate.status();
+            console.log(`settled ${micros === null ? "the full cap (cost not proven)" : "$" + spent}: ${ok ? "recorded" : "NOT recorded"}; ledger now $${(st.total / 1e6).toFixed(4)} of $70`);
+            if (!ok) Deno.exit(1);
+          '
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mirror-${{ steps.req.outputs.label }}
+          path: ${{ runner.temp }}/out/

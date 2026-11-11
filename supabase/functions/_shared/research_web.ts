@@ -18,6 +18,7 @@ import { releaseFlagOn } from "../agent-chat/release_config.ts";
 import { isBlockedHost, isHttps, normalizeUrl } from "./research_sources.ts";
 import { NEVER_SEARCH_DOMAINS } from "./research_never.ts";
 import type { SearchHit, SearchOut, SearchPlan, SearchProvider } from "./research_search.ts";
+import { type WorkdayRead, workdayUrl } from "./workday_posting.ts";
 
 type Env = { get(k: string): string | undefined };
 // Web research is on when the knowledge release flag is (D-060: CAREER_KNOWLEDGE is a release flag, rolled back with =off) and
@@ -126,11 +127,13 @@ export function withWebSearch(web: SearchProvider, free: SearchProvider): Search
 
 // ------------------------------------------------------------------------------------------------ "is that posting still open?"
 // D-060 (C18): a live re-check of a named posting page, only on the job boards the product already reads by their public APIs
-// (link_check.ts: Greenhouse, Lever and SmartRecruiters by posting id, Ashby by its board's list). Any other host (Workday, a
-// company's own careers site) is not read here: the answer says so and gives the link, never a guess. Nothing is applied for.
-export type PostingRecheck = { state: "open" | "closed" | "unknown"; board: string; url: string; checked_at: string }
+// (link_check.ts: Greenhouse, Lever and SmartRecruiters by posting id, Ashby by its posting page) and, since D-062, Workday by
+// the posting's own CXS data (workday_posting.ts: open or closed, and the application deadline when the posting states one).
+// Any other host (a company's own careers site) is not read here: the answer says so and gives the link, never a guess.
+// Nothing is applied for.
+export type PostingRecheck = { state: "open" | "closed" | "unknown"; board: string; url: string; checked_at: string; title?: string; deadline?: string | null; deadline_text?: string | null; why?: string }
   | { state: "not_readable"; host: string; url: string };
-export const READABLE_BOARDS = ["Greenhouse", "Lever", "SmartRecruiters", "Ashby"] as const;
+export const READABLE_BOARDS = ["Greenhouse", "Lever", "SmartRecruiters", "Ashby", "Workday"] as const;
 export function postingJobId(url: string): { id: string; board: string } | null {
   let u: URL; try { u = new URL(url); } catch { return null; }
   const host = u.hostname.toLowerCase(), seg = u.pathname.split("/").filter(Boolean);
@@ -141,12 +144,21 @@ export function postingJobId(url: string): { id: string; board: string } | null 
   if (host === "jobs.lever.co" && seg.length >= 2 && /^[0-9a-f-]{8,}$/i.test(seg[1])) return { id: `lever:${seg[0]}:${seg[1].toLowerCase()}`, board: "Lever" };
   if (host === "jobs.ashbyhq.com" && seg.length >= 2 && /^[0-9a-f-]{8,}$/i.test(seg[1])) return { id: `ashby:${seg[0]}:${seg[1].toLowerCase()}`, board: "Ashby" };
   if (host === "jobs.smartrecruiters.com" && seg.length >= 2) { const id = /^(\d+)/.exec(seg[1])?.[1]; return id ? { id: `smartrecruiters:${seg[0]}:${id}`, board: "SmartRecruiters" } : null; }
+  const wd = workdayUrl(url);
+  if (wd) return { id: wd.key, board: "Workday" };
   return null;
 }
-export async function recheckPosting(url: string, check: (job: { job_id?: string; url?: string }) => Promise<"live" | "dead" | "unknown">, now: () => number = Date.now): Promise<PostingRecheck> {
+// `workday`: the Workday posting reader (workday_posting.ts readWorkdayPosting); absent, a Workday link is checked by `check`
+// (link_check.ts, the same CXS read without the deadline).
+export async function recheckPosting(url: string, check: (job: { job_id?: string; url?: string }) => Promise<"live" | "dead" | "unknown">, now: () => number = Date.now,
+  o: { workday?: ((url: string) => Promise<WorkdayRead | null>) | null } = {}): Promise<PostingRecheck> {
   const clean = String(url ?? "").trim();
   const job = isHttps(clean) && !isBlockedHost(clean) ? postingJobId(clean) : null;
   if (!job) return { state: "not_readable", host: hostOf(clean) || "that site", url: clean };
+  if (job.board === "Workday" && o.workday) {
+    const w = await o.workday(clean).catch(() => null);
+    return { state: w?.state ?? "unknown", board: "Workday", url: clean, checked_at: new Date(now()).toISOString(), ...(w?.posting ? { title: w.posting.title, deadline: w.posting.deadline, deadline_text: w.posting.deadline_text } : {}), why: w?.why ?? "the Workday read did not finish" };
+  }
   const s = await check({ job_id: job.id, url: clean }).catch(() => "unknown" as const);
   return { state: s === "live" ? "open" : s === "dead" ? "closed" : "unknown", board: job.board, url: clean, checked_at: new Date(now()).toISOString() };
 }

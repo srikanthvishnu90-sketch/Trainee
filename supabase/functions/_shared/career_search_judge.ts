@@ -26,6 +26,7 @@ import { correctedAsk, refinedAsk } from "./search_correction.ts";
 import { blockerAsk, inMetro, METRO, remoteInUs, widenedAsk, withScope } from "./search_widen.ts";
 import { arrangementOf, checkedAt, nextWidening, placesLine, roleVariants, studentWindowOf, wantOf } from "./search_shortlist.ts";
 import { apiUrlFor, ashbyBoardFor, type LinkCheck, liveOnly, SEARCH_CHECK_MAX, searchCheck } from "./link_check.ts";
+import { workdayUrl } from "./workday_posting.ts"; // D-062
 import { type CanSubmit, capabilitiesOf, rankBySubmit, submitLabel } from "./submit_capability.ts";
 import { hasLimits, type Limits, limitsLine, outsideLimits, REASON_WORDS, type Reason, searchTextOf, statedBand, statedPay } from "./posting_constraints.ts";
 import { CareerPool } from "./career_pool.js";
@@ -563,11 +564,12 @@ export async function searchJudgeTurn(o: {
   let hits: SearchHit[] = found.postings;
   // 2b. R10 WO-C (fix 6): each role's application page is re-checked before it is shown. A closed one is left out (counted);
   // one whose page did not answer stays, marked "not re-checked"; without a checker every role is marked so.
-  // Only a posting on a public ATS board (Greenhouse, Lever, Ashby, SmartRecruiters) is re-checked: a page anywhere else is not
+  // Only a posting on a public ATS board (Greenhouse, Lever, Ashby, SmartRecruiters; Workday since D-062) is re-checked: a page anywhere else is not
   // read as open or closed, and is said to be not re-checked.
   const offBoard = new Set<string>();
   const check: LinkCheck | null = o.openCheck ? async (j) => {
-    if (apiUrlFor(String(j.job_id ?? "")) || ashbyBoardFor(String(j.job_id ?? ""))) return await o.openCheck!(j);
+    // D-062: and Workday, by the posting's own CXS data (link_check.ts, workday_posting.ts).
+    if (apiUrlFor(String(j.job_id ?? "")) || ashbyBoardFor(String(j.job_id ?? "")) || workdayUrl(String(j.url ?? ""))) return await o.openCheck!(j);
     offBoard.add(String(j.job_id ?? "")); return "unknown";
   } : null;
   // Architect ruling E.21: only the postings to be shown are checked (searchCheck): at most the count asked (or shown), never

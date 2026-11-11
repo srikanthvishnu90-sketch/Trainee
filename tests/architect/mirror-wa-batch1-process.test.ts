@@ -26,14 +26,15 @@ const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a,
 // and send"): C6, C16 and C19 move from BLOCKED to EXISTS (Gmail confirmations and the tracker File, CAREER_MAIL_TRACKING; public
 // people search, CAREER_PEOPLE_SEARCH in RELEASE_FLAGS). Their process is asserted in MP-1 below and in
 // tests/architect/d062-capabilities-process.test.ts; every other entry and check is unchanged.
-export const EXISTS = ["C2", "C3", "C5", "C5f1", "C5f2", "C6", "C7", "C8", "C9", "C12", "C13", "C14", "C15", "C16", "C17", "C18", "C19", "C21", "C21f", "C22", "C23"];
+// Architect amendment (D-062): C11 moves to EXISTS (inspect_apply_flow, posting_requirements.ts: the posting and its form read
+// from public pages only, the questions behind a Workday sign-in named as not known); its blocked step is asserted in MP-1 below.
+export const EXISTS = ["C2", "C3", "C5", "C5f1", "C5f2", "C6", "C7", "C8", "C9", "C11", "C12", "C13", "C14", "C15", "C16", "C17", "C18", "C19", "C21", "C21f", "C22", "C23"];
 // The turns whose process needs a capability Trainee does not serve today. OFF: the code exists and a release switch keeps it off
 // (`flags`, none of which release_config.ts serves on). MISSING: what has to be built or provided.
 export const BLOCKED: Record<string, { status: "OFF" | "MISSING"; blocker: string; flags?: string[] }> = {
   C1: { status: "OFF", flags: ["CAREER_REPLY_WRITER"], blocker: "one File with the checked postings and a weekly plan: create_file (the plan_review kind) is offered only with the reply writer on Telegram (career_brain.ts o.shape); research_career_question's plan page (D-060) has no postings in it" },
   C4: { status: "MISSING", blocker: "a sourced answer to a specific advice question (what goes at the top of a resume, with one cited guide): with web research on (D-060), research_career_question answers it as a career-entry plan (\"this week: build a tool\") with no source link, and research_market is market research" },
   C10: { status: "MISSING", blocker: "the email at the top of the resume: Instinct used the linked account's email; tailor_resume refuses until the person types one (set_resume_contact never uses the account email), and the benchmark persona never typed one" },
-  C11: { status: "MISSING", blocker: "a read-only reader of a posting's application entry flow and questions (Workday behind sign-in): questions are known only after a preparation run (career_apply_questions)" },
   C20: { status: "MISSING", blocker: "edits to a tailored resume (condense one role to one line, expand another): tailor_resume takes no edit instructions; save_resume_persona only orders or hides facts" },
 };
 
@@ -101,6 +102,7 @@ const SCRIPT: Record<string, Step[]> = {
   C14: [{ tool: "draft_followup", input: { kind: "note", recipient: "", tone: "way shorter, less formal", body: C14_BODY } }, { text: "Here it is." }],
   C15: [{ tool: "add_profile_fact", input: { kind: "education", text: "new grad, zero internships, mid GPA" } }, { text: "In that situation, I'd build the resume around one or two projects you can demo." }],
   C17: [{ tool: "get_profile", input: {} }, { text: "I'm studying computer science and finance at Lakeshore; I started Pixelforge and built over 70 React websites, and now I'm building Waypoint." }],
+  C11: [{ tool: "inspect_apply_flow", input: { job_id: PAYPAL.id } }, { text: `To submit it I'd need your approval of the final resume, the email and phone to put on it, and your answers to the form's own questions. I couldn't read PayPal's form just now, so I can't list those questions yet. I only read the public pages: no account, saved application or submission was created.\n${PAYPAL.url}` }],
   C18: [{ tool: "check_posting_open", input: { url: PAYPAL.url } }, { text: `I couldn't check PayPal's posting just now, so I can't call it open. Nothing was applied for.\n${PAYPAL.url}` }],
   C9: [{ tool: "research_market", input: { question: C9_Q, format: "inline", companies: ["Citadel"], queries: CITADEL_QUERIES } }, { text: (calls) => {
     const n = cite(calls);
@@ -208,6 +210,17 @@ Deno.test({ name: "MP-1 the EXISTS turns follow Instinct's process: the tools of
     eq(c18.outbound, ["GET https://boards-api.greenhouse.io/v1/boards/paypalwa1/jobs/9101"], "C18: one posting-page read, its own");
     ok(c18.reply.includes(PAYPAL.url), "C18 gives the link");
     ok(!/\bstill open\b|\bis open\b/i.test(c18.reply), "C18 never calls an unchecked posting open");
+
+    // C11 (architect amendment, D-062): what applying would need, read only: the posting the conversation listed, read with the
+    // apply-flow reader on its own posting page (one GET; refused here, so the questions are said to be not read, never guessed),
+    // and the boundary: no account, saved application or submission created; nothing applied for.
+    const c11 = brain("C11"), a11 = JSON.parse(result(c11.calls, "inspect_apply_flow") || "{}");
+    ok(/THE POSTING THEY MEAN/.test(c11.system) && c11.system.includes(PAYPAL.url), "C11: the posting the conversation listed");
+    ok(c11.tools.includes("inspect_apply_flow"), "C11 offers the read-only apply-flow reader");
+    eq([a11.board, a11.questions_read, a11.questions], ["Greenhouse", "not_read", null], `C11 read the form or said it could not: ${JSON.stringify(a11).slice(0, 300)}`);
+    eq(c11.outbound, ["GET https://boards-api.greenhouse.io/v1/boards/paypalwa1/jobs/9101"], "C11: one read, the posting's own page");
+    ok(/no account, saved application or submission was created/.test(a11.note) && /never guess the questions/.test(a11.note), `C11 note: ${a11.note}`);
+    ok(/no account, saved application or submission was created/.test(c11.reply), "C11 boundary kept");
 
     // C9: one web search; official pages first, the forum labelled an anecdote, the two employers kept apart; one topic per message
     // with its link on its own line; nothing sent.

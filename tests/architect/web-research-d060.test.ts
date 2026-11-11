@@ -157,9 +157,14 @@ Deno.test("D-060 C18: a posting is re-checked live only on the boards Trainee re
   const check = async (j: { job_id?: string }) => { seen.push(String(j.job_id)); return j.job_id === "greenhouse:paypal:12345" ? "live" as const : "dead" as const; };
   eq((await recheckPosting("https://boards.greenhouse.io/paypal/jobs/12345", check, () => 0)).state, "open");
   eq((await recheckPosting("https://boards.greenhouse.io/paypal/jobs/999", check, () => 0)).state, "closed");
+  // Architect amendment (D-062): Workday is now a board Trainee reads (the posting's own CXS data, workday_posting.ts), so its
+  // link is checked by the same check (never guessed: "closed" here is what the check answered); a host Trainee does not read
+  // is still named, never fetched, never guessed.
   const wd = await recheckPosting("https://paypal.wd1.myworkdayjobs.com/en-US/jobs/job/Software-Engineer-Intern_R0138586", check);
-  eq([wd.state, (wd as any).host], ["not_readable", "paypal.wd1.myworkdayjobs.com"]);
-  eq(seen, ["greenhouse:paypal:12345", "greenhouse:paypal:999"], "Workday was never asked");
+  eq([wd.state, (wd as any).board], ["closed", "Workday"]);
+  const other = await recheckPosting("https://careers.example.com/jobs/123", check);
+  eq([other.state, (other as any).host], ["not_readable", "careers.example.com"]);
+  eq(seen, ["greenhouse:paypal:12345", "greenhouse:paypal:999", "workday:paypal.wd1.myworkdayjobs.com:Software-Engineer-Intern_R0138586"], "only the boards Trainee reads were asked");
 });
 
 Deno.test("D-060 release: web research is on at the release value and off with CAREER_KNOWLEDGE=off; people search stays off", () => {
@@ -252,6 +257,8 @@ async function withHandler(fn: (h: Awaited<ReturnType<typeof careerHandler>>) =>
     const viaDouble = globalThis.fetch;
     globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
       const url = String(input instanceof Request ? input.url : input);
+      // Architect amendment (D-062): the Workday read is refused (as with no network), never answered by the fake board's 404.
+      if (/^https:\/\/[^/]+\.myworkdayjobs\.com\//.test(url)) { hosts.push(`${new URL(url).hostname}${new URL(url).pathname}`); throw new TypeError("network refused: myworkdayjobs.com"); }
       if (/^https:\/\/boards-api\.greenhouse\.io\/v1\/boards\/paypal\/jobs\/\d+/.test(url)) { hosts.push("boards-api.greenhouse.io"); return /\/12345$/.test(url) ? Response.json({ id: 12345, title: "Software Engineer Intern" }) : new Response("gone", { status: 404 }); }
       return viaDouble(input as any, init);
     }) as typeof fetch;
@@ -298,13 +305,15 @@ Deno.test({ name: "D-060 at the real handler: research with sources, one search 
     eq(r2.status, 200, r2.reply);
     eq(webCalls.length, 1, "C23 is answered from the cached search: no new web search");
     ok(r2.reply.includes(`roughly eight weeks.\n${CITADEL}`) || (r2.reply.includes("eight weeks") && r2.reply.includes(CITADEL)), `C23 recalls with the same source: ${r2.reply}`);
-    // C18: Greenhouse checked live; Workday named as not read, never fetched.
+    // C18: Greenhouse checked live. Architect amendment (D-062): Workday is read now (its posting's CXS data); with the read
+    // refused here it is "not known", never called open or closed, and the one request was that posting's own read.
     const r3 = await chat.say(`is that paypal internship posting still open? check rn ${GH}`);
     eq(r3.status, 200, r3.reply);
     const checks = seen.filter((s) => s.toolResult && /"state"/.test(s.toolResult)).map((s) => JSON.parse(s.toolResult!));
-    eq(checks.map((c) => c.state), ["open", "not_readable"], JSON.stringify(checks));
-    ok(/does not read paypal\.wd1\.myworkdayjobs\.com pages/.test(checks[1].note), checks[1].note);
-    ok(!hosts.some((x) => /myworkdayjobs/.test(x)), "Workday was never fetched");
+    eq(checks.map((c) => c.state), ["open", "unknown"], JSON.stringify(checks));
+    ok(/did not finish/.test(checks[1].note) && /Do not guess/.test(checks[1].note), checks[1].note);
+    eq(hosts.filter((x) => /myworkdayjobs/.test(x)), ["paypal.wd1.myworkdayjobs.com/wday/cxs/paypal/jobs/job/Software-Engineer-Intern---Summer-2027_R0138586",
+      "paypal.wd1.myworkdayjobs.com/jobs/job/Software-Engineer-Intern---Summer-2027_R0138586"], "Workday reads: that posting's own data, then its public page; nothing else");
   });
 } });
 

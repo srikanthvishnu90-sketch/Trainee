@@ -38,8 +38,8 @@ Deno.test({ name: "MP-BLOCKED the turns blocked on a missing or off capability f
     check("C6", /tracker/i.test(seen.C6.reply) && /\?/.test(seen.C6.reply), "offers a tracker");
     // C10: the PDF delivered, labelled a review draft, nothing submitted.
     check("C10", seen.C10.documents.length === 1 && seen.C10.documents[0]?.format === "pdf", `a tailored PDF delivered (tailor_resume: ${seen.C10.calls[0]?.result.slice(0, 160)})`);
-    // C11: the entry flow inspected read only; requirements and unknown questions listed.
-    check("C11", seen.C11.tools.includes("inspect_apply_flow"), "a read-only apply-flow reader offered");
+    // C11: architect amendment (D-062): passes now (inspect_apply_flow offered); moved to EXISTS and asserted in full in
+    // tests/architect/mirror-wa-batch1-process.test.ts MP-1, and on Workday in tests/architect/workday-posting-d062.test.ts.
     // C16: a tracker artifact with past applications, researched roles and the unsubmitted draft.
     check("C16", seen.C16.tools.includes("export_tracker") || /https?:\/\/\S+/.test(seen.C16.reply), "a tracker artifact made");
     // C19: three named public leads with a verification caveat; nobody contacted.

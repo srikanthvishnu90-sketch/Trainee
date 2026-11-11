@@ -19,6 +19,7 @@
 // quota), shared through the database so every instance backs off, and said plainly. One company is discovered once for
 // everyone inside the cache window. Docs: docs/architect/PEOPLE-PROVIDER-2026-10-27.md.
 import { writesToSomeone } from "./outreach_ask.ts";
+import { releaseFlagOn } from "../agent-chat/release_config.ts"; // D-062
 import { isAutomatedInbox } from "./automated_inbox.ts";
 import { chatAsk, cleanCell, cleanEmail, companyKey, isFormula, readsAsInstruction } from "./career_people_import.ts";
 import { neverOpen } from "./career_people_sites.ts";
@@ -59,7 +60,8 @@ export interface ProviderConfig { provider: ProviderName | null; apiKey: string 
 // stays unwired here whatever the gateway says.
 export const PEOPLE_WEB_SEARCH_WIRED = false;
 export function providerConfig(env: (k: string) => string | undefined): ProviderConfig {
-  const switchedOn = (env("CAREER_PEOPLE_SEARCH") ?? "").trim().toLowerCase() === "on";
+  // D-062: a release flag (on unless rolled back with CAREER_PEOPLE_SEARCH=off), read through the release config.
+  const switchedOn = releaseFlagOn({ get: env }, "CAREER_PEOPLE_SEARCH");
   const gw = modelConfig({ get: env });
   const asked = (env("CAREER_PEOPLE_SEARCH_MODEL") ?? "").trim();
   if (asked && !PRODUCT_MODELS.includes(asked)) warnIgnoredOnce("CAREER_PEOPLE_SEARCH_MODEL", asked, "Trainee serves claude-sonnet-5-5 only (D-046)");

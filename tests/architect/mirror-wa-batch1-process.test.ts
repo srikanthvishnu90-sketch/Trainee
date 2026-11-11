@@ -17,21 +17,23 @@ import { type Call, effectRows, PAYPAL, runConversation, type Step, TURNS } from
 import { agentTurn } from "../../supabase/functions/agent-chat/career_brain.ts";
 import { PRODUCTION_BRAIN, RELEASE_FLAGS, RELEASE_NEVER_ON } from "../../supabase/functions/agent-chat/release_config.ts";
 import { POSTING_PAGE } from "./helpers/posting_checks.ts";
+import { C16_STEPS, C19_STEPS, C6_STEPS, isPeopleSearch, peopleSearchAnswer } from "./helpers/d062_fixtures.ts"; // Architect amendment (D-062)
 
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
 
-export const EXISTS = ["C2", "C3", "C5", "C5f1", "C5f2", "C7", "C8", "C9", "C12", "C13", "C14", "C15", "C17", "C18", "C21", "C21f", "C22", "C23"];
+// Architect amendment (D-062; owner, 2026-11-11: "be able to answer emails, find alumni, do all of it. not gmail read, but gmail read
+// and send"): C6, C16 and C19 move from BLOCKED to EXISTS (Gmail confirmations and the tracker File, CAREER_MAIL_TRACKING; public
+// people search, CAREER_PEOPLE_SEARCH in RELEASE_FLAGS). Their process is asserted in MP-1 below and in
+// tests/architect/d062-capabilities-process.test.ts; every other entry and check is unchanged.
+export const EXISTS = ["C2", "C3", "C5", "C5f1", "C5f2", "C6", "C7", "C8", "C9", "C12", "C13", "C14", "C15", "C16", "C17", "C18", "C19", "C21", "C21f", "C22", "C23"];
 // The turns whose process needs a capability Trainee does not serve today. OFF: the code exists and a release switch keeps it off
 // (`flags`, none of which release_config.ts serves on). MISSING: what has to be built or provided.
 export const BLOCKED: Record<string, { status: "OFF" | "MISSING"; blocker: string; flags?: string[] }> = {
   C1: { status: "OFF", flags: ["CAREER_REPLY_WRITER"], blocker: "one File with the checked postings and a weekly plan: create_file (the plan_review kind) is offered only with the reply writer on Telegram (career_brain.ts o.shape); research_career_question's plan page (D-060) has no postings in it" },
   C4: { status: "MISSING", blocker: "a sourced answer to a specific advice question (what goes at the top of a resume, with one cited guide): with web research on (D-060), research_career_question answers it as a career-entry plan (\"this week: build a tool\") with no source link, and research_market is market research" },
-  C6: { status: "MISSING", blocker: "evidence from the person's email confirmations in the record reply: CAREER_MAIL_TRACKING reads one connected Gmail, the record reply (tracking_status) does not read it or separate researched roles from applications, and the benchmark persona has no Gmail" },
   C10: { status: "MISSING", blocker: "the email at the top of the resume: Instinct used the linked account's email; tailor_resume refuses until the person types one (set_resume_contact never uses the account email), and the benchmark persona never typed one" },
   C11: { status: "MISSING", blocker: "a read-only reader of a posting's application entry flow and questions (Workday behind sign-in): questions are known only after a preparation run (career_apply_questions)" },
-  C16: { status: "MISSING", blocker: "a tracker artifact (no tracker File kind in file_kinds.ts, no Sheets export) built from email confirmations; the record reply says the tracker is empty" },
-  C19: { status: "OFF", flags: ["CAREER_PEOPLE_SEARCH", "CAREER_CONTACT_OUTREACH"], blocker: "public people search (D-043 not accepted; both in RELEASE_NEVER_ON): code's people-list reply plans a list and finds no one" },
   C20: { status: "MISSING", blocker: "edits to a tailored resume (condense one role to one line, expand another): tailor_resume takes no edit instructions; save_resume_persona only orders or hides facts" },
 };
 
@@ -114,12 +116,14 @@ const SCRIPT: Record<string, Step[]> = {
   C21: [{ text: `${C21_Q} Give me the answer you'd actually say, and I'll be blunt.` }],
   C21f: [{ text: "Right now that's a plot summary, not an answer: what did YOU get wrong, and what did redoing it cost?" }],
   C23: [{ tool: "research_market", input: { question: C9_Q, format: "inline", companies: ["Citadel"], queries: CITADEL_QUERIES } }, { text: (calls) => `At Citadel, the overall process takes roughly eight weeks [${cite(calls)("our-engineering-interview-process")}].` }],
+  // Architect amendment (D-062): the capability turns (tests/architect/helpers/d062_fixtures.ts).
+  C6: C6_STEPS, C16: C16_STEPS, C19: C19_STEPS,
 };
 const result = (calls: Call[], name: string) => { const c = calls.find((x) => x.name === name); return c ? c.result : ""; };
 
 Deno.test({ name: "MP-1 the EXISTS turns follow Instinct's process: the tools offered and called, the artifact, the boundary, nothing sent", sanitizeOps: false, sanitizeResources: false, ignore: canRun() !== null && canRun() !== "FAIL", fn: async () => {
   if (canRun() === "FAIL") throw new Error("MP-1 needs Postgres 16 in CI");
-  const { seen, flags, world, person, close } = await runConversation(SCRIPT, { web, draft });
+  const { seen, flags, world, person, close } = await runConversation(SCRIPT, { web: (body, turn) => isPeopleSearch(body) ? peopleSearchAnswer(body) : web(body, turn), draft }); // Architect amendment (D-062): the people search stub
   try {
     // The backtest is production's configuration (owner, 2026-11-11): on every turn the handler's effective switches are
     // RELEASE_FLAGS exactly as release_config.ts ships them, no never-on switch is on, and the brain is PRODUCTION_BRAIN.
@@ -236,6 +240,19 @@ Deno.test({ name: "MP-1 the EXISTS turns follow Instinct's process: the tools of
     eq(c23.searches, 0, "C23 is answered from the earlier search, unsearched");
     ok(/eight weeks/.test(c23.reply) && c23.reply.includes("https://www.citadel.com/careers/career-perspectives/our-engineering-interview-process"), `C23 recalls with the same source: ${c23.reply}`);
 
+    // Architect amendment (D-062). C6: the record from Gmail confirmations (this persona has none connected: said, with where to
+    // connect it), tonight's PayPal kept apart as research, a tracker offered. C16: the tracker tool (its page needs file links,
+    // which this world does not set: d062-capabilities-process.test.ts makes it). C19: one people search from excerpts, three
+    // leads not verified, nobody contacted.
+    const c6 = brain("C6"), r6 = JSON.parse(result(c6.calls, "read_application_mail") || "{}");
+    ok(c6.tools.includes("read_application_mail") && r6.mail?.gmail === "not_connected" && /\/connect\/gmail$/.test(r6.connect_url ?? ""), `C6 record: ${JSON.stringify(r6).slice(0, 300)}`);
+    ok((r6.researched ?? []).some((x: any) => x.company === "PayPal") && !(r6.applied ?? []).length, "C6: PayPal is research, not an application");
+    ok(/Gmail/.test(c6.reply) && /PayPal[^\n]*research only/.test(c6.reply) && /tracker[^\n]*\?/.test(c6.reply), c6.reply);
+    ok(brain("C16").tools.includes("export_tracker") && seen.C16.calls.some((c) => c.name === "export_tracker"), "C16 builds the tracker");
+    const c19 = brain("C19"), r19 = JSON.parse(result(c19.calls, "find_people") || "{}");
+    eq(c19.searches, 1, "C19: one people search");
+    eq((r19.leads ?? []).length, 3, `C19 leads: ${JSON.stringify(r19).slice(0, 300)}`);
+    ok((c19.reply.match(/^\s*\d+\. /gm) ?? []).length === 3 && /not verified/.test(c19.reply) && /Nobody was contacted\./.test(c19.reply), c19.reply);
     // The whole conversation: nothing queued, prepared, submitted or sent; off the machine only posting-page reads.
     for (const [t, n] of Object.entries(await effectRows(world, person.id))) eq(n, 0, `${t} has rows`);
     // Off the machine: posting-page reads (C3, C18), and on the research turns (C9, C22, C23) the research reader's GETs of public

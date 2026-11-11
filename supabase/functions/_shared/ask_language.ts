@@ -48,6 +48,20 @@ const SECOND_REQUEST = /(?:[.?!]\s*|;\s*|,\s*and\s+)also,?\s+(?:draft|write|find
 // my job; draft a counter" is one ask with its context first.
 const SEMI_SECOND = /;\s*(?:research|tell me about|draft|write|prep me)\b/i;
 const REQUEST_HEAD = /^\s*(?:(?:please|can you|could you|pls)\s+)?(?:find|look|search|show|give|tell|draft|write|rework|tailor|update|edit|make|research|prep|send|list|check|fix|rewrite)\b|\?\s*$/i;
+// D-061 G13 (several asks: answer each), the same markers, wider: a counted list whose items are split by a semicolon ("two
+// things: X; and Y"), a second ask after "; and" or "and also", and two questions, each its own sentence. "Two things: remote
+// only, and nothing under $35" (conditions, no semicolon) and "find X, also give me exactly 3" stay one ask.
+const ASK_HEAD = String.raw`(?:what|what's|whats|which|how|is|are|can|could|should|do|does|did|have|has|will|would|when|where|who|why|draft|write|find|look|search|research|tell|give|show|send|log|track|prep|rework|make|list|check|fix|rewrite|help|explain)\b`;
+const COUNTED_SEMI = new RegExp(String.raw`\b(?:two|2|three|3|couple(?:\s+of)?|few)\s+(?:things|questions|asks|q's|qs)\s*[:.,-]?\s*[^;]{3,}?;\s*(?:and\s+|also\s+|then\s+)?${ASK_HEAD}`, "i");
+const AND_SECOND = new RegExp(String.raw`;\s*and\s+(?:also\s+)?${ASK_HEAD}|\band also,?\s+${ASK_HEAD}`, "i");
+const QUESTION_SENTENCE = new RegExp(String.raw`^(?:(?:and|also|plus|oh|ok|so)[,\s]+)?${ASK_HEAD}[^?]{6,}\?$`, "i");
+const twoQuestions = (t: string) => t.split(/(?<=[.?!])\s+|\n+/).map((x) => x.trim()).filter((x) => QUESTION_SENTENCE.test(x)).length >= 2;
+// D-061 G13: D-058's markers, or the wider ones above. The handler and the brain's note read this; the staged route's
+// "multi_part" reason keeps D-058's own reading (multiAsk), and the wider reading reaches the brain through g1CodeAnswers.
+export function severalAsks(message: string): boolean {
+  const t = String(message ?? "").replace(/[’]/g, "'");
+  return multiAsk(t) || COUNTED_SEMI.test(t) || AND_SECOND.test(t) || twoQuestions(t);
+}
 export function multiAsk(message: string): boolean {
   const t = String(message ?? "").replace(/[’]/g, "'");
   if (TWO_ASK_MARKER.test(t) || SECOND_REQUEST.test(t)) return true;

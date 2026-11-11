@@ -19,7 +19,8 @@ import { servedBrain } from "./release_config.ts";
 import { NO_CLOCK, type TurnClock } from "./turn_clock.ts";
 import { crisisReply } from "./crisis.ts";
 import { PAYLOAD_INTENTS } from "../_shared/career_reply_writer.ts";
-import { multiAsk, nonEnglishAsk } from "../_shared/ask_language.ts";
+import { multiAsk, nonEnglishAsk, severalAsks } from "../_shared/ask_language.ts";
+import { boundaryOf, correctionOf, hypotheticalOf } from "../_shared/agent/turn_notes.ts"; // D-061 G1, G8, G9
 
 type Env = { get(k: string): string | undefined };
 type Host = { runTurn(text: string, ctx: any): { intent: string | null; handler: string | null; reply?: string; contained?: boolean; result?: any }; isHostControlled(text: string, ctx: any): boolean };
@@ -497,9 +498,12 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (!STAGED_BRAIN_INTENTS.includes(intent)) {
     // Before the list: a turn that asks or forbids is the brain's unless its intent is code's own work (questionTurn).
     if (questionTurn(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "question_shaped", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
+    if (!g1CodeAnswers(o.message, intent, probe.result, o.ctx)) return g1Brain(o, intent, probe, clock);
     return { brain: false, mode, intent, reason: "action" };
   }
-  if (codeProduct(intent, probe.result)) return { brain: false, mode, intent, reason: "code_product" };
+  // A sourced record behind the answer (a company file, a benchmark with figures, the person's offer) stays code's (D-007), unless
+  // the turn is a hypothetical, a correction of Trainee or several asks (D-061 G8, G9, G13): then the record is the brain's data.
+  if (codeProduct(intent, probe.result)) return g1Override(o.message) ? g1Brain(o, intent, probe, clock) : { brain: false, mode, intent, reason: "code_product" };
   return { brain: true, mode, intent, reason: "question", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
 }
 
@@ -693,3 +697,96 @@ export function stagedRoute(o: { env: Env; message: string; ctx: Record<string, 
     get chosen(): boolean { return !!d?.brain; },
   };
 }
+
+// ------------------------------------------------------------------------------------------------ D-061 G1
+// docs/architect/specs/MIRROR-RULINGS.md G1: "Code answers on its own only (a) exact payload intents (an approval of a shown card,
+// stop/pause, account controls) and (b) a reply that is a bare answer to a question code just asked. Every other message goes to
+// the brain, with what code found (search results, records, profile facts) passed as data." Read by the router's intent and what
+// its probe built, never by a prompt's wording (P3). The brain still cannot apply, send, save an alert or verify a contact
+// (STAGED_WITHHELD_TOOLS), and every external effect still needs the person's yes to the exact payload.
+//
+// (a) and (b), and code's guards: always code's, a hypothetical or a correction included.
+const G1_CONTROL: ReadonlySet<string> = new Set([
+  // a bare yes or no, a hold, a cancel, a recipient change: the answer to whatever is waiting
+  "conversation_bare_reply", "conversation_hold", "intent_cancelled", "intent_recipient_change", "onboarding_answer",
+  // a running practice session: the answer to code's own question (starting one is the brain's, G12)
+  "prep_mock_next", "prep_mock_retry", "prep_mock_followup", "prep_mock_debrief", "prep_mock_complete", "prep_mock_checklist", "negotiation_roleplay",
+  // the account's controls
+  "career_erase_confirm", "career_erase_status", "career_profile_erased", "disconnect", "connect_google", "connect_browser_source",
+  "paused_hold", "pause_status", "people_matching_stop", "intent_opt_out", "career_paused", "career_resumed", "queue_halt", "queue_resume",
+  "captcha_handoff", "portal_account", "portal_accounts", "career_watch_manage", "career_stop_workflow",
+  // refusals and safety replies
+  "safety_support", "impersonation_refused", "authority_refused", "intent_refusal", "tailor_refused", "packet_refused",
+]);
+// Actions the person asks for in their own words, with a code-first owner (one writer each): code's unless the message forbids
+// that very action ("don't apply") or is a hypothetical, a correction or several asks.
+const G1_APPLY_ACTIONS: ReadonlySet<string> = new Set(["career_batch_apply", "named_role_apply", "named_role_link", "doorstep_submit", "doorstep_fill"]);
+// ... and the onboarding list, which answers "what do you need from me" with the facts to start applying.
+const G1_BOUNDARY_SENSITIVE: ReadonlySet<string> = new Set([...G1_APPLY_ACTIONS, "career_onboarding_needs"]);
+const G1_ACTIONS: ReadonlySet<string> = new Set([
+  ...G1_APPLY_ACTIONS, "doorstep_status", "application_packet", "application_packet_walkthrough", "career_packet", "career_packet_absent", "packet_prep",
+  "packet_needs_role", "intent_packet_validity", "career_watch", "career_watch_create", "career_watch_affirm", "career_os_watch",
+  // a search the person asked for: its constraints, list and results page are code's, the results the brain's data otherwise
+  "career_discovery", "career_internship_discovery", "discovery_dead_board",
+  // writes to the person's record they asked for, and onboarding
+  "onboarding", "career_onboarding_needs", "tracking_log", "profile_correction", "intent_sensitive_correction", "sensitive_answer_ask", "career_resume_ingest", "career_resume_correction",
+  "career_resume_update", "career_resume_disowned", "career_resume_dispute", "career_goal_record", "career_preference_corrected", "career_os_wins_log",
+  // an exact payload code drafted around the person's own figure (the counter card), the apply ledger's own entries
+  "negotiation_draft", "negotiation_revision", "career_pending_approvals", "career_approval_select", "career_submission_check", "career_sent_activity",
+  "career_answer_change_after_approval", "career_apply_email_draft", "career_apply_email_explain", "career_apply_email_sender", "career_portal_account",
+  "ai_use_answer", "eligibility_check", "disclosure_clarify", "career_os_review_packet", "calendar_proposal", "graph_intro", "graph_blurb", "profile_export",
+  "access_log", "session_health", "connected_accounts",
+]);
+// Reads of the person's own record (applications, follow-ups, their people): code's when the message asks about that record.
+const G1_RECORD_READS: ReadonlySet<string> = new Set(["tracking_status", "tracking_digest", "career_status_states", "intent_followup_status",
+  "campaign_digest", "season_dashboard", "intent_prior_application", "intent_role_closed", "career_resume_on_file", "career_resume_not_read",
+  "graph_alumni", "graph_referral", "graph_keep_warm", "graph_paths", "career_list_reference", "profile_recall"]);
+// The message is about the person's own record ("have I", "my applications", "did my", "what do you know about me").
+const OWN_RECORD_ASK = /\b(?:my|mine|me|i'?ve|i\s+have|have\s+i|did\s+i|do\s+i\s+(?:have|know)|i\s+(?:applied|sent|know|asked|told))\b/i;
+// A File or document code built for the ask is the deliverable itself (G11): it goes to the person.
+const G1_DELIVERABLE = ["file", "documents", "document", "tailorDoc"];
+// D-061 G1 (the model decides; code guards): the turns code's rules above kept, which the ruling gives to the brain, go there
+// with what the router would have answered as data (routerAnswerBlock), never as the answer.
+function g1Brain(o: { message: string; ctx: Record<string, unknown>; host: Host; env: Env }, intent: string, probe: { reply?: unknown }, clock: TurnClock): StagedDecision {
+  return { brain: true, mode: brainMode(o.env), intent, reason: "g1_model_decides", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
+}
+export const g1Override = (message: string) => { const m = String(message ?? "").replace(/[\u2019`]/g, "'"); return !!hypotheticalOf(m) || correctionOf(m) === "trainee" || severalAsks(m); };
+// A product code built for an instruction the person gave (a draft, a people list, a prep brief, a document, an offer card):
+// the instruction carried out. A sourced record (a company file, a benchmark, a comparison) is data for the brain's answer.
+const OTHER_DELIVERABLE = /\b(?:game\s*plan|(?:a|an|the|my|actual|real|recruiting|search|application|job[- ]search|week[- ]by[- ]week|weekly|daily|step[- ]by[- ]step)\s+(?:\w+\s+)?(?:plan|strategy|roadmap|timeline|schedule|checklist))\b/i;
+// An instruction to act toward someone, in any clause: "Draft only: send it to Lena", "help me message a recruiter at Stripe".
+const G1_INSTRUCTION = /(?:^|[.:;!]\s*)(?:please\s+)?(?:send|email|message|text|dm|reach\s+out|contact|apply|submit|queue)\b|^\s*(?:please\s+)?help\s+me\s+(?:send|email|message|text|dm|reach|contact|write|draft)\b/i;
+const G1_ACTION_PRODUCT = ["draft", "target", "brief", "offer", "documents", "document", "file"];
+// A practice session code is running (a question of its own is waiting): the next ask in it is the session's.
+const prepSessionOpen = (ctx: Record<string, unknown> | undefined) => !!(ctx as any)?.trackStore?._careerThread?.prep?.lastQ || !!(ctx as any)?.mockSession;
+export function g1CodeAnswers(message: string, intent: string, result: unknown, ctx?: Record<string, unknown>): boolean {
+  const m = String(message ?? "").replace(/[’`]/g, "'");
+  if (G1_CONTROL.has(intent) || PAYLOAD_INTENTS.has(intent) && !G1_PRODUCERS.has(intent)) return true;
+  const r = (result && typeof result === "object" ? result : {}) as Record<string, any>;
+  if (G1_DELIVERABLE.some((k) => has(r, k)) || has(r, "artifact") && (has(r.artifact, "pdf") || has(r.artifact, "url"))) return true;
+  // G8, G9, G13: a hypothetical, a correction of Trainee and several asks are the brain's.
+  if (g1Override(m)) return false;
+  // An action the message itself forbids ("don't apply", "don't submit") is not asked for.
+  if (G1_BOUNDARY_SENSITIVE.has(intent) && boundaryOf(m) === "submit") return false;
+  // A search the router ran on words that ask for a different deliverable (a plan, a strategy, a timeline) and no find ask:
+  // the deliverable asked for is the brain's, with the search as data (as adviceOverSearch does for an advice question).
+  if (SEARCH_INTENTS.has(intent) && OTHER_DELIVERABLE.test(m) && !SEARCH_ASK.test(m)) return false;
+  if (G1_ACTIONS.has(intent)) return true;
+  if (G1_RECORD_READS.has(intent)) return OWN_RECORD_ASK.test(m);
+  // G1 (b): the next ask inside a practice session code is running.
+  if (/^prep_/.test(intent) && prepSessionOpen(ctx)) return true;
+  // A drill answer graded against the bank's own key is the answer to code's question; a rubric read is not (prepRubricRead).
+  if (intent === "prep_brief" && r.scored && r.scored !== "rubric") return true;
+  // An instruction (not a question, nothing forbidden) that code carried out with a product, or one to message or list people.
+  if (!questionShaped(m) && (G1_ACTION_PRODUCT.some((k) => has(r, k)) || LIST_OR_SEND.test(m) || ASK_TO_ACT.test(m) || G1_INSTRUCTION.test(m))) return true;
+  // A sourced record behind the answer (a company file, a comparison, a benchmark with figures) stays code's (D-007), as
+  // codeProduct keeps it on the staged list.
+  if (has(r, "company") || has(r, "comparison") || (Array.isArray(r.bench?.figures) && r.bench.figures.length > 0)) return true;
+  // Everything else (advice and questions, research the router answered from its library, a draft code would write from
+  // words, a practice question served from a bank, a recall of the thread): the brain's, with the router's answer as data.
+  return false;
+}
+// Payload intents whose payload is code's reading of the words, not something the person was shown: the brain writes these
+// (a draft with placeholders, D-059; a practice question asked like an interviewer, G12; a tailored resume only when code
+// actually built one, above).
+const G1_PRODUCERS: ReadonlySet<string> = new Set(["outreach_draft", "career_tailor", "prep_mock_start"]);

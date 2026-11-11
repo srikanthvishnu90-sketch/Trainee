@@ -27,7 +27,7 @@ import {
   type OutreachStore, payloadHash, recordOutreach, SIGNATURE_ASK, guardRecipient,
 } from "../career_outreach.ts";
 import { legacyRows, REFERRAL_ASK, referralMap, targetFirms } from "../career_referrals.ts";
-import { CONTACT_QUESTION, confirmedOnly, contactFromMessage, contactQuestion, namedIn, resumeContact, type PersonaStore, type ResumeRenderer, type ResumeStore, restatePersona, savePersona, tailorForPosting, validPersonaName } from "../career_tailor.ts";
+import { CONTACT_QUESTION, confirmedOnly, EMAIL_PLACEHOLDER, contactFromMessage, contactQuestion, namedIn, resumeContact, type PersonaStore, type ResumeRenderer, type ResumeStore, restatePersona, savePersona, tailorForPosting, validPersonaName } from "../career_tailor.ts";
 import { recordVersion, type ResumeVersionLog } from "../career_resume_outcomes.ts";
 import { planLayout } from "../career_resume_rater.ts"; // RELEASE 10
 import { templateId } from "../career_resume_templates.ts"; // RELEASE 10
@@ -38,6 +38,7 @@ import { queueWants, refusal, resolvePicks, screenPicks, type Pick as WantPick, 
 import { payFrom, postingTextForModel } from "../posting_pay.ts";
 import type { Limits } from "../career_apply.ts";
 import { type Situation, statusText } from "../career_situation.ts";
+import { researchAdvice } from "./research/advice.ts";
 import { researchCareerQuestion, type ResearchDeps } from "./research/index.ts";
 import { type MarketDeps, type MarketResult, researchMarket } from "./research/market.ts";
 import { type CompanyResult, FOCI, type Focus, researchCompany } from "./research/company.ts";
@@ -204,6 +205,28 @@ export interface TailorTools {
   // materializes them into the person's artifact store, channel_artifacts.ts). Turn-scoped: nothing is kept in state.
   deliver?: (doc: { format: "pdf" | "docx"; filename: string; mime: string; base64: string; sha256: string | null }) => void;
 }
+// D-063 / G11: what the model is told about a file that rides the chat: it is a review draft, the placeholders that print in it,
+// and, for a changed version, each edit as made. The words to the person are the model's; these are its facts.
+// deno-lint-ignore no-explicit-any
+function reviewOf(r: any, delivered: boolean): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (r.edits?.length) out.edits_done = r.edits;
+  if (!delivered) return out;
+  const flags = [
+    ...(r.placeholders ?? []).includes("email") ? [`The email at the top prints as the visible placeholder ${EMAIL_PLACEHOLDER}: no email is on their confirmed resume and they have not typed one. Say so in the same sentence that hands over the file, and that it needs their email before it is used anywhere; never fill in the account's or this chat's address.`] : [],
+    ...(r.edits ?? []).filter((e: any) => e.expand_short).map((e: any) => `${e.entry}: ${e.asked} lines were asked and their confirmed record holds ${e.available} detail${e.available === 1 ? "" : "s"} for it, so it prints ${e.now}. Say that, and ask what else they did there; nothing was written for them.`),
+  ];
+  out.review_draft = { placeholders: r.placeholders ?? [], flags, note: "Hand it over as a review draft for them to check, not a final file. Name any detail they told you in this conversation is uncertain, outdated or conflicting that still prints in it, and say it needs reconciling before it is sent anywhere. Describe edits only as edits_done says (condensed, expanded, led); for work in progress keep their wording about what is being built, never claim it works. Nothing was submitted." };
+  return out;
+}
+// The how-manyth file this person has for this posting, by the order the version log numbered them.
+async function versionFor(log: ResumeVersionLog, userId: string, sha256: string, jobId: string): Promise<number> {
+  try {
+    const st = await log.get(userId), mine = st.files[sha256];
+    if (!mine) return 1;
+    return Object.values(st.files).filter((f) => f.job_id === jobId && f.n <= mine.n).length || 1;
+  } catch { return 1; }
+}
 const b64 = (bytes: Uint8Array) => { let s = ""; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000)); return btoa(s); };
 // `postings(query)` returns candidate open postings: in production a full-text search of career_postings
 // (supabasePostingsDb.search), in tests a fixed pool. search_jobs filters and ranks them either way.
@@ -266,9 +289,18 @@ export function careerTools(deps: {
   const tailorOf = () => { if (!deps.tailor) throw new Error("resume tailoring is not configured here"); return deps.tailor; };
   const researchTools: ToolSpec[] = deps.research ? [{
     name: "research_career_question", effect: "read",
-    description: "Use for an OPEN career question about any field, stage or situation (\"how do I get hired as an investment banker\", \"can I become an electrician at 40\", \"what does a new grad nurse do first\"), not for a named firm (career_path_answer) and not for job search. Searches current authoritative sources (cached, cost-capped), writes the full plan (stage-by-stage timeline, this-week actions, honest odds, sourced figures, what could not be verified) as a hosted page, and returns the verdict material. ALWAYS call it for such a question, for any field, stage or age, before answering; never answer one from memory. Then answer in ONE short paragraph as the result's note says, and put no plan detail in chat that the page holds. If it returns status need_field, ask its one question and stop.",
-    input_schema: obj({ question: str("The person's question, in their words") }, ["question"]),
-    run: async (i, c) => researchCareerQuestion({ profile: profileOf(c), message: String(i.question ?? c.turn?.message ?? ""), deps: deps.research!, now: c.now }),
+    description: "Use for an OPEN career question about any field, stage or situation (\"how do I get hired as an investment banker\", \"can I become an electrician at 40\", \"what does a new grad nurse do first\"), not for a named firm (career_path_answer) and not for job search. Searches current authoritative sources (cached, cost-capped), writes the full plan (stage-by-stage timeline, this-week actions, honest odds, sourced figures, what could not be verified) as a hosted page, and returns the verdict material. ALWAYS call it for such a question, for any field, stage or age, before answering; never answer one from memory. Then answer in ONE short paragraph as the result's note says, and put no plan detail in chat that the page holds. If it returns status need_field, ask its one question and stop. " +
+      "kind \"advice\" instead, for a SPECIFIC question about doing one thing (what goes on or at the top of a resume, how to word a bullet, how to follow up after an interview): it finds one authoritative page and returns its passages; answer for this person as its note says.",
+    input_schema: obj({ question: str("The person's question, in their words"), kind: { type: "string", enum: ["plan", "advice"], description: "plan (default): how to get into or move in a field. advice: a specific how-to question about one task" }, query: str("Only with kind advice: one web search query that would find an authoritative guide (a university career center or a public guide)") }, ["question"]),
+    run: async (i, c) => {
+      const question = String(i.question ?? c.turn?.message ?? "");
+      if (i.kind === "advice") {
+        const r = await researchAdvice({ question, query: i.query ? String(i.query) : null, deps: deps.research!, now: c.now });
+        deps.research!.onAdvice?.(r);
+        return r;
+      }
+      return researchCareerQuestion({ profile: profileOf(c), message: question, deps: deps.research!, now: c.now });
+    },
   }] : [];
   const strs = (description: string) => ({ type: "array", items: { type: "string" }, description });
   const marketTools: ToolSpec[] = deps.market ? [{
@@ -787,7 +819,8 @@ export function careerTools(deps: {
     {
       name: "tailor_resume", effect: "write_own",
       description: "A PDF resume for one posting from CONFIRMED facts only (never drafts or anything new); it passes the truth and ATS checks or refuses with the reason. Send gaps.summary and preview first, then its text as given, the 7-day private link alone on its own line; the files in attached ride your reply. job_id from search_jobs, or the posting text. layout: only when asked. Relay format_check.summary.",
-      input_schema: obj({ job_id: str("The posting's job_id from search_jobs"), posting_text: str("The posting's full text, if there is no job_id"), persona: str("A saved persona name, e.g. 'banking'; leave out to use the active one"), layout: { type: "string", enum: ["trainee", "own", "template"], description: "Only when asked: 'trainee' (Trainee's design), 'own' (\"keep mine\": their own file's layout) or 'template' (\"use template N\", with template)" }, template: str("Only with layout 'template': the template number they named, 1 to 15") }),
+      input_schema: obj({ job_id: str("The posting's job_id from search_jobs"), posting_text: str("The posting's full text, if there is no job_id"), persona: str("A saved persona name, e.g. 'banking'; leave out to use the active one"), layout: { type: "string", enum: ["trainee", "own", "template"], description: "Only when asked: 'trainee' (Trainee's design), 'own' (\"keep mine\": their own file's layout) or 'template' (\"use template N\", with template)" }, template: str("Only with layout 'template': the template number they named, 1 to 15"),
+        edits: { type: "array", description: "Only to change a version already made (call again for the same posting; say what changed from edits_done): per entry they named, how many detail lines it should print (\"condense X to one line\": 1; \"expand Y\": more than it has now, up to 6). Lines come only from that entry's confirmed details; never write new ones. Each call starts from the tailored resume, so include the earlier edits to this version too.", items: { type: "object", properties: { role: str("The entry as the person named it, e.g. a company or project name"), lines: { type: "integer", minimum: 1, maximum: 6, description: "Detail lines (bullets) that entry should print" } }, required: ["role", "lines"] } } }),
       run: async (i, c) => {
         const t = tailorOf();
         let text = "", job_id: string | null = null, company: string | null = null;
@@ -810,7 +843,11 @@ export function careerTools(deps: {
         const ownDocx = asked === "own" || (!asked && t.upload) ? await t.ownDocx?.(c.userId).catch(() => null) ?? null : null;
         const upload = asked !== "template" && asked !== "trainee" && t.upload ? await t.upload(c.userId).catch(() => null) : null;
         const plan = await planLayout({ asked, template: tid, upload, ownDocx, roleText: text.slice(0, 300) }).catch((e) => { console.error("format rater:", (e as Error)?.message ?? e); return null; });
-        const base = { userId: c.userId, profile: profileOf(c), posting: { text, job_id, company }, persona, deps: { render: t.render, resumes: t.resumes }, now: c.now };
+        // D-063: a file that rides this reply is a review draft: with no email on their confirmed resume or typed, it prints the
+        // visible placeholder and is not stored for an application. Without a deliverer the stored file is the only way to hand it
+        // over, so the email is asked for first, as before.
+        const edits = Array.isArray(i.edits) ? (i.edits as any[]).map((e) => ({ role: String(e?.role ?? ""), lines: Number(e?.lines) })) : [];
+        const base = { userId: c.userId, profile: profileOf(c), posting: { text, job_id, company }, persona, deps: { render: t.render, resumes: t.resumes }, now: c.now, reviewDraft: !!t.deliver, ...(edits.length ? { edits } : {}) };
         const legacy = asked === "trainee" || (asked === "own" && !plan) ? { layout: asked, ownDocx } : null;
         let r = await tailorForPosting(legacy ? { ...base, ...legacy } : { ...base, layout: plan?.layout ?? null, template: plan?.template ?? null, ownDocx: plan?.ownDocx ?? null, ownPdfSpec: plan?.ownPdfSpec ?? null });
         let keptNote = "";
@@ -823,6 +860,9 @@ export function careerTools(deps: {
           r = rec ? await tailorForPosting({ ...base, layout: "template", template: rec.template }) : await tailorForPosting(base);
         }
         if (r.ok && t.versions) await recordVersion(t.versions, { userId: c.userId, out: r, now: c.now });
+        // A second file for the same posting is its v2 (Instinct C10/C20: "..._v2.pdf"), counted from the person's own version log.
+        const nth = r.ok && t.versions && r.job_id ? await versionFor(t.versions, c.userId, r.sha256, r.job_id) : 1;
+        if (r.ok && nth > 1) r = { ...r, filename: r.filename.replace(/(\.pdf)?$/i, `_v${nth}.pdf`) };
         // WO-079: facts waiting for the person's yes are named, with the one question to ask (battery T09 ran out of steps
         // trying other tools); with none, ask what to build from. A confirmation can only come from their next message.
         if (!r.ok && r.refused === "no_confirmed_facts") {
@@ -833,7 +873,8 @@ export function careerTools(deps: {
             : `not made: there are no confirmed experience, project or education facts on file. Ask them for their work experience and education in their own words; nothing is invented. Do not call another tool this turn. Nothing was stored or sent.`);
         }
         if (!r.ok) throw new Error(`not made: ${r.reason}. ${r.refused === "link" ? "The file stays private; no link was given." : "Nothing was stored or sent."}`);
-        const { detail, ...rest } = r;
+        const { detail, ...rest0 } = r;
+        const rest = { ...rest0, ...reviewOf(r, !!t.deliver) };
         const out = plan?.rating ? { ...rest, format_check: { score: plan.rating.score, keep: plan.rating.keep, kept_layout: r.layout === "own", hard_failures: plan.rating.hardFailures,
           findings: plan.rating.findings.filter((f) => f.measured && !f.pass).map((f) => ({ criterion: f.criterion, detail: f.detail, where: f.where.slice(0, 3) })),
           recommended: plan.recommended ? { template: Number(plan.recommended.template.slice(1)), name: plan.recommended.name, why: plan.recommended.why } : null,

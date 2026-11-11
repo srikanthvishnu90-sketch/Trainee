@@ -61,7 +61,7 @@ The loop, reusable for any reference (Instinct batch 2, another assistant, a hum
 | C1 | OFF | `CAREER_REPLY_WRITER`: one File with the checked postings and a weekly plan comes only from `create_file` (`plan_review`), offered only with the reply writer on Telegram; the D-060 plan page has no postings |
 | C2 | EXISTS | (D-059, this PR: no recipient named is drafted with placeholders) |
 | C3 | EXISTS | |
-| C4 | MISSING | a sourced answer to a specific advice question: with web research on (D-060), `research_career_question` answers it as a career-entry plan with no source link |
+| C4 | MISSING | built (D-063): `research_career_question` kind `advice`, one cited source on its own line; its steps pass in `pending/mirror-process-blocked.test.ts`, and it moves to EXISTS at the architect's review |
 | C5 | EXISTS | |
 | C6 | MISSING | email-confirmation evidence in the record reply; researched roles separated from applications |
 | C5f1 | EXISTS | |
@@ -69,7 +69,7 @@ The loop, reusable for any reference (Instinct batch 2, another assistant, a hum
 | C7 | EXISTS | |
 | C8 | EXISTS | |
 | C9 | EXISTS | (D-060 web research: `research_market` with Claude's web search) |
-| C10 | MISSING | the resume's contact email: Instinct used the linked account's; Trainee takes only one the person typed |
+| C10 | MISSING | built (D-063): no email on the confirmed resume or typed prints a visible `[your email]` placeholder in a chat review draft (never the account's); steps pass in pending, moves to EXISTS at review |
 | C11 | MISSING | a read-only reader of a posting's apply entry flow and questions |
 | C12 | EXISTS | |
 | C13 | EXISTS | (D-059) |
@@ -79,7 +79,7 @@ The loop, reusable for any reference (Instinct batch 2, another assistant, a hum
 | C17 | EXISTS | |
 | C18 | EXISTS | (D-060 `check_posting_open`; a Workday page is named as not readable, never guessed) |
 | C19 | OFF | `CAREER_PEOPLE_SEARCH`, `CAREER_CONTACT_OUTREACH` (D-043 not accepted) |
-| C20 | MISSING | edits to a tailored resume (condense one role, expand another) |
+| C20 | MISSING | built (D-063): `tailor_resume` `edits` (condense, expand from confirmed details only), a v2 PDF; steps pass in pending, moves to EXISTS at review |
 | C21 | EXISTS | |
 | C22 | EXISTS | (D-060: `get_posting` pay, then `research_market`, self-reported figures labelled) |
 | C21f | EXISTS | |
@@ -143,6 +143,10 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
   is now offered, but it answers the question as a career-entry plan ("the way in is shipped projects ... This week: build one
   small tool") with no source link, i.e. a different task; `research_market` is market research. Needed: a sourced answer to a
   specific advice question (one guide, its link).
+  **D-063:** `research_career_question` with `kind: "advice"` (the model's choice, G1): one web search (D-060's searcher, cached),
+  passages kept by the guard, one source chosen by code (school, government, non-profit guides first), the answer first and the
+  source link alone on the last line, written by code (`research/advice.ts`, `career_brain.ts`). With no source, no link and the
+  answer says it is judgement.
 - **Artifact:** none. **Boundary:** none needed.
 
 ### C5 "quiz me on a python question like it's a real interview, one at a time" (EXISTS)
@@ -197,6 +201,10 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
   the resume - **MISSING for this persona**: Instinct used the linked account's email; Trainee takes only an email the person
   typed (`set_resume_contact` never uses the account email), so `tailor_resume` asks for it and makes no file. Either the
   persona types one, or the owner rules on the account email.
+  **D-063 (architect ruling):** the email is the confirmed resume's or one the person typed, never the channel's or the account's;
+  with none, the file that rides the chat is a review draft with a visible `[your email]` placeholder, the reply flags it, and the
+  draft is not stored for any application (every apply path still refuses without an email). A slash-listed skill
+  ("TypeScript/JavaScript") no longer fails the truth check on the person's own Skills line.
 - **Artifact:** a PDF. **Boundary:** "Nothing was submitted".
 
 ### C11 "what would you need from me to actually submit that paypal application? don't apply yet just wanna know" (MISSING)
@@ -248,6 +256,9 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
 - **Instinct:** a v2 PDF with both edits, honest wording about Waypoint, still a review draft.
 - **Steps:** `tailor_resume` with edits - **MISSING**: it takes no edit instructions; `save_resume_persona` only orders or hides
   facts. (Also needs C10's PDF.)
+  **D-063:** `tailor_resume` takes `edits` (`[{ role, lines }]`): an entry condensed to N detail lines, or expanded (and led) from
+  its own confirmed details only; when the record holds fewer than asked it says so (`expand_short`) and nothing is written; the
+  file is `_v2`, still a review draft with its open flags (`edits_done`, `review_draft`).
 
 ### C21 "ok behavioral round: ask me 'tell me about a time you failed' and then roast my answer" (EXISTS)
 - **Steps:** the brain asks the question; nothing is scored - EXISTS.

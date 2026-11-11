@@ -478,6 +478,7 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (prepRubricRead(intent, probe.result)) return { brain: true, mode, intent, reason: "prep_rubric_read", router: routerAnswer(intent, probe) };
   if (prepServeMismatch(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "prep_serve_mismatch", router: routerAnswer(intent, probe) };
   if (namedApplicationNeeds(o.message, intent)) return { brain: true, mode, intent, reason: "named_application_needs", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
+  if (mockQuotedQuestion(o.message, intent, probe.reply)) return { brain: true, mode, intent, reason: "mock_quoted_question", router: routerAnswer(intent, probe) };
   if (adviceOverSearch(o.message, intent)) return { brain: true, mode, intent, reason: "advice_over_search", router: routerAnswer(intent, probe) };
   if (!STAGED_BRAIN_INTENTS.includes(intent)) {
     // Before the list: a turn that asks or forbids is the brain's unless its intent is code's own work (questionTurn).
@@ -521,6 +522,18 @@ export function namedApplicationNeeds(message: string, intent: string | null): b
   if (intent !== "career_onboarding_needs") return false;
   const m = String(message ?? "").replace(/[\u2019`]/g, "'");
   return SUBMIT_NEEDS.test(m) && (NEGATED_ACTION.test(m) || /\b(?:that|the|this|my)\s+[A-Za-z][\w&.-]*\s+(?:application|role|posting|internship|job)\b/i.test(m));
+}
+// (5) "ok behavioral round: ask me 'tell me about a time you failed' and then roast my answer" started code's mock on its first
+//     bank question ("Tell me about yourself and why this role"). A mock start that names the question to ask, in quotes, and
+//     whose reply does not ask it is the brain's: it asks that question and reads the answer.
+const QUOTED = /["\u201c']([^"\u201d']{12,140})["\u201d']/;
+export function mockQuotedQuestion(message: string, intent: string | null, reply: unknown): boolean {
+  if (intent !== "prep_mock_start") return false;
+  const q = QUOTED.exec(String(message ?? "").replace(/[\u2018\u2019`]/g, "'"))?.[1];
+  if (!q || !/\b(?:ask|give|quiz|start|run)\b/i.test(String(message ?? ""))) return false;
+  const words = q.toLowerCase().split(/[^a-z]+/).filter((w) => w.length > 3);
+  const r = String(reply ?? "").toLowerCase();
+  return words.length > 0 && words.filter((w) => r.includes(w)).length < Math.ceil(words.length * 0.8);
 }
 // (4) "what should i actually be doing rn to land a swe internship for next summer" ran a search for "lock what should
 //     actually doing rn land". An advice question that names no find/show ask is the brain's (it can still search with its

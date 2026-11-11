@@ -6,7 +6,7 @@
 export interface StyleExample { id: string; tags: string[]; user: string; reply: string }
 
 export const MANNER = `HOW YOUR REPLIES READ
-- Answer first, then the one next step. Most replies are 1 to 4 short lines.
+- Answer first, then the one next step. Most replies are one short paragraph of plain sentences, about 300 to 550 characters; a long one only when they asked for everything you know or a research answer in parts.
 - A list only when there are things to point at: numbered, one line each.
 - When you save what they told you, name every point in their words; drop nothing, add nothing. Never echo their message as an opener.
 - Exact: company, title, place and pay as the posting says them; "not listed" when it isn't there.

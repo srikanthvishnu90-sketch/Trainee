@@ -83,13 +83,16 @@ dev split only (5%, 50 conversations); measured on the sealed held-out split (95
 | G9, G13 | A correction of Trainee and several asks (`severalAsks`, wider than D-058's `multiAsk`) are the brain's, with a turn note each. | `_shared/agent/turn_notes.ts`, `_shared/ask_language.ts`, `agent-chat/career_brain.ts` |
 | G11 | `create_file` is offered wherever a File link can be made (`TRAINEE_FILE_BASE_URL` and its secret), not only with the reply writer on; `CAREER_REPLY_WRITER` stays in `RELEASE_NEVER_ON`. | `agent-chat/career_brain.ts`, `agent-chat/handler-career.ts` |
 | G2 to G14 | The brain's instructions state every check (`MIRROR_RULES`); the empty tracker's reply answers first and names its source. | `_shared/agent/prompt.ts`, `packages/domain/142-career-router.js` |
+| G5 | The empty tracker says, in the answer's own sentence, that applications sent on one's own are not checked; the router's empty search names what it read and that career sites outside it were not checked. The judged search's empty form (D-058) is unchanged: a not-checked line there breaks the tone gate's length window, a G3/G5 trade-off left for the architect. | `packages/domain/142-career-router.js` |
 
-Held-out, $0, trunk `cf25cd69` against this branch (pass / scored, "model" turns excluded as the README explains):
+Held-out, $0, trunk `6aee3c4d` against this branch (pass / scored, "model" turns excluded as the README explains):
 
 | | G1 | G2 | G3 | G4 | G5 | G6 | G7 | G8 | G9 | G10 | G11 | G12 | G13 | G14 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | trunk | 73.3% | 97.9% | 38.3% | 84.0% | 0.9% | 57.2% | 100% | 71.8% | 0.0% | 97.3% | 36.4% | 100% | 0.0% | 76.2% |
-| D-061 applied | 93.8% | 98.8% | 46.6% | 93.4% | 1.6% | 92.9% | 100% | 100% | 0.0% | 100% | 86.3% | 100% | 0.0% | 93.3% |
+| D-061 applied | 93.9% | 98.8% | 48.0% | 93.3% | 16.0% | 92.9% | 100% | 100% | 0.0% | 100% | 86.3% | 100% | 0.0% | 93.9% |
 
 The text rulings (G2 to G5, G7, G9, G10, G12) are scored at $0 only on the turns code still answers; the brain's words are the
-live hook's to score (`live.ts`, not run). G9 and G13 stay at 0% on the few turns code still answers (1 and 22).
+live hook's to score (`live.ts`, not run). G9 stays at 0% on the 1 turn code still answers. G13's 19 are second messages texted seconds after the first (`rapid`): the
+$0 harness sends turns back to back and records the gap without waiting it, so no message-level reader can tell them apart
+without also catching every quick follow-up; that needs a turn-in-flight signal from the handler, not wording.

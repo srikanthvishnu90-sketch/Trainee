@@ -31,11 +31,16 @@ function buildHandoff(r, p = {}) {
   const extra = r.also_check ? [{ kind: "bot_check", what: "the verification check on the form" }] : [];
   if (r.reason === "bot_check") {
     const inForm = r.wall === "check_in_form";
+    // The person's own answers asked beside an in-form check go on the same hand-off; an engine failure beside it means no hand-off.
+    const asked = Array.isArray(r.needs) ? r.needs : [];
+    if (asked.some((n) => !PERSON_REASONS.has(n.reason))) return null;
     return { ...base, reason: inForm ? "bot_check_in_form" : "bot_check", wall: inForm ? "check_in_form" : "bot_check", link: page,
       step: inForm
         ? `Open the link and complete only the verification check on ${host}'s form; every other answer is already filled. Do not press Submit. Then say done.`
         : `Open the link and complete only the verification check ${host} shows; Trainee never solves one. Then say done.`,
-      remaining: [{ kind: "bot_check", what: String(r.check || "a verification check").slice(0, 120) }] };
+      ...(asked.length ? { card: "ask_once" } : {}),
+      remaining: [...asked.map((n) => ({ kind: n.reason === "upload_needs_you" ? "upload" : "answer", what: String(n.label || "").slice(0, 160), reason: n.reason })),
+        { kind: "bot_check", what: String(r.check || "a verification check").slice(0, 120) }] };
   }
   if (r.reason === "login_required") {
     return { ...base, reason: "login_required", wall: r.wall || "sign_in", link: page,

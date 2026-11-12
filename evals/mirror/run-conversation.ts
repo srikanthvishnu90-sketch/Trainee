@@ -15,6 +15,7 @@
 import { anthropicWire } from "../../tests/architect/helpers/anthropic_wire.ts";
 import { openWorld } from "../../tests/architect/helpers/response_world.ts";
 import { PRODUCTION_BRAIN, RELEASE_FLAGS, RELEASE_NEVER_ON, releaseFlagOn, releaseValue } from "../../supabase/functions/agent-chat/release_config.ts";
+import { FILE_ENV } from "./heldout/harness.ts";
 
 const realFetch = globalThis.fetch;
 const a = Deno.args, opt = (n: string) => { const i = a.indexOf(n); return i >= 0 ? a[i + 1] : undefined; };
@@ -36,7 +37,9 @@ const persona: { setup: string[] } = opt("--persona") ? JSON.parse(await Deno.re
 const out = opt("--out") ?? new URL(`./results/conversation-${dry ? "dry" : "live"}.jsonl`, import.meta.url).pathname;
 const promptLog = opt("--prompt-log"); // dry run only: where to write the system prompt each model call saw (debugging)
 
-let modelCalls = 0, spent = 0, label = "";
+let modelCalls = 0, spent = 0, label = "", webSearches = 0;
+// The tool trace (P5, the process check): per model call, the tools offered and whether it was a web search or a JSON call.
+let calls: { tools: string[]; web: boolean; json: boolean }[] = [];
 const modelErrors = new Map<number, string>();
 const prompts: string[] = [];
 const PRICE = { input: 2 / 1e6, output: 10 / 1e6, cacheRead: 0.1 / 1e6, cacheWrite: 2.5 / 1e6 };
@@ -47,6 +50,9 @@ const scripted = (chat: any) => {
   return Response.json({ id: "mirror-dry", model: chat.model, choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 10 } });
 };
 const model = async (req: Request): Promise<Response> => {
+  const body = await req.clone().json().catch(() => ({}));
+  const tools = (body.tools ?? []).map((t: any) => String(t.name ?? t.type));
+  calls.push({ tools, web: (body.tools ?? []).some((t: any) => /^web_search/.test(String(t.type ?? ""))), json: !!body.output_config?.format });
   if (dry) return await anthropicWire(req, scripted);
   if (spent >= budget) throw new Error(`budget reached: $${spent.toFixed(3)} of $${budget}`);
   modelCalls++;
@@ -55,6 +61,7 @@ const model = async (req: Request): Promise<Response> => {
   if (!res.ok && !modelErrors.has(res.status)) { modelErrors.set(res.status, (await res.clone().text()).slice(0, 300)); console.log(`model answered ${res.status}: ${modelErrors.get(res.status)}`); }
   try {
     const u = (await res.clone().json())?.usage ?? {};
+    webSearches += u.server_tool_use?.web_search_requests ?? 0;
     // D-060: a web search call also pays $0.01 a search (usage.server_tool_use.web_search_requests).
     spent += (u.input_tokens ?? 0) * PRICE.input + (u.output_tokens ?? 0) * PRICE.output + (u.cache_read_input_tokens ?? 0) * PRICE.cacheRead + (u.cache_creation_input_tokens ?? 0) * PRICE.cacheWrite + (u.server_tool_use?.web_search_requests ?? 0) * 0.01;
   } catch { /* a non-JSON answer is the product's to handle */ }
@@ -76,6 +83,8 @@ try {
   // never-on switch is off), and the brain is PRODUCTION_BRAIN. docs/architect/specs/MIRROR-PROCESS.md.
   for (const k of [...Object.keys(RELEASE_FLAGS), ...RELEASE_NEVER_ON]) Deno.env.delete(k);
   Deno.env.set("CAREER_BRAIN", PRODUCTION_BRAIN);
+  // Production serves File links; a non-routable example.test base and a TEST secret stand in (as heldout/harness.ts does).
+  for (const [k, v] of Object.entries(FILE_ENV)) Deno.env.set(k, v);
   const served = { release: Object.fromEntries(Object.keys(RELEASE_FLAGS).map((k) => [k, releaseValue(Deno.env, k)])), never_on_on: RELEASE_NEVER_ON.filter((k) => releaseFlagOn(Deno.env, k)) };
   if (JSON.stringify(served.release) !== JSON.stringify({ ...RELEASE_FLAGS }) || served.never_on_on.length) throw new Error(`not production's configuration: ${JSON.stringify(served)}`);
   Deno.env.set("ANTHROPIC_API_KEY", dry ? "sk-test-not-real" : LIVE_KEY);
@@ -94,20 +103,34 @@ try {
   }
   for (const t of turns) {
     label = t.id;
-    const before = await counts(person.id), outBefore = w.outbound.length, callsBefore = modelCalls, spentBefore = spent, t1 = performance.now();
-    let reply = "", intent: string | null = null, status = 0;
-    try { const r = await person.say(t.prompt); reply = String(r.reply ?? ""); intent = r.intent; status = r.status; } catch (e) { stopped = String((e as Error).message ?? e); }
+    const before = await counts(person.id), outBefore = w.outbound.length, callsBefore = modelCalls, spentBefore = spent, webBefore = webSearches, t1 = performance.now();
+    calls = [];
+    let reply = "", intent: string | null = null, status = 0, meta: any = {}, artifact = false;
+    try {
+      const r: any = await person.say(t.prompt); reply = String(r.reply ?? ""); intent = r.intent; status = r.status; meta = r?.body?.meta ?? {};
+      artifact = !!(r?.body?.artifacts?.length || r?.body?.file_cards?.length) || reply.includes(FILE_ENV.TRAINEE_FILE_BASE_URL);
+    } catch (e) { stopped = String((e as Error).message ?? e); }
     if (stopped) break;
     const after = await counts(person.id);
     const actions: { type: string; hosts?: string[] }[] = Object.keys(after).filter((k) => after[k] > (before[k] ?? 0)).map((type) => ({ type }));
     if (w.outbound.length > outBefore) actions.push({ type: "external", hosts: [...new Set(w.outbound.slice(outBefore))] });
-    lines.push(JSON.stringify({ id: t.id, reply, actions, route: modelCalls > callsBefore ? (dry ? "model-scripted" : "model") : "router", intent, status, ms: Math.round(performance.now() - t1), usd: Number((spent - spentBefore).toFixed(4)) }));
+    const trace = {
+      offered: [...new Set(calls.filter((c) => !c.json && !c.web).flatMap((c) => c.tools))].sort(),
+      called: ((meta.tool_calls ?? []) as any[]).map((x) => String(x?.name ?? x)),
+      web_search_calls: calls.filter((c) => c.web).length, web_searches: webSearches - webBefore, json_calls: calls.filter((c) => c.json).length,
+      router_intent: meta.router_intent ?? null, brain: meta.brain ?? null, artifact,
+    };
+    lines.push(JSON.stringify({ id: t.id, reply, actions, route: modelCalls > callsBefore ? (dry ? "model-scripted" : "model") : "router", intent, status, ms: Math.round(performance.now() - t1), usd: Number((spent - spentBefore).toFixed(4)), trace }));
+    // The product falls back to the router when the model call is refused at the cap, so later turns would be the fallback's
+    // words, not the model's: stop here (as heldout/harness.ts does). Live run 5 (2026-11-12) ran C18 to C23 on the fallback.
+    if (live && spent >= budget) { stopped = `budget reached: $${spent.toFixed(3)} of $${budget}`; break; }
   }
 } finally {
   Deno.env.delete("ANTHROPIC_API_KEY");
   Deno.env.delete("CAREER_BRAIN");
+  for (const k of Object.keys(FILE_ENV)) Deno.env.delete(k);
   await w.close();
 }
 await Deno.writeTextFile(out, lines.join("\n") + (lines.length ? "\n" : ""));
 if (promptLog) await Deno.writeTextFile(promptLog, prompts.join("\n\n"));
-console.log(`MIRROR-CONVERSATION ${dry ? "dry-run" : "live"} turns=${lines.filter((l) => !l.includes('"setup":true')).length}/${turns.length} model_calls=${modelCalls} external_requests=${w.outbound.length} spent_usd=${spent.toFixed(4)} in ${((performance.now() - t0) / 1000).toFixed(0)} s -> ${out}${stopped ? ` (stopped: ${stopped})` : ""}`);
+console.log(`MIRROR-CONVERSATION ${dry ? "dry-run" : "live"} turns=${lines.filter((l) => !l.includes('"setup":true')).length}/${turns.length} model_calls=${modelCalls} external_requests=${w.outbound.length} web_searches=${webSearches} spent_usd=${spent.toFixed(4)} in ${((performance.now() - t0) / 1000).toFixed(0)} s -> ${out}${stopped ? ` (stopped: ${stopped})` : ""}`);

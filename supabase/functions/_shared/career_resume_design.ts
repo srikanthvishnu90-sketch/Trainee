@@ -469,7 +469,9 @@ export function planOwnEdits(paragraphs: OwnParagraph[], doc: any, facts: OwnFac
     });
   }
   // Paragraphs of facts the tailoring left out.
-  for (const s of slots) if ((s.what === "entry" || s.what === "bullet") && !factsInDoc.has(s.fact!)) { remove.push(s.text); changed++; }
+  // D-070: an entry kept on one line (its heading only, keepEveryEntry oneLine) prints none of its bullets.
+  const bulletFacts = new Set(bulletLines.map((l) => l.factIds?.[0] ?? ""));
+  for (const s of slots) if (((s.what === "entry" || s.what === "bullet") && !factsInDoc.has(s.fact!)) || (s.what === "bullet" && !bulletFacts.has(s.fact!))) { remove.push(s.text); changed++; }
   // The skills line.
   const skillLines = lines.filter((l) => l.type === "skills"), skillSlots = slots.filter((s) => s.what === "skills");
   if (skillLines.length > skillSlots.length) return { ok: false, reason: "the tailored skills line has no place in your file" };

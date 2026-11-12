@@ -205,7 +205,11 @@ Deno.test("FILES LIVE LOOP: the S0 hooks: a live view is read every time, a null
       const ssid = await A.tok(U, stored.id, SPECIMEN_NOW);
       const sh = await (await handleFile(new Request(BASE, { headers: { cookie: `tf_s=${ssid}` } }), deps)).text();
       assert.doesNotMatch(sh, /name="action" value="approveplan"/, "a listed post with no records behind it is not drawn as a form");
-      assert.match(sh, /Approve search scope[\s\S]{0,200}Not available on this page yet/, "it is shown off with the reason");
+      // Architect amendment (D-072) (item 6b): a listed post with no records behind it was shown off ("Not available on this page yet. Ask
+      // Trainee in the chat."); it now opens that chat with the question filled in and says nothing is approved there. Every safety bar
+      // is kept: it is never a form (above), a post to it is refused unchanged (below), and the question is never a yes (D-MS-1).
+      assert.match(sh, /<a [^>]*href="https:\/\/t\.me\/TraineeBot\?text=About\+my\+Search\+plan[^"]*nothing\+is\+approved[^"]*"[^>]*>Approve search scope/, "it opens the chat with the question, never a form");
+      assert.doesNotMatch(sh, /Approve search scope[\s\S]{0,200}Not available on this page yet/, "no longer shown off");
       const sp = await handleFile(new Request(BASE, await phonePost({ t: ssid, action: "approveplan", h: "h-now" }, ENV.TRAINEE_FILE_LINK_SECRET, { headers: { origin: new URL(BASE).origin } })), deps);
       assert.equal(sp.status, 400, "a post to a stored view is refused");
     }

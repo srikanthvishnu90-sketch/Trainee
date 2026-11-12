@@ -81,8 +81,13 @@ const SHORTER = /\b(?:shorter|way short|less formal|more casual|keep it (?:casua
 const QUESTION_ASK = /\b(?:quiz|drill)\s+me\b|\bask me\b[^.?!]{0,80}\b(?:question|about a time)\b|\b(?:mock|behavioral|technical|coding)\s+(?:round|question|interview)\b[^.?!]{0,40}\bask\b/;
 const RECALL = /\b(?:from earlier|earlier,|again\b|remind me|what (?:was|did you say)|you (?:said|told me|mentioned))\b/;
 const EVERYTHING = /\b(?:everything|all you (?:know|remember)|like everything|full (?:list|picture|breakdown)|real sources|in detail)\b|,[^,]+,[^,]+\b(?:and|&)\b/;
-export function replyKind(message: string): ReplyKind {
+// D-072 (item 11): `history` (optional) is this conversation: inside a practice session, an answer to the question Trainee asked is
+// reviewed in one paragraph (the "answer" kind) whatever its words look like (a three-step approach read as "everything", "i'd
+// make a map ..." read as a draft), and an ask for the next question ("ok next", "another, harder") is the question kind.
+export function replyKind(message: string, history?: Msg[]): ReplyKind {
   const t = lc(message);
+  if (history && (practiceAnswerOf(message, history) || roastOf(message, history))) return "answer";
+  if (history && practiceNextOf(message, history)) return "question";
   if (EVERYTHING.test(t)) return "everything";
   if (QUESTION_ASK.test(t) || practiceAskOf(t)) return "question"; // D-070: a practice question said any way
   if (DRAFT.test(t)) return "draft";
@@ -98,8 +103,8 @@ export const REPLY_LENGTH: Record<ReplyKind, { max: number; upper: number; aim: 
   everything: { max: 1400, upper: 1200, aim: "about 900 to 1,200 characters; for research, the answer first and then each source link alone on its own line" },
   answer: { max: 600, upper: 500, aim: "one short paragraph of plain sentences, about 300 to 500 characters" },
 };
-export function replyLength(message: string): { kind: ReplyKind; max: number; upper: number; aim: string } {
-  const kind = replyKind(message);
+export function replyLength(message: string, history?: Msg[]): { kind: ReplyKind; max: number; upper: number; aim: string } {
+  const kind = replyKind(message, history);
   const base = REPLY_LENGTH[kind];
   return kind === "draft" && SHORTER.test(lc(message)) ? { kind, max: 400, upper: 200, aim: "the draft itself under about 200 characters, then one short line that it is theirs to send and nothing was sent" } : { kind, ...base };
 }
@@ -383,12 +388,42 @@ export function practiceAnswerOf(message: string, history: Msg[]): boolean {
   const h = (history ?? []).filter((m) => m && typeof m.content === "string");
   const lastA = [...h].reverse().find((m) => m.role === "assistant"), lastU = [...h].reverse().find((m) => m.role === "user");
   if (!lastA || !lastU) return false;
+  const before = h.slice(0, h.lastIndexOf(lastU));
+  // A new ask inside the session ("ok next", "harder one") is not an answer.
+  if (practiceNextOf(message, h)) return false;
   // The question Trainee asked in answer to a practice ask (or the follow-up in a review it gave), still waiting; a message that
-  // itself asks something ("have i applied to anything yet?") is a new ask, not the answer.
-  if (/\?/.test(t)) return false;
-  return practiceAskOf(String(lastU.content)) || (/\?\s*$/.test(norm(lastA.content).replace(/https?:\/\/\S+/g, "").trim()) && practiceAnswerOf(String(lastU.content), h.slice(0, h.lastIndexOf(lastU))));
+  // itself asks something ("have i applied to anything yet?") is a new ask, not the answer. D-072 (dev HO-0859.t2: "i'd draw the
+  // free body diagram, sum forces and moments to zero, solve for the reactions — thoughts?"): a closing check-in on the answer
+  // itself ("thoughts?", "right?", "is that correct?") asks for the verdict, and a "?" inside code (a ternary) is code.
+  if (/\?/.test(stripCheckIn(t)) && !CODE_LIKE.test(String(message ?? ""))) return false;
+  // D-072: Trainee's last reply waits for this answer when it ends on a question or on an instruction to answer ("Now write it.",
+  // "Walk me through your approach first."), not only on a "?".
+  const waiting = /\?\s*$/.test(norm(lastA.content).replace(/https?:\/\/\S+/g, "").trim()) || INVITES_ANSWER.test(lastSentence(lastA.content));
+  return practiceAskIn(String(lastU.content), before) || (waiting && practiceAnswerOf(String(lastU.content), before));
 }
+// D-072 (item 11): a closing check-in that asks only for the verdict on what came before it.
+const CHECK_IN = /(?:^|[\s,.;:\u2014\u2013-])(?:thoughts|right|correct|make sense|does (?:that|this) (?:work|make sense|sound right)|is (?:that|this|it) (?:right|correct|ok|okay|good|fine|enough|it)|how(?:'d| did) i do|how'?s (?:that|this)|sound (?:right|good|ok)|good|ok|okay|am i (?:right|close|on track|missing (?:something|anything))|what (?:am i|did i) miss(?:ing)?|anything (?:i'?m )?missing)\s*\?+\s*$/;
+const stripCheckIn = (t: string) => t.replace(CHECK_IN, "").trim();
+// Code a person pastes as their answer (a "?" in it is a ternary or a pattern, not a question to Trainee).
+const CODE_LIKE = /```|\bdef\s+\w+\s*\(|\bfunction\b\s*\w*\s*\(|=>|\breturn\b[^.\n]*[([{=;]|[;{}]\s*$|\bselect\b[^.?!]{0,80}\bfrom\b/im;
+const lastSentence = (s: unknown) => { const x = norm(s).replace(/https?:\/\/\S+/g, "").trim().split(/(?<=[.!?])\s+/); return x[x.length - 1] ?? ""; };
+const INVITES_ANSWER = /^(?:(?:now|ok(?:ay)?|so|then|next|first|go ahead and|your turn[:,]?)\s+)*(?:write|code|implement|walk me through|talk me through|tell me|give me|show me|explain|solve|answer|try|take|sketch|go)\b|\byour (?:turn|answer|approach)\b|\bwhen you'?re ready\b|\bi'?ll (?:score|grade|review|critique|roast|push)\b/i;
+// D-072 (item 11, Q-harder): inside a practice session (a practice ask among their last three messages), a short ask for the next
+// question ("ok next", "another, harder", "one more like that", "follow-up please") is a practice question, however it is said.
+const PRACTICE_NEXT = /^(?:(?:ok(?:ay)?|cool|nice|great|thanks|thank you|got it|alright|sure|yes|yep|k|now)[,.!]*\s+)*(?:(?:give me|hit me with|ask me|send me|try|do|let'?s do|let'?s go|can i get|can you (?:give me|ask me))\s+)?(?:(?:an?|one)\s+)?(?:another|next|one more|new (?:one|question)|different (?:one|question)|follow[- ]?up|harder|tougher|trickier|more difficult|level (?:it )?up|step it up)\b/;
+const NEXT_WORD = /\b(?:another|next (?:one|question|round)|one more|harder|tougher|trickier|more difficult|follow[- ]?up (?:question|one)|level (?:it )?up|step it up)\b/;
+const ANSWER_VOICE = /\b(?:i'?d|i would|i'?ll|i will|i think|i used|i'm using|my (?:answer|approach|take|code|solution))\b/;
+export function practiceNextOf(message: string, history: Msg[]): boolean {
+  const t = lc(message);
+  if (!t || t.length > 140 || CODE_LIKE.test(String(message ?? ""))) return false;
+  // Said first ("ok next", "another, harder"), or anywhere in a short message that is not itself an answer (no "i'd", "my approach").
+  if (!PRACTICE_NEXT.test(t) && !(t.length <= 100 && NEXT_WORD.test(t) && !ANSWER_VOICE.test(t))) return false;
+  const users = (history ?? []).filter((m) => m && m.role === "user" && typeof m.content === "string").slice(-3);
+  return users.some((m) => practiceAskOf(String(m.content)));
+}
+// A practice ask said in its own words, or the next one inside a session.
+export function practiceAskIn(message: string, history: Msg[]): boolean { return practiceAskOf(message) || practiceNextOf(message, history); }
 export function practiceAnswerNote(): string {
-  return "THEY ARE ANSWERING THE PRACTICE QUESTION YOU ASKED (code read it from this conversation). Your FIRST sentence is your verdict on their answer: right, partly right or wrong, and the one main reason. " +
-    "Then the single most important fix, concretely. Then at most one follow-up question, at the end. One short paragraph, about 300 to 500 characters: no headings, no numbered list, no model answer unless they asked for one.";
+  return "THEY ARE ANSWERING THE PRACTICE QUESTION YOU ASKED (code read it from this conversation). Your FIRST sentence is your verdict on their answer: right, partly right or wrong, the one main reason, and what it is a verdict on, named in their own terms (their approach, their code, their story), never a bare verdict with no subject. " +
+    "Then the single most important fix, concretely. Then at most one follow-up question, at the end. One short paragraph, about 300 to 500 characters: no headings, no numbered list, no code block, no model answer unless they asked for one.";
 }

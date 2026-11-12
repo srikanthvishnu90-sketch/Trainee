@@ -30,7 +30,7 @@ type Cited = { text: string; cite: number[] };
 // passage the web search quoted (the reader could not open it); dated: the search's own age of the page, when it gave one.
 export interface MarketSource { n: number; url: string; title: string; fetched_at: string; kind?: SourceKind; via?: "search_passage"; dated?: string | null }
 export type MarketResult =
-  | { status: "no_sources"; format: "inline"; notes: string[]; searched: string; note: string }
+  | { status: "no_sources"; format: "inline"; notes: string[]; searched: string; note: string; audit?: ResearchAudit }
   | { status: "ok"; format: "inline" | "file"; asked: "inline" | "file"; title: string; thesis: string | null; points: Cited[]; conditions: Cited[]; risks: Cited[];
       comparison: { options: string[]; rows: { label: string; cells: ({ value: string; cite: number[] } | null)[] }[] } | null;
       sources: MarketSource[]; file_url: string | null; dropped: number; notes: string[]; searched: string; note: string;
@@ -40,7 +40,7 @@ export type MarketResult =
       // cited sections below (thesis_summary). Code decides; the model never writes either.
       thesis_cite?: number[]; thesis_summary?: boolean;
       // Figures the cited sources give differently for the same thing: each value with its source (disagreementsIn).
-      disagreements?: Disagreement[]; layout?: "messages" };
+      disagreements?: Disagreement[]; layout?: "messages"; audit?: ResearchAudit };
 
 const squash = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim();
 // D-070: a reference marker ("[12]"), a typographic dash or a non-breaking space never keeps a quote off its page (readAlike).
@@ -106,13 +106,103 @@ export function hasPredicate(claim: string, pageTitle = ""): boolean {
 }
 // Does the claim say only what its quote says? Its numbers are in the quote; its content words are in the quote's context.
 // D-070: `subject` (company research: the company's name) may name what the quote's sentence is about without being in it.
-export function agrees(claim: string, quote: string, page: string, subject = ""): boolean {
+// D-071 (live-8 C9; real-set live run 43212037007: Coinbase, Brex, Gusto, Toast and Notion each opened 5 to 10 pages and kept no
+// line, the 15 others dropped 12 to 23 lines each): the model names where a line was said ("Citadel's posting lists ...", "The
+// posting says ...", "According to its careers page, ..."). Those words say where, not what: they are not the claim's content.
+// Every figure of the whole claim must still be in the quote, and every other content word in the quote's sentence.
+const SRC_NOUN = "(?:own\\s+)?(?:job\\s+|careers?\\s+|official\\s+|role\\s+|company\\s+)?(?:posting|page|site|website|listing|filing|board|press\\s+release|announcement|description)s?";
+const OWNER = "(?:[Tt]he|[Ii]ts|[Tt]heir|[Tt]his|[Tt]hat|[\\p{Lu}][\\p{L}&.'-]*(?:\\s+[\\p{Lu}][\\p{L}&.'-]*){0,2}'s)";
+const ATTRIBUTION = new RegExp(`(?:^|(?<=[.;:]\\s))(?:[Aa]ccording\\s+to|[Pp]er)\\s+(?:${OWNER}\\s+)?${SRC_NOUN}\\s*,?\\s*|\\b${OWNER}\\s+${SRC_NOUN}\\s+(?:says|said|states|stated|notes|noted|lists|listed|describes|described|mentions|mentioned|explains|reports|reported|shows|showed)(?:\\s+that)?(?:\\s*:)?\\s+|(?:^|(?<=[.;:]\\s))(?:[\\p{Lu}][\\p{L}&.'-]*\\s+){1,3}(?:says|said|states|stated|notes|noted|describes|described|writes|wrote)(?:\\s+that)?\\s+`, "gu");
+export const withoutAttribution = (claim: string) => readAlike(String(claim ?? "")).replace(ATTRIBUTION, " ").replace(/\s+/g, " ").trim();
+// The content words of a claim that its quote's sentence (and the subject) does not hold; null when the quote is not on the page or
+// a figure of the claim is not in the quote (never allowed).
+export function wordsNotInQuote(claim: string, quote: string, page: string, subject = "", title = ""): string[] | null {
   const ctx = quoteContext(page, quote);
-  if (ctx === null) return false;
+  if (ctx === null) return null;
   const qn = figuresIn(quote);
-  if (!figuresIn(claim).every((n) => qn.some((x) => numEq(x, n)))) return false;
-  const have = contentWords(`${ctx} ${subject}`);
-  return [...contentWords(claim)].every((w) => have.has(w));
+  if (!figuresIn(claim).every((n) => qn.some((x) => numEq(x, n)))) return null;
+  // D-071: the page's own title heads every sentence on it ("Our Engineering Interview Process - Citadel" over "the overall process
+  // takes roughly eight weeks"), as a heading before the quote already did.
+  const have = contentWords(`${ctx} ${subject} ${title}`);
+  // A name the attribution words carried ("Jane Street says ...") is still a word of the claim: only "where", never "who", goes.
+  const names = contentWords((readAlike(String(claim ?? "")).match(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}'-]*/gu) ?? []).join(" "));
+  return [...new Set([...contentWords(withoutAttribution(claim)), ...names])].filter((w) => !have.has(w));
+}
+export function agrees(claim: string, quote: string, page: string, subject = ""): boolean {
+  const miss = wordsNotInQuote(claim, quote, page, subject);
+  return miss !== null && miss.length === 0;
+}
+// D-071: the page's own sentence that holds the quote, in the page's words (reference markers and typographic forms read alike).
+export function sentenceOf(page: string, quote: string): string | null {
+  const P = squash(readAlike(page)), lower = P.toLowerCase(), q = squash(readAlike(quote)).toLowerCase();
+  if (!q || P.length !== lower.length) return null;
+  const at = lower.indexOf(q);
+  if (at < 0) return null;
+  const start = Math.max(P.lastIndexOf(". ", at), P.lastIndexOf("! ", at), P.lastIndexOf("? ", at));
+  const s0 = start < 0 ? 0 : start + 2, endM = /[.!?](\s|$)/.exec(P.slice(at + q.length)), s1 = endM ? at + q.length + endM.index + 1 : P.length;
+  const out = P.slice(s0, s1).trim();
+  return out.length >= 20 && out.length <= 300 ? out : null;
+}
+// D-071: one sourced line, checked, with why it was dropped. A claim that only rewords its quote (its figures all in the quote, at
+// most two content words not in the quote's sentence, at least 60% of them in it) is not lost: the page's own sentence that holds
+// the quote stands in its place, word for word from the page (`via: "quote"`). A claim with a figure the quote does not have, a
+// quote that is not on its page, or a page that was not read is dropped, as before.
+const FRAMING = contentWords("say says said report reports reported reporting note notes noted mention mentions mentioned claim claims claimed describe describes described state states stated explain explains explained highlight highlights highlighted share shares shared write writes wrote point points pointed add adds added indicate indicates indicated suggest suggests suggested tell tells told according publicly openly");
+export type LineCheck = { ok: true; text: string; via?: "quote" } | { ok: false; why: string };
+export function checkLine(text: unknown, quote: unknown, p: SourcePage | null, subject = "", o: { fallback?: boolean; predicate?: boolean } = {}): LineCheck {
+  const t = squash(text), q = squash(quote);
+  if (!t) return { ok: false, why: "no_text" };
+  if (t.length > 400) return { ok: false, why: "too_long" };
+  if (!linkFree(t)) return { ok: false, why: "link_in_text" };
+  if (!p) return { ok: false, why: "page_not_read" };
+  if (q.length < 8) return { ok: false, why: "no_quote" };
+  const miss = wordsNotInQuote(t, q, p.text, subject, p.title);
+  if (miss === null) return { ok: false, why: quoteContext(p.text, q) === null ? "quote_not_on_page" : "figure_not_in_quote" };
+  if (!miss.length) return o.predicate === false || hasPredicate(t, p.title) ? { ok: true, text: t } : { ok: false, why: "no_predicate" };
+  const all = contentWords(withoutAttribution(t)).size;
+  // A missing word that is a name in the claim ("Globex Power installed ..." on Acme's quote) is a different claim, never a rewording.
+  const names = contentWords((withoutAttribution(t).match(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}'-]*/gu) ?? []).join(" "));
+  // Only words that frame a statement (who said it, how) may be missing: "Acme installed 41,000 solar panels" on "Acme installed
+  // 41,000 home batteries" changes what was said, and is dropped.
+  if (o.fallback !== false && miss.length <= 2 && miss.every((w) => FRAMING.has(w)) && !miss.some((w) => names.has(w)) && all > 0 && (all - miss.length) / all >= 0.6) {
+    const own = sentenceOf(p.text, q);
+    if (own && linkFree(own) && hasPredicate(own, p.title)) return { ok: true, text: own, via: "quote" };
+  }
+  return { ok: false, why: "claim_words_not_in_quote" };
+}
+// D-071: what the research did with the model's draft (turn meta `research`, the real-set results): pages read, how the draft
+// parsed, lines drafted, lines kept (and how many stand on the page's own sentence), and lines dropped by reason.
+export interface ResearchAudit { pages: number; parse: "whole" | "salvaged" | "failed" | "none"; drafted: number; kept: number; from_quote: number; from_pages: number; dropped: Record<string, number> }
+export function newAudit(pages: number): ResearchAudit { return { pages, parse: "none", drafted: 0, kept: 0, from_quote: 0, from_pages: 0, dropped: {} }; }
+// D-071 (owner must-fix: "research never comes back without its sourced parts when pages were read"): when the draft gave no line at
+// all (it did not parse, the draft call failed, or it held nothing), the read pages' own sentences that speak to the ask are the
+// lines, word for word, each citing its page: the ones that name a subject asked about (when one was named) and share the most
+// content words with the ask, at most two a page. Nothing is reworded, so nothing can be invented.
+const nameIn = (name: string, text: string) => new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(text);
+export function pageSentences(pages: SourcePage[], want: Set<string>, names: string[], max: number): { text: string; page: SourcePage }[] {
+  const scored: { text: string; page: SourcePage; n: number; k: number; i: number }[] = [];
+  for (const [k, p] of pages.entries()) {
+    const ss = squash(readAlike(p.text.slice(0, 60000))).split(/(?<=[.!?])\s+/);
+    for (const [i, x] of ss.entries()) {
+      if (x.length < 40 || x.length > 300 || !/[.!?]$/.test(x) || !/[a-z]/.test(x) || !linkFree(x) || !hasPredicate(x, p.title)) continue;
+      if (names.length && !names.some((nm) => nameIn(nm, x) || nameIn(nm, p.title))) continue;
+      const n = [...contentWords(x)].filter((w) => want.has(w)).length;
+      if (n > 0) scored.push({ text: x, page: p, n, k, i });
+    }
+  }
+  scored.sort((a, b) => b.n - a.n || a.k - b.k || a.i - b.i);
+  const out: { text: string; page: SourcePage }[] = [], per = new Map<string, number>();
+  for (const x of scored) {
+    if (out.length >= max) break;
+    const u = normalizeUrl(x.page.url);
+    if ((per.get(u) ?? 0) >= 2 || out.some((o) => o.text === x.text)) continue;
+    per.set(u, (per.get(u) ?? 0) + 1); out.push({ text: x.text, page: x.page });
+  }
+  return out;
+}
+export function auditLine(a: ResearchAudit, r: LineCheck | { ok: false; why: string } | { ok: true; via?: "quote" }) {
+  a.drafted++;
+  if (r.ok) { a.kept++; if ((r as any).via === "quote") a.from_quote++; } else a.dropped[r.why] = (a.dropped[r.why] ?? 0) + 1;
 }
 // R9 free sources (architect, 2026-11-08): two cited sources that give different figures for the same thing are both shown, with
 // their sources, and the brief says they differ; Trainee never picks one silently. "The same thing" is narrow on purpose: the same
@@ -186,10 +276,14 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   const searched = found.provider;
   const lines = (xs: string[] | undefined) => [...new Set((xs ?? []).map(squash).filter((g) => g && g.length <= 240 && linkFree(g)))].slice(0, 8);
   const gaps = lines(found.gaps), basis = lines(found.basis);
-  const none = (): MarketResult => ({ status: "no_sources", format: "inline", notes, searched,
+  // D-071: what happened to the draft, line by line (turn meta `research`, the mirror runner's trace).
+  const audit = newAudit(pages.length);
+  const none = (): MarketResult => ({ status: "no_sources", format: "inline", notes, searched, audit,
     note: "No source could be opened. Say so plainly in one sentence and give no figure, name or claim from memory. Code adds nothing." });
   if (!pages.length) return none();
-  const d = parse(await i.deps.draft(marketDraftPayload(i.question, pages)).catch(() => "")) ?? {};
+  const parsed = parseDraft(await i.deps.draft(marketDraftPayload(i.question, pages)).catch(() => ""));
+  audit.parse = parsed.how;
+  const d = (parsed.value && typeof parsed.value === "object" ? parsed.value : null) ?? {};
   const byUrl = new Map(pages.map((p) => [normalizeUrl(p.url), p]));
   const pageOf = (u: unknown) => { const g = verifiedLinkGuard([String(u ?? "")], pages); return g.kept.length ? byUrl.get(g.kept[0]) ?? null : null; };
   const numsOn = (text: string, on: SourcePage[]) => { const pn = on.flatMap((p) => figuresIn(p.text.slice(0, 60000))); return figuresIn(text).every((n) => pn.some((p) => numEq(p, n))); };
@@ -200,18 +294,28 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   // claim is in the quote itself, and every content word of the claim is in the quote's sentence or the few words before it
   // (a heading such as "National estimates."). "Solar panel prices fell 20%" never stands on "Battery pack prices fell 20%".
   // A comparison cell's subject is its column: the quote must speak of that company too, so Acme's "41,000" never fills Globex's cell.
+  // D-071 (live-8 C9: no Citadel line stood): the subjects the ask named (the plan's companies) may be what a line is about when its
+  // page names them ("Citadel's posting lists a base salary ..." on Citadel's own posting, whose sentence says "this role"). A line
+  // that only rewords its quote stands as the page's own sentence (checkLine). A comparison cell keeps the strict rule: its quote
+  // must name its column, and it is never replaced.
+  const companies0 = (i.plan.companies ?? []).map(squash).filter(Boolean);
   const fact = (text: unknown, quote: unknown, url: unknown, subject = "") => {
-    const t = squash(text), q = squash(quote), p = pageOf(url);
-    if (!t || t.length > 400 || !linkFree(t) || !p || q.length < 8 || !agrees(t, q, p.text) || (subject && !agrees(subject, q, p.text)) || (!subject && !hasPredicate(t, p.title))) { dropped++; return null; }
-    return { text: t, cite: [num(p)] };
+    const p = pageOf(url);
+    const named = p ? companies0.filter((c) => nameIn(c, p.text) || nameIn(c, p.title)).join(" ") : "";
+    const c = checkLine(text, quote, p, subject ? "" : named, { fallback: !subject, predicate: !subject });
+    const ok2 = c.ok && (!subject || agrees(subject, squash(quote), p!.text));
+    auditLine(audit, ok2 ? c : { ok: false, why: c.ok ? "column_not_in_quote" : c.why });
+    if (!ok2) { dropped++; return null; }
+    return { text: (c as { text: string }).text, cite: [num(p!)] };
   };
   // Trainee's reading: every page it names passed the guard, and every number in it is on one of them.
   const reading = (x: any) => {
     const t = squash(x?.text), ps = arr(x?.urls, 4).map(pageOf).filter(Boolean) as SourcePage[];
-    if (!t || t.length > 400 || !linkFree(t) || !ps.length || !numsOn(t, ps)) { dropped++; return null; }
+    if (!t || t.length > 400 || !linkFree(t) || !ps.length || !numsOn(t, ps)) { dropped++; auditLine(audit, { ok: false, why: !ps.length ? "page_not_read" : "reading_unsupported" }); return null; }
+    auditLine(audit, { ok: true });
     return { text: t, cite: [...new Set(ps.map(num))] };
   };
-  const points = arr(d.summary, 5).map((x) => fact(x?.text, x?.quote, x?.url)).filter(Boolean) as Cited[];
+  const points = [...new Map((arr(d.summary, 5).map((x) => fact(x?.text, x?.quote, x?.url)).filter(Boolean) as Cited[]).map((x) => [x.text, x])).values()];
   let comparison: Extract<MarketResult, { status: "ok" }>["comparison"] = null;
   const opts = arr(d.comparison?.options, 4).map(squash).filter((o) => o && o.length <= 60 && linkFree(o));
   if (opts.length >= 2) {
@@ -224,6 +328,7 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   }
   const conditions = arr(d.conditions, 6).map(reading).filter(Boolean) as Cited[];
   const risks = arr(d.risks, 6).map(reading).filter(Boolean) as Cited[];
+  if (!audit.drafted) for (const l of pageSentences(pages, contentWords(`${i.question} ${companies0.join(" ")}`), companies0, 3)) { points.push({ text: l.text, cite: [num(l.page)] }); audit.kept++; audit.from_pages++; }
   const disagreements = disagreementsIn(points);
   if (!points.length && !comparison) return { ...none(), note: "Sources were opened but none supported an answer. Say you couldn't confirm one from what they say; do not guess." };
   const cited = order.map((k) => byUrl.get(k)!);
@@ -253,7 +358,7 @@ export async function researchMarket(i: { question: string; format: "inline" | "
     if (why) notes.push(`answered inline: ${why}`);
   }
   const format = file_url ? "file" : "inline";
-  return { status: "ok", format, asked: i.format, title, thesis, points, conditions, risks, comparison, sources, file_url, dropped, notes, searched, ...(gaps.length ? { gaps } : {}), ...(basis.length ? { basis } : {}), ...(disagreements.length ? { disagreements } : {}), ...(thesis ? (thesisCite.length ? { thesis_cite: thesisCite } : { thesis_summary: true }) : {}), ...(layout ? { layout } : {}),
+  return { status: "ok", format, asked: i.format, title, thesis, points, conditions, risks, comparison, sources, file_url, dropped, notes, searched, audit, ...(gaps.length ? { gaps } : {}), ...(basis.length ? { basis } : {}), ...(disagreements.length ? { disagreements } : {}), ...(thesis ? (thesisCite.length ? { thesis_cite: thesisCite } : { thesis_summary: true }) : {}), ...(layout ? { layout } : {}),
     note: format === "file"
       ? "Reply in one or two plain sentences: the thesis, then that the full brief with its sources is in the file. Write no link and no figure: code sends the file link."
       : layout ? WEB_NOTE + (disagreements.length ? " The sources differ on a figure (see disagreements): give each value with its source number and say they differ; never pick one." : "")

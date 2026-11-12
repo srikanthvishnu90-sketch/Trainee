@@ -85,7 +85,11 @@ export function capabilityTools(d: CapabilityDeps): ToolSpec[] {
     run: async (_i, c) => {
       const r = await recordFor(d, c);
       await remember(d, c, r);
-      return { ...r, connect_url: r.mail.gmail === "connected" ? null : d.connectUrl, note: RECORD_NOTE };
+      if (c.turn) c.turn.counts = { applied: r.applied.length };
+      // D-071 (live-8 C6: "Your Gmail shows 8 applications", then the list of 9 and "I miscounted"): the counts are code's, from the
+      // record, and the reply says them as given.
+      return { counts: { applied: r.applied.length, researched: r.researched.length, drafts: r.drafts.length }, ...r, connect_url: r.mail.gmail === "connected" ? null : d.connectUrl,
+        note: `${RECORD_NOTE} Say the numbers in counts exactly (counts.applied applications went); never count the list yourself.` };
     },
   }];
   if (d.files) tools.push({

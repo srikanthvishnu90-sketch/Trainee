@@ -1,0 +1,286 @@
+{
+ "heldout": {
+  "split": "heldout",
+  "conversations": 950,
+  "turns": 2802,
+  "code_turns": 282,
+  "brain_turns": 2520,
+  "nothing_sent": 2802,
+  "g1_strict": 2520,
+  "wrong_task": 93,
+  "rulings": {
+   "G1": {
+    "exercised": 2802,
+    "pass": 2648,
+    "fail": 154,
+    "model": 0,
+    "rate": 0.945
+   },
+   "G2": {
+    "exercised": 2802,
+    "pass": 278,
+    "fail": 4,
+    "model": 2520,
+    "rate": 0.986
+   },
+   "G3": {
+    "exercised": 2197,
+    "pass": 48,
+    "fail": 51,
+    "model": 2098,
+    "rate": 0.485
+   },
+   "G4": {
+    "exercised": 1121,
+    "pass": 140,
+    "fail": 12,
+    "model": 969,
+    "rate": 0.921
+   },
+   "G5": {
+    "exercised": 873,
+    "pass": 130,
+    "fail": 19,
+    "model": 724,
+    "rate": 0.872
+   },
+   "G6": {
+    "exercised": 988,
+    "pass": 935,
+    "fail": 53,
+    "model": 0,
+    "rate": 0.946
+   },
+   "G7": {
+    "exercised": 254,
+    "pass": 18,
+    "fail": 0,
+    "model": 236,
+    "rate": 1
+   },
+   "G8": {
+    "exercised": 323,
+    "pass": 323,
+    "fail": 0,
+    "model": 0,
+    "rate": 1
+   },
+   "G9": {
+    "exercised": 48,
+    "pass": 0,
+    "fail": 1,
+    "model": 47,
+    "rate": 0
+   },
+   "G10": {
+    "exercised": 979,
+    "pass": 118,
+    "fail": 0,
+    "model": 861,
+    "rate": 1
+   },
+   "G11": {
+    "exercised": 371,
+    "pass": 331,
+    "fail": 40,
+    "model": 0,
+    "rate": 0.892
+   },
+   "G12": {
+    "exercised": 537,
+    "pass": 23,
+    "fail": 0,
+    "model": 514,
+    "rate": 1
+   },
+   "G13": {
+    "exercised": 105,
+    "pass": 0,
+    "fail": 18,
+    "model": 87,
+    "rate": 0
+   },
+   "G14": {
+    "exercised": 852,
+    "pass": 567,
+    "fail": 17,
+    "model": 268,
+    "rate": 0.971
+   }
+  },
+  "families": {
+   "paraphrase": {
+    "turns": 354,
+    "g1": 345,
+    "fails": 11
+   },
+   "persona_swap": {
+    "turns": 349,
+    "g1": 332,
+    "fails": 18
+   },
+   "reorder": {
+    "turns": 197,
+    "g1": 189,
+    "fails": 8
+   },
+   "long_gap": {
+    "turns": 238,
+    "g1": 236,
+    "fails": 2
+   },
+   "typos": {
+    "turns": 254,
+    "g1": 244,
+    "fails": 15
+   },
+   "language": {
+    "turns": 155,
+    "g1": 155,
+    "fails": 0
+   },
+   "multi_ask": {
+    "turns": 177,
+    "g1": 162,
+    "fails": 21
+   },
+   "hypothetical": {
+    "turns": 187,
+    "g1": 187,
+    "fails": 0
+   },
+   "boundary": {
+    "turns": 263,
+    "g1": 233,
+    "fails": 30
+   },
+   "file_ask": {
+    "turns": 164,
+    "g1": 127,
+    "fails": 37
+   },
+   "practice": {
+    "turns": 237,
+    "g1": 218,
+    "fails": 19
+   },
+   "correction": {
+    "turns": 122,
+    "g1": 120,
+    "fails": 2
+   },
+   "capability": {
+    "turns": 105,
+    "g1": 100,
+    "fails": 6
+   }
+  },
+  "worst": [
+   {
+    "kind": "file",
+    "intent": "prep_brief",
+    "rulings": "G1",
+    "n": 22,
+    "example": "HO-0761.t1"
+   },
+   {
+    "kind": "draft",
+    "intent": "career_followup_answer",
+    "rulings": "G1,G6",
+    "n": 17,
+    "example": "HO-0688.t1"
+   },
+   {
+    "kind": "requirements",
+    "intent": "career_onboarding_needs",
+    "rulings": "G1,G6",
+    "n": 15,
+    "example": "HO-0013.t1"
+   },
+   {
+    "kind": "draft",
+    "intent": "career_stop_workflow",
+    "rulings": "G1,G6,G3",
+    "n": 14,
+    "example": "HO-0391.t2"
+   },
+   {
+    "kind": "practice_question",
+    "intent": "prep_brief",
+    "rulings": "G1",
+    "n": 13,
+    "example": "HO-0831.t4"
+   },
+   {
+    "kind": "file",
+    "intent": "career_resume_update",
+    "rulings": "G1,G11",
+    "n": 12,
+    "example": "HO-0033.t4"
+   },
+   {
+    "kind": "file",
+    "intent": "career_resume_clarify",
+    "rulings": "G1,G11",
+    "n": 10,
+    "example": "HO-0768.t1"
+   },
+   {
+    "kind": "practice_review",
+    "intent": "career_discovery",
+    "rulings": "G1,G3",
+    "n": 5,
+    "example": "HO-0304.t3"
+   },
+   {
+    "kind": "file",
+    "intent": "career_document_delivery",
+    "rulings": "G1,G11",
+    "n": 5,
+    "example": "HO-0766.t2"
+   },
+   {
+    "kind": "status_check",
+    "intent": "profile_recall",
+    "rulings": "G1,G14,G3,G4,G5",
+    "n": 4,
+    "example": "HO-0239.t3"
+   },
+   {
+    "kind": "tracker",
+    "intent": "tracking_status",
+    "rulings": "G11",
+    "n": 4,
+    "example": "HO-0404.t3"
+   },
+   {
+    "kind": "multi",
+    "intent": "career_resume_task",
+    "rulings": "G1,G14,G13,G3,G5",
+    "n": 4,
+    "example": "HO-0523.t1"
+   },
+   {
+    "kind": "search",
+    "intent": "career_internship_discovery",
+    "rulings": "G13",
+    "n": 4,
+    "example": "HO-0550.t2"
+   },
+   {
+    "kind": "record_read",
+    "intent": "intent_prior_application",
+    "rulings": "G4,G5",
+    "n": 3,
+    "example": "HO-0021.t3"
+   },
+   {
+    "kind": "draft",
+    "intent": "outreach_clarification",
+    "rulings": "G1,G6,G3",
+    "n": 3,
+    "example": "HO-0154.t3"
+   }
+  ]
+ }
+}

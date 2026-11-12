@@ -190,7 +190,7 @@ MIRROR_SPEND_APPROVED=D-0xx ANTHROPIC_API_KEY=... CI=true deno run -A --no-check
 
 The sample is seeded and taken round-robin over the families. The hook refuses to start without the DECISIONS.md line of the
 owner's written spend approval (D-060 is $10 for this effort), the key, and `--budget-usd`. It also refuses when the quote is
-over the cap: the turns with setup, times D-055's measured $0.0108 per turn (20 conversations come to about $1). It stops at
+over the cap: the turns with setup, times `PER_TURN_USD`, $0.10 a turn since D-065 (the live rate measured in live-5 and in the sample below; it was D-055's $0.0108, which under-quoted by ten times). It stops at
 the cap, metered at D-038's prices. It runs under the same production flags, and only the model host is reachable. It scores
 every turn on code's decisions and on the text. Its transcript stays local and git-ignored.
 

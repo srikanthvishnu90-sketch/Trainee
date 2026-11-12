@@ -18,7 +18,7 @@ import { enforceFollowupAsk } from "../_shared/followup_draft.ts";
 import { urlsIn } from "../_shared/channel_shape.ts";
 import { knowledgeFor, type Knowledge } from "../_shared/agent/knowledge/index.ts";
 import { styleBlock } from "../_shared/agent/style.ts";
-import { boundaryNote, boundaryOf, correctionNote, correctionOf, HYPOTHETICAL_WITHHELD, hypotheticalNote, hypotheticalOf, lengthNote, multiAskNote, PERSONA_WITHHELD, whileWorkingNote, postingNote, postingRefOf, REPLY_LENGTH, replyLength, roastNote, roastOf } from "../_shared/agent/turn_notes.ts";
+import { askedPartsOf, asksForDetail, boundaryNote, boundaryOf, capacityAskOf, capacityNote, correctionNote, correctionOf, DRAFT_TOOLS, draftAskOf, draftNote, HYPOTHETICAL_WITHHELD, hypotheticalNote, hypotheticalOf, lengthNote, multiAskNote, overLimit, partsMissing, partsNote, PERSONA_WITHHELD, planSearchAskOf, planSearchNote, whileWorkingNote, postingNote, postingRefOf, REPLY_LENGTH, replyLength, roastNote, roastOf, textLength } from "../_shared/agent/turn_notes.ts";
 import { severalAsks } from "../_shared/ask_language.ts";
 import type { AlertStore } from "../_shared/career_alert_store.ts";
 import type { HiredSource } from "../_shared/career_hired.ts";
@@ -152,8 +152,14 @@ export async function agentTurn(o: {
   const meant = hypo === "persona" ? [] : postingRefOf(o.message, Array.isArray(listed) ? listed : [], o.history);
   // D-061 G6, G9, G13: the boundary the person set, a correction said out loud, several asks each answered (turn_notes.ts).
   const boundary = boundaryOf(o.message), correction = correctionOf(o.message);
+  // D-065 (live round 1): a draft ask goes through the draft tool (G10/D-059), a plan ask aimed at postings searches first (C1),
+  // a research or advice ask's named parts are each covered (G3/G4, C9), an unverified pace is never affirmed (G5, C12).
+  const draftAsk = draftAskOf(o.message), planSearch = !hypo && planSearchAskOf(o.message, typeof o.whileWorking === "string" ? o.whileWorking : null);
+  const parts = askedPartsOf(o.message), capacity = capacityAskOf(o.message);
+  const draftLength = replyLength(o.message).kind === "draft" ? replyLength(o.message) : { kind: "draft" as const, ...REPLY_LENGTH.draft };
   const turnNotes = [hypo ? hypotheticalNote(hypo) : "", roast ? roastNote(roast) : "", meant.length ? postingNote(meant) : "", boundary ? boundaryNote(boundary) : "",
-    correction ? correctionNote(correction) : "", typeof o.whileWorking === "string" ? whileWorkingNote(o.whileWorking) : severalAsks(o.message) ? multiAskNote() : "", lengthNote(replyLength(o.message))].filter(Boolean);
+    correction ? correctionNote(correction) : "", typeof o.whileWorking === "string" ? whileWorkingNote(o.whileWorking) : severalAsks(o.message) ? multiAskNote() : "",
+    draftAsk ? draftNote(draftLength.aim) : "", planSearch ? planSearchNote() : "", parts.length ? partsNote(parts) : "", capacity ? capacityNote() : "", lengthNote(replyLength(o.message))].filter(Boolean);
   const hypoWithheld = hypo === "persona" ? PERSONA_WITHHELD : hypo ? HYPOTHETICAL_WITHHELD : [];
   const block = o.known ? personBlock({ profile: hypo === "persona" ? null : o.stores.profile, ...o.known }) : null;
   const notes: string[] = [];
@@ -170,13 +176,16 @@ export async function agentTurn(o: {
   // D-063 (C4): trace.a keeps a specific advice question's result (research/advice.ts): its one source goes on its own line.
   const trace: { r?: Extract<ResearchResult, { status: "ok" }>; m?: MarketResult | CompanyResult; a?: AdviceResult } = {};
   const ctx: any = { userId: o.userId, threadId: o.threadId, now: o.now, state: o.stores };
+  const tools = [...withheld([...(o.toolPolicy?.withhold ?? []), ...hypoWithheld], [...careerTools({ postings: o.postings ?? (async () => []), alerts: o.alerts ?? null, memory: o.memory ?? null, events: o.events ?? null, confirmations: o.confirmations ?? null, tz: o.tz, mail: o.mail ?? null, interviews: o.interviews ?? null, digest: o.digest ?? null, outreach: o.outreach ?? null, verifier: o.verifier ?? null, tailor: o.tailor ?? null, hired: o.hired ?? null, wants: o.wants ?? null, limits: o.limits, posting: o.posting ?? null, situation: o.known?.situation ?? null, linkCheck: o.linkCheck ?? null, conversations: o.conversations ?? null, market: o.market ? { ...o.market, onResult: (r) => { if (r.status === "ok" || trace.m?.status !== "ok") trace.m = r; } } : null, postingRecheck: o.postingRecheck ?? null, applyFlow: o.applyFlow ?? null, research: o.knowledge && o.research ? { ...o.research, onResult: (r, m) => { if (r.status === "ok") trace.r = r; o.research?.onResult?.(r, m); }, onAdvice: (r) => { if (r.source || !trace.a?.source) trace.a = r; } } : null }), ...(o.capabilities ?? [])]), ...(o.shape && attachAsked(o.message) ? [attachTool()] : []), ...(o.files ? [createFileTool(o.files)] : [])];
+  const offered = new Set(tools.map((t) => t.name));
   let result = await runAgentTurn({
+    process: processCheck({ draftAsk: draftAsk && DRAFT_TOOLS.some((n) => offered.has(n)), planSearch: planSearch && offered.has("search_jobs"), parts }),
     system: careerSystemPrompt(localDay(o.now, o.tz)) + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + "\n\n" + MIRROR_RULES + "\n\n" + turnNotes.join("\n\n") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
     history: o.history.slice(-HISTORY_WINDOW).map((m) => ({ role: m.role, content: String(m.content ?? "") })),
     message: [o.message, ...notes].filter(Boolean).join("\n\n"),
     // ADVERSARIAL ROUND 2: an attached file's name and text are not the person's words: no tool reads them as said.
     said: o.message,
-    tools: [...withheld([...(o.toolPolicy?.withhold ?? []), ...hypoWithheld], [...careerTools({ postings: o.postings ?? (async () => []), alerts: o.alerts ?? null, memory: o.memory ?? null, events: o.events ?? null, confirmations: o.confirmations ?? null, tz: o.tz, mail: o.mail ?? null, interviews: o.interviews ?? null, digest: o.digest ?? null, outreach: o.outreach ?? null, verifier: o.verifier ?? null, tailor: o.tailor ?? null, hired: o.hired ?? null, wants: o.wants ?? null, limits: o.limits, posting: o.posting ?? null, situation: o.known?.situation ?? null, linkCheck: o.linkCheck ?? null, conversations: o.conversations ?? null, market: o.market ? { ...o.market, onResult: (r) => { if (r.status === "ok" || trace.m?.status !== "ok") trace.m = r; } } : null, postingRecheck: o.postingRecheck ?? null, applyFlow: o.applyFlow ?? null, research: o.knowledge && o.research ? { ...o.research, onResult: (r, m) => { if (r.status === "ok") trace.r = r; o.research?.onResult?.(r, m); }, onAdvice: (r) => { if (r.source || !trace.a?.source) trace.a = r; } } : null }), ...(o.capabilities ?? [])]), ...(o.shape && attachAsked(o.message) ? [attachTool()] : []), ...(o.files ? [createFileTool(o.files)] : [])],
+    tools,
     model: o.model,
     ctx,
   });
@@ -208,18 +217,53 @@ export async function agentTurn(o: {
   // its own words, under guards in code: every figure and link must come from the long reply, and a turn that showed an exact
   // payload, holds an approval, carries code, or is a sourced research reply is never rewritten.
   // A research, market or company reply was laid out and sourced in code above (its citations number its sources): never condensed.
-  if (result.reply && result.stopped === "final" && !trace.r && !trace.m && !trace.a) {
-    const limit = condenseLimit(o.message);
-    // An ask for everything, or for the detail ("give me a detailed plan for my whole job search, everything"; "like everything
-    // you remember") is a deliberate long deliverable: the channel lays it out in several messages (channel_shape.ts), and a
-    // rewrite to a text's length would drop what was asked for (tests/architect/telegram-loop-30.test.ts, long-reply-bubbles).
-    // Its length is the prompt's to guide, never the shortener's.
-    if (limit !== REPLY_TARGET.long && condensable(result, limit)) {
-      const short = await condenseReply(o.model, result.reply, limit);
-      if (short) result = { ...result, reply: short };
+  // D-065 (G3, live round 1: the brain overshot every kind, median 507 characters against Instinct's 396): the length is enforced
+  // in code. A reply more than 10% over its kind's upper end (turn_notes.ts overLimit, links apart) gets ONE shortening pass, at
+  // the kind's target, under the condenser's guards plus: every link and [placeholder] kept, and the result within the bound
+  // (else the reply stands as written). An open-question, market or company research reply is laid out and sourced in code and is
+  // never rewritten; a specific advice answer is, and its one source goes back on its own line. An ask that itself asks for length
+  // ("a detailed plan for my whole job search, everything") is the channel's to lay out in parts (telegram-loop-30,
+  // long-reply-bubbles), never the shortener's. A turn whose tools wrote anything, an exact payload, an approval, or code is never
+  // condensed (condensable).
+  if (result.reply && result.stopped === "final" && !trace.r && !trace.m) {
+    const l = replyLength(o.message), bound = overLimit(l);
+    // A "draft" kind written in prose is not a message draft (those go through draft_followup, below): it is a rewrite of their
+    // own text ("make the answer less formal"), whose length is the text's, not a draft's.
+    if (l.kind !== "draft" && !(l.kind === "everything" && asksForDetail(o.message)) && textLength(result.reply) > bound && condensable(result, { max: -1 })) {
+      const short = await condenseReply(o.model, result.reply, { max: bound, aim: l.aim }, (long, out) => shortenedOk(long, out, bound));
+      if (short) result = { ...result, reply: trace.a ? enforceAdviceReply(short, trace.a) : short };
+    }
+  }
+  // D-065 (G3 for drafts): a draft shown by draft_followup ("Draft, not sent:") over the draft bound is shortened once BEFORE it is
+  // shown, only in its wording: the shorter text passes the same draft check (no invented history, figure, name or address; the
+  // same recipient and document) and keeps every placeholder, or the draft stands as the tool checked it. Nothing here touches a
+  // card with a payload (draft_outreach, draft_email_reply): those are never rewritten.
+  const d = (ctx.turn as any)?.draft as { prefix: string; body: string; recheck: (b: string) => boolean } | undefined;
+  if (result.show?.intent === "career_followup_draft" && d && result.reply === result.show.text) {
+    const bound = overLimit(draftLength);
+    if (textLength(result.reply) > bound) {
+      const room = bound - textLength(d.prefix);
+      const short = await condenseReply(o.model, d.body, { max: room, aim: draftLength.aim }, (long, out) => shortenedOk(long, out, room) && d.recheck(out));
+      if (short) { const text = `${d.prefix}${short}`; result = { ...result, reply: text, show: { ...result.show, text } }; }
     }
   }
   return know ? { ...result, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : result;
+}
+
+// D-065: the process the turn still owes before its reply stands (loop.ts `process`, asked once). Each names its ruling.
+export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts: string[] }): ((reply: string, calls: { name: string; ok: boolean }[]) => string | null) | null {
+  if (!o.draftAsk && !o.planSearch && !o.parts.length) return null;
+  return (reply, calls) => {
+    const called = (names: readonly string[]) => calls.some((c) => names.includes(c.name));
+    // G10 / D-059: the draft tool is the only path for a draft; a draft written in the reply's prose is never shown.
+    if (o.draftAsk && !called(DRAFT_TOOLS)) return "They asked for a message draft and you wrote it in your reply. Call draft_followup now with the draft as body (keep [placeholders] for what you don't know); code shows its text as your reply.";
+    // MIRROR-PROCESS C1: the plan stands on a search of postings they could apply to.
+    if (o.planSearch && !called(["search_jobs"])) return "They asked what to do to land postings they could apply to, and no search ran. Call search_jobs now with their goal, then write the plan around what it found (say how many, and if none, what it covered).";
+    // G3 / G4 (C9): every part they named is answered.
+    const missing = partsMissing(reply, o.parts);
+    if (missing.length) return `They asked about ${o.parts.join(", ")}, and your reply does not cover: ${missing.join(", ")}. Add each missing part from what you read this turn (call the research tool again only if needed), and where nothing covers it, say that in one plain sentence for that part.`;
+    return null;
+  };
 }
 
 // The links Trainee's own earlier replies in the window showed the person (assistant messages only; never a link the person typed,
@@ -266,7 +310,19 @@ export function condensedOk(long: string, short: string, limit: { max: number })
   for (const keep of [BOUNDARY, CAVEAT]) if (keep.test(long) && !keep.test(s)) return false;
   return (s.match(/\?/g) ?? []).length <= 1;
 }
-export async function condenseReply(model: ModelFn, long: string, limit: { max: number; aim: string }): Promise<string | null> {
+// D-065: the stricter acceptance of the length pass: the condenser's guards (no new figure or link, the boundary and the caveat
+// kept, at most one question), plus every link, figure and [placeholder] of the long text kept, and the text within the bound.
+const PLACEHOLDERS = /\[[^\]\n]{1,40}\]/g;
+export function shortenedOk(long: string, short: string, bound: number): boolean {
+  const s = String(short ?? "").trim();
+  if (!condensedOk(long, s, { max: Number.POSITIVE_INFINITY }) || textLength(s) > bound) return false;
+  if ((long.match(LINK) ?? []).some((x) => !s.includes(x))) return false;
+  // Facts kept: every figure of the long text is still in the short one (a shortening drops words, never a fact's number).
+  const nums = new Set((s.match(NUMBER) ?? []).map((x) => x.replace(/[,.]$/, "")));
+  if ((long.replace(LINK, " ").match(NUMBER) ?? []).some((x) => !nums.has(x.replace(/[,.]$/, "")))) return false;
+  return (long.match(PLACEHOLDERS) ?? []).every((x) => s.includes(x));
+}
+export async function condenseReply(model: ModelFn, long: string, limit: { max: number; aim: string }, ok: (long: string, short: string) => boolean = (a, b) => condensedOk(a, b, limit)): Promise<string | null> {
   try {
     const res = await model({
       system: `Rewrite this text message from a career assistant so it reads like a text: ${limit.aim}, plain sentences, at most two short paragraphs. ` +
@@ -276,6 +332,6 @@ export async function condenseReply(model: ModelFn, long: string, limit: { max: 
       messages: [{ role: "user", content: [{ type: "text", text: long }] }], tools: [], max_tokens: 600, tool_choice: { type: "none" },
     } as any);
     const out = ((res as any)?.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join("").trim();
-    return condensedOk(long, out, limit) ? out : null;
+    return ok(long, out) ? out : null;
   } catch { return null; }
 }

@@ -44,7 +44,8 @@ import { researchCareerQuestion, type ResearchDeps } from "./research/index.ts";
 import { type MarketDeps, type MarketResult, researchMarket } from "./research/market.ts";
 import { type CompanyResult, FOCI, type Focus, researchCompany } from "./research/company.ts";
 import { type PostingRecheck, READABLE_BOARDS } from "../research_web.ts";
-import { checkFollowup } from "../followup_draft.ts";
+import { checkFollowup, type FollowupIn } from "../followup_draft.ts";
+import { statementsOf, TODO_CLAUSE } from "./turn_notes.ts";
 
 const obj = (properties: Record<string, unknown> = {}, required: string[] = []) => ({ type: "object" as const, properties, required });
 const str = (description: string) => ({ type: "string", description });
@@ -128,6 +129,14 @@ function factShown(before: string, text: string, id: string): boolean {
 const FILLER = new Set(["the", "and", "for", "with", "has", "have", "had", "was", "are", "is", "years", "year", "wants", "want", "work", "worked", "role", "roles", "job", "jobs", "their", "they", "from", "who", "that", "this", "person", "user"]);
 const SENSITIVE = /\b(?:citizen|citizenship|green card|permanent resident|visa|h-?1b|opt|cpt|f-?1|sponsorship|sponsor|authori[sz]ed|clearance|gpa|phd|ph\.d|doctorate|mba|masters?|bachelors?|veteran|disabilit(?:y|ies)|convicted|felony)\b/g;
 const GUESSED = /\b(assum\w*|infer\w*|probabl\w*|likely|presumabl\w*|guess\w*|seems?|maybe|perhaps|implied)\b/i;
+// D-065 (G1/D-007): the text a record write may draw on. undefined: the message asks nothing (every word of it may be a statement,
+// as before); "": it asks and states nothing about the person; else the first-person statements in it.
+export const NOTHING_STATED = "not saved: their message asks a question or makes a request and states no fact about themselves; answer it and save nothing";
+export function recordSource(message: string | undefined): string | undefined {
+  if (message === undefined) return undefined;
+  const s = statementsOf(message);
+  return s.asking ? s.stated : undefined;
+}
 export function factRefusal(text: string, message: string | undefined): string | null {
   if (GUESSED.test(text)) return "not saved: a fact about the person is only what they said, never an assumption or inference";
   if (message === undefined) return null;
@@ -415,12 +424,19 @@ export function careerTools(deps: {
     }, ["kind", "body"]),
     run: async (i, c) => {
       const list = (x: unknown) => Array.isArray(x) ? x.map(String).filter(Boolean).slice(0, 4) : [];
-      const out = checkFollowup({ kind: ["thank_you", "follow_up", "note"].includes(String(i.kind)) ? i.kind : "note", recipient: i.recipient ? String(i.recipient) : null, recipient_options: list(i.recipient_options),
-        document: i.document ? String(i.document) : null, documents: list(i.documents), body: String(i.body ?? ""), tone: i.tone ? String(i.tone) : null },
-        { said: c.turn?.typed ?? c.turn?.message ?? "", facts: confirmed(profileOf(c).facts || []).map(factText) });
+      const input = { kind: (["thank_you", "follow_up", "note"].includes(String(i.kind)) ? i.kind : "note") as FollowupIn["kind"], recipient: i.recipient ? String(i.recipient) : null, recipient_options: list(i.recipient_options),
+        document: i.document ? String(i.document) : null, documents: list(i.documents), body: String(i.body ?? ""), tone: i.tone ? String(i.tone) : null };
+      const support = { said: c.turn?.typed ?? c.turn?.message ?? "", facts: confirmed(profileOf(c).facts || []).map(factText) };
+      const out = checkFollowup(input, support);
       if (out.status === "ask" && c.turn) c.turn.askOnly = true;
       // D-059: with no recipient named the draft is shown with its placeholders ("Draft, not sent:"), the same way.
-      if (out.status === "ok" && c.turn) c.turn.show = { intent: "career_followup_draft", text: `Draft${out.to ? ` for ${out.to}` : ""}${out.attachment ? `, with ${out.attachment}` : ""}, not sent:\n\n${out.body}` };
+      if (out.status === "ok" && c.turn) {
+        const prefix = `Draft${out.to ? ` for ${out.to}` : ""}${out.attachment ? `, with ${out.attachment}` : ""}, not sent:\n\n`;
+        c.turn.show = { intent: "career_followup_draft", text: `${prefix}${out.body}` };
+        // D-065 (G3): a draft over its length may be shortened once before it is shown (career_brain.ts); the shorter text must
+        // pass this same check, with the same recipient, document and support. Nothing is stored or sent from here.
+        c.turn.draft = { prefix, body: out.body, recheck: (body: string) => { const again = checkFollowup({ ...input, body }, support); return again.status === "ok" && again.to === out.to && again.attachment === out.attachment; } };
+      }
       return out;
     },
   }];
@@ -452,6 +468,10 @@ export function careerTools(deps: {
       input_schema: obj({ instruction: str("The instruction, short and plain, e.g. 'Needs visa sponsorship (F-1 OPT)'"), quote: str("Their exact words from this message that say it") }, ["instruction", "quote"]),
       run: async (i, c) => {
         if (!c.turn || !quotedFrom(c.turn.message, String(i.quote ?? ""))) throw new Error("not kept: the quote is not in the person's message this turn; only what they said is kept");
+        // D-065 (G1/D-007, live round 1 C1): a thing to do now ("I need to lock in for recruiting") is a task, not a rule to keep.
+        // A rule the person phrases inside a question ("how should I follow up after an interview?") is still theirs to keep
+        // (launch readiness S3), so only the to-do is refused here; facts are held to their statements (add_profile_fact).
+        if (TODO_CLAUSE.test(String(i.quote ?? "").toLowerCase()) || TODO_CLAUSE.test(String(i.instruction ?? "").toLowerCase())) throw new Error("not kept: that is something to do now, not a rule that should always hold; answer it and keep nothing");
         // WO-061/H031: a rule about a resume they name is about a record; when that resume is not on file, that is what
         // they need to hear, first, before anything about keeping the rule.
         const named = resumeNamedIn(`${i.quote ?? ""} ${i.instruction ?? ""}`);
@@ -508,7 +528,11 @@ export function careerTools(deps: {
       description: "Save one thing the person said about themselves (experience, education, skill, goal, location, preference) as a draft fact, in their words. It is not usable until they confirm it.",
       input_schema: obj({ kind: str("experience | education | skill | goal | location | preference | other"), text: str("The fact in the person's own words") }, ["kind", "text"]),
       run: async (i, c) => {
-        const refused = factRefusal(String(i.text ?? ""), c.turn?.message);
+        // D-065 (G1/D-007, live round 1 C1: two facts saved from a plain question): a message that asks something records only
+        // what its own first-person statements say; a question or request with none states no fact about the person.
+        const said = recordSource(c.turn?.message);
+        if (said === "") throw new Error(NOTHING_STATED);
+        const refused = factRefusal(String(i.text ?? ""), said ?? c.turn?.message);
         if (refused) throw new Error(refused);
         const fact = CareerProfile.addFact(profileOf(c), { kind: String(i.kind), text: String(i.text), needs_confirmation: true, status: "draft" });
         c.turn?.added.push(fact.id);

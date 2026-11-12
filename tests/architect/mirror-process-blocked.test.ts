@@ -1,16 +1,18 @@
+// Architect amendment (D-064): promoted out of pending/ (it passes on every turn: C1 by D-061 G11, C6, C16 and C19 by D-062); it now
+// runs in the gate and may not regress (P7). The text below is as it was written.
 // PENDING (architect, 2026-11-11): the process Instinct followed on the benchmark turns Trainee cannot follow yet
 // (docs/architect/specs/MIRROR-PROCESS.md; the BLOCKED table in tests/architect/mirror-wa-batch1-process.test.ts names each
 // blocker). Each assertion is the full process of one turn, through the real handler at $0 with the scripted model of
 // tests/architect/helpers/mirror_process.ts. It FAILS until the capability lands; when a turn passes here, move it to EXISTS in
 // mirror-wa-batch1-process.test.ts and the spec in the same PR. Never ignored, never weakened.
-//   CI=true deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/pending/mirror-process-blocked.test.ts
+//   CI=true deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/mirror-process-blocked.test.ts
 import assertNode from "node:assert/strict";
-import { canRun } from "../helpers/response_world.ts";
-import { effectRows, runConversation, type Step } from "../helpers/mirror_process.ts";
+import { canRun } from "./helpers/response_world.ts";
+import { effectRows, runConversation, type Step } from "./helpers/mirror_process.ts";
 // Architect amendment (D-062; owner, 2026-11-11: "be able to answer emails, find alumni, do all of it"): C6, C16 and C19 are scripted
 // like the other turns (the brain calls the tool the process names and replies from what it returned) and the people search is
 // stubbed on the Anthropic wire. Every check below is unchanged; nothing is sent, queued or contacted (effectRows).
-import { C16_STEPS, C19_STEPS, C6_STEPS, isPeopleSearch, peopleSearchAnswer } from "../helpers/d062_fixtures.ts";
+import { C16_STEPS, C19_STEPS, C6_STEPS, isPeopleSearch, peopleSearchAnswer } from "./helpers/d062_fixtures.ts";
 
 const SCRIPT: Record<string, Step[]> = {
   // Architect amendment (D-063): C4, C10 and C20 passed here and moved to EXISTS (MP-1, tests/architect/mirror-wa-batch1-process.test.ts).

@@ -17,6 +17,7 @@ export function createFileTool(files: FileService): ToolSpec {
       + "introduction: who, exactly 3 relevance bullets, and the exact outreach message (the person taps Pass or Introduce; nothing sends without it). "
       + "application_proof: give only {application_id} (the job id of an application on record); the company, role, status, dates, confirmation, answers and anything failed come from the application record, never from you. "
       + "application_review is not yours to make: Trainee builds it from a prepared application and links it on the card. "
+      + "tracker is not yours to make either: export_tracker builds it from the person's records and Gmail confirmations. "
       + "plan_review: a weekly pipeline summary (variant pipeline) or an interview prep brief (variant interview_prep). comparison: offers or roles side by side, 2 to 4 options. draft: an email, cover letter or message the person can edit and copy. research_brief: company or role research with its sources. "
       + "Every fact needs a source: 'From the posting', 'From your resume', 'From you', or 'Reported, not verified' (never \"From Trainee's records\": only the system attaches that, from a real record). A fact without a source is refused. Leave out what you do not know; never write unknown or n/a. Facts about the person only from their confirmed profile or what they said. "
       + "The link is added to your reply by the system after you answer: do not write a URL or link yourself. Say in a few words what the page holds, and only once this call has succeeded.",

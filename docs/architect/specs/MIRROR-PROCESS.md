@@ -63,7 +63,7 @@ The loop, reusable for any reference (Instinct batch 2, another assistant, a hum
 | C3 | EXISTS | |
 | C4 | MISSING | a sourced answer to a specific advice question: with web research on (D-060), `research_career_question` answers it as a career-entry plan with no source link |
 | C5 | EXISTS | |
-| C6 | MISSING | email-confirmation evidence in the record reply; researched roles separated from applications |
+| C6 | EXISTS | D-062: `read_application_mail` (the person's Gmail confirmations, researched roles and drafts kept apart, coverage) |
 | C5f1 | EXISTS | |
 | C5f2 | EXISTS | |
 | C7 | EXISTS | |
@@ -75,10 +75,10 @@ The loop, reusable for any reference (Instinct batch 2, another assistant, a hum
 | C13 | EXISTS | (D-059) |
 | C14 | EXISTS | (D-059) |
 | C15 | EXISTS | |
-| C16 | MISSING | a tracker artifact (no tracker File kind, no Sheets export) built from email confirmations |
+| C16 | EXISTS | D-062: `export_tracker` (the tracker File kind, built by code, corrections named) |
 | C17 | EXISTS | |
 | C18 | EXISTS | (D-060 `check_posting_open`; since D-062 a Workday posting is read from its own CXS data, with its stated deadline) |
-| C19 | OFF | `CAREER_PEOPLE_SEARCH`, `CAREER_CONTACT_OUTREACH` (D-043 not accepted) |
+| C19 | EXISTS | D-062: `find_people` (web search excerpts; `CAREER_PEOPLE_SEARCH` and `CAREER_CONTACT_OUTREACH` in RELEASE_FLAGS) |
 | C20 | MISSING | edits to a tailored resume (condense one role, expand another) |
 | C21 | EXISTS | |
 | C22 | EXISTS | (D-060: `get_posting` pay, then `research_market`, self-reported figures labelled) |
@@ -160,14 +160,19 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
 - **Instinct:** code review: catches the StopIteration on no unique number, gives the fix, asks a harder follow-up.
 - **Steps:** the brain with the conversation; no rubric score - EXISTS. (No code is executed; Instinct showed none either.)
 
-### C6 "have i applied to anything yet? trying to keep track" (MISSING)
+### C6 "have i applied to anything yet? trying to keep track" (EXISTS, D-062)
 - **Instinct:** evidence from Gmail confirmations across three accounts; separates confirmed applications from tonight's
   researched roles; says what could be missing; offers a running tracker.
-- **Steps:** (1) the person's records (`tracking_status`, `list_applications`) - EXISTS. (2) email confirmations - **MISSING**
-  in this reply: `CAREER_MAIL_TRACKING` (ON) reads one connected Gmail into the tracker, but the record reply does not read it,
-  there is no multi-account read, and the benchmark persona has no Gmail. (3) researched roles (C3's list) separated from
-  applications - **MISSING**: the reply says only that the tracker is empty. (4) the tracker offer - MISSING (see C16).
-- **Artifact:** none. **Boundary:** "tonight's roles were research only".
+- **Steps:** (1) the staged route sends the ask to the brain (`career_staged.ts applicationRecordAsk`, with
+  `CAREER_MAIL_TRACKING` on). (2) `read_application_mail` (`_shared/agent/capability_tools.ts`,
+  `_shared/career_application_record.ts`): one mail run for this person now (the scheduled run's own code), then the
+  applications with their evidence (the employer's email, Trainee's submission record, or the person's word), the roles this
+  conversation listed kept apart as research, unsubmitted drafts, the coverage (one connected Gmail; another address or a
+  portal-only status is missed), and what changed since last shown. (3) No Gmail connected: said, with the connect link (the
+  person signs in to Google themselves). **One Gmail account at a time**: the connector keeps one Google account per person
+  (connecting another replaces it), so Instinct's three-account read is not matched; the coverage says so.
+- **Artifact:** none. **Boundary:** "tonight's roles were research only". Asserted in MP-1 (no Gmail) and in
+  `tests/architect/d062-capabilities-process.test.ts` D62-1 (a stub Gmail with an employer's confirmation).
 
 ### C7 "hypothetically if i had two offers, 120k in chicago vs 140k in nyc ..." (EXISTS)
 - **Instinct:** net framing, a lean, challenges the premise; nothing saved.
@@ -230,11 +235,14 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
 ### C15 "say i'm a new grad with zero internships and a mid gpa, how do i even get interviews" (EXISTS)
 - **Steps:** the brain told it is a hypothetical PERSON: their saved facts left out, every record tool withheld - EXISTS.
 
-### C16 "yea set up that application tracker" (MISSING)
+### C16 "yea set up that application tracker" (EXISTS, D-062)
 - **Instinct:** a Google Sheet: past applications, researched roles and the unsubmitted PayPal draft, kept up from Gmail; a
   correction of C6 ("Payroll Co" was "Golf Co").
-- **Steps:** (1) the records - EXISTS. (2) a tracker artifact - **MISSING**: no tracker File kind (`file_kinds.ts`), no Sheets
-  export. (3) its rows from email confirmations - MISSING (see C6). (4) the self-correction - follows from (3).
+- **Steps:** (1) the staged route (`applicationRecordAsk`). (2) `export_tracker`: the same record as a tracker File (kind
+  `tracker` in `file_kinds.ts`, built by code only, never by `create_file`): applications with evidence and dates, researched
+  roles, drafts, each with its status, and the coverage. (3) G9: what changed since the record was last shown (kept per person
+  in `career_watch_kv`, erased with everything else) is named in the File and the reply. No Sheets export (a File page instead).
+- **Artifact:** the tracker File. Asserted in D62-2 (with a stage corrected by a later email).
 
 ### C17 "give me a 'tell me about yourself' answer i can reuse ..." (EXISTS)
 - **Steps:** the brain (`prep_serve_mismatch`) with the confirmed record and `get_profile` - EXISTS.
@@ -249,10 +257,14 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
   its own line and "nothing was applied for" - EXISTS. (This PR first added a `recheck` to `get_posting`; D-060's tool does the
   same job, so the `get_posting` change was dropped at the merge.)
 
-### C19 "find me 3 lakeshore alumni working at google or trading firms ... just research don't message anyone" (OFF)
+### C19 "find me 3 lakeshore alumni working at google or trading firms ... just research don't message anyone" (EXISTS, D-062)
 - **Instinct:** three leads from public profile search excerpts, a caveat that current employment is unverified; nobody contacted.
-- **Steps:** public people search - **OFF**: `CAREER_PEOPLE_SEARCH` and `CAREER_CONTACT_OUTREACH` (`RELEASE_NEVER_ON`, D-043
-  not accepted). Today code answers with a list plan (`outreach_clarification`) and finds no one.
+- **Steps:** (1) the staged route (`career_staged.ts alumniSearchAsk`, `CAREER_PEOPLE_SEARCH` on). (2) `find_people`
+  (`_shared/career_alumni_search.ts`): one web search call (at most 2 searches, cached 24 hours), LinkedIn, Indeed, Handshake
+  and the never-list blocked in the search itself, no page fetched; a lead stands only when its name and employer are in its
+  own page's quoted words; the school shown or not; one lead to start with and why; each "not verified; current employment
+  needs confirming". (3) Code keeps the caveat and "Nobody was contacted." in the reply (`enforcePeopleReply`).
+- **Boundary:** "Nobody was contacted." Asserted in MP-1 and D62-5.
 
 ### C20 "actually for that paypal resume, condense the pixelforge stuff to one line and expand the waypoint part more" (MISSING)
 - **Instinct:** a v2 PDF with both edits, honest wording about Waypoint, still a review draft.

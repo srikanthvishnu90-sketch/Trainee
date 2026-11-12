@@ -138,6 +138,9 @@ export async function agentTurn(o: {
   files?: FileService | null;
   // D-064 (G13): this message arrived while the previous turn (this text, the person's previous message) was still running.
   whileWorking?: string | null;
+  // D-062: the capability tools (_shared/agent/capability_tools.ts: Gmail record and tracker, people search, answering an email),
+  // under the same withholding as every other tool.
+  capabilities?: import("../_shared/agent/loop.ts").ToolSpec[] | null;
 }): Promise<TurnResult & { knowledge?: { playbooks: string[]; unknown: string[]; stage: string | null } }> {
   // MIRROR WA-1 gaps (turn_notes.ts): what code read from this message and this conversation, for this turn only. A hypothetical
   // person is answered without their saved facts (the profile is left out of the block) and with every record tool withheld;
@@ -171,7 +174,7 @@ export async function agentTurn(o: {
     message: [o.message, ...notes].filter(Boolean).join("\n\n"),
     // ADVERSARIAL ROUND 2: an attached file's name and text are not the person's words: no tool reads them as said.
     said: o.message,
-    tools: [...withheld([...(o.toolPolicy?.withhold ?? []), ...hypoWithheld], careerTools({ postings: o.postings ?? (async () => []), alerts: o.alerts ?? null, memory: o.memory ?? null, events: o.events ?? null, confirmations: o.confirmations ?? null, tz: o.tz, mail: o.mail ?? null, interviews: o.interviews ?? null, digest: o.digest ?? null, outreach: o.outreach ?? null, verifier: o.verifier ?? null, tailor: o.tailor ?? null, hired: o.hired ?? null, wants: o.wants ?? null, limits: o.limits, posting: o.posting ?? null, situation: o.known?.situation ?? null, linkCheck: o.linkCheck ?? null, conversations: o.conversations ?? null, market: o.market ? { ...o.market, onResult: (r) => { if (r.status === "ok" || trace.m?.status !== "ok") trace.m = r; } } : null, postingRecheck: o.postingRecheck ?? null, applyFlow: o.applyFlow ?? null, research: o.knowledge && o.research ? { ...o.research, onResult: (r, m) => { if (r.status === "ok") trace.r = r; o.research?.onResult?.(r, m); } } : null })), ...(o.shape && attachAsked(o.message) ? [attachTool()] : []), ...(o.files ? [createFileTool(o.files)] : [])],
+    tools: [...withheld([...(o.toolPolicy?.withhold ?? []), ...hypoWithheld], [...careerTools({ postings: o.postings ?? (async () => []), alerts: o.alerts ?? null, memory: o.memory ?? null, events: o.events ?? null, confirmations: o.confirmations ?? null, tz: o.tz, mail: o.mail ?? null, interviews: o.interviews ?? null, digest: o.digest ?? null, outreach: o.outreach ?? null, verifier: o.verifier ?? null, tailor: o.tailor ?? null, hired: o.hired ?? null, wants: o.wants ?? null, limits: o.limits, posting: o.posting ?? null, situation: o.known?.situation ?? null, linkCheck: o.linkCheck ?? null, conversations: o.conversations ?? null, market: o.market ? { ...o.market, onResult: (r) => { if (r.status === "ok" || trace.m?.status !== "ok") trace.m = r; } } : null, postingRecheck: o.postingRecheck ?? null, applyFlow: o.applyFlow ?? null, research: o.knowledge && o.research ? { ...o.research, onResult: (r, m) => { if (r.status === "ok") trace.r = r; o.research?.onResult?.(r, m); } } : null }), ...(o.capabilities ?? [])]), ...(o.shape && attachAsked(o.message) ? [attachTool()] : []), ...(o.files ? [createFileTool(o.files)] : [])],
     model: o.model,
     ctx,
   });

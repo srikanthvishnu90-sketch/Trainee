@@ -58,6 +58,7 @@ import { replyFlagsMeta } from "../_shared/agent/loop.ts"; // flag-only reply ch
 import { gatewayGroundSearch, memoryGroundCache } from "../_shared/agent/research/ground.ts";
 const researchCache = memoryGroundCache();
 const webResearchCache = memoryWebCache(); // D-060: per instance, like researchCache
+const peopleSearchCache = new Map<string, { at: number; out: AlumniResult }>(); // D-062: per instance, 24 hours (career_alumni_search.ts)
 // Review of #589 (DNS rebinding): at startup, can this runtime resolve names (Deno.resolveDns)? Logged once (research_dns_probe);
 // when it cannot, the research reader reads nothing (fails closed) instead of fetching without the resolved-address check.
 if (researchReplyOn(Deno.env)) void dnsProbe();
@@ -123,7 +124,13 @@ import { sendProviders } from "../_shared/mail_providers.ts";
 import { repliesTurn, supabaseRepliesStore } from "../_shared/career_outreach_replies.ts"; // MASS NETWORKING M5
 import { dohMx, hunterVerifier, supabaseCheckCache } from "../_shared/career_contacts.ts";
 import { GMAIL_SEND_SCOPE } from "../_shared/career_outreach_gmail.ts";
-import { missingIntegration } from "../_shared/agent/integrations.ts";
+import { connectUrl, missingIntegration } from "../_shared/agent/integrations.ts";
+// D-062: Gmail read and send, the tracker, public people search (agent/capability_tools.ts).
+import { capabilityTools } from "../_shared/agent/capability_tools.ts";
+import { supabaseCapabilityStores } from "../_shared/career_capability_stores.ts";
+import { type AlumniResult, enforcePeopleReply } from "../_shared/career_alumni_search.ts";
+import { inboxReader } from "../_shared/career_mail_reply.ts";
+import { CAREER_READ_SCOPE as GMAIL_READONLY } from "../_shared/career_mail_gmail.ts";
 import { documentsOf, materializeArtifacts } from "../_shared/channel_artifacts.ts";
 import { scoredN } from "../_shared/career_search.ts";
 import { askFor, isJudgePromptAsk, judgePromptTurn, searchJudgeTurn, searchReplyParts, supabaseJudgeCache, supabaseSearchSources } from "../_shared/career_search_judge.ts"; // FEATURE 5
@@ -170,7 +177,7 @@ import { summaryFacts } from "../_shared/apply_status_summary.ts"; // SPEC 6.5
 import { resultsFile, whatOf } from "../_shared/role_results.ts"; // ROLE + PAY RESULTS PAGE
 import { supabaseAccountStamp, supabaseConfirmedFacts, supabaseJobStore, type JobDeps } from "../_shared/telegram_jobs.ts";
 import { APPLY_ALL_INTENT, type ApplyAllOffer, applyAllYesTurn, isApplyAllYes, isConditionalYes, liveOfferRow, readOffer, supabaseStoppedAt } from "../_shared/apply_all_yes.ts"; // apply all by yes
-import { applyAllYesOn } from "./release_config.ts";
+import { applyAllYesOn, releaseFlagOn } from "./release_config.ts";
 import { supabaseTapStore } from "../_shared/channel_card_tap.ts";
 import { feedUrlsFor } from "../_shared/file_link.ts";
 import { fileCard, fileCardOn, rolesCardSource } from "../_shared/file_card.ts"; // SPEC C.2 / D-049: the chat File card
@@ -1162,7 +1169,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             mailOn: chatSwitches(Deno.env).mailTracking,
             readNow: (u) => mailNow({ userId: u, now: Date.now(), store: supabaseMailStore(admin), cursor: f08Stores.cursor, read: gmailReadNow(f08Grant, fetch), confirm: supabaseConfirmStore(admin) }),
             sendOn: chatSwitches(Deno.env).emailSend, canSend: async (u) => !!(await sendToken(u)), sendConsent: sendConsentFor,
-            send: countSend(turnEffects, (u: string, m: any) => gmailSender({ fetch, token: (uu: string) => sendToken(uu) }).send(u, m)), connectAsk: missingIntegration("gmail"), readGrant: gmailReadGrant(admin),
+            send: countSend(turnEffects, (u: string, m: any, t?: any) => gmailSender({ fetch, token: (uu: string) => sendToken(uu) }).send(u, m, t)), connectAsk: missingIntegration("gmail"), readGrant: gmailReadGrant(admin),
           } }).catch((e) => { console.error("follow-up turn:", e?.message ?? e); return null; })
         : null;
       // ROUTING SCENARIOS (2026-10-29): an email-status ask ("where are my emails", "email status", "any update on my emails")
@@ -1444,6 +1451,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         const summary = summaryFor(win.cut, recent, now, tz);
         // WO-066: the person's own daily application limit (the queue's SQL holds the same bound); unread, the default.
         const daily = await admin.rpc("career_apply_daily_limit", { p_user: user.id }).then((r: any) => r.error ? undefined : Number(r.data) || undefined, () => undefined);
+        const capStores = supabaseCapabilityStores(admin);
+        let peopleTrace: AlumniResult | null = null;
         const turn = await agentTurn({ message: typedMessage, history, stores: ctx as unknown as Record<string, unknown>, userId: user.id, threadId: tid, now,
           model: (payload) => callModel(cfg, payload, { meter, role: "chat" }), postings: (q) => postingsDb.search(searchWords(q), 150), alerts: alertStore,
           mail: supabaseMailStore(admin), interviews: supabaseInterviewStore(admin), digest: supabaseDigestStore(admin),
@@ -1492,6 +1501,18 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           // from public pages only (posting_requirements.ts); never an account, a saved application or a submission.
           applyFlow: (url: string) => readApplyFlow(url, { fetch, userAgent: `Trainee posting reader (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }),
           research: webResearchOn(Deno.env) && cfg.apiKey ? { search: gatewayGroundSearch((q, w) => webSearch(q, { cfg, meter, ...w })), cache: researchCache, publish: fileKindPublisher(createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }), user.id), derive: modelDerive(async (system, user) => { const r = await callModel(cfg, { system, messages: [{ role: "user", content: [{ type: "text", text: user }] }], max_tokens: 200 }, { meter, role: "chat" }); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); }) } : null,
+          // D-062 (owner, 2026-11-11: "be able to answer emails, find alumni, do all of it"): the person's Gmail confirmations and the
+          // tracker File (CAREER_MAIL_TRACKING), answering an email from their own Gmail (a yes to the exact card sends it:
+          // CAREER_EMAIL_SEND), and public people search from web search excerpts (CAREER_PEOPLE_SEARCH; never LinkedIn or Indeed).
+          capabilities: capabilityTools({
+            mail: supabaseMailStore(admin), tracking: chatSwitches(Deno.env).mailTracking, grant: capStores.grant, cursor: f08Stores.cursor,
+            readNow: (u) => mailNow({ userId: u, now: Date.now(), store: supabaseMailStore(admin), cursor: f08Stores.cursor, read: gmailReadNow(f08Grant, fetch), confirm: supabaseConfirmStore(admin) }),
+            connectUrl: connectUrl("gmail"), situation, snapshot: capStores.snapshot,
+            files: createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }),
+            people: { on: releaseFlagOn(Deno.env, "CAREER_PEOPLE_SEARCH"), search: cfg.apiKey ? (q, w) => webSearch(q, { cfg, meter, ...w }) : null, cache: peopleSearchCache, onResult: (r) => { peopleTrace = r; } },
+            inbox: chatSwitches(Deno.env).mailTracking ? inboxReader({ fetch, token: careerTokenFor(f08Grant, GMAIL_READONLY) }) : null,
+            reply: { outreach: outreachStore, sendOn: chatSwitches(Deno.env).emailSend && sendRailOn(Deno.env), canSend: async (u) => !!(await sendToken(u)), name: () => ((ctx as any).profile?.basics?.name ?? null) },
+          }),
           known: { standing, alerts: alertRow ? { prefs: alertRow.prefs, tz: alertRow.tz } : null, pipeline: null, situation }, memory,
           // D-064 (G13): the person's previous message, when this one arrived while that turn was still running.
           whileWorking: (ctx as any)._whileWorking ? ([...history].reverse().find((m) => m.role === "user")?.content ?? "") : null });
@@ -1526,11 +1547,13 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           turnPostings = Array.isArray(turn.postings) ? turn.postings : [];
           turnAttachments = turn.attachments ?? []; turnLinks = turn.linksSeen ?? []; turnFileLinks = turn.fileLinks ?? [];
           // The files tailor_resume made this turn ride the reply (documentsOf below), as a router tailor's do.
+          // D-062 (G6): after a people search, the caveat and "Nobody was contacted." are in the reply (career_alumni_search.ts).
+          if (peopleTrace && !turn.show && turn.stopped === "final") turn.reply = enforcePeopleReply(turn.reply, peopleTrace);
           out = { reply: turn.reply, intent: turn.show?.intent ?? (turn.tool_calls.some((c: any) => c.name === "draft_followup") ? FOLLOWUP_INTENT : "agent"), resultStatus: turn.stopped, contained: false, handler: "agent", ...(turn.show?.parts ? { parts: turn.show.parts } : {}),
             ...(turnDocuments.length ? { result: { documents: turnDocuments } } : {}) };
           agentMeta = { brain: staged.chosen ? "staged" : "agent", ...(staged.chosen ? { router_intent: staged.decision?.intent ?? null } : {}), tool_calls: turn.tool_calls, stopped: turn.stopped, pending_approvals: turn.pending_approvals.length, ...(turn.knowledge ? { knowledge: turn.knowledge } : {}),
             // flag-only reply checks (loop.ts): saved with the turn so remaining reply problems can be counted (Greptile on #566)
-            ...replyFlagsMeta(turn as { flags?: unknown }) };
+            ...replyFlagsMeta(turn as { flags?: unknown }), ...(turn.show?.meta ?? {}) };
         }
       } else {
         // FEATURE 5: job search ranked by fit and judged (_shared/career_search_judge.ts). "judge prompt: ..." keeps the

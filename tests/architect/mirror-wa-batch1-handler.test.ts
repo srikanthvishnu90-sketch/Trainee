@@ -17,7 +17,11 @@ const DIR = new URL("../../evals/mirror/instinct-wa-batch1/", import.meta.url);
 const lines = (f: string) => Deno.readTextFileSync(new URL(f, DIR)).split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
 const turns: { id: string; prompt: string }[] = lines("prompts.jsonl");
 const persona: { setup: string[] } = JSON.parse(Deno.readTextFileSync(new URL("persona.json", DIR)));
-const CODE_TURNS = ["C3", "C6", "C16", "C19"];
+// Architect amendment (D-062; owner, 2026-11-11: "find alumni, do all of it"): C19's people search is on (CAREER_PEOPLE_SEARCH in
+// RELEASE_FLAGS), so C19 reaches the brain (find_people). C6 and C16 stay code's HERE only because this shared world rolls
+// CAREER_MAIL_TRACKING back to "off" (response_world.ts); under production flags they are the brain's too (mirror-wa-batch1-process
+// MP-1, d062-capabilities-process). Every other assertion is unchanged.
+const CODE_TURNS = ["C3", "C6", "C16"];
 
 Deno.test({ name: "WA1-H the benchmark conversation: code answers only its own work, and nothing acts", sanitizeOps: false, sanitizeResources: false, ignore: canRun() !== null && canRun() !== "FAIL", fn: async () => {
   if (canRun() === "FAIL") throw new Error("WA1-H needs Postgres 16 in CI");

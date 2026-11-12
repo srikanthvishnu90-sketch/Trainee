@@ -21,10 +21,15 @@ const b64url = (s: string) => {
 const encodeWord = (s: string) => (/^[\x20-\x7e]*$/.test(s) ? s : `=?UTF-8?B?${btoa(String.fromCharCode(...new TextEncoder().encode(s)))}?=`);
 export const ONE_ADDRESS = /^[A-Za-z0-9._%+-]{1,64}@(?:[A-Za-z0-9-]{1,63}\.)+[A-Za-z]{2,24}$/;
 
-export function buildRaw(m: Message): string {
+// D-062 (answering an email): a reply is threaded to the email it answers, In-Reply-To and References set to that email's own
+// Message-ID (one id, angle brackets, no spaces or line breaks; anything else is refused, never cleaned) and the Gmail thread id.
+export interface Threading { inReplyTo: string; threadId: string | null }
+export const MESSAGE_ID = /^<[^<>\s@]{1,200}@[^<>\s@]{1,200}>$/;
+export function buildRaw(m: Message, t?: Threading | null): string {
   if (!ONE_ADDRESS.test(m.to)) throw new Error("one recipient, one plain address: no lists, names or separators");
   if (/[\r\n]/.test(m.subject) || /[\r\n]/.test(m.to)) throw new Error("a header with a line break is refused");
-  const head = [`To: ${m.to}`, `Subject: ${encodeWord(m.subject)}`, "MIME-Version: 1.0", "Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: 8bit"];
+  if (t && !MESSAGE_ID.test(t.inReplyTo)) throw new Error("the email being answered has no usable Message-ID");
+  const head = [`To: ${m.to}`, `Subject: ${encodeWord(m.subject)}`, ...(t ? [`In-Reply-To: ${t.inReplyTo}`, `References: ${t.inReplyTo}`] : []), "MIME-Version: 1.0", "Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: 8bit"];
   return b64url(`${head.join("\r\n")}\r\n\r\n${m.text.replace(/\r?\n/g, "\r\n")}`);
 }
 
@@ -32,12 +37,13 @@ export interface GmailDeps { fetch: typeof fetch; token: (userId: string, scope:
 
 export function gmailSender(d: GmailDeps) {
   return {
-    async send(userId: string, m: Message): Promise<SendResult> {
+    async send(userId: string, m: Message, t?: Threading | null): Promise<SendResult> {
       let raw: string;
-      try { raw = buildRaw(m); } catch (e) { return { status: "ERROR", detail: e instanceof Error ? e.message : String(e) }; }
+      try { raw = buildRaw(m, t); } catch (e) { return { status: "ERROR", detail: e instanceof Error ? e.message : String(e) }; }
       const token = await d.token(userId, GMAIL_SEND_SCOPE);
       if (!token) return { status: "NOT_WIRED", reason: "no career Google grant with gmail.send" };
-      const r = await d.fetch(`${API}/messages/send`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ raw }) });
+      const thread = t?.threadId && /^[A-Za-z0-9_-]{1,64}$/.test(t.threadId) ? { threadId: t.threadId } : {};
+      const r = await d.fetch(`${API}/messages/send`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ raw, ...thread }) });
       if (r.status === 429 || r.status === 403 && /rateLimit|quota/i.test(await r.clone().text())) return { status: "RATE_LIMITED", detail: `HTTP ${r.status}` };
       if (!r.ok) return { status: "ERROR", detail: `send: HTTP ${r.status}` };
       const j: any = await r.json().catch(() => ({}));

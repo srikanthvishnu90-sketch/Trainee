@@ -23,7 +23,8 @@ export const ONE_ADDRESS = /^[A-Za-z0-9._%+-]{1,64}@(?:[A-Za-z0-9-]{1,63}\.)+[A-
 
 // D-062 (answering an email): a reply is threaded to the email it answers, In-Reply-To and References set to that email's own
 // Message-ID (one id, angle brackets, no spaces or line breaks; anything else is refused, never cleaned) and the Gmail thread id.
-export interface Threading { inReplyTo: string; threadId: string | null }
+// from (D-062): which of the person's own Google accounts sends it (the caller's token picks it); absent, the first grant.
+export interface Threading { inReplyTo: string; threadId: string | null; from?: string | null }
 export const MESSAGE_ID = /^<[^<>\s@]{1,200}@[^<>\s@]{1,200}>$/;
 export function buildRaw(m: Message, t?: Threading | null): string {
   if (!ONE_ADDRESS.test(m.to)) throw new Error("one recipient, one plain address: no lists, names or separators");

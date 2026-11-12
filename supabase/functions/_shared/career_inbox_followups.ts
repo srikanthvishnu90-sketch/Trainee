@@ -28,6 +28,7 @@ import { type DraftRow, type ReadStanding, standingFrom } from "./career_standin
 import { vaultRefreshWrite } from "./oauth_vault_refresh.ts";
 import { PARTIAL_WORDS } from "./oauth_connect.ts";
 import { MAIL_REPLY_CARD_INTENT, type ReplyCardMeta, replyAnswer } from "./career_mail_reply.ts"; // D-062: answering an email
+import { accountToken, googleAccounts, readAllMailboxes } from "./career_google_accounts.ts"; // D-062: several Google accounts
 
 export const CHECK_INTENT = "career_inbox_check";
 export const FOLLOWUP_CARD_INTENT = "career_followup_card";
@@ -91,7 +92,7 @@ export function followupAnswer(message: string): FollowupAsk | null {
 // ------------------------------------------------------------------------------------------------ the mail run, now
 export interface Reminder { who: string; at: number }
 export type MailNow =
-  | { status: "ok"; read: number; statuses: string[]; offers: string[]; read_through: string | null; reminders?: Reminder[] }
+  | { status: "ok"; read: number; statuses: string[]; offers: string[]; read_through: string | null; reminders?: Reminder[]; mailboxes?: string[] }
   | { status: "NOT_WIRED" } | { status: "ERROR"; detail: string; statuses: string[]; offers: string[]; reminders?: Reminder[] };
 // EM-08: when an assessment's reminder is due. A stated date (no time): the day before, 14:00 UTC (morning in the
 // Americas, afternoon in Europe). A time limit: 24 hours before it ends, or halfway when the limit is shorter than 2 days.
@@ -147,7 +148,8 @@ export async function mailNow(o: {
   if (!got || (got as ReadResult).status === "NOT_WIRED") return { status: "NOT_WIRED" };
   const r = got as ReadResult;
   if (r.status === "RATE_LIMITED") return { status: "ERROR", detail: "Gmail asked Trainee to slow down", statuses: statuses(), offers: offers(), reminders: await remind() };
-  return { status: "ok", read: r.mails.length, statuses: statuses(), offers: offers(), read_through: r.readThrough !== null ? new Date(r.readThrough).toISOString() : read_through, reminders: await remind() };
+  return { status: "ok", read: r.mails.length, statuses: statuses(), offers: offers(), read_through: r.readThrough !== null ? new Date(r.readThrough).toISOString() : read_through, reminders: await remind(),
+    ...(Array.isArray((r as any).mailboxes) ? { mailboxes: (r as any).mailboxes } : {}) };
 }
 
 // ------------------------------------------------------------------------------------------------ the card
@@ -162,7 +164,7 @@ export interface FollowupDeps {
   name: () => string | null; // the person's own name on their profile, for the sign-off when no signature is set
   markSent: (userId: string, c: Card, outreachId: string, at: number) => Promise<void>;
   mailOn: boolean; readNow: (userId: string) => Promise<MailNow>;
-  sendOn: boolean; canSend: (userId: string) => Promise<boolean>; send: (userId: string, m: Message, t?: Threading | null) => Promise<SendResult>;
+  sendOn: boolean; canSend: (userId: string, from?: string | null) => Promise<boolean>; send: (userId: string, m: Message, t?: Threading | null) => Promise<SendResult>;
   connectAsk?: string;
   // D-037 (incremental authorization): the person's "allow sending" link (a connect link with reason "send" that asks Google
   // for gmail.send on top of their grant), or null when it can't be made. Offered only when a send was refused for want of it.
@@ -412,5 +414,7 @@ export const gmailReadGrant = (admin: any) => async (userId: string): Promise<"o
   return String(data.scopes ?? "").split(/[\s,]+/).includes(CAREER_READ_SCOPE) ? "ok" : "not_allowed";
 };
 // The person's mail, read now with the career grant's gmail.readonly, through the scheduled run's reader.
-export const gmailReadNow = (grant: TokenDeps, f: typeof fetch) => (userId: string, since: number, now: number) =>
-  readMailSince({ fetch: f, token: careerTokenFor(grant, CAREER_READ_SCOPE) }, userId, since, now);
+// D-062: with admin, every Google account the person connected is read (readAllMailboxes), each email tagged with its account.
+export const gmailReadNow = (grant: TokenDeps, f: typeof fetch, admin?: any) => (userId: string, since: number, now: number) =>
+  admin ? readAllMailboxes({ fetch: f, accounts: (u) => googleAccounts(admin, u), token: accountToken({ ...grant, admin }, CAREER_READ_SCOPE) })(userId, since, now)
+    : readMailSince({ fetch: f, token: careerTokenFor(grant, CAREER_READ_SCOPE) }, userId, since, now);

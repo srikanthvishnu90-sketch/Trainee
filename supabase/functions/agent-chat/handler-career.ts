@@ -121,6 +121,7 @@ import { capabilityTools } from "../_shared/agent/capability_tools.ts";
 import { supabaseCapabilityStores } from "../_shared/career_capability_stores.ts";
 import { type AlumniResult, enforcePeopleReply } from "../_shared/career_alumni_search.ts";
 import { inboxReader } from "../_shared/career_mail_reply.ts";
+import { accountToken, googleAccounts } from "../_shared/career_google_accounts.ts"; // D-062: several Google accounts
 import { CAREER_READ_SCOPE as GMAIL_READONLY } from "../_shared/career_mail_gmail.ts";
 import { documentsOf, materializeArtifacts } from "../_shared/channel_artifacts.ts";
 import { scoredN } from "../_shared/career_search.ts";
@@ -1142,9 +1143,10 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             read: supabaseStanding(admin), outreach: outreachStore, events, lastAssistant: f08Stores.lastAssistant, addressOnRecord: f08Stores.addressOnRecord,
             name: () => ((ctx as any).profile?.basics?.name ?? null), markSent: f08Stores.markSent,
             mailOn: chatSwitches(Deno.env).mailTracking,
-            readNow: (u) => mailNow({ userId: u, now: Date.now(), store: supabaseMailStore(admin), cursor: f08Stores.cursor, read: gmailReadNow(f08Grant, fetch), confirm: supabaseConfirmStore(admin) }),
-            sendOn: chatSwitches(Deno.env).emailSend, canSend: async (u) => !!(await sendToken(u)), sendConsent: sendConsentFor,
-            send: countSend(turnEffects, (u: string, m: any, t?: any) => gmailSender({ fetch, token: (uu: string) => sendToken(uu) }).send(u, m, t)), connectAsk: missingIntegration("gmail"), readGrant: gmailReadGrant(admin),
+            readNow: (u) => mailNow({ userId: u, now: Date.now(), store: supabaseMailStore(admin), cursor: f08Stores.cursor, read: gmailReadNow(f08Grant, fetch, admin), confirm: supabaseConfirmStore(admin) }),
+            sendOn: chatSwitches(Deno.env).emailSend, canSend: async (u, from?: string | null) => !!(await (from ? accountToken({ ...f08Grant, admin }, CAREER_SEND_SCOPE)(u, from) : sendToken(u))), sendConsent: sendConsentFor,
+            // D-062: a reply goes from the account the card names (t.from), else the first grant.
+            send: countSend(turnEffects, (u: string, m: any, t?: any) => gmailSender({ fetch, token: (uu: string) => (t?.from ? accountToken({ ...f08Grant, admin }, CAREER_SEND_SCOPE)(uu, t.from) : sendToken(uu)) }).send(u, m, t)), connectAsk: missingIntegration("gmail"), readGrant: gmailReadGrant(admin),
           } }).catch((e) => { console.error("follow-up turn:", e?.message ?? e); return null; })
         : null;
       // ROUTING SCENARIOS (2026-10-29): an email-status ask ("where are my emails", "email status", "any update on my emails")
@@ -1474,13 +1476,13 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           // tracker File (CAREER_MAIL_TRACKING), answering an email from their own Gmail (a yes to the exact card sends it:
           // CAREER_EMAIL_SEND), and public people search from web search excerpts (CAREER_PEOPLE_SEARCH; never LinkedIn or Indeed).
           capabilities: capabilityTools({
-            mail: supabaseMailStore(admin), tracking: chatSwitches(Deno.env).mailTracking, grant: capStores.grant, cursor: f08Stores.cursor,
-            readNow: (u) => mailNow({ userId: u, now: Date.now(), store: supabaseMailStore(admin), cursor: f08Stores.cursor, read: gmailReadNow(f08Grant, fetch), confirm: supabaseConfirmStore(admin) }),
+            mail: supabaseMailStore(admin), tracking: chatSwitches(Deno.env).mailTracking, accounts: (u) => googleAccounts(admin, u), cursor: f08Stores.cursor,
+            readNow: (u) => mailNow({ userId: u, now: Date.now(), store: supabaseMailStore(admin), cursor: f08Stores.cursor, read: gmailReadNow(f08Grant, fetch, admin), confirm: supabaseConfirmStore(admin) }),
             connectUrl: connectUrl("gmail"), situation, snapshot: capStores.snapshot,
             files: createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }),
             people: { on: releaseFlagOn(Deno.env, "CAREER_PEOPLE_SEARCH"), search: cfg.apiKey ? (q, w) => webSearch(q, { cfg, meter, ...w }) : null, cache: peopleSearchCache, onResult: (r) => { peopleTrace = r; } },
-            inbox: chatSwitches(Deno.env).mailTracking ? inboxReader({ fetch, token: careerTokenFor(f08Grant, GMAIL_READONLY) }) : null,
-            reply: { outreach: outreachStore, sendOn: chatSwitches(Deno.env).emailSend && sendRailOn(Deno.env), canSend: async (u) => !!(await sendToken(u)), name: () => ((ctx as any).profile?.basics?.name ?? null) },
+            inbox: chatSwitches(Deno.env).mailTracking ? inboxReader({ fetch, token: accountToken({ ...f08Grant, admin }, GMAIL_READONLY), accounts: (u) => googleAccounts(admin, u) }) : null,
+            reply: { outreach: outreachStore, sendOn: chatSwitches(Deno.env).emailSend && sendRailOn(Deno.env), canSend: async (u, from) => !!(await (from ? accountToken({ ...f08Grant, admin }, CAREER_SEND_SCOPE)(u, from) : sendToken(u))), name: () => ((ctx as any).profile?.basics?.name ?? null) },
           }),
           known: { standing, alerts: alertRow ? { prefs: alertRow.prefs, tz: alertRow.tz } : null, pipeline: null, situation }, memory });
         await ledger.record(meter);

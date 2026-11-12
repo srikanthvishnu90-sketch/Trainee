@@ -16,7 +16,8 @@
 import { sameCompany, type StatusEvent, type TrackedApp } from "./career_mail.ts";
 import type { Situation, Task } from "./career_situation.ts";
 
-export type Evidence = { kind: string; at: string; from: "gmail" | "trainee" | "you"; text?: string };
+// account (D-062): the Gmail address the email was read from, when it is known.
+export type Evidence = { kind: string; at: string; from: "gmail" | "trainee" | "you"; text?: string; account?: string };
 export interface AppliedItem {
   ref: string; company: string; role: string | null; applied_at: string | null; stage: string;
   status: string; // what the record says now, in plain words (submitted, confirmed by email, interview, rejected, ...)
@@ -30,8 +31,9 @@ export interface MailCoverage {
   gmail: "connected" | "not_connected" | "not_allowed" | "unknown";
   mailbox: string | null; read_through: string | null;
   accounts_connected: number;
-  // One Google account per person: connecting another replaces the first (career_mail_store.ts, CONNECTORS ROUND 4).
-  multiple_accounts_supported: false;
+  // D-062: every Google account connected (the first grant first), and those read for this record.
+  accounts: string[]; accounts_read: string[];
+  multiple_accounts_supported: true;
   read_now?: "read" | "not_read" | "error";
 }
 export interface RecordChange { ref: string; what: string; was: string; now: string }
@@ -75,7 +77,7 @@ export function appliedFrom(apps: TrackedApp[], events: StatusEvent[], situation
       ref: a.ref, company: clip(a.company, 120), role: a.role ? clip(a.role, 160) : null, applied_at: iso(a.applied_at), stage: a.stage, status, confirmed_by,
       evidence: [
         ...(a.source === "queue" ? [{ kind: "submitted", at: iso(a.applied_at) ?? "", from: "trainee" as const }] : a.source === "tracker" ? [{ kind: "told", at: iso(a.applied_at) ?? "", from: "you" as const }] : []),
-        ...evs.map((e) => ({ kind: e.kind, at: iso(e.at) ?? "", from: "gmail" as const, text: clip(e.evidence, 200) })),
+        ...evs.map((e) => ({ kind: e.kind, at: iso(e.at) ?? "", from: "gmail" as const, text: clip(e.evidence, 200), ...(e.mailbox ? { account: String(e.mailbox) } : {}) })),
       ].filter((e) => e.at || e.from !== "gmail"),
       hashes: evs.map((e) => e.hash).filter(Boolean),
     });
@@ -88,7 +90,7 @@ export function appliedFrom(apps: TrackedApp[], events: StatusEvent[], situation
     if (!evs.some((e) => e.kind === "received")) continue;
     out.push({ ref, company: clip(first.company, 120), role: first.role ? clip(first.role, 160) : null, applied_at: iso(first.at), stage: last.stage ?? "Submitted",
       status: STATUS[last.kind] ?? last.kind, confirmed_by: "employer email",
-      evidence: evs.map((e) => ({ kind: e.kind, at: iso(e.at) ?? "", from: "gmail" as const, text: clip(e.evidence, 200) })), hashes: evs.map((e) => e.hash) });
+      evidence: evs.map((e) => ({ kind: e.kind, at: iso(e.at) ?? "", from: "gmail" as const, text: clip(e.evidence, 200), ...(e.mailbox ? { account: String(e.mailbox) } : {}) })), hashes: evs.map((e) => e.hash) });
   }
   return out.sort((a, b) => String(b.applied_at ?? "").localeCompare(String(a.applied_at ?? "")));
 }
@@ -125,9 +127,9 @@ export function coverageOf(m: MailCoverage): string[] {
   else if (m.gmail === "not_connected") out.push("no Gmail is connected, so no email confirmation was read; the person connects it themselves (they sign in to Google)");
   else if (m.gmail === "not_allowed") out.push("Gmail is connected without permission to read mail, so no email confirmation was read");
   else if (m.gmail === "connected") {
-    out.push(`Gmail-based: only confirmations that reached ${m.mailbox || "the connected Gmail"}${m.read_through ? `, read through ${m.read_through.slice(0, 10)}` : ""}`);
-    out.push("an application confirmed to another email address, or a status change shown only on an employer's portal, is not in this record");
-    out.push("one Gmail account at a time: Trainee does not read several accounts");
+    const read = m.accounts_read.length ? m.accounts_read : m.accounts;
+    out.push(`Gmail-based: ${read.length === 1 ? "1 Gmail account" : `${read.length} Gmail accounts`} read (${read.join(", ") || "the connected Gmail"})${m.read_through ? `, through ${m.read_through.slice(0, 10)}` : ""}`);
+    out.push("an application confirmed to an email address that is not connected, or a status change shown only on an employer's portal, is not in this record");
   } else out.push("whether Gmail is connected could not be read just now");
   out.push("researched roles are research only, not applications");
   return out;
@@ -162,7 +164,7 @@ export function trackerData(r: ApplicationRecord): Record<string, unknown> {
   return {
     title: "Application tracker", as_of: r.as_of,
     applied: r.applied.map((a) => ({ company: a.company, ...(a.role ? { role: a.role } : {}), ...(DAY(a.applied_at) ? { applied_on: DAY(a.applied_at) } : {}), status: a.status, source: a.confirmed_by,
-      evidence: a.evidence.filter((e) => e.at).map((e) => ({ what: e.from === "gmail" ? (STATUS[e.kind] ?? e.kind) : e.from === "trainee" ? "submitted by Trainee" : "you told me", on: DAY(e.at), ...(e.text ? { text: e.text } : {}) })).slice(0, 6) })),
+      evidence: a.evidence.filter((e) => e.at).map((e) => ({ what: e.from === "gmail" ? `${STATUS[e.kind] ?? e.kind}${e.account ? ` (${e.account})` : ""}` : e.from === "trainee" ? "submitted by Trainee" : "you told me", on: DAY(e.at), ...(e.text ? { text: e.text } : {}) })).slice(0, 6) })),
     researched: r.researched.map((x) => ({ company: x.company, ...(x.role ? { role: x.role } : {}), ...(x.url ? { url: x.url } : {}), status: "researched, not applied" })),
     drafts: r.drafts.map((d) => ({ ...(d.company ? { company: d.company } : {}), what: d.what, status: d.state, ...(DAY(d.since) ? { since: DAY(d.since) } : {}) })),
     coverage: r.coverage,

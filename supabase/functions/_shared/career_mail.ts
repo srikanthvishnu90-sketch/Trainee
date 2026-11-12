@@ -1157,11 +1157,13 @@ export function mergeApps(queue: TrackedApp[], tracker: TrackedApp[]): TrackedAp
 }
 
 // ------------------------------------------------------------------------------------------------ the plan
-export interface MailIn extends MailMeta { hash: string }
+// mailbox (D-062): the Google account the email was read from (readAllMailboxes); every event made from it carries it.
+export interface MailIn extends MailMeta { hash: string; mailbox?: string }
 export interface StatusEvent {
   hash: string; ref: string; kind: Exclude<MailKind, "other">; company: string; role?: string;
   stage: string | null; // the stage after this message; null when it did not move one (already there, or flagged)
   flagged: boolean; evidence: string; at: string; new_app: boolean;
+  mailbox?: string | null; // D-062: the account the email was read from
   // WO-040 review: why a flagged event was only said, never applied: an offer through an e-signature or self-serve ATS
   // ("via DocuSign"), or the model's reading of an offer or rejection ("model").
   note?: string;
@@ -1300,7 +1302,7 @@ export function planUpdates(mails: MailIn[], applications: TrackedApp[], now: nu
     if (c.source === "model" && c.kind === "received") { plan.refused++; continue; }
     const soft = via ? `via ${via}` : c.source === "model" && (c.kind === "offer" || c.kind === "rejection") ? "model" : null;
     if (soft) {
-      const e: StatusEvent = { hash: m.hash, ref: app.ref, kind: c.kind, company: app.company, role: app.role ?? c.role, stage: null, flagged: true, evidence: c.evidence, at: new Date(Date.parse(m.date) || now).toISOString(), new_app: false, note: soft };
+      const e: StatusEvent = { hash: m.hash, ref: app.ref, kind: c.kind, company: app.company, role: app.role ?? c.role, stage: null, flagged: true, evidence: c.evidence, at: new Date(Date.parse(m.date) || now).toISOString(), new_app: false, note: soft, ...(m.mailbox ? { mailbox: m.mailbox } : {}) };
       plan.events.push(e);
       plan.texts.push({ key: `status:${m.hash}`, hash: m.hash, ref: app.ref, text: statusText(e, m.subject, app.stage) });
       continue;
@@ -1312,6 +1314,7 @@ export function planUpdates(mails: MailIn[], applications: TrackedApp[], now: nu
     const e: StatusEvent = {
       hash: m.hash, ref: app.ref, kind: c.kind, company: app.company, role: app.role ?? c.role,
       stage: forward ? to : fresh ? was : null, flagged, evidence: c.evidence, at: new Date(Date.parse(m.date) || now).toISOString(), new_app: fresh,
+      ...(m.mailbox ? { mailbox: m.mailbox } : {}),
     };
     const due = c.kind === "assessment" ? assessmentDeadline(m) : null;
     if (due) e.due = due;

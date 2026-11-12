@@ -16,6 +16,7 @@ import { anthropicWire } from "../../tests/architect/helpers/anthropic_wire.ts";
 import { openWorld } from "../../tests/architect/helpers/response_world.ts";
 import { PRODUCTION_BRAIN, RELEASE_FLAGS, RELEASE_NEVER_ON, releaseFlagOn, releaseValue } from "../../supabase/functions/agent-chat/release_config.ts";
 import { FILE_ENV } from "./heldout/harness.ts";
+import { worldFetch, worldGmail, worldSql } from "./instinct-wa-batch1/world.ts";
 
 const realFetch = globalThis.fetch;
 const a = Deno.args, opt = (n: string) => { const i = a.indexOf(n); return i >= 0 ? a[i + 1] : undefined; };
@@ -54,7 +55,9 @@ const model = async (req: Request): Promise<Response> => {
   const tools = (body.tools ?? []).map((t: any) => String(t.name ?? t.type));
   calls.push({ tools, web: (body.tools ?? []).some((t: any) => /^web_search/.test(String(t.type ?? ""))), json: !!body.output_config?.format });
   if (dry) return await anthropicWire(req, scripted);
-  if (spent >= budget) throw new Error(`budget reached: $${spent.toFixed(3)} of $${budget}`);
+  // D-065 (item 6): at the cap the runner refuses the call the way the provider refuses at an account's spending limit (HTTP 400,
+  // its own words), so the product says it stopped at a spending limit, never "an error on its side, not a limit" (limit_stop.ts).
+  if (spent >= budget) return Response.json({ type: "error", error: { type: "invalid_request_error", message: `You have reached your specified API usage limits (mirror runner cap $${budget}, $${spent.toFixed(3)} spent).` } }, { status: 400 });
   modelCalls++;
   const res = await realFetch(req);
   // A model error is the product's to handle (it falls back), but the run says what it was, once per status.
@@ -73,6 +76,13 @@ const model = async (req: Request): Promise<Response> => {
 const LIVE_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const ACTION_TABLES: [string, string][] = [["career_apply_receipts", "submit"], ["career_contact_sends", "send"], ["career_outbox", "send"], ["career_outlook_sends", "send"], ["career_apply_jobs", "queue"], ["career_apply_prepared", "prepare"]];
 const w = await openWorld(2, { model });
+// D-065 (item 7): the test world Instinct had (instinct-wa-batch1/world.ts): the benchmark's recorded postings served from their
+// recordings, the persona's stub Gmail, and on a live run the research reader's public GETs; everything else stays refused.
+const gmail = worldGmail(), served = worldFetch({ live, realFetch, gmail }), below = globalThis.fetch;
+globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
+  const req = input instanceof Request && !init ? input : new Request(input as any, init);
+  return (await served(req)) ?? await below(req);
+}) as typeof fetch;
 const lines: string[] = [];
 const t0 = performance.now();
 let stopped: string | null = null;
@@ -96,6 +106,7 @@ try {
     return r;
   };
   const person = await w.person({ resume: false });
+  await w.pg.sql(worldSql(person.id));
   for (const [i, s] of persona.setup.entries()) {
     label = `setup-${i}`;
     const r = await person.say(s);
@@ -129,8 +140,9 @@ try {
   Deno.env.delete("ANTHROPIC_API_KEY");
   Deno.env.delete("CAREER_BRAIN");
   for (const k of Object.keys(FILE_ENV)) Deno.env.delete(k);
+  globalThis.fetch = below;
   await w.close();
 }
 await Deno.writeTextFile(out, lines.join("\n") + (lines.length ? "\n" : ""));
 if (promptLog) await Deno.writeTextFile(promptLog, prompts.join("\n\n"));
-console.log(`MIRROR-CONVERSATION ${dry ? "dry-run" : "live"} turns=${lines.filter((l) => !l.includes('"setup":true')).length}/${turns.length} model_calls=${modelCalls} external_requests=${w.outbound.length} web_searches=${webSearches} spent_usd=${spent.toFixed(4)} in ${((performance.now() - t0) / 1000).toFixed(0)} s -> ${out}${stopped ? ` (stopped: ${stopped})` : ""}`);
+console.log(`MIRROR-CONVERSATION ${dry ? "dry-run" : "live"} gmail_sent=${gmail.sent.length} turns=${lines.filter((l) => !l.includes('"setup":true')).length}/${turns.length} model_calls=${modelCalls} external_requests=${w.outbound.length} web_searches=${webSearches} spent_usd=${spent.toFixed(4)} in ${((performance.now() - t0) / 1000).toFixed(0)} s -> ${out}${stopped ? ` (stopped: ${stopped})` : ""}`);

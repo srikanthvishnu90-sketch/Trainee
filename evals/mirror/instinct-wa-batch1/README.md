@@ -15,7 +15,8 @@ profile links). The verbatim transcript stays with the owner.
 |---|---|
 | `prompts.jsonl` | The 26 messages in the order sent: `{id, sent_at_ct, gap_s, prompt, task, needs?}`. `needs` marks a turn Instinct answered from something Trainee does not have here (`gmail`, `gmail+sheets`, `web`). |
 | `instinct.jsonl` | Instinct's replies per turn, every message of a multi-message reply in order, and the latency. C1 and C3 were answered by one merged reply and one File. |
-| `persona.json` | What Instinct knew about the tester, as three unscored setup turns: the resume pasted, "yes, that's my resume", and the corrections he had told it (the outdated GPA, the conflicting dates, the uncertain company name). Gmail and Sheets are not seeded: Trainee has no such data here. |
+| `persona.json` | What Instinct knew about the tester, as three unscored setup turns: the resume pasted, "yes, that's my resume", and the corrections he had told it (the outdated GPA, the conflicting dates, the uncertain company name). Gmail and Sheets were not seeded before D-065. |
+| `world.ts` | D-065: the runner's test world, like Instinct's: the recorded PayPal Workday posting and the recorded remote NVIDIA posting on the board (served from `tests/fixtures/posting-reads/`), a stub Gmail with the persona's fictional application confirmations, and on live runs only the research reader's public GETs. Everything else is refused and recorded. |
 | `results/` | The live runs: Trainee's transcript and the score of each turn against Instinct's. |
 
 **Limits the benchmark states (from the owner's write-up).** One account with its full history: this is one user with context,

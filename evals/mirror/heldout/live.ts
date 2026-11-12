@@ -8,14 +8,15 @@
 //     evals/mirror/heldout/live.ts --sample 20 --budget-usd 3 [--seed 7] [--label name] [--split heldout|dev]
 //
 // Refuses to start without MIRROR_SPEND_APPROVED (the DECISIONS.md line of the owner's written spend approval; D-060 is $10
-// for this effort), ANTHROPIC_API_KEY and --budget-usd, and when the preflight quote (turns x the D-055 measured $0.0108 per
-// turn, setup turns included) is over the cap. Stops at the cap, metered at the D-038 claude-sonnet-5-5 prices.
+// for this effort), ANTHROPIC_API_KEY and --budget-usd, and when the preflight quote (turns x PER_TURN_USD per
+// turn, setup turns included) is over the cap. D-065: the per-turn estimate is the live round's measured rate, about $0.10 a brain
+// turn (live-5: $1.8375 over 18 metered turns, C1 alone $0.37 with its web searches), not D-055's $0.0108, so a cap is real. Stops at the cap, metered at the D-038 claude-sonnet-5-5 prices.
 // --plan prints the sample and the quote and exits, with no key, no spend and no database.
 import { DEV_PATH, HELDOUT_PATH, loadSplit } from "./generate.ts";
 import { runConversations } from "./harness.ts";
 import { printSummary, scoreTurn, summarize } from "./score.ts";
 
-export const PER_TURN_USD = 0.0108; // D-055 measured brain rate (evals/mirror/README.md)
+export const PER_TURN_USD = 0.10; // D-065: live-5 measured $1.8375 / 18 brain turns = $0.102 (evals/mirror/instinct-wa-batch1/results/live-5/)
 const a = Deno.args, opt = (n: string) => { const i = a.indexOf(n); return i >= 0 ? a[i + 1] : undefined; };
 const n = Number(opt("--sample") ?? 0), budget = Number(opt("--budget-usd") ?? 0), seed = Number(opt("--seed") ?? 7), label = opt("--label") ?? `live-${new Date().toISOString().slice(0, 10)}`;
 const split = opt("--split") ?? "heldout", plan = a.includes("--plan");

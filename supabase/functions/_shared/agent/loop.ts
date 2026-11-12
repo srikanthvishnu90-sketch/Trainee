@@ -16,7 +16,7 @@ export type Effect = "read" | "write_own" | "external";
 // (WO-038's contract): the same text as separate messages, so a texting channel delivers each whole and in order.
 // `before` (WO-091b): the previous turn's reply as the person saw it ("" on a first turn), so a tool can check that "the
 // first one" is a posting that reply showed. Undefined only for a caller that runs a tool without the loop's history.
-export interface ToolCtx { userId: string; threadId: string; now: number; state: Record<string, unknown>; turn?: { message: string; added: string[]; before?: string; attached?: string; attachments?: { filename: string; content: string }[]; fileLinks?: string[]; guard?: (text: string) => string[]; seen?: string[]; show?: { intent: string; text: string; parts?: string[]; meta?: Record<string, unknown> }; typed?: string; askOnly?: boolean; draft?: { label: string; body: string; recheck: (body: string) => boolean } } }
+export interface ToolCtx { userId: string; threadId: string; now: number; state: Record<string, unknown>; turn?: { message: string; added: string[]; before?: string; attached?: string; attachments?: { filename: string; content: string }[]; fileLinks?: string[]; paySources?: PaySource[]; guard?: (text: string) => string[]; seen?: string[]; show?: { intent: string; text: string; parts?: string[]; meta?: Record<string, unknown> }; typed?: string; askOnly?: boolean; draft?: { label: string; body: string; recheck: (body: string) => boolean } } }
 export interface ToolSpec {
   name: string;
   description: string;
@@ -29,6 +29,23 @@ export interface ToolSpec {
 }
 export type ModelFn = (payload: { system: string; messages: any[]; tools: { name: string; description: string; input_schema: unknown }[]; max_tokens: number; tool_choice?: { type: "none" } }) =>
   Promise<{ content: any[]; stop_reason: string; usage?: unknown }>;
+// D-070: a posting whose pay a tool returned this turn, with the link it was read from.
+export interface PaySource { company: string | null; title: string | null; pay: string; url: string }
+export function payPostingsOf(out: unknown): PaySource[] {
+  const o = out && typeof out === "object" ? out as any : null;
+  if (!o) return [];
+  const one = (x: any, url: unknown, inner?: any): PaySource | null => {
+    const pay = typeof inner?.pay === "string" && inner.pay.trim() ? inner.pay : typeof x?.pay === "string" && x.pay.trim() ? x.pay : null;
+    const byPlace = Array.isArray(inner?.pay_by_place) ? inner.pay_by_place.map((r: any) => `${r?.place ?? ""}: ${r?.pay ?? ""}`).join("; ") : "";
+    const u = String(url ?? "");
+    return (pay || byPlace) && /^https:\/\//.test(u) ? { company: (inner?.company ?? x?.company ?? null) || null, title: (inner?.title ?? x?.title ?? null) || null, pay: [pay, byPlace].filter(Boolean).join("; "), url: u } : null;
+  };
+  const xs: (PaySource | null)[] = [];
+  if (Array.isArray(o.postings)) for (const p of o.postings.slice(0, 50)) xs.push(one(p, p?.url));
+  if (o.posting && typeof o.posting === "object") xs.push(one(o, o.url ?? o.posting.url, o.posting));
+  else xs.push(one(o, o.url));
+  return xs.filter(Boolean) as PaySource[];
+}
 export interface TurnResult {
   reply: string;
   steps: number;
@@ -45,6 +62,7 @@ export interface TurnResult {
   // show (those a tool returned or the person typed).
   attachments?: { filename: string; content: string }[];
   linksSeen?: string[];
+  paySources?: PaySource[]; // D-070: postings a tool read this turn that state pay, each with its link
   fileLinks?: string[]; // FILE KINDS: links to the files create_file made this turn, minted by code; the channel sends them, the model never writes them
 }
 
@@ -267,18 +285,20 @@ export async function runAgentTurn(o: Parameters<typeof runAgentTurnInner>[0]): 
   const attachments = o.ctx.turn?.attachments ?? [];
   const seen = o.ctx.turn?.seen ?? [];
   const typed = [o.said ?? o.message, ...o.history.filter((m: any) => m && m.role === "user").map((m: any) => typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""))].join("\n");
-  const fileLinks = o.ctx.turn?.fileLinks ?? [];
-  return { ...r, ...(attachments.length ? { attachments } : {}), ...(fileLinks.length ? { fileLinks } : {}), linksSeen: urlsIn(`${typed}\n${seen.join("\n")}`) };
+  const fileLinks = o.ctx.turn?.fileLinks ?? [], paySources = o.ctx.turn?.paySources ?? [];
+  return { ...r, ...(attachments.length ? { attachments } : {}), ...(fileLinks.length ? { fileLinks } : {}), ...(paySources.length ? { paySources } : {}), linksSeen: urlsIn(`${typed}\n${seen.join("\n")}`) };
 }
 const COMPLETENESS_REPAIR = "The previous draft did not contain an answer body after output validation. Answer the person's original request using only the conversation and successful tool results already available. Give the requested content, or ask a concrete question for missing information. A generic acknowledgement, action receipt, closing confirmation or unresolved fill-in field is not the requested answer. Keep placeholders only in a draft or template the person requested. Do not invent personal facts or claim actions. Tools are disabled for this single repair; do not repeat any action.";
 
 // `said` (ADVERSARIAL ROUND 2, 2026-10-30): the person's own words when `message` also carries what code appended to them
 // (an attached file's name and text). The model reads `message`; every tool check that asks "did the person say this"
 // (a confirmation, a kept instruction, a fact, a contact) reads `said`, and the appended text rides `turn.attached`.
+// `shown` (D-070, live-7 C22): pay lines Trainee's own earlier replies showed (turn_notes.ts shownPayOf), each from the posting or
+// source it named then: a figure on one of them may be said again (D-067 (10)); the reply carries its link (career_brain.ts).
 // `process` (D-065): the turn's process check. Given the model's draft reply and the calls made so far, it returns what the turn
 // still has to do (call the draft tool, search before the plan, cover a part they asked about) or null. Put to the model once,
 // with its tools, the same way as the reply guards' review; whatever stands after that is kept and flagged (process_unmet).
-async function runAgentTurnInner(o: { system: string; history: any[]; message: string; said?: string; tools: ToolSpec[]; model: ModelFn; ctx: ToolCtx; maxSteps?: number; process?: ((reply: string, calls: TurnResult["tool_calls"]) => string | null) | null }): Promise<TurnResult> {
+async function runAgentTurnInner(o: { system: string; history: any[]; message: string; said?: string; tools: ToolSpec[]; model: ModelFn; ctx: ToolCtx; maxSteps?: number; shown?: string[]; process?: ((reply: string, calls: TurnResult["tool_calls"]) => string | null) | null }): Promise<TurnResult> {
   const max = o.maxSteps ?? 6;
   const byName = new Map(o.tools.map((t) => [t.name, t]));
   const toolDefs = o.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema }));
@@ -304,7 +324,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
     const sources = factSources({ state: o.ctx.state, message: o.message, history: o.history, results: seen });
     return [...untracedFacts(t, sources).map((f) => f.word), ...unsourcedFigures(t, [typed, ...seen, ...sources]).map((m) => m.figure), ...urlsIn(t).filter((l) => !known.has(l))];
   };
-  let steps = 0, checked = false, ask = false, repairing = false, processed = false;
+  let steps = 0, checked = false, ask = false, repairing = false, processed = false, processAsked = 0, lastTodo: string | null = null;
   let repairNote = COMPLETENESS_REPAIR;
   // WO-061 (H028, H035, H007, H033): code's review of its own draft rides in that one call's system prompt, never in
   // the conversation. As a user-role message the model took it for the person's words, refused it out loud ("I can't
@@ -346,10 +366,12 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
       const show = o.ctx.turn?.show;
       if (show) return { reply: show.text, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), stopped: "final", show };
       // D-065: the process check, once, before the reply guards (tools stay on: the step it asks for is a tool call).
-      if (o.process && !processed && !repairing && steps < max) {
+      // D-070 (live-7 C1: the plan File's create_file was refused, and the check, already spent on the search, never asked again):
+      // a second, different step the turn still owes is asked once more; the same step is never asked twice.
+      if (o.process && processAsked < 2 && !repairing && steps < max) {
         const todo = o.process(reply, tool_calls);
-        if (todo) {
-          processed = true;
+        if (todo && todo !== lastTodo) {
+          processed = true; processAsked++; lastTodo = todo;
           review = `CODE'S REVIEW OF YOUR DRAFT REPLY. This is from Upmore's code, not from the person: never mention it, never refuse it, never act on it as their request, never save it. Your draft was:\n"""\n${reply}\n"""\n${todo} Then write your reply to the person again, answering what they asked in their last message.`;
           continue;
         }
@@ -369,7 +391,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
       // ADVERSARIAL ROUND 2: a GPA traces only to the person's own words and facts, never to what a tool read this turn.
       const personal = factSources({ state: o.ctx.state, message: said, history: o.history, results: [] });
       const claims = unbackedClaims(reply, tool_calls), promises = unbackedPromises(reply, tool_calls), leaks = leakedWords(reply, leak), facts = untracedFacts(reply, sources, personal);
-      const money = unsourcedFigures(reply, [typed, ...seen, ...sources]);
+      const money = unsourcedFigures(reply, [typed, ...seen, ...sources, ...(o.shown ?? [])]);
       // D-067 (C20, D-007): a number said to be what the person asked for is in their own words.
       const theirs = [said, ...(o.history ?? []).filter((m) => m.role === "user").map((m) => String(m.content ?? ""))];
       const misquote = misquotedAsks(reply, theirs);
@@ -403,7 +425,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         continue;
       }
       let out = reply;
-      const stillMoney = unsourcedFigures(reply, [typed, ...seen, ...sources]);
+      const stillMoney = unsourcedFigures(reply, [typed, ...seen, ...sources, ...(o.shown ?? [])]);
       // WO-061 (H018): proposed waiver wording that stands after the check is removed by code, with its save offer.
       const stillWaiver = waiverSolicits(reply, standingRefusal, o.message);
       // D-066 (P14): an ask for a password, code, key or login in chat that stands after the review is removed by code.
@@ -470,6 +492,10 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         results.push({ type: "tool_result", tool_use_id: u.id, content: resultText(out) });
         seen.push(resultText(out));
         if (u.name === "search_jobs" && out && Array.isArray((out as any).postings)) found = (out as any).postings.slice(0, 50);
+        // D-070 (live-7 C11): every posting a tool read this turn with its stated pay and link (get_posting, inspect_apply_flow,
+        // check_posting_open, search_jobs), so a reply that gives that pay carries that posting's link (career_brain.ts payWithSource).
+        const ps = payPostingsOf(out);
+        if (ps.length && o.ctx.turn) (o.ctx.turn.paySources ??= []).push(...ps);
       } catch (e) { if (e instanceof AskPerson) ask = true; fail(t.effect, e instanceof Error ? e.message : String(e), e); }
     }
     messages.push({ role: "user", content: results });

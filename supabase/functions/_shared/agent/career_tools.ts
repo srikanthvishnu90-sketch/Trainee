@@ -5,7 +5,7 @@ import { isAutomatedInbox } from "../automated_inbox.ts";
 import { conversationFor, type RepliesStore } from "../career_outreach_replies.ts";
 import { CareerProfile, CareerTrack, CareerPrep, CareerPaths } from "../router_core.career.js";
 import { AskPerson, type ToolSpec, type ToolCtx } from "./loop.ts";
-import { type FitCache, newFitCache, searchPostings } from "../career_search.ts";
+import { type FitCache, newFitCache, orAlternatives, searchAlternatives, searchPostings } from "../career_search.ts";
 import { searchWords, wordStem } from "../career_ingest.ts";
 import { liveOnly, type LinkCheck } from "../link_check.ts";
 import { startWatching, validPrefs, validZone, type AlertStore } from "../career_alert_store.ts";
@@ -710,6 +710,26 @@ export function careerTools(deps: {
         // WO-068: every word must match, so a word the model added ("mid level", "python") can empty a search that has
         // real postings. With none found, the query is shortened from the end until one matches, and the result says so.
         const asked = String(i.query ?? "");
+        // D-070: "chicago or remote" is two searches, merged (career_search.ts orAlternatives); each alternative is relaxed alone.
+        const alts = orAlternatives(asked);
+        if (alts.length > 1) {
+          const pools = await Promise.all(alts.map((a) => deps.postings(a)));
+          const union = [...new Map(pools.flat().map((p: any) => [String(p?.job_id ?? ""), p])).values()];
+          if (union.length) {
+            const saved0 = deps.alerts ? await deps.alerts.get(c.userId).catch(() => null) : null;
+            const { kept, filtered } = applyFloor([...union].sort((a, b) => String(b.first_seen_at || "").localeCompare(String(a.first_seen_at || ""))), saved0?.prefs?.floor ?? {});
+            const want = Math.max(1, Math.min(20, Number(i.limit) || 10));
+            const r = searchAlternatives(kept, alts, c.state.profile, Math.min(50, want * 3), fitCacheOf(c));
+            const withLink = r.postings.filter((p) => /^https?:\/\//i.test(String(p.url ?? "")));
+            const checked = await liveOnly(withLink, deps.linkCheck, want);
+            const found: any[] = checked.shown;
+            await record(c, "search", asked, { results: found.length, companies: [...new Set(found.map((p) => String(p.company ?? "")).filter(Boolean))].slice(0, 5),
+              shown: found.slice(0, 10).map((p) => ({ job_id: String(p.job_id ?? ""), company: String(p.company ?? "").slice(0, 80), title: String(p.title ?? "").slice(0, 100) })) });
+            return { ...r, postings: found, filtered, source: "live", searched_each: alts, note_or: `searched each of: ${alts.join(" | ")}; a posting whose role_match is false is a related role, not the role asked for: say so`,
+              links: { checked: checked.checked, dead_dropped: checked.dead, no_link_dropped: r.postings.length - withLink.length,
+                note: deps.linkCheck ? "each link was checked just now; a posting marked link 'unknown' could not be checked: say so beside it" : "links were not checked here" } };
+          }
+        }
         let query = asked, pool = await deps.postings(query);
         const words = asked.split(/\s+/).filter(Boolean);
         while (!pool.length && words.length > 1) { words.pop(); query = words.join(" "); pool = await deps.postings(query); }

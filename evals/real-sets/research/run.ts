@@ -25,6 +25,7 @@
 //   deno run -A --no-check evals/real-sets/research/run.ts [--capture | --live --budget-usd 5]
 // deno-lint-ignore-file no-explicit-any require-await
 import { researchCompany } from "../../../supabase/functions/_shared/agent/research/company.ts";
+import { RESEARCH_DRAFT_MAX_TOKENS } from "../../../supabase/functions/_shared/agent/research/draft_json.ts";
 import { freeProvider, freeReader, freeResearchFor } from "../../../supabase/functions/_shared/research_free_sources.ts";
 import { normalizeUrl } from "../../../supabase/functions/_shared/research_sources.ts";
 
@@ -73,7 +74,7 @@ if (mode === "live") {
   for (const c of CASES) {
     const free = freeResearchFor(env, fetch);
     const search = withWebSearch(claudeWebProvider({ search: (q: string, w: any) => webSearch(q, { cfg, budget: gate, ...w }), now: Date.now }), free.search);
-    const draft = async (p: any) => { const r = await callModel(cfg, { system: p.system, messages: p.messages.map((m: any) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: 1800 }, { budget: gate, role: "chat" } as any); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); };
+    const draft = async (p: any) => { const r = await callModel(cfg, { system: p.system, messages: p.messages.map((m: any) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: RESEARCH_DRAFT_MAX_TOKENS }, { budget: gate, role: "chat" } as any); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); };
     // What the reader returned this run, kept so the brief is scored against the pages it actually stood on.
     const reads: any[] = [];
     const read = async (urls: string[]) => { const r = await free.read(urls); reads.push(r); return r; };

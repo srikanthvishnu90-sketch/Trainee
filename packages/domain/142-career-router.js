@@ -16859,7 +16859,12 @@ const CareerRouter = (() => {
         const headline = sponsorAsk && need === false && agrees(true) ? "No: you told me you don't need visa sponsorship."
           : sponsorAsk && need === true && agrees(false) ? "Yes: you told me you need visa sponsorship."
           : "Here is what you told me about your work authorization.";
-        const reply = compose({ headline, facts: waRecord.slice(0, 2).map((x) => `On record: ${x}.`) });
+        // D-070 (D-054 M08 on the real model, 3 of 5 passes failed by one judge): the record was read back twice in two wordings
+        // ('work authorization — "I don't need visa sponsorship"' and "you do not need visa sponsorship"); a derived line that only
+        // repeats the person's own quoted words is not read back again.
+        const quoted = waRecord.filter((x) => /"/.test(x));
+        const lines = waRecord.filter((x) => !(/^you (?:do not )?need (?:visa )?sponsorship$/.test(x) && quoted.some((q) => /sponsor/i.test(q))));
+        const reply = compose({ headline, facts: lines.slice(0, 2).map((x) => `On record: ${x}.`) });
         return { intent: "profile_recall", reply, resultStatus: "completed", sends: 0 };
       }
       const label = what.charAt(0).toUpperCase() + what.slice(1);

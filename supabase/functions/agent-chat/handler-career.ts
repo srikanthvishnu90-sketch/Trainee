@@ -54,6 +54,7 @@ import { linkChecker } from "../_shared/link_check.ts";
 import { knowledgeOn } from "../_shared/agent/knowledge/index.ts";
 import { fileKindPublisher } from "../_shared/agent/research/file_publisher.ts";
 import { modelDerive } from "../_shared/agent/research/derive.ts";
+import { RESEARCH_DRAFT_MAX_TOKENS } from "../_shared/agent/research/draft_json.ts";
 import { replyFlagsMeta } from "../_shared/agent/loop.ts"; // flag-only reply checks saved with the turn (Greptile on #566)
 import { gatewayGroundSearch, memoryGroundCache } from "../_shared/agent/research/ground.ts";
 const researchCache = memoryGroundCache();
@@ -1492,7 +1493,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           market: researchReplyOn(Deno.env) && cfg.apiKey ? {
             ...researchSearchFor(Deno.env, fetch),
             ...(webResearchOn(Deno.env) ? { search: withWebSearch(claudeWebProvider({ search: (q, w) => webSearch(q, { cfg, meter, ...w }), now: Date.now, cache: webResearchCache }), researchSearchFor(Deno.env, fetch).search), layout: "messages" as const } : {}),
-            draft: async (p) => { const r = await callModel(cfg, { system: p.system, messages: p.messages.map((m) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: 1800 }, { meter, role: "chat" }); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); },
+            draft: async (p) => { const r = await callModel(cfg, { system: p.system, messages: p.messages.map((m) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: RESEARCH_DRAFT_MAX_TOKENS }, { meter, role: "chat" }); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); },
             publish: researchBriefOn(Deno.env) ? async (data) => { const r = await createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }).create(user.id, "research_brief", data); return r.ok && r.url ? { url: r.url } : null; } : null,
           } : null,
           // D-060 (C18): "is that posting still open?" re-checked live on the boards the product reads; any other host is named, not guessed.
@@ -1555,7 +1556,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           turn.reply = nonEmptyReply(turn);
           out = { reply: turn.reply, intent: turn.show?.intent ?? (turn.tool_calls.some((c: any) => c.name === "draft_followup") ? FOLLOWUP_INTENT : "agent"), resultStatus: turn.stopped, contained: false, handler: "agent", ...(turn.show?.parts ? { parts: turn.show.parts } : {}),
             ...(turnDocuments.length ? { result: { documents: turnDocuments } } : {}) };
-          agentMeta = { brain: staged.chosen ? "staged" : "agent", ...(staged.chosen ? { router_intent: staged.decision?.intent ?? null } : {}), tool_calls: turn.tool_calls, stopped: turn.stopped, pending_approvals: turn.pending_approvals.length, ...(turn.knowledge ? { knowledge: turn.knowledge } : {}),
+          agentMeta = { brain: staged.chosen ? "staged" : "agent", ...(staged.chosen ? { router_intent: staged.decision?.intent ?? null } : {}), tool_calls: turn.tool_calls, stopped: turn.stopped, ...((turn as any).shorten ? { shorten: (turn as any).shorten } : {}), pending_approvals: turn.pending_approvals.length, ...(turn.knowledge ? { knowledge: turn.knowledge } : {}),
             // flag-only reply checks (loop.ts): saved with the turn so remaining reply problems can be counted (Greptile on #566)
             ...replyFlagsMeta(turn as { flags?: unknown }), ...(turn.show?.meta ?? {}) };
         }

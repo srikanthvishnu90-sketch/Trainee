@@ -1,0 +1,3238 @@
+{
+ "approval": "D-068",
+ "budget_usd": 3.5,
+ "spent_usd": 2.9641,
+ "line": "REAL-SET RESEARCH LIVE (real model drafting, Claude web search + the free sources, live web): 20/20 cases run; sources 20/20, cited 20/20, invented 20/20, unread 20/20, entity 20/20, brief 11/20; PASS 11/20 (bar 19/20) BELOW",
+ "scored": [
+  {
+   "id": "R01",
+   "company": "Stripe",
+   "status": "ok",
+   "kept": 3,
+   "sources": [
+    "https://en.wikipedia.org/wiki/Stripe%2C_Inc.",
+    "https://boards-api.greenhouse.io/v1/boards/stripe/jobs/7230921?content=true",
+    "https://stripe.com/about"
+   ],
+   "hosts": [
+    "en.wikipedia.org",
+    "boards-api.greenhouse.io",
+    "stripe.com"
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R02",
+   "company": "Airbnb",
+   "status": "ok",
+   "kept": 3,
+   "sources": [
+    "https://boards-api.greenhouse.io/v1/boards/airbnb/jobs/8380007?content=true"
+   ],
+   "hosts": [
+    "boards-api.greenhouse.io"
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R03",
+   "company": "Figma",
+   "status": "ok",
+   "kept": 4,
+   "sources": [
+    "https://www.sec.gov/Archives/edgar/data/1579878/000162828026009024/fy25pressrelease.htm",
+    "https://boards-api.greenhouse.io/v1/boards/figma/jobs/5551532004?content=true",
+    "https://www.figma.com/",
+    "https://www.sec.gov/Archives/edgar/data/1579878/000162828026053331/q226pressrelease.htm"
+   ],
+   "hosts": [
+    "www.sec.gov",
+    "boards-api.greenhouse.io",
+    "www.figma.com"
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R04",
+   "company": "Robinhood",
+   "status": "ok",
+   "kept": 3,
+   "sources": [
+    "https://en.wikipedia.org/wiki/Robinhood_(company)",
+    "https://boards-api.greenhouse.io/v1/boards/robinhood/jobs/7264931?content=true",
+    "https://careers.robinhood.com/?"
+   ],
+   "hosts": [
+    "en.wikipedia.org",
+    "boards-api.greenhouse.io",
+    "careers.robinhood.com"
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R05",
+   "company": "Coinbase",
+   "status": "no_sources",
+   "kept": 0,
+   "sources": [],
+   "hosts": [],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": false
+   },
+   "notes": [
+    "no brief: 10 page(s) about Coinbase were opened, but none stated anything the brief could quote"
+   ],
+   "pass": false
+  },
+  {
+   "id": "R06",
+   "company": "Datadog",
+   "status": "no_sources",
+   "kept": 0,
+   "sources": [],
+   "hosts": [],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": false
+   },
+   "notes": [
+    "no brief: 9 page(s) about Datadog were opened, but none stated anything the brief could quote"
+   ],
+   "pass": false
+  },
+  {
+   "id": "R07",
+   "company": "Duolingo",
+   "status": "ok",
+   "kept": 4,
+   "sources": [
+    "https://boards-api.greenhouse.io/v1/boards/duolingo/jobs/8888848002?content=true",
+    "https://en.wikipedia.org/wiki/Duolingo"
+   ],
+   "hosts": [
+    "boards-api.greenhouse.io",
+    "en.wikipedia.org"
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R08",
+   "company": "Brex",
+   "status": "no_sources",
+   "kept": 0,
+   "sources": [],
+   "hosts": [],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": false
+   },
+   "notes": [
+    "no brief: 10 page(s) about Brex were opened, but none stated anything the brief could quote"
+   ],
+   "pass": false
+  },
+  {
+   "id": "R09",
+   "company": "Affirm",
+   "status": "no_sources",
+   "kept": 0,
+   "sources": [],
+   "hosts": [],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": false
+   },
+   "notes": [
+    "no brief: 11 page(s) about Affirm were opened, but none stated anything the brief could quote"
+   ],
+   "pass": false
+  },
+  {
+   "id": "R10",
+   "company": "Gusto",
+   "status": "ok",
+   "kept": 2,
+   "sources": [
+    "https://en.wikipedia.org/wiki/Gusto%2C_Inc.",
+    "https://boards-api.greenhouse.io/v1/boards/gusto/jobs/7656216?content=true"
+   ],
+   "hosts": [
+    "en.wikipedia.org",
+    "boards-api.greenhouse.io"
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R11",
+   "company": "Discord",
+   "status": "no_sources",
+   "kept": 0,
+   "sources": [],
+   "hosts": [],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": false
+   },
+   "notes": [
+    "no brief: 8 page(s) about Discord were opened, but none stated anything the brief could quote"
+   ],
+   "pass": false
+  },
+  {
+   "id": "R12",
+   "company": "Dropbox",
+   "status": "no_sources",
+   "kept": 0,
+   "sources": [],
+   "hosts": [],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": false
+   },
+   "notes": [
+    "no brief: 10 page(s) about Dropbox were opened, but none stated anything the brief could quote"
+   ],
+   "pass": false
+  },
+  {
+   "id": "R13",
+   "company": "Chime",
+   "status": "ok",
+   "kept": 2,
+   "sources": [
+    "https://boards-api.greenhouse.io/v1/boards/chime/jobs/8594959002?content=true",
+    "https://en.wikipedia.org/wiki/Chime_(company)"
+   ],
+   "hosts": [
+    "boards-api.greenhouse.io",
+    "en.wikipedia.org"
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R14",
+   "company": "Toast",
+   "status": "no_sources",
+   "kept": 0,
+   "sources": [],
+   "hosts": [],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": false
+   },
+   "notes": [
+    "no brief: 6 page(s) about Toast were opened, but none stated anything the brief could quote"
+   ],
+   "pass": false
+  },
+  {
+   "id": "R15",
+   "company": "Palantir",
+   "status": "no_sources",
+   "kept": 0,
+   "sources": [],
+   "hosts": [],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": false
+   },
+   "notes": [
+    "no brief: 10 page(s) about Palantir were opened, but none stated anything the brief could quote"
+   ],
+   "pass": false
+  },
+  {
+   "id": "R16",
+   "company": "Spotify",
+   "status": "ok",
+   "kept": 3,
+   "sources": [
+    "https://jobs.lever.co/spotify/b4f6cd01-1d5d-41a9-b287-6d10416da03c",
+    "https://www.sec.gov/Archives/edgar/data/1639920/000162828026066889/spot-20260930x6xk.htm",
+    "https://en.wikipedia.org/wiki/Spotify"
+   ],
+   "hosts": [
+    "jobs.lever.co",
+    "www.sec.gov",
+    "en.wikipedia.org"
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R17",
+   "company": "Ramp",
+   "status": "ok",
+   "kept": 2,
+   "sources": [
+    "https://en.wikipedia.org/wiki/Ramp_(company)",
+    "https://ramp.com/",
+    "https://ramp.com/careers"
+   ],
+   "hosts": [
+    "en.wikipedia.org",
+    "ramp.com"
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R18",
+   "company": "Notion",
+   "status": "no_sources",
+   "kept": 0,
+   "sources": [],
+   "hosts": [],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": false
+   },
+   "notes": [
+    "no brief: 5 page(s) about Notion were opened, but none stated anything the brief could quote"
+   ],
+   "pass": false
+  },
+  {
+   "id": "R19",
+   "company": "Plaid",
+   "status": "ok",
+   "kept": 2,
+   "sources": [
+    "https://en.wikipedia.org/wiki/Plaid_Inc.",
+    "https://plaid.com/"
+   ],
+   "hosts": [
+    "en.wikipedia.org",
+    "plaid.com"
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R20",
+   "company": "ServiceNow",
+   "status": "ok",
+   "kept": 3,
+   "sources": [
+    "https://en.wikipedia.org/wiki/ServiceNow"
+   ],
+   "hosts": [
+    "en.wikipedia.org"
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  }
+ ],
+ "out": [
+  {
+   "case": {
+    "id": "R01",
+    "company": "Stripe",
+    "site": "stripe.com",
+    "role": "Risk Operations Analyst",
+    "board": "greenhouse:stripe"
+   },
+   "result": {
+    "kind": "company",
+    "status": "ok",
+    "format": "inline",
+    "company": "Stripe",
+    "role": "Risk Operations Analyst",
+    "ask": null,
+    "focus": "all",
+    "audience": null,
+    "title": "Stripe: Risk Operations Analyst interview brief",
+    "frame": {
+     "text": "Stripe's own pages describe risk and fraud infrastructure as part of how it grows, so a Risk Operations Analyst is best understood as someone who lets Stripe say yes to more businesses and partners while limiting losses and compliance exposure.",
+     "cite": [
+      3,
+      2
+     ]
+    },
+    "business": [],
+    "developments": [
+     {
+      "text": "In January 2025 Stripe sent layoff notices to nearly 300 workers, affecting Product, Operations and Engineering roles.",
+      "cite": [
+       1
+      ],
+      "date": "Jan 2025",
+      "measure": null
+     }
+    ],
+    "competitors": [],
+    "role_asks": [
+     {
+      "text": "The team manages risk relationships with card, payment method and financial partners, building operational controls to mitigate user and partner risk.",
+      "cite": [
+       2
+      ]
+     }
+    ],
+    "questions": [],
+    "unknowns": [
+     "Which specific team, manager and stakeholders you would work with day to day.",
+     "How the team measures success or what its current loss and escalation levels are."
+    ],
+    "sources": [
+     {
+      "n": 1,
+      "url": "https://en.wikipedia.org/wiki/Stripe%2C_Inc.",
+      "title": "Stripe, Inc. - Wikipedia",
+      "fetched_at": "2026-11-12T09:31:52.157Z",
+      "by": "reported"
+     },
+     {
+      "n": 2,
+      "url": "https://boards-api.greenhouse.io/v1/boards/stripe/jobs/7230921?content=true",
+      "title": "Risk Operations Analyst: posting on Stripe's Greenhouse board",
+      "fetched_at": "2026-11-12T09:31:51.965Z",
+      "by": "reported"
+     },
+     {
+      "n": 3,
+      "url": "https://stripe.com/about",
+      "title": "About Us | Stripe",
+      "fetched_at": "2026-11-12T09:31:52.057Z",
+      "by": "company"
+     }
+    ],
+    "products": [],
+    "project": {
+     "ties": [],
+     "missing": "No confirmed facts about your projects yet. Confirm one project (what you built, with which tools, at what scale) and this section ties it to the role."
+    },
+    "five": [
+     {
+      "label": "The frame",
+      "text": "Stripe's own pages describe risk and fraud infrastructure as part of how it grows, so a Risk Operations Analyst is best understood as someone who lets Stripe say yes to more businesses and partners while limiting losses and compliance exposure.",
+      "cite": [
+       3,
+       2
+      ]
+     },
+     {
+      "label": "One number, correctly named",
+      "text": "Jan 2025: In January 2025 Stripe sent layoff notices to nearly 300 workers, affecting Product, Operations and Engineering roles.",
+      "cite": [
+       1
+      ]
+     },
+     {
+      "label": "Your example",
+      "text": "Not confirmed yet: see how to use your project, above."
+     }
+    ],
+    "wanted": null,
+    "unread": [
+     "api.gdeltproject.org: not read, because it could not be reached.",
+     "SEC EDGAR has no 10-K for Stripe (it may be private)."
+    ],
+    "file_url": null,
+    "dropped": 20,
+    "notes": [
+     "no 10-K on SEC EDGAR for Stripe",
+     "answered in chat, as the person asked"
+    ],
+    "note": "The person asked for the answer in chat. Write three to five short sentences from the lines above only: what the company does and what someone in this role would work on, each sentence ending with its source numbers like [1]. Write no link, no question list and no source list: code adds the interview questions, what the sources cannot establish and the numbered sources after your text."
+   },
+   "read": {
+    "verified": [
+     {
+      "url": "https://stripe.com/",
+      "status": 200,
+      "fetched_at": 1794475912105,
+      "chars": 14171
+     },
+     {
+      "url": "https://stripe.com/about",
+      "status": 200,
+      "fetched_at": 1794475912057,
+      "chars": 2306
+     },
+     {
+      "url": "https://stripe.com/careers",
+      "status": 200,
+      "fetched_at": 1794475912132,
+      "chars": 8486
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/stripe/jobs",
+      "status": 200,
+      "fetched_at": 1794475911944,
+      "chars": 4123
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/stripe/jobs/7456167?content=true",
+      "status": 200,
+      "fetched_at": 1794475911966,
+      "chars": 4332
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/stripe/jobs/7230921?content=true",
+      "status": 200,
+      "fetched_at": 1794475911965,
+      "chars": 3665
+     },
+     {
+      "url": "https://en.wikipedia.org/wiki/Stripe%2C_Inc.",
+      "status": 200,
+      "fetched_at": 1794475912157,
+      "chars": 43379
+     },
+     {
+      "url": "https://www.wikidata.org/wiki/Special:EntityData/Q7624104.json",
+      "status": 200,
+      "fetched_at": 1794475912305,
+      "chars": 247
+     },
+     {
+      "url": "https://stripe.com/newsroom",
+      "status": 200,
+      "fetched_at": 1794475912294,
+      "chars": 9899
+     },
+     {
+      "url": "https://api.github.com/orgs/stripe",
+      "status": 200,
+      "fetched_at": 1794475912171,
+      "chars": 198
+     }
+    ],
+    "rejected": [
+     {
+      "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Stripe%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+      "why": "unreachable"
+     }
+    ]
+   }
+  },
+  {
+   "case": {
+    "id": "R02",
+    "company": "Airbnb",
+    "site": "airbnb.com",
+    "role": "Advanced Analytics Intern",
+    "board": "greenhouse:airbnb"
+   },
+   "result": {
+    "kind": "company",
+    "status": "ok",
+    "format": "inline",
+    "company": "Airbnb",
+    "role": "Advanced Analytics Intern",
+    "ask": null,
+    "focus": "all",
+    "audience": null,
+    "title": "Airbnb: Advanced Analytics Intern interview brief",
+    "frame": {
+     "text": "My reading: the role sits in a team that forecasts Airbnb's top line and explains actuals versus forecast, so the useful way to see the company is as a marketplace whose performance has to be forecast, explained and fed back into the next forecast.",
+     "cite": [
+      1
+     ]
+    },
+    "business": [],
+    "developments": [],
+    "competitors": [],
+    "role_asks": [
+     {
+      "text": "You are expected to own a capstone project from beginning to end.",
+      "cite": [
+       1
+      ]
+     },
+     {
+      "text": "Forecasting, time series and A/B testing are preferred, not required.",
+      "cite": [
+       1
+      ]
+     }
+    ],
+    "questions": [],
+    "unknowns": [
+     "Which specific metrics or business lines your capstone project would cover.",
+     "The team's size, culture and day-to-day working style.",
+     "How the forecast has performed recently against actuals.",
+     "Your odds of a return offer."
+    ],
+    "sources": [
+     {
+      "n": 1,
+      "url": "https://boards-api.greenhouse.io/v1/boards/airbnb/jobs/8380007?content=true",
+      "title": "Advanced Analytics Intern: posting on Airbnb's Greenhouse board",
+      "fetched_at": "2026-11-12T09:32:21.998Z",
+      "by": "reported"
+     }
+    ],
+    "products": [],
+    "project": {
+     "ties": [],
+     "missing": "No confirmed facts about your projects yet. Confirm one project (what you built, with which tools, at what scale) and this section ties it to the role."
+    },
+    "five": [
+     {
+      "label": "The frame",
+      "text": "My reading: the role sits in a team that forecasts Airbnb's top line and explains actuals versus forecast, so the useful way to see the company is as a marketplace whose performance has to be forecast, explained and fed back into the next forecast.",
+      "cite": [
+       1
+      ]
+     },
+     {
+      "label": "Your example",
+      "text": "Not confirmed yet: see how to use your project, above."
+     }
+    ],
+    "wanted": null,
+    "unread": [
+     "airbnb.com: not read, because the site asks programs not to read it."
+    ],
+    "file_url": null,
+    "dropped": 19,
+    "notes": [
+     "answered in chat, as the person asked"
+    ],
+    "note": "The person asked for the answer in chat. Write three to five short sentences from the lines above only: what the company does and what someone in this role would work on, each sentence ending with its source numbers like [1]. Write no link, no question list and no source list: code adds the interview questions, what the sources cannot establish and the numbered sources after your text."
+   },
+   "read": {
+    "verified": [
+     {
+      "url": "https://www.airbnb.com/",
+      "status": 200,
+      "fetched_at": 1794475943432,
+      "chars": 4359
+     },
+     {
+      "url": "https://news.airbnb.com/about-us",
+      "status": 200,
+      "fetched_at": 1794475944001,
+      "chars": 7368
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/airbnb/jobs",
+      "status": 200,
+      "fetched_at": 1794475941974,
+      "chars": 3962
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/airbnb/jobs/8380007?content=true",
+      "status": 200,
+      "fetched_at": 1794475941998,
+      "chars": 6117
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/airbnb/jobs/8023118?content=true",
+      "status": 200,
+      "fetched_at": 1794475941998,
+      "chars": 6112
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1559720/000155972026000004/abnb-20251231.htm",
+      "status": 200,
+      "fetched_at": 1794475944150,
+      "chars": 60000
+     },
+     {
+      "url": "https://en.wikipedia.org/wiki/Airbnb",
+      "status": 200,
+      "fetched_at": 1794475944039,
+      "chars": 60000
+     },
+     {
+      "url": "https://www.wikidata.org/wiki/Special:EntityData/Q63327.json",
+      "status": 200,
+      "fetched_at": 1794475944157,
+      "chars": 254
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1559720/000119312520306257/d81668dex1021.htm",
+      "status": 200,
+      "fetched_at": 1794475944155,
+      "chars": 28109
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1559720/000119312520294801/d81668dex1020.htm",
+      "status": 200,
+      "fetched_at": 1794475944154,
+      "chars": 19275
+     }
+    ],
+    "rejected": [
+     {
+      "url": "https://airbnb.com/careers",
+      "why": "robots_disallow"
+     }
+    ]
+   }
+  },
+  {
+   "case": {
+    "id": "R03",
+    "company": "Figma",
+    "site": "figma.com",
+    "role": "Software Engineer - Machine Learning",
+    "board": "greenhouse:figma"
+   },
+   "result": {
+    "kind": "company",
+    "status": "ok",
+    "format": "inline",
+    "company": "Figma",
+    "role": "Software Engineer - Machine Learning",
+    "ask": null,
+    "focus": "all",
+    "audience": null,
+    "title": "Figma: Software Engineer - Machine Learning interview brief",
+    "frame": {
+     "text": "My reading: Figma is a collaborative design platform now building AI into the canvas itself, with revenue growth accelerating as AI adoption rises, so the ML role sits on the company's main growth bet.",
+     "cite": [
+      4,
+      2
+     ]
+    },
+    "business": [],
+    "developments": [
+     {
+      "text": "Figma acquired Weavy, now Figma Weave, to bring leading AI models together with professional editing tools on one canvas.",
+      "cite": [
+       1
+      ],
+      "date": "Feb 18, 2026",
+      "measure": null
+     }
+    ],
+    "competitors": [],
+    "role_asks": [
+     {
+      "text": "You would build data and annotation pipelines, including human-in-the-loop workflows.",
+      "cite": [
+       2
+      ]
+     }
+    ],
+    "questions": [
+     {
+      "area": "AI workflows on the canvas",
+      "a": "Using the world's leading third-party AI models",
+      "b": "Building a first-party model for the agent",
+      "text": "Your team is working on aI workflows on the canvas. How do you decide between Using the world's leading third-party AI models and Building a first-party model for the agent?",
+      "cite": [
+       3,
+       4
+      ]
+     }
+    ],
+    "unknowns": [
+     "Which team you would join, how it is structured, and who you would report to.",
+     "How the first-party model is trained and evaluated, and how it relates to this role.",
+     "Team culture and day-to-day working style.",
+     "How the interview process and hiring decision work."
+    ],
+    "sources": [
+     {
+      "n": 1,
+      "url": "https://www.sec.gov/Archives/edgar/data/1579878/000162828026009024/fy25pressrelease.htm",
+      "title": "Document",
+      "fetched_at": "2026-11-12T09:32:44.590Z",
+      "by": "reported"
+     },
+     {
+      "n": 2,
+      "url": "https://boards-api.greenhouse.io/v1/boards/figma/jobs/5551532004?content=true",
+      "title": "Software Engineer - Machine Learning: posting on Figma's Greenhouse board",
+      "fetched_at": "2026-11-12T09:32:43.491Z",
+      "by": "reported"
+     },
+     {
+      "n": 3,
+      "url": "https://www.figma.com/",
+      "title": "Figma: The collaborative canvas for design, code, and AI",
+      "fetched_at": "2026-11-12T09:32:44.231Z",
+      "by": "company",
+      "limit": "outdated",
+      "dated": "Mar 2025"
+     },
+     {
+      "n": 4,
+      "url": "https://www.sec.gov/Archives/edgar/data/1579878/000162828026053331/q226pressrelease.htm",
+      "title": "Document",
+      "fetched_at": "2026-11-12T09:32:44.584Z",
+      "by": "reported"
+     }
+    ],
+    "products": [],
+    "project": {
+     "ties": [],
+     "missing": "No confirmed facts about your projects yet. Confirm one project (what you built, with which tools, at what scale) and this section ties it to the role."
+    },
+    "five": [
+     {
+      "label": "The frame",
+      "text": "My reading: Figma is a collaborative design platform now building AI into the canvas itself, with revenue growth accelerating as AI adoption rises, so the ML role sits on the company's main growth bet.",
+      "cite": [
+       4,
+       2
+      ]
+     },
+     {
+      "label": "One number, correctly named",
+      "text": "Feb 18, 2026: Figma acquired Weavy, now Figma Weave, to bring leading AI models together with professional editing tools on one canvas.",
+      "cite": [
+       1
+      ]
+     },
+     {
+      "label": "Your example",
+      "text": "Not confirmed yet: see how to use your project, above."
+     },
+     {
+      "label": "Your first question",
+      "text": "Your team is working on aI workflows on the canvas. How do you decide between Using the world's leading third-party AI models and Building a first-party model for the agent?",
+      "cite": [
+       3,
+       4
+      ]
+     }
+    ],
+    "wanted": null,
+    "unread": [
+     "figma.com: not read, because it redirected too many times.",
+     "Wikipedia has no company article found for Figma."
+    ],
+    "file_url": null,
+    "dropped": 17,
+    "notes": [
+     "answered in chat, as the person asked"
+    ],
+    "note": "The person asked for the answer in chat. Write three to five short sentences from the lines above only: what the company does and what someone in this role would work on, each sentence ending with its source numbers like [1]. Write no link, no question list and no source list: code adds the interview questions, what the sources cannot establish and the numbered sources after your text."
+   },
+   "read": {
+    "verified": [
+     {
+      "url": "https://www.figma.com/",
+      "status": 200,
+      "fetched_at": 1794475964231,
+      "chars": 60000
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/figma/jobs",
+      "status": 200,
+      "fetched_at": 1794475963489,
+      "chars": 4520
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/figma/jobs/5551532004?content=true",
+      "status": 200,
+      "fetched_at": 1794475963491,
+      "chars": 6161
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/figma/jobs/6073106004?content=true",
+      "status": 200,
+      "fetched_at": 1794475963491,
+      "chars": 6143
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1579878/000162828026009228/fig-20251231.htm",
+      "status": 200,
+      "fetched_at": 1794475964631,
+      "chars": 60000
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1579878/000162828026009024/fy25pressrelease.htm",
+      "status": 200,
+      "fetched_at": 1794475964590,
+      "chars": 32294
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1579878/000162828026053331/q226pressrelease.htm",
+      "status": 200,
+      "fetched_at": 1794475964584,
+      "chars": 29409
+     },
+     {
+      "url": "https://api.github.com/orgs/figma",
+      "status": 200,
+      "fetched_at": 1794475964527,
+      "chars": 277
+     }
+    ],
+    "rejected": [
+     {
+      "url": "https://figma.com/careers",
+      "why": "too_many_redirects"
+     },
+     {
+      "url": "https://figma.com/press",
+      "why": "too_many_redirects"
+     },
+     {
+      "url": "https://figma.com/team",
+      "why": "too_many_redirects"
+     }
+    ]
+   }
+  },
+  {
+   "case": {
+    "id": "R04",
+    "company": "Robinhood",
+    "site": "robinhood.com",
+    "role": "Software Engineer 2, Backend",
+    "board": "greenhouse:robinhood"
+   },
+   "result": {
+    "kind": "company",
+    "status": "ok",
+    "format": "inline",
+    "company": "Robinhood",
+    "role": "Software Engineer 2, Backend",
+    "ask": null,
+    "focus": "all",
+    "audience": null,
+    "title": "Robinhood: Software Engineer 2, Backend interview brief",
+    "frame": {
+     "text": "My reading: treat Robinhood as a brokerage-and-crypto platform whose backend engineers carry correctness, reliability and customer trust, so prepare to talk about systems where mistakes cost money.",
+     "cite": [
+      2,
+      3
+     ]
+    },
+    "business": [],
+    "developments": [
+     {
+      "text": "Robinhood launched the Robinhood Gold credit card in March 2024.",
+      "cite": [
+       1
+      ],
+      "date": "Mar 2024",
+      "measure": null
+     },
+     {
+      "text": "Robinhood acquired Pluto Capital, an AI-powered investment research platform, in July 2024.",
+      "cite": [
+       1
+      ],
+      "date": "Jul 2024",
+      "measure": null
+     }
+    ],
+    "competitors": [],
+    "role_asks": [],
+    "questions": [],
+    "unknowns": [
+     "Which team you would join and its on-call load.",
+     "Team culture beyond the careers-page testimonials.",
+     "Competitor positioning and recent financial results, which these pages do not cover."
+    ],
+    "sources": [
+     {
+      "n": 1,
+      "url": "https://en.wikipedia.org/wiki/Robinhood_(company)",
+      "title": "Robinhood (company) - Wikipedia",
+      "fetched_at": "2026-11-12T09:33:06.417Z",
+      "by": "reported"
+     },
+     {
+      "n": 2,
+      "url": "https://boards-api.greenhouse.io/v1/boards/robinhood/jobs/7264931?content=true",
+      "title": "Senior Software Engineer, Backend: posting on Robinhood's Greenhouse board",
+      "fetched_at": "2026-11-12T09:33:05.918Z",
+      "by": "reported"
+     },
+     {
+      "n": 3,
+      "url": "https://careers.robinhood.com/?",
+      "title": "Robinhood is hiring! Join our team and help us democratize finance for all.",
+      "fetched_at": "2026-11-12T09:33:06.210Z",
+      "by": "company"
+     }
+    ],
+    "products": [],
+    "project": {
+     "ties": [],
+     "missing": "No confirmed facts about your projects yet. Confirm one project (what you built, with which tools, at what scale) and this section ties it to the role."
+    },
+    "five": [
+     {
+      "label": "The frame",
+      "text": "My reading: treat Robinhood as a brokerage-and-crypto platform whose backend engineers carry correctness, reliability and customer trust, so prepare to talk about systems where mistakes cost money.",
+      "cite": [
+       2,
+       3
+      ]
+     },
+     {
+      "label": "One number, correctly named",
+      "text": "Mar 2024: Robinhood launched the Robinhood Gold credit card in March 2024.",
+      "cite": [
+       1
+      ]
+     },
+     {
+      "label": "Your example",
+      "text": "Not confirmed yet: see how to use your project, above."
+     }
+    ],
+    "wanted": null,
+    "unread": [
+     "robinhood.com: not read, because it redirected too many times.",
+     "robinhood.com: not read, because it had no readable text.",
+     "api.gdeltproject.org: not read, because it could not be reached.",
+     "SEC EDGAR has no 10-K for Robinhood (it may be private)."
+    ],
+    "file_url": null,
+    "dropped": 17,
+    "notes": [
+     "no 10-K on SEC EDGAR for Robinhood",
+     "answered in chat, as the person asked"
+    ],
+    "note": "The person asked for the answer in chat. Write three to five short sentences from the lines above only: what the company does and what someone in this role would work on, each sentence ending with its source numbers like [1]. Write no link, no question list and no source list: code adds the interview questions, what the sources cannot establish and the numbered sources after your text."
+   },
+   "read": {
+    "verified": [
+     {
+      "url": "https://careers.robinhood.com/?",
+      "status": 200,
+      "fetched_at": 1794475986210,
+      "chars": 11035
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/robinhood/jobs",
+      "status": 200,
+      "fetched_at": 1794475985874,
+      "chars": 4629
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/robinhood/jobs/7264931?content=true",
+      "status": 200,
+      "fetched_at": 1794475985918,
+      "chars": 5961
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/robinhood/jobs/8255842?content=true",
+      "status": 200,
+      "fetched_at": 1794475985919,
+      "chars": 6138
+     },
+     {
+      "url": "https://en.wikipedia.org/wiki/Robinhood_(company)",
+      "status": 200,
+      "fetched_at": 1794475986417,
+      "chars": 50987
+     },
+     {
+      "url": "https://www.wikidata.org/wiki/Special:EntityData/Q18155123.json",
+      "status": 200,
+      "fetched_at": 1794475986626,
+      "chars": 192
+     },
+     {
+      "url": "https://api.github.com/orgs/robinhood",
+      "status": 200,
+      "fetched_at": 1794475986426,
+      "chars": 205
+     }
+    ],
+    "rejected": [
+     {
+      "url": "https://robinhood.com/",
+      "why": "too_many_redirects"
+     },
+     {
+      "url": "https://robinhood.com/about",
+      "why": "too_many_redirects"
+     },
+     {
+      "url": "https://robinhood.com/press",
+      "why": "empty"
+     },
+     {
+      "url": "https://robinhood.com/team",
+      "why": "empty"
+     },
+     {
+      "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Robinhood%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+      "why": "unreachable"
+     }
+    ]
+   }
+  },
+  {
+   "case": {
+    "id": "R05",
+    "company": "Coinbase",
+    "site": "coinbase.com",
+    "role": "Forward Deployed Engineer, Finance",
+    "board": "greenhouse:coinbase"
+   },
+   "result": {
+    "kind": "company",
+    "status": "no_sources",
+    "ask": null,
+    "notes": [
+     "no 10-K on SEC EDGAR for Coinbase"
+    ],
+    "unread": [
+     "coinbase.com: not read, because it answered with an error (it may be paywalled or removed).",
+     "api.gdeltproject.org: not read, because it could not be reached.",
+     "SEC EDGAR has no 10-K for Coinbase (it may be private)."
+    ],
+    "blocker": "10 page(s) about Coinbase were opened, but none stated anything the brief could quote",
+    "note": "Research found nothing it could stand on: 10 page(s) about Coinbase were opened, but none stated anything the brief could quote. Say that plainly; do not guess."
+   },
+   "read": {
+    "verified": [
+     {
+      "url": "https://www.coinbase.com/",
+      "status": 200,
+      "fetched_at": 1794476016941,
+      "chars": 10313
+     },
+     {
+      "url": "https://www.coinbase.com/about",
+      "status": 200,
+      "fetched_at": 1794476016972,
+      "chars": 9992
+     },
+     {
+      "url": "https://www.coinbase.com/careers",
+      "status": 200,
+      "fetched_at": 1794476016933,
+      "chars": 8727
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/coinbase/jobs",
+      "status": 200,
+      "fetched_at": 1794476016598,
+      "chars": 4119
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/coinbase/jobs/8072932?content=true",
+      "status": 200,
+      "fetched_at": 1794476016586,
+      "chars": 5396
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/coinbase/jobs/8175510?content=true",
+      "status": 200,
+      "fetched_at": 1794476016587,
+      "chars": 4525
+     },
+     {
+      "url": "https://en.wikipedia.org/wiki/Coinbase",
+      "status": 200,
+      "fetched_at": 1794476017003,
+      "chars": 60000
+     },
+     {
+      "url": "https://www.wikidata.org/wiki/Special:EntityData/Q16972754.json",
+      "status": 200,
+      "fetched_at": 1794476017095,
+      "chars": 282
+     },
+     {
+      "url": "https://www.coinbase.com/press",
+      "status": 200,
+      "fetched_at": 1794476017189,
+      "chars": 6441
+     },
+     {
+      "url": "https://api.github.com/orgs/coinbase",
+      "status": 200,
+      "fetched_at": 1794476017009,
+      "chars": 132
+     }
+    ],
+    "rejected": [
+     {
+      "url": "https://coinbase.com/team",
+      "why": "http_status"
+     },
+     {
+      "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Coinbase%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+      "why": "unreachable"
+     }
+    ]
+   }
+  },
+  {
+   "case": {
+    "id": "R06",
+    "company": "Datadog",
+    "site": "datadoghq.com",
+    "role": "Software Engineering Intern",
+    "board": "greenhouse:datadog"
+   },
+   "result": {
+    "kind": "company",
+    "status": "no_sources",
+    "ask": null,
+    "notes": [],
+    "unread": [
+     "datadoghq.com: not read, because it redirected too many times."
+    ],
+    "blocker": "9 page(s) about Datadog were opened, but none stated anything the brief could quote",
+    "note": "Research found nothing it could stand on: 9 page(s) about Datadog were opened, but none stated anything the brief could quote. Say that plainly; do not guess."
+   },
+   "read": {
+    "verified": [
+     {
+      "url": "https://www.datadoghq.com/",
+      "status": 200,
+      "fetched_at": 1794476048208,
+      "chars": 15707
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/datadog/jobs",
+      "status": 200,
+      "fetched_at": 1794476048003,
+      "chars": 4524
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/datadog/jobs/8114161?content=true",
+      "status": 200,
+      "fetched_at": 1794476048017,
+      "chars": 5415
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/datadog/jobs/8114186?content=true",
+      "status": 200,
+      "fetched_at": 1794476048018,
+      "chars": 5440
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1561550/000162828026008819/ddog-20251231.htm",
+      "status": 200,
+      "fetched_at": 1794476048308,
+      "chars": 60000
+     },
+     {
+      "url": "https://en.wikipedia.org/wiki/Datadog",
+      "status": 200,
+      "fetched_at": 1794476048230,
+      "chars": 27538
+     },
+     {
+      "url": "https://www.wikidata.org/wiki/Special:EntityData/Q16248637.json",
+      "status": 200,
+      "fetched_at": 1794476048361,
+      "chars": 164
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1561550/000156155025000310/ex-991x20250930x8k.htm",
+      "status": 200,
+      "fetched_at": 1794476048282,
+      "chars": 30135
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1561550/000156155024000109/ex-991x20240630x8k.htm",
+      "status": 200,
+      "fetched_at": 1794476048273,
+      "chars": 30205
+     }
+    ],
+    "rejected": [
+     {
+      "url": "https://datadoghq.com/about",
+      "why": "too_many_redirects"
+     },
+     {
+      "url": "https://datadoghq.com/careers",
+      "why": "too_many_redirects"
+     },
+     {
+      "url": "https://datadoghq.com/press",
+      "why": "too_many_redirects"
+     }
+    ]
+   }
+  },
+  {
+   "case": {
+    "id": "R07",
+    "company": "Duolingo",
+    "site": "duolingo.com",
+    "role": "Data Scientist, Intern",
+    "board": "greenhouse:duolingo"
+   },
+   "result": {
+    "kind": "company",
+    "status": "ok",
+    "format": "inline",
+    "company": "Duolingo",
+    "role": "Data Scientist, Intern",
+    "ask": null,
+    "focus": "all",
+    "audience": null,
+    "title": "Duolingo: Data Scientist, Intern interview brief",
+    "frame": {
+     "text": "Read Duolingo as a freemium consumer subscription company whose growth is steered by experiments and forecasts; this internship sits on the measurement side of that loop.",
+     "cite": [
+      2,
+      1
+     ]
+    },
+    "business": [],
+    "developments": [],
+    "competitors": [],
+    "role_asks": [
+     {
+      "text": "The role is to derive insights from data to influence product roadmaps and business results.",
+      "cite": [
+       1
+      ]
+     },
+     {
+      "text": "You would evaluate product experiments.",
+      "cite": [
+       1
+      ]
+     },
+     {
+      "text": "You must present findings to senior management.",
+      "cite": [
+       1
+      ]
+     }
+    ],
+    "questions": [],
+    "unknowns": [
+     "Which product team or business area an intern would be placed with.",
+     "How intern projects are scoped and whether they ship to production.",
+     "What the team's day-to-day experimentation tooling and cadence look like.",
+     "Whether internships lead to return offers."
+    ],
+    "sources": [
+     {
+      "n": 1,
+      "url": "https://boards-api.greenhouse.io/v1/boards/duolingo/jobs/8888848002?content=true",
+      "title": "Data Scientist, Intern (PhD): posting on Duolingo's Greenhouse board",
+      "fetched_at": "2026-11-12T09:34:33.568Z",
+      "by": "reported"
+     },
+     {
+      "n": 2,
+      "url": "https://en.wikipedia.org/wiki/Duolingo",
+      "title": "Duolingo - Wikipedia",
+      "fetched_at": "2026-11-12T09:34:34.985Z",
+      "by": "reported"
+     }
+    ],
+    "products": [],
+    "project": {
+     "ties": [],
+     "missing": "No confirmed facts about your projects yet. Confirm one project (what you built, with which tools, at what scale) and this section ties it to the role."
+    },
+    "five": [
+     {
+      "label": "The frame",
+      "text": "Read Duolingo as a freemium consumer subscription company whose growth is steered by experiments and forecasts; this internship sits on the measurement side of that loop.",
+      "cite": [
+       2,
+       1
+      ]
+     },
+     {
+      "label": "Your example",
+      "text": "Not confirmed yet: see how to use your project, above."
+     }
+    ],
+    "wanted": null,
+    "unread": [],
+    "file_url": null,
+    "dropped": 15,
+    "notes": [
+     "answered in chat, as the person asked"
+    ],
+    "note": "The person asked for the answer in chat. Write three to five short sentences from the lines above only: what the company does and what someone in this role would work on, each sentence ending with its source numbers like [1]. Write no link, no question list and no source list: code adds the interview questions, what the sources cannot establish and the numbered sources after your text."
+   },
+   "read": {
+    "verified": [
+     {
+      "url": "https://www.duolingo.com/",
+      "status": 200,
+      "fetched_at": 1794476074472,
+      "chars": 8
+     },
+     {
+      "url": "https://www.duolingo.com/info",
+      "status": 200,
+      "fetched_at": 1794476074559,
+      "chars": 8
+     },
+     {
+      "url": "https://careers.duolingo.com/",
+      "status": 200,
+      "fetched_at": 1794476074953,
+      "chars": 16
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/duolingo/jobs",
+      "status": 200,
+      "fetched_at": 1794476073546,
+      "chars": 4261
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/duolingo/jobs/8888848002?content=true",
+      "status": 200,
+      "fetched_at": 1794476073568,
+      "chars": 4616
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/duolingo/jobs/8750636002?content=true",
+      "status": 200,
+      "fetched_at": 1794476073577,
+      "chars": 4882
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1562088/000162828026012494/duol-20251231.htm",
+      "status": 200,
+      "fetched_at": 1794476075060,
+      "chars": 60000
+     },
+     {
+      "url": "https://en.wikipedia.org/wiki/Duolingo",
+      "status": 200,
+      "fetched_at": 1794476074985,
+      "chars": 60000
+     },
+     {
+      "url": "https://www.wikidata.org/wiki/Special:EntityData/Q2918660.json",
+      "status": 200,
+      "fetched_at": 1794476075269,
+      "chars": 148
+     },
+     {
+      "url": "https://press.duolingo.com/",
+      "status": 200,
+      "fetched_at": 1794476075474,
+      "chars": 19
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1562088/000156208822000033/duolingo_q4-2021xshareho.htm",
+      "status": 200,
+      "fetched_at": 1794476075009,
+      "chars": 38353
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1562088/000156208822000058/duolingo_q1-2022xshareho.htm",
+      "status": 200,
+      "fetched_at": 1794476075007,
+      "chars": 27680
+     }
+    ],
+    "rejected": []
+   }
+  },
+  {
+   "case": {
+    "id": "R08",
+    "company": "Brex",
+    "site": "brex.com",
+    "role": "Data Analyst II",
+    "board": "greenhouse:brex"
+   },
+   "result": {
+    "kind": "company",
+    "status": "no_sources",
+    "ask": null,
+    "notes": [
+     "no 10-K on SEC EDGAR for Brex"
+    ],
+    "unread": [
+     "brex.com: not read, because it answered with an error (it may be paywalled or removed).",
+     "api.gdeltproject.org: not read, because it could not be reached.",
+     "SEC EDGAR has no 10-K for Brex (it may be private)."
+    ],
+    "blocker": "10 page(s) about Brex were opened, but none stated anything the brief could quote",
+    "note": "Research found nothing it could stand on: 10 page(s) about Brex were opened, but none stated anything the brief could quote. Say that plainly; do not guess."
+   },
+   "read": {
+    "verified": [
+     {
+      "url": "https://www.brex.com/",
+      "status": 200,
+      "fetched_at": 1794476097215,
+      "chars": 10863
+     },
+     {
+      "url": "https://www.brex.com/about",
+      "status": 200,
+      "fetched_at": 1794476097222,
+      "chars": 5284
+     },
+     {
+      "url": "https://www.brex.com/careers",
+      "status": 200,
+      "fetched_at": 1794476097192,
+      "chars": 6170
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/brex/jobs",
+      "status": 200,
+      "fetched_at": 1794476096611,
+      "chars": 4402
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/brex/jobs/8463702002?content=true",
+      "status": 200,
+      "fetched_at": 1794476096649,
+      "chars": 5475
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/brex/jobs/8463703002?content=true",
+      "status": 200,
+      "fetched_at": 1794476096653,
+      "chars": 5138
+     },
+     {
+      "url": "https://en.wikipedia.org/wiki/Brex",
+      "status": 200,
+      "fetched_at": 1794476097242,
+      "chars": 9828
+     },
+     {
+      "url": "https://www.wikidata.org/wiki/Special:EntityData/Q60741065.json",
+      "status": 200,
+      "fetched_at": 1794476097327,
+      "chars": 167
+     },
+     {
+      "url": "https://www.brex.com/journal/press",
+      "status": 200,
+      "fetched_at": 1794476097413,
+      "chars": 3070
+     },
+     {
+      "url": "https://www.brex.com/careers/8463702002",
+      "status": 200,
+      "fetched_at": 1794476097421,
+      "chars": 8369
+     }
+    ],
+    "rejected": [
+     {
+      "url": "https://brex.com/team",
+      "why": "http_status"
+     },
+     {
+      "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Brex%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+      "why": "unreachable"
+     }
+    ]
+   }
+  },
+  {
+   "case": {
+    "id": "R09",
+    "company": "Affirm",
+    "site": "affirm.com",
+    "role": "Software Engineer II, Fullstack",
+    "board": "greenhouse:affirm"
+   },
+   "result": {
+    "kind": "company",
+    "status": "no_sources",
+    "ask": null,
+    "notes": [],
+    "unread": [
+     "affirm.com: not read, because the site asks programs not to read it."
+    ],
+    "blocker": "11 page(s) about Affirm were opened, but none stated anything the brief could quote",
+    "note": "Research found nothing it could stand on: 11 page(s) about Affirm were opened, but none stated anything the brief could quote. Say that plainly; do not guess."
+   },
+   "read": {
+    "verified": [
+     {
+      "url": "https://www.affirm.com/",
+      "status": 200,
+      "fetched_at": 1794476129783,
+      "chars": 5299
+     },
+     {
+      "url": "https://www.affirm.com/about",
+      "status": 200,
+      "fetched_at": 1794476130051,
+      "chars": 4951
+     },
+     {
+      "url": "https://www.affirm.com/careers",
+      "status": 200,
+      "fetched_at": 1794476130093,
+      "chars": 8112
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/affirm/jobs",
+      "status": 200,
+      "fetched_at": 1794476129559,
+      "chars": 3873
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/affirm/jobs/7981723003?content=true",
+      "status": 200,
+      "fetched_at": 1794476129582,
+      "chars": 5076
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/affirm/jobs/7981725003?content=true",
+      "status": 200,
+      "fetched_at": 1794476129578,
+      "chars": 5312
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1820953/000162828026059279/afrm-20260630.htm",
+      "status": 200,
+      "fetched_at": 1794476130228,
+      "chars": 60000
+     },
+     {
+      "url": "https://en.wikipedia.org/wiki/Affirm_Holdings",
+      "status": 200,
+      "fetched_at": 1794476130117,
+      "chars": 39437
+     },
+     {
+      "url": "https://www.wikidata.org/wiki/Special:EntityData/Q65085822.json",
+      "status": 200,
+      "fetched_at": 1794476130189,
+      "chars": 176
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1820953/000162828026059279/insidertradingpolicyex191.htm",
+      "status": 200,
+      "fetched_at": 1794476130191,
+      "chars": 24908
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1820953/000110465920128032/tm2026663d8_ex10-7.htm",
+      "status": 200,
+      "fetched_at": 1794476130245,
+      "chars": 60000
+     }
+    ],
+    "rejected": [
+     {
+      "url": "https://affirm.com/press",
+      "why": "robots_disallow"
+     }
+    ]
+   }
+  },
+  {
+   "case": {
+    "id": "R10",
+    "company": "Gusto",
+    "site": "gusto.com",
+    "role": "Data Scientist, Risk",
+    "board": "greenhouse:gusto"
+   },
+   "result": {
+    "kind": "company",
+    "status": "ok",
+    "format": "inline",
+    "company": "Gusto",
+    "role": "Data Scientist, Risk",
+    "ask": null,
+    "focus": "all",
+    "audience": null,
+    "title": "Gusto: Data Scientist, Risk interview brief",
+    "frame": {
+     "text": "Read Gusto as a payroll-and-money-movement platform for small businesses, where the Risk data scientist's job is to model and experiment on fraud and risk without adding friction for the customers it serves.",
+     "cite": [
+      2,
+      1
+     ]
+    },
+    "business": [],
+    "developments": [
+     {
+      "text": "Gusto acquired Mosey, which helps businesses comply with multi-state payroll and employment regulations.",
+      "cite": [
+       1
+      ],
+      "date": "Apr 2026",
+      "measure": null
+     }
+    ],
+    "competitors": [],
+    "role_asks": [],
+    "questions": [],
+    "unknowns": [
+     "The size, structure and current priorities of the Risk data science team.",
+     "Which fraud or risk problems (for example payments versus onboarding) this hire would start on.",
+     "How the Guideline and Mosey acquisitions change the risk work."
+    ],
+    "sources": [
+     {
+      "n": 1,
+      "url": "https://en.wikipedia.org/wiki/Gusto%2C_Inc.",
+      "title": "Gusto, Inc. - Wikipedia",
+      "fetched_at": "2026-11-12T09:35:52.841Z",
+      "by": "reported"
+     },
+     {
+      "n": 2,
+      "url": "https://boards-api.greenhouse.io/v1/boards/gusto/jobs/7656216?content=true",
+      "title": "Data Scientist, Risk: posting on Gusto, Inc.'s Greenhouse board",
+      "fetched_at": "2026-11-12T09:35:52.817Z",
+      "by": "reported"
+     }
+    ],
+    "products": [],
+    "project": {
+     "ties": [],
+     "missing": "No confirmed facts about your projects yet. Confirm one project (what you built, with which tools, at what scale) and this section ties it to the role."
+    },
+    "five": [
+     {
+      "label": "The frame",
+      "text": "Read Gusto as a payroll-and-money-movement platform for small businesses, where the Risk data scientist's job is to model and experiment on fraud and risk without adding friction for the customers it serves.",
+      "cite": [
+       2,
+       1
+      ]
+     },
+     {
+      "label": "One number, correctly named",
+      "text": "Apr 2026: Gusto acquired Mosey, which helps businesses comply with multi-state payroll and employment regulations.",
+      "cite": [
+       1
+      ]
+     },
+     {
+      "label": "Your example",
+      "text": "Not confirmed yet: see how to use your project, above."
+     }
+    ],
+    "wanted": null,
+    "unread": [
+     "gusto.com: not read, because the site asks programs not to read it.",
+     "api.gdeltproject.org: not read, because it could not be reached.",
+     "SEC EDGAR has no 10-K for Gusto (it may be private)."
+    ],
+    "file_url": null,
+    "dropped": 21,
+    "notes": [
+     "no 10-K on SEC EDGAR for Gusto",
+     "answered in chat, as the person asked"
+    ],
+    "note": "The person asked for the answer in chat. Write three to five short sentences from the lines above only: what the company does and what someone in this role would work on, each sentence ending with its source numbers like [1]. Write no link, no question list and no source list: code adds the interview questions, what the sources cannot establish and the numbered sources after your text."
+   },
+   "read": {
+    "verified": [
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/gusto/jobs",
+      "status": 200,
+      "fetched_at": 1794476152789,
+      "chars": 5485
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/gusto/jobs/7656216?content=true",
+      "status": 200,
+      "fetched_at": 1794476152817,
+      "chars": 6129
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/gusto/jobs/8282084?content=true",
+      "status": 200,
+      "fetched_at": 1794476152816,
+      "chars": 6131
+     },
+     {
+      "url": "https://en.wikipedia.org/wiki/Gusto%2C_Inc.",
+      "status": 200,
+      "fetched_at": 1794476152841,
+      "chars": 11730
+     },
+     {
+      "url": "https://www.wikidata.org/wiki/Special:EntityData/Q20540697.json",
+      "status": 200,
+      "fetched_at": 1794476152918,
+      "chars": 178
+     },
+     {
+      "url": "https://api.github.com/orgs/gusto",
+      "status": 200,
+      "fetched_at": 1794476152852,
+      "chars": 123
+     }
+    ],
+    "rejected": [
+     {
+      "url": "https://gusto.com/",
+      "why": "robots_disallow"
+     },
+     {
+      "url": "https://gusto.com/about",
+      "why": "robots_disallow"
+     },
+     {
+      "url": "https://gusto.com/careers",
+      "why": "robots_disallow"
+     },
+     {
+      "url": "https://gusto.com/press",
+      "why": "robots_disallow"
+     },
+     {
+      "url": "https://gusto.com/team",
+      "why": "robots_disallow"
+     },
+     {
+      "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Gusto%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+      "why": "unreachable"
+     }
+    ]
+   }
+  },
+  {
+   "case": {
+    "id": "R11",
+    "company": "Discord",
+    "site": "discord.com",
+    "role": "Strategic Finance Analyst",
+    "board": "greenhouse:discord"
+   },
+   "result": {
+    "kind": "company",
+    "status": "no_sources",
+    "ask": null,
+    "notes": [
+     "no 10-K on SEC EDGAR for Discord"
+    ],
+    "unread": [
+     "discord.com: not read, because it answered with an error (it may be paywalled or removed).",
+     "api.gdeltproject.org: not read, because it could not be reached.",
+     "SEC EDGAR has no 10-K for Discord (it may be private)."
+    ],
+    "blocker": "8 page(s) about Discord were opened, but none stated anything the brief could quote",
+    "note": "Research found nothing it could stand on: 8 page(s) about Discord were opened, but none stated anything the brief could quote. Say that plainly; do not guess."
+   },
+   "read": {
+    "verified": [
+     {
+      "url": "https://discord.com/",
+      "status": 200,
+      "fetched_at": 1794476185706,
+      "chars": 4225
+     },
+     {
+      "url": "https://discord.com/careers",
+      "status": 200,
+      "fetched_at": 1794476185734,
+      "chars": 11139
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/discord/jobs",
+      "status": 200,
+      "fetched_at": 1794476185666,
+      "chars": 3914
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/discord/jobs/8865033002?content=true",
+      "status": 200,
+      "fetched_at": 1794476185662,
+      "chars": 5173
+     },
+     {
+      "url": "https://en.wikipedia.org/wiki/Discord",
+      "status": 200,
+      "fetched_at": 1794476185633,
+      "chars": 60000
+     },
+     {
+      "url": "https://www.wikidata.org/wiki/Special:EntityData/Q22907849.json",
+      "status": 200,
+      "fetched_at": 1794476186149,
+      "chars": 184
+     },
+     {
+      "url": "https://api.github.com/orgs/discord",
+      "status": 200,
+      "fetched_at": 1794476186010,
+      "chars": 380
+     },
+     {
+      "url": "https://job-boards.greenhouse.io/discord",
+      "status": 200,
+      "fetched_at": 1794476186153,
+      "chars": 3314
+     }
+    ],
+    "rejected": [
+     {
+      "url": "https://discord.com/about",
+      "why": "http_status"
+     },
+     {
+      "url": "https://discord.com/press",
+      "why": "http_status"
+     },
+     {
+      "url": "https://discord.com/team",
+      "why": "http_status"
+     },
+     {
+      "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Discord%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+      "why": "unreachable"
+     }
+    ]
+   }
+  },
+  {
+   "case": {
+    "id": "R12",
+    "company": "Dropbox",
+    "site": "dropbox.com",
+    "role": "Full Stack Product Software Engineer",
+    "board": "greenhouse:dropbox"
+   },
+   "result": {
+    "kind": "company",
+    "status": "no_sources",
+    "ask": null,
+    "notes": [],
+    "unread": [
+     "dropbox.com: not read, because it answered with an error (it may be paywalled or removed).",
+     "dropbox.com: not read, because it could not be reached."
+    ],
+    "blocker": "10 page(s) about Dropbox were opened, but none stated anything the brief could quote",
+    "note": "Research found nothing it could stand on: 10 page(s) about Dropbox were opened, but none stated anything the brief could quote. Say that plainly; do not guess."
+   },
+   "read": {
+    "verified": [
+     {
+      "url": "https://www.dropbox.com/",
+      "status": 200,
+      "fetched_at": 1794476220938,
+      "chars": 5301
+     },
+     {
+      "url": "https://www.dropbox.com/about",
+      "status": 200,
+      "fetched_at": 1794476220912,
+      "chars": 8292
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/dropbox/jobs",
+      "status": 200,
+      "fetched_at": 1794476220043,
+      "chars": 4503
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/dropbox/jobs/7172839?content=true",
+      "status": 200,
+      "fetched_at": 1794476220038,
+      "chars": 2762
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/dropbox/jobs/6449729?content=true",
+      "status": 200,
+      "fetched_at": 1794476220049,
+      "chars": 2903
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1467623/000146762326000008/dbx-20251231.htm",
+      "status": 200,
+      "fetched_at": 1794476221127,
+      "chars": 60000
+     },
+     {
+      "url": "https://en.wikipedia.org/wiki/Dropbox",
+      "status": 200,
+      "fetched_at": 1794476220969,
+      "chars": 60000
+     },
+     {
+      "url": "https://www.wikidata.org/wiki/Special:EntityData/Q142539.json",
+      "status": 200,
+      "fetched_at": 1794476221142,
+      "chars": 193
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1467623/000146762325000060/exhibit101-q125.htm",
+      "status": 200,
+      "fetched_at": 1794476221135,
+      "chars": 12785
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1467623/000146762325000011/exhibit191-q424.htm",
+      "status": 200,
+      "fetched_at": 1794476221254,
+      "chars": 17219
+     }
+    ],
+    "rejected": [
+     {
+      "url": "https://dropbox.com/careers",
+      "why": "http_status"
+     },
+     {
+      "url": "https://dropbox.com/press",
+      "why": "unreachable"
+     }
+    ]
+   }
+  },
+  {
+   "case": {
+    "id": "R13",
+    "company": "Chime",
+    "site": "chime.com",
+    "role": "Software Engineer, Financial Platform",
+    "board": "greenhouse:chime"
+   },
+   "result": {
+    "kind": "company",
+    "status": "ok",
+    "format": "inline",
+    "company": "Chime",
+    "role": "Software Engineer, Financial Platform",
+    "ask": null,
+    "focus": "all",
+    "audience": null,
+    "title": "Chime: Software Engineer, Financial Platform interview brief",
+    "frame": {
+     "text": "Read Chime as a fee-free consumer fintech that relies on partner banks, where this role builds the core platform for moving members' money and must keep it fast, secure and auditable.",
+     "cite": [
+      1,
+      2
+     ]
+    },
+    "business": [],
+    "developments": [],
+    "competitors": [],
+    "role_asks": [
+     {
+      "text": "The platform must be lightning-fast, available, secure, resilient and auditable.",
+      "cite": [
+       1
+      ]
+     }
+    ],
+    "questions": [],
+    "unknowns": [
+     "How the financial platform team is structured and who it reports to.",
+     "What the on-call load is actually like in practice.",
+     "How the new platform relates to existing systems or the partner banks' systems.",
+     "What the interview process and hiring odds look like."
+    ],
+    "sources": [
+     {
+      "n": 1,
+      "url": "https://boards-api.greenhouse.io/v1/boards/chime/jobs/8594959002?content=true",
+      "title": "Software Engineer, Financial Platform: posting on Chime Financial, Inc's Greenhouse board",
+      "fetched_at": "2026-11-12T09:37:33.554Z",
+      "by": "reported"
+     },
+     {
+      "n": 2,
+      "url": "https://en.wikipedia.org/wiki/Chime_(company)",
+      "title": "Chime (company) - Wikipedia",
+      "fetched_at": "2026-11-12T09:37:33.595Z",
+      "by": "reported"
+     }
+    ],
+    "products": [],
+    "project": {
+     "ties": [],
+     "missing": "No confirmed facts about your projects yet. Confirm one project (what you built, with which tools, at what scale) and this section ties it to the role."
+    },
+    "five": [
+     {
+      "label": "The frame",
+      "text": "Read Chime as a fee-free consumer fintech that relies on partner banks, where this role builds the core platform for moving members' money and must keep it fast, secure and auditable.",
+      "cite": [
+       1,
+       2
+      ]
+     },
+     {
+      "label": "Your example",
+      "text": "Not confirmed yet: see how to use your project, above."
+     }
+    ],
+    "wanted": null,
+    "unread": [
+     "chime.com: not read, because the site asks programs not to read it.",
+     "api.gdeltproject.org: not read, because it could not be reached.",
+     "SEC EDGAR has no 10-K for Chime (it may be private)."
+    ],
+    "file_url": null,
+    "dropped": 16,
+    "notes": [
+     "no 10-K on SEC EDGAR for Chime",
+     "answered in chat, as the person asked"
+    ],
+    "note": "The person asked for the answer in chat. Write three to five short sentences from the lines above only: what the company does and what someone in this role would work on, each sentence ending with its source numbers like [1]. Write no link, no question list and no source list: code adds the interview questions, what the sources cannot establish and the numbered sources after your text."
+   },
+   "read": {
+    "verified": [
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/chime/jobs",
+      "status": 200,
+      "fetched_at": 1794476253514,
+      "chars": 5066
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/chime/jobs/8594959002?content=true",
+      "status": 200,
+      "fetched_at": 1794476253554,
+      "chars": 6170
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/chime/jobs/8840193002?content=true",
+      "status": 200,
+      "fetched_at": 1794476253570,
+      "chars": 6153
+     },
+     {
+      "url": "https://en.wikipedia.org/wiki/Chime_(company)",
+      "status": 200,
+      "fetched_at": 1794476253595,
+      "chars": 24482
+     },
+     {
+      "url": "https://www.wikidata.org/wiki/Special:EntityData/Q85752013.json",
+      "status": 200,
+      "fetched_at": 1794476253663,
+      "chars": 176
+     },
+     {
+      "url": "https://api.github.com/orgs/chime",
+      "status": 200,
+      "fetched_at": 1794476253604,
+      "chars": 234
+     }
+    ],
+    "rejected": [
+     {
+      "url": "https://chime.com/",
+      "why": "robots_disallow"
+     },
+     {
+      "url": "https://chime.com/about",
+      "why": "robots_disallow"
+     },
+     {
+      "url": "https://chime.com/careers",
+      "why": "robots_disallow"
+     },
+     {
+      "url": "https://chime.com/press",
+      "why": "robots_disallow"
+     },
+     {
+      "url": "https://chime.com/team",
+      "why": "robots_disallow"
+     },
+     {
+      "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Chime%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+      "why": "unreachable"
+     }
+    ]
+   }
+  },
+  {
+   "case": {
+    "id": "R14",
+    "company": "Toast",
+    "site": "toasttab.com",
+    "role": "Software Engineer II, Frontend",
+    "board": "greenhouse:toast"
+   },
+   "result": {
+    "kind": "company",
+    "status": "no_sources",
+    "ask": null,
+    "notes": [],
+    "unread": [
+     "toasttab.com: not read, because the site asks programs not to read it.",
+     "api.gdeltproject.org: not read, because it could not be reached.",
+     "Wikipedia has no company article found for Toast."
+    ],
+    "blocker": "6 page(s) about Toast were opened, but none stated anything the brief could quote",
+    "note": "Research found nothing it could stand on: 6 page(s) about Toast were opened, but none stated anything the brief could quote. Say that plainly; do not guess."
+   },
+   "read": {
+    "verified": [
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/toast/jobs",
+      "status": 200,
+      "fetched_at": 1794476283027,
+      "chars": 4564
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/toast/jobs/8223599?content=true",
+      "status": 200,
+      "fetched_at": 1794476283042,
+      "chars": 6155
+     },
+     {
+      "url": "https://boards-api.greenhouse.io/v1/boards/toast/jobs/8230767?content=true",
+      "status": 200,
+      "fetched_at": 1794476283049,
+      "chars": 6132
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1650164/000165016426000057/tost-20251231.htm",
+      "status": 200,
+      "fetched_at": 1794476283424,
+      "chars": 60000
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1650164/000165016422000027/tost-20220331xexhibit991.htm",
+      "status": 200,
+      "fetched_at": 1794476283431,
+      "chars": 24549
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1650164/000165016426000162/tost-20260630xexhibit991.htm",
+      "status": 200,
+      "fetched_at": 1794476283389,
+      "chars": 31977
+     }
+    ],
+    "rejected": [
+     {
+      "url": "https://toasttab.com/",
+      "why": "robots_disallow"
+     },
+     {
+      "url": "https://toasttab.com/about",
+      "why": "robots_disallow"
+     },
+     {
+      "url": "https://toasttab.com/careers",
+      "why": "robots_disallow"
+     },
+     {
+      "url": "https://toasttab.com/press",
+      "why": "robots_disallow"
+     },
+     {
+      "url": "https://toasttab.com/team",
+      "why": "robots_disallow"
+     },
+     {
+      "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Toast%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+      "why": "unreachable"
+     }
+    ]
+   }
+  },
+  {
+   "case": {
+    "id": "R15",
+    "company": "Palantir",
+    "site": "palantir.com",
+    "role": "Software Engineer, New Grad",
+    "board": "lever:palantir"
+   },
+   "result": {
+    "kind": "company",
+    "status": "no_sources",
+    "ask": null,
+    "notes": [
+     "no 10-K on SEC EDGAR for Palantir",
+     "Not used for Palantir: the SmartRecruiters job board \"palantir\" (Lever \"palantir\" is the one that links the company's site)."
+    ],
+    "unread": [
+     "api.gdeltproject.org: not read, because it could not be reached.",
+     "SEC EDGAR has no 10-K for Palantir (it may be private)."
+    ],
+    "blocker": "10 page(s) about Palantir were opened, but none stated anything the brief could quote",
+    "note": "Research found nothing it could stand on: 10 page(s) about Palantir were opened, but none stated anything the brief could quote. Say that plainly; do not guess."
+   },
+   "read": {
+    "verified": [
+     {
+      "url": "https://www.palantir.com/",
+      "status": 200,
+      "fetched_at": 1794476321335,
+      "chars": 28
+     },
+     {
+      "url": "https://www.palantir.com/about",
+      "status": 200,
+      "fetched_at": 1794476321341,
+      "chars": 27
+     },
+     {
+      "url": "https://www.palantir.com/careers",
+      "status": 200,
+      "fetched_at": 1794476321342,
+      "chars": 20
+     },
+     {
+      "url": "https://api.lever.co/v0/postings/palantir?mode=json",
+      "status": 200,
+      "fetched_at": 1794476321282,
+      "chars": 3916
+     },
+     {
+      "url": "https://en.wikipedia.org/wiki/Palantir",
+      "status": 200,
+      "fetched_at": 1794476321077,
+      "chars": 60000
+     },
+     {
+      "url": "https://www.wikidata.org/wiki/Special:EntityData/Q2047336.json",
+      "status": 200,
+      "fetched_at": 1794476321210,
+      "chars": 337
+     },
+     {
+      "url": "https://www.palantir.com/404",
+      "status": 200,
+      "fetched_at": 1794476321738,
+      "chars": 12
+     },
+     {
+      "url": "https://api.github.com/orgs/palantir",
+      "status": 200,
+      "fetched_at": 1794476321373,
+      "chars": 145
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1321655/000132165525000059/fy2024palantirarsa.htm",
+      "status": 200,
+      "fetched_at": 1794476321518,
+      "chars": 60000
+     },
+     {
+      "url": "https://www.palantir.com/docs/foundry/platform-overview/overview",
+      "status": 200,
+      "fetched_at": 1794476321957,
+      "chars": 21440
+     }
+    ],
+    "rejected": [
+     {
+      "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Palantir%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+      "why": "unreachable"
+     }
+    ]
+   }
+  },
+  {
+   "case": {
+    "id": "R16",
+    "company": "Spotify",
+    "site": "spotify.com",
+    "role": "Data Scientist",
+    "board": "lever:spotify"
+   },
+   "result": {
+    "kind": "company",
+    "status": "ok",
+    "format": "inline",
+    "company": "Spotify",
+    "role": "Data Scientist",
+    "ask": null,
+    "focus": "all",
+    "audience": null,
+    "title": "Spotify: Data Scientist interview brief",
+    "frame": {
+     "text": "My reading: for this role, think of Spotify as a freemium subscription and ad business where a data scientist's job is to turn experiments and forecasts into growth and payments recommendations for senior leaders.",
+     "cite": [
+      3,
+      1
+     ]
+    },
+    "business": [],
+    "developments": [],
+    "competitors": [],
+    "role_asks": [
+     {
+      "text": "The role uses data analysis, experimentation and statistical modeling to assess and launch initiatives and features focused on payments and payments fraud.",
+      "cite": [
+       1
+      ]
+     }
+    ],
+    "questions": [
+     {
+      "area": "content licensing",
+      "a": "Growing the free and Premium user base",
+      "b": "Paying royalties to rights holders for content",
+      "text": "Your team is working on content licensing. How do you decide between Growing the free and Premium user base and Paying royalties to rights holders for content?",
+      "cite": [
+       2,
+       3
+      ]
+     }
+    ],
+    "unknowns": [
+     "Who is on the Business Analytics team and who you would report to; these pages do not say.",
+     "How the team's work is prioritised, or what the team did in the past year.",
+     "What the interview process involves or how many candidates are in it.",
+     "Which specific payments markets or products the role would focus on first."
+    ],
+    "sources": [
+     {
+      "n": 1,
+      "url": "https://jobs.lever.co/spotify/b4f6cd01-1d5d-41a9-b287-6d10416da03c",
+      "title": "Spotify - Data Scientist - Business Analytics",
+      "fetched_at": "2026-11-12T09:39:16.516Z",
+      "by": "reported"
+     },
+     {
+      "n": 2,
+      "url": "https://www.sec.gov/Archives/edgar/data/1639920/000162828026066889/spot-20260930x6xk.htm",
+      "title": "Document",
+      "fetched_at": "2026-11-12T09:39:16.321Z",
+      "by": "reported",
+      "limit": "paywalled"
+     },
+     {
+      "n": 3,
+      "url": "https://en.wikipedia.org/wiki/Spotify",
+      "title": "Spotify - Wikipedia",
+      "fetched_at": "2026-11-12T09:39:15.605Z",
+      "by": "reported"
+     }
+    ],
+    "products": [],
+    "project": {
+     "ties": [],
+     "missing": "No confirmed facts about your projects yet. Confirm one project (what you built, with which tools, at what scale) and this section ties it to the role."
+    },
+    "five": [
+     {
+      "label": "The frame",
+      "text": "My reading: for this role, think of Spotify as a freemium subscription and ad business where a data scientist's job is to turn experiments and forecasts into growth and payments recommendations for senior leaders.",
+      "cite": [
+       3,
+       1
+      ]
+     },
+     {
+      "label": "Your example",
+      "text": "Not confirmed yet: see how to use your project, above."
+     },
+     {
+      "label": "Your first question",
+      "text": "Your team is working on content licensing. How do you decide between Growing the free and Premium user base and Paying royalties to rights holders for content?",
+      "cite": [
+       2,
+       3
+      ]
+     }
+    ],
+    "wanted": null,
+    "unread": [
+     "spotify.com: not read, because it redirected too many times.",
+     "spotify.com: not read, because its address changed while it was being read, so it was set aside.",
+     "api.gdeltproject.org: not read, because it could not be reached.",
+     "SEC EDGAR has no 10-K for Spotify (it may be private)."
+    ],
+    "file_url": null,
+    "dropped": 18,
+    "notes": [
+     "no 10-K on SEC EDGAR for Spotify",
+     "answered in chat, as the person asked"
+    ],
+    "note": "The person asked for the answer in chat. Write three to five short sentences from the lines above only: what the company does and what someone in this role would work on, each sentence ending with its source numbers like [1]. Write no link, no question list and no source list: code adds the interview questions, what the sources cannot establish and the numbered sources after your text."
+   },
+   "read": {
+    "verified": [
+     {
+      "url": "https://open.spotify.com/",
+      "status": 200,
+      "fetched_at": 1794476356232,
+      "chars": 70
+     },
+     {
+      "url": "https://api.lever.co/v0/postings/spotify?mode=json",
+      "status": 200,
+      "fetched_at": 1794476355656,
+      "chars": 3859
+     },
+     {
+      "url": "https://en.wikipedia.org/wiki/Spotify",
+      "status": 200,
+      "fetched_at": 1794476355605,
+      "chars": 60000
+     },
+     {
+      "url": "https://www.wikidata.org/wiki/Special:EntityData/Q689141.json",
+      "status": 200,
+      "fetched_at": 1794476355770,
+      "chars": 178
+     },
+     {
+      "url": "https://api.github.com/orgs/spotify",
+      "status": 200,
+      "fetched_at": 1794476356272,
+      "chars": 202
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1639920/000162828026066889/spot-20260930x6xk.htm",
+      "status": 200,
+      "fetched_at": 1794476356321,
+      "chars": 60000
+     },
+     {
+      "url": "https://jobs.lever.co/spotify/b4f6cd01-1d5d-41a9-b287-6d10416da03c",
+      "status": 200,
+      "fetched_at": 1794476356516,
+      "chars": 4384
+     }
+    ],
+    "rejected": [
+     {
+      "url": "https://spotify.com/about",
+      "why": "too_many_redirects"
+     },
+     {
+      "url": "https://spotify.com/careers",
+      "why": "address_changed"
+     },
+     {
+      "url": "https://spotify.com/press",
+      "why": "too_many_redirects"
+     },
+     {
+      "url": "https://spotify.com/team",
+      "why": "too_many_redirects"
+     },
+     {
+      "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Spotify%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+      "why": "unreachable"
+     }
+    ]
+   }
+  },
+  {
+   "case": {
+    "id": "R17",
+    "company": "Ramp",
+    "site": "ramp.com",
+    "role": "Software Engineer, Engineering Platform",
+    "board": "ashby:ramp"
+   },
+   "result": {
+    "kind": "company",
+    "status": "ok",
+    "format": "inline",
+    "company": "Ramp",
+    "role": "Software Engineer, Engineering Platform",
+    "ask": null,
+    "focus": "all",
+    "audience": null,
+    "title": "Ramp: Software Engineer, Engineering Platform interview brief",
+    "frame": {
+     "text": "My reading: Ramp is a fast-growing finance-automation platform that sells cards plus software to 85,000 businesses, so an engineering-platform role likely exists to keep many product teams shipping quickly and safely. Note that no PAGE is the Engineering Platform role posting itself.",
+     "cite": [
+      2,
+      3
+     ]
+    },
+    "business": [],
+    "developments": [
+     {
+      "text": "Ramp raised $750M at a $44B valuation, led by ICONIQ Growth, GIC and the Ontario Teachers' Pension Plan.",
+      "cite": [
+       1
+      ],
+      "date": "Jun 2026",
+      "measure": null
+     }
+    ],
+    "competitors": [],
+    "role_asks": [],
+    "questions": [],
+    "unknowns": [
+     "Which team the Engineering Platform role sits on and what it owns day to day, since no page describes that posting.",
+     "Team size, on-call load and engineering culture beyond the careers page's 'only hire builders' framing.",
+     "Interview process and hiring odds for this role."
+    ],
+    "sources": [
+     {
+      "n": 1,
+      "url": "https://en.wikipedia.org/wiki/Ramp_(company)",
+      "title": "Ramp (company) - Wikipedia",
+      "fetched_at": "2026-11-12T09:39:51.803Z",
+      "by": "reported"
+     },
+     {
+      "n": 2,
+      "url": "https://ramp.com/",
+      "title": "Spend Management, Corporate Cards & Accounts Payable Solutions | Ramp",
+      "fetched_at": "2026-11-12T09:39:53.854Z",
+      "by": "company"
+     },
+     {
+      "n": 3,
+      "url": "https://ramp.com/careers",
+      "title": "Careers - Change How Businesses Run | Ramp",
+      "fetched_at": "2026-11-12T09:39:54.187Z",
+      "by": "company"
+     }
+    ],
+    "products": [],
+    "project": {
+     "ties": [],
+     "missing": "No confirmed facts about your projects yet. Confirm one project (what you built, with which tools, at what scale) and this section ties it to the role."
+    },
+    "five": [
+     {
+      "label": "The frame",
+      "text": "My reading: Ramp is a fast-growing finance-automation platform that sells cards plus software to 85,000 businesses, so an engineering-platform role likely exists to keep many product teams shipping quickly and safely. Note that no PAGE is the Engineering Platform role posting itself.",
+      "cite": [
+       2,
+       3
+      ]
+     },
+     {
+      "label": "One number, correctly named",
+      "text": "Jun 2026: Ramp raised $750M at a $44B valuation, led by ICONIQ Growth, GIC and the Ontario Teachers' Pension Plan.",
+      "cite": [
+       1
+      ]
+     },
+     {
+      "label": "Your example",
+      "text": "Not confirmed yet: see how to use your project, above."
+     }
+    ],
+    "wanted": null,
+    "unread": [
+     "ramp.com: not read, because it answered with an error (it may be paywalled or removed).",
+     "ramp.com: not read, because the site asks programs not to read it.",
+     "api.gdeltproject.org: not read, because it could not be reached."
+    ],
+    "file_url": null,
+    "dropped": 18,
+    "notes": [
+     "Not used for Ramp: the Greenhouse job board \"ramp\" (Ashby \"ramp\" is the one that links the company's site).",
+     "answered in chat, as the person asked"
+    ],
+    "note": "The person asked for the answer in chat. Write three to five short sentences from the lines above only: what the company does and what someone in this role would work on, each sentence ending with its source numbers like [1]. Write no link, no question list and no source list: code adds the interview questions, what the sources cannot establish and the numbered sources after your text."
+   },
+   "read": {
+    "verified": [
+     {
+      "url": "https://ramp.com/",
+      "status": 200,
+      "fetched_at": 1794476393854,
+      "chars": 14458
+     },
+     {
+      "url": "https://ramp.com/careers",
+      "status": 200,
+      "fetched_at": 1794476394187,
+      "chars": 60000
+     },
+     {
+      "url": "https://api.ashbyhq.com/posting-api/job-board/ramp",
+      "status": 200,
+      "fetched_at": 1794476391896,
+      "chars": 3940
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/733269/000073326926000025/ramp-20260331.htm",
+      "status": 200,
+      "fetched_at": 1794476391958,
+      "chars": 60000
+     },
+     {
+      "url": "https://en.wikipedia.org/wiki/Ramp_(company)",
+      "status": 200,
+      "fetched_at": 1794476391803,
+      "chars": 10966
+     },
+     {
+      "url": "https://www.wikidata.org/wiki/Special:EntityData/Q123190361.json",
+      "status": 200,
+      "fetched_at": 1794476394281,
+      "chars": 175
+     },
+     {
+      "url": "https://ramp.com/press",
+      "status": 200,
+      "fetched_at": 1794476395956,
+      "chars": 11217
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/890784/000091068005000065/ex99-form8k01122005.txt",
+      "status": 200,
+      "fetched_at": 1794476394256,
+      "chars": 6344
+     },
+     {
+      "url": "https://ramp.com/about-us",
+      "status": 200,
+      "fetched_at": 1794476396078,
+      "chars": 14688
+     }
+    ],
+    "rejected": [
+     {
+      "url": "https://ramp.com/about",
+      "why": "http_status"
+     },
+     {
+      "url": "https://ramp.com/team",
+      "why": "robots_disallow"
+     },
+     {
+      "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Ramp%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+      "why": "unreachable"
+     }
+    ]
+   }
+  },
+  {
+   "case": {
+    "id": "R18",
+    "company": "Notion",
+    "site": "notion.so",
+    "role": "Software Engineer, Web Infrastructure",
+    "board": "ashby:notion"
+   },
+   "result": {
+    "kind": "company",
+    "status": "no_sources",
+    "ask": null,
+    "notes": [
+     "no 10-K on SEC EDGAR for Notion"
+    ],
+    "unread": [
+     "notion.so: not read, because it answered with an error (it may be paywalled or removed).",
+     "api.gdeltproject.org: not read, because it could not be reached.",
+     "jobs.ashbyhq.com: not read, because it answered with an error (it may be paywalled or removed).",
+     "forbes.com: not read, because it redirected too many times.",
+     "zapply.jobs: not read, because it redirected too many times.",
+     "Wikipedia has no company article found for Notion.",
+     "SEC EDGAR has no 10-K for Notion (it may be private)."
+    ],
+    "blocker": "5 page(s) about Notion were opened, but none stated anything the brief could quote",
+    "note": "Research found nothing it could stand on: 5 page(s) about Notion were opened, but none stated anything the brief could quote. Say that plainly; do not guess."
+   },
+   "read": {
+    "verified": [
+     {
+      "url": "https://www.notion.com/",
+      "status": 200,
+      "fetched_at": 1794476424610,
+      "chars": 2790
+     },
+     {
+      "url": "https://www.notion.com/about",
+      "status": 200,
+      "fetched_at": 1794476424696,
+      "chars": 4324
+     },
+     {
+      "url": "https://www.notion.com/careers",
+      "status": 200,
+      "fetched_at": 1794476424623,
+      "chars": 15579
+     },
+     {
+      "url": "https://api.ashbyhq.com/posting-api/job-board/notion",
+      "status": 200,
+      "fetched_at": 1794476424033,
+      "chars": 4165
+     },
+     {
+      "url": "https://softwarelore.com/companies/notion",
+      "status": 200,
+      "fetched_at": 1794476425202,
+      "chars": 11782
+     }
+    ],
+    "rejected": [
+     {
+      "url": "https://notion.so/press",
+      "why": "http_status"
+     },
+     {
+      "url": "https://notion.so/team",
+      "why": "http_status"
+     },
+     {
+      "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Notion%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+      "why": "unreachable"
+     },
+     {
+      "url": "https://jobs.ashbyhq.com/notion/6895adad-5031-4dce-9e8e-b9361d3a2850",
+      "why": "http_status"
+     },
+     {
+      "url": "https://www.forbes.com/companies/notion",
+      "why": "too_many_redirects"
+     },
+     {
+      "url": "https://zapply.jobs/jobs/8ab60c16-5583-413b-a028-024f2cc4fff4",
+      "why": "too_many_redirects"
+     }
+    ]
+   }
+  },
+  {
+   "case": {
+    "id": "R19",
+    "company": "Plaid",
+    "site": "plaid.com",
+    "role": "Data Scientist - Fraud",
+    "board": "ashby:plaid"
+   },
+   "result": {
+    "kind": "company",
+    "status": "ok",
+    "format": "inline",
+    "company": "Plaid",
+    "role": "Data Scientist - Fraud",
+    "ask": null,
+    "focus": "all",
+    "audience": null,
+    "title": "Plaid: Data Scientist - Fraud interview brief",
+    "frame": {
+     "text": "Plaid is a data network sitting between apps and banks, so fraud work there is most usefully understood as protecting a network that many fintech products rely on for connections, payments and onboarding.",
+     "cite": [
+      2,
+      1
+     ]
+    },
+    "business": [],
+    "developments": [
+     {
+      "text": "Plaid added instant payouts on the Real Time Payments network to its Transfer product.",
+      "cite": [
+       1
+      ],
+      "date": "Apr 2023",
+      "measure": null
+     }
+    ],
+    "competitors": [],
+    "role_asks": [],
+    "questions": [],
+    "unknowns": [
+     "The specific team, manager and scope of the Data Scientist - Fraud role, since the role's own posting was not in these pages.",
+     "Current fraud loss rates, model approaches and tooling used internally.",
+     "Team culture and interview structure or odds."
+    ],
+    "sources": [
+     {
+      "n": 1,
+      "url": "https://en.wikipedia.org/wiki/Plaid_Inc.",
+      "title": "Plaid Inc. - Wikipedia",
+      "fetched_at": "2026-11-12T09:40:54.699Z",
+      "by": "reported"
+     },
+     {
+      "n": 2,
+      "url": "https://plaid.com/",
+      "title": "Plaid: Enabling all companies to build fintech solutions",
+      "fetched_at": "2026-11-12T09:40:54.978Z",
+      "by": "company"
+     }
+    ],
+    "products": [],
+    "project": {
+     "ties": [],
+     "missing": "No confirmed facts about your projects yet. Confirm one project (what you built, with which tools, at what scale) and this section ties it to the role."
+    },
+    "five": [
+     {
+      "label": "The frame",
+      "text": "Plaid is a data network sitting between apps and banks, so fraud work there is most usefully understood as protecting a network that many fintech products rely on for connections, payments and onboarding.",
+      "cite": [
+       2,
+       1
+      ]
+     },
+     {
+      "label": "One number, correctly named",
+      "text": "Apr 2023: Plaid added instant payouts on the Real Time Payments network to its Transfer product.",
+      "cite": [
+       1
+      ]
+     },
+     {
+      "label": "Your example",
+      "text": "Not confirmed yet: see how to use your project, above."
+     }
+    ],
+    "wanted": null,
+    "unread": [
+     "plaid.com: not read, because it redirected too many times.",
+     "api.gdeltproject.org: not read, because it could not be reached.",
+     "SEC EDGAR has no 10-K for Plaid (it may be private)."
+    ],
+    "file_url": null,
+    "dropped": 14,
+    "notes": [
+     "no 10-K on SEC EDGAR for Plaid",
+     "answered in chat, as the person asked"
+    ],
+    "note": "The person asked for the answer in chat. Write three to five short sentences from the lines above only: what the company does and what someone in this role would work on, each sentence ending with its source numbers like [1]. Write no link, no question list and no source list: code adds the interview questions, what the sources cannot establish and the numbered sources after your text."
+   },
+   "read": {
+    "verified": [
+     {
+      "url": "https://plaid.com/",
+      "status": 200,
+      "fetched_at": 1794476454978,
+      "chars": 3634
+     },
+     {
+      "url": "https://api.ashbyhq.com/posting-api/job-board/plaid",
+      "status": 200,
+      "fetched_at": 1794476454744,
+      "chars": 3869
+     },
+     {
+      "url": "https://en.wikipedia.org/wiki/Plaid_Inc.",
+      "status": 200,
+      "fetched_at": 1794476454699,
+      "chars": 13825
+     },
+     {
+      "url": "https://www.wikidata.org/wiki/Special:EntityData/Q30610132.json",
+      "status": 200,
+      "fetched_at": 1794476454841,
+      "chars": 209
+     },
+     {
+      "url": "https://api.github.com/orgs/plaid",
+      "status": 200,
+      "fetched_at": 1794476455009,
+      "chars": 193
+     }
+    ],
+    "rejected": [
+     {
+      "url": "https://plaid.com/about",
+      "why": "too_many_redirects"
+     },
+     {
+      "url": "https://plaid.com/careers",
+      "why": "too_many_redirects"
+     },
+     {
+      "url": "https://plaid.com/press",
+      "why": "too_many_redirects"
+     },
+     {
+      "url": "https://plaid.com/team",
+      "why": "too_many_redirects"
+     },
+     {
+      "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Plaid%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+      "why": "unreachable"
+     },
+     {
+      "url": "https://plaid.com/company",
+      "why": "too_many_redirects"
+     },
+     {
+      "url": "https://plaid.com/en-eu/press",
+      "why": "too_many_redirects"
+     }
+    ]
+   }
+  },
+  {
+   "case": {
+    "id": "R20",
+    "company": "ServiceNow",
+    "site": "servicenow.com",
+    "role": "Information Security Engineer Intern",
+    "board": "smartrecruiters:servicenow"
+   },
+   "result": {
+    "kind": "company",
+    "status": "ok",
+    "format": "inline",
+    "company": "ServiceNow",
+    "role": "Information Security Engineer Intern",
+    "ask": null,
+    "focus": "all",
+    "audience": null,
+    "title": "ServiceNow: Information Security Engineer Intern interview brief",
+    "frame": {
+     "text": "My reading: ServiceNow is a workflow-platform company now adding AI and security products, so a security intern is helping protect a platform that businesses run their operations on.",
+     "cite": [
+      1
+     ]
+    },
+    "business": [],
+    "developments": [
+     {
+      "text": "ServiceNow crossed $10 billion in revenue in 2024 and grew subscription revenue at a 26% compound annual growth rate from 2020 to 2024.",
+      "cite": [
+       1
+      ],
+      "date": "2024",
+      "measure": null
+     },
+     {
+      "text": "In September 2025 ServiceNow announced a new office in West Palm Beach, Florida.",
+      "cite": [
+       1
+      ],
+      "date": "Sep 2025",
+      "measure": null
+     }
+    ],
+    "competitors": [],
+    "role_asks": [],
+    "questions": [],
+    "unknowns": [
+     "The role page itself is not in these pages, so the intern's exact duties, team and tools are unknown.",
+     "These pages do not show the team's culture, mentorship or how interns convert to full-time.",
+     "The pages do not give the competitive landscape beyond one named competitor."
+    ],
+    "sources": [
+     {
+      "n": 1,
+      "url": "https://en.wikipedia.org/wiki/ServiceNow",
+      "title": "ServiceNow - Wikipedia",
+      "fetched_at": "2026-11-12T09:41:22.222Z",
+      "by": "reported"
+     }
+    ],
+    "products": [],
+    "project": {
+     "ties": [],
+     "missing": "No confirmed facts about your projects yet. Confirm one project (what you built, with which tools, at what scale) and this section ties it to the role."
+    },
+    "five": [
+     {
+      "label": "The frame",
+      "text": "My reading: ServiceNow is a workflow-platform company now adding AI and security products, so a security intern is helping protect a platform that businesses run their operations on.",
+      "cite": [
+       1
+      ]
+     },
+     {
+      "label": "One number, correctly named",
+      "text": "2024: ServiceNow crossed $10 billion in revenue in 2024 and grew subscription revenue at a 26% compound annual growth rate from 2020 to 2024.",
+      "cite": [
+       1
+      ]
+     },
+     {
+      "label": "Your example",
+      "text": "Not confirmed yet: see how to use your project, above."
+     }
+    ],
+    "wanted": null,
+    "unread": [
+     "servicenow.com: not read, because the site asks programs not to read it."
+    ],
+    "file_url": null,
+    "dropped": 14,
+    "notes": [
+     "answered in chat, as the person asked"
+    ],
+    "note": "The person asked for the answer in chat. Write three to five short sentences from the lines above only: what the company does and what someone in this role would work on, each sentence ending with its source numbers like [1]. Write no link, no question list and no source list: code adds the interview questions, what the sources cannot establish and the numbered sources after your text."
+   },
+   "read": {
+    "verified": [
+     {
+      "url": "https://api.smartrecruiters.com/v1/companies/servicenow/postings",
+      "status": 200,
+      "fetched_at": 1794476482699,
+      "chars": 4668
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1373715/000137371526000007/now-20251231.htm",
+      "status": 200,
+      "fetched_at": 1794476482327,
+      "chars": 60000
+     },
+     {
+      "url": "https://en.wikipedia.org/wiki/ServiceNow",
+      "status": 200,
+      "fetched_at": 1794476482222,
+      "chars": 33451
+     },
+     {
+      "url": "https://www.wikidata.org/wiki/Special:EntityData/Q7455653.json",
+      "status": 200,
+      "fetched_at": 1794476482812,
+      "chars": 254
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1373715/000137371526000007/now-20251231xex211.htm",
+      "status": 200,
+      "fetched_at": 1794476482717,
+      "chars": 2170
+     },
+     {
+      "url": "https://www.sec.gov/Archives/edgar/data/1373715/000119312520213479/d81437dex992.htm",
+      "status": 200,
+      "fetched_at": 1794476482781,
+      "chars": 6598
+     },
+     {
+      "url": "https://api.github.com/orgs/servicenow",
+      "status": 200,
+      "fetched_at": 1794476482732,
+      "chars": 210
+     }
+    ],
+    "rejected": [
+     {
+      "url": "https://servicenow.com/",
+      "why": "robots_disallow"
+     },
+     {
+      "url": "https://servicenow.com/about",
+      "why": "robots_disallow"
+     },
+     {
+      "url": "https://servicenow.com/careers",
+      "why": "robots_disallow"
+     },
+     {
+      "url": "https://servicenow.com/press",
+      "why": "robots_disallow"
+     },
+     {
+      "url": "https://servicenow.com/team",
+      "why": "robots_disallow"
+     }
+    ]
+   }
+  }
+ ]
+}

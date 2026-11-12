@@ -51,7 +51,7 @@ Quote, per case:
 | Part | Basis | Cost |
 |---|---|---|
 | Web search call (`WEB_RESEARCH_SEARCHES` = 2) | One search measured $0.04364 (D-060 run 43069018220: 13,720 input + 620 output tokens + $0.01 fee) | ≈ $0.09 |
-| Draft call | ≈ 12k input tokens at $2/M, at most 1,800 output tokens at $10/M | ≈ $0.05 |
+| Draft call | ≈ 12k input tokens at $2/M, at most 4,000 output tokens at $10/M (D-070: 1,800 cut rich drafts off mid-item) | ≈ $0.05 to $0.07 (billed as used) |
 | **Total** | | **≈ $0.14 a case, ≈ $2.80 for 20** |
 
 Recommended cap: `--budget-usd 3.5`. Through the full chat turn (the brain's own call, ≈ $0.10) it would be ≈ $0.24 a case,

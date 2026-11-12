@@ -117,3 +117,27 @@ export function searchPostings(pool: any[], query: unknown, profile: any, limit 
     goal: goal ? { roles: goal.roles, places: goal.places, remote: goal.remote } : null,
   };
 }
+
+// D-070 (live-7 C1, C3: "SWE internship in Chicago or remote" returned only the Chicago posting): every word of a search must
+// match, so "chicago or remote" asked for postings in Chicago AND remote, found none, and the relaxed search dropped "remote".
+// Words joined by "or" are alternatives: the search runs once per alternative ("... chicago", "... remote") and the results
+// are merged, each posting once, taking from each alternative in turn so one place never crowds out the other.
+export function orAlternatives(query: unknown): string[] {
+  const q = String(query ?? "").replace(/\s+/g, " ").trim();
+  const m = /(?:^|\s)((?:[\w+#.-]+\s+or\s+)+[\w+#.-]+)(?=\s|$)/i.exec(q);
+  if (!m) return [q];
+  const opts = m[1].split(/\s+or\s+/i).map((x) => x.trim()).filter(Boolean);
+  if (opts.length < 2) return [q];
+  const at = q.indexOf(m[1]);
+  return [...new Set(opts.map((o) => `${q.slice(0, at)}${o}${q.slice(at + m[1].length)}`.replace(/\s+/g, " ").trim()))].slice(0, 4);
+}
+export function searchAlternatives(pool: any[], alts: string[], profile: any, limit = 10, cache?: FitCache): ReturnType<typeof searchPostings> {
+  const each = alts.map((a) => searchPostings(pool, a, profile, limit, cache));
+  if (each.length === 1) return each[0];
+  const seen = new Set<string>(), postings: SearchHit[] = [];
+  for (let k = 0; postings.length < limit && each.some((r) => k < r.postings.length); k++) {
+    for (const r of each) { const p = r.postings[k]; if (p && !seen.has(String(p.job_id)) && postings.length < limit) { seen.add(String(p.job_id)); postings.push(p); } }
+  }
+  const all = new Set(each.flatMap((r) => r.postings.map((p) => String(p.job_id))));
+  return { ...each[0], postings, total: Math.max(all.size, ...each.map((r) => r.total)), title_matches: each.reduce((n, r) => n + r.title_matches, 0) };
+}

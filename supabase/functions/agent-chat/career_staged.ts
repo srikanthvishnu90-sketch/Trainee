@@ -20,7 +20,7 @@ import { NO_CLOCK, type TurnClock } from "./turn_clock.ts";
 import { crisisReply } from "./crisis.ts";
 import { PAYLOAD_INTENTS } from "../_shared/career_reply_writer.ts";
 import { multiAsk, nonEnglishAsk, severalAsks } from "../_shared/ask_language.ts";
-import { boundaryOf, correctionOf, hypotheticalOf } from "../_shared/agent/turn_notes.ts"; // D-061 G1, G8, G9
+import { boundaryOf, correctionOf, hypotheticalOf, practiceAskOf, staleFactsOf } from "../_shared/agent/turn_notes.ts"; // D-061 G1, G8, G9; D-070
 
 type Env = { get(k: string): string | undefined };
 type Host = { runTurn(text: string, ctx: any): { intent: string | null; handler: string | null; reply?: string; contained?: boolean; result?: any }; isHostControlled(text: string, ctx: any): boolean };
@@ -467,6 +467,10 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   // D-058 ruling 3: two asks in one message are the model's, which answers both; the router keeps single asks, payload intents
   // included. The account's controls, approvals and bare replies stay code's (the same set the non-English route keeps).
   if (multiAsk(o.message) && !NON_ENGLISH_KEPT.test(intent)) return { brain: true, mode, intent, reason: "multi_part" };
+  // D-070 (G9/D-007, live-7 setup: "the 3.9 gpa on there is outdated, don't reuse it" went to the internship search and the GPA
+  // stayed in use): a message saying a stored fact of theirs is out of date is a correction of that fact, the brain's (code sets
+  // the fact aside before the model runs, career_brain.ts); what the router would have answered is its data.
+  if (!NON_ENGLISH_KEPT.test(intent) && staleFactsOf(o.message, (o.ctx as any)?.profile?.facts).length) return { brain: true, mode, intent, reason: "stale_fact_correction", router: routerAnswer(intent, probe) };
   // MIRROR-1000: a draft to a named person that the router read as a file ask, an alumni list or a missing recipient is the
   // brain's drafting turn (outreach_ask.ts namedDraftAsk).
   if (DRAFT_MISREAD.has(intent) && namedDraftAsk(o.message)) return { brain: true, mode, intent, reason: "named_draft" };
@@ -514,7 +518,7 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   // turn: it reads official sources first (research_company, research_market, each reply enforced in code: enforceCompanyReply),
   // with the file's answer as data. With web research rolled back (CAREER_KNOWLEDGE=off), the sourced file stays code's (D-007).
   if (intent === "company_intel" && has((probe.result ?? {}) as Record<string, unknown>, "company") && codeProduct(intent, probe.result) && knowledgeOn(o.env) && researchReplyOn(o.env)) return g1Brain(o, intent, probe, clock);
-  if (codeProduct(intent, probe.result)) return g1Override(o.message) || (o.ctx as any)?._whileWorking === true || (intent === "prep_brief" && !prepSessionOpen(o.ctx) && !G1_FILE_ASK.test(o.message) && G1_REQUEST.test(o.message)) ? g1Brain(o, intent, probe, clock) : { brain: false, mode, intent, reason: "code_product" };
+  if (codeProduct(intent, probe.result)) return g1Override(o.message) || (o.ctx as any)?._whileWorking === true || (intent === "prep_brief" && !prepSessionOpen(o.ctx) && !G1_FILE_ASK.test(o.message) && (G1_REQUEST.test(o.message) || practiceAskOf(o.message))) ? g1Brain(o, intent, probe, clock) : { brain: false, mode, intent, reason: "code_product" };
   return { brain: true, mode, intent, reason: "question", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
 }
 

@@ -84,7 +84,7 @@ const EVERYTHING = /\b(?:everything|all you (?:know|remember)|like everything|fu
 export function replyKind(message: string): ReplyKind {
   const t = lc(message);
   if (EVERYTHING.test(t)) return "everything";
-  if (QUESTION_ASK.test(t)) return "question";
+  if (QUESTION_ASK.test(t) || practiceAskOf(t)) return "question"; // D-070: a practice question said any way
   if (DRAFT.test(t)) return "draft";
   if (RECALL.test(t) && /\?\s*$/.test(t) && t.length <= 140) return "recall";
   return "answer";
@@ -337,4 +337,58 @@ export function shownPayNote(lines: { text: string; url: string | null }[]): str
   return "PAY THIS CONVERSATION ALREADY SHOWED (data from code: your own earlier replies, each from the posting or source it named). Where one answers this ask, use it, " +
     "with its place and naming where it came from, before or alongside any research; never say you have no figure when one of these answers it. Write no link: code puts each one's source link after your reply:\n" +
     lines.map((l) => `- ${l.text}${l.url ? ` (source: ${l.url})` : ""}`).join("\n");
+}
+
+// ------------------------------------------------------------------------------------------------ D-070 (live-7)
+// G9 / D-007 (live-7 setup: "the 3.9 gpa on there is outdated, don't reuse it" was answered as an internship search and the GPA
+// stayed confirmed, so C1 and C8 said it could still be used): a sentence that says one of the person's own stored facts is
+// out of date or must not be used again is a correction of a stored fact. Read by grammar (a staleness or do-not-use phrase in
+// the same sentence as what it names), never by a benchmark's wording (P3). Uncertainty ("might conflict", "not 100% sure") is
+// not a withdrawal.
+const STALE = /\b(?:outdated|out[- ]of[- ]date|no longer (?:true|accurate|current|right|valid|correct)|not (?:current|accurate|right|valid) any ?more|isn'?t (?:current|accurate|right) any ?more|(?:don'?t|do not|never|stop|please don'?t) (?:re-?use|use|using|put|include|list|show)\b(?: (?:it|that|this|them))?|is (?:old|stale|wrong) now)\b/;
+const sentencesOf = (t: string) => t.split(/(?<=[.!?;])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
+export function staleFactSaid(message: string): boolean { return sentencesOf(lc(message)).some((s) => STALE.test(s)); }
+export interface StoredFact { id?: unknown; kind?: unknown; text?: unknown; title?: unknown; status?: unknown; needs_confirmation?: unknown }
+// The confirmed facts a stale sentence names: by the label before its colon ("GPA: 3.9" -> "gpa"), or by a figure it carries
+// ("3.9"), said in that same sentence.
+export function staleFactsOf(message: string, facts: StoredFact[] | null | undefined): StoredFact[] {
+  const ss = sentencesOf(lc(message)).filter((s) => STALE.test(s));
+  if (!ss.length) return [];
+  const out: StoredFact[] = [];
+  for (const f of facts ?? []) {
+    if (!f || f.status === "draft" || f.needs_confirmation === true) continue;
+    const t = lc(f.title || f.text);
+    if (!t) continue;
+    const label = /^([a-z][a-z .'-]{1,30}):/.exec(t)?.[1]?.trim() ?? null;
+    const figs = (t.match(/\d+(?:\.\d+)?/g) ?? []).filter((x) => x.includes(".") || x.length >= 3);
+    const named = (s: string) => (label && new RegExp(`(?<![a-z])${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![a-z])`).test(s)) || figs.some((x) => new RegExp(`(?<![\\d.])${x.replace(/\./g, "\\.")}(?![\\d])`).test(s));
+    if (ss.some(named)) out.push(f);
+  }
+  return out;
+}
+export function staleFactNote(lines: string[]): string {
+  return "THEY SAID A FACT ON THEIR RECORD IS OUT OF DATE (code read it from their words, and code has already set it aside: it is no longer used for anything, and stays off every resume, answer and form until they give a current one): " +
+    lines.map((l) => JSON.stringify(l)).join(", ") + ". Say so in one short clause (for example that it is off their record and won't be used), never call it still on file or still usable, and answer the rest of their message.";
+}
+
+// G2 / G3 / G12 (practice item 11: practice questions ran 300 to 500 characters and reviews opened with something other than the
+// verdict): an ask for one practice or interview question, said any way ("mock interview time: one SQL question", "give me a real
+// swe interview question on graphs, just one", "harder one, same topic"), is a practice question; a message answering the
+// question Trainee just asked in a practice session is a practice answer, reviewed verdict first.
+const PRACTICE_ASK = /\b(?:quiz|drill)\s+me\b|\bask me\b[^.?!]{0,80}\b(?:question|about a time)\b|\b(?:mock|practice|behavioral|technical|coding|real)\s+(?:interview\s+)?(?:round|question|interview)\b|\b(?:one|a|an|another)\s+(?:\w+\s+){0,3}(?:interview|practice)\s+question\b|\binterview\s+time\b|\b(?:harder|tougher)\s+(?:one|question|follow[- ]?up)\b/;
+export function practiceAskOf(message: string): boolean { return PRACTICE_ASK.test(lc(message)); }
+export function practiceAnswerOf(message: string, history: Msg[]): boolean {
+  const t = lc(message);
+  if (!t || practiceAskOf(t)) return false;
+  const h = (history ?? []).filter((m) => m && typeof m.content === "string");
+  const lastA = [...h].reverse().find((m) => m.role === "assistant"), lastU = [...h].reverse().find((m) => m.role === "user");
+  if (!lastA || !lastU) return false;
+  // The question Trainee asked in answer to a practice ask (or the follow-up in a review it gave), still waiting; a message that
+  // itself asks something ("have i applied to anything yet?") is a new ask, not the answer.
+  if (/\?/.test(t)) return false;
+  return practiceAskOf(String(lastU.content)) || (/\?\s*$/.test(norm(lastA.content).replace(/https?:\/\/\S+/g, "").trim()) && practiceAnswerOf(String(lastU.content), h.slice(0, h.lastIndexOf(lastU))));
+}
+export function practiceAnswerNote(): string {
+  return "THEY ARE ANSWERING THE PRACTICE QUESTION YOU ASKED (code read it from this conversation). Your FIRST sentence is your verdict on their answer: right, partly right or wrong, and the one main reason. " +
+    "Then the single most important fix, concretely. Then at most one follow-up question, at the end. One short paragraph, about 300 to 500 characters: no headings, no numbered list, no model answer unless they asked for one.";
 }

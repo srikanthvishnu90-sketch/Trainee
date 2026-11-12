@@ -22,6 +22,7 @@ import { NO_SOURCES } from "../../research_reply.ts";
 import { contentWords, numbersIn, numEq, specifics } from "./guard.ts";
 import { agrees, figuresIn, hasPredicate, type MarketDeps, passagesFor } from "./market.ts";
 import { stripUrls } from "./reply.ts";
+import { parseDraft } from "./draft_json.ts";
 
 export const FOCI = ["all", "business", "developments", "competitors", "role", "questions"] as const;
 export type Focus = typeof FOCI[number];
@@ -150,7 +151,8 @@ const UNREAD_WHY: Record<string, string> = { http_status: "it answered with an e
   unreachable: "it could not be reached", not_text: "it had no readable text", empty: "it had no readable text", too_many_redirects: "it redirected too many times", private_address: "its address is private", not_http: "it is not a web page",
   time_budget: "the research time limit was reached before it was read", address_changed: "its address changed while it was being read, so it was set aside", blocked_site: "Trainee never reads that site" };
 
-const parse = (raw: string) => { try { return JSON.parse(raw.trim().replace(/^```(?:json)?\s*|\s*```$/g, "")); } catch { return null; } };
+// D-070: the draft as far as it is complete (draft_json.ts parseDraft): a draft cut off at its token limit keeps its whole items.
+const parse = (raw: string) => parseDraft(raw).value;
 
 export async function researchCompany(i: { company: string; role?: string | null; question: string; focus?: Focus; audience?: string | null; plan: SearchPlan; deps: MarketDeps; now: number; fileLinks?: string[]; format?: "file" | "inline"; facts?: string[] }): Promise<CompanyResult> {
   let format: "file" | "inline" = i.format === "inline" ? "inline" : "file";
@@ -184,7 +186,8 @@ export async function researchCompany(i: { company: string; role?: string | null
   // A source is numbered only when a line that cites it is kept, so a page whose lines were all dropped is never listed.
   const fact = (x: any): { text: string; page: SourcePage } | null => {
     const t = squash(x?.text), q = squash(x?.quote), p = pageOf(x?.url);
-    if (!t || t.length > 400 || !linkFree(t) || !p || q.length < 8 || !agrees(t, q, p.text) || !hasPredicate(t, p.title)) return drop();
+    // D-070: the company's own name is the subject of every line ("Coinbase operates ..." on "It operates ..."), never a new claim.
+    if (!t || t.length > 400 || !linkFree(t) || !p || q.length < 8 || !agrees(t, q, p.text, company) || !hasPredicate(t, p.title)) return drop();
     return { text: t, page: p };
   };
   const kept = (f: { text: string; page: SourcePage }): Cited => ({ text: f.text, cite: [num(f.page)] });

@@ -1,0 +1,143 @@
+{
+ "case": {
+  "id": "R08",
+  "company": "Brex",
+  "site": "brex.com",
+  "role": "Data Analyst II"
+ },
+ "plan": {
+  "queries": [
+   "Brex",
+   "Brex Data Analyst II"
+  ],
+  "companies": [
+   "Brex"
+  ],
+  "sites": [
+   "brex.com"
+  ]
+ },
+ "captured_at": "2026-11-12T07:23:48.271Z",
+ "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
+ "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
+ "search": {
+  "hits": [
+   {
+    "url": "https://brex.com/",
+    "title": "brex.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://brex.com/about",
+    "title": "brex.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://brex.com/careers",
+    "title": "brex.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/brex/jobs",
+    "title": "Greenhouse job board: brex",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/brex/jobs/8463702002?content=true",
+    "title": "Data Analyst II (Greenhouse posting)",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/brex/jobs/8463703002?content=true",
+    "title": "Data Analyst II (Greenhouse posting)",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://brex.com/press",
+    "title": "brex.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://brex.com/team",
+    "title": "brex.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Brex%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "title": "News headlines: Brex",
+    "provider": "news_rss",
+    "foundAt": 1794495600000
+   }
+  ],
+  "notes": [
+   "SEC EDGAR did not answer"
+  ],
+  "gaps": [
+   "Wikipedia has no company article found for Brex."
+  ],
+  "provider": "first_party",
+  "searches": 5
+ },
+ "read": {
+  "verified": [
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/brex/jobs",
+    "title": "Brex: Greenhouse job board",
+    "text": "The Greenhouse job board of Brex (token brex) lists 284 open roles.\n18 of the 284 open roles on Brex's Greenhouse job board (token brex) say intern, new grad, junior, associate or entry level in the title.\n78 open roles on Brex's Greenhouse job board (token brex) are in San Francisco, California, United States.\n70 open roles on Brex's Greenhouse job board (token brex) are in New York, New York, United States.\n52 open roles on Brex's Greenhouse job board (token brex) are in Seattle, Washington, United States.\n37 open roles on Brex's Greenhouse job board (token brex) are in Vancouver, British Columbia, Canada.\n26 open roles on Brex's Greenhouse job board (token brex) are in Salt Lake City, Utah, United States.\nOpen role on Brex's Greenhouse job board (token brex): Accountant Partnerships Manager, San Francisco, California, United States.\nOpen role on Brex's Greenhouse job board (token brex): Accountant Partnerships Manager, New York, New York, United States.\nOpen role on Brex's Greenhouse job board (token brex): Account Executive, Small Business, San Francisco, California, United States.\nOpen role on Brex's Greenhouse job board (token brex): Account Executive, Small Business, New York, New York, United States.\nOpen role on Brex's Greenhouse job board (token brex): Account Executive, Small Business, Salt Lake City, Utah, United States.\nOpen role on Brex's Greenhouse job board (token brex): Accounting Channel Partner Manager, San Francisco, California, United States.\nOpen role on Brex's Greenhouse job board (token brex): Accounting Partner Growth Manager, New York, New York, United States.\nOpen role on Brex's Greenhouse job board (token brex): Accounting Partner Growth Manager, San Francisco, California, United States.\nOpen role on Brex's Greenhouse job board (token brex): Account Protection Specialist, Vancouver, British Columbia, Canada.\nOpen role on Brex's Greenhouse job board (token brex): AI Engineer, Workbench, San Francisco, California, United States.\nOpen role on Brex's Greenhouse job board (token brex): Analyst, Banking Operations (Domestic), Salt Lake City, Utah, United States.\nOpen role on Brex's Greenhouse job board (token brex): Analyst, Banking Operations (Domestic), New York, New York, United States.\nOpen role on Brex's Greenhouse job board (token brex): Brand Design Manager, Growth, New York, New York, United States.\nOpen role on Brex's Greenhouse job board (token brex): Brand Design Manager, Growth, Seattle, Washington, United States.\nOpen role on Brex's Greenhouse job board (token brex): Brand Design Manager, Growth, San Francisco, California, United States.\nOpen role on Brex's Greenhouse job board (token brex): Brand Marketing Lead, New York, New York, United States; San Francisco, California, United States; Uni.\nOpen role on Brex's Greenhouse job board (token brex): Brex Rotational Program, São Paulo, São Paulo, Brazil.\nOpen role on Brex's Greenhouse job board (token brex): Brex Rotational Program, Salt Lake City, Utah, United States.\nOpen role on Brex's Greenhouse job board (token brex): Brex Rotational Program, Vancouver, British Columbia, Canada.\nOpen role on Brex's Greenhouse job board (token brex): Business Recruiter, Seattle, Washington, United States.\nOpen role on Brex's Greenhouse job board (token brex): Business Recruiter, Vancouver, British Columbia, Canada.\nOpen role on Brex's Greenhouse job board (token brex): Business Recruiter, New York, New York, United States.\nOpen role on Brex's Greenhouse job board (token brex): Business Recruiter, San Francisco, California, United States.\nOpen role on Brex's Greenhouse job board (token brex): Business Recruiter, Salt Lake City, Utah, United States.\nOpen role on Brex's Greenhouse job board (token brex): Commercial Account Executive, Salt Lake City, Utah, United States.\nOpen role on Brex's Greenhouse job board (token brex): Commercial Account Executive, San Francisco, California, United States.\nOpen role on Brex's Greenhouse job board (token brex): Commercial Account Executive, Seattle, Washington, United States.\nOpen role on Brex's Greenhouse job board (token brex): Commercial Account Executive, Vancouver, British Columbia, Canada.\nOpen role on Brex's Greenhouse job board (token brex): Commercial Account Executive, New York, New York, United States.\nOpen role on Brex's Greenhouse job board (token brex): Data Analyst II, New York, New York, United States.",
+    "requested": "https://boards-api.greenhouse.io/v1/boards/brex/jobs",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/brex/jobs/8463702002?content=true",
+    "title": "Data Analyst II: posting on Brex's Greenhouse board",
+    "text": "Posting on Brex's Greenhouse job board (token brex): Data Analyst II, New York, New York, United States.\nThe posting says: Why join us . Brex is the intelligent finance platform that enables companies to spend smarter and move faster in more than 200 markets. By combining global corporate cards and banking with intuitive spend management, bill pay, and travel software, Brex enables founders and finance teams to accelerate operations, gain real-time visibility, and control spend effortlessly. Brex’s AI-native automation and world-class service eliminate manual expense and accounting tasks for customers so they can focus on what matters most. Tens of thousands of the world's best companies run on Brex, including DoorDash, Coinbase, Robinhood, Zoom, Plaid, Reddit, and SeatGeek. Working at Brex allows you to push your limits, challenge the status quo, and collaborate with some of the brightest minds in the industry. We’re committed to building a diverse team and inclusive culture and believe your potential should only be limited by how big you can dream. We make this a reality by empowering you with the tools, resources, and support you need to grow your career. . Data at Brex . The Data organization develops insights, models, and data infrastructure for teams across Brex, including Sales, Marketing, Product, Engineering, and Operations. Our Data Scientists, Analysts, and Engineers work together to make data—and insights derived from data—a core asset across the company. What you’ll do . As a Data Analyst II (DA), you will play a central role in enhancing the operational tracking and reporting capabilities of different business teams across Brex. You will work closely with Data Scientists, Data Engineers, and partner teams to drive meaningful insights for the business through visualizations, self-service tools, and ad-hoc analyses. This is a high-impact role in a fast-paced fintech environment where your work will directly influence strategic decisions. Where you’ll work . This role will be based in our New York office. We are a hybrid environment that combines the energy and connections of being in the office with the benefits and flexibility of working from home. We currently require a minimum of three coordinated days in the office per week, Monday, Wednesday and Thursday. As a perk, we also have up to four weeks per year of fully remote work!. Responsibilities . Apply data visualization and storytelling skills in creating business intelligence solutions (such as Looker and/or Hex dashboards) that enable actionable insights. Perform ad-hoc analyses and deep dives to investigate business questions, surface trends, and provide data-driven recommendations. Develop self-service data tools and processes that empower business stakeholders to independently monitor the performance and health of their respective areas. Collaborate closely with Data Scientists and Data Engineers to identify data sources, enable data pipelines, and support the development of analytical data models that operationalize reports and dashboards. Implement and maintain rigorous data quality checks to ensure the integrity and robustness of datasets used across dashboards, reports, and analyses. Partner with various departments—including Sales, Operations, Product, and Finance—to understand their data needs and deliver tailored analyses and reporting that support strategic planning. Contribute to the automation of recurring analyses and reporting workflows using Python. Requirements . 3+ years of experience in data analytics or a related role in a professional setting. 2+ years of experience working directly with Sales, Operations, Product, or equivalent business teams. Fluency in SQL to manipulate data and perform complex analyses (CTEs, window functions, joins across large datasets). Experience with Python for data analysis, automation, or scripting. Experience with business intelligence and data visualization tools (Looker, Hex, Tableau, or similar). Strong quantitative and analytical skills with a demonstrated ability to translate data into business insights. Strong communication skills and the ability to work effectively with stakeholders across different functions and levels of technical fluency. Experience with generative AI and LLM-based tools (Claude Code, Cursor, GitHub Copilot) to perform and accelerate analyses, automated reporting, and build self-service data tools. Bonus points . Familiarity with cloud data platforms (e.g., Snowflake, BigQuery, Databricks). Familiarity with dbt for data modeling and transformation. Exposure to data pipeline orchestration tools (e.g., Airflow). Experience in fintech, financial services, or payments. Comfort operating in a fast-paced, high-growth environment with evolving priorities. Compensation . The expected salary range for this role is $93,600 - $117,000. However, the starting base pay will depend on a number of factors including the candidate’s location, skills, experience, market demands, and internal pay parity. Depending on the position offered, equity and other forms of compensation may be provided as part of a total compensation package. Brex LLC is a wholly owned subsidiary of Capital One, N.A. Please be aware, job-seekers may be at risk of targeting by malicious actors looking for personal data. Brex recruiters will only reach out via LinkedIn or email with a brex.com domain. Any outreach claiming to be from Brex via other sources should be ignored. .",
+    "requested": "https://boards-api.greenhouse.io/v1/boards/brex/jobs/8463702002?content=true",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/brex/jobs/8463703002?content=true",
+    "title": "Data Analyst II: posting on Brex's Greenhouse board",
+    "text": "Posting on Brex's Greenhouse job board (token brex): Data Analyst II, São Paulo, São Paulo, Brazil.\nThe posting says: Why join us . Brex is the intelligent finance platform that enables companies to spend smarter and move faster in more than 200 markets. By combining global corporate cards and banking with intuitive spend management, bill pay, and travel software, Brex enables founders and finance teams to accelerate operations, gain real-time visibility, and control spend effortlessly. Brex’s AI-native automation and world-class service eliminate manual expense and accounting tasks for customers so they can focus on what matters most. Tens of thousands of the world's best companies run on Brex, including DoorDash, Coinbase, Robinhood, Zoom, Plaid, Reddit, and SeatGeek. Working at Brex allows you to push your limits, challenge the status quo, and collaborate with some of the brightest minds in the industry. We’re committed to building a diverse team and inclusive culture and believe your potential should only be limited by how big you can dream. We make this a reality by empowering you with the tools, resources, and support you need to grow your career. . Data at Brex . The Data organization develops insights, models, and data infrastructure for teams across Brex, including Sales, Marketing, Product, Engineering, and Operations. Our Data Scientists, Analysts, and Engineers work together to make data—and insights derived from data—a core asset across the company. What you’ll do . As a Data Analyst II (DA), you will play a central role in enhancing the operational tracking and reporting capabilities of different business teams across Brex. You will work closely with Data Scientists, Data Engineers, and partner teams to drive meaningful insights for the business through visualizations, self-service tools, and ad-hoc analyses. This is a high-impact role in a fast-paced fintech environment where your work will directly influence strategic decisions. Where you’ll work . This role will be based in our São Paulo office. We are a hybrid environment that combines the energy and connections of being in the office with the benefits and flexibility of working from home. We currently require a minimum of three coordinated days in the office per week, Monday, Wednesday and Thursday. As a perk, we also have up to four weeks per year of fully remote work!. Responsibilities . Apply data visualization and storytelling skills in creating business intelligence solutions (such as Looker and/or Hex dashboards) that enable actionable insights. Perform ad-hoc analyses and deep dives to investigate business questions, surface trends, and provide data-driven recommendations. Develop self-service data tools and processes that empower business stakeholders to independently monitor the performance and health of their respective areas. Collaborate closely with Data Scientists and Data Engineers to identify data sources, enable data pipelines, and support the development of analytical data models that operationalize reports and dashboards. Implement and maintain rigorous data quality checks to ensure the integrity and robustness of datasets used across dashboards, reports, and analyses. Partner with various departments—including Sales, Operations, Product, and Finance—to understand their data needs and deliver tailored analyses and reporting that support strategic planning. Contribute to the automation of recurring analyses and reporting workflows using Python. Requirements . 4+ years of experience in data analytics or a related role in a professional setting. 3+ years of experience working directly with Sales, Operations, Product, or equivalent business teams. Fluency in SQL to manipulate data and perform complex analyses (CTEs, window functions, joins across large datasets). Proficiency in Python for data analysis, automation, and scripting (Pandas, NumPy, and similar libraries). Experience with business intelligence and data visualization tools (Looker, Hex, Tableau, or similar). Strong quantitative and analytical skills with a demonstrated ability to translate data into business insights. Strong communication skills and the ability to work effectively with stakeholders across different functions and levels of technical fluency. Experience with generative AI and LLM-based tools (Claude Code, Cursor, GitHub Copilot) to perform and accelerate analyses, automated reporting, and build self-service data tools. Bonus points . Familiarity with cloud data platforms (e.g., Snowflake, BigQuery, Databricks). Familiarity with dbt for data modeling and transformation. Exposure to data pipeline orchestration tools (e.g., Airflow). Experience in fintech, financial services, or payments. Comfort operating in a fast-paced, high-growth environment with evolving priorities. Brex LLC is a wholly owned subsidiary of Capital One, N.A. Please be aware, job-seekers may be at risk of targeting by malicious actors looking for personal data. Brex recruiters will only reach out via LinkedIn or email with a brex.com domain. Any outreach claiming to be from Brex via other sources should be ignored. .",
+    "requested": "https://boards-api.greenhouse.io/v1/boards/brex/jobs/8463703002?content=true",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   }
+  ],
+  "rejected": [
+   {
+    "url": "https://brex.com/",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://brex.com/about",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://brex.com/careers",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://brex.com/press",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://brex.com/team",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Brex%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "why": "unreachable"
+   }
+  ]
+ }
+}

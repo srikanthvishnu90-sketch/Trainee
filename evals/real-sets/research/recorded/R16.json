@@ -1,0 +1,115 @@
+{
+ "case": {
+  "id": "R16",
+  "company": "Spotify",
+  "site": "spotify.com",
+  "role": "Data Scientist"
+ },
+ "plan": {
+  "queries": [
+   "Spotify",
+   "Spotify Data Scientist"
+  ],
+  "companies": [
+   "Spotify"
+  ],
+  "sites": [
+   "spotify.com"
+  ]
+ },
+ "captured_at": "2026-11-12T07:24:12.242Z",
+ "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
+ "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
+ "search": {
+  "hits": [
+   {
+    "url": "https://spotify.com/",
+    "title": "spotify.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://spotify.com/about",
+    "title": "spotify.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://spotify.com/careers",
+    "title": "spotify.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://api.lever.co/v0/postings/spotify?mode=json",
+    "title": "Lever job board: spotify",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://spotify.com/press",
+    "title": "spotify.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://spotify.com/team",
+    "title": "spotify.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Spotify%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "title": "News headlines: Spotify",
+    "provider": "news_rss",
+    "foundAt": 1794495600000
+   }
+  ],
+  "notes": [
+   "SEC EDGAR did not answer"
+  ],
+  "gaps": [
+   "Wikipedia has no company article found for Spotify."
+  ],
+  "provider": "first_party",
+  "searches": 5
+ },
+ "read": {
+  "verified": [
+   {
+    "url": "https://api.lever.co/v0/postings/spotify?mode=json",
+    "title": "Lever job board token: spotify",
+    "text": "The Lever job board with the token spotify lists 85 open roles. The board does not name its company.\n1 of the 85 open roles on the Lever job board with the token spotify say intern, new grad, junior, associate or entry level in the title.\n33 open roles on the Lever job board with the token spotify are in London.\n25 open roles on the Lever job board with the token spotify are in New York, NY.\n10 open roles on the Lever job board with the token spotify are in Stockholm.\n3 open roles on the Lever job board with the token spotify are in Toronto.\n3 open roles on the Lever job board with the token spotify are in Tokyo.\nOpen role on the Lever job board with the token spotify: Account Executive - Commercial, Spotify Technology, New York, NY.\nOpen role on the Lever job board with the token spotify: Account Executive - Commercial, Spotify Technology, London.\nOpen role on the Lever job board with the token spotify: Account Executive - Commercial, Spotify Technology, Toronto.\nOpen role on the Lever job board with the token spotify: Account Executive - Enterprise, Spotify Technology, New York, NY.\nOpen role on the Lever job board with the token spotify: Analyst, Royalty Operations, Stockholm.\nOpen role on the Lever job board with the token spotify: Artist & Label Partnerships Manager - GSA (15-month fixed-term), Berlin.\nOpen role on the Lever job board with the token spotify: Associate Director, Proposition Strategy, New York, NY.\nOpen role on the Lever job board with the token spotify: Audiobook Licensing & Partnerships Manager - Japan, Tokyo.\nOpen role on the Lever job board with the token spotify: AV Engineer - Platform, Stockholm.\nOpen role on the Lever job board with the token spotify: Backend Engineer - Data Platform, Stockholm.\nOpen role on the Lever job board with the token spotify: Backend Engineer - Data Platform, Stockholm.\nOpen role on the Lever job board with the token spotify: Client Partner - Emerging & Scaled (French Speaking), London.\nOpen role on the Lever job board with the token spotify: Client Partner - Emerging & Scaled (German Speaking), London.\nOpen role on the Lever job board with the token spotify: Client Partner ANZ, Sydney.\nOpen role on the Lever job board with the token spotify: Client Partner, Emerging & Scaled, São Paulo.\nOpen role on the Lever job board with the token spotify: Communications Lead - MENAT+, Dubai.\nOpen role on the Lever job board with the token spotify: Content Marketing Manager Indonesia, Jakarta.\nOpen role on the Lever job board with the token spotify: Data Scientist - Business Analytics, London.\nOpen role on the Lever job board with the token spotify: Data Scientist - Music Mission, New York, NY.\nOpen role on the Lever job board with the token spotify: Data Scientist - Music Promotion, New York, NY.\nOpen role on the Lever job board with the token spotify: Director of Engineering - Content Platform (Catalog), London.\nOpen role on the Lever job board with the token spotify: Director of Sales - Emerging & Scaled (New Business), New York, NY.\nOpen role on the Lever job board with the token spotify: Engineering Manager - Data Platform, London.\nOpen role on the Lever job board with the token spotify: Engineering Manager - Experimentation, Stockholm.\nOpen role on the Lever job board with the token spotify: Engineering Manager - Experimentation, London.\nOpen role on the Lever job board with the token spotify: Full Stack Engineer - Music, New York, NY.\nOpen role on the Lever job board with the token spotify: Global Creative Lead, Reverb, New York, NY.\nOpen role on the Lever job board with the token spotify: Growth Lead - Japan, Tokyo.\nOpen role on the Lever job board with the token spotify: Head of Markets Strategy & Operations, Japan, Tokyo.\nOpen role on the Lever job board with the token spotify: Head of Measurement & Advertising Effectiveness, New York, NY.",
+    "requested": "https://api.lever.co/v0/postings/spotify?mode=json",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   }
+  ],
+  "rejected": [
+   {
+    "url": "https://spotify.com/",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://spotify.com/about",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://spotify.com/careers",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://spotify.com/press",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://spotify.com/team",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Spotify%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "why": "unreachable"
+   }
+  ]
+ }
+}

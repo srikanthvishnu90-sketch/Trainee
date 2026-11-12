@@ -3,7 +3,8 @@
   "id": "R14",
   "company": "Toast",
   "site": "toasttab.com",
-  "role": "Software Engineer II, Frontend"
+  "role": "Software Engineer II, Frontend",
+  "board": "greenhouse:toast"
  },
  "plan": {
   "queries": [
@@ -17,7 +18,7 @@
    "toasttab.com"
   ]
  },
- "captured_at": "2026-11-12T07:24:06.622Z",
+ "captured_at": "2026-11-12T07:53:59.042Z",
  "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
  "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
  "search": {

@@ -51,10 +51,12 @@ export function payFrom(text: unknown): string | null {
   }
   return null;
 }
-// Pay a posting states for each place, in its own words: "<City>, <Region> | (<range>)" (Workday's pay-by-location table).
+// Pay a posting states for each place, in its own words: "<City>, <Region> | (<range>)" (Workday's pay-by-location table), or
+// "<City>, <Region>: (<range>)" (D-069, real set item 13: PayPal R0137491 states "Scottsdale, Arizona: ($100,500.00 - $149,600.00
+// Annually)" with a colon, and only San Jose's range was read).
 export function paysByPlace(text: string): { place: string; pay: string }[] {
   const out: { place: string; pay: string }[] = [];
-  for (const m of String(text ?? "").matchAll(/([A-Z][A-Za-z.'-]+(?: [A-Z][A-Za-z.'-]+)*, [A-Z][A-Za-z]+(?: [A-Z][A-Za-z]+)*)\s*\|\s*\(([^()|]{3,60})\)/g)) {
+  for (const m of String(text ?? "").matchAll(/([A-Z][A-Za-z.'-]+(?: [A-Z][A-Za-z.'-]+)*, [A-Z][A-Za-z]+(?: [A-Z][A-Za-z]+)*)\s*[|:]\s*\(([^()|]{3,60})\)/g)) {
     const pay = payFrom(m[2]);
     if (pay && !out.some((x) => x.place === m[1])) out.push({ place: m[1], pay });
     if (out.length >= 12) break;

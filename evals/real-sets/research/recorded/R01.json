@@ -3,7 +3,8 @@
   "id": "R01",
   "company": "Stripe",
   "site": "stripe.com",
-  "role": "Risk Operations Analyst"
+  "role": "Risk Operations Analyst",
+  "board": "greenhouse:stripe"
  },
  "plan": {
   "queries": [
@@ -17,7 +18,7 @@
    "stripe.com"
   ]
  },
- "captured_at": "2026-11-12T07:23:29.974Z",
+ "captured_at": "2026-11-12T07:53:25.834Z",
  "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
  "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
  "search": {

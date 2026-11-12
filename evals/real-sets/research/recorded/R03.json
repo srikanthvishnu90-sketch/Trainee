@@ -3,7 +3,8 @@
   "id": "R03",
   "company": "Figma",
   "site": "figma.com",
-  "role": "Software Engineer - Machine Learning"
+  "role": "Software Engineer - Machine Learning",
+  "board": "greenhouse:figma"
  },
  "plan": {
   "queries": [
@@ -17,7 +18,7 @@
    "figma.com"
   ]
  },
- "captured_at": "2026-11-12T07:23:35.404Z",
+ "captured_at": "2026-11-12T07:53:31.092Z",
  "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
  "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
  "search": {

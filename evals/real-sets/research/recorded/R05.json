@@ -3,7 +3,8 @@
   "id": "R05",
   "company": "Coinbase",
   "site": "coinbase.com",
-  "role": "Forward Deployed Engineer, Finance"
+  "role": "Forward Deployed Engineer, Finance",
+  "board": "greenhouse:coinbase"
  },
  "plan": {
   "queries": [
@@ -17,7 +18,7 @@
    "coinbase.com"
   ]
  },
- "captured_at": "2026-11-12T07:23:40.658Z",
+ "captured_at": "2026-11-12T07:53:36.080Z",
  "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
  "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
  "search": {

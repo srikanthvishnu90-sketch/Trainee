@@ -7,7 +7,7 @@
 // Every row also carries the sha256 of its recorded file, checked against sources.json, so a changed input is caught.
 // deno-lint-ignore-file no-explicit-any
 import { CareerJobs } from "../../../supabase/functions/_shared/router_core.career.js";
-import { boardPay } from "../../../supabase/functions/_shared/career_ingest.ts";
+import { boardPay, boardPayZones, type PayZone } from "../../../supabase/functions/_shared/career_ingest.ts";
 import { plainText } from "../../../supabase/functions/_shared/posting_text.ts";
 import { parseWorkdayCxs } from "../../../supabase/functions/_shared/workday_posting.ts";
 
@@ -15,6 +15,7 @@ const HERE = new URL(".", import.meta.url).pathname;
 export interface PostingRow {
   job_id: string; provider: string; board: string; ats_id: string; title: string; company: string; location: string; url: string;
   description: string; pay: string | null; pays: { place: string; pay: string }[]; file: string; sha256: string; recorded_at: string;
+  pay_zones: PayZone[]; // D-069: every zone the board states (career_ingest.ts boardPayZones, stored in career_postings.pay_zones)
 }
 async function sha(s: string) { return [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)))].map((b) => b.toString(16).padStart(2, "0")).join(""); }
 
@@ -31,7 +32,7 @@ export async function loadPostings(): Promise<PostingRow[]> {
       const page = `https://paypal.wd1.myworkdayjobs.com/en-US/jobs${String(s.request).split("/wday/cxs/paypal/jobs")[1] ?? ""}`;
       const p = parseWorkdayCxs(raw, page);
       if (!p) throw new Error(`${s.file}: parseWorkdayCxs read no posting`);
-      rows.push({ ...base, job_id: `workday:paypal:${s.id}`, title: p.title, company: p.company ?? "PayPal", location: p.location ?? "", url: p.url, description: p.text, pay: p.pay, pays: p.pays });
+      rows.push({ ...base, job_id: `workday:paypal:${s.id}`, title: p.title, company: p.company ?? "PayPal", location: p.location ?? "", url: p.url, description: p.text, pay: p.pay, pays: p.pays, pay_zones: [] });
       continue;
     }
     const C: any = CareerJobs;
@@ -44,7 +45,7 @@ export async function loadPostings(): Promise<PostingRow[]> {
     // Greenhouse's job answer names the company (company_name); the list the normalizer expects names it as `name`.
     const company = s.provider === "greenhouse" && raw.company_name ? String(raw.company_name) : String(p.company || s.board);
     rows.push({ ...base, job_id: `${s.provider}:${s.board.toLowerCase()}:${s.id}`, title: String(p.title), company, location: String(p.location ?? ""), url: String(p.url ?? ""),
-      description: plainText(p.jd_text || ""), pay: boardPay(s.provider, raw), pays: [] });
+      description: plainText(p.jd_text || ""), pay: boardPay(s.provider, raw), pays: [], pay_zones: boardPayZones(s.provider, raw) });
   }
   return rows;
 }

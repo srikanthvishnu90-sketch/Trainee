@@ -3,7 +3,8 @@
   "id": "R09",
   "company": "Affirm",
   "site": "affirm.com",
-  "role": "Software Engineer II, Fullstack"
+  "role": "Software Engineer II, Fullstack",
+  "board": "greenhouse:affirm"
  },
  "plan": {
   "queries": [
@@ -17,7 +18,7 @@
    "affirm.com"
   ]
  },
- "captured_at": "2026-11-12T07:23:50.744Z",
+ "captured_at": "2026-11-12T07:53:46.497Z",
  "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
  "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
  "search": {

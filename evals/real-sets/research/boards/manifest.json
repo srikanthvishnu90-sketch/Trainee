@@ -1,0 +1,66 @@
+{
+ "note": "D-069: real public job-board answers recorded 2026-11-12 (public GETs, no model), for the $0 tests of findings 6 and 7 (tests/architect/d069-real-input-fixes-20261112.test.ts). Small boards are whole; a large board is its first roles, unchanged, with the full body's size, sha256 and content type, so a test can rebuild a body of the real size from real roles.",
+ "captured_at": "2026-11-12",
+ "boards": [
+  {
+   "name": "greenhouse-ramp",
+   "url": "https://boards-api.greenhouse.io/v1/boards/ramp/jobs",
+   "content_type": "application/json",
+   "full_bytes": 636,
+   "full_sha256": "bdb655c0b5c9f050ec0f9d78ced4a7da54a66dc8630287c5ba2acb44d151aa34",
+   "full_roles": 1,
+   "excerpt": "the whole recorded body",
+   "excerpt_bytes": 679
+  },
+  {
+   "name": "smartrecruiters-palantir",
+   "url": "https://api.smartrecruiters.com/v1/companies/palantir/postings",
+   "content_type": "application/json; charset=utf-8",
+   "full_bytes": 11903,
+   "full_sha256": "eb2322f6f0420efc1ca38ce0ca052ebd7a51bba27c1f7cd659c8ee70a12c0d47",
+   "full_roles": 10,
+   "excerpt": "the whole recorded body",
+   "excerpt_bytes": 12791
+  },
+  {
+   "name": "lever-palantir",
+   "url": "https://api.lever.co/v0/postings/palantir?mode=json",
+   "content_type": "application/json; charset=utf-8",
+   "full_bytes": 5900393,
+   "full_sha256": "71a22c477ac1994b9fe5c0813bb8fe2f668a2b7b20f87edaf4a73bdace1220fa",
+   "full_roles": 303,
+   "excerpt": "first 3 roles of the recorded body, unchanged",
+   "excerpt_bytes": 40438
+  },
+  {
+   "name": "ashby-ramp",
+   "url": "https://api.ashbyhq.com/posting-api/job-board/ramp",
+   "content_type": "application/json; charset=utf-8",
+   "full_bytes": 2962669,
+   "full_sha256": "920382c8c3fca8d4405789e3558dd1f5d26e0259100f975b39ac184a30c30a68",
+   "full_roles": 176,
+   "excerpt": "first 3 roles of the recorded body, unchanged",
+   "excerpt_bytes": 42279
+  },
+  {
+   "name": "ashby-notion",
+   "url": "https://api.ashbyhq.com/posting-api/job-board/notion",
+   "content_type": "application/json; charset=utf-8",
+   "full_bytes": 2892173,
+   "full_sha256": "a010d92aebd1b7af20f222376dd4488b266304b3f0c65ee07f8b15c12aef0ab6",
+   "full_roles": 157,
+   "excerpt": "first 3 roles of the recorded body, unchanged",
+   "excerpt_bytes": 47634
+  },
+  {
+   "name": "ashby-plaid",
+   "url": "https://api.ashbyhq.com/posting-api/job-board/plaid",
+   "content_type": "application/json; charset=utf-8",
+   "full_bytes": 1962735,
+   "full_sha256": "99c2a2b2a6c85323d9e3a89a54e54925aa5beb583372b629b4f9d6df16ae242a",
+   "full_roles": 143,
+   "excerpt": "first 3 roles of the recorded body, unchanged",
+   "excerpt_bytes": 36137
+  }
+ ]
+}

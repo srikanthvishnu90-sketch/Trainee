@@ -3,7 +3,8 @@
   "id": "R10",
   "company": "Gusto",
   "site": "gusto.com",
-  "role": "Data Scientist, Risk"
+  "role": "Data Scientist, Risk",
+  "board": "greenhouse:gusto"
  },
  "plan": {
   "queries": [
@@ -17,7 +18,7 @@
    "gusto.com"
   ]
  },
- "captured_at": "2026-11-12T07:23:53.234Z",
+ "captured_at": "2026-11-12T07:53:49.207Z",
  "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
  "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
  "search": {

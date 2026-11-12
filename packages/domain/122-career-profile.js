@@ -143,10 +143,52 @@ const CareerProfile = (() => {
   }
   function confirmedFacts(profile) { return (profile.facts || []).filter((f) => !f.needs_confirmation && !quarantinedFact(f)); }
   function unprovenSkills(profile) { refreshSkillFlags(profile); return (profile.facts || []).filter((f) => f.kind === "skill" && f.unproven); }
+  // D-069 (real set item 3, finding 1): a skill is named in a fact only as a whole token, or as one of its known aliases. It was a
+  // substring test, so "R" was proven by every fact with the letter r in it and "SQL" by "PostgreSQL". Case and punctuation are
+  // read: a short name (R, C, Go, ML, JS, TS) counts only as written with its capitals and never inside "R&D", "C-suite" or
+  // "Go-to-market"; "Node.js", "C++", "C#", "CI/CD" and "A/B testing" keep their punctuation; "SQL" is never "PostgreSQL" or
+  // "MySQL". Each alias group names one skill (Postgres is PostgreSQL, k8s is Kubernetes, Golang is Go).
+  const SKILL_ALIASES = [
+    ["JavaScript", "JS", "ECMAScript"], ["TypeScript", "TS"], ["PostgreSQL", "Postgres", "psql"], ["Kubernetes", "k8s"], ["Node.js", "NodeJS"],
+    ["Go", "Golang"], ["C++", "cpp"], ["C#", "csharp", "C sharp"], ["AWS", "Amazon Web Services"], ["GCP", "Google Cloud", "Google Cloud Platform"],
+    ["Machine Learning", "ML"], ["React", "React.js", "ReactJS"], ["Vue", "Vue.js", "VueJS"], ["Next.js", "NextJS"], ["CI/CD", "CICD"],
+    ["A/B Testing", "AB testing", "A/B tests", "A/B test", "split testing"], ["Excel", "Microsoft Excel", "MS Excel"], ["PowerPoint", "Microsoft PowerPoint", "MS PowerPoint"],
+    ["MongoDB", "Mongo"], ["scikit-learn", "sklearn", "scikit learn"], ["REST", "RESTful", "REST API", "REST APIs"], ["Capital IQ", "CapIQ", "S&P Capital IQ"],
+    ["Financial Modeling", "Financial Modelling"], ["Natural Language Processing", "NLP"], ["R"], ["C"], ["SQL"], ["MySQL"], ["Git"],
+  ];
+  const skillKey = (s) => String(s == null ? "" : s).toLowerCase().replace(/\s+/g, " ").trim();
+  const ALIAS_GROUP = new Map();
+  for (const g of SKILL_ALIASES) for (const f of g) ALIAS_GROUP.set(skillKey(f), g);
+  const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // The forms a skill is written in: its alias group, else the name as given.
+  function skillForms(name) {
+    const raw = String(name == null ? "" : name).trim();
+    return ALIAS_GROUP.get(skillKey(raw)) || (raw ? [raw] : []);
+  }
+  const skillKeyOf = (name) => skillKey(skillForms(name)[0] || name);
+  const WORD_NAMES = new Set(["REST", "Excel", "Spark", "Swift", "Rust", "Ruby", "Spring", "Flask", "Go", "Golang", "Express", "Ember", "Julia", "Dart", "Elixir", "Scala"]);
+  const _formRe = new Map();
+  function formRe(form) {
+    if (_formRe.has(form)) return _formRe.get(form);
+    // A name that is also an English word ("excel at", "the rest of", "spring 2024", "swift", "spark") counts only capitalized.
+    const short = (/^[A-Za-z]{1,2}$/.test(form)) || WORD_NAMES.has(form);
+    const body = escRe(form).replace(/\s+/g, "\\s+");
+    // A short name: its own capitals only (an all-lower form like "k8s" or "psql" is matched as written), and never joined to
+    // "&", "-", "'" or a dotted letter. A longer one: any case, never inside a longer word or a dotted name ("Node" in "Node.js").
+    const re = short
+      ? new RegExp(`(?<![A-Za-z0-9+#&.'\\-])${body}(?![A-Za-z0-9+#&'\\-])(?!\\.[A-Za-z0-9])`)
+      : new RegExp(`(?<![A-Za-z0-9+#])${body}(?![A-Za-z0-9+#])(?!\\.[A-Za-z0-9])`, "i");
+    _formRe.set(form, re);
+    return re;
+  }
+  function textNamesSkill(text, skillName) {
+    const t = String(text == null ? "" : text);
+    return !!t && skillForms(skillName).some((f) => formRe(f).test(t));
+  }
   function skillEvidence(profile, skillName) {
-    const name = String(skillName || "").toLowerCase();
-    const skill = (profile.facts || []).find((f) => f.kind === "skill" && (f.name || "").toLowerCase() === name);
-    const supporting = (profile.facts || []).filter((f) => !f.needs_confirmation && f.kind !== "skill" && ((f.skills || []).some((s) => String(s).toLowerCase() === name) || String(f.text || "").toLowerCase().includes(name)));
+    const name = skillKeyOf(skillName);
+    const skill = (profile.facts || []).find((f) => f.kind === "skill" && skillKeyOf(f.name || "") === name);
+    const supporting = (profile.facts || []).filter((f) => !f.needs_confirmation && f.kind !== "skill" && ((f.skills || []).some((s) => skillKeyOf(s) === name) || textNamesSkill(f.text, skillName)));
     const evidenceIds = new Set([].concat((skill && skill.evidence) || [], supporting.map((f) => f.id)));
     return { skill: skill || null, proven: evidenceIds.size > 0 && (skill ? !skill.unproven || supporting.length > 0 : supporting.length > 0), evidenceFactIds: [...evidenceIds], supportingFactIds: supporting.map((f) => f.id) };
   }
@@ -770,6 +812,6 @@ const CareerProfile = (() => {
     return receipt;
   }
 
-  return { KINDS, createProfile, profileFromData, addFact, updateFact, getFact, listFacts, confirmFact, confirmedFacts, quarantinedFact, QUARANTINE_VERSION, unprovenSkills, skillEvidence, factMiningQuestions, isThin, parseCsv, parseLinkedInConnections, parseLinkedInProfile, ingestLinkedIn, parseResumeText, parseResumeSections, ingestResume, supersedeResume, confirmationReply, fieldCorrectionOf, classifyResumeIngest, SUPPORTED_RESUME_FORMATS, refreshSkillFlags, RETENTION_DECLARATION, retentionDeclaration, previewProfileDeletion, deleteProfileData };
+  return { KINDS, createProfile, profileFromData, addFact, updateFact, getFact, listFacts, confirmFact, confirmedFacts, quarantinedFact, QUARANTINE_VERSION, unprovenSkills, skillEvidence, textNamesSkill, skillForms, factMiningQuestions, isThin, parseCsv, parseLinkedInConnections, parseLinkedInProfile, ingestLinkedIn, parseResumeText, parseResumeSections, ingestResume, supersedeResume, confirmationReply, fieldCorrectionOf, classifyResumeIngest, SUPPORTED_RESUME_FORMATS, refreshSkillFlags, RETENTION_DECLARATION, retentionDeclaration, previewProfileDeletion, deleteProfileData };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerProfile;

@@ -1277,6 +1277,16 @@ echo "== career_google_accounts.test.sql (a second Google account is added, not 
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261111120000_career_google_accounts.sql"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_google_accounts.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
 echo "  ok   rollback drops the added accounts and restores round 4's functions; up again"
+# D-069 (20261112130000): every pay zone a board states, as a structured array. Applied twice (idempotent), its shape check tested,
+# rolled back, applied again.
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261112130000_career_postings_pay_zones.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261112130000_career_postings_pay_zones.sql"
+echo "== career_postings_pay_zones.test.sql (all zones kept as an array; a non-array or an empty array refused)"
+"${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_postings_pay_zones.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
+"${QUIET[@]}" -f "$ROOT/supabase/rollbacks/20261112130000_career_postings_pay_zones.down.sql"
+[[ "$("${PSQL[@]}" -tAc "select not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'career_postings' and column_name = 'pay_zones')")" == "t" ]] || { echo "FAIL career_postings_pay_zones rollback"; exit 1; }
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261112130000_career_postings_pay_zones.sql"
+echo "  ok   rollback drops pay_zones; up again"
 # LAUNCH READINESS B1 (2026-10-26, audit PR #192): the definer lockdown, last, on the schema every phase above left
 # (the card-cloud bridge included). The test applies it (twice) over production's shape, then checks the whole schema:
 # no SECURITY DEFINER function anon can run, none without a fixed search_path.

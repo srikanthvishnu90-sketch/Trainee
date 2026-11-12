@@ -1,6 +1,6 @@
 # Item 13, offer math: 27 real published pay figures → 27 comparisons
 
-**Result on trunk 7bbf6512 (2026-11-12, $0): PASS 10/27 (bar 26/27). BELOW.** read 25/27, yearly 27/27, compare 10/27, sourced
+**Result after D-069 (2026-11-12, $0): PASS 27/27 (bar 26/27). MEETS.** read 27/27, yearly 27/27, compare 27/27, sourced 27/27. Before D-069, on trunk 7bbf6512: PASS 10/27 (bar 26/27), BELOW: read 25/27, yearly 27/27, compare 10/27, sourced
 27/27. The product made 10 of the 27 comparisons, and all 10 are exact. The 17 it did not make are offers it never kept
 (`../README.md`, finding 3).
 

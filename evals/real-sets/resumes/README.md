@@ -24,7 +24,8 @@ A posting passes when both files pass every check:
 
 The resume loop's own target rule, which trusts `CareerProfile.skillEvidence`, is reported as `loop_rule`: 23/35. On these real
 postings it asks the file to print "R" and "SQL", which the persona never stated (`../README.md`, finding 1). Printing them would
-be inventing, so that rule is reported and is not the bar.
+be inventing, so that rule is reported and is not the bar. After D-069 (skills matched as whole tokens and known aliases) it is
+35/35, with no unprinted skill; the bar result is unchanged at 35/35.
 
 `CI=true deno run -A --no-check evals/real-sets/resumes/run.ts [--out DIR]` writes `results/latest.json`. It needs poppler,
 pdfminer.six and python-docx, the ones the resume loop needs.

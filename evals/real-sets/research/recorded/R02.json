@@ -3,7 +3,8 @@
   "id": "R02",
   "company": "Airbnb",
   "site": "airbnb.com",
-  "role": "Advanced Analytics Intern"
+  "role": "Advanced Analytics Intern",
+  "board": "greenhouse:airbnb"
  },
  "plan": {
   "queries": [
@@ -17,7 +18,7 @@
    "airbnb.com"
   ]
  },
- "captured_at": "2026-11-12T07:23:32.718Z",
+ "captured_at": "2026-11-12T07:53:28.467Z",
  "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
  "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
  "search": {

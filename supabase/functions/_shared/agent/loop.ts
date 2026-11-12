@@ -16,7 +16,7 @@ export type Effect = "read" | "write_own" | "external";
 // (WO-038's contract): the same text as separate messages, so a texting channel delivers each whole and in order.
 // `before` (WO-091b): the previous turn's reply as the person saw it ("" on a first turn), so a tool can check that "the
 // first one" is a posting that reply showed. Undefined only for a caller that runs a tool without the loop's history.
-export interface ToolCtx { userId: string; threadId: string; now: number; state: Record<string, unknown>; turn?: { message: string; added: string[]; before?: string; attached?: string; attachments?: { filename: string; content: string }[]; fileLinks?: string[]; guard?: (text: string) => string[]; seen?: string[]; show?: { intent: string; text: string; parts?: string[] }; typed?: string; askOnly?: boolean } }
+export interface ToolCtx { userId: string; threadId: string; now: number; state: Record<string, unknown>; turn?: { message: string; added: string[]; before?: string; attached?: string; attachments?: { filename: string; content: string }[]; fileLinks?: string[]; guard?: (text: string) => string[]; seen?: string[]; show?: { intent: string; text: string; parts?: string[]; meta?: Record<string, unknown> }; typed?: string; askOnly?: boolean } }
 export interface ToolSpec {
   name: string;
   description: string;
@@ -38,7 +38,7 @@ export interface TurnResult {
   stopped: "final" | "max_steps" | "model_error" | "incomplete_reply";
   // Meta only, never changes the reply: a final draft that still asked several things or promised an alert after the one rewrite.
   flags?: string[];
-  show?: { intent: string; text: string; parts?: string[] };
+  show?: { intent: string; text: string; parts?: string[]; meta?: Record<string, unknown> };
   // JOB CARDS: the postings the turn's last successful search_jobs returned, for channels that show them as cards.
   postings?: unknown[];
   // REPLY SHAPE: the documents the turn staged with attach_document (each passed the fact guards), and the URLs the turn may

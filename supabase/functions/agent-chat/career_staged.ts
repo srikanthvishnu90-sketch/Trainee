@@ -15,7 +15,7 @@
 // (routerAnswerBlock). A turn the brain does not take runs through the router again on the real state, as
 // it does today, so what the router saves is exactly what it saved before.
 
-import { servedBrain } from "./release_config.ts";
+import { releaseFlagOn, servedBrain } from "./release_config.ts";
 import { NO_CLOCK, type TurnClock } from "./turn_clock.ts";
 import { crisisReply } from "./crisis.ts";
 import { PAYLOAD_INTENTS } from "../_shared/career_reply_writer.ts";
@@ -455,6 +455,11 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (researchReplyOn(o.env) && researchOverAction(o.message)) return { brain: true, mode, intent, reason: "company_research" };
   if (routerKept(o.env).has(intent)) return { brain: false, mode, intent, reason: "kept_on_router" };
   if (marketResearchAsk(o.env, o.message, intent)) return { brain: true, mode, intent, reason: "market_research" };
+  // D-062 (MIRROR-PROCESS C6, C16, C19): the person's application history and tracker (read from their Gmail confirmations), and a
+  // public alumni search, are the brain's: it has the tools (agent/capability_tools.ts); code guards what they return.
+  if (applicationRecordAsk(o.env, o.message, intent)) return { brain: true, mode, intent, reason: "application_record", router: routerAnswer(intent, probe) };
+  if (alumniSearchAsk(o.env, o.message, intent)) return { brain: true, mode, intent, reason: "alumni_search" };
+  if (emailReplyAsk(o.env, o.message, intent)) return { brain: true, mode, intent, reason: "email_reply" };
   // MIRROR-1000 gaps (2026-11-11): the router's words are English. A non-English ask it claimed from one English keyword is
   // the brain's, which answers in the person's language (ask_language.ts). Payloads, bare replies, mock sessions and the
   // account's controls stay code's.
@@ -827,3 +832,33 @@ export function g1CodeAnswers(message: string, intent: string, result: unknown, 
 // (a draft with placeholders, D-059; a practice question asked like an interviewer, G12; a tailored resume only when code
 // actually built one, above).
 const G1_PRODUCERS: ReadonlySet<string> = new Set(["outreach_draft", "career_tailor", "prep_mock_start"]);
+// D-062 (owner, 2026-11-11: "be able to answer emails, find alumni, do all of it"). Two asks the router answered from its own
+// records alone (C6 "have i applied to anything yet?" and C16 "set up that application tracker": "Your application tracker is
+// empty"; C19 "find me 3 lakeshore alumni at google ... don't message anyone": a list plan that finds no one). With the
+// capability on, each is the brain's, which reads the person's Gmail confirmations and records (read_application_mail,
+// export_tracker) or searches public pages (find_people). Every send stays code's, on the exact-payload card.
+const RECORD_INTENTS: ReadonlySet<string> = new Set(["tracking_status", "tracking_digest", "career_status_states", "career_sent_activity", UNCLAIMED]);
+const RECORD_ASK = /\b(?:have\s+i\s+(?:actually\s+)?(?:applied|submitted|sent\s+(?:any|an?)\s+applications?)|did\s+i\s+(?:ever\s+)?(?:apply|submit)|what\s+(?:have|did)\s+i\s+(?:applied|apply)|(?:keep(?:ing)?|kept)\s+track|(?:application|job|applications)\s+tracker|tracker\b|track\s+(?:of\s+)?(?:my|all\s+my)\s+(?:applications|apps))/i;
+export function applicationRecordAsk(env: Env, message: string, intent: string | null): boolean {
+  if (!intent || !RECORD_INTENTS.has(intent) || !releaseFlagOn(env, "CAREER_MAIL_TRACKING")) return false;
+  return RECORD_ASK.test(String(message ?? "").replace(/[\u2019`]/g, "'"));
+}
+const ALUMNI_INTENTS: ReadonlySet<string> = new Set(["outreach_clarification", "career_people_alumni", "career_catchall", "career_fallback", UNCLAIMED]);
+const ALUMNI_ASK = /\b(?:find|look\s+up|search\s+for|get|pull|list|show|give)\b[^?.!]{0,60}\b(?:alumni|alums?|grads|graduates)\b|\b(?:people|folks|engineers|anyone)\s+(?:who\s+went\s+to|from\s+my\s+school)\b/i;
+// An ask to write to or message them now is code's networking turn (its card); a find that forbids contact stays a find.
+const SEND_NOW = /\b(?:draft|write|email|e-mail|message|dm|text|send)\b[^?.!]{0,30}\b(?:them|each|all|to\s+them)\b/i;
+export function alumniSearchAsk(env: Env, message: string, intent: string | null): boolean {
+  if (!intent || !ALUMNI_INTENTS.has(intent) || !releaseFlagOn(env, "CAREER_PEOPLE_SEARCH")) return false;
+  const m = String(message ?? "").replace(/[\u2019`]/g, "'");
+  if (!ALUMNI_ASK.test(m)) return false;
+  return !SEND_NOW.test(m) || NEGATED_ACTION.test(m);
+}
+// Answering an email in the person's inbox ("reply to the email from Globex", "answer Dana's email and say Tuesday works"): the
+// brain finds it (find_email) and drafts the reply (draft_email_reply); only the person's yes to that exact card sends it.
+// Exact payloads and code's own sessions stay code's (PAYLOAD_INTENTS, a mock); a follow-up to an application stays the
+// follow-up card's (career_inbox_followups.ts claims "send the follow-up to X" before the router).
+const EMAIL_REPLY = /\b(?:reply|respond|answer|write\s+back|get\s+back)\b[^?.!]{0,30}\b(?:to\s+)?(?:the|this|that|their|his|her|an?|[\p{Lu}][\p{L}'-]+(?:'s)?)?\s*(?:e-?mails?|mail|message|inbox)\b|\b(?:e-?mail|message)\s+from\s+\S+[^?.!]{0,40}\b(?:reply|respond|answer)\b/iu;
+export function emailReplyAsk(env: Env, message: string, intent: string | null): boolean {
+  if (!intent || PAYLOAD_INTENTS.has(intent) || /^(?:prep_mock|negotiation_roleplay|career_apply_email|career_followup|conversation_bare_reply|conversation_hold|intent_cancelled)/.test(intent) || !releaseFlagOn(env, "CAREER_MAIL_TRACKING")) return false;
+  return EMAIL_REPLY.test(String(message ?? "").replace(/[’`]/g, "'"));
+}

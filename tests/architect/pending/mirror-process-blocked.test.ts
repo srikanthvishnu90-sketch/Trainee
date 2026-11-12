@@ -7,17 +7,23 @@
 import assertNode from "node:assert/strict";
 import { canRun } from "../helpers/response_world.ts";
 import { effectRows, PAYPAL, runConversation, type Step } from "../helpers/mirror_process.ts";
+// Architect amendment (D-062; owner, 2026-11-11: "be able to answer emails, find alumni, do all of it"): C6, C16 and C19 are scripted
+// like the other turns (the brain calls the tool the process names and replies from what it returned) and the people search is
+// stubbed on the Anthropic wire. Every check below is unchanged; nothing is sent, queued or contacted (effectRows).
+import { C16_STEPS, C19_STEPS, C6_STEPS, isPeopleSearch, peopleSearchAnswer } from "../helpers/d062_fixtures.ts";
 
 const SCRIPT: Record<string, Step[]> = {
   // C10, C20: the tailored PDF for the posting the conversation listed, then a v2 with both edits.
   C4: [{ tool: "research_career_question", input: { question: "what should i put at the very top of my resume for swe roles, be specific" } }, { text: "Name and contact links first, then school and graduation date, then a skills line; leave the outdated 3.9 off." }],
   C10: [{ tool: "tailor_resume", input: { job_id: PAYPAL.id } }, { text: "Your tailored PDF is attached. Treat it as a review draft. Nothing was submitted." }],
   C20: [{ tool: "tailor_resume", input: { job_id: PAYPAL.id, edits: [{ role: "Pixelforge", lines: 1 }, { role: "Waypoint", lines: 3 }] } }, { text: "Updated: Pixelforge is one line, Waypoint three. Still a review draft; nothing was submitted." }],
+  // Architect amendment (D-062): the capability turns.
+  C6: C6_STEPS, C16: C16_STEPS, C19: C19_STEPS,
 };
 
 Deno.test({ name: "MP-BLOCKED the turns blocked on a missing or off capability follow Instinct's full process", sanitizeOps: false, sanitizeResources: false, ignore: canRun() !== null && canRun() !== "FAIL", fn: async () => {
   if (canRun() === "FAIL") throw new Error("MP-BLOCKED needs Postgres 16 in CI");
-  const { seen, world, person, close } = await runConversation(SCRIPT);
+  const { seen, world, person, close } = await runConversation(SCRIPT, { web: (body) => isPeopleSearch(body) ? peopleSearchAnswer(body) : null }); // Architect amendment (D-062): the people search stub
   const fails: string[] = [];
   const check = (id: string, cond: boolean, what: string) => { if (!cond) fails.push(`${id}: ${what}`); };
   try {

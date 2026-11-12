@@ -356,7 +356,8 @@ Deno.test("people turn: discovery asks go to findTargets; off, the reply says we
     candidates: async (_u: string, keys: string[], after: number) => after || !keys.includes("stripe") ? [] : [own],
     appliedCompanies: async () => ["Stripe"], forget: async () => 0, feedback: async () => ({ format: null, rows_marked: 0 }),
   };
-  const off = providerConfig((k) => ({ ANTHROPIC_API_KEY: "sk-test-not-real" } as Record<string, string>)[k]);
+  // Architect amendment (D-062): CAREER_PEOPLE_SEARCH is a release flag now (on when unset); "off" is its rollback, so the off case sets it.
+  const off = providerConfig((k) => ({ ANTHROPIC_API_KEY: "sk-test-not-real", CAREER_PEOPLE_SEARCH: "off" } as Record<string, string>)[k]);
   const store = memoryStore();
   const fetched: string[] = [];
   const f = (async (u: any) => { fetched.push(String(u)); return new Response("no", { status: 599 }); }) as typeof fetch;

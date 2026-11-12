@@ -32,8 +32,10 @@ export function hypotheticalOf(message: string): Hypothetical | null {
 }
 // A hypothetical writes nothing to their record, and a hypothetical person reads nothing from it.
 export const HYPOTHETICAL_WITHHELD: readonly string[] = ["add_profile_fact", "correct_profile_fact", "confirm_profile_fact", "remember_instruction", "forget_instruction",
-  "track_application", "read_resume", "save_resume_persona", "use_resume_persona", "set_resume_contact"];
-export const PERSONA_WITHHELD: readonly string[] = [...HYPOTHETICAL_WITHHELD, "get_profile", "get_memory", "recall", "where_do_i_stand", "list_applications", "get_situation"];
+  "track_application", "read_resume", "save_resume_persona", "use_resume_persona", "set_resume_contact",
+  // D-062: a hypothetical never makes a tracker page or an email card.
+  "export_tracker", "draft_email_reply"];
+export const PERSONA_WITHHELD: readonly string[] = [...HYPOTHETICAL_WITHHELD, "get_profile", "get_memory", "recall", "where_do_i_stand", "list_applications", "get_situation", "read_application_mail", "find_email"];
 export function hypotheticalNote(kind: Hypothetical): string {
   return kind === "persona"
     ? "THIS MESSAGE IS A HYPOTHETICAL PERSON (code read it from their words): they asked how you would advise someone in the situation they describe, not about themselves. " +

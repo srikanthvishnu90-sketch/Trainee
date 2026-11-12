@@ -295,3 +295,46 @@ export function statementsOf(message: string): { asking: boolean; stated: string
 }
 // A clause about something to do now ("I need to lock in", "I have to finish my resume") is a task, not a standing rule.
 export const TODO_CLAUSE = /\bi\s+(?:really\s+)?(?:(?:need|have|got|want|should|must)\s+to|gotta|wanna|gonna)\s+(?!be\b|have\b|work\b|stay\b|keep\b|live\b|avoid\b|get paid\b)[a-z]+/;
+
+// ------------------------------------------------------------------------------------------------ D-067 (live round 2)
+// G1/D-007 (C1): a question or request that states nothing about the person (or only a task for now, "I need to lock in") gives a
+// record write nothing to draw on, so add_profile_fact is not offered on that turn at all (D-065 refused it; now it is not tried).
+export function statesNothing(message: string): boolean {
+  const s = statementsOf(message);
+  if (!s.asking) return false;
+  return s.stated.split(/\.\s+/).map((c) => c.trim()).filter(Boolean).every((c) => TODO_CLAUSE.test(c.toLowerCase()));
+}
+// G14 (C6: "have i applied to anything yet?" answered "nothing on record" without reading Gmail): an ask about their own
+// application history reads the record that holds it (read_application_mail) before it is answered.
+const HISTORY_ASK = /\b(?:have|did|had)\s+i\s+(?:already\s+|even\s+|ever\s+)?(?:applied|apply|sent|submitted)\b|\bwhat\s+(?:have|did)\s+i\s+(?:already\s+)?(?:apply|applied|submit(?:ted)?)\b|\bwhere\s+(?:have|did)\s+i\s+(?:already\s+)?(?:apply|applied)\b|\b(?:my|the)\s+applications?\s+(?:so\s+far|history|status|tracker)\b|\b(?:keep|keeping)\s+track\s+of\s+(?:my\s+)?(?:applications?|what\s+i\s+applied)\b|\bhow\s+many\s+(?:applications|places|jobs|roles)\s+(?:have|did)\s+i\b/;
+export function historyAskOf(message: string): boolean { return HISTORY_ASK.test(lc(message)); }
+export function historyNote(): string {
+  return "THEY ASKED ABOUT THEIR OWN APPLICATIONS (code read it from their words): call read_application_mail first and answer from what it returns " +
+    "(their Gmail confirmations, Trainee's own submissions and what they told you), saying what it covered; never answer \"nothing on record\" without it.";
+}
+// G7 (C22: PayPal's Chicago pay was read in C11 and the going-rate answer gave no figure): a pay ask is answered with the pay this
+// conversation already showed, from where it came, alongside any research. Code lists those lines from Trainee's own earlier replies.
+const PAY_ASK = /\b(?:pay|pays|paid|salary|salaries|comp|compensation|hourly|per hour|an hour|rate|wage|wages|stipend)\b/;
+const PAY_FIGURE = /\$\s?\d[\d,.]*(?:\s?[kK])?(?:\s*(?:-|–|—|to)\s*\$?\s?\d[\d,.]*(?:\s?[kK])?)?/;
+export function shownPayOf(message: string, history: Msg[]): { text: string; url: string | null }[] {
+  if (!PAY_ASK.test(lc(message))) return [];
+  const out: { text: string; url: string | null }[] = [];
+  for (const m of history ?? []) {
+    if (m?.role !== "assistant" || typeof m.content !== "string") continue;
+    // Each paragraph with the link it carries (a posting's or a source's, on its own line after it), else the message's first link.
+    const first = /https?:\/\/[^\s)<>"\]]+/.exec(m.content)?.[0] ?? null;
+    for (const para of m.content.split(/\n\s*\n/)) {
+      const url = /https?:\/\/[^\s)<>"\]]+/.exec(para)?.[0] ?? first;
+      for (const s of para.replace(/https?:\/\/\S+/g, " ").split(/(?<=[.!?])\s+|\n+/)) {
+        const t = s.trim();
+        if (PAY_FIGURE.test(t) && PAY_ASK.test(t.toLowerCase()) && t.length <= 300 && !out.some((x) => x.text === t)) out.push({ text: t, url });
+      }
+    }
+  }
+  return out.slice(-4);
+}
+export function shownPayNote(lines: { text: string; url: string | null }[]): string {
+  return "PAY THIS CONVERSATION ALREADY SHOWED (data from code: your own earlier replies, each from the posting or source it named). Where one answers this ask, use it, " +
+    "with its place and naming where it came from, before or alongside any research; never say you have no figure when one of these answers it. Write no link: code puts each one's source link after your reply:\n" +
+    lines.map((l) => `- ${l.text}${l.url ? ` (source: ${l.url})` : ""}`).join("\n");
+}

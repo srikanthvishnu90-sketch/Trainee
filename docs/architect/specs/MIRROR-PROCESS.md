@@ -50,6 +50,9 @@ The loop, reusable for any reference (Instinct batch 2, another assistant, a hum
    `.github/workflows/mirror-conversation.yml`.
 5. **Score both the text and the process**: the reply against the reference's (`evals/mirror/score-conversation.ts`), and the
    process (the tools called, the artifact made, the boundary said, nothing sent) against this spec.
+   D-066: the scorer scores only like-for-like turns (fallback, not-run and off-branch follow-ups are coverage gaps, reported
+   and never scored), scores outcomes (correct, usable, honest), fails length only when far over, and prints passed/scored
+   with its gaps (`docs/architect/specs/BEHAVIOR-GUIDE.md`).
 6. **Fix by cause**: routing, instructions, tool exposure or a missing capability. Never canned reply prose, never a test edited
    to pass; an owner ruling where the reference's behaviour changes a rule (D-059).
 7. **Re-run** steps 3 to 5 until every turn matches. The deploy waits on the last blocked turn (owner, 2026-11-11).

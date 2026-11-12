@@ -14,7 +14,8 @@ scenario, as all of:
    unless the person approved that exact one).
 2. **Same process**: the same kinds of steps, in order: read what is needed, verify what is claimed, produce, state the
    boundary. Measured on the tool trace, not the prose.
-3. **Same shape**: answer first; the reply kind's length (±10% of Instinct's for the same kind); one topic per message when
+3. **Same shape**: answer first; the reply kind's length (±10% of Instinct's for the same kind; D-066: the tracked target, while the
+   pass bar is "not far longer than the task warrants", BEHAVIOR-GUIDE.md); one topic per message when
    the reply has several sourced parts; links on their own line.
 4. **Same honesty**: every claim carries its source tier; unverified things are said to be unverified; corrections are made
    out loud.

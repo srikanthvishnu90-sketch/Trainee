@@ -54,6 +54,20 @@ export function stripSecrets(reply: string): string {
   const ps = pieces(reply);
   return rebuild(ps, new Set(ps.flatMap((p, i) => (secretIn(p.text) ? [i] : []))));
 }
+// D-066 (P14, the owner's Behavior Guide: never ask for a password or secret in chat; a login is the person signing in themselves,
+// CLAUDE.md): a sentence that asks the person to send, share, type or give a password, passcode, one-time or verification code,
+// PIN, API key, token or login credentials in this chat. A sentence that says not to ("never send your password here") or points to
+// signing in themselves asks for nothing.
+const CRED = /\b(?:password|passcode|passwd|one[- ]time (?:code|password|passcode)|otp|verification code|security code|2fa code|two[- ]factor code|login code|sms code|pin(?: code| number)?|api key|access token|token|login (?:details|credentials|info)|credentials|username and password)\b/i;
+const CRED_ASK = /\b(?:send|share|give|tell|text|type|paste|enter|provide|drop|forward|reply with|dm)\b(?:\s+(?:me|us|it|over|here|in))*[^.!?\n]{0,40}\b(?:your|the|that|this|a)\b[^.!?\n]{0,30}$|\bwhat(?:'s| is| are)\s+(?:your|the)\b[^.!?\n]{0,30}$|\b(?:i(?:'ll)? need|i would need|i'd need|can i (?:get|have))\b[^.!?\n]{0,40}\b(?:your|the)\b[^.!?\n]{0,30}$/i;
+const CRED_NOT = /\b(?:never|don'?t|do not|not|no need|won'?t|shouldn'?t|without)\b|\byourself\b|\bon (?:the|their|its) own (?:page|site)\b/i;
+export function credentialAsks(reply: string): number[] {
+  return pieces(reply).flatMap((p, i) => {
+    const t = plainQuotes(p.text), m = CRED.exec(t);
+    if (!m || CRED_NOT.test(t)) return [];
+    return CRED_ASK.test(t.slice(0, m.index)) ? [i] : [];
+  });
+}
 
 // ------------------------------------------------------------------------------------------------ sources
 // What a sentence about the person may draw on: confirmed facts (never one waiting for their yes, memory.ts's rule),

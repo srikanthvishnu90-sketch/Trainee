@@ -71,10 +71,12 @@ const I_HAVE = "\\bi(?:'ve| have)? (?:just |now |also )?";
 // tracker was made or is attached needs a tool that made one this turn and succeeded: create_file, export_tracker, tailor_resume,
 // attach_document, or a research tool that published a File (its effect, from its result, is write_own). Otherwise the claim goes
 // back to the model once, like every claim here; the link itself is always code's (file_tool.ts), never the model's.
+// A backed file claim is the deliverable itself (its link rides the answer), never a bare receipt (missingAnswerBody).
+const FILE_CLAIM = "a file made";
 export const FILE_MAKERS = ["create_file", "export_tracker", "tailor_resume", "attach_document", "research_market", "research_company"];
 const FILE_NOUN = "(?:file|pdf|page|tracker|spreadsheet|sheet|doc(?:ument)?|word (?:file|copy)|resume|cv|cover letter)";
 const CLAIMS: { kind: string; said: RegExp; by: string[] | "any_write"; wrote?: string[] }[] = [
-  { kind: "a file made", by: FILE_MAKERS, wrote: ["research_market", "research_company"], said: new RegExp(`${I_HAVE}(?:made|created|built|generated|put together|attached|uploaded|exported)(?: you)? (?:a|an|the|your|this)(?: [\\w-]+){0,3} ${FILE_NOUN}\\b|\\b(?:your|the|this)(?: [\\w-]+){0,3} ${FILE_NOUN} (?:is|are) (?:attached|ready|made|linked|below|done)\\b|^(?:here(?:'s| is) (?:your|the)(?: [\\w-]+){0,3} ${FILE_NOUN})\\b|\\battached (?:is|are|here)\\b|^attached\\b`, "i") },
+  { kind: FILE_CLAIM, by: FILE_MAKERS, wrote: ["research_market", "research_company"], said: new RegExp(`${I_HAVE}(?:made|created|built|generated|put together|attached|uploaded|exported)(?: you)? (?:a|an|the|your|this)(?: [\\w-]+){0,3} ${FILE_NOUN}\\b|\\b(?:your|the|this)(?: [\\w-]+){0,3} ${FILE_NOUN} (?:is|are) (?:attached|ready|made|linked|below|done)\\b|^(?:here(?:'s| is) (?:your|the)(?: [\\w-]+){0,3} ${FILE_NOUN})\\b|\\battached (?:is|are|here)\\b|^attached\\b`, "i") },
   { kind: "an alert set", by: ["set_job_alerts"], said: new RegExp(`${I_HAVE}(?:set|created|turned on|switched on|enabled|added)(?: up)? ${ALERT_NOUN}|\\balerts? (?:is|are) now (?:set|on|live|active)\\b|\\balerts? (?:has|have) been (?:set|turned on|switched on|created|enabled)\\b|^(?:done|all set)\\b.{0,40}\\balerts?\\b`, "i") },
   { kind: "postings queued", by: ["queue_applications"], said: new RegExp(`\\b(?:were|was|have been|has been|are now|is now) queued\\b|${I_HAVE}queued\\b|^queued\\b|(?:^|${I_HAVE})added (?:\\d+|them|it|these|those|all)\\b[^.]{0,30}\\bto your (?:apply )?queue`, "i") },
   { kind: "an application tracked", by: ["track_application"], said: new RegExp(`\\bi(?:'m| am) (?:now )?tracking\\b|\\bnow tracking\\b|(?:^|${I_HAVE})added (?:it|this|that|them)\\b[^.]{0,20}\\bto your (?:tracker|applications)|\\b(?:is|are) now (?:on|in) your tracker|${I_HAVE}(?:tracked|logged)\\b|^tracked\\b`, "i") },
@@ -242,7 +244,7 @@ function missingAnswerBody(reply: string, message: string, receiptOnly = false, 
     /\b(?:reply|message|email|text|note|letter|sentence|script)\b/i.test(message) && utterance(message).includes(utterance(reply))) return false;
   if (unresolvedFactFields(reply, message, sources)) return true;
   const clauses = pieces(plainQuotes(reply).replace(/\b(that|this|it)'s\b/gi, "$1 is").replace(/[*_`~]/g, "")).flatMap((p) => p.text.split(/[;—–]/)).map((s) => s.trim().replace(/^(?:[-•]|\d+[.)])\s+/, "").replace(/[.!?]+$/, "").trim()).filter(Boolean);
-  return clauses.length > 0 && clauses.every((s) => CLOSING_ONLY.test(s) || (!SOCIAL_MESSAGE.test(message.trim()) && (ACK_ONLY.test(s) || PROGRESS_ONLY.test(s))) || (receiptOnly && claimsIn(s).length > 0));
+  return clauses.length > 0 && clauses.every((s) => CLOSING_ONLY.test(s) || (!SOCIAL_MESSAGE.test(message.trim()) && (ACK_ONLY.test(s) || PROGRESS_ONLY.test(s))) || (receiptOnly && claimsIn(s).some((k) => k !== FILE_CLAIM)));
 }
 // REPLY SHAPE: what the turn staged and which links it may show ride the result, whichever way the turn ended.
 // The flag-only reply checks of a turn (missing_ack, many_asks, unbacked_promise), as the meta the career handler saves with

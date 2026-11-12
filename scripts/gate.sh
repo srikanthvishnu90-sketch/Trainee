@@ -184,6 +184,7 @@ browser_node_tests=(
   tests/career-browser-eval.test.cjs
   tests/career-challenge-shown.test.cjs
   tests/career-browser-strict.test.cjs
+  tests/career-browser-d072.test.cjs
   tests/career-browser-full-persona.test.cjs
   tests/career-dashboard-browser.test.cjs
   tests/career-extension-agent-submits.test.cjs

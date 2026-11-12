@@ -1515,9 +1515,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             inbox: chatSwitches(Deno.env).mailTracking ? inboxReader({ fetch, token: accountToken({ ...f08Grant, admin }, GMAIL_READONLY), accounts: (u) => googleAccounts(admin, u) }) : null,
             reply: { outreach: outreachStore, sendOn: chatSwitches(Deno.env).emailSend && sendRailOn(Deno.env), canSend: async (u, from) => !!(await (from ? accountToken({ ...f08Grant, admin }, CAREER_SEND_SCOPE)(u, from) : sendToken(u))), name: () => ((ctx as any).profile?.basics?.name ?? null) },
           }),
-          known: { standing, alerts: alertRow ? { prefs: alertRow.prefs, tz: alertRow.tz } : null, pipeline: null, situation }, memory,
           // D-064 (G13): the person's previous message, when this one arrived while that turn was still running.
-          whileWorking: (ctx as any)._whileWorking ? ([...history].reverse().find((m) => m.role === "user")?.content ?? "") : null });
+          whileWorking: (ctx as any)._whileWorking ? ([...history].reverse().find((m) => m.role === "user")?.content ?? "") : null,
+          known: { standing, alerts: alertRow ? { prefs: alertRow.prefs, tz: alertRow.tz } : null, pipeline: null, situation }, memory });
         await ledger.record(meter);
         // Architect ruling 3 (2026-11-09): at a limit, the router's own answer stands when it chose a specific intent for THIS message
         // ("what should I wear to a video interview?" -> its interview prep); only its catch-alls and fallback templates are replaced.

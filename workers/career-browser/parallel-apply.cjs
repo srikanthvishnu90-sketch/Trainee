@@ -473,7 +473,10 @@ async function attempt(browser, p, opts, timing) {
     }
     if (fr.needsUser.length) {
       const first = fr.needsUser[0];
-      const e = new NeedsUser(first.reason === "no_confirmed_answer" || /^(agreement|eeo|upload)_/.test(first.reason) || first.reason === "no_resume" ? "missing_required_answer" : "field_not_filled", first.label);
+      const answersOnly = first.reason === "no_confirmed_answer" || /^(agreement|eeo|upload)_/.test(first.reason) || first.reason === "no_resume";
+      // A form that also shows a check (CHECK_IN_FORM) stops as that check, with the person's answers beside it: both are theirs.
+      const e = answersOnly && checkInForm ? new NeedsUser("bot_check", p.url, "check_in_form") : new NeedsUser(answersOnly ? "missing_required_answer" : "field_not_filled", first.label);
+      if (answersOnly && checkInForm) e.detail = checkInForm;
       e.needs = fr.needsUser.map((n) => ({ label: n.label, reason: n.reason, ...(n.kind ? { kind: n.kind } : {}), ...(n.detail ? { detail: String(n.detail).slice(0, 400) } : {}), ...(Array.isArray(n.options) ? { options: n.options.slice(0, 60) } : {}) }));
       throw e;
     }

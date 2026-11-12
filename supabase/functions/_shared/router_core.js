@@ -48359,6 +48359,48 @@ const CareerRouter = (() => {
     });
     return { intent: "sensitive_answer_ask", resultStatus: "awaiting_user", reply, sends: 0, asked: [fields[0].key], open: fields.map((f) => f.key), company };
   }
+  // D-072 (item 9b, d054 M05; D-053 salary expectation is asked per application, WO-122 a reused answer is a labelled suggestion):
+  // "use the same expected salary for the Lakefront Data application". The model answered this, and in 1 of 5 real-model passes
+  // said it would use $85,000 for Lakefront Data without asking and without saying it was the Northline Health answer. A salary
+  // expectation is never carried to another employer on its own: code says which answer it is and where it was given, fills
+  // nothing in, and asks the person to confirm it for this application (one question; their yes keeps it for that application
+  // in their words, through the same open-question list as any sensitive answer).
+  const SALARY_REUSE = /\b(?:same|reuse|re-use|copy|carry (?:it )?over|bring (?:it )?over|again|too|as well)\b/;
+  const SALARY_WORDS = /\b(?:expected salary|salary expectations?|expected pay|pay expectations?|salary)\b/;
+  const MONEY = /\$\s?\d[\d,]*(?:\.\d+)?\s?[kK]?\b|\b\d{2,3}(?:,\d{3})+\b|\b\d{2,3}\s?[kK]\b/;
+  function salaryAnswerOnFile(ctx, target) {
+    const out = [];
+    for (const f of statedFactsOf(ctx)) if (f && f.kind === "salary_expectation" && MONEY.test(s(f.value))) out.push({ figure: s(f.value).match(MONEY)[0], company: f.key || null });
+    const prof = ctx && ctx.profile;
+    for (const f of prof && Array.isArray(prof.facts) && !prof._fromStatedFacts ? prof.facts : []) {
+      if (!f || f.status === "rejected") continue;
+      const txt = [f.title, f.text].map(s).join(" ");
+      if (!/\bsalary\b/i.test(txt) || !MONEY.test(txt)) continue;
+      const co = txt.match(/\bfor (?:the |my )?([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3}?)(?:\s+(?:application|role|job|posting|position|internship|one))\b/);
+      out.push({ figure: txt.match(MONEY)[0], company: co ? co[1] : null });
+    }
+    const other = out.filter((x) => !(x.company && target && lc(x.company) === lc(target)));
+    return other.length ? other[other.length - 1] : null;
+  }
+  function handleSalaryReuse(text, ctx) {
+    const t = lc(text);
+    if (!SALARY_WORDS.test(t) || !SALARY_REUSE.test(t)) return null;
+    if (/\b(?:offer|counter|negotiat\w*|signing bonus|raise)\b/.test(t)) return null; // a negotiation turn owns its pay talk
+    if (MONEY.test(s(text))) return null; // a figure stated now is the person's own answer, not a reuse
+    const coM = s(text).match(/\b[Ff]or (?:the |my )?([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3}?)\s+(?:one|application|role|job|internship|posting|position)\b/);
+    const target = coM ? coM[1] : null;
+    if (!target) return null;
+    const src = salaryAnswerOnFile(ctx, target);
+    if (!src) return null;
+    const fig = src.figure.replace(/\s+/g, "");
+    try { const m = threadMirrorForWrite(ctx); if (m) m.sensitiveAsk = { company: target, fields: ["salary"], total: 1, at: nowOf(ctx), suggest: { salary: fig, from: src.company || null } }; } catch { /* the reply still asks */ }
+    const reply = compose({
+      headline: `Expected salary is asked for each application, so I won't carry it over to ${target} on my own.`,
+      facts: [`${fig} is the expected salary you gave ${src.company ? `for the ${src.company} application` : "earlier in this chat"}. Nothing has been filled in, submitted or sent.`],
+      nextStep: `Should I use ${fig} as your expected salary for ${target} too?`,
+    });
+    return { intent: "sensitive_answer_ask", resultStatus: "awaiting_user", reply, sends: 0, asked: ["salary"], open: ["salary"], company: target, suggestion: { field: "salary", value: fig, from: src.company || null } };
+  }
   // The person's answer to the open field: recorded in their words, then the next field, or the end of the list.
   function sensitiveAnswerValue(key, raw) {
     const v = s(raw).replace(/\s+/g, " ").replace(/[.!]+$/, "").trim();
@@ -48385,7 +48427,17 @@ const CareerRouter = (() => {
     if (!field) { if (wm) delete wm.sensitiveAsk; return null; }
     const total = st.total || st.fields.length, k = total - st.fields.length + 1;
     const skipped = /^(?:skip|pass|leave it blank|i'?d rather not say|rather not say|prefer not to say)\b/.test(t);
-    const value = skipped ? null : sensitiveAnswerValue(key, raw);
+    // D-072 (D-053, WO-122): a suggested earlier answer (shown with its source) is kept only on the person's own yes; a no asks
+    // for their answer for this application, and a figure they type is their answer as said.
+    const suggested = st.suggest && typeof st.suggest[key] === "string" ? st.suggest[key] : null;
+    const bareYes = /^(?:yes|yep|yeah|yup|sure|ok|okay|correct|right|do it|use it|that'?s right|sounds good)\b[\s,.!]*(?:please|thanks|thank you|use it|do it)?[\s.!]*$/.test(t);
+    const bareNo = /^(?:no|nope|nah|don'?t|do not|not that)\b[\s,.!]*$/.test(t);
+    if (suggested && bareNo) {
+      if (wm) wm.sensitiveAsk = Object.assign({}, st, { suggest: undefined, at: nowOf(ctx) });
+      const reply = compose({ headline: `Okay, I won't use ${suggested} for ${st.company || "this application"}.`, nextStep: sensitiveQuestion(field, st.company, k, total) });
+      return { intent: "sensitive_answer_ask", resultStatus: "awaiting_user", reply, sends: 0, asked: [key], open: st.fields.slice(), company: st.company || null };
+    }
+    const value = skipped ? null : (suggested && bareYes ? suggested : sensitiveAnswerValue(key, raw));
     if (!skipped && !value) {
       const reply = compose({ headline: `I didn't catch ${field.label} in that, so nothing was kept for it.`, nextStep: sensitiveQuestion(field, st.company, k, total) });
       return { intent: "sensitive_answer_ask", resultStatus: "awaiting_user", reply, sends: 0, asked: [key], open: st.fields.slice(), company: st.company || null };
@@ -48393,7 +48445,17 @@ const CareerRouter = (() => {
     let said = null;
     if (value) {
       const kind = FIELD_FACT_KIND[key];
-      recordThreadFact(ctx, kind, value, raw);
+      const evidence = suggested && value === suggested ? `${raw} (yes to ${suggested}${st.suggest && st.suggest.from ? `, the answer given for ${st.suggest.from}` : ""})` : raw;
+      // D-072: a salary answer is keyed to its application (D-053); the same figure given for another employer is a separate
+      // answer, never a re-key of that one.
+      if (key === "salary" && st.company) {
+        if (!(ctx.statedFacts && Array.isArray(ctx.statedFacts.facts))) ctx.statedFacts = { facts: [] };
+        const list = ctx.statedFacts.facts;
+        if (!list.some((x) => x && x.kind === kind && lc(x.value) === lc(value) && x.key === st.company)) {
+          list.push({ kind, value: s(value).replace(/\s+/g, " ").trim(), evidence: s(evidence).slice(0, 200), at: new Date(nowOf(ctx)).toISOString(), key: st.company });
+          ctx.statedFacts.updatedAt = new Date(nowOf(ctx)).toISOString();
+        }
+      } else recordThreadFact(ctx, kind, value, evidence);
       // A sponsorship answer is written through the same path as a sponsorship correction, so a different earlier answer
       // still invalidates what was prepared on it.
       const prof = ctx && ctx.profile;
@@ -48402,8 +48464,7 @@ const CareerRouter = (() => {
         try { writeSensitiveCorrection(prof, { kind: need ? "future_need" : "no_longer_needed", needsSponsorship: need, clause: raw }, raw, ctx); } catch { /* the stated fact stands */ }
         if (before === true || before === false) { if (before !== need) recordInvalidation(ctx, "sensitive_fact_corrected", raw, "the user answered the sponsorship question differently from the earlier answer; prepared packets and approvals built on the old answer are invalid"); }
       }
-      const f = statedFactsOf(ctx).filter((x) => x.kind === kind).pop();
-      if (f && st.company && key === "salary") f.key = st.company;
+      const f = key === "salary" && st.company ? statedFactsOf(ctx).filter((x) => x.kind === kind && x.key === st.company).pop() : statedFactsOf(ctx).filter((x) => x.kind === kind).pop();
       said = f ? String(factLine(f)).replace(/[.\s]+$/, "") : `${field.label}: ${value}`;
     }
     const rest = st.fields.slice(1);
@@ -48858,6 +48919,7 @@ const CareerRouter = (() => {
       || handleSensitiveCorrection(text, c)
       || handleSensitivePick(text, c)
       || handleAnswerReuse(text, c)
+      || handleSalaryReuse(text, c)
       || handleQueueCancel(text, c)
       || handleDoorstepCancel(text, c)
       || handlePacketValidity(text, c)
@@ -52375,6 +52437,10 @@ const CareerRouter = (() => {
       const ex = facts.find((f) => f.kind === kind);
       if (ex) {
         if (lc(ex.value) === lc(clean)) return false;
+        // D-072 (item 9b, d054 M07/M08): a correction keeps what it replaced, beside the record (statedFacts.replaced), so a
+        // read-back and the brain can say "you first said X, then corrected it" instead of inventing where the answer came from.
+        const was = { kind, value: ex.value, evidence: ex.evidence || null, at: ex.at || null, replaced_at: new Date(nowOf(ctx)).toISOString() };
+        ctx.statedFacts.replaced = [...(Array.isArray(ctx.statedFacts.replaced) ? ctx.statedFacts.replaced : []), was].slice(-20);
         ex.value = clean; ex.evidence = ev; ex.at = new Date(nowOf(ctx)).toISOString();
         ctx.statedFacts.updatedAt = ex.at;
         return true;
@@ -53302,6 +53368,14 @@ const CareerRouter = (() => {
     return added;
   }
   function statedFactsOf(ctx) { return (ctx.statedFacts && Array.isArray(ctx.statedFacts.facts)) ? ctx.statedFacts.facts : []; }
+  // D-072 (item 9b): the latest earlier value a correction replaced for this kind, when it differs from the value now on record.
+  function statedReplacedOf(ctx, kind) {
+    const list = ctx && ctx.statedFacts && Array.isArray(ctx.statedFacts.replaced) ? ctx.statedFacts.replaced : [];
+    const now = statedFactsOf(ctx).find((f) => f && f.kind === kind);
+    if (!now) return null; // a fact no longer on record has no history to read back
+    for (let i = list.length - 1; i >= 0; i--) { const w = list[i]; if (w && w.kind === kind && lc(w.value) !== lc(now.value)) return w; }
+    return null;
+  }
   // SERIAL-1530: the location the person stated in chat (single-valued; a correction replaces it), else "".
   function statedHomeOf(ctx) { const g = statedFactsOf(ctx).find((f) => f && f.kind === "geography"); return g ? s(g.value).trim() : ""; }
   // 2026-10-23 (fix2 review): the experience kind holds every work-at frame, so its line
@@ -53361,7 +53435,13 @@ const CareerRouter = (() => {
       preferences: { roles: [], industries: [], locations: geo ? [geo.value] : [], remote: null, companySize: null, compFloor: null, dealBreakers: [], targetCompanies: firm ? [firm.value] : [], excludedCompanies: [] },
       constraints: { graduationDate: null, startDate: null, workAuthorization: spons ? spons.evidence || null : null, needsSponsorship: spons ? spons.value === "needs sponsorship" : null, relocation: null, securityClearance: null },
       defaults: {},
-      facts: facts.map((f, i) => ({ id: `stated-${f.kind}-${i}`, kind: f.kind, text: factLine(f), value: f.value, evidence: f.evidence || null })),
+      // D-072 (item 9b, d054 M07): each row says it was said in this chat (when), and what it replaced; the brain read these rows
+      // under "from their account, not from this chat" and told the person Purdue "was already waiting on your yes from before
+      // this chat" and that Northwestern "was never saved".
+      facts: facts.map((f, i) => {
+        const was = statedReplacedOf(ctx, f.kind);
+        return { id: `stated-${f.kind}-${i}`, kind: f.kind, text: factLine(f), value: f.value, evidence: f.evidence || null, said_in_chat: true, said_at: f.at || null, ...(was ? { replaces: factLine(was) } : {}) };
+      }),
       connections: [],
     };
   }
@@ -53879,7 +53959,12 @@ const CareerRouter = (() => {
         // repeats the person's own quoted words is not read back again.
         const quoted = waRecord.filter((x) => /"/.test(x));
         const lines = waRecord.filter((x) => !(/^you (?:do not )?need (?:visa )?sponsorship$/.test(x) && quoted.some((q) => /sponsor/i.test(q))));
-        const reply = compose({ headline, facts: lines.slice(0, 2).map((x) => `On record: ${x}.`) });
+        // D-072 (item 9b, d054 M08: one judge failed the read-back in 3 of 5 passes as "terse, does not acknowledge the
+        // correction"): when the answer on record corrected an earlier one in this conversation, the read-back says so, from the
+        // replaced value itself (statedFacts.replaced), never from a guess.
+        const was = sponsorAsk ? statedReplacedOf(ctx, "sponsorship") : null;
+        const corrected = was ? [`You first told me ${factLine(was)}, then corrected it; the corrected answer is the one I use.`] : [];
+        const reply = compose({ headline, facts: [...corrected, ...lines.slice(0, 2).map((x) => `On record: ${x}.`)] });
         return { intent: "profile_recall", reply, resultStatus: "completed", sends: 0 };
       }
       const label = what.charAt(0).toUpperCase() + what.slice(1);

@@ -95,6 +95,11 @@ Deno.test({ name: "D061-H through the real handler under production's flags: the
     return await anthropicWire(req, scripted);
   };
   const w = await openWorld(3, { model });
+  // Architect amendment (D-072): every variable this test changes is put back as it found it (the gate's explicit release-flag
+  // "off"s included); it deleted them and never restored them, so CAREER_TEXTING_NATIVE fell to its release default (on) for every
+  // later file in the same shard (flow-telegram-e2e: parse_mode HTML). The test itself still runs under production's flags.
+  const touched = [...Object.keys(RELEASE_FLAGS), ...RELEASE_NEVER_ON, "TRAINEE_FILE_BASE_URL", "TRAINEE_FILE_LINK_SECRET", "ANTHROPIC_API_KEY"];
+  const envBefore = new Map(touched.map((k) => [k, Deno.env.get(k)]));
   try {
     // P4: no test-only switch; production serves File links (a non-routable stand-in and a TEST secret).
     for (const k of [...Object.keys(RELEASE_FLAGS), ...RELEASE_NEVER_ON]) Deno.env.delete(k);
@@ -122,7 +127,7 @@ Deno.test({ name: "D061-H through the real handler under production's flags: the
     }
     eq(w.outbound, [], "a request left the machine");
   } finally {
-    for (const k of ["TRAINEE_FILE_BASE_URL", "TRAINEE_FILE_LINK_SECRET", "ANTHROPIC_API_KEY"]) Deno.env.delete(k);
+    for (const [k, v] of envBefore) { if (v === undefined) Deno.env.delete(k); else Deno.env.set(k, v); }
     await w.close();
   }
 } });

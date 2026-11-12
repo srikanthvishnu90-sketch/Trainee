@@ -351,6 +351,8 @@ async function attempt(browser, p, opts, timing) {
   page.setDefaultTimeout(opts.stepTimeoutMs || 15000);
   // A copy: a same-posting redirect (samePostingRedirect) adds the employer's own host for this attempt only.
   const allow = [...(opts.allowHosts || [])];
+  // The employer hosts a same-posting redirect added: their own pages are never the application form themselves (below).
+  const followed = new Set();
   const blocked = [], blockedUrls = [];
   // A new tab (window.open, target=_blank) is never driven: it is closed before it loads.
   ctx.on("page", (other) => { if (other !== page) other.close().catch(() => {}); });
@@ -379,14 +381,18 @@ async function attempt(browser, p, opts, timing) {
     try { sub = !!req.frame().parentFrame(); } catch { /* no frame (service worker): judged as top-level */ }
     if (sub) return isDeniedHost(new URL(req.url()).hostname) ? route.abort("blockedbyclient") : route.continue();
     const g = urlVerdict(req.url(), allow);
-    if (!g.ok) { blocked.push(g.host); blockedUrls.push(req.url()); return route.abort("blockedbyclient"); }
+    // The same employer's own posting reached by the board's script rather than a 3xx (Workable's apply.workable.com/j/<id> to the
+    // employer's Workable domain /_/j/<id>, bench run 43303161774): the same rule as a redirect, from the page the run is on.
+    let fromUrl = ""; try { fromUrl = page.url(); } catch { /* none */ }
+    if (!g.ok && opts.followSamePosting !== false && /^https?:/.test(fromUrl) && samePostingRedirect(fromUrl, req.url(), p.url, allow)) { const h = normHost(new URL(req.url()).hostname); allow.push(h); followed.add(h); }
+    else if (!g.ok) { blocked.push(g.host); blockedUrls.push(req.url()); return route.abort("blockedbyclient"); }
     if (req.method() !== "GET") return route.continue();
     const resp = await route.fetch({ maxRedirects: 0 });
     const loc = resp.status() >= 300 && resp.status() < 400 ? resp.headers().location : null;
     if (loc) {
       const to = new URL(loc, req.url()).href;
       const next = urlVerdict(to, allow);
-      if (!next.ok && opts.followSamePosting !== false && samePostingRedirect(req.url(), to, p.url, allow)) allow.push(normHost(new URL(to).hostname));
+      if (!next.ok && opts.followSamePosting !== false && samePostingRedirect(req.url(), to, p.url, allow)) { const h = normHost(new URL(to).hostname); allow.push(h); followed.add(h); }
       else if (!next.ok) { blocked.push(next.host); blockedUrls.push(to); return route.abort("blockedbyclient"); }
     }
     return route.fulfill({ response: resp });
@@ -498,6 +504,23 @@ async function attempt(browser, p, opts, timing) {
         await stopAtWall(page, p.url);
       }
     }
+    // D-072 (item 4, round 2): on the employer's own page a same-posting redirect led to, the only application form is the board's
+    // own: its embedded form opened at its own address (Greenhouse's job_app frame), or Workable's own app on the employer's domain
+    // (/_/j/<id>). Any other form there (a newsletter box, a site search; bench run 43303161774: cribl.io's page reached a Submit
+    // with no field filled) is never the application: the run stops as the redirect off the board it was before.
+    const onFollowed = () => followed.has(normHost(new URL(page.url()).hostname));
+    if (onFollowed()) {
+      const embed = await embeddedFormUrl(page, allow);
+      if (embed) {
+        try { await page.goto(embed, { waitUntil: "domcontentloaded" }); } catch (e) { onAllowedHost(); throw e; }
+        onAllowedHost();
+        await page.waitForSelector(FIELD_SEL, { timeout: 8000 }).catch(() => null);
+        await gate();
+        await stopAtWall(page, p.url);
+      } else if (!(p.ats === "workable" && /^\/_\/j\/[A-Z0-9]+(\/apply)?\/?$/.test(new URL(page.url()).pathname))) {
+        throw new NeedsUser("redirect_not_allowed", normHost(new URL(page.url()).hostname));
+      }
+    }
     // D-072: the board's own form embedded in the employer's page (a frame on an allowed host): opened at its own address.
     if (!(await hasForm())) {
       const embed = await embeddedFormUrl(page, allow);
@@ -586,6 +609,8 @@ async function attempt(browser, p, opts, timing) {
     await gate(true);
     await stopAtWall(page, p.url);
     if (!(await markSubmit())) throw new NeedsUser("no_submit_control", p.url);
+    // A form in which nothing was filled from the approved application is never the application (no name, no email, no resume).
+    if (!fr.filled.length) throw new NeedsUser("no_application_form_found", p.url);
     const action = await page.$eval("[data-upmore-submit]", (b) => {
       const a = b.getAttribute("formaction") ?? (b.form && b.form.getAttribute("action"));
       return new URL(a || location.href, document.baseURI).href;

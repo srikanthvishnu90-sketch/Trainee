@@ -114,6 +114,7 @@ before(async () => {
       "/breezy/p/913460a2bba7-inspector/apply": () => html(BREEZY_PHONE),
       "/rc/o/project-manager/c/new": () => html(RECRUITEE),
       "/ghr/jobs/5312426": () => html(GH_RERENDER), "/gh-export/jobs/5364611008": () => html(GH_EXPORT),
+      "/careers/job-detail/5971252004": () => html(page("Careers | Cribl", `<form action="/search" method="get"><label for="q">Search the site</label><input id="q" name="q"><button type="submit">Submit</button></form>`)),
       "/lv/cyara/aaa5ce22-78a3-4159-baa4-b7eb7994400d": () => res.writeHead(302, { location: "https://apply.workable.com/australian-christian-college/?not_found=true" }).end(),
     }[u.pathname];
     return r ? r() : res.writeHead(404).end();
@@ -247,4 +248,10 @@ test("a posting whose link the board sends to another board's 'not found' page i
   const r = await run("lever", "/lv/cyara/aaa5ce22-78a3-4159-baa4-b7eb7994400d");
   assert.equal(r.reason, "posting_closed", JSON.stringify(r).slice(0, 400));
   assert.deepEqual(posts, [], "no page posted anything that reached the employer");
+});
+
+test("a page whose only form takes nothing from the approved application (a site search) is never the application: no Submit is reached", { skip }, async () => {
+  const r = await run("greenhouse", "/careers/job-detail/5971252004");
+  assert.notEqual(r.result, "pass", JSON.stringify(r).slice(0, 400));
+  assert.equal(r.reason, "no_application_form_found", JSON.stringify(r).slice(0, 400));
 });

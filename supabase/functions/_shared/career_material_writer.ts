@@ -11,7 +11,8 @@
 // The producers attach `material` to the document they deliver (channel_artifacts.ts TurnDocument): the resume task
 // (career_resume_task.ts), tailor_resume (agent/career_tools.ts) and the router's posting tailor (its artifact). A cover letter is the
 // brain's create_file draft of type cover_letter (withLetterVersions below); its file is the letter's text as delivered.
-import type { DocChange } from "./file_family_records_materials.ts";
+// The change rows of the Materials page (file_family_records_materials.ts DocChange), written out so the brain loads no File page code.
+export interface DocChange { kind: "Emphasis" | "Wording" | "Fact needed"; before?: string | null; after: string; text: string; lead?: string }
 import type { FileService } from "./file_service.ts";
 
 export interface MaterialMeta {

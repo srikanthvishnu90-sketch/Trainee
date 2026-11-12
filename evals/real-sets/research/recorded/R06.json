@@ -3,7 +3,8 @@
   "id": "R06",
   "company": "Datadog",
   "site": "datadoghq.com",
-  "role": "Software Engineering Intern"
+  "role": "Software Engineering Intern",
+  "board": "greenhouse:datadog"
  },
  "plan": {
   "queries": [
@@ -17,7 +18,7 @@
    "datadoghq.com"
   ]
  },
- "captured_at": "2026-11-12T07:23:43.186Z",
+ "captured_at": "2026-11-12T07:53:38.628Z",
  "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
  "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
  "search": {

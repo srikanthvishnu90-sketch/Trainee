@@ -1,6 +1,6 @@
 # Item 10, research: 20 real companies
 
-**$0 result on trunk 7bbf6512 (2026-11-12): PASS 16/20 (bar 19/20). BELOW.**
+**$0 result after D-069 (2026-11-12, re-recorded with the fixed provider and reader): PASS 20/20 (bar 19/20). MEETS.** Before D-069, on trunk 7bbf6512: PASS 16/20 (the table below is that run; after D-069 every row is 20/20, with planted lines kept 0).
 
 | Check | Count |
 |---|---|
@@ -11,7 +11,8 @@
 | the job board cited is the company's own | 18/20 |
 | a brief was made | 18/20 |
 
-The four failures are product findings 6 and 7 in `../README.md`:
+The four failures were product findings 6 and 7 in `../README.md`, all fixed by D-069 (Palantir now cites its Lever board, Ramp its
+Ashby board, and Notion's and Plaid's Ashby boards are read; the left-out boards are named in the search notes):
 - Ramp and Palantir: another company's job board is cited.
 - Notion: its board is over the 2 MB cap.
 - Plaid: its board is refused as `not_text`.
@@ -20,7 +21,9 @@ The four failures are product findings 6 and 7 in `../README.md`:
 
 The product's free provider and free reader (`research_free_sources.ts`, what the chat uses with no key) ran once per case over the
 real network on 2026-11-12. They returned 45 pages, all from job-board APIs, and refused 121 pages, each with a reason: robots.txt
-unreadable, unreachable, not text.
+unreadable, unreachable, not text. After D-069 the cases were recorded again the same day with the fixed provider and reader
+(public GETs only, no model): 47 pages read (Greenhouse, Lever, Ashby and SmartRecruiters), 120 refused. The real board bodies the
+D-069 tests use are in `boards/` (small boards whole; a large one as its first roles, with the full body's size and sha256).
 
 This environment has no DNS. The reader checks the resolved addresses of every hop, so for the capture only it was given a
 stand-in resolver: every name "resolves" to 8.8.8.8, and each recording says so in its `resolver` field. Everything else is the

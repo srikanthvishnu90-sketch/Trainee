@@ -46,7 +46,8 @@ async function labelOk(f: Fig): Promise<string | null> {
 function readOk(f: Fig): boolean {
   const row = rows.get(f.job_id)!;
   // boardPay joins a board's ranges with "; " (and a zone's own label may hold "; "): the figure is one whole part of it.
-  if (row.provider !== "workday") { const p = row.pay ?? "", at = p.indexOf(f.stated); return at >= 0 && (at === 0 || p.slice(at - 2, at) === "; ") && (at + f.stated.length === p.length || p.slice(at + f.stated.length, at + f.stated.length + 2) === "; "); }
+  // D-069: or one of the zones the product stores whole (career_postings.pay_zones), none dropped.
+  if (row.provider !== "workday") { const p = row.pay ?? "", at = p.indexOf(f.stated); return (at >= 0 && (at === 0 || p.slice(at - 2, at) === "; ") && (at + f.stated.length === p.length || p.slice(at + f.stated.length, at + f.stated.length + 2) === "; ")) || row.pay_zones.some((z) => z.text === f.stated); }
   if (row.pays.length) return row.pays.some((p) => p.place === f.place && p.pay === f.stated);
   return row.pay === f.stated && row.location.startsWith(f.place); // one range read: it is the primary place's
 }

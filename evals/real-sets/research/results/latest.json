@@ -1,6 +1,6 @@
 {
- "at": "2026-11-12T07:30:59.071Z",
- "line": "REAL-SET RESEARCH ($0 replay, scripted draft): 20 real companies; pages fetched 45 (hosts: boards-api.greenhouse.io, api.smartrecruiters.com, api.lever.co), refused 121; sources 20/20, cited 20/20, invented 20/20, unread 20/20, entity 18/20, brief 18/20; planted lines kept 0 cases; PASS 16/20 (bar 19/20) BELOW",
+ "at": "2026-11-12T07:54:46.284Z",
+ "line": "REAL-SET RESEARCH ($0 replay, scripted draft): 20 real companies; pages fetched 47 (hosts: boards-api.greenhouse.io, api.lever.co, api.ashbyhq.com, api.smartrecruiters.com), refused 120; sources 20/20, cited 20/20, invented 20/20, unread 20/20, entity 20/20, brief 20/20; planted lines kept 0 cases; PASS 20/20 (bar 19/20) MEETS",
  "results": [
   {
    "id": "R01",
@@ -434,7 +434,7 @@
    ],
    "kept": 3,
    "sources": [
-    "https://api.smartrecruiters.com/v1/companies/palantir/postings"
+    "https://api.lever.co/v0/postings/palantir?mode=json"
    ],
    "unread": [
     "palantir.com: not read, because the site asks programs not to read it.",
@@ -446,13 +446,11 @@
     "cited": true,
     "invented": true,
     "unread": true,
-    "entity": false,
+    "entity": true,
     "brief": true
    },
-   "notes": [
-    "cites another company's board as Palantir's: https://api.smartrecruiters.com/v1/companies/palantir/postings (its own: lever:palantir)"
-   ],
-   "pass": false
+   "notes": [],
+   "pass": true
   },
   {
    "id": "R16",
@@ -496,7 +494,7 @@
    ],
    "kept": 3,
    "sources": [
-    "https://boards-api.greenhouse.io/v1/boards/ramp/jobs"
+    "https://api.ashbyhq.com/posting-api/job-board/ramp"
    ],
    "unread": [
     "ramp.com: not read, because the site asks programs not to read it.",
@@ -508,30 +506,29 @@
     "cited": true,
     "invented": true,
     "unread": true,
-    "entity": false,
+    "entity": true,
     "brief": true
    },
-   "notes": [
-    "cites another company's board as Ramp's: https://boards-api.greenhouse.io/v1/boards/ramp/jobs (its own: ashby:ramp)"
-   ],
-   "pass": false
+   "notes": [],
+   "pass": true
   },
   {
    "id": "R18",
    "company": "Notion",
-   "status": "no_sources",
-   "fetched": 0,
+   "status": "ok",
+   "fetched": 1,
    "refused": 6,
    "refused_why": [
     "robots_disallow",
     "unreachable"
    ],
-   "kept": 0,
-   "sources": [],
+   "kept": 3,
+   "sources": [
+    "https://api.ashbyhq.com/posting-api/job-board/notion"
+   ],
    "unread": [
     "notion.so: not read, because the site asks programs not to read it.",
     "api.gdeltproject.org: not read, because it could not be reached.",
-    "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Notion, so open roles were not counted.",
     "Wikipedia has no company article found for Notion."
    ],
    "checks": {
@@ -540,29 +537,27 @@
     "invented": true,
     "unread": true,
     "entity": true,
-    "brief": false
+    "brief": true
    },
-   "notes": [
-    "no brief: no source about Notion could be opened (notion.so: not read, because the site asks programs not to read it; api.gdeltproject.org: not read, because it could not be reached; No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Notion, so open roles were not counted; Wikipedia has no company article found for Notion)"
-   ],
-   "pass": false
+   "notes": [],
+   "pass": true
   },
   {
    "id": "R19",
    "company": "Plaid",
-   "status": "no_sources",
-   "fetched": 0,
-   "refused": 7,
+   "status": "ok",
+   "fetched": 1,
+   "refused": 6,
    "refused_why": [
     "robots_disallow",
-    "not_text",
     "unreachable"
    ],
-   "kept": 0,
-   "sources": [],
+   "kept": 3,
+   "sources": [
+    "https://api.ashbyhq.com/posting-api/job-board/plaid"
+   ],
    "unread": [
     "plaid.com: not read, because the site asks programs not to read it.",
-    "api.ashbyhq.com: not read, because it had no readable text.",
     "api.gdeltproject.org: not read, because it could not be reached.",
     "Wikipedia has no company article found for Plaid."
    ],
@@ -572,12 +567,10 @@
     "invented": true,
     "unread": true,
     "entity": true,
-    "brief": false
+    "brief": true
    },
-   "notes": [
-    "no brief: no source about Plaid could be opened (plaid.com: not read, because the site asks programs not to read it; api.ashbyhq.com: not read, because it had no readable text; api.gdeltproject.org: not read, because it could not be reached; Wikipedia has no company article found for Plaid)"
-   ],
-   "pass": false
+   "notes": [],
+   "pass": true
   },
   {
    "id": "R20",

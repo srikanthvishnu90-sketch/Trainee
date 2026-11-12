@@ -11,9 +11,9 @@ The 95% is D-056's reading: at least 95% by exact integer count.
 | Item | Set | Real inputs | $0 result | Bar | Meets? | Model-spend part (quoted, not run) |
 |---|---|---|---|---|---|---|
 | 3 Resumes | [`resumes/`](resumes/) | 35 real public postings (Greenhouse 14, Lever 6, Ashby 6, SmartRecruiters 5, PayPal Workday 4) × the fictional persona Alex Testcase (TEST) | **35/35** postings: 70/70 files open, copy, download, fit the page, carry the target, invent nothing (invented facts 0) | ≥ 34/35, invented 0 | **Yes** | none: the tailor is code |
-| 10 Research | [`research/`](research/) | 20 real companies; the product's free search and reader run once on the live web, recorded | **16/20** (sources 20/20, cited 20/20, planted lines kept 0, unread named 20/20, right company 18/20, brief made 18/20) | ≥ 19/20 | **No** | ≈ $0.14 a case, ≈ $2.80 for 20 (`--live --budget-usd 3.5`) |
+| 10 Research | [`research/`](research/) | 20 real companies; the product's free search and reader run once on the live web, recorded (re-recorded for D-069) | **20/20** (sources 20/20, cited 20/20, planted lines kept 0, unread named 20/20, right company 20/20, brief made 20/20); was 16/20 before D-069 | ≥ 19/20 | **Yes** | ≈ $0.14 a case, ≈ $2.80 for 20 (`--live --budget-usd 3.5`) |
 | 5 Finding people | [`people/`](people/) | 20 real school × employer asks (fictional asker); search answers scripted with fictional people | **20/20** (40/40 right leads kept, 120/120 bad proposals dropped, caveat 20/20, nobody contacted 20/20) | ≥ 19/20 | **Yes, for the guard only** | ≈ $0.08 an ask, ≈ $1.65 for 20 (`--live --budget-usd 2.5`) |
-| 13 Offer math | [`offers/`](offers/) | 27 real published pay figures from 19 postings, 14 employers (including PayPal's pay by place) → 27 comparisons | **10/27** (read 25/27, yearly 27/27, compare 10/27, sourced 27/27; the comparisons it made are exact, 10/10) | ≥ 26/27 | **No** | none |
+| 13 Offer math | [`offers/`](offers/) | 27 real published pay figures from 19 postings, 14 employers (including PayPal's pay by place) → 27 comparisons | **27/27** (read 27/27, yearly 27/27, compare 27/27, sourced 27/27); was 10/27 before D-069 | ≥ 26/27 | **Yes** | none |
 | 12 Tracking | [`tracking/`](tracking/) | runner only: waits for the owner's Gmail after the deploy | not run (no real mail); runner self-test on the synthetic set: 323/323 precision, 323/325 recall | precision and recall ≥ 95%, N ≥ 20 | waits | none ($0; needs the owner's consent and their own read-only token) |
 
 Inputs shared by 3 and 13: [`postings/`](postings/) (capture script, the 35 recorded bodies, `sources.json` with request, time and
@@ -26,7 +26,9 @@ every search engine, Wikipedia and Wikidata, SEC EDGAR, BLS, GDELT, USAJOBS, com
 answers NotFound for every name). So there are no levels.fyi figures in item 13, and in item 10 the briefs stand on job-board pages
 only. Production reaches more sources, so item 10's live run is the one that settles that bar.
 
-## Product findings (for the product builders; no product code was changed here)
+## Product findings (fixed by D-069; each has a $0 test in `tests/architect/d069-real-input-fixes-20261112.test.ts`)
+
+As found on trunk 7bbf6512. D-069 fixed all seven; item 3's `loop_rule` report went from 23/35 to 35/35.
 
 1. **`CareerProfile.skillEvidence` matches skills by substring** (router_core.career.js). For the persona it calls "R" proven by
    every fact (each one has the letter r) and "SQL" proven by "PostgreSQL". The tailor does not print either, which is correct.

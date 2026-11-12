@@ -39,6 +39,7 @@ export interface FeedPosting {
   ats_id?: string; department?: string; posted_at?: string | null; remote?: string; role_family?: string; seniority_band?: string;
   apply_email?: string | null; // WO-032: the address the posting asks applications to be emailed to (apply_email.ts)
   pay?: string | null; // WO-069: the pay the board states in its own structured fields (boardPay), or null
+  pay_zones?: PayZone[] | null; // D-069: every zone the board states (boardPayZones), none dropped; null when it states none
 }
 // A feed returns its postings; `complete: false` says the board has more than was read (closes nothing). WO-037:
 // `not_modified` says the board answered 304 to a conditional request (nothing changed since the last read); etag and
@@ -111,9 +112,11 @@ const TEXT_DEFAULTS = new Set(["location", "description", "department"]); // nev
 
 // ------------------------------------------------------------------------------------------------ the run
 // The fields that, when a board changes them, rewrite the stored posting; anything else seen again is only touched.
-const CONTENT = ["company", "title", "location", "url", "description", "department", "posted_at", "ats_id", "remote", "role_family", "seniority_band", "apply_email", "pay"] as const;
+const CONTENT = ["company", "title", "location", "url", "description", "department", "posted_at", "ats_id", "remote", "role_family", "seniority_band", "apply_email", "pay", "pay_zones"] as const;
 // Postgres hands timestamps back in its own format ("+00:00"), so a time compares as a time.
-const sameValue = (k: string, x: any, y: any) => k === "posted_at" ? (x ? Date.parse(x) : null) === (y ? Date.parse(y) : null) : (x ?? (TEXT_DEFAULTS.has(k) ? "" : null)) === (y ?? (TEXT_DEFAULTS.has(k) ? "" : null));
+// pay_zones (D-069) is an array of objects: it compares by value, keys sorted (jsonb hands keys back in its own order).
+const canon = (v: any): string => v === null || v === undefined ? "null" : Array.isArray(v) ? `[${v.map(canon).join(",")}]` : typeof v === "object" ? `{${Object.keys(v).sort().map((k) => `${JSON.stringify(k)}:${canon(v[k])}`).join(",")}}` : JSON.stringify(v);
+const sameValue = (k: string, x: any, y: any) => k === "posted_at" ? (x ? Date.parse(x) : null) === (y ? Date.parse(y) : null) : k === "pay_zones" ? canon(x?.length ? x : null) === canon(y?.length ? y : null) : (x ?? (TEXT_DEFAULTS.has(k) ? "" : null)) === (y ?? (TEXT_DEFAULTS.has(k) ? "" : null));
 const same = (a: any, b: any) => CONTENT.every((k) => sameValue(k, a[k], b[k]));
 // The same test against a stored row without its description (2026-10-30): the description compares by its SHA-256.
 const sameKnown = (a: KnownPosting, b: FeedPosting, descriptionSha: string) => a.description_sha === descriptionSha && CONTENT.every((k) => k === "description" || sameValue(k, (a as any)[k], (b as any)[k]));
@@ -437,7 +440,7 @@ export function memoryPostingsDb(): PostingsDb {
 // ------------------------------------------------------------------------------------------------ Supabase store
 // The tables: supabase/migrations/20261019000001_career_postings.sql (pay: 20261022110000). `admin` is a service-role client.
 const COLUMNS = ["job_id", "provider", "board", "ats_id", "company", "title", "location", "url", "description", "department",
-  "posted_at", "remote", "role_family", "seniority_band", "apply_email", "pay", "first_seen_at", "last_seen_at", "closed_at"] as const;
+  "posted_at", "remote", "role_family", "seniority_band", "apply_email", "pay", "pay_zones", "first_seen_at", "last_seen_at", "closed_at"] as const;
 const LIST_COLUMNS = COLUMNS.filter((c) => c !== "description").join(",");
 // Requests and statements stay small (2026-10-30 production fix):
 //   an in() list is cut by its URL length (idChunks: at most URL_MAX characters, and ID_CHUNK ids): 100 Workday ids made
@@ -690,6 +693,43 @@ export function boardPay(provider: string, raw: any): string | null {
     }
   } catch { /* a malformed pay field is no pay field */ }
   return null;
+}
+// D-069 (real set item 13, finding 4): every pay zone a board states, as a structured array, so no zone is dropped. `pay` above
+// stays the column's whole-range text (PAY_MAX); Robinhood's third zone (Lake Mary, FL: $130,000–$152,000) did not fit in it
+// and was lost. Each zone is the board's own numbers, currency and period: `text` is written the way boardPay writes a part,
+// `label` is the board's own zone title (its places), `min`/`max` its figures in its currency, `period` its interval as stated
+// (null when the board states none). Never converted, never estimated. Stored in career_postings.pay_zones (migration
+// 20261112130000).
+export interface PayZone { text: string; label: string | null; currency: string | null; min: number | null; max: number | null; period: "year" | "month" | "week" | "day" | "hour" | null }
+export const PAY_ZONES_MAX = 24;
+const ASHBY_PER: Record<string, PayZone["period"]> = { "1 YEAR": "year", "1 MONTH": "month", "1 WEEK": "week", "1 DAY": "day", "1 HOUR": "hour" };
+export function boardPayZones(provider: string, raw: any): PayZone[] {
+  const out: PayZone[] = [];
+  const put = (z: PayZone) => { if (out.length < PAY_ZONES_MAX && !out.some((x) => x.text === z.text)) out.push(z); };
+  const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) && n >= 0.995 ? n : null; };
+  const cur = (c: unknown) => { const x = oneLine(c).toUpperCase(); return /^[A-Z]{3}$/.test(x) ? x : null; };
+  try {
+    if (provider === "greenhouse") {
+      for (const r of Array.isArray(raw?.pay_input_ranges) ? raw.pay_input_ranges : []) {
+        const loN = Number(r?.min_cents) / 100, hiN = Number(r?.max_cents) / 100;
+        const s = span(money(loN, r?.currency_type), money(hiN, r?.currency_type), loN, hiN);
+        if (!s) continue;
+        const label = cut(oneLine(r?.title).replace(/[\s:;,.-]+$/, ""), 160).trim() || null;
+        put({ text: label ? `${s} (${label})` : s, label, currency: cur(r?.currency_type), min: num(loN), max: num(hiN), period: null });
+      }
+    } else if (provider === "lever") {
+      const text = boardPay("lever", raw), r = raw?.salaryRange;
+      if (text && r) put({ text, label: null, currency: cur(r.currency), min: num(r.min), max: num(r.max), period: (/^per-(year|month|week|day|hour)\b/.exec(oneLine(r.interval).toLowerCase())?.[1] ?? null) as PayZone["period"] });
+    } else if (provider === "ashby") {
+      for (const t of Array.isArray(raw?.compensation?.compensationTiers) ? raw.compensation.compensationTiers : []) {
+        const text = cut(oneLine(t?.tierSummary), 300).trim();
+        if (!text) continue;
+        const sal = (Array.isArray(t?.components) ? t.components : []).find((c: any) => c?.compensationType === "Salary") ?? null;
+        put({ text, label: cut(oneLine(t?.title), 160).trim() || null, currency: cur(sal?.currencyCode), min: num(sal?.minValue), max: num(sal?.maxValue), period: ASHBY_PER[oneLine(sal?.interval).toUpperCase()] ?? null });
+      }
+    }
+  } catch { /* a malformed pay field is no pay field */ }
+  return out;
 }
 // The list request each provider answers with its structured pay (Lever always includes salaryRange).
 const PAY_QUERY: Record<string, string> = { greenhouse: "pay_transparency=true", ashby: "includeCompensation=true" };
@@ -1006,6 +1046,7 @@ function toPostings(b: Board, normalized: any[], raw: any[]): FeedPosting[] {
         location: plainLine(p.location, 1000), url, description,
         department: plainLine(p.department, 300), posted_at: p.posted_at || null, remote: p.remote, role_family: p.role_family, seniority_band: p.seniority_band,
         apply_email: applyEmailOf({ description, url }), pay: pay === null ? null : cut(storable(pay), PAY_MAX) || null,
+        pay_zones: (() => { const z = boardPayZones(b.provider, raw[i]).map((x) => ({ ...x, text: storable(x.text), label: x.label === null ? null : storable(x.label) })); return z.length ? z : null; })(),
       });
     });
     return postings;

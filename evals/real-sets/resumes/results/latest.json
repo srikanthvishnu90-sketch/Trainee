@@ -1,7 +1,7 @@
 {
- "at": "2026-11-12T07:29:02.851Z",
- "base": "7bbf6512",
- "line": "REAL-SET RESUMES: postings 35 (greenhouse 14, lever 6, ashby 6, smartrecruiters 5, workday 4) x persona Alex Testcase (TEST); made 35/35; files 70: opens 70/70, copies 70/70, downloads 70/70, pages 70/70, target 70/70, invented 70/70; invented facts 0; postings with a confirmed skill to carry 24/35; PASS 35/35 (bar 34/35, invented 0) MEETS; reported: loop_rule (skillEvidence) target met 23/35, its unprinted skills SQL, R",
+ "at": "2026-11-12T07:41:05.824Z",
+ "base": "a0d1cc5c",
+ "line": "REAL-SET RESUMES: postings 35 (greenhouse 14, lever 6, ashby 6, smartrecruiters 5, workday 4) x persona Alex Testcase (TEST); made 35/35; files 70: opens 70/70, copies 70/70, downloads 70/70, pages 70/70, target 70/70, invented 70/70; invented facts 0; postings with a confirmed skill to carry 24/35; PASS 35/35 (bar 34/35, invented 0) MEETS; reported: loop_rule (skillEvidence) target met 35/35, its unprinted skills none",
  "cases": [
   {
    "job_id": "greenhouse:stripe:7230921",
@@ -56,14 +56,9 @@
    ],
    "loopWanted": [
     "Python",
-    "SQL",
-    "Statistics",
-    "R"
+    "Statistics"
    ],
-   "loopMissing": [
-    "SQL",
-    "R"
-   ],
+   "loopMissing": [],
    "files": [
     {
      "kind": "pdf",
@@ -283,12 +278,8 @@
    "provider": "greenhouse",
    "made": true,
    "wanted": [],
-   "loopWanted": [
-    "R"
-   ],
-   "loopMissing": [
-    "R"
-   ],
+   "loopWanted": [],
+   "loopMissing": [],
    "files": [
     {
      "kind": "pdf",
@@ -331,12 +322,9 @@
     "Python"
    ],
    "loopWanted": [
-    "Python",
-    "SQL"
+    "Python"
    ],
-   "loopMissing": [
-    "SQL"
-   ],
+   "loopMissing": [],
    "files": [
     {
      "kind": "pdf",
@@ -382,13 +370,10 @@
    ],
    "loopWanted": [
     "Python",
-    "SQL",
     "React",
     "JavaScript"
    ],
-   "loopMissing": [
-    "SQL"
-   ],
+   "loopMissing": [],
    "files": [
     {
      "kind": "pdf",
@@ -431,12 +416,9 @@
     "Python"
    ],
    "loopWanted": [
-    "Python",
-    "SQL"
+    "Python"
    ],
-   "loopMissing": [
-    "SQL"
-   ],
+   "loopMissing": [],
    "files": [
     {
      "kind": "pdf",
@@ -480,13 +462,10 @@
     "Financial Modeling"
    ],
    "loopWanted": [
-    "SQL",
     "Excel",
     "Financial Modeling"
    ],
-   "loopMissing": [
-    "SQL"
-   ],
+   "loopMissing": [],
    "files": [
     {
      "kind": "pdf",
@@ -580,12 +559,9 @@
    "loopWanted": [
     "Python",
     "Go",
-    "SQL",
     "AWS"
    ],
-   "loopMissing": [
-    "SQL"
-   ],
+   "loopMissing": [],
    "files": [
     {
      "kind": "pdf",
@@ -1115,12 +1091,9 @@
     "Python"
    ],
    "loopWanted": [
-    "Python",
-    "SQL"
+    "Python"
    ],
-   "loopMissing": [
-    "SQL"
-   ],
+   "loopMissing": [],
    "files": [
     {
      "kind": "pdf",
@@ -1163,12 +1136,9 @@
     "Python"
    ],
    "loopWanted": [
-    "Python",
-    "SQL"
+    "Python"
    ],
-   "loopMissing": [
-    "SQL"
-   ],
+   "loopMissing": [],
    "files": [
     {
      "kind": "pdf",
@@ -1340,12 +1310,9 @@
    ],
    "loopWanted": [
     "Python",
-    "SQL",
     "Statistics"
    ],
-   "loopMissing": [
-    "SQL"
-   ],
+   "loopMissing": [],
    "files": [
     {
      "kind": "pdf",
@@ -1394,14 +1361,11 @@
    "loopWanted": [
     "Python",
     "Go",
-    "SQL",
     "Statistics",
     "Probability",
     "Algorithms"
    ],
-   "loopMissing": [
-    "SQL"
-   ],
+   "loopMissing": [],
    "files": [
     {
      "kind": "pdf",
@@ -1580,13 +1544,10 @@
     "Algorithms"
    ],
    "loopWanted": [
-    "SQL",
     "Data Structures",
     "Algorithms"
    ],
-   "loopMissing": [
-    "SQL"
-   ],
+   "loopMissing": [],
    "files": [
     {
      "kind": "pdf",

@@ -3,7 +3,8 @@
   "id": "R20",
   "company": "ServiceNow",
   "site": "servicenow.com",
-  "role": "Information Security Engineer Intern"
+  "role": "Information Security Engineer Intern",
+  "board": "smartrecruiters:servicenow"
  },
  "plan": {
   "queries": [
@@ -17,7 +18,7 @@
    "servicenow.com"
   ]
  },
- "captured_at": "2026-11-12T07:24:22.956Z",
+ "captured_at": "2026-11-12T07:54:31.083Z",
  "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
  "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
  "search": {

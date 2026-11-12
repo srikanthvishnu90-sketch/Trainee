@@ -3,7 +3,8 @@
   "id": "R12",
   "company": "Dropbox",
   "site": "dropbox.com",
-  "role": "Full Stack Product Software Engineer"
+  "role": "Full Stack Product Software Engineer",
+  "board": "greenhouse:dropbox"
  },
  "plan": {
   "queries": [
@@ -17,7 +18,7 @@
    "dropbox.com"
   ]
  },
- "captured_at": "2026-11-12T07:24:01.406Z",
+ "captured_at": "2026-11-12T07:53:54.287Z",
  "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
  "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
  "search": {

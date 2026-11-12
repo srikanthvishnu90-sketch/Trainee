@@ -3,7 +3,8 @@
   "id": "R13",
   "company": "Chime",
   "site": "chime.com",
-  "role": "Software Engineer, Financial Platform"
+  "role": "Software Engineer, Financial Platform",
+  "board": "greenhouse:chime"
  },
  "plan": {
   "queries": [
@@ -17,7 +18,7 @@
    "chime.com"
   ]
  },
- "captured_at": "2026-11-12T07:24:04.144Z",
+ "captured_at": "2026-11-12T07:53:56.593Z",
  "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
  "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
  "search": {

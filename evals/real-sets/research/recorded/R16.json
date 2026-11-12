@@ -3,7 +3,8 @@
   "id": "R16",
   "company": "Spotify",
   "site": "spotify.com",
-  "role": "Data Scientist"
+  "role": "Data Scientist",
+  "board": "lever:spotify"
  },
  "plan": {
   "queries": [
@@ -17,7 +18,7 @@
    "spotify.com"
   ]
  },
- "captured_at": "2026-11-12T07:24:12.242Z",
+ "captured_at": "2026-11-12T07:54:20.406Z",
  "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
  "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
  "search": {

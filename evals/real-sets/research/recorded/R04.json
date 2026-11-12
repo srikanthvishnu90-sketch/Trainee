@@ -3,7 +3,8 @@
   "id": "R04",
   "company": "Robinhood",
   "site": "robinhood.com",
-  "role": "Software Engineer 2, Backend"
+  "role": "Software Engineer 2, Backend",
+  "board": "greenhouse:robinhood"
  },
  "plan": {
   "queries": [
@@ -17,7 +18,7 @@
    "robinhood.com"
   ]
  },
- "captured_at": "2026-11-12T07:23:38.022Z",
+ "captured_at": "2026-11-12T07:53:33.627Z",
  "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
  "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
  "search": {

@@ -21,6 +21,11 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
 import { buildFileDeps } from "../../supabase/functions/trainee-file/deps.ts";
 import { handleFile } from "../../supabase/functions/trainee-file/handler.ts";
 import { signedIn } from "../../tests/architect/file-session-fakes.ts";
+import { fetchArtifactBytes } from "../../supabase/functions/_shared/channel_artifacts.ts";
+import { CareerRender } from "../../supabase/functions/_shared/router_core.career.js";
+import * as zlib from "node:zlib";
+import * as nodeCrypto from "node:crypto";
+import { Buffer } from "node:buffer";
 
 const realFetch = globalThis.fetch;
 const a = Deno.args, opt = (n: string) => { const i = a.indexOf(n); return i >= 0 ? a[i + 1] : undefined; };
@@ -128,6 +133,22 @@ try {
       return { link, status: res.status, text: plain(await res.text()).slice(0, 4000) };
     } catch (e) { return { link, status: 0, text: `error: ${String((e as Error).message ?? e).slice(0, 300)}` }; }
   };
+  // Live-8 (owner must-fix (a), "don't trust the changelog"): every document a turn attaches (the tailored resume's PDF and Word
+  // copies, body.artifacts refs into channel_artifacts) is read back from the store as the channel bridge would fetch it, and its
+  // printed text is recorded (the renderer's own extractPdfLines / extractDocxLines, as the architect tests read a PDF).
+  const R = (CareerRender as any).withRuntime({ zlib, crypto: nodeCrypto, Buffer });
+  const readDocument = async (ref: any) => {
+    try {
+      const got = await fetchArtifactBytes(admin, { userId: person.id, ref: String(ref?.ref ?? "") });
+      if (!got) return { ref: ref?.ref ?? null, filename: ref?.filename ?? null, status: "missing", text: "" };
+      // The bytes are kept beside the transcript (the workflow uploads that folder), so the PDF itself can be opened after the run.
+      const keep = `${out.replace(/[^/]*$/, "")}documents/${label}-${String(got.filename).replace(/[^\w.-]+/g, "_")}`;
+      try { await Deno.mkdir(keep.replace(/[^/]*$/, ""), { recursive: true }); await Deno.writeFile(keep, got.bytes); } catch { /* the text below is still recorded */ }
+      const docx = /wordprocessingml|\.docx$/i.test(`${got.mime} ${got.filename}`);
+      const lines = (docx ? R.extractDocxLines(Buffer.from(got.bytes)) : R.extractPdfLines(Buffer.from(got.bytes))) as string[];
+      return { ref: ref.ref, filename: got.filename, mime: got.mime, bytes: got.bytes.length, status: "read", text: lines.join("\n").slice(0, 8000) };
+    } catch (e) { return { ref: ref?.ref ?? null, filename: ref?.filename ?? null, status: "error", text: String((e as Error).message ?? e).slice(0, 300) }; }
+  };
   const linksOf = (reply: string, body: any): string[] => {
     const rx = new RegExp(`${FILE_ENV.TRAINEE_FILE_BASE_URL.replace(/[.]/g, "\\.")}[^\\s)\\]>"']*`, "g");
     const xs = [...(reply.match(rx) ?? []), ...((body?.shape?.links ?? []) as string[]), ...((body?.artifacts ?? []) as any[]).map((x) => x?.url), ...((body?.file_cards ?? []) as any[]).map((x) => x?.url)];
@@ -151,6 +172,8 @@ try {
     if (stopped) break;
     const files = [];
     for (const l of linksOf(reply, body)) files.push(await openLink(l));
+    const documents = [];
+    for (const d of ((body?.artifacts ?? []) as any[])) documents.push(await readDocument(d));
     const after = await counts(person.id);
     const actions: { type: string; hosts?: string[] }[] = Object.keys(after).filter((k) => after[k] > (before[k] ?? 0)).map((type) => ({ type }));
     if (w.outbound.length > outBefore) actions.push({ type: "external", hosts: [...new Set(w.outbound.slice(outBefore))] });
@@ -161,7 +184,7 @@ try {
       // D-070: why a call failed (create_file refused, live-7 C1) and what the length pass did (ran, accepted or rejected, why).
       call_errors: ((meta.tool_calls ?? []) as any[]).filter((x) => x && x.ok === false).map((x) => ({ name: String(x.name), error: String(x.error ?? "").slice(0, 300) })),
       shorten: meta.shorten ?? null,
-      router_intent: meta.router_intent ?? null, brain: meta.brain ?? null, artifact, files,
+      router_intent: meta.router_intent ?? null, brain: meta.brain ?? null, artifact, files, documents,
     };
     lines.push(JSON.stringify({ id: t.id, reply, actions, route: modelCalls > callsBefore ? (dry ? "model-scripted" : "model") : "router", intent, status, ms: Math.round(performance.now() - t1), usd: Number((spent - spentBefore).toFixed(4)), trace }));
     // The product falls back to the router when the model call is refused at the cap, so later turns would be the fallback's

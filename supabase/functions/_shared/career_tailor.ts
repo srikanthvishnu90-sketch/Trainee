@@ -633,11 +633,18 @@ export async function tailorForPosting(o: {
   let ordered = withListedSkills(applyPersonaOrder(t.resume, lead), picked);
   let edits: EditDone[] | undefined, keptBack: string[] = [];
   if (o.edits?.length) {
-    const e = applyEdits(ordered, picked, o.edits);
+    // D-071 (live-8 C20: "Waypoint is now added back", though the first version printed it): an edit changes the version that was
+    // delivered, so it starts from the first version exactly as it printed (every entry kept, the ones this posting does not ask for
+    // on one line each, newest first), and says what changed against that version.
+    const v1 = keepEveryEntry(ordered, picked, { oneLine: true });
+    const delivered = v1.added.length ? applyPersonaOrder(v1.resume, lead) : v1.resume;
+    const e = applyEdits(delivered, picked, o.edits);
     if (!e.ok) return { ok: false, refused: "edit", reason: e.reason, ms: ms() };
     ordered = e.resume; edits = e.done;
+    const editedHeads = new Set(e.done.map((x) => x.entry.toLowerCase()));
+    keptBack = v1.added.filter((h) => !editedHeads.has(h.toLowerCase()));
   }
-  { const every = keepEveryEntry(ordered, picked, { oneLine: !edits }); ordered = every.resume; keptBack = every.added; }
+  { const every = keepEveryEntry(ordered, picked, { oneLine: !edits }); ordered = every.resume; keptBack = [...keptBack, ...every.added]; }
   // D-070: an entry kept back on a first version takes its place by date (RESUME-TEMPLATES E5, newest first); a lead the person
   // chose still goes first. An edited version keeps the order its edits set.
   if (!edits && keptBack.length) ordered = applyPersonaOrder(ordered, lead);

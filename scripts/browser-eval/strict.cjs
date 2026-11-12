@@ -22,6 +22,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const lib = require("./eval-lib.cjs");
+const d072 = require("./d072.cjs");
 const { applyOne, payloadHash, NeedsUser } = require("../../workers/career-browser/parallel-apply.cjs");
 // The apply VM's own verdict on the link (atsOf): a pass on a board the VM refuses is not one production can reach.
 const { atsOf } = require("../../workers/career-browser/apply-vm.cjs");
@@ -29,7 +30,7 @@ const vmVerdict = (url) => atsOf(url).refuse || "drives";
 
 // The hosts each provider's postings and forms live on; a redirect anywhere else is a failure (redirect_not_allowed).
 const PROVIDER_HOSTS = {
-  greenhouse: ["boards.greenhouse.io", "job-boards.greenhouse.io"], lever: ["jobs.lever.co"], ashby: ["jobs.ashbyhq.com"],
+  greenhouse: ["boards.greenhouse.io", "job-boards.greenhouse.io", "job-boards.eu.greenhouse.io"], lever: ["jobs.lever.co"], ashby: ["jobs.ashbyhq.com"],
   smartrecruiters: ["jobs.smartrecruiters.com", "careers.smartrecruiters.com"], workable: ["apply.workable.com"],
   recruitee: [], teamtailor: [], personio: [], bamboohr: [], breezy: [], workday: [],
 };
@@ -72,10 +73,15 @@ function graphqlRead(req) {
     /^\s*(?:#[^\n]*\n\s*)*(query\b|\{)/.test(op.query) && !/\bmutation\b/.test(op.query) && !/\bsubscription\b/.test(op.query));
 }
 
-async function robotsOk(url, cache, ua) {
+// D-072: one provider serves every employer's subdomain from the same machines (Recruitee answered 429 to 10 of 20 held-out
+// postings in run 43192269304, each on its own subdomain, six at once). The polite pace is per provider, not per subdomain.
+const SHARED = /(?:^|\.)(recruitee\.com|teamtailor\.com|bamboohr\.com|breezy\.hr|jobs\.personio\.de|myworkdayjobs\.com|smartrecruiters\.com|workable\.com|lever\.co|ashbyhq\.com|greenhouse\.io)$/i;
+const paceKey = (host) => { const m = SHARED.exec(String(host).toLowerCase()); return m ? m[1].toLowerCase() : String(host).toLowerCase(); };
+async function robotsOk(url, cache, ua, pacer) {
   const u = new URL(url);
   if (!cache.has(u.origin)) {
     let g;
+    if (pacer) await pacer.wait(paceKey(u.host));
     try {
       const r = await fetch(`${u.origin}/robots.txt`, { headers: { "user-agent": ua }, redirect: "follow", signal: AbortSignal.timeout(15000) });
       g = r.status >= 500 ? "deny" : r.ok ? lib.parseRobots(await r.text()) : [];
@@ -101,10 +107,12 @@ async function strictPosting(browser, item, o) {
   if (!lib.PERSONAS[persona]) throw new Error(`unknown persona: ${persona}`);
   const r = { provider: item.provider, url: item.url, persona, vm: vmVerdict(item.url), result: "fail", reason: null, field: null, needs: null, sent_blocked: 0, upload_simulated: 0, graphql_reads: 0, submit_attempts: 0, ms: 0 };
   const t0 = Date.now();
-  const rb = await robotsOk(item.url, o.robots, o.ua);
+  const rb = await robotsOk(item.url, o.robots, o.ua, o.pacer);
   if (rb !== true) { r.reason = rb === "unreachable" ? "host_unreachable" : "robots_disallowed"; r.ms = Date.now() - t0; return r; }
   const host = new URL(item.url).hostname.toLowerCase();
-  const allowHosts = [...new Set([host, ...(PROVIDER_HOSTS[item.provider] || [])])];
+  // The posting's own host and its www twin (sofi.com sends every visitor to www.sofi.com: the same site, not a redirect off it).
+  const twin = host.startsWith("www.") ? host.slice(4) : `www.${host}`;
+  const allowHosts = [...new Set([host, twin, ...(PROVIDER_HOSTS[item.provider] || [])])];
   const resumeSha = crypto.createHash("sha256").update(fs.readFileSync(o.resumePath)).digest("hex");
   const p = { id: `${item.provider}-${item.n ?? ""}`, ats: item.provider, url: item.url, facts: lib.PERSONAS[persona], answers: {}, resume: { path: o.resumePath, sha256: resumeSha, preparedWithSha256: resumeSha } };
   p.approval = { approval_id: "strict-dry-run", hash: payloadHash(p) };
@@ -119,7 +127,7 @@ async function strictPosting(browser, item, o) {
     }
     if (["image", "media", "font"].includes(req.resourceType())) return false;
     // Polite pacing is per page load (1 a second per host), not per script or stylesheet a page loads with it.
-    if (req.isNavigationRequest()) await o.pacer.wait(u.host);
+    if (req.isNavigationRequest()) await o.pacer.wait(paceKey(u.host));
     return true;
   };
   const stop = strictStop();
@@ -129,6 +137,9 @@ async function strictPosting(browser, item, o) {
   else if (out.reason === "missing_required_answer" && CUSTOM_ONLY(out.needs)) r.result = "ready_if_answered";
   if (out.status === "submitted_page_confirmed" || out.status === "unknown_outcome") { r.result = "fail"; r.reason = `BREACH: runner reported ${out.status}`; }
   r.diag = out.diag || null; r.check = out.check || null;
+  // D-072: the wall the run stopped at, the page it stopped on, and the hand-off the runner produced there (or none).
+  r.wall = out.wall || null; r.at = out.at || null; r.handoff = out.handoff || null; r.filled_count = (out.filled_labels || []).length;
+  r.d072 = d072.classify(r);
   r.ms = Date.now() - t0;
   return r;
 }
@@ -145,7 +156,7 @@ function summarize(rows) {
     ready_except_upload: rows.filter((x) => x.result === "ready_except_upload").length, uploads_simulated: rows.reduce((a, x) => a + (x.upload_simulated || 0), 0),
     sends_blocked: rows.reduce((a, x) => a + x.sent_blocked, 0), graphql_reads: rows.reduce((a, x) => a + x.graphql_reads, 0),
     breaches: rows.filter((x) => /^BREACH/.test(x.reason || "")).length, top_fail: reasons(rows).slice(0, 8) };
-  return { all, prov };
+  return { all, prov, d072: d072.tally(rows) };
 }
 
 function markdown(label, s, persona = "default") {
@@ -155,6 +166,11 @@ function markdown(label, s, persona = "default") {
     "| provider | sampled | pass | pass % | ready if answered | ready except upload | fail | VM today | pass the VM drives | top failure reasons |", "|---|---|---|---|---|---|---|---|---|---|"];
   for (const x of s.prov) L.push(`| ${x.provider} | ${x.sampled} | ${x.pass} | ${pct(x.pass, x.sampled)} | ${x.ready_if_answered} | ${x.ready_except_upload} | ${x.fail} | ${x.vm_drives === x.sampled ? "drives" : x.vm_drives ? `drives ${x.vm_drives}/${x.sampled}` : "refuses"} | ${x.vm_pass} | ${x.top_fail.map(([k, n]) => `${k} ${n}`).join("; ")} |`);
   L.push("", "Failure reasons overall: " + s.all.top_fail.map(([k, n]) => `${k} ${n}`).join("; "));
+  if (s.d072) {
+    const t = s.d072;
+    L.push("", `**D-072 (99% bar): (a) ${t.a} + (b) ${t.b} = ${t.a + t.b} / ${t.n}; needs ${t.need}; ${t.meets ? "meets" : "does not meet"}.** Raw reached Submit: ${t.raw_pass}.`, "",
+      "| outcome | cause | count |", "|---|---|---|", ...Object.entries(t.causes).sort().map(([k, n]) => `| ${k.split("|")[0]} | ${k.split("|")[1]} | ${n} |`));
+  }
   return L.join("\n") + "\n";
 }
 
@@ -175,6 +191,8 @@ async function main() {
   const conc = Math.max(1, Number(arg("concurrency", 6)));
   await Promise.all(Array.from({ length: conc }, async () => { while (next < items.length) { const i = next++; rows[i] = await strictPosting(browser, items[i], o);
     const x = rows[i]; console.log(["STRICT", x.provider, x.result, `vm=${x.vm}`, x.reason, x.field || x.error || "", `blocked=${x.sent_blocked}`, `gql=${x.graphql_reads}`, `upload_simulated=${x.upload_simulated}`, `${(x.ms / 1000).toFixed(1)}s`, x.url, `persona=${x.persona}`].join(" | "));
+    if (x.handoff) console.log("HANDOFF | " + x.provider + " | " + x.url + " | " + JSON.stringify({ reason: x.handoff.reason, wall: x.handoff.wall, link: x.handoff.link, card: x.handoff.card || null, step: x.handoff.step, filled: x.handoff.filled.length, at_door: x.handoff.at_door, remaining: x.handoff.remaining.slice(0, 6) }));
+    console.log("D072 | " + x.provider + " | " + x.d072.outcome + " | " + x.d072.cause + " | " + x.url);
     if (x.result !== "pass" && (x.diag || x.check)) console.log("DIAG | " + x.provider + " | " + JSON.stringify({ check: x.check, blocked: x.blocked || [], ...x.diag }));
     // Why each field was handed back, and the options a choice offered (the posting's own words), for the record.
     if (x.result !== "pass" && x.needs) console.log("NEEDS | " + x.provider + " | " + x.url + " | " + JSON.stringify([...x.needs].sort((m, n) => (m.reason === "no_confirmed_answer") - (n.reason === "no_confirmed_answer")).slice(0, 12).map((n) => ({ label: String(n.label || "").slice(0, 60), reason: n.reason, ...(n.kind ? { kind: n.kind } : {}), ...(n.detail ? { detail: String(n.detail).slice(0, 160) } : {}), ...(n.options ? { options: n.options.slice(0, 12).map((o) => String(o).slice(0, 40)) } : {}) })))); } }));
@@ -184,6 +202,7 @@ async function main() {
   fs.writeFileSync(path.join(out, "strict-summary.json"), JSON.stringify(s, null, 2));
   fs.writeFileSync(path.join(out, "strict-summary.md"), markdown(label, s, persona));
   process.stdout.write(markdown(label, s, persona));
+  { const t = s.d072; console.log(`D072-TOTAL | ${label} | a ${t.a} | b ${t.b} | a+b ${t.a + t.b} / ${t.n} | need ${t.need} | ${t.meets ? "MEETS" : "BELOW"} | raw reached Submit ${t.raw_pass}`); }
   if (s.all.breaches) process.exit(3);
 }
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });

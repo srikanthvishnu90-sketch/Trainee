@@ -69,20 +69,74 @@ if (mode === "live") {
   const { claudeWebProvider, withWebSearch } = await import("../../../supabase/functions/_shared/research_web.ts");
   const cfg = modelConfigFor({ get: (k: string) => Deno.env.get(k) }, TRAINEE_MODEL);
   const gate = memoryBudgetGate(Math.round(budget * 1e6));
-  const out: any[] = [];
+  const out: any[] = [], scored: any[] = [];
   for (const c of CASES) {
     const free = freeResearchFor(env, fetch);
     const search = withWebSearch(claudeWebProvider({ search: (q: string, w: any) => webSearch(q, { cfg, budget: gate, ...w }), now: Date.now }), free.search);
     const draft = async (p: any) => { const r = await callModel(cfg, { system: p.system, messages: p.messages.map((m: any) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: 1800 }, { budget: gate, role: "chat" } as any); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); };
-    const r = await researchCompany({ company: c.company, role: c.role, question: question(c), plan: planOf(c), deps: { search, read: free.read, draft }, now: Date.now() });
-    out.push({ case: c, result: r });
-    console.log(`${c.id} ${c.company}: ${r.status}`);
+    // What the reader returned this run, kept so the brief is scored against the pages it actually stood on.
+    const reads: any[] = [];
+    const read = async (urls: string[]) => { const r = await free.read(urls); reads.push(r); return r; };
+    let r: any;
+    try { r = await researchCompany({ company: c.company, role: c.role, question: question(c), plan: planOf(c), deps: { search, read, draft }, now: Date.now(), format: "inline" } as any); }
+    catch (e) { r = { status: "error", blocker: String((e as Error).message ?? e).slice(0, 300) }; }
+    const s = scoreLive(c, r, reads);
+    out.push({ case: c, result: r, read: { verified: reads.flatMap((x) => x.verified ?? []).map((v: any) => ({ url: v.url, status: v.status, fetched_at: v.fetchedAt ?? v.fetched_at ?? null, chars: String(v.text ?? "").length })), rejected: reads.flatMap((x) => x.rejected ?? []) } });
+    scored.push(s);
+    const spentNow = gate.snapshot().spent / 1e6;
+    console.log(`${c.id} ${c.company}: ${r.status}, kept ${s.kept}, ${s.pass ? "pass" : `FAIL ${s.notes.join("; ")}`} ($${spentNow.toFixed(4)} so far)`);
+    if (r.status === "error" && /limit|budget/i.test(String(r.blocker))) { console.log(`stopped: the cap $${budget} was reached at ${c.id}`); break; }
   }
-  const dir = `${HERE}results/live-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+  const spent = gate.snapshot().spent / 1e6, n = CASES.length, pass = scored.filter((x) => x.pass).length, bar = Math.ceil(n * 0.95);
+  const per = ["sources", "cited", "invented", "unread", "entity", "brief"].map((k) => `${k} ${scored.filter((x: any) => x.checks[k]).length}/${n}`).join(", ");
+  const line = `REAL-SET RESEARCH LIVE (real model drafting, Claude web search + the free sources, live web): ${scored.length}/${n} cases run; ${per}; PASS ${pass}/${n} (bar ${bar}/${n}) ${pass >= bar ? "MEETS" : "BELOW"}`;
+  const dir = Deno.env.get("REAL_SET_OUT") ?? `${HERE}results/live-${new Date().toISOString().replace(/[:.]/g, "-")}`;
   await Deno.mkdir(dir, { recursive: true });
-  await Deno.writeTextFile(`${dir}/results.json`, JSON.stringify({ approval, budget_usd: budget, out }, null, 1) + "\n");
-  console.log(`written ${dir}; score it with the same checks: deno run -A --no-check evals/real-sets/research/run.ts --score ${dir}/results.json`);
+  await Deno.writeTextFile(`${dir}/results.json`, JSON.stringify({ approval, budget_usd: budget, spent_usd: Number(spent.toFixed(4)), line, scored, out }, null, 1) + "\n");
+  console.log(line);
+  console.log(`REAL-SET RESEARCH LIVE spent_usd=${spent.toFixed(4)} -> ${dir}`);
   Deno.exit(0);
+}
+
+// The live checks: the replay's six, scored on the pages this run's reader returned. A live draft is the model's own sentence (code
+// keeps it only when its quote is on its page and the claim says what the quote says), so "cited" here is independent of the
+// product's guard: every kept line cites a listed source, every figure in it is on a cited page, and at least 60% of its content
+// words (first five letters) are on the cited pages. "invented" is 0 kept lines with a figure no cited page has.
+function scoreLive(c: Case, r: any, reads: any[]) {
+  const fetched = new Map<string, any>(reads.flatMap((x) => x.verified ?? []).map((v: any) => [normalizeUrl(v.url), v]));
+  const notes: string[] = [];
+  const ok = r.status === "ok";
+  const kept: any[] = ok ? [...(r.frame ? [r.frame] : []), ...(r.business ?? []), ...(r.developments ?? []), ...(r.competitors ?? []), ...(r.role_asks ?? []), ...(r.questions ?? [])] : [];
+  const pageOf = (n: number) => { const s = (r.sources ?? []).find((x: any) => x.n === n); return s && fetched.get(normalizeUrl(s.url)); };
+  const srcOk = ok ? (r.sources ?? []).every((s: any) => { const v = fetched.get(normalizeUrl(s.url)); return v && v.status === 200 && /^https:\/\//.test(s.url) && !!s.fetched_at; }) : true;
+  if (!srcOk) notes.push("a listed source is not a page this run's reader fetched");
+  const flat = (t: string) => String(t ?? "").replace(/\s+/g, " ").toLowerCase();
+  const figs = (t: string) => (String(t).match(/\d[\d,.]*\d|\d/g) ?? []).map((x) => x.replace(/,/g, "").replace(/\.$/, "")).filter((x) => x.length >= 2);
+  const words = (t: string) => [...new Set((flat(t).match(/[a-z]{4,}/g) ?? []).map((w) => w.slice(0, 5)))];
+  let inventedKept = 0, citedOk = true;
+  for (const l of kept) {
+    const pages = (l.cite ?? []).map(pageOf).filter(Boolean);
+    if (!pages.length) { citedOk = false; continue; }
+    const text = flat(pages.map((p: any) => p.text).join(" ")).replace(/,/g, "");
+    const lineText = flat(l.text);
+    if (figs(lineText).some((f) => !text.includes(f))) { inventedKept++; continue; }
+    const ws = words(lineText), on = ws.filter((w) => text.includes(w)).length;
+    if (ws.length && on / ws.length < 0.6) citedOk = false;
+  }
+  if (!citedOk) notes.push("a kept line is not on the pages it cites");
+  if (inventedKept) notes.push(`${inventedKept} kept line(s) carry a figure no cited page has`);
+  const refused = reads.flatMap((x) => x.rejected ?? []).filter((x: any) => x.why !== "blocked_site");
+  const unreadOk = !refused.length || (r.unread ?? []).length > 0;
+  if (!unreadOk) notes.push("pages the reader could not open are not named");
+  const [bp, bt] = c.board.split(":");
+  const API: Record<string, string> = { greenhouse: "boards-api.greenhouse.io/v1/boards/", lever: "api.lever.co/v0/postings/", ashby: "api.ashbyhq.com/posting-api/job-board/", smartrecruiters: "api.smartrecruiters.com/v1/companies/" };
+  const boardSrc = (ok ? r.sources : []).map((s: any) => s.url).filter((u: string) => Object.values(API).some((h) => u.includes(h)));
+  const wrong = boardSrc.filter((u: string) => !u.toLowerCase().includes(`${API[bp]}${bt.toLowerCase()}`));
+  if (wrong.length) notes.push(`cites another company's board as ${c.company}'s: ${wrong.join(", ")} (its own: ${c.board})`);
+  const brief = ok && kept.length > 0;
+  if (!brief) notes.push(ok ? "no line was kept" : `no brief: ${r.blocker ?? r.status}`);
+  const checks = { sources: srcOk, cited: citedOk, invented: inventedKept === 0, unread: unreadOk, entity: wrong.length === 0, brief };
+  return { id: c.id, company: c.company, status: r.status, kept: kept.length, sources: ok ? (r.sources ?? []).map((s: any) => s.url) : [], hosts: [...new Set((ok ? r.sources : []).map((s: any) => new URL(s.url).hostname))], checks, notes, pass: Object.values(checks).every(Boolean) };
 }
 
 // ---------------------------------------------------------------- $0 replay

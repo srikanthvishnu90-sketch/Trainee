@@ -18,6 +18,7 @@
 import type { Act, KV, Src, StateInput } from "./file_family.ts";
 import type { AnswerLibrary, CareerBrief, PathComparison, ProfileFact, ProfileFacts } from "./file_family_plan.ts";
 import type { InterviewHub, Negotiation, OfferComparison, WeeklyBrief } from "./file_family_apply.ts";
+import type { PathComparisonRow } from "./career_path_comparisons.ts";
 
 export type LiveFamily = "F-01" | "F-02" | "F-03" | "F-08" | "F-13" | "F-14" | "F-14n" | "F-15";
 export const LIVE_FAMILIES: LiveFamily[] = ["F-01", "F-02", "F-03", "F-08", "F-13", "F-14", "F-14n", "F-15"];
@@ -34,11 +35,13 @@ export interface Records {
   // deno-lint-ignore no-explicit-any
   account: any | null; standing: { text: string; at?: string }[]; questions: QuestionRow[]; interviews: InterviewRow[];
   digest: { enabled: boolean; day: number; hour: number; tz: string | null } | null; events: { at: string; kind: string; subject: string | null }[]; offers: OfferOnFile[];
+  // D-072 (files writers): the person's newest path comparison (career_path_comparisons); absent or null: none on record.
+  paths?: PathComparisonRow | null;
 }
 // What each family reads: the reader fetches only these.
-export type Source = "account" | "standing" | "questions" | "interviews" | "digest" | "events" | "offers";
+export type Source = "account" | "standing" | "questions" | "interviews" | "digest" | "events" | "offers" | "paths";
 export const READS: Record<LiveFamily, Source[]> = {
-  "F-01": ["account", "standing", "events"], "F-02": ["account", "standing"], "F-03": ["account"], "F-08": ["questions"],
+  "F-01": ["account", "standing", "events"], "F-02": ["account", "standing"], "F-03": ["paths"], "F-08": ["questions"],
   "F-13": ["interviews"], "F-14": ["digest", "events", "questions", "interviews"], "F-14n": ["offers"], "F-15": ["offers"],
 };
 export type FamilyView = { view: unknown } | { state: StateInput };
@@ -125,9 +128,22 @@ export function careerBriefView(r: Records): FamilyView {
 }
 
 // ---------------------------------------------------------------- F-03 Path comparison
-// No record of compared directions exists anywhere yet (the brain keeps none). Evidence strength and reach are never made up, so
-// the page says so and opens the chat. It draws a comparison as soon as a store of directions does.
-export function pathComparisonView(_r: Records): FamilyView {
+// D-072 (files writers): drawn from the person's newest comparison (career_path_comparisons, written by compare_paths when they
+// compared paths in chat): each direction as they named it, with rows from their own words and confirmed record. Evidence is the
+// stored count of related confirmed facts; reach, odds and timing are never predicted. With none on record the page says so and
+// opens the chat.
+export function pathComparisonView(r: Records): FamilyView {
+  const p = r.paths;
+  if (p && Array.isArray(p.directions) && p.directions.length >= 2) {
+    const d: PathComparison = { title: clean(p.title, 120), confirmedFacts: Math.max(0, Number(p.confirmed_facts) || 0), updatedAt: iso(p.created_at),
+      directions: p.directions.slice(0, 4).map((x) => ({ letter: clean(x.letter, 2), name: clean(x.name, 80), evidence: x.evidence === "Strong" || x.evidence === "Partial" ? x.evidence : "Weak",
+        reach: `${x.related} related confirmed fact${x.related === 1 ? "" : "s"}; timing not predicted`,
+        rows: (x.rows ?? []).map((e): KV => ({ k: clean(e.k, 60), v: e.v === null ? null : clean(e.v, 240), ...(e.missing ? { missing: clean(e.missing, 80) } : {}),
+          src: e.v === null ? null : e.src?.kind === "resume" ? { label: "Your resume, confirmed by you" } : SAID(e.src?.at ?? p.created_at) })) })),
+      experiment: null,
+      acts: { primary: ask("start", "Compare again"), secondary: [ask("decision", "Talk through the decision")], caption: "Nothing here predicts your odds; it holds what you said and what your record shows." } };
+    return { view: d };
+  }
   return missingState("F-03", "No path comparison on record", "What's missing", "Trainee compares directions only from facts you confirmed, and no comparison has been made for you yet. Hiring odds are never predicted.", ask("start", "Ask Trainee to compare two directions"));
 }
 
@@ -265,6 +281,7 @@ export function supabaseRecords(admin: any): (userId: string, family: LiveFamily
     const offers = need.has("offers") ? (must(await admin.from("agent_flow_state").select("offers:state->career->stores->offerBenchmark->offers").eq("user_id", userId).limit(200), "the offers on file") ?? [])
       // deno-lint-ignore no-explicit-any
       .flatMap((t: any) => Array.isArray(t?.offers) ? t.offers : []).filter((x: OfferOnFile) => x && x.offer && typeof x.at === "number") : [];
-    return { now: o.now, tz: o.tz, account: val("career:account"), standing, questions, interviews, digest: digest ?? null, events, offers };
+    const paths = need.has("paths") ? (must(await admin.from("career_path_comparisons").select("version,title,directions,said,confirmed_facts,created_at").eq("user_id", userId).order("version", { ascending: false }).limit(1), "the path comparisons") ?? [])[0] ?? null : null;
+    return { now: o.now, tz: o.tz, account: val("career:account"), standing, questions, interviews, digest: digest ?? null, events, offers, paths };
   };
 }

@@ -21,6 +21,7 @@ const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { applyOne, payloadHash, NeedsUser } = require("./parallel-apply.cjs");
+const { recheck } = require("./handoff.cjs");
 // What the person is told was handed to them, per HANDOFF_REASONS (the same words as parallel-apply.cjs and scripts/apply.ts).
 const HANDED_BACK = {
   login_required: "the employer asks the person to sign in; they finish it at the link",
@@ -162,6 +163,19 @@ function createWorker(o) {
         const r = await rpc("career_apply_vm_heartbeat", { p_id: row.id, p_lease: row.lease_token, p_worker: cfg.workerId, p_phase: phase });
         if (!r || r.ok !== true) throw new NeedsUser(r && r.why ? r.why : "lease_lost");
       };
+      // D-072 / WO-L: a row the person finished a wall on (handoff_done_at, set when they said done) is RE-CHECKED, never sent on
+      // that run: the same approved payload is driven to the instant before Submit and the exact answers the page holds are recorded
+      // as the card (needs_user / ready_for_yes). Only a later run carrying the person's yes to that card's hash (handoff_yes) may
+      // press Submit, and only while the page still holds exactly that card (handoff.cjs recheck).
+      const handoffDone = row.handoff_done_at || (row.evidence && row.evidence.handoff_done_at);
+      if (handoffDone) {
+        const yes = row.handoff_yes || (row.evidence && row.evidence.handoff_yes) || null;
+        const rc = await (o.recheck || recheck)(browser, prep.pool, { allowHosts: cfg.allowHosts, stepTimeoutMs: cfg.stepTimeoutMs, shotDir, onPhase, yes }, o.applyOne ? { runner: { applyOne: apply, NeedsUser } } : undefined);
+        if (rc.state === "ready_for_yes") return void (await complete(row, "needs_user", "ready_for_yes", { nothing_sent: true, link: row.url, answers_card: rc.card, handed_back: "re-checked after you finished the step: these are the exact answers on the page; reply yes to submit exactly this" }));
+        if (rc.state === "still_walled") return void (await complete(row, "needs_user", rc.handoff.reason === "person_answer" ? "needs_answers" : rc.handoff.reason, { nothing_sent: true, link: row.url, handoff: rc.handoff, handed_back: "the step is still there at the employer's page" }));
+        if (rc.state === "submitted") return void (await settle(row, rc.result, shotDir, t0));
+        return void (await complete(row, "not_submitted", rc.reason || "not_submitted", { nothing_sent: true, link: row.url, ...(rc.card ? { answers_card: rc.card } : {}) }));
+      }
       const res = await apply(browser, prep.pool, { allowHosts: cfg.allowHosts, retries: cfg.retries, stepTimeoutMs: cfg.stepTimeoutMs, shotDir, onPhase, backoffMs: 300 });
       await settle(row, res, shotDir, t0);
     } catch (e) {
@@ -195,7 +209,7 @@ function createWorker(o) {
       // A wall stops the run before Submit (parallel-apply never hands one back after the click): nothing was sent, which
       // is what lets the person finish it themselves or have it prepared again (WO-L). The wall kind is kept; the page's
       // contents are not.
-      return void (await complete(row, "needs_user", res.reason, { ...ev, nothing_sent: true, wall: res.wall || (res.reason === "bot_check" ? "bot_check" : null), handed_back: HANDED_BACK[res.reason] || HANDED_BACK.login_required }));
+      return void (await complete(row, "needs_user", res.reason, { ...ev, nothing_sent: true, wall: res.wall || (res.reason === "bot_check" ? "bot_check" : null), handed_back: HANDED_BACK[res.reason] || HANDED_BACK.login_required, ...(res.handoff ? { handoff: res.handoff } : {}) }));
     }
     if (res.status === "unknown_outcome") return void (await complete(row, "unknown_outcome", "application outcome unknown: " + String(res.reason || "").slice(0, 80), ev));
     // not_submitted
@@ -207,7 +221,7 @@ function createWorker(o) {
     if (res.reason === "missing_required_answer") {
       const needs = Array.isArray(res.needs) && res.needs.length ? res.needs : [{ label: res.field || "" }];
       const questions = needs.map((n) => ({ label: String(n.label || "").replace(/\s+/g, " ").slice(0, 200), ...(Array.isArray(n.options) && n.options.length ? { options: n.options.map(String).slice(0, 60) } : {}) }));
-      return void (await complete(row, "not_submitted", "needs_answers", { ...ev, nothing_sent: true, field: res.field, fields: questions.map((q) => q.label), questions, needs: res.needs || null, handed_back: "a required question has no confirmed answer" }));
+      return void (await complete(row, "not_submitted", "needs_answers", { ...ev, nothing_sent: true, field: res.field, fields: questions.map((q) => q.label), questions, needs: res.needs || null, handed_back: "a required question has no confirmed answer", ...(res.handoff ? { handoff: res.handoff } : {}) }));
     }
     // One that could not be set and read back: handed back by name, never guessed.
     if (res.reason === "field_not_filled") {
@@ -217,6 +231,7 @@ function createWorker(o) {
     // The posting's own page answered 404 Not Found or 410 Gone on every try: the posting is closed, not a page that failed to
     // load (batch of 60: a Lever 404 read "retries_exhausted"). Reported as closed, with the status as its proof; the portal is
     // not held off for it.
+    if (res.reason === "posting_closed") return void (await complete(row, "not_submitted", "POSTING_CLOSED", { ...ev, nothing_sent: true, closed: "the board sent the posting's link to " + String(res.field || "").slice(0, 160) }));
     if (res.reason === "retries_exhausted" && /^page_load_(404|410)$/.test(res.error || "")) return void (await complete(row, "not_submitted", "POSTING_CLOSED", { ...ev, nothing_sent: true, error: res.error, closed: "the posting's page answered " + res.error.slice(-3) }));
     if (res.reason === "retries_exhausted") {
       if (res.error === "page_load_429") await refused(row, "rate_limited", null);

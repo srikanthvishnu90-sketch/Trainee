@@ -32,6 +32,7 @@
 const fs = require("node:fs");
 const { fillForm, heldNow, recheckFilled, MARK_SIGNIN } = require("./ats-fill.cjs");
 const { APPLY_TEXT, NEVER_CLICK, applyUrlFor } = require("./apply-entry.cjs");
+const { buildHandoff } = require("./handoff.cjs");
 const crypto = require("node:crypto");
 
 const sha256 = (b) => crypto.createHash("sha256").update(b).digest("hex");
@@ -199,6 +200,45 @@ async function openApply(page, timeout) {
   await page.waitForSelector(FIELD_SEL, { timeout: Math.min(timeout, 8000) }).catch(() => null);
   return true;
 }
+// D-072 (item 4): a shown check that sits INSIDE the application form (BambooHR draws a reCAPTCHA checkbox above its Submit on every
+// form, strict benchmark run 43192269304: 76 of 80 postings) is a wall at the end of the form, not at its door: everything else
+// is filled and read back first, and the run stops at the check, untouched, as needs_user / bot_check with wall check_in_form.
+// A check over the whole page (a Cloudflare or DataDome challenge, an interstitial, a check outside any form) still stops the
+// run on load, before anything is typed. Read only: the check is never clicked, typed into or scored.
+function CHECK_IN_FORM() {
+  const sel = ".g-recaptcha, .h-captcha, .cf-turnstile, iframe[src*='recaptcha/api2/anchor'], iframe[src*='recaptcha/enterprise/anchor'], iframe[src*='hcaptcha.com/captcha'], iframe[src*='challenges.cloudflare.com']";
+  if (/^(just a moment|attention required)/i.test(document.title || "")) return false;
+  const checks = [...document.querySelectorAll(sel)].filter((e) => e.offsetWidth > 60 && e.offsetHeight > 40);
+  if (!checks.length) return false;
+  return checks.every((e) => {
+    const f = e.closest("form");
+    if (!f || f.hasAttribute("data-upmore-signin")) return false;
+    const fields = [...f.querySelectorAll("input, select, textarea")].filter((i) => !["hidden", "submit", "button"].includes(i.type) && !/captcha/i.test(i.name || ""));
+    // A whole-page challenge covers the page; an in-form check is a small box among the form's own questions.
+    return fields.length >= 3 && e.offsetWidth < innerWidth * 0.8 && e.offsetHeight < 200;
+  });
+}
+// D-072: the posting's own page says it is gone (Greenhouse ?error=true, Workable ?not_found=true, BambooHR / Breezy sending the
+// posting's link back to the job list). Named posting_closed, the real reason, instead of "no application form found".
+function closedAfterLoad(asked, landed) {
+  let a, b;
+  try { a = new URL(asked); b = new URL(landed); } catch { return false; }
+  if (/[?&](?:error|not_found)=true\b/.test(b.search) && !/[?&](?:error|not_found)=true\b/.test(a.search)) return true;
+  return b.host === a.host && a.pathname.replace(/\/+$/, "").length > 1 && a.pathname.replace(/\/+$/, "") !== b.pathname.replace(/\/+$/, "")
+    && /^\/(?:careers|jobs)?\/?$/.test(b.pathname);
+}
+// D-072: an employer page that embeds the board's own form in a frame (Greenhouse's job_app embed on bitwarden.com, lucidmotors.com):
+// the frame's address, when it is on an allowed host, is the application form one GET away.
+async function embeddedFormUrl(page, allow) {
+  const srcs = await page.evaluate(() => [...document.querySelectorAll("iframe")].map((f) => f.src || "")).catch(() => []);
+  for (const src of srcs) {
+    let u; try { u = new URL(src); } catch { continue; }
+    if (!/\/embed\/job_app\b|\/embed\/job_board\/?$/.test(u.pathname) && !/[?&]for=/.test(u.search)) continue;
+    if (/\/embed\/job_board/.test(u.pathname)) continue;
+    if (urlVerdict(u.href, allow).ok) return u.href;
+  }
+  return null;
+}
 async function botCheck(page) {
   // The page and its own frames (an employer's site embedding the ATS form). A captcha provider's frame is judged from its
   // parent, by its iframe's src and rendered size: an invisible badge frame is not a shown check.
@@ -213,7 +253,7 @@ const hasApproval = (p) => !!p.approval && typeof p.approval.approval_id === "st
   && typeof p.approval.hash === "string" && p.approval.hash === payloadHash(p);
 const CONFIRM_RE = /thank you for applying|application (has been )?submitted|we['’]ve received your application/i;
 
-class NeedsUser extends Error { constructor(reason, field, wall) { super(`${reason}${field ? `: ${field}` : ""}`); this.reason = reason; this.field = field; this.needs = null; this.wall = wall || null; } }
+class NeedsUser extends Error { constructor(reason, field, wall) { super(`${reason}${field ? `: ${field}` : ""}`); this.reason = reason; this.field = field; this.needs = null; this.wall = wall || null; this.filled = null; this.at = null; } }
 
 function checkPayload(p, { allowHosts = [] } = {}) {
   if (!p || !p.url || !p.facts || !p.resume) throw new NeedsUser("invalid_payload");
@@ -245,6 +285,9 @@ function DIAG(field) {
   out.apply = [...document.querySelectorAll("a, button, [role=button]")].filter((e) => /apply|bewerb|postul|solicit|interest|candidat/i.test(e.innerText || ""))
     .slice(0, 5).map((e) => cut(`${e.tagName} "${(e.innerText || "").trim()}" ${e.getAttribute("href") || ""} ${e.offsetWidth}x${e.offsetHeight}`, 140));
   out.frames = [...document.querySelectorAll("iframe")].slice(0, 4).map((f) => cut(f.getAttribute("src"), 100));
+  // The visible controls a person could press (their words, type, and whether a form holds them): why no Submit was marked.
+  out.buttons = [...document.querySelectorAll("button, input[type=submit], input[type=button], [role=button]")].filter((b) => b.offsetWidth || b.offsetHeight)
+    .slice(0, 10).map((b) => cut(`${b.tagName} ${b.getAttribute("type") || ""} "${(b.innerText || b.value || "").trim()}" ${b.closest("form") ? "in-form" : "outside"}`, 80));
   return out;
 }
 async function attempt(browser, p, opts, timing) {
@@ -298,13 +341,26 @@ async function attempt(browser, p, opts, timing) {
     const g = urlVerdict(page.url(), allow);
     if (!g.ok) throw new NeedsUser("redirect_not_allowed", g.host);
   };
+  // The shown-check gate. On the way in (final false), a check inside the application form is noted and the form is filled first
+  // (CHECK_IN_FORM); any other shown check stops the run here, before anything is typed. Right before Submit (final true), any
+  // shown check stops the run: an in-form one as wall check_in_form, with everything else already filled and read back.
+  let checkInForm = null;
+  const gate = async (final = false) => {
+    const shown = await botCheck(page);
+    if (!shown) return;
+    if (!final && (await page.evaluate(CHECK_IN_FORM).catch(() => false))) { checkInForm = shown; return; }
+    const e = new NeedsUser("bot_check", p.url, checkInForm || (final && (await page.evaluate(CHECK_IN_FORM).catch(() => false))) ? "check_in_form" : null);
+    e.detail = shown; throw e;
+  };
+  let filledSoFar = [];
   try {
     const t0 = Date.now();
     let resp;
     try { resp = await page.goto(p.url, { waitUntil: "domcontentloaded" }); } catch (e) { onAllowedHost(); throw e; }
     onAllowedHost();
     if (!resp || resp.status() >= 400) throw new Error(`page_load_${resp ? resp.status() : "none"}`);
-    { const shown = await botCheck(page); if (shown) { const e = new NeedsUser("bot_check", p.url); e.detail = shown; throw e; } }
+    if (closedAfterLoad(p.url, page.url())) throw new NeedsUser("posting_closed", page.url());
+    await gate();
     // An employer that wants the person to sign in first: never signed into, never given a password (the person does that).
     await stopAtWall(page, p.url);
     // The form's own Submit control, as a person would press it: the visible one. A <button> with no type submits its form
@@ -316,12 +372,19 @@ async function attempt(browser, p, opts, timing) {
       const vis = (e) => !!(e.offsetWidth || e.offsetHeight) && getComputedStyle(e).visibility !== "hidden";
       for (const e of document.querySelectorAll("[data-upmore-submit]")) e.removeAttribute("data-upmore-submit");
       const forms = [...document.querySelectorAll("form")].filter((f) => f.querySelector("input, select, textarea") && !f.hasAttribute("data-upmore-signin"));
-      const word = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$|^\s*(bewerbung )?(absenden|senden)\s*$|^\s*(envoyer|enviar|verzenden|skicka)( .{0,20})?$/i;
+      const word = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$|^\s*(bewerbung )?(absenden|senden|abschicken)\s*$|^\s*(sollicitatie )?(versturen|verzenden)\s*$|^\s*(envoyer|enviar|verzenden|skicka)( .{0,20})?$/i;
       for (const f of forms) {
         const typed = [...f.querySelectorAll("button[type=submit], button:not([type]), input[type=submit]")].filter(vis);
         const worded = [...f.querySelectorAll("button, [role=button], input[type=button]")].filter((b) => vis(b) && word.test(b.innerText || b.value || ""));
         const pick = worded.length === 1 ? worded[0] : typed.length === 1 ? typed[0] : worded.find((b) => typed.includes(b)) || null;
         if (pick) { pick.setAttribute("data-upmore-submit", "1"); return true; }
+      }
+      // D-072: one application form whose Submit the board draws just outside it (BambooHR: strict run 43273066955, 18 of 20
+      // held-out forms, 17 to 31 fields, no Submit inside the <form>): the page's one visible control in the Submit words, outside
+      // every form and every sign-in form. Two or none: no Submit is pressed.
+      if (forms.length === 1) {
+        const lone = [...document.querySelectorAll("button, [role=button], input[type=button], input[type=submit]")].filter((b) => vis(b) && !b.closest("form") && !b.closest("[data-upmore-signin]") && word.test(b.innerText || b.value || ""));
+        if (lone.length === 1) { lone[0].setAttribute("data-upmore-submit", "1"); return true; }
       }
       // A board that builds its application without a <form> (Ashby: every posting, strict benchmark run 42712892939, forms=0 with
       // 19 to 48 fields): the page is the form when it has no form of its own, asks for a file or an email, and has exactly one
@@ -356,21 +419,37 @@ async function attempt(browser, p, opts, timing) {
       if (direct) {
         try { await page.goto(direct, { waitUntil: "domcontentloaded" }); } catch (e) { onAllowedHost(); throw e; }
         onAllowedHost();
+        // A board drawn by its own script after the load (Workday): its form or its sign-in box, whichever it draws.
+        await page.waitForSelector(`${FIELD_SEL}, input[type=password]`, { timeout: 12000 }).catch(() => null);
+        await gate();
+        await stopAtWall(page, p.url);
+      }
+    }
+    // D-072: the board's own form embedded in the employer's page (a frame on an allowed host): opened at its own address.
+    if (!(await hasForm())) {
+      const embed = await embeddedFormUrl(page, allow);
+      if (embed) {
+        try { await page.goto(embed, { waitUntil: "domcontentloaded" }); } catch (e) { onAllowedHost(); throw e; }
+        onAllowedHost();
         await page.waitForSelector(FIELD_SEL, { timeout: 8000 }).catch(() => null);
-        { const shown = await botCheck(page); if (shown) { const e = new NeedsUser("bot_check", p.url); e.detail = shown; throw e; } }
+        await gate();
         await stopAtWall(page, p.url);
       }
     }
     // A job page whose form is behind its "Apply" control: opened once, and what it leads to is checked like the first load.
     if (!(await hasForm()) && (await openApply(page, opts.stepTimeoutMs || 15000))) {
       onAllowedHost();
-      { const shown = await botCheck(page); if (shown) { const e = new NeedsUser("bot_check", p.url); e.detail = shown; throw e; } }
+      await gate();
       await stopAtWall(page, p.url);
     }
     timing.load = Date.now() - t0;
     const t1 = Date.now();
     if (!(await hasForm())) {
       // The page's only form is an employee sign-in form: a sign-in wall the person finishes themselves (WO-L), nothing typed.
+      // The stop stays a sign-in wall (needs_user / login_required, nothing typed, nothing sent), marked employee_sign_in. D-072:
+      // it is the employer's staff login beside the posting, not the person's own account, so it carries no hand-off
+      // (handoff.cjs) and the 99% reading names it form_not_found:employee_sign_in_only (strict run 43192269304: 18 Teamtailor
+      // postings), never a kept wall.
       if (await page.evaluate(MARK_SIGNIN).catch(() => 0)) throw new NeedsUser("login_required", p.url, "employee_sign_in");
       throw new NeedsUser("no_application_form_found", p.url);
     }
@@ -382,10 +461,11 @@ async function attempt(browser, p, opts, timing) {
     for (let step = 0; ; step++) {
       const r = await fillForm(page, { ats: p.ats, facts: p.facts, answers: p.answers || {}, resumePath: p.resume.path });
       for (const k of Object.keys(fr)) fr[k].push(...(r[k] || []));
+      filledSoFar = fr.filled.map((f) => f.label);
       if (fr.needsUser.length || fr.invalid.length || fr.failed.length || (await markSubmit())) break;
       if (step >= 7 || !(await markNext())) throw new NeedsUser("no_submit_control", p.url);
       onAllowedHost();
-      { const shown = await botCheck(page); if (shown) { const e = new NeedsUser("bot_check", p.url); e.detail = shown; throw e; } }
+      await gate();
       await stopAtWall(page, p.url);
       const before = await page.evaluate(() => [...document.querySelectorAll("input, select, textarea")].filter((e) => e.offsetWidth || e.offsetHeight).length + "|" + (document.body.innerText || "").length);
       await page.click("[data-upmore-next]");
@@ -404,7 +484,10 @@ async function attempt(browser, p, opts, timing) {
     }
     if (fr.needsUser.length) {
       const first = fr.needsUser[0];
-      const e = new NeedsUser(first.reason === "no_confirmed_answer" || /^(agreement|eeo|upload)_/.test(first.reason) || first.reason === "no_resume" ? "missing_required_answer" : "field_not_filled", first.label);
+      const answersOnly = first.reason === "no_confirmed_answer" || /^(agreement|eeo|upload)_/.test(first.reason) || first.reason === "no_resume";
+      // A form that also shows a check (CHECK_IN_FORM) stops as that check, with the person's answers beside it: both are theirs.
+      const e = answersOnly && checkInForm ? new NeedsUser("bot_check", p.url, "check_in_form") : new NeedsUser(answersOnly ? "missing_required_answer" : "field_not_filled", first.label);
+      if (answersOnly && checkInForm) e.detail = checkInForm;
       e.needs = fr.needsUser.map((n) => ({ label: n.label, reason: n.reason, ...(n.kind ? { kind: n.kind } : {}), ...(n.detail ? { detail: String(n.detail).slice(0, 400) } : {}), ...(Array.isArray(n.options) ? { options: n.options.slice(0, 60) } : {}) }));
       throw e;
     }
@@ -421,7 +504,7 @@ async function attempt(browser, p, opts, timing) {
     // Last checks before the click, on what is actually on the page now: still an allowed host, no bot check that appeared
     // while filling, the form posts to an allowed host, and the payload still hashes to what was approved.
     onAllowedHost();
-    { const shown = await botCheck(page); if (shown) { const e = new NeedsUser("bot_check", p.url); e.detail = shown; throw e; } }
+    await gate(true);
     await stopAtWall(page, p.url);
     if (!(await markSubmit())) throw new NeedsUser("no_submit_control", p.url);
     const action = await page.$eval("[data-upmore-submit]", (b) => {
@@ -459,6 +542,12 @@ async function attempt(browser, p, opts, timing) {
     return { status: "submitted_page_confirmed", confirmation: code ? code[0] : null, filled };
   } catch (e) {
     // A benchmark's dry run asks what the page showed at a stop (opts.diag); production never does.
+    if (e instanceof NeedsUser) {
+      // What was filled and read back before the stop, and the page it stopped on: the hand-off's "everything else filled" (D-072).
+      e.filled = e.filled || filledSoFar.slice();
+      e.at = e.at || page.url();
+      if (checkInForm && e.reason !== "bot_check") e.alsoCheck = checkInForm;
+    }
     if (opts.diag && e instanceof NeedsUser) e.diag = await page.evaluate(DIAG, e.field || "").catch(() => null);
     throw e;
   } finally {
@@ -484,7 +573,13 @@ async function applyOne(browser, p, opts = {}) {
       const r = await attempt(browser, p, { ...opts, shotBefore: opts.shotDir && `${opts.shotDir}/${p.id}-1-filled.png`, shotAfter: opts.shotDir && `${opts.shotDir}/${p.id}-2-confirmation.png` }, t);
       return { ...out, ...r, timing: t, ms: Date.now() - started };
     } catch (e) {
-      if (e instanceof NeedsUser && !t.submitClicked) return { ...out, ...(e.detail ? { check: e.detail } : {}), ...(e.diag ? { diag: e.diag } : {}), status: HANDOFF_REASONS.includes(e.reason) ? "needs_user" : "not_submitted", reason: e.reason, field: e.field, wall: e.wall || undefined, needs: e.needs || undefined, ms: Date.now() - started };
+      if (e instanceof NeedsUser && !t.submitClicked) {
+        const r = { ...out, ...(e.detail ? { check: e.detail } : {}), ...(e.diag ? { diag: e.diag } : {}), status: HANDOFF_REASONS.includes(e.reason) ? "needs_user" : "not_submitted", reason: e.reason, field: e.field, wall: e.wall || undefined, needs: e.needs || undefined, filled_labels: e.filled || [], at: e.at || null, ...(e.alsoCheck ? { also_check: e.alsoCheck } : {}), ms: Date.now() - started };
+        // D-072: a stop at a wall the rules keep carries its hand-off (workers/career-browser/handoff.cjs); any other stop carries none.
+        const h = buildHandoff(r, p);
+        if (h) r.handoff = h;
+        return r;
+      }
       if (t.submitClicked) return { ...out, status: "unknown_outcome", reason: e.message, ms: Date.now() - started };
       out.lastError = e.message.split("\n")[0];
       if (out.lastError === "page_load_429") break; // the portal said slow down: not asked again by this run
@@ -509,4 +604,4 @@ async function runPool(browser, payloads, opts = {}) {
   return { results, wallMs: Date.now() - started, concurrency };
 }
 
-module.exports = { botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };
+module.exports = { CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };

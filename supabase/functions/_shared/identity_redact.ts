@@ -53,6 +53,8 @@ const NOT_A_BARE_PASSWORD = /^(?:is|was|for|to|of|on|in|at|and|or|the|a|an|my|yo
 // research / design" are no pair.
 const SIGN_IN_WAY = /^(?:sso|saml|oauth2?|openid|oidc|google|apple|github|gitlab|microsoft|azure|okta|facebook|linkedin|email|phone|sms|passkeys?|face ?id|touch ?id|biometrics?|magic link|ldap|kerberos|face|fingerprint|pin|device|passcode|password|touch|voice)$/i;
 const SIGN_IN_PAIR = /\b(login|log-in|sign[- ]?in with|creds|credentials|user ?name)((?:\s+(?:for|to|on)\s+[^/:\n]{1,30}?)?\s*(?:\bis\b|\bare\b|=|:|-)\s*|(?<=with)\s+)([^\s/:]+\s*\/\s*)([^\s/]{3,})/gi;
+const SIGN_IN_WORD = /\b(?:login|log-in|log in|sign[- ]?in|signin|creds|credentials|password|account)\b/i;
+const EMAIL_PAIR = /(\b[^\s@/:]+@[^\s@/:]+\.[a-z]{2,}\s*\/\s*)([^\s/]{3,})/gi;
 const CODE_LABELED = /\b((?:one[- ]time|verification|security|sign[- ]?in|login|log[- ]in|2fa|mfa|otp|auth(?:entication)?)\s*(?:code|pin|passcode|number)?)(\s*(?:is|=|:|#)?\s*)(\d(?:(?:[ \t\u00a0\u2007\u2009\u202f]{0,8}(?:(?:\r\n|[\r\n\-\u2013\u2014])[ \t\u00a0\u2007\u2009\u202f]{0,8})?)\d){3,7})\b/gi;
 // "code is 4821", "here's the code: 482 913", "sms code 4821", "pin: 4821", "the code they texted me is 482-913": a code or
 // PIN, unless the code is named as something else (a zip, area, promo, course, error, referral ... code).
@@ -154,6 +156,13 @@ export function redactIdentity(input: string, o: { codePending?: boolean } = {})
     // "sign in with SSO / SAML", "sign in with Google / Apple": ways to sign in, not a user name and password.
     if (/with$/i.test(label) && [u, value.replace(/[.,!?;]+$/, "")].some((x) => SIGN_IN_WAY.test(x))) return m;
     removed.add("password"); return `${label}${gap}${user}[password removed]`;
+  });
+  // D-066 (P14 probe, tests/architect/behavior-guide-suite.test.ts): an email and a value after a slash, in a message that names a
+  // login ("here's my workday login so you can check it: alex@x.test / x"), is a sign-in pair even when words stand between the
+  // label and the colon; SIGN_IN_PAIR reads only "login is" / "login for the portal:". The email stays; the value goes.
+  if (SIGN_IN_WORD.test(t)) t = t.replace(EMAIL_PAIR, (m, user: string, value: string) => {
+    if (value.startsWith("[") || !/[\d!@#$%^&*_+=?~-]/.test(value) || value.includes("@")) return m;
+    removed.add("password"); return `${user}[password removed]`;
   });
   t = t.replace(CODE_LABELED, (m, label, sep, code: string, at: number, all: string) => { removed.add("code"); return `${label}${sep}[code removed]${countTail(code, all.slice(at + m.length))}`; });
   t = t.replace(CODE_ANY, (m, label, sep, code: string, at: number, all: string) => { if (DATE_LIKE.test(code)) return m; removed.add("code"); return `${label}${sep}[code removed]${countTail(code, all.slice(at + m.length))}`; });

@@ -134,8 +134,8 @@ export async function agentTurn(o: {
   // REPLY SHAPE: Telegram with CAREER_REPLY_WRITER=on: the shape rules in the prompt, and the attach_document tool.
   shape?: boolean;
   // FILE KINDS: create_file (a page of one of the file kinds). D-061 G11 ("a file ask gets the file"): offered whenever the
-  // handler passes a File service, which it does wherever a File link can be made and delivered (the link rides shape.links to
-  // every channel, after the answer); no longer tied to the reply writer, which stays off (RELEASE_NEVER_ON).
+  // handler passes a File service, which it does on every channel (the link rides shape.links after the answer; where File links
+  // are not set up the service refuses and the brain says so); no longer tied to the reply writer, which stays off (RELEASE_NEVER_ON).
   files?: FileService | null;
   // D-062: the capability tools (_shared/agent/capability_tools.ts: Gmail record and tracker, people search, answering an email),
   // under the same withholding as every other tool.

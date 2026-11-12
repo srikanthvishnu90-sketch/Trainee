@@ -67,7 +67,6 @@ import { brainMode, draftContinuation, FOLLOWUP_INTENT, questionShaped, research
 import { BOUNDARY_LINE, BOUNDARY_SAID, boundaryOf, correctionOf, hypotheticalOf } from "../_shared/agent/turn_notes.ts"; // D-061 G1, G6, G8, G9
 import { severalAsks } from "../_shared/ask_language.ts"; // D-061 G13
 // D-061 G6: a write that moves toward an external effect (a queued or prepared application, a receipt, an email on the rail).
-const fileLinksSet = (env: { get(k: string): string | undefined }) => /^https:\/\/[^\s?#]+$/.test((env.get("TRAINEE_FILE_BASE_URL") || "").trim()) && !!env.get("TRAINEE_FILE_LINK_SECRET");
 // D-061 G1: an ask to make, change, send or export a document.
 const G1_MAKE_ASK = /\b(?:make|build|write|tailor|create|update|edit|change|fix|redo|rewrite|send|give me|generate|export|download|turn|convert|shorten|cut|add|remove|swap|use)\b/i;
 // D-061 G10: an ask to write something ("draft a note to ...", "write a short intro message ...").
@@ -1459,9 +1458,10 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           conversations: repliesStore,
           // REPLY SHAPE: Telegram with the reply writer on gets the shape rules and the attach_document tool.
           shape: replyWriterOn(Deno.env) && writerChannel((body as any)?.channel) === "telegram",
-          // D-061 G11: create_file wherever a File link can be made (TRAINEE_FILE_BASE_URL and its link secret, as production
-          // serves them); without them no file tool is offered, so nothing is promised that cannot be opened.
-          files: fileLinksSet(Deno.env) ? createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now, records: { application: (u, id) => supabaseFileStore(admin).appRow(u, id) } }) : null,
+          // D-061 G11: create_file is offered on every channel, the reply writer on or off. Where File links are not set up
+          // (TRAINEE_FILE_BASE_URL and its secret), the File service refuses to make one and tells the brain to say so, so
+          // nothing is promised that cannot be opened.
+          files: createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now, records: { application: (u, id) => supabaseFileStore(admin).appRow(u, id) } }),
           verifier: hunterVerifier({ fetch, apiKey: Deno.env.get("HUNTER_API_KEY"), cache: supabaseCheckCache(admin), now: Date.now }),
           // RELEASE 9: "keep my layout" reads their own Word file; each tailored file is recorded by version for the outcome rates.
           tailor: { posting: (id) => postingsDb.get(id), personas: supabasePersonaStore(admin), resumes: supabaseResumeStore(admin), render: edgeRenderer(), ownDocx: supabaseOwnDocx(admin), upload: supabaseNewestUpload(admin), versions: supabaseVersionLog(admin),

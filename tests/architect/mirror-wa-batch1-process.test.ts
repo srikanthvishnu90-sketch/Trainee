@@ -30,11 +30,12 @@ const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a,
 // from public pages only, the questions behind a Workday sign-in named as not known); its blocked step is asserted in MP-1 below.
 // Architect amendment (D-063): C4 (a specific advice question, one cited guide), C10 (the tailored PDF, its email a visible placeholder)
 // and C20 (the v2 PDF with both edits) moved from BLOCKED to EXISTS; their process is asserted in MP-1.
-export const EXISTS = ["C2", "C3", "C4", "C5", "C5f1", "C5f2", "C6", "C7", "C8", "C9", "C10", "C11", "C12", "C13", "C14", "C15", "C16", "C17", "C18", "C19", "C20", "C21", "C21f", "C22", "C23"];
+// Architect amendment (D-061): C1 moved from BLOCKED (OFF, CAREER_REPLY_WRITER) to EXISTS: create_file is offered with the reply writer
+// off (D-061 G11), beside search_jobs; asserted in MP-1. The writer stays in RELEASE_NEVER_ON.
+export const EXISTS = ["C1", "C2", "C3", "C4", "C5", "C5f1", "C5f2", "C6", "C7", "C8", "C9", "C10", "C11", "C12", "C13", "C14", "C15", "C16", "C17", "C18", "C19", "C20", "C21", "C21f", "C22", "C23"];
 // The turns whose process needs a capability Trainee does not serve today. OFF: the code exists and a release switch keeps it off
 // (`flags`, none of which release_config.ts serves on). MISSING: what has to be built or provided.
 export const BLOCKED: Record<string, { status: "OFF" | "MISSING"; blocker: string; flags?: string[] }> = {
-  C1: { status: "OFF", flags: ["CAREER_REPLY_WRITER"], blocker: "one File with the checked postings and a weekly plan: create_file (the plan_review kind) is offered only with the reply writer on Telegram (career_brain.ts o.shape); research_career_question's plan page (D-060) has no postings in it" },
 };
 
 const NOTHING_SENT = /\b(?:nothing|not)\b[^.!?\n]{0,40}\b(?:sent|submitted|applied|queued|contacted)\b/i;
@@ -143,6 +144,11 @@ Deno.test({ name: "MP-1 the EXISTS turns follow Instinct's process: the tools of
       eq(f.brain, PRODUCTION_BRAIN, `${id}: the served brain`);
     }
     const brain = (id: string) => { ok(!seen[id].code, `${id} reached the brain (code answered: ${seen[id].reply.slice(0, 120)})`); return seen[id]; };
+
+    // Architect amendment (D-061): C1: the live search and the plan File are both in the brain's hands (search_jobs, create_file).
+    const c1 = brain("C1");
+    ok(c1.tools.includes("search_jobs"), "C1 offers search_jobs");
+    ok(c1.tools.includes("create_file"), "C1 offers create_file (plan_review) with the reply writer off");
 
     // C2: a draft from the confirmed profile with placeholders, shown, not sent; no question about the recipient (D-059).
     const c2 = brain("C2");

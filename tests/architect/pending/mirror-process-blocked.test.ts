@@ -24,9 +24,8 @@ Deno.test({ name: "MP-BLOCKED the turns blocked on a missing or off capability f
   const fails: string[] = [];
   const check = (id: string, cond: boolean, what: string) => { if (!cond) fails.push(`${id}: ${what}`); };
   try {
-    // C1: a live search with each posting checked open, and a plan File (links and a weekly plan) on this channel.
-    check("C1", seen.C1.tools.includes("search_jobs"), "search_jobs offered");
-    check("C1", seen.C1.tools.includes("create_file"), "create_file (plan_review) offered on WhatsApp [CAREER_REPLY_WRITER off]");
+    // Architect amendment (D-061): C1 passed here (create_file offered with the reply writer off) and moved to EXISTS (MP-1,
+    // tests/architect/mirror-wa-batch1-process.test.ts).
     // C6: email confirmations as evidence, applications separated from researched roles, a tracker offered.
     check("C6", seen.C6.tools.includes("read_application_mail") || /Gmail|email confirmations?/i.test(seen.C6.reply), "evidence from email confirmations");
     check("C6", /PayPal/.test(seen.C6.reply) && /research/i.test(seen.C6.reply), "the researched role separated from applications");

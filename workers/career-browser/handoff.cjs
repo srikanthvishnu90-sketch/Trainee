@@ -42,6 +42,8 @@ function buildHandoff(r, p = {}) {
       remaining: [...asked.map((n) => ({ kind: n.reason === "upload_needs_you" ? "upload" : "answer", what: String(n.label || "").slice(0, 160), reason: n.reason })),
         { kind: "bot_check", what: String(r.check || "a verification check").slice(0, 120) }] };
   }
+  // The employer's staff sign-in form (Teamtailor's "Already working at X?") is not the person's account: no hand-off to it.
+  if (r.reason === "login_required" && r.wall === "employee_sign_in") return null;
   if (r.reason === "login_required") {
     return { ...base, reason: "login_required", wall: r.wall || "sign_in", link: page,
       step: `Open the link and sign in to your own account on ${host} yourself (or create it there). Trainee never signs in for you and never asks for your password. Then say done.`,

@@ -29,6 +29,17 @@ two jobs (fixed).
 | Bar (99%) | 218 | 218 | 218 | 218 |
 | Meets | no | no | no | no |
 
+The same counts read both ways (the bar is unchanged; leaving closed postings out of the denominator is the owner's ruling to make,
+not made here):
+
+| After (43276162667) | sample-default | sample-full | held-out-default | held-out-full | held-out 60 |
+|---|---|---|---|---|---|
+| With closed postings (the bar as set) | 164 / 220, need 218 | 158 / 220, need 218 | 167 / 220, need 218 | 169 / 220, need 218 | ≤ 50 / 60, need 60 |
+| Closed postings | 11 | 11 | 12 | 12 | 4 |
+| Without closed postings (not the bar) | 164 / 209, need 207 | 158 / 209, need 207 | 167 / 208, need 206 | 169 / 208, need 206 | ≤ 50 / 56, need 56 |
+
+Neither reading meets 99%.
+
 Before, no hand-off existed, so no wall counted as (b): (a) only (36 and 37 on held-out include 3 Workable postings filled to Submit
 with the resume upload answered inside the browser, `reached_submit_upload_simulated`). After: (a) 32/33/40/42, (b) 132/125/127/127.
 Raw moves of ±1 to 5 between runs are live boards changing (postings closing, forms changing) as well as the fixes (Recruitee
@@ -100,7 +111,9 @@ closed, 2 Apply not opened. Every other stop: answers only the person can give (
 5. **Closed postings named** `posting_closed` (Greenhouse `?error=true`, Workable `?not_found=true`, a posting link sent back to the
    job list), instead of "no application form found".
 6. **Employer-embedded Greenhouse** (`job_app` frame on bitwarden.com, lucidmotors.com): opened at the frame's own address.
-7. **Teamtailor's staff sign-in form** is no longer handed to the person as their sign-in: named `employee_sign_in_only`.
+7. **Teamtailor's staff sign-in form** still stops as a sign-in wall exactly as the pinned tests require (needs_user /
+   login_required, wall employee_sign_in, nothing typed, never a pass), but it is not the person's account: it gets no hand-off,
+   and the 99% reading names it `form_not_found:employee_sign_in_only`.
 8. **Bench pacing per provider** (Recruitee 429s: 10 held-out before, 0 after), robots reads paced; a posting's www twin allowed.
 
 ## Root causes, every posting, after (run 43276162667)

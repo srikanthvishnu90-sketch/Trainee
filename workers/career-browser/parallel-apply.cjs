@@ -446,10 +446,11 @@ async function attempt(browser, p, opts, timing) {
     const t1 = Date.now();
     if (!(await hasForm())) {
       // The page's only form is an employee sign-in form: a sign-in wall the person finishes themselves (WO-L), nothing typed.
-      // D-072: an employee sign-in form is not the person's wall (it is the employer's staff login beside the posting): the
-      // application form was not reached, and that is named, never handed to the person as a sign-in (strict run 43192269304:
-      // 18 Teamtailor postings were called login_required this way).
-      if (await page.evaluate(MARK_SIGNIN).catch(() => 0)) throw new NeedsUser("no_application_form_found", p.url, "employee_sign_in_only");
+      // The stop stays a sign-in wall (needs_user / login_required, nothing typed, nothing sent), marked employee_sign_in. D-072:
+      // it is the employer's staff login beside the posting, not the person's own account, so it carries no hand-off
+      // (handoff.cjs) and the 99% reading names it form_not_found:employee_sign_in_only (strict run 43192269304: 18 Teamtailor
+      // postings), never a kept wall.
+      if (await page.evaluate(MARK_SIGNIN).catch(() => 0)) throw new NeedsUser("login_required", p.url, "employee_sign_in");
       throw new NeedsUser("no_application_form_found", p.url);
     }
     // The page's own questions, answered only from the approved facts / answers (ats-fill.cjs), each read back. A required

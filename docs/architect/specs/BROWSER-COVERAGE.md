@@ -120,6 +120,6 @@ sample (`D072-TOTAL`), from `scripts/browser-eval/d072.cjs`; the raw "reached Su
 there: a check drawn inside the form (BambooHR) is reached with every other field filled and stops untouched (`CHECK_IN_FORM`);
 a form's Submit drawn just outside its one form is that form's Submit; Workday is opened at `<posting>/apply/applyManually` and
 its account page is a sign-in wall the person finishes; a closed posting is `posting_closed`; an employer page embedding
-Greenhouse's `job_app` frame is opened at the frame's own address; an employee staff sign-in form is no longer called the
-person's wall. The bench paces per provider (every Recruitee subdomain is one provider). Root causes and counts:
+Greenhouse's `job_app` frame is opened at the frame's own address; an employee staff sign-in form still stops the run (login_required, nothing typed) but
+carries no hand-off and is read as the form not reached. The bench paces per provider (every Recruitee subdomain is one provider). Root causes and counts:
 `docs/architect/reports/ITEM4-ROOT-CAUSES-20261112.md`.

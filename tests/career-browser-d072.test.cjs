@@ -171,10 +171,12 @@ test("Workday: Apply Manually is opened at its own address and its account page 
   assert.deepEqual(posts, []);
 });
 
-test("Teamtailor's staff sign-in form is not the person's wall: the application form was not reached, and that is said", { skip }, async () => {
+test("Teamtailor's staff sign-in form stays a sign-in stop (nothing typed), but it is not the person's wall: no hand-off, named form not found", { skip }, async () => {
   const r = await strictPosting(browser, { provider: "teamtailor", url: `${base}/tt/jobs/123-engineer` }, opts());
-  assert.equal(r.reason, "no_application_form_found", JSON.stringify(r));
+  assert.equal(r.reason, "login_required", JSON.stringify(r));
+  assert.equal(r.wall, "employee_sign_in");
   assert.equal(r.handoff, null);
+  assert.equal(r.filled_count, 0);
   assert.equal(r.d072.cause, "form_not_found:employee_sign_in_only");
 });
 

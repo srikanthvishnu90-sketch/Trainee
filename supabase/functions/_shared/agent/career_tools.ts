@@ -35,7 +35,7 @@ import { type OfferPending, offerTurn, saidIn } from "../career_offer.ts";
 import { findFirm, pathAnswer } from "../career_path.ts";
 import type { HiredResult, HiredSource } from "../career_hired.ts";
 import { queueWants, refusal, resolvePicks, screenPicks, type Pick as WantPick, type Refusal, type WantStore } from "../career_apply_want.ts";
-import { payFrom, postingTextForModel } from "../posting_pay.ts";
+import { placedPay, postingTextForModel } from "../posting_pay.ts";
 import type { ApplyFlow } from "../posting_requirements.ts";
 import type { Limits } from "../career_apply.ts";
 import { type Situation, statusText } from "../career_situation.ts";
@@ -224,7 +224,7 @@ function reviewOf(r: any, delivered: boolean): Record<string, unknown> {
   if (!delivered) return out;
   const flags = [
     ...(r.placeholders ?? []).includes("email") ? [`The email at the top prints as the visible placeholder ${EMAIL_PLACEHOLDER}: no email is on their confirmed resume and they have not typed one. Say so in the same sentence that hands over the file, and that it needs their email before it is used anywhere; never fill in the account's or this chat's address.`] : [],
-    ...(r.edits ?? []).filter((e: any) => e.expand_short).map((e: any) => `${e.entry}: ${e.asked} lines were asked and their confirmed record holds ${e.available} detail${e.available === 1 ? "" : "s"} for it, so it prints ${e.now}. Say that, and ask what else they did there; nothing was written for them.`),
+    ...(r.edits ?? []).filter((e: any) => e.expand_short).map((e: any) => `${e.entry}: their confirmed record holds ${e.available} detail${e.available === 1 ? "" : "s"} for it, so it prints ${e.now} (all it holds). Say that, and ask what else they did there; nothing was written for them. The number of lines is your input to the tool, not theirs: never say they asked for a number they did not type.`),
   ];
   out.review_draft = { placeholders: r.placeholders ?? [], flags, note: "Hand it over as a review draft for them to check, not a final file. Name any detail they told you in this conversation is uncertain, outdated or conflicting that still prints in it, and say it needs reconciling before it is sent anywhere. Describe edits only as edits_done says (condensed, expanded, led); for work in progress keep their wording about what is being built, never claim it works. Nothing was submitted." };
   return out;
@@ -403,7 +403,7 @@ export function careerTools(deps: {
           r.questions_read === "read" ? `Its form has ${q.length} questions, ${q.filter((x) => x.required).length} required: name what the person would need to provide, drawing only on these.` : `Its questions were not read: ${r.questions_why} Say that plainly; never guess the questions.`,
           r.sign_in_required ? "Applying needs the person's own sign-in or new account on the employer's careers site; they do that themselves. Trainee never signs in for them." : "",
           r.posting?.deadline ? `The posting states an application deadline: ${r.posting.deadline_text || r.posting.deadline}.` : "",
-          r.posting?.pay_by_place?.length ? "The posting states its pay by place (posting.pay_by_place): give the range for the place the person means, as written." : "",
+          r.posting?.pay_by_place?.length ? "The posting states its pay by place (posting.pay_by_place): give only the range for the place the person means, with that place named, as written (never one place's range as another's); if you don't know which place they mean, give each range with its place." : "",
           "Any answer comes only from facts the person confirmed; a question no confirmed fact answers is something to ask them. End by saying you only read the public pages: no account, saved application or submission was created. Nothing was applied for.",
         ].filter(Boolean).join(" ");
       return { ...r, note };
@@ -429,13 +429,14 @@ export function careerTools(deps: {
       const support = { said: c.turn?.typed ?? c.turn?.message ?? "", facts: confirmed(profileOf(c).facts || []).map(factText) };
       const out = checkFollowup(input, support);
       if (out.status === "ask" && c.turn) c.turn.askOnly = true;
-      // D-059: with no recipient named the draft is shown with its placeholders ("Draft, not sent:"), the same way.
+      // D-059: with no recipient named the draft is shown with its placeholders, the same way. D-067 (G2, answer first): the draft
+      // comes first and its label after it, on its own line ("Draft, not sent."), so the person reads the draft before the label.
       if (out.status === "ok" && c.turn) {
-        const prefix = `Draft${out.to ? ` for ${out.to}` : ""}${out.attachment ? `, with ${out.attachment}` : ""}, not sent:\n\n`;
-        c.turn.show = { intent: "career_followup_draft", text: `${prefix}${out.body}` };
+        const label = `Draft${out.to ? ` for ${out.to}` : ""}${out.attachment ? `, with ${out.attachment}` : ""}, not sent.`;
+        c.turn.show = { intent: "career_followup_draft", text: `${out.body}\n\n${label}` };
         // D-065 (G3): a draft over its length may be shortened once before it is shown (career_brain.ts); the shorter text must
         // pass this same check, with the same recipient, document and support. Nothing is stored or sent from here.
-        c.turn.draft = { prefix, body: out.body, recheck: (body: string) => { const again = checkFollowup({ ...input, body }, support); return again.status === "ok" && again.to === out.to && again.attachment === out.attachment; } };
+        c.turn.draft = { label, body: out.body, recheck: (body: string) => { const again = checkFollowup({ ...input, body }, support); return again.status === "ok" && again.to === out.to && again.attachment === out.attachment; } };
       }
       return out;
     },
@@ -692,7 +693,7 @@ export function careerTools(deps: {
         const read = postingTextForModel(p.description);
         // RESEARCH ROUND 3: the pay is read from the text with any sentence written to an AI taken out (no injected
         // figure becomes the posting's pay); a closed posting says so in its own words, with the date it closed.
-        const pay = p.pay ?? payFrom(postingTextForModel(p.description, Infinity).text);
+        const pay = p.pay ?? placedPay(postingTextForModel(p.description, Infinity).text, p.location);
         return { job_id: p.job_id, company: p.company, title: p.title, location: p.location || "", url: p.url, closed: !!p.closed_at,
           ...(p.closed_at ? { closed_on: String(p.closed_at).slice(0, 10), status: "closed: no longer accepting applications. Say it has closed; never present it as open." } : {}),
           ...(p.first_seen_at ? { first_seen_on: String(p.first_seen_at).slice(0, 10) } : {}),

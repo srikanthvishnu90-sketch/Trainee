@@ -85,7 +85,9 @@ Deno.test({ name: "WA1-G the brain gets the hypothetical, the roast, the posting
     for (const t of ["add_profile_fact", "correct_profile_fact", "track_application"]) assertNode.ok(!seen.C7.tools.includes(t), `C7 offers ${t}`);
     // Control: a plain advice question is not a hypothetical, and keeps the record tools.
     await say("X2", "what should i put at the very top of my resume for swe roles, be specific");
-    assertNode.ok(!/HYPOTHETICAL/.test(seen.X2.system) && seen.X2.tools.includes("add_profile_fact"), "not a hypothetical");
+    // Architect amendment (D-067 (7), G1/D-007): a question that states nothing about the person is no longer offered add_profile_fact
+    // (nothing to save from it); the control's bar stands: it is not a hypothetical and keeps the record tools a hypothetical withholds.
+    assertNode.ok(!/HYPOTHETICAL/.test(seen.X2.system) && seen.X2.tools.includes("correct_profile_fact") && seen.X2.tools.includes("track_application"), "not a hypothetical");
 
     // C21, C22, C21f: the answer to the roast ask, one turn later, is critiqued bluntly on what it says.
     await say("C21");

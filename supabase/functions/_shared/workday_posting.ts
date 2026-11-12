@@ -13,7 +13,7 @@
 //
 // Never: a sign-in, an account, a saved application, an /apply request, a captcha. A Workday application's own questions are
 // behind the person's sign-in on the employer's site; this module says so and never guesses them (posting_requirements.ts).
-import { payFrom, postingTextForModel } from "./posting_pay.ts";
+import { payFrom, paysByPlace, postingTextForModel } from "./posting_pay.ts";
 import { decodeHtmlEntities } from "./posting_text.ts";
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
@@ -74,7 +74,7 @@ export interface WorkdayPosting {
   start_date: string | null;
   deadline: string | null; // YYYY-MM-DD, only when the posting states one
   deadline_text: string | null; // the posting's own words ("End Date: November 13, 2026", "15 days left to apply")
-  pay: string | null; // only as the posting's text states it (posting_pay.ts payFrom): the first range it states
+  pay: string | null; // only as the posting's text states it (posting_pay.ts payFrom): the first range it states; with a table, `pays` (D-067: readers pass the brain placedPay)
   pays: { place: string; pay: string }[]; // a range stated per place ("Chicago, Illinois | ($28- $49 Hourly)"), each as written
   description_html: string;
   text: string; // plain text, with any sentence written to an AI removed (posting_pay.ts postingTextForModel)
@@ -91,16 +91,9 @@ const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 const day = (v: unknown) => { const s = str(v).slice(0, 10); return ISO_DAY.test(s) && !Number.isNaN(Date.parse(s)) ? s : null; };
 const company = (v: unknown) => str(v).replace(/^\d{2,}\s+/, "") || null;
 
-// Pay a posting states for each place, in its own words: "<City>, <Region> | (<range>)" (Workday's pay-by-location table).
-export function paysByPlace(text: string): { place: string; pay: string }[] {
-  const out: { place: string; pay: string }[] = [];
-  for (const m of String(text ?? "").matchAll(/([A-Z][A-Za-z.'-]+(?: [A-Z][A-Za-z.'-]+)*, [A-Z][A-Za-z]+(?: [A-Z][A-Za-z]+)*)\s*\|\s*\(([^()|]{3,60})\)/g)) {
-    const pay = payFrom(m[2]);
-    if (pay && !out.some((x) => x.place === m[1])) out.push({ place: m[1], pay });
-    if (out.length >= 12) break;
-  }
-  return out;
-}
+// Pay a posting states for each place: posting_pay.ts paysByPlace (D-067 moved it there, so every reader of a posting's pay keeps
+// a figure with its place).
+export { paysByPlace } from "./posting_pay.ts";
 // A CXS job answer -> the posting, or null when it carries none.
 export function parseWorkdayCxs(json: unknown, pageUrl: string): WorkdayPosting | null {
   const j: any = (json as any)?.jobPostingInfo;

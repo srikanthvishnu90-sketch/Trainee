@@ -25,7 +25,10 @@ const PLACEHOLDER = /\[[^\]\n]{1,40}\]/g;
 const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi;
 // Each past event a draft can claim, and the words that show the person said it happened.
 export const HISTORY: { kind: string; claim: RegExp; said: RegExp }[] = [
-  { kind: "a meeting or conversation", claim: /\b(?:(?:great|nice|good|lovely|wonderful)\s+(?:meeting|to\s+meet|talking|speaking|chatting|to\s+(?:talk|speak|chat))|when\s+we\s+(?:met|spoke|talked|chatted)|(?:our|the)\s+(?:call|chat|conversation|coffee|meeting|catch[\s-]?up)\b|as\s+(?:we\s+)?(?:discussed|mentioned|agreed)|as\s+promised|following\s+up\s+on\s+our|you\s+(?:mentioned|said|told\s+me))/i, said: /\b(?:met|meet|meeting|call|called|spoke|speak|talked|talk|chat(?:ted)?|coffee|conversation|interview(?:ed|s)?)\b/i },
+  { kind: "a meeting or conversation", claim: new RegExp(String.raw`\b(?:(?:great|nice|good|lovely|wonderful)\s+(?:meeting|to\s+meet|talking|speaking|chatting|to\s+(?:talk|speak|chat))|when\s+we\s+(?:met|spoke|talked|chatted)|(?:our|the)\s+(?:call|chat|conversation|coffee|meeting|catch[\s-]?up)\b|as\s+(?:we\s+)?(?:discussed|mentioned|agreed)|as\s+promised|following\s+up\s+on\s+our|you\s+(?:mentioned|said|told\s+me)` +
+    // D-067 (live-6 C13: "thanks again for walking me through the [role]", in a first message to a recruiter): a thank-you for time
+    // or an explanation given, "thanks again", "it was great to ...", "enjoyed our ..." each claim a past exchange.
+    String.raw`|walk(?:ing|ed)?\s+me\s+through|thanks?(?:\s+you)?\s+again\b|(?:thanks?(?:\s+you)?|grateful|appreciate(?:d)?)\s+(?:so\s+much\s+)?for\s+(?:explaining|getting\s+back|the\s+(?:insight|update|walkthrough))|(?:it\s+was|it's\s+been)\s+(?:great|good|nice|lovely|a\s+pleasure)\s+(?:to\s+)?(?:meet|talk|speak|chat|connect|hear)|enjoyed\s+(?:our|meeting|talking|speaking|chatting|connecting|learning)|(?:like|as)\s+you\s+(?:explained|walked|described|showed)|since\s+we\s+(?:last\s+)?(?:spoke|talked|met|connected))`, "i"), said: /\b(?:met|meet|meeting|call|called|spoke|speak|talked|talk|chat(?:ted)?|coffee|conversation|interview(?:ed|s)?|walked\s+me\s+through)\b/i },
   { kind: "an interview", claim: /\b(?:(?:the|my|our|today's|yesterday's)\s+interview|interviewing\s+me|for\s+(?:the\s+)?interview|taking\s+the\s+time\s+to\s+interview)\b/i, said: /\binterview/i },
   { kind: "an offer", claim: /\b(?:(?:the|your|an?|this)\s+(?:job\s+|generous\s+|kind\s+)?offer\b(?!\s+(?:any|some)\s+feedback)|offered\s+me|extend(?:ed|ing)\s+(?:me\s+)?an?\s+offer)/i, said: /\boffer(?:ed)?\b/i },
   { kind: "a referral or introduction", claim: /\b(?:referr(?:al|ed|ing)|recommended\s+(?:me|that\s+i)|suggested\s+(?:i|that\s+i)\s+(?:reach|contact|write|email)|told\s+me\s+to\s+(?:reach|contact|write)|put\s+(?:me\s+)?in\s+touch|introduc(?:ed|tion))\b/i, said: /\b(?:refer|referr|recommend|introduc|put\s+me\s+in\s+touch|suggested\s+i)/i },
@@ -84,7 +87,7 @@ export function checkFollowup(i: FollowupIn, o: { said: string; facts: string[] 
     const m = h.claim.exec(plain);
     if (!m) continue;
     if (!h.said.test(o.said) && !o.facts.some((f) => h.said.test(f))) problems.push(`"${m[0]}" states ${h.kind} the person never mentioned; remove it, do not invent history`);
-    else if (TIED.has(h.kind) && !pastWith(h.said, to, [o.said, ...o.facts])) problems.push(`"${m[0]}" states ${h.kind} with ${to} that has not happened yet or was with someone else; thank or recall only a past event the person had with ${to}`);
+    else if (TIED.has(h.kind) && !pastWith(h.said, to, [o.said, ...o.facts])) problems.push(`"${m[0]}" states ${h.kind} with ${to || "the recipient"} that has not happened yet or was with someone else; thank or recall only a past event the person had with ${to || "them"}`);
   }
   const sNums = numbersIn(support);
   for (const n of numbersIn(plain)) if (!sNums.some((x) => numEq(x, n))) problems.push(`the figure "${n.raw}" is not in the person's words or confirmed facts`);

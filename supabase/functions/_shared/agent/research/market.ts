@@ -283,12 +283,19 @@ const CLAIM_AFTER = /\b(?:but|however|although|though|yet|still|anyway)\b/i;
 // named by a kept point citing that source (a file reply's figures must be on a kept point); the inline answer ends with its numbered sources (each a page fetched this turn, with its
 // read date). With nothing left, the answer is the kept points themselves; with no source at all, only a sentence saying research
 // could not confirm an answer, else the plain no-source line.
-export function enforceMarketReply(reply: string, r: MarketResult): string {
+export function enforceMarketReply(reply: string, r: MarketResult, shown: { text: string; url: string | null }[] = []): string {
+  // D-067 (G7, live-6 C22): a figure Trainee already showed in this conversation (its own earlier reply, from the posting or source
+  // it named there; career_brain.ts passes those lines) may be said again; every figure of the sentence must be on such a line.
+  // Such a sentence carries its source: the link of the line its figures are on goes after the answer (D-067 (d)).
+  const shownNums = shown.flatMap((l) => numbersIn(l.text));
+  const wasShown = (s: string) => { const ns = numbersIn(s.replace(/\[\d+\]/g, "")); return shownNums.length > 0 && ns.length > 0 && ns.every((n) => shownNums.some((x) => numEq(x, n))); };
+  const linksFor = (t: string) => [...new Set(t.split(/(?<=[.!?])\s+/).filter(wasShown).flatMap((x) => { const ns = numbersIn(x); return shown.filter((l) => l.url && numbersIn(l.text).some((y) => ns.some((n) => numEq(y, n)))).map((l) => l.url as string); }))];
+  const withLinks = (t: string) => { const ls = linksFor(t).filter((u) => !t.includes(u)); return ls.length ? `${t}\n${ls.join("\n")}` : t; };
   // Research found nothing to stand on: a sentence stays only when it says so (no figure, a plain "couldn't confirm", no
   // "but" carrying a claim after it); anything else is the plain no-source line. "The market is growing rapidly." never stands.
   if (r.status !== "ok") {
-    const kept = stripUrls(reply).split(/(?<=[.!?])\s+/).filter((s) => s && !numbersIn(s).length && SAYS_UNCONFIRMED.test(s) && !CLAIM_AFTER.test(s)).join(" ");
-    return kept || NO_SOURCES;
+    const kept = stripUrls(reply).split(/(?<=[.!?])\s+/).filter((s) => s && ((!numbersIn(s).length && SAYS_UNCONFIRMED.test(s) && !CLAIM_AFTER.test(s)) || wasShown(s))).join(" ");
+    return kept ? withLinks(kept) : NO_SOURCES;
   }
   const max = r.sources.length;
   // Every kept point with the sources it cites: a figure in the reply must come from a point that cites what the sentence cites.
@@ -315,13 +322,17 @@ export function enforceMarketReply(reply: string, r: MarketResult): string {
       && specifics(s.replace(/\[\d+\]/g, "")).names.every((w) => mine.some((p) => said(w, p.text))) && statOk(s, mine) && labelOk(s);
   };
   const keep = (t: string) => stripUrls(t).replace(/\[(\d+)\]/g, (m, n) => Number(n) >= 1 && Number(n) <= max ? m : "")
-    .split(/(?<=[.!?](?:\s*\[\d+\])*)\s+/).filter((s) => s.trim() && (r.format === "file" ? onRecord(s) && statOk(s, items) : supported(s))).join(" ").trim();
+    .split(/(?<=[.!?](?:\s*\[\d+\])*)\s+/).filter((s) => s.trim() && ((r.format === "file" ? onRecord(s) && statOk(s, items) : supported(s)) || (!/\[\d+\]/.test(s) && wasShown(s)))).join(" ").trim();
   // D-060 (C9): in the messages layout the model's paragraphs (one topic each) are kept as paragraphs.
   const paras = r.layout === "messages" && r.format !== "file";
   let body = paras ? reply.split(/\n\s*\n/).map(keep).filter(Boolean).join("\n\n") : keep(reply);
   if (!body) body = r.points.slice(0, 3).filter((p) => labelOk(`${p.text} ${p.cite.map((n) => `[${n}]`).join("")}`)).map((p) => `${p.text.replace(/[.]?$/, "")} ${p.cite.map((n) => `[${n}]`).join("")}.`).join(paras ? "\n\n" : " ");
   if (!body && r.format !== "file") return NO_SOURCES;
-  if (r.format === "file") return body;
+  // D-067 (live-6 C9, D-024): a file reply is never empty. With no sentence of the model's on record, the brief's own thesis
+  // (code kept it only when its figures are on the cited pages) says what was found; the File's link follows it, sent by code.
+  // A point's [n] markers are the brief's, not the chat's: none is written into a file reply.
+  body = body && shown.length ? withLinks(body) : body;
+  if (r.format === "file") return body || (r.thesis ?? "") || r.points.filter((p) => labelOk(`${p.text} ${p.cite.map((n) => `[${n}]`).join("")}`)).slice(0, 2).map((p) => p.text.replace(/[.]?$/, ".")).join(" ") || NO_SOURCES;
   if (r.layout === "messages") return messagesLayout(body, r.sources);
   const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
   const tag = (k?: SourceKind) => k === "anecdote" ? " (anecdote)" : k === "self_reported" ? " (self-reported)" : "";

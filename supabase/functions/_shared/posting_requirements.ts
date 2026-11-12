@@ -18,7 +18,7 @@
 // endpoint, and a captcha on the form is recorded (captcha_expected), never touched. Every request made is returned (reads).
 // The questions are the form's shape only: never an answer and never a payload (D-007).
 import { schemaFromGreenhouse } from "./posting_schema.ts";
-import { payFrom, postingTextForModel } from "./posting_pay.ts";
+import { placedPay, postingTextForModel } from "./posting_pay.ts";
 import { decodeHtmlEntities } from "./posting_text.ts";
 import { htmlToText, readWorkdayPosting, workdayUrl, type WorkdayDeps } from "./workday_posting.ts";
 import { neverOpen } from "./career_people_sites.ts";
@@ -179,7 +179,7 @@ export async function readApplyFlow(href: string, d: ReadDeps): Promise<ApplyFlo
   const failed = (o: ApplyFlow, e: unknown, what: string): ApplyFlow => ({ ...o, why: `${what} did not finish (${String((e as Error)?.name === "TimeoutError" ? "timeout" : (e as Error)?.message ?? e).slice(0, 80)})` });
   const out = base(b.board);
   const posting = (title: string, company: string | null, location: string | null, text: string, deadline: string | null = null, state: "open" | "closed" | "unknown" = "open") =>
-    ({ title, company, location, pay: payFrom(postingTextForModel(text, Infinity).text), deadline, deadline_text: deadline, state });
+    ({ title, company, location, pay: placedPay(postingTextForModel(text, Infinity).text, location), deadline, deadline_text: deadline, state });
 
   if (b.board === "Workday") {
     const w = await readWorkdayPosting(url, d as WorkdayDeps);
@@ -187,7 +187,8 @@ export async function readApplyFlow(href: string, d: ReadDeps): Promise<ApplyFlo
     const p = w?.posting;
     return {
       ...out, status: p ? "ok" : "unknown", why: w?.why ?? "",
-      posting: p ? { title: p.title, company: p.company, location: p.location, pay: p.pay, ...(p.pays.length ? { pay_by_place: p.pays } : {}), deadline: p.deadline, deadline_text: p.deadline_text, state: w!.state } : null,
+      // D-067 (C1): a posting that states pay by place never hands over one place's range unlabelled: `pay` is each range with its place.
+    posting: p ? { title: p.title, company: p.company, location: p.location, pay: p.pays.length > 1 && new Set(p.pays.map((x) => x.pay)).size > 1 ? p.pays.map((x) => `${x.place}: ${x.pay}`).join("; ") : p.pay, ...(p.pays.length ? { pay_by_place: p.pays } : {}), deadline: p.deadline, deadline_text: p.deadline_text, state: w!.state } : null,
       requirements: p ? requirementsFrom(p.description_html) : out.requirements,
       questions: null, questions_read: "behind_sign_in",
       questions_why: `Workday shows an application's questions only after the person signs in to (or creates) their own careers account on ${w?.url.host ?? host}${p?.questionnaire ? "; this posting has employer questions of its own" : ""}. They were not read, and are not known.`,

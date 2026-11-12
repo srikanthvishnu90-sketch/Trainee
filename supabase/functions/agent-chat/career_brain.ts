@@ -1,7 +1,7 @@
 // Which brain answers a career turn (WO-002, D-008): the CareerHost router unless CAREER_BRAIN=agent, and the agent turn
 // itself (model + tools over the person's career state).
 import type { LinkCheck } from "../_shared/link_check.ts";
-import { runAgentTurn, type ModelFn, type TurnResult } from "../_shared/agent/loop.ts";
+import { EMPTY_AFTER_SAVE_REPLY, EMPTY_REPLY, runAgentTurn, type ModelFn, type TurnResult } from "../_shared/agent/loop.ts";
 import { careerTools, type OutreachDeps, type TailorTools } from "../_shared/agent/career_tools.ts";
 import { importContactsFile, MX_NOT_WIRED, type MxResolver, type Verifier } from "../_shared/career_contacts.ts";
 import { attachAsked, attachTool } from "../_shared/agent/attach_tool.ts";
@@ -16,9 +16,10 @@ import { enforceMarketReply, type MarketDeps, type MarketResult } from "../_shar
 import { type CompanyResult, enforceCompanyReply } from "../_shared/agent/research/company.ts";
 import { enforceFollowupAsk } from "../_shared/followup_draft.ts";
 import { urlsIn } from "../_shared/channel_shape.ts";
+import { numbersIn, numEq } from "../_shared/agent/research/guard.ts";
 import { knowledgeFor, type Knowledge } from "../_shared/agent/knowledge/index.ts";
 import { styleBlock } from "../_shared/agent/style.ts";
-import { askedPartsOf, asksForDetail, boundaryNote, boundaryOf, capacityAskOf, capacityNote, correctionNote, correctionOf, DRAFT_TOOLS, draftAskOf, draftNote, HYPOTHETICAL_WITHHELD, hypotheticalNote, hypotheticalOf, lengthNote, multiAskNote, overLimit, partsMissing, partsNote, PERSONA_WITHHELD, planSearchAskOf, planSearchNote, whileWorkingNote, postingNote, postingRefOf, REPLY_LENGTH, replyLength, roastNote, roastOf, textLength } from "../_shared/agent/turn_notes.ts";
+import { askedPartsOf, asksForDetail, boundaryNote, boundaryOf, capacityAskOf, capacityNote, correctionNote, correctionOf, DRAFT_TOOLS, draftAskOf, draftNote, historyAskOf, historyNote, HYPOTHETICAL_WITHHELD, hypotheticalNote, hypotheticalOf, lengthNote, multiAskNote, overLimit, partsMissing, partsNote, PERSONA_WITHHELD, planSearchAskOf, planSearchNote, whileWorkingNote, postingNote, postingRefOf, REPLY_LENGTH, replyLength, roastNote, roastOf, shownPayNote, shownPayOf, statesNothing, textLength } from "../_shared/agent/turn_notes.ts";
 import { severalAsks } from "../_shared/ask_language.ts";
 import type { AlertStore } from "../_shared/career_alert_store.ts";
 import type { HiredSource } from "../_shared/career_hired.ts";
@@ -157,10 +158,13 @@ export async function agentTurn(o: {
   const draftAsk = draftAskOf(o.message), planSearch = !hypo && planSearchAskOf(o.message, typeof o.whileWorking === "string" ? o.whileWorking : null);
   const parts = askedPartsOf(o.message), capacity = capacityAskOf(o.message);
   const draftLength = replyLength(o.message).kind === "draft" ? replyLength(o.message) : { kind: "draft" as const, ...REPLY_LENGTH.draft };
+  // D-067 (live round 2): an ask about their own applications reads the Gmail record first (G14, C6); pay this conversation already
+  // showed is used for a pay ask (G7, C22); a question that states nothing about them is not offered a record write (G1, C1).
+  const historyAsk = !hypo && historyAskOf(o.message), shownPay = hypo ? [] : shownPayOf(o.message, o.history);
   const turnNotes = [hypo ? hypotheticalNote(hypo) : "", roast ? roastNote(roast) : "", meant.length ? postingNote(meant) : "", boundary ? boundaryNote(boundary) : "",
     correction ? correctionNote(correction) : "", typeof o.whileWorking === "string" ? whileWorkingNote(o.whileWorking) : severalAsks(o.message) ? multiAskNote() : "",
-    draftAsk ? draftNote(draftLength.aim) : "", planSearch ? planSearchNote() : "", parts.length ? partsNote(parts) : "", capacity ? capacityNote() : "", lengthNote(replyLength(o.message))].filter(Boolean);
-  const hypoWithheld = hypo === "persona" ? PERSONA_WITHHELD : hypo ? HYPOTHETICAL_WITHHELD : [];
+    draftAsk ? draftNote(draftLength.aim) : "", planSearch ? planSearchNote() : "", parts.length ? partsNote(parts) : "", capacity ? capacityNote() : "", historyAsk ? historyNote() : "", shownPay.length ? shownPayNote(shownPay) : "", lengthNote(replyLength(o.message))].filter(Boolean);
+  const hypoWithheld = [...(hypo === "persona" ? PERSONA_WITHHELD : hypo ? HYPOTHETICAL_WITHHELD : []), ...(statesNothing(o.message) ? ["add_profile_fact"] : [])];
   const block = o.known ? personBlock({ profile: hypo === "persona" ? null : o.stores.profile, ...o.known }) : null;
   const notes: string[] = [];
   for (const f of o.attachments ?? []) {
@@ -179,7 +183,8 @@ export async function agentTurn(o: {
   const tools = [...withheld([...(o.toolPolicy?.withhold ?? []), ...hypoWithheld], [...careerTools({ postings: o.postings ?? (async () => []), alerts: o.alerts ?? null, memory: o.memory ?? null, events: o.events ?? null, confirmations: o.confirmations ?? null, tz: o.tz, mail: o.mail ?? null, interviews: o.interviews ?? null, digest: o.digest ?? null, outreach: o.outreach ?? null, verifier: o.verifier ?? null, tailor: o.tailor ?? null, hired: o.hired ?? null, wants: o.wants ?? null, limits: o.limits, posting: o.posting ?? null, situation: o.known?.situation ?? null, linkCheck: o.linkCheck ?? null, conversations: o.conversations ?? null, market: o.market ? { ...o.market, onResult: (r) => { if (r.status === "ok" || trace.m?.status !== "ok") trace.m = r; } } : null, postingRecheck: o.postingRecheck ?? null, applyFlow: o.applyFlow ?? null, research: o.knowledge && o.research ? { ...o.research, onResult: (r, m) => { if (r.status === "ok") trace.r = r; o.research?.onResult?.(r, m); }, onAdvice: (r) => { if (r.source || !trace.a?.source) trace.a = r; } } : null }), ...(o.capabilities ?? [])]), ...(o.shape && attachAsked(o.message) ? [attachTool()] : []), ...(o.files ? [createFileTool(o.files)] : [])];
   const offered = new Set(tools.map((t) => t.name));
   let result = await runAgentTurn({
-    process: processCheck({ draftAsk: draftAsk && DRAFT_TOOLS.some((n) => offered.has(n)), planSearch: planSearch && offered.has("search_jobs"), parts }),
+    process: processCheck({ draftAsk: draftAsk && DRAFT_TOOLS.some((n) => offered.has(n)), planSearch: planSearch && offered.has("search_jobs"), parts,
+      planFile: planSearch && offered.has("create_file"), history: historyAsk && offered.has("read_application_mail"), mail: !hypo && offered.has("read_application_mail"), posting: meant.length > 0 && offered.has("get_posting") }),
     system: careerSystemPrompt(localDay(o.now, o.tz)) + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + "\n\n" + MIRROR_RULES + "\n\n" + turnNotes.join("\n\n") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
     history: o.history.slice(-HISTORY_WINDOW).map((m) => ({ role: m.role, content: String(m.content ?? "") })),
     message: [o.message, ...notes].filter(Boolean).join("\n\n"),
@@ -203,7 +208,7 @@ export async function agentTurn(o: {
   }
   // Market research: the sources or the file link come from code; the model's links and unsourced figures do not reach the person.
   // R10 WO-H: company research has its own rules (one role question when the role is unknown; a focus keeps that area only).
-  if (trace.m && !trace.r && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? enforceCompanyReply(result.reply, trace.m) : enforceMarketReply(result.reply, trace.m as MarketResult) };
+  if (trace.m && !trace.r && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? enforceCompanyReply(result.reply, trace.m) : enforceMarketReply(result.reply, trace.m as MarketResult, shownPay) };
   // Not an open career question: any link the model wrote that the turn never saw is removed (links not on the turn's allow-list).
   // MIRROR PROCESS (C23, docs/architect/specs/MIRROR-PROCESS.md): a link Trainee itself already showed in this conversation (an
   // earlier reply's source, e.g. the research answer "that citadel process from earlier" recalls) may be given again with the
@@ -229,36 +234,73 @@ export async function agentTurn(o: {
     const l = replyLength(o.message), bound = overLimit(l);
     // A "draft" kind written in prose is not a message draft (those go through draft_followup, below): it is a rewrite of their
     // own text ("make the answer less formal"), whose length is the text's, not a draft's.
-    if (l.kind !== "draft" && !(l.kind === "everything" && asksForDetail(o.message)) && textLength(result.reply) > bound && condensable(result, { max: -1 })) {
+    if (l.kind !== "draft" && !(l.kind === "everything" && asksForDetail(o.message)) && !carriesCode(o.message) && !carriesCode(result.reply) && textLength(result.reply) > bound && condensable(result, { max: -1 })) {
       const short = await condenseReply(o.model, result.reply, { max: bound, aim: l.aim }, (long, out) => shortenedOk(long, out, bound));
       if (short) result = { ...result, reply: trace.a ? enforceAdviceReply(short, trace.a) : short };
     }
   }
-  // D-065 (G3 for drafts): a draft shown by draft_followup ("Draft, not sent:") over the draft bound is shortened once BEFORE it is
+  // D-065 (G3 for drafts): a draft shown by draft_followup (labelled "Draft, not sent." after it, D-067) over the draft bound is shortened once BEFORE it is
   // shown, only in its wording: the shorter text passes the same draft check (no invented history, figure, name or address; the
   // same recipient and document) and keeps every placeholder, or the draft stands as the tool checked it. Nothing here touches a
   // card with a payload (draft_outreach, draft_email_reply): those are never rewritten.
-  const d = (ctx.turn as any)?.draft as { prefix: string; body: string; recheck: (b: string) => boolean } | undefined;
+  const d = (ctx.turn as any)?.draft as { label: string; body: string; recheck: (b: string) => boolean } | undefined;
   if (result.show?.intent === "career_followup_draft" && d && result.reply === result.show.text) {
     const bound = overLimit(draftLength);
     if (textLength(result.reply) > bound) {
-      const room = bound - textLength(d.prefix);
+      const room = bound - textLength(d.label) - 2;
       const short = await condenseReply(o.model, d.body, { max: room, aim: draftLength.aim }, (long, out) => shortenedOk(long, out, room) && d.recheck(out));
-      if (short) { const text = `${d.prefix}${short}`; result = { ...result, reply: text, show: { ...result.show, text } }; }
+      if (short) { const text = `${short}\n\n${d.label}`; result = { ...result, reply: text, show: { ...result.show, text } }; }
     }
   }
+  // D-067 (owner, must-fix (d): "each figure carries its source link and place"): a posting's pay said in the reply comes with that
+  // posting's link (search_jobs / get_posting returned both); code adds the link when the reply has the figure and not the link.
+  if (result.reply && result.stopped === "final" && !result.show) result = { ...result, reply: payWithSource(result.reply, Array.isArray(result.postings) ? result.postings as any[] : []) };
+  // D-067 (live-6 C9: research_market ran and the person got an empty message; D-024): the last line of every brain turn. An empty
+  // or blank reply is never sent: the research's own sourced points when it found any, else the honest line that it did not finish.
+  result = { ...result, reply: nonEmptyReply(result, trace.m) };
   return know ? { ...result, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : result;
 }
 
+// D-067 (d): every posting whose stated pay the reply gives (its figures, in a sentence naming its company) has its link in the reply.
+export function payWithSource(reply: string, postings: { company?: string | null; pay?: string | null; url?: string | null }[]): string {
+  const add: string[] = [];
+  const sentences = String(reply).replace(/https?:\/\/\S+/g, " ").split(/(?<=[.!?])\s+|\n+/);
+  for (const p of postings ?? []) {
+    const ns = numbersIn(String(p?.pay ?? "")), url = String(p?.url ?? "");
+    if (!ns.length || !/^https:\/\//.test(url) || reply.includes(url) || add.includes(url)) continue;
+    const co = String(p?.company ?? "").toLowerCase();
+    if (sentences.some((x) => co && x.toLowerCase().includes(co) && numbersIn(x).some((n) => ns.some((y) => numEq(y, n))))) add.push(url);
+  }
+  return add.length ? `${reply.trimEnd()}\n\n${add.join("\n")}` : reply;
+}
+// D-067: the reply, never blank. A shown payload stands as shown; a market research result with sources gives its points (code's
+// own enforcement of an empty draft: the kept points with their sources, or the plain no-source line).
+export function nonEmptyReply(r: Pick<TurnResult, "reply" | "show" | "tool_calls">, m?: MarketResult | CompanyResult): string {
+  if (/[\p{L}\p{N}]/u.test(String(r.reply ?? ""))) return r.reply;
+  if (r.show?.text && /[\p{L}\p{N}]/u.test(r.show.text)) return r.show.text;
+  if (m && !("kind" in m && m.kind === "company") && m.status === "ok") {
+    const fromResearch = enforceMarketReply("", m as MarketResult);
+    if (/[\p{L}\p{N}]/u.test(fromResearch)) return fromResearch;
+  }
+  return (r.tool_calls ?? []).some((c) => c.ok && c.effect === "write_own") ? EMPTY_AFTER_SAVE_REPLY : EMPTY_REPLY;
+}
+
 // D-065: the process the turn still owes before its reply stands (loop.ts `process`, asked once). Each names its ruling.
-export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts: string[] }): ((reply: string, calls: { name: string; ok: boolean }[]) => string | null) | null {
-  if (!o.draftAsk && !o.planSearch && !o.parts.length) return null;
+export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts: string[]; planFile?: boolean; history?: boolean; mail?: boolean; posting?: boolean }): ((reply: string, calls: { name: string; ok: boolean }[]) => string | null) | null {
+  if (!o.draftAsk && !o.planSearch && !o.parts.length && !o.history && !o.mail && !o.posting) return null;
   return (reply, calls) => {
     const called = (names: readonly string[]) => calls.some((c) => names.includes(c.name));
     // G10 / D-059: the draft tool is the only path for a draft; a draft written in the reply's prose is never shown.
     if (o.draftAsk && !called(DRAFT_TOOLS)) return "They asked for a message draft and you wrote it in your reply. Call draft_followup now with the draft as body (keep [placeholders] for what you don't know); code shows its text as your reply.";
     // MIRROR-PROCESS C1: the plan stands on a search of postings they could apply to.
     if (o.planSearch && !called(["search_jobs"])) return "They asked what to do to land postings they could apply to, and no search ran. Call search_jobs now with their goal, then write the plan around what it found (say how many, and if none, what it covered).";
+    // D-067 (G14, C6): their own application history is read from the record that holds it.
+    if ((o.history || (o.mail && SAYS_NOT_APPLIED.test(reply))) && !called(["read_application_mail"])) return "They asked about their own applications and you did not read their record. Call read_application_mail now and answer from what it returns, saying what it covered.";
+    // D-067 (G11, C1): a plan ask gets its plan as a File (the postings and the weeks in it); the reply is the short answer and says the plan is in the file.
+    if (o.planFile && called(["search_jobs"]) && !called(["create_file"])) return "They asked for a plan: put the plan (the postings the search found, with their links, and the steps by week) in a File with create_file (kind plan_review), then reply in a few sentences with the answer first and say the full plan is in the file. Write no link: code adds it.";
+    // D-067 (G14, C22): a posting they named is read before research about it.
+    const firstResearch = calls.findIndex((c) => c.name === "research_market"), firstRead = calls.findIndex((c) => c.name === "get_posting");
+    if (o.posting && firstResearch >= 0 && (firstRead < 0 || firstRead > firstResearch)) return "They named a posting this conversation already showed, and you researched before reading it. Call get_posting on it now and answer from what the posting itself states (its pay for their place, as written) before any research figure.";
     // G3 / G4 (C9): every part they named is answered.
     const missing = partsMissing(reply, o.parts);
     if (missing.length) return `They asked about ${o.parts.join(", ")}, and your reply does not cover: ${missing.join(", ")}. Add each missing part from what you read this turn (call the research tool again only if needed), and where nothing covers it, say that in one plain sentence for that part.`;
@@ -266,6 +308,9 @@ export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts:
   };
 }
 
+// D-067 (owner, must-fix: "never say 'you haven't applied' without checking connected email first"): a reply that says they have
+// not applied, or that nothing is on record, is a history answer whatever the ask was.
+export const SAYS_NOT_APPLIED = /\byou(?:'ve|\s+have)?\s+(?:not|haven'?t|didn'?t|did\s+not|never)\s+(?:yet\s+)?(?:applied|submitted)\b|\byou\s+have\s+no\s+applications?\b|\bno\s+applications?\s+(?:on\s+record|yet|so\s+far|from\s+you|anywhere)\b|\bnothing\s+(?:is\s+)?on\s+record\s+yet\b|\b(?:not|haven'?t)\s+applied\s+(?:to\s+)?any(?:thing|where)\s+yet\b/i;
 // The links Trainee's own earlier replies in the window showed the person (assistant messages only; never a link the person typed,
 // which linksSeen already holds, and never one from a tool the model saw but did not show).
 export function shownBefore(history: { role: string; content: unknown }[]): string[] {
@@ -290,9 +335,14 @@ export function condenseLimit(message: string): { max: number; aim: string } {
 // condensed: its reply can be the stored payload's own words, which the turn's commit checks against what was written.
 export function condensable(r: Pick<TurnResult, "reply" | "show" | "pending_approvals"> & { tool_calls?: TurnResult["tool_calls"] }, limit: { max: number }): boolean {
   const reply = String(r.reply ?? "");
-  const wrote = (r.tool_calls ?? []).some((c) => c.effect !== null && c.effect !== undefined || /draft|tailor|file|attach|resume/i.test(c.name));
+  // D-067 (G3, live-6: no answer turn that called any tool came under its bound): a read is not a write. The name test matched
+  // "profile" and "resume" in read tools (get_profile, read_resume) and every effect counted, "read" included, so any turn that
+  // looked something up was never shortened. A write is a call that succeeded with a writing effect, or a tool that makes a draft,
+  // a file or a resume (its words can be the payload's own).
+  const wrote = (r.tool_calls ?? []).some((c) => (c.ok !== false && c.effect !== null && c.effect !== undefined && c.effect !== "read") || WRITER_TOOL.test(c.name));
   return reply.length > limit.max && !r.show && !(r.pending_approvals ?? []).length && !wrote && !/```/.test(reply);
 }
+const WRITER_TOOL = /^(?:draft_\w+|tailor_resume|create_file|attach_document|export_tracker|save_resume_persona|use_resume_persona|set_resume_contact)$/;
 const BOUNDARY = /\b(?:nothing|not|never|haven'?t|hasn'?t|didn'?t|wasn'?t|isn'?t|won'?t|no one|nobody)\b[^.!?\n]{0,60}\b(?:sent|submitted|applied|queued|contacted|messaged|emailed)\b|\b(?:sent|submitted|applied)\b[^.!?\n]{0,20}\b(?:nothing|nowhere)\b/i;
 const CAVEAT = /\b(?:not (?:verified|confirmed|guaranteed|listed|on file)|unverified|unconfirmed|(?:i )?(?:don'?t|do not|can'?t|cannot|couldn'?t) (?:have|verify|confirm|check|tell|find)|no verified)\b/i;
 const NUMBER = /\$?\d[\d,.]*(?:k|%)?/gi, LINK = /https?:\/\/\S+/g;
@@ -320,8 +370,28 @@ export function shortenedOk(long: string, short: string, bound: number): boolean
   // Facts kept: every figure of the long text is still in the short one (a shortening drops words, never a fact's number).
   const nums = new Set((s.match(NUMBER) ?? []).map((x) => x.replace(/[,.]$/, "")));
   if ((long.replace(LINK, " ").match(NUMBER) ?? []).some((x) => !nums.has(x.replace(/[,.]$/, "")))) return false;
-  return (long.match(PLACEHOLDERS) ?? []).every((x) => s.includes(x));
+  if (!(long.match(PLACEHOLDERS) ?? []).every((x) => s.includes(x))) return false;
+  // D-067 (live-6 C5f2: the condenser answered "It looks like there was no text to rewrite ... please paste it", and that reached
+  // the person in place of a code review): the shorter text must be a rewrite of THIS reply. It says nothing about the rewriting
+  // itself, nearly every content word of it is the long reply's, and it keeps a real share of the long reply's content.
+  return sameContent(long, s);
 }
+// D-067: the words of a text that carry its content (4+ letters, not filler), lower-cased, by their first five letters ("refer",
+// "referral"), so a rewording of the same words still counts as the same content.
+const FILLER_WORDS = new Set(["that", "this", "with", "from", "have", "your", "about", "what", "when", "will", "would", "could", "should", "there", "their", "them", "they", "then", "than", "into", "just", "also", "only", "some", "more", "most", "very", "like", "were", "been", "being", "does", "dont", "here", "want", "which", "while", "each", "both", "make"]);
+const wordsOf = (t: string) => new Set((String(t ?? "").replace(LINK, " ").toLowerCase().match(/[a-z][a-z'’]{3,}/g) ?? []).map((w) => w.replace(/['’]s$/, "").replace(/s$/, "")).filter((w) => w.length >= 4 && !FILLER_WORDS.has(w)).map((w) => w.slice(0, 5)));
+// A condenser's words about the job instead of the reply ("no text to rewrite", "paste the message", "here's a shorter version").
+export const META_REWRITE = /\b(?:(?:no|any) (?:text|message) (?:to|for me to) (?:rewrite|shorten|condense)|nothing to (?:rewrite|shorten|condense)|(?:paste|share|send) (?:it|the (?:text|message)|me the (?:text|message))(?: here)?\b[^.?!]{0,40}\b(?:rewrite|shape|shorten)|career assistant'?s (?:message|text|reply)|(?:here(?:'s| is)|below is) (?:a |the |your )?(?:shorter|shortened|rewritten|condensed|text-?style) (?:version|text|message|reply)|i (?:can(?:'|no)?t|cannot|won'?t) (?:rewrite|shorten|condense)|as an ai\b)/i;
+export function sameContent(long: string, short: string): boolean {
+  if (META_REWRITE.test(short) && !META_REWRITE.test(long)) return false;
+  const L = wordsOf(long), S = wordsOf(short);
+  if (!S.size || !L.size) return !S.size && !L.size;
+  const shared = [...S].filter((w) => L.has(w)).length;
+  return shared / S.size >= 0.6 && shared / L.size >= 0.2;
+}
+// D-067 (G12): a practice session's code review carries code (the person's function, the fix): the shortener never touches it.
+const CODE_IN = /```|`[^`\n]{2,}`|\bdef\s+\w+\s*\(|\bfunction\s+\w+\s*\(|=>|\breturn\s+[^.\n]*[([{=]|\bnext\(|\blambda\b|\w+\(\s*\w*\s*\)\s*[:{]|\bO\(\s*(?:1|n|n\^?2|log ?n|n log ?n)\s*\)/i;
+export function carriesCode(text: string): boolean { return CODE_IN.test(String(text ?? "")); }
 export async function condenseReply(model: ModelFn, long: string, limit: { max: number; aim: string }, ok: (long: string, short: string) => boolean = (a, b) => condensedOk(a, b, limit)): Promise<string | null> {
   try {
     const res = await model({

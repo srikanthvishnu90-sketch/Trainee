@@ -107,7 +107,8 @@ Deno.test({ name: "BG-1 the 23 scenarios through the real handler: process, outc
     // S1 (P1, P2, P5): the live search and the plan File in the brain's hands; nothing written to the record from a question.
     check("C1", b("C1").tools.includes("search_jobs") && seen.C1.tools.includes("create_file"), "search_jobs and create_file offered");
     // S2 (P4, P17): the draft is shown copy-ready, said not sent, its placeholders kept.
-    check("C2", seen.C2.reply.startsWith("Draft, not sent:") && seen.C2.reply.includes("[Name]"), `copy-ready draft, not sent: ${seen.C2.reply.slice(0, 120)}`);
+    // Architect amendment (D-067): the draft comes first and its label after it (G2, answer first); the bar stands: the reply is the tool's checked text and the not-sent label still appears.
+    check("C2", seen.C2.reply.endsWith("\n\nDraft, not sent.") && seen.C2.reply.includes("[Name]"), `copy-ready draft, not sent: ${seen.C2.reply.slice(0, 120)}`);
     // S3 (P2, P3, P4, P17): code's search: each posting re-checked on its own page, its plain link, nothing applied.
     // With production's File settings the postings ride their list page (its link verified above), which holds the posting's link.
     const c3tok = fileLinks(seen.C3)[0] ? await verifyFileToken(new URL(fileLinks(seen.C3)[0]).searchParams.get("t"), FILE_ENV.TRAINEE_FILE_LINK_SECRET, Date.now()) : null;
@@ -144,7 +145,8 @@ Deno.test({ name: "BG-1 the 23 scenarios through the real handler: process, outc
     // S12 (P4, P10): no tool that queues or applies; the boundary said.
     check("C12", !b("C12").tools.includes("queue_applications") && NOTHING_SENT.test(seen.C12.reply), "no queue tool, boundary said");
     // S13, S14 (P4, P7, P12): drafts through the draft tool, not sent; C14 is the earlier draft, shorter.
-    for (const id of ["C13", "C14"]) check(id, b(id).reply.startsWith("Draft, not sent:") && /"status":"ok"/.test(seen[id].calls.find((c) => c.name === "draft_followup")?.result ?? ""), "a checked draft, not sent");
+    // Architect amendment (D-067): the draft comes first and its label after it (G2, answer first); the bar stands: the reply is the tool's checked text and the not-sent label still appears.
+    for (const id of ["C13", "C14"]) check(id, b(id).reply.endsWith("\n\nDraft, not sent.") && /"status":"ok"/.test(seen[id].calls.find((c) => c.name === "draft_followup")?.result ?? ""), "a checked draft, not sent");
     check("C14", seen.C14.history.includes("70+ React websites") && seen.C14.reply.length < seen.C2.reply.length, "continuity: the earlier draft, shorter");
     // S16 (P5, P6, P15): the tracker page is built from the record, its link verifies (above), and its coverage is said.
     const t16 = result("C16", "export_tracker");

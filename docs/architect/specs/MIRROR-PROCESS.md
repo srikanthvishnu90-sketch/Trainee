@@ -129,7 +129,7 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
 - **Instinct:** a draft from the confirmed profile (school, Waypoint, 70+ React sites) with `[Name]` and `[job link]` placeholders;
   no question about the recipient; not sent.
 - **Steps:** (1) the brain - EXISTS. (2) `draft_followup` (kind `note`, recipient empty) - EXISTS; code checks the draft
-  (no invented meeting, referral, figure or name; no guessed address) and shows it as "Draft, not sent:" (`followup_draft.ts`).
+  (no invented meeting, referral, figure or name; no guessed address) and shows it with "Draft, not sent." after it (`followup_draft.ts`; label after the draft since D-067).
   Before this PR code refused a draft with no recipient and asked who it was for; **D-059** makes it draft with placeholders and
   ask for the recipient only at send time. A greeting or sign-off word ("Best, Sam") is no longer read as a name, and a
   short form of words the person typed ("CS" for "Computer Science") is theirs.
@@ -247,7 +247,7 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
 
 ### C13 "draft a message to a recruiter asking if the comp range on a role is negotiable, keep it casual, don't send" (EXISTS)
 - **Instinct:** a two-sentence casual draft, no name; not sent.
-- **Steps:** `draft_followup` with no recipient (D-059), shown "Draft, not sent:" - EXISTS; length "under about 200 characters".
+- **Steps:** `draft_followup` with no recipient (D-059), shown with "Draft, not sent." after it (D-067) - EXISTS; length "under about 200 characters".
 
 ### C14 "actually that referral draft from earlier, make it way shorter and less formal" (EXISTS)
 - **Instinct:** C2's draft, shorter, placeholders kept; not sent.

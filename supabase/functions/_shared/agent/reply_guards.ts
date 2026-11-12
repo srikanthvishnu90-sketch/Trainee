@@ -257,6 +257,8 @@ export function bracketUntraced(reply: string, sources: string[], personal: stri
 const SNAKE = /\b[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)+\b/g;
 const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
 const RAW_ID = /\b[a-z][a-z0-9]*:[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9._-]*\b/gi;
+// D-067 (live-6 C8: "the 3.9 GPA is still on file as confirmed (F-002)"): a fact's record id from the person block is internal.
+const FACT_ID = /\bF-\d{3,}\b/g;
 export interface Posting { title: string; company: string }
 // The postings this turn's tool results named, by every id they gave it.
 export function postingsOf(results: string[]): Map<string, Posting> {
@@ -282,7 +284,7 @@ export function leakedWords(reply: string, o: { tools: string[]; typed: string; 
   const add = (w: string) => { if (!own.has(w.toLowerCase()) && !out.includes(w)) out.push(w); };
   const t = String(reply ?? "").replace(URL_RE, " ");
   for (const id of o.postings.keys()) if (idLike(id) && t.includes(id)) add(id);
-  for (const re of [RAW_ID, UUID, SNAKE]) for (const m of t.matchAll(re)) add(m[0]);
+  for (const re of [RAW_ID, UUID, SNAKE, FACT_ID]) for (const m of t.matchAll(re)) add(m[0]);
   for (const name of o.tools) if (/_/.test(name) && new RegExp(`\\b${esc(name)}\\b`).test(t)) add(name);
   // WO-061 (second judge, run 39603731114 p3: "You don't have that interview on file yet: SITUATION shows nothing"):
   // the name of the system prompt's block is internal; only the all-caps block name, never the ordinary word.
@@ -299,7 +301,7 @@ export function stripLeaks(reply: string, o: { tools: string[]; typed: string; p
     if (!leakedWords(p.text, o).length) continue;
     p.text = tidy(masked(p.text, (t) => {
       let s = t;
-      const ids = [...new Set([...[...o.postings.keys()].filter((id) => idLike(id) && s.includes(id)), ...(s.match(RAW_ID) || []), ...(s.match(UUID) || [])])]
+      const ids = [...new Set([...[...o.postings.keys()].filter((id) => idLike(id) && s.includes(id)), ...(s.match(RAW_ID) || []), ...(s.match(UUID) || []), ...(s.match(FACT_ID) || [])])]
         .filter((id) => !own.has(id.toLowerCase())).sort((a, b) => b.length - a.length);
       for (const id of ids) {
         const known = o.postings.get(id);
@@ -582,6 +584,30 @@ export function smallTalkPitch(message: string, reply: string): number[] {
   pieces(plainQuotes(String(reply ?? ""))).forEach((p, k) => {
     const verbs = new Set((p.text.match(VERBS) ?? []).map((v) => v.toLowerCase().slice(0, 5)));
     if (PITCH.test(p.text) || verbs.size >= 3) out.push(k);
+  });
+  return out;
+}
+
+// ------------------------------------------------------------------------------------------------ what the person asked for
+// D-067 (live-6 C20: "it prints 1 line, not the 6 you asked for", when the person typed no number; D-007): a number the reply says
+// the person asked for, wanted or said is in their own words, or the sentence goes. The sentences that carry one are returned.
+const NUM_WORD: Record<string, string> = { one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9", ten: "10", twelve: "12", fifteen: "15", twenty: "20", fifty: "50", hundred: "100", single: "1", a: "1", an: "1" };
+const N = String.raw`(\d[\d,.]*|one|two|three|four|five|six|seven|eight|nine|ten|twelve|fifteen|twenty|fifty|hundred)`;
+const ATTRIBUTED = [
+  new RegExp(String.raw`\b${N}\s+(?:[\w-]+\s+){0,3}?(?:that\s+|which\s+)?you\s+(?:asked|wanted|requested|said|mentioned|named|picked|chose|told\s+me)\b`, "gi"),
+  new RegExp(String.raw`\byou\s+(?:asked|wanted|requested|said|told\s+me|named)\s+(?:me\s+)?(?:for\s+|to\s+\w+\s+)?(?:about\s+|around\s+|roughly\s+|exactly\s+)?${N}\b`, "gi"),
+  new RegExp(String.raw`\b(?:as\s+you\s+asked|you\s+asked\s+for)[^.!?\n]{0,30}?\b${N}\b`, "gi"),
+];
+const numKey = (x: string) => NUM_WORD[x.toLowerCase()] ?? x.replace(/[,.]+$/, "").replace(/,/g, "");
+export function misquotedAsks(reply: string, personSaid: string[]): { index: number; figure: string }[] {
+  const said = new Set((personSaid.join("\n").match(/\d[\d,.]*|\b(?:one|two|three|four|five|six|seven|eight|nine|ten|twelve|fifteen|twenty|fifty|hundred|single|an?)\b/gi) ?? []).map(numKey));
+  const out: { index: number; figure: string }[] = [];
+  pieces(reply).forEach((p, index) => {
+    const t = plainQuotes(p.text).replace(URL_RE, " ");
+    for (const re of ATTRIBUTED) for (const m of t.matchAll(re)) {
+      const n = numKey(m[1]);
+      if (!said.has(n) && !out.some((o) => o.index === index)) out.push({ index, figure: m[1] });
+    }
   });
   return out;
 }

@@ -2,6 +2,7 @@
   "default_s": 5,
   "files": {
     "tests/architect/d065-live-round1-20261112.test.ts": 0.2,
+    "tests/architect/d067-live-round2-20261112.test.ts": 0.3,
     "tests/architect/d066-behavior-guide-20261112.test.ts": 0.5,
     "tests/architect/behavior-guide-suite.test.ts": 17,
     "tests/architect/gmail-oauth-wrapper-ci.test.ts": 0.6,

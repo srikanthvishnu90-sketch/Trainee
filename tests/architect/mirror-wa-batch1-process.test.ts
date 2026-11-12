@@ -86,7 +86,8 @@ Deno.test({ name: "MP-1 the EXISTS turns follow Instinct's process: the tools of
     ok(c2.tools.includes("draft_followup"), "C2 offers draft_followup");
     ok(/"status":"ok"/.test(result(c2.calls, "draft_followup")), `C2 draft passed code's checks: ${result(c2.calls, "draft_followup").slice(0, 300)}`);
     eq(c2.intent, "career_followup_draft");
-    ok(c2.reply.startsWith("Draft, not sent:") && c2.reply.includes(C2_BODY), `C2 shows the checked draft: ${c2.reply.slice(0, 200)}`);
+    // Architect amendment (D-067): the draft comes first and its label after it (G2, answer first); the bar stands: the reply is the tool's checked text and the not-sent label still appears.
+    ok(c2.reply.endsWith("Draft, not sent.") && c2.reply.includes(C2_BODY), `C2 shows the checked draft: ${c2.reply.slice(0, 200)}`);
     ok(c2.reply.includes("[Name]") && c2.reply.includes("[job link]"), "C2 keeps the placeholders");
     ok(!/\?\s*$/.test(c2.reply.split("\n")[0]), "C2 asks no recipient question");
 
@@ -139,7 +140,8 @@ Deno.test({ name: "MP-1 the EXISTS turns follow Instinct's process: the tools of
       const s = brain(id);
       ok(/"status":"ok"/.test(result(s.calls, "draft_followup")), `${id} draft passed: ${result(s.calls, "draft_followup").slice(0, 300)}`);
       eq(s.intent, "career_followup_draft");
-      ok(s.reply.startsWith("Draft, not sent:") && s.reply.endsWith(body), `${id}: ${s.reply.slice(0, 160)}`);
+      // Architect amendment (D-067): the draft comes first and its label after it (G2, answer first); the bar stands: the reply is the tool's checked text and the not-sent label still appears.
+      ok(s.reply.endsWith("\n\nDraft, not sent.") && s.reply.startsWith(body), `${id}: ${s.reply.slice(0, 160)}`);
     }
     ok(seen.C14.history.includes(C2_BODY), "C14: the brain sees the earlier referral draft");
     ok(C14_BODY.length < C2_BODY.length, "C14 is shorter");

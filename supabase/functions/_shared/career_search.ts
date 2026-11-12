@@ -131,6 +131,49 @@ export function orAlternatives(query: unknown): string[] {
   const at = q.indexOf(m[1]);
   return [...new Set(opts.map((o) => `${q.slice(0, at)}${o}${q.slice(at + m[1].length)}`.replace(/\s+/g, " ").trim()))].slice(0, 4);
 }
+// D-073 (live-9 C1, C3: the person's goal is "Chicago or remote", the brain searched "software engineer intern summer 2027 Chicago
+// remote", one query with no "or", so D-071's per-place search never ran and NVIDIA's remote posting was not returned): the places
+// the person joined with "or" (in this message, or in their goal on record) stay alternatives whatever the model's query did with
+// them. A query that names two or more of them without "or" names them as alternatives ("... Chicago or remote"); a query that names
+// one of a pair the person said in this message gets the other ("... Chicago" -> "... Chicago or remote"). Nothing else changes.
+const words = (t: string) => t.toLowerCase().match(/[a-z][a-z.'-]*/g) ?? [];
+const OR_SKIP = new Set(["either", "this", "that", "more", "less", "something", "anything", "else", "not", "so", "now", "later", "sooner", "one", "two", "both"]);
+function orPairs(text: string): string[][] {
+  const out: string[][] = [];
+  for (const m of String(text ?? "").matchAll(/((?:[A-Za-z][\w.'-]*\s+){0,1}[A-Za-z][\w.'-]*)\s+or\s+([A-Za-z][\w.'-]*(?:\s+[A-Za-z][\w.'-]*)?)/g)) {
+    const l = words(m[1]), r = words(m[2]);
+    if (!l.length || !r.length) continue;
+    out.push([l.slice(-2).join(" "), l.slice(-1)[0], r.slice(0, 2).join(" "), r[0]].filter((x): x is string => !!x && !OR_SKIP.has(x)));
+  }
+  return out;
+}
+const hasPhrase = (q: string, ph: string) => new RegExp(`(?<![a-z])${ph.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![a-z])`, "i").test(q);
+export function placeAlternatives(query: unknown, message: unknown, profile: any = null): string {
+  const q = String(query ?? "").replace(/\s+/g, " ").trim();
+  if (!q || /\sor\s/i.test(q)) return q;
+  const goal = goalOf(profile);
+  const goalTexts = (Array.isArray(profile?.facts) ? profile.facts : []).filter((f: any) => f?.kind === "goal" && f.status !== "rejected" && typeof f.text === "string").map((f: any) => f.text as string);
+  // The place groups: each "X or Y" the person said (this message first, then their goal), and the goal's places with remote.
+  const said = orPairs(String(message ?? ""));
+  const groups: { phrases: string[]; fromMessage: boolean }[] = [...said.map((g) => ({ phrases: g, fromMessage: true })), ...goalTexts.flatMap(orPairs).map((g: string[]) => ({ phrases: g, fromMessage: false })),
+    ...(goal && goal.remote && goal.places.length ? [{ phrases: [...goal.places, "remote"], fromMessage: false }] : [])];
+  for (const g of groups) {
+    // One-word places only: orAlternatives reads "X or Y" word by word.
+    const inQ = [...new Set(g.phrases.filter((ph) => !ph.includes(" ") && hasPhrase(q, ph)))].filter((ph, _k, all) => !all.some((o) => o !== ph && o.includes(ph)));
+    if (inQ.length >= 2 && !g.phrases.some((ph) => ph.includes(" ") && hasPhrase(q, ph))) {
+      // Every named place goes; the first one's spot holds them all, joined by "or".
+      const first = inQ.map((ph) => ({ ph, at: q.toLowerCase().search(new RegExp(`(?<![a-z])${ph.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![a-z])`)) })).sort((a, b) => a.at - b.at);
+      let out = q;
+      for (const x of first.slice(1)) out = out.replace(new RegExp(`\\s*(?<![a-z])${x.ph.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![a-z])`, "i"), "");
+      return out.replace(new RegExp(`(?<![a-z])(${first[0].ph.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})(?![a-z])`, "i"), `$1 or ${first.slice(1).map((x) => x.ph).join(" or ")}`).replace(/\s+/g, " ").trim();
+    }
+    if (inQ.length === 1 && g.fromMessage && !g.phrases.some((ph) => ph.includes(" ") && hasPhrase(q, ph))) {
+      const other = g.phrases.find((ph) => !inQ[0].includes(ph) && !ph.includes(inQ[0]) && ph.split(" ").length === 1 && !hasPhrase(q, ph));
+      if (other) return q.replace(new RegExp(`(?<![a-z])(${inQ[0].replace(/[.*+?^${}()|[\]\\]/g, "\\$&")})(?![a-z])`, "i"), `$1 or ${other}`);
+    }
+  }
+  return q;
+}
 export function searchAlternatives(pool: any[], alts: string[], profile: any, limit = 10, cache?: FitCache): ReturnType<typeof searchPostings> {
   const each = alts.map((a) => searchPostings(pool, a, profile, limit, cache));
   if (each.length === 1) return each[0];

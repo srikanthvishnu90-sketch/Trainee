@@ -5,7 +5,7 @@ import { isAutomatedInbox } from "../automated_inbox.ts";
 import { conversationFor, type RepliesStore } from "../career_outreach_replies.ts";
 import { CareerProfile, CareerTrack, CareerPrep, CareerPaths } from "../router_core.career.js";
 import { AskPerson, type ToolSpec, type ToolCtx } from "./loop.ts";
-import { type FitCache, newFitCache, orAlternatives, searchAlternatives, searchPostings } from "../career_search.ts";
+import { type FitCache, newFitCache, orAlternatives, placeAlternatives, searchAlternatives, searchPostings } from "../career_search.ts";
 import { searchWords, wordStem } from "../career_ingest.ts";
 import { liveOnly, type LinkCheck } from "../link_check.ts";
 import { startWatching, validPrefs, validZone, type AlertStore } from "../career_alert_store.ts";
@@ -335,7 +335,7 @@ export function careerTools(deps: {
     run: async (i, c) => {
       const list = (x: unknown) => Array.isArray(x) ? x.map(String).filter(Boolean).slice(0, 4) : [];
       const q = String(i.question ?? c.turn?.message ?? "");
-      const r = await researchMarket({ question: q, format: i.format === "file" ? "file" : "inline", deps: deps.market!, fileLinks: c.turn ? (c.turn.fileLinks ??= []) : undefined,
+      const r = await researchMarket({ question: q, format: i.format === "file" ? "file" : "inline", deps: deps.market!, fileLinks: c.turn ? (c.turn.fileLinks ??= []) : undefined, ask: c.turn?.message,
         plan: { queries: list(i.queries).slice(0, 3).concat(list(i.queries).length ? [] : [q]), companies: list(i.companies), sites: list(i.sites), soc: i.soc ? String(i.soc) : null, cbsa: i.cbsa ? String(i.cbsa) : null } });
       deps.market!.onResult?.(r);
       return r;
@@ -709,7 +709,8 @@ export function careerTools(deps: {
       run: async (i, c) => {
         // WO-068: every word must match, so a word the model added ("mid level", "python") can empty a search that has
         // real postings. With none found, the query is shortened from the end until one matches, and the result says so.
-        const asked = String(i.query ?? "");
+        // D-073: the places the person joined with "or" stay alternatives, whatever the model's query did with them (placeAlternatives).
+        const asked = placeAlternatives(String(i.query ?? ""), c.turn?.message ?? "", c.state?.profile ?? null);
         // D-070: "chicago or remote" is two searches, merged (career_search.ts orAlternatives); each alternative is relaxed alone.
         const alts0 = orAlternatives(asked);
         if (alts0.length > 1) {

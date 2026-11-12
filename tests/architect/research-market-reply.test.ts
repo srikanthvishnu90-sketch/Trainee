@@ -129,9 +129,17 @@ Deno.test("no source could be opened, or none supports an answer: the reply says
   eq(r.status, "no_sources");
   eq(enforceMarketReply("Batteries will grow 35% a year. I couldn't open a source for that.", r), "I couldn't open a source for that.");
   ok(/couldn't find a source/.test(enforceMarketReply("Growth is 35%.", r)));
-  const bad = deps(KEY, { ...MARKET_DRAFT, summary: [{ text: "x 99%", quote: "nowhere on any page", url: "https://acme.example/annual-report" }] });
-  const r2 = await researchMarket({ question: "battery market?", format: "inline", plan: { queries: ["battery market"] }, deps: bad.d });
+  // Architect amendment (D-073): every kept, cited line counts toward an answer (live-9 C9 and C22 kept lines and still said
+  // no_sources), and when the draft's lines are dropped the read pages' own sentences that speak to the ask answer, word for word.
+  // So "none supports an answer" is a draft whose every line is dropped (its conditions and risks too) on pages none of whose
+  // sentences speaks to the ask. The bar stands: then the result is no_sources and says it couldn't confirm one; and a kept line
+  // answers only with its source number and no figure that is not on it.
+  const bad = deps(KEY, { ...MARKET_DRAFT, summary: [{ text: "x 99%", quote: "nowhere on any page", url: "https://acme.example/annual-report" }], conditions: [{ text: "x", urls: ["https://www.linkedin.com/pulse/batteries"] }], risks: [] });
+  const r2 = await researchMarket({ question: "What is the outlook for hydrogen trucks?", format: "inline", plan: { queries: ["battery market"] }, deps: bad.d });
   ok(r2.status === "no_sources" && /couldn't confirm/.test(r2.note));
+  const kept = deps(KEY, { ...MARKET_DRAFT, summary: [{ text: "x 99%", quote: "nowhere on any page", url: "https://acme.example/annual-report" }] });
+  const r3 = await researchMarket({ question: "battery market?", format: "inline", plan: { queries: ["battery market"] }, deps: kept.d });
+  ok(r3.status === "ok" && !/99%/.test(enforceMarketReply("", r3)) && /\[\d\]/.test(enforceMarketReply("", r3)), enforceMarketReply("", r3));
 });
 
 Deno.test("routing: with CAREER_RESEARCH_REPLY=on the three asks go to the brain; off, or a job search or a payload, they do not", () => {

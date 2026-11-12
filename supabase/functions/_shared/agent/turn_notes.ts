@@ -333,6 +333,19 @@ export function shownPayOf(message: string, history: Msg[]): { text: string; url
   }
   return out.slice(-4);
 }
+// D-073 (live-9 C9: "the PayPal SWE internship posting you saw earlier, listed at $28-$49 hourly" went out with the link and no
+// place): each shown pay line with the place its paragraph named ("Chicago, IL", or remote), read from that earlier reply.
+const US_STATES = "Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming";
+const PLACE_IN = new RegExp(`\\b((?:[A-Z][A-Za-z.'-]+\\s){0,2}[A-Z][A-Za-z.'-]+),\\s(?:[A-Z]{2}(?![A-Za-z])|(?:${US_STATES})\\b)`);
+export function shownPayPlaces(message: string, history: Msg[]): { text: string; url: string | null; place: string | null }[] {
+  const lines = shownPayOf(message, history);
+  const paras = (history ?? []).filter((m) => m?.role === "assistant" && typeof m.content === "string").flatMap((m) => (m.content as string).split(/\n\s*\n/));
+  return lines.map((l) => {
+    const para = paras.find((x) => x.replace(/https?:\/\/\S+/g, " ").includes(l.text)) ?? "";
+    const own = PLACE_IN.exec(l.text)?.[0] ?? null, near = PLACE_IN.exec(para.replace(/https?:\/\/\S+/g, " "))?.[0] ?? null;
+    return { ...l, place: own ?? near ?? (/\bremote\b/i.test(l.text) ? "remote" : null) };
+  });
+}
 export function shownPayNote(lines: { text: string; url: string | null }[]): string {
   return "PAY THIS CONVERSATION ALREADY SHOWED (data from code: your own earlier replies, each from the posting or source it named). Where one answers this ask, use it, " +
     "with its place and naming where it came from, before or alongside any research; never say you have no figure when one of these answers it. Write no link: code puts each one's source link after your reply:\n" +

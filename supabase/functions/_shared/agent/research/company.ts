@@ -20,7 +20,7 @@ import { isBlockedHost, isHttps, normalizeUrl, type SourcePage, URL_IN_TEXT, ver
 import type { SearchPlan } from "../../research_search.ts";
 import { NO_SOURCES } from "../../research_reply.ts";
 import { contentWords, numbersIn, numEq, specifics } from "./guard.ts";
-import { agrees, auditLine, checkLine, figuresIn, hasPredicate, type MarketDeps, newAudit, pageSentences, passagesFor, type ResearchAudit } from "./market.ts";
+import { agrees, auditFromPages, auditLine, checkLine, figuresIn, hasPredicate, type MarketDeps, newAudit, ON_PAGES_SHARE, pageSentences, passagesFor, type ResearchAudit, wordsOnPages } from "./market.ts";
 import { stripUrls } from "./reply.ts";
 import { parseDraft } from "./draft_json.ts";
 
@@ -177,7 +177,7 @@ export async function researchCompany(i: { company: string; role?: string | null
     return { kind: "company", status: "no_sources", ask, notes, unread, blocker, audit: newAudit(0), note: `Research could not run: ${blocker}. Say that blocker plainly in one or two sentences, give no fact from memory, and say nothing was applied for or sent.${roleAsk}` };
   }
   // D-071: what happened to the draft, line by line (turn meta `research`, the real-set results).
-  const audit = newAudit(pages.length);
+  const audit = newAudit(pages.length, { samples: !!i.deps.auditSamples });
   const parsed = parseDraft(await i.deps.draft(companyDraftPayload({ company, role, focus, audience, question: i.question }, pages)).catch(() => ""));
   audit.parse = parsed.how;
   const d = (parsed.value && typeof parsed.value === "object" ? parsed.value : null) ?? {};
@@ -186,59 +186,69 @@ export async function researchCompany(i: { company: string; role?: string | null
   const order: string[] = [];
   const num = (p: SourcePage) => { const k = normalizeUrl(p.url); if (!order.includes(k)) order.push(k); return order.indexOf(k) + 1; };
   let dropped = 0;
-  const drop = (why = "other") => { dropped++; auditLine(audit, { ok: false, why }); return null; };
+  const drop = (why = "other", section = "", line: { text?: unknown; quote?: unknown } = {}) => { dropped++; auditLine(audit, { ok: false, why }, section, line); return null; };
   // A source is numbered only when a line that cites it is kept, so a page whose lines were all dropped is never listed.
   // D-071: checkLine (market.ts) gives the reason a line is dropped, and keeps a line that only rewords its quote as the page's own
   // sentence. A line the later rules drop (date, meaning, competitor) is counted once, by that rule.
-  const fact = (x: any): { text: string; page: SourcePage; via?: "quote" } | null => {
+  // D-073: every line the brief keeps has at least 60% of its words on the pages it cites (wordsOnPages, the real-set "cited" measure).
+  const fact = (x: any, section: string): { text: string; page: SourcePage; via?: "quote"; section: string } | null => {
     const p = pageOf(x?.url);
     // D-070: the company's own name is the subject of every line ("Coinbase operates ..." on "It operates ..."), never a new claim.
     const c = checkLine(x?.text, x?.quote, p, company);
-    if (!c.ok) return drop(c.why);
-    return { text: c.text, page: p!, ...(c.via ? { via: c.via } : {}) };
+    if (!c.ok) return drop(c.why, section, x);
+    if (wordsOnPages(c.text, [p!]) < ON_PAGES_SHARE) return drop("words_not_on_pages", section, x);
+    return { text: c.text, page: p!, section, ...(c.via ? { via: c.via } : {}) };
   };
-  const keptOk = (f: { via?: "quote" }) => { auditLine(audit, { ok: true, via: f.via }); };
-  const kept = (f: { text: string; page: SourcePage; via?: "quote" }): Cited => { keptOk(f); return { text: f.text, cite: [num(f.page)] }; };
+  const keptOk = (f: { via?: "quote"; section: string }) => { auditLine(audit, { ok: true, via: f.via }, f.section); };
+  const kept = (f: { text: string; page: SourcePage; via?: "quote"; section: string }): Cited => { keptOk(f); return { text: f.text, cite: [num(f.page)] }; };
   const on = (f: Focus) => focus === "all" || focus === f;
   // A product line keeps its product only when the quote names it.
-  const business: (Cited & { product?: string })[] = on("business") ? arr(d.business, 6).map((x) => { const f = fact(x); if (!f) return null; const pr = squash(x?.product).slice(0, 40);
+  const business: (Cited & { product?: string })[] = on("business") ? arr(d.business, 6).map((x) => { const f = fact(x, "business"); if (!f) return null; const pr = squash(x?.product).slice(0, 40);
     return { ...kept(f), ...(pr && linkFree(pr) && word(pr, squash(x?.quote)) ? { product: pr } : {}) }; }).filter(Boolean) as (Cited & { product?: string })[] : [];
   const developments: Development[] = on("developments") ? arr(d.developments, 5).map((x) => {
-    const day = parseDay(squash(x?.date)), f = fact(x);
+    const day = parseDay(squash(x?.date)), f = fact(x, "developments");
     if (!f) return null;
-    if (!day || !dayOnPage(day, f.page.text)) return drop("date_not_on_page"); // a recent item has a date, and it is the page's date
+    if (!day || !dayOnPage(day, f.page.text)) return drop("date_not_on_page", "developments", x); // a recent item has a date, and it is the page's date
     const m = meaningKept(f.text, squash(x?.quote));
-    if (!m.ok) return drop(`meaning_${m.measure}`);
+    if (!m.ok) return drop(`meaning_${m.measure}`, "developments", x);
     return { ...kept(f), date: showDay(day), measure: m.measure };
   }).filter(Boolean) as Development[] : [];
   const competitors = on("competitors") ? arr(d.competitors, 4).map((x) => {
-    const name = squash(x?.name).slice(0, 60), f = fact(x);
+    const name = squash(x?.name).slice(0, 60), f = fact(x, "competitors");
     if (!f) return null;
-    if (!name || !linkFree(name) || word(company, name) || !word(name, squash(x?.quote))) return drop("competitor_not_named");
+    if (!name || !linkFree(name) || word(company, name) || !word(name, squash(x?.quote))) return drop("competitor_not_named", "competitors", x);
     return { name, ...kept(f) };
   }).filter(Boolean) as (Cited & { name: string })[] : [];
-  const role_asks = on("role") && role ? arr(d.role, 5).map(fact).filter(Boolean).map((f) => kept(f!)) : [];
+  const role_asks = on("role") && role ? arr(d.role, 5).map((x) => fact(x, "role")).filter(Boolean).map((f) => kept(f!)) : [];
   // D-071 (owner must-fix: research never comes back without its sourced parts when pages were read; real-set live run: five
   // companies opened 5 to 10 pages each and kept nothing): a draft that gave no line at all (unparsed, failed, or empty) still gives
   // the pages' own sentences that name the company, word for word, as its business lines, each citing its page.
-  if (!audit.drafted && on("business")) for (const l of pageSentences(pages, contentWords(`${company} ${role ?? ""} ${i.question}`), [company], 4)) {
-    business.push({ text: l.text, cite: [num(l.page)] }); audit.kept++; audit.from_pages++;
+  // D-073 (item 10 live run 43272687366: Datadog, Affirm and Toast each kept only the frame, Trainee's reading, and gave no brief): the
+  // pages' own sentences are also used when the draft had lines but kept fewer facts than a brief needs (two), so a brief never
+  // stands on a reading alone.
+  const facts0 = () => business.length + developments.length + competitors.length + role_asks.length;
+  if ((!audit.drafted || facts0() < 2) && on("business")) for (const l of pageSentences(pages, contentWords(`${company} ${role ?? ""} ${i.question}`), [company], 4)) {
+    if (audit.drafted && facts0() >= 2) break;
+    if (business.some((b) => b.text === l.text)) continue;
+    business.push({ text: l.text, cite: [num(l.page)] }); auditFromPages(audit, "business");
   }
   // A question is code's sentence around a verified tension: the area agrees with its quote on a cited page; A and B are each stated
   // on the cited pages (every content word, every figure); A and B differ. Nothing in a question is the model's own claim.
   const questions: Question[] = on("questions") ? arr(d.tensions, Math.min(6, Math.max(focus === "questions" ? 6 : 5, wanted ?? 0))).map((x) => {
     const area = squash(x?.area).replace(/[.?!]+$/, ""), a = squash(x?.a).replace(/[.?!]+$/, ""), b = squash(x?.b).replace(/[.?!]+$/, ""), aq = squash(x?.area_quote);
     const ps = arr(x?.urls, 4).map(pageOf).filter(Boolean) as SourcePage[];
-    if (!ps.length || ![area, a, b].every((s) => s && s.length <= 120 && linkFree(s))) return drop("tension_malformed");
+    if (!ps.length || ![area, a, b].every((s) => s && s.length <= 120 && linkFree(s))) return drop("tension_malformed", "questions", { text: `${area} | ${a} | ${b}`, quote: aq });
     const home = ps.find((p) => agrees(area, aq, p.text));
     const words = new Set(ps.flatMap((p) => [...contentWords(p.text.slice(0, 60000))]));
     // A side is stated when each of its words is on a cited page, allowing an inflection the stemmer splits ("letting"/"let").
     const near = (w: string) => words.has(w) || [...words].some((x) => (x.startsWith(w) || w.startsWith(x)) && Math.min(x.length, w.length) >= 3 && Math.abs(x.length - w.length) <= 2);
     const stated = (s: string) => [...contentWords(s)].every(near) && contentWords(s).size > 0 && figuresIn(s).every((n) => ps.some((p) => figuresIn(p.text.slice(0, 60000)).some((y) => numEq(y, n))));
-    if (!home || !stated(a) || !stated(b) || a.toLowerCase() === b.toLowerCase()) return drop("tension_not_stated");
+    if (!home || !stated(a) || !stated(b) || a.toLowerCase() === b.toLowerCase()) return drop("tension_not_stated", "questions", { text: `${area} | ${a} | ${b}`, quote: aq });
+    // (Its area agrees with its quote and each side is stated word by word above: the model's words in it are all on its pages.)
+    const text = `Your team is working on ${area.charAt(0).toLowerCase()}${area.slice(1)}. How do you decide between ${a} and ${b}?`;
     const cite = [...new Set([home, ...ps].map(num))];
-    auditLine(audit, { ok: true });
-    return { area, a, b, text: `Your team is working on ${area.charAt(0).toLowerCase()}${area.slice(1)}. How do you decide between ${a} and ${b}?`, cite };
+    auditLine(audit, { ok: true }, "questions");
+    return { area, a, b, text, cite };
   }).filter(Boolean) as Question[] : [];
   const questions_n = () => questions.length;
   // Trainee's reading: every page it names passed the guard, and every figure in it is on one of them.
@@ -246,8 +256,10 @@ export async function researchCompany(i: { company: string; role?: string | null
   if (focus === "all" && d.frame) {
     const t = squash(d.frame.text), ps = arr(d.frame.urls, 4).map(pageOf).filter(Boolean) as SourcePage[];
     const nums = ps.flatMap((p) => figuresIn(p.text.slice(0, 60000)));
-    if (t && t.length <= 300 && linkFree(t) && ps.length && figuresIn(t).every((n) => nums.some((y) => numEq(y, n))) && initiativeStated(t, ps.map((p) => p.text.slice(0, 60000)).join("\n"))) { frame = { text: t, cite: [...new Set(ps.map(num))] }; auditLine(audit, { ok: true }); }
-    else drop("frame_unsupported");
+    // D-073: Trainee's reading has at least 60% of its words on the pages it names (item 10 live: Stripe's and Plaid's model-worded
+    // lines were under it).
+    if (t && t.length <= 300 && linkFree(t) && ps.length && figuresIn(t).every((n) => nums.some((y) => numEq(y, n))) && initiativeStated(t, ps.map((p) => p.text.slice(0, 60000)).join("\n")) && wordsOnPages(t, ps) >= ON_PAGES_SHARE) { frame = { text: t, cite: [...new Set(ps.map(num))] }; auditLine(audit, { ok: true }, "frame"); }
+    else drop("frame_unsupported", "frame", { text: t });
   }
   const cited = order.map((k) => byUrl.get(k)!);
   const pageText = cited.map((p) => p.text.slice(0, 60000)).join("\n");
@@ -255,7 +267,7 @@ export async function researchCompany(i: { company: string; role?: string | null
   const known = [company, role ?? ""].join(" ");
   const unknowns = focus === "all" ? arr(d.unknowns, 4).map(squash).filter((u) => {
     const ok = u && u.length <= 200 && linkFree(u) && !numbersIn(u).length && specifics(u).names.every((n) => word(n, pageText) || word(n, known));
-    if (!ok && u) drop("unknown_names_or_figures");
+    if (!ok && u) drop("unknown_names_or_figures", "unknowns", { text: u });
     return ok;
   }) : [];
   // Products (C.22 "Billing: the revenue lifecycle"): a product with kept lines, and an angle every word of which is on those lines' pages.
@@ -263,7 +275,7 @@ export async function researchCompany(i: { company: string; role?: string | null
     const mine = business.filter((b) => b.product && b.product.toLowerCase() === x.name.toLowerCase());
     const words = new Set(mine.flatMap((b) => b.cite.flatMap((n) => [...contentWords(cited0(n))])));
     const ok = !!x.name && !!x.angle && linkFree(x.angle) && mine.length > 0 && contentWords(x.angle).size > 0 && [...contentWords(x.angle)].every((w) => words.has(w));
-    if (!ok && x.name) drop("product_angle");
+    if (!ok && x.name) drop("product_angle", "products", { text: `${x.name}: ${x.angle}` });
     return ok;
   }) : [];
   for (const b of business) if (b.product && !products.some((x) => x.name.toLowerCase() === b.product!.toLowerCase())) delete b.product;
@@ -276,7 +288,8 @@ export async function researchCompany(i: { company: string; role?: string | null
     : !role_asks.length ? "The role page was not read, so none of your confirmed facts could be matched to what it asks." : !ties.length ? "None of your confirmed facts matches what the role page asks for; the brief does not stretch one to fit." : null;
   if (wanted && focus !== "business" && focus !== "developments" && focus !== "competitors" && focus !== "role" && questions_n() < wanted) unknowns.push(`Only ${questions_n()} of the ${wanted} questions asked for could be grounded in these sources; the rest would be guesses, so they are left out.`);
   if (ask && focus === "all") unknowns.unshift("Which role you are interviewing for: the brief has no role-specific section until you say.");
-  const any = business.length + developments.length + competitors.length + role_asks.length + questions.length;
+  // D-073: every kept, cited line counts toward a brief, the frame (Trainee's reading, checked above) included.
+  const any = business.length + developments.length + competitors.length + role_asks.length + questions.length + (frame ? 1 : 0);
   if (!any) { const blocker = `${pages.length} page(s) about ${company} were opened, but none stated anything the brief could quote`; return { kind: "company", status: "no_sources", ask, notes, unread, blocker, audit, note: `Research found nothing it could stand on: ${blocker}. Say that plainly; do not guess.${roleAsk}` }; }
   // The company's own site: as the turn named it, or as a free source found it (Wikidata P856, the postings' own host).
   const siteHosts = new Set([...(i.plan.sites ?? []), ...(found.sites ?? [])].map((s) => hostOf(`https://${String(s).replace(/^https?:\/\//, "")}`)));

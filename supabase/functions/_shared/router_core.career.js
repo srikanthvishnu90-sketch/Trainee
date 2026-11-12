@@ -24923,7 +24923,9 @@ const CareerRouter = (() => {
         const headline = sponsorAsk && need === false && agrees(true) ? "No: you told me you don't need visa sponsorship."
           : sponsorAsk && need === true && agrees(false) ? "Yes: you told me you need visa sponsorship."
           : "Here is what you told me about your work authorization.";
-        const reply = compose({ headline, facts: waRecord.slice(0, 2).map((x) => `On record: ${x}.`) });
+        const quoted = waRecord.filter((x) => /"/.test(x));
+        const lines = waRecord.filter((x) => !(/^you (?:do not )?need (?:visa )?sponsorship$/.test(x) && quoted.some((q) => /sponsor/i.test(q))));
+        const reply = compose({ headline, facts: lines.slice(0, 2).map((x) => `On record: ${x}.`) });
         return { intent: "profile_recall", reply, resultStatus: "completed", sends: 0 };
       }
       const label = what.charAt(0).toUpperCase() + what.slice(1);

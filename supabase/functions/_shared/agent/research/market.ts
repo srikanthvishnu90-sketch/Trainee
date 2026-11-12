@@ -13,6 +13,7 @@ import type { SearchPlan, SearchProvider } from "../../research_search.ts";
 import { NO_SOURCES } from "../../research_reply.ts";
 import { contentWords, numbersIn, numEq, specifics } from "./guard.ts";
 import { stripUrls } from "./reply.ts";
+import { parseDraft, readAlike } from "./draft_json.ts";
 import { type SourceKind, sourceKind } from "../../research_web.ts";
 
 export interface MarketDeps {
@@ -42,7 +43,8 @@ export type MarketResult =
       disagreements?: Disagreement[]; layout?: "messages" };
 
 const squash = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim();
-const norm = (s: string) => squash(s.normalize("NFC")).toLowerCase().replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
+// D-070: a reference marker ("[12]"), a typographic dash or a non-breaking space never keeps a quote off its page (readAlike).
+const norm = (s: string) => squash(readAlike(s)).toLowerCase().replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
 const arr = (x: unknown, n: number): any[] => Array.isArray(x) ? x.slice(0, n) : [];
 const LINKISH = /[a-z][a-z0-9+.-]*:\/\/|\bwww\.|\b(?:javascript|data|mailto):|\b(?:[a-z0-9-]+\.)+[a-z]{2,}\/\S/i;
 const linkFree = (s: string) => !LINKISH.test(s);
@@ -103,12 +105,13 @@ export function hasPredicate(claim: string, pageTitle = ""): boolean {
   return [...contentWords(lower)].some((w) => !title.has(w));
 }
 // Does the claim say only what its quote says? Its numbers are in the quote; its content words are in the quote's context.
-export function agrees(claim: string, quote: string, page: string): boolean {
+// D-070: `subject` (company research: the company's name) may name what the quote's sentence is about without being in it.
+export function agrees(claim: string, quote: string, page: string, subject = ""): boolean {
   const ctx = quoteContext(page, quote);
   if (ctx === null) return false;
   const qn = figuresIn(quote);
   if (!figuresIn(claim).every((n) => qn.some((x) => numEq(x, n)))) return false;
-  const have = contentWords(ctx);
+  const have = contentWords(`${ctx} ${subject}`);
   return [...contentWords(claim)].every((w) => have.has(w));
 }
 // R9 free sources (architect, 2026-11-08): two cited sources that give different figures for the same thing are both shown, with
@@ -150,7 +153,8 @@ export function disagreementsIn(points: { text: string; cite: number[] }[]): Dis
   }
   return out.slice(0, 4);
 }
-const parse = (raw: string) => { try { return JSON.parse(raw.trim().replace(/^```(?:json)?\s*|\s*```$/g, "")); } catch { return null; } };
+// D-070: the draft as far as it is complete (draft_json.ts parseDraft): a draft cut off at its token limit keeps its whole items.
+const parse = (raw: string) => parseDraft(raw).value;
 
 // D-060: the process of Instinct's research answers in the owner's batch 1 (C9, C22, C23), asked of the model; code enforces what it
 // can (enforceMarketReply): the source numbers, the figures, the labels on self-reported and anecdotal sources, "median".

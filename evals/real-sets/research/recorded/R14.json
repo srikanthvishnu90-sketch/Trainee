@@ -1,0 +1,143 @@
+{
+ "case": {
+  "id": "R14",
+  "company": "Toast",
+  "site": "toasttab.com",
+  "role": "Software Engineer II, Frontend"
+ },
+ "plan": {
+  "queries": [
+   "Toast",
+   "Toast Software Engineer II, Frontend"
+  ],
+  "companies": [
+   "Toast"
+  ],
+  "sites": [
+   "toasttab.com"
+  ]
+ },
+ "captured_at": "2026-11-12T07:24:06.622Z",
+ "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
+ "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
+ "search": {
+  "hits": [
+   {
+    "url": "https://toasttab.com/",
+    "title": "toasttab.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://toasttab.com/about",
+    "title": "toasttab.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://toasttab.com/careers",
+    "title": "toasttab.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/toast/jobs",
+    "title": "Greenhouse job board: toast",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/toast/jobs/8223599?content=true",
+    "title": "Senior Software Engineer, Backend — Toast International (Greenhouse posting)",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/toast/jobs/8230767?content=true",
+    "title": "Senior Software Engineer - Toast Connect (Greenhouse posting)",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://toasttab.com/press",
+    "title": "toasttab.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://toasttab.com/team",
+    "title": "toasttab.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Toast%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "title": "News headlines: Toast",
+    "provider": "news_rss",
+    "foundAt": 1794495600000
+   }
+  ],
+  "notes": [
+   "SEC EDGAR did not answer"
+  ],
+  "gaps": [
+   "Wikipedia has no company article found for Toast."
+  ],
+  "provider": "first_party",
+  "searches": 5
+ },
+ "read": {
+  "verified": [
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/toast/jobs",
+    "title": "Toast: Greenhouse job board",
+    "text": "The Greenhouse job board of Toast (token toast) lists 352 open roles.\n3 of the 352 open roles on Toast's Greenhouse job board (token toast) say intern, new grad, junior, associate or entry level in the title.\n24 open roles on Toast's Greenhouse job board (token toast) are in Dublin, Ireland.\n23 open roles on Toast's Greenhouse job board (token toast) are in Remote, US.\n10 open roles on Toast's Greenhouse job board (token toast) are in Chennai.\n7 open roles on Toast's Greenhouse job board (token toast) are in Los Angeles, CA.\n6 open roles on Toast's Greenhouse job board (token toast) are in San Francisco, CA.\nOpen role on Toast's Greenhouse job board (token toast): Albuquerque, NM Strategic Cuisines Account Executive - Spanish, Albuquerque, NM.\nOpen role on Toast's Greenhouse job board (token toast): Android Software Engineer, Dublin, Ireland.\nOpen role on Toast's Greenhouse job board (token toast): Android Software Engineer, Dublin, Ireland.\nOpen role on Toast's Greenhouse job board (token toast): Associate Counsel, Product and Marketing, Remote - US.\nOpen role on Toast's Greenhouse job board (token toast): Associate of R&D Strategic Finance (FP&A), Chennai.\nOpen role on Toast's Greenhouse job board (token toast): Belen, NM Strategic Cuisines Account Executive - Spanish, Belen, NM.\nOpen role on Toast's Greenhouse job board (token toast): Bernalillo, NM Strategic Cuisines Account Executive - Spanish, Benalillo, NM.\nOpen role on Toast's Greenhouse job board (token toast): Bilingual Hybrid Development Representative - Mandarin, Remote - US.\nOpen role on Toast's Greenhouse job board (token toast): Bilingual Hybrid Development Representative - Mandarin, Washington, DC.\nOpen role on Toast's Greenhouse job board (token toast): Bilingual Hybrid Development Representative - Mandarin, North Jersey, NJ.\nOpen role on Toast's Greenhouse job board (token toast): Bilingual Hybrid Development Representative - Mandarin, San Francisco, CA.\nOpen role on Toast's Greenhouse job board (token toast): Bilingual Hybrid Development Representative - Mandarin, Dallas, TX.\nOpen role on Toast's Greenhouse job board (token toast): Bilingual Hybrid Development Representative - Mandarin, New York, NY.\nOpen role on Toast's Greenhouse job board (token toast): Bilingual Hybrid Development Representative - Mandarin, Chicago, IL.\nOpen role on Toast's Greenhouse job board (token toast): Bilingual Hybrid Development Representative - Mandarin, Houston, TX.\nOpen role on Toast's Greenhouse job board (token toast): Bilingual Hybrid Development Representative - Mandarin, Atlanta, GA.\nOpen role on Toast's Greenhouse job board (token toast): Bilingual Hybrid Development Representative - Mandarin, Boston, MA.\nOpen role on Toast's Greenhouse job board (token toast): Bilingual Hybrid Development Representative - Mandarin, Seattle, WA.\nOpen role on Toast's Greenhouse job board (token toast): Bilingual Hybrid Development Representative - Mandarin, Los Angeles, CA.\nOpen role on Toast's Greenhouse job board (token toast): Bilingual Strategic Cuisines Account Executive, East Houston, TX - Spanish, East Houston, TX.\nOpen role on Toast's Greenhouse job board (token toast): Bilingual Strategic Cuisines Account Executive, East Houston, TX - Spanish, Houston, TX.\nOpen role on Toast's Greenhouse job board (token toast): Bilingual Strategic Cuisines Account Executive (Mandarin) - Los Angeles East, Los Angeles, CA.\nOpen role on Toast's Greenhouse job board (token toast): Bilingual Strategic Cuisines Account Executive (Mandarin) - Vancouver, BC, Vancouver, BC.\nOpen role on Toast's Greenhouse job board (token toast): Bilingual Strategic Cuisines Account Executive (Mandarin ) - West Coast, San Francisco, CA.\nOpen role on Toast's Greenhouse job board (token toast): Bilingual Strategic Cuisines Account Executive (Mandarin ) - West Coast, San Diego, CA.\nOpen role on Toast's Greenhouse job board (token toast): Bilingual Strategic Cuisines Account Executive (Mandarin ) - West Coast, Seattle, WA.\nOpen role on Toast's Greenhouse job board (token toast): Bilingual Strategic Cuisines Account Executive - South Houston, TX (Spanish), South Houston, TX.\nOpen role on Toast's Greenhouse job board (token toast): Bilingual Strategic Cuisines Account Executive (Spanish), League City, TX.\nOpen role on Toast's Greenhouse job board (token toast): Bilingual Strategic Cuisines Account Executive (Spanish), Edinburg, TX.\nOpen role on Toast's Greenhouse job board (token toast): Bilingual Strategic Cuisines Account Executive (Spanish) - Brownsville, TX, Brownsville, TX.",
+    "requested": "https://boards-api.greenhouse.io/v1/boards/toast/jobs",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/toast/jobs/8223599?content=true",
+    "title": "Senior Software Engineer, Backend — Toast International: posting on Toast's Greenhouse board",
+    "text": "Posting on Toast's Greenhouse job board (token toast): Senior Software Engineer, Backend — Toast International, Canada Hybrid (Ontario).\nThe posting says: Senior Software Engineer, Backend — Toast International . Location: Toronto, ON / Canada Hybrid (Ontario) . Who We Are . Toast is driven by building the restaurant platform that helps restaurants adapt, take control, and get back to what they do best: building the businesses they love. Are you bready* for a change? . As a Senior Backend Engineer on the Toast International team, you’ll play a pivotal role in engineering the platform that powers the next generation of guest reservations, dynamic floor management, and table operations across global markets like the UK, Europe, and Canada. You will lead the design and execution of core backend services—building scalable backend systems, robust integrations, data processing pipelines, and core platform capabilities. You’ll collaborate closely with engineering teams in North America and Europe, product managers, and designers to win high-value full-service restaurants worldwide. About this roll* (Responsibilities). Architect, implement, and scale distributed backend microservices (Java / Kotlin / AWS) powering reservations and guest management. Build core transactional and payment capabilities for the platform. Design robust integrations with third-party aggregators and partners and two-way POS synchronization. Implement tiering, entitlements, and usage metering services across freemium waitlists and premium subscription tiers. Partner cross-functionally with Mobile, Web/Frontend, Product Management, and UX to deliver seamless end-to-end features. Drive high standards of code quality, observability, test automation (unit, integration, and contract tests), and operational excellence. Mentor team members, participate in technical design reviews, and leverage modern AI development workflows to accelerate velocity and code quality. Do you have the right ingredients*? (Requirements). 5+ years of software engineering experience building scalable, distributed backend microservices in production. Deep proficiency in Java or Kotlin, relational and NoSQL databases (e.g., PostgreSQL, DynamoDB), and event-driven architectures (Pulsar / Kafka / AWS). Proven experience designing clean, versioned REST / GraphQL APIs and handling asynchronous workflows at scale. Experience integrating payment workflows (e.g., card tokenization, pre-auth, Stripe/Adyen/payment gateway integrations) or compliance-sensitive systems. Strong focus on software reliability, schema design, latency optimization, and distributed systems resilience. Passion for collaborating across distributed global time zones with a single-threaded ownership mindset. AI at Toast . At Toast, one of our company values is that we're hungry to build and learn. We believe learning new AI tools empowers us to build for our customers faster, more independently, and with higher quality. We provide these tools across all disciplines, from Engineering and Product to Sales and Support, and are inspired by how our Toasters are already driving real value with them. The people who thrive here are those who embrace changes that let us build more for our customers; it’s a core part of our culture. Our Total Rewards Philosophy We strive to provide competitive compensation and benefits programs that help to attract, retain, and motivate the best and brightest people in our industry. Our total rewards package goes beyond great earnings potential and provides the means to a healthy lifestyle with the flexibility to meet Toasters’ changing needs. Learn more about our benefits at https://careers.toasttab.com/toast-benefits. The base salary range for this role is listed below. The starting salary will be determined based on skills, experience, and geographic location. In addition to base salary, our total rewards components include cash compensation (overtime, bonus/commissions if eligible), equity, and benefits. . Pay Range . $115,000 &mdash; $165,000 CAD. . How Toast Uses AI in its Hiring Process . Throughout the hiring process, our goal is to get to know you. We use AI tools to support our recruiters and interviewers with tasks like note-taking, summarization, and documentation of interviews to ensure they can be fully focused on your conversation. All hiring decisions are made by people. We ask that you complete interviews and assessments on your own, without real-time AI tools, recording, or transcription bots, unless we tell you otherwise in advance. To learn more: https://careers.toasttab.com/ai-in-hiring . Our Approach to Hybrid Working We embrace a hybrid work model that fosters in-person collaboration while valuing individual needs. Our goal is to build a strong culture of connection as we work together to empower the hospitality community, regardless of location. Please visit the Locations page on our career site to learn more about our in-office expectations by region: https://careers.toasttab.com/locations-toast . People Are the Secret Ingredient in Our Recipe for Success . At Toast, our employees are our secret ingredient—when they thrive, we thrive. The restaurant industry brings together people with a wide range of backgrounds, experiences, and perspectives, and we value that same breadth at Toast. We strive to build a culture grounded in authenticity, respect, and humility, where every Toaster has a real opportunity to grow, contribute, and do their best work—raising the bar in delivering exceptional experiences for our customers and each other. Apply today! . Toast is committed to creating an accessible and inclusive hiring process. As part of this commitment, we strive to provide reasonable accommodations for persons with disabilities to enable them to access the hiring process. If you need an accommodation to access the job application or interview process, please contact candidateaccommodations@toasttab.com. ------ . For roles in the United States, it is unlawful in Massachusetts to require or administer a lie detector test as a condition of employment or continued employment. An employer who violates th",
+    "requested": "https://boards-api.greenhouse.io/v1/boards/toast/jobs/8223599?content=true",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/toast/jobs/8230767?content=true",
+    "title": "Senior Software Engineer - Toast Connect: posting on Toast's Greenhouse board",
+    "text": "Posting on Toast's Greenhouse job board (token toast): Senior Software Engineer - Toast Connect, Dublin, Ireland.\nThe posting says: Toast is building the restaurant platform that helps restaurants adapt, take control, and get back to what they do best: running the businesses they love. We’ve grown into a leading hospitality software company in the U.S., and are now entering our next phase of growth - one defined by scale, complexity, and a new class of enterprise customers. Toast is looking for a Senior Software Engineer to join our Toast Connect team in Dublin. The Connect team owns how everything outside Toast connects to Toast including the event infrastructure every team at Toast uses to publish data, the frameworks partners and customers use to integrate through our APIs, and a new charter to make Toast the source of truth for all the data about the customers we serve. You will play a key role in evolving our platform to support ever more complex new features and best-in-class monitoring as we scale to orders of magnitude of our current size!. If you want to help create something tangible that is used every day, help businesses achieve their vision, and take on the challenge of scaling a SaaS product, Toast is the place for you. A day in the life (Responsibilities) . Design, build, deploy, and maintain scalable backend microservices and RESTful APIs using Java / Kotlin and AWS infrastructure. Lead complex projects that may span multiple teams &amp; systems. Champion best practices such quality automated testing and phased rollouts to ensure zero-regression releases and high test coverage. Monitor service health for success &amp; failure, analyze logs and metrics (Datadog/CloudWatch), and participate in on-call rotations to maintain platform uptime. Collaborate with peer engineers, provide design feedback, and participate in code reviews. Collaborate with PM &amp; UX on the development of new features &amp; products. Mentor &amp; coach your peer engineers. Use AI tooling as a genuine part of your workflow, not an afterthought. What you'll need to thrive (Requirements) . 5+ years professional backend software development in Kotlin, Java, or another object-oriented language, with solid instincts around testing and code quality. Have strong understanding &amp; hands-on experience of building RESTful apis, fault-tolerant, highly-scalable &amp; secure distributed systems. Proficiency with sql/nosql databases, strong understanding of distributed datastores and knowledge of when to use what. Familiarity with distributed systems concepts, asynchronous messaging (Kafka, Pulsar, or AWS SQS/SNS), and cloud platforms (AWS). Strong communication &amp; problem-solving skills, curiosity to learn restaurant domain workflows, and enthusiasm for collaborating in an agile, cross-functional team. Demonstrate humility, empathy and respectfulness. *This is a hybrid role requiring two days per week in the office* . What will help you stand out: . Experience designing platform APIs that other teams depend on - platform thinking, not just feature delivery. Comfort with document-based or columnar data stores a plus. We are hiring individuals with a wide range of experience so if you have more or less than these exact roles, please still apply!. What we use to make our dish: (Our Tech Stack) . Backend services which follow a microservice architecture written using Kotlin, Java and DropWizard. Event driven messaging &amp; streaming using Apache Pulsar &amp; RabbitMQ. Apache Camel for implementing Enterprise Integration Pattern. React &amp; ES6 based Frontend SPAs leveraging Tailwind, GraphQL and Storybook. DynamoDb, Postgres &amp; Opensearch as core persistence data-storage layers. Datadog &amp; Sentry for system and application metric and monitoring. Splunk for log aggregation. FireHydrant for alerting. Our Spread of Total Rewards . We strive to provide competitive compensation and benefits programs that help to attract, retain, and motivate the best and brightest people in our industry. Our total rewards package goes beyond great earnings potential and provides the means to a healthy lifestyle with the flexibility to meet Toasters’ changing needs. Learn more about our benefits at https://careers.toasttab.com/toast-benefits. How Toast Uses AI in its Hiring Process . Throughout the hiring process, our goal is to get to know you. We use AI tools to support our recruiters and interviewers with tasks like note-taking, summarization, and documentation of interviews to ensure they can be fully focused on your conversation. All hiring decisions are made by people. We ask that you complete interviews and assessments on your own, without real-time AI tools, recording, or transcription bots, unless we tell you otherwise in advance. To learn more: https://careers.toasttab.com/ai-in-hiring . Our Approach to Hybrid Working We embrace a hybrid work model that fosters in-person collaboration while valuing individual needs. Our goal is to build a strong culture of connection as we work together to empower the hospitality community, regardless of location. Please visit the Locations page on our career site to learn more about our in-office expectations by region: https://careers.toasttab.com/locations-toast . People Are the Secret Ingredient in Our Recipe for Success . At Toast, our employees are our secret ingredient—when they thrive, we thrive. The restaurant industry brings together people with a wide range of backgrounds, experiences, and perspectives, and we value that same breadth at Toast. We strive to build a culture grounded in authenticity, respect, and humility, where every Toaster has a real opportunity to grow, contribute, and do their best work—raising the bar in delivering exceptional experiences for our customers and each other. Apply today! . Toast is committed to creating an accessible and inclusive hiring process. As part of this commitment, we strive to provide reasonable accommodations for persons with disabilities to enable them to access the hiring process. If you need an accommodation to access the job application or interview proce",
+    "requested": "https://boards-api.greenhouse.io/v1/boards/toast/jobs/8230767?content=true",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   }
+  ],
+  "rejected": [
+   {
+    "url": "https://toasttab.com/",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://toasttab.com/about",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://toasttab.com/careers",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://toasttab.com/press",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://toasttab.com/team",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Toast%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "why": "unreachable"
+   }
+  ]
+ }
+}

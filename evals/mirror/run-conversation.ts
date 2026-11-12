@@ -121,6 +121,9 @@ try {
       router_intent: meta.router_intent ?? null, brain: meta.brain ?? null, artifact,
     };
     lines.push(JSON.stringify({ id: t.id, reply, actions, route: modelCalls > callsBefore ? (dry ? "model-scripted" : "model") : "router", intent, status, ms: Math.round(performance.now() - t1), usd: Number((spent - spentBefore).toFixed(4)), trace }));
+    // The product falls back to the router when the model call is refused at the cap, so later turns would be the fallback's
+    // words, not the model's: stop here (as heldout/harness.ts does). Live run 5 (2026-11-12) ran C18 to C23 on the fallback.
+    if (live && spent >= budget) { stopped = `budget reached: $${spent.toFixed(3)} of $${budget}`; break; }
   }
 } finally {
   Deno.env.delete("ANTHROPIC_API_KEY");

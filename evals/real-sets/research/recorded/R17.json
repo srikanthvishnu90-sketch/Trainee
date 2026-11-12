@@ -1,0 +1,115 @@
+{
+ "case": {
+  "id": "R17",
+  "company": "Ramp",
+  "site": "ramp.com",
+  "role": "Software Engineer, Engineering Platform"
+ },
+ "plan": {
+  "queries": [
+   "Ramp",
+   "Ramp Software Engineer, Engineering Platform"
+  ],
+  "companies": [
+   "Ramp"
+  ],
+  "sites": [
+   "ramp.com"
+  ]
+ },
+ "captured_at": "2026-11-12T07:24:15.494Z",
+ "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
+ "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
+ "search": {
+  "hits": [
+   {
+    "url": "https://ramp.com/",
+    "title": "ramp.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://ramp.com/about",
+    "title": "ramp.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://ramp.com/careers",
+    "title": "ramp.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/ramp/jobs",
+    "title": "Greenhouse job board: ramp",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://ramp.com/press",
+    "title": "ramp.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://ramp.com/team",
+    "title": "ramp.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Ramp%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "title": "News headlines: Ramp",
+    "provider": "news_rss",
+    "foundAt": 1794495600000
+   }
+  ],
+  "notes": [
+   "SEC EDGAR did not answer"
+  ],
+  "gaps": [
+   "Wikipedia has no company article found for Ramp."
+  ],
+  "provider": "first_party",
+  "searches": 5
+ },
+ "read": {
+  "verified": [
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/ramp/jobs",
+    "title": "RAMP: Greenhouse job board",
+    "text": "The Greenhouse job board of RAMP (token ramp) lists 1 open roles.\n0 of the 1 open roles on RAMP's Greenhouse job board (token ramp) say intern, new grad, junior, associate or entry level in the title.\n1 open roles on RAMP's Greenhouse job board (token ramp) are in dublin.\nOpen role on RAMP's Greenhouse job board (token ramp): Copy of Chief Legal Officer, dublin.",
+    "requested": "https://boards-api.greenhouse.io/v1/boards/ramp/jobs",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   }
+  ],
+  "rejected": [
+   {
+    "url": "https://ramp.com/",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://ramp.com/about",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://ramp.com/careers",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://ramp.com/press",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://ramp.com/team",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Ramp%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "why": "unreachable"
+   }
+  ]
+ }
+}

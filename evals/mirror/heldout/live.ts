@@ -20,7 +20,10 @@ export const PER_TURN_USD = 0.10; // D-065: live-5 measured $1.8375 / 18 brain t
 const a = Deno.args, opt = (n: string) => { const i = a.indexOf(n); return i >= 0 ? a[i + 1] : undefined; };
 const n = Number(opt("--sample") ?? 0), budget = Number(opt("--budget-usd") ?? 0), seed = Number(opt("--seed") ?? 7), label = opt("--label") ?? `live-${new Date().toISOString().slice(0, 10)}`;
 const split = opt("--split") ?? "heldout", plan = a.includes("--plan");
-if (!(n > 0)) { console.log("usage: live.ts --sample N --budget-usd <cap> [--seed S] [--label name] [--split heldout|dev] [--plan]"); Deno.exit(2); }
+// --family (VERIFICATION-15 95% bars, D-068): sample one family only, e.g. practice for item 11 (G12). The seeded draw is
+// the same function on that family's conversations; without the flag the sample is exactly as before.
+const family = opt("--family");
+if (!(n > 0)) { console.log("usage: live.ts --sample N --budget-usd <cap> [--seed S] [--label name] [--split heldout|dev] [--family name] [--plan]"); Deno.exit(2); }
 
 // The sample: a seeded draw spread over the families (round robin over the families, seeded order inside each).
 export function sample<T extends { family: string; id: string }>(xs: T[], k: number, s: number): T[] {
@@ -33,7 +36,9 @@ export function sample<T extends { family: string; id: string }>(xs: T[], k: num
   return out;
 }
 
-const convs = sample(await loadSplit(split === "dev" ? DEV_PATH : HELDOUT_PATH), n, seed);
+const loaded = await loadSplit(split === "dev" ? DEV_PATH : HELDOUT_PATH);
+if (family && !loaded.some((c) => c.family === family)) { console.log(`refused: no ${split} conversation has the family ${family}`); Deno.exit(2); }
+const convs = sample(family ? loaded.filter((c) => c.family === family) : loaded, n, seed);
 const turns = convs.reduce((s, c) => s + c.turns.length + c.setup.turns.length, 0), quote = turns * PER_TURN_USD;
 console.log(`plan: ${convs.length} ${split} conversations (${convs.map((c) => c.id).join(" ")}), ${turns} turns with setup; quote $${quote.toFixed(2)} at $${PER_TURN_USD}/turn; cap $${budget}`);
 if (plan) Deno.exit(0);

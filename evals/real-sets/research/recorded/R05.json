@@ -1,0 +1,143 @@
+{
+ "case": {
+  "id": "R05",
+  "company": "Coinbase",
+  "site": "coinbase.com",
+  "role": "Forward Deployed Engineer, Finance"
+ },
+ "plan": {
+  "queries": [
+   "Coinbase",
+   "Coinbase Forward Deployed Engineer, Finance"
+  ],
+  "companies": [
+   "Coinbase"
+  ],
+  "sites": [
+   "coinbase.com"
+  ]
+ },
+ "captured_at": "2026-11-12T07:23:40.658Z",
+ "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
+ "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
+ "search": {
+  "hits": [
+   {
+    "url": "https://coinbase.com/",
+    "title": "coinbase.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://coinbase.com/about",
+    "title": "coinbase.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://coinbase.com/careers",
+    "title": "coinbase.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/coinbase/jobs",
+    "title": "Greenhouse job board: coinbase",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/coinbase/jobs/8072932?content=true",
+    "title": "Forward Deployed Engineer, Finance [Office of the CTO] (Greenhouse posting)",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/coinbase/jobs/8175510?content=true",
+    "title": "Forward Deployed Engineer Intern (HR Technology) (Greenhouse posting)",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://coinbase.com/press",
+    "title": "coinbase.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://coinbase.com/team",
+    "title": "coinbase.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Coinbase%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "title": "News headlines: Coinbase",
+    "provider": "news_rss",
+    "foundAt": 1794495600000
+   }
+  ],
+  "notes": [
+   "SEC EDGAR did not answer"
+  ],
+  "gaps": [
+   "Wikipedia has no company article found for Coinbase."
+  ],
+  "provider": "first_party",
+  "searches": 5
+ },
+ "read": {
+  "verified": [
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/coinbase/jobs",
+    "title": "Coinbase: Greenhouse job board",
+    "text": "The Greenhouse job board of Coinbase (token coinbase) lists 277 open roles.\n41 of the 277 open roles on Coinbase's Greenhouse job board (token coinbase) say intern, new grad, junior, associate or entry level in the title.\n160 open roles on Coinbase's Greenhouse job board (token coinbase) are in Remote - USA.\n32 open roles on Coinbase's Greenhouse job board (token coinbase) are in Manila, Philippines.\n20 open roles on Coinbase's Greenhouse job board (token coinbase) are in Hybrid - New York, NY.\n11 open roles on Coinbase's Greenhouse job board (token coinbase) are in Remote - Canada.\n9 open roles on Coinbase's Greenhouse job board (token coinbase) are in Remote - UK.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Acceleration Programs Intern, Hybrid - New York, NY.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Accounting Intern, Hybrid - New York, NY.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Accounting Manager, GL Operations & Intercompany, Remote - USA.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Accounting Manager, GL Operations & Intercompany, Remote - Canada.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Accounting Manager, Lending & Credit Products, Remote - USA.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Accounting Manager, Tokenized Equities, Remote - Abu Dhabi.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Analyst, Privacy (Privacy Assessments), Remote - USA.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Analytics Engineer Intern, Hybrid - New York, NY.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Associate General Counsel, EU Legal, Hybrid - Luxembourg.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Associate Manager, Internal Audit, Remote - UK.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Associate Product Manager Intern, Hybrid - San Francisco, CA.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Broker Dealer Operations, Associate, Remote - USA.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Broker Dealer Operations, Senior Associate, Remote - USA.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Business Controller Intern, Hybrid - New York, NY.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Business Operations, Senior Associate, Remote - USA.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Capacity Planning Lead, Remote - USA.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Clearing Risk Analyst, Remote - USA.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Communications Manager, Policy & Public Affairs, Remote - USA.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Complaints Analyst III, London, UK.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Complaints Analyst III, Remote - Australia.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Complaints Analyst III, Hybrid - Luxembourg.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Compliance, International Investigations Associate, Remote - UK.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Compliance, Senior Associate, Remote - Canada.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Compliance Senior Associate & Deputy MLRO, CBIE, Dublin, Ireland.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Compliance, Threat & Risk Assessment Manager, Remote - USA.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Concierge Specialist IV, Hybrid - London, UK.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Corporate Development Senior Manager, Remote - USA.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Counsel, Employment, Remote - USA.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Credit Risk Intern, Hybrid - New York, NY.\nOpen role on Coinbase's Greenhouse job board (token coinbase): Customer Success Team Agent II, Remote - USA.",
+    "requested": "https://boards-api.greenhouse.io/v1/boards/coinbase/jobs",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/coinbase/jobs/8072932?content=true",
+    "title": "Forward Deployed Engineer, Finance [Office of the CTO]: posting on Coinbase's Greenhouse board",
+    "text": "Posting on Coinbase's Greenhouse job board (token coinbase): Forward Deployed Engineer, Finance [Office of the CTO], Remote - USA.\nThe posting says: Ready to do the most impactful work of your career? At Coinbase , we are uncompromising on our mission to increase economic freedom. The bar is high, the environment is intense, and we like it that way. This isn't a place for complacency, it’s a place to be pushed past your perceived limits. If you're ready to build the future of finance alongside people who refuse to settle for \"good enough,\" you belong here. Coinbase is a remote-first, but not remote-only company. Expect to get together quarterly for intense in-person working sessions called “surges.” Learn more about working at Coinbase.. Coinbase's FP&amp;A &amp; Treasury organization manages financial planning and analysis across 60+ global subsidiaries, period-end close, GL reconciliation, intercompany eliminations, regulatory filings, budgeting, forecasting, and treasury operations. This role sits directly inside the Office of the CTO, embedded as a founding engineer within Finance. You'll identify high-value workflow opportunities, rapidly prototype solutions using Coinbase's existing AI platform, and drive measurable adoption of AI tooling across the FP&amp;A &amp; Treasury org. You'll be the connective tissue between Finance stakeholders and the engineering teams who maintain Coinbase's AI platform, acting as advocate, translator, and builder in one. What you'll do: . Embed with FP&amp;A and Treasury leadership to surface the automation opportunities with the greatest business leverage — developing ground-level understanding of workflows like period-end close, variance analysis, and liquidity stress-testing before writing a single line of code. Prototype quickly and pragmatically using Coinbase's existing AI platform as the default foundation before recommending net-new builds. Own the Finance automation roadmap in partnership with the VP of FP&amp;A &amp; Treasury, translating complex financial workflows — budgeting cycles, GL reconciliation, multi-entity consolidation, regulatory filing drafts — into engineering requirements and engineering constraints back to stakeholders clearly. Define the build-vs-buy strategy for Finance tooling, evaluating what Coinbase should build internally, adopt from partner teams, procure from vendors, or retire. Ensure every automated financial output is traceable, reviewable, and defensible to auditors — with SOX compliance, segregation of duties, and human-in-the-loop controls as first-class design concerns. Drive adoption through brown-bags, prototype walkthroughs, and feedback loops that bring FP&amp;A and Treasury teams along on the journey and ensure tools actually get used. Required Skills and Experience: . 5+ years of software engineering experience with a demonstrated ability to ship production systems in ambiguous, stakeholder-heavy environments, with greenfield experience a strong plus. Hands-on experience deploying LLM-based applications, including prompt engineering, evaluation frameworks, hallucination guardrails, and human-in-the-loop design for high-stakes financial outputs. Proven ability to embed with non-technical domain experts, rapidly internalize complex workflows, and translate them into engineering requirements. Familiarity with financial systems concepts: ERP data flows (NetSuite, Workday, Anaplan), reconciliation logic, trial balances, and SOX-controlled environments. Does not need to be a CPA, but should be open to learning. Familiarity with multi-agent orchestration concepts including how agent systems handle handoffs, escalation, and auditability. Experience in a Forward Deployed Engineering, Solutions Engineering, or embedded technical advisory capacity, ideally in fintech, finance-tech, or enterprise automation environments. Utilizes generative AI responsibly, maintaining human oversight to deliver business-ready outputs and drive measurable improvements in workflow efficiency, cost, and quality. . Pay Transparency Notice: Base salary varies by location (see range below). Total compensation may also include equity and bonus eligibility, and benefits (medical, dental, vision, 401(k)).. Annual base salary range (excluding equity and bonus):. $218,025 &mdash; $256,500 USD. . Application Limit: Candidates may submit a maximum of 3 applications within a 6-month period. Equal Opportunity Employer: Coinbase is an Equal Opportunity Employer. All qualified applicants will receive consideration for employment without regard to race, color, religion, sex, sexual orientation, gender identity, national origin, disability, protected veteran status, or genetic information. Applicants with criminal histories will be considered consistent with applicable federal, state, and local laws. US Applicants: View Employee Rights , Know Your Rights , and E-Verify Notice of Participation. Accommodations: If you are an individual with a disability who needs a reasonable accommodation, email us your request and contact info at accommodations[at]coinbase.com. Need screen reading technology? Click here to download a free compatible screen reader and view the tutorial. Data Privacy &amp; Arbitration: By submitting your application, you agree to our Candidate Privacy Notice . US applicants: By submitting your application, you agree to Arbitration of Disputes..",
+    "requested": "https://boards-api.greenhouse.io/v1/boards/coinbase/jobs/8072932?content=true",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/coinbase/jobs/8175510?content=true",
+    "title": "Forward Deployed Engineer Intern (HR Technology): posting on Coinbase's Greenhouse board",
+    "text": "Posting on Coinbase's Greenhouse job board (token coinbase): Forward Deployed Engineer Intern (HR Technology), Hybrid - New York, NY.\nThe posting says: Ready to do the most impactful work of your career? At Coinbase , we are uncompromising on our mission to increase economic freedom. The bar is high, the environment is intense, and we like it that way. This isn't a place for complacency, it’s a place to be pushed past your perceived limits. If you're ready to build the future of finance alongside people who refuse to settle for \"good enough,\" you belong here. Coinbase is a remote-first, but not remote-only company. Expect to get together quarterly for intense in-person working sessions called “surges.” Learn more about working at Coinbase.. This is a 12-week internship during summer 2027. We're hiring a Forward Deployed Engineer Intern to join the HR Technology team within People Success for a 12-week summer 2027 internship. This team builds the internal applications, integrations, and AI-powered workflows that help Coinbase employees move faster. You'll own a scoped project from discovery through production, making technical decisions across the stack and shipping working software that automates manual HR processes and measurably improves the employee experience. What you'll do: . Own a project end-to-end, from defining the problem and scope with HR stakeholders through designing, building, testing, and delivering production-ready software within the internship. Build custom applications, integrations, and AI-powered workflows that automate manual HR processes and improve the employee experience, taking solutions from prototype to production with appropriate quality checks and human oversight. Make technical decisions across data modeling, API integrations, application logic, and user interfaces, balancing speed, maintainability, and security. Partner directly with internal customers to understand their needs, map user journeys, and prioritize your roadmap based on expected impact. Measure results by defining success metrics, gathering user feedback, and using evidence like time saved, error reduction, and adoption rates to guide iterations and communicate outcomes. Required Skills and Experience: . Currently pursuing a degree in Computer Science, Software Engineering, or a related technical field, or equivalent hands-on engineering experience. Demonstrated ability to build, test, debug, and ship software (applications, API integrations, or automation tools) through academic projects, hackathons, or prior internships, with the ability to explain the technical choices behind your work. Hands-on experience building AI-powered prototypes or workflows using tools such as large language models, including validating generated outputs, protecting sensitive information, and recognizing when human review is needed. Proven ability to take a scoped project through delivery by breaking ambiguous needs into achievable milestones, communicating trade-offs to technical and nontechnical partners, and delivering against a deadline. Utilizes generative AI responsibly, maintaining human oversight to deliver business-ready outputs and drive measurable improvements in workflow efficiency, cost, and quality. Position ID: P78051. #LI-Hybrid. Pay Transparency Notice: Depending on your work location, the target hourly rate for this position can range as detailed below..... Hourly Rate:. $50 &mdash; $50 USD. . Application Limit: Candidates may submit a maximum of 3 applications within a 6-month period. Equal Opportunity Employer: Coinbase is an Equal Opportunity Employer. All qualified applicants will receive consideration for employment without regard to race, color, religion, sex, sexual orientation, gender identity, national origin, disability, protected veteran status, or genetic information. Applicants with criminal histories will be considered consistent with applicable federal, state, and local laws. US Applicants: View Employee Rights , Know Your Rights , and E-Verify Notice of Participation. Accommodations: If you are an individual with a disability who needs a reasonable accommodation, email us your request and contact info at accommodations[at]coinbase.com. Need screen reading technology? Click here to download a free compatible screen reader and view the tutorial. Data Privacy &amp; Arbitration: By submitting your application, you agree to our Candidate Privacy Notice . US applicants: By submitting your application, you agree to Arbitration of Disputes..",
+    "requested": "https://boards-api.greenhouse.io/v1/boards/coinbase/jobs/8175510?content=true",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   }
+  ],
+  "rejected": [
+   {
+    "url": "https://coinbase.com/",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://coinbase.com/about",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://coinbase.com/careers",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://coinbase.com/press",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://coinbase.com/team",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Coinbase%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "why": "unreachable"
+   }
+  ]
+ }
+}

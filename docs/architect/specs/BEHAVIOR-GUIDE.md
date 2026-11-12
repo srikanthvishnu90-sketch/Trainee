@@ -83,8 +83,12 @@ The owner named six things that had distorted earlier results:
 - **Headline.** The scorer only ever prints "passed / scored turns, with N of M turns as coverage gaps". `--compare` refuses a
   comparison unless the same scorer scored the same turns.
 
-Run on live-5, the scorer reports 5/17 scored turns passing. The other 9 of the 26 turns are gaps: C18 to C23 and C21f fell back
-at the cap, and C5f1 and C5f2 are off-branch. live-5's own README had counted 1/26.
+Re-scored with it:
+
+- **live-5:** 5/17 scored turns pass. The other 9 of the 26 turns are gaps: C18 to C23 and C21f fell back at the cap, and C5f1
+  and C5f2 are off-branch. live-5's README had counted 1/26.
+- **live-6:** 1/22 scored turns pass, with 4 gaps: C5f1 and C5f2 are off-branch (its C5 asked "first repeated value"), and C21f
+  and C23 were not run. 13 of the 22 scored turns are far over the D-066 bound, so length is still live-6's main loss.
 
 ## Audit: what provides each item, and the test that proves it
 

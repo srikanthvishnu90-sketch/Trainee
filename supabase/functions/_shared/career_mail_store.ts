@@ -133,7 +133,9 @@ export function supabaseMailStore(admin: any): MailStore {
     async people(limit) {
       const conns = must<any[]>(await admin.from("user_oauth_connections").select("user_id,email").eq("provider", "google_career").limit(5000), "read career grants") ?? [];
       for (const c of conns) mailbox.set(c.user_id, addr(c.email));
-      const ids = [...new Set(conns.map((c) => c.user_id))];
+      // D-062: a person whose only Google accounts are ones added beside a first grant they disconnected is read too.
+      const more = await Promise.resolve(admin.from("career_google_accounts").select("user_id").limit(5000)).catch((e: unknown) => ({ error: e, data: null }));
+      const ids = [...new Set([...conns.map((c) => c.user_id), ...(more.error || !Array.isArray(more.data) ? [] : more.data.map((r: any) => r.user_id))])];
       if (!ids.length) return [];
       const acct = await admin.from("career_watch_kv").select("user_id,value").eq("key", "career:account").in("user_id", ids);
       if (!acct.error) {
@@ -166,14 +168,19 @@ export function supabaseMailStore(admin: any): MailStore {
       return mergeApps(appsFromQueue(queue), appsFromTracker(tracked));
     },
     async events(u) {
-      const rows = must<any[]>(await admin.from("career_mail_events").select("application_ref,kind,company,role,stage,flagged,evidence,message_hash,mail_at")
-        .eq("user_id", u).order("mail_at", { ascending: true }).limit(2000), "read status events") ?? [];
-      return rows.map((r) => ({ hash: r.message_hash, ref: r.application_ref, kind: r.kind, company: r.company, role: r.role ?? undefined, stage: r.stage, flagged: r.flagged, evidence: r.evidence, at: r.mail_at, new_app: false }));
+      // D-062: with the account each email was read from (a project without the column: read as before).
+      let got = await admin.from("career_mail_events").select("application_ref,kind,company,role,stage,flagged,evidence,message_hash,mail_at,mailbox")
+        .eq("user_id", u).order("mail_at", { ascending: true }).limit(2000);
+      if (got.error && /mailbox/.test(String(got.error.message))) got = await admin.from("career_mail_events").select("application_ref,kind,company,role,stage,flagged,evidence,message_hash,mail_at")
+        .eq("user_id", u).order("mail_at", { ascending: true }).limit(2000);
+      const rows = must<any[]>(got, "read status events") ?? [];
+      return rows.map((r) => ({ hash: r.message_hash, ref: r.application_ref, kind: r.kind, company: r.company, role: r.role ?? undefined, stage: r.stage, flagged: r.flagged, evidence: r.evidence, at: r.mail_at, new_app: false, ...(r.mailbox ? { mailbox: r.mailbox } : {}) }));
     },
     async record(u, evs) {
       fromMail.add(u);
       if (!evs.length) return new Set();
-      const rows = evs.map((e) => ({ user_id: u, application_ref: e.ref, kind: e.kind, company: e.company.slice(0, 200), role: e.role?.slice(0, 200) ?? null, stage: e.stage, flagged: e.flagged, evidence: e.evidence, message_hash: e.hash, mail_at: e.at }));
+      const rows = evs.map((e) => ({ user_id: u, application_ref: e.ref, kind: e.kind, company: e.company.slice(0, 200), role: e.role?.slice(0, 200) ?? null, stage: e.stage, flagged: e.flagged, evidence: e.evidence, message_hash: e.hash, mail_at: e.at,
+        ...(e.mailbox ? { mailbox: String(e.mailbox).toLowerCase() } : {}) }));
       const args = { p_user: u, p_rows: rows.map(({ user_id: _u, ...r }) => r), p_epoch: epochs.get(u) ?? null };
       const g = await bound("career_mail_record_events", args, u);
       if (g.error && missingFn(g.error, "career_mail_record_events")) {
@@ -202,7 +209,13 @@ export function supabaseMailStore(admin: any): MailStore {
       // A write the database refused (disconnected or erased since the run began): nothing more of this run is kept or said.
       if (epochs.get(u) === Number.POSITIVE_INFINITY) return false;
       const r = must<any[]>(await admin.from("user_oauth_connections").select("provider,email").eq("user_id", u).eq("provider", "google_career").limit(1), "read the career grant") ?? [];
-      if (!r.length) return false;
+      if (!r.length) {
+        // D-062: only accounts added beside a first grant that is gone: still connected while one of them is.
+        const more = await Promise.resolve(admin.from("career_google_accounts").select("mailbox").eq("user_id", u).limit(1)).catch((e: unknown) => ({ error: e, data: null }));
+        if (more.error || !Array.isArray(more.data) || !more.data.length) return false;
+        if (mailbox.has(u)) { epochs.set(u, Number.POSITIVE_INFINITY); return false; }
+        return true;
+      }
       if (mailbox.has(u) && addr(r[0].email) !== mailbox.get(u)) { epochs.set(u, Number.POSITIVE_INFINITY); return false; }
       if (epochs.has(u)) {
         const a = await admin.from("career_watch_kv").select("value").eq("user_id", u).eq("key", "career:account").maybeSingle();

@@ -21,9 +21,16 @@ export const MAIL_REPLY_CARD_INTENT = "career_mail_reply_card";
 export const MAIL_REPLY_ANSWER_INTENT = "career_mail_reply_answer";
 export const BODY_MAX = 3000;
 
-export interface InboxMail { ref: string; thread_id: string | null; from: string; from_name: string; reply_to: string | null; subject: string; date: string; snippet: string; message_id: string | null }
+// account (D-062): the person's Gmail address the email reached; ref is "<gmail id>~<account>" so a later read asks the same account.
+export interface InboxMail { ref: string; account: string | null; thread_id: string | null; from: string; from_name: string; reply_to: string | null; subject: string; date: string; snippet: string; message_id: string | null }
 export type InboxRead = { status: "ok"; mails: InboxMail[] } | { status: "NOT_WIRED" } | { status: "ERROR"; detail: string };
-export interface InboxDeps { fetch: typeof fetch; token: (userId: string) => Promise<string | null> }
+// D-062: token for one account (null: the first grant); accounts: every Google account the person connected (absent: the first grant only).
+export interface InboxDeps { fetch: typeof fetch; token: (userId: string, account: string | null) => Promise<string | null>; accounts?: (userId: string) => Promise<{ mailbox: string; can_read: boolean; can_send: boolean }[]> }
+const refOf = (id: string, account: string | null) => (account ? `${id}~${account}` : id);
+const parseRef = (ref: string): { id: string; account: string | null } | null => {
+  const m = /^([A-Za-z0-9_-]{1,64})(?:~([a-z0-9._%+-]{1,64}@(?:[a-z0-9-]{1,63}\.)+[a-z]{2,24}))?$/i.exec(String(ref ?? "").trim());
+  return m ? { id: m[1], account: m[2] ? m[2].toLowerCase() : null } : null;
+};
 
 const squash = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim();
 const header = (msg: any, name: string) => String((msg?.payload?.headers ?? []).find((h: any) => String(h?.name ?? "").toLowerCase() === name.toLowerCase())?.value ?? "");
@@ -39,59 +46,71 @@ export function plainText(payload: any): string {
   const cut = text.split(/\r?\n(?:On .{5,200} wrote:|-{2,}\s*Original Message\s*-{2,}|>)/)[0];
   return cut.replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim().slice(0, BODY_MAX);
 }
-const mailOf = (m: any): InboxMail => {
+const mailOf = (m: any, account: string | null = null): InboxMail => {
   const from = header(m, "From"), rt = addressIn(header(m, "Reply-To"));
   const mid = squash(header(m, "Message-ID") || header(m, "Message-Id"));
-  return { ref: String(m?.id ?? ""), thread_id: m?.threadId ? String(m.threadId) : null, from: addressIn(from), from_name: nameIn(from), reply_to: rt || null, subject: squash(header(m, "Subject")).slice(0, 200),
+  return { ref: refOf(String(m?.id ?? ""), account), account, thread_id: m?.threadId ? String(m.threadId) : null, from: addressIn(from), from_name: nameIn(from), reply_to: rt || null, subject: squash(header(m, "Subject")).slice(0, 200),
     date: new Date(Number(m?.internalDate) || Date.parse(header(m, "Date")) || 0).toISOString(), snippet: squash(m?.snippet).slice(0, 300), message_id: MESSAGE_ID.test(mid) ? mid : null };
 };
 
 export function inboxReader(d: InboxDeps) {
   const get = async (url: string, token: string) => await d.fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   return {
-    // The person's received mail that matches their words (Gmail's own search), newest first, at most `max`.
-    async search(userId: string, query: string, max = 5): Promise<InboxRead> {
-      const token = await d.token(userId);
-      if (!token) return { status: "NOT_WIRED" };
+    // The person's received mail that matches their words (Gmail's own search), in every account they connected, newest first.
+    async search(userId: string, query: string, max = 5): Promise<InboxRead & { accounts?: string[] }> {
+      const all = d.accounts ? (await d.accounts(userId)).filter((a) => a.can_read).map((a) => a.mailbox) : [];
+      const accounts: (string | null)[] = all.length ? all : [null];
       const q = `${squash(query).slice(0, 200)} -in:sent -in:drafts -in:chats`.trim();
-      const r = await get(`${API}?q=${encodeURIComponent(q)}&maxResults=${Math.max(1, Math.min(10, max))}`, token);
-      if (!r.ok) return { status: "ERROR", detail: `search the inbox: HTTP ${r.status}` };
-      const ids = ((await r.json().catch(() => ({})))?.messages ?? []).map((m: any) => String(m?.id ?? "")).filter(Boolean).slice(0, max);
       const mails: InboxMail[] = [];
-      for (const id of ids) {
-        const g = await get(`${API}/${encodeURIComponent(id)}?format=metadata&metadataHeaders=From&metadataHeaders=Reply-To&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=Message-ID`, token);
-        if (g.status === 404) continue;
-        if (!g.ok) return { status: "ERROR", detail: `read a message: HTTP ${g.status}` };
-        mails.push(mailOf(await g.json().catch(() => ({}))));
+      let wired = false;
+      for (const account of accounts) {
+        const token = await d.token(userId, account);
+        if (!token) continue;
+        wired = true;
+        const r = await get(`${API}?q=${encodeURIComponent(q)}&maxResults=${Math.max(1, Math.min(10, max))}`, token);
+        if (!r.ok) return { status: "ERROR", detail: `search the inbox: HTTP ${r.status}` };
+        const ids = ((await r.json().catch(() => ({})))?.messages ?? []).map((m: any) => String(m?.id ?? "")).filter(Boolean).slice(0, max);
+        for (const id of ids) {
+          const g = await get(`${API}/${encodeURIComponent(id)}?format=metadata&metadataHeaders=From&metadataHeaders=Reply-To&metadataHeaders=Subject&metadataHeaders=Date&metadataHeaders=Message-ID`, token);
+          if (g.status === 404) continue;
+          if (!g.ok) return { status: "ERROR", detail: `read a message: HTTP ${g.status}` };
+          mails.push(mailOf(await g.json().catch(() => ({})), account));
+        }
       }
-      return { status: "ok", mails };
+      if (!wired) return { status: "NOT_WIRED" };
+      mails.sort((a, b) => b.date.localeCompare(a.date));
+      return { status: "ok", mails: mails.slice(0, max), ...(all.length ? { accounts: all } : {}) };
     },
-    // The one email the person chose, with its plain text.
+    // The one email the person chose, with its plain text, from the account it reached.
     async read(userId: string, ref: string): Promise<{ status: "ok"; mail: InboxMail; text: string } | { status: "NOT_WIRED" } | { status: "ERROR"; detail: string } | { status: "missing" }> {
-      if (!/^[A-Za-z0-9_-]{1,64}$/.test(ref)) return { status: "missing" };
-      const token = await d.token(userId);
+      const p = parseRef(ref);
+      if (!p) return { status: "missing" };
+      const token = await d.token(userId, p.account);
       if (!token) return { status: "NOT_WIRED" };
-      const g = await get(`${API}/${encodeURIComponent(ref)}?format=full`, token);
+      const g = await get(`${API}/${encodeURIComponent(p.id)}?format=full`, token);
       if (g.status === 404) return { status: "missing" };
       if (!g.ok) return { status: "ERROR", detail: `read the email: HTTP ${g.status}` };
       const m = await g.json().catch(() => ({}));
       if ((m?.labelIds ?? []).includes("SENT")) return { status: "missing" };
-      return { status: "ok", mail: mailOf(m), text: plainText(m?.payload) || squash(m?.snippet) };
+      return { status: "ok", mail: mailOf(m, p.account), text: plainText(m?.payload) || squash(m?.snippet) };
     },
   };
 }
 export type Inbox = ReturnType<typeof inboxReader>;
 
 // What the card waits on (the assistant message's meta, written by the handler from the tool's show.meta).
-export interface ReplyCardMeta { mail_reply_card: string; mail_reply: { to: string; subject: string; in_reply_to: string; thread_id: string | null; from_name: string } }
+// from_mailbox (D-062): the person's account the reply is sent from (by default the one the email reached). Shown on the card,
+// kept on the draft (recipient.source) and checked again at the yes.
+export interface ReplyCardMeta { mail_reply_card: string; mail_reply: { to: string; subject: string; in_reply_to: string; thread_id: string | null; from_name: string; from_mailbox?: string | null } }
+const sourceFor = (from: string | null) => `reply to their email${from ? `, from ${from}` : ""}`;
 export const replySubject = (s: string) => (/^\s*re\s*:/i.test(s) ? squash(s) : `Re: ${squash(s) || "your email"}`).slice(0, 200);
 
 // The card's exact text. Code shows the message it will send, word for word, and what a yes does.
-export function replyCardText(m: Message, o: { from_name: string; original_subject: string; sends: boolean }): string {
+export function replyCardText(m: Message, o: { from_name: string; original_subject: string; sends: boolean; from?: string | null }): string {
   const tail = o.sends
-    ? "Nothing is sent until you say yes, and a yes sends exactly this, once, from your Gmail, as a reply in that email's thread. Say no to drop it, or tell me what to change."
+    ? `Nothing is sent until you say yes, and a yes sends exactly this, once, from ${o.from ?? "your Gmail"}, as a reply in that email's thread. Say no to drop it, or tell me what to change${o.from ? " (or which of your accounts to send it from)" : ""}.`
     : "Trainee can't send from your Gmail yet (sending isn't allowed on your Google connection), so nothing will be sent; copy it into your own reply, or allow sending and ask again.";
-  return [`Reply to ${o.from_name || m.to} ("${o.original_subject}"), not sent:`, `To: ${m.to}`, `Subject: ${m.subject}`, "", m.text, "", tail].join("\n");
+  return [`Reply to ${o.from_name || m.to} ("${o.original_subject}"), not sent:`, ...(o.from ? [`From: ${o.from}`] : []), `To: ${m.to}`, `Subject: ${m.subject}`, "", m.text, "", tail].join("\n");
 }
 
 export type ReplyDraftOut =
@@ -100,7 +119,9 @@ export type ReplyDraftOut =
 // Builds and saves the card for the one email being answered. The brain wrote `body`; code decides whether it may be shown.
 export async function draftReply(o: {
   userId: string; threadId: string; now: number; inbox: Inbox; outreach: OutreachStore; ref: string; body: string;
-  said: string; facts: string[]; signature: string | null; canSend: () => Promise<boolean>;
+  said: string; facts: string[]; signature: string | null; canSend: (from: string | null) => Promise<boolean>;
+  // D-062: the person's own choice of account to send from; absent, the account the email reached.
+  sendFrom?: string | null; accounts?: string[];
 }): Promise<ReplyDraftOut> {
   const got = await o.inbox.read(o.userId, o.ref);
   if (got.status === "NOT_WIRED") return { status: "refused", reason: "gmail_not_connected", note: "No Gmail that Trainee may read is connected, so there is no email to answer. Say so and that they connect Gmail themselves (they sign in to Google); nothing was drafted or sent." };
@@ -114,22 +135,27 @@ export async function draftReply(o: {
   if (checked.status === "rewrite") return { status: "rewrite", problems: checked.problems, note: checked.note };
   if (checked.status === "ask") return { status: "rewrite", problems: [checked.note], note: checked.note };
   if (/\[[^\]\n]{1,40}\]/.test(checked.body)) return { status: "rewrite", problems: ["a placeholder in brackets is left in the reply"], note: "A reply that will be sent can't keep a placeholder: write the words, or ask the person for the one thing missing." };
+  const want = o.sendFrom ? String(o.sendFrom).trim().toLowerCase() : null;
+  if (want && !(o.accounts ?? []).includes(want)) return { status: "refused", reason: "not_your_account", note: `${want} is not one of the person's connected accounts (${(o.accounts ?? []).join(", ") || "none"}). Ask which of those to send from; nothing was drafted or sent.` };
+  const from = want ?? got.mail.account ?? null;
   const signature = squash(o.signature);
   if (!signature) return { status: "refused", reason: "no_signature", note: "Ask how they sign their emails (say \"sign as\" and their name); nothing was drafted or sent." };
-  const base = { n: 1, recipient: { name: mail.from_name.slice(0, 120) || to, firm: "", title: "", school: "", email: to, source: "reply to their email" },
+  const base = { n: 1, recipient: { name: mail.from_name.slice(0, 120) || to, firm: "", title: "", school: "", email: to, source: sourceFor(from) },
     subject: replySubject(mail.subject), body: checked.body.trim().slice(0, 4000), footer: signature.slice(0, 300), shared: [], status: "shown" as const,
     approved_hash: null, approved_at: null, sent_at: null, gmail_id: null, gmail_thread: null, result: null, created_at: new Date(o.now).toISOString() };
   const m = messageOf(base), hash = await payloadHash(m);
   const [d] = await o.outreach.saveBatch(o.userId, o.threadId, [{ ...base, hash }], o.now);
-  const sends = await o.canSend().catch(() => false);
-  const meta: ReplyCardMeta = { mail_reply_card: d.id, mail_reply: { to, subject: m.subject, in_reply_to: mail.message_id, thread_id: mail.thread_id, from_name: mail.from_name } };
-  return { status: "ok", show: { intent: MAIL_REPLY_CARD_INTENT, text: replyCardText(m, { from_name: mail.from_name, original_subject: mail.subject, sends }), meta: { ...meta } }, to, subject: m.subject, hash,
+  const sends = await o.canSend(from).catch(() => false);
+  // A reply sent from another account than the one the email reached starts a new thread there (Gmail threads per mailbox).
+  const thread = from && got.mail.account && from !== got.mail.account ? null : mail.thread_id;
+  const meta: ReplyCardMeta = { mail_reply_card: d.id, mail_reply: { to, subject: m.subject, in_reply_to: mail.message_id, thread_id: thread, from_name: mail.from_name, from_mailbox: from } };
+  return { status: "ok", show: { intent: MAIL_REPLY_CARD_INTENT, text: replyCardText(m, { from_name: mail.from_name, original_subject: mail.subject, sends, from }), meta: { ...meta } }, to, subject: m.subject, hash,
     note: "The card with the exact reply is shown to the person by code. Nothing is sent until they say yes to it." };
 }
 
 // The yes or no to the card (followupTurn calls this while the card is the thread's last word).
 export interface ReplyAnswerDeps {
-  outreach: OutreachStore; sendOn: boolean; canSend: (userId: string) => Promise<boolean>;
+  outreach: OutreachStore; sendOn: boolean; canSend: (userId: string, from?: string | null) => Promise<boolean>;
   send: (userId: string, m: Message, t?: Threading | null) => Promise<{ status: string; id?: string; thread_id?: string; detail?: string; reason?: string }>;
   sendConsent?: (userId: string) => Promise<string | null>;
 }
@@ -147,9 +173,10 @@ export async function replyAnswer(o: { userId: string; now: number; answer: "yes
   if (Date.parse(d.created_at) < o.now - DAY) return done("That reply is more than a day old, so nothing was sent. Ask me to draft it again.", "expired");
   if (o.answer === "no") { await s.update(o.userId, { ...d, status: "skipped" }, { status: "shown" }); return done("Dropped. Nothing was sent.", "declined"); }
   const m = messageOf(d), h = await payloadHash(m);
-  if (h !== d.hash || m.to !== o.meta.mail_reply.to || m.subject !== o.meta.mail_reply.subject) return done("Not sent: the reply changed after you saw it, so your yes was not for this version.", "changed");
+  const from = o.meta.mail_reply.from_mailbox ?? null;
+  if (h !== d.hash || m.to !== o.meta.mail_reply.to || m.subject !== o.meta.mail_reply.subject || (from && d.recipient.source !== sourceFor(from))) return done("Not sent: the reply changed after you saw it, so your yes was not for this version.", "changed");
   if (!o.deps.sendOn) return waiting("Not sent: sending email is switched off in Trainee right now. Copy the reply above into your own email.", "SEND_OFF");
-  if (!(await o.deps.canSend(o.userId).catch(() => false))) {
+  if (!(await o.deps.canSend(o.userId, from).catch(() => false))) {
     const allow = o.deps.sendConsent ? await o.deps.sendConsent(o.userId).catch(() => null) : null;
     return waiting(`Not sent: your Google connection lets Trainee read your mail, not send it.${allow ? ` To send from your Gmail, allow sending (you sign in to Google yourself): ${allow} then say yes again.` : ""} Or copy the reply above into your own email.`, "NOT_WIRED");
   }
@@ -162,11 +189,11 @@ export async function replyAnswer(o: { userId: string; now: number; answer: "yes
     return waiting(`Not sent: ${ADMIT[admit] ?? admit}. Nothing went to ${m.to}.`, admit);
   }
   const sending: OutreachDraft = { ...approved, status: "sending", sent_at: at };
-  const r = await o.deps.send(o.userId, m, { inReplyTo: o.meta.mail_reply.in_reply_to, threadId: o.meta.mail_reply.thread_id })
+  const r = await o.deps.send(o.userId, m, { inReplyTo: o.meta.mail_reply.in_reply_to, threadId: o.meta.mail_reply.thread_id, from })
     .catch((e): { status: string; id?: string; thread_id?: string; detail?: string; reason?: string } => ({ status: "ERROR", detail: e instanceof Error ? e.message : String(e) }));
   if (r.status === "sent") {
     await s.update(o.userId, { ...sending, status: "sent", gmail_id: r.id ?? null, gmail_thread: r.thread_id ?? null, result: "sent" }, { status: "sending" });
-    return done(`Sent to ${m.to} from your Gmail, in that email's thread, exactly as shown.`, "sent");
+    return done(`Sent to ${m.to} from ${from ?? "your Gmail"}${o.meta.mail_reply.thread_id ? ", in that email's thread" : ""}, exactly as shown.`, "sent");
   }
   await s.update(o.userId, { ...sending, status: "shown", approved_hash: null, approved_at: null, sent_at: null, result: `${r.status}: ${squash(r.detail ?? r.reason)}`.slice(0, 200) }, { status: "sending" });
   if (r.status === "NOT_WIRED") return waiting(`Not sent: your Google connection doesn't let Trainee send email, so nothing went to ${m.to}.`, "NOT_WIRED");

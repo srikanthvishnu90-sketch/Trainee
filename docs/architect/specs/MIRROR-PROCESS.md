@@ -12,7 +12,7 @@ today.
 - **MISSING**: what has to be built or provided.
 
 A turn with any OFF or MISSING step is **blocked**: it is listed in the test's `BLOCKED` table with the named blocker, and
-`tests/architect/pending/mirror-process-blocked.test.ts` asserts its full process and fails until the capability lands. The
+`tests/architect/mirror-process-blocked.test.ts` asserts its full process and fails until the capability lands. The
 test reads the summary table below and fails if a row and the test disagree.
 
 What the benchmark could see of Instinct's process is its replies (the tools behind them are inferred from what each reply
@@ -45,7 +45,7 @@ The loop, reusable for any reference (Instinct batch 2, another assistant, a hum
    build or provide).
 3. **$0 process tests** through the real handler with a scripted model under production's configuration: the EXISTS turns'
    process asserted (`mirror-wa-batch1-process.test.ts`); the blocked turns' full process in a pending test that fails until
-   each capability lands (`tests/architect/pending/mirror-process-blocked.test.ts`). Never ignored, never weakened.
+   each capability lands (`tests/architect/mirror-process-blocked.test.ts`). Never ignored, never weakened.
 4. **Live run under production flags** with the real model, only on the owner's approved spend (D-057 style), through
    `.github/workflows/mirror-conversation.yml`.
 5. **Score both the text and the process**: the reply against the reference's (`evals/mirror/score-conversation.ts`), and the
@@ -118,6 +118,9 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
   is offered only when `o.shape` (Telegram and `CAREER_REPLY_WRITER=on`, which is in `RELEASE_NEVER_ON`). Since D-060
   `research_career_question` is offered and publishes a plan page, but that page holds no postings.
 - **Artifact:** a plan File. **Boundary:** nothing applied.
+- **D-065:** live round 1 wrote the plan without a search and saved two profile facts from the question. Now the plan ask aimed
+  at postings (`turn_notes.ts planSearchAskOf`, on the message or the one it arrived during) carries a turn note and a process
+  check: `search_jobs` runs before the plan; and a message that asks writes no fact beyond its own first-person statements.
 
 ### C2 "draft a cold message to a google swe asking for a referral, don't send anything" (EXISTS)
 - **Instinct:** a draft from the confirmed profile (school, Waypoint, 70+ React sites) with `[Name]` and `[job link]` placeholders;
@@ -128,6 +131,9 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
   ask for the recipient only at send time. A greeting or sign-off word ("Best, Sam") is no longer read as a name, and a
   short form of words the person typed ("CS" for "Computer Science") is theirs.
 - **Artifact:** the draft. **Boundary:** "not sent" (code's label).
+- **D-065:** live round 1 (C2, C13, C14) wrote the drafts as prose. A draft ask (`draftAskOf`) now carries a turn note and a
+  process check (one review asking for `draft_followup`); the reply is the tool's text, shortened only in its wording before it
+  is shown when over the draft bound, and re-checked.
 
 ### C3 "find me 5 swe internships i could actually apply to right now, chicago or remote" (EXISTS)
 - **Instinct:** answered with C1's reply and File: five named postings, live, the stretch labelled.
@@ -255,6 +261,9 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
   roles, drafts, each with its status, and the coverage. (3) G9: what changed since the record was last shown (kept per person
   in `career_watch_kv`, erased with everything else) is named in the File and the reply. No Sheets export (a File page instead).
 - **Artifact:** the tracker File. Asserted in D62-2 (with a stage corrected by a later email).
+- **D-065:** live round 1 said "Your tracker page is made" with no link: the link rode only the channel's link messages (Telegram
+  only). On a channel without its own link messages (WhatsApp, iMessage), the page's link now rides the answer (D-024,
+  `channel_inbound.ts`).
 
 ### C17 "give me a 'tell me about yourself' answer i can reuse ..." (EXISTS)
 - **Steps:** the brain (`prep_serve_mismatch`) with the confirmed record and `get_profile` - EXISTS.

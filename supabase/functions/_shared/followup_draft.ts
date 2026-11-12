@@ -89,7 +89,10 @@ export function checkFollowup(i: FollowupIn, o: { said: string; facts: string[] 
   const sNums = numbersIn(support);
   for (const n of numbersIn(plain)) if (!sNums.some((x) => numEq(x, n))) problems.push(`the figure "${n.raw}" is not in the person's words or confirmed facts`);
   const word = (n: string) => new RegExp(`(?<![\\p{L}\\p{N}])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(support);
-  for (const n of specifics(plain).names) if (!word(n) && !signOff(n) && !initialsOf(n, support)) problems.push(`the name "${n}" is not in the person's words or confirmed facts`);
+  // D-065: a possessive is its name ("Google's" when they typed "google"): the draft tool is the only path for a draft, and it
+  // refused the benchmark's own C2 draft for "Google's".
+  const bare = (n: string) => n.replace(/['’]s$/i, "");
+  for (const n of specifics(plain).names) if (!word(n) && !word(bare(n)) && !signOff(n) && !initialsOf(bare(n), support)) problems.push(`the name "${n}" is not in the person's words or confirmed facts`);
   if (problems.length) return { status: "rewrite", problems: [...new Set(problems)].slice(0, 8), note: "Not shown. Rewrite the draft so it fixes every problem, keeping the tone asked for, and call draft_followup again." };
   return { status: "ok", to, body, attachment: squash(i.document).slice(0, 80) || null, note: `Code shows the draft to the person exactly as written; do not repeat or change it. Nothing is sent.${to ? "" : " No recipient was named: the draft keeps its placeholders; ask who it goes to only if they want it sent."}` };
 }

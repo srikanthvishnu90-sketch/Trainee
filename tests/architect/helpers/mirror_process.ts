@@ -4,7 +4,7 @@
 // calls the process names) and what each returned, and whether code answered the turn itself. Every migration on a throwaway
 // Postgres 16; every host but the database double and the scripted model refused and recorded with its full address.
 // Used by tests/architect/mirror-wa-batch1-process.test.ts (the turns whose capabilities exist) and
-// tests/architect/pending/mirror-process-blocked.test.ts (the turns blocked on a capability that is off or missing).
+// tests/architect/mirror-process-blocked.test.ts (the turns blocked on a capability that is off or missing).
 import { anthropicWire } from "./anthropic_wire.ts";
 import { openWorld, type World } from "./response_world.ts";
 import { SUPABASE_URL } from "../../flow/handler.ts";

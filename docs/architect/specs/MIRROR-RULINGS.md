@@ -83,7 +83,8 @@ dev split only (5%, 50 conversations); measured on the sealed held-out split (95
 | G9, G13 | A correction of Trainee and several asks (`severalAsks`, wider than D-058's `multiAsk`) are the brain's, with a turn note each. | `_shared/agent/turn_notes.ts`, `_shared/ask_language.ts`, `agent-chat/career_brain.ts` |
 | G11 | `create_file` is offered on every channel, not only with the reply writer on; where File links are not set up the File service refuses and the brain says so. `CAREER_REPLY_WRITER` stays in `RELEASE_NEVER_ON`. Benchmark C1 moved to EXISTS. | `agent-chat/career_brain.ts`, `agent-chat/handler-career.ts` |
 | G2 to G14 | The brain's instructions state every check (`MIRROR_RULES`); the empty tracker's reply answers first and names its source. | `_shared/agent/prompt.ts`, `packages/domain/142-career-router.js` |
-| G5 | The empty tracker says, in the answer's own sentence, that applications sent on one's own are not checked; the router's empty search names what it read and that career sites outside it were not checked. The judged search's empty form (D-058) is unchanged: a not-checked line there breaks the tone gate's length window, a G3/G5 trade-off left for the architect. | `packages/domain/142-career-router.js` |
+| G3, G10, G1, G5, D-024 | D-065 (live round 1): length enforced in code (one shortening pass past the kind's upper end + 10%, links and placeholders kept; a draft only before it is shown, re-checked); research asks' named parts each covered; the draft tool the only draft path; no fact saved from a question or request beyond its own statements; a plan ask aimed at postings searches first; a File's link delivered on every channel; an unverified pace never affirmed; a spending-limit refusal said as one. | `agent-chat/career_brain.ts`, `_shared/agent/turn_notes.ts`, `_shared/agent/loop.ts`, `_shared/agent/career_tools.ts`, `_shared/followup_draft.ts`, `_shared/limit_stop.ts`, `_shared/channel_inbound.ts` |
+| G5 | The empty tracker says, in the answer's own sentence, that applications sent on one's own are not checked; the router's empty search names what it read and that career sites outside it were not checked. D-064 (G5 over G3): the judged search's empty form carries "Other career sites were not checked." after "no open roles". | `packages/domain/142-career-router.js` |
 
 Held-out, $0, trunk `6aee3c4d` against this branch (pass / scored, "model" turns excluded as the README explains):
 
@@ -91,8 +92,10 @@ Held-out, $0, trunk `6aee3c4d` against this branch (pass / scored, "model" turns
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | trunk | 73.3% | 97.9% | 38.3% | 84.0% | 0.9% | 57.2% | 100% | 71.8% | 0.0% | 97.3% | 36.4% | 100% | 0.0% | 76.2% |
 | D-061 applied | 93.9% | 98.8% | 48.0% | 93.3% | 16.0% | 92.9% | 100% | 100% | 0.0% | 100% | 86.3% | 100% | 0.0% | 93.9% |
+| D-064 applied | 93.9% | 98.8% | 48.0% | 93.3% | 80.7% | 92.9% | 100% | 100% | 0.0% | 100% | 86.3% | 100% | 0.0% | 94.5% |
 
 The text rulings (G2 to G5, G7, G9, G10, G12) are scored at $0 only on the turns code still answers; the brain's words are the
 live hook's to score (`live.ts`, not run). G9 stays at 0% on the 1 turn code still answers. G13's 19 are second messages texted seconds after the first (`rapid`): the
 $0 harness sends turns back to back and records the gap without waiting it, so no message-level reader can tell them apart
-without also catching every quick follow-up; that needs a turn-in-flight signal from the handler, not wording.
+without also catching every quick follow-up. D-064 builds that signal in the handler (a turn that waited on the person's previous turn
+is the brain's second ask; `tests/architect/d064-while-working-20261111.test.ts`); the live hook measures it.

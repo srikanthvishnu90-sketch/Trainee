@@ -13,6 +13,9 @@
 //   paused        the owner switched the AI off for a while (MODEL_BUDGET_PAUSED or its database twin)
 //   unchecked     the budget could not be read, so no call was made
 //   rate_limit    the AI provider refused for rate (HTTP 429) or was overloaded (529); its retry-after, when it gave one
+//   spend_limit   D-065: the provider refused at a spending limit set on the account ("Your credit balance is too low", "You have
+//                 reached your specified API usage limits"), or a caller's own spend cap refused it the same way (the mirror
+//                 runner's --budget-usd). Live round 1 said "an error on its side, not a limit" there, which was false.
 // Any other model failure is an outage, not a limit (stop "outage", below): the router answers when it has a real intent for
 // the message, else the turn is held the same way (architect amendment, r-states 2026-11-10). Nothing here changes any limit.
 import { ModelBudgetBlockedError, ModelUnavailableError } from "./model_calls.ts";
@@ -21,7 +24,9 @@ import type { PersonZone } from "./person_zone.ts";
 
 // outage: not a limit (stopOfError never returns it); the model call failed. Architect amendment (r-states, 2026-11-10): the
 // turn is held the same way, so the router's catch-all never answers a different question.
-export type LimitStop = "global" | "budget_day" | "budget_after" | "budget_before" | "paused" | "unchecked" | "rate_limit" | "outage";
+export type LimitStop = "global" | "budget_day" | "budget_after" | "budget_before" | "paused" | "unchecked" | "rate_limit" | "spend_limit" | "outage";
+// The provider's own words for a spending-limit refusal (Anthropic answers HTTP 400 invalid_request_error with one of these).
+export const SPEND_LIMIT = /\bcredit balance is too low\b|\breached your (?:specified )?(?:api )?usage limits?\b|\bspend(?:ing)? (?:limit|cap)\b|\bbilling (?:limit|hard limit)\b|\bbudget (?:reached|exceeded|cap)\b/i;
 export const HELD_INTENT = "career_limit_held";
 
 export function stopOfError(e: unknown): LimitStop | null {
@@ -32,6 +37,7 @@ export function stopOfError(e: unknown): LimitStop | null {
   if (t === BUDGET_ERROR_TYPE.before) return "budget_before";
   if (t === BUDGET_ERROR_TYPE.paused) return "paused";
   if (t === BUDGET_ERROR_TYPE.unavailable) return "unchecked";
+  if (SPEND_LIMIT.test(`${e.detail ?? ""} ${e.message ?? ""}`)) return "spend_limit";
   if (e.status === 429 || e.status === 529 || /rate_limit|overloaded/.test(t)) return "rate_limit";
   return null;
 }
@@ -80,6 +86,7 @@ export function nextStepOf(stop: LimitStop, zone: PersonZone | null, retryAt: nu
     case "budget_before": return `Trainee's AI budget hasn't opened yet. Once it opens, say "continue" and I'll pick it up.`;
     case "paused": return `Trainee's AI is switched off for a short while. Say "continue" later and I'll pick it up.`;
     case "unchecked": return `I couldn't check Trainee's AI budget, so I made no AI call. Say "continue" later and I'll pick it up.`;
+    case "spend_limit": return `The AI was stopped at a spending limit, so this was not finished and nothing was sent. Once more spend is approved, say "continue" and I'll pick it up.`;
     case "outage": return `The AI service failed on this one (an error on its side, not a limit). Say "continue" in a minute and I'll pick it up.`;
   }
 }

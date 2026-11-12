@@ -27,13 +27,10 @@ jobs:
         run: |
           deno eval '
             const f = JSON.parse(Deno.readTextFileSync("evals/mirror/run-request.json"));
-            const kind = f.kind ?? "conversation";
-            const base = /^D-\d{3}[a-z]?$/.test(f.approval ?? "") && Number(f.budget_usd) > 0 && Number(f.budget_usd) <= 3 && typeof f.label === "string" && /^[a-z0-9-]{3,60}$/.test(f.label);
-            // kind "heldout" (P2 live hook, evals/mirror/heldout/live.ts): a seeded sample of the sealed held-out split, 1 to 40 conversations.
-            const ok = base && (kind === "conversation" ? typeof f.conv === "string" : kind === "heldout" && Number.isInteger(f.sample) && f.sample >= 1 && f.sample <= 40 && /^live-/.test(f.label));
-            if (!ok) { console.log("NOT RUN: bad request (approval D-xxx, 0 < budget_usd <= 3, label; conv, or kind heldout with sample 1..40 and a live- label)", JSON.stringify(f)); Deno.exit(2); }
-            Deno.writeTextFileSync(Deno.env.get("GITHUB_OUTPUT"), `kind=${kind}\napproval=${f.approval}\nbudget=${f.budget_usd}\nconv=${f.conv ?? ""}\npersona=${f.persona ?? ""}\nlabel=${f.label}\nsample=${f.sample ?? ""}\nseed=${f.seed ?? 7}\n`, { append: true });
-            console.log(`request: ${kind} ${f.label}, ${f.conv ?? `${f.sample} held-out conversations, seed ${f.seed ?? 7}`}, cap $${f.budget_usd} under ${f.approval}`);
+            const ok = /^D-\d{3}[a-z]?$/.test(f.approval ?? "") && Number(f.budget_usd) > 0 && Number(f.budget_usd) <= 3 && typeof f.conv === "string" && typeof f.label === "string" && /^[a-z0-9-]{3,60}$/.test(f.label);
+            if (!ok) { console.log("NOT RUN: bad request (approval D-xxx, 0 < budget_usd <= 3, conv, label)", JSON.stringify(f)); Deno.exit(2); }
+            Deno.writeTextFileSync(Deno.env.get("GITHUB_OUTPUT"), `approval=${f.approval}\nbudget=${f.budget_usd}\nconv=${f.conv}\npersona=${f.persona ?? ""}\nlabel=${f.label}\n`, { append: true });
+            console.log(`request: ${f.label}, ${f.conv}, cap $${f.budget_usd} under ${f.approval}`);
           '
       - name: Reserve the cap at the shared ledger
         id: reserve
@@ -59,7 +56,6 @@ jobs:
           '
       - name: The conversation, real model
         id: run
-        if: steps.req.outputs.kind == 'conversation'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           MIRROR_SPEND_APPROVED: ${{ steps.req.outputs.approval }}
@@ -74,23 +70,6 @@ jobs:
           cat "$RUNNER_TEMP/out/trainee-${{ steps.req.outputs.label }}.jsonl"
           spent=$(grep -o 'spent_usd=[0-9.]*' "$RUNNER_TEMP/out/summary.txt" | cut -d= -f2)
           echo "spent=${spent:-}" >> "$GITHUB_OUTPUT"
-      - name: The held-out sample, real model
-        id: heldout
-        if: steps.req.outputs.kind == 'heldout'
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          MIRROR_SPEND_APPROVED: ${{ steps.req.outputs.approval }}
-          CI: "true"
-        run: |
-          export PGBIN=/usr/lib/postgresql/16/bin PATH=/usr/lib/postgresql/16/bin:$PATH
-          mkdir -p "$RUNNER_TEMP/out" "$RUNNER_TEMP/turns"
-          deno run -A --no-check --import-map=tests/flow/supabase-npm.json evals/mirror/heldout/live.ts --sample "${{ steps.req.outputs.sample }}" --seed "${{ steps.req.outputs.seed }}" \
-            --budget-usd "${{ steps.req.outputs.budget }}" --label "${{ steps.req.outputs.label }}" | tee "$RUNNER_TEMP/out/summary.txt"
-          # The held-out split is sealed (P2): only the summary is printed and kept; the per-turn file goes to a 1-day artifact, never the log.
-          cp "evals/mirror/heldout/results/${{ steps.req.outputs.label }}-summary.json" "$RUNNER_TEMP/out/" || true
-          cp "evals/mirror/heldout/results/${{ steps.req.outputs.label }}.jsonl" "$RUNNER_TEMP/turns/" || true
-          spent=$(grep -o 'spent_usd=[0-9.]*' "$RUNNER_TEMP/out/summary.txt" | tail -1 | cut -d= -f2)
-          echo "spent=${spent:-}" >> "$GITHUB_OUTPUT"
       - name: Settle the ledger to the metered cost
         if: always() && steps.reserve.outputs.id != ''
         env:
@@ -100,7 +79,7 @@ jobs:
           MODEL_BUDGET_TARGET_USD: "70"
           MODEL_BUDGET_HARD_USD: "70"
           ID: ${{ steps.reserve.outputs.id }}
-          SPENT: ${{ steps.run.outputs.spent || steps.heldout.outputs.spent }}
+          SPENT: ${{ steps.run.outputs.spent }}
         run: |
           deno eval '
             const bud = await import("file://" + Deno.cwd() + "/supabase/functions/_shared/model_budget.ts");
@@ -118,9 +97,3 @@ jobs:
         with:
           name: mirror-${{ steps.req.outputs.label }}
           path: ${{ runner.temp }}/out/
-      - uses: actions/upload-artifact@v4
-        if: always() && steps.req.outputs.kind == 'heldout'
-        with:
-          name: mirror-${{ steps.req.outputs.label }}-turns
-          path: ${{ runner.temp }}/turns/
-          retention-days: 1

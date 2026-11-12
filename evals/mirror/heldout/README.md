@@ -180,7 +180,7 @@ with their before and after per ruling, are in `docs/architect/specs/MIRROR-RULI
 
 The "model" columns, and every brain-answered turn's text, are measured only by the live hook.
 
-## The live hook (P4, P6; not run)
+## The live hook (P4, P6)
 
 ```
 deno run -A evals/mirror/heldout/live.ts --sample 20 --plan     # the sample and its quote; no key, no spend
@@ -190,6 +190,28 @@ MIRROR_SPEND_APPROVED=D-0xx ANTHROPIC_API_KEY=... CI=true deno run -A --no-check
 
 The sample is seeded and taken round-robin over the families. The hook refuses to start without the DECISIONS.md line of the
 owner's written spend approval (D-060 is $10 for this effort), the key, and `--budget-usd`. It also refuses when the quote is
-over the cap: the turns with setup, times D-055's measured $0.0108 per turn (20 conversations come to about $1). It stops at
+over the cap: the turns with setup, times `PER_TURN_USD`, $0.10 a turn since D-065 (the live rate measured in live-5 and in the sample below; it was D-055's $0.0108, which under-quoted by ten times). It stops at
 the cap, metered at D-038's prices. It runs under the same production flags, and only the model host is reachable. It scores
 every turn on code's decisions and on the text. Its transcript stays local and git-ignored.
+
+**First live sample, `live-heldout-1`** (2026-11-12, trunk 1ee06408). It ran in CI run 43135853085 with the held-out kind of
+`mirror-conversation.yml` on `ci/mirror-conversation`. Approval D-060, cap $0.95, reserved and settled at the shared ledger:
+$0.9883. The quote was $0.40 at $0.0108 a turn, but the real cost was about $0.10 a brain turn, so the cap stopped the sample
+after 4 of its 8 conversations: boundary, capability, correction, and the first turn of a file ask. That is 10 turns, 9 of them
+the brain's. Nothing was sent, and no request went to any host but the model's.
+
+| Ruling | Passed | Rate |
+|---|---|---|
+| G1 | 10/10 | |
+| G2 | 10/10 | |
+| G3 | 2/6 | 33% |
+| G4 | 6/6 | |
+| G5 | 4/6 | 67% |
+| G6 | 7/7 | |
+| G9 | 0/1 | |
+| G10 | 4/4 | |
+| G11 | 1/1 | |
+| G14 | 5/6 | 83% |
+
+G7, G8, G12 and G13 were not exercised. Ten turns is a smoke test, not a measurement. The summary is
+`results/live-heldout-1-summary.json`, and the per-turn file stays out of git.

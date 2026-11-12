@@ -1,1 +1,1 @@
-{ "kind": "heldout", "label": "live-heldout-1", "approval": "D-060", "budget_usd": 0.95, "sample": 8, "seed": 7 }
+{ "label": "wa1-live-1", "approval": "D-057", "budget_usd": 2.2, "conv": "evals/mirror/instinct-wa-batch1/prompts.jsonl", "persona": "evals/mirror/instinct-wa-batch1/persona.json" }

@@ -514,7 +514,7 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   // turn: it reads official sources first (research_company, research_market, each reply enforced in code: enforceCompanyReply),
   // with the file's answer as data. With web research rolled back (CAREER_KNOWLEDGE=off), the sourced file stays code's (D-007).
   if (intent === "company_intel" && has((probe.result ?? {}) as Record<string, unknown>, "company") && codeProduct(intent, probe.result) && knowledgeOn(o.env) && researchReplyOn(o.env)) return g1Brain(o, intent, probe, clock);
-  if (codeProduct(intent, probe.result)) return g1Override(o.message) || (intent === "prep_brief" && !prepSessionOpen(o.ctx) && !G1_FILE_ASK.test(o.message) && G1_REQUEST.test(o.message)) ? g1Brain(o, intent, probe, clock) : { brain: false, mode, intent, reason: "code_product" };
+  if (codeProduct(intent, probe.result)) return g1Override(o.message) || (o.ctx as any)?._whileWorking === true || (intent === "prep_brief" && !prepSessionOpen(o.ctx) && !G1_FILE_ASK.test(o.message) && G1_REQUEST.test(o.message)) ? g1Brain(o, intent, probe, clock) : { brain: false, mode, intent, reason: "code_product" };
   return { brain: true, mode, intent, reason: "question", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
 }
 
@@ -793,7 +793,8 @@ export function g1CodeAnswers(message: string, intent: string, result: unknown, 
   if (mockWaiting(ctx)) return true;
   if (G1_DELIVERABLE.some((k) => has(r, k)) || has(r, "artifact") && (has(r.artifact, "pdf") || has(r.artifact, "url"))) return true;
   // G8, G9, G13: a hypothetical, a correction of Trainee and several asks are the brain's.
-  if (g1Override(m)) return false;
+  // D-064 (G13): a message sent while the person's previous turn was still running is a second ask.
+  if (g1Override(m) || (ctx as any)?._whileWorking === true) return false;
   // An action the message itself forbids ("don't apply", "don't submit") is not asked for.
   if (G1_BOUNDARY_SENSITIVE.has(intent) && boundaryOf(m) === "submit") return false;
   // A posting link inside a message with a question or a boundary ("is this still open? <url>", "don't apply yet <url>"): the

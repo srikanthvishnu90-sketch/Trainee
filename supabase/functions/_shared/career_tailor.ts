@@ -67,9 +67,16 @@ export function withListedSkills(resume: any, p: any): any {
   const norm = (s: string) => ` ${String(s).toLowerCase().replace(/[^\p{L}\p{N}+#]+/gu, " ").trim()} `;
   const named = String(line.text || "");
   const add: string[] = [];
+  // D-070 (live-7 C10: "Python, JavaScript, TypeScript, React, SQL, TypeScript/JavaScript"): a skill is on the line when it, or
+  // one of its aliases (D-069 SKILL_ALIASES: JS is JavaScript), is already there; a listed "A/B" pair is on the line when each
+  // of its parts is.
+  const key = (x: string) => String((CareerProfile as any).skillForms?.(x)?.[0] ?? x).toLowerCase().trim();
+  const onLine = () => new Set([...skillsOfLine(named), ...add].map(key));
+  const has = (name: string) => { const on = onLine(); if (on.has(key(name)) || norm(named).includes(norm(name))) return true;
+    const parts = name.split("/").map((x) => x.trim()).filter(Boolean); return parts.length >= 2 && parts.every((x) => on.has(key(x))); };
   for (const f of own) {
     const name = String(f.name || f.title).trim();
-    if (norm(named).includes(norm(name)) || add.some((a) => norm(a) === norm(name))) continue;
+    if (has(name)) continue;
     add.push(name);
     line.factIds = [...new Set([...(line.factIds || []), String(f.id)])];
   }
@@ -530,7 +537,11 @@ export function applyEdits(resume: any, profile: any, edits: ResumeEdit[]): { ok
 // every confirmed entry of their record. An entry the tailor's first pass left out for this posting comes back in its own words
 // (the fact's full line, as the base resume prints it), after the entries already there; no entry ever disappears unless the
 // person says to remove it. Returns the entries put back, by their head.
-export function keepEveryEntry(resume: any, profile: any): { resume: any; added: string[] } {
+// D-070 (owner, 2026-11-12, must-fix "don't drop resume experience"; live-7 C10: the FIRST tailored version printed 2 of 9 confirmed
+// entries): every version, not only an edited one, prints every confirmed entry. On a first version (`oneLine`) an entry the
+// posting does not ask for is condensed to one line, its own words as the base resume prints its heading, so the page stays one
+// page; nothing is ever reworded or invented.
+export function keepEveryEntry(resume: any, profile: any, opts: { oneLine?: boolean } = {}): { resume: any; added: string[] } {
   const out = clone(resume);
   out.sections = out.sections || [];
   const printed = new Set(out.sections.flatMap((sec: any) => (sec.lines || []).flatMap((l: any) => l.factIds || [])).map(String));
@@ -543,7 +554,7 @@ export function keepEveryEntry(resume: any, profile: any): { resume: any; added:
     if (!sec) { sec = { heading, lines: [] }; out.sections.push(sec); }
     const { head } = entryParts(f);
     const bullets = (f.bullets || []).map((b: unknown) => String(b ?? "").trim()).filter(Boolean);
-    sec.lines.push({ text: bullets.length ? head : String(f.title || f.text), factIds: [id], type: "entry" }, ...bullets.map((t: string) => ({ text: t, factIds: [id], type: "bullet" })));
+    sec.lines.push({ text: bullets.length ? head : String(f.title || f.text), factIds: [id], type: "entry" }, ...(opts.oneLine ? [] : bullets.map((t: string) => ({ text: t, factIds: [id], type: "bullet" }))));
     printed.add(id);
     added.push(head.replace(/[.]+$/, ""));
   }
@@ -625,9 +636,8 @@ export async function tailorForPosting(o: {
     const e = applyEdits(ordered, picked, o.edits);
     if (!e.ok) return { ok: false, refused: "edit", reason: e.reason, ms: ms() };
     ordered = e.resume; edits = e.done;
-    const every = keepEveryEntry(ordered, picked);
-    ordered = every.resume; keptBack = every.added;
   }
+  { const every = keepEveryEntry(ordered, picked, { oneLine: !edits }); ordered = every.resume; keptBack = every.added; }
   if (placeholder) {
     // The placeholder prints where the email would: after a contact line the person confirmed (which has no email), or alone.
     const h = ordered.header = { ...(ordered.header || {}), email: EMAIL_PLACEHOLDER };
@@ -681,8 +691,10 @@ export async function tailorForPosting(o: {
   const backHeads = keptBack.map((h) => h.toLowerCase());
   const aboutEdited = (x: any) => [...editedHeads, ...backHeads].some((h) => [x?.line, x?.name].some((v) => typeof v === "string" && v.toLowerCase().startsWith(h)));
   const backLine = keptBack.length ? ` Every other entry on your record still prints (${keptBack.length === 1 ? "1 entry" : `${keptBack.length} entries`} this posting doesn't ask for kept: ${keptBack.join("; ")}).` : "";
+  const firstBack = keptBack.length ? ` Every entry on your record prints: the ${keptBack.length === 1 ? "1" : keptBack.length} this posting doesn't ask for ${keptBack.length === 1 ? "is" : "are"} one line each.` : "";
   const log = edits ? { ...log0, line: editLine(edits) + backLine, items: [...edits.map((e): ChangeItem => ({ kind: "edit", text: editLine([e]).replace(/[.]$/, ""), diff: "edited", line: e.entry })),
-    ...keptBack.map((h): ChangeItem => ({ kind: "kept", text: `kept ${h}`, diff: "added", line: h })), ...(log0.items ?? []).filter((x: any) => !aboutEdited(x))] } : log0;
+    ...keptBack.map((h): ChangeItem => ({ kind: "kept", text: `kept ${h}`, diff: "added", line: h })), ...(log0.items ?? []).filter((x: any) => !aboutEdited(x))] }
+    : keptBack.length ? { ...log0, line: `${log0.line}${firstBack}`.trim(), items: (log0.items ?? []).filter((x: any) => !aboutEdited(x)) } : log0;
   const selected = new Set(doc.lines.flatMap((l: any) => l.factIds));
   // What the person reads, the same on every channel: plain words, and the link alone on its own line so any texting app
   // makes it tappable.

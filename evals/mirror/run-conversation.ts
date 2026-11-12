@@ -158,6 +158,9 @@ try {
       offered: [...new Set(calls.filter((c) => !c.json && !c.web).flatMap((c) => c.tools))].sort(),
       called: ((meta.tool_calls ?? []) as any[]).map((x) => String(x?.name ?? x)),
       web_search_calls: calls.filter((c) => c.web).length, web_searches: webSearches - webBefore, json_calls: calls.filter((c) => c.json).length,
+      // D-070: why a call failed (create_file refused, live-7 C1) and what the length pass did (ran, accepted or rejected, why).
+      call_errors: ((meta.tool_calls ?? []) as any[]).filter((x) => x && x.ok === false).map((x) => ({ name: String(x.name), error: String(x.error ?? "").slice(0, 300) })),
+      shorten: meta.shorten ?? null,
       router_intent: meta.router_intent ?? null, brain: meta.brain ?? null, artifact, files,
     };
     lines.push(JSON.stringify({ id: t.id, reply, actions, route: modelCalls > callsBefore ? (dry ? "model-scripted" : "model") : "router", intent, status, ms: Math.round(performance.now() - t1), usd: Number((spent - spentBefore).toFixed(4)), trace }));

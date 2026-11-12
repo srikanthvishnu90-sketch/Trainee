@@ -175,15 +175,23 @@ Deno.test("WO-028/6 the changelog is one plain line built from the diff, and cla
   for (const c of out.changes) assert((diff as any)[c.diff].some((d: any) => d.text === c.line), `"${c.text}" is in the diff (${c.diff})`);
   assert(/^Led with Software Engineering Intern, TEST Systems Inc, which shows Python/.test(out.changelog), "leads with the dashboard work, and why");
   for (const c of out.changes.filter((x) => x.diff === "removed")) assert(diff.removed.some((d: any) => d.text === c.line), "every drop is a removal");
-  assert(/; dropped Finance Intern, Example Capital \(TEST\), DeployBoard \(TEST project\) and MarketSim valuation project \(TEST\), which this posting doesn't ask for\.$/.test(out.changelog), "the dropped entries and why, in one clause");
+  // Architect amendment (D-070): the owner's must-fix "don't drop resume experience" (live-7 C10) keeps every confirmed entry on every
+  // version; the three this posting doesn't ask for print on one line each, and the line says so, in one clause. The bars above stand:
+  // one plain line, no markdown, every change item in the tailor's own diff, every drop a removal.
+  assert(/ Every entry on your record prints: the 3 this posting doesn't ask for are one line each\.$/.test(out.changelog), "the entries kept on one line, in one clause");
+  const printedIds = new Set(out.detail.doc.lines.flatMap((l: any) => l.factIds || []).map(String));
+  for (const name of ["Finance Intern, Example Capital (TEST)", "DeployBoard (TEST project)", "MarketSim valuation project (TEST)"]) {
+    const f = confirmedOnly(profile).facts.find((x: any) => String(x.title || x.text).startsWith(name));
+    assert(f && printedIds.has(String(f.id)), `${name} still prints`);
+  }
   // A posting that names, anywhere, a skill a dropped entry shows (the finance internship's Excel, in its About us):
   // that drop is said without "doesn't ask for".
   const excel = DATA_POSTING.replace("(TEST posting)\n", "(TEST posting)\nAbout us: our analysts live in Excel.\n");
   const ex = await tailorForPosting({ userId: USER, profile, posting: { text: excel }, deps: deps(), now: NOW });
   assert(ex.ok);
-  const fin = ex.changes.find((c) => c.kind === "drop" && c.name === "Finance Intern, Example Capital (TEST)");
-  assert(fin && fin.why === "", "no 'doesn't ask for' when the posting names a skill the entry shows");
-  assert(/; dropped Finance Intern, Example Capital \(TEST\)(;| and )/.test(ex.changelog) && !/Finance Intern, Example Capital \(TEST\), which/.test(ex.changelog), `said without a reason: ${ex.changelog}`);
+  // Architect amendment (D-070): nothing is dropped, so no drop is reported, with or without a reason; the entry prints.
+  assert(!ex.changes.some((c) => c.kind === "drop"), `no drop: ${JSON.stringify(ex.changes)}`);
+  assert(!/dropped/.test(ex.changelog) && !/Finance Intern, Example Capital \(TEST\), which/.test(ex.changelog), `said without a drop: ${ex.changelog}`);
   // Nothing changed: said as such.
   const same = { added: [], moved: [], removed: [] };
   eq(changelog({ diff: same, base: { lines: [] }, tailored: { lines: [] }, profile, jd: CareerTailor.parseJD(""), hidden: [], persona: null }).line,

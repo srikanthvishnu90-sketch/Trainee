@@ -111,3 +111,15 @@ answered" (stopped only for custom questions the person would answer) is reporte
 Nothing is sent: every request but GET/HEAD/OPTIONS is aborted except a GraphQL read (no `mutation`), a page script cancels
 every form submit, the runner is stopped before its click with no retries, robots.txt is obeyed, 1 request a second per host.
 A result the runner reports as sent is a breach and fails the job. Production passes neither `requestGate` nor `initScript`.
+
+## D-072 (item 4, 2026-11-12): the 99% reading and the hand-off
+
+The strict benchmark now also prints the owner's 99% reading per posting (`D072 | provider | a|b|fail | cause | url`) and per
+sample (`D072-TOTAL`), from `scripts/browser-eval/d072.cjs`; the raw "reached Submit" count (`BOTH`) is unchanged beside it.
+(b) counts only a kept wall that carries the runner's hand-off (`workers/career-browser/handoff.cjs`). Runner changes measured
+there: a check drawn inside the form (BambooHR) is reached with every other field filled and stops untouched (`CHECK_IN_FORM`);
+a form's Submit drawn just outside its one form is that form's Submit; Workday is opened at `<posting>/apply/applyManually` and
+its account page is a sign-in wall the person finishes; a closed posting is `posting_closed`; an employer page embedding
+Greenhouse's `job_app` frame is opened at the frame's own address; an employee staff sign-in form is no longer called the
+person's wall. The bench paces per provider (every Recruitee subdomain is one provider). Root causes and counts:
+`docs/architect/reports/ITEM4-ROOT-CAUSES-20261112.md`.

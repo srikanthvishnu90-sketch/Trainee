@@ -28,6 +28,7 @@ import { braveProvider, BRAVE_ENDPOINT, firstPartyProvider, type SearchHit, type
 import { type Convert, fetchSources, type FetchedSources, isBlockedHost, isPrivateHost, normalizeUrl, readCapped, resolveAfter, resolveBefore, type Resolver, type RobotsCheck } from "./research_sources.ts";
 import { parseRobots, robotsAllows } from "./contact_sources/web_gate.ts";
 import { dnsProbe, type DnsProbe, RESEARCH_BUDGET_MS, systemResolver } from "./research_dns.ts";
+import { BOARD_KEEP, BOARD_MAX_BYTES, jsonType, pruneJson } from "./json_stream.ts";
 
 type Env = { get(k: string): string | undefined };
 export type FreeKind = "company_site" | "sec_edgar" | "sec_fts" | "bls_oes" | "bls_ooh" | "usajobs" | "ats_board" | "wikipedia" | "wikidata" | "github" | "news_rss";
@@ -162,6 +163,63 @@ export function boardText(ats: string, token: string, roles: { title: string; lo
 }
 // The company a board names for itself: the same non-empty name on every role that carries one, else none.
 const ownerOf = (names: unknown[]) => { const xs = [...new Set(names.map((x) => clean(x, 80)).filter(Boolean))]; return xs.length === 1 ? xs[0] : null; };
+
+// ---------------------------------------------------------------- whose board it is (D-069, real set item 10, finding 6)
+// A board token is only a guess at a company's board: Greenhouse "ramp" is another company called RAMP (1 role), and
+// SmartRecruiters "palantir" another Palantir (C# roles in Aberdeen), while Ramp's and Palantir's own boards are on Ashby and
+// Lever. So every board that answers is checked against its own metadata before it is cited, and the company's own board is
+// preferred:
+//   domain   the board's own answer links the company's site (its postings' links or descriptions name that domain): its own
+//   name     the board names its company (Greenhouse company_name, SmartRecruiters company.name) and the name is the company's
+//   unnamed  the board names no company and does not link the site (said so in its text: "The board does not name its company")
+//   other    the board names a different company, and does not link the site: never cited as this company's
+// The best verdict wins (domain, then name, then unnamed); ties keep the order Greenhouse, Lever, Ashby, SmartRecruiters.
+export type BoardVerdict = "domain" | "name" | "unnamed" | "other";
+export const BOARD_RANK: Record<BoardVerdict, number> = { domain: 3, name: 2, unnamed: 1, other: 0 };
+export function sameCompanyName(a: string, b: string): boolean {
+  const x = squash(a), y = squash(b);
+  if (!x || !y) return false;
+  return x === y || x.replace(/ /g, "") === y.replace(/ /g, "") || `${x} `.startsWith(`${y} `) || `${y} `.startsWith(`${x} `);
+}
+export function boardOwner(ats: string, json: any): string | null {
+  if (ats === "Greenhouse") return ownerOf((json?.jobs ?? []).map((x: any) => x?.company_name));
+  if (ats === "SmartRecruiters") return ownerOf((json?.content ?? []).map((x: any) => x?.company?.name));
+  return null;
+}
+// A string from the board's own answer names the site's domain (or a subdomain of it) as a whole name: "plaid.com" in
+// "https://plaid.com/careers" or "jobs.plaid.com", never in "designedbyplaid.com".
+export function namesDomain(site: string): RegExp | null {
+  const d = siteOf(site);
+  if (!DOMAIN.test(d)) return null;
+  return new RegExp(`(?:^|[^a-z0-9-])(?:[a-z0-9-]+\\.)*${d.replace(/\./g, "\\.")}(?![a-z0-9-])`, "i");
+}
+export function boardVerdict(company: string, ats: string, json: any, domainHits: number): { verdict: BoardVerdict; owner: string | null } {
+  const owner = boardOwner(ats, json);
+  if (domainHits > 0) return { verdict: "domain", owner };
+  if (owner) return { verdict: sameCompanyName(owner, company) ? "name" : "other", owner };
+  return { verdict: "unnamed", owner };
+}
+// The URL of a board list the research probe and reader read (not one posting).
+export function boardListAts(url: string): keyof typeof BOARD_KEEP | null {
+  let u: URL; try { u = new URL(url); } catch { return null; }
+  const h = u.hostname.toLowerCase(), p = u.pathname;
+  if (h === "boards-api.greenhouse.io" && /^\/v1\/boards\/[^/]+\/jobs\/?$/.test(p)) return "Greenhouse";
+  if (h === "api.lever.co" && /^\/v0\/postings\/[^/]+\/?$/.test(p)) return "Lever";
+  if (h === "api.ashbyhq.com" && /^\/posting-api\/job-board\/[^/]+\/?$/.test(p)) return "Ashby";
+  if (h === "api.smartrecruiters.com" && /^\/v1\/companies\/[^/]+\/postings\/?$/.test(p)) return "SmartRecruiters";
+  return null;
+}
+// The reader's stream converter (research_sources.ts ReadOpts.stream): a board list is read as a stream, only its needed fields
+// kept, up to BOARD_MAX_BYTES, then converted by convertFree from those fields alone. Anything else is read as before.
+export function streamFree(url: string, type: string): ((res: Response) => Promise<{ title: string; text: string } | null>) | null {
+  const ats = boardListAts(url);
+  if (!ats || !jsonType(type, true)) return null;
+  return async (res: Response) => {
+    const got = await pruneJson(res.body, { keep: BOARD_KEEP[ats], maxBytes: BOARD_MAX_BYTES, maxString: 300 });
+    if (!got.ok) return null;
+    return convertFree(url, "application/json", JSON.stringify(got.value));
+  };
+}
 function rssItems(xml: string): { title: string; link: string; date: string; source: string }[] {
   const out: { title: string; link: string; date: string; source: string }[] = [];
   const cdata = (s: string) => s.replace(/^<!\[CDATA\[|\]\]>$/g, "");
@@ -356,17 +414,38 @@ export function freeProvider(o: { fetch: typeof fetch; now: () => number; userAg
       return got.truncated ? null : JSON.parse(new TextDecoder().decode(got.bytes));
     } catch { return null; }
   };
-  async function board(slug: string): Promise<{ hit: SearchHit; json: any; ats: string } | null> {
+  // D-069 (finding 7): a board list is read as a stream with only the fields research uses kept (json_stream.ts), up to
+  // BOARD_MAX_BYTES (Palantir's Lever board is 5.9 MB), and any JSON content type its API answers with is taken. While it streams,
+  // each string is checked for the company's own domain (`site`): that count is the board's identity evidence.
+  const getBoard = async (url: string, ats: keyof typeof BOARD_KEEP, site: RegExp | null): Promise<{ json: any; domainHits: number } | null> => {
+    try {
+      const r = await f(url, { headers: { accept: "application/json" }, redirect: "manual", signal: AbortSignal.timeout(15000) });
+      if (r.status !== 200 || !jsonType(r.headers.get("content-type"), true)) { await r.body?.cancel().catch(() => {}); return null; }
+      let domainHits = 0;
+      const got = await pruneJson(r.body, { keep: BOARD_KEEP[ats], maxBytes: BOARD_MAX_BYTES, maxString: 300, onString: site ? (t) => { if (site.test(t)) domainHits++; } : undefined });
+      return got.ok ? { json: got.value, domainHits } : null;
+    } catch { return null; }
+  };
+  type Board = { hit: SearchHit; json: any; ats: string; verdict: BoardVerdict; owner: string | null; slug: string };
+  async function boards(slug: string, company: string, sites: string[]): Promise<Board[]> {
     const s = encodeURIComponent(slug);
-    const tries: [string, string, (j: any) => boolean][] = [
+    const tries: [string, keyof typeof BOARD_KEEP, (j: any) => boolean][] = [
       [`https://boards-api.greenhouse.io/v1/boards/${s}/jobs`, "Greenhouse", (j) => Array.isArray(j?.jobs)],
       [`https://api.lever.co/v0/postings/${s}?mode=json`, "Lever", (j) => Array.isArray(j) && j.length > 0],
       [`https://api.ashbyhq.com/posting-api/job-board/${s}`, "Ashby", (j) => Array.isArray(j?.jobs)],
       [`https://api.smartrecruiters.com/v1/companies/${s}/postings`, "SmartRecruiters", (j) => Array.isArray(j?.content) && j.content.length > 0],
     ];
-    const got = await Promise.all(tries.map(async ([u, , ok]) => { const j = await getJson(u); return ok(j) ? j : null; }));
-    const i = got.findIndex((j) => j !== null);
-    return i < 0 ? null : { hit: hit(tries[i][0], `${tries[i][1]} job board: ${slug}`, "ats_board"), json: got[i], ats: tries[i][1] };
+    const site = sites.map(namesDomain).find(Boolean) ?? null;
+    const got = await Promise.all(tries.map(async ([u, ats, ok]) => { const g = await getBoard(u, ats, site); return g && ok(g.json) ? g : null; }));
+    const out: Board[] = [];
+    got.forEach((g, i) => { if (g) { const v = boardVerdict(company, tries[i][1], g.json, g.domainHits); out.push({ hit: hit(tries[i][0], `${tries[i][1]} job board: ${slug}`, "ats_board"), json: g.json, ats: tries[i][1], slug, ...v }); } });
+    return out;
+  }
+  // The company's own board among every board its slugs answered on: best verdict first, then the ATS order; "other" never.
+  function pickBoard(all: Board[]): { best: Board | null; passed: Board[] } {
+    const ok = all.filter((b) => b.verdict !== "other");
+    const best = ok.slice().sort((a, b) => BOARD_RANK[b.verdict] - BOARD_RANK[a.verdict])[0] ?? null;
+    return { best, passed: all.filter((b) => b !== best) };
   }
   async function wiki(name: string): Promise<SearchHit[]> {
     for (const t of [name, `${name} (company)`]) {
@@ -477,11 +556,14 @@ export function freeProvider(o: { fetch: typeof fetch; now: () => number; userAg
       const work = companies.map(async (c) => {
         const slugs = slugsFor(c, sites);
         searches += 3 + (o.userAgent ? 1 : 0);
-        const [bd, wk, gh, ft] = await Promise.all([
-          slugs.length ? Promise.any(slugs.map(async (s) => { const r = await board(s); if (!r) throw 0; return r; })).catch(() => null) : null,
+        const [found, wk, gh, ft] = await Promise.all([
+          Promise.all(slugs.map((s) => boards(s, c, sites))).then((xs) => xs.flat()),
           wiki(c), github(c, slugs, sites), o.userAgent ? fts(c) : Promise.resolve([] as SearchHit[]),
         ]);
+        const { best: bd, passed } = pickBoard(found);
         if (bd) put(0, bd.hit); else noBoard.push(c.slice(0, 60));
+        // Said, not hidden: a board left out because it is another company's, or because the company's own board was found.
+        for (const p of passed) notes.push(`Not used for ${c.slice(0, 60)}: the ${p.ats} job board "${p.slug}" (${p.verdict === "other" ? `it names ${p.owner}, another company` : bd ? `${bd.ats} "${bd.slug}" is ${bd.verdict === "domain" ? "the one that links the company's site" : "the better match"}` : "not the company's"}).`);
         for (const h of postingsFor(bd, roleWords)) put(0, h);
         // No site named: the official one (Wikidata P856, else the postings' own host), its home, newsroom, blog and careers pages.
         if (!sites.length) {
@@ -547,7 +629,7 @@ export function freeReader(o: { fetch: typeof fetch; userAgent?: string | null; 
     const parts: FetchedSources[] = new Array(list.length);
     for (let i = 0; i < list.length; i += 6) {
       const batch = list.slice(i, i + 6);
-      const got = await Promise.all(batch.map((u) => fetchSources([u], { fetch: f, resolver, robots, convert: convertFree, now: o.now, max: 1, deadline, clock })));
+      const got = await Promise.all(batch.map((u) => fetchSources([u], { fetch: f, resolver, robots, convert: convertFree, stream: streamFree, now: o.now, max: 1, deadline, clock })));
       got.forEach((g, j) => { parts[i + j] = g; });
     }
     for (const p of parts) { for (const v of p.verified) if (!out.verified.some((x) => x.url === v.url)) out.verified.push(v); out.rejected.push(...p.rejected); }

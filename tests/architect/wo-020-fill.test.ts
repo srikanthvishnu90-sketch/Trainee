@@ -107,7 +107,11 @@ Deno.test("WO-020/F6 fill coverage meets the bar and the committed report is tod
   // WO-058 (sealed sample G, scored once): work for this employer through an agency, a vendor or a third party is not on
   // the person's employer list (SpaceX's and xAI's lists offer "contracted by a third-party employer"; "a WPP agency" on
   // B), and "Additional information (for source)" is not how they heard: A 74.9% -> 74.7%, B 77.2% -> 77.1% (ready 38 -> 37).
-  assert(a.rate >= 0.746 && b.rate >= 0.770, `${a.rate} ${b.rate}`);
-  assert(a.ready >= 21 && b.ready >= 37, `${a.ready} ${b.ready}`);
+  // architect amendment D-053 (owner, 2026-11-10): a salary expectation is asked per application, never filled from a fact
+  // on file (the owner's choice, not a regression). Every lost fill is a required salary-expectation question: A 756 -> 748
+  // of 1,011 (74.8% -> 74.0%, ready 22 -> 21), B 653 -> 635 of 847 (77.1% -> 75.0%, ready 37 -> 32).
+  // Before: a.rate >= 0.746 && b.rate >= 0.770, a.ready >= 21 && b.ready >= 37. After: the salary rows asked.
+  assert(a.rate >= 0.739 && b.rate >= 0.749, `${a.rate} ${b.rate}`);
+  assert(a.ready >= 21 && b.ready >= 32, `${a.ready} ${b.ready}`);
   assert(REPORT.includes(`| ${a.postings} | ${a.required} | ${a.filled} (`) && REPORT.includes(`| ${b.postings} | ${b.required} | ${b.filled} (`), "docs/apply/fill-coverage.md is stale: regenerate it");
 });

@@ -277,7 +277,9 @@ const CareerNegotiation = (() => {
   // Nothing is sent: the draft is returned for the person to read, change and send themselves.
   function factScript(offer, opts) {
     opts = opts || {};
-    const usd = (n) => "$" + Math.round(n).toLocaleString("en-US");
+    // D-069: each figure in its own currency when the caller passes how to write it ("AUD 87,600"); US dollars otherwise.
+    const fmt = typeof opts.money === "function" ? opts.money : null;
+    const usd = (n, field) => fmt ? fmt(n, field) : "$" + Math.round(n).toLocaleString("en-US");
     const o = offer || {};
     const role = o.role || "role";
     const competing = (opts.competing || []).filter((c) => c && c.said && Number.isFinite(c.base));
@@ -296,9 +298,9 @@ const CareerNegotiation = (() => {
       if (best) because.push(`I have another offer${best.company ? ` from ${best.company}` : ""} with a base of ${usd(best.base)}.`);
       ask = "Is there flexibility on the base or the signing bonus?"; askSay = "Ask whether the base or the signing bonus can move.";
     }
-    const fallback = o.signing != null ? `If the base is set, a higher signing bonus than ${usd(o.signing)} would also help.` : "If the base is set, a signing bonus would also help.";
+    const fallback = o.signing != null ? `If the base is set, a higher signing bonus than ${usd(o.signing, "signing")} would also help.` : "If the base is set, a signing bonus would also help.";
     const deadline = opts.deadline && opts.deadline.text ? String(opts.deadline.text) : null;
-    const stated = [base != null ? `a base of ${usd(base)}` : null, o.signing != null ? `a ${usd(o.signing)} signing bonus` : null].filter(Boolean).join(" and ");
+    const stated = [base != null ? `a base of ${usd(base)}` : null, o.signing != null ? `a ${usd(o.signing, "signing")} signing bonus` : null].filter(Boolean).join(" and ");
     const email = [
       `Subject: ${role[0].toUpperCase() + role.slice(1)} offer${o.company ? `, ${o.company}` : ""}`,
       "",

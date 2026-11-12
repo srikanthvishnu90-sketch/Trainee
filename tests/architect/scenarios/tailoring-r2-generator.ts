@@ -459,7 +459,9 @@ const savedOnly = (label: string) => (_a: Record<string, Ans>, s: Record<string,
 const ynOf = (v: string) => /^(?:y|yes|true)$/i.test(v.trim()) ? "Yes" : "No";
 export function formQuestions(r: R, company: string, tool: string): FormQ[] {
   const qs: FormQ[] = [
-    { id: "salary", label: r.pick(["What are your salary expectations?", "Expected salary", "Desired salary"]), type: "input_text", options: [], expect: fromFact("salary_expectation") },
+    // architect amendment D-053 (owner, 2026-11-10): a salary expectation is asked per application, never filled from the
+    // salary_expectation fact. Before: expect fromFact("salary_expectation"). After: "needs" (asked).
+    { id: "salary", label: r.pick(["What are your salary expectations?", "Expected salary", "Desired salary"]), type: "input_text", options: [], expect: () => "needs" },
     { id: "salary-eur", label: r.pick(["What are your salary expectations (in EUR)?", "Desired salary (GBP)", "Expected annual salary in INR"]), type: "input_text", options: [], expect: () => "needs" },
     { id: "salary-current", label: r.pick(["What is your current salary?", "What was your salary at your last job?", "Salary history"]), type: "input_text", options: [], expect: () => "needs" },
     { id: "notice", label: r.pick(["What is your notice period?", "How much notice do you need to give?"]), type: "input_text", options: [], expect: fromFact("notice_period") },

@@ -4,7 +4,7 @@
 // carries the reason, so the agent can say what is missing instead of pretending the job doesn't exist.
 import { CareerJobs, CareerProfile, CareerRouter } from "./router_core.career.js";
 import { matchesWords, searchWords, titleTier, wordStem } from "./career_ingest.ts";
-import { payFrom } from "./posting_pay.ts";
+import { placedPay } from "./posting_pay.ts";
 import { formUrlFor } from "./posting_key.ts";
 import { personalSourceGuard } from "./personal_fact_source.ts";
 
@@ -111,7 +111,7 @@ export function searchPostings(pool: any[], query: unknown, profile: any, limit 
     // WO-106 (run 39538248995 called a Credit Risk Analyst one of "two that match" a senior data analyst search): whether the
     // title itself is the role asked for (every role word of the query, or of their goal, in the title), so a related role
     // is said to be related.
-    postings: scored.slice(0, n).map(({ p, fit, tier }) => ({ job_id: p.job_id, company: p.company, title: p.title, location: p.location || "", url: p.url || formUrlFor(String(p.job_id ?? "")) || "", first_seen_at: p.first_seen_at ?? null, fit, pay: p.pay ?? payFrom(p.description),
+    postings: scored.slice(0, n).map(({ p, fit, tier }) => ({ job_id: p.job_id, company: p.company, title: p.title, location: p.location || "", url: p.url || formUrlFor(String(p.job_id ?? "")) || "", first_seen_at: p.first_seen_at ?? null, fit, pay: p.pay ?? placedPay(p.description, p.location),
       role_match: goal && goal.roles.length ? goal.roles.every((w) => searchWords(p.title).map(wordStem).includes(wordStem(w))) : tier === 0 })),
     total: hits.length, title_matches: scored.filter((x) => x.tier === 0).length, ranked_by: goal ? "goal" : sp ? "fit" : "newest",
     goal: goal ? { roles: goal.roles, places: goal.places, remote: goal.remote } : null,

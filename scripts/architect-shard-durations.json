@@ -1,6 +1,10 @@
 {
   "default_s": 5,
   "files": {
+    "tests/architect/d065-live-round1-20261112.test.ts": 0.2,
+    "tests/architect/d067-live-round2-20261112.test.ts": 0.3,
+    "tests/architect/d066-behavior-guide-20261112.test.ts": 0.5,
+    "tests/architect/behavior-guide-suite.test.ts": 17,
     "tests/architect/gmail-oauth-wrapper-ci.test.ts": 0.6,
     "tests/architect/account-memory-unit.test.ts": 0.1,
     "tests/architect/advice-wide.test.ts": 6.2,
@@ -80,6 +84,8 @@
     "tests/architect/d038-career-model.test.ts": 0.1,
     "tests/architect/d046-people-model-and-v203.test.ts": 0.1,
     "tests/architect/d046-sonnet-only-no-person-cap.test.ts": 0.2,
+    "tests/architect/d053-salary-expectation.test.ts": 0.1,
+    "tests/architect/d053b-hosted-salary.test.ts": 0.1,
     "tests/architect/date-components.test.ts": 0.1,
     "tests/architect/delivery-throughput-pg.test.ts": 10,
     "tests/architect/delivery-throughput.test.ts": 0.3,
@@ -233,6 +239,9 @@
     "tests/architect/handler-e2e-apply-phrasings.test.ts": 7,
     "tests/architect/handler-submit-path.test.ts": 13.7,
     "tests/architect/hosted-apply-unit.test.ts": 0.1,
+    "tests/architect/mirror-set.test.ts": 21,
+    "tests/architect/router-mirror-fixes-20261111.test.ts": 12.4,
+    "tests/architect/mirror-length-and-gaps-20261111.test.ts": 9.5,
     "tests/architect/wo-122-reused-answer-source.test.ts": 0.1,
     "tests/architect/ingest-bounded-pg.test.ts": 14,
     "tests/architect/ingest-r2-pg.test.ts": 17,
@@ -341,6 +350,7 @@
     "tests/architect/research-company-brief-20261109.test.ts": 0.1,
     "tests/architect/research-company-f2-20261109.test.ts": 0.2,
     "tests/architect/research-company-f2-handler.test.ts": 9,
+    "tests/architect/web-research-d060.test.ts": 10,
     "tests/architect/research-company-review-20261109.test.ts": 0.1,
     "tests/architect/research-free-brief.test.ts": 0.1,
     "tests/architect/research-free-quality.test.ts": 0.1,
@@ -670,6 +680,15 @@
     "tests/architect/loop-05-outreach.test.ts": 14.2,
     "tests/architect/h2h-leftovers-20261110.test.ts": 2.3,
     "tests/architect/files-f12-live.test.ts": 2,
-    "tests/architect/instinct-tone-gate.test.ts": 13.4
+    "tests/architect/instinct-tone-gate.test.ts": 13.4,
+    "tests/architect/files-s3-plan-materials.test.ts": 4,
+    "tests/architect/channel-parts-follow-contact-pg.test.ts": 5.6,
+    "tests/architect/mirror-wa-batch1.test.ts": 0.4,
+    "tests/architect/mirror-wa-batch1-handler.test.ts": 16,
+    "tests/architect/mirror-wa-batch1-gaps.test.ts": 0.1,
+    "tests/architect/mirror-wa-batch1-gaps-handler.test.ts": 15,
+    "tests/architect/mirror-process-blocked.test.ts": 12,
+    "tests/architect/mirror-wa-batch1-process.test.ts": 15,
+    "tests/architect/r10-app-layer/r10-fix-12-review.test.ts": 10
   }
 }

@@ -75,8 +75,10 @@ Deno.test("WO-009a/5 an answer the person gave once (saved by its normalized lab
   const salary = { label: "What are your salary expectations? ", required: true, fields: [{ name: "question_555", type: "input_text", values: [] }] };
   const saved = { "what are your salary expectations": { value: "$85,000", factId: "F-030" } };
   const r = planBatch({ userId: "u1", postings: [{ job_id: "gh:acme:1", company: "Acme", title: "Data Analyst", fields: greenhouseQuestions(ghJob("1", [salary])) }], answers, saved, log: [], now: T0 });
-  eq(r.ready.length, 1);
-  eq(r.ready[0].fields.find((x: any) => x.name === "question_555").factId, "F-030");
+  // architect amendment D-053 (owner, 2026-11-10): a salary expectation is asked per application; an answer saved by its
+  // wording is never filled into another employer's form. Before: ready 1, question_555 filled from F-030. After: asked.
+  eq(r.ready.length, 0);
+  eq(r.needs.map((n: any) => [n.label, n.job_ids]), [["What are your salary expectations?", ["gh:acme:1"]]]);
 });
 
 Deno.test("WO-009a/6 a select answer that matches none of the employer's options is never forced: the question is asked", () => {

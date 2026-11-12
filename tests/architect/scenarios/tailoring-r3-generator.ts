@@ -89,7 +89,9 @@ export function numericCases(r: R, n: number): FieldCase[] {
       case "gpa-hs": out.push(c(F(r.pick(["High school GPA", "Secondary school GPA"])), [], null)); break;
       case "gpa-grad": out.push(c(F(r.pick(["Graduate GPA", "Master's GPA", "MBA GPA"])), [], null)); break;
       case "gpa-pct": out.push(c(F(r.pick(["Final grade percentage", "GPA or percentage (%)"])), [], null)); break;
-      case "pay-plain": out.push(c(F(r.pick(["Desired salary", "What are your salary expectations?", "Salary expectation"])), ["fact:salary_expectation"], answers.salary_expectation ? pay : null)); break;
+      // architect amendment D-053 (owner, 2026-11-10): a salary expectation is asked per application, never filled from the
+      // salary_expectation fact. Before: allowed ["fact:salary_expectation"], expect the stated pay. After: allowed [], asked.
+      case "pay-plain": out.push(c(F(r.pick(["Desired salary", "What are your salary expectations?", "Salary expectation"])), [], null)); break;
       case "pay-k": out.push(c(F(r.pick(["Expected salary (in thousands)", "Desired salary (k)", "Salary expectation in thousands of USD", "Expected base salary ('000s)"]), r.pick(["number", "input_text"])), [], null)); break;
       case "pay-month": out.push(c(F(r.pick(["Expected monthly salary", "Desired salary per month", "Salary expectation (monthly)"])), [], null)); break;
       case "pay-hour": out.push(c(F(r.pick(["Desired hourly rate", "Expected pay per hour"])), [], null)); break;

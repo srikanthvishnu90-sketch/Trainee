@@ -1,0 +1,606 @@
+{
+ "at": "2026-11-12T07:54:46.284Z",
+ "line": "REAL-SET RESEARCH ($0 replay, scripted draft): 20 real companies; pages fetched 47 (hosts: boards-api.greenhouse.io, api.lever.co, api.ashbyhq.com, api.smartrecruiters.com), refused 120; sources 20/20, cited 20/20, invented 20/20, unread 20/20, entity 20/20, brief 20/20; planted lines kept 0 cases; PASS 20/20 (bar 19/20) MEETS",
+ "results": [
+  {
+   "id": "R01",
+   "company": "Stripe",
+   "status": "ok",
+   "fetched": 3,
+   "refused": 6,
+   "refused_why": [
+    "robots_disallow",
+    "unreachable"
+   ],
+   "kept": 3,
+   "sources": [
+    "https://boards-api.greenhouse.io/v1/boards/stripe/jobs"
+   ],
+   "unread": [
+    "stripe.com: not read, because the site asks programs not to read it.",
+    "api.gdeltproject.org: not read, because it could not be reached.",
+    "Wikipedia has no company article found for Stripe."
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R02",
+   "company": "Airbnb",
+   "status": "ok",
+   "fetched": 3,
+   "refused": 6,
+   "refused_why": [
+    "robots_disallow",
+    "unreachable"
+   ],
+   "kept": 3,
+   "sources": [
+    "https://boards-api.greenhouse.io/v1/boards/airbnb/jobs"
+   ],
+   "unread": [
+    "airbnb.com: not read, because the site asks programs not to read it.",
+    "api.gdeltproject.org: not read, because it could not be reached.",
+    "Wikipedia has no company article found for Airbnb."
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R03",
+   "company": "Figma",
+   "status": "ok",
+   "fetched": 3,
+   "refused": 6,
+   "refused_why": [
+    "robots_disallow",
+    "unreachable"
+   ],
+   "kept": 3,
+   "sources": [
+    "https://boards-api.greenhouse.io/v1/boards/figma/jobs"
+   ],
+   "unread": [
+    "figma.com: not read, because the site asks programs not to read it.",
+    "api.gdeltproject.org: not read, because it could not be reached.",
+    "Wikipedia has no company article found for Figma."
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R04",
+   "company": "Robinhood",
+   "status": "ok",
+   "fetched": 3,
+   "refused": 6,
+   "refused_why": [
+    "robots_disallow",
+    "unreachable"
+   ],
+   "kept": 3,
+   "sources": [
+    "https://boards-api.greenhouse.io/v1/boards/robinhood/jobs"
+   ],
+   "unread": [
+    "robinhood.com: not read, because the site asks programs not to read it.",
+    "api.gdeltproject.org: not read, because it could not be reached.",
+    "Wikipedia has no company article found for Robinhood."
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R05",
+   "company": "Coinbase",
+   "status": "ok",
+   "fetched": 3,
+   "refused": 6,
+   "refused_why": [
+    "robots_disallow",
+    "unreachable"
+   ],
+   "kept": 3,
+   "sources": [
+    "https://boards-api.greenhouse.io/v1/boards/coinbase/jobs"
+   ],
+   "unread": [
+    "coinbase.com: not read, because the site asks programs not to read it.",
+    "api.gdeltproject.org: not read, because it could not be reached.",
+    "Wikipedia has no company article found for Coinbase."
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R06",
+   "company": "Datadog",
+   "status": "ok",
+   "fetched": 3,
+   "refused": 6,
+   "refused_why": [
+    "robots_disallow",
+    "unreachable"
+   ],
+   "kept": 3,
+   "sources": [
+    "https://boards-api.greenhouse.io/v1/boards/datadog/jobs"
+   ],
+   "unread": [
+    "datadoghq.com: not read, because the site asks programs not to read it.",
+    "api.gdeltproject.org: not read, because it could not be reached.",
+    "Wikipedia has no company article found for Datadog."
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R07",
+   "company": "Duolingo",
+   "status": "ok",
+   "fetched": 3,
+   "refused": 6,
+   "refused_why": [
+    "robots_disallow",
+    "unreachable"
+   ],
+   "kept": 3,
+   "sources": [
+    "https://boards-api.greenhouse.io/v1/boards/duolingo/jobs"
+   ],
+   "unread": [
+    "duolingo.com: not read, because the site asks programs not to read it.",
+    "api.gdeltproject.org: not read, because it could not be reached.",
+    "Wikipedia has no company article found for Duolingo."
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R08",
+   "company": "Brex",
+   "status": "ok",
+   "fetched": 3,
+   "refused": 6,
+   "refused_why": [
+    "robots_disallow",
+    "unreachable"
+   ],
+   "kept": 3,
+   "sources": [
+    "https://boards-api.greenhouse.io/v1/boards/brex/jobs"
+   ],
+   "unread": [
+    "brex.com: not read, because the site asks programs not to read it.",
+    "api.gdeltproject.org: not read, because it could not be reached.",
+    "Wikipedia has no company article found for Brex."
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R09",
+   "company": "Affirm",
+   "status": "ok",
+   "fetched": 3,
+   "refused": 6,
+   "refused_why": [
+    "robots_disallow",
+    "unreachable"
+   ],
+   "kept": 3,
+   "sources": [
+    "https://boards-api.greenhouse.io/v1/boards/affirm/jobs"
+   ],
+   "unread": [
+    "affirm.com: not read, because the site asks programs not to read it.",
+    "api.gdeltproject.org: not read, because it could not be reached.",
+    "Wikipedia has no company article found for Affirm."
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R10",
+   "company": "Gusto",
+   "status": "ok",
+   "fetched": 3,
+   "refused": 6,
+   "refused_why": [
+    "robots_disallow",
+    "unreachable"
+   ],
+   "kept": 3,
+   "sources": [
+    "https://boards-api.greenhouse.io/v1/boards/gusto/jobs"
+   ],
+   "unread": [
+    "gusto.com: not read, because the site asks programs not to read it.",
+    "api.gdeltproject.org: not read, because it could not be reached.",
+    "Wikipedia has no company article found for Gusto."
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R11",
+   "company": "Discord",
+   "status": "ok",
+   "fetched": 2,
+   "refused": 6,
+   "refused_why": [
+    "robots_disallow",
+    "unreachable"
+   ],
+   "kept": 3,
+   "sources": [
+    "https://boards-api.greenhouse.io/v1/boards/discord/jobs"
+   ],
+   "unread": [
+    "discord.com: not read, because the site asks programs not to read it.",
+    "api.gdeltproject.org: not read, because it could not be reached.",
+    "Wikipedia has no company article found for Discord."
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R12",
+   "company": "Dropbox",
+   "status": "ok",
+   "fetched": 3,
+   "refused": 6,
+   "refused_why": [
+    "robots_disallow",
+    "unreachable"
+   ],
+   "kept": 3,
+   "sources": [
+    "https://boards-api.greenhouse.io/v1/boards/dropbox/jobs"
+   ],
+   "unread": [
+    "dropbox.com: not read, because the site asks programs not to read it.",
+    "api.gdeltproject.org: not read, because it could not be reached.",
+    "Wikipedia has no company article found for Dropbox."
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R13",
+   "company": "Chime",
+   "status": "ok",
+   "fetched": 3,
+   "refused": 6,
+   "refused_why": [
+    "robots_disallow",
+    "unreachable"
+   ],
+   "kept": 3,
+   "sources": [
+    "https://boards-api.greenhouse.io/v1/boards/chime/jobs"
+   ],
+   "unread": [
+    "chime.com: not read, because the site asks programs not to read it.",
+    "api.gdeltproject.org: not read, because it could not be reached.",
+    "Wikipedia has no company article found for Chime."
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R14",
+   "company": "Toast",
+   "status": "ok",
+   "fetched": 3,
+   "refused": 6,
+   "refused_why": [
+    "robots_disallow",
+    "unreachable"
+   ],
+   "kept": 3,
+   "sources": [
+    "https://boards-api.greenhouse.io/v1/boards/toast/jobs"
+   ],
+   "unread": [
+    "toasttab.com: not read, because the site asks programs not to read it.",
+    "api.gdeltproject.org: not read, because it could not be reached.",
+    "Wikipedia has no company article found for Toast."
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R15",
+   "company": "Palantir",
+   "status": "ok",
+   "fetched": 1,
+   "refused": 6,
+   "refused_why": [
+    "robots_disallow",
+    "unreachable"
+   ],
+   "kept": 3,
+   "sources": [
+    "https://api.lever.co/v0/postings/palantir?mode=json"
+   ],
+   "unread": [
+    "palantir.com: not read, because the site asks programs not to read it.",
+    "api.gdeltproject.org: not read, because it could not be reached.",
+    "Wikipedia has no company article found for Palantir."
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R16",
+   "company": "Spotify",
+   "status": "ok",
+   "fetched": 1,
+   "refused": 6,
+   "refused_why": [
+    "robots_disallow",
+    "unreachable"
+   ],
+   "kept": 3,
+   "sources": [
+    "https://api.lever.co/v0/postings/spotify?mode=json"
+   ],
+   "unread": [
+    "spotify.com: not read, because the site asks programs not to read it.",
+    "api.gdeltproject.org: not read, because it could not be reached.",
+    "Wikipedia has no company article found for Spotify."
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R17",
+   "company": "Ramp",
+   "status": "ok",
+   "fetched": 1,
+   "refused": 6,
+   "refused_why": [
+    "robots_disallow",
+    "unreachable"
+   ],
+   "kept": 3,
+   "sources": [
+    "https://api.ashbyhq.com/posting-api/job-board/ramp"
+   ],
+   "unread": [
+    "ramp.com: not read, because the site asks programs not to read it.",
+    "api.gdeltproject.org: not read, because it could not be reached.",
+    "Wikipedia has no company article found for Ramp."
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R18",
+   "company": "Notion",
+   "status": "ok",
+   "fetched": 1,
+   "refused": 6,
+   "refused_why": [
+    "robots_disallow",
+    "unreachable"
+   ],
+   "kept": 3,
+   "sources": [
+    "https://api.ashbyhq.com/posting-api/job-board/notion"
+   ],
+   "unread": [
+    "notion.so: not read, because the site asks programs not to read it.",
+    "api.gdeltproject.org: not read, because it could not be reached.",
+    "Wikipedia has no company article found for Notion."
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R19",
+   "company": "Plaid",
+   "status": "ok",
+   "fetched": 1,
+   "refused": 6,
+   "refused_why": [
+    "robots_disallow",
+    "unreachable"
+   ],
+   "kept": 3,
+   "sources": [
+    "https://api.ashbyhq.com/posting-api/job-board/plaid"
+   ],
+   "unread": [
+    "plaid.com: not read, because the site asks programs not to read it.",
+    "api.gdeltproject.org: not read, because it could not be reached.",
+    "Wikipedia has no company article found for Plaid."
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "R20",
+   "company": "ServiceNow",
+   "status": "ok",
+   "fetched": 1,
+   "refused": 6,
+   "refused_why": [
+    "robots_disallow",
+    "unreachable"
+   ],
+   "kept": 3,
+   "sources": [
+    "https://api.smartrecruiters.com/v1/companies/servicenow/postings"
+   ],
+   "unread": [
+    "servicenow.com: not read, because the site asks programs not to read it.",
+    "api.gdeltproject.org: not read, because it could not be reached.",
+    "Wikipedia has no company article found for ServiceNow."
+   ],
+   "checks": {
+    "sources": true,
+    "cited": true,
+    "invented": true,
+    "unread": true,
+    "entity": true,
+    "brief": true
+   },
+   "notes": [],
+   "pass": true
+  }
+ ]
+}

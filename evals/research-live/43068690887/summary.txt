@@ -1,0 +1,7 @@
+Citadel new grad software engineer interview process (official Citadel careers page)
+  -> 1 search(es), 9 result page(s), 0 cited passage(s), $0.1181, 18432 ms, stop end_turn
+Chicago software engineer intern hourly pay 2026
+  -> 1 search(es), 9 result page(s), 0 cited passage(s), $0.0947, 17097 ms, stop end_turn
+verdict=not_proven searches=2 spent_usd=0.212804
+"Citadel new grad software engineer interview process (official Citadel careers page)": no cited passage came back
+"Chicago software engineer intern hourly pay 2026": no cited passage came back

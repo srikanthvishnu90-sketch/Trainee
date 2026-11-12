@@ -25,14 +25,21 @@ Deno.test("OQ-1 open entry questions go to the brain with CAREER_BRAIN=staged an
   for (const m of OPEN) { const d = decide(m); assertNode.deepStrictEqual([d.brain, d.reason], [true, "open_career_question"], `${m}: ${d.reason}`); }
 });
 Deno.test("OQ-2 without CAREER_KNOWLEDGE=on (no research tool) the library answer stays: nothing unsourced from the model", () => {
-  for (const m of OPEN) assertNode.equal(decide(m, env({ CAREER_BRAIN: "staged" })).reason === "open_career_question", false, m);
-  assertNode.equal(decide(OPEN[0], env({ CAREER_BRAIN: "staged" })).reason, "code_product");
+  // Architect amendment (D-060): CAREER_KNOWLEDGE is a release flag served on, so "without it" is its rollback, CAREER_KNOWLEDGE=off.
+  for (const m of OPEN) assertNode.equal(decide(m, env({ CAREER_BRAIN: "staged", CAREER_KNOWLEDGE: "off" })).reason === "open_career_question", false, m);
+  assertNode.equal(decide(OPEN[0], env({ CAREER_BRAIN: "staged", CAREER_KNOWLEDGE: "off" })).reason, "code_product");
   assertNode.equal(decide(OPEN[0], env({ CAREER_BRAIN: "router", CAREER_KNOWLEDGE: "on" })).brain, false, "router mode (the D-035 rollback): never");
 });
 Deno.test("OQ-3 company-specific and posting-requirement asks stay on the library / code", () => {
-  for (const m of ["what does Stripe look for in software engineers?", "what do data analyst postings usually require?", "how do I get hired at Goldman Sachs as an analyst?", "find me data analyst jobs in Chicago", "apply to the Backend Software Engineer role at Ironstack Payments"]) {
+  for (const m of ["what do data analyst postings usually require?", "find me data analyst jobs in Chicago", "apply to the Backend Software Engineer role at Ironstack Payments"]) {
     const d = decide(m); assertNode.notEqual(d.reason, "open_career_question", m); assertNode.equal(d.brain, false, `${m}: ${d.reason}`);
   }
+  // Architect amendment (D-061): G1 and G14 with web research on (D-060): a firm's company file is the brain's data for a research
+  // turn, not the open-question route.
+  { const m = "what does Stripe look for in software engineers?"; const d = decide(m); assertNode.notEqual(d.reason, "open_career_question", m); assertNode.equal(d.reason, "g1_model_decides", m); }
+  // Architect amendment (D-061): G1: the router read this question as a people list to build (outreach_clarification); the question
+  // is the brain's, with that reading as data. It is still not the open-question route (no company-free library answer applies).
+  { const m = "how do I get hired at Goldman Sachs as an analyst?"; const d = decide(m); assertNode.notEqual(d.reason, "open_career_question", m); assertNode.equal(d.reason, "g1_model_decides", m); }
 });
 Deno.test("OQ-4 the research tool is the brain's for it: present only with research deps, named in the tool description", () => {
   const t = (careerTools as any)({ postings: async () => [], research: { search: async () => ({ status: "error", detail: "x" }) } }).find((x: any) => x.name === "research_career_question");

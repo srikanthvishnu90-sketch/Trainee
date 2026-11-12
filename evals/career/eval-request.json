@@ -1,9 +1,10 @@
 {
- "note": "deploy standard S3 (scripts/launch/measure-reply.sh): measure the second parent",
+ "note": "D-068 (owner, 2026-11-12): items 7 and 9 (b) re-measured on the D-054 set at trunk 44b436f9 (D-064..D-069), capped at $2.50; measure the second parent",
  "action": "eval",
- "set": "dev",
+ "set": "d054",
  "brains": [
   "staged"
  ],
- "passes": 5
+ "passes": 5,
+ "budget_usd": 2.5
 }

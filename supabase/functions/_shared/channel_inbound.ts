@@ -222,7 +222,9 @@ export interface CoreDeps {
   //   while it is handled (best effort: a failure never touches the turn).
   // ackAfterMs: a turn (reading a file, then the chat) still running after this long gets ONE interim line (ackFor), sent
   //   straight out before the answer; null or absent: none. timers: the clock the two run on (tests inject one).
-  typing?: (address: string) => Promise<unknown>;
+  // D-066 (P11): with the id of the message it answers (WhatsApp shows its indicator only against the person's own message, a
+  //   wamid; without it Meta has nothing to show it on, so WhatsApp never showed one). Telegram ignores it.
+  typing?: (address: string, inboundId?: string | null) => Promise<unknown>;
   typingEveryMs?: number;
   ackAfterMs?: number | null;
   timers?: { set: (fn: () => void, ms: number) => unknown; clear: (h: unknown) => void };
@@ -291,7 +293,7 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
   // N12: the typing indicator goes out as soon as the message is claimed (a retried update shows nothing), and again every
   // typingEveryMs until it is handled (the answer delivered). Not for a block or an edit, which answer nothing.
   const typing = d.typing && (msg.kind === "text" || msg.kind === "callback" || (msg.kind === "seen" && !!(msg.file || msg.media)))
-    ? typingLoop({ typing: () => d.typing!(msg.address), everyMs: d.typingEveryMs, ...(d.timers ? { setTimer: d.timers.set, clearTimer: d.timers.clear } : {}) })
+    ? typingLoop({ typing: () => d.typing!(msg.address, msg.messageId), everyMs: d.typingEveryMs, ...(d.timers ? { setTimer: d.timers.set, clearTimer: d.timers.clear } : {}) })
     : null;
   let contact = msg.contact;
   // TELEGRAM ROUND 2 (2026-10-30): a fixed answer sent straight back (not through the outbox) that Telegram refused because
@@ -620,6 +622,14 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
       if (out.resultStatus === CARD_NEEDS_REPLY_STATUS) reply = needsReplyTextFor(msg.channel);
       parts = replyParts(out.parts);
       shape = out.shape ?? null;
+      // D-065 (D-024, live round 1 C16: "Your tracker page is made" and no page): a link that follows the answer (a File a tool made)
+      // went out only through sendLink, which only Telegram has; on WhatsApp and iMessage it was dropped. Where the channel cannot
+      // send a link on its own, each one not already in the answer rides the answer, on its own line.
+      if (!d.sendLink && shape?.links?.length) {
+        const missing = [...new Set(shape.links)].filter((u) => !reply.includes(u));
+        if (missing.length) { reply = `${reply.trimEnd()}\n${missing.join("\n")}`; if (parts) parts = [...parts, missing.join("\n")]; }
+        shape = { ...shape, links: [] };
+      }
       cardId = typeof out.cardId === "string" && out.cardId ? out.cardId : null;
       artifacts = Array.isArray(out.artifacts) ? out.artifacts : [];
       screenQidOut = out.screenButtons === true && typeof out.screenQid === "string" ? out.screenQid : null;

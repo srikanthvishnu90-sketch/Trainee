@@ -1,0 +1,145 @@
+{
+ "note": "20 real companies for item 10 (research before an interview). The role is a real open posting's title from evals/real-sets/postings (or the company's board). The asker is fictional. The plan is what research_company gets: queries, the company name (SEC EDGAR, Wikipedia, the ATS boards) and its official site. `board` is the company's own job board as the product's discovery directory lists it (evals/discovery-live/boards.json; Chime and Toast as recorded in evals/real-sets/postings): a brief that cites another board as this company's is about another company.",
+ "cases": [
+  {
+   "id": "R01",
+   "company": "Stripe",
+   "site": "stripe.com",
+   "role": "Risk Operations Analyst",
+   "board": "greenhouse:stripe"
+  },
+  {
+   "id": "R02",
+   "company": "Airbnb",
+   "site": "airbnb.com",
+   "role": "Advanced Analytics Intern",
+   "board": "greenhouse:airbnb"
+  },
+  {
+   "id": "R03",
+   "company": "Figma",
+   "site": "figma.com",
+   "role": "Software Engineer - Machine Learning",
+   "board": "greenhouse:figma"
+  },
+  {
+   "id": "R04",
+   "company": "Robinhood",
+   "site": "robinhood.com",
+   "role": "Software Engineer 2, Backend",
+   "board": "greenhouse:robinhood"
+  },
+  {
+   "id": "R05",
+   "company": "Coinbase",
+   "site": "coinbase.com",
+   "role": "Forward Deployed Engineer, Finance",
+   "board": "greenhouse:coinbase"
+  },
+  {
+   "id": "R06",
+   "company": "Datadog",
+   "site": "datadoghq.com",
+   "role": "Software Engineering Intern",
+   "board": "greenhouse:datadog"
+  },
+  {
+   "id": "R07",
+   "company": "Duolingo",
+   "site": "duolingo.com",
+   "role": "Data Scientist, Intern",
+   "board": "greenhouse:duolingo"
+  },
+  {
+   "id": "R08",
+   "company": "Brex",
+   "site": "brex.com",
+   "role": "Data Analyst II",
+   "board": "greenhouse:brex"
+  },
+  {
+   "id": "R09",
+   "company": "Affirm",
+   "site": "affirm.com",
+   "role": "Software Engineer II, Fullstack",
+   "board": "greenhouse:affirm"
+  },
+  {
+   "id": "R10",
+   "company": "Gusto",
+   "site": "gusto.com",
+   "role": "Data Scientist, Risk",
+   "board": "greenhouse:gusto"
+  },
+  {
+   "id": "R11",
+   "company": "Discord",
+   "site": "discord.com",
+   "role": "Strategic Finance Analyst",
+   "board": "greenhouse:discord"
+  },
+  {
+   "id": "R12",
+   "company": "Dropbox",
+   "site": "dropbox.com",
+   "role": "Full Stack Product Software Engineer",
+   "board": "greenhouse:dropbox"
+  },
+  {
+   "id": "R13",
+   "company": "Chime",
+   "site": "chime.com",
+   "role": "Software Engineer, Financial Platform",
+   "board": "greenhouse:chime"
+  },
+  {
+   "id": "R14",
+   "company": "Toast",
+   "site": "toasttab.com",
+   "role": "Software Engineer II, Frontend",
+   "board": "greenhouse:toast"
+  },
+  {
+   "id": "R15",
+   "company": "Palantir",
+   "site": "palantir.com",
+   "role": "Software Engineer, New Grad",
+   "board": "lever:palantir"
+  },
+  {
+   "id": "R16",
+   "company": "Spotify",
+   "site": "spotify.com",
+   "role": "Data Scientist",
+   "board": "lever:spotify"
+  },
+  {
+   "id": "R17",
+   "company": "Ramp",
+   "site": "ramp.com",
+   "role": "Software Engineer, Engineering Platform",
+   "board": "ashby:ramp"
+  },
+  {
+   "id": "R18",
+   "company": "Notion",
+   "site": "notion.so",
+   "role": "Software Engineer, Web Infrastructure",
+   "board": "ashby:notion"
+  },
+  {
+   "id": "R19",
+   "company": "Plaid",
+   "site": "plaid.com",
+   "role": "Data Scientist - Fraud",
+   "board": "ashby:plaid"
+  },
+  {
+   "id": "R20",
+   "company": "ServiceNow",
+   "site": "servicenow.com",
+   "role": "Information Security Engineer Intern",
+   "board": "smartrecruiters:servicenow"
+  }
+ ]
+}

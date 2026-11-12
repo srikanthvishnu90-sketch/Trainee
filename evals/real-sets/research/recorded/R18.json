@@ -1,0 +1,116 @@
+{
+ "case": {
+  "id": "R18",
+  "company": "Notion",
+  "site": "notion.so",
+  "role": "Software Engineer, Web Infrastructure",
+  "board": "ashby:notion"
+ },
+ "plan": {
+  "queries": [
+   "Notion",
+   "Notion Software Engineer, Web Infrastructure"
+  ],
+  "companies": [
+   "Notion"
+  ],
+  "sites": [
+   "notion.so"
+  ]
+ },
+ "captured_at": "2026-11-12T07:54:26.148Z",
+ "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
+ "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
+ "search": {
+  "hits": [
+   {
+    "url": "https://notion.so/",
+    "title": "notion.so",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://notion.so/about",
+    "title": "notion.so",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://notion.so/careers",
+    "title": "notion.so",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://api.ashbyhq.com/posting-api/job-board/notion",
+    "title": "Ashby job board: notion",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://notion.so/press",
+    "title": "notion.so",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://notion.so/team",
+    "title": "notion.so",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Notion%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "title": "News headlines: Notion",
+    "provider": "news_rss",
+    "foundAt": 1794495600000
+   }
+  ],
+  "notes": [
+   "SEC EDGAR did not answer"
+  ],
+  "gaps": [
+   "Wikipedia has no company article found for Notion."
+  ],
+  "provider": "first_party",
+  "searches": 5
+ },
+ "read": {
+  "verified": [
+   {
+    "url": "https://api.ashbyhq.com/posting-api/job-board/notion",
+    "title": "Ashby job board token: notion",
+    "text": "The Ashby job board with the token notion lists 157 open roles. The board does not name its company.\n10 of the 157 open roles on the Ashby job board with the token notion say intern, new grad, junior, associate or entry level in the title.\n64 open roles on the Ashby job board with the token notion are in San Francisco, California.\n32 open roles on the Ashby job board with the token notion are in Dublin, Ireland.\n21 open roles on the Ashby job board with the token notion are in Tokyo, Japan.\n17 open roles on the Ashby job board with the token notion are in New York, New York.\n5 open roles on the Ashby job board with the token notion are in Seoul, South Korea.\nOpen role on the Ashby job board with the token notion: Software Engineer, AI Connections (Developer Platform), San Francisco, California.\nOpen role on the Ashby job board with the token notion: Business Development Representative, New York, New York, New York.\nOpen role on the Ashby job board with the token notion: Business Development Representative, San Francisco, San Francisco, California.\nOpen role on the Ashby job board with the token notion: Business Development Representative, Tokyo, Japan.\nOpen role on the Ashby job board with the token notion: Forward Deployed Engineer, GTM, AMER, San Francisco, California.\nOpen role on the Ashby job board with the token notion: Manager, Sales Development, New York, New York.\nOpen role on the Ashby job board with the token notion: Outcomes Architect Manager, Dublin, Ireland.\nOpen role on the Ashby job board with the token notion: Sales Recruiter, New York, New York.\nOpen role on the Ashby job board with the token notion: Solutions Consultant Manager, Commercial (Sales Leadership), Tokyo, Japan.\nOpen role on the Ashby job board with the token notion: Engineering Manager, Mobile AI, New York, New York.\nOpen role on the Ashby job board with the token notion: Solutions Consultant Manager, Enterprise (Sales Leadership), Tokyo, Japan.\nOpen role on the Ashby job board with the token notion: General Manager, DACH, Munich, Germany.\nOpen role on the Ashby job board with the token notion: Security Engineer, Detection and Response, San Francisco, California.\nOpen role on the Ashby job board with the token notion: Forward Deployed Engineer, Tokyo, Japan.\nOpen role on the Ashby job board with the token notion: Product Operations Manager, San Francisco, California.\nOpen role on the Ashby job board with the token notion: Business Development Representative, Seoul, South Korea.\nOpen role on the Ashby job board with the token notion: Technical Education Specialist, New York, New York.\nOpen role on the Ashby job board with the token notion: Business Development Manager, Product & Platform, New York, New York.\nOpen role on the Ashby job board with the token notion: Outcomes Architect Manager, Tokyo, Tokyo, Japan.\nOpen role on the Ashby job board with the token notion: Software Engineer, Collections Experience, San Francisco, California.\nOpen role on the Ashby job board with the token notion: Enterprise Technical Support Engineer, San Francisco, California.\nOpen role on the Ashby job board with the token notion: Business Development Representative, Sydney, Australia.\nOpen role on the Ashby job board with the token notion: Lifecycle Marketing Manager, Campaign Strategy & Execution, San Francisco, California.\nOpen role on the Ashby job board with the token notion: Software Engineer, Early Career (AI), San Francisco, California.\nOpen role on the Ashby job board with the token notion: Regional Partner Manager, DACH, Munich, Germany.\nOpen role on the Ashby job board with the token notion: Business Development Representative, CEE, Dublin, Ireland.\nOpen role on the Ashby job board with the token notion: Security Engineer, Corporate Security, San Francisco, California.\nOpen role on the Ashby job board with the token notion: Software Engineer, AI Product Security, San Francisco, California.\nOpen role on the Ashby job board with the token notion: People Analytics Lead - Recruiting, San Francisco, California.\nOpen role on the Ashby job board with the token notion: Head of Early Career Recruiting, San Francisco, California.",
+    "requested": "https://api.ashbyhq.com/posting-api/job-board/notion",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   }
+  ],
+  "rejected": [
+   {
+    "url": "https://notion.so/",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://notion.so/about",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://notion.so/careers",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://notion.so/press",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://notion.so/team",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Notion%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "why": "unreachable"
+   }
+  ]
+ }
+}

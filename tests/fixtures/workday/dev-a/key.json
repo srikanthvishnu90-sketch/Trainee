@@ -903,9 +903,9 @@
       "type": "textarea",
       "required": true,
       "options": null,
-      "should": "fill",
+      "should": "ask",
       "expected": "95000",
-      "note": "Any rendering of 95,000 USD (e.g. \"$95,000\", \"95000 USD\") is acceptable."
+      "note": "architect amendment D-053 (owner, 2026-11-10): salary expectation is asked per application; before: should fill from the persona's fact:salary_expectation, after: should ask (expected is the person's answer for this posting). Before the amendment: Any rendering of 95,000 USD (e.g. \"$95,000\", \"95000 USD\") is acceptable."
     },
     {
       "page": "3-questions",

@@ -144,10 +144,52 @@ const CareerProfile = (() => {
   }
   function confirmedFacts(profile) { return (profile.facts || []).filter((f) => !f.needs_confirmation && !quarantinedFact(f)); }
   function unprovenSkills(profile) { refreshSkillFlags(profile); return (profile.facts || []).filter((f) => f.kind === "skill" && f.unproven); }
+  // D-069 (real set item 3, finding 1): a skill is named in a fact only as a whole token, or as one of its known aliases. It was a
+  // substring test, so "R" was proven by every fact with the letter r in it and "SQL" by "PostgreSQL". Case and punctuation are
+  // read: a short name (R, C, Go, ML, JS, TS) counts only as written with its capitals and never inside "R&D", "C-suite" or
+  // "Go-to-market"; "Node.js", "C++", "C#", "CI/CD" and "A/B testing" keep their punctuation; "SQL" is never "PostgreSQL" or
+  // "MySQL". Each alias group names one skill (Postgres is PostgreSQL, k8s is Kubernetes, Golang is Go).
+  const SKILL_ALIASES = [
+    ["JavaScript", "JS", "ECMAScript"], ["TypeScript", "TS"], ["PostgreSQL", "Postgres", "psql"], ["Kubernetes", "k8s"], ["Node.js", "NodeJS"],
+    ["Go", "Golang"], ["C++", "cpp"], ["C#", "csharp", "C sharp"], ["AWS", "Amazon Web Services"], ["GCP", "Google Cloud", "Google Cloud Platform"],
+    ["Machine Learning", "ML"], ["React", "React.js", "ReactJS"], ["Vue", "Vue.js", "VueJS"], ["Next.js", "NextJS"], ["CI/CD", "CICD"],
+    ["A/B Testing", "AB testing", "A/B tests", "A/B test", "split testing"], ["Excel", "Microsoft Excel", "MS Excel"], ["PowerPoint", "Microsoft PowerPoint", "MS PowerPoint"],
+    ["MongoDB", "Mongo"], ["scikit-learn", "sklearn", "scikit learn"], ["REST", "RESTful", "REST API", "REST APIs"], ["Capital IQ", "CapIQ", "S&P Capital IQ"],
+    ["Financial Modeling", "Financial Modelling"], ["Natural Language Processing", "NLP"], ["R"], ["C"], ["SQL"], ["MySQL"], ["Git"],
+  ];
+  const skillKey = (s) => String(s == null ? "" : s).toLowerCase().replace(/\s+/g, " ").trim();
+  const ALIAS_GROUP = new Map();
+  for (const g of SKILL_ALIASES) for (const f of g) ALIAS_GROUP.set(skillKey(f), g);
+  const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // The forms a skill is written in: its alias group, else the name as given.
+  function skillForms(name) {
+    const raw = String(name == null ? "" : name).trim();
+    return ALIAS_GROUP.get(skillKey(raw)) || (raw ? [raw] : []);
+  }
+  const skillKeyOf = (name) => skillKey(skillForms(name)[0] || name);
+  const WORD_NAMES = new Set(["REST", "Excel", "Spark", "Swift", "Rust", "Ruby", "Spring", "Flask", "Go", "Golang", "Express", "Ember", "Julia", "Dart", "Elixir", "Scala"]);
+  const _formRe = new Map();
+  function formRe(form) {
+    if (_formRe.has(form)) return _formRe.get(form);
+    // A name that is also an English word ("excel at", "the rest of", "spring 2024", "swift", "spark") counts only capitalized.
+    const short = (/^[A-Za-z]{1,2}$/.test(form)) || WORD_NAMES.has(form);
+    const body = escRe(form).replace(/\s+/g, "\\s+");
+    // A short name: its own capitals only (an all-lower form like "k8s" or "psql" is matched as written), and never joined to
+    // "&", "-", "'" or a dotted letter. A longer one: any case, never inside a longer word or a dotted name ("Node" in "Node.js").
+    const re = short
+      ? new RegExp(`(?<![A-Za-z0-9+#&.'\\-])${body}(?![A-Za-z0-9+#&'\\-])(?!\\.[A-Za-z0-9])`)
+      : new RegExp(`(?<![A-Za-z0-9+#])${body}(?![A-Za-z0-9+#])(?!\\.[A-Za-z0-9])`, "i");
+    _formRe.set(form, re);
+    return re;
+  }
+  function textNamesSkill(text, skillName) {
+    const t = String(text == null ? "" : text);
+    return !!t && skillForms(skillName).some((f) => formRe(f).test(t));
+  }
   function skillEvidence(profile, skillName) {
-    const name = String(skillName || "").toLowerCase();
-    const skill = (profile.facts || []).find((f) => f.kind === "skill" && (f.name || "").toLowerCase() === name);
-    const supporting = (profile.facts || []).filter((f) => !f.needs_confirmation && f.kind !== "skill" && ((f.skills || []).some((s) => String(s).toLowerCase() === name) || String(f.text || "").toLowerCase().includes(name)));
+    const name = skillKeyOf(skillName);
+    const skill = (profile.facts || []).find((f) => f.kind === "skill" && skillKeyOf(f.name || "") === name);
+    const supporting = (profile.facts || []).filter((f) => !f.needs_confirmation && f.kind !== "skill" && ((f.skills || []).some((s) => skillKeyOf(s) === name) || textNamesSkill(f.text, skillName)));
     const evidenceIds = new Set([].concat((skill && skill.evidence) || [], supporting.map((f) => f.id)));
     return { skill: skill || null, proven: evidenceIds.size > 0 && (skill ? !skill.unproven || supporting.length > 0 : supporting.length > 0), evidenceFactIds: [...evidenceIds], supportingFactIds: supporting.map((f) => f.id) };
   }
@@ -336,6 +378,33 @@ const CareerProfile = (() => {
   const DEGREE_ANY = /\b(?:bachelor|master|associate|doctor|degree|diploma|ph\.?\s?d|mba|bba|b\.?sc|m\.?sc)\b|\b[bm]\.\s?[as]\./i;
   const DEGREE_LINE = /^(?:(?:bachelor|master|associate|doctor|b\.?sc|m\.?sc|ph\.?\s?d|mba|bba)\b|(?:[bm]\.?\s?[as]\.?|[bm]\.?\s?b\.?\s?a\.?)(?=\s|,|$))/i;
   function parseResumeText(text) { return parseResumeSections(text).drafts; }
+  // D-063 follow-up (owner's benchmark persona; real pastes look the same): a resume's education line often sits in the header
+  // block under the name, with no "Education" heading ("Lakeshore University, BS Computer Science and Finance, Expected June
+  // 2029. GPA 3.9"). It was dropped with the contact lines, so the school, degree and graduation date were never facts. A
+  // header line naming a school AND a degree or a graduation date is read as an education DRAFT in the person's own words (its
+  // school, degree and date kept as fields), and a GPA on it as a separate GPA draft, both awaiting the person's yes like every
+  // other resume fact (D-007). Lines after the first heading are unchanged.
+  const HEAD_SCHOOL = /\b(?:university|college|institute of technology|polytechnic|academy|school of [a-z]+|[a-z]+ school)\b/i;
+  const HEAD_DEGREE = /\b(?:[Bb]achelor|[Mm]aster|[Aa]ssociate|[Dd]octor|[Dd]egree|[Dd]iploma|[Pp]h\.?\s?[Dd]|MBA|BBA|B\.Sc|M\.Sc|B\.Eng|M\.Eng)\b|\b[BbMm]\.\s?[AaSs]\.|\b(?:BS|BA|BSc|BSE|BBA|MS|MA|MSc|MEng|BEng|AB|SB)\b/;
+  const HEAD_MONTH = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|spring|summer|fall|autumn|winter)";
+  const HEAD_DATE = new RegExp(String.raw`\b(?:(expected|anticipated|graduating|graduation|grad\.?|class of)\s*:?\s*)?((?:${HEAD_MONTH}\.?\s+)?(?:19|20)\d{2})\b`, "i");
+  const HEAD_GPA = /[,;.|]?\s*\(?\b(?:cumulative\s+|overall\s+)?gpa\s*:?\s*([0-4]\.\d{1,2})(?:\s*\/\s*4(?:\.0+)?)?\)?|[,;.|]?\s*\b([0-4]\.\d{1,2})(?:\s*\/\s*4(?:\.0+)?)?\s+gpa\b/i;
+  function headerEducation(line) {
+    const raw = String(line || "").trim();
+    if (!raw || raw.length > 220 || /@|https?:|www\.|\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}/.test(raw) || !HEAD_SCHOOL.test(raw)) return null;
+    const date = raw.match(HEAD_DATE);
+    if (!HEAD_DEGREE.test(raw) && !(date && date[1])) return null;
+    const g = raw.match(HEAD_GPA);
+    const title = (g ? raw.replace(g[0], "") : raw).replace(/\s{2,}/g, " ").replace(/[\s,;|.]+$/, "").trim();
+    const parts = title.split(/\s*[,|–—]\s*|\s+-\s+/).map((x) => x.trim()).filter(Boolean);
+    const school = parts.find((x) => HEAD_SCHOOL.test(x)) || null;
+    const degree = parts.find((x) => x !== school && HEAD_DEGREE.test(x)) || null;
+    const d = title.match(HEAD_DATE);
+    const out = [{ kind: "education", title, text: title, bullets: [], school, degree, end: d ? d[2] : null, expected: !!(d && d[1] && /expect|anticipat|graduating/i.test(d[1])), source: "resume-ingest", needs_confirmation: true, status: "draft" }];
+    const gpa = g ? (g[1] || g[2]) : null;
+    if (gpa) out.push({ kind: "other", section: "gpa", name: "GPA", title: `GPA ${gpa}`, text: `GPA: ${gpa}`, gpa, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
+    return out;
+  }
   function parseResumeSections(text) {
     // CHAT PASTE SHAPE (text-path measurement 2026-10-24): a resume
     // pasted into a chat is often ONE paragraph with its section
@@ -384,7 +453,7 @@ const CareerProfile = (() => {
       }
     }
     const drafts = [], unread = [];
-    let section = null, current = null, lastWasMore = false, leadDate = null;
+    let section = null, current = null, lastWasMore = false, leadDate = null, seenHeading = false;
     const flush = () => {
       if (current) { drafts.push(current); current = null; }
       if (leadDate) { drafts.push({ kind: section || "experience", title: leadDate, text: leadDate, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" }); leadDate = null; }
@@ -402,6 +471,7 @@ const CareerProfile = (() => {
       if (aiDirected(line)) { if (!unread.includes(AI_DIRECTED_LABEL)) unread.push(AI_DIRECTED_LABEL); continue; }
       const head = sectionOf(line);
       if (head) {
+        seenHeading = true;
         flush();
         lastWasMore = false;
         // D-052 (owner, PR #742): an "Interests" or "Hobbies" heading holds the person's interests. Each item is a draft fact
@@ -426,7 +496,12 @@ const CareerProfile = (() => {
         }
         continue;
       }
-      if (!section) continue; // header/contact block (or a section that holds no entries) is not a fact
+      if (!section) {
+        // header/contact block (or a section that holds no entries) is not a fact, except an education line in the header block.
+        const edu = !seenHeading ? headerEducation(line) : null;
+        if (edu) drafts.push(...edu);
+        continue;
+      }
       if (section === "interest") {
         for (const name of line.replace(/^[-•*]\s*/, "").split(/[,;•|·]/).map((x) => x.trim()).filter(Boolean)) {
           drafts.push({ kind: "other", section: "interests", name, title: name, text: `Interest: ${name}`, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
@@ -738,7 +813,7 @@ const CareerProfile = (() => {
     return receipt;
   }
 
-  return { KINDS, createProfile, profileFromData, addFact, updateFact, getFact, listFacts, confirmFact, confirmedFacts, quarantinedFact, QUARANTINE_VERSION, unprovenSkills, skillEvidence, factMiningQuestions, isThin, parseCsv, parseLinkedInConnections, parseLinkedInProfile, ingestLinkedIn, parseResumeText, parseResumeSections, ingestResume, supersedeResume, confirmationReply, fieldCorrectionOf, classifyResumeIngest, SUPPORTED_RESUME_FORMATS, refreshSkillFlags, RETENTION_DECLARATION, retentionDeclaration, previewProfileDeletion, deleteProfileData };
+  return { KINDS, createProfile, profileFromData, addFact, updateFact, getFact, listFacts, confirmFact, confirmedFacts, quarantinedFact, QUARANTINE_VERSION, unprovenSkills, skillEvidence, textNamesSkill, skillForms, factMiningQuestions, isThin, parseCsv, parseLinkedInConnections, parseLinkedInProfile, ingestLinkedIn, parseResumeText, parseResumeSections, ingestResume, supersedeResume, confirmationReply, fieldCorrectionOf, classifyResumeIngest, SUPPORTED_RESUME_FORMATS, refreshSkillFlags, RETENTION_DECLARATION, retentionDeclaration, previewProfileDeletion, deleteProfileData };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerProfile;
 

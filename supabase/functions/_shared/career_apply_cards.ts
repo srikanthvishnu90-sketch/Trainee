@@ -22,7 +22,7 @@
 import { type EventStore, recordEvents } from "./agent/timeline.ts";
 import { sameCompany } from "./career_mail.ts";
 import { approvalWords, NEGATIONS } from "./approval_words.ts";
-import { guardedAnswer, unresolvedOf } from "./application_review.ts";
+import { guardedAnswer, narrowQuestion, unresolvedOf } from "./application_review.ts";
 
 export interface Prepared {
   id: string;
@@ -84,7 +84,9 @@ export type CardReply =
   | { kind: "no" }
   | { kind: "hold" }
   | { kind: "unclear" }
-  | { kind: "change"; n: number };
+  | { kind: "change"; n: number }
+  // R10 fix 12 (spec B.6 continuation 3, E.3 31): "use that" approves wording, never a send and never an unknown answer.
+  | { kind: "wording" };
 
 export const CARD_INTENT = "career_apply_card";
 // "Submit job 2", "send application #3", "apply to job 1": a submit aimed at one numbered application (spec B.4).
@@ -122,6 +124,8 @@ const NO =
   /^(?:no|nope|nah|n|none|no thanks|no thank you|send none|skip all|skip them|skip them all|decline|decline all|decline them|reject|reject all|cancel|cancel it|cancel all|cancel them|none of them|no to all|not any|don'?t send(?: (?:them|any|it|anything))?|do not send(?: (?:them|any|it|anything))?|no,? don'?t send(?: (?:them|any|it|anything))?)$/;
 const HOLD =
   /^(?:wait|wait a (?:sec|second|minute|moment)|hold on|hold up|hang on|not yet|not now|later|one sec(?:ond)?|give me a (?:sec|second|minute|moment)|let me (?:think|check|look)(?: (?:about it|first|again))?|pause|stop,? (?:don'?t|do not) send(?: (?:it|them|anything))?(?: yet)?|wait,? (?:don'?t|do not) send(?: (?:it|them|anything))?(?: yet)?|(?:don'?t|do not) send (?:it|them|anything) yet|wait,? stop|stop,? wait|hold off|hold them|hold it)(?:,? please)?$/;
+// "Use that.", "keep those answers", "go with that wording": the wording shown is fine. Not a yes (spec E.3 31).
+const WORDING = /^(?:(?:ok(?:ay)?|sure|great|perfect|nice|good),? )?(?:use|keep|go with) (?:that|this|it|those|these|them)(?: (?:one|wording|answer|answers|version|text))?(?:,? please)?$/;
 const UNCLEAR =
   /^(?:maybe|maybe later|perhaps|possibly|probably|i guess|i think so|not sure|unsure|idk|i don'?t know|dunno|hmm+|um+|ok|okay|k|kk|sure|yes but|yes and no|kind of|sort of|yes no|no yes|only|just|except|but)$/;
 const DEFER_OR_NONE =
@@ -199,6 +203,7 @@ export function parseCardReply(text: string): CardReply | null {
   // "stop" alone is the carrier's opt-out (and the host's pause): never a card answer.
   if (t === "stop") return null;
   if (HOLD.test(t)) return { kind: "hold" };
+  if (WORDING.test(t)) return { kind: "wording" };
   if (NO.test(t)) return asked ? { kind: "unclear" } : { kind: "no" };
   if (UNCLEAR.test(t)) return { kind: "unclear" };
   // Fail closed (owner, 2026-10-28): a reply that also says "none", "nothing", "later", "wait", "hold" or names a time
@@ -483,13 +488,19 @@ const HOW = (count: number) =>
 const lowerFirst = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 export const HOLD_TEXT = (count: number) =>
   `Okay, holding: nothing was approved and nothing was sent. When you're ready, ${lowerFirst(HOW(count))} A text yes counts within 10 minutes of the card; after that, say "show my applications" for a fresh one.`;
+// R10 fix 12: a wording approval keeps the answers as shown and approves nothing else; an open required question stays open.
+export const WORDING_TEXT = (count: number, open: { label: string; company: string | null }[], unread = false) =>
+  `I'll keep the wording exactly as shown. That is not a yes to send, and it answers none of the form's questions: nothing was submitted.` +
+  (open.length
+    ? ` Still unanswered: ${narrowQuestion({ label: open[0].label, company: open[0].company })}${open.length > 1 ? ` ${open.length - 1} more required question${open.length === 2 ? " is" : "s are"} still open too.` : ""}`
+    : unread ? ` I couldn't read the form's open questions just now, so I can't say none are left. ${HOW(count)}` : ` ${HOW(count)}`);
 export const UNCLEAR_TEXT = (count: number) => `I couldn't tell which ones you mean, so nothing was approved. ${HOW(count)}`;
 // "send it" on a card of more than one: "it" is one application, so the card asks which (S2 review of #614).
 export const IT_UNCLEAR_TEXT = (count: number) =>
   `"It" is one application and this card has ${count}, so nothing was approved. Send all ${count}, or which ones? ${HOW(count)}`;
 // The statuses after which the card is still waiting for its answer: the handler keeps it the thread's last word, with
 // its id on the reply, so the next "yes" answers it. "card_outdated" waits only when it carries the current card's id.
-export const CARD_WAITING = ["shown", "not_on_card", "change", "hold", "unclear", "not_named", "count_mismatch", "nothing_left", "confirm_except"];
+export const CARD_WAITING = ["shown", "not_on_card", "change", "hold", "wording", "unclear", "not_named", "count_mismatch", "nothing_left", "confirm_except"];
 // WHOLE JOURNEYS R2 (2026-11-02): "show my applications" that showed no card (nothing ready, no resume on file, one too long
 // to show, the resume check not made) is not a card's answer. It was recorded as CARD_ANSWER_INTENT, so the person's next
 // "yes" was told "That card was already answered. Nothing more was sent." about a card that never existed. Its own intent.
@@ -627,6 +638,14 @@ export async function cardTurn(
   // "send 1" / "approve 1" may be a count or a number, but on a card of one they say the same: that one application.
   if (r.kind === "unclear" && total === 1 && /^(?:send|approve) 1$/.test(approvalWords(o.message).trim().toLowerCase())) r = { kind: "only", only: [1] };
   if (r.kind === "hold") return waiting(HOLD_TEXT(total), "hold");
+  if (r.kind === "wording") {
+    // The card's own employers' open required questions, in the form's words: still open, named, and asked narrowly.
+    const ids = card.items.map((i) => i.prepared_id);
+    const companies = o.store.cardCompanies ? await o.store.cardCompanies(o.userId, ids).catch(() => null) : null;
+    const open = o.store.openQuestions ? await o.store.openQuestions(o.userId).catch(() => null) : null;
+    const mine = (open ?? []).filter((q) => !companies || [...companies.values()].some((c) => sameCompany(c, q.company ?? "")));
+    return waiting(WORDING_TEXT(total, mine, open === null), "wording");
+  }
   if (r.kind === "unclear") return waiting(UNCLEAR_TEXT(total), "unclear");
   // "it" (one item) on a card of more than one is not an answer anyone can act on: nothing is approved.
   if (r.kind === "yes" && r.it && total !== 1) return waiting(IT_UNCLEAR_TEXT(total), "unclear");

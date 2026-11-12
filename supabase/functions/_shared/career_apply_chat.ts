@@ -332,6 +332,10 @@ export interface ApplyChatDeps {
   // and its token). OWNER RULE (2026-10-26): no longer read for the resume check; "no resume on file" keeps every posting
   // out of the queue either way.
   prepareOn?: () => boolean;
+  // R10 fix 12 (spec B.3, E.3 27): "the top three" from a list of two. The thread's last search, widened by one step (the
+  // place's metro area), re-checked open on each posting's own page: up to `want` verified open roles not on the list, named
+  // beside it and never queued. Absent or failing, none.
+  nearby?: (want: number, listed: ShortlistEntry[]) => Promise<ShortlistEntry[]>;
 }
 // A posting held back by the possible-match question (SERIAL-1490): queued only when the person answers no.
 export interface EmployerQuestion { job_id: string | null; url: string; company: string; title: string }
@@ -596,7 +600,7 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
   if (!list.length) {
     return { reply: `I can't apply to those yet because there's no list of postings in this thread, so nothing was queued. Name one ("apply to the <role> role at <Company>"), or say "find <role> jobs in <place>" and then "apply to these". Which role should I search for?`, status: "no_list", intent, queued: [], refused: [] };
   }
-  let slice: ShortlistEntry[], note = given?.note ?? "", numbered = "";
+  let slice: ShortlistEntry[], note = given?.note ?? "", numbered = "", beyond = "";
   const missing: Missing[] = given ? given.missing.slice() : [];
   if (ask.kind === "nth") {
     if (ask.i > list.length) return { reply: `I listed ${list.length}, so there is no ${["first", "second", "third", "fourth", "fifth"][ask.i - 1] ?? `#${ask.i}`} one; nothing was queued. Say which of the ${list.length} you mean.`, status: "none", intent };
@@ -616,6 +620,15 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
       // WO-G (fix 12): "top" is the order of the numbered list this thread showed; the targets are named by those numbers
       // before anything is prepared, so the person sees exactly which postings the ask means.
       if (slice.length <= 8) numbered = `From the list I showed, by its numbers: ${slice.map((e, i) => `#${i + 1} ${nameOf(e)}`).join("; ")}.`;
+      // R10 fix 12: the rest of "the top N" is named from the same search one step wider, said as not on the list and not queued.
+      if (ask.n > list.length && o.nearby) {
+        const extra = (await o.nearby(Math.min(ask.n, MANY_MAX) - list.length, list).catch(() => [])).filter((e) => e && e.company && e.title);
+        if (extra.length) {
+          const one = extra.length === 1;
+          beyond = `Not on that list, ${one ? "the nearest verified open match" : `the ${extra.length} nearest verified open matches`} just outside its place (checked open just now): ` +
+            `${extra.map((e) => `${nameOf(e)}${e.location ? ` (${e.location})` : ""}`).join("; ")}. ${one ? "It is" : "They are"} not queued; say "apply to ${extra[0].company}" to add ${one ? "it" : "one"}.`;
+        }
+      }
     }
   } else if (ask.kind === "pick") {
     // FEATURE 1: "apply to 1 and 3": the positions on the list; one past its end is named, never guessed.
@@ -706,6 +719,7 @@ export async function applyManyTurn(o: ApplyChatDeps, given?: { list: ShortlistE
   if (shownRefused.length) parts.push(`Not queued: ${listed(byReason(shownRefused), 8)}.`);
   if (gs) parts.push(gs);
   if (asking.length) parts.push(askText(asking.map((r) => r.posting), o.facts ?? []));
+  if (beyond) parts.push(beyond);
   const status = queued.length ? "queued" : already ? "already" : asking.length ? "asking_employer" : "refused";
   const tail = queued.length || already ? ` ${NOTHING_SENT_MANY(prepareRunsNow(o))}` : "";
   return { reply: `${note}${parts.join(" ")}${tail}`.trim(), status, intent, queued, refused, coverage: { queued: queued.length, total }, screen: screened.gate, ...(kick ? { prepare: kick } : {}),

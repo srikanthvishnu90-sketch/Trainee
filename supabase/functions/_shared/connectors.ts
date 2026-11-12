@@ -22,6 +22,7 @@ import { connectLine, connectUrlsFor } from "./connect_link.ts";
 import { FONT_CSP, systemPage } from "./brand.ts";
 import { careerTokenFor, CAREER_READ_SCOPE, CAREER_SEND_SCOPE } from "./career_mail_gmail.ts";
 import { disconnectGoogle, disconnectReply, revokeWords } from "./google_disconnect.ts";
+import { disconnectGoogleAccount, googleAccounts } from "./career_google_accounts.ts"; // D-062: several Google accounts
 import { askWords, disconnectOf, gmailConnectOf, whatsConnectedOf } from "./connector_words.ts";
 import { consentNotice, GMAIL_READONLY, GMAIL_SEND, requestableScopes } from "./google_scopes.ts";
 import { channelOf, disconnectOutlook, disconnectWords, linkBase as outlookLinkBase, MICROSOFT_NOTE, outlookFor, RECONNECT_REPLY, TELEGRAM_BROWSER, tokenDeps as msTokenDeps } from "./outlook_connector.ts";
@@ -59,7 +60,7 @@ export type ConnectorId = "gmail" | "outlook";
 export type Need = ConnectorId | "mail"; // mail: either mail connector does
 export type Cap = "read" | "send" | "calendar";
 export type State = "connected" | "not_connected" | "needs_reconnect";
-export interface Status { id: ConnectorId; label: string; state: State; email: string | null; uses: string[] }
+export interface Status { id: ConnectorId; label: string; state: State; email: string | null; uses: string[]; accounts?: string[] }
 export type TokenOut =
   | { status: "ok"; token: string }
   | { status: "not_connected" | "needs_reconnect" | "not_allowed" | "not_wired" }
@@ -179,6 +180,13 @@ export async function statuses(d: Deps, userId: string): Promise<Status[]> {
     const scopes = split(r.scopes);
     out.push({ id: c.id, label: c.label, state: await c.needsReconnect(d, userId) ? "needs_reconnect" : "connected", email: r.email ?? null, uses: c.uses(scopes) });
   }
+  // D-062: every Google account the person connected (the first grant and each one added beside it, or only added ones).
+  const g = out.find((x) => x.id === "gmail")!;
+  const all = await googleAccounts(d.admin, userId).catch(() => null);
+  if (all && all.some((a) => a.mailbox)) {
+    g.accounts = all.map((a) => a.mailbox).filter(Boolean);
+    if (g.state === "not_connected") { g.state = "connected"; g.email = g.accounts[0] ?? null; g.uses = CONNECTORS.gmail.uses(all.some((a) => a.can_send) ? ["https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/gmail.send"] : ["https://www.googleapis.com/auth/gmail.readonly"]); }
+  }
   return out;
 }
 
@@ -233,13 +241,18 @@ export function isWhatsConnected(text: string): boolean {
   return whatsConnectedOf(text);
 }
 const CHECK_RE = /^\s*(?:(?:please|can you|could you|pls)\s+)?(?:check|read|scan|look through|go through|sync)\s+(?:my\s+|the\s+)?(gmail|outlook|hotmail|e-?mails?|inbox|mail|mailbox)(?:\s+inbox)?(?:\s+(?:now|again|right now|for me|for (?:updates|news|replies|responses)))*(?:\s+please)?\s*[?.!]*$/i;
-export type ConnectorAsk = { kind: "whats_connected" } | { kind: "connect"; id: ConnectorId } | { kind: "disconnect"; id: ConnectorId } | { kind: "check"; need: Need };
+export type ConnectorAsk = { kind: "whats_connected" } | { kind: "connect"; id: ConnectorId; another?: boolean } | { kind: "disconnect"; id: ConnectorId } | { kind: "disconnect_account"; mailbox: string } | { kind: "check"; need: Need };
+// D-062: "disconnect sam.work@gmail.com", "remove my gmail sam@x.com": that one Google account alone.
+const DISCONNECT_ACCOUNT = /^\s*(?:please\s+)?(?:disconnect|unlink|remove|revoke)\s+(?:my\s+)?(?:(?:gmail|google)(?:\s+account)?\s+|account\s+)?<?([a-z0-9._%+-]{1,64}@(?:[a-z0-9-]{1,63}\.)+[a-z]{2,24})>?[\s.!]*$/i;
+const ANOTHER = /\b(?:another|second|one more|other|a new)\b/i;
 export function connectorAsk(message: string): ConnectorAsk | null {
+  const acct = DISCONNECT_ACCOUNT.exec(String(message ?? ""));
+  if (acct) return { kind: "disconnect_account", mailbox: acct[1].toLowerCase() };
   const t = askWords(message);
   if (whatsConnectedOf(t)) return { kind: "whats_connected" };
   const off = disconnectOf(t);
   if (off) return { kind: "disconnect", id: off };
-  if (gmailConnectOf(t)) return { kind: "connect", id: "gmail" };
+  if (gmailConnectOf(t)) return { kind: "connect", id: "gmail", ...(ANOTHER.test(t) ? { another: true } : {}) };
   const m = CHECK_RE.exec(t);
   if (m) {
     const w = m[1].toLowerCase();
@@ -268,7 +281,8 @@ export function whatsConnectedWords(s: Status[], waiting: { need: Need; ask: str
   const lines = ["Here's what's connected to Trainee:"];
   for (const x of s) {
     const c = CONNECTORS[x.id];
-    if (x.state === "connected") lines.push(`${x.label}: connected${x.email ? ` (${x.email})` : ""}.${x.uses.length ? ` I use it to ${x.uses.join(", and to ")}.` : " It allows nothing beyond your address yet."}`);
+    const many = (x.accounts?.length ?? 0) > 1;
+    if (x.state === "connected") lines.push(`${x.label}: connected${many ? ` (${x.accounts!.length} accounts: ${x.accounts!.join(", ")})` : x.email ? ` (${x.email})` : ""}.${x.uses.length ? ` I use it to ${x.uses.join(", and to ")}.` : " It allows nothing beyond your address yet."}${many ? ` Say "disconnect" and an address to remove just that one.` : ""}`);
     else if (x.state === "needs_reconnect") lines.push(`${x.label}: needs reconnecting. ${x.label} stopped accepting Trainee's access, so nothing is read or sent through it. Text "${c.connectAsk}" for a new link.`);
     else lines.push(`${x.label}: not connected. Text "${c.connectAsk}" to connect it.`);
   }
@@ -316,7 +330,7 @@ export async function confirmMailAsk(d: Deps, o: { userId: string; channel: stri
 export function connectorFailure(message: string): ChatOut | null {
   const a = connectorAsk(message);
   if (!a) return null;
-  const what = a.kind === "disconnect" ? `disconnect ${CONNECTORS[a.id].label}; I can't confirm anything was removed yet` : a.kind === "whats_connected" ? "read what's connected" : a.kind === "connect" ? `make a link for ${CONNECTORS[a.id].label}` : "check that";
+  const what = a.kind === "disconnect_account" ? `disconnect ${a.mailbox}; I can't confirm anything was removed yet` : a.kind === "disconnect" ? `disconnect ${CONNECTORS[a.id].label}; I can't confirm anything was removed yet` : a.kind === "whats_connected" ? "read what's connected" : a.kind === "connect" ? `make a link for ${CONNECTORS[a.id].label}` : "check that";
   return { reply: `I couldn't ${what}. Please ask me again in a minute.`, intent: "career_connectors_error", resultStatus: "failed", handler: "connectors", meta: null };
 }
 
@@ -328,6 +342,25 @@ export async function connectorChatTurn(d: TurnIn): Promise<ChatOut | null> {
     const w = must(await d.admin.from("career_parked_tasks").select("need,ask,status").eq("user_id", d.userId).in("status", ["waiting", "resuming"]).order("created_at").limit(10), "read what waits") ?? [];
     return out(d, whatsConnectedWords(s, w as any[]), "career_connectors_status", "shown");
   }
+  if (ask.kind === "disconnect_account") {
+    // D-062: one Google account alone; the others stay connected, with what was read from them.
+    const all = await googleAccounts(d.admin, d.userId);
+    const hit = all.find((a) => a.mailbox === ask.mailbox);
+    const rest = all.filter((a) => a.mailbox !== ask.mailbox).map((a) => a.mailbox);
+    if (!hit) return out(d, `${ask.mailbox} isn't connected to Trainee${all.length ? ` (connected: ${all.map((a) => a.mailbox).join(", ")})` : ""}, so there was nothing to disconnect.`, "career_google_disconnect", "nothing");
+    if (hit.primary && !rest.length) {
+      const r = await disconnectConnector(d, CONNECTORS.gmail, d.userId);
+      return out(d, r.reply, "career_google_disconnect", r.ok ? "completed" : "failed");
+    }
+    const r = hit.primary
+      ? await disconnectGoogle(d.admin, d.userId, { fetch: d.fetch, sleep: d.sleep }, ["google_career"], { keepAdded: true }).then((x) => ({ ok: x.ok, failures: x.failures, note: revokeWords(x) }))
+      : await disconnectGoogleAccount(d.admin, d.userId, hit.mailbox, { fetch: d.fetch, sleep: d.sleep }).then((x) => ({ ok: x.ok, failures: x.failures,
+        note: x.revoke === "revoked" ? "Google confirmed Trainee's access to it is revoked." : "Google didn't confirm that Trainee's access to it is revoked, so please remove Trainee at myaccount.google.com/permissions to be sure." }));
+    const reply = r.ok
+      ? `${hit.mailbox} is disconnected. ${r.note} I deleted its stored access and the application updates I had read from it. ${rest.length === 1 ? `${rest[0]} stays connected.` : `${rest.join(", ")} stay connected.`}`
+      : `I couldn't finish disconnecting ${hit.mailbox}: I wasn't able to ${r.failures.join(", or ")}. ${r.note} Say "disconnect ${hit.mailbox}" again to retry.`;
+    return out(d, reply, "career_google_disconnect", r.ok ? "completed" : "failed");
+  }
   if (ask.kind === "disconnect") {
     const r = await disconnectConnector(d, CONNECTORS[ask.id], d.userId);
     return out(d, r.reply, ask.id === "gmail" ? "career_google_disconnect" : "career_outlook_disconnect", r.ok ? (r.had || r.erased ? "completed" : "nothing") : "failed");
@@ -336,7 +369,17 @@ export async function connectorChatTurn(d: TurnIn): Promise<ChatOut | null> {
   const channel = await channelOf(d.admin, d.userId, d.threadId, d.bridge);
   if (ask.kind === "connect") {
     const c = CONNECTORS[ask.id], st = s.find((x) => x.id === ask.id)!;
-    if (st.state === "connected") return out(d, `${c.label} is already connected${st.email ? `: ${st.email}` : ""}. Say "${c.disconnectAsk}" to remove it.`, `career_${c.id}_connect`, "already");
+    // D-062: another Google account is added beside the ones connected ("connect another gmail"); a plain "connect gmail" says
+    // what is connected and how to add one more.
+    const another = c.id === "gmail" && ask.another === true && st.state === "connected";
+    if (st.state === "connected" && !another) return out(d, `${c.label} is already connected${(st.accounts?.length ?? 0) > 1 ? `: ${st.accounts!.join(", ")}` : st.email ? `: ${st.email}` : ""}. Say "${c.disconnectAsk}" to remove it${c.id === "gmail" ? `, or "connect another gmail" to add another Google account` : ""}.`, `career_${c.id}_connect`, "already");
+    if (another) {
+      const url = await c.issueLink(d, { userId: d.userId, threadId: d.threadId, channel });
+      if (!url) return out(d, `I can't make a ${c.label} link yet because Trainee's ${c.label} connection isn't set up on this service. Nothing was connected.`, `career_${c.id}_connect`, "not_wired");
+      const r = linkReply(c, url, channel, `Here's a one-time link to add another Gmail. Sign in with the other Google account; ${(st.accounts ?? [st.email]).filter(Boolean).join(", ")} stays connected.`,
+        ["Each account is read the same way (sender, subject and preview), and nothing is sent from any of them unless you approve that exact email."]);
+      return out(d, r.reply, `career_${c.id}_connect`, "link", r.meta);
+    }
     const pageReply = c.wired(d.env) ? await connectPageReply(d, { userId: d.userId, channel, reason: "replies" }) : null;
     if (pageReply) return out(d, pageReply.reply, `career_${c.id}_connect`, "link", pageReply.meta);
     const url = await c.issueLink(d, { userId: d.userId, threadId: d.threadId, channel });

@@ -253,7 +253,9 @@ Deno.test({ name: "loop 05: 27 outreach journeys through the real handler, score
       if (!/^supabase\.test$|^localhost|^127\./.test(host)) { leaked.push(req.url); throw new Error(`a call left the test: ${req.url}`); }
       return viaDouble(req);
     }) as typeof fetch;
-    Deno.env.delete("CAREER_PEOPLE_SEARCH");
+    // Architect amendment (D-062): CAREER_PEOPLE_SEARCH is a release flag now (on when unset), so the scored configuration (D-048
+    // option a: people search off) rolls it back with "off" instead of leaving it unset. The configuration scored is unchanged.
+    Deno.env.set("CAREER_PEOPLE_SEARCH", "off");
     for (const [k, v] of Object.entries(ENV)) Deno.env.set(k, v);
     if (diagnostic) Deno.env.set("CAREER_PEOPLE_SEARCH", "on");
     conn = await PgConn.connect({ host: pg.host, port: pg.port });

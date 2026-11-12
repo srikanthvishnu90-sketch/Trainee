@@ -119,6 +119,18 @@ export const RELEASE_FLAGS: Readonly<Record<string, string>> = Object.freeze({
   // D-049 (architect ruling 2026-11-09): the chat File card of spec C.2 (_shared/file_card.ts): a message that is exactly one File
   // link goes as one card with real counts and one button. Rolled back with CAREER_FILE_CARD=off: the link goes alone, as before.
   CAREER_FILE_CARD: "on",
+  // D-060 (owner, 2026-11-11, in chat: "Web research"): the knowledge layer and web research. Claude's web search (proven live,
+  // evals/research-live/) feeds research_market, research_company and research_career_question, official sources first, with
+  // sources and caveats like Instinct's; the context pack and playbooks go in the brain's prompt. Rolled back with
+  // CAREER_KNOWLEDGE=off: research answers from the free sources alone, as before, and no playbooks.
+  CAREER_KNOWLEDGE: "on",
+  // D-062 (owner, 2026-11-11, in chat: "be able to answer emails, find alumni, do all of it"; accepts D-043): public people
+  // search from web search results (each lead "not verified", nobody contacted: _shared/career_alumni_search.ts) and the contact
+  // connector (_shared/career_contact_*.ts). Every send still needs the person's yes to the exact message, from their own
+  // Gmail (D-MN-2); D-048's test mode is the owner's CAREER_CONTACT_TEST_RECIPIENTS. LinkedIn and Indeed are never opened.
+  // Rolled back with CAREER_PEOPLE_SEARCH=off (no search) and CAREER_CONTACT_OUTREACH=off (no contact card), no deploy.
+  CAREER_PEOPLE_SEARCH: "on",
+  CAREER_CONTACT_OUTREACH: "on",
 });
 
 // APPLY ALL BY YES (owner, 2026-11-02 17:10 CT; _shared/apply_all_yes.ts): not a release flag. It adds no new way to send: a bare yes
@@ -154,15 +166,14 @@ export const RELEASE_PENDING: Readonly<Record<string, string>> = Object.freeze({
 // Switches the release config does not turn on: reply words no measurement covers yet (D-037 condition 3: each rewriter goes
 // on only after its measurement), or what production does not have or the owner has not decided
 // (docs/architect/RELEASE-FLAGS-2026-11-01.md, "why off"). tests/architect/release-flags.test.ts fails if one of them
-// enters RELEASE_FLAGS. The environment reads them as before. CAREER_RESEARCH_REPLY and CAREER_RESEARCH_BRIEF moved into
+// enters RELEASE_FLAGS. The environment reads them as before. CAREER_KNOWLEDGE moved into RELEASE_FLAGS by D-060. CAREER_RESEARCH_REPLY and CAREER_RESEARCH_BRIEF moved into
 // RELEASE_FLAGS by D-047 and its amendment (docs/architect/RELEASE-FLAGS-2026-11-01.md). LinkedIn and Indeed automation and any send from Trainee's own
 // identity have no switch at all: there is no code path to turn on (CLAUDE.md; D-033).
-// CAREER_CONTACT_OUTREACH (release 9 E, proposal D-043): the contact connector (_shared/career_contact_*.ts), read only
-// together with CAREER_PEOPLE_SEARCH; both move into RELEASE_FLAGS in one commit once the owner accepts D-043.
+// CAREER_PEOPLE_SEARCH and CAREER_CONTACT_OUTREACH moved into RELEASE_FLAGS by D-062 (the owner accepted D-043).
 export const RELEASE_NEVER_ON: readonly string[] = Object.freeze([
   "CAREER_OUTREACH_REPLIES", "CAREER_OUTREACH_REPLIES_MODEL",
-  "CAREER_REPLY_WRITER", "CAREER_KNOWLEDGE", "CAREER_JUDGE", "CAREER_MAIL_MODEL",
-  "CAREER_PEOPLE_SEARCH", "CAREER_CONTACT_OUTREACH", "CAREER_PEOPLE_SWEEP", "CAREER_PDL", "CAREER_VOICE", "CAREER_PREPARE_AHEAD", "CAREER_PREPARE_AHEAD_COVER",
+  "CAREER_REPLY_WRITER", "CAREER_JUDGE", "CAREER_MAIL_MODEL",
+  "CAREER_PEOPLE_SWEEP", "CAREER_PDL", "CAREER_VOICE", "CAREER_PREPARE_AHEAD", "CAREER_PREPARE_AHEAD_COVER",
   "TRAINEE_LOGO_GUESS", "CHANNEL_UNKNOWN_REPLY", "TRAINEE_SIGNUP",
   "WHATSAPP_TEMPLATE_UPDATES", "UPMORE_LEGACY_GMAIL_CONNECT",
 ]);

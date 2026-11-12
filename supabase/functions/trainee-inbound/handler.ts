@@ -9,7 +9,7 @@
 import { equalSecret } from "../_shared/message_service.ts";
 import type { Send } from "../_shared/channel.ts";
 import { loopMessageAdapter } from "../_shared/loopmessage_adapter.ts";
-import { textingNativeOn } from "../_shared/channel_voice.ts";
+import { LATENCY_BUDGET, textingNativeOn } from "../_shared/channel_voice.ts";
 import { runInbound, type InboundStore } from "../_shared/channel_inbound.ts";
 
 export { CHAT_DOWN_REPLY, SIGNUP_CLOSED_REPLY, signupAllows, turnKeyFor } from "../_shared/channel_inbound.ts";
@@ -21,6 +21,7 @@ export interface InboundDeps {
   send: (apiKey: string) => Send; // channel commands and the signup refusal go straight out: no account, no outbox row
   chat: (a: { userId: string; threadId: string | null; message: string; turnKey: string }) => Promise<{ status: number; reply: string; threadId: string | null }>;
   deliverReply: (a: { userId: string; key: string; apiKey: string; now: number }) => Promise<unknown>;
+  timers?: { set: (fn: () => void, ms: number) => unknown; clear: (h: unknown) => void }; // D-066: the clock the interim runs on (tests inject one)
 }
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
@@ -51,6 +52,10 @@ export async function handleInbound(req: Request, d: InboundDeps): Promise<Respo
     env: d.env, now: d.now, store: d.store(), render: adapter.render, chat: d.chat,
     reply: (contact, bubbles) => send(contact, bubbles),
     deliver: (a) => d.deliverReply({ userId: a.userId, key: a.key, apiKey, now: a.now }),
+    // D-066 (P11, the thread never sits silent): a turn still running after the latency budget gets the one short interim line
+    // the other channels send (channel_voice.ts ackFor), as Telegram and WhatsApp do. LoopMessage has no typing indicator here.
+    ackAfterMs: LATENCY_BUDGET.ackAfterMs,
+    ...(d.timers ? { timers: d.timers } : {}),
   });
   return json(r.body, r.status);
 }

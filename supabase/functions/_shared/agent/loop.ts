@@ -5,7 +5,7 @@
 //   external   touches the world (send, submit, message); NEVER runs here. It becomes a pending approval the
 //              person approves on its exact payload (WO-005), and the model is told it is waiting.
 // Messages use the Anthropic block shape (text / tool_use / tool_result); _shared/model_gateway.ts converts to OpenAI.
-import { bracketUntraced, factSources, missingAck, multiAsk, unbackedPromises, secretIn, stripSecrets, leakedWords, pieces, plainQuotes, postingsOf, rebuild, stripLeaks, closedNotes, smallTalkPitch, unsourcedFigures, untracedFacts, waiverSolicits } from "./reply_guards.ts";
+import { bracketUntraced, credentialAsks, factSources, missingAck, multiAsk, unbackedPromises, secretIn, stripSecrets, leakedWords, pieces, plainQuotes, postingsOf, rebuild, stripLeaks, closedNotes, misquotedAsks, smallTalkPitch, unsourcedFigures, untracedFacts, waiverSolicits } from "./reply_guards.ts";
 import { urlsIn } from "../channel_shape.ts";
 import { STANDING_REFUSED, standingRefusal } from "./memory.ts";
 export type Effect = "read" | "write_own" | "external";
@@ -16,7 +16,7 @@ export type Effect = "read" | "write_own" | "external";
 // (WO-038's contract): the same text as separate messages, so a texting channel delivers each whole and in order.
 // `before` (WO-091b): the previous turn's reply as the person saw it ("" on a first turn), so a tool can check that "the
 // first one" is a posting that reply showed. Undefined only for a caller that runs a tool without the loop's history.
-export interface ToolCtx { userId: string; threadId: string; now: number; state: Record<string, unknown>; turn?: { message: string; added: string[]; before?: string; attached?: string; attachments?: { filename: string; content: string }[]; fileLinks?: string[]; guard?: (text: string) => string[]; seen?: string[]; show?: { intent: string; text: string; parts?: string[] }; typed?: string; askOnly?: boolean } }
+export interface ToolCtx { userId: string; threadId: string; now: number; state: Record<string, unknown>; turn?: { message: string; added: string[]; before?: string; attached?: string; attachments?: { filename: string; content: string }[]; fileLinks?: string[]; guard?: (text: string) => string[]; seen?: string[]; show?: { intent: string; text: string; parts?: string[]; meta?: Record<string, unknown> }; typed?: string; askOnly?: boolean; draft?: { label: string; body: string; recheck: (body: string) => boolean } } }
 export interface ToolSpec {
   name: string;
   description: string;
@@ -38,7 +38,7 @@ export interface TurnResult {
   stopped: "final" | "max_steps" | "model_error" | "incomplete_reply";
   // Meta only, never changes the reply: a final draft that still asked several things or promised an alert after the one rewrite.
   flags?: string[];
-  show?: { intent: string; text: string; parts?: string[] };
+  show?: { intent: string; text: string; parts?: string[]; meta?: Record<string, unknown> };
   // JOB CARDS: the postings the turn's last successful search_jobs returned, for channels that show them as cards.
   postings?: unknown[];
   // REPLY SHAPE: the documents the turn staged with attach_document (each passed the fact guards), and the URLs the turn may
@@ -54,6 +54,9 @@ export const MODEL_ERROR_REPLY = "I can't answer right now because the AI servic
 export const MAX_STEPS_AFTER_SAVE_REPLY = "I couldn't finish all of that because it needed more steps than one reply allows; what you told me is saved. Nothing was sent or submitted. Tell me which part to do next.";
 export const MODEL_ERROR_AFTER_SAVE_REPLY = "I couldn't finish because the AI service stopped responding; what you told me is saved. Nothing was sent or submitted. Try again in a minute.";
 export const INCOMPLETE_REPLY = "I couldn't produce a complete answer because the AI's reply came back unfinished, so I stopped. Nothing was sent, saved or submitted. Please try again.";
+// D-067 (live-6 C9, D-024): a reply that came out empty after code's checks is never sent blank; it says the turn did not finish.
+export const EMPTY_REPLY = "I couldn't finish this answer, so I stopped here. Nothing was sent or submitted. Ask me again and I'll pick it up.";
+export const EMPTY_AFTER_SAVE_REPLY = "I couldn't finish this answer, so I stopped here; what you told me is saved. Nothing was sent or submitted. Ask me again and I'll pick it up.";
 export const INCOMPLETE_AFTER_SAVE_REPLY = "I couldn't produce a complete answer because the AI's reply came back unfinished; what you told me is saved. Nothing was sent or submitted. Please try again.";
 // WO-077: a reply never claims a change that did not happen this turn (battery run 39485101366, T12: "Kept for good" after
 // only a read). Each kind of claim names the tools that make it true. WO-091a (audit chat-brain F5; battery run
@@ -67,7 +70,16 @@ export const CLAIM_UNBACKED_REPLY = "I didn't change anything this time.";
 export const SECRET_DROPPED_REPLY = "I can't share keys, tokens or passwords because they never go through chat, and I didn't change anything.";
 const ALERT_NOUN = "(?:(?:an?|your|the|new|these|those|\\d+) )?(?:(?:job|daily|instant|new) )?(?:alerts?|job watch(?:es)?)\\b";
 const I_HAVE = "\\bi(?:'ve| have)? (?:just |now |also )?";
-const CLAIMS: { kind: string; said: RegExp; by: string[] | "any_write" }[] = [
+// D-066 (P5/P6, the owner's Behavior Guide: "a claim without an artifact is a hard fail"): a reply that says a file, page, PDF or
+// tracker was made or is attached needs a tool that made one this turn and succeeded: create_file, export_tracker, tailor_resume,
+// attach_document, or a research tool that published a File (its effect, from its result, is write_own). Otherwise the claim goes
+// back to the model once, like every claim here; the link itself is always code's (file_tool.ts), never the model's.
+// A backed file claim is the deliverable itself (its link rides the answer), never a bare receipt (missingAnswerBody).
+const FILE_CLAIM = "a file made";
+export const FILE_MAKERS = ["create_file", "export_tracker", "tailor_resume", "attach_document", "research_market", "research_company", "research_career_question"];
+const FILE_NOUN = "(?:file|pdf|page|tracker|spreadsheet|sheet|doc(?:ument)?|word (?:file|copy)|resume|cv|cover letter)";
+const CLAIMS: { kind: string; said: RegExp; by: string[] | "any_write"; wrote?: string[] }[] = [
+  { kind: FILE_CLAIM, by: FILE_MAKERS, wrote: ["research_market", "research_company", "research_career_question"], said: new RegExp(`${I_HAVE}(?:made|created|built|generated|put together|attached|uploaded|exported)(?: you)? (?:a|an|the|your|this)(?: [\\w-]+){0,3} ${FILE_NOUN}\\b|\\b(?:your|the|this)(?: [\\w-]+){0,3} ${FILE_NOUN} (?:is|are) (?:attached|ready|made|linked|below|done)\\b|^(?:here(?:'s| is) (?:your|the)(?: [\\w-]+){0,3} ${FILE_NOUN})\\b|\\battached (?:is|are|here)\\b|^attached\\b`, "i") },
   { kind: "an alert set", by: ["set_job_alerts"], said: new RegExp(`${I_HAVE}(?:set|created|turned on|switched on|enabled|added)(?: up)? ${ALERT_NOUN}|\\balerts? (?:is|are) now (?:set|on|live|active)\\b|\\balerts? (?:has|have) been (?:set|turned on|switched on|created|enabled)\\b|^(?:done|all set)\\b.{0,40}\\balerts?\\b`, "i") },
   { kind: "postings queued", by: ["queue_applications"], said: new RegExp(`\\b(?:were|was|have been|has been|are now|is now) queued\\b|${I_HAVE}queued\\b|^queued\\b|(?:^|${I_HAVE})added (?:\\d+|them|it|these|those|all)\\b[^.]{0,30}\\bto your (?:apply )?queue`, "i") },
   { kind: "an application tracked", by: ["track_application"], said: new RegExp(`\\bi(?:'m| am) (?:now )?tracking\\b|\\bnow tracking\\b|(?:^|${I_HAVE})added (?:it|this|that|them)\\b[^.]{0,20}\\bto your (?:tracker|applications)|\\b(?:is|are) now (?:on|in) your tracker|${I_HAVE}(?:tracked|logged)\\b|^tracked\\b`, "i") },
@@ -75,6 +87,11 @@ const CLAIMS: { kind: string; said: RegExp; by: string[] | "any_write" }[] = [
   // ADVERSARIAL ROUND 2 (2026-10-30): "I've confirmed your GPA 4.0" when no confirmation ran (a posting told the model to
   // mark it confirmed) is a false record: only confirm_profile_fact, on the person's own yes, confirms a fact.
   { kind: "a fact confirmed", by: ["confirm_profile_fact"], said: new RegExp(`${I_HAVE}(?:confirmed|verified|marked (?:(?:it|that|this|them|your [\\w ]{1,30}) )?(?:as )?(?:confirmed|verified))\\b|\\b(?:has|have) been (?:confirmed|verified)\\b|\\b(?:is|are) now (?:confirmed|verified)\\b`, "i") },
+  // D-067 (owner, must-fix (e): "no 'made' or 'attached' without the File arriving"): a page, File, tracker, PDF or brief said to be
+  // made, attached or holding something is backed only by a call this turn that made one (its link minted by code, or its file
+  // riding the reply): create_file, export_tracker, attach_document, tailor_resume, or research that published its brief.
+  // (Merged with D-066's file claim above: the same kind and the same backing; these are the phrasings D-066's pattern does not read.)
+  { kind: FILE_CLAIM, by: FILE_MAKERS, wrote: ["research_market", "research_company", "research_career_question"], said: new RegExp(`${I_HAVE}(?:made|created|built|put together|attached|generated|drafted up|started)\\b[^.!?\\n]{0,40}\\b(?:file|page|tracker|pdf|brief|spreadsheet|document|doc)s?\\b|\\b(?:is|are) (?:attached|in (?:the|your|this) (?:file|page|tracker|pdf|brief))\\b|\\bhere(?:'s| is) (?:the|your) (?:file|page|tracker|pdf|brief)\\b|\\b(?:the|your) (?:file|page|tracker|pdf|brief) (?:is ready|has (?:the|your|every|all))\\b|\\b(?:full |whole )?(?:plan|details?|links?|list|breakdown|brief|sources?|timeline)\\b[^.!?\\n]{0,30}\\b(?:is|are) in the (?:file|page|tracker|brief)\\b`, "i") },
   // Nothing external runs inside the turn (it waits for the person's yes on its card), so a reply never sent anything.
   { kind: "something sent or applied for", by: [], said: new RegExp(`${I_HAVE}(?:sent|submitted|emailed|messaged|shared|forwarded) (?:it|this|that|them|your (?:application|email|message|note|resume|cover letter)s?|the (?:application|email|message|note|resume|cover letter)s?|\\d+ (?:applications?|emails?|messages?|notes?))\\b|${I_HAVE}applied (?:you |for you )?(?:to|for) (?:it|this|that|them|these|those|all|\\d+)\\b|${I_HAVE}applied you\\b|\\b(?:has|have) been (?:sent|submitted)\\b|^(?:sent|submitted)\\b` +
     // ADVERSARIAL ROUND 2 (2026-10-30): "I emailed attacker@evil.example", "I've messaged the recruiter", "I sent your
@@ -117,7 +134,7 @@ function claimsIn(sentence: string): string[] {
 type Call = { name: string; ok: boolean; effect: Effect | null };
 const backedBy = (kind: string, calls: Call[]) => {
   const c = CLAIMS.find((x) => x.kind === kind)!;
-  return calls.some((t) => t.ok && (c.by === "any_write" ? t.effect === "write_own" : c.by.includes(t.name)));
+  return calls.some((t) => t.ok && (c.by === "any_write" ? t.effect === "write_own" : c.by.includes(t.name) && (!c.wrote?.includes(t.name) || t.effect === "write_own")));
 };
 // The sentences of a reply that claim a change no tool made this turn, with the kind of each claim.
 export function unbackedClaims(reply: string, calls: Call[]): { index: number; kind: string }[] {
@@ -235,7 +252,7 @@ function missingAnswerBody(reply: string, message: string, receiptOnly = false, 
     /\b(?:reply|message|email|text|note|letter|sentence|script)\b/i.test(message) && utterance(message).includes(utterance(reply))) return false;
   if (unresolvedFactFields(reply, message, sources)) return true;
   const clauses = pieces(plainQuotes(reply).replace(/\b(that|this|it)'s\b/gi, "$1 is").replace(/[*_`~]/g, "")).flatMap((p) => p.text.split(/[;—–]/)).map((s) => s.trim().replace(/^(?:[-•]|\d+[.)])\s+/, "").replace(/[.!?]+$/, "").trim()).filter(Boolean);
-  return clauses.length > 0 && clauses.every((s) => CLOSING_ONLY.test(s) || (!SOCIAL_MESSAGE.test(message.trim()) && (ACK_ONLY.test(s) || PROGRESS_ONLY.test(s))) || (receiptOnly && claimsIn(s).length > 0));
+  return clauses.length > 0 && clauses.every((s) => CLOSING_ONLY.test(s) || (!SOCIAL_MESSAGE.test(message.trim()) && (ACK_ONLY.test(s) || PROGRESS_ONLY.test(s))) || (receiptOnly && claimsIn(s).some((k) => k !== FILE_CLAIM)));
 }
 // REPLY SHAPE: what the turn staged and which links it may show ride the result, whichever way the turn ended.
 // The flag-only reply checks of a turn (missing_ack, many_asks, unbacked_promise), as the meta the career handler saves with
@@ -258,7 +275,10 @@ const COMPLETENESS_REPAIR = "The previous draft did not contain an answer body a
 // `said` (ADVERSARIAL ROUND 2, 2026-10-30): the person's own words when `message` also carries what code appended to them
 // (an attached file's name and text). The model reads `message`; every tool check that asks "did the person say this"
 // (a confirmation, a kept instruction, a fact, a contact) reads `said`, and the appended text rides `turn.attached`.
-async function runAgentTurnInner(o: { system: string; history: any[]; message: string; said?: string; tools: ToolSpec[]; model: ModelFn; ctx: ToolCtx; maxSteps?: number }): Promise<TurnResult> {
+// `process` (D-065): the turn's process check. Given the model's draft reply and the calls made so far, it returns what the turn
+// still has to do (call the draft tool, search before the plan, cover a part they asked about) or null. Put to the model once,
+// with its tools, the same way as the reply guards' review; whatever stands after that is kept and flagged (process_unmet).
+async function runAgentTurnInner(o: { system: string; history: any[]; message: string; said?: string; tools: ToolSpec[]; model: ModelFn; ctx: ToolCtx; maxSteps?: number; process?: ((reply: string, calls: TurnResult["tool_calls"]) => string | null) | null }): Promise<TurnResult> {
   const max = o.maxSteps ?? 6;
   const byName = new Map(o.tools.map((t) => [t.name, t]));
   const toolDefs = o.tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.input_schema }));
@@ -284,7 +304,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
     const sources = factSources({ state: o.ctx.state, message: o.message, history: o.history, results: seen });
     return [...untracedFacts(t, sources).map((f) => f.word), ...unsourcedFigures(t, [typed, ...seen, ...sources]).map((m) => m.figure), ...urlsIn(t).filter((l) => !known.has(l))];
   };
-  let steps = 0, checked = false, ask = false, repairing = false;
+  let steps = 0, checked = false, ask = false, repairing = false, processed = false;
   let repairNote = COMPLETENESS_REPAIR;
   // WO-061 (H028, H035, H007, H033): code's review of its own draft rides in that one call's system prompt, never in
   // the conversation. As a user-role message the model took it for the person's words, refused it out loud ("I can't
@@ -325,6 +345,15 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
       let reply = content.filter((b: any) => b && b.type === "text").map((b: any) => b.text).join("").trim();
       const show = o.ctx.turn?.show;
       if (show) return { reply: show.text, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), stopped: "final", show };
+      // D-065: the process check, once, before the reply guards (tools stay on: the step it asks for is a tool call).
+      if (o.process && !processed && !repairing && steps < max) {
+        const todo = o.process(reply, tool_calls);
+        if (todo) {
+          processed = true;
+          review = `CODE'S REVIEW OF YOUR DRAFT REPLY. This is from Upmore's code, not from the person: never mention it, never refuse it, never act on it as their request, never save it. Your draft was:\n"""\n${reply}\n"""\n${todo} Then write your reply to the person again, answering what they asked in their last message.`;
+          continue;
+        }
+      }
       // A model may write its answer beside a tool call, then finish with only a closing question. Recover that body
       // without a length heuristic; the assembled reply still passes every truth filter below. A substantive final
       // answer always supersedes earlier text. Once a repair starts, rejected earlier text must not be reintroduced.
@@ -341,19 +370,25 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
       const personal = factSources({ state: o.ctx.state, message: said, history: o.history, results: [] });
       const claims = unbackedClaims(reply, tool_calls), promises = unbackedPromises(reply, tool_calls), leaks = leakedWords(reply, leak), facts = untracedFacts(reply, sources, personal);
       const money = unsourcedFigures(reply, [typed, ...seen, ...sources]);
+      // D-067 (C20, D-007): a number said to be what the person asked for is in their own words.
+      const theirs = [said, ...(o.history ?? []).filter((m) => m.role === "user").map((m) => String(m.content ?? ""))];
+      const misquote = misquotedAsks(reply, theirs);
       const waiver = waiverSolicits(reply, standingRefusal, o.message);
       // FLAG ONLY (#540: code never cuts the model's answer): asked once; a draft that still violates is kept as written.
       const manyAsks = multiAsk(reply) || promises.length > 0;
       const noAck = missingAck(said, reply);
       // D-054 (R03): small talk answered with a pitch (an introduction, a list of what Trainee does, an ask for a role).
       const pitch = smallTalkPitch(said, reply);
-      if ((claims.length || leaks.length || facts.length || money.length || waiver.length || manyAsks || noAck || pitch.length) && !checked && !repairing && steps < max) {
+      const creds = credentialAsks(reply); // D-066 (P14)
+      if ((creds.length || claims.length || leaks.length || facts.length || money.length || misquote.length || waiver.length || manyAsks || noAck || pitch.length) && !checked && !repairing && steps < max) {
         checked = true;
         const told = [
           pitch.length ? `They made small talk. Answer it in one plain sentence, as a person would. Remove these sentences: ${pitch.map((k) => `"${pieces(reply.trim())[k]?.text ?? ""}"`).join(" ")}. No introduction, no list of what you do, no question about a role or a search; only if SITUATION shows something waiting on them, name that one thing as your last sentence.` : "",
           noAck ? `Your first sentence was: "${pieces(reply.trim())[0]?.text ?? ""}". They said they feel overwhelmed. Replace that opening with one short, warm sentence acknowledging how they feel; the nothing-sent line comes after it, never first.` : "",
+          creds.length ? "Your reply asks the person to send a password, code, key or login in this chat. Never ask for one: secrets never go through chat, and a login is the person signing in themselves on the site's own page. Remove that ask." : "",
           claims.length ? `Your reply says ${[...new Set(claims.map((c) => c.kind))].join(" and ")}, but no tool that does that succeeded this turn. Either call the tool now, or rewrite the reply without saying it happened.` : "",
           leaks.length ? `Your reply shows internal words the person must never see: ${leaks.join(", ")}. Say it in plain words; name a posting by its title and company.` : "",
+          misquote.length ? `Your reply says they asked for ${[...new Set(misquote.map((m) => m.figure))].join(", ")}, but they never gave that number. Say only what they asked in their own words, and what was done.` : "",
           money.length ? `Your reply states pay, money or count figures that no tool returned this turn and they did not say: ${[...new Set(money.map((m) => m.figure))].join(", ")}. Remove them, and say you don't have a verified figure for that unless a tool returned it.` : "",
           waiver.length ? "Your reply offers them wording to send, offers to save something, or asks them to confirm something, after they asked to waive their yes or grant a standing permission. Never propose that wording, offer to save it or ask them to confirm it: say plainly it can't be kept, because every application and message still needs their yes on its card." : "",
           manyAsks ? "Your reply asks more than one thing. End with at most ONE question, asking for ONE thing (never \"X and Y\", never a second question); state a sensible default for anything else instead of asking. Never promise an action this reply did not take (an alert, a text); say only what happened. Keep everything else in your answer." : "",
@@ -371,8 +406,12 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
       const stillMoney = unsourcedFigures(reply, [typed, ...seen, ...sources]);
       // WO-061 (H018): proposed waiver wording that stands after the check is removed by code, with its save offer.
       const stillWaiver = waiverSolicits(reply, standingRefusal, o.message);
-      if (claims.length || stillMoney.length || stillWaiver.length) {
-        out = rebuild(pieces(reply), new Set([...claims.map((c) => c.index), ...stillMoney.map((m) => m.index), ...stillWaiver]));
+      // D-066 (P14): an ask for a password, code, key or login in chat that stands after the review is removed by code.
+      const stillCreds = credentialAsks(reply);
+      const stillMisquote = misquotedAsks(reply, theirs);
+      if (stillCreds.length && !(claims.length || stillMoney.length || stillWaiver.length || stillMisquote.length)) { out = rebuild(pieces(reply), new Set(stillCreds)); if (!/[A-Za-z0-9]/.test(out)) out = SECRET_DROPPED_REPLY; }
+      if (claims.length || stillMoney.length || stillWaiver.length || stillMisquote.length) {
+        out = rebuild(pieces(reply), new Set([...stillCreds, ...claims.map((c) => c.index), ...stillMoney.map((m) => m.index), ...stillWaiver, ...stillMisquote.map((m) => m.index)]));
         if (!/[A-Za-z0-9]/.test(out) && ((stillWaiver.length && !claims.length) || !ANSWER_REQUEST.test(o.message))) return { reply: stillWaiver.length && !claims.length ? STANDING_REFUSED : CLAIM_UNBACKED_REPLY, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), stopped: "final" };
         // WO-061 (H018 p1): after a waiver strip the refusal must still be there; if the person asked to waive their yes
         // and nothing left says it is still needed, code says it first.
@@ -395,7 +434,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         if (!out.trim()) repairNote = "Your last answer was empty. " + COMPLETENESS_REPAIR;
         continue;
       }
-      const flags = [...(missingAck(said, out) ? ["missing_ack"] : []), ...(multiAsk(out) ? ["many_asks"] : []), ...(unbackedPromises(out, tool_calls).length ? ["unbacked_promise"] : []), ...(smallTalkPitch(said, out).length ? ["small_talk_pitch"] : [])];
+      const flags = [...(processed && o.process?.(out, tool_calls) ? ["process_unmet"] : []), ...(missingAck(said, out) ? ["missing_ack"] : []), ...(multiAsk(out) ? ["many_asks"] : []), ...(unbackedPromises(out, tool_calls).length ? ["unbacked_promise"] : []), ...(smallTalkPitch(said, out).length ? ["small_talk_pitch"] : [])];
       return { reply: out, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), ...(flags.length ? { flags } : {}), stopped: "final" };
     }
     const pre = content.filter((b: any) => b && b.type === "text").map((b: any) => String(b.text ?? "")).join("").trim();

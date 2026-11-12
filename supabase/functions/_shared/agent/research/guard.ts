@@ -262,11 +262,13 @@ function officialHost(url: string, text: string): boolean {
   const site = host.replace(/^www\./, "").split(".").slice(-2)[0] ?? "";
   return (text.match(GAZ_RX) ?? []).some((n) => n.toLowerCase().replace(/[^a-z0-9]/g, "") === site);
 }
-export function notAFact(f: { text?: string; quote?: string; url?: string }): string | null {
+// o.advice (D-063, advice.ts): a how-to passage ("start with your name, then your school") is addressed to any reader; it is
+// shown as general advice, never as a fact about the person, so the second-person rule alone is not applied. Every other rule is.
+export function notAFact(f: { text?: string; quote?: string; url?: string }, o: { advice?: boolean } = {}): string | null {
   const text = fold(String(f.text ?? "")), quote = fold(String(f.quote ?? ""));
   if (readsAsInstruction(text) || readsAsInstruction(quote) || TO_MODEL.test(text) || TO_MODEL.test(quote)) return "reads as an instruction, not a fact";
   if (SECRET.test(text) || SECRET.test(quote)) return "carries something secret-shaped";
-  if (ABOUT_PERSON.test(text)) return "a claim about the person, not the field";
+  if (!o.advice && ABOUT_PERSON.test(text)) return "a claim about the person, not the field";
   if (LINK_IN_TEXT.test(text)) return "a link inside the fact's words";
   if (EMAIL_IN_TEXT.test(text) || PHONE_IN_TEXT.test(text)) return "a contact address or number, not a fact";
   if ((OFFICIAL_CLAIM.test(text) || OFFICIAL_CLAIM.test(quote)) && !officialHost(String(f.url ?? ""), `${text} ${quote}`)) return "says it is official, but its source is not a government, school or employer page";
@@ -275,7 +277,7 @@ export function notAFact(f: { text?: string; quote?: string; url?: string }): st
 // A retrieved fact stays only if: its URL is one the search returned; it carries a verbatim quote; and every number in the fact's
 // text is in a quote passage that shares the claim's subject words, and every name is in the quote. The model's paraphrase can
 // drop words but cannot add a figure, change a number's subject, or introduce an employer.
-export function acceptFacts(facts: Fact[], returnedUrls: string[]): { kept: Fact[]; rejected: Rejected[] } {
+export function acceptFacts(facts: Fact[], returnedUrls: string[], o: { advice?: boolean } = {}): { kept: Fact[]; rejected: Rejected[] } {
   const kept: Fact[] = [], rejected: Rejected[] = [];
   for (const f of facts) {
     const bad = (why: string) => rejected.push({ fact: f, why });
@@ -286,7 +288,7 @@ export function acceptFacts(facts: Fact[], returnedUrls: string[]): { kept: Fact
     if (!/^https:\/\//i.test(source)) { bad("no https source URL"); continue; }
     if (!f.quote || f.quote.trim().length < 8) { bad("no quote from the source"); continue; }
     if (f.text.length > 320) { bad("too long to verify"); continue; }
-    const not = notAFact(f);
+    const not = notAFact(f, o);
     if (not) { bad(not); continue; }
     const extra = unsupported(f.text, [f.quote], false);
     if (extra.length) { bad(`not in the quote: ${extra.join(", ")}`); continue; }

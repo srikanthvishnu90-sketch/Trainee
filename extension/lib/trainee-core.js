@@ -556,7 +556,7 @@
         "kind": "screen",
         "type": "yesno",
         "group": "pay",
-        "note": "the posted range meets their floor: derived from salary_expectation against the posting's range, else asked"
+        "note": "the posted range meets their expectations: asked per application (D-053c); never from salary_expectation, a pay_range_ok fact or another posting's answer"
       },
       "work_history": {
         "kind": "fact",
@@ -1673,12 +1673,38 @@
     return d.length === 1 ? d[0] : null;
   }
   var PAY_HISTORY_ASKED = /\b(salary|pay|compensation|wage)s? histor|\b(previous|prior|past|last|former|most recent)\b[^?.]{0,30}\b(salary|pay|compensation|wage|earnings)\b|\b(salary|pay|compensation|wage)\b[^?.]{0,40}\b(previous|prior|past|last|former) (job|position|role|employer)/i;
+  var SALARY_EXPECTATION_ASKED = new RegExp([
+    String.raw`\b(expected|desired|target|ideal|requested|preferred)\s+((annual|annualized|base|total|yearly|hourly|monthly|gross|starting)\s+){0,2}(salary|compensation|pay|ctc|wages?|remuneration|(hourly|daily|day) rate)\b`,
+    String.raw`\bminimum (acceptable |annual |base )?(salary|compensation)\b`,
+    String.raw`\b(salary|compensation|pay|wage|remuneration)\s+(expectations?|requirements?|expected|desired)\b`,
+    String.raw`\b(expectations?|requirements?) (for|regarding|on|around) (the |your )?(salary|compensation|pay)\b`,
+    String.raw`\b(salary|compensation|pay)\b[^?.]{0,30}\b(do you|would you|you) (expect|require|want|seek|desire)\b`,
+    String.raw`\b(salary|compensation|pay)\b[^?.]{0,30}\b(are you|you are|you're) (seeking|looking for|expecting|asking for|targeting)\b`,
+    String.raw`\bprétentions? salariales?|\battentes? salariales?|\b(salaire|rémunération|remuneration)s? (souhaitée?s?|attendue?s?|désirée?s?|demandée?s?)`,
+    String.raw`\bpretensi(ón|on|ones) salarial(es)?\b|\bexpectativas? salarial(es)?\b|\baspiraci(ón|on|ones) salarial(es)?\b|\bsalario (deseado|esperado|pretendido)\b`,
+    String.raw`\bsalarisverwachting(en)?\b|\bgewenst(e)? salaris\b|\bgehalts(vorstellung|wunsch|erwartung)(en)?\b|\bwunschgehalt\b|希望(年収|給与|給料|月収)`
+  ].join("|"), "i");
+  var PAY_RANGE_ASKED = /\b(range|band|rate)\b[^?]{0,60}\b(meets?|align(s|ed)?|in line|within|fits?|match(es)?|acceptable|agreeable|works? for)\b|\b(align(s|ed)?|in line|within|meets?|match(es)?|fits?)\b[^?]{0,30}\b(posted|stated|listed|advertised|above|this|the|our) ((salary|pay|compensation|base) )?(range|band)\b/;
+  function payRangeAsked(q) {
+    if (mapQuestion(q).fact === "pay_range_ok") return true;
+    const t = norm(String(q.label ?? ""));
+    return PAY_RANGE_ASKED.test(t) && !/\b(what|how much|please|if (not|no))\b/.test(t);
+  }
+  function salaryExpectationAsked(q) {
+    const label = String(q.label ?? ""), t = norm(label);
+    if (PAY_HISTORY_ASKED.test(label)) return false;
+    if (payRangeAsked(q)) return false;
+    if (SALARY_EXPECTATION_ASKED.test(t)) return true;
+    const m = mapQuestion(q);
+    if (m.fact === "salary_expectation") return true;
+    return m.fact === "unknown" && /\bsalary\b/.test(t) && !/\b(current|currently|present|currency|paid|earn(ed|ing)?)\b/.test(t);
+  }
   function answerKey(q, jobId, o = {}) {
     const m = mapQuestion(q);
     const words = norm(q.label);
     const job = `job:${h16(`${jobId}
 ${words}`)}`, wording = `label:${h16(words)}`;
-    if (BIRTH_DATE.test(String(q.label ?? "")) || PAY_HISTORY_ASKED.test(String(q.label ?? ""))) return job;
+    if (BIRTH_DATE.test(String(q.label ?? "")) || PAY_HISTORY_ASKED.test(String(q.label ?? "")) || salaryExpectationAsked(q) || payRangeAsked(q)) return job;
     if (m.kind === "fact") {
       if (m.fact === "eeo") return job;
       if (o.here) return job;
@@ -3804,6 +3830,12 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     const rest = digits.slice(code.length).replace(/^[\s)\-.]+/, "").trim();
     return /\d{4,}/.test(rest.replace(/[^\d]/g, "")) ? rest : null;
   }
+  function withoutEarlierAnswers(answers, range = false) {
+    if (!answers?.salary_expectation && !(range && answers?.pay_range_ok)) return answers;
+    const { salary_expectation: _earlier, ...rest } = answers;
+    if (range) delete rest.pay_range_ok;
+    return rest;
+  }
   function planBatch(o) {
     const ready = [];
     const needs = /* @__PURE__ */ new Map();
@@ -3874,7 +3906,10 @@ ${words}`)}`, wording = `label:${h16(words)}`;
         const key = keyed === "full_name" && /^\s*name\s*[*:]?\s*$/i.test(f.label) && p.fields.some((x) => x !== f && classifyField(x.label, x.type) === "last_name") ? "first_name" : keyed;
         const followUp = FOLLOW_UP.test(f.label);
         const here = factStaysHere(f, p.location, o.answers);
-        const legacy = BIRTH_DATE.test(f.label) || key === "eeo" || mapQuestion(f).fact === "eeo" ? void 0 : o.saved[normLabel(f.label)];
+        const range = payRangeAsked(f);
+        const perApp = salaryExpectationAsked(f) || range;
+        const facts = perApp || key === "salary_expectation" ? withoutEarlierAnswers(o.answers, range) : o.answers;
+        const legacy = BIRTH_DATE.test(f.label) || PAY_HISTORY.test(f.label) || perApp || key === "eeo" || mapQuestion(f).fact === "eeo" ? void 0 : o.saved[normLabel(f.label)];
         const own = o.saved[answerKey(f, p.job_id, {
           haveFact: true,
           here
@@ -3886,10 +3921,10 @@ ${words}`)}`, wording = `label:${h16(words)}`;
           here
         })] ?? o.saved[answerKey(f, p.job_id, {
           here
-        })] ?? (key !== "unknown" && key !== "eeo" && !followUp && !otherCountry(key, placeText(f), p.location, homeInUs(o.answers)) && !beyondFact(key, f) ? o.answers[key] : void 0) ?? legacy;
+        })] ?? (key !== "unknown" && key !== "eeo" && !followUp && !otherCountry(key, placeText(f), p.location, homeInUs(o.answers)) && !beyondFact(key, f) ? facts[key] : void 0) ?? legacy;
         let a = direct;
         let value = a ? String(a.value) : null;
-        if (value !== null && f.options.length) value = matchOption(value, f.options) ?? (key !== "unknown" && direct === o.answers[key] ? chooseOption(...placeFact(key, value, o.answers), f.options, f.label) : null);
+        if (value !== null && f.options.length) value = matchOption(value, f.options) ?? (key !== "unknown" && direct === facts[key] ? chooseOption(...placeFact(key, value, o.answers), f.options, f.label) : null);
         if (value === null && !direct) {
           const e = educationEnd(f, p.fields, o.answers);
           if (e) {
@@ -3897,8 +3932,8 @@ ${words}`)}`, wording = `label:${h16(words)}`;
             value = f.options.length ? matchOption(e.value, f.options) : e.value;
           }
         }
-        if (value === null && (!direct || direct === o.answers[key]) && !followUp) {
-          const m = byMeaning(f, p.company, o.answers, places, where, p.location);
+        if (value === null && (!direct || direct === facts[key]) && !followUp) {
+          const m = byMeaning(f, p.company, facts, places, where, p.location);
           if (m) {
             a = m;
             value = m.value;
@@ -4333,9 +4368,12 @@ ${words}`)}`, wording = `label:${h16(words)}`;
     }
   }
   function reusedSourceSuffix(field, _postingJobId, tz) {
+    const label = String(field?.label ?? "");
     if (!SENSITIVE.has(mapQuestion({
-      label: String(field?.label ?? "")
-    }).fact)) return "";
+      label
+    }).fact) && !salaryExpectationAsked({
+      label
+    })) return "";
     const id = String(field?.factId ?? ""), src = field?.source && typeof field.source === "object" ? field.source : {};
     if (!id || /^(approved-local-resume|essay-draft):/.test(id) || String(src.key ?? "").startsWith("job:")) return "";
     if (id.startsWith("text-answer:")) {

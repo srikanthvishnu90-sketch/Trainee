@@ -120,6 +120,10 @@ test("every stop rule applies per step: a value changed after the card, a verifi
     let card = await fill(f);
     await f.page.locator('[data-automation-id="formField-cdbd4e9b56940fb1d6a038b49f140d79"] textarea').fill("TEST answer typed by the person");
     await f.page.locator('[data-automation-id="formField-9c2b219960adc5e750fdc326707b1e95"] input[type=checkbox]').first().check();
+    // architect amendment D-053 (owner, 2026-11-10): the salary expectation is asked per application, so the person also
+    // picks it here. Before: filled from the persona's fact:salary_expectation; after: the person's own pick for this posting.
+    await f.page.locator('[data-automation-id="formField-fd0872da25982831b7e85f612bacb69d"] button[aria-haspopup="listbox"]').first().click();
+    await f.page.locator('[role="listbox"]:not([data-automation-id="selectedItemList"]) [role="option"]', { hasText: "$80,000 - $99,999" }).first().click();
     card = await cardFor(f, (c) => c.status === "ready", 15000);
     assert.ok(card, "ready once the person answered");
     // 1. A page script changes an answer after the card: the tap saves nothing.

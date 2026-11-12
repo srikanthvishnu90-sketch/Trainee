@@ -96,7 +96,8 @@ class V {
     return v as Source;
   }
   list(v: unknown, path: string, min: number, max: number): any[] {
-    if (!Array.isArray(v)) { this.err(path, "must be a list"); return []; }
+    // D-071 (live-8 C1: "sections: must be a list", twice): the error says what came instead, so the model can fix that exactly.
+    if (!Array.isArray(v)) { this.err(path, `must be a list (a JSON array), got ${v === undefined ? "nothing" : v === null ? "null" : typeof v === "string" ? "text" : typeof v === "object" ? "an object" : typeof v}`); return []; }
     if (v.length < min || v.length > max) this.err(path, `needs ${min === max ? min : `${min} to ${max}`} item(s), has ${v.length}`);
     return v.slice(0, max);
   }

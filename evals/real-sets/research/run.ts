@@ -137,7 +137,8 @@ function scoreLive(c: Case, r: any, reads: any[]) {
   const brief = ok && kept.length > 0;
   if (!brief) notes.push(ok ? "no line was kept" : `no brief: ${r.blocker ?? r.status}`);
   const checks = { sources: srcOk, cited: citedOk, invented: inventedKept === 0, unread: unreadOk, entity: wrong.length === 0, brief };
-  return { id: c.id, company: c.company, status: r.status, kept: kept.length, sources: ok ? (r.sources ?? []).map((s: any) => s.url) : [], hosts: [...new Set((ok ? r.sources : []).map((s: any) => new URL(s.url).hostname))], checks, notes, pass: Object.values(checks).every(Boolean) };
+  // D-071: what the research did with the draft (drafted, kept, kept as the page's own sentence, dropped by reason).
+  return { id: c.id, company: c.company, status: r.status, kept: kept.length, research: r.audit ?? null, sources: ok ? (r.sources ?? []).map((s: any) => s.url) : [], hosts: [...new Set((ok ? r.sources : []).map((s: any) => new URL(s.url).hostname))], checks, notes, pass: Object.values(checks).every(Boolean) };
 }
 
 // ---------------------------------------------------------------- $0 replay
@@ -196,7 +197,7 @@ async function runCase(c: Case) {
   const brief = r.status === "ok" && kept.length > 0;
   if (!brief) notes.push(r.status === "ok" ? "no line was kept" : `no brief: ${r.blocker}`);
   const checks = { sources: srcOk, cited: citedOk, invented: inventedKept === 0 && plantedDropped, unread: unreadOk, entity, brief };
-  return { id: c.id, company: c.company, status: r.status, fetched: fetched.size, refused: refused.length, refused_why: [...new Set(refused.map((x) => x.why))], kept: kept.length, sources: r.status === "ok" ? r.sources.map((s: any) => s.url) : [], unread: r.unread ?? [], checks, notes, pass: Object.values(checks).every(Boolean) };
+  return { id: c.id, company: c.company, status: r.status, research: r.audit ?? null, fetched: fetched.size, refused: refused.length, refused_why: [...new Set(refused.map((x) => x.why))], kept: kept.length, sources: r.status === "ok" ? r.sources.map((s: any) => s.url) : [], unread: r.unread ?? [], checks, notes, pass: Object.values(checks).every(Boolean) };
 }
 const results: any[] = [];
 for (const c of CASES) results.push(await runCase(c));

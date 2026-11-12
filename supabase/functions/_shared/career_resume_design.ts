@@ -66,10 +66,14 @@ export function splitDates(text: string): { text: string; right?: string } {
 // REVERSE CHRONOLOGICAL (r-resume-design, 2026-11-10; RESUME-TEMPLATES E5, APP-LAYER-15-FIXES A.4): the tailor ranks
 // entries by fit to the posting, which put a 2014 role above a 2019 one on 16 of 162 loop files. Within each section whose
 // entries ALL end in dates, the entries (each with its own bullets) go newest start first; ties keep the tailor's order. A
-// section with an undated entry is left as it is. Lines are moved whole, never changed.
+// section with an undated entry is left as it is. Lines are moved whole, never changed. (D-071: dated entries are ordered among
+// themselves even when the section also holds undated ones; see newestFirst.)
 const MONTH_N: Record<string, number> = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+// D-071 (live-8 C10/C20: "Pixelforge, Founder (2023-2025): ..." printed above "Mindgrove AI Research, Researcher (August 2026 -
+// present)"): an entry's dates are also read where a pasted resume writes them, in parentheses in its heading, before its details.
+const PAREN_DATES = new RegExp(`^[^:]*?\\((${RANGE})\\)`, "i");
 export function entryStart(text: string): number | null {
-  const right = splitDates(String(text ?? "")).right;
+  const right = splitDates(String(text ?? "")).right ?? PAREN_DATES.exec(String(text ?? "").replace(/\bpresent\b/gi, "Present"))?.[1];
   const m = right ? /^(?:([A-Za-z]{3})[a-z]*\.? )?(\d{4})/.exec(right) : null;
   return m ? Number(m[2]) * 12 + (m[1] ? MONTH_N[m[1].toLowerCase()] ?? 0 : 0) : null;
 }
@@ -83,12 +87,17 @@ export function newestFirst(resume: any): any {
     const blocks: any[][] = [];
     for (const l of s.lines || []) { if (l?.type === "entry" || !blocks.length) blocks.push([l]); else blocks[blocks.length - 1].push(l); }
     const entries = blocks.filter((b) => b[0]?.type === "entry");
-    if (entries.length < 2 || blocks[0][0]?.type !== "entry" || entries.some((b) => entryStart(b[0].text) === null)) return s;
-    const keyed = blocks.map((b, i) => ({ b, i, k: entryStart(b[0].text)! }));
-    keyed.sort((x, y) => y.k - x.k || x.i - y.i);
-    if (keyed.every((x, i) => x.i === i)) return s;
+    if (entries.length < 2 || blocks[0][0]?.type !== "entry") return s;
+    // D-071 (live-8: a section with one undated entry was left in the tailor's order, so a 2023 role printed above two 2026 ones):
+    // the dated entries go newest start first in the places dated entries hold; an undated entry keeps its own place.
+    const keyed = blocks.map((b, i) => ({ b, i, k: entryStart(b[0].text) }));
+    const dated = keyed.filter((x) => x.k !== null).sort((x, y) => y.k! - x.k! || x.i - y.i);
+    if (dated.length < 2) return s;
+    let d = 0;
+    const placed = keyed.map((x) => x.k === null ? x : dated[d++]);
+    if (placed.every((x, i) => x.i === i)) return s;
     moved = true;
-    return { ...s, lines: keyed.flatMap((x) => x.b) };
+    return { ...s, lines: placed.flatMap((x) => x.b) };
   });
   if (!moved) return resume;
   // deno-lint-ignore no-explicit-any

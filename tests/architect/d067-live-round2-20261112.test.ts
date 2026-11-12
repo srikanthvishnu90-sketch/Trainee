@@ -248,7 +248,10 @@ Deno.test("D67-8 G3: the length pass runs on a turn whose tools only read, and t
     const short = faithful(reply, bound);
     const s = scripted((_p, n) => n === 0 ? use("get_profile", {}) : text(reply), () => short);
     const r = await turn(P[id], s.model, { history: [{ role: "assistant", content: reply }], stores: { profile: personaProfile() } });
-    eq(s.seen.filter((p) => !p.tools?.length).length, 1, `${id}: one shortening pass ran`);
+    // Architect amendment (D-071): a faithful shorter text still over the bound gets ONE second pass toward the bound (live-8: 11 of
+    // 14 shortened texts were thrown away for being over); a text within the bound after the first pass gets none. Every guard stands.
+    const passes = s.seen.filter((p) => !p.tools?.length).length;
+    ok(passes === 1 || (passes === 2 && textLength(short) > bound), `${id}: one shortening pass ran (a second only toward the bound): ${passes}`);
     if (textLength(short) <= bound && shortenedOk(reply, short, bound)) { eq(r.reply, short, `${id}: the faithful shorter text is the reply`); shortened++; }
   }
   // C7 and C15 come within the bound by dropping whole sentences alone; the others keep a figure or caveat in every sentence, so

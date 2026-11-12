@@ -144,7 +144,7 @@ export async function agentTurn(o: {
   // D-062: the capability tools (_shared/agent/capability_tools.ts: Gmail record and tracker, people search, answering an email),
   // under the same withholding as every other tool.
   capabilities?: import("../_shared/agent/loop.ts").ToolSpec[] | null;
-}): Promise<TurnResult & { shorten?: Shorten; knowledge?: { playbooks: string[]; unknown: string[]; stage: string | null } }> {
+}): Promise<TurnResult & { shorten?: Shorten; research?: Record<string, unknown>; knowledge?: { playbooks: string[]; unknown: string[]; stage: string | null } }> {
   // MIRROR WA-1 gaps (turn_notes.ts): what code read from this message and this conversation, for this turn only. A hypothetical
   // person is answered without their saved facts (the profile is left out of the block) and with every record tool withheld;
   // a hypothetical situation writes nothing.
@@ -197,7 +197,8 @@ export async function agentTurn(o: {
   const offered = new Set(tools.map((t) => t.name));
   let result = await runAgentTurn({
     process: processCheck({ draftAsk: draftAsk && DRAFT_TOOLS.some((n) => offered.has(n)), planSearch: planSearch && offered.has("search_jobs"), parts,
-      planFile: planSearch && offered.has("create_file"), history: historyAsk && offered.has("read_application_mail"), mail: !hypo && offered.has("read_application_mail"), posting: meant.length > 0 && offered.has("get_posting"), shownPay }),
+      planFile: planSearch && offered.has("create_file"), history: historyAsk && offered.has("read_application_mail"), mail: !hypo && offered.has("read_application_mail"), posting: meant.length > 0 && offered.has("get_posting"), shownPay,
+      marketRate: !hypo && marketRateAskOf(o.message) && offered.has("research_market") }),
     system: careerSystemPrompt(localDay(o.now, o.tz)) + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + "\n\n" + MIRROR_RULES + "\n\n" + turnNotes.join("\n\n") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
     history: o.history.slice(-HISTORY_WINDOW).map((m) => ({ role: m.role, content: String(m.content ?? "") })),
     message: [o.message, ...notes].filter(Boolean).join("\n\n"),
@@ -248,7 +249,9 @@ export async function agentTurn(o: {
   // what the length pass did (`shorten`: ran or not, accepted or rejected, and why). A turn whose only writes made a File or a
   // resume (tailor_resume, export_tracker, create_file; no record write, no draft, no approval) is now shortened too: its reply
   // describes what was made (the File or PDF holds the content), and its list of changes is said in one line.
-  let shorten: Shorten = { ran: false, outcome: "not_run", why: "" };
+  // D-071 (live-8: the pass did not run on C9 and recorded no reason): every way it does not run says why.
+  let shorten: Shorten = { ran: false, outcome: "not_run", why: !result.reply ? "no reply to shorten" : result.stopped !== "final" ? `the turn did not finish (${result.stopped})`
+    : trace.r || trace.m ? "a research reply, laid out and sourced in code (never rewritten)" : "" };
   if (result.reply && result.stopped === "final" && !trace.r && !trace.m) {
     const l = replyLength(o.message), bound = overLimit(l), n = textLength(result.reply);
     const fileTurn = !condensable(result, { max: -1 }) && onlyFileWrites(result);
@@ -258,9 +261,23 @@ export async function agentTurn(o: {
       : carriesCode(o.message) || carriesCode(result.reply) ? "carries code" : !(condensable(result, { max: -1 }) || fileTurn) ? "the turn wrote a record, a draft or an approval" : "";
     if (why) shorten = { ran: false, outcome: n <= bound ? "within" : "skipped", why, chars: n, bound };
     else {
-      const seen = { out: "" };
-      const short = await condenseReply(o.model, result.reply, { max: bound, aim: l.aim }, (long, out) => shortenedOk(long, out, bound), fileTurn ? FILE_TURN_CONDENSE : "", seen);
-      shorten = { ran: true, outcome: short ? "accepted" : "rejected", why: short ? "" : shortenRejection(result.reply, seen.out, bound), chars: n, bound, ...(short ? { after: textLength(short) } : {}) };
+      // D-071 (live-8: 11 of 14 shortened texts were refused only for being still over the bound, and the long reply was sent; C4's
+      // 602 would have passed the far bound): a shorter text that passes every preservation check (every figure, link and
+      // [placeholder] kept, the boundary and the caveat kept, at most one question, a rewrite of this same reply) is used even when
+      // it is still over the bound, and it gets ONE more pass toward the bound under the same checks against the original reply.
+      const long = result.reply, seen = { out: "" };
+      const faithful = (from: string) => (l0: string, out: string) => shortenedOk(l0, out, Number.POSITIVE_INFINITY) && shortenedOk(from, out, Number.POSITIVE_INFINITY);
+      let short = await condenseReply(o.model, long, { max: bound, aim: l.aim }, faithful(long), fileTurn ? FILE_TURN_CONDENSE : "", seen);
+      let passes = 1, why = short ? "" : shortenRejection(long, seen.out, Number.POSITIVE_INFINITY);
+      if (short && textLength(short) > bound) {
+        const seen2 = { out: "" };
+        const second = await condenseReply(o.model, short, { max: bound, aim: l.aim }, faithful(long), fileTurn ? FILE_TURN_CONDENSE : "", seen2);
+        passes = 2;
+        if (second) short = second;
+      }
+      const after = short ? textLength(short) : null;
+      if (short && after! > bound) why = `shorter but still over the bound (${after} > ${bound})`;
+      shorten = { ran: true, outcome: !short ? "rejected" : after! <= bound ? "accepted" : "shorter", why, chars: n, bound, passes, ...(short ? { after: after! } : {}) };
       if (short) result = { ...result, reply: trace.a ? enforceAdviceReply(short, trace.a) : short };
     }
   }
@@ -282,10 +299,30 @@ export async function agentTurn(o: {
   if (result.reply && result.stopped === "final" && !result.show) result = { ...result, reply: payWithSource(result.reply, [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])], trace.m ? [] : shownPay) };
   // D-067 (live-6 C9: research_market ran and the person got an empty message; D-024): the last line of every brain turn. An empty
   // or blank reply is never sent: the research's own sourced points when it found any, else the honest line that it did not finish.
-  result = { ...result, reply: nonEmptyReply(result, trace.m), shorten } as typeof result;
+  // D-071 (live-8 C6: "Your Gmail shows 8 applications ... That's 9 listed, so I miscounted 8 above"): the number of applications is
+  // the record's (read_application_mail's counts), never the model's own count.
+  const counted = (ctx.turn as any)?.counts?.applied;
+  if (typeof counted === "number" && result.reply && result.stopped === "final" && !result.show) result = { ...result, reply: applicationCount(result.reply, counted) };
+  // D-071 (live-8 C9: research ran, kept nothing, and the trace could not say why): what the research did with its pages and draft.
+  const research = trace.m ? { kind: "kind" in trace.m ? "company" : "market", status: trace.m.status, ...((trace.m as any).audit ?? {}) } : null;
+  result = { ...result, reply: nonEmptyReply(result, trace.m), shorten, ...(research ? { research } : {}) } as typeof result;
   return know ? { ...result, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : result;
 }
 
+// D-071: "N applications" said with another number than the record's is the record's number; a sentence about having miscounted
+// goes (the count was code's). Other numbers ("1 researched role") are not touched.
+const NUMWORD: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
+export function applicationCount(reply: string, n: number): string {
+  let changed = false;
+  const out = String(reply).replace(/\b(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)(\s+(?:[a-z-]+\s+){0,2}?applications?\b)/gi, (m, k: string, rest: string) => {
+    const v = /^\d/.test(k) ? Number(k) : NUMWORD[k.toLowerCase()];
+    if (v === n || /researched|draft/i.test(rest)) return m;
+    changed = true; return `${n}${rest.replace(/\bapplication\b/i, n === 1 ? "application" : "applications")}`;
+  });
+  if (!changed && !/\bmiscount/i.test(out)) return reply;
+  const keep = (x: string) => !/\bmiscount/i.test(x) && !/^(?:\d{1,3}|[a-z]+) is right\.?$/i.test(x.trim());
+  return out.split("\n").map((line) => line.split(/(?<=[^\d\s][.!?])[ \t]+/).filter(keep).join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
 // D-067 (d): every posting whose stated pay the reply gives (its figures, in a sentence naming its company) has its link in the reply.
 // D-070 (live-7 C11: "For Chicago the pay is $28-$49 hourly", read by inspect_apply_flow, went out with no link): every tool that read
 // a posting's pay this turn is a source (loop.ts paySources), not search_jobs alone; and when the turn read exactly one posting
@@ -322,8 +359,13 @@ export function nonEmptyReply(r: Pick<TurnResult, "reply" | "show" | "tool_calls
 }
 
 // D-065: the process the turn still owes before its reply stands (loop.ts `process`, asked once). Each names its ruling.
-export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts: string[]; planFile?: boolean; history?: boolean; mail?: boolean; posting?: boolean; shownPay?: { text: string; url: string | null }[] }): ((reply: string, calls: { name: string; ok: boolean; error?: string }[]) => string | null) | null {
-  if (!o.draftAsk && !o.planSearch && !o.parts.length && !o.history && !o.mail && !o.posting && !o.shownPay?.length) return null;
+// D-071 (live-8 C22: "what's the going rate for swe interns in chicago, hourly" was answered with one posting's range and an offer
+// to look; no research ran): an ask for the going, market or typical pay of a role is a research ask. The posting pay already shown
+// is still given, beside a sourced benchmark.
+export const MARKET_RATE_ASK = /\b(?:going|market|typical|average|usual|standard|normal|median)\s+(?:hourly\s+|annual\s+|base\s+)?(?:rate|pay|salary|salaries|wage|wages|comp(?:ensation)?)\b|\bhow\s+much\s+(?:do|does|would|will)\s+[a-z ]{2,40}?\s+(?:make|earn|get\s+paid)\b|\bwhat\s+(?:do|does)\s+[a-z ]{2,40}?\s+(?:make|earn)\b|\bpay\s+(?:range|benchmark)s?\s+for\s+(?:a\s+|an\s+)?[a-z]/i;
+export function marketRateAskOf(message: string): boolean { return MARKET_RATE_ASK.test(String(message ?? "")); }
+export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts: string[]; planFile?: boolean; history?: boolean; mail?: boolean; posting?: boolean; shownPay?: { text: string; url: string | null }[]; marketRate?: boolean }): ((reply: string, calls: { name: string; ok: boolean; error?: string }[]) => string | null) | null {
+  if (!o.draftAsk && !o.planSearch && !o.parts.length && !o.history && !o.mail && !o.posting && !o.shownPay?.length && !o.marketRate) return null;
   return (reply, calls: { name: string; ok: boolean; error?: string }[]) => {
     const called = (names: readonly string[]) => calls.some((c) => names.includes(c.name));
     // G10 / D-059: the draft tool is the only path for a draft; a draft written in the reply's prose is never shown.
@@ -348,6 +390,8 @@ export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts:
     const money = (t: string) => (String(t).match(/\$\s?\d[\d,.]*(?:\s?[kK])?/g) ?? []).flatMap((x) => numbersIn(x));
     const shownNums = (o.shownPay ?? []).flatMap((l) => money(l.text));
     if (shownNums.length && !money(reply).some((n) => shownNums.some((x) => numEq(x, n)))) return `This conversation already showed pay that answers this ask: ${(o.shownPay ?? []).map((l) => `"${l.text}"`).join("; ")}. State that figure with its place, naming the posting or source it came from (a single posting's range is not a market rate: say so), alongside anything else you found. Write no link: code adds its source.`;
+    // D-071 (C22): a market-rate ask tries sourced research (a benchmark with its sources), whatever pay this conversation showed.
+    if (o.marketRate && !called(["research_market"])) return "They asked for the going rate, not one posting's pay. Call research_market now (format inline) for a sourced benchmark for that role and place, then answer with what it found (or say it found nothing) beside the posting pay already shown, each with where it came from. Write no link: code adds the sources.";
     // G3 / G4 (C9): every part they named is answered.
     const missing = partsMissing(reply, o.parts);
     if (missing.length) return `They asked about ${o.parts.join(", ")}, and your reply does not cover: ${missing.join(", ")}. Add each missing part from what you read this turn (call the research tool again only if needed), and where nothing covers it, say that in one plain sentence for that part.`;
@@ -443,7 +487,8 @@ export function sameContent(long: string, short: string): boolean {
 const CODE_IN = /```|`[^`\n]{2,}`|\bdef\s+\w+\s*\(|\bfunction\s+\w+\s*\(|=>|\breturn\s+[^.\n]*[([{=]|\bnext\(|\blambda\b|\w+\(\s*\w*\s*\)\s*[:{]|\bO\(\s*(?:1|n|n\^?2|log ?n|n log ?n)\s*\)/i;
 export function carriesCode(text: string): boolean { return CODE_IN.test(String(text ?? "")); }
 // D-070: what the length pass did on a turn (recorded in the turn's meta, and by the mirror runner in its trace).
-export interface Shorten { ran: boolean; outcome: "not_run" | "within" | "skipped" | "accepted" | "rejected"; why: string; chars?: number; bound?: number; after?: number }
+// D-071: "shorter" = a faithful shorter text was used though it is still over the bound; `passes` = how many shortening calls ran.
+export interface Shorten { ran: boolean; outcome: "not_run" | "within" | "skipped" | "accepted" | "shorter" | "rejected"; why: string; chars?: number; bound?: number; after?: number; passes?: number }
 // A turn's writes were only the File and resume makers (whose reply describes what was made).
 const FILE_MAKERS = new Set(["tailor_resume", "export_tracker", "create_file"]);
 export function onlyFileWrites(r: Pick<TurnResult, "reply" | "show" | "pending_approvals"> & { tool_calls?: TurnResult["tool_calls"] }): boolean {

@@ -1,0 +1,88 @@
+# D-072 item 4 round 2 (99% bar), $0 re-measure of the item-4 round-2 branch (branch bench/browser-v95-* only, never a PR): items 2 and 4.
+# strict: the r12 strict benchmark matrix (bench/browser-r12-b), unchanged. batch60: the item-2 held-out 60 dry run
+# (bench/browser-item2-heldout60-r2-4), unchanged. DRY RUN on real public postings: every request but GET/HEAD/OPTIONS (and a
+# GraphQL read) aborted in the browser, submits trapped, stopped before the Submit click, robots.txt obeyed. A synthetic TEST
+# person and resume. No secrets. No model. Nothing is submitted.
+name: browser-bench
+on:
+  push:
+    branches: ["bench/browser-*"]
+permissions:
+  contents: read
+jobs:
+  strict:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        sample: [sample, heldout]
+        persona: [default, full]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22.23.3" }
+      - name: Playwright and its Chromium
+        run: |
+          npm ci --prefix tools --no-audit --no-fund
+          (cd tools && npx --no-install playwright install --with-deps chromium)
+          echo "UPMORE_PLAYWRIGHT_PATH=$GITHUB_WORKSPACE/tools/node_modules/playwright" >> "$GITHUB_ENV"
+      - name: Strict benchmark (nothing is submitted)
+        run: |
+          label="r12-${{ matrix.sample }}-${{ matrix.persona }}-$(printf '%s' "$GITHUB_SHA" | cut -c1-8)"
+          extra=""; [ "${{ matrix.persona }}" != "default" ] && extra="--persona ${{ matrix.persona }}"
+          node scripts/browser-eval/strict.cjs --sample "scripts/browser-eval/${{ matrix.sample }}.csv" --label "$label" --max-per-provider 20 $extra
+          cat "artifacts/browser-eval/$label/strict-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          node -e 'const s=require(process.argv[1]); console.log(`BOTH | ${process.argv[2]} | pass ${s.all.pass} / ${s.all.sampled} | ready_if_answered ${s.all.ready_if_answered} | ready_except_upload ${s.all.ready_except_upload} | breaches ${s.all.breaches}`); for (const p of s.prov) console.log(`PROV | ${process.argv[2]} | ${p.provider} | pass ${p.pass} | ria ${p.ready_if_answered} | reu ${p.ready_except_upload} | fail ${p.fail} | ${p.top_fail.map(([k,n])=>k+" "+n).join("; ")}`)' "$PWD/artifacts/browser-eval/$label/strict-summary.json" "${{ matrix.sample }}-${{ matrix.persona }}"
+      - name: Keep the per-posting rows (D-072 root causes)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: strict-${{ matrix.sample }}-${{ matrix.persona }}
+          path: artifacts/browser-eval/
+          retention-days: 14
+  batch60:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "22.23.3" }
+      - name: Playwright and its Chromium
+        run: |
+          npm ci --prefix tools --no-audit --no-fund
+          (cd tools && npx --no-install playwright install --with-deps chromium)
+          echo "UPMORE_PLAYWRIGHT_PATH=$GITHUB_WORKSPACE/tools/node_modules/playwright" >> "$GITHUB_ENV"
+      - name: Allow sandboxed Chromium user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - name: The 60 (heldout.csv rows the VM drives, file order)
+        run: |
+          mkdir -p "$RUNNER_TEMP/b60"
+          node -e '
+            const fs = require("fs"); const { atsOf } = require("./workers/career-browser/apply-vm.cjs");
+            const lines = fs.readFileSync("scripts/browser-eval/heldout.csv", "utf8").split(/\r?\n/);
+            const keep = lines.filter((l) => { const m = /^\s*([a-z0-9_-]+)\s*,\s*(https?:\/\/\S+)\s*$/i.exec(l); return m && !atsOf(m[2]).refuse; });
+            fs.writeFileSync(process.argv[1], "provider,url\n" + keep.join("\n") + "\n");
+            const c = {}; for (const l of keep) { const p = l.split(",")[0]; c[p] = (c[p] || 0) + 1; }
+            console.log("SAMPLE60-SOURCE heldout.csv driven-by-vm rows " + keep.length + " " + JSON.stringify(c));
+          ' "$RUNNER_TEMP/b60/heldout-vm.csv"
+          cat > "$RUNNER_TEMP/b60/observe.cjs" <<'EOF'
+          const vm = require(process.env.GITHUB_WORKSPACE + "/workers/career-browser/apply-vm.cjs");
+          const orig = vm.createWorker, urls = new Map();
+          vm.createWorker = (opts) => orig({ ...opts, rpc: async (name, a = {}) => {
+            const r = await opts.rpc(name, a);
+            if (name === "career_apply_vm_claim" && Array.isArray(r)) for (const x of r) urls.set(x.id, x.url);
+            if (name === "career_apply_vm_complete") {
+              const e = a.p_evidence || {};
+              const qs = Array.isArray(e.fields) ? e.fields : (e.field ? [e.field] : []);
+              console.log(["B60-EVIDENCE", a.p_state, a.p_reason || "", "questions=" + JSON.stringify(qs.map((q) => String(q).slice(0, 90))), "wall=" + (e.wall || ""), "error=" + (e.error || ""), urls.get(a.p_id) || a.p_id].join(" | "));
+            }
+            return r;
+          } });
+          EOF
+      - name: Fixture of 60 (real queue on Postgres 16, mock employers, receipts and the one closeout)
+        if: always()
+        run: PGBIN=/usr/lib/postgresql/16/bin PATH=/usr/lib/postgresql/16/bin:$PATH node --test tests/career-batch60-fixture.test.cjs
+      - name: Batch of 60 real held-out postings through the apply VM's pool (dry run; nothing is submitted)
+        if: always()
+        run: node -r "$RUNNER_TEMP/b60/observe.cjs" scripts/browser-eval/batch60.cjs --sample "$RUNNER_TEMP/b60/heldout-vm.csv" --n 60 --concurrency 6 --label "batch60-heldout-${GITHUB_SHA::8}"

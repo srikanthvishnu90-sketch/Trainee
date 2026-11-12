@@ -108,7 +108,7 @@ async function strictPosting(browser, item, o) {
   const r = { provider: item.provider, url: item.url, persona, vm: vmVerdict(item.url), result: "fail", reason: null, field: null, needs: null, sent_blocked: 0, upload_simulated: 0, graphql_reads: 0, submit_attempts: 0, ms: 0 };
   const t0 = Date.now();
   const rb = await robotsOk(item.url, o.robots, o.ua, o.pacer);
-  if (rb !== true) { r.reason = rb === "unreachable" ? "host_unreachable" : "robots_disallowed"; r.ms = Date.now() - t0; return r; }
+  if (rb !== true) { r.reason = rb === "unreachable" ? "host_unreachable" : "robots_disallowed"; r.ms = Date.now() - t0; r.d072 = d072.classify(r); return r; }
   const host = new URL(item.url).hostname.toLowerCase();
   // The posting's own host and its www twin (sofi.com sends every visitor to www.sofi.com: the same site, not a redirect off it).
   const twin = host.startsWith("www.") ? host.slice(4) : `www.${host}`;

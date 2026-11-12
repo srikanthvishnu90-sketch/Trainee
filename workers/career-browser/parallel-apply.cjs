@@ -285,6 +285,9 @@ function DIAG(field) {
   out.apply = [...document.querySelectorAll("a, button, [role=button]")].filter((e) => /apply|bewerb|postul|solicit|interest|candidat/i.test(e.innerText || ""))
     .slice(0, 5).map((e) => cut(`${e.tagName} "${(e.innerText || "").trim()}" ${e.getAttribute("href") || ""} ${e.offsetWidth}x${e.offsetHeight}`, 140));
   out.frames = [...document.querySelectorAll("iframe")].slice(0, 4).map((f) => cut(f.getAttribute("src"), 100));
+  // The visible controls a person could press (their words, type, and whether a form holds them): why no Submit was marked.
+  out.buttons = [...document.querySelectorAll("button, input[type=submit], input[type=button], [role=button]")].filter((b) => b.offsetWidth || b.offsetHeight)
+    .slice(0, 10).map((b) => cut(`${b.tagName} ${b.getAttribute("type") || ""} "${(b.innerText || b.value || "").trim()}" ${b.closest("form") ? "in-form" : "outside"}`, 80));
   return out;
 }
 async function attempt(browser, p, opts, timing) {
@@ -375,6 +378,13 @@ async function attempt(browser, p, opts, timing) {
         const worded = [...f.querySelectorAll("button, [role=button], input[type=button]")].filter((b) => vis(b) && word.test(b.innerText || b.value || ""));
         const pick = worded.length === 1 ? worded[0] : typed.length === 1 ? typed[0] : worded.find((b) => typed.includes(b)) || null;
         if (pick) { pick.setAttribute("data-upmore-submit", "1"); return true; }
+      }
+      // D-072: one application form whose Submit the board draws just outside it (BambooHR: strict run 43273066955, 18 of 20
+      // held-out forms, 17 to 31 fields, no Submit inside the <form>): the page's one visible control in the Submit words, outside
+      // every form and every sign-in form. Two or none: no Submit is pressed.
+      if (forms.length === 1) {
+        const lone = [...document.querySelectorAll("button, [role=button], input[type=button], input[type=submit]")].filter((b) => vis(b) && !b.closest("form") && !b.closest("[data-upmore-signin]") && word.test(b.innerText || b.value || ""));
+        if (lone.length === 1) { lone[0].setAttribute("data-upmore-submit", "1"); return true; }
       }
       // A board that builds its application without a <form> (Ashby: every posting, strict benchmark run 42712892939, forms=0 with
       // 19 to 48 fields): the page is the form when it has no form of its own, asks for a file or an email, and has exactly one

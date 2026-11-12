@@ -29,7 +29,8 @@ const FORM = (extra = "", submit = `<button type="submit">Submit application</bu
   <label>First Name <input name="first_name" required></label><label>Last Name <input name="last_name" required></label>
   <label>Email <input name="email" type="email" required></label>${extra}${submit}</form>`;
 // BambooHR (run 43192269304 DIAG: forms=1, inputs 17 to 31, a reCAPTCHA anchor frame 304x78 drawn above Submit, inside the form).
-const BAMBOO = `<!doctype html><title>BambooHR</title><body>${FORM(`<div class="g-recaptcha" data-sitekey="6LfZ4-TEST" style="width:304px;height:78px;border:1px solid #ccc">I'm not a robot</div>`)}</body>`;
+// Its Submit is drawn just outside the <form> (run 43273066955: 18 of 20 held-out forms, no Submit inside the form).
+const BAMBOO = `<!doctype html><title>BambooHR</title><body>${FORM(`<div class="g-recaptcha" data-sitekey="6LfZ4-TEST" style="width:304px;height:78px;border:1px solid #ccc">I'm not a robot</div>`, "")}<button type="button">Submit Application</button></body>`;
 // A Cloudflare-style interstitial over the whole page (no form behind it yet): a wall at the door.
 const INTERSTITIAL = `<!doctype html><title>Just a moment...</title><body><div id="challenge-form" style="width:600px;height:300px">Checking your browser</div></body>`;
 // Greenhouse's job_app embed inside an employer's careers page (bitwarden.com, lucidmotors.com in the run).

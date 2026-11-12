@@ -6,6 +6,8 @@ import { careerTools, type OutreachDeps, type TailorTools } from "../_shared/age
 import { importContactsFile, MX_NOT_WIRED, type MxResolver, type Verifier } from "../_shared/career_contacts.ts";
 import { attachAsked, attachTool } from "../_shared/agent/attach_tool.ts";
 import { createFileTool } from "../_shared/agent/file_tool.ts";
+import { FAMILY_FILE_TOOL, familyFileTool } from "../_shared/agent/file_family_tool.ts";
+import { FAMILY_TITLE, familyAskOf, type FamilyMakeDeps } from "../_shared/file_family_make.ts";
 import type { FileService } from "../_shared/file_service.ts";
 import { careerSystemPrompt, MIRROR_RULES, shapeRulesFor } from "../_shared/agent/prompt.ts";
 import { alertLine, type MemoryStore, type Pipeline, personBlock, type Standing } from "../_shared/agent/memory.ts";
@@ -139,6 +141,8 @@ export async function agentTurn(o: {
   // handler passes a File service, which it does on every channel (the link rides shape.links after the answer; where File links
   // are not set up the service refuses and the brain says so); no longer tied to the reply writer, which stays off (RELEASE_NEVER_ON).
   files?: FileService | null;
+  // D-072 (files reachable): the record-backed File families (file_family_make.ts), offered as open_record_file. Absent: no such tool.
+  familyFiles?: FamilyMakeDeps | null;
   // D-064 (G13): this message arrived while the previous turn (this text, the person's previous message) was still running.
   whileWorking?: string | null;
   // D-062: the capability tools (_shared/agent/capability_tools.ts: Gmail record and tracker, people search, answering an email),
@@ -193,12 +197,12 @@ export async function agentTurn(o: {
   // D-063 (C4): trace.a keeps a specific advice question's result (research/advice.ts): its one source goes on its own line.
   const trace: { r?: Extract<ResearchResult, { status: "ok" }>; m?: MarketResult | CompanyResult; a?: AdviceResult } = {};
   const ctx: any = { userId: o.userId, threadId: o.threadId, now: o.now, state: o.stores };
-  const tools = [...withheld([...(o.toolPolicy?.withhold ?? []), ...hypoWithheld], [...careerTools({ postings: o.postings ?? (async () => []), alerts: o.alerts ?? null, memory: o.memory ?? null, events: o.events ?? null, confirmations: o.confirmations ?? null, tz: o.tz, mail: o.mail ?? null, interviews: o.interviews ?? null, digest: o.digest ?? null, outreach: o.outreach ?? null, verifier: o.verifier ?? null, tailor: o.tailor ?? null, hired: o.hired ?? null, wants: o.wants ?? null, limits: o.limits, posting: o.posting ?? null, situation: o.known?.situation ?? null, linkCheck: o.linkCheck ?? null, conversations: o.conversations ?? null, market: o.market ? { ...o.market, onResult: (r) => { if (r.status === "ok" || trace.m?.status !== "ok") trace.m = r; } } : null, postingRecheck: o.postingRecheck ?? null, applyFlow: o.applyFlow ?? null, research: o.knowledge && o.research ? { ...o.research, onResult: (r, m) => { if (r.status === "ok") trace.r = r; o.research?.onResult?.(r, m); }, onAdvice: (r) => { if (r.source || !trace.a?.source) trace.a = r; } } : null }), ...(o.capabilities ?? [])]), ...(o.shape && attachAsked(o.message) ? [attachTool()] : []), ...(o.files ? [createFileTool(o.files)] : [])];
+  const tools = [...withheld([...(o.toolPolicy?.withhold ?? []), ...hypoWithheld], [...careerTools({ postings: o.postings ?? (async () => []), alerts: o.alerts ?? null, memory: o.memory ?? null, events: o.events ?? null, confirmations: o.confirmations ?? null, tz: o.tz, mail: o.mail ?? null, interviews: o.interviews ?? null, digest: o.digest ?? null, outreach: o.outreach ?? null, verifier: o.verifier ?? null, tailor: o.tailor ?? null, hired: o.hired ?? null, wants: o.wants ?? null, limits: o.limits, posting: o.posting ?? null, situation: o.known?.situation ?? null, linkCheck: o.linkCheck ?? null, conversations: o.conversations ?? null, market: o.market ? { ...o.market, onResult: (r) => { if (r.status === "ok" || trace.m?.status !== "ok") trace.m = r; } } : null, postingRecheck: o.postingRecheck ?? null, applyFlow: o.applyFlow ?? null, research: o.knowledge && o.research ? { ...o.research, onResult: (r, m) => { if (r.status === "ok") trace.r = r; o.research?.onResult?.(r, m); }, onAdvice: (r) => { if (r.source || !trace.a?.source) trace.a = r; } } : null }), ...(o.capabilities ?? [])]), ...(o.shape && attachAsked(o.message) ? [attachTool()] : []), ...(o.files ? [createFileTool(o.files)] : []), ...(o.familyFiles ? [familyFileTool(o.familyFiles, o.files?.ttlHours() ?? 168)] : [])];
   const offered = new Set(tools.map((t) => t.name));
   let result = await runAgentTurn({
     process: processCheck({ draftAsk: draftAsk && DRAFT_TOOLS.some((n) => offered.has(n)), planSearch: planSearch && offered.has("search_jobs"), parts,
       planFile: planSearch && offered.has("create_file"), history: historyAsk && offered.has("read_application_mail"), mail: !hypo && offered.has("read_application_mail"), posting: meant.length > 0 && offered.has("get_posting"), shownPay,
-      marketRate: !hypo && marketRateAskOf(o.message) && offered.has("research_market") }),
+      marketRate: !hypo && marketRateAskOf(o.message) && offered.has("research_market"), familyFile: !hypo && offered.has(FAMILY_FILE_TOOL) ? familyAskOf(o.message) : null }),
     system: careerSystemPrompt(localDay(o.now, o.tz)) + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + "\n\n" + MIRROR_RULES + "\n\n" + turnNotes.join("\n\n") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
     history: o.history.slice(-HISTORY_WINDOW).map((m) => ({ role: m.role, content: String(m.content ?? "") })),
     message: [o.message, ...notes].filter(Boolean).join("\n\n"),
@@ -364,10 +368,13 @@ export function nonEmptyReply(r: Pick<TurnResult, "reply" | "show" | "tool_calls
 // is still given, beside a sourced benchmark.
 export const MARKET_RATE_ASK = /\b(?:going|market|typical|average|usual|standard|normal|median)\s+(?:hourly\s+|annual\s+|base\s+)?(?:rate|pay|salary|salaries|wage|wages|comp(?:ensation)?)\b|\bhow\s+much\s+(?:do|does|would|will)\s+[a-z ]{2,40}?\s+(?:make|earn|get\s+paid)\b|\bwhat\s+(?:do|does)\s+[a-z ]{2,40}?\s+(?:make|earn)\b|\bpay\s+(?:range|benchmark)s?\s+for\s+(?:a\s+|an\s+)?[a-z]/i;
 export function marketRateAskOf(message: string): boolean { return MARKET_RATE_ASK.test(String(message ?? "")); }
-export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts: string[]; planFile?: boolean; history?: boolean; mail?: boolean; posting?: boolean; shownPay?: { text: string; url: string | null }[]; marketRate?: boolean }): ((reply: string, calls: { name: string; ok: boolean; error?: string }[]) => string | null) | null {
-  if (!o.draftAsk && !o.planSearch && !o.parts.length && !o.history && !o.mail && !o.posting && !o.shownPay?.length && !o.marketRate) return null;
+export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts: string[]; planFile?: boolean; history?: boolean; mail?: boolean; posting?: boolean; shownPay?: { text: string; url: string | null }[]; marketRate?: boolean; familyFile?: keyof typeof FAMILY_TITLE | null }): ((reply: string, calls: { name: string; ok: boolean; error?: string }[]) => string | null) | null {
+  if (!o.draftAsk && !o.planSearch && !o.parts.length && !o.history && !o.mail && !o.posting && !o.shownPay?.length && !o.marketRate && !o.familyFile) return null;
   return (reply, calls: { name: string; ok: boolean; error?: string }[]) => {
     const called = (names: readonly string[]) => calls.some((c) => names.includes(c.name));
+    // D-072 (files reachable, D-066 P6): an ask to see one of their record-backed Files gets that File from their records, or is told
+    // plainly what is missing (the tool's own answer); it is never described from memory.
+    if (o.familyFile && !called([FAMILY_FILE_TOOL])) return `They asked to see their ${FAMILY_TITLE[o.familyFile]}. Call ${FAMILY_FILE_TOOL} now with that family, then say in a sentence or two what it holds (only from its holds), or, if it was not made, what is missing. Write no link: code adds it.`;
     // G10 / D-059: the draft tool is the only path for a draft; a draft written in the reply's prose is never shown.
     if (o.draftAsk && !called(DRAFT_TOOLS)) return "They asked for a message draft and you wrote it in your reply. Call draft_followup now with the draft as body (keep [placeholders] for what you don't know); code shows its text as your reply.";
     // MIRROR-PROCESS C1: the plan stands on a search of postings they could apply to.
@@ -433,7 +440,7 @@ export function condensable(r: Pick<TurnResult, "reply" | "show" | "pending_appr
   const wrote = (r.tool_calls ?? []).some((c) => (c.ok !== false && c.effect !== null && c.effect !== undefined && c.effect !== "read") || WRITER_TOOL.test(c.name));
   return reply.length > limit.max && !r.show && !(r.pending_approvals ?? []).length && !wrote && !/```/.test(reply);
 }
-const WRITER_TOOL = /^(?:draft_\w+|tailor_resume|create_file|attach_document|export_tracker|save_resume_persona|use_resume_persona|set_resume_contact)$/;
+const WRITER_TOOL = /^(?:draft_\w+|tailor_resume|create_file|open_record_file|attach_document|export_tracker|save_resume_persona|use_resume_persona|set_resume_contact)$/;
 const BOUNDARY = /\b(?:nothing|not|never|haven'?t|hasn'?t|didn'?t|wasn'?t|isn'?t|won'?t|no one|nobody)\b[^.!?\n]{0,60}\b(?:sent|submitted|applied|queued|contacted|messaged|emailed)\b|\b(?:sent|submitted|applied)\b[^.!?\n]{0,20}\b(?:nothing|nowhere)\b/i;
 const CAVEAT = /\b(?:not (?:verified|confirmed|guaranteed|listed|on file)|unverified|unconfirmed|(?:i )?(?:don'?t|do not|can'?t|cannot|couldn'?t) (?:have|verify|confirm|check|tell|find)|no verified)\b/i;
 const NUMBER = /\$?\d[\d,.]*(?:k|%)?/gi, LINK = /https?:\/\/\S+/g;
@@ -490,7 +497,7 @@ export function carriesCode(text: string): boolean { return CODE_IN.test(String(
 // D-071: "shorter" = a faithful shorter text was used though it is still over the bound; `passes` = how many shortening calls ran.
 export interface Shorten { ran: boolean; outcome: "not_run" | "within" | "skipped" | "accepted" | "shorter" | "rejected"; why: string; chars?: number; bound?: number; after?: number; passes?: number }
 // A turn's writes were only the File and resume makers (whose reply describes what was made).
-const FILE_MAKERS = new Set(["tailor_resume", "export_tracker", "create_file"]);
+const FILE_MAKERS = new Set(["tailor_resume", "export_tracker", "create_file", FAMILY_FILE_TOOL]);
 export function onlyFileWrites(r: Pick<TurnResult, "reply" | "show" | "pending_approvals"> & { tool_calls?: TurnResult["tool_calls"] }): boolean {
   const reply = String(r.reply ?? "");
   const writes = (r.tool_calls ?? []).filter((c) => (c.ok !== false && c.effect !== null && c.effect !== undefined && c.effect !== "read") || WRITER_TOOL.test(c.name));

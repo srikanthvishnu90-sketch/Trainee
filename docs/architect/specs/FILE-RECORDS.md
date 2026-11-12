@@ -131,3 +131,42 @@ newest (wiring the engine to read it is not part of S3).
 
 Each is its own migration PR with RLS tests in `tests/db/` (owner reads own rows; another account reads nothing; anon
 reads nothing; authenticated cannot write), and its adapter and family wiring in a WO-E follow-up.
+
+## 6. How each File family is reached from the chat (D-072, files reachable)
+
+Owner standard (behavior guide P5/P17, "complete product"): every File family the product defines is reachable from the chat
+when the person's ask calls for it, made from their real records, and a "made" claim needs a made File that opens (D-066 P6,
+D-067). Before D-072 no production code called `createFamily`, so the record-backed pages below were served and tested but
+unreachable (item 6b report, `docs/architect/reports/ITEM6B-ROOT-CAUSES-20261112.md`).
+
+The chat path for the eleven record-backed families: the person's ask (`_shared/file_family_ask.ts familyAskOf`) routes the
+turn to the brain in staged mode (`career_staged.ts`, reason `file_family_ask`; an exact payload, an approval, a control such as
+"pause my weekly brief" and a bare reply stay code's). The brain calls `open_record_file` with the family's name only
+(`_shared/agent/file_family_tool.ts`); code reads the person's records through the same `FamilyRecords` the File server draws
+the page from (`_shared/file_family_make.ts makeFamilyFile`, `supabaseFamilyMaker`), and makes the File with
+`createFamily(userId, family, title, null, { ref })` only when the records hold something: no view is stored, the page reads the
+records on every open. The link is minted by code and rides the reply (`fileLinks`); the tool returns what the page holds
+(`holds`, from the page's own view), and the reply says only that. Nothing on record: no File is made and the reply says what
+is missing (never a hollow File). Records unreadable: nothing is made. If the model answers the ask without the tool, the
+process check asks it once (`career_brain.ts processCheck familyFile`). Approvals on these pages stay POST forms bound to the
+payload hash shown (D-MS-1, D-MN-2).
+
+| Family | File | The ask (examples) | Creator | Records the page reads | Before D-072 | After |
+| --- | --- | --- | --- | --- | --- | --- |
+| F-01 | Career brief | "show me my career brief" | `open_record_file` career_brief | account (stated facts, confirmed resume), standing, events | unreachable | reachable (drawn for everyone: what is not on record is named "Not set yet" / Unknown) |
+| F-02 | Profile facts | "show me my profile facts", "give me the page with my profile" | `open_record_file` profile_facts | account, standing | unreachable | reachable (drawn for everyone, Unknowns named) |
+| F-03 | Path comparison | "open my path comparison" | `open_record_file` path_comparison | none: no store of compared directions exists | unreachable | wired; answers "nothing on record" and makes no File until a store exists |
+| F-04 | Search plan | "show me my search plan" | `open_record_file` search_plan | `career_search_plans` (newest version) | unreachable | reachable when a plan row exists (the plan-step writer, section 1, is not built) |
+| F-05, F-06, F-10, F-11 | Roles list, role workspace, batch, pipeline | a search ("find me analyst internships in Chicago") | the results list (`role_results.ts`, `file_family_live.ts`) | the results list | reachable | unchanged |
+| F-07 | Materials | "open my materials page" | `open_record_file` materials | `career_material_versions` (the newest document) | unreachable | reachable when a version row exists (no production writer yet, section 5) |
+| F-08 | Answer library | "what's in my answer library?", "show me my answers page" | `open_record_file` answer_library | `career_apply_questions` | unreachable | reachable |
+| F-09 | Application review | the card's review link | `createReview` (`application_review_links.ts`) | the prepared application | reachable | unchanged |
+| F-12 | Message review | "show me the message review" | `open_record_file` message_review | `career_outreach_drafts` (newest waiting for a decision, else newest) | unreachable | reachable |
+| F-13 | Interview hub | "pull up my interview hub", "show me my interviews page" | `open_record_file` interview_hub | `career_interviews` | unreachable | reachable |
+| F-14 | Weekly brief | "send me my weekly brief", "where's my weekly summary" | `open_record_file` weekly_brief | `career_digest_prefs`, `career_events`, questions, interviews | unreachable | reachable (drawn for everyone: a quiet week says so) |
+| F-14n | Negotiation plan | "show me my negotiation plan" | `open_record_file` negotiation_plan | the offers the person told Trainee | unreachable | reachable |
+| F-15 | Offer comparison | "show me my offer comparison", "give me a file comparing my offers" | `open_record_file` offer_comparison | the offers the person told Trainee | unreachable | reachable |
+
+Tests: `tests/architect/files-reachable-d072.test.ts` (each family from its ask through the real brain turn and File server,
+nothing on record, hash-bound approvals, the process check) and `tests/architect/files-reachable-d072-pg.test.ts` (the real
+agent-chat handler on Postgres 16, the link opened through the deployed File server's dependencies).

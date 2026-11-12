@@ -638,6 +638,9 @@ export async function tailorForPosting(o: {
     ordered = e.resume; edits = e.done;
   }
   { const every = keepEveryEntry(ordered, picked, { oneLine: !edits }); ordered = every.resume; keptBack = every.added; }
+  // D-070: an entry kept back on a first version takes its place by date (RESUME-TEMPLATES E5, newest first); a lead the person
+  // chose still goes first. An edited version keeps the order its edits set.
+  if (!edits && keptBack.length) ordered = applyPersonaOrder(ordered, lead);
   if (placeholder) {
     // The placeholder prints where the email would: after a contact line the person confirmed (which has no email), or alone.
     const h = ordered.header = { ...(ordered.header || {}), email: EMAIL_PLACEHOLDER };

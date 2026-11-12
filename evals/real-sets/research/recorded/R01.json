@@ -1,0 +1,143 @@
+{
+ "case": {
+  "id": "R01",
+  "company": "Stripe",
+  "site": "stripe.com",
+  "role": "Risk Operations Analyst"
+ },
+ "plan": {
+  "queries": [
+   "Stripe",
+   "Stripe Risk Operations Analyst"
+  ],
+  "companies": [
+   "Stripe"
+  ],
+  "sites": [
+   "stripe.com"
+  ]
+ },
+ "captured_at": "2026-11-12T07:23:29.974Z",
+ "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
+ "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
+ "search": {
+  "hits": [
+   {
+    "url": "https://stripe.com/",
+    "title": "stripe.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://stripe.com/about",
+    "title": "stripe.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://stripe.com/careers",
+    "title": "stripe.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/stripe/jobs",
+    "title": "Greenhouse job board: stripe",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/stripe/jobs/7456167?content=true",
+    "title": "Credit Risk Operations Analyst (CDMX) (Greenhouse posting)",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/stripe/jobs/7230921?content=true",
+    "title": "Risk Operations Analyst (Greenhouse posting)",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://stripe.com/press",
+    "title": "stripe.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://stripe.com/team",
+    "title": "stripe.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Stripe%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "title": "News headlines: Stripe",
+    "provider": "news_rss",
+    "foundAt": 1794495600000
+   }
+  ],
+  "notes": [
+   "SEC EDGAR did not answer"
+  ],
+  "gaps": [
+   "Wikipedia has no company article found for Stripe."
+  ],
+  "provider": "first_party",
+  "searches": 5
+ },
+ "read": {
+  "verified": [
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/stripe/jobs",
+    "title": "Stripe: Greenhouse job board",
+    "text": "The Greenhouse job board of Stripe (token stripe) lists 787 open roles.\n53 of the 787 open roles on Stripe's Greenhouse job board (token stripe) say intern, new grad, junior, associate or entry level in the title.\n60 open roles on Stripe's Greenhouse job board (token stripe) are in Dublin.\n52 open roles on Stripe's Greenhouse job board (token stripe) are in Singapore.\n33 open roles on Stripe's Greenhouse job board (token stripe) are in London.\n27 open roles on Stripe's Greenhouse job board (token stripe) are in Bengaluru.\n24 open roles on Stripe's Greenhouse job board (token stripe) are in N/A.\nOpen role on Stripe's Greenhouse job board (token stripe): Abuse Investigator, Seattle, San Francisco, New York City.\nOpen role on Stripe's Greenhouse job board (token stripe): Abuse Investigator, Dublin.\nOpen role on Stripe's Greenhouse job board (token stripe): Abuse Investigator, Dublin.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive, AI Sales, San Francisco, CA.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive, AI Sales, San Francisco, CA.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive, AI Startups - Grower, San Francisco.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive - Bridge, SF, NYC, CHI, ATL, SEA.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive, Bridge, SF, NYC, SEA, CHI.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive, Commercial (Grower), Chicago.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive, Commercial Hunter, Chicago.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive, Commercial (Hunter), Chicago.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive, Commercial Hunter, AUNZ, Sydney.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive, Commercial Hunter Japan, Japan.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive, Commercial & SMB (India), Bangalore.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive, Cross Border China, Singapore.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive, DACH, Commercial (Existing Business), Dublin or Germany (Berlin or Remote).\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive- Enterprise Grower, London.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive, Enterprise - Grower, US-New York, US-Chicago, US-Remote.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive, Enterprise (Grower), US-New York, US-Chicago.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive, Enterprise (Grower), US-San Francisco, US-Seattle, US-West Coast (Remote).\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive, Enterprise Grower (Benelux), Amsterdam.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive - Enterprise Grower (DACH Market), Germany.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive - Enterprise (Grower) - French Speaking, Paris.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive, Enterprise Grower (Israel), Israel.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive, Enterprise Grower, Platforms (Israel), Israel.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive - Enterprise, Growth, US-San Francisco, US-Seattle.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive, Enterprise - Hunter, US-Chicago, US-New York, US-San Francisco, US-Seattle.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive - Enterprise (Hunter) - Belgium, Belgium.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive, Enterprise Hunter (DACH Market), Germany.\nOpen role on Stripe's Greenhouse job board (token stripe): Account Executive, Enterprise Hunter (French-speaking), Paris.",
+    "requested": "https://boards-api.greenhouse.io/v1/boards/stripe/jobs",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/stripe/jobs/7456167?content=true",
+    "title": "Credit Risk Operations Analyst (CDMX): posting on Stripe's Greenhouse board",
+    "text": "Posting on Stripe's Greenhouse job board (token stripe): Credit Risk Operations Analyst (CDMX), Mexico City.\nThe posting says: Who we are. About Stripe. Stripe is a financial infrastructure platform for businesses. Millions of companies—from the world's largest enterprises to the most ambitious startups—use Stripe to accept payments, grow their revenue, and accelerate new business opportunities. Our mission is to increase the GDP of the internet, and we have a staggering amount of work ahead. That means you have an unprecedented opportunity to put the global economy within everyone's reach while doing the most important work of your career. About the team. At Stripe, our Mexico City office is a vibrant hub at the forefront of our mission to reshape the financial landscape for businesses worldwide. Our team prioritizes collaboration, innovation, and excellence. As a member of the Mexico City team, you'll be part of a mission-driven community dedicated to enhancing the global economy and increasing the GDP of the internet. We strive for excellence by creating with craft and beauty, while having fun and celebrating our successes together. We cultivate a culture of collaboration, inclusivity, and support where every team member's voice matters. Our commitment shines through as we handle over a million support cases each year, empowering our users not just to solve problems but to achieve their goals. What you'll do. The credit risk operations team plays a critical role in ensuring a healthy financial ecosystem for businesses around the world. This team will directly impact the company's bottom line and growth capabilities by supporting new and emerging businesses. The Credit Operations team is responsible for conducting credit risk assessments, underwriting small and mid-size users, and proposing mitigation strategies that enable Stripe to take smart risks for our users. Responsibilities. • Work with merchants, from successful venture-backed startups to well-established institutions, evaluating their business models and financial statements. • Help manage Stripe's portfolio by developing a deep understanding of risk across industries, geographies, and operating models. • Identify differing risks of complex business models and enforce appropriate loss mitigation actions based on your assessment. • Utilize analytics to optimize strategies that can be enforced across Stripe's portfolio. • Identify risk factors and trends and further report these identifiers to the wider risk team to ensure consistency in partnership. • Identify gaps in current systems, policies, and strategies, and recommend enhancements and process improvements. • Have an opportunity to learn how Stripe operates from the ground up and make a real impact on the future of the organization. • Be a part of building a brand-new team and operational culture for Stripe. • Partner with global operations specialists or business process owners to run a critical workflow. Who you are. We're looking for someone who meets the minimum requirements to be considered for the role. If you meet these requirements, you are encouraged to apply. The preferred qualifications are a bonus, not a requirement. Minimum requirements. • 1+ years of experience with knowledge of commercial credit underwriting, financial risk modeling, and cash flow forecasting. • Ability to transform business and financial data into a cohesive narrative that outlines potential credit risks. • Strong knowledge of accounting principles and comfort with evaluating financial statements and business models across a range of industries. • You excel in diagnostic thinking and problem-solving. • You have a process-oriented mindset and ability to get things done. • You enjoy working in an in-office environment with strong cross-team collaboration and support. • You are able to prioritize and enjoy working in a quick-moving environment. • You are humble and have a proven track record for working well across teams and with external partners. • You're willing to periodically work a weekend day for which you will receive a weekday off. The SDC operates during daytime hours with shifts from the morning through early evening. Preferred qualifications. • Proficiency in SQL or other data analysis tools. • The ability and desire to challenge the status quo.",
+    "requested": "https://boards-api.greenhouse.io/v1/boards/stripe/jobs/7456167?content=true",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/stripe/jobs/7230921?content=true",
+    "title": "Risk Operations Analyst: posting on Stripe's Greenhouse board",
+    "text": "Posting on Stripe's Greenhouse job board (token stripe): Risk Operations Analyst, Chicago, Atlanta, US-Remote, Toro.\nThe posting says: Who we are. About Stripe. Stripe is a financial infrastructure platform for businesses. Millions of companies—from the world's largest enterprises to the most ambitious startups—use Stripe to accept payments, grow their revenue, and accelerate new business opportunities. Our mission is to increase the GDP of the internet, and we have a staggering amount of work ahead. That means you have an unprecedented opportunity to put the global economy within everyone's reach while doing the most important work of your career. About the team. Risk Operations is responsible for managing the risk relationships spanning across global payment method, card, and financial partners. It's our mission to build operational controls to mitigate user and partner risk and enable strategic development opportunities. What you'll do. As a Risk Operations Analyst, you'll work to ensure our policies, operations, and workflows align to the needs of our financial partners. You'll be accountable for workflows impacting a variety of cross-functional internal and external stakeholders to identify and assess regulatory, contractual, and partner risk. Further, you'll influence and advise operational teams in building out scalable operational processes to ensure compliance with service level agreements, routine reporting, and overall risk mitigation. Responsibilities. Demonstrate sound judgment and an ability to navigate non-binary, high-risk decisions. Evaluate merchants, from successful venture-backed startups to well-established institutions by assessing suitability to process on Stripe. Adhere closely to process while still constantly questioning assumptions, suggesting improvements, and following up on implementation of those improvements. Effectively and clearly communicate, including with other Stripe employees, Stripe users, and Stripe financial partners. Identify trends and further report these to cross-functional teams to enhance detection systems. Contribute to projects to enhance and optimize due diligence strategy systems and tools. Help build and scale processes across the risk operations ecosystem. Identify gaps in current systems, policies, and strategies, and recommend enhancements and process improvements to mitigate emerging risks through a collaborative approach with stakeholders. Who you are. We're looking for someone who meets the minimum requirements to be considered for the role. If you meet these requirements, you are encouraged to apply. The preferred qualifications are a bonus, not a requirement. Minimum requirements. 5+ years of experience in risk management, compliance, or operations in a fast-moving environment. Experience scaling operational processes and driving quantifiable improvements. Experience working cross-functionally on complex problems. Ability to use data to quantify problems, tell a story, and influence a solution. The ability and desire to challenge the status quo. Creative thinker who considers problems from a customer perspective while being pragmatic and solutions-oriented when solving them. Experience analyzing feedback patterns and using those insights to drive process and tooling improvements. You have a lot of ownership, are accountable, and drive towards ambitious goals. Deep empathy for entrepreneurs running a business and motivation to solve problems to empower them. Preferred qualifications. Experience with risk assessment and mitigation strategies in a financial technology environment. Knowledge of payment processing systems and associated risks.",
+    "requested": "https://boards-api.greenhouse.io/v1/boards/stripe/jobs/7230921?content=true",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   }
+  ],
+  "rejected": [
+   {
+    "url": "https://stripe.com/",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://stripe.com/about",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://stripe.com/careers",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://stripe.com/press",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://stripe.com/team",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Stripe%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "why": "unreachable"
+   }
+  ]
+ }
+}

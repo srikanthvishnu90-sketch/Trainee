@@ -1,0 +1,101 @@
+{
+ "case": {
+  "id": "R18",
+  "company": "Notion",
+  "site": "notion.so",
+  "role": "Software Engineer, Web Infrastructure"
+ },
+ "plan": {
+  "queries": [
+   "Notion",
+   "Notion Software Engineer, Web Infrastructure"
+  ],
+  "companies": [
+   "Notion"
+  ],
+  "sites": [
+   "notion.so"
+  ]
+ },
+ "captured_at": "2026-11-12T07:24:17.984Z",
+ "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
+ "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
+ "search": {
+  "hits": [
+   {
+    "url": "https://notion.so/",
+    "title": "notion.so",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://notion.so/about",
+    "title": "notion.so",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://notion.so/careers",
+    "title": "notion.so",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://notion.so/press",
+    "title": "notion.so",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://notion.so/team",
+    "title": "notion.so",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Notion%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "title": "News headlines: Notion",
+    "provider": "news_rss",
+    "foundAt": 1794495600000
+   }
+  ],
+  "notes": [
+   "SEC EDGAR did not answer"
+  ],
+  "gaps": [
+   "No public Greenhouse, Lever, Ashby or SmartRecruiters job board was found for Notion, so open roles were not counted.",
+   "Wikipedia has no company article found for Notion."
+  ],
+  "provider": "first_party",
+  "searches": 5
+ },
+ "read": {
+  "verified": [],
+  "rejected": [
+   {
+    "url": "https://notion.so/",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://notion.so/about",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://notion.so/careers",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://notion.so/press",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://notion.so/team",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Notion%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "why": "unreachable"
+   }
+  ]
+ }
+}

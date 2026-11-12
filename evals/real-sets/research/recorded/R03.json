@@ -1,0 +1,143 @@
+{
+ "case": {
+  "id": "R03",
+  "company": "Figma",
+  "site": "figma.com",
+  "role": "Software Engineer - Machine Learning"
+ },
+ "plan": {
+  "queries": [
+   "Figma",
+   "Figma Software Engineer - Machine Learning"
+  ],
+  "companies": [
+   "Figma"
+  ],
+  "sites": [
+   "figma.com"
+  ]
+ },
+ "captured_at": "2026-11-12T07:23:35.404Z",
+ "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
+ "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
+ "search": {
+  "hits": [
+   {
+    "url": "https://figma.com/",
+    "title": "figma.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://figma.com/about",
+    "title": "figma.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://figma.com/careers",
+    "title": "figma.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/figma/jobs",
+    "title": "Greenhouse job board: figma",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/figma/jobs/5551532004?content=true",
+    "title": "Software Engineer - Machine Learning (Greenhouse posting)",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/figma/jobs/6073106004?content=true",
+    "title": "Software Engineer - Figma Weave (Tel Aviv, Israel) (Greenhouse posting)",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://figma.com/press",
+    "title": "figma.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://figma.com/team",
+    "title": "figma.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Figma%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "title": "News headlines: Figma",
+    "provider": "news_rss",
+    "foundAt": 1794495600000
+   }
+  ],
+  "notes": [
+   "SEC EDGAR did not answer"
+  ],
+  "gaps": [
+   "Wikipedia has no company article found for Figma."
+  ],
+  "provider": "first_party",
+  "searches": 5
+ },
+ "read": {
+  "verified": [
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/figma/jobs",
+    "title": "Figma: Greenhouse job board",
+    "text": "The Greenhouse job board of Figma (token figma) lists 141 open roles.\n10 of the 141 open roles on Figma's Greenhouse job board (token figma) say intern, new grad, junior, associate or entry level in the title.\n67 open roles on Figma's Greenhouse job board (token figma) are in San Francisco, CA • New York, NY • United States.\n20 open roles on Figma's Greenhouse job board (token figma) are in London, England.\n14 open roles on Figma's Greenhouse job board (token figma) are in San Francisco, CA • New York, NY.\n8 open roles on Figma's Greenhouse job board (token figma) are in Berlin, Germany.\n5 open roles on Figma's Greenhouse job board (token figma) are in New York, NY • United States.\nOpen role on Figma's Greenhouse job board (token figma): Account Executive, Enterprise, San Francisco, CA • New York, NY • United States.\nOpen role on Figma's Greenhouse job board (token figma): Account Executive, Enterprise (Bengaluru, India), Bengaluru, India.\nOpen role on Figma's Greenhouse job board (token figma): Account Executive, Enterprise (Berlin, Germany), Berlin, Germany.\nOpen role on Figma's Greenhouse job board (token figma): Account Executive, Enterprise (London, United Kingdom), London, England.\nOpen role on Figma's Greenhouse job board (token figma): Account Executive, Enterprise, Mandarin Speaking (Singapore), Singapore.\nOpen role on Figma's Greenhouse job board (token figma): Account Executive, Enterprise (São Paulo, Brazil), São Paulo, Brazil.\nOpen role on Figma's Greenhouse job board (token figma): Account Executive, Enterprise (Tokyo, Japan), Tokyo, Japan.\nOpen role on Figma's Greenhouse job board (token figma): Account Executive - Figma Weave (London, United Kingdom), London, England.\nOpen role on Figma's Greenhouse job board (token figma): Account Executive, Mid-Market (Berlin, Germany), Berlin, Germany.\nOpen role on Figma's Greenhouse job board (token figma): Account Executive, Mid-Market (London, United Kingdom), London, England.\nOpen role on Figma's Greenhouse job board (token figma): Account Executive, Mid-Market, Mandarin Speaking (Singapore), Singapore.\nOpen role on Figma's Greenhouse job board (token figma): Account Executive, Mid-Market (Paris, France), Paris, France.\nOpen role on Figma's Greenhouse job board (token figma): Account Executive, Mid-Market (Sydney, Australia), Sydney, Australia.\nOpen role on Figma's Greenhouse job board (token figma): Account Executive, Public Sector - State & Local, San Francisco, CA.\nOpen role on Figma's Greenhouse job board (token figma): Account Executive, SMB, San Francisco, CA • New York, NY.\nOpen role on Figma's Greenhouse job board (token figma): Account Executive, SMB (Berlin, Germany), Berlin, Germany.\nOpen role on Figma's Greenhouse job board (token figma): Account Executive, SMB (London, United Kingdom), London, England.\nOpen role on Figma's Greenhouse job board (token figma): Account Executive, Strategic, San Francisco, CA • New York, NY • United States.\nOpen role on Figma's Greenhouse job board (token figma): Account Executive, Strategic (London, United Kingdom), London, England.\nOpen role on Figma's Greenhouse job board (token figma): Account Executive, Strategic (Paris, France), Paris, France.\nOpen role on Figma's Greenhouse job board (token figma): Account Executive, Strategic (São Paulo, Brazil), São Paulo, Brazil.\nOpen role on Figma's Greenhouse job board (token figma): AI Applied Scientist, San Francisco, CA • New York, NY • United States.\nOpen role on Figma's Greenhouse job board (token figma): AI Engineer, Internal Tools, San Francisco, CA • New York, NY • United States.\nOpen role on Figma's Greenhouse job board (token figma): Brand Designer, Web, San Francisco, CA • New York, NY • United States.\nOpen role on Figma's Greenhouse job board (token figma): Business Systems Analyst, San Francisco, CA • New York, NY • United States.\nOpen role on Figma's Greenhouse job board (token figma): Business Systems Architect, San Francisco, CA • New York, NY • United States.\nOpen role on Figma's Greenhouse job board (token figma): Compliance Engineer, San Francisco, CA • New York, NY • United States.\nOpen role on Figma's Greenhouse job board (token figma): Content Strategist, Product, San Francisco, CA • New York, NY • United States.\nOpen role on Figma's Greenhouse job board (token figma): Corporate Communications Manager, San Francisco, CA • New York, NY.\nOpen role on Figma's Greenhouse job board (token figma): Customer Success Manager - Figma Weave (London, United Kingdom), London, England.",
+    "requested": "https://boards-api.greenhouse.io/v1/boards/figma/jobs",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/figma/jobs/5551532004?content=true",
+    "title": "Software Engineer - Machine Learning: posting on Figma's Greenhouse board",
+    "text": "Posting on Figma's Greenhouse job board (token figma): Software Engineer - Machine Learning, San Francisco, CA • New York, NY • United States.\nThe posting says: Figma is growing our team of passionate creatives and builders on a mission to make design accessible to all. Figma’s platform helps teams bring ideas to life—whether you're brainstorming, creating a prototype, translating designs into code, or iterating with AI. From idea to product, Figma empowers teams to streamline workflows, move faster, and work together in real time from anywhere in the world. If you're excited to shape the future of design and collaboration, join us!. Figma is seeking a versatile and experienced Machine Learning / AI Engineer to join our growing AI team, working at the intersection of applied machine learning, infrastructure, and product innovation. Whether you’re building intelligent search systems, crafting scalable data pipelines, or enhancing AI-powered creativity tools, your work will drive user productivity, shape new product experiences, and advance the state of AI at Figma. You’ll collaborate closely with engineers, researchers, designers, and product managers across multiple teams to deliver high-quality ML-driven features and infrastructure. This is a high-impact, cross-functional role where you’ll shape both foundational systems and user-facing capabilities. This is a full time role that can be held from one of our US hubs or remotely in the United States. What you’ll do at Figma: . Design, build, and productionize ML models for Search, Discovery, Ranking, Retrieval-Augmented Generation (RAG), and generative AI features. Build and maintain scalable data pipelines to collect high-quality training and evaluation datasets, including annotation systems and human-in-the-loop workflows. Collaborate with AI researchers to iterate on datasets, evaluation metrics, and model architectures to improve quality and relevance. Work with product engineers to define and deliver impactful AI features across Figma’s platform. Partner with infrastructure engineers to develop and optimize systems for training, inference, monitoring, and deployment. Explore new ideas at the edge of what’s technically possible and help shape the long-term AI vision at Figma. We’d love to hear from you If you have: . 5+ years of industry experience in software engineering, with 3+ years focused on applied machine learning or AI. Strong experience with end-to-end ML model development, including training, evaluation, deployment, and monitoring. Proficiency in Python and familiarity with ML libraries like PyTorch, TensorFlow, Scikit-learn, Spark MLlib, or XGBoost. Experience designing and building scalable data and annotation pipelines, as well as evaluation systems for AI model quality. Experience mentoring or leading others and contributing to a culture of technical excellence and innovation. While not required, It’s an added plus if you also have: . Familiarity with search relevance, ranking, NLP, or RAG systems. Experience with AI infrastructure and MLOps, including observability, CI/CD, and automation for ML workflows. Experience working on creative or design-focused ML applications. Knowledge of additional languages such as C++ or Go is a plus, but not required. A product mindset with the ability to tie technical work to user outcomes and business impact. Strong collaboration and communication skills, especially when working across functions (engineering, product, research). At Figma, one of our values is Grow as you go. We believe in hiring smart, curious people who are excited to learn and develop their skills. If you’re excited about this role but your past experience doesn’t align perfectly with the points outlined in the job description, we encourage you to apply anyways. You may be just the right candidate for this or other roles... Pay Transparency Disclosure . Job level and actual compensation will be decided based on factors including, but not limited to, individual qualifications objectively assessed during the interview process (including skills and prior relevant experience, potential impact, and scope of role), market demands, and specific work location. Figma offers equity to employees, as well as a competitive package of additional benefits, including health, dental, and vision coverage; retirement benefits with company contributions; parental leave and reproductive or family planning support; mental health and wellness benefits; and paid time off. Figma provides paid sick leave, holidays, and other leave benefits in compliance with applicable federal, state, and local laws, including the requirements of the Washington Minimum Wage Act and related regulations. Exempt employees are eligible for employer‑provided paid flexible PTO in addition to flexible paid sick leave. PTO is subject to manager approval. Additional benefits may include company recharge days, cell phone and home internet reimbursements, and a number of lifestyle spending accounts. Figma also offers sales incentive compensation for most sales roles and an annual bonus plan for eligible non-sales roles. All compensation and benefits are subject to applicable plan terms and may be modified by Figma at any time, consistent with applicable law. . Annual Base Salary Range:. $153,000 &mdash; $376,000 USD. . At Figma we celebrate and support our differences. We know employing a team rich in diverse thoughts, experiences, and opinions allows our employees, our product and our community to flourish. Figma is an equal opportunity workplace - we are dedicated to equal employment opportunities regardless of race, color, ancestry, religion, sex, national origin, sexual orientation, age, citizenship, marital status, disability, gender identity/expression, veteran status , or any other characteristic protected by law. We also consider qualified applicants regardless of criminal histories, consistent with legal requirements. We will work to ensure individuals with disabilities are provided reasonable accommodation to apply for a role, participate in the interview process, perform essential job functions, and receive other ben",
+    "requested": "https://boards-api.greenhouse.io/v1/boards/figma/jobs/5551532004?content=true",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/figma/jobs/6073106004?content=true",
+    "title": "Software Engineer - Figma Weave (Tel Aviv, Israel): posting on Figma's Greenhouse board",
+    "text": "Posting on Figma's Greenhouse job board (token figma): Software Engineer - Figma Weave (Tel Aviv, Israel), Tel Aviv, Israel.\nThe posting says: Figma is growing our team of passionate creatives and builders on a mission to make design accessible to all. Figma’s platform helps teams bring ideas to life—whether you're brainstorming, creating a prototype, translating designs into code, or iterating with AI. From idea to product, Figma empowers teams to streamline workflows, move faster, and work together in real time from anywhere in the world. If you're excited to shape the future of design and collaboration, join us!. We're building the next chapter of AI-native craft and creativity - where craft and technology meet. Our unified platform bridges the gap between AI capabilities and human creativity, and lets professional creatives and designers harness the power of the world’s leading AI models without losing precision, expression, or soul. Together, we’re building tools that help people move faster without sacrificing quality, precision, or craft - a platform where AI supports creativity instead of flattening it. We’re looking for experienced full-stack engineers to join the Figma Weave team. Whether you're enabling real-time collaboration for thousands of designers, building systems that make design tools robust, performant, and scalable, creating new ways for teams to design and share ideas seamlessly, or powering the features that drive product growth, your work will directly impact the experiences of our users - from startups to Fortune 500 companies. You’ll contribute to our core mission by designing and scaling reliable, secure, and intuitive systems across Figma Weave. Our teams are highly collaborative, work cross-functionally, and focus on building features that support our rapid growth, global expansion, and evolving product surface area. What you’ll do at Figma Weave: . Design, build, test, and ship high-quality features across the stack, using technologies like TypeScript, React, Ruby, Go, and more. Own key parts of the product that impact user experience, internal productivity, or revenue operations. Collaborate with cross-functional partners in product, design, data science, support, and sales to shape product direction and solve complex problems. Operate and monitor the systems you build, with a strong focus on reliability, security, performance, and user experience. Contribute to team culture by mentoring peers, providing feedback, and helping foster a collaborative and inclusive engineering environment. We’d Love to Hear From You If You Have: . 5+ years of professional software engineering experience, with a track record of shipping and maintaining complex systems or products in production. Full-stack experience with modern front-end frameworks (e.g., React/TypeScript) and back-end technologies (e.g., Ruby, Go, Node.js, PostgreSQL). Strong collaboration and communication skills, with experience working effectively across functions. While it’s not required, it’s an added plus if you also have: . Experience with Rust, WebAssembly, or graphics rendering technologies. Prior work on extensibility platforms (plugins, APIs, widgets), or experience contributing to open source developer communities. Passion for crafting excellent developer or user experiences, and an eye for elegant, maintainable architecture. Enthusiasm for learning and teaching - whether mentoring teammates, leading initiatives, or sharing knowledge in code reviews or pairing sessions. At Figma, one of our values is Grow as you go. We believe in hiring smart, curious people who are excited to learn and develop their skills. If you’re excited about this role but your past experience doesn’t align perfectly with the points outlined in the job description, we encourage you to apply anyways. You may be just the right candidate for this or other roles.. . At Figma we celebrate and support our differences. We know employing a team rich in diverse thoughts, experiences, and opinions allows our employees, our product and our community to flourish. Figma is an equal opportunity workplace - we are dedicated to equal employment opportunities regardless of race, color, ancestry, religion, sex, national origin, sexual orientation, age, citizenship, marital status, disability, gender identity/expression, veteran status , or any other characteristic protected by law. We also consider qualified applicants regardless of criminal histories, consistent with legal requirements. We will work to ensure individuals with disabilities are provided reasonable accommodation to apply for a role, participate in the interview process, perform essential job functions, and receive other benefits and privileges of employment. If you require accommodation, please reach out to accommodations-ext@figma.com . These modifications enable an individual with a disability to have an equal opportunity not only to get a job, but successfully perform their job tasks to the same extent as people without disabilities. Examples of accommodations include but are not limited to: . Holding interviews in an accessible location. Enabling closed captioning on video conferencing. Ensuring all written communication be compatible with screen readers. Changing the mode or format of interviews . To ensure the integrity of our hiring process and facilitate a more personal connection, we require all candidates keep their cameras on during video interviews. Additionally, if hired you will be required to attend in person onboarding. By applying for this job, the candidate acknowledges and agrees that any personal data contained in their application or supporting materials will be processed in accordance with Figma's Candidate Privacy Notice. Application limits: To help candidates focus on the opportunities most relevant to their skills and experience, Figma limits the number and frequency of applications. These limits apply to all roles:. Candidates may submit up to 5 applications during any rolling 30-day period. Candidates may not reapply to the same role while an application is active or within 90 days of receiv",
+    "requested": "https://boards-api.greenhouse.io/v1/boards/figma/jobs/6073106004?content=true",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   }
+  ],
+  "rejected": [
+   {
+    "url": "https://figma.com/",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://figma.com/about",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://figma.com/careers",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://figma.com/press",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://figma.com/team",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Figma%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "why": "unreachable"
+   }
+  ]
+ }
+}

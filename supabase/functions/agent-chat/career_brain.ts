@@ -18,7 +18,7 @@ import { enforceFollowupAsk } from "../_shared/followup_draft.ts";
 import { urlsIn } from "../_shared/channel_shape.ts";
 import { knowledgeFor, type Knowledge } from "../_shared/agent/knowledge/index.ts";
 import { styleBlock } from "../_shared/agent/style.ts";
-import { boundaryNote, boundaryOf, correctionNote, correctionOf, HYPOTHETICAL_WITHHELD, hypotheticalNote, hypotheticalOf, lengthNote, multiAskNote, PERSONA_WITHHELD, postingNote, postingRefOf, REPLY_LENGTH, replyLength, roastNote, roastOf } from "../_shared/agent/turn_notes.ts";
+import { boundaryNote, boundaryOf, correctionNote, correctionOf, HYPOTHETICAL_WITHHELD, hypotheticalNote, hypotheticalOf, lengthNote, multiAskNote, PERSONA_WITHHELD, whileWorkingNote, postingNote, postingRefOf, REPLY_LENGTH, replyLength, roastNote, roastOf } from "../_shared/agent/turn_notes.ts";
 import { severalAsks } from "../_shared/ask_language.ts";
 import type { AlertStore } from "../_shared/career_alert_store.ts";
 import type { HiredSource } from "../_shared/career_hired.ts";
@@ -137,6 +137,8 @@ export async function agentTurn(o: {
   // handler passes a File service, which it does on every channel (the link rides shape.links after the answer; where File links
   // are not set up the service refuses and the brain says so); no longer tied to the reply writer, which stays off (RELEASE_NEVER_ON).
   files?: FileService | null;
+  // D-064 (G13): this message arrived while the previous turn (this text, the person's previous message) was still running.
+  whileWorking?: string | null;
   // D-062: the capability tools (_shared/agent/capability_tools.ts: Gmail record and tracker, people search, answering an email),
   // under the same withholding as every other tool.
   capabilities?: import("../_shared/agent/loop.ts").ToolSpec[] | null;
@@ -151,7 +153,7 @@ export async function agentTurn(o: {
   // D-061 G6, G9, G13: the boundary the person set, a correction said out loud, several asks each answered (turn_notes.ts).
   const boundary = boundaryOf(o.message), correction = correctionOf(o.message);
   const turnNotes = [hypo ? hypotheticalNote(hypo) : "", roast ? roastNote(roast) : "", meant.length ? postingNote(meant) : "", boundary ? boundaryNote(boundary) : "",
-    correction ? correctionNote(correction) : "", severalAsks(o.message) ? multiAskNote() : "", lengthNote(replyLength(o.message))].filter(Boolean);
+    correction ? correctionNote(correction) : "", typeof o.whileWorking === "string" ? whileWorkingNote(o.whileWorking) : severalAsks(o.message) ? multiAskNote() : "", lengthNote(replyLength(o.message))].filter(Boolean);
   const hypoWithheld = hypo === "persona" ? PERSONA_WITHHELD : hypo ? HYPOTHETICAL_WITHHELD : [];
   const block = o.known ? personBlock({ profile: hypo === "persona" ? null : o.stores.profile, ...o.known }) : null;
   const notes: string[] = [];

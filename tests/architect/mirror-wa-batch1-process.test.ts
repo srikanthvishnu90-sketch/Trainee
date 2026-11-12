@@ -9,7 +9,7 @@
 // double is refused and recorded with its full address.
 //
 // EXISTS turns: their process is asserted here. Turns blocked on a capability that is OFF or MISSING are listed in BLOCKED with
-// the named blocker; tests/architect/pending/mirror-process-blocked.test.ts asserts their full process and fails until each lands.
+// the named blocker; tests/architect/mirror-process-blocked.test.ts asserts their full process (architect amendment (D-064): promoted from pending/).
 //   CI=true deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/mirror-wa-batch1-process.test.ts
 import assertNode from "node:assert/strict";
 import { canRun } from "./helpers/response_world.ts";

@@ -12,7 +12,7 @@ today.
 - **MISSING**: what has to be built or provided.
 
 A turn with any OFF or MISSING step is **blocked**: it is listed in the test's `BLOCKED` table with the named blocker, and
-`tests/architect/pending/mirror-process-blocked.test.ts` asserts its full process and fails until the capability lands. The
+`tests/architect/mirror-process-blocked.test.ts` asserts its full process and fails until the capability lands. The
 test reads the summary table below and fails if a row and the test disagree.
 
 What the benchmark could see of Instinct's process is its replies (the tools behind them are inferred from what each reply
@@ -45,7 +45,7 @@ The loop, reusable for any reference (Instinct batch 2, another assistant, a hum
    build or provide).
 3. **$0 process tests** through the real handler with a scripted model under production's configuration: the EXISTS turns'
    process asserted (`mirror-wa-batch1-process.test.ts`); the blocked turns' full process in a pending test that fails until
-   each capability lands (`tests/architect/pending/mirror-process-blocked.test.ts`). Never ignored, never weakened.
+   each capability lands (`tests/architect/mirror-process-blocked.test.ts`). Never ignored, never weakened.
 4. **Live run under production flags** with the real model, only on the owner's approved spend (D-057 style), through
    `.github/workflows/mirror-conversation.yml`.
 5. **Score both the text and the process**: the reply against the reference's (`evals/mirror/score-conversation.ts`), and the

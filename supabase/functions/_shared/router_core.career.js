@@ -21894,6 +21894,9 @@ const CareerRouter = (() => {
     const d = ctx && ctx.workerCapabilities && ctx.workerCapabilities.job_alert_delivery;
     return !!(d && (d.live === true || d.status === "LIVE"));
   }
+  function watchSourceLine() {
+    return "It reads the employer job boards I index (Greenhouse, Lever, Ashby, Workday and similar), never LinkedIn or Indeed, so a role posted only there won't reach you.";
+  }
   function alertDeliveryLine(ctx) {
     return alertDeliveryLive(ctx)
       ? "I will text you matches as they post."
@@ -21977,6 +21980,7 @@ const CareerRouter = (() => {
     else facts.push("Remote postings for this role are included too, as long as they are open to where you are; say \"no remote\" to leave them out.");
     if (interest.filters.remote_ok !== false && !homeKnown) facts.push("A remote posting limited to a country is held until I know where you are — tell me your city and country.");
     if (userWords) facts.push("That title is not a standard category, so the watch keys on your own words exactly as you stated them — postings whose titles carry those words are what it can match.");
+    facts.push(watchSourceLine());
     facts.push(alertDeliveryLine(ctx));
     if (wp.opt_out && wp.opt_out.global) facts.push("Your job alerts are currently paused, so this watch is recorded but will not remind until you resume alerts.");
     const missing = [];
@@ -22010,6 +22014,7 @@ const CareerRouter = (() => {
       : ["Your watch profile exists but holds no interests right now — it polls nothing and reminds nothing."];
     if (wp.opt_out && wp.opt_out.global) facts.push("Job alerts are PAUSED for you: watches are recorded, and no reminders go out until you resume them.");
     if (wp.alert_cap_per_day) facts.push(`Cap: at most ${wp.alert_cap_per_day} alert${wp.alert_cap_per_day === 1 ? "" : "s"} a day across your watches.`);
+    if (wp.interests.length) facts.push(watchSourceLine());
     facts.push(alertDeliveryLine(ctx));
     if (queued) facts.push(`${queued} reminder${queued === 1 ? " is" : "s are"} already queued for delivery.`);
     const reply = compose({ headline: wp.interests.length ? `You are watching ${wp.interests.length} role${wp.interests.length === 1 ? "" : "s"}.` : "Your watch list is empty.", facts, nextStep: "Add a role, remove one by name, or pause alerts — say which." });

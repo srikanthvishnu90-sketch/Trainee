@@ -29,6 +29,7 @@ export type Seen = {
   reply: string; intent: string | null; documents: any[];
   outbound: string[]; // off-machine requests made during this turn (method and full address), each refused
   searches: number; // web searches (the web_search server tool) requested on this turn
+  body?: any; // Architect amendment (D-066), additive: the handler's whole response body (shape.links, artifacts), for the behavior-guide suite
 };
 // The switches as the handler reads them at a turn: every release flag's served value, and whether any never-on switch is on.
 export type FlagsAtTurn = { release: Record<string, string | undefined>; neverOnOn: string[]; brain: string | undefined };
@@ -47,7 +48,7 @@ export type Step = { tool: string; input: Record<string, unknown> | ((calls: Cal
 // a real public page answering an off-machine request (tests/fixtures/), or null to refuse it. A served request is still
 // recorded on its turn (Seen.outbound) exactly like a refused one; nothing else changes.
 export type SeedPosting = { id: string; provider: string; board: string; company: string; title: string; location: string; url: string; description: string };
-export async function runConversation(script: Record<string, Step[]>, opts: { only?: string[]; web?: (body: any, turn: string) => any; draft?: (system: string, user: string, turn: string) => string | null; posting?: SeedPosting; turns?: { id: string; prompt: string }[]; serve?: (req: Request, turn: string) => Response | null | Promise<Response | null> } = {}): Promise<{ seen: Record<string, Seen>; flags: Record<string, FlagsAtTurn>; world: World; person: { id: string }; close: () => Promise<void> }> {
+export async function runConversation(script: Record<string, Step[]>, opts: { only?: string[]; web?: (body: any, turn: string) => any; draft?: (system: string, user: string, turn: string) => string | null; posting?: SeedPosting; turns?: { id: string; prompt: string }[]; serve?: (req: Request, turn: string) => Response | null | Promise<Response | null>; env?: Record<string, string> } = {}): Promise<{ seen: Record<string, Seen>; flags: Record<string, FlagsAtTurn>; world: World; person: { id: string }; close: () => Promise<void> }> {
   let label = "";
   const seen: Record<string, Seen> = {};
   const fresh = (): Seen => ({ code: true, tools: [], schemas: {}, system: "", history: "", calls: [], reply: "", intent: null, documents: [], outbound: [], searches: 0 });
@@ -112,8 +113,11 @@ export async function runConversation(script: Record<string, Step[]>, opts: { on
   for (const k of RELEASE_NEVER_ON) Deno.env.delete(k);
   Deno.env.set("CAREER_BRAIN", PRODUCTION_BRAIN);
   Deno.env.set("ANTHROPIC_API_KEY", "sk-test-not-real");
+  // Architect amendment (D-066), additive: env: variables set after the world is open (production's File settings stood in by a
+  // non-routable base and a TEST secret, as evals/mirror/heldout/harness.ts FILE_ENV does), removed again by close().
+  for (const [k, v] of Object.entries(opts.env ?? {})) Deno.env.set(k, v);
   const flags: Record<string, FlagsAtTurn> = {};
-  const close = async () => { globalThis.fetch = refuse; Deno.env.delete("CAREER_BRAIN"); Deno.env.delete("ANTHROPIC_API_KEY"); await world.close(); };
+  const close = async () => { globalThis.fetch = refuse; Deno.env.delete("CAREER_BRAIN"); Deno.env.delete("ANTHROPIC_API_KEY"); for (const k of Object.keys(opts.env ?? {})) Deno.env.delete(k); await world.close(); };
   try {
     const seed: SeedPosting = opts.posting ?? { id: PAYPAL.id, provider: "greenhouse", board: "paypalwa1", company: "PayPal", title: "Software Engineer Intern", location: "Chicago, IL", url: PAYPAL.url, description: "Summer 2027 software engineering internship. Python, Java, SQL. Pay: $28 - $49 per hour." };
     const q = (v: string) => `$q$${v}$q$`;
@@ -131,6 +135,7 @@ export async function runConversation(script: Record<string, Step[]>, opts: { on
       // materializeArtifacts: kind, ref, filename, mime), never as `documents`, so the files were never seen here. Each is read
       // with its format from its mime; a response that does carry `documents` is read as before.
       const fmt = (a: any) => /pdf/.test(String(a?.mime)) ? "pdf" : /wordprocessingml/.test(String(a?.mime)) ? "docx" : String(a?.format ?? a?.mime ?? "");
+      s.body = r.body ?? null; // Architect amendment (D-066), additive
       s.reply = String(r.reply ?? ""); s.intent = r.intent ?? null; s.documents = Array.isArray(r.body?.documents) ? r.body.documents : Array.isArray(r.body?.artifacts) ? r.body.artifacts.filter((a: any) => a?.kind === "document").map((a: any) => ({ ...a, format: fmt(a) })) : [];
     }
     return { seen, flags, world, person, close };

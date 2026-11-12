@@ -16,11 +16,12 @@ fictional name.
 |---|---|---|---|---|---|---|
 | `live-3` (CI run 42975069689) | the routing fixes | $1.3950 | 0 / 26 | 13 | 0 | 936 |
 | `live-4` (CI run 42977209350) | + texts condensed, + the quoted mock question | $1.4005 | 3 / 26 (11.5%) | 12 | 5 | 460 |
+| [`live-5`](live-5/) (CI run 43135329449) | trunk 1ee06408 (D-059 to D-063), web research on (D-060), scored on the five P5 checks | $1.8375 | 1 / 26 (C18 to C23 cut by the cap) | 13 | 1 | 507 |
 
 `live-1` and `live-2` cost $0 and did not reach the model. The runner set the API key after the test world had cleared it,
 so every call got a 401. Both runners are fixed.
 
-The total spent under D-057 is $2.7955 of $3.
+The total spent under D-057 is $2.7955 of $3. live-5 ran under D-060 ($10 for this effort).
 
 **How a turn is scored** (`evals/mirror/score-conversation.ts`): a turn mirrors when it passes all six checks below.
 

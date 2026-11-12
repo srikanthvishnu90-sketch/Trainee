@@ -1,0 +1,144 @@
+{
+ "case": {
+  "id": "R07",
+  "company": "Duolingo",
+  "site": "duolingo.com",
+  "role": "Data Scientist, Intern",
+  "board": "greenhouse:duolingo"
+ },
+ "plan": {
+  "queries": [
+   "Duolingo",
+   "Duolingo Data Scientist, Intern"
+  ],
+  "companies": [
+   "Duolingo"
+  ],
+  "sites": [
+   "duolingo.com"
+  ]
+ },
+ "captured_at": "2026-11-12T07:53:41.303Z",
+ "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
+ "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
+ "search": {
+  "hits": [
+   {
+    "url": "https://duolingo.com/",
+    "title": "duolingo.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://duolingo.com/about",
+    "title": "duolingo.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://duolingo.com/careers",
+    "title": "duolingo.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/duolingo/jobs",
+    "title": "Greenhouse job board: duolingo",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/duolingo/jobs/8888848002?content=true",
+    "title": "Data Scientist, Intern (PhD) (Greenhouse posting)",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/duolingo/jobs/8750636002?content=true",
+    "title": "Senior Data Scientist, Growth Forecasting (Greenhouse posting)",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://duolingo.com/press",
+    "title": "duolingo.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://duolingo.com/team",
+    "title": "duolingo.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Duolingo%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "title": "News headlines: Duolingo",
+    "provider": "news_rss",
+    "foundAt": 1794495600000
+   }
+  ],
+  "notes": [
+   "SEC EDGAR did not answer"
+  ],
+  "gaps": [
+   "Wikipedia has no company article found for Duolingo."
+  ],
+  "provider": "first_party",
+  "searches": 5
+ },
+ "read": {
+  "verified": [
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/duolingo/jobs",
+    "title": "Duolingo: Greenhouse job board",
+    "text": "The Greenhouse job board of Duolingo (token duolingo) lists 61 open roles.\n6 of the 61 open roles on Duolingo's Greenhouse job board (token duolingo) say intern, new grad, junior, associate or entry level in the title.\n29 open roles on Duolingo's Greenhouse job board (token duolingo) are in New York, NY; Pittsburgh, PA.\n10 open roles on Duolingo's Greenhouse job board (token duolingo) are in New York, NY.\n8 open roles on Duolingo's Greenhouse job board (token duolingo) are in Beijing, China.\n6 open roles on Duolingo's Greenhouse job board (token duolingo) are in Pittsburgh, PA.\n2 open roles on Duolingo's Greenhouse job board (token duolingo) are in Remote - California.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Ad Sales Lead, Programmatic, New York, NY.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Ad Sales Lead - West, Remote - California.\nOpen role on Duolingo's Greenhouse job board (token duolingo): AI Research Engineer, New PhD Graduate, New York, NY; Pittsburgh, PA.\nOpen role on Duolingo's Greenhouse job board (token duolingo): AI Research Intern (PhD), New York, NY; Pittsburgh, PA.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Corporate Counsel, Pittsburgh, PA.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Data Scientist, Intern (PhD), New York, NY; Pittsburgh, PA.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Director of Ad Sales - West, Remote - California.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Executive Assistant to the CEO, New York, NY; Pittsburgh, PA.\nOpen role on Duolingo's Greenhouse job board (token duolingo): General Manager, India, Bangalore, India.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Head of Influencers & Community, New York, NY; Pittsburgh, PA.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Head of Merchandising, Japan, Tokyo, Japan.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Head of Talent Management Programs and PMO, Pittsburgh, PA.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Managing Editor, Tokyo, Japan.\nOpen role on Duolingo's Greenhouse job board (token duolingo): People Relations Business Partner, New York, NY; Pittsburgh, PA.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Performance Marketing Lead, New York, NY.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Proctor Quality and Learning Manager, Scaling Operations, London, England.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Proctor Quality and Learning Manager, Scaling Operations, New York, NY; Pittsburgh, PA.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Product Designer, Thrive Intern, Pittsburgh, PA.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Product Manager, MBA Intern, Pittsburgh, PA.\nOpen role on Duolingo's Greenhouse job board (token duolingo): QA Specialist I, Recent Graduate, New York, NY; Pittsburgh, PA.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Senior Business Development Manager, China, Beijing, China.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Senior Creative Director, Marketing, New York, NY.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Senior Creative Director, Marketing, London, England.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Senior Creative, Social, New York, NY; Pittsburgh, PA.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Senior Data Scientist, Growth Forecasting, New York, NY; Pittsburgh, PA.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Senior Director of Engineering, New Subjects, New York, NY.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Senior Director of Performance Marketing, New York, NY.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Senior Engineering Manager, Data Platform, New York, NY; Pittsburgh, PA.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Senior Engineering Manager, Product, New York, NY; Pittsburgh, PA.\nOpen role on Duolingo's Greenhouse job board (token duolingo): Senior Enterprise Engineer, New York, NY; Pittsburgh, PA.",
+    "requested": "https://boards-api.greenhouse.io/v1/boards/duolingo/jobs",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/duolingo/jobs/8888848002?content=true",
+    "title": "Data Scientist, Intern (PhD): posting on Duolingo's Greenhouse board",
+    "text": "Posting on Duolingo's Greenhouse job board (token duolingo): Data Scientist, Intern (PhD), New York, NY; Pittsburgh, PA.\nThe posting says: Our mission at Duolingo is to develop the best education in the world and make it universally available. It’s a big mission, and that’s where you come in!. At Duolingo, you’ll join a team that cares about educating our users, experimenting with big ideas, making fact-based decisions, and finding innovative solutions to complex problems. You’ll have limitless learning opportunities and daily collaborations with world-class minds — while doing work that’s both meaningful and fun. Join our life-changing mission to develop education for our half a billion (and growing!) learners around the world. Read our blog to learn more. About the role . You will.. Derive insights from data to influence product roadmaps and drive business results. Apply advanced analytical methods, structural approaches, causal inference, and/or machine learning and AI to model user behavior and estimate the impact of potential new feature implementations, and collaborate with product and engineering teams to develop solutions. Evaluate product experiments to create and improve user experiences. Communicate and present findings and recommendations to senior management . Help preserve our culture of fact-based decision making as we scale. You have.. Pursuing a PhD degree (in at least the third year of PhD program) in a quantitative field (e.g. Economics, Finance, Statistics, Math, Linguistics, Computer Science, Computational Social Science, ML/AI), ideally planning to graduate in Fall 2027 or Spring/Summer 2028. Strong understanding of consumer digital products and an interest in applying advanced analytics and economics to business outcomes. Previous experience analyzing large datasets, communicating results to technical and non-technical senior-level audiences, and making actionable recommendations that improve the product or business. Skilled in SQL, R or Python, and/or statistical methods to analyze behavioral data. Enthusiasm for learning and sharing analytical methods to help grow a collaborative Data Science team and data-forward company culture. Able to relocate to Pittsburgh or NYC for the internship. Exceptional candidates will have.. Experience with \"big data\" and cloud computing technologies like BigQuery, Snowflake, and/or dbt. Experience articulating business questions and using available data to find answers that translate into product recommendations. Self-starter, with a desire to both learn new techniques and guide others. Previous experience/internships in applied business settings. Familiarity with AI tools such as Cursor, a knack for prompt engineering, and a desire to continue to innovate and learn in AI. A GPA of 3.5+. A Duolingo streak. Why you’ll love working here… . Language learning opportunities. Catered in-house lunches and breakfast. Company-wide Hackathon. PTO and company holidays. Frequent company-wide dinners, monthly celebrations, social clubs, and so much more!. Connect with your recruiter on the benefits for interns at Duolingo!. Hourly Range for this internship is:. $63 &mdash; $65 USD. . Benefits: Take a peek at how we care for our employees' holistic well-being with our benefits here . Job Alerts: Sign up for job alerts here . Accommodations: We will do everything we can within reason to make sure that your interview takes place in an environment that fairly and accurately assesses your skills. If you need assistance or accommodation, please contact accommodations@duolingo.com . Equal Employment Opportunity: Duolingo is proud to be an Equal Employment Opportunity employer. We do not discriminate based upon race, religion, color, national origin, gender (including pregnancy, childbirth, or related medical conditions), sexual orientation, gender identity, gender expression, age, status as a protected veteran, status as an individual with a disability, or other applicable legally protected characteristics. Fraud Warning: Unfortunately, there is a rise in scammers pretending to be real Duolingo employees. Duolingo and our employees will never ask for your Social Security number, bank details, or passport info, and we’ll never ask you to deposit a check, purchase equipment, or exchange money during the interview process. Real Duolingo employees always use an email that ends in @duolingo.com or @recruiting.duolingo.com. Stay alert and double-check these details before sharing any information. By applying for this position your data will be processed as per the Duolingo Applicant Privacy Notice. .",
+    "requested": "https://boards-api.greenhouse.io/v1/boards/duolingo/jobs/8888848002?content=true",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/duolingo/jobs/8750636002?content=true",
+    "title": "Senior Data Scientist, Growth Forecasting: posting on Duolingo's Greenhouse board",
+    "text": "Posting on Duolingo's Greenhouse job board (token duolingo): Senior Data Scientist, Growth Forecasting, New York, NY; Pittsburgh, PA.\nThe posting says: Our mission at Duolingo is to develop the best education in the world and make it universally available. It’s a big mission, and that’s where you come in!. At Duolingo, you’ll join a team that cares about educating our users, experimenting with big ideas, making fact-based decisions, and finding innovative solutions to complex problems. You’ll have limitless learning opportunities and daily collaborations with world-class minds — while doing work that’s both meaningful and fun. Join our life-changing mission to develop education for our half a billion (and growing!) learners around the world. Read our blog to learn more. About the role.. This person will be part of our Growth Data Science team, collaborating with peers and cross-functional partners in Product, Finance, and Strategy to continuously improve our forecasting capabilities. They will drive methodological advances and deliver trustworthy business-critical quarterly forecasts, built on a deep understanding of the dynamics of user growth across Duolingo’s product portfolio. . 🧠 You will.. Join a small team of data scientists focused on User Growth forecasting. Collaborate with peers and mentor junior data scientists to ensure that our forecasts remain trustworthy and reliably delivered. Work with diverse stakeholders to develop forecasts that reflect a deep understanding of our product development, big bets, and evolving business strategy. Translate complex analytical findings into clear narratives for senior leadership and cross-functional partners. Influence strategic decisions through a combination of technical depth and effective communication. Develop and validate methodological advances to our forecasts, aligning methodological strengths with business priorities. Build systems and processes that ensure our forecasting process is robust and repeatable. . ✅ You have.. Applied industry experience building forecasts in messy real world settings where details, confounds, and the validity of assumptions matter. A graduate degree in Data Science, Statistics, Economics, or a related quantitative field, or equivalent demonstrated expertise in formal analytical techniques. Demonstrated ability to connect technical results to real-world recommendations, and to translate product and business changes into technical requirements. Strong command of SQL, Python, AI analysis tools, and data/analytics engineering ecosystems. Exceptional communication skills, both written and verbal, with the ability to distill complex quantitative work into crisp, actionable insights for diverse audiences. ⭐ Exceptional candidates will have.. Experience operating at a high-growth consumer technology company, including experience with user growth forecasting specifically. Experience at a public company, including the analytical demands that come with investor-grade reporting and forecasting. An impressive Duolingo streak. The offered salary is dependent upon several factors, including work experience, skills, and internal peer comparisons. The posted range is subject to change in the future. For this role, base salary is supplemented by equity compensation. We encourage you to talk with your recruiter for more information related to compensation for this role!. Salary Range: . $182,800 &mdash; $247,300 USD. . Benefits: Take a peek at how we care for our employees' holistic well-being with our benefits here . Job Alerts: Sign up for job alerts here . Accommodations: We will do everything we can within reason to make sure that your interview takes place in an environment that fairly and accurately assesses your skills. If you need assistance or accommodation, please contact accommodations@duolingo.com . Equal Employment Opportunity: Duolingo is proud to be an Equal Employment Opportunity employer. We do not discriminate based upon race, religion, color, national origin, gender (including pregnancy, childbirth, or related medical conditions), sexual orientation, gender identity, gender expression, age, status as a protected veteran, status as an individual with a disability, or other applicable legally protected characteristics. Fraud Warning: Unfortunately, there is a rise in scammers pretending to be real Duolingo employees. Duolingo and our employees will never ask for your Social Security number, bank details, or passport info, and we’ll never ask you to deposit a check, purchase equipment, or exchange money during the interview process. Real Duolingo employees always use an email that ends in @duolingo.com or @recruiting.duolingo.com. Stay alert and double-check these details before sharing any information. By applying for this position your data will be processed as per the Duolingo Applicant Privacy Notice. .",
+    "requested": "https://boards-api.greenhouse.io/v1/boards/duolingo/jobs/8750636002?content=true",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   }
+  ],
+  "rejected": [
+   {
+    "url": "https://duolingo.com/",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://duolingo.com/about",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://duolingo.com/careers",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://duolingo.com/press",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://duolingo.com/team",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Duolingo%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "why": "unreachable"
+   }
+  ]
+ }
+}

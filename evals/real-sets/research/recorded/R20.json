@@ -1,0 +1,116 @@
+{
+ "case": {
+  "id": "R20",
+  "company": "ServiceNow",
+  "site": "servicenow.com",
+  "role": "Information Security Engineer Intern",
+  "board": "smartrecruiters:servicenow"
+ },
+ "plan": {
+  "queries": [
+   "ServiceNow",
+   "ServiceNow Information Security Engineer Intern"
+  ],
+  "companies": [
+   "ServiceNow"
+  ],
+  "sites": [
+   "servicenow.com"
+  ]
+ },
+ "captured_at": "2026-11-12T07:54:31.083Z",
+ "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
+ "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
+ "search": {
+  "hits": [
+   {
+    "url": "https://servicenow.com/",
+    "title": "servicenow.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://servicenow.com/about",
+    "title": "servicenow.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://servicenow.com/careers",
+    "title": "servicenow.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://api.smartrecruiters.com/v1/companies/servicenow/postings",
+    "title": "SmartRecruiters job board: servicenow",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://servicenow.com/press",
+    "title": "servicenow.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://servicenow.com/team",
+    "title": "servicenow.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22ServiceNow%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "title": "News headlines: ServiceNow",
+    "provider": "news_rss",
+    "foundAt": 1794495600000
+   }
+  ],
+  "notes": [
+   "SEC EDGAR did not answer"
+  ],
+  "gaps": [
+   "Wikipedia has no company article found for ServiceNow."
+  ],
+  "provider": "first_party",
+  "searches": 5
+ },
+ "read": {
+  "verified": [
+   {
+    "url": "https://api.smartrecruiters.com/v1/companies/servicenow/postings",
+    "title": "ServiceNow: SmartRecruiters job board",
+    "text": "The SmartRecruiters job board of ServiceNow (token servicenow) lists 788 open roles.\n4 of the 100 open roles on ServiceNow's SmartRecruiters job board (token servicenow) say intern, new grad, junior, associate or entry level in the title.\n8 open roles on ServiceNow's SmartRecruiters job board (token servicenow) are in Hyderabad, IN.\n8 open roles on ServiceNow's SmartRecruiters job board (token servicenow) are in Santa Clara, CALIFORNIA, US.\n8 open roles on ServiceNow's SmartRecruiters job board (token servicenow) are in San Diego, CALIFORNIA, US.\n8 open roles on ServiceNow's SmartRecruiters job board (token servicenow) are in San Diego, California, US.\n6 open roles on ServiceNow's SmartRecruiters job board (token servicenow) are in New York, NEW YORK, US.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Staff Software Engineer, Hyderabad, IN.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Solution Architect, Singapore, Singapore, SG.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Solution Architect, Singapore, Singapore, SG.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Sr Software Engineer, Hyderabad, IN.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Software Engineer, Hyderabad, IN.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Staff Software Engineer, Full Stack, Hyderabad, Telangana, IN.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Applications Dev Engineer, Hyderabad, IN.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Senior Advisory Solution Consultant - CRM & Industry Workflows (Technology & Managed Services), Sydney, AU.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Assoc Detection Engineering Intern, Kirkland, Washington, US.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Assoc Security Engineering & Automation Intern, Santa Clara, CALIFORNIA, US.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Assoc AI Engineering (Cloud Security Automation) Intern, Santa Clara, CALIFORNIA, US.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Assoc Information Security Engineer Intern, San Diego, CALIFORNIA, US.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Business Development Representative - Public Sector (Armis), Vienna, VIRGINIA, US.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Senior Staff Software Engineer, Agentic Systems - Moveworks, Mountain View, CALIFORNIA, US.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): CRM Specialist Account Executive, CPQ, Milan, IT.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Cyber Account Executive (Texas), Austin, TEXAS, US.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Business Development Representative (Native/Fluent Dutch, Finnish, Spanish, Italian, Swedish, Arabic OR French Speaking), Dublin, IE.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Cyber Account Executive (Georgia), Atlanta, GEORGIA, US.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Cyber Account Executive, New York, NEW YORK, US.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Sales Director, Stockholm, SE.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Cyber Account Executive (New York), New York, NEW YORK, US.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Cyber Account Executive (New York), New York, NEW YORK, US.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Cyber Account Executive (New York), New York, NEW YORK, US.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Cyber Account Executive (California), San Diego, CALIFORNIA, US.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Cyber Account Executive (California), San Diego, CALIFORNIA, US.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Cyber Account Executive (California), San Diego, CALIFORNIA, US.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Cyber Account Executive (California), San Diego, CALIFORNIA, US.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Sr Mgr, Sales (Cyber Security & Risk), San Diego, CALIFORNIA, US.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Sr Mgr, Sales (Cyber Security & Risk), New York, NEW YORK, US.\nOpen role on ServiceNow's SmartRecruiters job board (token servicenow): Sr Enterprise Account Executive, Hong Kong, Causeway Bay, HK.",
+    "requested": "https://api.smartrecruiters.com/v1/companies/servicenow/postings",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   }
+  ],
+  "rejected": [
+   {
+    "url": "https://servicenow.com/",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://servicenow.com/about",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://servicenow.com/careers",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://servicenow.com/press",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://servicenow.com/team",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22ServiceNow%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "why": "unreachable"
+   }
+  ]
+ }
+}

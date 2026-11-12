@@ -51,6 +51,30 @@ export function payFrom(text: unknown): string | null {
   }
   return null;
 }
+// Pay a posting states for each place, in its own words: "<City>, <Region> | (<range>)" (Workday's pay-by-location table), or
+// "<City>, <Region>: (<range>)" (D-069, real set item 13: PayPal R0137491 states "Scottsdale, Arizona: ($100,500.00 - $149,600.00
+// Annually)" with a colon, and only San Jose's range was read).
+export function paysByPlace(text: string): { place: string; pay: string }[] {
+  const out: { place: string; pay: string }[] = [];
+  for (const m of String(text ?? "").matchAll(/([A-Z][A-Za-z.'-]+(?: [A-Z][A-Za-z.'-]+)*, [A-Z][A-Za-z]+(?: [A-Z][A-Za-z]+)*)\s*[|:]\s*\(([^()|]{3,60})\)/g)) {
+    const pay = payFrom(m[2]);
+    if (pay && !out.some((x) => x.place === m[1])) out.push({ place: m[1], pay });
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+// D-067 (live-6 C1: San Jose's "$32 - $55 Hourly", the first row of PayPal's pay-by-location table, was given as the Chicago pay):
+// a figure keeps its place. When a posting states pay for more than one place, the pay is the row for the posting's own location
+// (its city), else every row with its place; a posting with one pay is read as before (payFrom).
+const cityOf = (s: string) => String(s ?? "").split(/[,;|(]/)[0].toLowerCase().replace(/[^a-z ]+/g, " ").replace(/\s+/g, " ").trim();
+export function placedPay(text: unknown, location: string | null | undefined): string | null {
+  const rows = paysByPlace(String(text ?? "").replace(/[ \t]+/g, " "));
+  if (rows.length < 2 || new Set(rows.map((r) => r.pay)).size < 2) return payFrom(text);
+  const where = String(location ?? "").split(/;|\bor\b|\//).map(cityOf).filter((c) => c.length >= 3);
+  const mine = rows.filter((r) => where.includes(cityOf(r.place)));
+  if (mine.length === 1) return `${mine[0].pay} (${mine[0].place})`;
+  return rows.map((r) => `${r.place}: ${r.pay}`).join("; ");
+}
 // The currency a pay string is in: "USD" for a plain or US dollar, else the code; null when it names none.
 export function payCurrency(pay: string): string | null {
   const s = String(pay ?? "");

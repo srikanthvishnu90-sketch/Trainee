@@ -1,0 +1,144 @@
+{
+ "case": {
+  "id": "R12",
+  "company": "Dropbox",
+  "site": "dropbox.com",
+  "role": "Full Stack Product Software Engineer",
+  "board": "greenhouse:dropbox"
+ },
+ "plan": {
+  "queries": [
+   "Dropbox",
+   "Dropbox Full Stack Product Software Engineer"
+  ],
+  "companies": [
+   "Dropbox"
+  ],
+  "sites": [
+   "dropbox.com"
+  ]
+ },
+ "captured_at": "2026-11-12T07:53:54.287Z",
+ "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
+ "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
+ "search": {
+  "hits": [
+   {
+    "url": "https://dropbox.com/",
+    "title": "dropbox.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://dropbox.com/about",
+    "title": "dropbox.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://dropbox.com/careers",
+    "title": "dropbox.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/dropbox/jobs",
+    "title": "Greenhouse job board: dropbox",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/dropbox/jobs/7172839?content=true",
+    "title": "Full Stack Product Software Engineer (Greenhouse posting)",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/dropbox/jobs/6449729?content=true",
+    "title": "Full Stack Product Software Engineer (Greenhouse posting)",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://dropbox.com/press",
+    "title": "dropbox.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://dropbox.com/team",
+    "title": "dropbox.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Dropbox%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "title": "News headlines: Dropbox",
+    "provider": "news_rss",
+    "foundAt": 1794495600000
+   }
+  ],
+  "notes": [
+   "SEC EDGAR did not answer"
+  ],
+  "gaps": [
+   "Wikipedia has no company article found for Dropbox."
+  ],
+  "provider": "first_party",
+  "searches": 5
+ },
+ "read": {
+  "verified": [
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/dropbox/jobs",
+    "title": "Dropbox: Greenhouse job board",
+    "text": "The Greenhouse job board of Dropbox (token dropbox) lists 38 open roles.\n2 of the 38 open roles on Dropbox's Greenhouse job board (token dropbox) say intern, new grad, junior, associate or entry level in the title.\n14 open roles on Dropbox's Greenhouse job board (token dropbox) are in Remote - US: Select locations.\n11 open roles on Dropbox's Greenhouse job board (token dropbox) are in Remote - Canada: Select locations.\n4 open roles on Dropbox's Greenhouse job board (token dropbox) are in Remote - Mexico.\n3 open roles on Dropbox's Greenhouse job board (token dropbox) are in Remote - Poland.\n2 open roles on Dropbox's Greenhouse job board (token dropbox) are in Remote - US: All locations.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Account Executive, Remote - US: Select locations.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Backend Product Software Engineer, Remote - Mexico.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Backend Product Software Engineer, Remote - Mexico.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Customer Success Manager — Japan, Remote - Japan.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Director, Data Science & Engineering, Finance, Remote - US: Select locations.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Director of Pricing and Packaging, Remote - US: All locations.\nOpen role on Dropbox's Greenhouse job board (token dropbox): EMEA Sales Operations Manager - GTM, Remote - Ireland; Remote - United Kingdom.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Full Stack Product Software Engineer, Remote - Mexico.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Full Stack Product Software Engineer, Remote - Poland.\nOpen role on Dropbox's Greenhouse job board (token dropbox): GTM Program Manager, Remote - Canada: Select locations.\nOpen role on Dropbox's Greenhouse job board (token dropbox): GTM Program Manager, Remote - US: Select locations.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Infrastructure Software Engineer, Remote - Poland.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Infrastructure Software Engineer, Remote - Poland.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Infrastructure Software Engineer, Remote - Mexico.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Integrated Campaign Strategist, Remote - Canada: Select locations.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Integrated Campaign Strategist, Remote - US: Select locations.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Legal Operations Associate, Remote - US: Select locations.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Legal Operations Associate, Remote - Canada: Select locations.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Principal Software Engineer, Product Engineering, Remote - Canada: Select locations.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Principal Software Engineer, Product Engineering, Remote - US: All locations.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Program Manager, Customer Programs, Remote - Canada: Select locations.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Program Manager, Customer Programs, Remote - US: Select locations.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Security Engineer, IAM, Remote - US: Select locations.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Security Engineer, IAM, Remote - Canada: Select locations.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Senior Account Executive, Remote - US: Select locations.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Senior Corporate Enterprise Platform Engineer, Windows, Remote - US: Select locations.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Senior Corporate Enterprise Platform Engineer, Windows, Remote - Canada: Select locations.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Senior Financial Planning & Analysis Partner - Product & Growth, Remote - Canada: Select locations.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Senior Financial Planning & Analysis Partner - Product & Growth, Remote - US: Select locations.\nOpen role on Dropbox's Greenhouse job board (token dropbox): Senior Manager, APJ Field & Channel Marketing, Remote - Australia: Select locations.",
+    "requested": "https://boards-api.greenhouse.io/v1/boards/dropbox/jobs",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/dropbox/jobs/7172839?content=true",
+    "title": "Full Stack Product Software Engineer: posting on Dropbox's Greenhouse board",
+    "text": "Posting on Dropbox's Greenhouse job board (token dropbox): Full Stack Product Software Engineer, Remote - Mexico.\nThe posting says: Role Description. As a Full Stack Engineer at Dropbox, you will help design and develop the seamless, scalable, and user-friendly experiences Dropbox users depend on. Your work will encompass both front-end and back-end development, supporting products that empower millions worldwide. You will work closely with cross-functional teams to transform ideas into reliable, scalable features that provide outstanding user experiences. This year, Dropbox is on a mission to expedite the creation and implementation of AI-enabled products, providing a comprehensive technology stack for rapid prototyping and reliable deployment of AI-augmented functionality. Our Engineering Career Framework is viewable by anyone outside the company and describes what’s expected for our engineers at each of our career levels. Check out our blog post on this topic and more here. Responsibilities. Design and build scalable software solutions across specific product areas or multi-component systems . Write and review code, demonstrating technical leadership while mentoring junior engineers . Collaborate with cross-functional teams to identify user needs and create impactful solutions . Develop and execute comprehensive roadmaps balancing technical quality, business impact, and user experience . Contribute to the team culture through mentorship, interviewing, and active engagement in new initiatives . On-call work may be necessary occasionally to help address bugs, outages, or other operational issues, with the goal of maintaining a stable and high-quality experience for our customers. Requirements. 5+ years of experience in software engineering or related roles . Experience in both front-end (JavaScript, React, Angular, HTML/CSS) and back-end (Node.js, Python) development . BS degree in Computer Science, a related technical field, or equivalent experience . Success developing and deploying large-scale full-stack applications . Proficiency in building front-end interfaces and back-end systems, delivering minimum viable products quickly . Durable Skills. AI fluency means using these tools to amplify human judgment, not replace it. We believe people with these skills will thrive as work and technology continue to evolve:. Awareness: Understand yourself and others. Judgment: Evaluate information and make decisions in complex situations. Adaptability: Learn, adjust, and stay effective through change. Connection: Communicate, collaborate, and build trust. To learn more about why these skills matter and what the data shows about thriving through change, read this blog post from our Chief People Officer, Melanie Rosenwasser.",
+    "requested": "https://boards-api.greenhouse.io/v1/boards/dropbox/jobs/7172839?content=true",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   },
+   {
+    "url": "https://boards-api.greenhouse.io/v1/boards/dropbox/jobs/6449729?content=true",
+    "title": "Full Stack Product Software Engineer: posting on Dropbox's Greenhouse board",
+    "text": "Posting on Dropbox's Greenhouse job board (token dropbox): Full Stack Product Software Engineer, Remote - Poland.\nThe posting says: Role Description. As a Full Stack Engineer at Dropbox, you will help design and develop the seamless, scalable, and user-friendly experiences Dropbox users depend on. Your work will encompass both front-end and back-end development, supporting products that empower millions worldwide. You will work closely with cross-functional teams to transform ideas into reliable, scalable features that provide outstanding user experiences. This year, Dropbox is on a mission to expedite the creation and implementation of AI-enabled products, providing a comprehensive technology stack for rapid prototyping and reliable deployment of AI-augmented functionality. Our Engineering Career Framework is viewable by anyone outside the company and describes what’s expected for our engineers at each of our career levels. Check out our blog post on this topic and more here. Responsibilities. Design and build scalable software solutions across specific product areas or multi-component systems . Write and review code, demonstrating technical leadership while mentoring junior engineers . Collaborate with cross-functional teams to identify user needs and create impactful solutions . Develop and execute comprehensive roadmaps balancing technical quality, business impact, and user experience . Contribute to the team culture through mentorship, interviewing, and active engagement in new initiatives . On-call work may be necessary occasionally to help address bugs, outages, or other operational issues, with the goal of maintaining a stable and high-quality experience for our customers. Requirements. 5+ years of experience in software engineering or related roles . Experience in both front-end (JavaScript, React, Angular, HTML/CSS) and back-end (Node.js, Python) development . BS degree in Computer Science, a related technical field, or equivalent experience . Success developing and deploying large-scale full-stack applications . Proficiency in building front-end interfaces and back-end systems, delivering minimum viable products quickly . Willingness to participate in on-call rotations as needed by the team . Durable Skills. AI fluency means using these tools to amplify human judgment, not replace it. We believe people with these skills will thrive as work and technology continue to evolve:. Awareness: Understand yourself and others. Judgment: Evaluate information and make decisions in complex situations. Adaptability: Learn, adjust, and stay effective through change. Connection: Communicate, collaborate, and build trust. To learn more about why these skills matter and what the data shows about thriving through change, read this blog post from our Chief People Officer, Melanie Rosenwasser. Compensation. Poland Pay Range. 272 000 zł &mdash; 368 000 zł PLN. .",
+    "requested": "https://boards-api.greenhouse.io/v1/boards/dropbox/jobs/6449729?content=true",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   }
+  ],
+  "rejected": [
+   {
+    "url": "https://dropbox.com/",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://dropbox.com/about",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://dropbox.com/careers",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://dropbox.com/press",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://dropbox.com/team",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Dropbox%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "why": "unreachable"
+   }
+  ]
+ }
+}

@@ -242,7 +242,7 @@ const wantedOf = (jd: any) => [...(jd.mustHaveSkills || []), ...(jd.niceToHaveSk
 const corpusOf = (f: any) => `${f?.title || ""} ${f?.text || ""} ${(f?.bullets || []).join(" ")} ${(f?.skills || []).join(" ")}`;
 const skillsOfLine = (t: string) => String(t || "").replace(/^technical skills:\s*/i, "").split(/,\s*/).map((x) => x.trim()).filter(Boolean);
 const list = (xs: string[], max = 3) => xs.length <= max ? xs.join(", ") : `${xs.slice(0, max).join(", ")} and ${xs.length - max} more`;
-export interface ChangeItem { kind: "lead" | "drop" | "skills" | "reword" | "kept"; text: string; diff: "added" | "moved" | "removed"; line: string; name?: string; why?: string }
+export interface ChangeItem { kind: "lead" | "drop" | "skills" | "reword" | "kept" | "edit"; text: string; diff: "added" | "moved" | "removed" | "edited"; line: string; name?: string; why?: string }
 // FEATURE 4: the bullet rewording (career_tailor_rewrite.ts), said after the selection changes: how many bullets were
 // reworded, and each rewrite that was refused with the words it added that are not on the record.
 export interface RewriteLog { status: string; accepted: { before: string; after: string }[]; rejected: { before: string; proposed: string; reasons: string[] }[] }
@@ -526,11 +526,37 @@ export function applyEdits(resume: any, profile: any, edits: ResumeEdit[]): { ok
   out.lines = out.sections.flatMap((s: any) => (s.lines || []).map((l: any) => ({ ...l, section: s.heading })));
   return { ok: true, resume: out, done };
 }
+// D-067 (owner, 2026-11-12, must-fix: "resume edits never drop experience"; live-6 C20): a version the person is editing prints
+// every confirmed entry of their record. An entry the tailor's first pass left out for this posting comes back in its own words
+// (the fact's full line, as the base resume prints it), after the entries already there; no entry ever disappears unless the
+// person says to remove it. Returns the entries put back, by their head.
+export function keepEveryEntry(resume: any, profile: any): { resume: any; added: string[] } {
+  const out = clone(resume);
+  out.sections = out.sections || [];
+  const printed = new Set(out.sections.flatMap((sec: any) => (sec.lines || []).flatMap((l: any) => l.factIds || [])).map(String));
+  const added: string[] = [];
+  for (const f of (profile.facts || []).filter((x: any) => HEADING[x.kind])) {
+    const id = String(f.id);
+    if (printed.has(id)) continue;
+    const heading = HEADING[f.kind];
+    let sec = out.sections.find((x: any) => x.heading === heading);
+    if (!sec) { sec = { heading, lines: [] }; out.sections.push(sec); }
+    const { head } = entryParts(f);
+    const bullets = (f.bullets || []).map((b: unknown) => String(b ?? "").trim()).filter(Boolean);
+    sec.lines.push({ text: bullets.length ? head : String(f.title || f.text), factIds: [id], type: "entry" }, ...bullets.map((t: string) => ({ text: t, factIds: [id], type: "bullet" })));
+    printed.add(id);
+    added.push(head.replace(/[.]+$/, ""));
+  }
+  out.lines = out.sections.flatMap((x: any) => (x.lines || []).map((l: any) => ({ ...l, section: x.heading })));
+  return { resume: out, added };
+}
 export function editLine(done: EditDone[]): string {
   const one = (e: EditDone) => {
     const lines = `${e.now} detail line${e.now === 1 ? "" : "s"}`;
     const what = e.change === "condensed" ? `condensed to ${lines}` : e.change === "expanded" ? `${e.added_back ? "added back with" : "expanded to"} ${lines}` : `kept at ${lines}`;
-    const short = e.expand_short ? ` (${e.asked} asked; the confirmed record holds ${e.available})` : "";
+    // D-067 (live-6 C20: "not the 6 you asked for", when the person named no number): the count of lines is the tool's input,
+    // not the person's words, so it is never said as what they asked for.
+    const short = e.expand_short ? ` (all the confirmed record holds for it)` : "";
     return `${e.entry}: ${what}${e.led ? ", now first in its section" : ""}${short}`;
   };
   const s = done.map(one).join("; ");
@@ -594,11 +620,13 @@ export async function tailorForPosting(o: {
   const lead = persona ? persona.lead.filter((id) => CareerProfile.getFact(picked, id)) : [];
   // `picked`, not `clean`: a skill a persona hides stays hidden.
   let ordered = withListedSkills(applyPersonaOrder(t.resume, lead), picked);
-  let edits: EditDone[] | undefined;
+  let edits: EditDone[] | undefined, keptBack: string[] = [];
   if (o.edits?.length) {
     const e = applyEdits(ordered, picked, o.edits);
     if (!e.ok) return { ok: false, refused: "edit", reason: e.reason, ms: ms() };
     ordered = e.resume; edits = e.done;
+    const every = keepEveryEntry(ordered, picked);
+    ordered = every.resume; keptBack = every.added;
   }
   if (placeholder) {
     // The placeholder prints where the email would: after a contact line the person confirmed (which has no email), or alone.
@@ -647,7 +675,14 @@ export async function tailorForPosting(o: {
   const log0 = changelog({ diff, base, tailored: doc, profile: clean, jd, hidden, persona: persona?.name ?? null });
   // An edited version says what the edits did, against the version they edited (the base-resume diff would call a condensed entry
   // "dropped").
-  const log = edits ? { ...log0, line: editLine(edits) } : log0;
+  // D-067 (live-6 C20: the reply said Pixelforge "dropped" because the base diff listed its old line as removed): an edited entry's
+  // change is the edit's own (condensed, expanded, led), never a drop; the base diff's items about it are replaced by the edit's.
+  const editedHeads = (edits ?? []).map((e) => e.entry.toLowerCase());
+  const backHeads = keptBack.map((h) => h.toLowerCase());
+  const aboutEdited = (x: any) => [...editedHeads, ...backHeads].some((h) => [x?.line, x?.name].some((v) => typeof v === "string" && v.toLowerCase().startsWith(h)));
+  const backLine = keptBack.length ? ` Every other entry on your record still prints (${keptBack.length === 1 ? "1 entry" : `${keptBack.length} entries`} this posting doesn't ask for kept: ${keptBack.join("; ")}).` : "";
+  const log = edits ? { ...log0, line: editLine(edits) + backLine, items: [...edits.map((e): ChangeItem => ({ kind: "edit", text: editLine([e]).replace(/[.]$/, ""), diff: "edited", line: e.entry })),
+    ...keptBack.map((h): ChangeItem => ({ kind: "kept", text: `kept ${h}`, diff: "added", line: h })), ...(log0.items ?? []).filter((x: any) => !aboutEdited(x))] } : log0;
   const selected = new Set(doc.lines.flatMap((l: any) => l.factIds));
   // What the person reads, the same on every channel: plain words, and the link alone on its own line so any texting app
   // makes it tappable.

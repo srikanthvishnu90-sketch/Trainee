@@ -1,0 +1,116 @@
+{
+ "case": {
+  "id": "R19",
+  "company": "Plaid",
+  "site": "plaid.com",
+  "role": "Data Scientist - Fraud",
+  "board": "ashby:plaid"
+ },
+ "plan": {
+  "queries": [
+   "Plaid",
+   "Plaid Data Scientist - Fraud"
+  ],
+  "companies": [
+   "Plaid"
+  ],
+  "sites": [
+   "plaid.com"
+  ]
+ },
+ "captured_at": "2026-11-12T07:54:28.505Z",
+ "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
+ "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
+ "search": {
+  "hits": [
+   {
+    "url": "https://plaid.com/",
+    "title": "plaid.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://plaid.com/about",
+    "title": "plaid.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://plaid.com/careers",
+    "title": "plaid.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://api.ashbyhq.com/posting-api/job-board/plaid",
+    "title": "Ashby job board: plaid",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://plaid.com/press",
+    "title": "plaid.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://plaid.com/team",
+    "title": "plaid.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Plaid%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "title": "News headlines: Plaid",
+    "provider": "news_rss",
+    "foundAt": 1794495600000
+   }
+  ],
+  "notes": [
+   "SEC EDGAR did not answer"
+  ],
+  "gaps": [
+   "Wikipedia has no company article found for Plaid."
+  ],
+  "provider": "first_party",
+  "searches": 5
+ },
+ "read": {
+  "verified": [
+   {
+    "url": "https://api.ashbyhq.com/posting-api/job-board/plaid",
+    "title": "Ashby job board token: plaid",
+    "text": "The Ashby job board with the token plaid lists 143 open roles. The board does not name its company.\n2 of the 143 open roles on the Ashby job board with the token plaid say intern, new grad, junior, associate or entry level in the title.\n64 open roles on the Ashby job board with the token plaid are in San Francisco HQ.\n48 open roles on the Ashby job board with the token plaid are in New York City Office.\n10 open roles on the Ashby job board with the token plaid are in Remote United States.\n9 open roles on the Ashby job board with the token plaid are in Seattle Office.\n8 open roles on the Ashby job board with the token plaid are in London Office.\nOpen role on the Ashby job board with the token plaid: Strategic Initiatives, San Francisco HQ.\nOpen role on the Ashby job board with the token plaid: TechOps Site Support, Seattle Office.\nOpen role on the Ashby job board with the token plaid: TechOps Site Support, New York City Office.\nOpen role on the Ashby job board with the token plaid: Strategic Finance Lead, Product & Engineering, New York City Office.\nOpen role on the Ashby job board with the token plaid: Account Executive - Fintech Named, New York City Office.\nOpen role on the Ashby job board with the token plaid: Account Executive - SMB, New York City Office.\nOpen role on the Ashby job board with the token plaid: Product Manager - Connectivity Platform, New York City Office.\nOpen role on the Ashby job board with the token plaid: Strategic Partnerships – Credit | Product & Data, San Francisco HQ.\nOpen role on the Ashby job board with the token plaid: Product Designer - Dashboard, San Francisco HQ.\nOpen role on the Ashby job board with the token plaid: Partner Development Manager, AI, San Francisco HQ.\nOpen role on the Ashby job board with the token plaid: Strategic Partnerships - Credit | Capital Markets, San Francisco HQ.\nOpen role on the Ashby job board with the token plaid: Fraud Strategist, New York City Office.\nOpen role on the Ashby job board with the token plaid: Head of Corporate Development, San Francisco HQ.\nOpen role on the Ashby job board with the token plaid: Fraud Intelligence Analyst, San Francisco HQ.\nOpen role on the Ashby job board with the token plaid: Senior Analytics Engineer, San Francisco HQ.\nOpen role on the Ashby job board with the token plaid: Software Engineer, Backend, San Francisco HQ.\nOpen role on the Ashby job board with the token plaid: Senior Software Engineer, Backend, San Francisco HQ.\nOpen role on the Ashby job board with the token plaid: Software Engineer, Full Stack, San Francisco HQ.\nOpen role on the Ashby job board with the token plaid: Software Engineer, Backend, Seattle Office.\nOpen role on the Ashby job board with the token plaid: Software Engineer, Backend, New York City Office.\nOpen role on the Ashby job board with the token plaid: Senior Software Engineer, Backend, New York City Office.\nOpen role on the Ashby job board with the token plaid: Senior Software Engineer, Backend, Seattle Office.\nOpen role on the Ashby job board with the token plaid: Senior Software Engineer, Full Stack, San Francisco HQ.\nOpen role on the Ashby job board with the token plaid: Senior Software Engineer, Full Stack, New York City Office.\nOpen role on the Ashby job board with the token plaid: Senior Software Engineer, Full Stack, Seattle Office.\nOpen role on the Ashby job board with the token plaid: Software Engineer, Full Stack, New York City Office.\nOpen role on the Ashby job board with the token plaid: Software Engineer, Full Stack, Seattle Office.\nOpen role on the Ashby job board with the token plaid: AI Marketing Technologist Lead, San Francisco HQ.\nOpen role on the Ashby job board with the token plaid: Staff Machine Learning Engineer (Research Scientist) - DFAI, San Francisco HQ.\nOpen role on the Ashby job board with the token plaid: Internal Communications, San Francisco HQ.",
+    "requested": "https://api.ashbyhq.com/posting-api/job-board/plaid",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   }
+  ],
+  "rejected": [
+   {
+    "url": "https://plaid.com/",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://plaid.com/about",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://plaid.com/careers",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://plaid.com/press",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://plaid.com/team",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Plaid%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "why": "unreachable"
+   }
+  ]
+ }
+}

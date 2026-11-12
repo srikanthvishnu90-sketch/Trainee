@@ -47,7 +47,8 @@ Deno.test("WO-H/D3 continuation 4 turns 5-7: drafts get warmer without an invent
   const h = [{ role: "user", content: "Now send it to Maya." }, { role: "assistant", content: "Which Maya, and where should I send it?" }, { role: "user", content: "Maya at the company." },
     { role: "assistant", content: "I still need the exact recipient or the conversation you mean. I can draft a short note while you find it." }];
   const five = await turn("What would you say?", h, [{ kind: "note", recipient: "Maya", document: "revised resume", body: "Hi Maya, attaching my revised resume for the data analyst internship. Thanks for taking a look. [Your name]" }]);
-  eq(five.t.reply, "Draft for Maya, with revised resume, not sent:\n\nHi Maya, attaching my revised resume for the data analyst internship. Thanks for taking a look. [Your name]");
+  // Architect amendment (D-067): the draft comes first and its label after it (G2, answer first); the bar stands: the reply is the tool's checked text and the not-sent label still appears.
+  eq(five.t.reply, "Hi Maya, attaching my revised resume for the data analyst internship. Thanks for taking a look. [Your name]\n\nDraft for Maya, with revised resume, not sent.");
   ok(!/@/.test(five.t.reply), "no address is guessed from the company");
   const h2 = [...h, { role: "user", content: "What would you say?" }, { role: "assistant", content: five.t.reply }];
   // "Make it warmer": the first try invents a meeting, a referral and a figure; code refuses it and the model rewrites.
@@ -55,11 +56,13 @@ Deno.test("WO-H/D3 continuation 4 turns 5-7: drafts get warmer without an invent
     { kind: "note", recipient: "Maya", document: "revised resume", tone: "warmer", body: "Hi Maya, it was great meeting you last week, and thanks again to Jordan for the referral! I am attaching my revised resume; I screened 300 targets in my project. Warmly, [Your name]" },
     { kind: "note", recipient: "Maya", document: "revised resume", tone: "warmer", body: "Hi Maya, I am attaching my revised resume for the data analyst internship. I would really appreciate any feedback when you have a chance. Thanks for your time, [Your name]" }]);
   eq(six.calls.map((c: any) => c.ok), [true, true]);
-  ok(/Hi Maya, I am attaching my revised resume[^]*Thanks for your time, \[Your name\]$/.test(six.t.reply), six.t.reply);
+  // Architect amendment (D-067): the draft comes first and its label after it (G2, answer first); the bar stands: the reply is the tool's checked text and the not-sent label still appears.
+  ok(/^Hi Maya, I am attaching my revised resume[^]*Thanks for your time, \[Your name\]\n\nDraft for Maya, with revised resume, not sent\.$/.test(six.t.reply), six.t.reply);
   ok(!/meeting|referral|Jordan|300/.test(six.t.reply), "nothing from the refused draft reaches the person");
   const seven = await turn("A little less formal.", [...h2, { role: "user", content: "Make it warmer." }, { role: "assistant", content: six.t.reply }],
     [{ kind: "note", recipient: "Maya", document: "revised resume", tone: "less formal", body: "Hi Maya, here is my revised resume for the data analyst internship. I would love your feedback if you have a chance. Thanks, [Your name]" }]);
-  ok(seven.t.reply.endsWith("Hi Maya, here is my revised resume for the data analyst internship. I would love your feedback if you have a chance. Thanks, [Your name]"));
+  // Architect amendment (D-067): the draft comes first and its label after it (G2, answer first); the bar stands: the reply is the tool's checked text and the not-sent label still appears.
+  ok(seven.t.reply.startsWith("Hi Maya, here is my revised resume for the data analyst internship. I would love your feedback if you have a chance. Thanks, [Your name]") && seven.t.reply.endsWith("\n\nDraft for Maya, with revised resume, not sent."));
 });
 
 Deno.test("WO-H/D4 a thank-you after an interview: the interview the person named is fine; an invented offer, referral or relationship is not", () => {

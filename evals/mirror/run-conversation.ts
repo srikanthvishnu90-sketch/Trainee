@@ -17,6 +17,10 @@ import { openWorld } from "../../tests/architect/helpers/response_world.ts";
 import { PRODUCTION_BRAIN, RELEASE_FLAGS, RELEASE_NEVER_ON, releaseFlagOn, releaseValue } from "../../supabase/functions/agent-chat/release_config.ts";
 import { FILE_ENV } from "./heldout/harness.ts";
 import { worldFetch, worldGmail, worldSql } from "./instinct-wa-batch1/world.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.117.1";
+import { buildFileDeps } from "../../supabase/functions/trainee-file/deps.ts";
+import { handleFile } from "../../supabase/functions/trainee-file/handler.ts";
+import { signedIn } from "../../tests/architect/file-session-fakes.ts";
 
 const realFetch = globalThis.fetch;
 const a = Deno.args, opt = (n: string) => { const i = a.indexOf(n); return i >= 0 ? a[i + 1] : undefined; };
@@ -107,6 +111,28 @@ try {
   };
   const person = await w.person({ resume: false });
   await w.pg.sql(worldSql(person.id));
+  // D-067 (e), the owner's must-fix "Files and tracker links arrive and open": every File link a turn returns is followed right
+  // after that turn through the real File server (trainee-file/handler.ts handleFile, with the deployed function's own deps over
+  // this world's database), in the person's own signed-in session (a phone session, as file-session-fakes.ts opens one), exactly
+  // as a tap would. Recorded per turn: the link, the status, and the page as text (its first 4,000 characters).
+  const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+  const auth = signedIn();
+  const fileDeps = { ...buildFileDeps(admin, { get: (k: string) => Deno.env.get(k) }, Date.now), ...auth.deps };
+  const sid = await auth.tok(person.id, "chat", Date.now());
+  const plain = (html: string) => html.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/g, " ").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&#39;|&#x27;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
+  const openLink = async (link: string) => {
+    const hdr = { cookie: `tf_s=${sid}`, origin: new URL(FILE_ENV.TRAINEE_FILE_BASE_URL).origin };
+    try {
+      let res = await handleFile(new Request(link, { headers: hdr }), fileDeps as any);
+      for (let hop = 0; hop < 3 && res.status >= 300 && res.status < 400; hop++) res = await handleFile(new Request(new URL(res.headers.get("location") ?? "", link).toString(), { headers: hdr }), fileDeps as any);
+      return { link, status: res.status, text: plain(await res.text()).slice(0, 4000) };
+    } catch (e) { return { link, status: 0, text: `error: ${String((e as Error).message ?? e).slice(0, 300)}` }; }
+  };
+  const linksOf = (reply: string, body: any): string[] => {
+    const rx = new RegExp(`${FILE_ENV.TRAINEE_FILE_BASE_URL.replace(/[.]/g, "\\.")}[^\\s)\\]>"']*`, "g");
+    const xs = [...(reply.match(rx) ?? []), ...((body?.shape?.links ?? []) as string[]), ...((body?.artifacts ?? []) as any[]).map((x) => x?.url), ...((body?.file_cards ?? []) as any[]).map((x) => x?.url)];
+    return [...new Set(xs.filter((x): x is string => typeof x === "string" && x.startsWith(FILE_ENV.TRAINEE_FILE_BASE_URL)).map((x) => x.replace(/[.,;:]+$/, "")))];
+  };
   for (const [i, s] of persona.setup.entries()) {
     label = `setup-${i}`;
     const r = await person.say(s);
@@ -116,13 +142,15 @@ try {
     label = t.id;
     const before = await counts(person.id), outBefore = w.outbound.length, callsBefore = modelCalls, spentBefore = spent, webBefore = webSearches, t1 = performance.now();
     calls = [];
-    let reply = "", intent: string | null = null, status = 0, meta: any = {}, artifact = false;
+    let reply = "", intent: string | null = null, status = 0, meta: any = {}, artifact = false, body: any = null;
     try {
-      const r: any = await person.say(t.prompt); reply = String(r.reply ?? ""); intent = r.intent; status = r.status; meta = r?.body?.meta ?? {};
+      const r: any = await person.say(t.prompt); reply = String(r.reply ?? ""); intent = r.intent; status = r.status; meta = r?.body?.meta ?? {}; body = r?.body ?? null;
       // D-065: a File link the turn sends after its answer (body.shape.links; on WhatsApp and iMessage it rides the answer) counts too.
       artifact = !!(r?.body?.artifacts?.length || r?.body?.file_cards?.length) || reply.includes(FILE_ENV.TRAINEE_FILE_BASE_URL) || (r?.body?.shape?.links ?? []).some((l: string) => l.includes(FILE_ENV.TRAINEE_FILE_BASE_URL));
     } catch (e) { stopped = String((e as Error).message ?? e); }
     if (stopped) break;
+    const files = [];
+    for (const l of linksOf(reply, body)) files.push(await openLink(l));
     const after = await counts(person.id);
     const actions: { type: string; hosts?: string[] }[] = Object.keys(after).filter((k) => after[k] > (before[k] ?? 0)).map((type) => ({ type }));
     if (w.outbound.length > outBefore) actions.push({ type: "external", hosts: [...new Set(w.outbound.slice(outBefore))] });
@@ -130,7 +158,7 @@ try {
       offered: [...new Set(calls.filter((c) => !c.json && !c.web).flatMap((c) => c.tools))].sort(),
       called: ((meta.tool_calls ?? []) as any[]).map((x) => String(x?.name ?? x)),
       web_search_calls: calls.filter((c) => c.web).length, web_searches: webSearches - webBefore, json_calls: calls.filter((c) => c.json).length,
-      router_intent: meta.router_intent ?? null, brain: meta.brain ?? null, artifact,
+      router_intent: meta.router_intent ?? null, brain: meta.brain ?? null, artifact, files,
     };
     lines.push(JSON.stringify({ id: t.id, reply, actions, route: modelCalls > callsBefore ? (dry ? "model-scripted" : "model") : "router", intent, status, ms: Math.round(performance.now() - t1), usd: Number((spent - spentBefore).toFixed(4)), trace }));
     // The product falls back to the router when the model call is refused at the cap, so later turns would be the fallback's

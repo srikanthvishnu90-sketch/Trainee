@@ -86,7 +86,10 @@ export function readableText(html: string): { title: string; text: string } {
 const MAX_BYTES = 1_500_000, MAX_TEXT = 60_000, MAX_REDIRECTS = 3;
 
 // Reads each page once. Nothing here throws: a page that cannot be read is a rejection with its reason.
-type ReadOpts = { resolver?: Resolver; robots?: RobotsCheck; convert?: Convert; deadline?: number; clock?: () => number };
+// stream (D-069): for a page a caller reads as a stream (a large job-board list), the converter that reads the response itself,
+// bounded by its own cap; null for every other page, which is read as below.
+export type StreamConvert = (url: string, contentType: string) => ((res: Response) => Promise<{ title: string; text: string } | null>) | null;
+type ReadOpts = { resolver?: Resolver; robots?: RobotsCheck; convert?: Convert; stream?: StreamConvert; deadline?: number; clock?: () => number };
 // Review of #628: a body is read as a stream and stops at its cap; nothing past the cap is ever buffered. truncated: the cap was hit.
 export async function readCapped(res: Response, max: number): Promise<{ bytes: Uint8Array; truncated: boolean }> {
   if (!res.body) return { bytes: new Uint8Array(await res.arrayBuffer()).slice(0, max), truncated: false };
@@ -169,6 +172,14 @@ async function readOne(start: string, f: typeof fetch, timeout: number, o: ReadO
     }
     if (res.status !== 200) { await res.body?.cancel().catch(() => {}); return { why: "http_status" }; }
     const type = (res.headers.get("content-type") ?? "").toLowerCase();
+    const streamed = o.stream?.(url, type) ?? null;
+    if (streamed) {
+      let conv: { title: string; text: string } | null = null;
+      try { conv = await streamed(res); } catch { conv = null; }
+      if (!conv) return { why: "not_text" };
+      if (!conv.text) return { why: "empty" };
+      return { url, title: conv.title || new URL(url).hostname, text: conv.text.slice(0, MAX_TEXT) };
+    }
     const structured = !!o.convert && /json|xml|rss|atom/.test(type) && !/text\/html|application\/xhtml/.test(type);
     if (!structured && !/text\/html|text\/plain|application\/xhtml/.test(type)) { await res.body?.cancel().catch(() => {}); return { why: "not_text" }; }
     let body = "";

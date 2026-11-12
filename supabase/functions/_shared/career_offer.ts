@@ -18,7 +18,7 @@ export const REQUIRED = ["company", "base", "city", "role"] as const;
 export type Field = typeof REQUIRED[number];
 export const MAX_MESSAGE = 1500;
 
-export interface Competing { company: string | null; base: number; said: string }
+export interface Competing { company: string | null; base: number; said: string; currency?: string }
 export interface Offer {
   company: string | null; firm_id: string | null; lca_company_id: string | null; sector: string | null;
   base: number | null; hourly: number | null; signing: number | null; bonus: number | null; bonus_pct: number | null;
@@ -28,6 +28,14 @@ export interface Offer {
   // LOOP 13: a bonus amount said as a target ("a $15k target bonus") is not guaranteed cash; and the clause each figure was
   // read from, so the reply can say where it came from (offer letter, verbal, the person's estimate).
   bonus_target?: number | null; from?: Partial<Record<"base" | "signing" | "bonus" | "bonus_pct" | "bonus_target", string>>;
+  // D-069 (real set item 13, findings 2 and 3): the offer as the person stated it. `currency` is the base's currency as said
+  // ("AUD 87,600" is AUD, "$110k" is USD; nothing said is read as USD, as before), and `currencies` each figure's own, so an
+  // amount said in AUD or PLN is never restated in dollars. `title` is the job title in their words and `place` the place they
+  // named, any title and any place: an offer outside the metros and titles the pay data knows is still their offer (it is kept
+  // and compared; only the public benchmark is skipped). `period`: "hour" for an hourly base, "year" for a yearly one, null
+  // when not said.
+  currency?: string; currencies?: Partial<Record<"base" | "signing" | "bonus" | "bonus_target", string>>;
+  title?: string | null; place?: string | null; period?: "hour" | "year" | null;
 }
 export interface Bench {
   kind: "lca" | "oews" | "bls_national";
@@ -48,6 +56,40 @@ export function payData(): OfferData { return (CareerNegotiation as any).payData
 function guide(): any { return (CareerPaths as any).firmGuide(); }
 
 const usd = (n: number) => "$" + Math.round(n).toLocaleString("en-US");
+// ---------- currency (D-069) ----------
+// ISO 4217 codes people write next to pay. "$" alone is US dollars; "A$", "C$", "S$" and the like name their own dollar.
+export const CURRENCY_CODES = ["USD", "AUD", "CAD", "EUR", "GBP", "INR", "JPY", "CHF", "SGD", "PLN", "NZD", "HKD", "MXN", "BRL", "SEK", "NOK", "DKK", "CNY", "KRW",
+  "ILS", "ZAR", "AED", "CZK", "HUF", "RON", "TRY", "PHP", "IDR", "MYR", "THB", "TWD", "VND", "COP", "ARS", "CLP", "PEN", "NGN", "KES", "EGP", "SAR", "QAR", "BGN", "UAH"];
+const CODE_RE = CURRENCY_CODES.join("|");
+const DOLLAR_PREFIX: Record<string, string> = { US: "USD", A: "AUD", AU: "AUD", C: "CAD", CA: "CAD", NZ: "NZD", S: "SGD", SG: "SGD", HK: "HKD", MX: "MXN", R: "BRL" };
+const SYMBOL: Record<string, string> = { "€": "EUR", "£": "GBP", "¥": "JPY", "₹": "INR", "₩": "KRW", "₪": "ILS", "zł": "PLN" };
+const WORD_CUR: [RegExp, string][] = [[/^\s?(?:us\s)?dollars?\b/i, "USD"], [/^\s?euros?\b/i, "EUR"], [/^\s?(?:pounds?|quid)(?:\s+sterling)?\b/i, "GBP"],
+  [/^\s?rupees?\b/i, "INR"], [/^\s?(?:z[łl]oty|zlotys?|zł)(?![\w])/i, "PLN"], [/^\s?yen\b/i, "JPY"], [/^\s?(?:swiss\s)?francs?\b/i, "CHF"]];
+// The currency an amount is said in, from the words right around it; null when none is said.
+export function currencyAround(text: string, at: number, end: number): string | null {
+  const before = text.slice(Math.max(0, at - 8), at), after = text.slice(end, end + 14);
+  const code = new RegExp(`(?:^|[^A-Za-z])(${CODE_RE})\\s?$`).exec(before)?.[1] ?? new RegExp(`^\\s?(${CODE_RE})(?![A-Za-z])`).exec(after)?.[1];
+  if (code) return code;
+  const sym = /(?:^|[^A-Za-z])([A-Z]{1,2})\$\s?$/.exec(text.slice(at, at + 1) === "$" ? `${before}$` : before)?.[1];
+  if (sym && DOLLAR_PREFIX[sym]) return DOLLAR_PREFIX[sym];
+  for (const [k, v] of Object.entries(SYMBOL)) if (before.trimEnd().endsWith(k) || after.trimStart().startsWith(k)) return v;
+  for (const [re, v] of WORD_CUR) if (re.test(after)) return v;
+  if (text.slice(at, end).includes("$") || /\$\s?$/.test(before)) return "USD";
+  return null;
+}
+// An amount written in its own currency: "$87,600" for US dollars, "AUD 87,600" for any other. Never converted.
+export function moneyIn(n: number, currency: string | null | undefined): string {
+  const c = currency && currency !== "USD" ? currency : null;
+  return c ? `${c} ${Math.round(n).toLocaleString("en-US")}` : usd(n);
+}
+export const isUsd = (o: Pick<Offer, "currency">) => (o.currency ?? "USD") === "USD";
+// The formatter a counter script writes each figure with: each in its own currency (D-069).
+export const moneyFor = (o: Offer) => (n: number, field?: string) => moneyIn(n, field === "signing" ? (o.currencies?.signing ?? o.currency) : o.currency);
+// An hourly figure keeps its cents ("$27.50 an hour").
+export function rateIn(n: number, currency: string | null | undefined): string {
+  const t = Number.isInteger(n) ? n.toLocaleString("en-US") : n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return currency && currency !== "USD" ? `${currency} ${t}` : `$${t}`;
+}
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const plain = (s: unknown) => String(s ?? "").toLowerCase().replace(/[’']/g, "").replace(/[^a-z0-9$%.]+/g, " ").trim();
 // A word or phrase, bounded so "c++" and "jpm" match only as themselves. With `names`, a short company alias (JPM, GS,
@@ -62,8 +104,27 @@ export function hasWord(text: string, w: string, names = false): boolean {
 }
 
 // ---------- reading the offer from the person's words ----------
+// D-069: the words that answer "what is the job title?" or "what is the city?" (asked once about a half-told offer): "I'm a
+// cybersecurity intern", "It's in Sydney", "cybersecurity intern in Scottsdale, Arizona". Only read as an answer to that ask.
+const ANSWER_LEAD = /^\s*(?:(?:so|well|oh|ok|okay|yes|yeah|sure)[,!.]?\s+)?(?:(?:i'?m|i am|i'?ll be|i will be|it'?s|it is|it'?d be|it would be|that'?s|that is|the (?:job )?title is|my (?:job )?title is|title|role|the role is|position|as)\s*:?\s+)?(?:an?\s+|the\s+)?/i;
+export function titleAnswer(text: string): string | null {
+  const t = String(text ?? "").replace(ANSWER_LEAD, "").split(/(?:^|\s+)(?:in|at|based in|located in|out of)\s+|[,.;!?(]/i)[0].trim();
+  if (!t || /\d/.test(t) || t.split(/\s+/).length > 7 || !/^[A-Za-z][A-Za-z&/+#' -]*$/.test(t) || NOT_TITLE_ANSWER.test(t)) return null;
+  return t.replace(/\s+(?:role|position|job)$/i, "").toLowerCase();
+}
+const NOT_TITLE_ANSWER = /^(?:not sure|no idea|dunno|don'?t know|idk|unsure|n\/a|none|nothing|skip|later|never ?mind|remote|hybrid)\b/i;
+export function placeAnswer(text: string, onlyCity = true): string | null {
+  const said = placeIn(text);
+  if (said) return said;
+  const raw = String(text ?? "");
+  // Not asked alone, the bare words are a place only when they say so ("it's in ...", "in ...", "based in ...").
+  if (!onlyCity && !/^\s*(?:(?:it'?s|it is|it'?d be|that'?s|the city is|city|the office is|i'?ll be|i will be)\s*:?\s+)?(?:in|based in|located in|out of)\s+|^\s*(?:the city is|city)\s*:?\s+/i.test(raw)) return null;
+  const t = raw.replace(/^\s*(?:(?:it'?s|it is|it'?d be|that'?s|the city is|city|the office is|i'?ll be|i will be)\s*:?\s+)?(?:in|based in|located in|out of|at)\s+/i, "").replace(/^\s*(?:it'?s|it is|the city is|city)\s*:?\s+/i, "").replace(/[.!?]+$/, "").trim();
+  if (!t || /\d/.test(t) || t.split(/\s+/).length > 6 || !/^[A-Za-z][A-Za-z.' -]*(?:,\s*[A-Za-z][A-Za-z.' -]*)?$/.test(t) || NOT_TITLE_ANSWER.test(t)) return null;
+  return t;
+}
 const MONEY = /(?<![\w.])\$?\s?(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s?(k|K|thousand|m|M)?(?![\w])(\s?(?:\/\s?(?:hr|hour)|an hour|per hour|hourly|\/h\b))?/g;
-interface Amount { value: number; hourly: boolean; at: number; end: number }
+interface Amount { value: number; hourly: boolean; at: number; end: number; currency: string | null }
 function amounts(clause: string): Amount[] {
   const out: Amount[] = [];
   for (const m of clause.matchAll(MONEY)) {
@@ -71,14 +132,15 @@ function amounts(clause: string): Amount[] {
     const unit = (m[2] || "").toLowerCase(), hourly = !!m[3];
     if (unit === "k" || unit === "thousand") v *= 1000;
     else if (unit === "m") v *= 1_000_000;
-    const dollar = m[0].includes("$");
+    const cur = currencyAround(clause, m.index ?? 0, (m.index ?? 0) + m[0].length);
+    const dollar = m[0].includes("$") || !!cur;
     // "401k", "403(b)", "457b" name a retirement plan, never pay (LOOP 13: "a 4% 401k match" was read as a $401,000 base).
     if (!dollar && /^(?:401|403|457)$/.test(m[1]) && /^\s?\(?[kb]\)?/i.test(clause.slice((m.index ?? 0) + m[0].indexOf(m[1]) + m[1].length))) continue;
     // A bare small number is a count or a date, not pay: pay is "110k", "$110,000", "110000" or "$45/hr".
     if (!hourly && v < 1000) continue;
     if (hourly && (v < 7 || v > 1000)) continue;
     if (!dollar && !unit && !hourly && (v < 10000 || /^20\d\d$/.test(m[1]))) continue;
-    out.push({ value: v, hourly, at: m.index ?? 0, end: (m.index ?? 0) + m[0].length });
+    out.push({ value: v, hourly, at: m.index ?? 0, end: (m.index ?? 0) + m[0].length, currency: cur });
   }
   return out;
 }
@@ -115,6 +177,29 @@ function roleIn(text: string): string | null {
   for (const r of ROLE_WORDS) if (hasWord(text, r)) return r === "swe" || r === "sde" ? r.toUpperCase() : r;
   return null;
 }
+// D-069: the job title as the person said it ("as an advanced analytics intern", "as a cybersecurity intern in Scottsdale"),
+// any title, in their words: at most 7 words, letters only (a title is never a figure), not a phrase that only looks like one.
+const NOT_TITLE = /^(?:result|matter|whole|bonus|signing|base|offer|counter|backup|start|minimum|total|percentage|reminder|test|joke|favor|courtesy|starting point)\b/i;
+const TITLE_STOP = String.raw`(?=\s+(?:in|at|based|located|out of|for|with|on|from|starting|and|but|plus|paying|making|earning|offered|remote|hybrid|onsite|on-site)\b|\s*[,.;!?(]|\s*$)`;
+export function titleIn(text: string): string | null {
+  const t = String(text ?? "");
+  const m = new RegExp(String.raw`\b(?:as|for)\s+(?:an?|the|my)\s+([A-Za-z][A-Za-z&/+#'-]*(?:\s+[A-Za-z&/+#'-]+){0,6}?)` + TITLE_STOP, "i").exec(t)
+    ?? new RegExp(String.raw`\b(?:title(?:\s+is)?|role(?:\s+is)?|position(?:\s+is)?)\s*:?\s+(?:an?\s+)?([A-Za-z][A-Za-z&/+#'-]*(?:\s+[A-Za-z&/+#'-]+){0,6}?)` + TITLE_STOP, "i").exec(t);
+  const w = m?.[1]?.trim();
+  if (!w || NOT_TITLE.test(w) || /\b(?:offer|offered|salary|base|signing|bonus)\b/i.test(w)) return null;
+  return w.replace(/\s+(?:role|position|job)$/i, "").toLowerCase();
+}
+// D-069: the place the person named ("in Sydney", "in Lake Mary, Florida", "based in Warsaw, Poland"), any place: capitalized
+// words after "in", "based in", "located in" or "out of", with one ", Region" after them. Not a month, a currency, a team.
+const NOT_PLACE = new RegExp(`^(?:${CODE_RE}|January|February|March|April|May|June|July|August|September|October|November|December|Q[1-4]|My|Our|Their|Total|Cash|Equity|Stock|Base|Salary|Year|Person|Office)\b`);
+export function placeIn(text: string): string | null {
+  const t = String(text ?? "");
+  const P = String.raw`[A-Z][A-Za-z.'-]*(?:\s+(?:[A-Z][A-Za-z.'-]*|de|del|la|le|of|upon|am|an|sur))*?`;
+  const m = new RegExp(String.raw`\b(?:in|based in|located in|out of|relocating to|moving to)\s+(${P}(?:,\s*${P})?)(?=\s*(?:[;.!?()]|,(?!\s*[A-Z])|\s(?:as|for|with|and|but|plus|at|on|starting|paying|base|offered)\b|$))`).exec(t);
+  const w = m?.[1]?.replace(/[.,]+$/, "").trim();
+  if (!w || NOT_PLACE.test(w) || w.length > 80) return null;
+  return w;
+}
 function occupationFor(role: string | null, sector: string | null, maps: any): Offer["occupation"] {
   if (!role) return null;
   const r = role.toLowerCase();
@@ -133,7 +218,7 @@ const COMPETING = /\b(another offer|competing offer|other offer|second offer|als
 
 // One message, or one piece of it, read into an offer. Clauses are read one at a time so "110k base, 15k signing" puts
 // each number with its own label, and a clause about another offer never becomes this offer's numbers.
-export function parseOfferWords(text: string, data: OfferData = payData()): Offer {
+export function parseOfferWords(text: string, data: OfferData = payData(), opts: { asked?: readonly Field[] } = {}): Offer {
   const t = String(text ?? "");
   const maps = data?.maps;
   const offer: Offer = { company: null, firm_id: null, lca_company_id: null, sector: null, base: null, hourly: null, signing: null, bonus: null, bonus_pct: null,
@@ -146,7 +231,7 @@ export function parseOfferWords(text: string, data: OfferData = payData()): Offe
       if (a) {
         const f = firmIn(c.replace(COMPETING, ""));
         const named = f ? f.name : (c.match(/\b(?:from|at)\s+([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,2})/)?.[1] ?? null);
-        offer.competing.push({ company: named, base: a.hourly ? a.value * 2080 : a.value, said: c });
+        offer.competing.push({ company: named, base: a.hourly ? a.value * 2080 : a.value, said: c, currency: a.currency ?? "USD" });
       }
       continue;
     }
@@ -158,6 +243,8 @@ export function parseOfferWords(text: string, data: OfferData = payData()): Offe
   else offer.company = namedCompany(body);
   const from: NonNullable<Offer["from"]> = {};
   offer.from = from;
+  const curs: NonNullable<Offer["currencies"]> = {};
+  offer.currencies = curs;
   offer.bonus_target = null;
   for (const c of main) {
     const as = amounts(c).filter((a) => !BENEFIT_AMOUNT.test(c.slice(a.end, a.end + 40)));
@@ -165,18 +252,35 @@ export function parseOfferWords(text: string, data: OfferData = payData()): Offe
     // A relocation, a stipend or a retirement match is a benefit, never the base or a bonus (LOOP 13).
     if (BENEFIT.test(c) && !/\b(base|salary)\b/i.test(c)) continue;
     const a = as[0];
-    if (/sign(?:ing|-on| on)/i.test(c)) { offer.signing = a.value; from.signing = c; }
-    else if (/bonus/i.test(c) && /\btarget\b/i.test(c)) { offer.bonus_target = a.value; from.bonus_target = c; }
-    else if (/bonus/i.test(c)) { offer.bonus = a.value; from.bonus = c; }
+    const cur = a.currency ?? "USD";
+    if (/sign(?:ing|-on| on)/i.test(c)) { offer.signing = a.value; from.signing = c; curs.signing = cur; }
+    else if (/bonus/i.test(c) && /\btarget\b/i.test(c)) { offer.bonus_target = a.value; from.bonus_target = c; curs.bonus_target = cur; }
+    else if (/bonus/i.test(c)) { offer.bonus = a.value; from.bonus = c; curs.bonus = cur; }
     else if (/\b(base|salary|pay|offered|offer of|offering|comp|per year|a year|annual|\/yr)\b/i.test(c) || a.hourly || offer.base == null) {
-      if (a.hourly) { offer.hourly = a.value; offer.base = Math.round(a.value * 2080); } else offer.base = a.value;
-      from.base = c;
+      if (a.hourly) { offer.hourly = a.value; offer.base = Math.round(a.value * 2080); offer.period = "hour"; } else { offer.base = a.value; offer.hourly = null; offer.period = /\b(per year|a year|annual(?:ly)?|yearly|\/\s?yr|per annum)\b/i.test(c) ? "year" : null; }
+      from.base = c; curs.base = cur; offer.currency = cur;
     }
   }
   const metro = metroIn(body, maps);
+  // The place as said is read from the whole message: "Lake Mary, Florida" spans a comma the clauses are split on.
+  const place = placeIn(t.replace(COMPETING, " "));
+  offer.place = place;
   if (metro) { offer.metro = metro.key; offer.metro_label = metro.label; offer.city = metro.label; }
+  else if (place) offer.city = place;
   else if (/\bremote\b/i.test(body)) { offer.remote = true; offer.city = "remote"; }
-  offer.role = roleIn(body);
+  // An answer to the one ask: the title or the place as said, when the words are nothing else.
+  if (opts.asked?.includes("city") && !metro && !place && !offer.remote) { const p = placeAnswer(t, opts.asked.length === 1); if (p) { offer.place = p; offer.city = p; } }
+  // The title answer is the words left once the place is taken out ("Seattle" alone names a place, never a title).
+  const bare = () => {
+    let x = t;
+    if (offer.place) x = x.replace(new RegExp(`(?:\\b(?:in|based in|located in|out of)\\s+)?${esc(offer.place)}`, "i"), " ");
+    for (const w of metro?.words ?? []) if (hasWord(x, w)) x = x.replace(new RegExp(`(?:\\b(?:in|based in|located in|out of)\\s+)?(?<![\\w+#])${esc(w)}(?![\\w+#])`, "i"), " ");
+    return x.replace(/\s+/g, " ").trim();
+  };
+  const title = titleIn(body) ?? (opts.asked?.includes("role") && !roleIn(body) ? titleAnswer(bare()) : null);
+  offer.title = title;
+  // A title the pay data knows keeps its known role (the benchmark's words); any other stated title is the role as said.
+  offer.role = roleIn(body) ?? title;
   offer.occupation = occupationFor(offer.role, offer.sector, maps);
   const d = t.match(DEADLINE);
   if (d) offer.deadline = { text: d[1] };
@@ -192,6 +296,9 @@ export function mergeOffers(a: Offer, b: Offer, data: OfferData = payData()): Of
   }
   out.competing = [...a.competing, ...b.competing];
   out.from = { ...(a.from ?? {}), ...(b.from ?? {}) };
+  out.currencies = { ...(a.currencies ?? {}), ...(b.currencies ?? {}) };
+  out.currency = out.currencies.base ?? a.currency ?? b.currency;
+  if (out.currency === undefined) delete out.currency;
   out.occupation = occupationFor(out.role, out.sector, data?.maps);
   return out as Offer;
 }
@@ -219,6 +326,9 @@ function position(base: number, b: { median: number | null; p25: number | null; 
 export function benchmarks(o: Offer, data: OfferData = payData()): Bench[] {
   const out: Bench[] = [];
   if (!o.occupation) return out;
+  // D-069: the public pay data on file is US data in US dollars. An offer said in another currency is never placed against it
+  // (that would need a conversion with a sourced rate, and a US market for a non-US job).
+  if (!isUsd(o)) return out;
   const occ = o.occupation;
   const base = o.base;
   // 1. The employer's own filed H-1B wages for this occupation and metro.
@@ -293,11 +403,13 @@ export interface OfferResult {
 }
 export function offerReply(o: Offer, notGiven: Field[], data: OfferData = payData()): OfferResult {
   const bench = benchmarks(o, data);
-  const parts = [o.company, o.role, o.city === "remote" ? "remote" : o.metro_label, o.base != null ? `base ${usd(o.base)}${o.hourly ? ` (${usd(o.hourly)} an hour x 2,080 hours)` : ""}` : null,
-    o.signing != null ? `signing ${usd(o.signing)}` : null, o.bonus != null ? `bonus ${usd(o.bonus)}` : null, o.bonus_pct != null ? `target bonus ${o.bonus_pct}%` : null].filter(Boolean);
+  const c = o.currencies ?? {};
+  const parts = [o.company, o.title ?? o.role, o.city === "remote" ? "remote" : o.metro_label ?? o.place ?? o.city, o.base != null ? `base ${moneyIn(o.base, c.base ?? o.currency)}${o.hourly ? ` (${rateIn(o.hourly, c.base ?? o.currency)} an hour x 2,080 hours)` : ""}` : null,
+    o.signing != null ? `signing ${moneyIn(o.signing, c.signing)}` : null, o.bonus != null ? `bonus ${moneyIn(o.bonus, c.bonus)}` : null, o.bonus_pct != null ? `target bonus ${o.bonus_pct}%` : null].filter(Boolean);
   const lines: string[] = [`Your offer: ${parts.join(", ")}.`];
   if (notGiven.length) lines.push(`Not given: ${notGiven.map((f) => ASK_WORDS[f]).join(", ")}, so I left ${notGiven.length > 1 ? "those" : "that"} out of the comparison.`);
-  if (!o.occupation) lines.push(o.role ? `I don't have public pay data mapped to "${o.role}" at ${o.sector ? `a ${o.sector} firm` : "this employer"}, so there is no occupation benchmark.` : "Without the job title there is no occupation to benchmark against.");
+  if (!isUsd(o)) lines.push(`The offer is in ${o.currency}. The public pay data on file is US data in US dollars, so it is not placed against it, and nothing is converted.`);
+  else if (!o.occupation) lines.push(o.role ? `I don't have public pay data mapped to "${o.role}" at ${o.sector ? `a ${o.sector} firm` : "this employer"}, so there is no occupation benchmark.` : "Without the job title there is no occupation to benchmark against.");
   const urls: string[] = [];
   for (const b of bench) {
     if (b.shown) {
@@ -312,10 +424,10 @@ export function offerReply(o: Offer, notGiven: Field[], data: OfferData = payDat
     }
   }
   const shown = bench.filter((b) => b.shown);
-  if (o.occupation && !shown.length) lines.push("", "So I have no public number to place your offer against yet, and I won't make one up.");
+  if (o.occupation && isUsd(o) && !shown.length) lines.push("", "So I have no public number to place your offer against yet, and I won't make one up.");
   const firstUp = shown.find((b) => b.median != null);
-  const script = (CareerNegotiation as any).factScript({ company: o.company, role: o.role, base: o.base, signing: o.signing },
-    { competing: o.competing.map((c) => ({ ...c })), deadline: o.deadline, benchmark: firstUp ? { median: firstUp.median, cite: firstUp.cite } : null });
+  const script = (CareerNegotiation as any).factScript({ company: o.company, role: o.title ?? o.role, base: o.base, signing: o.signing },
+    { competing: o.competing.filter((x) => (x.currency ?? "USD") === (o.currency ?? "USD")).map((x) => ({ ...x })), deadline: o.deadline, benchmark: firstUp ? { median: firstUp.median, cite: firstUp.cite } : null, money: moneyFor(o) });
   const uniq = [...new Set(urls)];
   if (uniq.length) lines.push("", "Sources:", ...uniq);
   const draftLines = ["A counter you could send. Nothing is sent: edit it and send it yourself.", "", script.email, "", "On a call:", script.call];
@@ -336,10 +448,10 @@ export function offerTurn(o: { words: string; pending: OfferPending | null; now:
   let pieces = fresh ? [...fresh.pieces, o.words] : [o.words];
   let asked = fresh ? fresh.asked : [];
   if (fresh && now.company && now.base != null) {
-    const before = fresh.pieces.map((p) => parseOfferWords(p, data)).reduce((a, b) => mergeOffers(a, b, data));
+    const before = fresh.pieces.map((p, i) => parseOfferWords(p, data, i ? { asked: fresh.asked } : {})).reduce((a, b) => mergeOffers(a, b, data));
     if (before.company && before.company !== now.company) { pieces = [o.words]; asked = []; }
   }
-  const offer = pieces.map((p) => parseOfferWords(p, data)).reduce((a, b) => mergeOffers(a, b, data));
+  const offer = pieces.map((p, i) => parseOfferWords(p, data, i ? { asked } : {})).reduce((a, b) => mergeOffers(a, b, data));
   const missing = missingOf(offer);
   if (missing.length && !asked.length) {
     const ask = askFor(missing);

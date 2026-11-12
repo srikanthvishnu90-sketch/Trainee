@@ -1,0 +1,117 @@
+{
+ "case": {
+  "id": "R15",
+  "company": "Palantir",
+  "site": "palantir.com",
+  "role": "Software Engineer, New Grad",
+  "board": "lever:palantir"
+ },
+ "plan": {
+  "queries": [
+   "Palantir",
+   "Palantir Software Engineer, New Grad"
+  ],
+  "companies": [
+   "Palantir"
+  ],
+  "sites": [
+   "palantir.com"
+  ]
+ },
+ "captured_at": "2026-11-12T07:54:16.243Z",
+ "how": "research_free_sources.ts freeProvider + freeReader (the pair freeResearchFor builds), real network through this environment's proxy",
+ "resolver": "stand-in: every host -> 8.8.8.8 (no DNS in this environment)",
+ "search": {
+  "hits": [
+   {
+    "url": "https://palantir.com/",
+    "title": "palantir.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://palantir.com/about",
+    "title": "palantir.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://palantir.com/careers",
+    "title": "palantir.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://api.lever.co/v0/postings/palantir?mode=json",
+    "title": "Lever job board: palantir",
+    "provider": "ats_board",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://palantir.com/press",
+    "title": "palantir.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://palantir.com/team",
+    "title": "palantir.com",
+    "provider": "company_site",
+    "foundAt": 1794495600000
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Palantir%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "title": "News headlines: Palantir",
+    "provider": "news_rss",
+    "foundAt": 1794495600000
+   }
+  ],
+  "notes": [
+   "SEC EDGAR did not answer",
+   "Not used for Palantir: the SmartRecruiters job board \"palantir\" (Lever \"palantir\" is the one that links the company's site)."
+  ],
+  "gaps": [
+   "Wikipedia has no company article found for Palantir."
+  ],
+  "provider": "first_party",
+  "searches": 5
+ },
+ "read": {
+  "verified": [
+   {
+    "url": "https://api.lever.co/v0/postings/palantir?mode=json",
+    "title": "Lever job board token: palantir",
+    "text": "The Lever job board with the token palantir lists 303 open roles. The board does not name its company.\n87 of the 303 open roles on the Lever job board with the token palantir say intern, new grad, junior, associate or entry level in the title.\n101 open roles on the Lever job board with the token palantir are in New York, NY.\n64 open roles on the Lever job board with the token palantir are in Washington, D.C..\n45 open roles on the Lever job board with the token palantir are in London, United Kingdom.\n29 open roles on the Lever job board with the token palantir are in Palo Alto, CA.\n11 open roles on the Lever job board with the token palantir are in Seattle, WA.\nOpen role on the Lever job board with the token palantir: Administrative Business Partner, Singapore, Singapore.\nOpen role on the Lever job board with the token palantir: Administrative Business Partner, London, United Kingdom.\nOpen role on the Lever job board with the token palantir: American Tech Fellowship, North America.\nOpen role on the Lever job board with the token palantir: Backend Software Engineer - Application Development, London, United Kingdom.\nOpen role on the Lever job board with the token palantir: Backend Software Engineer - Application Development, New York, NY.\nOpen role on the Lever job board with the token palantir: Backend Software Engineer - Data Connectors, New York, NY.\nOpen role on the Lever job board with the token palantir: Backend Software Engineer - Defense, Washington, D.C..\nOpen role on the Lever job board with the token palantir: Backend Software Engineer - Defense, Palo Alto, CA.\nOpen role on the Lever job board with the token palantir: Backend Software Engineer - Defense, New York, NY.\nOpen role on the Lever job board with the token palantir: Backend Software Engineer - Infrastructure, New York, NY.\nOpen role on the Lever job board with the token palantir: Backend Software Engineer - Infrastructure, London, United Kingdom.\nOpen role on the Lever job board with the token palantir: Backend Software Engineer - Infrastructure, Foundations, London, United Kingdom.\nOpen role on the Lever job board with the token palantir: Backend Software Engineer - Infrastructure, Foundations, New York, NY.\nOpen role on the Lever job board with the token palantir: Commercial Administrative Business Partner, New York, NY.\nOpen role on the Lever job board with the token palantir: Commercial Contracts Specialist, New York, NY.\nOpen role on the Lever job board with the token palantir: Commercial Contracts Specialist, Palo Alto, CA.\nOpen role on the Lever job board with the token palantir: Compliance Analyst, Washington, D.C..\nOpen role on the Lever job board with the token palantir: Compliance Analyst, New York, NY.\nOpen role on the Lever job board with the token palantir: Contract Operations, Palo Alto, CA.\nOpen role on the Lever job board with the token palantir: Contract Operations, Washington, D.C..\nOpen role on the Lever job board with the token palantir: Contract Operations, Denver, CO.\nOpen role on the Lever job board with the token palantir: Contract Operations, New York, NY.\nOpen role on the Lever job board with the token palantir: Corporate Counsel, New York, NY.\nOpen role on the Lever job board with the token palantir: Corporate Counsel, Palo Alto, CA.\nOpen role on the Lever job board with the token palantir: Corporate Counsel, Washington, D.C..\nOpen role on the Lever job board with the token palantir: Data Engineer - Talent Acquisition Operations, New York, NY.\nOpen role on the Lever job board with the token palantir: Deal Team - Business Affairs, New York, NY.\nOpen role on the Lever job board with the token palantir: Deal Team - Business Affairs, Washington, D.C..\nOpen role on the Lever job board with the token palantir: Deal Team - Business Affairs, Palo Alto, CA.\nOpen role on the Lever job board with the token palantir: Defensive Security Analyst, Washington, D.C..",
+    "requested": "https://api.lever.co/v0/postings/palantir?mode=json",
+    "status": 200,
+    "fetchedAt": 1794495600000
+   }
+  ],
+  "rejected": [
+   {
+    "url": "https://palantir.com/",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://palantir.com/about",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://palantir.com/careers",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://palantir.com/press",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://palantir.com/team",
+    "why": "robots_disallow"
+   },
+   {
+    "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Palantir%22&mode=artlist&format=rss&maxrecords=15&timespan=3months&sourcelang=english",
+    "why": "unreachable"
+   }
+  ]
+ }
+}

@@ -62,7 +62,7 @@ const peopleSearchCache = new Map<string, { at: number; out: AlumniResult }>(); 
 // Review of #589 (DNS rebinding): at startup, can this runtime resolve names (Deno.resolveDns)? Logged once (research_dns_probe);
 // when it cannot, the research reader reads nothing (fails closed) instead of fetching without the resolved-address check.
 if (researchReplyOn(Deno.env)) void dnsProbe();
-import { AGENT_BRAIN_RELEASED, chooseBrain, agentTurn, HISTORY_WINDOW, historyWindow, summaryFor } from "./career_brain.ts";
+import { AGENT_BRAIN_RELEASED, chooseBrain, agentTurn, HISTORY_WINDOW, historyWindow, nonEmptyReply, summaryFor } from "./career_brain.ts";
 import { brainMode, draftContinuation, FOLLOWUP_INTENT, questionShaped, researchOverAction, stagedRoute, stagedToolPolicy } from "./career_staged.ts";
 import { BOUNDARY_LINE, BOUNDARY_SAID, boundaryOf, correctionOf, hypotheticalOf } from "../_shared/agent/turn_notes.ts"; // D-061 G1, G6, G8, G9
 import { severalAsks } from "../_shared/ask_language.ts"; // D-061 G13
@@ -1551,6 +1551,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           // The files tailor_resume made this turn ride the reply (documentsOf below), as a router tailor's do.
           // D-062 (G6): after a people search, the caveat and "Nobody was contacted." are in the reply (career_alumni_search.ts).
           if (peopleTrace && !turn.show && turn.stopped === "final") turn.reply = enforcePeopleReply(turn.reply, peopleTrace);
+          // D-067 (D-024): the brain's reply is never sent blank, after every check code ran on it.
+          turn.reply = nonEmptyReply(turn);
           out = { reply: turn.reply, intent: turn.show?.intent ?? (turn.tool_calls.some((c: any) => c.name === "draft_followup") ? FOLLOWUP_INTENT : "agent"), resultStatus: turn.stopped, contained: false, handler: "agent", ...(turn.show?.parts ? { parts: turn.show.parts } : {}),
             ...(turnDocuments.length ? { result: { documents: turnDocuments } } : {}) };
           agentMeta = { brain: staged.chosen ? "staged" : "agent", ...(staged.chosen ? { router_intent: staged.decision?.intent ?? null } : {}), tool_calls: turn.tool_calls, stopped: turn.stopped, pending_approvals: turn.pending_approvals.length, ...(turn.knowledge ? { knowledge: turn.knowledge } : {}),

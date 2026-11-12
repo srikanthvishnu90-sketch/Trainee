@@ -1,0 +1,189 @@
+{
+ "note": "20 real public people-search asks (item 5): a real school and real employers, asked by a fictional person (Alex Testcase, TEST). No real person is named anywhere in this set: the $0 run's search answers carry fictional people only (run.ts), and the live run (model spend, not made) stores counts and hashes, never names.",
+ "queries": [
+  {
+   "id": "P01",
+   "school": "University of Illinois Urbana-Champaign",
+   "employers": [
+    "Google"
+   ],
+   "count": 3,
+   "ask": "find me 3 University of Illinois Urbana-Champaign alumni working at Google, just research, don't message anyone"
+  },
+  {
+   "id": "P02",
+   "school": "Georgia Institute of Technology",
+   "employers": [
+    "Microsoft"
+   ],
+   "count": 3,
+   "ask": "find me 3 Georgia Institute of Technology alumni working at Microsoft, just research, don't message anyone"
+  },
+  {
+   "id": "P03",
+   "school": "The University of Texas at Austin",
+   "employers": [
+    "Dell Technologies",
+    "Oracle"
+   ],
+   "count": 3,
+   "ask": "find me 3 The University of Texas at Austin alumni working at Dell Technologies or Oracle, just research, don't message anyone"
+  },
+  {
+   "id": "P04",
+   "school": "University of Michigan",
+   "employers": [
+    "Stripe"
+   ],
+   "count": 3,
+   "ask": "find me 3 University of Michigan alumni working at Stripe, just research, don't message anyone"
+  },
+  {
+   "id": "P05",
+   "school": "Carnegie Mellon University",
+   "employers": [
+    "Jane Street",
+    "Citadel"
+   ],
+   "count": 3,
+   "ask": "find me 3 Carnegie Mellon University alumni working at Jane Street or Citadel, just research, don't message anyone"
+  },
+  {
+   "id": "P06",
+   "school": "University of California, Berkeley",
+   "employers": [
+    "Figma"
+   ],
+   "count": 3,
+   "ask": "find me 3 University of California, Berkeley alumni working at Figma, just research, don't message anyone"
+  },
+  {
+   "id": "P07",
+   "school": "Purdue University",
+   "employers": [
+    "Caterpillar"
+   ],
+   "count": 3,
+   "ask": "find me 3 Purdue University alumni working at Caterpillar, just research, don't message anyone"
+  },
+  {
+   "id": "P08",
+   "school": "University of Washington",
+   "employers": [
+    "Amazon"
+   ],
+   "count": 3,
+   "ask": "find me 3 University of Washington alumni working at Amazon, just research, don't message anyone"
+  },
+  {
+   "id": "P09",
+   "school": "Northeastern University",
+   "employers": [
+    "Wayfair"
+   ],
+   "count": 3,
+   "ask": "find me 3 Northeastern University alumni working at Wayfair, just research, don't message anyone"
+  },
+  {
+   "id": "P10",
+   "school": "The Ohio State University",
+   "employers": [
+    "JPMorgan Chase"
+   ],
+   "count": 3,
+   "ask": "find me 3 The Ohio State University alumni working at JPMorgan Chase, just research, don't message anyone"
+  },
+  {
+   "id": "P11",
+   "school": "Rutgers University",
+   "employers": [
+    "Johnson & Johnson"
+   ],
+   "count": 3,
+   "ask": "find me 3 Rutgers University alumni working at Johnson & Johnson, just research, don't message anyone"
+  },
+  {
+   "id": "P12",
+   "school": "Arizona State University",
+   "employers": [
+    "Intel"
+   ],
+   "count": 3,
+   "ask": "find me 3 Arizona State University alumni working at Intel, just research, don't message anyone"
+  },
+  {
+   "id": "P13",
+   "school": "University of California, Los Angeles",
+   "employers": [
+    "Snap"
+   ],
+   "count": 3,
+   "ask": "find me 3 University of California, Los Angeles alumni working at Snap, just research, don't message anyone"
+  },
+  {
+   "id": "P14",
+   "school": "New York University",
+   "employers": [
+    "Goldman Sachs",
+    "Morgan Stanley"
+   ],
+   "count": 3,
+   "ask": "find me 3 New York University alumni working at Goldman Sachs or Morgan Stanley, just research, don't message anyone"
+  },
+  {
+   "id": "P15",
+   "school": "Penn State University",
+   "employers": [
+    "Lockheed Martin"
+   ],
+   "count": 3,
+   "ask": "find me 3 Penn State University alumni working at Lockheed Martin, just research, don't message anyone"
+  },
+  {
+   "id": "P16",
+   "school": "University of Wisconsin-Madison",
+   "employers": [
+    "Epic Systems"
+   ],
+   "count": 3,
+   "ask": "find me 3 University of Wisconsin-Madison alumni working at Epic Systems, just research, don't message anyone"
+  },
+  {
+   "id": "P17",
+   "school": "Boston University",
+   "employers": [
+    "Datadog"
+   ],
+   "count": 3,
+   "ask": "find me 3 Boston University alumni working at Datadog, just research, don't message anyone"
+  },
+  {
+   "id": "P18",
+   "school": "Virginia Tech",
+   "employers": [
+    "Capital One"
+   ],
+   "count": 3,
+   "ask": "find me 3 Virginia Tech alumni working at Capital One, just research, don't message anyone"
+  },
+  {
+   "id": "P19",
+   "school": "University of Florida",
+   "employers": [
+    "Chewy"
+   ],
+   "count": 3,
+   "ask": "find me 3 University of Florida alumni working at Chewy, just research, don't message anyone"
+  },
+  {
+   "id": "P20",
+   "school": "Texas A&M University",
+   "employers": [
+    "ExxonMobil",
+    "Chevron"
+   ],
+   "count": 3,
+   "ask": "find me 3 Texas A&M University alumni working at ExxonMobil or Chevron, just research, don't message anyone"
+  }
+ ]
+}

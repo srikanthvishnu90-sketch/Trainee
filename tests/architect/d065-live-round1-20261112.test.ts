@@ -90,7 +90,8 @@ Deno.test("D65-2 G10: a draft ask goes through draft_followup; prose drafts get 
   ok(/THIS IS A DRAFT ASK/.test(s1.seen[0].system), "the turn note");
   ok(/Call draft_followup now/.test(s1.seen[1].system), "one process review");
   eq(r1.tool_calls.map((c) => c.name), ["draft_followup"]);
-  eq(r1.reply, `Draft, not sent:\n\n${body}`, "the reply is the tool's text");
+  // Architect amendment (D-067): the draft comes first and its label after it (G2, answer first); the bar stands: the reply is the tool's checked text and the not-sent label still appears.
+  eq(r1.reply, `${body}\n\nDraft, not sent.`, "the reply is the tool's text");
   // A draft over the bound: shortened only in its wording, before it is shown; the shorter text passes the same draft check.
   const longBody = "Hi [Name], I'm a Lakeshore University CS and Finance student. I hand-coded 70+ React websites for clients at Pixelforge. " +
     "I'm applying for Google's SWE internship [job link], and I'd be grateful for a short chat about your team and, if you think I'm a fit, a referral. Thanks either way, I appreciate your time and any advice.";
@@ -99,11 +100,13 @@ Deno.test("D65-2 G10: a draft ask goes through draft_followup; prose drafts get 
   const C2_SHOWN = [{ role: "user", content: P.C2 }, { role: "assistant", content: `Draft, not sent:\n\n${longBody}` }];
   const r2 = await turn(P.C14, s2.model, { history: C2_SHOWN });
   ok(textLength(`Draft, not sent:\n\n${longBody}`) > 220);
-  eq(r2.reply, `Draft, not sent:\n\n${shortBody}`);
+  // Architect amendment (D-067): the draft comes first and its label after it (G2, answer first); the bar stands: the reply is the tool's checked text and the not-sent label still appears.
+  eq(r2.reply, `${shortBody}\n\nDraft, not sent.`);
   eq(r2.show?.text, r2.reply, "the shown card is the shorter text");
   // The shorter text invents a figure: the draft check refuses it and the checked draft stands.
   const s3 = scripted((_p, n) => n === 0 ? use("draft_followup", { kind: "note", recipient: "", body: longBody }) : text("ok"), () => "Hi [Name], I built 90 React sites. Refer me for Google's SWE internship [job link]? Thanks!");
-  eq((await turn(P.C14, s3.model, { history: C2_SHOWN })).reply, `Draft, not sent:\n\n${longBody}`);
+  // Architect amendment (D-067): the draft comes first and its label after it (G2, answer first); the bar stands: the reply is the tool's checked text and the not-sent label still appears.
+  eq((await turn(P.C14, s3.model, { history: C2_SHOWN })).reply, `${longBody}\n\nDraft, not sent.`);
 });
 
 Deno.test("D65-3 C9: a research ask's parts are each covered; a missing part gets one completion pass", async () => {

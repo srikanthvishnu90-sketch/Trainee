@@ -19,6 +19,20 @@ The 95% is D-056's reading: at least 95% by exact integer count.
 Inputs shared by 3 and 13: [`postings/`](postings/) (capture script, the 35 recorded bodies, `sources.json` with request, time and
 sha256 for each). Every runner checks those hashes before it reads.
 
+## Live runs (D-068, 2026-11-12, trunk 44b436f9)
+
+Run through `.github/workflows/real-sets-live.yml` on `ci/real-sets-live` (the request is `run-request.json` there), each cap
+reserved at the shared $70 ledger and settled to the metered cost. Results are in each set's `results/live-<CI run>/`.
+
+| Item | CI run | Cap | Spent | Result | Bar |
+|---|---|---|---|---|---|
+| 10 Research (`research --live`, Claude web search + the free sources, the real model drafting) | 43192205798 | $3.50 | $2.9641 | **11/20**: sources 20/20, cited 20/20, no kept figure off its page 20/20, unread named 20/20, own board 20/20, brief 11/20 (Coinbase, Datadog, Brex, Affirm, Discord, Dropbox, Toast, Palantir, Notion: "no_sources" although 5 to 11 pages each were read) | 19/20, **BELOW** |
+| 5 Finding people (`people --live`, Claude web search, the real `find_people` tool and guard) | 43193852143 | $2.50 | $1.5872 | **20/20** pass the guard checks (one search with LinkedIn and Indeed blocked, name and employer in the lead's own excerpt, caveat, nobody contacted); a lead was found on 2/20 asks (3 leads, school shown on 2; 36 proposals dropped) | 19/20, **MEETS (the guard)** |
+
+The live research score is the replay's six checks on the pages the run's own reader returned, except that a live line is the
+model's sentence, so "cited" checks every figure and at least 60% of the content words against the cited pages (the product's
+guard keeps a line only when its quote is on its page). People: names are stored as sha256 prefixes only.
+
 ## What this environment could reach (2026-11-12)
 
 Reachable: the public APIs of Greenhouse, Lever, Ashby and SmartRecruiters, and PayPal's Workday. Refused by the proxy: levels.fyi,

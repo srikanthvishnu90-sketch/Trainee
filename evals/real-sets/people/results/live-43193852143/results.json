@@ -1,0 +1,372 @@
+{
+ "approval": "D-068",
+ "budget_usd": 2.5,
+ "spent_usd": 1.5872,
+ "line": "REAL-SET PEOPLE LIVE (Claude web search, the real find_people tool and guard): 20/20 asks run; asks with at least one lead 2/20; leads kept 3 (school shown 2), dropped 36; one_search 20/20, guard 20/20, caveat 20/20, nobody_contacted 20/20; PASS 20/20 (bar 19/20) MEETS",
+ "note": "names are sha256 prefixes; no real name is stored",
+ "rows": [
+  {
+   "id": "P01",
+   "status": "none",
+   "kept": 0,
+   "dropped": 3,
+   "school_shown": 0,
+   "leads": [],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P02",
+   "status": "none",
+   "kept": 0,
+   "dropped": 3,
+   "school_shown": 0,
+   "leads": [],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P03",
+   "status": "ok",
+   "kept": 2,
+   "dropped": 1,
+   "school_shown": 1,
+   "leads": [
+    {
+     "name": "f44fc0e0",
+     "employer": "Oracle",
+     "school_match": "shown",
+     "host": "www.siliconhillsnews.com",
+     "page_age": "2886 days ago"
+    },
+    {
+     "name": "815bbfaf",
+     "employer": "Oracle",
+     "school_match": "not shown",
+     "host": "liberalarts.utexas.edu",
+     "page_age": null
+    }
+   ],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P04",
+   "status": "none",
+   "kept": 0,
+   "dropped": 0,
+   "school_shown": 0,
+   "leads": [],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P05",
+   "status": "none",
+   "kept": 0,
+   "dropped": 3,
+   "school_shown": 0,
+   "leads": [],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P06",
+   "status": "none",
+   "kept": 0,
+   "dropped": 1,
+   "school_shown": 0,
+   "leads": [],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P07",
+   "status": "none",
+   "kept": 0,
+   "dropped": 3,
+   "school_shown": 0,
+   "leads": [],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P08",
+   "status": "none",
+   "kept": 0,
+   "dropped": 3,
+   "school_shown": 0,
+   "leads": [],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P09",
+   "status": "none",
+   "kept": 0,
+   "dropped": 0,
+   "school_shown": 0,
+   "leads": [],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P10",
+   "status": "none",
+   "kept": 0,
+   "dropped": 3,
+   "school_shown": 0,
+   "leads": [],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P11",
+   "status": "none",
+   "kept": 0,
+   "dropped": 0,
+   "school_shown": 0,
+   "leads": [],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P12",
+   "status": "none",
+   "kept": 0,
+   "dropped": 3,
+   "school_shown": 0,
+   "leads": [],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P13",
+   "status": "none",
+   "kept": 0,
+   "dropped": 3,
+   "school_shown": 0,
+   "leads": [],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P14",
+   "status": "none",
+   "kept": 0,
+   "dropped": 3,
+   "school_shown": 0,
+   "leads": [],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P15",
+   "status": "none",
+   "kept": 0,
+   "dropped": 3,
+   "school_shown": 0,
+   "leads": [],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P16",
+   "status": "none",
+   "kept": 0,
+   "dropped": 0,
+   "school_shown": 0,
+   "leads": [],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P17",
+   "status": "none",
+   "kept": 0,
+   "dropped": 1,
+   "school_shown": 0,
+   "leads": [],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P18",
+   "status": "none",
+   "kept": 0,
+   "dropped": 0,
+   "school_shown": 0,
+   "leads": [],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P19",
+   "status": "ok",
+   "kept": 1,
+   "dropped": 0,
+   "school_shown": 1,
+   "leads": [
+    {
+     "name": "d9733525",
+     "employer": "Chewy",
+     "school_match": "shown",
+     "host": "www.zoominfo.com",
+     "page_age": null
+    }
+   ],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  },
+  {
+   "id": "P20",
+   "status": "none",
+   "kept": 0,
+   "dropped": 3,
+   "school_shown": 0,
+   "leads": [],
+   "checks": {
+    "one_search": true,
+    "guard": true,
+    "caveat": true,
+    "nobody_contacted": true,
+    "sorted": true
+   },
+   "notes": [],
+   "pass": true
+  }
+ ]
+}

@@ -18,11 +18,12 @@ fictional name.
 | `live-4` (CI run 42977209350) | + texts condensed, + the quoted mock question | $1.4005 | 3 / 26 (11.5%) | 12 | 5 | 460 |
 | [`live-5`](live-5/) (CI run 43135329449) | trunk 1ee06408 (D-059 to D-063), web research on (D-060), scored on the five P5 checks | $1.8375 | 1 / 26 (C18 to C23 cut by the cap) | 13 | 1 | 507 |
 | [`live-6`](live-6/) (CI run 43162338950) | trunk 6e17f371 (+ D-064, D-065, the test world), five P5 checks | $3.0153 | 1 / 26 (C21f and C23 cut by the cap) | 16 | 2 | 544 |
+| [`live-7`](live-7/) (CI run 43192119443) | trunk 44b436f9 (+ D-066 to D-069), all 26 turns run, scored `wa-1/d066` | $3.3528 | 6 / 24 scored (2 branch gaps); like for like with live-6 on 22 turns: 5 vs 1 | 17 | 1 | 527 |
 
 `live-1` and `live-2` cost $0 and did not reach the model. The runner set the API key after the test world had cleared it,
 so every call got a 401. Both runners are fixed.
 
-The total spent under D-057 is $2.7955 of $3. live-5 and live-6 ran under D-060 ($10 for this effort; $6.1053 of it spent after live-6).
+The total spent under D-057 is $2.7955 of $3. live-5 and live-6 ran under D-060 ($10 for this effort; $6.1053 of it spent after live-6). live-7 ran under D-068 (+$20).
 
 **How a turn is scored** (`evals/mirror/score-conversation.ts`): a turn mirrors when it passes all six checks below.
 

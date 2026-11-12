@@ -1,1 +1,1 @@
-{ "label": "wa1-live-7", "approval": "D-068", "budget_usd": 4.5, "conv": "evals/mirror/instinct-wa-batch1/prompts.jsonl", "persona": "evals/mirror/instinct-wa-batch1/persona.json" }
+{ "kind": "heldout", "label": "live-v95-practice", "approval": "D-068", "budget_usd": 3.6, "sample": 6, "seed": 7, "family": "practice" }

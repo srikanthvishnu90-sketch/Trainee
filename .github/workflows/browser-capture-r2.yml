@@ -21,4 +21,4 @@ jobs:
           (cd tools && npx --no-install playwright install --with-deps chromium)
           echo "UPMORE_PLAYWRIGHT_PATH=$GITHUB_WORKSPACE/tools/node_modules/playwright" >> "$GITHUB_ENV"
       - name: Capture (read only; nothing is submitted)
-        run: node scripts/browser-eval/cap/capture-r2.cjs scripts/browser-eval/cap/capture.csv
+        run: node scripts/browser-eval/cap/capture-r3.cjs

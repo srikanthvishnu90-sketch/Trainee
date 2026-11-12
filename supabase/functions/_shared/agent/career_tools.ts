@@ -711,9 +711,26 @@ export function careerTools(deps: {
         // real postings. With none found, the query is shortened from the end until one matches, and the result says so.
         const asked = String(i.query ?? "");
         // D-070: "chicago or remote" is two searches, merged (career_search.ts orAlternatives); each alternative is relaxed alone.
-        const alts = orAlternatives(asked);
-        if (alts.length > 1) {
-          const pools = await Promise.all(alts.map((a) => deps.postings(a)));
+        const alts0 = orAlternatives(asked);
+        if (alts0.length > 1) {
+          // D-071 (live-8 C1/setup-2: "chicago or remote" still returned no remote posting): the database matches whole words, so
+          // "software engineer intern remote" found nothing (NVIDIA's remote role is not an internship; only the in-memory test pool
+          // matched "intern" inside "internal"), and the alternative was never relaxed. Each alternative that finds nothing is now
+          // relaxed alone, from its end, but never by dropping the alternative itself (the place or the word the person chose):
+          // "software engineer intern remote" becomes "software engineer remote". What each searched is said (relaxed_each).
+          const own = (a: string) => { const common = alts0.map((x) => new Set(x.toLowerCase().split(/\s+/))).reduce((m, s2) => new Set([...m].filter((w) => s2.has(w)))); return a.toLowerCase().split(/\s+/).filter((w) => !common.has(w)); };
+          const relaxedAlt = async (a: string) => {
+            const keep = own(a), words = a.split(/\s+/).filter(Boolean);
+            let pool = await deps.postings(a);
+            while (!pool.length && words.length > keep.length + 1) {
+              const k = [...words.keys()].reverse().find((j) => !keep.includes(words[j].toLowerCase()));
+              if (k === undefined) break;
+              words.splice(k, 1); pool = await deps.postings(words.join(" "));
+            }
+            return { query: words.join(" "), pool };
+          };
+          const each = await Promise.all(alts0.map(relaxedAlt));
+          const alts = each.map((x) => x.query), pools = each.map((x) => x.pool);
           const union = [...new Map(pools.flat().map((p: any) => [String(p?.job_id ?? ""), p])).values()];
           if (union.length) {
             const saved0 = deps.alerts ? await deps.alerts.get(c.userId).catch(() => null) : null;
@@ -725,7 +742,8 @@ export function careerTools(deps: {
             const found: any[] = checked.shown;
             await record(c, "search", asked, { results: found.length, companies: [...new Set(found.map((p) => String(p.company ?? "")).filter(Boolean))].slice(0, 5),
               shown: found.slice(0, 10).map((p) => ({ job_id: String(p.job_id ?? ""), company: String(p.company ?? "").slice(0, 80), title: String(p.title ?? "").slice(0, 100) })) });
-            return { ...r, postings: found, filtered, source: "live", searched_each: alts, note_or: `searched each of: ${alts.join(" | ")}; a posting whose role_match is false is a related role, not the role asked for: say so`,
+            const relaxed_each = alts0.map((a, k) => a === alts[k] ? null : { asked: a, searched: alts[k] }).filter(Boolean);
+            return { ...r, postings: found, filtered, source: "live", searched_each: alts, ...(relaxed_each.length ? { relaxed_each, note_relaxed: "an alternative that matched nothing was searched with fewer words (relaxed_each): a posting it found may not be the exact role asked for; say so" } : {}), note_or: `searched each of: ${alts.join(" | ")}; a posting whose role_match is false is a related role, not the role asked for: say so`,
               links: { checked: checked.checked, dead_dropped: checked.dead, no_link_dropped: r.postings.length - withLink.length,
                 note: deps.linkCheck ? "each link was checked just now; a posting marked link 'unknown' could not be checked: say so beside it" : "links were not checked here" } };
           }

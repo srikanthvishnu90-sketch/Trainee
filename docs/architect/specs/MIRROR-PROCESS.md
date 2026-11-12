@@ -50,6 +50,9 @@ The loop, reusable for any reference (Instinct batch 2, another assistant, a hum
    `.github/workflows/mirror-conversation.yml`.
 5. **Score both the text and the process**: the reply against the reference's (`evals/mirror/score-conversation.ts`), and the
    process (the tools called, the artifact made, the boundary said, nothing sent) against this spec.
+   D-066: the scorer scores only like-for-like turns (fallback, not-run and off-branch follow-ups are coverage gaps, reported
+   and never scored), scores outcomes (correct, usable, honest), fails length only when far over, and prints passed/scored
+   with its gaps (`docs/architect/specs/BEHAVIOR-GUIDE.md`).
 6. **Fix by cause**: routing, instructions, tool exposure or a missing capability. Never canned reply prose, never a test edited
    to pass; an owner ruling where the reference's behaviour changes a rule (D-059).
 7. **Re-run** steps 3 to 5 until every turn matches. The deploy waits on the last blocked turn (owner, 2026-11-11).
@@ -126,7 +129,7 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
 - **Instinct:** a draft from the confirmed profile (school, Waypoint, 70+ React sites) with `[Name]` and `[job link]` placeholders;
   no question about the recipient; not sent.
 - **Steps:** (1) the brain - EXISTS. (2) `draft_followup` (kind `note`, recipient empty) - EXISTS; code checks the draft
-  (no invented meeting, referral, figure or name; no guessed address) and shows it as "Draft, not sent:" (`followup_draft.ts`).
+  (no invented meeting, referral, figure or name; no guessed address) and shows it with "Draft, not sent." after it (`followup_draft.ts`; label after the draft since D-067).
   Before this PR code refused a draft with no recipient and asked who it was for; **D-059** makes it draft with placeholders and
   ask for the recipient only at send time. A greeting or sign-off word ("Best, Sam") is no longer read as a name, and a
   short form of words the person typed ("CS" for "Computer Science") is theirs.
@@ -244,7 +247,7 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
 
 ### C13 "draft a message to a recruiter asking if the comp range on a role is negotiable, keep it casual, don't send" (EXISTS)
 - **Instinct:** a two-sentence casual draft, no name; not sent.
-- **Steps:** `draft_followup` with no recipient (D-059), shown "Draft, not sent:" - EXISTS; length "under about 200 characters".
+- **Steps:** `draft_followup` with no recipient (D-059), shown with "Draft, not sent." after it (D-067) - EXISTS; length "under about 200 characters".
 
 ### C14 "actually that referral draft from earlier, make it way shorter and less formal" (EXISTS)
 - **Instinct:** C2's draft, shorter, placeholders kept; not sent.

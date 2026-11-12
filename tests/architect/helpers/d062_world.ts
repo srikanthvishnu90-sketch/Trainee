@@ -88,6 +88,9 @@ export async function conversation(o: { gmail?: ReturnType<typeof fakeGmail> | n
     return await below(req);
   }) as typeof fetch;
   // PRODUCTION CONFIGURATION: every release flag unset (served at its release value), no never-on switch, the production brain.
+  // Architect amendment (D-066): the switches are put back as they were at close (the gate runs with them off); they leaked into
+  // later files of the same shard (tests/architect/flow-telegram-e2e.test.ts read CAREER_TEXTING_NATIVE unset, so on).
+  const savedFlags = [...Object.keys(RELEASE_FLAGS), ...RELEASE_NEVER_ON].map((k) => [k, Deno.env.get(k)] as const);
   for (const k of Object.keys(RELEASE_FLAGS)) Deno.env.delete(k);
   for (const k of RELEASE_NEVER_ON) Deno.env.delete(k);
   Deno.env.set("CAREER_BRAIN", PRODUCTION_BRAIN);
@@ -96,7 +99,7 @@ export async function conversation(o: { gmail?: ReturnType<typeof fakeGmail> | n
   Deno.env.set("TRAINEE_FILE_BASE_URL", "https://trainee.example.test"); Deno.env.set("TRAINEE_FILE_LINK_SECRET", "test-file-link-secret-0123456789abcdef");
   const person = await world.person({ resume: false });
   await o.setup?.(world.pg, person.id);
-  const close = async () => { globalThis.fetch = below; for (const k of ["CAREER_BRAIN", "ANTHROPIC_API_KEY", "TRAINEE_FILE_BASE_URL", "TRAINEE_FILE_LINK_SECRET"]) Deno.env.delete(k); await world.close(); };
+  const close = async () => { globalThis.fetch = below; for (const k of ["CAREER_BRAIN", "ANTHROPIC_API_KEY", "TRAINEE_FILE_BASE_URL", "TRAINEE_FILE_LINK_SECRET"]) Deno.env.delete(k); await world.close(); for (const [k, v] of savedFlags) v === undefined ? Deno.env.delete(k) : Deno.env.set(k, v); };
   const say = async (id: string, text: string) => {
     label = id;
     const f = flagsNow();

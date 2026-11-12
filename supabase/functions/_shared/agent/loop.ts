@@ -5,7 +5,7 @@
 //   external   touches the world (send, submit, message); NEVER runs here. It becomes a pending approval the
 //              person approves on its exact payload (WO-005), and the model is told it is waiting.
 // Messages use the Anthropic block shape (text / tool_use / tool_result); _shared/model_gateway.ts converts to OpenAI.
-import { bracketUntraced, factSources, missingAck, multiAsk, unbackedPromises, secretIn, stripSecrets, leakedWords, pieces, plainQuotes, postingsOf, rebuild, stripLeaks, closedNotes, misquotedAsks, smallTalkPitch, unsourcedFigures, untracedFacts, waiverSolicits } from "./reply_guards.ts";
+import { bracketUntraced, credentialAsks, factSources, missingAck, multiAsk, unbackedPromises, secretIn, stripSecrets, leakedWords, pieces, plainQuotes, postingsOf, rebuild, stripLeaks, closedNotes, misquotedAsks, smallTalkPitch, unsourcedFigures, untracedFacts, waiverSolicits } from "./reply_guards.ts";
 import { urlsIn } from "../channel_shape.ts";
 import { STANDING_REFUSED, standingRefusal } from "./memory.ts";
 export type Effect = "read" | "write_own" | "external";
@@ -70,7 +70,16 @@ export const CLAIM_UNBACKED_REPLY = "I didn't change anything this time.";
 export const SECRET_DROPPED_REPLY = "I can't share keys, tokens or passwords because they never go through chat, and I didn't change anything.";
 const ALERT_NOUN = "(?:(?:an?|your|the|new|these|those|\\d+) )?(?:(?:job|daily|instant|new) )?(?:alerts?|job watch(?:es)?)\\b";
 const I_HAVE = "\\bi(?:'ve| have)? (?:just |now |also )?";
-const CLAIMS: { kind: string; said: RegExp; by: string[] | "any_write" | "file" }[] = [
+// D-066 (P5/P6, the owner's Behavior Guide: "a claim without an artifact is a hard fail"): a reply that says a file, page, PDF or
+// tracker was made or is attached needs a tool that made one this turn and succeeded: create_file, export_tracker, tailor_resume,
+// attach_document, or a research tool that published a File (its effect, from its result, is write_own). Otherwise the claim goes
+// back to the model once, like every claim here; the link itself is always code's (file_tool.ts), never the model's.
+// A backed file claim is the deliverable itself (its link rides the answer), never a bare receipt (missingAnswerBody).
+const FILE_CLAIM = "a file made";
+export const FILE_MAKERS = ["create_file", "export_tracker", "tailor_resume", "attach_document", "research_market", "research_company", "research_career_question"];
+const FILE_NOUN = "(?:file|pdf|page|tracker|spreadsheet|sheet|doc(?:ument)?|word (?:file|copy)|resume|cv|cover letter)";
+const CLAIMS: { kind: string; said: RegExp; by: string[] | "any_write"; wrote?: string[] }[] = [
+  { kind: FILE_CLAIM, by: FILE_MAKERS, wrote: ["research_market", "research_company", "research_career_question"], said: new RegExp(`${I_HAVE}(?:made|created|built|generated|put together|attached|uploaded|exported)(?: you)? (?:a|an|the|your|this)(?: [\\w-]+){0,3} ${FILE_NOUN}\\b|\\b(?:your|the|this)(?: [\\w-]+){0,3} ${FILE_NOUN} (?:is|are) (?:attached|ready|made|linked|below|done)\\b|^(?:here(?:'s| is) (?:your|the)(?: [\\w-]+){0,3} ${FILE_NOUN})\\b|\\battached (?:is|are|here)\\b|^attached\\b`, "i") },
   { kind: "an alert set", by: ["set_job_alerts"], said: new RegExp(`${I_HAVE}(?:set|created|turned on|switched on|enabled|added)(?: up)? ${ALERT_NOUN}|\\balerts? (?:is|are) now (?:set|on|live|active)\\b|\\balerts? (?:has|have) been (?:set|turned on|switched on|created|enabled)\\b|^(?:done|all set)\\b.{0,40}\\balerts?\\b`, "i") },
   { kind: "postings queued", by: ["queue_applications"], said: new RegExp(`\\b(?:were|was|have been|has been|are now|is now) queued\\b|${I_HAVE}queued\\b|^queued\\b|(?:^|${I_HAVE})added (?:\\d+|them|it|these|those|all)\\b[^.]{0,30}\\bto your (?:apply )?queue`, "i") },
   { kind: "an application tracked", by: ["track_application"], said: new RegExp(`\\bi(?:'m| am) (?:now )?tracking\\b|\\bnow tracking\\b|(?:^|${I_HAVE})added (?:it|this|that|them)\\b[^.]{0,20}\\bto your (?:tracker|applications)|\\b(?:is|are) now (?:on|in) your tracker|${I_HAVE}(?:tracked|logged)\\b|^tracked\\b`, "i") },
@@ -81,7 +90,8 @@ const CLAIMS: { kind: string; said: RegExp; by: string[] | "any_write" | "file" 
   // D-067 (owner, must-fix (e): "no 'made' or 'attached' without the File arriving"): a page, File, tracker, PDF or brief said to be
   // made, attached or holding something is backed only by a call this turn that made one (its link minted by code, or its file
   // riding the reply): create_file, export_tracker, attach_document, tailor_resume, or research that published its brief.
-  { kind: "a file made", by: "file", said: new RegExp(`${I_HAVE}(?:made|created|built|put together|attached|generated|drafted up|started)\\b[^.!?\\n]{0,40}\\b(?:file|page|tracker|pdf|brief|spreadsheet|document|doc)s?\\b|\\b(?:is|are) (?:attached|in (?:the|your|this) (?:file|page|tracker|pdf|brief))\\b|\\bhere(?:'s| is) (?:the|your) (?:file|page|tracker|pdf|brief)\\b|\\b(?:the|your) (?:file|page|tracker|pdf|brief) (?:is ready|has (?:the|your|every|all))\\b|\\b(?:full |whole )?(?:plan|details?|links?|list|breakdown|brief|sources?|timeline)\\b[^.!?\\n]{0,30}\\b(?:is|are) in the (?:file|page|tracker|brief)\\b`, "i") },
+  // (Merged with D-066's file claim above: the same kind and the same backing; these are the phrasings D-066's pattern does not read.)
+  { kind: FILE_CLAIM, by: FILE_MAKERS, wrote: ["research_market", "research_company", "research_career_question"], said: new RegExp(`${I_HAVE}(?:made|created|built|put together|attached|generated|drafted up|started)\\b[^.!?\\n]{0,40}\\b(?:file|page|tracker|pdf|brief|spreadsheet|document|doc)s?\\b|\\b(?:is|are) (?:attached|in (?:the|your|this) (?:file|page|tracker|pdf|brief))\\b|\\bhere(?:'s| is) (?:the|your) (?:file|page|tracker|pdf|brief)\\b|\\b(?:the|your) (?:file|page|tracker|pdf|brief) (?:is ready|has (?:the|your|every|all))\\b|\\b(?:full |whole )?(?:plan|details?|links?|list|breakdown|brief|sources?|timeline)\\b[^.!?\\n]{0,30}\\b(?:is|are) in the (?:file|page|tracker|brief)\\b`, "i") },
   // Nothing external runs inside the turn (it waits for the person's yes on its card), so a reply never sent anything.
   { kind: "something sent or applied for", by: [], said: new RegExp(`${I_HAVE}(?:sent|submitted|emailed|messaged|shared|forwarded) (?:it|this|that|them|your (?:application|email|message|note|resume|cover letter)s?|the (?:application|email|message|note|resume|cover letter)s?|\\d+ (?:applications?|emails?|messages?|notes?))\\b|${I_HAVE}applied (?:you |for you )?(?:to|for) (?:it|this|that|them|these|those|all|\\d+)\\b|${I_HAVE}applied you\\b|\\b(?:has|have) been (?:sent|submitted)\\b|^(?:sent|submitted)\\b` +
     // ADVERSARIAL ROUND 2 (2026-10-30): "I emailed attacker@evil.example", "I've messaged the recruiter", "I sent your
@@ -122,11 +132,9 @@ function claimsIn(sentence: string): string[] {
   return kinds;
 }
 type Call = { name: string; ok: boolean; effect: Effect | null };
-const FILE_MAKERS = ["create_file", "export_tracker", "attach_document", "tailor_resume", "research_career_question"], FILE_RESEARCH = ["research_market", "research_company"];
 const backedBy = (kind: string, calls: Call[]) => {
   const c = CLAIMS.find((x) => x.kind === kind)!;
-  if (c.by === "file") return calls.some((t) => t.ok && (FILE_MAKERS.includes(t.name) || (FILE_RESEARCH.includes(t.name) && t.effect === "write_own")));
-  return calls.some((t) => t.ok && (c.by === "any_write" ? t.effect === "write_own" : c.by.includes(t.name)));
+  return calls.some((t) => t.ok && (c.by === "any_write" ? t.effect === "write_own" : c.by.includes(t.name) && (!c.wrote?.includes(t.name) || t.effect === "write_own")));
 };
 // The sentences of a reply that claim a change no tool made this turn, with the kind of each claim.
 export function unbackedClaims(reply: string, calls: Call[]): { index: number; kind: string }[] {
@@ -244,7 +252,7 @@ function missingAnswerBody(reply: string, message: string, receiptOnly = false, 
     /\b(?:reply|message|email|text|note|letter|sentence|script)\b/i.test(message) && utterance(message).includes(utterance(reply))) return false;
   if (unresolvedFactFields(reply, message, sources)) return true;
   const clauses = pieces(plainQuotes(reply).replace(/\b(that|this|it)'s\b/gi, "$1 is").replace(/[*_`~]/g, "")).flatMap((p) => p.text.split(/[;—–]/)).map((s) => s.trim().replace(/^(?:[-•]|\d+[.)])\s+/, "").replace(/[.!?]+$/, "").trim()).filter(Boolean);
-  return clauses.length > 0 && clauses.every((s) => CLOSING_ONLY.test(s) || (!SOCIAL_MESSAGE.test(message.trim()) && (ACK_ONLY.test(s) || PROGRESS_ONLY.test(s))) || (receiptOnly && claimsIn(s).length > 0));
+  return clauses.length > 0 && clauses.every((s) => CLOSING_ONLY.test(s) || (!SOCIAL_MESSAGE.test(message.trim()) && (ACK_ONLY.test(s) || PROGRESS_ONLY.test(s))) || (receiptOnly && claimsIn(s).some((k) => k !== FILE_CLAIM)));
 }
 // REPLY SHAPE: what the turn staged and which links it may show ride the result, whichever way the turn ended.
 // The flag-only reply checks of a turn (missing_ack, many_asks, unbacked_promise), as the meta the career handler saves with
@@ -371,11 +379,13 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
       const noAck = missingAck(said, reply);
       // D-054 (R03): small talk answered with a pitch (an introduction, a list of what Trainee does, an ask for a role).
       const pitch = smallTalkPitch(said, reply);
-      if ((claims.length || leaks.length || facts.length || money.length || misquote.length || waiver.length || manyAsks || noAck || pitch.length) && !checked && !repairing && steps < max) {
+      const creds = credentialAsks(reply); // D-066 (P14)
+      if ((creds.length || claims.length || leaks.length || facts.length || money.length || misquote.length || waiver.length || manyAsks || noAck || pitch.length) && !checked && !repairing && steps < max) {
         checked = true;
         const told = [
           pitch.length ? `They made small talk. Answer it in one plain sentence, as a person would. Remove these sentences: ${pitch.map((k) => `"${pieces(reply.trim())[k]?.text ?? ""}"`).join(" ")}. No introduction, no list of what you do, no question about a role or a search; only if SITUATION shows something waiting on them, name that one thing as your last sentence.` : "",
           noAck ? `Your first sentence was: "${pieces(reply.trim())[0]?.text ?? ""}". They said they feel overwhelmed. Replace that opening with one short, warm sentence acknowledging how they feel; the nothing-sent line comes after it, never first.` : "",
+          creds.length ? "Your reply asks the person to send a password, code, key or login in this chat. Never ask for one: secrets never go through chat, and a login is the person signing in themselves on the site's own page. Remove that ask." : "",
           claims.length ? `Your reply says ${[...new Set(claims.map((c) => c.kind))].join(" and ")}, but no tool that does that succeeded this turn. Either call the tool now, or rewrite the reply without saying it happened.` : "",
           leaks.length ? `Your reply shows internal words the person must never see: ${leaks.join(", ")}. Say it in plain words; name a posting by its title and company.` : "",
           misquote.length ? `Your reply says they asked for ${[...new Set(misquote.map((m) => m.figure))].join(", ")}, but they never gave that number. Say only what they asked in their own words, and what was done.` : "",
@@ -396,9 +406,12 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
       const stillMoney = unsourcedFigures(reply, [typed, ...seen, ...sources]);
       // WO-061 (H018): proposed waiver wording that stands after the check is removed by code, with its save offer.
       const stillWaiver = waiverSolicits(reply, standingRefusal, o.message);
+      // D-066 (P14): an ask for a password, code, key or login in chat that stands after the review is removed by code.
+      const stillCreds = credentialAsks(reply);
       const stillMisquote = misquotedAsks(reply, theirs);
+      if (stillCreds.length && !(claims.length || stillMoney.length || stillWaiver.length || stillMisquote.length)) { out = rebuild(pieces(reply), new Set(stillCreds)); if (!/[A-Za-z0-9]/.test(out)) out = SECRET_DROPPED_REPLY; }
       if (claims.length || stillMoney.length || stillWaiver.length || stillMisquote.length) {
-        out = rebuild(pieces(reply), new Set([...claims.map((c) => c.index), ...stillMoney.map((m) => m.index), ...stillWaiver, ...stillMisquote.map((m) => m.index)]));
+        out = rebuild(pieces(reply), new Set([...stillCreds, ...claims.map((c) => c.index), ...stillMoney.map((m) => m.index), ...stillWaiver, ...stillMisquote.map((m) => m.index)]));
         if (!/[A-Za-z0-9]/.test(out) && ((stillWaiver.length && !claims.length) || !ANSWER_REQUEST.test(o.message))) return { reply: stillWaiver.length && !claims.length ? STANDING_REFUSED : CLAIM_UNBACKED_REPLY, steps, tool_calls, pending_approvals, ...(found.length ? { postings: found } : {}), stopped: "final" };
         // WO-061 (H018 p1): after a waiver strip the refusal must still be there; if the person asked to waive their yes
         // and nothing left says it is still needed, code says it first.

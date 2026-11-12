@@ -602,7 +602,9 @@ const CareerHost = (() => {
           // recorded — the target of a "sorry, I meant X" correction)
           // is thread state and survives the account seed.
           const lastTurn = ctx.statedFacts && ctx.statedFacts.lastTurn ? ctx.statedFacts.lastTurn : null;
-          if (merged.length) ctx.statedFacts = Object.assign({ facts: merged, updatedAt: (ctx.statedFacts && ctx.statedFacts.updatedAt) || acctFacts.updated_at || null }, lastTurn ? { lastTurn } : {});
+          // D-072 (item 9b): what a correction in this thread replaced (statedFacts.replaced) is thread state too.
+          const replaced = ctx.statedFacts && Array.isArray(ctx.statedFacts.replaced) && ctx.statedFacts.replaced.length ? ctx.statedFacts.replaced : null;
+          if (merged.length) ctx.statedFacts = Object.assign({ facts: merged, updatedAt: (ctx.statedFacts && ctx.statedFacts.updatedAt) || acctFacts.updated_at || null }, lastTurn ? { lastTurn } : {}, replaced ? { replaced } : {});
           const offer = acctFacts.offer && typeof acctFacts.offer === "object" ? acctFacts.offer : null;
           if (offer && (offer.firm || offer.amount || offer.deadline)) {
             const mirrorNeg = ctx.trackStore && ctx.trackStore._careerThread && typeof ctx.trackStore._careerThread === "object" ? ctx.trackStore._careerThread.negotiation : null;

@@ -145,7 +145,8 @@ export const numEq = (s: Num, n: Num) => (s.v === n.v || Math.abs(s.v - n.v) <= 
 
 // ---------------------------------------------------------------------------------------------- words
 const STOP = new Set(("the a an and or but of in on at to for from with by as is are was were be been being it its this that these those there their they them you your we our i me my he she his her not no do does did can could will would should may might must have has had over under about into than then also only just more most less very much many some any each every per via out up down off such so if when while which who whom what how why where all both other another same own after before between during through against among within without across around toward until since because is's").split(" "));
-const stem = (w: string) => w.replace(/ies$/, "y").replace(/(?:ss|x|ch|sh)es$/, (m) => m.slice(0, -2)).replace(/s$/, "").replace(/(?:ing|ed|ly)$/, "").replace(/e$/, "");
+// D-071: a possessive is its word ("Coinbase's mission" is about Coinbase; the claim "Coinbase's" was a word no page had).
+const stem = (w: string) => w.replace(/'s?$/, "").replace(/ies$/, "y").replace(/(?:ss|x|ch|sh)es$/, (m) => m.slice(0, -2)).replace(/s$/, "").replace(/(?:ing|ed|ly)$/, "").replace(/e$/, "");
 export const contentWords = (s: string) => new Set((norm(s).match(/[a-z][a-z'-]{2,}/g) ?? []).filter((w) => !STOP.has(w) && !isNumWord(w) && !(w in FRAC) && !VAGUE.has(w) && !(w in ORD) && !/^(?:percent|dollars?|usd|euros?|eur|pounds?|gbp|rupees?|inr|yen|jpy|cad|aud|chf|bucks)$/.test(w)).map(stem));
 // Subject words: the occupation, group or thing a number is ABOUT. Measure words ("median", "wage", "earned", "grow"), verbs and
 // generic time words say what kind of number it is, not whose it is, so they never count as the subject.

@@ -16,7 +16,7 @@ export type Effect = "read" | "write_own" | "external";
 // (WO-038's contract): the same text as separate messages, so a texting channel delivers each whole and in order.
 // `before` (WO-091b): the previous turn's reply as the person saw it ("" on a first turn), so a tool can check that "the
 // first one" is a posting that reply showed. Undefined only for a caller that runs a tool without the loop's history.
-export interface ToolCtx { userId: string; threadId: string; now: number; state: Record<string, unknown>; turn?: { message: string; added: string[]; before?: string; attached?: string; attachments?: { filename: string; content: string }[]; fileLinks?: string[]; paySources?: PaySource[]; guard?: (text: string) => string[]; seen?: string[]; show?: { intent: string; text: string; parts?: string[]; meta?: Record<string, unknown> }; typed?: string; askOnly?: boolean; draft?: { label: string; body: string; recheck: (body: string) => boolean } } }
+export interface ToolCtx { userId: string; threadId: string; now: number; state: Record<string, unknown>; turn?: { message: string; added: string[]; before?: string; attached?: string; attachments?: { filename: string; content: string }[]; fileLinks?: string[]; paySources?: PaySource[]; guard?: (text: string) => string[]; seen?: string[]; show?: { intent: string; text: string; parts?: string[]; meta?: Record<string, unknown> }; typed?: string; askOnly?: boolean; draft?: { label: string; body: string; recheck: (body: string) => boolean }; counts?: { applied: number } } }
 export interface ToolSpec {
   name: string;
   description: string;
@@ -50,7 +50,9 @@ export interface TurnResult {
   reply: string;
   steps: number;
   // WO-080: a failed call carries `error`, its reason cleaned by scrubError; a call that ran carries none.
-  tool_calls: { name: string; ok: boolean; effect: Effect | null; error?: string }[];
+  // D-071 (live-8 C1: NVIDIA's remote posting was not returned and the trace held no search words): what a search or research
+  // call asked (argsOf), recorded in the turn's meta.
+  tool_calls: { name: string; ok: boolean; effect: Effect | null; error?: string; args?: Record<string, unknown> }[];
   pending_approvals: { tool: string; input: unknown; summary: string }[];
   stopped: "final" | "max_steps" | "model_error" | "incomplete_reply";
   // Meta only, never changes the reply: a final draft that still asked several things or promised an alert after the one rewrite.
@@ -298,6 +300,15 @@ const COMPLETENESS_REPAIR = "The previous draft did not contain an answer body a
 // `process` (D-065): the turn's process check. Given the model's draft reply and the calls made so far, it returns what the turn
 // still has to do (call the draft tool, search before the plan, cover a part they asked about) or null. Put to the model once,
 // with its tools, the same way as the reply guards' review; whatever stands after that is kept and flagged (process_unmet).
+// D-071: the words a search or research call used (no person's data: a search query, a company, research queries), for the trace.
+const ARGS_OF: Record<string, string[]> = { search_jobs: ["query", "limit"], research_market: ["companies", "queries", "format"], research_company: ["company", "role", "focus"] };
+export function argsOf(name: string, input: unknown): Record<string, unknown> | null {
+  const keys = ARGS_OF[name], i = input && typeof input === "object" ? input as Record<string, unknown> : null;
+  if (!keys || !i) return null;
+  const clip = (v: unknown): unknown => typeof v === "string" ? v.slice(0, 200) : typeof v === "number" ? v : Array.isArray(v) ? v.slice(0, 6).map(clip) : null;
+  const out = Object.fromEntries(keys.filter((k) => i[k] !== undefined && i[k] !== null).map((k) => [k, clip(i[k])]));
+  return Object.keys(out).length ? out : null;
+}
 async function runAgentTurnInner(o: { system: string; history: any[]; message: string; said?: string; tools: ToolSpec[]; model: ModelFn; ctx: ToolCtx; maxSteps?: number; shown?: string[]; process?: ((reply: string, calls: TurnResult["tool_calls"]) => string | null) | null }): Promise<TurnResult> {
   const max = o.maxSteps ?? 6;
   const byName = new Map(o.tools.map((t) => [t.name, t]));
@@ -465,7 +476,8 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
     const results: any[] = [];
     for (const u of uses) {
       const t = byName.get(u.name);
-      const fail = (effect: Effect | null, msg: string, why: unknown = msg) => { tool_calls.push({ name: u.name, ok: false, effect, error: scrubError(why as string) }); results.push({ type: "tool_result", tool_use_id: u.id, is_error: true, content: msg }); };
+      const args = argsOf(u.name, u.input);
+      const fail = (effect: Effect | null, msg: string, why: unknown = msg) => { tool_calls.push({ name: u.name, ok: false, effect, error: scrubError(why as string), ...(args ? { args } : {}) }); results.push({ type: "tool_result", tool_use_id: u.id, is_error: true, content: msg }); };
       if (!t) { fail(null, `unknown tool: ${u.name}`); continue; }
       const input = u.input && typeof u.input === "object" ? u.input : {};
       const missing = (t.input_schema.required || []).filter((k) => input[k] === undefined || input[k] === null || input[k] === "");
@@ -488,7 +500,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
           if (bad.length) { throw new Error(`not attached: the file states things no tool returned this turn and the person did not say: ${[...new Set(bad)].slice(0, 8).join(", ")}. Remove them or mark them "not verified", then attach again.`); }
           o.ctx.turn!.attachments!.push({ filename: att.filename, content: att.content });
         }
-        tool_calls.push({ name: t.name, ok: true, effect: t.effectOf ? t.effectOf(out) : t.effect });
+        tool_calls.push({ name: t.name, ok: true, effect: t.effectOf ? t.effectOf(out) : t.effect, ...(args ? { args } : {}) });
         results.push({ type: "tool_result", tool_use_id: u.id, content: resultText(out) });
         seen.push(resultText(out));
         if (u.name === "search_jobs" && out && Array.isArray((out as any).postings)) found = (out as any).postings.slice(0, 50);

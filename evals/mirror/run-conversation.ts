@@ -184,6 +184,9 @@ try {
       // D-070: why a call failed (create_file refused, live-7 C1) and what the length pass did (ran, accepted or rejected, why).
       call_errors: ((meta.tool_calls ?? []) as any[]).filter((x) => x && x.ok === false).map((x) => ({ name: String(x.name), error: String(x.error ?? "").slice(0, 300) })),
       shorten: meta.shorten ?? null,
+      // D-071: what research did with its pages and draft (drafted, kept, dropped by reason), and what each search asked.
+      research: meta.research ?? null,
+      args: ((meta.tool_calls ?? []) as any[]).filter((x) => x && x.args).map((x) => ({ name: String(x.name), args: x.args })),
       router_intent: meta.router_intent ?? null, brain: meta.brain ?? null, artifact, files, documents,
     };
     lines.push(JSON.stringify({ id: t.id, reply, actions, route: modelCalls > callsBefore ? (dry ? "model-scripted" : "model") : "router", intent, status, ms: Math.round(performance.now() - t1), usd: Number((spent - spentBefore).toFixed(4)), trace }));

@@ -468,10 +468,10 @@ export function careerTools(deps: {
       input_schema: obj({ instruction: str("The instruction, short and plain, e.g. 'Needs visa sponsorship (F-1 OPT)'"), quote: str("Their exact words from this message that say it") }, ["instruction", "quote"]),
       run: async (i, c) => {
         if (!c.turn || !quotedFrom(c.turn.message, String(i.quote ?? ""))) throw new Error("not kept: the quote is not in the person's message this turn; only what they said is kept");
-        // D-065 (G1/D-007): in a message that asks something, the quote must be one of its statements, and a thing to do now ("I
-        // need to lock in") is a task, not a rule to keep.
-        { const said = recordSource(c.turn.message);
-          if (said === "" || (said !== undefined && (!quotedFrom(said, String(i.quote ?? "")) || TODO_CLAUSE.test(String(i.quote ?? "").toLowerCase())))) throw new Error(NOTHING_STATED); }
+        // D-065 (G1/D-007, live round 1 C1): a thing to do now ("I need to lock in for recruiting") is a task, not a rule to keep.
+        // A rule the person phrases inside a question ("how should I follow up after an interview?") is still theirs to keep
+        // (launch readiness S3), so only the to-do is refused here; facts are held to their statements (add_profile_fact).
+        if (TODO_CLAUSE.test(String(i.quote ?? "").toLowerCase()) || TODO_CLAUSE.test(String(i.instruction ?? "").toLowerCase())) throw new Error("not kept: that is something to do now, not a rule that should always hold; answer it and keep nothing");
         // WO-061/H031: a rule about a resume they name is about a record; when that resume is not on file, that is what
         // they need to hear, first, before anything about keeping the rule.
         const named = resumeNamedIn(`${i.quote ?? ""} ${i.instruction ?? ""}`);

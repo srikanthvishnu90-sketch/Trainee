@@ -6,7 +6,7 @@
 //          shortened only in its wording, before it is shown, and only when the shorter text passes the same draft check.
 //   D65-3  C9: a research ask's named parts are each covered (turn note + one completion pass).
 //   D65-4  C1 (G1/D-007): no record write from a question or request; a plan ask aimed at postings searches first.
-//   D65-5  C16 (D-024): a page a tool made is proven by its link in the reply.
+//   D65-5  C16 (D-024): a page a tool made reaches the person with its link, on channels that cannot send a link on its own.
 //   D65-6  C12 (G5): an unverified capacity is never affirmed (instruction and turn note).
 //   D65-7  the spending-limit refusal is said as one (never "an error on its side, not a limit"), and nothing was sent.
 //   D65-8  the mirror runner's test world (eval only): recorded postings and Gmail served; research GETs pass only live.
@@ -18,6 +18,8 @@ import { MIRROR_RULES } from "../../supabase/functions/_shared/agent/prompt.ts";
 import { heldReply, nextStepOf, stopOfError } from "../../supabase/functions/_shared/limit_stop.ts";
 import { ModelUnavailableError } from "../../supabase/functions/_shared/model_calls.ts";
 import { createFileService, memoryFileStore } from "../../supabase/functions/_shared/file_service.ts";
+import { runInbound } from "../../supabase/functions/_shared/channel_inbound.ts";
+import { parseTelegramUpdate } from "../../supabase/functions/_shared/telegram.ts";
 import { CONFIRMATIONS, PAYPAL_CXS, POSTINGS, worldFetch, worldGmail } from "../../evals/mirror/instinct-wa-batch1/world.ts";
 
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -143,16 +145,30 @@ Deno.test("D65-4 C1 (G1/D-007): no record write from a question; a plan ask aime
   eq(processCheck({ draftAsk: false, planSearch: false, parts: [] }), null, "no check when nothing is owed");
 });
 
-Deno.test("D65-5 C16 (D-024): a page a tool made is proven by its link in the reply", async () => {
+Deno.test("D65-5 C16 (D-024): a page a tool made reaches the person with its link on a channel that cannot send links on their own", async () => {
+  // The agent turn keeps the File link as code's (fileLinks); the channel sends it after the answer.
   const ENV: Record<string, string> = { TRAINEE_FILE_LINK_SECRET: "file-link-secret-0123456789-abcdef", TRAINEE_FILE_BASE_URL: "https://trainee.example/file" };
   const files = createFileService({ store: memoryFileStore(), env: { get: (k: string) => ENV[k] }, now: () => NOW });
   const data = { title: "Plan", variant: "pipeline", period: "This week", sections: [{ heading: "Plan", items: [{ label: "Step", value: "Ship one project.", source: "From you" }] }] };
   const s = scripted((_p, n) => n === 0 ? use("create_file", { kind: "plan_review", data }) : text("Your plan page is made."));
   const r = await turn("make me a plan page for this week", s.model, { files });
-  ok(r.tool_calls.some((c) => c.name === "create_file" && c.ok), JSON.stringify(r.tool_calls));
   const link = (r as any).fileLinks?.[0] as string;
   ok(link?.startsWith("https://trainee.example/file?t=v1."), String(link));
-  eq(r.reply, `Your plan page is made.\n${link}`);
+  // WhatsApp / iMessage: no sendLink. The link rides the answer, on its own line; Telegram (sendLink) still sends it on its own.
+  const run = async (sendLink: boolean) => {
+    const stored: string[] = [], links: string[] = [];
+    const store: any = { async claimMessage() { return true; }, async person() { return { userId: "u", threadId: "th", contact: "wa:1" }; }, async sawInbound() {}, async setOptOut() {}, async setThread() {},
+      async enqueueReply(_u: string, _k: string, t: string) { stored.push(t); return true; } };
+    const d: any = { env: { get: () => undefined }, now: () => NOW, store, render: (x: string) => [x], deliver: async () => {}, reply: async () => ({ ok: true }),
+      chat: async () => ({ status: 200, reply: r.reply, threadId: "th", shape: { attachments: [], links: [link] } }),
+      ...(sendLink ? { sendLink: async (x: any) => { links.push(x.url); return { ok: true }; } } : {}) };
+    await runInbound(parseTelegramUpdate({ update_id: 1, message: { message_id: 1, chat: { id: 1, type: "private" }, from: { id: 1 }, text: "make me a plan page" } }).message!, d);
+    return { stored, links };
+  };
+  const wa = await run(false);
+  eq(wa.stored.join("\n"), `Your plan page is made.\n${link}`, "the link is in the answer the person gets");
+  const tg = await run(true);
+  ok(!tg.stored.join("\n").includes(link) && tg.links.includes(link), "Telegram: the link is its own message, not repeated");
 });
 
 Deno.test("D65-6 C12 (G5): a capacity never verified is never affirmed", async () => {

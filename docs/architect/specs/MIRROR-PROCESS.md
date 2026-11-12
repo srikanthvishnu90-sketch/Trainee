@@ -262,7 +262,8 @@ Format: **Instinct** (what it visibly did) / **Steps** (Trainee's tools, in orde
   in `career_watch_kv`, erased with everything else) is named in the File and the reply. No Sheets export (a File page instead).
 - **Artifact:** the tracker File. Asserted in D62-2 (with a stage corrected by a later email).
 - **D-065:** live round 1 said "Your tracker page is made" with no link: the link rode only the channel's link messages (Telegram
-  only). The page's link is now in the reply itself (D-024).
+  only). On a channel without its own link messages (WhatsApp, iMessage), the page's link now rides the answer (D-024,
+  `channel_inbound.ts`).
 
 ### C17 "give me a 'tell me about yourself' answer i can reuse ..." (EXISTS)
 - **Steps:** the brain (`prep_serve_mismatch`) with the confirmed record and `get_profile` - EXISTS.

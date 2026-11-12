@@ -1907,9 +1907,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         if (sh.parts) out = { ...out, parts: sh.parts };
         shapeField = sh.shape;
         // FILE KINDS: the links to the pages create_file made were minted by code; they are sent after the answer whatever the shape decided.
-        // D-065 (D-024): the brain's reply now carries each such link itself (career_brain.ts), so a link already in the reply's text is
-        // not sent a second time as its own message.
-        if (turnFileLinks.some((l) => !out.reply.includes(l))) shapeField = { attachments: shapeField?.attachments ?? [], links: [...(shapeField?.links ?? []), ...turnFileLinks.filter((l) => !(shapeField?.links ?? []).includes(l) && !out.reply.includes(l))] };
+        if (turnFileLinks.length) shapeField = { attachments: shapeField?.attachments ?? [], links: [...(shapeField?.links ?? []), ...turnFileLinks.filter((l) => !(shapeField?.links ?? []).includes(l))] };
         if (sh.notes.length) agentMeta = { ...(agentMeta || {}), reply_shape: sh.notes.slice(0, 8) };
       }
       // ONBOARDING SCENARIOS (2026-10-29): a turn answered here, before or beside the host (a card, an apply, a connector, the

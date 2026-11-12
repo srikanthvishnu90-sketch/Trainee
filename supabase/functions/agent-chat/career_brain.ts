@@ -247,13 +247,6 @@ export async function agentTurn(o: {
       if (short) { const text = `${d.prefix}${short}`; result = { ...result, reply: text, show: { ...result.show, text } }; }
     }
   }
-  // D-065 (D-024, live round 1 C16: "Your tracker page is made" with no link): a page a tool made this turn (create_file,
-  // export_tracker, research files) is proven by its link in the reply itself, on its own line. The link rode only the channel's
-  // link messages, which only Telegram sends; on WhatsApp and iMessage the person got the claim without the page.
-  if (result.reply && result.stopped === "final" && !result.show) {
-    const missing = [...new Set(result.fileLinks ?? [])].filter((u) => !result.reply.includes(u));
-    if (missing.length) result = { ...result, reply: `${result.reply.trimEnd()}\n${missing.join("\n")}` };
-  }
   return know ? { ...result, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : result;
 }
 

@@ -119,7 +119,8 @@ try {
     let reply = "", intent: string | null = null, status = 0, meta: any = {}, artifact = false;
     try {
       const r: any = await person.say(t.prompt); reply = String(r.reply ?? ""); intent = r.intent; status = r.status; meta = r?.body?.meta ?? {};
-      artifact = !!(r?.body?.artifacts?.length || r?.body?.file_cards?.length) || reply.includes(FILE_ENV.TRAINEE_FILE_BASE_URL);
+      // D-065: a File link the turn sends after its answer (body.shape.links; on WhatsApp and iMessage it rides the answer) counts too.
+      artifact = !!(r?.body?.artifacts?.length || r?.body?.file_cards?.length) || reply.includes(FILE_ENV.TRAINEE_FILE_BASE_URL) || (r?.body?.shape?.links ?? []).some((l: string) => l.includes(FILE_ENV.TRAINEE_FILE_BASE_URL));
     } catch (e) { stopped = String((e as Error).message ?? e); }
     if (stopped) break;
     const after = await counts(person.id);

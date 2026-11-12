@@ -620,6 +620,14 @@ export async function runInbound(msg: InboundMessage, d: CoreDeps): Promise<Out>
       if (out.resultStatus === CARD_NEEDS_REPLY_STATUS) reply = needsReplyTextFor(msg.channel);
       parts = replyParts(out.parts);
       shape = out.shape ?? null;
+      // D-065 (D-024, live round 1 C16: "Your tracker page is made" and no page): a link that follows the answer (a File a tool made)
+      // went out only through sendLink, which only Telegram has; on WhatsApp and iMessage it was dropped. Where the channel cannot
+      // send a link on its own, each one not already in the answer rides the answer, on its own line.
+      if (!d.sendLink && shape?.links?.length) {
+        const missing = [...new Set(shape.links)].filter((u) => !reply.includes(u));
+        if (missing.length) { reply = `${reply.trimEnd()}\n${missing.join("\n")}`; if (parts) parts = [...parts, missing.join("\n")]; }
+        shape = { ...shape, links: [] };
+      }
       cardId = typeof out.cardId === "string" && out.cardId ? out.cardId : null;
       artifacts = Array.isArray(out.artifacts) ? out.artifacts : [];
       screenQidOut = out.screenButtons === true && typeof out.screenQid === "string" ? out.screenQid : null;

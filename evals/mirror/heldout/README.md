@@ -147,7 +147,8 @@ language 144/155, multi_ask 126/177, hypothetical 163/187, boundary 143/263, fil
 106/122 and capability 79/105. The persona swap (70.8%) is well below its own batch-1 paraphrase (86.2%). That gap is the
 generalisation P2 measures.
 
-**What fails, by code's decision** (held-out counts):
+**What fails, by code's decision** (held-out counts, at the baseline's trunk; the D-061 rulings applied to product code since,
+with their before and after per ruling, are in `docs/architect/specs/MIRROR-RULINGS.md` part D):
 
 - **G11 (36%).** A file ask that reaches the brain is never handed a file tool. `create_file` and `attach_document` are
   offered only when the reply writer is on and the channel is Telegram (`career_brain.ts`), and the release serves the writer

@@ -285,7 +285,11 @@ const CareerHost = (() => {
   // holds the send, and the hand-off is the ask (it is not a stop).
   const ASK_WORD_RE = /\b(?:find|search|look for|get me|show me|apply to|draft|write|tell me about|what'?s|what is|how)\b/i;
   const HANDOFF_RE = /\b(?:[Ss]end|[Gg]et|[Ff]orward|[Pp]ass)\s+(?:it|this|that|them)\s+(?:over\s+|along\s+|on\s+)?to\s+[A-Z]/;
-  const OTHER_ASK_RE = { test: (x) => ASK_WORD_RE.test(x) || HANDOFF_RE.test(x) };
+  // D-061 G1/G6: a boundary phrase inside an ask ("who are some alumni at X? names and roles, don't reach out to anyone",
+  // "find 3 grads ..., research only, don't message anyone") limits that ask; it is not a stop. A question, a list or a research
+  // ask beside the boundary is the other ask.
+  const ASK_MORE_RE = /\?|\b(?:who|which|where|when|why|list|names?|give me|research|look up|pull up|any)\b/i;
+  const OTHER_ASK_RE = { test: (x) => ASK_WORD_RE.test(x) || HANDOFF_RE.test(x) || ASK_MORE_RE.test(x) };
   const NEGATED_RE = /\b(?:don'?t|do not|dont|never|no need to)\s+(?:\w+\s+)?$/i;
   const sentencesOf = (s) => s.split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
   const HYPOTHETICAL_STOP_RE = /\bhypothetic|\bif i (?:said|say|were to|wanted to|asked you to|told you to)\b|\bwhat (?:would )?happens? if\b|\bwhat would (?:it|that|pausing|a pause|stopping) do\b|\b(?:just|only) (?:explain|tell me)\b[^.!?]*\b(?:don'?t|do not) do it\b|\bonly tell me what it would do\b/i;

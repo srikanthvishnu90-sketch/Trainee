@@ -631,7 +631,7 @@ const CareerRouter = (() => {
       // over an empty list, and one specific next change. An ask with no role and no place keeps "Nothing to show yet".
       const scope = emptySearchScope(lp, o, namedRole);
       // MIRROR-1000 gaps (2026-11-11): the empty result in plain words ("I found no open roles"), and the limits kept.
-      const facts = [scope ? "I found no open roles for that in the postings I have on hand, and I won't make any up." : namedRole ? "I won't make any up." : "I have no open roles on my list right now, and I won't make any up."];
+      const facts = [scope ? "I checked the postings I have on hand and found no open roles for that (career sites outside them were not checked), and I won't make any up." /* D-061 G4, G5: what was read, and what was not */ : namedRole ? "I won't make any up." : "I have no open roles on my list right now, and I won't make any up."];
       const kept = statedSearchLimits(text);
       if (kept.length) facts.push(`I kept your limits: ${kept.join("; ")}.`);
       if (fams && fams.length) facts.push(`I've kept your ask (${fams.map(familyLabel).join(" + ")}) and will run it as soon as matching roles come in.`);
@@ -8332,7 +8332,8 @@ const CareerRouter = (() => {
         try { sum0 = Track && Track.statusSummary ? Track.statusSummary(store) : null; } catch { sum0 = null; }
         return emitTrack(ctx, { intent: "tracking_status", reply, resultStatus: "prepared", sends: 0, counts: { total: 0 } }, sum0 ? { summary: sum0 } : { summary: { total: 0 } });
       }
-      const reply = compose({ headline: "Your application tracker is empty — no applications on record yet.", facts: ["Once you apply through me, each one shows up here with where it stands. If you applied somewhere on your own, tell me and I'll add it."], nextStep: "Say \"find jobs\" and I'll start a search." }); // PRODUCT AUDIT 2026-10-28: plain words (no question, so a bare \"yes\" never reads as an answer to one)
+      // D-061 G2 (answer first): the answer, then what it means; the same words in that order.
+      const reply = compose({ headline: "No applications on record yet, per your application tracker; ones you sent on your own are not checked here.", facts: ["Once you apply through me, each one shows up here with where it stands. If you applied somewhere on your own, tell me and I'll add it."], nextStep: "Say \"find jobs\" and I'll start a search." }); // D-061 G5: what the tracker does not cover, said in the answer's own sentence. PRODUCT AUDIT 2026-10-28: plain words (no question, so a bare \"yes\" never reads as an answer to one)
       let sum = null;
       try { sum = Track && Track.statusSummary ? Track.statusSummary(store) : null; } catch { sum = null; }
       return emitTrack(ctx, { intent: "tracking_status", reply, resultStatus: "prepared", sends: 0, counts: { total: 0 } }, sum ? { summary: sum } : { summary: { total: 0 } });

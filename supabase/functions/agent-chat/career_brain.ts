@@ -7,7 +7,7 @@ import { importContactsFile, MX_NOT_WIRED, type MxResolver, type Verifier } from
 import { attachAsked, attachTool } from "../_shared/agent/attach_tool.ts";
 import { createFileTool } from "../_shared/agent/file_tool.ts";
 import type { FileService } from "../_shared/file_service.ts";
-import { careerSystemPrompt, shapeRulesFor } from "../_shared/agent/prompt.ts";
+import { careerSystemPrompt, MIRROR_RULES, shapeRulesFor } from "../_shared/agent/prompt.ts";
 import { alertLine, type MemoryStore, type Pipeline, personBlock, type Standing } from "../_shared/agent/memory.ts";
 import type { ResearchDeps, ResearchResult } from "../_shared/agent/research/index.ts";
 import { enforceResearchReply, stripUnseenLinks } from "../_shared/agent/research/reply.ts";
@@ -18,7 +18,8 @@ import { enforceFollowupAsk } from "../_shared/followup_draft.ts";
 import { urlsIn } from "../_shared/channel_shape.ts";
 import { knowledgeFor, type Knowledge } from "../_shared/agent/knowledge/index.ts";
 import { styleBlock } from "../_shared/agent/style.ts";
-import { HYPOTHETICAL_WITHHELD, hypotheticalNote, hypotheticalOf, lengthNote, PERSONA_WITHHELD, postingNote, postingRefOf, REPLY_LENGTH, replyLength, roastNote, roastOf } from "../_shared/agent/turn_notes.ts";
+import { boundaryNote, boundaryOf, correctionNote, correctionOf, HYPOTHETICAL_WITHHELD, hypotheticalNote, hypotheticalOf, lengthNote, multiAskNote, PERSONA_WITHHELD, postingNote, postingRefOf, REPLY_LENGTH, replyLength, roastNote, roastOf } from "../_shared/agent/turn_notes.ts";
+import { severalAsks } from "../_shared/ask_language.ts";
 import type { AlertStore } from "../_shared/career_alert_store.ts";
 import type { HiredSource } from "../_shared/career_hired.ts";
 import type { WantStore } from "../_shared/career_apply_want.ts";
@@ -132,7 +133,9 @@ export async function agentTurn(o: {
   applyFlow?: ((url: string) => Promise<import("../_shared/posting_requirements.ts").ApplyFlow>) | null;
   // REPLY SHAPE: Telegram with CAREER_REPLY_WRITER=on: the shape rules in the prompt, and the attach_document tool.
   shape?: boolean;
-  // FILE KINDS: create_file (a page of one of the file kinds); present only with the shape on.
+  // FILE KINDS: create_file (a page of one of the file kinds). D-061 G11 ("a file ask gets the file"): offered whenever the
+  // handler passes a File service, which it does on every channel (the link rides shape.links after the answer; where File links
+  // are not set up the service refuses and the brain says so); no longer tied to the reply writer, which stays off (RELEASE_NEVER_ON).
   files?: FileService | null;
   // D-062: the capability tools (_shared/agent/capability_tools.ts: Gmail record and tracker, people search, answering an email),
   // under the same withholding as every other tool.
@@ -145,7 +148,10 @@ export async function agentTurn(o: {
   const roast = roastOf(o.message, o.history);
   const listed = (o.stores as any)?.discovery?.lastShortlist;
   const meant = hypo === "persona" ? [] : postingRefOf(o.message, Array.isArray(listed) ? listed : [], o.history);
-  const turnNotes = [hypo ? hypotheticalNote(hypo) : "", roast ? roastNote(roast) : "", meant.length ? postingNote(meant) : "", lengthNote(replyLength(o.message))].filter(Boolean);
+  // D-061 G6, G9, G13: the boundary the person set, a correction said out loud, several asks each answered (turn_notes.ts).
+  const boundary = boundaryOf(o.message), correction = correctionOf(o.message);
+  const turnNotes = [hypo ? hypotheticalNote(hypo) : "", roast ? roastNote(roast) : "", meant.length ? postingNote(meant) : "", boundary ? boundaryNote(boundary) : "",
+    correction ? correctionNote(correction) : "", severalAsks(o.message) ? multiAskNote() : "", lengthNote(replyLength(o.message))].filter(Boolean);
   const hypoWithheld = hypo === "persona" ? PERSONA_WITHHELD : hypo ? HYPOTHETICAL_WITHHELD : [];
   const block = o.known ? personBlock({ profile: hypo === "persona" ? null : o.stores.profile, ...o.known }) : null;
   const notes: string[] = [];
@@ -163,12 +169,12 @@ export async function agentTurn(o: {
   const trace: { r?: Extract<ResearchResult, { status: "ok" }>; m?: MarketResult | CompanyResult; a?: AdviceResult } = {};
   const ctx: any = { userId: o.userId, threadId: o.threadId, now: o.now, state: o.stores };
   let result = await runAgentTurn({
-    system: careerSystemPrompt(localDay(o.now, o.tz)) + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + "\n\n" + turnNotes.join("\n\n") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
+    system: careerSystemPrompt(localDay(o.now, o.tz)) + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + "\n\n" + MIRROR_RULES + "\n\n" + turnNotes.join("\n\n") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
     history: o.history.slice(-HISTORY_WINDOW).map((m) => ({ role: m.role, content: String(m.content ?? "") })),
     message: [o.message, ...notes].filter(Boolean).join("\n\n"),
     // ADVERSARIAL ROUND 2: an attached file's name and text are not the person's words: no tool reads them as said.
     said: o.message,
-    tools: [...withheld([...(o.toolPolicy?.withhold ?? []), ...hypoWithheld], [...careerTools({ postings: o.postings ?? (async () => []), alerts: o.alerts ?? null, memory: o.memory ?? null, events: o.events ?? null, confirmations: o.confirmations ?? null, tz: o.tz, mail: o.mail ?? null, interviews: o.interviews ?? null, digest: o.digest ?? null, outreach: o.outreach ?? null, verifier: o.verifier ?? null, tailor: o.tailor ?? null, hired: o.hired ?? null, wants: o.wants ?? null, limits: o.limits, posting: o.posting ?? null, situation: o.known?.situation ?? null, linkCheck: o.linkCheck ?? null, conversations: o.conversations ?? null, market: o.market ? { ...o.market, onResult: (r) => { if (r.status === "ok" || trace.m?.status !== "ok") trace.m = r; } } : null, postingRecheck: o.postingRecheck ?? null, applyFlow: o.applyFlow ?? null, research: o.knowledge && o.research ? { ...o.research, onResult: (r, m) => { if (r.status === "ok") trace.r = r; o.research?.onResult?.(r, m); }, onAdvice: (r) => { if (r.source || !trace.a?.source) trace.a = r; } } : null }), ...(o.capabilities ?? [])]), ...(o.shape && attachAsked(o.message) ? [attachTool()] : []), ...(o.shape && o.files ? [createFileTool(o.files)] : [])],
+    tools: [...withheld([...(o.toolPolicy?.withhold ?? []), ...hypoWithheld], [...careerTools({ postings: o.postings ?? (async () => []), alerts: o.alerts ?? null, memory: o.memory ?? null, events: o.events ?? null, confirmations: o.confirmations ?? null, tz: o.tz, mail: o.mail ?? null, interviews: o.interviews ?? null, digest: o.digest ?? null, outreach: o.outreach ?? null, verifier: o.verifier ?? null, tailor: o.tailor ?? null, hired: o.hired ?? null, wants: o.wants ?? null, limits: o.limits, posting: o.posting ?? null, situation: o.known?.situation ?? null, linkCheck: o.linkCheck ?? null, conversations: o.conversations ?? null, market: o.market ? { ...o.market, onResult: (r) => { if (r.status === "ok" || trace.m?.status !== "ok") trace.m = r; } } : null, postingRecheck: o.postingRecheck ?? null, applyFlow: o.applyFlow ?? null, research: o.knowledge && o.research ? { ...o.research, onResult: (r, m) => { if (r.status === "ok") trace.r = r; o.research?.onResult?.(r, m); }, onAdvice: (r) => { if (r.source || !trace.a?.source) trace.a = r; } } : null }), ...(o.capabilities ?? [])]), ...(o.shape && attachAsked(o.message) ? [attachTool()] : []), ...(o.files ? [createFileTool(o.files)] : [])],
     model: o.model,
     ctx,
   });

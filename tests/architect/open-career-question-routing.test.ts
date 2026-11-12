@@ -31,9 +31,15 @@ Deno.test("OQ-2 without CAREER_KNOWLEDGE=on (no research tool) the library answe
   assertNode.equal(decide(OPEN[0], env({ CAREER_BRAIN: "router", CAREER_KNOWLEDGE: "on" })).brain, false, "router mode (the D-035 rollback): never");
 });
 Deno.test("OQ-3 company-specific and posting-requirement asks stay on the library / code", () => {
-  for (const m of ["what does Stripe look for in software engineers?", "what do data analyst postings usually require?", "how do I get hired at Goldman Sachs as an analyst?", "find me data analyst jobs in Chicago", "apply to the Backend Software Engineer role at Ironstack Payments"]) {
+  for (const m of ["what do data analyst postings usually require?", "find me data analyst jobs in Chicago", "apply to the Backend Software Engineer role at Ironstack Payments"]) {
     const d = decide(m); assertNode.notEqual(d.reason, "open_career_question", m); assertNode.equal(d.brain, false, `${m}: ${d.reason}`);
   }
+  // Architect amendment (D-061): G1 and G14 with web research on (D-060): a firm's company file is the brain's data for a research
+  // turn, not the open-question route.
+  { const m = "what does Stripe look for in software engineers?"; const d = decide(m); assertNode.notEqual(d.reason, "open_career_question", m); assertNode.equal(d.reason, "g1_model_decides", m); }
+  // Architect amendment (D-061): G1: the router read this question as a people list to build (outreach_clarification); the question
+  // is the brain's, with that reading as data. It is still not the open-question route (no company-free library answer applies).
+  { const m = "how do I get hired at Goldman Sachs as an analyst?"; const d = decide(m); assertNode.notEqual(d.reason, "open_career_question", m); assertNode.equal(d.reason, "g1_model_decides", m); }
 });
 Deno.test("OQ-4 the research tool is the brain's for it: present only with research deps, named in the tool description", () => {
   const t = (careerTools as any)({ postings: async () => [], research: { search: async () => ({ status: "error", detail: "x" }) } }).find((x: any) => x.name === "research_career_question");

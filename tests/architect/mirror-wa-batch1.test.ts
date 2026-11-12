@@ -117,8 +117,10 @@ Deno.test("WA1-8 a mock start that names its question asks that question (the br
   const C21 = "ok behavioral round: ask me 'tell me about a time you failed' and then roast my answer";
   const d = decide(C21);
   ok(d.brain, `${d.intent}/${d.reason}`);
+  // Architect amendment (D-061): G1 gives a practice-session start to the brain (G12, one question at a time); the session's own
+  // answers stay code's (WA1-6). Nothing in either sends or saves.
   const plain = decide("mock interview me for a data analyst role");
-  eq(plain.brain, false, `${plain.intent}/${plain.reason}`);
+  eq(plain.brain, true, `${plain.intent}/${plain.reason}`);
 });
 
 Deno.test("WA1-9 a long text is condensed once, under code's guards", async () => {

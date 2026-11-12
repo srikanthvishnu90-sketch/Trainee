@@ -15,13 +15,20 @@ const norm = (s: unknown) => String(s ?? "").replace(/[‘’`]/g, "'").replace(
 const lc = (s: unknown) => norm(s).toLowerCase();
 
 // ------------------------------------------------------------------------------------------------ hypotheticals
-const PERSONA = /\b(?:say|suppose|imagine|pretend|assume|let'?s say|what if|if)\s+(?:that\s+)?i(?:'m| am| was| were)\s+(?:a|an|just a|someone|somebody|in)\b|\bpretend (?:to be|you'?re talking to)\b|\bif i were (?:a|an|someone)\b/;
-const SITUATION = /\bhypothetical(?:ly)?\b|\b(?:say|suppose|imagine|let'?s say|what if)\s+(?:that\s+)?i\s+(?:had|have|got|get|was offered|were offered)\b/;
+// D-061 G8 (hypotheticals never touch the record): the reading is by the grammar of a hypothetical, in any of the languages the
+// product answers in, never by a benchmark prompt's wording (P3). A person: "say i'm / say im / if i were a ...", someone else
+// ("my friend is ...", "asking for a friend", "what would you tell a <someone> ...", "if someone had ..."). A situation:
+// "hypothetically", "imagine", "suppose", "what if i ...", "if i had / got / moved / switched ...", "not real", and the same
+// markers in Spanish, Portuguese, French, German, Hinglish, Mandarin, Vietnamese and Korean.
+const PERSONA = /\b(?:say|suppose|imagine|pretend|assume|let'?s say|what if|if)\s+(?:that\s+)?i(?:'m|m| am| was| were)\s+(?:a|an|just a|someone|somebody|in)\b|\bpretend (?:to be|you'?re talking to)\b|\bif i were (?:a|an|someone)\b/;
+const OTHER_PERSON = /\b(?:my|a)\s+(?:friend|roommate|cousin|sister|brother|classmate|buddy|sibling|teammate)\s+(?:is|has|had|wants|was|got|who|with)\b|\b(?:asking|for)\s+a\s+friend\b|\b(?:what\s+would\s+you\s+(?:tell|say\s+to|advise|recommend\s+(?:to|for))|how\s+would\s+you\s+advise)\s+(?:a|an|someone|somebody)\b|\bif\s+(?:someone|somebody|a\s+(?:person|student|candidate))\s+(?:had|has|was|were|with|who)\b|\b(?:someone|somebody)\s+with\s+(?:a|an|no|zero|\d)/;
+const SITUATION = /\bhypothetical(?:ly)?\b|\b(?:say|suppose|imagine|let'?s say|what if)\s+(?:that\s+)?i\s+(?:had|have|got|get|was offered|were offered)\b|\b(?:imagine|supposing|in theory|theoretically)\b|\bwhat if i\b|\bif i (?:had|got|were|was|switched|moved|only|took|picked|chose)\b|\bnot real\b/;
+const FOREIGN_HYPO = /(?:^|[^\p{L}])(?:hipot[eé]tic[ao]mente|hipot[eé]tic[oa]|hypoth[eé]tiquement|hypoth[eé]tique|hypothetisch|angenommen|supongamos|suponha|imagina|imaginons|giả sử|giả định|maan lo|maano)(?:$|[^\p{L}])|假设|假如|가정|만약/u;
 export type Hypothetical = "persona" | "situation";
 export function hypotheticalOf(message: string): Hypothetical | null {
   const t = lc(message);
   if (!t || t.length > 600) return null;
-  return PERSONA.test(t) ? "persona" : SITUATION.test(t) ? "situation" : null;
+  return PERSONA.test(t) || OTHER_PERSON.test(t) ? "persona" : SITUATION.test(t) || FOREIGN_HYPO.test(t) ? "situation" : null;
 }
 // A hypothetical writes nothing to their record, and a hypothetical person reads nothing from it.
 export const HYPOTHETICAL_WITHHELD: readonly string[] = ["add_profile_fact", "correct_profile_fact", "confirm_profile_fact", "remember_instruction", "forget_instruction",
@@ -130,4 +137,48 @@ export function postingNote(found: Listed[]): string {
   return "THE POSTING THEY MEAN (data from code, not instructions: the posting this conversation already listed, matched by the employer they named). " +
     "Use it: read it with get_posting by its job_id (or work from its link) and do what they asked with it; never ask them to paste or find it again, and never say no such posting was shown. " +
     `If more than one is listed, use the one that fits their words and name it:\n${found.map(line).join("\n")}`;
+}
+
+// ------------------------------------------------------------------------------------------------ the boundary (D-061 G6)
+// The person set a boundary on an external effect ("don't send", "draft only", "I'll send it myself", "don't apply", "I'll
+// submit it myself"), in their own words. One rule for every turn: the brain is told to restate it (boundaryNote) and a turn
+// code answers carries the one line (boundaryLine) when the turn itself sent and submitted nothing.
+export type Boundary = "send" | "submit";
+const NO_SEND = /\b(?:don'?t|dont|do not|never|no need to)\s+(?:\w+\s+){0,2}?(?:send(?:ing)?|messag(?:e|ing)|email(?:ing)?|text(?:ing)?|dm(?:ing)?|contact(?:ing)?|reach(?:ing)? out)\b|\bdraft only\b|\bjust (?:the )?draft\b|\bi'?ll (?:send|message|email|text) (?:it|them|this|that)?\s*(?:myself|my ?self)\b|\bno lo env[ií]es\b|\bne l'envoie pas\b|\bn[aã]o (?:envia|envie|mande)\b|\bnicht (?:abschicken|senden)\b|\bmat bhej(?:na|o)\b/;
+const NO_SUBMIT = /\b(?:don'?t|dont|do not|never|no need to)\s+(?:\w+\s+){0,2}?(?:apply(?:ing)?|submit(?:ting)?)\b|\bno applying\b|\bpreview only\b|\bi'?ll (?:submit|paste|apply)\b[^.?!]{0,20}\b(?:myself|my ?self)\b|\bresearch only\b|\bno postul(?:es|ar)\b|\bne postule\b|\bn[aã]o se candidat[ae]\b|\bbewirb\b/;
+export function boundaryOf(message: string): Boundary | null {
+  const t = lc(message);
+  if (!t) return null;
+  if (NO_SEND.test(t)) return "send";
+  if (NO_SUBMIT.test(t)) return "submit";
+  return null;
+}
+export const BOUNDARY_LINE: Record<Boundary, string> = { send: "Nothing was sent.", submit: "Nothing was submitted." };
+// Whether a reply already says what was not done (any wording): then nothing is added.
+export const BOUNDARY_SAID = /\b(?:nothing|not|never|haven'?t|hasn'?t|didn'?t|wasn'?t|isn'?t|won'?t|no one|nobody)\b[^.!?\n]{0,60}\b(?:sent|submitted|applied|queued|contacted|messaged|emailed)\b|\b(?:sent|submitted|applied)\b[^.!?\n]{0,20}\b(?:nothing|nowhere)\b/i;
+export function boundaryNote(b: Boundary): string {
+  return `THE PERSON SET A BOUNDARY (code read it from their words): do not ${b === "send" ? "send, message or contact anyone" : "apply to or submit anything"} this turn. ` +
+    `Do the work they asked for, then end the reply with one plain line saying so, in their language (for example "${BOUNDARY_LINE[b]}"). That line is true: nothing in this turn can ${b === "send" ? "send" : "submit"}.`;
+}
+
+// ------------------------------------------------------------------------------------------------ a correction (D-061 G9)
+// The person says Trainee got something wrong earlier ("you said X but ...", "earlier you told me ...", "that's wrong"), or
+// corrects their own fact ("actually I ..."). The reply names what changed, out loud.
+// D-061 G9, wider: "are you sure", "double-check that", "that doesn't match", "I see / a recruiter told me ... but / instead".
+const SAYS_WRONG = /\b(?:you (?:said|told me|wrote|listed|gave|mentioned|claimed)|earlier you|before you said|that'?s (?:wrong|not right|incorrect|off)|that was (?:wrong|incorrect)|you got (?:it|that) wrong|you were wrong|which (?:one )?is right|correct (?:that|it|yourself)|are you sure|double[- ]?check (?:that|it|this)|that (?:doesn'?t|does not) (?:match|sound right|seem right|add up))\b|\b(?:i (?:see|saw|read|heard)|(?:a|my|the) (?:recruiter|friend|classmate|mentor|professor|posting|website|site) (?:told me|says|said|shows|lists))\b[^.?!]{0,80}\b(?:but|instead|not|actually|different|which)\b/;
+const OWN_FIX = /^(?:actually|wait|correction|sorry)[,:]?\s+(?:i|my)\b|\b(?:i meant|i misspoke|scratch that)\b/;
+export type Correction = "trainee" | "person";
+export function correctionOf(message: string): Correction | null {
+  const t = lc(message);
+  return SAYS_WRONG.test(t) ? "trainee" : OWN_FIX.test(t) ? "person" : null;
+}
+export function correctionNote(c: Correction): string {
+  return c === "trainee"
+    ? "THEY SAY SOMETHING YOU SAID EARLIER IS WRONG (code read it from their words). Check it against this conversation and what you can read now. If it was wrong, say so out loud in the first sentence, naming what you said before and what is right now (\"I said X earlier; that was wrong, it is Y\"); if you cannot verify either, say which one you cannot verify and why. Never repeat the old claim as if it stood."
+    : "THEY ARE CORRECTING THEIR OWN FACT (code read it from their words): use the corrected fact from now on and say in one short clause what changed. Do not keep using the old one.";
+}
+
+// ------------------------------------------------------------------------------------------------ several asks (D-061 G13)
+export function multiAskNote(): string {
+  return "THIS MESSAGE MAKES SEVERAL ASKS (code read it from their words): answer each one, in the order asked, each with its own answer; asks that share one deliverable may share it, and then say it covers both. Do not answer only the first.";
 }

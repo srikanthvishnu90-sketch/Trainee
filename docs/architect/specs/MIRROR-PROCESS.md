@@ -58,7 +58,7 @@ The loop, reusable for any reference (Instinct batch 2, another assistant, a hum
 
 | Turn | Status | Blocker (what is missing or off) |
 |---|---|---|
-| C1 | OFF | `CAREER_REPLY_WRITER`: one File with the checked postings and a weekly plan comes only from `create_file` (`plan_review`), offered only with the reply writer on Telegram; the D-060 plan page has no postings |
+| C1 | EXISTS | `search_jobs` and `create_file` (`plan_review`) are both offered to the brain with the reply writer off (D-061 G11); the File holds the checked postings and the weekly plan |
 | C2 | EXISTS | (D-059, this PR: no recipient named is drafted with placeholders) |
 | C3 | EXISTS | |
 | C4 | EXISTS | (D-063: `research_career_question` kind `advice`, one cited guide, its link on its own line; the header education line read as drafts) |

@@ -20,11 +20,12 @@ fictional name.
 | [`live-6`](live-6/) (CI run 43162338950) | trunk 6e17f371 (+ D-064, D-065, the test world), five P5 checks | $3.0153 | 1 / 26 (C21f and C23 cut by the cap) | 16 | 2 | 544 |
 | [`live-7`](live-7/) (CI run 43192119443) | trunk 44b436f9 (+ D-066 to D-069), all 26 turns run, scored `wa-1/d066` | $3.3528 | 6 / 24 scored (2 branch gaps); like for like with live-6 on 22 turns: 5 vs 1 | 17 | 1 | 527 |
 | [`live-8`](live-8/) (CI run 43211904644) | trunk 44183b35 (+ D-070), all 26 turns run, attached documents read back, scored `wa-1/d066` | $3.0978 | 5 / 24 scored (2 branch gaps); like for like with live-7 on 24 turns: 5 vs 6 | 17 | 0 | 559 |
+| [`live-9`](live-9/) (CI run 43272797730) | trunk 671ba1b7 (+ D-071), all 26 turns run (C8 met a model API 503: a coverage gap), scored `wa-1/d066` | $3.2764 | 4 / 23 scored (3 gaps); like for like with live-8 on 23 turns: 4 vs 4 | 17 | 0 | 513 |
 
 `live-1` and `live-2` cost $0 and did not reach the model. The runner set the API key after the test world had cleared it,
 so every call got a 401. Both runners are fixed.
 
-The total spent under D-057 is $2.7955 of $3. live-5 and live-6 ran under D-060 ($10 for this effort; $6.1053 of it spent after live-6). live-7 and live-8 ran under D-068 (+$20).
+The total spent under D-057 is $2.7955 of $3. live-5 and live-6 ran under D-060 ($10 for this effort; $6.1053 of it spent after live-6). live-7 and live-8 ran under D-068 (+$20); live-9 under D-068 with the owner's 2026-11-12 approval of $10 more.
 
 **How a turn is scored** (`evals/mirror/score-conversation.ts`): a turn mirrors when it passes all six checks below.
 

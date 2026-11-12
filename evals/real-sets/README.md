@@ -19,7 +19,7 @@ The 95% is D-056's reading: at least 95% by exact integer count.
 Inputs shared by 3 and 13: [`postings/`](postings/) (capture script, the 35 recorded bodies, `sources.json` with request, time and
 sha256 for each). Every runner checks those hashes before it reads.
 
-## Live runs (D-068, 2026-11-12, trunk 44b436f9; item 10 re-run on trunk 44183b35)
+## Live runs (D-068, 2026-11-12, trunk 44b436f9; item 10 re-run on trunk 44183b35 and on trunk 671ba1b7)
 
 Run through `.github/workflows/real-sets-live.yml` on `ci/real-sets-live` (the request is `run-request.json` there), each cap
 reserved at the shared $70 ledger and settled to the metered cost. Results are in each set's `results/live-<CI run>/`.
@@ -28,7 +28,37 @@ reserved at the shared $70 ledger and settled to the metered cost. Results are i
 |---|---|---|---|---|---|
 | 10 Research (`research --live`, Claude web search + the free sources, the real model drafting) | 43192205798 | $3.50 | $2.9641 | **11/20**: sources 20/20, cited 20/20, no kept figure off its page 20/20, unread named 20/20, own board 20/20, brief 11/20 (Coinbase, Datadog, Brex, Affirm, Discord, Dropbox, Toast, Palantir, Notion: "no_sources" although 5 to 11 pages each were read) | 19/20, **BELOW** |
 | 10 Research, re-run on trunk 44183b35 (D-070: draft parse, 4,000-token draft cap, quote matching) | 43212037007 | $3.50 | $2.9605 | **15/20**: sources 20/20, cited 20/20, no kept figure off its page 20/20, unread named 20/20, own board 20/20, brief 15/20 (Coinbase, Brex, Gusto, Toast, Notion: "no_sources", 5 to 10 pages read each; Datadog, Affirm, Discord, Dropbox and Palantir now brief; Gusto briefed on 43192205798) | 19/20, **BELOW** |
+| 10 Research, re-run on trunk 671ba1b7 (D-071: model-worded lines, quote fallback, page sentences when the draft gives none, ResearchAudit) | 43272687366 | $3.00 | $2.9275 | **15/20**: sources 20/20, **cited 18/20** (Stripe, Plaid: a kept line under 60% of its words on its cited pages), no kept figure off its page 20/20, unread named 20/20, own board 20/20, **brief 17/20** (Datadog, Affirm, Toast: `no_sources` with the audit's kept 1 each, the `frame`, which does not count toward a brief; Coinbase, Brex, Gusto, Notion now brief). Per-case audit in `research/results/live-43272687366/results.json` (`research`) | 19/20, **BELOW** |
 | 5 Finding people (`people --live`, Claude web search, the real `find_people` tool and guard) | 43193852143 | $2.50 | $1.5872 | **20/20** pass the guard checks (one search with LinkedIn and Indeed blocked, name and employer in the lead's own excerpt, caveat, nobody contacted); a lead was found on 2/20 asks (3 leads, school shown on 2; 36 proposals dropped) | 19/20, **MEETS (the guard)** |
+
+
+Item 10 on trunk 671ba1b7 (run 43272687366), the ResearchAudit per case (`research`: pages read, draft parse, lines drafted, kept,
+kept as the page's own sentence (`from_quote`), from the pages when the draft gave none (`from_pages`), dropped by reason):
+
+| Case | Company | Pass | pages | parse | drafted | kept | from_quote | from_pages | dropped (claim words not in quote / figure not in quote / product angle / tension not stated / other) | Failed check |
+|---|---|---|---|---|---|---|---|---|---|---|
+| R01 | Stripe | **no** | 10 | whole | 23 | 4 | 0 | 0 | 12 / 1 / 3 / 2 / unknown names or figures 1 | cited |
+| R02 | Airbnb | yes | 10 | whole | 25 | 5 | 0 | 0 | 10 / 3 / 3 / 2 / quote not on page 1, no quote 1 |  |
+| R03 | Figma | yes | 8 | whole | 23 | 2 | 0 | 0 | 9 / 6 / 3 / 3 / 0 |  |
+| R04 | Robinhood | yes | 7 | whole | 19 | 5 | 0 | 0 | 4 / 3 / 3 / 2 / unknown names or figures 2 |  |
+| R05 | Coinbase | yes | 10 | whole | 22 | 3 | 0 | 0 | 9 / 5 / 3 / 1 / unknown names or figures 1 |  |
+| R06 | Datadog | **no** | 9 | whole | 21 | 1 | 0 | 0 | 13 / 2 / 3 / 2 / 0 | brief |
+| R07 | Duolingo | yes | 12 | whole | 17 | 4 | 0 | 0 | 7 / 2 / 2 / 1 / quote not on page 1 |  |
+| R08 | Brex | yes | 10 | whole | 21 | 3 | 0 | 0 | 11 / 2 / 3 / 2 / 0 |  |
+| R09 | Affirm | **no** | 11 | whole | 22 | 1 | 0 | 0 | 13 / 1 / 3 / 1 / quote not on page 1, unknown names or figures 2 | brief |
+| R10 | Gusto | yes | 8 | whole | 24 | 3 | 1 | 0 | 12 / 3 / 3 / 2 / unknown names or figures 1 |  |
+| R11 | Discord | yes | 8 | whole | 26 | 3 | 0 | 0 | 13 / 4 / 3 / 2 / unknown names or figures 1 |  |
+| R12 | Dropbox | yes | 10 | whole | 23 | 2 | 0 | 0 | 15 / 1 / 3 / 2 / 0 |  |
+| R13 | Chime | yes | 6 | whole | 19 | 3 | 0 | 0 | 7 / 5 / 2 / 2 / 0 |  |
+| R14 | Toast | **no** | 8 | whole | 25 | 1 | 0 | 0 | 15 / 2 / 3 / 3 / quote not on page 1 | brief |
+| R15 | Palantir | yes | 10 | whole | 25 | 4 | 0 | 0 | 14 / 1 / 3 / 3 / 0 |  |
+| R16 | Spotify | yes | 7 | whole | 22 | 3 | 0 | 0 | 8 / 6 / 3 / 2 / 0 |  |
+| R17 | Ramp | yes | 9 | whole | 18 | 2 | 0 | 0 | 10 / 0 / 3 / 2 / frame unsupported 1 |  |
+| R18 | Notion | yes | 6 | whole | 23 | 3 | 0 | 0 | 12 / 3 / 3 / 2 / 0 |  |
+| R19 | Plaid | **no** | 5 | whole | 18 | 2 | 0 | 0 | 7 / 2 / 3 / 2 / no quote 1, unknown names or figures 1 | cited |
+| R20 | ServiceNow | yes | 7 | failed | 0 | 4 | 0 | 4 | 0 / 0 / 0 / 0 / 0 |  |
+
+Totals: drafted 416, kept 58 (from_quote 1, from_pages 4); the most common drop is `claim_words_not_in_quote` (201). The three cases with no brief each kept only the `frame` (Trainee's labelled reading), which `researchCompany` does not count toward a brief (`any`), and the page-sentence fallback runs only when the draft gave no line (`!audit.drafted`). Stripe and Plaid fail the eval's independent 60%-of-words check on a kept line; the result does not keep page text, so which line cannot be re-checked here (both carry a model-worded `frame`).
 
 The live research score is the replay's six checks on the pages the run's own reader returned, except that a live line is the
 model's sentence, so "cited" checks every figure and at least 60% of the content words against the cited pages (the product's

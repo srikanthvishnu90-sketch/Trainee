@@ -1,12 +1,25 @@
 {
- "at": "2026-11-12T12:19:01.927Z",
+ "at": "2026-11-12T14:36:05.855Z",
  "line": "REAL-SET RESEARCH ($0 replay, scripted draft): 20 real companies; pages fetched 47 (hosts: boards-api.greenhouse.io, api.lever.co, api.ashbyhq.com, api.smartrecruiters.com), refused 120; sources 20/20, cited 20/20, invented 20/20, unread 20/20, entity 20/20, brief 20/20; planted lines kept 0 cases; PASS 20/20 (bar 19/20) MEETS",
  "results": [
   {
    "id": "R01",
    "company": "Stripe",
    "status": "ok",
-   "research": null,
+   "research": {
+    "pages": 3,
+    "parse": "whole",
+    "drafted": 7,
+    "kept": 3,
+    "from_quote": 0,
+    "from_pages": 0,
+    "dropped": {
+     "figure_not_in_quote": 1,
+     "page_not_read": 1,
+     "date_not_on_page": 1,
+     "claim_words_not_in_quote": 1
+    }
+   },
    "fetched": 3,
    "refused": 6,
    "refused_why": [
@@ -37,7 +50,20 @@
    "id": "R02",
    "company": "Airbnb",
    "status": "ok",
-   "research": null,
+   "research": {
+    "pages": 3,
+    "parse": "whole",
+    "drafted": 7,
+    "kept": 3,
+    "from_quote": 0,
+    "from_pages": 0,
+    "dropped": {
+     "figure_not_in_quote": 1,
+     "page_not_read": 1,
+     "date_not_on_page": 1,
+     "claim_words_not_in_quote": 1
+    }
+   },
    "fetched": 3,
    "refused": 6,
    "refused_why": [
@@ -68,7 +94,20 @@
    "id": "R03",
    "company": "Figma",
    "status": "ok",
-   "research": null,
+   "research": {
+    "pages": 3,
+    "parse": "whole",
+    "drafted": 7,
+    "kept": 3,
+    "from_quote": 0,
+    "from_pages": 0,
+    "dropped": {
+     "figure_not_in_quote": 1,
+     "page_not_read": 1,
+     "date_not_on_page": 1,
+     "claim_words_not_in_quote": 1
+    }
+   },
    "fetched": 3,
    "refused": 6,
    "refused_why": [
@@ -99,7 +138,20 @@
    "id": "R04",
    "company": "Robinhood",
    "status": "ok",
-   "research": null,
+   "research": {
+    "pages": 3,
+    "parse": "whole",
+    "drafted": 7,
+    "kept": 3,
+    "from_quote": 0,
+    "from_pages": 0,
+    "dropped": {
+     "figure_not_in_quote": 1,
+     "page_not_read": 1,
+     "date_not_on_page": 1,
+     "claim_words_not_in_quote": 1
+    }
+   },
    "fetched": 3,
    "refused": 6,
    "refused_why": [
@@ -130,7 +182,20 @@
    "id": "R05",
    "company": "Coinbase",
    "status": "ok",
-   "research": null,
+   "research": {
+    "pages": 3,
+    "parse": "whole",
+    "drafted": 7,
+    "kept": 3,
+    "from_quote": 0,
+    "from_pages": 0,
+    "dropped": {
+     "figure_not_in_quote": 1,
+     "page_not_read": 1,
+     "date_not_on_page": 1,
+     "claim_words_not_in_quote": 1
+    }
+   },
    "fetched": 3,
    "refused": 6,
    "refused_why": [
@@ -161,7 +226,20 @@
    "id": "R06",
    "company": "Datadog",
    "status": "ok",
-   "research": null,
+   "research": {
+    "pages": 3,
+    "parse": "whole",
+    "drafted": 7,
+    "kept": 3,
+    "from_quote": 0,
+    "from_pages": 0,
+    "dropped": {
+     "figure_not_in_quote": 1,
+     "page_not_read": 1,
+     "date_not_on_page": 1,
+     "claim_words_not_in_quote": 1
+    }
+   },
    "fetched": 3,
    "refused": 6,
    "refused_why": [
@@ -192,7 +270,20 @@
    "id": "R07",
    "company": "Duolingo",
    "status": "ok",
-   "research": null,
+   "research": {
+    "pages": 3,
+    "parse": "whole",
+    "drafted": 7,
+    "kept": 3,
+    "from_quote": 0,
+    "from_pages": 0,
+    "dropped": {
+     "figure_not_in_quote": 1,
+     "page_not_read": 1,
+     "date_not_on_page": 1,
+     "claim_words_not_in_quote": 1
+    }
+   },
    "fetched": 3,
    "refused": 6,
    "refused_why": [
@@ -223,7 +314,20 @@
    "id": "R08",
    "company": "Brex",
    "status": "ok",
-   "research": null,
+   "research": {
+    "pages": 3,
+    "parse": "whole",
+    "drafted": 7,
+    "kept": 3,
+    "from_quote": 0,
+    "from_pages": 0,
+    "dropped": {
+     "figure_not_in_quote": 1,
+     "page_not_read": 1,
+     "date_not_on_page": 1,
+     "claim_words_not_in_quote": 1
+    }
+   },
    "fetched": 3,
    "refused": 6,
    "refused_why": [
@@ -254,7 +358,20 @@
    "id": "R09",
    "company": "Affirm",
    "status": "ok",
-   "research": null,
+   "research": {
+    "pages": 3,
+    "parse": "whole",
+    "drafted": 7,
+    "kept": 3,
+    "from_quote": 0,
+    "from_pages": 0,
+    "dropped": {
+     "figure_not_in_quote": 1,
+     "page_not_read": 1,
+     "date_not_on_page": 1,
+     "claim_words_not_in_quote": 1
+    }
+   },
    "fetched": 3,
    "refused": 6,
    "refused_why": [
@@ -285,7 +402,20 @@
    "id": "R10",
    "company": "Gusto",
    "status": "ok",
-   "research": null,
+   "research": {
+    "pages": 3,
+    "parse": "whole",
+    "drafted": 7,
+    "kept": 3,
+    "from_quote": 0,
+    "from_pages": 0,
+    "dropped": {
+     "figure_not_in_quote": 1,
+     "page_not_read": 1,
+     "date_not_on_page": 1,
+     "claim_words_not_in_quote": 1
+    }
+   },
    "fetched": 3,
    "refused": 6,
    "refused_why": [
@@ -316,7 +446,20 @@
    "id": "R11",
    "company": "Discord",
    "status": "ok",
-   "research": null,
+   "research": {
+    "pages": 2,
+    "parse": "whole",
+    "drafted": 7,
+    "kept": 3,
+    "from_quote": 0,
+    "from_pages": 0,
+    "dropped": {
+     "figure_not_in_quote": 1,
+     "page_not_read": 1,
+     "date_not_on_page": 1,
+     "claim_words_not_in_quote": 1
+    }
+   },
    "fetched": 2,
    "refused": 6,
    "refused_why": [
@@ -347,7 +490,20 @@
    "id": "R12",
    "company": "Dropbox",
    "status": "ok",
-   "research": null,
+   "research": {
+    "pages": 3,
+    "parse": "whole",
+    "drafted": 7,
+    "kept": 3,
+    "from_quote": 0,
+    "from_pages": 0,
+    "dropped": {
+     "figure_not_in_quote": 1,
+     "page_not_read": 1,
+     "date_not_on_page": 1,
+     "claim_words_not_in_quote": 1
+    }
+   },
    "fetched": 3,
    "refused": 6,
    "refused_why": [
@@ -378,7 +534,20 @@
    "id": "R13",
    "company": "Chime",
    "status": "ok",
-   "research": null,
+   "research": {
+    "pages": 3,
+    "parse": "whole",
+    "drafted": 7,
+    "kept": 3,
+    "from_quote": 0,
+    "from_pages": 0,
+    "dropped": {
+     "figure_not_in_quote": 1,
+     "page_not_read": 1,
+     "date_not_on_page": 1,
+     "claim_words_not_in_quote": 1
+    }
+   },
    "fetched": 3,
    "refused": 6,
    "refused_why": [
@@ -409,7 +578,20 @@
    "id": "R14",
    "company": "Toast",
    "status": "ok",
-   "research": null,
+   "research": {
+    "pages": 3,
+    "parse": "whole",
+    "drafted": 7,
+    "kept": 3,
+    "from_quote": 0,
+    "from_pages": 0,
+    "dropped": {
+     "figure_not_in_quote": 1,
+     "page_not_read": 1,
+     "date_not_on_page": 1,
+     "claim_words_not_in_quote": 1
+    }
+   },
    "fetched": 3,
    "refused": 6,
    "refused_why": [
@@ -440,7 +622,20 @@
    "id": "R15",
    "company": "Palantir",
    "status": "ok",
-   "research": null,
+   "research": {
+    "pages": 1,
+    "parse": "whole",
+    "drafted": 7,
+    "kept": 3,
+    "from_quote": 0,
+    "from_pages": 0,
+    "dropped": {
+     "figure_not_in_quote": 1,
+     "page_not_read": 1,
+     "date_not_on_page": 1,
+     "claim_words_not_in_quote": 1
+    }
+   },
    "fetched": 1,
    "refused": 6,
    "refused_why": [
@@ -471,7 +666,20 @@
    "id": "R16",
    "company": "Spotify",
    "status": "ok",
-   "research": null,
+   "research": {
+    "pages": 1,
+    "parse": "whole",
+    "drafted": 7,
+    "kept": 3,
+    "from_quote": 0,
+    "from_pages": 0,
+    "dropped": {
+     "figure_not_in_quote": 1,
+     "page_not_read": 1,
+     "date_not_on_page": 1,
+     "claim_words_not_in_quote": 1
+    }
+   },
    "fetched": 1,
    "refused": 6,
    "refused_why": [
@@ -502,7 +710,20 @@
    "id": "R17",
    "company": "Ramp",
    "status": "ok",
-   "research": null,
+   "research": {
+    "pages": 1,
+    "parse": "whole",
+    "drafted": 7,
+    "kept": 3,
+    "from_quote": 0,
+    "from_pages": 0,
+    "dropped": {
+     "figure_not_in_quote": 1,
+     "page_not_read": 1,
+     "date_not_on_page": 1,
+     "claim_words_not_in_quote": 1
+    }
+   },
    "fetched": 1,
    "refused": 6,
    "refused_why": [
@@ -533,7 +754,20 @@
    "id": "R18",
    "company": "Notion",
    "status": "ok",
-   "research": null,
+   "research": {
+    "pages": 1,
+    "parse": "whole",
+    "drafted": 7,
+    "kept": 3,
+    "from_quote": 0,
+    "from_pages": 0,
+    "dropped": {
+     "figure_not_in_quote": 1,
+     "page_not_read": 1,
+     "date_not_on_page": 1,
+     "claim_words_not_in_quote": 1
+    }
+   },
    "fetched": 1,
    "refused": 6,
    "refused_why": [
@@ -564,7 +798,20 @@
    "id": "R19",
    "company": "Plaid",
    "status": "ok",
-   "research": null,
+   "research": {
+    "pages": 1,
+    "parse": "whole",
+    "drafted": 7,
+    "kept": 3,
+    "from_quote": 0,
+    "from_pages": 0,
+    "dropped": {
+     "figure_not_in_quote": 1,
+     "page_not_read": 1,
+     "date_not_on_page": 1,
+     "claim_words_not_in_quote": 1
+    }
+   },
    "fetched": 1,
    "refused": 6,
    "refused_why": [
@@ -595,7 +842,20 @@
    "id": "R20",
    "company": "ServiceNow",
    "status": "ok",
-   "research": null,
+   "research": {
+    "pages": 1,
+    "parse": "whole",
+    "drafted": 7,
+    "kept": 3,
+    "from_quote": 0,
+    "from_pages": 0,
+    "dropped": {
+     "figure_not_in_quote": 1,
+     "page_not_read": 1,
+     "date_not_on_page": 1,
+     "claim_words_not_in_quote": 1
+    }
+   },
    "fetched": 1,
    "refused": 6,
    "refused_why": [

@@ -236,22 +236,6 @@ export function applyPersonaOrder(resume0: any, lead: string[]): any {
   return { ...resume, sections: ordered, lines: ordered.flatMap((s: any) => s.lines.filter((l: any) => l.type !== "note" && l.type !== "gap").map((l: any) => ({ ...l, section: s.heading }))) };
 }
 
-export function isStudent(profile: any, now: number): boolean {
-  const year = new Date(now).getUTCFullYear();
-  return (profile?.facts || []).some((f: any) => f?.kind === "education" && f?.status !== "draft" && (() => {
-    const t = String(f.text || f.title || "");
-    if (/\b(?:expected|anticipated|candidate|in progress|current(?:ly)?|present)\b/i.test(t)) return true;
-    const ys = (t.match(/\b(?:19|20)\d{2}\b/g) ?? []).map(Number);
-    return ys.length > 0 && Math.max(...ys) > year;
-  })());
-}
-export function educationFirst(resume: any): any {
-  const secs = Array.isArray(resume?.sections) ? resume.sections : [];
-  const k = secs.findIndex((x: any) => /^education$/i.test(String(x?.heading ?? "")));
-  if (k <= 0) return resume;
-  const sections = [secs[k], ...secs.slice(0, k), ...secs.slice(k + 1)];
-  return { ...resume, sections, lines: sections.flatMap((x: any) => (x.lines || []).filter((l: any) => l.type !== "note" && l.type !== "gap").map((l: any) => ({ ...l, section: x.heading }))) };
-}
 // The document that goes to an employer: the cited lines only. The tailor's eligibility verdict and gap notes are for
 // the person, not the employer, and are not facts; they never print on a submitted resume.
 export function submissionResume(resume: any): any {
@@ -664,10 +648,6 @@ export async function tailorForPosting(o: {
   // D-070: an entry kept back on a first version takes its place by date (RESUME-TEMPLATES E5, newest first); a lead the person
   // chose still goes first. An edited version keeps the order its edits set.
   if (!edits && keptBack.length) ordered = applyPersonaOrder(ordered, lead);
-  // D-071 (live-8 C10, C20: education printed last on a student's resume): with no template or own layout chosen, a student's
-  // education leads, as the student templates order it (RESUME-TEMPLATES T01, T02: education > experience > ...). A student is
-  // someone whose confirmed education is still to come ("Expected June 2029", or an end year not yet reached).
-  if (!o.template && o.layout !== "own" && isStudent(picked, o.now)) ordered = educationFirst(ordered);
   if (placeholder) {
     // The placeholder prints where the email would: after a contact line the person confirmed (which has no email), or alone.
     const h = ordered.header = { ...(ordered.header || {}), email: EMAIL_PLACEHOLDER };

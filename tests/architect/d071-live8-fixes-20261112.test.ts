@@ -12,7 +12,7 @@
 //          kind's exact shape; the plan File is made on the first call.
 //   D71-4  C1, C3: "chicago or remote" returns NVIDIA's remote posting on a whole-word search (the database's rule); the search's
 //          words are in the trace.
-//   D71-5  C10, C20: dated entries newest first even beside undated ones; a student's education leads.
+//   D71-5  C10, C20: dated entries newest first even beside undated ones; education where the technical template puts it.
 //   D71-6  C20: an edit is said against the version that was delivered (Waypoint was printed in v1: never "added back").
 //   D71-7  C6: the number of applications is the record's (counts), never the model's own count.
 //   D71-8  C22: a going-rate ask runs sourced research beside the posting pay already shown.
@@ -143,7 +143,7 @@ const CITADEL = Object.entries(WEB).slice(0, 4).map(([url, p]) => ({ url, title:
 const C9_DRAFT = JSON.stringify({ title: "Citadel new grad SWE", thesis: "Citadel's posting states pay; its own page describes the process.", summary: [
   { text: "Citadel's posting lists a base salary range of $235,000 to $300,000, plus a discretionary bonus.", quote: "The base salary range for this role is $235,000 to $300,000, plus a discretionary bonus.", url: CITADEL[0].url },
   { text: "Citadel says its engineering interview process takes roughly eight weeks from start to finish.", quote: "At Citadel, the overall process takes roughly eight weeks from start to finish.", url: CITADEL[1].url },
-  { text: "Anonymous posters describe demanding hours and performance pressure at Citadel's offices.", quote: "Anonymous posters describe demanding hours and performance pressure at Citadel.", url: CITADEL[2].url },
+  { text: "Anonymous posters describe demanding hours and performance pressure at Citadel.", quote: "Anonymous posters describe demanding hours and performance pressure at Citadel.", url: CITADEL[2].url },
   { text: "Citadel Securities is a market maker, a separate firm from Citadel.", quote: "Citadel Securities is a market maker, a separate firm from Citadel.", url: CITADEL[3].url },
 ] });
 async function marketTurn(message: string, history: any[], brain: (n: number) => any, draft: (u: string) => string = () => C9_DRAFT) {
@@ -170,6 +170,7 @@ Deno.test("D71-2 RESEARCH (C9, C23, item 10): lines worded the way the model wor
   const pg = (i: number): any => ({ url: CITADEL[i].url, requested: CITADEL[i].url, status: 200, title: CITADEL[i].title, text: CITADEL[i].text, fetchedAt: NOW });
   eq(checkLine("Citadel's posting lists a base salary of $400,000.", "The base salary range for this role is $235,000 to $300,000, plus a discretionary bonus.", pg(0), "Citadel"), { ok: false, why: "figure_not_in_quote" });
   eq(checkLine("Citadel pays $235,000.", "The base salary range for this role is $235,000 to $300,000", null), { ok: false, why: "page_not_read" });
+  eq(checkLine("Acme Energy installed 41,000 solar panels.", "Acme Energy installed 41,000 home batteries in 2025", { url: "https://acme.example/r", requested: "https://acme.example/r", status: 200, title: "Annual report", text: "Acme Energy installed 41,000 home batteries in 2025.", fetchedAt: NOW } as any).ok, false, "a changed object is never a rewording");
   eq(checkLine("Jane Street describes demanding hours and performance pressure.", "Anonymous posters describe demanding hours and performance pressure at Citadel.", pg(2), "").ok, false, "another employer's name is never a rewording");
   // A line that only rewords its quote stands as the page's own sentence, word for word.
   eq(checkLine("Anonymous posters report demanding hours, with performance pressure at Citadel.", "Anonymous posters describe demanding hours and performance pressure at Citadel.", pg(2), "Citadel"),
@@ -259,7 +260,7 @@ Deno.test("D71-4 C1, C3: 'chicago or remote' returns NVIDIA's remote posting on 
 });
 
 // ---------------------------------------------------------------- D71-5 order
-Deno.test("D71-5 C10, C20: dated entries newest first beside undated ones; a student's education leads", async () => {
+Deno.test("D71-5 C10, C20: dated entries newest first beside undated ones; education where the technical template puts it", async () => {
   const pdf10 = LIVE8.C10.trace.documents[0].text as string;
   ok(pdf10.indexOf("Pixelforge") < pdf10.indexOf("Mindgrove") && pdf10.indexOf("EDUCATION") > pdf10.indexOf("EXPERIENCE"), "live-8 C10: 2023 above 2026, education last");
   eq(entryStart("Pixelforge, Founder (2023-2025): hand-coded 70+ React websites for clients."), 2023 * 12);
@@ -270,7 +271,9 @@ Deno.test("D71-5 C10, C20: dated entries newest first beside undated ones; a stu
     deps: { render: edgeRenderer(), resumes: memoryResumeStore() }, now: NOW, reviewDraft: true });
   ok(r.ok, JSON.stringify(r).slice(0, 300));
   const sections = [...new Set(r.detail.doc.lines.map((l: any) => l.section))];
-  eq(sections[0], "Education", JSON.stringify(sections));
+  // Education's place for a software posting is the technical template's (RESUME-TEMPLATES T03 Engineer: skills > experience >
+  // projects > education; pinned by tests/architect/wo-028-tailor.test.ts, where the tailor leads with experience): after Experience.
+  ok(sections.indexOf("Experience") < sections.indexOf("Education") && sections.indexOf("Skills") < sections.indexOf("Experience"), JSON.stringify(sections));
   const exp = r.detail.doc.lines.filter((l: any) => l.section === "Experience" && l.type === "entry").map((l: any) => l.text as string);
   const at = (w: string) => exp.findIndex((x: string) => x.startsWith(w));
   ok(at("Elmstead") < at("Mindgrove") && at("Mindgrove") < at("Crestline") && at("Crestline") < at("Pixelforge"), exp.join(" | "));

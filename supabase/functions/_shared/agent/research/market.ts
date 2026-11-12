@@ -147,6 +147,7 @@ export function sentenceOf(page: string, quote: string): string | null {
 // most two content words not in the quote's sentence, at least 60% of them in it) is not lost: the page's own sentence that holds
 // the quote stands in its place, word for word from the page (`via: "quote"`). A claim with a figure the quote does not have, a
 // quote that is not on its page, or a page that was not read is dropped, as before.
+const FRAMING = contentWords("say says said report reports reported reporting note notes noted mention mentions mentioned claim claims claimed describe describes described state states stated explain explains explained highlight highlights highlighted share shares shared write writes wrote point points pointed add adds added indicate indicates indicated suggest suggests suggested tell tells told according publicly openly");
 export type LineCheck = { ok: true; text: string; via?: "quote" } | { ok: false; why: string };
 export function checkLine(text: unknown, quote: unknown, p: SourcePage | null, subject = "", o: { fallback?: boolean; predicate?: boolean } = {}): LineCheck {
   const t = squash(text), q = squash(quote);
@@ -161,7 +162,9 @@ export function checkLine(text: unknown, quote: unknown, p: SourcePage | null, s
   const all = contentWords(withoutAttribution(t)).size;
   // A missing word that is a name in the claim ("Globex Power installed ..." on Acme's quote) is a different claim, never a rewording.
   const names = contentWords((withoutAttribution(t).match(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}'-]*/gu) ?? []).join(" "));
-  if (o.fallback !== false && miss.length <= 2 && !miss.some((w) => names.has(w)) && all > 0 && (all - miss.length) / all >= 0.6) {
+  // Only words that frame a statement (who said it, how) may be missing: "Acme installed 41,000 solar panels" on "Acme installed
+  // 41,000 home batteries" changes what was said, and is dropped.
+  if (o.fallback !== false && miss.length <= 2 && miss.every((w) => FRAMING.has(w)) && !miss.some((w) => names.has(w)) && all > 0 && (all - miss.length) / all >= 0.6) {
     const own = sentenceOf(p.text, q);
     if (own && linkFree(own) && hasPredicate(own, p.title)) return { ok: true, text: own, via: "quote" };
   }

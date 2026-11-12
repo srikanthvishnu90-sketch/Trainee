@@ -21,7 +21,8 @@ import { knowledgeFor, type Knowledge } from "../_shared/agent/knowledge/index.t
 import { styleBlock } from "../_shared/agent/style.ts";
 import { askedPartsOf, asksForDetail, boundaryNote, boundaryOf, capacityAskOf, capacityNote, correctionNote, correctionOf, DRAFT_TOOLS, draftAskOf, draftNote, historyAskOf, historyNote, HYPOTHETICAL_WITHHELD, hypotheticalNote, hypotheticalOf, lengthNote, multiAskNote, overLimit, partsMissing, partsNote, PERSONA_WITHHELD, planSearchAskOf, planSearchNote, whileWorkingNote, postingNote, postingRefOf, REPLY_LENGTH, replyLength, roastNote, roastOf, shownPayNote, shownPayOf, statesNothing, textLength } from "../_shared/agent/turn_notes.ts";
 import { severalAsks } from "../_shared/ask_language.ts";
-import { practiceAnswerNote, practiceAnswerOf, staleFactNote, staleFactsOf } from "../_shared/agent/turn_notes.ts";
+import { practiceAnswerNote, practiceAnswerOf, practiceAskIn, staleFactNote, staleFactsOf } from "../_shared/agent/turn_notes.ts";
+import { answersFirst } from "../_shared/reply_rubric.ts";
 import type { AlertStore } from "../_shared/career_alert_store.ts";
 import type { HiredSource } from "../_shared/career_hired.ts";
 import type { WantStore } from "../_shared/career_apply_want.ts";
@@ -176,7 +177,7 @@ export async function agentTurn(o: {
   const practiceAnswer = !roast && !hypo && practiceAnswerOf(o.message, o.history);
   const turnNotes = [stale.length ? staleFactNote(stale.map((f) => String(f.title || f.text))) : "", practiceAnswer ? practiceAnswerNote() : "", hypo ? hypotheticalNote(hypo) : "", roast ? roastNote(roast) : "", meant.length ? postingNote(meant) : "", boundary ? boundaryNote(boundary) : "",
     correction ? correctionNote(correction) : "", typeof o.whileWorking === "string" ? whileWorkingNote(o.whileWorking) : severalAsks(o.message) ? multiAskNote() : "",
-    draftAsk ? draftNote(draftLength.aim) : "", planSearch ? planSearchNote() : "", parts.length ? partsNote(parts) : "", capacity ? capacityNote() : "", historyAsk ? historyNote() : "", shownPay.length ? shownPayNote(shownPay) : "", lengthNote(replyLength(o.message))].filter(Boolean);
+    draftAsk ? draftNote(draftLength.aim) : "", planSearch ? planSearchNote() : "", parts.length ? partsNote(parts) : "", capacity ? capacityNote() : "", historyAsk ? historyNote() : "", shownPay.length ? shownPayNote(shownPay) : "", lengthNote(replyLength(o.message, o.history))].filter(Boolean);
   const hypoWithheld = [...(hypo === "persona" ? PERSONA_WITHHELD : hypo ? HYPOTHETICAL_WITHHELD : []), ...(statesNothing(o.message) ? ["add_profile_fact"] : [])];
   const block = o.known ? personBlock({ profile: hypo === "persona" ? null : o.stores.profile, ...o.known }) : null;
   const notes: string[] = [];
@@ -198,7 +199,7 @@ export async function agentTurn(o: {
   let result = await runAgentTurn({
     process: processCheck({ draftAsk: draftAsk && DRAFT_TOOLS.some((n) => offered.has(n)), planSearch: planSearch && offered.has("search_jobs"), parts,
       planFile: planSearch && offered.has("create_file"), history: historyAsk && offered.has("read_application_mail"), mail: !hypo && offered.has("read_application_mail"), posting: meant.length > 0 && offered.has("get_posting"), shownPay,
-      marketRate: !hypo && marketRateAskOf(o.message) && offered.has("research_market") }),
+      marketRate: !hypo && marketRateAskOf(o.message) && offered.has("research_market"), review: practiceAnswer || !!roast ? o.message : null }),
     system: careerSystemPrompt(localDay(o.now, o.tz)) + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + "\n\n" + MIRROR_RULES + "\n\n" + turnNotes.join("\n\n") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
     history: o.history.slice(-HISTORY_WINDOW).map((m) => ({ role: m.role, content: String(m.content ?? "") })),
     message: [o.message, ...notes].filter(Boolean).join("\n\n"),
@@ -253,12 +254,17 @@ export async function agentTurn(o: {
   let shorten: Shorten = { ran: false, outcome: "not_run", why: !result.reply ? "no reply to shorten" : result.stopped !== "final" ? `the turn did not finish (${result.stopped})`
     : trace.r || trace.m ? "a research reply, laid out and sourced in code (never rewritten)" : "" };
   if (result.reply && result.stopped === "final" && !trace.r && !trace.m) {
-    const l = replyLength(o.message), bound = overLimit(l), n = textLength(result.reply);
+    const l = replyLength(o.message, o.history), bound = overLimit(l), n = textLength(result.reply);
+    // D-072 (item 11): a practice turn (a question asked, or a review of their answer) is shortened like any reply unless it shows a
+    // code block; the code it names (a call, an index, an operator, a complexity) is kept verbatim (codeKept). Complexity notation
+    // alone ("O(n) time") is not code. Every other turn keeps D-067's rule: code in the message or the reply is never shortened.
+    const practiceTurn = practiceAnswer || !!roast || (l.kind === "question" && practiceAskIn(o.message, o.history));
+    const codeSkip = practiceTurn ? /```/.test(result.reply) : carriesCode(o.message) || carriesCode(result.reply);
     const fileTurn = !condensable(result, { max: -1 }) && onlyFileWrites(result);
     // A "draft" kind written in prose is not a message draft (those go through draft_followup, below): it is a rewrite of their
     // own text ("make the answer less formal"), whose length is the text's, not a draft's. A File turn's reply is not a draft.
     const why = n <= bound ? "within the bound" : l.kind === "draft" && !fileTurn ? "a draft kind (its length is the text's)" : l.kind === "everything" && asksForDetail(o.message) ? "the ask asks for detail"
-      : carriesCode(o.message) || carriesCode(result.reply) ? "carries code" : !(condensable(result, { max: -1 }) || fileTurn) ? "the turn wrote a record, a draft or an approval" : "";
+      : codeSkip ? (practiceTurn ? "a practice reply with a code block" : "carries code") : !(condensable(result, { max: -1 }) || fileTurn) ? "the turn wrote a record, a draft or an approval" : "";
     if (why) shorten = { ran: false, outcome: n <= bound ? "within" : "skipped", why, chars: n, bound };
     else {
       // D-071 (live-8: 11 of 14 shortened texts were refused only for being still over the bound, and the long reply was sent; C4's
@@ -266,7 +272,7 @@ export async function agentTurn(o: {
       // [placeholder] kept, the boundary and the caveat kept, at most one question, a rewrite of this same reply) is used even when
       // it is still over the bound, and it gets ONE more pass toward the bound under the same checks against the original reply.
       const long = result.reply, seen = { out: "" };
-      const faithful = (from: string) => (l0: string, out: string) => shortenedOk(l0, out, Number.POSITIVE_INFINITY) && shortenedOk(from, out, Number.POSITIVE_INFINITY);
+      const faithful = (from: string) => (l0: string, out: string) => shortenedOk(l0, out, Number.POSITIVE_INFINITY) && shortenedOk(from, out, Number.POSITIVE_INFINITY) && (!practiceTurn || codeKept(from, out));
       let short = await condenseReply(o.model, long, { max: bound, aim: l.aim }, faithful(long), fileTurn ? FILE_TURN_CONDENSE : "", seen);
       let passes = 1, why = short ? "" : shortenRejection(long, seen.out, Number.POSITIVE_INFINITY);
       if (short && textLength(short) > bound) {
@@ -364,8 +370,8 @@ export function nonEmptyReply(r: Pick<TurnResult, "reply" | "show" | "tool_calls
 // is still given, beside a sourced benchmark.
 export const MARKET_RATE_ASK = /\b(?:going|market|typical|average|usual|standard|normal|median)\s+(?:hourly\s+|annual\s+|base\s+)?(?:rate|pay|salary|salaries|wage|wages|comp(?:ensation)?)\b|\bhow\s+much\s+(?:do|does|would|will)\s+[a-z ]{2,40}?\s+(?:make|earn|get\s+paid)\b|\bwhat\s+(?:do|does)\s+[a-z ]{2,40}?\s+(?:make|earn)\b|\bpay\s+(?:range|benchmark)s?\s+for\s+(?:a\s+|an\s+)?[a-z]/i;
 export function marketRateAskOf(message: string): boolean { return MARKET_RATE_ASK.test(String(message ?? "")); }
-export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts: string[]; planFile?: boolean; history?: boolean; mail?: boolean; posting?: boolean; shownPay?: { text: string; url: string | null }[]; marketRate?: boolean }): ((reply: string, calls: { name: string; ok: boolean; error?: string }[]) => string | null) | null {
-  if (!o.draftAsk && !o.planSearch && !o.parts.length && !o.history && !o.mail && !o.posting && !o.shownPay?.length && !o.marketRate) return null;
+export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts: string[]; planFile?: boolean; history?: boolean; mail?: boolean; posting?: boolean; shownPay?: { text: string; url: string | null }[]; marketRate?: boolean; review?: string | null }): ((reply: string, calls: { name: string; ok: boolean; error?: string }[]) => string | null) | null {
+  if (!o.draftAsk && !o.planSearch && !o.parts.length && !o.history && !o.mail && !o.posting && !o.shownPay?.length && !o.marketRate && !o.review) return null;
   return (reply, calls: { name: string; ok: boolean; error?: string }[]) => {
     const called = (names: readonly string[]) => calls.some((c) => names.includes(c.name));
     // G10 / D-059: the draft tool is the only path for a draft; a draft written in the reply's prose is never shown.
@@ -395,6 +401,10 @@ export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts:
     // G3 / G4 (C9): every part they named is answered.
     const missing = partsMissing(reply, o.parts);
     if (missing.length) return `They asked about ${o.parts.join(", ")}, and your reply does not cover: ${missing.join(", ")}. Add each missing part from what you read this turn (call the research tool again only if needed), and where nothing covers it, say that in one plain sentence for that part.`;
+    // D-072 (item 11, G2: live-7 and live-8 reviews opened "Right approach for the wrong problem." and "That's a summary of events,
+    // not an interview answer.", a verdict that never says what it is a verdict on): a review of their practice answer opens with
+    // the verdict ON what they said, naming their answer or approach in their own terms (reply_rubric.ts answersFirst, the G2 rule).
+    if (o.review && answersFirst({ ask: o.review, reply } as any).length) return `Your first sentence is: "${String(reply).trim().split(/(?<=[.!?])\s+/)[0]?.slice(0, 200) ?? ""}". It gives a verdict without saying what it is a verdict on. Make the FIRST sentence your verdict on their answer and name what they actually said or did (their approach, their code, their story, in their own words). Keep the rest of the review, as short as it was or shorter, with at most one question at the end.`;
     return null;
   };
 }
@@ -486,6 +496,13 @@ export function sameContent(long: string, short: string): boolean {
 // D-067 (G12): a practice session's code review carries code (the person's function, the fix): the shortener never touches it.
 const CODE_IN = /```|`[^`\n]{2,}`|\bdef\s+\w+\s*\(|\bfunction\s+\w+\s*\(|=>|\breturn\s+[^.\n]*[([{=]|\bnext\(|\blambda\b|\w+\(\s*\w*\s*\)\s*[:{]|\bO\(\s*(?:1|n|n\^?2|log ?n|n log ?n)\s*\)/i;
 export function carriesCode(text: string): boolean { return CODE_IN.test(String(text ?? "")); }
+// D-072 (item 11): the code a practice reply names, kept verbatim by its shortening: inline code, a call or an index ("next(",
+// "counts["), an identifier with an underscore, an operator, a complexity ("O(n)").
+const CODE_TOKEN = /`[^`\n]+`|\b[A-Za-z_][\w.]*[([]|\b[A-Za-z]+_[\w]+\b|==|!=|<=|>=|=>|\+=|-=|\bO\([^)\n]{1,20}\)/g;
+export function codeKept(long: string, short: string): boolean {
+  const s = String(short ?? "");
+  return [...new Set(String(long ?? "").replace(LINK, " ").match(CODE_TOKEN) ?? [])].every((t) => s.includes(t));
+}
 // D-070: what the length pass did on a turn (recorded in the turn's meta, and by the mirror runner in its trace).
 // D-071: "shorter" = a faithful shorter text was used though it is still over the bound; `passes` = how many shortening calls ran.
 export interface Shorten { ran: boolean; outcome: "not_run" | "within" | "skipped" | "accepted" | "shorter" | "rejected"; why: string; chars?: number; bound?: number; after?: number; passes?: number }

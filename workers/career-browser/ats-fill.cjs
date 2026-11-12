@@ -117,8 +117,10 @@ function EXTRACT() {
   // never used before on this page: a control the board removed or hid can never share a number with a live one (strict run
   // 42737911402: a field read as empty after a re-render).
   const tagOf = (el) => (el && el.hasAttribute("data-upmore-q") ? Number(el.getAttribute("data-upmore-q")) : null);
-  let qn = 1 + deepAll(document, "[data-upmore-q]").reduce((m, e) => Math.max(m, Number(e.getAttribute("data-upmore-q")) || 0), -1);
-  const push = (d, el) => { const t = tagOf(el); d.q = t !== null && !out.some((x) => x.q === t) ? t : qn++; out.push(d); return d.q; };
+  // The page keeps its own high-water mark too: a board that re-renders every input (dropping every tag) never gets an old number
+  // back for a different question.
+  let qn = Math.max(Number(window.__upmoreQn) || 0, 1 + deepAll(document, "[data-upmore-q]").reduce((m, e) => Math.max(m, Number(e.getAttribute("data-upmore-q")) || 0), -1));
+  const push = (d, el) => { const t = tagOf(el); d.q = t !== null && !out.some((x) => x.q === t) ? t : qn++; window.__upmoreQn = Math.max(Number(window.__upmoreQn) || 0, qn); out.push(d); return d.q; };
   const all = deepAll(scope, "input, select, textarea").filter((e) => !e.closest("[data-upmore-signin]"));
 
   // Yes/No button pairs (Ashby): the hidden checkbox inside them is not a question of its own.
@@ -589,7 +591,15 @@ async function fillPlace(page, d, value, country) {
   await input.fill("");
   await input.pressSequentially(String(value), { delay: 25 });
   let list = [];
-  for (let i = 0; i < 30 && !list.length; i++) { await page.waitForTimeout(200); list = (await opts().allInnerTexts().catch(() => [])).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean); }
+  // D-072 (item 4, round 2): Lever's lookup (GET /searchLocations) can take longer than 6 s (capture of 2026-11-12: one posting's
+  // lookup still loading after 5 s, another answered "Chicago, IL, USA" in 160 ms). Waited on while the question's own loading row
+  // shows, up to 15 s; its own "no location found" row with nothing loading ends the wait.
+  const loading = () => page.evaluate(([q]) => { const el = document.querySelector(`[data-upmore-q="${q}"]`), li = el && el.closest("li"), l = li && li.querySelector(".dropdown-loading-results"); return !!(l && (l.offsetWidth || l.offsetHeight)); }, [d.q]).catch(() => false);
+  for (let i = 0; i < 75 && !list.length; i++) {
+    await page.waitForTimeout(200);
+    list = (await opts().allInnerTexts().catch(() => [])).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean);
+    if (!list.length && i >= 29 && !(await loading())) break;
+  }
   if (!list.length) return { ok: false, reason: "place_not_offered" };
   const m = matchPlace(list, value, country);
   if (m.error) return { ok: false, reason: m.error, options: list.slice(0, 12) };
@@ -683,6 +693,9 @@ async function pickOption(opts, m) { await opts().nth(m.index).click(); }
 // The kinds of question under each label, so a fact is held back only when two questions that could each take it share the
 // label. Ashby puts its "Phone" label over the number box and over a Yes/No texting consent (strict benchmark run 42719264485:
 // 5 of 20 postings stopped on label_on_form_twice); the consent can never hold the number, so the number box is not ambiguous.
+// The boards' own standard candidate fields, by their fixed names (Breezy: cName, cEmail, cPhoneNumber).
+const BOARD_STANDARD = /^c(?:Name|Email|PhoneNumber)$/;
+const labelNames = (qs) => { const m = new Map(); for (const d of qs) if (d.kind !== "file") { const k = labelKey(d); if (!m.has(k)) m.set(k, []); m.get(k).push(String(d.name || "")); } return m; };
 const labelKinds = (qs) => { const m = new Map(); for (const d of qs) if (d.kind !== "file") { const k = labelKey(d); if (!m.has(k)) m.set(k, []); m.get(k).push(d.kind); } return m; };
 const takesFact = (kind, label) => CHOICE_FACTS.has(factKey(label)) ? CHOICE_KINDS.includes(kind) : ["text", "textarea", "select"].includes(kind) || (kind === "combobox" && /location|city|state/i.test(label));
 // Decide what to do with one question. status: fill | ask | skip. Never invents a value.
@@ -695,7 +708,14 @@ function decide(d, ctx) {
   }
   // ROUND 3: one label on two questions of this form (a second "Phone" in a references block): the approved answer belongs
   // to at most one of them, so neither is filled from it; the person is asked (as the extension's planForm does).
-  if (ctx.labelCount && (ctx.labelCount.get(labelKey(d)) || 0) > 1) {
+  // D-072 (item 4, round 2): the board's own standard field beside an employer's custom question in the same words (Breezy's
+  // "Phone Number", name cPhoneNumber, and a custom "Phone Number" question, strict run 43276162667): the confirmed fact belongs to
+  // the board's own field; the employer's copy is a question only the person answers (asked on the hand-off, never guessed).
+  const sameLabel = ctx.labelNames && ctx.labelNames.get(labelKey(d));
+  const standard = (sameLabel || []).filter((n) => BOARD_STANDARD.test(n));
+  const boardOwn = standard.length === 1 && BOARD_STANDARD.test(String(d.name || ""));
+  if (ctx.labelCount && (ctx.labelCount.get(labelKey(d)) || 0) > 1 && !boardOwn && standard.length === 1 && blank(answerFor(d.label, answers))) return { status: "ask", reason: "no_confirmed_answer" };
+  if (ctx.labelCount && (ctx.labelCount.get(labelKey(d)) || 0) > 1 && !boardOwn) {
     if (!blank(answerFor(d.label, answers))) return { status: "ask", reason: "label_on_form_twice" };
     const kinds = ctx.labelKinds && ctx.labelKinds.get(labelKey(d));
     if (!blank(factValue(d.label, facts || {})) && (!kinds || (takesFact(d.kind, d.label) && kinds.filter((k) => takesFact(k, d.label)).length > 1))) return { status: "ask", reason: "label_on_form_twice" };
@@ -773,6 +793,7 @@ async function fillForm(page, ctx0) {
     const qs = await page.evaluate(EXTRACT);
     ctx.labelCount = labelCounts(qs);
     ctx.labelKinds = labelKinds(qs);
+    ctx.labelNames = labelNames(qs);
     const fresh = qs.filter((d) => !handled.has(`${d.label}|${d.kind}|${d.name}`));
     if (!fresh.length) break;
     for (const d of fresh) {
@@ -786,7 +807,20 @@ async function fillForm(page, ctx0) {
       if (dec.status === "skip") { entry.status = "skipped"; entry.reason = dec.reason; continue; }
       if (dec.status === "ask") { entry.status = "needs_user"; entry.reason = dec.reason; needsUser.push({ label: d.label, reason: dec.reason, kind: d.kind, ...(d.options ? { options: d.options.map((o) => o.label).slice(0, 40) } : {}) }); continue; }
       let r;
+      // Once the board has re-rendered (below), a question read before it is looked up again first, not waited on.
+      if (ctx.retagged && !(await page.$(sel(d.q)).catch(() => null))) {
+        const now = (await page.evaluate(EXTRACT).catch(() => [])).find((x) => x.label === d.label && x.kind === d.kind && x.name === d.name);
+        if (now) Object.assign(d, now);
+      }
       try { r = await doFill(page, d, dec, ctx); } catch (e) { r = { ok: false, reason: "fill_error", detail: String(e.message).split("\n")[0].slice(0, 120) }; }
+      // D-072 (item 4, round 2): a board that re-renders its form after the questions were read (React hydration on
+      // job-boards.greenhouse.io, strict run 43276162667: every field "locator.fill: Timeout 20000ms exceeded" on 4 forms; the same
+      // fields fill in 50 ms once read again, capture of 2026-11-12) drops the tags on its inputs. The question is read again from the
+      // page as it is now and the same approved value set once more, then read back as always.
+      if (!r.ok && r.reason === "fill_error" && !(await page.$(sel(d.q)).catch(() => null))) {
+        const again = (await page.evaluate(EXTRACT).catch(() => [])).find((x) => x.label === d.label && x.kind === d.kind && x.name === d.name);
+        if (again) { ctx.retagged = true; try { r = await doFill(page, again, dec, ctx); if (r.ok) Object.assign(d, again); } catch (e) { r = { ok: false, reason: "fill_error", detail: String(e.message).split("\n")[0].slice(0, 120) }; } }
+      }
       if (r.ok) {
         entry.status = "filled"; filled.push({ label: d.label, source: dec.source, kind: d.kind, value: dec.pick === "decline" ? "decline" : dec.source === "resume" ? require("node:path").basename(ctx.resumePath) : dec.value, d });
         // What a choice question now holds, in the form's own option words (never a typed answer's text).

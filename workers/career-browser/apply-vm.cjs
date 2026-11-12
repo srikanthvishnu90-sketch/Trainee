@@ -167,12 +167,29 @@ function createWorker(o) {
       // that run: the same approved payload is driven to the instant before Submit and the exact answers the page holds are recorded
       // as the card (needs_user / ready_for_yes). Only a later run carrying the person's yes to that card's hash (handoff_yes) may
       // press Submit, and only while the page still holds exactly that card (handoff.cjs recheck).
-      const handoffDone = row.handoff_done_at || (row.evidence && row.evidence.handoff_done_at);
+      // D-072 (item 4, round 2): the row's hand-off state lives in its own columns (20261112160000), read for the leased row through
+      // career_apply_vm_handoff_state (this worker's role reads no table). A database without that function answers nothing here.
+      let hs = null;
+      if (!row.handoff_done_at && !(row.evidence && row.evidence.handoff_done_at)) {
+        hs = await rpc("career_apply_vm_handoff_state", { p_id: row.id, p_lease: row.lease_token, p_worker: cfg.workerId }).catch(() => null);
+      }
+      const handoffDone = row.handoff_done_at || (row.evidence && row.evidence.handoff_done_at) || (hs && hs.handoff_done_at);
       if (handoffDone) {
-        const yes = row.handoff_yes || (row.evidence && row.evidence.handoff_yes) || null;
+        const yes = row.handoff_yes || (row.evidence && row.evidence.handoff_yes) || (hs && hs.handoff_yes) || null;
         const rc = await (o.recheck || recheck)(browser, prep.pool, { allowHosts: cfg.allowHosts, stepTimeoutMs: cfg.stepTimeoutMs, shotDir, onPhase, yes }, o.applyOne ? { runner: { applyOne: apply, NeedsUser } } : undefined);
         if (rc.state === "ready_for_yes") return void (await complete(row, "needs_user", "ready_for_yes", { nothing_sent: true, link: row.url, answers_card: rc.card, handed_back: "re-checked after you finished the step: these are the exact answers on the page; reply yes to submit exactly this" }));
-        if (rc.state === "still_walled") return void (await complete(row, "needs_user", rc.handoff.reason === "person_answer" ? "needs_answers" : rc.handoff.reason, { nothing_sent: true, link: row.url, handoff: rc.handoff, handed_back: "the step is still there at the employer's page" }));
+        // The wall is still there on a re-check in a NEW cloud session, after the person said they finished it: the employer keeps the
+        // step in the person's own browser session (their sign-in, a check scored to their browser), which no cloud session carries.
+        // That application is the person's own browser's to finish (the extension, or submitting at the link themselves): marked
+        // needs_extension, kept as the hand-off stop, never a pass. Its reason stays the wall's, so the person's own answer
+        // (career_apply_person_finished_as) still applies.
+        if (rc.state === "still_walled") {
+          const wall = rc.handoff.reason === "bot_check_in_form" ? "bot_check" : rc.handoff.reason;
+          const session = ["login_required", "bot_check", "email_code"].includes(wall);
+          return void (await complete(row, "needs_user", rc.handoff.reason === "person_answer" ? "needs_answers" : wall, { nothing_sent: true, link: row.url, handoff: rc.handoff,
+            ...(session ? { needs_extension: true, handed_back: "the step is still there when Trainee re-opens the page in its own browser: this employer keeps it in your own browser session, so finish this application in your browser (the link), or with the Trainee extension" }
+              : { handed_back: "the step is still there at the employer's page" }) }));
+        }
         if (rc.state === "submitted") return void (await settle(row, rc.result, shotDir, t0));
         return void (await complete(row, "not_submitted", rc.reason || "not_submitted", { nothing_sent: true, link: row.url, ...(rc.card ? { answers_card: rc.card } : {}) }));
       }

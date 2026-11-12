@@ -84,6 +84,7 @@ import { mockPassNote, mockTurn, supabaseMockStore as supabaseMockStoreUncapped 
 import { hiredSourceFromEnv } from "../_shared/career_hired.ts";
 import { askNextOpenQuestion, QUESTIONS_INTENT, questionsTurn, supabaseQuestionStore } from "../_shared/career_apply_questions.ts";
 import { applicationsTurn, supabaseApplications } from "../_shared/career_apply_status.ts";
+import { handoffTurn, supabaseHandoffStore } from "../_shared/career_apply_handoff.ts";
 import { emailStatusAsk, outreachStatusTurn } from "../_shared/career_send_rail.ts"; // "where are my emails"
 import { standingTurn, supabaseStanding } from "../_shared/career_standing.ts";
 // FEATURE 14: receipts
@@ -700,7 +701,15 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // CodeRabbit #1 on #634 (architect, round 5): after "don't apply" is the resume task's limit, "Send this one" or a bare yes
       // never approves an open card here; the resume task (or the held reply below) asks which is meant.
       const cardHold = holdsCardApproval((ctx as any).profile, message, Date.now());
-      const card0 = !cardHold && !tapIn && !connAns && !outlookAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+      // D-072 (item 4, round 2): the hand-off at a kept wall (career_apply_handoff.ts). "done" after the person finished the one step
+      // at the employer's page re-checks it in Trainee's own browser; "done" again shows the exact answers the page holds as a card;
+      // a yes while that card is this thread's last word submits exactly that card (its hash), never anything else. It answers only
+      // those words, only when a hand-off is waiting, and stands in the card's place (every turn the card turn guards is skipped).
+      const handoffAns = !tapIn && !connAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
+        ? await handoffTurn({ message, userId: user.id, threadId: tid, store: supabaseHandoffStore(admin) })
+          .catch((e) => { console.error("hand-off turn:", (e as Error)?.message ?? e); return null; })
+        : null;
+      const card0 = handoffAns ? ({ reply: handoffAns.reply, status: "handoff", handoff: handoffAns } as any) : !cardHold && !tapIn && !connAns && !outlookAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         // FEATURE 16: OWNER RULE (2026-10-26): no card without a confirmed resume on file (resumeReady).
         ? await cardTurn({ message, userId: user.id, threadId: tid, now: Date.now(), replyTo, resumeReady: resumeOnFileReader(admin, user.id),
           review: (shown) => supabaseReviewLinks(admin, Deno.env)(user.id, shown.map((p) => p.id)), store: supabaseCardStore(admin), events })
@@ -1299,6 +1308,11 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         out = { reply: planned.reply, intent: planned.intent, resultStatus: planned.resultStatus, contained: false, handler: crisisText ? "crisis" : codeTurn ? "code_in_chat" : resumeAns ? "resume_task" : "planner", parts: planned.parts,
           ...(planned.documents.length ? { result: { documents: planned.documents } } : {}) };
         agentMeta = planned.meta;
+      } else if (card && (card as any).handoff) {
+        const h = (card as any).handoff;
+        out = { reply: h.reply, intent: h.intent, resultStatus: h.status, contained: false, handler: "handoff" };
+        // The exact-answers card's id and hash ride the reply: the next yes in this thread answers that card and no other.
+        if (h.meta) agentMeta = { ...(agentMeta || {}), ...h.meta };
       } else if (card) {
         // A card still waiting for its answer stays this thread's last word (D-MS-1: also after "wait", an unclear reply
         // or a number not on it); an answered one does not.

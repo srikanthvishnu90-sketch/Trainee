@@ -127,7 +127,11 @@ export async function runConversation(script: Record<string, Step[]>, opts: { on
       flags[t.id] = flagsNow();
       const r: any = await person.say(t.prompt);
       const s = seen[t.id] ??= fresh();
-      s.reply = String(r.reply ?? ""); s.intent = r.intent ?? null; s.documents = Array.isArray(r.body?.documents) ? r.body.documents : [];
+      // Architect amendment (D-063): the handler's response carries a turn's files as `artifacts` (channel_artifacts.ts
+      // materializeArtifacts: kind, ref, filename, mime), never as `documents`, so the files were never seen here. Each is read
+      // with its format from its mime; a response that does carry `documents` is read as before.
+      const fmt = (a: any) => /pdf/.test(String(a?.mime)) ? "pdf" : /wordprocessingml/.test(String(a?.mime)) ? "docx" : String(a?.format ?? a?.mime ?? "");
+      s.reply = String(r.reply ?? ""); s.intent = r.intent ?? null; s.documents = Array.isArray(r.body?.documents) ? r.body.documents : Array.isArray(r.body?.artifacts) ? r.body.artifacts.filter((a: any) => a?.kind === "document").map((a: any) => ({ ...a, format: fmt(a) })) : [];
     }
     return { seen, flags, world, person, close };
   } catch (e) { await close(); throw e; }

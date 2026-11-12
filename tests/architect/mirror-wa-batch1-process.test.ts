@@ -28,14 +28,14 @@ const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a,
 // tests/architect/d062-capabilities-process.test.ts; every other entry and check is unchanged.
 // Architect amendment (D-062): C11 moves to EXISTS (inspect_apply_flow, posting_requirements.ts: the posting and its form read
 // from public pages only, the questions behind a Workday sign-in named as not known); its blocked step is asserted in MP-1 below.
-export const EXISTS = ["C2", "C3", "C5", "C5f1", "C5f2", "C6", "C7", "C8", "C9", "C11", "C12", "C13", "C14", "C15", "C16", "C17", "C18", "C19", "C21", "C21f", "C22", "C23"];
+// Architect amendment (D-063): C4 (a specific advice question, one cited guide), C10 (the tailored PDF, its email a visible placeholder)
+// and C20 (the v2 PDF with both edits) moved from BLOCKED to EXISTS; their process is asserted in MP-1.
+// Architect amendment (D-061): C1 moved from BLOCKED (OFF, CAREER_REPLY_WRITER) to EXISTS: create_file is offered with the reply writer
+// off (D-061 G11), beside search_jobs; asserted in MP-1. The writer stays in RELEASE_NEVER_ON.
+export const EXISTS = ["C1", "C2", "C3", "C4", "C5", "C5f1", "C5f2", "C6", "C7", "C8", "C9", "C10", "C11", "C12", "C13", "C14", "C15", "C16", "C17", "C18", "C19", "C20", "C21", "C21f", "C22", "C23"];
 // The turns whose process needs a capability Trainee does not serve today. OFF: the code exists and a release switch keeps it off
 // (`flags`, none of which release_config.ts serves on). MISSING: what has to be built or provided.
 export const BLOCKED: Record<string, { status: "OFF" | "MISSING"; blocker: string; flags?: string[] }> = {
-  C1: { status: "OFF", flags: ["CAREER_REPLY_WRITER"], blocker: "one File with the checked postings and a weekly plan: create_file (the plan_review kind) is offered only with the reply writer on Telegram (career_brain.ts o.shape); research_career_question's plan page (D-060) has no postings in it" },
-  C4: { status: "MISSING", blocker: "a sourced answer to a specific advice question (what goes at the top of a resume, with one cited guide): with web research on (D-060), research_career_question answers it as a career-entry plan (\"this week: build a tool\") with no source link, and research_market is market research" },
-  C10: { status: "MISSING", blocker: "the email at the top of the resume: Instinct used the linked account's email; tailor_resume refuses until the person types one (set_resume_contact never uses the account email), and the benchmark persona never typed one" },
-  C20: { status: "MISSING", blocker: "edits to a tailored resume (condense one role to one line, expand another): tailor_resume takes no edit instructions; save_resume_persona only orders or hides facts" },
 };
 
 const NOTHING_SENT = /\b(?:nothing|not)\b[^.!?\n]{0,40}\b(?:sent|submitted|applied|queued|contacted)\b/i;
@@ -66,6 +66,8 @@ const C21_Q = "Tell me about a time you failed: what were you responsible for, w
 // D-060 web research at $0: a stubbed web search on the Anthropic wire (the shape the live proof recorded, evals/research-live/)
 // quoting these passages; the market draft (market.ts RULES) quotes them back word for word. The pages themselves are refused
 // like every other host, so each passage stands for its page (via "search_passage"), as D-060 allows.
+const C4_GUIDE = "https://student-to-software-engineer.org/docs/find-your-first-internship/resumes/";
+const C4_ANSWER = "For the top of your SWE resume: your name and contact links, then \"Lakeshore University | BS Computer Science and Finance | Expected June 2029\", then a compact skills line led by Python, TypeScript/JavaScript, React and SQL. Leave the outdated 3.9 GPA off.";
 const C9_Q = "what's citadel like for new grad swe, culture pay interview process, give me real sources";
 const CITADEL_QUERIES = ["Citadel new grad software engineer pay", "Citadel engineering interview process", "Citadel culture hours"];
 const WEB: Record<string, { title: string; text: string }> = {
@@ -75,8 +77,10 @@ const WEB: Record<string, { title: string; text: string }> = {
   "https://www.citadelsecurities.com/careers/engineering": { title: "Engineering at Citadel Securities", text: "Citadel Securities is a market maker, a separate firm from Citadel." },
   "https://www.levels.fyi/internships/Relativity/Software-Engineer-Intern": { title: "Relativity Software Engineer Intern pay", text: "Relativity software engineer interns in Chicago report $32 per hour." },
   "https://www.levels.fyi/internships/CME-Group/Software-Engineer-Intern": { title: "CME Group Software Engineer Intern pay", text: "CME Group software engineer interns in Chicago report $34 per hour." },
+  // Architect amendment (D-063): C4's guide page (the one Instinct cited), one quoted passage.
+  [C4_GUIDE]: { title: "Resumes | Student to Software Engineer", text: "Start with your name and contact links, then education with your school, degree and expected graduation date, followed by a short technical skills section." },
 };
-const WEB_BY_TURN: Record<string, string[]> = { C9: Object.keys(WEB).slice(0, 4), C23: Object.keys(WEB).slice(0, 4), C22: Object.keys(WEB).slice(4) };
+const WEB_BY_TURN: Record<string, string[]> = { C9: Object.keys(WEB).slice(0, 4), C23: Object.keys(WEB).slice(0, 4), C22: Object.keys(WEB).slice(4, 6), C4: [C4_GUIDE] };
 const web = (body: any, turn: string) => {
   const urls = WEB_BY_TURN[turn] ?? [];
   return { id: "msg_search", type: "message", role: "assistant", model: body.model, stop_reason: "end_turn", content: [
@@ -91,6 +95,10 @@ const draft = (system: string, user: string) => /^You answer a market research q
 // The source number research_market gave a page (by a piece of its address), for the brain's citation.
 const cite = (calls: Call[]) => { const r = JSON.parse(calls.find((c) => c.name === "research_market")?.result || "{}"); return (part: string) => (r.sources ?? []).find((x: any) => String(x.url).includes(part))?.n; };
 const SCRIPT: Record<string, Step[]> = {
+  // Architect amendment (D-063): C4, C10, C20 (moved from pending/mirror-process-blocked.test.ts).
+  C4: [{ tool: "research_career_question", input: { question: "what should i put at the very top of my resume for swe roles, be specific", kind: "advice", query: "student software engineer resume header what to put at the top" } }, { text: C4_ANSWER }],
+  C10: [{ tool: "tailor_resume", input: { job_id: PAYPAL.id } }, { text: "Your tailored PDF is attached, with the skills reordered for PayPal; the email at the top is a [your email] placeholder. Treat it as a review draft. Nothing was submitted." }],
+  C20: [{ tool: "tailor_resume", input: { job_id: PAYPAL.id, edits: [{ role: "Pixelforge", lines: 1 }, { role: "Waypoint", lines: 3 }] } }, { text: "Updated: Pixelforge is one line, and Waypoint leads with what your record holds. Still a review draft; nothing was submitted." }],
   C2: [{ tool: "draft_followup", input: { kind: "note", recipient: "", body: C2_BODY } }, { text: "Here it is." }],
   C5: [{ text: C5_Q }],
   C5f1: [{ text: "That's the right approach: count first, then scan the original list. Can you write the function now, including what it returns for an empty list?" }],
@@ -136,6 +144,11 @@ Deno.test({ name: "MP-1 the EXISTS turns follow Instinct's process: the tools of
       eq(f.brain, PRODUCTION_BRAIN, `${id}: the served brain`);
     }
     const brain = (id: string) => { ok(!seen[id].code, `${id} reached the brain (code answered: ${seen[id].reply.slice(0, 120)})`); return seen[id]; };
+
+    // Architect amendment (D-061): C1: the live search and the plan File are both in the brain's hands (search_jobs, create_file).
+    const c1 = brain("C1");
+    ok(c1.tools.includes("search_jobs"), "C1 offers search_jobs");
+    ok(c1.tools.includes("create_file"), "C1 offers create_file (plan_review) with the reply writer off");
 
     // C2: a draft from the confirmed profile with placeholders, shown, not sent; no question about the recipient (D-059).
     const c2 = brain("C2");
@@ -243,6 +256,33 @@ Deno.test({ name: "MP-1 the EXISTS turns follow Instinct's process: the tools of
     ok(/self-reported/i.test(c22.reply) && c22.reply.includes("levels.fyi/internships/Relativity"), `C22: ${c22.reply}`);
     ok(!/\bmedian\b/i.test(c22.reply), "C22 never calls a benchmark a median");
 
+    // Architect amendment (D-063). C4: a specific advice question: the confirmed record and the GPA correction in the brain's view;
+    // research_career_question (advice) makes one web search and cites one guide; the answer first, that one link alone on the last
+    // line, written by code; no plan file.
+    const c4 = brain("C4"), a4 = JSON.parse(result(c4.calls, "research_career_question") || "{}");
+    ok(c4.tools.includes("research_career_question") && "kind" in (c4.schemas.research_career_question?.properties ?? {}), "C4 offers the advice kind");
+    ok(/Lakeshore University/.test(c4.system) && /outdated/i.test(c4.history), "C4: the confirmed education and the GPA correction are in view");
+    eq([a4.status, a4.source?.url, c4.searches], ["advice", C4_GUIDE, 1], `C4 advice: ${JSON.stringify(a4).slice(0, 300)}`);
+    eq(c4.reply, `${C4_ANSWER}\n${C4_GUIDE}`, "C4: answer first, then the one source on its own line");
+    // C10: the posting the conversation listed, tailored from confirmed facts; one PDF (its Word copy may ride with it,
+    // RESUME-TEMPLATES 1.1); no email on the confirmed resume and none typed, so the email is a visible placeholder the tool flags,
+    // and the draft is never stored for an application (D-063); nothing submitted.
+    const c10 = brain("C10"), t10 = JSON.parse(result(c10.calls, "tailor_resume") || "{}");
+    const pdfs = (d: any[]) => d.filter((x) => x?.format === "pdf");
+    ok(/THE POSTING THEY MEAN/.test(c10.system) && c10.system.includes(PAYPAL.id), "C10: the posting the conversation listed");
+    ok(t10.ok === true && t10.placeholders?.includes("email") && !t10.link, `C10 tailor_resume: ${JSON.stringify(t10).slice(0, 300)}`);
+    ok((t10.review_draft?.flags ?? []).some((f: string) => f.includes("[your email]")) && /review draft/.test(t10.review_draft?.note ?? ""), "C10: flagged as a review draft with the placeholder");
+    eq([pdfs(c10.documents).length, c10.documents.length <= 2], [1, true], `C10 files: ${JSON.stringify(c10.documents.map((d) => d.filename))}`);
+    ok(NOTHING_SENT.test(c10.reply), "C10 boundary");
+    // C20: the same posting again with both edits, from confirmed details only: Pixelforge condensed to one line, Waypoint leading
+    // with every detail its record holds and the shortfall said; the file is v2, still a review draft.
+    const c20 = brain("C20"), t20 = JSON.parse(result(c20.calls, "tailor_resume") || "{}"), ed = (r: string) => (t20.edits_done ?? []).find((e: any) => e.role === r);
+    ok("edits" in (c20.schemas.tailor_resume?.properties ?? {}), "C20: tailor_resume takes edits");
+    eq([ed("Pixelforge")?.change, ed("Pixelforge")?.now], ["condensed", 1], `C20 Pixelforge: ${JSON.stringify(t20.edits_done ?? t20).slice(0, 300)}`);
+    ok(ed("Waypoint")?.led === true && ed("Waypoint")?.now === ed("Waypoint")?.available && ed("Waypoint")?.expand_short === (ed("Waypoint")?.available < 3), "C20 Waypoint: from its confirmed details only, leading");
+    ok(pdfs(c20.documents).length === 1 && /_v2\.pdf$/.test(pdfs(c20.documents)[0]?.filename ?? ""), `C20 v2: ${JSON.stringify(c20.documents.map((d) => d.filename))}`);
+    ok(!!t20.review_draft && NOTHING_SENT.test(c20.reply), "C20: still a review draft; nothing submitted");
+
     // C21, C21f: the question first; then the answer is roasted, never a template.
     eq(brain("C21").reply.startsWith(C21_Q), true);
     ok(/THEY ARE ANSWERING THE PRACTICE QUESTION THEY ASKED YOU TO ROAST/.test(brain("C21f").system), "C21f: the roast");
@@ -273,7 +313,7 @@ Deno.test({ name: "MP-1 the EXISTS turns follow Instinct's process: the tools of
     const off = Object.entries(seen).flatMap(([id, s]) => s.outbound.map((o) => `${id} ${o}`));
     ok(off.every((o) => / GET /.test(o) && (POSTING_PAGE.test(o.split(" GET ")[1]) || /^(?:C9|C22|C23) /.test(o))), `only reads left the machine: ${off.join(", ")}`);
     // Every EXISTS brain turn's boundary survives code's shaping where the script stated one.
-    for (const id of ["C12", "C18"]) ok(NOTHING_SENT.test(seen[id].reply) || /nothing is being applied/i.test(seen[id].reply), `${id} boundary kept`);
+    for (const id of ["C10", "C12", "C18", "C20"]) ok(NOTHING_SENT.test(seen[id].reply) || /nothing is being applied/i.test(seen[id].reply), `${id} boundary kept`);
   } finally {
     await close();
   }

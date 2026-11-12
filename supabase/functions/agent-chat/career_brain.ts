@@ -11,6 +11,7 @@ import { careerSystemPrompt, MIRROR_RULES, shapeRulesFor } from "../_shared/agen
 import { alertLine, type MemoryStore, type Pipeline, personBlock, type Standing } from "../_shared/agent/memory.ts";
 import type { ResearchDeps, ResearchResult } from "../_shared/agent/research/index.ts";
 import { enforceResearchReply, stripUnseenLinks } from "../_shared/agent/research/reply.ts";
+import { type AdviceResult, enforceAdviceReply } from "../_shared/agent/research/advice.ts";
 import { enforceMarketReply, type MarketDeps, type MarketResult } from "../_shared/agent/research/market.ts";
 import { type CompanyResult, enforceCompanyReply } from "../_shared/agent/research/company.ts";
 import { enforceFollowupAsk } from "../_shared/followup_draft.ts";
@@ -133,8 +134,8 @@ export async function agentTurn(o: {
   // REPLY SHAPE: Telegram with CAREER_REPLY_WRITER=on: the shape rules in the prompt, and the attach_document tool.
   shape?: boolean;
   // FILE KINDS: create_file (a page of one of the file kinds). D-061 G11 ("a file ask gets the file"): offered whenever the
-  // handler passes a File service, which it does wherever a File link can be made and delivered (the link rides shape.links to
-  // every channel, after the answer); no longer tied to the reply writer, which stays off (RELEASE_NEVER_ON).
+  // handler passes a File service, which it does on every channel (the link rides shape.links after the answer; where File links
+  // are not set up the service refuses and the brain says so); no longer tied to the reply writer, which stays off (RELEASE_NEVER_ON).
   files?: FileService | null;
   // D-064 (G13): this message arrived while the previous turn (this text, the person's previous message) was still running.
   whileWorking?: string | null;
@@ -166,7 +167,8 @@ export async function agentTurn(o: {
     : null;
   // D-060: trace.m keeps the turn's sourced result: a later research call that found nothing (the turn's one web search was
   // already used) never replaces it.
-  const trace: { r?: Extract<ResearchResult, { status: "ok" }>; m?: MarketResult | CompanyResult } = {};
+  // D-063 (C4): trace.a keeps a specific advice question's result (research/advice.ts): its one source goes on its own line.
+  const trace: { r?: Extract<ResearchResult, { status: "ok" }>; m?: MarketResult | CompanyResult; a?: AdviceResult } = {};
   const ctx: any = { userId: o.userId, threadId: o.threadId, now: o.now, state: o.stores };
   let result = await runAgentTurn({
     system: careerSystemPrompt(localDay(o.now, o.tz)) + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + "\n\n" + MIRROR_RULES + "\n\n" + turnNotes.join("\n\n") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
@@ -174,7 +176,7 @@ export async function agentTurn(o: {
     message: [o.message, ...notes].filter(Boolean).join("\n\n"),
     // ADVERSARIAL ROUND 2: an attached file's name and text are not the person's words: no tool reads them as said.
     said: o.message,
-    tools: [...withheld([...(o.toolPolicy?.withhold ?? []), ...hypoWithheld], [...careerTools({ postings: o.postings ?? (async () => []), alerts: o.alerts ?? null, memory: o.memory ?? null, events: o.events ?? null, confirmations: o.confirmations ?? null, tz: o.tz, mail: o.mail ?? null, interviews: o.interviews ?? null, digest: o.digest ?? null, outreach: o.outreach ?? null, verifier: o.verifier ?? null, tailor: o.tailor ?? null, hired: o.hired ?? null, wants: o.wants ?? null, limits: o.limits, posting: o.posting ?? null, situation: o.known?.situation ?? null, linkCheck: o.linkCheck ?? null, conversations: o.conversations ?? null, market: o.market ? { ...o.market, onResult: (r) => { if (r.status === "ok" || trace.m?.status !== "ok") trace.m = r; } } : null, postingRecheck: o.postingRecheck ?? null, applyFlow: o.applyFlow ?? null, research: o.knowledge && o.research ? { ...o.research, onResult: (r, m) => { if (r.status === "ok") trace.r = r; o.research?.onResult?.(r, m); } } : null }), ...(o.capabilities ?? [])]), ...(o.shape && attachAsked(o.message) ? [attachTool()] : []), ...(o.files ? [createFileTool(o.files)] : [])],
+    tools: [...withheld([...(o.toolPolicy?.withhold ?? []), ...hypoWithheld], [...careerTools({ postings: o.postings ?? (async () => []), alerts: o.alerts ?? null, memory: o.memory ?? null, events: o.events ?? null, confirmations: o.confirmations ?? null, tz: o.tz, mail: o.mail ?? null, interviews: o.interviews ?? null, digest: o.digest ?? null, outreach: o.outreach ?? null, verifier: o.verifier ?? null, tailor: o.tailor ?? null, hired: o.hired ?? null, wants: o.wants ?? null, limits: o.limits, posting: o.posting ?? null, situation: o.known?.situation ?? null, linkCheck: o.linkCheck ?? null, conversations: o.conversations ?? null, market: o.market ? { ...o.market, onResult: (r) => { if (r.status === "ok" || trace.m?.status !== "ok") trace.m = r; } } : null, postingRecheck: o.postingRecheck ?? null, applyFlow: o.applyFlow ?? null, research: o.knowledge && o.research ? { ...o.research, onResult: (r, m) => { if (r.status === "ok") trace.r = r; o.research?.onResult?.(r, m); }, onAdvice: (r) => { if (r.source || !trace.a?.source) trace.a = r; } } : null }), ...(o.capabilities ?? [])]), ...(o.shape && attachAsked(o.message) ? [attachTool()] : []), ...(o.files ? [createFileTool(o.files)] : [])],
     model: o.model,
     ctx,
   });
@@ -198,13 +200,15 @@ export async function agentTurn(o: {
   // earlier reply's source, e.g. the research answer "that citadel process from earlier" recalls) may be given again with the
   // recalled figure; it passed this same check, or was written by code, when it was first shown.
   else if (!trace.r && result.reply && result.stopped === "final") result = { ...result, reply: stripUnseenLinks(result.reply, [...(result.linksSeen ?? []), ...(result.fileLinks ?? []), ...shownBefore(o.history)]) };
+  // D-063 (C4): a specific advice answer: the model's links are removed and code adds the one cited source on its own line.
+  if (trace.a && !trace.r && !trace.m && result.reply && result.stopped === "final") result = { ...result, reply: enforceAdviceReply(result.reply, trace.a) };
   // MIRROR WA-1 (2026-11-11): the length of a text. On the owner's WhatsApp benchmark Instinct answered in one paragraph of about
   // 400 characters (median 396; longer only to list everything it knew or a research answer in parts); Trainee's brain wrote
   // 1,500 to 2,500 characters of numbered lists on the same asks. A reply over the limit is condensed once by the model, in
   // its own words, under guards in code: every figure and link must come from the long reply, and a turn that showed an exact
   // payload, holds an approval, carries code, or is a sourced research reply is never rewritten.
   // A research, market or company reply was laid out and sourced in code above (its citations number its sources): never condensed.
-  if (result.reply && result.stopped === "final" && !trace.r && !trace.m) {
+  if (result.reply && result.stopped === "final" && !trace.r && !trace.m && !trace.a) {
     const limit = condenseLimit(o.message);
     // An ask for everything, or for the detail ("give me a detailed plan for my whole job search, everything"; "like everything
     // you remember") is a deliberate long deliverable: the channel lays it out in several messages (channel_shape.ts), and a

@@ -21895,7 +21895,7 @@ const CareerRouter = (() => {
     return !!(d && (d.live === true || d.status === "LIVE"));
   }
   function watchSourceLine() {
-    return "It reads the employer job boards I index (Greenhouse, Lever, Ashby, Workday and similar), never LinkedIn or Indeed, so a role posted only there won't reach you.";
+    return "Source: employer boards (Greenhouse, Lever, Ashby, Workday); never LinkedIn or Indeed, so roles only there won't reach you.";
   }
   function alertDeliveryLine(ctx) {
     return alertDeliveryLive(ctx)

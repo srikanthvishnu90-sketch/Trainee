@@ -49063,7 +49063,7 @@ const CareerRouter = (() => {
   // source of a watch is the employer job boards ingest reads (career_ingest.ts INGEST_PROVIDERS); LinkedIn and Indeed are never
   // read (CLAUDE.md), so a role posted only there is a blind spot, said once when a watch is set or listed.
   function watchSourceLine() {
-    return "It reads the employer job boards I index (Greenhouse, Lever, Ashby, Workday and similar), never LinkedIn or Indeed, so a role posted only there won't reach you.";
+    return "Source: employer boards (Greenhouse, Lever, Ashby, Workday); never LinkedIn or Indeed, so roles only there won't reach you.";
   }
   function alertDeliveryLine(ctx) {
     return alertDeliveryLive(ctx)

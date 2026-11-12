@@ -109,6 +109,8 @@ export async function runConversation(script: Record<string, Step[]>, opts: { on
   // backtest runs with the release configuration exactly as release_config.ts ships it. The shared world turns
   // CAREER_MAIL_TRACKING off for its own tests; here every release flag is left unset, so the handler serves its release value
   // (releaseValue), no never-on switch is set, and the brain is PRODUCTION_BRAIN. The model key is a dummy (the model is scripted).
+  // Architect amendment (D-066): the switches are put back as they were at close, so they do not leak into later files of a shard.
+  const savedFlags = [...Object.keys(RELEASE_FLAGS), ...RELEASE_NEVER_ON].map((k) => [k, Deno.env.get(k)] as const);
   for (const k of Object.keys(RELEASE_FLAGS)) Deno.env.delete(k);
   for (const k of RELEASE_NEVER_ON) Deno.env.delete(k);
   Deno.env.set("CAREER_BRAIN", PRODUCTION_BRAIN);
@@ -117,7 +119,7 @@ export async function runConversation(script: Record<string, Step[]>, opts: { on
   // non-routable base and a TEST secret, as evals/mirror/heldout/harness.ts FILE_ENV does), removed again by close().
   for (const [k, v] of Object.entries(opts.env ?? {})) Deno.env.set(k, v);
   const flags: Record<string, FlagsAtTurn> = {};
-  const close = async () => { globalThis.fetch = refuse; Deno.env.delete("CAREER_BRAIN"); Deno.env.delete("ANTHROPIC_API_KEY"); for (const k of Object.keys(opts.env ?? {})) Deno.env.delete(k); await world.close(); };
+  const close = async () => { globalThis.fetch = refuse; Deno.env.delete("CAREER_BRAIN"); Deno.env.delete("ANTHROPIC_API_KEY"); for (const k of Object.keys(opts.env ?? {})) Deno.env.delete(k); await world.close(); for (const [k, v] of savedFlags) v === undefined ? Deno.env.delete(k) : Deno.env.set(k, v); };
   try {
     const seed: SeedPosting = opts.posting ?? { id: PAYPAL.id, provider: "greenhouse", board: "paypalwa1", company: "PayPal", title: "Software Engineer Intern", location: "Chicago, IL", url: PAYPAL.url, description: "Summer 2027 software engineering internship. Python, Java, SQL. Pay: $28 - $49 per hour." };
     const q = (v: string) => `$q$${v}$q$`;

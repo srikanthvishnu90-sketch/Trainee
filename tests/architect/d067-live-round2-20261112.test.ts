@@ -42,9 +42,8 @@ const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
 const DIR = new URL("../../evals/mirror/instinct-wa-batch1/", import.meta.url);
 const read = (f: string) => Deno.readTextFileSync(new URL(f, DIR)).split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
 const P: Record<string, string> = Object.fromEntries(read("prompts.jsonl").map((t: any) => [t.id, t.prompt]));
-// live-6's own replies (the transcript the run recorded, copied byte for byte from PR #783's
-// evals/mirror/instinct-wa-batch1/results/live-6/trainee-live-6.jsonl), used as the brain's observed output.
-const LIVE6: Record<string, string> = Object.fromEntries(Deno.readTextFileSync(new URL("../fixtures/mirror-live6/trainee-live-6.jsonl", import.meta.url)).split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l)).map((t: any) => [t.id, t.reply]));
+// live-6's own replies (the transcript the run recorded, PR #783), used as the brain's observed output.
+const LIVE6: Record<string, string> = Object.fromEntries(read("results/live-6/trainee-live-6.jsonl").map((t: any) => [t.id, t.reply]));
 const NOW = Date.parse("2026-11-12T03:00:00Z");
 const FACTS = [
   { id: "F-001", kind: "education", text: "Lakeshore University, BS Computer Science and Finance, Expected June 2029", status: "confirmed" },

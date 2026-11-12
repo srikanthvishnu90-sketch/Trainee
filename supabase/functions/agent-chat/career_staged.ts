@@ -15,18 +15,21 @@
 // (routerAnswerBlock). A turn the brain does not take runs through the router again on the real state, as
 // it does today, so what the router saves is exactly what it saved before.
 
-import { servedBrain } from "./release_config.ts";
+import { releaseFlagOn, servedBrain } from "./release_config.ts";
 import { NO_CLOCK, type TurnClock } from "./turn_clock.ts";
 import { crisisReply } from "./crisis.ts";
 import { PAYLOAD_INTENTS } from "../_shared/career_reply_writer.ts";
+import { multiAsk, nonEnglishAsk, severalAsks } from "../_shared/ask_language.ts";
+import { boundaryOf, correctionOf, hypotheticalOf } from "../_shared/agent/turn_notes.ts"; // D-061 G1, G8, G9
 
 type Env = { get(k: string): string | undefined };
 type Host = { runTurn(text: string, ctx: any): { intent: string | null; handler: string | null; reply?: string; contained?: boolean; result?: any }; isHostControlled(text: string, ctx: any): boolean };
 
-import { correctedAsk } from "../_shared/search_correction.ts";
+import { correctedAsk, refinedAsk } from "../_shared/search_correction.ts";
 import { askFor } from "../_shared/career_search_judge.ts";
-import { outreachAsk } from "../_shared/outreach_ask.ts";
+import { namedDraftAsk, outreachAsk } from "../_shared/outreach_ask.ts";
 import { researchReplyOn } from "../_shared/research_reply.ts"; // D-047
+import { knowledgeOn } from "../_shared/agent/knowledge/index.ts"; // D-060
 export type BrainMode = "router" | "agent" | "staged";
 // The served brain (release_config.ts): the committed PRODUCTION_BRAIN unless CAREER_BRAIN rolls it back to the router.
 // "agent" is never served from here (the full brain stays pinned off in career_brain.ts).
@@ -195,7 +198,7 @@ export function namesSomeone(span: string): boolean {
 const OPEN_ENTRY = { test: (m: string) => OPEN_ENTRY_RES.some((r) => { const x = r.exec(m); return !!x && !namesSomeone(m.slice(x.index).split(/[?.!]/)[0]); }) };
 const OPEN_ENTRY_KINDS = new Set(["role_kb_stats", "role_kb_absent", "plan_paths"]);
 export function openCareerQuestion(env: Env, message: string, intent: string, result: unknown): boolean {
-  if (env.get("CAREER_KNOWLEDGE") !== "on") return false;
+  if (!knowledgeOn(env)) return false; // D-060: a release flag, read through releaseFlagOn
   // career_os_plan ("the path from freshman to null") and profile_recall (a self-statement such as "I'm on F-1" swallows the
   // question) are the router's generic misses on the same open questions: they carry no library answer, so the brain takes them.
   const GENERIC_MISS = intent === "career_os_plan" || intent === "profile_recall";
@@ -412,6 +415,7 @@ export function marketResearchAsk(env: Env, message: string, intent: string | nu
   return !(intent && CODE_OWNED_INTENTS.has(intent));
 }
 // The router's own outreach and networking intents (R9 outreach routing leaves them to their rules).
+const DRAFT_MISREAD: ReadonlySet<string> = new Set(["career_document_delivery", "career_people_alumni", "outreach_clarification", "career_stop_workflow", "career_tailor", "career_fallback", "career_catchall"]);
 const OUTREACH_OWN = /^(?:outreach|career_outreach|career_networking|career_people|networking)/;
 const LIST_FOLLOWUP = /^\s*(?:(?:and|so|but|ok(?:ay)?),?\s+)?why\s+(?:not|didn't\s+you\s+(?:include|list|show|pick))\s+(?:that|the|this)\s+[^?.!]{1,40}?\s*one\b/i;
 const QUESTION_TO_ASK = /\b(?:won't|will\s+not|wouldn't|would\s+not|doesn't|does\s+not|not)\s+sound\s+(?:copied|generic|canned|scripted|rehearsed|memori[sz]ed)\b|\bquestions?\b[^.?!]{0,30}\b(?:to\s+ask|i\s+(?:can|could|should)\s+ask|for\s+(?:them|the\s+(?:interviewer|panel|recruiter|hiring\s+manager)))\b/i;
@@ -424,6 +428,7 @@ export function followupOffTask(message: string, intent: string, result: unknown
   if (intent === "career_document_delivery") return !(Array.isArray(r.documents) && r.documents.length) && PACKET_ASK.test(m) && !RESUME_FILE.test(m);
   return false;
 }
+const NON_ENGLISH_KEPT = /^(?:conversation_|intent_cancelled|intent_recipient_change|prep_mock|negotiation_roleplay|career_erase|career_profile_erased|career_paused|career_resumed|paused_|pause_status|career_pending_approvals|career_approval|career_batch_apply|doorstep_|queue_|captcha_|portal_|disconnect|connect_|intent_opt_out|people_matching_stop)/;
 export function stagedDecision(o: { env: Env; message: string; ctx: Record<string, unknown>; host: Host; structured: boolean; clock?: TurnClock }): StagedDecision {
   const clock = o.clock ?? NO_CLOCK;
   const mode = brainMode(o.env);
@@ -434,7 +439,7 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (crisisReply(o.message) !== null) return { brain: false, mode, intent: null, reason: "crisis" };
   // Spec 2.3: a correction to the last search ("remote only", "only individual-contributor roles") changes its constraints in
   // code (search_correction.ts) and the next results use them; it is not a question for the brain.
-  if (correctedAsk(o.message, o.ctx.discovery)) return { brain: false, mode, intent: null, reason: "search_correction" };
+  if (correctedAsk(o.message, o.ctx.discovery) || refinedAsk(o.message, o.ctx.discovery)) return { brain: false, mode, intent: null, reason: "search_correction" };
   let probe, records: any[] = [];
   try { const copy = clock.sync("staged_probe_copy", () => probeCtx(o.ctx)); probe = clock.sync("staged_probe_router", () => o.host.runTurn(o.message, copy)); records = Array.isArray(copy.containmentRecords) ? copy.containmentRecords as any[] : []; }
   catch { return { brain: false, mode, intent: null, reason: "probe_failed" }; }
@@ -450,6 +455,21 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (researchReplyOn(o.env) && researchOverAction(o.message)) return { brain: true, mode, intent, reason: "company_research" };
   if (routerKept(o.env).has(intent)) return { brain: false, mode, intent, reason: "kept_on_router" };
   if (marketResearchAsk(o.env, o.message, intent)) return { brain: true, mode, intent, reason: "market_research" };
+  // D-062 (MIRROR-PROCESS C6, C16, C19): the person's application history and tracker (read from their Gmail confirmations), and a
+  // public alumni search, are the brain's: it has the tools (agent/capability_tools.ts); code guards what they return.
+  if (applicationRecordAsk(o.env, o.message, intent)) return { brain: true, mode, intent, reason: "application_record", router: routerAnswer(intent, probe) };
+  if (alumniSearchAsk(o.env, o.message, intent)) return { brain: true, mode, intent, reason: "alumni_search" };
+  if (emailReplyAsk(o.env, o.message, intent)) return { brain: true, mode, intent, reason: "email_reply" };
+  // MIRROR-1000 gaps (2026-11-11): the router's words are English. A non-English ask it claimed from one English keyword is
+  // the brain's, which answers in the person's language (ask_language.ts). Payloads, bare replies, mock sessions and the
+  // account's controls stay code's.
+  if (nonEnglishAsk(o.message) && !PAYLOAD_INTENTS.has(intent) && !NON_ENGLISH_KEPT.test(intent)) return { brain: true, mode, intent, reason: "non_english" };
+  // D-058 ruling 3: two asks in one message are the model's, which answers both; the router keeps single asks, payload intents
+  // included. The account's controls, approvals and bare replies stay code's (the same set the non-English route keeps).
+  if (multiAsk(o.message) && !NON_ENGLISH_KEPT.test(intent)) return { brain: true, mode, intent, reason: "multi_part" };
+  // MIRROR-1000: a draft to a named person that the router read as a file ask, an alumni list or a missing recipient is the
+  // brain's drafting turn (outreach_ask.ts namedDraftAsk).
+  if (DRAFT_MISREAD.has(intent) && namedDraftAsk(o.message)) return { brain: true, mode, intent, reason: "named_draft" };
   if ((!CODE_OWNED_INTENTS.has(intent) || intent === "tracking_log") && followupDraftAsk(o.message)) return { brain: true, mode, intent, reason: "followup_draft" };
   // H2H fix 4 (docs/architect/INSTINCT-HEAD-TO-HEAD.md C2 t5, C5 t4, C3 t6): a follow-up stays on the thread's current task. The
   // router read each from a keyword and answered a different ask: "Why not that Stripe one?" after a search got Stripe's
@@ -483,9 +503,18 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (!STAGED_BRAIN_INTENTS.includes(intent)) {
     // Before the list: a turn that asks or forbids is the brain's unless its intent is code's own work (questionTurn).
     if (questionTurn(o.message, intent, probe.result)) return { brain: true, mode, intent, reason: "question_shaped", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
+    if (!g1CodeAnswers(o.message, intent, probe.result, o.ctx)) return g1Brain(o, intent, probe, clock);
     return { brain: false, mode, intent, reason: "action" };
   }
-  if (codeProduct(intent, probe.result)) return { brain: false, mode, intent, reason: "code_product" };
+  // A sourced record behind the answer (a company file, a benchmark with figures, the person's offer) stays code's (D-007), unless
+  // the turn is a hypothetical, a correction of Trainee or several asks (D-061 G8, G9, G13): then the record is the brain's data.
+  // D-061 G1, G11: a prep File or brief the router built for an ask that asked for no file or plan (practice problems, a STAR story,
+  // rating an answer) answered a different task: the ask is the brain's, with the router's prep as data.
+  // D-061 G1, G4, G14 (D-060 web research on): an ask about a firm that code answers from its company file is the brain's research
+  // turn: it reads official sources first (research_company, research_market, each reply enforced in code: enforceCompanyReply),
+  // with the file's answer as data. With web research rolled back (CAREER_KNOWLEDGE=off), the sourced file stays code's (D-007).
+  if (intent === "company_intel" && has((probe.result ?? {}) as Record<string, unknown>, "company") && codeProduct(intent, probe.result) && knowledgeOn(o.env) && researchReplyOn(o.env)) return g1Brain(o, intent, probe, clock);
+  if (codeProduct(intent, probe.result)) return g1Override(o.message) || (intent === "prep_brief" && !prepSessionOpen(o.ctx) && !G1_FILE_ASK.test(o.message) && G1_REQUEST.test(o.message)) ? g1Brain(o, intent, probe, clock) : { brain: false, mode, intent, reason: "code_product" };
   return { brain: true, mode, intent, reason: "question", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
 }
 
@@ -678,4 +707,158 @@ export function stagedRoute(o: { env: Env; message: string; ctx: Record<string, 
     get decision(): StagedDecision | null { return d; },
     get chosen(): boolean { return !!d?.brain; },
   };
+}
+
+// ------------------------------------------------------------------------------------------------ D-061 G1
+// docs/architect/specs/MIRROR-RULINGS.md G1: "Code answers on its own only (a) exact payload intents (an approval of a shown card,
+// stop/pause, account controls) and (b) a reply that is a bare answer to a question code just asked. Every other message goes to
+// the brain, with what code found (search results, records, profile facts) passed as data." Read by the router's intent and what
+// its probe built, never by a prompt's wording (P3). The brain still cannot apply, send, save an alert or verify a contact
+// (STAGED_WITHHELD_TOOLS), and every external effect still needs the person's yes to the exact payload.
+//
+// (a) and (b), and code's guards: always code's, a hypothetical or a correction included.
+const G1_CONTROL: ReadonlySet<string> = new Set([
+  // a bare yes or no, a hold, a cancel, a recipient change: the answer to whatever is waiting
+  "conversation_bare_reply", "conversation_hold", "intent_cancelled", "intent_recipient_change", "onboarding_answer",
+  // a running practice session: the answer to code's own question (starting one is the brain's, G12)
+  "prep_mock_next", "prep_mock_retry", "prep_mock_followup", "prep_mock_debrief", "prep_mock_complete", "prep_mock_checklist", "negotiation_roleplay",
+  // the account's controls
+  "career_erase_confirm", "career_erase_status", "career_profile_erased", "disconnect", "connect_google", "connect_browser_source",
+  "paused_hold", "pause_status", "people_matching_stop", "intent_opt_out", "career_paused", "career_resumed", "queue_halt", "queue_resume",
+  "captcha_handoff", "portal_account", "portal_accounts", "career_watch_manage", "career_stop_workflow",
+  // refusals and safety replies
+  "safety_support", "impersonation_refused", "authority_refused", "intent_refusal", "tailor_refused", "packet_refused",
+]);
+// Actions the person asks for in their own words, with a code-first owner (one writer each): code's unless the message forbids
+// that very action ("don't apply") or is a hypothetical, a correction or several asks.
+const G1_APPLY_ACTIONS: ReadonlySet<string> = new Set(["career_batch_apply", "named_role_apply", "named_role_link", "doorstep_submit", "doorstep_fill"]);
+// ... and the onboarding list, which answers "what do you need from me" with the facts to start applying.
+const G1_BOUNDARY_SENSITIVE: ReadonlySet<string> = new Set([...G1_APPLY_ACTIONS, "career_onboarding_needs", "profile_recall"]);
+const G1_ACTIONS: ReadonlySet<string> = new Set([
+  ...G1_APPLY_ACTIONS, "doorstep_status", "application_packet", "application_packet_walkthrough", "career_packet", "career_packet_absent", "packet_prep",
+  "packet_needs_role", "intent_packet_validity", "career_watch", "career_watch_create", "career_watch_affirm", "career_os_watch",
+  // a search the person asked for: its constraints, list and results page are code's, the results the brain's data otherwise
+  "career_discovery", "career_internship_discovery", "discovery_dead_board",
+  // writes to the person's record they asked for, and onboarding
+  "onboarding", "career_onboarding_needs", "tracking_log", "profile_correction", "intent_sensitive_correction", "sensitive_answer_ask", "career_resume_ingest", "career_resume_correction",
+  "career_resume_update", "career_resume_disowned", "career_resume_dispute", "career_goal_record", "career_preference_corrected", "career_os_wins_log",
+  // an exact payload code drafted around the person's own figure (the counter card), the apply ledger's own entries
+  "negotiation_draft", "negotiation_revision", "career_pending_approvals", "career_approval_select", "career_submission_check", "career_sent_activity",
+  "career_answer_change_after_approval", "career_apply_email_draft", "career_apply_email_explain", "career_apply_email_sender", "career_portal_account",
+  "ai_use_answer", "eligibility_check", "disclosure_clarify", "career_os_review_packet", "calendar_proposal", "graph_intro", "graph_blurb", "profile_export",
+  "access_log", "session_health", "connected_accounts",
+  // what the person told Trainee about themselves, read back from what they confirmed (D-007); "the first one" of the list code
+  // just showed (G1 b: the answer refers to code's own list)
+  "profile_recall", "career_list_reference",
+]);
+// Reads of the person's own record (applications, follow-ups, their people): code's when the message asks about that record.
+const G1_RECORD_READS: ReadonlySet<string> = new Set(["tracking_status", "tracking_digest", "career_status_states", "intent_followup_status",
+  "campaign_digest", "season_dashboard", "intent_prior_application", "intent_role_closed", "career_resume_on_file", "career_resume_not_read",
+  "graph_alumni", "graph_referral", "graph_keep_warm", "graph_paths"]);
+// The message is about the person's own record ("have I", "my applications", "did my", "what do you know about me").
+const OWN_RECORD_ASK = /\b(?:my|mine|me|i'?ve|i\s+have|have\s+i|did\s+i|do\s+i\s+(?:have|know)|i\s+(?:applied|sent|know|asked|told))\b|\b(?:the|that|this|our)\s+(?:application\s+)?(?:tracker|applications?|pipeline)\b/i;
+const G1_RECALLS: ReadonlySet<string> = new Set(["conversation_recall", "career_goal_recall", "graph_memory", "negotiation_recall"]);
+const ABOUT_ME = /\b(?:about me|know about me|remember about me|my (?:profile|facts|info|details|background|goals?))\b|\bwho am i\b/i;
+// A File or document code built for the ask is the deliverable itself (G11): it goes to the person.
+const G1_DELIVERABLE = ["file", "documents", "document", "tailorDoc"];
+// D-061 G1 (the model decides; code guards): the turns code's rules above kept, which the ruling gives to the brain, go there
+// with what the router would have answered as data (routerAnswerBlock), never as the answer.
+function g1Brain(o: { message: string; ctx: Record<string, unknown>; host: Host; env: Env }, intent: string, probe: { reply?: unknown }, clock: TurnClock): StagedDecision {
+  return { brain: true, mode: brainMode(o.env), intent, reason: "g1_model_decides", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
+}
+// An ask for a file, a document, a page or a plan to keep or open (G11).
+const G1_FILE_ASK = /\b(?:file|doc|docs|document|pdf|docx|page|sheet|one[- ]?pager|brief|briefing|plan|checklist|cheat ?sheet|download\w*|printable)\b|\b(?:prep|prepare)\s+me\b|\bhelp\s+me\s+(?:prep|prepare|get\s+ready)\b|\bget\s+me\s+ready\b/i;
+// A request for something specific ("give me three practice problems", "rate this answer", "walk me through ..."); a statement
+// of the situation alone ("I have an interview tomorrow and I'm nervous") keeps the router's prep plan.
+const G1_REQUEST = /\b(?:give|walk|help|turn|rate|ask|quiz|shape|show|tell|write|make|review|critique|grade|practice|practise|drill|explain|how|what|which|can you|could you)\b|\?/i;
+const G1_URL = /https?:\/\/\S+/i, G1_URL_ALL = /https?:\/\/\S+/gi;
+const G1_RESUME = /\b(?:r[eé]sum[eé]s?|cvs?)\b/i;
+export const g1Override = (message: string) => { const m = String(message ?? "").replace(/[\u2019`]/g, "'"); return !!hypotheticalOf(m) || correctionOf(m) === "trainee" || severalAsks(m); };
+// A product code built for an instruction the person gave (a draft, a people list, a prep brief, a document, an offer card):
+// the instruction carried out. A sourced record (a company file, a benchmark, a comparison) is data for the brain's answer.
+const OTHER_DELIVERABLE = /\b(?:game\s*plan|(?:a|an|the|my|actual|real|recruiting|search|application|job[- ]search|week[- ]by[- ]week|weekly|daily|step[- ]by[- ]step)\s+(?:\w+\s+)?(?:plan|strategy|roadmap|timeline|schedule|checklist))\b/i;
+// An instruction to act toward someone, in any clause: "Draft only: send it to Lena", "help me message a recruiter at Stripe".
+const G1_INSTRUCTION = /(?:^|[.:;!]\s*)(?:please\s+)?(?:send|email|message|text|dm|reach\s+out|contact|apply|submit|queue)\b|^\s*(?:please\s+)?help\s+me\s+(?:send|email|message|text|dm|reach|contact|write|draft)\b/i;
+const G1_ACTION_PRODUCT = ["draft", "target", "brief", "offer", "documents", "document", "file"];
+// A practice session code is running (a question of its own is waiting): the next ask in it is the session's.
+const prepSessionOpen = (ctx: Record<string, unknown> | undefined) => !!(ctx as any)?.trackStore?._careerThread?.prep?.lastQ || !!(ctx as any)?.mockSession;
+const mockWaiting = (ctx: Record<string, unknown> | undefined) => { const pm = (ctx as any)?.trackStore?._careerThread?.prep?.prepMock; return !!pm && pm.phase === "question" && !!pm.currentQ; };
+export function g1CodeAnswers(message: string, intent: string, result: unknown, ctx?: Record<string, unknown>): boolean {
+  const m = String(message ?? "").replace(/[’`]/g, "'");
+  // A question about a watch ("what happens if I turn off alerts?") is not the control itself (G1): the brain answers it.
+  if (intent === "career_watch_manage" && (QUESTION_LEAD.test(m) || m.includes("?"))) return false;
+  if (G1_CONTROL.has(intent) || PAYLOAD_INTENTS.has(intent) && !G1_PRODUCERS.has(intent)) return true;
+  const r = (result && typeof result === "object" ? result : {}) as Record<string, any>;
+  // G1 (b): code's mock asked a question and is waiting: this message is the answer to it, whatever the router read.
+  if (mockWaiting(ctx)) return true;
+  if (G1_DELIVERABLE.some((k) => has(r, k)) || has(r, "artifact") && (has(r.artifact, "pdf") || has(r.artifact, "url"))) return true;
+  // G8, G9, G13: a hypothetical, a correction of Trainee and several asks are the brain's.
+  if (g1Override(m)) return false;
+  // An action the message itself forbids ("don't apply", "don't submit") is not asked for.
+  if (G1_BOUNDARY_SENSITIVE.has(intent) && boundaryOf(m) === "submit") return false;
+  // A posting link inside a message with a question or a boundary ("is this still open? <url>", "don't apply yet <url>"): the
+  // link is the subject, not search words or an apply command; the brain reads the posting (get_posting, the posting re-check)
+  // with the router's reading as data. A bare "apply here <url>" stays code's apply intake.
+  if (G1_URL.test(m) && (SEARCH_INTENTS.has(intent) || G1_APPLY_ACTIONS.has(intent)) && (QUESTION_LEAD.test(m.replace(G1_URL_ALL, " ")) || m.replace(G1_URL_ALL, " ").includes("?") || boundaryOf(m))) return false;
+  // A search the router ran on words that ask for a different deliverable (a plan, a strategy, a timeline) and no find ask:
+  // the deliverable asked for is the brain's, with the search as data (as adviceOverSearch does for an advice question).
+  if (SEARCH_INTENTS.has(intent) && OTHER_DELIVERABLE.test(m) && !SEARCH_ASK.test(m)) return false;
+  if (G1_ACTIONS.has(intent)) return true;
+  if (G1_RECORD_READS.has(intent)) return OWN_RECORD_ASK.test(m);
+  // "What do you know about me?" is a read of their own record (D-007: from what they confirmed); "that X from earlier" is a
+  // recall of this conversation, the brain's (G7: the thread is memory).
+  if (G1_RECALLS.has(intent)) return ABOUT_ME.test(m);
+  // G1 (b): the next ask inside a practice session code is running.
+  // A new ask inside it ("a harder one", "ask me another") served from the bank is not an answer: prep_brief's serve is the brain's.
+  if (intent === "prep_mock_start" && prepSessionOpen(ctx)) return true;
+  // A drill answer graded against the bank's own key is the answer to code's question; a rubric read is not (prepRubricRead).
+  if (intent === "prep_brief" && r.scored && r.scored !== "rubric") return true;
+  // An instruction (not a question, nothing forbidden) that code carried out with a product, or one to message or list people.
+  // G10 (ask only what the action needs): "tailor my resume" with the role missing is an action the person asked for whose one
+  // required slot is missing: code's tailor asks for that slot. A cover letter or a note is the brain's draft (D-059 placeholders).
+  if ((intent === "career_tailor" || intent === "tailor_needs_posting") && G1_RESUME.test(m) && !(QUESTION_LEAD.test(m) || m.includes("?"))) return true;
+  // A boundary ("just research, don't message anyone") limits the instruction, it does not make it a question; a draft asked for
+  // under "don't send" is the brain's to write (G10, D-059).
+  const asks = QUESTION_LEAD.test(m) || m.includes("?"), draftOnly = boundaryOf(m) === "send" && G1_PRODUCERS.has(intent);
+  if (!asks && !draftOnly && (G1_ACTION_PRODUCT.some((k) => has(r, k)) || LIST_OR_SEND.test(m) || ASK_TO_ACT.test(m) || G1_INSTRUCTION.test(m))) return true;
+  // A sourced record behind the answer (a company file, a comparison, a benchmark with figures) stays code's (D-007), as
+  // codeProduct keeps it on the staged list.
+  if (has(r, "company") || has(r, "comparison") || (Array.isArray(r.bench?.figures) && r.bench.figures.length > 0)) return true;
+  // Everything else (advice and questions, research the router answered from its library, a draft code would write from
+  // words, a practice question served from a bank, a recall of the thread): the brain's, with the router's answer as data.
+  return false;
+}
+// Payload intents whose payload is code's reading of the words, not something the person was shown: the brain writes these
+// (a draft with placeholders, D-059; a practice question asked like an interviewer, G12; a tailored resume only when code
+// actually built one, above).
+const G1_PRODUCERS: ReadonlySet<string> = new Set(["outreach_draft", "career_tailor", "prep_mock_start"]);
+// D-062 (owner, 2026-11-11: "be able to answer emails, find alumni, do all of it"). Two asks the router answered from its own
+// records alone (C6 "have i applied to anything yet?" and C16 "set up that application tracker": "Your application tracker is
+// empty"; C19 "find me 3 lakeshore alumni at google ... don't message anyone": a list plan that finds no one). With the
+// capability on, each is the brain's, which reads the person's Gmail confirmations and records (read_application_mail,
+// export_tracker) or searches public pages (find_people). Every send stays code's, on the exact-payload card.
+const RECORD_INTENTS: ReadonlySet<string> = new Set(["tracking_status", "tracking_digest", "career_status_states", "career_sent_activity", UNCLAIMED]);
+const RECORD_ASK = /\b(?:have\s+i\s+(?:actually\s+)?(?:applied|submitted|sent\s+(?:any|an?)\s+applications?)|did\s+i\s+(?:ever\s+)?(?:apply|submit)|what\s+(?:have|did)\s+i\s+(?:applied|apply)|(?:keep(?:ing)?|kept)\s+track|(?:application|job|applications)\s+tracker|tracker\b|track\s+(?:of\s+)?(?:my|all\s+my)\s+(?:applications|apps))/i;
+export function applicationRecordAsk(env: Env, message: string, intent: string | null): boolean {
+  if (!intent || !RECORD_INTENTS.has(intent) || !releaseFlagOn(env, "CAREER_MAIL_TRACKING")) return false;
+  return RECORD_ASK.test(String(message ?? "").replace(/[\u2019`]/g, "'"));
+}
+const ALUMNI_INTENTS: ReadonlySet<string> = new Set(["outreach_clarification", "career_people_alumni", "career_catchall", "career_fallback", UNCLAIMED]);
+const ALUMNI_ASK = /\b(?:find|look\s+up|search\s+for|get|pull|list|show|give)\b[^?.!]{0,60}\b(?:alumni|alums?|grads|graduates)\b|\b(?:people|folks|engineers|anyone)\s+(?:who\s+went\s+to|from\s+my\s+school)\b/i;
+// An ask to write to or message them now is code's networking turn (its card); a find that forbids contact stays a find.
+const SEND_NOW = /\b(?:draft|write|email|e-mail|message|dm|text|send)\b[^?.!]{0,30}\b(?:them|each|all|to\s+them)\b/i;
+export function alumniSearchAsk(env: Env, message: string, intent: string | null): boolean {
+  if (!intent || !ALUMNI_INTENTS.has(intent) || !releaseFlagOn(env, "CAREER_PEOPLE_SEARCH")) return false;
+  const m = String(message ?? "").replace(/[\u2019`]/g, "'");
+  if (!ALUMNI_ASK.test(m)) return false;
+  return !SEND_NOW.test(m) || NEGATED_ACTION.test(m);
+}
+// Answering an email in the person's inbox ("reply to the email from Globex", "answer Dana's email and say Tuesday works"): the
+// brain finds it (find_email) and drafts the reply (draft_email_reply); only the person's yes to that exact card sends it.
+// Exact payloads and code's own sessions stay code's (PAYLOAD_INTENTS, a mock); a follow-up to an application stays the
+// follow-up card's (career_inbox_followups.ts claims "send the follow-up to X" before the router).
+const EMAIL_REPLY = /\b(?:reply|respond|answer|write\s+back|get\s+back)\b[^?.!]{0,30}\b(?:to\s+)?(?:the|this|that|their|his|her|an?|[\p{Lu}][\p{L}'-]+(?:'s)?)?\s*(?:e-?mails?|mail|message|inbox)\b|\b(?:e-?mail|message)\s+from\s+\S+[^?.!]{0,40}\b(?:reply|respond|answer)\b/iu;
+export function emailReplyAsk(env: Env, message: string, intent: string | null): boolean {
+  if (!intent || PAYLOAD_INTENTS.has(intent) || /^(?:prep_mock|negotiation_roleplay|career_apply_email|career_followup|conversation_bare_reply|conversation_hold|intent_cancelled)/.test(intent) || !releaseFlagOn(env, "CAREER_MAIL_TRACKING")) return false;
+  return EMAIL_REPLY.test(String(message ?? "").replace(/[’`]/g, "'"));
 }

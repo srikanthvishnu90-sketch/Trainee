@@ -329,7 +329,7 @@
       const doorstep = { family: "application", driven_by: "agent", gap, state: "AWAITING_COMMIT", committed: false, step_log: stepLog, payload, payload_sha256: hash, proof: { step_log: stepLog, payload_snapshot: payload, payload_sha256: hash } };
       return {
         intent: "captcha_handoff", family: "access", resultStatus: "awaiting_user", sends: 0, submits: 0, artifact: payload, payload, doorstep,
-        reply: "A CAPTCHA is a step only you can do: I hand you the tap on the real page, you finish that one step, and the run resumes right where it stopped. No solver services are used, ever — that is a hard rule, not a preference. No stop is recorded for this session yet, so no ticket exists to hand you — the moment a run actually stops on one, the ticket is minted and the link is yours. Next step — tap the handoff link when it appears and the application continues from the exact field it stopped on.",
+        reply: "I won't solve a CAPTCHA, and no solver service is used. It is a step only you can do: I hand you the tap on the real page, you finish that one step, and the run resumes right where it stopped. That is a hard rule, not a preference. No stop is recorded for this session yet, so no ticket exists to hand you — the moment a run actually stops on one, the ticket is minted and the link is yours. Next step — tap the handoff link when it appears and the application continues from the exact field it stopped on.",
       };
     }
     const ACCESS_VOCAB = new Set(["connect", "disconnect", "gmail", "google", "calendar", "linkedin", "handshake", "export", "upload", "accounts", "account", "consent", "password", "portal", "access", "audit", "actions", "login", "browser", "source", "session", "event", "email"]);
@@ -1436,6 +1436,27 @@ const CareerProfile = (() => {
   const DEGREE_ANY = /\b(?:bachelor|master|associate|doctor|degree|diploma|ph\.?\s?d|mba|bba|b\.?sc|m\.?sc)\b|\b[bm]\.\s?[as]\./i;
   const DEGREE_LINE = /^(?:(?:bachelor|master|associate|doctor|b\.?sc|m\.?sc|ph\.?\s?d|mba|bba)\b|(?:[bm]\.?\s?[as]\.?|[bm]\.?\s?b\.?\s?a\.?)(?=\s|,|$))/i;
   function parseResumeText(text) { return parseResumeSections(text).drafts; }
+  const HEAD_SCHOOL = /\b(?:university|college|institute of technology|polytechnic|academy|school of [a-z]+|[a-z]+ school)\b/i;
+  const HEAD_DEGREE = /\b(?:[Bb]achelor|[Mm]aster|[Aa]ssociate|[Dd]octor|[Dd]egree|[Dd]iploma|[Pp]h\.?\s?[Dd]|MBA|BBA|B\.Sc|M\.Sc|B\.Eng|M\.Eng)\b|\b[BbMm]\.\s?[AaSs]\.|\b(?:BS|BA|BSc|BSE|BBA|MS|MA|MSc|MEng|BEng|AB|SB)\b/;
+  const HEAD_MONTH = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|spring|summer|fall|autumn|winter)";
+  const HEAD_DATE = new RegExp(String.raw`\b(?:(expected|anticipated|graduating|graduation|grad\.?|class of)\s*:?\s*)?((?:${HEAD_MONTH}\.?\s+)?(?:19|20)\d{2})\b`, "i");
+  const HEAD_GPA = /[,;.|]?\s*\(?\b(?:cumulative\s+|overall\s+)?gpa\s*:?\s*([0-4]\.\d{1,2})(?:\s*\/\s*4(?:\.0+)?)?\)?|[,;.|]?\s*\b([0-4]\.\d{1,2})(?:\s*\/\s*4(?:\.0+)?)?\s+gpa\b/i;
+  function headerEducation(line) {
+    const raw = String(line || "").trim();
+    if (!raw || raw.length > 220 || /@|https?:|www\.|\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}/.test(raw) || !HEAD_SCHOOL.test(raw)) return null;
+    const date = raw.match(HEAD_DATE);
+    if (!HEAD_DEGREE.test(raw) && !(date && date[1])) return null;
+    const g = raw.match(HEAD_GPA);
+    const title = (g ? raw.replace(g[0], "") : raw).replace(/\s{2,}/g, " ").replace(/[\s,;|.]+$/, "").trim();
+    const parts = title.split(/\s*[,|–—]\s*|\s+-\s+/).map((x) => x.trim()).filter(Boolean);
+    const school = parts.find((x) => HEAD_SCHOOL.test(x)) || null;
+    const degree = parts.find((x) => x !== school && HEAD_DEGREE.test(x)) || null;
+    const d = title.match(HEAD_DATE);
+    const out = [{ kind: "education", title, text: title, bullets: [], school, degree, end: d ? d[2] : null, expected: !!(d && d[1] && /expect|anticipat|graduating/i.test(d[1])), source: "resume-ingest", needs_confirmation: true, status: "draft" }];
+    const gpa = g ? (g[1] || g[2]) : null;
+    if (gpa) out.push({ kind: "other", section: "gpa", name: "GPA", title: `GPA ${gpa}`, text: `GPA: ${gpa}`, gpa, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
+    return out;
+  }
   function parseResumeSections(text) {
     const markerKeys = [...Object.keys(SECTION_KIND), "summary", "objective"].sort((a, b) => b.length - a.length).map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
     const markerRe = new RegExp(`(^|[.!?]\\s+|\\s)(${markerKeys.join("|")})\\s*:`, "gi");
@@ -1463,7 +1484,7 @@ const CareerProfile = (() => {
       }
     }
     const drafts = [], unread = [];
-    let section = null, current = null, lastWasMore = false, leadDate = null;
+    let section = null, current = null, lastWasMore = false, leadDate = null, seenHeading = false;
     const flush = () => {
       if (current) { drafts.push(current); current = null; }
       if (leadDate) { drafts.push({ kind: section || "experience", title: leadDate, text: leadDate, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" }); leadDate = null; }
@@ -1476,6 +1497,7 @@ const CareerProfile = (() => {
       if (aiDirected(line)) { if (!unread.includes(AI_DIRECTED_LABEL)) unread.push(AI_DIRECTED_LABEL); continue; }
       const head = sectionOf(line);
       if (head) {
+        seenHeading = true;
         flush();
         lastWasMore = false;
         if (head.skip && /^(?:(?:personal |other )?interests|hobbies(?: (?:&|and) interests)?|interests (?:&|and) hobbies)$/i.test(head.label.trim())) section = "interest";
@@ -1494,7 +1516,11 @@ const CareerProfile = (() => {
         }
         continue;
       }
-      if (!section) continue;
+      if (!section) {
+        const edu = !seenHeading ? headerEducation(line) : null;
+        if (edu) drafts.push(...edu);
+        continue;
+      }
       if (section === "interest") {
         for (const name of line.replace(/^[-•*]\s*/, "").split(/[,;•|·]/).map((x) => x.trim()).filter(Boolean)) {
           drafts.push({ kind: "other", section: "interests", name, title: name, text: `Interest: ${name}`, bullets: [], source: "resume-ingest", needs_confirmation: true, status: "draft" });
@@ -13740,6 +13766,28 @@ const CareerRouter = (() => {
   const employerKey = (x) => lc(s(x)).normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/['’]/g, "").replace(/[^a-z0-9]+/g, " ")
     .replace(/\b(?:inc|llc|ltd|co|corp|corporation|company|the|plc|gmbh|sa)\b/g, " ").replace(/\s+/g, " ").trim();
   function sameEmployer(a, b) { const x = employerKey(a), y = employerKey(b); return !!x && x === y; }
+  function oneSlip(a, b, min = 4) {
+    if (a === b) return true;
+    if (a.length < min || b.length < min || Math.abs(a.length - b.length) > 1) return false;
+    const d = [];
+    for (let i = 0; i <= a.length; i++) { d[i] = [i]; for (let j = 1; j <= b.length; j++) d[i][j] = i ? 0 : j; }
+    for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) {
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+    }
+    return d[a.length][b.length] <= 1;
+  }
+  const NOT_A_SLIP = new Set(["remove", "removed", "poster", "posters", "dates", "date", "dais", "week's"]);
+  const slipWords = (text) => lc(text).split(/[^a-z]+/).filter((w) => w && !NOT_A_SLIP.has(w));
+  const saidWord = (words, target) => words.some((w) => oneSlip(w, target));
+  function statedSearchLimits(text) {
+    const w = slipWords(text), t = lc(text), out = [];
+    if (saidWord(w, "remote")) out.push(/(?:only|fully)/.test(t) || saidWord(w, "only") ? "remote only" : "remote");
+    if (saidWord(w, "hybrid")) out.push(saidWord(w, "onsite") || saidWord(w, "office") ? "hybrid, not fully onsite" : "hybrid");
+    else if (saidWord(w, "onsite") || saidWord(w, "office")) out.push(/no/.test(t) ? "no office days" : "onsite");
+    if (saidWord(w, "posted") || saidWord(w, "fresh") || saidWord(w, "recent") || saidWord(w, "recently") || /(?:last|past)\s+(?:\w+\s+)?(?:week|days?|dyas|dayss)/.test(t)) out.push("posted recently");
+    return out;
+  }
   function emptySearchScope(lp, o, namedRole) {
     const internship = (o && o.intent) === "career_internship_discovery";
     const roleText = s(lp && lp.roleText).trim();
@@ -13760,7 +13808,8 @@ const CareerRouter = (() => {
     const ranked = o.employer ? shortlisted.ranked.filter((r) => sameEmployer(r.company || (r.posting && r.posting.company), o.employer)) : shortlisted.ranked;
     try {
       const prevP = (ctx.discovery && ctx.discovery.lastParams) || null;
-      const cleanedAsk = s(text).replace(/^\s*(wait|actually|ok|okay|so|eh|and)[ ,]+/i, "").replace(/^.*?\bi meant\s+/i, "").replace(/^(find|show|get|give|search|list)(\s+me)?\s+/i, "");
+      const cleanedAsk = s(text).replace(/^\s*(wait|actually|ok|okay|so|eh|and)[ ,]+/i, "").replace(/^.*?\bi meant\s+/i, "")
+        .replace(/^([a-z]+)(\s+up)?(\s+me)?\s+/i, (m, v) => ["find", "show", "get", "give", "search", "list", "look"].some((x) => oneSlip(v.toLowerCase(), x, 3)) ? "" : m);
       const roleM = cleanedAsk.match(/([A-Za-z][A-Za-z /&-]{2,34}?)\s+(roles|internships|jobs|openings)\b/);
       const whereM = s(text).match(/\bin\s+([A-Z][A-Za-z]+(?:\s[A-Z][A-Za-z]+){0,2}|NYC|SF|LA)\b/) || s(text).match(/\b(NYC|New York|Chicago|Boston|San Francisco|Los Angeles|Houston|Dallas|London|Illinois|Midwest)\b/);
       ctx.discovery = Object.assign({}, ctx.discovery || {}, { lastParams: {
@@ -13792,7 +13841,9 @@ const CareerRouter = (() => {
       const lp = (ctx.discovery && ctx.discovery.lastParams) || {};
       const namedRole = !o.headline && lp.ask === s(text).slice(0, 200) && (!!s(lp.whereText) && /\bin\s+[A-Z]/.test(s(text)) || /\b(?:analyst|engineer|developer|designer|scientist|coordinator|manager|intern|associate|consultant|marketing|product|data|finance|financial|software|ux|operations|sales|nurse|teacher)\b/i.test(s(lp.roleText)));
       const scope = emptySearchScope(lp, o, namedRole);
-      const facts = [scope ? "The postings I have on hand right now hold none, and I won't make any up." : namedRole ? "I won't make any up." : "I don't have open roles on my list right now, and I won't make any up."];
+      const facts = [scope ? "I checked the postings I have on hand and found no open roles for that (career sites outside them were not checked), and I won't make any up."   : namedRole ? "I won't make any up." : "I have no open roles on my list right now, and I won't make any up."];
+      const kept = statedSearchLimits(text);
+      if (kept.length) facts.push(`I kept your limits: ${kept.join("; ")}.`);
       if (fams && fams.length) facts.push(`I've kept your ask (${fams.map(familyLabel).join(" + ")}) and will run it as soon as matching roles come in.`);
       const newPerson = !(profile && (profile.facts || []).length);
       const widen = scope && lp.whereText && !lp.remoteOnly ? `Want me to look beyond ${lp.whereText}, remote roles included?` : null;
@@ -14840,7 +14891,7 @@ const CareerRouter = (() => {
     if (!art && /\bpacket\b/.test(t) && !/\b(resume|cv|cover letter|pdf|docx)\b/.test(t)) {
       const reply = compose({
         headline: "There's no application packet in this chat yet.",
-        facts: ["Pick a role and I'll prepare one for you to review: the job and the resume for it. Nothing is submitted until you approve it."],
+        facts: ["Pick a role and I'll prepare one for you to review. Nothing is submitted until you approve it."],
         nextStep: "Which role should it be for?",
       });
       return { intent: "career_packet_absent", reply, resultStatus: "awaiting_user", sends: 0, documents: [] };
@@ -15827,6 +15878,10 @@ const CareerRouter = (() => {
           headline: "To stop messages: text \"stop\" — I pause, send no alerts and start nothing new until you text \"resume career work\".",
           facts: ["To delete your data: say \"yes, erase it\" and I remove your saved career facts and profile, job watches and alerts, application tracker, and the plans and drafts I act on.", "Nothing is deleted until you send that exact yes."],
           nextStep: "Which would you like?" }) };
+      }
+      if (/\b(?:keep it (?:short|brief)|short (?:version|answer)|(?:in )?(?:one or two|one|two) (?:lines?|sentences?)|briefly|be brief|tl;?dr)\b/.test(t)) {
+        return { intent: "career_erase_confirm", resultStatus: "awaiting_user", reply: compose({ headline: "An erase removes your saved career facts and profile, job watches and alerts, application tracker, and the drafts and plans I act on.",
+          facts: [], nextStep: "Nothing is deleted until you say “yes, erase it”." }) };
       }
       return { intent: "career_erase_confirm", resultStatus: "awaiting_user", reply: compose({ headline: "Before anything is deleted — here is exactly what an erase removes.", facts: ["It goes: your saved career facts and profile, your job watches and alerts, your application tracker, and the standing plans, drafts and conversation state I act on.", "It does not rewrite the chat transcript or audit records — that text is excluded from your active context instead, the same line the product's own erase draws."], nextStep: "Say “yes, erase it” if that is what you want. Nothing is deleted until that yes — and a yes to anything else does not count." }) };
     }
@@ -16872,7 +16927,8 @@ const CareerRouter = (() => {
     const barePluralMass = /\b(applications|jobs|roles)\b/.test(t) && noReview && !/\?\s*$/.test(t) && !/^(did|have|has|do|does|were|was|are)\b/.test(t);
     const massObject = /\b(everything|every job|all jobs|all of them|every role|all roles)\b/.test(t) || /\b(\d{2,})\s*(jobs|applications|roles)\b/.test(t) || barePluralMass;
     const massCount = Number((t.match(/\b(\d{2,})\s*(jobs|applications|roles)\b/) || [])[1]) || 0;
-    const massApply = /\b(apply|submit|send in)\b/.test(t) && massObject && (noReview || massCount >= 50);
+    const applyAsked = /\b(apply|submit|send in)\b/.test(t.replace(/\b(?:don'?t|do not|never|not|no|nothing)\s+(?:\w+\s+){0,3}?(?:apply|submit|send in)\b[^.;:!?]*/g, " "));
+    const massApply = applyAsked && massObject && (noReview || massCount >= 50);
     const dismissal = /\b(nobody|no one)\s+(checks|verifies|verified|will (check|verify|verified|find out|know))\b|\bthey (never|don'?t)\s+(check|verify|verified)\b|\bnever (checked|verified)\b/.test(t);
     const dismissalFabricate = dismissal && /\b(add|put|write|include)\b/.test(t);
     if (!falseClaim && !blast && !fabricate && !unverifiedClaim && !massApply && !dismissalFabricate) return null;
@@ -17499,7 +17555,7 @@ const CareerRouter = (() => {
     } catch {   }
     const facts = ["Answer it the way you would in the room — out loud, structured, numbers before adjectives.", "I will score the answer against the rubric and drill the weakest part next; that loop is the prep."];
     if (cycled) facts.unshift("You have answered every question I have for this, so this one comes round again.");
-    const reply = compose({ headline: `Here is your question: ${q}`, facts, nextStep: "Give me your answer and I will score it." });
+    const reply = compose({ headline: `Here is your question: ${q}`, facts, nextStep: "What is your answer? I will score it." });
     return { intent: "prep_brief", reply, resultStatus: "running", sends: 0, question: { kind: "bank_question", q } };
   }
   function prepSectorOf(tn, raw, ctx) {
@@ -17705,11 +17761,12 @@ const CareerRouter = (() => {
     const isCase = sector === "consulting";
     const pickedBehavioral = /behavioural|behavioral/.test(lc((row.source && row.source.section) || row.round || "")) || (row.source && row.source.type === "generic_behavioral_bank") || row.round === "behavioral";
     const serveLabel = pickedBehavioral ? "Your behavioral question" : isCase ? "Your case" : `Your ${kindLabel}`;
-    return { intent: "prep_brief", reply: compose({ headline: explainTS ? "The three financial statements, walked through — statements, linkages, and the flow-through." : `${serveLabel}: ${qText}`, facts, nextStep: explainTS ? "Now say it back as your own answer — I will grade it against the drill key (fin-1)." : pickedBehavioral ? "Answer it the way you would in the room — situation, task, action, result — I will score it against the rubric and drill the weakest part next." : isCase ? "Work it out loud: clarify the objective, build the tree, state a hypothesis — I will push on the weakest branch." : "Answer it the way you would in the room, out loud and structured — I will score it against the rubric and drill the weakest part next." }), resultStatus: "running", sends: 0, question: { kind: "bank_question", q: qText, sector, bank_item: row.source || null } };
+    return { intent: "prep_brief", reply: compose({ headline: explainTS ? "The three financial statements, walked through — statements, linkages, and the flow-through." : `${serveLabel}: ${qText}`, facts: explainTS ? facts : [...facts, pickedBehavioral ? "Answer it the way you would in the room — situation, task, action, result — I will score it against the rubric and drill the weakest part next." : isCase ? "Work it out loud: clarify the objective, build the tree, state a hypothesis — I will push on the weakest branch." : "Answer it the way you would in the room, out loud and structured — I will score it against the rubric and drill the weakest part next."],
+      nextStep: explainTS ? "Now say it back as your own answer — I will grade it against the drill key (fin-1)." : pickedBehavioral ? "What is your answer?" : isCase ? "Where do you start?" : "What is your approach?" }), resultStatus: "running", sends: 0, question: { kind: "bank_question", q: qText, sector, bank_item: row.source || null } };
   }
   function handlePrepEve(text, ctx) {
     const t = lc(text);
-    if (!/\binterview\b/.test(t) || !/\b(tomorrow|tonight|nervous|anxious|can'?t sleep|cant sleep|scared|worried|freaking out)\b/.test(t)) return null;
+    if (!/\binterview\b/.test(t) || !/\b(tomorrow|tonight|can'?t sleep|cant sleep|freaking out)\b/.test(t) && !(/\b(nervous|anxious|scared|worried)\b/.test(t) && /\b(today|in the morning|in a few hours)\b/.test(t))) return null;
     const namedFirm = namedCompanyOf(text, ctx);
     const unknown = namedFirm ? null : (() => { const lt = letterTargetOf(text, ctx); return lt && !lt.cir ? lt.company : null; })();
     const firmCir = namedFirm && namedFirm.cir ? namedFirm.cir : null;
@@ -19172,7 +19229,7 @@ const CareerRouter = (() => {
         try { sum0 = Track && Track.statusSummary ? Track.statusSummary(store) : null; } catch { sum0 = null; }
         return emitTrack(ctx, { intent: "tracking_status", reply, resultStatus: "prepared", sends: 0, counts: { total: 0 } }, sum0 ? { summary: sum0 } : { summary: { total: 0 } });
       }
-      const reply = compose({ headline: "Your application tracker is empty — no applications on record yet.", facts: ["Once you apply through me, each one shows up here with where it stands. If you applied somewhere on your own, tell me and I'll add it."], nextStep: "Say \"find jobs\" and I'll start a search." });
+      const reply = compose({ headline: "No applications on record yet, per your application tracker; ones you sent on your own are not checked here.", facts: ["Once you apply through me, each one shows up here with where it stands. If you applied somewhere on your own, tell me and I'll add it."], nextStep: "Say \"find jobs\" and I'll start a search." });
       let sum = null;
       try { sum = Track && Track.statusSummary ? Track.statusSummary(store) : null; } catch { sum = null; }
       return emitTrack(ctx, { intent: "tracking_status", reply, resultStatus: "prepared", sends: 0, counts: { total: 0 } }, sum ? { summary: sum } : { summary: { total: 0 } });
@@ -22720,7 +22777,7 @@ const CareerRouter = (() => {
       if (tgt.company) { const mir = threadMirrorForWrite(ctx); if (mir) mir.namedApply = { company: tgt.company, role: tgt.role || null }; }
       const worker = ctx.workerCapabilities && ctx.workerCapabilities.portal_browser;
       const facts = [`I can apply only to a posting I have on file or one you paste. The ${tgt.role || "role"} posting at ${tgt.company || "that company"} is not on file, and I won't make one up.`];
-      { const L = getApplyLedger(); const f = L && L.submitFact(ctx); if (!f && worker && worker.status === "NOT_WIRED" && !ctx.liveSwitches) facts.push("The browser worker that executes applications is also not wired in this handler — even a listed role would stop at preparation here."); }
+      { const L = getApplyLedger(); const f = L && L.submitFact(ctx); if (!f && worker && worker.status === "NOT_WIRED" && !ctx.liveSwitches) facts.push("Here a listed role would also stop at preparation: I prepare it, and nothing is submitted from this chat."); }
       const reply = compose({ headline: `I can't apply to the ${tgt.role || "role"} at ${tgt.company || "that company"} yet — that posting is not in the list I can work from.`, facts, nextStep: "Paste the posting or its link and I will prepare the application from it in this turn." });
       return { intent: "named_role_apply", reply, resultStatus: "blocked", sends: 0 };
     }
@@ -24270,7 +24327,7 @@ const CareerRouter = (() => {
         const HEDGE = /\b(?:i think|i thought|i believe|i guess|i suppose|i assume|i reckon|idk|i dont know|i don'?t know|dunno|not sure|unsure|prob|probs|prolly|probably|tentative(?:ly)?|maybe|possibly|likely|roughly|around|approximately|about|ish|tbd|or so|or later|or earlier|or thereabouts|give or take)\b/i;
         const ALTERNATIVES = new RegExp(`\\b(?:${MON}\\s+)?20\\d\\d\\s*(?:\\bor\\b|/)\\s*(?:${MON}\\s+)?(?:20\\d\\d|later|earlier|after|before)|\\b${MON}\\s*(?:\\bor\\b|/)\\s*${MON}\\b|\\b(?:or|/)\\s*${MON}(?:\\s+'?\\d\\d(?:\\d\\d)?)?\\b`, "i");
         const definiteSentence = (x) => !/\b(?:not|never|no longer|don'?t|dont|doesn'?t|won'?t|wont|didn'?t|can'?t|cant|isn'?t|aren'?t)\b|n't\b/i.test(x) && !/\b(?:if|unless|might|could|would|maybe|perhaps|probably|hope|hoping|hopefully|ideally|assuming|supposedly|wish|plan(?:ning)? to|trying to|supposed to|should)\b/i.test(x) && !HEDGE.test(x) && !ALTERNATIVES.test(x);
-        const CONTRAST = new RegExp(`,?\\s*(?:and\\s+)?(?:not|instead of|rather than)\\s+(?:in\\s+|on\\s+)?(?:${MON}\\s+)?20\\d\\d\\b`, "gi");
+        const CONTRAST = new RegExp(`,?\\s*(?:and\\s+)?(?:not|instead of|rather than)\\s+(?:in\\s+|on\\s+)?(?:(?:${MON})(?:\\s+20\\d\\d)?|20\\d\\d)\\b`, "gi");
         const wholeDefinite = definiteSentence(u.replace(CONTRAST, "").replace(/[.!?;:\n\u2014\u2013-]+/g, " "));
         const definite = (x) => wholeDefinite && definiteSentence(x);
         let m2;
@@ -24554,6 +24611,8 @@ const CareerRouter = (() => {
     if (!/\bwhat did you change\b|\bshow me (exactly )?what you changed\b|\bwhat (exactly )?changed\b|\bwhat'?s different\b|\bthe diff\b|\bshow (me )?the changes\b|\bwhat did you (add|remove|drop|keep)\b/.test(t)) return null;
     let rec = null;
     try { const m = threadMirrorOf(ctx); rec = m && m.tailor ? m.tailor : null; } catch { rec = null; }
+    const lastSearch = ctx.discovery && ctx.discovery.lastParams;
+    if ((!rec || !rec.diff) && lastSearch && !/\b(resume|cv|cover letter|bullets?|tailor\w*)\b/.test(t)) return null;
     if (!rec || !rec.diff) {
       const reply = compose({ headline: "No tailoring has run in this conversation yet, so there is no change list to show.", facts: ["The moment a resume is tailored here, the exact additions, removals and moves — each with its reason — are kept on this thread, and I can walk every one."], nextStep: "Name the role (or paste the posting) and I will tailor first, then show every change." });
       return { intent: "career_tailor_diff", reply, resultStatus: "awaiting_user", sends: 0 };
@@ -30379,7 +30438,7 @@ const CareerApplyLedger = (() => {
       return { kind: "change_after_approval", attachment: /\battach(?:ment|ed)?\b|\bresume file\b/.test(t), email: /\be-?mail\b/.test(t) };
     }
     if (/\b(?:portal|site|website|employer|application|form|page|workday|greenhouse|lever|ashby|taleo|icims|smartrecruiters|ats)\b[^.?]*\b(?:requires?|required|needs?|asks? (?:for|me (?:to|for))|asking (?:for|me to)|wants?|makes? me|forces? me to|won'?t let me)\b[^.?]*\b(?:an? |my |another |their |its )?(?:accounts?|account'?s|sign[- ]?in|log[- ]?in|login|register|registration|sign[- ]?up|passwords?|username)\b/.test(t)
-      || /\b(?:do i|should i|will you|can you)\s+(?:need to\s+)?(?:create|make|open|register)\s+(?:an? )?account\b/.test(t)) return { kind: "portal_account", password: /\bpassword/.test(t) };
+      || /\b(?:do i|should i|will you|can you)\s+(?:need to\s+)?(?:create|make|open|register)\s+(?:an? )?account\b/.test(t)) return { kind: "portal_account", password: /\bpassword/.test(t), short: SHORT_ANSWER_RE.test(t) };
     if (/\b(?:distinguish|tell apart|tell the difference|difference between|differ|separate|keep apart)\b/.test(t) && /\b(?:prepared|submitted|approved|sent)\b/.test(t)) return { kind: "prepared_vs_submitted" };
     if (/\bprepared\b[^.?]*\b(?:vs\.?|versus|or|and|from)\b[^.?]*\b(?:submitted|sent)\b/.test(t)) return { kind: "prepared_vs_submitted" };
     if (/^(?:so |and |ok |okay |but )?(?:was|were|did|has|have|is)\b[^.?]{0,60}\b(?:the|my|that|this|it|any|those|these)?\s*(?:application|applications|apps?|it|that one|they|them)?\b[^.?]{0,30}\b(?:actually|really|truly|definitely|for real)\b[^.?]{0,20}\b(?:submitted|sent|go(?:ne)? through|get (?:sent|submitted)|been (?:sent|submitted)|land(?:ed)?)\b/.test(t)
@@ -30412,6 +30471,7 @@ const CareerApplyLedger = (() => {
     return n ? `text "show my applications" to open the card, then reply "only ${n}" (or "only" and the number the card shows for it)`
       : "text \"show my applications\" to open the card, then reply \"only\" and the number the card shows for it";
   }
+  const SHORT_ANSWER_RE = /\b(?:keep it (?:short|brief)|short (?:version|answer)|(?:in )?(?:one or two|one|two) (?:lines?|sentences?)|briefly|be brief|tl;?dr)\b/;
   function answer(ask, ctx, trackRows) {
     const led = ledgerOf(ctx, trackRows);
     const facts = [];
@@ -30462,11 +30522,14 @@ const CareerApplyLedger = (() => {
         return out("career_answer_change_after_approval", "Changing anything after you approve cancels that approval; nothing changed is sent on the old yes.", live.length ? "Which answer should change, and to what?" : "Want to change an answer on an application?");
       }
       case "portal_account": {
-        push("I never create an account or sign in for you, and I never take a password in this chat.");
-        push("When an employer's site needs an account, that application stops at that step and comes back to you with its link; you sign in or create the account yourself, on their page.");
+        if (ask.short) push("I never sign in, create an account or take a password for you; a site that needs one stops that application and sends you its link.");
+        else {
+          push("I never create an account or sign in for you, and I never take a password in this chat.");
+          push("When an employer's site needs an account, that application stops at that step and comes back to you with its link; you sign in or create the account yourself, on their page.");
+        }
         const stopped = led.entries.filter((e) => e.state === "needs_you" && /login|sign|account/i.test(s(e.reason)));
         if (stopped.length) push(`Waiting on a sign-in now: ${stopped.map(nameOf).join("; ")}.`);
-        if (ask.password) push("If a site asks for another account's password, don't type it anywhere I can see it; that sign-in is yours alone.");
+        if (ask.password && !ask.short) push("If a site asks for another account's password, don't type it anywhere I can see it; that sign-in is yours alone.");
         return out("career_portal_account", "An employer account is yours to sign in to; I hand that step to you.", stopped.length ? "Open its link to sign in, then tell me when you're done?" : "Want me to keep going with the applications that don't need an account?");
       }
       case "prepared_vs_submitted": {

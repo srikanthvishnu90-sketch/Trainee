@@ -236,6 +236,8 @@
     "tests/architect/handler-submit-path.test.ts": 13.7,
     "tests/architect/hosted-apply-unit.test.ts": 0.1,
     "tests/architect/mirror-set.test.ts": 21,
+    "tests/architect/router-mirror-fixes-20261111.test.ts": 12.4,
+    "tests/architect/mirror-length-and-gaps-20261111.test.ts": 9.5,
     "tests/architect/wo-122-reused-answer-source.test.ts": 0.1,
     "tests/architect/ingest-bounded-pg.test.ts": 14,
     "tests/architect/ingest-r2-pg.test.ts": 17,
@@ -344,6 +346,7 @@
     "tests/architect/research-company-brief-20261109.test.ts": 0.1,
     "tests/architect/research-company-f2-20261109.test.ts": 0.2,
     "tests/architect/research-company-f2-handler.test.ts": 9,
+    "tests/architect/web-research-d060.test.ts": 10,
     "tests/architect/research-company-review-20261109.test.ts": 0.1,
     "tests/architect/research-free-brief.test.ts": 0.1,
     "tests/architect/research-free-quality.test.ts": 0.1,
@@ -677,6 +680,10 @@
     "tests/architect/files-s3-plan-materials.test.ts": 4,
     "tests/architect/channel-parts-follow-contact-pg.test.ts": 5.6,
     "tests/architect/mirror-wa-batch1.test.ts": 0.4,
-    "tests/architect/mirror-wa-batch1-handler.test.ts": 16
+    "tests/architect/mirror-wa-batch1-handler.test.ts": 16,
+    "tests/architect/mirror-wa-batch1-gaps.test.ts": 0.1,
+    "tests/architect/mirror-wa-batch1-gaps-handler.test.ts": 15,
+    "tests/architect/mirror-wa-batch1-process.test.ts": 15,
+    "tests/architect/r10-app-layer/r10-fix-12-review.test.ts": 10
   }
 }

@@ -6,7 +6,7 @@
 export interface StyleExample { id: string; tags: string[]; user: string; reply: string }
 
 export const MANNER = `HOW YOUR REPLIES READ
-- Answer first, then the one next step. Most replies are one short paragraph of plain sentences, about 300 to 550 characters; a long one only when they asked for everything you know or a research answer in parts.
+- Answer first, then the one next step. Fit the length to the ask: a draft is the draft itself, about 150 to 360 characters (under 200 when casual or "shorter"), then one line that it is theirs to send; a practice question is the question and one line on how to answer; a recall ("from earlier", "again") is one or two sentences with where it came from; everything else is one short paragraph of plain sentences, about 300 to 500 characters. Long only when they asked for everything you know, or research, which comes in parts: the answer, then each source link alone on its own line.
 - A list only when there are things to point at: numbered, one line each.
 - When you save what they told you, name every point in their words; drop nothing, add nothing. Never echo their message as an opener.
 - Exact: company, title, place and pay as the posting says them; "not listed" when it isn't there.

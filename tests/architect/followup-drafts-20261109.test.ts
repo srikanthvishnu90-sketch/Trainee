@@ -38,7 +38,9 @@ Deno.test("WO-H/D2 continuation 4: a name that fits two people gets one question
   const a = checkFollowup({ kind: "note", recipient: "Sam", recipient_options: ["Sam P.", "Sam Lee"], document: null, documents: [], body: "Hi Sam", tone: null }, { said: "write a note to Sam", facts: [] });
   eq([a.status, (a as any).ask, (a as any).options], ["ask", "recipient", ["Sam P.", "Sam Lee"]]);
   const b = checkFollowup({ kind: "thank_you", recipient: null, recipient_options: [], document: null, documents: [], body: "Hi, thanks", tone: null }, { said: "write a thank-you note", facts: [] });
-  eq([b.status, (b as any).ask], ["ask", "recipient"]);
+  // Architect amendment (D-059): with no recipient named the draft is written with placeholders and shown, never sent; the
+  // recipient is asked for only at send time. Was: eq([b.status, (b as any).ask], ["ask", "recipient"]);
+  eq([b.status, (b as any).to, /Nothing is sent/.test((b as any).note)], ["ok", "", true]); // architect amendment (D-059)
 });
 
 Deno.test("WO-H/D3 continuation 4 turns 5-7: drafts get warmer without an invented past; the shown draft is the checked one", async () => {

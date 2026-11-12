@@ -425,7 +425,7 @@
       const doorstep = { family: "application", driven_by: "agent", gap, state: "AWAITING_COMMIT", committed: false, step_log: stepLog, payload, payload_sha256: hash, proof: { step_log: stepLog, payload_snapshot: payload, payload_sha256: hash } };
       return {
         intent: "captcha_handoff", family: "access", resultStatus: "awaiting_user", sends: 0, submits: 0, artifact: payload, payload, doorstep,
-        reply: "A CAPTCHA is a step only you can do: I hand you the tap on the real page, you finish that one step, and the run resumes right where it stopped. No solver services are used, ever — that is a hard rule, not a preference. No stop is recorded for this session yet, so no ticket exists to hand you — the moment a run actually stops on one, the ticket is minted and the link is yours. Next step — tap the handoff link when it appears and the application continues from the exact field it stopped on.",
+        reply: "I won't solve a CAPTCHA, and no solver service is used. It is a step only you can do: I hand you the tap on the real page, you finish that one step, and the run resumes right where it stopped. That is a hard rule, not a preference. No stop is recorded for this session yet, so no ticket exists to hand you — the moment a run actually stops on one, the ticket is minted and the link is yours. Next step — tap the handoff link when it appears and the application continues from the exact field it stopped on.",
       };
     }
     // Routing robustness (wedge paraphrase battery): repair a token only

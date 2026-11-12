@@ -35,7 +35,8 @@ export const TO_CODE: string[] = [
   "find me data analyst jobs in Chicago",
   "watch data analyst roles in Chicago for me and alert me when new ones post",
   "apply to the Backend Software Engineer role at Ironstack Payments",
-  "mock me for a data analyst interview at Northwind Ledger",
+  // Architect amendment (D-061): G1 gives starting a practice session to the brain, which runs it like an interviewer (G12); the
+  // answers inside a session code is running stay code's (f13 still holds every action, control and payload here as code's).
   "I applied to the Operations Analyst role at Cascade Retail Group today",
   "introduce me to an alum working at Bluepeak Networks",
   "show me job links",
@@ -76,6 +77,8 @@ Deno.test("F13-4 staged: every action stays code's; host controls and structured
     const d = decide(m);
     eq(d.brain, false, `${m}: ${d.reason} ${d.intent}`);
   }
+  // Architect amendment (D-061): a practice-session start is the brain's (G1, G12); nothing in it sends or saves.
+  eq(decide("mock me for a data analyst interview at Northwind Ledger").reason, "g1_model_decides");
   eq(decide("STOP").reason, "host_control");
   eq(decide("how should I follow up after an interview?", STAGED, true).reason, "structured_request");
   // A sourced record behind the answer keeps it the router's (a company file, a benchmark with figures, an offer).

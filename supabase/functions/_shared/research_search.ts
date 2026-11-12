@@ -24,7 +24,7 @@ async function cappedJson(r: Response): Promise<any> {
 
 type Env = { get(k: string): string | undefined };
 // R9 free sources (2026-11-08): research_free_sources.ts freeProvider proposes the other free kinds.
-export interface SearchHit { url: string; title: string; provider: "brave" | "sec_edgar" | "bls_oes" | "company_site" | "sec_fts" | "bls_ooh" | "usajobs" | "ats_board" | "wikipedia" | "wikidata" | "github" | "news_rss"; foundAt: number }
+export interface SearchHit { url: string; title: string; provider: "brave" | "sec_edgar" | "bls_oes" | "company_site" | "sec_fts" | "bls_ooh" | "usajobs" | "ats_board" | "wikipedia" | "wikidata" | "github" | "news_rss" | "claude_web"; foundAt: number }
 // What the turn knows to look for. Free-text queries go to a search engine; the hints go to first-party sources.
 export interface SearchPlan {
   queries: string[]; // at most 3
@@ -36,8 +36,10 @@ export interface SearchPlan {
 // gaps: what a free source could not supply, in plain words for the brief ("SEC EDGAR has no 10-K for Ramp"), D-007.
 // basis: how a free source was chosen when the turn did not say ("Pay figures use BLS occupation 15-1252 ..."), shown on the brief.
 // sites: the company's official site(s) a free source found when the turn named none (Wikidata P856, a board's posting host).
-export type SearchOut = { hits: SearchHit[]; notes: string[]; provider: string; searches: number; gaps?: string[]; basis?: string[]; sites?: string[] };
-export interface SearchProvider { id: "brave" | "first_party"; needsKey: boolean; search(plan: SearchPlan): Promise<SearchOut> }
+// passages (D-060, research_web.ts): what Claude's web search quoted word for word, by page; cost_usd: what that search cost.
+export type SearchOut = { hits: SearchHit[]; notes: string[]; provider: string; searches: number; gaps?: string[]; basis?: string[]; sites?: string[];
+  passages?: { url: string; title: string; text: string; page_age: string | null }[]; cost_usd?: number | null };
+export interface SearchProvider { id: "brave" | "first_party" | "claude_web"; needsKey: boolean; search(plan: SearchPlan): Promise<SearchOut> }
 
 export const BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search";
 const MAX_QUERIES = 3, MAX_HITS = 8;

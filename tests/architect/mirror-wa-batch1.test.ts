@@ -117,8 +117,10 @@ Deno.test("WA1-8 a mock start that names its question asks that question (the br
   const C21 = "ok behavioral round: ask me 'tell me about a time you failed' and then roast my answer";
   const d = decide(C21);
   ok(d.brain, `${d.intent}/${d.reason}`);
+  // Architect amendment (D-061): G1 gives a practice-session start to the brain (G12, one question at a time); the session's own
+  // answers stay code's (WA1-6). Nothing in either sends or saves.
   const plain = decide("mock interview me for a data analyst role");
-  eq(plain.brain, false, `${plain.intent}/${plain.reason}`);
+  eq(plain.brain, true, `${plain.intent}/${plain.reason}`);
 });
 
 Deno.test("WA1-9 a long text is condensed once, under code's guards", async () => {
@@ -140,4 +142,12 @@ Deno.test("WA1-9 a long text is condensed once, under code's guards", async () =
   eq(await condenseReply(model as any, long, REPLY_TARGET.short), "Start with PayPal and Pinterest; the posting lists $28-$49/hour. Nothing was sent. Want the plan?");
   const bad = async () => ({ content: [{ type: "text", text: "Pay is $99/hour." }] });
   eq(await condenseReply(bad as any, long, REPLY_TARGET.short), null, "a failed guard keeps the long reply");
+});
+
+Deno.test("WA1-10 a turn whose tools wrote anything is never condensed", async () => {
+  const { condensable, REPLY_TARGET } = await import("../../supabase/functions/agent-chat/career_brain.ts");
+  const long = "Hi Elena, I'm reaching out about the data scientist role. ".repeat(20);
+  ok(condensable({ reply: long, pending_approvals: [], tool_calls: [{ name: "search_jobs", ok: true, effect: null }] } as any, REPLY_TARGET.short), "a read-only turn is condensed");
+  ok(!condensable({ reply: long, pending_approvals: [], tool_calls: [{ name: "draft_outreach", ok: true, effect: null }] } as any, REPLY_TARGET.short), "a draft tool");
+  ok(!condensable({ reply: long, pending_approvals: [], tool_calls: [{ name: "add_profile_fact", ok: true, effect: { kind: "write" } }] } as any, REPLY_TARGET.short), "a write");
 });

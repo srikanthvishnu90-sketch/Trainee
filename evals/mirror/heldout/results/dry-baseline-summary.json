@@ -1,0 +1,570 @@
+{
+ "dev": {
+  "split": "dev",
+  "conversations": 50,
+  "turns": 149,
+  "code_turns": 50,
+  "brain_turns": 99,
+  "nothing_sent": 149,
+  "g1_strict": 99,
+  "wrong_task": 17,
+  "rulings": {
+   "G1": {
+    "exercised": 149,
+    "pass": 110,
+    "fail": 39,
+    "model": 0,
+    "rate": 0.738
+   },
+   "G2": {
+    "exercised": 149,
+    "pass": 49,
+    "fail": 1,
+    "model": 99,
+    "rate": 0.98
+   },
+   "G3": {
+    "exercised": 111,
+    "pass": 11,
+    "fail": 16,
+    "model": 84,
+    "rate": 0.407
+   },
+   "G4": {
+    "exercised": 65,
+    "pass": 19,
+    "fail": 4,
+    "model": 42,
+    "rate": 0.826
+   },
+   "G5": {
+    "exercised": 51,
+    "pass": 0,
+    "fail": 22,
+    "model": 29,
+    "rate": 0
+   },
+   "G6": {
+    "exercised": 51,
+    "pass": 27,
+    "fail": 24,
+    "model": 0,
+    "rate": 0.529
+   },
+   "G7": {
+    "exercised": 15,
+    "pass": 4,
+    "fail": 0,
+    "model": 11,
+    "rate": 1
+   },
+   "G8": {
+    "exercised": 18,
+    "pass": 12,
+    "fail": 6,
+    "model": 0,
+    "rate": 0.667
+   },
+   "G9": {
+    "exercised": 2,
+    "pass": 0,
+    "fail": 2,
+    "model": 0,
+    "rate": 0
+   },
+   "G10": {
+    "exercised": 51,
+    "pass": 19,
+    "fail": 1,
+    "model": 31,
+    "rate": 0.95
+   },
+   "G11": {
+    "exercised": 22,
+    "pass": 7,
+    "fail": 15,
+    "model": 0,
+    "rate": 0.318
+   },
+   "G12": {
+    "exercised": 26,
+    "pass": 8,
+    "fail": 0,
+    "model": 18,
+    "rate": 1
+   },
+   "G13": {
+    "exercised": 5,
+    "pass": 0,
+    "fail": 2,
+    "model": 3,
+    "rate": 0
+   },
+   "G14": {
+    "exercised": 49,
+    "pass": 30,
+    "fail": 9,
+    "model": 10,
+    "rate": 0.769
+   }
+  },
+  "families": {
+   "paraphrase": {
+    "turns": 18,
+    "g1": 16,
+    "fails": 2
+   },
+   "persona_swap": {
+    "turns": 21,
+    "g1": 18,
+    "fails": 5
+   },
+   "reorder": {
+    "turns": 9,
+    "g1": 7,
+    "fails": 4
+   },
+   "long_gap": {
+    "turns": 12,
+    "g1": 9,
+    "fails": 5
+   },
+   "typos": {
+    "turns": 14,
+    "g1": 9,
+    "fails": 8
+   },
+   "language": {
+    "turns": 9,
+    "g1": 9,
+    "fails": 2
+   },
+   "multi_ask": {
+    "turns": 9,
+    "g1": 8,
+    "fails": 5
+   },
+   "hypothetical": {
+    "turns": 10,
+    "g1": 9,
+    "fails": 4
+   },
+   "boundary": {
+    "turns": 15,
+    "g1": 9,
+    "fails": 6
+   },
+   "file_ask": {
+    "turns": 12,
+    "g1": 6,
+    "fails": 10
+   },
+   "practice": {
+    "turns": 11,
+    "g1": 6,
+    "fails": 5
+   },
+   "correction": {
+    "turns": 5,
+    "g1": 2,
+    "fails": 4
+   },
+   "capability": {
+    "turns": 4,
+    "g1": 2,
+    "fails": 2
+   }
+  },
+  "worst": [
+   {
+    "kind": "search",
+    "intent": "career_discovery",
+    "rulings": "G6,G5",
+    "n": 5,
+    "example": "HO-0153.t3"
+   },
+   {
+    "kind": "practice_question",
+    "intent": "prep_brief",
+    "rulings": "G1",
+    "n": 4,
+    "example": "HO-0122.t2"
+   },
+   {
+    "kind": "file",
+    "intent": "agent",
+    "rulings": "G11",
+    "n": 4,
+    "example": "HO-0762.t1"
+   },
+   {
+    "kind": "practice_question",
+    "intent": "prep_mock_start",
+    "rulings": "G1,G3",
+    "n": 3,
+    "example": "HO-0010.t1"
+   },
+   {
+    "kind": "search",
+    "intent": "career_internship_discovery",
+    "rulings": "G6,G5",
+    "n": 3,
+    "example": "HO-0224.t1"
+   },
+   {
+    "kind": "research",
+    "intent": "company_intel",
+    "rulings": "G1,G14,G3,G5",
+    "n": 3,
+    "example": "HO-0246.t2"
+   },
+   {
+    "kind": "hypothetical_advice",
+    "intent": "agent",
+    "rulings": "G8",
+    "n": 3,
+    "example": "HO-0480.t2"
+   },
+   {
+    "kind": "plan",
+    "intent": "agent",
+    "rulings": "G11",
+    "n": 3,
+    "example": "HO-0560.t1"
+   },
+   {
+    "kind": "file",
+    "intent": "named_role_apply",
+    "rulings": "G1,G6,G11",
+    "n": 2,
+    "example": "HO-0122.t4"
+   },
+   {
+    "kind": "draft",
+    "intent": "career_tailor",
+    "rulings": "G1,G6,G3",
+    "n": 2,
+    "example": "HO-0436.t1"
+   },
+   {
+    "kind": "offer_compare",
+    "intent": "agent",
+    "rulings": "G8",
+    "n": 2,
+    "example": "HO-0485.t2"
+   },
+   {
+    "kind": "draft",
+    "intent": "named_role_apply",
+    "rulings": "G1,G6",
+    "n": 2,
+    "example": "HO-0683.t2"
+   },
+   {
+    "kind": "draft",
+    "intent": "outreach_clarification",
+    "rulings": "G1",
+    "n": 2,
+    "example": "HO-0699.t3"
+   },
+   {
+    "kind": "file",
+    "intent": "prep_brief",
+    "rulings": "G1",
+    "n": 2,
+    "example": "HO-0762.t3"
+   },
+   {
+    "kind": "file",
+    "intent": "career_tailor",
+    "rulings": "G1,G6,G11",
+    "n": 2,
+    "example": "HO-0770.t1"
+   }
+  ]
+ },
+ "heldout": {
+  "split": "heldout",
+  "conversations": 950,
+  "turns": 2802,
+  "code_turns": 896,
+  "brain_turns": 1906,
+  "nothing_sent": 2802,
+  "g1_strict": 1906,
+  "wrong_task": 326,
+  "rulings": {
+   "G1": {
+    "exercised": 2802,
+    "pass": 2053,
+    "fail": 749,
+    "model": 0,
+    "rate": 0.733
+   },
+   "G2": {
+    "exercised": 2802,
+    "pass": 877,
+    "fail": 19,
+    "model": 1906,
+    "rate": 0.979
+   },
+   "G3": {
+    "exercised": 2197,
+    "pass": 222,
+    "fail": 358,
+    "model": 1617,
+    "rate": 0.383
+   },
+   "G4": {
+    "exercised": 1121,
+    "pass": 299,
+    "fail": 57,
+    "model": 765,
+    "rate": 0.84
+   },
+   "G5": {
+    "exercised": 873,
+    "pass": 3,
+    "fail": 313,
+    "model": 557,
+    "rate": 0.009
+   },
+   "G6": {
+    "exercised": 988,
+    "pass": 565,
+    "fail": 423,
+    "model": 0,
+    "rate": 0.572
+   },
+   "G7": {
+    "exercised": 254,
+    "pass": 92,
+    "fail": 0,
+    "model": 162,
+    "rate": 1
+   },
+   "G8": {
+    "exercised": 323,
+    "pass": 232,
+    "fail": 91,
+    "model": 0,
+    "rate": 0.718
+   },
+   "G9": {
+    "exercised": 48,
+    "pass": 0,
+    "fail": 7,
+    "model": 41,
+    "rate": 0
+   },
+   "G10": {
+    "exercised": 979,
+    "pass": 359,
+    "fail": 10,
+    "model": 610,
+    "rate": 0.973
+   },
+   "G11": {
+    "exercised": 371,
+    "pass": 135,
+    "fail": 236,
+    "model": 0,
+    "rate": 0.364
+   },
+   "G12": {
+    "exercised": 537,
+    "pass": 157,
+    "fail": 0,
+    "model": 380,
+    "rate": 1
+   },
+   "G13": {
+    "exercised": 105,
+    "pass": 0,
+    "fail": 46,
+    "model": 59,
+    "rate": 0
+   },
+   "G14": {
+    "exercised": 852,
+    "pass": 522,
+    "fail": 163,
+    "model": 167,
+    "rate": 0.762
+   }
+  },
+  "families": {
+   "paraphrase": {
+    "turns": 354,
+    "g1": 305,
+    "fails": 104
+   },
+   "persona_swap": {
+    "turns": 349,
+    "g1": 247,
+    "fails": 125
+   },
+   "reorder": {
+    "turns": 197,
+    "g1": 147,
+    "fails": 65
+   },
+   "long_gap": {
+    "turns": 238,
+    "g1": 156,
+    "fails": 93
+   },
+   "typos": {
+    "turns": 254,
+    "g1": 204,
+    "fails": 85
+   },
+   "language": {
+    "turns": 155,
+    "g1": 144,
+    "fails": 21
+   },
+   "multi_ask": {
+    "turns": 177,
+    "g1": 126,
+    "fails": 74
+   },
+   "hypothetical": {
+    "turns": 187,
+    "g1": 163,
+    "fails": 73
+   },
+   "boundary": {
+    "turns": 263,
+    "g1": 143,
+    "fails": 138
+   },
+   "file_ask": {
+    "turns": 164,
+    "g1": 82,
+    "fails": 147
+   },
+   "practice": {
+    "turns": 237,
+    "g1": 151,
+    "fails": 86
+   },
+   "correction": {
+    "turns": 122,
+    "g1": 106,
+    "fails": 28
+   },
+   "capability": {
+    "turns": 105,
+    "g1": 79,
+    "fails": 39
+   }
+  },
+  "worst": [
+   {
+    "kind": "file",
+    "intent": "agent",
+    "rulings": "G11",
+    "n": 65,
+    "example": "HO-0761.t2"
+   },
+   {
+    "kind": "search",
+    "intent": "career_discovery",
+    "rulings": "G6,G5",
+    "n": 61,
+    "example": "HO-0025.t1"
+   },
+   {
+    "kind": "practice_question",
+    "intent": "prep_mock_start",
+    "rulings": "G1,G3",
+    "n": 57,
+    "example": "HO-0009.t3"
+   },
+   {
+    "kind": "practice_question",
+    "intent": "prep_brief",
+    "rulings": "G1",
+    "n": 54,
+    "example": "HO-0139.t4"
+   },
+   {
+    "kind": "plan",
+    "intent": "agent",
+    "rulings": "G11",
+    "n": 53,
+    "example": "HO-0003.t2"
+   },
+   {
+    "kind": "search",
+    "intent": "career_internship_discovery",
+    "rulings": "G6,G5",
+    "n": 51,
+    "example": "HO-0007.t4"
+   },
+   {
+    "kind": "hypothetical_advice",
+    "intent": "agent",
+    "rulings": "G8",
+    "n": 50,
+    "example": "HO-0388.t3"
+   },
+   {
+    "kind": "draft",
+    "intent": "outreach_clarification",
+    "rulings": "G1",
+    "n": 45,
+    "example": "HO-0021.t1"
+   },
+   {
+    "kind": "research",
+    "intent": "company_intel",
+    "rulings": "G1,G14,G3,G5",
+    "n": 39,
+    "example": "HO-0126.t3"
+   },
+   {
+    "kind": "draft",
+    "intent": "career_tailor",
+    "rulings": "G1,G6,G3",
+    "n": 34,
+    "example": "HO-0031.t2"
+   },
+   {
+    "kind": "file",
+    "intent": "career_tailor",
+    "rulings": "G1,G6,G11",
+    "n": 26,
+    "example": "HO-0772.t1"
+   },
+   {
+    "kind": "draft",
+    "intent": "career_networking_draft",
+    "rulings": "G1,G6,G3",
+    "n": 25,
+    "example": "HO-0292.t1"
+   },
+   {
+    "kind": "people_search",
+    "intent": "company_intel",
+    "rulings": "G1,G6,G14,G5",
+    "n": 23,
+    "example": "HO-0014.t2"
+   },
+   {
+    "kind": "thread_recall",
+    "intent": "company_intel",
+    "rulings": "G1,G3",
+    "n": 22,
+    "example": "HO-0132.t2"
+   },
+   {
+    "kind": "file",
+    "intent": "prep_brief",
+    "rulings": "G1",
+    "n": 22,
+    "example": "HO-0761.t1"
+   }
+  ]
+ }
+}

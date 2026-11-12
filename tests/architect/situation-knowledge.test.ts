@@ -195,7 +195,9 @@ function modelSpy() {
 const base = (extra: Record<string, unknown>) => ({ message: "I'm a freshman. How do I get internships at small firms?", history: [], stores: {}, userId: "u1", threadId: "t1", now: Date.UTC(2026, 9, 28), ...extra });
 
 Deno.test("wiring: the flag is off unless CAREER_KNOWLEDGE=on", () => {
-  eq(knowledgeOn({ get: () => undefined }), false);
+  // Architect amendment (D-060): CAREER_KNOWLEDGE is a release flag served on; unset is the release value (on), any other value rolls it back.
+  eq(knowledgeOn({ get: () => undefined }), true);
+  eq(knowledgeOn({ get: (k) => (k === "CAREER_KNOWLEDGE" ? "off" : undefined) }), false);
   eq(knowledgeOn({ get: (k) => (k === "CAREER_KNOWLEDGE" ? "yes" : undefined) }), false);
   eq(knowledgeOn({ get: (k) => (k === "CAREER_KNOWLEDGE" ? "on" : undefined) }), true);
 });

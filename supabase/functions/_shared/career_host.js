@@ -281,13 +281,25 @@ const CareerHost = (() => {
     ["outreach", /\boutreach\b|\bfollow[- ]?ups\b|\b(?:all|the|my) (?:emails|messages)\b|\bthe queue\b/i],
   ];
   const BOUNDARY_RE = /\b(?:don'?t|do not|dont)\s+(?:contact|message|email|reach out to|text)\s+anyone\b|\bleave (?:everything|it all|them|it|all of it) unsent\b|\b(?:don'?t|do not|dont)\s+send\s+(?:anything|any of (?:it|them))\b|\b(?:don'?t|do not|dont)\s+start\s+(?:any(?:thing)?\s+)?new(?:\s+work)?\b/i;
-  const OTHER_ASK_RE = /\b(?:find|search|look for|get me|show me|apply to|draft|write|tell me about|what'?s|what is|how)\b/i;
+  // MIRROR-1000 gaps (2026-11-11): "Don't send anything yet: get that over to Marcus" hands a message to someone; the guard
+  // holds the send, and the hand-off is the ask (it is not a stop).
+  const ASK_WORD_RE = /\b(?:find|search|look for|get me|show me|apply to|draft|write|tell me about|what'?s|what is|how)\b/i;
+  const HANDOFF_RE = /\b(?:[Ss]end|[Gg]et|[Ff]orward|[Pp]ass)\s+(?:it|this|that|them)\s+(?:over\s+|along\s+|on\s+)?to\s+[A-Z]/;
+  // D-061 G1/G6: a boundary phrase inside an ask ("who are some alumni at X? names and roles, don't reach out to anyone",
+  // "find 3 grads ..., research only, don't message anyone") limits that ask; it is not a stop. A question, a list or a research
+  // ask beside the boundary is the other ask.
+  const ASK_MORE_RE = /\?|\b(?:who|which|where|when|why|list|names?|give me|research|look up|pull up|any)\b/i;
+  const OTHER_ASK_RE = { test: (x) => ASK_WORD_RE.test(x) || HANDOFF_RE.test(x) || ASK_MORE_RE.test(x) };
   const NEGATED_RE = /\b(?:don'?t|do not|dont|never|no need to)\s+(?:\w+\s+)?$/i;
   const sentencesOf = (s) => s.split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
+  const HYPOTHETICAL_STOP_RE = /\bhypothetic|\bif i (?:said|say|were to|wanted to|asked you to|told you to)\b|\bwhat (?:would )?happens? if\b|\bwhat would (?:it|that|pausing|a pause|stopping) do\b|\b(?:just|only) (?:explain|tell me)\b[^.!?]*\b(?:don'?t|do not) do it\b|\bonly tell me what it would do\b/i;
   function stopControlOf(text) {
     const ask = typeof text === "string" ? text.trim() : "";
     if (!ask || ask.length > 2000) return null;
     if (/\balerts?\b|\balert-wise\b|\bwatch(?:es|ing)?\b/i.test(ask)) return null;
+    // MIRROR-1000 (2026-11-11): a question about what a stop WOULD do is not a stop. "If I said pause everything, what happens
+    // to what's in flight? Just explain, don't do it" paused the account and answered "Done: your account is paused".
+    if (HYPOTHETICAL_STOP_RE.test(ask)) return null;
     const sentences = sentencesOf(ask).filter((x) => !/\?\s*$/.test(x));
     const imperative = (re) => sentences.some((x) => { const m = re.exec(x); return !!m && !NEGATED_RE.test(x.slice(0, m.index)); });
     if (imperative(ACCOUNT_STOP_RE)) return { kind: "account" };
@@ -671,7 +683,8 @@ const CareerHost = (() => {
         // these 141 results remain local preparation either way, and the
         // batch seam (155) is the wired drive path.
         result = { ...result, worker: workerCapabilities.portal_browser,
-          reply: boardFor ? result.reply : `Live browser execution is not wired in this handler; no employer form has been opened or submitted.\n${result.reply}` };
+          // MIRROR-1000 (2026-11-11): said plainly, right after the answer's first line, never in the handler's own words ("not wired in this handler").
+          reply: boardFor ? result.reply : String(result.reply ?? "").replace(/^([^\n]*)(\n|$)/, (_, head, nl) => `${head}\nThe browser that fills employer forms isn't connected here, so no employer form has been opened or submitted: I prepare the application, and it goes to an employer only after you approve that exact one.${nl}`) };
       }
       return {
         reply: CareerContainment.extractReplyText(result),

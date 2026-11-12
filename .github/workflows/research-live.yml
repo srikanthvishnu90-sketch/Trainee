@@ -1,0 +1,99 @@
+# D-060 live proof of Claude's web_search server tool (architect builder, 2026-11-11). Runs evals/research-live/run.ts --live: at
+# most two real searches through the gateway's webSearch door (one call per query, max_uses 1), hard-capped in process at the
+# request's budget_usd (at most $0.50). It runs only on a push to ci/research-live that changes evals/research-live/**, so nothing
+# on trunk or a PR ever spends.
+# Spend: the owner's written approval is the request's `approval` (D-060: web research on; live verification at most $10 in total
+# for this effort, reserved against the $70 ledger). The cap is reserved at the shared $70 ledger BEFORE the run (refused if it does
+# not fit what remains) and settled to the metered cost after it, as mirror-conversation.yml does. The ledger secrets are given only
+# to those two steps, never to the run. The only host the run calls is the model API; nothing is sent to anyone.
+name: research-live
+on:
+  push:
+    branches: [ci/research-live]
+    paths: [evals/research-live/**, .github/workflows/research-live.yml]
+permissions:
+  contents: read
+concurrency: { group: research-live, cancel-in-progress: false }
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with: { deno-version: "v2.9.6" }
+      - name: The request
+        id: req
+        run: |
+          deno eval '
+            const f = JSON.parse(Deno.readTextFileSync("evals/research-live/run-request.json"));
+            const ok = /^D-\d{3}[a-z]?$/.test(f.approval ?? "") && Number(f.budget_usd) > 0 && Number(f.budget_usd) <= 0.5;
+            if (!ok) { console.log("NOT RUN: bad request (approval D-xxx, 0 < budget_usd <= 0.5)", JSON.stringify(f)); Deno.exit(2); }
+            Deno.writeTextFileSync(Deno.env.get("GITHUB_OUTPUT"), `approval=${f.approval}\nbudget=${f.budget_usd}\n`, { append: true });
+            console.log(`request: web search proof, cap $${f.budget_usd} under ${f.approval}`);
+          '
+      - name: Reserve the cap at the shared ledger
+        id: reserve
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          EVAL_LEDGER: shared
+          MODEL_BUDGET_TARGET_USD: "70"
+          MODEL_BUDGET_HARD_USD: "70"
+          CAP_USD: ${{ steps.req.outputs.budget }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then echo "NOT RUN: a secret is missing (ANTHROPIC_API_KEY or the shared ledger); no model call was made"; exit 2; fi
+          deno eval '
+            const bud = await import("file://" + Deno.cwd() + "/supabase/functions/_shared/model_budget.ts");
+            const gate = bud.resolveBudgetGate(undefined, (k) => Deno.env.get(k));
+            if (!gate) { console.log("NOT RUN: the shared ledger could not be opened"); Deno.exit(2); }
+            const st = await gate.status();
+            const r = await gate.reserve(Math.round(Number(Deno.env.get("CAP_USD")) * 1e6), { model: "claude-sonnet-5-5", role: "eval" });
+            if (!r?.ok || !r.id) { console.log(`NOT RUN: the ledger refused the cap (recorded $${(st.total / 1e6).toFixed(4)} of $70):`, JSON.stringify(r)); Deno.exit(2); }
+            Deno.writeTextFileSync(Deno.env.get("GITHUB_OUTPUT"), `id=${r.id}\n`, { append: true });
+            console.log(`reserved $${Deno.env.get("CAP_USD")} (recorded before: $${(st.total / 1e6).toFixed(4)} of $70)`);
+          '
+      - name: The searches, real API
+        id: run
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          WEB_RESEARCH_SPEND_APPROVED: ${{ steps.req.outputs.approval }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          set +e
+          deno run -A --no-check evals/research-live/run.ts --live --budget-usd "${{ steps.req.outputs.budget }}" --out "$RUNNER_TEMP/out" | tee "$RUNNER_TEMP/out/summary.txt"
+          code=${PIPESTATUS[0]}
+          set -e
+          # The queries are public questions and the answers public pages, so the record is printed.
+          cat "$RUNNER_TEMP/out/result.json" || true
+          spent=$(grep -o 'spent_usd=[0-9.]*' "$RUNNER_TEMP/out/summary.txt" | cut -d= -f2)
+          echo "spent=${spent:-}" >> "$GITHUB_OUTPUT"
+          exit $code
+      - name: Settle the ledger to the metered cost
+        if: always() && steps.reserve.outputs.id != ''
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          EVAL_LEDGER: shared
+          MODEL_BUDGET_TARGET_USD: "70"
+          MODEL_BUDGET_HARD_USD: "70"
+          ID: ${{ steps.reserve.outputs.id }}
+          SPENT: ${{ steps.run.outputs.spent }}
+        run: |
+          deno eval '
+            const bud = await import("file://" + Deno.cwd() + "/supabase/functions/_shared/model_budget.ts");
+            const gate = bud.resolveBudgetGate(undefined, (k) => Deno.env.get(k));
+            const spent = Deno.env.get("SPENT");
+            // Not metered (the run died before its summary): the whole reservation stays spent (settle null).
+            const micros = spent && /^[0-9.]+$/.test(spent) ? Math.ceil(Number(spent) * 1e6) : null;
+            const ok = await gate.settle(Deno.env.get("ID"), micros);
+            const st = await gate.status();
+            console.log(`settled ${micros === null ? "the full cap (cost not proven)" : "$" + spent}: ${ok ? "recorded" : "NOT recorded"}; ledger now $${(st.total / 1e6).toFixed(4)} of $70`);
+            if (!ok) Deno.exit(1);
+          '
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: research-live-${{ github.run_id }}
+          path: ${{ runner.temp }}/out/

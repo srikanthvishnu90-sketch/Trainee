@@ -14,6 +14,85 @@ Status key: **Not verified** (no A, B or C at the release commit), **Partial** (
 
 ---
 
+## The 95% bars (owner, 2026-11-12; D-068)
+
+The owner asked for "real proof that the failures are fixed and all 15 capabilities meet the 95% bar before deploying".
+The 95% is D-056's reading: a pass rate is at least 95% by exact integer count (19/20, 37/38, 209/220), and where a run has
+several passes, every pass is. **Real inputs** means real employer pages, real captured forms, real job boards or the
+real model; a TEST person or a scripted model on them is said each time. A fixture loop (synthetic records, scripted
+model) is A evidence and is listed so its count is on record, but it never meets a B bar by itself. Where an item has no
+real-input set, N is 0 and the row says so; no bar is redefined to pass.
+
+Measured on trunk **6e17f371** (#782, D-065), 2026-11-12, at $0: the trunk CI run **43162024100** (every job green; the
+suites print the counts below), local runs in this checkout (Deno 2.9.6, Postgres 16, as root: the suites that launch
+Chromium or `initdb` as an unprivileged user cannot run as root here, so their counts are CI's), and the bench run
+**43166270951** (branch `bench/browser-v95-6e17f371` = trunk + the bench workflow, never a PR; real public postings, dry run,
+no model). Re-measure: `bash scripts/verification/measure-95.sh --ci-run <trunk CI run> --local`.
+
+| # | Item | 95% bar | Suite / eval | N | How measured | Cost | Now on 6e17f371 | ≥95%? |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Application layer | (a) applications fully clean (every field right, nothing invented, ready vs held right, hash honoured) ≥ 46/48, and wrong answers = 0; (b) fill precision on hand-labelled real questions ≥ 95% | (a) `evals/career/mass-apply-outcomes` (24 real captured Greenhouse/Lever/Ashby forms × 2 TEST people); (b) `evals/apply/question-map.ts` (240 random required questions from 199 real captured forms, labelled blind) | 48; 187 filled | (a) `deno run --allow-read evals/career/mass-apply-outcomes/run.ts`; (b) `deno run --allow-read evals/apply/question-map.ts` | $0 | (a) **46/48 (95.8%)**, wrong 0, hash honoured 44/44, stale yes refused 1/1; (b) **186/187 (99.5%)** (placed 223/229, 97.4%; recall 94.5%, which is "asked", not wrong). A (fixtures, CI): app-layer loop 37 cases, invented 0, hash 10/10; `r10-fix-12-review` **4/4 steps** (CI shard 2 and local; it is out of `pending/` and runs in the gate) | **Yes** (real forms, TEST people). C still owed. |
+| 2 | 60 in one batch | (a) exactly one named outcome per row ≥ 57/60, with duplicates, dropped and mismatches = 0; (b) rows that end submitted or awaiting the employer ≥ 57/60 | held-out 60 dry run (`scripts/browser-eval/batch60.cjs`, the 60 `heldout.csv` rows the apply VM drives, round robin) | 60 | bench run 43166270951, job `batch60` | $0 | (a) **60/60**, duplicates 0, dropped 0, mismatches 0, breaches 0; (b) **0/60 possible in a dry run**; 18/60 reached the instant before Submit, 33 held `needs_answers` (the employer's own questions), 3 `field_not_filled` (Phone Number, step did not advance, Attach), 3 posting closed, 2 no form, 1 redirect. Fixture of 60: 60/60 one outcome, 55 reached Submit | (a) **Yes**. (b) **No, and cannot be measured before a real batch**: it needs real submissions with the person's yes (C). Even then, 33/60 wait on the person's answers. |
+| 3 | Resumes | every file passes all nine design checks (opens, one page, identity, target, dates, chronology, ATS order, DOCX = PDF, no overflow) ≥ 95% of files, invented 0 | `r10-resume-design-loop-20261110` | 162 (81 TEST cases × PDF, DOCX); **real profiles: 0** | local `deno test` (above) and CI | $0 | **162/162** on every check (local and CI); resume loop invented 0, confirmed skills 594/594 | On TEST profiles only. **No real-input set exists**: B needs real resumes with consent (the owner's own is N = 1) and a copy/download check in the delivered form. |
+| 4 | Browser runner | reached the instant before Submit ≥ 209/220 on each sample | strict benchmark (`scripts/browser-eval/strict.cjs`), tuned sample and held-out, default and full persona | 220 × 4 | bench run 43166270951, four `strict` jobs | $0 | **33/220 (15.0%)** sample-default, **36/220 (16.4%)** held-out-default, **33/220** sample-full, **36/220** held-out-full; breaches 0. Held-out default: ready if answered 71, ready except upload 3 | **No, cannot reach 95%** (see below). |
+| 5 | Networking and email | right person from a real source and nothing invented ≥ 95% of drafts; exact sends 100% | real sources: none; fixture `loop-05-outreach` | **real: 0**; fixture 27 journeys | CI shard log and local | $0 (fixture) | fixture: 27/27 journeys, invented 0, guessed 0, exact sends 12/12, nothing sent when refused 15/15 | **Not measurable at $0.** Needs the owner's test address (a real send, C) and a live people search (D-062 (3)): no harness exists. |
+| 6 | Files | (a) dead controls = 0; (b) controls that work when pressed ≥ 95% of controls shown, on served pages | `files-actions-loop`, `files-live-loop`, `files-live-records-loop` (headless Chromium, 390 px, fixture records) | 228; 99 + 73 | CI shards (root cannot launch sandboxed Chromium here) | $0 | (a) dead **0** in all three; (b) actions **226/228 (99.1%)**; served pages **156/172 (90.7%)**: live loop 83/99 (16 still shown off with a reason), records loop 73/73 | (a) Yes. (b) **No: 156/172**; the 16 controls F-family pages still show off must be served (at least 8 of them for 164/172). On fixtures, not a phone. |
+| 7 | Bot responses | replies pass RESPONSE-RULES ≥ 95% on the **real model** | (a) d054 reply-rule items (`evals/career/d054-items-7-9.json`, staged brain, 5 passes, both Claude judges); (b) mirror held-out live sample; $0 companions: response battery, mirror held-out dry | (a) 25; (b) per sample | (a) `brain-eval` dispatch `set=d054`; (b) `evals/mirror/heldout/live.ts` | (a) quote $2.45; (b) $0.10 a turn | $0: battery staged **998/1000** replies clean (scripted model); tone gate within length 31/34, answer first 33/34; mirror held-out dry, code's own replies G2 **278/282 (98.6%)**, G3 48/99, G5 130/149. Real model: last (a) **19/25 (76%)** on 2e8f5302, before D-061 to D-065; batch-1 live 1/26 (live-5) | **No (last real measure 76%)**; needs (a) re-run. |
+| 8 | Job discovery | per search: invented, dead, unmarked unchecked, dishonest count, unscoped empty = 0, ≥ 21/22 searches; shown postings open and on scope ≥ 95% | `evals/discovery-live` (61 live public boards, the real handler, independent re-check) | 22 searches; 70 shown | `deno run -A --no-check --import-map=tests/flow/supabase-npm.json evals/discovery-live/run.ts` (run 2026-11-12T06-12-24-165Z) | $0 | **22/22** searches pass; open on re-check **70/70**; on scope **69/70 (98.6%)** (1 off-scope title in "product manager, remote US"); 15,404 open postings indexed; effects 0/0/0 | **Yes** (real boards). C (deployed function) still owed. |
+| 9 | Profile and memory | (a) sensitive and identity questions on real forms handled (never guessed, asked per application, decline lands right) ≥ 95%; (b) memory items on the real model ≥ 48/50 | (a) `evals/apply/sensitive-loop.ts` (real employer variants); (b) d054 memory items | 90; 50 | (a) `deno run -A --no-check evals/apply/sensitive-loop.ts`; (b) `brain-eval` `set=d054` | (a) $0; (b) shares (7a)'s run | (a) **90/90**, reused answers on card and in hash 27/27; (b) last **37/50 (74%)** (D-055, stale). Fixture loops: 150 answers, unconfirmed used 0, sensitive reused 0 | (a) **Yes**. (b) **No until re-measured.** |
+| 10 | Research | briefs sourced, dated, role-specific, nothing invented ≥ 95% on real companies with live web research | none on real companies; fixture `loop-10-research`; code floor `evals/career/advice-wide.ts` | **real: 0**; fixture 15; floor 340 | CI and local | $0 | fixture **15/15** (N < 20); edge `research-reply` 13/13; advice floor **340/340** (empty search: no number shown without a source) | **Not measured on real inputs.** No harness runs research asks through the live brain with web search at N ≥ 20; see spend list. |
+| 11 | Interview prep | practice turns pass G12 (interviewer process) and the tie to the posting ≥ 95% on the real model | mirror held-out live, family `practice` (`live.ts --family practice`, added here) | 24 scored turns (6 conversations) | `live.ts --sample 6 --family practice` | quote $3.60 | fixture `loop-11` questions tied **72/72**, feedback **72/72**; held-out dry G12 23/23 code turns, 514 left to the model | **Not measured on the real model.** |
+| 12 | Tracking | statuses read from mail right ≥ 95% (precision and recall) on real mail | real mail: none; synthetic labelled set `evals/career/mail-eval.ts`; fixture `loop-12` | **real: 0**; synthetic 415 | `deno run --allow-read evals/career/mail-eval.ts` | $0 | synthetic: status precision **323/323**, recall **323/325 (99.4%)**, employer named 323/323; fixture: wrong statuses 0 of 17 applications, 16 replies | Synthetic only. **Real mail needs the owner's Gmail** (labelled, consented). |
+| 13 | Offers | comparisons exactly right with every value sourced ≥ 19/20 | `loop-13-offers` (hand-computed fixtures) | 20; **real offers: 0** | CI and local | $0 | **20/20** | On fixtures (the owner's ruling on fixtures as B is still open). |
+| 14 | Accounts and channels | scripts that pass on each channel that is on ≥ 95%, and parity ≥ 19/20; secrets 0 | `channel-parity-acceptance` (20 scripts × Telegram, iMessage); `telegram-loop-30`; `telegram-acceptance`; `accounts-loop` | 20 × 2; 30; 12; 339 | local and CI | $0 | Telegram **20/20**, iMessage **20/20**, parity **19/20 (95.0%)**, secrets 0; telegram loop **30/30**, exactly once 46/46; telegram acceptance 11/12 (1 known gap: a fit question answered with the greeting); accounts 339 checks, leaks 0 | **Yes, at the line** (parity 19/20) on the harness; telegram acceptance 11/12 is below and N < 20. WhatsApp is off. No real chat yet (C). |
+| 15 | Release readiness | every gate job green on the release commit; S3 every pass ≥ 37/38 | trunk CI; `brain-eval` dev set (S3) | 38 × 5 | CI 43162024100; S3 on the candidate | S3 ≈ $5 | CI **all 22 jobs green** on 6e17f371; S3 not yet run on a candidate built from trunk. Mirror held-out dry (not a gate): G1 **2648/2802 (94.5%)**, G6 935/988 (94.6%) | **Not yet**: S3 and the Production approval. |
+
+### What meets 95% now, and what does not
+
+- **Meet now on real inputs ($0):** 1 (real captured forms, TEST people), 2 (a) (one outcome per row, real postings), 8 (live
+  boards), 9 (a) (real sensitive-question variants), 14 (parity on the harness, exactly at 19/20).
+- **Meet only on fixtures or TEST profiles:** 3, 5, 11, 12, 13 (and 10 at N = 15). These are A evidence, not the B bar.
+- **Measured and below 95%:** 4 (33–36/220), 6 (b) (156/172 served controls), 7 (last real-model 19/25), 9 (b) (last
+  37/50), telegram acceptance 11/12, and the mirror held-out dry G1 2648/2802.
+- **Need the real model (spend, below):** 7, 9 (b), 11, 15 (S3); 10 has no harness.
+- **Cannot be measured before the deploy:** 2 (b), 5 (real sources and sends), 12 (real mail), 13 (real offers), and every C.
+
+### Item 4: why 95% is not reachable, literally
+
+Held-out default, by board: Personio 20/20, Lever 6, Breezy 4, Ashby 3, Recruitee 3, and 0 for Greenhouse, Workable, BambooHR,
+SmartRecruiters, Teamtailor and Workday. Even if every "ready if answered" (71) and "ready except upload" (3) posting passed,
+the ceiling is 110/220 (50%). The other 110 stop for reasons the rules keep: a shown bot check (BambooHR 20,
+SmartRecruiters 17; never solved), Workday's account wall (20; a login is the person signing in), Teamtailor sign-in and
+missing answers (20), and forms not found or retries exhausted. What it would take to move: (1) the person's answers
+(the ask-once card) for the 71, which the dry run cannot supply; (2) the dry run's upload simulation on the boards where an upload is the only stop (Workable 3 "ready except
+upload"); (3) the Greenhouse forms behind "Apply" (17 ready if answered, 0 pass); (4) Recruitee's form discovery (7 not
+found, 5 retries). That is at most about 50%. 95% of a random sample of postings would need captcha solving and signing in
+for the person, both forbidden. A bar over "supported postings" only would be a redefinition and is not used here.
+
+### Spend the real-model bars need (D-068: $20, shared; nothing spent by this section)
+
+| Run | Item | N | Command | Quote | Bar |
+|---|---|---|---|---|---|
+| S3 on the release candidate | 15 | 38 × 5 | `brain-eval` dispatch, `set=dev`, the candidate's SHA | ≈ $5 (coordinator) | every pass ≥ 37/38 |
+| d054 re-measure (items 7 and 9 together) | 7, 9 (b) | 25 and 50 judgements | `brain-eval` dispatch `set=d054`, `brains=staged`, `budget_usd=2.5` (the set refuses a cap over $3) | $2.45 (D-055 cost $1.69) | 24/25 and 48/50 |
+| Practice sample | 11 | 24 scored turns | `MIRROR_SPEND_APPROVED=D-068 CI=true deno run -A --no-check --import-map=tests/flow/supabase-npm.json evals/mirror/heldout/live.ts --sample 6 --family practice --budget-usd 3.6 --label v95-practice` (through `mirror-conversation.yml`'s held-out kind, as live-heldout-1) | $3.60 (36 turns × $0.10) | G12 and G2 ≥ 23/24 |
+| Live mirror round | 7 (supporting) | 26 turns | `mirror-conversation.yml` | ≈ $3.80 each | 25/26 turns on the five checks |
+
+S3 + d054 + practice = about $11.05, leaving about $8.95 for two mirror rounds ($7.60). Not affordable within $20, and so
+not proposed: item 7 or 10 at N ≥ 20 on the held-out live sample (20 conversations quote $9.80; research turns are about a
+fifth of a conversation's turns, so 20 research turns is about $9), and any people-search measurement for item 5.
+
+### To refresh after the D-067 PR merges
+
+D-067 changes product code, so every number above that runs product code is stale on merge: items 1, 2, 4 (bench run),
+5 to 14 fixtures and $0 evals, 8 (discovery-live), and the mirror held-out dry rates. Only item 4's per-board ceiling
+reasoning and the "real: 0" rows do not change. Refresh: the new trunk CI run, then
+`bash scripts/verification/measure-95.sh --ci-run <id> --local`, then push the new trunk SHA to
+`bench/browser-v95-<sha>` with the same workflow (the item 2 and 4 jobs). The real-model runs above should be made on the
+post-D-067 trunk (the release candidate), not before.
+
+---
+
 ## Pre-deploy check, release candidate `release/production` 1c751db3 (2026-11-11)
 
 Release candidate: `1c751db3a6f0e7f78698a9ecf0f5f46cd1ebc33a` (merge of release PR #756). Deploy run 42955378931 waits at

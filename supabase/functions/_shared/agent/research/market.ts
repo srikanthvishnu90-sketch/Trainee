@@ -199,16 +199,36 @@ export function agrees(claim: string, quote: string, page: string, subject = "")
   return miss !== null && miss.length === 0;
 }
 // D-071: the page's own sentence that holds the quote, in the page's words (reference markers and typographic forms read alike).
-export function sentenceOf(page: string, quote: string): string | null {
-  const P = squash(readAlike(page)), lower = P.toLowerCase(), q = squash(readAlike(quote)).toLowerCase();
+function wholeSentence(page: string, quote: string): string | null {
+  // A quote that ends with its sentence's full stop ends that sentence: the stop is not searched for again after it.
+  const P = squash(readAlike(page)), lower = P.toLowerCase(), q = squash(readAlike(quote)).toLowerCase().replace(/[.!?]+$/, "");
   if (!q || P.length !== lower.length) return null;
   const at = lower.indexOf(q);
   if (at < 0) return null;
   const start = Math.max(P.lastIndexOf(". ", at), P.lastIndexOf("! ", at), P.lastIndexOf("? ", at));
   const s0 = start < 0 ? 0 : start + 2, endM = /[.!?](\s|$)/.exec(P.slice(at + q.length)), s1 = endM ? at + q.length + endM.index + 1 : P.length;
-  const out = P.slice(s0, s1).trim();
-  return out.length >= 20 && out.length <= 300 ? out : null;
+  return P.slice(s0, s1).trim();
 }
+export function sentenceOf(page: string, quote: string): string | null {
+  const out = wholeSentence(page, quote);
+  return out !== null && out.length >= 20 && out.length <= 300 ? out : null;
+}
+// Fail closed (architect, 2026-11-13, review of #801: "Citadel interns earn $5,000 a week" stood on "Citadel interns do not earn
+// $5,000 a week", on "Unlike interns, senior traders at Citadel earn $5,000 a week" and on "interns never earn $5,000 a week"): which
+// words a sentence has cannot say whether it affirms or denies, or whom its figure is about.
+//   Polarity (always on): a line worded by the model stands only when it and its page's sentence have the same polarity (a
+//   negating word in one and not in the other: not supported). The page's own sentence stands in its place where a sentence may
+//   (`via: "quote"`), else the line is dropped (`polarity_differs`).
+//   Figures word for word (FAIL_CLOSED.figures): a line that carries a number (pay, a percentage, a count, a date) is shown ONLY as
+//   its page's own sentence; the model's part is to pick the sentence, never to word the figure; a reply sentence with a number
+//   stands only when it is such a kept sentence, the whole of it (enforceMarketReply); and the brief's thesis is a verified line
+//   or the first kept one. OFF until the architect rules on the existing tests that pin a model-worded figure as the expected
+//   output (research-market-reply, research-market-review, research-market-subject-review, research-no-sources-review,
+//   web-research-d060, research-company-brief-20261109, research-free-brief): with it on, those assertions fail, and they may not be
+//   edited to pass. tests/architect/pending/research-figures-verbatim-20261113.test.ts is its acceptance test.
+export const FAIL_CLOSED = { figures: false };
+const NEGATING = /\b(?:not|no|never|none|neither|nor|nobody|nothing|nowhere|without|unlike|cannot|except|excluding|hardly|barely|scarcely|rarely|seldom|false|untrue|lacks?|lacking|fail(?:s|ed|ing)?|den(?:y|ies|ied)|refus(?:e|es|ed))\b|n['’]t\b/i;
+export const negates = (s: string) => NEGATING.test(readAlike(String(s ?? "")));
 // D-071: one sourced line, checked, with why it was dropped. A claim that only rewords its quote (its figures all in the quote, at
 // most two content words not in the quote's sentence, at least 60% of them in it) is not lost: the page's own sentence that holds
 // the quote stands in its place, word for word from the page (`via: "quote"`). A claim with a figure the quote does not have, a
@@ -224,17 +244,21 @@ export function checkLine(text: unknown, quote: unknown, p: SourcePage | null, s
   if (q.length < 8) return { ok: false, why: "no_quote" };
   const miss = wordsNotInQuote(t, q, p.text, subject, p.title);
   if (miss === null) return { ok: false, why: quoteContext(p.text, q) === null ? "quote_not_on_page" : "figure_not_in_quote" };
-  if (!miss.length) return o.predicate === false || hasPredicate(t, p.title) ? { ok: true, text: t } : { ok: false, why: "no_predicate" };
+  const figure = FAIL_CLOSED.figures && figuresIn(t).length > 0, flipped = negates(t) !== negates(wholeSentence(p.text, q) ?? q);
+  if (!miss.length && !figure && !flipped) return o.predicate === false || hasPredicate(t, p.title) ? { ok: true, text: t } : { ok: false, why: "no_predicate" };
   const all = contentWords(withoutAttribution(t)).size;
   // A missing word that is a name in the claim ("Globex Power installed ..." on Acme's quote) is a different claim, never a rewording.
   const names = contentWords((withoutAttribution(t).match(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}'-]*/gu) ?? []).join(" "));
   // Only words that frame a statement (who said it, how) may be missing: "Acme installed 41,000 solar panels" on "Acme installed
   // 41,000 home batteries" changes what was said, and is dropped.
-  if (o.fallback !== false && miss.length <= 2 && miss.every((w) => FRAMING.has(w)) && !miss.some((w) => names.has(w)) && all > 0 && (all - miss.length) / all >= 0.6) {
+  const reworded = miss.length <= 2 && miss.every((w) => FRAMING.has(w)) && !miss.some((w) => names.has(w)) && all > 0 && (all - miss.length) / all >= 0.6;
+  // The page's own sentence in the line's place: where a sentence may stand in (o.fallback); with FAIL_CLOSED.figures, always for
+  // a line with a number (when its words pass, or only reword).
+  if ((!miss.length || reworded) && (figure || o.fallback !== false)) {
     const own = sentenceOf(p.text, q);
-    if (own && linkFree(own) && hasPredicate(own, p.title)) return { ok: true, text: own, via: "quote" };
+    if (own && linkFree(own) && (o.predicate === false || hasPredicate(own, p.title))) return { ok: true, text: own, via: "quote" };
   }
-  return { ok: false, why: "claim_words_not_in_quote" };
+  return { ok: false, why: !miss.length && figure ? "figure_not_verbatim" : !miss.length ? "polarity_differs" : "claim_words_not_in_quote" };
 }
 // D-071: what the research did with the model's draft (turn meta `research`, the real-set results): pages read, how the draft
 // parsed, lines drafted, lines kept (and how many stand on the page's own sentence), and lines dropped by reason.
@@ -251,24 +275,24 @@ export function newAudit(pages: number, o: { samples?: boolean } = {}): Research
 // lines, word for word, each citing its page: the ones that name a subject asked about (when one was named) and share the most
 // content words with the ask, at most two a page. Nothing is reworded, so nothing can be invented.
 const nameIn = (name: string, text: string) => new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(text);
-export function pageSentences(pages: SourcePage[], want: Set<string>, names: string[], max: number): { text: string; page: SourcePage }[] {
-  const scored: { text: string; page: SourcePage; n: number; k: number; i: number }[] = [];
+export function pageSentences(pages: SourcePage[], want: Set<string>, names: string[], max: number): { text: string; page: SourcePage; prev: string }[] {
+  const scored: { text: string; page: SourcePage; prev: string; n: number; k: number; i: number }[] = [];
   for (const [k, p] of pages.entries()) {
     const ss = squash(readAlike(p.text.slice(0, 60000))).split(/(?<=[.!?])\s+/);
     for (const [i, x] of ss.entries()) {
       if (x.length < 40 || x.length > 300 || !/[.!?]$/.test(x) || !/[a-z]/.test(x) || !linkFree(x) || !hasPredicate(x, p.title)) continue;
       if (names.length && !names.some((nm) => nameIn(nm, x) || nameIn(nm, p.title))) continue;
       const n = [...contentWords(x)].filter((w) => want.has(w)).length;
-      if (n > 0) scored.push({ text: x, page: p, n, k, i });
+      if (n > 0) scored.push({ text: x, page: p, prev: i > 0 ? ss[i - 1] : "", n, k, i });
     }
   }
   scored.sort((a, b) => b.n - a.n || a.k - b.k || a.i - b.i);
-  const out: { text: string; page: SourcePage }[] = [], per = new Map<string, number>();
+  const out: { text: string; page: SourcePage; prev: string }[] = [], per = new Map<string, number>();
   for (const x of scored) {
     if (out.length >= max) break;
     const u = normalizeUrl(x.page.url);
     if ((per.get(u) ?? 0) >= 2 || out.some((o) => o.text === x.text)) continue;
-    per.set(u, (per.get(u) ?? 0) + 1); out.push({ text: x.text, page: x.page });
+    per.set(u, (per.get(u) ?? 0) + 1); out.push({ text: x.text, page: x.page, prev: x.prev });
   }
   return out;
 }
@@ -378,11 +402,15 @@ const LEVELS: [string, RegExp][] = [
 ];
 const WORK = /\b(?:swex|engineer(?:s|ing)?|developers?|programmers?|analysts?|scientists?|designers?|researchers?|traders?|quants?|quantitative|consultants?|accountants?|nurses?|teachers?|recruiters?|marketing|sales|product|data|software|hardware|finance|legal|operations|security|design)\b/gi;
 const workOf = (s: string) => new Set((abbreviated(s).toLowerCase().match(WORK) ?? []).map((w) => [...contentWords(w)][0] ?? w));
-export function aboutAsked(sentence: string, title: string, ask: string): boolean {
+// Fail closed (2026-11-13, review of #801: "Quantitative traders earn a base salary of $350,000" was offered for an intern ask
+// because the page was titled "Software Engineer Intern - Citadel"): what the sentence itself says of the level and the kind of work
+// decides; `context` lends a level or a kind of work only when the sentence names none of its own, and must name no other. The
+// research passes the sentence right before it on the page as `context`, never the page's title.
+export function aboutAsked(sentence: string, context: string, ask: string): boolean {
   const lv = (s: string) => LEVELS.filter(([, re]) => re.test(s)).map(([k]) => k);
-  const want = lv(ask), own = lv(sentence), around = lv(`${sentence} ${title}`);
-  if (!want.every((k) => around.includes(k)) || own.some((k) => !want.includes(k))) return false;
-  const work = workOf(ask), has = workOf(`${sentence} ${title}`);
+  const want = lv(ask), own = lv(sentence), level = own.length ? own : lv(context);
+  if (!want.every((k) => level.includes(k)) || level.some((k) => !want.includes(k))) return false;
+  const work = workOf(ask), mine = workOf(sentence), has = mine.size ? mine : workOf(context);
   return !work.size || [...work].some((w) => has.has(w));
 }
 // `ask` (D-073): the person's own message this turn; the parts the answer must cover are the ones THEY named (C23 "that citadel
@@ -448,18 +476,29 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   // in the page's title or a company asked about that the page names). Any other reading is never the answer and never lends a
   // figure to the reply; with nothing verified the result is no_sources and the reply says it could not be confirmed.
   const answerable = new Set<string>();
-  const saidBy = (t: string, ps: SourcePage[]) => ps.some((p) => {
-    const named = companies0.filter((c) => nameIn(c, p.text) || nameIn(c, p.title)).join(" "), want = contentWords(t);
-    return squash(readAlike(p.text.slice(0, 60000))).split(/(?<=[.!?])\s+/).some((x) => x.length >= 8 && x.length <= 600 && [...contentWords(x)].some((w) => want.has(w))
-      && checkLine(t, x, { ...p, text: x }, named, { fallback: false, predicate: false }).ok);
-  });
+  // 2026-11-13 (fail closed): the sentence that says it is found the same way, and checkLine decides what may be shown: a reading
+  // with a number only as that sentence itself, word for word; one without a number only when the sentence has its polarity.
+  const sayer = (t: string, ps: SourcePage[]): { text: string; page: SourcePage } | null => {
+    const want = contentWords(t);
+    for (const p of ps) {
+      const named = companies0.filter((c) => nameIn(c, p.text) || nameIn(c, p.title)).join(" ");
+      for (const x of squash(readAlike(p.text.slice(0, 60000))).split(/(?<=[.!?])\s+/)) {
+        if (x.length < 8 || x.length > 600 || ![...contentWords(x)].some((w) => want.has(w))) continue;
+        const c = checkLine(t, x, { ...p, text: x }, named, { fallback: false, predicate: false });
+        if (c.ok) return { text: c.text, page: p };
+      }
+    }
+    return null;
+  };
   const reading = (section: string) => (x: any) => {
     const t = squash(x?.text), ps = arr(x?.urls, 4).map(pageOf).filter(Boolean) as SourcePage[];
     const why = !ps.length ? "page_not_read" : !t || t.length > 400 || !linkFree(t) || !numsOn(t, ps) ? "reading_unsupported" : "";
     if (why) { dropped++; auditLine(audit, { ok: false, why }, section, { text: t }); return null; }
     auditLine(audit, { ok: true }, section);
-    if (wordsOnPages(t, ps) >= ON_PAGES_SHARE && saidBy(t, ps)) answerable.add(t);
-    return { text: t, cite: [...new Set(ps.map(num))] };
+    const hit = wordsOnPages(t, ps) >= ON_PAGES_SHARE ? sayer(t, ps) : null;
+    if (hit) answerable.add(hit.text);
+    // The page's own sentence (a reading with a number) cites the page it is on; a reading in the model's words, the pages it named.
+    return hit && hit.text !== t ? { text: hit.text, cite: [num(hit.page)] } : { text: t, cite: [...new Set(ps.map(num))] };
   };
   const points = [...new Map((arr(d.summary, 5).map((x) => fact(x?.text, x?.quote, x?.url)).filter(Boolean) as Cited[]).map((x) => [x.text, x])).values()];
   let comparison: Extract<MarketResult, { status: "ok" }>["comparison"] = null;
@@ -484,7 +523,8 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   // D-073 review (item 2): a page's sentence that gives pay answers the pay asked about only when it is about the role and level
   // asked (aboutAsked); a senior engineer's or a trader's pay is never offered as the intern's. Such a sentence is passed over.
   const asked = `${i.ask ?? ""} ${i.question}`;
-  const payOk = (l: { text: string; page: SourcePage }) => !covers(l.text, PAY_PART) || aboutAsked(l.text, l.page.title, asked);
+  // 2026-11-13: by the sentence's own words or the sentence before it on the page; the page's title never makes it so.
+  const payOk = (l: { text: string; page: SourcePage; prev?: string }) => !covers(l.text, PAY_PART) || aboutAsked(l.text, l.prev ?? "", asked);
   const addPage = (l: { text: string; page: SourcePage }) => { if (keptLines().some((x) => x.text === l.text)) return; points.push({ text: l.text, cite: [num(l.page)] }); auditFromPages(audit); };
   for (const part of parts.filter((pt) => !keptLines().some((l) => covers(l.text, pt)))) for (const l of pageSentences(pages, part.words, companies0, 6).filter(payOk).slice(0, 1)) addPage(l);
   const need = Math.max(1, parts.length);
@@ -498,10 +538,23 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   }
   const cited = order.map((k) => byUrl.get(k)!);
   const thesis0 = squash(d.thesis), title0 = squash(d.title).slice(0, 80);
-  const thesis = thesis0 && thesis0.length <= 160 && linkFree(thesis0) && numsOn(thesis0, cited) ? thesis0 : null;
-  const title = title0 && linkFree(title0) && numsOn(title0, cited) ? title0 : squash(i.question).replace(/[?]+$/, "").slice(0, 80);
-  // The thesis's own sources: every cited page that holds all of its content words (and, by numsOn above, its numbers).
-  const thesisCite = thesis ? cited.map((p, k) => ({ p, n: k + 1 })).filter(({ p }) => { const have = contentWords(p.text.slice(0, 60000)); return [...contentWords(thesis)].every((w) => have.has(w)); }).map(({ n }) => n) : [];
+  // 2026-11-13 (fail closed; review of #801: "Citadel interns earn $9,000 a week" was the File's cover headline, cited [1], while
+  // the same claim sat under "Not confirmed" below it): the thesis is checked like any other line the model worded. It stands only
+  // when one sentence of a cited page says it (sayer: with a number, as that sentence itself; without one, with its polarity), and
+  // it cites that page. Otherwise the cover is the first kept line (a quoted fact, a page's own sentence or a reading its page
+  // says): never an unverified headline, and never a reading the File lists as not confirmed. A title's numbers are the question's.
+  // A thesis with no number that no one sentence says is still shown as "a summary of the cited sections below" (thesis_summary),
+  // unless it restates a reading the File lists as not confirmed; with FAIL_CLOSED.figures it too gives way to the first kept line
+  // (research-free-brief.test.ts pins the summary form).
+  const fits = !!thesis0 && thesis0.length <= 160 && linkFree(thesis0) && numsOn(thesis0, cited);
+  const said0 = fits ? sayer(thesis0, cited) : null;
+  const unsaidWords = [...conditions, ...risks].filter((x) => !answerable.has(x.text)).map((x) => contentWords(x.text)).filter((w) => w.size > 0);
+  const echoes = (t: string) => { const have = contentWords(t); return unsaidWords.some((w) => [...w].filter((x) => have.has(x)).length / w.size >= 0.8 || (have.size > 0 && [...have].filter((x) => w.has(x)).length / have.size >= 0.8)); };
+  const asSummary = fits && !said0 && !FAIL_CLOSED.figures && !figuresIn(thesis0).length && !echoes(thesis0);
+  const lead = said0 && said0.text.length <= 160 ? { text: said0.text, cite: [cited.indexOf(said0.page) + 1] } : asSummary ? { text: thesis0, cite: [] as number[] } : [...points, ...keptLines()].find((x) => x.text.length <= 160) ?? null;
+  const thesis = lead ? lead.text : null, thesisCite = lead ? lead.cite : [];
+  const qn = figuresIn(i.question);
+  const title = title0 && linkFree(title0) && figuresIn(title0).every((n) => qn.some((x) => numEq(x, n))) ? title0 : squash(i.question).replace(/[?]+$/, "").slice(0, 80);
   const companies = i.plan.companies ?? [];
   const sources: MarketSource[] = cited.map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || new URL(p.url).hostname, fetched_at: new Date(p.fetchedAt).toISOString(),
     kind: sourceKind(p.url, companies), ...(quoted.has(normalizeUrl(p.url)) ? { via: "search_passage" as const } : {}), ...(dated.get(normalizeUrl(p.url)) ? { dated: dated.get(normalizeUrl(p.url)) } : {}) }));
@@ -553,7 +606,20 @@ export function messagesLayout(body: string, sources: MarketSource[]): string {
   return out.join("\n\n");
 }
 const SAYS_UNCONFIRMED = /\b(?:couldn['’]?t|could not|can['’]?t|cannot|unable to|wasn['’]?t able|was not able|not able to|don['’]?t have|do not have|no (?:source|page|verified))\b/i;
-const CLAIM_AFTER = /\b(?:but|however|although|though|yet|still|anyway)\b/i;
+// 2026-11-13 (fail closed; review of #801: "I couldn't confirm the exact figure, and Citadel interns are the best paid in the
+// industry." went out whole, and "I can't share links here." was taken for the could-not-confirm sentence): the model's sentence
+// stands only when it says that an answer could not be confirmed or found, and says nothing else. It starts with "I" (or with the
+// phrase itself), at most saying first that it looked; what follows the phrase is about confirming, finding or the sources; and no
+// second clause follows (no "and", "but", "so", comma, semicolon or colon after it). Any other sentence is not it.
+const ABOUT_CONFIRMING = /\b(?:confirm\w*|verif\w*|find|locate|determine|establish|substantiate|pin\s+down|sources?|pages?)\b/i;
+const SECOND_CLAUSE = /\b(?:and|but|however|although|though|yet|still|anyway|while|whereas|because|since|so|plus|which)\b|[,;:—–]|\s-\s/i;
+const ONLY_LOOKED = /^(?:(?:sorry|unfortunately)[,\s]+)?(?:i(?:\s+(?:looked|searched|checked|read|tried)\b(?:\s+[^\s,;:]+){0,10}?\s+(?:and|but)(?:\s+i)?)?)?$/i;
+export function onlySaysUnconfirmed(s: string): boolean {
+  const t = String(s ?? "").trim(), m = SAYS_UNCONFIRMED.exec(t);
+  if (!m || numbersIn(t).length) return false;
+  const after = t.slice(m.index + m[0].length);
+  return ONLY_LOOKED.test(t.slice(0, m.index).trim()) && ABOUT_CONFIRMING.test(`${m[0]}${after}`) && !SECOND_CLAUSE.test(after);
+}
 // The reply, enforced in code: every link the model wrote is removed; a citation number with no source is removed; an inline
 // sentence stands only when it cites a source, every figure in it is on a kept point citing that source, and every name in it is
 // named by a kept point citing that source (a file reply's figures must be on a kept point); the inline answer ends with its numbered sources (each a page fetched this turn, with its
@@ -570,8 +636,11 @@ export function enforceMarketReply(reply: string, r: MarketResult, shown: { text
   // Research found nothing to stand on: a sentence stays only when it says so (no figure, a plain "couldn't confirm", no
   // "but" carrying a claim after it); anything else is the plain no-source line. "The market is growing rapidly." never stands.
   if (r.status !== "ok") {
-    const says = (s: string) => !numbersIn(s).length && SAYS_UNCONFIRMED.test(s) && !CLAIM_AFTER.test(s);
-    const sents = stripUrls(reply).split(/(?<=[.!?])\s+/).filter((s) => s && (says(s) || wasShown(s)));
+    // 2026-11-13: one such sentence, the first; no other sentence of the model's survives (a pay line this conversation already
+    // showed is code's own record of an earlier reply and stays with its link, as before).
+    const all = stripUrls(reply).split(/(?<=[.!?])\s+/).filter(Boolean), own = all.find(onlySaysUnconfirmed);
+    const says = (s: string) => s === own;
+    const sents = all.filter((s, k) => (s === own && all.indexOf(s) === k) || (!onlySaysUnconfirmed(s) && wasShown(s)));
     const kept = sents.join(" ");
     // D-073 review: a reply that says it could not confirm an answer carries the sources that were opened and checked.
     // D-073 review 2 (owner: never a blank research answer): pages were read, so the person is always told that no answer could be
@@ -604,10 +673,33 @@ export function enforceMarketReply(reply: string, r: MarketResult, shown: { text
   // D-060 (C9): a sentence that stands only on self-reported or anecdotal sources says so.
   const kindOf = (n: number) => r.sources.find((x) => x.n === n)?.kind;
   const labelOk = (s: string) => { const cs = citesOf(s); return !cs.length || cs.some((c) => { const k = kindOf(c); return !k || k === "official" || k === "reported"; }) || UNVERIFIED_LABEL.test(s); };
+  // 2026-11-13 (fail closed; review of #801). Always: a sentence with a number has the polarity of a kept line it takes a figure
+  // from (the caveat a label asks for, "anecdotes, not proof", is not a denial): "interns earn $5,000 [1]" never stands on the kept
+  // "interns do not earn $5,000". With FAIL_CLOSED.figures (the kept point "Senior traders at Citadel received a signing bonus of
+  // $5,000." let "Citadel interns earn $5,000 a week [1]." stand): a sentence with a number stands only when it IS a kept line, the
+  // whole of it, character for character (every kept line with a number is then its page's own sentence), citing that line's
+  // source. The kept lines whose figures a removed sentence used are given in its place (`lost`, below).
+  const plainOf = (s: string) => s.replace(/\[\d+\]/g, " ").replace(/\s+/g, " ").trim().replace(/\s*[.!?]+$/, "");
+  const lines: Cited[] = [...r.points, ...(r.comparison?.rows ?? []).flatMap((x) => x.cells.flatMap((c) => c ? [{ text: c.value, cite: c.cite }] : [])), ...[...r.conditions, ...r.risks].filter((x) => said1.has(x.text))];
+  const isKept = (s: string, cs: number[] | null) => lines.some((p) => plainOf(p.text) === plainOf(s) && (!cs || p.cite.some((c) => cs.includes(c))));
+  const lost: ReturnType<typeof numbersIn> = [];
+  const polarityOf = (s: string) => negates(s.replace(new RegExp(UNVERIFIED_LABEL.source, "gi"), " "));
+  const figureOk = (s: string, cs: number[] | null) => {
+    const ns = numsOf(s);
+    if (!ns.length || isKept(s, cs)) return true;
+    const from = items.filter((p) => (!cs || p.cite.some((c) => cs.includes(c))) && p.nums.some((x) => ns.some((n) => numEq(x, n))));
+    // Always, too: the sentence names no level (intern, senior, ...) and no kind of work (engineer, trader, ...) that the kept
+    // lines it takes its figure from do not: a senior trader's bonus is never said as an intern's pay (LEVELS, WORK: aboutAsked's).
+    const lv = (t: string) => LEVELS.filter(([, re]) => re.test(t)).map(([k]) => k), whose = from.map((p) => p.text).join(" ");
+    const sameWho = !from.length || (lv(s).every((k) => lv(whose).includes(k)) && [...workOf(s)].every((w) => workOf(whose).has(w)));
+    if (!FAIL_CLOSED.figures && sameWho && (!from.length || from.some((p) => polarityOf(p.text) === polarityOf(s)))) return true;
+    if (!wasShown(s)) lost.push(...ns);
+    return false;
+  };
   const supported = (s: string) => {
     const cs = citesOf(s);
     const mine = items.filter((p) => p.cite.some((c) => cs.includes(c)));
-    return cs.length > 0 && numsOf(s).every((n) => mine.some((p) => p.nums.some((x) => numEq(x, n))))
+    return cs.length > 0 && figureOk(s, cs) && numsOf(s).every((n) => mine.some((p) => p.nums.some((x) => numEq(x, n))))
       && specifics(s.replace(/\[\d+\]/g, "")).names.every((w) => mine.some((p) => said(w, p.text))) && statOk(s, mine) && labelOk(s);
   };
   // D-073 review 2: the chat and the File agree. A reading no sentence of its page says is shown on the File apart, as not confirmed
@@ -616,7 +708,7 @@ export function enforceMarketReply(reply: string, r: MarketResult, shown: { text
   const unsaid = [...r.conditions, ...r.risks].filter((p) => !said1.has(p.text)).map((p) => contentWords(p.text)).filter((w) => w.size > 0);
   const restates = (s: string) => { const have = contentWords(s.replace(/\[\d+\]/g, " ")); return unsaid.some((w) => [...w].filter((x) => have.has(x)).length / w.size >= 0.8); };
   const keep = (t: string) => stripUrls(t).replace(/\[(\d+)\]/g, (m, n) => Number(n) >= 1 && Number(n) <= max ? m : "")
-    .split(/(?<=[.!?](?:\s*\[\d+\])*)\s+/).filter((s) => s.trim() && !restates(s) && ((r.format === "file" ? onRecord(s) && statOk(s, items) : supported(s)) || (!/\[\d+\]/.test(s) && wasShown(s)))).join(" ").trim();
+    .split(/(?<=[.!?](?:\s*\[\d+\])*)\s+/).filter((s) => s.trim() && !restates(s) && ((r.format === "file" ? figureOk(s, null) && onRecord(s) && statOk(s, items) : supported(s)) || (!/\[\d+\]/.test(s) && wasShown(s)))).join(" ").trim();
   // D-060 (C9): in the messages layout the model's paragraphs (one topic each) are kept as paragraphs.
   const paras = r.layout === "messages" && r.format !== "file";
   let body = paras ? reply.split(/\n\s*\n/).map(keep).filter(Boolean).join("\n\n") : keep(reply);
@@ -632,8 +724,12 @@ export function enforceMarketReply(reply: string, r: MarketResult, shown: { text
   if (!body && r.format === "file") body = r.points.slice(0, 3).filter((p) => labelOk(`${p.text} ${p.cite.map((n) => `[${n}]`).join("")}`)).map(lineOf).join(" ");
   else if (!body) body = [...new Set([...byPart, ...pool])].slice(0, Math.max(3, byPart.length)).map(lineOf).join(paras ? "\n\n" : " ");
   else if (r.format !== "file") {
-    const left = parts.filter((pt) => !covers(body.replace(/\[\d+\]/g, " "), pt)).map((pt) => pool.find((p) => covers(p.text, pt))).filter(Boolean) as Cited[];
-    if (left.length) body = [body, ...[...new Set(left)].map(lineOf)].join(paras ? "\n\n" : " ");
+    const has = (p: Cited) => plainOf(body).includes(plainOf(p.text));
+    // The kept lines a removed sentence's figures came from, first; then a line for each part asked that the answer left out.
+    const swapped = pool.filter((p) => !has(p) && numbersIn(p.text).some((n) => lost.some((x) => numEq(x, n))));
+    const left = parts.filter((pt) => !covers(`${body} ${swapped.map((p) => p.text).join(" ")}`.replace(/\[\d+\]/g, " "), pt)).map((pt) => pool.find((p) => covers(p.text, pt))).filter((p) => p && !has(p)) as Cited[];
+    const more = [...new Set([...swapped, ...left])];
+    if (more.length) body = [body, ...more.map(lineOf)].join(paras ? "\n\n" : " ");
   }
   if (!body && r.format !== "file") return NO_SOURCES;
   // D-067 (live-6 C9, D-024): a file reply is never empty. With no sentence of the model's on record, the brief's own thesis

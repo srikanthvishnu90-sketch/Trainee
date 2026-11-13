@@ -203,11 +203,11 @@ const REAL_EMAILS = ["a.khan@gmail.com", "dana.okafor@gmail.com", "d.okafor+jobs
   "dana@company.technology", "dana@email.com", "dana@domain.com", "me@me.com", "dana@例え.jp", "k.nakamura@g.ecc.u-tokyo.ac.jp", "dana@example-labs.com", "user1@gmail.com", "null.pointer@gmail.com", "DANA.OKAFOR@GMAIL.COM", "johndoe123@gmail.com", "1234567@qq.com"];
 const DOUBTFUL_EMAILS = ["you@gmail.com", "name@domain.com", "yourname@gmail.com", "your.name@gmail.com", "first.last@university.edu", "firstname.lastname@outlook.com", "first_last@yahoo.com", "email@gmail.com", "user@company.org", "test@gmail.com", "john.doe@gmail.com", "jane.doe@outlook.com"];
 const BAD_PHONES = ["555-0100", "555-0199", "(212) 555-0142", "+1 212 555 0142", "123-456-7890", "(123) 456-7890", "+1 123 456 7890", "1234567890", "(xxx) xxx-xxxx", "XXX-XXX-XXXX", "(NNN) NNN-NNNN", "(###) ###-####", "(555) 555-5555", "000-000-0000", "555-123-4567",
-  "111-111-1111", "(999) 999-9999", "987-654-3210", "(415) 000-0000", "415-123-4567", "+44 7700 900123", "07700 900000", "+61 491 570 156", "(415) 867-530", "867-5309", "41586753091234567", "+00 000 000 0000", "[phone]", "{{phone}}"];
+  "111-111-1111", "(999) 999-9999", "987-654-3210", "(415) 000-0000", "415-123-4567", "+44 7700 900123", "07700 900000", "+61 491 570 156", "41586753091234567", "+00 000 000 0000", "[phone]", "{{phone}}"];
 const GOOD_PHONES = ["(415) 867-5309", "+1 212-736-5000", "646.555.0234", "312-555-1212", "+44 20 7183 8750", "+44 7911 123456", "+91 98765 43210", "+49 30 901820", "+33 1 42 68 53 00", "+81 3-1234-5678", "4158675309", "(415) 867-5309 ext. 12", "020 7183 8750", "+86 138 0013 8000", "Chicago, IL 60614", "2019 - 2021"];
 
-Deno.test("finding 3: 117 emails and phones: malformed, reserved and template ones are refused; no real address is; a template's stand-in name is asked about", () => {
-  eq(REFUSED_EMAILS.length + REAL_EMAILS.length + DOUBTFUL_EMAILS.length + BAD_PHONES.length + GOOD_PHONES.length, 117);
+Deno.test("finding 3: 115 emails and phones: malformed, reserved and template ones are refused; no real address is; a template's stand-in name is asked about", () => {
+  eq(REFUSED_EMAILS.length + REAL_EMAILS.length + DOUBTFUL_EMAILS.length + BAD_PHONES.length + GOOD_PHONES.length, 115);
   for (const e of REFUSED_EMAILS) ok(typeof R.placeholderEmail(e) === "string" && R.placeholderEmail(e), `refused: ${JSON.stringify(e)}`);
   for (const e of REAL_EMAILS) eq([R.placeholderEmail(e), R.doubtfulEmail(e), R.contactProblems({ email: e })], [null, null, []], e);
   for (const e of DOUBTFUL_EMAILS) {
@@ -447,4 +447,34 @@ Deno.test("round 3/5-6: cut-short and counting phones are refused; '+1 555-01xx'
   const base = T.keepEveryEntry({ sections: [] }, { facts: [pp, hooli] }).resume;
   const r: any = T.applyEdits(base, { facts: [pp, hooli] }, [{ role: "Hooli", lines: 2 }]);
   eq(blockOf(r.resume, "B2"), ["Hooli, SRE (2021 - 2024)", "migrated to kubernetes", "on-call lead"]);
+});
+
+// ------------------------------------------------------------------------------------------------ round 4 (2026-11-13)
+Deno.test("round 4: a number is a placeholder only when it matches a known fiction or template pattern; Irish, South African and Ghanaian mobiles and a 7-digit local number are real", async () => {
+  for (const p of ["087 412 9906", "082 456 7781", "024 412 9906", "555-2368", "(415) 867-530", "867-5309", "+353 87 412 9906", "+27 82 456 7781", "+233 24 412 9906"]) {
+    eq(R.placeholderPhones(`dana.okafor@gmail.com | ${p} | Dublin`), [], `header: ${p}`);
+    eq(R.placeholderPhones(`dana.okafor@gmail.com | ${p}`, { file: true }), [], `file: ${p}`);
+  }
+  // Trainee's own renderer prints them.
+  for (const p of ["087 412 9906", "555-2368"]) {
+    const out: any = await tailor(person("dana.okafor@gmail.com", ` | ${p}`));
+    ok(out.ok, `${p}: ${JSON.stringify(out).slice(0, 200)}`);
+  }
+  for (const p of ["555-0123", "(212) 555-0142", "123-456-7890", "000-000-0000", "(xxx) xxx-xxxx", "+1 (987) 654-3210", "(555) 555-5555"]) ok(R.placeholderPhones(`dana.okafor@gmail.com | ${p}`).length === 1, p);
+});
+
+Deno.test("round 4: set_resume_contact never confirms an address the person gives as someone else's; an address followed by a full stop is read", async () => {
+  const tools = Object.fromEntries(careerTools({ postings: async () => [] } as any).map((x: any) => [x.name, x]));
+  const run = async (message: string, email: string) => {
+    const c: any = { userId: USER, threadId: "t1", now: NOW, state: { profile: person("Chicago, IL") }, turn: { message, added: [] } };
+    let err = ""; try { await tools.set_resume_contact.run({ email }, c); } catch (e) { err = String((e as Error).message); }
+    return { err, email: c.state.profile.basics?.email ?? null, checked: c.state.profile.basics?.contact_checked ?? [] };
+  };
+  for (const [msg, e] of [["My friend's email is first.last@gmail.com", "first.last@gmail.com"], ["My manager uses john.doe@gmail.com for this", "john.doe@gmail.com"],
+    ["use jane.doe@gmail.com, it is my husband's", "jane.doe@gmail.com"], ["My sister's address is dana.o@gmail.com", "dana.o@gmail.com"]]) {
+    const r = await run(msg, e);
+    ok(/someone else/.test(r.err) && r.email === null && !r.checked.length, `${msg}: ${JSON.stringify(r)}`);
+  }
+  const r = await run("my email is dana.okafor@gmail.com.", "dana.okafor@gmail.com");
+  ok(!r.err && r.email === "dana.okafor@gmail.com" && r.checked.includes("dana.okafor@gmail.com"), JSON.stringify(r));
 });

@@ -958,6 +958,23 @@ async function recheckFilled(page, filled, ctx0, { settleMs = 300 } = {}) {
   lost = await dropped();
   return lost.map((f) => f.label);
 }
+// Round 2 (review of #818): a text answer the page rewrote after it was filled and read back ("Example" to "EXAMPLE JR" on change,
+// a phone reformatted on blur) no longer says what the person approved. Read once more at the end, each typed answer must be the
+// approved text exactly (spaces at its ends aside), or for a phone the approved digits, less only a dial code that the field's own
+// picker shows (phoneSame, the fill's own rule). Returns the labels that drifted.
+async function driftedFills(page, filled) {
+  const typed = filled.filter((f) => ["text", "textarea"].includes(f.kind) && f.source !== "resume");
+  if (!typed.length) return [];
+  const held = await heldNow(page, typed, { menus: false });
+  const out = [];
+  for (const [i, f] of typed.entries()) {
+    const now = held[i] && !held[i].gone ? String(held[i].held ?? "") : "";
+    if (now.trim() === String(f.value).trim()) continue;
+    if (isPhone(f.d, f.value) && await phoneSame(page, f.d, f.value, now)) continue;
+    out.push(f.label);
+  }
+  return out;
+}
 // Does a field's one held value say the approved answer, by the same exact rule the fill chose it by? A country by its name or
 // its listed other spellings, a place as the same city, state and country (matchPlace), a state by name or postal code, the
 // phone's country picker as the country with the approved phone's own dial code. Anything else: only the same words.
@@ -974,4 +991,4 @@ function holdsApproved(f, want, facts = {}) {
   if (key === "state") return !matchState([held], want).error;
   return false;
 }
-module.exports = { isHoneypot, MARK_SIGNIN, heldNow, recheckFilled, holdsApproved, factsFrom, fillForm, matchOption, matchPlace, matchState, countryNames, phoneCountryMatch, factKey, factValue, answerFor, decide, labelCounts, labelKinds, norm, EXTRACT, STATE, DECLINE };
+module.exports = { driftedFills, isHoneypot, MARK_SIGNIN, heldNow, recheckFilled, holdsApproved, factsFrom, fillForm, matchOption, matchPlace, matchState, countryNames, phoneCountryMatch, factKey, factValue, answerFor, decide, labelCounts, labelKinds, norm, EXTRACT, STATE, DECLINE };

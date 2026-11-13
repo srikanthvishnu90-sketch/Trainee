@@ -30,7 +30,7 @@
 //  - local only by default: only loopback hosts are driven. Real employer hosts need `allowHosts` from the caller
 //    (the owner-run approve-first path), and this module never discovers or logs in anywhere.
 const fs = require("node:fs");
-const { fillForm, heldNow, recheckFilled, MARK_SIGNIN, EXTRACT, answerFor, factValue, factsFrom } = require("./ats-fill.cjs");
+const { fillForm, heldNow, recheckFilled, driftedFills, MARK_SIGNIN, EXTRACT, answerFor, factValue, factsFrom } = require("./ats-fill.cjs");
 const { APPLY_TEXT, NEVER_CLICK, OVERLAY_APPLY, CLOSED_MARK, CLOSED_TEXT, applyUrlFor } = require("./apply-entry.cjs");
 const { buildHandoff, PERSON_REASONS, pageDigest, unconfirmedDefaults } = require("./handoff.cjs");
 const NOT_OFFERED = new Set(["no_matching_option", "ambiguous_option"]);
@@ -432,6 +432,34 @@ function MARK(pick) {
 // is in that form. `t` is read from the page (attempt): formless (no form was marked), anyForm, sameForm, filledOutside.
 // `outside`: pickControls took the control by the one narrow exception (outsideSubmitOf); it must still belong to no form.
 const CAPTCHA_QUESTION = /captcha|characters (?:shown|you see|displayed|in the image)|(?:text|code|letters) (?:shown |you see )?in the (?:image|picture)|prove (?:that )?you(?:'re| are) (?:a )?human|not a robot/i;
+// Round 2 (review of #818): the in-page guard, armed as the last step before the click. FORM_SNAP is what the application form
+// would send (its FormData, an upload by its name and size, opaque tokens left out) at the last look; GUARD compares the form with
+// it now (a difference refuses before the click) and again at the instant it is sent: on the Submit control's click (capture, before
+// the page's own click handlers) and on the form's submit (bubbling to window, after the page's own submit handlers). A difference
+// there stops the browser from sending it (preventDefault) and leaves a flag; when the page's own script had already taken the
+// submission (it prevented the default to send it itself), the flag says late: it may have been sent. Read after the click by
+// guardVerdict. A board with no <form> has nothing to snapshot and no guard.
+function FORM_SNAP(opaque) {
+  const f = document.querySelector("form[data-upmore-app]");
+  if (!f) return null;
+  const tok = new RegExp(opaque, "i"), rows = [];
+  for (const [k, v] of new FormData(f)) if (!tok.test(k)) rows.push([k, typeof v === "string" ? v : `file:${v.name}:${v.size}`]);
+  return JSON.stringify(rows);
+}
+function GUARD([want, opaque]) {
+  const f = document.querySelector("form[data-upmore-app]"), b = document.querySelector("[data-upmore-submit]");
+  if (!f || want === null) return { armed: false, same: true };
+  const tok = new RegExp(opaque, "i");
+  const now = () => { const rows = []; for (const [k, v] of new FormData(f)) if (!tok.test(k)) rows.push([k, typeof v === "string" ? v : `file:${v.name}:${v.size}`]); return JSON.stringify(rows); };
+  const g = window.__upmoreGuard = { aborted: false, late: false };
+  const stop = (e, late) => { g.aborted = true; g.late = g.late || late; e.preventDefault(); e.stopImmediatePropagation(); };
+  if (b) b.addEventListener("click", (e) => { if (now() !== want) stop(e, false); }, { capture: true, once: true });
+  window.addEventListener("submit", (e) => { if (e.target === f && now() !== want) stop(e, e.defaultPrevented); });
+  return { armed: true, same: now() === want };
+}
+const guardVerdict = (g) => (!g || !g.aborted ? { status: null }
+  : g.late ? { status: "unknown_outcome", reason: "the page changed the form as it was sent, and its own script had already taken it: it may have been sent" }
+    : { status: "not_submitted", reason: "page_changed_at_submit" });
 const submitTieRefusal = (t) => ((t.formless ? !t.anyForm : (t.sameForm || (t.outside === true && t.noForm === true)) && !t.filledOutside) ? null : "submit_not_tied_to_form");
 // Page side, read only: what every control of the application form holds now (the whole page for a board with no <form>): the
 // rows of handoff.cjs pageRows. A box or radio by its own option (value null when not ticked), a select by its chosen options'
@@ -933,7 +961,13 @@ async function attempt(browser, p, opts, timing) {
       const labels = new Map((await page.evaluate(EXTRACT).catch(() => [])).map((d) => [String(d.q), d.label]));
       return (await page.evaluate(CONTROLS, { filled: fr.filled.map((f) => String(f.d.q)), answer: HIDDEN_ANSWER.source, opaque: OPAQUE.source })).map((c) => { const label = labels.get(String(c.q)) || c.label; return { ...c, label, value: c.type === "checkbox" && c.value && c.value === label ? "checked" : c.value }; });
     };
+    // Round 2: every typed answer still says exactly what was approved (a page that rewrote one after the fill is refused).
+    // The focus leaves the last field first, as a person's click on Submit would make it: a page that reformats on blur does it now.
+    await page.evaluate(() => { const a = document.activeElement; if (a && a !== document.body && a.blur) a.blur(); }).catch(() => {});
+    await page.waitForTimeout(150);
+    { const drifted = await driftedFills(page, fr.filled); if (drifted.length) { const e = new NeedsUser("field_not_filled", drifted[0]); e.needs = drifted.map((l) => ({ label: l, reason: "value_changed_by_page" })); throw e; } }
     const controls = await readControls();
+    const formSnap = await page.evaluate(FORM_SNAP, OPAQUE.source).catch(() => null);
     // The person's own confirmed answer to a question, as ats-fill reads it (an approved answer, else a confirmed fact).
     const known = factsFrom(p.facts || {}, p.answers || {});
     const unconfirmed = unconfirmedDefaults(controls, { answer: (l) => { const a = answerFor(l, p.answers || {}); return a === undefined || a === null || String(a).trim() === "" ? factValue(l, known) : a; }, phone: known.phone, country: known.country });
@@ -954,10 +988,15 @@ async function attempt(browser, p, opts, timing) {
     if (opts.onPhase) await opts.onPhase("submitting", audit, submitInfo);
     // Past this line nothing is retried: the employer may have received it.
     const t2 = Date.now();
+    // Round 2: the guard is armed and the form compared with the last look as the last step before the click; nothing between.
+    const armed = await page.evaluate(GUARD, [formSnap, OPAQUE.source]).catch(() => ({ armed: false, same: formSnap === null }));
+    if (!armed.same) throw new NeedsUser("page_changed_before_submit", p.url);
     timing.submitClicked = true;
     watchPosts = true;
     try {
       await Promise.all([page.waitForLoadState("domcontentloaded"), page.click("[data-upmore-submit]")]);
+      const gv = guardVerdict(await page.evaluate(() => window.__upmoreGuard || null).catch(() => null));
+      if (gv.status) return { status: gv.status, reason: gv.reason, filled };
       await page.waitForSelector("#confirmation, h1", { timeout: opts.stepTimeoutMs || 15000 });
       if (blocked.length) return { status: "unknown_outcome", reason: `after submit: navigation to a disallowed host was refused (${blocked[0]})`, filled };
     } catch (e) {
@@ -1042,4 +1081,4 @@ async function runPool(browser, payloads, opts = {}) {
   return { results, wallMs: Date.now() - started, concurrency };
 }
 
-module.exports = { outcomeVerdict, hiddenIsAnswer, HIDDEN_ANSWER, CAPTCHA_QUESTION, controlLabel, SUBMIT_DENY, checkGate, pickControls, outsideSubmitOf, isApplicationForm, submitTieRefusal, sentToJobList, SNAP, MARK, CONTROLS, closedOnPage, declineCookies, samePostingRedirect, followedPageRefusal, postingIds, CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };
+module.exports = { guardVerdict, GUARD, FORM_SNAP, outcomeVerdict, hiddenIsAnswer, HIDDEN_ANSWER, CAPTCHA_QUESTION, controlLabel, SUBMIT_DENY, checkGate, pickControls, outsideSubmitOf, isApplicationForm, submitTieRefusal, sentToJobList, SNAP, MARK, CONTROLS, closedOnPage, declineCookies, samePostingRedirect, followedPageRefusal, postingIds, CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };

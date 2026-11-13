@@ -437,4 +437,438 @@ const pages = { "/gh-form": GH_FORM, "/captcha-open": CAPTCHA_OPEN, "/captcha-re
   res.writeHead(body ? 200 : 404, { "content-type": "text/html" });
   res.end(body || "<html><body>not found</body></html>");
 });
-server.listen(0, () => { console.log(`FIXTURE_PORT ${server.address().port}`); });
+// WO-009b-3: offline saved-page harness. Legacy routes above remain unchanged.
+const fs = require("node:fs"),
+  path = require("node:path"),
+  crypto = require("node:crypto");
+const hash = (b) => crypto.createHash("sha256").update(b).digest("hex");
+const families = {
+  greenhouse: "greenhouse.io",
+  lever: "lever.co",
+  ashby: "ashbyhq.com",
+  smartrecruiters: "smartrecruiters.com",
+};
+function loadSnapshots(root) {
+  const file = path.join(root, "manifest.json");
+  if (!fs.existsSync(file)) {
+    return {
+      status: "NOT_RUN",
+      expected: 17,
+      real_count: 0,
+      snapshots: [],
+      handoffs: [],
+      unavailable: [],
+    };
+  }
+  const manifest = JSON.parse(fs.readFileSync(file, "utf8")),
+    snapshots = [],
+    handoffs = [],
+    unavailable = [],
+    ids = new Set(),
+    urls = new Set();
+  const rendered = (manifest.forms || []).some((r) =>
+      ["application", "no_application", "blocked_403"].includes(r.status)
+    ),
+    expected = rendered ? 17 : 24;
+  for (const row of manifest.forms || []) {
+    if (
+      !["captured", "application", "no_application", "blocked_403"].includes(
+        row.status,
+      )
+    ) continue;
+    if (!/^[a-z0-9_-]{1,160}$/.test(row.id) || ids.has(row.id)) {
+      throw Error("CAPTURE_ID_INVALID");
+    }
+    ids.add(row.id);
+    if (row.synthetic === true) throw Error("SYNTHETIC_CAPTURE_NOT_REAL");
+    const u = new URL(row.source_url), suffix = families[row.family];
+    u.hash = "";
+    if (
+      !suffix || u.protocol !== "https:" || u.username || u.password ||
+      !(u.hostname === suffix || u.hostname.endsWith("." + suffix)) ||
+      urls.has(u.href)
+    ) throw Error("CAPTURE_PROVENANCE_INVALID");
+    urls.add(u.href);
+    const read = (name) => {
+      if (name !== path.basename(name) || !name.startsWith(row.id + ".")) {
+        throw Error("CAPTURE_PATH_INVALID");
+      }
+      const p = path.join(root, name);
+      if (fs.lstatSync(p).isSymbolicLink()) throw Error("CAPTURE_SYMLINK");
+      return fs.readFileSync(p);
+    };
+    const isRendered = row.status !== "captured";
+    if (isRendered && !Number.isFinite(Date.parse(row.rendered_at))) {
+      throw Error("CAPTURE_PROVENANCE_INVALID");
+    }
+    if (row.status === "blocked_403") {
+      if (
+        row.family !== "smartrecruiters" || row.http_status !== 403 ||
+        !row.bot_check?.includes("datadome")
+      ) throw Error("CAPTURE_HANDOFF_INVALID");
+      handoffs.push({
+        id: row.id,
+        family: row.family,
+        source_url: row.source_url,
+        reason: "DATADOME_MANUAL_HANDOFF",
+      });
+      continue;
+    }
+    if (row.status === "no_application") {
+      unavailable.push({
+        id: row.id,
+        family: row.family,
+        source_url: row.source_url,
+        reason: "NO_APPLICATION_CAPTURED",
+      });
+      continue;
+    }
+    const bytes = read(isRendered ? row.html : row.id + ".html"),
+      meta = isRendered ? row : JSON.parse(read(row.id + ".json"));
+    if (hash(bytes) !== (isRendered ? meta.html_sha256 : meta.sha256)) {
+      throw Error("CAPTURE_HASH_MISMATCH");
+    }
+    if (meta.synthetic === true) throw Error("SYNTHETIC_CAPTURE_NOT_REAL");
+    if (
+      meta.source_url !== row.source_url ||
+      !Number.isFinite(
+        Date.parse(isRendered ? meta.rendered_at : meta.captured_at),
+      )
+    ) throw Error("CAPTURE_PROVENANCE_INVALID");
+    const fields = isRendered
+      ? meta.required?.map((f) => ({ ...f, required: true }))
+      : meta.fields;
+    if (
+      meta.http_status !== 200 || !Array.isArray(fields) || !fields.some((f) =>
+        f.required && f.name
+      ) || !(isRendered
+        ? meta.resume_inputs > 0
+        : fields.some((f) => f.type === "file"))
+    ) throw Error("CAPTURE_PROVENANCE_INVALID");
+    snapshots.push({
+      ...row,
+      ...meta,
+      fields,
+      rendered: isRendered,
+      sha256: hash(bytes),
+      html: bytes.toString("utf8"),
+      synthetic: false,
+    });
+  }
+  const familiesReady = !rendered ||
+    ["greenhouse", "lever", "ashby"].every((f) =>
+      snapshots.filter((s) => s.family === f).length >= 5
+    );
+  return {
+    status: snapshots.length === expected && familiesReady
+      ? "AVAILABLE"
+      : snapshots.length
+      ? "PARTIAL"
+      : "NOT_RUN",
+    expected,
+    real_count: snapshots.length,
+    snapshots,
+    handoffs,
+    unavailable,
+  };
+}
+function createSnapshotServer(snapshots) {
+  const pages = new Map();
+  for (const s of snapshots) {
+    if (
+      !/^[a-z0-9_-]{1,160}$/.test(s.id) || pages.has(s.id) ||
+      typeof s.html !== "string"
+    ) throw Error("SNAPSHOT_INVALID");
+    pages.set(s.id, s);
+  }
+  const stats = { gets: 0, mutations: 0 };
+  const instance = http.createServer((req, res) => {
+    if (!["GET", "HEAD"].includes(req.method)) {
+      stats.mutations++;
+      res.writeHead(405).end();
+      return;
+    }
+    if (req.url === "/__snapshot_stats") {
+      res.writeHead(200, { "content-type": "application/json" }).end(
+        JSON.stringify(stats),
+      );
+      return;
+    }
+    let id;
+    try {
+      id = decodeURIComponent(
+        new URL(req.url, "http://fixture.invalid").pathname.slice(
+          "/snapshots/".length,
+        ),
+      );
+    } catch {
+      res.writeHead(404).end();
+      return;
+    }
+    const s =
+      req.url.startsWith("/snapshots/") && /^[a-z0-9_-]{1,160}$/.test(id)
+        ? pages.get(id)
+        : null;
+    stats.gets++;
+    res.writeHead(s ? 200 : 404, {
+      "content-type": "text/html",
+      "cache-control": "no-store",
+      "content-security-policy":
+        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'; frame-src 'none'; base-uri 'none'",
+    });
+    res.end(s ? s.html : "Not a saved snapshot");
+  });
+  return { server: instance, stats };
+}
+function probeSnapshot({ url, snapshot, packet, resumePath, evidenceDir }) {
+  if (packet.synthetic !== true || !/^TEST[-_]/.test(packet.user_id)) {
+    throw Error("SYNTHETIC_PROFILE_REQUIRED");
+  }
+  const u = new URL(url);
+  if (
+    u.protocol !== "http:" ||
+    !["127.0.0.1", "localhost"].includes(u.hostname) || u.username || u.password
+  ) throw Error("LOOPBACK_FIXTURE_REQUIRED");
+  const Portal = require("../../packages/domain/149-career-portal-apply.js"),
+    Browser = require("../../packages/domain/150-career-portal-browser.js");
+  const sha256 = hash(Buffer.from(packet.resume.text)),
+    profile = {
+      ...packet.profile,
+      resume: { filename: packet.resume.filename, sha256 },
+    };
+  const board = Browser.createBrowserBoard({
+      url,
+      userId: packet.user_id,
+      resumePath,
+      evidenceDir,
+      scope: { origin: u.origin },
+    }),
+    defs = new Map(),
+    planned = new Map(),
+    raws = new Map(),
+    liveWidgets = new Map(),
+    bindings = new Map(),
+    attemptedWidgets = new Set();
+  let reviews = 0, result;
+  const form = board.form.bind(board),
+    fill = board.fill.bind(board),
+    review = board.atReview.bind(board);
+  board.form = () => {
+    const r = form(),
+      raw = board.lastObservation?.fields || [],
+      classified = Browser.classifyFields(raw);
+    for (const [id, b] of Object.entries(classified.bindings)) {
+      bindings.set(id, b);
+    }
+    for (const f of r.fields) defs.set(f.field_id, f);
+    for (const f of raw) raws.set(f.selector, f);
+    if (snapshot.rendered) {
+      for (const [id, b] of Object.entries(classified.bindings)) {
+        if (b.widget) liveWidgets.set(id, defs.get(id)?.label || id);
+      }
+    }
+    return r;
+  };
+  board.fill = (id, value) => {
+    planned.set(id, JSON.parse(JSON.stringify(value)));
+    if (liveWidgets.has(id)) {
+      attemptedWidgets.add(id);
+      return undefined;
+    }
+    return fill(id, value);
+  };
+  board.atReview = () => {
+    if (attemptedWidgets.size) {
+      throw Object.assign(
+        Error("Stripped fixture cannot execute this widget"),
+        { code: "RENDERED_WIDGET_REQUIRES_LIVE_PAGE" },
+      );
+    }
+    reviews++;
+    return review();
+  };
+  try {
+    const session = Portal.createPortalSession({
+      userId: packet.user_id,
+      board,
+    });
+    try {
+      result = Portal.runApply(session, {
+        posting: {
+          id: snapshot.id,
+          canonicalKey: "TEST:" + snapshot.id,
+          company: "SYNTHETIC fixture",
+          url,
+          status: "open",
+        },
+        profile,
+        attestations: packet.attestations,
+        log: { records: [] },
+      });
+    } catch (e) {
+      if (e.code === "RESUME_SHA_MISMATCH") throw e;
+      result = { resultStatus: "blocked", code: e.code || "BROWSER_BLOCKED" };
+    }
+    if (
+      attemptedWidgets.size &&
+      ["awaiting_user", "prepared"].includes(result.resultStatus)
+    ) {
+      result = {
+        ...result,
+        resultStatus: "blocked",
+        code: "RENDERED_WIDGET_REQUIRES_LIVE_PAGE",
+      };
+    }
+    let current = {};
+    try {
+      current = board.answers();
+    } catch {
+      result = { resultStatus: "blocked", code: "READBACK_UNAVAILABLE" };
+    }
+    const answers = current,
+      required = [...defs.values()].filter((f) => f.required),
+      equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    const bound = required.filter((f) => planned.has(f.field_id)),
+      read = bound.filter((f) =>
+        equal(
+          answers[f.field_id],
+          board.renderedValues[f.field_id] ?? planned.get(f.field_id),
+        )
+      );
+    const raw = [...raws.values()],
+      expected = (snapshot.fields || []).filter((f) => f.required),
+      available = raw.filter((r) => r.required),
+      detected = [],
+      undetected = [];
+    const type = (t) =>
+        /^select-(one|multiple)$/.test(t)
+          ? "select"
+          : t === "input"
+          ? "text"
+          : t,
+      label = (t) =>
+        String(t || "").replace(/[*✱]\s*$/, "").trim().replace(/\s+/g, " ");
+    for (const [i, f] of expected.entries()) {
+      const n = available.findIndex((r) =>
+        (f.name
+          ? (r.name || r.id) === f.name
+          : !r.name && !r.id && !!label(f.label) &&
+            label(r.label) === label(f.label)) &&
+        (!f.type || type(r.inputType) === type(f.type))
+      );
+      if (n >= 0) detected.push(available.splice(n, 1)[0]);
+      else {undetected.push(
+          f.label || f.name || `[unnamed ${f.type || "control"} #${i + 1}]`,
+        );}
+    }
+    const unknown = (result.asks || []).filter((a) =>
+      defs.get(a.field_id)?.required
+    ).map((a) => defs.get(a.field_id).label);
+    const answerable = (f) => {
+      if (f.kind === "standard") {
+        const v = Portal.profileValue(profile, f.profile_key);
+        return v !== undefined && v !== null && v !== "";
+      }
+      const a = profile.answers?.[f.question_key];
+      if (f.kind === "screening") {
+        return a?.confirmed === true && a.value !== undefined;
+      }
+      if (f.kind === "free_text") {
+        return a?.confirmed === true && a.draft === true &&
+          a.value !== undefined;
+      }
+      if (f.kind === "eeo") return true;
+      return f.kind === "attestation" &&
+        packet.attestations?.[f.field_id]?.explicit === true &&
+        packet.attestations[f.field_id].value !== undefined;
+    };
+    const native = required.filter((f) =>
+      !bindings.get(f.field_id)?.widget && answerable(f)
+    );
+    const nativeBound = native.filter((f) => planned.has(f.field_id));
+    const nativeRead = nativeBound.filter((f) => read.includes(f));
+    const nativeGaps = native.filter((f) => !nativeRead.includes(f)).map(
+      (f) => ({
+        id: f.field_id,
+        label: f.label,
+        planned: planned.get(f.field_id),
+        observed: answers[f.field_id],
+        rendered: board.renderedValues[f.field_id],
+        binding: bindings.get(f.field_id)?.inputType,
+      }),
+    );
+    const resumeVerified = Object.values(answers).some((a) =>
+      a && typeof a === "object" && a.sha256 === sha256 &&
+      a.filename === packet.resume.filename
+    );
+    if (
+      result.resultStatus === "prepared" &&
+      (!resumeVerified || !required.length ||
+        read.length / required.length < 0.95)
+    ) {
+      result = {
+        resultStatus: "blocked",
+        code: "FINAL_OBSERVATION_INCOMPLETE",
+      };
+    }
+    return {
+      id: snapshot.id,
+      evidence: snapshot.synthetic ? "SYNTHETIC_CONTROL" : "SAVED_REAL_FORM",
+      source_url: snapshot.source_url || null,
+      status: result.resultStatus,
+      code: result.code || null,
+      expected_raw: expected.length,
+      detected_raw: detected.length,
+      undetected,
+      required: required.length,
+      bound: bound.length,
+      read_back: read.length,
+      ratio: required.length ? read.length / required.length : 0,
+      unknown,
+      unknown_required: required.filter((f) => !answerable(f)).map((f) =>
+        f.label
+      ),
+      native_answerable: native.length,
+      native_bound: nativeBound.length,
+      native_read_back: nativeRead.length,
+      native_gaps: nativeGaps,
+      fill_calls: board.calls.fill,
+      requires_live_widget: [...liveWidgets.values()],
+      resume_verified: resumeVerified,
+      review_calls: reviews,
+      submit_calls: board.calls.submit,
+    };
+  } finally {
+    board.close();
+  }
+}
+function shutdownProbe() {
+  require("../../packages/domain/150-career-portal-browser.js").shutdownAll();
+}
+if (require.main === module) {
+  if (["--snapshot-bundle", "--snapshots"].includes(process.argv[2])) {
+    const bundle = process.argv[2] === "--snapshot-bundle",
+      snapshots = bundle
+        ? JSON.parse(fs.readFileSync(process.argv[3], "utf8"))
+        : loadSnapshots(process.argv[3]).snapshots;
+    if (
+      bundle && snapshots.some((s) =>
+        s.synthetic !== true &&
+        (s.synthetic !== false || s.sha256 !== hash(Buffer.from(s.html)))
+      )
+    ) throw Error("SNAPSHOT_BUNDLE_LABEL_OR_HASH_REQUIRED");
+    const local = createSnapshotServer(snapshots).server;
+    local.listen(
+      0,
+      "127.0.0.1",
+      () => console.log(`FIXTURE_PORT ${local.address().port}`),
+    );
+  } else {server.listen(0, () =>
+      console.log(`FIXTURE_PORT ${server.address().port}`));}
+}
+module.exports = {
+  loadSnapshots,
+  createSnapshotServer,
+  probeSnapshot,
+  shutdownProbe,
+};

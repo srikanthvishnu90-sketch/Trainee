@@ -151,6 +151,12 @@ is missing (never a hollow File). Records unreadable: nothing is made. If the mo
 process check asks it once (`career_brain.ts processCheck familyFile`). Approvals on these pages stay POST forms bound to the
 payload hash shown (D-MS-1, D-MN-2).
 
+Not a File ask (`familyAskOf` is null, so the turn is not held to the tool): a control or an opt-out however it is worded
+("pause my weekly brief", "no more weekly brief", "don't send me the weekly brief anymore", "weekly digest off"), which stays
+with the settings path, and an ask to make something new ("build a search plan", "draft a counter plan"), which stays with the
+planning turn. The interview time in `holds` is the page's: the person's zone, with the zone named
+(`tests/architect/files-ask-optout-d072.test.ts`).
+
 | Family | File | The ask (examples) | Creator | Records the page reads | Before D-072 | After |
 | --- | --- | --- | --- | --- | --- | --- |
 | F-01 | Career brief | "show me my career brief" | `open_record_file` career_brief | account (stated facts, confirmed resume), standing, events | unreachable | reachable (drawn for everyone: what is not on record is named "Not set yet" / Unknown) |

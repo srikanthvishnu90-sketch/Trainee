@@ -30,6 +30,16 @@ export { FAMILY_BY_NAME, FAMILY_NAMES, FAMILY_TITLE, familyAskOf, type MadeFamil
 // ---------------------------------------------------------------- what the page holds (from the page's own view)
 const clip = (s: unknown, n = 160) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, n);
 const kvLine = (r: KV) => `${clip(r.k, 60)}: ${r.v === null || r.v === undefined ? clip(r.missing || "Unknown", 60) : clip(r.v)}`;
+// The interview's time as the page's hero shows it (file_family_apply.ts clock): in the zone the page reads it in, with the zone
+// named. Never the stored UTC instant, which the model would restate as a wrong hour (review of #798).
+export function clockOf(at: unknown, tz: unknown): string {
+  const t = Date.parse(String(at ?? ""));
+  if (!Number.isFinite(t)) return "time not on record";
+  const parts = (zone: string) => Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: zone, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).formatToParts(new Date(t)).map((x) => [x.type, x.value]));
+  let p: Record<string, string>;
+  try { p = parts(String(tz || "America/Chicago")); } catch { p = parts("America/Chicago"); }
+  return `${p.weekday} ${p.month} ${p.day}, ${p.hour}:${p.minute} ${p.dayPeriod} ${p.timeZoneName}`;
+}
 // deno-lint-ignore no-explicit-any
 export function holdsOf(family: MadeFamily, v: any): string[] {
   const out: string[] = [];
@@ -46,7 +56,7 @@ export function holdsOf(family: MadeFamily, v: any): string[] {
     case "F-08": out.push(...(v.factual ?? []).filter((r: KV) => r.v).map((r: KV) => `Saved answer: ${kvLine(r)}`), ...(v.roleSpecific ?? []).map((r: { q: string; scope: string }) => `For ${clip(r.scope, 60)} only: ${clip(r.q)}`),
       ...(v.declaration ? [`Declaration to review (${clip(v.declaration.rid, 60)}): ${clip(v.declaration.text)}`] : []), `Questions waiting for your answer: ${Number(v.needed) || 0}`); break;
     case "F-12": out.push(`${clip(v.kind)} to ${clip(v.recipient?.name, 80)}${v.to ? ` (${clip(v.to, 120)})` : " (address not resolved)"}`, `${clip(String(v.words ?? "").split("\n")[0], 200)}`, `Status: ${clip(v.boundary ?? "not sent", 80)}`); break;
-    case "F-13": out.push(`Interview: ${clip(v.company, 80)}, ${clip(v.stage, 80)}`, `When: ${clip(v.at, 40)} (${v.booked ? "the time the invite stated" : "suggested times, not booked"})`, `Format: ${clip(v.medium, 40)}`, `Interviewer: ${clip(v.person?.name, 60)}${v.person?.role ? `, ${clip(v.person.role, 60)}` : ""}`); break;
+    case "F-13": out.push(`Interview: ${clip(v.company, 80)}, ${clip(v.stage, 80)}`, `When: ${clockOf(v.at, v.tz)} (${v.booked ? "the time the invite stated" : "suggested times, not booked"})`, `Format: ${clip(v.medium, 40)}`, `Interviewer: ${clip(v.person?.name, 60)}${v.person?.role ? `, ${clip(v.person.role, 60)}` : ""}`); break;
     case "F-14": out.push(`Cadence: ${clip(v.cadence, 60)}`, ...(v.changed?.length ? v.changed.map((c: string) => `This week: ${clip(c)}`) : ["This week: a quiet week"]), ...(v.decisions ?? []).map((d: { title: string }) => `Decision: ${clip(d.title)}`), ...(v.blockers ?? []).map((b: string) => `Blocker: ${clip(b)}`)); break;
     case "F-14n": out.push(`Offer: ${clip(v.company, 80)}`, ...(v.history ?? []).map((h: { v: string; text: string; written: boolean }) => `${clip(h.v, 60)}: ${clip(h.text)}${h.written ? "" : " (verbal)"}`), ...(v.position ?? []).map((r: KV) => `Position: ${kvLine(r)}`)); break;
     case "F-15": for (const o of v.offers ?? []) out.push(`${o.letter} ${clip(o.company, 60)}: ${(o.rows ?? []).filter((r: KV) => r.v).map((r: KV) => kvLine(r)).join("; ")}`);
@@ -82,8 +92,11 @@ export async function makeFamilyFile(d: FamilyMakeDeps, userId: string, name: st
     const s = loaded.state as { title?: string; field?: { why?: string }; scope?: string };
     return nothing(family, [s.title, s.field?.why ?? s.scope].filter(Boolean).map((x) => clip(x, 200)).join(". "));
   }
+  // What it holds is read before the File is made: a view that can't be summarised makes no File (never a row with no link sent).
+  let holds: string[];
+  try { holds = holdsOf(family, loaded.view); } catch { return { ok: false, family, reason: "unreadable", error: `not made: your records for the ${title} could not be read just now, so no File was made` }; }
   const made = await d.files.createFamily!(userId, family, title, null, { ref }).catch(() => null);
   if (!made || !made.ok || !made.url) return { ok: false, family, reason: "no_link", error: `not made: ${made && !made.ok ? made.error : "File links aren't set up"}, so no File was made` };
-  return { ok: true, family, title, url: made.url, holds: holdsOf(family, loaded.view) };
+  return { ok: true, family, title, url: made.url, holds };
 }
 const nothing = (family: MadeFamily, why: string): MakeResult => ({ ok: false, family, reason: "nothing_on_record", error: `not made: nothing on record for the ${FAMILY_TITLE[family]}: ${why}` });

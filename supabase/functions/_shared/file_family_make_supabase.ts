@@ -5,9 +5,11 @@ import { recordsFamilies, supabaseDigestWriter } from "./file_family_actions.ts"
 import { supabaseRecords } from "./file_family_records.ts";
 import { planMaterialRecords, supabasePlanMaterialStore } from "./file_family_records_materials.ts";
 import { messageRecords, outreachDrafts } from "./file_family_message.ts";
+import { supabaseTimeZone } from "../trainee-file/store.ts";
 
 // The same record readers the File server serves these pages from (trainee-file/deps.ts), over the service role, keyed by the person.
-// Only `load` is used here: no post runs from the chat.
+// Only `load` is used here: no post runs from the chat. The person's zone is passed as the page passes it, so a time the reply
+// names (the interview's) is the time the page shows.
 // deno-lint-ignore no-explicit-any
 export function supabaseFamilyMaker(admin: any, files: Pick<FileService, "createFamily">, now: () => number = Date.now): FamilyMakeDeps {
   // deno-lint-ignore no-explicit-any
@@ -15,7 +17,7 @@ export function supabaseFamilyMaker(admin: any, files: Pick<FileService, "create
   return {
     files,
     records: {
-      ...recordsFamilies({ read: supabaseRecords(admin), digest: supabaseDigestWriter(admin), now }),
+      ...recordsFamilies({ read: supabaseRecords(admin), digest: supabaseDigestWriter(admin), now, timeZone: supabaseTimeZone(admin) }),
       ...planMaterialRecords(supabasePlanMaterialStore(admin), now),
       "F-12": messageRecords({ store: outreachDrafts(admin), rail: null }),
     },

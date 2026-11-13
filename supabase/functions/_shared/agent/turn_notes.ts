@@ -379,30 +379,99 @@ export function shownPayNote(lines: { text: string; url: string | null }[]): str
 // out of date or must not be used again is a correction of a stored fact. Read by grammar (a staleness or do-not-use phrase in
 // the same sentence as what it names), never by a benchmark's wording (P3). Uncertainty ("might conflict", "not 100% sure") is
 // not a withdrawal.
+// Review of #790 (2026-11-13, BLOCKER; owner must-fix "resume edits never drop experience"; D-007): the reading above was a regex
+// guess, and code un-confirmed a fact on it ("Please don't put the 2024 hackathon first on my resume" set the Acme internship aside,
+// and it left every resume). Code now FAILS CLOSED. Two readings:
+//   staleFactsOf        the ONE fact code may set aside, or none. One clause of the message must be nothing but: that fact (every
+//                       value of it, at least one a figure no other fact holds; its label), an explicit statement that it is wrong,
+//                       out of date, or to be removed from their profile or record, and filler words. Any other word in the clause
+//                       (a posting, a template, "first", "said", "if", "not", "keep") leaves storage alone. Never a role, a project
+//                       or a skill; never a question or a quotation; never when the message names the fact twice, takes it back, or
+//                       two facts qualify.
+//   factCorrectionHints the wide reading above, for a NOTE only: storage is untouched, and the model asks or uses
+//                       correct_profile_fact, which waits for the person's yes.
 const STALE = /\b(?:outdated|out[- ]of[- ]date|no longer (?:true|accurate|current|right|valid|correct)|not (?:current|accurate|right|valid) any ?more|isn'?t (?:current|accurate|right) any ?more|(?:don'?t|do not|never|stop|please don'?t) (?:re-?use|use|using|put|include|list|show)\b(?: (?:it|that|this|them))?|is (?:old|stale|wrong) now)\b/;
 const sentencesOf = (t: string) => t.split(/(?<=[.!?;])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
 export function staleFactSaid(message: string): boolean { return sentencesOf(lc(message)).some((s) => STALE.test(s)); }
 export interface StoredFact { id?: unknown; kind?: unknown; text?: unknown; title?: unknown; status?: unknown; needs_confirmation?: unknown }
-// The confirmed facts a stale sentence names: by the label before its colon ("GPA: 3.9" -> "gpa"), or by a figure it carries
-// ("3.9"), said in that same sentence.
+const WRONG = /(?:^|\s)(?:(?:is|are|'s)\s+)?(?:now\s+)?(?:outdated|out[- ]of[- ]date)(?![a-z0-9-])|(?:^|\s)(?:(?:is|are|'s)\s+)?no longer (?:true|accurate|current|right|valid|correct)(?![a-z0-9-])|(?:^|\s)(?:is|are)(?:n'?t| not) (?:true|accurate|current|right|valid|correct) any ?more(?![a-z0-9-])|(?:^|\s)(?:is|are) (?:wrong|old|stale)(?: now)?(?![a-z0-9-])/g;
+const REMOVE = /^(?:remove|delete|take) (.+?) (?:from|off|out of) my (?:profile|record)$/;
+const LEAD_IN = /^(?:(?:a )?(?:few|couple of|quick) (?:things?|notes?|updates?|corrections?)(?: to know)?|one (?:thing|correction|update)|fyi|heads up|btw|by the way|also|update|correction)\s*[:,]?\s+/;
+const NO_REUSE = /,?\s*(?:so )?(?:please )?(?:don'?t|do not|never) (?:re-?use|use|include|list|show) (?:it|that)(?: again| any ?more)?$/;
+const TAKEN_BACK = /\b(?:keep|kidding|jk|joking|never ?mind|scratch that|ignore that|not really|wait)\b/;
+const QUESTION_START = /^(?:is|are|was|were|isn'?t|aren'?t|do|does|did|should|shall|can|could|would|will|has|have|what|why|how|when|which|who|if|suppose|imagine|say)\b/;
+const GLUE = new Set(["the", "my", "a", "that", "this", "on", "in", "there", "it", "now", "please", "resume", "profile", "record"]);
+const NEVER_SET_ASIDE = new Set(["experience", "project", "skill"]);
+const tokensOf = (t: string) => t.split(/[\s,;:()]+/).map((w) => w.replace(/^[^a-z0-9+#]+|[^a-z0-9+#]+$/g, "")).filter(Boolean);
+const confirmedFact = (f: StoredFact | null | undefined): f is StoredFact => !!f && f.status !== "draft" && f.status !== "rejected" && f.needs_confirmation !== true;
+function partsOf(f: StoredFact): { label: string[]; value: string[] } {
+  const t = lc(f.text || f.title), m = /^([a-z][a-z .'-]{1,30}):\s*(.*)$/.exec(t);
+  const own = [m?.[1], (f as { name?: unknown }).name, (f as { section?: unknown }).section, f.kind].flatMap((x) => tokensOf(lc(x ?? "")));
+  return { label: [...new Set(own.flatMap((w) => [w, `${w}s`]))], value: tokensOf(m ? m[2] : t) };
+}
 export function staleFactsOf(message: string, facts: StoredFact[] | null | undefined): StoredFact[] {
+  const msg = lc(message), all = (facts ?? []).filter(Boolean);
+  if (TAKEN_BACK.test(msg) || /["“”]/.test(String(message ?? ""))) return [];
+  const sentences = sentencesOf(msg);
+  const hits: { f: StoredFact; at: number }[] = [];
+  sentences.forEach((s, at) => {
+    if (s.endsWith("?")) return;
+    let c = s.replace(/[.!;]+$/, "").replace(LEAD_IN, "").replace(/^please\s+/, "").replace(/\s+please$/, "");
+    if (QUESTION_START.test(c)) return;
+    const removal = REMOVE.exec(c);
+    if (removal) c = removal[1];
+    else {
+      c = c.replace(NO_REUSE, "");
+      if ((c.match(WRONG) ?? []).length !== 1) return;
+      c = c.replace(WRONG, " ");
+    }
+    const said = tokensOf(c);
+    for (const f of all) {
+      if (!confirmedFact(f) || NEVER_SET_ASIDE.has(String(f.kind))) continue;
+      const { label, value } = partsOf(f);
+      const figures = value.filter((w) => /\d/.test(w));
+      if (!figures.length || !value.every((w) => said.includes(w))) continue;
+      // A figure another fact also holds ("2026", in three entries) names no one fact.
+      if (figures.some((x) => all.some((o) => o !== f && tokensOf(lc(`${o.title ?? ""} ${o.text ?? ""}`)).includes(x)))) continue;
+      if (said.every((w) => value.includes(w) || label.includes(w) || GLUE.has(w))) hits.push({ f, at });
+    }
+  });
+  if (hits.length !== 1) return [];
+  // Said once: another sentence that names the same fact ("mine is 3.9 so keep it") makes the message two-sided.
+  const { f, at } = hits[0], { label, value } = partsOf(f);
+  if (sentences.some((s, k) => k !== at && tokensOf(s).some((w) => value.includes(w) || label.includes(w)))) return [];
+  return [f];
+}
+// The wide reading, for the note only: a confirmed fact named (its label before the colon, a figure it carries) in a sentence with
+// a staleness or do-not-use phrase, or named by a word only its title has in a sentence saying something is wrong or out of date.
+// `byTitle` false keeps the routing reading exactly what it was before the review (label or figure only).
+export function factCorrectionHints(message: string, facts: StoredFact[] | null | undefined, byTitle = true): StoredFact[] {
   const ss = sentencesOf(lc(message)).filter((s) => STALE.test(s));
   if (!ss.length) return [];
+  const all = (facts ?? []).filter(confirmedFact), set = staleFactsOf(message, facts);
+  const wrong = ss.filter((s) => new RegExp(WRONG.source).test(s)).map((s) => tokensOf(s));
+  const titleWords = (f: StoredFact) => tokensOf(lc(f.title || f.text)).filter((w) => /^[a-z]{4,}$/.test(w) && !GLUE.has(w));
   const out: StoredFact[] = [];
-  for (const f of facts ?? []) {
-    if (!f || f.status === "draft" || f.needs_confirmation === true) continue;
+  for (const f of all) {
     const t = lc(f.title || f.text);
-    if (!t) continue;
+    if (!t || set.includes(f)) continue;
     const label = /^([a-z][a-z .'-]{1,30}):/.exec(t)?.[1]?.trim() ?? null;
     const figs = (t.match(/\d+(?:\.\d+)?/g) ?? []).filter((x) => x.includes(".") || x.length >= 3);
     const named = (s: string) => (label && new RegExp(`(?<![a-z])${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![a-z])`).test(s)) || figs.some((x) => new RegExp(`(?<![\\d.])${x.replace(/\./g, "\\.")}(?![\\d])`).test(s));
-    if (ss.some(named)) out.push(f);
+    const mine = titleWords(f).filter((w) => !all.some((o) => o !== f && titleWords(o).includes(w)));
+    if (ss.some(named) || (byTitle && wrong.some((ws) => mine.some((w) => ws.includes(w))))) out.push(f);
   }
   return out;
 }
 export function staleFactNote(lines: string[]): string {
-  return "THEY SAID A FACT ON THEIR RECORD IS OUT OF DATE (code read it from their words, and code has already set it aside: it is no longer used for anything, and stays off every resume, answer and form until they give a current one): " +
-    lines.map((l) => JSON.stringify(l)).join(", ") + ". Say so in one short clause (for example that it is off their record and won't be used), never call it still on file or still usable, and answer the rest of their message.";
+  return "THEY SAID A FACT ON THEIR RECORD IS OUT OF DATE (code read it from their words, and code has already set it aside: it is not deleted, it is no longer used for anything, and stays off every resume, answer and form until they give a current one or ask for it back): " +
+    lines.map((l) => JSON.stringify(l)).join(", ") + ". Say which fact was set aside in one short clause (for example that it is off their record and won't be used), never call it still on file or still usable, and answer the rest of their message. " +
+    "If they later want it back, show it as written and ask; confirm_profile_fact puts it back on their yes.";
+}
+export function factCorrectionNote(lines: string[]): string {
+  return "THEY MAY BE CORRECTING A FACT ON THEIR RECORD (code only matched words; nothing was changed, and every fact below is still confirmed and still used): " +
+    lines.map((l) => JSON.stringify(l)).join(", ") + ". Read their message. If it says one of these is wrong or out of date and gives the right version, use correct_profile_fact; if it gives none, or you cannot tell which fact they mean, ask one short question naming the fact. " +
+    "If the message is about something else (where a line goes on a resume, a posting, a document, someone else's advice, a question), this note does not apply: answer the message. Never say a fact was removed, set aside or changed unless a tool did it this turn.";
 }
 
 // G2 / G3 / G12 (practice item 11: practice questions ran 300 to 500 characters and reviews opened with something other than the

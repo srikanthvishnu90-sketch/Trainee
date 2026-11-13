@@ -234,7 +234,8 @@ Deno.test("FW-1 routing: a message that may correct a fact is the brain's, named
   const next = () => host.createTurnCtx({ userId: "u-fw", threadId: "t-fw", now: NOW, snapshot: snap, accountPersistence: true });
   const d = (m: string) => { const x = stagedDecision({ env: STAGED, message: m, ctx: next(), host, structured: false }); return [x.brain, x.reason]; };
   eq(d(PERSONA.setup[2]), [true, "stale_fact_correction"]);
-  eq(d("my gpa is outdated, it's 3.7 now"), [true, "possible_fact_correction"]);
+  eq(d("don't use the 3.9 gpa anymore"), [true, "possible_fact_correction"]);
+  eq(d("Please don't put the 2025 hackathon first on my resume"), [true, "possible_fact_correction"]);
 });
 
 // ---------------------------------------------------------------- FW-2 "or" keeps multi-word places and employers whole
@@ -260,6 +261,9 @@ const OR: [string, string[]][] = [
   ["analyst new york or san francisco or remote", ["analyst new york", "analyst san francisco", "analyst remote"]],
   ["engineer chicago or austin or remote", ["engineer chicago", "engineer austin", "engineer remote"]],
   ["designer london or new york", ["designer london", "designer new york"]],
+  ["swe intern san jose or remote", ["swe intern san jose", "swe intern remote"]],
+  ["swe intern remote or san jose", ["swe intern remote", "swe intern san jose"]],
+  ["chicago or new york city product analyst", ["chicago product analyst", "new york city product analyst"]],
   // employers: whole on both sides; a shared role after them goes to each
   ["stripe or goldman sachs", ["stripe", "goldman sachs"]],
   ["goldman sachs or stripe", ["goldman sachs", "stripe"]],
@@ -291,6 +295,9 @@ Deno.test("FW-3 a version whose entries lost their detail lines says so, and whi
   const facts = [
     { id: "x1", kind: "experience", title: "Line Cook, Harbor Diner (2023 - 2024)", text: "Line Cook, Harbor Diner (2023 - 2024)", bullets: ["Ran the grill station for 200 covers a night", "Trained 4 new cooks"], status: "confirmed", needs_confirmation: false },
     { id: "x2", kind: "experience", title: "Lifeguard, City Pool (2022)", text: "Lifeguard, City Pool (2022)", bullets: ["Watched a 25 meter pool"], status: "confirmed", needs_confirmation: false },
+    { id: "x3", kind: "experience", title: "Cashier, Corner Market (2021)", text: "Cashier, Corner Market (2021)", bullets: ["Handled the register on weekends"], status: "confirmed", needs_confirmation: false },
+    { id: "x6", kind: "experience", title: "Barista, Bean House (2020)", text: "Barista, Bean House (2020)", bullets: ["Made 300 drinks a shift", "Opened the store"], status: "confirmed", needs_confirmation: false },
+    { id: "x7", kind: "experience", title: "Tutor, Math Lab (2019)", text: "Tutor, Math Lab (2019)", bullets: ["Tutored 12 students in algebra"], status: "confirmed", needs_confirmation: false },
   ];
   const profile = { basics: { name: "Sam Rivera", email: "sam@example.com" }, facts };
   const t: any = await tailorForPosting({ userId: "00000000-0000-4000-8000-000000001171", profile, posting: { text: "Quantum Researcher at Example Labs\n\nWe study superconducting qubits.", company: "Example Labs" },
@@ -302,4 +309,5 @@ Deno.test("FW-3 a version whose entries lost their detail lines says so, and whi
   ok(!/Same as your base resume/.test(t.changelog), `not the same as the base resume: ${t.changelog}`);
   for (const f of facts.filter((x) => x.bullets.some((b) => lost.includes(b)))) ok(t.changelog.includes(f.title.replace(/\s*\(.*$/, "").split(",")[0]), `names ${f.title}: ${t.changelog}`);
   ok(!t.changelog.includes("\n") && t.changelog.length <= 300 && !/[*#`_]/.test(t.changelog), "still one plain line");
+  eq(t.shortened.length, facts.filter((x) => x.bullets.some((b) => lost.includes(b))).length, "the result names every shortened entry");
 });

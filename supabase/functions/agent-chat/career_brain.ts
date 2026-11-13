@@ -25,7 +25,7 @@ import { knowledgeFor, type Knowledge } from "../_shared/agent/knowledge/index.t
 import { styleBlock } from "../_shared/agent/style.ts";
 import { askedPartsOf, asksForDetail, boundaryNote, boundaryOf, capacityAskOf, capacityNote, correctionNote, correctionOf, DRAFT_TOOLS, draftAskOf, draftNote, historyAskOf, historyNote, HYPOTHETICAL_WITHHELD, hypotheticalNote, hypotheticalOf, lengthNote, multiAskNote, overLimit, partsMissing, partsNote, PERSONA_WITHHELD, planSearchAskOf, planSearchNote, whileWorkingNote, postingNote, postingRefOf, REPLY_LENGTH, replyLength, roastNote, roastOf, shownPayNote, shownPayOf, shownPayPlaces, statesNothing, textLength } from "../_shared/agent/turn_notes.ts";
 import { severalAsks } from "../_shared/ask_language.ts";
-import { practiceAnswerNote, practiceAnswerOf, practiceAskIn, staleFactNote, staleFactsOf } from "../_shared/agent/turn_notes.ts";
+import { factCorrectionHints, factCorrectionNote, practiceAnswerNote, practiceAnswerOf, practiceAskIn, staleFactNote, staleFactsOf } from "../_shared/agent/turn_notes.ts";
 import { answersFirst } from "../_shared/reply_rubric.ts";
 import type { AlertStore } from "../_shared/career_alert_store.ts";
 import type { HiredSource } from "../_shared/career_hired.ts";
@@ -174,16 +174,21 @@ export async function agentTurn(o: {
   // D-070 (G9/D-007, live-7 setup: "the 3.9 gpa on there is outdated, don't reuse it"): a stored fact the person says is out of date
   // is set aside by code before the model runs: back to a draft (never used for a resume, an answer or a form), with when and what
   // they said; what was prepared from the old facts goes stale. The model is told, and answers the rest of the message.
-  const stale = hypo ? [] : staleFactsOf(o.message, (o.stores as any)?.profile?.facts);
+  // Review of #790 (BLOCKER): only the one fact staleFactsOf's fail-closed reading names (never a role, a project or a skill; never a
+  // guess). What it was is kept (`was`), so it can be put back; the reply says which fact (setAsideSaid, below). Every other message
+  // that may be correcting a fact changes nothing here: the model gets a note (factCorrectionNote) and asks, or corrects it through
+  // the person's yes.
+  const facts0 = hypo ? [] : (o.stores as any)?.profile?.facts;
+  const stale = staleFactsOf(o.message, facts0), maybe = factCorrectionHints(o.message, facts0);
   for (const f of stale as any[]) {
+    f.withdrawn_by_owner = { at: new Date(o.now).toISOString(), said: String(o.message ?? "").slice(0, 200), was: { status: f.status, needs_confirmation: f.needs_confirmation } };
     f.status = "draft"; f.needs_confirmation = true;
-    f.withdrawn_by_owner = { at: new Date(o.now).toISOString(), said: String(o.message ?? "").slice(0, 200) };
     const pr = (o.stores as any).profile;
     pr.fact_version = (Number.isFinite(pr.fact_version) ? pr.fact_version : 0) + 1;
   }
   // D-070 (item 11, G2/G3): an answer to the practice question Trainee asked is reviewed verdict first, in one short paragraph.
   const practiceAnswer = !roast && !hypo && practiceAnswerOf(o.message, o.history);
-  const turnNotes = [stale.length ? staleFactNote(stale.map((f) => String(f.title || f.text))) : "", practiceAnswer ? practiceAnswerNote() : "", hypo ? hypotheticalNote(hypo) : "", roast ? roastNote(roast) : "", meant.length ? postingNote(meant) : "", boundary ? boundaryNote(boundary) : "",
+  const turnNotes = [stale.length ? staleFactNote(stale.map((f) => String(f.title || f.text))) : "", maybe.length ? factCorrectionNote(maybe.map((f) => String(f.title || f.text))) : "", practiceAnswer ? practiceAnswerNote() : "", hypo ? hypotheticalNote(hypo) : "", roast ? roastNote(roast) : "", meant.length ? postingNote(meant) : "", boundary ? boundaryNote(boundary) : "",
     correction ? correctionNote(correction) : "", typeof o.whileWorking === "string" ? whileWorkingNote(o.whileWorking) : severalAsks(o.message) ? multiAskNote() : "",
     draftAsk ? draftNote(draftLength.aim) : "", planSearch ? planSearchNote() : "", parts.length ? partsNote(parts) : "", capacity ? capacityNote() : "", historyAsk ? historyNote() : "", shownPay.length ? shownPayNote(shownPay) : "", lengthNote(replyLength(o.message, o.history))].filter(Boolean);
   const hypoWithheld = [...(hypo === "persona" ? PERSONA_WITHHELD : hypo ? HYPOTHETICAL_WITHHELD : []), ...(statesNothing(o.message) ? ["add_profile_fact"] : [])];
@@ -331,9 +336,26 @@ export async function agentTurn(o: {
   // D-071 (live-8 C9: research ran, kept nothing, and the trace could not say why): what the research did with its pages and draft.
   const research = trace.m ? { kind: "kind" in trace.m ? "company" : "market", status: trace.m.status, ...((trace.m as any).audit ?? {}) } : null;
   result = { ...result, reply: nonEmptyReply(result, trace.m), shorten, ...(research ? { research } : {}) } as typeof result;
+  // Review of #790: a fact code set aside this turn is said to the person, by name, on every path. When the reply does not carry
+  // the fact's own figures, its line goes after the reply, in the fact's own words. A turn whose reply is a card (an exact payload)
+  // cannot carry it, so nothing is set aside on that turn: the fact goes back as it was.
+  if (stale.length) {
+    if (result.show) {
+      for (const f of stale as any[]) { Object.assign(f, f.withdrawn_by_owner.was); delete f.withdrawn_by_owner; }
+    } else {
+      const set = (stale as any[]).map((f) => ({ id: String(f.id), text: String(f.text || f.title) }));
+      result = { ...result, reply: setAsideSaid(result.reply, set.map((x) => x.text)), set_aside: set } as typeof result;
+    }
+  }
   return know ? { ...result, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : result;
 }
 
+// Review of #790: the reply names each fact set aside this turn (its figures, as the fact holds them); one it does not name gets
+// one line after the reply, the fact in its own words.
+export function setAsideSaid(reply: string, facts: string[]): string {
+  const missing = facts.filter((t) => { const figs = t.match(/\d[\d.,/-]*\d|\d/g) ?? []; return !(figs.length ? figs.every((x) => reply.includes(x)) : reply.toLowerCase().includes(t.toLowerCase())); });
+  return missing.length ? `${reply}\n\nSet aside, not deleted (no longer used until you say it's right again): ${missing.join("; ")}`.trim() : reply;
+}
 // D-071: "N applications" said with another number than the record's is the record's number; a sentence about having miscounted
 // goes (the count was code's). Other numbers ("1 researched role") are not touched.
 const NUMWORD: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };

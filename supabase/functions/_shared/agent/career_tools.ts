@@ -113,6 +113,11 @@ function confirmationRefusal(c: ToolCtx, id: string): string | null {
     const fact = (profileOf(c).facts || []).find((f: any) => f.id === id);
     if (fact && !factShown(t.before, String(fact.text ?? ""), id)) return "the reply before this turn did not show this fact; show it to them as written and ask them to confirm it";
   }
+  // Review of #790: a fact the person set aside (withdrawn_by_owner) comes back only on their yes to a QUESTION that showed it. The
+  // reply that said it was set aside also shows it, and a yes after that reply answers something else.
+  const set = (profileOf(c).facts || []).find((f: any) => f.id === id && f.withdrawn_by_owner);
+  if (set && !String(t.before ?? "").split(/(?<=[.!?])\s+|\n+/).some((s) => s.trim().endsWith("?") && factShown(s, String(set.text ?? ""), id)))
+    return "they set this fact aside; ask them, in a question that shows the fact as written, whether to put it back, and confirm only on their yes to that";
   return null;
 }
 // Whether a reply showed a fact: its id, or most of the fact's own words (3+ letters, not filler), at least two of them.
@@ -555,6 +560,7 @@ export function careerTools(deps: {
         const refusal = confirmationRefusal(c, id);
         if (refusal) throw new Error(`not confirmed: ${refusal}`);
         const fact = CareerProfile.confirmFact(profileOf(c), id);
+        if (fact?.withdrawn_by_owner) { fact.restored_by_owner = { at: new Date(c.now).toISOString(), set_aside_at: fact.withdrawn_by_owner.at }; delete fact.withdrawn_by_owner; }
         // WO-102 evidence: the persisted fact_confirmed row (this person, now, their own message's hash) and the fact name
         // each other by confirmation_event_id, with an owner provenance the answer contract accepts. A row that could not
         // be recorded stamps nothing, so the fact reads as needs-review, never as evidenced.

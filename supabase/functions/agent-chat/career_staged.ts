@@ -20,7 +20,7 @@ import { NO_CLOCK, type TurnClock } from "./turn_clock.ts";
 import { crisisReply } from "./crisis.ts";
 import { PAYLOAD_INTENTS } from "../_shared/career_reply_writer.ts";
 import { multiAsk, nonEnglishAsk, severalAsks } from "../_shared/ask_language.ts";
-import { boundaryOf, correctionOf, hypotheticalOf, practiceAskOf, staleFactsOf } from "../_shared/agent/turn_notes.ts"; // D-061 G1, G8, G9; D-070
+import { boundaryOf, correctionOf, factCorrectionHints, hypotheticalOf, practiceAskOf, staleFactsOf } from "../_shared/agent/turn_notes.ts"; // D-061 G1, G8, G9; D-070
 
 type Env = { get(k: string): string | undefined };
 type Host = { runTurn(text: string, ctx: any): { intent: string | null; handler: string | null; reply?: string; contained?: boolean; result?: any }; isHostControlled(text: string, ctx: any): boolean };
@@ -473,6 +473,9 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   // stayed in use): a message saying a stored fact of theirs is out of date is a correction of that fact, the brain's (code sets
   // the fact aside before the model runs, career_brain.ts); what the router would have answered is its data.
   if (!NON_ENGLISH_KEPT.test(intent) && staleFactsOf(o.message, (o.ctx as any)?.profile?.facts).length) return { brain: true, mode, intent, reason: "stale_fact_correction", router: routerAnswer(intent, probe) };
+  // Review of #790: a message that only MAY be correcting a stored fact is the brain's too (as it was), and is named as that: code
+  // changes nothing for it (turn_notes.ts factCorrectionHints); the model reads it and asks, or corrects through their yes.
+  if (!NON_ENGLISH_KEPT.test(intent) && factCorrectionHints(o.message, (o.ctx as any)?.profile?.facts, false).length) return { brain: true, mode, intent, reason: "possible_fact_correction", router: routerAnswer(intent, probe) };
   // D-072 (files reachable; owner standard "complete product"): an ask to see one of their record-backed Files ("send me my weekly
   // brief", "show me my offer comparison") is the brain's, which makes it from their records with open_record_file (or says what is
   // missing); the router's answer is its data. An exact payload, an approval, a control or a bare reply stays code's.

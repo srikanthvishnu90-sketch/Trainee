@@ -123,14 +123,52 @@ export function searchPostings(pool: any[], query: unknown, profile: any, limit 
 // match, so "chicago or remote" asked for postings in Chicago AND remote, found none, and the relaxed search dropped "remote".
 // Words joined by "or" are alternatives: the search runs once per alternative ("... chicago", "... remote") and the results
 // are merged, each posting once, taking from each alternative in turn so one place never crowds out the other.
+// Review of #790 (MAJOR: "frontend engineer san francisco or new york" searched "... san francisco york" and "... san new york";
+// "morgan stanley or goldman sachs" broke the same way): the two sides were read one word each. Each side is now read whole:
+//   a place the code knows (isPlace: "new york", "salt lake city", "remote"), the longest one touching the "or";
+//   else a side that is one word, or the words a role's head word shares ("data or product ANALYST", "... INTERN python or java");
+//   else the full side ("morgan stanley", "goldman sachs"): never one side's words mixed into the other.
+// What both sides share goes to each: the words before the left alternative, a role head or a place after the right one. Each
+// "or" is read alone, last first, so "frontend or backend engineer san francisco or new york" is four searches.
+const ROLE_HEAD = /^(?:analysts?|engineers?|developers?|scientists?|designers?|managers?|interns?|internships?|associates?|consultants?|researchers?|recruiters?|architects?|specialists?|coordinators?|administrators?|programmers?|accountants?|bankers?|traders?|roles?|jobs?|positions?|openings?)$/i;
+function orOnce(q: string): string[] | null {
+  const at = q.toLowerCase().lastIndexOf(" or ");
+  if (at < 0) return null;
+  const before = q.slice(0, at).trim(), right = q.slice(at + 4).trim().split(" ").filter(Boolean);
+  const prev = before.toLowerCase().lastIndexOf(" or "), kept = prev < 0 ? "" : before.slice(0, prev + 4);
+  const left = before.slice(kept.length).trim().split(" ").filter(Boolean);
+  if (!left.length || !right.length) return null;
+  // A place touching the "or": the longest US place ("new york city", not "york city"), else the shortest other one ("remote",
+  // "london": the place reader finds those inside any phrase, so a longer phrase proves nothing).
+  const usPlace = (ph: string) => postingPlaces(ph.toLowerCase()).some((x) => x.country === "us" || !!x.state);
+  const placeAt = (ws: string[], end: boolean) => { const ph = (n: number) => (end ? ws.slice(-n) : ws.slice(0, n)).join(" "); const ns = [3, 2, 1].filter((n) => n <= ws.length); return ns.find((n) => usPlace(ph(n))) ?? [...ns].reverse().find((n) => isPlace(ph(n))) ?? 0; };
+  const lp = placeAt(left, true), rp = placeAt(right, false);
+  const lHead = left.findLastIndex((w) => ROLE_HEAD.test(w)), rHead = right.findIndex((w) => ROLE_HEAD.test(w));
+  // How many words each alternative takes (from the "or" outward); the rest of each side is shared.
+  const afterHead = lHead >= 0 && lHead < left.length - 1 ? left.length - 1 - lHead : left.length, beforeHead = rHead > 0 ? rHead : right.length;
+  let l = left.length, r = right.length;
+  if (lp || rp) {
+    // A place on one side: the other side's alternative is what stands in the place's spot (after its role, before the next one).
+    l = lp || afterHead; r = rp || beforeHead;
+  } else {
+    if (lHead < 0) r = beforeHead;
+    if (rHead < 0) l = afterHead;
+    // Two whole roles and a place after the second ("data analyst or product manager chicago"): the place is for both.
+    if (l === left.length && r === right.length) { const tail = [3, 2, 1].find((n) => n < right.length && isPlace(right.slice(-n).join(" "))); if (tail && !left.some((w) => isPlace(w))) r = right.length - tail; }
+  }
+  const pre = [kept.trim(), ...left.slice(0, left.length - l)].filter(Boolean).join(" "), post = right.slice(r).join(" ");
+  const alt = (words: string[]) => [pre, words.join(" "), post].filter(Boolean).join(" ");
+  return [alt(left.slice(left.length - l)), alt(right.slice(0, r))];
+}
 export function orAlternatives(query: unknown): string[] {
   const q = String(query ?? "").replace(/\s+/g, " ").trim();
-  const m = /(?:^|\s)((?:[\w+#.-]+\s+or\s+)+[\w+#.-]+)(?=\s|$)/i.exec(q);
-  if (!m) return [q];
-  const opts = m[1].split(/\s+or\s+/i).map((x) => x.trim()).filter(Boolean);
-  if (opts.length < 2) return [q];
-  const at = q.indexOf(m[1]);
-  return [...new Set(opts.map((o) => `${q.slice(0, at)}${o}${q.slice(at + m[1].length)}`.replace(/\s+/g, " ").trim()))].slice(0, 4);
+  let alts = [q];
+  for (let k = 0; k < 4; k++) {
+    const next = alts.flatMap((a) => orOnce(a) ?? [a]);
+    if (next.length === alts.length) break;
+    alts = next;
+  }
+  return [...new Set(alts)].slice(0, 4);
 }
 // D-073 (live-9 C1, C3: the person's goal is "Chicago or remote", the brain searched "software engineer intern summer 2027 Chicago
 // remote", one query with no "or", so D-071's per-place search never ran and NVIDIA's remote posting was not returned): the places

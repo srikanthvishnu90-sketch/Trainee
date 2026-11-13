@@ -541,11 +541,13 @@ export function applyEdits(resume: any, profile: any, edits: ResumeEdit[]): { ok
 // entries): every version, not only an edited one, prints every confirmed entry. On a first version (`oneLine`) an entry the
 // posting does not ask for is condensed to one line, its own words as the base resume prints its heading, so the page stays one
 // page; nothing is ever reworded or invented.
-export function keepEveryEntry(resume: any, profile: any, opts: { oneLine?: boolean } = {}): { resume: any; added: string[] } {
+// Review of #790 (MINOR): `shortened` names the entries put back on one line whose detail lines (bullets) were left off, so the
+// changelog can say so instead of "Same as your base resume".
+export function keepEveryEntry(resume: any, profile: any, opts: { oneLine?: boolean } = {}): { resume: any; added: string[]; shortened: string[] } {
   const out = clone(resume);
   out.sections = out.sections || [];
   const printed = new Set(out.sections.flatMap((sec: any) => (sec.lines || []).flatMap((l: any) => l.factIds || [])).map(String));
-  const added: string[] = [];
+  const added: string[] = [], shortened: string[] = [];
   for (const f of (profile.facts || []).filter((x: any) => HEADING[x.kind])) {
     const id = String(f.id);
     if (printed.has(id)) continue;
@@ -557,9 +559,10 @@ export function keepEveryEntry(resume: any, profile: any, opts: { oneLine?: bool
     sec.lines.push({ text: bullets.length ? head : String(f.title || f.text), factIds: [id], type: "entry" }, ...(opts.oneLine ? [] : bullets.map((t: string) => ({ text: t, factIds: [id], type: "bullet" }))));
     printed.add(id);
     added.push(head.replace(/[.]+$/, ""));
+    if (opts.oneLine && bullets.length) shortened.push(head.replace(/[.]+$/, ""));
   }
   out.lines = out.sections.flatMap((x: any) => (x.lines || []).map((l: any) => ({ ...l, section: x.heading })));
-  return { resume: out, added };
+  return { resume: out, added, shortened };
 }
 export function editLine(done: EditDone[]): string {
   const one = (e: EditDone) => {
@@ -572,6 +575,11 @@ export function editLine(done: EditDone[]): string {
   };
   const s = done.map(one).join("; ");
   return `${s.charAt(0).toUpperCase()}${s.slice(1)}.`;
+}
+// The whole line of a first version whose only change is entries shortened to one line: how many, and which (three named, the rest counted).
+function shortenedLine(heads: string[]): string {
+  const n = heads.length, named = heads.slice(0, 3).map((h) => clip(h, 50)).join("; ");
+  return `Every entry on your record prints: the ${n} this posting doesn't ask for ${n === 1 ? "is" : "are"} one line each, without ${n === 1 ? "its" : "their"} detail lines (${named}${n > 3 ? ` and ${n - 3} more` : ""}).`;
 }
 // The place an entry held in its section before it was edited (by how many entries came before it), so a condensed entry stays put.
 function positionOf(sec: any, before: any, id: string): number {
@@ -587,7 +595,7 @@ function positionOf(sec: any, before: any, id: string): number {
 export type TailorOut = {
   ok: true; text: string; link: string; expires_at: string; changelog: string; changes: ChangeItem[]; sha256: string; filename: string;
   // D-063: what prints as a placeholder (a review draft for the chat, never stored for an application), and the edits made.
-  placeholders?: string[]; edits?: EditDone[];
+  placeholders?: string[]; edits?: EditDone[]; shortened?: string[];
   persona: string | null; job_id: string | null; company: string | null; ats: { status: string; warnings: string[] };
   not_on_your_record: string[]; lead_not_picked: string[]; rendered_in: string; ms: number; detail: { doc: any; base: any; diff: any; docx: Uint8Array | null; pdf: Uint8Array };
   // RELEASE 9: the posting against the resume (missing, weak, emphasise) and the top of the file as it prints, both for the
@@ -631,7 +639,7 @@ export async function tailorForPosting(o: {
   const lead = persona ? persona.lead.filter((id) => CareerProfile.getFact(picked, id)) : [];
   // `picked`, not `clean`: a skill a persona hides stays hidden.
   let ordered = withListedSkills(applyPersonaOrder(t.resume, lead), picked);
-  let edits: EditDone[] | undefined, keptBack: string[] = [];
+  let edits: EditDone[] | undefined, keptBack: string[] = [], shortened: string[] = [];
   if (o.edits?.length) {
     // D-071 (live-8 C20: "Waypoint is now added back", though the first version printed it): an edit changes the version that was
     // delivered, so it starts from the first version exactly as it printed (every entry kept, the ones this posting does not ask for
@@ -644,7 +652,7 @@ export async function tailorForPosting(o: {
     const editedHeads = new Set(e.done.map((x) => x.entry.toLowerCase()));
     keptBack = v1.added.filter((h) => !editedHeads.has(h.toLowerCase()));
   }
-  { const every = keepEveryEntry(ordered, picked, { oneLine: !edits }); ordered = every.resume; keptBack = [...keptBack, ...every.added]; }
+  { const every = keepEveryEntry(ordered, picked, { oneLine: !edits }); ordered = every.resume; keptBack = [...keptBack, ...every.added]; if (!edits) shortened = every.shortened; }
   // D-070: an entry kept back on a first version takes its place by date (RESUME-TEMPLATES E5, newest first); a lead the person
   // chose still goes first. An edited version keeps the order its edits set.
   if (!edits && keptBack.length) ordered = applyPersonaOrder(ordered, lead);
@@ -704,14 +712,16 @@ export async function tailorForPosting(o: {
   const firstBack = keptBack.length ? ` Every entry on your record prints: the ${keptBack.length === 1 ? "1" : keptBack.length} this posting doesn't ask for ${keptBack.length === 1 ? "is" : "are"} one line each.` : "";
   const log = edits ? { ...log0, line: editLine(edits) + backLine, items: [...edits.map((e): ChangeItem => ({ kind: "edit", text: editLine([e]).replace(/[.]$/, ""), diff: "edited", line: e.entry })),
     ...keptBack.map((h): ChangeItem => ({ kind: "kept", text: `kept ${h}`, diff: "added", line: h })), ...(log0.items ?? []).filter((x: any) => !aboutEdited(x))] }
-    : keptBack.length ? { ...log0, line: `${log0.line}${firstBack}`.trim(), items: (log0.items ?? []).filter((x: any) => !aboutEdited(x)) } : log0;
+    // Review of #790 (MINOR): with nothing else changed the line read "Same as your base resume; it already fits this posting."
+    // while entries had lost their detail lines. A version that shortened entries is not the same: it says so, and which.
+    : keptBack.length ? { ...log0, line: !(log0.items ?? []).length && shortened.length ? shortenedLine(shortened) : `${log0.line}${firstBack}`.trim(), items: (log0.items ?? []).filter((x: any) => !aboutEdited(x)) } : log0;
   const selected = new Set(doc.lines.flatMap((l: any) => l.factIds));
   // What the person reads, the same on every channel: plain words, and the link alone on its own line so any texting app
   // makes it tappable.
   const text = [`Your resume for ${o.posting.company || "this posting"} is ready. ${log.line}`, ...(link ? [link, "The link works for 7 days."] : [])].join("\n");
   return {
     ok: true, text, link, expires_at: link ? new Date(o.now + LINK_TTL_SECONDS * 1000).toISOString() : "", changelog: log.line, changes: log.items,
-    ...(placeholder ? { placeholders: ["email"] } : {}), ...(edits ? { edits } : {}),
+    ...(placeholder ? { placeholders: ["email"] } : {}), ...(edits ? { edits } : {}), ...(shortened.length ? { shortened } : {}),
     sha256: r.sha256, filename: r.filename, persona: persona?.name ?? null, job_id: o.posting.job_id ?? null, company: o.posting.company ?? null,
     ats: { status: r.ats.status, warnings: r.ats.warnings }, not_on_your_record: (t.requiredGaps || []).map((g: any) => g.requirement),
     lead_not_picked: lead.filter((id) => !selected.has(id)), rendered_in: r.where, ms: ms(), detail: { doc, base, diff, docx: r.docx ?? null, pdf: r.pdf },

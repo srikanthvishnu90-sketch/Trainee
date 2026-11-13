@@ -18,7 +18,7 @@ export const REQUIRED = ["company", "base", "city", "role"] as const;
 export type Field = typeof REQUIRED[number];
 export const MAX_MESSAGE = 1500;
 
-export interface Competing { company: string | null; base: number; said: string; currency?: string; mark?: string | null; assumed?: boolean; written?: string; rated?: boolean; abroad?: boolean }
+export interface Competing { company: string | null; base: number; said: string; currency?: string; mark?: string | null; assumed?: boolean; written?: string; rated?: boolean; abroad?: boolean; plain?: boolean }
 export type Period = "hour" | "day" | "week" | "biweek" | "semimonth" | "month" | "year";
 type Fig = "base" | "signing" | "bonus" | "bonus_target";
 export interface Offer {
@@ -54,7 +54,9 @@ export interface Offer {
   // `total`: pay said as total compensation, OTE or TC (never the base). `part_year`: the words that say the job is not a full
   // year of full-time work (internship, contract, part-time, stated hours or weeks): a yearly figure from its rate is arithmetic
   // only, never compared. `place_kind` and `state`: whether the stated place is in the United States, and which state.
+  // Round 3: `current` is the pay the person says they make now and `ask` the figure they say they want: neither is the offer.
   open?: string[]; unsettled?: boolean; total?: { amount: number; written: string } | null; part_year?: string | null;
+  current?: string | null; ask?: { amount: number; written: string } | null;
   place_kind?: "us" | "none" | "dollar" | "other"; state?: string | null;
 }
 export interface Bench {
@@ -95,7 +97,7 @@ function codeOf(w: string | undefined): string | null {
 const DOLLAR_PREFIX: Record<string, string> = { US: "USD", A: "AUD", AU: "AUD", C: "CAD", CA: "CAD", NZ: "NZD", S: "SGD", SG: "SGD", HK: "HKD", MX: "MXN", R: "BRL" };
 // A sign that names one currency. "¥" is both the yen and the yuan, "kr" four Nordic currencies, "pesos" several: ambiguous.
 const SYMBOL: Record<string, string> = { "€": "EUR", "£": "GBP", "¥": "¥", "￥": "¥", "₹": "INR", "₩": "KRW", "₪": "ILS", "zł": "PLN" };
-const WORD_CUR: [RegExp, string][] = [[/^\s?US(?:\s?dollars?)?\b/, "USD"], [/^\s?(?:us\s?dollars?|american(?:\s?dollars?)?)\b/i, "USD"], [/^\s?(?:canadian|cdn)(?:\s?dollars?)?\b|^\s?loonies\b/i, "CAD"], [/^\s?(?:australian|aussie)(?:\s?dollars?)?\b/i, "AUD"],
+const WORD_CUR: [RegExp, string][] = [[/^\s?US(?:\s?dollars?)?\b/, "USD"], [/^\s?(?:us\s?dollars?|american(?:\s?dollars?)?)\b/i, "USD"], [/^\s?(?:canadian|cdn)(?:\s?dollars?)?\b(?!\s+(?:company|firm|startup|entity|subsidiary|office|team|bank|branch))|^\s?loonies\b/i, "CAD"], [/^\s?(?:australian|aussie)(?:\s?dollars?)?\b(?!\s+(?:company|firm|startup|entity|subsidiary|office|team|bank|branch))/i, "AUD"],
   [/^\s?(?:new zealand|nz|kiwi)\s?dollars?\b/i, "NZD"], [/^\s?singapore(?:an)?\s?dollars?\b/i, "SGD"], [/^\s?hong kong\s?dollars?\b/i, "HKD"], [/^\s?(?:dollars?|bucks)\b/i, "$"],
   [/^\s?euros?\b/i, "EUR"], [/^\s?(?:pounds?(?:\s+sterling)?|quid|sterling)\b/i, "GBP"], [/^\s?(?:indian\s)?rupees?\b/i, "INR"], [/^\s?(?:z[łl]oty|zlotys?|zł)(?![\w])/i, "PLN"],
   [/^\s?(?:japanese\s)?yen\b/i, "JPY"], [/^\s?(?:chinese\s)?(?:yuan|renminbi)\b/i, "CNY"], [/^\s?(?:swiss\s)?francs?\b/i, "CHF"], [/^\s?swedish\s?(?:kronor|krona)\b/i, "SEK"],
@@ -104,12 +106,14 @@ const WORD_CUR: [RegExp, string][] = [[/^\s?US(?:\s?dollars?)?\b/, "USD"], [/^\s
 const AMBIGUOUS: Record<string, string> = { "kr": `"kr" could be Swedish, Norwegian, Danish or Icelandic kronor (SEK, NOK, DKK or ISK)`, "¥": `"¥" is the sign of both the Japanese yen and the Chinese yuan`,
   "pesos": `"pesos" could be Mexican, Argentine, Chilean, Colombian or Philippine pesos`, "lakh": `lakh and crore count rupees, and which country's rupee was not said (write INR, PKR ...)` };
 const DOLLARS = new Set(["USD", "CAD", "AUD", "NZD", "SGD", "HKD", "MXN", "TWD"]);
-// A currency said on its own, away from any figure ("paid in CAD", "(Canadian dollars)", "It's in CAD"): the code, or null.
-const CUR_CODE = new RegExp(`\\b(?:${CODE_RE}|RMB)\\b|\\b(?:in|paid in)\\s(?:${CODE_RE.toLowerCase()})\\b`, "g");
-const CUR_NAME = /\b(?:(?:us|u\.s\.|american|canadian|cdn|australian|aussie|new zealand|singapore|hong kong|mexican|swedish|norwegian|danish|swiss|indian|japanese|chinese)\s)?(?:dollars?|bucks|euros?|pounds?|sterling|quid|rupees?|yen|yuan|renminbi|francs?|kronor|krona|kroner|krone|pesos?|reais|zloty|loonies)\b|\b(?:canadian|australian)\b(?!\s+[a-z]*(?:company|firm|startup|office|team|branch|bank))/gi;
-const freeCur = (rest: string) => [...rest.matchAll(CUR_CODE), ...rest.matchAll(CUR_NAME)].map((m) => m[0]);
+// Round 3: a currency counts only next to an amount (currencyMark) or in an explicit statement of it: "in CAD", "paid in
+// reais", "(Canadian dollars)", "It's in euros". A word that is also an ordinary word, a place or a company ("real",
+// "pound", "rand", "Sterling, Virginia", "a Canadian company") never sets or questions the currency.
+const CUR_WORDS = String.raw`(?:(?:us|u\.s\.|american|canadian|cdn|australian|aussie|new zealand|singapore|hong kong|mexican|swedish|norwegian|danish|swiss|indian|japanese|chinese|brazilian)\s)?(?:dollars|bucks|euros?|pounds(?: sterling)?|sterling|quid|rupees|yen|yuan|renminbi|francs|kronor|kroner|pesos|reais|zloty|loonies)`;
+const CUR_SAID = new RegExp(String.raw`\b(?:paid |denominated )?in\s+(${CODE_RE}|RMB|${CODE_RE.toLowerCase()}|${CUR_WORDS})\b(?!\s+[A-Za-z]*(?:company|firm|startup|entity|office|team|bank|branch))|\((${CODE_RE}|RMB|${CUR_WORDS})\)`, "gi");
+const freeCur = (rest: string) => [...rest.matchAll(CUR_SAID)].map((m) => m[1] ?? m[2]).filter((w) => codeOf(w) || !/^[A-Za-z]{3}$/.test(w));
 export function currencyOf(token: string): string | null {
-  const w = token.replace(/^(?:paid )?in\s/i, "").trim();
+  const w = token.replace(/^(?:paid )?in\s/i, "").replace(/^(?:us|u\.s\.)\sdollars$/i, "US dollars").trim();
   if (codeOf(w)) return codeOf(w);
   for (const [re, v] of WORD_CUR) if (re.test(w)) return v;
   return null;
@@ -177,7 +181,7 @@ export const known = (c: string | null | undefined) => !!c && c !== UNKNOWN_CURR
 export const sameCurrency = (a: string | null | undefined, b: string | null | undefined) => known(a ?? "USD") && (a ?? "USD") === (b ?? "USD");
 // A competing offer is weighed against this base only like for like: both yearly as said, one known currency, neither an
 // assumption, and not a job in another country.
-export const comparable = (o: Offer, x: Competing) => !o.rate && !x.rated && !x.assumed && !x.abroad && !o.currency_assumed?.base && !o.unsettled && sameCurrency(x.currency, o.currency);
+export const comparable = (o: Offer, x: Competing) => x.plain !== false && !o.part_year && !o.rate && !x.rated && !x.assumed && !x.abroad && !o.currency_assumed?.base && !o.unsettled && sameCurrency(x.currency, o.currency);
 export const anyAssumed = (o: Offer) => Object.values(o.currency_assumed ?? {}).some(Boolean);
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 // Each figure's currency from what was written next to it and, for "$" or nothing, the place. A figure with no currency of
@@ -216,7 +220,7 @@ export function settleCurrency(o: Offer): Offer {
   const g = figs.find((f) => f !== "base" && read[f]![2]);
   o.currency_fact = read.base?.[1] ?? (g ? `${g === "signing" ? "signing bonus" : "bonus"} ${read[g]![1]}` : null);
   const r = o.rate;
-  o.period_fact = !r ? null : o.annualized ? `the yearly base is an estimate: ${rateIn(r.amount, o.currency)} ${PER[r.period]} x ${o.annualized.assumption}, as if that many are paid in a year`
+  o.period_fact = !r || o.part_year ? null : o.annualized ? `the yearly base is an estimate: ${rateIn(r.amount, o.currency)} ${PER[r.period]} x ${o.annualized.assumption}, as if that many are paid in a year`
     : `${rateIn(r.amount, o.currency)} ${PER[r.period]} is a daily rate; it is not turned into a yearly base because the days worked in a year were not given`;
   return o;
 }
@@ -236,6 +240,7 @@ export const moneyFor = (o: Offer) => (n: number, field?: string) => {
   // yearly figure in stated US dollars is written out ("$110,000"). A rate is never restated as a yearly figure.
   const k: Fig | null = field === "signing" ? "signing" : field === undefined && n === o.base ? "base" : null;
   if (k && o.written?.[k] && !(c === "USD" && !o.currency_assumed?.[k] && !(k === "base" && o.rate))) return o.written[k]!;
+  if (k === "base" && o.rate) return `${rateIn(o.rate.amount, c)} ${PER[o.rate.period]}`;
   return bare(field === undefined && o.rate && n === o.base ? `${rateIn(o.rate.amount, c)} ${PER[o.rate.period]}` : moneyIn(n, c));
 };
 // A rate keeps its cents ("$27.50 an hour").
@@ -260,11 +265,11 @@ export function rateNote(o: Offer, c: string | null | undefined): string {
 }
 // Why the offer is not placed against the public pay data, in one line; null when it is.
 export function notPlaced(o: Offer): string | null {
-  if (o.unsettled) return `I have not compared this offer with anything, because I could not place: ${(o.open ?? []).join("; ")}.`;
+  if (o.unsettled) return `I have not compared this offer with anything, because I could not place this: ${(o.open ?? []).join("; ")}.`;
   if (o.currency === UNKNOWN_CURRENCY) return `${cap(o.currency_fact ?? NOT_STATED)}. So it is not placed against any pay data, and nothing is converted. Tell me the offer again with its currency (USD, CAD, EUR ...) and I'll redo it.`;
   if (!isUsd(o)) return `The offer is in ${o.currency}. The public pay data on file is US data in US dollars, so it is not placed against it, and nothing is converted.`;
   if (o.currency_assumed?.base) return "The currency is an assumption until you confirm it, so the offer is not placed against any pay data.";
-  if (o.part_year && o.rate) return `You said ${o.part_year}, which is not a full year of full-time work, so the rate is not turned into a yearly figure to compare, and the yearly pay data is not placed against it.`;
+  if (o.part_year) return `You said ${o.part_year}, which is not a full year of full-time work, so ${o.rate ? "the rate is not turned into a yearly figure" : "the figure is not treated as a full-year salary"}, and the full-year pay data is not placed against it.`;
   return usMarket(o) ? null : `The public pay data on file is for the United States, and ${placeName(o)} is not a US place I can confirm, so the offer is not placed against it.`;
 }
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -289,7 +294,8 @@ export function titleAnswer(text: string): string | null {
   if (!t || /\d/.test(t) || t.split(/\s+/).length > 7 || !/^[A-Za-z][A-Za-z&/+#' -]*$/.test(t) || NOT_TITLE_ANSWER.test(t)) return null;
   return t.replace(/\s+(?:role|position|job)$/i, "").toLowerCase();
 }
-const NOT_TITLE_ANSWER = /^(?:not sure|no idea|dunno|don'?t know|idk|unsure|n\/a|none|nothing|skip|later|never ?mind|remote|hybrid)\b/i;
+// Not a title: "not sure", and a control phrase the person types to the agent ("help me negotiate", "correction: ...").
+const NOT_TITLE_ANSWER = /^(?:not sure|no idea|dunno|don'?t know|idk|unsure|n\/a|none|nothing|skip|later|never ?mind|remote|hybrid)\b|\b(?:help|negotiat\w*|compare|counter|correction|actually|sorry|thanks|please|draft|email|offer)\b/i;
 export function placeAnswer(text: string, onlyCity = true): string | null {
   const said = placeIn(text);
   if (said) return said;
@@ -303,6 +309,13 @@ export function placeAnswer(text: string, onlyCity = true): string | null {
 const MONEY = new RegExp(String.raw`(?:(?<![\w.]|\d[,'])|(?<=\b(?:${CODE_RE}|RMB|Rs)))\$?\s?(\d{1,2}(?:,\d{2})+,\d{3}|\d{1,3}(?:[,' ]\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s?(k|K|thousand|mm|million|m|M|lakhs?|lacs?|LPA|lpa|L|crores?|cr)?(?![\w])`, "g");
 // Everything the figure's own words take, from the currency before it to the period after it: `text` is that span as written.
 interface Amount { value: number; per: Period | null; at: number; end: number; mark: string | null; text: string; pre?: string }
+// Round 3: a number that is not pay, from the words around it: a ZIP code after a city or state, an id ("employee id",
+// "requisition", "req", "#"), a headcount ("a team of 12000 people"), a count of months of pay.
+export function notPay(before: string, tok: string, after: string): boolean {
+  if (/^\d{5}$/.test(tok) && /(?:\b[A-Z]{2}|[A-Z][a-z]+),?\s+$/.test(before)) return true;
+  if (/(?:\b(?:id|no|number|requisition|req|ticket|ref|reference|badge|code|ext|extension)\b\.?|#)\s*:?\s*$/i.test(before)) return true;
+  return /\bteam of\s+$/i.test(before) || /^\s?(?:people|employees|engineers|staff|users|customers|person|headcount)\b/i.test(after);
+}
 function amounts(clause: string): Amount[] {
   const out: Amount[] = [];
   for (const m of clause.matchAll(MONEY)) {
@@ -324,6 +337,7 @@ function amounts(clause: string): Amount[] {
     // A bare small number is a count or a date, not pay: pay is "110k", "$110,000", "110000", "$45/hr" or "$1,500 a week".
     if (rated ? v < RATE_RANGE[per!][0] || v > RATE_RANGE[per!][1] : v < 1000) continue;
     if (!dollar && !unit && !rated && (v < 10000 || /^20\d\d$/.test(m[1]))) continue;
+    if (!dollar && notPay(clause.slice(0, at), m[1], clause.slice(end))) continue;
     const lead = new RegExp(String.raw`(?:\b(?:${CODE_RE}|RMB|Rs|US|AU|CA|NZ|SG|HK|MX|[ACSR])\s?\$?|[€£¥￥₹₩₪])\s?$`).exec(clause.slice(0, at));
     const to = end + after + (post ? post[0].length : 0);
     out.push({ value: v, per, at: lead ? lead.index : at, end: to, mark, text: clause.slice(lead ? lead.index : at, to).trim(), pre: !post && pm ? pm[0] : undefined });
@@ -343,7 +357,7 @@ export function firmIn(text: string): any | null {
 }
 // A company not in the guide, named the way people say it: "Acme offered", "offer from Acme", "at Acme".
 function namedCompany(text: string): string | null {
-  const m = text.match(/\b([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})\s+(?:offered|is offering|gave me|made me an offer)/) ||
+  const m = text.match(/\b([A-Z][\w&.'-]*(?:\s+(?:of\s+|and\s+|& )?[A-Z][\w&.'-]*){0,3})\s+(?:offered|is offering|gave me|made me an offer)/) ||
     text.match(/\b([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})\s+(?:will|might|may|could|should|is going to|is likely to) offer\b/) ||
     text.match(/\boffer (?:letter )?(?:from|at)\s+([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,3})/);
   if (!m) return null;
@@ -365,7 +379,7 @@ function roleIn(text: string): string | null {
 }
 // D-069: the job title as the person said it ("as an advanced analytics intern", "as a cybersecurity intern in Scottsdale"),
 // any title, in their words: at most 7 words, letters only (a title is never a figure), not a phrase that only looks like one.
-const NOT_TITLE = /^(?:result|matter|whole|bonus|signing|base|offer|counter|backup|start|minimum|total|percentage|reminder|test|joke|favor|courtesy|starting point)\b/i;
+const NOT_TITLE = /^(?:first|second|third|next|year|result|matter|whole|bonus|signing|base|offer|counter|backup|start|minimum|total|percentage|reminder|test|joke|favor|courtesy|starting point)\b/i;
 const TITLE_STOP = String.raw`(?=\s+(?:in|at|based|located|out of|for|with|on|from|starting|and|but|plus|paying|making|earning|offered|remote|hybrid|onsite|on-site)\b|\s*[,.;!?(]|\s*$)`;
 export function titleIn(text: string): string | null {
   const t = String(text ?? "");
@@ -383,7 +397,7 @@ export function placeIn(text: string): string | null {
   const t = String(text ?? "").replace(/,\s*(?=(?:I|It|It's|My|We|They|The|And|But|Also)\b|[A-Z][\w&.'-]*\s+(?:offered|is offering|gave|will)\b)/g, "; ");
   const P = String.raw`[A-Z][A-Za-z\u00C0-\u024F.'-]*(?:\s+(?:[A-Z][A-Za-z\u00C0-\u024F.'-]*|de|del|la|le|of|upon|am|an|sur))*?`;
   // "relocating from Toronto to Seattle" names the place the job is in last.
-  const m = new RegExp(String.raw`\b(?:(?:relocating|moving|transferring)\s+from\s+${P}(?:,\s*${P})?\s+to|in|based in|located in|out of|relocating to|moving to)\s+(${P}(?:,\s*${P})?)(?=\s*(?:[;.!?()]|,(?!\s*[A-Z])|\s(?:as|for|with|and|but|plus|at|on|starting|paying|base|offered)\b|$))`).exec(t);
+  const m = new RegExp(String.raw`\b(?:(?:relocating|moving|transferring)\s+from\s+${P}(?:,\s*${P})?\s+to|in|based in|located in|out of|relocating to|moving to)\s+(${P}(?:,\s*${P})?)(?=\s*(?:[;.!?()]|,(?!\s*[A-Z])|\s(?:as|for|with|and|but|plus|at|on|not|or|starting|paying|base|offered|office)\b|$))`).exec(t);
   const w = m?.[1]?.replace(/[.,]+$/, "").trim();
   if (!w || NOT_PLACE.test(w) || w.length > 80) return null;
   return w;
@@ -406,24 +420,34 @@ function occupationFor(role: string | null, sector: string | null, maps: any, ti
 const DEADLINE = /\b(?:deadline(?: is)?|expires?(?: on)?|due|(?:answer|respond|reply|decide|sign|accept)(?: back)? by|need to (?:answer|decide|respond|reply|sign|accept)(?: by)?|have until|by)\s+((?:next |this )?(?:mon|tues|wednes|thurs|fri|satur|sun)day|tomorrow|end of (?:the )?(?:day|week|month)|eod|eow|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.? \d{1,2}(?:st|nd|rd|th)?|\d{1,2}\/\d{1,2})/i;
 const BENEFIT = /\b(relocation|reloc|stipend|allowance|tuition|(?:401|403|457)\s?\(?[kb]\)?)(?![\w])/i;
 // An amount followed by a benefit's name ("$3,000 relocation") inside a clause that also states the pay.
+const PERK = /\b(?:moving|housing|commuter|travel|visa|equipment|home office|wellness|gym|phone|internet|education|learning|match)\b/i;
 const BENEFIT_AMOUNT = /^\s*(?:in |of |for )?(?:relocation|reloc|stipend|allowance|tuition|(?:401|403|457)\s?\(?[kb]\)?)/i;
-const COMPETING = /\b(another offer|competing offer|other offer|second offer|also (?:have|got) an offer|also offered|offer from .+ too)\b/i;
+const COMPETING = /\b(another offer|competing offer|other offer|second offer|also (?:have|got) an offer|also offered|offer from .+ too)\b|\balso have [A-Z][\w&.'-]* (?:at|for)\b/i;
 
 // ---------- the completeness rule (2026-11-13 round 2) ----------
 export const norm = (s: string) => s.replace(/[’‘]/g, "'").replace(/ /g, " ").replace(/\bRs\.\s?/g, "Rs ").replace(/\bp\.a\.?(?=\s|$)/gi, "per annum").replace(/\bU\.S\.A?\.?(?=\s|$)/g, "US").replace(/\bD\.C\.?/g, "DC").replace(/\bSt\.\s/g, "St ");
 const EQUITY = /\b(?:equity|rsus?|stock|options|shares|vest\w*|cliff)\b/i;
-const TOTAL = /\b(?:OTE|TC)\b|\b(?:total comp(?:ensation)?|total package|total pay|on[- ]target earnings|all[- ]in)\b/i;
-const PART_YEAR = /\b\d{1,2}\s?(?:hrs?|hours)\s?(?:\/|a|per|each)\s?(?:week|wk)\b|\bpart[- ]time\b|\b\d{1,2}-(?:week|month)\b|\b\d{1,2}[- ](?:week|month|wk|mo)s?(?=\s+(?:intern\w*|contract\w*|co-?op|placement|gig|program|term))|\bintern(?:ship)?\b|\bcontract(?:or)?\b|\btemp(?:orary)?\b|\bseasonal\b|\bco-?op\b/gi;
+const TOTAL = /\b(?:OTE|TC)\b|\b(?:total comp(?:ensation)?|total package|total pay|on[- ]target earnings|all[- ]in|total)\b/i;
+// Not a full year of full-time work. Stated hours of 35 a week or more are full time and are not such a signal.
+const PART_YEAR = /\b(\d{1,2})\s?(?:hrs?|hours)\s?(?:\/|a|per|each)\s?(?:week|wk)\b|\bpart[- ]time\b|\b\d{1,2}-(?:week|month)\b(?!\s*(?:cliff|vest))|\b\d{1,2}[- ](?:week|month|wk|mo|year|yr)s?(?=\s+(?:intern\w*|contract\w*|co-?op|placement|gig|program|term|fixed))|\bintern(?:ship)?\b|\bcontract(?:or)?\b|\bfixed[- ]term\b|\btemp(?:orary)?\b|\bseasonal\b|\bco-?op\b|\bpro[- ]rata\b|\b[1-4] days a week\b|\b0?\.\d+ FTE\b|\b\d{2}% FTE\b/gi;
+const partYear = (t: string) => [...t.matchAll(PART_YEAR)].filter((m) => !(m[1] && Number(m[1]) >= 35)).map((m) => m[0].trim());
+// Pay the person makes now, and the figure they say they want: neither is the offer's.
+const CURRENT_PAY = /\b(?:currently|right now|at the moment|presently)\b[^.]*\b(?:make|making|earn|earning|paid|on)\b|\bmy current\b|\bI (?:make|earn)\b/i;
+const WANTED = /\bI(?:'d| would)? (?:want|like|asked for|am asking for|countered (?:at|with)|am hoping for)\b|\basking for\b|\bmy (?:ask|target|number) is\b/i;
+// Another offer counts only as the person's own, one they hold now: not a friend's, declined, expired or hoped-for one.
+const NOT_OWN = /\b(?:friend|brother|sister|colleague|coworker|roommate|wife|husband|partner|cousin|someone|somebody)\b|\b(?:turned down|declined|rejected|expired|rescinded|withdr[ae]w\w*|pulled)\b|\b(?:might|may|could|should|expect\w*|hop(?:e|ing)|if I|would have|used to|last year|previous\w*|hypothetical\w*)\b/i;
+const KNOWN_PLACE = /^(?:London|Paris|Berlin|Dublin|Munich|Amsterdam|Madrid|Barcelona|Zurich|Geneva|Stockholm|Oslo|Copenhagen|Warsaw|Tokyo|Shanghai|Beijing|Bangalore|Mumbai|Delhi|Hyderabad|Pune|Dubai|Tel Aviv|Lisbon|Milan|Rome|Vienna|Prague|Seoul|Manchester|Edinburgh)$/;
 const RANGE = /\$?\d[\d,.]*\s?[kKmM]?\s?(?:-|–|—|\sto\s)\s?\$?\d[\d,.]*\s?[kKmM]\b|\bbetween\s+\$?\d[\d,.]*\s?[kKmM]?\s+and\s+\$?\d[\d,.]*\s?[kKmM]?/;
-const LEFT_PERIOD = /\btwice a month\b|\bsemi-?monthly\b|\bbi-?monthly\b|\bper (?:hour|day|week|month|year|annum)\b|\/\s?(?:hr|hour|h|day|wk|week|mo|month|yr|year)\b|\ban hour\b|\ba (?:day|month|year)\b|\b(?:hourly|daily|weekly|bi-?weekly|fortnightly|monthly|annually|yearly)\b|\bevery (?:two|2|other) weeks\b/i;
+const LEFT_PERIOD = /\b1[3-6](?:th)? months?\b|\btwice a month\b|\bsemi-?monthly\b|\bbi-?monthly\b|\bper (?:hour|day|week|month|year|annum)\b|\/\s?(?:hr|hour|h|day|wk|week|mo|month|yr|year)\b|\ban hour\b|\ba (?:day|month|year)\b|\b(?:hourly|daily|weekly|bi-?weekly|fortnightly|monthly|annually|yearly)\b|\bevery (?:two|2|other) weeks\b/i;
 const NOT_A_PLACE = /^(?:January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|Q[1-4]|I|My|Our|Their|Total|Cash|Equity|Stock|Base|Salary|Year|Person|Office|RSUs?|PTO)\b/;
 // What is left of the message once every field has taken its words: any money, currency, period, total-pay or place word still
 // there was not understood, and is returned in the person's own words.
+const isPlace = (w: string) => KNOWN_PLACE.test(w) || US_CITY.test(w) || DOLLAR_PLACE.test(w) || !!STATES[w.toLowerCase()] || (payData()?.maps?.metros ?? []).some((m: any) => (m.words as string[]).includes(w.toLowerCase()));
 function leftOpen(rest: string): string[] {
   const open: string[] = [], said = (what: string, w: string) => { const x = `${what}: "${w.trim()}"`; if (!open.includes(x)) open.push(x); };
   for (const m of rest.matchAll(/\d[\d.,' ]*\d|\d/g)) {
     const tok = m[0].trim(), at = m.index ?? 0, after = rest.slice(at + m[0].length, at + m[0].length + 14), before = rest.slice(Math.max(0, at - 12), at), n = Number(tok.replace(/[,' ]/g, ""));
-    if (/^\s?%/.test(after) || /^(?:401|403|457)$/.test(tok) || /^(?:19|20)\d\d$/.test(tok)) continue;
+    if (/^\s?%/.test(after) || /^(?:401|403|457|1099)$/.test(tok) || /^(?:19|20)\d\d$/.test(tok) || notPay(rest.slice(0, at), tok, after)) continue;
     const unit = /^\s?(?:k|m|mm|thousand|million|lakhs?|lacs?|lpa|l|cr|crores?|kr)(?![a-z])/i.exec(after)?.[0] ?? "";
     const labelled = /^\s?(?:\+\s?)?(?:base|salary|bonus|signing)\b/i.test(after) || /(?:base|salary|bonus)\s?(?:of|is|:)?\s?$/i.test(before) || /[$€£¥￥₹₩₪]\s?$/.test(before);
     if (unit || n >= 1000 || labelled || (/^\d{1,3}[.,]\d{2,3}$/.test(tok) && !/^\d+\.\d{1,2}$/.test(tok))) said("a figure I did not use", tok + unit);
@@ -433,6 +457,7 @@ function leftOpen(rest: string): string[] {
   const lakh = /\b(?:lakhs?|lacs?|crores?|lpa)\b/i.exec(rest); if (lakh && !open.length) said("a currency I did not attach to a figure", lakh[0]);
   const per = LEFT_PERIOD.exec(rest); if (per) said("a pay period I did not attach to a figure", per[0]);
   const tot = TOTAL.exec(rest); if (tot) said("total pay with no figure I could read", tot[0]);
+  for (const m of rest.matchAll(/(?:\b(?:or|and|from)\s+|\/\s*)([A-Z][A-Za-z]+(?: [A-Z][a-z]+)?)\b/g)) if (isPlace(m[1])) said("a second place I did not use", m[1]);
   for (const m of rest.matchAll(/\b(?:in|to)\s+(?:the\s+)?([A-Z][A-Za-zÀ-ɏ'.-]*(?:,?\s+[A-Z][A-Za-zÀ-ɏ'.-]*)*)/g)) if (!NOT_A_PLACE.test(m[1]) && !codeOf(m[1])) said("a second place I did not use", m[1]);
   return open;
 }
@@ -451,22 +476,27 @@ export function parseOfferWords(text: string, data: OfferData = payData(), opts:
   const eatAll = (re: RegExp) => { rest = rest.replace(re, " | "); };
   const range = RANGE.exec(t);
   if (range) { open.push(`a range, not one figure: "${range[0].trim()}"`); eat(range[0]); }
-  const clauses = t.split(/[;\n]|,(?!\d{2},\d|\d{3})|\.(?=\s|$)|\s+(?:and|but|plus|with|or)\s+/i).map((c) => c.trim()).filter(Boolean);
+  // A sentence at a time: once a clause in it is about another offer, the rest of that sentence is too ("... from Meta for
+  // 170k plus 30k signing"), so that offer's parts never attach to this one.
+  const SPLIT = /,(?!\d{2},\d|\d{3})|\s+(?:and|but|plus|with|or)\s+/i;
   const main: string[] = [], aside: string[] = [];
-  for (const c of clauses) {
-    if (COMPETING.test(c) || (/\boffer(?:ed)?\b.*\btoo\b/i.test(c) && amounts(c).length)) {
-      const as = amounts(c), a = as[0];
-      if (a) {
-        const f = firmIn(c.replace(COMPETING, ""));
-        const named = f ? f.name : (c.match(/\b(?:from|at)\s+([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,2})/)?.[1] ?? null);
-        const rated = !!a.per && a.per !== "year", f1 = rated ? ANNUAL[a.per!]?.factor ?? null : 1, where = placeIn(c);
-        if (f1 != null) offer.competing.push({ company: named, base: a.value * f1, said: c, mark: a.mark, written: a.text, rated, abroad: !!where && readPlace(where, metroIn(where, maps)).kind !== "us" });
-      }
-      if (as.length <= 1) eat(c);
-      aside.push(c);
-      continue;
-    }
-    main.push(c);
+  for (const sentence of t.split(/[;\n]|\.(?=\s|$)/).map((x) => x.trim()).filter(Boolean)) {
+    const clauses = sentence.split(SPLIT).map((c) => c.trim()).filter(Boolean);
+    const k = clauses.findIndex((c) => COMPETING.test(c) || (/\boffer(?:ed)?\b.*\btoo\b/i.test(c) && amounts(c).length));
+    main.push(...(k < 0 ? clauses : clauses.slice(0, k)));
+    if (k < 0) continue;
+    const c = clauses[k], tail = sentence.slice(sentence.indexOf(c)), as = amounts(tail), a = as[0];
+    aside.push(tail); eat(tail);
+    // Only the person's own offer, held now, stated with one figure: anything else is not cited at all.
+    if (!a || NOT_OWN.test(sentence) || /\b(?:from|at)\s+[A-Z][\w&.'-]*\b.*\b(?:from|at)\s+[A-Z]/.test(tail.replace(COMPETING, ""))) continue;
+    const f = firmIn(c.replace(COMPETING, ""));
+    const named = f ? f.name : (c.match(/\b(?:from|at|have)\s+([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,2})/)?.[1] ?? null);
+    const rated = !!a.per && a.per !== "year", f1 = rated ? ANNUAL[a.per!]?.factor ?? null : 1, where = placeIn(tail);
+    // `plain`: a single yearly figure with no component named. Otherwise it is cited as written, component and all
+    // ("$170k total comp", "170k plus 30k signing", "$170k as an intern"), and never weighed against this base.
+    const rest1 = tail.slice(tail.indexOf(a.text) + a.text.length).replace(/\s+in\s+[A-Z][\w ,.'-]*$/, "").trim();
+    const plain = as.length === 1 && !rated && !rest1 && !TOTAL.test(tail) && !partYear(tail).length && !/\b(?:signing|sign-on|bonus|equity|rsus?|stock|options)\b/i.test(tail);
+    if (f1 != null) offer.competing.push({ company: named, base: a.value * f1, said: tail, mark: a.mark, written: plain ? a.text : `${a.text}${rest1 ? ` ${rest1}` : ""}`, rated, plain, abroad: !!where && readPlace(where, metroIn(where, maps)).kind !== "us" });
   }
   const body = main.join(", ");
   const firm = firmIn(body);
@@ -485,11 +515,22 @@ export function parseOfferWords(text: string, data: OfferData = payData(), opts:
     for (const a of all) if (!as.includes(a)) { take(a); }
     if (!as.length) { const p = c.match(/(\d{1,2}(?:\.\d+)?)\s?%\s*(?:target )?bonus|bonus(?: target)?(?: of)? (\d{1,2}(?:\.\d+)?)\s?%/i); if (p) { offer.bonus_pct = Number(p[1] ?? p[2]); from.bonus_pct = c; } continue; }
     // A relocation, a stipend or a retirement match is a benefit, never the base or a bonus (LOOP 13).
-    if (BENEFIT.test(c) && !/\b(base|salary)\b/i.test(c)) { as.forEach(take); continue; }
+    if ((BENEFIT.test(c) || PERK.test(c)) && !/\b(base|salary)\b/i.test(c)) { eat(c); continue; }
+    // What the person makes now, and the figure they want, are not the offer's.
+    if (CURRENT_PAY.test(c)) { offer.current = as[0].text; eat(c); continue; }
+    if (WANTED.test(c)) { offer.ask = { amount: as[0].value, written: as[0].text }; eat(c); continue; }
+    // Total compensation, OTE or TC is not the base: the figure next to those words is kept as said, never compared.
+    if (TOTAL.test(c)) {
+      const ti = as.findIndex((x) => new RegExp(`(?:${TOTAL.source})\\s*(?:of|is|:|=)?\\s*$`, "i").test(c.slice(0, x.at)) || new RegExp(`^\\s*(?:in\\s+)?(?:${TOTAL.source})`, "i").test(c.slice(x.end)));
+      const tot = ti >= 0 ? as.splice(ti, 1)[0] : !/\bbase\b/i.test(c) ? as.shift()! : null;
+      if (tot) { offer.total = { amount: tot.value, written: tot.text }; take(tot); eatAll(TOTAL); }
+      if (!as.length) continue;
+    }
     const a = as[0];
     const rated = !!a.per && a.per !== "year";
-    // Total compensation, OTE or TC is not the base: kept as said, never compared.
-    if (TOTAL.test(c) && !/\bbase\b/i.test(c)) { offer.total = { amount: a.value, written: a.text }; take(a); eatAll(TOTAL); continue; }
+    // "up to 150k" and "at least 150k" are a bound, not a figure.
+    const lead = c.slice(0, a.at), bound = /\b(?:up to|as much as|at least|a minimum of|no less than|north of|upwards of)\s*$/i.exec(lead) ?? /^\+(?!\s*\$?\d)/.exec(c.slice(a.end));
+    if (bound) open.push(`a bound, not one figure: "${`${/^\+/.test(bound[0]) ? "" : bound[0]}${a.text}${/^\+/.test(bound[0]) ? "+" : ""}`.trim()}"`);
     if (/sign(?:ing|-on| on)/i.test(c)) { offer.signing = a.value; from.signing = c; marks.signing = a.mark; written.signing = a.text; take(a); }
     else if (/bonus/i.test(c) && /\btarget\b/i.test(c)) { offer.bonus_target = a.value; from.bonus_target = c; marks.bonus_target = a.mark; take(a); }
     else if (/bonus/i.test(c)) { offer.bonus = a.value; from.bonus = c; marks.bonus = a.mark; take(a); }
@@ -529,18 +570,21 @@ export function parseOfferWords(text: string, data: OfferData = payData(), opts:
   const d = t.match(DEADLINE);
   if (d) offer.deadline = { text: d[1] };
   // Not a full year of full-time work, as the person said it: the rate stays a rate.
-  const part = [...t.matchAll(PART_YEAR)].map((m) => m[0].trim());
+  const part = partYear(aside.reduce((x, c) => x.replace(c, " "), t));
   offer.part_year = part.length ? part.join(", ") : null;
   // Strike what the fields above took, then read a currency said on its own ("paid in CAD") as the currency of every figure
   // that has none of its own (or only a "$", when it names a dollar); one that contradicts a figure stays open.
   for (const w of [place, title, d?.[0], offer.company, ...(metro?.words ?? []), ...(firm ? [firm.name, ...(firm.aliases ?? [])] : [])]) eat(w);
   eatAll(PART_YEAR); eatAll(/\b(?:relocating|moving|transferring)\s+from\s+[A-Z][\w'.-]*(?:,?\s[A-Z][\w'.-]*)*\s+to\b/g); eatAll(/\bpaid\s+(?:weekly|bi-?weekly|monthly|semi-?monthly|twice a month|every (?:two|other) weeks)\b/gi);
+  eatAll(/\bnot\s+(?:in\s+)?[A-Z][\w'.-]*(?:\s[A-Z][\w'.-]*)*/g);
   const free = freeCur(rest), codes = new Set(free.map(currencyOf));
   const figs = (["base", "signing", "bonus", "bonus_target"] as Fig[]).filter((f) => marks[f] !== undefined);
   if (codes.size === 1 && [...codes][0] && figs.length) {
     const code = [...codes][0]!;
-    if (figs.every((f) => !marks[f] || marks[f] === code || (marks[f] === "$" && DOLLARS.has(code)))) { for (const f of figs) marks[f] = code; eatAll(CUR_CODE); eatAll(CUR_NAME); }
+    if (figs.every((f) => !marks[f] || marks[f] === code || (marks[f] === "$" && DOLLARS.has(code)))) { for (const f of figs) { if (marks[f] !== code) delete written[f]; marks[f] = code; } eatAll(CUR_SAID); }
   }
+  // A period word that only repeats the rate's own period ("it's hourly, $72/hr") is that rate's.
+  if (offer.rate) for (let m = LEFT_PERIOD.exec(rest); m && !/months?$/.test(m[0]) && periodOf(m[0].replace(/^(?:per |an? |\/\s?)/i, "")) === offer.rate.period; m = LEFT_PERIOD.exec(rest)) eat(m[0]);
   open.push(...leftOpen(rest));
   if (offer.base != null && !offer.rate && offer.base > 5_000_000 && (!marks.base || marks.base === "$" || marks.base === "USD")) open.push(`"${written.base}" is far above any yearly base I can check; say the amount again`);
   offer.open = open; offer.unsettled = open.length > 0;
@@ -562,6 +606,9 @@ export function mergeOffers(a: Offer, b: Offer, data: OfferData = payData()): Of
   out.currency = out.currencies.base ?? a.currency ?? b.currency;
   if (out.currency === undefined) delete out.currency;
   out.written = { ...(a.written ?? {}), ...(b.written ?? {}) };
+  out.part_year = [a.part_year, b.part_year].filter(Boolean).join(", ") || null;
+  // A place said again replaces the whole of the earlier one (its metro and state go with it).
+  if (b.place != null || b.metro) for (const k of ["place", "city", "metro", "metro_label", "place_kind", "state"] as const) out[k] = b[k] ?? null;
   if (a.marks || b.marks) { out.marks = { ...(a.marks ?? {}), ...(b.marks ?? {}) }; settleCurrency(out); }
   out.occupation = occupationFor(out.role, out.sector, data?.maps, out.title);
   // What a piece left open stays open until the base is said again whole.
@@ -600,7 +647,7 @@ export function benchmarks(o: Offer, data: OfferData = payData()): Bench[] {
   // D-069: the public pay data on file is US data in US dollars. An offer said in another currency is never placed against it
   // (that would need a conversion with a sourced rate, and a US market for a non-US job).
   // 2026-11-13: nor is an offer whose currency is not known, or one for a place code cannot confirm is in the United States.
-  if (!isUsd(o) || !usMarket(o) || o.currency_assumed?.base || o.unsettled || (o.part_year && o.rate)) return out;
+  if (!isUsd(o) || !usMarket(o) || o.currency_assumed?.base || o.unsettled || o.part_year) return out;
   const occ = o.occupation;
   const base = o.base;
   // 1. The employer's own filed H-1B wages for this occupation and metro.
@@ -675,22 +722,25 @@ export interface OfferResult {
 }
 // What was understood, field by field, in the offer's own terms.
 export function readingOf(o: Offer): string[] {
-  const c = o.currencies ?? {};
-  return [o.company ? `company ${o.company}` : null, o.title ?? o.role ? `title ${o.title ?? o.role}` : null, o.city ? `place ${o.city === "remote" ? "remote" : o.metro_label ?? o.place ?? o.city}` : null,
-    o.rate ? `pay ${rateIn(o.rate.amount, c.base ?? o.currency)} ${PER[o.rate.period]}` : o.base != null ? `base ${moneyIn(o.base, c.base ?? o.currency)}` : null,
-    o.signing != null ? `signing bonus ${moneyIn(o.signing, c.signing)}` : null, o.bonus != null ? `bonus ${moneyIn(o.bonus, c.bonus)}` : null, o.bonus_pct != null ? `target bonus ${o.bonus_pct}%` : null,
-    o.total ? `total pay as you said it "${o.total.written}" (not the base)` : null, o.part_year ? `you said ${o.part_year}` : null].filter((x): x is string => !!x);
+  const c = o.currencies ?? {}, open = (o.open ?? []).join(" ");
+  // Round 3: what is unclear is quoted in the person's words (in `open`), never restated as a guessed value.
+  const pay = !/figure|range|bound|base|period|months|currency/.test(open), where = !/place|could be/.test(open), who = !/two figures/.test(open);
+  return [who && o.company ? `company ${o.company}` : null, o.title ?? o.role ? `title ${o.title ?? o.role}` : null, where && o.city ? `place ${o.city === "remote" ? "remote" : o.metro_label ?? o.place ?? o.city}` : null,
+    !pay ? null : o.rate ? `pay ${rateIn(o.rate.amount, c.base ?? o.currency)} ${PER[o.rate.period]}` : o.base != null ? `base ${moneyIn(o.base, c.base ?? o.currency)}` : null,
+    pay && o.signing != null ? `signing bonus ${moneyIn(o.signing, c.signing)}` : null, pay && o.bonus != null ? `bonus ${moneyIn(o.bonus, c.bonus)}` : null, o.bonus_pct != null ? `target bonus ${o.bonus_pct}%` : null,
+    o.total ? `total pay as you said it "${o.total.written}" (not the base)` : null, o.part_year ? `you said ${o.part_year}` : null, o.current ? `your pay now "${o.current}" (not the offer)` : null,
+    o.ask ? `the figure you want "${o.ask.written}"` : null].filter((x): x is string => !!x);
 }
 // The reply to an offer that is not settled: what was read, what was not, and the ask. No figure is compared or drafted.
 export function unsettledText(o: Offer): string {
   const read = readingOf(o);
-  return `${read.length ? `Here is what I read: ${read.join("; ")}. ` : ""}I could not place ${(o.open ?? []).join("; ")}. So I have not compared the offer with anything or drafted a counter. Tell me the offer again in one line (company, title, city and state, the base with its currency and whether it is per year, month, week or hour) and I'll redo it.`;
+  return `${read.length ? `Here is what I read: ${read.join("; ")}. ` : ""}I could not place this: ${(o.open ?? []).join("; ")}. So I have not compared the offer with anything or drafted a counter. Tell me the offer again in one line (company, title, city and state, the base with its currency and whether it is per year, month, week or hour) and I'll redo it.`;
 }
 export function offerReply(o: Offer, notGiven: Field[], data: OfferData = payData()): OfferResult {
   if (o.unsettled) { const ask = unsettledText(o); return { status: "ask", offer: o, missing: notGiven, ask, benchmarks: [], draft: null, messages: fit([ask]) }; }
   const bench = benchmarks(o, data);
   const c = o.currencies ?? {};
-  const parts = [o.company, o.title ?? o.role, o.city === "remote" ? "remote" : o.metro_label ?? o.place ?? o.city, o.base != null ? `base ${moneyIn(o.base, c.base ?? o.currency)}${rateNote(o, c.base ?? o.currency)}` : o.rate ? `${rateIn(o.rate.amount, o.currency)} ${PER[o.rate.period]}` : null,
+  const parts = [o.company, o.title ?? o.role, o.city === "remote" ? "remote" : o.metro_label ?? o.place ?? o.city, o.base != null && !(o.rate && o.part_year) ? `base ${moneyIn(o.base, c.base ?? o.currency)}${rateNote(o, c.base ?? o.currency)}` : o.rate ? `${rateIn(o.rate.amount, o.currency)} ${PER[o.rate.period]}${o.part_year ? " (not a full-year salary)" : ""}` : null,
     o.signing != null ? `signing ${moneyIn(o.signing, c.signing)}` : null, o.bonus != null ? `bonus ${moneyIn(o.bonus, c.bonus)}` : null, o.bonus_pct != null ? `target bonus ${o.bonus_pct}%` : null, o.total ? `total pay as you said it ${o.total.written} (not the base, not compared)` : null].filter(Boolean);
   const lines: string[] = [`Your offer: ${parts.join(", ")}.`];
   if (notGiven.length) lines.push(`Not given: ${notGiven.map((f) => ASK_WORDS[f]).join(", ")}, so I left ${notGiven.length > 1 ? "those" : "that"} out of the comparison.`);

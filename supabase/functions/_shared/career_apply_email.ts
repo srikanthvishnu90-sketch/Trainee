@@ -165,6 +165,8 @@ const REFUSED: Record<string, string> = {
   company_cooldown: "you applied to them in the last 30 days",
   duplicate_job: "this posting is already in your applications (sent, or approved and waiting to go), and each posting goes at most once",
   changed_since_yes: "the email changed after you saw it, so your yes was not for this version",
+  // D-075 (20261113140000 career_apply_facts_email_guard): the card was shown before a fact its email states was set aside or corrected.
+  fact_changed: "an answer in it changed after you saw it, so your yes was not for what is on file now; ask for the email again and I'll draft it from your current answers",
   no_resume: "I have no confirmed resume on file for you, so nothing goes without one",
 };
 const RESUME_UNREAD_EMAIL = "I couldn't check your resume on file just now, so nothing was drafted or sent. Ask again in a minute.";

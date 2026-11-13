@@ -163,6 +163,7 @@ import { careerGrant, followupTurn, gmailReadGrant, gmailReadNow, mailNow, supab
 import { gmailSender } from "../_shared/career_outreach_gmail.ts";
 import { fileUploadFor, isUploadedResumeText } from "../_shared/channel_resume_upload.ts"; // FEATURE 16
 import { replacedResumeLines, replacedResumeStops } from "../_shared/career_resume_replace.ts"; // ONBOARDING ROUND 4
+import { staleFactChanges, staleFactLines, stopStaleFacts, untoldFactStopLine, untoldFactStops } from "../_shared/career_apply_stale_facts.ts"; // D-075
 import { outlookAsk, outlookChatTurn } from "../_shared/outlook_connector.ts"; // M4: Outlook
 import { shapeForTurn } from "../_shared/channel_shape.ts"; // REPLY SHAPE
 import { applyHereTurn } from "../_shared/apply_here.ts"; // APPLY HERE: a pasted link or "apply to this" -> one line + one Apply button
@@ -1613,6 +1614,17 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             // flag-only reply checks (loop.ts): saved with the turn so remaining reply problems can be counted (Greptile on #566)
             ...replyFlagsMeta(turn as { flags?: unknown }), ...(turn.show?.meta ?? {}) };
         }
+        // D-075: a fact set aside by code or corrected through correct_profile_fact this turn stops the hosted applications that
+        // state its old value (approved and not started: closed unsent; prepared: discarded), whatever reply the turn ended with;
+        // the reply says which, or that they could not be checked (career_apply_stale_facts.ts; 20261113140000).
+        const factChange = { set_aside: (turn as any).set_aside ?? null, corrected: (turn as any).corrected ?? null };
+        const staleChanges = staleFactChanges(factChange);
+        if (staleChanges.length) {
+          const stops = await stopStaleFacts(admin, user.id, staleChanges, factChange.set_aside?.length ? "set_aside" : "corrected");
+          const lines = staleFactLines(stops);
+          if (lines.length) out = { ...out, reply: [out.reply, ...lines].join("\n"), ...(out.parts ? { parts: [...out.parts, ...lines] } : {}) };
+          agentMeta = { ...(agentMeta || {}), stale_fact_stops: stops === "failed" ? "failed" : Object.fromEntries(Object.entries(stops).map(([k, v]) => [k, v.length])) };
+        }
       } else {
         // FEATURE 5: job search ranked by fit and judged (_shared/career_search_judge.ts). "judge prompt: ..." keeps the
         // person's own judging instructions (a standing instruction). After the router decides a turn is a role search
@@ -1841,6 +1853,12 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           const line = reopenedLine(await reopenContradicted(admin, user.id, fresh, Date.now()).catch((e) => { console.error("career stated answers:", e?.message ?? e); return null; }));
           if (line) out = { ...out, reply: `${out.reply}\n${line}`, ...(out.parts ? { parts: [...out.parts, line] } : {}) };
         }
+      }
+      // D-075: what a claim or submit check stopped because a fact it stated changed (the fact write recorded it; no reply said it
+      // yet) is said here, once, on every path.
+      {
+        const told = untoldFactStopLine(await untoldFactStops(admin, user.id));
+        if (told) out = { ...out, reply: `${out.reply}\n${told}`, ...(out.parts ? { parts: [...out.parts, told] } : {}) };
       }
       // BETA C03 / A15.1 (career_prep_file.ts): the router's interview prep File (result.file) is stored as a File for this person
       // and its signed link is sent after the summary; when it cannot be made, the reply says so and gives the page as text.

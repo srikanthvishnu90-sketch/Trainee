@@ -402,7 +402,10 @@ Deno.test("FW-3 a version whose entries lost their detail lines says so, and whi
     { id: "x6", kind: "experience", title: "Barista, Bean House (2020)", text: "Barista, Bean House (2020)", bullets: ["Made 300 drinks a shift", "Opened the store"], status: "confirmed", needs_confirmation: false },
     { id: "x7", kind: "experience", title: "Tutor, Math Lab (2019)", text: "Tutor, Math Lab (2019)", bullets: ["Tutored 12 students in algebra"], status: "confirmed", needs_confirmation: false },
   ];
-  const profile = { basics: { name: "Sam Rivera", email: "sam@example.com" }, facts };
+  // Architect amendment (fixture only, no assertion changed): #815 (merged after this file) refuses a resume whose top email is on
+  // a reserved domain (example.com cannot receive mail), so FW-3's profile carries a deliverable-shaped address, as the resume
+  // email tests do (first.last@gmail.com). Nothing is sent by this test.
+  const profile = { basics: { name: "Sam Rivera", email: "sam.rivera@gmail.com" }, facts };
   const t: any = await tailorForPosting({ userId: "00000000-0000-4000-8000-000000001171", profile, posting: { text: "Quantum Researcher at Example Labs\n\nWe study superconducting qubits.", company: "Example Labs" },
     deps: { render: edgeRenderer(), resumes: memoryResumeStore() }, now: NOW, reviewDraft: true });
   ok(t.ok, JSON.stringify(t).slice(0, 300));

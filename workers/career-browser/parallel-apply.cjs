@@ -1066,9 +1066,11 @@ async function attempt(browser, p, opts, timing) {
       onAllowedHost();
       await gate("continue");
       await stopAtWall(page, p.url);
-      const before = await page.evaluate(() => [...document.querySelectorAll("input, select, textarea")].filter((e) => e.offsetWidth || e.offsetHeight).length + "|" + (document.body.innerText || "").length);
+      // What the step shows: its visible fields, its text, and its visible buttons (a Review step that only swaps "Review" for "Submit").
+      const STEP_SIG = () => [...document.querySelectorAll("input, select, textarea")].filter((e) => e.offsetWidth || e.offsetHeight).length + "|" + (document.body.innerText || "").length + "|" + [...document.querySelectorAll("button, input[type=submit], [role=button]")].filter((e) => e.offsetWidth || e.offsetHeight).map((e) => e.innerText || e.value).join("/");
+      const before = await page.evaluate(STEP_SIG);
       await page.click("[data-upmore-next]");
-      const moved = await page.waitForFunction((b) => [...document.querySelectorAll("input, select, textarea")].filter((e) => e.offsetWidth || e.offsetHeight).length + "|" + (document.body.innerText || "").length !== b, before, { timeout: 5000 }).then(() => true, () => false);
+      const moved = await page.waitForFunction((b) => [...document.querySelectorAll("input, select, textarea")].filter((e) => e.offsetWidth || e.offsetHeight).length + "|" + (document.body.innerText || "").length + "|" + [...document.querySelectorAll("button, input[type=submit], [role=button]")].filter((e) => e.offsetWidth || e.offsetHeight).map((e) => e.innerText || e.value).join("/") !== b, before, { timeout: 5000 }).then(() => true, () => false);
       // The page did not move on (its own check held the step back): handed back, never pressed again.
       if (!moved) {
         // What the page says held it back, in its own visible words (an error line on the step), for the person and the record.

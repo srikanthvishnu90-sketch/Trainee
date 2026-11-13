@@ -27,11 +27,13 @@ const QUESTION = 'Is this right again: "GPA: 3.9"? Reply yes to put it back on y
 Deno.test({ name: "set-aside and restore through the real handler: the set-aside turn never asks to restore; code's question, then a plain yes, restores", sanitizeResources: false, sanitizeOps: false, async fn() {
   if (!pgBinDir()) { if (Deno.env.get("CI") === "true") throw new Error("needs Postgres 16"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
   const pg: Pg = await startPg(), realFetch = globalThis.fetch;
+  const ENV_KEYS = ["CAREER_BRAIN", "CAREER_BRAIN_ROUTER_INTENTS", "MODEL_PROVIDER", "CAREER_REPLY_WRITER", "ANTHROPIC_API_KEY"];
+  const saved = Object.fromEntries(ENV_KEYS.map((k) => [k, Deno.env.get(k)]));
   let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
   try {
     await supabaseParity(pg);
     for (const id of Object.values(PEOPLE)) await pg.sql(`insert into auth.users (id, email) values ('${id}', '${id}@example.test'); insert into public.profiles (id) values ('${id}'); insert into public.career_watch_kv (user_id, key, value) values ('${id}', 'career:account', '{"epoch":0,"version":0,"paused":false}');`);
-    for (const k of ["CAREER_BRAIN", "CAREER_BRAIN_ROUTER_INTENTS", "MODEL_PROVIDER", "CAREER_REPLY_WRITER"]) Deno.env.delete(k);
+    for (const k of ENV_KEYS) Deno.env.delete(k);
     Deno.env.set("ANTHROPIC_API_KEY", "sk-fake-not-a-key"); globalThis.fetch = fakeModel as typeof fetch;
     handler = await careerHandler(pg, PEOPLE);
     const find = (o: any): any => { if (!o || typeof o !== "object") return null; if (o.text === "GPA: 3.9" && o.id) return o; for (const v of Array.isArray(o) ? o : Object.values(o)) { const r = find(v); if (r) return r; } return null; };
@@ -54,5 +56,10 @@ Deno.test({ name: "set-aside and restore through the real handler: the set-aside
     assertNode.deepStrictEqual(await gpa("tok-r"), ["draft", true]);
     const late = await turn("tok-r", "yes", eager("F-002", "It is back."));
     assertNode.deepStrictEqual([await gpa("tok-r"), /back on your record|It is back/.test(String(late.reply))], [["draft", true], false], String(late.reply));
-  } finally { handler?.restore(); globalThis.fetch = realFetch; await pg.stop(); }
+  } finally {
+    handler?.restore(); globalThis.fetch = realFetch;
+    // Every variable this file changed goes back as it was, so a later file never inherits the fake key or the brain switches.
+    for (const [k, v] of Object.entries(saved)) v === undefined ? Deno.env.delete(k) : Deno.env.set(k, v);
+    await pg.stop();
+  }
 } });

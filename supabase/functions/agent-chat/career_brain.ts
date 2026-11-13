@@ -373,9 +373,11 @@ export async function agentTurn(o: {
     const recLine = (p: any) => `${[p?.company, p?.title].map((x) => String(x ?? "").trim()).filter(Boolean).join(", ")}: ${String(p.pay).trim()}`;
     const letters = (t: string) => /\p{L}/u.test(t.replace(/https?:\/\/\S+/g, "")), links = (t: string) => t.match(/https?:\/\/\S+/g) ?? [];
     if (trace.r) {
-      const own = [trace.r.verdict.now, trace.r.verdict.later, trace.r.short?.now ?? "", trace.r.short?.later ?? "", trace.r.short?.act ?? "", trace.r.first_action].filter(Boolean).flatMap((x) => x.split(/(?<=[.!?])\s+/));
+      // Code's own lines: the verdict, the first action, and the fallback paragraph code writes (its last sentence carries the File link).
+      const own = [trace.r.verdict.now, trace.r.verdict.later, trace.r.short?.now ?? "", trace.r.short?.later ?? "", trace.r.short?.act ?? "", trace.r.first_action, fallbackVerdict(trace.r)].filter(Boolean).flatMap((x) => x.split(/(?<=[.!?])\s+(?!https?:)/));
       const k = await keepSupported(result.reply, [...trace.r.facts.map((f) => ({ text: f.quote, title: f.label })), ...trace.r.person.map((text) => ({ text, title: "What the person confirmed" }))], { judge, pure, own, ask: o.message });
-      result = { ...result, reply: letters(k.text) ? k.text : [fallbackVerdict(trace.r), ...links(k.text)].join("\n") };
+      // With nothing of the model's left, code's own fallback paragraph (it already ends with the File link, when there is one).
+      result = { ...result, reply: letters(k.text) ? k.text : fallbackVerdict(trace.r) };
     } else if (trace.a) {
       const k = await keepSupported(result.reply, trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), { judge, pure, ask: o.message });
       result = { ...result, reply: letters(k.text) ? k.text : [trace.a.not_verified || NOT_CONFIRMED, ...links(k.text)].join("\n") };
@@ -389,7 +391,7 @@ export async function agentTurn(o: {
       const said = new Set(o.message.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}&'-]*/gu) ?? []);
       const about = shownPay.filter((l) => (l.text.match(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}\p{N}&'-]*/gu) ?? []).slice(/^\p{Lu}\p{Ll}*\s+\p{Ll}/u.test(l.text) ? 1 : 0).some((w) => said.has(w.toLowerCase().replace(/'s$/, ""))));
       const k = await keepSupported(result.reply, [...recs.map((p: any) => ({ text: recLine(p), title: "Posting record" })), ...about.map((l) => ({ text: l.text, title: "Pay shown earlier in this conversation" }))], { judge, pure, own: about.map((l) => l.text), ask: o.message });
-      const named = recs.filter((p: any) => { const c = String(p?.company ?? "").trim().toLowerCase(); return c && o.message.toLowerCase().includes(c); });
+      const named = recordsNamed(o.message, recs);
       const mine = [...new Set((named.length ? named : recs.length === 1 ? recs : []).map(recLine))].filter((l) => !numbersIn(l).every((n) => numbersIn(k.text).some((x) => numEq(x, n))));
       result = { ...result, reply: !k.removed.length ? k.text : [k.text, ...(mine.length ? mine : letters(k.text) ? [] : about.length ? [...new Set(about.map((l) => l.text))] : [NOT_CONFIRMED])].filter(Boolean).join("\n") };
     }
@@ -427,6 +429,9 @@ export async function agentTurn(o: {
       result = { ...result, reply: setAsideSaid(result.reply, set.map((x) => x.text)), set_aside: set } as typeof result;
     }
   }
+  // D-075: the facts correct_profile_fact replaced this turn (old words, new words), for the stop of applications stating the old ones.
+  const corrected = (ctx.turn as any)?.corrected;
+  if (Array.isArray(corrected) && corrected.length) result = { ...result, corrected } as typeof result;
   // Review of #790 (round 3): the marker a later yes needs to put a set-aside fact back is the one CODE set when confirm_profile_fact
   // asked its own question (the reply is that question, shown as written); a question in the model's words never sets it. It is
   // dropped when the turn also asked for an approval, or a card is open: the person's next yes belongs to that.
@@ -491,6 +496,11 @@ function placeOfPay(p: { pay?: string | null; place?: string | null }, figures: 
   if (held.length) return held.length === 1 ? held[0] : null;
   const inPay = /\(([^()$\d]{2,60})\)/.exec(pay)?.[1]?.trim();
   return onePlace(String(p?.place ?? "")) || inPay || null;
+}
+// FAIL_CLOSED.support, round 4 (review: "the role you put in my inbox" matched Box; "dropbox" matched Box and Dropbox): the posting
+// records the person's message names: the record's employer name, the whole of it, as whole words of the message.
+export function recordsNamed<T extends { company?: string | null }>(message: string, recs: T[]): T[] {
+  return recs.filter((p) => { const c = String(p?.company ?? "").replace(/\s+/g, " ").trim(); return !!c && new RegExp(`(?<![\\p{L}\\p{N}])${c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\s+")}(?:'s)?(?![\\p{L}\\p{N}])`, "iu").test(String(message ?? "")); });
 }
 // 2026-11-13 (review of #801; a missing place is acceptable, a wrong one is not): the record's location is written beside the pay
 // only when it is one place. Several places ("San Jose, CA; Austin, TX", "Chicago, IL / New York, NY", "Multiple locations") or

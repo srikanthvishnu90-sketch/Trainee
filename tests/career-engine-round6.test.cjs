@@ -36,7 +36,8 @@ test("v1/v2: no request in the window carries an answer in its path or query; an
   const used = st({ used: true, answered: true });
   assert.equal(pa.submitWindowVerdict({ method: "GET", url: "http://h/v1/done/consent/1/sponsorship/yes", resourceType: "document", navigation: true }, used), "abort", "v1: answers in a navigation's path");
   assert.equal(pa.submitWindowVerdict({ method: "GET", url: "http://h/px/consent/1/sponsorship/yes/pixel.png", resourceType: "image", navigation: false }, used), "abort", "v2: answers in an image's path");
-  assert.equal(pa.submitWindowVerdict({ method: "GET", url: "http://h/static/check.png", resourceType: "image", navigation: false }, used), "allow", "an asset under a folder of assets loaded before");
+  // Round 7 (architect amendment, stricter): a folder of assets loaded before is not enough; only the very address (below).
+  assert.equal(pa.submitWindowVerdict({ method: "GET", url: "http://h/static/check.png", resourceType: "image", navigation: false }, used), "abort", "an asset under a folder of assets loaded before");
   assert.equal(pa.submitWindowVerdict({ method: "GET", url: "http://h/px/pixel.png", resourceType: "image", navigation: false }, used), "abort", "a folder no asset was loaded from");
   assert.equal(pa.submitWindowVerdict({ method: "GET", url: "http://h/static/app.css", resourceType: "stylesheet", navigation: false }, used), "allow", "the very address loaded before");
   assert.equal(pa.carriesAnswer("http://h/v1/done/consent/1/sponsorship/yes", want), true);

@@ -624,6 +624,23 @@ function multipartFiles(contentType, body) {
   }
   return out;
 }
+// An outcome page's address: path segments of plain words (no more than 40 characters each), parameters with short plain values (an
+// id, a source), and no value of the application in either.
+function plainAddress(url, want = []) {
+  let u; try { u = new URL(url); } catch { return false; }
+  const dec = (x) => { try { return decodeURIComponent(x); } catch { return x; } };
+  const vals = want.map(([, v]) => String(v).toLowerCase()).filter((v) => v.length >= 3 && !/^file:/.test(v));
+  const has = (x) => vals.some((v) => x.toLowerCase().includes(v));
+  for (const seg of u.pathname.split("/").filter(Boolean).map(dec)) if (!/^[A-Za-z0-9._~-]{1,40}$/.test(seg) || has(seg)) return false;
+  for (const [k, v] of u.searchParams.entries()) if (!/^[A-Za-z0-9_.-]{1,32}$/.test(k) || !/^[A-Za-z0-9_.-]{0,24}$/.test(v) || has(v)) return false;
+  return true;
+}
+// Round 7 (q6): a hidden field of the form whose value the page changed after load (not a token, not a widget's field the engine
+// set by answering its question) is sent with a value nobody approved: its names.
+function hiddenChangedSinceLoad(atLoad = [], controls = []) {
+  const load = new Map(atLoad.map(([k, v]) => [k, String(v)]));
+  return controls.filter((c) => c.type === "hidden" && !c.touched && c.name && !isOpaqueName(c.name) && load.has(c.name) && load.get(c.name) !== String(c.value ?? "")).map((c) => c.name);
+}
 const sameOrigin = (a, b) => { try { return new URL(a).origin === new URL(b).origin; } catch { return false; } };
 function submitWindowVerdict(r, s) {
   const noHash = (u) => String(u || "").replace(/#.*$/, "");
@@ -632,19 +649,20 @@ function submitWindowVerdict(r, s) {
   if (method === "GET" && !(String(s.method).toUpperCase() === "GET" && noHash(r.url).split("?")[0] === noHash(s.action).split("?")[0] && r.navigation)) {
     // Round 5: a navigation with parameters is only the board's own redirect after the approved POST; the page's script putting
     // answers in an address it navigates to is aborted.
-    // Round 6: no address in the window carries an answer (v1: /done/consent/1/sponsorship/yes). A navigation with parameters is the
-    // approved POST's own redirect, or, once that POST has been answered, the page's own outcome page on its own origin (y1).
-    if (carriesAnswer(r.url, s.want)) return "abort";
-    if (r.navigation) return !u.search || (s.used && r.redirected) || (s.used && s.answered && sameOrigin(r.url, s.action)) ? "allow" : "abort";
-    // Anything else fetched by GET is allowed only as an asset by an asset's own address: no parameters, an asset's extension, on a
-    // host and under a folder the page loaded from before the window (or the very address it loaded), and not named after an answer.
-    const bare = noHash(r.url).split("?")[0];
-    if (u.search) return "abort";
-    if (s.seen && s.seen.has(bare)) return "allow";
-    if (!ASSET_EXT.test(u.pathname) || ![...(s.assets || [])].some((d) => bare.startsWith(d))) return "abort";
-    const file = decodeURIComponent(u.pathname.split("/").pop() || "").toLowerCase();
-    if ((s.want || []).some(([, v]) => String(v).length >= 3 && !/^file:/.test(v) && file.includes(String(v).toLowerCase()))) return "abort";
-    return "allow";
+    // Round 7 (review of round 6): a destination allowlist, not a list of words. A navigation is the approved POST's own redirect,
+    // or, once that POST has been answered, the page's own outcome page on its origin at a plain address (words and short ids, no
+    // value of the application, no answer word). A subresource is an address the page loaded before the window, exactly, or one the
+    // outcome page itself asks for. Everything else is refused (q1: ?d=<encoded data>; q4: an encoded name in an old folder).
+    const here = noHash(r.url);
+    if (r.navigation) {
+      if (r.redirected && s.used) { s.outcome = here; return "allow"; }
+      if (!(s.used && s.answered) || !sameOrigin(r.url, s.action) || !plainAddress(r.url, s.want) || carriesAnswer(r.url, s.want)) return "abort";
+      s.outcome = here;
+      return "allow";
+    }
+    if (s.seen && s.seen.has(here)) return "allow";
+    if (s.outcome && r.frameUrl && noHash(r.frameUrl) === s.outcome) return "allow";
+    return "abort";
   }
   // The form's own submission (a navigation) goes to the form's address by its method. A board that posts the form with its own
   // script (fetch / XHR: Workable, Breezy) posts it to its own API address: allowed once, if its body holds exactly the form's data.
@@ -930,11 +948,12 @@ async function attempt(browser, p, opts, timing) {
   const loadedBefore = new Set(); // every GET address the page loaded before the submit window (no parameters, no fragment)
   async function guardRoute(route) {
     const req = route.request();
-    if (!submitWindow && req.method() === "GET") { try { const x = new URL(req.url()); if (!x.search) loadedBefore.add(x.origin + x.pathname); } catch { /* none */ } }
+    if (!submitWindow && req.method() === "GET") loadedBefore.add(String(req.url()).replace(/#.*$/, ""));
     if (submitWindow) {
       let nav = false; try { nav = req.isNavigationRequest(); } catch { /* none */ }
       const buf = req.postDataBuffer();
-      const verdict = submitWindowVerdict({ method: req.method(), url: req.url(), resourceType: req.resourceType(), navigation: nav, redirected: !!req.redirectedFrom(), contentType: (req.headers() || {})["content-type"], body: buf ? buf.toString("latin1") : null }, submitWindow);
+      let frameUrl = ""; try { frameUrl = req.frame().url(); } catch { /* none */ }
+      const verdict = submitWindowVerdict({ method: req.method(), url: req.url(), resourceType: req.resourceType(), navigation: nav, redirected: !!req.redirectedFrom(), frameUrl, contentType: (req.headers() || {})["content-type"], body: buf ? buf.toString("latin1") : null }, submitWindow);
       if (verdict === "abort") { submitWindow.blocked.push(`${req.method()} ${req.url().slice(0, 120)}`); return route.abort("blockedbyclient"); }
       // The approved request let out: its answer, once it arrives, opens the way to the page's own outcome page (y1).
       if (submitWindow.used && !submitWindow.approvedReq && req.method() !== "GET") { const w = submitWindow; w.approvedReq = req; req.response().then((resp) => { if (resp) w.answered = true; }).catch(() => {}); }
@@ -1120,7 +1139,8 @@ async function attempt(browser, p, opts, timing) {
     // the step with the Submit control. A step with anything handed back stops there, as on a one-page form. At most 8 steps.
     await declineCookies(page);
     // Round 5: the page as it was before anything was filled: its own constants (a job id, a shortcode, a source) are known here.
-    hiddenAtLoad = await page.evaluate(() => [...document.querySelectorAll("input[type=hidden]")].filter((e) => e.name).map((e) => [e.name, String(e.value)])).catch(() => []);
+    // Round 7 (q5): the filled form's own hidden inputs only (one outside it, or in another form, is no constant of this one).
+    hiddenAtLoad = await page.evaluate(() => { const f = document.querySelector("form[data-upmore-app]"); return f ? [...f.elements].filter((e) => e.type === "hidden" && e.name).map((e) => [e.name, String(e.value)]) : []; }).catch(() => []);
     const fr = { map: [], filled: [], needsUser: [], failed: [], invalid: [] };
     for (let step = 0; ; step++) {
       const r = await fillForm(page, { ats: p.ats, facts: p.facts, answers: p.answers || {}, resumePath: p.resume.path });
@@ -1222,6 +1242,8 @@ async function attempt(browser, p, opts, timing) {
     { let drifted = await driftedFills(page, fr.filled, factsFrom(p.facts || {}, p.answers || {}));
       if (drifted.length) { const lost = await recheckFilled(page, fr.filled, { facts: p.facts, answers: p.answers || {}, resumePath: p.resume.path }); if (!lost.length) drifted = await driftedFills(page, fr.filled, factsFrom(p.facts || {}, p.answers || {})); } if (drifted.length) { const e = new NeedsUser("field_not_filled", drifted[0]); e.needs = drifted.map((l) => ({ label: l, reason: "value_changed_by_page" })); throw e; } }
     const controls = await readControls();
+    // Round 7 (q6): a hidden field the page changed after load is refused, never sent with a value nobody approved.
+    { const changed = hiddenChangedSinceLoad(hiddenAtLoad, controls); if (changed.length) throw new NeedsUser("page_changed_before_submit", changed[0]); }
     const formSnap = await page.evaluate(FORM_SNAP, OPAQUE.source).catch(() => null);
     // Round 4: the pressed control's own name and value are sent with the form: part of what the network guard lets out.
     const sentRows = formSnap ? JSON.parse(formSnap).rows.concat(submitter ? [[submitter.name, submitter.value]] : []) : null;
@@ -1255,7 +1277,7 @@ async function attempt(browser, p, opts, timing) {
     watchPosts = true;
     // Round 6: folders of assets only (never the page's own folder, which would take in any address on the host).
     if (sentRows) submitWindow = { action: tie.action, method: tie.method, want: sentRows, used: false, answered: false, blocked: [], ats: p.ats, resumeSha: p.resume.sha256, hiddenAtLoad,
-      seen: new Set(loadedBefore), assets: new Set([...loadedBefore].filter((x) => ASSET_EXT.test(x)).map((x) => x.replace(/[^/]*$/, ""))) };
+      seen: new Set(loadedBefore) };
     // Nothing the application did not approve left the browser: the guard stopped every request, the application's own included.
     const heldBack = () => submitWindow && submitWindow.blocked.length && !submitWindow.used ? { status: "not_submitted", reason: "page_changed_at_submit", blocked: submitWindow.blocked.slice(0, 5), filled } : null;
     try {
@@ -1351,4 +1373,4 @@ async function runPool(browser, payloads, opts = {}) {
   return { results, wallMs: Date.now() - started, concurrency };
 }
 
-module.exports = { carriesAnswer, multipartFiles, submitTargetRefusal, submitterControl, bodyRows, submitWindowVerdict, isStructuralHidden, sentDiffers, jsonDiffers, isErrorText, isOpaqueName, guardVerdict, GUARD, FORM_SNAP, outcomeVerdict, hiddenIsAnswer, HIDDEN_ANSWER, CAPTCHA_QUESTION, controlLabel, SUBMIT_DENY, checkGate, pickControls, outsideSubmitOf, isApplicationForm, submitTieRefusal, sentToJobList, SNAP, MARK, CONTROLS, closedOnPage, declineCookies, samePostingRedirect, followedPageRefusal, postingIds, CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };
+module.exports = { plainAddress, hiddenChangedSinceLoad, carriesAnswer, multipartFiles, submitTargetRefusal, submitterControl, bodyRows, submitWindowVerdict, isStructuralHidden, sentDiffers, jsonDiffers, isErrorText, isOpaqueName, guardVerdict, GUARD, FORM_SNAP, outcomeVerdict, hiddenIsAnswer, HIDDEN_ANSWER, CAPTCHA_QUESTION, controlLabel, SUBMIT_DENY, checkGate, pickControls, outsideSubmitOf, isApplicationForm, submitTieRefusal, sentToJobList, SNAP, MARK, CONTROLS, closedOnPage, declineCookies, samePostingRedirect, followedPageRefusal, postingIds, CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };

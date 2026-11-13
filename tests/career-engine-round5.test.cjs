@@ -21,11 +21,17 @@ test("n2: a navigation with parameters is the approved POST's own redirect, or i
   const used = st({ used: true });
   assert.equal(pa.submitWindowVerdict(nav("http://h/app/a?step=1&ref=apply", { redirected: true }), used), "allow", "the board's redirect after the approved POST");
   assert.equal(pa.submitWindowVerdict(nav("http://h/app/a?step=1", { redirected: true }), st()), "abort", "a redirect before any approved POST");
-  assert.equal(pa.submitWindowVerdict(nav("http://h/thanks"), used), "allow", "a navigation with no parameters");
+  // Round 7 (architect amendment, stricter): a script's navigation is the outcome page only once the approved POST has been answered.
+  assert.equal(pa.submitWindowVerdict(nav("http://h/thanks"), used), "abort", "a navigation before the approved POST's answer");
+  assert.equal(pa.submitWindowVerdict(nav("http://h/thanks"), st({ used: true, answered: true })), "allow", "the outcome page after the answer");
 });
 
 test("n3, n16-n19: during the window only assets the page already loaded from, by an asset's own address, may be fetched", () => {
-  for (const [u, t] of [["http://h/static/app.css", "stylesheet"], ["http://h/img/logo.png", "image"], ["http://h/static/fonts/x.woff2", "font"]]) assert.equal(pa.submitWindowVerdict(get(u, t), st()), "allow", u);
+  // Round 7 (architect amendment, stricter): an asset only at the very address the page loaded before the window (a folder is not enough).
+  for (const [u, t] of [["http://h/static/app.css", "stylesheet"], ["http://h/img/logo.png", "image"], ["http://h/static/fonts/x.woff2", "font"]]) {
+    assert.equal(pa.submitWindowVerdict(get(u, t), st()), "abort", `${u}: a folder loaded from`);
+    assert.equal(pa.submitWindowVerdict(get(u, t), st({ seen: new Set([u]) })), "allow", `${u}: loaded before, exactly`);
+  }
   for (const [u, t, why] of [["http://h/px/consent/1/sponsorship/yes/c%40x", "image", "answers in a ping's path"], ["http://h/jsonp?consent=1", "script", "a script with parameters"], ["http://h/css?consent=1", "stylesheet", "a stylesheet with parameters"],
     ["http://h/bg?consent=1", "image", "a background with parameters"], ["http://h/prefetch?consent=1", "other", "a prefetch"], ["http://h/collect?consent=1", "xhr", "an XHR with parameters"], ["http://h/static2/x.png", "image", "a folder the page never loaded from"],
     ["http://evil.test/img/logo.png", "image", "another host"], ["http://h/img/c%40x.png", "image", "an image named after an answer"], ["http://h/api/status", "fetch", "a fetch that is no asset"]])

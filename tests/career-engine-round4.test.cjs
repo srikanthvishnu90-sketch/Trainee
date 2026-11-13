@@ -58,7 +58,9 @@ test("3: the submit window lets out exactly one request: the approved form, to i
   // the same requests with no record of earlier loads are refused, and allowed once the page had loaded from there.
   const assets = [{ method: "GET", url: "http://h/app.css", resourceType: "stylesheet", navigation: false }, { method: "GET", url: "http://h/logo.png", resourceType: "image", navigation: false }];
   for (const r of assets) assert.equal(pa.submitWindowVerdict(r, st()), "abort", `${r.url} with no earlier load`);
-  for (const r of assets) assert.equal(pa.submitWindowVerdict(r, { ...st(), assets: new Set(["http://h/"]) }), "allow", `${r.url} under a folder loaded before`);
+  // Round 7 (architect amendment, stricter): a folder loaded from is no longer enough; only the very address loaded before.
+  for (const r of assets) assert.equal(pa.submitWindowVerdict(r, { ...st(), assets: new Set(["http://h/"]) }), "abort", `${r.url} only under a folder loaded before`);
+  for (const r of assets) assert.equal(pa.submitWindowVerdict(r, { ...st(), seen: new Set([r.url]) }), "allow", `${r.url} loaded before, exactly`);
   // A navigation with parameters is the approved post's own redirect only once that post has gone; before it, it is refused (n2).
   const thanks = { method: "GET", url: "http://h/app/thanks?ref=1", resourceType: "document", navigation: true };
   assert.equal(pa.submitWindowVerdict(thanks, st()), "abort", "a GET navigation with parameters before the approved post");

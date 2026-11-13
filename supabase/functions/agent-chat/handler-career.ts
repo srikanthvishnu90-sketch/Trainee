@@ -66,7 +66,7 @@ const peopleSearchCache = new Map<string, { at: number; out: AlumniResult }>(); 
 if (researchReplyOn(Deno.env)) void dnsProbe();
 import { AGENT_BRAIN_RELEASED, chooseBrain, agentTurn, HISTORY_WINDOW, historyWindow, nonEmptyReply, summaryFor } from "./career_brain.ts";
 import { brainMode, draftContinuation, FOLLOWUP_INTENT, questionShaped, researchOverAction, stagedRoute, stagedToolPolicy } from "./career_staged.ts";
-import { BOUNDARY_LINE, BOUNDARY_SAID, boundaryOf, correctionOf, hypotheticalOf } from "../_shared/agent/turn_notes.ts"; // D-061 G1, G6, G8, G9
+import { BOUNDARY_LINE, BOUNDARY_SAID, boundaryOf, correctionOf, hypotheticalOf, plainAnswer } from "../_shared/agent/turn_notes.ts"; // D-061 G1, G6, G8, G9
 import { severalAsks } from "../_shared/ask_language.ts"; // D-061 G13
 // D-061 G6: a write that moves toward an external effect (a queued or prepared application, a receipt, an email on the rail).
 // D-061 G1: an ask to make, change, send or export a document.
@@ -1310,7 +1310,10 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // rollback, and then it is never taken and the router answers exactly as before. Read lazily, only when the brain
       // test below is reached. With no model key configured the staged brain is never tried: the router answers, as it
       // does when the model fails (D-035).
-      const staged = stagedRoute({ env: Deno.env, message, ctx: ctx as unknown as Record<string, unknown>, host, structured: !!(careerTask || careerBatch), clock });
+      // Review of #790 (round 3): the marker of code's restore question, read only for a plain yes or no, and only while that
+      // question is the thread's last word (liveOfferRow: the newest assistant row, no user turn after it). It lives one turn.
+      const restoreAsk = plainAnswer(message) ? ((await liveOfferRow(admin, tid).catch(() => null))?.meta as any)?.restore_ask ?? null : null;
+      const staged = stagedRoute({ env: Deno.env, message, ctx: ctx as unknown as Record<string, unknown>, host, structured: !!(careerTask || careerBatch), clock, restoreAsk });
       // A "judge prompt: ..." instruction is code's (judgePromptTurn), and without a model key the brain is never tried.
       // R10 WO-C: a follow-up that widens the last search ("include business analyst ... plus remote US internships") is a
       // search, code's: it never goes to the brain, and is never answered by a template a word in it happens to match.
@@ -1494,7 +1497,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         const daily = await admin.rpc("career_apply_daily_limit", { p_user: user.id }).then((r: any) => r.error ? undefined : Number(r.data) || undefined, () => undefined);
         const capStores = supabaseCapabilityStores(admin);
         let peopleTrace: AlumniResult | null = null;
-        const turn = await agentTurn({ message: typedMessage, history, stores: ctx as unknown as Record<string, unknown>, userId: user.id, threadId: tid, now,
+        // Review of #790 (round 3): the restore question is never asked while an application card is open (a read that fails counts as open).
+        const cardPending = !!(await supabaseCardStore(admin).latestOpen(user.id).catch(() => true));
+        const turn = await agentTurn({ message: typedMessage, history, restoreAsk, cardPending, stores: ctx as unknown as Record<string, unknown>, userId: user.id, threadId: tid, now,
           model: (payload) => callModel(cfg, payload, { meter, role: "chat" }), postings: (q) => postingsDb.search(searchWords(q), 150), alerts: alertStore,
           mail: supabaseMailStore(admin), interviews: supabaseInterviewStore(admin), digest: supabaseDigestStore(admin),
           events, tz, summary, ...(resumedTaskNote ? { summary: [summary, resumedTaskNote].filter(Boolean).join("\n\n") } : {}), hired: hiredSourceFromEnv(Deno.env, admin), confirmations: confirmEvents,
@@ -1607,7 +1612,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           turn.reply = nonEmptyReply(turn);
           out = { reply: turn.reply, intent: turn.show?.intent ?? (turn.tool_calls.some((c: any) => c.name === "draft_followup") ? FOLLOWUP_INTENT : "agent"), resultStatus: turn.stopped, contained: false, handler: "agent", ...(turn.show?.parts ? { parts: turn.show.parts } : {}),
             ...(turnDocuments.length ? { result: { documents: turnDocuments } } : {}) };
-          agentMeta = { brain: staged.chosen ? "staged" : "agent", ...(staged.chosen ? { router_intent: staged.decision?.intent ?? null } : {}), tool_calls: turn.tool_calls, stopped: turn.stopped, ...((turn as any).shorten ? { shorten: (turn as any).shorten } : {}), ...((turn as any).research ? { research: (turn as any).research } : {}), pending_approvals: turn.pending_approvals.length, ...(turn.knowledge ? { knowledge: turn.knowledge } : {}),
+          agentMeta = { brain: staged.chosen ? "staged" : "agent", ...(staged.chosen ? { router_intent: staged.decision?.intent ?? null } : {}), tool_calls: turn.tool_calls, stopped: turn.stopped, ...((turn as any).shorten ? { shorten: (turn as any).shorten } : {}), ...((turn as any).set_aside ? { set_aside: (turn as any).set_aside } : {}), ...((turn as any).research ? { research: (turn as any).research } : {}), pending_approvals: turn.pending_approvals.length, ...(turn.knowledge ? { knowledge: turn.knowledge } : {}),
             // flag-only reply checks (loop.ts): saved with the turn so remaining reply problems can be counted (Greptile on #566)
             ...replyFlagsMeta(turn as { flags?: unknown }), ...(turn.show?.meta ?? {}) };
         }

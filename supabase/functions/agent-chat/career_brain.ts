@@ -401,6 +401,9 @@ export async function agentTurn(o: {
       result = { ...result, reply: setAsideSaid(result.reply, set.map((x) => x.text)), set_aside: set } as typeof result;
     }
   }
+  // D-075: the facts correct_profile_fact replaced this turn (old words, new words), for the stop of applications stating the old ones.
+  const corrected = (ctx.turn as any)?.corrected;
+  if (Array.isArray(corrected) && corrected.length) result = { ...result, corrected } as typeof result;
   // Review of #790 (round 3): the marker a later yes needs to put a set-aside fact back is the one CODE set when confirm_profile_fact
   // asked its own question (the reply is that question, shown as written); a question in the model's words never sets it. It is
   // dropped when the turn also asked for an approval, or a card is open: the person's next yes belongs to that.

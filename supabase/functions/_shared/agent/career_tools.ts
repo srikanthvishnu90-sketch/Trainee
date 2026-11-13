@@ -624,6 +624,8 @@ export function careerTools(deps: {
         const fact = CareerProfile.updateFact(profileOf(c), id, { text, needs_confirmation: true, status: "draft", corrected_from: was });
         if (PREF_KINDS.has(old.kind)) dropSuperseded(profileOf(c), id, was, text);
         c.turn?.added.push(id);
+        // D-075: what this turn corrected, for the stop of the applications stating the old words (career_apply_stale_facts.ts).
+        if (c.turn) (c.turn as any).corrected = [...((c.turn as any).corrected ?? []), { id, was, text }];
         await record(c, "fact_corrected", text, { id, was: was.slice(0, 200) });
         return { fact, was };
       },

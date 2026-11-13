@@ -180,7 +180,7 @@ export function indexPages(pages: { text: string; title?: string; url?: string }
     const title = plainText(decoded(String(p.title ?? ""))), host = hostOf(p.url);
     const one = subs.length === 1 ? subs[0] : null;
     const ownSite = !!one && !!host && !SHARED.some((d) => host === d || host.endsWith(`.${d}`)) && sites.some((d) => (host === d || host.endsWith(`.${d}`)) && d.split(".")[0].startsWith(compactName(one).slice(0, 12)) && !host.slice(0, Math.max(0, host.length - d.length)).split(".").some((l) => PUBLIC_LABELS.test(l)));
-    const whole = !!one && new RegExp(`(?<![\\p{L}\\p{N}])(?<!\\bthe\\s)${one.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:'s)?(?!\\s+\\p{Lu}(?!nc\\b|LC\\b|td\\b))(?![\\p{L}\\p{N}-])`, "u").test(title) && !new RegExp(`(?<![\\p{L}\\p{N}])(?:the|ex-?|former)\\s*-?${one.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(title);
+    const whole = !!one && new RegExp(`(?<![\\p{L}\\p{N}])(?<!\\bthe\\s)${one.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:'s)?(?!\\s+(?!(?:Inc|LLC|Ltd|Corp|Corporation|Co|Company|Holdings|Group|Technologies|Labs|Financial)\\b)\\p{Lu})(?![\\p{L}\\p{N}-])`, "u").test(title) && !new RegExp(`(?<![\\p{L}\\p{N}])(?:the|ex-?|former)\\s*-?${one.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(title);
     const owner = one && (ownSite || (whole && !TITLE_CUE.test(title.replace(nameRe(one), " ")))) ? one : null;
     // The page, cut into units: line by line; a table row (cells apart by a bar or a tab) is one unit and is never cut; any other
     // line is cut at ";", at bullets and at sentence ends. HTML entities are read first ("&mdash;" is a dash, not a ";").
@@ -238,7 +238,9 @@ export function indexPages(pages: { text: string; title?: string; url?: string }
     return { sentences: raw.map((u, k) => ({ ...u, k })).filter(({ text, k }) => text.length >= 8 && text.length <= 600 && /\p{L}/u.test(text) && !text.includes("?") && !(ASKS_Q.test(text) && !/^[A-Z]{2,}(?![a-z])/.test(text)) && (text.split(" ").length >= 5 || /\d/.test(text) || /[.!]["')\]]*$/.test(text)) && !(raw[k + 1] && ANSWERS.test(raw[k + 1].text) && !/[.!]$/.test(text)))
       .map(({ text, k, heads: hs }) => {
         const r = read(text), names = !subs.length || subs.some((n) => nameRe(n).test(text));
-        const lend = !names && !!owner && !POINTS_AWAY.test(text) && !foreignHead(hs);
+        // A unit whose own subject is another name ("Jane Street interns earn ...", "Stripe's interns ...") is that name's.
+        const h0 = hardParts(text, read), otherSubject = (h0.names[0]?.length ?? 0) >= 2 && h0.first === h0.names[0][0] || /(?<![\p{L}\p{N}])\p{Lu}[\p{L}\p{N}&-]*'s\s/u.test(text);
+        const lend = !names && !!owner && !POINTS_AWAY.test(text) && !foreignHead(hs) && !otherSubject;
         return { text, hard: hardParts(text, read), lower: lowerWords(r), content: contentWords(r), quotable: quotable(text) && !unsafe[k - 1] && !unsafe[k + 1] && (names || lend), lent: lend ? owner : null, label: lend ? `${host ? `From ${host}, a` : "A"} page about ${owner}` : "", passage: passage(k) };
       }) };
   }) };

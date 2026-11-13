@@ -100,7 +100,7 @@ async function one(c: SupportCase, j: SupportJudge | null): Promise<Outcome> {
     if (low(rest).includes(low(c.claim))) model = true;
     for (const s of flat(rest).split(/(?<=[.!?])\s+/).map(low).filter((x) => /[a-z]/.test(x))) {
       // Round 3: a quote from a page that is the asked employer's, whose unit does not name it, carries the page's title before it.
-      if (low(pageText).includes(s) || low(NOT_CONFIRMED).includes(s) || s === low(c.claim) || s === "(anecdote)" || pages.some((p) => s === `${p.title.toLowerCase()}:`)) continue;
+      if (low(pageText).includes(s) || low(NOT_CONFIRMED).includes(s) || s === low(c.claim) || s === "(anecdote)" || /^(?:from [\w.-]+, )?a page about [\p{L} ]+:$/u.test(s)) continue; // round 4: the label is code's words, never the title
       stray.push(`unquoted, not a page sentence: ${s}`);
     }
   }
@@ -131,7 +131,7 @@ Deno.test("allYes judge: what layer A (code) stops alone, by case", async () => 
   // thing, a name or a year the cited sentence does not have, a question on the page.
   for (const id of ["N24", "F04", "F05", "F06", "U01", "U02", "U03", "U04", "U05", "U06", "U07", "U09", "W01", "W02", "W05", "W06", "W09", "W10", "W11", "C03", "C05", "T04", "R01", "R03", "R10", "R12", "R16", "X01", "X04"]) ok(!through.includes(id), `layer A alone stops ${id}`);
 });
-const LAYER_A_THROUGH = 38; // round 3: 56 stopped by code alone. Before: 49 through (round 2), 59 (round 1).
+const LAYER_A_THROUGH = 49; // round 4: 45 stopped by code alone (56 in round 3, when a sentence one word off a unit was read as that unit; it is now a claim of its own, for the judge). Before: 49 through (round 2), 59 (round 1).
 const LAYER_A_THROUGH_R2 = 49; // round 2: 45 of the 94 are stopped by code alone (35 in round 1); the other 49 need the judge (polarity, hedges, who did what to whom)
 
 Deno.test("oracle judge: the 28 true cases; none with a supporting page sentence is dropped", async () => {
@@ -386,17 +386,16 @@ Deno.test("round 2, the judge call: at most 12 claims and about 6 KB of sources 
   const j: SupportJudge = async (c) => { calls.push(c); return c.map(() => "yes"); };
   const idx = indexPages([{ text: Array.from({ length: 60 }, (_, k) => `Citadel team ${k + 100} pays interns $5,000 a week.`).join(" ") }]);
   const vs = await decide(Array.from({ length: 60 }, (_, k) => ({ claim: `Citadel team ${k + 100} pays interns $5,000 a week, people say, in every office it has.` })), idx, j);
-  // Round 3: the first call asks 12 claims (yes: the model's words); the second asks, for 12 of the claims that did not fit, whether
-  // the page's own unit may stand; the rest are dropped.
+  // Round 4: 8 claims a call (the passages are larger); the second call asks the next 8 claims; the rest are dropped, and counted.
   eq(calls.length, 2);
-  ok(calls.every((c) => c.length <= 12 && c.reduce((n, x) => n + x.source.length, 0) <= 6500));
+  ok(calls.every((c) => c.length <= 8 && c.reduce((n, x) => n + x.source.length, 0) <= 14500));
   console.log(`BATCH: ${calls.map((c) => `${c.length} claims, ${c.reduce((n, x) => n + x.source.length + x.claim.length, 0)} bytes`).join("; ")}`);
-  eq([vs.filter((v) => v.how === "model").length, vs.filter((v) => v.how === "quote").length, vs.filter((v) => v.how === "drop").length], [12, 12, 36]);
+  eq([vs.filter((v) => v.how === "model").length, vs.filter((v) => v.how === "quote").length, vs.filter((v) => v.how === "drop").length, vs.unasked], [16, 0, 44, 44]);
   // A judge that refuses every claim is asked once more, whether the page's own units may stand: 12 claims, then 12 quotes.
   const calls2: any[][] = [];
   const vs2 = await decide(Array.from({ length: 60 }, (_, k) => ({ claim: `Citadel team ${k + 100} pays interns $5,000 a week, people say, in every office it has.` })), indexPages([{ text: Array.from({ length: 60 }, (_, k) => `Citadel team ${k + 100} pays interns $5,000 a week.`).join(" ") }]), async (c) => { calls2.push(c); return c.map((x) => isQuoteClaim(x.claim) ? "yes" : "no"); });
-  eq(calls2.map((c) => c.length), [12, 12]);
-  eq([vs2.filter((v) => v.how === "quote").length, vs2.filter((v) => v.how === "model").length], [12, 0]);
+  eq(calls2.map((c) => c.length), [8, 8]);
+  eq([vs2.filter((v) => v.how === "quote").length, vs2.filter((v) => v.how === "model").length], [8, 0]);
 });
 
 Deno.test("round 2, the File: an option or a row label the pages and the ask do not give is not shown; the title is the ask", async () => {
@@ -545,7 +544,7 @@ Deno.test("round 3 H: 40 true claims (at most 3 dropped); 101 false claims (what
     if (printed++ < 5) console.log(`PAYLOAD [${cls}] ${JSON.stringify(c)}`);
   }
   console.log(`FALSE_101 with a yes judge: layer A stops ${stops}; the other ${FALSE_101.length - stops} reach the judge with context`);
-  ok(stops >= 45);
+  ok(stops >= 35); // round 4: 38 (49 in round 3: a near-echo is now a claim for the judge, not a quote candidate)
 });
 
 Deno.test("round 3 E, F: a label is the ask's or the unit's own words, judged with its cells; a shared host is never official", async () => {
@@ -653,9 +652,11 @@ Deno.test("round 4.1: what was judged is what is emitted: a sentence one word of
   const recs = [{ text: "PayPal, Software Engineer Intern - Summer 2027: $28- $49 Hourly (Chicago, Illinois)", title: "Posting record" }];
   for (const j of [quotesOnly, allYes]) {
     const k = await keepSupported("PayPal, Software Engineer Intern - Summer 2027: never $28- $49 Hourly (Chicago, Illinois).", recs, { judge: j, pure });
-    if (j === quotesOnly) eq(k.text, ""); // a model claim, judged as one: refused
-    else ok(!/never/.test(k.text) || k.asked?.some?.((c: any) => /never/.test(c.claim)), "kept only if the altered sentence itself was the judged claim");
+    eq(k.text, j === quotesOnly ? "" : "PayPal, Software Engineer Intern - Summer 2027: never $28- $49 Hourly (Chicago, Illinois)."); // a model claim, judged as one
   }
+  const spy = asking("yes");
+  await keepSupported("PayPal, Software Engineer Intern - Summer 2027: never $28- $49 Hourly (Chicago, Illinois).", recs, { judge: spy.judge, pure });
+  ok(spy.asked.length === 1 && /never \$28/.test(spy.asked[0].claim), "the altered sentence itself is what the judge was asked");
   const adv = ["Keep a resume to one page for early-career roles."];
   eq((await keepSupported("Keep a resume to one page for early-career roles never.", adv, { judge: quotesOnly, pure })).text, "");
   eq((await keepSupported("Never keep a resume to one page for early-career roles.", adv, { judge: quotesOnly, pure })).text, "");
@@ -727,10 +728,10 @@ Deno.test("round 4.8 and 4.9: a long draft is judged up to the cap across the ca
   const facts = Array.from({ length: 25 }, (_, k) => `Citadel desk ${k + 100} sits in tower ${k + 200} of the campus.`);
   const page = `${facts.join(" ")} Citadel interns earn $5,000 a week.`;
   const j = asking("yes");
-  const r = await mk3([{ url: U, title: "Citadel notes", text: page }], { summary: [...facts.slice(0, 4).map((t) => ({ text: t.replace("sits in", "is in"), quote: t, url: U })), { text: "Citadel pays interns $5,000 a week.", quote: "Citadel interns earn $5,000 a week.", url: U }], conditions: facts.slice(4, 10).map((t) => ({ text: t.replace("sits in", "is in"), urls: [U] })), risks: facts.slice(10, 16).map((t) => ({ text: t.replace("sits in", "is in"), urls: [U] })) }, j.judge);
+  const r = await mk3([{ url: U, title: "Citadel notes", text: page }], { summary: [...facts.slice(0, 4).map((t) => ({ text: t.replace("of the campus", "on the campus"), quote: t, url: U })), { text: "Citadel pays interns $5,000 a week.", quote: "Citadel interns earn $5,000 a week.", url: U }], conditions: facts.slice(4, 10).map((t) => ({ text: t.replace("of the campus", "on the campus"), urls: [U] })), risks: facts.slice(10, 16).map((t) => ({ text: t.replace("of the campus", "on the campus"), urls: [U] })) }, j.judge);
   ok(j.asked.some((c) => /pays interns \$5,000/.test(c.claim)), "the line that answers the ask is judged, whatever its place in the draft");
   ok(r.points.some((p: any) => /\$5,000/.test(p.text)));
-  const big = Array.from({ length: 40 }, (_, k) => ({ claim: `Citadel desk ${k + 100} is in tower ${k + 200} of the campus.` }));
+  const big = Array.from({ length: 40 }, (_, k) => ({ claim: `Citadel desk ${k + 100} sits in tower ${k + 200} on the campus.` }));
   const j2 = asking("yes"), idx = indexPages([{ text: Array.from({ length: 40 }, (_, k) => `Citadel desk ${k + 100} sits in tower ${k + 200} of the campus.`).join(" "), title: "Citadel notes" }], undefined, ["Citadel"]);
   const vs = await decide(big, idx, j2.judge);
   ok(vs.filter((v) => v.how === "model").length >= 12 && vs.filter((v) => v.how === "drop").length > 0);

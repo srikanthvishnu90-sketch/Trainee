@@ -1370,6 +1370,36 @@ const CareerProfile = (() => {
     return { skill: skill || null, proven: evidenceIds.size > 0 && (skill ? !skill.unproven || supporting.length > 0 : supporting.length > 0), evidenceFactIds: [...evidenceIds], supportingFactIds: supporting.map((f) => f.id) };
   }
 
+  const usableFact = (f) => f && !f.needs_confirmation && f.status !== "draft" && (f.status === undefined || f.status === "confirmed") && !quarantinedFact(f);
+  function statedSkill(profile, skillName) {
+    const key = skillKeyOf(skillName);
+    if (!key) return false;
+    return (profile && profile.facts || []).some((f) => usableFact(f) && (
+      (f.skills || []).some((s) => skillKeyOf(s) === key)
+      || (f.kind === "skill" && ([f.name, f.title].some((n) => n && skillKeyOf(String(n).replace(/^Skill:\s*/i, "")) === key) || namedInSkillFact(f.text, skillName)))));
+  }
+  function namedInSkillFact(text, skillName) {
+    const t = String(text == null ? "" : text);
+    for (const form of skillForms(skillName)) {
+      const re = formRe(form); re.lastIndex = 0;
+      for (const m of t.matchAll(re)) if (!notOwnUse(t.slice(0, m.index), t.slice(m.index + m[0].length))) return true;
+    }
+    return false;
+  }
+  const INFERRED_SOURCE = "inferred-from-experience";
+  function inferredSkillAsked(profile, skillName) {
+    const key = skillKeyOf(skillName);
+    return (profile && profile.facts || []).some((f) => f && f.kind === "skill" && f.source === INFERRED_SOURCE && skillKeyOf(f.name || f.title || "") === key);
+  }
+  function inferredSkillEvidence(profile, skillName) {
+    return (profile && profile.facts || []).filter((f) => usableFact(f) && f.kind !== "skill" && textNamesSkill([f.title, f.text, ...(f.bullets || [])].filter(Boolean).join(". "), skillName)).map((f) => f.id);
+  }
+  function inferredSkillDraft(skillName, evidence) {
+    const name = String(skillName).trim();
+    return { kind: "skill", name, title: name, text: `${name}, read from your experience`, skills: [name], evidence: (evidence || []).slice(), source: INFERRED_SOURCE, needs_confirmation: true, status: "draft" };
+  }
+  const SKILL_QUESTION = (names) => `I read these skills from your experience: ${names.join(", ")}: keep them? They are not on your resume until you say yes.`;
+
   const METRIC_RE = /\b\d+(\.\d+)?\s*(%|users?|customers?|teams?|members?|people|hours?|minutes?|pages?|companies|participants|requests|ms\b|x\b)/i;
   const NUMBER_RE = /\b\d[\d,.]*\b/;
   function factMiningQuestions(entry) {
@@ -1860,7 +1890,7 @@ const CareerProfile = (() => {
     return receipt;
   }
 
-  return { KINDS, createProfile, profileFromData, addFact, updateFact, getFact, listFacts, confirmFact, confirmedFacts, quarantinedFact, QUARANTINE_VERSION, unprovenSkills, skillEvidence, textNamesSkill, skillForms, factMiningQuestions, isThin, parseCsv, parseLinkedInConnections, parseLinkedInProfile, ingestLinkedIn, parseResumeText, parseResumeSections, ingestResume, supersedeResume, confirmationReply, fieldCorrectionOf, classifyResumeIngest, SUPPORTED_RESUME_FORMATS, refreshSkillFlags, RETENTION_DECLARATION, retentionDeclaration, previewProfileDeletion, deleteProfileData };
+  return { KINDS, createProfile, profileFromData, addFact, updateFact, getFact, listFacts, confirmFact, confirmedFacts, quarantinedFact, QUARANTINE_VERSION, unprovenSkills, skillEvidence, textNamesSkill, skillForms, statedSkill, inferredSkillAsked, inferredSkillEvidence, inferredSkillDraft, SKILL_QUESTION, INFERRED_SOURCE, factMiningQuestions, isThin, parseCsv, parseLinkedInConnections, parseLinkedInProfile, ingestLinkedIn, parseResumeText, parseResumeSections, ingestResume, supersedeResume, confirmationReply, fieldCorrectionOf, classifyResumeIngest, SUPPORTED_RESUME_FORMATS, refreshSkillFlags, RETENTION_DECLARATION, retentionDeclaration, previewProfileDeletion, deleteProfileData };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerProfile;
 

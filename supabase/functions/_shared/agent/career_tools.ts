@@ -926,7 +926,7 @@ export function careerTools(deps: {
     },
     {
       name: "tailor_resume", effect: "write_own",
-      description: "A PDF resume for one posting from CONFIRMED facts only (never drafts or anything new); it passes the truth and ATS checks or refuses with the reason. Send gaps.summary and preview first, then its text as given, the 7-day private link alone on its own line; the files in attached ride your reply. job_id from search_jobs, or the posting text. layout: only when asked. Relay format_check.summary.",
+      description: "A PDF resume for one posting from CONFIRMED facts only (never drafts or anything new); it passes the truth and ATS checks or refuses with the reason. Send gaps.summary and preview first, then its text as given (with skills_question, when there is one: skills read from their experience that are not printed until they say yes; on their plain yes next turn call confirm_profile_fact for each skills_to_confirm id), the 7-day private link alone on its own line; the files in attached ride your reply. job_id from search_jobs, or the posting text. layout: only when asked. Relay format_check.summary.",
       input_schema: obj({ job_id: str("The posting's job_id from search_jobs"), posting_text: str("The posting's full text, if there is no job_id"), persona: str("A saved persona name, e.g. 'banking'; leave out to use the active one"), layout: { type: "string", enum: ["trainee", "own", "template"], description: "Only when asked: 'trainee' (Trainee's design), 'own' (\"keep mine\": their own file's layout) or 'template' (\"use template N\", with template)" }, template: str("Only with layout 'template': the template number they named, 1 to 15"),
         edits: { type: "array", description: "Only to change a version already made (call again for the same posting; say what changed from edits_done): per entry they named, how many detail lines it should print (\"condense X to one line\": 1; \"expand Y\": more than it has now, up to 6). Lines come only from that entry's confirmed details; never write new ones. Each call starts from the tailored resume, so include the earlier edits to this version too.", items: { type: "object", properties: { role: str("The entry as the person named it, e.g. a company or project name"), lines: { type: "integer", minimum: 1, maximum: 6, description: "Detail lines (bullets) that entry should print" } }, required: ["role", "lines"] } } }),
       run: async (i, c) => {
@@ -981,8 +981,19 @@ export function careerTools(deps: {
             : `not made: there are no confirmed experience, project or education facts on file. Ask them for their work experience and education in their own words; nothing is invented. Do not call another tool this turn. Nothing was stored or sent.`);
         }
         if (!r.ok) throw new Error(`not made: ${r.reason}. ${r.refused === "link" ? "The file stays private; no link was given." : "Nothing was stored or sent."}`);
-        const { detail, ...rest0 } = r;
-        const rest = { ...rest0, ...reviewOf(r, !!t.deliver) };
+        // D-078: skills read from their experience text are not printed until they say yes. Each one not put to them before
+        // is saved as a draft skill fact (in the words of the question) and asked once; their plain yes next turn confirms it
+        // with confirm_profile_fact like any other draft, and the next resume prints it. One already asked is not asked again.
+        const toAsk: { id: string; name: string }[] = [];
+        for (const w of r.skills_withheld ?? []) {
+          if (!w.factIds.length || CareerProfile.inferredSkillAsked(profileOf(c), w.name)) continue;
+          const fact = CareerProfile.addFact(profileOf(c), CareerProfile.inferredSkillDraft(w.name, w.factIds));
+          c.turn?.added.push(fact.id);
+          toAsk.push({ id: fact.id, name: w.name });
+        }
+        if (toAsk.length) r = { ...r, text: `${r.text}\n${CareerProfile.SKILL_QUESTION(toAsk.map((x) => x.name))}` };
+        const { detail, skills_withheld: _sw, ...rest0 } = r;
+        const rest = { ...rest0, ...reviewOf(r, !!t.deliver), ...(toAsk.length ? { skills_to_confirm: toAsk, skills_question: CareerProfile.SKILL_QUESTION(toAsk.map((x) => x.name)) } : {}) };
         const out = plan?.rating ? { ...rest, format_check: { score: plan.rating.score, keep: plan.rating.keep, kept_layout: r.layout === "own", hard_failures: plan.rating.hardFailures,
           findings: plan.rating.findings.filter((f) => f.measured && !f.pass).map((f) => ({ criterion: f.criterion, detail: f.detail, where: f.where.slice(0, 3) })),
           recommended: plan.recommended ? { template: Number(plan.recommended.template.slice(1)), name: plan.recommended.name, why: plan.recommended.why } : null,

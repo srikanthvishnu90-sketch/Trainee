@@ -14,6 +14,7 @@ import { CareerJobs } from "./router_core.career.js";
 import { applyEmailOf } from "./apply_email.ts";
 import { BACKLOG_MS, freshWhenSeen } from "./career_fresh.ts";
 import { FEEDS, isMoreProvider, MORE_PROVIDERS } from "./career_ingest_feeds.ts";
+import { boardHost, cappedText, guardedFetch } from "./posting_fetch.ts";
 // Feature 6: the posting URL-shape guard (packages/domain/166-career-url-shape.js, MUSE-F-010), copied byte for byte
 // (tests/edge/career-ingest-scale.test.ts fails while the copy is stale). It sets globalThis.CareerUrlShape.
 import "./career_url_shape.js";
@@ -745,13 +746,22 @@ export async function sha256Hex(text: string): Promise<string> {
   return h;
 }
 // 2026-10-30: the bounded read's limits (see streamRead).
+export const BOARD_MAX_BYTES = 64 * 1024 * 1024; // a whole board's list read whole (not streamed): stopped beyond this
 export const WHOLE_MAX = 2_000_000, XML_MAX = 8_000_000, STREAM_TIMEOUT_MS = 45000;
 // Where each JSON provider's job array is: a key of the root object, or the root itself (null).
 const CORE_ARRAY: Record<string, string | null> = { greenhouse: "jobs", lever: null, ashby: "jobs" };
-export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?: string; timeoutMs?: number; bodyHash?: boolean; stream?: boolean; wholeMax?: number } = {}): FetchFeed {
+export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?: string; timeoutMs?: number; bodyHash?: boolean; stream?: boolean; wholeMax?: number; wholeBytes?: number } = {}): FetchFeed {
   const headers: Record<string, string> = { accept: "application/json" };
   if (opts.userAgent) headers["user-agent"] = opts.userAgent;
   const timeoutMs = opts.timeoutMs ?? 15000;
+  // Review of #775, round 2 (2026-11-13): a board read never follows a redirect unchecked (posting_fetch.ts guardedFetch:
+  // redirect "manual", at most 3 hops, each https, on the host asked or a job board's own host, never a never-open site), and
+  // a whole-body read stops at BOARD_MAX_BYTES (the streamed read below has its own bounds). The first address is built here
+  // from the provider list (career_ingest_feeds.ts), so no name lookup is made for it.
+  const guarded = async (url: string, init: RequestInit): Promise<Response> => {
+    const hostOf = (h: string) => { try { return new URL(h).hostname.toLowerCase(); } catch { return ""; } };
+    return (await guardedFetch(fetchFn as any, url, init, { allow: (h) => boardHost(h) || hostOf(h) === hostOf(url), resolve: null })).res;
+  };
   // WO-037: `cond` sends the board's last validators (If-None-Match / If-Modified-Since); a 304 comes back as NOT_MODIFIED
   // (2026-10-30: it was null, so a board whose body was the JSON `null` read as "not modified").
   async function getJson(prov: string, url: string, deadline: number, cond?: Board, seen?: { etag?: string | null; last_modified?: string | null; body_sha?: string | null }): Promise<any> {
@@ -761,12 +771,12 @@ export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?
     if (cond?.etag) h["if-none-match"] = cond.etag;
     if (cond?.last_modified) h["if-modified-since"] = cond.last_modified;
     let res: Response;
-    try { res = await fetchFn(url, { headers: h, signal: AbortSignal.timeout(left) }); }
+    try { res = await guarded(url, { headers: h, signal: AbortSignal.timeout(left) }); }
     catch (e) { throw new Error(e instanceof Error && /timed? ?out|abort/i.test(`${e.name} ${e.message}`) ? `timed out after ${timeoutMs / 1000}s` : e instanceof Error ? e.message : String(e)); }
     if (seen) { seen.etag = res.headers.get("etag"); seen.last_modified = res.headers.get("last-modified"); }
     if (res.status === 304 && cond) { try { await res.body?.cancel(); } catch { /* already closed */ } return NOT_MODIFIED; }
     if (res.status < 200 || res.status >= 300) { try { await res.body?.cancel(); } catch { /* already closed */ } throw new Error(`HTTP ${res.status}`); }
-    const text = await res.text();
+    const text = await cappedText(res, opts.wholeBytes ?? BOARD_MAX_BYTES);
     if (opts.bodyHash && seen) {
       seen.body_sha = await sha256Hex(text);
       if (cond?.body_sha && cond.body_sha === seen.body_sha) return NOT_MODIFIED; // the same body as the last full read
@@ -799,14 +809,14 @@ export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?
       if (cond && b.last_modified) h["if-modified-since"] = b.last_modified;
       if (rq.body) h["content-type"] = "application/json";
       let res: Response;
-      try { res = await fetchFn(rq.url, { method: rq.method, headers: h, body: rq.body, signal: AbortSignal.timeout(left) }); }
+      try { res = await guarded(rq.url, { method: rq.method, headers: h, body: rq.body, signal: AbortSignal.timeout(left) }); }
       catch (e) {
         if (page > startPage) { complete = false; more = true; break; }
         throw new Error(e instanceof Error && /timed? ?out|abort/i.test(`${e.name} ${e.message}`) ? `timed out after ${timeoutMs / 1000}s` : e instanceof Error ? e.message : String(e)); }
       if (res.status === 304 && cond && (b.etag || b.last_modified)) { try { await res.body?.cancel(); } catch { /* already closed */ } return null; }
       if (res.status < 200 || res.status >= 300) { try { await res.body?.cancel(); } catch { /* already closed */ } throw new Error(`HTTP ${res.status}`); }
       if (cond) validators = { etag: res.headers.get("etag"), last_modified: res.headers.get("last-modified") };
-      const text = await res.text();
+      const text = await cappedText(res, opts.wholeBytes ?? BOARD_MAX_BYTES);
       if (cond && opts.bodyHash) {
         const sha = await sha256Hex(text);
         if (b.body_sha && b.body_sha === sha) return { same: true as const, sha, validators };
@@ -892,7 +902,7 @@ export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?
     let streaming = false;
     try {
       let res: Response;
-      try { res = await fetchFn(rq.url, { method: rq.method, headers: h, signal: ctl.signal }); }
+      try { res = await guarded(rq.url, { method: rq.method, headers: h, signal: ctl.signal }); }
       catch (e) { throw new Error(ctl.signal.aborted || (e instanceof Error && /timed? ?out|abort/i.test(`${e.name} ${e.message}`)) ? `timed out after ${timeoutMs / 1000}s` : e instanceof Error ? e.message : String(e)); }
       const notModified = { postings: [], complete: false, not_modified: true as const, etag: b.etag ?? null, last_modified: b.last_modified ?? null, ...(opts.bodyHash ? { body_sha: b.body_sha ?? null } : {}) };
       if (res.status === 304 && (b.etag || b.last_modified)) { try { await res.body?.cancel(); } catch { /* closed */ } return notModified; }

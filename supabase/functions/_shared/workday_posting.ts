@@ -20,7 +20,7 @@
 // behind the person's sign-in on the employer's site; this module says so and never guesses them (posting_requirements.ts).
 import { payFrom, paysByPlace, postingTextForModel } from "./posting_pay.ts";
 import { decodeHtmlEntities } from "./posting_text.ts";
-import { boardHost, cappedJson, cappedText, guardedFetch, NotRead, stopWords } from "./posting_fetch.ts";
+import { boardHost, guardedText, INVISIBLE, NotRead, parseJson, stopWords } from "./posting_fetch.ts";
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 export interface WorkdayUrl { host: string; tenant: string; site: string; jobPath: string; cxs: string; page: string; key: string }
@@ -28,10 +28,16 @@ export interface WorkdayUrl { host: string; tenant: string; site: string; jobPat
 const WD_JOBS = /^([a-z0-9][a-z0-9-]{0,62})\.(wd\d{1,3})\.myworkdayjobs\.com$/i;
 const WD_SITE = /^(wd\d{1,3})\.myworkdaysite\.com$/i;
 const LOCALE = /^[a-z]{2}(?:-[A-Za-z]{2,4})?$/;
-const SAFE = /^[A-Za-z0-9][A-Za-z0-9_.~%-]*$/;
+// A career site's name: a plain slug. A path segment of a posting: letters, digits, "_ ~ - ( ) ,", single dots inside, and
+// percent-escapes of non-ASCII bytes only (an accented place name: "Montr%C3%A9al"); at most 200 characters. Never an escaped
+// slash, hash, dot or control ("%2f", "%23", "%2e", "%00"), never "..", ";" or a bare "%".
+const SITE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/;
+const SAFE = /^(?=.{1,200}$)(?!\.)(?:[A-Za-z0-9_~(),-]|\.(?!\.)|%[89A-Fa-f][0-9A-Fa-f])+$/;
+const MAX_SEGMENTS = 6;
 // The posting a public Workday link names, with its CXS endpoint and its page; null for anything else (a search page, the
 // signed-in myworkday.com app, another host). A link to an application step ("/job/<slug>/apply", ".../apply/applyManually")
-// names the posting before "apply": the step itself is never requested.
+// names the posting before "apply": the step itself is never requested. "/details/<slug>" is the same posting as
+// "/job/<slug>" (the form Workday's search results link to).
 export function workdayUrl(href: string): WorkdayUrl | null {
   let u: URL;
   try { u = new URL(String(href ?? "").trim()); } catch { return null; }
@@ -52,11 +58,11 @@ export function workdayUrl(href: string): WorkdayUrl | null {
     site = seg[2] ?? "";
     seg = seg.slice(3);
   } else return null;
-  if (!tenant || !site || !SAFE.test(site) || !/^[a-z0-9-]+$/.test(tenant)) return null;
-  if (seg[0] !== "job") return null;
+  if (!tenant || !site || !SITE.test(site) || !/^[a-z0-9-]{1,63}$/.test(tenant)) return null;
+  if (seg[0] !== "job" && seg[0] !== "details") return null;
   const at = seg.findIndex((s) => /^apply$/i.test(s));
   const rest = (at > 0 ? seg.slice(1, at) : seg.slice(1)).filter((s) => !/^(applyManually|autofillWithResume|useMyLastApplication)$/i.test(s));
-  if (!rest.length || !rest.every((s) => SAFE.test(s))) return null;
+  if (!rest.length || rest.length > MAX_SEGMENTS || !rest.every((s) => SAFE.test(s))) return null;
   const jobPath = `/job/${rest.join("/")}`;
   const base = jobs ? `https://${host}` : `https://${host}`;
   const page = jobs ? `${base}/${site}${jobPath}` : `${base}/recruiting/${tenant}/${site}${jobPath}`;
@@ -109,8 +115,19 @@ const DEADLINE_SHAPES = [
   new RegExp(`^${LEAD} ${WD}(\\d{1,2})(st|nd|rd|th)? ${MON},? (\\d{4})${TIME}\\.?$`, "i"), // 13 November 2026
   new RegExp(`^${LEAD} (\\d{4})-(\\d{2})-(\\d{2})\\.?$`, "i"),
 ];
+const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const cap = (w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
-export function deadlineWording(text: unknown): string | null {
+// `iso`: the posting's structured date (YYYY-MM-DD). When given, the wording is used only if its date is that date or the
+// day before it (Workday's endDate is the first day the posting is closed: PayPal's "through Sunday, December 6th, 2026" has
+// endDate 2026-12-07). A weekday the wording names must be that date's weekday.
+export function deadlineWording(text: unknown, iso?: string | null): string | null {
+  const fits = (y: number, mi: number, d: number, wd?: string) => {
+    const at = Date.UTC(y, mi, d);
+    if (wd && WEEKDAYS[new Date(at).getUTCDay()].toLowerCase().slice(0, 3) !== wd.toLowerCase().slice(0, 3)) return false;
+    if (iso === undefined) return true;
+    const want = day(iso) ? Date.parse(`${iso}T00:00:00Z`) : NaN;
+    return want === at || want - at === 86400000;
+  };
   // Workday joins its end-date label and its countdown with ";": every other part must be that countdown, or nothing.
   const parts = String(text ?? "").split(";").map((x) => x.replace(/\s+/g, " ").trim()).filter(Boolean);
   if (parts.length > 2 || parts.filter((x) => !/^\d{1,3} days? left to apply$/i.test(x)).length !== 1) return null;
@@ -120,11 +137,11 @@ export function deadlineWording(text: unknown): string | null {
       const m = re.exec(t);
       if (!m) continue;
       const lead = cap(m[1]).replace(/^End date/, "End Date");
-      if (k === 2) { const iso = `${m[2]}-${m[3]}-${m[4]}`; return day(iso) && new Date(iso).toISOString().slice(0, 10) === iso ? `${lead} ${iso}` : null; }
+      if (k === 2) { const d = `${m[2]}-${m[3]}-${m[4]}`; return day(d) && new Date(d).toISOString().slice(0, 10) === d && fits(Number(m[2]), Number(m[3]) - 1, Number(m[4])) ? `${lead} ${d}` : null; }
       const [wd, mon, dd, suf, year] = k === 0 ? [m[2], m[3], m[4], m[5], m[6]] : [m[2], m[5], m[3], m[4], m[6]];
       const mi = MONTHS.findIndex((x) => x.startsWith(mon.toLowerCase().slice(0, 3))), d = Number(dd), y = Number(year);
-      if (mi < 0 || y < 2000 || y > 2100 || d < 1 || d > new Date(Date.UTC(y, mi + 1, 0)).getUTCDate()) return null;
-      const weekday = wd ? `${["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].find((x) => x.toLowerCase().startsWith(wd.toLowerCase().slice(0, 3)))}, ` : "";
+      if (mi < 0 || y < 2000 || y > 2100 || d < 1 || d > new Date(Date.UTC(y, mi + 1, 0)).getUTCDate() || !fits(y, mi, d, wd)) return null;
+      const weekday = wd ? `${WEEKDAYS.find((x) => x.toLowerCase().startsWith(wd.toLowerCase().slice(0, 3)))}, ` : "";
       const date = k === 0 ? `${cap(MONTHS[mi])} ${d}${(suf ?? "").toLowerCase()}, ${y}` : `${d}${(suf ?? "").toLowerCase()} ${cap(MONTHS[mi])} ${y}`;
       const hh = Number(m[7]), mm = Number(m[8]);
       const time = m[7] && hh >= 1 && hh <= 12 && mm <= 59 ? ` at ${hh}:${m[8]} ${m[9].toUpperCase()}M${m[10] ? ` ${m[10].toUpperCase()}` : ""}` : "";
@@ -135,7 +152,9 @@ export function deadlineWording(text: unknown): string | null {
 }
 // A short string a posting supplied (title, place, a label), as data for the model: posting_pay.ts postingTextForModel takes out
 // a sentence written to an AI, and the length is capped.
-export const postingField = (v: unknown, max = 200): string => postingTextForModel(str(v), max).text;
+// Round 2: at most 120 characters by default, and controls, zero-width and bidirectional marks are taken out. The filter is a
+// deny-list, so instruction-like text can still sit in such a field: it is DATA, framed as that by the tools (career_tools.ts).
+export const postingField = (v: unknown, max = 120): string => { const t = postingTextForModel(str(v).replace(INVISIBLE, ""), Infinity).text; return t.length <= max ? t : postingTextForModel(t, max - 8).text; };
 const company = (v: unknown) => postingField(str(v).replace(/^\d{2,}\s+/, "")) || null;
 const STATES_A_DATE = /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}|\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)|\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/i;
 
@@ -159,7 +178,7 @@ export function parseWorkdayCxs(json: unknown, pageUrl: string): WorkdayPosting 
   const deadlineText = [postingField(j.jobPostingEndDateAsText, 80), postingField(j.timeLeftToApply, 80)].filter(Boolean).join("; ") || saidOk || null;
   const ext = workdayUrl(str(j.externalUrl)), here = workdayUrl(pageUrl);
   return {
-    source: "cxs", url: ext && (!here || ext.host === here.host) ? str(j.externalUrl) : pageUrl, title: postingField(j.title), company: company((json as any)?.hiringOrganization?.name),
+    source: "cxs", url: ext && (!here || ext.host === here.host) ? ext.page : pageUrl, title: postingField(j.title), company: company((json as any)?.hiringOrganization?.name),
     location: f(j.location), locations: [j.location, ...extra].map((x) => postingField(x)).filter(Boolean),
     req_id: f(j.jobReqId), time_type: f(j.timeType), remote_type: f(j.remoteType),
     posted: f(j.postedOn), start_date: day(j.startDate), deadline: day(j.endDate), deadline_text: deadlineText,
@@ -181,7 +200,7 @@ export function parseWorkdayPage(html: string, pageUrl: string): WorkdayPosting 
     const canonical = /<link[^>]*rel=["']canonical["'][^>]*href=["']([^"']+)["']/i.exec(html)?.[1];
     const f = (v: unknown) => postingField(v) || null, place = postingField(loc);
     return {
-      source: "page", url: canonical && workdayUrl(canonical) && workdayUrl(canonical)?.host === workdayUrl(pageUrl)?.host ? canonical : pageUrl, title: postingField(jp.title), company: company(jp.hiringOrganization?.name), location: place || null, locations: place ? [place] : [],
+      source: "page", url: canonical && workdayUrl(canonical) && workdayUrl(canonical)?.host === workdayUrl(pageUrl)?.host ? workdayUrl(canonical)!.page : pageUrl, title: postingField(jp.title), company: company(jp.hiringOrganization?.name), location: place || null, locations: place ? [place] : [],
       req_id: f(jp.identifier?.value), time_type: f(jp.employmentType), remote_type: f(jp.jobLocationType),
       posted: day(jp.datePosted), start_date: null, deadline: day(jp.validThrough), deadline_text: day(jp.validThrough) ? `validThrough ${day(jp.validThrough)}` : null,
       pay: payFrom(postingTextForModel(desc, Infinity).text), pays: paysByPlace(postingTextForModel(desc, Infinity).text), description_html: desc, text: postingTextForModel(desc).text, can_apply: null, questionnaire: false,
@@ -193,9 +212,11 @@ export function parseWorkdayPage(html: string, pageUrl: string): WorkdayPosting 
 export interface WorkdayDeps { fetch: Fetch; timeoutMs?: number; userAgent?: string; now?: () => number }
 const req = async (d: WorkdayDeps, url: string, reads: string[], accept: string, init: RequestInit = {}) => {
   reads.push(`${init.method ?? "GET"} ${url}`);
-  // The signal covers the body too: the answer's bytes stop arriving when the time is up.
-  return (await guardedFetch(d.fetch, url, { method: "GET", ...init, signal: AbortSignal.timeout(d.timeoutMs ?? 8000), headers: { accept, "user-agent": d.userAgent ?? "Trainee posting reader", ...(init.headers ?? {}) } }, { allow: boardHost })).res;
+  // One time limit for the request, its redirects and its body (posting_fetch.ts limited: it holds whatever the fetch does).
+  return await guardedText(d.fetch, url, { method: "GET", ...init, headers: { accept, "user-agent": d.userAgent ?? "Trainee posting reader", ...(init.headers ?? {}) } }, { allow: boardHost, timeoutMs: d.timeoutMs ?? 8000 });
 };
+// Workday's error code, only in its own shape ("S21"); anything else a body puts there is not repeated.
+const errorCode = (v: unknown) => { const c = str(v); return /^[A-Z]\d{1,4}$/.test(c) ? c : ""; };
 const today = (now: number) => new Date(now).toISOString().slice(0, 10);
 
 // One posting, read now. open: the CXS answer holds the posting and says it can be applied to (canApply true), and its stated end
@@ -210,8 +231,8 @@ export async function readWorkdayPosting(href: string, d: WorkdayDeps): Promise<
   let why = "";
   try {
     const r = await req(d, url.cxs, reads, "application/json");
-    const body: any = await cappedJson(r);
-    const code = str(body?.errorCode);
+    const body: any = parseJson(r.text);
+    const code = errorCode(body?.errorCode);
     if (r.status === 404 || r.status === 410 || code === "S21" || code === "S22") {
       return { state: "closed", posting: null, why: `Workday answered ${code ? `errorCode ${code}` : `HTTP ${r.status}`} for this posting: it is no longer published`, reads, url };
     }
@@ -230,7 +251,7 @@ export async function readWorkdayPosting(href: string, d: WorkdayDeps): Promise<
   try {
     const r = await req(d, url.page, reads, "text/html");
     if (r.status === 404 || r.status === 410) return { state: "closed", posting: null, why: `the posting page answered HTTP ${r.status}`, reads, url };
-    const p = r.ok ? parseWorkdayPage(await cappedText(r), url.page) : (await r.body?.cancel().catch(() => {}), null);
+    const p = r.ok ? parseWorkdayPage(r.text, url.page) : null;
     if (p) return { state: p.deadline && p.deadline < today(now) ? "closed" : "unknown", posting: p, why: `${why}; the details are from the public posting page, which cannot say whether it is still open`, reads, url };
     why = `${why}; the posting page ${r.ok ? "held no posting data" : `answered HTTP ${r.status}`}`;
   } catch (e) {
@@ -246,25 +267,24 @@ export async function readWorkdayPosting(href: string, d: WorkdayDeps): Promise<
 export interface WorkdayListing { title: string; url: string; location: string; posted: string | null; req_id: string | null }
 export async function searchWorkdayBoard(o: { host: string; tenant: string; site: string; text?: string; maxPages?: number; gapMs?: number; sleep?: (ms: number) => Promise<void> } & WorkdayDeps):
   Promise<{ postings: WorkdayListing[]; total: number | null; complete: boolean; stopped: string | null; retry_after_s: number | null; reads: string[] }> {
-  if (!WD_JOBS.test(o.host) || !/^[a-z0-9-]+$/.test(o.tenant) || !SAFE.test(o.site)) throw new Error("not a Workday career site");
+  if (!WD_JOBS.test(o.host) || !/^[a-z0-9-]+$/.test(o.tenant) || !SITE.test(o.site)) throw new Error("not a Workday career site");
   const reads: string[] = [], postings: WorkdayListing[] = [], seen = new Set<string>();
   const maxPages = Math.max(1, Math.min(10, o.maxPages ?? 3)), gap = Math.max(250, o.gapMs ?? 1500), sleep = o.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   let total: number | null = null, stopped: string | null = null, retry: number | null = null, complete = false;
   for (let page = 0; page < maxPages; page++) {
     if (page) await sleep(gap);
     const url = `https://${o.host}/wday/cxs/${o.tenant}/${o.site}/jobs`;
-    let r: Response;
+    let r: Awaited<ReturnType<typeof req>>;
     try {
       r = await req(o, url, reads, "application/json", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ appliedFacets: {}, limit: 20, offset: page * 20, searchText: String(o.text ?? "").slice(0, 100) }) });
     } catch (e) { stopped = `the search did not finish (${stopWords(e)})`; break; }
     if (!r.ok) {
-      await r.body?.cancel().catch(() => {});
       stopped = `HTTP ${r.status}`;
       const ra = Number(r.headers.get("retry-after"));
       if (r.status === 429 && Number.isFinite(ra)) retry = ra;
       break;
     }
-    const d: any = await cappedJson(r).catch(() => null);
+    const d: any = parseJson(r.text);
     if (!d || !Array.isArray(d.jobPostings)) { stopped = "an answer this reader does not know"; break; }
     if (page === 0 && Number.isFinite(Number(d.total))) total = Number(d.total);
     let added = 0;

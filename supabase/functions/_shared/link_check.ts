@@ -7,8 +7,9 @@
 // held to the same rule as the first address: https, a named public host, never a site Trainee does not open, and a job board's
 // own host when the first address was one); a refused address or hop is "unknown", never live. A board name or posting id that
 // is not a plain slug builds no address. A Workday posting is live only when its own data says canApply true.
-import { workdayUrl } from "./workday_posting.ts";
-import { boardHost, BOARD_SLUG, cappedJson, guardedFetch, POSTING_UUID } from "./posting_fetch.ts";
+import { isWorkdayHost, workdayUrl } from "./workday_posting.ts";
+import { boardHost, BOARD_SLUG, guardedText, parseJson, POSTING_UUID, type Resolve } from "./posting_fetch.ts";
+import { ashbyAppData, boardOf } from "./posting_requirements.ts";
 export type LinkState = "live" | "dead" | "unknown";
 // Architect ruling E.21 (release item 8): every search re-checks the postings it shows, and only those (searchCheck below):
 // at most the count asked, never more than SEARCH_CHECK_MAX, each on its own posting page by id. No board listing is read.
@@ -38,38 +39,40 @@ export function ashbyPageFor(jobId: string): string | null {
 
 // `ashby: "posting"` (E.21, the search path): an Ashby posting is checked on its own page by id, never by reading the board's
 // list; a 404 or 410, or a redirect off the posting's own page, is dead. The default ("board") keeps the board-list read.
-export function linkChecker(f: typeof fetch, o: { timeoutMs?: number; userAgent?: string; ashby?: "board" | "posting" } = {}): LinkCheck {
+export function linkChecker(f: typeof fetch, o: { timeoutMs?: number; userAgent?: string; ashby?: "board" | "posting"; resolve?: Resolve } = {}): LinkCheck {
   const timeoutMs = o.timeoutMs ?? 4000, ua = o.userAgent ?? "Trainee job link check";
-  // One guarded request (posting_fetch.ts): a board address stays on the boards' hosts through every hop. `read` takes the body
-  // (to 2 MB, or `max`) inside the same time limit; without it the body is dropped unread.
-  const ask = async <T>(url: string, accept: string, read?: (r: Response) => Promise<T>): Promise<{ r: Response; at: string; body: T | null }> => {
-    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), timeoutMs);
-    try {
-      const { res: r, url: at } = await guardedFetch(f as any, url, { method: "GET", signal: ctl.signal, headers: { "user-agent": ua, accept } }, boardHost(url) ? { allow: boardHost } : {});
-      const body = read ? await read(r) : (await r.body?.cancel().catch(() => {}), null);
-      return { r, at, body };
-    } finally { clearTimeout(timer); }
-  };
-  const get = async (url: string) => { const { r, at } = await ask(url, "application/json,text/html"); return { status: r.status, ok: r.ok, url: at }; };
+  // One guarded request (posting_fetch.ts) under one time limit that holds whatever the fetch does: a board address stays on the
+  // boards' hosts through every hop; any other host is looked up first (o.resolve, default the system resolver) and refused
+  // when its name leads to a private address. The body is read to 2 MB (or `max`), or dropped unread (body false).
+  const ask = (url: string, accept: string, x: { body?: boolean; max?: number } = {}) =>
+    guardedText(f as any, url, { method: "GET", headers: { "user-agent": ua, accept } }, { ...(boardHost(url) ? { allow: boardHost } : {}), resolve: o.resolve, timeoutMs, ...x });
   const ashbyBoards = new Map<string, Promise<Set<string> | "dead" | "unknown">>();
   const readAshby = async (url: string): Promise<Set<string> | "dead" | "unknown"> => {
     try {
       // A whole board's list (larger than one posting): read to 16 MB.
-      const { r, body } = await ask<any>(url, "application/json", (x) => x.ok ? cappedJson(x, 16 * 1024 * 1024) : (x.body?.cancel().catch(() => {}), Promise.resolve(null)));
+      const r = await ask(url, "application/json", { max: 16 * 1024 * 1024 });
       if (r.status === 404) return "dead";
       if (!r.ok) return "unknown";
+      const body = parseJson(r.text);
       return Array.isArray(body?.jobs) ? new Set(body.jobs.map((j: any) => String(j?.id ?? "").toLowerCase())) : "unknown";
     } catch { return "unknown"; }
   };
+  const named = (v: unknown) => typeof v === "string" && v.trim().length > 0;
   return async (job) => {
-    const page = o.ashby === "posting" ? ashbyPageFor(String(job.job_id ?? "")) : null;
+    let id = String(job.job_id ?? "");
+    const link = String(job.url ?? "");
+    // Round 2: a job board's page address with no board job_id is asked of the board by the posting id its address names; no
+    // board's page (an app shell, a bot wall, a redirect to the employer's site) is ever the check.
+    if (!apiUrlFor(id) && !ashbyPageFor(id)) { const b = boardOf(link); if (b && b.board !== "Workday") id = `${b.board.toLowerCase()}:${b.parts[0]}:${b.parts[1]}`; }
+    const page = o.ashby === "posting" ? ashbyPageFor(id) : null;
     if (page) {
       try {
-        const r = await get(page);
+        const r = await ask(page, "text/html");
         if (r.status === 404 || r.status === 410) return "dead";
-        const at = String(r.url || page).toLowerCase();
-        if (r.ok && !at.includes(page.split("/").at(-1)!)) return "dead";
-        return r.ok ? "live" : "unknown";
+        const pid = page.split("/").at(-1)!;
+        if (r.ok && !r.url.toLowerCase().includes(pid)) return "dead";
+        // Live needs the page's own data to hold this posting; a 200 without it is not confirmed.
+        return r.ok && String(ashbyAppData(r.text)?.posting?.id ?? "").toLowerCase() === pid ? "live" : "unknown";
       } catch {
         return "unknown";
       }
@@ -77,33 +80,49 @@ export function linkChecker(f: typeof fetch, o: { timeoutMs?: number; userAgent?
     // D-062: a Workday posting is asked of its own CXS endpoint by its path (workday_posting.ts). Its public page is the same app
     // shell (HTTP 200) for a live and a removed posting, so the page itself is never the check. Gone: HTTP 404 or 410, or
     // errorCode S21 / S22, or canApply false; live: the answer holds the posting and says canApply true; anything else (canApply
-    // absent included) is unknown.
-    const wd = workdayUrl(String(job.url ?? ""));
+    // absent included, and a Workday address that names no posting) is unknown.
+    const wd = workdayUrl(link);
     if (wd) {
       try {
-        const { r, body } = await ask<any>(wd.cxs, "application/json", (x) => cappedJson(x));
+        const r = await ask(wd.cxs, "application/json"), body = parseJson(r.text);
         if (r.status === 404 || r.status === 410 || body?.errorCode === "S21" || body?.errorCode === "S22") return "dead";
-        if (r.ok && body?.jobPostingInfo?.title) return body.jobPostingInfo.canApply === false ? "dead" : body.jobPostingInfo.canApply === true ? "live" : "unknown";
+        if (r.ok && named(body?.jobPostingInfo?.title)) return body.jobPostingInfo.canApply === false ? "dead" : body.jobPostingInfo.canApply === true ? "live" : "unknown";
         return "unknown";
       } catch { return "unknown"; }
     }
-    const ashby = ashbyBoardFor(String(job.job_id ?? ""));
+    const ashby = ashbyBoardFor(id);
     if (ashby) {
       // One read of each Ashby board per checker (one checker per turn), its ids kept as a set: the board is not fetched or
       // parsed again for each of its postings.
       const board = await (ashbyBoards.get(ashby.url) ?? (() => { const p = readAshby(ashby.url); ashbyBoards.set(ashby.url, p); return p; })());
       return board === "dead" || board === "unknown" ? board : board.has(ashby.id) ? "live" : "dead";
     }
-    const api = apiUrlFor(String(job.job_id ?? ""));
-    const url = api ?? String(job.url ?? "");
-    if (!/^https?:\/\//i.test(url)) return "dead";
-    // An address that is never requested (plain http, an IP or private name, userinfo, a never-open site) throws below: unknown.
+    const api = apiUrlFor(id);
+    if (api) {
+      // The board's posting API by id: live only when its answer IS the posting (its id, its title, and its active flag where
+      // the API has one). An error body, another posting, or HTML where JSON belongs is unknown.
+      try {
+        const r = await ask(api, "application/json");
+        if (r.status === 404 || r.status === 410) return "dead";
+        if (/[?&]error=true\b/.test(r.url)) return "dead";
+        if (!r.ok) return "unknown";
+        const j = parseJson(r.text), [family, , pid] = id.split(":");
+        if (!j || typeof j !== "object" || Array.isArray(j) || String(j.id ?? "").toLowerCase() !== pid.toLowerCase()) return "unknown";
+        if (family === "greenhouse") return named(j.title) ? "live" : "unknown";
+        if (family === "lever") return !named(j.text) ? "unknown" : j.state === undefined || j.state === "published" ? "live" : "dead";
+        return !named(j.name) ? "unknown" : j.active === true ? "live" : j.active === false ? "dead" : "unknown";
+      } catch { return "unknown"; }
+    }
+    if (!/^https?:\/\//i.test(link)) return "dead";
+    // A job board's or Workday's host whose address names no posting: its page answers 200 whatever it holds. Unknown.
+    if (boardHost(link) || isWorkdayHost(link)) return "unknown";
+    // Any other employer page. An address that is never requested (plain http, an IP, a reserved or private name, a name that
+    // leads to a private address, userinfo, a never-open site) throws: unknown.
     try {
-      const r = await get(url);
+      const r = await ask(link, "application/json,text/html", { body: false });
       if (r.status === 404 || r.status === 410) return "dead";
-      if (/[?&]error=true\b/.test(r.url || "")) return "dead";
-      if (r.ok) return "live";
-      return "unknown";
+      if (/[?&]error=true\b/.test(r.url)) return "dead";
+      return r.ok ? "live" : "unknown";
     } catch {
       return "unknown";
     }

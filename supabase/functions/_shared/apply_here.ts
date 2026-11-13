@@ -94,7 +94,7 @@ export async function applyHereTurn(o: {
     const f = await within(postingForLink({ ask: la, db: o.db, fetchFeed: o.fetchFeed, now: o.now }), until - Date.now());
     if (f === LATE) { seen.delete(la.key.toLowerCase()); unread(url); continue; }
     if (f.kind !== "found") {
-      const why = f.kind === "closed" ? "that posting is closed" : f.kind === "not_on_board" ? `${f.board.company}'s board doesn't list it (closed, or never there)` : `I couldn't read ${f.board.company}'s board just now (${f.why.slice(0, 80)})`;
+      const why = f.kind === "closed" ? "that posting is closed" : f.kind === "not_on_board" ? `${f.board.company}'s board doesn't list it (closed, or never there)` : `I couldn't read ${f.board.company}'s board just now`;
       refused.push({ url, why: `${hostOf(url)}: ${why}; nothing was set up.` });
       continue;
     }

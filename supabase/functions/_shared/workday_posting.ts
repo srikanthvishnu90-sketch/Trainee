@@ -95,6 +95,44 @@ export const htmlToText = (html: string) => decodeHtmlEntities(String(html ?? ""
   .replace(/[ \t ]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 const day = (v: unknown) => { const s = str(v).slice(0, 10); return ISO_DAY.test(s) && !Number.isNaN(Date.parse(s)) ? s : null; };
+// The deadline in the posting's wording, for a tool's note: an allowlist grammar and nothing else. One part of the text (parts
+// are split at ";") must be, whole: a known lead-in ("End Date:", "Applications will be accepted through", "Apply by",
+// "Closes", "Deadline:"), one real calendar date, an optional clock time and zone. The result is REBUILT from the lead-in
+// matched and the date's own pieces (weekday, month, day, year), never copied from the page; anything else gives null and the
+// note carries the parsed ISO date alone.
+const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+const WD = "(?:(mon|tues?|wed(?:nes)?|thu(?:rs)?|fri|sat(?:ur)?|sun)(?:day)?,? )?", MON = "(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\.?";
+const LEAD = "(end date:?|applications? (?:(?:will be|are) )?accepted (?:through|until)|apply by|closes(?: on)?|(?:application )?deadline(?: to apply)?:?)";
+const TIME = "(?:,? (?:at )?(\\d{1,2}):(\\d{2}) ?([ap])\\.?m\\.?(?: (et|est|edt|pt|pst|pdt|ct|cst|cdt|mt|mst|mdt|utc|gmt))?)?";
+const DEADLINE_SHAPES = [
+  new RegExp(`^${LEAD} ${WD}${MON} (\\d{1,2})(st|nd|rd|th)?,? (\\d{4})${TIME}\\.?$`, "i"), // Sunday, December 6th, 2026
+  new RegExp(`^${LEAD} ${WD}(\\d{1,2})(st|nd|rd|th)? ${MON},? (\\d{4})${TIME}\\.?$`, "i"), // 13 November 2026
+  new RegExp(`^${LEAD} (\\d{4})-(\\d{2})-(\\d{2})\\.?$`, "i"),
+];
+const cap = (w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+export function deadlineWording(text: unknown): string | null {
+  // Workday joins its end-date label and its countdown with ";": every other part must be that countdown, or nothing.
+  const parts = String(text ?? "").split(";").map((x) => x.replace(/\s+/g, " ").trim()).filter(Boolean);
+  if (parts.length > 2 || parts.filter((x) => !/^\d{1,3} days? left to apply$/i.test(x)).length !== 1) return null;
+  for (const t of parts) {
+    if (t.length > 90) continue;
+    for (const [k, re] of DEADLINE_SHAPES.entries()) {
+      const m = re.exec(t);
+      if (!m) continue;
+      const lead = cap(m[1]).replace(/^End date/, "End Date");
+      if (k === 2) { const iso = `${m[2]}-${m[3]}-${m[4]}`; return day(iso) && new Date(iso).toISOString().slice(0, 10) === iso ? `${lead} ${iso}` : null; }
+      const [wd, mon, dd, suf, year] = k === 0 ? [m[2], m[3], m[4], m[5], m[6]] : [m[2], m[5], m[3], m[4], m[6]];
+      const mi = MONTHS.findIndex((x) => x.startsWith(mon.toLowerCase().slice(0, 3))), d = Number(dd), y = Number(year);
+      if (mi < 0 || y < 2000 || y > 2100 || d < 1 || d > new Date(Date.UTC(y, mi + 1, 0)).getUTCDate()) return null;
+      const weekday = wd ? `${["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].find((x) => x.toLowerCase().startsWith(wd.toLowerCase().slice(0, 3)))}, ` : "";
+      const date = k === 0 ? `${cap(MONTHS[mi])} ${d}${(suf ?? "").toLowerCase()}, ${y}` : `${d}${(suf ?? "").toLowerCase()} ${cap(MONTHS[mi])} ${y}`;
+      const hh = Number(m[7]), mm = Number(m[8]);
+      const time = m[7] && hh >= 1 && hh <= 12 && mm <= 59 ? ` at ${hh}:${m[8]} ${m[9].toUpperCase()}M${m[10] ? ` ${m[10].toUpperCase()}` : ""}` : "";
+      return `${lead} ${weekday}${date}${time}`.slice(0, 90);
+    }
+  }
+  return null;
+}
 // A short string a posting supplied (title, place, a label), as data for the model: posting_pay.ts postingTextForModel takes out
 // a sentence written to an AI, and the length is capped.
 export const postingField = (v: unknown, max = 200): string => postingTextForModel(str(v), max).text;
@@ -116,7 +154,7 @@ export function parseWorkdayCxs(json: unknown, pageUrl: string): WorkdayPosting 
   // ("Applications will be accepted through Sunday, December 6th, 2026"). The end date (endDate) decides closed.
   // The sentence counts only when it states a date (a line that merely begins "Apply by ..." is not a deadline) and is not
   // one the AI-sentence filter takes out.
-  const said = /[^.\n]*\b(?:applications? (?:will be )?accepted (?:through|until)|apply by|application deadline|deadline to apply)\b[^.\n]*/i.exec(htmlToText(html))?.[0]?.replace(/^[-\s]+/, "").trim();
+  const said = /[^.\n]*\b(?:applications? (?:will be |are )?accepted (?:through|until)|apply by|application deadline|deadline to apply)\b[^.\n]*/i.exec(htmlToText(html))?.[0]?.replace(/^[-\s]+/, "").trim();
   const saidOk = said && STATES_A_DATE.test(said) && !postingTextForModel(said).removed ? postingField(said, 160) : "";
   const deadlineText = [postingField(j.jobPostingEndDateAsText, 80), postingField(j.timeLeftToApply, 80)].filter(Boolean).join("; ") || saidOk || null;
   const ext = workdayUrl(str(j.externalUrl)), here = workdayUrl(pageUrl);

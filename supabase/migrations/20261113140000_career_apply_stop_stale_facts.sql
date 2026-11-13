@@ -19,6 +19,8 @@
 --      value its payload states: the row is closed not_submitted with the reason, and the claim is handed nothing for it.
 --      A stopped application comes back only through a new approval (which stamps facts_at again); putting the fact back re-queues
 --      nothing.
+--   3. An emailed application starts at the person's yes to its card, never from the queue: career_apply_facts_email_guard refuses
+--      that start ('fact_changed') when the card was shown before a change of a value the email states.
 -- "States a value": some text or number anywhere in the payload holds the value as a whole word (case-insensitive; "3.9" is not in
 -- "3.95" or "13.9"). Over-matching stops an application that then needs a fresh yes; it never sends one.
 -- Additive and reversible (supabase/rollbacks/20261113140000_career_apply_stop_stale_facts.down.sql). Idempotent.
@@ -105,6 +107,30 @@ drop trigger if exists career_apply_facts_claim_guard on public.career_apply_job
 create trigger career_apply_facts_claim_guard before update on public.career_apply_jobs
  for each row when (new.state = 'driving' and old.state = 'queued')
  execute function public.career_apply_facts_claim_guard();
+
+-- An emailed application never waits in the queue: the person's yes to the shown email card starts it at once
+-- (career_apply_email_reserve_for: inserted, or a refused one updated, straight to 'driving', source 'email'). Its facts were read
+-- when the card was shown, so a card shown before a change of a value its email states is refused here with 'fact_changed'
+-- (career_apply_email.ts says so; nothing is sent, and a fresh draft is a fresh card).
+create or replace function public.career_apply_facts_email_guard() returns trigger
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare shown timestamptz;
+begin
+ if tg_op = 'UPDATE' and old.state = 'driving' then return new; end if;
+ begin
+  select (value->>'shown_at')::timestamptz into shown from public.career_watch_kv where user_id = new.user_id and key = 'career:email-card';
+ exception when others then shown := null; end;
+ if exists (select from public.career_apply_fact_changes c where c.user_id = new.user_id and c.at >= coalesce(shown, new.created_at)
+   and public.career_apply_payload_states(new.payload, c.fact_values)) then
+  raise exception 'fact_changed: an answer this email states changed after it was shown';
+ end if;
+ return new;
+end $$;
+revoke all on function public.career_apply_facts_email_guard() from public, anon, authenticated; -- trigger function
+drop trigger if exists career_apply_facts_email_guard on public.career_apply_jobs;
+create trigger career_apply_facts_email_guard before insert or update on public.career_apply_jobs
+ for each row when (new.state = 'driving' and new.source = 'email')
+ execute function public.career_apply_facts_email_guard();
 
 -- The chat's stop, in the turn that set the fact aside or corrected it.
 create or replace function public.career_apply_stop_stale_facts(p_user uuid, p_values text[], p_reason text) returns jsonb

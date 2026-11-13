@@ -7,6 +7,8 @@ do $$ begin
  drop function if exists public.career_apply_stop_stale_facts(uuid, text[], text);
  drop trigger if exists career_apply_facts_claim_guard on public.career_apply_jobs;
  drop function if exists public.career_apply_facts_claim_guard();
+ drop trigger if exists career_apply_facts_email_guard on public.career_apply_jobs;
+ drop function if exists public.career_apply_facts_email_guard();
  drop trigger if exists career_apply_facts_at_stamp on public.career_apply_jobs;
  drop trigger if exists career_apply_facts_at_stamp on public.career_apply_prepared;
  drop function if exists public.career_apply_facts_at_stamp();

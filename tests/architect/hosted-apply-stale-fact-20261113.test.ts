@@ -151,7 +151,7 @@ Deno.test({ name: "database: the stop closes only that person's unstarted rows s
       eq((await pg.sql(`select has_function_privilege('service_role','public.career_apply_stop_stale_facts(uuid,text[],text)','EXECUTE') and not has_function_privilege('authenticated','public.career_apply_stop_stale_facts(uuid,text[],text)','EXECUTE')
         and not has_function_privilege('anon','public.career_apply_stop_stale_facts(uuid,text[],text)','EXECUTE') and not has_table_privilege('authenticated','public.career_apply_fact_changes','SELECT') and not has_table_privilege('anon','public.career_apply_fact_changes','SELECT')
         and (select relrowsecurity from pg_class where oid = 'public.career_apply_fact_changes'::regclass)
-        and (select bool_and(proconfig::text like '%search_path=public, pg_temp%') from pg_proc where proname in ('career_apply_stop_stale_facts','career_apply_facts_claim_guard','career_apply_facts_at_stamp','career_apply_fact_changed_close','career_apply_payload_states'))`)).trim(), "t");
+        and (select bool_and(proconfig::text like '%search_path=public, pg_temp%') from pg_proc where proname in ('career_apply_stop_stale_facts','career_apply_facts_claim_guard','career_apply_facts_at_stamp','career_apply_fact_changed_close','career_apply_payload_states','career_apply_facts_email_guard'))`)).trim(), "t");
       for (const bad of [`null, array['3.9'], 'set_aside'`, `'${A}', array['3']::text[], 'set_aside'`, `'${A}', '{}'::text[], 'set_aside'`, `'${A}', array['3.9'], 'Not A Reason'`]) {
         await assertNode.rejects(() => pg.sql(`select public.career_apply_stop_stale_facts(${bad})`), /invalid fact change/);
       }
@@ -211,6 +211,19 @@ Deno.test({ name: "database: the stop closes only that person's unstarted rows s
       eq(await claim(), ["STALE-11"]);
     });
 
+    await t.step("an emailed application (started at the yes to its card, never queued): a card shown before the change is refused, fact_changed; one shown after is not", async () => {
+      const p = payload(C, "STALE-12", "TEST Email", "3.9");
+      const start = () => pg.sql(`insert into career_apply_jobs(user_id,job_id,company,url,payload,payload_hash,approval_hash,state,attempts,claimed_at,lease_token,source)
+        values ('${C}','STALE-12','TEST Email','${link("STALE-12")}',${p},public.career_apply_payload_hash(${p}),public.career_apply_payload_hash(${p}),'driving',1,now(),gen_random_uuid(),'email')`);
+      await pg.sql(`insert into career_watch_kv(user_id,key,value) values ('${C}','career:email-card', jsonb_build_object('state','shown','shown_at', (select min(at) - interval '1 minute' from career_apply_fact_changes where user_id='${C}')))`);
+      await assertNode.rejects(start, /fact_changed/);
+      eq(await job(C, "STALE-12"), null, "nothing was started");
+      // A card shown after the change (drafted from the facts as they are now): this guard lets it through.
+      await pg.sql(`update career_watch_kv set value = jsonb_build_object('state','shown','shown_at', clock_timestamp()) where user_id='${C}' and key='career:email-card'`);
+      const err = await start().then(() => "", (e) => String(e?.message ?? e));
+      assertNode.doesNotMatch(err, /fact_changed/);
+    });
+
     await t.step("nothing stopped comes back by itself: no row of A, B or C went back to the queue", async () => {
       eq((await pg.sql(`select string_agg(job_id || ':' || state, ',' order by length(job_id), job_id) from career_apply_jobs where evidence->>'reason' = 'fact_changed'`)).trim(), "STALE-1:not_submitted,STALE-2:not_submitted,STALE-9:not_submitted");
     });
@@ -221,17 +234,17 @@ Deno.test({ name: "database: the stop closes only that person's unstarted rows s
 
     await t.step("rollback: no function, trigger, column or table is left; stopped rows stay closed; it runs twice; the migration applies again, twice", async () => {
       const down = await Deno.readTextFile(ROLLBACK), up = await Deno.readTextFile(MIGRATION);
-      const left = () => pg.sql(`select (select count(*) from pg_proc where proname in ('career_apply_stop_stale_facts','career_apply_facts_claim_guard','career_apply_facts_at_stamp','career_apply_fact_changed_close','career_apply_payload_states'))
-        || '/' || (select count(*) from pg_trigger where tgname in ('career_apply_facts_claim_guard','career_apply_facts_at_stamp'))
+      const left = () => pg.sql(`select (select count(*) from pg_proc where proname like 'career_apply_fact%' or proname in ('career_apply_stop_stale_facts','career_apply_payload_states'))
+        || '/' || (select count(*) from pg_trigger where tgname like 'career_apply_facts_%')
         || '/' || (select count(*) from information_schema.columns where table_schema='public' and column_name='facts_at')
         || '/' || (to_regclass('public.career_apply_fact_changes') is not null)::text`);
-      eq((await left()).trim(), "5/3/2/true");
+      eq((await left()).trim(), "6/4/2/true");
       await pg.sql(down);
       eq((await left()).trim(), "0/0/0/false");
       eq((await job(A, "STALE-1")).state, "not_submitted", "a stopped row is not put back by the rollback");
       await pg.sql(down);
       await pg.sql(up); await pg.sql(up);
-      eq((await left()).trim(), "5/3/2/true");
+      eq((await left()).trim(), "6/4/2/true");
       eq((await job(A, "STALE-1")).state, "not_submitted");
     });
   } finally { await pg.stop(); }

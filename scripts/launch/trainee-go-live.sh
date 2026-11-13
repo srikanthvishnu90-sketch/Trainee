@@ -133,6 +133,8 @@ fi
 # 20261019020000_site_capture.sql is main's landing-page capture, already live (WO-081): its mark skips it there. Trunk's
 # channel delivery moved to 20261019020001 so the two never share a version.
 # 20261110120000 (release item 2): the VM drives Personio and Breezy by exact host. Rollback: supabase/rollbacks/20261110120000_career_apply_vm_boards.down.sql.
+# 20261112160000 (D-072 item 4, round 2): the hand-off's re-check and yes on the apply rows; a hand-off row leaves the queue only
+# through career_apply_vm_claim_handoff (the guard trigger). Rollback: supabase/rollbacks/20261112160000_career_apply_handoff_recheck.down.sql.
 MIGRATIONS=(
   20261019000000_channel_threads.sql
   20261019000001_career_postings.sql
@@ -307,6 +309,7 @@ MIGRATIONS=(
   20261111120000_career_google_accounts.sql
   20261112130000_career_postings_pay_zones.sql
   20261112150000_career_path_comparisons.sql
+  20261112160000_career_apply_handoff_recheck.sql
   20261113120000_career_erase_approved_versions.sql
 )
 MIGRATION_MARK=(
@@ -483,6 +486,7 @@ MIGRATION_MARK=(
   "to_regclass('public.career_google_accounts') is not null and to_regprocedure('public.career_google_account_commit(uuid,text,text,text,timestamptz)') is not null"
   "exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'career_postings' and column_name = 'pay_zones') and exists (select 1 from pg_constraint where conname = 'career_postings_pay_zones_shape')"
   "to_regclass('public.career_path_comparisons') is not null and exists (select 1 from pg_trigger where tgname = 'career_path_comparisons_guard')"
+  "exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'career_apply_jobs' and column_name = 'handoff_done_at') and to_regprocedure('public.career_apply_vm_claim_handoff(text,integer,integer,text[])') is not null and exists (select 1 from pg_trigger where tgname = 'career_apply_handoff_claim_guard')"
   "exists (select 1 from pg_proc where proname = 'career_file_versions_guard' and prosrc like '%career.erase_person%') and exists (select 1 from pg_proc where proname = 'career_erase_person' and prosrc like '%career.erase_person%')"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.

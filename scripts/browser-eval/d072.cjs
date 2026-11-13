@@ -79,6 +79,10 @@ function classify(row) {
     if (/^429$/.test(String(d.title || ""))) return { outcome: "fail", cause: "rate_limited_429" };
     if (row.wall === "employee_sign_in_only") return { outcome: "fail", cause: "form_not_found:employee_sign_in_only" };
     if ((d.frames || []).some((f) => /greenhouse\.io\/embed\/job_app/.test(String(f)))) return { outcome: "fail", cause: "form_not_found:embedded_frame" };
+    // D-072 (item 4, round 2): a Workday tenant that takes guest applications starts each one with a POST
+    // (/wday/cxs/<tenant>/jobpostings/<posting>/jobapplications) and saves every answer as it is typed: the dry run blocks that POST,
+    // so the page shows "Something went wrong" (capture of 2026-11-12). Not reachable in a dry run; named, never a pass.
+    if (row.workday_start_blocked || [...(row.blocked || []), ...(d.blocked || [])].some((b) => /^POST \S+\/wday\/cxs\/[^/]+\/jobpostings\//.test(String(b)))) return { outcome: "fail", cause: "dry_run_blocks_send:workday_application_start" };
     if (/myworkday(jobs|site)?\.com/.test(String(row.url))) return { outcome: "fail", cause: "form_not_found:workday_apply_not_opened" };
     if ((d.apply || []).length) return { outcome: "fail", cause: "form_not_found:apply_control_not_opened" };
     if (!d.inputs && !d.forms) return { outcome: "fail", cause: "form_not_found:page_not_rendered" };

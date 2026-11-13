@@ -166,7 +166,7 @@ unreachable, robots or off the board 6 / 6 / 3 / 2; a person-only EEO choice rou
   logs, so 32 rows stay failures rather than being guessed.
 - **What the rules keep** is now (b), not a failure: 325 answers only the person can give, 70 in-form checks, 62 whole-page checks,
   54 Workday sign-ins over the four samples. Nothing at those walls is solved, bypassed or signed into.
-- **Live hand-off wiring still owed**: setting `handoff_done_at` / `handoff_yes` on a row when the person says done or yes is a
+- **Live hand-off wiring** (built in round 2: `ITEM4-ROUND2-20261112.md`, D-072 (item 4, round 2); the migration is the owner's to apply). As written for round 1: setting `handoff_done_at` / `handoff_yes` on a row when the person says done or yes is a
   database and chat change (a migration the owner applies), and finishing a cloud run's wall needs a browser the person can use
   that Trainee then re-checks: the person's own browser through the extension (Greenhouse, Lever, Ashby, Workday) or a kept-alive
   live window (the guided-connect Browserbase session: the owner's credentials and spend).

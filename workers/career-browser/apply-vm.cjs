@@ -77,6 +77,8 @@ function restRpc({ url, key, fetchImpl = fetch }) {
   };
 }
 
+// The database has no such function (PostgREST's PGRST202 / Postgres 42883): this build is ahead of the migration.
+const NO_FUNCTION = /PGRST202|Could not find the function|does not exist|\b42883\b/i;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const pct = (xs, p) => { if (!xs.length) return 0; const s = [...xs].sort((a, b) => a - b); return s[Math.min(s.length - 1, Math.ceil(p * s.length) - 1)]; };
 
@@ -101,8 +103,8 @@ function createWorker(o) {
   const apply = o.applyOne || applyOne;
   const inflight = new Map(); // job id -> { row, host, lost }
   const hostCount = new Map(), hostLast = new Map();
-  const stats = { claimed: 0, done: {}, ms: [], refusedHosts: 0, completeErrors: 0 };
-  let stopping = false;
+  const stats = { claimed: 0, done: {}, ms: [], refusedHosts: 0, completeErrors: 0, handoffUnreadable: 0 };
+  let stopping = false, plainClaimUntil = 0;
 
   const rec = (state, reason) => { const k = `${state}${reason ? ":" + reason : ""}`; stats.done[k] = (stats.done[k] || 0) + 1; };
 
@@ -113,6 +115,22 @@ function createWorker(o) {
       catch (e) { last = e; if (/invalid apply claim/.test(e.message)) break; await sleep(200 * (i + 1)); }
     }
     stats.completeErrors++; log(`COMPLETE_FAILED ${row.id} ${String(last && last.message).slice(0, 120)}`); return false;
+  }
+
+  // The hand-off state a claimed row carries. { done, yes }, or { unreadable: true } when the hand-off claim's row does not say
+  // (no handoff object, or one that is not {done_at: null | text, yes: null | {card_hash}}): never read as "an ordinary row".
+  function handoffState(row) {
+    const ev = row.evidence && typeof row.evidence === "object" ? row.evidence : {};
+    let done = row.handoff_done_at || ev.handoff_done_at || null, yes = row.handoff_yes || ev.handoff_yes || null;
+    if (row._handoffClaim) {
+      const h = row.handoff;
+      if (!h || typeof h !== "object" || Array.isArray(h)) return { unreadable: true };
+      const doneOk = h.done_at === null || (typeof h.done_at === "string" && h.done_at.length > 0);
+      const yesOk = h.yes === null || (h.yes && typeof h.yes === "object" && typeof h.yes.card_hash === "string");
+      if (!doneOk || !yesOk || (h.yes && !h.done_at)) return { unreadable: true };
+      done = done || h.done_at; yes = yes || h.yes;
+    }
+    return { done, yes };
   }
 
   // Everything checked before a browser is opened. Returns the pool payload, or { refuse: code }.
@@ -156,6 +174,14 @@ function createWorker(o) {
     const shotDir = cfg.evidenceDir ? path.join(cfg.evidenceDir, row.id) : undefined; // null: no screenshots kept (the scheduling load test)
     if (shotDir) fs.mkdirSync(shotDir, { recursive: true, mode: 0o700 });
     try {
+      // D-072 (item 4, round 2), review of #800: the row's hand-off state lives in its own columns (20261112160000) and comes WITH
+      // the row, in the claim's own answer (career_apply_vm_claim_handoff: handoff {done_at, yes}); there is no second call whose
+      // failure could turn a re-check into an ordinary drive. A row from that claim whose state cannot be read is never driven:
+      // it is let go unsent (nothing recorded, no browser opened), and the sweep puts it back for another try
+      // (career_apply_vm_reap: twice, then closed not sent). The plain claim never hands out a hand-off row (the database's
+      // guard, career_apply_handoff_claim_guard), so a row from it is an ordinary approved row.
+      const hs = handoffState(row);
+      if (hs.unreadable) { stats.handoffUnreadable++; rec("released", "HANDOFF_STATE_UNREADABLE"); log(`HANDOFF_STATE_UNREADABLE ${row.id} nothing sent; left for the sweep`); return; }
       const prep = await prepare(row, dir);
       if (prep.refuse) { await complete(row, "not_submitted", prep.refuse, { nothing_sent: true, link: row.url }); return; }
       const onPhase = async (phase) => {
@@ -167,12 +193,23 @@ function createWorker(o) {
       // that run: the same approved payload is driven to the instant before Submit and the exact answers the page holds are recorded
       // as the card (needs_user / ready_for_yes). Only a later run carrying the person's yes to that card's hash (handoff_yes) may
       // press Submit, and only while the page still holds exactly that card (handoff.cjs recheck).
-      const handoffDone = row.handoff_done_at || (row.evidence && row.evidence.handoff_done_at);
+      const handoffDone = hs.done;
       if (handoffDone) {
-        const yes = row.handoff_yes || (row.evidence && row.evidence.handoff_yes) || null;
+        const yes = hs.yes;
         const rc = await (o.recheck || recheck)(browser, prep.pool, { allowHosts: cfg.allowHosts, stepTimeoutMs: cfg.stepTimeoutMs, shotDir, onPhase, yes }, o.applyOne ? { runner: { applyOne: apply, NeedsUser } } : undefined);
         if (rc.state === "ready_for_yes") return void (await complete(row, "needs_user", "ready_for_yes", { nothing_sent: true, link: row.url, answers_card: rc.card, handed_back: "re-checked after you finished the step: these are the exact answers on the page; reply yes to submit exactly this" }));
-        if (rc.state === "still_walled") return void (await complete(row, "needs_user", rc.handoff.reason === "person_answer" ? "needs_answers" : rc.handoff.reason, { nothing_sent: true, link: row.url, handoff: rc.handoff, handed_back: "the step is still there at the employer's page" }));
+        // The wall is still there on a re-check in a NEW cloud session, after the person said they finished it: the employer keeps the
+        // step in the person's own browser session (their sign-in, a check scored to their browser), which no cloud session carries.
+        // That application is the person's own browser's to finish (the extension, or submitting at the link themselves): marked
+        // needs_extension, kept as the hand-off stop, never a pass. Its reason stays the wall's, so the person's own answer
+        // (career_apply_person_finished_as) still applies.
+        if (rc.state === "still_walled") {
+          const wall = rc.handoff.reason === "bot_check_in_form" ? "bot_check" : rc.handoff.reason;
+          const session = ["login_required", "bot_check", "email_code"].includes(wall);
+          return void (await complete(row, "needs_user", rc.handoff.reason === "person_answer" ? "needs_answers" : wall, { nothing_sent: true, link: row.url, handoff: rc.handoff,
+            ...(session ? { needs_extension: true, handed_back: "the step is still there when Trainee re-opens the page in its own browser: this employer keeps it in your own browser session, so finish this application in your browser (the link), or with the Trainee extension" }
+              : { handed_back: "the step is still there at the employer's page" }) }));
+        }
         if (rc.state === "submitted") return void (await settle(row, rc.result, shotDir, t0));
         return void (await complete(row, "not_submitted", rc.reason || "not_submitted", { nothing_sent: true, link: row.url, ...(rc.card ? { answers_card: rc.card } : {}) }));
       }
@@ -264,7 +301,23 @@ function createWorker(o) {
     // Ask for work in batches: a claim has a fixed cost, so with engines still running wait until a quarter of the slots are free.
     if (inflight.size > 0 && capacity < Math.max(1, Math.ceil(cfg.concurrency / 4))) return 0;
     const skip = [...hostCount.entries()].filter(([, n]) => n >= cfg.hostMax).map(([h]) => h.toLowerCase().replace(/^www\./, "").replace(/:(80|443)$/, ""));
-    const rows = await rpc("career_apply_vm_claim", { p_worker: cfg.workerId, p_limit: capacity, p_per_user: cfg.perUser, p_skip_hosts: skip });
+    const args = { p_worker: cfg.workerId, p_limit: capacity, p_per_user: cfg.perUser, p_skip_hosts: skip };
+    // The hand-off claim (20261112160000) first: the same rows as the plain claim plus the hand-off rows, each with its hand-off
+    // state. A database that does not have it yet (this build released before the migration), or one where the call fails,
+    // is asked with the plain claim instead: that one never hands out a hand-off row, so nothing from it is a re-check.
+    let rows = null;
+    if (Date.now() >= plainClaimUntil) {
+      try {
+        const got = await rpc("career_apply_vm_claim_handoff", args);
+        if (Array.isArray(got)) { rows = got; for (const r of rows) if (r && typeof r === "object") r._handoffClaim = true; }
+        else plainClaimUntil = Date.now() + 60000;
+      } catch (e) {
+        const missing = NO_FUNCTION.test(String(e && e.message));
+        plainClaimUntil = Date.now() + (missing ? 60000 : 5000);
+        log(`HANDOFF_CLAIM_UNAVAILABLE ${missing ? "not in this database" : String(e && e.message).slice(0, 100)}; plain claim (hand-off rows wait)`);
+      }
+    }
+    if (!rows) rows = await rpc("career_apply_vm_claim", args);
     for (const r of rows || []) { r._claimedAt = Date.now(); stats.claimed++; runOne(r).catch((e) => log(`RUN_ERROR ${e.message}`)); }
     return (rows || []).length;
   }

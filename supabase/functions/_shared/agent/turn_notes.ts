@@ -347,6 +347,8 @@ const US_STATES = "Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connectic
 const STATE_CODES = "AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC|PR";
 const PLACE_SRC = `\\b((?:[A-Z][A-Za-z.'-]+\\s){0,2}[A-Z][A-Za-z.'-]+),\\s(?:(?:${STATE_CODES})(?![A-Za-z])|(?:${US_STATES})\\b)`;
 const PLACE_IN = new RegExp(PLACE_SRC);
+// One place and nothing else: "Chicago, IL" (a city and a US state), never a list, a note or a count beside it.
+export const isOnePlace = (s: string) => new RegExp(`^${PLACE_SRC}$`).test(String(s ?? "").trim());
 function placesIn(text: string): { place: string; at: number }[] {
   return [...text.matchAll(new RegExp(PLACE_SRC, "g"))].map((m) => ({ place: m[0], at: m.index ?? 0 }));
 }

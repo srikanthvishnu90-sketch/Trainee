@@ -792,7 +792,7 @@ function keptSentences(reply: string, strict: boolean, own: string): string {
     if (!bullet) headGone = false;
     const kept: string[] = [];
     for (const x of parts) {
-      const ok = stays(x) && !(dropped && /^\W*(?:that|this|it|those|these|which|so)\b|\b(?:it|them)\b/i.test(x));
+      const ok: boolean = stays(x) && !(dropped && /^\W*(?:that|this|it|those|these|which|so)\b|\b(?:it|them)\b/i.test(x));
       if (ok) kept.push(x); else if (/:\s*$/.test(x)) headGone = true;
       dropped = !ok;
     }

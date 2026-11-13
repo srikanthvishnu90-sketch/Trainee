@@ -802,6 +802,10 @@ Deno.test("round 5.2: what disputes, dates or footnotes a unit reaches the judge
     [`${K5}¹\n${longPad(30)}\n¹ Applies to PhD quant interns only.`, "PhD quant interns only"],
     [`${K5}*\n${longPad(30)}\n* Figure from 2019, before the program was cut.`, "Figure from 2019"],
     [`Citadel interns earn $5,000 a week (a)\n${longPad(30)}\n(a) This figure is the London office in pounds converted at 2019 rates.`, "converted at 2019 rates"],
+    // A note with no word that would flag it on its own: it travels only because the unit's mark points at it.
+    [`${K5}[2]\n${longPad(30)}\n[2] Figure for the PhD quant interns in London.`, "PhD quant interns in London"],
+    // ... and ahead of other notes nearer the unit (at most six travel).
+    [`${Array.from({ length: 16 }, (_, k) => `Room ${k + 3} was last updated in 2019.`).join("\n")}\n${K5}[2]\n${longPad(30)}\n[2] Figure for the PhD quant interns in London.`, "PhD quant interns in London"],
   ] as const) {
     const p = passageOf([{ url: "https://blog.example/x", title: "Citadel notes", text }], K5);
     ok(p && p.includes(key) && p.length <= 2500, `${key}: ${p?.slice(0, 300)}`);
@@ -831,7 +835,12 @@ Deno.test("round 5.3: the judge cannot answer: the pages' own units, labelled as
 Deno.test("round 5.4: a heading that is another name lends the owner's name to nothing under it; a heading is never a quoted line", async () => {
   const lentUnder = (heading: string) => indexPages([{ url: "https://blog.example/x", title: "Citadel internship guide", text: `${longPad(30)}\n${heading}\nInterns earn $7,500 a week in pay.` }], undefined, ["Citadel"]).pages[0].sentences.find((u: any) => /7,500/.test(u.text))?.lent ?? null;
   eq(lentUnder("Tower Research"), null);
-  eq(lentUnder("Internship Guide"), "Citadel"); // a heading in the words of the page's own title is not another name
+  eq(lentUnder("Internship Guide"), "Citadel");
+  // A page that names another entity beginning with the owner's name, or says it is about someone else, lends nothing.
+  const lentOn = (text: string) => indexPages([{ url: "https://blog.example/x", title: "Citadel", text }], undefined, ["Citadel"]).pages[0].sentences.find((u: any) => /\$/.test(u.text))?.lent ?? null;
+  eq(lentOn("Citadel Partners LLP is a small London fund.\nOur fund pays interns $7,500 a month."), null);
+  eq(lentOn("This post covers my internship at Hudson River Trading, not Citadel.\nInterns earn $6,500 a week in total."), null);
+  eq(lentOn("Our fund pays interns $7,500 a month."), "Citadel"); // a heading in the words of the page's own title is not another name
   const r = await mk3([{ url: U, title: "Citadel filings", text: "Form 10-K Citadel LLC.\nCitadel employs 4,000 people in its offices." }], { summary: [{ text: "Citadel files a Form 10-K.", quote: "Form 10-K Citadel LLC", url: U }] }, quotesOnly);
   ok(!JSON.stringify(r.points ?? []).includes("Form 10-K Citadel LLC"), JSON.stringify(r.points));
 });

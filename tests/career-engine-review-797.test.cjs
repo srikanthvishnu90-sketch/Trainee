@@ -43,7 +43,7 @@ test("1: a check seen inside the form on an earlier step is remembered: no Conti
 // ------------------------------------------------------------------------------------------------ 2. the Submit of the filled form
 const field = (type, hint) => ({ type, hint });
 const APP = [field("text", "First Name first_name"), field("email", "Email email"), field("file", "Resume resume")];
-const ctl = (c, form, text, o = {}) => ({ c, form, vis: true, text, tag: "BUTTON", type: "", signin: false, ...o });
+const ctl = (c, form, text, o = {}) => ({ c, form, inside: form >= 0, vis: true, text, tag: "BUTTON", type: "", signin: false, ...o });
 const snap = (forms, controls, loose = []) => ({ forms: forms.map((fields) => ({ signin: false, hasControl: true, fields })), controls, loose });
 test("2: a control outside the form is never that form's Submit; a form with no application field is not the application", () => {
   // The review's page: a newsletter box and one "Apply" button outside it.

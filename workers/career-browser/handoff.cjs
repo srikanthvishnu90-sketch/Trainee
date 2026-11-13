@@ -82,24 +82,43 @@ const askedQuestions = (handoff) => ((handoff && handoff.remaining) || []).filte
 // before the click) they are compared, less the per-load tokens.
 const PER_LOAD_TOKEN = /csrf|xsrf|authenticity|nonce|(^|_)token$|captcha|recaptcha|turnstile|-captcha-response/i;
 const DEMOGRAPHIC = /gender|\brace\b|ethnic|veteran|disab|hispanic|latino|pronoun|sexual orientation/i;
-const CONSENT = /agree|consent|accept|acknowledg|authori[sz]|privacy|terms|certif|sponsor|eligib|legally|right to work|opt.?in|subscribe|marketing|newsletter/i;
+const CONSENT = /agree|consent|accept|acknowledg|authori[sz]|privacy|terms|certif|attest|declar|sponsor|visa|eligib|legally|right to work|opt.?in|subscribe|marketing|newsletter|contact(ed)? (me|you)|criminal|convict|background check/i;
 const set = (c) => c.value !== null && c.value !== undefined && c.value !== "";
 function pageRows(controls, { hidden = false } = {}) {
   return (controls || []).filter((c) => (c.hidden ? hidden && !PER_LOAD_TOKEN.test(c.name || "") : true))
     .map((c) => [String(c.name || c.label || ""), String(c.type || ""), c.option === null || c.option === undefined ? null : String(c.option), set(c) ? String(c.value) : null]);
 }
 const pageDigest = (controls, o) => crypto.createHash("sha256").update(JSON.stringify(pageRows(controls, o))).digest("hex");
-// A choice the page made and the person never confirmed (the engine did not set it): every ticked box or radio, and a select
-// already on a consent, authorisation or demographic answer. Asked of the person (PERSON_REASONS), never sent as it stands.
-function unconfirmedDefaults(controls) {
+// A choice the page made itself (the engine did not set it): a ticked box, a chosen radio, a select off its empty option.
+// `person`: { answer(label) -> the person's confirmed answer to that question or undefined, phone, country }.
+//  - It equals the person's confirmed answer to that question: theirs already, not a stop.
+//  - Presentational (the phone's country-code picker on the confirmed phone's own country, the form's language, a sort or
+//    page-size select, "same as above"): shown on the card and hashed, not a stop.
+//  - Anything else is a question the person has not answered (consent, authorisation, sponsorship, a legal attestation, a marketing
+//    opt-in, a demographic choice, or any other): asked (PERSON_REASONS), never sent as it stands.
+const PRESENTATIONAL = /^(?:(?:site|form|page|display|preferred)\s+)?(?:language|locale|lang)$|\bsort\b|order by|per page|page size|results per|same as (?:above|home|mailing|current)/i;
+const DIAL = /country.?code|dial|calling code|phone.?country|country.{0,12}phone|phone.{0,12}prefix/i;
+const same = (a, b) => String(a).trim().toLowerCase().replace(/\s+/g, " ") === String(b).trim().toLowerCase().replace(/\s+/g, " ");
+function unconfirmedDefaults(controls, person = {}) {
   const out = [], seen = new Set();
   for (const c of controls || []) {
     if (c.hidden || c.touched || !set(c)) continue;
-    const label = String(c.label || c.name || c.option || "").slice(0, 200), box = c.type === "checkbox" || c.type === "radio";
-    if (!box && !(/^select/.test(String(c.type)) && (DEMOGRAPHIC.test(label) || CONSENT.test(label)))) continue;
+    const box = c.type === "checkbox" || c.type === "radio";
+    if (!box && !/^select/.test(String(c.type))) continue; // a prefilled text box: shown and hashed (answersCard), not a choice
+    const label = String(c.label || c.name || c.option || "").slice(0, 200), key = `${label} ${c.name || ""}`;
+    const sensitive = DEMOGRAPHIC.test(key) || CONSENT.test(key);
+    const confirmed = person.answer ? person.answer(label) : undefined;
+    if (confirmed !== undefined && confirmed !== null && String(confirmed).trim() !== "") {
+      if (same(confirmed, c.value) || (c.type === "checkbox" && c.value === "checked" && /^(yes|true|checked|on|i agree|agree)$/i.test(String(confirmed).trim()))) continue;
+    } else if (!sensitive) {
+      if (PRESENTATIONAL.test(label) || PRESENTATIONAL.test(c.name || "")) continue;
+      // The dial-code picker: the confirmed phone's own code, or the confirmed country by name.
+      const code = /^\+\d{1,3}/.exec(String(person.phone || "").trim()), v = String(c.value).toLowerCase();
+      if (DIAL.test(key) && ((code && new RegExp(`\\${code[0]}(?!\\d)`).test(v)) || (person.country && v.includes(String(person.country).trim().toLowerCase())))) continue;
+    }
     if (seen.has(label)) continue;
     seen.add(label);
-    out.push({ label, reason: DEMOGRAPHIC.test(label) ? "eeo_needs_your_choice" : "agreement_needs_you", kind: c.type, detail: `set by the page, not confirmed by you: ${String(c.value).slice(0, 80)}` });
+    out.push({ label, reason: DEMOGRAPHIC.test(key) ? "eeo_needs_your_choice" : CONSENT.test(key) || c.type === "checkbox" ? "agreement_needs_you" : "no_confirmed_answer", kind: c.type, detail: `set by the page, not confirmed by you: ${String(c.value).slice(0, 80)}` });
   }
   return out;
 }

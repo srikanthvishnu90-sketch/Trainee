@@ -30,7 +30,7 @@
 //  - local only by default: only loopback hosts are driven. Real employer hosts need `allowHosts` from the caller
 //    (the owner-run approve-first path), and this module never discovers or logs in anywhere.
 const fs = require("node:fs");
-const { fillForm, heldNow, recheckFilled, MARK_SIGNIN, EXTRACT } = require("./ats-fill.cjs");
+const { fillForm, heldNow, recheckFilled, MARK_SIGNIN, EXTRACT, answerFor, factValue, factsFrom } = require("./ats-fill.cjs");
 const { APPLY_TEXT, NEVER_CLICK, OVERLAY_APPLY, CLOSED_MARK, CLOSED_TEXT, applyUrlFor } = require("./apply-entry.cjs");
 const { buildHandoff, PERSON_REASONS, pageDigest, unconfirmedDefaults } = require("./handoff.cjs");
 const NOT_OFFERED = new Set(["no_matching_option", "ambiguous_option"]);
@@ -291,8 +291,31 @@ function pickControls(snap) {
   }
   const loose = ctl.filter((c) => c.vis && c.form < 0 && SUBMIT_WORD.test(c.text));
   if (!forms.length) return isApplicationForm(snap.loose) && loose.length === 1 ? { ...none, form: -1, submit: loose[0].c } : none;
+  // The one exception (BambooHR, D-072: its Submit is drawn just outside its one form): outsideSubmitOf, every condition or none.
+  const tied = outsideSubmitOf(snap, forms, ctl);
+  if (tied) return { ...none, form: tied.form, submit: tied.submit, outside: true };
   if (apps.length && loose.length) return { ...none, refuse: "submit_not_tied_to_form", opener: loose.every((c) => APPLY_TEXT.test(c.text) && !NEVER_CLICK.test(c.text)) };
   return none;
+}
+// Review of #797, follow-up: a Submit drawn outside the form is that form's Submit only when ALL of this holds; anything else stays
+// submit_not_tied_to_form. (1) The page, every frame counted, has exactly one form. (2) That form is an application by its own
+// fields: a name or email question AND a resume upload or two or more application questions. (3) The page shows exactly one
+// submit-like control outside the form and none inside it. (4) That control is not a link (no href, not role=link) and says
+// Submit, Submit application, Apply or Send application. (5) It sits in the form's own container, or directly after the form in
+// the page's order, with no other form-like region (a search, newsletter or sign-in box: any field outside the form) between.
+const OUTSIDE_LABEL = /^\s*(submit|submit application|apply|send application)\s*$/i;
+function outsideSubmitOf(snap, forms, ctl) {
+  if ((snap.forms || []).length !== 1 || (snap.otherFrameForms || 0) !== 0 || forms.length !== 1) return null;
+  const f = forms[0], fields = f.fields || [];
+  const who = fields.some((x) => x.type === "email" || /(?<!user)name|e-?mail/i.test(x.hint || ""));
+  const questions = fields.filter((x) => !["email", "checkbox", "search"].includes(x.type)).length;
+  if (!who || !(fields.some((x) => x.type === "file") || questions >= 2)) return null;
+  const like = (c) => c.vis && (SUBMIT_WORD.test(c.text) || (c.tag === "BUTTON" && (c.type === "submit" || c.type === "")) || (c.tag === "INPUT" && c.type === "submit"));
+  const out = ctl.filter((c) => c.form < 0 && like(c));
+  if (out.length !== 1 || ctl.some((c) => c.form === f.i && like(c))) return null;
+  const b = out[0];
+  if (b.link || !OUTSIDE_LABEL.test(b.text) || b.gap !== 0 || !(b.sameBox || b.follows)) return null;
+  return { form: f.i, submit: b.c };
 }
 // Page side: every form (its questions as { type, hint }, shadow roots included), the fields outside every form, and every control
 // a person could press, numbered (data-upmore-c) so the one Node picks can be marked. Read only but for that number.
@@ -305,8 +328,13 @@ function SNAP() {
   const forms = [...document.querySelectorAll("form")];
   const controls = [...document.querySelectorAll("button, [role=button], input[type=button], input[type=submit]")].map((b, c) => {
     b.setAttribute("data-upmore-c", String(c));
-    const f = b.form || b.closest("form");
-    return { c, form: f ? forms.indexOf(f) : -1, inside: !!b.closest("form"), vis: vis(b), text: squash(b.innerText || b.value).slice(0, 120), tag: b.tagName, type: (b.getAttribute("type") || "").toLowerCase(), signin: !!b.closest("[data-upmore-signin]") };
+    const f = b.form || b.closest("form"), one = forms.length === 1 ? forms[0] : null;
+    // Where an outside control sits against the page's one form (outsideSubmitOf): after it in the page's order, in its container,
+    // and how many fields outside the form lie between the two (or share that container).
+    const follows = !f && !!one && !!(one.compareDocumentPosition(b) & 4), sameBox = !f && !!one && one.parentElement !== document.body && one.parentElement.contains(b);
+    const gap = f || !one ? 0 : deep(document.body, "input, select, textarea, [role=search]").filter((i) => i.type !== "hidden" && !one.contains(i)
+      && ((sameBox && one.parentElement.contains(i)) || (follows && (one.compareDocumentPosition(i) & 4) && (i.compareDocumentPosition(b) & 4)))).length;
+    return { c, follows, sameBox, gap, link: b.tagName === "A" || b.hasAttribute("href") || b.getAttribute("role") === "link", form: f ? forms.indexOf(f) : -1, inside: !!b.closest("form"), vis: vis(b), text: squash(b.innerText || b.value).slice(0, 120), tag: b.tagName, type: (b.getAttribute("type") || "").toLowerCase(), signin: !!b.closest("[data-upmore-signin]") };
   });
   return { controls, forms: forms.map((f) => ({ signin: f.hasAttribute("data-upmore-signin"), was: f.hasAttribute("data-upmore-app-seen"), hasControl: !!f.querySelector("input, select, textarea"), fields: deep(f, "input, select, textarea").filter(isField).map(field) })),
     loose: deep(document.body, "input, select, textarea").filter((i) => isField(i) && !i.closest("form") && !i.closest("[data-upmore-signin]")).map(field) };
@@ -321,7 +349,8 @@ function MARK(pick) {
 }
 // The last look before the click: the control about to be pressed belongs to the form that was filled, and every filled question
 // is in that form. `t` is read from the page (attempt): formless (no form was marked), anyForm, sameForm, filledOutside.
-const submitTieRefusal = (t) => ((t.formless ? !t.anyForm : t.sameForm && !t.filledOutside) ? null : "submit_not_tied_to_form");
+// `outside`: pickControls took the control by the one narrow exception (outsideSubmitOf); it must still belong to no form.
+const submitTieRefusal = (t) => ((t.formless ? !t.anyForm : (t.sameForm || (t.outside === true && t.noForm === true)) && !t.filledOutside) ? null : "submit_not_tied_to_form");
 // Page side, read only: what every control of the application form holds now (the whole page for a board with no <form>): the
 // rows of handoff.cjs pageRows. A box or radio by its own option (value null when not ticked), a select by its chosen options'
 // words (null on its empty placeholder), an upload by its file's name. `touched`: the engine filled that question (filledQs).
@@ -331,7 +360,8 @@ function CONTROLS(filledQs) {
   return (app ? [...app.elements] : [...document.querySelectorAll("input, select, textarea")])
     .filter((e) => /^(INPUT|SELECT|TEXTAREA)$/.test(e.tagName) && !["submit", "button", "image", "reset", "password"].includes(e.type) && !e.closest("[data-upmore-signin]")).map((e) => {
       const box = e.type === "checkbox" || e.type === "radio", q = e.getAttribute("data-upmore-q");
-      const value = box ? (e.checked ? squash(e.value) || "on" : null) : e.tagName === "SELECT" ? [...e.selectedOptions].filter((o) => o.value !== "").map((o) => squash(o.textContent)).join(", ") || null
+      const own = squash(e.labels && e.labels[0] && e.labels[0].innerText);
+      const value = box ? (e.checked ? own || squash(e.value) || "on" : null) : e.tagName === "SELECT" ? [...e.selectedOptions].filter((o) => o.value !== "").map((o) => squash(o.textContent)).join(", ") || null
         : e.type === "file" ? [...(e.files || [])].map((f) => f.name).join(", ") || null : String(e.value) === "" ? null : String(e.value);
       return { name: e.name || "", label: squash((e.labels && e.labels[0] && e.labels[0].innerText) || e.getAttribute("aria-label") || e.placeholder).slice(0, 200), type: e.type, option: box ? squash(e.value) : null, value, q, touched: q !== null && filledQs.includes(q), hidden: e.type === "hidden" };
     });
@@ -552,7 +582,16 @@ async function attempt(browser, p, opts, timing) {
     // Review of #797: the choice is pickControls' (above), on what SNAP read: the Submit is a control of the application form
     // itself, the step form's Continue likewise, and the form they belong to is the one filled (data-upmore-app).
     let lastPick = {};
-    const mark = async () => { await page.evaluate(MARK_SIGNIN).catch(() => 0); lastPick = pickControls(await page.evaluate(SNAP)); await page.evaluate(MARK, lastPick); return lastPick; };
+    const mark = async () => {
+      await page.evaluate(MARK_SIGNIN).catch(() => 0);
+      const snap = await page.evaluate(SNAP);
+      // Forms in the page's other frames (a captcha provider's own frame is not the page's): a frame that cannot be read counts as one.
+      snap.otherFrameForms = 0;
+      for (const f of page.frames()) if (f !== page.mainFrame() && !/recaptcha|hcaptcha|challenges\.cloudflare\.com|turnstile/i.test(f.url())) snap.otherFrameForms += await f.evaluate(() => document.forms.length).catch(() => 1);
+      lastPick = pickControls(snap);
+      await page.evaluate(MARK, lastPick);
+      return lastPick;
+    };
     const markSubmit = async () => (await mark()).submit !== null;
     const markNext = async () => (await mark()).next !== null;
     const hasForm = async () => { lastPick = {}; return !!(await page.$(FIELD_SEL)) && ((await markSubmit()) || (await markNext())); };
@@ -707,11 +746,11 @@ async function attempt(browser, p, opts, timing) {
     const tie = await page.$eval("[data-upmore-submit]", (b, qs) => {
       const app = document.querySelector("form[data-upmore-app]"), f = b.form || b.closest("form");
       const inApp = (el) => { for (let n = el; n; n = n.parentNode || n.host) if (n === app) return true; return false; };
-      const a = b.getAttribute("formaction") ?? (f && f.getAttribute("action"));
-      return { formless: !app, anyForm: !!document.querySelector("form:not([data-upmore-signin]) :is(input, select, textarea)"), sameForm: !!app && f === app,
+      const a = b.getAttribute("formaction") ?? ((f || app) && (f || app).getAttribute("action"));
+      return { noForm: !f, formless: !app, anyForm: !!document.querySelector("form:not([data-upmore-signin]) :is(input, select, textarea)"), sameForm: !!app && f === app,
         filledOutside: app ? qs.filter((q) => { const el = document.querySelector(`[data-upmore-q="${q}"]`); return el && !inApp(el); }).length : 0, action: new URL(a || location.href, document.baseURI).href };
     }, fr.filled.map((f) => String(f.d.q)));
-    const untied = submitTieRefusal(tie);
+    const untied = submitTieRefusal({ ...tie, outside: lastPick.outside === true });
     if (untied) throw new NeedsUser(untied, p.url);
     const av = urlVerdict(tie.action, allow);
     if (!av.ok) throw new NeedsUser("form_action_not_allowed", av.host);
@@ -720,23 +759,27 @@ async function attempt(browser, p, opts, timing) {
     // it preselected, was never the person's answer: it is asked (the ask-once hand-off), never sent as it stands.
     const readControls = async () => {
       const labels = new Map((await page.evaluate(EXTRACT).catch(() => [])).map((d) => [String(d.q), d.label]));
-      return (await page.evaluate(CONTROLS, fr.filled.map((f) => String(f.d.q)))).map((c) => ({ ...c, label: labels.get(String(c.q)) || c.label }));
+      return (await page.evaluate(CONTROLS, fr.filled.map((f) => String(f.d.q)))).map((c) => { const label = labels.get(String(c.q)) || c.label; return { ...c, label, value: c.type === "checkbox" && c.value && c.value === label ? "checked" : c.value }; });
     };
     const controls = await readControls();
-    const unconfirmed = unconfirmedDefaults(controls);
+    // The person's own confirmed answer to a question, as ats-fill reads it (an approved answer, else a confirmed fact).
+    const known = factsFrom(p.facts || {}, p.answers || {});
+    const unconfirmed = unconfirmedDefaults(controls, { answer: (l) => { const a = answerFor(l, p.answers || {}); return a === undefined || a === null || String(a).trim() === "" ? factValue(l, known) : a; }, phone: known.phone, country: known.country });
     if (unconfirmed.length) { const e = new NeedsUser("missing_required_answer", unconfirmed[0].label); e.needs = unconfirmed; throw e; }
     if (!hasApproval(p)) throw new NeedsUser("not_approved", "payload changed after approval");
     if (opts.shotBefore) await page.screenshot({ path: opts.shotBefore, fullPage: true });
+    // Review of #797: the page is read once more and must hold exactly what the first read (the card's) held: every control, and
+    // every hidden value that is not a per-load token. Any difference refuses. It is the last read of the form BEFORE the caller's
+    // "submitting" record, so this refusal ends not_submitted (nothing was pressed); only a click that happened can be unknown.
+    const audit = opts.audit ? { id: p.id, fields: await heldNow(page, fr.filled), controls } : undefined;
+    if (pageDigest(await readControls(), { hidden: true }) !== pageDigest(controls, { hidden: true })) throw new NeedsUser("page_changed_before_submit", p.url);
     // The caller records "submitting" (and re-checks its lease and kill switch) BEFORE the click; a refusal stops here, unsent.
     // A dry run's audit (opts.audit) also gets what each filled question holds at this instant; production passes only the phase.
     // The page as it is now, the last read before the caller's "submitting" record: never the employer's own page.
     notOnFollowed();
     // The control about to be pressed, for the caller's own check (the strict bench refuses one inside a sign-in form).
     const submitInfo = await page.$eval("[data-upmore-submit]", (b) => { const f = b.closest("form"); return { signin: !!b.closest("[data-upmore-signin]"), form: f ? f.getAttribute("action") || "" : null }; }).catch(() => ({ signin: false, form: null }));
-    if (opts.onPhase) await opts.onPhase("submitting", opts.audit ? { id: p.id, fields: await heldNow(page, fr.filled), controls } : undefined, submitInfo);
-    // Review of #797: the page is read once more, the instant before the click, and must hold exactly what it held when the caller
-    // was shown it (the card's read): every control, and every hidden value that is not a per-load token. Any difference refuses.
-    if (pageDigest(await readControls(), { hidden: true }) !== pageDigest(controls, { hidden: true })) throw new NeedsUser("page_changed_before_submit", p.url);
+    if (opts.onPhase) await opts.onPhase("submitting", audit, submitInfo);
     // Past this line nothing is retried: the employer may have received it.
     const t2 = Date.now();
     timing.submitClicked = true;
@@ -821,4 +864,4 @@ async function runPool(browser, payloads, opts = {}) {
   return { results, wallMs: Date.now() - started, concurrency };
 }
 
-module.exports = { checkGate, pickControls, isApplicationForm, submitTieRefusal, sentToJobList, SNAP, MARK, CONTROLS, closedOnPage, declineCookies, samePostingRedirect, followedPageRefusal, postingIds, CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };
+module.exports = { checkGate, pickControls, outsideSubmitOf, isApplicationForm, submitTieRefusal, sentToJobList, SNAP, MARK, CONTROLS, closedOnPage, declineCookies, samePostingRedirect, followedPageRefusal, postingIds, CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };

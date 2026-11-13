@@ -53,7 +53,7 @@ test("2: a control outside the form is never that form's Submit; a form with no 
   assert.equal(pa.isApplicationForm([field("email", "Your email newsletter_email")]), false);
   assert.equal(pa.isApplicationForm(APP), true);
   // An application form whose only Submit-worded control is outside it and not tied to it: refused, with its own reason.
-  const out = pa.pickControls(snap([APP], [ctl(0, -1, "Submit Application", { type: "button" })]));
+  const out = pa.pickControls(snap([APP], [ctl(0, -1, "Submit Application", { type: "button", follows: true, gap: 1 })]));
   assert.deepEqual([out.submit, out.refuse, !!out.opener], [null, "submit_not_tied_to_form", false]);
   // The same with an "Apply" control: it is an opener (opened once, as before), never the Submit.
   const opener = pa.pickControls(snap([APP], [ctl(0, -1, "Apply now", { tag: "A" })]));
@@ -79,7 +79,45 @@ test("2: a control outside the form is never that form's Submit; a form with no 
   assert.equal(pa.submitTieRefusal({ formless: true, anyForm: false }), null);
   // The refusal comes before anything is filled, and the tie is checked before the click.
   assert.ok(at("if (lastPick.refuse") < at("await fillForm(page"));
-  assert.ok(at("submitTieRefusal(tie)", at("await fillForm(page")) < at('opts.onPhase("submitting"'));
+  assert.ok(at("submitTieRefusal({ ...tie", at("await fillForm(page")) < at('opts.onPhase("submitting"'));
+});
+
+// The one narrow exception (BambooHR's recorded shape): every condition, or submit_not_tied_to_form as before.
+test("2: a Submit outside the page's one application form is that form's only when every condition holds", () => {
+  const NAMES = [field("text", "First Name first_name"), field("text", "Last Name last_name"), field("email", "Email email")];
+  const btn = (o = {}) => ctl(0, -1, "Submit Application", { type: "button", follows: true, sameBox: false, gap: 0, link: false, ...o });
+  const page = (o = {}) => ({ ...snap([o.fields || NAMES], o.controls || [btn(o.btn)]), otherFrameForms: o.frames || 0, ...(o.forms ? { forms: o.forms } : {}) });
+  assert.deepEqual(pa.pickControls(page()), { form: 0, submit: 0, next: null, refuse: null, outside: true }, "BambooHR: one form, names and email, one Submit right after it");
+  assert.equal(pa.pickControls(page({ fields: [field("text", "Full name name"), field("file", "Resume resume")] })).outside, true, "a name and the resume upload");
+  assert.equal(pa.pickControls(page({ btn: { follows: false, sameBox: true } })).outside, true, "in the form's own container");
+  for (const label of ["Submit", "Apply", "Send application"]) assert.equal(pa.pickControls(page({ btn: { text: label } })).outside, true, label);
+  const form = (fields) => ({ signin: false, hasControl: true, fields });
+  const refused = {
+    "a second form on the page (a newsletter box)": page({ forms: [form(NAMES), form([field("email", "newsletter")])] }),
+    "a second form that is a sign-in form": page({ forms: [form(NAMES), { ...form([field("email", "login")]), signin: true }] }),
+    "a form in another frame": page({ frames: 1 }),
+    "no name or email question": page({ fields: [field("text", "City city"), field("text", "Country country"), field("tel", "Phone phone")] }),
+    "an email and one other question only": page({ fields: [field("email", "Email email"), field("text", "City city")] }),
+    "two Submit-like controls outside": page({ controls: [btn(), ctl(1, -1, "Send application", { type: "button", follows: true, gap: 0 })] }),
+    "an untyped button outside beside it": page({ controls: [btn(), ctl(1, -1, "Save")] }),
+    "Submit-like controls inside the form too": page({ controls: [btn(), ctl(1, 0, "Save draft"), ctl(2, 0, "Attach")] }),
+    "the control is a link": page({ btn: { link: true } }),
+    "its words are not a Submit label": page({ btn: { text: "Send" } }),
+    "a search or newsletter box between the form and the control": page({ btn: { gap: 1 } }),
+    "neither after the form nor in its container": page({ btn: { follows: false, sameBox: false } }),
+  };
+  for (const [why, sn] of Object.entries(refused)) {
+    const r = pa.pickControls(sn);
+    assert.deepEqual([r.submit, r.outside, r.refuse], [null, undefined, "submit_not_tied_to_form"], why);
+  }
+  // The review's page still refuses: the newsletter box is no application, whatever sits beside it.
+  const news = pa.pickControls({ ...snap([[field("email", "Your email newsletter_email")]], [ctl(0, 0, "Subscribe", { type: "submit" }), ctl(1, -1, "Apply", { follows: true, gap: 0 })]), otherFrameForms: 0 });
+  assert.deepEqual([news.form, news.submit, news.outside], [null, null, undefined]);
+  // Before the click: the outside control is accepted only as the pick's exception, and only while it still belongs to no form.
+  assert.equal(pa.submitTieRefusal({ formless: false, sameForm: false, noForm: true, outside: true, filledOutside: 0 }), null);
+  assert.equal(pa.submitTieRefusal({ formless: false, sameForm: false, noForm: true, outside: false, filledOutside: 0 }), "submit_not_tied_to_form");
+  assert.equal(pa.submitTieRefusal({ formless: false, sameForm: false, noForm: false, outside: true, filledOutside: 0 }), "submit_not_tied_to_form");
+  assert.equal(pa.submitTieRefusal({ formless: false, sameForm: false, noForm: true, outside: true, filledOutside: 1 }), "submit_not_tied_to_form");
 });
 
 // ------------------------------------------------------------------------------------------------ 3. the hand-off says what is true
@@ -150,7 +188,7 @@ test("4: the card shows and hashes what every control holds, a pre-ticked box is
   assert.equal(h.answersCard({ url: URL_, payload_hash: "ph", fields: FILLED, controls: PAGE.map((x) => (x.hidden ? { ...x, value: "other" } : x)) }).hash, card.hash, "a per-load hidden value does not make every yes stale");
   // A box or a sensitive choice the page set and the person never confirmed is asked, never sent.
   const un = h.unconfirmedDefaults([...ticked, c("gender", "select-one", "Male", { label: "Gender" }), c("auth", "radio", "yes", { label: "Are you authorised to work here?", option: "yes" }),
-    c("country", "select-one", "United Kingdom", { label: "Country" }), c("terms", "checkbox", "on", { label: "I accept the terms", touched: true }), c("news", "checkbox", null, { label: "Newsletter" })]);
+    c("office", "text", "Leeds", { label: "Preferred office" }), c("terms", "checkbox", "on", { label: "I accept the terms", touched: true }), c("news", "checkbox", null, { label: "Newsletter" })]);
   assert.deepEqual(un.map((n) => [n.label, n.reason]), [["I agree to be contacted about other roles", "agreement_needs_you"], ["Gender", "eeo_needs_your_choice"], ["Are you authorised to work here?", "agreement_needs_you"]]);
   for (const n of un) assert.ok(h.PERSON_REASONS.has(n.reason));
   // The same page, read twice in one run: a stable hidden value counts, a per-load token (#710's pattern) does not.
@@ -171,9 +209,58 @@ test("4: the card shows and hashes what every control holds, a pre-ticked box is
   assert.equal(same.state, "submitted"); assert.deepEqual(log, ["CLICK"]);
   // The runner: unconfirmed defaults refuse before the submitting record; the page is read again between that record and the click.
   const fill = at("await fillForm(page"), rec = at('opts.onPhase("submitting"', fill), click = at('page.click("[data-upmore-submit]")', rec);
-  assert.ok(at("unconfirmedDefaults(controls)", fill) < rec);
-  const reread = at('"page_changed_before_submit"', rec);
-  assert.ok(rec < reread && reread < click, "re-read and compared after the record, before the click");
+  const reread = at('"page_changed_before_submit"', fill);
+  assert.ok(at("unconfirmedDefaults(controls", fill) < reread && reread < rec && rec < click, "re-read and compared before the submitting record: a refusal there is not_submitted, never unknown");
+  assert.equal(SRC.indexOf("readControls()", rec), -1, "nothing between the record and the click can refuse");
+});
+
+// What the page set itself, control by control: asked, or shown and hashed without a stop.
+test("4: page defaults, one by one: a question the person has not answered is asked; their own confirmed answer and presentational defaults are not", () => {
+  const person = { phone: "+44 7700 900123", country: "United Kingdom", answer: (l) => ({ "Are you authorised to work in the UK?": "Yes", "Country": "United Kingdom", "Gender": "Female", "I confirm the information is true": "Yes", "Notice period": "1 month" })[l] };
+  const ASK = "ask", OK = "ok";
+  const table = [
+    [c("gdpr", "checkbox", "checked", { label: "I consent to the processing of my data" }), ASK, "agreement_needs_you"],
+    [c("auth_us", "radio", "Yes", { label: "Are you legally authorized to work in the US?" }), ASK, "agreement_needs_you"],
+    [c("sponsor", "select-one", "No", { label: "Will you require visa sponsorship?" }), ASK, "agreement_needs_you"],
+    [c("race", "select-one", "White", { label: "Race / Ethnicity" }), ASK, "eeo_needs_your_choice"],
+    [c("veteran", "radio", "I am not a protected veteran", { label: "Veteran status" }), ASK, "eeo_needs_your_choice"],
+    [c("disability", "radio", "No", { label: "Disability" }), ASK, "eeo_needs_your_choice"],
+    [c("attest", "checkbox", "checked", { label: "I certify that my answers are true and complete" }), ASK, "agreement_needs_you"],
+    [c("talent", "checkbox", "checked", { label: "Keep me in the talent pool" }), ASK, "agreement_needs_you"],
+    [c("mkt", "checkbox", "checked", { label: "Send me marketing emails" }), ASK, "agreement_needs_you"],
+    [c("convict", "radio", "No", { label: "Have you ever been convicted of a crime?" }), ASK, "agreement_needs_you"],
+    [c("relocate", "radio", "Yes", { label: "Are you willing to relocate?" }), ASK, "no_confirmed_answer"],
+    [c("salary", "select-one", "50-60k", { label: "Salary expectation" }), ASK, "no_confirmed_answer"],
+    [c("lang_spoken", "select-one", "English", { label: "Which languages do you speak?" }), ASK, "no_confirmed_answer"],
+    [c("phone_cc", "select-one", "United States (+1)", { label: "Country code" }), ASK, "no_confirmed_answer"],
+    [c("gender", "select-one", "Male", { label: "Gender" }), ASK, "eeo_needs_your_choice"],
+    [c("notice", "select-one", "3 months", { label: "Notice period" }), ASK, "no_confirmed_answer"],
+    [c("auth_uk", "radio", "Yes", { label: "Are you authorised to work in the UK?" }), OK],
+    [c("country", "select-one", "United Kingdom", { label: "Country" }), OK],
+    [c("gender2", "select-one", "female", { label: "Gender" }), OK],
+    [c("true", "checkbox", "checked", { label: "I confirm the information is true" }), OK],
+    [c("phone_cc2", "select-one", "United Kingdom (+44)", { label: "Country code" }), OK],
+    [c("dial", "select-one", "+44", { label: "Phone country" }), OK],
+    [c("lang", "select-one", "English", { label: "Language" }), OK],
+    [c("locale", "select-one", "en-GB", { label: "", option: null }), OK],
+    [c("sort", "select-one", "Newest", { label: "Sort by" }), OK],
+    [c("per_page", "select-one", "25", { label: "Results per page" }), OK],
+    [c("same", "checkbox", null, { label: "Same as above" }), OK],
+    [c("city", "text", "Leeds", { label: "City" }), OK],
+    [c("csrf", "hidden", "t", {}), OK],
+    [c("terms", "checkbox", "checked", { label: "I accept the terms", touched: true }), OK],
+  ];
+  assert.ok(table.length >= 20);
+  for (const [control, want, reason] of table) {
+    const got = h.unconfirmedDefaults([control], person);
+    assert.deepEqual(got.map((n) => n.reason), want === ASK ? [reason] : [], `${control.name}: ${control.label} = ${control.value}`);
+    if (want === ASK) assert.ok(h.PERSON_REASONS.has(got[0].reason));
+  }
+  // Not a stop does not mean not on the card: every one of them is hashed, and the visible ones are shown.
+  const quiet = table.filter(([, want]) => want === OK).map(([x]) => x);
+  const card = h.answersCard({ url: URL_, payload_hash: "ph", fields: [], controls: quiet });
+  assert.deepEqual(card.answers.map((a) => a.source), quiet.filter((x) => !x.hidden && !x.touched && x.value !== null).map(() => "page_default"));
+  assert.notEqual(card.hash, h.answersCard({ url: URL_, payload_hash: "ph", fields: [], controls: quiet.map((x) => (x.name === "sort" ? { ...x, value: "Oldest" } : x)) }).hash);
 });
 
 // ------------------------------------------------------------------------------------------------ 5. closed, and the one source of the yes

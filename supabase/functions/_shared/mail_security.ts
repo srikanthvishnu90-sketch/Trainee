@@ -50,6 +50,10 @@ const MONTH = String.raw`(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec
 // A credential cue is the credential noun phrase itself, never the same words in another sense ("the verification of your
 // references", "sign in with your password as usual", "use code below at checkout").
 const CREDENTIAL = new RegExp(String.raw`\b(?:verification|verify|one[- ]?time|login|log[- ]?in|sign[- ]?in|security|access|2fa|two[- ]?(?:factor|step)|authentication|auth|temporary|reset|backup|recovery)\s+(?:codes?|pins?|passcodes?|passwords?|numbers?|otps?)\b|\b(?:otps?|pins?|passcodes?|digits)\b|\bpasswords?\b(?=\s*(?:is\b|:|follows|below|next|here|[.!]|$))|\b(?:your|the|this)\s+(?:\S+\s+){0,2}(?:codes?|passwords?)\b(?=\s*(?:is\b|:|follows|below|next|here|you\s+(?:asked|need|requested|wanted)|[.!]|$))|\bcodes?\s+(?:follows|below|is\s+(?:next|below))\b|${CUE_BARE}|c[oó]digo|codice|inlogcode|verificatiecode|best[aä]tigungscode|code\s+de\s+v[eé]rification|mot\s+de\s+passe|passwort|kennwort|contrase[nñ]a|senha|код|пароль`, "iu");
+// A statement about a password that gives none ("doesn't change", "no cambia", "ne change pas", "as usual", "never share").
+const PW_TALK = String.raw`passwords?|passcodes?|pins?|contrase[nñ]as?|claves?|mot\s+de\s+passe|passw[oö]rt(?:er)?|kennw[oö]rt(?:er)?|senhas?|password\s+di|пароль`;
+const PW_NEG = String.raw`(?:does\s*n[o']?t|do\s*n[o']?t|did\s*n[o']?t|won'?t|will\s+not|is\s*n'?t|has\s*n'?t|have\s*n'?t|never|not|stays?|remains?|unchanged|as\s+usual|as\s+before|the\s+same|no\s+(?:cambia|ha\s+cambiado|cambi[oó])|sigue\s+igual|nunca|como\s+siempre|no\s+(?:la\s+)?compartas|ne\s+\S+\s+pas|reste|jamais|comme\s+d'habitude|[äa]ndert\s+sich\s+nicht|bleibt|niemals|nie|wie\s+gewohnt|n[ãa]o\s+muda|continua|como\s+sempre|non\s+cambia|resta|mai|come\s+sempre)`;
+const PW_NOT_GIVEN = new RegExp(String.raw`(?:\b|^)(?:${PW_TALK})\b[^.!?\n]{0,40}?\b${PW_NEG}\b|\b${PW_NEG}\b[^.!?\n]{0,40}?\b(?:${PW_TALK})\b`, "iu");
 const NOT_CREDENTIAL = /\b(?:checkout|check\s+out|cart|basket|discount|promo(?:tion)?|coupon|voucher|gift\s+card|% off|off\s+your\s+(?:order|purchase))\b|\bverification\s+of\b|\b(?:sign|log)[- ]?in\s+with\s+your\s+(?:usual\s+)?password\b/i;
 const PW_WORD = /^(?:passwords?|passwd|pwd|passcodes?|pass\s+codes?|passwort|kennwort|contrase[nñ]a|senha|пароль|mot\s+de\s+passe|密码|密碼|パスワード|비밀번호|סיסמה|पासवर्ड)$/iu;
 // What a waiting credential cue skips: by FORMAT only (never by a label such as Ref, Order or Booking): a year next to (c),
@@ -276,16 +280,14 @@ export function redact(text: unknown): { text: string; removed: Removed[] } {
         (/\p{L}/u.test(tok) && /[\p{Nd}!@#$%^&*_+=~?]/u.test(tok) && !/@.*\.|^https?:|[\u0001\u0002]|\[removed\]/u.test(tok) && removed.length === before
           ? (removed.push({ kind: "secret", token: tok, carried: true }), all.replace(tok, REMOVED)) : all));
       const done = codesIn(part, carried, removed, strong);
-      // A taken number behind a label (Ref, Order, Booking) is removed, but the carry goes on: the real code may follow it.
-      const added = removed.slice(before), labelled = added.length > 0 && added.every((r) => { const at = part.indexOf(r.token); return at > 0 && ID_BEFORE.test(part.slice(Math.max(0, at - 40), at)); });
-      const took = added.length > 0 && !labelled;
+      // Taking a number does not end the carry (a labelled number in any language may come first, "Commande 4471. 772019"):
+      // every credential-shaped run in the paragraph window is redacted.
       // Only a credential cue carries: one-time, login, sign-in, verification, security, access or 2FA code, password, passcode,
       // PIN, OTP, digits (and translations). promo, discount, coupon, order, booking, dress and zip codes are not cues at all.
-      const cue = CREDENTIAL.test(part) && !NOT_CREDENTIAL.test(part)
+      const cue = CREDENTIAL.test(part) && !NOT_CREDENTIAL.test(part) && !PW_NOT_GIVEN.test(part)
         ? cuesIn(part).filter((c) => !c.imp && (!c.weak || /^(?:pins?|digits)$/i.test(part.slice(c.start, c.end))) && !/\p{Nd}|\[removed\]/u.test(part.slice(c.end))) : [];
       if (cue.length) { carried = true; hops = 0; strong = true; pw = cue.some((c) => PW_WORD.test(part.slice(c.start, c.end))); }
-      else if (carried && /^[\p{Nd} .-]+$/u.test(part.trim()) && took) { /* a line of digits only: the next may hold more */ }
-      else if (carried && !took && hops < 4) hops++;
+      else if (carried && hops < 4) hops++;
       else { carried = false; hops = 0; strong = false; pw = false; }
       return done;
     }).join("");

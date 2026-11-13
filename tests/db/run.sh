@@ -1297,6 +1297,18 @@ echo "== career_path_comparisons.test.sql (versions never overwritten; 2 to 4 di
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261112150000_career_path_comparisons.sql"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_path_comparisons.test.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
 echo "  ok   rollback drops career_path_comparisons; up again"
+# D-072 files writers, review fix (20261113120000): the person's own erase deletes their approved plans and documents; every other
+# delete of an approved version is still refused. Applied twice (idempotent), its check, the rollback (the guard and the erase as
+# they were), up again and the check again. Last of the files migrations: 20261110160000 above re-creates the guard it replaces.
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261113120000_career_erase_approved_versions.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261113120000_career_erase_approved_versions.sql"
+echo "== career_erase_approved_versions.check.sql (a plain delete of an approved version is refused; forget everything erases them)"
+"${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_erase_approved_versions.check.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
+"${QUIET[@]}" -f "$ROOT/supabase/rollbacks/20261113120000_career_erase_approved_versions.down.sql"
+[[ "$("${PSQL[@]}" -tAc "select not exists (select 1 from pg_proc where proname in ('career_file_versions_guard', 'career_erase_person') and prosrc like '%career.erase_person%') and to_regprocedure('public.career_erase_person(uuid)') is not null and to_regprocedure('public.career_file_versions_guard()') is not null")" == "t" ]] || { echo "FAIL career_erase_approved_versions rollback"; exit 1; }
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261113120000_career_erase_approved_versions.sql"
+"${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_erase_approved_versions.check.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
+echo "  ok   rollback restores the guard and the erase as they were; up again"
 # LAUNCH READINESS B1 (2026-10-26, audit PR #192): the definer lockdown, last, on the schema every phase above left
 # (the card-cloud bridge included). The test applies it (twice) over production's shape, then checks the whole schema:
 # no SECURITY DEFINER function anon can run, none without a fixed search_path.

@@ -19,6 +19,7 @@ export interface MaterialMeta {
   doc_kind: "resume" | "letter";
   target: string;                 // what it was made for, as said: "Data Analyst at Acme", "data analyst internships"
   role_job_id?: string | null;    // the posting (career_postings.job_id) when made for one
+  posting_key?: string | null;    // a posting with no id: postingKeyOf(its own text or URL), a digest. Only ever part of doc_key (which posting this is); never shown
   based_on?: string | null;       // "your confirmed resume"
   changes?: DocChange[];          // from the producer's own change list
   format_check?: string | null;   // the producer's own check of the file, in words
@@ -36,12 +37,21 @@ export type MaterialWrite = { written: true; doc_key: string; version: number } 
 
 const clean = (s: unknown, n = 120) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, n);
 const slug = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-// One document per target: a posting by its id (a short digest of it, so any id fits), else the target's words.
-export async function docKeyOf(m: Pick<MaterialMeta, "doc_kind" | "target" | "role_job_id">): Promise<string> {
-  const job = clean(m.role_job_id, 200);
-  const tail = job ? `${slug(clean(m.target, 40)).slice(0, 30)}-${(await sha256Hex(new TextEncoder().encode(job))).slice(0, 10)}` : slug(clean(m.target, 80)).slice(0, 50);
-  return `${m.doc_kind}-${tail}`.replace(/-+$/g, "").slice(0, 60);
+// One document per target. A posting is told apart by a short digest: of its id (so any id fits), else of its own text or URL
+// (posting_key), so two pasted postings, or two at one employer, are two documents and never each other's "v2". With no posting
+// it is the target's words; words the key's alphabet cannot spell (no Latin letters, or symbols that fold away: "C++", "C#") add a
+// digest of the words themselves, so "数据分析师" and "产品经理" do not both become `resume`. Nothing here is shown to the person.
+const digest10 = async (s: string) => (await sha256Hex(new TextEncoder().encode(s))).slice(0, 10);
+const postingText = (s: unknown) => String(s ?? "").normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
+export async function docKeyOf(m: Pick<MaterialMeta, "doc_kind" | "target" | "role_job_id" | "posting_key">): Promise<string> {
+  const job = clean(m.role_job_id, 200), posting = job ? "" : postingText(m.posting_key), words = postingText(clean(m.target, 90));
+  const lossy = /[^a-z0-9\s,.\-\/&()':]/.test(words.normalize("NFKD").replace(/\p{M}/gu, ""));
+  const mark = job ? await digest10(job) : posting ? await digest10(posting) : lossy ? await digest10(words) : "";
+  const name = slug(clean(m.target, mark ? 40 : 80)).slice(0, mark ? 30 : 50).replace(/-+$/g, "");
+  return [m.doc_kind, name, mark].filter(Boolean).join("-").slice(0, 60);
 }
+// Which posting a pasted posting is: a digest of its text (or URL), case and spacing aside. The text itself goes no further.
+export const postingKeyOf = (textOrUrl: string): Promise<string> => sha256Hex(new TextEncoder().encode(postingText(textOrUrl)));
 export async function sha256Hex(b: Uint8Array): Promise<string> {
   return [...new Uint8Array(await crypto.subtle.digest("SHA-256", b as Uint8Array<ArrayBuffer>))].map((x) => x.toString(16).padStart(2, "0")).join("");
 }
@@ -84,7 +94,10 @@ export function withLetterVersions(files: FileService, store: MaterialWriteStore
         try {
           const body = String(d.body), bytes = new TextEncoder().encode(body);
           const target = clean(String(d.title ?? "").replace(/^\s*cover\s+letter\s+(?:for|to)\s+/i, ""), 90) || clean(d.to, 90);
-          await writeMaterialVersion(store, userId, { doc_kind: "letter", target, based_on: "your words and confirmed facts", format_check: null,
+          // What it is based on is said only when it is known: the facts the draft itself lists (its basis, shown on the draft's
+          // File). A letter that lists none says nothing about its basis; no claim is stamped on it unchecked.
+          const basis = Array.isArray(d.basis) ? d.basis.filter((f: unknown) => f && typeof f === "object").length : 0;
+          await writeMaterialVersion(store, userId, { doc_kind: "letter", target, based_on: basis ? `the ${basis} fact${basis === 1 ? "" : "s"} listed on the draft` : null, format_check: null,
             changes: [] }, { name: `${slug(target).slice(0, 60) || "cover-letter"}-letter.txt`, bytes, sha256: await sha256Hex(bytes) });
         } catch (e) { onError(e); }
       }
@@ -133,7 +146,7 @@ const metaOf = (x: unknown): MaterialMeta | null => {
   // deno-lint-ignore no-explicit-any
   const m = x as any;
   if (!m || typeof m !== "object" || (m.doc_kind !== "resume" && m.doc_kind !== "letter") || !clean(m.target)) return null;
-  return { doc_kind: m.doc_kind, target: String(m.target), role_job_id: m.role_job_id ?? null, based_on: m.based_on ?? null, format_check: m.format_check ?? null,
+  return { doc_kind: m.doc_kind, target: String(m.target), role_job_id: m.role_job_id ?? null, posting_key: typeof m.posting_key === "string" ? m.posting_key : null, based_on: m.based_on ?? null, format_check: m.format_check ?? null,
     changes: Array.isArray(m.changes) ? m.changes.filter((c: DocChange) => c && ["Emphasis", "Wording", "Fact needed"].includes(c.kind) && clean(c.after)) : [] };
 };
 const bytesOf = (b64: string) => { const bin = atob(b64); const out = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; };

@@ -1,7 +1,8 @@
 // D-072 (files writers): compare_paths, the chat's writer of the F-03 Path comparison record (career_path_comparisons.ts). When the
 // person compares paths they are weighing ("consulting at Deloitte or product management?", "the Evercore offer or grad school"),
 // the model names each path and quotes the person's own words for it from THIS message; code refuses a path whose words the person
-// did not write (D-007), builds each direction's rows from their own records (career_path_comparisons.ts directionOf: what they
+// did not write (D-007), keeps a name only when the person wrote it too (else the path is named by their quoted words: the File
+// shows the name as theirs, so the model's wording never stands there), builds each direction's rows from their own records (career_path_comparisons.ts directionOf: what they
 // said, the confirmed facts that relate, an offer they told Trainee about), and writes the comparison as a new version. Nothing is
 // predicted (no odds, reach or timing). The File is opened with open_record_file path_comparison; this tool makes no link.
 import { CareerProfile } from "../router_core.career.js";
@@ -27,7 +28,7 @@ export function pathComparisonTool(store: PathStore): ToolSpec {
       properties: {
         title: { type: "string", description: "A short title, e.g. 'Consulting vs product management'" },
         paths: { type: "array", minItems: 2, maxItems: 4, description: "The paths, in the order they named them",
-          items: { type: "object", required: ["name", "said"], properties: { name: { type: "string", description: "Short name, e.g. 'Consulting at Deloitte'" }, said: { type: "string", description: "Their exact words for this path, from this message" } } } },
+          items: { type: "object", required: ["name", "said"], properties: { name: { type: "string", description: "Short name in their own words from this message, e.g. 'Consulting at Deloitte' (a name they did not write is replaced by their words)" }, said: { type: "string", description: "Their exact words for this path, from this message" } } } },
       },
     },
     run: async (i, c) => {
@@ -44,9 +45,14 @@ export function pathComparisonTool(store: PathStore): ToolSpec {
         // deno-lint-ignore no-explicit-any
         .map((o: any) => ({ company: clean(o.offer.company, 60), at: o.at,
           terms: [clean(o.offer.role, 60), money(o.offer.base) ? `base ${money(o.offer.base)}` : null, money(o.offer.signing) ? `signing ${money(o.offer.signing)}` : null].filter(Boolean).join(", ") || "terms not stated" }));
+      // The name shown on their File is their wording: the model's short name only when it stands in their message, else their words.
+      for (const p of paths) if (!saidIn(message, p.name)) p.name = clean(p.said, 80);
       const at = new Date(c.now).toISOString();
       const directions = paths.map((p: { name: string; said: string }, k: number) => directionOf(String.fromCharCode(65 + k), p, facts, offers, at));
-      const title = clean(i?.title, 120) || directions.map((d: { name: string }) => d.name).join(" vs ").slice(0, 120);
+      // The title too: the model's only when every word of it is theirs (or a joining word); else the names, which are theirs.
+      const theirs = new Set(plain(message).split(" ")), join = new Set(["vs", "versus", "or", "and", "against", "compared", "to", "with", "the", "a", "an", "at", "in", "of", "for"]);
+      const given = clean(i?.title, 120), titleOk = !!given && plain(given).split(" ").every((w) => theirs.has(w) || join.has(w));
+      const title = (titleOk ? given : "") || directions.map((d: { name: string }) => d.name).join(" vs ").slice(0, 120);
       const version = await writePathComparison(store, c.userId, { title, directions, said: message, confirmed_facts: facts.length });
       return { saved: true, version, title, confirmed_facts: facts.length,
         directions: directions.map((d: { letter: string; name: string; evidence: string; related: number; rows: { k: string; v: string | null; missing?: string }[] }) => ({ letter: d.letter, name: d.name, evidence: `${d.evidence} (${d.related} related confirmed fact${d.related === 1 ? "" : "s"})`, rows: d.rows.map((r) => `${r.k}: ${r.v ?? r.missing ?? "Unknown"}`) })),

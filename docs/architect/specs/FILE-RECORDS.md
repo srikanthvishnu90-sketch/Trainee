@@ -185,3 +185,19 @@ agent-chat handler on Postgres 16, the link opened through the deployed File ser
 Each writes a new version only when the content differs (F-04) or the file differs (F-07), never overwrites one, and never fails the turn.
 Tests: `tests/architect/files-writers-d072-pg.test.ts` (each writer from its chat path through the real handler on Postgres 16, then the
 family File opened with those rows) and `tests/architect/files-writers-d072.test.ts`.
+
+Review fixes (PR #799, 2026-11-13; `tests/architect/files-writers-review-20261113.test.ts`, `tests/db/career_erase_approved_versions.check.sql`):
+
+- **Erase.** `career_erase_person` ("forget everything") deletes the person's approved plans and documents: for its own transaction
+  it names the one person it is erasing (`career.erase_person`, transaction-local, cleared when it ends) and the versions guard
+  lets only that person's approved rows go. Every other delete of an approved version is refused as before (migration
+  `20261113120000`, with its rollback). Account deletion (the cascade) and `career_path_comparisons` (no delete guard) were not affected.
+- **One document per posting (F-07).** `doc_key` tells postings apart: by the posting id, else by a digest of the pasted posting's own
+  text (`postingKeyOf`, never shown or stored as text); a target the key's alphabet cannot spell (no Latin letters, "C++"/"C#")
+  adds a digest of its words. Not covered: the router's posting tailor when its artifact carries a company and no posting id
+  (the artifact holds no posting text), which still keys on the company.
+- **A letter's basis.** `based_on` on a cover letter is "the N facts listed on the draft" when the draft lists them, else empty.
+- **Path comparison (F-03).** A direction's name is the person's wording: the model's name is kept only when it stands in their
+  message, else their quoted words are the name; the title likewise. Related confirmed facts hold two of the path's distinct words
+  as whole words (or its only word); Strong needs three such facts each holding two (a one-word path is never Strong); an offer
+  is matched by the company's name as whole words in what they wrote.

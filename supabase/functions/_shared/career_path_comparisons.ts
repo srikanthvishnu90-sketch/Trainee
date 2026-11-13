@@ -4,9 +4,13 @@
 // A comparison is written when the person compares paths in chat (agent/path_comparison_tool.ts compare_paths): each direction as
 // they named it and the words they used, with rows that point only at their own facts (D-007):
 //   You said                  their own words about that path, from this message
-//   Related confirmed facts   the confirmed entries of their record that share a word with the path's name (code's match, named as such)
-//   Offer on file             an offer for that company they told Trainee about (offer_benchmark's record), with the terms they gave
-// Evidence is how many confirmed facts relate (3 or more Strong, 1 or 2 Partial, none Weak), a count, never a prediction; reach,
+//   Related confirmed facts   the confirmed entries of their record that hold the path's own words as whole words: two of its
+//                             distinct words, or its one word when it has only one (code's match, named as such)
+//   Offer on file             an offer for a company they told Trainee about (offer_benchmark's record) whose name stands, as whole
+//                             words, in what they wrote for that path ("Meta" is not in "metallurgy"), with the terms they gave
+// A direction's name is the person's own wording (the tool keeps a name only when they wrote it; else their quoted words are the
+// name), so the words matched are theirs. Evidence is a count, never a prediction: Strong is three or more confirmed facts each
+// holding two of the path's words (a one-word path is never Strong); any related fact is Partial; none is Weak. Reach,
 // odds and timing are never predicted. A comparison is never overwritten: a new one is a new version, and the File shows the newest.
 // No imports beyond types: the File server loads this.
 
@@ -21,22 +25,28 @@ export interface PathStore {
 
 const clean = (s: unknown, n = 160) => String(s ?? "").replace(/\s+/g, " ").trim().slice(0, n);
 const STOP = new Set(["the", "and", "for", "with", "into", "from", "path", "paths", "role", "roles", "job", "jobs", "career", "track", "going", "staying", "working", "work", "offer", "option", "either", "versus", "about", "some", "more", "less", "than", "that", "this", "what", "which", "should", "would", "could", "doing"]);
-const wordsOf = (s: string) => [...new Set(clean(s, 400).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 4 && !STOP.has(w)))];
+const tokensOf = (s: unknown, n = 400) => clean(s, n).toLowerCase().replace(/[\u2019']/g, "").split(/[^a-z0-9]+/).filter(Boolean);
+const wordsOf = (s: string) => [...new Set(tokensOf(s).filter((w) => w.length >= 4 && !STOP.has(w)))];
+// `phrase` stands in `text` as whole words, in order ("meta" in "the meta offer", never in "metallurgy").
+const holdsPhrase = (text: string, phrase: string) => { const p = tokensOf(phrase).join(" "); return !!p && ` ${tokensOf(text).join(" ")} `.includes(` ${p} `); };
 
 export interface ConfirmedFact { title: string; text: string }
 export interface OfferSaid { company: string; terms: string; at: number }
 // One direction's rows from the person's own words and records. `at`: when they said it.
 export function directionOf(letter: string, p: { name: string; said: string }, facts: ConfirmedFact[], offers: OfferSaid[], at: string): PathDirection {
   const name = clean(p.name, 80), said = clean(p.said, 240), keys = wordsOf(name);
-  const related = keys.length ? facts.filter((f) => { const w = new Set(wordsOf(`${f.title} ${f.text}`)); return keys.some((k) => w.has(k)); }) : [];
-  const offer = offers.filter((o) => clean(o.company) && name.toLowerCase().includes(clean(o.company).toLowerCase())).sort((a, b) => b.at - a.at)[0];
+  // How many of the path's distinct words each confirmed fact holds, as whole words. Related: two of them (or the only one).
+  const need = Math.min(2, keys.length);
+  const shared = keys.length ? facts.map((f) => { const w = new Set(wordsOf(`${f.title} ${f.text}`)); return { f, n: keys.filter((k) => w.has(k)).length }; }).filter((x) => x.n >= need) : [];
+  const related = shared.map((x) => x.f), strong = shared.filter((x) => x.n >= 2).length >= 3;
+  const offer = offers.filter((o) => holdsPhrase(name, o.company) || holdsPhrase(said, o.company)).sort((a, b) => b.at - a.at)[0];
   const rows: PathRowEntry[] = [
     { k: "You said", v: said, src: { kind: "you", at } },
     related.length ? { k: "Related confirmed facts", v: clean(related.slice(0, 3).map((f) => f.title).join("; ") + (related.length > 3 ? ` and ${related.length - 3} more` : ""), 240), src: { kind: "resume" } }
       : { k: "Related confirmed facts", v: null, missing: "None on your confirmed record" },
     ...(offer ? [{ k: "Offer on file", v: clean(offer.terms, 200), src: { kind: "you" as const, at: new Date(offer.at).toISOString() } }] : []),
   ];
-  return { letter, name, said, evidence: related.length >= 3 ? "Strong" : related.length ? "Partial" : "Weak", related: related.length, rows };
+  return { letter, name, said, evidence: strong ? "Strong" : related.length ? "Partial" : "Weak", related: related.length, rows };
 }
 
 export async function writePathComparison(store: PathStore, userId: string, c: { title: string; directions: PathDirection[]; said: string; confirmed_facts: number }): Promise<number> {

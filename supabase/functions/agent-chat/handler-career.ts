@@ -1266,6 +1266,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           .catch((e) => { console.error("offer turn:", e?.message ?? e); return null; })
         : null;
       if (offered?.state) (ctx as any).offerBenchmark = offered.state;
+      // D-078: a reading shown for the person's yes lives for one turn. A turn another handler answered drops it, so a yes
+      // after another turn confirms nothing.
+      else if ((ctx as any).offerBenchmark?.shown) (ctx as any).offerBenchmark = { ...(ctx as any).offerBenchmark, shown: null };
       const offerAns = offered?.answer ?? null;
       // END FEATURE 12
       // REQS DOC 1 (Q21, Q249, Q34): "what did you do today", "what did you send this week", "how many applications did you

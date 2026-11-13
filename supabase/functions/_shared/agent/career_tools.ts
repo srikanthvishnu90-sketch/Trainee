@@ -886,14 +886,16 @@ export function careerTools(deps: {
     {
       // WO-036. The half-told offer waits in the thread's state (offerBenchmark) so the missing piece is asked once.
       name: "offer_benchmark", effect: "write_own",
-      description: "Use when the person texts a job offer (\"JPM offered 110k base, 15k signing, NYC, analyst\"). Reads it from their words in THIS message, asks once for a missing company, base, city or title, places the base against public pay data and drafts a counter from their own facts. Send its messages as written. Nothing is sent to the employer.",
+      description: "Use when the person texts a job offer (\"JPM offered 110k base, 15k signing, NYC, analyst\"). Reads it from their words in THIS message, asks once for a missing company, base, city or title, then shows its reading (status confirm) and waits: when the person's next message is a plain yes to that reading, call it again with offer_words set to their yes, and only then does it place the base against public pay data and draft a counter; a correction is passed the same way and the reading is shown again. Send its messages as written. Nothing is sent to the employer.",
       input_schema: obj({ offer_words: str("The person's exact words about the offer from this message; leave out to read the whole message") }),
       run: async (i, c) => {
         const message = c.turn?.message ?? "";
         const words = i.offer_words ? String(i.offer_words) : message;
         if (!c.turn || !words.trim() || !saidIn(message, words)) throw new Error("not read: the offer must be the person's own words in this message; ask them to text the offer");
         const pending = (c.state.offerBenchmark as OfferPending | undefined) ?? null;
-        const { result, pending: next } = offerTurn({ words, pending, now: c.now });
+        // D-078: the reading is shown first; only the person's plain yes in the next turn (to the reply that showed it) lets
+        // it be benchmarked or drafted.
+        const { result, pending: next } = await offerTurn({ words, pending, now: c.now, lastReply: typeof c.turn.before === "string" ? c.turn.before : null });
         if (next) c.state.offerBenchmark = next;
         else delete c.state.offerBenchmark;
         return { status: result.status, ask: result.ask, offer: result.offer, not_given: result.status === "ask" ? [] : result.missing, benchmarks: result.benchmarks, draft: result.draft, messages: result.messages };

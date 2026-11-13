@@ -13,13 +13,13 @@
 //   - No cost-of-living dataset is on file, so two places are never adjusted; the reply says so.
 //   - Nothing is sent. The counter is a draft on a card (requires_approval, sent: false) bound to its exact text by hash;
 //     there is no send path for it.
-import { anyAssumed, type Bench, benchmarks, comparable, currencyOf, rateThenEstimate, readingOf, statedHours, settleCurrency, unsettledText, type Field, hasWord, isUsd, known, MAX_MESSAGE, mergeOffers, MIN_N, norm, moneyFor, moneyIn, notPlaced, type Offer, type OfferData, parseOfferWords, payData, PER, placeKind, rateAsk, rateIn, rateNote, sameCurrency, UNKNOWN_CURRENCY, usMarket } from "./career_offer.ts";
+import { anyAssumed, type Bench, CONFIRM_TTL_MS, plainNo, plainYes, readingBlock, readingHash, benchmarks, comparable, currencyOf, rateThenEstimate, readingOf, statedHours, settleCurrency, unsettledText, type Field, hasWord, isUsd, known, MAX_MESSAGE, mergeOffers, MIN_N, norm, moneyFor, moneyIn, notPlaced, type Offer, type OfferData, parseOfferWords, payData, PER, placeKind, rateAsk, rateIn, rateNote, sameCurrency, UNKNOWN_CURRENCY, usMarket } from "./career_offer.ts";
 import { CareerNegotiation, CareerPaths } from "./router_core.career.js";
 import { searchWords } from "./career_ingest.ts";
 import type { KV, Src } from "./file_family.ts";
 import type { OfferComparison } from "./file_family_apply.ts";
 
-export const OFFER_INTENT = { ask: "career_offer_ask", bench: "career_offer_benchmark", compare: "career_offer_compare", counter: "career_offer_counter" } as const;
+export const OFFER_INTENT = { ask: "career_offer_ask", bench: "career_offer_benchmark", compare: "career_offer_compare", counter: "career_offer_counter", confirm: "career_offer_confirm" } as const;
 export const ASK_TTL_MS = 24 * 3600_000;
 export const MAX_ON_FILE = 6; // offers kept in the thread
 // The pay data source. Production reads the bundled datasets; a test points it at fixture datasets.
@@ -30,11 +30,18 @@ export const offerData = { get: (): OfferData => payData() };
 export type SrcLabel = "offer letter" | "verbal" | "your estimate" | "you told me";
 // `aside`: an offer the person only mentioned beside another ("I also have an offer from Meta for $170k"): never the one a
 // plain "help me negotiate" drafts to.
-export interface OnFile { offer: Offer; equity: string | null; said: string; at: number; aside?: boolean; src?: Partial<Record<"base" | "signing" | "bonus" | "equity" | "benefits" | "terms", SrcLabel>>; benefits?: { text: string; src: SrcLabel }[] }
+// D-078 `confirmed`: the person's yes to the reading of this offer (the block's hash, when, by whom). Absent or null: the
+// offer is on file but unconfirmed, and nothing compares, benchmarks or drafts from it.
+export interface Confirmed { by: "person"; at: number; hash: string }
+export interface OnFile { offer: Offer; equity: string | null; said: string; at: number; aside?: boolean; confirmed?: Confirmed | null; src?: Partial<Record<"base" | "signing" | "bonus" | "equity" | "benefits" | "terms", SrcLabel>>; benefits?: { text: string; src: SrcLabel }[] }
 // Kept in the thread's `offerBenchmark` store (career_host.js STATE_KEYS; erased with the rest). The pieces/asked/at
 // fields keep the shape WO-036's brain tool reads, so the two never disagree about a half-told offer.
 // `target`: the company the last counter was drafted to, so a later plain "help me negotiate" means the same one.
-export interface OfferChatState { v: 1; pieces: string[]; asked: Field[]; at: number; mode?: "offer" | "check"; offers: OnFile[]; target?: string | null }
+// D-078 `shown`: the reading last shown for the person's yes: its hash and block, when, what to do on the yes, and for a rate
+// check (never kept on file) the check itself. It lives for one turn: any other message drops it.
+export type Then = "bench" | "bench_counter" | "counter" | "compare";
+export interface Shown { hash: string; block: string; at: number; then: Then; notGiven: Field[]; check?: OnFile | null; names?: string[] }
+export interface OfferChatState { v: 1; pieces: string[]; asked: Field[]; at: number; mode?: "offer" | "check"; offers: OnFile[]; target?: string | null; shown?: Shown | null }
 export interface PostedRow { company?: string; title?: string; location?: string; pay?: string | null }
 export interface PostingsReader { search(words: string[], limit: number): Promise<PostedRow[]> }
 export interface OfferCard { type: "approval_card"; kind: "counter_email"; title: string; body: string; destination: null; requires_approval: true; sent: false; note: string; payload_hash: string; benchmark: string | null }
@@ -357,7 +364,7 @@ async function counterOf(f: OnFile, m: Market, state: OfferChatState, _now: numb
   // An offer the person only estimated is not one they have: never cited as a competing offer (LOOP 13).
   // D-069: a competing offer in another currency is never weighed against this base (that would need a sourced rate).
   // Round 2: weighed only like for like (comparable); any other offer the person has is cited as they wrote it, with no arithmetic.
-  const others = [...o.competing.filter((c) => !sameCompany(c.company, o.company)).map((c) => ({ ...c, plain: c.plain !== false })), ...state.offers.filter((x) => x !== f && !isEstimate(x) && !x.offer.unsettled && !sameCompany(x.offer.company, o.company) && (x.offer.base != null || x.offer.rate) && x.offer.company && !o.competing.some((c) => sameCompany(c.company, x.offer.company)))
+  const others = [...o.competing.filter((c) => !sameCompany(c.company, o.company)).map((c) => ({ ...c, plain: c.plain !== false })), ...state.offers.filter((x) => x !== f && !!x.confirmed && !isEstimate(x) && !x.offer.unsettled && !sameCompany(x.offer.company, o.company) && (x.offer.base != null || x.offer.rate) && x.offer.company && !o.competing.some((c) => sameCompany(c.company, x.offer.company)))
     .map((x) => ({ company: x.offer.company, base: x.offer.base ?? 0, said: x.said, currency: x.offer.currency, assumed: !!x.offer.currency_assumed?.base, rated: !!x.offer.rate, abroad: (placeKind(x.offer) === "us") !== (placeKind(o) === "us"),
       plain: !x.offer.rate && !x.offer.part_year && !x.offer.total && /\b(?:base|salary)\b/i.test(x.offer.from?.base ?? ""), onFile: true, written: x.offer.written?.base ?? (x.offer.rate ? rateSaid(x.offer) : x.offer.base != null ? m$(x.offer, "base", x.offer.base) : undefined) }))];
   const competing = others.filter((c) => comparable(o, c)), cited = others.filter((c) => !comparable(o, c) && c.company && c.written);
@@ -498,9 +505,62 @@ function amendOf(message: string, o: Offer, data: OfferData): Offer | "stale" | 
 }
 const firmFor = (message: string): any | null => message.trim().split(/\s+/).length <= 3 ? (CareerPaths as any).firmGuide()?.firms?.find((f: any) => [f.name, ...(f.aliases ?? [])].some((w: string) => hasWord(message, String(w).toLowerCase(), true))) ?? null : null;
 
+// ---------- D-078: confirm before compare ----------
+// The reading of one offer (or rate check) as the block the person confirms. Every field comes from the stored Offer, so
+// the block's hash binds the yes to exactly what will be benchmarked and drafted.
+function blockOf(f: OnFile, check: boolean): string {
+  return readingBlock(f.offer, { equity: f.equity, benefits: (f.benefits ?? []).map((b) => b.text), check, estimate: isEstimate(f) });
+}
+async function show(state: OfferChatState, f: OnFile, then: Then, check: boolean, notGiven: Field[], now: number, o: { lead?: string; names?: string[]; postings?: PostingsReader | null; data?: OfferData } = {}): Promise<OfferTurnResult> {
+  // Not settled: the restatement and the ask, as before. Nothing is compared, so there is nothing to confirm yet.
+  if (f.offer.unsettled) return { answer: answer(OFFER_INTENT.ask, "unsettled", [[unsettledText(f.offer)]]), state };
+  const block = blockOf(f, check);
+  const shown: Shown = { hash: await readingHash(block), block, at: now, then, notGiven, check: check ? f : null, ...(o.names?.length ? { names: o.names } : {}) };
+  return { answer: answer(OFFER_INTENT.confirm, "confirm", [[...(o.lead ? [o.lead] : []), block]]), state: { ...state, shown } };
+}
+// The person's yes: the offer whose block, printed again now, is the block shown (same hash) is confirmed, with the time;
+// then what they asked for runs on that confirmed offer. Anything else confirms nothing.
+async function confirmShown(shown: Shown, state: OfferChatState, postings: PostingsReader | null, data: OfferData, now: number, lastReply: string | null): Promise<OfferTurnResult> {
+  const cands = shown.check ? [shown.check] : state.offers;
+  let hit: OnFile | null = null;
+  for (const f of cands) { const b = blockOf(f, !!shown.check); if (b === shown.block && (await readingHash(b)) === shown.hash) { hit = f; break; } }
+  if (!hit || (lastReply && !lastReply.includes(shown.block))) {
+    return { answer: answer(OFFER_INTENT.confirm, "not_confirmed", [["That yes was not to the reading I showed just before it, so it confirms nothing and I have compared nothing. Tell me the offer again and I'll show you how I read it."]]), state };
+  }
+  const c: Confirmed = { by: "person", at: now, hash: shown.hash };
+  const f: OnFile = { ...hit, confirmed: c };
+  // An offer named beside it (shown in the same block as "another offer you mentioned") is confirmed with it.
+  const beside = (x: OnFile) => x.aside && !x.confirmed && hit!.offer.competing.some((k) => sameCompany(k.company, x.offer.company));
+  const next: OfferChatState = shown.check ? state : { ...state, offers: state.offers.map((x) => x === hit ? f : beside(x) ? { ...x, confirmed: c } : x) };
+  if (shown.then === "compare") return compareStep(next, shown.names ? next.offers.filter((x) => shown.names!.some((n) => sameCompany(n, x.offer.company))) : [], postings, data, now, next);
+  if (shown.then === "counter") {
+    const m = await marketFor(f.offer, postings, data, now);
+    return { answer: await counterOf(f, m, next, now), state: { ...next, target: f.offer.company } };
+  }
+  const negotiate = shown.then === "bench_counter";
+  return { answer: await benchTurn(f, !!shown.check, shown.notGiven, postings, data, now, negotiate, next), state: negotiate && !shown.check ? { ...next, target: f.offer.company } : next };
+}
+// Compare the offers on file (or the ones named): each must be confirmed first; the first that is not is shown for a yes.
+async function compareStep(state: OfferChatState, picked: OnFile[], postings: PostingsReader | null, data: OfferData, now: number, unchanged: OfferChatState | null): Promise<OfferTurnResult> {
+  const list = (picked.length >= 2 ? picked : state.offers).slice(-3);
+  if (list.length < 2) {
+    const have = state.offers.map((f) => f.offer.company || "one offer without a company").join(", ");
+    return { answer: answer(OFFER_INTENT.compare, "need_offers", [[`${have ? `I have one offer on file in this chat: ${have}.` : "I have no offers on file in this chat yet."} Text me each offer (company, base, city and title, plus any signing bonus, bonus, equity or deadline) and I'll put them side by side.`]], null, list.length ? comparisonOf(list) : null), state: unchanged ?? state };
+  }
+  const waiting = list.filter((f) => !f.confirmed && !f.offer.unsettled);
+  if (waiting.length) {
+    const w = waiting[0];
+    const lead = `Before I compare, confirm how I read ${w.offer.company ? `the ${w.offer.company} offer` : "this offer"}${waiting.length > 1 ? ` (then ${waiting.length - 1} more)` : ""}.`;
+    return show(state, w, "compare", false, missingOf(w.offer), now, { lead, names: picked.length >= 2 ? picked.map((x) => x.offer.company).filter((x): x is string => !!x) : undefined });
+  }
+  return { answer: await compareTurn(list, postings, data, now), state };
+}
+
 // One turn. `answer` null: not an offer turn (the router answers); `state` is what the thread keeps either way (a half-told
 // offer whose ask was not answered by this message is dropped, so the ask is only ever the last word).
-export async function offerChatTurn(o: { message: string; state: OfferChatState | null; now: number; postings?: PostingsReader | null }): Promise<OfferTurnResult> {
+// `lastReply`: the reply sent just before this message, when the caller has it; a yes confirms a reading only when that
+// reply showed it.
+export async function offerChatTurn(o: { message: string; state: OfferChatState | null; now: number; postings?: PostingsReader | null; lastReply?: string | null }): Promise<OfferTurnResult> {
   const message = norm(String(o.message ?? "")).trim();
   const data = offerData.get();
   const postings = o.postings ?? null;
@@ -509,6 +569,14 @@ export async function offerChatTurn(o: { message: string; state: OfferChatState 
   const pending = prior && Array.isArray(prior.pieces) && prior.pieces.length && Array.isArray(prior.asked) && prior.asked.length && o.now - prior.at < ASK_TTL_MS ? prior : null;
   const unchanged: OfferChatState | null = prior ? { ...state, offers: state.offers } : null;
   if (!message) return { answer: null, state: unchanged };
+  // D-078 step 0: the answer to a reading shown in the reply just before this one. A plain yes confirms it (and only it);
+  // a plain no asks what to change; anything else drops it (`fresh` keeps no `shown`), and a correction below shows the
+  // reading again.
+  const shownP = prior?.shown && o.now - prior.shown.at < CONFIRM_TTL_MS ? prior.shown : null;
+  if (shownP && plainYes(message)) return confirmShown(shownP, state, postings, data, o.now, typeof o.lastReply === "string" && o.lastReply.trim() ? o.lastReply : null);
+  if (shownP && plainNo(message)) return { answer: answer(OFFER_INTENT.confirm, "not_confirmed", [["OK, nothing is confirmed and nothing is compared. What should I change? Tell me the right detail, for example \"the base is $150k a year\" or \"it's in CAD\"."]]), state };
+  // "No, it's 160k": the correction itself.
+  const said = shownP ? message.replace(/^\W*(?:no|nope|not quite|wrong)\b[\s,.:;!-]*(?=\S)/i, "") : message;
   // MIRROR WA-1 (2026-11-11, the owner's WhatsApp benchmark C7): "hypothetically if i had two offers, 120k in chicago vs 140k
   // in nyc, how would you think about it" was taken as a real offer ("Got it: Chicago metro, $120,000") and the job title
   // asked for. An offer the person says is hypothetical is not theirs: nothing is kept, and the turn goes on (the brain answers it).
@@ -528,7 +596,8 @@ export async function offerChatTurn(o: { message: string; state: OfferChatState 
       const f = onFile(offer, [priorEquity, equity].filter(Boolean).join(", ") || null, pieces.join(" / "), [...pending.pieces, message].join(". "), o.now);
       const check = pending.mode === "check";
       const next = check ? state : keep(state, f);
-      return { answer: await benchTurn(f, check, missingOf(offer), postings, data, o.now, negotiate, next), state: next };
+      // D-078: the reading is shown for the person's yes; nothing is benchmarked yet.
+      return show(next, f, negotiate ? "bench_counter" : "bench", check, missingOf(offer), o.now);
     }
   }
 
@@ -536,29 +605,27 @@ export async function offerChatTurn(o: { message: string; state: OfferChatState 
   // period, the place, the employment type, a component, the currency, the figure wanted) or, when it has a pay, period,
   // place, currency or employment word and code cannot tell what it changes, marks that offer unsettled: the reply restates
   // what is on file and asks what changed, and nothing is compared or drafted from it until it is told again.
+  // D-078: a correction to a rate check's reading (never kept on file) reads the check again and shows it again.
+  if (shownP?.check && !COMPARE.test(said) && !OTHER_ASK.test(said)) {
+    const a = amendOf(said, shownP.check.offer, data);
+    if (a && a !== "stale") return show(state, onFile(a, shownP.check.equity, `${shownP.check.said} / ${said}`, `${shownP.check.said}. ${said}`, o.now), "bench", true, missingOf(a), o.now);
+  }
   const told = state.offers.filter((x) => !x.aside), onName = named(message, told), last = onName.length === 1 ? onName[0] : told[told.length - 1];
-  if (last && !pending && !COMPARE.test(message) && !OTHER_ASK.test(message) && !/\?\s*$/.test(message) && !(CHECK.test(message) && !AMEND_LEAD.test(message))) {
-    const a = amendOf(message, last.offer, data);
+  if (last && !pending && !COMPARE.test(said) && !OTHER_ASK.test(said) && !/\?\s*$/.test(said) && !(CHECK.test(said) && !AMEND_LEAD.test(said))) {
+    const a = amendOf(said, last.offer, data);
     if (a) {
-      const said = `${last.said} / ${message}`;
-      const f: OnFile = a === "stale" ? { ...last, offer: { ...last.offer, unsettled: true, open: [...(last.offer.open ?? []), `your later message "${message}": I could not tell what it changes`] } }
-        : { ...onFile(a, last.equity, said, `${last.said}. ${message}`, o.now), aside: last.aside };
+      const both = `${last.said} / ${said}`;
+      // D-078: a change to any field puts the offer back to unconfirmed (`confirmed: null`), and its reading is shown again.
+      const f: OnFile = a === "stale" ? { ...last, confirmed: null, offer: { ...last.offer, unsettled: true, open: [...(last.offer.open ?? []), `your later message "${message}": I could not tell what it changes`] } }
+        : { ...onFile(a, last.equity, both, `${last.said}. ${said}`, o.now), aside: last.aside, confirmed: null };
       const next = { ...state, offers: state.offers.map((x) => x === last ? f : x) };
       if (a === "stale") return { answer: answer(OFFER_INTENT.ask, "unsettled", [[`You told me this offer: ${readingOf(last.offer).join("; ")}. Then you wrote "${message}", and I could not tell what it changes, so I have stopped using this offer for a comparison or a counter. What changed? Tell me the offer again in one line and I'll redo it.`]]), state: next };
-      return { answer: await benchTurn(f, false, missingOf(f.offer), postings, data, o.now, negotiate, next), state: negotiate ? { ...next, target: f.offer.company } : next };
+      return show(next, f, negotiate ? "bench_counter" : "bench", false, missingOf(f.offer), o.now, { lead: last.confirmed ? "That changes the offer you confirmed, so it needs your yes again before I compare anything." : undefined });
     }
   }
 
-  // 2. Compare the offers on file (or the ones named).
-  if (COMPARE.test(message)) {
-    const picked = named(message, state.offers);
-    const list = (picked.length >= 2 ? picked : state.offers).slice(-3);
-    if (list.length < 2) {
-      const have = state.offers.map((f) => f.offer.company || "one offer without a company").join(", ");
-      return { answer: answer(OFFER_INTENT.compare, "need_offers", [[`${have ? `I have one offer on file in this chat: ${have}.` : "I have no offers on file in this chat yet."} Text me each offer (company, base, city and title, plus any signing bonus, bonus, equity or deadline) and I'll put them side by side.`]], null, list.length ? comparisonOf(list) : null), state: unchanged ?? state };
-    }
-    return { answer: await compareTurn(list, postings, data, o.now), state };
-  }
+  // 2. Compare the offers on file (or the ones named); each is confirmed first.
+  if (COMPARE.test(message)) return compareStep(state, named(message, state.offers), postings, data, o.now, unchanged);
 
   // 3. An offer or a rate check in this message.
   const { equity, rest } = equityOf(message);
@@ -573,7 +640,8 @@ export async function offerChatTurn(o: { message: string; state: OfferChatState 
       return { answer: answer(OFFER_INTENT.ask, "ask", [[askFor(missing, offer)]]), state: next };
     }
     const next = check ? state : keep(state, f);
-    return { answer: await benchTurn(f, check, [], postings, data, o.now, negotiate, next), state: next };
+    // D-078: the reading first; the benchmark (and a counter, when asked) only after the person's yes to it.
+    return show(next, f, negotiate ? "bench_counter" : "bench", check, [], o.now);
   }
 
   // 4. "Help me negotiate" over an offer on file.
@@ -583,6 +651,8 @@ export async function offerChatTurn(o: { message: string; state: OfferChatState 
     // Which offer? The one named; else the only one told as an offer. With several and none named, ask: never guess the company.
     if (!picked.length && told.length > 1) return { answer: answer(OFFER_INTENT.ask, "which_offer", [[`Which offer should the counter go to: ${told.map((x) => x.offer.company || "the one with no company").join(" or ")}? Say "help me negotiate with <company>".`]]), state };
     const f = picked.length ? picked[picked.length - 1] : told[0] ?? state.offers[state.offers.length - 1];
+    // D-078: an offer not confirmed yet is shown for a yes first (one not settled, or only an estimate, gets no counter anyway).
+    if (!f.confirmed && !f.offer.unsettled && !isEstimate(f)) return show(state, f, "counter", false, missingOf(f.offer), o.now, { lead: "Before I draft a counter, confirm how I read this offer." });
     const m = await marketFor(f.offer, postings, data, o.now);
     return { answer: await counterOf(f, m, state, o.now), state: { ...state, target: f.offer.company } };
   }

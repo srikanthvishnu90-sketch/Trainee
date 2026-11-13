@@ -1,7 +1,7 @@
 // Which brain answers a career turn (WO-002, D-008): the CareerHost router unless CAREER_BRAIN=agent, and the agent turn
 // itself (model + tools over the person's career state).
 import type { LinkCheck } from "../_shared/link_check.ts";
-import { EMPTY_AFTER_SAVE_REPLY, EMPTY_REPLY, runAgentTurn, type ModelFn, type TurnResult } from "../_shared/agent/loop.ts";
+import { EMPTY_AFTER_SAVE_REPLY, EMPTY_REPLY, INCOMPLETE_REPLY, REFUSED_FILE_TODO, runAgentTurn, type ModelFn, type TurnResult } from "../_shared/agent/loop.ts";
 import { careerTools, type OutreachDeps, type TailorTools } from "../_shared/agent/career_tools.ts";
 import { importContactsFile, MX_NOT_WIRED, type MxResolver, type Verifier } from "../_shared/career_contacts.ts";
 import { attachAsked, attachTool } from "../_shared/agent/attach_tool.ts";
@@ -23,7 +23,7 @@ import { urlsIn } from "../_shared/channel_shape.ts";
 import { numbersIn, numEq } from "../_shared/agent/research/guard.ts";
 import { knowledgeFor, type Knowledge } from "../_shared/agent/knowledge/index.ts";
 import { styleBlock } from "../_shared/agent/style.ts";
-import { askedPartsOf, asksForDetail, boundaryNote, boundaryOf, capacityAskOf, capacityNote, correctionNote, correctionOf, DRAFT_TOOLS, draftAskOf, draftNote, historyAskOf, historyNote, HYPOTHETICAL_WITHHELD, hypotheticalNote, hypotheticalOf, lengthNote, multiAskNote, overLimit, partsMissing, partsNote, PERSONA_WITHHELD, planSearchAskOf, planSearchNote, whileWorkingNote, postingNote, postingRefOf, REPLY_LENGTH, replyLength, roastNote, roastOf, shownPayNote, shownPayOf, statesNothing, textLength } from "../_shared/agent/turn_notes.ts";
+import { askedPartsOf, asksForDetail, boundaryNote, boundaryOf, capacityAskOf, capacityNote, correctionNote, correctionOf, DRAFT_TOOLS, draftAskOf, draftNote, historyAskOf, historyNote, HYPOTHETICAL_WITHHELD, hypotheticalNote, hypotheticalOf, lengthNote, multiAskNote, overLimit, partsMissing, partsNote, PERSONA_WITHHELD, planSearchAskOf, planSearchNote, whileWorkingNote, postingNote, postingRefOf, REPLY_LENGTH, replyLength, roastNote, roastOf, shownPayNote, shownPayOf, shownPayPlaces, statesNothing, textLength } from "../_shared/agent/turn_notes.ts";
 import { severalAsks } from "../_shared/ask_language.ts";
 import { practiceAnswerNote, practiceAnswerOf, practiceAskIn, staleFactNote, staleFactsOf } from "../_shared/agent/turn_notes.ts";
 import { answersFirst } from "../_shared/reply_rubric.ts";
@@ -233,6 +233,11 @@ export async function agentTurn(o: {
   // Market research: the sources or the file link come from code; the model's links and unsourced figures do not reach the person.
   // R10 WO-H: company research has its own rules (one role question when the role is unknown; a focus keeps that area only).
   if (trace.m && !trace.r && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? enforceCompanyReply(result.reply, trace.m) : enforceMarketReply(result.reply, trace.m as MarketResult, shownPay) };
+  // D-073 review 2: research read pages and none supported an answer, and the model's reply did not stand (the loop removed its
+  // unsourced claim, asked once more and stopped: "incomplete_reply"). The person is told what research found, in code's words: that
+  // it could not be confirmed, with the pages checked. Not after a save: that failure sentence says what was saved, and stays.
+  else if (trace.m && !trace.r && result.stopped === "incomplete_reply" && result.reply === INCOMPLETE_REPLY && trace.m.status === "no_sources" && (trace.m as { checked?: unknown[] }).checked?.length)
+    result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? enforceCompanyReply("", trace.m) : enforceMarketReply("", trace.m as MarketResult, shownPay) };
   // Not an open career question: any link the model wrote that the turn never saw is removed (links not on the turn's allow-list).
   // MIRROR PROCESS (C23, docs/architect/specs/MIRROR-PROCESS.md): a link Trainee itself already showed in this conversation (an
   // earlier reply's source, e.g. the research answer "that citadel process from earlier" recalls) may be given again with the
@@ -281,11 +286,16 @@ export async function agentTurn(o: {
       // it is still over the bound, and it gets ONE more pass toward the bound under the same checks against the original reply.
       const long = result.reply, seen = { out: "" };
       const faithful = (from: string) => (l0: string, out: string) => shortenedOk(l0, out, Number.POSITIVE_INFINITY) && shortenedOk(from, out, Number.POSITIVE_INFINITY) && (!practiceTurn || codeKept(from, out));
-      let short = await condenseReply(o.model, long, { max: bound, aim: l.aim }, faithful(long), fileTurn ? FILE_TURN_CONDENSE : "", seen);
+      // D-073 (live-9: 7 shorter texts still over the bound, the second pass stopping short of it; C4, C6, C11 refused for dropping
+      // a caveat or a figure): each pass is told the number to reach (the kind's upper end, inside the scorer's D-066 kind bound)
+      // and what must stay (keepList: every figure, link-free, every [placeholder], each sentence saying what was not done or is
+      // not known), instead of being refused after.
+      const keep = keepList(long), extra = (t: string, k: number) => [fileTurn ? FILE_TURN_CONDENSE : "", lengthTarget(textLength(t), l.upper, k), keep].filter(Boolean).join(" ");
+      let short = await condenseReply(o.model, long, { max: bound, aim: l.aim }, faithful(long), extra(long, 1), seen);
       let passes = 1, why = short ? "" : shortenRejection(long, seen.out, Number.POSITIVE_INFINITY);
       if (short && textLength(short) > bound) {
         const seen2 = { out: "" };
-        const second = await condenseReply(o.model, short, { max: bound, aim: l.aim }, faithful(long), fileTurn ? FILE_TURN_CONDENSE : "", seen2);
+        const second = await condenseReply(o.model, short, { max: bound, aim: l.aim }, faithful(long), extra(short, 2), seen2);
         passes = 2;
         if (second) short = second;
       }
@@ -310,7 +320,8 @@ export async function agentTurn(o: {
   }
   // D-067 (owner, must-fix (d): "each figure carries its source link and place"): a posting's pay said in the reply comes with that
   // posting's link (search_jobs / get_posting returned both); code adds the link when the reply has the figure and not the link.
-  if (result.reply && result.stopped === "final" && !result.show) result = { ...result, reply: payWithSource(result.reply, [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])], trace.m ? [] : shownPay) };
+  // D-073: on every path, research turns included (their shown figure's link was added above; its place is added here).
+  if (result.reply && result.stopped === "final" && !result.show) result = { ...result, reply: payWithSource(result.reply, [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])], shownPayPlaces(o.message, hypo ? [] : o.history)) };
   // D-067 (live-6 C9: research_market ran and the person got an empty message; D-024): the last line of every brain turn. An empty
   // or blank reply is never sent: the research's own sourced points when it found any, else the honest line that it did not finish.
   // D-071 (live-8 C6: "Your Gmail shows 8 applications ... That's 9 listed, so I miscounted 8 above"): the number of applications is
@@ -342,23 +353,80 @@ export function applicationCount(reply: string, n: number): string {
 // a posting's pay this turn is a source (loop.ts paySources), not search_jobs alone; and when the turn read exactly one posting
 // with pay, a sentence giving that pay is about it whether or not it names the employer again. Pay this conversation already showed
 // (shownPayOf's lines, each with the link it was shown with) carries that link when the reply says it again.
-export function payWithSource(reply: string, postings: { company?: string | null; pay?: string | null; url?: string | null }[], shown: { text: string; url: string | null }[] = []): string {
+// D-073 (live-9 C9, owner must-fix (d) "each figure carries its source link and place"): on every path (a posting read this turn,
+// pay this conversation already showed, research turns included) a sentence giving a posting's pay names its place: when the
+// sentence does not name it, the place the tool or the earlier reply gave (`place`; else the pay's own "(Chicago, Illinois)") goes
+// right after the figure, in parentheses. Nothing else in the sentence changes.
+const MONEY_PHRASE = /\$\s?\d[\d,.]*(?:\s?[kK])?(?:\s?(?:-|–|to)\s?\$?\s?\d[\d,.]*(?:\s?[kK])?)?(?:\s?\/\s?(?:hr|hour|yr|year)\b|\s(?:an?|per)\s(?:hour|year)\b|\s(?:hourly|annually|yearly|a year)\b)?/;
+function placeOfPay(p: { pay?: string | null; place?: string | null }, figures: ReturnType<typeof numbersIn>): string | null {
+  const pay = String(p?.pay ?? "");
+  // Pay by place ("Chicago, IL: $28-$49; San Jose, CA: $36-$62"): the place whose range holds the figure.
+  // The sentence's own figures decide; figures that sit in two places' ranges name no one place, so none is written.
+  const byPlace = pay.split(/;\s*/).map((seg) => /^([^:$]{2,60}):\s*(.*)$/.exec(seg.trim())).filter(Boolean) as RegExpExecArray[];
+  const held = [...new Set(byPlace.filter((m) => numbersIn(m[2]).some((y) => figures.some((n) => numEq(y, n)))).map((m) => m[1].trim()))];
+  if (held.length) return held.length === 1 ? held[0] : null;
+  const inPay = /\(([^()$\d]{2,60})\)/.exec(pay)?.[1]?.trim();
+  return String(p?.place ?? "").trim() || inPay || null;
+}
+// D-073 review (item 1: "Stripe pays $40/hr. PayPal pays $40/hr." had PayPal's sentence given Stripe's place, then its own): a place
+// is a fact code writes into the reply, so it goes only into the sentence(s) bound to that one posting or shown line (`binds`: the
+// sentence, the figures, the place), never into every sentence that happens to give the same figure. A sentence bound to two
+// different places, or naming another posting's employer, is ambiguous and gets nothing.
+type PlaceBind = { key: string; figures: ReturnType<typeof numbersIn>; place: string };
+function withPlace(reply: string, binds: PlaceBind[]): string {
+  if (!binds.length) return reply;
+  return reply.split("\n").map((line) => line.split(/(?<=[.!?])(?=\s)/).map((x) => {
+    if (/https?:\/\//.test(x)) return x;
+    const mine = binds.filter((b) => b.key === x.trim());
+    const places = [...new Set(mine.map((b) => b.place.toLowerCase()))];
+    if (places.length !== 1) return x;
+    const place = mine[0].place, figures = mine.flatMap((b) => b.figures), city = place.split(",")[0].trim().toLowerCase();
+    if (!city || x.toLowerCase().includes(city)) return x;
+    const m = MONEY_PHRASE.exec(x);
+    return m && numbersIn(m[0]).some((n) => figures.some((y) => numEq(y, n))) ? `${x.slice(0, m.index + m[0].length)} (${place})${x.slice(m.index + m[0].length)}` : x;
+  }).join("")).join("\n");
+}
+const namesWord = (x: string, name: string) => !!name && new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(x);
+export function payWithSource(reply: string, postings: { company?: string | null; title?: string | null; pay?: string | null; url?: string | null; place?: string | null }[], shown: { text: string; url: string | null; place?: string | null }[] = []): string {
   const add: string[] = [];
   const sentences = String(reply).replace(/https?:\/\/\S+/g, " ").split(/(?<=[.!?])\s+|\n+/);
   const withPay = [...new Map((postings ?? []).filter((p) => numbersIn(String(p?.pay ?? "")).length && /^https:\/\//.test(String(p?.url ?? ""))).map((p) => [String(p.url), p])).values()];
   const only = withPay.length === 1;
+  const companies = [...new Set((postings ?? []).map((p) => String(p?.company ?? "").trim().toLowerCase()).filter(Boolean))];
+  const binds: PlaceBind[] = [];
   for (const p of withPay) {
     const ns = numbersIn(String(p?.pay ?? "")), url = String(p?.url ?? "");
-    if (reply.includes(url) || add.includes(url)) continue;
-    const co = String(p?.company ?? "").toLowerCase();
-    if (sentences.some((x) => (only || (co && x.toLowerCase().includes(co))) && numbersIn(x).some((n) => ns.some((y) => numEq(y, n))))) add.push(url);
+    const co = String(p?.company ?? "").trim().toLowerCase();
+    const mine = sentences.filter((x) => (only || (co && x.toLowerCase().includes(co))) && numbersIn(x).some((n) => ns.some((y) => numEq(y, n))));
+    if (!mine.length) continue;
+    // The place: only where the sentence is this posting's alone (it names no other posting's employer; and when it does not name
+    // this employer either, the one posting read this turn, it names no one at all).
+    for (const x of mine) {
+      const place = placeOfPay(p, numbersIn(x).filter((n) => ns.some((y) => numEq(y, n))));
+      if (!place) continue;
+      if (companies.some((c) => c !== co && namesWord(x, c))) continue;
+      if (!(co && namesWord(x, co)) && otherNames(x, `${place} ${p.title ?? ""}`).length) continue;
+      binds.push({ key: x.trim(), figures: ns, place });
+    }
+    if (!reply.includes(url) && !add.includes(url)) add.push(url);
   }
   for (const l of shown ?? []) {
     const ns = numbersIn(l.text), url = String(l.url ?? "");
-    if (!ns.length || !/^https:\/\//.test(url) || reply.includes(url) || add.includes(url)) continue;
-    if (sentences.some((x) => { const xs = numbersIn(x); return xs.length > 0 && xs.every((n) => ns.some((y) => numEq(y, n))); })) add.push(url);
+    if (!ns.length) continue;
+    const mine = sentences.filter((x) => { const xs = numbersIn(x); return xs.length > 0 && xs.every((n) => ns.some((y) => numEq(y, n))); });
+    if (!mine.length) continue;
+    if (l.place) for (const x of mine) binds.push({ key: x.trim(), figures: ns, place: l.place });
+    if (/^https:\/\//.test(url) && !reply.includes(url) && !add.includes(url)) add.push(url);
   }
-  return add.length ? `${reply.trimEnd()}\n\n${add.join("\n")}` : reply;
+  const out = withPlace(String(reply), binds);
+  return add.length ? `${out.trimEnd()}\n\n${add.join("\n")}` : out;
+}
+// The names a sentence gives beyond the posting's own place and title (capitalised words; an all-capitals word such as "SWE" or "US" is not a name
+// here; a first word is one unless it is a common way to start a sentence). A word wrongly read as a name only means no place is added.
+const STARTER = /^(?:The|A|An|For|In|At|On|It|Its|That|This|Their|They|There|Here|Pay|Base|Hourly|And|But|So|Yes|No|You|Your|With|From|To|As|Per|Each|Most|Also|Salary|Compensation|Posted|Listed|Stated)$/;
+function otherNames(x: string, own: string): string[] {
+  const inPlace = own.toLowerCase(), first = /^\S+/.exec(x.trim())?.[0].replace(/[^\p{L}'-]/gu, "") ?? "";
+  return (x.trim().match(/(?<![\p{L}\p{N}])\p{Lu}\p{Ll}[\p{L}'-]*/gu) ?? []).filter((w, k) => !(k === 0 && w === first && STARTER.test(w)) && !inPlace.includes(w.toLowerCase()) && !/^(?:I|I'm|I've|I'll|January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)$/.test(w));
 }
 // D-067: the reply, never blank. A shown payload stands as shown; a market research result with sources gives its points (code's
 // own enforcement of an empty draft: the kept points with their sources, or the plain no-source line).
@@ -369,6 +437,9 @@ export function nonEmptyReply(r: Pick<TurnResult, "reply" | "show" | "tool_calls
     const fromResearch = enforceMarketReply("", m as MarketResult);
     if (/[\p{L}\p{N}]/u.test(fromResearch)) return fromResearch;
   }
+  // D-073 review 2: research read pages and none supported an answer, and the model wrote nothing: the person is still told that it
+  // could not be confirmed, with the pages checked (code's enforcement of an empty draft), never the general empty line.
+  if (m && m.status === "no_sources" && (m as { checked?: unknown[] }).checked?.length) return "kind" in m && m.kind === "company" ? enforceCompanyReply("", m) : enforceMarketReply("", m as MarketResult);
   return (r.tool_calls ?? []).some((c) => c.ok && c.effect === "write_own") ? EMPTY_AFTER_SAVE_REPLY : EMPTY_REPLY;
 }
 
@@ -396,8 +467,9 @@ export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts:
     // one is asked again with what refused it.
     const madeFile = calls.some((c) => c.name === "create_file" && c.ok);
     const refusedFile = [...calls].reverse().find((c) => c.name === "create_file" && !c.ok) as { error?: string } | undefined;
+    // D-073 (live-9 C1): the refusal's exact error, whole (its words before the kind's shape, and the shape), and the fix it asks for.
     if (o.planFile && called(["search_jobs"]) && !madeFile) return refusedFile
-      ? `Your create_file call was refused${refusedFile.error ? `: ${String(refusedFile.error).slice(0, 300)}` : ""}. Fix exactly that (give every fact its source, leave out what no tool returned and they did not say) and call create_file (kind plan_review) again, then reply in a few sentences with the answer first and say the full plan is in the file. Write no link: code adds it.`
+      ? `${REFUSED_FILE_TODO}${refusedFile.error ? `: ${String(refusedFile.error).slice(0, 900)}` : ""}. Fix exactly what that error names${/source/i.test(String(refusedFile.error ?? "")) ? " (give every fact its source, leave out what no tool returned and they did not say)" : ""}, keep everything else as it was, and call create_file (kind plan_review) again now, then reply in a few sentences with the answer first and say the full plan is in the file. Write no link: code adds it.`
       : "They asked for a plan: put the plan (the postings the search found, with their links, and the steps by week) in a File with create_file (kind plan_review), then reply in a few sentences with the answer first and say the full plan is in the file. Write no link: code adds it.";
     // D-067 (G14, C22): a posting they named is read before research about it.
     const firstResearch = calls.findIndex((c) => c.name === "research_market"), firstRead = calls.findIndex((c) => c.name === "get_posting");
@@ -525,6 +597,20 @@ export function onlyFileWrites(r: Pick<TurnResult, "reply" | "show" | "pending_a
   return writes.length > 0 && writes.every((c) => FILE_MAKERS.has(c.name)) && !r.show && !(r.pending_approvals ?? []).length && !/```/.test(reply);
 }
 export const FILE_TURN_CONDENSE = "This reply describes a file or resume that was just made (the file holds the detail). Say what was made first; then the changes in ONE line; then what must be settled before it is sent, in one short sentence naming each item.";
+// D-073: what the length pass must keep, said to it up front: every figure (list markers and links apart), every [placeholder], and
+// each sentence that says what was not done, sent or verified, or what is not known (BOUNDARY, CAVEAT). The guards still check it.
+export function keepList(long: string): string {
+  const figs = [...new Set((figureText(long).replace(LINK, " ").match(NUMBER) ?? []).map((x) => x.replace(/[,.]$/, "")))];
+  const marks = [...new Set(long.match(PLACEHOLDERS) ?? [])];
+  const said = [...new Set(String(long).replace(LINK, " ").split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter((x) => x && (BOUNDARY.test(x) || CAVEAT.test(x))))].slice(0, 4);
+  const parts = [figs.length ? `every one of these figures, exactly as written: ${figs.join(", ")}` : "", marks.length ? `these placeholders: ${marks.join(", ")}` : "",
+    said.length ? `what each of these says (shorter wording is fine; keep the words that say it was not done or is not known): ${said.map((x) => `"${x}"`).join(" ")}` : ""].filter(Boolean);
+  return parts.length ? `It must keep ${parts.join("; and ")}.` : "";
+}
+// D-073: the length the pass is to reach, as a number (the kind's upper end); the second pass is told how far the first one fell short.
+export function lengthTarget(now: number, upper: number, pass: number): string {
+  return `The whole message must be at most ${upper} characters, links apart. It is ${now} now${pass > 1 ? `, still over after one pass: cut at least ${Math.max(0, now - upper)} more characters by dropping whole sentences that add least` : ""}.`;
+}
 // Why the shorter text was refused, in the guard's own terms (for the trace).
 export function shortenRejection(long: string, short: string, bound: number): string {
   const s = String(short ?? "").trim();

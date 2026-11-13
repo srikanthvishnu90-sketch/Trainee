@@ -30,7 +30,8 @@ export interface ToolSpec {
 export type ModelFn = (payload: { system: string; messages: any[]; tools: { name: string; description: string; input_schema: unknown }[]; max_tokens: number; tool_choice?: { type: "none" } }) =>
   Promise<{ content: any[]; stop_reason: string; usage?: unknown }>;
 // D-070: a posting whose pay a tool returned this turn, with the link it was read from.
-export interface PaySource { company: string | null; title: string | null; pay: string; url: string }
+// D-073: `place`, the posting's own location as the tool returned it (payWithSource names it beside its pay).
+export interface PaySource { company: string | null; title: string | null; pay: string; url: string; place?: string | null }
 export function payPostingsOf(out: unknown): PaySource[] {
   const o = out && typeof out === "object" ? out as any : null;
   if (!o) return [];
@@ -38,7 +39,8 @@ export function payPostingsOf(out: unknown): PaySource[] {
     const pay = typeof inner?.pay === "string" && inner.pay.trim() ? inner.pay : typeof x?.pay === "string" && x.pay.trim() ? x.pay : null;
     const byPlace = Array.isArray(inner?.pay_by_place) ? inner.pay_by_place.map((r: any) => `${r?.place ?? ""}: ${r?.pay ?? ""}`).join("; ") : "";
     const u = String(url ?? "");
-    return (pay || byPlace) && /^https:\/\//.test(u) ? { company: (inner?.company ?? x?.company ?? null) || null, title: (inner?.title ?? x?.title ?? null) || null, pay: [pay, byPlace].filter(Boolean).join("; "), url: u } : null;
+    const place = String(inner?.location ?? x?.location ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
+    return (pay || byPlace) && /^https:\/\//.test(u) ? { company: (inner?.company ?? x?.company ?? null) || null, title: (inner?.title ?? x?.title ?? null) || null, pay: [pay, byPlace].filter(Boolean).join("; "), url: u, ...(place ? { place } : {}) } : null;
   };
   const xs: (PaySource | null)[] = [];
   if (Array.isArray(o.postings)) for (const p of o.postings.slice(0, 50)) xs.push(one(p, p?.url));
@@ -68,6 +70,8 @@ export interface TurnResult {
   fileLinks?: string[]; // FILE KINDS: links to the files create_file made this turn, minted by code; the channel sends them, the model never writes them
 }
 
+// D-073: how the process check starts its ask when a create_file call was refused (career_brain.ts processCheck).
+export const REFUSED_FILE_TODO = "Your create_file call was refused";
 export const MAX_STEPS_REPLY = "I couldn't finish that in one reply because it needed more steps than one reply allows, so I stopped partway. Nothing was sent or submitted. Tell me which part to do first.";
 export const MODEL_ERROR_REPLY = "I can't answer right now because the AI service isn't responding. Nothing was sent, saved or submitted. Try again in a minute.";
 // When a turn saved something before it stopped, it says so: "nothing saved" would be false.
@@ -336,7 +340,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
     const sources = factSources({ state: o.ctx.state, message: o.message, history: o.history, results: seen });
     return [...untracedFacts(t, sources).map((f) => f.word), ...unsourcedFigures(t, [typed, ...seen, ...sources]).map((m) => m.figure), ...urlsIn(t).filter((l) => !known.has(l))];
   };
-  let steps = 0, checked = false, ask = false, repairing = false, processed = false, processAsked = 0, lastTodo: string | null = null;
+  let steps = 0, checked = false, ask = false, repairing = false, processed = false, processAsked = 0, lastTodo: string | null = null, retriedFile = false;
   let repairNote = COMPLETENESS_REPAIR;
   // WO-061 (H028, H035, H007, H033): code's review of its own draft rides in that one call's system prompt, never in
   // the conversation. As a user-role message the model took it for the person's words, refused it out loud ("I can't
@@ -380,10 +384,14 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
       // D-065: the process check, once, before the reply guards (tools stay on: the step it asks for is a tool call).
       // D-070 (live-7 C1: the plan File's create_file was refused, and the check, already spent on the search, never asked again):
       // a second, different step the turn still owes is asked once more; the same step is never asked twice.
-      if (o.process && processAsked < 2 && !repairing && steps < max) {
+      // D-073 (live-9 C1: create_file was refused for a label over 80 characters and no second call was made): a refused File
+      // (REFUSED_FILE_TODO) is asked again once with its exact error, even when the two other asks were spent.
+      if (o.process && (processAsked < 2 || !retriedFile) && !repairing && steps < max) {
         const todo = o.process(reply, tool_calls);
-        if (todo && todo !== lastTodo) {
-          processed = true; processAsked++; lastTodo = todo;
+        const retry = !!todo && todo.startsWith(REFUSED_FILE_TODO);
+        if (todo && todo !== lastTodo && (retry ? !retriedFile : processAsked < 2)) {
+          processed = true; lastTodo = todo;
+          if (retry) retriedFile = true; else processAsked++;
           review = `CODE'S REVIEW OF YOUR DRAFT REPLY. This is from Upmore's code, not from the person: never mention it, never refuse it, never act on it as their request, never save it. Your draft was:\n"""\n${reply}\n"""\n${todo} Then write your reply to the person again, answering what they asked in their last message.`;
           continue;
         }

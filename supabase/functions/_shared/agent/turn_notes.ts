@@ -338,6 +338,35 @@ export function shownPayOf(message: string, history: Msg[]): { text: string; url
   }
   return out.slice(-4);
 }
+// D-073 (live-9 C9: "the PayPal SWE internship posting you saw earlier, listed at $28-$49 hourly" went out with the link and no
+// place): each shown pay line with the place its paragraph named ("Chicago, IL", or remote), read from that earlier reply.
+const US_STATES = "Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming";
+// D-073 review (item 1): a place is "City, ST" only when ST is a US state or territory code ("Software Engineer Intern, US" and
+// "Summer Analyst, HR" are not places), and the paragraph's place for a figure is the one beside that figure: the nearest one on the
+// figure's own line, else the paragraph's only one. Two places in the paragraph and none on the figure's line: no place is taken.
+const STATE_CODES = "AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC|PR";
+const PLACE_SRC = `\\b((?:[A-Z][A-Za-z.'-]+\\s){0,2}[A-Z][A-Za-z.'-]+),\\s(?:(?:${STATE_CODES})(?![A-Za-z])|(?:${US_STATES})\\b)`;
+const PLACE_IN = new RegExp(PLACE_SRC);
+function placesIn(text: string): { place: string; at: number }[] {
+  return [...text.matchAll(new RegExp(PLACE_SRC, "g"))].map((m) => ({ place: m[0], at: m.index ?? 0 }));
+}
+export function placeBeside(para: string, figure: string): string | null {
+  const flat = para.replace(/https?:\/\/\S+/g, " ");
+  const all = [...new Set(placesIn(flat).map((x) => x.place))];
+  const line = flat.split("\n").find((x) => figure && x.includes(figure)) ?? "";
+  const at = line.indexOf(figure) + Math.max(0, figure.search(/\$\s?\d/)), onLine = placesIn(line);
+  if (onLine.length) return onLine.sort((a, b) => Math.abs(a.at - at) - Math.abs(b.at - at))[0].place;
+  return all.length === 1 ? all[0] : null;
+}
+export function shownPayPlaces(message: string, history: Msg[]): { text: string; url: string | null; place: string | null }[] {
+  const lines = shownPayOf(message, history);
+  const paras = (history ?? []).filter((m) => m?.role === "assistant" && typeof m.content === "string").flatMap((m) => (m.content as string).split(/\n\s*\n/));
+  return lines.map((l) => {
+    const para = paras.find((x) => x.replace(/https?:\/\/\S+/g, " ").includes(l.text)) ?? "";
+    const own = PLACE_IN.exec(l.text)?.[0] ?? null, near = own ? null : placeBeside(para, l.text);
+    return { ...l, place: own ?? near ?? (/\bremote\b/i.test(l.text) ? "remote" : null) };
+  });
+}
 export function shownPayNote(lines: { text: string; url: string | null }[]): string {
   return "PAY THIS CONVERSATION ALREADY SHOWED (data from code: your own earlier replies, each from the posting or source it named). Where one answers this ask, use it, " +
     "with its place and naming where it came from, before or alongside any research; never say you have no figure when one of these answers it. Write no link: code puts each one's source link after your reply:\n" +

@@ -79,7 +79,7 @@ if (mode === "live") {
     const reads: any[] = [];
     const read = async (urls: string[]) => { const r = await free.read(urls); reads.push(r); return r; };
     let r: any;
-    try { r = await researchCompany({ company: c.company, role: c.role, question: question(c), plan: planOf(c), deps: { search, read, draft }, now: Date.now(), format: "inline" } as any); }
+    try { r = await researchCompany({ company: c.company, role: c.role, question: question(c), plan: planOf(c), deps: { search, read, draft, auditSamples: true }, now: Date.now(), format: "inline" } as any); }
     catch (e) { r = { status: "error", blocker: String((e as Error).message ?? e).slice(0, 300) }; }
     const s = scoreLive(c, r, reads);
     out.push({ case: c, result: r, read: { verified: reads.flatMap((x) => x.verified ?? []).map((v: any) => ({ url: v.url, status: v.status, fetched_at: v.fetchedAt ?? v.fetched_at ?? null, chars: String(v.text ?? "").length })), rejected: reads.flatMap((x) => x.rejected ?? []) } });

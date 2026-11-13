@@ -640,8 +640,10 @@ const COMMAND = /^\W*(?:please\s+)?(?:hold|pause|stop|resume|unpause|restart|can
 export function statusQuestion(message: string): boolean {
   const all = tidy(message), real = all.split(/(?<=[.!?])\s+|\n+/).filter((x) => !/^\W*(?:if|suppose|supposing|imagine|hypothetically|what\s+if|say)\b/i.test(x) || /\b(?:have|did|has)\s+(?:i|anything)\b[^,]*\?\s*$/i.test(x));
   if (real.some((x) => realApplicationsAsk(x))) return true;
-  // A short question that is only about applying ("applied anywhere?", "any apps out?").
-  if (real.some((x) => /\?\s*$/.test(x) && x.split(/\s+/).length <= 6 && APP_STATUS.test(x) && !NOT_STATUS.test(x) && !COMMAND.test(x))) return true;
+  // A short question about their own applying ("applied anywhere?", "any apps out?", "did i apply?"); a topic about applications
+  // in general ("application deadlines for Google APM?", "tips for applications to nonprofits?") never.
+  if (real.some((x) => /\?\s*$/.test(x) && x.split(/\s+/).length <= 6 && APP_STATUS.test(x) && !NOT_STATUS.test(x) && !COMMAND.test(x)
+    && (/\b(?:my|mine|i|me|i've|i'm|your|you)\b/i.test(x) || /^\W*(?:(?:any|anything)\s+)?(?:applied|aplied|apps?|applications?)\s+(?:anywhere|out|back|yet)\b/i.test(x)))) return true;
   if (APP_STATUS.test(all) && real.some((x) => /^\W*(?:and\s+|so\s+|also\s+)?(?:have|did|has|am)\s+(?:i|it|anything)\b[^.]{0,20}\?\s*$/i.test(x.trim()))) return true;
   // In another language: the core word in a question ("¿ya postulé a algún lugar?", "Habe ich mich schon irgendwo beworben?").
   if (real.some((x) => /\?|\?\s*$/.test(x) && /postul|candidat|beworben|bewerbung|aplicad|solicitud|apply\s+kiya|आवेदन/i.test(x))) return true;

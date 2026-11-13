@@ -876,3 +876,15 @@ Deno.test("AC-17 \"how many applications does Google get\" is not their status; 
   const RECORD = /\bon record\b|\byour application to\b|\bhaven't approved\b|\breceipts?\b|\bchanges any of your applications\b/i;
   eq(said.filter((x) => !RECORD.test(x) && (B.saysNoApplications(x) || B.statusLike(x))), [], "a boundary line read as their status");
 });
+
+// v3 review: a short question about applications in general is a topic, not their status.
+Deno.test("AC-18 short generic questions about applications get no lookup and keep their answer", async () => {
+  const generic = ["application deadlines for Google APM?", "tips for applications to nonprofits?", "how to write applications?", "what makes applications stand out?", "application fees for grad school?",
+    "best time to send applications?", "applications for Stripe interns?", "do applications need cover letters?", "how long are applications?", "common application mistakes?", "applications for PM roles?", "are online applications worth it?"];
+  for (const q of generic) ok(!B.statusQuestion(q), q);
+  for (const q of ["applied anywhere?", "any apps out?", "did i apply?", "my applications?", "status?", "any news?", "where am I at?"]) ok(B.statusQuestion(q), q);
+  for (const [m, reply] of [["application deadlines for Google APM?", "Google's APM applications usually open in late summer and close in the fall."], ["tips for applications to nonprofits?", "Lead with mission fit and name one outcome you delivered."]] as const) {
+    const r = await turn(m, scripted(Array(6).fill(text(reply))).model, { capabilities: C4.CA() });
+    eq([r.reply, r.tool_calls.some((c) => c.name === "read_application_mail")], [reply, false], m);
+  }
+});

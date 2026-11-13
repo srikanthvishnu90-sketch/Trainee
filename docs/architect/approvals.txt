@@ -373,3 +373,4 @@
 766 fe7e985b34060bf405b4c43b5e8faf1cf3ccc0db independent-review-20261113 risk=medium note=condense-guarded-by-768-boundary-caveat-check
 768 3696cddf7a043907320f4b74776c7b1e1f3c9770 independent-review-20261113 risk=low note=hypotheticals-withhold-record-tools-prompt-only
 780 f651d90dcce157dd80150546da201e7595674ecf independent-review-20261113 risk=low note=adds-not-checked-clause-narrow-tone-window
+811 cf4e82a2a8818918a9f80f796689430058c28b83 independent-review-20261113 risk=medium note=no-branch-only-losses-false-claims-145-to-45-edit-turn-claims-stay-beside-true-block

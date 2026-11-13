@@ -14173,7 +14173,7 @@ const CareerRouter = (() => {
     const recommendationIntent = !counterDraftWithOffer && !tailorAsk && recommendations && recommendations.intentFor(text);
     if (recommendationIntent) {
       const rec = recommendations.recommend(Object.assign({}, c, { recommendationIntent, text: s(text) }));
-      return { intent: "career_recommendations", reply: rec.text, resultStatus: "prepared", sends: 0, guidance: rec, payload: rec, artifact: rec };
+      return { intent: "career_recommendations", reply: rec.text, resultStatus: rec.kind === "recommendation_clarification" ? "awaiting_user" : "prepared", sends: 0, guidance: rec, payload: rec, artifact: rec };
     }
     // ALERTS HOST WIRING (W4): alert-watch intents (152) — manage before
     // create, so "stop watching X" / "what am I watching" are never read as

@@ -75,6 +75,8 @@ shared_tests=(
   tests/deploy-provenance.test.cjs
   tests/outbox-kinds.test.cjs
   tests/career-bundle-data.test.cjs
+  tests/capability2-followup-bundle.test.cjs
+  tests/capability2-independent-boundaries.test.cjs
   tests/depth-CAREER-WRITING.test.cjs
   tests/extension-package.test.cjs
   tests/extension-package-agent.test.cjs

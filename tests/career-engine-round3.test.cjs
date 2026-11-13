@@ -45,9 +45,10 @@ test("2: success words inside a sentence that says it did not happen are not suc
 
 test("3: an icon-only Submit by its accessible name; a name that adds 'form'; LinkedIn named in a click handler, even encoded", () => {
   const b = (text, aria, o = {}) => ({ text, aria, blob: `${text} ${aria}`, disabled: false, ...o });
-  assert.equal(pa.controlLabel(b("", "Submit application", { icon: true })), "yes", "icon-only, an allowed accessible name");
-  assert.equal(pa.controlLabel(b("✈", "Submit", { icon: true })), "yes", "a glyph is no words");
+  assert.equal(pa.controlLabel(b("", "Submit application", { icon: true, tag: "BUTTON", type: "submit" })), "yes", "icon-only, an allowed accessible name");
+  assert.equal(pa.controlLabel(b("✈", "Submit", { icon: true, tag: "BUTTON", type: "submit" })), "yes", "a glyph is no words");
   assert.equal(pa.controlLabel(b("", "Submit application")), "conflict", "no icon and no words: still refused");
+  assert.equal(pa.controlLabel(b("", "Submit application", { icon: true, tag: "BUTTON", type: "button" })), "conflict", "an icon button that does not declare itself the Submit");
   assert.equal(pa.controlLabel(b("Submit", "Submit application form")), "yes", "both allowed and the same meaning");
   assert.equal(pa.controlLabel(b("Save draft", "Submit application")), "conflict");
   assert.equal(pa.controlLabel(b("", "Apply", { icon: true, blob: "Apply event.preventDefault();location.href='https://www.linkedin.com/x'" })), "no");

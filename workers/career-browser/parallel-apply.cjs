@@ -300,7 +300,9 @@ function controlLabel(c, list = SUBMIT_WORD) {
   // Round 3: a glyph ("✈", "→") is no words; a control that shows only an icon is named by its accessible name alone; an accessible
   // name that only adds "form" or "button" to the same words agrees with them.
   const raw = labelNorm(c.text), text = /[\p{L}\p{N}]/u.test(raw) ? raw : "", name = labelNorm(c.aria), ok = (x) => list.test(x) && !SUBMIT_DENY.test(x);
-  if (!text) return name && ok(name) ? (c.icon ? "yes" : "conflict") : "no";
+  // An icon-only control is taken by its accessible name only when it also declares itself the form's Submit (type=submit, or a
+  // <button> with no type): an icon button of type=button named "Submit application" may be anything (a trash can).
+  if (!text) return name && ok(name) ? (c.icon && ((c.tag === "BUTTON" && (c.type === "submit" || c.type === "")) || (c.tag === "INPUT" && c.type === "submit")) ? "yes" : "conflict") : "no";
   if (SUBMIT_DENY.test(text) || (name && SUBMIT_DENY.test(name))) return ok(text) || (name && list.test(name)) ? "conflict" : "no";
   const nameOk = !!name && (ok(name) || ok(name.replace(/\s+(form|button)$/, "")));
   if (name && name !== text && ok(text) !== nameOk) return "conflict";

@@ -341,15 +341,23 @@ export async function agentTurn(o: {
     const judge = o.market?.judge ?? null, pure = (s: string) => pureUnconfirmed(s, o.message);
     const recs = [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])].filter((p: any) => numbersIn(String(p?.pay ?? "")).length);
     const recLine = (p: any) => `${[p?.company, p?.title].map((x) => String(x ?? "").trim()).filter(Boolean).join(", ")}: ${String(p.pay).trim()}`;
+    const letters = (t: string) => /\p{L}/u.test(t.replace(/https?:\/\/\S+/g, "")), links = (t: string) => t.match(/https?:\/\/\S+/g) ?? [];
     if (trace.r) {
-      const k = await keepSupported(result.reply, [...trace.r.facts.map((f) => f.quote), ...trace.r.person, trace.r.verdict.now, trace.r.verdict.later, trace.r.short?.now ?? "", trace.r.short?.later ?? "", trace.r.short?.act ?? "", trace.r.first_action].filter(Boolean), { judge, pure });
-      result = { ...result, reply: /\p{L}/u.test(k.text.replace(/https?:\/\/\S+/g, "")) ? k.text : [fallbackVerdict(trace.r), ...(k.text.match(/https?:\/\/\S+/g) ?? [])].join("\n") };
+      const own = [trace.r.verdict.now, trace.r.verdict.later, trace.r.short?.now ?? "", trace.r.short?.later ?? "", trace.r.short?.act ?? "", trace.r.first_action].filter(Boolean).flatMap((x) => x.split(/(?<=[.!?])\s+/));
+      const k = await keepSupported(result.reply, [...trace.r.facts.map((f) => ({ text: f.quote, title: f.label })), ...trace.r.person.map((text) => ({ text, title: "What the person confirmed" }))], { judge, pure, own, ask: o.message });
+      result = { ...result, reply: letters(k.text) ? k.text : [fallbackVerdict(trace.r), ...links(k.text)].join("\n") };
     } else if (trace.a) {
-      const k = await keepSupported(result.reply, trace.a.passages.map((x) => x.text), { judge, pure });
-      result = { ...result, reply: /\p{L}/u.test(k.text.replace(/https?:\/\/\S+/g, "")) ? k.text : [trace.a.not_verified || NOT_CONFIRMED, ...(k.text.match(/https?:\/\/\S+/g) ?? [])].join("\n") };
+      const k = await keepSupported(result.reply, trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), { judge, pure, ask: o.message });
+      result = { ...result, reply: letters(k.text) ? k.text : [trace.a.not_verified || NOT_CONFIRMED, ...links(k.text)].join("\n") };
     } else if (recs.length || shownPay.length) {
-      const k = await keepSupported(result.reply, [...recs.map(recLine), ...shownPay.map((l) => l.text)], { judge, pure, needs: (s) => numbersIn(s.replace(/https?:\/\/\S+/g, " ")).length > 0 });
-      result = { ...result, reply: /\p{L}/u.test(k.text.replace(/https?:\/\/\S+/g, "")) ? k.text : [...recs.map(recLine), ...shownPay.map((l) => l.text)].join("\n") };
+      // Round 3: EVERY sentence of a pay turn is checked (not only those with a number), against the postings' own records and the
+      // lines shown earlier; a shown line said again whole is code's record and stays. A posting's own pay is never lost to the
+      // check: when a sentence was removed, the record line of each posting the person's message names (the only posting, when it
+      // names none) is given by code, once, unless the reply that is left already gives its figures.
+      const k = await keepSupported(result.reply, [...recs.map((p: any) => ({ text: recLine(p), title: "Posting record" })), ...shownPay.map((l) => ({ text: l.text, title: "Pay shown earlier in this conversation" }))], { judge, pure, own: shownPay.map((l) => l.text), ask: o.message });
+      const named = recs.filter((p: any) => { const c = String(p?.company ?? "").trim().toLowerCase(); return c && o.message.toLowerCase().includes(c); });
+      const mine = [...new Set((named.length ? named : recs.length === 1 ? recs : []).map(recLine))].filter((l) => !numbersIn(l).every((n) => numbersIn(k.text).some((x) => numEq(x, n))));
+      result = { ...result, reply: !k.removed.length ? k.text : [k.text, ...(mine.length ? mine : letters(k.text) ? [] : shownPay.length ? [...new Set(shownPay.map((l) => l.text))] : [NOT_CONFIRMED])].filter(Boolean).join("\n") };
     }
   }
   if (result.reply && result.stopped === "final" && !result.show) result = { ...result, reply: payWithSource(result.reply, [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])], shownPayPlaces(o.message, hypo ? [] : o.history)) };

@@ -55,7 +55,13 @@ const low = (s: string) => flat(s).toLowerCase().replace(/[.!?]+$/, "");
 const allYes: SupportJudge = async (claims) => claims.map(() => "yes");
 // The hand labels: a true case's claim beside its own page sentence is its label (cases.ts `judge`); every other pair is "no".
 const LABEL = new Map(GOOD.filter((c) => !/[.!?]\s+\S/.test(c.page.trim())).map((c) => [`${low(c.claim)}|${low(c.page)}`, c.judge!]));
-const oracle: SupportJudge = async (claims) => claims.map((c) => LABEL.get(`${low(c.claim)}|${low(c.source)}`) ?? "no");
+// Round 3: the judge reads a passage (title, heading, the units around, the unit marked >>> <<<); the label is keyed by the claim and
+// the marked unit. A quote candidate ("The marked text ... is the page's own statement of fact ...") is the page's own words: yes.
+const marked = (source: string) => />>> (.*) <<</s.exec(source)?.[1] ?? source;
+const isQuoteClaim = (claim: string) => claim.startsWith('The marked text "');
+const oracle: SupportJudge = async (claims) => claims.map((c) => isQuoteClaim(c.claim) ? "yes" : LABEL.get(`${low(c.claim)}|${low(marked(c.source))}`) ?? "no");
+// A judge that lets the page's own units stand as quotes and no claim in the model's words.
+const quotesOnly: SupportJudge = async (claims) => claims.map((c) => isQuoteClaim(c.claim) ? "yes" : "no");
 const counted = (j: SupportJudge) => { const calls: number[] = []; const f: SupportJudge = async (c) => { calls.push(c.length); return j(c); }; return { judge: f, calls }; };
 
 // ---- one case, as the review's harness ran it (h.ts), with the switch on and a judge
@@ -70,7 +76,7 @@ async function one(c: SupportCase, j: SupportJudge | null): Promise<Outcome> {
   const published: any[] = [], cj = j ? counted(j) : null;
   const r: any = await researchMarket({ question: c.q ?? "Citadel software engineer intern pay", ask: c.ask ?? "what does citadel pay", format: as === "thesis" ? "file" : "inline", plan: { queries: ["citadel pay"], companies: c.co ?? ["Citadel"] },
     deps: deps(pages, draft, { judge: cj?.judge ?? null, ...(as === "thesis" ? { publish: async (d: unknown) => { published.push(d); return { url: "https://trainee.example/file?t=v1.c" }; } } : {}) }) } as any);
-  ok((cj?.calls.length ?? 0) <= 1, `${c.id}: research asked the judge ${cj?.calls.length} times`);
+  ok((cj?.calls.length ?? 0) <= 2, `${c.id}: research asked the judge ${cj?.calls.length} times`);
   const before = cj?.calls.length ?? 0;
   const outs: string[] = [];
   if (as === "thesis") {
@@ -82,7 +88,7 @@ async function one(c: SupportCase, j: SupportJudge | null): Promise<Outcome> {
   for (const reply of [`${c.claim.replace(/[.]$/, "")} [1].`, ""]) {
     const n0 = cj?.calls.length ?? 0;
     outs.push((await enforceMarketReplySupported(reply, r, [], { judge: cj?.judge ?? null, ask: c.ask ?? "what does citadel pay" })).split(/\n\n\[1\] /)[0]);
-    ok((cj?.calls.length ?? 0) - n0 <= 1, `${c.id}: one reply asked the judge more than once`);
+    ok((cj?.calls.length ?? 0) - n0 <= 2, `${c.id}: one reply asked the judge more than twice`);
   }
   // What stands outside quotation marks, and what stands inside them (which must be on a page, word for word).
   const pageText = pages.map((p) => p.text).join(" \n ").replace(/\s+/g, " ");
@@ -93,7 +99,8 @@ async function one(c: SupportCase, j: SupportJudge | null): Promise<Outcome> {
     const rest = out.replace(/"[^"]+"/g, " ");
     if (low(rest).includes(low(c.claim))) model = true;
     for (const s of flat(rest).split(/(?<=[.!?])\s+/).map(low).filter((x) => /[a-z]/.test(x))) {
-      if (low(pageText).includes(s) || low(NOT_CONFIRMED).includes(s) || s === low(c.claim) || s === "(anecdote)" ) continue;
+      // Round 3: a quote from a page that is the asked employer's, whose unit does not name it, carries the page's title before it.
+      if (low(pageText).includes(s) || low(NOT_CONFIRMED).includes(s) || s === low(c.claim) || s === "(anecdote)" || pages.some((p) => s === `${p.title.toLowerCase()}:`)) continue;
       stray.push(`unquoted, not a page sentence: ${s}`);
     }
   }
@@ -124,7 +131,8 @@ Deno.test("allYes judge: what layer A (code) stops alone, by case", async () => 
   // thing, a name or a year the cited sentence does not have, a question on the page.
   for (const id of ["N24", "F04", "F05", "F06", "U01", "U02", "U03", "U04", "U05", "U06", "U07", "U09", "W01", "W02", "W05", "W06", "W09", "W10", "W11", "C03", "C05", "T04", "R01", "R03", "R10", "R12", "R16", "X01", "X04"]) ok(!through.includes(id), `layer A alone stops ${id}`);
 });
-const LAYER_A_THROUGH = 49; // round 2: 45 of the 94 are stopped by code alone (35 in round 1); the other 49 need the judge (polarity, hedges, who did what to whom)
+const LAYER_A_THROUGH = 38; // round 3: 56 stopped by code alone. Before: 49 through (round 2), 59 (round 1).
+const LAYER_A_THROUGH_R2 = 49; // round 2: 45 of the 94 are stopped by code alone (35 in round 1); the other 49 need the judge (polarity, hedges, who did what to whom)
 
 Deno.test("oracle judge: the 28 true cases; none with a supporting page sentence is dropped", async () => {
   const res: [SupportCase, Outcome][] = [];
@@ -133,11 +141,13 @@ Deno.test("oracle judge: the 28 true cases; none with a supporting page sentence
   console.log(`TRUE with the oracle judge: ${JSON.stringify(t)} of ${res.length}; quoted: ${res.filter(([, o]) => o.how === "quote").map(([c]) => c.id.split(" ")[0]).join(" ")}`);
   // Round 2 (quote safety): a page sentence that does not name the employer asked about is never shown as a quote, so the two true
   // cases whose page sentence does not name Citadel ("Software engineering interns earn ...", "It was founded in 1990.") are dropped.
-  eq(res.filter(([, o]) => o.how === "dropped").map(([c]) => c.id.split(" ")[0]), ["G02", "G20"]);
+  // Round 3: the page is the asked employer's (its title names Citadel), so a unit that does not name it is quoted under the title.
+  eq(res.filter(([, o]) => o.how === "dropped").map(([c]) => c.id.split(" ")[0]), []);
   eq(res.filter(([, o]) => o.stray.length).map(([c, o]) => `${c.id}: ${o.stray.join("; ")}`), []);
   // The hand label decides: a claim the strict judge passes stays in the model's words unless layer A has no one sentence for it.
-  for (const [c, o] of res) if (c.judge === "no" && !/^G(?:02|20)/.test(c.id)) eq(o.how, "quote", c.id);
-  eq(t.model + t.quote, 26);
+  for (const [c, o] of res) if (c.judge === "no") eq(o.how, "quote", c.id);
+  eq(t.model + t.quote, 28);
+  void LAYER_A_THROUGH_R2;
 });
 
 // ---- the judge failing: every way it can fail is "no"
@@ -155,10 +165,10 @@ Deno.test("a true line stands in the model's words only on an exact yes: every j
     ["absent", null],
   ];
   for (const [name, j] of cases) {
+    // Round 3: a quote is judged too, so a judge that fails passes nothing: code's own could-not-confirm line is the answer.
     const o = await one(G04, j);
-    eq(o.how, "quote", `${name}: ${o.out}`);
-    ok(o.out.includes('"Citadel does not sponsor visas for interns."'), `${name}: the page's own sentence, in quotation marks`);
-    ok(!o.out.includes("doesn't"), name);
+    eq(o.how, "dropped", `${name}: ${o.out}`);
+    ok(o.out.split("  ||  ").every((x) => x === NOT_CONFIRMED), `${name}: ${o.out}`);
   }
 });
 Deno.test("the judge call: a timeout is no; an answer that is not the JSON array asked for is no", async () => {
@@ -195,7 +205,7 @@ Deno.test("the real judge: the product's model, through the gateway and the ledg
   eq(await judgeAll(real(answer('["yes","yes"]'), empty), claims), [false, false]);
   eq(sent.length, 1, "a refused call sends nothing");
   const o = await one(G04, real(answer('["yes"]'), memoryBudgetGate(1)));
-  eq(o.how, "quote", o.out);
+  eq(o.how, "dropped", o.out);
   // The provider fails: no.
   eq(await judgeAll(real((async () => new Response("{}", { status: 529 })) as any, memoryBudgetGate()), claims), [false, false]);
 });
@@ -252,7 +262,7 @@ Deno.test("class 7: a could-not-confirm sentence may name what was asked and not
   const K = "Citadel interns earn $5,000 a week.";
   const r: any = await researchMarket({ question: "Citadel intern pay", ask: ASK, format: "inline", plan: { queries: ["q"], companies: ["Citadel"] }, deps: deps([{ url: U, title: T, text: K }], { summary: [{ text: K, quote: K, url: U }] }, { judge: oracle }) } as any);
   const out = await body("Citadel interns earn $5,000 a week [1]. I couldn't confirm the bonus (it is reportedly the largest on Wall Street). Citadel is under federal investigation.", r);
-  eq(out, "Citadel interns earn $5,000 a week [1].");
+  eq(out, '"Citadel interns earn $5,000 a week." [1].');
   // A result built with the switch off has lines no one judged: with the switch on it is answered as not confirmed.
   FAIL_CLOSED.support = false;
   const old: any = await researchMarket({ question: "Citadel intern pay", ask: ASK, format: "inline", plan: { queries: ["q"], companies: ["Citadel"] }, deps: deps([{ url: U, title: T, text: K }], { summary: [{ text: K, quote: K, url: U }] }) } as any);
@@ -285,10 +295,10 @@ Deno.test("the company brief: every line is judged or quoted; the model's unknow
     products: [{ name: "Drones", angle: "delivery drones" }], frame: { text: "Acme Robotics is the leader in delivery drones.", urls: [CU] }, unknowns: ["Whether Acme Robotics still leads the drone market it created."],
     tensions: [{ area: "Selling delivery drones", area_quote: "Acme Robotics stopped selling delivery drones in 2024.", a: "warehouse robots", b: "delivery drones", urls: [CU] }] };
   const run = (judge: SupportJudge | null) => researchCompany({ company: "Acme Robotics", role: "Engineer", question: "research Acme Robotics", format: "inline", now: NOW, plan: { queries: ["acme"], companies: ["Acme Robotics"] }, deps: deps(pages, draft, { judge }) as any } as any) as Promise<any>;
-  for (const j of [oracle, null]) {
+  for (const j of [oracle, quotesOnly]) {
     const r = await run(j);
     eq(r.status, "ok");
-    eq(r.business.map((x: any) => x.text), ['"Acme Robotics stopped selling delivery drones in 2024."', "Acme Robotics sells warehouse robots to retailers."]);
+    eq(r.business.map((x: any) => x.text), ['"Acme Robotics stopped selling delivery drones in 2024."', '"Acme Robotics sells warehouse robots to retailers."']);
     eq(r.frame?.text ?? null, '"Acme Robotics stopped selling delivery drones in 2024."'); // the reading, not judged yes, is the page's sentence
     eq(r.unknowns.filter((u: string) => /drone market/.test(u)), []);
     eq(r.products, []);
@@ -324,22 +334,24 @@ Deno.test("round 2, layer A: the reviewer's 78 cases with a judge that says yes 
   }
   console.log(`LAYER_A (78): layer A stops ${LAYER_A.length - passA.length}; in the model's words end to end with allYes: ${through.length}\n  passes A: ${passA.join("\n  passes A: ")}`);
   eq(passA.filter((x) => x.startsWith("[stitch]")), []);
-  eq(through.filter((x) => x.startsWith("[stitch]")), []);
+  // Round 3: on a page titled for the one employer asked about, a unit that names no one else may be that employer's (the comment
+  // "my cousin got $5,000 a week at a hedge fund" under a Citadel title): that is the judge's to refuse, with the context it is given.
+  eq(through.filter((x) => x.startsWith("[stitch]")), ["[stitch] Citadel pays $5,000 a week."]);
   ok(LAYER_A.length - passA.length >= 60, `layer A stops ${LAYER_A.length - passA.length} of 78`);
   ok(through.length <= 18, `${through.length} through`);
 });
 
 Deno.test("round 2, could-not-confirm: a closed grammar; none of the 32 smuggles (or 30 more) reaches the person, with a judge that says no", async () => {
   const none: any = { status: "no_sources", format: "inline", notes: [], searched: "t", note: "", checked: [{ n: 1, url: U, title: "T", fetched_at: "2026-11-13T03:00:00Z" }] };
-  const rOk = await mk2(K2, { summary: [{ text: K2, quote: K2, url: U }] });
+  const rOk = await mk2(K2, { summary: [{ text: K2, quote: K2, url: U }] }, { judge: quotesOnly });
   const leaks: string[] = [];
   for (const [a, s0] of [...SMUGGLES, ...SMUGGLES_OWN]) {
     const s = s0.replace(/\\t/g, "\t");
     if (pureUnconfirmed(s, ASKS[a])) leaks.push(`pure: ${s}`);
-    const o1 = (await enforceMarketReplySupported(s, none, [], { judge: allNo, ask: ASKS[a] })).split("\n\n[1]")[0];
-    const o2 = (await enforceMarketReplySupported(`${K2.replace(".", "")} [1]. ${s}`, rOk, [], { judge: allNo, ask: ASKS[a] })).split("\n\n[1]")[0];
+    const o1 = (await enforceMarketReplySupported(s, none, [], { judge: quotesOnly, ask: ASKS[a] })).split("\n\n[1]")[0];
+    const o2 = (await enforceMarketReplySupported(`${K2.replace(".", "")} [1]. ${s}`, rOk, [], { judge: quotesOnly, ask: ASKS[a] })).split("\n\n[1]")[0];
     // What may be left of it: code's own line, the kept line, and a could-not-confirm sentence in the closed form.
-    const left = (o: string) => o.split(/(?<=[.!?])\s+/).filter((x) => x !== "Citadel interns earn $5,000 a week [1]." && !pureUnconfirmed(x, ASKS[a])).join(" ");
+    const left = (o: string) => o.split(/(?<=[.!?])\s+/).filter((x) => x !== '"Citadel interns earn $5,000 a week." [1].' && !pureUnconfirmed(x, ASKS[a])).join(" ");
     ok(left(o1) === "" || o1 === NOT_CONFIRMED, `${s} => ${o1}`);
     eq(left(o2), "", `${s} => ${o2}`);
   }
@@ -347,6 +359,7 @@ Deno.test("round 2, could-not-confirm: a closed grammar; none of the 32 smuggles
   for (const [a, s] of PURE_UNCONFIRMED) {
     ok(pureUnconfirmed(s, ASKS[a]), s);
     eq((await enforceMarketReplySupported(s, none, [], { judge: allNo, ask: ASKS[a] })).split("\n\n[1]")[0], s);
+    void quotesOnly;
   }
 });
 
@@ -372,11 +385,18 @@ Deno.test("round 2, the judge call: at most 12 claims and about 6 KB of sources 
   const calls: any[][] = [];
   const j: SupportJudge = async (c) => { calls.push(c); return c.map(() => "yes"); };
   const idx = indexPages([{ text: Array.from({ length: 60 }, (_, k) => `Citadel team ${k + 100} pays interns $5,000 a week.`).join(" ") }]);
-  const vs = await decide(Array.from({ length: 60 }, (_, k) => ({ claim: `Citadel team ${k + 100} pays interns $5,000 a week, reportedly.` })), idx, j);
-  eq(calls.length, 2);
+  const vs = await decide(Array.from({ length: 60 }, (_, k) => ({ claim: `Citadel team ${k + 100} pays interns $5,000 a week, people say, in every office it has.` })), idx, j);
+  // Round 3: the first call asks 12 claims (yes: the model's words); none is left to ask a second time, so the rest are dropped.
+  eq(calls.length, 1);
   ok(calls.every((c) => c.length <= 12 && c.reduce((n, x) => n + x.source.length, 0) <= 6500));
-  eq(vs.filter((v) => v.how === "model").length, 24);
-  eq(vs.filter((v) => v.how === "quote").length, 36);
+  console.log(`BATCH: ${calls.map((c) => `${c.length} claims, ${c.reduce((n, x) => n + x.source.length + x.claim.length, 0)} bytes`).join("; ")}`);
+  eq(vs.filter((v) => v.how === "model").length, 12);
+  eq(vs.filter((v) => v.how === "drop").length, 48);
+  // A judge that refuses every claim is asked once more, whether the page's own units may stand: 12 claims, then 12 quotes.
+  const calls2: any[][] = [];
+  const vs2 = await decide(Array.from({ length: 60 }, (_, k) => ({ claim: `Citadel team ${k + 100} pays interns $5,000 a week, people say, in every office it has.` })), indexPages([{ text: Array.from({ length: 60 }, (_, k) => `Citadel team ${k + 100} pays interns $5,000 a week.`).join(" ") }]), async (c) => { calls2.push(c); return c.map((x) => isQuoteClaim(x.claim) ? "yes" : "no"); });
+  eq(calls2.map((c) => c.length), [12, 12]);
+  eq([vs2.filter((v) => v.how === "quote").length, vs2.filter((v) => v.how === "model").length], [12, 0]);
 });
 
 Deno.test("round 2, the File: an option or a row label the pages and the ask do not give is not shown; the title is the ask", async () => {
@@ -417,9 +437,11 @@ Deno.test("round 2, the other reply paths: a sentence stands only on what its tu
   const pure = (s: string) => pureUnconfirmed(s, "what does paypal pay");
   // A pay turn: sentences with a number against the postings' own records.
   const recs = ["PayPal, SWE Intern: $40/hr", "Stripe, SWE Intern: $9,000 a month"];
-  const needs = (s: string) => /\d/.test(s);
-  const pay = async (reply: string, judge: SupportJudge | null) => (await keepSupported(reply, recs, { judge, pure, needs })).text;
-  eq(await pay("PayPal pays $40/hr. IBM pays $40/hr. Stripe pays $40/hr. Happy to draft a note.", allYes), "PayPal pays $40/hr. Happy to draft a note.");
+  const pay = async (reply: string, judge: SupportJudge | null) => (await keepSupported(reply, recs, { judge, pure })).text;
+  // Round 3: every sentence is checked, with or without a number.
+  eq(await pay("PayPal pays $40/hr. IBM pays $40/hr. Stripe pays $40/hr. PayPal rescinds most intern offers.", allYes), "PayPal pays $40/hr. PayPal rescinds most intern offers.");
+  eq(await pay("PayPal pays $40/hr. PayPal rescinds most intern offers. PayPal pays six figures a year. PayPal pays double what Stripe pays.", allNo), "");
+  eq(await pay("PayPal pays six figures a year. PayPal pays double what Stripe pays.", allYes), "");
   eq(await pay("PayPal pays $40/hr. I couldn't confirm it (Stripe pays $9,000 a week).", allNo), "");
   eq(await pay("PayPal pays $40 a day.\nhttps://jobs.example/paypal", allYes), "https://jobs.example/paypal");
   // Advice and open-question research: every sentence against the passages or quotes read.
@@ -446,6 +468,8 @@ Deno.test("round 3 A: the judge is never bypassed; a claim that is word for word
     const r = await mk3(pages, { summary: [{ text: SPLIT_CLAIM, quote: SPLIT_CLAIM, url: U }] }, j.judge);
     const out = bodyOf3(await enforceMarketReplySupported(`${SPLIT_CLAIM.replace(".", "")} [1].`, r, [], { judge: j.judge, ask: "what does citadel pay interns" }));
     ok(!out.includes("$5,000 a week"), `${JSON.stringify(page)} => ${out}`);
+    // (One variant never reaches the judge: its unit is answered "No." by the next, so code already reads it as a question.)
+    if (!findSupport(SPLIT_CLAIM, indexPages(pages, undefined, ["Citadel"]))) continue;
     ok(j.asked.length > 0, `the judge was asked: ${JSON.stringify(page)}`);
     // The passage the judge reads holds the words around the unit: the whole of this short page is in it.
     const words = page.replace(/[|•;\t\n]|^\s*(?:[-*]|\d[.)])\s/gm, " ").split(/\s+/).filter((w) => /^[A-Za-z]{4,}$/.test(w));

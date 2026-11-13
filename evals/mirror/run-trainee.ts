@@ -21,6 +21,8 @@
 import { anthropicWire } from "../../tests/architect/helpers/anthropic_wire.ts";
 import { openWorld } from "../../tests/architect/helpers/response_world.ts";
 import { loadSet, SET_PATH, type MirrorPrompt } from "./distinct.ts";
+import { openLiveRunLedger } from "../career/eval_budget.ts";
+import { resolveBudgetGate } from "../../supabase/functions/_shared/model_budget.ts";
 import { PRODUCTION_BRAIN, RELEASE_FLAGS, RELEASE_NEVER_ON, releaseFlagOn, releaseValue } from "../../supabase/functions/agent-chat/release_config.ts";
 
 const realFetch = globalThis.fetch;
@@ -34,7 +36,11 @@ if (live) {
   if (!Deno.env.get("ANTHROPIC_API_KEY")) { console.log("refused: --live needs ANTHROPIC_API_KEY"); Deno.exit(3); }
   if (!(budget > 0)) { console.log("refused: --live needs --budget-usd <cap>"); Deno.exit(3); }
 }
-const all = await loadSet(opt("--set") ?? SET_PATH);
+// The shared $80 ledger: the cap is reserved before the first model call, settled at the end (eval_budget.ts openLiveRunLedger).
+const ledger = live ? await openLiveRunLedger({ budgetUsd: budget, approval: Deno.env.get("MIRROR_SPEND_APPROVED") ?? "", get: (k) => Deno.env.get(k), bud: { resolveBudgetGate } }) : null;
+if (ledger && "error" in ledger) { console.log(`refused: ${ledger.error}`); Deno.exit(3); }
+const settleLedger = (usd: number | null) => ledger && !("error" in ledger) ? ledger.settle(usd) : Promise.resolve(true);
+const all = await loadSet(opt("--set") ?? SET_PATH).catch(async (e) => { await settleLedger(0); throw e; });
 const offset = Number(opt("--offset") ?? 0), limit = Number(opt("--limit") ?? all.length);
 // --spread N: N prompts evenly spaced over the whole set (every category), instead of the first N.
 const spread = Number(opt("--spread") ?? 0);
@@ -65,7 +71,7 @@ const model = async (req: Request): Promise<Response> => {
 // live run (2026-11-11) sent the string "undefined" and every model call came back 401.
 const LIVE_KEY = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 const ACTION_TABLES: [string, string][] = [["career_apply_receipts", "submit"], ["career_contact_sends", "send"], ["career_outbox", "send"], ["career_outlook_sends", "send"], ["career_apply_jobs", "queue"], ["career_apply_prepared", "prepare"]];
-const w = await openWorld(set.length + 1, { model });
+const w = await openWorld(set.length + 1, { model }).catch(async (e) => { await settleLedger(0); throw e; });
 const lines: string[] = [];
 const t0 = performance.now();
 let stopped: string | null = null;
@@ -103,6 +109,7 @@ try {
   Deno.env.delete("ANTHROPIC_API_KEY");
   Deno.env.delete("CAREER_BRAIN");
   await w.close();
+  await settleLedger(spent);
 }
 await Deno.mkdir(new URL("./results/", import.meta.url), { recursive: true }).catch(() => {});
 await Deno.writeTextFile(out, lines.join("\n") + (lines.length ? "\n" : ""));

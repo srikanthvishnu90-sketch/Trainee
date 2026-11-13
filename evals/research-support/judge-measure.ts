@@ -5,28 +5,35 @@
 // sends each case that layer A (code) lets through to the product's model through the gateway and the budget ledger (callModel),
 // in batches as a reply would, and prints the confusion table against the hand labels and the dollar cost the meter recorded.
 // deno-lint-ignore-file no-explicit-any
-import { CASES } from "./cases.ts";
-import { findSupport, indexPages, judgeAll, modelSupportJudge, type SupportClaim, supportJudgePayload } from "../../supabase/functions/_shared/agent/research/support.ts";
+import { CASES, FALSE_101, LAYER_A, SPLIT_CLAIM, SPLIT_PAGES, TRUE_40 } from "./cases.ts";
+import { echoes, findSupport, indexPages, judgeAll, modelSupportJudge, quoteClaim, type SupportClaim, supportJudgePayload } from "../../supabase/functions/_shared/agent/research/support.ts";
 import { abbreviated } from "../../supabase/functions/_shared/agent/research/market.ts";
 import { callModel, modelConfig, newMeter, PRICES, TRAINEE_MODEL } from "../../supabase/functions/_shared/model_gateway.ts";
 import { assertRunMayStart } from "../../supabase/functions/_shared/model_budget.ts";
 
 const BATCH = 12;
-// What layer A sends on: the claim beside the one page sentence that holds its hard parts. The rest never reach the judge.
+// What layer A sends on: the claim beside the passage of the one page unit that holds its hard parts (round 3: the unit with its
+// title, heading and the units around it). The rest never reach the judge. A claim that is the unit itself is asked as a quote.
 const sent: { id: string; want: "yes" | "no"; c: SupportClaim }[] = [];
-let byCode = 0;
-for (const c of CASES) {
-  const f = findSupport(c.claim, indexPages([{ text: c.page }, ...(c.page2 ? [{ text: c.page2 }] : [])], abbreviated), [0]);
-  if (!f) { byCode++; continue; }
-  sent.push({ id: c.id, want: c.good && c.judge === "yes" ? "yes" : "no", c: { claim: c.claim, source: f.sentence } });
+const stopped: Record<string, number> = {};
+function add(set: string, id: string, want: "yes" | "no", pages: { text: string; title: string }[], claim: string) {
+  const idx = indexPages(pages, abbreviated, ["Citadel"], { ask: "what does citadel pay interns" }), f = findSupport(claim, idx, [0]);
+  if (!f) { stopped[set] = (stopped[set] ?? 0) + 1; return; }
+  sent.push({ id: `${set}: ${id}`, want, c: { claim: echoes(claim, f.sentence) ? quoteClaim(f.sentence, idx, f.unit.lent) : claim, source: f.unit.passage } });
 }
+for (const c of CASES) add(c.good ? "true 28" : "hostile 94", c.id, c.good && c.judge === "yes" ? "yes" : "no", [{ text: c.page, title: c.title ?? "Citadel compensation notes" }, ...(c.page2 ? [{ text: c.page2, title: "Other notes" }] : [])], c.claim);
+for (const [cls, page, claim] of LAYER_A) add("layer-A 78", `${cls}: ${claim}`, "no", [{ text: page, title: "Notes" }], claim);
+for (const [cls, page, claim] of FALSE_101) add("false 101", `${cls}: ${claim}`, "no", [{ text: page, title: "Citadel notes" }], claim);
+for (const [title, page, claim] of TRUE_40) add("true 40", claim, "yes", [{ text: page, title }], claim);
+for (const page of SPLIT_PAGES) add("split 12", page.slice(0, 40), "no", [{ text: page, title: "Citadel notes" }], SPLIT_CLAIM);
+console.log(`Stopped by layer A before the judge: ${JSON.stringify(stopped)}. The could-not-confirm smuggles and the solicitations never reach the judge.`);
 const batches: typeof sent[] = [];
 for (let k = 0; k < sent.length; k += BATCH) batches.push(sent.slice(k, k + BATCH));
 const price = PRICES[TRAINEE_MODEL];
 // About 4 characters a token; the output is the array plus the model's own thinking, which the gateway allows 1,024 tokens a call.
 const inTok = batches.reduce((n, b) => n + Math.ceil(JSON.stringify(supportJudgePayload(b.map((x) => x.c))).length / 4), 0);
 const estLow = (inTok * price.input + batches.length * 60 * price.output) / 1e6, estHigh = (inTok * price.input + batches.length * (1024 + 100) * price.output) / 1e6;
-console.log(`${CASES.length} cases (${CASES.filter((c) => !c.good).length} hostile, ${CASES.filter((c) => c.good).length} true). Layer A stops ${byCode} before the judge; ${sent.length} go to the judge in ${batches.length} calls of up to ${BATCH}.`);
+console.log(`${CASES.length + LAYER_A.length + FALSE_101.length + TRUE_40.length + SPLIT_PAGES.length} cases; ${sent.length} go to the judge in ${batches.length} calls of up to ${BATCH}; passages ${sent.reduce((n, x) => n + x.c.source.length, 0)} bytes in all, ${Math.round(sent.reduce((n, x) => n + x.c.source.length, 0) / Math.max(1, sent.length))} a claim.`);
 console.log(`Model ${TRAINEE_MODEL}. Estimated input ${inTok} tokens; estimated cost $${estLow.toFixed(3)} to $${estHigh.toFixed(3)} (output without and with the full thinking allowance).`);
 if (!Deno.args.includes("--live")) { console.log("Not run: pass --live to send these to the real judge (owner-approved spend only)."); Deno.exit(0); }
 

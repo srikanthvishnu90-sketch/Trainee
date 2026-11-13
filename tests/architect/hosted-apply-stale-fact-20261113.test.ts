@@ -89,11 +89,11 @@ Deno.test({ name: "database: the stop closes only that person's unstarted rows s
   if (!pgBinDir()) { if (Deno.env.get("CI") === "true") throw new Error("needs Postgres 16"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
   const pg: Pg = await startPg({ includeBridge: true });
   try {
-    const A = "00000000-0000-4000-8000-0000000e0901", B = "00000000-0000-4000-8000-0000000e0902", C = "00000000-0000-4000-8000-0000000e0903", D = "00000000-0000-4000-8000-0000000e0904";
+    const A = "00000000-0000-4000-8000-0000000e0901", B = "00000000-0000-4000-8000-0000000e0902", C = "00000000-0000-4000-8000-0000000e0903", D = "00000000-0000-4000-8000-0000000e0904", E = "00000000-0000-4000-8000-0000000e0905";
     const RESUME_HEX = Array.from(new TextEncoder().encode("%PDF-1.4\n% TEST resume for stale facts\n")).map((b) => b.toString(16).padStart(2, "0")).join("");
     for (const [k, v] of [["APPLY_VM", "on"], ["APPLY_VM_USER_IDS", "*"], ["APPLY_VM_ALLOW_LOCAL", "on"]]) await pg.sql(`insert into career_cloud_settings(key,value) values ('${k}','${v}') on conflict (key) do update set value=excluded.value`);
     const sha = (await pg.sql(`select encode(sha256(decode('${RESUME_HEX}','hex')),'hex')`)).trim();
-    for (const u of [A, B, C, D]) {
+    for (const u of [A, B, C, D, E]) {
       await pg.sql(`insert into auth.users(id,email) values ('${u}','${u}@example.test') on conflict do nothing;
         insert into profiles(id) values ('${u}') on conflict do nothing;
         insert into career_watch_kv(user_id,key,value) values ('${u}','career:account','{"epoch":1,"version":1,"paused":false}') on conflict do nothing;
@@ -134,7 +134,7 @@ Deno.test({ name: "database: the stop closes only that person's unstarted rows s
     await t.step("which payloads state a fact: by its id whatever the value says; without an id, by normalised value (numbers, month-year dates, phrases of four or more characters, never one common word)", async () => {
       const stale = async (p: string, ids: string[], was: string, now: string | null = null) => (await pg.sql(`select public.career_apply_payload_stale('${p}'::jsonb, array[${ids.map((x) => `'${x}'`).join(",")}]::text[], public.career_apply_changed_keys('${was}', null, ${now === null ? "null" : `'${now}'`}, null))`)).trim();
       eq(await stale('{"fields":[{"label":"Authorized to work?","value":"Yes","factId":"F0"}]}', ["F0"], "Work authorization: US citizen"), "t", "a derived Yes, by fact id");
-      eq(await stale('{"fields":[{"label":"GPA","value":"3.9","factId":"F9"}]}', ["F0"], "GPA: 3.9"), "f", "a field from another fact is that fact's: never matched by value");
+      eq(await stale('{"fields":[{"label":"GPA","value":"3.9","factId":"F9"}]}', ["F0"], "GPA: 3.9"), "t", "round 3: a field with a fact id is checked by value too (a text answer stating 3.9)");
       eq(await stale('{"answers":[{"label":"GPA","value":"3.90"}]}', [], "GPA: 3.9"), "t", "3.90 = 3.9");
       eq(await stale('{"answers":[{"label":"GPA","value":"3.9/4.0"}]}', [], "GPA 3.9"), "t", "the leading number of 3.9/4.0, a fact with no label");
       eq(await stale('{"answers":[{"label":"Graduation","value":"05/2026"}]}', [], "Graduating in May 2026", "Graduating in December 2026"), "t", "May 2026 = 05/2026");
@@ -311,6 +311,45 @@ Deno.test({ name: "database: the stop closes only that person's unstarted rows s
       }
     });
 
+    await t.step("review round 3 (#822): an answer from two facts, a text answer and an essay stating the value are stopped by the fact write alone; the same words saved again and unrelated numbers stop nothing; the person is told at the next turn", async () => {
+      const fact = (id: string, text: string, extra = "") => `{"id":"${id}","kind":"profile","text":"${text}","status":"confirmed","needs_confirmation":false${extra}}`;
+      const setFacts = (facts: string[]) => pg.sql(`update career_watch_kv set value = jsonb_set(value, '{memory}', jsonb_build_object('v',1,'profile', jsonb_build_object('facts', '[${facts.join(",")}]'::jsonb))) where user_id='${E}' and key='career:account'`);
+      const base = [fact("F-gpa", "GPA: 3.9"), fact("F-wa", "Work authorization: authorized to work in the US"), fact("F-sp", "Sponsorship: I do not need sponsorship"), fact("F-py", "2 years of Python experience"), fact("F-grad", "Graduating May 2026"), fact("F-pay", "Salary expectation: $85,000"), fact("F-cit", "Citizenship: U.S. citizen")];
+      await setFacts(base);
+      eq((await pg.sql(`select count(*) from career_apply_fact_changes where user_id='${E}'`)).trim(), "0", "a first write is no change");
+      await approveFields(E, "S-1", "TEST FactId GPA", '[{"label":"GPA","value":"3.9","factId":"F-gpa"}]');
+      await approveFields(E, "S-2", "TEST Two-fact derived", '[{"label":"Are you authorized to work in the US without sponsorship?","value":"Yes","factId":"F-wa"}]');
+      await approveFields(E, "S-3", "TEST Text answer", '[{"label":"What is your GPA?","value":"3.9","factId":"text-answer:11111111-1111-4111-8111-111111111111"}]');
+      await approveFields(E, "S-4", "TEST No factId 3.90", '[{"label":"GPA","value":"3.90"}]');
+      await approveFields(E, "S-5", "TEST Essay with factId", '[{"label":"Why us?","value":"With a 3.9 GPA in CS I ...","factId":"F-py"}]');
+      await approveFields(E, "S-6", "TEST Unrelated number 2", '[{"label":"Notice period","value":"2 weeks"}]');
+      await approveFields(E, "S-7", "TEST Unrelated 2026", '[{"label":"Earliest start","value":"June 2026"}]');
+      await approveFields(E, "S-8", "TEST Python factId", '[{"label":"Years of Python","value":"2","factId":"F-py"}]');
+      await approveFields(E, "S-9", "TEST unrelated 2", '[{"label":"How many references?","value":"2"}]');
+      await approveFields(E, "S-11", "TEST Phone", '[{"label":"Phone","value":"+1 (555) 123-4567"},{"label":"Salary","value":"85000"}]');
+      // No stop call: the fact write alone. GPA set aside, sponsorship corrected; Python saved again with the same words (a new id);
+      // citizenship written "US citizen" (the same value).
+      const b2 = [fact("F-gpa", "GPA: 3.9", ',"withdrawn_by_owner":{"at":"x"}'), base[1], fact("F-sp", "Sponsorship: I will need sponsorship"), fact("F-py2", "2 years of Python experience"), base[4], base[5], fact("F-cit", "Citizenship: US citizen")];
+      await setFacts(b2);
+      eq((await pg.sql(`select fact_ids::text from career_apply_fact_changes where user_id='${E}'`)).trim(), "{F-gpa,F-sp}", "only the set-aside and the correction are changes");
+      await pg.sql(`update career_apply_claim_turns set queued = true where user_id = '${E}'`).catch(() => {});
+      for (let i = 0; i < 3; i++) await json(`public.career_apply_vm_claim('vm-test', 20, 20, '{}')`);
+      eq((await pg.sql(`select string_agg(job_id || ':' || case when state = 'not_submitted' then 'stopped' else 'goes' end, ',' order by length(job_id), job_id) from career_apply_jobs where user_id='${E}'`)).trim(),
+        "S-1:stopped,S-2:stopped,S-3:stopped,S-4:stopped,S-5:stopped,S-6:goes,S-7:goes,S-8:goes,S-9:goes,S-11:goes");
+      // The person is told, once, at their next turn: which applications the checks stopped, and why.
+      const told = await json(`public.career_apply_fact_stops_untold('${E}'::uuid)`);
+      eq(names(told), ["TEST Essay with factId", "TEST FactId GPA", "TEST No factId 3.90", "TEST Text answer", "TEST Two-fact derived"]);
+      eq(await json(`public.career_apply_fact_stops_untold('${E}'::uuid)`), [], "told once");
+      eq(names(await json(`public.career_apply_fact_stops_untold('${A}'::uuid)`)), ["TEST Tried"], "A: only what the claim stopped is told; the chat's own stop (TEST Unstarted) was said in its reply");
+      // A salary written another way, and a corrected salary: only the change stops, and "$85,000" = 85000.
+      const b3 = [...b2]; b3[5] = fact("F-pay", "Salary expectation: 85000 USD");
+      await setFacts(b3);
+      eq((await pg.sql(`select count(*) from career_apply_fact_changes where user_id='${E}'`)).trim(), "1", "the same amount written another way is no change");
+      b3[5] = fact("F-pay", "Salary expectation: $95,000"); await setFacts(b3);
+      eq((await pg.sql(`select fact_keys @> array['n:85000'] from career_apply_fact_changes where user_id='${E}' order by id desc limit 1`)).trim(), "t");
+      eq((await pg.sql(`select public.career_apply_payload_stale(payload, '{}', (select fact_keys from career_apply_fact_changes where user_id='${E}' order by id desc limit 1)) from career_apply_jobs where user_id='${E}' and job_id='S-11'`)).trim(), "t", "85000 in a field without an id");
+    });
+
     await t.step("nothing stopped comes back by itself: no row of A, B or C went back to the queue", async () => {
       eq((await pg.sql(`select string_agg(job_id || ':' || state, ',' order by length(job_id), job_id) from career_apply_jobs where evidence->>'reason' = 'fact_changed' and user_id in ('${A}','${B}','${C}')`)).trim(), "STALE-1:not_submitted,STALE-2:not_submitted,STALE-9:not_submitted");
     });
@@ -326,14 +365,14 @@ Deno.test({ name: "database: the stop closes only that person's unstarted rows s
         || '/' || (select count(*) from pg_trigger where tgname like 'career_apply_facts_%')
         || '/' || (select count(*) from information_schema.columns where table_schema='public' and column_name='facts_at')
         || '/' || (to_regclass('public.career_apply_fact_changes') is not null)::text`);
-      eq((await left()).trim(), "14/6/2/true");
+      eq((await left()).trim(), "18/6/2/true");
       await pg.sql(down);
       eq((await left()).trim(), "0/0/0/false");
       eq((await job(A, "STALE-1")).state, "not_submitted", "a stopped row is not put back by the rollback");
       eq((await pg.sql(`select count(*) from pg_proc where proname in ('career_apply_vm_heartbeat','career_apply_cloud_authorize_any')`)).trim(), "2", "the heartbeat and the cloud authorization are back as they were");
       await pg.sql(down);
       await pg.sql(up); await pg.sql(up);
-      eq((await left()).trim(), "14/6/2/true");
+      eq((await left()).trim(), "18/6/2/true");
       eq((await job(A, "STALE-1")).state, "not_submitted");
     });
   } finally { await pg.stop(); }
@@ -406,6 +445,16 @@ Deno.test({ name: "chat: a correction stops the approved application and says so
     // The fact writes themselves (the thread's commit) recorded the set-aside and the correction too, by fact id.
     assertNode.equal((await pg.sql(`select count(*) from public.career_apply_fact_changes where user_id = '${WHO2}' and reason = 'fact_write' and '${fact.id}' = any(fact_ids)`)).trim(), "2");
 
+    // 3b. Round 3: a row the stop never saw (approved before the correction, written here past the triggers) is closed by the
+    // claim's check, and the person's next reply says so, once.
+    await pg.sql(`set session_replication_role = replica; insert into public.career_apply_jobs (user_id, job_id, company, url, payload, payload_hash, approval_hash, state, created_at, facts_at)
+      values ('${WHO2}', 'greenhouse:fern:1', 'Fern', 'https://boards.greenhouse.io/x/jobs/1', '{"answers":[{"label":"GPA","value":"3.9"}]}', repeat('b', 64), repeat('b', 64), 'queued', now() - interval '1 day', now() - interval '1 day'); set session_replication_role = origin;`);
+    await pg.sql(`update public.career_apply_jobs set state = 'driving', attempts = 1, claimed_at = now(), lease_token = gen_random_uuid() where user_id = '${WHO2}' and job_id = 'greenhouse:fern:1'`);
+    assertNode.equal(await state("greenhouse:fern:1"), "not_submitted", "the claim's check closed it");
+    const next1 = await chat.say("thanks");
+    assertNode.match(next1.reply, /1 approved application stating an answer you changed was stopped before it went out \(Fern\): nothing was sent/, `the next reply tells the person: ${next1.reply}`);
+    const next2 = await chat.say("ok");
+    assertNode.doesNotMatch(next2.reply, /stopped before it went out/, "told once");
     // 4. The stop cannot run (the function is gone): the reply says the approved applications could not be checked.
     await pg.sql(await Deno.readTextFile(ROLLBACK));
     await seed("greenhouse:dune:1", "Dune", "3.7");

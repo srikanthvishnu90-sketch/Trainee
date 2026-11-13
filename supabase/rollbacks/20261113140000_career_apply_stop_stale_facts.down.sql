@@ -64,6 +64,12 @@ do $$ begin
  drop function if exists public.career_apply_changed_keys(text, text, text, text);
  drop function if exists public.career_apply_value_keys(text);
  drop function if exists public.career_apply_value_key(text);
+ drop function if exists public.career_apply_fact_stops_untold(uuid);
+ drop function if exists public.career_apply_fact_keys(text, text);
+ drop function if exists public.career_apply_fact_said(jsonb);
+ drop function if exists public.career_apply_fact_value_text(text);
+ drop function if exists public.career_apply_topics(text);
+ drop function if exists public.career_apply_norm_text(text);
  alter table public.career_apply_jobs drop column if exists facts_at;
  alter table public.career_apply_prepared drop column if exists facts_at;
  drop table if exists public.career_apply_fact_changes;

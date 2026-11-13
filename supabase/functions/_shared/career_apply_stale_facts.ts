@@ -57,3 +57,20 @@ export function staleFactLines(r: StaleStops | "failed"): string[] {
   if (b) out.push(`${n(b, "application stating that answer is", "applications stating that answer are")} being sent right now${at(r.being_sent)} and can't be stopped midway; one that goes out can't be taken back.`);
   return out;
 }
+
+// What the claim and submit checks stopped since the person was last told (a fact changed by a write the chat's stop did not
+// reach, or a row that was waiting when it ran): read once, marked told, said in this reply. Null when it could not be read (it
+// stays untold and the next reply says it).
+// deno-lint-ignore no-explicit-any
+export async function untoldFactStops(admin: any, userId: string): Promise<StoppedRow[] | null> {
+  try {
+    const r = await admin.rpc("career_apply_fact_stops_untold", { p_user: userId });
+    if (r?.error || !Array.isArray(r?.data)) return null;
+    return rows(r.data);
+  } catch { return null; }
+}
+export function untoldFactStopLine(r: StoppedRow[] | null): string | null {
+  if (!r?.length) return null;
+  const k = r.length;
+  return `${n(k, "approved application stating an answer you changed was", "approved applications stating an answer you changed were")} stopped before ${k === 1 ? "it" : "they"} went out${at(r)}: nothing was sent, and ${k === 1 ? "it needs" : "they need"} your approval again.`;
+}

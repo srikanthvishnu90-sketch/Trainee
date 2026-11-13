@@ -15,12 +15,19 @@
 -- holds no profile (the account copy is the record when it does: a stale thread copy is never read as a change). So the record
 -- exists even when the chat's stop call below fails, and every guard reads it.
 --
--- WHAT AN APPLICATION "STATES" (career_apply_payload_stale): a field carrying a factId states that fact, whatever its value says
--- ("Yes" to "authorized to work?" from the work authorization fact); a changed fact id makes it stale. Text and numbers with no
--- factId are compared by normalised keys (career_apply_value_keys): numbers by value (3.9 = 3.90 = the 3.9 of "3.9/4.0"), dates
--- by month and year ("May 2024" = "05/2024" = "2024-05"), any other text only as a whole phrase of four or more characters that is
--- not one common word (never "yes", "no", "May" alone: those are covered by the fact id).
---
+-- WHAT AN APPLICATION "STATES" (career_apply_payload_stale): any of three signals. (a) A fact id: a field's factId, factIds or
+-- derived_from, or a cover note's fact_ids, names a changed fact. (b) A value: any text or number in it (a field with a fact id
+-- included: a text answer, an essay) holds a changed value, compared normalised (career_apply_value_keys: numbers by value,
+-- 3.9 = 3.90 = the 3.9 of "3.9/4.0", "$85,000" = 85000; dates by month and year, "May 2024" = "05/2024" = "2024-05"; other text
+-- only as a whole phrase of four or more characters that is not one common word, never "yes", "no" or "May" alone). (c) A topic:
+-- a question whose label is about an eligibility topic (sponsorship, work authorization, citizenship, relocation, clearance) a
+-- changed fact was about: such an answer is often derived from two facts ("authorized to work without sponsorship?" from the
+-- work authorization and the sponsorship facts) and carries only one id.
+-- A CHANGE is a change of what the fact says, compared normalised: the same words saved again under a new id (a screening answer
+-- re-saved), "U.S. citizen" written "US citizen" or "$85,000" written "85000 USD" is no change. A fact's value keys come from its
+-- whole value only (never a number from inside its words), plus the one month-year date it names and its eligibility topics.
+-- THE PERSON IS TOLD: the chat's stop says what it stopped in that reply; what a claim or submit check stopped is read, once, by the
+-- next reply (career_apply_fact_stops_untold).
 -- WHAT IS CLOSED:
 --   1. The chat's stop (career_apply_stop_stale_facts(p_user, p_changes, p_reason), service role only, under the person's locks;
 --      it records the change first): for that person, approved rows not started (queued, attempts = 0) are closed not_submitted
@@ -59,10 +66,20 @@ alter table public.career_apply_prepared add column if not exists facts_at times
 alter table public.career_apply_jobs add column if not exists facts_at timestamptz;
 -- Rows from before this file keep facts_at null: it reads as the time they were made (created_at).
 
--- The key of one value, or null when it is not one that can be compared on its own: 'n:<number>', 'd:<year>-<month>', 't:<phrase>'.
+-- Text as compared: lower case, "U.S." = "US", punctuation as spaces (a decimal point between digits kept).
+create or replace function public.career_apply_norm_text(p text) returns text
+language sql immutable set search_path = public, pg_temp as $$
+ select btrim(regexp_replace(regexp_replace(regexp_replace(regexp_replace(lower(coalesce(p, '')), '(^|[^a-z])([a-z])\.(?=[a-z]\.)', '\1\2', 'g'),
+   '(^|[^a-z])([a-z])\.', '\1\2', 'g'), '(?<![0-9])\.|\.(?![0-9])|[^a-z0-9.]+', ' ', 'g'), '\s+', ' ', 'g'))
+$$;
+revoke all on function public.career_apply_norm_text(text) from public, anon, authenticated;
+
+-- The key of one whole value, or null when it is not one that can be compared on its own: 'd:<year>-<month>' (a month and year),
+-- 'n:<number>' (a number, a score out of a scale "3.9/4.0", an amount "$85,000" = "85000 USD" = "85k"), 't:<phrase>' (four or
+-- more characters, not one common word: never "yes", "no" or a month alone).
 create or replace function public.career_apply_value_key(p text) returns text
 language plpgsql immutable set search_path = public, pg_temp as $$
-declare t text := lower(regexp_replace(btrim(coalesce(p, '')), '\s+', ' ', 'g')); m text[]; mi int;
+declare t text := lower(regexp_replace(btrim(coalesce(p, '')), '\s+', ' ', 'g')); m text[]; mi int; n numeric;
 begin
  if t = '' then return null; end if;
  m := regexp_match(t, '^([0-9]{1,2})/(?:[0-9]{1,2}/)?((?:19|20)[0-9]{2})$');
@@ -74,67 +91,123 @@ begin
   mi := array_position(array['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'], m[1]);
   return 'd:' || m[2] || '-' || lpad(mi::text, 2, '0');
  end if;
- m := regexp_match(t, '^\$?\s*(-?[0-9]+(?:\.[0-9]+)?)\s*(?:/\s*[0-9]+(?:\.[0-9]+)?)?\s*%?$');
- if m is not null then return 'n:' || trim_scale(m[1]::numeric)::text; end if;
+ m := regexp_match(t, '^(?:usd|us\$|\$)?\s*(-?[0-9]{1,3}(?:,[0-9]{3})+|-?[0-9]+)(\.[0-9]+)?\s*(k)?\s*(?:/\s*[0-9]+(?:\.[0-9]+)?)?\s*(?:%|usd|dollars|per year|a year|/yr|/year)?$');
+ if m is not null then
+  n := (replace(m[1], ',', '') || coalesce(m[2], ''))::numeric * case when m[3] is not null then 1000 else 1 end;
+  return 'n:' || trim_scale(n)::text;
+ end if;
+ t := public.career_apply_norm_text(t);
  if length(t) < 4 or t !~ '[a-z0-9]' then return null; end if;
- if t !~ ' ' and t ~ '^(yes|no|none|true|false|maybe|other|unknown|null|n/a|prefer|declined|decline|with|have|that|this|from|will|your|they|been|were|what|when|where|which|their|there|would|about|also|into|only|some|than|then|them|these|those|very|just|more|most|such|over|under|january|february|march|april|june|july|august|september|october|november|december|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\.?$' then return null; end if;
+ if t !~ ' ' and t ~ '^(yes|no|none|true|false|maybe|other|unknown|null|prefer|declined|decline|with|have|that|this|from|will|your|they|been|were|what|when|where|which|their|there|would|about|also|into|only|some|than|then|them|these|those|very|just|more|most|such|over|under|january|february|march|april|june|july|august|september|october|november|december|monday|tuesday|wednesday|thursday|friday|saturday|sunday)$' then return null; end if;
  return 't:' || t;
 end $$;
 revoke all on function public.career_apply_value_key(text) from public, anon, authenticated;
 
--- Every key a text holds: its own key, each number in it and each month-year date in it.
+-- What an eligibility question is about, from its words: a derived yes or no ("authorized to work without sponsorship?") is built
+-- from more than one fact, so a change of any fact about that topic makes it stale.
+create or replace function public.career_apply_topics(p text) returns text[]
+language sql immutable set search_path = public, pg_temp as $$
+ select coalesce(array_agg(k), '{}') from (values
+  ('k:sponsorship', '\m(sponsor[a-z]*|visa[a-z]*|h-?1b)\M'),
+  ('k:work_authorization', '\m(authori[sz][a-z]*|right to work|eligible to work|legally (able|permitted) to work|work permit[a-z]*)\M'),
+  ('k:citizenship', '\m(citizen[a-z]*|nationality|permanent resident|green card)\M'),
+  ('k:relocation', '\mrelocat[a-z]*\M'),
+  ('k:clearance', '\m(security clearance|clearance)\M')) t(k, re)
+ where lower(coalesce(p, '')) ~ t.re
+$$;
+revoke all on function public.career_apply_topics(text) from public, anon, authenticated;
+
+-- A fact's value as stated: the words after its label ("GPA: 3.9" -> "3.9"), the number after a short label of words ("GPA 3.9"
+-- -> "3.9"; never a year: "Graduating May 2026" is a date), else all of it.
+create or replace function public.career_apply_fact_value_text(p text) returns text
+language sql immutable set search_path = public, pg_temp as $$
+ select coalesce((regexp_match(coalesce(p, ''), '^[^:]{1,40}:\s*(\S.*)$'))[1],
+  (regexp_match(btrim(coalesce(p, '')), '^[A-Za-z][A-Za-z .]{0,30}?\s+(?!(?:19|20)[0-9]{2}$)(\$?[0-9][0-9,]*(?:\.[0-9]+)?(?:\s*/\s*[0-9]+(?:\.[0-9]+)?)?k?)$'))[1], p)
+$$;
+revoke all on function public.career_apply_fact_value_text(text) from public, anon, authenticated;
+
+-- What a fact says, as compared: the key of its value (or its normalised words), and of its value field.
+create or replace function public.career_apply_fact_said(f jsonb) returns text
+language sql immutable set search_path = public, pg_temp as $$
+ select coalesce(public.career_apply_value_key(public.career_apply_fact_value_text(f->>'text')), public.career_apply_norm_text(f->>'text'))
+  || '|' || coalesce(public.career_apply_value_key(f->>'value'), public.career_apply_norm_text(f->>'value'))
+$$;
+revoke all on function public.career_apply_fact_said(jsonb) from public, anon, authenticated;
+
+-- The keys of a fact as stated: its whole value (the words after its label, "GPA: 3.9" -> 3.9, else all of it), its whole words,
+-- the one month-year date it names (when it names exactly one). Never a number taken from inside other words.
+create or replace function public.career_apply_fact_keys(p_text text, p_value text) returns text[]
+language sql immutable set search_path = public, pg_temp as $$
+ with v as (select public.career_apply_fact_value_text(p_text) as val),
+  d as (select array_agg(x[1]) ds from regexp_matches(lower(coalesce(p_text, '')), '((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?(?: [0-9]{1,2}(?:st|nd|rd|th)?,?)? (?:19|20)[0-9]{2}|(?<![0-9/])[0-9]{1,2}/(?:19|20)[0-9]{2}|(?:19|20)[0-9]{2}-[0-9]{1,2}(?![0-9]))', 'g') x)
+ select coalesce(array_agg(distinct k) filter (where k is not null), '{}') from (
+  select public.career_apply_value_key(v.val) k from v
+  union all select public.career_apply_value_key(p_text)
+  union all select public.career_apply_value_key(p_value)
+  union all select public.career_apply_value_key(d.ds[1]) from d where cardinality(d.ds) = 1
+ ) z
+$$;
+revoke all on function public.career_apply_fact_keys(text, text) from public, anon, authenticated;
+
+-- Every key a payload text holds: its own whole key, each number standing alone in it (not a piece of a date, a phone number or
+-- a version), each month-year date in it.
 create or replace function public.career_apply_value_keys(p text) returns text[]
 language sql immutable set search_path = public, pg_temp as $$
  select coalesce(array_agg(distinct k) filter (where k is not null), '{}') from (
   select public.career_apply_value_key(p) k
-  union all select public.career_apply_value_key(x[1]) from regexp_matches(coalesce(p, ''), '(?<![0-9.])([0-9]+(?:\.[0-9]+)?)(?![0-9]|\.[0-9])', 'g') x
+  union all select public.career_apply_value_key(x[1]) from regexp_matches(coalesce(p, ''), '(?<![0-9.,/:()+-])(\$?[0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?|\$?[0-9]+(?:\.[0-9]+)?)(?![0-9]|[.,/:)-][0-9])', 'g') x
   union all select public.career_apply_value_key(x[1]) from regexp_matches(lower(coalesce(p, '')),
    '((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?(?: [0-9]{1,2}(?:st|nd|rd|th)?,?)? (?:19|20)[0-9]{2}|(?<![0-9/])[0-9]{1,2}/(?:[0-9]{1,2}/)?(?:19|20)[0-9]{2}|(?:19|20)[0-9]{2}-[0-9]{1,2})', 'g') x
  ) z
 $$;
 revoke all on function public.career_apply_value_keys(text) from public, anon, authenticated;
 
--- The keys a fact's old value no longer has: everything its old words and value held (and the value after its label, "GPA: 3.9"),
--- minus what the new words still hold when the fact was corrected (null p_now: set aside, removed or rejected).
+-- The keys a fact's old value no longer has: what it stated, minus what its new words still state when it was corrected
+-- (null p_now: set aside, removed or rejected); and the eligibility topics it was about (any answer derived on that topic).
 create or replace function public.career_apply_changed_keys(p_was text, p_was_value text, p_now text, p_now_value text) returns text[]
 language sql immutable set search_path = public, pg_temp as $$
  select coalesce(array_agg(distinct k), '{}') from (
-  select unnest(public.career_apply_value_keys(p_was) || public.career_apply_value_keys(p_was_value)
-   || public.career_apply_value_keys((regexp_match(coalesce(p_was, ''), '^[^:]{1,40}:\s*(\S.*)$'))[1])) k
-  except select unnest(public.career_apply_value_keys(p_now) || public.career_apply_value_keys(p_now_value)
-   || public.career_apply_value_keys((regexp_match(coalesce(p_now, ''), '^[^:]{1,40}:\s*(\S.*)$'))[1]))
+  (select unnest(public.career_apply_fact_keys(p_was, p_was_value)) k
+   except select unnest(public.career_apply_fact_keys(p_now, p_now_value)) where p_now is not null or p_now_value is not null)
+  union select unnest(public.career_apply_topics(p_was))
  ) z where k is not null
 $$;
 revoke all on function public.career_apply_changed_keys(text, text, text, text) from public, anon, authenticated;
 
--- Does this payload state one of these facts (by id) or values (by key)? An object with a factId states that fact and nothing
--- else; text and numbers outside such objects are compared by key, and a phrase key also as a whole phrase inside longer text.
+-- Does this payload state one of these facts or values? Either signal marks it: an id in factId, factIds, derived_from or
+-- fact_ids (a cover note's) that is a changed fact; a value (any text or number, a field with a fact id included) holding a
+-- changed value's key, or a changed phrase as a whole phrase; a question whose label is about a changed eligibility topic.
 create or replace function public.career_apply_payload_stale(p jsonb, p_ids text[], p_keys text[]) returns boolean
 language plpgsql immutable set search_path = public, pg_temp as $$
-declare v jsonb; s text; k text;
+declare v jsonb; s text; k text; key_ text; ids text[] := coalesce(p_ids, '{}'); ks text[] := coalesce(p_keys, '{}');
 begin
  if p is null then return false; end if;
  case jsonb_typeof(p)
   when 'object' then
-   if p ? 'factId' then return coalesce(p->>'factId', '') = any(coalesce(p_ids, '{}')); end if;
-   -- The application's own bookkeeping (where it goes, whose it is, its hashes and times) states no fact.
-   for v in select value from jsonb_each(p) where key not in ('url', 'destination', 'link', 'job_id', 'company', 'user_id', 'version',
+   if cardinality(ids) > 0 and (coalesce(p->>'factId', '') = any(ids)
+     or exists (select from jsonb_array_elements_text(case when jsonb_typeof(p->'factIds') = 'array' then p->'factIds' else '[]'::jsonb end
+       || case when jsonb_typeof(p->'derived_from') = 'array' then p->'derived_from' else '[]'::jsonb end
+       || case when jsonb_typeof(p->'fact_ids') = 'array' then p->'fact_ids' else '[]'::jsonb end) x where x = any(ids))) then return true; end if;
+   if jsonb_typeof(p->'label') = 'string' and public.career_apply_topics(p->>'label') && ks then return true; end if;
+   -- The application's own bookkeeping (where it goes, whose it is, its hashes and times, a field's own name) states no fact.
+   for key_, v in select key, value from jsonb_each(p) where key not in ('url', 'destination', 'link', 'job_id', 'company', 'user_id', 'version',
      'privacy_epoch', 'account_version', 'expires_at', 'engine_approval', 'resume_sha256', 'sha256', 'payload_hash', 'approval_hash',
-     'attachment', 'to', 'cc', 'bcc', 'id', 'name', 'label', 'selector', 'field_id', 'type', 'required', 'options') loop
-    if public.career_apply_payload_stale(v, p_ids, p_keys) then return true; end if;
+     'attachment', 'to', 'cc', 'bcc', 'id', 'name', 'label', 'selector', 'field_id', 'type', 'required', 'options', 'factId', 'factIds',
+     'derived_from', 'fact_ids') loop
+    if public.career_apply_payload_stale(v, ids, ks) then return true; end if;
    end loop;
    return false;
   when 'array' then
-   for v in select value from jsonb_array_elements(p) loop if public.career_apply_payload_stale(v, p_ids, p_keys) then return true; end if; end loop;
+   for v in select value from jsonb_array_elements(p) loop if public.career_apply_payload_stale(v, ids, ks) then return true; end if; end loop;
    return false;
   when 'string', 'number' then
-   if coalesce(cardinality(p_keys), 0) = 0 then return false; end if;
+   if cardinality(ks) = 0 then return false; end if;
    s := p #>> '{}';
    if s ~* '^(https?://|mailto:)' or s ~* '^[0-9a-f]{32,}$' or s ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' then return false; end if;
-   if public.career_apply_value_keys(s) && p_keys then return true; end if;
-   s := ' ' || btrim(regexp_replace(lower(s), '[^a-z0-9]+', ' ', 'g')) || ' ';
-   foreach k in array p_keys loop
-    if k like 't:%' and position(' ' || btrim(regexp_replace(substr(k, 3), '[^a-z0-9]+', ' ', 'g')) || ' ' in s) > 0 then return true; end if;
+   if public.career_apply_value_keys(s) && ks then return true; end if;
+   s := ' ' || public.career_apply_norm_text(s) || ' ';
+   foreach k in array ks loop
+    if k like 't:%' and position(' ' || substr(k, 3) || ' ' in s) > 0 then return true; end if;
    end loop;
    return false;
   else return false;
@@ -150,24 +223,23 @@ language sql stable security definer set search_path = public, pg_temp as $$
 $$;
 revoke all on function public.career_apply_fact_hit(uuid, jsonb, timestamptz) from public, anon, authenticated;
 
--- The facts that changed between two copies of a profile's facts: the ids and the keys of their old values.
+-- The facts that changed between two copies of a profile's facts: the ids and the keys of their old values. A fact changed when
+-- its normalised words or value changed, or it was set aside, rejected or removed. The same words under a new id (a screening
+-- answer saved again) are the same fact: no change.
 create or replace function public.career_apply_facts_diff(p_old jsonb, p_new jsonb, out ids text[], out keys text[])
 language sql immutable set search_path = public, pg_temp as $$
  with o as (select f from jsonb_array_elements(case when jsonb_typeof(p_old) = 'array' then p_old else '[]'::jsonb end) f
    where jsonb_typeof(f) = 'object' and coalesce(f->>'id', '') <> '' and coalesce(f->>'status', '') not in ('draft', 'rejected')
     and coalesce(f->>'needs_confirmation', 'false') <> 'true' and not f ? 'withdrawn_by_owner'),
   n as (select f from jsonb_array_elements(case when jsonb_typeof(p_new) = 'array' then p_new else '[]'::jsonb end) f where jsonb_typeof(f) = 'object'),
-  c as (select o.f as was, (select n.f from n where n.f->>'id' = o.f->>'id' limit 1) as now from o)
- select coalesce(array_agg(distinct c.was->>'id'), '{}'),
-  coalesce((select array_agg(distinct k) from c c2, unnest(public.career_apply_changed_keys(c2.was->>'text', c2.was->>'value',
-     case when c2.now is null or c2.now ? 'withdrawn_by_owner' or c2.now->>'status' = 'rejected' then null else c2.now->>'text' end,
-     case when c2.now is null or c2.now ? 'withdrawn_by_owner' or c2.now->>'status' = 'rejected' then null else c2.now->>'value' end)) k
-    where c2.now is null or c2.now ? 'withdrawn_by_owner' or c2.now->>'status' = 'rejected'
-     or lower(btrim(coalesce(c2.now->>'text', ''))) <> lower(btrim(coalesce(c2.was->>'text', '')))
-     or coalesce(c2.now->>'value', '') <> coalesce(c2.was->>'value', '')), '{}')
- from c where c.now is null or c.now ? 'withdrawn_by_owner' or c.now->>'status' = 'rejected'
-  or lower(btrim(coalesce(c.now->>'text', ''))) <> lower(btrim(coalesce(c.was->>'text', '')))
-  or coalesce(c.now->>'value', '') <> coalesce(c.was->>'value', '')
+  live as (select f from n where coalesce(f->>'status', '') <> 'rejected' and not f ? 'withdrawn_by_owner'),
+  c as (select o.f as was, (select n.f from n where n.f->>'id' = o.f->>'id' limit 1) as now from o),
+  ch as (select was, case when now is null or now ? 'withdrawn_by_owner' or now->>'status' = 'rejected' then null else now end as now from c
+   where not exists (select from live l where public.career_apply_fact_said(l.f) = public.career_apply_fact_said(c.was)
+     and (l.f->>'id' = c.was->>'id' or not exists (select from n where n.f->>'id' = c.was->>'id'))))
+ select coalesce(array_agg(distinct ch.was->>'id'), '{}'),
+  coalesce((select array_agg(distinct k) from ch c2, unnest(public.career_apply_changed_keys(c2.was->>'text', c2.was->>'value', c2.now->>'text', c2.now->>'value')) k), '{}')
+ from ch
 $$;
 revoke all on function public.career_apply_facts_diff(jsonb, jsonb) from public, anon, authenticated;
 
@@ -235,7 +307,8 @@ language plpgsql security definer set search_path = public, pg_temp as $$
 begin
  update public.career_apply_jobs set state = 'not_submitted', reason = 'not sent: a fact it states changed after you approved it',
   lease_token = null, claimed_at = null, vm_heartbeat_at = null,
-  evidence = evidence || jsonb_build_object('reason', 'fact_changed', 'nothing_sent', true, 'fact_changed_at', p_at, 'stopped_by', p_by, 'stopped_at', clock_timestamp()),
+  evidence = evidence || jsonb_build_object('reason', 'fact_changed', 'nothing_sent', true, 'fact_changed_at', p_at, 'stopped_by', p_by, 'stopped_at', clock_timestamp())
+   || case when p_by = 'chat' then jsonb_build_object('told_at', clock_timestamp()) else '{}'::jsonb end,
   updated_at = clock_timestamp()
   where id = p_id and (state in ('queued', 'needs_user')
    or (state = 'driving' and vm_worker is not null and vm_phase is distinct from 'submitting' and not evidence ? 'clicked_at'));
@@ -332,6 +405,22 @@ begin
  end if;
  return public.career_apply_cloud_text_authorize(p_id, p_lease, p_hash, p_source_digest);
 end $$;
+
+-- What the claim and submit checks stopped that the person has not been told yet; marked told as it is read (the chat's next reply
+-- says it; a reply that fails to go out loses that sentence, never the stop).
+create or replace function public.career_apply_fact_stops_untold(p_user uuid) returns jsonb
+language plpgsql security definer set search_path = public, pg_temp as $$
+declare out_ jsonb;
+begin
+ if p_user is null then raise exception 'invalid person'; end if;
+ with x as (update public.career_apply_jobs set evidence = evidence || jsonb_build_object('told_at', clock_timestamp())
+   where user_id = p_user and state = 'not_submitted' and evidence->>'reason' = 'fact_changed' and not evidence ? 'told_at'
+   returning id, company, evidence->>'stopped_by' as by_, updated_at)
+ select coalesce(jsonb_agg(jsonb_build_object('id', id, 'company', company, 'stopped_by', by_) order by updated_at), '[]'::jsonb) into out_ from x;
+ return out_;
+end $$;
+revoke all on function public.career_apply_fact_stops_untold(uuid) from public, anon, authenticated;
+grant execute on function public.career_apply_fact_stops_untold(uuid) to service_role;
 
 -- The chat's stop, in the turn that changed the fact. p_changes: [{"id": fact id, "was": old words, "was_value": old value or
 -- null, "now": new words or null (set aside), "now_value": new value or null}]. The change is recorded first.

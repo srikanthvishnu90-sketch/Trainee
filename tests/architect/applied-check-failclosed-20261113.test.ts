@@ -159,7 +159,8 @@ Deno.test("AC-3 a reply that says they have no applications needs a successful l
   const s = scripted([text(none), text(none)]);
   const r = await turn("what should i focus on this week?", s.model, { capabilities: [okTool] });
   ok(/did not read their record/.test(s.seen[1].system), "asked once");
-  ok(!B.saysNoApplications(r.reply) && /unconfirmed/.test(r.reply), r.reply);
+  // Round 2: the model never looked, so code ran the lookup itself; the reply now stands on a successful read.
+  eq([r.tool_calls.map((c) => [c.name, c.ok]), r.reply], [[["read_application_mail", true]], none]);
   // No lookup tool on the turn at all: still never sent as is.
   const s2 = scripted([text(`${none} Start with your resume.`), text(`${none} Start with your resume.`)]);
   const r2 = await turn("what should i focus on this week?", s2.model);
@@ -365,7 +366,7 @@ Deno.test("AC-9 end to end: code looks up when the model did not, says the cover
   const lazy = async (p: any) => { seen.push(p); return p.tools?.length ? text("You haven't applied anywhere yet, so start with PayPal.") : text(/Record: /.test(JSON.stringify(p.messages)) ? "Your record shows no applications yet, so start with PayPal." : ""); };
   const r5 = await turn("what should i focus on this week?", lazy, { capabilities: caps(ok1) });
   eq(r5.tool_calls.map((c) => [c.name, c.ok]), [["read_application_mail", true]], "code ran the lookup");
-  ok(seen.some((p) => !p.tools?.length && /"applied":\[\]/.test(JSON.stringify(p.messages))), "the model was asked once with the record as facts");
+  ok(seen.some((p) => !p.tools?.length && p.messages[0].content[0].text.includes('"applied":[]')), "the model was asked once with the record as facts");
   eq(r5.reply, "Your record shows no applications yet, so start with PayPal.\n\nChecked: Gmail account a@x.test and Trainee's saved record.");
   // Item 6: a real question inside a hypothetical is looked up; a true hypothetical is left alone.
   for (const m of ["have i applied anywhere? if i had, which ones?", "i can't imagine i've applied anywhere yet, have i?", "if i was rejected by stripe, have i applied anywhere else?"]) {

@@ -29,6 +29,7 @@ export interface CapabilityDeps {
   // D-062: every Google account the person connected (the first grant first), with whether each may read and send.
   accounts: ((userId: string) => Promise<GoogleAccount[]>) | null;
   cursor: ((userId: string) => Promise<string | null>) | null;
+  readTimeoutMs?: number; // how long the live read may take before it counts as not read (default 12 s)
   readNow: ((userId: string) => Promise<MailNow>) | null; // one mail run for this person before answering (career_inbox_followups.ts mailNow)
   connectUrl: string; // where the person connects Gmail themselves (they sign in to Google; no password in chat)
   situation: Situation | null;
@@ -54,43 +55,54 @@ async function recordFor(d: CapabilityDeps, c: ToolCtx): Promise<ApplicationReco
   // Review of #785 (D-024, owner must-fix "check connected email before saying I haven't applied"): every source is read or
   // named as not read. A live read that threw or answered an error read no account; an account the read left out was not read;
   // a store that threw was not read. None of those is a zero.
-  const could: string[] = [];
+  // Round 2: an account connected without permission to read, or any account while reading email is switched off, was not read
+  // either (the record is then not complete: "none" would only be Trainee's own record). A live read that does not answer within
+  // readTimeoutMs, or answers in a shape this code does not know, read nothing.
+  const could: string[] = [], readList: string[] = [];
   let readOk = false;
   if (all === null) could.push("which Google accounts are connected");
   const boxes = readable.map((a) => a.mailbox), inList = (xs: unknown) => boxes.filter((b) => (Array.isArray(xs) ? xs : []).some((x) => String(x).toLowerCase() === b.toLowerCase()));
+  const failed = new Map<string, string>();
+  for (const a of all ?? []) if (!a.can_read) failed.set(a.mailbox, " (no permission to read mail)");
+  if (!d.tracking) for (const b of boxes) failed.set(b, " (reading email is switched off)");
   // A live read of new mail first (the scheduled run's own code, for this person only, every account), so the answer is as of now.
   if (d.tracking && mail.gmail === "connected" && d.readNow) {
-    const r = await d.readNow(c.userId).catch(() => null);
-    mail.read_now = r?.status === "ok" ? "read" : r?.status === "ERROR" ? "error" : "not_read";
-    if (r?.status === "ok") mail.read_through = r.read_through;
-    mail.accounts_read = r?.status === "ok" ? (Array.isArray(r.mailboxes) ? inList(r.mailboxes) : boxes) : [];
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const r: any = await Promise.race([d.readNow(c.userId), new Promise<null>((res) => { timer = setTimeout(() => res(null), d.readTimeoutMs ?? 12_000); })]).catch(() => null).finally(() => clearTimeout(timer));
+    const ok = !!r && typeof r === "object" && r.status === "ok";
+    mail.read_now = ok ? "read" : r?.status === "ERROR" ? "error" : "not_read";
+    if (ok && typeof r.read_through === "string") mail.read_through = r.read_through;
+    mail.accounts_read = ok ? (r.mailboxes === undefined ? boxes : inList(typeof r.mailboxes === "string" ? [r.mailboxes] : r.mailboxes)) : [];
   }
   if (!mail.read_through && d.cursor && mail.gmail === "connected") mail.read_through = await d.cursor(c.userId).catch(() => null);
   if (d.tracking && mail.gmail === "connected") {
     // No live read on this turn: what the scheduled run read stands through its date; with no date, the mailbox was never read.
     if (!d.readNow && mail.read_through) mail.accounts_read = boxes;
-    mail.accounts_failed = boxes.filter((b) => !mail.accounts_read.includes(b));
-    for (const b of mail.accounts_failed) could.push(`Gmail account ${b}`);
-    readOk ||= mail.accounts_read.length > 0;
+    for (const b of boxes) if (!mail.accounts_read.includes(b)) failed.set(b, "");
   }
+  if (failed.size) mail.accounts_failed = [...failed.keys()];
+  for (const [b, why] of failed) could.push(`Gmail account ${b}${why}`);
+  for (const b of mail.accounts_read) readList.push(`Gmail account ${b}`);
+  readOk ||= mail.accounts_read.length > 0;
   const here = appsFromTracker((c.state as any)?.trackStore?.rows ?? []);
   let stored: any[] = [], events: any[] = [];
   if (d.mail) {
     const got = async <T>(name: string, what: string, f: () => Promise<T[]>): Promise<T[]> => {
-      try { const xs = await f(); readOk = true; return xs; } catch { unreadable.push(name); could.push(what); return []; }
+      try { const xs = await f(); if (!Array.isArray(xs)) throw new Error("not a list"); readOk = true; return xs; } catch { unreadable.push(name); could.push(what); return []; }
     };
     stored = await got("applications", "the saved applications record", () => d.mail!.applications(c.userId) as any);
     events = await got("mail events", "the saved mail events", () => d.mail!.events(c.userId) as any);
+    if (!unreadable.length) readList.push("Trainee's saved record");
   } else could.push("the saved applications and mail events");
   const apps = [...here.filter((h) => !stored.some((s) => s.ref === h.ref)), ...stored];
   const previous = d.snapshot ? await d.snapshot.get(c.userId).catch(() => null) : null;
-  return buildRecord({ now: c.now, apps, events, situation: d.situation, listed: (c.state as any)?.discovery?.lastShortlist, mail, previous, unreadable, could_not_read: could, read_ok: readOk });
+  return buildRecord({ now: c.now, apps, events, situation: d.situation, listed: (c.state as any)?.discovery?.lastShortlist, mail, previous, unreadable, could_not_read: could, read_ok: readOk, read: readList });
 }
 // The counts a record gives, and what the turn may take as read (loop.ts turn.record, turn.counts): a number of applications only
 // from a complete read. Otherwise it is unknown (null), with what was found as "at least", and the note says so.
 function countsOf(r: ApplicationRecord, c: ToolCtx) {
   const n = r.read.status === "complete" ? r.applied.length : null;
-  if (c.turn) { c.turn.record = r.read; if (n !== null) c.turn.counts = { applied: n }; else delete c.turn.counts; }
+  if (c.turn) { c.turn.record = { ...r.read, found: [...new Set(r.applied.map((a) => a.company))] }; if (n !== null) c.turn.counts = { applied: n }; else delete c.turn.counts; }
   return { applied: n, ...(n === null && r.applied.length ? { applied_at_least: r.applied.length } : {}), researched: r.researched.length, drafts: r.drafts.length };
 }
 const incompleteNote = (r: ApplicationRecord) => r.read.status === "complete" ? "" : ` THIS READ ${r.read.status === "failed" ? "FAILED" : "IS PARTIAL"}: could not read ${r.read.could_not_read.join("; ")}. ` +

@@ -141,6 +141,13 @@ export function recordSource(message: string | undefined): string | undefined {
 export function factRefusal(text: string, message: string | undefined): string | null {
   if (GUESSED.test(text)) return "not saved: a fact about the person is only what they said, never an assumption or inference";
   if (message === undefined) return null;
+  // Review of #785, round 2 (D-007): what they said they did NOT do is never saved as done ("I never interned at Google" as
+  // "Interned at Google"). Each part of the message that shares a content word with the fact decides: all negated, the fact not.
+  const NEG = /\b(?:never|not|no\s+longer|cannot|didnt|dont|wasnt|havent|isnt|arent|without)\b|n't\b/i;
+  const stem = (x: string) => (String(x).toLowerCase().match(/[a-z0-9+#]{3,}/g) ?? []).filter((w) => !FILLER.has(w)).map((w) => w.slice(0, 4));
+  const mine4 = new Set(stem(text));
+  const about = String(message).replace(/[’‘]/g, "'").split(/[.;!?\n]+|,\s+/).filter((part) => stem(part).some((w) => mine4.has(w)));
+  if (about.length && about.every((part) => NEG.test(part)) && !NEG.test(String(text).replace(/[’‘]/g, "'"))) return "not saved: they said they did not; a fact is saved as they said it, never as its opposite";
   // ADVERSARIAL ROUND 2 (2026-10-30): a number is said exactly or not at all. Half the words were enough, so "GPA 4.0"
   // was saved from a message that said "GPA 3.7" (a pasted resume, a posting telling the model the GPA is 4.0).
   const numsOf = (x: string) => (String(x).match(/\d+(?:[.,]\d+)*/g) ?? []).map((n) => n.replace(/,(?=\d{3}\b)/g, ""));

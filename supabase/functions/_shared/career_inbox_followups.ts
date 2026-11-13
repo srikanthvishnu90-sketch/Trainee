@@ -271,7 +271,7 @@ async function cardTurn(o: { userId: string; threadId: string; now: number; deps
     if (!known && await isOutreachPerson(o.deps.outreach, o.userId, ask.company)) return null;
     return done(known
       ? `No ${what} is due for ${clip(ask.company, 80)} right now: an application gets a follow-up after 14 days with no reply, and an interview step a thank-you after 7 days with nothing since. Nothing was drafted or sent.`
-      : `There's no application to ${clip(ask.company, 80)} on record, so there's no ${what} to send. Nothing was drafted or sent.`, "none_due");
+      : `There's no application to ${clip(ask.company, 80)} on record, so there's no ${what} to send. That is Trainee's own record and your tracker; your email was not checked for this answer. Nothing was drafted or sent.`, "none_due");
   }
   const c = found[0];
   if (ask.to) return await show(o, { ...c, to: ask.to, via: "typed" });

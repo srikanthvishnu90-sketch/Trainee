@@ -47,7 +47,7 @@ export interface ApplicationRecord {
   // what was not read, each in plain words.
   read: RecordRead;
 }
-export interface RecordRead { status: "complete" | "partial" | "failed"; could_not_read: string[] }
+export interface RecordRead { status: "complete" | "partial" | "failed"; could_not_read: string[]; read: string[] }
 // What was shown, kept per person (career_watch_kv, erased with everything else) so the next record can correct it.
 export interface Snapshot { at: string; items: { ref: string; company: string; role: string | null; stage: string; hashes: string[] }[] }
 
@@ -160,13 +160,13 @@ export function changesSince(prev: Snapshot | null, applied: AppliedItem[]): Rec
 }
 export const snapshotOf = (r: ApplicationRecord): Snapshot => ({ at: r.as_of, items: r.applied.map((a) => ({ ref: a.ref, company: a.company, role: a.role, stage: a.stage, hashes: a.hashes.slice(0, 10) })) });
 
-export function buildRecord(o: { now: number; apps: TrackedApp[]; events: StatusEvent[]; situation: Situation | null; listed: any[] | null | undefined; mail: MailCoverage; previous: Snapshot | null; unreadable?: string[]; could_not_read?: string[]; read_ok?: boolean }): ApplicationRecord {
+export function buildRecord(o: { now: number; apps: TrackedApp[]; events: StatusEvent[]; situation: Situation | null; listed: any[] | null | undefined; mail: MailCoverage; previous: Snapshot | null; unreadable?: string[]; could_not_read?: string[]; read_ok?: boolean; read?: string[] }): ApplicationRecord {
   const applied = appliedFrom(o.apps, o.events, o.situation);
   const could = [...new Set(o.could_not_read ?? [])];
   return {
     as_of: new Date(o.now).toISOString(), applied, researched: researchedFrom(o.listed, o.situation, applied), drafts: draftsFrom(o.situation),
     mail: o.mail, coverage: coverageOf(o.mail, could), changes: changesSince(o.previous, applied), unreadable: [...new Set([...(o.unreadable ?? []), ...(o.situation?.unreadable ?? [])])],
-    read: { status: !could.length ? "complete" : o.read_ok ? "partial" : "failed", could_not_read: could },
+    read: { status: !could.length ? "complete" : o.read_ok ? "partial" : "failed", could_not_read: could, read: o.read ?? [] },
   };
 }
 

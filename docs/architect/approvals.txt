@@ -370,3 +370,6 @@
 793 9f13bd75cdcf6f0f9d6fa365185baf1140bcebf6 independent-review-20261113 risk=low note=memory-scoped-per-thread-salary-reuse-needs-yes-provenance-wording-low
 794 4247cc744666d3ecdc32e2a232480e0ba51aeb60 independent-review-20261113 risk=low note=chat-links-only-escaped-host-allowlisted-posts-still-refused
 795 5e3203c5cbcd49711c244e076897ae5b0a8cc82a independent-review-20261113 risk=low note=practice-length-and-verdict-check-no-effects-no-test-edits
+766 fe7e985b34060bf405b4c43b5e8faf1cf3ccc0db independent-review-20261113 risk=medium note=condense-guarded-by-768-boundary-caveat-check
+768 3696cddf7a043907320f4b74776c7b1e1f3c9770 independent-review-20261113 risk=low note=hypotheticals-withhold-record-tools-prompt-only
+780 f651d90dcce157dd80150546da201e7595674ecf independent-review-20261113 risk=low note=adds-not-checked-clause-narrow-tone-window

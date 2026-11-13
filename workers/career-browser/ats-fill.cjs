@@ -253,7 +253,8 @@ function STATE(qs) {
     if (!el) return { q: d.q, filled: false, text: "", gone: true };
     switch (d.kind) {
       // AngularJS (Breezy) shows an unset model as its own "? undefined:undefined ?" option: nothing is chosen.
-      case "select": { const o = el.options[el.selectedIndex]; const ph = !el.value || /^\? .* \?$/.test(el.value); return { q: d.q, filled: !ph, text: ph ? "" : squash(o && o.textContent) }; }
+      // Round 2: an option in a placeholder's words ("Please select", "Choose one", "--"), or a disabled one, is no answer whatever its value.
+      case "select": { const o = el.options[el.selectedIndex]; const ph = !el.value || /^\? .* \?$/.test(el.value) || !o || o.disabled || /^[\s\-–—.…]*(?:(?:please\s+)?(?:select|choose|pick)(?:\s+(?:one|an?\s+(?:option|answer|value)))?)?[\s\-–—.…]*$/i.test(squash(o.textContent)); return { q: d.q, filled: !ph, text: ph ? "" : squash(o && o.textContent) }; }
       case "radio": case "checkgroup": { const on = els.filter((e) => e.checked || (!("checked" in e) && e.getAttribute("aria-checked") === "true")); const picked = [...new Set(on.map((e) => e.getAttribute("data-upmore-o") ?? e.getAttribute("data-upmore-io")))]; return { q: d.q, filled: picked.length > 0, picked }; }
       case "buttons": { const on = els.filter((e) => e.getAttribute("aria-pressed") === "true"); return { q: d.q, filled: on.length > 0, picked: on.map((e) => e.getAttribute("data-upmore-o")) }; }
       case "checkbox": return { q: d.q, filled: !!el.checked, text: el.checked ? "checked" : "" };
@@ -958,6 +959,10 @@ async function recheckFilled(page, filled, ctx0, { settleMs = 300 } = {}) {
   lost = await dropped();
   return lost.map((f) => f.label);
 }
+// Round 2 (review of #818), item 10: an option in a placeholder's words, or a disabled one, is no answer, whatever its value
+// (STATE and parallel-apply CONTROLS use the same words).
+const PLACEHOLDER_OPTION = /^[\s\-–—.…]*(?:(?:please\s+)?(?:select|choose|pick)(?:\s+(?:one|an?\s+(?:option|answer|value)))?)?[\s\-–—.…]*$/i;
+const isPlaceholderOption = (text, disabled) => !!disabled || PLACEHOLDER_OPTION.test(String(text || "").replace(/\s+/g, " "));
 // Round 2 (review of #818): a text answer the page rewrote after it was filled and read back ("Example" to "EXAMPLE JR" on change,
 // a phone reformatted on blur) no longer says what the person approved. Read once more at the end, each typed answer must be the
 // approved text exactly (spaces at its ends aside), or for a phone the approved digits, less only a dial code that the field's own
@@ -991,4 +996,4 @@ function holdsApproved(f, want, facts = {}) {
   if (key === "state") return !matchState([held], want).error;
   return false;
 }
-module.exports = { driftedFills, isHoneypot, MARK_SIGNIN, heldNow, recheckFilled, holdsApproved, factsFrom, fillForm, matchOption, matchPlace, matchState, countryNames, phoneCountryMatch, factKey, factValue, answerFor, decide, labelCounts, labelKinds, norm, EXTRACT, STATE, DECLINE };
+module.exports = { PLACEHOLDER_OPTION, isPlaceholderOption, driftedFills, isHoneypot, MARK_SIGNIN, heldNow, recheckFilled, holdsApproved, factsFrom, fillForm, matchOption, matchPlace, matchState, countryNames, phoneCountryMatch, factKey, factValue, answerFor, decide, labelCounts, labelKinds, norm, EXTRACT, STATE, DECLINE };

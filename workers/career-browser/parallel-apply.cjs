@@ -506,7 +506,7 @@ function CONTROLS(arg) {
     .filter((e) => /^(INPUT|SELECT|TEXTAREA)$/.test(e.tagName) && !["submit", "button", "image", "reset", "password"].includes(e.type) && !e.closest("[data-upmore-signin]")).map((e) => {
       const box = e.type === "checkbox" || e.type === "radio", q = e.getAttribute("data-upmore-q");
       const own = squash(e.labels && e.labels[0] && e.labels[0].innerText);
-      const value = box ? (e.checked ? own || squash(e.value) || "on" : null) : e.tagName === "SELECT" ? [...e.selectedOptions].filter((o) => o.value !== "").map((o) => squash(o.textContent)).join(", ") || null
+      const value = box ? (e.checked ? own || squash(e.value) || "on" : null) : e.tagName === "SELECT" ? [...e.selectedOptions].filter((o) => o.value !== "" && !o.disabled && !/^[\s\-–—.…]*(?:(?:please\s+)?(?:select|choose|pick)(?:\s+(?:one|an?\s+(?:option|answer|value)))?)?[\s\-–—.…]*$/i.test(squash(o.textContent))).map((o) => squash(o.textContent)).join(", ") || null
         : e.type === "file" ? [...(e.files || [])].map((f) => f.name).join(", ") || null : String(e.value) === "" ? null : String(e.value);
       const touched = (q !== null && filledQs.includes(q)) || (q === null && inQuestion(e));
       let label = squash((e.labels && e.labels[0] && e.labels[0].innerText) || e.getAttribute("aria-label") || e.placeholder).slice(0, 200), hidden = e.type === "hidden", answer = false;

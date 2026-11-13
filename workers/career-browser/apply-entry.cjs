@@ -15,6 +15,10 @@ function applyUrlFor(provider, landed) {
     case "breezy": return /^\/p\/[^/]+$/.test(p) ? `${u.origin}${p}/apply` : null;
     case "workable": return /^\/[^/]+\/j\/[A-Z0-9]+$/i.test(p) ? `${u.origin}${p}/apply/` : null;
     case "recruitee": return /^\/o\/[^/]+$/.test(p) ? `${u.origin}${p}/c/new` : null;
+    // D-072: Workday's form is behind "Apply" then "Apply Manually" (strict run 43192269304: 76 of 80 postings stopped with no form
+    // found because the two links lead to different addresses). Its own address: the posting's path + /apply/applyManually, which
+    // draws the employer's account sign-in or create-account page (a wall the person finishes) or the form.
+    case "workday": return /\/job\/.+_[A-Za-z0-9-]+$/.test(p) && !/\/apply(\/|$)/.test(p) ? `${u.origin}${p}/apply/applyManually` : null;
     default: return null;
   }
 }

@@ -66,6 +66,8 @@ export const SHARED_REPLY_MODULES = [
   "automated_inbox.ts", "outreach_ask.ts", "ask_language.ts",
   // R10 F.3 (2026-11-09): a stop turn's reply, built from the control state it wrote and read back (handler-career.ts).
   "career_stop_truth.ts",
+  // D-072 (2026-11-12): a review of a practice answer is checked with the rubric's answers-first rule (career_brain.ts processCheck).
+  "reply_rubric.ts",
   // D-072 (files reachable, 2026-11-12): the staged route's reading of a File ask, the File family maker behind open_record_file
   // (what it makes and the holds the reply may say), and its deployed wiring (handler-career.ts).
   "file_family_ask.ts", "file_family_make.ts", "file_family_make_supabase.ts",

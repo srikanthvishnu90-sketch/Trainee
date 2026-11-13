@@ -171,7 +171,7 @@ export async function agentTurn(o: {
   // D-067 (live round 2): an ask about their own applications reads the Gmail record first (G14, C6); pay this conversation already
   // showed is used for a pay ask (G7, C22); a question that states nothing about them is not offered a record write (G1, C1).
   // Round 2: a direct question about their real applications is answered from the record even inside a hypothetical.
-  const appHypo = !!hypo && !realApplicationsAsk(o.message);
+  const appHypo = !!hypo && !statusQuestion(o.message);
   const historyAsk = !appHypo && historyAskOf(o.message), shownPay = hypo ? [] : shownPayOf(o.message, o.history);
   // D-070 (G9/D-007, live-7 setup: "the 3.9 gpa on there is outdated, don't reuse it"): a stored fact the person says is out of date
   // is set aside by code before the model runs: back to a draft (never used for a resume, an answer or a form), with when and what
@@ -220,21 +220,15 @@ export async function agentTurn(o: {
     model: o.model,
     ctx,
   });
-  // Round 2 (owner must-fix; D-024): a turn that touches the status of their applications stands on a lookup. When the model made
-  // none, code reads the record itself (the same tool) and the model rewrites its reply once from what was read.
+  // Rounds 2 and 3 (owner must-fix; D-024): a turn that asks about, or whose reply speaks of, the status of their applications
+  // stands on a lookup. When the model made none, code reads the record itself (the same read-only tool), on any turn, whatever
+  // else it did; what is then said about their applications is code's (applicationsEnforced, at the end of the turn).
   const lookTool = tools.find((t) => t.name === "read_application_mail");
-  const wrote = (result.tool_calls ?? []).some((c) => c.ok && c.effect && c.effect !== "read");
   let codeRan = false;
-  if (!appHypo && lookTool && result.stopped === "final" && result.reply && !result.show && !wrote && !(result.pending_approvals ?? []).length && !lookupOf(result.tool_calls ?? []).tried
-    && (realApplicationsAsk(o.message) || touchesApplications(result.reply))) {
+  if (!appHypo && lookTool && result.stopped === "final" && result.reply && !lookupOf(result.tool_calls ?? []).tried && (statusQuestion(o.message) || (!result.show && statusLike(result.reply)))) {
     codeRan = true;
     const out: any = await Promise.resolve().then(() => lookTool.run({}, ctx)).catch(() => null);
     result = { ...result, tool_calls: [...(result.tool_calls ?? []), { name: lookTool.name, ok: !!out, effect: "read" as const, ...(out ? {} : { error: "the record could not be read" }) }] };
-    const facts = out ? JSON.stringify({ counts: out.counts, applied: (out.applied ?? []).map((a: any) => ({ company: a.company, role: a.role, status: a.status, confirmed_by: a.confirmed_by })), read: out.read, coverage: out.coverage }) : null;
-    const res = facts ? await o.model({ system: "A career assistant wrote this reply without reading the person's application record. Code has now read it. Rewrite the reply so that everything it says about the person's own applications (whether and where they applied, how many, their status) matches the record exactly; change nothing else. Use no employer, count or status that is not in the record. If the record's read is partial or failed, say what could not be read and that the rest is unconfirmed; never say they have not applied, and give no total. Output the reply only.",
-      messages: [{ role: "user", content: [{ type: "text", text: `Person's message: ${o.message}\nReply: ${result.reply}\nRecord: ${facts}` }] }], tools: [], max_tokens: 700, tool_choice: { type: "none" } } as any).catch(() => null) : null;
-    const again = ((res as any)?.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join("").trim();
-    if (again) result = { ...result, reply: again };
   }
   // R10 WO-H fix 14b: a draft that could not be written without settling which document or recipient: the reply is that one
   // question, and nothing else (no draft, no second question). Without a question in the reply, it stands as written.
@@ -346,11 +340,12 @@ export async function agentTurn(o: {
   // or blank reply is never sent: the research's own sourced points when it found any, else the honest line that it did not finish.
   // D-071 (live-8 C6: "Your Gmail shows 8 applications ... That's 9 listed, so I miscounted 8 above"): the number of applications is
   // the record's (read_application_mail's counts), never the model's own count.
-  // Review of #785 (owner must-fix; D-024): the last word on their applications is code's (applicationsEnforced): a reply that
-  // stands on no complete lookup is held, and what the lookup covered is said by code from its result.
+  // Review of #785 (owner must-fix; D-024): the last word on their applications is code's (applicationsEnforced): after a lookup
+  // the status is stated by code from its result and the model's own status sentences go; with none, a denial is held. A payload
+  // being shown is never touched: what code states goes after it.
   const looked = lookupOf(result.tool_calls ?? [], (ctx.turn as any)?.record);
-  if (!appHypo && result.reply && !result.show) {
-    const held = applicationsEnforced(result.reply, looked, { message: o.message, codeRan });
+  if (!appHypo && result.reply) {
+    const held = result.show ? (looked.tried && statusQuestion(o.message) ? `${result.reply.trimEnd()}\n\n${coverageLine(looked)}` : result.reply) : applicationsEnforced(result.reply, looked, { message: o.message, codeRan });
     if (held !== result.reply) result = { ...result, reply: held, flags: [...new Set([...(result.flags ?? []), looked.ok ? "applications_basis" : "applications_unconfirmed"])] };
   }
   const counted = (ctx.turn as any)?.counts?.applied;
@@ -510,7 +505,7 @@ export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts:
     // and when it was tried and failed the reply is asked again with that fact (agentTurn then enforces it in code).
     const none = (o.mail || o.noneClaim) && saysNoApplications(reply), look = lookupOf(calls, o.record?.());
     if ((o.history || (none && o.mail)) && !look.tried) return "They asked about their own applications and you did not read their record. Call read_application_mail now and answer from what it returns, saying what it covered.";
-    if (none && !look.ok) return look.tried
+    if (none && !look.ok && look.status !== "unknown") return look.tried
       ? `Your lookup of their applications ${look.what.length ? `was incomplete: it could not read ${look.what.join("; ")}` : "failed"}. Your draft says they have not applied or have no applications, and nothing verified that. Do not say it, and give no total. Say plainly what could not be read just now, that whether they applied is unconfirmed until it can be, and anything the lookup did find as "at least".`
       : "Your draft says they have not applied or have no applications, and their application record was not read this turn. Do not say it. Say that you have not checked their applications, so it is unconfirmed.";
     // D-067 (G11, C1): a plan ask gets its plan as a File (the postings and the weeks in it); the reply is the short answer and says the plan is in the file.
@@ -543,51 +538,77 @@ export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts:
   };
 }
 
-// Review of #785: what a turn's lookup of the person's applications came to. `ok` only when a lookup tool call succeeded and its
-// read was complete (every account and store read); `what` names what could not be read, `read` what was, `found` the employers on it.
+// Review of #785: what a turn's lookup of the person's applications came to. `status`: "none" no lookup ran; "failed" it ran and
+// read nothing; "partial"; "complete" every account and store was read; "unknown" a lookup returned but left no record of what it
+// read (round 3: that is never taken for complete). `what` names what could not be read, `read` what was, `found` each application.
 const LOOKUP_TOOLS = ["read_application_mail", "export_tracker"];
 type LookRecord = { status: string; could_not_read: string[]; read?: string[]; found?: string[] };
-export interface Look { tried: boolean; ok: boolean; status: "none" | "failed" | "partial" | "complete"; what: string[]; read: string[]; found: string[] }
+export interface Look { tried: boolean; ok: boolean; status: "none" | "failed" | "partial" | "complete" | "unknown"; what: string[]; read: string[]; found: string[] }
 export function lookupOf(calls: { name: string; ok: boolean }[], record?: LookRecord | null): Look {
   const mine = calls.filter((c) => LOOKUP_TOOLS.includes(c.name)), ran = mine.some((c) => c.ok);
-  const status = !mine.length ? "none" : !ran ? "failed" : record?.status === "partial" || record?.status === "failed" ? record.status : "complete";
-  return { tried: mine.length > 0, ok: status === "complete", status, what: ran && status !== "complete" ? record!.could_not_read : [], read: ran ? record?.read ?? [] : [], found: ran ? record?.found ?? [] : [] };
+  const status = !mine.length ? "none" : !ran ? "failed" : !record ? "unknown" : record.status === "complete" || record.status === "partial" ? record.status : "failed";
+  return { tried: mine.length > 0, ok: status === "complete", status, what: ran && record && status !== "complete" ? record.could_not_read : [], read: ran ? record?.read ?? [] : [], found: ran ? record?.found ?? [] : [] };
 }
-// Round 2 (structural, not by phrasing): does this text touch the status of the person's applications at all? A turn whose message
-// or reply does gets the record read (by the model, or by code after it), so what is said stands on a lookup. Broad on purpose: a
-// false trigger costs one read and one model pass.
+// Round 2 (structural, not by phrasing): does this text touch the status of the person's applications at all?
 const APP_STATUS = /\bappl(?:ied|ications?)\b|\b(?:did|do|does|didn'?t)\s+i\s+(?:\w+\s+)?apply\b|\bsubmi(?:tted|ssions?)\b|\bsent\s+(?:in|out)\b|\btracker\b|\bin\s+flight\b|\bon\s+(?:record|file)\b|\bheard\s+back\b|\breject(?:ed|ions?)\b|\banywhere\s+(?:yet|else|new)\b|\b(?:yet|need|still)\s+to\s+apply\b|\bnot\s+appl|\bapps\b|\bpipeline\b/i;
+const tidy = (t: string) => String(t ?? "").replace(/[’‘`]/g, "'");
 // A condition is not a statement of status ("If you hadn't applied anywhere, I'd start with three a week.").
-export function touchesApplications(text: string): boolean { return APP_STATUS.test(String(text ?? "").replace(/[’‘`]/g, "'").replace(/\b(?:if|suppose|supposing|unless|whether)\b[^,;:.!?]*/gi, " ")); }
+export function touchesApplications(text: string): boolean { return APP_STATUS.test(tidy(text).replace(/\b(?:if|suppose|supposing|unless|whether)\b[^,;:.!?]*/gi, " ")); }
 // A direct question about their real applications, even inside a hypothetical ("have i applied anywhere? if i had, which ones?").
-export function realApplicationsAsk(message: string): boolean { const t = String(message ?? "").replace(/[’‘`]/g, "'"); return historyAskOf(t) || (APP_STATUS.test(t) && /\b(?:have|did|had|am|do)\s+i\b/i.test(t)); }
+export function realApplicationsAsk(message: string): boolean { const t = tidy(message); return historyAskOf(t) || (APP_STATUS.test(t) && /\b(?:have|did|had|am|do)\s+i\b/i.test(t)); }
+// Round 3: a status-like question, read broadly (when unsure the record is read: a false alarm costs one read). Sentence by
+// sentence, a supposition apart ("if i had applied ..."); a bare "have i?" or "did i?" counts beside a sentence about applying.
+// Not when the message is plainly a search, a draft or a resume edit and names no application word.
+// CORE: asks that are about where things stand and little else. LOOSE: words a status question often has and other talk has too
+// ("how many", "so far", "go through"): they get the read, and code's statement only when the reply speaks of status.
+const CORE_ASK = /\b(?:status|pending|in\s+flight|heard\s+back|any\s+(?:luck|news|updates?|word)|where\s+(?:am|are)\s+(?:i|we)\b|where\s+do\s+(?:i|things)\s+stand|what'?s\s+out|anything\s+out|gone\s+out|catch\s+me\s+up|the\s+damage|my\s+name\s+on\s+it|(?:get|got|have|has)\s+my\s+(?:stuff|resume|application)|who\s+have\s+i\s+sent)\b/i;
+const LOOSE_ASK = /\b(?:go(?:ne|es)?\s+through|went\s+through|so\s+far|how\s+many|sent\s+(?:stuff|anything|it)\s+to)\b/i;
+const OTHER_TASK = /\b(?:find|search|look\s+for|show\s+me|tailor|rewrite|edit|draft|write|cover\s+letter|interview|prep|practice|quiz|salary|pay|internships?\s+(?:are|in)|postings?|openings?)\b/i;
+export function statusQuestion(message: string, coreOnly = false): boolean {
+  const all = tidy(message), real = all.split(/(?<=[.!?])\s+|\n+/).filter((x) => !/^\W*(?:if|suppose|supposing|imagine|hypothetically|what\s+if|say)\b/i.test(x) || /\b(?:have|did|has)\s+(?:i|anything)\b[^,]*\?\s*$/i.test(x));
+  if (real.some((x) => realApplicationsAsk(x))) return true;
+  if (APP_STATUS.test(all) && real.some((x) => /^\W*(?:and\s+|so\s+|also\s+)?(?:have|did|has|am)\s+(?:i|it|anything)\b[^.]{0,20}\?\s*$/i.test(x.trim()))) return true;
+  return real.some((x) => (CORE_ASK.test(x) || (!coreOnly && LOOSE_ASK.test(x))) && !(OTHER_TASK.test(x) && !APP_STATUS.test(x)));
+}
+// Round 3: a sentence of a reply that reads like a statement of where their applications stand, by a broad test: the application
+// words; the ways of saying "none" or "that is all" ("nothing has gone out", "clean slate", "so far", "at zero", "the list is
+// empty", "only Acme"); or a quantity said of the person. What Trainee itself did not send is not one ("Nothing was sent.").
+const IDIOM = /\bgone\s+out\b|\bclean\s+slate\b|\bso\s+far\b|\b(?:at|from|still\s+at)\s+(?:zero|none|square\s+one)\b|\bzero\s+sent\b|\bzilch\b|\bzip\b|\bstarting\s+(?:fresh|from\s+scratch)\b|\bfrom\s+scratch\b|\b(?:board|list|slate|queue)\s+is\s+(?:bare|empty|blank|clear)\b|\bnot\s+a\s+single\b|\bwhole\s+list\b|\bon\s+(?:the|your)\s+list\b|\bhave\s+your\s+resume\b|\b(?:never\s+)?went\s+through\b|\bfirst\s+(?:one|application)\b|\bnothing\s+from\s+you\b|\b(?:[Oo]nly|[Jj]ust)\s+(?-i:[A-Z])[a-z]+\b/i;
+const OF_YOU = /\byou(?:'re|'ve|r)?\b[^.!?]{0,40}\b(?:zero|none|nothing|nobody|no\s+one|only\s+one|anything\s+in|empty)\b|\b(?:zero|none|nothing|nobody)\b[^.!?]{0,30}\byou(?:r)?\b/i;
+export function statusLike(text: string): boolean {
+  return tidy(text).split(/(?<=[.!?])\s+|\n+/).some((x) => {
+    const c = x.replace(NOTHING_SENT_I, " ");
+    if (!c.trim() || POLICY.test(c.toLowerCase()) || TRAINEE_DID_NOT.test(c.toLowerCase())) return false;
+    return touchesApplications(c) || IDIOM.test(c) || OF_YOU.test(c) || saysNoApplications(c);
+  });
+}
 const listed = (xs: string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}` : xs[0] ?? "");
 const NOT_CHECKED = "I haven't checked your application record in this reply, so whether you've applied is unconfirmed. Ask me and I'll check.";
-// D-024: what the lookup covered, said by code from its result: what was read, what was not, and what that leaves unconfirmed.
+const NOT_READ = "I couldn't read your application record just now, so whether you've applied is unconfirmed. Ask me again and I'll check.";
+// D-024, round 3: the status of their applications, stated by code from the lookup's result and nothing else: each application
+// found (employer, role, date, what it stands on), or that none was found, and what was read and what was not.
 export function coverageLine(look: Look): string {
   if (!look.tried) return NOT_CHECKED;
-  if (look.status === "complete") return look.read.length ? `Checked: ${listed(look.read)}.` : "";
-  const found = look.found.length ? ` Found so far, at least: ${look.found.join(", ")}.` : "";
+  if (look.status === "unknown" || (look.status === "failed" && !look.what.length)) return NOT_READ;
+  const n = look.found.filter((f) => !/^and \d+ more$/.test(f)).length + Number(/^and (\d+) more$/.exec(look.found.at(-1) ?? "")?.[1] ?? 0);
+  if (look.status === "complete") return `${n ? `Your application record shows ${n} application${n === 1 ? "" : "s"}: ${look.found.join("; ")}.` : "I found no applications of yours."} Checked: ${listed(look.read)}.`;
+  const found = look.found.length ? ` Found so far, at least: ${look.found.join("; ")}.` : "";
   return look.status === "partial" && look.read.length
     ? `I read ${listed(look.read)}. I couldn't read ${listed(look.what)}, so what is there is unconfirmed.${found}`
-    : `I couldn't read ${look.what.length ? listed(look.what) : "your application record"} just now, so whether you've applied is unconfirmed.${found} Ask me again and I'll check.`;
+    : `I couldn't read ${listed(look.what)} just now, so whether you've applied is unconfirmed.${found} Ask me again and I'll check.`;
 }
-// Round 2: the reply after a read that was not complete (or none, with a "none" claim). Phrasings of "you haven't applied" cannot
-// be listed, so nothing is recognised: code's coverage line comes first, and of the model's sentences only two kinds stay: one that
-// names an employer the lookup found, with no denial or bound in it; and one with no application-status word, no negation and no
-// quantity at all. What hung on a dropped sentence goes with it (its list, "That means ...", a heading left with nothing under it).
-const HELD_STATUS = new RegExp(`${APP_STATUS.source}|\\bstatus\\b|\\bthings\\s+stand\\b|\\bfollow\\s+up\\b|\\bconfirmations?\\b|\\bgone\\s+out\\b|\\bgmail\\b|\\bemail\\b|\\binbox\\b`, "i");
-const DENIES = /\b(?:no|nope|nah|not|none|nothing|never|nowhere|zero|0|empty|only|just|yet|first|scratch|pending|neither|nor|without|all|total|altogether|nog|nergens|geen|niet|ningun[ao]?|nada|nunca|aucune?|rien|nicht|kein\w*|nie)\b|n't\b|\b(?:\d+|one|two|three)\s+(?:place|application|compan|role|job|app)\w*/i;
+// The model's sentences that may stay beside code's statement. `strict` (they asked about their applications, or the read was not
+// complete): only a sentence with no application-status word, no word about reading or checking, no negation, quantity or
+// yes/no, and none that hangs on a dropped one (its list, "That means ...", a heading left with nothing under it). Otherwise (the
+// reply only brushed the subject): every sentence but the status-like ones.
+const HELD_STATUS = new RegExp(`${APP_STATUS.source}|\\bstatus\\b|\\bthings\\s+stand\\b|\\bfollow\\s+up\\b|\\bconfirm\\w*\\b|\\bgmail\\b|\\be-?mails?\\b|\\binbox\\b|\\bmailbox\\b|\\baccounts?\\b|\\bread\\b|\\bcheck(?:ed|ing)?\\b|\\blooked\\b|\\bscanned\\b|\\bsearched\\b|\\brecords?\\b|\\blist(?:ed)?\\b|\\bsent\\b|\\bwent\\s+through\\b`, "i");
+const DENIES = /\b(?:yes|yep|yeah|no|nope|nah|not|none|nothing|nobody|never|nowhere|zero|0|zilch|zip|nada|nil|empty|bare|clear|only|just|yet|first|scratch|fresh|slate|square|pending|neither|nor|without|all|few|some|several|many|everything|total|altogether|already|good|nog|nergens|geen|niet|ningun[ao]?|nunca|aucune?|rien|nicht|kein\w*|nie)\b|n't\b|\b(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)\s+(?:place|application|compan|role|job|app|employer)\w*/i;
 const BULLET = /^\s*(?:[-*•]|\d+[.)])\s+/;
-export function heldReply(reply: string, look: Look): string {
-  const stays = (x: string) => {
-    const t = x.replace(/[’‘`]/g, "'");
-    if (look.found.some((c) => c && t.toLowerCase().includes(c.toLowerCase()))) return !DENIES.test(t);
-    return !HELD_STATUS.test(t) && !DENIES.test(t) && !(look.status !== "complete" && /^\W*i(?:'ve| have)?\s+(?:just\s+)?(?:checked|looked|searched|went\s+through)\b/i.test(t));
-  };
+function keptSentences(reply: string, strict: boolean, own: string): string {
+  const names = /\b(?:rejected|invited|interview(?:ed)?|offer(?:ed)?|replied|responded|confirmed|moved)\b/i;
+  const stays = (x: string) => { const t = tidy(x); return strict ? !HELD_STATUS.test(t) && !DENIES.test(t) && !IDIOM.test(t) && !names.test(t) && !/\b(?!(?:It|That|This|There|Here|What|Which|Who|She|He|Everything|One|Then|And|But)\b)[A-Z][A-Za-z]+(?:\s+(?:is|has|have|was|and)\b|,)/.test(t) : !statusLike(t); };
   const out: string[] = [];
   let dropped = false, headGone = false, anyBullet = false;
-  const own = coverageLine(look) || NOT_CHECKED;
   for (const line of String(reply ?? "").split(own).join("").split("\n")) {
     if (!line.trim()) { out.push(""); dropped = false; continue; }
     const bullet = BULLET.test(line), parts = line.split(/(?<=[.!?])\s+/);
@@ -602,18 +623,23 @@ export function heldReply(reply: string, look: Look): string {
     if (kept.length) out.push(kept.join(" "));
   }
   const lines = out.map((l) => (anyBullet ? l.replace(/^\s*\d+[.)]\s+/, "") : l)).filter((l, k, xs) => !(/:\s*$/.test(l) && !BULLET.test(xs[k + 1] ?? "")));
-  const kept = lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
-  return [own, kept].filter(Boolean).join("\n\n");
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
-// The last word on a turn's reply about applications (agentTurn). A read that was not complete: the held reply, when the person
-// asked about their applications, the reply says "none", or the model itself looked; a reply that only brushed the subject keeps
-// every sentence and gains the coverage line. No read at all: held only when it says "none". A complete read that found nothing:
-// untouched, with what was read after it, so "you haven't applied" always shows its basis.
+export function heldReply(reply: string, look: Look, strict = true): string {
+  const own = coverageLine(look);
+  return [own, keptSentences(reply, strict, own)].filter(Boolean).join("\n\n");
+}
+// The last word on a turn's reply about applications (agentTurn), round 3. A lookup ran: the status is code's statement
+// (coverageLine), and no sentence of the model's about it stays, whatever the read came to; strictly when they asked about their
+// applications or the read was not complete. No lookup ran (no tool for it): a status question, or a reply that says "none", is
+// held the same way with the line that the record was not checked; any other reply stands. A lookup that left no record of what
+// it read backs nothing: a denial after it is held.
 export function applicationsEnforced(reply: string, look: Look, o: { message: string; codeRan?: boolean }): string {
-  const denial = saysNoApplications(reply), asked = realApplicationsAsk(o.message), line = coverageLine(look);
-  if (!look.tried) return denial ? heldReply(reply, look) : reply;
-  if (look.status !== "complete") return asked || denial || !o.codeRan ? heldReply(reply, look) : reply.includes(line) ? reply : `${reply.trimEnd()}\n\n${line}`;
-  return !look.found.length && line && (asked || denial) && !reply.includes(line) ? `${reply.trimEnd()}\n\n${line}` : reply;
+  const asked = statusQuestion(o.message), core = statusQuestion(o.message, true), strong = realApplicationsAsk(o.message), speaks = statusLike(reply);
+  if (look.status === "none" || look.status === "unknown") return (look.status === "none" && (strong || (asked && speaks))) || saysNoApplications(reply) ? heldReply(reply, look) : reply;
+  // A loose trigger and a reply that says nothing of status: the read was a false alarm, and the reply stands as written.
+  if (!core && !speaks) return reply;
+  return heldReply(reply, look, strong || look.status !== "complete");
 }
 // Review of #785 (fail closed): does this reply say the person has no applications, or has not applied (anywhere or somewhere)?
 // Read sentence by sentence. Left out: what Trainee itself did not send ("Nothing was sent or submitted.", "I haven't submitted
@@ -622,6 +648,7 @@ export function applicationsEnforced(reply: string, look: Look, o: { message: st
 const NOT_APPLIED = /\b(?:you|u)(?:'ve| have| had)?\s+(?:still\s+|really\s+|also\s+)?(?:haven'?t|have\s+not|not|hadn'?t|had\s+not|never|have\s+never|didn'?t|did\s+not|have\s+yet\s+to|are\s+yet\s+to)\s+(?:yet\s+|actually\s+|even\s+)?(?:\w+\s+)?(?:applied|apply|submitted|submit|sent\s+in)\b|(?:^|[,;:]\s*|\b(?:so|and|but)\s+)(?:not|haven'?t|never)\s+(?:yet\s+)?applied\b/;
 const NO_APPLICATIONS = /(?:\b(?:no|zero|not\s+any|not\s+a\s+single|without\s+any|none\s+of(?:\s+your|\s+the)?)|(?<![\d.,])0(?!\s+of\b)|n't\s+(?:\w+\s+){0,3}?(?:any|a\s+single))\s+(?:(?!rejected|new|other|more|further|declined|withdrawn|pending|open|unanswered|response|reply|update|answer|news|word)\w+\s+){0,3}?applications?\b(?!\s+(?:fees?|deadlines?|forms?|process|portal|window|cycle|season|page|link|materials|essays?|requirements?|questions?|open(?:ed)?|needed|required|necessary|(?:is|are|was|were)\s+(?:needed|required|necessary|open|due|accepted)))/;
 const NOTHING_THERE = /\bnothing\b[^.!?]{0,30}?\b(?:submitted|applied|on\s+(?:record|file)(?!\s+(?:for|of|about)\s+(?:the|your|that|this|an?)\s+(?!appl)\w)|shows?\b[^.!?]{0,30}\bappl\w*|gone\s+out)\b|\bno\s+(?:record|sign|trace|evidence|confirmation|mention)\b[^.!?]{0,30}\bappl(?:y|ied|ying|ication)|\b(?:tracker|applications?\s+(?:list|record|history|log))\s+(?:is|looks|comes\s+up|came\s+back)\s+(?:still\s+)?(?:empty|blank)\b/;
+const NOTHING_SENT_I = /\bnothing\s+(?:was|has\s+been|is|got|will\s+be)\s+(?:sent|saved|queued|submitted|created|applied\s+for)\b(?:(?:,|\s+or|\s+and)\s+(?:sent|saved|queued|submitted|created|applied\s+for)\b)*/gi;
 const NOTHING_SENT = /\bnothing\s+(?:was|has\s+been|is|got|will\s+be)\s+(?:sent|saved|queued|submitted|created|applied\s+for)\b(?:(?:,|\s+or|\s+and)\s+(?:sent|saved|queued|submitted|created|applied\s+for)\b)*/g;
 const TRAINEE_DID_NOT = /\b(?:i|we|trainee)\s+(?:have\s+not|haven'?t|did\s+not|didn'?t|won'?t|will\s+not|never)\s+(?:yet\s+)?(?:sent|submitted|applied|queued)\b|\b(?:sent|submitted|applied|queued)\b[^.!?]{0,20}\b(?:by\s+me|by\s+trainee|for\s+you|on\s+your\s+behalf)\b/;
 const NOT_A_CLAIM = /^(?:so\s+|and\s+|ok(?:ay)?,?\s+)?(?:have|haven'?t|had|did|didn'?t|do|does|is|are|should|want|would|can|could|which|what|where|when|shall)\b[^?]*\?\s*$/;

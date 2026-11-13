@@ -306,9 +306,10 @@ export function statementsOf(message: string): { asking: boolean; stated: string
 // request for a topic ("add something about leadership", "a line about Python"), or the question's own subject ("have i
 // applied"). A negated assertion is kept negated (career_tools.ts factRefusal never saves its opposite).
 const ASKED_I = /\b(?:do|does|did|have|has|had|can|could|should|shall|would|will|am|was|may|might|must|what|where|when|how|why|who|which)\s+i\b/g;
-const DOUBT = /\b(?:should|could|would|might|may|can|shall)\s+i\s+(?:\w+\s+)?(?:say|add|put|write|claim|mention|note|include|list|tell)\b|\bi\s+(?:should|could|might)\b|\bif\s+i\b|\bwhat\s+if\b|\bwhether\b|\bdo\s+i\s+(?:need|have)\s+to\b|\bsupposed\s+to\b|\bto\s+(?:say|write|claim|put|list|mention)\s+(?:down\s+)?(?:that\s+)?i\b|\bis\s+it\s+true\b|\bhow\s+(?:do|should|would|can|could)\s+i\b|\bdo\s+you\s+think\b|\b(?:have|did)\s+i\s+(?:ever\s+)?(?:told|tell|mention(?:ed)?|say|said)\b|\beven\s+though\b|\bor\s+not\b|\bsuppose\b|\bpretend\b|\blet'?s\s+say\b/;
-const OWN_NOUN = "gpa|major|minor|school|university|college|degree|visa|goal|title|role|job|experience|internship|skills?|name|email|phone|location|team|work|background|status|graduation|grad|resume|linkedin|github";
-const REPORTED = new RegExp(String.raw`\b(?:said|says|say|told\s+me|thinks?|claims?|according\s+to)\b|^\W*(?:my\s+(?!(?:${OWN_NOUN})\b)[a-z]+|the\s+[a-z]+|he|she|they|someone|people)\s+(?!is\b|are\b|was\b|were\b)[a-z]+`);
+const DOUBT = /\b(?:should|could|would|might|may|can|shall)\s+i\s+(?:\w+\s+)?(?:say|add|put|write|claim|mention|note|include|list|tell|pass)\b|\bi\s+(?:should|could|might|may|wish)\b|\bi'd\s+(?:love|like)\b|\bif\s+i\b|\bwhat\s+if\b|\bwhether\b|\bdo\s+i\s+(?:need|have)\s+to\b|\bsupposed\s+to\b|\bto\s+(?:say|write|claim|put|list|mention)\s+(?:down\s+)?(?:that\s+)?i\b|\bis\s+it\s+true\b|\bhow\s+(?:do|should|would|can|could)\s+i\b|\bdo\s+you\s+think\b|\b(?:have|did)\s+i\s+(?:ever\s+)?(?:told|tell|mention(?:ed)?|say|said)\b|\beven\s+though\b|\bor\s+not\b|\bsuppose\b|\bpretend\b|\blet'?s\s+say\b|^\W*(?:say|imagine|assuming|had)\s+i\b|\b(?:assuming|imagine|hoping|planning)\b|\bwant\s+to\b|\bwould\s+like\b|\bidk\b|\bmaybe\b|\bprobably\b|\bwould\s+that\s+be\b|\b(?:would|will|do|did|can|could)\s+(?:you|u|they|employers|recruiters|people)\s+(?:tell|say|think|check|care|know)\b|\b(?:almost|barely|hardly)\b|\byeah\s+right\b|\boh\s+sure\b|\bas\s+if\b|\blol\b|\/s\b/;
+// Round 3: "my <someone> ..." is someone else, whatever the verb ("my girlfriend is a PM at Stripe"); "my GPA is 3.6" is theirs.
+const OWN_NOUN = "gpa|major|minor|school|university|college|degree|visa|goal|title|role|job|experience|internship|skills?|name|email|phone|location|team|work|background|status|graduation|grad|resume|linkedin|github|capstone|club|cert\\w*|clearance|salary|target|thesis|projects?|portfolio|website|masters|bachelors|phd|own|current|last|first|\\d[\\d.]*";
+const REPORTED = new RegExp(String.raw`\b(?:said|says|say|told\s+me|thinks?|claims?|according\s+to|asked)\b|^\W*(?:(?:and|but|also|so)\s+)?(?:my\s+(?!(?:${OWN_NOUN})\b)[a-z]+|the\s+[a-z]+|he|she|they|her|his|their|someone|people)\s+[a-z]+`);
 const I_STATE = /\b(?:i'm|im|i've|ive|i'd|i'll|i)\s+[a-z]|\bmy\s+[a-z0-9 .+#-]{1,40}?\s(?:is|are|was|were|as|=)\s|\bmy\s+\d+(?:\.\d+)?\s+(?:years?|months?|internships?|semesters?)\b/;
 const POLITE = /\b(?:can|could|will|would)\s+(?:you|u)\b|\bplease\b|\bpls\b/;
 const SAVE_THING = /(?:^\W*|\b(?:can|could|will|would)\s+(?:you|u)\s+(?:please\s+|pls\s+)?|\b(?:please|pls)\s+)(?:add|put\s+down|note|jot(?:\s+down)?|log|save|write\s+down|include)\b(?:\s+that)?\s*:?\s+(?!(?:a|an|the|some|something|anything|more|it|this|that|to|what|when|where|how|why|me)\b)(\S.*)$/;
@@ -316,6 +317,8 @@ export function assertedIn(clause: string, ask: boolean): string | null {
   const c = clause.toLowerCase().replace(/[’‘]/g, "'");
   if (DOUBT.test(c) || REPORTED.test(c)) return null;
   if (!ask) return FIRST_PERSON.test(c) ? clause : null;
+  // A bare "add that i know Go?" asks whether to; "can you add that ...?" asks for it.
+  if (/^\W*(?:add|put|note|jot|log|save|write|include|record)\b/.test(c) && /\?\s*$/.test(c) && !POLITE.test(c)) return null;
   const m = I_STATE.exec(c.replace(ASKED_I, (x) => " ".repeat(x.length)));
   if (m) return clause.slice(m.index);
   // A request to save a named thing ("can you add Python and Go to my skills?"); a bare "include my linkedin?" asks whether to.
@@ -323,6 +326,7 @@ export function assertedIn(clause: string, ask: boolean): string | null {
   return r && (POLITE.test(c) || !/\?\s*$/.test(c)) ? clause.slice(c.length - r[1].length) : null;
 }
 export const statedInAsk = (clause: string): boolean => assertedIn(clause, true) !== null;
+export const asksLike = (clause: string): boolean => ASK_START.test(clause.toLowerCase());
 // A clause about something to do now ("I need to lock in", "I have to finish my resume") is a task, not a standing rule.
 export const TODO_CLAUSE = /\bi\s+(?:really\s+)?(?:(?:need|have|got|want|should|must)\s+to|gotta|wanna|gonna)\s+(?!be\b|have\b|work\b|stay\b|keep\b|live\b|avoid\b|get paid\b)[a-z]+/;
 

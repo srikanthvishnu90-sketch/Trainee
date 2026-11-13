@@ -136,7 +136,7 @@ fi
 # 20261112160000 (D-072 item 4, round 2): the hand-off's re-check and yes on the apply rows; a hand-off row leaves the queue only
 # through career_apply_vm_claim_handoff (the guard trigger). Rollback: supabase/rollbacks/20261112160000_career_apply_handoff_recheck.down.sql.
 # 20261113140000 (D-075): an approved hosted application stating a fact the person set aside or corrected is stopped (the chat's
-# stop, and the claim guard trigger). Rollback: supabase/rollbacks/20261113140000_career_apply_stop_stale_facts.down.sql.
+# stop, the claim, submit and fact-write guards). Rollback: supabase/rollbacks/20261113140000_career_apply_stop_stale_facts.down.sql.
 MIGRATIONS=(
   20261019000000_channel_threads.sql
   20261019000001_career_postings.sql
@@ -491,7 +491,7 @@ MIGRATION_MARK=(
   "to_regclass('public.career_path_comparisons') is not null and exists (select 1 from pg_trigger where tgname = 'career_path_comparisons_guard')"
   "exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'career_apply_jobs' and column_name = 'handoff_done_at') and to_regprocedure('public.career_apply_vm_claim_handoff(text,integer,integer,text[])') is not null and exists (select 1 from pg_trigger where tgname = 'career_apply_handoff_claim_guard')"
   "exists (select 1 from pg_proc where proname = 'career_file_versions_guard' and prosrc like '%career.erase_person%') and exists (select 1 from pg_proc where proname = 'career_erase_person' and prosrc like '%career.erase_person%')"
-  "to_regprocedure('public.career_apply_stop_stale_facts(uuid,text[],text)') is not null and exists (select 1 from pg_trigger where tgname = 'career_apply_facts_claim_guard')"
+  "to_regprocedure('public.career_apply_stop_stale_facts(uuid,jsonb,text)') is not null and exists (select 1 from pg_trigger where tgname = 'career_apply_facts_claim_guard') and exists (select 1 from pg_trigger where tgname = 'career_apply_facts_write_record')"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.
 EARLIER=(20261015010000_career_knowledge_base.sql 20261015020000_career_watch_kv.sql 20261015234000_career_task_intents_v1.sql

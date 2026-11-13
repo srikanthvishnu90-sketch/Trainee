@@ -366,3 +366,7 @@
 791 dfcdb13c8b3f8eac6286a5ee94e4ac1308066735 independent-review-20261113 risk=low note=eval-results-and-docs
 796 c93604cbadfa4fb62b27dc4215d6602a5a345d76 independent-review-20261113 risk=low note=eval-results-and-docs
 819 bbeb23d3a7cbcad018a1d40303444eae79a99995 independent-review-20261113 risk=medium note=support-check-flag-off-byte-identical-to-trunk-1442-outputs-judge-never-called-flag-on-rejected
+786 f9f70591b2f190257c962c0735617154e058d965 independent-review-20261113 risk=medium note=guards-net-positive-followup-redaction-letters-only-password-and-otp-ask-gaps
+793 9f13bd75cdcf6f0f9d6fa365185baf1140bcebf6 independent-review-20261113 risk=low note=memory-scoped-per-thread-salary-reuse-needs-yes-provenance-wording-low
+794 4247cc744666d3ecdc32e2a232480e0ba51aeb60 independent-review-20261113 risk=low note=chat-links-only-escaped-host-allowlisted-posts-still-refused
+795 5e3203c5cbcd49711c244e076897ae5b0a8cc82a independent-review-20261113 risk=low note=practice-length-and-verdict-check-no-effects-no-test-edits

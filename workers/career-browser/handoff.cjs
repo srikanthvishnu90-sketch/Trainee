@@ -108,7 +108,7 @@ function unconfirmedDefaults(controls, person = {}) {
   for (const c of controls || []) {
     // Round 2 (review of #818): every control the page set and the engine did not, text boxes, hidden answers and contenteditable
     // regions included; a disabled control is never sent, so it is shown on the card and never asked.
-    if ((c.hidden && !c.answer) || c.touched || c.disabled || !set(c) || c.type === "file") continue;
+    if ((c.hidden && !c.answer) || c.pageData || c.touched || c.disabled || !set(c) || c.type === "file") continue;
     const box = c.type === "checkbox" || c.type === "radio";
     const label = String(c.label || c.name || c.option || "").slice(0, 200), key = `${label} ${c.name || ""}`;
     const sensitive = DEMOGRAPHIC.test(key) || CONSENT.test(key);
@@ -145,7 +145,7 @@ function answersCard({ url, payload_hash, fields, controls }) {
     const field = String(c.label || c.name || c.type || "");
     if ((c.hidden && !c.answer) || c.touched || !set(c) || have.has(field.toLowerCase())) continue;
     have.add(field.toLowerCase());
-    answers.push({ field, value: String(c.value), source: "page_default" });
+    answers.push({ field, value: String(c.value), source: c.pageData ? "page_data" : "page_default" });
   }
   const card = { url, payload_hash, answers, ...(controls ? { page_digest: pageDigest(controls), hidden_not_hashed: controls.filter((c) => c.hidden && !c.answer).length } : {}) };
   card.hash = cardHash(card);

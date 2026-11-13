@@ -422,30 +422,128 @@ export function shownPayNote(lines: { text: string; url: string | null }[]): str
 // out of date or must not be used again is a correction of a stored fact. Read by grammar (a staleness or do-not-use phrase in
 // the same sentence as what it names), never by a benchmark's wording (P3). Uncertainty ("might conflict", "not 100% sure") is
 // not a withdrawal.
+// Review of #790 (2026-11-13, BLOCKER; owner must-fix "resume edits never drop experience"; D-007), round 2: code un-confirmed
+// facts on a regex guess ("Please don't put the 2024 hackathon first on my resume" set the Acme internship aside, and it left every
+// resume), and the first fix still acted on clauses inside longer messages. Code now FAILS CLOSED, with two readings:
+//   staleFactsOf        the ONE fact code may set aside, or none: the single shape D70-3 pins and nothing else.
+//     1. The whole message is the statement: one sentence. (One exception, KNOWN-UNSAFE and kept only because a pinned test needs
+//        it: d703ListException, below.)
+//     2. Only plain ASCII letters, digits, spaces and . , : ' %; so no question mark of any script, no quotation mark, no symbol, no
+//        other language. No negation, doubt, reported speech, third party or task word (REFUSE). An apostrophe only inside a word; a
+//        colon only as the lead-in's.
+//     3. The statement is exactly: [the|my] <label> <value> | <value> <label> [on there | on my resume | on the resume] is
+//        outdated | out of date | no longer right|correct|true [, don't|do not reuse|use it]. Any other token refuses.
+//     4. Only a score (SCORE: a GPA or a test score) stored as kind "other", "<Label>: <number>", whose number no other fact holds.
+//        Never a role, project, skill, education, leadership, certification, award, contact, work authorisation or date.
+//   factCorrectionHints the wide reading above, for a NOTE only: storage is untouched, and the model asks or uses
+//                       correct_profile_fact, which waits for the person's yes.
 const STALE = /\b(?:outdated|out[- ]of[- ]date|no longer (?:true|accurate|current|right|valid|correct)|not (?:current|accurate|right|valid) any ?more|isn'?t (?:current|accurate|right) any ?more|(?:don'?t|do not|never|stop|please don'?t) (?:re-?use|use|using|put|include|list|show)\b(?: (?:it|that|this|them))?|is (?:old|stale|wrong) now)\b/;
 const sentencesOf = (t: string) => t.split(/(?<=[.!?;])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
 export function staleFactSaid(message: string): boolean { return sentencesOf(lc(message)).some((s) => STALE.test(s)); }
 export interface StoredFact { id?: unknown; kind?: unknown; text?: unknown; title?: unknown; status?: unknown; needs_confirmation?: unknown }
-// The confirmed facts a stale sentence names: by the label before its colon ("GPA: 3.9" -> "gpa"), or by a figure it carries
-// ("3.9"), said in that same sentence.
+// The closed filler list of the statement (rule 3): the only words allowed beside the fact's label, its value and the statement.
+export const SET_ASIDE_FILLER: readonly string[] = ["the", "my", "on", "there", "resume"];
+const SCORE = new Set(["gpa", "sat", "act", "gre", "gmat", "lsat", "mcat", "toefl", "ielts"]);
+const REFUSE = /\b(?:not|never|no|nope|hardly|maybe|perhaps|if|whether|unless|think|guess|said|says|say|claimed|claims|told|wrote|heard|according|brother|sister|mom|mother|dad|father|friend|recruiter|advisor|professor|his|her|hers|their|theirs|someone|somebody|translate|proofread|rewrite|pretend|imagine|suppose|repeat|kidding|joking|joke|lied|lying|jk|lol)\b|n't\b|n t\b/;
+const LIST_LEAD = "a few things to know: ";
+const WRONG_SAID = /^(.+) is (?:outdated|out of date|no longer (?:right|correct|true))(?:, (?:don't|do not) (?:reuse|use) it)?$/;
+const WRONG = /(?:^|\s)(?:(?:is|are|'s)\s+)?(?:now\s+)?(?:outdated|out[- ]of[- ]date)(?![a-z0-9-])|(?:^|\s)(?:(?:is|are|'s)\s+)?no longer (?:true|accurate|current|right|valid|correct)(?![a-z0-9-])|(?:^|\s)(?:is|are)(?:n'?t| not) (?:true|accurate|current|right|valid|correct) any ?more(?![a-z0-9-])|(?:^|\s)(?:is|are) (?:wrong|old|stale)(?: now)?(?![a-z0-9-])/;
+const tokensOf = (t: string) => t.split(/[\s,;:()]+/).map((w) => w.replace(/^[^a-z0-9+#]+|[^a-z0-9+#]+$/g, "")).filter(Boolean);
+const confirmedFact = (f: StoredFact | null | undefined): f is StoredFact => !!f && f.status !== "draft" && f.status !== "rejected" && f.needs_confirmation !== true;
+// A score fact: kind "other", "<Label>: <number>", the label a score's. Nothing else is ever set aside by code (rule 4).
+function scoreOf(f: StoredFact): { label: string; value: string } | null {
+  const m = /^([a-z]+): (\d+(?:\.\d+)?)$/.exec(String(f.text ?? "").trim().toLowerCase());
+  return m && f.kind === "other" && SCORE.has(m[1]) ? { label: m[1], value: m[2] } : null;
+}
 export function staleFactsOf(message: string, facts: StoredFact[] | null | undefined): StoredFact[] {
-  const ss = sentencesOf(lc(message)).filter((s) => STALE.test(s));
+  const raw = String(message ?? "").trim();
+  if (!/^[A-Za-z0-9 .,:'%]+$/.test(raw) || /(?:^|[^A-Za-z])'|'(?:[^A-Za-z]|$)/.test(raw)) return [];
+  const msg = raw.toLowerCase(), listed = msg.startsWith(LIST_LEAD);
+  const [first, ...rest] = (listed ? msg.slice(LIST_LEAD.length) : msg).split(/(?<=\.) +/);
+  if ((rest.length && !listed) || (msg.match(/:/g) ?? []).length !== (listed ? 1 : 0)) return [];
+  const said = WRONG_SAID.exec(first.replace(/\.$/, ""));
+  if (!said || REFUSE.test(said[1])) return [];
+  const all = (facts ?? []).filter(Boolean);
+  const hits = all.filter((f) => {
+    const s = confirmedFact(f) ? scoreOf(f) : null;
+    if (!s || !new RegExp(`^(?:the |my )?(?:${s.label} ${s.value.replace(".", "\\.")}|${s.value.replace(".", "\\.")} ${s.label})(?: on there| on my resume| on the resume)?$`).test(said[1])) return false;
+    // A number another fact also holds names no one fact.
+    return !all.some((o) => o !== f && `${o.title ?? ""} ${o.text ?? ""}`.toLowerCase().split(/[^a-z0-9.]+/).map((w) => w.replace(/\.+$/, "")).includes(s.value));
+  });
+  if (hits.length !== 1) return [];
+  return !rest.length || d703ListException(rest, scoreOf(hits[0])!, all.filter((o) => o !== hits[0])) ? [hits[0]] : [];
+}
+// KNOWN-UNSAFE. This exception exists ONLY because the pinned test D70-3 (tests/architect/d070-live7-fixes-20261112.test.ts:186, :200)
+// requires a code-side set-aside on a message that is a LIST: "a few things to know: <statement>. <other sentences>". A later
+// sentence can take the statement back in words no list can enumerate ("I am only seeing how you handle messages."), so this can
+// still set a fact aside wrongly. The safe behaviour (the list is a note to the model, nothing set aside by code) is asserted in
+// tests/architect/pending/fact-withdrawal-no-leadin-20261113.test.ts; with the owner's yes to amend D70-3, delete this function and
+// its one call. Until then it is as narrow as D70-3 allows. Every later sentence must:
+//   be a whole sentence of five or more words that starts with I / I'm / my, or with the name another stored fact starts with
+//   ("Rallyup's ...", "Harbor ..."): so no imperative and no question;
+//   hold no negation (unless it starts with another fact's name: D70-3's "Harbor dates ... I'm not 100% sure Crestline's ..."), no
+//   word of keeping, ignoring or not acting, no quantifier or pointer over the earlier items, no word of doubt, jest, test or
+//   reported speech, and not the fact's own label or value.
+const NEGATION = /\b(?:not|no|never|none|nothing|nobody|neither|nor|cannot|dont|wont|cant|isnt)\b|n't\b/;
+const POINTS_BACK = /\b(?:any|all|both|each|every|everything|anything|something|these|those|this|that|it|its|them|one|ones|first|second|last|former|above|earlier|before|previous|prior|item|items|line|lines|list|sentence|sentences|statement|statements|thing|things|part|point|points|message|messages|number|numbers|score|scores|record|profile|file)\b/;
+const TAKES_BACK = /\b(?:keep|keeping|ignore|disregard|leave|undo|cancel|forget|strike|scratch|revert|retract|belay|act|acting|change|changing|hold|wait|stop|drop|prefer|reply|test|tests|testing|practice|sample|example|examples|quiz|typo|typos|spam|quote|quoting|dared|messing|fiction|lie|lies|unsure|mistaken|mistake|back|typed|typing|wrote|write|writing|counselor|teacher|roommate|classmate|wrongly|actually|fine|stay|stays|reflection|thought|oops|sorry|true|false|right|wrong|correct|outdated|confused|anyway|obviously|until|unless|once|when|only)\b/;
+function d703ListException(later: string[], score: { label: string; value: string }, others: StoredFact[]): boolean {
+  const names = new Set(others.map((f) => /^[a-z]{4,}/.exec(String(f.title || f.text || "").toLowerCase())?.[0]).filter(Boolean));
+  return later.every((x) => {
+    const words = x.replace(/\.$/, "").split(/[ ,]+/), first = words[0].replace(/'s$/, ""), named = names.has(first);
+    if (!x.endsWith(".") || words.length < 5 || !(named || ["i", "i'm", "my"].includes(words[0]))) return false;
+    if (REFUSE.test(named ? x.replace(/\bnot\b/g, " ") : x) || (!named && NEGATION.test(x)) || POINTS_BACK.test(x) || TAKES_BACK.test(x)) return false;
+    return !words.some((w) => w === score.label || w.replace(/\.+$/, "") === score.value);
+  });
+}
+// The wide reading, for the note only: a confirmed fact named (its label before the colon, a figure it carries) in a sentence with
+// a staleness or do-not-use phrase, or named by a word only its title has in a sentence saying something is wrong or out of date.
+// `byTitle` false keeps the routing reading what it was before the review (label or figure only).
+export function factCorrectionHints(message: string, facts: StoredFact[] | null | undefined, byTitle = true): StoredFact[] {
+  // An ask to take something off their profile or record is read here too (for the note): code never acts on it.
+  const ss = sentencesOf(lc(message)).filter((s) => STALE.test(s) || /\b(?:remove|delete|take) .{1,80}? (?:from|off|out of) my (?:profile|record)\b/.test(s));
   if (!ss.length) return [];
+  const all = (facts ?? []).filter(confirmedFact), set = staleFactsOf(message, facts);
+  const wrong = ss.filter((s) => WRONG.test(s)).map((s) => tokensOf(s));
+  const titleWords = (f: StoredFact) => tokensOf(lc(f.title || f.text)).filter((w) => /^[a-z]{4,}$/.test(w) && !SET_ASIDE_FILLER.includes(w));
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const out: StoredFact[] = [];
-  for (const f of facts ?? []) {
-    if (!f || f.status === "draft" || f.needs_confirmation === true) continue;
+  for (const f of all) {
     const t = lc(f.title || f.text);
-    if (!t) continue;
-    const label = /^([a-z][a-z .'-]{1,30}):/.exec(t)?.[1]?.trim() ?? null;
+    if (!t || set.includes(f)) continue;
+    // Its label: before the colon of its title or of its text (the resume reader stores "GPA 3.9" with the text "GPA: 3.9").
+    const labels = [t, lc(f.text)].map((x) => /^([a-z][a-z .'-]{1,30}):/.exec(x)?.[1]?.trim()).filter((x): x is string => !!x);
     const figs = (t.match(/\d+(?:\.\d+)?/g) ?? []).filter((x) => x.includes(".") || x.length >= 3);
-    const named = (s: string) => (label && new RegExp(`(?<![a-z])${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![a-z])`).test(s)) || figs.some((x) => new RegExp(`(?<![\\d.])${x.replace(/\./g, "\\.")}(?![\\d])`).test(s));
-    if (ss.some(named)) out.push(f);
+    const named = (s: string) => labels.some((l) => new RegExp(`(?<![a-z])${esc(l)}(?![a-z])`).test(s)) || figs.some((x) => new RegExp(`(?<![\\d.])${esc(x)}(?![\\d])`).test(s));
+    const mine = titleWords(f).filter((w) => !all.some((o) => o !== f && titleWords(o).includes(w)));
+    if (ss.some(named) || (byTitle && wrong.some((ws) => mine.some((w) => ws.includes(w))))) out.push(f);
   }
   return out;
 }
 export function staleFactNote(lines: string[]): string {
-  return "THEY SAID A FACT ON THEIR RECORD IS OUT OF DATE (code read it from their words, and code has already set it aside: it is no longer used for anything, and stays off every resume, answer and form until they give a current one): " +
-    lines.map((l) => JSON.stringify(l)).join(", ") + ". Say so in one short clause (for example that it is off their record and won't be used), never call it still on file or still usable, and answer the rest of their message.";
+  return "THEY SAID A FACT ON THEIR RECORD IS OUT OF DATE (code read it from their words, and code has already set it aside: it is not deleted, it is no longer used for anything, and stays off every resume, answer and form until they give a current one or ask for it back): " +
+    lines.map((l) => JSON.stringify(l)).join(", ") + ". Code itself tells them which fact was set aside, in its own line at the top of your reply: do not say it again, do not mention that fact or its value, and never call it still on file or still usable. Answer the rest of their message. " +
+    "If they later want it back, call confirm_profile_fact with its id: code then asks them, and puts it back on their yes.";
+}
+// Review of #790 (round 3): putting a set-aside fact back. The question is CODE's, in one fixed positive form, asked only through
+// confirm_profile_fact (career_tools.ts), which also sets the marker (restore_ask, the fact's id, in that message's meta). A yes
+// counts only as the whole answer to that question: a plain affirmative, nothing else in the message.
+export const RESTORE_ASK_INTENT = "career_fact_restore_ask";
+export const restoreQuestion = (fact: string) => `Is this right again: "${fact}"? Reply yes to put it back on your record, or no to leave it set aside.`;
+export function plainAnswer(message: unknown): "yes" | "no" | null {
+  const m = String(message ?? "").trim().toLowerCase().replace(/[.! ]+$/, "");
+  if (/^(?:yes|yep|yeah|yup|y|sure|ok|okay|correct|right|confirm|confirmed|true|please do|that's right|thats right)(?: please| it is| that's right| thats right| put it back| it's right| its right)?$/.test(m)) return "yes";
+  return /^(?:no|nope|nah|n|not yet|leave it|leave it off|leave it set aside|keep it off)(?: thanks| thank you| leave it| leave it off| leave it set aside)?$/.test(m) ? "no" : null;
+}
+export function restoreAnswerNote(answer: "yes" | "no", id: string, fact: string): string {
+  return answer === "yes"
+    ? `THEY ANSWERED YES to code's question whether the fact ${JSON.stringify(fact)} (id ${id}), which they had set aside, is right again. Call confirm_profile_fact with id ${id} now, then say in one short sentence that it is back on their record.`
+    : `THEY ANSWERED NO to code's question whether the fact ${JSON.stringify(fact)} (id ${id}), which they had set aside, is right again. Change nothing: say in one short sentence that it stays set aside and is not used.`;
+}
+export function factCorrectionNote(lines: string[]): string {
+  return "THEY MAY BE CORRECTING A FACT ON THEIR RECORD (code only matched words; nothing was changed, and every fact below is still confirmed and still used): " +
+    lines.map((l) => JSON.stringify(l)).join(", ") + ". Read their message. If it says one of these is wrong or out of date and gives the right version, use correct_profile_fact; if it gives none, or you cannot tell which fact they mean, ask one short question naming the fact. " +
+    "If the message is about something else (where a line goes on a resume, a posting, a document, someone else's advice, a question), this note does not apply: answer the message. Never say a fact was removed, set aside or changed unless a tool did it this turn.";
 }
 
 // G2 / G3 / G12 (practice item 11: practice questions ran 300 to 500 characters and reviews opened with something other than the

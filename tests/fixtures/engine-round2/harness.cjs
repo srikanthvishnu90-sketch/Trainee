@@ -15,7 +15,7 @@ const F3 = `<label>First Name <input name="first_name" required></label><label>L
 const F = `${F3}<label>Resume <input type="file" name="resume"></label>`;
 const SUB = `<button type="submit">Submit application</button>`;
 const doc = (title, body) => `<!doctype html><html><head><title>${title}</title></head><body>${REC}<h1>${title}</h1>${body}</body></html>`;
-const st = { pages: {}, after: {}, posts: [], beacons: [], base: "" };
+const st = { pages: {}, after: {}, posts: [], beacons: [], hits: [], base: "" };
 function fieldsOf(buf, ct) {
   const s = buf.toString("latin1"), o = {};
   if (/multipart/.test(ct || "")) { const re = /name="([^"]*)"(?:; filename="([^"]*)")?\r\n(?:Content-Type:[^\r\n]*\r\n)?\r\n([\s\S]*?)\r\n--/g; let m; while ((m = re.exec(s))) o[m[1]] = m[2] !== undefined ? `file:${m[2]}` : m[3]; }
@@ -24,7 +24,7 @@ function fieldsOf(buf, ct) {
 }
 async function start() {
   const server = http.createServer((req, res) => {
-    const u = new URL(req.url, "http://x"), html = (s, code = 200) => res.writeHead(code, { "content-type": "text/html" }).end(s);
+    const u = new URL(req.url, "http://x"), html = (s, code = 200) => res.writeHead(code, { "content-type": "text/html; charset=utf-8" }).end(s);
     if (u.pathname.startsWith("/beacon/")) { st.beacons.push(decodeURIComponent(u.pathname.slice(8))); return res.writeHead(204).end(); }
     if (req.method !== "GET") {
       const chunks = []; req.on("data", (c) => chunks.push(c)); req.on("end", () => {
@@ -33,6 +33,7 @@ async function start() {
         return after ? after(req, res, html) : html("<h1>Thank you for applying</h1>");
       }); return;
     }
+    st.hits.push(req.url);
     const pg = st.pages[u.pathname];
     return pg ? html(typeof pg === "function" ? pg() : pg) : res.writeHead(404).end("nf");
   });
@@ -43,8 +44,8 @@ async function start() {
   const browser = await pw.chromium.launch({ headless: true, chromiumSandbox: process.env.UPMORE_CHROMIUM_SANDBOX !== "off", ...(process.env.UPMORE_CHROMIUM_PATH ? { executablePath: process.env.UPMORE_CHROMIUM_PATH } : {}) });
   const FACTS = { first_name: "Casey", last_name: "Example", email: "casey@example.invalid", phone: "+1 415 555 0100", country: "United States", website_url: "https://casey.example.invalid", current_company: "Acme" };
   const job = (p0, x = {}) => { const p = { id: "r2" + p0.replace(/\W/g, "-"), ats: "greenhouse", url: st.base + p0, facts: { ...FACTS, ...(x.facts || {}) }, answers: x.answers || {}, resume: { path: resume, sha256: rsha, preparedWithSha256: rsha } }; p.approval = { approval_id: "appr-r2", hash: payloadHash(p) }; return p; };
-  const reset = () => { st.posts.length = 0; st.beacons.length = 0; };
-  const view = (r) => ({ r, posts: st.posts.slice(), clicks: st.beacons.filter((k) => k.startsWith("click:")).map((k) => k.slice(6)), typed: [...new Set(st.beacons.filter((k) => k.startsWith("input:")).map((k) => k.slice(6)))] });
+  const reset = () => { st.posts.length = 0; st.beacons.length = 0; st.hits.length = 0; };
+  const view = (r) => ({ r, posts: st.posts.slice(), clicks: st.beacons.filter((k) => k.startsWith("click:")).map((k) => k.slice(6)), hits: st.hits.slice(), typed: [...new Set(st.beacons.filter((k) => k.startsWith("input:")).map((k) => k.slice(6)))] });
   const run = async (p0, x = {}) => { reset(); const phases = []; const r = await applyOne(browser, job(p0, x), { stepTimeoutMs: 6000, retries: 0, checkSettleMs: x.settle ?? 300, onPhase: async (ph) => { phases.push(ph); if (x.beat) await new Promise((d) => setTimeout(d, x.beat)); }, ...(x.opts || {}) }); return { ...view(r), phases }; };
   const rc = async (p0, x = {}, yes) => { if (!x.keep) reset(); const out = await recheck(browser, job(p0, x), { stepTimeoutMs: 6000, checkSettleMs: 300, ...(yes ? { yes } : {}) }); return { out, posts: st.posts.slice() }; };
   const stop = async () => { await browser.close(); await new Promise((r) => server.close(r)); fs.rmSync(dir, { recursive: true, force: true }); };

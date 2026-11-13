@@ -14,7 +14,7 @@
     "tests/architect/research-figures-failclosed-20261113.test.ts": 0.2,
     "tests/architect/handoff-recheck-live.test.ts": 34,
     "tests/architect/handoff-failclosed-20261113.test.ts": 12,
-    "tests/architect/hosted-apply-stale-fact-20261113.test.ts": 90,
+    "tests/architect/hosted-apply-stale-fact-20261113.test.ts": 37,
     "tests/architect/d066-behavior-guide-20261112.test.ts": 0.5,
     "tests/architect/behavior-guide-suite.test.ts": 17,
     "tests/architect/gmail-oauth-wrapper-ci.test.ts": 0.6,

@@ -509,3 +509,148 @@ Deno.test("R13 honest reads still read: the recorded postings of four boards say
   good("any host, three honest hops", (await checker(any((x) => { const i = Number(new URL(x).searchParams.get("i") ?? 0); return i < 3 ? to(`https://www.acme.com/j?i=${i + 1}`) : body("ok", "text/html"); }))({ url: "https://acme.com/j?i=0" })) === "live");
   ok(n >= 30, `${n} honest reads`);
 });
+
+// ------------------------------------------------------------------------------------------------ round 4 (second review)
+Deno.test("R14 a scheduled ingest read follows a board's redirect to any public https host; a pasted link's read stays on the boards, 8 MB", async () => {
+  const { boardFetchFeed } = await import("../../supabase/functions/_shared/career_ingest.ts");
+  const feed = (f: typeof fetch, o: Record<string, unknown> = {}) => (boardFetchFeed as any)(f, { timeoutMs: 3000, resolve: dns({ "inside.acme.com": ["10.0.0.9"] }), ...o });
+  const hop = (map: Record<string, string>, final: () => Response) => any((u, init) => map[u] ? (init?.redirect === "manual" ? to(map[u], 301) : final()) : final());
+  const offers = JSON.stringify({ offers: [{ id: 1, title: "Eng", careers_url: "https://careers.acme.com/o/eng", location: "NY", description: "d", status: "published" }] });
+  const xml = `<?xml version="1.0"?><workzag-jobs><position><id>1</id><name>Eng</name><office>Berlin</office></position></workzag-jobs>`;
+  for (const stream of [false, true]) {
+    await feed(hop({ "https://acme.recruitee.com/api/offers/": "https://careers.acme.com/api/offers/" }, () => new Response(offers)), { stream })({ company: "Acme", provider: "recruitee", board: "acme" });
+    await feed(hop({ "https://acme.jobs.personio.de/xml": "https://acme.jobs.personio.com/xml" }, () => new Response(xml)), { stream })({ company: "Acme", provider: "personio", board: "acme" });
+  }
+  // Never a never-open site, a private or reserved name or address, plain http, or a fourth hop.
+  for (const target of ["https://www.linkedin.com/jobs/x", "https://uk.indeed.com/x", "https://inside.acme.com/x", "https://10.0.0.9/x", "https://db.internal/x", "http://careers.acme.com/api/offers/", "https://user:pw@careers.acme.com/x"]) {
+    const sent: string[] = [];
+    await assertNode.rejects(() => feed(any((u) => { sent.push(u); return sent.length === 1 ? to(target) : new Response(offers); }))({ company: "Acme", provider: "recruitee", board: "acme" }), /not read/, target);
+    eq(sent.length, 1, target);
+  }
+  // The chat path (a pasted link): the boards' own hosts only, and 8 MB.
+  const gh = { provider: "greenhouse", board: "acme", company: "Acme" };
+  await assertNode.rejects(() => feed(any((u) => u.includes("boards-api") ? to("https://careers.acme.com/jobs.json") : new Response(JSON.stringify({ jobs: [] }))), { personLink: true })(gh), /not read/);
+  let pulled = 0;
+  const endless = () => new Response(new ReadableStream<Uint8Array>({ pull(c) { pulled += 1048576; if (pulled > 200 * 1048576) c.close(); else c.enqueue(new Uint8Array(1048576).fill(32)); } }));
+  await assertNode.rejects(() => feed(any(endless), { personLink: true })(gh));
+  ok(pulled <= 10 * 1048576, `a pasted link's board read took ${pulled / 1048576} MB`);
+  const handler = Deno.readTextFileSync(new URL("../../supabase/functions/agent-chat/handler-career.ts", import.meta.url));
+  const calls = handler.split("\n").filter((l) => /boardFetchFeed\(\(i, init\) => fetch\(i, init\)/.test(l));
+  ok(calls.length >= 2 && calls.every((l) => /personLink: true/.test(l)), "the chat handler's board reads are the strict, 8 MB kind");
+});
+
+Deno.test("R15 a regional board host asks its regional API; a global API's 404 is not that posting's end", async () => {
+  const UU = "0ccbe620-a3ef-41d1-a5c4-68e56b3c91d0", EU_LV = `https://jobs.eu.lever.co/acme/${UU}`, EU_GH = "https://job-boards.eu.greenhouse.io/acme/jobs/123";
+  const lv = JSON.parse(fx("lever-eu-acme-0ccbe620.posting.json")), ghGone = JSON.parse(fx("greenhouse-global-404.json"));
+  const sent: string[] = [];
+  const f = any((u) => { sent.push(u);
+    if (u === `https://api.eu.lever.co/v0/postings/acme/${UU}`) return json(lv);
+    if (u.startsWith("https://api.lever.co/")) return json({ ok: false, error: "Document not found" }, 404);
+    if (u.startsWith("https://boards-api.greenhouse.io/")) return json(ghGone, 404);
+    if (u.startsWith(EU_GH)) return body("<html>ok</html>", "text/html");
+    if (u === `https://jobs.eu.lever.co/acme/${UU}/apply`) return body("", "text/html", 404);
+    return body("nf", "text/plain", 404); });
+  eq(await checker(f, { ashby: "posting" })({ url: EU_LV }), "live");
+  eq((await recheckPosting(EU_LV, checker(f, { ashby: "posting" }), () => NOW)).state, "open");
+  const fl = await readApplyFlow(EU_LV, { fetch: f, now: () => NOW });
+  eq([fl.status, fl.posting?.state, fl.posting?.title], ["ok", "open", "Engineer"]);
+  ok(!sent.some((u) => u.startsWith("https://api.lever.co/") || u.startsWith("https://jobs.lever.co/")), `the global Lever hosts were asked: ${sent.join(" ")}`);
+  // Greenhouse's regional API is not known here: the global API's 404 does not close the posting. The link check answers as
+  // trunk did (the posting page), and the reader says it was not read.
+  eq(await checker(f)({ url: EU_GH }), "live");
+  ok((await recheckPosting(EU_GH, checker(f), () => NOW)).state !== "closed");
+  const g = await readApplyFlow(EU_GH, { fetch: f, now: () => NOW });
+  ok(g.status !== "ok" && !/closed/.test(g.why) && /not read/.test(g.why), `${g.status} ${g.why}`);
+  // The global hosts are unchanged: a 404 there is closed.
+  eq(await checker(f)({ url: `https://jobs.lever.co/acme/${UU}` }), "dead");
+  eq(await checker(f)({ url: "https://job-boards.greenhouse.io/acme/jobs/123" }), "dead");
+});
+
+Deno.test("R16 the name lookup: a resolver that cannot answer anything is not a refusal; a name that does not exist is; a private answer always is", async () => {
+  const pf: any = await import("../../supabase/functions/_shared/posting_fetch.ts");
+  const nf = () => Promise.reject(Object.assign(new Error("no records found"), { name: "NotFound" }));
+  // 1. The resolver throws for everything (this sandbox): not usable, so not checked.
+  const dead = pf.makeSystemResolve((_h: string, _t: string) => nf());
+  eq(await dead("careers.acme.com"), null);
+  // 2. It resolves a known-good name, and not this one: the name does not exist.
+  let probes = 0;
+  const works = pf.makeSystemResolve((h: string, t: string) => h === pf.RESOLVER_PROBE_NAME ? (probes++, Promise.resolve(t === "A" ? [PUBLIC] : [])) : nf());
+  await assertNode.rejects(() => works("no-such-name.acme.com"));
+  await assertNode.rejects(() => works("another.acme.com"));
+  ok(probes <= 2, `the probe ran once per process, not per name (${probes})`);
+  // 3. Not supported or not permitted: not checked.
+  for (const name of ["NotSupported", "PermissionDenied", "NotCapable"]) eq(await pf.makeSystemResolve(() => Promise.reject(Object.assign(new Error("x"), { name })))("careers.acme.com"), null, name);
+  eq(await pf.makeSystemResolve(null)("careers.acme.com"), null, "no resolver at all");
+  // 4. One family failed (not "no records"), the other answered: only that family was checked; a private address in it refuses.
+  const half = (aaaa: string[]) => pf.makeSystemResolve((_h: string, t: string) => t === "A" ? Promise.reject(Object.assign(new Error("timed out"), { name: "TimedOut" })) : Promise.resolve(aaaa));
+  eq(await half(["2606:2800:220:1:248:1893:25c8:1946"])("careers.acme.com"), { ips: ["2606:2800:220:1:248:1893:25c8:1946"], partial: true });
+  const through = async (resolve: unknown) => { const c = checker(any(() => body("ok", "text/html")), { resolve }); return [await c({ url: "https://careers.acme.com/jobs/1" }), c.debug?.dns_checked]; };
+  eq(await through(half(["2606:2800:220:1:248:1893:25c8:1946"])), ["live", false]);
+  eq(await through(half(["fd00::1"])), ["unknown", true]);
+  eq(await through(pf.makeSystemResolve((_h: string, t: string) => Promise.resolve(t === "A" ? [PUBLIC] : ["::1"]))), ["unknown", true]);
+  eq(await through(dead), ["live", false]);
+  eq(await through(works), ["unknown", true]);
+  eq(await through(pf.makeSystemResolve((_h: string, t: string) => Promise.resolve(t === "A" ? [PUBLIC] : []))), ["live", true]);
+});
+
+Deno.test("R17 the link check and the reader cannot disagree: one state per board answer", async () => {
+  const UU = LEVER_ID, wdInfo = { title: "Engineer", jobDescription: "<p>x</p>", canApply: true, posted: true, jobPostingId: "Engineer_R1" };
+  const ghOK = { id: 123, title: "Engineer", content: "", questions: [] }, lvOK = { id: UU, text: "Engineer", descriptionPlain: "x" };
+  const srOK = { id: "744000012345678", name: "Engineer", active: true, visibility: "PUBLIC" }, abOK = { id: UU, title: "Engineer", isListed: true, applicationDeadline: null, descriptionHtml: "" };
+  // [name, link, the address that answers, the answer, the one state]
+  const cases: [string, string, (u: string) => boolean, () => Response, "open" | "closed" | "unknown"][] = [
+    ["Greenhouse open", GH, (u) => u.startsWith("https://boards-api.greenhouse.io/"), () => json(ghOK), "open"],
+    ["Greenhouse deadline today", GH, (u) => u.startsWith("https://boards-api.greenhouse.io/"), () => json({ ...ghOK, application_deadline: "2026-11-13" }), "open"],
+    ["Greenhouse past deadline", GH, (u) => u.startsWith("https://boards-api.greenhouse.io/"), () => json({ ...ghOK, application_deadline: "2026-01-01" }), "closed"],
+    ["Lever open", LEVER, (u) => u === LEVER_API, () => json(lvOK), "open"],
+    ["Lever state closed", LEVER, (u) => u === LEVER_API, () => json({ ...lvOK, state: "closed" }), "closed"],
+    ["Lever state null", LEVER, (u) => u === LEVER_API, () => json({ ...lvOK, state: null }), "unknown"],
+    ["SmartRecruiters open", SR, (u) => u.startsWith("https://api.smartrecruiters.com/"), () => json(srOK), "open"],
+    ["SmartRecruiters inactive", SR, (u) => u.startsWith("https://api.smartrecruiters.com/"), () => json({ ...srOK, active: false }), "closed"],
+    ["SmartRecruiters internal", SR, (u) => u.startsWith("https://api.smartrecruiters.com/"), () => json({ ...srOK, visibility: "INTERNAL" }), "unknown"],
+    ["SmartRecruiters active 1", SR, (u) => u.startsWith("https://api.smartrecruiters.com/"), () => json({ ...srOK, active: 1 }), "unknown"],
+    ["Ashby open", ASHBY, (u) => u === ASHBY, () => ashbyPage(abOK), "open"],
+    ["Ashby unlisted", ASHBY, (u) => u === ASHBY, () => ashbyPage({ ...abOK, isListed: false }), "unknown"],
+    ["Ashby isListed missing", ASHBY, (u) => u === ASHBY, () => ashbyPage({ ...abOK, isListed: undefined }), "unknown"],
+    ["Ashby isListed 'true'", ASHBY, (u) => u === ASHBY, () => ashbyPage({ ...abOK, isListed: "true" }), "unknown"],
+    ["Ashby past deadline", ASHBY, (u) => u === ASHBY, () => ashbyPage({ ...abOK, applicationDeadline: "2026-01-01T00:00:00Z" }), "closed"],
+    ["Workday open", WD, (u) => u === WD_CXS, () => json({ jobPostingInfo: wdInfo }), "open"],
+    ["Workday end date today", WD, (u) => u === WD_CXS, () => json({ jobPostingInfo: { ...wdInfo, endDate: "2026-11-13" } }), "open"],
+    ["Workday past end date", WD, (u) => u === WD_CXS, () => json({ jobPostingInfo: { ...wdInfo, endDate: "2026-11-01" } }), "closed"],
+    ["Workday posted false", WD, (u) => u === WD_CXS, () => json({ jobPostingInfo: { ...wdInfo, posted: false } }), "closed"],
+    ["Workday canApply false", WD, (u) => u === WD_CXS, () => json({ jobPostingInfo: { ...wdInfo, canApply: false } }), "closed"],
+    ["Workday another job", WD, (u) => u === WD_CXS, () => json({ jobPostingInfo: { ...wdInfo, jobPostingId: "Other_R999", title: "Other" } }), "unknown"],
+    ["Workday same req id, another slug", WD, (u) => u === WD_CXS, () => json({ jobPostingInfo: { ...wdInfo, jobPostingId: "Senior-Engineer_R1" } }), "open"],
+  ];
+  const link = { open: "live", closed: "dead", unknown: "unknown" } as const;
+  for (const [name, u, hit, answer, want] of cases) {
+    const f = any((x) => hit(x) ? answer() : x.includes("non-user-graphql") ? json({ data: { jobPosting: { applicationForm: { sections: [] } } } }) : body("nf", "text/html", 404));
+    const fl = await readApplyFlow(u, { fetch: f, now: () => NOW });
+    const lc = await checker(f, { ashby: "posting" })({ url: u });
+    const rc = await recheckPosting(u, checker(f, { ashby: "posting" }), () => NOW, { workday: (x: string) => readWorkdayPosting(x, { fetch: f, now: () => NOW }) });
+    eq([name, fl.posting?.state ?? "unknown", lc, rc.state], [name, want, link[want], want]);
+  }
+  // Ashby with no title is not this posting's data, in both.
+  const noTitle = any((x) => x === ASHBY ? ashbyPage({ ...abOK, title: undefined }) : body("nf", "text/html", 404));
+  eq([(await readApplyFlow(ASHBY, { fetch: noTitle, now: () => NOW })).posting, await checker(noTitle, { ashby: "posting" })({ url: ASHBY })], [null, "unknown"]);
+});
+
+Deno.test("R18 a redirect from one board to another board's host is not read as the first board's answer", async () => {
+  const other = json({ id: LEVER_ID, text: "Leaked", title: "Leaked", descriptionPlain: "x" });
+  for (const target of ["https://jobs.ashbyhq.com/acme/x", "https://boards-api.greenhouse.io/v1/boards/acme/jobs/1", "https://api.smartrecruiters.com/v1/companies/acme/postings/1", "https://acme.wd1.myworkdayjobs.com/wday/cxs/acme/External/job/NY/Engineer_R1"]) {
+    const sent: string[] = [];
+    const f = any((u) => { sent.push(u); return u === LEVER_API ? to(target) : other.clone(); });
+    const r = await readApplyFlow(LEVER, { fetch: f, now: () => NOW });
+    ok(r.status !== "ok" && r.posting === null && /not read/.test(r.why), `${target}: ${r.status} ${r.why}`);
+    eq(sent, [LEVER_API], target);
+    eq(await checker(f)({ url: LEVER }), "unknown", target);
+  }
+  // Workday: another tenant's site is another board.
+  const wd = any((u) => u === WD_CXS ? to("https://evilco.wd1.myworkdayjobs.com/wday/cxs/evilco/External/job/NY/Engineer_R1") : json({ jobPostingInfo: { title: "Leaked", canApply: true } }));
+  const w = (await readWorkdayPosting(WD, { fetch: wd, now: () => NOW }))!;
+  ok(w.posting?.title !== "Leaked" && w.state !== "open", `${w.state} ${w.posting?.title}`);
+  eq(await checker(wd)({ url: WD }), "unknown");
+  // Inside one board (Lever's API to Lever's API) a redirect is still followed.
+  const same = any((u) => u === LEVER_API ? to(`${LEVER_API}?x=1`) : u.startsWith(LEVER_API) ? json({ id: LEVER_ID, text: "Analyst" }) : body("", "text/html", 404));
+  eq((await readApplyFlow(LEVER, { fetch: same, now: () => NOW })).posting?.title, "Analyst");
+});

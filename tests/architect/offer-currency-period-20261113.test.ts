@@ -124,7 +124,9 @@ Deno.test(`the offer reader on ${CASES.length} offers: currency, period and benc
         if (!/currency not stated/i.test(all)) throw new Error("an unknown currency is not said to be unknown");
         if (c.cur === "XXX" && !/currency not stated/.test(String(o.currency_fact))) throw new Error(`no currency fact: ${o.currency_fact}`);
       }
-      if (![c.cur, c.signing, c.bonus].includes("USD") && all.includes("$")) throw new Error(`"$" printed for an offer with no US-dollar figure: ${all.split("\n").find((l) => l.includes("$"))}`);
+      // The counter writes each figure as the person wrote it; everywhere else no "$" is printed for a figure that is not US dollars.
+      const said = Object.values(o.written ?? {}).reduce((x: string, w) => x.split(String(w)).join(""), all);
+      if (![c.cur, c.signing, c.bonus].includes("USD") && said.includes("$")) throw new Error(`"$" printed for an offer with no US-dollar figure: ${said.split("\n").find((l) => l.includes("$"))}`);
       eq(Object.keys(o.currency_assumed ?? {}), c.assumed ?? [], "figures read on an assumption");
       if (c.assumed) {
         if (!/currency not stated/i.test(all) || !/read as US dollars/.test(all) || !/please confirm the currency/.test(all)) throw new Error("an assumed currency is not said to be one, or not asked about");
@@ -157,7 +159,8 @@ Deno.test("an amount in an unknown currency is written without a symbol, and nev
   if (/120,000/.test(neg.answer!.card!.body)) throw new Error("an offer in an unknown currency was used as leverage");
   // A competing figure with no currency of its own inherits the only stated one; with two stated, it is unknown.
   eq(parseOfferWords("Offer from Acme: €90k base as a data analyst in Berlin, I also have another offer from Beta for 100k").competing.map((x) => x.currency), ["EUR"]);
-  eq(parseOfferWords("Offer from Acme: 90k base as a data analyst in Berlin, I also have another offer from Beta for 100k").competing.map((x) => x.currency), ["XXX"]);
+  eq(parseOfferWords("Offer from Acme: 90k base as a data analyst in Berlin, I also have another offer from Beta for 100k").competing.map((x) => [x.currency, x.assumed]), [["USD", true]]);
+  eq(parseOfferWords("Offer from Acme: 90k base as a data analyst in Toronto, I also have another offer from Beta for 100k").competing.map((x) => x.currency), ["XXX"]);
   // The city answered later settles a bare amount: a US metro reads it as US dollars and says that it did.
   const a = await offerChatTurn({ message: "Stripe offered me 150k", state: null, now: NOW, postings: null });
   if (a.answer!.reply.includes("$")) throw new Error(`"$" before the currency is known: ${a.answer!.reply}`);
@@ -166,4 +169,103 @@ Deno.test("an amount in an unknown currency is written without a symbol, and nev
   if (!/currency not stated/i.test(b.answer!.reply) || !/\$150,000/.test(b.answer!.reply)) throw new Error(b.answer!.reply);
   const c = await offerChatTurn({ message: "software engineer in Toronto", state: a.state, now: NOW + 5, postings: null });
   eq((c.state as any).offers.at(-1).offer.currency, "XXX");
+});
+
+// ---------------------------------------------------------------- round 2: the completeness rule, the place, hours, the counter
+// Every money, currency, period, range, total-pay or place word must be taken by exactly one field; what is not is `open`, the
+// offer is `unsettled`, and the reply restates what was read and asks: no benchmark, no percent, no leverage, no counter.
+const G = (pay: string, where = "in Seattle") => `Google offered me ${pay} as a software engineer ${where}`;
+const run = async (m: string) => { let state: any = null, last: any = null; for (const x of m.split(" >> ")) { last = await offerChatTurn({ message: x, state, now: NOW, postings: null }); state = last.state; } return { last, state, o: state?.offers?.at(-1)?.offer }; };
+interface R2 { m: string; unsettled?: true; cur?: string; base?: number | null; metro?: string | null; kind?: string; bench?: boolean; total?: string; occ?: null; part?: true; period?: string }
+const ROUND2: R2[] = [
+  // A: a currency said away from the figure settles it; a contradiction, a range, a second figure or a second place does not
+  { m: G("150k base", "in Seattle, paid in CAD"), cur: "CAD", bench: false }, { m: G("150k base in Canadian dollars"), cur: "CAD", bench: false },
+  { m: G("$150k (CAD) base"), cur: "CAD", bench: false }, { m: G("150k base", "in Seattle (Canadian dollars)"), cur: "CAD", bench: false },
+  { m: `${G("150k base")}. It's in CAD`, cur: "CAD", bench: false }, { m: `${G("150k base")} >> sorry that's in CAD`, cur: "CAD", bench: false },
+  { m: G("150,000 sterling base", "in New York"), cur: "GBP", bench: false }, { m: G("GBP150k base", "in New York"), cur: "GBP", bench: false },
+  { m: G("150k base and a 20k signing bonus in CAD"), cur: "CAD", bench: false }, { m: G("€150k base", "in Seattle, paid in CAD"), unsettled: true },
+  { m: G("Rs. 1,800,000 base"), cur: "INR", bench: false }, { m: G("Rs. 1800000 base", "in Pune"), cur: "INR", bench: false }, { m: G("18 lakhs base", "in Hyderabad"), cur: "XXX", base: 1800000, bench: false },
+  { m: G("$5,000 twice a month", "in Atlanta"), base: 120000, period: "semimonth", bench: true }, { m: G("$5,000 semi-monthly", "in Atlanta"), base: 120000, period: "semimonth" },
+  { m: G("$1,5k a week", "in Chicago"), unsettled: true }, { m: G("90-110k base"), unsettled: true }, { m: G("$90k-$110k base"), unsettled: true }, { m: G("between 90k and 110k"), unsettled: true },
+  { m: G("150k base and 250k total comp"), base: 150000, total: "250k", bench: true }, { m: G("250k OTE"), base: null, total: "250k" }, { m: G("TC 250k"), base: null, total: "250k" },
+  { m: "Google offered me 150k base as a software engineer in Seattle and Meta offered me 160k in London", unsettled: true }, { m: "Google offered me $150k in Seattle or C$160k in Toronto as a software engineer", unsettled: true },
+  { m: G("120m base", "in Chicago"), unsettled: true }, { m: G("$150,000.00 base"), base: 150000, bench: true }, { m: G("a monthly salary of 9,500", "in Boston"), base: 114000, period: "month" },
+  // B: the stated place wins over a metro guess
+  { m: G("$100k base", "in Tbilisi, Georgia"), unsettled: true }, { m: G("$100k base", "in Toronto, CA"), unsettled: true }, { m: G("100k base", "in Vancouver, CA"), unsettled: true },
+  { m: G("$100k base", "in San Jose, Costa Rica"), metro: null, kind: "other", bench: false }, { m: G("$150k base", "in Queens, Ontario"), metro: null, kind: "dollar", bench: false },
+  { m: G("$150k base", "in Miami, Australia"), metro: null, kind: "dollar", bench: false }, { m: G("$100k base", "in Arlington, Texas"), metro: null, kind: "us", bench: true },
+  { m: G("$100k base", "in Newark, Delaware"), metro: null, kind: "us" }, { m: G("100k base", "in Manhattan, Kansas"), metro: null, kind: "us" }, { m: G("$130k base", "in Cambridge, MA"), metro: "boston", bench: true },
+  { m: G("$130k base", "in Cambridge"), metro: null, kind: "other", bench: false }, { m: G("$100k base", ", relocating from Toronto to Seattle"), metro: "seattle", cur: "USD", bench: true },
+  { m: G("$100k base", ", relocating from Seattle to Toronto"), metro: null, cur: "XXX", bench: false }, { m: G("$150k base", "in Washington, DC"), metro: "washington-dc", bench: true },
+  // C: stated hours, a duration, part-time, an internship or a contract: the rate is not compared as a yearly figure
+  { m: G("$45/hr for a 12-week internship"), part: true, bench: false }, { m: G("$45/hr, 20 hrs/week,"), part: true, bench: false }, { m: G("$45 an hour part-time"), part: true, bench: false },
+  { m: G("a 6 month contract at $80/hr", "in Austin"), part: true, bench: false }, { m: G("$45/hr"), base: 93600, bench: true },
+  // E: an occupation only on a whole-phrase match
+  { m: "Google offered me $150k base as a real estate developer in Seattle", occ: null, bench: false }, { m: "Google offered me $150k base as a sales consultant in Seattle", occ: null, bench: false },
+  { m: "Google offered me $90k base as a market research analyst in Chicago", occ: null, bench: false }, { m: "Google offered me $90k base as a business developer in Chicago", occ: null, bench: false },
+  { m: "Google offered me $150k base as a senior software engineer in Seattle", bench: true },
+];
+Deno.test(`round 2: ${ROUND2.length} offers are read whole or left unsettled; nothing half-read is compared`, async () => {
+  const bad: string[] = [];
+  for (const c of ROUND2) {
+    try {
+      const { last, state, o } = await run(c.m);
+      const reply = String(last.answer?.reply ?? "");
+      if (c.unsettled) {
+        if (!o?.unsettled || !(o.open ?? []).length) throw new Error(`not unsettled: ${JSON.stringify([o?.base, o?.currency, o?.place, o?.open])}`);
+        if (last.answer?.status !== "unsettled" || !/I could not place/.test(reply) || !/Here is what I read/.test(reply)) throw new Error(`the reply does not restate and ask: ${reply}`);
+        if (/median|percentile|% (?:above|below)/.test(reply) || benchmarks(o).length) throw new Error("an unsettled offer was compared");
+        const neg = await offerChatTurn({ message: "help me negotiate", state, now: NOW + 9, postings: null });
+        if (neg.answer?.card) throw new Error("a counter was drafted for an unsettled offer");
+        continue;
+      }
+      if (!o && c.base !== null) throw new Error(`not kept: ${reply}`);
+      const got = o ?? parseOfferWords(c.m);
+      if (got.unsettled) throw new Error(`unsettled: ${JSON.stringify(got.open)}`);
+      if (c.cur) eq(got.currency, c.cur, "currency");
+      if (c.base !== undefined) eq(got.base, c.base, "base");
+      if (c.period) eq(got.period, c.period, "period");
+      if (c.metro !== undefined) eq(got.metro, c.metro, "metro");
+      if (c.kind) eq(got.place_kind, c.kind, "place kind");
+      if (c.total) eq(got.total?.written, c.total, "total pay");
+      if (c.occ === null) eq(got.occupation, null, "occupation");
+      if (c.part && !got.part_year) throw new Error("the hours or duration signal was not read");
+      const shown = benchmarks(got).filter((b) => b.shown);
+      if (c.bench === true && !shown.length) throw new Error("lost its benchmark");
+      if (c.bench === false && (shown.length || /% (?:above|below) the median|median \$|percentile/.test(reply))) throw new Error(`compared: ${reply.split("\n").find((l) => /median|percentile/.test(l))}`);
+    } catch (e) { bad.push(`${c.m}\n    ${(e as Error).message.replace(/\n/g, "\n    ")}`); }
+  }
+  if (bad.length) throw new Error(`${bad.length} of ${ROUND2.length} wrong:\n  ${bad.join("\n  ")}`);
+});
+
+// D: the counter. Figures as written and in their own period; a rate never against a yearly median; another offer weighed only
+// like for like, else cited as written; drafted to the company named, never to one only mentioned; never "the role role".
+const EMAILS: { m: string; has?: RegExp[]; not?: RegExp[]; none?: true }[] = [
+  { m: `${G("$150k base")}. I also have an offer from Meta for $170k >> help me negotiate`, has: [/Software engineer offer, Google/, /another offer from Meta with a base of \$170,000/], not: [/role role/, /base of \$170,000\. Before/] },
+  { m: `${G("$150k base")}. I also have another offer from Meta for $95/hr >> help me negotiate`, has: [/offer, Google/, /I also have an offer from Meta: \$95\/hr\./], not: [/197,600/, /bring the base to/] },
+  { m: `${G("$150k base")}. I also have another offer from Meta for $14k a month >> help me negotiate`, has: [/Meta: \$14k a month\./], not: [/168,000/] },
+  { m: `${G("£90k base", "in London")}. I also have an offer from Meta for 100k >> help me negotiate`, has: [/base of £90k/, /Meta: 100k\./], not: [/GBP 100,000/, /bring the base to/] },
+  { m: `${G("100k base", "in London")}. I also have an offer from Meta for £110k >> help me negotiate`, has: [/base of 100k/, /Meta: £110k\./], not: [/GBP/, /bring the base to/] },
+  { m: `${G("150k base")}. I also have an offer from Shopify for 170k in Toronto >> help me negotiate`, has: [/offer, Google/, /Shopify: 170k\./], not: [/\$170,000/, /bring the base to/] },
+  { m: `${G("$45/hr")} >> help me negotiate`, has: [/base of \$45\/hr/], not: [/93,600/, /median/] },
+  { m: `${G("$8,500 a month", "in New York")} >> help me negotiate`, has: [/\$8,500 a month/], not: [/102,000/, /median/] },
+  { m: `${G("$3,000 biweekly", "in Chicago")} >> help me negotiate`, has: [/\$3,000 biweekly/], not: [/78,000/, /median/] },
+  { m: `${G("$150k base")} >> Stripe offered me $15k a month as a software engineer in Seattle >> help me negotiate with Google`, has: [/offer, Google/, /base of \$150,000/, /Stripe: \$15k a month\./], not: [/180,000/, /15,000 a month\. Before/] },
+  { m: `${G("$150k base")} >> Stripe offered me 180k base as a software engineer in Dublin >> help me negotiate with Google >> help me negotiate`, has: [/offer, Google/, /Stripe: 180k\./], not: [/\$180,000/] },
+  { m: `${G("$150k base")} >> Stripe offered me €140k base as a software engineer in Dublin >> help me negotiate`, none: true },
+  { m: `${G("$150k base", "in Tbilisi, Georgia")} >> help me negotiate`, none: true },
+];
+Deno.test(`round 2: ${EMAILS.length} counter emails say only what the person said, to the company they are negotiating with`, async () => {
+  const bad: string[] = [];
+  for (const c of EMAILS) {
+    const { last } = await run(c.m), body = String(last.answer?.card?.body ?? "");
+    if (c.none) { if (last.answer?.card || !/Which offer|could not place/.test(String(last.answer?.reply))) bad.push(`${c.m}\n    drafted, or did not ask: ${last.answer?.reply}`); continue; }
+    for (const re of c.has ?? []) if (!re.test(body)) bad.push(`${c.m}\n    missing ${re}: ${body}`);
+    for (const re of c.not ?? []) if (re.test(body)) bad.push(`${c.m}\n    said ${re}: ${body}`);
+  }
+  if (bad.length) throw new Error(`${bad.length} wrong:\n  ${bad.join("\n  ")}`);
+  // The compare view labels a yearly figure worked out from a rate as an estimate, with its basis.
+  const cmp = await run(`${G("$150k base")} >> Stripe offered me $9,000 a month as a software engineer in Austin >> compare my offers`);
+  if (!/Stripe \$108,000 \(an estimate: \$9,000 a month x 12 months\)/.test(cmp.last.answer.reply)) throw new Error(cmp.last.answer.reply);
+  if (!cmp.last.answer.comparison.offers[1].rows.some((r: any) => r.k === "Yearly base basis" && /An estimate, not a stated salary/.test(r.v))) throw new Error("the File row does not label the estimate");
 });

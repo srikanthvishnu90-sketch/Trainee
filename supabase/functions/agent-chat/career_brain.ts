@@ -696,8 +696,8 @@ const researchedLine = (xs: Researched[]) => xs.length === 1
 export function coverageLine(look: Look): string {
   const line = coverageCore(look), res = look.researched?.length ? researchedLine(look.researched) : "";
   const connect = look.status === "complete" && look.nomail && look.connect ? `\n\nNo Gmail is connected, so employer emails are not in this record. Connect it yourself here (you sign in to Google):\n${look.connect}` : "";
-  const fixes = look.changes?.length ? ` ${look.changes.join(" ")}` : "";
-  return line + (look.status === "complete" || look.status === "partial" ? fixes + res : "") + connect;
+  const fixes = look.status === "complete" && look.changes?.length ? ` ${look.changes.join(" ")}` : "";
+  return line + fixes + (look.status === "complete" || look.status === "partial" ? res : "") + connect;
 }
 function coverageCore(look: Look): string {
   if (!look.tried) return NOT_CHECKED;

@@ -103,7 +103,10 @@ async function recordFor(d: CapabilityDeps, c: ToolCtx): Promise<ApplicationReco
   } else could.push("the saved applications and mail events");
   const apps = [...here.filter((h) => !stored.some((s) => s.ref === h.ref)), ...stored];
   const previous = d.snapshot ? await within(ms, () => d.snapshot!.get(c.userId)).catch(() => null) : null;
-  return buildRecord({ now: c.now, apps, events, situation: d.situation, listed: (c.state as any)?.discovery?.lastShortlist, mail, previous, unreadable, could_not_read: could, read_ok: readOk, read: readList });
+  const r = buildRecord({ now: c.now, apps, events, situation: d.situation, listed: (c.state as any)?.discovery?.lastShortlist, mail, previous, unreadable, could_not_read: could, read_ok: readOk, read: readList });
+  // Review of #832: what changed since the record was last shown (G9) is known only from a complete read; a partial one would
+  // report whatever it could not read as gone.
+  return r.read.status === "complete" ? r : { ...r, changes: [] };
 }
 // The counts a record gives, and what the turn may take as read (loop.ts turn.record, turn.counts): a number of applications only
 // from a complete read. Otherwise it is unknown (null), with what was found as "at least", and the note says so.
@@ -126,7 +129,8 @@ const foundLine = (a: ApplicationRecord["applied"][number]) => { const box = a.e
   return `${a.company}${a.role ? ` (${a.role})` : ""}${a.applied_at ? `, ${a.applied_at.slice(0, 10)}` : ""}, from ${a.confirmed_by === "your word" ? "what you told me" : a.confirmed_by === "employer email" ? `an employer email${box ? ` in ${box}` : ""}` : a.confirmed_by}${outcome}`; };
 const incompleteNote = (r: ApplicationRecord) => r.read.status === "complete" ? "" : ` THIS READ ${r.read.status === "failed" ? "FAILED" : "IS PARTIAL"}: could not read ${r.read.could_not_read.join("; ")}. ` +
   "The number of applications is unknown (counts.applied is null). Never say they have not applied, that there are none, or a total. Say which could not be read, give anything found as \"at least\", and say the rest is unconfirmed until it can be read.";
-const remember = async (d: CapabilityDeps, c: ToolCtx, r: ApplicationRecord) => { if (d.snapshot) await within(d.readTimeoutMs ?? 12_000, () => d.snapshot!.set(c.userId, snapshotOf(r))).catch(() => {}); };
+// Only a complete read becomes the snapshot the next read is compared with (review of #832).
+const remember = async (d: CapabilityDeps, c: ToolCtx, r: ApplicationRecord) => { if (d.snapshot && r.read.status === "complete") await within(d.readTimeoutMs ?? 12_000, () => d.snapshot!.set(c.userId, snapshotOf(r))).catch(() => {}); };
 
 // An email's words are someone else's: they reach the model as data only (the guard web and posting text go through,
 // posting_pay.ts postingTextForModel: a sentence addressed to an AI is taken out), each time with this note.

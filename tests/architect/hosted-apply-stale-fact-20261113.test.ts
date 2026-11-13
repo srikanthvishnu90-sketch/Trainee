@@ -18,6 +18,11 @@ import { careerHandler, supabaseParity } from "../flow/handler.ts";
 import { anthropicWire } from "./helpers/anthropic_wire.ts";
 import { STALE_UNCHECKED_LINE, staleFactChanges, staleFactLines, stopStaleFacts } from "../../supabase/functions/_shared/career_apply_stale_facts.ts";
 
+// Every env var a chat test here changes, saved before and restored after (test-env-hygiene: no model key or release flag leaks
+// into a later file).
+const ENV_KEYS = ["CAREER_BRAIN", "CAREER_BRAIN_ROUTER_INTENTS", "MODEL_PROVIDER", "CAREER_REPLY_WRITER", "ANTHROPIC_API_KEY"];
+const saveEnv = () => Object.fromEntries(ENV_KEYS.map((k) => [k, Deno.env.get(k)]));
+const restoreEnv = (saved: Record<string, string | undefined>) => { for (const [k, v] of Object.entries(saved)) v === undefined ? Deno.env.delete(k) : Deno.env.set(k, v); };
 const PERSONA = JSON.parse(Deno.readTextFileSync(new URL("../../evals/mirror/instinct-wa-batch1/persona.json", import.meta.url)));
 const WHO = "7b0f8f8e-6a43-4a49-9d2c-00000b0d0c01";
 const fakeModel = async (input: Request | URL | string, init?: RequestInit): Promise<Response> => {
@@ -28,7 +33,7 @@ const fakeModel = async (input: Request | URL | string, init?: RequestInit): Pro
 
 Deno.test({ name: "an application approved before a fact was set aside is not handed to the worker with that fact", sanitizeResources: false, sanitizeOps: false, async fn() {
   if (!pgBinDir()) { if (Deno.env.get("CI") === "true") throw new Error("needs Postgres 16"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
-  const pg: Pg = await startPg(), realFetch = globalThis.fetch;
+  const pg: Pg = await startPg(), realFetch = globalThis.fetch, saved = saveEnv();
   let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
   try {
     await supabaseParity(pg);
@@ -47,7 +52,7 @@ Deno.test({ name: "an application approved before a fact was set aside is not ha
     // career_apply_claim_fair hands the worker every row still 'queued' with attempts = 0: the row must have left that state.
     const state = (await pg.sql(`select state from public.career_apply_jobs where user_id = '${WHO}'`)).trim();
     assertNode.notEqual(state, "queued", "the approved application stating GPA 3.9 is still queued for the worker after the person set that fact aside");
-  } finally { handler?.restore(); globalThis.fetch = realFetch; await pg.stop(); }
+  } finally { handler?.restore(); globalThis.fetch = realFetch; restoreEnv(saved); await pg.stop(); }
 } });
 
 const ROOT = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
@@ -384,7 +389,7 @@ Deno.test({ name: "database: the stop closes only that person's unstarted rows s
 Deno.test({ name: "chat: a correction stops the approved application and says so; restoring the fact re-queues nothing; a stop that cannot run is said", sanitizeResources: false, sanitizeOps: false, async fn() {
   if (!pgBinDir()) { if (Deno.env.get("CI") === "true") throw new Error("needs Postgres 16"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
   const WHO2 = "7b0f8f8e-6a43-4a49-9d2c-00000b0d0c02";
-  const pg: Pg = await startPg(), realFetch = globalThis.fetch;
+  const pg: Pg = await startPg(), realFetch = globalThis.fetch, saved = saveEnv();
   let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
   // The scripted model: the next tool call it makes (once), then plain text.
   let next: { name: string; input: Record<string, unknown> } | null = null;
@@ -465,5 +470,5 @@ Deno.test({ name: "chat: a correction stops the approved application and says so
     assertNode.equal((await gpa()).text, "GPA: 3.6");
     assertNode.ok(unchecked.reply.includes(STALE_UNCHECKED_LINE), `a stop that could not run is said: ${unchecked.reply}`);
     assertNode.doesNotMatch(unchecked.reply, /stopped and not sent/);
-  } finally { handler?.restore(); globalThis.fetch = realFetch; await pg.stop(); }
+  } finally { handler?.restore(); globalThis.fetch = realFetch; restoreEnv(saved); await pg.stop(); }
 } });

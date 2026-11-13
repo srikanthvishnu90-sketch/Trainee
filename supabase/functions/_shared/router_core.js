@@ -21802,7 +21802,8 @@ const CareerProfile = (() => {
   }
   const skillKeyOf = (name) => skillKey(skillForms(name)[0] || name);
   const WORD_NAMES = new Set(["REST", "Excel", "Spark", "Swift", "Rust", "Ruby", "Spring", "Flask", "Go", "Golang", "Express", "Ember", "Julia", "Dart", "Elixir", "Scala",
-    "Word", "Access", "Chef", "Puppet", "Unity", "React", "Sketch", "Vue", "Basic", "Hive", "Pig", "Ant", "Salt", "Crystal", "Nim", "Lean"]);
+    "Word", "Access", "Chef", "Puppet", "Unity", "React", "Sketch", "Vue", "Basic", "Hive", "Pig", "Ant", "Salt", "Crystal", "Nim", "Lean", "Java", "Python", "SAS", "Scratch", "Processing", "Flutter", "Scheme"]);
+  const WORD_KEYS = new Set([...WORD_NAMES].map((w) => w.toLowerCase()));
   const _formRe = new Map();
   const isShort = (form) => (/^[A-Za-z]{1,2}$/.test(form)) || WORD_NAMES.has(form);
   function formRe(form) {
@@ -21829,51 +21830,77 @@ const CareerProfile = (() => {
   const KNOWN_SKILLS = new Set([...ALIAS_GROUP.keys(), ...[...WORD_NAMES].map(skillKey), ...("python java ruby php perl kotlin scala haskell matlab sas stata spss tableau "
     + "pytorch tensorflow keras pandas numpy scipy shiny tidyverse ggplot2 docker terraform ansible jenkins linux bash html css sass django rails laravel angular svelte redux "
     + "graphql grpc kafka airflow hadoop snowflake redshift bigquery dbt looker powerbi figma photoshop illustrator jira salesforce sap oracle azure redis elasticsearch nosql "
-    + "objective-c assembly fortran cobol lua jquery node selenium cypress jest junit pytest phoenix flutter rails postgres unreal blender autocad solidworks verilog vhdl latex vba ai").split(" ")]);
-  const NEGATED = /(?:\b(?:never|not(?!\s+only)|no|without|zero|lacks?|lacking|cannot|unfamiliar|rather than|instead of)|n['’]t)(?:[^\w.;!?\n]+[\w+#.'’/-]+){0,5}[^\w.;!?\n]*$/i;
-  // Round 2 (2026-11-13): not the person's own use. Learning or wanting to ("I am learning Go", "Interested in learning Swift",
-  // "Read a book about Python", "Attended a talk on Kubernetes"), someone else's use ("My manager used SQL"), or a denial
-  // later in the same sentence ("... SQL but never used it", "... SQL, I did not", "(not completed)").
-  const NOT_MINE = /\b(?:learning|(?:want(?:ed|s)?|hop(?:e|ing)|plan(?:ning|s)?|like|love|aim(?:ing)?|going|need) to (?:learn|use|try|study|pick up|get into)|interested in|curious about|pick(?:ing)? up|study(?:ing)?|(?:book|talk|class|course|lecture|article|video|workshop|webinar)s? (?:about|on|in|that mentioned)|read about|heard of|the idea of|exposure to|(?:my|our) (?:manager|boss|colleagues?|coworkers?|client|friend)s?(?: that)? (?:used|uses|wrote|built|knows?|chose))\b(?:[^\w.;!?\n]+[\w+#.'’/-]+){0,4}[^\w.;!?\n]*$/i;
-  const DENIED_AFTER = /^[^.;!?\n]{0,40}?(?:\bbut (?:(?:I|we) )?(?:have )?(?:never|not|didn'?t|haven'?t)\b|,\s*(?:I|we) (?:did not|didn'?t|have not|haven'?t|never)\b|\(not\b|\bbut (?:the team|we|they) (?:chose|used|went with)\b)/i;
-  // A cue right before the name: a preposition or verb of use, a label, years of it, a level word, "from X to", "migrated ... to".
-  const CUE = /(?:\b(?:in|using|with|via|use[sd]?|wrote|writes?|writing|know|knows|learned|taught myself|self-taught in|picked up|(?:skills?|languages?|tools?|stack|tech|technologies|frameworks?|software|proficien(?:t|cy))\s*(?::|-|in|with|is|was|includes?)?|\d+\+?\s*(?:years?|yrs?|months?)(?:\s+of)?(?:\s+experience)?(?:\s+(?:of|in|with|using))?|advanced|expert|strong|daily|intermediate|solid|heavy|fluent|embedded|modern|MS|Microsoft|(?:migrat|port|rewr[io]t|convert|mov|switch)\w*\b[^.;!?\n]{0,30}\bto|but also|from [\w+#.]+ to)\s+)$/i;
-  // A word of the trade right after it (lower case as written, or a product's own second word), or a parenthesis.
-  const TRADE = /^\s+(?:models?|modell?ing|pipelines?|algorithms?|engineer(?:ing|s)?|code|scripts?|scripting|programming|programmers?|programs?|developers?|development|apps?|services?|APIs?|apis?|macros?|formulas?|spreadsheets?|dashboards?|queries|components?|front[- ]?end|back[- ]?end|librar(?:y|ies)|packages?|frameworks?|microservices?|hooks?|notebooks?|users?|power user|fundamentals|CLI|iOS|jobs|chatbots?|agents|databases?|server|game|cookbooks?|research|Boot|on Rails|for (?:numerical|scientific|statistical|data|regression))\b|^\s*\((?!\s*(?:19|20)\d\d\b)/;
-  const LIST_SEP = /\s*(?:[,/;|•·\n]|\s[&+]\s|\s(?:and|or)\s)\s*/;
+    + "objective-c assembly fortran cobol lua jquery node selenium cypress jest junit pytest phoenix flutter rails postgres akka apache pyspark rstudio racket swiftui gin gorm scratch processing scheme unreal blender autocad solidworks verilog vhdl latex vba ai").split(" ")]);
+  // Round 3 (2026-11-13). Two rules, the first for EVERY skill name, the second for names that are also a common word, a
+  // place, an animal, a company or a unit.
+  //  (a) The clause the name is in must be the person's own use of it. It is refused when the clause denies it near the name
+  //      ("not", "never", "none", "no ... experience", "have yet to"), only wishes for or studies it ("would love", "learning",
+  //      "Intro to", "a course in", "basic knowledge of"), or someone else does the using ("she", "my teammate", "the team
+  //      used", "hired", "recruited", "a vendor who used").
+  //  (b) Such a name counts only: alone; in a list of known skills; after a cue or a skills label; before a word of the
+  //      trade; or in a clause that is plainly technical. Never as the first word of another name ("Spark New Zealand"),
+  //      before "of", "at" or an apposition ("Ruby, my manager").
+  const NOT_NEG = /\bnot (?:only|just)\b|\bno stranger to\b|\bnever (?:stopped|quit|gave up)\b|\bcan(?:['’]t|not) imagine [\w ]*?without\b/gi;
+  const NEG = /(?:\b(?:not|never|none|no|without|neither|nor|zero|unfamiliar|lack\w*|limited|rather than|instead of)\b|n['’]t\b|\byet to\b)/i;
+  const INTENT = /\b(?:wish|would love|want(?:ed|s)? to|hop(?:e|ing) to|plan(?:ning|s)? to|goal|learning|to learn|become proficient|interested in|curious about|pick(?:ing)? up|taking a course|currently taking|enrolled|bootcamp|coursework|intro(?:duction)? to|(?:book|talk|class|course|lecture|article|video|workshop|webinar)s? (?:about|on|in|that mentioned)|read about|heard (?:of|about)|the idea of|exposure to|basic knowledge of|someday)\b/i;
+  const NOT_ME = /\b(?:she|he|they)\s+(?:is|was|were|are|built|wrote|used|uses|knows?)\b|\b(?:my|our) (?:teammate|manager|boss|colleagues?|coworkers?|client|friend)s?\b|\bthe team (?:used|uses|chose|wrote)\b|\bvendor\b|\b(?:hired|recruit\w+|interviewed|sold|selling|job ads?|job postings?)\b/i;
+  const words = (x, n, fromEnd) => { const w = x.split(/\s+/).filter(Boolean); return (fromEnd ? w.slice(-n) : w.slice(0, n)).join(" "); };
+  function notOwnUse(before, after) {
+    const b = before, a = after;
+    return NEG.test(words(b, 6, true)) || NEG.test(words(a, 6, false)) || INTENT.test(`${b} | ${a}`) || NOT_ME.test(`${b} | ${a}`);
+  }
+  // A cue right before the name: a preposition or verb of use, a skills label, years of it, a level word.
+  const CUE = /(?:\b(?:in|using|with|via|use[sd]?|wrote|writes?|writing|know|knows|learned|taught myself|self-taught in|picked up|applied|mostly|mainly|primarily|also|(?:skills?|languages?|tools?|stack|tech|technologies|frameworks?|software|proficien(?:t|cy)|analysis|programming|experience)\s*(?::|-|—|–|in|with|is|was|includes?)?|\d+\+?\s*(?:years?|yrs?|months?)(?:\s+of)?(?:\s+experience)?(?:\s+(?:of|in|with|using))?|advanced|expert(?:-level)?|strong|daily|intermediate|solid|heavy|fluent|embedded|modern|low-level|ANSI|Apache|Visual|MS|Microsoft|(?:migrat|port|rewr[io]t|convert|mov|switch)\w*\b[^.;!?\n]{0,30}\bto|but also|from [\w+#.]+ to)\s+)$/i;
+  // A word of the trade right after it (lower case as written, or a product's own second word), or a parenthesis that is not a name.
+  const TRADE = /^\s+(?:models?|modell?ing|pipelines?|algorithms?|engineer(?:ing|s)?|code|scripts?|scripting|programming|programmers?|programs?|developers?|development|apps?|services?|APIs?|apis?|macros?|formulas?|spreadsheets?|dashboards?|queries|components?|front[- ]?end|back[- ]?end|librar(?:y|ies)|frameworks?|microservices?|hooks?|notebooks?|users?|power user|fundamentals|CLI|iOS|jobs|chatbots?|agents|databases?|server|game|cookbooks?|research|Boot|Native|Streaming|Shiny|Markdown|on Rails|for (?:numerical|scientific|statistical|data|regression)|is (?:my|what|the|our))\b|^\s*\((?!\s*(?:19|20)\d\d\b)(?![A-Z][a-z]+(?: [A-Z][a-z]+){0,2}\))|^\s*:\s*\S|^\s*\)/;
+  // A clause that is plainly about software or a claimed skill.
+  const TECHY = /\b(?:APIs?|SDK|CLI|backend|back-end|front[- ]?end|full-stack|microservices?|firmware|iOS|Android|apps?|databases?|quer(?:y|ies)|pipelines?|ETL|jobs|events|latency|deploy\w*|cluster|compiler|generics|concurrency|middleware|scripting|scripts?|programming|programmer|developer|software|codebase|code|coded|monorepo|library|framework|server|client|game|shader|dashboards?|models?|regression|simulation|ARM|REST|auth|production|rewrite|rewrote|refactor\w*|composition|streaming|configuration|cross-platform|macros|VLOOKUP|pivot|spreadsheets?|forecasting|languages?|proficient|experienced|expert|hands-on|comfortable|systems|optimi[sz]ation|generative)\b/;
+  const OK_NEXT = (w) => KNOWN_SKILLS.has(skillKey(w)) || /[a-z][A-Z]|^[A-Z0-9#+]{2,}$/.test(w) || /^(?:Boot|Native|Streaming|Shiny|Markdown|Rails)$/.test(w);
+  const LIST_SEP = /\s*(?:[,/;|•·\n—–]|\s[&+-]\s|\s(?:and|or)\s)\s*/;
   const knownAt = (item, end) => {
-    const words = String(item).replace(/\([^)]*\)/g, " ").replace(/^[\s([]+|[\s.)\]]+$/g, "").split(/\s+/).filter(Boolean);
-    if (!words.length) return false;
-    const pick = (n) => skillKey((end ? words.slice(-n) : words.slice(0, n)).join(" ").replace(/^[^:]*:\s*/, ""));
-    return KNOWN_SKILLS.has(pick(1)) || (words.length > 1 && KNOWN_SKILLS.has(pick(2)));
+    const ws = String(item).replace(/\([^)]*\)/g, " ").replace(/^[\s([]+|[\s.)\]]+$/g, "").split(/\s+/).filter(Boolean);
+    if (!ws.length) return false;
+    const pick = (n) => skillKey((end ? ws.slice(-n) : ws.slice(0, n)).join(" ").replace(/^[^:]*:\s*/, ""));
+    return KNOWN_SKILLS.has(pick(1)) || (ws.length > 1 && KNOWN_SKILLS.has(pick(2)));
   };
-  // `asWritten` false: the name in another case ("react", "go", "r"). That counts only as an item of a list of known skills
-  // ("python, react, sql", "built with react and typescript"), never from a cue or a following word alone ("with access to").
-  function inSkillsContext(t, at, end, asWritten) {
-    const before = t.slice(0, at), after = t.slice(end);
-    if (asWritten && !before.trim() && /^[\s.]*$/.test(after)) return true; // the name alone
-    // "Go to market", "R and D", "Word of mouth", "R. Smith" (an initial and a surname).
-    if (/^[- ]to\b|^\s+(?:and|&|n)\s+D\b|^\s+of\b|^\.\s+[A-Z][a-z]/.test(after)) return false;
+  // `asWritten` false: the name in another case ("react", "go", "r"). That counts only as an item of a list of known skills.
+  function inSkillsContext(t, at, end, asWritten, name) {
+    const before = t.slice(0, at), after = t.slice(end), cued = CUE.test(before);
+    if (!before.trim() && /^[\s.]*$/.test(after)) return true; // the name alone
+    // Not the skill: "Go to market", "R and D", "Word of mouth", "Excel at", "R. Smith", "Ruby, my manager", "Spark New Zealand".
+    if ((/^[- ]to\b|^\s+at\b/.test(after) && !cued) || /^[- ]to[- ]market\b|^\s+(?:and|&|n)\s+D\b|^\s+of\b|^\.\s+[A-Z][a-z]|^,\s+(?:the|my|our)\s+[\w ]{1,25}(?:,|$)/.test(after)) return false;
+    const nextWord = /^\s+([A-Z][\w+#.-]*)/.exec(after);
+    if (nextWord && !OK_NEXT(nextWord[1].replace(/[.,]$/, ""))) return false;
+    if (nextWord && asWritten) return true; // a product's own second word, or another skill ("React Native", "Spark SQL", "Elixir GenServers")
     // The list this name is an item of: the item before ends in a known skill, or the item after starts with one; and the
     // name is the whole of its own item, or follows a cue ("built with react and typescript"; never "I go, python club").
     const prev = before.split(LIST_SEP), next = after.split(LIST_SEP), own = prev[prev.length - 1];
-    const alone = (x) => /^[\s([:]*$/.test(x == null ? "" : x.replace(/^.*:\s*/, ""));
-    if (prev.length > 1 && alone(own) && knownAt(prev[prev.length - 2], true)) return true;
-    if (next.length > 1 && /^[\s.)\]]*$/.test(next[0].replace(/\([^)]*\)/g, "")) && (alone(own) || CUE.test(own)) && knownAt(next[1], false)) return true;
+    const alone = (x) => /^[\s([:]*$/.test(x == null ? "" : x.replace(/^.*[:(]\s*/, ""));
+    const others = [...KNOWN_SKILLS].filter((k) => k !== skillKey(name) && k.length > 1 && new RegExp(`(?<![A-Za-z0-9+#])${escRe(k)}(?![A-Za-z0-9+#])`, "i").test(t));
+    const plainOther = others.some((k) => !isShort(k) && !WORD_KEYS.has(k)), listOnly = !t.replace(/\([^)]*\)/g, "").split(LIST_SEP).some((x) => x.trim().split(/\s+/).length > 2);
+    const listCue = CUE.test(own) || prev.slice(0, -1).some((it) => CUE.test(it.replace(/\S+\s*$/, "")));
+    const neighbour = (item, e) => knownAt(item, e) && (plainOther || listOnly || others.length >= 2 || listCue || TECHY.test(t));
+    if (prev.length > 1 && alone(own) && neighbour(prev[prev.length - 2], true)) return true;
+    if (next.length > 1 && /^[\s.)\]]*$/.test(next[0].replace(/\([^)]*\)/g, "")) && (alone(own) || CUE.test(own)) && neighbour(next[1], false)) return true;
     if (!asWritten) return false;
-    // A cue right before it, and not the first word of a longer name or a season ("Excel Academy", "Spring 2024").
-    if (CUE.test(before) && !/^\s+(?:[A-Z][a-z]|(?:19|20)\d\d\b)/.test(after)) return true;
-    return TRADE.test(after);
+    if (cued && !/^\s+(?:19|20)\d\d\b/.test(after)) return true;
+    if (TRADE.test(after) && !/^\s*\)/.test(after)) return true;
+    // A plainly technical clause, or one that names other skills beside it.
+    return TECHY.test(`${before} | ${after}`) || plainOther || others.length >= 2;
   }
   function textNamesSkill(text, skillName) {
-    const t = String(text == null ? "" : text);
+    // "Not only Python but also Go", "No stranger to Go", "never stopped using R" affirm the skill: read as "using".
+    const t = String(text == null ? "" : text).replace(NOT_NEG, " using ");
     if (!t) return false;
     for (const f of skillForms(skillName)) {
       const re = formRe(f); re.lastIndex = 0;
       for (const m of t.matchAll(re)) {
-        const before = t.slice(0, m.index), after = t.slice(m.index + m[0].length);
-        if (NEGATED.test(before) || NOT_MINE.test(before) || DENIED_AFTER.test(after)) continue;
-        if (!isShort(f) || inSkillsContext(t, m.index, m.index + m[0].length, m[0] === f)) return true;
+        // The clause the name is in: up to the sentence marks around it.
+        const cs = Math.max(...[...t.slice(0, m.index).matchAll(/(?<!\b[A-Z])\.(?=\s)|[;!?](?=\s)|\n/g)].map((x) => x.index + 1), 0), endRe = /(?<!\b[A-Z])\.(?=\s|$)|[;!?](?=\s|$)|\n/g;
+        endRe.lastIndex = m.index + m[0].length;
+        const ce0 = endRe.exec(t), ce = ce0 ? ce0.index : t.length, before = t.slice(cs, m.index), after = t.slice(m.index + m[0].length, ce);
+        if (notOwnUse(before, after)) continue;
+        if (!isShort(f) || inSkillsContext(t.slice(cs, ce), m.index - cs, m.index - cs + m[0].length, m[0] === f, f)) return true;
       }
     }
     return false;

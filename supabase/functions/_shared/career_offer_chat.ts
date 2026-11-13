@@ -504,7 +504,7 @@ function amendOf(message: string, o: Offer, data: OfferData): Offer | "stale" | 
     p = perOld && bare && /\d/.test(body) ? parseOfferWords(body.replace(/([$€£¥₹]?\s?\d[\d,]*(?:\.\d+)?\s?[kKmM]?)(?![\d,.])/, `$1 ${perOld}`), data) : said0;
     if (perOld && p.unsettled && !said0.unsettled) p = said0;
     // What they wrote is quoted as they wrote it, never with the period added here.
-    if (p !== said0) { p.written = { ...(p.written ?? {}) }; if (said0.written?.base) p.written.base = said0.written.base; else delete p.written.base; }
+    if (p !== said0) { p.written = { ...(p.written ?? {}) }; const typed = said0.written?.base ?? /[$€£¥₹]?\s?\d[\d,]*(?:\.\d+)?\s?[kKmM]?(?![\d,.])/.exec(body)?.[0]?.trim(); if (typed) p.written.base = typed; else delete p.written.base; }
     for (const k of ["base", "signing", "bonus", "bonus_target"] as const) {
       const set = k === "base" ? p.base != null || !!p.rate : p[k] != null;
       if (!set || p.marks?.[k] || !known(o.currencies?.[k] ?? (k === "base" ? o.currency : undefined))) continue;

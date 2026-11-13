@@ -15,6 +15,7 @@
     "tests/architect/mail-reply-round4-20261113.test.ts": 0.3,
     "tests/architect/mail-reply-round5-20261113.test.ts": 0.2,
     "tests/architect/mail-reply-round6-20261113.test.ts": 0.1,
+    "tests/architect/mail-reply-round7-20261113.test.ts": 0.1,
     "tests/architect/research-figures-failclosed-20261113.test.ts": 0.2,
     "tests/architect/handoff-recheck-live.test.ts": 34,
     "tests/architect/handoff-failclosed-20261113.test.ts": 12,

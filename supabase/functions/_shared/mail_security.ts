@@ -22,7 +22,8 @@ export const REMOVED = "[removed]";
 // Zero-width, bidi and emoji-keycap marks go; full-width, circled and superscript forms become their plain letters and digits.
 export const normalise = (s: unknown) => String(s ?? "").normalize("NFKC").replace(/(?<![\p{L}\p{Nd}])(?:\p{L} ){2,}\p{L}(?![\p{L}\p{Nd}])/gu, (m) => (/^(?:code|otp|pin|passcode|password|token|key)$/i.test(m.replace(/ /g, "")) ? m.replace(/ /g, "") : m)).replace(/[\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff\ufe0e\ufe0f\u20e3]/g, "")
   .replace(/<\/?(?:b|i|u|em|strong|span|font|small|big|code|tt|mark|sup|sub)\b[^<>]{0,200}>/gi, "");
-export type Removed = { kind: "code" | "secret" | "link"; token: string };
+// carried: taken as the code that a code cue in an earlier sentence announced ("Your code follows. 554102"), from a strong cue.
+export type Removed = { kind: "code" | "secret" | "link"; token: string; carried?: boolean };
 
 // ------------------------------------------------------------------------------------------------ (a) code-like tokens near a cue
 const NUMBER_WORD = String.raw`(?:zero|oh|one|two|three|four|five|six|seven|eight|nine|cero|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|null|eins|zwei|drei|vier|f[uü]nf|sechs|sieben|acht|neun|z[eé]ro|un|deux|trois|quatre|cinq|sept|huit|neuf|\d)`;
@@ -79,11 +80,10 @@ function cuesIn(line: string): { start: number; end: number; weak: boolean; imp?
   return out;
 }
 // Removes code-like tokens near a cue in one line; `carried`: a cue on the line before that ended it (or ended with ":").
-function codesIn(line: string, carried: boolean, out: Removed[]): string {
+function codesIn(line: string, carried: boolean, out: Removed[], strong = false): string {
   const cues = cuesIn(line);
   if (!cues.length && !carried) return line;
   const near = (start: number, end: number, short: boolean) => {
-    if (carried && wordsBetween(line, 0, start) <= 3) return -1;
     // A code cue decides first; an imperative alone ("enter", "type") marks its gap with .5 (the stricter rules below).
     let best = Infinity, imp = Infinity;
     for (const c of cues) {
@@ -91,10 +91,11 @@ function codesIn(line: string, carried: boolean, out: Removed[]): string {
       const gap = c.end <= start ? wordsBetween(line, c.end, start) : c.start >= end ? wordsBetween(line, end, c.start) : 0;
       if (c.imp) { if (gap <= 2) imp = Math.min(imp, gap + 0.5); } else if (gap <= (c.weak || short ? 3 : 8)) best = Math.min(best, gap);
     }
-    return Number.isFinite(best) ? best : imp;
+    // Its own cue decides first; otherwise a carried cue reaches it anywhere in the sentence, as long as it ends the sentence.
+    return Number.isFinite(best) ? best : carried ? -1 : imp;
   };
   const sentence = line;
-  const cut: [number, number, string][] = [];
+  const cut: [number, number, string, boolean][] = [];
   const consider = (m: RegExpMatchArray, kind: "digits" | "alnum" | "words") => {
     const tok = m[0], start = m.index!, end = start + tok.length;
     if (cut.some(([a, b]) => start < b && end > a)) return;
@@ -103,19 +104,21 @@ function codesIn(line: string, carried: boolean, out: Removed[]): string {
     if (kind === "alnum" && (tok.length < 4 || tok.length > 24 || /^\p{Nd}+$/u.test(tok) || /^(?:2fa|mfa|otp\d*)$/i.test(tok))) return;
     const gap = near(start, end, kind === "digits" && digits < 4);
     if (gap === Infinity) return;
-    const imp = gap % 1 !== 0, viaCarry = gap === -1;
+    const viaCarry = gap === -1, imp = !viaCarry && gap % 1 !== 0;
     if (imp && kind === "digits" && digits < 4) return;
     if (kind === "digits" && keepToken(tok, line.slice(Math.max(0, start - 40), start), line.slice(end, end + 16), sentence, imp || viaCarry ? 99 : gap)) return;
+    // A carried code ends its sentence, or is followed by two words at most ("552019 now"); "556677 people visit yearly" is a count.
+    if (viaCarry && ((digits < 4 && !/^[\p{Nd} .-]+$/u.test(line.trim())) || line.slice(end).trim().split(/\s+/).filter((w) => /\p{L}/u.test(w)).length > 2)) return;
     if (imp && kind === "digits" && /^\s+(?:[A-Z][a-z]+\s+)?(?:st|street|ave|avenue|blvd|boulevard|rd|road|lane|ln|dr|drive|way|place|pl|court|ct|square|sq|suite|floor)\b/i.test(line.slice(end, end + 30))) return;
     if (kind === "alnum" && ID_BEFORE.test(line.slice(Math.max(0, start - 40), start))) return;
-    cut.push([start, end, tok]);
+    cut.push([start, end, tok, viaCarry]);
   };
   for (const m of line.matchAll(WORD_RUN)) consider(m, "words");
   for (const m of line.matchAll(DIGIT_RUN)) consider(m, "digits");
   for (const m of line.matchAll(ALNUM)) consider(m, "alnum");
   if (!cut.length) return line;
   cut.sort((x, y) => y[0] - x[0]);
-  for (const [a, b, tok] of cut) { out.push({ kind: "code", token: tok }); line = line.slice(0, a) + REMOVED + line.slice(b); }
+  for (const [a, b, tok, via] of cut) { out.push({ kind: "code", token: tok, ...(via && strong ? { carried: true } : {}) }); line = line.slice(0, a) + REMOVED + line.slice(b); }
   return line;
 }
 
@@ -236,7 +239,7 @@ export function redact(text: unknown): { text: string; removed: Removed[] } {
   for (const [re, ok] of SHAPES) t = t.replace(re, (s) => (s.includes(REMOVED) || !ok(s) ? s : (removed.push({ kind: "secret", token: s }), REMOVED)));
   t = phrasesAndLists(afterCues(t, removed), removed);
   const lines = t.split("\n");
-  let carried = false, hops = 0;
+  let carried = false, hops = 0, strong = false;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     // A cue reaches only its own sentence: "zip code 60601. The dress code ... Parking code 4471" keeps the zip.
@@ -245,13 +248,15 @@ export function redact(text: unknown): { text: string; removed: Removed[] } {
     // A cue sentence with no value of its own ("Your login code is next.") carries forward through the paragraph: up to four
     // sentences, stopping at a blank line, and the first sentence with a number holds the code ("Do not share. 552019"); lines
     // of digits only keep it going ("Enter these digits:" "4 8 2" "9 1 3"). "Passcode: 551203" has its value and carries nothing.
-    if (!line.trim()) { carried = false; hops = 0; continue; }
+    if (!line.trim()) { carried = false; hops = 0; strong = false; continue; }
+    // Numbers that are not code-shaped do not stop it ("Order 12 ships today.", "2024 Acme Inc."): it ends where it takes a code.
     lines[i] = line.split(/(?<=[.!?])(?<!\b(?:no|nr|nos|ref|approx|ext|apt|vs|mr|mrs|ms|dr|st|e\.g|i\.e|etc)\.)(?=\s+\S)/i).map((part) => {
-      const done = codesIn(part, carried, removed);
-      if (cuesIn(part).some((c) => !c.imp && !/\p{Nd}|\[removed\]/u.test(part.slice(c.end)))) { carried = true; hops = 0; }
-      else if (carried && /^[\p{Nd} .-]+$/u.test(part.trim())) { /* a line of digits only: the next may hold more */ }
-      else if (carried && !/\p{Nd}/u.test(part) && hops < 4) hops++;
-      else { carried = false; hops = 0; }
+      const before = removed.length, done = codesIn(part, carried, removed, strong), took = removed.length > before;
+      const cue = cuesIn(part).filter((c) => !c.imp && !/\p{Nd}|\[removed\]/u.test(part.slice(c.end)));
+      if (cue.length) { carried = true; hops = 0; strong = cue.some((c) => !c.weak); }
+      else if (carried && /^[\p{Nd} .-]+$/u.test(part.trim()) && took) { /* a line of digits only: the next may hold more */ }
+      else if (carried && !took && hops < 4) hops++;
+      else { carried = false; hops = 0; strong = false; }
       return done;
     }).join("");
   }
@@ -333,7 +338,7 @@ export function securityMail(m: { from: string; subject: string; text: string })
   if (ASSERTED.test(plainBody)) return true;
   // The same across a full stop: "Here is your login code. It is 330918.", "Your code follows. 554102", "We sent a one-time
   // code. Write it down! 7 7 2 0 1 9".
-  if (SPLIT_CODE.test(plainBody)) return true;
+  if (SPLIT_CODE.test(plainBody) || redact(plainBody).removed.some((r) => r.carried)) return true;
   if (MONEY_ALERT.test(all) && ALERT.test(all)) return true;
   // Reset, sign-in, two-step and alert wording counts in the body only when the email also tells the reader to act on it.
   if (acts && (RESET.test(body) || SIGNIN.test(body) || ALERT.test(body) || (TWO_STEP.test(body) && /\bcodes?\b/i.test(body)))) return true;

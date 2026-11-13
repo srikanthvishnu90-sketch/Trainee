@@ -182,7 +182,9 @@ function unitsOf(A: string[], B0: string[]): { l: number; r: number; skip: numbe
   return { l, r: prep && !again ? r + 1 : r, skip: again ? 1 : 0 };
 }
 export interface OrSearch { queries: string[]; groups: string[][]; not_searched: string[] }
-export function orSearch(query: unknown): OrSearch {
+// How many combinations search_jobs runs: each is one database read, in parallel, with no model call.
+export const SEARCH_ALTERNATIVES_MAX = 9;
+export function orSearch(query: unknown, max = 4): OrSearch {
   const q = String(query ?? "").replace(/\s+/g, " ").trim();
   const none: OrSearch = { queries: [q], groups: [], not_searched: [] };
   // Parts: shared text and groups of alternatives, in the order said.
@@ -224,10 +226,10 @@ export function orSearch(query: unknown): OrSearch {
   for (const g of groups) combos = combos.flatMap((c) => g.map((_, k) => [...c, k]));
   const text = (c: number[]) => { let k = 0; return parts.map((p) => Array.isArray(p) ? groups[k][c[k++]] : p).filter(Boolean).join(" ").replace(/\s+/g, " ").trim(); };
   let picked = combos;
-  if (combos.length > 4) {
+  if (combos.length > max) {
     picked = [];
     const seen = new Set<string>(), gain = (c: number[]) => c.filter((a, g) => !seen.has(`${g}:${a}`)).length;
-    while (picked.length < 4) {
+    while (picked.length < max) {
       const best = combos.filter((c) => !picked.includes(c)).reduce((b, c) => gain(c) > gain(b) ? c : b);
       picked.push(best); best.forEach((a, g) => seen.add(`${g}:${a}`));
     }

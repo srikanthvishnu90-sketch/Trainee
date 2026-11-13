@@ -721,8 +721,10 @@ export async function tailorForPosting(o: {
   // Review of #790 (round 2): a fact that was confirmed and is now waiting for their yes (corrected with correct_profile_fact, or set
   // aside) prints nowhere on this version. The changelog names each one, so a line never leaves a resume unmentioned.
   const held = (o.profile?.facts || []).filter((f: any) => f && (f.corrected_from || f.withdrawn_by_owner) && f.status !== "rejected" && !(f.status === "confirmed" && f.needs_confirmation === false))
-    .map((f: any) => clip(String(f.text || f.title), 70).replace(/[.]+$/, ""));
-  if (held.length) log.line = `${log.line} Left off until you confirm ${held.length === 1 ? "it" : "them"}: ${held.slice(0, 3).join("; ")}${held.length > 3 ? ` and ${held.length - 3} more` : ""}.`;
+    .map((f: any) => clip(entryParts(f).head || String(f.text || f.title), 70).replace(/[.]+$/, ""));
+  // Round 4: every one is named, however many (no existing test pins a length for a version with entries waiting; WO-028/6's 300
+  // characters is for a version with none).
+  if (held.length) log.line = `${log.line} Left off until you confirm ${held.length === 1 ? "it" : "them"} (${held.length}): ${held.join("; ")}.`;
   const text = [`Your resume for ${o.posting.company || "this posting"} is ready. ${log.line}`, ...(link ? [link, "The link works for 7 days."] : [])].join("\n");
   return {
     ok: true, text, link, expires_at: link ? new Date(o.now + LINK_TTL_SECONDS * 1000).toISOString() : "", changelog: log.line, changes: log.items,

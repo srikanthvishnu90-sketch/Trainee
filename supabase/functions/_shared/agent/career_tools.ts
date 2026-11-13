@@ -6,7 +6,7 @@ import { conversationFor, type RepliesStore } from "../career_outreach_replies.t
 import { CareerProfile, CareerTrack, CareerPrep, CareerPaths } from "../router_core.career.js";
 import { AskPerson, type ToolSpec, type ToolCtx } from "./loop.ts";
 import { plainAnswer, RESTORE_ASK_INTENT, restoreQuestion } from "./turn_notes.ts";
-import { type FitCache, newFitCache, orSearch, placeAlternatives, searchAlternatives, searchPostings } from "../career_search.ts";
+import { type FitCache, newFitCache, orSearch, placeAlternatives, SEARCH_ALTERNATIVES_MAX, searchAlternatives, searchPostings } from "../career_search.ts";
 import { searchWords, wordStem } from "../career_ingest.ts";
 import { liveOnly, type LinkCheck } from "../link_check.ts";
 import { startWatching, validPrefs, validZone, type AlertStore } from "../career_alert_store.ts";
@@ -562,6 +562,8 @@ export function careerTools(deps: {
         const answered = setAside && (c as any).restoreAsk?.fact_id === id && plainAnswer(c.turn?.message) === "yes";
         if (setAside && !answered) {
           if (!c.turn) throw new Error("not confirmed: no confirmation from the person in this turn");
+          // Round 4: the turn that set it aside (the person's own words, this message) never asks to put it back.
+          if (setAside.withdrawn_by_owner.at === new Date(c.now).toISOString()) throw new Error("not confirmed: the person just said this fact is out of date, in this message; it stays set aside. Do not ask about it now");
           if (c.turn.show || (c as any).cardPending || (c.turn as any).pendingApprovals) throw new Error("not confirmed: they set this fact aside, and an approval is waiting for their answer; ask about this fact after that is answered, not in this reply");
           const text = restoreQuestion(String(setAside.text || setAside.title));
           c.turn.show = { intent: RESTORE_ASK_INTENT, text, meta: { restore_ask: { fact_id: id } } };
@@ -731,10 +733,12 @@ export function careerTools(deps: {
         // D-073: the places the person joined with "or" stay alternatives, whatever the model's query did with them (placeAlternatives).
         const asked = placeAlternatives(String(i.query ?? ""), c.turn?.message ?? "", c.state?.profile ?? null);
         // D-070: "chicago or remote" is two searches, merged (career_search.ts orAlternatives); each alternative is relaxed alone.
-        // Review of #790: at most four alternatives are searched; the ones left out are returned, so the reply can say so.
-        const ors = orSearch(asked), alts0 = ors.queries;
+        // Review of #790: the alternatives left out are returned, so the reply can say so. Round 4: each alternative here is one
+        // database read (no model call), so up to SEARCH_ALTERNATIVES_MAX combinations are searched, not four: "python or go or
+        // rust engineer in seattle or remote" is six, and its one Rust/remote posting is found.
+        const ors = orSearch(asked, SEARCH_ALTERNATIVES_MAX), alts0 = ors.queries;
         // On every result, an empty one included: which alternatives were left out.
-        const notSearched = ors.not_searched.length ? { not_searched: ors.not_searched, note_not_searched: "only the first four alternatives were searched; say which were not (not_searched) and offer to search them" } : {};
+        const notSearched = ors.not_searched.length ? { not_searched: ors.not_searched, note_not_searched: "not every combination was searched; say which were not (not_searched) and offer to search them" } : {};
         if (alts0.length > 1) {
           // D-071 (live-8 C1/setup-2: "chicago or remote" still returned no remote posting): the database matches whole words, so
           // "software engineer intern remote" found nothing (NVIDIA's remote role is not an internship; only the in-memory test pool

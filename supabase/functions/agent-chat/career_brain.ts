@@ -352,7 +352,9 @@ export async function agentTurn(o: {
   // the fact's own figures, its line goes after the reply, in the fact's own words. A turn whose reply is a card (an exact payload)
   // cannot carry it, so nothing is set aside on that turn: the fact goes back as it was.
   if (stale.length) {
-    if (result.show) {
+    // Round 4: only a card that carries a payload undoes it. Code's own restore question is not one (and is never asked on the
+    // turn that set the fact aside: confirm_profile_fact refuses), so it can never undo a set-aside.
+    if (result.show && result.show.intent !== RESTORE_ASK_INTENT) {
       for (const f of stale as any[]) { Object.assign(f, f.withdrawn_by_owner.was); delete f.withdrawn_by_owner; }
     } else {
       const set = (stale as any[]).map((f) => ({ id: String(f.id), text: String(f.text || f.title) }));
@@ -368,10 +370,11 @@ export async function agentTurn(o: {
   return know ? { ...result, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : result;
 }
 
-// Review of #790 (round 3): code does not judge how the model worded a set-aside ("I kept your GPA 3.9; it was not removed" held the
-// label, the value and a set-aside word). Whenever a fact was set aside this turn, code states it itself, once, as the first line,
-// in the fact's own words; every sentence of the model's reply that names the fact's label or its value is removed, so nothing
-// repeats or contradicts it (the model is told not to mention it: staleFactNote). A turn that did not finish says what was saved.
+// Review of #790 (rounds 3 and 4): whenever a fact was set aside this turn, code states it itself, once, as the first line, in the
+// fact's own words (the model is told not to: staleFactNote). From the model's reply only this is removed: a sentence that STATES
+// that fact's status (its label or value with a status word: set aside, removed, kept, still on file, updated, using ...), and a
+// general claim that nothing changed ("Nothing on your record was changed."), which the set-aside makes untrue. A question, and a
+// sentence about a form, a posting or a next step that only mentions the label, stay. A turn that did not finish says what was saved.
 const UNFINISHED: Record<string, string> = { [INCOMPLETE_REPLY]: INCOMPLETE_AFTER_SAVE_REPLY, [EMPTY_REPLY]: EMPTY_AFTER_SAVE_REPLY, [MODEL_ERROR_REPLY]: MODEL_ERROR_AFTER_SAVE_REPLY, [MAX_STEPS_REPLY]: MAX_STEPS_AFTER_SAVE_REPLY };
 export const SET_ASIDE_LINE = "Set aside, not deleted (no longer used until you say it's right again): ";
 function namesFact(sentence: string, fact: string): boolean {
@@ -379,11 +382,14 @@ function namesFact(sentence: string, fact: string): boolean {
   const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return (!!label && new RegExp(`(?<![A-Za-z])${esc(label)}(?![A-Za-z])`, "i").test(sentence)) || new RegExp(`(?<![\\w$.])${esc(value)}(?![\\w%]|\\.\\d)`, "i").test(sentence);
 }
+const STATUS_WORD = /\bset aside\b|\baside\b|\bremov(?:e|ed|ing)\b|\bkept\b|\bkeep(?:ing)? (?:using|it)\b|\bstill on (?:file|record)\b|\bupdated\b|\bchanged\b|\bsaved\b|\bdeleted\b|\busing\b|\bwill use\b|\bon your (?:record|profile)\b|\boff\b|\bno longer (?:used|use)\b|\b(?:won't|will not) (?:be used|use)\b/i;
+const NOTHING_CHANGED = /\b(?:nothing|no facts?|none of your facts)\b[^.!?]*\b(?:changed|removed|updated|deleted|touched|set aside)\b|\b(?:didn't|did not|haven't|have not|hasn't|has not) (?:been )?(?:chang|remov|touch|updat|delet)\w*\b|\bunchanged\b|\bstill confirmed\b|\b(?:all|every one of) your facts\b/i;
 export function setAsideSaid(reply: string, facts: string[]): string {
   if (!facts.length) return reply;
   const line = `${SET_ASIDE_LINE}${facts.join("; ")}`, r = String(reply ?? "");
   if (UNFINISHED[r] || Object.values(UNFINISHED).includes(r)) return `${line}\n\n${UNFINISHED[r] ?? r}`;
-  const kept = r.split("\n").map((l) => l.startsWith(SET_ASIDE_LINE) ? "" : l.split(/(?<=[.!?])[ \t]+/).filter((x) => !facts.some((f) => namesFact(x, f))).join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  const goes = (x: string) => !x.trim().endsWith("?") && (NOTHING_CHANGED.test(x) || (STATUS_WORD.test(x) && facts.some((f) => namesFact(x, f))));
+  const kept = r.split("\n").map((l) => l.startsWith(SET_ASIDE_LINE) ? "" : l.split(/(?<=[.!?])[ \t]+/).filter((x) => !goes(x)).join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
   return kept ? `${line}\n\n${kept}` : line;
 }
 // D-071: "N applications" said with another number than the record's is the record's number; a sentence about having miscounted

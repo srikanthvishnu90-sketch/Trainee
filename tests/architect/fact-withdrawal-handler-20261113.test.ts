@@ -36,18 +36,19 @@ Deno.test({ name: "set-aside and restore through the real handler: the set-aside
     handler = await careerHandler(pg, PEOPLE);
     const find = (o: any): any => { if (!o || typeof o !== "object") return null; if (o.text === "GPA: 3.9" && o.id) return o; for (const v of Array.isArray(o) ? o : Object.values(o)) { const r = find(v); if (r) return r; } return null; };
     const gpa = async (who: string) => { const s = String(await pg.sql(`select coalesce(json_agg(state)::text,'[]') from public.agent_flow_state where user_id = '${PEOPLE[who]}'`)); const f = find(JSON.parse(s.slice(s.indexOf("["), s.lastIndexOf("]") + 1))); return [f?.status, !!f?.withdrawn_by_owner]; };
-    const turn = async (who: string, m: string, s: (b: any) => any) => { script = s; return await handler!.chat(who).say(m); };
+    const chats: Record<string, any> = {};
+    const turn = async (who: string, m: string, s: (b: any) => any) => { script = s; return await (chats[who] ??= handler!.chat(who)).say(m); };
     // The eager model on the set-aside turn itself.
     await turn("tok-e", PERSONA.setup[0], say("Okay.")); await turn("tok-e", PERSONA.setup[1], say("Okay."));
-    const e1 = await turn("tok-e", "the 3.9 gpa is outdated", eager("F-002", "Understood."));
-    assertNode.deepStrictEqual([String(e1.reply), e1.body?.meta?.restore_ask, await gpa("tok-e")], [`${LINE}\n\nUnderstood.`, undefined, ["draft", true]]);
+    const e1 = await turn("tok-e", "the 3.9 gpa is outdated", eager("F-002", "Understood, thanks for letting me know about that."));
+    assertNode.deepStrictEqual([String(e1.reply), e1.body?.meta?.restore_ask, await gpa("tok-e")], [`${LINE}\n\nUnderstood, thanks for letting me know about that.`, undefined, ["draft", true]]);
     const e2 = await turn("tok-e", "actually can you put my gpa back", eager("F-002", "x"));
     assertNode.deepStrictEqual([String(e2.reply), e2.body?.meta?.restore_ask, await gpa("tok-e")], [QUESTION, { fact_id: "F-002" }, ["draft", true]]);
     const e3 = await turn("tok-e", "yes", eager("F-002", "It is back on your record."));
     assertNode.deepStrictEqual([String(e3.reply), await gpa("tok-e")], ["It is back on your record.", ["confirmed", false]]);
     // A no leaves it set aside, and the yes after that answers nothing.
     await turn("tok-r", PERSONA.setup[0], say("Okay.")); await turn("tok-r", PERSONA.setup[1], say("Okay."));
-    await turn("tok-r", "the 3.9 gpa is outdated", say("Understood."));
+    await turn("tok-r", "the 3.9 gpa is outdated", say("Understood, thanks for letting me know about that."));
     await turn("tok-r", "actually can you put my gpa back", eager("F-002", "x"));
     await turn("tok-r", "no", say("It stays set aside."));
     assertNode.deepStrictEqual(await gpa("tok-r"), ["draft", true]);

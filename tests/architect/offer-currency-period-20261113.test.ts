@@ -15,7 +15,7 @@ import { offerChatTurn } from "../../supabase/functions/_shared/career_offer_cha
 
 const NOW = Date.UTC(2026, 10, 13, 15);
 function eq(a: unknown, b: unknown, m = "") { const x = JSON.stringify(a), y = JSON.stringify(b); if (x !== y) throw new Error(`${m}\n  got:  ${x}\n  want: ${y}`); }
-interface Case { m: string; cur: string; base?: number | null; period?: string | null; rate?: number; factor?: number; signing?: string; bonus?: string; bench: boolean; not?: RegExp; has?: RegExp }
+interface Case { m: string; cur: string; base?: number | null; period?: string | null; rate?: number; factor?: number; signing?: string; bonus?: string; bench: boolean; not?: RegExp; has?: RegExp; assumed?: string[]; wrote?: string[] }
 const swe = (pay: string, place: string) => `Offer from Acme: ${pay} as a software engineer in ${place}`;
 const CASES: Case[] = [
   // ---- finding 1: the currency as said, never US dollars by default, never against US data
@@ -31,7 +31,6 @@ const CASES: Case[] = [
   { m: swe("¥8,000,000 base", "Shanghai"), cur: "XXX", base: 8000000, bench: false },
   { m: swe("1,200,000 pesos base", "Mexico City"), cur: "XXX", base: 1200000, bench: false },
   { m: swe("95k base", "Toronto"), cur: "XXX", base: 95000, bench: false },
-  { m: swe("110k base", "Berlin"), cur: "XXX", base: 110000, bench: false },
   { m: swe("CAD 95,000 base", "Toronto"), cur: "CAD", base: 95000, bench: false },
   { m: swe("95,000 CAD base", "Toronto"), cur: "CAD", base: 95000, bench: false },
   { m: swe("95k cad base", "Toronto"), cur: "CAD", base: 95000, bench: false },
@@ -68,8 +67,24 @@ const CASES: Case[] = [
   { m: "Offer from Acme: 70k USD base, 10k EUR signing, as a software engineer in Austin", cur: "USD", signing: "EUR", bench: true },
   { m: "Offer from Acme: 70k USD base, 10k EUR signing, 5k bonus, as a software engineer in Austin", cur: "USD", signing: "EUR", bonus: "XXX", bench: true, not: /\$5,000/ },
   { m: "Offer from Acme: $110k base, 15k signing, as a software engineer in Austin", cur: "USD", signing: "USD", bench: true },
-  { m: "Coinbase offered me AUD 87,600 base and a $10,000 signing bonus as a complaints analyst in Sydney", cur: "AUD", signing: "XXX", bench: false, not: /\$/ },
   { m: "Offer from Acme: £70k base, 10% bonus, 5k signing, as a data analyst in London", cur: "GBP", signing: "GBP", bench: false },
+  // ---- read as US dollars on an assumption (a "$" or nothing, for a place code cannot confirm is in the United States, or a "$"
+  // beside another stated currency): the parsed currency stays USD, marked assumed; it is never benchmarked, added or weighed,
+  // the reply asks to confirm it, and the counter email writes the figure as the person wrote it.
+  { m: swe("110k base", "Berlin"), cur: "USD", base: 110000, bench: false, assumed: ["base"], wrote: ["110k"], not: /base of \$110,000/ },
+  { m: swe("$110k base", "Berlin"), cur: "USD", base: 110000, bench: false, assumed: ["base"], wrote: ["$110k"], not: /base of \$110,000/ },
+  { m: "Coinbase offered me AUD 87,600 base and a $10,000 signing bonus as a complaints analyst in Sydney", cur: "AUD", signing: "USD", bench: false, assumed: ["signing"], wrote: ["$10,000"] },
+  { m: "Dropbox offered me PLN 368,000 base and a $10,000 signing bonus as an infrastructure software engineer in Warsaw", cur: "PLN", signing: "USD", bench: false, assumed: ["signing"], wrote: ["$10,000"], not: /378,000/ },
+  { m: swe("$95,000 base", "London"), cur: "USD", base: 95000, bench: false, assumed: ["base"], wrote: ["$95,000"] },
+  { m: swe("95,000 base", "Pune"), cur: "USD", base: 95000, bench: false, assumed: ["base"], wrote: ["95,000"], not: /base of \$95,000/ },
+  { m: swe("$120k base and a $10k signing bonus", "Dublin"), cur: "USD", signing: "USD", bench: false, assumed: ["base", "signing"], wrote: ["$120k", "$10k"], not: /130,000/ },
+  { m: swe("CAD 95,000 base and a $5,000 signing bonus", "Toronto"), cur: "CAD", signing: "USD", bench: false, assumed: ["signing"], wrote: ["$5,000"], not: /100,000/ },
+  { m: swe("€60k base and a $5k signing bonus", "Berlin"), cur: "EUR", signing: "USD", bench: false, assumed: ["signing"], wrote: ["$5k"], not: /65,000/ },
+  { m: swe("$40 an hour", "Warsaw"), cur: "USD", period: "hour", rate: 40, bench: false, assumed: ["base"], wrote: ["$40 an hour"], not: /base of \$83,200/ },
+  { m: swe("$6,000 a month", "Tokyo"), cur: "USD", period: "month", rate: 6000, bench: false, assumed: ["base"], wrote: ["$6,000 a month"] },
+  { m: swe("85k base", "Scottsdale"), cur: "USD", base: 85000, bench: false, assumed: ["base"], wrote: ["85k"] },
+  { m: swe("$85k base", "Lagos"), cur: "USD", base: 85000, bench: false, assumed: ["base"], wrote: ["$85k"] },
+  { m: "Offer from Acme: 80k base, 5k signing, as a data analyst in Amsterdam", cur: "USD", signing: "USD", bench: false, assumed: ["base", "signing"], wrote: ["80k", "5k"], not: /85,000/ },
   // ---- finding 3: the period
   { m: "I got an offer from Acme for $6,500 per month as a software engineer in Austin", cur: "USD", period: "month", rate: 6500, factor: 12, base: 78000, bench: true, not: /9\d% below/, has: /12 months/ },
   { m: "Offer from Acme: 8k a month base as a software engineer in Austin", cur: "USD", period: "month", rate: 8000, factor: 12, base: 96000, bench: true },
@@ -110,6 +125,11 @@ Deno.test(`the offer reader on ${CASES.length} offers: currency, period and benc
         if (c.cur === "XXX" && !/currency not stated/.test(String(o.currency_fact))) throw new Error(`no currency fact: ${o.currency_fact}`);
       }
       if (![c.cur, c.signing, c.bonus].includes("USD") && all.includes("$")) throw new Error(`"$" printed for an offer with no US-dollar figure: ${all.split("\n").find((l) => l.includes("$"))}`);
+      eq(Object.keys(o.currency_assumed ?? {}), c.assumed ?? [], "figures read on an assumption");
+      if (c.assumed) {
+        if (!/currency not stated/i.test(all) || !/read as US dollars/.test(all) || !/please confirm the currency/.test(all)) throw new Error("an assumed currency is not said to be one, or not asked about");
+        for (const mail of [brain.draft?.email ?? "", second?.answer?.card?.body ?? ""]) for (const w of c.wrote ?? []) if (!mail.includes(w)) throw new Error(`the counter does not write "${w}" as the person wrote it: ${mail}`);
+      }
       const shown = benchmarks(o).filter((b) => b.shown);
       if (c.bench && !shown.length) throw new Error("a US-dollar yearly offer in a US place lost its benchmark");
       if (!c.bench && (shown.length || /% (?:above|below) the median|median \$|percentile/.test(all))) throw new Error(`placed against US pay data: ${all.split("\n").find((l) => /median|percentile/.test(l))}`);

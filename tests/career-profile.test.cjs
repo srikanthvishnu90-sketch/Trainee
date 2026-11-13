@@ -152,6 +152,12 @@ const SKILL_CASES = [
   ["Languages: Go", "Go", true], ["Proficient in Excel and Word", "Word", true], ["Wrote ETL jobs using Spark", "Spark", true],
   ["Programming in Julia and Dart", "Dart", true], ["Configuration management with Chef and Puppet", "Puppet", true], ["Games in Unity", "Unity", true],
   ["APIs with Flask and Express", "Express", true], ["Go", "Go", true], ["R scripts for survival analysis", "R", true],
+  // lower case counts inside a list of known skills, and only there
+  ["python, react, sql", "React", true], ["built with react and typescript", "React", true], ["python, r, sql", "R", true], ["java, go, rust", "Go", true],
+  ["java, go, rust", "Rust", true], ["excel, word and powerpoint", "Word", true], ["swift/kotlin mobile apps", "Swift", true], ["docker, chef, puppet", "Chef", true],
+  ["flask and django services", "Flask", true], ["spark, hadoop, hive", "Hive", true],
+  ["helped the team react quickly", "React", false], ["with access to payroll records", "Access", false], ["in word and deed", "Word", false],
+  ["learned python and go to meetups", "Go", false], ["I excel at sql", "Excel", false], ["a spark of interest in rust removal", "Rust", false],
   ["Models in R, a REST API in Go, Node.js on k8s, CI/CD.", "Go", true], ["Used SQL daily; never missed a deadline", "SQL", true], ["Mockups in Sketch", "Sketch", true],
 ];
 test(`textNamesSkill on ${SKILL_CASES.length} texts: short and ordinary-word skills only in a skills context, never in a negation`, () => {

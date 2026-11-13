@@ -1297,7 +1297,7 @@ const CareerProfile = (() => {
     const short = isShort(form);
     const body = escRe(form).replace(/\s+/g, "\\s+");
     const re = short
-      ? new RegExp(`(?<![A-Za-z0-9+#&.'\\-])${body}(?![A-Za-z0-9+#&'\\-])(?!\\.[A-Za-z0-9])`, "g")
+      ? new RegExp(`(?<![A-Za-z0-9+#&.'\\-])${body}(?![A-Za-z0-9+#&'\\-])(?!\\.[A-Za-z0-9])`, "gi")
       : new RegExp(`(?<![A-Za-z0-9+#])${body}(?![A-Za-z0-9+#])(?!\\.[A-Za-z0-9])`, "gi");
     _formRe.set(form, re);
     return re;
@@ -1316,14 +1316,15 @@ const CareerProfile = (() => {
     const pick = (n) => skillKey((end ? words.slice(-n) : words.slice(0, n)).join(" ").replace(/^[^:]*:\s*/, ""));
     return KNOWN_SKILLS.has(pick(1)) || (words.length > 1 && KNOWN_SKILLS.has(pick(2)));
   };
-  function inSkillsContext(t, at, end) {
+  function inSkillsContext(t, at, end, asWritten) {
     const before = t.slice(0, at), after = t.slice(end);
-    if (!before.trim() && /^[\s.]*$/.test(after)) return true;
+    if (asWritten && !before.trim() && /^[\s.]*$/.test(after)) return true;
     if (/^[- ]to\b|^\s+(?:and|&|n)\s+D\b/.test(after)) return false;
     const prev = before.split(LIST_SEP), next = after.split(LIST_SEP);
     const alone = (x) => /^[\s([:]*$/.test(x == null ? "" : x.replace(/^.*:\s*/, ""));
     if (prev.length > 1 && alone(prev[prev.length - 1]) && knownAt(prev[prev.length - 2], true)) return true;
     if (next.length > 1 && /^[\s.)\]]*$/.test(next[0]) && knownAt(next[1], false)) return true;
+    if (!asWritten) return false;
     if (CUE.test(before) && !/^\s+(?:[A-Z][a-z]|(?:19|20)\d\d\b)/.test(after)) return true;
     return TRADE.test(after);
   }
@@ -1334,7 +1335,7 @@ const CareerProfile = (() => {
       const re = formRe(f); re.lastIndex = 0;
       for (const m of t.matchAll(re)) {
         if (NEGATED.test(t.slice(0, m.index))) continue;
-        if (!isShort(f) || inSkillsContext(t, m.index, m.index + m[0].length)) return true;
+        if (!isShort(f) || inSkillsContext(t, m.index, m.index + m[0].length, m[0] === f)) return true;
       }
     }
     return false;

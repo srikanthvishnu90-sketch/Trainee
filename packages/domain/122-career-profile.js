@@ -178,7 +178,7 @@ const CareerProfile = (() => {
     // A short name: its own capitals only (an all-lower form like "k8s" or "psql" is matched as written), and never joined to
     // "&", "-", "'" or a dotted letter. A longer one: any case, never inside a longer word or a dotted name ("Node" in "Node.js").
     const re = short
-      ? new RegExp(`(?<![A-Za-z0-9+#&.'\\-])${body}(?![A-Za-z0-9+#&'\\-])(?!\\.[A-Za-z0-9])`, "g")
+      ? new RegExp(`(?<![A-Za-z0-9+#&.'\\-])${body}(?![A-Za-z0-9+#&'\\-])(?!\\.[A-Za-z0-9])`, "gi")
       : new RegExp(`(?<![A-Za-z0-9+#])${body}(?![A-Za-z0-9+#])(?!\\.[A-Za-z0-9])`, "gi");
     _formRe.set(form, re);
     return re;
@@ -205,15 +205,18 @@ const CareerProfile = (() => {
     const pick = (n) => skillKey((end ? words.slice(-n) : words.slice(0, n)).join(" ").replace(/^[^:]*:\s*/, ""));
     return KNOWN_SKILLS.has(pick(1)) || (words.length > 1 && KNOWN_SKILLS.has(pick(2)));
   };
-  function inSkillsContext(t, at, end) {
+  // `asWritten` false: the name in another case ("react", "go", "r"). That counts only as an item of a list of known skills
+  // ("python, react, sql", "built with react and typescript"), never from a cue or a following word alone ("with access to").
+  function inSkillsContext(t, at, end, asWritten) {
     const before = t.slice(0, at), after = t.slice(end);
-    if (!before.trim() && /^[\s.]*$/.test(after)) return true; // the name alone
+    if (asWritten && !before.trim() && /^[\s.]*$/.test(after)) return true; // the name alone
     if (/^[- ]to\b|^\s+(?:and|&|n)\s+D\b/.test(after)) return false; // "Go to market", "R and D"
     // The list this name is an item of: the item before ends in a known skill, or the item after starts with one.
     const prev = before.split(LIST_SEP), next = after.split(LIST_SEP);
     const alone = (x) => /^[\s([:]*$/.test(x == null ? "" : x.replace(/^.*:\s*/, ""));
     if (prev.length > 1 && alone(prev[prev.length - 1]) && knownAt(prev[prev.length - 2], true)) return true;
     if (next.length > 1 && /^[\s.)\]]*$/.test(next[0]) && knownAt(next[1], false)) return true;
+    if (!asWritten) return false;
     // A cue right before it, and not the first word of a longer name or a season ("Excel Academy", "Spring 2024").
     if (CUE.test(before) && !/^\s+(?:[A-Z][a-z]|(?:19|20)\d\d\b)/.test(after)) return true;
     return TRADE.test(after);
@@ -225,7 +228,7 @@ const CareerProfile = (() => {
       const re = formRe(f); re.lastIndex = 0;
       for (const m of t.matchAll(re)) {
         if (NEGATED.test(t.slice(0, m.index))) continue;
-        if (!isShort(f) || inSkillsContext(t, m.index, m.index + m[0].length)) return true;
+        if (!isShort(f) || inSkillsContext(t, m.index, m.index + m[0].length, m[0] === f)) return true;
       }
     }
     return false;

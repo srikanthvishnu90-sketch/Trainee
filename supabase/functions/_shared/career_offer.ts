@@ -18,7 +18,7 @@ export const REQUIRED = ["company", "base", "city", "role"] as const;
 export type Field = typeof REQUIRED[number];
 export const MAX_MESSAGE = 1500;
 
-export interface Competing { company: string | null; base: number; said: string; currency?: string; mark?: string | null }
+export interface Competing { company: string | null; base: number; said: string; currency?: string; mark?: string | null; assumed?: boolean }
 export type Period = "hour" | "day" | "week" | "biweek" | "month" | "year";
 type Fig = "base" | "signing" | "bonus" | "bonus_target";
 export interface Offer {
@@ -43,7 +43,10 @@ export interface Offer {
   // why (null when the base's currency was stated), and `marks` keeps what was written next to each figure so a later
   // message (the city) can settle it. `rate` is a base said per hour, day, week, two weeks or month; `annualized` is the
   // stated assumption a yearly `base` was worked out with (null for a daily rate: no yearly base), and `period_fact` says so.
-  currency_fact?: string | null; marks?: Partial<Record<Fig, string | null>>;
+  // `currency_assumed` marks a figure read as US dollars without the person saying so beyond a "$" or nothing, for a place
+  // code cannot confirm is in the United States: it is never benchmarked, added or weighed against another amount, the
+  // reply asks to confirm it, and a counter email writes it as the person wrote it (`written`).
+  currency_fact?: string | null; marks?: Partial<Record<Fig, string | null>>; currency_assumed?: Partial<Record<Fig, boolean>>; written?: Partial<Record<Fig, string>>;
   rate?: { amount: number; period: Period } | null; annualized?: { factor: number; assumption: string } | null; period_fact?: string | null;
 }
 export interface Bench {
@@ -125,6 +128,7 @@ export const usMarket = (o: Offer) => ["us", "none"].includes(placeKind(o));
 export const known = (c: string | null | undefined) => !!c && c !== UNKNOWN_CURRENCY;
 // Two amounts are in one currency only when both currencies are known and equal (a legacy offer on file with none is USD).
 export const sameCurrency = (a: string | null | undefined, b: string | null | undefined) => known(a ?? "USD") && (a ?? "USD") === (b ?? "USD");
+export const anyAssumed = (o: Offer) => Object.values(o.currency_assumed ?? {}).some(Boolean);
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 // Each figure's currency from what was written next to it and, for "$" or nothing, the place. A figure with no currency of
 // its own takes the message's only stated one; with none stated and a US place it is read as US dollars and that is said;
@@ -135,15 +139,30 @@ export function settleCurrency(o: Offer): Offer {
   const figs = (["base", "signing", "bonus", "bonus_target"] as Fig[]).filter((f) => f === "base" ? o.base != null || !!o.rate : o[f] != null);
   const stated = new Set([...figs.map((f) => marks[f]), ...o.competing.map((c) => c.mark)].filter((m): m is string => !!m));
   const only = stated.size === 1 ? [...stated][0] : null, kind = placeKind(o);
-  const settle = (own: string | null | undefined): [string, string | null] => {
+  const other = [...stated].find((m) => CURRENCY_CODES.includes(m) && m !== "USD");
+  const guess = (why: string): [string, string, boolean] => ["USD", `${NOT_STATED}: ${why}, so it is read as US dollars, which is an assumption; please confirm the currency`, true];
+  // [currency, the fact to say, assumed]
+  const settle = (own: string | null | undefined): [string, string | null, boolean] => {
     const m = own ?? only;
-    if (!m) return stated.size === 0 && kind === "us" ? ["USD", `${NOT_STATED}; read as US dollars because ${placeName(o)} is in the United States`] : [UNKNOWN_CURRENCY, NOT_STATED];
-    if (m === "$") return kind === "dollar" ? [UNKNOWN_CURRENCY, `${NOT_STATED}: the dollar sign with ${placeName(o)} could mean US dollars or the local currency`] : ["USD", null];
-    return AMBIGUOUS[m] ? [UNKNOWN_CURRENCY, `${NOT_STATED}: ${AMBIGUOUS[m]}`] : [m, null];
+    if (!m) {
+      if (stated.size === 0 && kind === "us") return ["USD", `${NOT_STATED}; read as US dollars because ${placeName(o)} is in the United States`, false];
+      return stated.size === 0 && kind === "other" ? guess(`the figure has no currency and ${placeName(o)} is not a US place I can confirm`) : [UNKNOWN_CURRENCY, NOT_STATED, false];
+    }
+    if (m === "$") {
+      if (kind === "other") return guess(`the dollar sign is all that was written and ${placeName(o)} is not a US place I can confirm`);
+      if (kind !== "dollar") return ["USD", null, false];
+      return other ? guess(`the dollar sign is written beside ${other} for ${placeName(o)}`) : [UNKNOWN_CURRENCY, `${NOT_STATED}: the dollar sign with ${placeName(o)} could mean US dollars or the local currency`, false];
+    }
+    return AMBIGUOUS[m] ? [UNKNOWN_CURRENCY, `${NOT_STATED}: ${AMBIGUOUS[m]}`, false] : [m, null, false];
   };
-  o.currencies = Object.fromEntries(figs.map((f) => [f, settle(marks[f])[0]]));
-  for (const c of o.competing) if ("mark" in c) c.currency = settle(c.mark)[0];
-  if (figs.includes("base")) { [o.currency, o.currency_fact] = settle(marks.base); } else { delete o.currency; o.currency_fact = null; }
+  const read = Object.fromEntries(figs.map((f) => [f, settle(marks[f])])) as Partial<Record<Fig, [string, string | null, boolean]>>;
+  o.currencies = Object.fromEntries(figs.map((f) => [f, read[f]![0]]));
+  o.currency_assumed = Object.fromEntries(figs.filter((f) => read[f]![2]).map((f) => [f, true]));
+  for (const c of o.competing) if ("mark" in c) { const [cur, , assumed] = settle(c.mark); c.currency = cur; c.assumed = assumed; }
+  if (figs.includes("base")) o.currency = read.base![0]; else delete o.currency;
+  // The fact said: the base's, else that of the first other figure read on an assumption.
+  const g = figs.find((f) => f !== "base" && read[f]![2]);
+  o.currency_fact = read.base?.[1] ?? (g ? `${g === "signing" ? "signing bonus" : "bonus"} ${read[g]![1]}` : null);
   const r = o.rate;
   o.period_fact = !r ? null : o.annualized ? `the yearly base is an estimate: ${rateIn(r.amount, o.currency)} ${PER[r.period]} x ${o.annualized.assumption}, as if that many are paid in a year`
     : `${rateIn(r.amount, o.currency)} ${PER[r.period]} is a daily rate; it is not turned into a yearly base because the days worked in a year were not given`;
@@ -161,6 +180,9 @@ export const isUsd = (o: Pick<Offer, "currency">) => (o.currency ?? "USD") === "
 // currency is unknown; and a base said as a rate as that rate ("$6,500 a month"), never as the yearly estimate.
 export const moneyFor = (o: Offer) => (n: number, field?: string) => {
   const c = field === "signing" ? (o.currencies?.signing ?? o.currency) : o.currency, bare = (x: string) => x.replace(` (${NOT_STATED})`, "");
+  // A figure whose currency is an assumption is written as the person wrote it ("$10,000", "110k"): no currency is asserted.
+  const k: Fig | null = field === "signing" ? "signing" : field === undefined && n === o.base ? "base" : null;
+  if (k && o.currency_assumed?.[k] && o.written?.[k]) return k === "base" && o.rate ? `${o.written.base} ${PER[o.rate.period]}` : o.written[k]!;
   return bare(field === undefined && o.rate && n === o.base ? `${rateIn(o.rate.amount, c)} ${PER[o.rate.period]}` : moneyIn(n, c));
 };
 // A rate keeps its cents ("$27.50 an hour").
@@ -187,6 +209,7 @@ export function rateNote(o: Offer, c: string | null | undefined): string {
 export function notPlaced(o: Offer): string | null {
   if (o.currency === UNKNOWN_CURRENCY) return `${cap(o.currency_fact ?? NOT_STATED)}. So it is not placed against any pay data, and nothing is converted. Tell me the offer again with its currency (USD, CAD, EUR ...) and I'll redo it.`;
   if (!isUsd(o)) return `The offer is in ${o.currency}. The public pay data on file is US data in US dollars, so it is not placed against it, and nothing is converted.`;
+  if (o.currency_assumed?.base) return "The currency is an assumption until you confirm it, so the offer is not placed against any pay data.";
   return usMarket(o) ? null : `The public pay data on file is for the United States, and ${placeName(o)} is not a US place I can confirm, so the offer is not placed against it.`;
 }
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -223,7 +246,7 @@ export function placeAnswer(text: string, onlyCity = true): string | null {
   return t;
 }
 const MONEY = /(?<![\w.])\$?\s?(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s?(k|K|thousand|m|M)?(?![\w])/g;
-interface Amount { value: number; per: Period | null; at: number; end: number; mark: string | null }
+interface Amount { value: number; per: Period | null; at: number; end: number; mark: string | null; text: string }
 function amounts(clause: string): Amount[] {
   const out: Amount[] = [];
   for (const m of clause.matchAll(MONEY)) {
@@ -241,7 +264,7 @@ function amounts(clause: string): Amount[] {
     // A bare small number is a count or a date, not pay: pay is "110k", "$110,000", "110000", "$45/hr" or "$1,500 a week".
     if (rated ? v < RATE_RANGE[per!][0] || v > RATE_RANGE[per!][1] : v < 1000) continue;
     if (!dollar && !unit && !rated && (v < 10000 || /^20\d\d$/.test(m[1]))) continue;
-    out.push({ value: v, per, at, end: end + after + (post ? post[0].length : 0), mark });
+    out.push({ value: v, per, at, end: end + after + (post ? post[0].length : 0), mark, text: m[0].trim() });
   }
   return out;
 }
@@ -345,8 +368,8 @@ export function parseOfferWords(text: string, data: OfferData = payData(), opts:
   else offer.company = namedCompany(body);
   const from: NonNullable<Offer["from"]> = {};
   offer.from = from;
-  const marks: NonNullable<Offer["marks"]> = {};
-  offer.marks = marks;
+  const marks: NonNullable<Offer["marks"]> = {}, written: NonNullable<Offer["written"]> = {};
+  offer.marks = marks; offer.written = written;
   offer.bonus_target = null;
   for (const c of main) {
     const as = amounts(c).filter((a) => !BENEFIT_AMOUNT.test(c.slice(a.end, a.end + 40)));
@@ -355,14 +378,14 @@ export function parseOfferWords(text: string, data: OfferData = payData(), opts:
     if (BENEFIT.test(c) && !/\b(base|salary)\b/i.test(c)) continue;
     const a = as[0];
     const rated = !!a.per && a.per !== "year";
-    if (/sign(?:ing|-on| on)/i.test(c)) { offer.signing = a.value; from.signing = c; marks.signing = a.mark; }
+    if (/sign(?:ing|-on| on)/i.test(c)) { offer.signing = a.value; from.signing = c; marks.signing = a.mark; written.signing = a.text; }
     else if (/bonus/i.test(c) && /\btarget\b/i.test(c)) { offer.bonus_target = a.value; from.bonus_target = c; marks.bonus_target = a.mark; }
     else if (/bonus/i.test(c)) { offer.bonus = a.value; from.bonus = c; marks.bonus = a.mark; }
     else if (/\b(base|salary|pay|offered|offer of|offering|comp|per year|a year|annual|\/yr)\b/i.test(c) || rated || (offer.base == null && !offer.rate)) {
       // A rate is kept as said; the yearly base is rate x a stated assumption, or nothing for a daily rate.
       if (rated) { const y = ANNUAL[a.per!] ?? null; Object.assign(offer, { rate: { amount: a.value, period: a.per }, annualized: y, base: y ? Math.round(a.value * y.factor) : null, hourly: a.per === "hour" ? a.value : null, period: a.per }); }
       else Object.assign(offer, { rate: null, annualized: null, base: a.value, hourly: null, period: a.per === "year" || /\b(per year|a year|annual(?:ly)?|yearly|\/\s?yr|per annum)\b/i.test(c) ? "year" : null });
-      from.base = c; marks.base = a.mark;
+      from.base = c; marks.base = a.mark; written.base = a.text;
     }
   }
   const metro = metroIn(body, maps);
@@ -405,6 +428,7 @@ export function mergeOffers(a: Offer, b: Offer, data: OfferData = payData()): Of
   out.currencies = { ...(a.currencies ?? {}), ...(b.currencies ?? {}) };
   out.currency = out.currencies.base ?? a.currency ?? b.currency;
   if (out.currency === undefined) delete out.currency;
+  out.written = { ...(a.written ?? {}), ...(b.written ?? {}) };
   if (a.marks || b.marks) { out.marks = { ...(a.marks ?? {}), ...(b.marks ?? {}) }; settleCurrency(out); }
   out.occupation = occupationFor(out.role, out.sector, data?.maps);
   return out as Offer;
@@ -438,7 +462,7 @@ export function benchmarks(o: Offer, data: OfferData = payData()): Bench[] {
   // D-069: the public pay data on file is US data in US dollars. An offer said in another currency is never placed against it
   // (that would need a conversion with a sourced rate, and a US market for a non-US job).
   // 2026-11-13: nor is an offer whose currency is not known, or one for a place code cannot confirm is in the United States.
-  if (!isUsd(o) || !usMarket(o)) return out;
+  if (!isUsd(o) || !usMarket(o) || o.currency_assumed?.base) return out;
   const occ = o.occupation;
   const base = o.base;
   // 1. The employer's own filed H-1B wages for this occupation and metro.
@@ -540,7 +564,7 @@ export function offerReply(o: Offer, notGiven: Field[], data: OfferData = payDat
   if (o.occupation && !why && !shown.length) lines.push("", "So I have no public number to place your offer against yet, and I won't make one up.");
   const firstUp = shown.find((b) => b.median != null);
   const script = (CareerNegotiation as any).factScript({ company: o.company, role: o.title ?? o.role, base: o.base, signing: o.signing },
-    { competing: o.competing.filter((x) => sameCurrency(x.currency, o.currency)).map((x) => ({ ...x })), deadline: o.deadline, benchmark: firstUp ? { median: firstUp.median, cite: firstUp.cite } : null, money: moneyFor(o) });
+    { competing: o.competing.filter((x) => !x.assumed && !o.currency_assumed?.base && sameCurrency(x.currency, o.currency)).map((x) => ({ ...x })), deadline: o.deadline, benchmark: firstUp ? { median: firstUp.median, cite: firstUp.cite } : null, money: moneyFor(o) });
   const uniq = [...new Set(urls)];
   if (uniq.length) lines.push("", "Sources:", ...uniq);
   const draftLines = ["A counter you could send. Nothing is sent: edit it and send it yourself.", "", script.email, "", "On a call:", script.call];

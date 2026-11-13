@@ -98,17 +98,28 @@ function SHOWN_CHECK() {
   const text = ((document.body && document.body.innerText) || "").slice(0, 20000);
   if (/verify\s+(?:that\s+)?you(?:\s+are|['\u2019]re)\s+(?:a\s+)?(?:human|not a robot)|are you a robot|i['\u2019]?m not a robot|complete the (security )?check|press (and|&) hold/i.test(text)) return "text";
   if (/^(just a moment|attention required)/i.test(document.title || "")) return "interstitial";
+  // Round 2: a challenge asked as a question (an image of characters to type, "prove you are human"): a check, never a question
+  // handed to the person as one of the form's own.
+  if (/\b(?:type|enter) the (?:characters|letters|text|code|word)s? (?:shown|you see|displayed|from|in) (?:in |on )?(?:the |this )?(?:image|picture|box)|prove (?:that )?you(?:\s+are|['\u2019]re) (?:a )?human|security question to prove/i.test(text)) return "question";
+  const img = [...document.querySelectorAll("img[alt*='captcha' i], img[src*='captcha' i], img[id*='captcha' i], img[class*='captcha' i]")].find(vis);
+  if (img) return "question image";
   // A reCAPTCHA or hCaptcha container the page runs invisibly at its own click is not shown either: a hidden *-captcha-response
   // field with a hidden submit button in the same form (every captured Lever form), or the reCAPTCHA badge (Greenhouse, Ashby).
   // The 2026-11-09 benchmark (run 42676274898) saw 0 shown checks on these boards (architect ruling of 2026-10-19).
   const hiddenEl = (b) => !vis(b) || b.hidden || /(^|\s)hidden(\s|$)/.test(b.className || "");
   const runsInvisibly = (e) => {
     if (!e.matches(".g-recaptcha, .h-captcha")) return false;
+    // A box the widget has drawn at a real size is shown, whatever else the page runs beside it (a v3 badge, a hidden token field).
+    if (onScreen(e)) return false;
     const scope = e.closest("form") || document;
     const token = [...scope.querySelectorAll("[name$='-captcha-response']")].some((t) => t.type === "hidden" || !vis(t));
     const hiddenSubmit = [...scope.querySelectorAll("button[type=submit], input[type=submit]")].some(hiddenEl);
     return (token && hiddenSubmit) || (e.matches(".g-recaptcha") && !!document.querySelector(".grecaptcha-badge"));
   };
+  // Round 2: the other providers' own containers, by class, id or data attribute (Friendly Captcha, Arkose / FunCaptcha, GeeTest,
+  // DataDome, PerimeterX / HUMAN, AWS WAF, MTCaptcha, Cloudflare Turnstile), shown at a real size.
+  const other = [...document.querySelectorAll(".frc-captcha, [data-e2e='enforcement-frame'], #arkose, #FunCaptcha, [id^='funcaptcha' i], [class*='geetest' i], #datadome-captcha, [id^='ddChallenge' i], #px-captcha, [class*='px-captcha' i], awswaf-captcha, #captcha-container.amzn-captcha, .amzn-captcha-modal, .mtcaptcha, [data-captcha-provider]")].find(onScreen);
+  if (other) return `widget ${other.tagName.toLowerCase()}${other.id ? "#" + other.id : ""}.${String(other.className || "").slice(0, 40)} ${other.offsetWidth}x${other.offsetHeight}`;
   const widget = [...document.querySelectorAll(".g-recaptcha, .h-captcha, .cf-turnstile, #challenge-form, #cf-challenge-running")]
     .find((e) => (e.getAttribute("data-size") || "").toLowerCase() !== "invisible" && !/invisible/i.test(e.getAttribute("data-badge") || "") && !runsInvisibly(e)
       // A reCAPTCHA or hCaptcha container is shown only once it has drawn its checkbox: an empty 680x0 box (every live Lever
@@ -118,7 +129,8 @@ function SHOWN_CHECK() {
   if (widget) return `widget ${desc(widget)}`;
   const frame = [...document.querySelectorAll("iframe")].find((f) => {
     const src = f.src || "";
-    if (!/recaptcha\/(?:api2|enterprise)\/(?:anchor|bframe)|\/recaptcha\/anchor|hcaptcha\.com\/captcha|challenges\.cloudflare\.com|captcha-delivery\.com/i.test(src)) return false;
+    if (!/recaptcha\/(?:api2|enterprise)\/(?:anchor|bframe)|\/recaptcha\/anchor|hcaptcha\.com\/captcha|challenges\.cloudflare\.com|captcha-delivery\.com|arkoselabs\.com|funcaptcha|\/fc\/gc\/|geetest|perimeterx|px-cdn|px-cloud|awswaf|friendlycaptcha|mtcaptcha/i.test(src)
+      && !/captcha|verification challenge|security check/i.test(`${f.title || ""} ${f.getAttribute("aria-label") || ""}`)) return false;
     if (/[?&]size=invisible\b/i.test(src)) return false;
     // hCaptcha's enclave frame (hcaptcha-enclave.html, #frame=enclave) is its background scoring frame on every Lever form, never
     // a challenge (strict benchmark run 42707036468); its checkbox and challenge frames are.
@@ -215,7 +227,8 @@ async function openApply(page, timeout) {
 // A check over the whole page (a Cloudflare or DataDome challenge, an interstitial, a check outside any form) still stops the
 // run on load, before anything is typed. Read only: the check is never clicked, typed into or scored.
 function CHECK_IN_FORM() {
-  const sel = ".g-recaptcha, .h-captcha, .cf-turnstile, iframe[src*='recaptcha/api2/anchor'], iframe[src*='recaptcha/enterprise/anchor'], iframe[src*='hcaptcha.com/captcha'], iframe[src*='challenges.cloudflare.com']";
+  const sel = ".g-recaptcha, .h-captcha, .cf-turnstile, iframe[src*='recaptcha/api2/anchor'], iframe[src*='recaptcha/enterprise/anchor'], iframe[src*='hcaptcha.com/captcha'], iframe[src*='challenges.cloudflare.com'], "
+    + ".frc-captcha, [data-e2e='enforcement-frame'], #arkose, [class*='geetest' i], #px-captcha, awswaf-captcha, .mtcaptcha, iframe[title*='captcha' i], iframe[title*='challenge' i], iframe[src*='arkoselabs'], iframe[src*='/fc/gc/'], img[alt*='captcha' i], img[src*='captcha' i]";
   if (/^(just a moment|attention required)/i.test(document.title || "")) return false;
   const checks = [...document.querySelectorAll(sel)].filter((e) => e.offsetWidth > 60 && e.offsetHeight > 40);
   if (!checks.length) return false;
@@ -323,7 +336,7 @@ function pickControls(snap) {
   // The application lives in a frame of this page (an ATS's embedded form): no form of the parent page is the application.
   if (snap.frameApp) return { ...none, refuse: "application_in_frame" };
   // `was`: this run already took the form as the application (a board that swaps the upload's input for a chip once the resume is set).
-  const ownSubmit = (f) => Math.max(0, ...ctl.filter((c) => c.form === f.i && c.vis && controlLabel(c) === "yes").map((c) => (NAMES_APPLICATION.test(c.text) ? 2 : 1)));
+  const ownSubmit = (f) => Math.max(0, ...ctl.filter((c) => c.form === f.i && controlLabel(c) === "yes").map((c) => (NAMES_APPLICATION.test(c.text) ? 2 : 1)));
   const apps = forms.filter((f) => f.was || isApplicationForm(f, ownSubmit(f)));
   for (const f of apps) {
     const own = ctl.filter((c) => c.form === f.i && c.vis), labels = own.map((c) => controlLabel(c)), cands = own.filter((c, i) => labels[i] === "yes");
@@ -414,6 +427,7 @@ function MARK(pick) {
 // The last look before the click: the control about to be pressed belongs to the form that was filled, and every filled question
 // is in that form. `t` is read from the page (attempt): formless (no form was marked), anyForm, sameForm, filledOutside.
 // `outside`: pickControls took the control by the one narrow exception (outsideSubmitOf); it must still belong to no form.
+const CAPTCHA_QUESTION = /captcha|characters (?:shown|you see|displayed|in the image)|(?:text|code|letters) (?:shown |you see )?in the (?:image|picture)|prove (?:that )?you(?:'re| are) (?:a )?human|not a robot/i;
 const submitTieRefusal = (t) => ((t.formless ? !t.anyForm : (t.sameForm || (t.outside === true && t.noForm === true)) && !t.filledOutside) ? null : "submit_not_tied_to_form");
 // Page side, read only: what every control of the application form holds now (the whole page for a board with no <form>): the
 // rows of handoff.cjs pageRows. A box or radio by its own option (value null when not ticked), a select by its chosen options'
@@ -618,7 +632,19 @@ async function attempt(browser, p, opts, timing) {
   // stops the run before anything is typed; before the step form's Continue and before Submit, a check shown now or seen on any
   // earlier step of this run stops it, as wall check_in_form with everything else already filled and read back.
   let checkInForm = null;
+  // Round 2: a widget drawn late (Turnstile a second or two after load) is waited for before every Continue and Submit: the page
+  // must have stopped changing for checkSettleMs (2 s), at most three times that. Read only.
+  const settleMs = opts.checkSettleMs ?? 2000;
+  const settled = () => page.evaluate(([quiet, max]) => new Promise((done) => {
+    const t0 = Date.now(); let timer;
+    const end = () => { mo.disconnect(); clearTimeout(timer); done(); };
+    const arm = () => { clearTimeout(timer); timer = setTimeout(end, Math.max(0, Math.min(quiet, max - (Date.now() - t0)))); };
+    const mo = new MutationObserver(arm);
+    mo.observe(document.documentElement, { childList: true, subtree: true });
+    arm();
+  }), [settleMs, settleMs * 3]).catch(() => {});
   const gate = async (phase = "enter") => {
+    if (phase !== "enter" && settleMs > 0) await settled();
     const shown = await botCheck(page);
     const g = checkGate(checkInForm, shown, shown ? await page.evaluate(CHECK_IN_FORM).catch(() => false) : false, phase);
     checkInForm = g.seen;
@@ -775,6 +801,12 @@ async function attempt(browser, p, opts, timing) {
       }
       await page.waitForTimeout(300);
       onAllowedHost();
+    }
+    // Round 2: a challenge the form asks as a question ("Enter the characters shown in the image") is the check, never one of the
+    // person's questions: it leaves the list, and the stop is the check's own hand-off.
+    if (checkInForm) {
+      fr.needsUser = fr.needsUser.filter((n) => !CAPTCHA_QUESTION.test(n.label || ""));
+      if (!fr.needsUser.length && !fr.invalid.length && !fr.failed.length) { const e = new NeedsUser("bot_check", p.url, "check_in_form"); e.detail = checkInForm; throw e; }
     }
     if (fr.needsUser.length) {
       const first = fr.needsUser[0];
@@ -933,4 +965,4 @@ async function runPool(browser, payloads, opts = {}) {
   return { results, wallMs: Date.now() - started, concurrency };
 }
 
-module.exports = { controlLabel, SUBMIT_DENY, checkGate, pickControls, outsideSubmitOf, isApplicationForm, submitTieRefusal, sentToJobList, SNAP, MARK, CONTROLS, closedOnPage, declineCookies, samePostingRedirect, followedPageRefusal, postingIds, CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };
+module.exports = { CAPTCHA_QUESTION, controlLabel, SUBMIT_DENY, checkGate, pickControls, outsideSubmitOf, isApplicationForm, submitTieRefusal, sentToJobList, SNAP, MARK, CONTROLS, closedOnPage, declineCookies, samePostingRedirect, followedPageRefusal, postingIds, CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };

@@ -121,7 +121,22 @@ function EXTRACT() {
   // The page keeps its own high-water mark too: a board that re-renders every input (dropping every tag) never gets an old number
   // back for a different question.
   let qn = Math.max(Number(window.__upmoreQn) || 0, 1 + deepAll(document, "[data-upmore-q]").reduce((m, e) => Math.max(m, Number(e.getAttribute("data-upmore-q")) || 0), -1));
-  const push = (d, el) => { const t = tagOf(el); d.q = t !== null && !out.some((x) => x.q === t) ? t : qn++; window.__upmoreQn = Math.max(Number(window.__upmoreQn) || 0, qn); out.push(d); return d.q; };
+  // Round 2: what a person can see of the question's control (isHoneypot, Node side): its box on the page, whether it or a parent is
+  // hidden, transparent, aria-hidden or clipped to nothing, and whether its label is shown.
+  const seenBy = (el) => {
+    if (!el || !el.getBoundingClientRect) return null;
+    const r = el.getBoundingClientRect(); let hidden = false, clipped = false;
+    for (let n = el; n && n.nodeType === 1; n = up(n)) {
+      const cs = getComputedStyle(n);
+      if (cs.display === "none" || cs.visibility === "hidden" || cs.visibility === "collapse" || Number(cs.opacity) < 0.05 || n.getAttribute("aria-hidden") === "true") hidden = true;
+      if (n !== el && /hidden|clip/.test(`${cs.overflowX} ${cs.overflowY}`) && (n.clientWidth < 2 || n.clientHeight < 2)) clipped = true;
+    }
+    const lab = labelNode(el);
+    return { w: r.width, h: r.height, right: r.right + scrollX, bottom: r.bottom + scrollY, left: r.left + scrollX, pageW: Math.max(document.documentElement.scrollWidth, innerWidth), hidden, clipped,
+      tabNeg: el.getAttribute("tabindex") === "-1", labelSeen: !!lab && !!(lab.offsetWidth || lab.offsetHeight), name: el.name || el.id || "",
+      widget: el.getAttribute("role") === "combobox" || el.hasAttribute("aria-autocomplete") || el.hasAttribute("aria-haspopup") || el.hasAttribute("aria-controls") };
+  };
+  const push = (d, el) => { d.seen = seenBy(el); const t = tagOf(el); d.q = t !== null && !out.some((x) => x.q === t) ? t : qn++; window.__upmoreQn = Math.max(Number(window.__upmoreQn) || 0, qn); out.push(d); return d.q; };
   const all = deepAll(scope, "input, select, textarea").filter((e) => !e.closest("[data-upmore-signin]"));
 
   // Yes/No button pairs (Ashby): the hidden checkbox inside them is not a question of its own.
@@ -705,6 +720,17 @@ const BOARD_STANDARD = /^c(?:Name|Email|PhoneNumber)$/;
 const labelNames = (qs) => { const m = new Map(); for (const d of qs) if (d.kind !== "file") { const k = labelKey(d); if (!m.has(k)) m.set(k, []); m.get(k).push(String(d.name || "")); } return m; };
 const labelKinds = (qs) => { const m = new Map(); for (const d of qs) if (d.kind !== "file") { const k = labelKey(d); if (!m.has(k)) m.set(k, []); m.get(k).push(d.kind); } return m; };
 const takesFact = (kind, label) => CHOICE_FACTS.has(factKey(label)) ? CHOICE_KINDS.includes(kind) : ["text", "textarea", "select"].includes(kind) || (kind === "combobox" && /location|city|state/i.test(label));
+// Round 2: a box a person cannot see is never typed into (a trap for automated fills, or a field the page keeps for itself).
+// Only what the engine would TYPE into (a text box or a text area that is not a drawn widget's own input): off the page, of no
+// size, hidden, transparent or aria-hidden (itself or a parent), clipped to nothing, or named like a trap (website, url,
+// homepage, fax, company, honeypot) with no label a person can see. `seen` is EXTRACT's reading (seenBy).
+const TRAP_NAME = /^(website|url|homepage|fax|company|address2?)$|honey|hp[_-]|[_-]hp$/i;
+function isHoneypot(d) {
+  const v = d && d.seen;
+  if (!v || !["text", "textarea"].includes(d.kind) || v.widget) return false;
+  if (v.hidden || v.clipped || v.w < 2 || v.h < 2 || v.right <= 0 || v.bottom <= 0 || v.left >= v.pageW) return true;
+  return TRAP_NAME.test(v.name || "") && !v.labelSeen;
+}
 // Decide what to do with one question. status: fill | ask | skip. Never invents a value.
 function decide(d, ctx) {
   const { facts, answers, resumePath } = ctx;
@@ -807,6 +833,7 @@ async function fillForm(page, ctx0) {
       handled.add(`${d.label}|${d.kind}|${d.name}`);
       const entry = { label: d.label, kind: d.kind, required: !!d.required, eeo: !!d.eeo, options: d.options ? d.options.length : undefined };
       map.push(entry);
+      if (isHoneypot(d)) { entry.status = "skipped"; entry.reason = "not_visible_to_a_person"; continue; }
       const before = (await page.evaluate(STATE, [d]))[0];
       const dec = decide(d, ctx);
       entry.source = dec.source;
@@ -872,7 +899,7 @@ async function fillForm(page, ctx0) {
   const states = qsNow.length ? await page.evaluate(STATE, qsNow) : [];
   for (const d of qsNow) {
     const s = states.find((x) => x.q === d.q);
-    if (d.required && s && !s.filled && !accounted.has(d.label)) { needsUser.push({ label: d.label, reason: "still_empty_after_fill", kind: d.kind }); accounted.add(d.label); }
+    if (d.required && s && !s.filled && !accounted.has(d.label) && !isHoneypot(d)) { needsUser.push({ label: d.label, reason: "still_empty_after_fill", kind: d.kind }); accounted.add(d.label); }
   }
   const invalid = await page.evaluate(INVALID).catch(() => []);
   return { map, filled, needsUser, failed, invalid };
@@ -947,4 +974,4 @@ function holdsApproved(f, want, facts = {}) {
   if (key === "state") return !matchState([held], want).error;
   return false;
 }
-module.exports = { MARK_SIGNIN, heldNow, recheckFilled, holdsApproved, factsFrom, fillForm, matchOption, matchPlace, matchState, countryNames, phoneCountryMatch, factKey, factValue, answerFor, decide, labelCounts, labelKinds, norm, EXTRACT, STATE, DECLINE };
+module.exports = { isHoneypot, MARK_SIGNIN, heldNow, recheckFilled, holdsApproved, factsFrom, fillForm, matchOption, matchPlace, matchState, countryNames, phoneCountryMatch, factKey, factValue, answerFor, decide, labelCounts, labelKinds, norm, EXTRACT, STATE, DECLINE };

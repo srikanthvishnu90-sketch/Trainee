@@ -239,3 +239,35 @@ Deno.test("6 prompt: the process review is from Trainee's code, never Upmore's",
 });
 
 function ok(v: unknown, m?: string) { assertNode.ok(v, m); }
+
+// ---------- round 2 (review 2026-11-13): a boundary sentence is a hold; a question about state beside it never cancels it ----------
+const HOLDS_R2 = [
+  "don't send anything. which ones are still pending?",
+  "Don't email anyone. Why did you queue those?",
+  "Don't send anything!! who told you to?",
+  "don't contact anyone. any idea why Maya hasn't replied?",
+  "Don't text anyone. Where did you get those numbers?",
+  "Don't start anything new. When does my next interview start?",
+  "Don't reach out to anyone, my manager might find out.",
+];
+// A real ask for work beside the boundary still limits that ask (D-061 G1/G6), never a hold.
+const ASKS_R2 = [
+  "What should I say to Leo? Don't message anyone yet.",
+  "How should I follow up with Priya? don't text anyone yet",
+  "Who at Airbnb could refer me? don't reach out to anyone",
+  "which of my contacts work at Meta? Don't message anyone.",
+  "Research Datadog's interview process, don't contact anyone there",
+  "list engineers at Plaid who went to Michigan, don't contact anyone",
+];
+Deno.test("2b hold: a question about state beside a boundary never cancels the hold; 'find out' is not an ask", () => {
+  const bad: string[] = [];
+  for (const m of HOLDS_R2) { const s = host.stopControlOf(m); if (!(s && s.kind === "workflow" && s.boundary === true)) bad.push(`${JSON.stringify(m)} -> ${JSON.stringify(s)}, want a workflow hold`); }
+  for (const m of ASKS_R2) { const s = host.stopControlOf(m); if (s) bad.push(`${JSON.stringify(m)} -> ${JSON.stringify(s)}, want null`); }
+  failures(bad);
+});
+Deno.test("4b limits: a company or domain name is not a limit ('Remote.com')", () => {
+  const R = c.CareerRouter;
+  const bad: string[] = [];
+  for (const m of ["find product roles at Remote.com", "jobs at remote.io in Denver"]) { const got = R.statedSearchLimits(m); if (got.length) bad.push(`${JSON.stringify(m)} -> ${JSON.stringify(got)}`); }
+  failures(bad);
+});

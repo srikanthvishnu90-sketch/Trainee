@@ -16,7 +16,7 @@ import assertNode from "node:assert/strict";
 import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
 import { careerHandler, supabaseParity } from "../flow/handler.ts";
 import { anthropicWire } from "./helpers/anthropic_wire.ts";
-import { STALE_UNCHECKED_LINE, staleFactLines, staleFactValues, stopStaleFacts } from "../../supabase/functions/_shared/career_apply_stale_facts.ts";
+import { STALE_UNCHECKED_LINE, staleFactChanges, staleFactLines, stopStaleFacts } from "../../supabase/functions/_shared/career_apply_stale_facts.ts";
 
 const PERSONA = JSON.parse(Deno.readTextFileSync(new URL("../../evals/mirror/instinct-wa-batch1/persona.json", import.meta.url)));
 const WHO = "7b0f8f8e-6a43-4a49-9d2c-00000b0d0c01";
@@ -55,43 +55,45 @@ const MIGRATION = `${ROOT}/supabase/migrations/20261113140000_career_apply_stop_
 const ROLLBACK = `${ROOT}/supabase/rollbacks/20261113140000_career_apply_stop_stale_facts.down.sql`;
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
 
-Deno.test("the values an application must not state any more, and the sentences the reply carries (a failed stop is said, never silent)", async () => {
-  eq(staleFactValues({ set_aside: [{ id: "F-1", text: "GPA: 3.9" }] }), ["GPA: 3.9", "3.9"]);
-  eq(staleFactValues({ corrected: [{ id: "F-2", was: "Senior data analyst role in Austin", text: "Senior data analyst role in Denver" }] }), ["Senior data analyst role in Austin", "Austin"]);
-  eq(staleFactValues({ corrected: [{ id: "F-3", was: "GPA: 3.9", text: "GPA: 3.7" }] }), ["GPA: 3.9", "3.9"]);
-  eq(staleFactValues({ corrected: [{ id: "F-4", was: "GPA: 3.9", text: "gpa: 3.9" }] }), [], "nothing changed, nothing to stop");
-  eq(staleFactValues({}), []);
+Deno.test("the changes the stop is given, and the sentences the reply carries (a failed stop is said, never silent)", async () => {
+  eq(staleFactChanges({ set_aside: [{ id: "F-1", text: "GPA: 3.9" }] }), [{ id: "F-1", was: "GPA: 3.9", now: null }]);
+  eq(staleFactChanges({ corrected: [{ id: "F-2", was: "Senior data analyst role in Austin", text: "Senior data analyst role in Denver" }] }), [{ id: "F-2", was: "Senior data analyst role in Austin", now: "Senior data analyst role in Denver" }]);
+  eq(staleFactChanges({ corrected: [{ id: "F-4", was: "GPA: 3.9", text: "gpa: 3.9" }] }), [], "nothing changed, nothing to stop");
+  eq(staleFactChanges({}), []);
   eq(staleFactLines("failed"), [STALE_UNCHECKED_LINE]);
   assertNode.match(STALE_UNCHECKED_LINE, /couldn't check your approved applications.*can't confirm/);
-  eq(staleFactLines({ cancelled: [], discarded: [], started: [], being_sent: [] }), [], "nothing stopped, nothing claimed");
-  const lines = staleFactLines({ cancelled: [{ id: "1", company: "Acme" }], discarded: [{ id: "2", company: "Bolt" }, { id: "3", company: "Core" }], started: [{ id: "4", company: "Dune" }], being_sent: [{ id: "5", company: "Echo" }] });
-  eq(lines.length, 4);
-  assertNode.match(lines[0], /^1 approved application that hadn't gone out yet states that answer, so it is stopped and not sent \(Acme\): it needs your approval again/);
-  assertNode.match(lines[1], /^2 prepared applications stating that answer are discarded \(Bolt, Core\)/);
-  assertNode.match(lines[2], /^1 approved application stating that answer was already tried once .*\(Dune\): it is not started again with that answer\.$/);
-  assertNode.match(lines[3], /^1 application stating that answer is being sent right now \(Echo\) and can't be stopped midway/);
+  const none = { cancelled: [], waiting: [], stopped_preparing: [], discarded: [], started: [], being_sent: [] };
+  eq(staleFactLines(none), [], "nothing stopped, nothing claimed");
+  const lines = staleFactLines({ cancelled: [{ id: "1", company: "Acme" }], stopped_preparing: [{ id: "6", company: "Fern" }], waiting: [{ id: "7", company: "Gale" }], discarded: [{ id: "2", company: "Bolt" }, { id: "3", company: "Core" }], started: [{ id: "4", company: "Dune" }], being_sent: [{ id: "5", company: "Echo" }] });
+  eq(lines.length, 5);
+  assertNode.match(lines[0], /^2 approved applications that hadn't gone out yet state that answer, so they are stopped and not sent \(Acme, Fern\): they need your approval again/);
+  assertNode.match(lines[1], /^1 application waiting on you states that answer, so it is stopped too \(Gale\): it needs a fresh look/);
+  assertNode.match(lines[2], /^2 prepared applications stating that answer are discarded \(Bolt, Core\)/);
+  assertNode.match(lines[3], /^1 approved application stating that answer was already tried once .*\(Dune\): it is not started again with that answer\.$/);
+  assertNode.match(lines[4], /^1 application stating that answer is being sent right now \(Echo\) and can't be stopped midway/);
   // The call: an error, a thrown error and an unreadable answer are all "failed".
+  const ch = [{ id: "F-1", was: "GPA: 3.9", now: null }];
   const quiet = console.error; console.error = () => {};
   try {
-    eq(await stopStaleFacts({ rpc: () => Promise.resolve({ error: { message: "no function" }, data: null }) }, "u", ["3.9"], "set_aside"), "failed");
-    eq(await stopStaleFacts({ rpc: () => Promise.reject(new Error("down")) }, "u", ["3.9"], "set_aside"), "failed");
-    eq(await stopStaleFacts({ rpc: () => Promise.resolve({ error: null, data: { cancelled: 1 } }) }, "u", ["3.9"], "set_aside"), "failed");
+    eq(await stopStaleFacts({ rpc: () => Promise.resolve({ error: { message: "no function" }, data: null }) }, "u", ch, "set_aside"), "failed");
+    eq(await stopStaleFacts({ rpc: () => Promise.reject(new Error("down")) }, "u", ch, "set_aside"), "failed");
+    eq(await stopStaleFacts({ rpc: () => Promise.resolve({ error: null, data: { cancelled: 1 } }) }, "u", ch, "set_aside"), "failed");
   } finally { console.error = quiet; }
   const seen: unknown[] = [];
-  const ok = await stopStaleFacts({ rpc: (f: string, a: unknown) => { seen.push([f, a]); return Promise.resolve({ error: null, data: { cancelled: [{ id: "1", company: "Acme" }], discarded: [], started: [], being_sent: [] } }); } }, "u", ["3.9"], "corrected");
-  eq(seen, [["career_apply_stop_stale_facts", { p_user: "u", p_values: ["3.9"], p_reason: "corrected" }]]);
-  eq(ok, { cancelled: [{ id: "1", company: "Acme" }], discarded: [], started: [], being_sent: [] });
+  const ok = await stopStaleFacts({ rpc: (f: string, a: unknown) => { seen.push([f, a]); return Promise.resolve({ error: null, data: { ...none, cancelled: [{ id: "1", company: "Acme" }] } }); } }, "u", ch, "corrected");
+  eq(seen, [["career_apply_stop_stale_facts", { p_user: "u", p_changes: ch, p_reason: "corrected" }]]);
+  eq(ok, { ...none, cancelled: [{ id: "1", company: "Acme" }] });
 });
 
 Deno.test({ name: "database: the stop closes only that person's unstarted rows stating the value; the claim refuses a row the stop did not reach; the rollback leaves nothing", sanitizeResources: false, sanitizeOps: false, async fn(t) {
   if (!pgBinDir()) { if (Deno.env.get("CI") === "true") throw new Error("needs Postgres 16"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
   const pg: Pg = await startPg({ includeBridge: true });
   try {
-    const A = "00000000-0000-4000-8000-0000000e0901", B = "00000000-0000-4000-8000-0000000e0902", C = "00000000-0000-4000-8000-0000000e0903";
+    const A = "00000000-0000-4000-8000-0000000e0901", B = "00000000-0000-4000-8000-0000000e0902", C = "00000000-0000-4000-8000-0000000e0903", D = "00000000-0000-4000-8000-0000000e0904";
     const RESUME_HEX = Array.from(new TextEncoder().encode("%PDF-1.4\n% TEST resume for stale facts\n")).map((b) => b.toString(16).padStart(2, "0")).join("");
     for (const [k, v] of [["APPLY_VM", "on"], ["APPLY_VM_USER_IDS", "*"], ["APPLY_VM_ALLOW_LOCAL", "on"]]) await pg.sql(`insert into career_cloud_settings(key,value) values ('${k}','${v}') on conflict (key) do update set value=excluded.value`);
     const sha = (await pg.sql(`select encode(sha256(decode('${RESUME_HEX}','hex')),'hex')`)).trim();
-    for (const u of [A, B, C]) {
+    for (const u of [A, B, C, D]) {
       await pg.sql(`insert into auth.users(id,email) values ('${u}','${u}@example.test') on conflict do nothing;
         insert into profiles(id) values ('${u}') on conflict do nothing;
         insert into career_watch_kv(user_id,key,value) values ('${u}','career:account','{"epoch":1,"version":1,"paused":false}') on conflict do nothing;
@@ -101,7 +103,17 @@ Deno.test({ name: "database: the stop closes only that person's unstarted rows s
         select public.career_resume_put('${u}'::uuid,'${sha}','file','test:stale','resume.pdf',decode('${RESUME_HEX}','hex'),'seed:stale');`);
     }
     const link = (jid: string) => `http://127.0.0.1:9/greenhouse/${jid}/1`; // never opened: this test drives no browser
-    const payload = (u: string, jid: string, co: string, gpa: string) => `jsonb_build_object('version',1,'user_id','${u}','job_id','${jid}','company','${co}','url','${link(jid)}','fields','[{"label":"First Name","value":"Test","factId":"f1"},{"label":"GPA","value":"${gpa}","factId":"f2"}]'::jsonb,'privacy_epoch',1,'account_version',1,'expires_at','2099-01-01T00:00:00Z'::text,'engine_approval',repeat('e',64),'resume_sha256','${sha}','destination','${link(jid)}')`;
+    const payloadOf = (u: string, jid: string, co: string, fields: string) => `jsonb_build_object('version',1,'user_id','${u}','job_id','${jid}','company','${co}','url','${link(jid)}','fields','${fields}'::jsonb,'privacy_epoch',1,'account_version',1,'expires_at','2099-01-01T00:00:00Z'::text,'engine_approval',repeat('e',64),'resume_sha256','${sha}','destination','${link(jid)}')`;
+    const approveFields = async (u: string, jid: string, co: string, fields: string) => {
+      const p = payloadOf(u, jid, co, fields);
+      await pg.sql(`with a as (insert into career_apply_batch_approvals(user_id,job_id,batch_hash,entry,approved_at,used_at)
+          values ('${u}','${jid}',public.career_apply_payload_hash(${p}),${p},now(),now()) returning id, user_id, batch_hash)
+        insert into career_message_approval_private.cloud_bound_approvals(approval_id,user_id,card_id,item_index,payload_hash,approved_at,expires_at)
+          select a.id, a.user_id, gen_random_uuid(), 0, a.batch_hash, now(), now() + interval '23 hours' from a;
+        insert into career_apply_jobs(user_id,job_id,company,url,payload,payload_hash,approval_hash)
+          values ('${u}','${jid}','${co}','${link(jid)}',${p},public.career_apply_payload_hash(${p}),public.career_apply_payload_hash(${p}));`);
+    };
+    const payload = (u: string, jid: string, co: string, gpa: string) => `jsonb_build_object('version',1,'user_id','${u}','job_id','${jid}','company','${co}','url','${link(jid)}','fields','[{"label":"First Name","value":"Test","factId":"f1"},{"label":"GPA","value":"${gpa}","factId":"F-GPA-${gpa}"}]'::jsonb,'privacy_epoch',1,'account_version',1,'expires_at','2099-01-01T00:00:00Z'::text,'engine_approval',repeat('e',64),'resume_sha256','${sha}','destination','${link(jid)}')`;
     // One approved application with a real stored approval for exactly its payload (as a tapped card leaves it).
     const approve = async (u: string, jid: string, co: string, gpa: string) => {
       const p = payload(u, jid, co, gpa);
@@ -119,15 +131,23 @@ Deno.test({ name: "database: the stop closes only that person's unstarted rows s
     const names = (r: any[]) => r.map((x) => x.company).sort();
     const claim = async () => (await json(`public.career_apply_vm_claim('vm-test', 10, 5, '{}')`) as any[]).map((c) => c.job_id).sort();
 
-    await t.step("which payloads state a value: a whole word anywhere in the payload, any case; never part of another number or word", async () => {
-      const states = async (p: string, v: string[]) => (await pg.sql(`select public.career_apply_payload_states('${p}'::jsonb, array[${v.map((x) => `'${x}'`).join(",")}]::text[])`)).trim();
-      eq(await states('{"answers":[{"label":"GPA","value":"3.9"}]}', ["3.9"]), "t");
-      eq(await states('{"fields":[{"label":"GPA","value":3.9}]}', ["3.9"]), "t", "a number");
-      eq(await states('{"cover":{"text":"My GPA is 3.9, and I live in austin."}}', ["Austin"]), "t", "nested, another case");
-      eq(await states('{"answers":[{"label":"GPA","value":"3.95"},{"label":"x","value":"13.9"},{"label":"y","value":"Austinville"}]}', ["3.9", "Austin"]), "f");
-      eq(await states('{"answers":[{"label":"GPA","value":"3.9"}]}', ["3"]), "f", "a value under two characters matches nothing");
-      eq(await states('{"answers":[{"label":"C++ (a.b)","value":"x"}]}', ["C++ (a.b)"]), "t", "punctuation is literal");
-      eq(await states('{"answers":[{"label":"GPA","value":"3x9"}]}', ["3.9"]), "f", "the dot is a dot");
+    await t.step("which payloads state a fact: by its id whatever the value says; without an id, by normalised value (numbers, month-year dates, phrases of four or more characters, never one common word)", async () => {
+      const stale = async (p: string, ids: string[], was: string, now: string | null = null) => (await pg.sql(`select public.career_apply_payload_stale('${p}'::jsonb, array[${ids.map((x) => `'${x}'`).join(",")}]::text[], public.career_apply_changed_keys('${was}', null, ${now === null ? "null" : `'${now}'`}, null))`)).trim();
+      eq(await stale('{"fields":[{"label":"Authorized to work?","value":"Yes","factId":"F0"}]}', ["F0"], "Work authorization: US citizen"), "t", "a derived Yes, by fact id");
+      eq(await stale('{"fields":[{"label":"GPA","value":"3.9","factId":"F9"}]}', ["F0"], "GPA: 3.9"), "f", "a field from another fact is that fact's: never matched by value");
+      eq(await stale('{"answers":[{"label":"GPA","value":"3.90"}]}', [], "GPA: 3.9"), "t", "3.90 = 3.9");
+      eq(await stale('{"answers":[{"label":"GPA","value":"3.9/4.0"}]}', [], "GPA 3.9"), "t", "the leading number of 3.9/4.0, a fact with no label");
+      eq(await stale('{"answers":[{"label":"Graduation","value":"05/2026"}]}', [], "Graduating in May 2026", "Graduating in December 2026"), "t", "May 2026 = 05/2026");
+      eq(await stale('{"answers":[{"label":"Graduation","value":"2026-05"}]}', [], "Graduating in May 2026", "Graduating in December 2026"), "t", "May 2026 = 2026-05");
+      eq(await stale('{"answers":[{"label":"Graduation","value":"December 2026"}]}', [], "Graduating in May 2026", "Graduating in December 2026"), "f", "the year the correction kept stops nothing");
+      eq(await stale('{"cover":{"text":"My GPA is 3.9, and I live in austin."}}', [], "Austin"), "t", "nested, another case");
+      eq(await stale('{"answers":[{"value":"3.95"},{"value":"13.9"},{"value":"Austinville"}]}', [], "GPA: 3.9"), "f");
+      eq(await stale('{"answers":[{"value":"Yes"},{"value":"No"},{"value":"May"}]}', [], "Yes"), "f", "yes alone stops nothing by value");
+      eq(await stale('{"answers":[{"value":"May"}]}', [], "May"), "f", "May alone stops nothing by value");
+      eq(await stale('{"answers":[{"value":"No"}]}', [], "No"), "f");
+      eq(await stale('{"answers":[{"value":"none"}]}', [], "none"), "f", "a common word");
+      eq(await stale('{"url":"http://127.0.0.1:9/x/3/1","expires_at":"2099-01-01T00:00:00Z","resume_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","fields":[]}', [], "Years of experience: 1"), "f", "where it goes, its hashes and times state no fact");
+      eq(await stale('{"body":"I have 1 year of experience."}', [], "Years of experience: 1"), "t", "free text without a fact id is compared");
     });
 
     await t.step("seed: A has an unstarted row, a tried row, a row being sent, a row without the value, two prepared rows and an open card; B has an unstarted row with the same value", async () => {
@@ -148,17 +168,18 @@ Deno.test({ name: "database: the stop closes only that person's unstarted rows s
     });
 
     await t.step("the stop: service role only; bad input refused", async () => {
-      eq((await pg.sql(`select has_function_privilege('service_role','public.career_apply_stop_stale_facts(uuid,text[],text)','EXECUTE') and not has_function_privilege('authenticated','public.career_apply_stop_stale_facts(uuid,text[],text)','EXECUTE')
-        and not has_function_privilege('anon','public.career_apply_stop_stale_facts(uuid,text[],text)','EXECUTE') and not has_table_privilege('authenticated','public.career_apply_fact_changes','SELECT') and not has_table_privilege('anon','public.career_apply_fact_changes','SELECT')
+      eq((await pg.sql(`select has_function_privilege('service_role','public.career_apply_stop_stale_facts(uuid,jsonb,text)','EXECUTE') and not has_function_privilege('authenticated','public.career_apply_stop_stale_facts(uuid,jsonb,text)','EXECUTE')
+        and not has_function_privilege('anon','public.career_apply_stop_stale_facts(uuid,jsonb,text)','EXECUTE') and not has_table_privilege('authenticated','public.career_apply_fact_changes','SELECT') and not has_table_privilege('anon','public.career_apply_fact_changes','SELECT')
         and (select relrowsecurity from pg_class where oid = 'public.career_apply_fact_changes'::regclass)
-        and (select bool_and(proconfig::text like '%search_path=public, pg_temp%') from pg_proc where proname in ('career_apply_stop_stale_facts','career_apply_facts_claim_guard','career_apply_facts_at_stamp','career_apply_fact_changed_close','career_apply_payload_states','career_apply_facts_email_guard'))`)).trim(), "t");
-      for (const bad of [`null, array['3.9'], 'set_aside'`, `'${A}', array['3']::text[], 'set_aside'`, `'${A}', '{}'::text[], 'set_aside'`, `'${A}', array['3.9'], 'Not A Reason'`]) {
+        and (select bool_and(proconfig::text like '%search_path=public, pg_temp%') from pg_proc where proname in ('career_apply_stop_stale_facts','career_apply_facts_claim_guard','career_apply_facts_at_stamp','career_apply_fact_changed_close','career_apply_payload_stale','career_apply_facts_email_guard','career_apply_fact_hit','career_apply_facts_write_record','career_apply_facts_diff','career_apply_value_key','career_apply_value_keys','career_apply_changed_keys'))`)).trim(), "t");
+      const GPA39 = `'[{"id":"F-GPA-3.9","was":"GPA: 3.9","now":null}]'::jsonb`;
+      for (const bad of [`null, ${GPA39}, 'set_aside'`, `'${A}', '[{"id":"","was":"No","now":null}]'::jsonb, 'set_aside'`, `'${A}', '[]'::jsonb, 'set_aside'`, `'${A}', '{}'::jsonb, 'set_aside'`, `'${A}', ${GPA39}, 'Not A Reason'`]) {
         await assertNode.rejects(() => pg.sql(`select public.career_apply_stop_stale_facts(${bad})`), /invalid fact change/);
       }
     });
 
     await t.step("the stop: the unstarted row is closed unsent; the tried row and the one being sent are reported, untouched; the other value, the other person: untouched", async () => {
-      const r = await json(`public.career_apply_stop_stale_facts('${A}'::uuid, array['GPA: 3.9','3.9'], 'set_aside')`);
+      const r = await json(`public.career_apply_stop_stale_facts('${A}'::uuid, '[{"id":"F-GPA-3.9","was":"GPA: 3.9","now":null}]'::jsonb, 'set_aside')`);
       eq([names(r.cancelled), names(r.discarded), names(r.started), names(r.being_sent)], [["TEST Unstarted"], ["TEST Prepared"], ["TEST Tried"], ["TEST Sending"]]);
       const j1 = await job(A, "STALE-1");
       eq([j1.state, j1.reason, j1.evidence.reason, j1.evidence.nothing_sent, j1.evidence.stopped_by, j1.lease_token], ["not_submitted", "not sent: a fact it states changed after you approved it", "fact_changed", true, "chat", null]);
@@ -171,7 +192,7 @@ Deno.test({ name: "database: the stop closes only that person's unstarted rows s
       eq((await pg.sql(`select detail->>'cancelled' || '/' || (detail->>'discarded') || '/' || (detail->>'started') || '/' || (detail->>'being_sent') from career_events where user_id='${A}' and subject like 'fact changed:%'`)).trim(), "1/1/1/1");
       eq((await pg.sql(`select count(*) from career_events where user_id='${B}' and subject like 'fact changed:%'`)).trim(), "0");
       // Again: nothing more to stop, the started ones are still reported.
-      const again = await json(`public.career_apply_stop_stale_facts('${A}'::uuid, array['3.9'], 'set_aside')`);
+      const again = await json(`public.career_apply_stop_stale_facts('${A}'::uuid, '[{"id":"F-GPA-3.9","was":"GPA: 3.9","now":null}]'::jsonb, 'set_aside')`);
       eq([again.cancelled, again.discarded, names(again.started), names(again.being_sent)], [[], [], ["TEST Tried"], ["TEST Sending"]]);
     });
 
@@ -188,7 +209,7 @@ Deno.test({ name: "database: the stop closes only that person's unstarted rows s
       // C's application is prepared and its card tapped (prepared row 'approved'), the enqueue has not happened yet.
       await prepared(C, "STALE-9", "TEST Race", "3.9", "approved");
       await prepared(C, "STALE-10", "TEST Race Other", "3.95", "approved");
-      const r = await json(`public.career_apply_stop_stale_facts('${C}'::uuid, array['3.9'], 'corrected')`);
+      const r = await json(`public.career_apply_stop_stale_facts('${C}'::uuid, '[{"id":"F-GPA-3.9","was":"GPA: 3.9","now":"GPA: 3.7"}]'::jsonb, 'corrected')`);
       eq([r.cancelled, r.discarded, r.started, r.being_sent], [[], [], [], []], "nothing for the stop to reach");
       await approve(C, "STALE-9", "TEST Race", "3.9");
       await approve(C, "STALE-10", "TEST Race Other", "3.95");
@@ -224,8 +245,74 @@ Deno.test({ name: "database: the stop closes only that person's unstarted rows s
       assertNode.doesNotMatch(err, /fact_changed/);
     });
 
+    await t.step("review round 2 (#822): a derived answer, 3.90, a fact with no label: stopped by fact id; a row the VM is filling in is stopped before its submit point; a row waiting on the person is stopped", async () => {
+      await approveFields(D, "R-1", "TEST Derived", '[{"label":"Are you legally authorized to work in the United States?","value":"Yes","factId":"F0"}]');
+      await approveFields(D, "R-2", "TEST Trailing Zero", '[{"label":"GPA","value":"3.90","factId":"F1"}]');
+      await approveFields(D, "R-3", "TEST No Colon", '[{"label":"GPA","value":"3.9","factId":"F2"}]');
+      await approveFields(D, "R-6", "TEST Waiting", '[{"label":"City","value":"Austin","factId":"F4"}]');
+      await pg.sql(`set session_replication_role = replica; update career_apply_jobs set state='needs_user', reason='login_required', evidence = evidence || '{"nothing_sent":true,"handoff":{"step":"sign in","link":"https://example.invalid/x"}}' where user_id='${D}' and job_id='R-6'; set session_replication_role = origin;`);
+      const r = await json(`public.career_apply_stop_stale_facts('${D}'::uuid, '[{"id":"F0","was":"Work authorization: US citizen","now":null},{"id":"F1","was":"GPA: 3.9","now":null},{"id":"F2","was":"GPA 3.9","now":null},{"id":"F4","was":"Austin, TX","now":"Denver, CO"}]'::jsonb, 'set_aside')`);
+      eq([names(r.cancelled), names(r.waiting), r.being_sent], [["TEST Derived", "TEST No Colon", "TEST Trailing Zero"], ["TEST Waiting"], []]);
+      eq((await pg.sql(`select string_agg(job_id || ':' || state || ':' || (evidence->>'reason'), ',' order by job_id) from career_apply_jobs where user_id='${D}'`)).trim(),
+        "R-1:not_submitted:fact_changed,R-2:not_submitted:fact_changed,R-3:not_submitted:fact_changed,R-6:not_submitted:fact_changed");
+      // A row the apply VM claimed and is filling in ('preparing'): stopped, its lease taken; the submit check finds no lease.
+      await approveFields(D, "R-4", "TEST Preparing", '[{"label":"GPA","value":"3.7","factId":"F3"}]');
+      const c4 = (await json(`public.career_apply_vm_claim('vm-test', 10, 5, '{}')`) as any[]).find((x) => x.job_id === "R-4");
+      assertNode.ok(c4, "R-4 claimed");
+      eq(await json(`public.career_apply_vm_heartbeat('${c4.id}','${c4.lease_token}','vm-test','preparing')`), { ok: true });
+      const r4 = await json(`public.career_apply_stop_stale_facts('${D}'::uuid, '[{"id":"F3","was":"GPA: 3.7","now":"GPA: 3.8"}]'::jsonb, 'corrected')`);
+      eq([names(r4.stopped_preparing), r4.being_sent], [["TEST Preparing"], []], "not 'being sent': it had not reached its submit point");
+      eq(await json(`public.career_apply_vm_heartbeat('${c4.id}','${c4.lease_token}','vm-test','submitting')`), { ok: false, why: "lease_lost" });
+      const j4 = await job(D, "R-4");
+      eq([j4.state, j4.vm_phase === "submitting", j4.evidence.reason, j4.evidence.stopped_by], ["not_submitted", false, "fact_changed", "chat"]);
+    });
+
+    await t.step("no stop call at all: the fact write itself records the change (account record), and the submit check refuses a row being filled in", async () => {
+      const facts = (f: string) => `jsonb_set(value, '{memory}', jsonb_build_object('v',1,'profile',jsonb_build_object('facts','${f}'::jsonb)))`;
+      await pg.sql(`update career_watch_kv set value = ${facts('[{"id":"F5","kind":"other","text":"GPA: 3.8","status":"confirmed","needs_confirmation":false}]')} where user_id='${D}' and key='career:account'`);
+      const before = Number((await pg.sql(`select count(*) from career_apply_fact_changes where user_id='${D}' and reason='fact_write'`)).trim());
+      await approveFields(D, "R-5", "TEST Submit Check", '[{"label":"GPA","value":"3.8","factId":"F5"}]');
+      const c5 = (await json(`public.career_apply_vm_claim('vm-test', 10, 5, '{}')`) as any[]).find((x) => x.job_id === "R-5");
+      assertNode.ok(c5, "R-5 claimed");
+      eq(await json(`public.career_apply_vm_heartbeat('${c5.id}','${c5.lease_token}','vm-test','preparing')`), { ok: true });
+      // The person sets the fact aside: the commit writes the account record (no chat stop runs here).
+      await pg.sql(`update career_watch_kv set value = ${facts('[{"id":"F5","kind":"other","text":"GPA: 3.8","status":"draft","needs_confirmation":true,"withdrawn_by_owner":{"at":"2026-11-13T00:00:00Z"}}]')} where user_id='${D}' and key='career:account'`);
+      eq((await pg.sql(`select count(*) - ${before} || ':' || (array_agg(fact_ids::text order by id desc))[1] from career_apply_fact_changes where user_id='${D}' and reason='fact_write'`)).trim(), "1:{F5}");
+      eq(await json(`public.career_apply_vm_heartbeat('${c5.id}','${c5.lease_token}','vm-test','submitting')`), { ok: false, why: "fact_changed" });
+      const j5 = await job(D, "R-5");
+      eq([j5.state, j5.vm_phase, j5.evidence.reason, j5.evidence.stopped_by, j5.lease_token], ["not_submitted", "preparing", "fact_changed", "submit_check", null]);
+      // Putting the fact back is not a change; nothing is re-queued.
+      await pg.sql(`update career_watch_kv set value = ${facts('[{"id":"F5","kind":"other","text":"GPA: 3.8","status":"confirmed","needs_confirmation":false}]')} where user_id='${D}' and key='career:account'`);
+      eq((await pg.sql(`select count(*) - ${before} from career_apply_fact_changes where user_id='${D}' and reason='fact_write'`)).trim(), "1");
+      eq((await job(D, "R-5")).state, "not_submitted");
+      // A screening answer replacing the fact (a new id; saveScreenFact) and a correction of its words are changes too.
+      await pg.sql(`update career_watch_kv set value = ${facts('[{"id":"F7","kind":"eligibility","text":"Needs sponsorship: no","value":"no","status":"confirmed","needs_confirmation":false}]')} where user_id='${D}' and key='career:account'`);
+      await pg.sql(`update career_watch_kv set value = ${facts('[{"id":"F8","kind":"eligibility","text":"Needs sponsorship: yes","value":"yes","status":"confirmed","needs_confirmation":false}]')} where user_id='${D}' and key='career:account'`);
+      assertNode.match((await pg.sql(`select (array_agg(fact_ids::text order by id desc))[1] from career_apply_fact_changes where user_id='${D}' and reason='fact_write'`)).trim(), /F7/);
+    });
+
+    await t.step("the cloud runner's authorization refuses a row stating a changed fact; facts_at moves only with a new approval", async () => {
+      await approveFields(D, "R-8", "TEST Cloud", '[{"label":"School","value":"Lakeshore","factId":"F9"}]');
+      const j8 = await job(D, "R-8");
+      await pg.sql(`set session_replication_role = replica; update career_apply_jobs set state='driving', attempts=1, claimed_at=now(), lease_token=gen_random_uuid(), source='cloud' where id='${j8.id}'; set session_replication_role = origin;`);
+      const r8 = await json(`public.career_apply_stop_stale_facts('${D}'::uuid, '[{"id":"F9","was":"School: Lakeshore","now":null}]'::jsonb, 'set_aside')`);
+      eq(names(r8.being_sent), ["TEST Cloud"], "the cloud runner's row is not ours to close: reported, and refused at its authorization");
+      const lease = (await job(D, "R-8")).lease_token;
+      await assertNode.rejects(() => pg.sql(`select public.career_apply_cloud_authorize_any('${j8.id}','${lease}','${j8.payload_hash}',repeat('a',64))`), /fact_changed/);
+      // facts_at: a stopped row put back in the queue without a new approval keeps its facts_at, so the claim closes it again.
+      const j1 = await job(D, "R-1");
+      await pg.sql(`update career_apply_jobs set state='queued', reason=null where id='${j1.id}'`).catch(() => {});
+      const back = await job(D, "R-1");
+      eq(back.facts_at, j1.facts_at, "facts_at is not moved by not_submitted -> queued");
+      if (back.state === "queued") {
+        await pg.sql(`update career_apply_claim_turns set queued = true where user_id = '${D}'`).catch(() => {});
+        await json(`public.career_apply_vm_claim('vm-test', 10, 5, '{}')`);
+        eq((await job(D, "R-1")).state, "not_submitted", "the claim closes it again");
+      }
+    });
+
     await t.step("nothing stopped comes back by itself: no row of A, B or C went back to the queue", async () => {
-      eq((await pg.sql(`select string_agg(job_id || ':' || state, ',' order by length(job_id), job_id) from career_apply_jobs where evidence->>'reason' = 'fact_changed'`)).trim(), "STALE-1:not_submitted,STALE-2:not_submitted,STALE-9:not_submitted");
+      eq((await pg.sql(`select string_agg(job_id || ':' || state, ',' order by length(job_id), job_id) from career_apply_jobs where evidence->>'reason' = 'fact_changed' and user_id in ('${A}','${B}','${C}')`)).trim(), "STALE-1:not_submitted,STALE-2:not_submitted,STALE-9:not_submitted");
     });
 
     await t.step("erase: the record of changed values goes with the person", async () => {
@@ -234,17 +321,19 @@ Deno.test({ name: "database: the stop closes only that person's unstarted rows s
 
     await t.step("rollback: no function, trigger, column or table is left; stopped rows stay closed; it runs twice; the migration applies again, twice", async () => {
       const down = await Deno.readTextFile(ROLLBACK), up = await Deno.readTextFile(MIGRATION);
-      const left = () => pg.sql(`select (select count(*) from pg_proc where proname like 'career_apply_fact%' or proname in ('career_apply_stop_stale_facts','career_apply_payload_states'))
+      const left = () => pg.sql(`select (select count(*) from pg_proc where proname like 'career_apply_fact%' or proname in ('career_apply_stop_stale_facts','career_apply_payload_states','career_apply_payload_stale','career_apply_value_key','career_apply_value_keys','career_apply_changed_keys')
+          or (proname in ('career_apply_vm_heartbeat','career_apply_cloud_authorize_any') and prosrc like '%fact_changed%'))
         || '/' || (select count(*) from pg_trigger where tgname like 'career_apply_facts_%')
         || '/' || (select count(*) from information_schema.columns where table_schema='public' and column_name='facts_at')
         || '/' || (to_regclass('public.career_apply_fact_changes') is not null)::text`);
-      eq((await left()).trim(), "6/4/2/true");
+      eq((await left()).trim(), "14/6/2/true");
       await pg.sql(down);
       eq((await left()).trim(), "0/0/0/false");
       eq((await job(A, "STALE-1")).state, "not_submitted", "a stopped row is not put back by the rollback");
+      eq((await pg.sql(`select count(*) from pg_proc where proname in ('career_apply_vm_heartbeat','career_apply_cloud_authorize_any')`)).trim(), "2", "the heartbeat and the cloud authorization are back as they were");
       await pg.sql(down);
       await pg.sql(up); await pg.sql(up);
-      eq((await left()).trim(), "6/4/2/true");
+      eq((await left()).trim(), "14/6/2/true");
       eq((await job(A, "STALE-1")).state, "not_submitted");
     });
   } finally { await pg.stop(); }
@@ -313,7 +402,9 @@ Deno.test({ name: "chat: a correction stops the approved application and says so
     assertNode.equal((await gpa()).text, "GPA: 3.7");
     assertNode.match(fixed.reply, /1 approved application that hadn't gone out yet states that answer, so it is stopped and not sent \(Core\)/, `the reply names what the correction stopped: ${fixed.reply}`);
     assertNode.equal(await state("greenhouse:core:1"), "not_submitted");
-    assertNode.equal((await pg.sql(`select string_agg(reason, ',' order by id) from public.career_apply_fact_changes where user_id = '${WHO2}'`)).trim(), "set_aside,corrected");
+    assertNode.equal((await pg.sql(`select string_agg(reason, ',' order by id) from public.career_apply_fact_changes where user_id = '${WHO2}' and reason <> 'fact_write'`)).trim(), "set_aside,corrected");
+    // The fact writes themselves (the thread's commit) recorded the set-aside and the correction too, by fact id.
+    assertNode.equal((await pg.sql(`select count(*) from public.career_apply_fact_changes where user_id = '${WHO2}' and reason = 'fact_write' and '${fact.id}' = any(fact_ids)`)).trim(), "2");
 
     // 4. The stop cannot run (the function is gone): the reply says the approved applications could not be checked.
     await pg.sql(await Deno.readTextFile(ROLLBACK));

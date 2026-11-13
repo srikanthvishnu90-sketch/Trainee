@@ -63,7 +63,7 @@ export function overviewText(s: Situation, now: number): string {
   }
   if (interviews.length) L.push("Interviews coming up:", ...interviews.map((t) => `- ${name(t)}${t.since ? `: ${day(t.since)}` : ": date not on record"}`));
   if (tracked.length) L.push(`On your tracker (what you told me): ${tracked.slice(0, 6).map((t) => `${name(t)}, ${t.evidence.stage ?? "Submitted"}`).join("; ")}${tracked.length > 6 ? `; and ${tracked.length - 6} more` : ""}.`);
-  if (!T.length) L.push("Nothing is in flight in Trainee's own record (your email was not checked for this answer): no applications, drafts, questions or interviews on your account. Say \"find jobs\" to start a search.");
+  if (!T.length) L.push("Nothing is in flight: no applications, drafts, questions or interviews on your account. Say \"find jobs\" to start a search.");
   const close = closeoutOf(apps, T);
   if (close) L.push("Closeout, from the records:", close);
   L.push(...lost(s));

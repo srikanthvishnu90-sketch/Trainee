@@ -23,10 +23,10 @@ approved amending them as part of turning the check on). Measured on branch `ag/
 - By hand instead (same refusals, same ledger):
   `SUPPORT_JUDGE_SPEND_APPROVED=D-xxx ANTHROPIC_API_KEY=… SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… deno run -A --no-check --import-map=tests/flow/supabase-npm.json evals/research-support/judge-measure.ts --live --budget-usd 0.5 --out out/`
 
-## 2. Existing tests that fail with the switch on (54)
+## 2. Existing tests that fail with the switch on (53)
 
 Run: the 55 architect files that touch research or the brain, with `FAIL_CLOSED.support = true` (flag off: all pass), plus the
-two real-handler files that need Postgres 16 (run as root with `CI=true PGBIN=/usr/lib/postgresql/16/bin`; rows 53 and 54). The failing
+two real-handler files that need Postgres 16 (run as root with `CI=true PGBIN=/usr/lib/postgresql/16/bin`; rows 53 and 54). Row 7 passes since round 5 (an outage now shows the pages' own units), so 53 fail today. The failing
 line is the first assertion that fails in each test; a test may fail again further down once that line is amended.
 
 Codes: **J** the test builds research with no judge, so with the switch on every line fails closed: add `judge` to its deps (a test
@@ -47,7 +47,7 @@ sentence; it goes on the posting's link line from that posting's record. **A** t
 | 4 | `d070-live7-fixes-20261112.test.ts:219` | `ok(r.reply.includes(p.url) && /\$28-\$49/.test(r.reply), r.reply);` | P+J: no judge, so the model's pay sentence is replaced by the posting's record line; expect `/\$28- ?\$49/` and the link (or inject a judge that says yes to the model's pay sentence). |
 | 5 | `d071-live8-fixes-20261112.test.ts:116` | `ok(/research reply/.test(m.r.shorten.why), m.r.shorten.why);` | J: give the brain `market: { judge }`; re-measure `shorten.why` (with no judge the research turn ends `incomplete_reply`). |
 | 6 | `d071-live8-fixes-20261112.test.ts:162` | `eq(r.status, "ok", JSON.stringify(r).slice(0, 400));` | J+Q: inject the judge; expect each kept line as its page unit in quotation marks. |
-| 7 | `d071-live8-fixes-20261112.test.ts:340` | `ok(/\$32/.test(r.reply) && r.reply.includes(levels[0].url), r.reply);` | J: inject the judge (passes with a yes judge). |
+| 7 | `d071-live8-fixes-20261112.test.ts:340` | `ok(/\$32/.test(r.reply) && r.reply.includes(levels[0].url), r.reply);` | J: inject the judge (passes with a yes judge). **Passes since round 5.** |
 | 8 | `d073-live9-fixes-20261112.test.ts:109` | `eq(r.status, "ok");` | J+A: inject the judge; expect the audit's drop reason `unsupported` (the support path has one reason) and the new counts. |
 | 9 | `d073-live9-fixes-20261112.test.ts:187` | `eq(withS.audit.samples[0], { section: "summary", why: "claim_words_not_in_quote", text: "Citadel pays new grads generously.", quote: "The base salary range for this role is $235…` | A: expect `why: "unsupported"` in the audit sample. |
 | 10 | `d073-live9-fixes-20261112.test.ts:328` | `ok(out.includes("$28-$49 hourly (Chicago, IL), and that isn't Citadel.") && out.includes(POSTINGS[0].url), out);` | P: the place is no longer written into the model's sentence; expect `(Chicago, IL)` on the posting's link line (`PayPal, SWE Intern (Chicago, IL): <url>`). |

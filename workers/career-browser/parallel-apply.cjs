@@ -434,17 +434,66 @@ const submitTieRefusal = (t) => ((t.formless ? !t.anyForm : (t.sameForm || (t.ou
 // Page side, read only: what every control of the application form holds now (the whole page for a board with no <form>): the
 // rows of handoff.cjs pageRows. A box or radio by its own option (value null when not ticked), a select by its chosen options'
 // words (null on its empty placeholder), an upload by its file's name. `touched`: the engine filled that question (filledQs).
-function CONTROLS(filledQs) {
-  const app = document.querySelector("form[data-upmore-app]");
+// Round 2 (review of #818): a hidden input that carries an ANSWER is a control the person must see: by its name (sponsorship, work
+// authorisation, visa, opt-in, consent, age, demographics, relocation, salary, agreement), or because a drawn control beside it
+// writes it (a role=switch / checkbox / radio / combobox / listbox, or aria-checked / aria-pressed / aria-selected). An opaque
+// token (csrf, nonce, session, a timestamp) never is.
+const HIDDEN_ANSWER = /sponsor|work.?auth|authori[sz]|visa|opt.?in|marketing|consent|over.?1[89]|(^|[_-])age([_-]|$)|gender|\brace\b|^race|ethnic|veteran|disab|relocat|salary|agree|terms|certif/i;
+const OPAQUE = /csrf|xsrf|authenticity|nonce|(^|_)token$|captcha|recaptcha|turnstile|session|^ts$|timestamp|^utf8$/i;
+const hiddenIsAnswer = (name, widget) => !OPAQUE.test(name || "") && (!!widget || HIDDEN_ANSWER.test(name || ""));
+// Page side, read only: what every control of the application form holds now (the whole page for a board with no <form>): the
+// rows of handoff.cjs pageRows. A box or radio by its own option (value null when not ticked), a select by its chosen options'
+// words (null on its empty placeholder), an upload by its file's name, a contenteditable region by its text. `touched`: the engine
+// filled that question (filled, by data-upmore-q), or the control lives inside the one question it filled (a drawn widget's own
+// input). A hidden input is `hidden` (an opaque value, counted, never shown) unless it carries an answer (`answer`, shown under its
+// widget's words). The argument is the filled questions, or { filled, answer, opaque } (the two rules above, as sources).
+function CONTROLS(arg) {
+  const filledQs = Array.isArray(arg) ? arg : arg.filled || [];
+  const answerRe = new RegExp(arg.answer || "^$", "i"), opaqueRe = new RegExp(arg.opaque || "^$", "i");
+  const app = document.querySelector("form[data-upmore-app]"), root = app || document.body;
   const squash = (x) => String(x || "").replace(/\s+/g, " ").trim();
-  return (app ? [...app.elements] : [...document.querySelectorAll("input, select, textarea")])
+  const WIDGET = "[role=radio], [role=checkbox], [role=switch], [role=listbox], [role=combobox], [role=radiogroup], [aria-checked], [aria-selected], [aria-pressed]";
+  const inQuestion = (e) => {
+    for (let a = e.parentElement, i = 0; a && i < 3 && a !== root && a !== document.body && a.tagName !== "FORM"; a = a.parentElement, i++) {
+      const qs = new Set([...a.querySelectorAll("[data-upmore-q]")].map((x) => x.getAttribute("data-upmore-q")));
+      if (qs.size) return qs.size === 1 && filledQs.includes([...qs][0]);
+    }
+    return false;
+  };
+  const widgetOf = (e) => {
+    const near = [e.previousElementSibling, e.previousElementSibling && e.previousElementSibling.previousElementSibling, e.nextElementSibling, e.parentElement !== root && e.parentElement.tagName !== "FORM" ? e.parentElement : null];
+    for (const n of near) { if (!n) continue; if (n.matches(WIDGET)) return n; const w = n.querySelector(WIDGET); if (w) return n.matches("[role=group], [role=radiogroup]") || n.hasAttribute("aria-label") ? n : w; }
+    return null;
+  };
+  const named = (w, value) => {
+    const by = (w.getAttribute("aria-labelledby") || "").split(/\s+/).map((id) => (document.getElementById(id) || {}).innerText || "").join(" ");
+    let t = squash(w.getAttribute("aria-label") || by || w.innerText).replace(/^[^\p{L}\p{N}]+/u, "");
+    const v = squash(value);
+    if (v && t.toLowerCase().endsWith(" " + v.toLowerCase())) t = t.slice(0, -v.length - 1).trim();
+    return t.slice(0, 200);
+  };
+  const fields = (app ? [...app.elements] : [...document.querySelectorAll("input, select, textarea")])
     .filter((e) => /^(INPUT|SELECT|TEXTAREA)$/.test(e.tagName) && !["submit", "button", "image", "reset", "password"].includes(e.type) && !e.closest("[data-upmore-signin]")).map((e) => {
       const box = e.type === "checkbox" || e.type === "radio", q = e.getAttribute("data-upmore-q");
       const own = squash(e.labels && e.labels[0] && e.labels[0].innerText);
       const value = box ? (e.checked ? own || squash(e.value) || "on" : null) : e.tagName === "SELECT" ? [...e.selectedOptions].filter((o) => o.value !== "").map((o) => squash(o.textContent)).join(", ") || null
         : e.type === "file" ? [...(e.files || [])].map((f) => f.name).join(", ") || null : String(e.value) === "" ? null : String(e.value);
-      return { name: e.name || "", label: squash((e.labels && e.labels[0] && e.labels[0].innerText) || e.getAttribute("aria-label") || e.placeholder).slice(0, 200), type: e.type, option: box ? squash(e.value) : null, value, q, touched: q !== null && filledQs.includes(q), hidden: e.type === "hidden" };
+      const touched = (q !== null && filledQs.includes(q)) || (q === null && inQuestion(e));
+      let label = squash((e.labels && e.labels[0] && e.labels[0].innerText) || e.getAttribute("aria-label") || e.placeholder).slice(0, 200), hidden = e.type === "hidden", answer = false;
+      if (hidden) {
+        const w = widgetOf(e);
+        answer = !opaqueRe.test(e.name || "") && (!!w || answerRe.test(e.name || ""));
+        if (answer) { hidden = false; label = w ? named(w, value) : squash(e.name).replace(/[_-]+/g, " "); }
+      }
+      return { name: e.name || "", label, type: e.type, option: box ? squash(e.value) : null, value, q, touched, hidden, answer, disabled: !!e.disabled };
     });
+  // A contenteditable region of the form is a control too: the page's script sends what it says.
+  const edits = [...root.querySelectorAll("[contenteditable=''], [contenteditable=true]")].filter((e) => !e.parentElement.closest("[contenteditable=''], [contenteditable=true]")).map((e) => {
+    const by = (e.getAttribute("aria-labelledby") || "").split(/\s+/).map((id) => (document.getElementById(id) || {}).innerText || "").join(" ");
+    const value = squash(e.innerText);
+    return { name: e.id || "", label: squash(e.getAttribute("aria-label") || by || e.getAttribute("data-placeholder")).slice(0, 200), type: "contenteditable", option: null, value: value || null, q: null, touched: false, hidden: false, answer: false, disabled: false };
+  });
+  return [...fields, ...edits];
 }
 // D-072: an employer page that embeds the board's own form in a frame (Greenhouse's job_app embed on bitwarden.com, lucidmotors.com):
 // the frame's address, when it is on an allowed host, is the application form one GET away.
@@ -499,6 +548,20 @@ async function botCheck(page) {
 const hasApproval = (p) => !!p.approval && typeof p.approval.approval_id === "string" && p.approval.approval_id.trim() !== ""
   && typeof p.approval.hash === "string" && p.approval.hash === payloadHash(p);
 const CONFIRM_RE = /thank you for applying|application (has been )?submitted|we['’]ve received your application/i;
+// Round 2 (review of #818): what proves an application was sent. The employer's page must SHOW its success words (rendered text,
+// never a hidden template), not negated anywhere on the page ("could not confirm", "was not submitted", "failed", "unable",
+// "error"), with no error list shown; and when a POST of the click was seen, every one answered 2xx or 3xx (0: it failed). Anything
+// else is unknown_outcome: the application may or may not have reached the employer, and the reply says it is unconfirmed.
+const NEGATED = /\b(?:not|n['’]t|never|unable|fail(?:ed|ure)?|error|went wrong|try again|already applied)\b/i;
+function outcomeVerdict({ text = "", errors = [], posts = [] } = {}) {
+  const bad = posts.find((st) => !(st >= 200 && st < 400));
+  if (bad !== undefined) return { confirmed: false, reason: bad === 0 ? "the POST of the application failed" : `the POST of the application answered ${bad}` };
+  if (errors.length) return { confirmed: false, reason: `the page shows an error: ${String(errors[0]).slice(0, 80)}` };
+  if (!CONFIRM_RE.test(text)) return { confirmed: false, reason: "no confirmation text on the page after submit" };
+  if (NEGATED.test(text)) return { confirmed: false, reason: "the page's words around the confirmation say it did not go through" };
+  const code = /\b(?:GH|LV)-[A-Z0-9-]+/.exec(text);
+  return { confirmed: true, code: code ? code[0] : null };
+}
 
 class NeedsUser extends Error { constructor(reason, field, wall) { super(`${reason}${field ? `: ${field}` : ""}`); this.reason = reason; this.field = field; this.needs = null; this.wall = wall || null; this.filled = null; this.at = null; } }
 
@@ -573,6 +636,10 @@ const NOT_FOUND_URL = /[?&](?:error|not_found)=true\b/;
 async function attempt(browser, p, opts, timing) {
   const ctx = await browser.newContext({ viewport: { width: 900, height: 1100 } });
   const page = await ctx.newPage();
+  // The answer to every request the Submit click sends that is not a GET (outcomeVerdict), counted from the instant before the click.
+  const postAnswers = []; let watchPosts = false;
+  page.on("response", (r) => { if (watchPosts && r.request().method() !== "GET") postAnswers.push(r.status()); });
+  page.on("requestfailed", (r) => { if (watchPosts && r.method() !== "GET") postAnswers.push(0); });
   page.setDefaultTimeout(opts.stepTimeoutMs || 15000);
   // A copy: a same-posting redirect (samePostingRedirect) adds the employer's own host for this attempt only.
   const allow = [...(opts.allowHosts || [])];
@@ -862,7 +929,7 @@ async function attempt(browser, p, opts, timing) {
     // it preselected, was never the person's answer: it is asked (the ask-once hand-off), never sent as it stands.
     const readControls = async () => {
       const labels = new Map((await page.evaluate(EXTRACT).catch(() => [])).map((d) => [String(d.q), d.label]));
-      return (await page.evaluate(CONTROLS, fr.filled.map((f) => String(f.d.q)))).map((c) => { const label = labels.get(String(c.q)) || c.label; return { ...c, label, value: c.type === "checkbox" && c.value && c.value === label ? "checked" : c.value }; });
+      return (await page.evaluate(CONTROLS, { filled: fr.filled.map((f) => String(f.d.q)), answer: HIDDEN_ANSWER.source, opaque: OPAQUE.source })).map((c) => { const label = labels.get(String(c.q)) || c.label; return { ...c, label, value: c.type === "checkbox" && c.value && c.value === label ? "checked" : c.value }; });
     };
     const controls = await readControls();
     // The person's own confirmed answer to a question, as ats-fill reads it (an approved answer, else a confirmed fact).
@@ -886,6 +953,7 @@ async function attempt(browser, p, opts, timing) {
     // Past this line nothing is retried: the employer may have received it.
     const t2 = Date.now();
     timing.submitClicked = true;
+    watchPosts = true;
     try {
       await Promise.all([page.waitForLoadState("domcontentloaded"), page.click("[data-upmore-submit]")]);
       await page.waitForSelector("#confirmation, h1", { timeout: opts.stepTimeoutMs || 15000 });
@@ -894,15 +962,20 @@ async function attempt(browser, p, opts, timing) {
       return { status: "unknown_outcome", reason: `after submit: ${e.message.split("\n")[0]}`, filled };
     }
     timing.submit = Date.now() - t2;
-    const text = (await page.textContent("body")) || "";
+    // A page that answers in place (its own script posts the form) gets a moment to show its words; then only what it renders counts.
+    await page.waitForFunction((re) => new RegExp(re, "i").test((document.body && document.body.innerText) || ""), CONFIRM_RE.source, { timeout: 3000 }).catch(() => {});
+    await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
+    const seen = await page.evaluate(() => ({ text: (document.body && document.body.innerText) || "",
+      errors: [...document.querySelectorAll("[role=alert], .error, .errors, .error-message, [class*='error' i]")].filter((e) => (e.offsetWidth || e.offsetHeight) && getComputedStyle(e).visibility !== "hidden")
+        .map((e) => (e.innerText || "").replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 3) })).catch(() => ({ text: "", errors: [] }));
     if (opts.shotAfter) await page.screenshot({ path: opts.shotAfter, fullPage: true });
-    if (!CONFIRM_RE.test(text)) {
+    const v = outcomeVerdict({ ...seen, posts: postAnswers });
+    if (!v.confirmed) {
       // The page's own check can become a shown challenge at the click: the person finishes it; it is never solved or retried.
       if (await botCheck(page)) return { status: "unknown_outcome", reason: "after submit: the page showed a verification check; nothing is confirmed until you finish it", filled };
-      return { status: "unknown_outcome", reason: "no confirmation text on the page after submit", filled };
+      return { status: "unknown_outcome", reason: v.reason, filled };
     }
-    const code = /\b(?:GH|LV)-[A-Z0-9-]+/.exec(text);
-    return { status: "submitted_page_confirmed", confirmation: code ? code[0] : null, filled };
+    return { status: "submitted_page_confirmed", confirmation: v.code, filled };
   } catch (e) {
     // A benchmark's dry run asks what the page showed at a stop (opts.diag); production never does.
     if (e instanceof NeedsUser) {
@@ -967,4 +1040,4 @@ async function runPool(browser, payloads, opts = {}) {
   return { results, wallMs: Date.now() - started, concurrency };
 }
 
-module.exports = { CAPTCHA_QUESTION, controlLabel, SUBMIT_DENY, checkGate, pickControls, outsideSubmitOf, isApplicationForm, submitTieRefusal, sentToJobList, SNAP, MARK, CONTROLS, closedOnPage, declineCookies, samePostingRedirect, followedPageRefusal, postingIds, CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };
+module.exports = { outcomeVerdict, hiddenIsAnswer, HIDDEN_ANSWER, CAPTCHA_QUESTION, controlLabel, SUBMIT_DENY, checkGate, pickControls, outsideSubmitOf, isApplicationForm, submitTieRefusal, sentToJobList, SNAP, MARK, CONTROLS, closedOnPage, declineCookies, samePostingRedirect, followedPageRefusal, postingIds, CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };

@@ -519,6 +519,7 @@ function hiddenIsAnswer(name, widget, value) {
   if (widget || HIDDEN_ANSWER.test(name || "")) return true;
   const v = String(value ?? "").trim();
   if (!v || OPAQUE_VALUE.test(v)) return false;
+  if (/^[[{]/.test(v)) { let j; try { j = JSON.parse(v); } catch { j = undefined; } if (j && typeof j === "object") { const keys = []; const walk = (o) => { if (o && typeof o === "object") for (const [k, x] of Object.entries(o)) { keys.push(k); walk(x); } }; walk(j); return keys.some((k) => SENSITIVE_KEY.test(k)); } }
   if (LEGAL_WORD.test(v) || YESNO.test(v) || v.split(/\s+/).length >= 3) return true;
   return QUESTION_ID.test(name || "") && v.length <= 60;
 }
@@ -557,7 +558,11 @@ const isErrorText = (text, isLink) => !isLink && ERRORISH.test(String(text || ""
 function CONTROLS(arg) {
   const filledQs = Array.isArray(arg) ? arg : arg.filled || [];
   const answerRe = new RegExp(arg.answer || "^$", "i"), opaqueRe = new RegExp(arg.opaque || "^$", "i");
-  const [opaqueValueRe, legalRe, yesNoRe, questionRe] = (arg.value || ["^$", "^$", "^$", "^$"]).map((x) => new RegExp(x, "i"));
+  const byValue = Array.isArray(arg.value), [opaqueValueRe, legalRe, yesNoRe, questionRe, sensRe] = (arg.value || ["^$", "^$", "^$", "^$", "^$"]).map((x) => new RegExp(x, "i"));
+  // A JSON value is the page's own structured data (Lever keeps each question's template in a hidden field); it is an answer only
+  // when one of its keys is a consent, opt-in, authorisation or demographic key.
+  const jsonAnswer = (v) => { let j; try { j = JSON.parse(v); } catch { return null; } if (!j || typeof j !== "object") return null; let hit = false; const walk = (o) => { if (hit || !o || typeof o !== "object") return; for (const [k, x] of Object.entries(o)) { if (sensRe.test(k)) { hit = true; return; } walk(x); } }; walk(j); return hit; };
+  const valueAnswer = (name, v) => { if (!byValue || !v || opaqueValueRe.test(v)) return false; const js = /^[[{]/.test(v) ? jsonAnswer(v) : null; if (js !== null) return js; return legalRe.test(v) || yesNoRe.test(v) || v.split(/\s+/).length >= 3 || (questionRe.test(name) && v.length <= 60); };
   const app = document.querySelector("form[data-upmore-app]"), root = app || document.body;
   const squash = (x) => String(x || "").replace(/\s+/g, " ").trim();
   const WIDGET = "[role=radio], [role=checkbox], [role=switch], [role=listbox], [role=combobox], [role=radiogroup], [aria-checked], [aria-selected], [aria-pressed]";
@@ -591,7 +596,10 @@ function CONTROLS(arg) {
       if (hidden) {
         const w = widgetOf(e);
         const v = String(e.value || "").trim();
-        answer = !opaqueRe.test(e.name || "") && (!!w || answerRe.test(e.name || "") || (!!v && !opaqueValueRe.test(v) && (legalRe.test(v) || yesNoRe.test(v) || v.split(/\s+/).length >= 3 || (questionRe.test(e.name || "") && v.length <= 60))));
+        // The "off" value a form keeps beside its own tick box of the same name (Lever: consent[marketing]=0 beside the box, sent
+        // when it is not ticked) is that box's unticked state, not an answer of its own: the box is the question.
+        const offOfBox = /^(?:0|no|false|off|)$/i.test(v) && !!e.name && [...(e.form ? e.form.elements : document.querySelectorAll("input"))].some((x) => x !== e && x.name === e.name && (x.type === "checkbox" || x.type === "radio"));
+        answer = !offOfBox && !opaqueRe.test(e.name || "") && (!!w || answerRe.test(e.name || "") || valueAnswer(e.name || "", v));
         if (answer) { hidden = false; label = w ? named(w, value) : squash(e.name).replace(/[_-]+/g, " "); }
       }
       return { name: e.name || "", label, type: e.type, option: box ? squash(e.value) : null, value, q, touched, hidden, answer, disabled: !!e.disabled };
@@ -1042,7 +1050,7 @@ async function attempt(browser, p, opts, timing) {
     // it preselected, was never the person's answer: it is asked (the ask-once hand-off), never sent as it stands.
     const readControls = async () => {
       const labels = new Map((await page.evaluate(EXTRACT).catch(() => [])).map((d) => [String(d.q), d.label]));
-      return (await page.evaluate(CONTROLS, { filled: fr.filled.map((f) => String(f.d.q)), answer: HIDDEN_ANSWER.source, opaque: OPAQUE.source, value: [OPAQUE_VALUE.source, LEGAL_WORD.source, YESNO.source, QUESTION_ID.source] })).map((c) => { const label = labels.get(String(c.q)) || c.label; return { ...c, label, value: c.type === "checkbox" && c.value && c.value === label ? "checked" : c.value }; });
+      return (await page.evaluate(CONTROLS, { filled: fr.filled.map((f) => String(f.d.q)), answer: HIDDEN_ANSWER.source, opaque: OPAQUE.source, value: [OPAQUE_VALUE.source, LEGAL_WORD.source, YESNO.source, QUESTION_ID.source, SENSITIVE_KEY.source] })).map((c) => { const label = labels.get(String(c.q)) || c.label; return { ...c, label, value: c.type === "checkbox" && c.value && c.value === label ? "checked" : c.value }; });
     };
     // Round 2: every typed answer still says exactly what was approved (a page that rewrote one after the fill is refused).
     // The focus leaves the last field first, as a person's click on Submit would make it: a page that reformats on blur does it now.

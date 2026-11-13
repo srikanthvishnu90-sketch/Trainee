@@ -61,3 +61,14 @@ test("2: success words in a sentence that says it did not work are not success",
   const x = await h.run("/p8");
   assert.equal(x.r.status, "unknown_outcome", JSON.stringify(x.r));
 });
+
+// Lever's own pattern: consent[marketing]=0 kept beside the tick box of the same name (sent when it is not ticked) is the box's
+// unticked state, not an answer; the same hidden field saying "1" beside an unticked box is.
+P["/lever-consent"] = doc("lever-consent", app("lever-consent", F + `<input type="hidden" name="consent[marketing]" value="0"><label><input type="checkbox" name="consent[marketing]" value="1"> Send me news about future roles</label>` + SUB));
+P["/lever-consent-on"] = doc("lever-consent-on", app("lever-consent-on", F + `<input type="hidden" name="consent[marketing]" value="1"><label><input type="checkbox" name="consent[marketing]" value="1"> Send me news about future roles</label>` + SUB));
+test("1: a hidden 'off' value beside its own tick box is not asked; a hidden 'on' value is", o, async () => {
+  const off = await h.run("/lever-consent");
+  assert.equal(off.r.status, "submitted_page_confirmed", JSON.stringify(off.r)); assert.equal(off.posts[0].fields["consent[marketing]"], "0");
+  const on = await h.run("/lever-consent-on");
+  assert.equal(on.r.status, "not_submitted", JSON.stringify(on.r)); assert.deepEqual(on.posts, []);
+});

@@ -25,8 +25,11 @@ export interface HandoffRow {
   reason: string | null;
   handoff_done_at: string | null;
   evidence: {
-    handoff?: { step?: string; link?: string | null; reason?: string } | null;
-    answers_card?: { hash?: string; answers?: { field: string; value: string }[] } | null;
+    // person_sees (workers/career-browser/handoff.cjs): what the link shows in the person's OWN browser. "empty_form": the wall is
+    // a check on the form itself, and their browser opens that form empty (what Trainee filled was in its own browser).
+    handoff?: { step?: string; link?: string | null; reason?: string; person_sees?: string } | null;
+    // source "page_default": a value the employer's page set itself; hidden_not_hashed: hidden fields the card cannot show.
+    answers_card?: { hash?: string; answers?: { field: string; value: string; source?: string | null }[]; hidden_not_hashed?: number } | null;
     needs_extension?: boolean;
     link?: string | null;
   };
@@ -54,7 +57,9 @@ const linkOf = (r: HandoffRow) => r.evidence?.handoff?.link || r.evidence?.link 
 
 export function cardText(r: HandoffRow): string {
   const answers = r.evidence?.answers_card?.answers || [];
-  const lines = answers.map((a) => `- ${a.field}: ${a.value}`);
+  const lines = answers.map((a) => `- ${a.field}: ${a.value}${a.source === "page_default" ? " (set by the employer's page, not by you)" : ""}`);
+  const hidden = Number(r.evidence?.answers_card?.hidden_not_hashed) || 0;
+  if (hidden > 0) lines.push(`The page also sends ${hidden} hidden field${hidden === 1 ? "" : "s"} of its own, which I can't show you.`);
   return [`${name(r)}: I re-opened the application in my own browser after your step. These are the exact answers on the page now:`, ...lines,
     `Nothing has been sent. Reply yes to submit exactly this, or no to leave it.`].join("\n");
 }
@@ -91,7 +96,11 @@ export async function handoffTurn(o: { message: string; userId: string; threadId
   if (waiting.length) {
     const r = waiting[0];
     const res = await o.store.done(o.userId, r.id);
-    if (res.ok) return { reply: `${name(r)}: thanks. I'm re-opening the application in my own browser to check your step is done; nothing will be sent. When it's checked, say done again and I'll show you the exact answers on the page before anything goes.`, intent: HANDOFF_INTENT, status: "rechecking" };
+    // Review of #797: a check on the form itself was finished on the person's own copy of the form, which opened empty; the reply
+    // says so, and never that the answers were already there or that the cloud's copy now has their check.
+    const sees = r.evidence?.handoff?.person_sees ?? null;
+    const own = sees === "empty_form" ? ` The form you opened was your own browser's copy: it opened empty, because what I filled was in my browser. If the check is still on the form when I open it, this application is yours to finish in your browser.` : "";
+    if (res.ok) return { reply: `${name(r)}: thanks. I'm re-opening the application in my own browser to check your step is done; nothing will be sent.${own} When it's checked, say done again and I'll show you the exact answers on the page before anything goes.`, intent: HANDOFF_INTENT, status: "rechecking", ...(sees ? { meta: { person_sees: sees } } : {}) };
     if (res.why === "needs_extension") {
       const l = linkOf(r);
       return { reply: `${name(r)}: this employer keeps that step in your own browser session, which my browser can't carry, so I can't finish it from here. Finish the application in your browser${l ? ` at ${l}` : ""} (or with the Trainee extension). Nothing was sent by me.`, intent: HANDOFF_INTENT, status: "needs_extension" };

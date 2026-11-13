@@ -14,10 +14,12 @@ import type { FileService } from "../_shared/file_service.ts";
 import { careerSystemPrompt, MIRROR_RULES, shapeRulesFor } from "../_shared/agent/prompt.ts";
 import { alertLine, type MemoryStore, type Pipeline, personBlock, type Standing } from "../_shared/agent/memory.ts";
 import type { ResearchDeps, ResearchResult } from "../_shared/agent/research/index.ts";
-import { enforceResearchReply, stripUnseenLinks } from "../_shared/agent/research/reply.ts";
+import { enforceResearchReply, fallbackVerdict, stripUnseenLinks } from "../_shared/agent/research/reply.ts";
 import { type AdviceResult, enforceAdviceReply } from "../_shared/agent/research/advice.ts";
-import { enforceMarketReply, type MarketDeps, type MarketResult } from "../_shared/agent/research/market.ts";
-import { type CompanyResult, enforceCompanyReply } from "../_shared/agent/research/company.ts";
+import { enforceMarketReply, enforceMarketReplySupported, FAIL_CLOSED, type MarketDeps, type MarketResult, pureUnconfirmed } from "../_shared/agent/research/market.ts";
+import { keepSupported } from "../_shared/agent/research/support.ts";
+import { NOT_CONFIRMED } from "../_shared/research_reply.ts";
+import { type CompanyResult, enforceCompanyReply, enforceCompanyReplySupported } from "../_shared/agent/research/company.ts";
 import { enforceFollowupAsk } from "../_shared/followup_draft.ts";
 import { urlsIn } from "../_shared/channel_shape.ts";
 import { numbersIn, numEq } from "../_shared/agent/research/guard.ts";
@@ -25,7 +27,7 @@ import { knowledgeFor, type Knowledge } from "../_shared/agent/knowledge/index.t
 import { styleBlock } from "../_shared/agent/style.ts";
 import { askedPartsOf, asksForDetail, boundaryNote, boundaryOf, capacityAskOf, capacityNote, correctionNote, correctionOf, DRAFT_TOOLS, draftAskOf, draftNote, historyAskOf, historyNote, HYPOTHETICAL_WITHHELD, hypotheticalNote, hypotheticalOf, lengthNote, multiAskNote, overLimit, partsMissing, partsNote, PERSONA_WITHHELD, planSearchAskOf, planSearchNote, whileWorkingNote, postingNote, postingRefOf, REPLY_LENGTH, replyLength, roastNote, roastOf, shownPayNote, shownPayOf, shownPayPlaces, statesNothing, textLength } from "../_shared/agent/turn_notes.ts";
 import { severalAsks } from "../_shared/ask_language.ts";
-import { practiceAnswerNote, practiceAnswerOf, practiceAskIn, staleFactNote, staleFactsOf } from "../_shared/agent/turn_notes.ts";
+import { isOnePlace, practiceAnswerNote, practiceAnswerOf, practiceAskIn, staleFactNote, staleFactsOf } from "../_shared/agent/turn_notes.ts";
 import { answersFirst } from "../_shared/reply_rubric.ts";
 import type { AlertStore } from "../_shared/career_alert_store.ts";
 import type { HiredSource } from "../_shared/career_hired.ts";
@@ -244,7 +246,12 @@ export async function agentTurn(o: {
   }
   // Market research: the sources or the file link come from code; the model's links and unsourced figures do not reach the person.
   // R10 WO-H: company research has its own rules (one role question when the role is unknown; a focus keeps that area only).
-  if (trace.m && !trace.r && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? enforceCompanyReply(result.reply, trace.m) : enforceMarketReply(result.reply, trace.m as MarketResult, shownPay) };
+  // FAIL_CLOSED.support (off by default; support.ts): every sentence of the reply is checked by code and by the judge (o.market.judge,
+  // one batched call) before it may stand in the model's words; without a judge none does.
+  // Round 2: also when an open-question research ran in the same turn (trace.r): the market or company result's check is the one
+  // that stands, since its sources are the numbered ones the reply cites.
+  if (FAIL_CLOSED.support && trace.m && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? await enforceCompanyReplySupported(result.reply, trace.m, { judge: o.market?.judge ?? null, ask: o.message }) : await enforceMarketReplySupported(result.reply, trace.m as MarketResult, shownPay, { judge: o.market?.judge ?? null, ask: o.message }) };
+  else if (trace.m && !trace.r && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? enforceCompanyReply(result.reply, trace.m) : enforceMarketReply(result.reply, trace.m as MarketResult, shownPay) };
   // D-073 review 2: research read pages and none supported an answer, and the model's reply did not stand (the loop removed its
   // unsourced claim, asked once more and stopped: "incomplete_reply"). The person is told what research found, in code's words: that
   // it could not be confirmed, with the pages checked. Not after a save: that failure sentence says what was saved, and stays.
@@ -335,6 +342,40 @@ export async function agentTurn(o: {
   // D-067 (owner, must-fix (d): "each figure carries its source link and place"): a posting's pay said in the reply comes with that
   // posting's link (search_jobs / get_posting returned both); code adds the link when the reply has the figure and not the link.
   // D-073: on every path, research turns included (their shown figure's link was added above; its place is added here).
+  // FAIL_CLOSED.support, round 2: the reply paths that had no check of what a sentence says, each against what its turn stood on, in
+  // one batched judge call (support.ts keepSupported), after any shortening rewrite and before code adds links:
+  //   open-question research (trace.r): every sentence against the quotes of its facts, the person's confirmed facts and code's own
+  //     verdict lines; with nothing left, code's fallback verdict;
+  //   advice (trace.a): every sentence against the passages read; with nothing left, code's not-verified line;
+  //   a pay turn (a posting with pay was read, or pay was shown earlier): every sentence with a number against the postings' own
+  //     records and the lines shown earlier; with nothing left, the records themselves.
+  if (FAIL_CLOSED.support && !trace.m && result.reply && result.stopped === "final" && !result.show) {
+    const judge = o.market?.judge ?? null, pure = (s: string) => pureUnconfirmed(s, o.message);
+    const recs = [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])].filter((p: any) => numbersIn(String(p?.pay ?? "")).length);
+    const recLine = (p: any) => `${[p?.company, p?.title].map((x) => String(x ?? "").trim()).filter(Boolean).join(", ")}: ${String(p.pay).trim()}`;
+    const letters = (t: string) => /\p{L}/u.test(t.replace(/https?:\/\/\S+/g, "")), links = (t: string) => t.match(/https?:\/\/\S+/g) ?? [];
+    if (trace.r) {
+      const own = [trace.r.verdict.now, trace.r.verdict.later, trace.r.short?.now ?? "", trace.r.short?.later ?? "", trace.r.short?.act ?? "", trace.r.first_action].filter(Boolean).flatMap((x) => x.split(/(?<=[.!?])\s+/));
+      const k = await keepSupported(result.reply, [...trace.r.facts.map((f) => ({ text: f.quote, title: f.label })), ...trace.r.person.map((text) => ({ text, title: "What the person confirmed" }))], { judge, pure, own, ask: o.message });
+      result = { ...result, reply: letters(k.text) ? k.text : [fallbackVerdict(trace.r), ...links(k.text)].join("\n") };
+    } else if (trace.a) {
+      const k = await keepSupported(result.reply, trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), { judge, pure, ask: o.message });
+      result = { ...result, reply: letters(k.text) ? k.text : [trace.a.not_verified || NOT_CONFIRMED, ...links(k.text)].join("\n") };
+    } else if (recs.length || shownPay.length) {
+      // Round 3: EVERY sentence of a pay turn is checked (not only those with a number), against the postings' own records and the
+      // lines shown earlier; a shown line said again whole is code's record and stays. A posting's own pay is never lost to the
+      // check: when a sentence was removed, the record line of each posting the person's message names (the only posting, when it
+      // names none) is given by code, once, unless the reply that is left already gives its figures.
+      // A line shown earlier is code's record only when it is about what the person asks now (it names a name their message has);
+      // "If Jane Street matched it, their pay would be $95 an hour." said after a Citadel line is not Citadel's pay.
+      const said = new Set(o.message.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}&'-]*/gu) ?? []);
+      const about = shownPay.filter((l) => (l.text.match(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}\p{N}&'-]*/gu) ?? []).slice(/^\p{Lu}\p{Ll}*\s+\p{Ll}/u.test(l.text) ? 1 : 0).some((w) => said.has(w.toLowerCase().replace(/'s$/, ""))));
+      const k = await keepSupported(result.reply, [...recs.map((p: any) => ({ text: recLine(p), title: "Posting record" })), ...about.map((l) => ({ text: l.text, title: "Pay shown earlier in this conversation" }))], { judge, pure, own: about.map((l) => l.text), ask: o.message });
+      const named = recs.filter((p: any) => { const c = String(p?.company ?? "").trim().toLowerCase(); return c && o.message.toLowerCase().includes(c); });
+      const mine = [...new Set((named.length ? named : recs.length === 1 ? recs : []).map(recLine))].filter((l) => !numbersIn(l).every((n) => numbersIn(k.text).some((x) => numEq(x, n))));
+      result = { ...result, reply: !k.removed.length ? k.text : [k.text, ...(mine.length ? mine : letters(k.text) ? [] : about.length ? [...new Set(about.map((l) => l.text))] : [NOT_CONFIRMED])].filter(Boolean).join("\n") };
+    }
+  }
   if (result.reply && result.stopped === "final" && !result.show) result = { ...result, reply: payWithSource(result.reply, [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])], shownPayPlaces(o.message, hypo ? [] : o.history)) };
   // D-067 (live-6 C9: research_market ran and the person got an empty message; D-024): the last line of every brain turn. An empty
   // or blank reply is never sent: the research's own sourced points when it found any, else the honest line that it did not finish.
@@ -423,6 +464,29 @@ const namesWord = (x: string, name: string) => !!name && new RegExp(`(?<![\\p{L}
 export function payWithSource(reply: string, postings: { company?: string | null; title?: string | null; pay?: string | null; url?: string | null; place?: string | null }[], shown: { text: string; url: string | null; place?: string | null }[] = []): string {
   const add: string[] = [];
   const sentences = String(reply).replace(/https?:\/\/\S+/g, " ").split(/(?<=[.!?])\s+|\n+/);
+  // FAIL_CLOSED.support (review of #807, class 8: with PayPal's posting read, "the ibm role pays $40/hr." was given PayPal's city, and
+  // a city read from an earlier reply's text was attached to another employer's pay): no place is written into a sentence of the
+  // model's, and none is taken from reply text. A posting's place is written by code beside that posting's own link, from that
+  // posting's own record (employer, title, place: all three from the one record the link is from), and only when the record names
+  // one place (isOnePlace, or remote alone) and no other record with that link names another.
+  if (FAIL_CLOSED.support) {
+    const recs = (postings ?? []).filter((p) => numbersIn(String(p?.pay ?? "")).length && /^https:\/\//.test(String(p?.url ?? "")));
+    const urls = [...new Set(recs.map((p) => String(p.url)))];
+    const placeOf = (p: { place?: string | null }) => { const t = String(p?.place ?? "").replace(/[ \t]+/g, " ").trim(); return isOnePlace(t) || /^remote$/i.test(t) ? t : null; };
+    for (const url of urls) {
+      const mine = recs.filter((p) => String(p.url) === url), p = mine[mine.length - 1], co = String(p?.company ?? "").trim().toLowerCase(), ns = numbersIn(String(p?.pay ?? ""));
+      if (!sentences.some((x) => (urls.length === 1 || (co && x.toLowerCase().includes(co))) && numbersIn(x).some((n) => ns.some((y) => numEq(y, n)))) || reply.includes(url)) continue;
+      const places = mine.map(placeOf), place = places.every(Boolean) && new Set(places.map((x) => x!.toLowerCase())).size === 1 ? places[0] : null;
+      const whose = [p?.company, p?.title].map((x) => String(x ?? "").replace(/\s+/g, " ").trim()).filter(Boolean).join(", ");
+      add.push(place ? `${whose ? `${whose} ` : ""}(${place}): ${url}` : url);
+    }
+    for (const l of shown ?? []) {
+      const ns = numbersIn(l.text), url = String(l.url ?? "");
+      if (!ns.length || !sentences.some((x) => { const xs = numbersIn(x); return xs.length > 0 && xs.every((n) => ns.some((y) => numEq(y, n))); })) continue;
+      if (/^https:\/\//.test(url) && !reply.includes(url) && !add.some((a) => a.endsWith(url))) add.push(url);
+    }
+    return add.length ? `${String(reply).trimEnd()}\n\n${add.join("\n")}` : String(reply);
+  }
   const withPay = [...new Map((postings ?? []).filter((p) => numbersIn(String(p?.pay ?? "")).length && /^https:\/\//.test(String(p?.url ?? ""))).map((p) => [String(p.url), p])).values()];
   const only = withPay.length === 1;
   const companies = [...new Set((postings ?? []).map((p) => String(p?.company ?? "").trim().toLowerCase()).filter(Boolean))];

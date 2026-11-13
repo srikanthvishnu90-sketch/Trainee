@@ -115,6 +115,8 @@ export const RELEASE_FLAG_PATHS = [
   "supabase/functions/_shared/career_application_record.ts",
   "supabase/functions/_shared/career_alumni_search.ts",
   "supabase/functions/_shared/career_mail_reply.ts",
+  // What of an inbox may reach a model (security mail withheld, codes and sign-in links taken out): read by career_mail_reply.ts.
+  "supabase/functions/_shared/mail_security.ts",
   "supabase/functions/_shared/career_capability_stores.ts",
   "supabase/functions/_shared/career_inbox_followups.ts",
   // D-062: several Google accounts per person (read, named on evidence, a reply from the account the email reached).

@@ -15,7 +15,7 @@ import { contentWords, numbersIn, numEq, specifics } from "./guard.ts";
 import { stripUrls } from "./reply.ts";
 import { parseDraft, readAlike } from "./draft_json.ts";
 import { type SourceKind, sourceKind } from "../../research_web.ts";
-import { bare, decide, indexPages, markSupported, quoteOf, supportOf, type SupportJudge, type Verdict, type Wanted } from "./support.ts";
+import { bare, decide, indexPages, markSupported, quoteOf, supportOf, type SupportJudge, UNCHECKED_LINE, uncheckedOk, type Verdict, type Wanted } from "./support.ts";
 
 export interface MarketDeps {
   search: SearchProvider;
@@ -52,7 +52,9 @@ export type MarketResult =
       // D-073: the parts the ask named (askedParts), so the reply answers each one a kept line covers.
       parts?: { label: string; words: string[] }[];
       // D-073: the conditions and risks that may answer on their own (at least 60% of their words on their pages).
-      answerable?: string[] };
+      answerable?: string[];
+      // FAIL_CLOSED.support: the judge could not answer, and the lines are the pages' own units code picked, shown as not checked.
+      unchecked?: true };
 
 const squash = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim();
 // D-070: a reference marker ("[12]"), a typographic dash or a non-breaking space never keeps a quote off its page (readAlike).
@@ -522,6 +524,7 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   const units = new Set((idx?.pages ?? []).flatMap((p) => p.sentences.filter((u) => u.quotable).map((u) => u.text)));
   const pidx = (p: SourcePage | null) => p ? pages.indexOf(p) : -1;
   const THESIS = {}, sup = new Map<unknown, Verdict>(), srcOf = new Map<string, string>();
+  let judgeDown = false;
   if (idx) {
     const keys: unknown[] = [], wants: Wanted[] = [];
     for (const x of arr(d.summary, 5)) { keys.push(x); wants.push({ claim: squash(x?.text), pages: [pidx(pageOf(x?.url))], fallback: squash(x?.quote) }); }
@@ -536,6 +539,7 @@ export async function researchMarket(i: { question: string; format: "inline" | "
     const cands = [...new Map([...parts0.flatMap((pt) => pageSentences(pages, pt.words, companies0, 6).filter(ok0).slice(0, 2)), ...pageSentences(pages, contentWords(`${i.question} ${companies0.join(" ")}`), companies0, 8).filter(ok0).slice(0, 3)].map((l) => [l.text, l] as const)).values()].slice(0, 5);
     for (const l of cands) { keys.push(`unit:${l.text}`); wants.push({ claim: l.text, unit: true, pages: [pidx(l.page)] }); }
     const vs = await decide(wants, idx, i.deps.judge);
+    judgeDown = vs.failed;
     vs.forEach((v, k) => { if (!sup.has(keys[k])) sup.set(keys[k], v); });
     // Round 4: a draft longer than the judge may be asked about loses lines unchecked; the result says so, so the reply can.
     if (vs.unasked) notes.push(`${vs.unasked} drafted line(s) could not be checked this turn and were left out: say that not everything found could be checked`);
@@ -600,6 +604,24 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   // FAIL_CLOSED.support: two figures are compared as the pages give them (a quote's own unit, without its label or quotation marks).
   const disagreements = disagreementsIn(idx ? points.map((p) => ({ ...p, text: srcOf.get(p.text) ?? p.text })) : points);
   const marked = (x: Cited) => answerable.has(x.text) ? x : { ...x, unconfirmed: true as const };
+  // Round 5: the judge could not answer and nothing stands: the pages' own units code picks for the ask, not checked, said so.
+  let unchecked = false;
+  if (idx && judgeDown && !keptLines().length) {
+    // The units of the read pages that share the most words with the ask (a pay unit only when it names no other level or kind of
+    // work than the ask: what it does not say is read as the ask's).
+    const want = contentWords(`${i.question} ${i.ask ?? ""}`), payAsked = parts.some((pt) => pt.label === "pay");
+    const ranked = idx.pages.flatMap((pg, k) => pg.sentences.map((u) => ({ u, k, n: [...u.content].filter((w) => want.has(w)).length + (payAsked && /[$€£]\s?\d|\d\s?(?:USD|dollars)/.test(u.text) ? 2 : 0) })))
+      .filter((x) => x.n > 0 && uncheckedOk(x.u) && (!covers(x.u.text, PAY_PART) || aboutAsked(x.u.text, asked, asked))).sort((a, b) => b.n - a.n);
+    for (const { u, k } of ranked) {
+      if (points.length >= 3) break;
+      const f = { sentence: u.text, page: k, unit: u };
+      if (points.some((x) => srcOf.get(x.text) === f.sentence)) continue;
+      const text = quoteOf({ sentence: f.sentence, label: f.unit.lent && f.unit.label ? f.unit.label : undefined });
+      points.push({ text, cite: [num(pages[f.page])] }); srcOf.set(text, f.sentence); auditFromPages(audit);
+    }
+    unchecked = points.length > 0;
+    if (unchecked) notes.push("the judge could not check the lines this turn: the pages' own sentences are shown, labelled as not checked");
+  }
   if (!keptLines().length) {
     const checked: MarketSource[] = pages.slice(0, 4).map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || new URL(p.url).hostname, fetched_at: new Date(p.fetchedAt).toISOString(), kind: sourceKind(p.url, i.plan.companies ?? [], FAIL_CLOSED.support ? found.sites ?? [] : undefined) }));
     return { ...none(), checked, ...(i.deps.layout === "messages" ? { layout: "messages" as const } : {}),
@@ -655,7 +677,7 @@ export async function researchMarket(i: { question: string; format: "inline" | "
     if (why) notes.push(`answered inline: ${why}`);
   }
   const format = file_url ? "file" : "inline";
-  const result: MarketResult = { status: "ok", format, asked: i.format, title, thesis, points, conditions, risks, comparison, sources, file_url, dropped, notes, searched, audit, ...(parts.length ? { parts: parts.map((pt) => ({ label: pt.label, words: [...pt.words] })) } : {}), answerable: [...conditions, ...risks].filter((x) => answerable.has(x.text)).map((x) => x.text), ...(gaps.length ? { gaps } : {}), ...(basis.length ? { basis } : {}), ...(disagreements.length ? { disagreements } : {}), ...(thesis ? (thesisCite.length ? { thesis_cite: thesisCite } : { thesis_summary: true }) : {}), ...(layout ? { layout } : {}),
+  const result: MarketResult = { ...(unchecked ? { unchecked: true as const } : {}), status: "ok", format, asked: i.format, title, thesis, points, conditions, risks, comparison, sources, file_url, dropped, notes, searched, audit, ...(parts.length ? { parts: parts.map((pt) => ({ label: pt.label, words: [...pt.words] })) } : {}), answerable: [...conditions, ...risks].filter((x) => answerable.has(x.text)).map((x) => x.text), ...(gaps.length ? { gaps } : {}), ...(basis.length ? { basis } : {}), ...(disagreements.length ? { disagreements } : {}), ...(thesis ? (thesisCite.length ? { thesis_cite: thesisCite } : { thesis_summary: true }) : {}), ...(layout ? { layout } : {}),
     note: format === "file"
       ? "Reply in one or two plain sentences: the thesis, then that the full brief with its sources is in the file. Write no link and no figure: code sends the file link."
       : layout ? WEB_NOTE + (disagreements.length ? " The sources differ on a figure (see disagreements): give each value with its source number and say they differ; never pick one." : "")
@@ -863,6 +885,8 @@ export async function enforceMarketReplySupported(reply: string, r: MarketResult
     return enforceMarketReply(all.filter((s, k) => (s === first && all.indexOf(s) === k) || shownWhole(s)).join("\n"), r, shown, { unconfirmed: (s) => s === first });
   }
   const max = r.sources.length, inline = r.format !== "file";
+  // Round 5: the judge could not answer: the model's words are not shown; code's own lines, the pages' units, with the clause.
+  if (r.unchecked) return enforceMarketReply("", r, shown, { body: [...r.points.map((p) => inline ? `${p.text} ${p.cite.map((n) => `[${n}]`).join("")}.` : p.text), UNCHECKED_LINE].join(" ") });
   const kept: Cited[] = [...r.points, ...(r.comparison?.rows ?? []).flatMap((x) => x.cells.flatMap((c) => c ? [{ text: c.value, cite: c.cite }] : [])), ...r.conditions, ...r.risks];
   const kindOf = (n: number) => r.sources.find((x) => x.n === n)?.kind;
   const tag = (text: string, cite: number[]) => !cite.length || cite.some((c) => { const k = kindOf(c); return !k || k === "official" || k === "reported"; }) || UNVERIFIED_LABEL.test(text) ? "" : cite.every((n) => kindOf(n) === "anecdote") ? " (anecdote)" : " (self-reported)";

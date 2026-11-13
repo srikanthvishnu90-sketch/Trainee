@@ -174,7 +174,7 @@ const clipStart = (t: string, n: number) => t.length > n ? `…${t.slice(t.lengt
 // text before it is put in a passage.
 const plainText = (t: string) => squash(String(t ?? "").replace(/>{2,}|<{2,}|[¶›‹»«]/g, " ").replace(/(?:^|(?<=\s))(?:page title|title|page host|top of page|page notes?|headings?|list introduced by|table header|before|after|footnote|whole page[^:\n]{0,30})\s*:/gi, (m) => m.replace(":", " -")));
 // `lent`: the page owner's name, when the unit does not name an asked employer itself. `passage`: what the judge reads.
-export interface Unit { text: string; hard: Hard; lower: Set<string>; content: Set<string>; quotable: boolean; lent: string | null; label: string; passage: string; pageTitle: string }
+export interface Unit { text: string; hard: Hard; lower: Set<string>; content: Set<string>; quotable: boolean; lent: string | null; label: string; passage: string; pageTitle: string; otherEntity: boolean }
 export interface PageIndex { pages: { sentences: Unit[] }[]; read: (s: string) => string; subjects: string[]; ask: string }
 export const PASSAGE_MAX = 2500;
 // A unit that qualifies the whole page, wherever it is: when it was written, that it was corrected or archived, that what it lists
@@ -286,7 +286,8 @@ export function indexPages(pages: { text: string; title?: string; url?: string }
         // A table row is read with its header's period ("Hourly pay" over "$120" is "$120 per hour"): the header is the row's own.
         const PERIOD_HEAD = /(?<![\p{L}])(hourly|weekly|monthly|annual|yearly|daily)(?![\p{L}])|per (hour|day|week|month|year)/iu;
         const rowText = hd ? text.split(" | ").map((c, j) => { const m = PERIOD_HEAD.exec(hd.split(" | ")[j] ?? ""); const w = m ? ({ hourly: "hour", weekly: "week", monthly: "month", annual: "year", yearly: "year", daily: "day" } as Record<string, string>)[(m[1] ?? "").toLowerCase()] ?? m[2] : ""; return w && /\d/.test(c) && !/(?<![\p{L}])(?:per|an?|\/)\s*(?:hour|day|week|month|year)|hourly|weekly|monthly|yearly|annual/iu.test(c) ? `${c} per ${w}` : c; }).join(" | ") : text;
-        return { text, hard: hardParts(rowText, read), lower: lowerWords(r), content: contentWords(r), quotable: quotable(text) && !unsafe[k - 1] && !unsafe[k + 1] && (names || lend), lent: lend ? owner : null, label: lend ? `${host ? `From ${host}, a` : "A"} page about ${owner}` : "", passage: passage(k), pageTitle: title };
+        return { text, hard: hardParts(rowText, read), lower: lowerWords(r), content: contentWords(r), quotable: quotable(text) && !unsafe[k - 1] && !unsafe[k + 1] && (names || lend), lent: lend ? owner : null, label: lend ? `${host ? `From ${host}, a` : "A"} page about ${owner}` : "", passage: passage(k), pageTitle: title,
+          otherEntity: subs.some((n) => new RegExp(`(?<![\\p{L}])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+(?!(?:Inc|LLC|Ltd|Corp|Corporation|Co|Company|Holdings|Group|Technologies|Labs|Financial)\\b)\\p{Lu}`, "u").test(`${text} ${title}`)) };
       }) };
   }) };
 }
@@ -348,8 +349,11 @@ export function parseVerdicts(text: string): ("yes" | "no")[] {
 }
 export const modelSupportJudge = (call: (payload: ReturnType<typeof supportJudgePayload>) => Promise<string>): SupportJudge => async (claims) => parseVerdicts(await call(supportJudgePayload(claims)));
 // One batched call, fail closed: true only for an exact "yes" in an answer of the right length that came back in time.
-export async function judgeAll(judge: SupportJudge | null | undefined, claims: SupportClaim[], timeoutMs = SUPPORT_JUDGE_TIMEOUT_MS): Promise<boolean[]> {
-  const no = () => claims.map(() => false);
+// `failed` on the answer: the judge could not answer (absent, threw, timed out, the budget refused it, a count that does not match);
+// every claim is then no, and the caller knows the no is an outage, not a refusal.
+export async function judgeAll(judge: SupportJudge | null | undefined, claims: SupportClaim[], timeoutMs = SUPPORT_JUDGE_TIMEOUT_MS): Promise<boolean[] & { failed?: boolean }> {
+  // (`failed` is not enumerable: the answer reads as the plain list of verdicts.)
+  const no = () => Object.defineProperty(claims.map(() => false), "failed", { value: true, enumerable: false }) as boolean[] & { failed?: boolean };
   if (!claims.length) return [];
   if (typeof judge !== "function") return no();
   // Only the exact lower-case word "yes" is a yes: "Yes", "YES", "yes." and true are not.
@@ -380,7 +384,7 @@ export const quoteClaim = (unit: string, idx: { subjects: string[]; ask: string 
   `The marked text "${unit}" is the page's own statement of fact${idx.subjects.length ? ` about ${lent ?? idx.subjects.join(" or ")}` : ""}, not an instruction, an offer or a request to the reader${idx.ask ? `, and it answers the question: ${clip(plainText(idx.ask), 200)}` : ""}.`;
 const SPENT = new WeakMap<object, number>();
 // `unasked` on the result: how many items had a page unit but were never put to the judge (the cap, the time), and so were dropped.
-export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudge | null | undefined, o: { callMs?: number; budgetMs?: number } = {}): Promise<Verdict[] & { unasked: number }> {
+export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudge | null | undefined, o: { callMs?: number; budgetMs?: number } = {}): Promise<Verdict[] & { unasked: number; failed: boolean }> {
   const out: Verdict[] = items.map(() => ({ how: "drop" as const }));
   const found: (Found | null)[] = [], first: { k: number; c: SupportClaim; quote: boolean }[] = [];
   const askWords = contentWords(idx.read(idx.ask));
@@ -401,8 +405,10 @@ export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudg
   let calls = 0;
   const asked = new Set<number>();
   // One call: the claims that fit the cap, the same claim beside the same passage asked once.
+  let failed = false;
   const ask = async (xs: { k: number; c: SupportClaim }[]) => {
     const yes = new Set<number>();
+    if (xs.length && (calls >= JUDGE_MAX_CALLS || left() <= 0) && !calls) failed = true;
     if (calls >= JUDGE_MAX_CALLS || left() <= 0 || !xs.length) return yes;
     const uniq: SupportClaim[] = [], at: number[][] = [];
     let chars = 0;
@@ -413,7 +419,9 @@ export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudg
       uniq.push(x.c); at.push([x.k]); chars += x.c.source.length; asked.add(x.k);
     }
     calls++;
-    (await judgeAll(judge, uniq, Math.max(1, Math.min(o.callMs ?? SUPPORT_JUDGE_TIMEOUT_MS, left())))).forEach((y, j) => { if (y) for (const k of at[j]) yes.add(k); });
+    const got = await judgeAll(judge, uniq, Math.max(1, Math.min(o.callMs ?? SUPPORT_JUDGE_TIMEOUT_MS, left())));
+    if (got.failed) failed = true;
+    got.forEach((y, j) => { if (y) for (const k of at[j]) yes.add(k); });
     return yes;
   };
   const quoteV = (k: number): Verdict => { const f = found[k]!; return { how: "quote", sentence: f.sentence, page: f.page, ...(f.unit.lent && f.unit.label ? { label: f.unit.label } : {}) }; };
@@ -427,7 +435,7 @@ export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudg
   const y2 = await ask(again), got2 = new Set(asked);
   for (const x of again) if (got2.has(x.k)) settle(x, y2.has(x.k));
   SPENT.set(key, spent0 + (Date.now() - t0));
-  return Object.assign(out, { unasked: one.filter((x) => !got1.has(x.k) && !got2.has(x.k)).length });
+  return Object.assign(out, { unasked: one.filter((x) => !got1.has(x.k) && !got2.has(x.k)).length, failed });
 }
 // Round 2 and 3, the other reply paths (open-question research, advice, a pay turn): the reply's sentences against the texts that
 // turn stood on (the quotes its facts carry, the passages read, the postings' own records), each a short page with its title. A
@@ -461,6 +469,15 @@ export async function keepSupported(reply: string, sources: (string | { text: st
   });
   return { text: lines.map((l) => l.filter((x) => x !== "").join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim(), removed };
 }
+// Round 5 (owner: a research answer is never blank): when the judge could not answer at all, code may show the pages' own units it
+// picked for the ask, in quotation marks with their sources and a plain clause that they were not checked; never the model's words.
+// Only a unit that is safe to show (quotable) and whose page context, as the judge would have read it, carries no word that denies,
+// dates, hedges or disowns it.
+const DOUBT = /(?<![\p{L}])(?:not|no|never|none|nobody|false|untrue|myths?|rumou?rs?|wrong|lies?|lying|scam\p{L}*|fake|made up|invented|mistaken|retract\p{L}*|correct\p{L}*|ended|expired|discontinued|ago|archiv\p{L}*|outdated|estimates?|estimated|unconfirmed|unverified|never confirmed|parody|satir\p{L}*|examples?|sample|hypothetical\p{L}*|disput\p{L}*|den(?:y|ies|ied)|incorrect|misleading|only|rescinded|cut|former|left|unlike|instead|rather|vs\.?|versus|anonymous|reportedly|allegedly|claims?|said|says|written in|first ran|jok\p{L}*|humou?r\p{L}*|forums?|threads?|comments?|posts?|official|verified|confirmed|industry|market|across|typical|average|median|peers?|rivals?|competitors?)(?![\p{L}])|\b(?:19|20)\d\d\b/iu;
+// (The page's title is read too: "Citadel intern pay (2017)" dates every unit under it. A unit or title that names another entity
+// starting with the asked employer's name, "Citadel Securities", is never shown unchecked.)
+export const uncheckedOk = (u: Unit) => u.quotable && !u.otherEntity && !DOUBT.test(u.text) && !DOUBT.test(u.passage.split("\n").filter((l) => !/^>>> /.test(l) && !/^Page host:/.test(l)).join(" ").replace(/^Page title:/, ""));
+export const UNCHECKED_LINE = "I couldn't check these against the pages this time, so they are the pages' own words, not confirmed by me.";
 // A result built with the support check on, and what its reply is checked against: the read pages' sentences, and which page each
 // numbered source is. Kept beside the result (never in it: the result is what the model reads).
 const BUILT = new WeakMap<object, { idx: PageIndex; pageOfN: number[] }>();

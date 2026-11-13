@@ -35,16 +35,17 @@ Deno.test("ERL/1 openLiveRunLedger: refusals before any reservation, the shared 
     eq(f.asked()!("EVAL_LEDGER"), "shared", "the ledger is resolved with EVAL_LEDGER=shared: never the process-local twin"); }
   { const f = fakeGate({ status: false }); const r = await open(1, LEDGER_ENV, f); assert("error" in r && /unreachable/.test(r.error)); eq(f.ev, ["status"]); }
   { const f = fakeGate({ grant: false }); const r = await open(2, LEDGER_ENV, f); assert("error" in r && /refused the cap \$2/.test(r.error)); eq(f.ev, ["status", "reserve:2000000"]); }
-  { const f = fakeGate(); const r = await open(2.5, LEDGER_ENV, f); assert(!("error" in r) && !r.external);
+  { const f = fakeGate(); const r = await open(2.5, LEDGER_ENV, f); assert(!("error" in r));
     if ("error" in r) throw new Error(r.error);
     eq(f.ev, ["status", "reserve:2500000"]);
     await r.settle(0.1234561); await r.settle(9); eq(f.ev, ["status", "reserve:2500000", "settle:123457"], "settled once, to the metered micros (rounded up)"); }
   { const f = fakeGate(); const r = await open(1, LEDGER_ENV, f); if ("error" in r) throw new Error(r.error); await r.settle(null); eq(f.ev.at(-1), "settle:null", "unknown cost: the whole cap stays spent"); }
-  // CI: the workflow's own reservation is used (no second one); it is honoured only inside GitHub Actions.
-  const id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
-  { const f = fakeGate(); const r = await open(5, { EVAL_LEDGER_RESERVATION_ID: id, GITHUB_ACTIONS: "true" }, f); assert(!("error" in r) && r.external && r.id === id); eq(f.ev, []); }
-  { const f = fakeGate(); const r = await open(5, { ...LEDGER_ENV, EVAL_LEDGER_RESERVATION_ID: id }, f); assert("error" in r && /GitHub Actions/.test(r.error)); eq(f.ev, []); }
-  { const f = fakeGate(); const r = await open(5, { EVAL_LEDGER_RESERVATION_ID: "nope", GITHUB_ACTIONS: "true" }, f); assert("error" in r); eq(f.ev, []); }
+  // Review round 2 (the bypass): a reservation id handed in from outside is never trusted, in CI or not. The ledger offers no
+  // narrow read of one reservation, so the runner always reserves and settles its own cap.
+  const id = "00000000-0000-0000-0000-000000000000";
+  { const f = fakeGate(); const r = await open(5, { EVAL_LEDGER_RESERVATION_ID: id, GITHUB_ACTIONS: "true" }, f); assert("error" in r && /cannot be opened/.test(r.error), "no ledger: refused, whatever id is set"); eq(f.ev, []); }
+  { const f = fakeGate(); const r = await open(5, { ...LEDGER_ENV, EVAL_LEDGER_RESERVATION_ID: id, GITHUB_ACTIONS: "true" }, f); if ("error" in r) throw new Error(r.error);
+    assert(r.id !== id); eq(f.ev, ["status", "reserve:5000000"], "its own reservation, the outside id ignored"); }
 });
 
 // ---- the runners themselves, as subprocesses ------------------------------------------------------------------------------
@@ -99,6 +100,12 @@ for (const r of RUNNERS) {
       }
       const badRow = await run(r, 3, refuse.url, proxy.url, Object.fromEntries(Object.keys(r.env).map((k) => [k, "D-999"])));
       assert(badRow.code === 3 && /not a row of docs\/architect\/DECISIONS.md/.test(badRow.text), badRow.text.slice(-600));
+      // The review's bypass: GITHUB_ACTIONS=true and a made-up reservation id, with no ledger and with an unreachable one.
+      const fake = { GITHUB_ACTIONS: "true", EVAL_LEDGER_RESERVATION_ID: "00000000-0000-0000-0000-000000000000" };
+      const byNone = await run(r, 3, "", proxy.url, { ...fake, SUPABASE_SERVICE_ROLE_KEY: "" });
+      assert(byNone.code === 3 && /refused: the shared budget ledger cannot be opened/.test(byNone.text), byNone.text.slice(-600));
+      const byDown = await run(r, 3, `http://127.0.0.1:${closedPort()}`, proxy.url, fake);
+      assert(byDown.code === 3 && /refused: the shared budget ledger is unreachable/.test(byDown.text), byDown.text.slice(-600));
       eq(proxy.hits, [], "no request tried to leave the machine (no model call, no web)");
     } finally { await refuse.close(); proxy.close(); }
   });

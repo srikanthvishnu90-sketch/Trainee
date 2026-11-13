@@ -7,6 +7,7 @@
 # total, on prompts Instinct answered). The run is capped at the request's budget_usd: the shared $80 ledger is reserved for
 # that cap BEFORE the run (refused if it does not fit what remains) and settled to the metered cost after it. The ledger secrets
 # are given only to those two steps, never to the run, so the handler's own model calls are counted once (by the runner's meter).
+# A held-out request (live.ts) skips those two steps: live.ts reserves and settles its own cap, so its step gets the ledger secrets.
 # Every host but the model and the database double is refused inside the run: nothing can be submitted or sent.
 name: mirror-conversation
 on:
@@ -39,6 +40,7 @@ jobs:
           '
       - name: Reserve the cap at the shared ledger
         id: reserve
+        if: steps.req.outputs.kind == 'conversation'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -82,8 +84,12 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           MIRROR_SPEND_APPROVED: ${{ steps.req.outputs.approval }}
-          # The reservation the step above made: the runner uses it (no second one); the settle step below settles it.
-          EVAL_LEDGER_RESERVATION_ID: ${{ steps.reserve.outputs.id }}
+          # live.ts reserves the cap at the shared ledger itself and settles it (eval_budget.ts openLiveRunLedger); the world it
+          # opens points the handler at the database double, so the handler's own calls never reach the real ledger.
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          MODEL_BUDGET_TARGET_USD: "80"
+          MODEL_BUDGET_HARD_USD: "80"
           CI: "true"
         run: |
           export PGBIN=/usr/lib/postgresql/16/bin PATH=/usr/lib/postgresql/16/bin:$PATH

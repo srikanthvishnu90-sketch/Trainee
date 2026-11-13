@@ -114,15 +114,15 @@ export async function ledgerSpentUsd(gate: { status?: () => Promise<{ total: num
 // so never the process-local twin): the run's whole cap is reserved before the first model call and settled to the metered cost
 // at the end (also on error; an unknown cost settles as the whole cap). Refused (no model call): a cap above LIVE_RUN_MAX_USD, an
 // approval that is not a row of docs/architect/DECISIONS.md, a missing or unreachable ledger, a refused reservation. In GitHub
-// Actions a workflow that already reserved the cap passes its id in EVAL_LEDGER_RESERVATION_ID: that reservation is used (no
-// second one) and the workflow's own step settles it.
+// Actions too the runner reserves and settles its own cap (the workflow gives the run step the ledger secrets): a reservation id
+// handed in from outside is never trusted, since the ledger has no narrow read of one reservation to check it against.
 export const LIVE_RUN_MAX_USD = 10;
 const DECISIONS_URL = new URL("../../docs/architect/DECISIONS.md", import.meta.url);
 export function approvalRowExists(approval: string, decisions: string): boolean {
   if (!/^D-\d{3}[a-z]?$/.test(approval)) return false;
   return decisions.split("\n").some((l) => l.startsWith(`| ${approval} |`));
 }
-export interface LiveLedger { id: string; external: boolean; settle(spentUsd: number | null): Promise<boolean> }
+export interface LiveLedger { id: string; settle(spentUsd: number | null): Promise<boolean> }
 type LedgerGate = { reserve: (m: number, meta?: any) => Promise<{ ok: boolean; id?: string; reason?: string; detail?: string }>; settle: (id: string, actual: number | null) => Promise<boolean>; status?: () => Promise<{ total: number } | null> };
 export async function openLiveRunLedger(o: { budgetUsd: number; approval: string; get: (k: string) => string | undefined;
   bud: { resolveBudgetGate: (explicit: undefined, get: (k: string) => string | undefined) => unknown }; decisions?: string; model?: string }): Promise<LiveLedger | { error: string }> {
@@ -130,11 +130,6 @@ export async function openLiveRunLedger(o: { budgetUsd: number; approval: string
   let decisions = o.decisions;
   if (decisions === undefined) { try { decisions = await Deno.readTextFile(DECISIONS_URL); } catch (_) { decisions = ""; } }
   if (!approvalRowExists(o.approval, decisions)) return { error: `the approval "${o.approval}" is not a row of docs/architect/DECISIONS.md` };
-  const ext = String(o.get("EVAL_LEDGER_RESERVATION_ID") ?? "").trim();
-  if (ext) {
-    if (o.get("GITHUB_ACTIONS") !== "true" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ext)) return { error: "EVAL_LEDGER_RESERVATION_ID is honoured only inside GitHub Actions, as the reservation id a workflow step made" };
-    return { id: ext, external: true, settle: async () => true };
-  }
   const shared = (k: string) => k === "EVAL_LEDGER" ? "shared" : o.get(k);
   const gate = o.bud.resolveBudgetGate(undefined, shared) as LedgerGate | null;
   if (!gate) {
@@ -147,7 +142,7 @@ export async function openLiveRunLedger(o: { budgetUsd: number; approval: string
   if (!r.ok || !r.id) return { error: `the shared ledger refused the cap $${o.budgetUsd} (recorded $${(st.total / 1e6).toFixed(4)}): ${r.reason ?? "refused"}${r.detail ? ` (${r.detail})` : ""}` };
   const id = r.id;
   let done = false;
-  return { id, external: false, settle: async (spentUsd) => {
+  return { id, settle: async (spentUsd) => {
     if (done) return true;
     done = true;
     return await gate.settle(id, spentUsd === null || !Number.isFinite(spentUsd) ? null : Math.ceil(Math.max(0, spentUsd) * 1e6));

@@ -55,6 +55,7 @@ import { knowledgeOn } from "../_shared/agent/knowledge/index.ts";
 import { fileKindPublisher } from "../_shared/agent/research/file_publisher.ts";
 import { modelDerive } from "../_shared/agent/research/derive.ts";
 import { RESEARCH_DRAFT_MAX_TOKENS } from "../_shared/agent/research/draft_json.ts";
+import { modelSupportJudge } from "../_shared/agent/research/support.ts";
 import { replyFlagsMeta } from "../_shared/agent/loop.ts"; // flag-only reply checks saved with the turn (Greptile on #566)
 import { gatewayGroundSearch, memoryGroundCache } from "../_shared/agent/research/ground.ts";
 const researchCache = memoryGroundCache();
@@ -1533,6 +1534,10 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             ...(webResearchOn(Deno.env) ? { search: withWebSearch(claudeWebProvider({ search: (q, w) => webSearch(q, { cfg, meter, ...w }), now: Date.now, cache: webResearchCache }), researchSearchFor(Deno.env, fetch).search), layout: "messages" as const } : {}),
             draft: async (p) => { const r = await callModel(cfg, { system: p.system, messages: p.messages.map((m) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: RESEARCH_DRAFT_MAX_TOKENS }, { meter, role: "chat" }); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); },
             publish: researchBriefOn(Deno.env) ? async (data) => { const r = await createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }).create(user.id, "research_brief", data); return r.ok && r.url ? { url: r.url } : null; } : null,
+            // FAIL_CLOSED.support (off by default; research/support.ts): the judge of layer B. The product's own model (cfg), through
+            // callModel (the one door: the budget ledger reserves before anything is sent) and the turn's meter; never called while
+            // the switch is off. A refusal, an error or a timeout is "no" for every claim (support.ts judgeAll).
+            judge: modelSupportJudge(async (p) => { const r = await callModel(cfg, { system: p.system, messages: p.messages.map((m) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: p.max_tokens, temperature: p.temperature }, { meter, role: "chat", timeoutMs: 15000 }); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); }),
           } : null,
           // D-060 (C18): "is that posting still open?" re-checked live on the boards the product reads; any other host is named, not guessed.
           // D-062: a Workday posting is read from its own CXS data (workday_posting.ts), with its stated deadline.

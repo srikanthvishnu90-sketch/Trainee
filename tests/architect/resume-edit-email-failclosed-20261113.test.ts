@@ -162,26 +162,68 @@ Deno.test("finding 1: an edit that would still lose something is printed whole o
   ok(!/all the confirmed record holds/.test(T.editLine([done as any])), T.editLine([done as any]));
 });
 
-// ------------------------------------------------------------------------------------------------ 3: the contact
-const BAD_EMAILS = ["", "[your email]", "<email>", "you@example.com", "name@domain.com", "your.name@gmail.com", "firstname.lastname@gmail.com", "john.doe@gmail.com", "jane.doe@outlook.com", "user@company.org",
-  "email@email.com", "me@gmail.com", "your.email@email.com", "dana@example.org", "dana@example.net", "dana@mail.example.com", "dana@host.invalid", "dana@localhost", "dana@yourdomain.com", "YOU@EXAMPLE.COM",
-  "dana@test.com", "username@gmail.com", "you+jobs@gmail.com", "dana okafor@gmail.com", "dana@", "@gmail.com", "dana.gmail.com", "xxx@gmail.com", "test@gmail.com", "yourname@university.edu"];
-const GOOD_EMAILS = ["a.khan@gmail.com", "first.last@university.edu", "dana.okafor@gmail.com", "d.okafor+jobs@outlook.com", "priya_s@cs.stanford.edu", "j.o'neil@tcd.ie".replace("'", ""), "mei.lin@alumni.berkeley.edu", "tom@smith.dev", "youssef.name@proton.me", "emailie.user@yahoo.co.uk"];
-const BAD_PHONES = ["555-0100", "555-0199", "(212) 555-0142", "123-456-7890", "(123) 456-7890", "+1 123 456 7890", "(xxx) xxx-xxxx", "XXX-XXX-XXXX", "(555) 555-5555", "000-000-0000", "555-123-4567", "111-111-1111", "(###) ###-####"];
-const GOOD_PHONES = ["(415) 867-5309", "+1 212-736-5000", "646.555.0234", "+44 20 7946 0958", "312-555-1212", "Chicago, IL 60614", "2019 - 2021"];
+Deno.test("round 2 D/E: what is said about an entry is its final state; a shared employer is named with title and dates; colons, accents, kana and quotes", () => {
+  const five = { id: "F-1", kind: "experience", status: "confirmed", title: "Northwind Logistics, Operations Analyst (Jan 2022 - Mar 2024): cut freight cost 18%.", text: "", bullets: ["Built 2 models", "Cut late shipments to 4%", "Ran a $2.4M budget", "Hired 6 planners"] };
+  const more = [{ id: "F-2", kind: "experience", status: "confirmed", title: "Northwind Logistics, Intern (Jun 2021 - Aug 2021): shipped a dashboard; wrote 45 tests.", text: "", bullets: [] },
+    { id: "F-3", kind: "project", status: "confirmed", title: "Capstone: Route Planner, Team Lead (2023): led 4 students; won 1st of 30 teams.", text: "", bullets: [] },
+    { id: "F-4", kind: "experience", status: "confirmed", title: "ETH Zürich, Research Assistant (2020): ran 12 experiments; wrote 2 papers.", text: "", bullets: [] },
+    { id: "F-5", kind: "experience", status: "confirmed", title: "メルカリ, Engineer (2019): built search; cut latency 30%.", text: "", bullets: [] }];
+  for (const f of [five, ...more]) f.text = f.title;
+  const profile = { facts: [five, ...more] }, base = T.keepEveryEntry({ sections: [] }, profile).resume;
+  const run = (edits: any[]) => { const r: any = T.applyEdits(base, profile, edits); ok(r.ok, r.reason); return { r, said: T.editLine(r.done) as string, block: (id: string) => blockOf(r.resume, id) }; };
+  // 5 -> 1 -> 5 in one call: all five print, so nothing is said to be left out.
+  const back = run([{ role: "Operations Analyst", lines: 1 }, { role: "Operations Analyst", lines: 5 }]);
+  eq([back.block("F-1").length - 1, back.r.done.length, back.r.done[0].left_out], [5, 1, []]);
+  ok(!/left out|condensed/.test(back.said), back.said);
+  // 6 -> 2 in one call: it stays where it was, and is not said to be first unless it is.
+  const down = run([{ role: "Intern", lines: 6 }, { role: "Intern", lines: 1 }]);
+  const first = down.r.resume.sections.find((x: any) => x.heading === "Experience").lines[0].factIds[0];
+  eq([first, /now first in its section/.test(down.said)], ["F-1", false], down.said);
+  // Two entries at one employer: what was left out names the entry by its title and dates.
+  ok(down.said.includes("(left out of Northwind Logistics, Intern (Jun 2021 - Aug 2021): wrote 45 tests)"), down.said);
+  ok(run([{ role: "Zurich", lines: 1 }]).said.includes("(left out of ETH Zürich: wrote 2 papers)"));
+  // Two entries grown in one section: only the one that ends first is said to be.
+  const two = run([{ role: "Zürich", lines: 3 }, { role: "メルカリ", lines: 3 }]);
+  eq([two.r.done.map((d: any) => d.led), (two.said.match(/now first in its section/g) || []).length], [[false, true], 1], two.said);
+  // A title with its own colon keeps its line whole.
+  eq(T.entryParts(more[1]), { head: "Capstone: Route Planner, Team Lead (2023)", details: ["led 4 students", "won 1st of 30 teams"] });
+  eq(run([{ role: "Capstone", lines: 1 }]).block("F-3"), ["Capstone: Route Planner, Team Lead (2023)", "led 4 students"]);
+  // E: no cut inside quotation marks.
+  eq(TT.splitDetails('won "Best Demo. Runner Up; 2022" award; hired 3'), ['won "Best Demo. Runner Up; 2022" award', "hired 3"]);
+  eq(TT.splitDetails("said “ship it. Now; today” twice. Shipped 2"), ["said “ship it. Now; today” twice", "Shipped 2"]);
+});
 
-Deno.test("finding 3: 60 emails and phones: a placeholder is never a confirmed contact; a real-looking one is", () => {
-  eq(BAD_EMAILS.length + GOOD_EMAILS.length + BAD_PHONES.length + GOOD_PHONES.length, 60);
-  for (const e of BAD_EMAILS) ok(typeof R.placeholderEmail(e) === "string" && R.placeholderEmail(e), `refused: ${JSON.stringify(e)}`);
-  for (const e of GOOD_EMAILS) eq(R.placeholderEmail(e), null, e);
+// ------------------------------------------------------------------------------------------------ 3: the contact
+// Round 2: the rule is syntax, then reserved domains, then equality with a confirmed email; a template's stand-in name on a real
+// domain is asked about, never refused. No real person's address is refused by a guess.
+const REFUSED_EMAILS = ["", " ", "[your email]", "<email>", "{{email}}", "%EMAIL%", "your email", "[email protected]", "you@example.com", "name@example.org", "dana@example.net", "dana@example.edu", "dana@sub.example.com", "dana@example.co.uk",
+  "dana@host.invalid", "dana@localhost", "dana@box.local", "dana@foo.example", "YOU@EXAMPLE.COM", "mailto:dana.okafor@gmail.com", "dana okafor@gmail.com", "dana..okafor@gmail.com", "dana@gmail..com", "dana@gmail.com.", ".dana@gmail.com",
+  "dana.@gmail.com", "dana@-gmail.com", "dana@gmail-.com", "dana@@gmail.com", "dana@gmail.c", "dana@", "@gmail.com", "dana.gmail.com", "dana@gmail.com, dana2@gmail.com", "dаna@gmail.com", "dana＠gmail.com", "dana@127.0.0.1", "user@domain.tld"];
+const REAL_EMAILS = ["a.khan@gmail.com", "dana.okafor@gmail.com", "d.okafor+jobs@outlook.com", "priya_s@cs.stanford.edu", "mei-lin.chen@alumni.berkeley.edu", "tom@smith.dev", "me@danaokafor.com", "josé.garcía@gmail.com", "dana@müller.de", "o'brien@tcd.ie",
+  "dana@company.technology", "dana@email.com", "dana@domain.com", "me@me.com", "dana@例え.jp", "k.nakamura@g.ecc.u-tokyo.ac.jp", "dana@example-labs.com", "user1@gmail.com", "null.pointer@gmail.com", "DANA.OKAFOR@GMAIL.COM", "johndoe123@gmail.com", "1234567@qq.com"];
+const DOUBTFUL_EMAILS = ["you@gmail.com", "name@domain.com", "yourname@gmail.com", "your.name@gmail.com", "first.last@university.edu", "firstname.lastname@outlook.com", "first_last@yahoo.com", "email@gmail.com", "user@company.org", "test@gmail.com", "john.doe@gmail.com", "jane.doe@outlook.com"];
+const BAD_PHONES = ["555-0100", "555-0199", "(212) 555-0142", "+1 212 555 0142", "123-456-7890", "(123) 456-7890", "+1 123 456 7890", "1234567890", "(xxx) xxx-xxxx", "XXX-XXX-XXXX", "(NNN) NNN-NNNN", "(###) ###-####", "(555) 555-5555", "000-000-0000", "555-123-4567",
+  "111-111-1111", "(999) 999-9999", "987-654-3210", "(415) 000-0000", "415-123-4567", "+44 7700 900123", "07700 900000", "+61 491 570 156", "(415) 867-530", "867-5309", "41586753091234567", "+00 000 000 0000", "[phone]", "{{phone}}"];
+const GOOD_PHONES = ["(415) 867-5309", "+1 212-736-5000", "646.555.0234", "312-555-1212", "+44 20 7183 8750", "+44 7911 123456", "+91 98765 43210", "+49 30 901820", "+33 1 42 68 53 00", "+81 3-1234-5678", "4158675309", "(415) 867-5309 ext. 12", "020 7183 8750", "+86 138 0013 8000", "Chicago, IL 60614", "2019 - 2021"];
+
+Deno.test("finding 3: 117 emails and phones: malformed, reserved and template ones are refused; no real address is; a template's stand-in name is asked about", () => {
+  eq(REFUSED_EMAILS.length + REAL_EMAILS.length + DOUBTFUL_EMAILS.length + BAD_PHONES.length + GOOD_PHONES.length, 117);
+  for (const e of REFUSED_EMAILS) ok(typeof R.placeholderEmail(e) === "string" && R.placeholderEmail(e), `refused: ${JSON.stringify(e)}`);
+  for (const e of REAL_EMAILS) eq([R.placeholderEmail(e), R.doubtfulEmail(e), R.contactProblems({ email: e })], [null, null, []], e);
+  for (const e of DOUBTFUL_EMAILS) {
+    eq(R.placeholderEmail(e), null, `${e}: possible, so never refused outright`);
+    eq(R.contactProblems({ email: e }).map((c: any) => c.level), ["confirm"], e);
+    eq(R.contactProblems({ email: e }, { checked: [e] }), [], `${e}: theirs once they typed it for the resume`);
+  }
   for (const p of BAD_PHONES) ok(R.placeholderPhones(`Chicago, IL | ${p} | linkedin.com/in/dana`).length === 1, `refused: ${p}`);
-  for (const p of GOOD_PHONES) eq(R.placeholderPhones(`Chicago, IL | ${p}`), [], p);
+  for (const p of GOOD_PHONES) eq(R.placeholderPhones(`Chicago, IL | ${p} | dana.okafor@gmail.com`), [], p);
+  for (const line of ["linkedin.com/in/yourname | github.com/dana", "Your City, ST | Phone", "City, State", "Chicago | [phone]"]) ok(R.contactProblems({ email: "dana.okafor@gmail.com", contactLine: line }).some((c: any) => c.level === "refuse"), line);
 });
 
 Deno.test("finding 3, the render: a placeholder email or phone at the top is not a pass and cannot be marked ready, on the plain and the designed layouts", async () => {
   const { doc } = await files(), render = T.edgeRenderer();
   const withHeader = (h: any) => ({ ...structuredClone(doc), header: { ...doc.header, ...h } });
-  for (const [h, field] of [[{ email: "you@example.com" }, "email"], [{ email: "name@domain.com" }, "email"], [{ email: "" }, "email"], [{ contactLine: "dana.okafor@gmail.com | (555) 555-5555" }, "phone"], [{ contactLine: "you@example.com | 312-867-5309" }, "email"]] as const) {
+  for (const [h, field] of [[{ email: "you@example.com" }, "email"], [{ email: "name@example.org" }, "email"], [{ email: "" }, "email"], [{ contactLine: "dana.okafor@gmail.com | (555) 555-5555" }, "phone"], [{ contactLine: "you@example.com | 312-867-5309" }, "email"]] as const) {
     for (const opts of [undefined, { layout: "trainee" }] as any[]) {
       const r: any = await render(withHeader(h), opts);
       ok(r.ok && r.ats.pass === false && r.ats.status === "FAIL" && r.ats.reasons.some((x: string) => x.startsWith("contact_unconfirmed:") && x.includes(`the ${field} is not confirmed`)), `${JSON.stringify(h)} ${JSON.stringify(opts)}: ${JSON.stringify(r.ats ?? r)}`);
@@ -192,10 +234,10 @@ Deno.test("finding 3, the render: a placeholder email or phone at the top is not
 });
 
 Deno.test("finding 3, the tailor (the call the apply paths make): typed or on the resume header, a placeholder email or phone is refused and nothing is stored", async () => {
-  for (const email of ["you@example.com", "name@domain.com", "your.email@email.com", "email@example.com", "[your email]"]) {
+  for (const email of ["you@example.com", "name@example.org", "dana@sub.example.com", "mailto:dana.okafor@gmail.com", "[your email]"]) {
     for (const o of [{}, { reviewDraft: true }, { contact: "typed" }]) {
       const store = T.memoryResumeStore(), r = await tailor(typed(email), o, store);
-      ok(!r.ok && r.refused === "no_contact" && /not an email they confirmed/.test(r.reason) && r.reason.includes(T.EMAIL_QUESTION), `${email} ${JSON.stringify(o)}: ${JSON.stringify(r).slice(0, 300)}`);
+      ok(!r.ok && r.refused === "no_contact" && /cannot go on a resume/.test(r.reason) && !/not an email they confirmed/.test(r.reason) && r.reason.includes(T.EMAIL_QUESTION), `${email} ${JSON.stringify(o)}: ${JSON.stringify(r).slice(0, 300)}`);
       eq([store.files.size, store.signed.length], [0, 0], `${email}: nothing stored, no link`);
     }
   }
@@ -211,6 +253,17 @@ Deno.test("finding 3, the tailor (the call the apply paths make): typed or on th
   const store = T.memoryResumeStore();
   const r: any = await T.tailorForPosting({ userId: USER, profile: person(), posting: POSTING, deps: { render: T.edgeRenderer(), resumes: store, tailor: other }, now: NOW });
   ok(!r.ok && /is not the email they confirmed/.test(r.reason) && store.files.size === 0, JSON.stringify(r).slice(0, 300));
+  // A template's stand-in name on a real domain is asked about, truthfully, and is theirs once they type it for the resume.
+  for (const email of ["john.doe@gmail.com", "first.last@university.edu", "name@domain.com"]) {
+    const profile = typed(email), kept = T.memoryResumeStore(), ask = await tailor(profile, {}, kept);
+    ok(!ask.ok && ask.refused === "contact_needs_confirmation" && ask.reason.includes(`Is ${email} your own email address?`) && !/not an email they confirmed|placeholder/.test(ask.reason) && kept.files.size === 0, JSON.stringify(ask).slice(0, 300));
+    const tools = Object.fromEntries(careerTools({ postings: async () => [] } as any).map((x: any) => [x.name, x]));
+    const c: any = { userId: USER, threadId: "t1", now: NOW, state: { profile }, turn: { message: `yes that is mine, use Dana Okafor and ${email}`, added: [] } };
+    await tools.set_resume_contact.run({ name: "Dana Okafor", email }, c);
+    const made = await tailor(c.state.profile, {}, kept);
+    ok(made.ok && kept.files.size === 1 && pdfText(made.detail.pdf).includes(email), JSON.stringify(made).slice(0, 300));
+  }
+  for (const email of ["me@danaokafor.com", "josé.garcía@gmail.com", "dana@email.com"]) ok((await tailor(typed(email))).ok, `${email}: a real address is never refused`);
   // A real one, with a real phone, is made and stored as before.
   const real = T.memoryResumeStore(), fine = await tailor(person("a.khan@gmail.com", " | (312) 867-5309"), {}, real);
   ok(fine.ok && fine.link && real.files.size === 1 && fine.ats.status !== "FAIL", JSON.stringify(fine).slice(0, 300));
@@ -222,7 +275,7 @@ Deno.test("finding 3, the chat tool: tailor_resume refuses a placeholder email w
     const tools = Object.fromEntries(careerTools({ postings: async () => [], tailor: { posting: async (id: string) => ({ job_id: id, title: "Software Engineer Intern", company: "PayPal", description: POSTING.text }), personas: T.memoryPersonaStore(), resumes: store, render: T.edgeRenderer(), versions: null, ...(deliver ? { deliver: (d: any) => sent.push(d) } : {}) } } as any).map((x: any) => [x.name, x]));
     let out: any;
     try { out = await tools.tailor_resume.run({ job_id: POSTING.job_id }, { userId: USER, threadId: "t1", now: NOW, state: { profile: typed("you@example.com") }, turn: { message: "make my resume for paypal", added: [] } }); } catch (e) { out = { threw: String((e as Error).message) }; }
-    ok(out.threw ? /not an email they confirmed/.test(out.threw) : out.ok === false, JSON.stringify(out).slice(0, 300));
+    ok(out.threw ? /cannot go on a resume/.test(out.threw) : out.ok === false, JSON.stringify(out).slice(0, 300));
     eq([sent.length, store.files.size], [0, 0]);
   }
 });

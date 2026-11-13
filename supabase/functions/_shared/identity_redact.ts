@@ -136,6 +136,17 @@ const SIGN_IN_STRICT = /\b(?:log[- ]?in|sign[- ]?in|signin|creds|credentials|pas
 const NOT_A_PAIR_VALUE = /^(?:thanks|thank|thx|ty|cheers|best|regards|or|and|then|please|pls|call|text|phone|cell|mobile|linkedin|github|portfolio|website|site|web|personal|work|home|other|etc|same|none|either)$/i;
 const CUE_PAIR = /\b(log[- ]?in|sign[- ]?in|signin|creds|credentials|user ?name)\b([^!?\n]{0,60}?)([^\s/:]+)(\s*\/\s*|:(?=[^\s/]))([^\s/]{3,})/gi;
 const PASS_AFTER_USER = /(\b(?:user ?name|user|login|email|id)\s*[:=]?\s*(?!(?:can|must|should|will|may|might|could|would|to|who|that|then|and|cannot|can't|needs?|has|had|did|does|is|was)\b)\S+\s*,?\s*(?:and\s+)?)(pass(?:word)?|pwd?)(\s*[:=]?\s*)("[^"\n]+"|'[^'\n]+'|[^\s,;]{3,})/gi;
+// Review round 3: a value alone on the line after a label that ends its line ("2fa code\nHJKLQW", "contraseña:\nmariposa",
+// "passphrase:\ncorrect horse battery staple"). The next line is the value only when it is one value-like token (a code:
+// digits or capitals; a password: one token), or for a passphrase at most 6 plain words; a sentence there is kept.
+const NEXT_LINE = /(^|\n)([^\n]*?(?<!\p{L})(pass ?phrase|password|passwd|passcode|pwd|pw|mot de passe|contrase[ñn]a|clave|passwort|kennwort|senha|palavra[- ]passe|pin(?: code| number)?|(?:one[- ]time|verification|2fa|mfa|otp|auth(?:entication)?|sign[- ]?in|login)[ \t]*(?:code|pin|passcode)|otp|c[óo]digo|codice)[ \t]*(?:(?<!\p{L})(?:is|est|es|ist|é|è)(?!\p{L}))?[ \t]*[:=]?[ \t]*\n[ \t]*)([^\n]*[^\n \t])(?=[ \t]*(?:\n|$))/giu;
+function nextLineValue(cue: string, v: string): "password" | "code" | null {
+  if (v.startsWith("[")) return null;
+  if (/^pass ?phrase$/i.test(cue)) return /^[\p{L}\d'-]+(?:[ \t]+[\p{L}\d'-]+){0,5}$/u.test(v) && !/^(?:not|too|wrong|forgot|i|i'm|i've|it|my|we|you|can|please|what|how|why|the|a)$/i.test(v.split(/\s+/)[0]) ? "password" : null;
+  if (/\s/.test(v)) return null;
+  if (/pin|code|otp|c[óo]digo|codice/i.test(cue)) return /^[A-Za-z0-9-]{4,12}$/.test(v) && (/\d/.test(v) || /^[A-Z0-9-]+$/.test(v)) ? "code" : null;
+  return /^\S{3,64}$/.test(v) && !quiet(v) && !/^https?:/i.test(v) ? "password" : null;
+}
 const PIN_ANY = /\b(pin(?: code| number)?)([ \t]*(?:\bis\b|=|:)[ \t]*)([^\s,;]*\d[^\s,;]*)/gi;
 // Review round 2 (#825): "log in with alex and hunter2"; the same cues in Spanish, French, German, Portuguese and Italian
 // ("mot de passe : papillon", "mein Passwort ist Schmetterling", "código: 739201"); two product names are no pair.
@@ -166,6 +177,11 @@ function redactCredentialCues(t: string, removed: Set<Redaction["removed"][numbe
   });
   t = t.replace(FOREIGN_PW, (m, label: string, sep: string, value: string) => { if (quiet(value) || NOT_A_FOREIGN_VALUE.test(value.replace(/[.,!?;:]+$/, ""))) return m; removed.add("password"); return `${label}${sep}[password removed]`; });
   t = t.replace(FOREIGN_CODE, (_m, label: string, sep: string) => { removed.add("code"); return `${label}${sep}[code removed]`; });
+  t = t.replace(NEXT_LINE, (m, start: string, lead: string, cue: string, value: string) => {
+    const kind = nextLineValue(cue, value);
+    if (!kind) return m;
+    removed.add(kind); return `${start}${lead}[${kind} removed]`;
+  });
   t = t.replace(PIN_ANY, (m, label: string, sep: string, value: string) => { if (quiet(value)) return m; removed.add("code"); return `${label}${sep}[code removed]`; });
   t = t.replace(CODE_WORDS, (m, label: string, sep: string, value: string) => { if (quiet(value) || /^(?:here|sent|below|attached|coming|wrong)$/i.test(value)) return m; removed.add("code"); return `${label}${sep}[code removed]`; });
   return t;

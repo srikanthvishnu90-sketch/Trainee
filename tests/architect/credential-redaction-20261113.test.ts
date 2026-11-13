@@ -233,3 +233,24 @@ Deno.test("CR-5 review round 2: pairs, other languages, passphrases; no false PI
   eq(ASKS_2.filter((r) => credentialAsks(r).length !== 1), [], "asks missed");
   eq(HONEST.filter((r) => credentialAsks(r).length !== 0), [], "honest replies caught");
 });
+
+// Review round 3: a value alone on the line after its label is still the secret; a sentence on the next line is not
+// (r8-docx-clean-copy R8C-1: "Verification code:" then ordinary text is left for the file's own gate).
+export const NEXT_LINE_REDACT: [string, string][] = [
+  ["login code:\n55AB21", "55AB21"],
+  ["passphrase:\ncorrect horse battery staple", "correct horse battery staple"],
+  ["contraseña:\nmariposa", "mariposa"],
+  ["2fa code\nHJKLQW", "HJKLQW"],
+  ["my workday password is\nlavender", "lavender"],
+];
+export const NEXT_LINE_KEEP: string[] = [
+  "Verification code:\nVolunteer",
+  "Verification code:\nI never got one, what now?",
+  "passphrase:\nI forgot it and the reset link never came, can you help me",
+  "my login code was wrong\nJordan Lee",
+  "PIN code\nVolunteer at the food bank",
+];
+Deno.test("CR-6 a value alone on the next line after its label is removed; a sentence there is kept", () => {
+  eq(NEXT_LINE_REDACT.filter(([m, s]) => { const i = chatInput(m, [], 4000) as any; return i.userContent.includes(s) || !i.redacted.length; }), [], "secrets kept");
+  eq(NEXT_LINE_KEEP.filter((m) => (chatInput(m, [], 4000) as any).userContent !== m), [], "ordinary text changed");
+});

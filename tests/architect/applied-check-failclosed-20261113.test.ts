@@ -854,10 +854,11 @@ Deno.test("AC-16 an edit turn that also asks about status keeps the edited text,
 // research-only lines (written by code, listed here from the codebase) are never a statement of the person's status.
 Deno.test("AC-17 \"how many applications does Google get\" is not their status; Trainee's boundary lines never count as a denial", async () => {
   for (const [m, reply, keep] of [["how many applications does Google get a year", "Google gets about 3 million applications a year, and hires well under 1%.", /3 million applications/],
-    ["TEST Northwind is hiring a BI analyst, what does it pay?", "The Northwind BI Analyst posting lists $78,000 to $92,000. Nothing is being applied to; this is research only.", /research only/]] as const) {
+    // (the figure no tool returned is taken out by the existing pay guard, on trunk too; the boundary line stays as written)
+    ["TEST Northwind is hiring a BI analyst, what does it pay?", "The Northwind BI Analyst posting lists $78,000 to $92,000. Nothing is being applied to; this is research only.", /^Nothing is being applied to; this is research only\.$/]] as const) {
     ok(!B.statusQuestion(m), m);
     const r = await turn(m, scripted(Array(6).fill(text(reply))).model, { capabilities: C4.CA() });
-    eq([r.reply, r.tool_calls.some((c) => c.name === "read_application_mail")], [reply, false], m);
+    ok(!/haven't checked|Checked:|application record/.test(r.reply) && !r.tool_calls.some((c) => c.name === "read_application_mail"), `${m} => ${r.reply}`);
     ok(keep.test(r.reply));
   }
   for (const q of ["how many applications have i sent", "how many have i applied to", "how many places did i apply to"]) ok(B.statusQuestion(q), q);

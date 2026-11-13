@@ -5,7 +5,8 @@ import { isAutomatedInbox } from "../automated_inbox.ts";
 import { conversationFor, type RepliesStore } from "../career_outreach_replies.ts";
 import { CareerProfile, CareerTrack, CareerPrep, CareerPaths } from "../router_core.career.js";
 import { AskPerson, type ToolSpec, type ToolCtx } from "./loop.ts";
-import { type FitCache, newFitCache, orAlternatives, placeAlternatives, searchAlternatives, searchPostings } from "../career_search.ts";
+import { plainAnswer, RESTORE_ASK_INTENT, restoreQuestion } from "./turn_notes.ts";
+import { type FitCache, newFitCache, orSearch, placeAlternatives, SEARCH_ALTERNATIVES_MAX, searchAlternatives, searchPostings } from "../career_search.ts";
 import { searchWords, wordStem } from "../career_ingest.ts";
 import { liveOnly, type LinkCheck } from "../link_check.ts";
 import { startWatching, validPrefs, validZone, type AlertStore } from "../career_alert_store.ts";
@@ -27,7 +28,7 @@ import {
   type OutreachStore, payloadHash, recordOutreach, SIGNATURE_ASK, guardRecipient,
 } from "../career_outreach.ts";
 import { legacyRows, REFERRAL_ASK, referralMap, targetFirms } from "../career_referrals.ts";
-import { CONTACT_QUESTION, confirmedOnly, EMAIL_PLACEHOLDER, contactFromMessage, contactQuestion, namedIn, resumeContact, type PersonaStore, type ResumeRenderer, type ResumeStore, restatePersona, savePersona, tailorForPosting, validPersonaName } from "../career_tailor.ts";
+import { affirmsOwn, CONTACT_QUESTION, confirmedOnly, EMAIL_PLACEHOLDER, contactFromMessage, contactQuestion, namedIn, resumeContact, type PersonaStore, type ResumeRenderer, type ResumeStore, restatePersona, savePersona, tailorForPosting, validPersonaName } from "../career_tailor.ts";
 import { recordVersion, type ResumeVersionLog } from "../career_resume_outcomes.ts";
 import { changesOfItems, postingKeyOf } from "../career_material_writer.ts"; // D-072 (files writers)
 import { planLayout } from "../career_resume_rater.ts"; // RELEASE 10
@@ -227,6 +228,8 @@ function reviewOf(r: any, delivered: boolean): Record<string, unknown> {
   if (!delivered) return out;
   const flags = [
     ...(r.placeholders ?? []).includes("email") ? [`The email at the top prints as the visible placeholder ${EMAIL_PLACEHOLDER}: no email is on their confirmed resume and they have not typed one. Say so in the same sentence that hands over the file, and that it needs their email before it is used anywhere; never fill in the account's or this chat's address.`] : [],
+    ...(r.edits ?? []).filter((e: any) => e.left_out?.length).map((e: any) => `${e.entry}: shortened as they asked; this version no longer prints: ${e.left_out.join("; ")}. Say what was left out; it is still on their record.`),
+    ...(r.edits ?? []).filter((e: any) => e.restored?.length).map((e: any) => `${e.entry}: printed whole. Shortening it as asked would have dropped ${e.restored.join(", ")} from what they confirmed, so nothing was removed. Say that, and ask if they want that removed.`),
     ...(r.edits ?? []).filter((e: any) => e.expand_short).map((e: any) => `${e.entry}: their confirmed record holds ${e.available} detail${e.available === 1 ? "" : "s"} for it, so it prints ${e.now} (all it holds). Say that, and ask what else they did there; nothing was written for them. The number of lines is your input to the tool, not theirs: never say they asked for a number they did not type.`),
   ];
   out.review_draft = { placeholders: r.placeholders ?? [], flags, note: "Hand it over as a review draft for them to check, not a final file. Name any detail they told you in this conversation is uncertain, outdated or conflicting that still prints in it, and say it needs reconciling before it is sent anywhere. Describe edits only as edits_done says (condensed, expanded, led); for work in progress keep their wording about what is being built, never claim it works. Nothing was submitted." };
@@ -552,9 +555,26 @@ export function careerTools(deps: {
       run: async (i, c) => {
         const id = String(i.id);
         if (!(profileOf(c).facts || []).some((f: any) => f.id === id)) throw new Error(`no fact ${id} on file`);
-        const refusal = confirmationRefusal(c, id);
+        // Review of #790 (round 3): a fact the person set aside (withdrawn_by_owner) comes back only on a plain yes to CODE's own
+        // question about that fact. This tool is the only way that question is asked: code writes it (restoreQuestion, one fixed
+        // positive form), shows it as the reply and marks the message (restore_ask, the fact's id). A question the model writes sets
+        // no marker ("Should I leave GPA: 3.9 off the Stripe application?" + "yes" restores nothing). Never beside a card: a card
+        // open now, or an approval asked for in this turn, takes the person's next yes, so the question waits.
+        const setAside = (profileOf(c).facts || []).find((f: any) => f.id === id && f.withdrawn_by_owner);
+        const answered = setAside && (c as any).restoreAsk?.fact_id === id && plainAnswer(c.turn?.message) === "yes";
+        if (setAside && !answered) {
+          if (!c.turn) throw new Error("not confirmed: no confirmation from the person in this turn");
+          // Round 4: the turn that set it aside (the person's own words, this message) never asks to put it back.
+          if (setAside.withdrawn_by_owner.at === new Date(c.now).toISOString()) throw new Error("not confirmed: the person just said this fact is out of date, in this message; it stays set aside. Do not ask about it now");
+          if (c.turn.show || (c as any).cardPending || (c.turn as any).pendingApprovals) throw new Error("not confirmed: they set this fact aside, and an approval is waiting for their answer; ask about this fact after that is answered, not in this reply");
+          const text = restoreQuestion(String(setAside.text || setAside.title));
+          c.turn.show = { intent: RESTORE_ASK_INTENT, text, meta: { restore_ask: { fact_id: id } } };
+          return { confirmed: false, asked: text, next: "They set this fact aside. Code now asks them this exact question as your reply: write nothing else. It comes back only on their yes to it." };
+        }
+        const refusal = answered ? null : confirmationRefusal(c, id);
         if (refusal) throw new Error(`not confirmed: ${refusal}`);
         const fact = CareerProfile.confirmFact(profileOf(c), id);
+        if (fact?.withdrawn_by_owner) { fact.restored_by_owner = { at: new Date(c.now).toISOString(), set_aside_at: fact.withdrawn_by_owner.at }; delete fact.withdrawn_by_owner; }
         // WO-102 evidence: the persisted fact_confirmed row (this person, now, their own message's hash) and the fact name
         // each other by confirmation_event_id, with an owner provenance the answer contract accepts. A row that could not
         // be recorded stamps nothing, so the fact reads as needs-review, never as evidenced.
@@ -604,6 +624,8 @@ export function careerTools(deps: {
         const fact = CareerProfile.updateFact(profileOf(c), id, { text, needs_confirmation: true, status: "draft", corrected_from: was });
         if (PREF_KINDS.has(old.kind)) dropSuperseded(profileOf(c), id, was, text);
         c.turn?.added.push(id);
+        // D-075: what this turn corrected, for the stop of the applications stating the old words (career_apply_stale_facts.ts).
+        if (c.turn) (c.turn as any).corrected = [...((c.turn as any).corrected ?? []), { id, was, text }];
         await record(c, "fact_corrected", text, { id, was: was.slice(0, 200) });
         return { fact, was };
       },
@@ -715,7 +737,12 @@ export function careerTools(deps: {
         // D-073: the places the person joined with "or" stay alternatives, whatever the model's query did with them (placeAlternatives).
         const asked = placeAlternatives(String(i.query ?? ""), c.turn?.message ?? "", c.state?.profile ?? null);
         // D-070: "chicago or remote" is two searches, merged (career_search.ts orAlternatives); each alternative is relaxed alone.
-        const alts0 = orAlternatives(asked);
+        // Review of #790: the alternatives left out are returned, so the reply can say so. Round 4: each alternative here is one
+        // database read (no model call), so up to SEARCH_ALTERNATIVES_MAX combinations are searched, not four: "python or go or
+        // rust engineer in seattle or remote" is six, and its one Rust/remote posting is found.
+        const ors = orSearch(asked, SEARCH_ALTERNATIVES_MAX), alts0 = ors.queries;
+        // On every result, an empty one included: which alternatives were left out.
+        const notSearched = ors.not_searched.length ? { not_searched: ors.not_searched, note_not_searched: "not every combination was searched; say which were not (not_searched) and offer to search them" } : {};
         if (alts0.length > 1) {
           // D-071 (live-8 C1/setup-2: "chicago or remote" still returned no remote posting): the database matches whole words, so
           // "software engineer intern remote" found nothing (NVIDIA's remote role is not an internship; only the in-memory test pool
@@ -747,7 +774,7 @@ export function careerTools(deps: {
             await record(c, "search", asked, { results: found.length, companies: [...new Set(found.map((p) => String(p.company ?? "")).filter(Boolean))].slice(0, 5),
               shown: found.slice(0, 10).map((p) => ({ job_id: String(p.job_id ?? ""), company: String(p.company ?? "").slice(0, 80), title: String(p.title ?? "").slice(0, 100) })) });
             const relaxed_each = alts0.map((a, k) => a === alts[k] ? null : { asked: a, searched: alts[k] }).filter(Boolean);
-            return { ...r, postings: found, filtered, source: "live", searched_each: alts, ...(relaxed_each.length ? { relaxed_each, note_relaxed: "an alternative that matched nothing was searched with fewer words (relaxed_each): a posting it found may not be the exact role asked for; say so" } : {}), note_or: `searched each of: ${alts.join(" | ")}; a posting whose role_match is false is a related role, not the role asked for: say so`,
+            return { ...r, postings: found, filtered, source: "live", searched_each: alts, ...notSearched, ...(relaxed_each.length ? { relaxed_each, note_relaxed: "an alternative that matched nothing was searched with fewer words (relaxed_each): a posting it found may not be the exact role asked for; say so" } : {}), note_or: `searched each of: ${alts.join(" | ")}; a posting whose role_match is false is a related role, not the role asked for: say so`,
               links: { checked: checked.checked, dead_dropped: checked.dead, no_link_dropped: r.postings.length - withLink.length,
                 note: deps.linkCheck ? "each link was checked just now; a posting marked link 'unknown' could not be checked: say so beside it" : "links were not checked here" } };
           }
@@ -761,7 +788,7 @@ export function careerTools(deps: {
         // the last tool result is delivered). The empty result says how it is used, beside the data, where the model reads it.
         if (!pool.length) {
           await record(c, "search", query, { results: 0, source: "none" });
-          return { postings: [], total: 0, source: "none", note: EMPTY_SEARCH_NOTE };
+          return { postings: [], total: 0, source: "none", note: EMPTY_SEARCH_NOTE, ...notSearched };
         }
         // C-04: the person's saved floor (and, always, closed postings and the same job on another board) before any
         // ranking; what was hidden is counted by reason so the reply can say it ("7 senior roles, 5 contract").
@@ -778,7 +805,7 @@ export function careerTools(deps: {
         // WO-100: the list in the order shown, so "the second one" resolves in any thread (the situation's last_shown).
         await record(c, "search", query, { results: found.length, companies: [...new Set(found.map((p) => String(p.company ?? "")).filter(Boolean))].slice(0, 5),
           shown: found.slice(0, 10).map((p) => ({ job_id: String(p.job_id ?? ""), company: String(p.company ?? "").slice(0, 80), title: String(p.title ?? "").slice(0, 100) })) });
-        return { ...r, postings: found, filtered, source: "live", ...relaxed,
+        return { ...r, postings: found, filtered, source: "live", ...notSearched, ...relaxed,
           links: { checked: checked.checked, dead_dropped: checked.dead, no_link_dropped: r.postings.length - withLink.length,
             note: deps.linkCheck ? "each link was checked just now; a posting marked link 'unknown' could not be checked: say so beside it" : "links were not checked here" } };
       },
@@ -1016,7 +1043,10 @@ export function careerTools(deps: {
         if (only === null) throw new Error(`not saved: ${hasEmail ? "no name is on their confirmed record either, so their name must be typed too" : hasName ? "no email is on their confirmed record either, so their email must be typed too" : "nothing was typed"}. Ask them: "${question}"`);
         const r = contactFromMessage(c.turn.message, i.name, i.email, only ? { only } : {});
         if (!r.ok) throw new Error(`not saved: ${r.error}. Ask them: "${question}"`);
-        p.basics = { ...(p.basics || {}), ...(only !== "email" ? { name: r.name } : {}), ...(only !== "name" ? { email: r.email } : {}) };
+        // A template-looking address (148 rule 4) is theirs only when they say so in this message ("<a> is my email", "use <a>").
+        const typedNow = only !== "name" && r.email && affirmsOwn(c.turn.message, r.email) ? [String(r.email).trim().toLowerCase()] : [];
+        p.basics = { ...(p.basics || {}), ...(only !== "email" ? { name: r.name } : {}), ...(only !== "name" ? { email: r.email } : {}),
+          ...(typedNow.length ? { contact_checked: [...new Set([...(Array.isArray(p.basics?.contact_checked) ? p.basics.contact_checked : []), ...typedNow])].slice(-10) } : {}) };
         const shown = resumeContact(confirmedOnly(p));
         return { saved: { ...(only !== "email" ? { name: r.name } : {}), ...(only !== "name" ? { email: r.email } : {}) }, restated: `Your resume will show ${shown.name} and ${shown.email} at the top.` };
       },

@@ -198,10 +198,11 @@ export async function researchCompany(i: { company: string; role?: string | null
   // periods, years and names AND the judge says that sentence states it; else that page sentence in quotation marks; else dropped.
   // The company's name is lent to no line (D-070's lending is off on this path). What has no quoted form is not shown at all: the
   // model's "unknowns", a product's angle, and the questions built around a tension the model named.
-  const idx = FAIL_CLOSED.support ? indexPages(pages, abbreviated, [company], { sites: found.sites ?? [], ask: i.question }) : null;
+  const idx = FAIL_CLOSED.support ? indexPages(pages, abbreviated, [company], { sites: [...(i.plan.sites ?? []), ...(found.sites ?? [])], ask: i.question }) : null;
   const units = new Set((idx?.pages ?? []).flatMap((p) => p.sentences.filter((u) => u.quotable).map((u) => u.text)));
   const pidx = (p: SourcePage | null) => p ? pages.indexOf(p) : -1;
   const FRAME = {}, sup = new Map<unknown, Verdict>();
+  let judgeDown = false;
   if (idx) {
     const keys: unknown[] = [], wants: Wanted[] = [];
     for (const [k, x] of [...arr(d.business, 6), ...arr(d.developments, 5), ...arr(d.competitors, 4), ...arr(d.role, 5)].entries()) {
@@ -211,7 +212,10 @@ export async function researchCompany(i: { company: string; role?: string | null
     // Round 3: the page units code may pick itself (below) are quote candidates, judged in this same call.
     for (const l of pageSentences(pages, contentWords(`${company} ${role ?? ""} ${i.question}`), [company], 4).filter((l) => units.has(l.text))) { keys.push(`unit:${l.text}`); wants.push({ claim: l.text, unit: true, pages: [pidx(l.page)] }); }
     if (d.frame) { const ks = arr(d.frame.urls, 4).map((u) => pidx(pageOf(u))).filter((k) => k >= 0); keys.push(FRAME); wants.push({ claim: squash(d.frame.text), pages: ks.length ? ks : [-1] }); }
-    (await decide(wants, idx, i.deps.judge)).forEach((v, k) => { if (!sup.has(keys[k])) sup.set(keys[k], v); });
+    const vs = await decide(wants, idx, i.deps.judge);
+    judgeDown = vs.failed;
+    vs.forEach((v, k) => { if (!sup.has(keys[k])) sup.set(keys[k], v); });
+    if (vs.unasked) notes.push(`${vs.unasked} drafted line(s) could not be checked this turn and were left out: say that not everything found could be checked`);
   }
   const picked = (t: string) => { const v = idx ? sup.get(`unit:${t}`) : null; return v && v.how === "quote" ? v : null; };
   const own = (t: string) => { const v = picked(t); return v ? quoteOf(v) : t; };
@@ -236,6 +240,8 @@ export async function researchCompany(i: { company: string; role?: string | null
   // A product line keeps its product only when the quote names it.
   const business: (Cited & { product?: string })[] = on("business") ? arr(d.business, 6).map((x) => { const f = fact(x, "business"); if (!f) return null; const pr = squash(x?.product).slice(0, 40);
     return { ...kept(f), ...(pr && !idx && linkFree(pr) && word(pr, squash(x?.quote)) ? { product: pr } : {}) }; }).filter(Boolean) as (Cited & { product?: string })[] : [];
+  // FAIL_CLOSED.support: two drafted lines that end as the same page unit are one line.
+  if (idx) for (let k = business.length - 1; k >= 0; k--) if (business.findIndex((b) => b.text === business[k].text) < k) business.splice(k, 1);
   const developments: Development[] = on("developments") ? arr(d.developments, 5).map((x) => {
     const day = parseDay(squash(x?.date)), f = fact(x, "developments");
     if (!f) return null;
@@ -263,7 +269,9 @@ export async function researchCompany(i: { company: string; role?: string | null
   if ((!audit.drafted || facts0() < 2) && on("business")) for (const l of pageSentences(pages, contentWords(`${company} ${role ?? ""} ${i.question}`), [company], 4)) {
     if (audit.drafted && facts0() >= 2) break;
     if (business.some((b) => b.text === l.text || b.text === own(l.text)) || (idx && !picked(l.text))) continue;
-    business.push({ text: own(l.text), cite: [num(l.page)] }); auditFromPages(audit, "business");
+    const text = own(l.text);
+    if (business.some((b) => b.text === text)) continue;
+    business.push({ text, cite: [num(l.page)] }); auditFromPages(audit, "business");
   }
   // A question is code's sentence around a verified tension: the area agrees with its quote on a cited page; A and B are each stated
   // on the cited pages (every content word, every figure); A and B differ. Nothing in a question is the model's own claim.
@@ -329,7 +337,8 @@ export async function researchCompany(i: { company: string; role?: string | null
   if (ask && focus === "all") unknowns.unshift("Which role you are interviewing for: the brief has no role-specific section until you say.");
   // D-073: every kept, cited line counts toward a brief, the frame (Trainee's reading, checked above) included.
   const any = business.length + developments.length + competitors.length + role_asks.length + questions.length + (frame ? 1 : 0);
-  if (!any) { const blocker = `${pages.length} page(s) about ${company} were opened, but none stated anything the brief could quote`; const checked = pages.slice(0, 4).map((p, k) => ({ n: k + 1, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || hostOf(p.url), url: p.url, fetched_at: new Date(p.fetchedAt).toISOString() }));
+  // Round 7: the judge could not answer: the blocker says so (the pages are listed after it), never that the pages said nothing.
+  if (!any) { const blocker = idx && judgeDown ? `${pages.length} page(s) about ${company} were opened, but I couldn't check what they say just now; I can check them again if you ask` : `${pages.length} page(s) about ${company} were opened, but none stated anything the brief could quote`; const checked = pages.slice(0, 4).map((p, k) => ({ n: k + 1, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || hostOf(p.url), url: p.url, fetched_at: new Date(p.fetchedAt).toISOString() }));
     return { kind: "company", status: "no_sources", ask, notes, unread, blocker, audit, checked, note: `Research found nothing it could stand on: ${blocker}. Say that plainly; do not guess. Write no link: code lists the pages that were checked.${roleAsk}` }; }
   // The company's own site: as the turn named it, or as a free source found it (Wikidata P856, the postings' own host).
   const siteHosts = new Set([...(i.plan.sites ?? []), ...(found.sites ?? [])].map((s) => hostOf(`https://${String(s).replace(/^https?:\/\//, "")}`)));

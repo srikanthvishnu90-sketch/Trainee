@@ -1320,6 +1320,19 @@ echo "== career_outreach_adopt_skip_mail_reply.check.sql (an outreach thread is 
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261113130000_career_outreach_adopt_skip_mail_reply.sql"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_outreach_adopt_skip_mail_reply.check.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
 echo "  ok   rollback restores the adopt function as it was; up again"
+# D-075 (20261113140000): an approved hosted application stating a fact the person set aside or corrected is stopped (the chat's stop,
+# the claim guard). Applied twice (idempotent), its check, the rollback (no function, trigger, column or table left), up again and
+# the check again.
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261113140000_career_apply_stop_stale_facts.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261113140000_career_apply_stop_stale_facts.sql"
+echo "== career_apply_stop_stale_facts.check.sql (a changed fact stops the approved applications stating it, by fact id or value; the fact write records it)"
+"${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_stop_stale_facts.check.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
+"${QUIET[@]}" -f "$ROOT/supabase/rollbacks/20261113140000_career_apply_stop_stale_facts.down.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/rollbacks/20261113140000_career_apply_stop_stale_facts.down.sql"
+[[ "$("${PSQL[@]}" -tAc "select not exists (select 1 from pg_proc where proname in ('career_apply_stop_stale_facts', 'career_apply_facts_claim_guard', 'career_apply_facts_at_stamp', 'career_apply_fact_changed_close', 'career_apply_payload_stale', 'career_apply_facts_email_guard', 'career_apply_fact_hit', 'career_apply_facts_write_record', 'career_apply_facts_diff', 'career_apply_value_key', 'career_apply_value_keys', 'career_apply_changed_keys')) and not exists (select 1 from pg_proc where proname in ('career_apply_vm_heartbeat', 'career_apply_cloud_authorize_any') and prosrc like '%fact_changed%') and not exists (select 1 from pg_trigger where tgname like 'career_apply_facts_%') and not exists (select 1 from information_schema.columns where table_schema = 'public' and column_name = 'facts_at') and to_regclass('public.career_apply_fact_changes') is null")" == "t" ]] || { echo "FAIL career_apply_stop_stale_facts rollback"; exit 1; }
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261113140000_career_apply_stop_stale_facts.sql"
+"${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_stop_stale_facts.check.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
+echo "  ok   rollback leaves nothing of the stale-facts stop; up again"
 # LAUNCH READINESS B1 (2026-10-26, audit PR #192): the definer lockdown, last, on the schema every phase above left
 # (the card-cloud bridge included). The test applies it (twice) over production's shape, then checks the whole schema:
 # no SECURITY DEFINER function anon can run, none without a fixed search_path.

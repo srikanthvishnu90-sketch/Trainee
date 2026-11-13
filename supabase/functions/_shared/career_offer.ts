@@ -113,6 +113,8 @@ export function currencyMark(text: string, at: number, end: number): { mark: str
 }
 // ---------- the place: is it in the United States? ----------
 const US_STATE = /\b(?:Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming|District of Columbia|United States|USA|U\.S\.A?\.?)\b|,\s*(?:A[LKZR]|C[AOT]|D[EC]|FL|GA|HI|I[DLNA]|K[SY]|LA|M[EDAINSOT]|N[EVHJMYCD]|O[HKR]|PA|RI|S[CD]|T[NX]|UT|V[TA]|W[AVIY]|US)\b/;
+// Large US cities outside the metros the pay data maps, named without a state ("in San Diego").
+const US_CITY = /^(?:San Diego|Phoenix|Portland|Minneapolis|Saint Paul|St\.? Paul|Detroit|Pittsburgh|Nashville|Charlotte|Raleigh|Durham|Salt Lake City|Las Vegas|San Antonio|Columbus|Indianapolis|Baltimore|Sacramento|Kansas City|St\.? Louis|Tampa|Orlando|Jacksonville|Cleveland|Cincinnati|Milwaukee|Honolulu|Boise|Albuquerque|Tucson|Omaha|Oklahoma City|Louisville|New Orleans|Richmond|Buffalo|Boulder|Irvine|San Mateo|Menlo Park|Redmond|Bellevue|Fort Lauderdale|Ann Arbor|Madison)$/;
 const DOLLAR_PLACE = /\b(?:Canada|Toronto|Vancouver|Montreal|Ottawa|Calgary|Edmonton|Waterloo|Winnipeg|Quebec|Ontario|British Columbia|Alberta|Mississauga|Halifax|Australia|Sydney|Melbourne|Brisbane|Perth|Adelaide|Canberra|New Zealand|Auckland|Wellington|Christchurch|Singapore|Hong Kong|Taiwan|Taipei|Mexico|Guadalajara|Monterrey|Argentina|Buenos Aires|Chile|Santiago|Colombia|Bogota|Medellin|Brazil|Sao Paulo|Rio de Janeiro|Jamaica|Bahamas|Barbados|Trinidad|Fiji|Uruguay|Montevideo|Dominican Republic|Philippines|Manila|Cuba|Liberia|Namibia|Belize|Guyana)\b/i;
 // "us": a metro the pay data knows, or a named US state. "none": remote or not said. "dollar": a place whose own money is a
 // dollar or a peso. "other": any other place, which code cannot confirm is in the United States.
@@ -120,7 +122,7 @@ export function placeKind(o: Pick<Offer, "metro" | "place" | "city" | "remote">)
   if (o.metro) return "us";
   const p = o.place ?? (o.city && o.city !== "remote" ? o.city : null);
   if (!p) return "none";
-  return US_STATE.test(p) ? "us" : DOLLAR_PLACE.test(p) ? "dollar" : "other";
+  return US_STATE.test(p) || US_CITY.test(p.trim()) ? "us" : DOLLAR_PLACE.test(p) ? "dollar" : "other";
 }
 const placeName = (o: Offer) => o.metro_label ?? o.place ?? o.city ?? "the place";
 // US pay data is placed only against a US-dollar offer for a US place (or one with no place said, or remote).

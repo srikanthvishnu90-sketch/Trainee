@@ -47,13 +47,17 @@ const NOT_CUE_AFTER = /^\s*(?:bonus|bonuses|sheet|desk|form|of\s+conduct|review|
 const ID_BEFORE = /(?:\b(?:req|requisition|job|id|ids|ref|reference|confirmation|conf|application|app|candidate|order|ticket|case|invoice|booking|employee|flight|room|suite|building|floor|ext|extension|meeting|conference|webinar|zip|postal|course|class|policy|claim|member|student|registration|item|model|version|v|chapter|page|step|round|level|grade|unit|seat|req\.?\s*#|#)\s*(?:id|no\.?|number|#|is)?\s*[:#]?\s*)$/i;
 const PAY = /\b(?:salary|salaries|base|bonus|bonuses|stipend|rate|rates|compensation|comp|pay|paid|offer|offering|per\s+(?:year|annum|month|hour|week)|annual|annually|hourly|monthly|\/yr|\/hr|\/year|\/hour|ctc|lpa|equity|rsus?|options|relocation|allowance|reimburse\w*|budget|sign-on\s+bonus|raised|grant|usd|eur|gbp|inr|dollars|euros|pounds)\b|[$€£¥₹]/i;
 const MONTH = String.raw`(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?`;
+// A credential cue is the credential noun phrase itself, never the same words in another sense ("the verification of your
+// references", "sign in with your password as usual", "use code below at checkout").
+const CREDENTIAL = new RegExp(String.raw`\b(?:verification|verify|one[- ]?time|login|log[- ]?in|sign[- ]?in|security|access|2fa|two[- ]?(?:factor|step)|authentication|auth|temporary|reset|backup|recovery)\s+(?:codes?|pins?|passcodes?|passwords?|numbers?|otps?)\b|\b(?:otps?|pins?|passcodes?|digits)\b|\bpasswords?\b(?=\s*(?:is\b|:|follows|below|next|here|[.!]|$))|\b(?:your|the|this)\s+(?:\S+\s+){0,2}(?:codes?|passwords?)\b(?=\s*(?:is\b|:|follows|below|next|here|you\s+(?:asked|need|requested|wanted)|[.!]|$))|\bcodes?\s+(?:follows|below|is\s+(?:next|below))\b|${CUE_BARE}|c[oó]digo|codice|inlogcode|verificatiecode|best[aä]tigungscode|code\s+de\s+v[eé]rification|mot\s+de\s+passe|passwort|kennwort|contrase[nñ]a|senha|код|пароль`, "iu");
+const NOT_CREDENTIAL = /\b(?:checkout|check\s+out|cart|basket|discount|promo(?:tion)?|coupon|voucher|gift\s+card|% off|off\s+your\s+(?:order|purchase))\b|\bverification\s+of\b|\b(?:sign|log)[- ]?in\s+with\s+your\s+(?:usual\s+)?password\b/i;
 const PW_WORD = /^(?:passwords?|passwd|pwd|passcodes?|pass\s+codes?|passwort|kennwort|contrase[nñ]a|senha|пароль|mot\s+de\s+passe|密码|密碼|パスワード|비밀번호|סיסמה|पासवर्ड)$/iu;
 // What a waiting credential cue skips: by FORMAT only (never by a label such as Ref, Order or Booking): a year next to (c),
 // Inc or a month name, a price, a percentage, a phone number in phone grouping, a date or a time.
 function carryKeep(tok: string, before: string, after: string): boolean {
   const t = tok.trim();
   if (/^(?:19|20)\d{2}$/.test(t) && (/(?:\u00a9|\(c\)|copyright)\s*$/i.test(before) || /^\s*,?\s*(?:\p{Lu}[\p{L}&.-]*\s+){0,3}(?:inc|llc|ltd|corp|gmbh|plc|co)\b/iu.test(after) || new RegExp(String.raw`${MONTH}\s*(?:\d{1,2}(?:st|nd|rd|th)?,?\s*)?$`, "i").test(before) || new RegExp(String.raw`^\s*${MONTH}`, "i").test(after))) return true;
-  if (/[$€£¥₹]\s?$/.test(before) || /^\s*%/.test(after) || /^\s?(?:k|m|usd|eur|gbp|inr|dollars|euros|pounds)\b/i.test(after)) return true;
+  if ((/[$€£¥₹]\s?$/.test(before) && !/^\d{6,8}$/.test(t)) || /^\s*%/.test(after) || /^\s?(?:k|m|usd|eur|gbp|inr|dollars|euros|pounds)\b/i.test(after)) return true;
   if (/^(?:\(?\d{3}\)?[ .-]\d{3}[ .-]\d{4}|\d{3}[ .-]\d{4})$/.test(t) || (/\+\s?$/.test(before) && t.replace(/\D/g, "").length >= 8)) return true;
   const dm = /^(\d{1,4})[-./](\d{1,2})[-./](\d{1,4})$/.exec(t);
   if (dm) { const [a, b, c] = [Number(dm[1]), Number(dm[2]), Number(dm[3])]; if ((a <= 31 && b <= 12) || (a <= 12 && b <= 31) || (a > 1900 && b <= 12 && c <= 31)) return true; }
@@ -277,7 +281,8 @@ export function redact(text: unknown): { text: string; removed: Removed[] } {
       const took = added.length > 0 && !labelled;
       // Only a credential cue carries: one-time, login, sign-in, verification, security, access or 2FA code, password, passcode,
       // PIN, OTP, digits (and translations). promo, discount, coupon, order, booking, dress and zip codes are not cues at all.
-      const cue = cuesIn(part).filter((c) => !c.imp && (!c.weak || /^(?:pins?|digits)$/i.test(part.slice(c.start, c.end))) && !/\p{Nd}|\[removed\]/u.test(part.slice(c.end)));
+      const cue = CREDENTIAL.test(part) && !NOT_CREDENTIAL.test(part)
+        ? cuesIn(part).filter((c) => !c.imp && (!c.weak || /^(?:pins?|digits)$/i.test(part.slice(c.start, c.end))) && !/\p{Nd}|\[removed\]/u.test(part.slice(c.end))) : [];
       if (cue.length) { carried = true; hops = 0; strong = true; pw = cue.some((c) => PW_WORD.test(part.slice(c.start, c.end))); }
       else if (carried && /^[\p{Nd} .-]+$/u.test(part.trim()) && took) { /* a line of digits only: the next may hold more */ }
       else if (carried && !took && hops < 4) hops++;
@@ -363,7 +368,7 @@ export function securityMail(m: { from: string; subject: string; text: string })
   if (ASSERTED.test(plainBody)) return true;
   // The same across a full stop: "Here is your login code. It is 330918.", "Your code follows. 554102", "We sent a one-time
   // code. Write it down! 7 7 2 0 1 9".
-  if (SPLIT_CODE.test(plainBody) || redact(plainBody).removed.some((r) => r.carried)) return true;
+  if (SPLIT_CODE.test(plainBody)) return true;
   if (MONEY_ALERT.test(all) && ALERT.test(all)) return true;
   // Reset, sign-in, two-step and alert wording counts in the body only when the email also tells the reader to act on it.
   if (acts && (RESET.test(body) || SIGNIN.test(body) || ALERT.test(body) || (TWO_STEP.test(body) && /\bcodes?\b/i.test(body)))) return true;

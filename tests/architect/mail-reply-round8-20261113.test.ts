@@ -11,7 +11,6 @@ import * as S from "../../supabase/functions/_shared/mail_security.ts";
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
 const s: any = S;
-const withheld = (text: string) => s.securityMail({ from: "noreply@app.example", subject: "Hi", text });
 
 Deno.test("a credential cue's secret is taken whatever its label (c7, e1, e2, e6, two variants each)", () => {
   const cases: [string, string, string][] = [
@@ -30,7 +29,7 @@ Deno.test("a credential cue's secret is taken whatever its label (c7, e1, e2, e6
   ];
   for (const [n, text, secret] of cases) {
     ok(!s.redactSecrets(text).includes(secret), `${n} redacted: ${s.redactSecrets(text)}`);
-    eq(withheld(text), true, `${n} withheld`);
+    // Round 9 (review of 3361e2908): a carried secret is redacted only; it no longer withholds the whole mail.
   }
 });
 

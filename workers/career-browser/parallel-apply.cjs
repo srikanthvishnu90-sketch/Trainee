@@ -177,13 +177,17 @@ async function openApply(page, timeout) {
   // to the same address. Controls that lead to different places, or buttons with no address, stay ambiguous unless there is one.
   const h = (await page.evaluateHandle(([at, nc, overlay]) => {
     const re = new RegExp(at, "i"), never = new RegExp(nc, "i");
+    // Round 2: a control that mentions LinkedIn or Indeed anywhere (words, accessible name, title, address, data attributes, an
+    // image's alt), or leads to either, is never opened.
+    const li = (e) => /linkedin|lnkd\.in|indeed/i.test([e.innerText, e.getAttribute("aria-label"), e.getAttribute("title"), e.getAttribute("href"), e.href, e.getAttribute("formaction"), e.getAttribute("onclick"),
+      ...[...e.attributes].filter((a) => a.name.startsWith("data-")).map((a) => `${a.name}=${a.value}`), ...[...e.querySelectorAll("img, svg")].map((i) => `${i.getAttribute("alt") || ""} ${i.getAttribute("aria-label") || ""} ${i.getAttribute("src") || ""}`)].join(" "));
     // Teamtailor's Apply control by its declared action (apply-entry.cjs OVERLAY_APPLY), outside every form, not a submit: the first
     // visible one (the board draws it twice, in the page and as a bar fixed to the bottom).
-    const ov = [...document.querySelectorAll(overlay)].find((e) => !e.closest("form") && (e.offsetWidth || e.offsetHeight) && (e.getAttribute("type") || "").toLowerCase() !== "submit");
+    const ov = [...document.querySelectorAll(overlay)].find((e) => !e.closest("form") && (e.offsetWidth || e.offsetHeight) && (e.getAttribute("type") || "").toLowerCase() !== "submit" && !li(e));
     if (ov) return ov;
     const c = [...document.querySelectorAll("a, button, [role=button]")].filter((e) => {
       const t = (e.innerText || e.getAttribute("aria-label") || "").trim();
-      return !e.closest("form") && (e.offsetWidth || e.offsetHeight) && re.test(t) && !never.test(t);
+      return !e.closest("form") && (e.offsetWidth || e.offsetHeight) && re.test(t) && !never.test(t) && !li(e) && !e.disabled;
     });
     if (!c.length) return null;
     // Repeats of one control: every link goes to the same address and every button carries a link's words (Personio), or
@@ -264,37 +268,88 @@ function checkGate(seen, shown, inForm, phase) {
 //    (apply-entry.cjs), so it may be opened once, as a job page's Apply control always was, and the page read again.
 //  - A board with no <form> at all (Ashby): the page is the form when its own fields are an application's and it has exactly one
 //    visible Submit-worded control.
-const SUBMIT_WORD = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$|^\s*(bewerbung )?(absenden|senden|abschicken)\s*$|^\s*(sollicitatie )?(versturen|verzenden|verstuur|indienen)\s*$|^\s*(envoyer|enviar|verzenden|skicka|sende|send inn|indsend|l[äa]het[äa]|wy[śs]lij|s[ūu]t[īi]t|si[ųu]sti|saada|odeslat|odosla[ťt]|invia|inviare|trimite|g[öo]nder|k[üu]ld[ée]s|po[šs]alji|po[šs]lji|изпрати|отправить|надіслати|αποστολή|υποβολή)( .{0,24})?$/i;
+const SUBMIT_WORD = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$|^\s*(complete application|finish|finish application)\s*$|^\s*(bewerbung )?(absenden|senden|abschicken)\s*$|^\s*(sollicitatie )?(versturen|verzenden|verstuur|indienen)\s*$|^\s*(envoyer|enviar|verzenden|skicka|sende|send inn|send s[øo]knad|send ans[øo]gning|indsend|l[äa]het[äa]|wy[śs]lij|s[ūu]t[īi]t|si[ųu]sti|saada|odeslat|odosla[ťt]|invia|inviare|trimite|g[öo]nder|k[üu]ld[ée]s|po[šs]alji|po[šs]lji|изпрати|отправить|надіслати|αποστολή|υποβολή)( .{0,24})?$/i;
 const NEXT_WORD = /^\s*(continue|next|next step|weiter|suivant|siguiente|volgende|avanti|pr[oó]ximo)\s*[›»>→]?\s*$/i;
 const PLAIN_SUBMIT = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$/i;
-const NOT_APPLICATION = /subscribe|newsletter|sign ?up|notify|alert|search|abonn|suchen/i;
-const isApplicationForm = (fields = []) => fields.some((f) => f.type === "file") || (fields.length >= 2 && fields.some((f) => !["email", "checkbox", "search"].includes(f.type)));
+// Round 2 (review of #818): a wrong click on an employer's site cannot be undone, so every control the engine presses is pressed
+// on positive evidence, never because it is "the only button".
+//  - controlLabel: a control is a Submit (or a Continue) only when its visible words are on the list (SUBMIT_WORD / NEXT_WORD), no
+//    word of SUBMIT_DENY is in its words or its accessible name, and the two do not disagree (one on the list, the other not, or
+//    no visible words at all behind an accessible name: "conflict", which refuses the form as ambiguous_submit).
+//  - LinkedIn and Indeed (the rule that never moves): a control or link that mentions either, in its words, accessible name,
+//    title, address, form address, data attributes or an image's alt (SNAP's `blob`), is never pressed, as a Submit or as an opener.
+const SUBMIT_DENY = /\b(withdraw|delete|remove|cancel|save|draft|later|sign ?in|log ?in|create (an |your )?account|register|subscribe|google|facebook|apple|sso|easy apply|refer|share|back|previous|reset|clear|upload)\b|linkedin|indeed/i;
+const LI_INDEED = /linkedin|lnkd\.in|indeed/i;
+const labelNorm = (x) => String(x || "").toLowerCase().replace(/[\s ]+/g, " ").replace(/^[\s!.»>→›]+|[\s!.»>→›]+$/g, "");
+function controlLabel(c, list = SUBMIT_WORD) {
+  if (c.disabled || LI_INDEED.test(c.blob || "")) return "no";
+  const text = labelNorm(c.text), name = labelNorm(c.aria), ok = (x) => list.test(x) && !SUBMIT_DENY.test(x);
+  if (!text) return name && ok(name) ? "conflict" : "no";
+  if (SUBMIT_DENY.test(text) || (name && SUBMIT_DENY.test(name))) return ok(text) || (name && list.test(name)) ? "conflict" : "no";
+  if (name && name !== text && ok(text) !== ok(name)) return "conflict";
+  return ok(text) ? "yes" : "no";
+}
+//  - isApplicationForm: a form may be given the person's data only on positive evidence that it is the application: a resume / CV
+//    upload, or a name question AND an email question AND one more application question (phone, cover letter, work
+//    authorisation, experience, ...). And never against contrary evidence: a password box, or the words of a contact, demo,
+//    newsletter, talent-community, job-alert, search, sign-in, returning-candidate, refer-a-friend or feedback form in its
+//    headings, buttons, address (`head`) or its labels and placeholders (`labels`).
+const NOT_APP_HEAD = /contact us|talk to sales|(request|book|get) a demo|newsletter|subscribe|talent (community|network|pool)|job alerts?|returning candidate|already have an account|refer a (friend|colleague|candidate)|\brefer\b|feedback|was this (page )?helpful|\bsign ?in\b|\blog ?in\b|\blogin\b|\bsearch\b|find jobs/i;
+const NOT_APP_LABEL = /contact us|(request|book|get) a demo|returning candidate|refer a (friend|colleague)|keyword|search (jobs|roles|positions|openings)/i;
+const Q_NAME = /(?<!user|company|file)[ _-]?name\b|vorname|nachname|pr[ée]nom|\bnom\b|nombre|apellido|naam|navn|namn|nimi|imi[eę]|nazwisko|vardas|v[āa]rds|jm[ée]no|cognome/i;
+const Q_RESUME = /resume|r[ée]sum[ée]|\bcv\b|curriculum|lebenslauf|vita\b/i;
+const Q_MORE = /phone|telefon|mobile|\btel\b|cover|anschreiben|motivation|authori[sz]|sponsor|visa|right to work|experience|erfahrung|linkedin|portfolio|website|salary|notice period|start date|location|city/i;
+// `own`: what the form's own Submit adds (pickControls): 1 when it passes controlLabel, 2 when its words also name the application
+// ("Submit application", "Apply now", "Bewerbung absenden"). The coordinator's rule asks for name AND email AND one more
+// application question; the repo's own recorded forms include boards whose first step asks only name and email (Personio,
+// Recruitee, Teamtailor) and forms with an email and the employer's questions under "Submit application", so the form's own
+// Submit stands in for the third question (own 1 beside a name and an email; own 2 beside an email). STRICT_EVIDENCE = true
+// drops that and holds the rule to the letter.
+const STRICT_EVIDENCE = false;
+const NAMES_APPLICATION = /appl|bewerb|sollicit|candidat|postul|ans[öo]k|s[øo]k|hakemu/i;
+function isApplicationForm(form = [], own = 0) {
+  const f = Array.isArray(form) ? { fields: form } : form, fields = f.fields || [];
+  if (f.password || fields.some((x) => x.type === "password") || NOT_APP_HEAD.test(`${f.head || ""} ${f.action || ""}`) || NOT_APP_LABEL.test(f.labels || "") || fields.some((x) => x.type === "search")) return false;
+  const files = fields.filter((x) => x.type === "file"), has = (re) => fields.some((x) => re.test(x.hint || ""));
+  if (files.some((x) => Q_RESUME.test(x.hint || "")) || files.length === 1) return true;
+  const email = fields.some((x) => x.type === "email" || /e-?mail/i.test(x.hint || "")), more = files.length > 0 || fields.some((x) => x.type === "tel") || has(Q_MORE);
+  if (STRICT_EVIDENCE) return has(Q_NAME) && email && more;
+  return email && ((has(Q_NAME) && (more || own >= 1)) || own >= 2);
+}
 function pickControls(snap) {
   const none = { form: null, submit: null, next: null, refuse: null };
   const ctl = (snap.controls || []).filter((c) => !c.signin);
   const forms = (snap.forms || []).map((f, i) => ({ ...f, i })).filter((f) => f.hasControl && !f.signin);
+  // The application lives in a frame of this page (an ATS's embedded form): no form of the parent page is the application.
+  if (snap.frameApp) return { ...none, refuse: "application_in_frame" };
   // `was`: this run already took the form as the application (a board that swaps the upload's input for a chip once the resume is set).
-  const apps = forms.filter((f) => f.was || isApplicationForm(f.fields));
-  const typed = (c) => (c.tag === "BUTTON" && (c.type === "submit" || c.type === "")) || (c.tag === "INPUT" && c.type === "submit");
+  const ownSubmit = (f) => Math.max(0, ...ctl.filter((c) => c.form === f.i && c.vis && controlLabel(c) === "yes").map((c) => (NAMES_APPLICATION.test(c.text) ? 2 : 1)));
+  const apps = forms.filter((f) => f.was || isApplicationForm(f, ownSubmit(f)));
   for (const f of apps) {
-    const own = ctl.filter((c) => c.form === f.i && c.vis), t = own.filter(typed), declared = t.filter((c) => c.type === "submit"), worded = own.filter((c) => SUBMIT_WORD.test(c.text));
-    // A control the form itself declares its Submit (type="submit") is preferred over a button with no type beside it.
-    const pick = worded.length === 1 ? worded[0] : t.length === 1 ? t[0] : worded.find((b) => t.includes(b)) || (declared.length === 1 ? declared[0] : null);
-    if (pick && !NOT_APPLICATION.test(pick.text)) return { ...none, form: f.i, submit: pick.c };
+    const own = ctl.filter((c) => c.form === f.i && c.vis), labels = own.map((c) => controlLabel(c)), cands = own.filter((c, i) => labels[i] === "yes");
+    if (labels.includes("conflict")) return { ...none, refuse: "ambiguous_submit" };
+    if (cands.length === 1) return { ...none, form: f.i, submit: cands[0].c };
+    // Two or more Submit-worded controls in one form: only when exactly one is the form's declared Submit and it is the last of them.
+    const declared = cands.filter((c) => c.type === "submit" && (c.tag === "BUTTON" || c.tag === "INPUT"));
+    if (cands.length > 1) { if (declared.length === 1 && declared[0] === cands[cands.length - 1]) return { ...none, form: f.i, submit: declared[0].c }; return { ...none, refuse: "ambiguous_submit" }; }
   }
   // A form shown in steps (Breezy): one visible "Continue" (not a submit, so pressing it posts nothing) with the form's Submit
   // drawn but hidden until the last step. Two such controls, a submit-typed one, or no hidden Submit beside it: not a step form.
   for (const f of apps) {
-    const mine = ctl.filter((c) => c.form === f.i && c.inside), nexts = mine.filter((c) => c.vis && NEXT_WORD.test(c.text));
-    const hiddenSubmit = mine.some((c) => !c.vis && (c.tag === "BUTTON" || c.tag === "INPUT") && PLAIN_SUBMIT.test(c.text));
+    const mine = ctl.filter((c) => c.form === f.i && c.inside), nexts = mine.filter((c) => c.vis && controlLabel(c, NEXT_WORD) === "yes");
+    const hiddenSubmit = mine.some((c) => !c.vis && (c.tag === "BUTTON" || c.tag === "INPUT") && PLAIN_SUBMIT.test(c.text) && !LI_INDEED.test(c.blob || ""));
     if (nexts.length === 1 && hiddenSubmit && nexts[0].type !== "submit" && (nexts[0].tag !== "BUTTON" || nexts[0].type === "button")) return { ...none, form: f.i, next: nexts[0].c };
   }
   const loose = ctl.filter((c) => c.vis && c.form < 0 && SUBMIT_WORD.test(c.text));
-  if (!forms.length) return isApplicationForm(snap.loose) && loose.length === 1 ? { ...none, form: -1, submit: loose[0].c } : none;
+  if (!forms.length) { const yes = ctl.filter((c) => c.vis && c.form < 0 && controlLabel(c) === "yes"); return isApplicationForm({ fields: snap.loose, head: snap.head }) && loose.length === 1 && yes.length === 1 ? { ...none, form: -1, submit: yes[0].c } : none; }
   // The one exception (BambooHR, D-072: its Submit is drawn just outside its one form): outsideSubmitOf, every condition or none.
   const tied = outsideSubmitOf(snap, forms, ctl);
   if (tied) return { ...none, form: tied.form, submit: tied.submit, outside: true };
-  if (apps.length && loose.length) return { ...none, refuse: "submit_not_tied_to_form", opener: loose.every((c) => APPLY_TEXT.test(c.text) && !NEVER_CLICK.test(c.text)) };
+  // An outside control in the Apply words is opened (once) only when it is a link of the page; a button beside an application
+  // form that is already there is never pressed.
+  // (Any form that asks more than an email counts here, so the refusal names the real reason; nothing is filled either way.)
+  const near = forms.filter((f) => apps.includes(f) || (f.fields || []).some((x) => x.type === "file") || ((f.fields || []).length >= 2 && f.fields.some((x) => !["email", "checkbox", "search"].includes(x.type))));
+  if (near.length && loose.length) return { ...none, refuse: "submit_not_tied_to_form", opener: loose.every((c) => (c.link || c.tag === "A") && APPLY_TEXT.test(c.text) && !NEVER_CLICK.test(c.text) && !LI_INDEED.test(c.blob || "")) };
   return none;
 }
 // Review of #797, follow-up: a Submit drawn outside the form is that form's Submit only when ALL of this holds; anything else stays
@@ -309,12 +364,12 @@ function outsideSubmitOf(snap, forms, ctl) {
   const f = forms[0], fields = f.fields || [];
   const who = fields.some((x) => x.type === "email" || /(?<!user)name|e-?mail/i.test(x.hint || ""));
   const questions = fields.filter((x) => !["email", "checkbox", "search"].includes(x.type)).length;
-  if (!who || !(fields.some((x) => x.type === "file") || questions >= 2)) return null;
+  if (!who || !(fields.some((x) => x.type === "file") || questions >= 2) || (!f.was && !isApplicationForm({ ...f, fields: [...fields, { type: "tel", hint: "" }] }))) return null;
   const like = (c) => c.vis && (SUBMIT_WORD.test(c.text) || (c.tag === "BUTTON" && (c.type === "submit" || c.type === "")) || (c.tag === "INPUT" && c.type === "submit"));
   const out = ctl.filter((c) => c.form < 0 && like(c));
   if (out.length !== 1 || ctl.some((c) => c.form === f.i && like(c))) return null;
   const b = out[0];
-  if (b.link || !OUTSIDE_LABEL.test(b.text) || b.gap !== 0 || !(b.sameBox || b.follows)) return null;
+  if (b.link || !OUTSIDE_LABEL.test(b.text) || controlLabel(b) !== "yes" || b.gap !== 0 || !(b.sameBox || b.follows)) return null;
   return { form: f.i, submit: b.c };
 }
 // Page side: every form (its questions as { type, hint }, shadow roots included), the fields outside every form, and every control
@@ -326,17 +381,26 @@ function SNAP() {
   const isField = (i) => !["hidden", "submit", "button", "image", "reset"].includes(i.type);
   const field = (i) => ({ type: i.type || "", hint: squash(`${(i.labels && i.labels[0] && i.labels[0].innerText) || ""} ${i.getAttribute("aria-label") || ""} ${i.placeholder || ""} ${i.name || ""} ${i.id || ""} ${i.autocomplete || ""}`).slice(0, 240) });
   const forms = [...document.querySelectorAll("form")];
+  // What a control says to a person (text), to assistive technology (aria: aria-label, aria-labelledby, title), and everything it
+  // carries that can name where it leads (blob: both, its address, its form's address, its data attributes, its images' alt).
+  const aria = (b) => squash(b.getAttribute("aria-label") || (b.getAttribute("aria-labelledby") || "").split(/\s+/).map((id) => (document.getElementById(id) || {}).innerText || "").join(" ") || b.getAttribute("title") || "");
+  const blob = (b) => squash([b.innerText || b.value, aria(b), b.getAttribute("href"), b.getAttribute("formaction"), b.name, b.id,
+    ...[...b.attributes].filter((a) => a.name.startsWith("data-") && !a.name.startsWith("data-upmore")).map((a) => `${a.name}=${a.value}`), ...[...b.querySelectorAll("img, svg")].map((i) => `${i.getAttribute("alt") || ""} ${i.getAttribute("aria-label") || ""} ${i.getAttribute("src") || ""}`)].join(" ")).slice(0, 600);
+  // A form's own words: its headings, legends and buttons and the heading just before it (head); its labels and placeholders (labels).
+  const head = (f) => { let h = ""; for (let p = f.previousElementSibling, i = 0; p && i < 2; p = p.previousElementSibling, i++) if (/^H[1-6]$/.test(p.tagName)) { h = p.innerText; break; }
+    return squash([h, f.id, f.getAttribute("name"), f.getAttribute("role"), f.getAttribute("aria-label"), ...[...f.querySelectorAll("h1, h2, h3, h4, h5, h6, legend, button, input[type=submit], [role=button]")].map((e) => e.innerText || e.value)].join(" | ")).slice(0, 800); };
+  const labels = (f) => squash([...f.querySelectorAll("label, [placeholder]")].map((e) => (e.tagName === "LABEL" ? e.innerText : e.getAttribute("placeholder"))).join(" | ")).slice(0, 1500);
   const controls = [...document.querySelectorAll("button, [role=button], input[type=button], input[type=submit]")].map((b, c) => {
     b.setAttribute("data-upmore-c", String(c));
     const f = b.form || b.closest("form"), one = forms.length === 1 ? forms[0] : null;
     // Where an outside control sits against the page's one form (outsideSubmitOf): after it in the page's order, in its container,
     // and how many fields outside the form lie between the two (or share that container).
     const follows = !f && !!one && !!(one.compareDocumentPosition(b) & 4), sameBox = !f && !!one && one.parentElement !== document.body && one.parentElement.contains(b);
-    const gap = f || !one ? 0 : deep(document.body, "input, select, textarea, [role=search]").filter((i) => i.type !== "hidden" && !one.contains(i)
+    const gap = f || !one ? 0 : deep(document.body, "input, select, textarea, [role=search], [contenteditable=true], [contenteditable='']").filter((i) => i.type !== "hidden" && !one.contains(i)
       && ((sameBox && one.parentElement.contains(i)) || (follows && (one.compareDocumentPosition(i) & 4) && (i.compareDocumentPosition(b) & 4)))).length;
-    return { c, follows, sameBox, gap, link: b.tagName === "A" || b.hasAttribute("href") || b.getAttribute("role") === "link", form: f ? forms.indexOf(f) : -1, inside: !!b.closest("form"), vis: vis(b), text: squash(b.innerText || b.value).slice(0, 120), tag: b.tagName, type: (b.getAttribute("type") || "").toLowerCase(), signin: !!b.closest("[data-upmore-signin]") };
+    return { c, aria: aria(b), blob: blob(b), disabled: !!b.disabled || b.getAttribute("aria-disabled") === "true", follows, sameBox, gap, link: b.tagName === "A" || b.hasAttribute("href") || b.getAttribute("role") === "link", form: f ? forms.indexOf(f) : -1, inside: !!b.closest("form"), vis: vis(b), text: squash(b.innerText || b.value).slice(0, 120), tag: b.tagName, type: (b.getAttribute("type") || "").toLowerCase(), signin: !!b.closest("[data-upmore-signin]") };
   });
-  return { controls, forms: forms.map((f) => ({ signin: f.hasAttribute("data-upmore-signin"), was: f.hasAttribute("data-upmore-app-seen"), hasControl: !!f.querySelector("input, select, textarea"), fields: deep(f, "input, select, textarea").filter(isField).map(field) })),
+  return { controls, head: squash([...document.querySelectorAll("h1, h2, h3")].map((e) => e.innerText).join(" | ")).slice(0, 400), forms: forms.map((f) => ({ head: head(f), labels: labels(f), action: f.getAttribute("action") || "", password: !!f.querySelector("input[type=password]"), signin: f.hasAttribute("data-upmore-signin"), was: f.hasAttribute("data-upmore-app-seen"), hasControl: !!f.querySelector("input, select, textarea"), fields: deep(f, "input, select, textarea").filter(isField).map(field) })),
     loose: deep(document.body, "input, select, textarea").filter((i) => isField(i) && !i.closest("form") && !i.closest("[data-upmore-signin]")).map(field) };
 }
 // Page side: mark what pickControls chose: the application form (data-upmore-app: the one form ats-fill reads and fills), its
@@ -586,8 +650,13 @@ async function attempt(browser, p, opts, timing) {
       await page.evaluate(MARK_SIGNIN).catch(() => 0);
       const snap = await page.evaluate(SNAP);
       // Forms in the page's other frames (a captcha provider's own frame is not the page's): a frame that cannot be read counts as one.
+      // A frame that holds a form with an upload or three or more questions holds the application (frameApp): the parent's forms are never filled.
       snap.otherFrameForms = 0;
-      for (const f of page.frames()) if (f !== page.mainFrame() && !/recaptcha|hcaptcha|challenges\.cloudflare\.com|turnstile/i.test(f.url())) snap.otherFrameForms += await f.evaluate(() => document.forms.length).catch(() => 1);
+      for (const f of page.frames()) {
+        if (f === page.mainFrame() || /recaptcha|hcaptcha|challenges\.cloudflare\.com|turnstile/i.test(f.url())) continue;
+        const n = await f.evaluate(() => [document.forms.length, [...document.forms].some((x) => x.querySelector("input[type=file]") || x.querySelectorAll("input:not([type=hidden]), select, textarea").length >= 3)]).catch(() => [1, false]);
+        snap.otherFrameForms += n[0]; if (n[1]) snap.frameApp = true;
+      }
       lastPick = pickControls(snap);
       await page.evaluate(MARK, lastPick);
       return lastPick;
@@ -864,4 +933,4 @@ async function runPool(browser, payloads, opts = {}) {
   return { results, wallMs: Date.now() - started, concurrency };
 }
 
-module.exports = { checkGate, pickControls, outsideSubmitOf, isApplicationForm, submitTieRefusal, sentToJobList, SNAP, MARK, CONTROLS, closedOnPage, declineCookies, samePostingRedirect, followedPageRefusal, postingIds, CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };
+module.exports = { controlLabel, SUBMIT_DENY, checkGate, pickControls, outsideSubmitOf, isApplicationForm, submitTieRefusal, sentToJobList, SNAP, MARK, CONTROLS, closedOnPage, declineCookies, samePostingRedirect, followedPageRefusal, postingIds, CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };

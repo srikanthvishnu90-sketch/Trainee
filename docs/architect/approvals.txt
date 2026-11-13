@@ -341,3 +341,8 @@
 754 5ed9829a427b6dd4b688b5b9522f53f2b06bf4bb architect-review-r11 risk=medium note=WO-123-the-intelligence-loop-as-a-work-order-with-its-pending-acceptan-scope-tests-assertion-diff-rulings-and-full-ci-reviewed-not-line-by-line
 755 1a85b6058da4269f7adfb5b4f5b0f7c24e593bd5 architect-review-r11 risk=medium note=S3-owner-ruling-D-056-for-release-11-every-pass-95-bound-to-deployed-7-scope-tests-assertion-diff-rulings-and-full-ci-reviewed-not-line-by-line
 756 02fb8dc06fcb11d2c8f88b1e4aaf22f017265322 owner-release-approval risk=high note=release-11-118-prs-since-release-9-items-2-to-9-evidence-in-VERIFICATION-15-S3-under-D-056
+798 3f7a59995aae9fbba6175f4a8c229e54dac9b040 independent-review-20261113 risk=high note=file-ask-reader-and-files-reachable-reviewed-by-a-separate-reviewer-at-this-head-approved-its-opt-out-misrouting-finding-fixed-forward-in-805
+799 29db4d6e8d23194a2f024151eb618acbd64f3082 independent-review-20261113 risk=high note=erase-of-approved-versions-migration-and-writer-keys-final-review-approve-at-this-head-open-note-router-tailor-with-company-but-no-job-id-keys-on-company
+800 9fb065805a300aaf8d33e4fe6827283246ae97ef independent-review-20261113 risk=high note=hand-off-re-check-claim-guard-and-locked-rollback-final-review-approve-at-this-head-open-notes-click-time-yes-check-only-in-worker-and-no-concurrent-done-test
+802 288aa3e43dfd8d1dad75358ff23c529c301b4fe1 independent-review-20261113 risk=medium note=D-074-budget-80-total-reviewed-at-this-head-approved-doc-finding-fixed-in-806
+805 17fdf43d97ad6798d1afb849c348549f7d76198d independent-review-20261113 risk=high note=file-ask-allowlist-rebuild-two-adversarial-reviews-before-merge-at-this-head-approved-low-severity-leftovers-recorded

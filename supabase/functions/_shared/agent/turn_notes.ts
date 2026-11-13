@@ -356,15 +356,27 @@ export function placeBeside(para: string, figure: string): string | null {
   const line = flat.split("\n").find((x) => figure && x.includes(figure)) ?? "";
   const at = line.indexOf(figure) + Math.max(0, figure.search(/\$\s?\d/)), onLine = placesIn(line);
   if (onLine.length) return onLine.sort((a, b) => Math.abs(a.at - at) - Math.abs(b.at - at))[0].place;
-  return all.length === 1 ? all[0] : null;
+  if (all.length !== 1) return null;
+  // 2026-11-13 (review of #801: "Stripe SWE Intern, Chicago, IL: no pay listed." then "PayPal SWE Intern: pay is $28-$49 hourly."
+  // gave PayPal's pay Stripe's city): the paragraph's one place, on another line, is the figure's only when the figure's own line
+  // names no one that the place's line does not (any capitalised or all-capitals word that is not a common first word).
+  const placed = (flat.split("\n").find((x) => x.includes(all[0])) ?? "").toLowerCase();
+  const names = (line.match(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}\p{N}'&.-]*/gu) ?? []).filter((w) => !LINE_STARTER.test(w));
+  return names.every((w) => placed.includes(w.toLowerCase().replace(/[.']+$/, ""))) ? all[0] : null;
 }
+const LINE_STARTER = /^(?:The|A|An|For|In|At|On|It|Its|That|This|Their|There|Here|Pay|Base|Hourly|Salary|Compensation|Posted|Listed|Stated|Range|Annual|USD|US)$/;
 export function shownPayPlaces(message: string, history: Msg[]): { text: string; url: string | null; place: string | null }[] {
   const lines = shownPayOf(message, history);
   const paras = (history ?? []).filter((m) => m?.role === "assistant" && typeof m.content === "string").flatMap((m) => (m.content as string).split(/\n\s*\n/));
   return lines.map((l) => {
     const para = paras.find((x) => x.replace(/https?:\/\/\S+/g, " ").includes(l.text)) ?? "";
+    // 2026-11-13 (review of #801; a missing place is acceptable, a wrong one is not). No city is taken when the line speaks of the
+    // person ("Since you live in Madison, Wisconsin, ... pay is $40 hourly" is not Madison's pay), or when its paragraph says the
+    // role is remote (the head office named beside a remote role is not where its pay applies).
+    if (/\b(?:you|your|you['’]re|my|our)\b/i.test(l.text)) return { ...l, place: null };
+    if (/\bremote\b/i.test(para) || /\bremote\b/i.test(l.text)) return { ...l, place: /\bremote\b/i.test(l.text) && !PLACE_IN.test(l.text) ? "remote" : null };
     const own = PLACE_IN.exec(l.text)?.[0] ?? null, near = own ? null : placeBeside(para, l.text);
-    return { ...l, place: own ?? near ?? (/\bremote\b/i.test(l.text) ? "remote" : null) };
+    return { ...l, place: own ?? near };
   });
 }
 export function shownPayNote(lines: { text: string; url: string | null }[]): string {

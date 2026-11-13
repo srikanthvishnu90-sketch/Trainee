@@ -53,6 +53,11 @@ test("148 contact: the same check reads a file's own text (the submit gates hold
   assert.deepEqual(top("casey.rivers@gmail.com | (415) 867-5309"), [], "the body below the first heading is not the contact");
   assert.deepEqual(top("you@example.com").map((x) => x.field), ["email"]);
   assert.deepEqual(top("casey.rivers@gmail.com | (555) 555-5555").map((x) => x.field), ["phone"]);
-  assert.deepEqual(top("Chicago, IL").map((x) => x.field), ["email"], "no email at the top: the only one in the file is a placeholder");
-  assert.deepEqual(Render.fileContactProblems(["Casey Rivers", "Chicago, IL", "EXPERIENCE", "Built pipelines"]).map((x) => [x.field, x.why]), [["email", "missing"]]);
+  // Round 3: a file gate refuses only what it read with confidence. No email it can read is "unread" and passes, as on trunk;
+  // an address inside a sentence is not the contact; a differing address is refused only against the confirmed one.
+  assert.deepEqual(top("Chicago, IL"), [], "no contact read: unread, not refused");
+  assert.deepEqual(Render.fileContactProblems(["Casey Rivers", "Chicago, IL", "EXPERIENCE", "Built pipelines"]), []);
+  assert.deepEqual(Render.fileContactRead(["Casey Rivers", "Chicago, IL", "EXPERIENCE", "Built pipelines"]).status, "unread");
+  assert.deepEqual(top("other.person@gmail.com").map((x) => x.field), [], "nothing to compare with");
+  assert.deepEqual(Render.fileContactProblems(["Casey Rivers", "other.person@gmail.com", "EXPERIENCE"], { confirmed: ["casey.rivers@gmail.com"] }).map((x) => x.why), ["not the email they confirmed (casey.rivers@gmail.com)"]);
 });

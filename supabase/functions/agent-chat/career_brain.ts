@@ -226,9 +226,12 @@ export async function agentTurn(o: {
   // stands on a lookup. When the model made none, code reads the record itself (the same read-only tool), on any turn, whatever
   // else it did; what is then said about their applications is code's (applicationsEnforced, at the end of the turn).
   const lookTool = tools.find((t) => t.name === "read_application_mail");
+  // Round 5: a turn that asks to edit, rewrite or draft text (a resume line, a bullet, a checklist, a letter) and does not also ask
+  // about their applications gets no lookup, and its text loses no sentence.
+  const editTurn = EDIT_ASK.test(String(o.message ?? "")) && !statusQuestion(o.message);
   let codeRan = false;
   // A turn that stopped unfinished still gets the read when they asked: code's statement then answers it.
-  if (!appHypo && lookTool && result.reply && !lookupOf(result.tool_calls ?? []).tried && ((result.stopped === "final" || result.stopped === "incomplete_reply") && statusQuestion(o.message) || (result.stopped === "final" && !result.show && statusLike(result.reply)))) {
+  if (!appHypo && !editTurn && lookTool && result.reply && !lookupOf(result.tool_calls ?? []).tried && ((result.stopped === "final" || result.stopped === "incomplete_reply") && statusQuestion(o.message) || (result.stopped === "final" && !result.show && statusLike(result.reply)))) {
     codeRan = true;
     const out: any = await Promise.resolve().then(() => lookTool.run({}, ctx)).catch(() => null);
     result = { ...result, tool_calls: [...(result.tool_calls ?? []), { name: lookTool.name, ok: !!out, effect: "read" as const, ...(out ? {} : { error: "the record could not be read" }) }] };
@@ -386,7 +389,8 @@ export async function agentTurn(o: {
   // the status is stated by code from its result and the model's own status sentences go; with none, a denial is held. A payload
   // being shown is never touched: what code states goes after it.
   const looked = lookupOf(result.tool_calls ?? [], (ctx.turn as any)?.record);
-  if (!appHypo && result.reply) {
+  if (editTurn && result.reply && !result.show && !lookupOf(result.tool_calls ?? []).tried && saysNoApplications(result.reply)) result = { ...result, reply: `${result.reply.trimEnd()}\n\n${coverageLine(lookupOf([]))}` };
+  else if (!appHypo && !editTurn && result.reply) {
     const held = result.show ? (looked.tried && statusQuestion(o.message) ? `${result.reply.trimEnd()}\n\n${coverageLine(looked)}` : result.reply) : applicationsEnforced(result.reply, looked, { message: o.message, codeRan });
     if (held !== result.reply) result = { ...result, reply: held, flags: [...new Set([...(result.flags ?? []), looked.ok ? "applications_basis" : "applications_unconfirmed"])] };
   }
@@ -615,7 +619,7 @@ export function lookupOf(calls: { name: string; ok: boolean }[], record?: LookRe
   return { tried: mine.length > 0, ok: status === "complete", status, what: ran && record && status !== "complete" ? record.could_not_read : [], read: ran ? record?.read ?? [] : [], found: ran ? record?.found ?? [] : [], nomail: ran && !!record?.nomail };
 }
 // Round 2 (structural, not by phrasing): does this text touch the status of the person's applications at all?
-const APP_STATUS = /\bappl(?:ied|ications?)\b|\b(?:did|do|does|didn'?t)\s+i\s+(?:\w+\s+)?apply\b|\bsubmi(?:tted|ssions?)\b|\bsent\s+(?:in|out)\b|\btracker\b|\bin\s+flight\b|\bon\s+(?:record|file)\b|\bheard\s+back\b|\breject(?:ed|ions?)\b|\banywhere\s+(?:yet|else|new)\b|\b(?:yet|need|still)\s+to\s+apply\b|\bnot\s+appl|\bapps\b|\bpipeline\b|\bapl+(?:ied|y|ication)|\bapplyed\b|\bmy\s+apps?\b|\bapp\s+(?:count|status)\b|\bpostul\w*|\bsolicitud\w*|\bcandidat(?:ure|ura|ei|é)\w*|\bbeworben\b|\bbewerbung\w*|\bapply\s+kiya\b|आवेदन/i;
+const APP_STATUS = /\bappl(?:ied|ications?)\b|\b(?:did|do|does|didn'?t)\s+i\s+(?:\w+\s+)?apply\b|\bsubmi(?:tted|ssions?)\b|\bsent\s+(?:in|out)\b|\bin\s+flight\b|\bon\s+(?:record|file)\b|\bheard\s+back\b|\breject(?:ed|ions?)\b|\banywhere\s+(?:yet|else|new)\b|\b(?:yet|need|still)\s+to\s+apply\b|\bnot\s+appl|\bapps\b|\byour\s+(?:tracker|pipeline)\s+(?:is|has|shows|looks|holds)\b|\bapl+(?:ied|y|ication)|\bapplyed\b|\bmy\s+apps?\b|\bapp\s+(?:count|status)\b|\bpostul\w*|\bsolicitud\w*|\bcandidat(?:ure|ura|ei|é)\w*|\bbeworben\b|\bbewerbung\w*|\bapply\s+kiya\b|आवेदन/i;
 const tidy = (t: string) => String(t ?? "").replace(/[’‘`]/g, "'");
 // A condition is not a statement of status ("If you hadn't applied anywhere, I'd start with three a week.").
 export function touchesApplications(text: string): boolean { return APP_STATUS.test(tidy(text).replace(/\b(?:if|suppose|supposing|unless|whether)\b[^,;:.!?]*/gi, " ")); }
@@ -627,6 +631,7 @@ export function realApplicationsAsk(message: string): boolean { const t = tidy(m
 // typos and the core words in Spanish, French, German, Portuguese and Hindi. Wording coverage is partial by nature.
 const STATUS_ASK = /^\W*(?:status|staus)\W*$|\b(?:(?:my|application|app)\s+(?:status|staus)|(?:status|staus)\s+of\s+my\s+(?:app|application)|(?:anything|what'?s)\s+pending(?!\s+(?:on|in|for|with)\b)|in\s+flight|heard?\s+back|hear\s+from\s+[a-z]|get\s+back\s+to\s+me|(?:companies|anyone|anybody)\s+(?:responded|replied)|any\s+(?:luck|news|updates?|word)(?!\s+(?:finding|getting|on\s+the|in\s|about\s+(?!my)))|any\s+rejections|where\s+(?:am|are)\s+(?:i|we)\s+(?:at|with)\b|where\s+do\s+(?:i|things)\s+stand|catch\s+me\s+up(?!\s+on\b)|the\s+damage|my\s+name\s+on\s+it|(?:get|got|have|has)\s+my\s+(?:stuff|resume|application)|who\s+have\s+i\s+sent|(?:still\s+in|out\s+of)\s+the\s+running|still\s+alive|interviews?\s+lined\s+up|offer\s+situation|turn(?:ed)?\s+(?:me|you)\s+down|waiting\s+on\s+anyone|job\s+hunt|latest\s+on\s+my|remind\s+me\s+(?:where|which|what)\b[^?.]{0,20}\bi\s+(?:applied|went|did|sent|aplied)|where'?d\s+my\s+(?:applications?|apps?)|my\s+(?:applications?|apps?)\s+end\s+up|did\s+i\s+do\s+the\s+[\w ]{1,20}\s+one|(?:list|count\s+of)\s+my\s+(?:apps|applications)|app\s+count|hit\s+up|shot\s+my\s+shot|how\s+many\s+(?:have|did)\s+i|how\s+many\s+(?:applications|apps|places|companies)\b|how\s+many\s+so\s+far|(?:did|has|have|is|was)\s+(?:my|the|that|it|this)\b[^?.]{0,30}?\b(?:go|get|gone|went|gotten)\s+thr(?:ough|u)\b|go\s+anywhere|get\s+lost|(?:has|did|is)\s+anything\s+(?:gone|go|went)\s+out|send\s+anything\s+to|sent\s+(?:stuff|anything)\s+to|apply\s+kiya)\b|आवेदन/i;
 const NOT_STATUS = /\b(?:calendar|news\s+in|upload|transcript|cover\s+letter|template|resume\s+rewrite|posting\s+link|interview\s+rounds?|leetcode|hours)\b/i;
+export const EDIT_ASK = /\b(?:rewrite|rewrote|write\s+(?:my|me|a|an|the|this|up)\b|re-?word|edit|polish|shorten|tighten|draft|proofread|improve|make\s+(?:my|this|it|the)\b[^?.]{0,30}\b(?:sound|shorter|longer|stronger)|give\s+me\s+a\s+(?:checklist|template|list|sample)|checklist|bullet|cover\s+letter|this\s+line)\b/i;
 export function statusQuestion(message: string): boolean {
   const all = tidy(message), real = all.split(/(?<=[.!?])\s+|\n+/).filter((x) => !/^\W*(?:if|suppose|supposing|imagine|hypothetically|what\s+if|say)\b/i.test(x) || /\b(?:have|did|has)\s+(?:i|anything)\b[^,]*\?\s*$/i.test(x));
   if (real.some((x) => realApplicationsAsk(x))) return true;
@@ -642,11 +647,15 @@ export function statusQuestion(message: string): boolean {
 // empty", "only Acme"); or a quantity said of the person. What Trainee itself did not send is not one ("Nothing was sent.").
 const IDIOM = /\bgone\s+out\b|\bclean\s+slate\b|\bso\s+far\b|\b(?:at|from|still\s+at)\s+(?:zero|none|square\s+one)\b|\bzero\s+sent\b|\bzilch\b|\bzip\b|\bstarting\s+(?:fresh|from\s+scratch)\b|\bfrom\s+scratch\b|\b(?:board|list|slate|queue)\s+is\s+(?:bare|empty|blank|clear)\b|\bnot\s+a\s+single\b|\bwhole\s+list\b|\bon\s+(?:the|your)\s+list\b|\bhave\s+your\s+resume\b|\b(?:never\s+)?went\s+through\b|\bfirst\s+(?:one|application)\b|\bnothing\s+from\s+you\b|\b(?:[Oo]nly|[Jj]ust)\s+(?-i:[A-Z])[a-z]+\b/i;
 const OF_YOU = /\byou(?:'re|'ve|r)?\b[^.!?]{0,40}\b(?:zero|none|nothing|nobody|no\s+one|only\s+one|anything\s+in|empty)\b|\b(?:zero|none|nothing|nobody)\b[^.!?]{0,30}\byou(?:r)?\b/i;
+// Round 5: the person's own applications only. "Applied" opening a resume line ("Applied ML to churn"), quoted text, and the
+// application words with no "you/your/I/my" in the sentence are not a statement of their status.
+const PERSON = /\b(?:you|your|you've|you're|you'd|u|i|i've|i'm|my|me)\b/i;
 export function statusLike(text: string): boolean {
   return tidy(text).split(/(?<=[.!?])\s+|\n+/).some((x) => {
-    const c = x.replace(NOTHING_SENT_I, " ");
+    const c = x.replace(BULLET, "").replace(/^\W*(?:try|rewrote\s+it|here'?s?)?\s*:?\s*Applied\s+(?!to\b|for\b|anywhere\b)/, " ").replace(/"[^"]*"|'[^']{4,}'/g, " ").replace(NOTHING_SENT_I, " ");
     if (!c.trim() || POLICY.test(c.toLowerCase()) || TRAINEE_DID_NOT.test(c.toLowerCase())) return false;
-    return touchesApplications(c) || IDIOM.test(c) || OF_YOU.test(c) || saysNoApplications(c);
+    const mine = PERSON.test(c) || /\b[A-Z][a-z]+\b[^.]{0,20}\bappl(?:ied|ication)\b/.test(c.replace(/^\W*\w+/, ""));
+    return (mine && touchesApplications(c)) || IDIOM.test(c) || OF_YOU.test(c) || saysNoApplications(c);
   });
 }
 const listed = (xs: string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}` : xs[0] ?? "");

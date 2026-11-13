@@ -167,7 +167,7 @@ export function saveRefusal(text: string, message: string, kind = ""): string | 
   const asking = statementsOf(msg).asking;
   const clauses: { text: string; neg: boolean; coarse?: boolean }[] = [];
   const sentences = msg.split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
-  const SPLIT = String.raw`,\s+|;\s+|\s+[-–—]\s+|\s+(?:but|though|although)\s+|\s+and\s+(?=(?:i|i'm|im|i've|my|we|he|she|they|not|never)\b|[a-z]+(?:ed|ing)\b)`;
+  const SPLIT = String.raw`,\s+|;\s+|\s+[-–—]\s+|\s+(?:but|though|although)\s+|\s+and\s+(?=(?:i|i'm|im|i've|my|we|he|she|they|not|never|won'?t|cannot|don'?t|didn'?t|isn'?t|wasn'?t|will\s+not|do\s+not|am\s+not|no\s+longer)\b|[a-z]+(?:ed|ing)\b)`;
   sentences.forEach((sentence, si) => {
     // Taken back later in the message: nothing before the retraction stands.
     if (sentences.slice(si + 1).some((x) => S_RETRACT.test(x)) || sentence.split(/,\s+/).slice(1).some((x) => S_RETRACT.test(x))) return;

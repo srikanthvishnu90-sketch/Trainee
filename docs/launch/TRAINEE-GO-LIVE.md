@@ -119,7 +119,7 @@ Function secrets are project-wide in Supabase: every function sees every one.
 the deployed code, not a secret. `CAREER_REPLY_MODEL` and `CAREER_MODEL` cannot move it (any other value is ignored and
 logged once); unset them if they are still set. There is no per-person AI cap: `CAREER_MODEL_DAILY_USD` and
 `CAREER_MODEL_DAILY_CALLS` are ignored (logged once while set; `supabase secrets unset CAREER_MODEL_DAILY_USD
-CAREER_MODEL_DAILY_CALLS --project-ref <ref>` removes the log line). The global model budget still stops every call at the $70
+CAREER_MODEL_DAILY_CALLS --project-ref <ref>` removes the log line). The global model budget still stops every call at the $80
 total (`MODEL_BUDGET_TARGET_USD` / `MODEL_BUDGET_HARD_USD`; `MODEL_BUDGET_PAUSED=on` stops all model calls at once), and the
 reply then says the AI budget is used up. Sonnet 5.5 is $2 / $10 per million input / output tokens (about 20 times Haiku
 5.5), so a typical brain turn is estimated at $0.03 to $0.09 before prompt caching.

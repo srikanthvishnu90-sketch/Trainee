@@ -58,9 +58,14 @@ export function stripSecrets(reply: string): string {
 // CLAUDE.md): a sentence that asks the person to send, share, type or give a password, passcode, one-time or verification code,
 // PIN, API key, token or login credentials in this chat. A sentence that says not to ("never send your password here") or points to
 // signing in themselves asks for nothing.
-const CRED = /\b(?:password|passcode|passwd|one[- ]time (?:code|password|passcode)|otp|verification code|security code|2fa code|two[- ]factor code|login code|sms code|pin(?: code| number)?|api key|access token|token|login (?:details|credentials|info)|credentials|username and password)\b/i;
-const CRED_ASK = /\b(?:send|share|give|tell|text|type|paste|enter|provide|drop|forward|reply with|dm)\b(?:\s+(?:me|us|it|over|here|in))*[^.!?\n]{0,40}\b(?:your|the|that|this|a)\b[^.!?\n]{0,30}$|\bwhat(?:'s| is| are)\s+(?:your|the)\b[^.!?\n]{0,30}$|\b(?:i(?:'ll)? need|i would need|i'd need|can i (?:get|have))\b[^.!?\n]{0,40}\b(?:your|the)\b[^.!?\n]{0,30}$/i;
-const CRED_NOT = /\b(?:never|don'?t|do not|not|no need|won'?t|shouldn'?t|without)\b|\byourself\b|\bon (?:the|their|its) own (?:page|site)\b/i;
+// Independent review 2026-11-13: "send me the 6-digit code they texted you", "text me the code Workday emailed you" and "send
+// over your login" were missed. A code is a sign-in code when its digits, its kind or where it came from is said; "login" is the
+// sign-in itself unless a page, link or its working is meant. Pointing to a page or site to type it on asks for nothing.
+const CODE_KIND = String.raw`(?:\d+|four|five|six|seven|eight)[- ]digit code|(?:sms|text|texted|email|emailed|confirmation|access|auth|authentication|mfa|sign[- ]?in|log[- ]?in) code|code(?=[^.!?\n]{0,40}\b(?:texted|e-?mailed|sent|send|sends|received|got|get|gets|messaged|arrives?|from (?:the|their|that|your|an?) (?:text|e-?mail|sms|message|app|authenticator))\b)`;
+const LOGIN = String.raw`(?:log[- ]?in|sign[- ]?in)(?:\s+(?:details|credentials|info(?:rmation)?))?(?!\s+(?:page|screen|link|url|portal|button|form|flow|step|issue|problem|error|works?|worked|is|was|goes|went|fails?|failed|succeeds?|attempts?)\b)`;
+const CRED = new RegExp(String.raw`\b(?:password|passcode|passwd|one[- ]time (?:code|password|passcode)|otp|verification code|security code|2fa code|two[- ]factor code|pin(?: code| number)?|api key|access token|token|${CODE_KIND}|credentials|creds|username and password|${LOGIN})\b`, "i");
+const CRED_ASK = /\b(?:send|share|give|tell|text|type|paste|enter|provide|drop|forward|reply with|dm|shoot|message|pass along|let me (?:know|have))\b(?:\s+(?:me|us|it|over|here|in))*[^.!?\n]{0,40}\b(?:your|the|that|this|a)\b[^.!?\n]{0,30}$|\bwhat(?:'s| is| are)\s+(?:your|the)\b[^.!?\n]{0,30}$|\bwhat\s+$|\b(?:i(?:'ll)? need|i would need|i'd need|can i (?:get|have))\b[^.!?\n]{0,40}\b(?:your|the)\b[^.!?\n]{0,30}$/i;
+const CRED_NOT = /\b(?:never|don'?t|do not|not|no need|won'?t|shouldn'?t|without)\b|\byourself\b|\bon (?:the|their|its) own (?:page|site)\b|\b(?:on|into)\s+(?:the\s+|their\s+|its\s+)?(?:[\w-]+(?:'s)?\s+){0,2}(?:page|site|website|portal|form|app|screen|box|field)\b/i;
 export function credentialAsks(reply: string): number[] {
   return pieces(reply).flatMap((p, i) => {
     const t = plainQuotes(p.text), m = CRED.exec(t);

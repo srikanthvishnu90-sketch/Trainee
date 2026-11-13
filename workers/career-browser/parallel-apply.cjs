@@ -637,9 +637,11 @@ function plainAddress(url, want = []) {
 }
 // Round 7 (q6): a hidden field of the form whose value the page changed after load (not a token, not a widget's field the engine
 // set by answering its question) is sent with a value nobody approved: its names.
-function hiddenChangedSinceLoad(atLoad = [], controls = []) {
-  const load = new Map(atLoad.map(([k, v]) => [k, String(v)]));
-  return controls.filter((c) => c.type === "hidden" && !c.touched && c.name && !isOpaqueName(c.name) && load.has(c.name) && load.get(c.name) !== String(c.value ?? "")).map((c) => c.name);
+// A new value that is one of the person's approved answers (an uploader writing the resume's file name into its hidden field) is the
+// page echoing what was filled, not a value of its own.
+function hiddenChangedSinceLoad(atLoad = [], controls = [], approved = []) {
+  const load = new Map(atLoad.map(([k, v]) => [k, String(v)])), ok = new Set(approved.map((v) => String(v)));
+  return controls.filter((c) => c.type === "hidden" && !c.touched && c.name && !isOpaqueName(c.name) && load.has(c.name) && load.get(c.name) !== String(c.value ?? "") && !ok.has(String(c.value ?? ""))).map((c) => c.name);
 }
 const sameOrigin = (a, b) => { try { return new URL(a).origin === new URL(b).origin; } catch { return false; } };
 function submitWindowVerdict(r, s) {
@@ -1243,7 +1245,7 @@ async function attempt(browser, p, opts, timing) {
       if (drifted.length) { const lost = await recheckFilled(page, fr.filled, { facts: p.facts, answers: p.answers || {}, resumePath: p.resume.path }); if (!lost.length) drifted = await driftedFills(page, fr.filled, factsFrom(p.facts || {}, p.answers || {})); } if (drifted.length) { const e = new NeedsUser("field_not_filled", drifted[0]); e.needs = drifted.map((l) => ({ label: l, reason: "value_changed_by_page" })); throw e; } }
     const controls = await readControls();
     // Round 7 (q6): a hidden field the page changed after load is refused, never sent with a value nobody approved.
-    { const changed = hiddenChangedSinceLoad(hiddenAtLoad, controls); if (changed.length) throw new NeedsUser("page_changed_before_submit", changed[0]); }
+    { const changed = hiddenChangedSinceLoad(hiddenAtLoad, controls, fr.filled.map((f) => f.value)); if (changed.length) throw new NeedsUser("hidden_field_changed", changed[0]); }
     const formSnap = await page.evaluate(FORM_SNAP, OPAQUE.source).catch(() => null);
     // Round 4: the pressed control's own name and value are sent with the form: part of what the network guard lets out.
     const sentRows = formSnap ? JSON.parse(formSnap).rows.concat(submitter ? [[submitter.name, submitter.value]] : []) : null;

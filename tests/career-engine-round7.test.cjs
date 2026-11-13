@@ -43,4 +43,5 @@ test("q5/q6: a field outside the approval passes only as a hidden input of the f
   assert.deepEqual(pa.hiddenChangedSinceLoad([["ref_code", "abc"], ["job_id", "1"]], [{ name: "ref_code", type: "hidden", value: "relocate-anywhere", touched: false }, { name: "job_id", type: "hidden", value: "1", touched: false }]), ["ref_code"], "q6");
   assert.deepEqual(pa.hiddenChangedSinceLoad([["authenticity_token", "a"]], [{ name: "authenticity_token", type: "hidden", value: "b", touched: false }]), [], "a token may change");
   assert.deepEqual(pa.hiddenChangedSinceLoad([["cq", ""]], [{ name: "cq", type: "hidden", value: "Yes", touched: true }]), [], "a widget's own field the engine set by answering it");
+  assert.deepEqual(pa.hiddenChangedSinceLoad([["resume_name", ""]], [{ name: "resume_name", type: "hidden", value: "resume.pdf", touched: false }], ["resume.pdf"]), [], "an uploader echoing the approved file's name");
 });

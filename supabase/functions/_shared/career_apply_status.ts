@@ -221,24 +221,21 @@ export function statusReply(message: string, rows: AppRow[] | null, now: number)
   // Item 12: `next`, the one next action for the applications this reply is about; the chat turns say it after the reply.
   return { reply: r.reply, status: r.status, intent: r.intent, summary: applySummary(rows), next: nextAction(r.about) };
 }
-// Review of #785, round 2 (D-024): these answers read Trainee's own queue only, and say so; an application made elsewhere shows
-// only in the person's email, which this path does not read.
-export const OWN_RECORD = " That is Trainee's own record; your email was not checked for this answer.";
 function statusReplyFor(ask: NonNullable<ReturnType<typeof statusAsk>>, rows: AppRow[], now: number): { reply: string; status: string; intent: string; about: AppRow[] } {
   if (ask.latest) {
     const last = [...rows].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))[0];
-    if (!last) return { reply: "I have no application on record for you, so nothing was sent through Trainee." + OWN_RECORD, status: "none", intent: STATUS_INTENT, about: [] };
+    if (!last) return { reply: "I have no application on record for you, so nothing was sent through Trainee.", status: "none", intent: STATUS_INTENT, about: [] };
     return { reply: statusLine(last), status: "shown", intent: STATUS_INTENT, about: [last] };
   }
   if (ask.company) {
     const mine = rows.filter((a) => sameCompany(a.company, ask.company));
     if (!mine.length) {
-      return { reply: `I have no application to ${ask.company} on record, so I can't say it went through. Nothing was sent to ${ask.company} through Trainee.${OWN_RECORD}`, status: "none", intent: STATUS_INTENT, about: [] };
+      return { reply: `I have no application to ${ask.company} on record, so I can't say it went through. Nothing was sent to ${ask.company} through Trainee.`, status: "none", intent: STATUS_INTENT, about: [] };
     }
     return { reply: mine.slice(0, MAX_LISTED).map(statusLine).join("\n"), status: "shown", intent: STATUS_INTENT, about: mine.slice(0, MAX_LISTED) };
   }
   const recent = rows.filter((a) => Date.parse(a.updated_at) >= now - RECENT_DAYS * 86_400_000 || ["queued", "driving", "needs_user"].includes(a.state));
-  if (!recent.length) return { reply: `No applications are on record from the last ${RECENT_DAYS} days: nothing was sent for you through Trainee.${OWN_RECORD}`, status: "none", intent: STATUS_INTENT, about: [] };
+  if (!recent.length) return { reply: `No applications are on record from the last ${RECENT_DAYS} days: nothing was sent for you through Trainee.`, status: "none", intent: STATUS_INTENT, about: [] };
   const more = recent.length > MAX_LISTED ? `\n…and ${recent.length - MAX_LISTED} more.` : "";
   // MASS APPLY (2026-11-01): a batch is summed up first, every application counted by what happened, and the ones waiting
   // on the person listed first, so none of those is ever below the cut. Item 12: an employer's invitation, offer or reply

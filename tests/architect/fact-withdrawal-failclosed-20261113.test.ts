@@ -653,3 +653,56 @@ Deno.test("FW-7 the second review's 80 'or' queries: every alternative whole, no
   eq(OR_REVIEW2.length, 80);
   eq(bad, []);
 });
+
+// ================================================================ ROUND 4 (third review, 2026-11-13)
+import { R as REVIEW3_REPLIES } from "./fixtures/set-aside-replies-review3.ts";
+Deno.test("FW-41 the turn that sets a fact aside never asks to put it back: confirm_profile_fact for that fact is refused, the set-aside stands, and it is said", async () => {
+  const profile = personaProfile(), gpa = (profile.facts as any[]).find((f) => /GPA/.test(String(f.text)));
+  const r: any = await agentTurn({ message: "the 3.9 gpa is outdated", history: [], stores: { profile }, userId: "u-fw", threadId: "th", now: NOW, model: callsConfirm(gpa.id, "Understood.") } as any);
+  eq([gpa.status, gpa.needs_confirmation, !!gpa.withdrawn_by_owner], ["draft", true, true], "the set-aside stands");
+  eq([r.set_aside, r.restore_ask, r.show], [[{ id: gpa.id, text: "GPA: 3.9" }], undefined, undefined]);
+  eq(r.reply, "Set aside, not deleted (no longer used until you say it's right again): GPA: 3.9\n\nUnderstood.");
+  ok(r.tool_calls.some((c: any) => c.name === "confirm_profile_fact" && !c.ok && /just said/.test(String(c.error))), JSON.stringify(r.tool_calls));
+});
+
+Deno.test("FW-42 code's set-aside line removes only what STATES that fact's status or claims nothing changed; questions, forms, postings and next steps stay", async () => {
+  const { setAsideSaid, SET_ASIDE_LINE } = await import("../../supabase/functions/agent-chat/career_brain.ts");
+  const CONTRADICTS = ["I didn't change anything this time.", "Nothing on your record was changed.", "All your facts are still confirmed and in use.", "Your profile is unchanged, and your resume is ready to send as is.", "I kept your GPA 3.9; it was not removed.",
+    "- GPA: removed from use", "Your GPA is still on file and I will keep using it on applications.", "I haven't touched your record; say the word and I'll remove it.", "Got it, GPA off."];
+  const bad: string[] = [];
+  for (const [reply, must] of REVIEW3_REPLIES) {
+    const out = setAsideSaid(reply, ["GPA: 3.9"]);
+    if (!out.startsWith(SET_ASIDE_LINE) || out.split(SET_ASIDE_LINE).length !== 2) bad.push(`not once and first: ${JSON.stringify(out)}`);
+    for (const m of must) if (!out.includes(m)) bad.push(`lost a needed sentence: ${JSON.stringify(m)} from ${JSON.stringify(reply)}`);
+    for (const c of CONTRADICTS) if (reply.includes(c) && out.includes(c)) bad.push(`kept a contradiction: ${JSON.stringify(c)}`);
+  }
+  eq(REVIEW3_REPLIES.length, 30);
+  eq(bad, []);
+});
+
+Deno.test("FW-43 six alternatives: the tool searches them all (each is one database read, no model call); past nine, four at least cover every value", async () => {
+  const q = "python or go or rust engineer in seattle or remote";
+  const search = orSearchFn as (q: string, max?: number) => { queries: string[]; groups: string[][]; not_searched: string[] };
+  eq([search(q, 9).queries.length, search(q, 9).not_searched.length], [6, 0]);
+  const four = search(q);
+  eq([four.queries.length, four.not_searched.length], [4, 2]);
+  for (const v of ["python", "go", "rust", "seattle", "remote"]) ok(four.queries.some((x) => x.split(" ").includes(v)), `${v} is searched: ${JSON.stringify(four.queries)}`);
+  const pool = [{ job_id: "gh:acme:1", company: "Acme", title: "Rust Engineer", location: "Remote", url: "https://boards.greenhouse.io/acme/jobs/1", description: "rust engineer remote", first_seen_at: "2026-11-10T00:00:00Z" }];
+  const tools: any = Object.fromEntries(careerTools({ postings: async (x: string) => { const ws = x.toLowerCase().split(/\s+/); return pool.filter((p: any) => ws.every((w) => `${p.title} ${p.location} ${p.description}`.toLowerCase().split(/\W+/).includes(w))); } } as any).map((t: any) => [t.name, t]));
+  const out = await tools.search_jobs.run({ query: q }, { userId: "u-fw", threadId: "th", now: NOW, state: { profile: { facts: [] } }, turn: { message: q, added: [], before: "" } });
+  eq([out.postings.map((p: any) => p.title), out.not_searched], [["Rust Engineer"], undefined]);
+});
+
+Deno.test("FW-44 the changelog names every entry left off until a yes, however many", async () => {
+  const profile = personaProfile(), tools = toolsOf(), names = ["Crestline", "Pixelforge", "Elmstead", "Mindgrove", "Harbor"];
+  for (const n of names) {
+    const f = (profile.facts as any[]).find((x) => String(x.text).startsWith(n));
+    await tools.correct_profile_fact.run({ id: f.id, text: String(f.text).replace(/\.$/, "") + ", updated." }, { userId: "u-fw", threadId: "th", now: NOW, state: { profile }, turn: { message: `${f.text} updated`, added: [], before: "" } } as any);
+    eq(f.status, "draft", n);
+  }
+  const t: any = await tailorForPosting({ userId: "00000000-0000-4000-8000-000000001173", profile, posting: { text: "Software Engineer Intern at Example Labs\n\nPython, React, SQL.", company: "Example Labs" }, deps: { render: edgeRenderer(), resumes: memoryResumeStore() }, now: NOW, reviewDraft: true });
+  ok(t.ok, JSON.stringify(t).slice(0, 200));
+  eq(t.held_back.length, 5);
+  for (const n of names) ok(t.changelog.includes(n), `${n} is named: ${t.changelog}`);
+  ok(!/ more\b/.test(t.changelog.slice(t.changelog.indexOf("Left off"))), t.changelog);
+});

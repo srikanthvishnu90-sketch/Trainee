@@ -31,8 +31,9 @@
 //    (the owner-run approve-first path), and this module never discovers or logs in anywhere.
 const fs = require("node:fs");
 const { fillForm, heldNow, recheckFilled, MARK_SIGNIN } = require("./ats-fill.cjs");
-const { APPLY_TEXT, NEVER_CLICK, applyUrlFor } = require("./apply-entry.cjs");
-const { buildHandoff } = require("./handoff.cjs");
+const { APPLY_TEXT, NEVER_CLICK, OVERLAY_APPLY, CLOSED_MARK, CLOSED_TEXT, applyUrlFor } = require("./apply-entry.cjs");
+const { buildHandoff, PERSON_REASONS } = require("./handoff.cjs");
+const NOT_OFFERED = new Set(["no_matching_option", "ambiguous_option"]);
 const crypto = require("node:crypto");
 
 const sha256 = (b) => crypto.createHash("sha256").update(b).digest("hex");
@@ -174,8 +175,12 @@ const FIELD_SEL = "form input, form select, form textarea, input[type=file], inp
 async function openApply(page, timeout) {
   // Job pages repeat their Apply control (top and bottom of the posting): several controls are one control when they all lead
   // to the same address. Controls that lead to different places, or buttons with no address, stay ambiguous unless there is one.
-  const h = (await page.evaluateHandle(([at, nc]) => {
+  const h = (await page.evaluateHandle(([at, nc, overlay]) => {
     const re = new RegExp(at, "i"), never = new RegExp(nc, "i");
+    // Teamtailor's Apply control by its declared action (apply-entry.cjs OVERLAY_APPLY), outside every form, not a submit: the first
+    // visible one (the board draws it twice, in the page and as a bar fixed to the bottom).
+    const ov = [...document.querySelectorAll(overlay)].find((e) => !e.closest("form") && (e.offsetWidth || e.offsetHeight) && (e.getAttribute("type") || "").toLowerCase() !== "submit");
+    if (ov) return ov;
     const c = [...document.querySelectorAll("a, button, [role=button]")].filter((e) => {
       const t = (e.innerText || e.getAttribute("aria-label") || "").trim();
       return !e.closest("form") && (e.offsetWidth || e.offsetHeight) && re.test(t) && !never.test(t);
@@ -193,7 +198,7 @@ async function openApply(page, timeout) {
     if (!pick) return null;
     pick.removeAttribute("target");
     return pick;
-  }, [APPLY_TEXT.source, NEVER_CLICK.source])).asElement();
+  }, [APPLY_TEXT.source, NEVER_CLICK.source, OVERLAY_APPLY])).asElement();
   if (!h) return false;
   await Promise.all([page.waitForNavigation({ waitUntil: "domcontentloaded", timeout }).catch(() => null), h.click()]);
   // A board that renders its form in place (no navigation) gets a moment to draw it.
@@ -238,6 +243,34 @@ async function embeddedFormUrl(page, allow) {
     if (urlVerdict(u.href, allow).ok) return u.href;
   }
   return null;
+}
+// D-072 (item 4, round 2): does the page say the posting is closed (apply-entry.cjs CLOSED_MARK / CLOSED_TEXT)? Read only, and only
+// asked when no application form was found: words in a form's own questions are never read as a closed posting.
+async function closedOnPage(page) {
+  return page.evaluate(([mark, re]) => {
+    if ([...document.querySelectorAll(mark)].some((e) => e.offsetWidth || e.offsetHeight || e.getClientRects().length)) return true;
+    return new RegExp(re, "i").test(((document.body && document.body.innerText) || "").slice(0, 6000));
+  }, [CLOSED_MARK, CLOSED_TEXT.source]).catch(() => false);
+}
+// D-072 (item 4, round 2): a cookie-consent layer drawn over the whole form (Workable's full-page backdrop, z-index 999999: 7 rows of
+// "option covered" in strict run 43276162667) is closed with its own DECLINE control: never "accept", never anything else. A fresh
+// browser context per run keeps nothing afterwards. One click at most; no layer, nothing pressed.
+async function declineCookies(page) {
+  const h = (await page.evaluateHandle(() => {
+    const vis = (e) => !!(e.offsetWidth || e.offsetHeight) && getComputedStyle(e).visibility !== "hidden";
+    const byId = [...document.querySelectorAll("[data-ui='cookie-consent-decline'], #onetrust-reject-all-handler, [data-automation-id='legalNoticeDeclineButton'], #CybotCookiebotDialogBodyButtonDecline")].find(vis);
+    if (byId) return byId;
+    const words = /^\s*(decline|reject|refuse|deny)( all)?( (cookies|non-?essential( cookies)?|optional( cookies)?|non-?necessary( cookies)?))?\s*$/i;
+    return [...document.querySelectorAll("button, [role=button]")].find((b) => {
+      if (!vis(b) || b.closest("form") || !words.test(b.innerText || "")) return false;
+      for (let a = b.parentElement, i = 0; a && i < 6; a = a.parentElement, i++) if (/cookie/i.test((a.innerText || "").slice(0, 2000))) return true;
+      return false;
+    }) || null;
+  }).catch(() => null))?.asElement?.();
+  if (!h) return false;
+  await h.click({ timeout: 3000 }).catch(() => {});
+  await page.waitForTimeout(400);
+  return true;
 }
 async function botCheck(page) {
   // The page and its own frames (an employer's site embedding the ATS form). A captcha provider's frame is judged from its
@@ -290,11 +323,47 @@ function DIAG(field) {
     .slice(0, 10).map((b) => cut(`${b.tagName} ${b.getAttribute("type") || ""} "${(b.innerText || b.value || "").trim()}" ${b.closest("form") ? "in-form" : "outside"}`, 80));
   return out;
 }
+// D-072 (item 4, round 2): the board's own redirect of a posting to the same employer's own copy of that posting (Workable's
+// apply.workable.com/j/7046AFAA95 to apply.belmond.com/_/j/7046AFAA95, the employer's Workable site; Greenhouse's
+// job-boards.greenhouse.io/cribl/jobs/5971252004 to cribl.io/...?gh_jid=5971252004, the employer's page that embeds the board's form;
+// strict run 43276162667: 6 rows "redirect_off_board"). Followed only when the hop comes from a host the run was already allowed on,
+// the target is https and not denied, and the target carries the posting's own id (a path segment or a query value, exactly).
+// Anything else stays redirect_not_allowed. The id is the posting's: a run of 5+ digits, an 8+ capital-letter-and-digit code with a digit (Workable),
+// or a UUID, taken from the posting's own path.
+// A posting segment with its title after it ("8589342-category-retail-manager") is its number.
+const slugless = (x) => String(x).replace(/^(\d{5,})-.*$/, "$1");
+function postingIds(u) {
+  let url; try { url = new URL(u); } catch { return []; }
+  return url.pathname.split("/").map(slugless).filter((x) => /^\d{5,}$/.test(x) || (/^[A-Z0-9]{8,}$/.test(x) && /\d/.test(x)) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(x));
+}
+function samePostingRedirect(from, to, posting, allow) {
+  let a, b; try { a = new URL(from); b = new URL(to); } catch { return false; }
+  if (b.protocol !== "https:" || isDeniedHost(b.hostname) || !urlVerdict(a.href, allow).ok) return false;
+  const ids = postingIds(posting);
+  if (!ids.length) return false;
+  const parts = new Set([...b.pathname.split("/"), ...[...b.searchParams.values()]].map(slugless));
+  return ids.some((id) => parts.has(id));
+}
+// The employer's own page a same-posting redirect led to (its host is in `followed`) is never the application form itself: the
+// host it is refused as, or null when the page may hold the form (a host no redirect added, or Workable's own app on the
+// employer's domain, /_/j/<id>). A page whose address cannot be read is refused.
+function followedPageRefusal(pageUrl, ats, followed) {
+  let u; try { u = new URL(pageUrl); } catch { return "unreadable_page_address"; }
+  const host = normHost(u.hostname);
+  if (!followed || !followed.has(host)) return null;
+  if (ats === "workable" && /^\/_\/j\/[A-Z0-9]+(\/apply)?\/?$/.test(u.pathname)) return null;
+  return host;
+}
+// A posting whose link the board sends to a "not found" page (Lever's cyara posting to apply.workable.com/...?not_found=true): closed.
+const NOT_FOUND_URL = /[?&](?:error|not_found)=true\b/;
 async function attempt(browser, p, opts, timing) {
   const ctx = await browser.newContext({ viewport: { width: 900, height: 1100 } });
   const page = await ctx.newPage();
   page.setDefaultTimeout(opts.stepTimeoutMs || 15000);
-  const allow = opts.allowHosts || [];
+  // A copy: a same-posting redirect (samePostingRedirect) adds the employer's own host for this attempt only.
+  const allow = [...(opts.allowHosts || [])];
+  // The employer hosts a same-posting redirect added: their own pages are never the application form themselves (below).
+  const followed = new Set();
   const blocked = [], blockedUrls = [];
   // A new tab (window.open, target=_blank) is never driven: it is closed before it loads.
   ctx.on("page", (other) => { if (other !== page) other.close().catch(() => {}); });
@@ -323,20 +392,26 @@ async function attempt(browser, p, opts, timing) {
     try { sub = !!req.frame().parentFrame(); } catch { /* no frame (service worker): judged as top-level */ }
     if (sub) return isDeniedHost(new URL(req.url()).hostname) ? route.abort("blockedbyclient") : route.continue();
     const g = urlVerdict(req.url(), allow);
-    if (!g.ok) { blocked.push(g.host); blockedUrls.push(req.url()); return route.abort("blockedbyclient"); }
+    // The same employer's own posting reached by the board's script rather than a 3xx (Workable's apply.workable.com/j/<id> to the
+    // employer's Workable domain /_/j/<id>, bench run 43303161774): the same rule as a redirect, from the page the run is on.
+    let fromUrl = ""; try { fromUrl = page.url(); } catch { /* none */ }
+    if (!g.ok && opts.followSamePosting !== false && /^https?:/.test(fromUrl) && samePostingRedirect(fromUrl, req.url(), p.url, allow)) { const h = normHost(new URL(req.url()).hostname); allow.push(h); followed.add(h); }
+    else if (!g.ok) { blocked.push(g.host); blockedUrls.push(req.url()); return route.abort("blockedbyclient"); }
     if (req.method() !== "GET") return route.continue();
     const resp = await route.fetch({ maxRedirects: 0 });
     const loc = resp.status() >= 300 && resp.status() < 400 ? resp.headers().location : null;
     if (loc) {
       const to = new URL(loc, req.url()).href;
       const next = urlVerdict(to, allow);
-      if (!next.ok) { blocked.push(next.host); blockedUrls.push(to); return route.abort("blockedbyclient"); }
+      if (!next.ok && opts.followSamePosting !== false && samePostingRedirect(req.url(), to, p.url, allow)) { const h = normHost(new URL(to).hostname); allow.push(h); followed.add(h); }
+      else if (!next.ok) { blocked.push(next.host); blockedUrls.push(to); return route.abort("blockedbyclient"); }
     }
     return route.fulfill({ response: resp });
   }
   const onAllowedHost = () => {
     // An employer that sends the candidate to its SSO: a sign-in wall the person finishes themselves, not a refused host.
     if (blocked.length && ssoSignIn(blockedUrls[0])) throw new NeedsUser("login_required", blocked[0], "sso_redirect");
+    if (blocked.length && NOT_FOUND_URL.test(blockedUrls[0]) && !NOT_FOUND_URL.test(p.url)) throw new NeedsUser("posting_closed", blockedUrls[0]);
     if (blocked.length) throw new NeedsUser("redirect_not_allowed", blocked[0]);
     const g = urlVerdict(page.url(), allow);
     if (!g.ok) throw new NeedsUser("redirect_not_allowed", g.host);
@@ -372,11 +447,15 @@ async function attempt(browser, p, opts, timing) {
       const vis = (e) => !!(e.offsetWidth || e.offsetHeight) && getComputedStyle(e).visibility !== "hidden";
       for (const e of document.querySelectorAll("[data-upmore-submit]")) e.removeAttribute("data-upmore-submit");
       const forms = [...document.querySelectorAll("form")].filter((f) => f.querySelector("input, select, textarea") && !f.hasAttribute("data-upmore-signin"));
-      const word = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$|^\s*(bewerbung )?(absenden|senden|abschicken)\s*$|^\s*(sollicitatie )?(versturen|verzenden)\s*$|^\s*(envoyer|enviar|verzenden|skicka)( .{0,20})?$/i;
+      // D-072 (item 4, round 2): the Submit words of the boards' other languages too (Recruitee's "Sūtīt", "Wyślij", strict run
+      // 43276162667: 4 forms with a Submit no word here named, beside a second button with no type).
+      const word = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$|^\s*(bewerbung )?(absenden|senden|abschicken)\s*$|^\s*(sollicitatie )?(versturen|verzenden|verstuur|indienen)\s*$|^\s*(envoyer|enviar|verzenden|skicka|sende|send inn|indsend|l[äa]het[äa]|wy[śs]lij|s[ūu]t[īi]t|si[ųu]sti|saada|odeslat|odosla[ťt]|invia|inviare|trimite|g[öo]nder|k[üu]ld[ée]s|po[šs]alji|po[šs]lji|изпрати|отправить|надіслати|αποστολή|υποβολή)( .{0,24})?$/i;
       for (const f of forms) {
         const typed = [...f.querySelectorAll("button[type=submit], button:not([type]), input[type=submit]")].filter(vis);
+        // A control the form itself declares its Submit (type="submit") is preferred over a button with no type beside it.
+        const declared = [...f.querySelectorAll("button[type=submit], input[type=submit]")].filter(vis);
         const worded = [...f.querySelectorAll("button, [role=button], input[type=button]")].filter((b) => vis(b) && word.test(b.innerText || b.value || ""));
-        const pick = worded.length === 1 ? worded[0] : typed.length === 1 ? typed[0] : worded.find((b) => typed.includes(b)) || null;
+        const pick = worded.length === 1 ? worded[0] : typed.length === 1 ? typed[0] : worded.find((b) => typed.includes(b)) || (declared.length === 1 ? declared[0] : null);
         if (pick) { pick.setAttribute("data-upmore-submit", "1"); return true; }
       }
       // D-072: one application form whose Submit the board draws just outside it (BambooHR: strict run 43273066955, 18 of 20
@@ -419,12 +498,45 @@ async function attempt(browser, p, opts, timing) {
       if (direct) {
         try { await page.goto(direct, { waitUntil: "domcontentloaded" }); } catch (e) { onAllowedHost(); throw e; }
         onAllowedHost();
-        // A board drawn by its own script after the load (Workday): its form or its sign-in box, whichever it draws.
-        await page.waitForSelector(`${FIELD_SEL}, input[type=password]`, { timeout: 12000 }).catch(() => null);
+        // A board drawn by its own script after the load (Workday): its form or its sign-in box, whichever it draws. D-072 (item 4,
+        // round 2): Workday's own readiness signal is its app drawing one of its marked parts (data-automation-id: the sign-in or
+        // create-account box, the form, "page doesn't exist", or its error), within 30 s; a page that drew none is loaded once more
+        // (strict run 43276162667: 22 rows drew nothing within the old 12 s).
+        const READY = `${FIELD_SEL}, input[type=password], [data-automation-id='signInContent'], [data-automation-id='invalid-content'], [data-automation-id='errorMessage'], [data-automation-id='applyFlowPage'] [data-automation-id='progressBar']`;
+        const waitMs = p.ats === "workday" ? 30000 : 12000;
+        if (!(await page.waitForSelector(READY, { timeout: waitMs }).catch(() => null)) && p.ats === "workday") {
+          try { await page.reload({ waitUntil: "domcontentloaded" }); } catch (e) { onAllowedHost(); throw e; }
+          onAllowedHost();
+          await page.waitForSelector(READY, { timeout: waitMs }).catch(() => null);
+        }
+        // Its apply flow, once drawn, fills in its sign-in box or its first step a moment later.
+        if (p.ats === "workday") await page.waitForSelector(`${FIELD_SEL}, input[type=password], [data-automation-id='invalid-content'], [data-automation-id='errorMessage']`, { timeout: 8000 }).catch(() => null);
         await gate();
         await stopAtWall(page, p.url);
       }
     }
+    // D-072 (item 4, round 2): on the employer's own page a same-posting redirect led to, the only application form is the board's
+    // own: its embedded form opened at its own address (Greenhouse's job_app frame), or Workable's own app on the employer's domain
+    // (/_/j/<id>). Any other form there (a newsletter box, a site search; bench run 43303161774: cribl.io's page reached a Submit
+    // with no field filled) is never the application: the run stops as the redirect off the board it was before.
+    // Review of #800: the rule holds for every page the run reaches, not only the first. It is checked again after the page's
+    // Apply control is opened (the control may itself lead to the employer's host, which the route guard then allows as the same
+    // posting) and once more on the page as it is the instant before Submit (notOnFollowed, no navigation there): a newsletter
+    // or job-alert box with one Email field there takes the confirmed email, and would otherwise pass every later check.
+    const notOnFollowed = () => { const h = followedPageRefusal(page.url(), p.ats, followed); if (h) throw new NeedsUser("redirect_not_allowed", h); };
+    const leaveFollowed = async () => {
+      if (!followedPageRefusal(page.url(), p.ats, followed)) return;
+      const embed = await embeddedFormUrl(page, allow);
+      if (embed) {
+        try { await page.goto(embed, { waitUntil: "domcontentloaded" }); } catch (e) { onAllowedHost(); throw e; }
+        onAllowedHost();
+        await page.waitForSelector(FIELD_SEL, { timeout: 8000 }).catch(() => null);
+        await gate();
+        await stopAtWall(page, p.url);
+      }
+      notOnFollowed();
+    };
+    await leaveFollowed();
     // D-072: the board's own form embedded in the employer's page (a frame on an allowed host): opened at its own address.
     if (!(await hasForm())) {
       const embed = await embeddedFormUrl(page, allow);
@@ -442,6 +554,7 @@ async function attempt(browser, p, opts, timing) {
       await gate();
       await stopAtWall(page, p.url);
     }
+    await leaveFollowed();
     timing.load = Date.now() - t0;
     const t1 = Date.now();
     if (!(await hasForm())) {
@@ -451,12 +564,14 @@ async function attempt(browser, p, opts, timing) {
       // (handoff.cjs) and the 99% reading names it form_not_found:employee_sign_in_only (strict run 43192269304: 18 Teamtailor
       // postings), never a kept wall.
       if (await page.evaluate(MARK_SIGNIN).catch(() => 0)) throw new NeedsUser("login_required", p.url, "employee_sign_in");
+      if (await closedOnPage(page)) throw new NeedsUser("posting_closed", page.url());
       throw new NeedsUser("no_application_form_found", p.url);
     }
     // The page's own questions, answered only from the approved facts / answers (ats-fill.cjs), each read back. A required
     // question with no confirmed answer, or one that could not be set and checked, stops the run: the person is asked.
     // A step form is filled one step at a time: each step's questions answered and read back, then its one Continue pressed, until
     // the step with the Submit control. A step with anything handed back stops there, as on a one-page form. At most 8 steps.
+    await declineCookies(page);
     const fr = { map: [], filled: [], needsUser: [], failed: [], invalid: [] };
     for (let step = 0; ; step++) {
       const r = await fillForm(page, { ats: p.ats, facts: p.facts, answers: p.answers || {}, resumePath: p.resume.path });
@@ -484,7 +599,13 @@ async function attempt(browser, p, opts, timing) {
     }
     if (fr.needsUser.length) {
       const first = fr.needsUser[0];
-      const answersOnly = first.reason === "no_confirmed_answer" || /^(agreement|eeo|upload)_/.test(first.reason) || first.reason === "no_resume";
+      // D-072 (item 4, round 2): a choice only the person can make is theirs too: an EEO or export-control question with no option
+      // to decline (no_decline_option). Asked on the hand-off's card (strict run 43276162667: Greenhouse's "This position requires
+      // access to information ..." was a fill failure with no hand-off). handoff.cjs PERSON_REASONS is the one list, less two:
+      // an APPROVED answer or fact that is not exactly one of the offered options (no_matching_option, ambiguous_option) is a
+      // question that could not be filled, not one with no answer: it stays field_not_filled (#340), so the person is never told
+      // a question they answered "has no confirmed answer".
+      const answersOnly = (PERSON_REASONS.has(first.reason) && !NOT_OFFERED.has(first.reason)) || /^(agreement|eeo|upload)_/.test(first.reason);
       // A form that also shows a check (CHECK_IN_FORM) stops as that check, with the person's answers beside it: both are theirs.
       const e = answersOnly && checkInForm ? new NeedsUser("bot_check", p.url, "check_in_form") : new NeedsUser(answersOnly ? "missing_required_answer" : "field_not_filled", first.label);
       if (answersOnly && checkInForm) e.detail = checkInForm;
@@ -504,9 +625,12 @@ async function attempt(browser, p, opts, timing) {
     // Last checks before the click, on what is actually on the page now: still an allowed host, no bot check that appeared
     // while filling, the form posts to an allowed host, and the payload still hashes to what was approved.
     onAllowedHost();
+    notOnFollowed();
     await gate(true);
     await stopAtWall(page, p.url);
     if (!(await markSubmit())) throw new NeedsUser("no_submit_control", p.url);
+    // A form in which nothing was filled from the approved application is never the application (no name, no email, no resume).
+    if (!fr.filled.length) throw new NeedsUser("no_application_form_found", p.url);
     const action = await page.$eval("[data-upmore-submit]", (b) => {
       const a = b.getAttribute("formaction") ?? (b.form && b.form.getAttribute("action"));
       return new URL(a || location.href, document.baseURI).href;
@@ -517,6 +641,8 @@ async function attempt(browser, p, opts, timing) {
     if (opts.shotBefore) await page.screenshot({ path: opts.shotBefore, fullPage: true });
     // The caller records "submitting" (and re-checks its lease and kill switch) BEFORE the click; a refusal stops here, unsent.
     // A dry run's audit (opts.audit) also gets what each filled question holds at this instant; production passes only the phase.
+    // The page as it is now, the last read before the caller's "submitting" record: never the employer's own page.
+    notOnFollowed();
     // The control about to be pressed, for the caller's own check (the strict bench refuses one inside a sign-in form).
     const submitInfo = await page.$eval("[data-upmore-submit]", (b) => { const f = b.closest("form"); return { signin: !!b.closest("[data-upmore-signin]"), form: f ? f.getAttribute("action") || "" : null }; }).catch(() => ({ signin: false, form: null }));
     if (opts.onPhase) await opts.onPhase("submitting", opts.audit ? { id: p.id, fields: await heldNow(page, fr.filled) } : undefined, submitInfo);
@@ -604,4 +730,4 @@ async function runPool(browser, payloads, opts = {}) {
   return { results, wallMs: Date.now() - started, concurrency };
 }
 
-module.exports = { CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };
+module.exports = { closedOnPage, declineCookies, samePostingRedirect, followedPageRefusal, postingIds, CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };

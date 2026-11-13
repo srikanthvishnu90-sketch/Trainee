@@ -157,8 +157,13 @@ payload hash shown (D-MS-1, D-MN-2).
 Not a File ask (`familyAskOf` is null, so the turn is not held to the tool): a control or an opt-out however it is worded
 ("pause my weekly brief", "no more weekly brief", "don't send me the weekly brief anymore", "weekly digest off"), which stays
 with the settings path, and an ask to make something new ("build a search plan", "draft a counter plan"), which stays with the
-planning turn. The interview time in `holds` is the page's: the person's zone, with the zone named
-(`tests/architect/files-ask-optout-d072.test.ts`).
+planning turn. Both are read from the clause that governs the File's name (the verb and negation before it, a word straight
+after it, or another clause that points back at it: "stop sending it"), never from a word elsewhere in the message, so "where's
+my weekly brief? I can't find the link" and "show me my interview hub so I can prepare" are File asks; "can't open my career
+brief" is an ask to see it; "make me my weekly brief" opens the person's own always-drawn File (F-01, F-02, F-14), while "make
+me my search plan" stays the planning turn's; a genuinely mixed message is null
+(`tests/architect/files-ask-clause-20261113.test.ts`). The interview time in `holds` is the page's: the person's zone, with the
+zone named (`tests/architect/files-ask-optout-d072.test.ts`).
 
 | Family | File | The ask (examples) | Creator | Records the page reads | Before D-072 | After |
 | --- | --- | --- | --- | --- | --- | --- |

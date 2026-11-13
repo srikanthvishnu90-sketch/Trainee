@@ -377,6 +377,9 @@ export async function runApproved(d: {
       const resume = await d.resumeFor(job);
       if (!resume || typeof resume.path !== "string" || !resume.path) throw Error("NO_RESUME");
       if (resume.sha256 !== p.resume_sha256) throw Error("RESUME_CHANGED");
+      // The submit gate: a resume whose own text shows a placeholder email or phone at its top is never sent.
+      const file = await Deno.readFile(resume.path).catch(() => null);
+      if (file && (await (await import("../../supabase/functions/_shared/career_tailor.ts")).resumeFileContactProblems(file, { foreign: true })).length) throw Error("RESUME_CONTACT_UNCONFIRMED");
       const factsPath = await d.writeFacts(job, factsFromPayload(p));
       // WO-096: this drive is the person's approved application, so the code its employer emails may be read for it.
       const codeEnv = d.emailCode ? await d.emailCode(job) : null;

@@ -1127,6 +1127,66 @@ const CareerRender = (() => {
     { re: /\[[^\]]{1,40}\]/, label: "bracketed placeholder [..]" }, { re: /\bTBD\b/, label: "TBD" },
     { re: /\bXXX+\b/, label: "XXX" }, { re: /placeholder/i, label: "the word 'placeholder'" },
   ];
+  // ================= contact placeholders (fail closed) =================
+  // An employer reads the email and phone at the top of the file. One that is missing, bracketed, on a reserved or
+  // template domain, or a template's stand-in name ("you@", "firstname.lastname@") is not a confirmed contact: the parse
+  // check fails it, so the file is never a pass and never ready to submit. When unsure, it is not confirmed.
+  const EMAIL_TOKEN_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g;
+  // NOT here: the reserved TLD ".test". Every fixture in this repo writes the person's own email as <name>@example.test
+  // (over 900 places, architect tests included), so refusing it turns those tests red; it needs the owner's ruling and a
+  // fixture migration. Until then no domain under .test is refused; a placeholder name on one (you@example.test) still is.
+  const RESERVED_TLDS = new Set(["invalid", "localhost", "example", "local"]);
+  const PLACEHOLDER_DOMAIN_LABELS = new Set(["example", "domain", "yourdomain", "mydomain", "yourcompany", "company", "email", "youremail", "test", "testing", "placeholder", "sample", "invalid", "localhost", "website", "yoursite", "xxx"]);
+  const PLACEHOLDER_LOCALS = new Set(["you", "your", "name", "yourname", "myname", "fullname", "firstname", "lastname", "firstnamelastname", "youremail", "myemail", "email", "emailaddress", "user", "username", "me", "test", "example", "sample", "placeholder", "johndoe", "janedoe", "xxx", "nobody", "none", "null"]);
+  // null when the email reads as a real address; otherwise why it is not one.
+  function placeholderEmail(v) {
+    const s = String(v == null ? "" : v).trim().toLowerCase();
+    if (!s) return "missing";
+    if (/[\[\]<>{}]/.test(s)) return "a bracketed placeholder";
+    const m = /^([a-z0-9._%+-]+)@([a-z0-9-]+(?:\.[a-z0-9-]+)*)\.?$/.exec(s);
+    if (!m) return "not an email address";
+    const labels = m[2].split("."), tld = labels[labels.length - 1];
+    if (labels.length < 2 || !/^[a-z]{2,}$/.test(tld)) return RESERVED_TLDS.has(tld) ? `on a reserved domain (${m[2]})` : "not an email address";
+    if (RESERVED_TLDS.has(tld) || (tld !== "test" && PLACEHOLDER_DOMAIN_LABELS.has(labels[labels.length - 2]))) return `on a reserved or template domain (${m[2]})`;
+    const local = m[1].replace(/\+.*$/, "").replace(/[._%-]+/g, "");
+    if (!local || PLACEHOLDER_LOCALS.has(local) || /^x+$/.test(local)) return `a template's stand-in name (${m[1]}@)`;
+    return null;
+  }
+  // The placeholder phone numbers in a piece of text: 555-0100 to 555-0199 (reserved for fiction), area code 555 or 000,
+  // counting runs (123-456-7890), one digit repeated, and lettered patterns ((xxx) xxx-xxxx).
+  function placeholderPhones(text) {
+    const s = String(text == null ? "" : text), out = [];
+    for (const m of s.matchAll(/(?:\(\s*[xX#]{3}\s*\)|(?<![A-Za-z#])[xX#]{3})[\s.-]*[xX#]{3}[\s.-]*[xX#]{4}(?![A-Za-z#])/g)) out.push(m[0]);
+    for (const m of s.matchAll(/(?<![\d$.,@\w/=_-])\+?\(?\d[\d\s().-]{5,}\d(?![\d%\w])/g)) {
+      const d = m[0].replace(/\D/g, ""), n = d.length === 11 && d[0] === "1" ? d.slice(1) : d;
+      const bad = n.length === 7 ? /^55501\d\d$/.test(n)
+        : n.length === 10 && (/^(555|000)/.test(n) || /^\d{3}55501/.test(n) || /^(\d)\1{9}$/.test(n) || ["1234567890", "0123456789", "9876543210", "1231231234"].includes(n));
+      if (bad) out.push(m[0].trim());
+    }
+    return out;
+  }
+  // What is not a confirmed contact at the top of a resume: [{ field: "email" | "phone", value, why }]; empty when all is.
+  function contactProblems(header) {
+    const h = header || {}, out = [], own = String(h.email == null ? "" : h.email).trim().toLowerCase();
+    const why = placeholderEmail(h.email);
+    if (why) out.push({ field: "email", value: own, why });
+    const rest = [h.contactLine, h.linksLine, h.location, h.phone].filter((x) => typeof x === "string").join(" | ");
+    for (const m of rest.match(EMAIL_TOKEN_RE) || []) { const w = m.toLowerCase() === own ? null : placeholderEmail(m); if (w) out.push({ field: "email", value: m, why: w }); }
+    for (const p of placeholderPhones(rest)) out.push({ field: "phone", value: p, why: "a placeholder number" });
+    return out;
+  }
+  // The same check on a file's own text (the submit gates, which hold only the bytes): the lines above the first section
+  // heading must carry an email, and no email or phone there may be a placeholder.
+  function fileContactProblems(lines) {
+    const all = (lines || []).map((l) => String(l == null ? "" : l)), cut = all.findIndex((l) => HEADING_ALLOWLIST.includes(l.trim().toUpperCase()));
+    // A layout that sets the contact beside the body reads back in another order: then every email in the file is judged.
+    const top = all.slice(0, cut > 0 ? cut : Math.min(all.length, 8)).join(" | "), emails = top.match(EMAIL_TOKEN_RE) || all.join(" | ").match(EMAIL_TOKEN_RE) || [], out = [];
+    if (!emails.length) out.push({ field: "email", value: "", why: "missing" });
+    for (const e of emails) { const w = placeholderEmail(e); if (w) out.push({ field: "email", value: e, why: w }); }
+    for (const p of placeholderPhones(top)) out.push({ field: "phone", value: p, why: "a placeholder number" });
+    return out;
+  }
+  const contactReason = (p) => `the ${p.field} at the top of the resume (${p.value || "none"}) is ${p.why}: the ${p.field} is not confirmed, so this resume is not ready to submit`;
   const NUMERIC_DATE_RES = [/\b\d{1,2}\/\d{4}\b/g, /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g, /\b\d{4}-\d{2}(?:-\d{2})?\b/g, /\b\d{1,2}-\d{4}\b/g];
   function diffSequences(expected, actual) {
     // returns { missing:[], extra:[], moved:bool }
@@ -1169,6 +1229,9 @@ const CareerRender = (() => {
       }
     }
 
+    // Fail closed: a contact email or phone that is a placeholder is never a pass. (A resume with no email at all is failed
+    // by the renderer's verdict, career_tailor.ts contactProblems: this check also serves layout files that carry no header.)
+    if (resume) for (const p of contactProblems(resume.header)) if (p.why !== "missing") add("contact_unconfirmed", "fail", contactReason(p));
     // BUG-2026-10-14-NDER (brief B6): two source-level FAILs.
     // (1) duplicate_line — a content line belongs in exactly one section;
     //     the same normalized line twice in the source document fails.
@@ -1302,7 +1365,7 @@ const CareerRender = (() => {
   const runtime = { zlib: !!rt.zlib, crypto: !!rt.crypto, Buffer: !!Buffer, codec: rt.zlib && rt.crypto ? "platform" : zlib && crypto ? "vendored" : "none" };
   // RELEASE 9: the byte primitives career_resume_design.ts builds its two layouts with (same codec, same ZIP writer).
   const primitives = { zipBuffer, unzipParts, encodeWinAnsi, pdfLiteral, escXml, deflate: (b) => zlibDeflateFixed(Bytes.from(b)), bytes: (x, enc) => Bytes.from(x, enc), concat: (xs) => Bytes.concat(xs) };
-  return { primitives, renderPdf, renderDocx, parseCheck, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
+  return { primitives, renderPdf, renderDocx, parseCheck, placeholderEmail, placeholderPhones, contactProblems, fileContactProblems, contactReason, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
   }
   return make(NODE_RUNTIME);
 })();

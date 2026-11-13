@@ -15,10 +15,12 @@ function check(header) {
 }
 const unconfirmed = (pc, field) => pc.status === "FAIL" && pc.reasons.some((x) => x.check === "contact_unconfirmed" && x.level === "fail" && x.detail.includes(`the ${field} is not confirmed`) && /not ready to submit/.test(x.detail));
 
-test("148 contact: a placeholder, bracketed or missing header email FAILS parse-check as not confirmed", () => {
-  for (const email of ["you@example.com", "name@domain.com", "your.email@email.com", "firstname.lastname@gmail.com", "jane.doe@gmail.com", "user@localhost", "casey@example.org", "[your email]", "", null, undefined]) {
+test("148 contact: a placeholder or bracketed header email FAILS parse-check as not confirmed; a missing one is named", () => {
+  for (const email of ["you@example.com", "name@domain.com", "your.email@email.com", "firstname.lastname@gmail.com", "jane.doe@gmail.com", "user@localhost", "casey@example.org", "[your email]"]) {
     assert.ok(unconfirmed(check({ email }), "email"), `must FAIL: ${JSON.stringify(email)}`);
   }
+  // No email at all: named by the contact check, which the renderer's verdict (career_tailor.ts) turns into a FAIL.
+  for (const email of ["", null, undefined]) assert.deepEqual(Render.contactProblems({ name: "Casey Rivers", email }).map((x) => [x.field, x.why]), [["email", "missing"]]);
 });
 
 test("148 contact: a placeholder phone or a second, placeholder email on the confirmed contact line FAILS parse-check", () => {
@@ -43,5 +45,6 @@ test("148 contact: the same check reads a file's own text (the submit gates hold
   assert.deepEqual(top("casey.rivers@gmail.com | (415) 867-5309"), [], "the body below the first heading is not the contact");
   assert.deepEqual(top("you@example.com").map((x) => x.field), ["email"]);
   assert.deepEqual(top("casey.rivers@gmail.com | (555) 555-5555").map((x) => x.field), ["phone"]);
-  assert.deepEqual(top("Chicago, IL").map((x) => [x.field, x.why]), [["email", "missing"]]);
+  assert.deepEqual(top("Chicago, IL").map((x) => x.field), ["email"], "no email at the top: the only one in the file is a placeholder");
+  assert.deepEqual(Render.fileContactProblems(["Casey Rivers", "Chicago, IL", "EXPERIENCE", "Built pipelines"]).map((x) => [x.field, x.why]), [["email", "missing"]]);
 });

@@ -35,6 +35,8 @@ export async function prepareCloudCard(o: CloudCardPreparation, d: {
     !Number.isSafeInteger(account.epoch) || !Number.isSafeInteger(account.version)) fail("INVALID_CLOUD_PREPARE_CONTEXT");
   const bytes = bytesOf(r.b64);
   if (!bytes.length || bytes.length > 5 * 1024 * 1024 || await sha256(bytes) !== r.sha256) fail("RESUME_CHANGED");
+  // No card is prepared with a resume whose own text shows a placeholder email or phone at its top.
+  if ((await (await import("../../supabase/functions/_shared/career_tailor.ts")).resumeFileContactProblems(bytes, { foreign: true })).length) fail("RESUME_CONTACT_UNCONFIRMED");
   const snapshot = await d.rpc("career_apply_message_cloud_sources", { p_user: o.owner });
   if (!object(snapshot) || !Object.hasOwn(snapshot, "profile") || !Array.isArray(snapshot.rows) ||
     snapshot.user_id !== o.owner ||

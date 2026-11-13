@@ -27006,6 +27006,52 @@ const CareerRender = (() => {
     { re: /\[[^\]]{1,40}\]/, label: "bracketed placeholder [..]" }, { re: /\bTBD\b/, label: "TBD" },
     { re: /\bXXX+\b/, label: "XXX" }, { re: /placeholder/i, label: "the word 'placeholder'" },
   ];
+  const EMAIL_TOKEN_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g;
+  const RESERVED_TLDS = new Set(["invalid", "localhost", "example", "local"]);
+  const PLACEHOLDER_DOMAIN_LABELS = new Set(["example", "domain", "yourdomain", "mydomain", "yourcompany", "company", "email", "youremail", "test", "testing", "placeholder", "sample", "invalid", "localhost", "website", "yoursite", "xxx"]);
+  const PLACEHOLDER_LOCALS = new Set(["you", "your", "name", "yourname", "myname", "fullname", "firstname", "lastname", "firstnamelastname", "youremail", "myemail", "email", "emailaddress", "user", "username", "me", "test", "example", "sample", "placeholder", "johndoe", "janedoe", "xxx", "nobody", "none", "null"]);
+  function placeholderEmail(v) {
+    const s = String(v == null ? "" : v).trim().toLowerCase();
+    if (!s) return "missing";
+    if (/[\[\]<>{}]/.test(s)) return "a bracketed placeholder";
+    const m = /^([a-z0-9._%+-]+)@([a-z0-9-]+(?:\.[a-z0-9-]+)*)\.?$/.exec(s);
+    if (!m) return "not an email address";
+    const labels = m[2].split("."), tld = labels[labels.length - 1];
+    if (labels.length < 2 || !/^[a-z]{2,}$/.test(tld)) return RESERVED_TLDS.has(tld) ? `on a reserved domain (${m[2]})` : "not an email address";
+    if (RESERVED_TLDS.has(tld) || (tld !== "test" && PLACEHOLDER_DOMAIN_LABELS.has(labels[labels.length - 2]))) return `on a reserved or template domain (${m[2]})`;
+    const local = m[1].replace(/\+.*$/, "").replace(/[._%-]+/g, "");
+    if (!local || PLACEHOLDER_LOCALS.has(local) || /^x+$/.test(local)) return `a template's stand-in name (${m[1]}@)`;
+    return null;
+  }
+  function placeholderPhones(text) {
+    const s = String(text == null ? "" : text), out = [];
+    for (const m of s.matchAll(/(?:\(\s*[xX#]{3}\s*\)|(?<![A-Za-z#])[xX#]{3})[\s.-]*[xX#]{3}[\s.-]*[xX#]{4}(?![A-Za-z#])/g)) out.push(m[0]);
+    for (const m of s.matchAll(/(?<![\d$.,@\w/=_-])\+?\(?\d[\d\s().-]{5,}\d(?![\d%\w])/g)) {
+      const d = m[0].replace(/\D/g, ""), n = d.length === 11 && d[0] === "1" ? d.slice(1) : d;
+      const bad = n.length === 7 ? /^55501\d\d$/.test(n)
+        : n.length === 10 && (/^(555|000)/.test(n) || /^\d{3}55501/.test(n) || /^(\d)\1{9}$/.test(n) || ["1234567890", "0123456789", "9876543210", "1231231234"].includes(n));
+      if (bad) out.push(m[0].trim());
+    }
+    return out;
+  }
+  function contactProblems(header) {
+    const h = header || {}, out = [], own = String(h.email == null ? "" : h.email).trim().toLowerCase();
+    const why = placeholderEmail(h.email);
+    if (why) out.push({ field: "email", value: own, why });
+    const rest = [h.contactLine, h.linksLine, h.location, h.phone].filter((x) => typeof x === "string").join(" | ");
+    for (const m of rest.match(EMAIL_TOKEN_RE) || []) { const w = m.toLowerCase() === own ? null : placeholderEmail(m); if (w) out.push({ field: "email", value: m, why: w }); }
+    for (const p of placeholderPhones(rest)) out.push({ field: "phone", value: p, why: "a placeholder number" });
+    return out;
+  }
+  function fileContactProblems(lines) {
+    const all = (lines || []).map((l) => String(l == null ? "" : l)), cut = all.findIndex((l) => HEADING_ALLOWLIST.includes(l.trim().toUpperCase()));
+    const top = all.slice(0, cut > 0 ? cut : Math.min(all.length, 8)).join(" | "), emails = top.match(EMAIL_TOKEN_RE) || all.join(" | ").match(EMAIL_TOKEN_RE) || [], out = [];
+    if (!emails.length) out.push({ field: "email", value: "", why: "missing" });
+    for (const e of emails) { const w = placeholderEmail(e); if (w) out.push({ field: "email", value: e, why: w }); }
+    for (const p of placeholderPhones(top)) out.push({ field: "phone", value: p, why: "a placeholder number" });
+    return out;
+  }
+  const contactReason = (p) => `the ${p.field} at the top of the resume (${p.value || "none"}) is ${p.why}: the ${p.field} is not confirmed, so this resume is not ready to submit`;
   const NUMERIC_DATE_RES = [/\b\d{1,2}\/\d{4}\b/g, /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g, /\b\d{4}-\d{2}(?:-\d{2})?\b/g, /\b\d{1,2}-\d{4}\b/g];
   function diffSequences(expected, actual) {
     const exp = [...expected], act = [...actual];
@@ -27044,6 +27090,7 @@ const CareerRender = (() => {
       }
     }
 
+    if (resume) for (const p of contactProblems(resume.header)) if (p.why !== "missing") add("contact_unconfirmed", "fail", contactReason(p));
     if (expected) {
       const seenLine = new Set();
       for (const l of expected) {
@@ -27156,7 +27203,7 @@ const CareerRender = (() => {
 
   const runtime = { zlib: !!rt.zlib, crypto: !!rt.crypto, Buffer: !!Buffer, codec: rt.zlib && rt.crypto ? "platform" : zlib && crypto ? "vendored" : "none" };
   const primitives = { zipBuffer, unzipParts, encodeWinAnsi, pdfLiteral, escXml, deflate: (b) => zlibDeflateFixed(Bytes.from(b)), bytes: (x, enc) => Bytes.from(x, enc), concat: (xs) => Bytes.concat(xs) };
-  return { primitives, renderPdf, renderDocx, parseCheck, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
+  return { primitives, renderPdf, renderDocx, parseCheck, placeholderEmail, placeholderPhones, contactProblems, fileContactProblems, contactReason, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
   }
   return make(NODE_RUNTIME);
 })();

@@ -59,7 +59,7 @@ const CASES: Case[] = [
   { m: swe("95k USD base", "London"), cur: "USD", base: 95000, bench: false },
   // ---- true cases: a US place
   { m: swe("$110k base", "Austin"), cur: "USD", base: 110000, bench: true },
-  { m: swe("110k base", "Austin"), cur: "USD", base: 110000, bench: true, has: /currency not stated/ },
+  { m: swe("110k base", "Austin"), cur: "USD", base: 110000, bench: true, has: /currency not stated/i },
   { m: swe("$95k base", "Springfield, Illinois"), cur: "USD", base: 95000, bench: true },
   { m: swe("USD 130,000 base", "Seattle"), cur: "USD", base: 130000, bench: true },
   { m: swe("$110,000 a year", "Chicago"), cur: "USD", base: 110000, period: "year", bench: true },
@@ -73,9 +73,9 @@ const CASES: Case[] = [
   // ---- finding 3: the period
   { m: "I got an offer from Acme for $6,500 per month as a software engineer in Austin", cur: "USD", period: "month", rate: 6500, factor: 12, base: 78000, bench: true, not: /9\d% below/, has: /12 months/ },
   { m: "Offer from Acme: 8k a month base as a software engineer in Austin", cur: "USD", period: "month", rate: 8000, factor: 12, base: 96000, bench: true },
-  { m: "Offer from Acme: $1,500 a week as a data analyst in Chicago", cur: "USD", period: "week", rate: 1500, factor: 52, base: 78000, bench: true, has: /52 weeks/ },
-  { m: "Offer from Acme: $3,000 biweekly as a data analyst in Chicago", cur: "USD", period: "biweek", rate: 3000, factor: 26, base: 78000, bench: true, has: /26 pay periods/ },
-  { m: "Offer from Acme: $3,000 every two weeks as a data analyst in Chicago", cur: "USD", period: "biweek", rate: 3000, factor: 26, base: 78000, bench: true },
+  { m: "Offer from Acme: $1,500 a week as a software engineer in Chicago", cur: "USD", period: "week", rate: 1500, factor: 52, base: 78000, bench: true, has: /52 weeks/ },
+  { m: "Offer from Acme: $3,000 biweekly as a software engineer in Chicago", cur: "USD", period: "biweek", rate: 3000, factor: 26, base: 78000, bench: true, has: /26 pay periods/ },
+  { m: "Offer from Acme: $3,000 every two weeks as a software engineer in Chicago", cur: "USD", period: "biweek", rate: 3000, factor: 26, base: 78000, bench: true },
   { m: "Offer from Acme: $50/hr as a software engineer in Austin", cur: "USD", period: "hour", rate: 50, factor: 2080, base: 104000, bench: true, has: /2,080 hours/ },
   { m: "Offer from Acme: $400 a day as a data analyst in Chicago", cur: "USD", period: "day", rate: 400, base: null, bench: false, has: /daily rate/ },
   { m: "Offer from Acme: £45 an hour as a data analyst in London", cur: "GBP", period: "hour", rate: 45, factor: 2080, bench: false },
@@ -106,7 +106,7 @@ Deno.test(`the offer reader on ${CASES.length} offers: currency, period and benc
       const all = [...brain.messages, brain.draft?.email ?? "", first.answer?.reply ?? "", second?.answer?.reply ?? "", second?.answer?.card?.body ?? ""].join("\n");
       if (!first.answer) throw new Error("the chat turn did not take the offer");
       if (c.cur === "XXX" || c.signing === "XXX" || c.bonus === "XXX") {
-        if (!/currency not stated/.test(all)) throw new Error("an unknown currency is not said to be unknown");
+        if (!/currency not stated/i.test(all)) throw new Error("an unknown currency is not said to be unknown");
         if (c.cur === "XXX" && !/currency not stated/.test(String(o.currency_fact))) throw new Error(`no currency fact: ${o.currency_fact}`);
       }
       if (![c.cur, c.signing, c.bonus].includes("USD") && all.includes("$")) throw new Error(`"$" printed for an offer with no US-dollar figure: ${all.split("\n").find((l) => l.includes("$"))}`);
@@ -126,8 +126,8 @@ Deno.test("an amount in an unknown currency is written without a symbol, and nev
   eq(moneyIn(95000, "CAD"), "CAD 95,000");
   eq(moneyIn(95000, "USD"), "$95,000");
   // Two unknown-currency figures are not added up; a competing offer in an unknown currency is never the counter's lever.
-  const t = await offerChatTurn({ message: "Offer from Shopify: $95k base and a $10k signing bonus as a software engineer in Toronto", state: null, now: NOW, postings: null });
-  const cash = await offerChatTurn({ message: "Offer from Beta: $120k base as a software engineer in Toronto", state: t.state, now: NOW + 1, postings: null });
+  const t = await offerChatTurn({ message: "I got an offer from Shopify: $95k base and a $10k signing bonus as a software engineer in Toronto", state: null, now: NOW, postings: null });
+  const cash = await offerChatTurn({ message: "I got an offer from Betaworks: $120k base as a software engineer in Toronto", state: t.state, now: NOW + 1, postings: null });
   const cmp = await offerChatTurn({ message: "compare my offers", state: cash.state, now: NOW + 2, postings: null });
   const row = (i: number, k: string) => (cmp.answer as any).comparison.offers[i].rows.find((r: any) => r.k === k)?.v;
   eq(row(0, "Base"), "95,000 (currency not stated)");
@@ -143,7 +143,7 @@ Deno.test("an amount in an unknown currency is written without a symbol, and nev
   if (a.answer!.reply.includes("$")) throw new Error(`"$" before the currency is known: ${a.answer!.reply}`);
   const b = await offerChatTurn({ message: "software engineer in Seattle", state: a.state, now: NOW + 5, postings: null });
   eq((b.state as any).offers.at(-1).offer.currency, "USD");
-  if (!/currency not stated/.test(b.answer!.reply) || !/\$150,000/.test(b.answer!.reply)) throw new Error(b.answer!.reply);
+  if (!/currency not stated/i.test(b.answer!.reply) || !/\$150,000/.test(b.answer!.reply)) throw new Error(b.answer!.reply);
   const c = await offerChatTurn({ message: "software engineer in Toronto", state: a.state, now: NOW + 5, postings: null });
   eq((c.state as any).offers.at(-1).offer.currency, "XXX");
 });

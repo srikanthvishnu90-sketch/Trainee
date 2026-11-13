@@ -1288,21 +1288,56 @@ const CareerProfile = (() => {
     return ALIAS_GROUP.get(skillKey(raw)) || (raw ? [raw] : []);
   }
   const skillKeyOf = (name) => skillKey(skillForms(name)[0] || name);
-  const WORD_NAMES = new Set(["REST", "Excel", "Spark", "Swift", "Rust", "Ruby", "Spring", "Flask", "Go", "Golang", "Express", "Ember", "Julia", "Dart", "Elixir", "Scala"]);
+  const WORD_NAMES = new Set(["REST", "Excel", "Spark", "Swift", "Rust", "Ruby", "Spring", "Flask", "Go", "Golang", "Express", "Ember", "Julia", "Dart", "Elixir", "Scala",
+    "Word", "Access", "Chef", "Puppet", "Unity", "React", "Sketch", "Vue", "Basic", "Hive", "Pig", "Ant", "Salt", "Crystal", "Nim", "Lean"]);
   const _formRe = new Map();
+  const isShort = (form) => (/^[A-Za-z]{1,2}$/.test(form)) || WORD_NAMES.has(form);
   function formRe(form) {
     if (_formRe.has(form)) return _formRe.get(form);
-    const short = (/^[A-Za-z]{1,2}$/.test(form)) || WORD_NAMES.has(form);
+    const short = isShort(form);
     const body = escRe(form).replace(/\s+/g, "\\s+");
     const re = short
-      ? new RegExp(`(?<![A-Za-z0-9+#&.'\\-])${body}(?![A-Za-z0-9+#&'\\-])(?!\\.[A-Za-z0-9])`)
-      : new RegExp(`(?<![A-Za-z0-9+#])${body}(?![A-Za-z0-9+#])(?!\\.[A-Za-z0-9])`, "i");
+      ? new RegExp(`(?<![A-Za-z0-9+#&.'\\-])${body}(?![A-Za-z0-9+#&'\\-])(?!\\.[A-Za-z0-9])`, "g")
+      : new RegExp(`(?<![A-Za-z0-9+#])${body}(?![A-Za-z0-9+#])(?!\\.[A-Za-z0-9])`, "gi");
     _formRe.set(form, re);
     return re;
   }
+  const KNOWN_SKILLS = new Set([...ALIAS_GROUP.keys(), ...[...WORD_NAMES].map(skillKey), ...("python java ruby php perl kotlin scala haskell matlab sas stata spss tableau "
+    + "pytorch tensorflow keras pandas numpy scipy shiny tidyverse ggplot2 docker terraform ansible jenkins linux bash html css sass django rails laravel angular svelte redux "
+    + "graphql grpc kafka airflow hadoop snowflake redshift bigquery dbt looker powerbi figma photoshop illustrator jira salesforce sap oracle azure redis elasticsearch nosql "
+    + "objective-c assembly fortran cobol lua jquery node selenium cypress jest junit pytest unreal blender autocad solidworks verilog vhdl latex vba ai").split(" ")]);
+  const NEGATED = /(?:\b(?:never|not|no|without|zero|lacks?|lacking|cannot|unfamiliar)|n['’]t)(?:[^\w.;!?\n]+[\w+#.'’/-]+){0,5}[^\w.;!?\n]*$/i;
+  const CUE = /(?:\b(?:in|using|with|via|use[sd]?|wrote|writes?|writing|know|knows|learn(?:ed|ing)|(?:skills?|languages?|tools?|stack|tech|technologies|frameworks?|software|proficien(?:t|cy))\s*(?::|-|in|with)?)\s+)$/i;
+  const TRADE = /^\s+(?:models?|pipelines?|algorithms?|engineer(?:ing|s)?|code|scripts?|scripting|programming|programs?|developers?|development|apps?|services?|apis?|macros?|formulas?|spreadsheets?|dashboards?|queries|components?|front[- ]?end|back[- ]?end|librar(?:y|ies)|packages?|frameworks?|microservices?|hooks?|notebooks?)\b|^\s*\((?!\s*\d)/i;
+  const LIST_SEP = /\s*(?:[,/;|•·\n]|\s&\s|\s(?:and|or)\s)\s*/;
+  const knownAt = (item, end) => {
+    const words = String(item).replace(/^[\s([]+|[\s.)\]]+$/g, "").split(/\s+/).filter(Boolean);
+    if (!words.length) return false;
+    const pick = (n) => skillKey((end ? words.slice(-n) : words.slice(0, n)).join(" ").replace(/^[^:]*:\s*/, ""));
+    return KNOWN_SKILLS.has(pick(1)) || (words.length > 1 && KNOWN_SKILLS.has(pick(2)));
+  };
+  function inSkillsContext(t, at, end) {
+    const before = t.slice(0, at), after = t.slice(end);
+    if (!before.trim() && /^[\s.]*$/.test(after)) return true;
+    if (/^[- ]to\b|^\s+(?:and|&|n)\s+D\b/.test(after)) return false;
+    const prev = before.split(LIST_SEP), next = after.split(LIST_SEP);
+    const alone = (x) => /^[\s([:]*$/.test(x == null ? "" : x.replace(/^.*:\s*/, ""));
+    if (prev.length > 1 && alone(prev[prev.length - 1]) && knownAt(prev[prev.length - 2], true)) return true;
+    if (next.length > 1 && /^[\s.)\]]*$/.test(next[0]) && knownAt(next[1], false)) return true;
+    if (CUE.test(before) && !/^\s+(?:[A-Z][a-z]|(?:19|20)\d\d\b)/.test(after)) return true;
+    return TRADE.test(after);
+  }
   function textNamesSkill(text, skillName) {
     const t = String(text == null ? "" : text);
-    return !!t && skillForms(skillName).some((f) => formRe(f).test(t));
+    if (!t) return false;
+    for (const f of skillForms(skillName)) {
+      const re = formRe(f); re.lastIndex = 0;
+      for (const m of t.matchAll(re)) {
+        if (NEGATED.test(t.slice(0, m.index))) continue;
+        if (!isShort(f) || inSkillsContext(t, m.index, m.index + m[0].length)) return true;
+      }
+    }
+    return false;
   }
   function skillEvidence(profile, skillName) {
     const name = skillKeyOf(skillName);

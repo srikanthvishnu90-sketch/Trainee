@@ -13,7 +13,7 @@
 //   - No cost-of-living dataset is on file, so two places are never adjusted; the reply says so.
 //   - Nothing is sent. The counter is a draft on a card (requires_approval, sent: false) bound to its exact text by hash;
 //     there is no send path for it.
-import { type Bench, benchmarks, type Field, hasWord, isUsd, MAX_MESSAGE, mergeOffers, MIN_N, moneyFor, moneyIn, type Offer, type OfferData, parseOfferWords, payData, rateIn } from "./career_offer.ts";
+import { type Bench, benchmarks, type Field, hasWord, isUsd, known, MAX_MESSAGE, mergeOffers, MIN_N, moneyFor, moneyIn, notPlaced, type Offer, type OfferData, parseOfferWords, payData, PER, rateAsk, rateIn, rateNote, sameCurrency, UNKNOWN_CURRENCY, usMarket } from "./career_offer.ts";
 import { CareerNegotiation, CareerPaths } from "./router_core.career.js";
 import { searchWords } from "./career_ingest.ts";
 import type { KV, Src } from "./file_family.ts";
@@ -47,7 +47,10 @@ const m$ = (o: Offer, k: "base" | "signing" | "bonus" | "bonus_target", n: numbe
 const placeOf = (o: Offer) => o.remote ? "remote" : o.metro_label ?? o.place ?? o.city;
 const titleOf = (o: Offer) => o.title ?? o.role;
 // Guaranteed cash adds only figures said in one currency; with two, nothing is added (no sourced exchange rate is on file).
-const oneCurrency = (o: Offer) => new Set([cur(o, "base"), ...(o.signing != null ? [cur(o, "signing")] : []), ...(o.bonus != null ? [cur(o, "bonus")] : [])]).size === 1;
+// A figure whose currency is not known is never added to another (2026-11-13).
+const curs = (o: Offer) => [cur(o, "base"), ...(o.signing != null ? [cur(o, "signing")] : []), ...(o.bonus != null ? [cur(o, "bonus")] : [])];
+const curName = (c: string | undefined) => known(c ?? "USD") ? c ?? "USD" : "a currency that was not stated";
+const oneCurrency = (o: Offer) => curs(o).every(known) && new Set([cur(o, "base"), ...(o.signing != null ? [cur(o, "signing")] : []), ...(o.bonus != null ? [cur(o, "bonus")] : [])]).size === 1;
 const ord = (n: number) => { const r = n % 100, t = n % 10; return `${n}${r >= 11 && r <= 13 ? "th" : t === 1 ? "st" : t === 2 ? "nd" : t === 3 ? "rd" : "th"}`; };
 const dateOf = (ms: number) => new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 
@@ -131,7 +134,7 @@ function askFor(missing: Field[], o: Offer): string {
   const w = missing.map((f) => ASK_WORDS[f]);
   const list = w.length > 1 ? `${w.slice(0, -1).join(", ")} and ${w[w.length - 1]}` : w[0];
   const have = [o.company, titleOf(o), o.metro_label ?? o.place ?? (o.remote ? "remote" : null), o.base != null ? m$(o, "base", o.base) : null].filter(Boolean).join(", ");
-  return `${have ? `Got it: ${have}. ` : ""}To place it against market pay I need ${list}. What ${missing.length > 1 ? "are they" : "is it"}?`;
+  return `${have ? `Got it: ${have}. ` : ""}${rateAsk(o)}To place it against market pay I need ${list}. What ${missing.length > 1 ? "are they" : "is it"}?`;
 }
 const sameCompany = (a: string | null, b: string | null) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
 
@@ -168,7 +171,7 @@ export function yearlyRange(pay: string | null | undefined): { lo: number; hi: n
 export interface PostedBench { shown: boolean; n: number; median: number | null; p25: number | null; p75: number | null; below: number; reason: string | null; cite: string; label: string; companies: string[] }
 // Open postings on file for the same role in the same metro that state a yearly pay range: the midpoint of each range.
 export async function postedPay(o: Offer, postings: PostingsReader | null, data: OfferData, now: number): Promise<PostedBench | null> {
-  if (!postings || !o.role || !o.metro || !isUsd(o)) return null;
+  if (!postings || !o.role || !o.metro || !isUsd(o) || !usMarket(o)) return null;
   const metro = (data?.maps?.metros || []).find((m: any) => m.key === o.metro);
   const label = `Pay stated by open ${o.role} postings in the ${o.metro_label} on file`;
   const cite = (n: number) => `${n} open ${o.role} postings in the ${o.metro_label} that state pay (job boards' own pay fields, read ${dateOf(now)})`;
@@ -212,7 +215,10 @@ function citable(m: Market): { median: number; cite: string; n: number | null } 
 function marketLines(o: Offer, m: Market): string[] {
   const lines: string[] = [];
   const urls: string[] = [];
-  if (!isUsd(o)) lines.push(`Public pay data (DOL, BLS): US data in US dollars; your offer is in ${o.currency}, so it is not placed against it and nothing is converted (no sourced exchange rate is on file).`);
+  // 2026-11-13: an unknown currency, or a place code cannot confirm is in the United States, is said and never compared.
+  const why = notPlaced(o);
+  if (why && (!known(o.currency ?? "USD") || isUsd(o))) lines.push(why);
+  else if (!isUsd(o)) lines.push(`Public pay data (DOL, BLS): US data in US dollars; your offer is in ${o.currency}, so it is not placed against it and nothing is converted (no sourced exchange rate is on file).`);
   else if (!o.occupation) lines.push(o.role ? `Public pay data (DOL, BLS): none mapped to "${o.role}", so no public figure.` : "Public pay data: without the job title there is no occupation to look up.");
   for (const b of m.pub) {
     if (!b.shown) { lines.push(`${b.label}: no median, ${b.reason}.`); continue; }
@@ -228,7 +234,7 @@ function marketLines(o: Offer, m: Market): string[] {
     if (!p.shown) lines.push(`${p.label}: no median, ${p.reason}.`);
     else lines.push(`${p.label}: median ${usd(p.median!)} from ${p.n} postings (the middle of each stated range); middle half ${usd(p.p25!)} to ${usd(p.p75!)}.${o.base != null ? ` Your base is above the middle of ${p.below} of the ${p.n} posted ranges.` : ""} What it is: what employers hiring now post, not what they pay.`);
   }
-  if (isUsd(o) && m.pub.every((b) => !b.shown) && !p?.shown) lines.push("So I have no market number for this one, and I won't make one up.");
+  if (!why && m.pub.every((b) => !b.shown) && !p?.shown) lines.push("So I have no market number for this one, and I won't make one up.");
   const uniq = [...new Set(urls)];
   if (uniq.length) lines.push("Sources:", ...uniq);
   return lines;
@@ -236,7 +242,7 @@ function marketLines(o: Offer, m: Market): string[] {
 function offerLine(f: { offer: Offer; equity: string | null }, check: boolean): string {
   const o = f.offer;
   const head = [o.company, titleOf(o), placeOf(o)].filter(Boolean).join(", ");
-  const pay = [o.base != null ? `base ${m$(o, "base", o.base)}${o.hourly ? ` (${rateIn(o.hourly, cur(o, "base"))} an hour x 2,080 hours)` : ""}` : null, o.signing != null ? `signing ${m$(o, "signing", o.signing)}` : null,
+  const pay = [o.base != null ? `base ${m$(o, "base", o.base)}${rateNote(o, cur(o, "base"))}` : null, o.signing != null ? `signing ${m$(o, "signing", o.signing)}` : null,
     o.bonus != null ? `bonus ${m$(o, "bonus", o.bonus)}` : null, o.bonus_target != null ? `target bonus ${m$(o, "bonus_target", o.bonus_target)} (not guaranteed)` : null,
     o.bonus_pct != null ? `target bonus ${o.bonus_pct}%${o.base != null ? ` (${m$(o, "base", o.base * o.bonus_pct / 100)}, not guaranteed)` : ""}` : null].filter(Boolean).join(", ");
   const eq = f.equity ? equityValue(f.equity) : null;
@@ -254,7 +260,7 @@ const isEstimate = (f: OnFile) => f.src?.base === "your estimate";
 const guaranteed = (o: Offer) => o.base != null && oneCurrency(o) ? o.base + (o.signing ?? 0) + (o.bonus ?? 0) : null;
 // The figures that were not added, said each in its own currency.
 const andList = (xs: string[]) => xs.length <= 2 ? xs.join(" and ") : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`;
-const notAdded = (o: Offer) => `not added up: ${andList([o.base != null ? `base ${m$(o, "base", o.base)}` : null, o.signing != null ? `signing bonus ${m$(o, "signing", o.signing)}` : null, o.bonus != null ? `bonus ${m$(o, "bonus", o.bonus)}` : null].filter((x): x is string => !!x))} are in different currencies, and no sourced exchange rate is on file, so nothing is converted`;
+const notAdded = (o: Offer) => `not added up: ${andList([o.base != null ? `base ${m$(o, "base", o.base)}` : null, o.signing != null ? `signing bonus ${m$(o, "signing", o.signing)}` : null, o.bonus != null ? `bonus ${m$(o, "bonus", o.bonus)}` : null].filter((x): x is string => !!x))} ${curs(o).every(known) ? "are in different currencies, and no sourced exchange rate is on file, so nothing is converted" : "are not all in a stated currency, so nothing is added or converted"}`;
 const targetAmount = (o: Offer) => o.bonus_target != null ? o.bonus_target : o.bonus_pct != null && o.base != null ? Math.round(o.base * o.bonus_pct / 100) : null;
 // F-15 (offer comparison File): the offers on file as rows, each value with its source; a value not given is Unknown;
 // code's arithmetic is labelled "worked out". No row adds equity to cash, and no row is called a total.
@@ -266,7 +272,7 @@ export function comparisonOf(list: OnFile[]): OfferComparison {
     const o = f.offer, s = f.src ?? {};
     const src = (k: keyof NonNullable<OnFile["src"]>) => S(s[k] ?? "you told me");
     const rows: KV[] = [];
-    rows.push(o.base != null ? { k: "Base", v: o.hourly ? `${rateIn(o.hourly, cur(o, "base"))} an hour x 2,080 hours = ${m$(o, "base", o.base)} a year` : m$(o, "base", o.base), src: src("base") } : unknown("Base"));
+    rows.push(o.base != null ? { k: "Base", v: o.rate && o.annualized ? `${rateIn(o.rate.amount, cur(o, "base"))} ${PER[o.rate.period]} x ${o.annualized.assumption} = ${m$(o, "base", o.base)} a year` : o.hourly ? `${rateIn(o.hourly, cur(o, "base"))} an hour x 2,080 hours = ${m$(o, "base", o.base)} a year` : m$(o, "base", o.base), src: src("base") } : unknown("Base"));
     rows.push(o.signing != null ? { k: "Signing bonus", v: m$(o, "signing", o.signing), src: src("signing") } : unknown("Signing bonus"));
     const t = targetAmount(o);
     const bonus = [o.bonus != null ? `${m$(o, "bonus", o.bonus)} guaranteed` : null, o.bonus_target != null ? `target ${m$(o, "bonus_target", o.bonus_target)}, not guaranteed` : null,
@@ -311,6 +317,7 @@ async function benchTurn(f: OnFile, check: boolean, notGiven: Field[], postings:
   if (!f.offer.company && !check) head.push("No company given, so the employer's own filings are not looked up.");
   const from = sourceLine(f);
   if (from) head.push(`Where these came from: ${from}.`);
+  for (const fact of [known(f.offer.currency) ? f.offer.currency_fact : null, f.offer.period_fact]) if (fact) head.push(`${fact[0].toUpperCase()}${fact.slice(1)}.`);
   if ((f.benefits ?? []).length) head.push(`Benefits as you gave them (not added to pay): ${f.benefits!.map((b) => b.text).join("; ")}.`);
   if (isEstimate(f)) head.push("This is your estimate of an offer, not an offer you have, so I won't cite it as an offer in a counter.");
   const groups = [[...head, "", ...marketLines(f.offer, m)]];
@@ -332,7 +339,7 @@ async function counterOf(f: OnFile, m: Market, state: OfferChatState, _now: numb
   // Other offers the person told this thread about (company and base in their words) are competing offers.
   // An offer the person only estimated is not one they have: never cited as a competing offer (LOOP 13).
   // D-069: a competing offer in another currency is never weighed against this base (that would need a sourced rate).
-  const same = (c: string | undefined) => (c ?? "USD") === (o.currency ?? "USD");
+  const same = (c: string | undefined) => sameCurrency(c, o.currency);
   const competing = [...o.competing.filter((c) => same(c.currency)), ...state.offers.filter((x) => x !== f && !isEstimate(x) && !sameCompany(x.offer.company, o.company) && x.offer.base != null && x.offer.company && same(x.offer.currency))
     .map((x) => ({ company: x.offer.company, base: x.offer.base!, said: x.said }))];
   const script = (CareerNegotiation as any).factScript({ company: o.company, role: titleOf(o), base: o.base, signing: o.signing }, { competing, deadline: o.deadline, benchmark: bench ? { median: bench.median, cite: bench.cite } : null, money: moneyFor(o) });
@@ -374,14 +381,14 @@ async function compareTurn(list: OnFile[], postings: PostingsReader | null, data
   if (est.length) lines.push(`${est.map((f, i) => name(f, i)).join(" and ")}: your estimate of an offer, not an offer you have.`);
   lines.push(row("Against the market", (f, i) => {
     const b = citable(ms[i]);
-    if (!b) return isUsd(f.offer) ? "no market number with enough data" : `no market number (the offer is in ${f.offer.currency}; the public pay data on file is in US dollars)`;
+    if (!b) return isUsd(f.offer) ? "no market number with enough data" : `no market number (the offer is in ${curName(f.offer.currency)}; the public pay data on file is in US dollars)`;
     const pub = ms[i].pub.find((x) => x.shown && x.median === b.median && x.cite && b.cite.startsWith(x.cite));
     const pct = f.offer.base != null && pub ? percentileOf(f.offer.base, pub) : null;
     return `median ${usd(b.median)} (${b.cite})${pct ? `, your base ${pct}` : f.offer.base != null ? `, your base ${f.offer.base >= b.median ? "at or above" : "below"} it` : ""}`;
   }));
   // D-069: offers said in different currencies are shown each in its own and never converted or ranked against each other.
   const currencies = [...new Set(list.map((f) => f.offer.currency ?? "USD"))];
-  if (currencies.length > 1) lines.push(`Currencies: ${list.map((f, i) => `${name(f, i)} in ${f.offer.currency ?? "USD"}`).join(", ")}. No sourced exchange rate is on file, so the amounts are not converted, and the offers are not ranked on pay against each other.`);
+  if (currencies.length > 1 || !currencies.every(known)) lines.push(`Currencies: ${list.map((f, i) => `${name(f, i)} in ${curName(f.offer.currency)}`).join(", ")}. No sourced exchange rate is on file, so the amounts are not converted, and the offers are not ranked on pay against each other.`);
   const places = new Set(list.map((f) => f.offer.metro ?? f.offer.city));
   lines.push(places.size > 1 ? "Cost of living: no cost-of-living dataset is on file, so the places are not adjusted against each other." : "Cost of living: same place, so no adjustment is needed.");
   const deadlines = list.filter((f) => f.offer.deadline);
@@ -403,7 +410,8 @@ function keep(state: OfferChatState, f: OnFile): OfferChatState {
   for (const c of f.offer.competing) {
     if (!c.company || offers.some((x) => sameCompany(x.offer.company, c.company))) continue;
     const o = parseOfferWords(c.said, offerData.get());
-    o.company = c.company; o.base = c.base; o.competing = []; o.currency = c.currency ?? "USD"; o.currencies = { ...(o.currencies ?? {}), base: o.currency };
+    Object.assign(o, { company: c.company, base: c.base, hourly: null, rate: null, annualized: null, period_fact: null, competing: [], currency: c.currency ?? UNKNOWN_CURRENCY, marks: undefined });
+    o.currencies = { ...(o.currencies ?? {}), base: o.currency }; o.currency_fact = known(o.currency) ? null : "currency not stated";
     offers.push(onFile(o, null, c.said, c.said, f.at));
   }
   return { ...state, pieces: [], asked: [], offers: offers.slice(-MAX_ON_FILE) };
@@ -463,7 +471,7 @@ export async function offerChatTurn(o: { message: string; state: OfferChatState 
   const { equity, rest } = equityOf(message);
   const offer = parseOfferWords(rest, data);
   const isOffer = OFFER_WORDS.test(message), isCheck = CHECK.test(message);
-  if (offer.base != null && (isOffer || isCheck || negotiate) && (offer.role || offer.city || offer.company)) {
+  if ((offer.base != null || offer.rate) && (isOffer || isCheck || negotiate) && (offer.role || offer.city || offer.company)) {
     const check = !isOffer && !offer.company;
     const f = onFile(offer, equity, rest, message, o.now);
     const missing = missingOf(offer);

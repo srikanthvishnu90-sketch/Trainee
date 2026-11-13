@@ -24,13 +24,16 @@ export const ONE_ADDRESS = /^[A-Za-z0-9._%+-]{1,64}@(?:[A-Za-z0-9-]{1,63}\.)+[A-
 // D-062 (answering an email): a reply is threaded to the email it answers, In-Reply-To and References set to that email's own
 // Message-ID (one id, angle brackets, no spaces or line breaks; anything else is refused, never cleaned) and the Gmail thread id.
 // from (D-062): which of the person's own Google accounts sends it (the caller's token picks it); absent, the first grant.
-export interface Threading { inReplyTo: string; threadId: string | null; from?: string | null }
+// messageId: this message's own Message-ID, the same for every try of one card (career_mail_reply.ts replyMessageId), so a try
+// whose outcome is unknown can be looked for in Sent (rfc822msgid) before anything is sent again.
+export interface Threading { inReplyTo: string; threadId: string | null; from?: string | null; messageId?: string | null }
 export const MESSAGE_ID = /^<[^<>\s@]{1,200}@[^<>\s@]{1,200}>$/;
 export function buildRaw(m: Message, t?: Threading | null): string {
   if (!ONE_ADDRESS.test(m.to)) throw new Error("one recipient, one plain address: no lists, names or separators");
   if (/[\r\n]/.test(m.subject) || /[\r\n]/.test(m.to)) throw new Error("a header with a line break is refused");
   if (t && !MESSAGE_ID.test(t.inReplyTo)) throw new Error("the email being answered has no usable Message-ID");
-  const head = [`To: ${m.to}`, `Subject: ${encodeWord(m.subject)}`, ...(t ? [`In-Reply-To: ${t.inReplyTo}`, `References: ${t.inReplyTo}`] : []), "MIME-Version: 1.0", "Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: 8bit"];
+  if (t?.messageId && !MESSAGE_ID.test(t.messageId)) throw new Error("the message's own Message-ID is not usable");
+  const head = [`To: ${m.to}`, `Subject: ${encodeWord(m.subject)}`, ...(t?.messageId ? [`Message-ID: ${t.messageId}`] : []), ...(t ? [`In-Reply-To: ${t.inReplyTo}`, `References: ${t.inReplyTo}`] : []), "MIME-Version: 1.0", "Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: 8bit"];
   return b64url(`${head.join("\r\n")}\r\n\r\n${m.text.replace(/\r?\n/g, "\r\n")}`);
 }
 
@@ -40,13 +43,14 @@ export function gmailSender(d: GmailDeps) {
   return {
     async send(userId: string, m: Message, t?: Threading | null): Promise<SendResult> {
       let raw: string;
-      try { raw = buildRaw(m, t); } catch (e) { return { status: "ERROR", detail: e instanceof Error ? e.message : String(e) }; }
+      try { raw = buildRaw(m, t); } catch (e) { return { status: "ERROR", detail: e instanceof Error ? e.message : String(e), not_sent: true }; }
       const token = await d.token(userId, GMAIL_SEND_SCOPE);
       if (!token) return { status: "NOT_WIRED", reason: "no career Google grant with gmail.send" };
       const thread = t?.threadId && /^[A-Za-z0-9_-]{1,64}$/.test(t.threadId) ? { threadId: t.threadId } : {};
       const r = await d.fetch(`${API}/messages/send`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ raw, ...thread }) });
       if (r.status === 429 || r.status === 403 && /rateLimit|quota/i.test(await r.clone().text())) return { status: "RATE_LIMITED", detail: `HTTP ${r.status}` };
-      if (!r.ok) return { status: "ERROR", detail: `send: HTTP ${r.status}` };
+      // A 4xx is Gmail's refusal: nothing went. A 5xx (or no answer at all: the fetch throws) says nothing about whether it went.
+      if (!r.ok) return { status: "ERROR", detail: `send: HTTP ${r.status}`, ...(r.status >= 400 && r.status < 500 ? { not_sent: true } : {}) };
       const j: any = await r.json().catch(() => ({}));
       return j?.id ? { status: "sent", id: String(j.id), thread_id: String(j.threadId ?? "") } : { status: "ERROR", detail: "send: no message id" };
     },

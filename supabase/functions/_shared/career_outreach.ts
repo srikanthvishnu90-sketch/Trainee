@@ -31,7 +31,12 @@ import { autoReply, deliveryNotice, newText, optedOut } from "./career_send_rail
 import { AUTOMATED_WHY, automatedInbox } from "./automated_inbox.ts";
 
 export type ModelFn = (payload: any) => Promise<any>;
-export interface Recipient { name: string; firm: string; title: string; school: string; email: string; source: string; prior_firms?: string[]; address?: "published" | "inferred" }
+export interface Recipient { name: string; firm: string; title: string; school: string; email: string; source: string; prior_firms?: string[]; address?: "published" | "inferred";
+  // A reply to an email in the person's own inbox (career_mail_reply.ts): its own kind, never an outreach draft. It is listed,
+  // approved and sent only through its own card; every outreach entry point below skips it (isMailReply). The row's recipient is
+  // written once, at the card (the store's update never rewrites it), and the card's hash covers `reply`.
+  kind?: "mail_reply"; reply?: { from: string | null; in_reply_to: string; thread_id: string | null } }
+export const isMailReply = (d: { recipient?: { kind?: unknown } | null } | null | undefined): boolean => d?.recipient?.kind === "mail_reply";
 export type Status = "shown" | "approved" | "skipped" | "sending" | "sent" | "failed" | "bounced" | "replied";
 export interface OutreachDraft {
   id: string; batch_id: string; thread_id: string | null; n: number;
@@ -782,7 +787,7 @@ export async function outreachTurn(o: {
   const anytime = r.kind === "skip" && !!r.anytime;
   if (r.kind !== "show" && r.kind !== "lapsed" && !anytime && (await o.store.lastAssistantIntent(o.threadId)) !== OUTREACH_INTENT) return null;
   if (anytime && (await o.store.lastAssistantIntent(o.threadId)) !== OUTREACH_INTENT) {
-    const b = await o.store.latestBatch(o.userId);
+    const b = (await o.store.latestBatch(o.userId)).filter((d) => !isMailReply(d));
     if (!r.ns.every((n) => b.some((d) => d.n === n && (d.status === "shown" || d.status === "approved")))) return null;
   }
   // SERIAL-1510 (b): approvals the run dropped as expired are said when the person next asks, never proactively; the old
@@ -799,7 +804,7 @@ export async function outreachTurn(o: {
     const parts = [head, ...batchMessages(shown)];
     return { reply: parts.join("\n\n"), status: "lapsed_shown", intent: OUTREACH_INTENT, parts };
   }
-  const batch = await o.store.latestBatch(o.userId);
+  const batch = (await o.store.latestBatch(o.userId)).filter((d) => !isMailReply(d)); // a mail reply is never listed or approved here
   const note = lapsed.length ? `${lapsedLine(lapsed.length)}\n\n` : "";
   if (!batch.length) return r.kind === "show" ? { reply: `${note}There are no outreach drafts yet. Ask me to draft emails to people on your list.`, status: lapsed.length ? "empty_lapsed" : "empty", intent: "career_outreach_answer" } : null;
   const open = (s: string, status: string) => ({ reply: s, status, intent: OUTREACH_INTENT });
@@ -928,7 +933,7 @@ export interface ApprovedItem { draftId: string; approvalHash: string; n: number
 export async function approvedOutreach(store: OutreachStore, userId: string): Promise<(ApprovedItem & { approvedAt: string | null })[]> {
   // NO LIMITS: every approved draft, however many (no newest-500 window).
   const rows = store.approvedDrafts ? await store.approvedDrafts(userId) : store.history ? await store.history(userId, Number.MAX_SAFE_INTEGER) : await store.latestBatch(userId);
-  return rows.filter((d) => d.status === "approved" && !!d.approved_hash && d.approved_hash === d.hash)
+  return rows.filter((d) => !isMailReply(d) && d.status === "approved" && !!d.approved_hash && d.approved_hash === d.hash)
     .map((d) => ({ draftId: d.id, approvalHash: d.approved_hash!, n: d.n, batchId: d.batch_id, to: d.recipient.email, approvedAt: d.approved_at }));
 }
 
@@ -959,7 +964,9 @@ export function sendYourselfText(ds: Pick<OutreachDraft, "n" | "recipient" | "su
 }
 
 // ------------------------------------------------------------------------------------------------ the scheduled run
-export type SendResult = { status: "sent"; id: string; thread_id: string } | { status: "NOT_WIRED"; reason: string } | { status: "ERROR"; detail: string } | { status: "RATE_LIMITED"; detail: string };
+// ERROR with not_sent true: the provider refused it and nothing went (a 4xx, or a message that could not be built). ERROR without
+// it: the outcome is unknown (no answer, a timeout, a 5xx): the provider may have accepted it, so it is never tried again blind.
+export type SendResult = { status: "sent"; id: string; thread_id: string } | { status: "NOT_WIRED"; reason: string } | { status: "ERROR"; detail: string; not_sent?: boolean } | { status: "RATE_LIMITED"; detail: string };
 export interface Sender { send(userId: string, m: Message): Promise<SendResult> }
 export interface ReplyMail { from: string; subject: string; snippet: string; at: string }
 export type ReplyRead = { status: "ok"; messages: ReplyMail[] } | { status: "NOT_WIRED" } | { status: "ERROR"; detail: string };
@@ -977,7 +984,8 @@ export async function runOutreachSends(o: SendRun) {
   const waiting = new Set<string>(); // Gmail said "not now" (or is not wired) for this person this run
   const tried = new Set<string>();
   for (;;) {
-    const due = (await o.store.approvedDue(o.page ?? 500)).filter((x) => !tried.has(x.draft.id));
+    // A mail reply is sent only by its own card's yes (career_mail_reply.ts), never by this run.
+    const due = (await o.store.approvedDue(o.page ?? 500)).filter((x) => !tried.has(x.draft.id) && !isMailReply(x.draft));
     if (!due.length) break;
     const before = stats.sent;
     for (const { user_id, draft } of due) {
@@ -997,6 +1005,7 @@ export async function runOutreachSends(o: SendRun) {
 }
 // One approved draft through the claim and the sender. "wait": Gmail is not taking this person's mail right now.
 async function sendOne(o: SendRun, stats: SendStats, user_id: string, draft: OutreachDraft): Promise<"done" | "wait"> {
+  if (isMailReply(draft)) { stats.refused.mail_reply = (stats.refused.mail_reply ?? 0) + 1; return "done"; }
   const m = messageOf(draft);
   if (!/^[^\s@,;<>]+@[^\s@,;<>]+$/.test(m.to)) { stats.refused.bad_address = (stats.refused.bad_address ?? 0) + 1; return "done"; }
   const hash = await payloadHash(m);
@@ -1059,14 +1068,19 @@ export async function recordReply(o: { store: OutreachStore; userId: string; dra
 export async function runOutreachReplies(o: { store: OutreachStore; read: ReplyReader; now: number; events?: EventStore | null; limit?: number }) {
   const stats = { checked: 0, replies: 0, stops: 0, bounces: 0, not_wired: 0, errors: 0, error: null as string | null };
   for (const { user_id, draft } of await o.store.sentAwaiting(o.limit ?? 20, new Date(o.now - 30 * 86400_000).toISOString())) {
-    if (!draft.gmail_thread) continue;
+    // Only a thread Trainee started is read for the contact's answer. A mail reply answers an email that was already in the
+    // person's inbox: that thread holds the email being answered, which is not a reply to anything Trainee sent.
+    if (!draft.gmail_thread || isMailReply(draft)) continue;
     const r = await o.read(user_id, draft.gmail_thread).catch((e) => ({ status: "ERROR", detail: String(e) }) as ReplyRead);
     if (r.status === "NOT_WIRED") { stats.not_wired++; continue; }
     if (r.status !== "ok") continue;
     stats.checked++;
     // WO-091c: a failed write for one thread is counted; the next thread is still read.
     try {
+      // An answer is newer than the message it answers: anything on the thread from before the send is not one.
+      const sentAt = Date.parse(draft.sent_at ?? "");
       for (const mail of r.messages) {
+        if (Number.isFinite(sentAt) && !(Date.parse(mail.at) > sentAt)) continue;
         const k = await recordReply({ store: o.store, userId: user_id, draft, mail, now: o.now, events: o.events });
         if (k === "other") continue;
         if (k === "bounce") stats.bounces++; else if (k === "stop") { stats.stops++; stats.replies++; } else stats.replies++;
@@ -1118,7 +1132,7 @@ export function memoryOutreachStore(): OutreachStore & { dump(): { drafts: (Outr
       return copy(out);
     },
     async latestBatch(u: string) {
-      const mine = drafts.filter((d) => d.user_id === u);
+      const mine = drafts.filter((d) => d.user_id === u && !isMailReply(d)); // the newest outreach batch: a mail reply card is not one
       if (!mine.length) return [];
       const b = mine[mine.length - 1].batch_id;
       return copy(mine.filter((d) => d.batch_id === b).sort((a, z) => a.n - z.n));
@@ -1241,9 +1255,12 @@ export function supabaseOutreachStore(admin: any): OutreachStore {
       return (must(await admin.from("career_outreach_drafts").insert(rows).select(COLS), "save the drafts") ?? []).map(fromRow);
     },
     async latestBatch(u) {
-      const last = must(await admin.from("career_outreach_drafts").select("batch_id").eq("user_id", u).order("created_at", { ascending: false }).limit(1), "read the latest batch");
+      // The newest outreach batch. A mail reply card (its own kind, saved after it) is not a batch: it is passed over, so the
+      // outreach drafts under it stay reachable and it is never listed or approved as one. 100 newest rows are looked at; with
+      // more reply cards than that since the last batch, no batch is found and nothing can be approved (the person asks again).
+      const last = (must(await admin.from("career_outreach_drafts").select("batch_id,recipient").eq("user_id", u).order("created_at", { ascending: false }).limit(100), "read the latest batch") ?? []).filter((x: any) => !isMailReply(x));
       if (!last?.length) return [];
-      return (must(await admin.from("career_outreach_drafts").select(COLS).eq("user_id", u).eq("batch_id", last[0].batch_id).order("n"), "read the batch") ?? []).map(fromRow);
+      return (must(await admin.from("career_outreach_drafts").select(COLS).eq("user_id", u).eq("batch_id", last[0].batch_id).order("n"), "read the batch") ?? []).map(fromRow).filter((d: OutreachDraft) => !isMailReply(d));
     },
     async update(u, d, expect = {}) {
       let q = admin.from("career_outreach_drafts").update({ subject: d.subject, body: d.body, hash: d.hash, status: d.status, approved_hash: d.approved_hash, approved_at: d.approved_at, sent_at: d.sent_at, gmail_id: d.gmail_id, gmail_thread: d.gmail_thread, result: d.result, shared: d.shared ?? [], updated_at: new Date().toISOString() })

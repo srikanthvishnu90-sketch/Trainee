@@ -1198,6 +1198,10 @@ const CareerRender = (() => {
       const t = m[0].trim(), d = t.replace(/\D/g, ""), plus = t[0] === "+";
       const nanp = plus ? (d[0] === "1" ? d.slice(1) : null) : d.length === 11 && d[0] === "1" ? d.slice(1) : /^\(?\d{3}\)?[\s.-]*\d{3}[\s.-]*\d{4}$/.test(t) ? d : null;
       let bad = false;
+      // NOT refused: "+1 555-01xx" with no area code. Two existing architect tests print exactly that as the person's phone and
+      // expect a pass (r9-resume-fit-send-20261108.test.ts:115 and :159, resume-design.test.ts:317-327); refusing it needs
+      // those fixtures moved first. Every other spelling of the fiction range is refused.
+      if (plus && /^155501\d\d$/.test(d)) continue;
       if (d.length < 7 || (!plus && d.length < 10 && t[0] === "(")) bad = /^\(\d{3}\)|^\d{3}-\d{3}$/.test(t);                  // a phone cut short; a ZIP or a year is not one
       else if (d.length > 15 || (plus && (d[0] === "0" || d.length < 8))) bad = true;
       else if (/^(\d)\1+$/.test(d) || "01234567890123456789".includes(d) || "98765432109876543210".includes(d)) bad = true;

@@ -288,8 +288,8 @@ function INVALID() {
 
 // ---- answers ---------------------------------------------------------------------------------------------------------------
 const FACT_RULES = [
-  [/^first name\b|^given name\b|^vorname\b|^voornaam\b|^pr nom\b|^nombre$/, "first_name"],
-  [/^last name\b|^surname\b|^family name\b|^nachname\b|^achternaam\b|^apellidos?\b|^nom de famille\b/, "last_name"],
+  [/^first name\b|^given name\b|^vorname\b|^voornaam\b|^pr nom\b|^nombre$|^f rnamn$|^fornamn$|^fornavn$|^etunimi$/, "first_name"],
+  [/^last name\b|^surname\b|^family name\b|^nachname\b|^achternaam\b|^apellidos?\b|^nom de famille\b|^efternamn$|^etternavn$|^efternavn$|^cognome$|^sukunimi$|^nazwisko$/, "last_name"],
   [/^preferred (first )?name\b/, "preferred_name"],
   [/^(full |legal |your )?name$|^full legal name\b/, "full_name"],
   // The same question in the languages the benchmark's boards ask it in (German, Dutch, Spanish, French, Portuguese, Swedish).
@@ -732,6 +732,7 @@ function isHoneypot(d) {
   if (v.hidden || v.clipped || v.w < 2 || v.h < 2 || v.right <= 0 || v.bottom <= 0 || v.left >= v.pageW) return true;
   return TRAP_NAME.test(v.name || "") && !v.labelSeen;
 }
+const BARE_NAME = /^(name|namn|naam|navn|nimi|nom|nome|nombre)$/;
 // Decide what to do with one question. status: fill | ask | skip. Never invents a value.
 function decide(d, ctx) {
   const { facts, answers, resumePath } = ctx;
@@ -764,6 +765,20 @@ function decide(d, ctx) {
   }
   const a = answerFor(d.label, answers);
   if (!blank(a)) return { status: "fill", value: String(a), source: "answer" };
+  // Round 3 (review of #831): a bare "Name" in a language where it may be one half (Swedish "Namn" beside "Efternamn", French
+  // "Nom" beside "Prénom", Italian "Nome" beside "Cognome") is the half its neighbours leave, or what the box's own name says
+  // (candidate[first_name]); alone, a word that means "name" is the full name, and one that may mean a half (nom, nome, nombre) is
+  // asked. Both halves beside it: asked. The full name is never typed into a first-name box.
+  const bare = BARE_NAME.exec(norm(d.label));
+  if (bare && (!d.kind || ["text", "textarea"].includes(d.kind))) {
+    const own = String(d.name || "");
+    const keys = new Set((ctx.siblings || []).filter((l) => norm(l) !== norm(d.label)).map((l) => factKey(l)));
+    const half = /first|given|fname|vorname|prenom/i.test(own) ? "first_name" : /last|family|surname|lname|nachname/i.test(own) ? "last_name"
+      : keys.has("first_name") && keys.has("last_name") ? "ask" : keys.has("last_name") ? "first_name" : keys.has("first_name") ? "last_name" : /^(nom|nome|nombre)$/.test(bare[1]) ? "ask" : "full_name";
+    const value = half === "ask" ? undefined : half === "full_name" ? factValue("full name", facts || {}) : (facts || {})[half];
+    if (!blank(value)) return { status: "fill", value: String(value), source: "fact" };
+    return d.required || half === "ask" ? { status: "ask", reason: "no_confirmed_answer" } : { status: "skip", reason: "optional_left_blank" };
+  }
   if (d.eeo) {
     if (facts && facts.eeo_policy === "decline" && ["select", "combobox", "radio", "buttons"].includes(d.kind)) return { status: "fill", pick: "decline", source: "eeo_policy" };
     return d.required ? { status: "ask", reason: "eeo_needs_your_choice" } : { status: "skip", reason: "eeo_left_blank" };
@@ -828,6 +843,7 @@ async function fillForm(page, ctx0) {
     ctx.labelCount = labelCounts(qs);
     ctx.labelKinds = labelKinds(qs);
     ctx.labelNames = labelNames(qs);
+    ctx.siblings = qs.map((x) => x.label);
     const fresh = qs.filter((d) => !handled.has(`${d.label}|${d.kind}|${d.name}`));
     if (!fresh.length) break;
     for (const d of fresh) {
@@ -981,6 +997,9 @@ async function driftedFills(page, filled, facts = {}) {
     if (now.trim() === String(f.value).trim()) continue;
     if (held[i] && holdsApproved({ ...held[i], held: now }, f.value, facts)) continue;
     if (isPhone(f.d, f.value) && await phoneSame(page, f.d, f.value, now)) continue;
+    // Round 3: a phone box that reformats on blur ("+1 415 555 0100" shown as "(415) 555-0100") holds the same number when its
+    // digits are the approved ones, less only the approved number's own country code. Any other digit refuses.
+    if (isPhone(f.d, f.value)) { const cc = /^\s*\+(\d{1,3})[\s\-.(]/.exec(String(f.value)), want = digitsOf(f.value), got = digitsOf(now); if (got && (got === want || (cc && want === cc[1] + got))) continue; }
     out.push(f.label);
   }
   return out;

@@ -237,7 +237,7 @@ export function sentenceOf(page: string, quote: string): string | null {
 //   summary, the comparison, the conditions and risks, the File's thesis, title and labels, the company brief and every sentence of
 //   the chat reply (enforceMarketReplySupported). OFF: tests/architect/pending/research-support-judge-20261113.test.ts is its
 //   acceptance test, and the header of that file lists the existing assertions that fail with it on.
-export const FAIL_CLOSED = { figures: false, support: false };
+export const FAIL_CLOSED = { figures: false, support: true }; // support ON: owner decision 2026-11-13 ("Switch it on now")
 const NEGATING = /\b(?:not|no|never|none|neither|nor|nobody|nothing|nowhere|without|unlike|cannot|except|excluding|hardly|barely|scarcely|rarely|seldom|false|untrue|lacks?|lacking|fail(?:s|ed|ing)?|den(?:y|ies|ied)|refus(?:e|es|ed))\b|n['’]t\b/i;
 export const negates = (s: string) => NEGATING.test(readAlike(String(s ?? "")));
 // D-071: one sourced line, checked, with why it was dropped. A claim that only rewords its quote (its figures all in the quote, at

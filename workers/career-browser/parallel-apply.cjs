@@ -474,7 +474,9 @@ function GUARD([want, opaque, rules]) {
   const tok = new RegExp(opaque, "i"), sens = new RegExp(rules.sensitive, "i"), w = JSON.parse(want).rows, wantRows = JSON.stringify(w);
   const val = (v) => (typeof v === "string" ? v.replace(/\r\n/g, "\n") : `file:${v.name}:${v.size}`);
   const now = () => { const rows = []; for (const [k, v] of new FormData(f)) if (!tok.test(k)) rows.push([k, val(v)]); return JSON.stringify(rows); };
-  const differs = (got) => { for (const [k, v] of got) { if (tok.test(k)) continue; const mine = w.filter((x) => x[0] === k); if (!mine.length || !mine.some((x) => x[1] === val(v))) return k; } return null; };
+  // A field the form did not have is allowed only as one of the page's own constants (a value on the page before the fill).
+  const constant = (k, v) => typeof v === "string" && (rules.hidden || []).some((h) => h[0] === k && h[1] === v);
+  const differs = (got) => { for (const [k, v] of got) { if (tok.test(k)) continue; const mine = w.filter((x) => x[0] === k); if (!mine.length && constant(k, v)) continue; if (!mine.length || !mine.some((x) => x[1] === val(v))) return k; } return null; };
   const names = new Set(w.map((x) => String(x[0]).toLowerCase().replace(/[^a-z0-9]/g, "")));
   const jsonBad = (s) => { let j; try { j = JSON.parse(s); } catch { return null; } let bad = null; const walk = (o, key) => { if (bad) return; if (o && typeof o === "object") { for (const [k, v] of Object.entries(o)) walk(v, k); return; } if (key && sens.test(key) && !names.has(String(key).toLowerCase().replace(/[^a-z0-9]/g, ""))) bad = key; }; walk(j, ""); return bad; };
   const bodyBad = (body) => {
@@ -492,6 +494,8 @@ function GUARD([want, opaque, rules]) {
   // A beacon sent while the page unloads (pagehide) is not seen by the network guard (the browser sends it as the page goes):
   // every beacon is refused here while the guard is armed; the application itself is not a beacon.
   try { navigator.sendBeacon = function () { g.side = (g.side || 0) + 1; return false; }; } catch (e) { /* read-only */ }
+  // Round 5: no WebSocket message and no new WebSocket while the guard is armed.
+  try { const OWS = window.WebSocket; WebSocket.prototype.send = function () { g.side = (g.side || 0) + 1; }; window.WebSocket = function () { g.side = (g.side || 0) + 1; throw new DOMException("blocked", "SecurityError"); }; window.WebSocket.prototype = OWS.prototype; } catch (e) { /* none */ }
   const osend = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.send = function (body) { const bad = bodyBad(body); if (bad) { g.aborted = true; g.why = bad; try { this.abort(); } catch (e) { /* none */ } return; } return osend.apply(this, arguments); };
   return { armed: true, same: now() === wantRows };
@@ -591,13 +595,56 @@ function bodyRows(contentType, body) {
 // JSON body only with keys and values the form itself holds. Every other request that sends something is aborted: another POST,
 // a beacon, a frame's form, a fetch or XHR or ping with parameters; GETs of the page's assets and navigations go on.
 const ASSET = new Set(["stylesheet", "script", "font", "media", "manifest", "texttrack"]);
+const ASSET_EXT = /\.(?:css|js|mjs|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|eot|mp4|webm|mp3|wav)$/i;
+// Round 5: the boards' own JSON names for the application's fields (posted by their own scripts), by board.
+const BOARD_SCHEMA = { workable: ["firstname", "lastname", "email", "phone", "resume", "headline", "summary", "address", "coverletter"], breezy: ["name", "email", "phone", "resume", "summary"],
+  lever: ["name", "email", "phone", "org", "resume", "urls"], ashby: ["name", "email", "phone", "resume"], greenhouse: ["firstname", "lastname", "email", "phone", "resume"] };
+// A board's own constant (a job id, a shortcode, a domain, a source the page set itself): a value of 4+ characters with no spaces
+// that was on the page before anything was filled, under a key that is no consent / opt-in / authorisation / demographic one.
+// Round 6 (review of round 5): a board's own constant is only a hidden input that was on the page at load, before anything was
+// filled, sent under its own name with its own value. A value merely found in the page's text, a script or an attribute is not one
+// (the page writes its own HTML).
+const nkey = (x) => String(x).toLowerCase().replace(/[^a-z0-9]/g, "");
+const isConstant = (s, k, v) => (s.hiddenAtLoad || []).some(([hk, hv]) => (hk === k || nkey(hk) === nkey(k)) && String(hv) === String(v));
+// Does an address carry an answer: a path segment or a query key or value that is a consent / sponsorship / demographic word, a legal
+// word, or a yes / no beside one of those, or one of the form's own values the approval does not hold.
+function carriesAnswer(url, want = []) {
+  let u; try { u = new URL(url); } catch { return true; }
+  const parts = [...u.pathname.split("/"), ...[...u.searchParams.entries()].flat()].map((x) => { try { return decodeURIComponent(x); } catch { return x; } }).filter(Boolean);
+  if (parts.some((x) => SENSITIVE_KEY.test(x) || LEGAL_WORD.test(x))) return true;
+  return false;
+}
+// The uploads of a multipart body that carry their bytes (a file the page built in memory; a file from disk arrives empty).
+function multipartFiles(contentType, body) {
+  const bd = /boundary=("?)([^";]+)\1/i.exec(String(contentType || "")); if (!bd) return [];
+  const out = [];
+  for (const part of String(body || "").split("--" + bd[2]).slice(1)) {
+    const m = /name="([^"]*)"; filename="([^"]*)"[^]*?\r\n\r\n([^]*)\r\n$/.exec(part);
+    if (m && m[3].length) out.push({ name: m[1], filename: m[2], bytes: Buffer.from(m[3], "latin1") });
+  }
+  return out;
+}
+const sameOrigin = (a, b) => { try { return new URL(a).origin === new URL(b).origin; } catch { return false; } };
 function submitWindowVerdict(r, s) {
   const noHash = (u) => String(u || "").replace(/#.*$/, "");
   const method = String(r.method || "GET").toUpperCase();
   let u; try { u = new URL(r.url); } catch { return "abort"; }
   if (method === "GET" && !(String(s.method).toUpperCase() === "GET" && noHash(r.url).split("?")[0] === noHash(s.action).split("?")[0] && r.navigation)) {
-    if (!u.search || r.navigation || ASSET.has(r.resourceType)) return "allow";
-    return "abort";
+    // Round 5: a navigation with parameters is only the board's own redirect after the approved POST; the page's script putting
+    // answers in an address it navigates to is aborted.
+    // Round 6: no address in the window carries an answer (v1: /done/consent/1/sponsorship/yes). A navigation with parameters is the
+    // approved POST's own redirect, or, once that POST has been answered, the page's own outcome page on its own origin (y1).
+    if (carriesAnswer(r.url, s.want)) return "abort";
+    if (r.navigation) return !u.search || (s.used && r.redirected) || (s.used && s.answered && sameOrigin(r.url, s.action)) ? "allow" : "abort";
+    // Anything else fetched by GET is allowed only as an asset by an asset's own address: no parameters, an asset's extension, on a
+    // host and under a folder the page loaded from before the window (or the very address it loaded), and not named after an answer.
+    const bare = noHash(r.url).split("?")[0];
+    if (u.search) return "abort";
+    if (s.seen && s.seen.has(bare)) return "allow";
+    if (!ASSET_EXT.test(u.pathname) || ![...(s.assets || [])].some((d) => bare.startsWith(d))) return "abort";
+    const file = decodeURIComponent(u.pathname.split("/").pop() || "").toLowerCase();
+    if ((s.want || []).some(([, v]) => String(v).length >= 3 && !/^file:/.test(v) && file.includes(String(v).toLowerCase()))) return "abort";
+    return "allow";
   }
   // The form's own submission (a navigation) goes to the form's address by its method. A board that posts the form with its own
   // script (fetch / XHR: Workable, Breezy) posts it to its own API address: allowed once, if its body holds exactly the form's data.
@@ -608,11 +655,18 @@ function submitWindowVerdict(r, s) {
   // An upload is compared by its file's name: "file:<name>" in a multipart body, the bare name in an urlencoded or GET one.
   const multipart = /multipart\/form-data/i.test(String(r.contentType || ""));
   const want = (s.want || []).map(([k, v]) => [k, /^file:/.test(v) ? (multipart ? String(v).replace(/^(file:[^:]*):\d+$/, "$1") : String(v).replace(/^file:([^:]*):\d+$/, "$1")) : v]);
+  // Round 5: an upload the request carries the bytes of must be the approved resume.
+  if (multipart && s.resumeSha && multipartFiles(r.contentType, r.body).some((f) => require("node:crypto").createHash("sha256").update(f.bytes).digest("hex") !== s.resumeSha)) return "abort";
   if (!rows) {
     let j; try { j = JSON.parse(String(r.body || "")); } catch { return "abort"; }
     rows = [];
     const walk = (o, key) => { if (o && typeof o === "object") { for (const [k, x] of Object.entries(o)) walk(x, k); return; } rows.push([key, String(o)]); };
     walk(j, "");
+    // Round 5: each key is one of the form's own names, the board's own schema, or holds one of the page's own constants.
+    const nk = (x) => String(x).toLowerCase().replace(/[^a-z0-9]/g, "");
+    const known = new Set([...want.map(([k]) => nk(k)), ...want.map(([k]) => nk(String(k).replace(/^.*\[([^\]]+)\]$/, "$1"))), ...(BOARD_SCHEMA[s.ats] || [])]);
+    if (rows.some(([k, v]) => !known.has(nk(k)) && !isConstant(s, k, v))) return "abort";
+    rows = rows.filter(([k, v]) => known.has(nk(k)) || !isConstant(s, k, v));
     // A board that posts its form as JSON names the fields its own way (Breezy: cName as "name"): each value must be one the form
     // holds (an upload by its file's name), under any key but a consent / opt-in / authorisation / demographic one the form does
     // not have. A value the form does not hold (an added "yes", a sentence, a true) refuses.
@@ -620,7 +674,11 @@ function submitWindowVerdict(r, s) {
     const names = new Set(want.map(([k]) => norm(k)));
     const values = new Set(want.map(([, v]) => String(v).replace(/^file:([^:]*)(?::\d+)?$/, "$1").replace(/\r\n/g, "\n")));
     if (rows.some(([k, v]) => (v !== "" && !values.has(String(v).replace(/\r\n/g, "\n"))) || (SENSITIVE_KEY.test(k) && !names.has(norm(k))))) return "abort";
-  } else if (sentDiffers(want, rows)) return "abort";
+  } else {
+    // Round 5: a field the form did not have is allowed only as one of the page's own constants (h4: a board's source field).
+    const names = new Set(want.map(([k]) => k));
+    if (sentDiffers(want, rows.filter(([k, v]) => names.has(k) || !isConstant(s, k, v)))) return "abort";
+  }
   s.used = true;
   return "allow";
 }
@@ -836,7 +894,8 @@ function followedPageRefusal(pageUrl, ats, followed) {
 // A posting whose link the board sends to a "not found" page (Lever's cyara posting to apply.workable.com/...?not_found=true): closed.
 const NOT_FOUND_URL = /[?&](?:error|not_found)=true\b/;
 async function attempt(browser, p, opts, timing) {
-  const ctx = await browser.newContext({ viewport: { width: 900, height: 1100 } });
+  // Round 5: no service worker: a worker's own requests would not pass the context's route (the guard).
+  const ctx = await browser.newContext({ viewport: { width: 900, height: 1100 }, serviceWorkers: "block" });
   const page = await ctx.newPage();
   // The answer to every request the Submit click sends that is not a GET (outcomeVerdict), counted from the instant before the click.
   const postAnswers = []; let watchPosts = false;
@@ -867,14 +926,18 @@ async function attempt(browser, p, opts, timing) {
   // disposed").
   await ctx.route("**/*", (route) => guardRoute(route).catch(() => route.abort("blockedbyclient").catch(() => {})));
   // Round 4: the submit window's network guard (submitWindowVerdict), set just before the click and cleared once the outcome is read.
-  let submitWindow = null;
+  let submitWindow = null, hiddenAtLoad = [];
+  const loadedBefore = new Set(); // every GET address the page loaded before the submit window (no parameters, no fragment)
   async function guardRoute(route) {
     const req = route.request();
+    if (!submitWindow && req.method() === "GET") { try { const x = new URL(req.url()); if (!x.search) loadedBefore.add(x.origin + x.pathname); } catch { /* none */ } }
     if (submitWindow) {
       let nav = false; try { nav = req.isNavigationRequest(); } catch { /* none */ }
       const buf = req.postDataBuffer();
-      const verdict = submitWindowVerdict({ method: req.method(), url: req.url(), resourceType: req.resourceType(), navigation: nav, contentType: (req.headers() || {})["content-type"], body: buf ? buf.toString("latin1") : null }, submitWindow);
+      const verdict = submitWindowVerdict({ method: req.method(), url: req.url(), resourceType: req.resourceType(), navigation: nav, redirected: !!req.redirectedFrom(), contentType: (req.headers() || {})["content-type"], body: buf ? buf.toString("latin1") : null }, submitWindow);
       if (verdict === "abort") { submitWindow.blocked.push(`${req.method()} ${req.url().slice(0, 120)}`); return route.abort("blockedbyclient"); }
+      // The approved request let out: its answer, once it arrives, opens the way to the page's own outcome page (y1).
+      if (submitWindow.used && !submitWindow.approvedReq && req.method() !== "GET") { const w = submitWindow; w.approvedReq = req; req.response().then((resp) => { if (resp) w.answered = true; }).catch(() => {}); }
     }
     // A gate may answer a request inside the browser itself (the strict benchmark's simulated resume upload): nothing is sent.
     if (opts.requestGate) { const gv = await opts.requestGate(req); if (gv && typeof gv === "object" && gv.fulfill) return route.fulfill(gv.fulfill); if (!gv) return route.abort("blockedbyclient"); }
@@ -1056,6 +1119,8 @@ async function attempt(browser, p, opts, timing) {
     // A step form is filled one step at a time: each step's questions answered and read back, then its one Continue pressed, until
     // the step with the Submit control. A step with anything handed back stops there, as on a one-page form. At most 8 steps.
     await declineCookies(page);
+    // Round 5: the page as it was before anything was filled: its own constants (a job id, a shortcode, a source) are known here.
+    hiddenAtLoad = await page.evaluate(() => [...document.querySelectorAll("input[type=hidden]")].filter((e) => e.name).map((e) => [e.name, String(e.value)])).catch(() => []);
     const fr = { map: [], filled: [], needsUser: [], failed: [], invalid: [] };
     for (let step = 0; ; step++) {
       const r = await fillForm(page, { ats: p.ats, facts: p.facts, answers: p.answers || {}, resumePath: p.resume.path });
@@ -1184,11 +1249,13 @@ async function attempt(browser, p, opts, timing) {
     // Past this line nothing is retried: the employer may have received it.
     const t2 = Date.now();
     // Round 2: the guard is armed and the form compared with the last look as the last step before the click; nothing between.
-    const armed = await page.evaluate(GUARD, [formSnap, OPAQUE.source, { sensitive: SENSITIVE_KEY.source }]).catch(() => ({ armed: false, same: formSnap === null }));
+    const armed = await page.evaluate(GUARD, [formSnap, OPAQUE.source, { sensitive: SENSITIVE_KEY.source, hidden: hiddenAtLoad }]).catch(() => ({ armed: false, same: formSnap === null }));
     if (!armed.same) throw new NeedsUser("page_changed_before_submit", p.url);
     timing.submitClicked = true;
     watchPosts = true;
-    if (sentRows) submitWindow = { action: tie.action, method: tie.method, want: sentRows, used: false, blocked: [] };
+    // Round 6: folders of assets only (never the page's own folder, which would take in any address on the host).
+    if (sentRows) submitWindow = { action: tie.action, method: tie.method, want: sentRows, used: false, answered: false, blocked: [], ats: p.ats, resumeSha: p.resume.sha256, hiddenAtLoad,
+      seen: new Set(loadedBefore), assets: new Set([...loadedBefore].filter((x) => ASSET_EXT.test(x)).map((x) => x.replace(/[^/]*$/, ""))) };
     // Nothing the application did not approve left the browser: the guard stopped every request, the application's own included.
     const heldBack = () => submitWindow && submitWindow.blocked.length && !submitWindow.used ? { status: "not_submitted", reason: "page_changed_at_submit", blocked: submitWindow.blocked.slice(0, 5), filled } : null;
     try {
@@ -1284,4 +1351,4 @@ async function runPool(browser, payloads, opts = {}) {
   return { results, wallMs: Date.now() - started, concurrency };
 }
 
-module.exports = { submitTargetRefusal, submitterControl, bodyRows, submitWindowVerdict, isStructuralHidden, sentDiffers, jsonDiffers, isErrorText, isOpaqueName, guardVerdict, GUARD, FORM_SNAP, outcomeVerdict, hiddenIsAnswer, HIDDEN_ANSWER, CAPTCHA_QUESTION, controlLabel, SUBMIT_DENY, checkGate, pickControls, outsideSubmitOf, isApplicationForm, submitTieRefusal, sentToJobList, SNAP, MARK, CONTROLS, closedOnPage, declineCookies, samePostingRedirect, followedPageRefusal, postingIds, CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };
+module.exports = { carriesAnswer, multipartFiles, submitTargetRefusal, submitterControl, bodyRows, submitWindowVerdict, isStructuralHidden, sentDiffers, jsonDiffers, isErrorText, isOpaqueName, guardVerdict, GUARD, FORM_SNAP, outcomeVerdict, hiddenIsAnswer, HIDDEN_ANSWER, CAPTCHA_QUESTION, controlLabel, SUBMIT_DENY, checkGate, pickControls, outsideSubmitOf, isApplicationForm, submitTieRefusal, sentToJobList, SNAP, MARK, CONTROLS, closedOnPage, declineCookies, samePostingRedirect, followedPageRefusal, postingIds, CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };

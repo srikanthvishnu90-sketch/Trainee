@@ -15,7 +15,7 @@ import { contentWords, numbersIn, numEq, specifics } from "./guard.ts";
 import { stripUrls } from "./reply.ts";
 import { parseDraft, readAlike } from "./draft_json.ts";
 import { type SourceKind, sourceKind } from "../../research_web.ts";
-import { bare, decide, indexPages, markSupported, quoteOf, supportOf, type SupportJudge, type Verdict, type Wanted } from "./support.ts";
+import { bare, decide, indexPages, markSupported, OUTAGE_LINE, quoteOf, supportOf, type SupportJudge, type Verdict, type Wanted } from "./support.ts";
 
 export interface MarketDeps {
   search: SearchProvider;
@@ -38,7 +38,8 @@ export interface MarketSource { n: number; url: string; title: string; fetched_a
 export type MarketResult =
   // checked (D-073 review): the pages that were opened and read when none of them supported an answer, so the reply that says it
   // could not confirm one carries the sources it checked. Empty or absent when no page could be opened.
-  | { status: "no_sources"; format: "inline"; notes: string[]; searched: string; note: string; audit?: ResearchAudit; checked?: MarketSource[]; layout?: "messages" }
+  // unchecked (FAIL_CLOSED.support, round 7): the judge could not answer; the reply is code's outage clause and the pages read.
+  | { status: "no_sources"; format: "inline"; notes: string[]; searched: string; note: string; audit?: ResearchAudit; checked?: MarketSource[]; layout?: "messages"; unchecked?: true }
   | { status: "ok"; format: "inline" | "file"; asked: "inline" | "file"; title: string; thesis: string | null; points: Cited[]; conditions: Cited[]; risks: Cited[];
       comparison: { options: string[]; rows: { label: string; cells: ({ value: string; cite: number[] } | null)[] }[] } | null;
       sources: MarketSource[]; file_url: string | null; dropped: number; notes: string[]; searched: string; note: string;
@@ -516,12 +517,13 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   // page sentence stands in its place in quotation marks, or the line is dropped. Nothing the old word checks allowed is taken on
   // trust: checkLine, sayer and the unconfirmed-reading form are not used on this path. A comparison cell has no quoted form (its
   // row label and column are judged with it): not supported, it is empty.
-  const idx = FAIL_CLOSED.support ? indexPages(pages, abbreviated, companies0, { sites: found.sites ?? [], ask: i.ask?.trim() ? i.ask : i.question }) : null;
+  const idx = FAIL_CLOSED.support ? indexPages(pages, abbreviated, companies0, { sites: [...(i.plan.sites ?? []), ...(found.sites ?? [])], ask: i.ask?.trim() ? i.ask : i.question }) : null;
   // Round 2: a page's own sentence is offered only as one unit of its page that may be quoted (support.ts quotable), never as two
   // lines read as one sentence.
   const units = new Set((idx?.pages ?? []).flatMap((p) => p.sentences.filter((u) => u.quotable).map((u) => u.text)));
   const pidx = (p: SourcePage | null) => p ? pages.indexOf(p) : -1;
   const THESIS = {}, sup = new Map<unknown, Verdict>(), srcOf = new Map<string, string>();
+  let judgeDown = false;
   if (idx) {
     const keys: unknown[] = [], wants: Wanted[] = [];
     for (const x of arr(d.summary, 5)) { keys.push(x); wants.push({ claim: squash(x?.text), pages: [pidx(pageOf(x?.url))], fallback: squash(x?.quote) }); }
@@ -535,7 +537,11 @@ export async function researchMarket(i: { question: string; format: "inline" | "
     const ok0 = (l: { text: string; prev?: string }) => units.has(l.text) && (!covers(l.text, PAY_PART) || aboutAsked(l.text, l.prev ?? "", asked0));
     const cands = [...new Map([...parts0.flatMap((pt) => pageSentences(pages, pt.words, companies0, 6).filter(ok0).slice(0, 2)), ...pageSentences(pages, contentWords(`${i.question} ${companies0.join(" ")}`), companies0, 8).filter(ok0).slice(0, 3)].map((l) => [l.text, l] as const)).values()].slice(0, 5);
     for (const l of cands) { keys.push(`unit:${l.text}`); wants.push({ claim: l.text, unit: true, pages: [pidx(l.page)] }); }
-    (await decide(wants, idx, i.deps.judge)).forEach((v, k) => { if (!sup.has(keys[k])) sup.set(keys[k], v); });
+    const vs = await decide(wants, idx, i.deps.judge);
+    judgeDown = vs.failed;
+    vs.forEach((v, k) => { if (!sup.has(keys[k])) sup.set(keys[k], v); });
+    // Round 4: a draft longer than the judge may be asked about loses lines unchecked; the result says so, so the reply can.
+    if (vs.unasked) notes.push(`${vs.unasked} drafted line(s) could not be checked this turn and were left out: say that not everything found could be checked`);
   }
   const lineS = (x: any, text: unknown, section: string, o: { subject?: string; quote?: boolean } = {}): Cited | null => {
     const t = squash(text), v = sup.get(x), reading = section !== "summary" && section !== "comparison";
@@ -545,7 +551,8 @@ export async function researchMarket(i: { question: string; format: "inline" | "
     const hit = why ? null : v as { how: "model" | "quote"; sentence: string; page: number };
     // D-073's measure still holds for a line in the model's words: at least 60% of its words on its page; else the page's sentence.
     const model = !!hit && hit.how === "model" && wordsOnPages(t, [pages[hit.page]]) >= ON_PAGES_SHARE;
-    if (!hit || (!model && o.quote === false)) { dropped++; auditLine(audit, { ok: false, why: why || "unsupported" }, section, { text, quote: x?.quote }); return null; }
+    // Round 4: a page's unit shown in its own words must say something: a heading ("Form 10-K Hollow Oak Logistics Inc.") is no line.
+    if (!hit || (!model && (o.quote === false || !hasPredicate(hit.sentence, pages[hit.page].title)))) { dropped++; auditLine(audit, { ok: false, why: why || "unsupported" }, section, { text, quote: x?.quote }); return null; }
     const out = model ? t : quoteOf(hit);
     auditLine(audit, model ? { ok: true } : { ok: true, via: "quote" }, section);
     srcOf.set(out, hit.sentence);
@@ -593,10 +600,17 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   for (const part of parts.filter((pt) => !keptLines().some((l) => covers(l.text, pt)))) for (const l of pageSentences(pages, part.words, companies0, 6).filter(payOk).filter(stated).slice(0, 1)) addPage(l);
   const need = Math.max(1, parts.length);
   if (keptLines().length < need) for (const l of pageSentences(pages, contentWords(`${i.question} ${companies0.join(" ")}`), companies0, need + 6).filter(payOk).filter(stated)) { if (keptLines().length >= need) break; addPage(l); }
-  const disagreements = disagreementsIn(points);
+  // FAIL_CLOSED.support: two figures are compared as the pages give them (a quote's own unit, without its label or quotation marks).
+  const disagreements = disagreementsIn(idx ? points.map((p) => ({ ...p, text: srcOf.get(p.text) ?? p.text })) : points);
   const marked = (x: Cited) => answerable.has(x.text) ? x : { ...x, unconfirmed: true as const };
+  // Round 7: the judge could not answer and nothing stands: the pages read, as links, and one plain clause; no line of any page.
+  if (idx && judgeDown && !keptLines().length) {
+    const checked: MarketSource[] = pages.slice(0, 4).map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || new URL(p.url).hostname, fetched_at: new Date(p.fetchedAt).toISOString(), kind: sourceKind(p.url, i.plan.companies ?? [], [...(i.plan.sites ?? []), ...(found.sites ?? [])]) }));
+    return { ...none(), checked, unchecked: true, ...(i.deps.layout === "messages" ? { layout: "messages" as const } : {}),
+      note: "The pages could not be checked just now. Say only that, in one sentence; give no figure, name or claim. Code lists the pages." };
+  }
   if (!keptLines().length) {
-    const checked: MarketSource[] = pages.slice(0, 4).map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || new URL(p.url).hostname, fetched_at: new Date(p.fetchedAt).toISOString(), kind: sourceKind(p.url, i.plan.companies ?? [], FAIL_CLOSED.support ? found.sites ?? [] : undefined) }));
+    const checked: MarketSource[] = pages.slice(0, 4).map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || new URL(p.url).hostname, fetched_at: new Date(p.fetchedAt).toISOString(), kind: sourceKind(p.url, i.plan.companies ?? [], FAIL_CLOSED.support ? [...(i.plan.sites ?? []), ...(found.sites ?? [])] : undefined) }));
     return { ...none(), checked, ...(i.deps.layout === "messages" ? { layout: "messages" as const } : {}),
       note: "Sources were opened but none supported an answer. Say what you looked for and that you couldn't confirm it from what they say; do not guess, and give no figure. Write no link: code lists the sources that were checked." };
   }
@@ -629,7 +643,7 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   const title = idx ? (stripUrls(squash(i.ask?.trim() ? i.ask : i.question)).replace(/[?]+$/, "").slice(0, 80) || "Research") : title0 && linkFree(title0) && figuresIn(title0).every((n) => qn.some((x) => numEq(x, n))) ? title0 : squash(i.question).replace(/[?]+$/, "").slice(0, 80);
   const companies = i.plan.companies ?? [];
   const sources: MarketSource[] = cited.map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || new URL(p.url).hostname, fetched_at: new Date(p.fetchedAt).toISOString(),
-    kind: sourceKind(p.url, companies, idx ? found.sites ?? [] : undefined), ...(quoted.has(normalizeUrl(p.url)) ? { via: "search_passage" as const } : {}), ...(dated.get(normalizeUrl(p.url)) ? { dated: dated.get(normalizeUrl(p.url)) } : {}) }));
+    kind: sourceKind(p.url, companies, idx ? [...(i.plan.sites ?? []), ...(found.sites ?? [])] : undefined), ...(quoted.has(normalizeUrl(p.url)) ? { via: "search_passage" as const } : {}), ...(dated.get(normalizeUrl(p.url)) ? { dated: dated.get(normalizeUrl(p.url)) } : {}) }));
   const layout = i.deps.layout === "messages" ? "messages" as const : undefined;
 
   // The format: the brain's choice, kept unless a File cannot honestly be made.
@@ -853,6 +867,8 @@ export async function enforceMarketReplySupported(reply: string, r: MarketResult
   const pieces = (t: string) => String(t ?? "").split(/\n+/).flatMap((l) => stripUrls(l).split(/(?<=[.!?]["')*_]*(?:\s*\[\d+\])*)\s+/)).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x));
   const shownWhole = (s: string) => shown.some((l) => plainLine(l.text) === plainLine(s));
   const sup = r.status === "ok" ? supportOf(r) : null;
+  // Round 6: the judge could not answer: code's own clause and the pages read, nothing of the model's.
+  if (r.status !== "ok" && r.unchecked) return enforceMarketReply(OUTAGE_LINE, r, shown, { unconfirmed: (s) => s === OUTAGE_LINE });
   if (r.status !== "ok" || !sup) {
     const all = pieces(reply), first = all.find((s) => pureUnconfirmed(s, ask));
     return enforceMarketReply(all.filter((s, k) => (s === first && all.indexOf(s) === k) || shownWhole(s)).join("\n"), r, shown, { unconfirmed: (s) => s === first });

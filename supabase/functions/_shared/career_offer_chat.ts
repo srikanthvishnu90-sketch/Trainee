@@ -485,6 +485,7 @@ function amendOf(message: string, o: Offer, data: OfferData): Offer | "stale" | 
   // The currency alone: "it's in CAD", "in euros", "USD".
   const code = /\d/.test(body) ? null : currencyOf((/^(?:(?:it'?s|that'?s|it is|that is|they pay|paid)\s+)?(?:paid\s+)?in\s+([A-Za-z. ]+?)[.!]?$/i.exec(body)?.[1] ?? (/^[A-Z]{3}$/.test(body) ? body : "")).trim());
   let p: Offer;
+  const carried: ("base" | "signing" | "bonus" | "bonus_target")[] = [];
   if (per && !o.rate && o.base != null) p = parseOfferWords(`${o.written?.base ?? o.base} ${per[1] ? `per ${per[1]}` : per[2]}`, data);
   else if (amb) { p = parseOfferWords(`It is in ${o.place!.split(",")[0]}, ${amb[1]}`, data); if (p.unsettled || !p.place) return "stale"; }
   else if (code && code.length === 3) {
@@ -492,7 +493,29 @@ function amendOf(message: string, o: Offer, data: OfferData): Offer | "stale" | 
     for (const k of ["base", "signing", "bonus", "bonus_target"] as const) if (off[k] != null || (k === "base" && off.rate)) { const m = off.marks![k]; if (!m || m === "$" || k === "base") { off.marks![k] = code; if (m !== code) delete off.written![k]; } }
     off.open = (off.open ?? []).filter((x) => !/^a currency/.test(x)); off.unsettled = off.open.length > 0;
     return settleCurrency(off);
-  } else p = parseOfferWords(body, data);
+  } else {
+    // D-078 review: a figure said again with no period of its own ("they raised it to $8,500") is in the period of the figure on
+    // file, and one with no currency of its own ("actually it's 120k") keeps the currency read before; a period or currency the
+    // amendment states wins.
+    const PER_WORD: Partial<Record<string, string>> = { hour: "per hour", day: "per day", week: "per week", biweek: "every two weeks", semimonth: "twice a month", month: "per month" };
+    const perOld = o.rate ? PER_WORD[o.rate.period] : undefined;
+    const said0 = parseOfferWords(body, data);
+    const bare = !said0.rate && said0.period == null && !/\b(?:per|an?|each|every)\s+(?:hour|hr|day|week|month|year|yr|annum)\b|\/\s?(?:hr|h|hour|mo|month|yr|year|wk|week)\b|\b(?:hourly|daily|weekly|monthly|yearly|annual\w*|biweekly|bi-weekly)\b/i.test(body);
+    p = perOld && bare && /\d/.test(body) ? parseOfferWords(body.replace(/([$€£¥₹]?\s?\d[\d,]*(?:\.\d+)?\s?[kKmM]?)(?![\d,.])/, `$1 ${perOld}`), data) : said0;
+    if (perOld && p.unsettled && !said0.unsettled) p = said0;
+    // What they wrote is quoted as they wrote it, never with the period added here.
+    if (p !== said0) { p.written = { ...(p.written ?? {}) }; if (said0.written?.base) p.written.base = said0.written.base; else delete p.written.base; }
+    for (const k of ["base", "signing", "bonus", "bonus_target"] as const) {
+      const set = k === "base" ? p.base != null || !!p.rate : p[k] != null;
+      if (!set || p.marks?.[k] || !known(o.currencies?.[k] ?? (k === "base" ? o.currency : undefined))) continue;
+      carried.push(k);
+      p.currencies = { ...(p.currencies ?? {}), [k]: o.currencies?.[k] ?? o.currency };
+      p.marks = { ...(p.marks ?? {}), [k]: o.marks?.[k] ?? null };
+      p.currency_assumed = { ...(p.currency_assumed ?? {}), [k]: !!o.currency_assumed?.[k] };
+      if (!p.currency_assumed[k]) delete p.currency_assumed[k];
+      if (k === "base") { p.currency = p.currencies.base; p.currency_fact = o.currency_fact ?? null; }
+    }
+  }
   const firm = !o.company ? firmFor(message) : null;
   if (p.company && o.company && !sameCompany(p.company, o.company)) return null; // another company's offer: not an amendment
   if (p.unsettled) return stale;
@@ -501,6 +524,20 @@ function amendOf(message: string, o: Offer, data: OfferData): Offer | "stale" | 
   const base: Offer = { ...o, open: amb ? (o.open ?? []).filter((x) => !/could be/.test(x)) : o.open };
   const out = mergeOffers(base, { ...p, company: firm?.name ?? null, firm_id: firm?.firm_id ?? null, lca_company_id: firm?.lca_company_id ?? null, sector: firm?.sector ?? null, title: p.title && /\b(?:as|title|role|position)\b/i.test(body) ? p.title : null, role: p.title && /\b(?:as|title|role|position)\b/i.test(body) ? p.role : null }, data);
   if (base.base != null && !p.rate && p.base == null && base.rate == null) { out.open = [...(base.open ?? []), ...(p.open ?? [])]; out.unsettled = out.open.length > 0; }
+  // A figure said again with no currency of its own keeps the currency read before, and so do the figures it did not touch
+  // (the merge settles currency again from the written marks; a currency read from the place has none).
+  if (carried.length) {
+    for (const k of ["base", "signing", "bonus", "bonus_target"] as const) {
+      if (!carried.includes(k) && (k === "base" ? p.base != null || !!p.rate : p[k] != null)) continue;
+      const c = o.currencies?.[k] ?? (k === "base" ? o.currency : undefined);
+      if (!c || !known(c) || (k !== "base" && out[k] == null)) continue;
+      out.currencies = { ...(out.currencies ?? {}), [k]: c };
+      out.currency_assumed = { ...(out.currency_assumed ?? {}) };
+      if (o.currency_assumed?.[k]) out.currency_assumed[k] = true; else delete out.currency_assumed[k];
+    }
+    out.currency = out.currencies?.base ?? out.currency;
+    out.currency_fact = o.currency_fact ?? null;
+  }
   return out;
 }
 const firmFor = (message: string): any | null => message.trim().split(/\s+/).length <= 3 ? (CareerPaths as any).firmGuide()?.firms?.find((f: any) => [f.name, ...(f.aliases ?? [])].some((w: string) => hasWord(message, String(w).toLowerCase(), true))) ?? null : null;

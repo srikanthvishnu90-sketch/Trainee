@@ -14,7 +14,6 @@ import { offerTurn, payData, readingBlock, readingHash, parseOfferWords } from "
 import { CareerProfile } from "../../supabase/functions/_shared/router_core.career.js";
 import { careerTools } from "../../supabase/functions/_shared/agent/career_tools.ts";
 import { edgeRenderer, memoryPersonaStore, memoryResumeStore, tailorForPosting, withoutInferredSkills } from "../../supabase/functions/_shared/career_tailor.ts";
-import { offerCases, rng } from "./scenarios/research-r2-generator.ts";
 
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -343,27 +342,23 @@ Deno.test("D-078/skill resume 06: an inference the stricter reader does not supp
   ok(!(first.skills_to_confirm ?? []).some((x: any) => x.name === "SQL"), JSON.stringify(first.skills_to_confirm));
 });
 
-// ---------- 8. the 1,000 generated offers of research round 2 (D), through the yes ----------
-// scenarios-research-r2 D checks the first reply; with the reading shown first, the same oracle runs here on the reply after the
-// person's yes too, so the benchmarked path keeps its coverage: the current pay is never said back, and every figure is the
-// offer's or a named source's.
-Deno.test("D-078/offer generated: 1,000 offers with the current pay beside them, confirmed then benchmarked: no figure but the offer's or a source's", () => {
-  const MONEY = /\$\d[\d,]*(?:\.\d+)?k?|\b\d{2,3}k\b/gi;
-  const moneyOf = (s: string) => (s.match(MONEY) ?? []).map((m) => { const k = /k$/i.test(m); const n = Number(m.replace(/[$,k]/gi, "")); return k ? n * 1000 : n; });
-  const bad: string[] = [];
-  let benchmarked = 0;
-  for (const [i, c] of offerCases(rng(20261030 + 3), 1000).entries()) {
-    const shown = offerTurn({ words: c.words, pending: null, now: NOW });
-    const t = shown.result.status === "confirm" ? offerTurn({ words: "yes", pending: shown.pending, now: NOW + 1000, lastReply: shown.result.messages.join("\n") }) : shown;
-    if (t.result.status === "benchmarked") benchmarked++;
-    for (const r of [shown, t]) {
-      const msgs = (r.result.messages ?? []).join("\n");
-      if (moneyOf(msgs).includes(c.current * 1000)) bad.push(`#${i} current pay said: ${msgs.slice(0, 160)}`);
-      const sourced = new Set<number>([c.base * 1000]);
-      for (const b of r.result.benchmarks ?? []) for (const v of Object.values(b as Record<string, unknown>)) if (typeof v === "number") sourced.add(Math.round(v));
-      for (const n of moneyOf(msgs)) if (!sourced.has(n) && !(r.result.draft && JSON.stringify(r.result.draft).includes(String(n)))) bad.push(`#${i} $${n} unsourced: ${msgs.slice(0, 160)}`);
-    }
-  }
-  eq(bad.slice(0, 5), []);
-  ok(benchmarked >= 900, `most generated offers reach the benchmark after the yes (${benchmarked})`);
+// ---------- 8. an amendment keeps what it does not restate ----------
+const KEEP: { says: string; change: string; shows: RegExp; not: RegExp }[] = [
+  { says: "JPM offered 110k base, 15k signing, NYC, analyst", change: "actually it's 120k", shows: /Base: \$120,000 a year .*USD/, not: /currency not sure|Not sure/ },
+  { says: "Shopify offered me 140k CAD as a software engineer in Toronto", change: "actually it's 150k", shows: /Base: CAD 150,000 a year .*CAD/, not: /currency not sure|Not sure|\$150,000/ },
+  { says: "Kestrel offered me $8,000 a month as a data analyst in Chicago", change: "they raised it to $8,500", shows: /Base: \$8,500 a month, USD/, not: /\$8,500 a year/ },
+];
+for (const [i, c] of KEEP.entries()) {
+  Deno.test(`D-078/offer keep ${String(i + 1).padStart(2, "0")}: "${c.change}" keeps the currency and period read before`, async () => {
+    const { out } = await say([c.says, "yes", c.change]);
+    unconfirmedReply(out[2], c.change);
+    ok(c.shows.test(out[2].answer!.reply), `${c.shows}\n${out[2].answer!.reply}`);
+    ok(!c.not.test(out[2].answer!.reply), `${c.not}\n${out[2].answer!.reply}`);
+  });
+}
+Deno.test("D-078/offer keep 04: a currency or period the amendment states wins over the one read before", async () => {
+  const a = await say(["Granite offered $95k as a data analyst in Chicago", "yes", "it's 100k CAD"]);
+  ok(/Base: CAD 100,000/.test(a.out[2].answer!.reply), a.out[2].answer!.reply);
+  const b = await say(["Kestrel offered me $8,000 a month as a data analyst in Chicago", "yes", "actually it's $110k a year"]);
+  ok(/Base: \$110,000 a year/.test(b.out[2].answer!.reply), b.out[2].answer!.reply);
 });

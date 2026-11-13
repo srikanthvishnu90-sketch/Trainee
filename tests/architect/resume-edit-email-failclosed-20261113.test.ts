@@ -340,3 +340,83 @@ Deno.test("finding 3, the submit gates: the cloud card, the cloud submit and the
     ok(sends ? /STOP_AFTER_RESUME_GATE/.test(err) : /RESUME_CONTACT_UNCONFIRMED/.test(err) && calls.length === 1, `cloud card: ${err} after ${calls}`);
   }
 });
+
+// ------------------------------------------------------------------------------------------------ round 2 B/C: the recorded verdict
+import { keptResume } from "../../workers/career-cloud/prepare-runner.ts";
+import { prepare } from "../../workers/career-browser/approve-first.ts";
+import { memoryVersionLog, recordVersion } from "../../supabase/functions/_shared/career_resume_outcomes.ts";
+// A text PDF as another writer saves it: its content stream stored as it is, or ASCII85 over flate (ReportLab's default).
+function foreignPdf(top: string, armour: boolean): Uint8Array {
+  const content = `BT /F1 12 Tf 14.4 TL ET\nBT 1 0 0 1 72 740 Tm (Dana Okafor) Tj T* (${top.replace(/[()]/g, "\\$&")}) Tj T* (EXPERIENCE) Tj T* (Northwind Logistics, Analyst) Tj ET\n`;
+  let body = content, filter = "";
+  if (armour) {
+    const z = zlib.deflateSync(Buffer.from(content, "latin1")); let a = "";
+    for (let i = 0; i < z.length; i += 4) { const c = z.subarray(i, i + 4); let v = 0; for (let k = 0; k < 4; k++) v = v * 256 + (c[k] ?? 0); let s = ""; for (let k = 0; k < 5; k++) { s = String.fromCharCode(33 + (v % 85)) + s; v = Math.floor(v / 85); } a += s.slice(0, c.length + 1); }
+    body = `${a}~>`; filter = "/Filter [ /ASCII85Decode /FlateDecode ] ";
+  }
+  return new TextEncoder().encode(`%PDF-1.3\n1 0 obj\n<< ${filter}/Length ${body.length} >>\nstream\n${body}endstream\nendobj\ntrailer\n<< >>\n%%EOF\n`);
+}
+const IMAGE_ONLY = new TextEncoder().encode("%PDF-1.4\n1 0 obj\n<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /Length 3 >>\nstream\n\u0001\u0002\u0003\nendstream\nendobj\n%%EOF\n");
+
+Deno.test("round 2 B: a stored resume carries its contact verdict; the gates read it, and a file no one could read is not ready", async () => {
+  const p = person(), log = memoryVersionLog(), out = await tailor(p);
+  eq(out.contact, { status: "ok", email_hash: crypto.createHash("sha256").update("dana.okafor@gmail.com").digest("hex") });
+  await recordVersion(log, { userId: USER, out, now: NOW });
+  eq((await log.get(USER)).files[out.sha256].contact, out.contact, "the verdict is on the version record");
+  eq((await tailor(p, { reviewDraft: true })).contact?.status, "ok");
+  // Other writers' text PDFs are read (they read as 0 lines before): a placeholder in one is seen.
+  for (const armour of [false, true]) {
+    const bad = foreignPdf("you@example.com | (555) 555-5555", armour), fine = foreignPdf("dana.okafor@gmail.com | (312) 867-5309", armour);
+    ok(pdfText(bad).includes("you@example.com"), `armour ${armour}: the text is read`);
+    eq([(await T.contactVerdict(bad)).status, (await T.contactVerdict(fine)).status], ["unconfirmed", "ok"]);
+  }
+  eq((await T.contactVerdict(IMAGE_ONLY)).status, "unreadable");
+  eq((await T.contactVerdict(new TextEncoder().encode("%PDF-1.4\nnot a pdf you@example.com"))).status, "unconfirmed", "a reserved address in bytes that do not parse is still seen");
+  // The gate. A storage row hands its record (null when it has none): only "ok", for the email confirmed now, is ready.
+  const good = out.detail.pdf as Uint8Array, gate = T.resumeFileContactProblems;
+  eq(await gate(good, { record: out.contact }), []);
+  eq(await gate(good, { record: out.contact, confirmedEmailHash: out.contact.email_hash }), []);
+  eq(await gate(good, { record: null }), [T.UNREADABLE_CONTACT], "a stored file with no record is not ready");
+  eq(await gate(IMAGE_ONLY, { record: { status: "unreadable", email_hash: null } }), [T.UNREADABLE_CONTACT]);
+  eq(await gate(IMAGE_ONLY, { record: null, foreign: true }), [T.UNREADABLE_CONTACT], "foreign never excuses a stored file");
+  ok((await gate(good, { record: out.contact, confirmedEmailHash: "0".repeat(64) }))[0].includes("not the email they have confirmed now"));
+  ok((await gate(good, { record: { status: "ok", email_hash: "0".repeat(64) } }))[0].includes("not the one recorded for it"));
+  eq(await gate(IMAGE_ONLY), [T.UNREADABLE_CONTACT], "bytes alone, unreadable: not ready");
+  eq(T.recordOf({ sha256: "x", contact: null }), { record: null });
+  eq(T.recordOf({ sha256: "x" }), {});
+});
+
+Deno.test("round 2 B/C: every card and submit path: an unreadable or placeholder file with a storage record never gets a card or an engine run", async () => {
+  const { good, bad } = await files(), okRec = await T.contactVerdict(good);
+  const engineOf = (n: { runs: number }): any => async (_a: string[], _e: unknown, controls?: any) => { n.runs++; await controls?.beforeEffect?.(); return { result: { state: "submitted_unconfirmed", reason: "employer confirmation on the page" }, evidence: null }; };
+  const cases: [string, Uint8Array, any, boolean][] = [["good, recorded ok", good, { contact: okRec }, true], ["good, row without a record", good, { contact: null }, false], ["image only, row without a record", IMAGE_ONLY, { contact: null }, false],
+    ["image only, recorded unreadable", IMAGE_ONLY, { contact: { status: "unreadable", email_hash: null } }, false], ["placeholder, wrongly recorded ok", bad, { contact: okRec }, false], ["ReportLab placeholder, no record", foreignPdf("you@example.com", true), {}, false]];
+  for (const [label, bytes, row, ready] of cases) {
+    const sha = await hex(bytes), b64 = Buffer.from(bytes).toString("base64"), n = { runs: 0 };
+    const job = await cardBound({ id: "job-1", lease_token: "lease-1", user_id: "TEST-owner", company: "Test Co", url: "https://jobs.lever.co/test-co/de-1",
+      payload: { posting: "lever:test-co:de-1", user_id: "TEST-owner", company: "Test Co", url: "https://jobs.lever.co/test-co/de-1", engine_approval: "c".repeat(64), resume_sha256: sha, fields: [] } });
+    const fin: string[] = [];
+    await runCloudJob(job as any, { queue: { claim: async () => [], gatePresent: async () => true, authorize: authorizer().authorize, resume: async () => ({ filename: "resume.pdf", sha256: sha, b64, ...row }), finish: async (_j: unknown, state: string, ev: any) => { fin.push(ev?.reason ?? state); } } as any, runEngine: engineOf(n), log: () => {} });
+    eq([n.runs, fin[0] === "RESUME_CONTACT_UNCONFIRMED"], [ready ? 1 : 0, !ready], `cloud submit: ${label}`);
+    const path = await Deno.makeTempFile({ suffix: ".pdf" }), dir = await Deno.makeTempDir(); await Deno.writeFile(path, bytes);
+    try {
+      const m = { runs: 0 }, loc: string[] = [];
+      await runApproved({ claim: async () => [{ id: "00000000-0000-4000-8000-000000000011", lease_token: "lease", url: job.url, payload: job.payload } as any], finish: async (_i, _l, state, ev) => { loc.push((ev as any)?.reason ?? state); }, resumeFor: async () => ({ path, sha256: sha, ...row }), writeFacts: async () => path, runEngine: engineOf(m) });
+      eq([m.runs, loc[0] === "RESUME_CONTACT_UNCONFIRMED"], [ready ? 1 : 0, !ready], `local submit: ${label}`);
+      eq(!!(await keptResume(async () => ({ b64, sha256: sha, filename: "resume.pdf", ...row }))({ job_id: "x" }, dir)), ready, `the kept resume for a prepared card: ${label}`);
+      const rpc: any = async (name: string) => { if (name === "career_apply_message_cloud_prepare_context") return { resume: { sha256: sha, b64, filename: "resume.pdf", ...row }, account: { epoch: 1, version: 1 } }; throw Error("PAST_THE_RESUME_GATE"); };
+      const card = await prepareCloudCard({ owner: USER, thread: "00000000-0000-4000-8000-0000000000aa", urls: [job.url], resumeSha256: sha }, { rpc, runEngine: engineOf({ runs: 0 }) }).then(() => "prepared", (e) => String(e?.message ?? e));
+      eq(card.includes("PAST_THE_RESUME_GATE"), ready, `cloud card: ${label}: ${card}`);
+    } finally { await Deno.remove(path); await Deno.remove(dir, { recursive: true }); }
+  }
+  // approve-first prepare() (the CLI's card and the batch): no dry run starts for a file whose contact is a placeholder.
+  const path = await Deno.makeTempFile({ suffix: ".pdf" }); let runs = 0;
+  try {
+    await Deno.writeFile(path, bad);
+    const r: any = await prepare({ url: "https://jobs.lever.co/test-co/de-1", factsPath: path, resumePath: path, account: { epoch: 1, version: 1 }, now: NOW, runEngine: (async () => { runs++; return null; }) as any });
+    eq([r.ready, r.result.reason, runs], [false, "RESUME_CONTACT_UNCONFIRMED", 0]);
+  } finally { await Deno.remove(path); }
+  // The cloud card reads bytes handed with no record strictly: unreadable is not ready.
+  const sha = await hex(IMAGE_ONLY), rpc: any = async () => ({ resume: { sha256: sha, b64: Buffer.from(IMAGE_ONLY).toString("base64"), filename: "resume.pdf" }, account: { epoch: 1, version: 1 } });
+  ok(/RESUME_CONTACT_UNCONFIRMED/.test(await prepareCloudCard({ owner: USER, thread: "00000000-0000-4000-8000-0000000000aa", urls: ["https://jobs.lever.co/test-co/de-1"], resumeSha256: sha }, { rpc, runEngine: (async () => null) as any }).then(() => "prepared", (e) => String(e?.message ?? e))));
+});

@@ -529,7 +529,9 @@ Deno.test("round 3 C: on a page code knows is one asked employer's, a unit need 
   console.log(`REAL pages: ${answered} of 5 true pay claims answered with the switch on (3 with it off)`);
   // Round 9: the recorded pages are job-board postings (greenhouse.io, not the employer's own domain) whose pay units do not name the
   // employer: with no title lending, none of the five is answered (flag off answers 3). The cost of the rule, measured here.
-  ok(answered >= 3, `${answered} of 5`); // round 10: title lending back (round 9 answered 0)
+  // Round 12 (review: a title owns a page only off shared hosts): these postings are on greenhouse.io, a shared host, and their pay
+  // units do not name the employer, so none is answered (round 10/11: 4; flag off: 3). The measured cost of the ruling, kept exact.
+  eq(answered, 0, `${answered} of 5`);
   // A page titled for one employer whose unit speaks of another is the judge's to refuse: the title is in the passage.
   const j = asking("no"), pages = [{ url: U, title: "Citadel careers", text: "Unlike here, Jane Street pays interns $5,000 a week in pay." }];
   const r = await mk3(pages, { summary: [{ text: "Citadel pays interns $5,000 a week.", quote: "pays interns $5,000 a week", url: U }] }, j.judge);
@@ -1087,6 +1089,7 @@ Deno.test("round 10.3: a row approves one run, named in it and in the request; r
   // D-079 was run 1 and it ran.
   const real = await Deno.readTextFile(new URL("../../../docs/architect/DECISIONS.md", import.meta.url));
   ok(/already been spent/.test(measureApproval("D-079", 0.22, real, 1) ?? ""));
+  ok(/already been spent/.test(measureApproval("D-082", 0.2, real, 3) ?? "")); // round 12: run 3 ran (D-082, $0.129)
   // The request file names a run, and the workflow passes it to the runner.
   const req = JSON.parse(await Deno.readTextFile(new URL("../../../evals/research-support/run-request.json", import.meta.url)));
   ok(Number.isInteger(req.run) && req.run >= 2, JSON.stringify(req));

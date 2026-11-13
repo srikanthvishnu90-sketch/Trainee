@@ -357,3 +357,127 @@ export const RUN2_WRONG: Replay2[] = [
   "sentPassage": "Page title: Citadel careers\nWhole page, the candidate marked:\n>>> Pay range: $4,000 - $5,000 a week. <<<\n- Location: Chicago, IL."
  }
 ];
+
+// Run 3 (D-082, 2026-11-13, $0.129, 74d66a1cb): its 10 wrong verdicts, rebuilt exactly at the run's code with no network.
+export const RUN3_WRONG: Replay2[] = [
+ {
+  "key": "hostile 94: N17 double negative",
+  "cause": "judge",
+  "live": "yes",
+  "want": "no",
+  "why": "\"It is not true that Citadel does not sponsor visas\" read as a denial; the prompt has had the double-negation rule since round 9, and the judge still erred. Needs the judge.",
+  "title": "Citadel compensation notes",
+  "page": "It is not true that Citadel does not sponsor visas for interns.",
+  "claim": "Citadel does not sponsor visas for interns.",
+  "sentClaim": "Citadel does not sponsor visas for interns.",
+  "sentPassage": "Page title: Citadel compensation notes\nPage of: Citadel (the page title names only it)\nWhole page, the candidate marked:\n>>> It is not true that Citadel does not sponsor visas for interns. <<<"
+ },
+ {
+  "key": "true 28: G01 verbatim",
+  "cause": "judge",
+  "live": "no",
+  "want": "yes",
+  "why": "The passage is clean and holds the fact word for word or in plain paraphrase; the judge refused it. Judge noise: needs the judge (no code cause found).",
+  "title": "Citadel compensation notes",
+  "page": "Citadel interns earn $5,000 a week.",
+  "claim": "Citadel interns earn $5,000 a week.",
+  "sentClaim": "The marked text \"Citadel interns earn $5,000 a week.\" is the page's own statement of fact about Citadel specifically, not about another firm, not an instruction, an offer or a request to the reader, and it answers the question: what does citadel pay interns.",
+  "sentPassage": "Page title: Citadel compensation notes\nPage of: Citadel (the page title names only it)\nWhole page, the candidate marked:\n>>> Citadel interns earn $5,000 a week. <<<"
+ },
+ {
+  "key": "true 28: G19 without attribution owner",
+  "cause": "label",
+  "live": "no",
+  "want": "yes",
+  "why": "The claim adds \"According to the careers page\": the judge is right (as in run 2).",
+  "title": "Citadel compensation notes",
+  "page": "The summer program at Citadel runs for eleven weeks in Chicago.",
+  "claim": "According to the careers page, the summer program at Citadel runs for eleven weeks in Chicago.",
+  "sentClaim": "According to the careers page, the summer program at Citadel runs for eleven weeks in Chicago.",
+  "sentPassage": "Page title: Citadel compensation notes\nPage of: Citadel (the page title names only it)\nWhole page, the candidate marked:\n>>> The summer program at Citadel runs for eleven weeks in Chicago. <<<"
+ },
+ {
+  "key": "false 101: table: Citadel interns earn $5,000 a month.",
+  "cause": "label",
+  "live": "yes",
+  "want": "no",
+  "why": "Header \"Monthly stipend\" over \"Citadel intern | $5,000\": the page does state it (as in D-079).",
+  "title": "Citadel notes",
+  "page": "Role\tMonthly stipend\nCitadel intern\t$5,000",
+  "claim": "Citadel interns earn $5,000 a month.",
+  "sentClaim": "Citadel interns earn $5,000 a month.",
+  "sentPassage": "Page title: Citadel notes\nPage of: Citadel (the page title names only it)\nTable header: Role | Monthly stipend\nWhole page, the candidate marked:\n- Role | Monthly stipend\n>>> Citadel intern | $5,000 <<<"
+ },
+ {
+  "key": "false 101: heading: Citadel intern pay is $5,000 a week.",
+  "cause": "layerA",
+  "live": "yes",
+  "want": "no",
+  "why": "\"Citadel intern pay 2019: $5,000 a week\": a past year read as a bare number. Code: a bare past year on the unit is one the claim must carry.",
+  "title": "Citadel notes",
+  "page": "Citadel intern pay 2019: $5,000 a week",
+  "claim": "Citadel intern pay is $5,000 a week.",
+  "sentClaim": "Citadel intern pay is $5,000 a week.",
+  "sentPassage": "Page title: Citadel notes\nPage of: Citadel (the page title names only it)\nWhole page, the candidate marked:\n>>> Citadel intern pay 2019: $5,000 a week <<<"
+ },
+ {
+  "key": "false 101: entity: Citadel interns earn $5,000 a week.",
+  "cause": "prompt",
+  "live": "yes",
+  "want": "no",
+  "why": "\"A Citadel intern earned $5,000 a week.\": one person's case read as all interns. Prompt rule added.",
+  "title": "Citadel notes",
+  "page": "A Citadel intern earned $5,000 a week.",
+  "claim": "Citadel interns earn $5,000 a week.",
+  "sentClaim": "Citadel interns earn $5,000 a week.",
+  "sentPassage": "Page title: Citadel notes\nPage of: Citadel (the page title names only it)\nWhole page, the candidate marked:\n>>> A Citadel intern earned $5,000 a week. <<<"
+ },
+ {
+  "key": "true 40: Applications close on January 15, 2027.",
+  "cause": "judge",
+  "live": "no",
+  "want": "yes",
+  "why": "The passage is clean and holds the fact word for word or in plain paraphrase; the judge refused it. Judge noise: needs the judge (no code cause found).",
+  "title": "Citadel careers",
+  "page": "Applications close on January 15, 2027.",
+  "claim": "Applications close on January 15, 2027.",
+  "sentClaim": "The marked text \"Applications close on January 15, 2027.\" is the page's own statement of fact about Citadel specifically, not about another firm, not an instruction, an offer or a request to the reader, and it answers the question: what should i know about citadel.",
+  "sentPassage": "Page title: Citadel careers\nPage of: Citadel (the page title names only it)\nWhole page, the candidate marked:\n>>> Applications close on January 15, 2027. <<<"
+ },
+ {
+  "key": "true 40: Citadel reportedly raised intern pay to $5,000 a week in 2025.",
+  "cause": "judge",
+  "live": "no",
+  "want": "yes",
+  "why": "The passage is clean and holds the fact word for word or in plain paraphrase; the judge refused it. Judge noise: needs the judge (no code cause found).",
+  "title": "Bloomberg",
+  "page": "Citadel raised intern pay to $5,000 a week in 2025, according to people familiar with the matter.",
+  "claim": "Citadel reportedly raised intern pay to $5,000 a week in 2025.",
+  "sentClaim": "Citadel reportedly raised intern pay to $5,000 a week in 2025.",
+  "sentPassage": "Page title: Bloomberg\nWhole page, the candidate marked:\n>>> Citadel raised intern pay to $5,000 a week in 2025, according to people familiar with the matter. <<<"
+ },
+ {
+  "key": "true 40: Returning interns get a $10,000 signing bonus.",
+  "cause": "judge",
+  "live": "no",
+  "want": "yes",
+  "why": "The passage is clean and holds the fact word for word or in plain paraphrase; the judge refused it. Judge noise: needs the judge (no code cause found).",
+  "title": "Citadel careers",
+  "page": "The firm offers a signing bonus of $10,000 to returning interns.",
+  "claim": "Returning interns get a $10,000 signing bonus.",
+  "sentClaim": "Returning interns get a $10,000 signing bonus.",
+  "sentPassage": "Page title: Citadel careers\nPage of: Citadel (the page title names only it)\nWhole page, the candidate marked:\n>>> The firm offers a signing bonus of $10,000 to returning interns. <<<"
+ },
+ {
+  "key": "true 40: Citadel gives returning interns a $10,000 signing bonus.",
+  "cause": "judge",
+  "live": "no",
+  "want": "yes",
+  "why": "The passage is clean and holds the fact word for word or in plain paraphrase; the judge refused it. Judge noise: needs the judge (no code cause found).",
+  "title": "Citadel careers",
+  "page": "Citadel offers a signing bonus of $10,000 to returning interns.",
+  "claim": "Citadel gives returning interns a $10,000 signing bonus.",
+  "sentClaim": "Citadel gives returning interns a $10,000 signing bonus.",
+  "sentPassage": "Page title: Citadel careers\nPage of: Citadel (the page title names only it)\nWhole page, the candidate marked:\n>>> Citadel offers a signing bonus of $10,000 to returning interns. <<<"
+ }
+];

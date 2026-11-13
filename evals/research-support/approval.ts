@@ -8,7 +8,7 @@
 //     says "run N" (for run 1, "run 1" or "one run"); a (row, run) already spent (USED) is refused.
 const HEDGED = /(?<![\p{L}])(?:reject\p{L}*|refus\p{L}*|not|no|pending|await\p{L}*|wait\p{L}*|later|would|if|once|draft\p{L}*|propos\p{L}*|until|unless|except\p{L}*|after|should|provided|providing|confirm\p{L}*|tomorrow|next|only|maybe|perhaps|tentative\p{L}*|conditional\p{L}*|subject to|in principle|kidding|joking|jk)(?![\p{L}])|n['’]t(?![\p{L}])/iu;
 // The runs already spent, by row: D-079 approved one run and it ran (2026-11-13, $0.0698); D-080 run 2 ran (2026-11-13, $0.116).
-export const USED: Record<string, number[]> = { "D-079": [1], "D-080": [2] };
+export const USED: Record<string, number[]> = { "D-079": [1], "D-080": [2], "D-082": [3] };
 export function measureApproval(approval: string, budgetUsd: number, decisions: string, run: number): string | null {
   if (!/^D-\d{3}[a-z]?$/.test(approval)) return `the approval "${approval}" is not a DECISIONS.md id (D-xxx)`;
   if (!Number.isInteger(run) || run < 1) return `the request names no run number ("run": N, from 1)`;

@@ -354,10 +354,14 @@ export async function agentTurn(o: {
       // lines shown earlier; a shown line said again whole is code's record and stays. A posting's own pay is never lost to the
       // check: when a sentence was removed, the record line of each posting the person's message names (the only posting, when it
       // names none) is given by code, once, unless the reply that is left already gives its figures.
-      const k = await keepSupported(result.reply, [...recs.map((p: any) => ({ text: recLine(p), title: "Posting record" })), ...shownPay.map((l) => ({ text: l.text, title: "Pay shown earlier in this conversation" }))], { judge, pure, own: shownPay.map((l) => l.text), ask: o.message });
+      // A line shown earlier is code's record only when it is about what the person asks now (it names a name their message has);
+      // "If Jane Street matched it, their pay would be $95 an hour." said after a Citadel line is not Citadel's pay.
+      const said = new Set(o.message.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}&'-]*/gu) ?? []);
+      const about = shownPay.filter((l) => (l.text.match(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}\p{N}&'-]*/gu) ?? []).slice(/^\p{Lu}\p{Ll}*\s+\p{Ll}/u.test(l.text) ? 1 : 0).some((w) => said.has(w.toLowerCase().replace(/'s$/, ""))));
+      const k = await keepSupported(result.reply, [...recs.map((p: any) => ({ text: recLine(p), title: "Posting record" })), ...about.map((l) => ({ text: l.text, title: "Pay shown earlier in this conversation" }))], { judge, pure, own: about.map((l) => l.text), ask: o.message });
       const named = recs.filter((p: any) => { const c = String(p?.company ?? "").trim().toLowerCase(); return c && o.message.toLowerCase().includes(c); });
       const mine = [...new Set((named.length ? named : recs.length === 1 ? recs : []).map(recLine))].filter((l) => !numbersIn(l).every((n) => numbersIn(k.text).some((x) => numEq(x, n))));
-      result = { ...result, reply: !k.removed.length ? k.text : [k.text, ...(mine.length ? mine : letters(k.text) ? [] : shownPay.length ? [...new Set(shownPay.map((l) => l.text))] : [NOT_CONFIRMED])].filter(Boolean).join("\n") };
+      result = { ...result, reply: !k.removed.length ? k.text : [k.text, ...(mine.length ? mine : letters(k.text) ? [] : about.length ? [...new Set(about.map((l) => l.text))] : [NOT_CONFIRMED])].filter(Boolean).join("\n") };
     }
   }
   if (result.reply && result.stopped === "final" && !result.show) result = { ...result, reply: payWithSource(result.reply, [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])], shownPayPlaces(o.message, hypo ? [] : o.history)) };

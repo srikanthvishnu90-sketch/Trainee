@@ -309,7 +309,8 @@ export async function keepSupported(reply: string, sources: (string | { text: st
   lines.forEach((l, a) => l.forEach((x, b) => { if (/\p{L}/u.test(x.replace(/https?:\/\/\S+/g, "")) && !own.has(bare(x).toLowerCase().replace(/[.!?]+$/, "")) && !o.pure?.(x)) { wants.push({ claim: bare(x) }); at.push([a, b]); } }));
   const vs = await decide(wants, idx, o.judge);
   const removed: string[] = [];
-  vs.forEach((v, k) => { if (v.how === "drop") { removed.push(lines[at[k][0]][at[k][1]]); lines[at[k][0]][at[k][1]] = ""; } });
+  // A "quote" verdict keeps a sentence only when the sentence IS that unit said again; the unit never stands in for other words here.
+  vs.forEach((v, k) => { if (v.how === "drop" || (v.how === "quote" && !echoes(wants[k].claim, v.sentence))) { removed.push(lines[at[k][0]][at[k][1]]); lines[at[k][0]][at[k][1]] = ""; } });
   return { text: lines.map((l) => l.filter((x) => x !== "").join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim(), removed };
 }
 // A result built with the support check on, and what its reply is checked against: the read pages' sentences, and which page each

@@ -30,11 +30,11 @@ import { findSupport, indexPages, judgeAll, modelSupportJudge, parseVerdicts, SU
 import { NOT_CONFIRMED } from "../../../supabase/functions/_shared/research_reply.ts";
 import { callModel, TRAINEE_MODEL } from "../../../supabase/functions/_shared/model_gateway.ts";
 import { memoryBudgetGate } from "../../../supabase/functions/_shared/model_budget.ts";
-import { payWithSource } from "../../../supabase/functions/agent-chat/career_brain.ts";
+import { agentTurn, payWithSource } from "../../../supabase/functions/agent-chat/career_brain.ts";
 import { shownPayPlaces } from "../../../supabase/functions/_shared/agent/turn_notes.ts";
 import { ECHO_PAGES, FALSE_101, SOLICIT, SPLIT_CLAIM, SPLIT_PAGES, TRUE_40 } from "../../../evals/research-support/cases.ts";
 import { ASKS, GOOD, HOSTILE, LAYER_A, PURE_UNCONFIRMED, SMUGGLES, SMUGGLES_OWN, type SupportCase } from "../../../evals/research-support/cases.ts";
-import { decide, keepSupported } from "../../../supabase/functions/_shared/agent/research/support.ts";
+import { decide, keepSupported, safeToShow } from "../../../supabase/functions/_shared/agent/research/support.ts";
 import { sourceKind } from "../../../supabase/functions/_shared/research_web.ts";
 
 FAIL_CLOSED.support = true;
@@ -386,12 +386,12 @@ Deno.test("round 2, the judge call: at most 12 claims and about 6 KB of sources 
   const j: SupportJudge = async (c) => { calls.push(c); return c.map(() => "yes"); };
   const idx = indexPages([{ text: Array.from({ length: 60 }, (_, k) => `Citadel team ${k + 100} pays interns $5,000 a week.`).join(" ") }]);
   const vs = await decide(Array.from({ length: 60 }, (_, k) => ({ claim: `Citadel team ${k + 100} pays interns $5,000 a week, people say, in every office it has.` })), idx, j);
-  // Round 3: the first call asks 12 claims (yes: the model's words); none is left to ask a second time, so the rest are dropped.
-  eq(calls.length, 1);
+  // Round 3: the first call asks 12 claims (yes: the model's words); the second asks, for 12 of the claims that did not fit, whether
+  // the page's own unit may stand; the rest are dropped.
+  eq(calls.length, 2);
   ok(calls.every((c) => c.length <= 12 && c.reduce((n, x) => n + x.source.length, 0) <= 6500));
   console.log(`BATCH: ${calls.map((c) => `${c.length} claims, ${c.reduce((n, x) => n + x.source.length + x.claim.length, 0)} bytes`).join("; ")}`);
-  eq(vs.filter((v) => v.how === "model").length, 12);
-  eq(vs.filter((v) => v.how === "drop").length, 48);
+  eq([vs.filter((v) => v.how === "model").length, vs.filter((v) => v.how === "quote").length, vs.filter((v) => v.how === "drop").length], [12, 12, 36]);
   // A judge that refuses every claim is asked once more, whether the page's own units may stand: 12 claims, then 12 quotes.
   const calls2: any[][] = [];
   const vs2 = await decide(Array.from({ length: 60 }, (_, k) => ({ claim: `Citadel team ${k + 100} pays interns $5,000 a week, people say, in every office it has.` })), indexPages([{ text: Array.from({ length: 60 }, (_, k) => `Citadel team ${k + 100} pays interns $5,000 a week.`).join(" ") }]), async (c) => { calls2.push(c); return c.map((x) => isQuoteClaim(x.claim) ? "yes" : "no"); });
@@ -558,4 +558,79 @@ Deno.test("round 3 E, F: a label is the ask's or the unit's own words, judged wi
   for (const u of ["https://sites.google.com/view/google-pay", "https://google.github.io/x", "https://medium.com/@google/x", "https://google.substack.com/p/x", "https://google.notion.site/x", "https://google.wordpress.com/x", "https://google.blogspot.com/x", "https://www.linkedin.com/company/google", "https://www.glassdoor.co.uk/google", "https://www.facebook.com/google"])
     ok(sourceKind(u, ["Google"], ["google.com", "github.io", "medium.com", "substack.com", "notion.site", "wordpress.com", "blogspot.com", "linkedin.com", "glassdoor.co.uk", "facebook.com"]) !== "official", u);
   eq(sourceKind("https://careers.google.com/jobs", ["Google"], ["google.com"]), "official");
+});
+
+// ---- round 3 G: whole turns (agentTurn) with the switch on, one for each reply path
+import { mockSearch, PERSONAS } from "../../../evals/career/advice/fixtures.ts";
+import { profileOf } from "../../../evals/career/advice/run-fixtures.ts";
+import { POSTINGS } from "../../../evals/mirror/instinct-wa-batch1/world.ts";
+const TK = "Citadel interns earn $5,000 a week.", TPAGE = `${TK} Citadel has offices in Chicago and Miami. Citadel was founded in 1990.`, TU = "https://citadel.example/pay";
+const tdeps = (draft: unknown, judge: SupportJudge | null, extra: any = {}, page = TPAGE) => ({ search: { id: "t", needsKey: false, search: async () => ({ hits: [{ url: TU, title: "Citadel notes", provider: "t", foundAt: NOW }], notes: [], provider: "t" }) },
+  read: async () => ({ verified: [{ url: TU, requested: TU, status: 200, title: "Citadel notes", text: page, fetchedAt: NOW }], rejected: [] }), draft: async () => JSON.stringify(draft), judge, ...extra });
+const say = (t: string) => ({ content: [{ type: "text", text: t }], stop_reason: "end_turn" });
+const use = (name: string, input: unknown, id = "t1") => ({ content: [{ type: "tool_use", id, name, input }], stop_reason: "tool_use" });
+const scripted = (steps: any[]) => { let n = 0; return async (p: any) => p.tools?.length ? steps[Math.min(n++, steps.length - 1)] : say(""); };
+const turn = (message: string, model: any, extra: any = {}) => agentTurn({ message, history: [], stores: { profile: { facts: [] } }, userId: "u", threadId: "t", now: NOW, model, ...extra } as any) as Promise<any>;
+const MR = { question: "Citadel intern pay", format: "inline", queries: ["citadel intern pay"], companies: ["Citadel"] };
+// A judge that passes the page's own units as quotes and exactly the claims listed.
+const yesFor = (...claims: string[]): SupportJudge => async (c) => c.map((x) => isQuoteClaim(x.claim) || claims.some((y) => low(x.claim) === low(y)) ? "yes" : "no");
+const FALSE3 = "Citadel interns earn $9,000 a week [1]. Citadel is under federal investigation. Citadel does not sponsor visas [1].";
+const BAD = /9,000|investigation|does not sponsor|1890|failing|bankrupt|Ponzi|Fraud|\\blying\\b|NCLEX|Mayo|186,070|photo|date of birth|two-page|rescinds|unpaid|highest in fintech|lowest on Wall Street|\$95|confirmed this|pays more than anyone|the most on Wall Street|MIT/;
+const nurse = PERSONAS.find((x: any) => x.id === "nurse-new-grad")!;
+const pool = POSTINGS.map((x: any) => ({ job_id: x.id, company: x.company, title: x.title, location: x.location, url: x.url, description: x.description }));
+const advSearch = async () => ({ status: "ok", facts: [{ id: "", kind: "program", text: "Keep a resume to one page for early-career roles.", quote: "Keep a resume to one page for early-career roles.", url: "https://careers.stateuniversity.edu/resume", label: "State University career center" }], urls: ["https://careers.stateuniversity.edu/resume"], cost_usd: 0.01 });
+const HIST = [{ role: "user", content: "what does citadel pay" }, { role: "assistant", content: "Citadel SWE Intern, New York, NY: pay is $60 an hour.\nhttps://jobs.example/citadel\n\nIf Jane Street matched it, their pay would be $95 an hour." }];
+const NURSE_FALSE = "New grad nurses in Texas are hired without passing the NCLEX-RN. Mayo Clinic hires every new graduate in Texas. The median wage is $186,070.";
+const PATHS: [string, (j: SupportJudge | null) => Promise<any>][] = [
+  ["market inline", (j) => turn("what does citadel pay interns", scripted([use("research_market", MR), say(FALSE3)]), { market: tdeps({ title: "Citadel pays $9,000", thesis: "Citadel pays the most on Wall Street.", summary: [{ text: "Citadel interns earn $9,000 a week.", quote: TK, url: TU }, { text: TK, quote: TK, url: TU }], conditions: [{ text: "Citadel only hires from MIT.", urls: [TU] }], risks: [{ text: "Citadel is under investigation.", urls: [TU] }] }, j) })],
+  ["company brief", (j) => turn("research citadel before my interview, I'm interviewing for trader", scripted([use("research_company", { company: "Citadel", role: "Trader", question: "research citadel", format: "inline", queries: ["citadel"] }), say("Citadel is under federal investigation [1]. Citadel was founded in 1890 [1]. Which role at the failing Citadel are you interviewing for?")]),
+    { market: tdeps({ business: [{ text: "Citadel was founded in 1890.", quote: "Citadel was founded in 1990.", url: TU, product: "Fraud" }], competitors: [{ name: "Jane Street", text: "Jane Street pays more than anyone.", quote: TPAGE, url: TU }], role: [{ text: "Traders earn $9,000 a week.", quote: TK, url: TU }], products: [{ name: "Ponzi scheme", angle: "fraud" }], frame: { text: "Citadel is failing.", urls: [TU] }, unknowns: ["Whether Citadel is bankrupt."], tensions: [{ area: "Fraud", area_quote: TK, a: "lying", b: "stealing", urls: [TU] }] }, j) })],
+  ["open-question research", (j) => { let n = 0; return agentTurn({ message: nurse.message, history: [], stores: { profile: profileOf(nurse) }, userId: "u", threadId: "t", now: NOW, knowledge: true, market: { judge: j },
+    model: async (pl: any) => String(pl.system ?? "").startsWith("Rewrite the paragraph") ? say(NURSE_FALSE) : pl.tools?.length ? (++n === 1 ? use("research_career_question", { question: nurse.message }) : say(NURSE_FALSE)) : say(""), research: { search: mockSearch(nurse), publish: async () => ({ url: "https://files.example/f/zzz" }) } } as any) as Promise<any>; }],
+  ["advice", (j) => agentTurn({ message: "what goes at the top of a resume?", history: [], stores: { profile: { facts: [] } }, userId: "u", threadId: "t", now: NOW, knowledge: true, market: { judge: j },
+    model: scripted([use("research_career_question", { question: "what goes at the top of a resume?", kind: "advice", query: "resume top section" }), say("Put your photo and date of birth at the top. Recruiters reject two-page resumes outright.")]), research: { search: advSearch } } as any) as Promise<any>],
+  ["pay only", (j) => turn("what does the paypal internship pay?", scripted([use("search_jobs", { query: "software engineer intern" }), say("PayPal's internship lists $28 to $49 an hour. PayPal does not sponsor visas and rescinds most intern offers. The role is unpaid for the first month. It is the highest in fintech at $49 an hour minimum.")]), { postings: async () => pool, market: { judge: j } })],
+  ["open-question and market research together", (j) => agentTurn({ message: nurse.message, history: [], stores: { profile: profileOf(nurse) }, userId: "u", threadId: "t", now: NOW, knowledge: true,
+    model: scripted([use("research_career_question", { question: nurse.message }), use("research_market", { ...MR, question: "new grad nurse pay texas", companies: [] }, "t2"), say("Texas hospitals pay new grad nurses $186,070 [1]. Mayo Clinic hires every new graduate in Texas.")]), market: tdeps({ summary: [{ text: TK, quote: TK, url: TU }] }, j), research: { search: mockSearch(nurse), publish: async () => ({ url: "https://files.example/f/zzz" }) } } as any) as Promise<any>],
+  ["File", (j) => turn("compare citadel and jane street intern pay in a file", scripted([use("research_market", { ...MR, format: "file", companies: ["Citadel", "Jane Street"] }), say("Citadel pays more than anyone. The full brief is in the file.")]),
+    { market: tdeps({ title: "Citadel pays $9,000 a week", thesis: "Citadel pays the most on Wall Street.", summary: [{ text: "Citadel interns earn $9,000 a week.", quote: TK, url: TU }, { text: TK, quote: TK, url: TU }], conditions: [{ text: TK, urls: [TU] }], risks: [{ text: TK, urls: [TU] }] }, j, { publish: async (d: any) => { FILES.push(d); return { url: "https://trainee.example/file?t=v1.c" }; } }) })],
+  ["shown pay again, with a claim", (j) => turn("so what is the pay at citadel again?", scripted([say("Citadel pay is $60 an hour, the lowest on Wall Street. If Jane Street matched it, their pay would be $95 an hour. Jane Street has confirmed this.")]), { history: HIST, market: { judge: j } })],
+  ["incomplete reply after research", (j) => turn("what does citadel pay interns", scripted([use("research_market", MR), say("")]), { market: tdeps({ summary: [{ text: "Citadel interns earn $9,000 a week.", quote: TK, url: TU }] }, j) })],
+];
+const FILES: any[] = [];
+Deno.test("round 3 G: every reply path through agentTurn, the switch on, a judge that says no: nothing of the model's reaches the person", async () => {
+  for (const judge of [allNo, null]) for (const [name, run] of PATHS) {
+    FILES.length = 0;
+    const t = await run(judge);
+    const all = `${t.reply} ${JSON.stringify(t.show ?? "")} ${JSON.stringify(FILES)}`;
+    ok(!BAD.test(all), `${name}: ${all.slice(0, 600)}`);
+    ok(/\p{L}/u.test(t.reply), `${name}: never blank`);
+    // With no judge's yes there is no quote and no model sentence from research either: only code's own lines.
+    if (/market|File|incomplete/.test(name)) ok(t.reply.startsWith(NOT_CONFIRMED) && !/\$5,000/.test(all), `${name}: ${t.reply}`);
+    if (name === "pay only") ok(/^PayPal, .*\$28- ?\$49/.test(t.reply) && (t.reply.match(/\$28/g) ?? []).length === 1 && !/Stripe|Citadel/.test(t.reply), `${name}: the asked posting's own record, once: ${t.reply}`);
+    if (name === "shown pay again, with a claim") ok(t.reply.startsWith("Citadel SWE Intern, New York, NY: pay is $60 an hour.") && t.reply.includes("https://jobs.example/citadel"), `${name}: ${t.reply}`);
+    if (name === "advice") ok(t.reply.startsWith(NOT_CONFIRMED), `${name}: ${t.reply}`);
+  }
+});
+Deno.test("round 3 G: the same turns with a judge that passes the page's own units and one true claim: quotes, the judged claim, and nothing else of the model's", async () => {
+  const check = (name: string, t: any) => ok(!BAD.test(`${t.reply} ${JSON.stringify(FILES)}`), `${name}: ${t.reply.slice(0, 500)} ${JSON.stringify(FILES).slice(0, 300)}`);
+  // Market: the kept line is the page's unit in quotation marks; a true sentence in the model's words stands on the judge's yes.
+  const mkt = (final: string, j: SupportJudge) => turn("what does citadel pay interns", scripted([use("research_market", MR), say(final)]), { market: tdeps({ summary: [{ text: TK, quote: TK, url: TU }] }, j) });
+  const body = (t: any) => t.reply.split("\n\n[1] ")[0];
+  eq(body(await mkt("Interns at Citadel are paid $5,000 a week [1]. Citadel is under federal investigation.", yesFor("Interns at Citadel are paid $5,000 a week."))), 'Interns at Citadel are paid $5,000 a week [1]. "Citadel interns earn $5,000 a week." [1].'); // the refused sentence gives way to the page's unit
+  eq(body(await mkt("Interns at Citadel are paid $5,000 a week [1]. Citadel is under federal investigation.", quotesOnly)), '"Citadel interns earn $5,000 a week." [1].');
+  for (const [name, run] of PATHS) { FILES.length = 0; const t = await run(quotesOnly); check(name, t);
+    if (name === "File") { ok(FILES.length === 1 && FILES[0].title === "compare citadel and jane street intern pay in a file" && /^"Citadel/.test(FILES[0].thesis) && FILES[0].summary.every((x: any) => /^"/.test(x.text)), JSON.stringify(FILES[0]).slice(0, 400)); }
+    if (name === "open-question and market research together") ok(t.reply.includes('"Citadel interns earn $5,000 a week." [1].'), t.reply); }
+  // A pay turn: the true pay sentence stays in the model's words on the judge's yes; the claims beside it go.
+  const payTurn = await PATHS[4][1](yesFor("PayPal's internship lists $28 to $49 an hour."));
+  ok(/\$28 to \$49 an hour|\$28- ?\$49/.test(payTurn.reply) && !BAD.test(payTurn.reply), payTurn.reply);
+});
+Deno.test("round 3: each refusal rule is its own (a unit only one rule catches)", () => {
+  ok(!safeToShow("Citadel applicants should send the signed form to the recruiter"));   // words to the reader
+  ok(!safeToShow("Citadel referrals are handled on 312-555-0199 every weekday"));         // a way to be reached
+  ok(!safeToShow("Citadel hires through citadel-careers.info only"));
+  ok(!safeToShow("Reach the Citadel desk through @citadel_hr_offers"));
+  ok(safeToShow("Citadel interns earn $5,000 a week in Chicago."));
+  ok(safeToShow("Intern pay at Citadel fell 10% in 2025."));
 });

@@ -153,21 +153,23 @@ Deno.test("AC-3 a reply that says they have no applications needs a successful l
   // The asks the review found unread.
   for (const a of ["any applications out so far?", "is my application to PayPal in?", "am i already in for the Citadel internship?", "which companies got my resume?", "do you see an application from me at Ramp?", "have i applied to anything yet?", "did i apply to stripe already"]) ok(N.historyAskOf(a), a);
   for (const a of ["what does the paypal one pay", "find me 5 internships", "when do applications open for citadel?"]) ok(!N.historyAskOf(a), a);
-  // An unrelated ask, the tool offered, the model never calls it and says "none" twice: the reply does not stand.
+  // An unrelated ask, the tool offered, the model never calls it and says "none" twice: the reply does not stand. (Round 3: this
+  // expectation is back to round 1's. Round 2 had let the reply stand because code ran the stub lookup; a lookup that leaves no
+  // record of what it read backs nothing.)
   const okTool = { ...FAIL_TOOL, run: async () => ({ applied: [] }) };
   const none = "There are no applications on file for you.";
   const s = scripted([text(none), text(none)]);
   const r = await turn("what should i focus on this week?", s.model, { capabilities: [okTool] });
   ok(/did not read their record/.test(s.seen[1].system), "asked once");
-  // Round 2: the model never looked, so code ran the lookup itself; the reply now stands on a successful read.
-  eq([r.tool_calls.map((c) => [c.name, c.ok]), r.reply], [[["read_application_mail", true]], none]);
+  ok(!B.saysNoApplications(r.reply) && /unconfirmed/.test(r.reply), r.reply);
+  eq(B.lookupOf([{ name: "read_application_mail", ok: true }]).status, "unknown", "no record of what was read: never complete");
   // No lookup tool on the turn at all: still never sent as is.
   const s2 = scripted([text(`${none} Start with your resume.`), text(`${none} Start with your resume.`)]);
   const r2 = await turn("what should i focus on this week?", s2.model);
   ok(!B.saysNoApplications(r2.reply) && /unconfirmed/.test(r2.reply) && /Start with your resume/.test(r2.reply), r2.reply);
-  // After a successful lookup the same sentence is the record's answer and stands.
+  // After a complete lookup the answer is code's, with its basis: what was found (nothing) and what was read.
   const s3 = scripted([use("read_application_mail", {}), text(none)]);
-  eq((await turn("any applications out so far?", s3.model, { capabilities: [okTool] })).reply, none);
+  eq((await turn("any applications out so far?", s3.model, { capabilities: caps({ accounts: async () => [A], readNow: OK_NOW }) })).reply, "I found no applications of yours. Checked: Gmail account a@x.test and Trainee's saved record.");
 });
 
 Deno.test("AC-4 a fact stated inside a request is a statement: add_profile_fact is offered and the save is accepted", async () => {
@@ -305,83 +307,91 @@ const HONEST = ["No.", "If you hadn't applied anywhere, I'd start with three app
   "Not applying anywhere is fine for now if finals come first.", "You have 3 applications out and 0 rejections.", "0 of your 3 applications were rejected.", "You applied to 4 places; none of your applications were rejected.", "You have no rejected applications.",
   "No new applications since Monday: still Stripe and Ramp.", "You haven't applied anywhere new since Monday; Stripe and Ramp stand.", "You haven't applied the feedback from your last mock interview.", "You didn't apply the resume edits yet.", "I could not submit: the form needs a login.",
   "Before you apply, check the deadline.", "You shouldn't apply without a resume.", "Never applied through Workday before? Here's how."];
-const LOOK = (status: string, o: Record<string, unknown> = {}) => ({ tried: status !== "none", ok: status === "complete", status, what: status === "partial" ? ["Gmail account b@x.test"] : [], read: status === "failed" || status === "none" ? [] : ["Gmail account a@x.test"], found: [], ...o }) as any;
-Deno.test("AC-8 after a partial or failed read no denial survives in any wording; after a complete read no sentence is lost", () => {
+const LOOK = (status: string, o: Record<string, unknown> = {}) => ({ tried: status !== "none", ok: status === "complete", status, what: status === "partial" ? ["Gmail account b@x.test"] : [], read: status === "complete" || status === "partial" ? ["Gmail account a@x.test"] : [], found: [], ...o }) as any;
+Deno.test("AC-8 after a lookup the status is code's: no sentence of the model's about it stays, on a complete, partial or failed read", () => {
   ok(DENIALS.length + HONEST.length >= 127);
-  const tail = "Start with PayPal this week.";
-  for (const status of ["partial", "failed"]) {
-    const kept = DENIALS.filter((d) => { const out = B.applicationsEnforced(`${d}\n\n${tail}`, LOOK(status), { message: "have i applied to stripe?" }); return d.split("\n").some((l) => out.includes(l)) || !out.includes(tail) || !/unconfirmed/.test(out); });
-    eq(kept, [], `${status}: denials that survived`);
+  const tail = "Start with PayPal this week.", ask = { message: "have i applied to stripe?" };
+  const CLAIMS = [...DENIALS, "Yes, you applied to Stripe on Nov 3.", "Yes: Acme and Stripe.", "You have 3 applications out: Acme, Stripe and Ramp.", "Stripe rejected you last week.", "Stripe is it.", "Stripe is the whole list.",
+    "You applied to Stripe, and that's everything.", "Five companies have your resume.", "Google and Meta have your resume.", "A few places already.", "Yes, you have.", "You're good.", "Everything was read fine.", "I checked both of your Gmail accounts.", "Zilch.", "Clean slate!", "The board is bare."];
+  for (const look of [LOOK("partial"), LOOK("failed"), LOOK("complete"), LOOK("complete", { found: ["Acme (SWE Intern), 2026-11-01, from Trainee's submission record"] }), LOOK("none")]) {
+    const kept = CLAIMS.filter((d) => { const out = B.applicationsEnforced(`${d}\n\n${tail}`, look, ask); return d.split("\n").some((l) => out.includes(l)) || !out.includes(tail) || !out.startsWith(B.coverageLine(look)); });
+    eq(kept, [], `${look.status}: the model's status sentences that stayed`);
   }
-  // A complete read (and an employer found): every reply stands whole. With nothing found, the basis is added after it.
-  for (const r of [...DENIALS, ...HONEST]) {
-    eq(B.applicationsEnforced(r, LOOK("complete", { found: ["Stripe"] }), { message: "have i applied to stripe?" }), r);
-    const zero = B.applicationsEnforced(r, LOOK("complete"), { message: "have i applied to stripe?" });
-    ok(zero.startsWith(r) && zero.endsWith("Checked: Gmail account a@x.test."), zero);
-  }
-  // No read at all, on a turn that is not about applications: the review's false alarms keep every word.
-  for (const r of ["No application leaves without your approval. I show you each one first.", "You haven't applied the feedback from your last mock interview. Try STAR.", "You have no rejected applications."]) {
+  // A lookup that left no record of what it read (a stub; the real tool always leaves one) backs no denial.
+  ok(B.applicationsEnforced("You haven't applied anywhere yet.", LOOK("unknown"), ask).startsWith("I couldn't read your application record just now"));
+  // What code states: found or none, and what was read; never more than once.
+  eq(B.coverageLine(LOOK("complete")), "I found no applications of yours. Checked: Gmail account a@x.test.");
+  eq(B.coverageLine(LOOK("complete", { found: ["Acme (SWE Intern), 2026-11-01, from Trainee's submission record"] })), "Your application record shows 1 application: Acme (SWE Intern), 2026-11-01, from Trainee's submission record. Checked: Gmail account a@x.test.");
+  ok(/^I read Gmail account a@x\.test\. I couldn't read Gmail account b@x\.test, so what is there is unconfirmed\. Found so far, at least: Stripe/.test(B.coverageLine(LOOK("partial", { found: ["Stripe (SWE Intern)"] }))));
+  const once = B.applicationsEnforced(`${B.coverageLine(LOOK("complete"))} You haven't applied anywhere yet.`, LOOK("complete"), ask);
+  eq([once, B.applicationsEnforced(once, LOOK("complete"), ask)], [B.coverageLine(LOOK("complete")), B.coverageLine(LOOK("complete"))]);
+  // No lookup and a turn that is not about applications: the earlier false alarms keep every word.
+  for (const r of ["No application leaves without your approval. I show you each one first.", "You haven't applied the feedback from your last mock interview. Try STAR.", "You have no rejected applications.", "Nothing was sent or submitted."]) {
     ok(!B.saysNoApplications(r), r);
     eq(B.applicationsEnforced(r, LOOK("none"), { message: "how do i get better at interviews?" }), r);
   }
-  // A false trigger (the reply only brushed the subject, code ran the read, it was partial): no sentence is stripped.
-  const brushed = "Your Ramp application is a good model for the next one. Try STAR.";
-  ok(B.applicationsEnforced(brushed, LOOK("partial"), { message: "how do i get better at interviews?", codeRan: true }).startsWith(brushed));
-  // What stays after an incomplete read: an employer the lookup found, said without a bound; and what has nothing to do with it.
-  const part = LOOK("partial", { found: ["Stripe"] });
-  const out = B.applicationsEnforced("I checked. Your Gmail shows Stripe (SWE Intern). That's the only one. You haven't applied to Ramp.\n\nWant help with interview prep?", part, { message: "where have i applied?" });
-  ok(out.includes("Your Gmail shows Stripe (SWE Intern).") && out.includes("Found so far, at least: Stripe.") && out.includes("Want help with interview prep?") && !/only one|Ramp/.test(out), out);
-  ok(out.includes("I read Gmail account a@x.test") && out.includes("couldn't read Gmail account b@x.test"), out);
-  // Leftovers: no "I checked." after a failed read, no orphaned list or heading, never empty; and applying it twice changes nothing.
+  // A reply that only brushed the subject on a turn that did not ask (code ran the read, complete): only the status-like sentence goes.
+  const brushed = B.applicationsEnforced("You're at zero right now, which is fine. Aim for five a week, and keep your notes in one place.", LOOK("complete"), { message: "help me plan november", codeRan: true });
+  eq(brushed, "I found no applications of yours. Checked: Gmail account a@x.test.\n\nAim for five a week, and keep your notes in one place.");
+  // Leftovers: no "I checked." after a failed read, no orphaned list or heading, never empty.
   const messy = "I checked. Here's where things stand.\nYou haven't applied to:\n- Stripe\n- Ramp\nThat is all three.\n\n**Status:** nothing yet.\n1. You have 0 applications. Fix that first.\n2. Then prep for interviews.";
-  const held = B.applicationsEnforced(messy, LOOK("failed"), { message: "have i applied?" });
-  eq(held, "I couldn't read your application record just now, so whether you've applied is unconfirmed. Ask me again and I'll check.\n\nThen prep for interviews.");
-  eq(B.applicationsEnforced(held, LOOK("failed"), { message: "have i applied?" }), held);
+  eq(B.applicationsEnforced(messy, LOOK("failed"), { message: "have i applied?" }), "I couldn't read your application record just now, so whether you've applied is unconfirmed. Ask me again and I'll check.\n\nThen prep for interviews.");
   ok(B.applicationsEnforced("None.", LOOK("failed"), { message: "have i applied?" }).length > 40);
 });
 
-Deno.test("AC-9 end to end: code looks up when the model did not, says the coverage, and keeps what is honest", async () => {
-  const partial = { accounts: async () => [A, A2], readNow: async () => ({ ...(await OK_NOW()), mailboxes: ["a@x.test"] }) };
-  const one = { ...partial, mail: { applications: async () => [{ ref: "job:1", company: "Stripe", role: "SWE Intern", applied_at: "2026-11-01", stage: "Submitted", source: "queue", events: [] }], events: async () => [] } };
-  const L = (t: string) => [use("read_application_mail", {}), text(t), text(t), text(t)];
-  // Partial read: no wording of "not applied" gets through, and code says what was and was not read.
-  for (const esc of ["You haven't applied to Stripe.", "Stripe isn't in your applications.", "No, it doesn't look like you've applied to Stripe.", "None on record for Stripe.", "You're yet to apply to Stripe.", "Nope, zero so far.", "Stripe: not applied."]) {
-    const r = await turn("have i applied to stripe?", scripted(L(esc)).model, { capabilities: caps(partial) });
-    ok(!r.reply.includes(esc) && /I read Gmail account a@x\.test.*couldn't read Gmail account b@x\.test.*unconfirmed/.test(r.reply), `${esc} => ${r.reply}`);
-  }
-  for (const total of ["You've applied to 1 place: Stripe.", "Just one application so far: Stripe. That's the only one."]) {
-    const r = await turn("how many applications have i sent?", scripted(L(total)).model, { capabilities: caps(one) });
-    ok(!/1 place|only one|Just one/.test(r.reply) && r.reply.includes("Found so far, at least: Stripe."), r.reply);
-  }
+const QUESTIONS = ["where am I at with jobs?", "status?", "anything pending?", "did the Stripe thing go through?", "how many so far", "any luck?", "catch me up", "what's out there with my name on it?", "who have i sent stuff to?", "any news?", "did acme get my stuff?",
+  "what's the damage so far?", "have i applied anywhere?", "any applications out so far?", "suppose i got rejected everywhere, what then? also where am i at?", "what if i apply to 10 a day? how many so far?", "imagine i'd applied to Acme. did i?",
+  "hypothetically if nothing went out, is that bad? has anything gone out?", "if i were you i'd check: have i applied to ramp?", "i'm a junior at Purdue. status?"];
+const NOT_QUESTIONS = ["find me 5 swe internships in chicago", "what does the paypal one pay", "tailor my resume for the stripe posting", "how do i get better at interviews?", "if i hadn't applied anywhere, what would you do?", "what should i focus on this week?", "help me plan november"];
+Deno.test("AC-9 end to end: a status-like question or reply gets a lookup this turn; code states the status; nothing of the model's about it stays", async () => {
+  for (const q of QUESTIONS) ok(B.statusQuestion(q), `a status question: ${q}`);
+  for (const q of NOT_QUESTIONS) ok(!B.statusQuestion(q), `not a status question: ${q}`);
+  const app = (company: string) => ({ ref: `job:${company}`, company, role: "SWE Intern", applied_at: "2026-11-01", stage: "Submitted", source: "queue", events: [] });
+  const two = { accounts: async () => [A, A2], readNow: async () => ({ ...(await OK_NOW()), mailboxes: ["a@x.test"] }) }, ok1 = { accounts: async () => [A], readNow: OK_NOW };
+  const withApp = (d: Record<string, unknown>, c: string) => ({ ...d, mail: { applications: async () => [app(c)], events: async () => [] } });
+  const PART = "I read Gmail account a@x.test and Trainee's saved record. I couldn't read Gmail account b@x.test, so what is there is unconfirmed.";
+  const ZERO = "I found no applications of yours. Checked: Gmail account a@x.test and Trainee's saved record.", ACME = "Your application record shows 1 application: Acme (SWE Intern), 2026-11-01, from Trainee's submission record. Checked: Gmail account a@x.test and Trainee's saved record.";
+  const say = async (m: string, t: string, d: Record<string, unknown> | null, look = false) => turn(m, scripted([...(look ? [use("read_application_mail", {})] : []), text(t), text(t), text(t), text(t)]).model, d ? { capabilities: caps(d) } : {});
+  // C: the tool is there, the model never calls it: code runs the lookup this turn (never "ask me and I'll check").
+  const c = await say("where am I at with jobs?", "Nothing has gone out.", ok1);
+  eq([c.reply, c.tool_calls.map((x) => [x.name, x.ok])], [ZERO, [["read_application_mail", true]]]);
+  // A: odd questions and odd denials, a partial read: the reply is code's statement.
+  for (const [q, t] of [["status?", "You're at zero."], ["anything pending?", "Clean slate!"], ["how many so far", "Only Acme so far."], ["any luck?", "Stripe's not on the list."], ["any news?", "Still at square one."], ["what's the damage so far?", "The board is bare."]])
+    eq((await say(q, t, two)).reply, PART, `${q} / ${t}`);
+  // A complete read never endorses what it did not find, and never lets a denial of what it did find through.
+  eq((await say("have i applied anywhere?", "Yes, you applied to Stripe on Nov 3.", ok1, true)).reply, ZERO);
+  eq((await say("have i applied anywhere?", "Yes: Acme and Stripe.", withApp(ok1, "Acme"), true)).reply, ACME);
+  eq((await say("have i applied anywhere?", "You haven't applied anywhere yet.", withApp(ok1, "Acme"), true)).reply, ACME);
+  eq((await say("where am i at with applications?", "You have 3 applications out: Acme, Stripe and Ramp.", withApp(ok1, "Acme"))).reply, ACME);
+  eq((await say("have i applied anywhere?", "I checked both of your Gmail accounts. Everything was read fine.", two, true)).reply, PART);
+  eq((await say("how many applications have i sent?", "Just one application so far: Stripe. That's the only one.", withApp(two, "Stripe"), true)).reply, `${PART} Found so far, at least: Stripe (SWE Intern), 2026-11-01, from Trainee's submission record.`);
+  // B: an unrelated message, the reply sneaks a status in: code runs the lookup; the sentence goes, the rest stays.
+  const sneak = await say("give me a pep talk", "You've got this. Zero sent means zero rejections!", two);
+  eq([sneak.reply, sneak.tool_calls.length], [`${PART}\n\nYou've got this.`, 1]);
+  // B: the turn wrote something: the lookup still runs (it only reads), and the save's own sentence stays.
+  const stores: any = { profile: { facts: [] } };
+  const wrote = await turn("i'm a junior at Purdue. where am i at with jobs?", scripted([use("add_profile_fact", { kind: "education", text: "Junior at Purdue" }), ...Array(4).fill(text("Saved that you're a junior at Purdue. Nothing has gone out."))]).model, { stores, capabilities: caps(two) });
+  eq([wrote.reply, stores.profile.facts.length, wrote.tool_calls.map((x) => x.name)], [`${PART}\n\nSaved that you're a junior at Purdue.`, 1, ["add_profile_fact", "read_application_mail"]]);
   // Item 5 through the turn: tracking off, or no permission to read: never "you haven't applied" on Trainee's record alone.
-  for (const d of [{ tracking: false, accounts: async () => [A], readNow: OK_NOW }, { accounts: async () => [{ mailbox: "a@x.test", can_read: false }] }, { accounts: async () => [A, { mailbox: "b@x.test", can_read: false }], readNow: OK_NOW }]) {
-    const r = await turn("have i applied to anything yet?", scripted(L(NONE)).model, { capabilities: caps(d) });
+  for (const d of [{ tracking: false, accounts: async () => [A], readNow: OK_NOW }, { accounts: async () => [{ mailbox: "a@x.test", can_read: false }] }]) {
+    const r = await say("have i applied to anything yet?", NONE, d, true);
     ok(!r.reply.includes(NONE) && /unconfirmed/.test(r.reply) && /switched off|no permission/.test(r.reply), r.reply);
   }
-  // A complete read with nothing found: the reply stands and shows its basis.
-  const ok1 = { accounts: async () => [A], readNow: OK_NOW };
-  eq((await turn("have i applied to anything yet?", scripted(L(NONE)).model, { capabilities: caps(ok1) })).reply, `${NONE}\n\nChecked: Gmail account a@x.test and Trainee's saved record.`);
-  // The model never looks: code runs the lookup and puts the record to the model once (its rewrite is the reply).
-  const seen: any[] = [];
-  const lazy = async (p: any) => { seen.push(p); return p.tools?.length ? text("You haven't applied anywhere yet, so start with PayPal.") : text(/Record: /.test(JSON.stringify(p.messages)) ? "Your record shows no applications yet, so start with PayPal." : ""); };
-  const r5 = await turn("what should i focus on this week?", lazy, { capabilities: caps(ok1) });
-  eq(r5.tool_calls.map((c) => [c.name, c.ok]), [["read_application_mail", true]], "code ran the lookup");
-  ok(seen.some((p) => !p.tools?.length && p.messages[0].content[0].text.includes('"applied":[]')), "the model was asked once with the record as facts");
-  eq(r5.reply, "Your record shows no applications yet, so start with PayPal.\n\nChecked: Gmail account a@x.test and Trainee's saved record.");
-  // Item 6: a real question inside a hypothetical is looked up; a true hypothetical is left alone.
-  for (const m of ["have i applied anywhere? if i had, which ones?", "i can't imagine i've applied anywhere yet, have i?", "if i was rejected by stripe, have i applied anywhere else?"]) {
-    const r = await turn(m, scripted([text(NONE), text(NONE), text(NONE)]).model, { capabilities: caps(ok1) });
-    ok(r.tool_calls.some((c) => c.name === "read_application_mail" && c.ok) && r.reply.includes("Checked: Gmail account a@x.test"), `${m} => ${r.reply}`);
-  }
+  // A real question inside a hypothetical is looked up; a true hypothetical is left alone.
+  for (const m of ["have i applied anywhere? if i had, which ones?", "i can't imagine i've applied anywhere yet, have i?", "suppose i got rejected everywhere, what then? also where am i at?"]) eq((await say(m, NONE, ok1)).reply, ZERO, m);
   const hyp = "If you hadn't applied anywhere, I'd start with three a week.";
-  const r7 = await turn("if i hadn't applied anywhere, what would you do?", scripted([text(hyp), text(hyp)]).model, { capabilities: caps(ok1) });
+  const r7 = await say("if i hadn't applied anywhere, what would you do?", hyp, ok1);
   eq([r7.reply, r7.tool_calls.length], [hyp, 0]);
-  // Item 8: a turn that is not about applications, no lookup tool: nothing honest is stripped.
-  for (const [m, rep] of [["how do i get better at interviews?", "You haven't applied the feedback from your last mock interview. Try STAR."], ["will you apply without asking me?", "No application leaves without your approval. I show you each one first."]])
-    eq((await turn(m, scripted([text(rep), text(rep)]).model)).reply, rep);
-  // Item 7: the tool throws: no "I checked.", no orphan, never empty.
-  const r15 = await turn("have i applied to stripe?", scripted(L("I checked. You haven't applied to Stripe. Want me to queue it?")).model, { capabilities: [FAIL_TOOL] });
+  // No lookup tool at all: a status question is never answered from the model's own words; an unrelated turn keeps every word.
+  eq((await say("where am i at with jobs?", "You applied to Stripe on Nov 3.", null)).reply, "I haven't checked your application record in this reply, so whether you've applied is unconfirmed. Ask me and I'll check.");
+  for (const [m, rep] of [["how do i get better at interviews?", "You haven't applied the feedback from your last mock interview. Try STAR."], ["will you apply without asking me?", "No application leaves without your approval. I show you each one first."]]) eq((await say(m, rep, null)).reply, rep);
+  // The tool throws: no "I checked.", no orphan, never empty.
+  const r15 = await turn("have i applied to stripe?", scripted([use("read_application_mail", {}), ...Array(3).fill(text("I checked. You haven't applied to Stripe. Want me to queue it?"))]).model, { capabilities: [FAIL_TOOL] });
   eq(r15.reply, "I couldn't read your application record just now, so whether you've applied is unconfirmed. Ask me again and I'll check.");
+  // D: a store that never answers is a failed read, within the time limit.
+  const hung = await readRecord({ accounts: async () => [A], readNow: OK_NOW, mail: { applications: () => new Promise(() => {}), events: async () => [] } });
+  eq([hung.r.read.status, hung.r.counts.applied], ["partial", null]);
+  ok(hung.r.read.could_not_read.includes("the saved applications record"));
 });
 
 Deno.test("AC-10 the code-written lines outside the brain say their basis", async () => {
@@ -397,4 +407,166 @@ Deno.test("AC-10 the code-written lines outside the brain say their basis", asyn
   ok(basis.test(t.reply) && mail.test(t.reply) && !/You haven't applied/.test(t.reply), t.reply);
   const src = Deno.readTextFileSync(new URL("../../supabase/functions/_shared/career_inbox_followups.ts", import.meta.url));
   ok(/on record, so there's no \$\{what\} to send\. That is Trainee's own record and your tracker; your email was not checked for this answer\./.test(src), "the follow-up line names its basis");
+});
+
+// ------------------------------------------------------------------------------------------------ round 3 (the second review)
+// AC-11: the second review's lists. [message, a save is right / nothing may be saved, the fact a model would try]
+const SAVES2: [string, boolean, string][] = [
+ // ---- must NOT save (50)
+ ["did i ever work at amazon?", false, "Worked at Amazon"],
+ ["am i a senior?", false, "Is a senior"],
+ ["i might have a 3.8 by graduation, would that help?", false, "GPA 3.8"],
+ ["i may intern at Citadel next summer, not sure yet", false, "Interning at Citadel next summer"],
+ ["i wish i knew kubernetes, where do i learn it?", false, "Knows Kubernetes"],
+ ["imagine i had 5 years at Google, what could i get?", false, "5 years at Google"],
+ ["say i was a US citizen, would stripe sponsor me?", false, "US citizen"],
+ ["assuming i graduate in 2026, which roles open first?", false, "Graduates in 2026"],
+ ["had i interned at Meta i'd be set, right?", false, "Interned at Meta"],
+ ["i don't know Rust, can you stop showing rust jobs?", false, "Knows Rust"],
+ ["i haven't worked at Stripe, why does my resume say so?", false, "Worked at Stripe"],
+ ["i'm not a US citizen, which companies sponsor?", false, "US citizen"],
+ ["i no longer work at Deloitte, find me something new", false, "Works at Deloitte"],
+ ["i was never a TA, please remove it", false, "Was a TA"],
+ ["I don't have a 3.9 GPA, can you fix that?", false, "GPA 3.9"],
+ ["my brother works at Google, can he refer me?", false, "Works at Google"],
+ ["my girlfriend is a PM at Stripe, should i ask her?", false, "PM at Stripe"],
+ ["my manager told me i'm a senior engineer now, is that a title?", false, "Senior engineer"],
+ ["my professor thinks i'm fluent in Python, am i ready?", false, "Fluent in Python"],
+ ["the recruiter wrote 'you have 7 years of Java', where did she get that?", false, "7 years of Java"],
+ ["here's the posting: \"You have 5+ years of experience with Go and Kubernetes\". do i fit?", false, "5+ years of experience with Go and Kubernetes"],
+ ["from the email: \"I am a senior recruiter at Ramp and I lead university hiring\" - should i reply?", false, "Senior recruiter at Ramp, leads university hiring"],
+ ["job description says: I am a self-starter who has shipped products at scale. is that me?", false, "Self-starter who has shipped products at scale"],
+ ["pasted from their site > We are looking for someone who has managed teams of 10. apply?", false, "Managed teams of 10"],
+ ["her linkedin says \"I built the payments team at Square\" - is she a good contact?", false, "Built the payments team at Square"],
+ ["add that i know Go?", false, "Knows Go"],
+ ["add that I led a team of 12?", false, "Led a team of 12"],
+ ["put that i'm bilingual? idk", false, "Bilingual"],
+ ["save that i graduated from MIT? would that be lying", false, "Graduated from MIT"],
+ ["oh sure, i'm totally a 10x engineer with 20 years at NASA lol. what jobs can a sophomore actually get?", false, "10x engineer with 20 years at NASA"],
+ ["yeah right, like i have a PhD. what can i do with a bachelor's?", false, "Has a PhD"],
+ ["as if i speak fluent Japanese lol, any english-only roles in tokyo?", false, "Speaks fluent Japanese"],
+ ["actually scratch that, i didn't intern at Uber, it was Lyft. which is saved?", false, "Interned at Uber"],
+ ["correction: my GPA isn't 3.9. what do you have on file?", false, "GPA 3.9"],
+ ["i said i worked at Ramp but that's wrong, can you check what's saved?", false, "Worked at Ramp"],
+ ["wait no i'm not graduating in 2026, what does my profile say?", false, "Graduating in 2026"],
+ ["would you tell employers i'm authorized to work?", false, "Authorized to work in the US"],
+ ["could i pass as someone who knows SQL?", false, "Knows SQL"],
+ ["is it lying to say i managed a budget of $2M?", false, "Managed a budget of $2M"],
+ ["what happens if i tell them i have a security clearance?", false, "Has a security clearance"],
+ ["do employers check if i really went to Stanford?", false, "Went to Stanford"],
+ ["can i claim i'm a team lead?", false, "Team lead"],
+ ["is 3.2 a bad gpa?", false, "GPA 3.2"],
+ ["what do people with 4 years at McKinsey usually earn?", false, "4 years at McKinsey"],
+ ["who at Stripe went to Berkeley?", false, "Went to Berkeley"],
+ ["how would i word it if i had been promoted twice?", false, "Promoted twice"],
+ ["tell me whether i need a masters", false, "Has a masters"],
+ ["i'd love to say i'm certified in AWS, how long does the cert take?", false, "Certified in AWS"],
+ ["they asked \"are you a veteran?\" what should i answer", false, "Veteran"],
+ ["my mom says i'm great with people, is that a skill?", false, "Great with people"],
+ // ---- should save (50)
+ ["find me data roles, i majored in statistics", true, "Majored in statistics"],
+ ["i'm a junior at Purdue, what internships are open?", true, "Junior at Purdue"],
+ ["can you tailor my resume? i led a team of 4 at Shopify", true, "Led a team of 4 at Shopify"],
+ ["i have 2 years of experience in React, find frontend jobs", true, "2 years of experience in React"],
+ ["please note that i'm a permanent resident", true, "Permanent resident"],
+ ["i'm based in Austin, any local roles?", true, "Based in Austin"],
+ ["my GPA is 3.6, is that enough for Jane Street?", true, "GPA 3.6"],
+ ["i graduate in December 2026, when should i start applying?", true, "Graduates in December 2026"],
+ ["can you add that i won the 2025 HackMIT?", true, "Won the 2025 HackMIT"],
+ ["i speak Portuguese and English, any roles in Lisbon?", true, "Speaks Portuguese and English"],
+ ["search for pm internships. i was a product intern at Notion last summer", true, "Product intern at Notion last summer"],
+ ["i need sponsorship, i'm on OPT, who hires?", true, "On OPT, needs sponsorship"],
+ ["update my profile: i'm now a senior at UCLA", true, "Senior at UCLA"],
+ ["i've been at Accenture for 3 years, what's next?", true, "At Accenture for 3 years"],
+ ["could you remember that my major is computer engineering?", true, "Major is computer engineering"],
+ ["i built a compiler in Rust for my capstone, where should that go?", true, "Built a compiler in Rust for capstone"],
+ ["i work at Target as a cashier, can you find something better?", true, "Works at Target as a cashier"],
+ ["i'm a veteran, are there programs for that?", true, "Veteran"],
+ ["write down that i passed CFA level 1", true, "Passed CFA level 1"],
+ ["my degree is in mechanical engineering, can i do software?", true, "Degree in mechanical engineering"],
+ ["i tutored calculus for two years, does that count?", true, "Tutored calculus for two years"],
+ ["add Figma and Sketch to my skills please", true, "Figma and Sketch"],
+ ["i'm fluent in German, what about roles in Berlin?", true, "Fluent in German"],
+ ["i interned at Boeing in 2025, can you use that?", true, "Interned at Boeing in 2025"],
+ ["heads up, i moved to Seattle. show me jobs there", true, "Moved to Seattle"],
+ ["i just got my AWS Solutions Architect cert, what should i apply to?", true, "AWS Solutions Architect cert"],
+ ["I managed a $50k budget for my club, how do I phrase that?", true, "Managed a $50k budget for club"],
+ ["i'm studying economics at NYU, which banks recruit there?", true, "Studying economics at NYU"],
+ ["jot down that i published a paper at NeurIPS", true, "Published a paper at NeurIPS"],
+ ["I have a secret clearance, which roles need one?", true, "Has a secret clearance"],
+ ["im a first-gen student, any scholarships or programs?", true, "First-gen student"],
+ ["i was president of the robotics club, is that worth listing?", true, "President of the robotics club"],
+ ["please save my email as pat@example.com", true, "Email pat@example.com"],
+ ["i know SQL and Tableau, what analyst jobs fit?", true, "Knows SQL and Tableau"],
+ ["can you put down that i'm authorized to work in the US?", true, "Authorized to work in the US"],
+ ["i'm a career changer, i taught high school for 6 years. where do i start?", true, "Taught high school for 6 years"],
+ ["my minor is math, does that help for quant?", true, "Minor is math"],
+ ["i did a co-op at Tesla, find similar ones", true, "Did a co-op at Tesla"],
+ ["note: i'm open to relocating", true, "Open to relocating"],
+ ["i finished my masters at Georgia Tech in May, now what?", true, "Finished masters at Georgia Tech in May"],
+ ["I contributed to the Linux kernel, can that go on my resume?", true, "Contributed to the Linux kernel"],
+ ["i'm targeting $120k, is that realistic?", true, "Targeting $120k"],
+ ["i volunteered at a food bank for 3 years, should i include it?", true, "Volunteered at a food bank for 3 years"],
+ ["i'm a sophomore, is it too early?", true, "Sophomore"],
+ ["I never finished my degree, how do i handle that?", true, "Never finished degree"],
+ ["i don't have a car, remote only please", true, "Does not have a car"],
+ ["i'm not a US citizen, i'm on an H-1B. who sponsors?", true, "On an H-1B, not a US citizen"],
+ ["i left Google in March, looking for startups", true, "Left Google in March"],
+ ["i scored 760 on the GMAT, which programs?", true, "Scored 760 on the GMAT"],
+ ["remember that i prefer hybrid roles", true, "Prefers hybrid roles"],
+];
+// [message, an UNFAITHFUL fact the model tries (the one marked control is faithful), why]
+const UNFAITHFUL: [string, string, string][] = [
+ ["i interned at Boeing in 2025, can you use that?", "Interned at Boeing in 2025 as a software engineer on the 787 avionics team", "added detail"],
+ ["i interned at Boeing in 2025, can you use that?", "Interned at Airbus in 2025", "wrong employer"],
+ ["i interned at Boeing in 2025, can you use that?", "Interned at Boeing", "ok-subset(control)"],
+ ["i left Google in March, looking for startups", "Works at Google", "tense/polarity"],
+ ["i left Google in March, looking for startups", "Currently at Google", "tense"],
+ ["i graduate in December 2026, when should i start applying?", "Graduated in December 2026", "tense"],
+ ["i'm studying economics at NYU, which banks recruit there?", "Economics degree from NYU", "tense: degree not earned"],
+ ["i applied to Stripe and interned at Ramp", "Interned at Stripe", "employer swap"],
+ ["i worked at Target as a cashier and my sister is a manager at Walmart", "Manager at Walmart", "third party"],
+ ["i know SQL, and i want to learn Tableau", "Knows SQL and Tableau", "want vs have"],
+ ["i know SQL but not Tableau", "Knows Tableau", "polarity in same clause"],
+ ["i know SQL but not Tableau", "Knows SQL and Tableau", "polarity partial"],
+ ["i led a team of 4 at Shopify", "Led a team of 14 at Shopify", "number"],
+ ["i led a team of 4 at Shopify", "Led teams at Shopify and managed 4 direct reports", "added detail"],
+ ["i was rejected by Meta after interning at Lyft", "Interned at Meta", "employer swap"],
+ ["i almost finished my masters at Georgia Tech", "Finished masters at Georgia Tech", "almost"],
+ ["i'm hoping to be a senior at UCLA next year", "Senior at UCLA", "future"],
+ ["i used to be fluent in German", "Fluent in German", "past"],
+ ["i failed the CFA level 1", "Passed CFA level 1", "opposite verb"],
+ ["i dropped out of Stanford", "Graduated from Stanford", "opposite"],
+ ["i turned down an offer from Google", "Worked at Google", "invented"],
+ ["i hate Java but i use it at Accenture", "Loves Java", "invented"],
+ ["i have barely any experience in React", "Experienced in React", "hedge"],
+ ["I can't code in Rust", "Can code in Rust", "can't"],
+ ["i lack a degree", "Has a degree", "lack"],
+ ["i'm far from fluent in French", "Fluent in French", "far from"],
+ ["i have zero experience with Kubernetes", "Experience with Kubernetes", "zero"],
+ ["i hardly know SQL", "Knows SQL", "hardly"],
+ ["I was never a TA.", "Was a TA", "TA short word"],
+ ["I don't have a 3.9 GPA.", "GPA 3.9", "decimal split"],
+ ["my GPA is not 3.9", "GPA 3.9", "not"],
+ ["i did not, repeat not, work at Stripe", "Worked at Stripe", "not"],
+ ["neither Google nor Meta hired me", "Hired by Google and Meta", "neither"],
+ ["i failed to get the AWS cert", "Has the AWS cert", "failed to"],
+];
+const trySave = async (m: string, fact: string) => {
+  const stores: any = { profile: { facts: [] } };
+  const r = await turn(m, scripted([use("add_profile_fact", { kind: "other", text: fact }), text("ok")]).model, { stores });
+  return { saved: stores.profile.facts.length > 0, call: r.tool_calls.find((c) => c.name === "add_profile_fact") };
+};
+Deno.test("AC-11 a save stands on one clause the person asserted: no hedge, quote, other person or sarcasm; the same words, polarity and tense", async () => {
+  eq([SAVES2.length, UNFAITHFUL.length], [100, 34]);
+  const wrong: string[] = [], missed: string[] = [];
+  for (const [m, want, fact] of SAVES2) { const x = await trySave(m, fact); if (x.saved && !want) wrong.push(`${m} => ${fact}`); if (!x.saved && want) missed.push(`${m} (${x.call?.error ?? "not offered"})`); }
+  eq(wrong, [], "must-not-save saved");
+  ok(missed.length <= 3, `true saves missed (${missed.length}): ${missed.join(" | ")}`);
+  const unfaithful: string[] = [];
+  for (const [m, fact, why] of UNFAITHFUL) { const x = await trySave(m, fact); if (x.saved !== why.includes("control")) unfaithful.push(`[${why}] ${m} => ${fact}`); }
+  eq(unfaithful, [], "unfaithful texts saved (or the faithful control refused)");
+  // The refusal tells the model why, so it asks the person.
+  const x = await trySave("i left Google in March, looking for startups", "Works at Google");
+  ok(/^not saved: /.test(x.call?.error ?? "") && !x.saved, x.call?.error);
 });

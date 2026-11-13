@@ -7,6 +7,7 @@
     "tests/architect/d072-item9b-memory-20261112.test.ts": 16.1,
     "tests/architect/d072-item11-practice-20261112.test.ts": 0.5,
     "tests/architect/d073-live9-fixes-20261112.test.ts": 0.5,
+    "tests/architect/d073-review-fixes-20261113.test.ts": 0.2,
     "tests/architect/d066-behavior-guide-20261112.test.ts": 0.5,
     "tests/architect/behavior-guide-suite.test.ts": 17,
     "tests/architect/gmail-oauth-wrapper-ci.test.ts": 0.6,

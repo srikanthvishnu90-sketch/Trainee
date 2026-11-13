@@ -352,42 +352,72 @@ const MONEY_PHRASE = /\$\s?\d[\d,.]*(?:\s?[kK])?(?:\s?(?:-|–|to)\s?\$?\s?\d[\d
 function placeOfPay(p: { pay?: string | null; place?: string | null }, figures: ReturnType<typeof numbersIn>): string | null {
   const pay = String(p?.pay ?? "");
   // Pay by place ("Chicago, IL: $28-$49; San Jose, CA: $36-$62"): the place whose range holds the figure.
-  for (const seg of pay.split(/;\s*/)) { const m = /^([^:$]{2,60}):\s*(.*)$/.exec(seg.trim()); if (m && numbersIn(m[2]).some((y) => figures.some((n) => numEq(y, n)))) return m[1].trim(); }
+  // The sentence's own figures decide; figures that sit in two places' ranges name no one place, so none is written.
+  const byPlace = pay.split(/;\s*/).map((seg) => /^([^:$]{2,60}):\s*(.*)$/.exec(seg.trim())).filter(Boolean) as RegExpExecArray[];
+  const held = [...new Set(byPlace.filter((m) => numbersIn(m[2]).some((y) => figures.some((n) => numEq(y, n)))).map((m) => m[1].trim()))];
+  if (held.length) return held.length === 1 ? held[0] : null;
   const inPay = /\(([^()$\d]{2,60})\)/.exec(pay)?.[1]?.trim();
   return String(p?.place ?? "").trim() || inPay || null;
 }
-function withPlace(reply: string, figures: ReturnType<typeof numbersIn>, place: string | null): string {
-  if (!place) return reply;
-  const city = place.split(",")[0].trim().toLowerCase();
-  if (!city) return reply;
+// D-073 review (item 1: "Stripe pays $40/hr. PayPal pays $40/hr." had PayPal's sentence given Stripe's place, then its own): a place
+// is a fact code writes into the reply, so it goes only into the sentence(s) bound to that one posting or shown line (`binds`: the
+// sentence, the figures, the place), never into every sentence that happens to give the same figure. A sentence bound to two
+// different places, or naming another posting's employer, is ambiguous and gets nothing.
+type PlaceBind = { key: string; figures: ReturnType<typeof numbersIn>; place: string };
+function withPlace(reply: string, binds: PlaceBind[]): string {
+  if (!binds.length) return reply;
   return reply.split("\n").map((line) => line.split(/(?<=[.!?])(?=\s)/).map((x) => {
-    if (/https?:\/\//.test(x) || x.toLowerCase().includes(city) || !numbersIn(x).some((n) => figures.some((y) => numEq(y, n)))) return x;
+    if (/https?:\/\//.test(x)) return x;
+    const mine = binds.filter((b) => b.key === x.trim());
+    const places = [...new Set(mine.map((b) => b.place.toLowerCase()))];
+    if (places.length !== 1) return x;
+    const place = mine[0].place, figures = mine.flatMap((b) => b.figures), city = place.split(",")[0].trim().toLowerCase();
+    if (!city || x.toLowerCase().includes(city)) return x;
     const m = MONEY_PHRASE.exec(x);
     return m && numbersIn(m[0]).some((n) => figures.some((y) => numEq(y, n))) ? `${x.slice(0, m.index + m[0].length)} (${place})${x.slice(m.index + m[0].length)}` : x;
   }).join("")).join("\n");
 }
-export function payWithSource(reply: string, postings: { company?: string | null; pay?: string | null; url?: string | null; place?: string | null }[], shown: { text: string; url: string | null; place?: string | null }[] = []): string {
+const namesWord = (x: string, name: string) => !!name && new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(x);
+export function payWithSource(reply: string, postings: { company?: string | null; title?: string | null; pay?: string | null; url?: string | null; place?: string | null }[], shown: { text: string; url: string | null; place?: string | null }[] = []): string {
   const add: string[] = [];
   const sentences = String(reply).replace(/https?:\/\/\S+/g, " ").split(/(?<=[.!?])\s+|\n+/);
   const withPay = [...new Map((postings ?? []).filter((p) => numbersIn(String(p?.pay ?? "")).length && /^https:\/\//.test(String(p?.url ?? ""))).map((p) => [String(p.url), p])).values()];
   const only = withPay.length === 1;
-  let out = String(reply);
+  const companies = [...new Set((postings ?? []).map((p) => String(p?.company ?? "").trim().toLowerCase()).filter(Boolean))];
+  const binds: PlaceBind[] = [];
   for (const p of withPay) {
     const ns = numbersIn(String(p?.pay ?? "")), url = String(p?.url ?? "");
-    const co = String(p?.company ?? "").toLowerCase();
+    const co = String(p?.company ?? "").trim().toLowerCase();
     const mine = sentences.filter((x) => (only || (co && x.toLowerCase().includes(co))) && numbersIn(x).some((n) => ns.some((y) => numEq(y, n))));
     if (!mine.length) continue;
-    out = withPlace(out, ns, placeOfPay(p, ns));
+    // The place: only where the sentence is this posting's alone (it names no other posting's employer; and when it does not name
+    // this employer either, the one posting read this turn, it names no one at all).
+    for (const x of mine) {
+      const place = placeOfPay(p, numbersIn(x).filter((n) => ns.some((y) => numEq(y, n))));
+      if (!place) continue;
+      if (companies.some((c) => c !== co && namesWord(x, c))) continue;
+      if (!(co && namesWord(x, co)) && otherNames(x, `${place} ${p.title ?? ""}`).length) continue;
+      binds.push({ key: x.trim(), figures: ns, place });
+    }
     if (!reply.includes(url) && !add.includes(url)) add.push(url);
   }
   for (const l of shown ?? []) {
     const ns = numbersIn(l.text), url = String(l.url ?? "");
     if (!ns.length) continue;
-    if (!sentences.some((x) => { const xs = numbersIn(x); return xs.length > 0 && xs.every((n) => ns.some((y) => numEq(y, n))); })) continue;
-    out = withPlace(out, ns, l.place ?? null);
+    const mine = sentences.filter((x) => { const xs = numbersIn(x); return xs.length > 0 && xs.every((n) => ns.some((y) => numEq(y, n))); });
+    if (!mine.length) continue;
+    if (l.place) for (const x of mine) binds.push({ key: x.trim(), figures: ns, place: l.place });
     if (/^https:\/\//.test(url) && !reply.includes(url) && !add.includes(url)) add.push(url);
   }
+  const out = withPlace(String(reply), binds);
   return add.length ? `${out.trimEnd()}\n\n${add.join("\n")}` : out;
+}
+// The names a sentence gives beyond the posting's own place and title (capitalised words; an all-capitals word such as "SWE" or "US" is not a name
+// here; a first word is one unless it is a common way to start a sentence). A word wrongly read as a name only means no place is added.
+const STARTER = /^(?:The|A|An|For|In|At|On|It|Its|That|This|Their|They|There|Here|Pay|Base|Hourly|And|But|So|Yes|No|You|Your|With|From|To|As|Per|Each|Most|Also|Salary|Compensation|Posted|Listed|Stated)$/;
+function otherNames(x: string, own: string): string[] {
+  const inPlace = own.toLowerCase(), first = /^\S+/.exec(x.trim())?.[0].replace(/[^\p{L}'-]/gu, "") ?? "";
+  return (x.trim().match(/(?<![\p{L}\p{N}])\p{Lu}\p{Ll}[\p{L}'-]*/gu) ?? []).filter((w, k) => !(k === 0 && w === first && STARTER.test(w)) && !inPlace.includes(w.toLowerCase()) && !/^(?:I|I'm|I've|I'll|January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)$/.test(w));
 }
 // D-067: the reply, never blank. A shown payload stands as shown; a market research result with sources gives its points (code's
 // own enforcement of an empty draft: the kept points with their sources, or the plain no-source line).

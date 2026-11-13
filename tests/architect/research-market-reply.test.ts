@@ -129,17 +129,20 @@ Deno.test("no source could be opened, or none supports an answer: the reply says
   eq(r.status, "no_sources");
   eq(enforceMarketReply("Batteries will grow 35% a year. I couldn't open a source for that.", r), "I couldn't open a source for that.");
   ok(/couldn't find a source/.test(enforceMarketReply("Growth is 35%.", r)));
-  // Architect amendment (D-073): every kept, cited line counts toward an answer (live-9 C9 and C22 kept lines and still said
-  // no_sources), and when the draft's lines are dropped the read pages' own sentences that speak to the ask answer, word for word.
-  // So "none supports an answer" is a draft whose every line is dropped (its conditions and risks too) on pages none of whose
-  // sentences speaks to the ask. The bar stands: then the result is no_sources and says it couldn't confirm one; and a kept line
-  // answers only with its source number and no figure that is not on it.
-  const bad = deps(KEY, { ...MARKET_DRAFT, summary: [{ text: "x 99%", quote: "nowhere on any page", url: "https://acme.example/annual-report" }], conditions: [{ text: "x", urls: ["https://www.linkedin.com/pulse/batteries"] }], risks: [] });
-  const r2 = await researchMarket({ question: "What is the outlook for hydrogen trucks?", format: "inline", plan: { queries: ["battery market"] }, deps: bad.d });
-  ok(r2.status === "no_sources" && /couldn't confirm/.test(r2.note));
-  const kept = deps(KEY, { ...MARKET_DRAFT, summary: [{ text: "x 99%", quote: "nowhere on any page", url: "https://acme.example/annual-report" }] });
-  const r3 = await researchMarket({ question: "battery market?", format: "inline", plan: { queries: ["battery market"] }, deps: kept.d });
-  ok(r3.status === "ok" && !/99%/.test(enforceMarketReply("", r3)) && /\[\d\]/.test(enforceMarketReply("", r3)), enforceMarketReply("", r3));
+  const bad = deps(KEY, { ...MARKET_DRAFT, summary: [{ text: "x 99%", quote: "nowhere on any page", url: "https://acme.example/annual-report" }] });
+  // Architect amendment (D-073, as left after its review). The input above is the original one. Two things changed around it:
+  // (1) The original question ("battery market?") no longer ends in no_sources: the owner's rule is that research is never blank
+  //     when a read page speaks to the ask, so the page's own sentence answers, word for word, with its source (D-071, D-073).
+  //     What the original assertion guarded still holds and is asserted: the unsupported line (99%) is not shown, and the model's
+  //     unquoted conditions and risks are not shown as the answer either (no sentence of their pages says them).
+  // (2) The original assertion, unchanged, on the same draft with a question none of the read pages speaks to.
+  const r2 = await researchMarket({ question: "battery market?", format: "inline", plan: { queries: ["battery market"] }, deps: bad.d });
+  const a2 = enforceMarketReply("", r2);
+  ok(r2.status === "ok" && !/99%/.test(a2), a2);
+  eq(a2.split("\n\n")[0], "Battery price survey 2024 Battery pack prices fell 20% in 2024 according to the annual survey of cell makers [1].", "only the page's own sentence");
+  for (const x of [...MARKET_DRAFT.conditions, ...MARKET_DRAFT.risks]) ok(!a2.includes(x.text.replace(/\.$/, "")), `a model-worded reading is not the answer: ${x.text}`);
+  const r3 = await researchMarket({ question: "What is the outlook for hydrogen trucks?", format: "inline", plan: { queries: ["battery market"] }, deps: bad.d });
+  ok(r3.status === "no_sources" && /couldn't confirm/.test(r3.note));
 });
 
 Deno.test("routing: with CAREER_RESEARCH_REPLY=on the three asks go to the brain; off, or a job search or a payload, they do not", () => {

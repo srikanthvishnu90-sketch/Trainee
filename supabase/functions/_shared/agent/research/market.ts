@@ -32,7 +32,9 @@ type Cited = { text: string; cite: number[] };
 // passage the web search quoted (the reader could not open it); dated: the search's own age of the page, when it gave one.
 export interface MarketSource { n: number; url: string; title: string; fetched_at: string; kind?: SourceKind; via?: "search_passage"; dated?: string | null }
 export type MarketResult =
-  | { status: "no_sources"; format: "inline"; notes: string[]; searched: string; note: string; audit?: ResearchAudit }
+  // checked (D-073 review): the pages that were opened and read when none of them supported an answer, so the reply that says it
+  // could not confirm one carries the sources it checked. Empty or absent when no page could be opened.
+  | { status: "no_sources"; format: "inline"; notes: string[]; searched: string; note: string; audit?: ResearchAudit; checked?: MarketSource[]; layout?: "messages" }
   | { status: "ok"; format: "inline" | "file"; asked: "inline" | "file"; title: string; thesis: string | null; points: Cited[]; conditions: Cited[]; risks: Cited[];
       comparison: { options: string[]; rows: { label: string; cells: ({ value: string; cite: number[] } | null)[] }[] } | null;
       sources: MarketSource[]; file_url: string | null; dropped: number; notes: string[]; searched: string; note: string;
@@ -160,18 +162,27 @@ function withParts(have: Set<string>): Set<string> {
 const SMALL: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
 // A claim's figure is in the quote: equal to one of its figures, or a whole count of twelve or less the quote spells out ("3 rounds"
 // on "three rounds of interviews").
-function figureInQuote(n: ReturnType<typeof figuresIn>[number], quote: string, qn: ReturnType<typeof figuresIn>): boolean {
+// D-073 review (item 4): the spelled count must count the same thing ("3 rounds" on "three rounds", never on "one of the three
+// founders"): one of the two words after the claim's numeral is one of the two after the quote's spelled count.
+function figureInQuote(n: ReturnType<typeof figuresIn>[number], quote: string, qn: ReturnType<typeof figuresIn>, claim = ""): boolean {
   if (qn.some((x) => numEq(x, n))) return true;
   if (n.unit || n.date || !Number.isInteger(n.v) || n.v < 1 || n.v > 12) return false;
-  return (String(quote).toLowerCase().match(/[a-z]+/g) ?? []).some((w) => SMALL[w] === n.v);
+  const after = (t: string, re: RegExp, k: number) => [...t.toLowerCase().matchAll(re)].map((m) => contentWords(t.slice((m.index ?? 0) + m[0].length).split(/\s+/).slice(0, k).join(" ")));
+  const counted = after(String(claim), new RegExp(`(?<![\\d.,$])${n.v}(?![\\d.,%])\\s*`, "g"), 2);
+  const spelled = after(String(quote), new RegExp(`\\b(?:${Object.keys(SMALL).filter((w) => SMALL[w] === n.v).join("|")})\\b\\s*`, "g"), 2);
+  return counted.some((c) => spelled.some((q) => [...c].some((w) => q.has(w))));
 }
+// D-073 review (item 4): the stemmer reads "hardly" as "hard" and "barely" as "bare". An adverb that all but denies what follows is
+// never a form of the word it is built on: it must be on both sides, or on neither.
+const DENYING = /\b(?:hardly|barely|scarcely|rarely|seldom)\b/gi;
+const denying = (s: string) => [...new Set((String(s ?? "").match(DENYING) ?? []).map((w) => w.toLowerCase()))].sort().join(" ");
 export function wordsNotInQuote(claim: string, quote: string, page: string, subject = "", title = ""): string[] | null {
   if (quoteContext(page, quote) === null) return null;
   // The quote's sentence read with the same abbreviation forms as the claim (the page's case kept until then: "US" is a country,
   // "us" is not).
   const ctx = quoteContext(abbreviated(page), abbreviated(quote)) ?? quoteContext(page, quote)!;
   const qn = figuresIn(quote);
-  if (!figuresIn(claim).every((n) => figureInQuote(n, quote, qn))) return null;
+  if (!figuresIn(claim).every((n) => figureInQuote(n, quote, qn, claim))) return null;
   // D-071: the page's own title heads every sentence on it ("Our Engineering Interview Process - Citadel" over "the overall process
   // takes roughly eight weeks"), as a heading before the quote already did.
   const have = withParts(contentWords(`${ctx} ${abbreviated(subject)} ${abbreviated(title)}`));
@@ -179,7 +190,9 @@ export function wordsNotInQuote(claim: string, quote: string, page: string, subj
   // A name the attribution words carried ("Jane Street says ...") is still a word of the claim: only "where", never "who", goes.
   const c = abbreviated(withoutAttribution(claim));
   const names = contentWords((abbreviated(String(claim ?? "")).match(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}'-]*/gu) ?? []).join(" "));
-  return [...new Set([...contentWords(c), ...names])].filter((w) => !sameWordIn(w, have, roots));
+  const miss = [...new Set([...contentWords(c), ...names])].filter((w) => !sameWordIn(w, have, roots));
+  const dc = denying(claim), dq = denying(ctx);
+  return dc === dq ? miss : [...miss, ...(dc || dq).split(" ")];
 }
 export function agrees(claim: string, quote: string, page: string, subject = ""): boolean {
   const miss = wordsNotInQuote(claim, quote, page, subject);
@@ -274,11 +287,18 @@ export function auditFromPages(a: ResearchAudit, section = "pages") { a.kept++; 
 // that are on the pages it cites, the same measure the real-set "cited" check uses. A line worded by the model (Trainee's reading:
 // a frame, a condition, a risk) stands only at 60% or more; a quoted line is checked against its quote's sentence already.
 export const ON_PAGES_SHARE = 0.6;
+// D-073 review (item 2): a word is on the pages only as a word of theirs, never as letters inside another ("inter" of "intern" was
+// found in "interest", "rate" in "corporate"): the page has a word with the same start, the two agreeing over the whole of the
+// shorter one (give or take an ending, for words over six letters). Never looser than the eval's measure, so a kept line passes it.
+const base = (w: string) => w.replace(/(?:ies|y)$/, "i").replace(/(?:es|s|ed|ing)$/, "");
 export function wordsOnPages(text: string, pages: { text: string }[]): number {
   const flat = (t: string) => String(t ?? "").replace(/\s+/g, " ").toLowerCase();
-  const hay = flat(pages.map((p) => p.text.slice(0, 60000)).join(" ")).replace(/,/g, "");
-  const ws = [...new Set((flat(text).match(/[a-z]{4,}/g) ?? []).map((w) => w.slice(0, 5)))];
-  return ws.length ? ws.filter((w) => hay.includes(w)).length / ws.length : 1;
+  const byStart = new Map<string, Set<string>>();
+  for (const w of flat(pages.map((p) => p.text.slice(0, 60000)).join(" ")).replace(/,/g, "").match(/[a-z]{4,}/g) ?? []) { const k = w.slice(0, 4); (byStart.get(k) ?? byStart.set(k, new Set()).get(k)!).add(base(w)); }
+  const same = (a: string, b: string) => { const min = Math.min(a.length, b.length); let k = 0; while (k < min && a[k] === b[k]) k++; return k >= Math.min(5, min) && k >= min - (min > 6 ? 2 : 0); };
+  const ws = [...new Set(flat(text).match(/[a-z]{4,}/g) ?? [])];
+  const on = (w: string) => { const b = base(w); return [...(byStart.get(w.slice(0, 4)) ?? [])].some((p) => same(b, p)); };
+  return ws.length ? ws.filter(on).length / ws.length : 1;
 }
 // R9 free sources (architect, 2026-11-08): two cited sources that give different figures for the same thing are both shown, with
 // their sources, and the brief says they differ; Trainee never picks one silently. "The same thing" is narrow on purpose: the same
@@ -347,6 +367,24 @@ export function covers(text: string, part: { label: string; words: Set<string> |
   const ws = part.words instanceof Set ? part.words : new Set(part.words);
   return [...contentWords(text)].some((w) => ws.has(w)) || (part.label === "pay" && /[$€£]\s?\d/.test(text));
 }
+const PAY_PART = { label: "pay", words: contentWords(TOPICS[0].words) };
+// D-073 review (item 2): is a sentence that gives pay about the role and level the person asked about? The level asked (intern, new
+// grad, senior, ...) must be the sentence's or its page title's, the sentence must name no other level, and when the ask names a
+// kind of work (engineer, analyst, ...) the sentence or the title names one of the kinds asked. An ask that names neither asks
+// about the employer's pay in general, and any pay sentence speaks to it.
+const LEVELS: [string, RegExp][] = [
+  ["intern", /\b(?:interns?|internships?|co-?ops?)\b/i], ["new grad", /\b(?:new[\s-]+grad(?:uate)?s?|entry[\s-]+level|junior|university\s+grad(?:uate)?s?|campus\s+hires?)\b/i],
+  ["senior", /\b(?:senior|sr\.?)\b/i], ["staff", /\b(?:staff|principal)\b/i], ["manager", /\b(?:managers?|directors?|vice\s+presidents?|vp|executives?|partners?)\b/i],
+];
+const WORK = /\b(?:swex|engineer(?:s|ing)?|developers?|programmers?|analysts?|scientists?|designers?|researchers?|traders?|quants?|quantitative|consultants?|accountants?|nurses?|teachers?|recruiters?|marketing|sales|product|data|software|hardware|finance|legal|operations|security|design)\b/gi;
+const workOf = (s: string) => new Set((abbreviated(s).toLowerCase().match(WORK) ?? []).map((w) => [...contentWords(w)][0] ?? w));
+export function aboutAsked(sentence: string, title: string, ask: string): boolean {
+  const lv = (s: string) => LEVELS.filter(([, re]) => re.test(s)).map(([k]) => k);
+  const want = lv(ask), own = lv(sentence), around = lv(`${sentence} ${title}`);
+  if (!want.every((k) => around.includes(k)) || own.some((k) => !want.includes(k))) return false;
+  const work = workOf(ask), has = workOf(`${sentence} ${title}`);
+  return !work.size || [...work].some((w) => has.has(w));
+}
 // `ask` (D-073): the person's own message this turn; the parts the answer must cover are the ones THEY named (C23 "that citadel
 // process from earlier" asks for the process only, though the research question repeats C9's three parts).
 export async function researchMarket(i: { question: string; format: "inline" | "file"; plan: SearchPlan; deps: MarketDeps; fileLinks?: string[]; ask?: string }): Promise<MarketResult> {
@@ -369,7 +407,7 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   const gaps = lines(found.gaps), basis = lines(found.basis);
   // D-071: what happened to the draft, line by line (turn meta `research`, the mirror runner's trace).
   const audit = newAudit(pages.length, { samples: !!i.deps.auditSamples });
-  const none = (): MarketResult => ({ status: "no_sources", format: "inline", notes, searched, audit,
+  const none = (): Extract<MarketResult, { status: "no_sources" }> => ({ status: "no_sources", format: "inline", notes, searched, audit,
     note: "No source could be opened. Say so plainly in one sentence and give no figure, name or claim from memory. Code adds nothing." });
   if (!pages.length) return none();
   const parsed = parseDraft(await i.deps.draft(marketDraftPayload(i.question, pages)).catch(() => ""));
@@ -403,15 +441,24 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   };
   // Trainee's reading: every page it names passed the guard, and every number in it is on one of them.
   // D-073: a reading stays in the brief as before (labelled as a condition or a risk); it answers the person on its own (counts
-  // toward an answer, and is said in the reply when no other line is) only when at least 60% of its words are on those pages
-  // (wordsOnPages, the real-set "cited" measure): `answerable`.
+  // toward an answer, and is said in the reply when no other line is) only when it is `answerable`.
+  // D-073 review (item 2: "Citadel interns earn $5,000 a week" stood, unlabelled, because "$5,000" was somewhere on its page and
+  // enough letters of its words were): a reading is model-worded and has no quote, so it is answerable only when one sentence of a
+  // page it names says it, by the rule a quoted fact passes (checkLine: every figure in that sentence, every content word in it,
+  // in the page's title or a company asked about that the page names). Any other reading is never the answer and never lends a
+  // figure to the reply; with nothing verified the result is no_sources and the reply says it could not be confirmed.
   const answerable = new Set<string>();
+  const saidBy = (t: string, ps: SourcePage[]) => ps.some((p) => {
+    const named = companies0.filter((c) => nameIn(c, p.text) || nameIn(c, p.title)).join(" "), want = contentWords(t);
+    return squash(readAlike(p.text.slice(0, 60000))).split(/(?<=[.!?])\s+/).some((x) => x.length >= 8 && x.length <= 600 && [...contentWords(x)].some((w) => want.has(w))
+      && checkLine(t, x, { ...p, text: x }, named, { fallback: false, predicate: false }).ok);
+  });
   const reading = (section: string) => (x: any) => {
     const t = squash(x?.text), ps = arr(x?.urls, 4).map(pageOf).filter(Boolean) as SourcePage[];
     const why = !ps.length ? "page_not_read" : !t || t.length > 400 || !linkFree(t) || !numsOn(t, ps) ? "reading_unsupported" : "";
     if (why) { dropped++; auditLine(audit, { ok: false, why }, section, { text: t }); return null; }
     auditLine(audit, { ok: true }, section);
-    if (wordsOnPages(t, ps) >= ON_PAGES_SHARE) answerable.add(t);
+    if (wordsOnPages(t, ps) >= ON_PAGES_SHARE && saidBy(t, ps)) answerable.add(t);
     return { text: t, cite: [...new Set(ps.map(num))] };
   };
   const points = [...new Map((arr(d.summary, 5).map((x) => fact(x?.text, x?.quote, x?.url)).filter(Boolean) as Cited[]).map((x) => [x.text, x])).values()];
@@ -434,12 +481,20 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   // than the parts asked: for each such part, the read pages' sentences that speak to it (naming the company asked about).
   const parts = askedParts(i.ask?.trim() ? i.ask : `${i.question} ${(i.plan.queries ?? []).join(" ")}`);
   const keptLines = (): Cited[] => [...points, ...[...conditions, ...risks].filter((x) => answerable.has(x.text)), ...(comparison?.rows ?? []).flatMap((r) => r.cells.flatMap((c) => c ? [{ text: c.value, cite: c.cite }] : []))];
+  // D-073 review (item 2): a page's sentence that gives pay answers the pay asked about only when it is about the role and level
+  // asked (aboutAsked); a senior engineer's or a trader's pay is never offered as the intern's. Such a sentence is passed over.
+  const asked = `${i.ask ?? ""} ${i.question}`;
+  const payOk = (l: { text: string; page: SourcePage }) => !covers(l.text, PAY_PART) || aboutAsked(l.text, l.page.title, asked);
   const addPage = (l: { text: string; page: SourcePage }) => { if (keptLines().some((x) => x.text === l.text)) return; points.push({ text: l.text, cite: [num(l.page)] }); auditFromPages(audit); };
-  for (const part of parts.filter((pt) => !keptLines().some((l) => covers(l.text, pt)))) for (const l of pageSentences(pages, part.words, companies0, 1)) addPage(l);
+  for (const part of parts.filter((pt) => !keptLines().some((l) => covers(l.text, pt)))) for (const l of pageSentences(pages, part.words, companies0, 6).filter(payOk).slice(0, 1)) addPage(l);
   const need = Math.max(1, parts.length);
-  if (keptLines().length < need) for (const l of pageSentences(pages, contentWords(`${i.question} ${companies0.join(" ")}`), companies0, need + 2)) { if (keptLines().length >= need) break; addPage(l); }
+  if (keptLines().length < need) for (const l of pageSentences(pages, contentWords(`${i.question} ${companies0.join(" ")}`), companies0, need + 6).filter(payOk)) { if (keptLines().length >= need) break; addPage(l); }
   const disagreements = disagreementsIn(points);
-  if (!keptLines().length) return { ...none(), note: "Sources were opened but none supported an answer. Say you couldn't confirm one from what they say; do not guess." };
+  if (!keptLines().length) {
+    const checked: MarketSource[] = pages.slice(0, 4).map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || new URL(p.url).hostname, fetched_at: new Date(p.fetchedAt).toISOString(), kind: sourceKind(p.url, i.plan.companies ?? []) }));
+    return { ...none(), checked, ...(i.deps.layout === "messages" ? { layout: "messages" as const } : {}),
+      note: "Sources were opened but none supported an answer. Say what you looked for and that you couldn't confirm it from what they say; do not guess, and give no figure. Write no link: code lists the sources that were checked." };
+  }
   const cited = order.map((k) => byUrl.get(k)!);
   const thesis0 = squash(d.thesis), title0 = squash(d.title).slice(0, 80);
   const thesis = thesis0 && thesis0.length <= 160 && linkFree(thesis0) && numsOn(thesis0, cited) ? thesis0 : null;
@@ -513,12 +568,19 @@ export function enforceMarketReply(reply: string, r: MarketResult, shown: { text
   // "but" carrying a claim after it); anything else is the plain no-source line. "The market is growing rapidly." never stands.
   if (r.status !== "ok") {
     const kept = stripUrls(reply).split(/(?<=[.!?])\s+/).filter((s) => s && ((!numbersIn(s).length && SAYS_UNCONFIRMED.test(s) && !CLAIM_AFTER.test(s)) || wasShown(s))).join(" ");
-    return kept ? withLinks(kept) : NO_SOURCES;
+    // D-073 review: a reply that says it could not confirm an answer carries the sources that were opened and checked.
+    const checked = kept ? r.checked ?? [] : [];
+    if (!checked.length) return kept ? withLinks(kept) : NO_SOURCES;
+    return r.layout === "messages" ? [withLinks(kept), ...checked.map((x) => x.url)].join("\n") : `${withLinks(kept)}\n\n${checked.map(sourceLine).join("\n")}`;
   }
   const max = r.sources.length;
   // Every kept point with the sources it cites: a figure in the reply must come from a point that cites what the sentence cites.
   // A comparison cell speaks for its column's company (fact() checked that its quote names it).
-  const items = [...r.points, ...r.conditions, ...r.risks].map((p) => ({ text: p.text, nums: numbersIn(p.text), cite: p.cite }))
+  // D-073 review (item 2): a condition or a risk is Trainee's reading, worded by the model with no quote. It lends its names to a
+  // sentence that cites its page, but its figures only when a sentence of that page says it (r.answerable): a figure reaches the
+  // person only from a quoted point, a comparison cell, a page's own sentence or such a reading.
+  const said1 = new Set(r.answerable ?? []);
+  const items = [...r.points.map((p) => ({ ...p, checked: true })), ...[...r.conditions, ...r.risks].map((p) => ({ ...p, checked: said1.has(p.text) }))].map((p) => ({ text: p.text, nums: p.checked ? numbersIn(p.text) : [], cite: p.cite }))
     .concat((r.comparison?.rows ?? []).flatMap((x) => x.cells.flatMap((c, j) => c ? [{ text: `${r.comparison!.options[j]} ${c.value}`, nums: numbersIn(c.value), cite: c.cite }] : [])));
   const citesOf = (s: string) => [...s.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1]));
   const numsOf = (s: string) => numbersIn(s.replace(/\[\d+\]/g, ""));
@@ -548,7 +610,7 @@ export function enforceMarketReply(reply: string, r: MarketResult, shown: { text
   // point, a comparison cell, a condition, a risk), each with its source number (its link, in the messages layout), one line for each
   // part the person asked about first. A part the model's answer left out gets its kept line after it, with its source.
   const parts = (r.parts ?? []).map((pt) => ({ label: pt.label, words: new Set(pt.words) }));
-  const pool: Cited[] = [...r.points, ...(r.comparison?.rows ?? []).flatMap((x) => x.cells.flatMap((c, j) => c ? [{ text: `${r.comparison!.options[j]}: ${c.value}`, cite: c.cite }] : [])), ...[...r.conditions, ...r.risks].filter((x) => !r.answerable || r.answerable.includes(x.text))];
+  const pool: Cited[] = [...r.points, ...(r.comparison?.rows ?? []).flatMap((x) => x.cells.flatMap((c, j) => c ? [{ text: `${r.comparison!.options[j]}: ${c.value}`, cite: c.cite }] : [])), ...[...r.conditions, ...r.risks].filter((x) => said1.has(x.text))];
   // A line that stands only on self-reported or anecdotal sources carries the label the source list gives them (D-060).
   const tagOf = (p: Cited) => labelOk(`${p.text} ${p.cite.map((n) => `[${n}]`).join("")}`) ? "" : p.cite.every((n) => kindOf(n) === "anecdote") ? " (anecdote)" : " (self-reported)";
   const lineOf = (p: Cited) => `${p.text.replace(/[.]?$/, "")}${tagOf(p)} ${p.cite.map((n) => `[${n}]`).join("")}.`;
@@ -566,7 +628,10 @@ export function enforceMarketReply(reply: string, r: MarketResult, shown: { text
   body = body && shown.length ? withLinks(body) : body;
   if (r.format === "file") return body || (r.thesis ?? "") || pool.filter((p) => labelOk(`${p.text} ${p.cite.map((n) => `[${n}]`).join("")}`)).slice(0, 2).map((p) => p.text.replace(/[.]?$/, ".")).join(" ") || NO_SOURCES;
   if (r.layout === "messages") return messagesLayout(body, r.sources);
+  return `${body}\n\n${r.sources.map(sourceLine).join("\n")}`;
+}
+function sourceLine(s: MarketSource): string {
   const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
   const tag = (k?: SourceKind) => k === "anecdote" ? " (anecdote)" : k === "self_reported" ? " (self-reported)" : "";
-  return `${body}\n\n${r.sources.map((s) => `[${s.n}] ${s.title}${tag(s.kind)}: ${s.url} (read ${day(s.fetched_at)})`).join("\n")}`;
+  return `[${s.n}] ${s.title}${tag(s.kind)}: ${s.url} (read ${day(s.fetched_at)})`;
 }

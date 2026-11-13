@@ -886,7 +886,7 @@ export function careerTools(deps: {
     {
       // WO-036. The half-told offer waits in the thread's state (offerBenchmark) so the missing piece is asked once.
       name: "offer_benchmark", effect: "write_own",
-      description: "Use when the person texts a job offer (\"JPM offered 110k base, 15k signing, NYC, analyst\"). Reads it from their words in THIS message, asks once for a missing company, base, city or title, then shows its reading (status confirm) and waits: when the person's next message is a plain yes to that reading, call it again with offer_words set to their yes, and only then does it place the base against public pay data and draft a counter; a correction is passed the same way and the reading is shown again. Send its messages as written. Nothing is sent to the employer.",
+      description: "Use when the person texts a job offer (\"JPM offered 110k base, 15k signing, NYC, analyst\"). Reads it from THIS message, asks once for a missing piece, then shows its reading (status confirm). Call again with their next message (a plain yes, or a correction); only after the yes does it benchmark and draft a counter. Send its messages as written. Nothing is sent to the employer.",
       input_schema: obj({ offer_words: str("The person's exact words about the offer from this message; leave out to read the whole message") }),
       run: async (i, c) => {
         const message = c.turn?.message ?? "";
@@ -926,7 +926,7 @@ export function careerTools(deps: {
     },
     {
       name: "tailor_resume", effect: "write_own",
-      description: "A PDF resume for one posting from CONFIRMED facts only (never drafts or anything new); it passes the truth and ATS checks or refuses with the reason. Send gaps.summary and preview first, then its text as given (with skills_question, when there is one: skills read from their experience that are not printed until they say yes; on their plain yes next turn call confirm_profile_fact for each skills_to_confirm id), the 7-day private link alone on its own line; the files in attached ride your reply. job_id from search_jobs, or the posting text. layout: only when asked. Relay format_check.summary.",
+      description: "A PDF resume for one posting from CONFIRMED facts only (never drafts or anything new); it passes the truth and ATS checks or refuses with the reason. Send gaps.summary and preview first, then its text as given, the 7-day private link alone on its own line; the files in attached ride your reply. job_id from search_jobs, or the posting text. layout: only when asked. Relay format_check.summary.",
       input_schema: obj({ job_id: str("The posting's job_id from search_jobs"), posting_text: str("The posting's full text, if there is no job_id"), persona: str("A saved persona name, e.g. 'banking'; leave out to use the active one"), layout: { type: "string", enum: ["trainee", "own", "template"], description: "Only when asked: 'trainee' (Trainee's design), 'own' (\"keep mine\": their own file's layout) or 'template' (\"use template N\", with template)" }, template: str("Only with layout 'template': the template number they named, 1 to 15"),
         edits: { type: "array", description: "Only to change a version already made (call again for the same posting; say what changed from edits_done): per entry they named, how many detail lines it should print (\"condense X to one line\": 1; \"expand Y\": more than it has now, up to 6). Lines come only from that entry's confirmed details; never write new ones. Each call starts from the tailored resume, so include the earlier edits to this version too.", items: { type: "object", properties: { role: str("The entry as the person named it, e.g. a company or project name"), lines: { type: "integer", minimum: 1, maximum: 6, description: "Detail lines (bullets) that entry should print" } }, required: ["role", "lines"] } } }),
       run: async (i, c) => {
@@ -993,7 +993,7 @@ export function careerTools(deps: {
         }
         if (toAsk.length) r = { ...r, text: `${r.text}\n${CareerProfile.SKILL_QUESTION(toAsk.map((x) => x.name))}` };
         const { detail, skills_withheld: _sw, ...rest0 } = r;
-        const rest = { ...rest0, ...reviewOf(r, !!t.deliver), ...(toAsk.length ? { skills_to_confirm: toAsk, skills_question: CareerProfile.SKILL_QUESTION(toAsk.map((x) => x.name)) } : {}) };
+        const rest = { ...rest0, ...reviewOf(r, !!t.deliver), ...(toAsk.length ? { skills_to_confirm: toAsk, skills_question: CareerProfile.SKILL_QUESTION(toAsk.map((x) => x.name)), skills_next: "Send skills_question as written. Only on their plain yes in the next turn, call confirm_profile_fact for each skills_to_confirm id." } : {}) };
         const out = plan?.rating ? { ...rest, format_check: { score: plan.rating.score, keep: plan.rating.keep, kept_layout: r.layout === "own", hard_failures: plan.rating.hardFailures,
           findings: plan.rating.findings.filter((f) => f.measured && !f.pass).map((f) => ({ criterion: f.criterion, detail: f.detail, where: f.where.slice(0, 3) })),
           recommended: plan.recommended ? { template: Number(plan.recommended.template.slice(1)), name: plan.recommended.name, why: plan.recommended.why } : null,
@@ -1009,7 +1009,7 @@ export function careerTools(deps: {
           // R10 privacy ruling: with the file attached, no bearer link to the person's resume reaches the model, the reply or the
           // thread's history (the private object stays stored for the email apply path; a link is the signed-in File page only).
           const { link: _l, expires_at: _e, ...noLink } = out;
-          return { ...noLink, text: out.text.split("\n")[0], attached: [r.filename, ...(detail.docx ? [r.filename.replace(/\.pdf$/i, "") + ".docx"] : [])] };
+          return { ...noLink, text: [out.text.split("\n")[0], ...(toAsk.length ? [CareerProfile.SKILL_QUESTION(toAsk.map((x) => x.name))] : [])].join("\n"), attached: [r.filename, ...(detail.docx ? [r.filename.replace(/\.pdf$/i, "") + ".docx"] : [])] };
         }
         return out;
       },

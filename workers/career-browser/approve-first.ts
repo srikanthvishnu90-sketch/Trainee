@@ -386,7 +386,7 @@ export async function runApproved(d: {
       const gate = contactGate ?? await contactGateReady;
       let file: Uint8Array | null = null;
       try { file = Deno.readFileSync(resume.path); } catch { file = null; }
-      if (file && (gate.resumeFileContactProblemsNow(file, { foreign: true }) ?? ["the contact gate is not loaded"]).length) throw Error("RESUME_CONTACT_UNCONFIRMED");
+      if (file && (gate.resumeFileContactProblemsNow(file, { confirmed: gate.approvedEmails(p) }) ?? ["the contact gate is not loaded"]).length) throw Error("RESUME_CONTACT_UNCONFIRMED");
       const factsPath = await d.writeFacts(job, factsFromPayload(p));
       // WO-096: this drive is the person's approved application, so the code its employer emails may be read for it.
       const codeEnv = d.emailCode ? await d.emailCode(job) : null;

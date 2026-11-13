@@ -417,8 +417,8 @@ Deno.test("round 3/2: a file email that is not the confirmed one is refused, tru
 
 Deno.test("round 3/3: set_resume_contact confirms an address only when the person says it is theirs; internationalised addresses are not called invalid", async () => {
   const tools = Object.fromEntries(careerTools({ postings: async () => [] } as any).map((x: any) => [x.name, x]));
-  const run = async (message: string, input: any) => {
-    const c: any = { userId: USER, threadId: "t1", now: NOW, state: { profile: person("first.last@gmail.com") }, turn: { message, added: [] } };
+  const run = async (message: string, input: any, header = "first.last@gmail.com") => {
+    const c: any = { userId: USER, threadId: "t1", now: NOW, state: { profile: header ? person(header) : person("Chicago, IL") }, turn: { message, added: [] } };
     let err = ""; try { await tools.set_resume_contact.run(input, c); } catch (e) { err = String((e as Error).message); }
     return { err, checked: c.state.profile.basics?.contact_checked ?? [], email: c.state.profile.basics?.email ?? null, after: await tailor(c.state.profile) };
   };
@@ -431,7 +431,7 @@ Deno.test("round 3/3: set_resume_contact confirms an address only when the perso
     ok(!r.err && r.checked.includes("first.last@gmail.com") && r.after.ok, `${msg}: ${JSON.stringify(r).slice(0, 240)}`);
   }
   for (const e of ["josé.garcía@gmail.com", "müller@gmx.de", "o'brien@gmail.com", "d'angelo.r@yahoo.com", "王伟@qq.com", "dana@münchen.de", "олег@почта.рф"]) {
-    const r = await run(`my email is ${e}`, { email: e });
+    const r = await run(`my email is ${e}`, { email: e }, "");
     ok(!/not a valid email/.test(r.err) && r.email === e, `${e}: saved: ${JSON.stringify(r).slice(0, 200)}`);
     ok(r.after.ok || (r.after.refused === "no_contact" && /cannot print|can print only/.test(r.after.reason) && !/not a valid/.test(r.after.reason)), `${e}: ${JSON.stringify(r.after).slice(0, 260)}`);
   }

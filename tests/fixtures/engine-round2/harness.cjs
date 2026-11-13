@@ -24,7 +24,7 @@ function fieldsOf(buf, ct) {
 }
 async function start() {
   const server = http.createServer((req, res) => {
-    const u = new URL(req.url, "http://x"), html = (s, code = 200) => res.writeHead(code, { "content-type": "text/html" }).end(s);
+    const u = new URL(req.url, "http://x"), html = (s, code = 200) => res.writeHead(code, { "content-type": "text/html; charset=utf-8" }).end(s);
     if (u.pathname.startsWith("/beacon/")) { st.beacons.push(decodeURIComponent(u.pathname.slice(8))); return res.writeHead(204).end(); }
     if (req.method !== "GET") {
       const chunks = []; req.on("data", (c) => chunks.push(c)); req.on("end", () => {

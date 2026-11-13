@@ -191,7 +191,8 @@ async function openApply(page, timeout) {
     const re = new RegExp(at, "i"), never = new RegExp(nc, "i");
     // Round 2: a control that mentions LinkedIn or Indeed anywhere (words, accessible name, title, address, data attributes, an
     // image's alt), or leads to either, is never opened.
-    const li = (e) => /linkedin|lnkd\.in|indeed/i.test([e.innerText, e.getAttribute("aria-label"), e.getAttribute("title"), e.getAttribute("href"), e.href, e.getAttribute("formaction"), e.getAttribute("onclick"),
+    const dec = (t) => [...String(t || "").matchAll(/atob\(\s*['"]([A-Za-z0-9+/=]+)['"]\s*\)/g)].map((m) => { try { return atob(m[1]); } catch { return ""; } }).join(" ");
+    const li = (e) => /linkedin|lnkd\.in|indeed/i.test([e.innerText, e.getAttribute("aria-label"), e.getAttribute("title"), e.getAttribute("href"), e.href, e.getAttribute("formaction"), e.getAttribute("onclick"), dec(e.getAttribute("onclick")), String(e.className || ""),
       ...[...e.attributes].filter((a) => a.name.startsWith("data-")).map((a) => `${a.name}=${a.value}`), ...[...e.querySelectorAll("img, svg")].map((i) => `${i.getAttribute("alt") || ""} ${i.getAttribute("aria-label") || ""} ${i.getAttribute("src") || ""}`)].join(" "));
     // Teamtailor's Apply control by its declared action (apply-entry.cjs OVERLAY_APPLY), outside every form, not a submit: the first
     // visible one (the board draws it twice, in the page and as a bar fixed to the bottom).
@@ -659,12 +660,16 @@ const CONFIRM_RE = /thank you for applying|application (has been )?submitted|we[
 // "error"), with no error list shown; and when a POST of the click was seen, every one answered 2xx or 3xx (0: it failed). Anything
 // else is unknown_outcome: the application may or may not have reached the employer, and the reply says it is unconfirmed.
 const NEGATED = /\b(?:not|n['’]t|never|unable|fail(?:ed|ure)?|error|went wrong|try again|already applied|expired|would (?:see|appear|show)|you['’]d see|if (?:this|it) had|for example|an example|example only|sample|preview)\b/i;
+const NEGATED_ANYWHERE = /\bnot (?:been )?(?:submitted|sent|received|saved|complete)|\bcould ?n['’o]?t\b|\bunable to\b|\bsession (?:has )?expired|\bwent wrong|\balready applied|\bif (?:this|it) had\b|\byou['’]d see\b/i;
 function outcomeVerdict({ text = "", errors = [], posts = [] } = {}) {
   const bad = posts.find((st) => !(st >= 200 && st < 400));
   if (bad !== undefined) return { confirmed: false, reason: bad === 0 ? "the POST of the application failed" : `the POST of the application answered ${bad}` };
   if (errors.length) return { confirmed: false, reason: `the page shows an error: ${String(errors[0]).slice(0, 80)}` };
   if (!CONFIRM_RE.test(text)) return { confirmed: false, reason: "no confirmation text on the page after submit" };
-  if (NEGATED.test(text)) return { confirmed: false, reason: "the page's words around the confirmation say it did not go through" };
+  // Round 3: the words that say otherwise count in the confirmation's own sentence, and the strong ones ("not submitted", "could
+  // not", "session expired") anywhere on the page; a footer's "Report an error" elsewhere is not a negation.
+  const own = String(text).split(/[.!?\n]+/).filter((x) => CONFIRM_RE.test(x));
+  if (own.some((x) => NEGATED.test(x)) || NEGATED_ANYWHERE.test(text)) return { confirmed: false, reason: "the page's words around the confirmation say it did not go through" };
   const code = /\b(?:GH|LV)-[A-Z0-9-]+/.exec(text);
   return { confirmed: true, code: code ? code[0] : null };
 }

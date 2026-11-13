@@ -548,7 +548,8 @@ export async function researchMarket(i: { question: string; format: "inline" | "
     const hit = why ? null : v as { how: "model" | "quote"; sentence: string; page: number };
     // D-073's measure still holds for a line in the model's words: at least 60% of its words on its page; else the page's sentence.
     const model = !!hit && hit.how === "model" && wordsOnPages(t, [pages[hit.page]]) >= ON_PAGES_SHARE;
-    if (!hit || (!model && o.quote === false)) { dropped++; auditLine(audit, { ok: false, why: why || "unsupported" }, section, { text, quote: x?.quote }); return null; }
+    // Round 4: a page's unit shown in its own words must say something: a heading ("Form 10-K Hollow Oak Logistics Inc.") is no line.
+    if (!hit || (!model && (o.quote === false || !hasPredicate(hit.sentence, pages[hit.page].title)))) { dropped++; auditLine(audit, { ok: false, why: why || "unsupported" }, section, { text, quote: x?.quote }); return null; }
     const out = model ? t : quoteOf(hit);
     auditLine(audit, model ? { ok: true } : { ok: true, via: "quote" }, section);
     srcOf.set(out, hit.sentence);
@@ -596,7 +597,8 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   for (const part of parts.filter((pt) => !keptLines().some((l) => covers(l.text, pt)))) for (const l of pageSentences(pages, part.words, companies0, 6).filter(payOk).filter(stated).slice(0, 1)) addPage(l);
   const need = Math.max(1, parts.length);
   if (keptLines().length < need) for (const l of pageSentences(pages, contentWords(`${i.question} ${companies0.join(" ")}`), companies0, need + 6).filter(payOk).filter(stated)) { if (keptLines().length >= need) break; addPage(l); }
-  const disagreements = disagreementsIn(points);
+  // FAIL_CLOSED.support: two figures are compared as the pages give them (a quote's own unit, without its label or quotation marks).
+  const disagreements = disagreementsIn(idx ? points.map((p) => ({ ...p, text: srcOf.get(p.text) ?? p.text })) : points);
   const marked = (x: Cited) => answerable.has(x.text) ? x : { ...x, unconfirmed: true as const };
   if (!keptLines().length) {
     const checked: MarketSource[] = pages.slice(0, 4).map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || new URL(p.url).hostname, fetched_at: new Date(p.fetchedAt).toISOString(), kind: sourceKind(p.url, i.plan.companies ?? [], FAIL_CLOSED.support ? found.sites ?? [] : undefined) }));

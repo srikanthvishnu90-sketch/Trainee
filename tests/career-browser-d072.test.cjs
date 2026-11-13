@@ -111,7 +111,8 @@ test("the hand-off: one https link to the employer's page, only the wall's step,
   const code = buildHandoff({ status: "needs_user", reason: "email_code", at: "https://boards.greenhouse.io/a/jobs/1" });
   assert.match(code.step, /never send it in chat/);
   const check = buildHandoff({ status: "needs_user", reason: "bot_check", wall: "check_in_form", at: "https://a.bamboohr.com/careers/93", filled_labels: ["First Name", "Email"] });
-  assert.equal(check.reason, "bot_check_in_form"); assert.deepEqual(check.filled, ["First Name", "Email"]); assert.match(check.step, /Do not press Submit/);
+  assert.equal(check.reason, "bot_check_in_form"); assert.deepEqual(check.filled, ["First Name", "Email"]); assert.equal(check.person_sees, "empty_form");
+  assert.doesNotMatch(check.step, /already filled/, "review of #797: the person's own browser opens the form empty");
   const ans = buildHandoff({ status: "not_submitted", reason: "missing_required_answer", at: "https://jobs.lever.co/a/b/apply", filled_labels: ["Email"], needs: [{ label: "Why us?", reason: "no_confirmed_answer" }], also_check: "widget" });
   assert.equal(ans.card, "ask_once"); assert.deepEqual(ans.remaining.map((x) => x.kind), ["answer", "bot_check"]);
   assert.equal(buildHandoff({ status: "not_submitted", reason: "missing_required_answer", needs: [{ label: "Resume", reason: "upload_not_accepted" }] }), null);
@@ -131,19 +132,21 @@ test("Workday's own apply address, and a posting the board sent back to its job 
   assert.equal(applyUrlFor("workday", "https://a.wd1.myworkdayjobs.com/S/job/X/Y_R1/apply/applyManually"), null);
   assert.equal(closedAfterLoad("https://job-boards.greenhouse.io/a/jobs/1", "https://job-boards.greenhouse.io/a?error=true"), true);
   assert.equal(closedAfterLoad("https://apply.workable.com/j/E2", "https://apply.workable.com/co/?not_found=true"), true);
-  assert.equal(closedAfterLoad("https://a.bamboohr.com/careers/757", "https://a.bamboohr.com/careers"), true);
+  // Review of #797: the job list's address alone is not "closed" (the page must say so: sentToJobList + closedOnPage).
+  assert.equal(closedAfterLoad("https://a.bamboohr.com/careers/757", "https://a.bamboohr.com/careers"), false);
   assert.equal(closedAfterLoad("https://jobs.lever.co/a/b", "https://jobs.lever.co/a/b/apply"), false);
   assert.equal(closedAfterLoad("https://a.breezy.hr/p/x", "https://a.breezy.hr/p/x/apply"), false);
 });
 
 // ------------------------------------------------------------------------------------------------ the engine on recorded pages
-test("BambooHR's in-form check: every other field filled and read back first, then a stop at the check, untouched, with its hand-off", { skip }, async () => {
+// Review of #797: this recorded shape (the only Submit-worded control outside the <form>, tied to it by nothing) is no longer taken
+// as that form's Submit: the run is refused before anything is filled. The in-form check on a form with its own Submit is in
+// tests/career-engine-review-797-browser.test.cjs.
+test("BambooHR's recorded shape (Submit drawn outside the form, tied to nothing): refused before anything is filled", { skip }, async () => {
   const r = await strictPosting(browser, { provider: "bamboohr", url: `${base}/bamboo/careers/93` }, opts());
-  assert.equal(r.reason, "bot_check", JSON.stringify(r));
-  assert.equal(r.wall, "check_in_form");
-  assert.equal(r.filled_count, 3, "First Name, Last Name and Email were filled before the stop");
-  assert.equal(r.handoff.reason, "bot_check_in_form"); assert.equal(r.handoff.link, `${base}/bamboo/careers/93`);
-  assert.deepEqual(r.d072, { outcome: "b", cause: "bot_check_in_form_handed_off", wall: "bot_check_in_form" });
+  assert.equal(r.reason, "submit_not_tied_to_form", JSON.stringify(r));
+  assert.equal(r.filled_count, 0);
+  assert.equal(r.d072.outcome, "fail");
   assert.deepEqual(posts, []);
 });
 

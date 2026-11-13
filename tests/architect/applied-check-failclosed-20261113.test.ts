@@ -840,3 +840,12 @@ Deno.test("AC-15 edit, rewrite and checklist turns: no lookup, nothing removed; 
   }
   ok((await trySave("I'm based in Austin and won't relocate", "Based in Austin, won't relocate")).saved, "each clause keeps its own polarity");
 });
+
+// Round 6: an edit turn that also mentions status keeps its produced text whole; code's block, when asked, goes after it.
+Deno.test("AC-16 an edit turn that also asks about status keeps the edited text, with code's block after it", async () => {
+  for (const [m, reply, caps_] of [["polish my summary, still waiting to hear back from places", "Polished: Data analyst who turns messy operational data into decisions. Six years in retail analytics.", "C0"],
+    ["shorten my summary, any news would be nice lol", "Shorter: Ops analyst who fixes broken processes.", "CA"]] as const) {
+    const r = await turn(m, scripted(Array(6).fill(text(reply))).model, { capabilities: C4[caps_]() });
+    ok(r.reply.startsWith(reply) && /Checked: Gmail account a@x\.test/.test(r.reply), `${m} => ${r.reply}`);
+  }
+});

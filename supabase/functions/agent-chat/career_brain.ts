@@ -228,10 +228,12 @@ export async function agentTurn(o: {
   const lookTool = tools.find((t) => t.name === "read_application_mail");
   // Round 5: a turn that asks to edit, rewrite or draft text (a resume line, a bullet, a checklist, a letter) and does not also ask
   // about their applications gets no lookup, and its text loses no sentence.
-  const editTurn = EDIT_ASK.test(String(o.message ?? "")) && !statusQuestion(o.message);
+  // Round 6: whatever else the message asks, the produced text is never removed; when it also asks about status, the lookup runs and
+  // code's block goes after the text.
+  const editTurn = EDIT_ASK.test(String(o.message ?? "")), editStatus = editTurn && statusQuestion(o.message);
   let codeRan = false;
   // A turn that stopped unfinished still gets the read when they asked: code's statement then answers it.
-  if (!appHypo && !editTurn && lookTool && result.reply && !lookupOf(result.tool_calls ?? []).tried && ((result.stopped === "final" || result.stopped === "incomplete_reply") && statusQuestion(o.message) || (result.stopped === "final" && !result.show && statusLike(result.reply)))) {
+  if (!appHypo && (!editTurn || editStatus) && lookTool && result.reply && !lookupOf(result.tool_calls ?? []).tried && ((result.stopped === "final" || result.stopped === "incomplete_reply") && statusQuestion(o.message) || (result.stopped === "final" && !result.show && statusLike(result.reply)))) {
     codeRan = true;
     const out: any = await Promise.resolve().then(() => lookTool.run({}, ctx)).catch(() => null);
     result = { ...result, tool_calls: [...(result.tool_calls ?? []), { name: lookTool.name, ok: !!out, effect: "read" as const, ...(out ? {} : { error: "the record could not be read" }) }] };
@@ -389,7 +391,8 @@ export async function agentTurn(o: {
   // the status is stated by code from its result and the model's own status sentences go; with none, a denial is held. A payload
   // being shown is never touched: what code states goes after it.
   const looked = lookupOf(result.tool_calls ?? [], (ctx.turn as any)?.record);
-  if (editTurn && result.reply && !result.show && !lookupOf(result.tool_calls ?? []).tried && saysNoApplications(result.reply)) result = { ...result, reply: `${result.reply.trimEnd()}\n\n${coverageLine(lookupOf([]))}` };
+  const editLook = lookupOf(result.tool_calls ?? [], (ctx.turn as any)?.record);
+  if (editTurn && result.reply && !result.show && (editStatus || saysNoApplications(result.reply)) && !result.reply.includes(coverageLine(editLook))) result = { ...result, reply: `${result.reply.trimEnd()}\n\n${coverageLine(editLook)}` };
   else if (!appHypo && !editTurn && result.reply) {
     const held = result.show ? (looked.tried && statusQuestion(o.message) ? `${result.reply.trimEnd()}\n\n${coverageLine(looked)}` : result.reply) : applicationsEnforced(result.reply, looked, { message: o.message, codeRan });
     if (held !== result.reply) result = { ...result, reply: held, flags: [...new Set([...(result.flags ?? []), looked.ok ? "applications_basis" : "applications_unconfirmed"])] };

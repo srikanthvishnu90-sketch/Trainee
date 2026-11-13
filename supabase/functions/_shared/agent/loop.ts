@@ -100,7 +100,8 @@ const I_HAVE = "\\bi(?:'ve| have)? (?:just |now |also )?";
 // back to the model once, like every claim here; the link itself is always code's (file_tool.ts), never the model's.
 // A backed file claim is the deliverable itself (its link rides the answer), never a bare receipt (missingAnswerBody).
 const FILE_CLAIM = "a file made";
-export const FILE_MAKERS = ["create_file", "export_tracker", "tailor_resume", "attach_document", "research_market", "research_company", "research_career_question"];
+// D-072 (files reachable): open_record_file makes a record-backed File family page (file_family_make.ts); only a made one backs a claim.
+export const FILE_MAKERS = ["create_file", "open_record_file", "export_tracker", "tailor_resume", "attach_document", "research_market", "research_company", "research_career_question"];
 const FILE_NOUN = "(?:file|pdf|page|tracker|spreadsheet|sheet|doc(?:ument)?|word (?:file|copy)|resume|cv|cover letter)";
 const CLAIMS: { kind: string; said: RegExp; by: string[] | "any_write"; wrote?: string[] }[] = [
   { kind: FILE_CLAIM, by: FILE_MAKERS, wrote: ["research_market", "research_company", "research_career_question"], said: new RegExp(`${I_HAVE}(?:made|created|built|generated|put together|attached|uploaded|exported)(?: you)? (?:a|an|the|your|this)(?: [\\w-]+){0,3} ${FILE_NOUN}\\b|\\b(?:your|the|this)(?: [\\w-]+){0,3} ${FILE_NOUN} (?:is|are) (?:attached|ready|made|linked|below|done)\\b|^(?:here(?:'s| is) (?:your|the)(?: [\\w-]+){0,3} ${FILE_NOUN})\\b|\\battached (?:is|are|here)\\b|^attached\\b`, "i") },

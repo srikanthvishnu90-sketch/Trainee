@@ -37,6 +37,9 @@ export const FAMILY_TITLE: Record<MadeFamily, string> = {
 const alt = (...xs: string[]) => `(?:${xs.join("|")})`;
 const FW = "(?:file|page|link|doc|document|one[- ]?pager|sheet|url)";
 const DET = "(?:my|the|that|our|this)";
+// A generic word names a File only with a word that means a Trainee page. "doc", "link" and "url" beside a generic word are other
+// things (review of #805: "my draft doc" is a resume draft, "the interview link" a meeting link, "my profile url" LinkedIn).
+const FW_PAGE = "(?:file|page|one[- ]?pager|sheet)";
 // The File's own name, and the generic words for it that count only with a File word beside them.
 const FAMILY_WORDS: [MadeFamily, string, string | null, string | null][] = [
   // family, own name, generic + File word after it, File word + "with|comparing ..." before it
@@ -82,7 +85,7 @@ const FAIL = alt(
 const SEP = alt("[.?!,] (?:(?:and|but|because|cause|since) )?", " (?:and|but|because|cause|since) ");
 const SHAPES: [MadeFamily, RegExp][] = FAMILY_WORDS.map(([family, own, generic, pageWith]) => {
   const named = `(?:${DET} )?${own}(?: ${FW})?`;
-  const file = alt(named, ...(generic ? [`(?:${DET} )?${generic} ${FW}`] : []), ...(pageWith ? [`(?:a|${DET}) ${FW} ${pageWith}`] : []));
+  const file = alt(named, ...(generic ? [`(?:${DET} )?${generic} ${FW_PAGE}`] : []), ...(pageWith ? [`(?:a|${DET}) ${FW} ${pageWith}`] : []));
   const see = `${SEE_VERB}${file}${TAIL}`;
   // The File they can't reach, said of the File itself, with nothing after it but an ask for the link.
   const cant = alt(

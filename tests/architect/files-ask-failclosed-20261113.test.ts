@@ -211,3 +211,16 @@ Deno.test("FX-7 NO INPUT hangs or throws: 600-character adversarial strings and 
   // deno-lint-ignore no-explicit-any
   for (const v of [null, undefined, 42, {}, [], "", " ", "?", "x".repeat(601), "weekly brief".repeat(50)] as any[]) eq(familyAskOf(v), null, String(v).slice(0, 20));
 });
+
+// Second review of #805: a generic word names a File only beside a word that means a Trainee page. "doc", "link" and "url" beside
+// "draft", "interview", "profile" or "answers" are other things (a resume draft, a meeting link, LinkedIn), so they hold no turn.
+Deno.test("FF-8 a generic word with doc, link or url is not a File ask; with page or file it still is", () => {
+  for (const m of ["send me my draft doc", "open the draft document", "where's the interview link", "send me the interview doc", "open my profile url",
+    "send me the application answers document", "show me my interviews link", "send me my offers doc", "open my negotiation url"]) {
+    if (familyAskOf(m) !== null) throw new Error(`"${m}" is held to a File: ${familyAskOf(m)}`);
+  }
+  const page: [string, string][] = [["show me my interviews page", "F-13"], ["open my offers page", "F-15"], ["show me my negotiation file", "F-14n"], ["open my profile page", "F-02"]];
+  for (const [m, f] of page) if (familyAskOf(m) !== f) throw new Error(`"${m}": ${familyAskOf(m)}, expected ${f}`);
+  // The File's own name still takes any File word.
+  for (const [m, f] of [["send me my weekly brief link", "F-14"], ["open my career brief doc", "F-01"]] as [string, string][]) if (familyAskOf(m) !== f) throw new Error(`"${m}": ${familyAskOf(m)}, expected ${f}`);
+});

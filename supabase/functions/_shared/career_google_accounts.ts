@@ -69,6 +69,17 @@ export function accountToken(d: TokenDeps & { admin: any }, scope: string) {
   };
 }
 
+// The token a reply is sent with: the named account when it is one of the person's own; with no account named, their only
+// account. Several accounts and none named, or a name that is not theirs: null (nothing is sent; never the first grant).
+export function ownSendToken(d: TokenDeps & { admin: any }, scope: string) {
+  const token = accountToken(d, scope);
+  return async (userId: string, mailbox: string | null): Promise<string | null> => {
+    const accounts = await googleAccounts(d.admin, userId);
+    if (mailbox ? !accounts.some((a) => a.mailbox === addr(mailbox)) : accounts.length > 1) return null;
+    return await token(userId, mailbox);
+  };
+}
+
 // Mail tracking's reader across every account the person connected: each account read since the same cursor, each email tagged
 // with the address it was read from; the read position is the earliest any account reached (none is skipped past). Accounts
 // that may not read are left out and named in `skipped`.

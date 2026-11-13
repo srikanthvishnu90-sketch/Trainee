@@ -27,7 +27,7 @@ import { runMail } from "./career_proactive_run.ts";
 import { type DraftRow, type ReadStanding, standingFrom } from "./career_standing.ts";
 import { vaultRefreshWrite } from "./oauth_vault_refresh.ts";
 import { PARTIAL_WORDS } from "./oauth_connect.ts";
-import { MAIL_REPLY_CARD_INTENT, type ReplyCardMeta, replyAnswer } from "./career_mail_reply.ts"; // D-062: answering an email
+import { MAIL_REPLY_CARD_INTENT, type ReplyAnswerDeps, type ReplyCardMeta, replyAnswer } from "./career_mail_reply.ts"; // D-062: answering an email
 import { accountToken, googleAccounts, readAllMailboxes } from "./career_google_accounts.ts"; // D-062: several Google accounts
 
 export const CHECK_INTENT = "career_inbox_check";
@@ -166,6 +166,9 @@ export interface FollowupDeps {
   mailOn: boolean; readNow: (userId: string) => Promise<MailNow>;
   sendOn: boolean; canSend: (userId: string, from?: string | null) => Promise<boolean>; send: (userId: string, m: Message, t?: Threading | null) => Promise<SendResult>;
   connectAsk?: string;
+  // Answering an email (career_mail_reply.ts): the person's own accounts that may send, and the Sent mailbox check a try with an
+  // unknown outcome needs before anything is sent again.
+  sendAccounts?: ReplyAnswerDeps["accounts"]; findSent?: ReplyAnswerDeps["findSent"];
   // D-037 (incremental authorization): the person's "allow sending" link (a connect link with reason "send" that asks Google
   // for gmail.send on top of their grant), or null when it can't be made. Offered only when a send was refused for want of it.
   sendConsent?: (userId: string) => Promise<string | null>;
@@ -225,7 +228,7 @@ export async function followupTurn(o: { message: string; userId: string; threadI
   // D-062: the reply card for an email in the person's inbox (career_mail_reply.ts): a yes sends exactly it once, a no drops it.
   if (last?.intent === MAIL_REPLY_CARD_INTENT && typeof last.meta?.mail_reply_card === "string" && last.meta?.mail_reply && (ans.kind === "yes" || ans.kind === "no")) {
     return await replyAnswer({ userId: o.userId, now: o.now, answer: ans.kind, meta: last.meta as unknown as ReplyCardMeta,
-      deps: { outreach: o.deps.outreach, sendOn: o.deps.sendOn, canSend: o.deps.canSend, send: o.deps.send, sendConsent: o.deps.sendConsent } });
+      deps: { outreach: o.deps.outreach, sendOn: o.deps.sendOn, canSend: o.deps.canSend, send: o.deps.send, sendConsent: o.deps.sendConsent, accounts: o.deps.sendAccounts, findSent: o.deps.findSent } });
   }
   if (!last || last.intent !== FOLLOWUP_CARD_INTENT) return null;
   if (last.meta?.followup_ask && typeof last.meta.followup_ask === "object") return await askAnswer(o, ans, last.meta.followup_ask as Card);

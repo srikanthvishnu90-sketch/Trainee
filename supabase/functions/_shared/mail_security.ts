@@ -20,7 +20,7 @@
 // Those reach the model as text; the output guard still refuses a reply that pairs a code-like token with a code cue.
 export const REMOVED = "[removed]";
 // Zero-width, bidi and emoji-keycap marks go; full-width, circled and superscript forms become their plain letters and digits.
-export const normalise = (s: unknown) => String(s ?? "").normalize("NFKC").replace(/[\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff\ufe0e\ufe0f\u20e3]/g, "")
+export const normalise = (s: unknown) => String(s ?? "").normalize("NFKC").replace(/(?<![\p{L}\p{Nd}])(?:\p{L} ){3,}\p{L}(?![\p{L}\p{Nd}])/gu, (m) => m.replace(/ /g, "")).replace(/[\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff\ufe0e\ufe0f\u20e3]/g, "")
   .replace(/<\/?(?:b|i|u|em|strong|span|font|small|big|code|tt|mark|sup|sub)\b[^<>]{0,200}>/gi, "");
 export type Removed = { kind: "code" | "secret" | "link"; token: string };
 
@@ -28,16 +28,16 @@ export type Removed = { kind: "code" | "secret" | "link"; token: string };
 const NUMBER_WORD = String.raw`(?:zero|oh|one|two|three|four|five|six|seven|eight|nine|cero|uno|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|null|eins|zwei|drei|vier|f[uü]nf|sechs|sieben|acht|neun|z[eé]ro|un|deux|trois|quatre|cinq|sept|huit|neuf|\d)`;
 const WORD_RUN = new RegExp(String.raw`(?<![\p{L}\p{Nd}])${NUMBER_WORD}(?:[\s,-]+${NUMBER_WORD}){3,}(?![\p{L}\p{Nd}])`, "giu");
 // Digits in any script, single separators between them (a space, dash, dot, slash, underscore, comma or colon).
-const DIGIT_RUN = /(?<![\p{L}\p{Nd}])(?<!\p{L}-)\p{Nd}(?:[ \-./_,:]?\p{Nd}){2,18}(?![\p{L}\p{Nd}])/gu;
+const DIGIT_RUN = /(?<![\p{L}\p{Nd}])(?<!\p{L}-)\p{Nd}(?:(?:[ \-./_,:]| - )?\p{Nd}){2,18}(?![\p{L}\p{Nd}])/gu;
 const ALNUM = /(?<![\p{L}\p{Nd}-])(?=[\p{L}\p{Nd}-]*\p{Nd})(?=[\p{L}\p{Nd}-]*\p{L})[\p{L}\p{Nd}]+(?:-[\p{L}\p{Nd}]+)*(?![\p{L}\p{Nd}-])/gu;
 // Cues with word edges (Latin, Cyrillic) and without (scripts written without spaces, or with attached prefixes).
-const CUE_WORDS = String.raw`codes?|otps?|passcodes?|pass\s+codes?|passwords?|passwd|pwd|pins?|verification|verify|verifying|one[- ]?time|2fa|mfa|two[- ]?(?:factor|step)|authenticat\w*|log[- ]?in|sign[- ]?in|sign[- ]?on|unlock|digits|tokens?|cvv|cvc|ssn|social\s+security|routing|account\s+(?:no|number|#)|acct|accounts?|cards?|iban|sort\s+code|combination|access\s+(?:code|number)|keys?|passport|zugang|zugangsdaten|acceso|acc[eè]s|clave|contrase[nñ]a|c[oó]digo|verificaci[oó]n|code\s+de\s+v[eé]rification|mot\s+de\s+passe|best[aä]tigungscode|zugangscode|kennwort|passwort|senha|код|пароль`;
+const CUE_WORDS = String.raw`codes?|otps?|inlogcode|verificatiecode|codice|signing\s+in|logging\s+in|pair(?:ing)?\s+(?:with|code)|\d+[- ]?digit|passcodes?|pass\s+codes?|passwords?|passwd|pwd|pins?|verification|verify|verifying|one[- ]?time|2fa|mfa|two[- ]?(?:factor|step)|authenticat\w*|log[- ]?in|sign[- ]?in|sign[- ]?on|unlock|digits|tokens?|cvv|cvc|ssn|social\s+security|routing|account\s+(?:no|number|#)|acct|accounts?|cards?|iban|sort\s+code|combination|access\s+(?:code|number)|keys?|passport|zugang|zugangsdaten|acceso|acc[eè]s|clave|contrase[nñ]a|c[oó]digo|verificaci[oó]n|code\s+de\s+v[eé]rification|mot\s+de\s+passe|best[aä]tigungscode|zugangscode|kennwort|passwort|senha|код|пароль`;
 const CUE_BARE = String.raw`验证码|驗證碼|密码|密碼|認証コード|確認コード|パスワード|暗証番号|入力|인증번호|비밀번호|رمز|کد|קוד|סיסמה|รหัส|कोड|पासवर्ड|ओटीपी`;
 const CUE = new RegExp(String.raw`(?<![\p{L}])(?:${CUE_WORDS})(?![\p{L}])|${CUE_BARE}`, "giu");
 // "Enter", "type", "paste": a code only right after them (two words at most), and never a date, a year, money, a phone or an address.
-const IMPERATIVE = /(?<![\p{L}])(?:enter|type|paste|input|key\s+in|introduce|introduzca|ingresa|ingrese|escribe|saisissez|tapez|eingeben|geben\s+sie)(?![\p{L}])/giu;
+const IMPERATIVE = /(?<![\p{L}])(?:enter|type|paste|input|confirm\s+with|key\s+in|introduce|introduzca|ingresa|ingrese|escribe|saisissez|tapez|eingeben|geben\s+sie)(?![\p{L}])/giu;
 // A "code" that is not a credential: zip code, dress code, job code, code of conduct ...; a PIN or key used as an ordinary word.
-const NOT_CUE_BEFORE = /(?:zip|postal|area|country|dress|job|promo|coupon|discount|referral|reference|source|qr|bar|event|course|class|project|product|tracking|honor|honour|building|team|style|tax|sic|naics|program|programme|error|status|morse|da|de|the\s+key|key)\s*$/i;
+const NOT_CUE_BEFORE = /(?:territory|region|cost|sku|airport|currency|language|zip|postal|area|country|dress|job|promo|coupon|discount|referral|reference|source|qr|bar|event|course|class|project|product|tracking|honor|honour|building|team|style|tax|sic|naics|program|programme|error|status|morse|da|de|the\s+key|key)\s*$/i;
 const NOT_CUE_AFTER = /^\s*(?:bonus|bonuses|sheet|desk|form|of\s+conduct|review|base|reviews|pad|point|points|note|takeaways?|dates?|people|person|players?|skills?|areas?|metrics?|results?|responsibilities|stakeholders?|accounts?\s+(?:manager|executive)|this|that|it|to\s+(?:your|the)\s+calendar|board|insight)\b/i;
 // The token itself is not a credential: an id named as an id, money, a date, a time, a year, a percentage, a phone, a postal code.
 const ID_BEFORE = /(?:\b(?:req|requisition|job|id|ids|ref|reference|confirmation|conf|application|app|candidate|order|ticket|case|invoice|booking|employee|flight|room|suite|building|floor|ext|extension|meeting|conference|webinar|zip|postal|course|class|policy|claim|member|student|registration|item|model|version|v|chapter|page|step|round|level|grade|unit|seat|req\.?\s*#|#)\s*(?:id|no\.?|number|#|is)?\s*[:#]?\s*)$/i;
@@ -159,13 +159,15 @@ const SHAPES: [RegExp, (m: string) => boolean][] = [
   [/(?<![\d-])(\d{3})[- ](\d{2})[- ](\d{4})(?![\d-])/g, (s) => { const [a, b, c] = s.split(/[- ]/); return a !== "000" && a !== "666" && a[0] !== "9" && b !== "00" && c !== "0000"; }],
 ];
 // ------------------------------------------------------------------------------------------------ (d) after a password cue
-const PW_STRONG = String.raw`passwords?|passwort|kennwort|passcodes?|pass\s+code|passphrase|passwd|pwd|pw|mot\s+de\s+passe|contrase[nñ]a|senha|пароль|wi-?fi\s+key|network\s+key`;
+const PW_STRONG = String.raw`pass(?=\s*[:=])|passwords?|passwort|kennwort|passcodes?|pass\s+code|passphrase|passwd|pwd|pw|mot\s+de\s+passe|contrase[nñ]a|senha|пароль|wi-?fi\s+key|network\s+key`;
 const PW_WEAK = String.raw`pins?|credentials?|secret|keys?|tokens?|clave|access\s+code|api\s+key`;
 const FILLER = String.raw`(?:\s+(?:is|are|was|will\s+be|for\s+(?:the\s+)?\S+|temporaire|temporal|temporary|temp|new|neue[rs]?|nouveau|initial|one-time|of\s+the\s+day))*`;
 const PW_AFTER = new RegExp(String.raw`(?<![\p{L}])(${PW_STRONG}|${PW_WEAK})(?![\p{L}])${FILLER}\s*(?:[:=—–-]|\(|\bis\b|\best\b|\bes\b|\blautet\b|\bé\b)?\s*(?:\n\s*)?("[^"\n]{1,80}"|“[^”\n]{1,80}”|'[^'\n]{1,80}'|[^\s"“'(]+)`, "giu");
 const STOP = new Set("a an the and or of on in at to for by from with that this these those it its is are was be your my our their his her please here below above reset resets manager managers management pad policy policies change changed changes field protected requirements rules strength expired expiry hint hints recovery protection free less impressive strong so not if when as you we they will can should must which who what".split(" "));
 const secretish = (t: string) => /[\d!@#$%^&*_+=~|\\/<>]/.test(t) || /[a-z][A-Z]|[A-Z]{2,}[a-z]/.test(t) || t.length >= 12;
 function afterCues(text: string, out: Removed[]): string {
+  // A one-tap dial string repeats the meeting passcode: "+16699006833,,81234567890#,,,,*551203#".
+  text = text.replace(/(\+?\d[\d ]{6,}(?:,+\d+#?)*,+\*)(\d{4,10})(#)/g, (_a, pre: string, tok: string, post: string) => { out.push({ kind: "code", token: tok }); return pre + REMOVED + post; });
   text = text.replace(PW_AFTER, (all: string, cue: string, tok: string, at: number, whole: string) => {
     const bare = tok.replace(/^["“']|["”']$/g, ""), weak = new RegExp(`^(?:${PW_WEAK})$`, "iu").test(cue.trim());
     if (!bare || STOP.has(bare.toLowerCase().replace(/[.,;:!?)]+$/, "")) || (weak && !/^["“']/.test(tok) && !secretish(bare.replace(/[.,;:!?)]+$/, "")))) return all;
@@ -191,6 +193,33 @@ function afterCues(text: string, out: Removed[]): string {
 }
 
 // A readable email with what could sign someone in taken out, and the list of what was taken out (kept for the turn only).
+// A recovery or seed phrase after its cue (the rest of that line, or the word lines below it), and a list of codes: two or more
+// lines that are only digit-bearing groups ("83920-19283"), or only letter groups right under a "backup codes" line.
+const SEED_CUE = /\b(?:seed|recovery|backup|secret|mnemonic|wallet)\s+(?:phrase|words?)\b|^\s*seed\s*[:=]/i;
+const CODES_CUE = /\b(?:backup|recovery|one[- ]?time|2fa|security|login|spare)\s+codes?\b|\bsave\s+these\b|\bkeep\s+these\b/i;
+const GROUP_LINE = /^\s*(?:\d{1,2}[.)]\s*)?[A-Za-z0-9]{3,8}(?:[- ][A-Za-z0-9]{3,8}){1,3}\s*$/;
+function phrasesAndLists(text: string, out: Removed[]): string {
+  const lines = text.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (SEED_CUE.test(lines[i])) {
+      lines[i] = lines[i].replace(/^(.*?(?:phrase|words?|seed)\b[^:=\n]*[:=]\s*)(\S.*)$/i, (_a, pre: string, rest: string) => { out.push({ kind: "secret", token: rest }); return pre + REMOVED; })
+        // the same on one line (Gmail's snippet): six or more lowercase words right after the cue
+        .replace(/((?:phrase|words?)\s+)(\p{Ll}+(?:\s+\p{Ll}+){5,})/u, (_a, pre: string, rest: string) => { out.push({ kind: "secret", token: rest }); return pre + REMOVED; });
+      for (let j = i + 1; j < lines.length && j <= i + 24 && /^\s*(?:\d{1,2}[.)]\s*)?\p{Ll}+(?:\s+\p{Ll}+)*\s*$/u.test(lines[j]); j++) { out.push({ kind: "secret", token: lines[j].trim() }); lines[j] = REMOVED; }
+    }
+    const digits = (l: string) => GROUP_LINE.test(l) && l.trim().replace(/^\d{1,2}[.)]\s*/, "").split(/[- ]/).every((g) => /\d/.test(g));
+    const letters = (l: string) => GROUP_LINE.test(l) && /^[a-z0-9 -]+$/.test(l.trim());
+    const cued = CODES_CUE.test(lines[i]);
+    // On one line (Gmail's snippet): the code groups right after a codes cue and its colon.
+    if (cued) lines[i] = lines[i].replace(/([:=]\s*)((?:[A-Za-z0-9]{3,8}[- ][A-Za-z0-9]{3,8}\s*){2,})/g, (_a, pre: string, rest: string) => { out.push({ kind: "code", token: rest.trim() }); return pre + REMOVED + " "; });
+    let j = i + 1;
+    while (j < lines.length && (digits(lines[j]) || (cued && letters(lines[j])))) j++;
+    if (j - (i + 1) >= 2 || (cued && j - (i + 1) >= 1)) for (let k = i + 1; k < j; k++) { out.push({ kind: "code", token: lines[k].trim() }); lines[k] = REMOVED; }
+    else if (i === 0 && digits(lines[0]) && lines.length > 1 && digits(lines[1])) { let k = 0; while (k < lines.length && digits(lines[k])) { out.push({ kind: "code", token: lines[k].trim() }); lines[k] = REMOVED; k++; } }
+  }
+  return lines.join("\n");
+}
+
 export function redact(text: unknown): { text: string; removed: Removed[] } {
   const removed: Removed[] = [];
   // Links are cleaned first and then held aside, so no later rule reads a kept path as a code.
@@ -198,13 +227,16 @@ export function redact(text: unknown): { text: string; removed: Removed[] } {
   let t = normalise(text).replace(/[\u0001\u0002]/g, "");
   t = t.replace(URL_RE, (u) => { const c = cleanLink(u, removed); return c.startsWith(REMOVED) ? c : `\u0001${held.push(c) - 1}\u0002`; });
   for (const [re, ok] of SHAPES) t = t.replace(re, (s) => (s.includes(REMOVED) || !ok(s) ? s : (removed.push({ kind: "secret", token: s }), REMOVED)));
-  t = afterCues(t, removed);
+  t = phrasesAndLists(afterCues(t, removed), removed);
   const lines = t.split("\n");
   let carried = false;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    lines[i] = codesIn(line, carried, removed);
-    if (line.trim()) carried = cuesIn(line).some((c) => !c.imp && wordsBetween(line, c.end, line.length) <= 3) || (carried && /^[\p{Nd} .-]+$/u.test(line.trim()));
+    // A cue reaches only its own sentence: "zip code 60601. The dress code ... Parking code 4471" keeps the zip.
+    lines[i] = line.split(/(?<=[.!?])(?<!\b(?:no|nr|nos|ref|approx|ext|apt|vs|mr|mrs|ms|dr|st|e\.g|i\.e|etc)\.)(?=\s+\S)/i).map((part, k) => codesIn(part, carried && k === 0, removed)).join("");
+    // A cue carries to the next line only when its own line gives no value ("Enter these digits:" then "4 8 2"), never after
+    // "Passcode: 551203" (the dial string under it keeps its meeting ID).
+    if (line.trim()) carried = cuesIn(line).some((c) => !c.imp && wordsBetween(line, c.end, line.length) <= 3 && !/\p{Nd}|\[removed\]/u.test(line.slice(c.end))) || (carried && /^[\p{Nd} .-]+$/u.test(line.trim()));
   }
   return { text: lines.join("\n").replace(/\u0001(\d+)\u0002/g, (_m, i: string) => held[Number(i)]), removed };
 }
@@ -213,12 +245,9 @@ export const redactSecrets = (text: unknown) => redact(text).text;
 // ------------------------------------------------------------------------------------------------ the output guard
 // Tokens of a withheld security mail (never read by the model, but never to be sent either).
 export function withheldTokens(text: unknown): string[] {
-  const t = normalise(text), out = new Set<string>();
-  for (const m of t.matchAll(DIGIT_RUN)) if (m[0].replace(/\D/g, "").length >= 4) out.add(m[0]);
-  for (const m of t.matchAll(ALNUM)) if (m[0].length >= 5) out.add(m[0]);
-  for (const m of t.matchAll(URL_RE)) out.add(m[0]);
-  for (const r of redact(t).removed) out.add(r.token);
-  return [...out];
+  // Only what redaction itself takes out of that mail: code-shaped tokens near a cue, secrets by shape, link tokens. Never every
+  // number or link of the mail (a year, a zip, a street number, a help-page link are not secrets, and a reply may say them).
+  return [...new Set(redact(text).removed.map((r) => r.token))];
 }
 const digitsOf = (s: string) => normalise(s).replace(/(?<=\p{Nd})[ \-./_,:](?=\p{Nd})/gu, "");
 // Whether a reply would carry something Trainee removed or withheld this turn (by its letters, or by its digits however spaced).
@@ -226,7 +255,7 @@ export function mentionsRemoved(text: unknown, tokens: Iterable<string>): string
   const t = normalise(text), td = digitsOf(t), hit: string[] = [];
   for (const raw of tokens) {
     const tok = normalise(raw).trim();
-    if (tok.length < 4 || tok === REMOVED) continue;
+    if (tok.length < 4 || tok === REMOVED || /^(?:19|20)\d{2}$/.test(tok)) continue;
     const d = digitsOf(tok);
     if (t.includes(tok) || (/^[\p{Nd}]{4,}$/u.test(d) && new RegExp(`(?<!\\p{Nd})${d}(?!\\p{Nd})`, "u").test(td))) hit.push(raw);
   }
@@ -276,12 +305,15 @@ export function securityMail(m: { from: string; subject: string; text: string })
   // The subject of a security mail says what it is.
   if (SUBJECT_CODE.test(subject) || RESET.test(subject) || SIGNIN.test(subject) || ALERT.test(subject) || /\bconfirm\s+it'?s\s+you\b/i.test(subject) || (TWO_STEP.test(subject) && /\bcodes?\b/i.test(subject))) return true;
   const all = `${subject}\n${body}`, acts = ACT.test(all);
+  // An interview invite (a meeting, a call or a test link) is ordinary mail: its passcode or access code is redacted, and the
+  // invite is withheld only for one-time, verification or sign-in code wording.
+  const invite = MEETING.test(all) || /(?:zoom\.us|zoomgov\.com|meet\.google\.com|teams\.microsoft\.com|teams\.live\.com|webex\.com|calendly\.com|hackerrank|coderpad\.io|codesignal\.com|codility\.com)/i.test(all);
   // A code stated as a code ("your verification code is 482913"), in any sentence.
-  if (ASSERTED.test(body)) return true;
+  if (ASSERTED.test(invite ? body.replace(/\b(?:access|confirmation|meeting|conference|dial[- ]in|temporary)\s+(?:pass)?(?:codes?|pins?)\b/gi, "") : body)) return true;
   if (MONEY_ALERT.test(all) && ALERT.test(all)) return true;
   // Reset, sign-in, two-step and alert wording counts in the body only when the email also tells the reader to act on it.
   if (acts && (RESET.test(body) || SIGNIN.test(body) || ALERT.test(body) || (TWO_STEP.test(body) && /\bcodes?\b/i.test(body)))) return true;
   // A plain "code" with digits counts when the email treats it as a secret, and it is not a meeting's passcode.
-  if (acts) for (const line of body.split(/\n+/)) if (PLAIN_CODE.test(line) && !MEETING.test(line)) return true;
+  if (acts && !invite) for (const line of body.split(/\n+/)) if (PLAIN_CODE.test(line) && !MEETING.test(line)) return true;
   return false;
 }

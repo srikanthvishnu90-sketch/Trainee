@@ -189,7 +189,9 @@ export function sentFinder(d: InboxDeps) {
 // from_mailbox (D-062): the person's account the reply is sent from (by default the one the email reached). Shown on the card,
 // kept on the row (recipient.reply, written once) and inside the hash. hash, text and created_at: the approval key, the exact text
 // shown and when the card was made, kept with the card itself: the yes sends only a row that still equals what the card showed.
-export interface ReplyCardMeta { mail_reply_card: string; mail_reply: { to: string; subject: string; in_reply_to: string; thread_id: string | null; from_name: string; from_mailbox?: string | null; hash?: string; text?: string; created_at?: string; prior_unconfirmed?: string } }
+// acknowledged: other replies to the same email (sent, or possibly sent) the person was told about before this yes: the card's
+// own warning line, or the warning a first yes got. Any other such reply stops the send and is said first.
+export interface ReplyCardMeta { mail_reply_card: string; mail_reply: { to: string; subject: string; in_reply_to: string; thread_id: string | null; from_name: string; from_mailbox?: string | null; hash?: string; text?: string; created_at?: string; prior_unconfirmed?: string; acknowledged?: string[] } }
 const sourceFor = (from: string | null) => `reply to their email${from ? `, from ${from}` : ""}`;
 export const replySubject = (s: string) => (/^\s*re\s*:/i.test(s) ? squash(s) : `Re: ${squash(s) || "your email"}`).slice(0, 200);
 // The approval's key: everything a yes approves. Cc and Bcc are always empty (a reply goes to one address) and are in the key
@@ -314,7 +316,10 @@ export async function draftReply(o: {
   const earlier = o.outreach.replyAttempts ? await o.outreach.replyAttempts(o.userId, to, mail.message_id)
     : (o.outreach.history ? await o.outreach.history(o.userId, 5000) : []).filter((x) => isMailReply(x) && (x.status === "sending" || x.status === "approved") && x.recipient.email === to && x.recipient.reply?.in_reply_to === mail.message_id);
   let prior: string | null = null, priorId: string | null = null;
+  const acknowledged: string[] = [], told: string[] = [];
   for (const first of earlier) {
+    // A reply to this email already went from another card: the new card says so first (a second reply is the person's call).
+    if (first.status === "sent") { acknowledged.push(first.id); told.push(`Before you answer: you already sent a reply to this email (${String(first.sent_at ?? first.created_at).slice(0, 16).replace("T", " ")} UTC). If you say yes here, a second reply goes.`); continue; }
     const old = await recordEnd(o.outreach, o.userId, first, o.now);
     const began = Date.parse(old.sent_at ?? old.approved_at ?? "") || o.now, end = endedAt(old);
     const c: SentCheck = o.findSent ? await o.findSent(o.userId, queryOf(old, began)).catch((): SentCheck => ({ status: "unknown", detail: "" })) : { status: "unknown", detail: "" };
@@ -333,7 +338,9 @@ export async function draftReply(o: {
     const sentSays = c.status === "absent" ? "your Sent mail does not show it" : c.status === "similar" ? "your Sent mail has a reply in that thread, but not this one word for word" : "I could not read your Sent mail to check";
     prior = `Before you answer: an earlier reply to this email (tried ${new Date(began).toISOString().slice(0, 16).replace("T", " ")} UTC) is unconfirmed: it may have gone, and ${sentSays}. If it did go, a yes here sends a second reply.`;
     priorId = old.id;
+    acknowledged.push(old.id);
   }
+  if (told.length) prior = [...told, ...(prior ? [prior] : [])].join("\n");
   // A reply sent from another account than the one the email reached starts a new thread there (Gmail threads per mailbox).
   const thread = from && reached && from !== reached ? null : mail.thread_id;
   const base = { n: 1, recipient: { name: (name || to).slice(0, 120), firm: "", title: "", school: "", email: to, source: sourceFor(from), kind: "mail_reply" as const, reply: { from, in_reply_to: mail.message_id, thread_id: thread } },
@@ -342,7 +349,7 @@ export async function draftReply(o: {
   const m = messageOf(base), hash = await replyHash({ from, to: m.to, subject: m.subject, text: m.text, in_reply_to: mail.message_id, thread_id: thread });
   const [d] = await o.outreach.saveBatch(o.userId, o.threadId, [{ ...base, hash }], o.now);
   const sends = await o.canSend(from).catch(() => false);
-  const meta: ReplyCardMeta = { mail_reply_card: d.id, mail_reply: { to, subject: m.subject, in_reply_to: mail.message_id, thread_id: thread, from_name: name, from_mailbox: from, hash, text: m.text, created_at: d.created_at, ...(priorId ? { prior_unconfirmed: priorId } : {}) } };
+  const meta: ReplyCardMeta = { mail_reply_card: d.id, mail_reply: { to, subject: m.subject, in_reply_to: mail.message_id, thread_id: thread, from_name: name, from_mailbox: from, hash, text: m.text, created_at: d.created_at, ...(priorId ? { prior_unconfirmed: priorId } : {}), ...(acknowledged.length ? { acknowledged } : {}) } };
   return { status: "ok", show: { intent: MAIL_REPLY_CARD_INTENT, text: replyCardText(m, { from_name: name, sends, from, prior }), meta: { ...meta } }, to, subject: m.subject, hash,
     note: prior ? "The card with the exact reply is shown to the person by code, with a line saying an earlier reply to this email is unconfirmed. Nothing is sent until they say yes to it." : "The card with the exact reply is shown to the person by code. Nothing is sent until they say yes to it." };
 }
@@ -365,7 +372,7 @@ const ADMIT: Record<string, string> = { not_approved: "the approval was not reco
 type Answer = { reply: string; status: string; intent: string; meta?: Record<string, unknown> };
 export async function replyAnswer(o: { userId: string; now: number; answer: "yes" | "no"; meta: ReplyCardMeta; deps: ReplyAnswerDeps }): Promise<Answer> {
   const done = (reply: string, status: string): Answer => ({ reply, status, intent: MAIL_REPLY_ANSWER_INTENT });
-  const waiting = (reply: string, status: string): Answer => ({ reply, status, intent: MAIL_REPLY_CARD_INTENT, meta: { ...o.meta } as Record<string, unknown> });
+  const waiting = (reply: string, status: string, more: Partial<ReplyCardMeta["mail_reply"]> = {}): Answer => ({ reply, status, intent: MAIL_REPLY_CARD_INTENT, meta: { ...o.meta, mail_reply: { ...o.meta.mail_reply, ...more } } as Record<string, unknown> });
   const s = o.deps.outreach, id = o.meta.mail_reply_card;
   let d: OutreachDraft | undefined = (s.drafts ? await s.drafts(o.userId, [id]) : []).find((x) => x.id === id);
   if (!d || !isMailReply(d)) return done("That reply is no longer on record, so nothing was sent.", "missing");
@@ -417,6 +424,16 @@ export async function replyAnswer(o: { userId: string; now: number; answer: "yes
     const allow = o.deps.sendConsent ? await o.deps.sendConsent(o.userId).catch(() => null) : null;
     return waiting(`Not sent: your Google connection lets Trainee read your mail, not send it.${allow ? ` To send from your Gmail, allow sending (you sign in to Google yourself): ${allow} then say yes again.` : ""} Or copy the reply above into your own email.`, "NOT_WIRED");
   }
+  // Another card's reply to this same email that went, or may have: said first, and this card sends only on a yes after that.
+  const known = new Set([...(c.acknowledged ?? []), ...(c.prior_unconfirmed ? [c.prior_unconfirmed] : [])]);
+  const others = async () => (s.replyAttempts ? await s.replyAttempts(o.userId, to, p.in_reply_to) : []).filter((x) => x.id !== id && !known.has(x.id));
+  const another = (rows: OutreachDraft[]) => {
+    const went = rows.find((x) => x.status === "sent"), when = (x: OutreachDraft) => String(x.sent_at ?? x.approved_at ?? x.created_at).slice(0, 16).replace("T", " ");
+    const what = went ? `already went to ${to} (${when(went)} UTC)` : `may already have gone to ${to} (tried ${when(rows[0])} UTC; it is unconfirmed)`;
+    return waiting(`Not sent: another reply to this same email, from another card, ${what}. Say yes again only if you want this reply sent as well; say no to drop it.`, "another_reply", { acknowledged: [...known, ...rows.map((x) => x.id)] });
+  };
+  const before = await others();
+  if (before.length) return another(before);
   const at = new Date(o.now).toISOString();
   const approved: OutreachDraft = { ...d, status: "approved", approved_hash: h, approved_at: at };
   if (!(await s.update(o.userId, approved, { status: "shown", hash: h }))) return changed();
@@ -428,6 +445,13 @@ export async function replyAnswer(o: { userId: string; now: number; answer: "yes
     return waiting(`Not sent: ${admit === "error" ? "the approval could not be recorded just now" : ADMIT[admit] ?? admit}. Nothing went to ${to}.${admit === "error" ? " Say yes to try again." : ""}`, admit === "error" ? "not_recorded" : admit);
   }
   let sending: OutreachDraft = { ...approved, status: "sending", sent_at: at };
+  // Two cards for one email said yes to at the same moment: after the claim, another one claimed or sent is said first and this
+  // card waits (if both see each other, neither sends and both say so).
+  const raced = await others();
+  if (raced.length) {
+    await s.update(o.userId, { ...sending, status: "shown", approved_hash: null, approved_at: null, sent_at: null, result: "held: another reply to this email" }, { status: "sending" });
+    return another(raced);
+  }
   const t0 = performance.now();
   const r = await o.deps.send(o.userId, m, { inReplyTo: p.in_reply_to, threadId: p.thread_id, from, messageId: mid })
     .catch((e): { status: string; id?: string; thread_id?: string; detail?: string; reason?: string; not_sent?: boolean } => ({ status: "ERROR", detail: e instanceof Error ? e.message : String(e) }));

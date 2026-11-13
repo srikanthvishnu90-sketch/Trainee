@@ -149,41 +149,63 @@ const S_NEG = /\b(?:never|not|no\s+longer|cannot|without|neither|nor|lack(?:s|ed
 const S_ENDED = /\b(?:left|quit|fired|laid\s+off|used\s+to|formerly|dropped\s+out|turned\s+down|declined|failed|rejected|withdrew)\b/gi;
 const S_FUNC = new Set("a an the and or of in at to as on for from with by is are was were am be been has have had do does did not no never i i'm im i've my me who that which this it its also just really only please pls".split(" "));
 const PAST = /[a-z]{2,}(?<!e)ed$|[a-z]{3,}eed$(?<!need|feed|seed|speed)/;
-const sToks = (x: string) => (String(x).toLowerCase().replace(/[’‘]/g, "'").match(/[a-z0-9][a-z0-9+#.@'-]*[a-z0-9+#]|[a-z0-9]/g) ?? []).map((w) => w.replace(/'s$/, "")).filter((w) => !S_FUNC.has(w) && !/n't$/.test(w));
+// Round 4: "can't", "can not" and "cannot" are one word; a year range ("2021-2023") is its two years ("from 2021 to 2023").
+const sNorm = (x: string) => String(x).toLowerCase().replace(/[’‘`]/g, "'").replace(/\bcan(?:'t|not|\s+not)\b/g, "cannot");
+const sToks = (x: string) => (sNorm(x).match(/[a-z0-9][a-z0-9+#.@'-]*[a-z0-9+#]|[a-z0-9]/g) ?? []).flatMap((w) => (/^\d{2,4}[-–]\d{2,4}$/.test(w) ? w.split(/[-–]/) : [w])).map((w) => w.replace(/'s$/, "")).filter((w) => !S_FUNC.has(w) && !/n't$/.test(w));
+// Round 4: what a clause says is not a fact about the person now: a plan, something being learned or tried, a pretence, an
+// interview or an offer (not a job), a near miss, a role play; and what someone else is or did ("our team lead has ...").
+const S_NOTFACT = /\b(?:plan(?:ning)?\s+to|trying\s+to|learning|taking\s+(?:a|an|the)\b|dream(?:ing)?\s+of|pretend(?:ed|ing)?|lied|guess|once\s+i|nearly|role\s*-?\s*play|interview(?:ing|ed)\s+(?:with|at|for)|applied\s+(?:to|for)\s+be|waitlisted|(?:was|got|been)\s+offered|i'?d\s+be|going\s+to|gonna|hope\s+to|hoping)\b/i;
+const S_OTHER = /^\W*(?:(?:and|but|also|so|btw)\s+)?(?:our|his|her|their|the|a|an|my\s+(?:roommate|friend|brother|sister|mom|dad|mother|father|manager|boss|recruiter|girlfriend|boyfriend|wife|husband|partner|cousin|classmate|professor|coworker|colleague|team\s*lead|teammate))\b/i;
+// A later "no, that was my roommate", "actually no", "jk", "that's not true" takes back what came before it in the message.
+const S_RETRACT = /^\W*(?:no|nope|nah|actually|wait|scratch\s+that|jk|just\s+kidding|kidding|not\s+really)\b|\bthat\s+(?:was|is)\s+(?:my|his|her|their)\b|\bthat'?s\s+(?:not\s+true|wrong|a\s+lie)\b/i;
+const S_JEST = /\b(?:lol|lmao|jk|j\/k)\b|\/s(?![a-z])/i, S_JEST_ON = /\byeah\s+right\b|\boh\s+sure\b|\bas\s+if\b/i;
 const sSame = (a: string, b: string) => a === b || a + "s" === b || b + "s" === a || (!/\d/.test(a + b) && a.length >= 4 && b.length >= 4 && a.slice(0, 4) === b.slice(0, 4));
 export function saveRefusal(text: string, message: string, kind = ""): string | null {
-  const msg = String(message).replace(/[’‘`]/g, "'").replace(/[“”]/g, '"')
+  const msg = sNorm(message).replace(/[“”]/g, '"')
     .replace(/"[^"\n]*"/g, " ").replace(/(^|\s)'[^'\n]{3,}'(?=[\s,.!?]|$)/g, " ").replace(/^\s*>.*$/gm, " ")
-    .replace(/(?:\b(?:says?|said|wrote|writes|reads?|states?)\s*:|\s>\s)[^.!?\n]*[.!?]?/gi, " ").replace(/\n--\s*\n[\s\S]*$/, " ");
+    .replace(/(?:\b(?:says?|said|wrote|writes|reads?|states?|e-?mail|message|dm|text|posting|jd|reply|asked)\s*:|\s>\s)[^.!?\n]*[.!?]?/gi, " ").replace(/\n--\s*\n[\s\S]*$/, " ");
   const asking = statementsOf(msg).asking;
-  const clauses: { text: string; neg: boolean }[] = [];
-  for (const sentence of msg.split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter(Boolean)) {
-    if (/\byeah\s+right\b|\boh\s+sure\b|\bas\s+if\b|\blol\b|\/s(?![a-z])/i.test(sentence)) continue; // said in jest: not a statement
-    const parts = sentence.split(/,\s+|;\s+|\s+[-–—]\s+|\s+(?:but|after|before|while|though|although)\s+|\s+and\s+(?=(?:i|i'm|im|i've|my|we|he|she|they|not|never)\b|[a-z]+(?:ed|ing)\b)/i).map((x) => x.trim()).filter(Boolean);
-    let neg = false;
-    parts.forEach((c, k) => {
-      // A negation carries over the commas of its sentence until a clause has its own subject ("i did not, repeat not, work at X").
-      neg = /^\W*(?:(?:and|also|so|btw)\s+)*(?:i|i'm|im|i've|ive|i'd|my|we)\b/i.test(c) ? S_NEG.test(c) : neg || S_NEG.test(c);
-      const ask = (k === parts.length - 1 && /\?\s*$/.test(sentence)) || asksLike(c);
-      const said = assertedIn(c, ask) ?? (!asking && !ask && assertedIn(`i ${c}`, false) ? c : null);
-      if (said) clauses.push({ text: said, neg });
-    });
-  }
+  const clauses: { text: string; neg: boolean; coarse?: boolean }[] = [];
+  const sentences = msg.split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
+  const SPLIT = String.raw`,\s+|;\s+|\s+[-–—]\s+|\s+(?:but|though|although)\s+|\s+and\s+(?=(?:i|i'm|im|i've|my|we|he|she|they|not|never)\b|[a-z]+(?:ed|ing)\b)`;
+  sentences.forEach((sentence, si) => {
+    // Taken back later in the message: nothing before the retraction stands.
+    if (sentences.slice(si + 1).some((x) => S_RETRACT.test(x)) || sentence.split(/,\s+/).slice(1).some((x) => S_RETRACT.test(x))) return;
+    // A tag question ("i'd be a senior by then, right?") or a statement asked back ("i worked at stripe?") is not one.
+    if (/(?:,\s*|\s)(?:right|correct|yeah|no|ok|true)\s*\?\s*$/.test(sentence) || /^\W*(?:i|i'm|im|i've|my)\b[^,?]*\?\s*$/.test(sentence)) return;
+    for (const [re, coarse] of [[new RegExp(`${SPLIT}|\\s+(?:after|before|while)\\s+`, "i"), false], [new RegExp(SPLIT, "i"), true]] as const) {
+      const parts = sentence.split(re).map((x) => x.trim()).filter(Boolean);
+      let neg = false, jest = false;
+      parts.forEach((c, k) => {
+        // A negation carries over the commas of its sentence until a clause has its own subject ("i did not, repeat not, work at X").
+        neg = /^\W*(?:(?:and|also|so|btw)\s+)*(?:i|i'm|im|i've|ive|i'd|my|we)\b/i.test(c) ? S_NEG.test(c) : neg || S_NEG.test(c);
+        // In jest: "lol"/"jk" void their own clause; "yeah right", "oh sure", "as if" void the rest of the sentence.
+        jest ||= S_JEST_ON.test(c);
+        if (jest || S_JEST.test(c) || S_NOTFACT.test(c) || S_OTHER.test(c)) return;
+        const ask = (k === parts.length - 1 && /\?\s*$/.test(sentence)) || asksLike(c);
+        const said = assertedIn(c, ask) ?? (!asking && !ask && assertedIn(`i ${c}`, false) ? c : null);
+        if (said) clauses.push({ text: said, neg, coarse });
+      });
+    }
+  });
   if (!clauses.length) return NOTHING_STATED;
-  for (const part of String(text).replace(/[’‘`]/g, "'").split(/,\s+|;\s+/).map((x) => x.trim()).filter(Boolean)) {
+  for (const part of sNorm(text).split(/,\s+|;\s+/).map((x) => x.trim()).filter(Boolean)) {
     const want = sToks(part);
     if (!want.length) continue;
-    const held = clauses.map((c) => ({ c, toks: sToks(c.text) })).filter((x) => want.every((w) => x.toks.some((t) => sSame(w, t))));
+    // One fine clause holds it; else one clause of the sentence uncut at "after"/"before"/"while" ("i left Amazon in 2024 after 3
+    // years as an SDE"), whose ended or failed marker must then be in what is saved.
+    const holds = (coarse: boolean) => clauses.filter((c) => !!c.coarse === coarse).map((c) => ({ c, toks: sToks(c.text) })).filter((x) => want.every((w) => x.toks.some((t) => sSame(w, t))));
+    const fineHeld = holds(false), held = fineHeld.length ? fineHeld : holds(true);
     if (!held.length) {
       const all = sToks(msg), gone = want.filter((w) => !all.some((t) => sSame(w, t)));
       return gone.length ? `not saved: "${gone.join('", "')}" is not in what they said; save only what they said, in their words, or ask them`
         : `not saved: they did not state "${part}" as a fact about themselves in one statement (it was asked, hedged, negated, someone else's, or put together from separate statements); ask them`;
     }
     const fine = held.some(({ c, toks }) => {
-      if (c.neg !== S_NEG.test(part)) return false;
+      if (c.neg !== S_NEG.test(part) && !(c.coarse && S_NEG.test(c.text) === S_NEG.test(sNorm(text)))) return false;
       // What they want is a goal, never a fact about what they are or have ("i want to learn Tableau" is not "knows Tableau").
       if (/\b(?:want(?:s|ed)?\s+to|would\s+like|'d\s+like)\b/i.test(c.text) && !/^(?:goal|preference)$/.test(kind) && !/\bwants?\b|\bgoal\b/i.test(part)) return false;
-      if ((c.text.match(S_ENDED) ?? []).some((m) => !part.toLowerCase().includes(m.toLowerCase().split(/\s+/)[0]))) return false;
+      if ((c.text.match(S_ENDED) ?? []).some((m) => !(c.coarse ? sNorm(text) : sNorm(part)).includes(m.toLowerCase().split(/\s+/)[0]))) return false;
       // Tense: a word of the save and the clause's word for it end alike ("-ed" or not).
       return want.every((w) => { const t = toks.find((x) => sSame(w, x))!; return w === t || PAST.test(w) === PAST.test(t); });
     });

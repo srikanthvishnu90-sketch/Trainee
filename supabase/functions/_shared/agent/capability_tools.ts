@@ -109,12 +109,15 @@ async function recordFor(d: CapabilityDeps, c: ToolCtx): Promise<ApplicationReco
 // from a complete read. Otherwise it is unknown (null), with what was found as "at least", and the note says so.
 function countsOf(r: ApplicationRecord, c: ToolCtx) {
   const n = r.read.status === "complete" ? r.applied.length : null;
-  if (c.turn) { c.turn.record = { ...r.read, found: r.applied.slice(0, 12).map(foundLine).concat(r.applied.length > 12 ? [`and ${r.applied.length - 12} more`] : []) }; if (n !== null) c.turn.counts = { applied: n }; else delete c.turn.counts; }
+  if (c.turn) { c.turn.record = { ...r.read, nomail: r.mail.gmail === "not_connected", found: r.applied.slice(0, 12).map(foundLine).concat(r.applied.length > 12 ? [`and ${r.applied.length - 12} more`] : []) }; if (n !== null) c.turn.counts = { applied: n }; else delete c.turn.counts; }
   return { applied: n, ...(n === null && r.applied.length ? { applied_at_least: r.applied.length } : {}), researched: r.researched.length, drafts: r.drafts.length };
 }
 // One application as code states it in the reply (career_brain.ts coverageLine): employer, role, date, and what it stands on.
 const foundLine = (a: ApplicationRecord["applied"][number]) => { const box = a.evidence.find((e) => e.account)?.account;
-  return `${a.company}${a.role ? ` (${a.role})` : ""}${a.applied_at ? `, ${a.applied_at.slice(0, 10)}` : ""}, from ${a.confirmed_by === "your word" ? "what you told me" : a.confirmed_by === "employer email" ? `an employer email${box ? ` in ${box}` : ""}` : a.confirmed_by}`; };
+  // Round 4: an outcome an employer's email gave (a rejection, an interview, an offer) is on the line, with its date and mailbox.
+  const last = [...a.evidence].reverse().find((e) => e.from === "gmail" && e.kind !== "received");
+  const outcome = last && /reject|interview|offer|assessment|replied/i.test(a.status) ? `; ${a.status} on ${last.at.slice(0, 10)}${last.account ? ` (${last.account})` : ""}` : "";
+  return `${a.company}${a.role ? ` (${a.role})` : ""}${a.applied_at ? `, ${a.applied_at.slice(0, 10)}` : ""}, from ${a.confirmed_by === "your word" ? "what you told me" : a.confirmed_by === "employer email" ? `an employer email${box ? ` in ${box}` : ""}` : a.confirmed_by}${outcome}`; };
 const incompleteNote = (r: ApplicationRecord) => r.read.status === "complete" ? "" : ` THIS READ ${r.read.status === "failed" ? "FAILED" : "IS PARTIAL"}: could not read ${r.read.could_not_read.join("; ")}. ` +
   "The number of applications is unknown (counts.applied is null). Never say they have not applied, that there are none, or a total. Say which could not be read, give anything found as \"at least\", and say the rest is unconfirmed until it can be read.";
 const remember = async (d: CapabilityDeps, c: ToolCtx, r: ApplicationRecord) => { if (d.snapshot) await within(d.readTimeoutMs ?? 12_000, () => d.snapshot!.set(c.userId, snapshotOf(r))).catch(() => {}); };

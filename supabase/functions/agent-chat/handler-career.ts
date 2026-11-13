@@ -1487,7 +1487,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         const daily = await admin.rpc("career_apply_daily_limit", { p_user: user.id }).then((r: any) => r.error ? undefined : Number(r.data) || undefined, () => undefined);
         const capStores = supabaseCapabilityStores(admin);
         let peopleTrace: AlumniResult | null = null;
-        const turn = await agentTurn({ message: typedMessage, history, stores: ctx as unknown as Record<string, unknown>, userId: user.id, threadId: tid, now,
+        // Review of #790: the marker the turn before set when it asked whether a set-aside fact is right again (its message's meta).
+        const restoreAsk = (((hist.data || []) as any[]).find((m) => m?.role === "assistant")?.meta as any)?.restore_ask ?? null;
+        const turn = await agentTurn({ message: typedMessage, history, restoreAsk, stores: ctx as unknown as Record<string, unknown>, userId: user.id, threadId: tid, now,
           model: (payload) => callModel(cfg, payload, { meter, role: "chat" }), postings: (q) => postingsDb.search(searchWords(q), 150), alerts: alertStore,
           mail: supabaseMailStore(admin), interviews: supabaseInterviewStore(admin), digest: supabaseDigestStore(admin),
           events, tz, summary, ...(resumedTaskNote ? { summary: [summary, resumedTaskNote].filter(Boolean).join("\n\n") } : {}), hired: hiredSourceFromEnv(Deno.env, admin), confirmations: confirmEvents,
@@ -1596,7 +1598,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           turn.reply = nonEmptyReply(turn);
           out = { reply: turn.reply, intent: turn.show?.intent ?? (turn.tool_calls.some((c: any) => c.name === "draft_followup") ? FOLLOWUP_INTENT : "agent"), resultStatus: turn.stopped, contained: false, handler: "agent", ...(turn.show?.parts ? { parts: turn.show.parts } : {}),
             ...(turnDocuments.length ? { result: { documents: turnDocuments } } : {}) };
-          agentMeta = { brain: staged.chosen ? "staged" : "agent", ...(staged.chosen ? { router_intent: staged.decision?.intent ?? null } : {}), tool_calls: turn.tool_calls, stopped: turn.stopped, ...((turn as any).shorten ? { shorten: (turn as any).shorten } : {}), ...((turn as any).research ? { research: (turn as any).research } : {}), pending_approvals: turn.pending_approvals.length, ...(turn.knowledge ? { knowledge: turn.knowledge } : {}),
+          agentMeta = { brain: staged.chosen ? "staged" : "agent", ...(staged.chosen ? { router_intent: staged.decision?.intent ?? null } : {}), tool_calls: turn.tool_calls, stopped: turn.stopped, ...((turn as any).shorten ? { shorten: (turn as any).shorten } : {}), ...((turn as any).set_aside ? { set_aside: (turn as any).set_aside } : {}), ...((turn as any).restore_ask ? { restore_ask: (turn as any).restore_ask } : {}), ...((turn as any).research ? { research: (turn as any).research } : {}), pending_approvals: turn.pending_approvals.length, ...(turn.knowledge ? { knowledge: turn.knowledge } : {}),
             // flag-only reply checks (loop.ts): saved with the turn so remaining reply problems can be counted (Greptile on #566)
             ...replyFlagsMeta(turn as { flags?: unknown }), ...(turn.show?.meta ?? {}) };
         }

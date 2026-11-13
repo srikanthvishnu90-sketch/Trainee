@@ -1,7 +1,7 @@
 // Which brain answers a career turn (WO-002, D-008): the CareerHost router unless CAREER_BRAIN=agent, and the agent turn
 // itself (model + tools over the person's career state).
 import type { LinkCheck } from "../_shared/link_check.ts";
-import { EMPTY_AFTER_SAVE_REPLY, EMPTY_REPLY, INCOMPLETE_REPLY, REFUSED_FILE_TODO, runAgentTurn, type ModelFn, type TurnResult } from "../_shared/agent/loop.ts";
+import { EMPTY_AFTER_SAVE_REPLY, EMPTY_REPLY, INCOMPLETE_AFTER_SAVE_REPLY, INCOMPLETE_REPLY, MAX_STEPS_AFTER_SAVE_REPLY, MAX_STEPS_REPLY, MODEL_ERROR_AFTER_SAVE_REPLY, MODEL_ERROR_REPLY, REFUSED_FILE_TODO, runAgentTurn, type ModelFn, type TurnResult } from "../_shared/agent/loop.ts";
 import { careerTools, type OutreachDeps, type TailorTools } from "../_shared/agent/career_tools.ts";
 import { importContactsFile, MX_NOT_WIRED, type MxResolver, type Verifier } from "../_shared/career_contacts.ts";
 import { attachAsked, attachTool } from "../_shared/agent/attach_tool.ts";
@@ -150,6 +150,8 @@ export async function agentTurn(o: {
   paths?: PathStore | null;
   // D-064 (G13): this message arrived while the previous turn (this text, the person's previous message) was still running.
   whileWorking?: string | null;
+  // Review of #790: the marker the turn before returned (restore_ask) when it asked whether a set-aside fact is right again.
+  restoreAsk?: { fact_id: string } | null;
   // D-062: the capability tools (_shared/agent/capability_tools.ts: Gmail record and tracker, people search, answering an email),
   // under the same withholding as every other tool.
   capabilities?: import("../_shared/agent/loop.ts").ToolSpec[] | null;
@@ -206,7 +208,7 @@ export async function agentTurn(o: {
   // already used) never replaces it.
   // D-063 (C4): trace.a keeps a specific advice question's result (research/advice.ts): its one source goes on its own line.
   const trace: { r?: Extract<ResearchResult, { status: "ok" }>; m?: MarketResult | CompanyResult; a?: AdviceResult } = {};
-  const ctx: any = { userId: o.userId, threadId: o.threadId, now: o.now, state: o.stores };
+  const ctx: any = { userId: o.userId, threadId: o.threadId, now: o.now, state: o.stores, restoreAsk: o.restoreAsk ?? null };
   const tools = [...withheld([...(o.toolPolicy?.withhold ?? []), ...hypoWithheld], [...careerTools({ postings: o.postings ?? (async () => []), alerts: o.alerts ?? null, memory: o.memory ?? null, events: o.events ?? null, confirmations: o.confirmations ?? null, tz: o.tz, mail: o.mail ?? null, interviews: o.interviews ?? null, digest: o.digest ?? null, outreach: o.outreach ?? null, verifier: o.verifier ?? null, tailor: o.tailor ?? null, hired: o.hired ?? null, wants: o.wants ?? null, limits: o.limits, posting: o.posting ?? null, situation: o.known?.situation ?? null, linkCheck: o.linkCheck ?? null, conversations: o.conversations ?? null, market: o.market ? { ...o.market, onResult: (r) => { if (r.status === "ok" || trace.m?.status !== "ok") trace.m = r; } } : null, postingRecheck: o.postingRecheck ?? null, applyFlow: o.applyFlow ?? null, research: o.knowledge && o.research ? { ...o.research, onResult: (r, m) => { if (r.status === "ok") trace.r = r; o.research?.onResult?.(r, m); }, onAdvice: (r) => { if (r.source || !trace.a?.source) trace.a = r; } } : null }), ...(o.capabilities ?? []), ...(o.paths ? [pathComparisonTool(o.paths)] : [])]), ...(o.shape && attachAsked(o.message) ? [attachTool()] : []), ...(o.files ? [createFileTool(o.files)] : []), ...(o.familyFiles ? [familyFileTool(o.familyFiles, o.files?.ttlHours() ?? 168)] : [])];
   const offered = new Set(tools.map((t) => t.name));
   let result = await runAgentTurn({
@@ -349,14 +351,31 @@ export async function agentTurn(o: {
       result = { ...result, reply: setAsideSaid(result.reply, set.map((x) => x.text)), set_aside: set } as typeof result;
     }
   }
+  // Review of #790 (round 2): the marker a later yes needs to put a set-aside fact back. Code sets it only when the model tried to
+  // confirm that fact this turn, was refused (career_tools.ts confirmationRefusal), and the reply asks a question naming the fact.
+  const askedBack = (ctx.turn as any)?.restoreAsked, backFact = ((o.stores as any)?.profile?.facts ?? []).find((f: any) => f?.id === askedBack && f.withdrawn_by_owner);
+  if (backFact && result.stopped === "final" && !result.show && String(result.reply).split(/(?<=[.!?])\s+|\n+/).some((x) => x.trim().endsWith("?") && namesFact(x, String(backFact.text || backFact.title))))
+    result = { ...result, restore_ask: { fact_id: String(backFact.id) } } as typeof result;
   return know ? { ...result, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : result;
 }
 
-// Review of #790: the reply names each fact set aside this turn (its figures, as the fact holds them); one it does not name gets
-// one line after the reply, the fact in its own words.
+// Review of #790 (round 2): the reply says a fact was set aside only when ONE sentence holds the fact's label, its value as a
+// number of its own ("3.9", not "3.9k" or "$3.9") and a set-aside word. Otherwise code says it, in the fact's own words: after the
+// model's reply, or FIRST when the turn did not finish, and then the line that follows says what was saved (the set-aside was).
+const UNFINISHED: Record<string, string> = { [INCOMPLETE_REPLY]: INCOMPLETE_AFTER_SAVE_REPLY, [EMPTY_REPLY]: EMPTY_AFTER_SAVE_REPLY, [MODEL_ERROR_REPLY]: MODEL_ERROR_AFTER_SAVE_REPLY, [MAX_STEPS_REPLY]: MAX_STEPS_AFTER_SAVE_REPLY };
+const SET_ASIDE_WORD = /\bset aside\b|\boff your (?:record|profile|resume)\b|\bno longer (?:be )?(?:used|use|using)\b|\b(?:won't|will not|not) (?:be used|use it|use that)\b|\bremoved\b|\btaken off\b/i;
+function namesFact(sentence: string, fact: string): boolean {
+  const m = /^([^:]{1,40}):\s*(.+)$/.exec(fact), label = (m ? m[1] : "").trim(), value = (m ? m[2] : fact).trim();
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return (!label || new RegExp(`(?<![A-Za-z])${esc(label)}(?![A-Za-z])`, "i").test(sentence)) && new RegExp(`(?<![\\w$.])${esc(value)}(?![\\w%]|\\.\\d)`, "i").test(sentence);
+}
 export function setAsideSaid(reply: string, facts: string[]): string {
-  const missing = facts.filter((t) => { const figs = t.match(/\d[\d.,/-]*\d|\d/g) ?? []; return !(figs.length ? figs.every((x) => reply.includes(x)) : reply.toLowerCase().includes(t.toLowerCase())); });
-  return missing.length ? `${reply}\n\nSet aside, not deleted (no longer used until you say it's right again): ${missing.join("; ")}`.trim() : reply;
+  const sentences = String(reply).split(/(?<=[.!?])\s+|\n+/);
+  const missing = facts.filter((t) => !sentences.some((x) => SET_ASIDE_WORD.test(x) && namesFact(x, t)));
+  if (!missing.length) return reply;
+  const line = `Set aside, not deleted (no longer used until you say it's right again): ${missing.join("; ")}`;
+  const unfinished = UNFINISHED[reply] ?? (Object.values(UNFINISHED).includes(reply) ? reply : null);
+  return unfinished ? `${line}\n\n${unfinished}` : `${reply}\n\n${line}`.trim();
 }
 // D-071: "N applications" said with another number than the record's is the record's number; a sentence about having miscounted
 // goes (the count was code's). Other numbers ("1 researched role") are not touched.

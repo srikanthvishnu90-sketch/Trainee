@@ -259,7 +259,7 @@ function spelledYears(s: string): { value: number; at: number; len: number }[] {
 const withoutSpelledYears = (s: string) => s.replace(SPELLED_YEAR, " ");
 // Employers and schools a person may type in lower case ("at google", "studied at stanford"). A capitalized name is the
 // name check's (factLock, 123, the guard); these are the ones that slip past it in lower case.
-const ORGS = ["google", "alphabet", "microsoft", "amazon", "apple", "meta", "facebook", "netflix", "nvidia", "openai", "anthropic", "tesla", "spacex",
+export const ORGS = ["google", "alphabet", "microsoft", "amazon", "apple", "meta", "facebook", "netflix", "nvidia", "openai", "anthropic", "tesla", "spacex",
   "uber", "lyft", "airbnb", "stripe", "palantir", "databricks", "snowflake", "salesforce", "oracle", "ibm", "intel", "adobe", "linkedin",
   "twitter", "mckinsey", "bain", "bcg", "deloitte", "accenture", "pwc", "kpmg", "ey", "goldman", "goldman sachs", "morgan stanley", "jpmorgan",
   "jp morgan", "citadel", "blackrock", "jane street", "two sigma", "harvard", "stanford", "mit", "yale", "princeton", "columbia", "berkeley",

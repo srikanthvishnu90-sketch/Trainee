@@ -595,7 +595,7 @@ function positionOf(sec: any, before: any, id: string): number {
 export type TailorOut = {
   ok: true; text: string; link: string; expires_at: string; changelog: string; changes: ChangeItem[]; sha256: string; filename: string;
   // D-063: what prints as a placeholder (a review draft for the chat, never stored for an application), and the edits made.
-  placeholders?: string[]; edits?: EditDone[]; shortened?: string[];
+  placeholders?: string[]; edits?: EditDone[]; shortened?: string[]; held_back?: string[];
   persona: string | null; job_id: string | null; company: string | null; ats: { status: string; warnings: string[] };
   not_on_your_record: string[]; lead_not_picked: string[]; rendered_in: string; ms: number; detail: { doc: any; base: any; diff: any; docx: Uint8Array | null; pdf: Uint8Array };
   // RELEASE 9: the posting against the resume (missing, weak, emphasise) and the top of the file as it prints, both for the
@@ -718,10 +718,15 @@ export async function tailorForPosting(o: {
   const selected = new Set(doc.lines.flatMap((l: any) => l.factIds));
   // What the person reads, the same on every channel: plain words, and the link alone on its own line so any texting app
   // makes it tappable.
+  // Review of #790 (round 2): a fact that was confirmed and is now waiting for their yes (corrected with correct_profile_fact, or set
+  // aside) prints nowhere on this version. The changelog names each one, so a line never leaves a resume unmentioned.
+  const held = (o.profile?.facts || []).filter((f: any) => f && (f.corrected_from || f.withdrawn_by_owner) && f.status !== "rejected" && !(f.status === "confirmed" && f.needs_confirmation === false))
+    .map((f: any) => clip(String(f.text || f.title), 70).replace(/[.]+$/, ""));
+  if (held.length) log.line = `${log.line} Left off until you confirm ${held.length === 1 ? "it" : "them"}: ${held.slice(0, 3).join("; ")}${held.length > 3 ? ` and ${held.length - 3} more` : ""}.`;
   const text = [`Your resume for ${o.posting.company || "this posting"} is ready. ${log.line}`, ...(link ? [link, "The link works for 7 days."] : [])].join("\n");
   return {
     ok: true, text, link, expires_at: link ? new Date(o.now + LINK_TTL_SECONDS * 1000).toISOString() : "", changelog: log.line, changes: log.items,
-    ...(placeholder ? { placeholders: ["email"] } : {}), ...(edits ? { edits } : {}), ...(shortened.length ? { shortened } : {}),
+    ...(placeholder ? { placeholders: ["email"] } : {}), ...(edits ? { edits } : {}), ...(shortened.length ? { shortened } : {}), ...(held.length ? { held_back: held } : {}),
     sha256: r.sha256, filename: r.filename, persona: persona?.name ?? null, job_id: o.posting.job_id ?? null, company: o.posting.company ?? null,
     ats: { status: r.ats.status, warnings: r.ats.warnings }, not_on_your_record: (t.requiredGaps || []).map((g: any) => g.requirement),
     lead_not_picked: lead.filter((id) => !selected.has(id)), rendered_in: r.where, ms: ms(), detail: { doc, base, diff, docx: r.docx ?? null, pdf: r.pdf },

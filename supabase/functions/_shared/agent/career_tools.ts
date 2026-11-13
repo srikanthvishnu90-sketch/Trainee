@@ -5,7 +5,7 @@ import { isAutomatedInbox } from "../automated_inbox.ts";
 import { conversationFor, type RepliesStore } from "../career_outreach_replies.ts";
 import { CareerProfile, CareerTrack, CareerPrep, CareerPaths } from "../router_core.career.js";
 import { AskPerson, type ToolSpec, type ToolCtx } from "./loop.ts";
-import { type FitCache, newFitCache, orAlternatives, placeAlternatives, searchAlternatives, searchPostings } from "../career_search.ts";
+import { type FitCache, newFitCache, orSearch, placeAlternatives, searchAlternatives, searchPostings } from "../career_search.ts";
 import { searchWords, wordStem } from "../career_ingest.ts";
 import { liveOnly, type LinkCheck } from "../link_check.ts";
 import { startWatching, validPrefs, validZone, type AlertStore } from "../career_alert_store.ts";
@@ -101,6 +101,14 @@ async function sha256Hex(text: string): Promise<string> {
 function confirmationRefusal(c: ToolCtx, id: string): string | null {
   const t = c.turn;
   if (!t) return "no confirmation from the person in this turn";
+  // Review of #790 (round 2): a fact the person set aside (withdrawn_by_owner) comes back only on their plain yes to the turn CODE
+  // marked as having asked about this fact (restoreAsk: the marker the turn before returned, kept in that message's meta, naming the
+  // fact id). The fact's words in the question before prove nothing ("Should I leave GPA 3.9 off the Stripe application?" + "yes").
+  if ((profileOf(c).facts || []).some((f: any) => f.id === id && f.withdrawn_by_owner)) {
+    if ((c as any).restoreAsk?.fact_id === id && AFFIRM.test(t.message) && !DENY.test(t.message) && CareerProfile.confirmationReply(t.message).kind === "yes") return null;
+    (t as any).restoreAsked = id;
+    return "they set this fact aside; ask them in one short question whether it is right again, showing the fact as written, and confirm only on their yes to that question";
+  }
   if (t.added.includes(id)) return `fact ${id} was added in this turn; show it to the person and wait for their reply before confirming`;
   // ONBOARDING SCENARIOS (2026-10-29): a yes word anywhere was taken ("is that right?", "yeah maybe", "yes I think so?"):
   // only a plain yes confirms (122's confirmationReply, the router's own reader).
@@ -113,11 +121,6 @@ function confirmationRefusal(c: ToolCtx, id: string): string | null {
     const fact = (profileOf(c).facts || []).find((f: any) => f.id === id);
     if (fact && !factShown(t.before, String(fact.text ?? ""), id)) return "the reply before this turn did not show this fact; show it to them as written and ask them to confirm it";
   }
-  // Review of #790: a fact the person set aside (withdrawn_by_owner) comes back only on their yes to a QUESTION that showed it. The
-  // reply that said it was set aside also shows it, and a yes after that reply answers something else.
-  const set = (profileOf(c).facts || []).find((f: any) => f.id === id && f.withdrawn_by_owner);
-  if (set && !String(t.before ?? "").split(/(?<=[.!?])\s+|\n+/).some((s) => s.trim().endsWith("?") && factShown(s, String(set.text ?? ""), id)))
-    return "they set this fact aside; ask them, in a question that shows the fact as written, whether to put it back, and confirm only on their yes to that";
   return null;
 }
 // Whether a reply showed a fact: its id, or most of the fact's own words (3+ letters, not filler), at least two of them.
@@ -721,7 +724,8 @@ export function careerTools(deps: {
         // D-073: the places the person joined with "or" stay alternatives, whatever the model's query did with them (placeAlternatives).
         const asked = placeAlternatives(String(i.query ?? ""), c.turn?.message ?? "", c.state?.profile ?? null);
         // D-070: "chicago or remote" is two searches, merged (career_search.ts orAlternatives); each alternative is relaxed alone.
-        const alts0 = orAlternatives(asked);
+        // Review of #790: at most four alternatives are searched; the ones left out are returned, so the reply can say so.
+        const ors = orSearch(asked), alts0 = ors.queries;
         if (alts0.length > 1) {
           // D-071 (live-8 C1/setup-2: "chicago or remote" still returned no remote posting): the database matches whole words, so
           // "software engineer intern remote" found nothing (NVIDIA's remote role is not an internship; only the in-memory test pool
@@ -753,7 +757,7 @@ export function careerTools(deps: {
             await record(c, "search", asked, { results: found.length, companies: [...new Set(found.map((p) => String(p.company ?? "")).filter(Boolean))].slice(0, 5),
               shown: found.slice(0, 10).map((p) => ({ job_id: String(p.job_id ?? ""), company: String(p.company ?? "").slice(0, 80), title: String(p.title ?? "").slice(0, 100) })) });
             const relaxed_each = alts0.map((a, k) => a === alts[k] ? null : { asked: a, searched: alts[k] }).filter(Boolean);
-            return { ...r, postings: found, filtered, source: "live", searched_each: alts, ...(relaxed_each.length ? { relaxed_each, note_relaxed: "an alternative that matched nothing was searched with fewer words (relaxed_each): a posting it found may not be the exact role asked for; say so" } : {}), note_or: `searched each of: ${alts.join(" | ")}; a posting whose role_match is false is a related role, not the role asked for: say so`,
+            return { ...r, postings: found, filtered, source: "live", searched_each: alts, ...(ors.not_searched.length ? { not_searched: ors.not_searched, note_not_searched: "only the first four alternatives were searched; say which were not (not_searched) and offer to search them" } : {}), ...(relaxed_each.length ? { relaxed_each, note_relaxed: "an alternative that matched nothing was searched with fewer words (relaxed_each): a posting it found may not be the exact role asked for; say so" } : {}), note_or: `searched each of: ${alts.join(" | ")}; a posting whose role_match is false is a related role, not the role asked for: say so`,
               links: { checked: checked.checked, dead_dropped: checked.dead, no_link_dropped: r.postings.length - withLink.length,
                 note: deps.linkCheck ? "each link was checked just now; a posting marked link 'unknown' could not be checked: say so beside it" : "links were not checked here" } };
           }

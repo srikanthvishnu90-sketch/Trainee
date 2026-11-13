@@ -8,6 +8,7 @@ import { placedPay } from "./posting_pay.ts";
 import { postingPlaces } from "./posting_place.ts";
 import { formUrlFor } from "./posting_key.ts";
 import { personalSourceGuard } from "./personal_fact_source.ts";
+import { ORGS } from "./person_claims.ts";
 
 export interface Fit { score: number | null; bucket: string | null; excluded: boolean; reasons: string[]; gaps: string[] }
 export interface SearchHit { job_id: string; company: string; title: string; location: string; url: string; first_seen_at: string | null; fit: Fit | null; pay: string | null; role_match: boolean }
@@ -123,53 +124,105 @@ export function searchPostings(pool: any[], query: unknown, profile: any, limit 
 // match, so "chicago or remote" asked for postings in Chicago AND remote, found none, and the relaxed search dropped "remote".
 // Words joined by "or" are alternatives: the search runs once per alternative ("... chicago", "... remote") and the results
 // are merged, each posting once, taking from each alternative in turn so one place never crowds out the other.
-// Review of #790 (MAJOR: "frontend engineer san francisco or new york" searched "... san francisco york" and "... san new york";
-// "morgan stanley or goldman sachs" broke the same way): the two sides were read one word each. Each side is now read whole:
-//   a place the code knows (isPlace: "new york", "salt lake city", "remote"), the longest one touching the "or";
-//   else a side that is one word, or the words a role's head word shares ("data or product ANALYST", "... INTERN python or java");
-//   else the full side ("morgan stanley", "goldman sachs"): never one side's words mixed into the other.
-// What both sides share goes to each: the words before the left alternative, a role head or a place after the right one. Each
-// "or" is read alone, last first, so "frontend or backend engineer san francisco or new york" is four searches.
-const ROLE_HEAD = /^(?:analysts?|engineers?|developers?|scientists?|designers?|managers?|interns?|internships?|associates?|consultants?|researchers?|recruiters?|architects?|specialists?|coordinators?|administrators?|programmers?|accountants?|bankers?|traders?|roles?|jobs?|positions?|openings?)$/i;
-function orOnce(q: string): string[] | null {
-  const at = q.toLowerCase().lastIndexOf(" or ");
-  if (at < 0) return null;
-  const before = q.slice(0, at).trim(), right = q.slice(at + 4).trim().split(" ").filter(Boolean);
-  const prev = before.toLowerCase().lastIndexOf(" or "), kept = prev < 0 ? "" : before.slice(0, prev + 4);
-  const left = before.slice(kept.length).trim().split(" ").filter(Boolean);
-  if (!left.length || !right.length) return null;
-  // A place touching the "or": the longest US place ("new york city", not "york city"), else the shortest other one ("remote",
-  // "london": the place reader finds those inside any phrase, so a longer phrase proves nothing).
-  const usPlace = (ph: string) => postingPlaces(ph.toLowerCase()).some((x) => x.country === "us" || !!x.state);
-  const placeAt = (ws: string[], end: boolean) => { const ph = (n: number) => (end ? ws.slice(-n) : ws.slice(0, n)).join(" "); const ns = [3, 2, 1].filter((n) => n <= ws.length); return ns.find((n) => usPlace(ph(n))) ?? [...ns].reverse().find((n) => isPlace(ph(n))) ?? 0; };
-  const lp = placeAt(left, true), rp = placeAt(right, false);
-  const lHead = left.findLastIndex((w) => ROLE_HEAD.test(w)), rHead = right.findIndex((w) => ROLE_HEAD.test(w));
-  // How many words each alternative takes (from the "or" outward); the rest of each side is shared.
-  const afterHead = lHead >= 0 && lHead < left.length - 1 ? left.length - 1 - lHead : left.length, beforeHead = rHead > 0 ? rHead : right.length;
-  let l = left.length, r = right.length;
-  if (lp || rp) {
-    // A place on one side: the other side's alternative is what stands in the place's spot (after its role, before the next one).
-    l = lp || afterHead; r = rp || beforeHead;
-  } else {
-    if (lHead < 0) r = beforeHead;
-    if (rHead < 0) l = afterHead;
-    // Two whole roles and a place after the second ("data analyst or product manager chicago"): the place is for both.
-    if (l === left.length && r === right.length) { const tail = [3, 2, 1].find((n) => n < right.length && isPlace(right.slice(-n).join(" "))); if (tail && !left.some((w) => isPlace(w))) r = right.length - tail; }
-  }
-  const pre = [kept.trim(), ...left.slice(0, left.length - l)].filter(Boolean).join(" "), post = right.slice(r).join(" ");
-  const alt = (words: string[]) => [pre, words.join(" "), post].filter(Boolean).join(" ");
-  return [alt(left.slice(left.length - l)), alt(right.slice(0, r))];
+// Review of #790 (MAJOR), round 2. "frontend engineer san francisco or new york" searched "... san francisco york" and "... san new
+// york": the two sides of an "or" were read one word each. The first fix read whole sides and broke what the one-word reading had
+// right ("oracle or salesforce account executive"). The rule now: an alternative is the MINIMAL unit beside the "or":
+//   a place the code knows ("new york", "st louis", "boston, ma", "remote"), an employer it knows (person_claims ORGS: "goldman
+//   sachs"), a fixed compound ("part time", "new grad", "private equity", "summer 2027");
+//   a whole role when both sides end in a role's head word ("data scientist or ml engineer");
+//   beside a known unit, the unknown side up to the next head word, preposition, known unit or end ("san jose or remote", "jp morgan
+//   or bank of america analyst");
+//   else the one word (or hyphenated term) on each side, as before.
+// Parentheses scope the alternatives to what is inside them. A preposition said again ("at X or at Y") is said once. Everything
+// outside the alternatives is shared by every search. Each "or" group is crossed with the others; at most four searches run, chosen
+// so every alternative is searched when four can cover them, and the combinations left out are returned (not_searched), never dropped.
+const ROLE_HEAD = /^(?:analysts?|engineers?|developers?|scientists?|designers?|managers?|interns?|internships?|associates?|consultants?|researchers?|recruiters?|architects?|specialists?|coordinators?|administrators?|programmers?|accountants?|bankers?|traders?|doctors?|nurses?|practitioners?|physicians?|lawyers?|attorneys?|teachers?|executives?|assistants?|editors?|writers?|reporters?|directors?|technicians?|swe|sde|roles?|jobs?|positions?|openings?)$/;
+const OR_PREP = new Set(["in", "at", "for", "near", "with"]);
+const COMPOUND = new Set(["part time", "full time", "new grad", "entry level", "mid level", "senior level", "investment banking", "private equity", "venture capital", "machine learning", "bay area"]);
+const bare = (w: string) => w.toLowerCase().replace(/,$/, "");
+const usPlace = (ph: string) => postingPlaces(ph.toLowerCase()).some((x) => x.country === "us" || !!x.state);
+// The known unit at the end (or start) of a run of words: how many words it takes, 0 when the word beside the "or" is not known.
+function knownUnit(ws: string[], end: boolean): number {
+  const ph = (n: number) => (end ? ws.slice(-n) : ws.slice(0, n)).join(" "), low = (n: number) => ph(n).toLowerCase().replace(/,$/, "");
+  for (const n of [3, 2].filter((k) => k <= ws.length)) if (usPlace(low(n)) || ORGS.includes(low(n)) || COMPOUND.has(low(n)) || (n === 2 && /^(?:spring|summer|fall|autumn|winter) 20\d\d$/.test(low(n)))) return n;
+  return ws.length && (isPlace(low(1)) || ORGS.includes(low(1))) ? 1 : 0;
 }
-export function orAlternatives(query: unknown): string[] {
+const stops = (w: string) => ROLE_HEAD.test(bare(w)) || OR_PREP.has(bare(w)) || isPlace(bare(w)) || ORGS.includes(bare(w));
+// The two alternatives of one "or": how many words to its left and to its right, and whether a repeated preposition is dropped.
+function unitsOf(A: string[], B0: string[]): { l: number; r: number; skip: number } {
+  const prep = B0.length > 1 && OR_PREP.has(bare(B0[0])), B = prep ? B0.slice(1) : B0;
+  let l = knownUnit(A, true), r = knownUnit(B, false);
+  const grow = (ws: string[], end: boolean) => { let n = 1; while (n < ws.length && !stops(end ? ws[ws.length - 1 - n] : ws[n])) n++; return n; };
+  if (l && !r) r = grow(B, false);
+  else if (r && !l) l = grow(A, true);
+  else if (!l && !r) {
+    const head = B.slice(0, 3).findIndex((w) => ROLE_HEAD.test(bare(w)));
+    if (ROLE_HEAD.test(bare(A[A.length - 1])) && head >= 0) {
+      // Two whole roles: the left one back to a place, an employer or a preposition; the right one through its head word(s).
+      r = head + 1; while (r < B.length && ROLE_HEAD.test(bare(B[r]))) r++;
+      l = 1; while (l < A.length && !(OR_PREP.has(bare(A[A.length - 1 - l])) || isPlace(bare(A[A.length - 1 - l])) || ORGS.includes(bare(A[A.length - 1 - l])))) l++;
+    } else { l = 1; r = 1; }
+  }
+  // A left alternative of several words that ends in a role's head word is a whole role, so the right one runs through its own head word too.
+  if (l > 1 && ROLE_HEAD.test(bare(A[A.length - 1])) && !B.slice(0, r).some((w) => ROLE_HEAD.test(bare(w)))) { const h = B.slice(r, r + 2).findIndex((w) => ROLE_HEAD.test(bare(w))); if (h >= 0) r += h + 1; }
+  // "at X or at Y": the second "at" is the first one said again; "remote or in denver": the "in" belongs to denver.
+  const again = prep && A.length > l && bare(A[A.length - 1 - l]) === bare(B0[0]);
+  return { l, r: prep && !again ? r + 1 : r, skip: again ? 1 : 0 };
+}
+export interface OrSearch { queries: string[]; groups: string[][]; not_searched: string[] }
+export function orSearch(query: unknown): OrSearch {
   const q = String(query ?? "").replace(/\s+/g, " ").trim();
-  let alts = [q];
-  for (let k = 0; k < 4; k++) {
-    const next = alts.flatMap((a) => orOnce(a) ?? [a]);
-    if (next.length === alts.length) break;
-    alts = next;
+  const none: OrSearch = { queries: [q], groups: [], not_searched: [] };
+  // Parts: shared text and groups of alternatives, in the order said.
+  const parts: (string | string[])[] = [];
+  const read = (text: string) => {
+    const ws = text.replace(/\band\/or\b/gi, "or").split(" ").filter((w) => w && !/^either$/i.test(w)).filter((w, k, all) => !(/^or$/i.test(w) && k > 0 && /^or$/i.test(all[k - 1])));
+    const ors = ws.map((w, k) => /^or$/i.test(w) && k > 0 && k < ws.length - 1 ? k : -1).filter((k) => k >= 0);
+    let from = 0;
+    for (let n = 0; n < ors.length; n++) {
+      // One chain ("a or b or c"): each middle alternative is the whole run between its two "or"s.
+      const group: string[] = [];
+      let k = n, u = unitsOf(ws.slice(from, ors[k]), ws.slice(ors[k] + 1, ors[k + 1] ?? ws.length));
+      parts.push(ws.slice(from, ors[k] - u.l).join(" "));
+      group.push(ws.slice(ors[k] - u.l, ors[k]).join(" "));
+      for (;;) {
+        const next = ors[k + 1], mid = next === undefined ? [] : ws.slice(ors[k] + 1 + u.skip, next);
+        const u2 = next === undefined ? null : unitsOf(mid, ws.slice(next + 1, ors[k + 2] ?? ws.length));
+        if (u2 && mid.length <= 3 && (u.r >= mid.length || u2.l >= mid.length)) { group.push(mid.join(" ")); k++; u = u2; continue; }
+        group.push(ws.slice(ors[k] + 1 + u.skip, ors[k] + 1 + u.skip + u.r).join(" "));
+        from = ors[k] + 1 + u.skip + u.r;
+        break;
+      }
+      parts.push(group);
+      n = k;
+    }
+    parts.push(ws.slice(from).join(" "));
+  };
+  let rest = q;
+  for (let m = /\(([^()]*\sor\s[^()]*)\)/i.exec(rest); m; m = /\(([^()]*\sor\s[^()]*)\)/i.exec(rest)) {
+    read(rest.slice(0, m.index).trim());
+    parts.push(m[1].split(/\s+or\s+/i).map((x) => x.trim()).filter(Boolean));
+    rest = rest.slice(m.index + m[0].length).trim();
   }
-  return [...new Set(alts)].slice(0, 4);
+  read(rest);
+  const groups = parts.filter((p): p is string[] => Array.isArray(p)).map((g) => [...new Set(g)]);
+  if (!groups.length || groups.some((g) => g.length < 2 || g.some((a) => !a))) return none;
+  // Every combination, in the order said; four at most are searched, the ones that cover the most alternatives first.
+  let combos: number[][] = [[]];
+  for (const g of groups) combos = combos.flatMap((c) => g.map((_, k) => [...c, k]));
+  const text = (c: number[]) => { let k = 0; return parts.map((p) => Array.isArray(p) ? groups[k][c[k++]] : p).filter(Boolean).join(" ").replace(/\s+/g, " ").trim(); };
+  let picked = combos;
+  if (combos.length > 4) {
+    picked = [];
+    const seen = new Set<string>(), gain = (c: number[]) => c.filter((a, g) => !seen.has(`${g}:${a}`)).length;
+    while (picked.length < 4) {
+      const best = combos.filter((c) => !picked.includes(c)).reduce((b, c) => gain(c) > gain(b) ? c : b);
+      picked.push(best); best.forEach((a, g) => seen.add(`${g}:${a}`));
+    }
+  }
+  return { queries: [...new Set(picked.map(text))], groups, not_searched: combos.filter((c) => !picked.includes(c)).map(text) };
 }
+export function orAlternatives(query: unknown): string[] { return orSearch(query).queries; }
 // D-073 (live-9 C1, C3: the person's goal is "Chicago or remote", the brain searched "software engineer intern summer 2027 Chicago
 // remote", one query with no "or", so D-071's per-place search never ran and NVIDIA's remote posting was not returned): the places
 // the person joined with "or" (in this message, or in their goal on record) stay alternatives whatever the model's query did with

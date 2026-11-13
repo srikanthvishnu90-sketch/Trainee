@@ -17,11 +17,11 @@
 //     with a per-person career_account facts_changed_at stamp).
 //   CI=true deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/pending/hosted-apply-stale-fact-20261113.test.ts
 import assertNode from "node:assert/strict";
-import { pgBinDir, type Pg, startPg } from "../../flow/pg.ts";
-import { careerHandler, supabaseParity } from "../../flow/handler.ts";
-import { anthropicWire } from "../helpers/anthropic_wire.ts";
+import { pgBinDir, type Pg, startPg } from "../flow/pg.ts";
+import { careerHandler, supabaseParity } from "../flow/handler.ts";
+import { anthropicWire } from "./helpers/anthropic_wire.ts";
 
-const PERSONA = JSON.parse(Deno.readTextFileSync(new URL("../../../evals/mirror/instinct-wa-batch1/persona.json", import.meta.url)));
+const PERSONA = JSON.parse(Deno.readTextFileSync(new URL("../../evals/mirror/instinct-wa-batch1/persona.json", import.meta.url)));
 const WHO = "7b0f8f8e-6a43-4a49-9d2c-00000b0d0c01";
 const fakeModel = async (input: Request | URL | string, init?: RequestInit): Promise<Response> => {
   const req = input instanceof Request && !init ? input : new Request(input as any, init);

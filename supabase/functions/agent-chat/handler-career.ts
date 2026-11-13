@@ -163,6 +163,7 @@ import { careerGrant, followupTurn, gmailReadGrant, gmailReadNow, mailNow, supab
 import { gmailSender } from "../_shared/career_outreach_gmail.ts";
 import { fileUploadFor, isUploadedResumeText } from "../_shared/channel_resume_upload.ts"; // FEATURE 16
 import { replacedResumeLines, replacedResumeStops } from "../_shared/career_resume_replace.ts"; // ONBOARDING ROUND 4
+import { staleFactLines, staleFactValues, stopStaleFacts } from "../_shared/career_apply_stale_facts.ts"; // D-075
 import { outlookAsk, outlookChatTurn } from "../_shared/outlook_connector.ts"; // M4: Outlook
 import { shapeForTurn } from "../_shared/channel_shape.ts"; // REPLY SHAPE
 import { applyHereTurn } from "../_shared/apply_here.ts"; // APPLY HERE: a pasted link or "apply to this" -> one line + one Apply button
@@ -1612,6 +1613,17 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           agentMeta = { brain: staged.chosen ? "staged" : "agent", ...(staged.chosen ? { router_intent: staged.decision?.intent ?? null } : {}), tool_calls: turn.tool_calls, stopped: turn.stopped, ...((turn as any).shorten ? { shorten: (turn as any).shorten } : {}), ...((turn as any).set_aside ? { set_aside: (turn as any).set_aside } : {}), ...((turn as any).research ? { research: (turn as any).research } : {}), pending_approvals: turn.pending_approvals.length, ...(turn.knowledge ? { knowledge: turn.knowledge } : {}),
             // flag-only reply checks (loop.ts): saved with the turn so remaining reply problems can be counted (Greptile on #566)
             ...replyFlagsMeta(turn as { flags?: unknown }), ...(turn.show?.meta ?? {}) };
+        }
+        // D-075: a fact set aside by code or corrected through correct_profile_fact this turn stops the hosted applications that
+        // state its old value (approved and not started: closed unsent; prepared: discarded), whatever reply the turn ended with;
+        // the reply says which, or that they could not be checked (career_apply_stale_facts.ts; 20261113140000).
+        const factChange = { set_aside: (turn as any).set_aside ?? null, corrected: (turn as any).corrected ?? null };
+        const staleValues = staleFactValues(factChange);
+        if (staleValues.length) {
+          const stops = await stopStaleFacts(admin, user.id, staleValues, factChange.set_aside?.length ? "set_aside" : "corrected");
+          const lines = staleFactLines(stops);
+          if (lines.length) out = { ...out, reply: [out.reply, ...lines].join("\n"), ...(out.parts ? { parts: [...out.parts, ...lines] } : {}) };
+          agentMeta = { ...(agentMeta || {}), stale_fact_stops: stops === "failed" ? "failed" : { cancelled: stops.cancelled.length, discarded: stops.discarded.length, started: stops.started.length, being_sent: stops.being_sent.length } };
         }
       } else {
         // FEATURE 5: job search ranked by fit and judged (_shared/career_search_judge.ts). "judge prompt: ..." keeps the

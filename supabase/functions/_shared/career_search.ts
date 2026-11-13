@@ -136,15 +136,24 @@ export function searchPostings(pool: any[], query: unknown, profile: any, limit 
 // Parentheses scope the alternatives to what is inside them. A preposition said again ("at X or at Y") is said once. Everything
 // outside the alternatives is shared by every search. Each "or" group is crossed with the others; at most four searches run, chosen
 // so every alternative is searched when four can cover them, and the combinations left out are returned (not_searched), never dropped.
-const ROLE_HEAD = /^(?:analysts?|engineers?|developers?|scientists?|designers?|managers?|interns?|internships?|associates?|consultants?|researchers?|recruiters?|architects?|specialists?|coordinators?|administrators?|programmers?|accountants?|bankers?|traders?|doctors?|nurses?|practitioners?|physicians?|lawyers?|attorneys?|teachers?|executives?|assistants?|editors?|writers?|reporters?|directors?|technicians?|swe|sde|roles?|jobs?|positions?|openings?)$/;
+// A job title's head word ("data SCIENTIST", "legal ASSISTANT"), and the generic or level words a title can be followed by.
+const TITLE_HEAD = /^(?:analysts?|engineers?|developers?|scientists?|designers?|managers?|associates?|consultants?|researchers?|recruiters?|architects?|specialists?|coordinators?|administrators?|programmers?|accountants?|bankers?|traders?|doctors?|nurses?|practitioners?|physicians?|lawyers?|attorneys?|teachers?|executives?|assistants?|editors?|writers?|reporters?|directors?|technicians?|tellers?|officers?|generalists?|hygienists?|strategists?|copywriters?|paralegals?|pharmacists?|swe|sde)$/;
+const ROLE_HEAD = { test: (w: string) => TITLE_HEAD.test(w) || /^(?:interns?|internships?|roles?|jobs?|positions?|openings?)$/.test(w) };
+// The first word of a two-word city the place reader may not know ("san jose", "el paso", "new haven").
+const CITY_FIRST = new Set(["san", "los", "las", "fort", "ft", "st", "saint", "el", "santa", "baton", "des", "palo", "ann", "new"]);
 const OR_PREP = new Set(["in", "at", "for", "near", "with"]);
-const COMPOUND = new Set(["part time", "full time", "new grad", "entry level", "mid level", "senior level", "investment banking", "private equity", "venture capital", "machine learning", "bay area"]);
+const COMPOUND = new Set(["part time", "full time", "new grad", "entry level", "mid level", "senior level", "investment banking", "private equity", "venture capital", "machine learning", "bay area", "site reliability", "middle school", "high school", "front end", "back end", "full stack"]);
 const bare = (w: string) => w.toLowerCase().replace(/,$/, "");
 const usPlace = (ph: string) => postingPlaces(ph.toLowerCase()).some((x) => x.country === "us" || !!x.state);
 // The known unit at the end (or start) of a run of words: how many words it takes, 0 when the word beside the "or" is not known.
 function knownUnit(ws: string[], end: boolean): number {
   const ph = (n: number) => (end ? ws.slice(-n) : ws.slice(0, n)).join(" "), low = (n: number) => ph(n).toLowerCase().replace(/,$/, "");
-  for (const n of [3, 2].filter((k) => k <= ws.length)) if (usPlace(low(n)) || ORGS.includes(low(n)) || COMPOUND.has(low(n)) || (n === 2 && /^(?:spring|summer|fall|autumn|winter) 20\d\d$/.test(low(n)))) return n;
+  for (const n of [3, 2].filter((k) => k <= ws.length)) {
+    const p = low(n), w = p.split(" ");
+    // "boston, ma" is a place; a comma anywhere else ("engineer, boston", "milwaukee, wi accountant") joins nothing.
+    if (p.includes(",") ? /^[a-z .'-]+, [a-z]{2}$/.test(p) && usPlace(p) : usPlace(p) || ORGS.includes(p) || COMPOUND.has(p) || (n === 2 && /^(?:spring|summer|fall|autumn|winter) 20\d\d$/.test(p))) return n;
+    if (n === 2 && !p.includes(",") && CITY_FIRST.has(w[0]) && /^[a-z]{3,}$/.test(w[1]) && !ROLE_HEAD.test(w[1])) return 2;
+  }
   return ws.length && (isPlace(low(1)) || ORGS.includes(low(1))) ? 1 : 0;
 }
 const stops = (w: string) => ROLE_HEAD.test(bare(w)) || OR_PREP.has(bare(w)) || isPlace(bare(w)) || ORGS.includes(bare(w));
@@ -156,15 +165,18 @@ function unitsOf(A: string[], B0: string[]): { l: number; r: number; skip: numbe
   if (l && !r) r = grow(B, false);
   else if (r && !l) l = grow(A, true);
   else if (!l && !r) {
-    const head = B.slice(0, 3).findIndex((w) => ROLE_HEAD.test(bare(w)));
-    if (ROLE_HEAD.test(bare(A[A.length - 1])) && head >= 0) {
+    const head = B.slice(0, 3).findIndex((w) => TITLE_HEAD.test(bare(w)));
+    // Said in parallel: the same word before both ("cdl a or cdl b", "dental hygienist or dental assistant") or after both
+    // ("night shift or day shift", "front end or back end") makes each side two words.
+    if (A.length > 1 && B.length > 1 && (bare(A[A.length - 2]) === bare(B[0]) || bare(A[A.length - 1]) === bare(B[1]))) { l = 2; r = 2; }
+    else if (TITLE_HEAD.test(bare(A[A.length - 1])) && head >= 0) {
       // Two whole roles: the left one back to a place, an employer or a preposition; the right one through its head word(s).
-      r = head + 1; while (r < B.length && ROLE_HEAD.test(bare(B[r]))) r++;
+      r = head + 1; while (r < B.length && TITLE_HEAD.test(bare(B[r]))) r++;
       l = 1; while (l < A.length && !(OR_PREP.has(bare(A[A.length - 1 - l])) || isPlace(bare(A[A.length - 1 - l])) || ORGS.includes(bare(A[A.length - 1 - l])))) l++;
     } else { l = 1; r = 1; }
   }
   // A left alternative of several words that ends in a role's head word is a whole role, so the right one runs through its own head word too.
-  if (l > 1 && ROLE_HEAD.test(bare(A[A.length - 1])) && !B.slice(0, r).some((w) => ROLE_HEAD.test(bare(w)))) { const h = B.slice(r, r + 2).findIndex((w) => ROLE_HEAD.test(bare(w))); if (h >= 0) r += h + 1; }
+  if (l > 1 && TITLE_HEAD.test(bare(A[A.length - 1])) && !B.slice(0, r).some((w) => TITLE_HEAD.test(bare(w)))) { const h = B.slice(r, r + 2).findIndex((w) => TITLE_HEAD.test(bare(w))); if (h >= 0) r += h + 1; }
   // "at X or at Y": the second "at" is the first one said again; "remote or in denver": the "in" belongs to denver.
   const again = prep && A.length > l && bare(A[A.length - 1 - l]) === bare(B0[0]);
   return { l, r: prep && !again ? r + 1 : r, skip: again ? 1 : 0 };

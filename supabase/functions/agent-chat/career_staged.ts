@@ -20,7 +20,7 @@ import { NO_CLOCK, type TurnClock } from "./turn_clock.ts";
 import { crisisReply } from "./crisis.ts";
 import { PAYLOAD_INTENTS } from "../_shared/career_reply_writer.ts";
 import { multiAsk, nonEnglishAsk, severalAsks } from "../_shared/ask_language.ts";
-import { boundaryOf, correctionOf, factCorrectionHints, hypotheticalOf, practiceAskOf, staleFactsOf } from "../_shared/agent/turn_notes.ts"; // D-061 G1, G8, G9; D-070
+import { boundaryOf, correctionOf, factCorrectionHints, hypotheticalOf, plainAnswer, practiceAskOf, staleFactsOf } from "../_shared/agent/turn_notes.ts"; // D-061 G1, G8, G9; D-070
 
 type Env = { get(k: string): string | undefined };
 type Host = { runTurn(text: string, ctx: any): { intent: string | null; handler: string | null; reply?: string; contained?: boolean; result?: any }; isHostControlled(text: string, ctx: any): boolean };
@@ -431,7 +431,7 @@ export function followupOffTask(message: string, intent: string, result: unknown
   return false;
 }
 const NON_ENGLISH_KEPT = /^(?:conversation_|intent_cancelled|intent_recipient_change|prep_mock|negotiation_roleplay|career_erase|career_profile_erased|career_paused|career_resumed|paused_|pause_status|career_pending_approvals|career_approval|career_batch_apply|doorstep_|queue_|captcha_|portal_|disconnect|connect_|intent_opt_out|people_matching_stop)/;
-export function stagedDecision(o: { env: Env; message: string; ctx: Record<string, unknown>; host: Host; structured: boolean; clock?: TurnClock }): StagedDecision {
+export function stagedDecision(o: { env: Env; message: string; ctx: Record<string, unknown>; host: Host; structured: boolean; clock?: TurnClock; restoreAsk?: { fact_id?: unknown } | null }): StagedDecision {
   const clock = o.clock ?? NO_CLOCK;
   const mode = brainMode(o.env);
   if (mode !== "staged") return { brain: false, mode, intent: null, reason: "not_staged" };
@@ -439,6 +439,10 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (o.host.isHostControlled(o.message, o.ctx)) return { brain: false, mode, intent: null, reason: "host_control" };
   // Crisis text is code's (crisis.ts): never the brain's, whatever the router would class it as.
   if (crisisReply(o.message) !== null) return { brain: false, mode, intent: null, reason: "crisis" };
+  // Review of #790 (round 3): the turn before asked code's own question whether a set-aside fact is right again (its marker,
+  // restore_ask, is on the thread's newest reply). A plain yes or no answers that question: the brain's, where the answer is
+  // checked against the marker. The router has nothing waiting on a yes and would ask "Yes to what?".
+  if (o.restoreAsk?.fact_id && plainAnswer(o.message) && ((o.ctx as any)?.profile?.facts ?? []).some((f: any) => f?.id === o.restoreAsk!.fact_id && f.withdrawn_by_owner)) return { brain: true, mode, intent: null, reason: "restore_answer" };
   // Spec 2.3: a correction to the last search ("remote only", "only individual-contributor roles") changes its constraints in
   // code (search_correction.ts) and the next results use them; it is not a question for the brain.
   if (correctedAsk(o.message, o.ctx.discovery) || refinedAsk(o.message, o.ctx.discovery)) return { brain: false, mode, intent: null, reason: "search_correction" };
@@ -721,7 +725,7 @@ export const STAGED_PROMPT_NOTE = "In this conversation you answer questions and
 export const STAGED_TOOL_POLICY = { withhold: STAGED_WITHHELD_TOOLS, note: STAGED_PROMPT_NOTE } as const;
 
 // Lazy and memoized: the probe runs only when the handler reaches the brain test, at most once a turn.
-export function stagedRoute(o: { env: Env; message: string; ctx: Record<string, unknown>; host: Host; structured: boolean; clock?: TurnClock }) {
+export function stagedRoute(o: { env: Env; message: string; ctx: Record<string, unknown>; host: Host; structured: boolean; clock?: TurnClock; restoreAsk?: { fact_id?: unknown } | null }) {
   let d: StagedDecision | null = null;
   return {
     toBrain(): boolean { d ??= stagedDecision(o); return d.brain; },

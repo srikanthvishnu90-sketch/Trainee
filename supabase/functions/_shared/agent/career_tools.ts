@@ -5,6 +5,7 @@ import { isAutomatedInbox } from "../automated_inbox.ts";
 import { conversationFor, type RepliesStore } from "../career_outreach_replies.ts";
 import { CareerProfile, CareerTrack, CareerPrep, CareerPaths } from "../router_core.career.js";
 import { AskPerson, type ToolSpec, type ToolCtx } from "./loop.ts";
+import { plainAnswer, RESTORE_ASK_INTENT, restoreQuestion } from "./turn_notes.ts";
 import { type FitCache, newFitCache, orSearch, placeAlternatives, searchAlternatives, searchPostings } from "../career_search.ts";
 import { searchWords, wordStem } from "../career_ingest.ts";
 import { liveOnly, type LinkCheck } from "../link_check.ts";
@@ -101,14 +102,6 @@ async function sha256Hex(text: string): Promise<string> {
 function confirmationRefusal(c: ToolCtx, id: string): string | null {
   const t = c.turn;
   if (!t) return "no confirmation from the person in this turn";
-  // Review of #790 (round 2): a fact the person set aside (withdrawn_by_owner) comes back only on their plain yes to the turn CODE
-  // marked as having asked about this fact (restoreAsk: the marker the turn before returned, kept in that message's meta, naming the
-  // fact id). The fact's words in the question before prove nothing ("Should I leave GPA 3.9 off the Stripe application?" + "yes").
-  if ((profileOf(c).facts || []).some((f: any) => f.id === id && f.withdrawn_by_owner)) {
-    if ((c as any).restoreAsk?.fact_id === id && AFFIRM.test(t.message) && !DENY.test(t.message) && CareerProfile.confirmationReply(t.message).kind === "yes") return null;
-    (t as any).restoreAsked = id;
-    return "they set this fact aside; ask them in one short question whether it is right again, showing the fact as written, and confirm only on their yes to that question";
-  }
   if (t.added.includes(id)) return `fact ${id} was added in this turn; show it to the person and wait for their reply before confirming`;
   // ONBOARDING SCENARIOS (2026-10-29): a yes word anywhere was taken ("is that right?", "yeah maybe", "yes I think so?"):
   // only a plain yes confirms (122's confirmationReply, the router's own reader).
@@ -560,7 +553,21 @@ export function careerTools(deps: {
       run: async (i, c) => {
         const id = String(i.id);
         if (!(profileOf(c).facts || []).some((f: any) => f.id === id)) throw new Error(`no fact ${id} on file`);
-        const refusal = confirmationRefusal(c, id);
+        // Review of #790 (round 3): a fact the person set aside (withdrawn_by_owner) comes back only on a plain yes to CODE's own
+        // question about that fact. This tool is the only way that question is asked: code writes it (restoreQuestion, one fixed
+        // positive form), shows it as the reply and marks the message (restore_ask, the fact's id). A question the model writes sets
+        // no marker ("Should I leave GPA: 3.9 off the Stripe application?" + "yes" restores nothing). Never beside a card: a card
+        // open now, or an approval asked for in this turn, takes the person's next yes, so the question waits.
+        const setAside = (profileOf(c).facts || []).find((f: any) => f.id === id && f.withdrawn_by_owner);
+        const answered = setAside && (c as any).restoreAsk?.fact_id === id && plainAnswer(c.turn?.message) === "yes";
+        if (setAside && !answered) {
+          if (!c.turn) throw new Error("not confirmed: no confirmation from the person in this turn");
+          if (c.turn.show || (c as any).cardPending || (c.turn as any).pendingApprovals) throw new Error("not confirmed: they set this fact aside, and an approval is waiting for their answer; ask about this fact after that is answered, not in this reply");
+          const text = restoreQuestion(String(setAside.text || setAside.title));
+          c.turn.show = { intent: RESTORE_ASK_INTENT, text, meta: { restore_ask: { fact_id: id } } };
+          return { confirmed: false, asked: text, next: "They set this fact aside. Code now asks them this exact question as your reply: write nothing else. It comes back only on their yes to it." };
+        }
+        const refusal = answered ? null : confirmationRefusal(c, id);
         if (refusal) throw new Error(`not confirmed: ${refusal}`);
         const fact = CareerProfile.confirmFact(profileOf(c), id);
         if (fact?.withdrawn_by_owner) { fact.restored_by_owner = { at: new Date(c.now).toISOString(), set_aside_at: fact.withdrawn_by_owner.at }; delete fact.withdrawn_by_owner; }
@@ -726,6 +733,8 @@ export function careerTools(deps: {
         // D-070: "chicago or remote" is two searches, merged (career_search.ts orAlternatives); each alternative is relaxed alone.
         // Review of #790: at most four alternatives are searched; the ones left out are returned, so the reply can say so.
         const ors = orSearch(asked), alts0 = ors.queries;
+        // On every result, an empty one included: which alternatives were left out.
+        const notSearched = ors.not_searched.length ? { not_searched: ors.not_searched, note_not_searched: "only the first four alternatives were searched; say which were not (not_searched) and offer to search them" } : {};
         if (alts0.length > 1) {
           // D-071 (live-8 C1/setup-2: "chicago or remote" still returned no remote posting): the database matches whole words, so
           // "software engineer intern remote" found nothing (NVIDIA's remote role is not an internship; only the in-memory test pool
@@ -757,7 +766,7 @@ export function careerTools(deps: {
             await record(c, "search", asked, { results: found.length, companies: [...new Set(found.map((p) => String(p.company ?? "")).filter(Boolean))].slice(0, 5),
               shown: found.slice(0, 10).map((p) => ({ job_id: String(p.job_id ?? ""), company: String(p.company ?? "").slice(0, 80), title: String(p.title ?? "").slice(0, 100) })) });
             const relaxed_each = alts0.map((a, k) => a === alts[k] ? null : { asked: a, searched: alts[k] }).filter(Boolean);
-            return { ...r, postings: found, filtered, source: "live", searched_each: alts, ...(ors.not_searched.length ? { not_searched: ors.not_searched, note_not_searched: "only the first four alternatives were searched; say which were not (not_searched) and offer to search them" } : {}), ...(relaxed_each.length ? { relaxed_each, note_relaxed: "an alternative that matched nothing was searched with fewer words (relaxed_each): a posting it found may not be the exact role asked for; say so" } : {}), note_or: `searched each of: ${alts.join(" | ")}; a posting whose role_match is false is a related role, not the role asked for: say so`,
+            return { ...r, postings: found, filtered, source: "live", searched_each: alts, ...notSearched, ...(relaxed_each.length ? { relaxed_each, note_relaxed: "an alternative that matched nothing was searched with fewer words (relaxed_each): a posting it found may not be the exact role asked for; say so" } : {}), note_or: `searched each of: ${alts.join(" | ")}; a posting whose role_match is false is a related role, not the role asked for: say so`,
               links: { checked: checked.checked, dead_dropped: checked.dead, no_link_dropped: r.postings.length - withLink.length,
                 note: deps.linkCheck ? "each link was checked just now; a posting marked link 'unknown' could not be checked: say so beside it" : "links were not checked here" } };
           }
@@ -771,7 +780,7 @@ export function careerTools(deps: {
         // the last tool result is delivered). The empty result says how it is used, beside the data, where the model reads it.
         if (!pool.length) {
           await record(c, "search", query, { results: 0, source: "none" });
-          return { postings: [], total: 0, source: "none", note: EMPTY_SEARCH_NOTE };
+          return { postings: [], total: 0, source: "none", note: EMPTY_SEARCH_NOTE, ...notSearched };
         }
         // C-04: the person's saved floor (and, always, closed postings and the same job on another board) before any
         // ranking; what was hidden is counted by reason so the reply can say it ("7 senior roles, 5 contract").
@@ -788,7 +797,7 @@ export function careerTools(deps: {
         // WO-100: the list in the order shown, so "the second one" resolves in any thread (the situation's last_shown).
         await record(c, "search", query, { results: found.length, companies: [...new Set(found.map((p) => String(p.company ?? "")).filter(Boolean))].slice(0, 5),
           shown: found.slice(0, 10).map((p) => ({ job_id: String(p.job_id ?? ""), company: String(p.company ?? "").slice(0, 80), title: String(p.title ?? "").slice(0, 100) })) });
-        return { ...r, postings: found, filtered, source: "live", ...relaxed,
+        return { ...r, postings: found, filtered, source: "live", ...notSearched, ...relaxed,
           links: { checked: checked.checked, dead_dropped: checked.dead, no_link_dropped: r.postings.length - withLink.length,
             note: deps.linkCheck ? "each link was checked just now; a posting marked link 'unknown' could not be checked: say so beside it" : "links were not checked here" } };
       },

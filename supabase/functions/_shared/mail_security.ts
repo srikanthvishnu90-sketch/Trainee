@@ -37,7 +37,10 @@ const CUE = new RegExp(String.raw`(?<![\p{L}])(?:${CUE_WORDS})(?![\p{L}])|${CUE_
 // "Enter", "type", "paste": a code only right after them (two words at most), and never a date, a year, money, a phone or an address.
 const IMPERATIVE = /(?<![\p{L}])(?:enter|type|paste|input|confirm\s+with|key\s+in|introduce|introduzca|ingresa|ingrese|escribe|saisissez|tapez|eingeben|geben\s+sie)(?![\p{L}])/giu;
 // A "code" that is not a credential: zip code, dress code, job code, code of conduct ...; a PIN or key used as an ordinary word.
-const NOT_CUE_BEFORE = /(?:territory|region|cost|sku|airport|currency|language|zip|postal|area|country|dress|job|promo|coupon|discount|referral|reference|source|qr|bar|event|course|class|project|product|tracking|honor|honour|building|team|style|tax|sic|naics|program|programme|error|status|morse|da|de|the\s+key|key)\s*$/i;
+// Words that make "code" something other than a credential. One list, read by redaction (NOT_CUE_BEFORE) and by whole-mail
+// withholding (PLAIN_CODE, CODE_NOUN).
+const NON_CODE = String.raw`zip|postal|postcode|area|country|dress|job|promo|coupon|discount|voucher|gift|referral|reference|requisition|req|source|qr|bar|event|course|class|project|product|booking|reservation|order|tracking|shipping|confirmation|invoice|ticket|territory|region|cost|sku|airport|currency|language|honor|honour|building|team|style|tax|sic|naics|program|programme|error|status|morse`;
+const NOT_CUE_BEFORE = new RegExp(String.raw`(?:${NON_CODE}|da|de|the\s+key|key)\s*$`, "i");
 const NOT_CUE_AFTER = /^\s*(?:bonus|bonuses|sheet|desk|form|of\s+conduct|review|base|reviews|pad|point|points|note|takeaways?|dates?|people|person|players?|skills?|areas?|metrics?|results?|responsibilities|stakeholders?|accounts?\s+(?:manager|executive)|this|that|it|to\s+(?:your|the)\s+calendar|board|insight)\b/i;
 // The token itself is not a credential: an id named as an id, money, a date, a time, a year, a percentage, a phone, a postal code.
 const ID_BEFORE = /(?:\b(?:req|requisition|job|id|ids|ref|reference|confirmation|conf|application|app|candidate|order|ticket|case|invoice|booking|employee|flight|room|suite|building|floor|ext|extension|meeting|conference|webinar|zip|postal|course|class|policy|claim|member|student|registration|item|model|version|v|chapter|page|step|round|level|grade|unit|seat|req\.?\s*#|#)\s*(?:id|no\.?|number|#|is)?\s*[:#]?\s*)$/i;
@@ -80,7 +83,7 @@ function codesIn(line: string, carried: boolean, out: Removed[]): string {
   const cues = cuesIn(line);
   if (!cues.length && !carried) return line;
   const near = (start: number, end: number, short: boolean) => {
-    if (carried && wordsBetween(line, 0, start) <= 3) return 0;
+    if (carried && wordsBetween(line, 0, start) <= 3) return -1;
     // A code cue decides first; an imperative alone ("enter", "type") marks its gap with .5 (the stricter rules below).
     let best = Infinity, imp = Infinity;
     for (const c of cues) {
@@ -100,9 +103,9 @@ function codesIn(line: string, carried: boolean, out: Removed[]): string {
     if (kind === "alnum" && (tok.length < 4 || tok.length > 24 || /^\p{Nd}+$/u.test(tok) || /^(?:2fa|mfa|otp\d*)$/i.test(tok))) return;
     const gap = near(start, end, kind === "digits" && digits < 4);
     if (gap === Infinity) return;
-    const imp = gap % 1 !== 0;
+    const imp = gap % 1 !== 0, viaCarry = gap === -1;
     if (imp && kind === "digits" && digits < 4) return;
-    if (kind === "digits" && keepToken(tok, line.slice(Math.max(0, start - 40), start), line.slice(end, end + 16), sentence, imp ? 99 : gap)) return;
+    if (kind === "digits" && keepToken(tok, line.slice(Math.max(0, start - 40), start), line.slice(end, end + 16), sentence, imp || viaCarry ? 99 : gap)) return;
     if (imp && kind === "digits" && /^\s+(?:[A-Z][a-z]+\s+)?(?:st|street|ave|avenue|blvd|boulevard|rd|road|lane|ln|dr|drive|way|place|pl|court|ct|square|sq|suite|floor)\b/i.test(line.slice(end, end + 30))) return;
     if (kind === "alnum" && ID_BEFORE.test(line.slice(Math.max(0, start - 40), start))) return;
     cut.push([start, end, tok]);
@@ -233,23 +236,24 @@ export function redact(text: unknown): { text: string; removed: Removed[] } {
   for (const [re, ok] of SHAPES) t = t.replace(re, (s) => (s.includes(REMOVED) || !ok(s) ? s : (removed.push({ kind: "secret", token: s }), REMOVED)));
   t = phrasesAndLists(afterCues(t, removed), removed);
   const lines = t.split("\n");
-  let carried = false;
+  let carried = false, hops = 0;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     // A cue reaches only its own sentence: "zip code 60601. The dress code ... Parking code 4471" keeps the zip.
     // A cue sentence without a value of its own ("Your code follows.") reaches the next sentence, and one short one in between
     // ("We sent a one-time code. Write it down! 7 7 2 0 1 9"); non-cues ("dress code", "zip code") never carry.
-    let carry = carried, hops = 0;
+    // A cue sentence with no value of its own ("Your login code is next.") carries forward through the paragraph: up to four
+    // sentences, stopping at a blank line, and the first sentence with a number holds the code ("Do not share. 552019"); lines
+    // of digits only keep it going ("Enter these digits:" "4 8 2" "9 1 3"). "Passcode: 551203" has its value and carries nothing.
+    if (!line.trim()) { carried = false; hops = 0; continue; }
     lines[i] = line.split(/(?<=[.!?])(?<!\b(?:no|nr|nos|ref|approx|ext|apt|vs|mr|mrs|ms|dr|st|e\.g|i\.e|etc)\.)(?=\s+\S)/i).map((part) => {
-      const done = codesIn(part, carry, removed), words = part.trim().split(/\s+/).length;
-      if (cuesIn(part).some((c) => !c.imp && !/\p{Nd}|\[removed\]/u.test(part.slice(c.end)))) { carry = true; hops = 0; }
-      else if (carry && !/\p{Nd}/u.test(part) && words <= 6 && hops < 1) hops++;
-      else carry = false;
+      const done = codesIn(part, carried, removed);
+      if (cuesIn(part).some((c) => !c.imp && !/\p{Nd}|\[removed\]/u.test(part.slice(c.end)))) { carried = true; hops = 0; }
+      else if (carried && /^[\p{Nd} .-]+$/u.test(part.trim())) { /* a line of digits only: the next may hold more */ }
+      else if (carried && !/\p{Nd}/u.test(part) && hops < 4) hops++;
+      else { carried = false; hops = 0; }
       return done;
     }).join("");
-    // A cue carries to the next line only when its own line gives no value ("Enter these digits:" then "4 8 2"), never after
-    // "Passcode: 551203" (the dial string under it keeps its meeting ID).
-    if (line.trim()) carried = cuesIn(line).some((c) => !c.imp && wordsBetween(line, c.end, line.length) <= 3 && !/\p{Nd}|\[removed\]/u.test(line.slice(c.end))) || (carried && /^[\p{Nd} .-]+$/u.test(line.trim()));
   }
   return { text: lines.join("\n").replace(/\u0001(\d+)\u0002/g, (_m, i: string) => held[Number(i)]), removed };
 }
@@ -308,9 +312,10 @@ const MONEY_ALERT = /\b(?:transaction|payment|withdrawal|wire|transfer|deposit|b
 const ACT = /\bclick\b|\btap\b|\blink\b|\bbutton\b|\bbelow\b|https?:\/\/|\bexpires?\b|\bvalid\s+for\b|\bdo(?:n'?t|\s+not)\s+share\b|\bnever\s+(?:share|ask)\b|\bdid(?:n'?t|\s+not)\s+request\b|\bwas(?:n'?t|\s+not)\s+you\b|\bignore\s+this\s+e-?mail\b|\breply\s+(?:yes|no|fraud|stop)\b|\bcall\s+the\s+number\b/i;
 const TOKEN = String.raw`(?:[A-Za-z]{1,3}-)?\d(?:[ -]?\d){3,9}|[A-Za-z0-9]{2,6}-[A-Za-z0-9]{2,6}`;
 const ASSERTED = new RegExp(String.raw`(?:${CODE_PHRASE.source})[^.!?\n]{0,60}?(?:\bis\b|:|=|\blautet\b|\bes\b|\best\b)\s*(?:${TOKEN})|(?<![\d$€£.,/:-])\d(?:[ -]?\d){3,9}(?![\d%/:])[^.!?\n]{0,30}\bis\s+your\b[^.!?\n]{0,40}\b(?:code|otp|pin|passcode)\b`, "i");
-const PLAIN_CODE = /(?<!\b(?:zip|postal|area|dress|job|promo|coupon|discount|referral|reference|requisition|req|country|source|qr|bar|team|honor|building|door|gate|parking|event|course|class|project|product|booking|order|tracking)\s)\b(?:code|otp|pin|passcode)\b[^.!?\n]{0,60}?(?<![\d$€£.,/:-])\d(?:[ -]?\d){3,9}(?![\d%/:])/i;
-const CODE_NOUN = String.raw`(?:${CODE_PHRASE.source}|\b(?:your|the)\s+(?:(?!zip|postal|area|dress|job|promo|referral|reference|country|discount|coupon|territory|source|qr|bar|tax)\w+\s+)?(?:code|otp|pin|passcode)\b)`;
-const SPLIT_CODE = new RegExp(String.raw`${CODE_NOUN}[^.!?\n]{0,40}[.!?]\s+(?:[^.!?\n\d]{1,40}[.!?]\s+)?(?:(?:it\s+is|it's|here\s+it\s+is|use|enter)\s*:?\s*)?(?<![\d$€£.,/:-])\d(?:(?:[ -]| - )?\d){3,9}\s*[.!]?\s*(?:$|\n)`, "im");
+const PLAIN_CODE = new RegExp(String.raw`(?<!\b(?:${NON_CODE}|door|gate|parking)\s)\b(?:code|otp|pin|passcode)\b[^.!?\n]{0,60}?(?<![\d$€£.,/:-])\d(?:[ -]?\d){3,9}(?![\d%/:])`, "i");
+const CODE_NOUN = String.raw`(?:${CODE_PHRASE.source}|\b(?:your|the)\s+(?:(?!(?:${NON_CODE})\b)\w+\s+)?(?:code|otp|pin|passcode)\b)`;
+// The code may come up to three sentences later in the same paragraph, each of them without a number of its own.
+const SPLIT_CODE = new RegExp(String.raw`${CODE_NOUN}[^.!?\n]{0,40}[.!?]\s+(?:[^.!?\n\d]{1,60}[.!?]\s+){0,3}(?:(?:it\s+is|it's|here\s+it\s+is|use|enter)\s*:?\s*)?(?<![\d$€£.,/:-])\d(?:(?:[ -]| - )?\d){3,9}\s*[.!]?\s*(?:$|\n)`, "im");
 const MEETING = /\b(?:zoom|meeting|webinar|teams|webex|google\s+meet|dial[- ]in|conference)\b/i;
 
 // True when the email is a credential or account-security message whose text is withheld whole.

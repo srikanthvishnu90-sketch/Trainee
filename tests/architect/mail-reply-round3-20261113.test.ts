@@ -188,7 +188,7 @@ Deno.test("D the earlier attempt is found by its key: 250 newer drafts do not hi
     status: "shown", approved_hash: null, approved_at: null, sent_at: null, gmail_id: null, gmail_thread: null, result: null, created_at: new Date(now + 1000).toISOString(), hash: "a".repeat(64) })), now + 1000);
   eq((await card(store, {}, now + 2 * MIN)).reason, "earlier_unconfirmed");
   const src = await Deno.readTextFile(new URL("../../supabase/functions/_shared/career_outreach.ts", import.meta.url));
-  ok(/async replyAttempts\(u, to, inReplyTo\) \{[\s\S]{0,400}\.eq\("recipient->>kind", "mail_reply"\)[\s\S]{0,120}\.eq\("recipient->reply->>in_reply_to", inReplyTo\)\.in\("status", \["sending", "approved", "sent"\]\)/.test(src), "keyed lookup in the deployed store (round 4: sent replies too)");
+  ok(/async replyAttempts\(u, to, inReplyTo\) \{[\s\S]{0,400}\.eq\("recipient->>kind", "mail_reply"\)[\s\S]{0,120}\.eq\("recipient->reply->>in_reply_to", inReplyTo\)\.or\("status\.in\.\(sending,approved,sent\),and\(status\.eq\.failed,result\.like\.unconfirmed\*\)"\)/.test(src), "keyed lookup in the deployed store (round 4: sent replies; round 5: replaced unconfirmed tries)");
 });
 
 Deno.test("E a crash mid-send: the try is in flight until it is found abandoned, then ended there; every unconfirmed reply names the way out", async () => {

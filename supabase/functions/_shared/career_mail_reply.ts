@@ -319,6 +319,8 @@ export async function draftReply(o: {
   const acknowledged: string[] = [], told: string[] = [];
   for (const first of earlier) {
     // A reply to this email already went from another card: the new card says so first (a second reply is the person's call).
+    // A try whose outcome stayed unknown when a later card replaced it may still have landed: every later card says so first.
+    if (first.status === "failed") { acknowledged.push(first.id); told.push(`Before you answer: an earlier reply to this email (tried ${String(first.sent_at ?? first.approved_at ?? first.created_at).slice(0, 16).replace("T", " ")} UTC) is unconfirmed: it may have gone. If it did, a yes here sends another reply.`); continue; }
     if (first.status === "sent") { acknowledged.push(first.id); told.push(`Before you answer: you already sent a reply to this email (${String(first.sent_at ?? first.created_at).slice(0, 16).replace("T", " ")} UTC). If you say yes here, a second reply goes.`); continue; }
     const old = await recordEnd(o.outreach, o.userId, first, o.now);
     const began = Date.parse(old.sent_at ?? old.approved_at ?? "") || o.now, end = endedAt(old);

@@ -75,7 +75,8 @@ export interface OutreachStore {
   approvedDrafts?(userId: string): Promise<OutreachDraft[]>; // every approved draft, read in pages (the send rail's check)
   // Exactly these drafts of the person's, by id (the primary key): the bounded read the reminder run and the sending rail use.
   drafts?(userId: string, ids: string[]): Promise<OutreachDraft[]>;
-  // Every reply to one email in the person's inbox (career_mail_reply.ts) that went or may have gone (approved, sending or sent),
+  // Every reply to one email in the person's inbox (career_mail_reply.ts) that went or may have gone (approved, sending, sent, or
+  // an unconfirmed try a later card replaced: status failed, result "unconfirmed..."),
   // looked up by its own key, the address it answers and that email's Message-ID, however many rows the person has.
   replyAttempts?(userId: string, to: string, inReplyTo: string): Promise<OutreachDraft[]>;
   followups?(userId: string): Promise<Followup[]>;
@@ -1174,7 +1175,7 @@ export function memoryOutreachStore(): OutreachStore & { dump(): { drafts: (Outr
     async history(u: string, limit = 200) { return copy(drafts.filter((d) => d.user_id === u).sort((a, z) => String(z.created_at).localeCompare(String(a.created_at)) || z.n - a.n).slice(0, limit)); },
     async drafts(u: string, ids: string[]) { const want = new Set(ids); return copy(drafts.filter((d) => d.user_id === u && want.has(d.id))); },
     async replyAttempts(u: string, to: string, inReplyTo: string) {
-      return copy(drafts.filter((d) => d.user_id === u && isMailReply(d) && d.recipient.email === to && d.recipient.reply?.in_reply_to === inReplyTo && (d.status === "sending" || d.status === "approved" || d.status === "sent")));
+      return copy(drafts.filter((d) => d.user_id === u && isMailReply(d) && d.recipient.email === to && d.recipient.reply?.in_reply_to === inReplyTo && (d.status === "sending" || d.status === "approved" || d.status === "sent" || (d.status === "failed" && /^unconfirmed/.test(String(d.result ?? ""))))));
     },
     async followups(u: string) { return copy(follow[u] ?? []); },
     async saveFollowups(u: string, items: Followup[]) { follow[u] = copy(followupValue(items).items); delete leases[u]; },
@@ -1301,7 +1302,7 @@ export function supabaseOutreachStore(admin: any): OutreachStore {
     },
     async replyAttempts(u, to, inReplyTo) {
       return (must(await admin.from("career_outreach_drafts").select(COLS).eq("user_id", u).eq("recipient_email", to.toLowerCase()).eq("recipient->>kind", "mail_reply")
-        .eq("recipient->reply->>in_reply_to", inReplyTo).in("status", ["sending", "approved", "sent"]).limit(50), "read earlier replies to that email") ?? []).map(fromRow);
+        .eq("recipient->reply->>in_reply_to", inReplyTo).or("status.in.(sending,approved,sent),and(status.eq.failed,result.like.unconfirmed*)").limit(50), "read earlier replies to that email") ?? []).map(fromRow);
     },
     async drafts(u, ids) {
       if (!ids.length) return [];

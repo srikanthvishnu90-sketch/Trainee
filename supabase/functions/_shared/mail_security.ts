@@ -20,7 +20,7 @@
 // Those reach the model as text; the output guard still refuses a reply that pairs a code-like token with a code cue.
 export const REMOVED = "[removed]";
 // Zero-width, bidi and emoji-keycap marks go; full-width, circled and superscript forms become their plain letters and digits.
-export const normalise = (s: unknown) => String(s ?? "").normalize("NFKC").replace(/(?<![\p{L}\p{Nd}])(?:\p{L} ){3,}\p{L}(?![\p{L}\p{Nd}])/gu, (m) => m.replace(/ /g, "")).replace(/[\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff\ufe0e\ufe0f\u20e3]/g, "")
+export const normalise = (s: unknown) => String(s ?? "").normalize("NFKC").replace(/(?<![\p{L}\p{Nd}])(?:\p{L} ){2,}\p{L}(?![\p{L}\p{Nd}])/gu, (m) => (/^(?:code|otp|pin|passcode|password|token|key)$/i.test(m.replace(/ /g, "")) ? m.replace(/ /g, "") : m)).replace(/[\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u2069\ufeff\ufe0e\ufe0f\u20e3]/g, "")
   .replace(/<\/?(?:b|i|u|em|strong|span|font|small|big|code|tt|mark|sup|sub)\b[^<>]{0,200}>/gi, "");
 export type Removed = { kind: "code" | "secret" | "link"; token: string };
 
@@ -69,6 +69,8 @@ function cuesIn(line: string): { start: number; end: number; weak: boolean; imp?
     const start = m.index!, end = start + m[0].length, w = m[0].toLowerCase();
     if (/^(?:codes?|keys?|pins?|tokens?)$/.test(w) && NOT_CUE_BEFORE.test(line.slice(Math.max(0, start - 24), start))) continue;
     if (NOT_CUE_AFTER.test(line.slice(end, end + 40))) continue;
+    // Webex: "Meeting number (access code): 2634 812 9011" names the meeting, not a credential.
+    if (/^(?:access\s+(?:code|number)|codes?)$/.test(w) && /\b(?:meeting|conference|webinar|event)\s+(?:number|id|no)\b/i.test(line)) continue;
     out.push({ start, end, weak: /^(?:pins?|keys?|tokens?|digits|combination|acct|accounts?|cards?|routing|passport|unlock|入力)$/.test(w) });
   }
   return out;
@@ -169,6 +171,8 @@ function afterCues(text: string, out: Removed[]): string {
   // A one-tap dial string repeats the meeting passcode: "+16699006833,,81234567890#,,,,*551203#".
   text = text.replace(/(\+?\d[\d ]{6,}(?:,+\d+#?)*,+\*)(\d{4,10})(#)/g, (_a, pre: string, tok: string, post: string) => { out.push({ kind: "code", token: tok }); return pre + REMOVED + post; });
   text = text.replace(PW_AFTER, (all: string, cue: string, tok: string, at: number, whole: string) => {
+    const lineAt = whole.slice(whole.lastIndexOf("\n", at) + 1, (whole.indexOf("\n", at) + 1 || whole.length + 1) - 1);
+    if (/^access\s+code$/i.test(cue.trim()) && /\b(?:meeting|conference|webinar|event)\s+(?:number|id|no)\b/i.test(lineAt)) return all;
     const bare = tok.replace(/^["“']|["”']$/g, ""), weak = new RegExp(`^(?:${PW_WEAK})$`, "iu").test(cue.trim());
     if (!bare || STOP.has(bare.toLowerCase().replace(/[.,;:!?)]+$/, "")) || (weak && !/^["“']/.test(tok) && !secretish(bare.replace(/[.,;:!?)]+$/, "")))) return all;
     // No separator and a plain lowercase word: a password only when it is long and the sentence moves on right after it
@@ -233,7 +237,16 @@ export function redact(text: unknown): { text: string; removed: Removed[] } {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     // A cue reaches only its own sentence: "zip code 60601. The dress code ... Parking code 4471" keeps the zip.
-    lines[i] = line.split(/(?<=[.!?])(?<!\b(?:no|nr|nos|ref|approx|ext|apt|vs|mr|mrs|ms|dr|st|e\.g|i\.e|etc)\.)(?=\s+\S)/i).map((part, k) => codesIn(part, carried && k === 0, removed)).join("");
+    // A cue sentence without a value of its own ("Your code follows.") reaches the next sentence, and one short one in between
+    // ("We sent a one-time code. Write it down! 7 7 2 0 1 9"); non-cues ("dress code", "zip code") never carry.
+    let carry = carried, hops = 0;
+    lines[i] = line.split(/(?<=[.!?])(?<!\b(?:no|nr|nos|ref|approx|ext|apt|vs|mr|mrs|ms|dr|st|e\.g|i\.e|etc)\.)(?=\s+\S)/i).map((part) => {
+      const done = codesIn(part, carry, removed), words = part.trim().split(/\s+/).length;
+      if (cuesIn(part).some((c) => !c.imp && !/\p{Nd}|\[removed\]/u.test(part.slice(c.end)))) { carry = true; hops = 0; }
+      else if (carry && !/\p{Nd}/u.test(part) && words <= 6 && hops < 1) hops++;
+      else carry = false;
+      return done;
+    }).join("");
     // A cue carries to the next line only when its own line gives no value ("Enter these digits:" then "4 8 2"), never after
     // "Passcode: 551203" (the dial string under it keeps its meeting ID).
     if (line.trim()) carried = cuesIn(line).some((c) => !c.imp && wordsBetween(line, c.end, line.length) <= 3 && !/\p{Nd}|\[removed\]/u.test(line.slice(c.end))) || (carried && /^[\p{Nd} .-]+$/u.test(line.trim()));
@@ -296,6 +309,8 @@ const ACT = /\bclick\b|\btap\b|\blink\b|\bbutton\b|\bbelow\b|https?:\/\/|\bexpir
 const TOKEN = String.raw`(?:[A-Za-z]{1,3}-)?\d(?:[ -]?\d){3,9}|[A-Za-z0-9]{2,6}-[A-Za-z0-9]{2,6}`;
 const ASSERTED = new RegExp(String.raw`(?:${CODE_PHRASE.source})[^.!?\n]{0,60}?(?:\bis\b|:|=|\blautet\b|\bes\b|\best\b)\s*(?:${TOKEN})|(?<![\d$€£.,/:-])\d(?:[ -]?\d){3,9}(?![\d%/:])[^.!?\n]{0,30}\bis\s+your\b[^.!?\n]{0,40}\b(?:code|otp|pin|passcode)\b`, "i");
 const PLAIN_CODE = /(?<!\b(?:zip|postal|area|dress|job|promo|coupon|discount|referral|reference|requisition|req|country|source|qr|bar|team|honor|building|door|gate|parking|event|course|class|project|product|booking|order|tracking)\s)\b(?:code|otp|pin|passcode)\b[^.!?\n]{0,60}?(?<![\d$€£.,/:-])\d(?:[ -]?\d){3,9}(?![\d%/:])/i;
+const CODE_NOUN = String.raw`(?:${CODE_PHRASE.source}|\b(?:your|the)\s+(?:(?!zip|postal|area|dress|job|promo|referral|reference|country|discount|coupon|territory|source|qr|bar|tax)\w+\s+)?(?:code|otp|pin|passcode)\b)`;
+const SPLIT_CODE = new RegExp(String.raw`${CODE_NOUN}[^.!?\n]{0,40}[.!?]\s+(?:[^.!?\n\d]{1,40}[.!?]\s+)?(?:(?:it\s+is|it's|here\s+it\s+is|use|enter)\s*:?\s*)?(?<![\d$€£.,/:-])\d(?:(?:[ -]| - )?\d){3,9}\s*[.!]?\s*(?:$|\n)`, "im");
 const MEETING = /\b(?:zoom|meeting|webinar|teams|webex|google\s+meet|dial[- ]in|conference)\b/i;
 
 // True when the email is a credential or account-security message whose text is withheld whole.
@@ -309,7 +324,11 @@ export function securityMail(m: { from: string; subject: string; text: string })
   // invite is withheld only for one-time, verification or sign-in code wording.
   const invite = MEETING.test(all) || /(?:zoom\.us|zoomgov\.com|meet\.google\.com|teams\.microsoft\.com|teams\.live\.com|webex\.com|calendly\.com|hackerrank|coderpad\.io|codesignal\.com|codility\.com)/i.test(all);
   // A code stated as a code ("your verification code is 482913"), in any sentence.
-  if (ASSERTED.test(invite ? body.replace(/\b(?:access|confirmation|meeting|conference|dial[- ]in|temporary)\s+(?:pass)?(?:codes?|pins?)\b/gi, "") : body)) return true;
+  const plainBody = invite ? body.replace(/\b(?:access|confirmation|meeting|conference|dial[- ]in|temporary)\s+(?:pass)?(?:codes?|pins?)\b/gi, "") : body;
+  if (ASSERTED.test(plainBody)) return true;
+  // The same across a full stop: "Here is your login code. It is 330918.", "Your code follows. 554102", "We sent a one-time
+  // code. Write it down! 7 7 2 0 1 9".
+  if (SPLIT_CODE.test(plainBody)) return true;
   if (MONEY_ALERT.test(all) && ALERT.test(all)) return true;
   // Reset, sign-in, two-step and alert wording counts in the body only when the email also tells the reader to act on it.
   if (acts && (RESET.test(body) || SIGNIN.test(body) || ALERT.test(body) || (TWO_STEP.test(body) && /\bcodes?\b/i.test(body)))) return true;

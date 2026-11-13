@@ -668,6 +668,7 @@ Deno.test("round 4.1: what was judged is what is emitted: a sentence one word of
   // A line code stores (own) is exempt only when it is that line, whole; one word more and it is a claim like any other.
   eq((await keepSupported("Citadel SWE Intern, New York, NY: pay is never $60 an hour.", [], { judge: quotesOnly, pure, own: ["Citadel SWE Intern, New York, NY: pay is $60 an hour."] })).text, "");
   eq((await keepSupported("Citadel SWE Intern, New York, NY: pay is $60 an hour. That is the lowest on Wall Street.", [], { judge: quotesOnly, pure, own: ["Citadel SWE Intern, New York, NY: pay is $60 an hour."] })).text, "Citadel SWE Intern, New York, NY: pay is $60 an hour.");
+  eq((await keepSupported("PayPal, SWE Intern: $40/hr and nothing for the first month.", [], { judge: quotesOnly, pure, own: ["PayPal, SWE Intern: $40/hr"] })).text, ""); // a line that begins as code's own and goes on is not code's own
   // On the market path a near-echo is replaced by the unit, byte for byte, in quotation marks.
   const page = "Citadel hires full-time engineers in Miami every spring. Citadel interns earn $5,000 a week.";
   const r = await mk3([{ url: U, title: "Citadel notes", text: page }], { summary: [{ text: K2, quote: K2, url: U }] }, quotesOnly);
@@ -680,6 +681,8 @@ Deno.test("round 4.2 and 4.5: the passage carries page-level and section-level c
   const far = (lead: string) => [{ url: "https://blog.example/x", title: "Intern pay notes", text: `${lead}\n- Jane Street pays weekly.\n- Optiver is in Amsterdam.\n- Two Sigma is in New York.\n- DRW is in Chicago.\n- ${F9}` }];
   ok(/all false/.test(passageOf(far("The rumours that follow are all false."), F9)!), "the sentence that introduces the list");
   ok(/Myths/.test(passageOf(far("Myths"), F9)!), "the heading above a list");
+  const fill = Array.from({ length: 7 }, (_, k) => `The firm has office number ${k + 1} in a large city.`).join(" ");
+  ok(/Headings: .*What Jane Street pays/.test(passageOf([{ url: "https://blog.example/x", title: "Notes", text: `Intro line one is here.\nIntro line two is here.\n## What Jane Street pays\n${fill} Interns earn $9,000 a week.` }], "Interns earn $9,000 a week.", [])!), "the heading the unit sits under, however far above");
   const pad = Array.from({ length: 9 }, (_, k) => `The firm has office number ${k + 1} in a large city.`).join(" ");
   ok(/Updated: 2019/.test(passageOf([{ url: "https://blog.example/x", title: "Notes", text: `Updated: 2019\n${pad} ${F9}` }], F9)!), "a date line at the top of the page");
   ok(/satire/i.test(passageOf([{ url: "https://blog.example/x", title: "Notes", text: `${F9} ${pad}\nThis page is satire and nothing on it is true.` }], F9)!), "a disclaimer anywhere on the page");
@@ -715,6 +718,8 @@ Deno.test("round 4.6: a unit that puts a cost, a purchase or a hand-over of deta
   for (const u of ["Citadel requires each new intern to cover a $350 laptop charge.", "Citadel's HR desk needs a copy of each applicant's passport and a selfie holding it.", "Every Citadel candidate is expected to buy the assessment pack before the interview.", "Citadel interns must install the RemoteDesk tool on a personal laptop.",
     "Citadel candidates meet the recruiter at 14 Elm Road with cash for the background check.", "Candidates for Citadel roles are expected to hand their phone's six-digit login number to the agent.", "Citadel's intern class is full, but seats can be bought from departing interns for $1,000.", "Citadel recruiters can be reached at five five five zero one four two.",
     "Reach Citadel HR on bit.ly/citadel-hr for the offer.", "Citadel applicants are selected by lottery after donating to the fund."]) ok(!q(u), u);
+  // A unit right beside one that solicits is not shown either.
+  ok(!indexPages([{ text: "Citadel interns earn $5,000 a week in Chicago. Tap the green button.", title: "Citadel notes" }], undefined, ["Citadel"]).pages[0].sentences.some((x: any) => x.quotable));
   for (const u of ["You will earn $5,000 a week as a Citadel intern.", "Citadel interns earn $5,000 a week and receive housing.", "As a Citadel intern, your base pay is $120 an hour."]) ok(q(u), u);
 });
 
@@ -744,6 +749,10 @@ Deno.test("round 4.8 and 4.9: a long draft is judged up to the cap across the ca
   const hang: SupportJudge = () => { calls++; return new Promise(() => {}); };
   const vs2 = await decide(big, idx, hang, { callMs: 40, budgetMs: 60 });
   ok(Date.now() - t0 < 1000 && calls <= 2 && vs2.every((v) => v.how === "drop"), `${Date.now() - t0} ms, ${calls} calls`);
+  // The turn's budget ends the judging even when one call's own limit is long: one call, cut at the budget, and no second.
+  const t1 = Date.now(); let calls3 = 0;
+  await decide(big, idx, () => { calls3++; return new Promise(() => {}); }, { callMs: 5000, budgetMs: 50 });
+  ok(Date.now() - t1 < 1000 && calls3 === 1, `${Date.now() - t1} ms, ${calls3} calls`);
 });
 
 Deno.test("round 4.10: whole turns with a judge that says yes only to a page's own unit: no altered sentence, no model words", async () => {

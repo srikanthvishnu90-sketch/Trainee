@@ -324,7 +324,7 @@ const STRICT_EVIDENCE = false;
 const NAMES_APPLICATION = /appl|bewerb|sollicit|candidat|postul|ans[öo]k|s[øo]k|hakemu/i;
 function isApplicationForm(form = [], own = 0) {
   const f = Array.isArray(form) ? { fields: form } : form, fields = f.fields || [];
-  if (f.password || fields.some((x) => x.type === "password") || NOT_APP_HEAD.test(`${f.head || ""} ${f.action || ""}`) || NOT_APP_LABEL.test(f.labels || "") || fields.some((x) => x.type === "search" || NOT_APP_FIELD.test(x.hint || ""))) return false;
+  if (f.password || fields.some((x) => x.type === "password") || NOT_APP_HEAD.test(`${f.head || ""} ${f.action || ""}`) || NOT_APP_LABEL.test(f.labels || "") || fields.some((x) => x.type === "search" || (!["checkbox", "radio"].includes(x.type) && NOT_APP_FIELD.test(x.hint || "")))) return false;
   const files = fields.filter((x) => x.type === "file"), has = (re) => fields.some((x) => re.test(x.hint || ""));
   if (files.some((x) => Q_RESUME.test(x.hint || "")) || files.length === 1) return true;
   const email = fields.some((x) => x.type === "email" || /e-?mail/i.test(x.hint || "")), more = files.length > 0 || fields.some((x) => x.type === "tel") || has(Q_MORE);
@@ -403,7 +403,9 @@ function SNAP() {
     ...[...b.attributes].filter((a) => a.name.startsWith("data-") && !a.name.startsWith("data-upmore")).map((a) => `${a.name}=${a.value}`), ...[...b.querySelectorAll("img, svg")].map((i) => `${i.getAttribute("alt") || ""} ${i.getAttribute("aria-label") || ""} ${i.getAttribute("src") || ""}`)].join(" ")).slice(0, 600);
   // A form's own words: its headings, legends and buttons and the heading just before it (head); its labels and placeholders (labels).
   const head = (f) => { let h = ""; for (let p = f.previousElementSibling, i = 0; p && i < 2; p = p.previousElementSibling, i++) if (/^H[1-6]$/.test(p.tagName)) { h = p.innerText; break; }
-    return squash([h, f.id, f.getAttribute("name"), f.getAttribute("role"), f.getAttribute("aria-label"), ...[...f.querySelectorAll("h1, h2, h3, h4, h5, h6, legend, button, input[type=submit], [role=button]")].map((e) => e.innerText || e.value)].join(" | ")).slice(0, 800); };
+    return squash([h, f.id, f.getAttribute("name"), f.getAttribute("role"), f.getAttribute("aria-label"), ...[...f.querySelectorAll("h1, h2, h3, h4, h5, h6, legend, button, input[type=submit], [role=button]")].map((e) => e.innerText || e.value)
+      // A third party's own button inside the application ("Apply with LinkedIn", "Sign in with Google") says nothing of the form.
+      .filter((t) => !/linkedin|indeed|google|facebook|apple|github|microsoft/i.test(t || ""))].join(" | ")).slice(0, 800); };
   const labels = (f) => squash([...f.querySelectorAll("label, [placeholder]")].map((e) => (e.tagName === "LABEL" ? e.innerText : e.getAttribute("placeholder"))).join(" | ")).slice(0, 1500);
   const controls = [...document.querySelectorAll("button, [role=button], input[type=button], input[type=submit]")].map((b, c) => {
     b.setAttribute("data-upmore-c", String(c));

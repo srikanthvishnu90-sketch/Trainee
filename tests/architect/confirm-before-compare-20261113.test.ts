@@ -11,7 +11,7 @@
 import assertNode from "node:assert/strict";
 import { offerChatTurn, offerData, type OfferChatState, type OfferTurnResult } from "../../supabase/functions/_shared/career_offer_chat.ts";
 import { offerTurn, payData, readingBlock, readingHash, parseOfferWords } from "../../supabase/functions/_shared/career_offer.ts";
-import { CareerProfile } from "../../supabase/functions/_shared/router_core.career.js";
+import { CareerPackets, CareerProfile, CareerRouter, CareerTailor } from "../../supabase/functions/_shared/router_core.career.js";
 import { careerTools } from "../../supabase/functions/_shared/agent/career_tools.ts";
 import { edgeRenderer, memoryPersonaStore, memoryResumeStore, tailorForPosting, withoutInferredSkills } from "../../supabase/functions/_shared/career_tailor.ts";
 
@@ -362,3 +362,84 @@ Deno.test("D-078/offer keep 04: a currency or period the amendment states wins o
   const b = await say(["Kestrel offered me $8,000 a month as a data analyst in Chicago", "yes", "actually it's $110k a year"]);
   ok(/Base: \$110,000 a year/.test(b.out[2].answer!.reply), b.out[2].answer!.reply);
 });
+
+// ---------- 9. review of d2f69ad29: the brain's yes, other resume paths, short assents ----------
+const PINE = "Pinecone offered me $120k base as a data analyst in Chicago";
+const brainTurn = (message: string, state: Record<string, unknown>, before?: string) => ({ userId: "u9", threadId: "t9", now: NOW, state, turn: { message, added: [] as string[], ...(before !== undefined ? { before } : {}) } });
+Deno.test("D-078/review 01: the brain's yes is the person's whole message: \"yes but the base is 130k\" with offer_words \"yes\" is a correction, not a benchmark", async () => {
+  const t = Object.fromEntries(careerTools({ postings: async () => [] }).map((x) => [x.name, x]));
+  const state: Record<string, unknown> = {};
+  const c1 = brainTurn(PINE, state);
+  const a = await t.offer_benchmark.run({}, c1) as any;
+  eq(a.status, "confirm");
+  const c2 = brainTurn("yes but the base is 130k", state, (c1.turn as any).show?.text);
+  const b = await t.offer_benchmark.run({ offer_words: "yes" }, c2) as any;
+  eq(b.status, "confirm", "not benchmarked");
+  eq(b.draft, null, "no counter");
+  ok(/Base: \$130,000 a year .*USD/.test(b.messages.join("\n")), b.messages.join("\n"));
+  ok(!/120,000/.test(b.messages.join("\n")));
+});
+Deno.test("D-078/review 02: the brain's reading is the reply word for word (turn.show), so a yes to it matches the hash", async () => {
+  const t = Object.fromEntries(careerTools({ postings: async () => [] }).map((x) => [x.name, x]));
+  const state: Record<string, unknown> = {};
+  const c1 = brainTurn(PINE, state);
+  const a = await t.offer_benchmark.run({}, c1) as any;
+  const show = (c1.turn as any).show;
+  eq(show?.intent, "career_offer_confirm");
+  eq(show?.text, a.messages.join("\n"));
+  const b = await t.offer_benchmark.run({ offer_words: "yes" }, brainTurn("yes", state, show.text)) as any;
+  eq(b.status, "benchmarked");
+});
+Deno.test("D-078/review 03: a correction on the brain's path keeps the currency read from the place; a bare no confirms nothing and keeps it too", () => {
+  const a = offerTurn({ words: "JPM offered 110k base, 15k signing, NYC, analyst", pending: null, now: NOW, data: fixtures });
+  const fix = offerTurn({ words: "actually it's 120k", message: "actually it's 120k", pending: a.pending, now: NOW + 1000, data: fixtures });
+  eq(fix.result.status, "confirm");
+  ok(/Base: \$120,000 a year .*USD/.test(fix.result.messages.join("\n")) && !/currency not sure/.test(fix.result.messages.join("\n")), fix.result.messages.join("\n"));
+  const no = offerTurn({ words: "no", message: "no", pending: a.pending, now: NOW + 1000, data: fixtures });
+  eq(no.result.status, "ask");
+  const yes = offerTurn({ words: "yes", message: "yes", pending: no.pending, now: NOW + 2000, data: fixtures, lastReply: no.result.messages.join("\n") });
+  eq(yes.result.status, "confirm", "a yes after the no confirms nothing");
+  const fix2 = offerTurn({ words: "the base is 125k", message: "the base is 125k", pending: no.pending, now: NOW + 2000, data: fixtures });
+  ok(/Base: \$125,000 a year .*USD/.test(fix2.result.messages.join("\n")) && !/currency not sure/.test(fix2.result.messages.join("\n")), fix2.result.messages.join("\n"));
+});
+const ETL = person({ exp: [EXP] });
+const JD = "Data Analyst, Acme (TEST)\nRequirements:\n- SQL and Python\n- Tableau dashboards\n- Statistics";
+const skillsIn = (resume: any) => (resume?.sections ?? []).flatMap((s: any) => s.lines).filter((l: any) => l.type === "skills").map((l: any) => l.text).join(" | ");
+Deno.test("D-078/review 04: the shared builder (123 tailorResume, used by batch apply) withholds skills read from experience text", () => {
+  const r = CareerTailor.tailorResume(ETL, JD, {});
+  ok(!/Python|SQL|Statistics|Tableau/.test(skillsIn(r.resume)), skillsIn(r.resume));
+  ok(!/Skills:.*Python/.test(String(r.rendered?.text ?? "")), String(r.rendered?.text));
+  for (const n of ["Python", "SQL"]) ok(r.resume.withheldSkills.some((w: any) => w.name === n && w.factIds.length === 1), JSON.stringify(r.resume.withheldSkills));
+});
+Deno.test("D-078/review 05: the router's tailor (tailor-and-apply) prints no inferred skill", () => {
+  const r = CareerRouter.handleChat("tailor my resume for this role", { profile: person({ exp: [EXP] }), jdText: JD });
+  eq(r.intent, "career_tailor");
+  ok(!/Skills?:?[^\n]*\b(?:Python|SQL)\b/i.test(String(r.artifact?.text ?? "").split("\n").filter((l: string) => /skill/i.test(l)).join("\n")), String(r.artifact?.text));
+  ok(!/\n(?:TECHNICAL )?SKILLS\n/i.test(String(r.artifact?.text ?? "")), String(r.artifact?.text));
+});
+Deno.test("D-078/review 06: a packet (133 assemblePacket) prints no inferred skill", () => {
+  const k = CareerPackets.assemblePacket({ profile: person({ exp: [EXP] }), company: "Acme", jdText: JD });
+  ok(k.ok, JSON.stringify(k).slice(0, 300));
+  ok(!/Python|SQL/.test(skillsIn(k.tailored.resume)), skillsIn(k.tailored.resume));
+});
+Deno.test("D-078/review 07: a stated skill still prints on every path", () => {
+  const p = person({ exp: [EXP], skills: ["Python"] });
+  ok(/Python/.test(skillsIn(CareerTailor.tailorResume(p, JD, {}).resume)));
+  ok(/Python/.test(skillsIn(CareerPackets.assemblePacket({ profile: person({ exp: [EXP], skills: ["Python"] }), company: "Acme", jdText: JD }).tailored.resume)));
+});
+const ASSENTS = ["sure", "ok", "👍", "y", "yes 👍", "yes please compare", "yes, help me negotiate", "Yep, looks good", "correct", "okay thanks"];
+for (const m of ASSENTS) {
+  Deno.test(`D-078/review assent: "${m}" confirms the reading shown`, async () => {
+    const { out } = await say(["Granite offered $95k as a data analyst in Chicago", m]);
+    ok(["career_offer_benchmark", "career_offer_counter", "career_offer_compare"].includes(String(out[1].answer?.intent)), `${m}: ${out[1].answer?.intent} ${out[1].answer?.reply}`);
+    eq(out[1].state!.offers[0].confirmed?.by, "person");
+    if (/negotiate/.test(m)) eq(out[1].answer?.intent, "career_offer_counter");
+  });
+}
+for (const m of ["yes but 100k", "ok, it's in CAD", "sure, actually Seattle", "no", "yes?", "maybe", "ok I think so but not sure", "yes, at Stripe"]) {
+  Deno.test(`D-078/review not assent: "${m}" confirms nothing`, async () => {
+    const { out } = await say(["Granite offered $95k as a data analyst in Chicago", m]);
+    eq(out[1].state?.offers?.[0]?.confirmed ?? null, null, `${m}: ${out[1].answer?.intent} ${out[1].answer?.reply}`);
+    ok(!out[1].answer || !COMPARED.test(out[1].answer.reply), `${m}: ${out[1].answer?.reply}`);
+  });
+}

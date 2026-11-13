@@ -659,7 +659,9 @@ export async function tailorForPosting(o: {
   const lead = persona ? persona.lead.filter((id) => CareerProfile.getFact(picked, id)) : [];
   // `picked`, not `clean`: a skill a persona hides stays hidden.
   // D-078: skills read from experience text and never confirmed are taken off the Skills line before anything prints.
-  const gate = withoutInferredSkills(withListedSkills(applyPersonaOrder(t.resume, lead), picked), picked);
+  const gate0 = withoutInferredSkills(withListedSkills(applyPersonaOrder(t.resume, lead), picked), picked);
+  // 123's builder already withheld the inferred skills it found (every resume path); this line catches any added after it.
+  const gate = { ...gate0, withheld: [...((t.resume.withheldSkills ?? []) as WithheldSkill[]), ...gate0.withheld].filter((w, i, all) => all.findIndex((x) => x.name.toLowerCase() === w.name.toLowerCase()) === i) };
   let ordered = gate.resume;
   let edits: EditDone[] | undefined, keptBack: string[] = [];
   if (o.edits?.length) {

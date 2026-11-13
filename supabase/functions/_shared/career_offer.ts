@@ -741,6 +741,82 @@ export function readingOf(o: Offer): string[] {
     o.total ? `total pay as you said it "${o.total.written}" (not the base)` : null, o.part_year ? `you said ${o.part_year}` : null, o.current ? `your pay now "${o.current}" (not the offer)` : null,
     o.ask ? `the figure you want "${o.ask.written}"` : null].filter((x): x is string => !!x);
 }
+// An amendment to an offer on file (moved from career_offer_chat.ts for D-078 so the chat turn and the brain's offer tool read a
+// correction the same way).
+const sameCompanyA = (a: string | null, b: string | null) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
+export const AMEND_LEAD = /^\W*(?:actually|correction|sorry|oops|update|oh|wait|they (?:raised|bumped|increased|upped|lowered|cut)|it'?s|it is|that'?s|that is|the base is|base is|plus|also|i meant)\b/i;
+const STRONG_LEAD = /^\W*(?:actually|correction|they (?:raised|bumped|increased|upped|lowered|cut)|i meant)\b|\bi meant\b/i;
+const STALE_WORD = /\d\s?[kKmM]\b|\d{4,}|[$€£¥₹]|\b(?:base|salary|bonus|signing|equity|rsus?|per (?:hour|month|week|year)|hourly|monthly|weekly|annual\w*|intern\w*|contract\w*|part[- ]time|full[- ]time|remote|relocat\w*|canadian|australian|american|swiss|dollars?|euros?|pounds?|francs?|yen|rupees?|pesos?|usd|cad|eur|gbp|currency)\b|\bin [A-Z]/i;
+// The offer on file with one field changed by `message`, "stale" when the message bears on it and is not a clean change, null
+// when the message is not about the offer.
+export function amendOf(message: string, o: Offer, data: OfferData): Offer | "stale" | null {
+  if (!AMEND_LEAD.test(message) && !STALE_WORD.test(message) && !(!o.company && firmFor(message)) && !(o.open ?? []).some((x) => /could be/.test(x))) return null;
+  const body = message.replace(/^\W*(?:(?:sorry|actually|correction|oops|oh|wait|update)\b[,:.!]?\s*)+/i, "").replace(/\s+not\s+\$?\d[\d,.]*\s?[kKmM]?\b/, "");
+  const stale = STRONG_LEAD.test(message) || STALE_WORD.test(message) ? "stale" as const : null;
+  // The period alone: the figure on file was per that period.
+  const per = /^(?:that'?s|it'?s|it is|that is|they'?re)\s+(?:(?:per|a|an|each)\s+(hour|day|week|month|year)|(hourly|daily|weekly|bi-?weekly|monthly|yearly|annual))\b[.!]?$/i.exec(body);
+  // A place that settles an ambiguous one ("Ontario, CA" then "California").
+  const amb = (o.open ?? []).some((x) => /could be/.test(x)) && o.place ? /^(?:it'?s|it is|in)?\s*(?:in\s+)?([A-Z][A-Za-z ]+?)[.!]?$/.exec(body) : null;
+  // The currency alone: "it's in CAD", "in euros", "USD".
+  const code = /\d/.test(body) ? null : currencyOf((/^(?:(?:it'?s|that'?s|it is|that is|they pay|paid)\s+)?(?:paid\s+)?in\s+([A-Za-z. ]+?)[.!]?$/i.exec(body)?.[1] ?? (/^[A-Z]{3}$/.test(body) ? body : "")).trim());
+  let p: Offer;
+  const carried: ("base" | "signing" | "bonus" | "bonus_target")[] = [];
+  if (per && !o.rate && o.base != null) p = parseOfferWords(`${o.written?.base ?? o.base} ${per[1] ? `per ${per[1]}` : per[2]}`, data);
+  else if (amb) { p = parseOfferWords(`It is in ${o.place!.split(",")[0]}, ${amb[1]}`, data); if (p.unsettled || !p.place) return "stale"; }
+  else if (code && code.length === 3) {
+    const off: Offer = { ...o, marks: { ...(o.marks ?? {}) }, written: { ...(o.written ?? {}) } };
+    for (const k of ["base", "signing", "bonus", "bonus_target"] as const) if (off[k] != null || (k === "base" && off.rate)) { const m = off.marks![k]; if (!m || m === "$" || k === "base") { off.marks![k] = code; if (m !== code) delete off.written![k]; } }
+    off.open = (off.open ?? []).filter((x) => !/^a currency/.test(x)); off.unsettled = off.open.length > 0;
+    return settleCurrency(off);
+  } else {
+    // D-078 review: a figure said again with no period of its own ("they raised it to $8,500") is in the period of the figure on
+    // file, and one with no currency of its own ("actually it's 120k") keeps the currency read before; a period or currency the
+    // amendment states wins.
+    const PER_WORD: Partial<Record<string, string>> = { hour: "per hour", day: "per day", week: "per week", biweek: "every two weeks", semimonth: "twice a month", month: "per month" };
+    const perOld = o.rate ? PER_WORD[o.rate.period] : undefined;
+    const said0 = parseOfferWords(body, data);
+    const bare = !said0.rate && said0.period == null && !/\b(?:per|an?|each|every)\s+(?:hour|hr|day|week|month|year|yr|annum)\b|\/\s?(?:hr|h|hour|mo|month|yr|year|wk|week)\b|\b(?:hourly|daily|weekly|monthly|yearly|annual\w*|biweekly|bi-weekly)\b/i.test(body);
+    p = perOld && bare && /\d/.test(body) ? parseOfferWords(body.replace(/([$€£¥₹]?\s?\d[\d,]*(?:\.\d+)?\s?[kKmM]?)(?![\d,.])/, `$1 ${perOld}`), data) : said0;
+    if (perOld && p.unsettled && !said0.unsettled) p = said0;
+    // What they wrote is quoted as they wrote it, never with the period added here.
+    if (p !== said0) { p.written = { ...(p.written ?? {}) }; const typed = said0.written?.base ?? /[$€£¥₹]?\s?\d[\d,]*(?:\.\d+)?\s?[kKmM]?(?![\d,.])/.exec(body)?.[0]?.trim(); if (typed) p.written.base = typed; else delete p.written.base; }
+    for (const k of ["base", "signing", "bonus", "bonus_target"] as const) {
+      const set = k === "base" ? p.base != null || !!p.rate : p[k] != null;
+      if (!set || p.marks?.[k] || !known(o.currencies?.[k] ?? (k === "base" ? o.currency : undefined))) continue;
+      carried.push(k);
+      p.currencies = { ...(p.currencies ?? {}), [k]: o.currencies?.[k] ?? o.currency };
+      p.marks = { ...(p.marks ?? {}), [k]: o.marks?.[k] ?? null };
+      p.currency_assumed = { ...(p.currency_assumed ?? {}), [k]: !!o.currency_assumed?.[k] };
+      if (!p.currency_assumed[k]) delete p.currency_assumed[k];
+      if (k === "base") { p.currency = p.currencies.base; p.currency_fact = o.currency_fact ?? null; }
+    }
+  }
+  const firm = !o.company ? firmFor(message) : null;
+  if (p.company && o.company && !sameCompanyA(p.company, o.company)) return null; // another company's offer: not an amendment
+  if (p.unsettled) return stale;
+  const changes = p.base != null || !!p.rate || !!p.place || !!p.metro || !!p.part_year || p.signing != null || p.bonus != null || p.bonus_pct != null || !!p.ask || !!p.deadline || !!p.total || p.competing.length > 0 || !!firm;
+  if (!changes) return stale;
+  const base: Offer = { ...o, open: amb ? (o.open ?? []).filter((x) => !/could be/.test(x)) : o.open };
+  const out = mergeOffers(base, { ...p, company: firm?.name ?? null, firm_id: firm?.firm_id ?? null, lca_company_id: firm?.lca_company_id ?? null, sector: firm?.sector ?? null, title: p.title && /\b(?:as|title|role|position)\b/i.test(body) ? p.title : null, role: p.title && /\b(?:as|title|role|position)\b/i.test(body) ? p.role : null }, data);
+  if (base.base != null && !p.rate && p.base == null && base.rate == null) { out.open = [...(base.open ?? []), ...(p.open ?? [])]; out.unsettled = out.open.length > 0; }
+  // A figure said again with no currency of its own keeps the currency read before, and so do the figures it did not touch
+  // (the merge settles currency again from the written marks; a currency read from the place has none).
+  if (carried.length) {
+    for (const k of ["base", "signing", "bonus", "bonus_target"] as const) {
+      if (!carried.includes(k) && (k === "base" ? p.base != null || !!p.rate : p[k] != null)) continue;
+      const c = o.currencies?.[k] ?? (k === "base" ? o.currency : undefined);
+      if (!c || !known(c) || (k !== "base" && out[k] == null)) continue;
+      out.currencies = { ...(out.currencies ?? {}), [k]: c };
+      out.currency_assumed = { ...(out.currency_assumed ?? {}) };
+      if (o.currency_assumed?.[k]) out.currency_assumed[k] = true; else delete out.currency_assumed[k];
+    }
+    out.currency = out.currencies?.base ?? out.currency;
+    out.currency_fact = o.currency_fact ?? null;
+  }
+  return out;
+}
+const firmFor = (message: string): any | null => message.trim().split(/\s+/).length <= 3 ? (CareerPaths as any).firmGuide()?.firms?.find((f: any) => [f.name, ...(f.aliases ?? [])].some((w: string) => hasWord(message, String(w).toLowerCase(), true))) ?? null : null;
+
 // ---------- confirm before compare (owner decision 2026-11-13, D-078) ----------
 // Reading free text by rule is wrong about one time in seven, so the reading is a step the person confirms. The offer as
 // read is shown back in one short block (company, role, base with its currency and period as read, every other component
@@ -814,6 +890,25 @@ export function readingHash(block: string): string {
 }
 // A plain yes to the block shown, in this message alone: 122's confirmationReply (the reader every fact confirmation uses).
 export const plainYes = (message: string) => (CareerProfile as any).confirmationReply(String(message ?? "")).kind === "yes";
+// A short assent to the reading shown ("sure", "ok", "y", a thumbs-up, "yes please compare", "yes, help me negotiate"): every
+// word is an assent word or a word of the next step, with at least one assent, and nothing that could change the reading (a
+// figure, a currency, a period, a name, a place, "but", "no", "actually") and no question. Anything else is not a yes; a
+// message that changes something is read as a correction.
+const ASSENT = new Set(["yes", "yep", "yeah", "yea", "yup", "ya", "y", "sure", "ok", "okay", "k", "kk", "correct", "right", "exactly", "confirm", "confirmed", "lgtm", "perfect", "great", "good", "fine", "cool", "yess", "yas"]);
+const ASSENT_EMOJI = /^[\u{1F44D}\u{1F44C}\u{2705}\u{2714}\u{FE0F}\u{1F3FB}-\u{1F3FF}\s]+$/u;
+const NEXT_WORDS = new Set(["please", "pls", "thanks", "thank", "you", "that", "thats", "that's", "is", "it", "looks", "all", "go", "ahead", "do", "compare", "them", "my", "offers", "the", "offer", "help", "me", "negotiate", "counter", "draft", "a", "and", "now", "sounds", "benchmark", "check"]);
+export function assent(message: string): { next: "compare" | "negotiate" | null } | null {
+  const raw = String(message ?? "").normalize("NFKC").trim();
+  if (!raw || /\?/.test(raw)) return null;
+  const emo = /[\u{1F44D}\u{1F44C}\u{2705}\u{2714}]/u.test(raw);
+  const text = raw.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{1F3FB}-\u{1F3FF}]/gu, " ").toLowerCase().replace(/[’‘`]/g, "'").replace(/[.,!:;-]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!text) return emo && ASSENT_EMOJI.test(raw) ? { next: null } : null;
+  if (/\d|[$€£¥₹]/.test(text)) return null;
+  const words = text.split(" ");
+  if (!words.every((w) => ASSENT.has(w) || NEXT_WORDS.has(w))) return null;
+  if (!emo && !words.some((w) => ASSENT.has(w))) return null;
+  return { next: words.includes("negotiate") || words.includes("counter") ? "negotiate" : words.includes("compare") ? "compare" : null };
+}
 export const plainNo = (message: string) => (CareerProfile as any).confirmationReply(String(message ?? "")).kind === "no";
 
 // The reply to an offer that is not settled: what was read, what was not, and the ask. No figure is compared or drafted.
@@ -865,20 +960,41 @@ export function offerReply(o: Offer, notGiven: Field[], data: OfferData = payDat
 
 // ---------- the tool's turn: read, ask once, answer ----------
 // D-078: `reading` is the block last shown for the person's yes (its hash, its time and the pieces it was read from).
-export interface OfferPending { v: 1; pieces: string[]; asked: Field[]; at: number; reading?: { hash: string; block: string; at: number; missing: Field[] } }
-export function offerTurn(o: { words: string; pending: OfferPending | null; now: number; data?: OfferData; lastReply?: string | null }): { result: OfferResult; pending: OfferPending | null } {
+export interface OfferPending { v: 1; pieces: string[]; asked: Field[]; at: number; reading?: { hash: string; block: string; at: number; missing: Field[]; offer?: Offer } }
+export function offerTurn(o: { words: string; pending: OfferPending | null; now: number; data?: OfferData; lastReply?: string | null; message?: string }): { result: OfferResult; pending: OfferPending | null } {
   const data = o.data ?? payData();
   const fresh = o.pending && o.now - o.pending.at < ASK_TTL_MS ? o.pending : null;
   // D-078: the person's plain yes to the reading shown in the reply just before this one confirms exactly that reading. The
   // offer is read again from the same pieces; it must print the same block (hash), or nothing is confirmed.
   const shown = o.pending?.reading && o.now - o.pending.reading.at < CONFIRM_TTL_MS ? o.pending.reading : null;
-  if (shown && plainYes(o.words)) {
-    const offer = o.pending!.pieces.map((p, i) => parseOfferWords(p, data, i ? { asked: o.pending!.asked } : {})).reduce((a, b) => mergeOffers(a, b, data));
+  // D-078 review: the yes is the person's whole message, never the words the model picked out of it ("yes but the base is
+  // 130k" with offer_words "yes" is a correction, not a yes).
+  const said = typeof o.message === "string" ? o.message : o.words;
+  const readOf = (r: NonNullable<OfferPending["reading"]>) => r.offer ?? o.pending!.pieces.map((p, i) => parseOfferWords(p, data, i ? { asked: o.pending!.asked } : {})).reduce((a, b) => mergeOffers(a, b, data));
+  const reshow = (offer: Offer, missing: Field[], lead: string | null): { result: OfferResult; pending: OfferPending | null } => {
+    if (offer.unsettled) return { result: offerReply(offer, missing, data), pending: null };
+    const block = readingBlock(offer, { notGiven: missing });
+    return { result: { status: "confirm", offer, missing, ask: block, benchmarks: [], draft: null, messages: [lead ? `${lead}\n${block}` : block] }, pending: { ...o.pending!, at: o.now, reading: { hash: readingHash(block), block, at: o.now, missing, offer } } };
+  };
+  if (shown && assent(said)) {
+    const offer = readOf(shown);
     const block = readingBlock(offer, { notGiven: shown.missing });
     const before = typeof o.lastReply === "string" && o.lastReply.trim() ? o.lastReply : null;
-    if (block === shown.block && readingHash(block) === shown.hash && (!before || before.includes(block))) return { result: offerReply(offer, shown.missing, data), pending: null };
-    const again = { hash: readingHash(block), block, at: o.now, missing: shown.missing };
-    return { result: { status: "confirm", offer, missing: shown.missing, ask: block, benchmarks: [], draft: null, messages: [`That yes was not to the reading shown just before it, so it confirms nothing.\n${block}`] }, pending: { ...o.pending!, at: o.now, reading: again } };
+    if (shown.hash && block === shown.block && readingHash(block) === shown.hash && (!before || before.includes(block))) return { result: offerReply(offer, shown.missing, data), pending: null };
+    return reshow(offer, shown.missing, "That yes was not to the reading shown just before it, so it confirms nothing.");
+  }
+  if (shown && plainNo(said)) {
+    const msg = "OK, nothing is confirmed and nothing is compared. What should I change? Tell me the right detail, for example \"the base is $150k a year\" or \"it's in CAD\".";
+    // The reading stays on file to be corrected, but no yes can confirm it now (its hash is cleared).
+    return { result: { status: "ask", offer: readOf(shown), missing: shown.missing, ask: msg, benchmarks: [], draft: null, messages: [msg] }, pending: { ...o.pending!, at: o.now, reading: { ...shown, hash: "", at: o.now, offer: readOf(shown) } } };
+  }
+  if (shown) {
+    // A correction to the reading shown, read like an amendment in the chat (amendOf): what it does not restate (the currency
+    // and period read before) is kept.
+    const body = said.replace(/^\W*(?:no|nope|not quite|wrong|yes|yeah|yep)\b[\s,.:;!-]*(?:but\b[\s,]*)?(?=\S)/i, "");
+    const prev = readOf(shown), a = amendOf(body, prev, data);
+    if (a === "stale") return { result: offerReply({ ...prev, unsettled: true, open: [...(prev.open ?? []), `your message "${said}": I could not tell what it changes`] }, shown.missing, data), pending: null };
+    if (a) return reshow(a, missingOf(a), null);
   }
   const now = parseOfferWords(o.words, data);
   // A new offer (another company with its own base) starts over instead of mixing two offers.
@@ -901,7 +1017,7 @@ export function offerTurn(o: { words: string; pending: OfferPending | null; now:
   if (offer.unsettled) return { result: offerReply(offer, missing, data), pending: null };
   // Asked once already: what is still missing is said, never asked again; the reading is shown for the person's yes.
   const block = readingBlock(offer, { notGiven: missing });
-  return { result: { status: "confirm", offer, missing, ask: block, benchmarks: [], draft: null, messages: [block] }, pending: { v: 1, pieces, asked, at: o.now, reading: { hash: readingHash(block), block, at: o.now, missing } } };
+  return { result: { status: "confirm", offer, missing, ask: block, benchmarks: [], draft: null, messages: [block] }, pending: { v: 1, pieces, asked, at: o.now, reading: { hash: readingHash(block), block, at: o.now, missing, offer } } };
 }
 // The words must be the person's own, from this turn's message.
 export function saidIn(message: string, words: string): boolean {

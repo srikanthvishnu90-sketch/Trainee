@@ -895,9 +895,11 @@ export function careerTools(deps: {
         const pending = (c.state.offerBenchmark as OfferPending | undefined) ?? null;
         // D-078: the reading is shown first; only the person's plain yes in the next turn (to the reply that showed it) lets
         // it be benchmarked or drafted.
-        const { result, pending: next } = offerTurn({ words, pending, now: c.now, lastReply: typeof c.turn.before === "string" ? c.turn.before : null });
+        const { result, pending: next } = offerTurn({ words, message, pending, now: c.now, lastReply: typeof c.turn.before === "string" ? c.turn.before : null });
         if (next) c.state.offerBenchmark = next;
         else delete c.state.offerBenchmark;
+        // The reading is the reply, word for word (the brain cannot reword it), so the yes is to exactly the block hashed.
+        if (result.status === "confirm") c.turn.show = { intent: "career_offer_confirm", text: result.messages.join("\n") };
         return { status: result.status, ask: result.ask, offer: result.offer, not_given: result.status === "ask" ? [] : result.missing, benchmarks: result.benchmarks, draft: result.draft, messages: result.messages };
       },
     },

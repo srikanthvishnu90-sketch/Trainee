@@ -79,8 +79,12 @@ export function linkChecker(f: typeof fetch, o: { timeoutMs?: number; userAgent?
         if (r.status === 404 || r.status === 410) return "dead";
         const pid = page.split("/").at(-1)!;
         if (r.ok && !r.url.toLowerCase().includes(pid)) return "dead";
-        // Live needs the page's own data to hold this posting, listed, its deadline not passed; a 200 without it is not confirmed.
-        return r.ok ? linkOf(boardState("Ashby", ashbyAppData(r.text)?.posting, pid, today())) : "unknown";
+        // Live needs the page's own data to hold this posting, listed, its deadline not passed. A 200 page with no app data at all
+        // keeps trunk's answer ("live") for now: tests/architect/r10-wo-c (WO-C S2) and D-051(6) pin it; the stricter answer
+        // (unknown) waits in tests/architect/pending/posting-link-nonjson-20261113.test.ts (owner, 2026-11-13).
+        if (!r.ok) return "unknown";
+        const data = ashbyAppData(r.text);
+        return data ? linkOf(boardState("Ashby", data.posting, pid, today())) : "live";
       } catch {
         return "unknown";
       }

@@ -319,7 +319,8 @@ Deno.test("R6 no board says open or live without its own positive signal; a past
   eq(await checker(any(() => json({ id: 999, title: "Other" })))(gh), "unknown", "Greenhouse another posting");
   eq(await checker(any(() => json({ id: "744000012345678", name: "Eng", active: false })))(sr), "dead");
   eq(await checker(any(() => json({ id: "744000012345678", name: "Eng" })))(sr), "unknown");
-  eq(await checker(any(() => body("<html>Job not found</html>", "text/html")), { ashby: "posting" })(ab), "unknown", "Ashby page with no posting data");
+  // (An Ashby page 200 with no posting data keeps trunk's "live" for now (WO-C S2, D-051(6)): moved to
+  // tests/architect/pending/posting-link-nonjson-20261113.test.ts, owner ruling 2026-11-13.)
   eq([await checker(any(() => json({ id: LEVER_ID, text: "Eng" })))(lv), await checker(any(() => json({ id: 123, title: "Eng" })))(gh), await checker(any(() => json({ id: "744000012345678", name: "Eng", active: true })))(sr)], ["live", "live", "live"]);
 });
 

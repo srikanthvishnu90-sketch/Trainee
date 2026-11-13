@@ -16,3 +16,10 @@ Deno.test("a board API's 200 that is not JSON is unknown, never live", async () 
     ["SmartRecruiters plain text", { job_id: "smartrecruiters:acme:744000012345678" }, page("x", "text/plain")],
   ] as const) assertNode.equal(await linkChecker(f)(job), "unknown", name);
 });
+
+// Moved from tests/architect/posting-read-review-20261113.test.ts R6 (owner ruling 2026-11-13): an Ashby posting page that
+// answers 200 with no posting data is not confirmed live. Pinned the other way today by the WO-C S2 replay and D-051(6).
+Deno.test("an Ashby posting page 200 with no posting data is unknown, never live", async () => {
+  const id = "0ccbe620-aaaa-bbbb-cccc-000000000000";
+  assertNode.equal(await linkChecker(page("<html>Job not found</html>", "text/html"), { ashby: "posting" })({ job_id: `ashby:acme:${id}` }), "unknown");
+});

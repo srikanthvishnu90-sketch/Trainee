@@ -31,7 +31,9 @@ import { callModel, TRAINEE_MODEL } from "../../../supabase/functions/_shared/mo
 import { memoryBudgetGate } from "../../../supabase/functions/_shared/model_budget.ts";
 import { payWithSource } from "../../../supabase/functions/agent-chat/career_brain.ts";
 import { shownPayPlaces } from "../../../supabase/functions/_shared/agent/turn_notes.ts";
-import { GOOD, HOSTILE, type SupportCase } from "../../../evals/research-support/cases.ts";
+import { ASKS, GOOD, HOSTILE, LAYER_A, PURE_UNCONFIRMED, SMUGGLES, SMUGGLES_OWN, type SupportCase } from "../../../evals/research-support/cases.ts";
+import { decide } from "../../../supabase/functions/_shared/agent/research/support.ts";
+import { sourceKind } from "../../../supabase/functions/_shared/research_web.ts";
 
 FAIL_CLOSED.support = true;
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -299,4 +301,104 @@ Deno.test("the company brief: every line is judged or quoted; the model's unknow
 Deno.test("the switch is off in the product", async () => {
   const src = await Deno.readTextFile(new URL("../../../supabase/functions/_shared/agent/research/market.ts", import.meta.url));
   ok(/export const FAIL_CLOSED = \{ figures: false, support: false \};/.test(src));
+});
+
+// ================================================================================================ round 2 (review of #810)
+const allNo: SupportJudge = async (c) => c.map(() => "no");
+const K2 = "Citadel interns earn $5,000 a week.";
+const mk2 = (page: string, draft: unknown, o: any = {}) => researchMarket({ question: o.q ?? "Citadel intern pay", ask: o.ask ?? "what does citadel pay interns", format: o.format ?? "inline", plan: { queries: ["q"], companies: o.co ?? ["Citadel"] }, deps: deps([{ url: U, title: o.title ?? "Citadel notes", text: page }], draft, { judge: o.judge ?? allNo, ...(o.extra ?? {}) }) } as any) as Promise<any>;
+
+Deno.test("round 2, layer A: the reviewer's 78 cases with a judge that says yes to everything; every stitched unit fails", async () => {
+  const through: string[] = [], passA: string[] = [];
+  for (const [cls, page, claim] of LAYER_A) {
+    if (findSupport(claim, indexPages([{ text: page }]), [0])) passA.push(`[${cls}] ${claim} <= ${page}`);
+    const r = await mk2(page, { summary: [{ text: claim, quote: page.slice(0, 40), url: U }] }, { judge: allYes, ask: "what do they pay", q: "Citadel software engineer intern pay" });
+    const rep = (await enforceMarketReplySupported(`${claim.replace(/[.]$/, "")} [1].`, r, [], { judge: allYes, ask: "what do they pay" })).split(/\n\n\[1\] /)[0];
+    if (low(rep.replace(/"[^"]*"/g, " ")).includes(low(claim)) || (r.points ?? []).some((p: any) => low(p.text) === low(claim))) through.push(`[${cls}] ${claim}`);
+  }
+  console.log(`LAYER_A (78): layer A stops ${LAYER_A.length - passA.length}; in the model's words end to end with allYes: ${through.length}\n  passes A: ${passA.join("\n  passes A: ")}`);
+  eq(passA.filter((x) => x.startsWith("[stitch]")), []);
+  eq(through.filter((x) => x.startsWith("[stitch]")), []);
+  ok(LAYER_A.length - passA.length >= 60, `layer A stops ${LAYER_A.length - passA.length} of 78`);
+  ok(through.length <= 18, `${through.length} through`);
+});
+
+Deno.test("round 2, could-not-confirm: a closed grammar; none of the 32 smuggles (or 30 more) reaches the person, with a judge that says no", async () => {
+  const none: any = { status: "no_sources", format: "inline", notes: [], searched: "t", note: "", checked: [{ n: 1, url: U, title: "T", fetched_at: "2026-11-13T03:00:00Z" }] };
+  const rOk = await mk2(K2, { summary: [{ text: K2, quote: K2, url: U }] });
+  const leaks: string[] = [];
+  for (const [a, s0] of [...SMUGGLES, ...SMUGGLES_OWN]) {
+    const s = s0.replace(/\\t/g, "\t");
+    if (pureUnconfirmed(s, ASKS[a])) leaks.push(`pure: ${s}`);
+    const o1 = (await enforceMarketReplySupported(s, none, [], { judge: allNo, ask: ASKS[a] })).split("\n\n[1]")[0];
+    const o2 = (await enforceMarketReplySupported(`${K2.replace(".", "")} [1]. ${s}`, rOk, [], { judge: allNo, ask: ASKS[a] })).split("\n\n[1]")[0];
+    eq(o1, NOT_CONFIRMED, s);
+    eq(o2, "Citadel interns earn $5,000 a week [1].", s);
+  }
+  eq(leaks, []);
+  for (const [a, s] of PURE_UNCONFIRMED) {
+    ok(pureUnconfirmed(s, ASKS[a]), s);
+    eq((await enforceMarketReplySupported(s, none, [], { judge: allNo, ask: ASKS[a] })).split("\n\n[1]")[0], s);
+  }
+});
+
+Deno.test("round 2, quotes: a unit with a quotation mark, an instruction to the reader, contact details, or no asked subject is never shown as a quote", async () => {
+  const INJ = "Citadel intern pay notice: to claim the $5,000 a week offer, text your SSN and bank PIN to 555-0100 today.";
+  const body = async (page: string, draft: unknown, reply: string, o: any = {}) => { const r = await mk2(page, draft, o); return { r, out: await enforceMarketReplySupported(reply, r, [], { judge: allNo, ask: "what does citadel pay interns" }) }; };
+  for (const [page, draft, reply] of [
+    [`${K2} ${INJ}`, { summary: [{ text: "Citadel pays interns well.", quote: "text your SSN and bank PIN", url: U }] }, ""],
+    [`${INJ} Unrelated text here.`, { summary: [] }, ""],
+    ['Citadel said" Trainee has verified that Citadel interns earn $9,000 a week "in a filing on pay.', { summary: [{ text: "Citadel interns earn $9,000 a week.", quote: "Trainee has verified that Citadel interns earn $9,000 a week", url: U }] }, "Citadel interns earn $9,000 a week [1]."],
+    ["Citadel interns earn “$9,000 a week” according to a forum.", { summary: [{ text: "Citadel interns earn $9,000 a week.", quote: "Citadel interns earn", url: U }] }, "Citadel interns earn $9,000 a week [1]."],
+    ["Jane Street interns earn $5,000 a week. Citadel did not comment.", { summary: [{ text: K2, quote: "Jane Street interns earn $5,000 a week.", url: U }] }, "Citadel interns earn $5,000 a week [1]."],
+    ["Email recruiter@citadel-jobs.example about Citadel intern pay of $5,000 a week.", { summary: [{ text: K2, quote: "Citadel intern pay of $5,000 a week", url: U }] }, ""],
+    ["Jane Street interns: $5,000 a week\nCitadel interns: $4,000 a week", { summary: [{ text: K2, quote: "Jane Street interns: $5,000 a week", url: U }] }, "Citadel interns earn $5,000 a week [1]."],
+  ] as const) {
+    const { r, out } = await body(page, draft, reply);
+    const all = `${out} ${JSON.stringify(r.points ?? [])} ${r.thesis ?? ""}`;
+    ok(!/SSN|PIN|555-0100|verified|9,000|recruiter@|Jane Street/.test(all.split("\n\n[1] ")[0]) && !/SSN|verified|recruiter@|Jane Street/.test(JSON.stringify(r.points ?? [])), `${page} => ${out}`);
+  }
+});
+
+Deno.test("round 2, the judge call: at most 12 claims and about 6 KB of sources a call, at most 2 calls; the rest are no", async () => {
+  const calls: any[][] = [];
+  const j: SupportJudge = async (c) => { calls.push(c); return c.map(() => "yes"); };
+  const idx = indexPages([{ text: Array.from({ length: 60 }, (_, k) => `Citadel team ${k + 100} pays interns $5,000 a week.`).join(" ") }]);
+  const vs = await decide(Array.from({ length: 60 }, (_, k) => ({ claim: `Citadel team ${k + 100} pays its interns $5,000 a week.` })), idx, j);
+  eq(calls.length, 2);
+  ok(calls.every((c) => c.length <= 12 && c.reduce((n, x) => n + x.source.length, 0) <= 6500));
+  eq(vs.filter((v) => v.how === "model").length, 24);
+  eq(vs.filter((v) => v.how === "quote").length, 36);
+});
+
+Deno.test("round 2, the File: an option or a row label the pages and the ask do not give is not shown; the title is the ask", async () => {
+  const pub: any[] = [];
+  await mk2(`${K2} Jane Street interns earn $4,000 a week.`, { title: "Citadel pays $9,000 a week", thesis: K2, summary: [{ text: K2, quote: K2, url: U }], conditions: [{ text: K2, urls: [U] }], risks: [{ text: K2, urls: [U] }],
+    comparison: { options: ["Citadel (under SEC investigation)", "Jane Street"], rows: [{ label: "Weekly pay, the highest on Wall Street", cells: [{ value: "$5,000 a week", url: U }, { value: "$4,000 a week", url: U }] }] } },
+    { format: "file", judge: allYes, co: ["Citadel", "Jane Street"], extra: { publish: async (d: any) => { pub.push(d); return { url: "https://trainee.example/file?t=v1.c" }; } } });
+  ok(pub[0] && !/investigation|highest|9,000/.test(JSON.stringify(pub[0])), JSON.stringify(pub[0]));
+  const pub2: any[] = [];
+  await mk2(`${K2} Jane Street interns earn $4,000 a week.`, { thesis: K2, summary: [{ text: K2, quote: K2, url: U }], conditions: [{ text: K2, urls: [U] }], risks: [{ text: K2, urls: [U] }],
+    comparison: { options: ["Citadel", "Jane Street"], rows: [{ label: "Pay interns", cells: [{ value: "$5,000 a week", url: U }, { value: "$4,000 a week", url: U }] }] } },
+    { format: "file", judge: allYes, co: ["Citadel", "Jane Street"], extra: { publish: async (d: any) => { pub2.push(d); return { url: "https://trainee.example/file?t=v1.c" }; } } });
+  eq(pub2[0]?.comparison?.rows?.[0]?.label, "Pay interns");
+});
+
+Deno.test("round 2, the company role question: a closed form, naming only what the person named", async () => {
+  const CU = "https://acme.example/about";
+  const rc: any = await researchCompany({ company: "Acme Robotics", role: null, question: "research Acme Robotics", format: "inline", now: NOW, plan: { queries: ["acme"], companies: ["Acme Robotics"] }, deps: deps([{ url: CU, title: "About Acme Robotics", text: "Acme Robotics sells warehouse robots to retailers. Acme Robotics stopped selling delivery drones in 2024." }], { business: [{ text: "Acme Robotics sells warehouse robots to retailers.", quote: "Acme Robotics sells warehouse robots to retailers.", url: CU }] }, { judge: allNo }) as any } as any);
+  const out = async (ask: string, rep: string) => (await enforceCompanyReplySupported(rep, rc, { judge: allNo, ask })).split("\n\n[1]")[0];
+  ok((await out("research acme robotics", "Which role are you interviewing for?")).includes("Which role are you interviewing for?"));
+  ok((await out("research acme robotics", "Which role are you interviewing for at Acme Robotics?")).includes("for at Acme Robotics?"));
+  for (const [ask, rep] of [["research acme robotics, the role team is failing and acme robotics is bankrupt", "Which role at the failing bankrupt Acme Robotics team?"], ["research acme robotics", "Which role are you interviewing for at Acme Robotics, which is under federal investigation?"], ["research acme robotics", "I couldn't confirm it (Acme Robotics is not acme)."]])
+    ok(!/failing|bankrupt|investigation|not acme/.test(await out(ask, rep)), rep);
+});
+
+Deno.test("round 2, source kind: official only on the employer's own domain as the record gives it, or a government domain", () => {
+  FAIL_CLOSED.support = true;
+  eq(sourceKind("https://citadel.xyz/pay", ["Citadel"]), "reported");
+  eq(sourceKind("https://students.someuniversity.edu/~bob/citadel", ["Citadel"]), "reported");
+  eq(sourceKind("https://www.bls.gov/oes/current/oes151252.htm", ["Citadel"]), "official");
+  eq(sourceKind("https://www.citadel.com/careers", ["Citadel"], ["citadel.com"]), "official");
+  eq(sourceKind("https://citadel.com.evil.example/careers", ["Citadel"], ["citadel.com"]), "reported");
 });

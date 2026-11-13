@@ -1,10 +1,11 @@
 // The real support judge, measured on every case of the reviews (cases.ts). $0 by default:
 //   deno run -A --no-check --import-map=tests/flow/supabase-npm.json evals/research-support/judge-measure.ts
 // prints the case count and an estimated cost and exits; nothing is sent. Live, only with the owner's written approval of the spend
-// (a DECISIONS.md line) and the key; the CI workflow .github/workflows/research-support-live.yml runs it, after reserving the cap at
-// the shared $80 ledger, and settles the ledger to `spent_usd` after:
-//   SUPPORT_JUDGE_SPEND_APPROVED=D-0xx ANTHROPIC_API_KEY=... deno run -A --no-check --import-map=tests/flow/supabase-npm.json \
-//     evals/research-support/judge-measure.ts --live --budget-usd 0.5 --out <dir>
+// (a row of docs/architect/DECISIONS.md), the key and the shared ledger (#824: like every live eval runner, it reserves its cap at the
+// ONE shared $80 ledger before its first model call and settles it to the metered cost at the end, also on error, through
+// evals/career/eval_budget.ts openLiveRunLedger). The CI workflow .github/workflows/research-support-live.yml runs it:
+//   SUPPORT_JUDGE_SPEND_APPROVED=D-0xx ANTHROPIC_API_KEY=... SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+//     deno run -A --no-check --import-map=tests/flow/supabase-npm.json evals/research-support/judge-measure.ts --live --budget-usd 0.5 --out <dir>
 // It sends each case that layer A (code) lets through to the product's model through the gateway (callModel), in batches as a turn
 // would, under an in-process hard cap of --budget-usd (at most $1; a call that does not fit is refused before it is sent), and
 // prints the confusion table against the hand labels, the latency, and `spent_usd=` from the meter; <dir>/result.json keeps it.
@@ -13,7 +14,8 @@ import { CASES, FALSE_101, LAYER_A, SPLIT_CLAIM, SPLIT_PAGES, TRUE_40 } from "./
 import { echoes, findSupport, indexPages, JUDGE_MAX_CLAIMS, judgeAll, modelSupportJudge, quoteClaim, type SupportClaim, supportJudgePayload } from "../../supabase/functions/_shared/agent/research/support.ts";
 import { abbreviated } from "../../supabase/functions/_shared/agent/research/market.ts";
 import { callModel, modelConfig, newMeter, PRICES, TRAINEE_MODEL } from "../../supabase/functions/_shared/model_gateway.ts";
-import { memoryBudgetGate } from "../../supabase/functions/_shared/model_budget.ts";
+import * as bud from "../../supabase/functions/_shared/model_budget.ts";
+import { openLiveRunLedger } from "../career/eval_budget.ts";
 
 const BATCH = JUDGE_MAX_CLAIMS; // as a turn batches them (support.ts)
 // What layer A sends on: the claim beside the passage of the one page unit that holds its hard parts (round 3: the unit with its
@@ -46,9 +48,14 @@ const budget = Number(opt("--budget-usd") ?? 0), out = opt("--out");
 if (!(budget > 0 && budget <= 1) || !out) { console.log("refused: --live needs --budget-usd (above 0, at most 1) and --out <dir>"); Deno.exit(3); }
 if (!/^D-\d{3}[a-z]?$/.test(Deno.env.get("SUPPORT_JUDGE_SPEND_APPROVED") ?? "")) { console.log("refused: --live needs SUPPORT_JUDGE_SPEND_APPROVED=<the DECISIONS.md line>"); Deno.exit(3); }
 if (!Deno.env.get("ANTHROPIC_API_KEY")) { console.log("refused: --live needs ANTHROPIC_API_KEY"); Deno.exit(3); }
-const gate = memoryBudgetGate(Math.round(budget * 1e6));
+// The shared $80 ledger first (refused: no model call); then an in-process gate of the same cap on every call, so a call that does
+// not fit is refused before it is sent and nothing is counted twice.
+const ledger = await openLiveRunLedger({ budgetUsd: budget, approval: Deno.env.get("SUPPORT_JUDGE_SPEND_APPROVED")!, get: (k) => Deno.env.get(k), bud });
+if ("error" in ledger) { console.log(`refused: ${ledger.error}`); Deno.exit(3); }
+const gate = bud.memoryBudgetGate(Math.round(budget * 1e6));
 const cfg = modelConfig(Deno.env), meter = newMeter();
 const judge = modelSupportJudge(async (p) => { const r = await callModel(cfg, { system: p.system, messages: p.messages.map((m) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: p.max_tokens, temperature: p.temperature }, { meter, role: "chat", budget: gate, timeoutMs: 8000 }); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); });
+try {
 const table = { yes_yes: 0, yes_no: 0, no_yes: 0, no_no: 0 }, wrong: string[] = [], ms: number[] = [];
 for (const b of batches) {
   const t0 = Date.now(), got = await judgeAll(judge, b.map((x) => x.c));
@@ -63,3 +70,4 @@ const spent = meter.usd_micros / 1e6;
 await Deno.mkdir(out, { recursive: true });
 await Deno.writeTextFile(`${out}/result.json`, JSON.stringify({ kind: "research-support-judge", approval: Deno.env.get("SUPPORT_JUDGE_SPEND_APPROVED"), model: cfg.model, run_id: Deno.env.get("GITHUB_RUN_ID") ?? null, sha: Deno.env.get("GITHUB_SHA") ?? null, at: new Date().toISOString(), budget_usd: budget, calls: meter.calls, failed: meter.failed, table, wrong, latency_ms: ms, spent_usd: Number(spent.toFixed(6)) }, null, 1));
 console.log(`spent_usd=${spent.toFixed(6)}`);
+} finally { await ledger.settle(meter.calls ? meter.usd_micros / 1e6 : 0); }

@@ -9,16 +9,18 @@ approved amending them as part of turning the check on). Measured on branch `ag/
 
 - Script: `evals/research-support/judge-measure.ts`. Without `--live` it prints the case count and an estimate and sends nothing.
   Today: 353 cases, 179 reach the judge, estimated $0.05 to $0.21 in all.
-- Workflow: `.github/workflows/research-support-live.yml`, a copy of `research-live.yml`'s pattern. It runs only on a push to
-  `ci/research-support-live` that changes `evals/research-support/run-request.json`. Its steps: check the request (`approval` must be
-  a `D-xxx` line, `0 < budget_usd <= 1`); reserve the cap at the shared $80 ledger (`EVAL_LEDGER=shared`, refused if it does not fit);
-  run the script with the key only (`SUPPORT_JUDGE_SPEND_APPROVED`, `--budget-usd`, an in-process `memoryBudgetGate` cap that refuses
-  a call before it is sent); settle the ledger to the metered `spent_usd` (the whole cap stays spent if the run dies unmetered);
-  upload `result.json` (confusion table, wrong cases, latency per call, cost).
-- To run, after the owner writes the DECISIONS line: set `approval` in `evals/research-support/run-request.json` to it (it is
+- Workflow: `.github/workflows/research-support-live.yml`, on the pattern trunk set for live eval runners in #824
+  (`real-sets-live.yml`). It runs only on a push to `ci/research-support-live` that changes
+  `evals/research-support/run-request.json`. Its first step checks the request (`approval` must be a `D-xxx` line,
+  `0 < budget_usd <= 1`); the run step gets the key and the ledger secrets. The script itself refuses unless the approval is a row of
+  `docs/architect/DECISIONS.md`, then reserves the cap at the shared $80 ledger (`eval_budget.ts openLiveRunLedger`,
+  `EVAL_LEDGER=shared`; refused if it does not fit what remains), puts the same cap as an in-process gate on every judge call (a
+  call that does not fit is refused before it is sent), and settles the ledger to the metered cost at the end, also on error. It
+  writes `result.json` (confusion table, wrong cases, latency per call, `spent_usd`) and the workflow uploads it.
+- To run, after the owner writes the DECISIONS row: set `approval` in `evals/research-support/run-request.json` to it (it is
   `PENDING` now, which the first step refuses), then `git push origin HEAD:ci/research-support-live`. Suggested cap: `0.5`.
-- By hand instead (same caps, no ledger reservation):
-  `SUPPORT_JUDGE_SPEND_APPROVED=D-xxx ANTHROPIC_API_KEY=… deno run -A --no-check --import-map=tests/flow/supabase-npm.json evals/research-support/judge-measure.ts --live --budget-usd 0.5 --out out/`
+- By hand instead (same refusals, same ledger):
+  `SUPPORT_JUDGE_SPEND_APPROVED=D-xxx ANTHROPIC_API_KEY=… SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… deno run -A --no-check --import-map=tests/flow/supabase-npm.json evals/research-support/judge-measure.ts --live --budget-usd 0.5 --out out/`
 
 ## 2. Existing tests that fail with the switch on (52)
 

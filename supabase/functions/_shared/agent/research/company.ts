@@ -238,6 +238,8 @@ export async function researchCompany(i: { company: string; role?: string | null
   // A product line keeps its product only when the quote names it.
   const business: (Cited & { product?: string })[] = on("business") ? arr(d.business, 6).map((x) => { const f = fact(x, "business"); if (!f) return null; const pr = squash(x?.product).slice(0, 40);
     return { ...kept(f), ...(pr && !idx && linkFree(pr) && word(pr, squash(x?.quote)) ? { product: pr } : {}) }; }).filter(Boolean) as (Cited & { product?: string })[] : [];
+  // FAIL_CLOSED.support: two drafted lines that end as the same page unit are one line.
+  if (idx) for (let k = business.length - 1; k >= 0; k--) if (business.findIndex((b) => b.text === business[k].text) < k) business.splice(k, 1);
   const developments: Development[] = on("developments") ? arr(d.developments, 5).map((x) => {
     const day = parseDay(squash(x?.date)), f = fact(x, "developments");
     if (!f) return null;

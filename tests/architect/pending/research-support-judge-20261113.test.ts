@@ -131,7 +131,7 @@ Deno.test("allYes judge: what layer A (code) stops alone, by case", async () => 
   // thing, a name or a year the cited sentence does not have, a question on the page.
   for (const id of ["N24", "F04", "F05", "F06", "U01", "U02", "U03", "U04", "U05", "U06", "U07", "U09", "W01", "W02", "W05", "W06", "W09", "W10", "W11", "C03", "C05", "T04", "R01", "R03", "R10", "R12", "R16", "X01", "X04"]) ok(!through.includes(id), `layer A alone stops ${id}`);
 });
-const LAYER_A_THROUGH = 50; // round 4: 44 stopped by code alone (56 in round 3, when a sentence one word off a unit was read as that unit; it is now a claim of its own, for the judge). Before: 49 through (round 2), 59 (round 1).
+const LAYER_A_THROUGH = 45; // round 5: 49 stopped by code alone (a figure is not another name's, a year on the unit is the claim's). // round 4: 44 stopped by code alone (56 in round 3, when a sentence one word off a unit was read as that unit; it is now a claim of its own, for the judge). Before: 49 through (round 2), 59 (round 1).
 const LAYER_A_THROUGH_R2 = 49; // round 2: 45 of the 94 are stopped by code alone (35 in round 1); the other 49 need the judge (polarity, hedges, who did what to whom)
 
 Deno.test("oracle judge: the 28 true cases; none with a supporting page sentence is dropped", async () => {
@@ -301,7 +301,9 @@ Deno.test("the company brief: every line is judged or quoted; the model's unknow
   for (const j of [oracle, quotesOnly]) {
     const r = await run(j);
     eq(r.status, "ok");
-    eq(r.business.map((x: any) => x.text), ['"Acme Robotics stopped selling delivery drones in 2024."', '"Acme Robotics sells warehouse robots to retailers."']);
+    // Round 5: the 2024 unit carries a year the claim does not, so layer A stands the false claim on the other unit, whose quote the
+    // two drafted lines now share (shown once).
+    eq(r.business.map((x: any) => x.text), ['"Acme Robotics sells warehouse robots to retailers."']);
     eq(r.frame?.text ?? null, '"Acme Robotics stopped selling delivery drones in 2024."'); // the reading, not judged yes, is the page's sentence
     eq(r.unknowns.filter((u: string) => /drone market/.test(u)), []);
     eq(r.products, []);
@@ -681,7 +683,7 @@ Deno.test("round 4.2 and 4.5: the passage carries page-level and section-level c
   const far = (lead: string) => [{ url: "https://blog.example/x", title: "Intern pay notes", text: `${lead}\n- Jane Street pays weekly.\n- Optiver is in Amsterdam.\n- Two Sigma is in New York.\n- DRW is in Chicago.\n- ${F9}` }];
   ok(/all false/.test(passageOf(far("The rumours that follow are all false."), F9)!), "the sentence that introduces the list");
   ok(/Myths/.test(passageOf(far("Myths"), F9)!), "the heading above a list");
-  const fill = Array.from({ length: 7 }, (_, k) => `The firm has office number ${k + 1} in a large city.`).join(" ");
+  const fill = Array.from({ length: 40 }, (_, k) => `The firm has office number ${k + 1} in a large city.`).join(" "); // a long page (a short one travels whole)
   ok(/Headings: .*What Jane Street pays/.test(passageOf([{ url: "https://blog.example/x", title: "Notes", text: `Intro line one is here.\nIntro line two is here.\n## What Jane Street pays\n${fill} Interns earn $9,000 a week.` }], "Interns earn $9,000 a week.", [])!), "the heading the unit sits under, however far above");
   const pad = Array.from({ length: 9 }, (_, k) => `The firm has office number ${k + 1} in a large city.`).join(" ");
   ok(/Updated: 2019/.test(passageOf([{ url: "https://blog.example/x", title: "Notes", text: `Updated: 2019\n${pad} ${F9}` }], F9)!), "a date line at the top of the page");

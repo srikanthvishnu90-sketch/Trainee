@@ -126,7 +126,8 @@ const REPLIES: [string, boolean][] = [
   ["I can't check your applications right now, so I can't confirm whether you applied.", false], ["PayPal's internship pays $28 - $49 hourly.", false],
   ["Want me to check whether you've applied to Google?", false], ["No cover letter is required for this application.", false],
   ["Let me know once you've applied and I'll track it.", false], ["The role hasn't opened applications yet.", false], ["Nothing has been sent, saved or submitted.", false],
-  ["You have 10 applications out.", false], ["You don't need to apply separately for the Chicago office.", false],
+  ["You have 10 applications out.", false], ["No account, saved application or submission was created, and nothing was applied for.", false],
+  ["I couldn't make that File: nothing on record for the path comparison: no comparison has been made for you yet.", false], ["You don't need to apply separately for the Chicago office.", false],
 ];
 Deno.test("AC-3 a reply that says they have no applications needs a successful lookup, however the ask was phrased", async () => {
   ok(REPLIES.length >= 40);

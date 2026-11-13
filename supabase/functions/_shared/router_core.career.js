@@ -879,20 +879,89 @@ const CareerJobs = (() => {
     return [...groups.values()].flat();
   }
 
-  function diffNew(current, prior) {
+  const REPOST_WINDOW_MS = 60 * DAY;
+  const STALE_DAYS = 60;
+  const msOf = (v) => { if (v == null) return Date.now(); if (typeof v === "number") return v; const p = Date.parse(v); return isNaN(p) ? Date.now() : p; };
+  function historyEntryFor(history, jobId) {
+    if (!history) return null;
+    if (history[jobId]) return { id: jobId, entry: history[jobId] };
+    for (const id of Object.keys(history)) {
+      const e = history[id];
+      if (e && Array.isArray(e.job_ids) && e.job_ids.includes(jobId)) return { id, entry: e };
+    }
+    return null;
+  }
+  function classifyAgainstHistory(p, history, nowMs) {
+    if (!history) return { entryId: null, entry: null, isRepost: false, isNewCycle: false };
+    const direct = historyEntryFor(history, p.job_id);
+    let hit = direct && (!direct.entry.present || direct.entry.job_ids.includes(p.job_id)) ? direct : null;
+    if (!hit && !direct) {
+      const key = dedupeKey(p);
+      const seatLive = Object.values(history).some((e) => e && e.present && e.dedupe_key === key);
+      if (seatLive) return { entryId: null, entry: null, isRepost: false, isNewCycle: false };
+      let best = null;
+      for (const id of Object.keys(history)) {
+        const e = history[id];
+        if (!e || e.present || e.dedupe_key !== key) continue;
+        if (!best || s(e.closed_at || e.last_seen) > s(best.entry.closed_at || best.entry.last_seen)) best = { id, entry: e };
+      }
+      hit = best;
+    }
+    if (!hit) return { entryId: null, entry: null, isRepost: false, isNewCycle: false };
+    if (hit.entry.present) return { entryId: hit.id, entry: hit.entry, isRepost: false, isNewCycle: false };
+    const closedMs = Date.parse(hit.entry.closed_at || hit.entry.last_seen || "");
+    const gap = isNaN(closedMs) ? Infinity : nowMs - closedMs;
+    if (gap <= REPOST_WINDOW_MS) return { entryId: hit.id, entry: hit.entry, isRepost: true, isNewCycle: false };
+    return { entryId: hit.id, entry: hit.entry, isRepost: false, isNewCycle: true };
+  }
+  function diffNew(current, prior, now) {
     const seen = new Set((prior && prior.job_ids) || []);
-    return (current || []).filter((p) => !seen.has(p.job_id));
+    const history = prior && prior.history;
+    const nowMs = msOf(now == null ? (prior && prior.saved_at) || Date.now() : now);
+    return (current || []).filter((p) => {
+      if (seen.has(p.job_id)) return false;
+      if (history) {
+        const c = classifyAgainstHistory(p, history, nowMs);
+        if (c.isRepost) return false;
+        if (c.entry && !c.isNewCycle && c.entry.present) return false;
+      }
+      return true;
+    });
   }
   function makeSnapshot(postings, now, priorHistory) {
-    const history = Object.assign({}, (priorHistory || {}));
-    const at = new Date(now || Date.now()).toISOString();
-    for (const p of postings) {
-      const h = history[p.job_id];
-      if (!h) history[p.job_id] = { first_seen: at, last_seen: at, repost_count: 0, present: true };
-      else { if (!h.present) h.repost_count = (h.repost_count || 0) + 1; h.last_seen = at; h.present = true; }
+    const history = {};
+    for (const id of Object.keys(priorHistory || {})) {
+      const e = priorHistory[id] || {};
+      history[id] = Object.assign({}, e, { job_ids: Array.isArray(e.job_ids) ? e.job_ids.slice() : [id] });
     }
-    for (const id of Object.keys(history)) if (!postings.some((p) => p.job_id === id)) history[id].present = false;
-    return { saved_at: at, job_ids: postings.map((p) => p.job_id), history };
+    const at = new Date(now || Date.now()).toISOString();
+    const nowMs = msOf(now == null ? Date.now() : now);
+    for (const p of postings) {
+      const c = classifyAgainstHistory(p, history, nowMs);
+      if (!c.entry) {
+        history[p.job_id] = { first_seen: at, last_seen: at, repost_count: 0, present: true, dedupe_key: dedupeKey(p), job_ids: [p.job_id], closed_at: null };
+        continue;
+      }
+      const h = history[c.entryId];
+      if (!h.job_ids.includes(p.job_id)) h.job_ids.push(p.job_id);
+      if (h.present) { h.last_seen = at; }
+      else if (c.isRepost) {
+        h.repost_count = (h.repost_count || 0) + 1;
+        h.last_reposted_at = at;
+        h.last_seen = at; h.present = true; h.closed_at = null;
+      } else {
+        h.cycles = (h.cycles || 1) + 1;
+        h.last_seen = at; h.present = true; h.closed_at = null;
+      }
+    }
+    const currentIds = new Set((postings || []).map((p) => p.job_id));
+    for (const id of Object.keys(history)) {
+      const h = history[id];
+      const live = (h.job_ids || [id]).some((j) => currentIds.has(j));
+      if (!live && h.present) { h.present = false; h.closed_at = at; }
+      else if (!live) h.present = false;
+    }
+    return { saved_at: at, job_ids: (postings || []).map((p) => p.job_id), history };
   }
   async function poll(feedList, opts) {
     opts = opts || {};
@@ -900,37 +969,57 @@ const CareerJobs = (() => {
     const prior = store ? await store.get(key) : null;
     const results = [];
     for (const fd of feedList) results.push(await fetchFeed(fd, opts));
-    const postings = dedupe(results.flatMap((r) => r.postings));
-    const new_postings = diffNew(postings, prior);
+    const rawPostings = dedupe(results.flatMap((r) => r.postings));
+    const priorHistory = prior && prior.history;
+    const nowMs = msOf(opts.now == null ? Date.now() : opts.now);
+    const postings = rawPostings.map((p) => {
+      const c = classifyAgainstHistory(p, priorHistory, nowMs);
+      const ageDays = p.posted_at ? Math.max(0, Math.floor((nowMs - Date.parse(p.posted_at)) / DAY)) : null;
+      return Object.assign({}, p, {
+        reposted: c.isRepost,
+        repost_count: c.entry ? (c.entry.repost_count || 0) + (c.isRepost ? 1 : 0) : 0,
+        canonical_job_id: c.entryId || p.job_id,
+        possibly_stale: !c.entry && ageDays != null && ageDays > STALE_DAYS,
+        first_seen_at: c.entry ? c.entry.first_seen : new Date(nowMs).toISOString(),
+      });
+    });
+    const new_postings = diffNew(postings, prior, opts.now);
+    const reposted_postings = postings.filter((p) => p.reposted);
     const priorIds = (prior && prior.job_ids) || [];
     const massCloseSuspect = priorIds.length >= 4 && postings.length < priorIds.length / 2;
     const snapshot = makeSnapshot(postings, opts.now, prior && prior.history);
     if (massCloseSuspect) {
-      for (const id of priorIds) if (snapshot.history[id]) snapshot.history[id].present = true;
+      for (const id of priorIds) {
+        const h = snapshot.history[id] || (snapshot.history && historyEntryFor(snapshot.history, id) || {}).entry;
+        if (h) { h.present = true; h.closed_at = null; }
+      }
       snapshot.job_ids = priorIds.slice();
       snapshot.mass_close_suspect = { prior_count: priorIds.length, current_count: postings.length };
     }
     if (store) await store.set(key, snapshot);
     const skippedDead = (feedList || []).filter((fd) => fd && fd.status === "dead")
       .map((fd) => ({ company: fd.company || fd.company_token, provider: fd.provider || fd.source, board: fd.board || fd.company_token, status: "dead", reason: fd.note || "board marked dead" }));
-    return { postings, new_postings, feeds: results, snapshot, deadBoards: skippedDead, source_health: sourceHealth(results), mass_close_suspect: massCloseSuspect ? { prior_count: priorIds.length, current_count: postings.length } : null };
+    return { postings, new_postings, reposted_postings, feeds: results, snapshot, deadBoards: skippedDead, source_health: sourceHealth(results), mass_close_suspect: massCloseSuspect ? { prior_count: priorIds.length, current_count: postings.length } : null };
   }
 
   function qualityFlags(posting, opts) {
     opts = opts || {};
     const now = opts.now || Date.now();
     const age_days = posting.posted_at ? Math.max(0, Math.floor((now - Date.parse(posting.posted_at)) / DAY)) : null;
-    const repost_count = opts.repost_count || 0;
+    const repost_count = opts.repost_count != null ? opts.repost_count : (posting.repost_count || 0);
     const jd = lc(posting.jd_text);
     const flags = [];
-    if (age_days != null && age_days >= 60) flags.push({ code: "stale", reason: `open ${age_days} days` });
+    const first_seen = opts.first_seen === true || opts.firstSeen === true || posting.possibly_stale === true;
+    const possibly_stale = age_days != null && age_days > STALE_DAYS && first_seen;
+    if (possibly_stale) flags.push({ code: "possibly_stale", reason: `possibly stale — first seen today but dated ${age_days} days ago` });
+    else if (age_days != null && age_days >= 60) flags.push({ code: "stale", reason: `open ${age_days} days` });
     else if (age_days != null && age_days >= 30) flags.push({ code: "aging", reason: `open ${age_days} days` });
     if (repost_count >= 1) flags.push({ code: "reposted", reason: `reposted ${repost_count === 1 ? "once" : repost_count + " times"}` });
     if (!posting.department && !/\b(team|group|organization|org)\b/.test(jd.slice(0, 800))) flags.push({ code: "missing_team", reason: "no named team in the posting" });
     if (!/(\$\s?\d|salary|compensation range|pay range|base salary)/.test(jd)) flags.push({ code: "missing_salary", reason: "no salary or compensation range shown" });
-    const bad = flags.some((f) => f.code === "stale" || f.code === "reposted");
+    const bad = flags.some((f) => f.code === "stale" || f.code === "possibly_stale" || f.code === "reposted");
     const summary = flags.length ? `${flags.map((f) => f.reason).join(", ")}${bad ? " — lower odds" : ""}` : "no quality flags";
-    return { age_days, repost_count, flags, summary, lower_odds: bad };
+    return { age_days, repost_count, flags, summary, lower_odds: bad, possibly_stale, reposted: repost_count >= 1 };
   }
 
   function profileSkills(profile) {
@@ -1164,7 +1253,7 @@ const CareerJobs = (() => {
 
   return { POLL_MINUTES, NEUTRAL_BAR, STARTER_FEEDS, BOARD_REGISTRY, liveBoards, deadBoards, boardFeeds, feeds, fetchFeed, fetchAll: async (fl, o) => { const r = []; for (const f of fl) r.push(await fetchFeed(f, o)); return { feeds: r, postings: dedupe(r.flatMap((x) => x.postings)), source_health: sourceHealth(r), deadBoards: (fl || []).filter((fd) => fd && fd.status === "dead").map((fd) => ({ company: fd.company || fd.company_token, provider: fd.provider || fd.source, board: fd.board || fd.company_token, status: "dead", reason: fd.note || "board marked dead" })) }; },
     normalizeGreenhouse, normalizeLever, normalizeAshby, normalizeSmartRecruiters,
-    dedupe, dedupeKey, diffNew, makeSnapshot, poll, qualityFlags, hardFilters, scoreFit, profileFromPersona, buildShortlist, shortlistForAsk, askRoleFamilies, recordFeedback, feedbackNudge,
+    dedupe, dedupeKey, diffNew, makeSnapshot, poll, qualityFlags, classifyAgainstHistory, REPOST_WINDOW_MS, STALE_DAYS, hardFilters, scoreFit, profileFromPersona, buildShortlist, shortlistForAsk, askRoleFamilies, recordFeedback, feedbackNudge,
     detectRestrictions, evaluateRestrictions, detectAiAuthorshipBan, applicationPrepFor, sourceHealth, profileResidence,
     detectKnockouts, evaluateKnockouts, evidencedFullTimeYears,
     roleFamily, seniorityBand, locationText, stripHtml, hash };
@@ -28733,6 +28822,10 @@ const CareerAlertWatch = (() => {
       jd_text: posting.jd_text || "",
       posted_at: posting.posted_at || null,
       posted_at_quality,
+      reposted: posting.reposted === true,
+      repost_count: posting.repost_count || 0,
+      possibly_stale: posting.possibly_stale === true,
+      first_seen_at: posting.first_seen_at || null,
       detected_at,
       latency_seconds,
       fit_lines,
@@ -29373,6 +29466,9 @@ const CareerAssign = (() => {
       url: posting.url,
       source: posting.source,
       posted_at: posting.posted_at || null,
+      possibly_stale: posting.possibly_stale === true,
+      reposted: posting.reposted === true,
+      repost_count: posting.repost_count || 0,
       detected_at: new Date(now).toISOString(),
       deadline: extractDeadline(posting),
       fit: { score, bucket, lines: fitLines, matched_fact_ids: factIds },
@@ -29388,7 +29484,8 @@ const CareerAssign = (() => {
     const who = r.company_stated ? r.company : "an employer whose name is not stated in the posting";
     const dl = r.deadline ? ` Deadline, in the posting's own words: "${r.deadline.text}".` : "";
     const fit = r.fit && r.fit.lines && r.fit.lines.length ? ` ${r.fit.lines[0]}.` : "";
-    return `New ${r.role_title} posting: ${r.title} at ${who}${r.location ? ` — ${r.location}` : ""}.${fit}${dl} Apply: ${r.url}`;
+    const stale = r.possibly_stale ? " Possibly stale: this posting was first seen today but its source dates it more than 60 days old." : "";
+    return `New ${r.role_title} posting: ${r.title} at ${who}${r.location ? ` — ${r.location}` : ""}.${fit}${dl}${stale} Apply: ${r.url}`;
   }
 
   function createReminderQueue(store, userId) {
@@ -29583,6 +29680,8 @@ const CareerAssign = (() => {
         url: c.url, posted_at: c.posted_at || null, source: c.source,
         seniority_band: c.seniority_band, role_family: c.role_family,
         jd_text: c.jd_text || "",
+        reposted: c.reposted === true, repost_count: c.repost_count || 0,
+        possibly_stale: c.possibly_stale === true, first_seen_at: c.first_seen_at || null,
         _inherited_fit: c.fit || null, _inherited_fit_lines: c.fit_lines || [], _inherited_fact_ids: c.matched_fact_ids || [],
       };
     }

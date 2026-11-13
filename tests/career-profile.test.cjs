@@ -181,3 +181,12 @@ test(`textNamesSkill on ${SKILL_CASES.length} texts: short and ordinary-word ski
   const p = { facts: [{ id: "a", kind: "experience", text: "Toys R Us cashier; Go Bears! Cheer captain; I have never used SQL" }, { id: "b", kind: "project", text: "Dashboards in R, SQL and Go" }] };
   for (const sk of ["R", "Go", "SQL"]) assert.deepEqual(Profile.skillEvidence(p, sk).supportingFactIds, ["b"], sk);
 });
+
+// Round 3 (2026-11-13): the third review's 195 texts (tests/fixtures/career-skills/review3-20261113.json): [text, skill, named?].
+// Every skill name is refused in a clause that denies it, only wishes for it, or has someone else using it; a name that is
+// also a common word, a place, an animal, a company or a unit (Java, Python, SAS, Scratch, Processing ...) needs a skills context.
+test("textNamesSkill on the third review's 195 texts", () => {
+  const cases = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "career-skills", "review3-20261113.json"), "utf8"));
+  assert.equal(cases.length, 195);
+  assert.deepEqual(cases.filter(([text, skill, want]) => Profile.textNamesSkill(text, skill) !== want).map(([text, skill, want]) => `${JSON.stringify(skill)} in ${JSON.stringify(text)} should be ${want}`), []);
+});

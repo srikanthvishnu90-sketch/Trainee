@@ -12,18 +12,24 @@ do $$
 declare a uuid := '00000000-0000-4000-8000-0000000f7501'; b uuid := '00000000-0000-4000-8000-0000000f7502'; r jsonb; n int; st text; fa timestamptz;
 begin
   if not public.career_apply_payload_stale('{"fields":[{"label":"Authorized?","value":"Yes","factId":"F0"}]}', array['F0'], '{}')
-     or public.career_apply_payload_stale('{"fields":[{"label":"GPA","value":"3.9","factId":"F9"}]}', array['F0'], array['n:3.9'])
      or not public.career_apply_payload_stale('{"answers":[{"label":"GPA","value":"3.90"}]}', '{}', public.career_apply_changed_keys('GPA: 3.9', null, null, null))
      or not public.career_apply_payload_stale('{"answers":[{"value":"05/2026"}]}', '{}', public.career_apply_changed_keys('Graduating in May 2026', null, 'Graduating in December 2026', null))
      or public.career_apply_payload_stale('{"answers":[{"value":"3.95"},{"value":"Yes"},{"value":"May"}]}', '{}', public.career_apply_changed_keys('GPA: 3.9', null, null, null) || public.career_apply_changed_keys('Yes', null, null, null))
   then raise exception 'FAIL career_apply_payload_stale'; end if;
-  raise notice 'ok   a field with a fact id states that fact; other values compare normalised; yes/no/a month alone never';
+  if not public.career_apply_payload_stale('{"fields":[{"label":"What is your GPA?","value":"3.9","factId":"text-answer:1"}]}', array['F-gpa'], public.career_apply_changed_keys('GPA: 3.9', null, null, null))
+     or not public.career_apply_payload_stale('{"fields":[{"label":"Authorized to work without sponsorship?","value":"Yes","factId":"F-wa"}]}', array['F-sp'], public.career_apply_changed_keys('Sponsorship: I do not need sponsorship', null, 'Sponsorship: I will need sponsorship', null))
+     or public.career_apply_payload_stale('{"fields":[{"label":"How many references?","value":"2"}]}', array['F-py'], public.career_apply_changed_keys('2 years of Python experience', null, null, null))
+     or (public.career_apply_facts_diff('[{"id":"F-py","text":"2 years of Python experience","status":"confirmed"},{"id":"F-c","text":"Citizenship: U.S. citizen","status":"confirmed"}]',
+           '[{"id":"F-py2","text":"2 years of Python experience","status":"confirmed"},{"id":"F-c","text":"Citizenship: US citizen","status":"confirmed"}]')).ids <> '{}'
+  then raise exception 'FAIL round 3 matching'; end if;
+  raise notice 'ok   a field states its fact by id and its value; values compare normalised; yes/no/a month alone never';
+  raise notice 'ok   a text answer and a two-fact answer are stale; the same words saved again and an unrelated 2 are not';
 
   set local session_replication_role = replica;
   insert into public.career_apply_jobs(user_id,job_id,company,url,payload,payload_hash,approval_hash,state,attempts) values
     (a,'sf-1','Unstarted Co','https://example.test/1','{"fields":[{"label":"Authorized?","value":"Yes","factId":"F0"}]}',repeat('a',64),repeat('a',64),'queued',0),
     (a,'sf-2','Tried Co','https://example.test/2','{"fields":[{"label":"Authorized?","value":"Yes","factId":"F0"}]}',repeat('b',64),repeat('b',64),'queued',1),
-    (a,'sf-3','Other Fact Co','https://example.test/3','{"fields":[{"label":"Authorized?","value":"Yes","factId":"F1"}]}',repeat('c',64),repeat('c',64),'queued',0),
+    (a,'sf-3','Other Fact Co','https://example.test/3','{"fields":[{"label":"Willing to relocate?","value":"Yes","factId":"F1"}]}',repeat('c',64),repeat('c',64),'queued',0),
     (b,'sf-4','Someone Else Co','https://example.test/4','{"fields":[{"label":"Authorized?","value":"Yes","factId":"F0"}]}',repeat('d',64),repeat('d',64),'queued',0),
     (a,'sf-5','Write Co','https://example.test/5','{"fields":[{"label":"GPA","value":"3.8","factId":"F5"}]}',repeat('e',64),repeat('e',64),'queued',0);
   set local session_replication_role = origin;
@@ -51,7 +57,10 @@ begin
   if not exists (select from public.career_apply_fact_changes where user_id = a and reason = 'fact_write' and 'F5' = any(fact_ids) and 'n:3.8' = any(fact_keys)) then raise exception 'FAIL the fact write recorded nothing'; end if;
   update public.career_apply_jobs set state = 'driving', attempts = 1, claimed_at = now(), lease_token = gen_random_uuid() where job_id = 'sf-5';
   if (select state from public.career_apply_jobs where job_id = 'sf-5') <> 'not_submitted' then raise exception 'FAIL a row stating a fact changed by a write was started'; end if;
+  if (select jsonb_array_length(public.career_apply_fact_stops_untold(a))) <> 2 or (select jsonb_array_length(public.career_apply_fact_stops_untold(a))) <> 0 then
+   raise exception 'FAIL the claim''s stops are not told once'; end if;
   raise notice 'ok   a fact write records the change in its own transaction; the claim refuses with no stop call';
+  raise notice 'ok   what the claim stopped is told once (the chat''s own stop was said in its reply)';
 
   -- facts_at moves only with a new approval.
   select coalesce(facts_at, created_at) into fa from public.career_apply_jobs where job_id = 'sf-3';

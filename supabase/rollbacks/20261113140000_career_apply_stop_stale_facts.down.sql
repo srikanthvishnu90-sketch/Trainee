@@ -46,6 +46,13 @@ begin
  end if;
  return jsonb_build_object('ok', true);
 end $$;
+revoke all on function public.career_apply_vm_heartbeat(uuid, uuid, text, text) from public, anon, authenticated;
+do $$ begin
+ if exists (select from pg_roles where rolname = 'apply_vm_worker') then
+  grant execute on function public.career_apply_vm_heartbeat(uuid, uuid, text, text) to apply_vm_worker;
+ end if;
+end $$;
+grant execute on function public.career_apply_vm_heartbeat(uuid, uuid, text, text) to service_role;
 create or replace function public.career_apply_cloud_authorize_any(p_id uuid, p_lease uuid, p_hash text, p_source_digest text default null) returns jsonb
 language plpgsql security definer set search_path = public, pg_temp as $$
 declare r jsonb;
@@ -56,6 +63,8 @@ begin
  end if;
  return public.career_apply_cloud_text_authorize(p_id, p_lease, p_hash, p_source_digest);
 end $$;
+revoke all on function public.career_apply_cloud_authorize_any(uuid, uuid, text, text) from public, anon, authenticated;
+grant execute on function public.career_apply_cloud_authorize_any(uuid, uuid, text, text) to service_role;
 do $$ begin
  drop function if exists public.career_apply_fact_changed_close(uuid, timestamptz, text);
  drop function if exists public.career_apply_fact_hit(uuid, jsonb, timestamptz);

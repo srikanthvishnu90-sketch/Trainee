@@ -310,19 +310,19 @@ Deno.test("F6 security mail is withheld and ordinary recruiter mail stays readab
   eq(leaked, [], "every security email is withheld");
   const lost = ORDINARY.filter(([from, subject, text]) => S.securityMail({ from, subject, text })).map((c) => c[1]);
   eq(lost, [], "no ordinary email is withheld");
-  // Round 2 (review of PR #814): every returned text is redacted whatever its wording, so ordinary mail loses its bare numbers
-  // (job codes, meeting ids) and its links' paths. Its words, money, dates, times and usual-format phone numbers stay.
-  for (const [, subject, text] of ORDINARY) {
-    const red = S.redactSecrets(`${subject}\n${text}`);
-    // (what follows "passcode" on its line goes with it)
-    for (const w of `${subject} ${text.replace(/pass(?:word|code).*$/gim, "")}`.match(/\b[A-Za-z]{3,}\b/g) ?? []) if (!/^https?$/.test(w)) ok(red.includes(w) || /https?:\/\/\S*/.test(text) && !text.replace(/https?:\/\/\S*/g, "").includes(w), `"${w}" is kept: ${red}`);
-  }
-  for (const keep of ["$120000", "June 15, 2027", "415-555-0134", "3pm", "December 4", "11/20/2026", "9:30", "02/03/2027", "2-4pm"]) ok(S.redactSecrets(ORDINARY.map((c) => c[2]).join("\n")).includes(keep), `${keep} is kept`);
-  // Round 3: a test or scheduling link on a known host keeps its path (it is the test itself); its query and fragment still go.
-  ok(S.redactSecrets(ORDINARY[9][2]).includes("https://www.hackerrank.com/test/abc123xyz") && S.redactSecrets(ORDINARY[11][2]).includes("https://calendly.com/reschedulings/9f2c"), "a meeting or test link keeps its path");
+  // Ordinary mail keeps its words: the dates, phone numbers, pay, meeting details and job codes are all still there. Exactly,
+  // except a credential written into an ordinary mail (review of PR #820, round 4: a meeting passcode or a gate code is redacted,
+  // the rest of the invite stays), each stated exactly below.
+  const CREDENTIAL: Record<string, string> = {
+    "Hi Sam, your interview is Tuesday at 3pm. Zoom meeting ID 912 3345 1200, passcode 482913. See you then.": "Hi Sam, your interview is Tuesday at 3pm. Zoom meeting ID 912 3345 1200, passcode [removed]. See you then.",
+    "Our office is at 1007 Mountain Drive, zip code 60601. The dress code is business casual. Parking code 4471 opens the gate.": "Our office is at 1007 Mountain Drive, zip code 60601. The dress code is business casual. Parking code [removed] opens the gate.",
+    "Join the Teams meeting on Monday. Meeting ID: 284 119 402 77 Passcode: Qx9T2a. Dial-in conference ID 88120044.": "Join the Teams meeting on Monday. Meeting ID: 284 119 402 77 Passcode: [removed]. Dial-in conference ID 88120044.",
+  };
+  for (const [, subject, text] of ORDINARY) if (!/https?:/.test(text)) eq([S.redactSecrets(subject), S.redactSecrets(text)], [subject, CREDENTIAL[text] ?? text], subject);
+  ok(S.redactSecrets(ORDINARY[9][2]).includes("https://www.hackerrank.com/test/abc123xyz") && S.redactSecrets(ORDINARY[11][2]).includes("https://calendly.com/reschedulings/9f2c"), "an ordinary link stays");
   // What is left in a readable email that could sign someone in is taken out.
   const red = S.redactSecrets("Hi Sam, great talking. Your portal code is 448210 and the password: Winter2026! Log in at https://portal.acme.com/login?token=abc.def or see https://acme.com/careers");
-  ok(!/448210|Winter2026|token=abc/.test(red) && red.includes("Hi Sam, great talking."), red);
+  ok(!/448210|Winter2026|token=abc/.test(red) && red.includes("https://acme.com/careers") && red.includes("Hi Sam, great talking."), red);
 });
 
 Deno.test("F6 the reader and find_email: a security email's subject, snippet and text never come back; other email comes back as data with the note", async () => {

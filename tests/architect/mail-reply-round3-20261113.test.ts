@@ -22,6 +22,7 @@ import * as C from "../../supabase/functions/_shared/agent/capability_tools.ts";
 import * as Sit from "../../supabase/functions/_shared/career_situation.ts";
 import * as Undo from "../../supabase/functions/_shared/career_undo.ts";
 import { ORDINARY_60, SECRET_109 } from "./helpers/mail_round3_tables.ts";
+import { PENDING_109 } from "./helpers/mail_pending_leaks.ts";
 
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -47,16 +48,12 @@ const seen = (from: string, subject: string, text: string) => {
   if (s.securityMail({ from, subject, text: `${snippet}\n${text}` })) return null;
   return [s.redactSecrets(subject), s.redactSecrets(snippet), s.redactSecrets(text)].join("\n|\n");
 };
-// What still reaches a model, by class (the module's header names them): no code cue near the token; kept by the ordinary-mail
-// rules (a percentage, a phone, a year, a postal code); a secret only by its meaning (a seed phrase, backup words); a link whose
-// token is words or a short path. Pinned so the set cannot grow unseen.
-const STILL_LEAKS = ["3+3 split by word", "split lines 2", "cvv words", "kennwort prose", "door code 3 digit", "dial-in pin", "percent disguise", "phone disguise", "year disguise", "zip disguise",
-  "backup codes list", "backup words", "seed 12", "seed 24", "seed numbered", "token subdomain words", "no scheme short path"];
+// Secrets that nothing marks (no cue, no shape, no link) are pending, not allowed: helpers/mail_pending_leaks.ts PENDING_109,
+// asserted in tests/architect/pending/mail-secrets-without-cue-20261113.test.ts. Every other secret must not leak.
 Deno.test("A the review's tables: secrets of 109 emails leak only in the named classes (was 74); none of 60 ordinary emails loses useful content (was 41)", () => {
   eq([SECRET_109.length, ORDINARY_60.length], [109, 60]);
   const leaks = SECRET_109.filter(([, from, subject, text, pieces]) => { const v = seen(from, subject, text); return v !== null && pieces.every((p) => v.includes(p) || v.normalize("NFKC").includes(p.normalize("NFKC"))); }).map((c) => c[0]);
-  eq(leaks.filter((n) => !STILL_LEAKS.includes(n)), [], "no leak outside the named classes");
-  ok(leaks.length <= STILL_LEAKS.length, `${leaks.length} leaks`);
+  eq(leaks.filter((n) => !PENDING_109.includes(n)), [], "no secret leaks except the pending ones");
   const lost = ORDINARY_60.flatMap(([from, subject, text, keep]) => { const v = seen(from, subject, text); return v === null ? [`${subject}: withheld`] : keep.filter((k) => !s.redactSecrets(text).includes(k)).map((k) => `${subject}: ${k}`); });
   eq(lost, [], "ordinary mail keeps salaries, dates, times, phones, ids and meeting links");
 });
@@ -191,7 +188,7 @@ Deno.test("D the earlier attempt is found by its key: 250 newer drafts do not hi
     status: "shown", approved_hash: null, approved_at: null, sent_at: null, gmail_id: null, gmail_thread: null, result: null, created_at: new Date(now + 1000).toISOString(), hash: "a".repeat(64) })), now + 1000);
   eq((await card(store, {}, now + 2 * MIN)).reason, "earlier_unconfirmed");
   const src = await Deno.readTextFile(new URL("../../supabase/functions/_shared/career_outreach.ts", import.meta.url));
-  ok(/async replyAttempts\(u, to, inReplyTo\) \{[\s\S]{0,400}\.eq\("recipient->>kind", "mail_reply"\)[\s\S]{0,120}\.eq\("recipient->reply->>in_reply_to", inReplyTo\)\.in\("status", \["sending", "approved"\]\)/.test(src), "keyed lookup in the deployed store");
+  ok(/async replyAttempts\(u, to, inReplyTo\) \{[\s\S]{0,400}\.eq\("recipient->>kind", "mail_reply"\)[\s\S]{0,120}\.eq\("recipient->reply->>in_reply_to", inReplyTo\)\.in\("status", \["sending", "approved", "sent"\]\)/.test(src), "keyed lookup in the deployed store (round 4: sent replies too)");
 });
 
 Deno.test("E a crash mid-send: the try is in flight until it is found abandoned, then ended there; every unconfirmed reply names the way out", async () => {

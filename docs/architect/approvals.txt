@@ -374,3 +374,4 @@
 768 3696cddf7a043907320f4b74776c7b1e1f3c9770 independent-review-20261113 risk=low note=hypotheticals-withhold-record-tools-prompt-only
 780 f651d90dcce157dd80150546da201e7595674ecf independent-review-20261113 risk=low note=adds-not-checked-clause-narrow-tone-window
 811 cf4e82a2a8818918a9f80f796689430058c28b83 independent-review-20261113 risk=medium note=no-branch-only-losses-false-claims-145-to-45-edit-turn-claims-stay-beside-true-block
+825 e84c9199a3e7e4799346da5aab00b1499595adb7 independent-review-20261113 risk=medium note=net-fewer-leaks-followup-signin-colon-other-languages-false-redactions

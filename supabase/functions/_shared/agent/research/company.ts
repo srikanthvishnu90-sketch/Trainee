@@ -20,7 +20,7 @@ import { isBlockedHost, isHttps, normalizeUrl, type SourcePage, URL_IN_TEXT, ver
 import type { SearchPlan } from "../../research_search.ts";
 import { NO_SOURCES, NOT_CONFIRMED } from "../../research_reply.ts";
 import { contentWords, numbersIn, numEq, specifics } from "./guard.ts";
-import { abbreviated, agrees, auditFromPages, auditLine, checkLine, FAIL_CLOSED, figuresIn, hasPredicate, type MarketDeps, newAudit, ON_PAGES_SHARE, pageSentences, passagesFor, pureUnconfirmed, type ResearchAudit, wordsOnPages } from "./market.ts";
+import { abbreviated, agrees, auditFromPages, auditLine, checkLine, FAIL_CLOSED, figuresIn, hasPredicate, type MarketDeps, newAudit, ON_PAGES_SHARE, askSpan, pageSentences, passagesFor, pureUnconfirmed, type ResearchAudit, wordsOnPages } from "./market.ts";
 import { bare, decide, indexPages, markSupported, quoted, supportOf, type SupportJudge, type Verdict, type Wanted } from "./support.ts";
 import { stripUrls } from "./reply.ts";
 import { parseDraft } from "./draft_json.ts";
@@ -198,7 +198,8 @@ export async function researchCompany(i: { company: string; role?: string | null
   // periods, years and names AND the judge says that sentence states it; else that page sentence in quotation marks; else dropped.
   // The company's name is lent to no line (D-070's lending is off on this path). What has no quoted form is not shown at all: the
   // model's "unknowns", a product's angle, and the questions built around a tension the model named.
-  const idx = FAIL_CLOSED.support ? indexPages(pages, abbreviated) : null;
+  const idx = FAIL_CLOSED.support ? indexPages(pages, abbreviated, [company]) : null;
+  const units = new Set((idx?.pages ?? []).flatMap((p) => p.sentences.filter((u) => u.quotable).map((u) => u.text)));
   const pidx = (p: SourcePage | null) => p ? pages.indexOf(p) : -1;
   const FRAME = {}, sup = new Map<unknown, Verdict>();
   if (idx) {
@@ -243,6 +244,8 @@ export async function researchCompany(i: { company: string; role?: string | null
   const competitors = on("competitors") ? arr(d.competitors, 4).map((x) => {
     const name = squash(x?.name).slice(0, 60), f = fact(x, "competitors");
     if (!f) return null;
+    // FAIL_CLOSED.support, round 2: that X competes is the model's claim: it stands only judged (never as a quote), X a name.
+    if (idx && (f.via === "quote" || !/^\p{Lu}/u.test(name))) return drop("competitor_not_named", "competitors", x);
     if (!name || !linkFree(name) || word(company, name) || !word(name, idx ? f.sentence ?? "" : squash(x?.quote))) return drop("competitor_not_named", "competitors", x);
     return { name, ...kept(f) };
   }).filter(Boolean) as (Cited & { name: string })[] : [];
@@ -256,7 +259,7 @@ export async function researchCompany(i: { company: string; role?: string | null
   const facts0 = () => business.length + developments.length + competitors.length + role_asks.length;
   if ((!audit.drafted || facts0() < 2) && on("business")) for (const l of pageSentences(pages, contentWords(`${company} ${role ?? ""} ${i.question}`), [company], 4)) {
     if (audit.drafted && facts0() >= 2) break;
-    if (business.some((b) => b.text === l.text || b.text === own(l.text)) || (idx && /\?$/.test(l.text))) continue;
+    if (business.some((b) => b.text === l.text || b.text === own(l.text)) || (idx && !units.has(l.text))) continue;
     business.push({ text: own(l.text), cite: [num(l.page)] }); auditFromPages(audit, "business");
   }
   // A question is code's sentence around a verified tension: the area agrees with its quote on a cited page; A and B are each stated
@@ -443,12 +446,13 @@ export function enforceCompanyReply(reply: string, r: CompanyResult, checked = f
 // not), or a sentence that passes both layers against the pages it cites (ONE batched judge call); one the judge does not pass is
 // replaced by the page's own sentence in quotation marks; one with no page sentence is removed. With the switch off this is
 // enforceCompanyReply.
-const ROLE_FRAME = contentWords("role position job team internship title interview interviewing applying apply which what tell know");
+// Round 2: the role question is one closed form too ("Which role are you interviewing for [at <words of the ask, in order>]?").
+const ROLE_FORM = /^(?:which|what) (?:role|position|team|job|internship) (?:are|were) you (?:interviewing|applying) for(?: at (.+?))?\?$/;
 export async function enforceCompanyReplySupported(reply: string, r: CompanyResult, o: { judge?: SupportJudge | null; ask?: string } = {}): Promise<string> {
   if (!FAIL_CLOSED.support) return enforceCompanyReply(reply, r);
-  const ask = String(o.ask ?? ""), asked = contentWords(ask);
+  const ask = String(o.ask ?? "");
   const pieces = (t: string) => String(t ?? "").split(/\n+/).flatMap((l) => stripUrls(l).split(/(?<=[.!?]["')*_]*(?:\s*\[\d+\])*)\s+/)).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x));
-  const roleQ = (s: string) => /\?\s*$/.test(s) && !!r.ask && ROLE_Q.test(s) && !numbersIn(s).length && [...contentWords(bare(s))].every((w) => asked.has(w) || ROLE_FRAME.has(w));
+  const roleQ = (s: string) => { const m = ROLE_FORM.exec(s.trim().toLowerCase()); return !!r.ask && !!m && (!m[1] || (!/[^a-z0-9' &-]/.test(m[1]) && askSpan(m[1], ask))); };
   const sup = r.status === "ok" ? supportOf(r) : null;
   if (r.status !== "ok" || !sup) return enforceCompanyReply(pieces(reply).filter((s) => roleQ(s) || pureUnconfirmed(s, ask)).join(" "), r, true);
   const inline = r.format === "inline", max = r.sources.length, plain = (s: string) => bare(s).replace(/\s*[.!?]+$/, "");

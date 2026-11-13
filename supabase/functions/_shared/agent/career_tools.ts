@@ -28,7 +28,7 @@ import {
   type OutreachStore, payloadHash, recordOutreach, SIGNATURE_ASK, guardRecipient,
 } from "../career_outreach.ts";
 import { legacyRows, REFERRAL_ASK, referralMap, targetFirms } from "../career_referrals.ts";
-import { CONTACT_QUESTION, confirmedOnly, EMAIL_PLACEHOLDER, contactFromMessage, contactQuestion, namedIn, resumeContact, type PersonaStore, type ResumeRenderer, type ResumeStore, restatePersona, savePersona, tailorForPosting, validPersonaName } from "../career_tailor.ts";
+import { affirmsOwn, CONTACT_QUESTION, confirmedOnly, EMAIL_PLACEHOLDER, contactFromMessage, contactQuestion, namedIn, resumeContact, type PersonaStore, type ResumeRenderer, type ResumeStore, restatePersona, savePersona, tailorForPosting, validPersonaName } from "../career_tailor.ts";
 import { recordVersion, type ResumeVersionLog } from "../career_resume_outcomes.ts";
 import { changesOfItems, postingKeyOf } from "../career_material_writer.ts"; // D-072 (files writers)
 import { planLayout } from "../career_resume_rater.ts"; // RELEASE 10
@@ -228,6 +228,8 @@ function reviewOf(r: any, delivered: boolean): Record<string, unknown> {
   if (!delivered) return out;
   const flags = [
     ...(r.placeholders ?? []).includes("email") ? [`The email at the top prints as the visible placeholder ${EMAIL_PLACEHOLDER}: no email is on their confirmed resume and they have not typed one. Say so in the same sentence that hands over the file, and that it needs their email before it is used anywhere; never fill in the account's or this chat's address.`] : [],
+    ...(r.edits ?? []).filter((e: any) => e.left_out?.length).map((e: any) => `${e.entry}: shortened as they asked; this version no longer prints: ${e.left_out.join("; ")}. Say what was left out; it is still on their record.`),
+    ...(r.edits ?? []).filter((e: any) => e.restored?.length).map((e: any) => `${e.entry}: printed whole. Shortening it as asked would have dropped ${e.restored.join(", ")} from what they confirmed, so nothing was removed. Say that, and ask if they want that removed.`),
     ...(r.edits ?? []).filter((e: any) => e.expand_short).map((e: any) => `${e.entry}: their confirmed record holds ${e.available} detail${e.available === 1 ? "" : "s"} for it, so it prints ${e.now} (all it holds). Say that, and ask what else they did there; nothing was written for them. The number of lines is your input to the tool, not theirs: never say they asked for a number they did not type.`),
   ];
   out.review_draft = { placeholders: r.placeholders ?? [], flags, note: "Hand it over as a review draft for them to check, not a final file. Name any detail they told you in this conversation is uncertain, outdated or conflicting that still prints in it, and say it needs reconciling before it is sent anywhere. Describe edits only as edits_done says (condensed, expanded, led); for work in progress keep their wording about what is being built, never claim it works. Nothing was submitted." };
@@ -1041,7 +1043,10 @@ export function careerTools(deps: {
         if (only === null) throw new Error(`not saved: ${hasEmail ? "no name is on their confirmed record either, so their name must be typed too" : hasName ? "no email is on their confirmed record either, so their email must be typed too" : "nothing was typed"}. Ask them: "${question}"`);
         const r = contactFromMessage(c.turn.message, i.name, i.email, only ? { only } : {});
         if (!r.ok) throw new Error(`not saved: ${r.error}. Ask them: "${question}"`);
-        p.basics = { ...(p.basics || {}), ...(only !== "email" ? { name: r.name } : {}), ...(only !== "name" ? { email: r.email } : {}) };
+        // A template-looking address (148 rule 4) is theirs only when they say so in this message ("<a> is my email", "use <a>").
+        const typedNow = only !== "name" && r.email && affirmsOwn(c.turn.message, r.email) ? [String(r.email).trim().toLowerCase()] : [];
+        p.basics = { ...(p.basics || {}), ...(only !== "email" ? { name: r.name } : {}), ...(only !== "name" ? { email: r.email } : {}),
+          ...(typedNow.length ? { contact_checked: [...new Set([...(Array.isArray(p.basics?.contact_checked) ? p.basics.contact_checked : []), ...typedNow])].slice(-10) } : {}) };
         const shown = resumeContact(confirmedOnly(p));
         return { saved: { ...(only !== "email" ? { name: r.name } : {}), ...(only !== "name" ? { email: r.email } : {}) }, restated: `Your resume will show ${shown.name} and ${shown.email} at the top.` };
       },

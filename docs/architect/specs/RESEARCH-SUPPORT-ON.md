@@ -18,7 +18,7 @@ approved amending them as part of turning the check on). Measured on branch `ag/
   `EVAL_LEDGER=shared`; refused if it does not fit what remains), puts the same cap as an in-process gate on every judge call (a
   call that does not fit is refused before it is sent), and settles the ledger to the metered cost at the end, also on error. It
   writes `result.json` (confusion table, wrong cases, latency per call, `spent_usd`) and the workflow uploads it.
-- To run, after the owner writes the DECISIONS row (for example `| D-0xx | … | Owner: run evals/research-support/judge-measure.ts live, cap $0.50 | … |`): set `approval` in `evals/research-support/run-request.json` to it (it is
+- To run, after the owner writes the DECISIONS row (for example `| D-0xx | **Owner approves the live judge-measure run of the support judge, cap $0.50.** | settled | owner | 2026-11-xx |`; the row must be the owner's, approve judge-measure with no "not" or refusal in it, and give a cap at least the run's): set `approval` in `evals/research-support/run-request.json` to it (it is
   `PENDING` now, which the first step refuses), then `git push origin HEAD:ci/research-support-live`. Suggested cap: `0.5`.
 - By hand instead (same refusals, same ledger):
   `SUPPORT_JUDGE_SPEND_APPROVED=D-xxx ANTHROPIC_API_KEY=… SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… deno run -A --no-check --import-map=tests/flow/supabase-npm.json evals/research-support/judge-measure.ts --live --budget-usd 0.5 --out out/`

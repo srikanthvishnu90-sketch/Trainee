@@ -15,7 +15,7 @@ import { contentWords, numbersIn, numEq, specifics } from "./guard.ts";
 import { stripUrls } from "./reply.ts";
 import { parseDraft, readAlike } from "./draft_json.ts";
 import { type SourceKind, sourceKind } from "../../research_web.ts";
-import { bare, decide, indexPages, markSupported, quoteOf, supportOf, type SupportJudge, UNCHECKED_LINE, uncheckedOk, type Verdict, type Wanted } from "./support.ts";
+import { bare, decide, indexPages, markSupported, OUTAGE_LINE, quoteOf, supportOf, type SupportJudge, UNCHECKED_LINE, uncheckedOk, type Verdict, type Wanted } from "./support.ts";
 
 export interface MarketDeps {
   search: SearchProvider;
@@ -38,7 +38,7 @@ export interface MarketSource { n: number; url: string; title: string; fetched_a
 export type MarketResult =
   // checked (D-073 review): the pages that were opened and read when none of them supported an answer, so the reply that says it
   // could not confirm one carries the sources it checked. Empty or absent when no page could be opened.
-  | { status: "no_sources"; format: "inline"; notes: string[]; searched: string; note: string; audit?: ResearchAudit; checked?: MarketSource[]; layout?: "messages" }
+  | { status: "no_sources"; format: "inline"; notes: string[]; searched: string; note: string; audit?: ResearchAudit; checked?: MarketSource[]; layout?: "messages"; unchecked?: true }
   | { status: "ok"; format: "inline" | "file"; asked: "inline" | "file"; title: string; thesis: string | null; points: Cited[]; conditions: Cited[]; risks: Cited[];
       comparison: { options: string[]; rows: { label: string; cells: ({ value: string; cite: number[] } | null)[] }[] } | null;
       sources: MarketSource[]; file_url: string | null; dropped: number; notes: string[]; searched: string; note: string;
@@ -622,6 +622,12 @@ export async function researchMarket(i: { question: string; format: "inline" | "
     unchecked = points.length > 0;
     if (unchecked) notes.push("the judge could not check the lines this turn: the pages' own sentences are shown, labelled as not checked");
   }
+  // Round 6: the judge could not answer and no unit passes the positive test: the pages read, as links, and one plain clause.
+  if (idx && judgeDown && !keptLines().length) {
+    const checked: MarketSource[] = pages.slice(0, 4).map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || new URL(p.url).hostname, fetched_at: new Date(p.fetchedAt).toISOString(), kind: sourceKind(p.url, i.plan.companies ?? [], [...(i.plan.sites ?? []), ...(found.sites ?? [])]) }));
+    return { ...none(), checked, unchecked: true, ...(i.deps.layout === "messages" ? { layout: "messages" as const } : {}),
+      note: "The pages could not be checked just now. Say only that, in one sentence; give no figure, name or claim. Code lists the pages." };
+  }
   if (!keptLines().length) {
     const checked: MarketSource[] = pages.slice(0, 4).map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || new URL(p.url).hostname, fetched_at: new Date(p.fetchedAt).toISOString(), kind: sourceKind(p.url, i.plan.companies ?? [], FAIL_CLOSED.support ? [...(i.plan.sites ?? []), ...(found.sites ?? [])] : undefined) }));
     return { ...none(), checked, ...(i.deps.layout === "messages" ? { layout: "messages" as const } : {}),
@@ -880,6 +886,8 @@ export async function enforceMarketReplySupported(reply: string, r: MarketResult
   const pieces = (t: string) => String(t ?? "").split(/\n+/).flatMap((l) => stripUrls(l).split(/(?<=[.!?]["')*_]*(?:\s*\[\d+\])*)\s+/)).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x));
   const shownWhole = (s: string) => shown.some((l) => plainLine(l.text) === plainLine(s));
   const sup = r.status === "ok" ? supportOf(r) : null;
+  // Round 6: the judge could not answer: code's own clause and the pages read, nothing of the model's.
+  if (r.status !== "ok" && r.unchecked) return enforceMarketReply(OUTAGE_LINE, r, shown, { unconfirmed: (s) => s === OUTAGE_LINE });
   if (r.status !== "ok" || !sup) {
     const all = pieces(reply), first = all.find((s) => pureUnconfirmed(s, ask));
     return enforceMarketReply(all.filter((s, k) => (s === first && all.indexOf(s) === k) || shownWhole(s)).join("\n"), r, shown, { unconfirmed: (s) => s === first });

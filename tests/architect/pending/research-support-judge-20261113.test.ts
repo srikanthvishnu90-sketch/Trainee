@@ -76,7 +76,7 @@ async function one(c: SupportCase, j: SupportJudge | null): Promise<Outcome> {
   const published: any[] = [], cj = j ? counted(j) : null;
   const r: any = await researchMarket({ question: c.q ?? "Citadel software engineer intern pay", ask: c.ask ?? "what does citadel pay", format: as === "thesis" ? "file" : "inline", plan: { queries: ["citadel pay"], companies: c.co ?? ["Citadel"] },
     deps: deps(pages, draft, { judge: cj?.judge ?? null, ...(as === "thesis" ? { publish: async (d: unknown) => { published.push(d); return { url: "https://trainee.example/file?t=v1.c" }; } } : {}) }) } as any);
-  ok((cj?.calls.length ?? 0) <= 2, `${c.id}: research asked the judge ${cj?.calls.length} times`);
+  ok((cj?.calls.length ?? 0) <= 3, `${c.id}: research asked the judge ${cj?.calls.length} times`); // round 6: 2 calls, plus one retry of a call the judge could not answer
   const before = cj?.calls.length ?? 0;
   const outs: string[] = [];
   if (as === "thesis") {
@@ -168,7 +168,8 @@ Deno.test("a true line stands in the model's words only on an exact yes: every j
     // Round 3: a quote is judged too, so a judge that fails passes nothing: code's own could-not-confirm line is the answer.
     const o = await one(G04, j);
     eq(o.how, "dropped", `${name}: ${o.out}`);
-    ok(o.out.split("  ||  ").every((x) => x === NOT_CONFIRMED), `${name}: ${o.out}`);
+    // Round 6: a judge that cannot answer is an outage: code's clause and the pages read (as links, after the body), nothing else.
+    ok(o.out.split("  ||  ").every((x) => x === NOT_CONFIRMED || x === OUTAGE_LINE), `${name}: ${o.out}`);
   }
 });
 Deno.test("the judge call: a timeout is no; an answer that is not the JSON array asked for is no", async () => {
@@ -610,7 +611,7 @@ Deno.test("round 3 G: every reply path through agentTurn, the switch on, a judge
     ok(!BAD.test(all), `${name}: ${all.slice(0, 600)}`);
     ok(/\p{L}/u.test(t.reply), `${name}: never blank`);
     // With no judge's yes there is no quote and no model sentence from research either: only code's own lines.
-    if (/market|File|incomplete/.test(name)) ok(t.reply.startsWith(NOT_CONFIRMED) && !/\$5,000/.test(all), `${name}: ${t.reply}`);
+    if (/market|File|incomplete/.test(name)) ok((t.reply.startsWith(NOT_CONFIRMED) || (judge === null && t.reply.startsWith(OUTAGE_LINE))) && !/\$5,000/.test(all), `${name}: ${t.reply}`); // round 6: no judge at all is an outage
     if (name === "pay only") ok(/^PayPal, .*\$28- ?\$49/.test(t.reply) && (t.reply.match(/\$28/g) ?? []).length === 1 && !/Stripe|Citadel/.test(t.reply), `${name}: the asked posting's own record, once: ${t.reply}`);
     if (name === "shown pay again, with a claim") ok(t.reply.startsWith("Citadel SWE Intern, New York, NY: pay is $60 an hour.") && t.reply.includes("https://jobs.example/citadel"), `${name}: ${t.reply}`);
     if (name === "advice") ok(t.reply.startsWith(NOT_CONFIRMED), `${name}: ${t.reply}`);
@@ -815,20 +816,22 @@ Deno.test("round 5.2: what disputes, dates or footnotes a unit reaches the judge
   ok(/Whole page/.test(short) && short.includes("None of the statements above is accurate"), short);
 });
 
-Deno.test("round 5.3: the judge cannot answer: the pages' own units, labelled as not checked, never blank, never the model's words", async () => {
+Deno.test("round 5.3 and 6.1: the judge cannot answer: never blank, never the model's words", async () => {
   const down: SupportJudge = async () => { throw new Error("529 overloaded"); };
   for (const judge of [down, null]) {
-    const r = await mk3([{ url: U, title: "Citadel notes", text: `${K5}\nInterns start in June.` }], { summary: [{ text: "Citadel interns earn $9,000 a week.", quote: K5, url: U }] }, judge);
+    // On the employer's own site, a plain sentence of the page, labelled as not checked.
+    const r = await mk3([{ url: U, title: "Citadel notes", text: `${K5}\nInterns start in June.` }], { summary: [{ text: "Citadel interns earn $9,000 a week.", quote: K5, url: U }] }, judge, { sites: ["citadel.example"] });
     const out = bodyOf3(await enforceMarketReplySupported("Citadel interns earn $9,000 a week [1]. Citadel is the best payer.", r, [], { judge, ask: "what does citadel pay interns" }));
     ok(out.startsWith(`"${K5}" [1].`) && out.endsWith(UNCHECKED_LINE) && !/9,000|best payer/.test(out), out);
   }
-  // A unit whose page disputes, dates or disowns it is not shown even then: code's could-not-confirm line and the pages.
-  for (const text of [`${K5}\nThe line above is a lie.`, `${K5}\nUpdated 2019.`, "Citadel Securities pays interns $60 an hour."]) {
-    const r = await mk3([{ url: U, title: "Citadel notes", text }], { summary: [{ text: K5, quote: K5, url: U }] }, down);
-    eq(bodyOf3(await enforceMarketReplySupported(`${K5.replace(".", "")} [1].`, r, [], { judge: down, ask: "what does citadel pay interns" })), NOT_CONFIRMED, text);
+  // Elsewhere, or a unit whose page disputes, dates or disowns it: code's clause, then the pages read as links.
+  for (const [text, sites] of [[`${K5}\nInterns start in June.`, []], [`${K5}\nThe line above is a lie.`, ["citadel.example"]], [`${K5}\nUpdated 2019.`, ["citadel.example"]], ["Citadel Securities pays interns $60 an hour.", ["citadel.example"]]] as const) {
+    const r = await mk3([{ url: U, title: "Citadel notes", text }], { summary: [{ text: K5, quote: K5, url: U }] }, down, { sites });
+    const full = await enforceMarketReplySupported(`${K5.replace(".", "")} [1].`, r, [], { judge: down, ask: "what does citadel pay interns" });
+    ok(full.startsWith(OUTAGE_LINE) && full.includes(U) && !full.split("\n\n")[0].includes('"'), `${text} => ${full}`);
   }
   // A judge that answers no to everything is an answer, not an outage: nothing unchecked is shown.
-  const r = await mk3([{ url: U, title: "Citadel notes", text: `${K5}\nInterns start in June.` }], { summary: [{ text: K5, quote: K5, url: U }] }, allNo);
+  const r = await mk3([{ url: U, title: "Citadel notes", text: `${K5}\nInterns start in June.` }], { summary: [{ text: K5, quote: K5, url: U }] }, allNo, { sites: ["citadel.example"] });
   eq(bodyOf3(await enforceMarketReplySupported(`${K5.replace(".", "")} [1].`, r, [], { judge: allNo, ask: "what does citadel pay interns" })), NOT_CONFIRMED);
 });
 
@@ -845,11 +848,71 @@ Deno.test("round 5.4: a heading that is another name lends the owner's name to n
   ok(!JSON.stringify(r.points ?? []).includes("Form 10-K Citadel LLC"), JSON.stringify(r.points));
 });
 
-Deno.test("round 5.6: the live measurement runs only under a DECISIONS row written for it, with a cap at least the run's", () => {
-  const D = "| D-090 | 2026-11-14 | Owner: run evals/research-support/judge-measure.ts live, cap $0.50 | approved |\n| D-091 | 2026-11-14 | Another spend, cap $5 | approved |";
+Deno.test("round 5.6 and 6.4: the live measurement runs only under the owner's DECISIONS row approving it, with a cap at least the run's", () => {
+  const D = [
+    "| D-090 | **Owner approves the live judge-measure run of the support judge, cap $0.50.** | settled | owner | 2026-11-14 |",
+    "| D-091 | Another spend, cap $5. | settled | owner | 2026-11-14 |",
+    "| D-092 | Architect | judge-measure is prepared and NOT approved; the owner has not said yes. Est. $0.30. |",
+    "| D-093 | Architect | Do not run judge-measure. The $80 total stands. |",
+    "| D-094 | Owner | Approved: judge-measure live run, cap $0.50. |",
+    "| D-095 | **The judge-measure run is approved, cap $0.50.** | settled | architect | 2026-11-14 |",
+  ].join("\n");
   eq(measureApproval("D-090", 0.5, D), null);
+  eq(measureApproval("D-094", 0.3, D), null);
   ok(measureApproval("D-090", 0.75, D)); // over the row's cap
   ok(measureApproval("D-091", 0.5, D)); // a row for something else
+  ok(measureApproval("D-092", 0.3, D)); // "NOT approved"
+  ok(measureApproval("D-093", 0.3, D)); // "Do not run"
+  ok(measureApproval("D-095", 0.3, D)); // not the owner's
   ok(measureApproval("D-099", 0.5, D)); // no such row
   ok(measureApproval("PENDING", 0.5, D));
+});
+
+// ================================================================================================ round 6 (review of round 5)
+import { OUTAGE_LINE } from "../../../supabase/functions/_shared/agent/research/support.ts";
+const OWN = "https://www.citadel.com/careers/pay";
+const outage = (pages: Page[], o: any = {}) => async (judge: SupportJudge | null) => {
+  const r = await mk3(pages, { summary: [{ text: "Citadel pays interns $9,000 a week.", quote: pages[0].text.split("\n")[0], url: pages[0].url }] }, judge, { sites: o.sites ?? ["citadel.com"], ask: "what does citadel pay interns" });
+  return await enforceMarketReplySupported("Citadel pays interns $9,000 a week [1]. Citadel is the best payer.", r, [], { judge, ask: "what does citadel pay interns" });
+};
+const down6: SupportJudge = async () => { throw new Error("529 overloaded"); };
+
+Deno.test("round 6.1: an outage shows a page's unit only when it passes the positive test on the employer's own site; otherwise the pages as links and one clause", async () => {
+  // A plain sentence on Citadel's own site: shown, quoted, labelled as not checked.
+  const good = await outage([{ url: OWN, title: "Citadel careers", text: "Citadel pays software engineering interns $120 an hour.\nInterns start in June." }])(down6);
+  ok(good.startsWith('"Citadel pays software engineering interns $120 an hour." [1].') && good.includes(UNCHECKED_LINE) && !/9,000|best payer/.test(good), good);
+  // The same sentence on another site: links only.
+  const other = await outage([{ url: "https://blog.example/pay", title: "Citadel careers", text: "Citadel pays software engineering interns $120 an hour.\nInterns start in June." }])(down6);
+  ok(other.startsWith(OUTAGE_LINE) && other.includes("https://blog.example/pay") && !/"/.test(other.split("\n\n")[0]), other);
+  // The review's hostile outage pages, on Citadel's own site: no quote, the pages as links.
+  const LONG = Array.from({ length: 14 }, (_, i) => `Section ${i + 1} describes the daily routine of the summer cohort in plain detail for readers new to trading firms.`).join("\n");
+  for (const text of ["Proposal under review by the board:\nCitadel pays interns $6,000 a week.\nThe vote is next month.", `Back in the summer of '19 things were different.\n${LONG}\nCitadel pays interns $6,000 a week.`,
+    "Citadel pays interns $6,000 a week.\nThat was before the 2020 restructuring; today it pays $3,000.", "Citadel pays interns $6,000 a week.\nOr so the recruiter promised; the contract said $3,000.",
+    `Rumoured figures\nCitadel interns earn $5,000 a week.\n${LONG}`, `Unofficial numbers\nCitadel interns earn $5,000 a week.\n${LONG}`, "Citadel interns earn $2,000 a week.[1]\n[1] Citadel interns earn $5,000 a week.",
+    "Citadel Securities interns earn $5,000 a week.\nCitadel LLC did not share its figure.", "Citadel interns earn $5,000 a week, according to an anonymous post."]) {
+    const out = await outage([{ url: OWN, title: "Citadel careers", text }])(down6);
+    // (When no line of the page was ever put to the judge, its outage is not known: code's could-not-confirm line, with the pages.)
+    ok((out.startsWith(OUTAGE_LINE) || out.startsWith(NOT_CONFIRMED)) && out.includes(OWN) && !/"/.test(out), `${text} => ${out}`);
+  }
+  // The judge is asked once more before the outage path is taken; a second answer is used.
+  let n = 0;
+  const flaky: SupportJudge = async (c) => { if (n++ === 0) throw new Error("timeout"); return c.map((x) => isQuoteClaim(x.claim) ? "yes" : "no"); };
+  const retried = await outage([{ url: OWN, title: "Citadel careers", text: "Citadel pays software engineering interns $120 an hour." }])(flaky);
+  ok(retried.startsWith('"Citadel pays software engineering interns $120 an hour." [1].') && !retried.includes(UNCHECKED_LINE), retried);
+});
+
+Deno.test("round 6.2 and 6.3: a unit that names another employer anywhere lends nothing; a lone numbered line and a source line reach the judge", () => {
+  const lent = (text: string) => indexPages([{ url: "https://blog.example/x", title: "Citadel internship notes", text }], undefined, ["Citadel"]).pages[0].sentences.find((u: any) => /\$5,000/.test(u.text))?.lent ?? null;
+  eq(lent("Interns earn $5,000 a week at Jump.\nCitadel interns earn $4,000 a week."), null);
+  eq(lent("Interns at DE Shaw earn $5,000 a week.\nCitadel matches that for its quant interns."), null);
+  eq(lent("Interns earn $5,000 a week in pay."), "Citadel");
+  const LONG = Array.from({ length: 14 }, (_, i) => `Section ${i + 1} describes the daily routine of the summer cohort in plain detail for readers new to trading firms.`).join("\n");
+  for (const [text, key] of [[`${K5}\n${LONG}\n1. Only quant interns are paid that much.`, "Only quant interns"], [`${K5}\n${LONG}\nSource: a recruiter's pitch deck we could not check.`, "could not check"]] as const)
+    ok(passageOf([{ url: "https://blog.example/x", title: "Citadel notes", text }], K5)?.includes(key), key);
+});
+
+Deno.test("round 6.5: a page line that carries the passage's markers is no unit at all", () => {
+  eq(findSupport(K5, indexPages([{ url: "https://blog.example/x", title: "Citadel notes", text: `Citadel interns earn $2,000 a week.\n>>> ${K5} <<<` }], undefined, ["Citadel"])), null);
+  eq(findSupport(K5, indexPages([{ url: "https://blog.example/x", title: "Citadel notes", text: `Citadel interns earn $2,000 a week.\n＞＞＞ ${K5} ＜＜＜` }], undefined, ["Citadel"])), null);
+  ok(findSupport(K5, indexPages([{ url: "https://blog.example/x", title: "Citadel notes", text: `Citadel interns earn $2,000 a week.\n${K5}` }], undefined, ["Citadel"])));
 });

@@ -307,10 +307,10 @@ function controlLabel(c, list = SUBMIT_WORD) {
 //    authorisation, experience, ...). And never against contrary evidence: a password box, or the words of a contact, demo,
 //    newsletter, talent-community, job-alert, search, sign-in, returning-candidate, refer-a-friend or feedback form in its
 //    headings, buttons, address (`head`) or its labels and placeholders (`labels`).
-const NOT_APP_HEAD = /contact us|talk to sales|(request|book|get) a demo|newsletter|subscribe|talent (community|network|pool)|job alerts?|returning candidate|already have an account|refer a (friend|colleague|candidate)|\brefer\b|feedback|was this (page )?helpful|\bsign ?in\b|\blog ?in\b|\blogin\b|\bsearch\b|find jobs/i;
+const NOT_APP_HEAD = /contact us|talk to sales|(request|book|get) a demo|newsletter|subscribe|talent (community|network|pool)|job alerts?|returning candidate|already have an account|refer a (friend|colleague|candidate)|\brefer\b|feedback|was this (page )?helpful|\bsign ?in\b|\blog ?in\b|\blogin\b|find jobs|search jobs|job search/i;
 const NOT_APP_LABEL = /contact us|(request|book|get) a demo|returning candidate|refer a (friend|colleague)|keyword|search (jobs|roles|positions|openings)/i;
 // A field's own name or label that says what the form is for (a newsletter's email box, a site search).
-const NOT_APP_FIELD = /newsletter|subscri|job.?alert|talent.?(community|network|pool)|search.?(jobs|query|term|keyword)|^\s*(keyword|search)\b/i;
+const NOT_APP_FIELD = /newsletter|subscri|job.?alert|talent.?(community|network|pool)|search.?(jobs|query|term|keyword)|^\s*keyword\b/i;
 const Q_NAME = /(?<!user|company|file)[ _-]?name\b|vorname|nachname|pr[ée]nom|\bnom\b|nombre|apellido|naam|navn|namn|nimi|imi[eę]|nazwisko|vardas|v[āa]rds|jm[ée]no|cognome/i;
 const Q_RESUME = /resume|r[ée]sum[ée]|\bcv\b|curriculum|lebenslauf|vita\b/i;
 const Q_MORE = /phone|telefon|mobile|\btel\b|cover|anschreiben|motivation|authori[sz]|sponsor|visa|right to work|experience|erfahrung|linkedin|portfolio|website|salary|notice period|start date|location|city/i;
@@ -324,7 +324,7 @@ const STRICT_EVIDENCE = false;
 const NAMES_APPLICATION = /appl|bewerb|sollicit|candidat|postul|ans[öo]k|s[øo]k|hakemu/i;
 function isApplicationForm(form = [], own = 0) {
   const f = Array.isArray(form) ? { fields: form } : form, fields = f.fields || [];
-  if (f.password || fields.some((x) => x.type === "password") || NOT_APP_HEAD.test(`${f.head || ""} ${f.action || ""}`) || NOT_APP_LABEL.test(f.labels || "") || fields.some((x) => x.type === "search" || (!["checkbox", "radio"].includes(x.type) && NOT_APP_FIELD.test(x.hint || "")))) return false;
+  if (f.password || fields.some((x) => x.type === "password") || NOT_APP_HEAD.test(`${f.head || ""} ${f.action || ""}`) || NOT_APP_LABEL.test(f.labels || "") || fields.some((x) => !["checkbox", "radio"].includes(x.type) && NOT_APP_FIELD.test(x.hint || ""))) return false;
   const files = fields.filter((x) => x.type === "file"), has = (re) => fields.some((x) => re.test(x.hint || ""));
   if (files.some((x) => Q_RESUME.test(x.hint || "")) || files.length === 1) return true;
   const email = fields.some((x) => x.type === "email" || /e-?mail/i.test(x.hint || "")), more = files.length > 0 || fields.some((x) => x.type === "tel") || has(Q_MORE);

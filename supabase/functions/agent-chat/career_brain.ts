@@ -614,12 +614,13 @@ export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts:
 // read nothing; "partial"; "complete" every account and store was read; "unknown" a lookup returned but left no record of what it
 // read (round 3: that is never taken for complete). `what` names what could not be read, `read` what was, `found` each application.
 const LOOKUP_TOOLS = ["read_application_mail", "export_tracker"];
-type LookRecord = { status: string; could_not_read: string[]; read?: string[]; found?: string[]; nomail?: boolean; researched?: string[] };
-export interface Look { tried: boolean; ok: boolean; status: "none" | "failed" | "partial" | "complete" | "unknown"; what: string[]; read: string[]; found: string[]; nomail?: boolean; researched?: string[] }
+type Researched = { company: string; role: string | null };
+type LookRecord = { status: string; could_not_read: string[]; read?: string[]; found?: string[]; nomail?: boolean; connect?: string | null; researched?: Researched[]; changes?: string[] };
+export interface Look { tried: boolean; ok: boolean; status: "none" | "failed" | "partial" | "complete" | "unknown"; what: string[]; read: string[]; found: string[]; nomail?: boolean; connect?: string | null; researched?: Researched[]; changes?: string[] }
 export function lookupOf(calls: { name: string; ok: boolean }[], record?: LookRecord | null): Look {
   const mine = calls.filter((c) => LOOKUP_TOOLS.includes(c.name)), ran = mine.some((c) => c.ok);
   const status = !mine.length ? "none" : !ran ? "failed" : !record ? "unknown" : record.status === "complete" || record.status === "partial" ? record.status : "failed";
-  return { tried: mine.length > 0, ok: status === "complete", status, what: ran && record && status !== "complete" ? record.could_not_read : [], read: ran ? record?.read ?? [] : [], found: ran ? record?.found ?? [] : [], nomail: ran && !!record?.nomail, researched: ran ? record?.researched ?? [] : [] };
+  return { tried: mine.length > 0, ok: status === "complete", status, what: ran && record && status !== "complete" ? record.could_not_read : [], read: ran ? record?.read ?? [] : [], found: ran ? record?.found ?? [] : [], nomail: ran && !!record?.nomail, connect: ran ? record?.connect ?? null : null, changes: ran ? record?.changes ?? [] : [], researched: ran ? record?.researched ?? [] : [] };
 }
 // Round 2 (structural, not by phrasing): does this text touch the status of the person's applications at all?
 const APP_STATUS = /\bappl(?:ied|ications?)\b|\b(?:did|do|does|didn'?t)\s+i\s+(?:\w+\s+)?apply\b|\bsubmi(?:tted|ssions?)\b|\bsent\s+(?:in|out)\b|\bin\s+flight\b|\bon\s+(?:record|file)\b|\bheard\s+back\b|\breject(?:ed|ions?)\b|\banywhere\s+(?:yet|else|new)\b|\b(?:yet|need|still)\s+to\s+apply\b|\bnot\s+appl|\bapps\b|\byour\s+(?:tracker|pipeline)\s+(?:is|has|shows|looks|holds)\b|\bapl+(?:ied|y|ication)|\bapplyed\b|\bmy\s+apps?\b|\bapp\s+(?:count|status)\b|\bpostul\w*|\bsolicitud\w*|\bcandidat(?:ure|ura|ei|é)\w*|\bbeworben\b|\bbewerbung\w*|\bapply\s+kiya\b|आवेदन/i;
@@ -687,9 +688,16 @@ const readList = (read: string[]) => {
   const parts = [...(boxes.length ? [`Gmail account${boxes.length > 1 ? "s" : ""} ${listed(boxes)}`] : []), ...rest];
   return boxes.length > 1 ? parts.join("; ") : listed(parts);
 };
+// D-062 (d062-capabilities-process C6): a role only researched is named as such ("PayPal was research only in this conversation"),
+// a correction since the record was last shown is stated (G9), and with no Gmail connected the reply says so and carries the record's own connect link (the tool's connect_url, never the model's).
+const researchedLine = (xs: Researched[]) => xs.length === 1
+  ? ` ${xs[0].company} was research only in this conversation${xs[0].role ? ` (${xs[0].role})` : ""}, not an application.`
+  : ` ${listed(xs.map((x) => `${x.company}${x.role ? ` (${x.role})` : ""}`))} were research only in this conversation, not applications.`;
 export function coverageLine(look: Look): string {
-  const line = coverageCore(look), res = look.researched?.length ? ` ${look.researched.join("; ")}: research only in this conversation, not ${look.researched.length > 1 ? "applications" : "an application"}.` : "";
-  return line + (look.status === "complete" || look.status === "partial" ? res : "");
+  const line = coverageCore(look), res = look.researched?.length ? researchedLine(look.researched) : "";
+  const connect = look.status === "complete" && look.nomail && look.connect ? `\n\nNo Gmail is connected, so employer emails are not in this record. Connect it yourself here (you sign in to Google):\n${look.connect}` : "";
+  const fixes = look.changes?.length ? ` ${look.changes.join(" ")}` : "";
+  return line + (look.status === "complete" || look.status === "partial" ? fixes + res : "") + connect;
 }
 function coverageCore(look: Look): string {
   if (!look.tried) return NOT_CHECKED;

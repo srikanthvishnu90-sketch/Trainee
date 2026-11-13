@@ -107,11 +107,17 @@ async function recordFor(d: CapabilityDeps, c: ToolCtx): Promise<ApplicationReco
 }
 // The counts a record gives, and what the turn may take as read (loop.ts turn.record, turn.counts): a number of applications only
 // from a complete read. Otherwise it is unknown (null), with what was found as "at least", and the note says so.
-function countsOf(r: ApplicationRecord, c: ToolCtx) {
+function countsOf(r: ApplicationRecord, c: ToolCtx, connectUrl: string) {
   const n = r.read.status === "complete" ? r.applied.length : null;
-  if (c.turn) { c.turn.record = { ...r.read, nomail: r.mail.gmail === "not_connected", researched: r.researched.slice(0, 8).map((x) => `${x.company}${x.role ? ` (${x.role})` : ""}`), found: r.applied.slice(0, 12).map(foundLine).concat(r.applied.length > 12 ? [`and ${r.applied.length - 12} more`] : []) }; if (n !== null) c.turn.counts = { applied: n }; else delete c.turn.counts; }
+  if (c.turn) { c.turn.record = { ...r.read, nomail: r.mail.gmail === "not_connected", connect: r.mail.gmail === "connected" ? null : connectUrl, researched: r.researched.slice(0, 8).map((x) => ({ company: x.company, role: x.role ?? null })), changes: r.changes.map(changeLine(r)), found: r.applied.slice(0, 12).map(foundLine).concat(r.applied.length > 12 ? [`and ${r.applied.length - 12} more`] : []) }; if (n !== null) c.turn.counts = { applied: n }; else delete c.turn.counts; }
   return { applied: n, ...(n === null && r.applied.length ? { applied_at_least: r.applied.length } : {}), researched: r.researched.length, drafts: r.drafts.length };
 }
+// G9: a correction to what the record showed last time, as code states it in the reply (career_brain.ts coverageLine).
+const changeLine = (r: ApplicationRecord) => (c: ApplicationRecord["changes"][number]) => {
+  if (c.what === "no longer on record") return `Correction: ${c.was} is no longer on the record.`;
+  const co = r.applied.find((a) => a.ref === c.ref)?.company;
+  return `Correction: ${c.what} was ${c.was}, now ${c.now}${co && c.what !== "employer" ? ` (${co})` : ""}.`;
+};
 // One application as code states it in the reply (career_brain.ts coverageLine): employer, role, date, and what it stands on.
 const foundLine = (a: ApplicationRecord["applied"][number]) => { const box = a.evidence.find((e) => e.account)?.account;
   // Round 4: an outcome an employer's email gave (a rejection, an interview, an offer) is on the line, with its date and mailbox.
@@ -149,7 +155,7 @@ export function capabilityTools(d: CapabilityDeps): ToolSpec[] {
       await remember(d, c, r);
       // D-071 (live-8 C6: "Your Gmail shows 8 applications", then the list of 9 and "I miscounted"): the counts are code's, from the
       // record, and the reply says them as given.
-      return { counts: countsOf(r, c), ...r, connect_url: r.mail.gmail === "connected" ? null : d.connectUrl,
+      return { counts: countsOf(r, c, d.connectUrl), ...r, connect_url: r.mail.gmail === "connected" ? null : d.connectUrl,
         note: r.read.status === "complete" ? `${RECORD_NOTE} Say the numbers in counts exactly (counts.applied applications went); never count the list yourself.` : `${RECORD_NOTE}${incompleteNote(r)}` };
     },
   }];
@@ -165,7 +171,7 @@ export function capabilityTools(d: CapabilityDeps): ToolSpec[] {
       const url = made.url ?? made.webApp;
       if (url && c.turn) (c.turn.fileLinks ??= []).push(url);
       await remember(d, c, r);
-      return { status: "ok", counts: countsOf(r, c), read: r.read, coverage: r.coverage, changes: r.changes, applied: r.applied.map((a) => ({ company: a.company, role: a.role, status: a.status, confirmed_by: a.confirmed_by })),
+      return { status: "ok", counts: countsOf(r, c, d.connectUrl), read: r.read, coverage: r.coverage, changes: r.changes, applied: r.applied.map((a) => ({ company: a.company, role: a.role, status: a.status, confirmed_by: a.confirmed_by })),
         researched: r.researched, drafts: r.drafts, mail: r.mail, connect_url: r.mail.gmail === "connected" ? null : d.connectUrl,
         note: "The tracker page was made; the system adds its link. Say what it holds in a sentence or two, state the coverage, correct anything in changes out loud, and say it updates from their Gmail confirmations when they ask again. Nothing was submitted or sent." + incompleteNote(r) };
     },

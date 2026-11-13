@@ -1145,7 +1145,7 @@ export function memoryOutreachStore(): OutreachStore & { dump(): { drafts: (Outr
       drafts[i] = { ...copy(d), user_id: u };
       return true;
     },
-    async contacted(u: string) { return new Set(drafts.filter((d) => d.user_id === u && d.status !== "skipped").map((d) => d.recipient.email.toLowerCase())); },
+    async contacted(u: string) { return new Set(drafts.filter((d) => d.user_id === u && d.status !== "skipped" && !isMailReply(d)).map((d) => d.recipient.email.toLowerCase())); },
     async dnc(u: string) { return new Set(dnc[u] ?? []); },
     async addDnc(u: string, h: string) { (dnc[u] ??= new Set()).add(h); },
     async prefs(u: string) { return { ...{ daily_cap: null, signature: null }, ...(prefs[u] ?? {}) } as Prefs; },
@@ -1273,8 +1273,9 @@ export function supabaseOutreachStore(admin: any): OutreachStore {
       // Every address, in pages: a silent cut here would let someone be emailed twice.
       const out = new Set<string>();
       for (let from = 0; ; from += 1000) {
-        const rows = must(await admin.from("career_outreach_drafts").select("recipient_email").eq("user_id", u).neq("status", "skipped").order("id").range(from, from + 999), "read who was contacted") ?? [];
-        for (const r of rows) out.add(String(r.recipient_email).toLowerCase());
+        // recipient is read for its kind only: answering someone's email is not outreach to them (isMailReply).
+        const rows = must(await admin.from("career_outreach_drafts").select("recipient_email,recipient").eq("user_id", u).neq("status", "skipped").order("id").range(from, from + 999), "read who was contacted") ?? [];
+        for (const r of rows) if (!isMailReply(r)) out.add(String(r.recipient_email).toLowerCase());
         if (rows.length < 1000) return out;
       }
     },

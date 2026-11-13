@@ -1555,7 +1555,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             files: createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }),
             people: { on: releaseFlagOn(Deno.env, "CAREER_PEOPLE_SEARCH"), search: cfg.apiKey ? (q, w) => webSearch(q, { cfg, meter, ...w }) : null, cache: peopleSearchCache, onResult: (r) => { peopleTrace = r; } },
             inbox: chatSwitches(Deno.env).mailTracking ? inboxReader({ fetch, token: accountToken({ ...f08Grant, admin }, GMAIL_READONLY), accounts: (u) => googleAccounts(admin, u) }) : null,
-            reply: { outreach: outreachStore, sendOn: chatSwitches(Deno.env).emailSend && sendRailOn(Deno.env), canSend: async (u, from) => !!(await (from ? accountToken({ ...f08Grant, admin }, CAREER_SEND_SCOPE)(u, from) : sendToken(u))), name: () => ((ctx as any).profile?.basics?.name ?? null) },
+            reply: { outreach: outreachStore, sendOn: chatSwitches(Deno.env).emailSend && sendRailOn(Deno.env), canSend: async (u, from) => !!(await (from ? accountToken({ ...f08Grant, admin }, CAREER_SEND_SCOPE)(u, from) : sendToken(u))), name: () => ((ctx as any).profile?.basics?.name ?? null),
+              findSent: sentFinder({ fetch, token: accountToken({ ...f08Grant, admin }, GMAIL_READONLY) }) },
           }),
           // D-064 (G13): the person's previous message, when this one arrived while that turn was still running.
           whileWorking: (ctx as any)._whileWorking ? ([...history].reverse().find((m) => m.role === "user")?.content ?? "") : null,

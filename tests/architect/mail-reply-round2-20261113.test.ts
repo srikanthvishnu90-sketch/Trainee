@@ -17,6 +17,7 @@ import * as G from "../../supabase/functions/_shared/career_outreach_gmail.ts";
 import * as T from "../../supabase/functions/_shared/career_outreach_track.ts";
 import * as C from "../../supabase/functions/_shared/agent/capability_tools.ts";
 import * as F from "../../supabase/functions/_shared/career_inbox_followups.ts";
+import * as FM from "../../supabase/functions/_shared/file_family_message.ts";
 import { ORDINARY_MAIL, SECRET_MAIL, type M } from "./helpers/mail_security_tables.ts";
 
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
@@ -137,6 +138,9 @@ Deno.test("R3 the tracker and who-was-contacted never see a mail reply, in any s
       eq(JSON.stringify(row(store)), before, `${state} / "${message}": the row is untouched (${ans?.status})`);
       ok(!/dana/i.test(String(ans?.reply ?? "")) && (await store.followups("u1")).length === 0, `${state} / "${message}": ${ans?.reply}`);
       eq((await store.contacted("u1")).has("dana@acme.com"), false, "answering Dana's email is not outreach to Dana");
+      // The File page's "Approve send" (file_family_message.ts) is no way in either.
+      const post: any = await (FM as any).approveSendPost({ store, rail: { rpc: async () => ({ data: null, error: null }) } }, "u1", row(store).id, row(store).hash, now);
+      eq([post.ok, post.why, JSON.stringify(row(store))], [false, "not_found", before], `${state}: no File approval`);
     }
   }
 });

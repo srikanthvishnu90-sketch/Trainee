@@ -151,7 +151,7 @@ const S_FUNC = new Set("a an the and or of in at to as on for from with by is ar
 const PAST = /[a-z]{2,}(?<!e)ed$|[a-z]{3,}eed$(?<!need|feed|seed|speed)/;
 const sToks = (x: string) => (String(x).toLowerCase().replace(/[’‘]/g, "'").match(/[a-z0-9][a-z0-9+#.@'-]*[a-z0-9+#]|[a-z0-9]/g) ?? []).map((w) => w.replace(/'s$/, "")).filter((w) => !S_FUNC.has(w) && !/n't$/.test(w));
 const sSame = (a: string, b: string) => a === b || a + "s" === b || b + "s" === a || (!/\d/.test(a + b) && a.length >= 4 && b.length >= 4 && a.slice(0, 4) === b.slice(0, 4));
-export function saveRefusal(text: string, message: string): string | null {
+export function saveRefusal(text: string, message: string, kind = ""): string | null {
   const msg = String(message).replace(/[’‘`]/g, "'").replace(/[“”]/g, '"')
     .replace(/"[^"\n]*"/g, " ").replace(/(^|\s)'[^'\n]{3,}'(?=[\s,.!?]|$)/g, " ").replace(/^\s*>.*$/gm, " ")
     .replace(/(?:\b(?:says?|said|wrote|writes|reads?|states?)\s*:|\s>\s)[^.!?\n]*[.!?]?/gi, " ").replace(/\n--\s*\n[\s\S]*$/, " ");
@@ -181,6 +181,8 @@ export function saveRefusal(text: string, message: string): string | null {
     }
     const fine = held.some(({ c, toks }) => {
       if (c.neg !== S_NEG.test(part)) return false;
+      // What they want is a goal, never a fact about what they are or have ("i want to learn Tableau" is not "knows Tableau").
+      if (/\b(?:want(?:s|ed)?\s+to|would\s+like|'d\s+like)\b/i.test(c.text) && !/^(?:goal|preference)$/.test(kind) && !/\bwants?\b|\bgoal\b/i.test(part)) return false;
       if ((c.text.match(S_ENDED) ?? []).some((m) => !part.toLowerCase().includes(m.toLowerCase().split(/\s+/)[0]))) return false;
       // Tense: a word of the save and the clause's word for it end alike ("-ed" or not).
       return want.every((w) => { const t = toks.find((x) => sSame(w, x))!; return w === t || PAST.test(w) === PAST.test(t); });
@@ -189,12 +191,12 @@ export function saveRefusal(text: string, message: string): string | null {
   }
   return null;
 }
-export function factRefusal(text: string, message: string | undefined, structural = false): string | null {
+export function factRefusal(text: string, message: string | undefined, structural = false, kind = ""): string | null {
   if (GUESSED.test(text)) return "not saved: a fact about the person is only what they said, never an assumption or inference";
   if (message === undefined) return null;
   // Review of #785, rounds 2 and 3 (D-007): the save stands on a clause the person asserted, as they said it (saveRefusal).
   // A new fact (add_profile_fact) is held to it; a correction also draws on the fact it corrects, and keeps the older checks.
-  const refusal = structural ? saveRefusal(text, message) : null;
+  const refusal = structural ? saveRefusal(text, message, kind) : null;
   if (refusal) return refusal;
   // ADVERSARIAL ROUND 2 (2026-10-30): a number is said exactly or not at all. Half the words were enough, so "GPA 4.0"
   // was saved from a message that said "GPA 3.7" (a pasted resume, a posting telling the model the GPA is 4.0).
@@ -591,7 +593,7 @@ export function careerTools(deps: {
       run: async (i, c) => {
         // D-065 (G1/D-007, live round 1 C1: two facts saved from a plain question): a message that asks something records only
         // what its own first-person statements say; a question or request with none states no fact about the person.
-        const refused = factRefusal(String(i.text ?? ""), c.turn?.message, true);
+        const refused = factRefusal(String(i.text ?? ""), c.turn?.message, true, String(i.kind ?? ""));
         if (refused) throw new Error(refused);
         const fact = CareerProfile.addFact(profileOf(c), { kind: String(i.kind), text: String(i.text), needs_confirmation: true, status: "draft" });
         c.turn?.added.push(fact.id);

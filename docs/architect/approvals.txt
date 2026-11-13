@@ -378,3 +378,5 @@
 815 d395b92e4f1fc87aa9ca328441986b00717ec522 independent-review-20261113 risk=high note=no-real-file-regressions-placeholder-phones-off-email-line-still-pass-bundle-rebuild-only-after-review
 822 d0f975233b6ab873723ffeeb46989a1c27f14016 independent-review-20261113 risk=high note=stale-fact-stops-verified-topic-wording-gaps-minor
 827 6be6e77d5d0c48ec53f3866d49deda523ebdb858 independent-review-20261113 risk=high note=boundaries-always-hold-ask-answered-alongside-compose-prep-unanswered
+825 4684cda4248be478995d2e183be02a9b93c4fb69 independent-review-20261113 risk=medium note=newline-fix-reopens-login-code-next-line-same-as-trunk
+829 d26a20c3683e05d275f50c25bfe44d774066fe3b independent-review-20261113 risk=medium note=newline-fix-reopens-3-next-line-cases-same-as-trunk

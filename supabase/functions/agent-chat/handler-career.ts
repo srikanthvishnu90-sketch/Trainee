@@ -168,6 +168,9 @@ import { applyHereTurn } from "../_shared/apply_here.ts"; // APPLY HERE: a paste
 import { supabaseFileStore } from "../trainee-file/store.ts";
 import { createFileService, personFacingError, supabaseFileKindStore } from "../_shared/file_service.ts"; // FILE KINDS
 import { supabaseFamilyMaker } from "../_shared/file_family_make_supabase.ts"; // D-072 (files reachable)
+import { supabaseMaterialWriter, withLetterVersions, writeTurnMaterials } from "../_shared/career_material_writer.ts"; // D-072 (files writers)
+import { supabaseSearchPlanWriter, writeSearchPlan } from "../_shared/career_search_plan_writer.ts"; // D-072 (files writers)
+import { supabasePathStore } from "../_shared/career_path_comparisons.ts"; // D-072 (files writers)
 import { researchBriefOn, researchReplyOn } from "../_shared/research_reply.ts"; // R9-C
 import { dnsProbe } from "../_shared/research_dns.ts";
 import { researchSearchFor } from "../_shared/research_free_sources.ts";
@@ -190,6 +193,14 @@ import { overviewTurn } from "../_shared/career_overview.ts"; // REQS DOC 2: "an
 import { supabaseReviewLinks } from "../_shared/application_review_links.ts"; // WO-G: the review File of each application on a card
 
 // WO-033: whether the person's career Google grant carries a scope (gmail.send for outreach). Read failures say "no".
+// D-072 (files writers): after the person's watch changed, their search plan carries the watch as it is now saved (a new version only
+// when it differs). Never fails the turn.
+async function searchPlanAfterWatch(admin: any, userId: string): Promise<void> {
+  try {
+    const row = await supabaseAlertStore(admin).get(userId);
+    await writeSearchPlan(supabaseSearchPlanWriter(admin), userId, { watch: row, now: Date.now() });
+  } catch (e) { console.error("search plan: watch not written:", (e as Error)?.message ?? e); }
+}
 async function careerGrantHas(admin: any, userId: string, scope: string): Promise<boolean> {
   const { data, error } = await admin.from("user_oauth_connections").select("scopes").eq("user_id", userId).eq("provider", "google_career").maybeSingle();
   if (error || !data) return false;
@@ -644,7 +655,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // router path. A model failure falls back to the router so an outage never leaves the person with nothing.
       let out: CareerTurnResult;
       let agentMeta: Record<string, unknown> | null = null;
-      const turnDocuments: { format: string; filename: string; mime: string; base64: string; sha256: string | null }[] = []; // tailor_resume's files, this turn only
+      const turnDocuments: { format: string; filename: string; mime: string; base64: string; sha256: string | null; material?: Record<string, unknown> }[] = []; // tailor_resume's files, this turn only
       let turnAttachments: unknown[] = [], turnLinks: string[] | null = null, turnFileLinks: string[] = []; // REPLY SHAPE: what the agent staged; the URLs it may show
       let turnPostings: unknown[] = []; // JOB CARDS: what the turn's search found, for channels that show cards
       const events = supabaseEventStore(admin);
@@ -1488,7 +1499,11 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           // D-061 G11: create_file is offered on every channel, the reply writer on or off. Where File links are not set up
           // (TRAINEE_FILE_BASE_URL and its secret), the File service refuses to make one and tells the brain to say so, so
           // nothing is promised that cannot be opened.
-          files: createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now, records: { application: (u, id) => supabaseFileStore(admin).appRow(u, id) } }),
+          // D-072 (files writers): a cover letter it makes (a draft of type cover_letter) is written as a version on the Materials File.
+          files: withLetterVersions(createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now, records: { application: (u, id) => supabaseFileStore(admin).appRow(u, id) } }),
+            supabaseMaterialWriter(admin), (e) => console.error("materials: cover letter version not written:", (e as Error)?.message ?? e)),
+          // D-072 (files writers): the paths the person compares in chat (compare_paths), kept for their Path comparison File.
+          paths: supabasePathStore(admin),
           // D-072 (files reachable): the record-backed File families (open_record_file), read by the same readers the File server uses.
           familyFiles: supabaseFamilyMaker(admin, createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now })),
           verifier: hunterVerifier({ fetch, apiKey: Deno.env.get("HUNTER_API_KEY"), cache: supabaseCheckCache(admin), now: Date.now }),
@@ -1543,6 +1558,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           whileWorking: (ctx as any)._whileWorking ? ([...history].reverse().find((m) => m.role === "user")?.content ?? "") : null,
           known: { standing, alerts: alertRow ? { prefs: alertRow.prefs, tz: alertRow.tz } : null, pipeline: null, situation }, memory });
         await ledger.record(meter);
+        // D-072 (files writers): the brain's own watch tools change the search plan's watch (F-04), as a watch set by text does.
+        if (turn.tool_calls.some((t: any) => t.ok && (t.name === "set_job_alerts" || t.name === "stop_job_alerts"))) await searchPlanAfterWatch(admin, user.id);
         // Architect ruling 3 (2026-11-09): at a limit, the router's own answer stands when it chose a specific intent for THIS message
         // ("what should I wear to a video interview?" -> its interview prep); only its catch-alls and fallback templates are replaced.
         // Architect amendment (r-states, 2026-11-10; R4, R9, E.6 54): a model outage is held the same way. The router answers only
@@ -1705,6 +1722,9 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             }
           } catch (e) { console.error("career search judge: the router's reply stands:", (e as Error)?.message ?? e); }
           await ledger.record(f5Meter);
+          // D-072 (files writers): the search the person set or changed is their search plan (F-04): a new version when it differs.
+          await writeSearchPlan(supabaseSearchPlanWriter(admin), user.id, { search: f5Ask, now: Date.now() })
+            .catch((e) => console.error("search plan: not written:", (e as Error)?.message ?? e));
         } else if (f5Free && (ctx as any).discovery?.lastAsk) {
           // Spec 2.3: a turn that was not a search ends the search a correction could amend ("only remote" three messages later is not one).
           (ctx as any).discovery = { ...(ctx as any).discovery, lastAsk: null, lastAskAt: null };
@@ -1953,6 +1973,10 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         if (docs.length) {
           const m = await materializeArtifacts(admin, { userId: user.id, threadId: tid, documents: docs });
           if (m.artifacts.length) artifactsField = m.artifacts;
+          // D-072 (files writers): each tailored resume or cover letter delivered here is a version on the Materials File
+          // (career_material_writer.ts). A failed write never fails the turn: the file was delivered either way.
+          await writeTurnMaterials(supabaseMaterialWriter(admin), user.id, docs, m.stored, out.result)
+            .catch((e) => console.error("materials: version not written:", (e as Error)?.message ?? e));
           if (m.failed > 0) artifactNote = "One file from this turn couldn't be attached here — ask me to send it again and I'll rebuild it.";
         }
       }
@@ -2026,7 +2050,11 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // A job watch set, changed, paused or stopped by text is the person's alert settings, which the scheduled alerts
       // run reads (career_watch_alerts.ts). After the save: a refused save writes none; a failed write never fails it.
       await syncWatchAlerts({ userId: user.id, before: loaded.watchState, after: ctx.alertWatchState, erased: ctx._hostPatch?.erase === true, store: supabaseAlertStore(admin), now: Date.now() })
-        .then((r) => { if (r.action === "refused") console.error("career watch alerts: not saved:", r.reason); })
+        .then(async (r) => {
+          if (r.action === "refused") console.error("career watch alerts: not saved:", r.reason);
+          // D-072 (files writers): a watch set, changed, paused or stopped is a change to the person's search plan (F-04).
+          if (r.action === "saved" || r.action === "off") await searchPlanAfterWatch(admin, user.id);
+        })
         .catch((e) => console.error("career watch alerts:", e?.message ?? e));
       flowCtx.note = null;
       // R10 F.3: the stop's effect, read back from the authoritative state after the commit. The reply above stands only

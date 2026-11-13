@@ -30,9 +30,9 @@
 //  - local only by default: only loopback hosts are driven. Real employer hosts need `allowHosts` from the caller
 //    (the owner-run approve-first path), and this module never discovers or logs in anywhere.
 const fs = require("node:fs");
-const { fillForm, heldNow, recheckFilled, MARK_SIGNIN } = require("./ats-fill.cjs");
+const { fillForm, heldNow, recheckFilled, MARK_SIGNIN, EXTRACT, answerFor, factValue, factsFrom } = require("./ats-fill.cjs");
 const { APPLY_TEXT, NEVER_CLICK, OVERLAY_APPLY, CLOSED_MARK, CLOSED_TEXT, applyUrlFor } = require("./apply-entry.cjs");
-const { buildHandoff, PERSON_REASONS } = require("./handoff.cjs");
+const { buildHandoff, PERSON_REASONS, pageDigest, unconfirmedDefaults } = require("./handoff.cjs");
 const NOT_OFFERED = new Set(["no_matching_option", "ambiguous_option"]);
 const crypto = require("node:crypto");
 
@@ -228,9 +228,143 @@ function CHECK_IN_FORM() {
 function closedAfterLoad(asked, landed) {
   let a, b;
   try { a = new URL(asked); b = new URL(landed); } catch { return false; }
-  if (/[?&](?:error|not_found)=true\b/.test(b.search) && !/[?&](?:error|not_found)=true\b/.test(a.search)) return true;
+  return /[?&](?:error|not_found)=true\b/.test(b.search) && !/[?&](?:error|not_found)=true\b/.test(a.search);
+}
+// Review of #797: the posting's link sent to the same host's front page or job list (BambooHR, Breezy) says the link moved, not
+// that the posting is closed (a renamed slug, a board that routes through its list). Closed only when that page says so
+// (closedOnPage); otherwise the run stops as posting_not_confirmed_closed: nothing on a job list is this posting's form.
+function sentToJobList(asked, landed) {
+  let a, b;
+  try { a = new URL(asked); b = new URL(landed); } catch { return false; }
   return b.host === a.host && a.pathname.replace(/\/+$/, "").length > 1 && a.pathname.replace(/\/+$/, "") !== b.pathname.replace(/\/+$/, "")
     && /^\/(?:careers|jobs)?\/?$/.test(b.pathname);
+}
+// Review of #797: a shown check is remembered for the whole run. `seen` is the in-form check an earlier gate noted, `shown` what is
+// on the page now, `inForm` whether that is inside the application form. On the way in ("enter") an in-form check is noted and the
+// step is filled first; any other shown check stops the run. Before the step form's Continue ("continue") and before Submit
+// ("submit") a check shown now OR seen on any earlier step stops the run: a step that hides its check has not passed it. The stop
+// is the hand-off to the person (needs_user / bot_check); the check is never clicked, typed into or scored.
+function checkGate(seen, shown, inForm, phase) {
+  if (phase === "enter") {
+    if (!shown) return { seen: seen || null, stop: null };
+    if (inForm) return { seen: seen || shown, stop: null };
+    return { seen: seen || null, stop: { wall: seen ? "check_in_form" : null, detail: shown } };
+  }
+  if (!shown && !seen) return { seen: null, stop: null };
+  return { seen: seen || shown, stop: { wall: seen || inForm ? "check_in_form" : null, detail: shown || seen } };
+}
+// Review of #797: which form is the application and which control is its Submit, decided here on what the page-side reader (SNAP)
+// saw, so the rule is one tested function. The words are the boards' own (D-072 round 2: Recruitee's "Sūtīt", "Wyślij").
+//  - An application form has a file upload (the resume), or two or more questions of which one is more than an email box, a
+//    tick box or a search box (a name, a phone, a question of the employer's); a newsletter, job-alert or search box is not
+//    one, and neither its fields nor its button are ever used.
+//  - The Submit is a control OF that form: inside it, or tied to it by its own form attribute. A control outside every form is never
+//    a form's Submit. When an application form has no Submit of its own and the page shows a Submit-worded control outside it, the
+//    run is refused before anything is filled (submit_not_tied_to_form); `opener` says every such control is in the Apply words
+//    (apply-entry.cjs), so it may be opened once, as a job page's Apply control always was, and the page read again.
+//  - A board with no <form> at all (Ashby): the page is the form when its own fields are an application's and it has exactly one
+//    visible Submit-worded control.
+const SUBMIT_WORD = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$|^\s*(bewerbung )?(absenden|senden|abschicken)\s*$|^\s*(sollicitatie )?(versturen|verzenden|verstuur|indienen)\s*$|^\s*(envoyer|enviar|verzenden|skicka|sende|send inn|indsend|l[äa]het[äa]|wy[śs]lij|s[ūu]t[īi]t|si[ųu]sti|saada|odeslat|odosla[ťt]|invia|inviare|trimite|g[öo]nder|k[üu]ld[ée]s|po[šs]alji|po[šs]lji|изпрати|отправить|надіслати|αποστολή|υποβολή)( .{0,24})?$/i;
+const NEXT_WORD = /^\s*(continue|next|next step|weiter|suivant|siguiente|volgende|avanti|pr[oó]ximo)\s*[›»>→]?\s*$/i;
+const PLAIN_SUBMIT = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$/i;
+const NOT_APPLICATION = /subscribe|newsletter|sign ?up|notify|alert|search|abonn|suchen/i;
+const isApplicationForm = (fields = []) => fields.some((f) => f.type === "file") || (fields.length >= 2 && fields.some((f) => !["email", "checkbox", "search"].includes(f.type)));
+function pickControls(snap) {
+  const none = { form: null, submit: null, next: null, refuse: null };
+  const ctl = (snap.controls || []).filter((c) => !c.signin);
+  const forms = (snap.forms || []).map((f, i) => ({ ...f, i })).filter((f) => f.hasControl && !f.signin);
+  // `was`: this run already took the form as the application (a board that swaps the upload's input for a chip once the resume is set).
+  const apps = forms.filter((f) => f.was || isApplicationForm(f.fields));
+  const typed = (c) => (c.tag === "BUTTON" && (c.type === "submit" || c.type === "")) || (c.tag === "INPUT" && c.type === "submit");
+  for (const f of apps) {
+    const own = ctl.filter((c) => c.form === f.i && c.vis), t = own.filter(typed), declared = t.filter((c) => c.type === "submit"), worded = own.filter((c) => SUBMIT_WORD.test(c.text));
+    // A control the form itself declares its Submit (type="submit") is preferred over a button with no type beside it.
+    const pick = worded.length === 1 ? worded[0] : t.length === 1 ? t[0] : worded.find((b) => t.includes(b)) || (declared.length === 1 ? declared[0] : null);
+    if (pick && !NOT_APPLICATION.test(pick.text)) return { ...none, form: f.i, submit: pick.c };
+  }
+  // A form shown in steps (Breezy): one visible "Continue" (not a submit, so pressing it posts nothing) with the form's Submit
+  // drawn but hidden until the last step. Two such controls, a submit-typed one, or no hidden Submit beside it: not a step form.
+  for (const f of apps) {
+    const mine = ctl.filter((c) => c.form === f.i && c.inside), nexts = mine.filter((c) => c.vis && NEXT_WORD.test(c.text));
+    const hiddenSubmit = mine.some((c) => !c.vis && (c.tag === "BUTTON" || c.tag === "INPUT") && PLAIN_SUBMIT.test(c.text));
+    if (nexts.length === 1 && hiddenSubmit && nexts[0].type !== "submit" && (nexts[0].tag !== "BUTTON" || nexts[0].type === "button")) return { ...none, form: f.i, next: nexts[0].c };
+  }
+  const loose = ctl.filter((c) => c.vis && c.form < 0 && SUBMIT_WORD.test(c.text));
+  if (!forms.length) return isApplicationForm(snap.loose) && loose.length === 1 ? { ...none, form: -1, submit: loose[0].c } : none;
+  // The one exception (BambooHR, D-072: its Submit is drawn just outside its one form): outsideSubmitOf, every condition or none.
+  const tied = outsideSubmitOf(snap, forms, ctl);
+  if (tied) return { ...none, form: tied.form, submit: tied.submit, outside: true };
+  if (apps.length && loose.length) return { ...none, refuse: "submit_not_tied_to_form", opener: loose.every((c) => APPLY_TEXT.test(c.text) && !NEVER_CLICK.test(c.text)) };
+  return none;
+}
+// Review of #797, follow-up: a Submit drawn outside the form is that form's Submit only when ALL of this holds; anything else stays
+// submit_not_tied_to_form. (1) The page, every frame counted, has exactly one form. (2) That form is an application by its own
+// fields: a name or email question AND a resume upload or two or more application questions. (3) The page shows exactly one
+// submit-like control outside the form and none inside it. (4) That control is not a link (no href, not role=link) and says
+// Submit, Submit application, Apply or Send application. (5) It sits in the form's own container, or directly after the form in
+// the page's order, with no other form-like region (a search, newsletter or sign-in box: any field outside the form) between.
+const OUTSIDE_LABEL = /^\s*(submit|submit application|apply|send application)\s*$/i;
+function outsideSubmitOf(snap, forms, ctl) {
+  if ((snap.forms || []).length !== 1 || (snap.otherFrameForms || 0) !== 0 || forms.length !== 1) return null;
+  const f = forms[0], fields = f.fields || [];
+  const who = fields.some((x) => x.type === "email" || /(?<!user)name|e-?mail/i.test(x.hint || ""));
+  const questions = fields.filter((x) => !["email", "checkbox", "search"].includes(x.type)).length;
+  if (!who || !(fields.some((x) => x.type === "file") || questions >= 2)) return null;
+  const like = (c) => c.vis && (SUBMIT_WORD.test(c.text) || (c.tag === "BUTTON" && (c.type === "submit" || c.type === "")) || (c.tag === "INPUT" && c.type === "submit"));
+  const out = ctl.filter((c) => c.form < 0 && like(c));
+  if (out.length !== 1 || ctl.some((c) => c.form === f.i && like(c))) return null;
+  const b = out[0];
+  if (b.link || !OUTSIDE_LABEL.test(b.text) || b.gap !== 0 || !(b.sameBox || b.follows)) return null;
+  return { form: f.i, submit: b.c };
+}
+// Page side: every form (its questions as { type, hint }, shadow roots included), the fields outside every form, and every control
+// a person could press, numbered (data-upmore-c) so the one Node picks can be marked. Read only but for that number.
+function SNAP() {
+  const vis = (e) => !!(e.offsetWidth || e.offsetHeight) && getComputedStyle(e).visibility !== "hidden";
+  const squash = (x) => String(x || "").replace(/\s+/g, " ").trim();
+  const deep = (root, sel) => { const out = []; const walk = (n) => { for (const c of n.children) { if (c.matches(sel)) out.push(c); if (c.shadowRoot) walk(c.shadowRoot); walk(c); } }; walk(root); return out; };
+  const isField = (i) => !["hidden", "submit", "button", "image", "reset"].includes(i.type);
+  const field = (i) => ({ type: i.type || "", hint: squash(`${(i.labels && i.labels[0] && i.labels[0].innerText) || ""} ${i.getAttribute("aria-label") || ""} ${i.placeholder || ""} ${i.name || ""} ${i.id || ""} ${i.autocomplete || ""}`).slice(0, 240) });
+  const forms = [...document.querySelectorAll("form")];
+  const controls = [...document.querySelectorAll("button, [role=button], input[type=button], input[type=submit]")].map((b, c) => {
+    b.setAttribute("data-upmore-c", String(c));
+    const f = b.form || b.closest("form"), one = forms.length === 1 ? forms[0] : null;
+    // Where an outside control sits against the page's one form (outsideSubmitOf): after it in the page's order, in its container,
+    // and how many fields outside the form lie between the two (or share that container).
+    const follows = !f && !!one && !!(one.compareDocumentPosition(b) & 4), sameBox = !f && !!one && one.parentElement !== document.body && one.parentElement.contains(b);
+    const gap = f || !one ? 0 : deep(document.body, "input, select, textarea, [role=search]").filter((i) => i.type !== "hidden" && !one.contains(i)
+      && ((sameBox && one.parentElement.contains(i)) || (follows && (one.compareDocumentPosition(i) & 4) && (i.compareDocumentPosition(b) & 4)))).length;
+    return { c, follows, sameBox, gap, link: b.tagName === "A" || b.hasAttribute("href") || b.getAttribute("role") === "link", form: f ? forms.indexOf(f) : -1, inside: !!b.closest("form"), vis: vis(b), text: squash(b.innerText || b.value).slice(0, 120), tag: b.tagName, type: (b.getAttribute("type") || "").toLowerCase(), signin: !!b.closest("[data-upmore-signin]") };
+  });
+  return { controls, forms: forms.map((f) => ({ signin: f.hasAttribute("data-upmore-signin"), was: f.hasAttribute("data-upmore-app-seen"), hasControl: !!f.querySelector("input, select, textarea"), fields: deep(f, "input, select, textarea").filter(isField).map(field) })),
+    loose: deep(document.body, "input, select, textarea").filter((i) => isField(i) && !i.closest("form") && !i.closest("[data-upmore-signin]")).map(field) };
+}
+// Page side: mark what pickControls chose: the application form (data-upmore-app: the one form ats-fill reads and fills), its
+// Submit (data-upmore-submit) or its one Continue (data-upmore-next). Every older mark is cleared first.
+function MARK(pick) {
+  for (const a of ["data-upmore-submit", "data-upmore-next", "data-upmore-app"]) for (const e of document.querySelectorAll(`[${a}]`)) e.removeAttribute(a);
+  const f = pick.form >= 0 ? document.querySelectorAll("form")[pick.form] : null;
+  if (f) { f.setAttribute("data-upmore-app", "1"); f.setAttribute("data-upmore-app-seen", "1"); }
+  for (const [k, a] of [["submit", "data-upmore-submit"], ["next", "data-upmore-next"]]) { const e = pick[k] === null || pick[k] === undefined ? null : document.querySelector(`[data-upmore-c="${pick[k]}"]`); if (e) e.setAttribute(a, "1"); }
+}
+// The last look before the click: the control about to be pressed belongs to the form that was filled, and every filled question
+// is in that form. `t` is read from the page (attempt): formless (no form was marked), anyForm, sameForm, filledOutside.
+// `outside`: pickControls took the control by the one narrow exception (outsideSubmitOf); it must still belong to no form.
+const submitTieRefusal = (t) => ((t.formless ? !t.anyForm : (t.sameForm || (t.outside === true && t.noForm === true)) && !t.filledOutside) ? null : "submit_not_tied_to_form");
+// Page side, read only: what every control of the application form holds now (the whole page for a board with no <form>): the
+// rows of handoff.cjs pageRows. A box or radio by its own option (value null when not ticked), a select by its chosen options'
+// words (null on its empty placeholder), an upload by its file's name. `touched`: the engine filled that question (filledQs).
+function CONTROLS(filledQs) {
+  const app = document.querySelector("form[data-upmore-app]");
+  const squash = (x) => String(x || "").replace(/\s+/g, " ").trim();
+  return (app ? [...app.elements] : [...document.querySelectorAll("input, select, textarea")])
+    .filter((e) => /^(INPUT|SELECT|TEXTAREA)$/.test(e.tagName) && !["submit", "button", "image", "reset", "password"].includes(e.type) && !e.closest("[data-upmore-signin]")).map((e) => {
+      const box = e.type === "checkbox" || e.type === "radio", q = e.getAttribute("data-upmore-q");
+      const own = squash(e.labels && e.labels[0] && e.labels[0].innerText);
+      const value = box ? (e.checked ? own || squash(e.value) || "on" : null) : e.tagName === "SELECT" ? [...e.selectedOptions].filter((o) => o.value !== "").map((o) => squash(o.textContent)).join(", ") || null
+        : e.type === "file" ? [...(e.files || [])].map((f) => f.name).join(", ") || null : String(e.value) === "" ? null : String(e.value);
+      return { name: e.name || "", label: squash((e.labels && e.labels[0] && e.labels[0].innerText) || e.getAttribute("aria-label") || e.placeholder).slice(0, 200), type: e.type, option: box ? squash(e.value) : null, value, q, touched: q !== null && filledQs.includes(q), hidden: e.type === "hidden" };
+    });
 }
 // D-072: an employer page that embeds the board's own form in a frame (Greenhouse's job_app embed on bitwarden.com, lucidmotors.com):
 // the frame's address, when it is on an allowed host, is the application form one GET away.
@@ -416,16 +550,17 @@ async function attempt(browser, p, opts, timing) {
     const g = urlVerdict(page.url(), allow);
     if (!g.ok) throw new NeedsUser("redirect_not_allowed", g.host);
   };
-  // The shown-check gate. On the way in (final false), a check inside the application form is noted and the form is filled first
-  // (CHECK_IN_FORM); any other shown check stops the run here, before anything is typed. Right before Submit (final true), any
-  // shown check stops the run: an in-form one as wall check_in_form, with everything else already filled and read back.
+  // The shown-check gate (checkGate): on the way in an in-form check is noted and the form is filled first, any other shown check
+  // stops the run before anything is typed; before the step form's Continue and before Submit, a check shown now or seen on any
+  // earlier step of this run stops it, as wall check_in_form with everything else already filled and read back.
   let checkInForm = null;
-  const gate = async (final = false) => {
+  const gate = async (phase = "enter") => {
     const shown = await botCheck(page);
-    if (!shown) return;
-    if (!final && (await page.evaluate(CHECK_IN_FORM).catch(() => false))) { checkInForm = shown; return; }
-    const e = new NeedsUser("bot_check", p.url, checkInForm || (final && (await page.evaluate(CHECK_IN_FORM).catch(() => false))) ? "check_in_form" : null);
-    e.detail = shown; throw e;
+    const g = checkGate(checkInForm, shown, shown ? await page.evaluate(CHECK_IN_FORM).catch(() => false) : false, phase);
+    checkInForm = g.seen;
+    if (!g.stop) return;
+    const e = new NeedsUser("bot_check", p.url, g.stop.wall);
+    e.detail = g.stop.detail; throw e;
   };
   let filledSoFar = [];
   try {
@@ -435,6 +570,7 @@ async function attempt(browser, p, opts, timing) {
     onAllowedHost();
     if (!resp || resp.status() >= 400) throw new Error(`page_load_${resp ? resp.status() : "none"}`);
     if (closedAfterLoad(p.url, page.url())) throw new NeedsUser("posting_closed", page.url());
+    if (sentToJobList(p.url, page.url())) throw new NeedsUser((await closedOnPage(page)) ? "posting_closed" : "posting_not_confirmed_closed", page.url());
     await gate();
     // An employer that wants the person to sign in first: never signed into, never given a password (the person does that).
     await stopAtWall(page, p.url);
@@ -443,54 +579,22 @@ async function attempt(browser, p, opts, timing) {
     // after the hCaptcha token. Marked data-upmore-submit, so the check below and the click use that same control.
     // An employee sign-in form (ats-fill MARK_SIGNIN: Teamtailor's "Already working at X?") is never the application: its
     // controls are never marked, filled or pressed (architect ruling on #741: a Submit reached there was a false pass).
-    const markSubmit = async () => { await page.evaluate(MARK_SIGNIN).catch(() => 0); return page.evaluate(() => {
-      const vis = (e) => !!(e.offsetWidth || e.offsetHeight) && getComputedStyle(e).visibility !== "hidden";
-      for (const e of document.querySelectorAll("[data-upmore-submit]")) e.removeAttribute("data-upmore-submit");
-      const forms = [...document.querySelectorAll("form")].filter((f) => f.querySelector("input, select, textarea") && !f.hasAttribute("data-upmore-signin"));
-      // D-072 (item 4, round 2): the Submit words of the boards' other languages too (Recruitee's "Sūtīt", "Wyślij", strict run
-      // 43276162667: 4 forms with a Submit no word here named, beside a second button with no type).
-      const word = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$|^\s*(bewerbung )?(absenden|senden|abschicken)\s*$|^\s*(sollicitatie )?(versturen|verzenden|verstuur|indienen)\s*$|^\s*(envoyer|enviar|verzenden|skicka|sende|send inn|indsend|l[äa]het[äa]|wy[śs]lij|s[ūu]t[īi]t|si[ųu]sti|saada|odeslat|odosla[ťt]|invia|inviare|trimite|g[öo]nder|k[üu]ld[ée]s|po[šs]alji|po[šs]lji|изпрати|отправить|надіслати|αποστολή|υποβολή)( .{0,24})?$/i;
-      for (const f of forms) {
-        const typed = [...f.querySelectorAll("button[type=submit], button:not([type]), input[type=submit]")].filter(vis);
-        // A control the form itself declares its Submit (type="submit") is preferred over a button with no type beside it.
-        const declared = [...f.querySelectorAll("button[type=submit], input[type=submit]")].filter(vis);
-        const worded = [...f.querySelectorAll("button, [role=button], input[type=button]")].filter((b) => vis(b) && word.test(b.innerText || b.value || ""));
-        const pick = worded.length === 1 ? worded[0] : typed.length === 1 ? typed[0] : worded.find((b) => typed.includes(b)) || (declared.length === 1 ? declared[0] : null);
-        if (pick) { pick.setAttribute("data-upmore-submit", "1"); return true; }
-      }
-      // D-072: one application form whose Submit the board draws just outside it (BambooHR: strict run 43273066955, 18 of 20
-      // held-out forms, 17 to 31 fields, no Submit inside the <form>): the page's one visible control in the Submit words, outside
-      // every form and every sign-in form. Two or none: no Submit is pressed.
-      if (forms.length === 1) {
-        const lone = [...document.querySelectorAll("button, [role=button], input[type=button], input[type=submit]")].filter((b) => vis(b) && !b.closest("form") && !b.closest("[data-upmore-signin]") && word.test(b.innerText || b.value || ""));
-        if (lone.length === 1) { lone[0].setAttribute("data-upmore-submit", "1"); return true; }
-      }
-      // A board that builds its application without a <form> (Ashby: every posting, strict benchmark run 42712892939, forms=0 with
-      // 19 to 48 fields): the page is the form when it has no form of its own, asks for a file or an email, and has exactly one
-      // visible control in the Submit words. Two or none: no Submit is pressed.
-      const outside = (e) => !e.closest("[data-upmore-signin]");
-      if (!forms.length && [...document.querySelectorAll("input[type=file], input[type=email]")].some(outside)) {
-        const worded = [...document.querySelectorAll("button, [role=button], input[type=button], input[type=submit]")].filter((b) => vis(b) && outside(b) && word.test(b.innerText || b.value || ""));
-        if (worded.length === 1) { worded[0].setAttribute("data-upmore-submit", "1"); return true; }
-      }
-      return false;
-    }); };
-    // A form shown in steps (Breezy: strict benchmark run 42735825405, 4 postings): one visible "Continue" (type=button, so pressing
-    // it posts nothing; the page's own script shows the next step) with the form's Submit drawn but hidden until the last step.
-    // Marked data-upmore-next. Two such controls, a submit-typed one, or no hidden Submit beside it: not a step form.
-    const markNext = () => page.evaluate(() => {
-      const vis = (e) => !!(e.offsetWidth || e.offsetHeight) && getComputedStyle(e).visibility !== "hidden";
-      for (const e of document.querySelectorAll("[data-upmore-next]")) e.removeAttribute("data-upmore-next");
-      const next = /^\s*(continue|next|next step|weiter|suivant|siguiente|volgende|avanti|pr[oó]ximo)\s*[›»>→]?\s*$/i;
-      const submitWord = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$/i;
-      for (const f of [...document.querySelectorAll("form")].filter((x) => x.querySelector("input, select, textarea") && !x.hasAttribute("data-upmore-signin"))) {
-        const nexts = [...f.querySelectorAll("button, [role=button], input[type=button]")].filter((b) => vis(b) && next.test(b.innerText || b.value || ""));
-        const hiddenSubmit = [...f.querySelectorAll("button, input[type=submit], input[type=button]")].some((b) => !vis(b) && submitWord.test(b.innerText || b.value || ""));
-        if (nexts.length === 1 && hiddenSubmit && (nexts[0].tagName !== "BUTTON" || nexts[0].getAttribute("type") === "button") && nexts[0].getAttribute("type") !== "submit") { nexts[0].setAttribute("data-upmore-next", "1"); return true; }
-      }
-      return false;
-    });
-    const hasForm = async () => !!(await page.$(FIELD_SEL)) && ((await markSubmit()) || (await markNext()));
+    // Review of #797: the choice is pickControls' (above), on what SNAP read: the Submit is a control of the application form
+    // itself, the step form's Continue likewise, and the form they belong to is the one filled (data-upmore-app).
+    let lastPick = {};
+    const mark = async () => {
+      await page.evaluate(MARK_SIGNIN).catch(() => 0);
+      const snap = await page.evaluate(SNAP);
+      // Forms in the page's other frames (a captcha provider's own frame is not the page's): a frame that cannot be read counts as one.
+      snap.otherFrameForms = 0;
+      for (const f of page.frames()) if (f !== page.mainFrame() && !/recaptcha|hcaptcha|challenges\.cloudflare\.com|turnstile/i.test(f.url())) snap.otherFrameForms += await f.evaluate(() => document.forms.length).catch(() => 1);
+      lastPick = pickControls(snap);
+      await page.evaluate(MARK, lastPick);
+      return lastPick;
+    };
+    const markSubmit = async () => (await mark()).submit !== null;
+    const markNext = async () => (await mark()).next !== null;
+    const hasForm = async () => { lastPick = {}; return !!(await page.$(FIELD_SEL)) && ((await markSubmit()) || (await markNext())); };
     // A board whose form lives at its own apply address one GET away (Lever /apply, Ashby /application, ...): loaded once,
     // through the same host rules, and checked like the first load.
     if (!(await page.waitForSelector(FIELD_SEL, { timeout: 5000 }).catch(() => null))) {
@@ -549,10 +653,15 @@ async function attempt(browser, p, opts, timing) {
       }
     }
     // A job page whose form is behind its "Apply" control: opened once, and what it leads to is checked like the first load.
-    if (!(await hasForm()) && (await openApply(page, opts.stepTimeoutMs || 15000))) {
-      onAllowedHost();
-      await gate();
-      await stopAtWall(page, p.url);
+    // Review of #797: a Submit-worded control outside the application form, tied to nothing, is never pressed and never "opened":
+    // refused here, before anything is filled. Only a control in the Apply words is opened.
+    if (!(await hasForm())) {
+      if (lastPick.refuse && !lastPick.opener) throw new NeedsUser(lastPick.refuse, p.url);
+      if (await openApply(page, opts.stepTimeoutMs || 15000)) {
+        onAllowedHost();
+        await gate();
+        await stopAtWall(page, p.url);
+      }
     }
     await leaveFollowed();
     timing.load = Date.now() - t0;
@@ -565,6 +674,7 @@ async function attempt(browser, p, opts, timing) {
       // postings), never a kept wall.
       if (await page.evaluate(MARK_SIGNIN).catch(() => 0)) throw new NeedsUser("login_required", p.url, "employee_sign_in");
       if (await closedOnPage(page)) throw new NeedsUser("posting_closed", page.url());
+      if (lastPick.refuse) throw new NeedsUser(lastPick.refuse, p.url);
       throw new NeedsUser("no_application_form_found", p.url);
     }
     // The page's own questions, answered only from the approved facts / answers (ats-fill.cjs), each read back. A required
@@ -580,7 +690,7 @@ async function attempt(browser, p, opts, timing) {
       if (fr.needsUser.length || fr.invalid.length || fr.failed.length || (await markSubmit())) break;
       if (step >= 7 || !(await markNext())) throw new NeedsUser("no_submit_control", p.url);
       onAllowedHost();
-      await gate();
+      await gate("continue");
       await stopAtWall(page, p.url);
       const before = await page.evaluate(() => [...document.querySelectorAll("input, select, textarea")].filter((e) => e.offsetWidth || e.offsetHeight).length + "|" + (document.body.innerText || "").length);
       await page.click("[data-upmore-next]");
@@ -626,26 +736,50 @@ async function attempt(browser, p, opts, timing) {
     // while filling, the form posts to an allowed host, and the payload still hashes to what was approved.
     onAllowedHost();
     notOnFollowed();
-    await gate(true);
+    await gate("submit");
     await stopAtWall(page, p.url);
     if (!(await markSubmit())) throw new NeedsUser("no_submit_control", p.url);
     // A form in which nothing was filled from the approved application is never the application (no name, no email, no resume).
     if (!fr.filled.length) throw new NeedsUser("no_application_form_found", p.url);
-    const action = await page.$eval("[data-upmore-submit]", (b) => {
-      const a = b.getAttribute("formaction") ?? (b.form && b.form.getAttribute("action"));
-      return new URL(a || location.href, document.baseURI).href;
-    });
-    const av = urlVerdict(action, allow);
+    // Review of #797: the control about to be pressed is the filled form's own (submitTieRefusal), so the address checked below
+    // is that form's: a control tied to no form used to fall back to the page's own address, which checked nothing.
+    const tie = await page.$eval("[data-upmore-submit]", (b, qs) => {
+      const app = document.querySelector("form[data-upmore-app]"), f = b.form || b.closest("form");
+      const inApp = (el) => { for (let n = el; n; n = n.parentNode || n.host) if (n === app) return true; return false; };
+      const a = b.getAttribute("formaction") ?? ((f || app) && (f || app).getAttribute("action"));
+      return { noForm: !f, formless: !app, anyForm: !!document.querySelector("form:not([data-upmore-signin]) :is(input, select, textarea)"), sameForm: !!app && f === app,
+        filledOutside: app ? qs.filter((q) => { const el = document.querySelector(`[data-upmore-q="${q}"]`); return el && !inApp(el); }).length : 0, action: new URL(a || location.href, document.baseURI).href };
+    }, fr.filled.map((f) => String(f.d.q)));
+    const untied = submitTieRefusal({ ...tie, outside: lastPick.outside === true });
+    if (untied) throw new NeedsUser(untied, p.url);
+    const av = urlVerdict(tie.action, allow);
     if (!av.ok) throw new NeedsUser("form_action_not_allowed", av.host);
+    // Review of #797: what EVERY control of the form holds now, the engine's fills and the page's own defaults alike (CONTROLS),
+    // each named as ats-fill names its question. A box the page ticked itself, or a consent / authorisation / demographic choice
+    // it preselected, was never the person's answer: it is asked (the ask-once hand-off), never sent as it stands.
+    const readControls = async () => {
+      const labels = new Map((await page.evaluate(EXTRACT).catch(() => [])).map((d) => [String(d.q), d.label]));
+      return (await page.evaluate(CONTROLS, fr.filled.map((f) => String(f.d.q)))).map((c) => { const label = labels.get(String(c.q)) || c.label; return { ...c, label, value: c.type === "checkbox" && c.value && c.value === label ? "checked" : c.value }; });
+    };
+    const controls = await readControls();
+    // The person's own confirmed answer to a question, as ats-fill reads it (an approved answer, else a confirmed fact).
+    const known = factsFrom(p.facts || {}, p.answers || {});
+    const unconfirmed = unconfirmedDefaults(controls, { answer: (l) => { const a = answerFor(l, p.answers || {}); return a === undefined || a === null || String(a).trim() === "" ? factValue(l, known) : a; }, phone: known.phone, country: known.country });
+    if (unconfirmed.length) { const e = new NeedsUser("missing_required_answer", unconfirmed[0].label); e.needs = unconfirmed; throw e; }
     if (!hasApproval(p)) throw new NeedsUser("not_approved", "payload changed after approval");
     if (opts.shotBefore) await page.screenshot({ path: opts.shotBefore, fullPage: true });
+    // Review of #797: the page is read once more and must hold exactly what the first read (the card's) held: every control, and
+    // every hidden value that is not a per-load token. Any difference refuses. It is the last read of the form BEFORE the caller's
+    // "submitting" record, so this refusal ends not_submitted (nothing was pressed); only a click that happened can be unknown.
+    const audit = opts.audit ? { id: p.id, fields: await heldNow(page, fr.filled), controls } : undefined;
+    if (pageDigest(await readControls(), { hidden: true }) !== pageDigest(controls, { hidden: true })) throw new NeedsUser("page_changed_before_submit", p.url);
     // The caller records "submitting" (and re-checks its lease and kill switch) BEFORE the click; a refusal stops here, unsent.
     // A dry run's audit (opts.audit) also gets what each filled question holds at this instant; production passes only the phase.
     // The page as it is now, the last read before the caller's "submitting" record: never the employer's own page.
     notOnFollowed();
     // The control about to be pressed, for the caller's own check (the strict bench refuses one inside a sign-in form).
     const submitInfo = await page.$eval("[data-upmore-submit]", (b) => { const f = b.closest("form"); return { signin: !!b.closest("[data-upmore-signin]"), form: f ? f.getAttribute("action") || "" : null }; }).catch(() => ({ signin: false, form: null }));
-    if (opts.onPhase) await opts.onPhase("submitting", opts.audit ? { id: p.id, fields: await heldNow(page, fr.filled) } : undefined, submitInfo);
+    if (opts.onPhase) await opts.onPhase("submitting", audit, submitInfo);
     // Past this line nothing is retried: the employer may have received it.
     const t2 = Date.now();
     timing.submitClicked = true;
@@ -730,4 +864,4 @@ async function runPool(browser, payloads, opts = {}) {
   return { results, wallMs: Date.now() - started, concurrency };
 }
 
-module.exports = { closedOnPage, declineCookies, samePostingRedirect, followedPageRefusal, postingIds, CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };
+module.exports = { checkGate, pickControls, outsideSubmitOf, isApplicationForm, submitTieRefusal, sentToJobList, SNAP, MARK, CONTROLS, closedOnPage, declineCookies, samePostingRedirect, followedPageRefusal, postingIds, CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };

@@ -82,6 +82,8 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           MIRROR_SPEND_APPROVED: ${{ steps.req.outputs.approval }}
+          # The reservation the step above made: the runner uses it (no second one); the settle step below settles it.
+          EVAL_LEDGER_RESERVATION_ID: ${{ steps.reserve.outputs.id }}
           CI: "true"
         run: |
           export PGBIN=/usr/lib/postgresql/16/bin PATH=/usr/lib/postgresql/16/bin:$PATH

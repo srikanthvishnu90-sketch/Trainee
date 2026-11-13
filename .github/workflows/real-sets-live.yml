@@ -5,7 +5,7 @@
 # on trunk or a PR ever spends. The request is evals/real-sets/run-request.json: {set, approval (a DECISIONS.md line), budget_usd}.
 # The cap is reserved at the shared $80 ledger BEFORE the run (refused if it does not fit what remains) and settled to the metered
 # cost after it, as mirror-conversation.yml does; the ledger secrets go only to those two steps. Inside the run the cap is also a
-# hard in-process budget gate (memoryBudgetGate). Public GETs only and the model API; nothing is sent to anyone, no real name is
+# hard in-process budget gate (memoryBudgetGate); the runner is handed the reservation id (EVAL_LEDGER_RESERVATION_ID). Public GETs only and the model API; nothing is sent to anyone, no real name is
 # stored (people: sha256 prefixes).
 name: real-sets-live
 on:
@@ -62,6 +62,8 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           WEB_RESEARCH_SPEND_APPROVED: ${{ steps.req.outputs.approval }}
           PEOPLE_SEARCH_SPEND_APPROVED: ${{ steps.req.outputs.approval }}
+          # The reservation the step above made: the runner uses it (no second one); the settle step below settles it.
+          EVAL_LEDGER_RESERVATION_ID: ${{ steps.reserve.outputs.id }}
         run: |
           mkdir -p "$RUNNER_TEMP/out"
           export REAL_SET_OUT="$RUNNER_TEMP/out"

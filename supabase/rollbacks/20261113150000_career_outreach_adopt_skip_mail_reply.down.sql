@@ -1,16 +1,12 @@
--- Review of PR #814 (mail replies, round 2): a reply to an email in the person's own inbox is saved in career_outreach_drafts as
--- its own kind (recipient.kind = 'mail_reply', supabase/functions/_shared/career_mail_reply.ts). career_outreach_threads_adopt
--- (20261027240000) adopted every sent draft's provider thread into the replies lane, whatever its kind, so the thread of the
--- email being answered would be watched and read as a conversation Trainee started. Only this function changes: one more
--- condition on the drafts it adopts. No table, no data. Idempotent (create or replace).
--- Rollback: supabase/rollbacks/20261113130000_career_outreach_adopt_skip_mail_reply.down.sql
+-- Rollback of 20261113150000_career_outreach_adopt_skip_mail_reply.sql: career_outreach_threads_adopt exactly as 20261027240000
+-- defined it (every sent draft is adopted, a mail reply included). Roll back only together with the code that writes mail replies
+-- as their own kind; nothing is deleted either way.
 create or replace function public.career_outreach_threads_adopt(p_limit int)
 returns int language plpgsql security definer set search_path = public, pg_temp as $$
 declare d record; n int := 0;
 begin
  for d in select x.* from public.career_outreach_drafts x
    where x.status in ('sent', 'replied', 'bounced') and x.gmail_thread is not null and x.sent_at is not null
-     and coalesce(x.recipient->>'kind', '') <> 'mail_reply'
      and not exists (select 1 from public.career_outreach_threads t where t.draft_id = x.id)
    order by x.sent_at limit greatest(coalesce(p_limit, 1), 1) loop
   perform public.career_outreach_thread_track(d.user_id, d.id,

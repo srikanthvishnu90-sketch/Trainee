@@ -1,4 +1,4 @@
--- Review of PR #814, round 2 (20261113130000_career_outreach_adopt_skip_mail_reply.sql), in the database alone: of two sent drafts
+-- Review of PR #814, round 2 (20261113150000_career_outreach_adopt_skip_mail_reply.sql), in the database alone: of two sent drafts
 -- with a provider thread, the outreach draft's thread is adopted into the replies lane and the mail reply's (recipient.kind =
 -- 'mail_reply': an answer to an email already in the person's inbox) is not, on this call or the next. Everything rolls back.
 \set ON_ERROR_STOP on

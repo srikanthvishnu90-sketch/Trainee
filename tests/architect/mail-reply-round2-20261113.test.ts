@@ -151,7 +151,7 @@ Deno.test("R3 the tracker and who-was-contacted never see a mail reply, in any s
 
 Deno.test("R3 the replies lane's thread adoption skips a mail reply: a migration with its rollback, database check and go-live entries", async () => {
   const read = (p: string) => Deno.readTextFile(new URL(`../../${p}`, import.meta.url));
-  const name = "20261113130000_career_outreach_adopt_skip_mail_reply";
+  const name = "20261113150000_career_outreach_adopt_skip_mail_reply";
   const up = await read(`supabase/migrations/${name}.sql`), down = await read(`supabase/rollbacks/${name}.down.sql`), was = await read("supabase/migrations/20261027240000_career_outreach_replies.sql");
   ok(/create or replace function public\.career_outreach_threads_adopt\(p_limit int\)/.test(up) && /coalesce\(x\.recipient->>'kind', ''\) <> 'mail_reply'/.test(up), "the function skips the kind");
   const fn = (s: string) => s.slice(s.indexOf("create or replace function public.career_outreach_threads_adopt"), s.indexOf("end $$;", s.indexOf("create or replace function public.career_outreach_threads_adopt")));

@@ -5,6 +5,41 @@ paid measurement of the real judge. This page holds the two things that switch n
 existing architect tests that fail with the switch on, each with the assertion it fails and the amendment proposed (the owner
 approved amending them as part of turning the check on). Measured on branch `ag/research-support-round4`.
 
+## 0. Status (2026-11-13, branch `ag/research-support-round11`, round 13)
+
+Not switched on yet: `FAIL_CLOSED.support` is still `false`. The three live judge runs: D-079 run 1 ($0.0698), D-080 run 2 ($0.116:
+true kept 54/61 by the judge, 3 false through), D-082 run 3 ($0.129: 55/61, 4 false through). With the switch on, this round
+measured **58 failing tests in 22 architect files** (section 2's table of 53, measured at round 4, is out of date):
+injecting a judge (`tests/architect/support-test-judge.ts`, a deterministic word-and-negation judge, not always-yes) fixes only a
+few; the rest pin the model's words, the sync `enforceMarketReply` on a hand-built result (no judge: fails closed), places in the
+model's sentence, or old drop reasons, and each needs its expectation rewritten and checked against the safety it pins.
+`research-brief-browser.test.ts` needs the gate's Playwright browser (CI only), not an amendment.
+
+| File | Failing | Tests |
+|---|---|---|
+| `d067-live-round2-20261112.test.ts` | 2 | D67-1 C9 (D-024): a file research reply with no sentence on record is its thesis; a blank ; D67-10 C22 (G7): pay already shown in the conversation is used; a named posting is read be |
+| `d070-live7-fixes-20261112.test.ts` | 2 | D70-4 C11, C22 (D-067 (6), must-fix (d)): pay from any posting read carries its link; show |
+| `d071-live8-fixes-20261112.test.ts` | 3 | D71-8 C22: a going-rate ask runs sourced research beside the posting pay already shown |
+| `d073-live9-fixes-20261112.test.ts` | 3 | D73-6 C9: pay said again from an earlier reply carries its place and link, on the research |
+| `d073-review-fixes-20261113.test.ts` | 3 | R1 a place goes only into the sentence bound to that posting's pay; an ambiguous sentence ; R2 a model-worded reading with a figure is never the verified answer unless a sentence of ; R2 nothing verified: the reply says it could not confirm, with the sources checked; never  |
+| `d073-review2-fixes-20261113.test.ts` | 3 | G1 market: pages read, nothing verified: the reply always says it could not be confirmed a; G1 company research: pages opened and nothing quotable: the reply says so and lists the pa |
+| `flow-scenarios-research-r3.test.ts` | 1 |  |
+| `loop-10-research.test.ts` | 1 | item 10 loop: 15 research asks at the real handler; every claim sourced, dated, meaning ke |
+| `mirror-wa-batch1-process.test.ts` | 1 | MP-1 the EXISTS turns follow Instinct's process: the tools offered and called, the artifac |
+| `research-brief-browser.test.ts` | 1 | market research brief in Chromium: 390 and 1280 px, light and dark |
+| `research-company-brief-20261109.test.ts` | 5 | WO-H/1 turn 1, role unknown: the brief overview is made meanwhile and the reply asks ONLY ; WO-H/2 the brief: facts, reading and unknowns separate; dated developments keep their mean; WO-H/3 turns 2 and 3: the role is used without asking again; 'less generic' expands the qu; WO-H/5 guards on their own: dates, metric meaning, source limits, reply enforcement; WO-H/6 the person's side: confirmed facts tie to what the role page asks, never stretched; |
+| `research-company-f2-20261109.test.ts` | 1 | F.2 replay with research on: a sourced chat answer, interpretation labelled, grounded ques |
+| `research-company-review-20261109.test.ts` | 4 | F2-file-off: with no research File (publish off or failing), F2A is answered in chat with ; SEC: another company's filing that names a private company is never its source; with no de |
+| `research-figures-failclosed-20261113.test.ts` | 8 | item 1 (A): a figure whose page sentence denies it, or says it of someone else, is never s; item 1 (A): a model-worded line with no number does not stand on a sentence of the other p; item 3 (B): a reply sentence cannot move a kept figure onto someone else; the kept page se; item 7 (D): a page's pay sentence is about the role asked by its own words, never by the p; item 5 (E): nothing verified: one sentence that only says so, then the pages checked; no o; item 6 (F): the reply came back unfinished and research kept lines: the person gets those ; item 4 (G): one posting read this turn: a sentence about another employer or the person's  |
+| `research-free-brief.test.ts` | 4 | a research brief File from free sources: the ATS count is cited to the board it came from,; the cover thesis names its sources, or says it summarizes the cited sections; a long host ; facts guard: a heading or form name is never a fact; a filing's form code is not a number; when two cited sources differ on a figure, the brief shows both with their sources and say |
+| `research-market-reply.test.ts` | 5 | example 1, 'what would change the market for X': a research brief File, every claim cited ; example 2, 'compare these 3 companies': a brief with the comparison table; a cell no page ; the format: a File only when the brain asks and a publisher exists (CAREER_RESEARCH_BRIEF); no source could be opened, or none supports an answer: the reply says so and carries no fi |
+| `research-market-review.test.ts` | 2 | review: a claim stands only on a quote that says it; review: an inline sentence's figures come from the points its own citations name |
+| `research-market-subject-review.test.ts` | 2 | review: a comparison cell's figure is that column's company's, never another's; review: an inline sentence names only who its cited points name |
+| `research-no-sources-review.test.ts` | 2 | review: a fact never names another employer than its quote; review: failed research never sounds certain |
+| `research-review-fixes-589.test.ts` | 1 | research_market's effect is write_own when it published a File, read when it answered inli |
+| `web-research-d060.test.ts` | 3 | D-060 research: a passage the search quoted stands for a page the reader could not open; t |
+| `workday-posting-d062.test.ts` | 1 | D-062/MP-W C11 and C18 on Workday through the real handler: read only, the posting's own p |
+
 ## 1. The live measurement (not run)
 
 - Script: `evals/research-support/judge-measure.ts`. Without `--live` it prints the case count and an estimate and sends nothing.

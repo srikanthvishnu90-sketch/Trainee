@@ -91,8 +91,8 @@ Deno.test("CO/5 preflight: the quote is refused when it exceeds what remains of 
   assert(/campaign total/.test(spendLine({ label: "x", quote_usd: 1, brain_usd: 0.5, judge_usd: 0.2, spent_before_usd: 3, target_usd: 70, hard_usd: 70 })));
 });
 
-Deno.test("CO/6 targets both default to 70, read MODEL_BUDGET_*, and refuse nonsense; only Claude-era results count", () => {
-  assert(JSON.stringify(budgetTargets(() => undefined)) === JSON.stringify({ target: 70, hard: 70 }));
+Deno.test("CO/6 targets both default to 80 (D-074), read MODEL_BUDGET_*, and refuse nonsense; only Claude-era results count", () => {
+  assert(JSON.stringify(budgetTargets(() => undefined)) === JSON.stringify({ target: 80, hard: 80 }));
   assert(budgetTargets((k) => ({ MODEL_BUDGET_TARGET_USD: "50", MODEL_BUDGET_HARD_USD: "60" } as any)[k]).hard === 60);
   let threw = false; try { budgetTargets((k) => ({ MODEL_BUDGET_TARGET_USD: "80", MODEL_BUDGET_HARD_USD: "60" } as any)[k]); } catch { threw = true; }
   assert(threw);

@@ -189,7 +189,9 @@ test("4: the card shows and hashes what every control holds, a pre-ticked box is
   // A box or a sensitive choice the page set and the person never confirmed is asked, never sent.
   const un = h.unconfirmedDefaults([...ticked, c("gender", "select-one", "Male", { label: "Gender" }), c("auth", "radio", "yes", { label: "Are you authorised to work here?", option: "yes" }),
     c("office", "text", "Leeds", { label: "Preferred office" }), c("terms", "checkbox", "on", { label: "I accept the terms", touched: true }), c("news", "checkbox", null, { label: "Newsletter" })]);
-  assert.deepEqual(un.map((n) => [n.label, n.reason]), [["I agree to be contacted about other roles", "agreement_needs_you"], ["Gender", "eeo_needs_your_choice"], ["Are you authorised to work here?", "agreement_needs_you"]]);
+  // Engine round 2 (stricter, architect amendment): text the page prefilled and the person never gave (City, Preferred office) is
+  // asked too, not sent as if it were theirs.
+  assert.deepEqual(un.map((n) => [n.label, n.reason]), [["City", "no_confirmed_answer"], ["I agree to be contacted about other roles", "agreement_needs_you"], ["Gender", "eeo_needs_your_choice"], ["Are you authorised to work here?", "agreement_needs_you"], ["Preferred office", "no_confirmed_answer"]]);
   for (const n of un) assert.ok(h.PERSON_REASONS.has(n.reason));
   // The same page, read twice in one run: a stable hidden value counts, a per-load token (#710's pattern) does not.
   const d = (cs) => h.pageDigest(cs, { hidden: true });
@@ -246,7 +248,7 @@ test("4: page defaults, one by one: a question the person has not answered is as
     [c("sort", "select-one", "Newest", { label: "Sort by" }), OK],
     [c("per_page", "select-one", "25", { label: "Results per page" }), OK],
     [c("same", "checkbox", null, { label: "Same as above" }), OK],
-    [c("city", "text", "Leeds", { label: "City" }), OK],
+    [c("city", "text", "Leeds", { label: "City" }), ASK, "no_confirmed_answer"], // round 2: prefilled text the person never gave is asked
     [c("csrf", "hidden", "t", {}), OK],
     [c("terms", "checkbox", "checked", { label: "I accept the terms", touched: true }), OK],
   ];

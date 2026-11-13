@@ -211,7 +211,9 @@ export async function researchCompany(i: { company: string; role?: string | null
     // Round 3: the page units code may pick itself (below) are quote candidates, judged in this same call.
     for (const l of pageSentences(pages, contentWords(`${company} ${role ?? ""} ${i.question}`), [company], 4).filter((l) => units.has(l.text))) { keys.push(`unit:${l.text}`); wants.push({ claim: l.text, unit: true, pages: [pidx(l.page)] }); }
     if (d.frame) { const ks = arr(d.frame.urls, 4).map((u) => pidx(pageOf(u))).filter((k) => k >= 0); keys.push(FRAME); wants.push({ claim: squash(d.frame.text), pages: ks.length ? ks : [-1] }); }
-    (await decide(wants, idx, i.deps.judge)).forEach((v, k) => { if (!sup.has(keys[k])) sup.set(keys[k], v); });
+    const vs = await decide(wants, idx, i.deps.judge);
+    vs.forEach((v, k) => { if (!sup.has(keys[k])) sup.set(keys[k], v); });
+    if (vs.unasked) notes.push(`${vs.unasked} drafted line(s) could not be checked this turn and were left out: say that not everything found could be checked`);
   }
   const picked = (t: string) => { const v = idx ? sup.get(`unit:${t}`) : null; return v && v.how === "quote" ? v : null; };
   const own = (t: string) => { const v = picked(t); return v ? quoteOf(v) : t; };

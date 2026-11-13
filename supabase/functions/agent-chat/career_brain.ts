@@ -359,7 +359,7 @@ export async function agentTurn(o: {
       const said = new Set(o.message.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}&'-]*/gu) ?? []);
       const about = shownPay.filter((l) => (l.text.match(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}\p{N}&'-]*/gu) ?? []).slice(/^\p{Lu}\p{Ll}*\s+\p{Ll}/u.test(l.text) ? 1 : 0).some((w) => said.has(w.toLowerCase().replace(/'s$/, ""))));
       const k = await keepSupported(result.reply, [...recs.map((p: any) => ({ text: recLine(p), title: "Posting record" })), ...about.map((l) => ({ text: l.text, title: "Pay shown earlier in this conversation" }))], { judge, pure, own: about.map((l) => l.text), ask: o.message });
-      const named = recs.filter((p: any) => { const c = String(p?.company ?? "").trim().toLowerCase(); return c && o.message.toLowerCase().includes(c); });
+      const named = recordsNamed(o.message, recs);
       const mine = [...new Set((named.length ? named : recs.length === 1 ? recs : []).map(recLine))].filter((l) => !numbersIn(l).every((n) => numbersIn(k.text).some((x) => numEq(x, n))));
       result = { ...result, reply: !k.removed.length ? k.text : [k.text, ...(mine.length ? mine : letters(k.text) ? [] : about.length ? [...new Set(about.map((l) => l.text))] : [NOT_CONFIRMED])].filter(Boolean).join("\n") };
     }
@@ -410,6 +410,11 @@ function placeOfPay(p: { pay?: string | null; place?: string | null }, figures: 
   if (held.length) return held.length === 1 ? held[0] : null;
   const inPay = /\(([^()$\d]{2,60})\)/.exec(pay)?.[1]?.trim();
   return onePlace(String(p?.place ?? "")) || inPay || null;
+}
+// FAIL_CLOSED.support, round 4 (review: "the role you put in my inbox" matched Box; "dropbox" matched Box and Dropbox): the posting
+// records the person's message names: the record's employer name, the whole of it, as whole words of the message.
+export function recordsNamed<T extends { company?: string | null }>(message: string, recs: T[]): T[] {
+  return recs.filter((p) => { const c = String(p?.company ?? "").replace(/\s+/g, " ").trim(); return !!c && new RegExp(`(?<![\\p{L}\\p{N}])${c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\s+")}(?:'s)?(?![\\p{L}\\p{N}])`, "iu").test(String(message ?? "")); });
 }
 // 2026-11-13 (review of #801; a missing place is acceptable, a wrong one is not): the record's location is written beside the pay
 // only when it is one place. Several places ("San Jose, CA; Austin, TX", "Chicago, IL / New York, NY", "Multiple locations") or

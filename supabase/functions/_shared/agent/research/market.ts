@@ -535,7 +535,10 @@ export async function researchMarket(i: { question: string; format: "inline" | "
     const ok0 = (l: { text: string; prev?: string }) => units.has(l.text) && (!covers(l.text, PAY_PART) || aboutAsked(l.text, l.prev ?? "", asked0));
     const cands = [...new Map([...parts0.flatMap((pt) => pageSentences(pages, pt.words, companies0, 6).filter(ok0).slice(0, 2)), ...pageSentences(pages, contentWords(`${i.question} ${companies0.join(" ")}`), companies0, 8).filter(ok0).slice(0, 3)].map((l) => [l.text, l] as const)).values()].slice(0, 5);
     for (const l of cands) { keys.push(`unit:${l.text}`); wants.push({ claim: l.text, unit: true, pages: [pidx(l.page)] }); }
-    (await decide(wants, idx, i.deps.judge)).forEach((v, k) => { if (!sup.has(keys[k])) sup.set(keys[k], v); });
+    const vs = await decide(wants, idx, i.deps.judge);
+    vs.forEach((v, k) => { if (!sup.has(keys[k])) sup.set(keys[k], v); });
+    // Round 4: a draft longer than the judge may be asked about loses lines unchecked; the result says so, so the reply can.
+    if (vs.unasked) notes.push(`${vs.unasked} drafted line(s) could not be checked this turn and were left out: say that not everything found could be checked`);
   }
   const lineS = (x: any, text: unknown, section: string, o: { subject?: string; quote?: boolean } = {}): Cited | null => {
     const t = squash(text), v = sup.get(x), reading = section !== "summary" && section !== "comparison";

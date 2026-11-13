@@ -1540,7 +1540,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             // FAIL_CLOSED.support (off by default; research/support.ts): the judge of layer B. The product's own model (cfg), through
             // callModel (the one door: the budget ledger reserves before anything is sent) and the turn's meter; never called while
             // the switch is off. A refusal, an error or a timeout is "no" for every claim (support.ts judgeAll).
-            judge: modelSupportJudge(async (p) => { const r = await callModel(cfg, { system: p.system, messages: p.messages.map((m) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: p.max_tokens, temperature: p.temperature }, { meter, role: "chat", timeoutMs: 15000 }); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); }),
+            judge: modelSupportJudge(async (p) => { const r = await callModel(cfg, { system: p.system, messages: p.messages.map((m) => ({ role: m.role, content: [{ type: "text", text: m.content }] })), max_tokens: p.max_tokens, temperature: p.temperature }, { meter, role: "chat", timeoutMs: 8000 }); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); }),
           } : null,
           // D-060 (C18): "is that posting still open?" re-checked live on the boards the product reads; any other host is named, not guessed.
           // D-062: a Workday posting is read from its own CXS data (workday_posting.ts), with its stated deadline.

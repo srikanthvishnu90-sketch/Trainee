@@ -474,7 +474,9 @@ Deno.test("round 3 A: the judge is never bypassed; a claim that is word for word
     const out = bodyOf3(await enforceMarketReplySupported(`${SPLIT_CLAIM.replace(".", "")} [1].`, r, [], { judge: j.judge, ask: "what does citadel pay interns" }));
     ok(!out.includes("$5,000 a week"), `${JSON.stringify(page)} => ${out}`);
     // (One variant never reaches the judge: its unit is answered "No." by the next, so code already reads it as a question.)
-    if (!findSupport(SPLIT_CLAIM, indexPages(pages, undefined, ["Citadel"]))) continue;
+    // (round 6: a lone numbered line is a note, never shown, so it is never put to the judge either)
+    const f0 = findSupport(SPLIT_CLAIM, indexPages(pages, undefined, ["Citadel"]));
+    if (!f0 || !f0.unit.quotable) continue;
     ok(j.asked.length > 0, `the judge was asked: ${JSON.stringify(page)}`);
     // The passage the judge reads holds the words around the unit: the whole of this short page is in it.
     const words = page.replace(/[|•;\t\n]|^\s*(?:[-*]|\d[.)])\s/gm, " ").split(/\s+/).filter((w) => /^[A-Za-z]{4,}$/.test(w));
@@ -856,6 +858,7 @@ Deno.test("round 5.6 and 6.4: the live measurement runs only under the owner's D
     "| D-093 | Architect | Do not run judge-measure. The $80 total stands. |",
     "| D-094 | Owner | Approved: judge-measure live run, cap $0.50. |",
     "| D-095 | **The judge-measure run is approved, cap $0.50.** | settled | architect | 2026-11-14 |",
+    "| D-096 | Owner | judge-measure is approved for later, not yet; cap $0.50. |",
   ].join("\n");
   eq(measureApproval("D-090", 0.5, D), null);
   eq(measureApproval("D-094", 0.3, D), null);
@@ -864,6 +867,7 @@ Deno.test("round 5.6 and 6.4: the live measurement runs only under the owner's D
   ok(measureApproval("D-092", 0.3, D)); // "NOT approved"
   ok(measureApproval("D-093", 0.3, D)); // "Do not run"
   ok(measureApproval("D-095", 0.3, D)); // not the owner's
+  ok(measureApproval("D-096", 0.3, D)); // the owner's, but with a "not"
   ok(measureApproval("D-099", 0.5, D)); // no such row
   ok(measureApproval("PENDING", 0.5, D));
 });
@@ -909,6 +913,15 @@ Deno.test("round 6.2 and 6.3: a unit that names another employer anywhere lends 
   const LONG = Array.from({ length: 14 }, (_, i) => `Section ${i + 1} describes the daily routine of the summer cohort in plain detail for readers new to trading firms.`).join("\n");
   for (const [text, key] of [[`${K5}\n${LONG}\n1. Only quant interns are paid that much.`, "Only quant interns"], [`${K5}\n${LONG}\nSource: a recruiter's pitch deck we could not check.`, "could not check"]] as const)
     ok(passageOf([{ url: "https://blog.example/x", title: "Citadel notes", text }], K5)?.includes(key), key);
+});
+
+Deno.test("round 6.1b: a footnote is never shown, and a quote is always the page's own text, never stitched", async () => {
+  for (const judge of [quotesOnly, down6]) {
+    const page = "Citadel interns earn $2,000 a week.[1]\n[1] Citadel interns earn $5,000 a week.";
+    const r = await mk3([{ url: OWN, title: "Citadel careers", text: page }], { summary: [{ text: K5, quote: "Citadel interns earn $5,000 a week.", url: OWN }] }, judge, { sites: ["citadel.com"] });
+    const out = await enforceMarketReplySupported(`${K5.replace(".", "")} [1].`, r, [], { judge, ask: "what does citadel pay interns" });
+    for (const m of out.matchAll(/"([^"]+)"/g)) ok(page.replace(/\[1\]/g, "").includes(m[1]) && !/5,000/.test(m[1]), `${m[1]} in ${out}`);
+  }
 });
 
 Deno.test("round 6.5: a page line that carries the passage's markers is no unit at all", () => {

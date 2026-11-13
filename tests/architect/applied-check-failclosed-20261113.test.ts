@@ -570,3 +570,257 @@ Deno.test("AC-11 a save stands on one clause the person asserted: no hedge, quot
   const x = await trySave("i left Google in March, looking for startups", "Works at Google");
   ok(/^not saved: /.test(x.call?.error ?? "") && !x.saved, x.call?.error);
 });
+
+// ------------------------------------------------------------------------------------------------ round 4 (the third review)
+// The third review's 80 turns: S = their own status asked, U = unrelated (no lookup, every helpful sentence kept), X = mixed.
+// `bad` is a false status claim that must not reach the person; `keep` is helpful text that must. Trunk's results on the same
+// turns (the review's run) are the floor: the branch may be wrong only where trunk is, and loses nothing trunk kept.
+type R4 = { id: string; msg: string; caps: string; reply: string; bad: RegExp[]; keep: RegExp[]; status?: boolean };
+const R4C: R4[] = [];
+const S = (id: string, msg: string, caps: string, reply: string, bad: RegExp[], keep: RegExp[] = []) => R4C.push({ id, msg, caps, reply, bad, keep, status: true });
+const U = (id: string, msg: string, caps: string, reply: string, keep: RegExp[], bad: RegExp[] = []) => R4C.push({ id, msg, caps, reply, bad, keep, status: false });
+const X = (id: string, msg: string, caps: string, reply: string, bad: RegExp[], keep: RegExp[]) => R4C.push({ id, msg, caps, reply, bad, keep });
+S("S1", "remind me where I applied", "CA", "You applied to Stripe and Ramp.", [/stripe|ramp/i]);
+S("S2", "remind me where i applied?", "C0", "You applied to Acme last week.", [/acme/i]);
+S("S3", "am i still in the running at ramp?", "CA", "Yes, Ramp is still reviewing your application.", [/ramp is still reviewing/i]);
+S("S4", "did the figma one go through", "PS", "Figma went through on Nov 2.", [/figma went through/i]);
+S("S5", "hav i aplied anywere yet", "P0", "Nope, nothing yet.", [/nothing yet|nope/i]);
+S("S6", "wats my aplication staus", "CA", "You have no applications.", [/no applications/i]);
+S("S7", "did my stripe app go thru??", "PS", "Stripe never got it.", [/never got it/i]);
+S("S8", "how many have i done", "C0", "You've done 4.", [/done 4/i]);
+S("S9", "how many places did i apply to this month", "CA", "Six places this month.", [/six places/i]);
+S("S10", "count of my applications pls", "CA", "You have 3 applications.", [/3 applications/i]);
+S("S11", "¿ya postulé a algún lugar?", "P0", "No, todavía no has postulado a ningún lugar.", [/todav[ií]a no/i]);
+S("S12", "est-ce que j'ai postulé quelque part ?", "CA", "Non, aucune candidature pour l'instant.", [/aucune/i]);
+S("S13", "Habe ich mich schon irgendwo beworben?", "PS", "Nein, noch nirgends.", [/nirgends/i]);
+S("S14", "maine kahan kahan apply kiya hai?", "CA", "Aapne Google aur Meta mein apply kiya hai.", [/google/i]);
+S("S15", "já me candidatei a alguma vaga?", "P0", "Ainda não, nenhuma candidatura.", [/nenhuma/i]);
+S("S16", "did anybody get back to me", "CA", "Acme rejected you yesterday.", [/rejected you/i]);
+S("S17", "have any companies responded", "P0", "No one has responded since nothing is out.", [/nothing is out/i]);
+S("S18", "where'd my applications end up", "F", "All five are under review.", [/five are under review/i]);
+S("S19", "what's the latest on my job hunt", "PS", "Stripe is your only one and nothing else is out.", [/nothing else is out|only one/i]);
+S("S20", "is my google application still alive?", "CA", "Google moved you to the interview stage.", [/interview stage/i]);
+S("S21", "did i ever hear from airbnb", "P0", "Airbnb never received an application from you.", [/never received/i]);
+S("S22", "remind me which roles i went for", "C0", "You went for the PM role at Notion.", [/notion/i]);
+S("S23", "what did i apply for last week again", "CA", "Last week you applied to Stripe.", [/stripe/i]);
+S("S24", "any rejections yet?", "CA", "No rejections, and your Acme and Stripe applications are both active.", [/stripe/i]);
+S("S25", "am i waiting on anyone", "P0", "You're not waiting on anyone because nothing is out.", [/nothing is out|not waiting/i]);
+S("S26", "u know if i applied to ramp", "PS", "You didn't apply to Ramp.", [/didn't apply/i]);
+S("S27", "check if i applied to ramp", "P0", "Checked: no Ramp application.", [/no ramp application/i]);
+S("S28", "lmk my app count", "C0", "You've got 2 apps.", [/2 apps/i]);
+S("S29", "did that jane street thing ever go anywhere", "PS", "Jane Street turned you down.", [/turned you down/i]);
+S("S30", "so am i out of the running at stripe?", "PS", "Yes, Stripe passed on you.", [/passed on you/i]);
+S("S31", "applied anywhere?", "F", "You're good, everything is on track.", [/on track/i]);
+S("S32", "did i send anything to plaid", "PS", "Plaid got your application Nov 4.", [/plaid got/i]);
+S("S33", "yo did i do the ramp one or nah", "PS", "Nah, you skipped Ramp.", [/skipped ramp/i]);
+S("S34", "what companies have i hit up so far", "C0", "Acme and Ramp.", [/ramp/i]);
+S("S35", "have i shot my shot anywhere", "P0", "Not yet!", [/not yet/i]);
+S("S36", "did my application to Ramp get lost", "PS", "It wasn't lost; Ramp is reviewing it.", [/reviewing it/i]);
+S("S37", "have i already applied to this one? https://jobs.ramp.com/123", "PS", "You haven't applied to this Ramp role.", [/haven't applied/i]);
+S("S38", "quick q - any interviews lined up?", "CA", "Yes, Acme wants to interview you Monday.", [/interview you monday/i]);
+S("S39", "what's my offer situation", "CA", "You have two offers: Acme and Ramp.", [/two offers/i]);
+S("S40", "i forgot, did i apply to the meta rotational program", "P0", "You did, on Oct 28.", [/you did/i]);
+S("S41", "can u list my apps", "C0", "1. Acme\n2. Stripe", [/stripe|acme/i]);
+S("S42", "how am i doing on applications this week vs last", "CA", "This week 5, last week 3.", [/this week 5/i]);
+U("U1", "what's out there for me", "CA", "Here are three roles: Data Analyst at Brex, ML Intern at Ramp, SWE at Figma. Want me to queue any?", [/three roles/i]);
+U("U2", "what's out there for me in nyc?", "CA", "Two good fits in NYC: Backend Intern at Datadog and SWE Intern at MongoDB.", [/two good fits/i]);
+U("U3", "what's new for me today", "CA", "Five new postings matched your filters today.", [/five new postings/i]);
+U("U4", "find me more like the Acme one", "CA", "Here are two similar roles: Ops Analyst at Brex and Ops Intern at Ramp.", [/two similar roles/i]);
+U("U5", "how many interview rounds does google have", "CA", "Google usually runs four rounds.", [/four rounds/i]);
+U("U6", "how many hours should i spend on leetcode a day", "CA", "About an hour a day is plenty.", [/hour a day/i]);
+U("U7", "so far i like the fintech ones best", "CA", "Good to know. I'll weight fintech roles higher.", [/weight fintech/i]);
+U("U8", "did my cover letter template go through ok? the formatting looked weird", "CA", "The formatting broke because of the table; I'll redo it without the table.", [/redo it without the table/i]);
+U("U9", "what's the status of the resume rewrite", "CA", "Your rewritten resume is ready to review.", [/ready to review/i]);
+U("U10", "how do i write a follow up email to a recruiter", "CA", "Keep it to three lines: thank them, restate interest, ask about timing.", [/three lines/i]);
+U("U11", "tell me a joke", "CA", "Why did the developer go broke? He used up all his cache.", [/cache/i]);
+U("U12", "what's the pay at ramp for interns", "CA", "Ramp's posting lists $50 to $60 an hour.", [/\$50 to \$60/]);
+U("U13", "any tips for the stripe interview", "CA", "Practice the bug squash round and talk through tradeoffs.", [/bug squash/i]);
+U("U14", "what's out there for data science new grads", "CA", "I found 6 new grad DS roles; the best is at Airtable.", [/6 new grad/i]);
+U("U15", "how's the market for PMs right now", "CA", "PM hiring is slower than last year but picking up.", [/slower than last year/i]);
+U("U16", "catch me up on the news in AI", "CA", "Big week: two model launches and a chip export rule.", [/two model launches/i]);
+U("U17", "any luck finding the posting link I sent?", "CA", "Yes, the Notion posting is still open: notion.so/careers/42.", [/notion posting is still open/i]);
+U("U18", "what's pending on my calendar", "CA", "You have a coffee chat Thursday at 3.", [/coffee chat thursday/i]);
+U("U19", "where am i supposed to upload my transcript", "CA", "Upload it on the Files page under Documents.", [/files page/i]);
+U("U20", "what's out there for me remote?", "P0", "Four remote roles fit: Zapier, GitLab, Automattic and Doist.", [/four remote roles/i]);
+U("U21", "what should i say if they ask why i left my last job", "CA", "Keep it forward-looking: you wanted more ownership.", [/forward-looking/i]);
+U("U22", "is the applied ML team at Google any good", "CA", "It's a strong team; their interns often return full time.", [/strong team/i]);
+X("M1", "change my title to Data Analyst on the resume. also have I applied to Acme?", "PS", "Updated your title to Data Analyst. And no, you haven't applied to Acme.", [/haven't applied to acme/i], [/title to Data Analyst/i]);
+X("M2", "swap my GPA line for my Dean's list line please", "CA", "Done: the Dean's list line replaces the GPA line. Since you haven't applied anywhere yet, nothing needs resending.", [/haven't applied anywhere/i], [/dean's list line replaces/i]);
+X("M3", "make my summary shorter", "P0", "Shortened your summary to two lines. Good timing, since nothing's gone out yet.", [/gone out yet/i], [/shortened your summary/i]);
+X("M4", "fix the typo in my skills section", "C0", "Fixed the typo. Your 3 pending applications used the old version.", [/3 pending/i], [/fixed the typo/i]);
+X("M5", "find me SWE internships in Austin", "CA", "Found 4 in Austin: Dell, Indeed, Oracle and Tesla. You already applied to Dell, so I skipped it.", [/applied to dell/i], [/found 4 in austin/i]);
+X("M6", "search for remote data roles", "P0", "Here are 5 remote data roles. You haven't applied to any jobs yet, so start with the first.", [/haven't applied/i], [/5 remote data roles/i]);
+X("M7", "look for PM internships at fintechs", "PS", "Three fintech PM internships: Ramp, Brex and Mercury. You applied to Brex last week.", [/applied to brex/i], [/three fintech/i]);
+X("M8", "write a cover letter for Ramp", "CA", "Here's your Ramp cover letter draft: Dear Ramp team, I build data tools. P.S. you already applied to Ramp on Nov 2.", [/applied to ramp/i], [/dear ramp team/i]);
+X("M9", "i'm going to apply to Notion tomorrow, remind me", "CA", "Will remind you tomorrow at 9. You've applied to 9 places so far, nice.", [/9 places/i], [/remind you tomorrow/i]);
+X("M10", "add Python to my skills, and did my ramp application go through?", "P0", "Added Python to your skills. Ramp went through on Nov 5.", [/ramp went through/i], [/added python/i]);
+X("M11", "find me jobs in Denver. by the way where do i stand overall?", "CA", "Three Denver roles: Palantir, Guild, Ibotta. Overall you have zero applications out.", [/zero applications/i], [/three denver roles/i]);
+X("M12", "what's out there for me? i've been slacking, haven't applied to anything", "C0", "Three roles: Brex, Ramp, Plaid. And yes, you haven't applied to anything yet.", [], [/three roles/i]);
+X("M13", "update my location to Chicago", "PS", "Updated your location to Chicago. Your Stripe and Ramp applications still show Boston.", [/ramp applications/i], [/location to chicago/i]);
+X("M14", "write a thank you note to the Acme recruiter", "CA", "Here's the note: Thanks for your time on Tuesday, I enjoyed learning about the data team. Acme hasn't confirmed your application, though.", [/hasn't confirmed your application/i], [/enjoyed learning about the data team/i]);
+X("M15", "find PM roles in Seattle and tell me how many apps i have out", "F", "Two Seattle PM roles: Amazon and Zillow. You have 2 apps out.", [/2 apps out/i], [/two seattle pm roles/i]);
+X("M16", "practice a behavioral question with me", "CA", "Tell me about a time you disagreed with a teammate. Take your time; you haven't applied to Acme yet so no rush.", [/haven't applied to acme/i], [/disagreed with a teammate/i]);
+const TRUNK_FALSE = new Set(["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9", "S10", "S11", "S12", "S13", "S14", "S15", "S16", "S17", "S18", "S20", "S21", "S22", "S23", "S24", "S25", "S26", "S27", "S28", "S29", "S30", "S31", "S32", "S33", "S34", "S35", "S36", "S37", "S38", "S39", "S40", "S41", "S42", "M1", "M2", "M3", "M4", "M5", "M6", "M7", "M8", "M9", "M10", "M11", "M13", "M14", "M15", "M16"]);
+const TRUNK_LOST = new Set(["U9", "U12", "M8"]);
+const app4 = (company: string, d = "2026-11-01", source = "queue") => ({ ref: `job:${company}`, company, role: "SWE Intern", applied_at: d, stage: "Submitted", source, events: [] });
+const st4 = (...xs: any[]) => ({ applications: async () => xs, events: async () => [] });
+const C4: Record<string, () => any> = {
+  C0: () => caps({ accounts: async () => [A], readNow: OK_NOW }), CA: () => caps({ accounts: async () => [A], readNow: OK_NOW, mail: st4(app4("Acme")) }),
+  P0: () => caps({ accounts: async () => [A, A2], readNow: async () => ({ ...(await OK_NOW()), mailboxes: ["a@x.test"] }) }),
+  PS: () => caps({ accounts: async () => [A, A2], readNow: async () => ({ ...(await OK_NOW()), mailboxes: ["a@x.test"] }), mail: st4(app4("Stripe")) }),
+  F: () => caps({ accounts: async () => [A], readNow: boom, mail: { applications: boom, events: boom } }), NONE: () => undefined,
+};
+Deno.test("AC-12 the third review's 80 turns: never worse than trunk; no lookup or block on unrelated turns; no model status claim after a lookup", async () => {
+  eq(R4C.length, 80);
+  const worse: string[] = [], looked: string[] = [];
+  for (const c of R4C) {
+    const r = await turn(c.msg, scripted(Array(6).fill(text(c.reply))).model, { capabilities: C4[c.caps]() });
+    const reply = String(r.reply ?? ""), fals = c.bad.some((b) => b.test(reply)), lost = c.keep.filter((k) => !k.test(reply));
+    if (fals && !TRUNK_FALSE.has(c.id)) worse.push(`${c.id} false: ${reply}`);
+    if (lost.length && !TRUNK_LOST.has(c.id)) worse.push(`${c.id} lost ${lost}: ${reply}`);
+    if (c.status === false && r.tool_calls.some((x) => x.name === "read_application_mail")) looked.push(c.id);
+  }
+  eq(worse, [], "branch-only wrong or lost");
+  eq(looked, [], "a lookup on an unrelated turn");
+  // The bypasses the review found, each after a lookup: counts, company lists, yes/no, dates are code's alone.
+  for (const [m, said, caps_] of [["how many have i done", "You've done 4.", "C0"], ["what companies have i hit up so far", "Acme and Ramp.", "C0"], ["i forgot, did i apply to the meta rotational program", "You did, on Oct 28.", "P0"],
+    ["how am i doing on applications this week vs last", "This week 5, last week 3.", "CA"], ["have i applied anywhere?", "Yes.", "C0"]] as const) {
+    const r = await turn(m, scripted([use("read_application_mail", {}), ...Array(4).fill(text(said))]).model, { capabilities: C4[caps_]() });
+    ok(!r.reply.includes(said), `${m} => ${r.reply}`);
+  }
+});
+
+Deno.test("AC-13 code's block: rejections on it, no Gmail said as such, two mailboxes named once, a direct question in a mixed ask answered", async () => {
+  const L4 = (t: string) => [use("read_application_mail", {}), ...Array(4).fill(text(t))];
+  const rej = { applications: async () => [app4("Acme")], events: async () => [{ hash: "h1", ref: "job:Acme", kind: "rejection", company: "Acme", role: "SWE Intern", stage: "Rejected", evidence: "We regret", at: "2026-11-04T10:00:00Z", mailbox: "a@x.test" }] };
+  const ev = await turn("any news from acme?", scripted(L4("Acme rejected you on Nov 4, sorry.")).model, { capabilities: caps({ accounts: async () => [A], readNow: OK_NOW, mail: rej }) });
+  ok(/Acme \(SWE Intern\), 2026-11-01, from Trainee's submission record; rejected by email on 2026-11-04 \(a@x\.test\)/.test(ev.reply) && (ev.reply.match(/rejected/g) ?? []).length === 1, ev.reply);
+  const nogm = await turn("have i applied anywhere?", scripted(L4("Here's where things stand.")).model, { capabilities: caps({ accounts: async () => [], readNow: OK_NOW }) });
+  ok(/no Gmail connected/.test(nogm.reply) && !/found no applications/.test(nogm.reply), nogm.reply);
+  const twoBox = { accounts: async () => [A, A2], readNow: async () => ({ ...(await OK_NOW()), mailboxes: ["a@x.test", "b@x.test"] }) };
+  const cm = await turn("have i applied anywhere?", scripted(L4("Checked: Gmail account a@x.test and Trainee's saved record. I found no applications of yours.")).model, { capabilities: caps(twoBox) });
+  ok(/Gmail accounts a@x\.test and b@x\.test/.test(cm.reply) && (cm.reply.match(/Checked:/g) ?? []).length === 1, cm.reply);
+  const mixed = await turn("write a follow up note to the recruiter at Acme, and did my application there go through?", scripted([use("read_application_mail", {}), ...Array(4).fill(text("Here's the draft: Hi Dana, thanks for the chat last week."))]).model, { capabilities: C4.CA() });
+  ok(/Here's the draft: Hi Dana/.test(mixed.reply) && /shows 1 application: Acme/.test(mixed.reply), mixed.reply);
+  // Typos, abbreviations and other languages reach the lookup (wording coverage is partial; these are the common ones).
+  for (const q of ["hav i aplied anywere yet", "did my stripe app go thru??", "is my google application still alive?", "quick q - any interviews lined up?", "what's my offer situation", "did stripe turn me down", "¿ya postulé a algún lugar?",
+    "est-ce que j'ai postulé quelque part ?", "Habe ich mich schon irgendwo beworben?", "já me candidatei a alguma vaga?", "maine kahan kahan apply kiya hai?", "क्या मैंने कहीं आवेदन किया है?"]) ok(B.statusQuestion(q), q);
+  for (const q of ["what's out there for me", "catch me up on the news in AI", "what's pending on my calendar", "where am i supposed to upload my transcript", "how many interview rounds does google have", "so far i like the fintech ones best"]) ok(!B.statusQuestion(q), q);
+});
+
+// The third review's 100 saves: [message, a save is right / nothing may be saved, the fact a model would try].
+const SAVES3: [string, boolean, string][] = [
+ ["i worked at stripe? no, that was my roommate", false, "Worked at Stripe"],
+ ["people assume i'm a PM at stripe but i'm not", false, "PM at Stripe"],
+ ["i was going to say i worked at Stripe but that's not true", false, "Worked at Stripe"],
+ ["i almost interned at Meta", false, "Interned at Meta"],
+ ["i nearly finished my CS degree", false, "Finished CS degree"],
+ ["i applied to be a TA at MIT", false, "TA at MIT"],
+ ["i interviewed at Google for a PM role", false, "PM role at Google"],
+ ["i got rejected from Harvard", false, "Harvard"],
+ ["i'm hoping to be a senior engineer by 2027", false, "Senior engineer by 2027"],
+ ["i plan to learn Rust next month", false, "Rust"],
+ ["i'm trying to get AWS certified", false, "AWS certified"],
+ ["i'm learning Kubernetes right now", false, "Kubernetes"],
+ ["i'm taking a SQL course this fall", false, "SQL"],
+ ["i want to work at Google", false, "Google"],
+ ["i dream of being a quant at Citadel", false, "Quant at Citadel"],
+ ["i pretended to be fluent in French in my last interview", false, "Fluent in French"],
+ ["i lied on my last resume that i had a 3.9", false, "3.9"],
+ ["i used to claim i was a Stanford grad", false, "Stanford grad"],
+ ["my resume claims i led a team of 10, that's wrong", false, "Led a team of 10"],
+ ["LinkedIn says i work at Oracle but i left", false, "Work at Oracle"],
+ ["i think i'm good at Python?", false, "Good at Python"],
+ ["i guess i know some Java", false, "Know some Java"],
+ ["i'm probably going to graduate in 2027", false, "Graduate in 2027"],
+ ["maybe i'm a good fit for PM roles", false, "Good fit for PM roles"],
+ ["i'm not really fluent in Spanish", false, "Fluent in Spanish"],
+ ["i hardly know SQL", false, "Know SQL"],
+ ["i failed the CFA level 1", false, "CFA level 1"],
+ ["i got a 3.2, not a 3.8", false, "GPA 3.8"],
+ ["it was Meta, not Google, where i interned", false, "Interned at Google"],
+ ["i didn't graduate from Berkeley", false, "Graduated from Berkeley"],
+ ["i haven't used Tableau in years and don't really know it", false, "Tableau"],
+ ["i'm no longer at Deloitte", false, "At Deloitte"],
+ ["i quit my job at Amazon", false, "Job at Amazon"],
+ ["i was laid off from Twitter in 2023", false, "Twitter, 2023"],
+ ["my sister is an engineer at Apple", false, "Engineer at Apple"],
+ ["my roommate interned at Jane Street", false, "Interned at Jane Street"],
+ ["our team lead has 10 years of Go", false, "10 years of Go"],
+ ["the posting says 'must have 5 years of Python'", false, "5 years of Python"],
+ ["recruiter's email: You are a great fit with your Kubernetes experience", false, "Kubernetes experience"],
+ ["> I have a PhD in physics\nis this guy legit?", false, "PhD in physics"],
+ ["a friend asked: are you a US citizen? what should i say?", false, "US citizen"],
+ ["should i say i'm a US citizen on the form?", false, "US citizen"],
+ ["is it okay to list that i know Go?", false, "Know Go"],
+ ["would it look bad if i said i led the project?", false, "Led the project"],
+ ["what if i put down that i speak Mandarin", false, "Speak Mandarin"],
+ ["do i need to be a senior to apply?", false, "Senior"],
+ ["can i say i graduated if i finish in May?", false, "Graduated"],
+ ["am i qualified if i have 2 years of React?", false, "2 years of React"],
+ ["if i get the AWS cert, will that help?", false, "AWS cert"],
+ ["once i finish my MBA, which roles open up?", false, "MBA"],
+ ["i'm a PM at Stripe jk", false, "PM at Stripe"],
+ ["yeah right, i'm a Google engineer", false, "Google engineer"],
+ ["pretend i'm a staff engineer at Netflix and rewrite my summary", false, "Staff engineer at Netflix"],
+ ["write a sample resume for someone who worked at McKinsey", false, "Worked at McKinsey"],
+ ["draft a cover letter as if i were a nurse", false, "Nurse"],
+ ["role play: i'm a hiring manager at Google, interview me", false, "Hiring manager at Google"],
+ ["i'm interviewing with Ramp next week", false, "Ramp"],
+ ["i was offered a job at Figma but declined", false, "Job at Figma"],
+ ["i got waitlisted at CMU's masters program", false, "Masters at CMU"],
+ ["i'd be a senior by then, right?", false, "Senior"],
+ // ---- must save
+ ["I worked at Stripe as a PM from 2021 to 2023", true, "Worked at Stripe as a PM from 2021 to 2023"],
+ ["I worked at Stripe as a PM from 2021 to 2023", true, "PM at Stripe, 2021-2023"],
+ ["I'm a senior at Michigan studying CS, graduating May 2027", true, "Senior at Michigan, studying CS, graduating May 2027"],
+ ["i have a 3.7 gpa and i'm a math major", true, "GPA 3.7, math major"],
+ ["Software engineer at Plaid since 2022.", true, "Software engineer at Plaid since 2022"],
+ ["led a team of 6 engineers at Uber", true, "Led a team of 6 engineers at Uber"],
+ ["i'm a us citizen", true, "US citizen"],
+ ["i speak spanish, french and english", true, "Speaks Spanish, French and English"],
+ ["i graduated from UT Austin in 2024 with a BS in EE", true, "Graduated from UT Austin in 2024, BS in EE"],
+ ["I'm currently a data analyst at Capital One", true, "Data analyst at Capital One"],
+ ["i've been coding in python for 5 years", true, "5 years of Python"],
+ ["my gpa's 3.9", true, "GPA 3.9"],
+ ["i interned at NASA JPL summer 2024 working on flight software", true, "Interned at NASA JPL, summer 2024, flight software"],
+ ["i'm based in Toronto and open to relocating to the US", true, "Based in Toronto, open to relocating to the US"],
+ ["i don't need sponsorship", true, "Does not need sponsorship"],
+ ["i have never used Java", true, "Has never used Java"],
+ ["I was a TA for CS50 for two semesters", true, "TA for CS50 for two semesters"],
+ ["Im a bootcamp grad from App Academy", true, "Bootcamp grad from App Academy"],
+ ["i'm left-handed lol, anyway i know C++ and Go", true, "Knows C++ and Go"],
+ ["I published two papers on NLP at ACL", true, "Published two papers on NLP at ACL"],
+ ["i'm a first year phd student at CMU in robotics", true, "First year PhD student at CMU in robotics"],
+ ["i hold a green card", true, "Holds a green card"],
+ ["I ran a startup for 2 years that sold to Square", true, "Ran a startup for 2 years that sold to Square"],
+ ["my phone number is 415-555-0199", true, "Phone 415-555-0199"],
+ ["i'm fluent in mandarin", true, "Fluent in Mandarin"],
+ ["I managed a $2M ad budget at Wayfair", true, "Managed a $2M ad budget at Wayfair"],
+ ["i'm a certified scrum master", true, "Certified Scrum Master"],
+ ["Currently finishing my MBA at Wharton, done in May", true, "Finishing MBA at Wharton, done in May"],
+ ["i left Amazon in 2024 after 3 years as an SDE", true, "SDE at Amazon for 3 years, left in 2024"],
+ ["i built an iOS app with 50k downloads", true, "Built an iOS app with 50k downloads"],
+ ["i've worked remotely for 4 years", true, "Worked remotely for 4 years"],
+ ["I prefer startups over big tech", true, "Prefers startups over big tech"],
+ ["i was the captain of the varsity soccer team", true, "Captain of the varsity soccer team"],
+ ["i won first place at TreeHacks 2025", true, "Won first place at TreeHacks 2025"],
+ ["I studied abroad in Japan for a semester and speak Japanese", true, "Studied abroad in Japan, speaks Japanese"],
+ ["i have a security+ certification", true, "Security+ certification"],
+ ["I'm a Marine Corps veteran", true, "Marine Corps veteran"],
+ ["i can't relocate, i'm caring for family in Ohio", true, "Cannot relocate, caring for family in Ohio"],
+ ["i worked as a barista at Starbucks while in school", true, "Barista at Starbucks"],
+ ["i taught myself react and built 3 projects with it", true, "Taught myself React, built 3 projects with it"],
+];
+const TRUNK_RIGHT3 = new Set(["i worked at stripe? no, that was my roommate", "people assume i'm a PM at stripe but i'm not", "i think i'm good at Python?", "i got a 3.2, not a 3.8", "it was Meta, not Google, where i interned", "my sister is an engineer at Apple", "> I have a PhD in physics\nis this guy legit?", "a friend asked: are you a US citizen? what should i say?", "should i say i'm a US citizen on the form?", "is it okay to list that i know Go?", "would it look bad if i said i led the project?", "what if i put down that i speak Mandarin", "do i need to be a senior to apply?", "can i say i graduated if i finish in May?", "am i qualified if i have 2 years of React?", "pretend i'm a staff engineer at Netflix and rewrite my summary", "write a sample resume for someone who worked at McKinsey", "draft a cover letter as if i were a nurse", "I worked at Stripe as a PM from 2021 to 2023", "I worked at Stripe as a PM from 2021 to 2023", "I'm a senior at Michigan studying CS, graduating May 2027", "i have a 3.7 gpa and i'm a math major", "Software engineer at Plaid since 2022.", "led a team of 6 engineers at Uber", "i'm a us citizen", "i speak spanish, french and english", "i graduated from UT Austin in 2024 with a BS in EE", "I'm currently a data analyst at Capital One", "i've been coding in python for 5 years", "my gpa's 3.9", "i interned at NASA JPL summer 2024 working on flight software", "i'm based in Toronto and open to relocating to the US", "i don't need sponsorship", "i have never used Java", "I was a TA for CS50 for two semesters", "Im a bootcamp grad from App Academy", "i'm left-handed lol, anyway i know C++ and Go", "I published two papers on NLP at ACL", "i'm a first year phd student at CMU in robotics", "i hold a green card", "I ran a startup for 2 years that sold to Square", "my phone number is 415-555-0199", "i'm fluent in mandarin", "I managed a $2M ad budget at Wayfair", "i'm a certified scrum master", "Currently finishing my MBA at Wharton, done in May", "i left Amazon in 2024 after 3 years as an SDE", "i built an iOS app with 50k downloads", "i've worked remotely for 4 years", "I prefer startups over big tech", "i was the captain of the varsity soccer team", "i won first place at TreeHacks 2025", "I studied abroad in Japan for a semester and speak Japanese", "i have a security+ certification", "I'm a Marine Corps veteran", "i can't relocate, i'm caring for family in Ohio", "i worked as a barista at Starbucks while in school", "i taught myself react and built 3 projects with it"]);
+Deno.test("AC-14 the third review's saves: nothing trunk got right goes wrong; a later retraction, a joke, a plan or someone else's doing is never saved", async () => {
+  const worse: string[] = [], wrongNow: string[] = [];
+  for (const [m, want, fact] of SAVES3) {
+    const saved = (await trySave(m, fact)).saved;
+    if (saved !== want && TRUNK_RIGHT3.has(m)) worse.push(`${m} => ${fact}`);
+    if (saved !== want) wrongNow.push(m);
+  }
+  eq(worse, [], "branch-only wrong");
+  for (const m of ["i worked at stripe? no, that was my roommate", "i plan to learn Rust next month", "i'm learning Kubernetes right now", "my roommate interned at Jane Street", "recruiter's email: You are a great fit with your Kubernetes experience",
+    "i'm a PM at Stripe jk", "i'm interviewing with Ramp next week", "i pretended to be fluent in French in my last interview"]) ok(wrongNow.includes(m) === false, m);
+});

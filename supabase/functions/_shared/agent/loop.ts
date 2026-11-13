@@ -5,6 +5,7 @@
 //   external   touches the world (send, submit, message); NEVER runs here. It becomes a pending approval the
 //              person approves on its exact payload (WO-005), and the model is told it is waiting.
 // Messages use the Anthropic block shape (text / tool_use / tool_result); _shared/model_gateway.ts converts to OpenAI.
+import { stripRemoved } from "../mail_security.ts";
 import { bracketUntraced, credentialAsks, factSources, missingAck, multiAsk, unbackedPromises, secretIn, stripSecrets, leakedWords, pieces, plainQuotes, postingsOf, rebuild, stripLeaks, closedNotes, misquotedAsks, smallTalkPitch, unsourcedFigures, untracedFacts, waiverSolicits } from "./reply_guards.ts";
 import { urlsIn } from "../channel_shape.ts";
 import { STANDING_REFUSED, standingRefusal } from "./memory.ts";
@@ -16,7 +17,7 @@ export type Effect = "read" | "write_own" | "external";
 // (WO-038's contract): the same text as separate messages, so a texting channel delivers each whole and in order.
 // `before` (WO-091b): the previous turn's reply as the person saw it ("" on a first turn), so a tool can check that "the
 // first one" is a posting that reply showed. Undefined only for a caller that runs a tool without the loop's history.
-export interface ToolCtx { userId: string; threadId: string; now: number; state: Record<string, unknown>; turn?: { message: string; added: string[]; before?: string; attached?: string; attachments?: { filename: string; content: string }[]; fileLinks?: string[]; paySources?: PaySource[]; guard?: (text: string) => string[]; seen?: string[]; show?: { intent: string; text: string; parts?: string[]; meta?: Record<string, unknown> }; typed?: string; askOnly?: boolean; draft?: { label: string; body: string; recheck: (body: string) => boolean }; counts?: { applied: number } } }
+export interface ToolCtx { userId: string; threadId: string; now: number; state: Record<string, unknown>; turn?: { message: string; added: string[]; before?: string; attached?: string; attachments?: { filename: string; content: string }[]; fileLinks?: string[]; paySources?: PaySource[]; guard?: (text: string) => string[]; seen?: string[]; withheld?: Set<string>; show?: { intent: string; text: string; parts?: string[]; meta?: Record<string, unknown> }; typed?: string; askOnly?: boolean; draft?: { label: string; body: string; recheck: (body: string) => boolean }; counts?: { applied: number } } }
 export interface ToolSpec {
   name: string;
   description: string;
@@ -288,7 +289,11 @@ export function replyFlagsMeta(turn: { flags?: unknown } | null | undefined): { 
 }
 
 export async function runAgentTurn(o: Parameters<typeof runAgentTurnInner>[0]): Promise<TurnResult> {
-  const r = await runAgentTurnInner(o);
+  let r = await runAgentTurnInner(o);
+  // The output guard (mail_security.ts): a code, password or link token that this turn removed from the person's mail, or that
+  // sat in a security email Trainee did not read, never reaches the chat reply, whatever the model wrote.
+  const withheld = o.ctx.turn?.withheld;
+  if (withheld?.size && typeof r.reply === "string") r = { ...r, reply: stripRemoved(r.reply, withheld) };
   const attachments = o.ctx.turn?.attachments ?? [];
   const seen = o.ctx.turn?.seen ?? [];
   const typed = [o.said ?? o.message, ...o.history.filter((m: any) => m && m.role === "user").map((m: any) => typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""))].join("\n");

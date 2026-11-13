@@ -1288,7 +1288,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // (career_send_status) and the approved emails not on the rail; read only, nothing is sent or changed.
       const outreachStatus = !card && !mock && !asked && !which && !emailed && !outreachAns && !cloud && !cardYes && !paced && !employerAns && !queued && !f08 && !stood && !status && !networking && !offerAns && !receiptAns && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
         ? await outreachStatusTurn({ message, userId: user.id, rail: { rpc: (name, args) => admin.rpc(name, args) }, approvedNotQueued: async (u) => {
-            const d = await admin.from("career_outreach_drafts").select("id").eq("user_id", u).eq("status", "approved").limit(1000);
+            const d = await admin.from("career_outreach_drafts").select("id").eq("user_id", u).eq("status", "approved").or("recipient->>kind.is.null,recipient->>kind.neq.mail_reply").limit(1000); // a mail reply is never on the rail
             if (d.error) throw new Error(`read approved drafts: ${d.error.message}`);
             const ids = (d.data ?? []).map((r: any) => r.id);
             const onRail = new Set<string>();

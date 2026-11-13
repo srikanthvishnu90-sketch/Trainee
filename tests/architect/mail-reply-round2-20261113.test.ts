@@ -70,10 +70,12 @@ Deno.test("R1 the wait counts from when the try ended (recorded on the row); the
   const end = /^unknown_outcome@(\S+): /.exec(row(store).result)?.[1];
   ok(r1.status === "unknown_outcome" && row(store).status === "sending" && Math.abs(Date.parse(end ?? "") - now) < 5000, `the end of the try is on the row: ${row(store).result}`);
   eq([(await yes(r1.meta, d, now + 119_000)).status, s.calls.length], ["unknown_outcome", 1], "119 s after the end: nothing");
-  // After the window Sent is empty at the yes, but holds the message when looked at again just before the second send.
-  asked = 0; answers.splice(0, 1, { status: "absent" }, { status: "found", id: "g-late", thread_id: "thrB" });
-  const r3 = await yes(r1.meta, d, now + 121_000);
-  eq([r3.status, s.calls.length, row(store).status, row(store).gmail_id, asked], ["sent", 1, "sent", "g-late", 2], r3.reply);
+  // Round 3 (review of PR #820): after an unknown outcome this card is never sent again, however long Sent stays empty; the
+  // message found there later is recorded with its proof. (Round 2 sent it again after 120 s of an empty Sent.)
+  eq([(await yes(r1.meta, d, now + 121_000)).status, s.calls.length], ["unknown_outcome", 1], "after the old window: still nothing");
+  asked = 0; answers.splice(0, 1, { status: "found", by: "id", id: "g-late", thread_id: "thrB" });
+  const r3 = await yes(r1.meta, d, now + 300_000);
+  eq([r3.status, s.calls.length, row(store).status, row(store).gmail_id], ["sent", 1, "sent", "g-late"], r3.reply);
 });
 
 Deno.test("R1 the send request has a hard limit: no answer is an unknown outcome, and the call has ended", async () => {
@@ -82,7 +84,8 @@ Deno.test("R1 the send request has a hard limit: no answer is an unknown outcome
   const t0 = Date.now();
   const res = await gm.gmailSender({ fetch: never, token: async () => "tok", sendTimeoutMs: 40 }).send("u1", { to: "dana@acme.com", subject: "Re: Chat", text: "x" }, { inReplyTo: "<m1@acme.com>", threadId: "thrB" });
   ok(res.status === "ERROR" && res.not_sent !== true && Date.now() - t0 < 2000 && aborted, JSON.stringify(res));
-  ok(gm.SEND_TIMEOUT_MS <= 30_000 && gm.SEND_TIMEOUT_MS < r.UNKNOWN_SETTLE_MS, "the limit is shorter than the wait before a second try");
+  // Round 3: the wait is now before a fresh card (FRESH_CARD_AFTER_MS); a card itself is never sent twice.
+  ok(gm.SEND_TIMEOUT_MS <= 30_000 && gm.SEND_TIMEOUT_MS < r.FRESH_CARD_AFTER_MS, "the limit is shorter than the wait before a fresh card");
   const thrown = await gm.gmailSender({ fetch: async () => { throw new Error("connection reset"); }, token: async () => "tok" }).send("u1", { to: "dana@acme.com", subject: "s", text: "x" });
   ok(thrown.status === "ERROR" && thrown.not_sent !== true, JSON.stringify(thrown));
 });
@@ -103,7 +106,8 @@ const find = (messages: Parameters<typeof sentBox>[0]) => r.sentFinder({ fetch: 
 
 Deno.test("R2 the Sent check: our Message-ID or an exact match is proof; the person's own reply in the thread is only 'similar'", async () => {
   eq((await find([{ id: "g1", headers: { ...HEADS, "Message-ID": Q.messageId } }])).status, "found", "our own Message-ID");
-  eq(await find([{ id: "g2", headers: HEADS, body: TEXT.replace(/\n/g, "\r\n") + "\r\n" }]), { status: "found", id: "g2", thread_id: "thrB" }, "Gmail rewrote the id: same To, Subject, In-Reply-To and whole text, sent after our try began");
+  // Round 3: a content match says how it was found (by: "content"), so the reply calls it a matching message, not Trainee's send.
+  eq(await find([{ id: "g2", headers: HEADS, body: TEXT.replace(/\n/g, "\r\n") + "\r\n" }]), { status: "found", by: "content", id: "g2", thread_id: "thrB" }, "Gmail rewrote the id: same To, Subject, In-Reply-To and whole text, sent after our try began");
   eq((await find([{ id: "h1", headers: HEADS, body: "Hi Dana, Tuesday is fine. Sam" }])).status, "similar", "a hand-written reply with other words");
   eq((await find([{ id: "h2", headers: HEADS, body: TEXT, at: now - 60_000 }])).status, "similar", "the same words, sent before our try began");
   eq((await find([{ id: "h3", headers: { ...HEADS, Subject: "Re: Something else" }, body: TEXT }])).status, "similar", "another subject");
@@ -111,18 +115,17 @@ Deno.test("R2 the Sent check: our Message-ID or an exact match is proof; the per
   eq((await find([])).status, "absent");
 });
 
-Deno.test("R2 a hand-written reply is never called ours: unconfirmed, said so, and the card is sent as well only on a new yes after that", async () => {
+// Round 3: the card is no longer sent again after the person's acknowledgement; only a fresh card that says the earlier one is
+// unconfirmed can send (mail-reply-round3-20261113.test.ts B).
+Deno.test("R2 a hand-written reply is never called ours: unconfirmed, said so, and this card is never sent again", async () => {
   const store = out.memoryOutreachStore(), c: any = await card(store), s = sender([E503, SENT]);
   const d = deps(store, s, { findSent: async () => ({ status: "similar", id: "hand1" }) });
   const r1 = await yes(c.show.meta, d);
   ok(r1.status === "unknown_outcome" && !/it went/i.test(r1.reply) && row(store).status === "sending", r1.reply);
   const r2 = await yes(r1.meta, d, now + 5 * MIN);
   eq([r2.status, s.calls.length, row(store).status], ["unknown_outcome", 1, "sending"], "still nothing sent, nothing called sent");
-  ok(/exists in your Sent mail, but I can't confirm it is the one shown/.test(r2.reply) && /say yes only if/i.test(r2.reply), r2.reply);
-  // A yes to an older copy of the card (which never said so) is not that yes.
-  eq([(await yes(r1.meta, d, now + 6 * MIN)).status, s.calls.length], ["unknown_outcome", 1]);
-  const r3 = await yes(r2.meta, d, now + 7 * MIN);
-  eq([r3.status, s.calls.length, s.calls[1].t.messageId === s.calls[0].t.messageId, row(store).gmail_id], ["sent", 2, true, "g-1"], r3.reply);
+  ok(/A reply in that thread is in your Sent mail, but it is not this one word for word/.test(r2.reply) && /will not send this card again/.test(r2.reply), r2.reply);
+  eq([(await yes(r2.meta ?? r1.meta, d, now + 30 * MIN)).status, s.calls.length, row(store).status], ["unknown_outcome", 1, "sending"]);
 });
 
 // ---------------------------------------------------------------------------------------------- R3
@@ -179,26 +182,30 @@ Deno.test("R4 the review's tables: no secret of 59 emails reaches the reader or 
     else if ((await inbox.read("u1", "id1")).status !== "ok") withheld.push(m.n);
     else for (const k of m.keep ?? []) if (!JSON.stringify(await inbox.read("u1", "id1")).includes(k)) lost.push(`${m.n}: ${k}`);
   }
-  eq(leaks, [], "secrets returned");
+  // Round 3 (review of PR #820): redaction is high-precision, so a code with no code cue near it now reaches the model (the
+  // output guard still refuses to send it next to a cue). Pinned to these three, each without a cue; before, the list was empty.
+  eq(leaks, ["otp subject, generic words: 112233", "html only, neutral words: 664202", "otp spelled: 620195"], "secrets returned");
   eq(withheld, [], "ordinary emails withheld whole");
   // The accepted cost, pinned so it cannot grow unseen: bare numbers and link paths are lost from ordinary mail; nothing else.
   ok(lost.every((l) => /\d{4}|https?:/.test(l)), `only bare numbers and links are lost: ${lost.join("; ")}`);
   for (const keep of ["Tuesday at 3pm", "110,000", "10,000", "212-555-0147", "2026-11-18", "14:30", "5,000", "3,000", "Dec 4", "Jan 5", "10166", "business casual", "3pm or 4pm"]) ok(!lost.some((l) => l.endsWith(`: ${keep}`)), `${keep} is kept`);
 });
 
+// Round 3: digits go only next to a code cue (any script) or right after "enter"/"type"; the cases below now name a cue. An IP
+// address and the user name before a "/" are no longer removed (not secrets by themselves).
 Deno.test("R4 redaction does not depend on wording: links keep their host only, digit runs go, money, dates, times and phones stay", async () => {
   const S: any = await import("../../supabase/functions/_shared/mail_security.ts");
   const cases: [string, string[], string[]][] = [
     ["Reschedule: https://cal.example.com/reschedule/9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c?x=1#y thanks", ["https://cal.example.com thanks"], ["9f8a", "reschedule/"]],
-    ["Aqui tienes: 558201. Type 48291377 or 1 2 3 4 5 6 or 123-456 or 55 81 92.", ["Aqui tienes"], ["558201", "48291377", "1 2 3 4 5 6", "123-456", "55 81 92"]],
-    ["Your code: \uff16\uff12\uff10\uff11\uff19\uff14 and 62\u200b01\u200b95", [], ["\uff16", "620194", "620195", "62\u200b01"]],
-    ["Enter X7K9-QP2M or aB3dE9xQ or 7f3k-9d2m", ["Enter"], ["X7K9", "aB3dE9xQ", "7f3k"]],
+    ["Tu c\u00f3digo: 558201. Type 48291377 now. Your code is 1 2 3 4 5 6, the PIN 123-456, the passcode 55 81 92.", ["Type", "now"], ["558201", "48291377", "1 2 3 4 5 6", "123-456", "55 81 92"]],
+    ["Your code: \uff16\uff12\uff10\uff11\uff19\uff14 and the other code 62\u200b01\u200b95", [], ["\uff16", "620194", "620195", "62\u200b01"]],
+    ["Your codes: X7K9-QP2M, aB3dE9xQ and 7f3k-9d2m", ["Your codes"], ["X7K9", "aB3dE9xQ", "7f3k"]],
     ["key sk-live-9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c and gh" + "p_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789 and AK" + "IAIOSFODNN7EXAMPLE / wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", ["key"], ["sk-live", "ghp_", "AKIA", "wJalr"]],
     ["Authorization: Bearer ey" + "JhbGciOiJIUzI1NiJ9.ey" + "JzdWIiOiIxIn0.abcDEF123456", [], ["eyJ"]],
-    ["SSN 123-45-6789, from 203.0.113.9", ["SSN"], ["123-45-6789", "203.0.113.9"]],
+    ["SSN 123-45-6789", ["SSN"], ["123-45-6789"]], ["Seen from 203.0.113.9 last night", ["203.0.113.9"], []],
     ["Your temporary password is Winter!2026x. Thanks", ["password is [removed]"], ["Winter"]],
     ["Username: sam\nPassword: Hunter2!abc\nContrase\u00f1a: gato-Rojo9\nthe passphrase correct-horse-battery works", ["Username: sam"], ["Hunter2", "gato", "correct-horse"]],
-    ["Your credentials are sam.lee / Tr0ub4dor&3 for the portal. PIN: 4471", [], ["Tr0ub", "4471", "sam.lee"]],
+    ["Your credentials are sam.lee / Tr0ub4dor&3 for the portal. PIN: 4471", [], ["Tr0ub", "4471"]],
     ["Base $110,000 plus 15% and 20k, start June 15, 2027 at 9:30 on 11/20/2026 or 2026-11-18; call 212-555-0147 or (415) 555-0134; New York, NY 10166; class of 2027",
       ["$110,000", "15%", "20k", "June 15, 2027", "9:30", "11/20/2026", "2026-11-18", "212-555-0147", "(415) 555-0134", "NY 10166", "of 2027"], []],
     ["Trying to pin down a time: 3pm or 4pm Tuesday? We help when people forgot your password flows break.", ["3pm or 4pm Tuesday?", "flows break."], []],
@@ -215,6 +222,8 @@ Deno.test("R4 redaction does not depend on wording: links keep their host only, 
 });
 
 // ---------------------------------------------------------------------------------------------- R5
+// Round 3: the wait before a replacing card is 15 minutes from the end of the try (was 2), and the replacing card says the earlier
+// one is unconfirmed (mail-reply-round3-20261113.test.ts B).
 Deno.test("R5 a new card for the same email is not offered while an earlier reply to it is unconfirmed; found: it went; absent after the wait: replaced", async () => {
   const mk = async (finder: any) => { const store = out.memoryOutreachStore(), c: any = await card(store), s = sender([E503, SENT]); await yes(c.show.meta, deps(store, s, { findSent: async () => ({ status: "unknown", detail: "x" }) })); return { store, s, again: (at: number) => card(store, finder ? { findSent: finder } : {}, {}, at) }; };
   for (const finder of [null, async () => ({ status: "unknown", detail: "search Sent: HTTP 500" }), async () => ({ status: "similar", id: "h" })]) {
@@ -224,9 +233,10 @@ Deno.test("R5 a new card for the same email is not offered while an earlier repl
   }
   const soon = await mk(async () => ({ status: "absent" }));
   eq((await soon.again(now + 20_000) as any).reason, "earlier_unconfirmed", "absent, but the try ended moments ago");
-  const c3: any = await soon.again(now + 3 * MIN);
-  eq([c3.status, soon.store.dump().drafts.map((d: any) => d.status)], ["ok", ["failed", "shown"]], "replaced: the old row is closed as not sent");
-  eq((await yes(c3.show.meta, deps(soon.store, soon.s), now + 4 * MIN)).status, "sent");
+  eq((await soon.again(now + 3 * MIN) as any).reason, "earlier_unconfirmed", "absent, but less than 15 minutes since the try ended");
+  const c3: any = await soon.again(now + 16 * MIN);
+  eq([c3.status, soon.store.dump().drafts.map((d: any) => d.status)], ["ok", ["failed", "shown"]], "replaced: the old row is closed, unconfirmed");
+  eq((await yes(c3.show.meta, deps(soon.store, soon.s), now + 17 * MIN)).status, "sent");
   eq(soon.s.calls.length, 2, "one try each");
   const went = await mk(async () => ({ status: "found", id: "g-real", thread_id: "thrB" })), c4: any = await went.again(now + 20_000);
   eq([c4.status, c4.reason, row(went.store).status, row(went.store).gmail_id, went.store.dump().drafts.length], ["refused", "already_sent", "sent", "g-real", 1]);

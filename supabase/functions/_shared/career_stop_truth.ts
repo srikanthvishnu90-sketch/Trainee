@@ -101,7 +101,8 @@ export async function reconcile(admin: Admin, userId: string): Promise<Counts> {
       return (r.data ?? []).map((x: any) => ({ s: String(x[col]) }));
     } catch { return null; }
   };
-  const d = await read("career_outreach_drafts", "status");
+  // Outreach drafts only: a reply to an email in the person's inbox is not outreach, and its own card says where it stands.
+  const d = await (async () => { try { const r = await admin.from("career_outreach_drafts").select("status").eq("user_id", userId).or("recipient->>kind.is.null,recipient->>kind.neq.mail_reply").limit(5000); return r.error ? null : (r.data ?? []).map((x: any) => ({ s: String(x.status) })); } catch { return null; } })();
   const q = await read("career_send_queue", "state");
   const a = await read("career_apply_jobs", "state");
   const x = await read("career_outreach_actions", "status");

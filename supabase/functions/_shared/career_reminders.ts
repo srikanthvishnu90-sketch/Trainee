@@ -451,7 +451,7 @@ export function supabaseReminderStore(admin: any): ReminderStore {
     pending: async (u) => (must<any[]>(await admin.from("career_outbox").select("key,text,deliver_at,created_at").eq("user_id", u).eq("kind", "status").like("key", `${REMINDER_PREFIX}%`).eq("status", "queued").is("delivered_at", null).order("deliver_at", { ascending: true }).limit(100), "read the reminders") ?? [])
       .map((r) => ({ key: r.key, text: r.text, at: Date.parse(r.deliver_at), created: Date.parse(r.created_at) })),
     // deno-lint-ignore no-explicit-any
-    networking: async (u) => (must<any[]>(await admin.from("career_outreach_drafts").select("id").eq("user_id", u).limit(1), "read the networking emails") ?? []).length > 0,
+    networking: async (u) => (must<any[]>(await admin.from("career_outreach_drafts").select("id").eq("user_id", u).or("recipient->>kind.is.null,recipient->>kind.neq.mail_reply").limit(1), "read the networking emails") ?? []).length > 0,
     // deno-lint-ignore no-explicit-any
     remove: async (u, keys) => (must<any[]>(await admin.from("career_outbox").delete().eq("user_id", u).eq("kind", "status").like("key", `${REMINDER_PREFIX}%`).eq("status", "queued").is("delivered_at", null).in("key", keys).select("key"), "cancel the reminders") ?? []).length,
   };

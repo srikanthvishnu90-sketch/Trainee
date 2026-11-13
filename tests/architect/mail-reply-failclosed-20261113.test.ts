@@ -58,7 +58,9 @@ for (const [name, first] of [["a 503", () => ({ status: "ERROR", detail: "send: 
   });
 }
 
-Deno.test("F1 found in Sent: recorded as sent with that message's id, never sent twice; absent after the wait: one retry with the same Message-ID", async () => {
+// Round 3 (review of PR #820): an unknown outcome is never followed by a second try of the same card, even when Sent stays empty
+// (Sent can lag, and a cut-off request can still land); a fresh card is the only way (mail-reply-round3-20261113.test.ts B).
+Deno.test("F1 found in Sent: recorded as sent with that message's id, never sent twice; absent after the wait: still never sent again", async () => {
   // Found (the 503 was a lie: Gmail had taken it).
   let store = out.memoryOutreachStore(), c: any = await card(store), s = sender([() => ({ status: "ERROR", detail: "send: HTTP 503" }), SENT]);
   const asked: any[] = [];
@@ -70,15 +72,15 @@ Deno.test("F1 found in Sent: recorded as sent with that message's id, never sent
   const r2 = await yes(r1.meta, d, now + MIN);
   eq([s.calls.length, r2.status, row(store).status, row(store).gmail_id], [1, "sent", "sent", "g-real"], r2.reply);
   ok(asked.every((q) => q.messageId === s.calls[0].t.messageId && q.from === SECOND && q.to === "dana@acme.com" && q.inReplyTo === "<m1@acme.com>"), `Sent is searched for this exact message: ${JSON.stringify(asked[0])}`);
-  // Absent: too soon is still unconfirmed; after the wait the same card is tried once more, as the same message.
+  // Absent: unconfirmed, moments after and minutes after; the card is never tried again.
   store = out.memoryOutreachStore(); c = await card(store); s = sender([() => ({ status: "ERROR", detail: "send: HTTP 503" }), SENT]);
   const d2 = deps(store, s, { findSent: async () => ({ status: "absent" }) });
   const a1 = await yes(c.show.meta, d2);
   const a2 = await yes(a1.meta, d2, now + 10_000);
   eq([s.calls.length, a2.status], [1, "unknown_outcome"], `moments after the try nothing is sent again: ${a2.reply}`);
   const a3 = await yes(a1.meta, d2, now + 5 * MIN);
-  eq([s.calls.length, a3.status, row(store).status], [2, "sent", "sent"], a3.reply);
-  ok(gm.MESSAGE_ID.test(s.calls[0].t.messageId) && s.calls[0].t.messageId === s.calls[1].t.messageId, "both tries carry one Message-ID");
+  eq([s.calls.length, a3.status, row(store).status], [1, "unknown_outcome", "sending"], a3.reply);
+  ok(gm.MESSAGE_ID.test(s.calls[0].t.messageId), "the one try carries this card's Message-ID");
   // A definite refusal (Gmail's 4xx) is not sent, and may be tried again.
   store = out.memoryOutreachStore(); c = await card(store); s = sender([() => ({ status: "ERROR", detail: "send: HTTP 400", not_sent: true }), SENT]);
   const b1 = await yes(c.show.meta, deps(store, s));
@@ -316,7 +318,8 @@ Deno.test("F6 security mail is withheld and ordinary recruiter mail stays readab
     for (const w of `${subject} ${text.replace(/pass(?:word|code).*$/gim, "")}`.match(/\b[A-Za-z]{3,}\b/g) ?? []) if (!/^https?$/.test(w)) ok(red.includes(w) || /https?:\/\/\S*/.test(text) && !text.replace(/https?:\/\/\S*/g, "").includes(w), `"${w}" is kept: ${red}`);
   }
   for (const keep of ["$120000", "June 15, 2027", "415-555-0134", "3pm", "December 4", "11/20/2026", "9:30", "02/03/2027", "2-4pm"]) ok(S.redactSecrets(ORDINARY.map((c) => c[2]).join("\n")).includes(keep), `${keep} is kept`);
-  ok(S.redactSecrets(ORDINARY[9][2]).includes("https://www.hackerrank.com") && !S.redactSecrets(ORDINARY[9][2]).includes("abc123xyz") && !S.redactSecrets(ORDINARY[11][2]).includes("9f2c"), "a link keeps its host only");
+  // Round 3: a test or scheduling link on a known host keeps its path (it is the test itself); its query and fragment still go.
+  ok(S.redactSecrets(ORDINARY[9][2]).includes("https://www.hackerrank.com/test/abc123xyz") && S.redactSecrets(ORDINARY[11][2]).includes("https://calendly.com/reschedulings/9f2c"), "a meeting or test link keeps its path");
   // What is left in a readable email that could sign someone in is taken out.
   const red = S.redactSecrets("Hi Sam, great talking. Your portal code is 448210 and the password: Winter2026! Log in at https://portal.acme.com/login?token=abc.def or see https://acme.com/careers");
   ok(!/448210|Winter2026|token=abc/.test(red) && red.includes("Hi Sam, great talking."), red);

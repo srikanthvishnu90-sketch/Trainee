@@ -13,18 +13,20 @@ approved amending them as part of turning the check on). Measured on branch `ag/
   (`real-sets-live.yml`). It runs only on a push to `ci/research-support-live` that changes
   `evals/research-support/run-request.json`. Its first step checks the request (`approval` must be a `D-xxx` line,
   `0 < budget_usd <= 1`); the run step gets the key and the ledger secrets. The script itself refuses unless the approval is a row of
-  `docs/architect/DECISIONS.md`, then reserves the cap at the shared $80 ledger (`eval_budget.ts openLiveRunLedger`,
+  `docs/architect/DECISIONS.md` written for it: the row must name `judge-measure` and give a dollar cap at least the run's
+  `--budget-usd` (`evals/research-support/approval.ts`; any other row is refused). It then reserves the cap at the shared $80 ledger (`eval_budget.ts openLiveRunLedger`,
   `EVAL_LEDGER=shared`; refused if it does not fit what remains), puts the same cap as an in-process gate on every judge call (a
   call that does not fit is refused before it is sent), and settles the ledger to the metered cost at the end, also on error. It
   writes `result.json` (confusion table, wrong cases, latency per call, `spent_usd`) and the workflow uploads it.
-- To run, after the owner writes the DECISIONS row: set `approval` in `evals/research-support/run-request.json` to it (it is
+- To run, after the owner writes the DECISIONS row (for example `| D-0xx | … | Owner: run evals/research-support/judge-measure.ts live, cap $0.50 | … |`): set `approval` in `evals/research-support/run-request.json` to it (it is
   `PENDING` now, which the first step refuses), then `git push origin HEAD:ci/research-support-live`. Suggested cap: `0.5`.
 - By hand instead (same refusals, same ledger):
   `SUPPORT_JUDGE_SPEND_APPROVED=D-xxx ANTHROPIC_API_KEY=… SUPABASE_URL=… SUPABASE_SERVICE_ROLE_KEY=… deno run -A --no-check --import-map=tests/flow/supabase-npm.json evals/research-support/judge-measure.ts --live --budget-usd 0.5 --out out/`
 
-## 2. Existing tests that fail with the switch on (52)
+## 2. Existing tests that fail with the switch on (54)
 
-Run: the 55 architect files that touch research or the brain, with `FAIL_CLOSED.support = true` (flag off: all pass). The failing
+Run: the 55 architect files that touch research or the brain, with `FAIL_CLOSED.support = true` (flag off: all pass), plus the
+two real-handler files that need Postgres 16 (run as root with `CI=true PGBIN=/usr/lib/postgresql/16/bin`; rows 53 and 54). The failing
 line is the first assertion that fails in each test; a test may fail again further down once that line is amended.
 
 Codes: **J** the test builds research with no judge, so with the switch on every line fails closed: add `judge` to its deps (a test
@@ -91,3 +93,5 @@ sentence; it goes on the posting's link line from that posting's record. **A** t
 | 50 | `research-review-fixes-589.test.ts:59` | `eq((await run("file")).effect, "write_own");` | J: inject the judge so the File is published (`write_own`). |
 | 51 | `web-research-d060.test.ts:120` | `eq(out, [` | S+Q: messages layout through `enforceMarketReplySupported` with the judge; expect each paragraph as judged words or quoted units. |
 | 52 | `web-research-d060.test.ts:144` | `ok(r.status === "ok", JSON.stringify(r));` | J+Q: inject the judge; expect `"Anonymous posters describe 70-hour weeks at Citadel."`. |
+| 53 | `mirror-wa-batch1-process.test.ts:177` | `ok(… official and anecdotal sources told apart …)` (MP-1, C9) | Flag on, "official" needs the employer's own domain from the record (the plan's `sites` or the search's `found.sites`); the mirror script's search gives none, so citadel.com reads "reported". Amend the script's search answer to carry `sites: ["citadel.com"]` (the record), or expect "reported". |
+| 54 | `web-research-d060.test.ts:294` | `ok(…)` on the real handler's reply (D-060 at the real handler) | The handler's real judge goes through the test's Anthropic stub, which answers the judge's call with the brain's next scripted step (not a JSON array): the judge "fails", every line falls to the outage path (quoted units plus the not-checked clause), and the script is one step out of line, which is the crash the review saw on a no_sources result. Amend the stub to answer any request whose system prompt starts "You check claims against passages" with a JSON array (yes for the quote candidates and for its true lines) without advancing the script; then expect the quoted units in Instinct's layout (row 50's amendment). |

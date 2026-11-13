@@ -365,10 +365,13 @@ function contactProblems(R: any, resume: any, buf: any): string[] {
 // The submit gates hold only a file's bytes: what its own text says about the contact at its top. A file Trainee made always
 // reads back as text, so one that does not is not confirmed either (foreign: a file the person stored themselves, which this
 // parser may not read; then only what it can read is judged).
-let fileRender: Promise<any> | null = null;
-export async function resumeFileContactProblems(pdf: Uint8Array, o: { foreign?: boolean } = {}): Promise<string[]> {
-  fileRender ??= Promise.all([import("node:zlib"), import("node:crypto"), import("node:buffer")]).then(([zlib, crypto, b]) => (CareerRender as any).withRuntime({ zlib, crypto, Buffer: b.Buffer }));
-  const R = await fileRender;
+let fileRender: Promise<any> | null = null, loaded: any = null;
+const fileR = () => fileRender ??= Promise.all([import("node:zlib"), import("node:crypto"), import("node:buffer")]).then(([zlib, crypto, b]) => (loaded = (CareerRender as any).withRuntime({ zlib, crypto, Buffer: b.Buffer })));
+// A queue that paces its starts (approve-first.ts) loads the reader once, ahead of its jobs, and then judges without waiting.
+export const warmGate = (): Promise<void> => fileR().then(() => undefined);
+export async function resumeFileContactProblems(pdf: Uint8Array, o: { foreign?: boolean } = {}): Promise<string[]> { return problemsWith(await fileR(), pdf, o); }
+export function resumeFileContactProblemsNow(pdf: Uint8Array, o: { foreign?: boolean } = {}): string[] | null { return loaded ? problemsWith(loaded, pdf, o) : null; }
+function problemsWith(R: any, pdf: Uint8Array, o: { foreign?: boolean }): string[] {
   let lines: string[] = [];
   try { lines = (R.extractPdfLines(R.toBuffer(pdf)) as string[]).filter((l) => String(l ?? "").trim()); } catch { lines = []; }
   if (!lines.length) return o.foreign ? [] : ["the resume file's text could not be read, so its email is not confirmed"];

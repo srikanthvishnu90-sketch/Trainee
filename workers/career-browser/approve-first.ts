@@ -345,6 +345,10 @@ import { factsWithTextAnswers, jwtRole, questionsToStore, type TextAnswer, textA
 import { personZone } from "../../supabase/functions/_shared/person_zone.ts";
 export { factsWithTextAnswers, jwtRole, questionsToStore, type TextAnswer, textAnswerRows };
 
+// The resume contact gate (career_tailor.ts), loaded once with this module and warmed, so a job judges its file at once.
+// deno-lint-ignore no-explicit-any
+let contactGate: any = null;
+const contactGateReady = import("../../supabase/functions/_shared/career_tailor.ts").then(async (m) => { await m.warmGate(); return (contactGate = m); });
 export async function runApproved(d: {
   claim: () => Promise<Job[]>;
   finish: (id: string, lease: string, state: string, evidence: Record<string, unknown>) => Promise<unknown>;
@@ -378,8 +382,11 @@ export async function runApproved(d: {
       if (!resume || typeof resume.path !== "string" || !resume.path) throw Error("NO_RESUME");
       if (resume.sha256 !== p.resume_sha256) throw Error("RESUME_CHANGED");
       // The submit gate: a resume whose own text shows a placeholder email or phone at its top is never sent.
-      const file = await Deno.readFile(resume.path).catch(() => null);
-      if (file && (await (await import("../../supabase/functions/_shared/career_tailor.ts")).resumeFileContactProblems(file, { foreign: true })).length) throw Error("RESUME_CONTACT_UNCONFIRMED");
+      // Judged with no wait (the reader is loaded with this module): a paced queue's start is not delayed past its slot.
+      const gate = contactGate ?? await contactGateReady;
+      let file: Uint8Array | null = null;
+      try { file = Deno.readFileSync(resume.path); } catch { file = null; }
+      if (file && (gate.resumeFileContactProblemsNow(file, { foreign: true }) ?? ["the contact gate is not loaded"]).length) throw Error("RESUME_CONTACT_UNCONFIRMED");
       const factsPath = await d.writeFacts(job, factsFromPayload(p));
       // WO-096: this drive is the person's approved application, so the code its employer emails may be read for it.
       const codeEnv = d.emailCode ? await d.emailCode(job) : null;

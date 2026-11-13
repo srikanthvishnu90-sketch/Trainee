@@ -965,7 +965,9 @@ async function attempt(browser, p, opts, timing) {
     // The focus leaves the last field first, as a person's click on Submit would make it: a page that reformats on blur does it now.
     await page.evaluate(() => { const a = document.activeElement; if (a && a !== document.body && a.blur) a.blur(); }).catch(() => {});
     await page.waitForTimeout(150);
-    { const drifted = await driftedFills(page, fr.filled); if (drifted.length) { const e = new NeedsUser("field_not_filled", drifted[0]); e.needs = drifted.map((l) => ({ label: l, reason: "value_changed_by_page" })); throw e; } }
+    // A board that re-renders late drops the values (empty, not rewritten): they are set once more and read back (recheckFilled).
+    { let drifted = await driftedFills(page, fr.filled, factsFrom(p.facts || {}, p.answers || {}));
+      if (drifted.length) { const lost = await recheckFilled(page, fr.filled, { facts: p.facts, answers: p.answers || {}, resumePath: p.resume.path }); if (!lost.length) drifted = await driftedFills(page, fr.filled, factsFrom(p.facts || {}, p.answers || {})); } if (drifted.length) { const e = new NeedsUser("field_not_filled", drifted[0]); e.needs = drifted.map((l) => ({ label: l, reason: "value_changed_by_page" })); throw e; } }
     const controls = await readControls();
     const formSnap = await page.evaluate(FORM_SNAP, OPAQUE.source).catch(() => null);
     // The person's own confirmed answer to a question, as ats-fill reads it (an approved answer, else a confirmed fact).

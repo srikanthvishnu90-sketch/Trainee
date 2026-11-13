@@ -967,14 +967,19 @@ const isPlaceholderOption = (text, disabled) => !!disabled || PLACEHOLDER_OPTION
 // a phone reformatted on blur) no longer says what the person approved. Read once more at the end, each typed answer must be the
 // approved text exactly (spaces at its ends aside), or for a phone the approved digits, less only a dial code that the field's own
 // picker shows (phoneSame, the fill's own rule). Returns the labels that drifted.
-async function driftedFills(page, filled) {
+// A box the board re-rendered (its tag gone) is found again as recheckFilled finds it; a place the fill chose from the board's own
+// list is the same place by the fill's own rule (holdsApproved, with the confirmed facts).
+async function driftedFills(page, filled, facts = {}) {
   const typed = filled.filter((f) => ["text", "textarea"].includes(f.kind) && f.source !== "resume");
   if (!typed.length) return [];
   const held = await heldNow(page, typed, { menus: false });
+  const qs = held.some((x) => !x || x.gone) ? await page.evaluate(EXTRACT).catch(() => []) : [];
   const out = [];
   for (const [i, f] of typed.entries()) {
-    const now = held[i] && !held[i].gone ? String(held[i].held ?? "") : "";
+    let now = held[i] && !held[i].gone ? String(held[i].held ?? "") : null;
+    if (now === null) { const again = qs.find((x) => x.label === f.d.label && x.kind === f.d.kind && x.name === f.d.name); now = again ? String((await stateOf(page, again).catch(() => ({}))).text ?? "") : ""; }
     if (now.trim() === String(f.value).trim()) continue;
+    if (held[i] && holdsApproved({ ...held[i], held: now }, f.value, facts)) continue;
     if (isPhone(f.d, f.value) && await phoneSame(page, f.d, f.value, now)) continue;
     out.push(f.label);
   }

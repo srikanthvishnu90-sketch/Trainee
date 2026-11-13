@@ -167,6 +167,7 @@ import { shapeForTurn } from "../_shared/channel_shape.ts"; // REPLY SHAPE
 import { applyHereTurn } from "../_shared/apply_here.ts"; // APPLY HERE: a pasted link or "apply to this" -> one line + one Apply button
 import { supabaseFileStore } from "../trainee-file/store.ts";
 import { createFileService, personFacingError, supabaseFileKindStore } from "../_shared/file_service.ts"; // FILE KINDS
+import { supabaseFamilyMaker } from "../_shared/file_family_make_supabase.ts"; // D-072 (files reachable)
 import { researchBriefOn, researchReplyOn } from "../_shared/research_reply.ts"; // R9-C
 import { dnsProbe } from "../_shared/research_dns.ts";
 import { researchSearchFor } from "../_shared/research_free_sources.ts";
@@ -1482,6 +1483,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           // (TRAINEE_FILE_BASE_URL and its secret), the File service refuses to make one and tells the brain to say so, so
           // nothing is promised that cannot be opened.
           files: createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now, records: { application: (u, id) => supabaseFileStore(admin).appRow(u, id) } }),
+          // D-072 (files reachable): the record-backed File families (open_record_file), read by the same readers the File server uses.
+          familyFiles: supabaseFamilyMaker(admin, createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now })),
           verifier: hunterVerifier({ fetch, apiKey: Deno.env.get("HUNTER_API_KEY"), cache: supabaseCheckCache(admin), now: Date.now }),
           // RELEASE 9: "keep my layout" reads their own Word file; each tailored file is recorded by version for the outcome rates.
           tailor: { posting: (id) => postingsDb.get(id), personas: supabasePersonaStore(admin), resumes: supabaseResumeStore(admin), render: edgeRenderer(), ownDocx: supabaseOwnDocx(admin), upload: supabaseNewestUpload(admin), versions: supabaseVersionLog(admin),

@@ -29,6 +29,7 @@ import { correctedAsk, refinedAsk } from "../_shared/search_correction.ts";
 import { askFor } from "../_shared/career_search_judge.ts";
 import { namedDraftAsk, outreachAsk } from "../_shared/outreach_ask.ts";
 import { researchReplyOn } from "../_shared/research_reply.ts"; // D-047
+import { familyAskOf } from "../_shared/file_family_ask.ts"; // D-072 (files reachable)
 import { knowledgeOn } from "../_shared/agent/knowledge/index.ts"; // D-060
 export type BrainMode = "router" | "agent" | "staged";
 // The served brain (release_config.ts): the committed PRODUCTION_BRAIN unless CAREER_BRAIN rolls it back to the router.
@@ -471,6 +472,10 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   // stayed in use): a message saying a stored fact of theirs is out of date is a correction of that fact, the brain's (code sets
   // the fact aside before the model runs, career_brain.ts); what the router would have answered is its data.
   if (!NON_ENGLISH_KEPT.test(intent) && staleFactsOf(o.message, (o.ctx as any)?.profile?.facts).length) return { brain: true, mode, intent, reason: "stale_fact_correction", router: routerAnswer(intent, probe) };
+  // D-072 (files reachable; owner standard "complete product"): an ask to see one of their record-backed Files ("send me my weekly
+  // brief", "show me my offer comparison") is the brain's, which makes it from their records with open_record_file (or says what is
+  // missing); the router's answer is its data. An exact payload, an approval, a control or a bare reply stays code's.
+  if (!NON_ENGLISH_KEPT.test(intent) && !PAYLOAD_INTENTS.has(intent) && familyAskOf(o.message)) return { brain: true, mode, intent, reason: "file_family_ask", router: routerAnswer(intent, probe) };
   // MIRROR-1000: a draft to a named person that the router read as a file ask, an alumni list or a missing recipient is the
   // brain's drafting turn (outreach_ask.ts namedDraftAsk).
   if (DRAFT_MISREAD.has(intent) && namedDraftAsk(o.message)) return { brain: true, mode, intent, reason: "named_draft" };

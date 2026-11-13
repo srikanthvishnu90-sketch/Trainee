@@ -144,6 +144,7 @@
     "tests/architect/file-states-phone.test.ts": 2,
     "tests/architect/files-actions-loop.test.ts": 63,
     "tests/architect/files-live-loop.test.ts": 31,
+    "tests/architect/files-item6b-controls.test.ts": 7,
     "tests/architect/files-review-live.test.ts": 7,
     "tests/architect/flow-account-memory.test.ts": 7.6,
     "tests/architect/flow-apply-from-chat.test.ts": 40,

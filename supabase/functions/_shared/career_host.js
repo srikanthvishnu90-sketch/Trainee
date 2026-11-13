@@ -280,19 +280,15 @@ const CareerHost = (() => {
     ["application_batch", /\b(?:application|apply) batch\b|\bthe batch\b|\ball (?:my |the )?applications\b/i],
     ["outreach", /\boutreach\b|\bfollow[- ]?ups\b|\b(?:all|the|my) (?:emails|messages)\b|\bthe queue\b/i],
   ];
-  const BOUNDARY_RE = /\b(?:don'?t|do not|dont)\s+(?:contact|message|email|reach out to|text)\s+anyone\b|\bleave (?:everything|it all|them|it|all of it) unsent\b|\b(?:don'?t|do not|dont)\s+send\s+(?:anything|any of (?:it|them))\b|\b(?:don'?t|do not|dont)\s+start\s+(?:any(?:thing)?\s+)?new(?:\s+work)?\b/i;
+  const BOUNDARY_RE = /\b(?:don'?t|do not|dont)\s+(?:contact|message|email|reach out to|text)\s+anyone\b(?!\s+else\b)|\bleave (?:everything|it all|them|it|all of it) unsent\b|\b(?:don'?t|do not|dont)\s+send\s+(?:anything|any of (?:it|them))\b(?!\s+else\b)|\b(?:don'?t|do not|dont)\s+start\s+(?:any(?:thing)?\s+)?new(?:\s+work)?\b/i;
   // MIRROR-1000 gaps (2026-11-11): "Don't send anything yet: get that over to Marcus" hands a message to someone; the guard
   // holds the send, and the hand-off is the ask (it is not a stop).
-  // An ask for work beside a boundary: the boundary limits that ask (D-061 G1/G6) and is not a stop. A request verb ("find",
-  // never "find out"; "draft", "research", a sentence that starts "list"), an advice question about what to say ("what should I
-  // say to Leo?"), or a question for jobs, people or company research ("who at Airbnb could refer me?", "which companies are
-  // hiring analysts?", "what's Stripe like to work for?").
-  const ASK_WORD_RE = /\bfind\b(?!\s+out\b)|\b(?:search|look for|look up|dig up|pull up|get me|show me|give me|apply to|draft|write|tell me about|research)\b|(?:^|[.!?;,:]\s*)(?:list|name)\b|\b(?:what|how) (?:should|do|can|could|would) i\b/i;
+  // Review 2026-11-13 round 3 (fail closed): a boundary is a hold, full stop; nothing beside it cancels it. These only decide
+  // whether the rest of the message is ALSO answered by the normal path (`alongside`): a request verb ("find", never "find out"),
+  // a hand-off to a named person, or any question. The hold is then applied after that turn, limited to effects (approved
+  // outreach, queued emails, approved follow-ups and applications go back to waiting), and the reply says so.
+  const ASK_WORD_RE = /\bfind\b(?!\s+out\b)|\b(?:search|look for|look up|dig up|pull up|get me|show me|give me|apply to|draft|write|tell me|research|show|list|name)\b|\b(?:what|how|why|who|which|where|when) (?:should|do|does|did|can|could|would|is|are|was|were|has|have)\b/i;
   const HANDOFF_RE = /\b(?:[Ss]end|[Gg]et|[Ff]orward|[Pp]ass)\s+(?:it|this|that|them)\s+(?:over\s+|along\s+|on\s+)?to\s+[A-Z]/;
-  const WORK_QUESTION_RE = /\b(?:jobs?|roles?|internships?|openings|positions|hiring|like to work|alumni|grads|recruiters?|hiring managers?|contacts|connections|refer(?:ral)?)\b|\bwho (?:are some|at|from|works?|could|can|might)\b/i;
-  // Review 2026-11-13 round 2 (fail closed): a boundary sentence is a hold. A question about state beside it ("don't send
-  // anything. which ones are still pending?", "Don't email anyone. Why did you queue those?") never cancels it; only a real ask
-  // for work does (above), and a question counts as one only when it asks for jobs, people or company research.
   const NEGATED_RE = /\b(?:don'?t|do not|dont|never|no need to)\s+(?:\w+\s+)?$/i;
   const sentencesOf = (s) => s.split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
   // Review 2026-11-13 (fail closed): a stop is read per clause, never vetoed by a question elsewhere in the message. "Pause
@@ -331,8 +327,11 @@ const CareerHost = (() => {
     }
     return out;
   }
+  // Words inside quotation marks are someone's words, not this person's instruction: "My friend told me "pause everything"".
+  const unquoted = (t) => t.replace(/["“][^"”]{1,200}["”]/g, (q) => " ".repeat(q.length));
   function stopControlOf(text) {
-    const ask = typeof text === "string" ? text.trim() : "";
+    const raw = typeof text === "string" ? text.trim() : "";
+    const ask = unquoted(raw);
     if (!ask || ask.length > 2000) return null;
     if (/\balerts?\b|\balert-wise\b|\bwatch(?:es|ing)?\b/i.test(ask)) return null;
     // MIRROR-1000 (2026-11-11): "If I said pause everything, what happens to what's in flight? Just explain, don't do it" paused
@@ -345,20 +344,20 @@ const CareerHost = (() => {
     }
     const boundaries = stopsIn(ask, BOUNDARY_RE);
     const boundary = boundaries.length > 0;
-    if (!workflows.length) {
-      if (!boundary) return null;
-      // The boundary beside a real ask for work limits that ask (D-061 G1/G6); any other sentence beside it never cancels it.
-      const workQuestion = sentencesOf(ask).some((x) => /\?\s*$/.test(x) && !BOUNDARY_RE.test(x) && WORK_QUESTION_RE.test(x));
-      if (ASK_WORD_RE.test(ask) || HANDOFF_RE.test(ask) || workQuestion) return null;
-    }
+    if (!workflows.length && !boundary) return null;
+    // A boundary-only hold beside another ask or question: that ask is answered too, and the hold rides along (never cancelled).
+    const rest = ask.replace(new RegExp(BOUNDARY_RE.source, "gi"), " ");
+    const alongside = !workflows.length && (/\?/.test(ask) || ASK_WORD_RE.test(rest) || HANDOFF_RE.test(raw));
     // An ask the person says is still unanswered ("I asked for company research, and you haven't answered it").
     const open = /\bi asked (?:for|about) ([^.,;!?]{3,80}?)(?:,| and)? (?:and )?you (?:haven'?t|have not|didn'?t|did not)\b/i.exec(ask);
-    return { kind: "workflow", workflows, boundary, outstanding: open ? open[1].trim() : null };
+    return { kind: "workflow", workflows, boundary, outstanding: open ? open[1].trim() : null, alongside };
   }
   function isHostControlled(text, ctx) {
     const ask = typeof text === "string" ? text.trim() : "";
     if (PAUSE_RE.test(ask) || RESUME_RE.test(ask) || ERASE_RE.test(ask)) return true;
-    if (stopControlOf(ask)) return true;
+    // A hold beside another ask is not the host's turn: the ask is answered and the handler applies the hold after it.
+    const stop = stopControlOf(ask);
+    if (stop && !(stop.kind === "workflow" && stop.alongside)) return true;
     return !!(ctx && ctx.globalPause && ctx.globalPause.set === true && ctx.globalPause.source === "account_control");
   }
   function applyHostControl(text, ctx) {

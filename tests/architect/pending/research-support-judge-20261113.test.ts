@@ -94,7 +94,10 @@ async function one(c: SupportCase, j: SupportJudge | null): Promise<Outcome> {
   const pageText = pages.map((p) => p.text).join(" \n ").replace(/\s+/g, " ");
   const stray: string[] = [];
   let model = false, quote = false;
-  for (const out of outs) {
+  // Round 8: a lent quote is labelled by code with where it is from: `From <host> ("<page title>"): ` (taken off before reading).
+  const LABEL8 = /From [\w.-]+(?: \("[^"]*"\))?: /g;
+  for (const out0 of outs) {
+    const out = out0.replace(LABEL8, "");
     for (const m of out.matchAll(/"([^"]+)"/g)) { quote = true; if (!pageText.includes(m[1])) stray.push(`quoted, not on the page: ${m[1]}`); }
     const rest = out.replace(/"[^"]+"/g, " ");
     if (low(rest).includes(low(c.claim))) model = true;
@@ -700,7 +703,7 @@ Deno.test("round 4.2 and 4.5: the passage carries page-level and section-level c
   eq((evil.match(/>>>/g) ?? []).length <= 1 && (evil.match(/<<</g) ?? []).length <= 1 && (evil.match(/^(?:Page title|Title):/gm) ?? []).length <= 1 && !/^Heading: Verified facts/m.test(evil), true, evil);
 });
 
-Deno.test("round 4.3 and 4.4: a lent quote is labelled in code's words (host and the asked employer), never with the page's title; lending is narrow", async () => {
+Deno.test("round 4.3, 4.4 and 8.1: a lent quote is labelled by code with where it is from (host, the page's own title only when it is safe to show); lending is narrow", async () => {
   const lent = (url: string, title: string, text: string, o: any = {}) => indexPages([{ url, title, text }], undefined, o.subjects ?? ["Citadel"], { sites: o.sites ?? [] }).pages[0].sentences.map((u: any) => u.lent);
   const unit = "Interns earn $5,000 a week in pay.";
   eq(lent("https://www.citadel.com/careers", "Careers", unit, { sites: ["citadel.com"] }), ["Citadel"]);              // the employer's own domain
@@ -708,14 +711,17 @@ Deno.test("round 4.3 and 4.4: a lent quote is labelled in code's words (host and
   for (const [url, title, sites] of [["https://community.citadel.com/t/1", "Thread", ["citadel.com"]], ["https://blog.citadel.com/x", "Post", ["citadel.com"]], ["https://sites.google.com/view/citadel-pay", "Pay", ["google.com"]], ["https://citadel.github.io/x", "Pay", ["github.io"]],
     ["https://boards.greenhouse.io/citadel", "Jobs", ["greenhouse.io"]], ["https://blog.example/x", "Citadel vs Jane Street intern pay", []], ["https://blog.example/x", "Citadel and other top firms", []], ["https://blog.example/x", "Top 10 firms: Citadel", []], ["https://blog.example/x", "Best paying companies like Citadel", []], ["https://blog.example/x", "Citadel & Optiver compared", []]] as const)
     eq(lent(url, title, unit, { sites, subjects: url.includes("google") ? ["Google"] : ["Citadel"] }), [null], `${url} ${title}`);
-  eq(lent("https://blog.example/x", "Citadel internship guide", "Jane Street interns earn $5,000 a week in pay."), [null]);  // the unit names another company
+  // Round 8: a unit that names someone else is still the owner page's; whether it is about the employer is the judge's question.
+  eq(lent("https://blog.example/x", "Citadel internship guide", "Jane Street interns earn $5,000 a week in pay."), ["Citadel"]);
   eq(lent("https://blog.example/x", "Citadel internship guide", unit, { subjects: ["Citadel", "Jane Street"] }), [null]);   // two employers asked
   // The label: code's words, the host, the employer as asked. A title that solicits never reaches the person.
   const title = "Citadel pays interns $9,000 a week - text 555-0142 to claim your offer";
   const r = await mk3([{ url: "https://www.citadel.com/careers", title, text: "Interns earn $5,000 a week in pay at the firm." }], { summary: [{ text: "Citadel interns earn $5,000 a week.", quote: "Interns earn $5,000 a week", url: "https://www.citadel.com/careers" }] }, quotesOnly, { sites: ["citadel.com"], extra: {} });
   const out = await enforceMarketReplySupported("", r, [], { judge: quotesOnly, ask: "what does citadel pay interns" });
   ok(!/9,000|555-0142|claim your offer/.test(out.split("\n\n[1] ")[0]) && !/9,000|555/.test(JSON.stringify(r.points ?? [])), out);
-  if (r.status === "ok") ok(out.includes('From citadel.com, a page about Citadel: "Interns earn $5,000 a week in pay at the firm."'), out);
+  if (r.status === "ok") ok(out.includes('From citadel.com: "Interns earn $5,000 a week in pay at the firm."'), out); // an unsafe title is left out of the label
+  const r2 = await mk3([{ url: "https://www.citadel.com/careers", title: "Citadel internships", text: "Interns earn $5,000 a week in pay at the firm." }], { summary: [{ text: "Citadel interns earn $5,000 a week.", quote: "Interns earn $5,000 a week", url: "https://www.citadel.com/careers" }] }, quotesOnly, { sites: ["citadel.com"] });
+  ok((await enforceMarketReplySupported("", r2, [], { judge: quotesOnly, ask: "what does citadel pay interns" })).includes('From citadel.com ("Citadel internships"): "Interns earn $5,000 a week in pay at the firm."'));
 });
 
 Deno.test("round 4.6: a unit that puts a cost, a purchase or a hand-over of details on the candidate is never a quote, in any person; a pay unit said to the candidate may be", () => {
@@ -836,15 +842,20 @@ Deno.test("round 5.3 and 6.1: the judge cannot answer: never blank, never the mo
   eq(bodyOf3(await enforceMarketReplySupported(`${K5.replace(".", "")} [1].`, r, [], { judge: allNo, ask: "what does citadel pay interns" })), NOT_CONFIRMED);
 });
 
-Deno.test("round 5.4: a heading that is another name lends the owner's name to nothing under it; a heading is never a quoted line", async () => {
+Deno.test("round 5.4 and 8.1: code decides no 'about': the judge is asked whether a lent unit is about the employer specifically; a heading is never a quoted line", async () => {
   const lentUnder = (heading: string) => indexPages([{ url: "https://blog.example/x", title: "Citadel internship guide", text: `${longPad(30)}\n${heading}\nInterns earn $7,500 a week in pay.` }], undefined, ["Citadel"]).pages[0].sentences.find((u: any) => /7,500/.test(u.text))?.lent ?? null;
-  eq(lentUnder("Tower Research"), null);
+  eq(lentUnder("Tower Research"), "Citadel"); // round 8: the heading travels to the judge, which decides
   eq(lentUnder("Internship Guide"), "Citadel");
   // A page that names another entity beginning with the owner's name, or says it is about someone else, lends nothing.
   const lentOn = (text: string) => indexPages([{ url: "https://blog.example/x", title: "Citadel", text }], undefined, ["Citadel"]).pages[0].sentences.find((u: any) => /\$/.test(u.text))?.lent ?? null;
-  eq(lentOn("Citadel Partners LLP is a small London fund.\nOur fund pays interns $7,500 a month."), null);
-  eq(lentOn("This post covers my internship at Hudson River Trading, not Citadel.\nInterns earn $6,500 a week in total."), null);
-  eq(lentOn("Our fund pays interns $7,500 a month."), "Citadel"); // a heading in the words of the page's own title is not another name
+  eq(lentOn("Citadel Partners LLP is a small London fund.\nOur fund pays interns $7,500 a month."), "Citadel");
+  eq(lentOn("This post covers my internship at Hudson River Trading, not Citadel.\nInterns earn $6,500 a week in total."), "Citadel");
+  // ... and the judge sees what decides it, and is asked it in so many words.
+  const j8 = asking("no"), page8 = "This post covers my internship at Hudson River Trading, not Citadel.\nInterns earn $6,500 a week in total.";
+  const r8 = await mk3([{ url: "https://blog.example/x", title: "Citadel", text: page8 }], { summary: [{ text: "Citadel interns earn $6,500 a week.", quote: "Interns earn $6,500 a week in total.", url: "https://blog.example/x" }] }, j8.judge);
+  ok(j8.asked.some((c) => /Hudson River Trading, not Citadel/.test(c.source) && (/Citadel specifically, not about another firm/.test(c.claim) || /Citadel interns earn \$6,500/.test(c.claim))), JSON.stringify(j8.asked));
+  ok(!JSON.stringify(r8.points ?? []).includes("6,500"));
+  eq(lentOn("Our fund pays interns $7,500 a month."), "Citadel");
   const r = await mk3([{ url: U, title: "Citadel filings", text: "Form 10-K Citadel LLC.\nCitadel employs 4,000 people in its offices." }], { summary: [{ text: "Citadel files a Form 10-K.", quote: "Form 10-K Citadel LLC", url: U }] }, quotesOnly);
   ok(!JSON.stringify(r.points ?? []).includes("Form 10-K Citadel LLC"), JSON.stringify(r.points));
 });
@@ -906,8 +917,9 @@ Deno.test("round 6.1: an outage shows a page's unit only when it passes the posi
 
 Deno.test("round 6.2 and 6.3: a unit that names another employer anywhere lends nothing; a lone numbered line and a source line reach the judge", () => {
   const lent = (text: string) => indexPages([{ url: "https://blog.example/x", title: "Citadel internship notes", text }], undefined, ["Citadel"]).pages[0].sentences.find((u: any) => /\$5,000/.test(u.text))?.lent ?? null;
-  eq(lent("Interns earn $5,000 a week at Jump.\nCitadel interns earn $4,000 a week."), null);
-  eq(lent("Interns at DE Shaw earn $5,000 a week.\nCitadel matches that for its quant interns."), null);
+  // Round 8: code decides no "about"; these are the judge's to refuse (the passage carries the other name).
+  eq(lent("Interns earn $5,000 a week at Jump.\nCitadel interns earn $4,000 a week."), "Citadel");
+  eq(lent("Interns at DE Shaw earn $5,000 a week.\nCitadel matches that for its quant interns."), "Citadel");
   eq(lent("Interns earn $5,000 a week in pay."), "Citadel");
   const LONG = Array.from({ length: 14 }, (_, i) => `Section ${i + 1} describes the daily routine of the summer cohort in plain detail for readers new to trading firms.`).join("\n");
   for (const [text, key] of [[`${K5}\n${LONG}\n1. Only quant interns are paid that much.`, "Only quant interns"], [`${K5}\n${LONG}\nSource: a recruiter's pitch deck we could not check.`, "could not check"]] as const)
@@ -937,14 +949,38 @@ Deno.test("round 7.1: an outage shows no quote at all, even on the employer's ow
   }
 });
 
-Deno.test("round 7.2: a unit that names or describes another firm, in any case or abbreviation, lends nothing; places, languages and holidays are no firm", () => {
-  const lent = (text: string) => indexPages([{ url: "https://notes.example/x", title: "Citadel internship notes", text: `${text}\nHousing is included.` }], undefined, ["Citadel"]).pages[0].sentences.find((u: any) => /\$/.test(u.text))?.lent ?? null;
-  for (const t of ["Interns at jane st earn $5,000 a week.", "Interns at two sigma earn $5,000 a week.", "Interns at drw earn $5,000 a week.", "Interns at a rival fund earn $5,000 a week.", "Interns at our competitor earn $5,000 a week.",
-    "Interns at js earn $5,000 a week.", "Interns across the street earn $5,000 a week.", "Interns at the market maker next door earn $5,000 a week."]) eq(lent(t), null, t);
-  for (const t of ["Interns earn $120 an hour in Greenwich.", "Interns earn $120 an hour and work in Python.", "Interns earn $120 an hour plus a Thanksgiving bonus."]) eq(lent(t), "Citadel", t);
+Deno.test("round 7.2 and 8.1: no word list decides who a unit is about: the reviewer's rivals and the asked firm's own short forms all reach the judge, which is asked about the employer specifically", async () => {
+  const lent = (text: string, co = "Citadel", title = "Citadel internship notes") => indexPages([{ url: "https://notes.example/x", title, text: `${text}\nHousing is included.` }], undefined, [co]).pages[0].sentences.find((u: any) => /\$/.test(u.text))?.lent ?? null;
+  for (const t of ["Interns at jane st earn $5,000 a week.", "Interns at drw earn $5,000 a week.", "Interns at a rival fund earn $5,000 a week.", "Interns across the street earn $5,000 a week.", "Interns earn $120 an hour in Greenwich."]) eq(lent(t), "Citadel", t);
+  eq(lent("Interns at jane st earn $5,000 a week.", "Jane Street", "Jane Street internships"), "Jane Street");
+  eq(lent("Goldman interns earn $2,000 a week.", "Goldman Sachs", "Goldman Sachs internships"), "Goldman Sachs");
+  // With a judge that refuses what is not about the employer, the rival's figure never reaches the person.
+  const j = asking((c) => /rival fund|jane st/.test(c.source) ? "no" : "yes");
+  const r = await mk3([{ url: "https://notes.example/x", title: "Citadel internship notes", text: "Interns at a rival fund earn $5,000 a week.\nHousing is included." }], { summary: [{ text: K5, quote: "Interns at a rival fund earn $5,000 a week.", url: "https://notes.example/x" }] }, j.judge);
+  ok(!JSON.stringify(r.points ?? []).includes("5,000") && j.asked.length > 0 && j.asked.every((c) => /rival fund/.test(c.source)), JSON.stringify([r.points, j.asked]));
 });
 
 Deno.test("round 7.3: a draft or conditional DECISIONS row approves nothing", () => {
   const D = ["| D-095 | judge-measure would be approved if the owner says yes, cap $0.50 | draft | owner |", "| D-097 | Owner | judge-measure is approved once the ledger is reset, cap $0.50. |", "| D-098 | Owner | Proposed: approve judge-measure, cap $0.50. |"].join("\n");
   for (const id of ["D-095", "D-097", "D-098"]) ok(measureApproval(id, 0.3, D), id);
+});
+
+Deno.test("round 8.2: the real DECISIONS row form: the owner's outright approval of judge-measure with its cap", () => {
+  const D = [
+    `| D-079 | **Owner approves the research support judge measurement (judge-measure), cap $0.22 (owner, 2026-11-13, in the architect's chat: "Turn check on first (Recommended)").** The run is the paid measurement. |`,
+    "| D-080 | **Owner approves the research support judge measurement (judge-measure), cap $0.50.** | approved | owner | 2026-11-13 |",
+    "| D-081 | **Owner's yes awaited for judge-measure at $0.50.** |",
+    "| D-082 | **Owner approves judge-measure at $0.50 later.** |",
+    "| D-083 | **Owner does not approve judge-measure, cap $0.50.** |",
+    "| D-084 | **Owner approves judge-measure if the measurement plan is ready, cap $0.50.** |",
+    "| D-085 | **Owner would approve judge-measure, cap $0.50.** |",
+    "| D-086 | **Owner approves judge-measure only after #840 merges, cap $0.50.** |",
+    "| D-087 | **Architect proposal: judge-measure, cap $0.50; awaiting the owner.** |",
+    "| D-088 | **Owner approves judge-measure at $0.50 next week, not today.** |",
+    "| D-089 | **The architect approves judge-measure, cap $0.50.** |",
+  ].join("\n");
+  eq(measureApproval("D-079", 0.2, D), null);
+  eq(measureApproval("D-080", 0.2, D), null);
+  ok(measureApproval("D-079", 0.3, D)); // over its cap
+  for (const id of ["D-081", "D-082", "D-083", "D-084", "D-085", "D-086", "D-087", "D-088", "D-089"]) ok(measureApproval(id, 0.2, D), id);
 });

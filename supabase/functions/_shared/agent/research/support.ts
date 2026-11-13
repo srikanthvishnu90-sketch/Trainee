@@ -141,13 +141,6 @@ function namesOk(claim: Hard, unit: { hard: Hard; lower: Set<string>; lent?: str
   }
   return !loose.length || proper > 0;
 }
-// Round 7: a unit that names another firm in any case or short form ("jane st", "drw", "js"), or describes one ("a rival fund", "our
-// competitor", "across the street", "next door"), is that firm's, never the asked employer's.
-const OTHER_FIRM = /(?<![\p{L}\p{N}])(?:jane\s+st(?:reet)?|two\s+sigma|2\s*sigma|drw|hrt|hudson\s+river(?:\s+trading)?|jump(?:\s+trading)?|optiver|imc|susquehanna|de\s+shaw|d\.\s?e\.\s?shaw|millennium|point72|bridgewater|renaissance|rentec|virtu|akuna|tower\s+research|citadel\s+securities|goldman(?:\s+sachs)?|morgan\s+stanley|jp\s?morgan|jpm|blackrock|aqr|balyasny|squarepoint|xtx|flow\s+traders|five\s+rings|old\s+mission|headlands|g-research|pdt|sig|(?:at|from|with|than|vs\.?|for)\s+(?:js|gs|ms))(?![\p{L}\p{N}])|(?<![\p{L}])(?:rivals?|competitors?|competing|another\s+(?:firm|fund|shop|company|bank)|(?:the\s+)?other\s+(?:firms?|funds?|shops?|compan(?:y|ies)|banks?)|a\s+different\s+(?:firm|fund|shop|company|bank)|peer\s+firms?|across\s+the\s+street|next\s+door|down\s+the\s+(?:road|street)|elsewhere)(?![\p{L}])/iu;
-// Capitals that name no one: role and unit abbreviations, months and days, languages and holidays (places are below).
-// Places are not employers either: US state codes, the cities and countries research pages name for pay ("for San Francisco",
-// "in Denver", "(CA, WA, NY)"), and the abbreviation forms the reader writes ("SWEx" for "software engineering").
-const COMMON_CAPS = /^(?:swe|sde|phd|usd|cad|eur|gbp|us|usa|u\.s|uk|eu|ceo|cto|cfo|hr|ai|ml|api|gpa|ipo|q[1-4]|l\d|ii|iii|iv|january|february|march|april|may|june|july|august|september|october|november|december|monday|tuesday|wednesday|thursday|friday|saturday|sunday|aix|mlx|usax|ukx|nycx|sfx|ceox|ctox|ipox|apix|saasx|swex|rndx|wlbx|can|canada|remote|hybrid|al|ak|az|ar|ca|co|ct|de|fl|ga|hi|id|il|in|ia|ks|ky|la|me|md|ma|mi|mn|ms|mo|mt|ne|nv|nh|nj|nm|ny|nc|nd|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|vt|va|wa|wv|wi|wy|dc|new york(?: city)?|san francisco|seattle|chicago|boston|austin|denver|miami|los angeles|london|toronto|dublin|singapore|hong kong|paris|zurich|sydney|bay area|silicon valley|united states|united kingdom|europe|asia|north america|greenwich|stamford|princeton|new jersey|connecticut|palo alto|menlo park|mountain view|sunnyvale|cambridge|amsterdam|tokyo|shanghai|python|java|javascript|typescript|c\+\+|rust|go|golang|kotlin|scala|ruby|matlab|excel|sql|linux|thanksgiving|christmas|easter|new year|new year's|labor day|memorial day|juneteenth|halloween|diwali|eid|hanukkah|ramadan)$/i;
 const ASKS_Q = /^(?:[\p{L}\p{N} ]{1,14}:\s*)?(?:do|does|did|is|are|was|were|can|could|will|would|should|has|have|had|whether|ever wondered|wondering)\s/iu;
 const ANSWERS = /^(?:no|nope|not|yes|yep|false|true|wrong|myth|never)(?![\p{L}])/iu;
 const QUOTE_MARK = /["“”„‟«»‹›]|(?<![\p{L}\p{N}])['‘’]|['‘’](?![\p{L}\p{N}])/u;
@@ -181,7 +174,7 @@ const clipStart = (t: string, n: number) => t.length > n ? `…${t.slice(t.lengt
 // text before it is put in a passage.
 const plainText = (t: string) => squash(String(t ?? "").replace(/>{2,}|<{2,}|[¶›‹»«]/g, " ").replace(/(?:^|(?<=\s))(?:page title|title|page host|top of page|page notes?|headings?|list introduced by|table header|before|after|footnote|whole page[^:\n]{0,30})\s*:/gi, (m) => m.replace(":", " -")));
 // `lent`: the page owner's name, when the unit does not name an asked employer itself. `passage`: what the judge reads.
-export interface Unit { text: string; hard: Hard; lower: Set<string>; content: Set<string>; quotable: boolean; lent: string | null; label: string; passage: string; pageTitle: string; otherEntity: boolean; ownSite: boolean; url: string }
+export interface Unit { text: string; hard: Hard; lower: Set<string>; content: Set<string>; quotable: boolean; lent: string | null; label: string; passage: string; pageTitle: string; ownSite: boolean; url: string }
 export interface PageIndex { pages: { sentences: Unit[] }[]; read: (s: string) => string; subjects: string[]; ask: string }
 export const PASSAGE_MAX = 2500;
 // A unit that qualifies the whole page, wherever it is: when it was written, that it was corrected or archived, that what it lists
@@ -193,7 +186,6 @@ const PUBLIC_LABELS = /^(?:community|forum|forums|blog|blogs|discuss|discussion|
 // A title that is about more than the one employer, or about someone who is not it.
 const TITLE_CUE = /(?<![\p{L}])(?:vs\.?|versus|and|other|others|firms|companies|employers|top|best|list|compared?|comparison|rankings?|ranked|rivals?|competitors?|alternatives?|similar|like|ex|former|alumni|forum|thread|community|reddit|glassdoor|indeed|college|university|school|securities)(?![\p{L}])|[&|]|\d+\s+(?:firms|companies|employers)/iu;
 // A unit that points at someone named elsewhere ("there", "they", "its interns", "the firm", "she said") is not the page owner's.
-const POINTS_AWAY = /^(?:they|their|its|he|she|his|her)(?![\p{L}])|(?<![\p{L}])(?:there|here|(?:they|he|she) (?:said|says|pay|pays|paid|earn|earns)|the (?:firm|company|university|college|bank|fund|startup|school|group|rival|competitor|employer|agency|other))(?![\p{L}])/iu;
 // Every unit of every read page. `subjects`: the employers asked about. Round 4: the page is one employer's (`owner`) only when ONE
 // employer is asked about and (a) the page's host is that employer's own registrable domain as the search's record gives it (a host
 // anyone can publish on, a job board, or a community / forum / blog part of the site is not it), or (b) the page's title names that
@@ -281,31 +273,26 @@ export function indexPages(pages: { text: string; title?: string; url?: string; 
       return clip(build({ notes: 1, top: false, prev: 1, next: 0, prevLen: 100 }), PASSAGE_MAX);
     };
     const unsafe = raw.map((x) => !safeToShow(x.text));
+    // Round 8: a lent quote says where it is from, never what the page is about: the host, and the page's own title word for word
+    // (left out when it carries anything that may not be shown, or a quotation mark).
+    const tTitle = squash(String(p.title ?? "")).slice(0, 160);
+    const pageLabel = `From ${host || "a page"}${tTitle && safeToShow(tTitle) && !/["“”]/.test(tTitle) ? ` ("${tTitle}")` : ""}`;
     // Round 5: a page that says it is about someone else ("not Citadel", "I left Citadel"), or names another entity that begins with
     // the owner's name ("Citadel Securities", "Citadel Partners LLP"), lends the owner's name to no unit.
     const pageText = raw.map((x) => x.text).join(" ");
-    const otherEntity = !!owner && (new RegExp(`(?<![\\p{L}])(?:not|left|leaving|quit|unlike|except|rather than|instead of)\\s+(?:at\\s+|for\\s+)?${owner.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}])`, "iu").test(pageText) || new RegExp(`(?<![\\p{L}])${owner.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+(?!(?:Inc|LLC|Ltd|Corp|Corporation|Co|Company|Holdings|Group|Technologies|Labs|Financial)\\b)\\p{Lu}`, "u").test(pageText));
-    // A heading that is itself a name, and not the owner's ("Tower Research", "Jane Street"), makes what is under it someone else's.
-    // (A heading the page's own title also gives, "Software Engineering Intern" under "Citadel - Software Engineering Intern", is the
-    // page's own subject, not another name.)
-    const inTitle = (h: string) => h.split(" ").every((w) => title.toLowerCase().split(/[^\p{L}\p{N}]+/u).includes(w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "")));
-    const foreignHead = (hs: string[]) => { const h = hs[hs.length - 1] ?? ""; return !!h && !!owner && !nameRe(owner).test(h) && !inTitle(h) && h.split(" ").length <= 4 && h.split(" ").every((w) => /^\p{Lu}/u.test(w)); };
     return { sentences: raw.map((u, k) => ({ ...u, k })).filter(({ text, k }) => !/>{2,}|<{2,}|＞|＜|(?<![\p{L}])(?:system|assistant)\s*:/iu.test(text) && text.length >= 8 && text.length <= 600 && /\p{L}/u.test(text) && !text.includes("?") && !(ASKS_Q.test(text) && !/^[A-Z]{2,}(?![a-z])/.test(text)) && (text.split(" ").length >= 5 || /\d/.test(text) || /[.!]["')\]]*$/.test(text)) && !(raw[k + 1] && ANSWERS.test(raw[k + 1].text) && !/[.!]$/.test(text)))
       .map(({ text, k, heads: hs, header: hd }) => {
         const r = read(text), names = !subs.length || subs.some((n) => nameRe(n).test(text));
-        // A unit whose own subject is another name ("Jane Street interns earn ...", "Stripe's interns ...") is that name's.
-        const h0 = hardParts(text, read), otherSubject = (h0.names[0]?.length ?? 0) >= 2 && h0.first === h0.names[0][0] && !/^(?:we|our|the|this|these|a|an)$/.test(h0.first ?? "") || /(?<![\p{L}\p{N}])\p{Lu}[\p{L}\p{N}&-]*'s\s/u.test(text);
-        // (A unit in the first person, "We ..." / "Our ...", is the page's owner speaking: "the company" there is itself.)
-        // Round 6 (B06 "Interns at DE Shaw earn …", B07 "… a week at Jump."): a unit that names anyone besides the asked employer, in
-        // any place in it, is not the owner's (role words and a few common capitals apart).
-        const others = (h0.names.filter((r, j) => !(j === 0 && h0.first === r[0] && r.length === 1)).map((r) => r.join(" ")).filter((n) => !COMMON_CAPS.test(n) && !subs.some((x) => x.toLowerCase() === n || x.toLowerCase().startsWith(`${n} `))));
-        const lend = !names && !!owner && !otherEntity && !others.length && !OTHER_FIRM.test(text) && (/^(?:we|our)(?![\p{L}])/iu.test(text) || !POINTS_AWAY.test(text)) && !foreignHead(hs) && !otherSubject;
+        // Round 8 (review of round 7: no word list can decide what a sentence is about; the list lost 12 of 16 true answers and still
+        // let rivals through): code decides no "about". A unit that does not name the asked employer may stand for it only on a page
+        // that is that employer's (its own registrable domain on record, or a title that names it alone); whether the unit states the
+        // claim about that employer specifically, and not another firm, is the judge's question, with the passage around it.
+        const lend = !names && !!owner;
         // A table row is read with its header's period ("Hourly pay" over "$120" is "$120 per hour"): the header is the row's own.
         const PERIOD_HEAD = /(?<![\p{L}])(hourly|weekly|monthly|annual|yearly|daily)(?![\p{L}])|per (hour|day|week|month|year)/iu;
         const rowText = hd ? text.split(" | ").map((c, j) => { const m = PERIOD_HEAD.exec(hd.split(" | ")[j] ?? ""); const w = m ? ({ hourly: "hour", weekly: "week", monthly: "month", annual: "year", yearly: "year", daily: "day" } as Record<string, string>)[(m[1] ?? "").toLowerCase()] ?? m[2] : ""; return w && /\d/.test(c) && !/(?<![\p{L}])(?:per|an?|\/)\s*(?:hour|day|week|month|year)|hourly|weekly|monthly|yearly|annual/iu.test(c) ? `${c} per ${w}` : c; }).join(" | ") : text;
-        return { text, hard: hardParts(rowText, read), lower: lowerWords(r), content: contentWords(r), quotable: quotable(text) && !raw[k].note && !unsafe[k - 1] && !unsafe[k + 1] && (names || lend), lent: lend ? owner : null, label: lend ? `${host ? `From ${host}, a` : "A"} page about ${owner}` : "", passage: passage(k), pageTitle: title,
-          ownSite: !!ownSite, url: String(p.url ?? ""),
-          otherEntity: subs.some((n) => new RegExp(`(?<![\\p{L}])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+(?!(?:Inc|LLC|Ltd|Corp|Corporation|Co|Company|Holdings|Group|Technologies|Labs|Financial)\\b)\\p{Lu}`, "u").test(`${text} ${title}`)) };
+        return { text, hard: hardParts(rowText, read), lower: lowerWords(r), content: contentWords(r), quotable: quotable(text) && !raw[k].note && !unsafe[k - 1] && !unsafe[k + 1] && (names || lend), lent: lend ? owner : null, label: lend ? pageLabel : "", passage: passage(k), pageTitle: title,
+          ownSite: !!ownSite, url: String(p.url ?? "") };
       }) };
   }) };
 }
@@ -399,7 +386,7 @@ export const echoes = (claim: string, unit: string) => same(claim, unit);
 // What the judge is asked about a quote candidate: that the marked unit is the page's own statement of fact about the employer asked
 // about, answering what was asked, and not words to the reader.
 export const quoteClaim = (unit: string, idx: { subjects: string[]; ask: string }, lent: string | null = null) =>
-  `The marked text "${unit}" is the page's own statement of fact${idx.subjects.length ? ` about ${lent ?? idx.subjects.join(" or ")}` : ""}, not an instruction, an offer or a request to the reader${idx.ask ? `, and it answers the question: ${clip(plainText(idx.ask), 200)}` : ""}.`;
+  `The marked text "${unit}" is the page's own statement of fact${idx.subjects.length ? ` about ${lent ?? idx.subjects.join(" or ")} specifically, not about another firm` : ""}, not an instruction, an offer or a request to the reader${idx.ask ? `, and it answers the question: ${clip(plainText(idx.ask), 200)}` : ""}.`;
 const SPENT = new WeakMap<object, number>();
 // `unasked` on the result: how many items had a page unit but were never put to the judge (the cap, the time), and so were dropped.
 export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudge | null | undefined, o: { callMs?: number; budgetMs?: number } = {}): Promise<Verdict[] & { unasked: number; failed: boolean }> {

@@ -1,0 +1,1567 @@
+{
+ "H01": {
+  "replies": [
+   "Here are the internships that fit Boston or remote for summer 2027:\n- Harborline, Software Engineering Intern, Boston, $42 per hour: https://job-boards.greenhouse.io/harborline/jobs/9101001\n- Pinecrest Labs, Machine Learning Engineering Intern, Cambridge, hybrid, $50 per hour: https://job-boards.greenhouse.io/pinecrest/jobs/9106006\n- Kestrel Data, Data Science Intern, remote, $38 per hour: https://job-boards.greenhouse.io/kestreldata/jobs/9102002\nI left out the full-time and senior roles, and anything outside Boston that is not remote. Your Harborline application is already prepared, so that one is the fastest to finish."
+  ],
+  "state": [
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "software intern",
+      "machine learning intern"
+     ],
+     "locations": [
+      "boston"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "software intern",
+     "machine learning intern"
+    ],
+    "alert_locations": [
+     "boston"
+    ],
+    "drafts": [],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [
+     {
+      "company": "Harborline",
+      "state": "ready"
+     }
+    ],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   }
+  ]
+ },
+ "H02": {
+  "replies": [
+   "Harborline has one question still open, and it is your GPA. I do not have a GPA on your profile, so I will not guess one. What is it?",
+   "Got it, your GPA is 3.7 on the Harborline application, and that was the last open answer. Nothing goes to Harborline until you approve the full application, and I will show it to you first. Want me to show it now?"
+  ],
+  "state": [
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "software intern",
+      "machine learning intern"
+     ],
+     "locations": [
+      "boston"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "software intern",
+     "machine learning intern"
+    ],
+    "alert_locations": [
+     "boston"
+    ],
+    "drafts": [],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [
+     {
+      "company": "Harborline",
+      "state": "ready"
+     }
+    ],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   },
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "software intern",
+      "machine learning intern"
+     ],
+     "locations": [
+      "boston"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "software intern",
+     "machine learning intern"
+    ],
+    "alert_locations": [
+     "boston"
+    ],
+    "drafts": [],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [
+     {
+      "company": "Harborline",
+      "state": "ready"
+     }
+    ],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   }
+  ]
+ },
+ "H03": {
+  "replies": [
+   "Your alert now also watches for data science internships, along with software and machine learning internships in Boston or remote.\nHere is what I have on you. You are a junior in Computer Science at Northeastern, graduating May 2028. You worked 8 months as a research assistant in a computer vision lab, using Python and PyTorch. You are based in Boston, you want a summer 2027 software or machine learning internship, and you are a US citizen who needs no sponsorship."
+  ],
+  "state": [
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "software intern",
+      "machine learning intern"
+     ],
+     "locations": [
+      "boston"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "software intern",
+     "machine learning intern",
+     "data science intern"
+    ],
+    "alert_locations": [
+     "boston"
+    ],
+    "drafts": [],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [
+     {
+      "company": "Harborline",
+      "state": "ready"
+     }
+    ],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   }
+  ]
+ },
+ "H04": {
+  "replies": [
+   "One remote internship fits: Kestrel Data, Data Science Intern, remote in the US, $38 per hour. https://job-boards.greenhouse.io/kestreldata/jobs/9102002\nThe other internships on your list are in Boston or Cambridge, so tell me if you want those too.",
+   "Then I would add Harborline, Software Engineering Intern in Boston at $42 per hour, and Pinecrest Labs, Machine Learning Engineering Intern in Cambridge, hybrid, at $50 per hour, to Kestrel Data. All three are internships for summer 2027."
+  ],
+  "state": [
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "software intern",
+      "machine learning intern"
+     ],
+     "locations": [
+      "boston"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "software intern",
+     "machine learning intern"
+    ],
+    "alert_locations": [
+     "boston"
+    ],
+    "drafts": [],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [
+     {
+      "company": "Harborline",
+      "state": "ready"
+     }
+    ],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   },
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "software intern",
+      "machine learning intern"
+     ],
+     "locations": [
+      "boston"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "software intern",
+     "machine learning intern"
+    ],
+    "alert_locations": [
+     "boston"
+    ],
+    "drafts": [],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [
+     {
+      "company": "Harborline",
+      "state": "ready"
+     }
+    ],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   }
+  ]
+ },
+ "H05": {
+  "replies": [
+   "That sounds rough, and one midterm does not undo what you have built. You spent eight months doing real research in a computer vision lab, and you are on track to graduate from Northeastern in May 2028. I would not decide anything about your major tonight. Your internship alert keeps running in the background, so you can ignore it for a few days. What went wrong on the exam, if you want to talk it through?"
+  ],
+  "state": [
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "software intern",
+      "machine learning intern"
+     ],
+     "locations": [
+      "boston"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "software intern",
+     "machine learning intern"
+    ],
+    "alert_locations": [
+     "boston"
+    ],
+    "drafts": [],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [
+     {
+      "company": "Harborline",
+      "state": "ready"
+     }
+    ],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   }
+  ]
+ },
+ "H06": {
+  "replies": [
+   "Two roles on your board will transfer an H-1B and also clear your $150,000 minimum on a hybrid schedule.\n- Stratus Pay, Senior Software Engineer, Payments, Seattle, $165,000-$195,000. The posting says H-1B transfers are supported.\n- Orcas Health, Senior Software Engineer, Data Services, Bellevue, $170,000-$190,000. The posting says H-1B transfer sponsorship is available.\nFernhill pays well but says it cannot sponsor or transfer work visas, so I would skip it. Copperleaf does sponsor, but its $125,000-$145,000 is under your minimum."
+  ],
+  "state": [
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "senior software engineer"
+     ],
+     "locations": [
+      "seattle"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "senior software engineer"
+    ],
+    "alert_locations": [
+     "seattle"
+    ],
+    "drafts": [
+     {
+      "firm": "Stratus Pay",
+      "status": "shown",
+      "sent_at": null,
+      "approved_hash": null
+     }
+    ],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [
+     {
+      "company": "Stratus Pay",
+      "state": "ready"
+     }
+    ],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   }
+  ]
+ },
+ "H07": {
+  "replies": [
+   "Two roles fit your H-1B transfer, your $150,000 minimum and a hybrid schedule in the Seattle area:\n- Stratus Pay, Senior Software Engineer, Payments, Seattle, $165,000-$195,000: https://job-boards.greenhouse.io/stratuspay/jobs/9201001\n- Orcas Health, Senior Software Engineer, Data Services, Bellevue, $170,000-$190,000: https://job-boards.greenhouse.io/orcashealth/jobs/9204004\nFernhill pays more but says it cannot sponsor or transfer work visas, so it is out. The rest are under your minimum or five days in an office.",
+   "With the minimum at 120, Copperleaf comes in: Software Engineer, Platform, remote, $125,000-$145,000, and the posting says visa sponsorship is available. Stratus Pay and Orcas Health are still on the list. The Austin role stays out because it is five days in the office. I only changed this search, and your saved minimum is still $150,000. Want me to save 120 as your new minimum?"
+  ],
+  "state": [
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "senior software engineer"
+     ],
+     "locations": [
+      "seattle"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "senior software engineer"
+    ],
+    "alert_locations": [
+     "seattle"
+    ],
+    "drafts": [
+     {
+      "firm": "Stratus Pay",
+      "status": "shown",
+      "sent_at": null,
+      "approved_hash": null
+     }
+    ],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [
+     {
+      "company": "Stratus Pay",
+      "state": "ready"
+     }
+    ],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   },
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "senior software engineer"
+     ],
+     "locations": [
+      "seattle"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "senior software engineer"
+    ],
+    "alert_locations": [
+     "seattle"
+    ],
+    "drafts": [
+     {
+      "firm": "Stratus Pay",
+      "status": "shown",
+      "sent_at": null,
+      "approved_hash": null
+     }
+    ],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [
+     {
+      "company": "Stratus Pay",
+      "state": "ready"
+     }
+    ],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   }
+  ]
+ },
+ "H08": {
+  "replies": [
+   "Stratus Pay pays $165,000-$195,000 for a hybrid role in Seattle, three days a week, and supports H-1B transfers.\nOrcas Health pays $170,000-$190,000 for a hybrid role in Bellevue, two days a week, and offers H-1B transfer sponsorship.\nOrcas asks for fewer days in the office, and Stratus has the higher top of the range.",
+   "Orcas Health pays $170,000-$190,000, and the posting says H-1B transfer sponsorship is available."
+  ],
+  "state": [
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "senior software engineer"
+     ],
+     "locations": [
+      "seattle"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "senior software engineer"
+    ],
+    "alert_locations": [
+     "seattle"
+    ],
+    "drafts": [
+     {
+      "firm": "Stratus Pay",
+      "status": "shown",
+      "sent_at": null,
+      "approved_hash": null
+     }
+    ],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [
+     {
+      "company": "Stratus Pay",
+      "state": "ready"
+     }
+    ],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   },
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "senior software engineer"
+     ],
+     "locations": [
+      "seattle"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "senior software engineer"
+    ],
+    "alert_locations": [
+     "seattle"
+    ],
+    "drafts": [
+     {
+      "firm": "Stratus Pay",
+      "status": "shown",
+      "sent_at": null,
+      "approved_hash": null
+     }
+    ],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [
+     {
+      "company": "Stratus Pay",
+      "state": "ready"
+     }
+    ],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   }
+  ]
+ },
+ "H09": {
+  "replies": [
+   "Your Stratus Pay application, Senior Software Engineer, Payments, is ready and waiting for your yes. It uses your base resume, with 12 answers filled from your confirmed facts and none left open. Nothing has gone to Stratus Pay yet. Want me to show you the full application to approve?"
+  ],
+  "state": [
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "senior software engineer"
+     ],
+     "locations": [
+      "seattle"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "senior software engineer"
+    ],
+    "alert_locations": [
+     "seattle"
+    ],
+    "drafts": [
+     {
+      "firm": "Stratus Pay",
+      "status": "shown",
+      "sent_at": null,
+      "approved_hash": null
+     }
+    ],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [
+     {
+      "company": "Stratus Pay",
+      "state": "ready"
+     }
+    ],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   }
+  ]
+ },
+ "H10": {
+  "replies": [
+   "Here is the exact email, ready for your yes.\nTo: Maren Holt, maren.holt@stratuspay.example.test\nSubject: Senior Software Engineer application\nHi Maren, I applied for the Senior Software Engineer role on the payments team. I have five years building Go and PostgreSQL services and I am on an H-1B, so a transfer would be needed. I would be glad to talk this week.\nSay yes and I will send it, or tell me what to change.",
+   "Understood, I will not send anything to Maren. The draft stays saved, and it goes out only when you say so."
+  ],
+  "state": [
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "senior software engineer"
+     ],
+     "locations": [
+      "seattle"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "senior software engineer"
+    ],
+    "alert_locations": [
+     "seattle"
+    ],
+    "drafts": [
+     {
+      "firm": "Stratus Pay",
+      "status": "shown",
+      "sent_at": null,
+      "approved_hash": null
+     }
+    ],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [
+     {
+      "company": "Stratus Pay",
+      "state": "ready"
+     }
+    ],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   },
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "senior software engineer"
+     ],
+     "locations": [
+      "seattle"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "senior software engineer"
+    ],
+    "alert_locations": [
+     "seattle"
+    ],
+    "drafts": [
+     {
+      "firm": "Stratus Pay",
+      "status": "shown",
+      "sent_at": null,
+      "approved_hash": null
+     }
+    ],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [
+     {
+      "company": "Stratus Pay",
+      "state": "ready"
+     }
+    ],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   }
+  ]
+ },
+ "H11": {
+  "replies": [
+   "Cancelling means no charge after Nov 14, 2026. You keep access until then, and nothing else changes. Reply \"yes\" to cancel.",
+   "OK, nothing is cancelled. Your plan stays as it is."
+  ],
+  "state": [
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "senior software engineer"
+     ],
+     "locations": [
+      "seattle"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "senior software engineer"
+    ],
+    "alert_locations": [
+     "seattle"
+    ],
+    "drafts": [
+     {
+      "firm": "Stratus Pay",
+      "status": "shown",
+      "sent_at": null,
+      "approved_hash": null
+     }
+    ],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [
+     {
+      "company": "Stratus Pay",
+      "state": "ready"
+     }
+    ],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   },
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "senior software engineer"
+     ],
+     "locations": [
+      "seattle"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "senior software engineer"
+    ],
+    "alert_locations": [
+     "seattle"
+    ],
+    "drafts": [
+     {
+      "firm": "Stratus Pay",
+      "status": "shown",
+      "sent_at": null,
+      "approved_hash": null
+     }
+    ],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [
+     {
+      "company": "Stratus Pay",
+      "state": "ready"
+     }
+    ],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   }
+  ]
+ },
+ "H12": {
+  "replies": [
+   "Cancelling means no charge after Nov 14, 2026. You keep access until then, and nothing else changes. Reply \"yes\" to cancel.",
+   "Done, your plan is cancelled. No charge after Nov 14, 2026; you keep access until then."
+  ],
+  "state": [
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "senior software engineer"
+     ],
+     "locations": [
+      "seattle"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "senior software engineer"
+    ],
+    "alert_locations": [
+     "seattle"
+    ],
+    "drafts": [
+     {
+      "firm": "Stratus Pay",
+      "status": "shown",
+      "sent_at": null,
+      "approved_hash": null
+     }
+    ],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [
+     {
+      "company": "Stratus Pay",
+      "state": "ready"
+     }
+    ],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   },
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "senior software engineer"
+     ],
+     "locations": [
+      "seattle"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "senior software engineer"
+    ],
+    "alert_locations": [
+     "seattle"
+    ],
+    "drafts": [
+     {
+      "firm": "Stratus Pay",
+      "status": "shown",
+      "sent_at": null,
+      "approved_hash": null
+     }
+    ],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [
+     {
+      "company": "Stratus Pay",
+      "state": "ready"
+     }
+    ],
+    "billing": {
+     "cancelled": true,
+     "cancel_calls": 1
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   }
+  ]
+ },
+ "H13": {
+  "replies": [
+   "Here is the Stratus Pay application, Senior Software Engineer, Payments, Seattle, hybrid. It uses your base resume and 12 answers filled from your confirmed facts, with none left open. Nothing is sent until you say yes. Shall I send it?",
+   "Approved. The Stratus Pay application is queued, and I will tell you when it goes through. It has not been submitted yet."
+  ],
+  "state": [
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "senior software engineer"
+     ],
+     "locations": [
+      "seattle"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "senior software engineer"
+    ],
+    "alert_locations": [
+     "seattle"
+    ],
+    "drafts": [
+     {
+      "firm": "Stratus Pay",
+      "status": "shown",
+      "sent_at": null,
+      "approved_hash": null
+     }
+    ],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [
+     {
+      "company": "Stratus Pay",
+      "state": "ready"
+     }
+    ],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   },
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "senior software engineer"
+     ],
+     "locations": [
+      "seattle"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "senior software engineer"
+    ],
+    "alert_locations": [
+     "seattle"
+    ],
+    "drafts": [
+     {
+      "firm": "Stratus Pay",
+      "status": "shown",
+      "sent_at": null,
+      "approved_hash": null
+     }
+    ],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [
+     {
+      "company": "Stratus Pay",
+      "state": "approved"
+     }
+    ],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   }
+  ]
+ },
+ "H14": {
+  "replies": [
+   "Two roles fit weekday daytime hours and your $60,000 minimum:\n- Summit Ledger, Onboarding Specialist, remote, weekdays with no evenings, $66,000-$78,000: https://job-boards.greenhouse.io/summitledger/jobs/9304004\n- Alpenglow Software, Customer Success Associate, hybrid in Denver, Monday to Friday 9 to 5, $62,000-$74,000: https://job-boards.greenhouse.io/alpenglow/jobs/9301001\nYou already have an application in at Alpenglow, so Summit Ledger is the new one. I skipped the roles with evening shifts or weekends, and the ones that pay under your minimum."
+  ],
+  "state": [
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "customer success",
+      "operations coordinator"
+     ],
+     "locations": [
+      "denver"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "customer success",
+     "operations coordinator"
+    ],
+    "alert_locations": [
+     "denver"
+    ],
+    "drafts": [],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   }
+  ]
+ },
+ "H15": {
+  "replies": [
+   "I am sorry. A no from Alpenglow stings, especially when you were hoping for it. It does not make the switch pointless. You ran a 40-person restaurant team for nine years and finished the Google Data Analytics certificate this year, and that is the kind of story customer success teams hire for. Summit Ledger is still open and fits your weekday hours. Do you want to look at it together, or take a day first?"
+  ],
+  "state": [
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "customer success",
+      "operations coordinator"
+     ],
+     "locations": [
+      "denver"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "customer success",
+     "operations coordinator"
+    ],
+    "alert_locations": [
+     "denver"
+    ],
+    "drafts": [],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   }
+  ]
+ },
+ "H16": {
+  "replies": [
+   "I paused your alert for customer success and operations coordinator roles in Denver. It stays paused until you ask me to turn it back on.",
+   "Your alert is back on for customer success and operations coordinator roles in Denver, exactly as before."
+  ],
+  "state": [
+   {
+    "alert": {
+     "on": false,
+     "keywords": [
+      "customer success",
+      "operations coordinator"
+     ],
+     "locations": [
+      "denver"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "customer success",
+     "operations coordinator"
+    ],
+    "alert_locations": [
+     "denver"
+    ],
+    "drafts": [],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   },
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "customer success",
+      "operations coordinator"
+     ],
+     "locations": [
+      "denver"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "customer success",
+     "operations coordinator"
+    ],
+    "alert_locations": [
+     "denver"
+    ],
+    "drafts": [],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   }
+  ]
+ },
+ "H17": {
+  "replies": [
+   "I can stop the texts. Do you want me to turn off every text message from Trainee, including the daily alert for Denver customer success roles? Your search and your applications stay exactly as they are.",
+   "Deleting everything would remove your confirmed facts, your resume, your saved alert and your application history, and it cannot be undone. Nothing has been deleted yet. Reply yes if you want all of it erased, or tell me which part to keep."
+  ],
+  "state": [
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "customer success",
+      "operations coordinator"
+     ],
+     "locations": [
+      "denver"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "customer success",
+     "operations coordinator"
+    ],
+    "alert_locations": [
+     "denver"
+    ],
+    "drafts": [],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   },
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "customer success",
+      "operations coordinator"
+     ],
+     "locations": [
+      "denver"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "customer success",
+     "operations coordinator"
+    ],
+    "alert_locations": [
+     "denver"
+    ],
+    "drafts": [],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   }
+  ]
+ },
+ "H18": {
+  "replies": [
+   "I would like to, but I do not have an interview or a date saved for you yet. Is the thing you mean a call with Alpenglow, or something else?"
+  ],
+  "state": [
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "customer success",
+      "operations coordinator"
+     ],
+     "locations": [
+      "denver"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "customer success",
+     "operations coordinator"
+    ],
+    "alert_locations": [
+     "denver"
+    ],
+    "drafts": [],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   }
+  ]
+ },
+ "H19": {
+  "replies": [
+   "You told me weekday daytime hours only, with no evenings and no weekends, because of school pickup at 3. You also want at least $60,000."
+  ],
+  "state": [
+   {
+    "alert": {
+     "on": true,
+     "keywords": [
+      "customer success",
+      "operations coordinator"
+     ],
+     "locations": [
+      "denver"
+     ],
+     "remote_ok": true,
+     "report_hour": 8,
+     "quiet_start": 22,
+     "quiet_end": 7,
+     "max_instant_per_day": 3
+    },
+    "alert_keywords": [
+     "customer success",
+     "operations coordinator"
+    ],
+    "alert_locations": [
+     "denver"
+    ],
+    "drafts": [],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   }
+  ]
+ },
+ "H20": {
+  "replies": [
+   "That is a stressful spot, and I can help you move fast. What kind of work do you do?"
+  ],
+  "state": [
+   {
+    "alert": null,
+    "alert_keywords": [],
+    "alert_locations": [],
+    "drafts": [],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   }
+  ]
+ },
+ "H21": {
+  "replies": [
+   "Two Tampa roles work for nights and a $20 per hour minimum:\n- Harbour Club, Lead Bartender, evenings and nights, $21 per hour plus tips: https://job-boards.greenhouse.io/harbourclub/jobs/9402002\n- Skyline Hotel, Night Auditor, overnight, $22 per hour: https://job-boards.greenhouse.io/skylinehotel/jobs/9404004\nI left out the bartender job at $17 per hour and the morning barista job.",
+   "Got it, six years behind the bar and you are based in St Petersburg. I do not have any St Petersburg postings right now. The two Tampa roles I showed you are the closest, and I can keep them in your search. Is Tampa too far for night shifts?",
+   "Harbour Club pays $21 per hour plus tips for the Lead Bartender job, evenings and nights in Tampa. That clears your $20 minimum."
+  ],
+  "state": [
+   {
+    "alert": null,
+    "alert_keywords": [],
+    "alert_locations": [],
+    "drafts": [],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   },
+   {
+    "alert": null,
+    "alert_keywords": [],
+    "alert_locations": [],
+    "drafts": [],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   },
+   {
+    "alert": null,
+    "alert_keywords": [],
+    "alert_locations": [],
+    "drafts": [],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   }
+  ]
+ },
+ "H22": {
+  "replies": [
+   "I can't log in to LinkedIn for you, and please never share a password in chat. What I can do is find the right people through public sources and draft a short note for each, and nothing goes out until you approve the exact message. Want to start with a short list?"
+  ],
+  "state": [
+   {
+    "alert": null,
+    "alert_keywords": [],
+    "alert_locations": [],
+    "drafts": [],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   }
+  ]
+ },
+ "H23": {
+  "replies": [
+   "I can't check the forecast from here, so I won't guess. A weather app will tell you faster. If you are lining up shifts or interviews for tomorrow, I can help with that."
+  ],
+  "state": [
+   {
+    "alert": null,
+    "alert_keywords": [],
+    "alert_locations": [],
+    "drafts": [],
+    "sent_drafts": [],
+    "jobs": [],
+    "submitted_jobs": [],
+    "wanted": [],
+    "prepared": [],
+    "billing": {
+     "cancelled": false,
+     "cancel_calls": 0
+    },
+    "channel": {
+     "opted_out": false
+    },
+    "erased": false
+   }
+  ]
+ }
+}

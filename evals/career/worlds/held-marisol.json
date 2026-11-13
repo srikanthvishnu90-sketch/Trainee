@@ -1,0 +1,134 @@
+{
+ "version": 1,
+ "author": "independent judge (held-out)",
+ "note": "SYNTHETIC person. Marisol Vega, restaurant manager moving into customer success; Denver; weekday daytime only (school pickup); minimum $60,000; one application in; active subscription; texts on.",
+ "now": "2026-10-28T15:00:00Z",
+ "postings": [
+  {
+   "job_id": "greenhouse:alpenglow:9301001",
+   "company": "Alpenglow Software",
+   "title": "Customer Success Associate",
+   "location": "Denver, CO (hybrid)",
+   "url": "https://job-boards.greenhouse.io/alpenglow/jobs/9301001",
+   "description": "Customer success associate, hybrid in Denver. Monday to Friday, 9 to 5. $62,000-$74,000.",
+   "posted_at": "2026-10-26T14:00:00Z",
+   "first_seen_at": "2026-10-26T15:00:00Z"
+  },
+  {
+   "job_id": "greenhouse:mesa:9302002",
+   "company": "Mesa Logistics",
+   "title": "Operations Coordinator",
+   "location": "Denver, CO",
+   "url": "https://job-boards.greenhouse.io/mesa/jobs/9302002",
+   "description": "On-site operations coordinator in Denver. Rotating weekend shifts required. $54,000-$61,000.",
+   "posted_at": "2026-10-26T14:00:00Z",
+   "first_seen_at": "2026-10-26T15:00:00Z"
+  },
+  {
+   "job_id": "greenhouse:cobalt:9303003",
+   "company": "Cobalt Cloud",
+   "title": "Customer Support Specialist",
+   "location": "Remote - US",
+   "url": "https://job-boards.greenhouse.io/cobalt/jobs/9303003",
+   "description": "Remote customer support specialist. Shifts run until 10 pm Eastern. $48,000-$56,000.",
+   "posted_at": "2026-10-26T14:00:00Z",
+   "first_seen_at": "2026-10-26T15:00:00Z"
+  },
+  {
+   "job_id": "greenhouse:summitledger:9304004",
+   "company": "Summit Ledger",
+   "title": "Onboarding Specialist",
+   "location": "Remote - US",
+   "url": "https://job-boards.greenhouse.io/summitledger/jobs/9304004",
+   "description": "Remote onboarding specialist. Weekdays, no evenings. $66,000-$78,000.",
+   "posted_at": "2026-10-26T14:00:00Z",
+   "first_seen_at": "2026-10-26T15:00:00Z"
+  },
+  {
+   "job_id": "greenhouse:frontrange:9305005",
+   "company": "Front Range Foods",
+   "title": "Restaurant General Manager",
+   "location": "Denver, CO",
+   "url": "https://job-boards.greenhouse.io/frontrange/jobs/9305005",
+   "description": "General manager for a busy restaurant group. Evenings and weekends. $70,000-$85,000.",
+   "posted_at": "2026-10-26T14:00:00Z",
+   "first_seen_at": "2026-10-26T15:00:00Z"
+  }
+ ],
+ "apply_jobs": [],
+ "wanted": [],
+ "prepared": [],
+ "questions": [],
+ "outreach": [],
+ "connections": [],
+ "cloud": null,
+ "channel": {
+  "opted_out": false
+ },
+ "standing": [
+  {
+   "id": "S-001",
+   "text": "Weekday daytime hours only, no evenings or weekends",
+   "said": "I have school pickup at 3, no evenings and no weekends",
+   "at": "2026-10-14T15:00:00.000Z"
+  },
+  {
+   "id": "S-002",
+   "text": "Minimum salary $60,000",
+   "said": "I need at least 60k",
+   "at": "2026-10-14T15:00:00.000Z"
+  }
+ ],
+ "alerts": {
+  "input": {
+   "keywords": [
+    "customer success",
+    "operations coordinator"
+   ],
+   "locations": [
+    "denver"
+   ],
+   "remote_ok": true
+  },
+  "tz": "America/Denver",
+  "since": "2026-10-14T15:00:00Z"
+ },
+ "facts": [
+  {
+   "kind": "experience",
+   "text": "Managed a 40-person restaurant team for 9 years"
+  },
+  {
+   "kind": "certification",
+   "text": "Google Data Analytics certificate, 2026"
+  },
+  {
+   "kind": "location",
+   "text": "Based in Denver, Colorado"
+  },
+  {
+   "kind": "goal",
+   "text": "Wants a customer success or operations coordinator role at a tech company"
+  },
+  {
+   "kind": "preference",
+   "text": "Weekday daytime hours only, minimum salary $60,000"
+  }
+ ],
+ "tracked": [
+  {
+   "company": "Alpenglow Software",
+   "role": "Customer Success Associate",
+   "stage": "Submitted"
+  }
+ ],
+ "subscription": {
+  "status": "active",
+  "plan": "monthly",
+  "price_cents": 1000,
+  "current_period_end": "2026-11-14T00:00:00.000Z",
+  "stripe_customer_id": "cus_TESTHELD",
+  "stripe_subscription_id": "sub_TESTHELD",
+  "cancel_at_period_end": false
+ }
+}

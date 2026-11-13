@@ -1,0 +1,62 @@
+{
+ "version": 1,
+ "author": "independent judge (held-out)",
+ "note": "SYNTHETIC person. Nothing on file: no facts, no alert. Tampa hospitality postings.",
+ "now": "2026-10-28T15:00:00Z",
+ "postings": [
+  {
+   "job_id": "greenhouse:gulfcoastgrill:9401001",
+   "company": "Gulf Coast Grill",
+   "title": "Bartender (Nights)",
+   "location": "Tampa, FL",
+   "url": "https://job-boards.greenhouse.io/gulfcoastgrill/jobs/9401001",
+   "description": "Night bartender in Tampa. $17 per hour plus tips.",
+   "posted_at": "2026-10-26T14:00:00Z",
+   "first_seen_at": "2026-10-26T15:00:00Z"
+  },
+  {
+   "job_id": "greenhouse:harbourclub:9402002",
+   "company": "Harbour Club",
+   "title": "Lead Bartender",
+   "location": "Tampa, FL",
+   "url": "https://job-boards.greenhouse.io/harbourclub/jobs/9402002",
+   "description": "Lead bartender, evenings and nights, Tampa. $21 per hour plus tips.",
+   "posted_at": "2026-10-26T14:00:00Z",
+   "first_seen_at": "2026-10-26T15:00:00Z"
+  },
+  {
+   "job_id": "greenhouse:sunrisecafe:9403003",
+   "company": "Sunrise Cafe",
+   "title": "Barista (Mornings)",
+   "location": "Tampa, FL",
+   "url": "https://job-boards.greenhouse.io/sunrisecafe/jobs/9403003",
+   "description": "Morning barista in Tampa. $16 per hour.",
+   "posted_at": "2026-10-26T14:00:00Z",
+   "first_seen_at": "2026-10-26T15:00:00Z"
+  },
+  {
+   "job_id": "greenhouse:skylinehotel:9404004",
+   "company": "Skyline Hotel",
+   "title": "Night Auditor",
+   "location": "Tampa, FL",
+   "url": "https://job-boards.greenhouse.io/skylinehotel/jobs/9404004",
+   "description": "Overnight night auditor at a downtown Tampa hotel. $22 per hour.",
+   "posted_at": "2026-10-26T14:00:00Z",
+   "first_seen_at": "2026-10-26T15:00:00Z"
+  }
+ ],
+ "apply_jobs": [],
+ "wanted": [],
+ "prepared": [],
+ "questions": [],
+ "outreach": [],
+ "connections": [],
+ "cloud": null,
+ "channel": {
+  "opted_out": false
+ },
+ "standing": [],
+ "alerts": null,
+ "facts": [],
+ "tracked": []
+}

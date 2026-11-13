@@ -116,3 +116,32 @@ Deno.test("PAY-2 the adversarial review's 60: city and state both decide, no unl
   eq(P.placedPay("Pay: $40-$50/hr. Benefits.", "Chicago, IL"), "$40-$50/hr");
   eq(P.payFrom("The salary range is $153,000 - $221,000 USD."), "$153,000 - $221,000 USD");
 });
+
+// Round 3 (the second review's 105, the ones it found wrong or lost, and their neighbours).
+const METRO = "NYC metro: $145,000 - $175,000 per year. Bay Area: $155,000 - $185,000 per year. Remote - US: $120,000 - $150,000 per year.";
+const ALL_METRO = "NYC metro: $145,000 - $175,000 per year; Bay Area: $155,000 - $185,000 per year; Remote - US: $120,000 - $150,000 per year";
+const SLASH = "Hybrid - Chicago, IL: $92,000 - $108,000 / Remote: $85,000 - $100,000";
+const INTL = "Toronto, ON: CAD 95,000 - 120,000. London: £70,000 - £90,000. Berlin: €75,000 - €95,000. New York, NY: $130,000 - $160,000.";
+const ALL_INTL = "Toronto, ON: CAD 95,000 - 120,000; London: £70,000 - £90,000; Berlin: €75,000 - €95,000; New York, NY: $130,000 - $160,000";
+const IN3 = "In New York, the range is $115,000 - $135,000. In California, the range is $120,000 - $140,000. In all other US locations, the range is $100,000 - $120,000.";
+const ROUND3: [string, string | null, string | null][] = [
+  [METRO, "New York, NY", "$145,000 - $175,000 per year (NYC metro)"], [METRO, "NYC", "$145,000 - $175,000 per year (NYC metro)"], [METRO, "Remote (US)", "$120,000 - $150,000 per year (Remote - US)"],
+  [METRO, "Remote - US", "$120,000 - $150,000 per year (Remote - US)"], [METRO, "US Remote", "$120,000 - $150,000 per year (Remote - US)"], [METRO, "SF", "$155,000 - $185,000 per year (Bay Area)"],
+  [METRO, "Chicago, IL", ALL_METRO], [METRO, "Sacramento, CA", ALL_METRO],
+  // Each range keeps the label that is its own: a "/" between labelled ranges separates them.
+  [SLASH, "Chicago, IL (Hybrid)", "$92,000 - $108,000 (Hybrid - Chicago, IL)"], [SLASH, "Remote", "$85,000 - $100,000 (Remote)"], [SLASH, "Austin, TX", "Hybrid - Chicago, IL: $92,000 - $108,000; Remote: $85,000 - $100,000"],
+  // A state-qualified range is never given without its state to a posting somewhere else.
+  ["For Colorado applicants: the range is $70,000 - $90,000.", "Atlanta, GA", "Colorado: $70,000 - $90,000"], ["For Colorado applicants: the range is $70,000 - $90,000.", "Denver, CO", "$70,000 - $90,000"],
+  [IN3, "Buffalo, NY", "$115,000 - $135,000 (New York)"], [IN3, "Dallas, TX", null],
+  ["The range is $100,000 - $120,000. The range for the Bay Area and NYC is $120,000 - $145,000.", "San Jose, CA", "$120,000 - $145,000 (Bay Area and NYC)"],
+  // The currency says the country: a pound or Canadian range is not a US posting's, London, ON is not London; Georgia the country is not the state.
+  [INTL, "London, ON", ALL_INTL], [INTL, "London, UK", "£70,000 - £90,000 (London)"], [INTL, "Toronto, ON", "CAD 95,000 - 120,000 (Toronto, ON)"], [INTL, "Toronto, OH", ALL_INTL], [INTL, "Paris, France", ALL_INTL],
+  ["Georgia: $55,000 - $65,000. Texas: $58,000 - $68,000.", "Tbilisi, Georgia", "Georgia: $55,000 - $65,000; Texas: $58,000 - $68,000"], ["Georgia: $55,000 - $65,000. Texas: $58,000 - $68,000.", "Atlanta, Georgia", "$55,000 - $65,000 (Georgia)"],
+  ["DC: $60 - $70 per hour. LA: $58 - $66 per hour.", "Washington, DC", "$60 - $70 per hour (DC)"], ["DC: $60 - $70 per hour. LA: $58 - $66 per hour.", "Los Angeles, CA", "$58 - $66 per hour (LA)"],
+  // One range, written with its period on both ends or said before it; qualifiers beside the figure stay with it.
+  ["Hourly rate: $22/hr - $27/hr", "Columbus, OH", "$22/hr - $27/hr"], ["Monthly stipend of $7,500.", "Boston, MA", "$7,500 monthly"],
+  ["Pay: $150,000 - $180,000 OTE.", "Denver, CO", "$150,000 - $180,000 OTE"], ["Salary: $90,000 - $110,000 base, plus equity.", null, "$90,000 - $110,000 base"],
+];
+Deno.test("PAY-3 round 3: labels as written, each range its own label, aliases and state membership, the currency's country, qualifiers kept", () => {
+  eq(wrongIn(ROUND3), []);
+});

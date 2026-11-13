@@ -151,7 +151,8 @@ export function contactFromMessage(message: string, name: unknown, email: unknow
   const n = squash(String(name ?? "")), e = String(email ?? "").trim(), m = squash(String(message ?? ""));
   if (o.only !== "email" && (n.length < 2 || n.length > 80 || !NAME.test(n))) return { ok: false, error: "the name must be 2 to 80 letters, spaces, hyphens or apostrophes" };
   if (o.only !== "name" && !EMAIL.test(e)) return { ok: false, error: "that is not a valid email address" };
-  if (o.only !== "name" && !tokenIn(m, e, /[\p{L}\p{N}._%+@'’-]/u)) return { ok: false, error: "the person did not type that email in this message; they must type it themselves" };
+  // An address may end its sentence: a full stop after it is not part of it.
+  if (o.only !== "name" && !tokenIn(m.replace(/\.(?=\s|$)/g, " "), e, /[\p{L}\p{N}._%+@'’-]/u)) return { ok: false, error: "the person did not type that email in this message; they must type it themselves" };
   if (o.only !== "email" && !tokenIn(m, n, /\p{L}/u)) return { ok: false, error: "the person did not type that name in this message; they must type it themselves" };
   if (o.only !== "name") { const why = disowned(m, e); if (why) return { ok: false, error: `the person ${why}, so it is not theirs to put on a resume` }; }
   return { ok: true, name: n, email: e };
@@ -170,6 +171,7 @@ export function disowned(message: string, email: string): string | null {
   const q = clauseOf(message, email), e = email.toLowerCase();
   if (!q) return null;
   const c = q.split(e).join(" @ "); // the cue words are read around the address, never inside it
+  if (/\b(?:friend|manager|boss|husband|wife|partner|spouse|sister|brother|mother|mom|mum|father|dad|son|daughter|parent|colleague|co-?worker|roommate|girlfriend|boyfriend|fianc[eé]e?|cousin|aunt|uncle|recruiter|teacher|professor|neighbou?r)(?:['’]s)?\b/.test(c)) return `gave ${email} as someone else's address`;
   if (/\b(?:not|never|no longer|wrong)\b|n['’]t\b/.test(c)) return `said ${email} is not theirs`;
   if (/\?/.test(c) || /\b(?:should i|which|or something else|whether)\b/.test(c)) return `asked about ${email} rather than saying it is theirs`;
   if (/['"‘“]\s?@\s?['"’”]/.test(c)) return `quoted ${email} rather than saying it is theirs`;

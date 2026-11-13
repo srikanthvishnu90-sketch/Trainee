@@ -36,6 +36,11 @@ Deno.test({ name: "D064-2 through the real handler: a second message that arrive
     return await anthropicWire(req, scripted);
   };
   const w = await openWorld(3, { model });
+  // Architect amendment (test isolation only, no assertion changed): every variable this test clears is put back as it found it
+  // at close. It deleted the gate's explicit release-flag "off"s and never restored them, so CAREER_TEXTING_NATIVE fell to its
+  // release default (on) for every later file in the same shard (flow-telegram-e2e: parse_mode HTML), as D-066 and D-072 found.
+  const touched = [...Object.keys(RELEASE_FLAGS), ...RELEASE_NEVER_ON, "ANTHROPIC_API_KEY"];
+  const envBefore = new Map(touched.map((k) => [k, Deno.env.get(k)]));
   try {
     for (const k of [...Object.keys(RELEASE_FLAGS), ...RELEASE_NEVER_ON]) Deno.env.delete(k);
     Deno.env.set("ANTHROPIC_API_KEY", "sk-test-not-real");
@@ -69,7 +74,7 @@ Deno.test({ name: "D064-2 through the real handler: a second message that arrive
     }
     assertNode.deepEqual(w.outbound, [], "a request left the machine");
   } finally {
-    Deno.env.delete("ANTHROPIC_API_KEY");
+    for (const [k, v] of envBefore) v === undefined ? Deno.env.delete(k) : Deno.env.set(k, v);
     await w.close();
   }
 } });

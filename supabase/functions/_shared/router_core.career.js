@@ -13811,15 +13811,19 @@ const CareerRouter = (() => {
     }
     return d[a.length][b.length] <= 1;
   }
-  const NOT_A_SLIP = new Set(["remove", "removed", "poster", "posters", "dates", "date", "dais", "week's"]);
-  const slipWords = (text) => lc(text).split(/[^a-z]+/).filter((w) => w && !NOT_A_SLIP.has(w));
-  const saidWord = (words, target) => words.some((w) => oneSlip(w, target));
+  const LIMIT_REMOTE_RE = /\b(?:remote|remoet|reomte|rmote|remtoe)\b(?![- ](?:sensing|control|pilot|monitoring)\b|\.[a-z])/;
+  const LIMIT_ONLY_RE = /\b(?:only|fully|fuly|fulyl)\b/;
+  const LIMIT_HYBRID_RE = /\b(?:hybrid|hybrdi|hyrbid|hybird|hbyrid)\b(?![- ](?:cloud|car|cars|vehicle|vehicles|app|apps)\b)/;
+  const LIMIT_ONSITE_RE = /\b(?:on[- ]?site|onsight|in[- ](?:the[- ])?office|in[- ]person|office days?|office[- ]based)\b/;
+  const LIMIT_NO_OFFICE_RE = /\b(?:no|not|zero|without|never)\b[^.,;!?]{0,20}\b(?:on[- ]?site|onsight|in[- ](?:the[- ])?office|in[- ]person|office days?)\b/;
+  const LIMIT_RECENT_RE = /\b(?:posted|potsed|psoted|posed|listed)\s+(?:recently|today|yesterday|this week|within\b|in the (?:last|past|lasst)\b|(?:the )?(?:last|past|lasst)\b)|\b(?:recently|newly|freshly|just) (?:posted|listed)\b|\b(?:from|in|within|over)\s+(?:the\s+)?(?:last|past|lasst)\s+(?:\w+\s+)?(?:weeks?|days?|dyas|dayss|24 hours|month)\b|\b(?:recent|fresh|new) (?:postings|posts|listings|openings)\b/;
   function statedSearchLimits(text) {
-    const w = slipWords(text), t = lc(text), out = [];
-    if (saidWord(w, "remote")) out.push(/(?:only|fully)/.test(t) || saidWord(w, "only") ? "remote only" : "remote");
-    if (saidWord(w, "hybrid")) out.push(saidWord(w, "onsite") || saidWord(w, "office") ? "hybrid, not fully onsite" : "hybrid");
-    else if (saidWord(w, "onsite") || saidWord(w, "office")) out.push(/no/.test(t) ? "no office days" : "onsite");
-    if (saidWord(w, "posted") || saidWord(w, "fresh") || saidWord(w, "recent") || saidWord(w, "recently") || /(?:last|past)\s+(?:\w+\s+)?(?:week|days?|dyas|dayss)/.test(t)) out.push("posted recently");
+    const t = lc(text), out = [];
+    if (LIMIT_REMOTE_RE.test(t)) out.push(LIMIT_ONLY_RE.test(t) || /\bremote[- ]only\b/.test(t) ? "remote only" : "remote");
+    const onsite = LIMIT_ONSITE_RE.test(t);
+    if (LIMIT_HYBRID_RE.test(t)) out.push(onsite ? "hybrid, not fully onsite" : "hybrid");
+    else if (onsite) out.push(LIMIT_NO_OFFICE_RE.test(t) ? "no office days" : "onsite");
+    if (LIMIT_RECENT_RE.test(t)) out.push("posted recently");
     return out;
   }
   function emptySearchScope(lp, o, namedRole) {
@@ -13876,8 +13880,8 @@ const CareerRouter = (() => {
       const namedRole = !o.headline && lp.ask === s(text).slice(0, 200) && (!!s(lp.whereText) && /\bin\s+[A-Z]/.test(s(text)) || /\b(?:analyst|engineer|developer|designer|scientist|coordinator|manager|intern|associate|consultant|marketing|product|data|finance|financial|software|ux|operations|sales|nurse|teacher)\b/i.test(s(lp.roleText)));
       const scope = emptySearchScope(lp, o, namedRole);
       const facts = [scope ? "I checked the postings I have on hand and found no open roles for that (career sites outside them were not checked), and I won't make any up."   : namedRole ? "I won't make any up." : "I have no open roles on my list right now, and I won't make any up."];
-      const kept = statedSearchLimits(text);
-      if (kept.length) facts.push(`I kept your limits: ${kept.join("; ")}.`);
+      const asked = statedSearchLimits(text);
+      if (asked.length) facts.push(`You asked for ${asked.join("; ")}; no limit was applied, since there were no postings to apply it to.`);
       if (fams && fams.length) facts.push(`I've kept your ask (${fams.map(familyLabel).join(" + ")}) and will run it as soon as matching roles come in.`);
       const newPerson = !(profile && (profile.facts || []).length);
       const widen = scope && lp.whereText && !lp.remoteOnly ? `Want me to look beyond ${lp.whereText}, remote roles included?` : null;
@@ -16937,6 +16941,13 @@ const CareerRouter = (() => {
     return null;
   }
 
+  const BULK_APPLY_RE = /\b(?:apply|submit|send in)\b(?:\s+(?:for me|my applications?|applications?))?(?:\s+(?:to|for|on))?\s+(?:all|every|everything|each|\d{2,})\b/g;
+  const BULK_NEGATED_RE = /\b(?:don'?t|dont|do not|never|not|no|no need to|stop)\s+(?:(?:just|even|actually|ever|yet|really|go|ahead|and)\s+){0,2}$/;
+  function bulkApplyAsked(t) {
+    BULK_APPLY_RE.lastIndex = 0;
+    for (let m = BULK_APPLY_RE.exec(t); m; m = BULK_APPLY_RE.exec(t)) if (!BULK_NEGATED_RE.test(t.slice(0, m.index))) return true;
+    return false;
+  }
   function handleRefusal(text, ctx) {
     const t = lc(text);
     const falseClaim = /\b(say|claim|tell|pretend|imply)\b[^.]*\b(sent me|referred me|told me to reach out|recommended me)\b/.test(t);
@@ -16957,11 +16968,11 @@ const CareerRouter = (() => {
       } catch { claimOnRecord = false; }
     }
     const unverifiedClaim = materialImperative && (claimToken || admission) && (admission || !claimOnRecord);
-    const noReview = /\b(automatically|while i sleep|tonight|right now|don'?t need to see|no review|without (me|my) (seeing|reviewing)|just do it|all of them|don'?t ask)\b/.test(t);
+    const noReview = /\b(automatically|while i sleep|tonight|right now|don'?t need to see|no review|without (me|my) (seeing|reviewing)|just do it|all of them|don'?t ask|(?:don'?t|do not) care)\b/.test(t);
     const barePluralMass = /\b(applications|jobs|roles)\b/.test(t) && noReview && !/\?\s*$/.test(t) && !/^(did|have|has|do|does|were|was|are)\b/.test(t);
     const massObject = /\b(everything|every job|all jobs|all of them|every role|all roles)\b/.test(t) || /\b(\d{2,})\s*(jobs|applications|roles)\b/.test(t) || barePluralMass;
     const massCount = Number((t.match(/\b(\d{2,})\s*(jobs|applications|roles)\b/) || [])[1]) || 0;
-    const applyAsked = /\b(apply|submit|send in)\b/.test(t.replace(/\b(?:don'?t|do not|never|not|no|nothing)\s+(?:\w+\s+){0,3}?(?:apply|submit|send in)\b[^.;:!?]*/g, " "));
+    const applyAsked = /\b(apply|submit|send in)\b/.test(t.replace(/\b(?:don'?t|do not|never|not|no|nothing)\s+(?:\w+\s+){0,3}?(?:apply|submit|send in)\b[^.;:!?]*/g, " ")) || bulkApplyAsked(t);
     const massApply = applyAsked && massObject && (noReview || massCount >= 50);
     const dismissal = /\b(nobody|no one)\s+(checks|verifies|verified|will (check|verify|verified|find out|know))\b|\bthey (never|don'?t)\s+(check|verify|verified)\b|\bnever (checked|verified)\b/.test(t);
     const dismissalFabricate = dismissal && /\b(add|put|write|include)\b/.test(t);
@@ -25680,7 +25691,7 @@ const CareerRouter = (() => {
       if (m && m.resumeIngest && typeof m.resumeIngest === "object" && intent !== "career_resume_ingest") m.resumeIngest.stale = true;
     } catch {   }
   }
-  return { handleChat, noteServedTurn, handleStateChangeIntents, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf,
+  return { handleChat, noteServedTurn, handleStateChangeIntents, statedSearchLimits, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf,
     _d6Full: rankedShortlistFull, scoredCount, _c01NameMatch: { ltLexicon, ltFormMatches, ltEsc, ltPlain, ltClean, ltIsPlace, ltIsSchool, postingsFromCtx } };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerRouter;

@@ -39,7 +39,7 @@ import { planCareerTaskIntent, normalizeCareerTaskRequest, createCareerBoardFor,
 import { CareerHost } from "../_shared/career_host.js";
 import { CareerPool } from "../_shared/career_pool.js";
 import { createCareerPersistence, careerRequestHash } from "../_shared/career_persistence.js";
-import { holdUnsent, notConfirmedReply, pauseReply, readControl, reconcile, resumeReply, storeSentReply, unsavedStopReply, workflowReply, type Hold, type StopControl } from "../_shared/career_stop_truth.ts";
+import { alongsideHoldLine, holdUnsent, notConfirmedReply, pauseReply, readControl, reconcile, resumeReply, storeSentReply, unsavedStopReply, workflowReply, type Hold, type StopControl } from "../_shared/career_stop_truth.ts";
 import { callModel as callModelUncapped, newMeter, turnLedger, webSearch } from "../_shared/model_gateway.ts";
 import { claudeWebProvider, memoryWebCache, recheckPosting, webResearchOn, withWebSearch } from "../_shared/research_web.ts"; // D-060
 import { readWorkdayPosting } from "../_shared/workday_posting.ts"; // D-062
@@ -678,7 +678,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       const tapIn = tapRaw ? { qid: String(tapRaw.qid ?? ""), answer: String(tapRaw.answer ?? "") } : null;
       // R10 F.3: a stop in plain words (career_host.js stopControlOf, which also makes it a host turn), and the pause as it
       // stood before this turn: a narrower stop never leaves a pause behind that the reply would not mention.
-      const stopAsk = !tapIn && !careerTask && !careerBatch ? ((host as any).stopControlOf?.(message) ?? null) as { kind: "account" | "workflow"; workflows: string[]; boundary: boolean; outstanding: string | null } | null : null;
+      const stopAsk = !tapIn && !careerTask && !careerBatch ? ((host as any).stopControlOf?.(message) ?? null) as { kind: "account" | "workflow"; workflows: string[]; boundary: boolean; outstanding: string | null; alongside?: boolean } | null : null;
       const pauseBefore = (ctx as any).globalPause ? JSON.parse(JSON.stringify((ctx as any).globalPause)) : undefined;
       const accountPausedBefore = (loaded.account as any)?.paused === true;
       // M4: Outlook (Microsoft Graph) as a peer of Gmail, from any channel: "connect my outlook" / "use my work email" makes a
@@ -1590,7 +1590,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           const kept = (ctx as any).discovery?.heldAtLimit;
           const task = kept?.message && isResume(typedMessage) ? String(kept.message) : String(typedMessage);
           const zone = await readPersonZone(admin, user.id, (ctx as any).profile ?? null);
-          out = { reply: limitHeldReply(task, heldStop, zone, limitRetryAt), intent: HELD_INTENT, resultStatus: "held", contained: false, handler: "limit_held" };
+          out = { reply: limitHeldReply(task, heldStop, zone, limitRetryAt, Array.isArray(turn.tool_calls) ? turn.tool_calls : null), intent: HELD_INTENT, resultStatus: "held", contained: false, handler: "limit_held" };
           (ctx as any).discovery = { ...((ctx as any).discovery ?? {}), heldAtLimit: { message: task.slice(0, 1000), at: Date.now(), stop: heldStop } };
           agentMeta = { brain: staged.chosen ? "staged" : "agent", stopped: turn.stopped, limit_stop: heldStop, ...replyFlagsMeta(turn as { flags?: unknown }) };
         } else {
@@ -1898,7 +1898,15 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
         const hp = (ctx as any)._hostPatch as Record<string, unknown> | undefined;
         stopTurn = out.handler === "CareerHostControl" && hp?.paused === true && !hp.erase ? { kind: "account" }
           : out.handler === "CareerHostControl" && out.intent === "career_resumed" && hp?.paused === false ? { kind: "resume" }
-          : stopAsk && out.handler !== "agent" ? { ...stopAsk, cancelled: [] } : null;
+          : stopAsk && !stopAsk.alongside && out.handler !== "agent" ? { ...stopAsk, cancelled: [] } : null;
+      }
+      // Review 2026-11-13 round 3: a boundary beside another ask ("find jobs at Plaid, don't contact anyone") is never cancelled.
+      // The ask was answered above; the hold is applied here, to effects only, and the reply says what it held.
+      if (!stopTurn && stopAsk?.kind === "workflow" && stopAsk.alongside) {
+        stopHold = await holdUnsent(admin as any, user.id, Date.now());
+        if (stopHold.error) console.error("career stop (alongside): hold failed:", stopHold.error);
+        const line = alongsideHoldLine(stopHold);
+        if (line) out = { ...out, reply: `${out.reply ?? ""}\n\n${line}`.trim(), ...(out.parts ? { parts: [...out.parts, line] } : {}) };
       }
       if (stopTurn?.kind === "account") {
         // Whatever the chain answered, the pause is the account's: patched onto this turn's commit, read back below.

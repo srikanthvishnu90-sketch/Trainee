@@ -15,7 +15,7 @@ import { contentWords, numbersIn, numEq, specifics } from "./guard.ts";
 import { stripUrls } from "./reply.ts";
 import { parseDraft, readAlike } from "./draft_json.ts";
 import { type SourceKind, sourceKind } from "../../research_web.ts";
-import { bare, decide, indexPages, markSupported, quoted as inQuotes, supportOf, type SupportJudge, type Verdict, type Wanted } from "./support.ts";
+import { bare, decide, indexPages, markSupported, quoteOf, supportOf, type SupportJudge, type Verdict, type Wanted } from "./support.ts";
 
 export interface MarketDeps {
   search: SearchProvider;
@@ -516,7 +516,10 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   // page sentence stands in its place in quotation marks, or the line is dropped. Nothing the old word checks allowed is taken on
   // trust: checkLine, sayer and the unconfirmed-reading form are not used on this path. A comparison cell has no quoted form (its
   // row label and column are judged with it): not supported, it is empty.
-  const idx = FAIL_CLOSED.support ? indexPages(pages, abbreviated) : null;
+  const idx = FAIL_CLOSED.support ? indexPages(pages, abbreviated, companies0, { sites: found.sites ?? [], ask: i.ask?.trim() ? i.ask : i.question }) : null;
+  // Round 2: a page's own sentence is offered only as one unit of its page that may be quoted (support.ts quotable), never as two
+  // lines read as one sentence.
+  const units = new Set((idx?.pages ?? []).flatMap((p) => p.sentences.filter((u) => u.quotable).map((u) => u.text)));
   const pidx = (p: SourcePage | null) => p ? pages.indexOf(p) : -1;
   const THESIS = {}, sup = new Map<unknown, Verdict>(), srcOf = new Map<string, string>();
   if (idx) {
@@ -526,6 +529,12 @@ export async function researchMarket(i: { question: string; format: "inline" | "
     for (const r of arr(d.comparison?.rows, 10)) arr(r?.cells, 4).forEach((c, j) => { if (c && typeof c === "object" && os[j]) { keys.push(c); wants.push({ claim: `${os[j]} ${squash(c.value)}`, judged: `${os[j]}, ${squash(r?.label)}: ${squash(c.value)}`, pages: [pidx(pageOf(c.url))] }); } });
     for (const x of [...arr(d.conditions, 6), ...arr(d.risks, 6)]) { const ks = arr(x?.urls, 4).map((u) => pidx(pageOf(u))).filter((k) => k >= 0); keys.push(x); wants.push({ claim: squash(x?.text), pages: ks.length ? ks : [-1] }); }
     keys.push(THESIS); wants.push({ claim: squash(d.thesis) });
+    // Round 3: a page unit code picks itself (pageSentences, below) is a quote candidate too, and is judged in this same call: at
+    // most two for each part asked and three for the question, five in all.
+    const parts0 = askedParts(i.ask?.trim() ? i.ask : `${i.question} ${(i.plan.queries ?? []).join(" ")}`), asked0 = `${i.ask ?? ""} ${i.question}`;
+    const ok0 = (l: { text: string; prev?: string }) => units.has(l.text) && (!covers(l.text, PAY_PART) || aboutAsked(l.text, l.prev ?? "", asked0));
+    const cands = [...new Map([...parts0.flatMap((pt) => pageSentences(pages, pt.words, companies0, 6).filter(ok0).slice(0, 2)), ...pageSentences(pages, contentWords(`${i.question} ${companies0.join(" ")}`), companies0, 8).filter(ok0).slice(0, 3)].map((l) => [l.text, l] as const)).values()].slice(0, 5);
+    for (const l of cands) { keys.push(`unit:${l.text}`); wants.push({ claim: l.text, unit: true, pages: [pidx(l.page)] }); }
     (await decide(wants, idx, i.deps.judge)).forEach((v, k) => { if (!sup.has(keys[k])) sup.set(keys[k], v); });
   }
   const lineS = (x: any, text: unknown, section: string, o: { subject?: string; quote?: boolean } = {}): Cited | null => {
@@ -537,7 +546,7 @@ export async function researchMarket(i: { question: string; format: "inline" | "
     // D-073's measure still holds for a line in the model's words: at least 60% of its words on its page; else the page's sentence.
     const model = !!hit && hit.how === "model" && wordsOnPages(t, [pages[hit.page]]) >= ON_PAGES_SHARE;
     if (!hit || (!model && o.quote === false)) { dropped++; auditLine(audit, { ok: false, why: why || "unsupported" }, section, { text, quote: x?.quote }); return null; }
-    const out = model ? t : inQuotes(hit.sentence);
+    const out = model ? t : quoteOf(hit);
     auditLine(audit, model ? { ok: true } : { ok: true, via: "quote" }, section);
     srcOf.set(out, hit.sentence);
     if (reading) answerable.add(out);
@@ -553,7 +562,14 @@ export async function researchMarket(i: { question: string; format: "inline" | "
       return f && f.text.length <= 600 ? { value: f.text, cite: f.cite } : null;
     }) })).filter((r) => r.label && linkFree(r.label) && r.cells.some(Boolean));
     // FAIL_CLOSED.support: a row's label carries no figure, and a column with no supported cell is no column of a comparison.
-    const rowsS = idx ? rows.filter((r) => !figuresIn(r.label).length) : rows;
+    // Round 2: every word of a label is the person's (their ask) or the pages' (the units its cells stand on).
+    const askWords = contentWords(`${i.ask ?? ""}`);
+    const rowsS = idx ? rows.filter((r) => { const have = contentWords(r.cells.map((c) => c ? srcOf.get(c.value) ?? "" : "").join(" ")); 
+      // Round 3: a label is the ask's own words, in their order, as one unbroken run, or the words a cell's unit begins with, word
+      // for word; and it was judged with each of its cells as one claim ("<column>, <label>: <value>", lineS).
+      const lab = r.label.toLowerCase(), units0 = r.cells.map((c) => c ? (srcOf.get(c.value) ?? "").toLowerCase() : "").filter(Boolean);
+      void have; void askWords;
+      return !figuresIn(r.label).length && contentWords(r.label).size > 0 && !/[^\p{L}\p{N} '&-]/u.test(r.label) && (askSpan(lab, i.ask ?? "") || units0.some((u) => u.startsWith(`${lab} `))); }) : rows;
     if (idx ? rowsS.length > 0 && opts.every((_, j) => rowsS.some((r) => r.cells[j])) : rows.length) comparison = { options: opts, rows: rowsS };
   }
   const conditions = arr(d.conditions, 6).map(idx ? (x: any) => lineS(x, x?.text, "conditions") : reading("conditions")).filter(Boolean) as Cited[];
@@ -571,7 +587,8 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   // 2026-11-13: by the sentence's own words or the sentence before it on the page; the page's title never makes it so.
   const payOk = (l: { text: string; page: SourcePage; prev?: string }) => !covers(l.text, PAY_PART) || aboutAsked(l.text, l.prev ?? "", asked);
   // FAIL_CLOSED.support: a page's own sentence is shown as what it is, in quotation marks; a question on the page states nothing.
-  const own = (t: string) => idx ? inQuotes(t) : t, stated = (l: { text: string }) => !idx || !/\?$/.test(l.text);
+  const picked = (t: string) => { const v = idx ? sup.get(`unit:${t}`) : null; return v && v.how === "quote" ? v : null; };
+  const own = (t: string) => { const v = picked(t); return v ? quoteOf(v) : t; }, stated = (l: { text: string }) => !idx || !!picked(l.text);
   const addPage = (l: { text: string; page: SourcePage }) => { if (keptLines().some((x) => x.text === l.text || x.text === own(l.text))) return; points.push({ text: own(l.text), cite: [num(l.page)] }); if (idx) srcOf.set(own(l.text), l.text); auditFromPages(audit); };
   for (const part of parts.filter((pt) => !keptLines().some((l) => covers(l.text, pt)))) for (const l of pageSentences(pages, part.words, companies0, 6).filter(payOk).filter(stated).slice(0, 1)) addPage(l);
   const need = Math.max(1, parts.length);
@@ -579,7 +596,7 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   const disagreements = disagreementsIn(points);
   const marked = (x: Cited) => answerable.has(x.text) ? x : { ...x, unconfirmed: true as const };
   if (!keptLines().length) {
-    const checked: MarketSource[] = pages.slice(0, 4).map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || new URL(p.url).hostname, fetched_at: new Date(p.fetchedAt).toISOString(), kind: sourceKind(p.url, i.plan.companies ?? []) }));
+    const checked: MarketSource[] = pages.slice(0, 4).map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || new URL(p.url).hostname, fetched_at: new Date(p.fetchedAt).toISOString(), kind: sourceKind(p.url, i.plan.companies ?? [], FAIL_CLOSED.support ? found.sites ?? [] : undefined) }));
     return { ...none(), checked, ...(i.deps.layout === "messages" ? { layout: "messages" as const } : {}),
       note: "Sources were opened but none supported an answer. Say what you looked for and that you couldn't confirm it from what they say; do not guess, and give no figure. Write no link: code lists the sources that were checked." };
   }
@@ -589,7 +606,7 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   let leadS: Cited | null = null;
   if (idx) {
     const t = squash(d.thesis), v = sup.get(THESIS);
-    if (v && v.how !== "drop" && linkFree(v.sentence)) { const text = v.how === "model" && linkFree(t) ? t : inQuotes(v.sentence); if (text.length <= 160) leadS = { text, cite: [num(pages[v.page])] }; }
+    if (v && v.how !== "drop" && linkFree(v.sentence)) { const text = v.how === "model" && linkFree(t) ? t : quoteOf(v); if (text.length <= 160) leadS = { text, cite: [num(pages[v.page])] }; }
   }
   const cited = order.map((k) => byUrl.get(k)!);
   const thesis0 = squash(d.thesis), title0 = squash(d.title).slice(0, 80);
@@ -612,7 +629,7 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   const title = idx ? (stripUrls(squash(i.ask?.trim() ? i.ask : i.question)).replace(/[?]+$/, "").slice(0, 80) || "Research") : title0 && linkFree(title0) && figuresIn(title0).every((n) => qn.some((x) => numEq(x, n))) ? title0 : squash(i.question).replace(/[?]+$/, "").slice(0, 80);
   const companies = i.plan.companies ?? [];
   const sources: MarketSource[] = cited.map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || new URL(p.url).hostname, fetched_at: new Date(p.fetchedAt).toISOString(),
-    kind: sourceKind(p.url, companies), ...(quoted.has(normalizeUrl(p.url)) ? { via: "search_passage" as const } : {}), ...(dated.get(normalizeUrl(p.url)) ? { dated: dated.get(normalizeUrl(p.url)) } : {}) }));
+    kind: sourceKind(p.url, companies, idx ? found.sites ?? [] : undefined), ...(quoted.has(normalizeUrl(p.url)) ? { via: "search_passage" as const } : {}), ...(dated.get(normalizeUrl(p.url)) ? { dated: dated.get(normalizeUrl(p.url)) } : {}) }));
   const layout = i.deps.layout === "messages" ? "messages" as const : undefined;
 
   // The format: the brain's choice, kept unless a File cannot honestly be made.
@@ -676,26 +693,29 @@ export function onlySaysUnconfirmed(s: string): boolean {
   const after = t.slice(m.index + m[0].length);
   return ONLY_LOOKED.test(t.slice(0, m.index).trim()) && ABOUT_CONFIRMING.test(`${m[0]}${after}`) && !SECOND_CLAUSE.test(after);
 }
-// FAIL_CLOSED.support (review of #807: "I couldn't confirm it (interns there are paid extremely well)." and "I couldn't confirm that
-// Citadel interns earn less than the industry-leading rate they are famous for." went out whole): a could-not-confirm sentence may
-// name what the person asked about and nothing else. It is one only when it has the shape above AND, with the words of the person's
-// own message removed, every word left is a word of saying so (confirming, finding, the sources, the answer); any other word, a
-// figure, or a name the person did not write makes it a sentence like any other, which must be supported or go.
-const UNCONFIRMED_FRAME = contentWords("confirm confirmed verify verified find found locate determine establish source sources page pages read opened checked looked searched answer figure number information anything exact reliable sorry unfortunately able unable sure");
+// FAIL_CLOSED.support, round 2 (review of #810: 24 of 32 claims went out inside a could-not-confirm sentence built from the ask's own
+// words, "I couldn't confirm the figure (Citadel does not pay interns)."): a could-not-confirm sentence stands unjudged ONLY in one
+// closed form: "I" + could not (confirm | verify | find [a source for]) + an object + an optional full stop, where the object is
+// "it", "that", "this", "the figure", "the answer", "an answer" or "anything", or words of the person's own message, in their order,
+// as one unbroken run of it. Nothing else: no bracket, dash, slash, colon, comma, second clause or second sentence can be in it,
+// because no word outside the form is allowed. Every other sentence is a sentence like any other (supported, quoted or removed).
+const UNCONFIRMED_FORM = /^(?:(?:sorry|unfortunately),? )?i (?:couldn't|could not|wasn't able to|was not able to|was unable to|am unable to|can't|cannot) (?:confirm|verify|find)(?: a source for)? (.+?)\.?$/;
+const askTokens = (ask: string) => String(ask ?? "").toLowerCase().replace(/[‘’]/g, "'").split(/\s+/).map((w) => w.replace(/^[("']+|[)"'.,!?;:]+$/g, "")).filter(Boolean);
+export function askSpan(words: string, ask: string): boolean {
+  const ws = words.split(" "), at = askTokens(ask);
+  return ws.length > 0 && at.some((_, k) => ws.every((w, j) => at[k + j] === w));
+}
 export function pureUnconfirmed(s: string, ask: string): boolean {
-  const t = bare(s);
-  if (!onlySaysUnconfirmed(t)) return false;
-  const asked = contentWords(ask), said = new Set(String(ask ?? "").toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}&'-]*/gu) ?? []);
-  const rest = t.replace(new RegExp(SAYS_UNCONFIRMED.source, "gi"), " ");
-  const names = (rest.match(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}\p{N}&'-]*/gu) ?? []).map((w) => w.toLowerCase().replace(/'s$/, ""));
-  return [...contentWords(rest)].every((w) => asked.has(w) || UNCONFIRMED_FRAME.has(w)) && names.every((w) => said.has(w) || /^(?:i|i'm|i've|sorry|unfortunately)$/.test(w));
+  const t = String(s ?? "").trim().replace(/[‘’]/g, "'").toLowerCase(), m = UNCONFIRMED_FORM.exec(t);
+  if (!m || /[^a-z0-9' $%&-]/.test(m[1]) || / - |--/.test(m[1])) return false;
+  return /^(?:it|that|this|the figure|the answer|an answer|anything)$/.test(m[1]) || askSpan(m[1], ask);
 }
 // The reply, enforced in code: every link the model wrote is removed; a citation number with no source is removed; an inline
 // sentence stands only when it cites a source, every figure in it is on a kept point citing that source, and every name in it is
 // named by a kept point citing that source (a file reply's figures must be on a kept point); the inline answer ends with its numbered sources (each a page fetched this turn, with its
 // read date). With nothing left, the answer is the kept points themselves; with no source at all, only a sentence saying research
 // could not confirm an answer, else the plain no-source line.
-export function enforceMarketReply(reply: string, r: MarketResult, shown: { text: string; url: string | null }[] = [], pre?: { body?: string }): string {
+export function enforceMarketReply(reply: string, r: MarketResult, shown: { text: string; url: string | null }[] = [], pre?: { body?: string; unconfirmed?: (s: string) => boolean }): string {
   // FAIL_CLOSED.support: this function cannot ask the judge, so on its own it lets no sentence of the model's through (the reply is
   // read as empty: the kept lines answer); enforceMarketReplySupported checks the reply and passes what stood as `pre`. A result
   // that was not built with the switch on has lines no one checked: it is answered as not confirmed, with its pages.
@@ -708,16 +728,19 @@ export function enforceMarketReply(reply: string, r: MarketResult, shown: { text
   // Such a sentence carries its source: the link of the line its figures are on goes after the answer (D-067 (d)).
   const shownNums = shown.flatMap((l) => numbersIn(l.text));
   const wasShown = (s: string) => { const ns = numbersIn(s.replace(/\[\d+\]/g, "")); return shownNums.length > 0 && ns.length > 0 && ns.every((n) => shownNums.some((x) => numEq(x, n))); };
-  const linksFor = (t: string) => [...new Set(t.split(/(?<=[.!?])\s+/).filter(wasShown).flatMap((x) => { const ns = numbersIn(x); return shown.filter((l) => l.url && numbersIn(l.text).some((y) => ns.some((n) => numEq(y, n)))).map((l) => l.url as string); }))];
+  // FAIL_CLOSED.support (review of #785: a figure said again took another posting's link): a shown line stands only whole, word for
+  // word (enforceMarketReplySupported), and carries that line's own link, never the link of another line with the same number.
+  const linksFor = (t: string) => FAIL_CLOSED.support ? [...new Set(shown.filter((l) => l.url && plainLine(t).includes(plainLine(l.text))).map((l) => l.url as string))] : [...new Set(t.split(/(?<=[.!?])\s+/).filter(wasShown).flatMap((x) => { const ns = numbersIn(x); return shown.filter((l) => l.url && numbersIn(l.text).some((y) => ns.some((n) => numEq(y, n)))).map((l) => l.url as string); }))];
   const withLinks = (t: string) => { const ls = linksFor(t).filter((u) => !t.includes(u)); return ls.length ? `${t}\n${ls.join("\n")}` : t; };
   // Research found nothing to stand on: a sentence stays only when it says so (no figure, a plain "couldn't confirm", no
   // "but" carrying a claim after it); anything else is the plain no-source line. "The market is growing rapidly." never stands.
   if (r.status !== "ok") {
     // 2026-11-13: one such sentence, the first; no other sentence of the model's survives (a pay line this conversation already
     // showed is code's own record of an earlier reply and stays with its link, as before).
-    const all = stripUrls(reply).split(/(?<=[.!?])\s+/).filter(Boolean), own = all.find(onlySaysUnconfirmed);
+    const isUnconfirmed = pre?.unconfirmed ?? onlySaysUnconfirmed;
+    const all = (pre?.unconfirmed ? reply.split("\n") : stripUrls(reply).split(/(?<=[.!?])\s+/)).filter(Boolean), own = all.find(isUnconfirmed);
     const says = (s: string) => s === own;
-    const sents = all.filter((s, k) => (s === own && all.indexOf(s) === k) || (!onlySaysUnconfirmed(s) && wasShown(s)));
+    const sents = all.filter((s, k) => (s === own && all.indexOf(s) === k) || (!isUnconfirmed(s) && wasShown(s)));
     const kept = sents.join(" ");
     // D-073 review: a reply that says it could not confirm an answer carries the sources that were opened and checked.
     // D-073 review 2 (owner: never a blank research answer): pages were read, so the person is always told that no answer could be
@@ -832,7 +855,7 @@ export async function enforceMarketReplySupported(reply: string, r: MarketResult
   const sup = r.status === "ok" ? supportOf(r) : null;
   if (r.status !== "ok" || !sup) {
     const all = pieces(reply), first = all.find((s) => pureUnconfirmed(s, ask));
-    return enforceMarketReply(all.filter((s, k) => (s === first && all.indexOf(s) === k) || shownWhole(s)).join(" "), r, shown, {});
+    return enforceMarketReply(all.filter((s, k) => (s === first && all.indexOf(s) === k) || shownWhole(s)).join("\n"), r, shown, { unconfirmed: (s) => s === first });
   }
   const max = r.sources.length, inline = r.format !== "file";
   const kept: Cited[] = [...r.points, ...(r.comparison?.rows ?? []).flatMap((x) => x.cells.flatMap((c) => c ? [{ text: c.value, cite: c.cite }] : [])), ...r.conditions, ...r.risks];
@@ -859,7 +882,7 @@ export async function enforceMarketReplySupported(reply: string, r: MarketResult
     const v = vs[x], n = v.how === "drop" ? 0 : sup.pageOfN.indexOf(v.page) + 1;
     if (v.how === "drop" || n < 1) return "";
     // A page sentence that stands in for a sentence is said once: not again beside the kept line or the quote that already says it.
-    const text = v.how === "model" ? wants[x].claim : inQuotes(v.sentence), key = plainLine(v.how === "model" ? text : v.sentence).toLowerCase();
+    const text = v.how === "model" ? wants[x].claim : quoteOf(v), key = plainLine(v.how === "model" ? text : v.sentence).toLowerCase();
     if (said.has(key)) return "";
     said.add(key);
     return show(text, [n]);

@@ -14,9 +14,11 @@ import type { FileService } from "../_shared/file_service.ts";
 import { careerSystemPrompt, MIRROR_RULES, shapeRulesFor } from "../_shared/agent/prompt.ts";
 import { alertLine, type MemoryStore, type Pipeline, personBlock, type Standing } from "../_shared/agent/memory.ts";
 import type { ResearchDeps, ResearchResult } from "../_shared/agent/research/index.ts";
-import { enforceResearchReply, stripUnseenLinks } from "../_shared/agent/research/reply.ts";
+import { enforceResearchReply, fallbackVerdict, stripUnseenLinks } from "../_shared/agent/research/reply.ts";
 import { type AdviceResult, enforceAdviceReply } from "../_shared/agent/research/advice.ts";
-import { enforceMarketReply, enforceMarketReplySupported, FAIL_CLOSED, type MarketDeps, type MarketResult } from "../_shared/agent/research/market.ts";
+import { enforceMarketReply, enforceMarketReplySupported, FAIL_CLOSED, type MarketDeps, type MarketResult, pureUnconfirmed } from "../_shared/agent/research/market.ts";
+import { keepSupported } from "../_shared/agent/research/support.ts";
+import { NOT_CONFIRMED } from "../_shared/research_reply.ts";
 import { type CompanyResult, enforceCompanyReply, enforceCompanyReplySupported } from "../_shared/agent/research/company.ts";
 import { enforceFollowupAsk } from "../_shared/followup_draft.ts";
 import { urlsIn } from "../_shared/channel_shape.ts";
@@ -246,7 +248,9 @@ export async function agentTurn(o: {
   // R10 WO-H: company research has its own rules (one role question when the role is unknown; a focus keeps that area only).
   // FAIL_CLOSED.support (off by default; support.ts): every sentence of the reply is checked by code and by the judge (o.market.judge,
   // one batched call) before it may stand in the model's words; without a judge none does.
-  if (FAIL_CLOSED.support && trace.m && !trace.r && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? await enforceCompanyReplySupported(result.reply, trace.m, { judge: o.market?.judge ?? null, ask: o.message }) : await enforceMarketReplySupported(result.reply, trace.m as MarketResult, shownPay, { judge: o.market?.judge ?? null, ask: o.message }) };
+  // Round 2: also when an open-question research ran in the same turn (trace.r): the market or company result's check is the one
+  // that stands, since its sources are the numbered ones the reply cites.
+  if (FAIL_CLOSED.support && trace.m && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? await enforceCompanyReplySupported(result.reply, trace.m, { judge: o.market?.judge ?? null, ask: o.message }) : await enforceMarketReplySupported(result.reply, trace.m as MarketResult, shownPay, { judge: o.market?.judge ?? null, ask: o.message }) };
   else if (trace.m && !trace.r && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? enforceCompanyReply(result.reply, trace.m) : enforceMarketReply(result.reply, trace.m as MarketResult, shownPay) };
   // D-073 review 2: research read pages and none supported an answer, and the model's reply did not stand (the loop removed its
   // unsourced claim, asked once more and stopped: "incomplete_reply"). The person is told what research found, in code's words: that
@@ -338,6 +342,40 @@ export async function agentTurn(o: {
   // D-067 (owner, must-fix (d): "each figure carries its source link and place"): a posting's pay said in the reply comes with that
   // posting's link (search_jobs / get_posting returned both); code adds the link when the reply has the figure and not the link.
   // D-073: on every path, research turns included (their shown figure's link was added above; its place is added here).
+  // FAIL_CLOSED.support, round 2: the reply paths that had no check of what a sentence says, each against what its turn stood on, in
+  // one batched judge call (support.ts keepSupported), after any shortening rewrite and before code adds links:
+  //   open-question research (trace.r): every sentence against the quotes of its facts, the person's confirmed facts and code's own
+  //     verdict lines; with nothing left, code's fallback verdict;
+  //   advice (trace.a): every sentence against the passages read; with nothing left, code's not-verified line;
+  //   a pay turn (a posting with pay was read, or pay was shown earlier): every sentence with a number against the postings' own
+  //     records and the lines shown earlier; with nothing left, the records themselves.
+  if (FAIL_CLOSED.support && !trace.m && result.reply && result.stopped === "final" && !result.show) {
+    const judge = o.market?.judge ?? null, pure = (s: string) => pureUnconfirmed(s, o.message);
+    const recs = [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])].filter((p: any) => numbersIn(String(p?.pay ?? "")).length);
+    const recLine = (p: any) => `${[p?.company, p?.title].map((x) => String(x ?? "").trim()).filter(Boolean).join(", ")}: ${String(p.pay).trim()}`;
+    const letters = (t: string) => /\p{L}/u.test(t.replace(/https?:\/\/\S+/g, "")), links = (t: string) => t.match(/https?:\/\/\S+/g) ?? [];
+    if (trace.r) {
+      const own = [trace.r.verdict.now, trace.r.verdict.later, trace.r.short?.now ?? "", trace.r.short?.later ?? "", trace.r.short?.act ?? "", trace.r.first_action].filter(Boolean).flatMap((x) => x.split(/(?<=[.!?])\s+/));
+      const k = await keepSupported(result.reply, [...trace.r.facts.map((f) => ({ text: f.quote, title: f.label })), ...trace.r.person.map((text) => ({ text, title: "What the person confirmed" }))], { judge, pure, own, ask: o.message });
+      result = { ...result, reply: letters(k.text) ? k.text : [fallbackVerdict(trace.r), ...links(k.text)].join("\n") };
+    } else if (trace.a) {
+      const k = await keepSupported(result.reply, trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), { judge, pure, ask: o.message });
+      result = { ...result, reply: letters(k.text) ? k.text : [trace.a.not_verified || NOT_CONFIRMED, ...links(k.text)].join("\n") };
+    } else if (recs.length || shownPay.length) {
+      // Round 3: EVERY sentence of a pay turn is checked (not only those with a number), against the postings' own records and the
+      // lines shown earlier; a shown line said again whole is code's record and stays. A posting's own pay is never lost to the
+      // check: when a sentence was removed, the record line of each posting the person's message names (the only posting, when it
+      // names none) is given by code, once, unless the reply that is left already gives its figures.
+      // A line shown earlier is code's record only when it is about what the person asks now (it names a name their message has);
+      // "If Jane Street matched it, their pay would be $95 an hour." said after a Citadel line is not Citadel's pay.
+      const said = new Set(o.message.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}&'-]*/gu) ?? []);
+      const about = shownPay.filter((l) => (l.text.match(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}\p{N}&'-]*/gu) ?? []).slice(/^\p{Lu}\p{Ll}*\s+\p{Ll}/u.test(l.text) ? 1 : 0).some((w) => said.has(w.toLowerCase().replace(/'s$/, ""))));
+      const k = await keepSupported(result.reply, [...recs.map((p: any) => ({ text: recLine(p), title: "Posting record" })), ...about.map((l) => ({ text: l.text, title: "Pay shown earlier in this conversation" }))], { judge, pure, own: about.map((l) => l.text), ask: o.message });
+      const named = recs.filter((p: any) => { const c = String(p?.company ?? "").trim().toLowerCase(); return c && o.message.toLowerCase().includes(c); });
+      const mine = [...new Set((named.length ? named : recs.length === 1 ? recs : []).map(recLine))].filter((l) => !numbersIn(l).every((n) => numbersIn(k.text).some((x) => numEq(x, n))));
+      result = { ...result, reply: !k.removed.length ? k.text : [k.text, ...(mine.length ? mine : letters(k.text) ? [] : about.length ? [...new Set(about.map((l) => l.text))] : [NOT_CONFIRMED])].filter(Boolean).join("\n") };
+    }
+  }
   if (result.reply && result.stopped === "final" && !result.show) result = { ...result, reply: payWithSource(result.reply, [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])], shownPayPlaces(o.message, hypo ? [] : o.history)) };
   // D-067 (live-6 C9: research_market ran and the person got an empty message; D-024): the last line of every brain turn. An empty
   // or blank reply is never sent: the research's own sourced points when it found any, else the honest line that it did not finish.
@@ -352,7 +390,9 @@ export async function agentTurn(o: {
   // the fact's own figures, its line goes after the reply, in the fact's own words. A turn whose reply is a card (an exact payload)
   // cannot carry it, so nothing is set aside on that turn: the fact goes back as it was.
   if (stale.length) {
-    if (result.show) {
+    // Round 4: only a card that carries a payload undoes it. Code's own restore question is not one (and is never asked on the
+    // turn that set the fact aside: confirm_profile_fact refuses), so it can never undo a set-aside.
+    if (result.show && result.show.intent !== RESTORE_ASK_INTENT) {
       for (const f of stale as any[]) { Object.assign(f, f.withdrawn_by_owner.was); delete f.withdrawn_by_owner; }
     } else {
       const set = (stale as any[]).map((f) => ({ id: String(f.id), text: String(f.text || f.title) }));
@@ -371,10 +411,11 @@ export async function agentTurn(o: {
   return know ? { ...result, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : result;
 }
 
-// Review of #790 (round 3): code does not judge how the model worded a set-aside ("I kept your GPA 3.9; it was not removed" held the
-// label, the value and a set-aside word). Whenever a fact was set aside this turn, code states it itself, once, as the first line,
-// in the fact's own words; every sentence of the model's reply that names the fact's label or its value is removed, so nothing
-// repeats or contradicts it (the model is told not to mention it: staleFactNote). A turn that did not finish says what was saved.
+// Review of #790 (rounds 3 and 4): whenever a fact was set aside this turn, code states it itself, once, as the first line, in the
+// fact's own words (the model is told not to: staleFactNote). From the model's reply only this is removed: a sentence that STATES
+// that fact's status (its label or value with a status word: set aside, removed, kept, still on file, updated, using ...), and a
+// general claim that nothing changed ("Nothing on your record was changed."), which the set-aside makes untrue. A question, and a
+// sentence about a form, a posting or a next step that only mentions the label, stay. A turn that did not finish says what was saved.
 const UNFINISHED: Record<string, string> = { [INCOMPLETE_REPLY]: INCOMPLETE_AFTER_SAVE_REPLY, [EMPTY_REPLY]: EMPTY_AFTER_SAVE_REPLY, [MODEL_ERROR_REPLY]: MODEL_ERROR_AFTER_SAVE_REPLY, [MAX_STEPS_REPLY]: MAX_STEPS_AFTER_SAVE_REPLY };
 export const SET_ASIDE_LINE = "Set aside, not deleted (no longer used until you say it's right again): ";
 function namesFact(sentence: string, fact: string): boolean {
@@ -382,11 +423,14 @@ function namesFact(sentence: string, fact: string): boolean {
   const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   return (!!label && new RegExp(`(?<![A-Za-z])${esc(label)}(?![A-Za-z])`, "i").test(sentence)) || new RegExp(`(?<![\\w$.])${esc(value)}(?![\\w%]|\\.\\d)`, "i").test(sentence);
 }
+const STATUS_WORD = /\bset aside\b|\baside\b|\bremov(?:e|ed|ing)\b|\bkept\b|\bkeep(?:ing)? (?:using|it)\b|\bstill on (?:file|record)\b|\bupdated\b|\bchanged\b|\bsaved\b|\bdeleted\b|\busing\b|\bwill use\b|\bon your (?:record|profile)\b|\boff\b|\bno longer (?:used|use)\b|\b(?:won't|will not) (?:be used|use)\b/i;
+const NOTHING_CHANGED = /\b(?:nothing|no facts?|none of your facts)\b[^.!?]*\b(?:changed|removed|updated|deleted|touched|set aside)\b|\b(?:didn't|did not|haven't|have not|hasn't|has not) (?:been )?(?:chang|remov|touch|updat|delet)\w*\b|\bunchanged\b|\bstill confirmed\b|\b(?:all|every one of) your facts\b/i;
 export function setAsideSaid(reply: string, facts: string[]): string {
   if (!facts.length) return reply;
   const line = `${SET_ASIDE_LINE}${facts.join("; ")}`, r = String(reply ?? "");
   if (UNFINISHED[r] || Object.values(UNFINISHED).includes(r)) return `${line}\n\n${UNFINISHED[r] ?? r}`;
-  const kept = r.split("\n").map((l) => l.startsWith(SET_ASIDE_LINE) ? "" : l.split(/(?<=[.!?])[ \t]+/).filter((x) => !facts.some((f) => namesFact(x, f))).join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  const goes = (x: string) => !x.trim().endsWith("?") && (NOTHING_CHANGED.test(x) || (STATUS_WORD.test(x) && facts.some((f) => namesFact(x, f))));
+  const kept = r.split("\n").map((l) => l.startsWith(SET_ASIDE_LINE) ? "" : l.split(/(?<=[.!?])[ \t]+/).filter((x) => !goes(x)).join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
   return kept ? `${line}\n\n${kept}` : line;
 }
 // D-071: "N applications" said with another number than the record's is the record's number; a sentence about having miscounted

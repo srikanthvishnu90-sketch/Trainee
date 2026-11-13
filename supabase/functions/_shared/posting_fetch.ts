@@ -140,6 +140,15 @@ export async function guardedFetch(f: Fetch, href: string, init: RequestInit = {
     try { url = new URL(loc, url).href; } catch { throw new NotRead("it redirected to something that is not a link"); }
   }
 }
+// The platform fetch as the readers' transport (agent-chat passes it to every reader here). guardedFetch asks with redirect
+// "manual", so the platform follows nothing and its answer is from the address asked; a fetch that followed a redirect anyway
+// says so (`redirected` true), and that answer keeps its `url`, which guardedFetch then holds to the same rule as any hop. An
+// answer that was not redirected is handed on without a `url`: where the transport got it (a proxy, or a test's local copy of a
+// board standing in for the board's host) is not a redirect and not a second address. A readers' caller that is not the
+// platform fetch (a test's stub) is unaffected: its `url` is still checked as given.
+export const asAsked = (res: Response): Response =>
+  res.redirected || !res.url ? res : new Response(res.body, { status: res.status, statusText: res.statusText, headers: res.headers });
+export const fetchAsAsked = (f: Fetch = (i, init) => fetch(i, init)): Fetch => async (input, init) => asAsked(await f(input, init));
 // The body as text, read in pieces and stopped at the cap: a body that states or reaches a larger size is not read.
 export async function cappedText(res: Response, max = MAX_BODY_BYTES, signal?: AbortSignal): Promise<string> {
   const tooBig = () => new NotRead(`the page is larger than ${Math.round(max / 1048576)} MB`);

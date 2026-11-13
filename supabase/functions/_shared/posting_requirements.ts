@@ -184,9 +184,13 @@ export function ashbyAppData(html: string): any | null {
 // a `state` other than "published"), `active` true and not a non-public `visibility` (SmartRecruiters), `isListed` true
 // (Ashby). A stated deadline that has passed is closed. Anything else is unknown. (Workday: workday_posting.ts workdayState.)
 export type PostingState = "open" | "closed" | "unknown";
-export function boardState(board: Exclude<Board, "Workday">, j: any, id: string, today: string): PostingState | null {
+// `o.titled` false (the link check, link_check.ts): Greenhouse's and Lever's posting APIs answer by the posting's id, so the id
+// they return IS the posting, and whether it is open does not need its title (a reader needs the title to show the posting; the
+// link check only asks open or not: trunk's answer, pinned by tests/architect/r10-wo-c-search-replay.test.ts). Another id, an
+// error body, a past deadline or a non-published state are read the same either way.
+export function boardState(board: Exclude<Board, "Workday">, j: any, id: string, today: string, o: { titled?: boolean } = {}): PostingState | null {
   if (!j || typeof j !== "object" || Array.isArray(j)) return null;
-  const named = (v: unknown) => typeof v === "string" && v.trim().length > 0;
+  const named = (v: unknown) => o.titled === false && (board === "Greenhouse" || board === "Lever") ? true : typeof v === "string" && v.trim().length > 0;
   const past = (v: unknown) => { const d = isoDay(v); return !!d && d < today; };
   if (board === "Greenhouse") return String(j.id) !== id || !named(j.title) ? null : past(j.application_deadline) ? "closed" : "open";
   if (board === "Lever") return String(j.id ?? "").toLowerCase() !== id.toLowerCase() || !named(j.text) ? null : j.state === undefined || j.state === "published" ? "open" : typeof j.state === "string" ? "closed" : "unknown";

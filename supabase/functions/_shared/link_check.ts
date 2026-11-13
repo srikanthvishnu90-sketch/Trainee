@@ -136,7 +136,7 @@ export function linkChecker(f: typeof fetch, o: { timeoutMs?: number; userAgent?
         // A 200 whose body is not JSON keeps trunk's answer ("live") for now: tests/architect/wo-106-agent-slice.test.ts:180
         // pins it. tests/architect/pending/posting-link-nonjson-20261113.test.ts wants "unknown" here (a bot wall is not a posting).
         if (j === null && !/^\s*null\s*$/.test(r.text)) return "live";
-        return linkOf(boardState(family === "greenhouse" ? "Greenhouse" : family === "lever" ? "Lever" : "SmartRecruiters", j, pid, today()));
+        return linkOf(boardState(family === "greenhouse" ? "Greenhouse" : family === "lever" ? "Lever" : "SmartRecruiters", j, pid, today(), { titled: false }));
       } catch { return "unknown"; }
     }
     if (!/^https?:\/\//i.test(link)) return "dead";

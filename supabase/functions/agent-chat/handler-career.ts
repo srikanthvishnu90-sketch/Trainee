@@ -51,6 +51,7 @@ import { enterTurnGate, type TurnGate } from "../_shared/career_turn_gate.ts";
 import { CONFLICT_CODES, CONFLICT_REPLY, countSend, newTurnEffects, refusedSaveReply, trackTurnEffects } from "../_shared/career_save_replies.ts";
 import { poolNeeded } from "./career_pool_need.ts";
 import { linkChecker } from "../_shared/link_check.ts";
+import { asAsked, fetchAsAsked } from "../_shared/posting_fetch.ts"; // the posting readers' transport: the platform fetch, a redirect it followed kept checkable
 import { knowledgeOn } from "../_shared/agent/knowledge/index.ts";
 import { fileKindPublisher } from "../_shared/agent/research/file_publisher.ts";
 import { modelDerive } from "../_shared/agent/research/derive.ts";
@@ -1098,8 +1099,8 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // intake; a bare "apply here <link>" or a pasted link alone stays code's.
       const g1LinkQuestion = questionShaped(message.replace(/https?:\/\/\S+/gi, " "));
       const hereOut = !noApply && !g1LinkQuestion && Deno.env.get("CAREER_APPLY_HERE") !== "off" && writerChannel((body as any)?.channel) === "telegram" && !billing && !cancelled && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
-        ? await applyHereTurn({ message, now: Date.now(), db: supabasePostingsDb(admin), fetchFeed: boardFetchFeed((i, init) => fetch(i, init), { timeoutMs: 8000, personLink: true }),
-          readWorkday: (u) => readWorkdayPosting(u, { fetch, userAgent: `Trainee posting reader (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }), // D-062
+        ? await applyHereTurn({ message, now: Date.now(), db: supabasePostingsDb(admin), fetchFeed: boardFetchFeed((i, init) => fetch(i, init).then(asAsked), { timeoutMs: 8000, personLink: true }),
+          readWorkday: (u) => readWorkdayPosting(u, { fetch: fetchAsAsked(), userAgent: `Trainee posting reader (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }), // D-062
             apps: () => supabaseApplications(admin)(user.id), facts: screenFacts,
             last: (() => { const l = (loaded.snapshot as any)?.stores?.discovery?.lastShortlist; return Array.isArray(l) && l.length === 1 ? l[0] : null; })() })
           .catch((e) => { console.error("apply here:", (e as Error)?.message ?? e); return null; })
@@ -1149,7 +1150,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           // FEATURE E2E: a pasted posting link (or a role at a registered board) read from the ATS's public API on demand
           // and stored as the ingest stores it (career_apply_link.ts). CAREER_APPLY_LINK=off turns the read off.
           link: Deno.env.get("CAREER_APPLY_LINK") === "off" ? null
-            : { db: supabasePostingsDb(admin), fetchFeed: boardFetchFeed((i, init) => fetch(i, init), { timeoutMs: 8000, personLink: true }) },
+            : { db: supabasePostingsDb(admin), fetchFeed: boardFetchFeed((i, init) => fetch(i, init).then(asAsked), { timeoutMs: 8000, personLink: true }) },
           message: reach?.apply ?? tailorApply?.apply ?? message, userId: user.id, now: Date.now(), postings: supabasePostingsDb(admin), wants: supabaseWantStore(admin),
           apps: () => supabaseApplications(admin)(user.id),
           facts: screenFacts,
@@ -1167,7 +1168,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             const found = await searchJudgeTurn({ clock, message, ask: { ...prev, area: true, keep: [], verify: true, want: n }, userId: user.id, now: Date.now(), profile: (ctx as any).profile ?? null,
               sources: supabaseSearchSources(admin, { cpu: (stage, fn) => clock.sync(stage, fn), window: postings, jobs: { roleFamily: CareerJobs.roleFamily, seniorityBand: CareerJobs.seniorityBand, stripHtml: CareerJobs.stripHtml } }),
               judge: { on: false }, canSubmit: canSubmitByHost, show: n, tz: zone?.tz ?? null, want: n,
-              openCheck: linkChecker(fetch, { ashby: "posting", userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }) });
+              openCheck: linkChecker(fetchAsAsked() as typeof fetch, { ashby: "posting", userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }) });
             const seen = new Set(listed.map((e) => String(e.id ?? "")).filter(Boolean));
             return (found?.picked ?? []).filter((x) => x.posting && x.checked?.state === "live" && !seen.has(String(x.posting.job_id))).slice(0, want)
               .map((x) => ({ id: x.posting!.job_id, title: x.posting!.title, company: x.posting!.company, location: x.posting!.location, url: x.posting!.url }));
@@ -1518,7 +1519,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           // goes only on its card's tap.
           wants: supabaseWantStore(admin), limits: { daily }, posting: (id) => postingsDb.get(id),
           // WO-106 (F4): each job link is checked against its board just before it is shown.
-          linkCheck: linkChecker(fetch, { userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }),
+          linkCheck: linkChecker(fetchAsAsked() as typeof fetch, { userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }),
           // FEATURE 13: the staged brain answers with the actions that have a code-first owner withheld.
           toolPolicy: staged.chosen ? stagedToolPolicy(staged.decision) : null,
           // Situation knowledge: the context pack and playbooks (CAREER_KNOWLEDGE=on; off by default).
@@ -1544,11 +1545,11 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           } : null,
           // D-060 (C18): "is that posting still open?" re-checked live on the boards the product reads; any other host is named, not guessed.
           // D-062: a Workday posting is read from its own CXS data (workday_posting.ts), with its stated deadline.
-          postingRecheck: webResearchOn(Deno.env) ? (url: string) => recheckPosting(url, linkChecker(fetch, { ashby: "posting", userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }), Date.now,
-            { workday: (u) => readWorkdayPosting(u, { fetch, userAgent: `Trainee posting reader (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }) }) : null,
+          postingRecheck: webResearchOn(Deno.env) ? (url: string) => recheckPosting(url, linkChecker(fetchAsAsked() as typeof fetch, { ashby: "posting", userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }), Date.now,
+            { workday: (u) => readWorkdayPosting(u, { fetch: fetchAsAsked(), userAgent: `Trainee posting reader (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }) }) : null,
           // D-062 (1): "what would you need from me to apply?": the posting's requirements and its application's questions, read
           // from public pages only (posting_requirements.ts); never an account, a saved application or a submission.
-          applyFlow: (url: string) => readApplyFlow(url, { fetch, userAgent: `Trainee posting reader (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }),
+          applyFlow: (url: string) => readApplyFlow(url, { fetch: fetchAsAsked(), userAgent: `Trainee posting reader (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }),
           research: webResearchOn(Deno.env) && cfg.apiKey ? { search: gatewayGroundSearch((q, w) => webSearch(q, { cfg, meter, ...w })), cache: researchCache, publish: fileKindPublisher(createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }), user.id), derive: modelDerive(async (system, user) => { const r = await callModel(cfg, { system, messages: [{ role: "user", content: [{ type: "text", text: user }] }], max_tokens: 200 }, { meter, role: "chat" }); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); }) } : null,
           // D-062 (owner, 2026-11-11: "be able to answer emails, find alumni, do all of it"): the person's Gmail confirmations and the
           // tracker File (CAREER_MAIL_TRACKING), answering an email from their own Gmail (a yes to the exact card sends it:
@@ -1646,7 +1647,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
               // 10 pages read), each on its own posting page by id; no board listing is read (Ashby by its posting page). None is
               // called open unless its check passed.
               canSubmit: canSubmitByHost, // R10 owner ruling (apply by message and yes): the posting's own host decides the label
-              openCheck: linkChecker(fetch, { ashby: "posting", userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }),
+              openCheck: linkChecker(fetchAsAsked() as typeof fetch, { ashby: "posting", userAgent: `Trainee job link check (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }),
               tz: f5Zone?.tz ?? null, want: f5Ask.want ?? wantOf(message) }));
             // F.1: the blocker question gets the evidenced blocker: a source that could not be read is a connection problem.
             if (!found && f5Said?.explain) out = { ...out, intent: "career_discovery", resultStatus: "blocked", handler: "search_judge",

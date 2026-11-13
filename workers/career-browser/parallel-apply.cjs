@@ -296,10 +296,13 @@ const LI_INDEED = /linkedin|lnkd\.in|indeed/i;
 const labelNorm = (x) => String(x || "").toLowerCase().replace(/[\s ]+/g, " ").replace(/^[\s!.»>→›]+|[\s!.»>→›]+$/g, "");
 function controlLabel(c, list = SUBMIT_WORD) {
   if (c.disabled || LI_INDEED.test(c.blob || "")) return "no";
-  const text = labelNorm(c.text), name = labelNorm(c.aria), ok = (x) => list.test(x) && !SUBMIT_DENY.test(x);
-  if (!text) return name && ok(name) ? "conflict" : "no";
+  // Round 3: a glyph ("✈", "→") is no words; a control that shows only an icon is named by its accessible name alone; an accessible
+  // name that only adds "form" or "button" to the same words agrees with them.
+  const raw = labelNorm(c.text), text = /[\p{L}\p{N}]/u.test(raw) ? raw : "", name = labelNorm(c.aria), ok = (x) => list.test(x) && !SUBMIT_DENY.test(x);
+  if (!text) return name && ok(name) ? (c.icon ? "yes" : "conflict") : "no";
   if (SUBMIT_DENY.test(text) || (name && SUBMIT_DENY.test(name))) return ok(text) || (name && list.test(name)) ? "conflict" : "no";
-  if (name && name !== text && ok(text) !== ok(name)) return "conflict";
+  const nameOk = !!name && (ok(name) || ok(name.replace(/\s+(form|button)$/, "")));
+  if (name && name !== text && ok(text) !== nameOk) return "conflict";
   return ok(text) ? "yes" : "no";
 }
 //  - isApplicationForm: a form may be given the person's data only on positive evidence that it is the application: a resume / CV
@@ -399,13 +402,15 @@ function SNAP() {
   // What a control says to a person (text), to assistive technology (aria: aria-label, aria-labelledby, title), and everything it
   // carries that can name where it leads (blob: both, its address, its form's address, its data attributes, its images' alt).
   const aria = (b) => squash(b.getAttribute("aria-label") || (b.getAttribute("aria-labelledby") || "").split(/\s+/).map((id) => (document.getElementById(id) || {}).innerText || "").join(" ") || b.getAttribute("title") || "");
-  const blob = (b) => squash([b.innerText || b.value, aria(b), b.getAttribute("href"), b.getAttribute("formaction"), b.name, b.id,
+  // Round 3: its click handler's text too, and any atob('...') literal in it decoded (an encoded LinkedIn address).
+  const decoded = (t) => [...String(t || "").matchAll(/atob\(\s*['"]([A-Za-z0-9+/=]+)['"]\s*\)/g)].map((m) => { try { return atob(m[1]); } catch { return ""; } }).join(" ");
+  const blob = (b) => squash([b.innerText || b.value, aria(b), b.getAttribute("href"), b.getAttribute("formaction"), b.getAttribute("onclick"), decoded(b.getAttribute("onclick")), b.className && String(b.className), b.name, b.id,
     ...[...b.attributes].filter((a) => a.name.startsWith("data-") && !a.name.startsWith("data-upmore")).map((a) => `${a.name}=${a.value}`), ...[...b.querySelectorAll("img, svg")].map((i) => `${i.getAttribute("alt") || ""} ${i.getAttribute("aria-label") || ""} ${i.getAttribute("src") || ""}`)].join(" ")).slice(0, 600);
   // A form's own words: its headings, legends and buttons and the heading just before it (head); its labels and placeholders (labels).
   const head = (f) => { let h = ""; for (let p = f.previousElementSibling, i = 0; p && i < 2; p = p.previousElementSibling, i++) if (/^H[1-6]$/.test(p.tagName)) { h = p.innerText; break; }
-    return squash([h, f.id, f.getAttribute("name"), f.getAttribute("role"), f.getAttribute("aria-label"), ...[...f.querySelectorAll("h1, h2, h3, h4, h5, h6, legend, button, input[type=submit], [role=button]")].map((e) => e.innerText || e.value)
+    return squash([h, f.id, f.getAttribute("name"), f.getAttribute("role"), f.getAttribute("aria-label"), ...[...f.querySelectorAll("h1, h2, h3, h4, h5, h6, legend, button:not([type]), button[type=submit], input[type=submit]")].map((e) => e.innerText || e.value)
       // A third party's own button inside the application ("Apply with LinkedIn", "Sign in with Google") says nothing of the form.
-      .filter((t) => !/linkedin|indeed|google|facebook|apple|github|microsoft/i.test(t || ""))].join(" | ")).slice(0, 800); };
+      .filter((t) => !/linkedin|indeed|google|facebook|apple|github|microsoft|autofill|auto-fill/i.test(t || ""))].join(" | ")).slice(0, 800); };
   const labels = (f) => squash([...f.querySelectorAll("label, [placeholder]")].map((e) => (e.tagName === "LABEL" ? e.innerText : e.getAttribute("placeholder"))).join(" | ")).slice(0, 1500);
   const controls = [...document.querySelectorAll("button, [role=button], input[type=button], input[type=submit]")].map((b, c) => {
     b.setAttribute("data-upmore-c", String(c));
@@ -415,7 +420,7 @@ function SNAP() {
     const follows = !f && !!one && !!(one.compareDocumentPosition(b) & 4), sameBox = !f && !!one && one.parentElement !== document.body && one.parentElement.contains(b);
     const gap = f || !one ? 0 : deep(document.body, "input, select, textarea, [role=search], [contenteditable=true], [contenteditable='']").filter((i) => i.type !== "hidden" && !one.contains(i)
       && ((sameBox && one.parentElement.contains(i)) || (follows && (one.compareDocumentPosition(i) & 4) && (i.compareDocumentPosition(b) & 4)))).length;
-    return { c, aria: aria(b), blob: blob(b), disabled: !!b.disabled || b.getAttribute("aria-disabled") === "true", follows, sameBox, gap, link: b.tagName === "A" || b.hasAttribute("href") || b.getAttribute("role") === "link", form: f ? forms.indexOf(f) : -1, inside: !!b.closest("form"), vis: vis(b), text: squash(b.innerText || b.value).slice(0, 120), tag: b.tagName, type: (b.getAttribute("type") || "").toLowerCase(), signin: !!b.closest("[data-upmore-signin]") };
+    return { c, aria: aria(b), blob: blob(b), icon: !/[\p{L}\p{N}]/u.test(b.innerText || b.value || "") && !!b.querySelector("svg, img, i, [class*='icon' i]") || (!/[\p{L}\p{N}]/u.test(b.innerText || "") && /\S/.test(b.innerText || "")), disabled: !!b.disabled || b.getAttribute("aria-disabled") === "true", follows, sameBox, gap, link: b.tagName === "A" || b.hasAttribute("href") || b.getAttribute("role") === "link", form: f ? forms.indexOf(f) : -1, inside: !!b.closest("form"), vis: vis(b), text: squash(b.innerText || b.value).slice(0, 120), tag: b.tagName, type: (b.getAttribute("type") || "").toLowerCase(), signin: !!b.closest("[data-upmore-signin]") };
   });
   return { controls, head: squash([...document.querySelectorAll("h1, h2, h3")].map((e) => e.innerText).join(" | ")).slice(0, 400), forms: forms.map((f) => ({ head: head(f), labels: labels(f), action: f.getAttribute("action") || "", password: !!f.querySelector("input[type=password]"), signin: f.hasAttribute("data-upmore-signin"), was: f.hasAttribute("data-upmore-app-seen"), hasControl: !!f.querySelector("input, select, textarea"), fields: deep(f, "input, select, textarea").filter(isField).map(field) })),
     loose: deep(document.body, "input, select, textarea").filter((i) => isField(i) && !i.closest("form") && !i.closest("[data-upmore-signin]")).map(field) };
@@ -442,20 +447,48 @@ const CAPTCHA_QUESTION = /captcha|characters (?:shown|you see|displayed|in the i
 function FORM_SNAP(opaque) {
   const f = document.querySelector("form[data-upmore-app]");
   if (!f) return null;
-  const tok = new RegExp(opaque, "i"), rows = [];
-  for (const [k, v] of new FormData(f)) if (!tok.test(k)) rows.push([k, typeof v === "string" ? v : `file:${v.name}:${v.size}`]);
-  return JSON.stringify(rows);
+  const tok = new RegExp(opaque, "i"), rows = [], dom = [];
+  const val = (v) => (typeof v === "string" ? v.replace(/\r\n/g, "\n") : `file:${v.name}:${v.size}`);
+  for (const [k, v] of new FormData(f)) if (!tok.test(k)) rows.push([k, val(v)]);
+  // What the form's own controls hold, as the browser would list them, with no page script in between (a formdata handler can add
+  // or change entries of a FormData, never of this list).
+  for (const e of f.elements) {
+    if (!e.name || e.disabled || ["submit", "button", "reset", "image"].includes(e.type) || e.tagName === "BUTTON" || e.tagName === "FIELDSET" || e.tagName === "OUTPUT" || tok.test(e.name)) continue;
+    if ((e.type === "checkbox" || e.type === "radio") && !e.checked) continue;
+    if (e.tagName === "SELECT") { for (const o of e.selectedOptions) dom.push([e.name, o.value]); continue; }
+    if (e.type === "file") { if (e.files.length) for (const x of e.files) dom.push([e.name, val(x)]); else dom.push([e.name, "file::0"]); continue; }
+    dom.push([e.name, (e.type === "checkbox" || e.type === "radio") ? e.value || "on" : String(e.value).replace(/\r\n/g, "\n")]);
+  }
+  return JSON.stringify({ rows, dom });
 }
-function GUARD([want, opaque]) {
+// The guard (armed as the last step before the click): the form compared with the last look now, on the Submit control's click
+// (capture), and on the form's submit (bubbling to window, after the page's own handlers); and every request the page's own script
+// sends while it is armed (fetch, XMLHttpRequest) with a form or JSON body is compared too: one that adds or changes an answer is
+// never sent (its fetch is rejected), and the guard's flag says so.
+function GUARD([want, opaque, rules]) {
   const f = document.querySelector("form[data-upmore-app]"), b = document.querySelector("[data-upmore-submit]");
   if (!f || want === null) return { armed: false, same: true };
-  const tok = new RegExp(opaque, "i");
-  const now = () => { const rows = []; for (const [k, v] of new FormData(f)) if (!tok.test(k)) rows.push([k, typeof v === "string" ? v : `file:${v.name}:${v.size}`]); return JSON.stringify(rows); };
-  const g = window.__upmoreGuard = { aborted: false, late: false };
+  const tok = new RegExp(opaque, "i"), sens = new RegExp(rules.sensitive, "i"), w = JSON.parse(want).rows, wantRows = JSON.stringify(w);
+  const val = (v) => (typeof v === "string" ? v.replace(/\r\n/g, "\n") : `file:${v.name}:${v.size}`);
+  const now = () => { const rows = []; for (const [k, v] of new FormData(f)) if (!tok.test(k)) rows.push([k, val(v)]); return JSON.stringify(rows); };
+  const differs = (got) => { for (const [k, v] of got) { if (tok.test(k)) continue; const mine = w.filter((x) => x[0] === k); if (!mine.length || !mine.some((x) => x[1] === val(v))) return k; } return null; };
+  const names = new Set(w.map((x) => String(x[0]).toLowerCase().replace(/[^a-z0-9]/g, "")));
+  const jsonBad = (s) => { let j; try { j = JSON.parse(s); } catch { return null; } let bad = null; const walk = (o, key) => { if (bad) return; if (o && typeof o === "object") { for (const [k, v] of Object.entries(o)) walk(v, k); return; } if (key && sens.test(key) && !names.has(String(key).toLowerCase().replace(/[^a-z0-9]/g, ""))) bad = key; }; walk(j, ""); return bad; };
+  const bodyBad = (body) => {
+    if (!body) return null;
+    if (body instanceof FormData || body instanceof URLSearchParams) return differs([...body.entries()]);
+    if (typeof body === "string") return jsonBad(body) || (/^[^{[\s][^=&]*=/.test(body) ? differs([...new URLSearchParams(body).entries()]) : null);
+    return null;
+  };
+  const g = window.__upmoreGuard = { aborted: false, late: false, why: null };
   const stop = (e, late) => { g.aborted = true; g.late = g.late || late; e.preventDefault(); e.stopImmediatePropagation(); };
-  if (b) b.addEventListener("click", (e) => { if (now() !== want) stop(e, false); }, { capture: true, once: true });
-  window.addEventListener("submit", (e) => { if (e.target === f && now() !== want) stop(e, e.defaultPrevented); });
-  return { armed: true, same: now() === want };
+  if (b) b.addEventListener("click", (e) => { if (now() !== wantRows) stop(e, false); }, { capture: true, once: true });
+  window.addEventListener("submit", (e) => { if (e.target === f && now() !== wantRows) stop(e, e.defaultPrevented); });
+  const ofetch = window.fetch;
+  window.fetch = function (input, init) { const bad = bodyBad(init && init.body); if (bad) { g.aborted = true; g.why = bad; return Promise.reject(new TypeError("blocked: the request changes the approved application")); } return ofetch.apply(this, arguments); };
+  const osend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.send = function (body) { const bad = bodyBad(body); if (bad) { g.aborted = true; g.why = bad; try { this.abort(); } catch (e) { /* none */ } return; } return osend.apply(this, arguments); };
+  return { armed: true, same: now() === wantRows };
 }
 const guardVerdict = (g) => (!g || !g.aborted ? { status: null }
   : g.late ? { status: "unknown_outcome", reason: "the page changed the form as it was sent, and its own script had already taken it: it may have been sent" }
@@ -469,8 +502,49 @@ const submitTieRefusal = (t) => ((t.formless ? !t.anyForm : (t.sameForm || (t.ou
 // writes it (a role=switch / checkbox / radio / combobox / listbox, or aria-checked / aria-pressed / aria-selected). An opaque
 // token (csrf, nonce, session, a timestamp) never is.
 const HIDDEN_ANSWER = /sponsor|work.?auth|authori[sz]|visa|opt.?in|marketing|consent|over.?1[89]|(^|[_-])age([_-]|$)|gender|\brace\b|^race|ethnic|veteran|disab|relocat|salary|agree|terms|certif/i;
-const OPAQUE = /csrf|xsrf|authenticity|nonce|(^|_)token$|captcha|recaptcha|turnstile|session|^ts$|timestamp|^utf8$/i;
-const hiddenIsAnswer = (name, widget) => !OPAQUE.test(name || "") && (!!widget || HIDDEN_ANSWER.test(name || ""));
+// Round 3 (review of #831): a token by its exact name (never a name that merely contains "session" or "token"), or by its value's
+// shape (long and random, base64 / hex, a UUID, a timestamp). Any other hidden value is read for what it says: a sentence, a legal
+// word, a yes / no, or a short value under a question's id (q_88213, custom_question_4471, answers[3]) is an answer.
+const OPAQUE = /^(?:_?csrf(?:_?token)?|csrfmiddlewaretoken|_?xsrf(?:_?token)?|authenticity_token|_token|token|_?nonce|session_?id|sessionid|jsessionid|phpsessid|state|utf8|ts|timestamp|g-recaptcha-response|h-captcha-response|cf-turnstile-response|frc-captcha-solution|__requestverificationtoken|__viewstate\w*|__eventvalidation)$/i;
+const OPAQUE_VALUE = /^(?:[A-Za-z0-9+/_=\-.:]{24,}|[0-9a-f]{16,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d{9,}|\d{4}-\d\d-\d\dt[\d:.]+z?)$/i;
+const YESNO = /^(?:yes|no|y|n|true|false|on|off|agree|agreed|accept|accepted|decline|declined|ja|nein|oui|non|sí|si)$/i;
+const LEGAL_WORD = /agree|consent|authori[sz]|sponsor|arbitration|certif|attest|acknowledg|opt.?in|marketing/i;
+const QUESTION_ID = /(?:^|[_\-\[])(?:q|qs|question|questions|custom_?question|answer|answers|custom_?field|field|cq|cf)(?:[_\-]?\d+|\[\d*\]|\]|$)|^q\d+$|question|answer/i;
+const isOpaqueName = (n) => OPAQUE.test(String(n || ""));
+function hiddenIsAnswer(name, widget, value) {
+  if (isOpaqueName(name)) return false;
+  if (widget || HIDDEN_ANSWER.test(name || "")) return true;
+  const v = String(value ?? "").trim();
+  if (!v || OPAQUE_VALUE.test(v)) return false;
+  if (LEGAL_WORD.test(v) || YESNO.test(v) || v.split(/\s+/).length >= 3) return true;
+  return QUESTION_ID.test(name || "") && v.length <= 60;
+}
+// What a form sends, compared with what was approved (rows [name, value]): a field it adds or a value it changes is refused (a
+// formdata handler, the page's own fetch); a token by its exact name, and sending less, are not.
+function sentDiffers(want, got) {
+  for (const [k, v] of got || []) {
+    if (isOpaqueName(k)) continue;
+    const mine = (want || []).filter((w) => w[0] === k);
+    if (!mine.length) return `the page added ${String(k).slice(0, 60)}`;
+    if (!mine.some((w) => String(w[1]).replace(/\r\n/g, "\n") === String(v).replace(/\r\n/g, "\n"))) return `the page changed ${String(k).slice(0, 60)}`;
+  }
+  return null;
+}
+// A JSON body the page posts itself is read for answers: a consent, opt-in, authorisation or demographic key the approval does not
+// hold is refused; other keys (the board's own naming of approved answers) are not compared.
+const SENSITIVE_KEY = /consent|agree|opt.?in|marketing|newsletter|sponsor|authori[sz]|arbitration|gender|race|ethnic|veteran|disab|relocat|salary|terms|certif/i;
+function jsonDiffers(want, body) {
+  let j; try { j = JSON.parse(body); } catch { return null; }
+  const names = new Set((want || []).map((w) => String(w[0]).toLowerCase().replace(/[^a-z0-9]/g, "")));
+  const walk = (o, key) => {
+    if (o && typeof o === "object") { for (const [k, v] of Object.entries(o)) { const r = walk(v, k); if (r) return r; } return null; }
+    return key && SENSITIVE_KEY.test(key) && !names.has(String(key).toLowerCase().replace(/[^a-z0-9]/g, "")) ? `the page's own request adds ${key}` : null;
+  };
+  return walk(j, "");
+}
+// Only words that say something went wrong count as an error shown, and never a link (a footer's "Report an error").
+const ERRORISH = /error|invalid|required|fail|problem|please (fix|correct|check)|could ?n['’o]?t|unable|try again|missing|must be|not valid/i;
+const isErrorText = (text, isLink) => !isLink && ERRORISH.test(String(text || ""));
 // Page side, read only: what every control of the application form holds now (the whole page for a board with no <form>): the
 // rows of handoff.cjs pageRows. A box or radio by its own option (value null when not ticked), a select by its chosen options'
 // words (null on its empty placeholder), an upload by its file's name, a contenteditable region by its text. `touched`: the engine
@@ -480,6 +554,7 @@ const hiddenIsAnswer = (name, widget) => !OPAQUE.test(name || "") && (!!widget |
 function CONTROLS(arg) {
   const filledQs = Array.isArray(arg) ? arg : arg.filled || [];
   const answerRe = new RegExp(arg.answer || "^$", "i"), opaqueRe = new RegExp(arg.opaque || "^$", "i");
+  const [opaqueValueRe, legalRe, yesNoRe, questionRe] = (arg.value || ["^$", "^$", "^$", "^$"]).map((x) => new RegExp(x, "i"));
   const app = document.querySelector("form[data-upmore-app]"), root = app || document.body;
   const squash = (x) => String(x || "").replace(/\s+/g, " ").trim();
   const WIDGET = "[role=radio], [role=checkbox], [role=switch], [role=listbox], [role=combobox], [role=radiogroup], [aria-checked], [aria-selected], [aria-pressed]";
@@ -512,7 +587,8 @@ function CONTROLS(arg) {
       let label = squash((e.labels && e.labels[0] && e.labels[0].innerText) || e.getAttribute("aria-label") || e.placeholder).slice(0, 200), hidden = e.type === "hidden", answer = false;
       if (hidden) {
         const w = widgetOf(e);
-        answer = !opaqueRe.test(e.name || "") && (!!w || answerRe.test(e.name || ""));
+        const v = String(e.value || "").trim();
+        answer = !opaqueRe.test(e.name || "") && (!!w || answerRe.test(e.name || "") || (!!v && !opaqueValueRe.test(v) && (legalRe.test(v) || yesNoRe.test(v) || v.split(/\s+/).length >= 3 || (questionRe.test(e.name || "") && v.length <= 60))));
         if (answer) { hidden = false; label = w ? named(w, value) : squash(e.name).replace(/[_-]+/g, " "); }
       }
       return { name: e.name || "", label, type: e.type, option: box ? squash(e.value) : null, value, q, touched, hidden, answer, disabled: !!e.disabled };
@@ -582,7 +658,7 @@ const CONFIRM_RE = /thank you for applying|application (has been )?submitted|we[
 // never a hidden template), not negated anywhere on the page ("could not confirm", "was not submitted", "failed", "unable",
 // "error"), with no error list shown; and when a POST of the click was seen, every one answered 2xx or 3xx (0: it failed). Anything
 // else is unknown_outcome: the application may or may not have reached the employer, and the reply says it is unconfirmed.
-const NEGATED = /\b(?:not|n['’]t|never|unable|fail(?:ed|ure)?|error|went wrong|try again|already applied)\b/i;
+const NEGATED = /\b(?:not|n['’]t|never|unable|fail(?:ed|ure)?|error|went wrong|try again|already applied|expired|would (?:see|appear|show)|you['’]d see|if (?:this|it) had|for example|an example|example only|sample|preview)\b/i;
 function outcomeVerdict({ text = "", errors = [], posts = [] } = {}) {
   const bad = posts.find((st) => !(st >= 200 && st < 400));
   if (bad !== undefined) return { confirmed: false, reason: bad === 0 ? "the POST of the application failed" : `the POST of the application answered ${bad}` };
@@ -959,7 +1035,7 @@ async function attempt(browser, p, opts, timing) {
     // it preselected, was never the person's answer: it is asked (the ask-once hand-off), never sent as it stands.
     const readControls = async () => {
       const labels = new Map((await page.evaluate(EXTRACT).catch(() => [])).map((d) => [String(d.q), d.label]));
-      return (await page.evaluate(CONTROLS, { filled: fr.filled.map((f) => String(f.d.q)), answer: HIDDEN_ANSWER.source, opaque: OPAQUE.source })).map((c) => { const label = labels.get(String(c.q)) || c.label; return { ...c, label, value: c.type === "checkbox" && c.value && c.value === label ? "checked" : c.value }; });
+      return (await page.evaluate(CONTROLS, { filled: fr.filled.map((f) => String(f.d.q)), answer: HIDDEN_ANSWER.source, opaque: OPAQUE.source, value: [OPAQUE_VALUE.source, LEGAL_WORD.source, YESNO.source, QUESTION_ID.source] })).map((c) => { const label = labels.get(String(c.q)) || c.label; return { ...c, label, value: c.type === "checkbox" && c.value && c.value === label ? "checked" : c.value }; });
     };
     // Round 2: every typed answer still says exactly what was approved (a page that rewrote one after the fill is refused).
     // The focus leaves the last field first, as a person's click on Submit would make it: a page that reformats on blur does it now.
@@ -970,6 +1046,9 @@ async function attempt(browser, p, opts, timing) {
       if (drifted.length) { const lost = await recheckFilled(page, fr.filled, { facts: p.facts, answers: p.answers || {}, resumePath: p.resume.path }); if (!lost.length) drifted = await driftedFills(page, fr.filled, factsFrom(p.facts || {}, p.answers || {})); } if (drifted.length) { const e = new NeedsUser("field_not_filled", drifted[0]); e.needs = drifted.map((l) => ({ label: l, reason: "value_changed_by_page" })); throw e; } }
     const controls = await readControls();
     const formSnap = await page.evaluate(FORM_SNAP, OPAQUE.source).catch(() => null);
+    // Round 3: what the browser would send must be what the form's controls show: a page whose formdata handler adds or changes an
+    // entry is sending something nobody sees. Refused here, before the submitting record.
+    if (formSnap) { const fs = JSON.parse(formSnap), why = sentDiffers(fs.dom, fs.rows); if (why) { const e = new NeedsUser("page_changed_at_submit", why); throw e; } }
     // The person's own confirmed answer to a question, as ats-fill reads it (an approved answer, else a confirmed fact).
     const known = factsFrom(p.facts || {}, p.answers || {});
     const unconfirmed = unconfirmedDefaults(controls, { answer: (l) => { const a = answerFor(l, p.answers || {}); return a === undefined || a === null || String(a).trim() === "" ? factValue(l, known) : a; }, phone: known.phone, country: known.country });
@@ -991,7 +1070,7 @@ async function attempt(browser, p, opts, timing) {
     // Past this line nothing is retried: the employer may have received it.
     const t2 = Date.now();
     // Round 2: the guard is armed and the form compared with the last look as the last step before the click; nothing between.
-    const armed = await page.evaluate(GUARD, [formSnap, OPAQUE.source]).catch(() => ({ armed: false, same: formSnap === null }));
+    const armed = await page.evaluate(GUARD, [formSnap, OPAQUE.source, { sensitive: SENSITIVE_KEY.source }]).catch(() => ({ armed: false, same: formSnap === null }));
     if (!armed.same) throw new NeedsUser("page_changed_before_submit", p.url);
     timing.submitClicked = true;
     watchPosts = true;
@@ -1009,10 +1088,10 @@ async function attempt(browser, p, opts, timing) {
     await page.waitForFunction((re) => new RegExp(re, "i").test((document.body && document.body.innerText) || ""), CONFIRM_RE.source, { timeout: 3000 }).catch(() => {});
     await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
     const seen = await page.evaluate(() => ({ text: (document.body && document.body.innerText) || "",
-      errors: [...document.querySelectorAll("[role=alert], .error, .errors, .error-message, [class*='error' i]")].filter((e) => (e.offsetWidth || e.offsetHeight) && getComputedStyle(e).visibility !== "hidden")
+      errors: [...document.querySelectorAll("[role=alert], .error, .errors, .error-message, [class*='error' i]")].filter((e) => (e.offsetWidth || e.offsetHeight) && getComputedStyle(e).visibility !== "hidden" && !e.closest("a, [role=link]"))
         .map((e) => (e.innerText || "").replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 3) })).catch(() => ({ text: "", errors: [] }));
     if (opts.shotAfter) await page.screenshot({ path: opts.shotAfter, fullPage: true });
-    const v = outcomeVerdict({ ...seen, posts: postAnswers });
+    const v = outcomeVerdict({ ...seen, errors: seen.errors.filter((t) => isErrorText(t, false)), posts: postAnswers });
     if (!v.confirmed) {
       // The page's own check can become a shown challenge at the click: the person finishes it; it is never solved or retried.
       if (await botCheck(page)) return { status: "unknown_outcome", reason: "after submit: the page showed a verification check; nothing is confirmed until you finish it", filled };
@@ -1083,4 +1162,4 @@ async function runPool(browser, payloads, opts = {}) {
   return { results, wallMs: Date.now() - started, concurrency };
 }
 
-module.exports = { guardVerdict, GUARD, FORM_SNAP, outcomeVerdict, hiddenIsAnswer, HIDDEN_ANSWER, CAPTCHA_QUESTION, controlLabel, SUBMIT_DENY, checkGate, pickControls, outsideSubmitOf, isApplicationForm, submitTieRefusal, sentToJobList, SNAP, MARK, CONTROLS, closedOnPage, declineCookies, samePostingRedirect, followedPageRefusal, postingIds, CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };
+module.exports = { sentDiffers, jsonDiffers, isErrorText, isOpaqueName, guardVerdict, GUARD, FORM_SNAP, outcomeVerdict, hiddenIsAnswer, HIDDEN_ANSWER, CAPTCHA_QUESTION, controlLabel, SUBMIT_DENY, checkGate, pickControls, outsideSubmitOf, isApplicationForm, submitTieRefusal, sentToJobList, SNAP, MARK, CONTROLS, closedOnPage, declineCookies, samePostingRedirect, followedPageRefusal, postingIds, CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };

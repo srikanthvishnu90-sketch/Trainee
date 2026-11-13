@@ -824,3 +824,19 @@ Deno.test("AC-14 the third review's saves: nothing trunk got right goes wrong; a
   for (const m of ["i worked at stripe? no, that was my roommate", "i plan to learn Rust next month", "i'm learning Kubernetes right now", "my roommate interned at Jane Street", "recruiter's email: You are a great fit with your Kubernetes experience",
     "i'm a PM at Stripe jk", "i'm interviewing with Ramp next week", "i pretended to be fluent in French in my last interview"]) ok(wrongNow.includes(m) === false, m);
 });
+
+// ------------------------------------------------------------------------------------------------ round 5 (regression review)
+// "Applied" as a resume verb, "pipeline", "tracker" and "applying" in advice are not the person's application status: an edit,
+// rewrite or checklist turn gets no lookup and loses no sentence. A negation belongs to its own clause only.
+Deno.test("AC-15 edit, rewrite and checklist turns: no lookup, nothing removed; \"won't relocate\" does not negate \"based in Austin\"", async () => {
+  for (const [m, reply, keep] of [
+    ["rewrite my second bullet to sound more impact-driven", "Rewrote it: Cut report generation time 40% by automating the SQL pipeline in Airflow. Tell me if you want a shorter version.", [/cut report generation/i, /shorter version/i]],
+    ["edit this line: 'Applied ML to churn prediction'", "Try: Applied gradient-boosted models to predict churn, lifting retention 6%.", [/applied gradient-boosted models/i]],
+    ["give me a checklist for applying", "1. Tailor the resume\n2. Write a short cover letter\n3. Submit before the deadline\n4. Track it in your tracker", [/tailor the resume/i, /submit before the deadline/i, /track it in your tracker/i]],
+  ] as [string, string, RegExp[]][]) {
+    const r = await turn(m, scripted(Array(6).fill(text(reply))).model, { capabilities: C4.CA() });
+    eq([r.reply, r.tool_calls.some((c) => c.name === "read_application_mail")], [reply, false], m);
+    for (const k of keep) ok(k.test(r.reply), `${m}: ${k}`);
+  }
+  ok((await trySave("I'm based in Austin and won't relocate", "Based in Austin, won't relocate")).saved, "each clause keeps its own polarity");
+});

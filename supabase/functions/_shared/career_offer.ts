@@ -18,8 +18,8 @@ export const REQUIRED = ["company", "base", "city", "role"] as const;
 export type Field = typeof REQUIRED[number];
 export const MAX_MESSAGE = 1500;
 
-export interface Competing { company: string | null; base: number; said: string; currency?: string; mark?: string | null; assumed?: boolean }
-export type Period = "hour" | "day" | "week" | "biweek" | "month" | "year";
+export interface Competing { company: string | null; base: number; said: string; currency?: string; mark?: string | null; assumed?: boolean; written?: string; rated?: boolean; abroad?: boolean }
+export type Period = "hour" | "day" | "week" | "biweek" | "semimonth" | "month" | "year";
 type Fig = "base" | "signing" | "bonus" | "bonus_target";
 export interface Offer {
   company: string | null; firm_id: string | null; lca_company_id: string | null; sector: string | null;
@@ -48,6 +48,14 @@ export interface Offer {
   // reply asks to confirm it, and a counter email writes it as the person wrote it (`written`).
   currency_fact?: string | null; marks?: Partial<Record<Fig, string | null>>; currency_assumed?: Partial<Record<Fig, boolean>>; written?: Partial<Record<Fig, string>>;
   rate?: { amount: number; period: Period } | null; annualized?: { factor: number; assumption: string } | null; period_fact?: string | null;
+  // 2026-11-13 round 2, the completeness rule: every money, currency, period, range, total-pay or place word in the message
+  // must have been taken by exactly one field. What was not is listed in `open` (in the person's words) and the offer is
+  // `unsettled`: no benchmark, no percent, no leverage, no counter; the reply restates what was read and asks.
+  // `total`: pay said as total compensation, OTE or TC (never the base). `part_year`: the words that say the job is not a full
+  // year of full-time work (internship, contract, part-time, stated hours or weeks): a yearly figure from its rate is arithmetic
+  // only, never compared. `place_kind` and `state`: whether the stated place is in the United States, and which state.
+  open?: string[]; unsettled?: boolean; total?: { amount: number; written: string } | null; part_year?: string | null;
+  place_kind?: "us" | "none" | "dollar" | "other"; state?: string | null;
 }
 export interface Bench {
   kind: "lca" | "oews" | "bls_national";
@@ -87,23 +95,34 @@ function codeOf(w: string | undefined): string | null {
 const DOLLAR_PREFIX: Record<string, string> = { US: "USD", A: "AUD", AU: "AUD", C: "CAD", CA: "CAD", NZ: "NZD", S: "SGD", SG: "SGD", HK: "HKD", MX: "MXN", R: "BRL" };
 // A sign that names one currency. "¥" is both the yen and the yuan, "kr" four Nordic currencies, "pesos" several: ambiguous.
 const SYMBOL: Record<string, string> = { "€": "EUR", "£": "GBP", "¥": "¥", "￥": "¥", "₹": "INR", "₩": "KRW", "₪": "ILS", "zł": "PLN" };
-const WORD_CUR: [RegExp, string][] = [[/^\s?(?:us|u\.s\.|american)\s?dollars?\b/i, "USD"], [/^\s?(?:canadian|cdn)(?:\s?dollars?)?\b/i, "CAD"], [/^\s?(?:australian|aussie)(?:\s?dollars?)?\b/i, "AUD"],
+const WORD_CUR: [RegExp, string][] = [[/^\s?US(?:\s?dollars?)?\b/, "USD"], [/^\s?(?:us\s?dollars?|american(?:\s?dollars?)?)\b/i, "USD"], [/^\s?(?:canadian|cdn)(?:\s?dollars?)?\b|^\s?loonies\b/i, "CAD"], [/^\s?(?:australian|aussie)(?:\s?dollars?)?\b/i, "AUD"],
   [/^\s?(?:new zealand|nz|kiwi)\s?dollars?\b/i, "NZD"], [/^\s?singapore(?:an)?\s?dollars?\b/i, "SGD"], [/^\s?hong kong\s?dollars?\b/i, "HKD"], [/^\s?(?:dollars?|bucks)\b/i, "$"],
-  [/^\s?euros?\b/i, "EUR"], [/^\s?(?:pounds?|quid)(?:\s+sterling)?\b/i, "GBP"], [/^\s?(?:indian\s)?rupees?\b/i, "INR"], [/^\s?(?:z[łl]oty|zlotys?|zł)(?![\w])/i, "PLN"],
+  [/^\s?euros?\b/i, "EUR"], [/^\s?(?:pounds?(?:\s+sterling)?|quid|sterling)\b/i, "GBP"], [/^\s?(?:indian\s)?rupees?\b/i, "INR"], [/^\s?(?:z[łl]oty|zlotys?|zł)(?![\w])/i, "PLN"],
   [/^\s?(?:japanese\s)?yen\b/i, "JPY"], [/^\s?(?:chinese\s)?(?:yuan|renminbi)\b/i, "CNY"], [/^\s?(?:swiss\s)?francs?\b/i, "CHF"], [/^\s?swedish\s?(?:kronor|krona)\b/i, "SEK"],
   [/^\s?norwegian\s?(?:kroner|krone)\b/i, "NOK"], [/^\s?danish\s?(?:kroner|krone)\b/i, "DKK"], [/^\s?(?:kr|kronor|krona|kroner|krone)\b/i, "kr"],
   [/^\s?mexican\s?pesos?\b/i, "MXN"], [/^\s?pesos?\b/i, "pesos"], [/^\s?(?:brazilian\s)?rea(?:is|ls?)\b/i, "BRL"]];
 const AMBIGUOUS: Record<string, string> = { "kr": `"kr" could be Swedish, Norwegian, Danish or Icelandic kronor (SEK, NOK, DKK or ISK)`, "¥": `"¥" is the sign of both the Japanese yen and the Chinese yuan`,
-  "pesos": `"pesos" could be Mexican, Argentine, Chilean, Colombian or Philippine pesos` };
+  "pesos": `"pesos" could be Mexican, Argentine, Chilean, Colombian or Philippine pesos`, "lakh": `lakh and crore count rupees, and which country's rupee was not said (write INR, PKR ...)` };
+const DOLLARS = new Set(["USD", "CAD", "AUD", "NZD", "SGD", "HKD", "MXN", "TWD"]);
+// A currency said on its own, away from any figure ("paid in CAD", "(Canadian dollars)", "It's in CAD"): the code, or null.
+const CUR_CODE = new RegExp(`\\b(?:${CODE_RE}|RMB)\\b|\\b(?:in|paid in)\\s(?:${CODE_RE.toLowerCase()})\\b`, "g");
+const CUR_NAME = /\b(?:(?:us|u\.s\.|american|canadian|cdn|australian|aussie|new zealand|singapore|hong kong|mexican|swedish|norwegian|danish|swiss|indian|japanese|chinese)\s)?(?:dollars?|bucks|euros?|pounds?|sterling|quid|rupees?|yen|yuan|renminbi|francs?|kronor|krona|kroner|krone|pesos?|reais|zloty|loonies)\b|\b(?:canadian|australian)\b(?!\s+[a-z]*(?:company|firm|startup|office|team|branch|bank))/gi;
+const freeCur = (rest: string) => [...rest.matchAll(CUR_CODE), ...rest.matchAll(CUR_NAME)].map((m) => m[0]);
+export function currencyOf(token: string): string | null {
+  const w = token.replace(/^(?:paid )?in\s/i, "").trim();
+  if (codeOf(w)) return codeOf(w);
+  for (const [re, v] of WORD_CUR) if (re.test(w)) return v;
+  return null;
+}
 // What is written next to an amount: an ISO code, or the mark as said when it is ambiguous ("$", "kr", "¥", "pesos"); null
 // when nothing is. `after` is how much of the text after the amount the currency's own words take.
 export function currencyMark(text: string, at: number, end: number): { mark: string | null; after: number } {
   const before = text.slice(Math.max(0, at - 8), at), rest = text.slice(end, end + 30);
   const pre = codeOf(new RegExp(`(?:^|[^A-Za-z])(${CODE_RE}|RMB)\\$?\\s?$`, "i").exec(before)?.[1]);
   if (pre) return { mark: pre, after: 0 };
-  const post = new RegExp(`^\\s?(${CODE_RE}|RMB)(?![A-Za-z])`, "i").exec(rest);
+  const post = new RegExp(`^\\s?\\(?(${CODE_RE}|RMB)\\)?(?![A-Za-z])`, "i").exec(rest);
   if (codeOf(post?.[1])) return { mark: codeOf(post![1]), after: post![0].length };
-  const sym = /(?:^|[^A-Za-z])([A-Z]{1,2})\$\s?$/.exec(text.slice(at, at + 1) === "$" ? `${before}$` : before)?.[1];
+  const sym = /(?:^|[^A-Za-z])([A-Z]{1,2})\s?\$\s?$/.exec(text.slice(at, at + 1) === "$" ? `${before}$` : before)?.[1];
   if (sym && DOLLAR_PREFIX[sym]) return { mark: DOLLAR_PREFIX[sym], after: 0 };
   if (/(?:^|[^A-Za-z])Rs\.?\s?$/.test(before)) return { mark: "INR", after: 0 };
   for (const [k, v] of Object.entries(SYMBOL)) { if (before.trimEnd().endsWith(k)) return { mark: v, after: 0 }; if (rest.trimStart().startsWith(k)) return { mark: v, after: rest.indexOf(k) + k.length }; }
@@ -112,17 +131,43 @@ export function currencyMark(text: string, at: number, end: number): { mark: str
   return { mark: null, after: 0 };
 }
 // ---------- the place: is it in the United States? ----------
-const US_STATE = /\b(?:Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming|District of Columbia|United States|USA|U\.S\.A?\.?)\b|,\s*(?:A[LKZR]|C[AOT]|D[EC]|FL|GA|HI|I[DLNA]|K[SY]|LA|M[EDAINSOT]|N[EVHJMYCD]|O[HKR]|PA|RI|S[CD]|T[NX]|UT|V[TA]|W[AVIY]|US)\b/;
-// Large US cities outside the metros the pay data maps, named without a state ("in San Diego").
-const US_CITY = /^(?:San Diego|Phoenix|Portland|Minneapolis|Saint Paul|St\.? Paul|Detroit|Pittsburgh|Nashville|Charlotte|Raleigh|Durham|Salt Lake City|Las Vegas|San Antonio|Columbus|Indianapolis|Baltimore|Sacramento|Kansas City|St\.? Louis|Tampa|Orlando|Jacksonville|Cleveland|Cincinnati|Milwaukee|Honolulu|Boise|Albuquerque|Tucson|Omaha|Oklahoma City|Louisville|New Orleans|Richmond|Buffalo|Boulder|Irvine|San Mateo|Menlo Park|Redmond|Bellevue|Fort Lauderdale|Ann Arbor|Madison)$/;
-const DOLLAR_PLACE = /\b(?:Canada|Toronto|Vancouver|Montreal|Ottawa|Calgary|Edmonton|Waterloo|Winnipeg|Quebec|Ontario|British Columbia|Alberta|Mississauga|Halifax|Australia|Sydney|Melbourne|Brisbane|Perth|Adelaide|Canberra|New Zealand|Auckland|Wellington|Christchurch|Singapore|Hong Kong|Taiwan|Taipei|Mexico|Guadalajara|Monterrey|Argentina|Buenos Aires|Chile|Santiago|Colombia|Bogota|Medellin|Brazil|Sao Paulo|Rio de Janeiro|Jamaica|Bahamas|Barbados|Trinidad|Fiji|Uruguay|Montevideo|Dominican Republic|Philippines|Manila|Cuba|Liberia|Namibia|Belize|Guyana)\b/i;
-// "us": a metro the pay data knows, or a named US state. "none": remote or not said. "dollar": a place whose own money is a
-// dollar or a peso. "other": any other place, which code cannot confirm is in the United States.
-export function placeKind(o: Pick<Offer, "metro" | "place" | "city" | "remote">): "us" | "none" | "dollar" | "other" {
+const STATES: Record<string, string> = Object.fromEntries(("Alabama:AL,Alaska:AK,Arizona:AZ,Arkansas:AR,California:CA,Colorado:CO,Connecticut:CT,Delaware:DE,Florida:FL,Georgia:GA,Hawaii:HI,Idaho:ID,Illinois:IL,Indiana:IN,Iowa:IA,Kansas:KS,"
+  + "Kentucky:KY,Louisiana:LA,Maine:ME,Maryland:MD,Massachusetts:MA,Michigan:MI,Minnesota:MN,Mississippi:MS,Missouri:MO,Montana:MT,Nebraska:NE,Nevada:NV,New Hampshire:NH,New Jersey:NJ,New Mexico:NM,New York:NY,North Carolina:NC,"
+  + "North Dakota:ND,Ohio:OH,Oklahoma:OK,Oregon:OR,Pennsylvania:PA,Rhode Island:RI,South Carolina:SC,South Dakota:SD,Tennessee:TN,Texas:TX,Utah:UT,Vermont:VT,Virginia:VA,Washington:WA,West Virginia:WV,Wisconsin:WI,Wyoming:WY,"
+  + "District of Columbia:DC,DC:DC,United States:US,USA:US,US:US").split(",").map((x) => x.split(":").map((y, i) => i ? y : y.toLowerCase())));
+const STATE_CODES = new Set(Object.values(STATES));
+const GEORGIA_CITIES = /^(?:Atlanta|Athens|Savannah|Augusta|Macon|Columbus|Alpharetta|Marietta|Decatur)$/i;
+// Large US cities outside the metros the pay data maps, named without a state ("in San Diego"), that are no other country's city.
+const US_CITY = /^(?:San Diego|Phoenix|Portland|Minneapolis|Saint Paul|St\.? Paul|Detroit|Pittsburgh|Nashville|Charlotte|Raleigh|Salt Lake City|Las Vegas|San Antonio|Columbus|Indianapolis|Baltimore|Sacramento|Kansas City|St\.? Louis|Tampa|Orlando|Jacksonville|Cleveland|Cincinnati|Milwaukee|Honolulu|Boise|Albuquerque|Tucson|Omaha|Oklahoma City|Louisville|New Orleans|Buffalo|Boulder|Irvine|San Mateo|Fort Lauderdale|Ann Arbor|Madison)$/;
+const DOLLAR_PLACE = /\b(?:Canada|Toronto|Vancouver|Montreal|Ottawa|Calgary|Edmonton|Waterloo|Winnipeg|Quebec|Ontario|British Columbia|Alberta|Manitoba|Saskatchewan|Nova Scotia|New Brunswick|Newfoundland|ON|QC|BC|AB|MB|SK|NS|NB|NL|Mississauga|Halifax|Hamilton|Victoria|Kingston|Richmond|Windsor|Surrey|Australia|Sydney|Melbourne|Brisbane|Perth|Adelaide|Canberra|New Zealand|Auckland|Wellington|Christchurch|Singapore|Hong Kong|Taiwan|Taipei|Mexico|Guadalajara|Monterrey|Argentina|Buenos Aires|Chile|Santiago|Colombia|Bogota|Medellin|Brazil|Sao Paulo|Rio de Janeiro|Jamaica|Bahamas|Barbados|Trinidad|Fiji|Uruguay|Montevideo|Dominican Republic|Philippines|Manila|Cuba|Liberia|Namibia|Belize|Guyana)\b/;
+// The stated place always wins over a metro guess. "City, Region": a US state makes it a US place and keeps a metro only
+// when that metro lies in that state ("Arlington, Texas" is not the DC metro); any other region is not the United States
+// ("Queens, Ontario", "Miami, Australia"); ", CA" after a Canadian city and "Georgia" without one of its cities are ambiguous.
+export function readPlace(place: string | null, metro: any | null): { kind: "us" | "none" | "dollar" | "other"; metro: any | null; state: string | null; open: string | null } {
+  if (!place) return { kind: metro ? "us" : "none", metro, state: null, open: null };
+  const cut = place.lastIndexOf(","), city = (cut < 0 ? place : place.slice(0, cut)).trim(), region = cut < 0 ? null : place.slice(cut + 1).trim();
+  const stateOf = (w: string) => STATE_CODES.has(w) ? w : STATES[w.toLowerCase()] ?? null;
+  const metroStates = new Set<string>((metro?.lca_cities ?? []).map((x: string[]) => x[1]));
+  const metroNamed = !!metro && (metro.words as string[]).some((w) => hasWord(place, w));
+  if (region) {
+    const st = stateOf(region);
+    if (region === "CA" && DOLLAR_PLACE.test(city)) return { kind: "other", metro: null, state: null, open: `"${place}": CA could be California or Canada` };
+    if (/^Georgia$/i.test(region) && !GEORGIA_CITIES.test(city)) return { kind: "other", metro: null, state: null, open: `"${place}": Georgia could be the US state or the country` };
+    if (!st) return { kind: DOLLAR_PLACE.test(place) ? "dollar" : "other", metro: null, state: null, open: null };
+    return { kind: "us", metro: metroNamed && (st === "US" || metroStates.has(st)) ? metro : null, state: st === "US" ? null : st, open: null };
+  }
+  if (/^Georgia$/i.test(city)) return { kind: "other", metro: null, state: null, open: `"Georgia" could be the US state or the country` };
+  if (stateOf(city)) return { kind: "us", metro: /^(?:DC|District of Columbia|New York)$/i.test(city) ? metro : null, state: stateOf(city) === "US" ? null : stateOf(city), open: null };
+  if (metroNamed) return { kind: "us", metro, state: null, open: null };
+  return { kind: US_CITY.test(city) ? "us" : DOLLAR_PLACE.test(city) ? "dollar" : "other", metro: null, state: null, open: null };
+}
+// "us": a metro the pay data knows, a US state, or a city with its state. "none": remote or not said. "dollar": a place whose
+// own money is a dollar or a peso. "other": any other place, which code cannot confirm is in the United States.
+export function placeKind(o: Pick<Offer, "metro" | "place" | "city" | "remote" | "place_kind">): "us" | "none" | "dollar" | "other" {
+  if (o.place_kind) return o.place_kind;
   if (o.metro) return "us";
   const p = o.place ?? (o.city && o.city !== "remote" ? o.city : null);
-  if (!p) return "none";
-  return US_STATE.test(p) || US_CITY.test(p.trim()) ? "us" : DOLLAR_PLACE.test(p) ? "dollar" : "other";
+  return readPlace(p, null).kind;
 }
 const placeName = (o: Offer) => o.metro_label ?? o.place ?? o.city ?? "the place";
 // US pay data is placed only against a US-dollar offer for a US place (or one with no place said, or remote).
@@ -130,6 +175,9 @@ export const usMarket = (o: Offer) => ["us", "none"].includes(placeKind(o));
 export const known = (c: string | null | undefined) => !!c && c !== UNKNOWN_CURRENCY;
 // Two amounts are in one currency only when both currencies are known and equal (a legacy offer on file with none is USD).
 export const sameCurrency = (a: string | null | undefined, b: string | null | undefined) => known(a ?? "USD") && (a ?? "USD") === (b ?? "USD");
+// A competing offer is weighed against this base only like for like: both yearly as said, one known currency, neither an
+// assumption, and not a job in another country.
+export const comparable = (o: Offer, x: Competing) => !o.rate && !x.rated && !x.assumed && !x.abroad && !o.currency_assumed?.base && !o.unsettled && sameCurrency(x.currency, o.currency);
 export const anyAssumed = (o: Offer) => Object.values(o.currency_assumed ?? {}).some(Boolean);
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 // Each figure's currency from what was written next to it and, for "$" or nothing, the place. A figure with no currency of
@@ -139,7 +187,8 @@ export function settleCurrency(o: Offer): Offer {
   const marks = o.marks;
   if (!marks) return o;
   const figs = (["base", "signing", "bonus", "bonus_target"] as Fig[]).filter((f) => f === "base" ? o.base != null || !!o.rate : o[f] != null);
-  const stated = new Set([...figs.map((f) => marks[f]), ...o.competing.map((c) => c.mark)].filter((m): m is string => !!m));
+  // Only this offer's own figures say its currency: another company's offer never lends its currency to this one.
+  const stated = new Set(figs.map((f) => marks[f]).filter((m): m is string => !!m));
   const only = stated.size === 1 ? [...stated][0] : null, kind = placeKind(o);
   const other = [...stated].find((m) => CURRENCY_CODES.includes(m) && m !== "USD");
   const guess = (why: string): [string, string, boolean] => ["USD", `${NOT_STATED}: ${why}, so it is read as US dollars, which is an assumption; please confirm the currency`, true];
@@ -160,7 +209,8 @@ export function settleCurrency(o: Offer): Offer {
   const read = Object.fromEntries(figs.map((f) => [f, settle(marks[f])])) as Partial<Record<Fig, [string, string | null, boolean]>>;
   o.currencies = Object.fromEntries(figs.map((f) => [f, read[f]![0]]));
   o.currency_assumed = Object.fromEntries(figs.filter((f) => read[f]![2]).map((f) => [f, true]));
-  for (const c of o.competing) if ("mark" in c) { const [cur, , assumed] = settle(c.mark); c.currency = cur; c.assumed = assumed; }
+  // A competing figure with no currency of its own is read in this offer's only on an assumption (unless both are plainly US dollars).
+  for (const c of o.competing) if ("mark" in c) { const [cur, , assumed] = settle(c.mark); c.currency = cur; c.assumed = assumed || (!c.mark && !(cur === "USD" && kind === "us")); }
   if (figs.includes("base")) o.currency = read.base![0]; else delete o.currency;
   // The fact said: the base's, else that of the first other figure read on an assumption.
   const g = figs.find((f) => f !== "base" && read[f]![2]);
@@ -182,9 +232,10 @@ export const isUsd = (o: Pick<Offer, "currency">) => (o.currency ?? "USD") === "
 // currency is unknown; and a base said as a rate as that rate ("$6,500 a month"), never as the yearly estimate.
 export const moneyFor = (o: Offer) => (n: number, field?: string) => {
   const c = field === "signing" ? (o.currencies?.signing ?? o.currency) : o.currency, bare = (x: string) => x.replace(` (${NOT_STATED})`, "");
-  // A figure whose currency is an assumption is written as the person wrote it ("$10,000", "110k"): no currency is asserted.
+  // 2026-11-13 round 2: a figure is written as the person wrote it, in its own period ("$90/hr", "£90k", "110k"); only a plain
+  // yearly figure in stated US dollars is written out ("$110,000"). A rate is never restated as a yearly figure.
   const k: Fig | null = field === "signing" ? "signing" : field === undefined && n === o.base ? "base" : null;
-  if (k && o.currency_assumed?.[k] && o.written?.[k]) return k === "base" && o.rate ? `${o.written.base} ${PER[o.rate.period]}` : o.written[k]!;
+  if (k && o.written?.[k] && !(c === "USD" && !o.currency_assumed?.[k] && !(k === "base" && o.rate))) return o.written[k]!;
   return bare(field === undefined && o.rate && n === o.base ? `${rateIn(o.rate.amount, c)} ${PER[o.rate.period]}` : moneyIn(n, c));
 };
 // A rate keeps its cents ("$27.50 an hour").
@@ -195,12 +246,12 @@ export function rateIn(n: number, currency: string | null | undefined): string {
 }
 // ---------- the period ----------
 // A yearly base worked out from a rate is an estimate, shown with the assumption it rests on. A daily rate has none.
-export const PER: Record<Period, string> = { hour: "an hour", day: "a day", week: "a week", biweek: "every two weeks", month: "a month", year: "a year" };
+export const PER: Record<Period, string> = { hour: "an hour", day: "a day", week: "a week", biweek: "every two weeks", semimonth: "twice a month", month: "a month", year: "a year" };
 const ANNUAL: Partial<Record<Period, { factor: number; assumption: string }>> = { hour: { factor: 2080, assumption: "2,080 hours" }, week: { factor: 52, assumption: "52 weeks" },
-  biweek: { factor: 26, assumption: "26 pay periods" }, month: { factor: 12, assumption: "12 months" } };
-const RATE_RANGE: Record<string, [number, number]> = { hour: [7, 1000], day: [50, 10000], week: [100, 50000], biweek: [200, 100000], month: [500, 500000] };
-const periodOf = (w: string): Period => { const x = w.toLowerCase().replace(/[- ]/g, ""); return /^(hr|hour|h$)/.test(x) ? "hour" : /^(day|dai)/.test(x) ? "day" : /^(biweek|twoweek|2week|otherweek|fortnight)/.test(x) ? "biweek" : /^(week|wk)/.test(x) ? "week" : /^mo/.test(x) ? "month" : "year"; };
-const PERIOD_AFTER = /^(?:\s(?:base|salary|gross|net))?\s?(?:(?:\/|per\s|an?\s|each\s|every\s)\s?(hr|hour|h|day|two weeks|2 weeks|other week|fortnight|week|wk|month|mo|year|yr|annum)\b|(hourly|daily|bi-?weekly|fortnightly|weekly|monthly|yearly|annually|annual)\b)/i;
+  biweek: { factor: 26, assumption: "26 pay periods" }, semimonth: { factor: 24, assumption: "24 pay periods" }, month: { factor: 12, assumption: "12 months" } };
+const RATE_RANGE: Record<string, [number, number]> = { hour: [7, 1000], day: [50, 10000], week: [100, 50000], biweek: [200, 100000], semimonth: [200, 100000], month: [500, 500000] };
+const periodOf = (w: string): Period => { const x = w.toLowerCase().replace(/[- ]/g, ""); return /^(hr|hour|h$)/.test(x) ? "hour" : /^(day|dai)/.test(x) ? "day" : /^(twiceamonth|semimonth)/.test(x) ? "semimonth" : /^(biweek|twoweek|2week|otherweek|fortnight)/.test(x) ? "biweek" : /^(week|wk)/.test(x) ? "week" : /^mo/.test(x) ? "month" : "year"; };
+const PERIOD_AFTER = /^(?:\s(?:base|salary|gross|net))?\s?(?:(?:\/|per\s|an?\s|each\s|every\s)\s?(hr|hour|h|day|two weeks|2 weeks|other week|fortnight|week|wk|month|mo|year|yr|annum)\b|(twice a month|semi-?monthly|hourly|daily|bi-?weekly|fortnightly|weekly|monthly|yearly|annually|annual)\b)/i;
 const PERIOD_BEFORE = /\b(hourly|daily|bi-?weekly|fortnightly|weekly|monthly|yearly|annual)\s(?:(?:base|salary|pay|rate|wage)\s)?(?:(?:of|is|at)\s)?$/i;
 // The offer's base as said, with its rate and the stated assumption behind a yearly figure.
 export function rateNote(o: Offer, c: string | null | undefined): string {
@@ -209,9 +260,11 @@ export function rateNote(o: Offer, c: string | null | undefined): string {
 }
 // Why the offer is not placed against the public pay data, in one line; null when it is.
 export function notPlaced(o: Offer): string | null {
+  if (o.unsettled) return `I have not compared this offer with anything, because I could not place: ${(o.open ?? []).join("; ")}.`;
   if (o.currency === UNKNOWN_CURRENCY) return `${cap(o.currency_fact ?? NOT_STATED)}. So it is not placed against any pay data, and nothing is converted. Tell me the offer again with its currency (USD, CAD, EUR ...) and I'll redo it.`;
   if (!isUsd(o)) return `The offer is in ${o.currency}. The public pay data on file is US data in US dollars, so it is not placed against it, and nothing is converted.`;
   if (o.currency_assumed?.base) return "The currency is an assumption until you confirm it, so the offer is not placed against any pay data.";
+  if (o.part_year && o.rate) return `You said ${o.part_year}, which is not a full year of full-time work, so the rate is not turned into a yearly figure to compare, and the yearly pay data is not placed against it.`;
   return usMarket(o) ? null : `The public pay data on file is for the United States, and ${placeName(o)} is not a US place I can confirm, so the offer is not placed against it.`;
 }
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -247,26 +300,33 @@ export function placeAnswer(text: string, onlyCity = true): string | null {
   if (!t || /\d/.test(t) || t.split(/\s+/).length > 6 || !/^[A-Za-z][A-Za-z.' -]*(?:,\s*[A-Za-z][A-Za-z.' -]*)?$/.test(t) || NOT_TITLE_ANSWER.test(t)) return null;
   return t;
 }
-const MONEY = /(?<![\w.])\$?\s?(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s?(k|K|thousand|m|M)?(?![\w])/g;
-interface Amount { value: number; per: Period | null; at: number; end: number; mark: string | null; text: string }
+const MONEY = new RegExp(String.raw`(?:(?<![\w.]|\d[,'])|(?<=\b(?:${CODE_RE}|RMB|Rs)))\$?\s?(\d{1,2}(?:,\d{2})+,\d{3}|\d{1,3}(?:[,' ]\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)\s?(k|K|thousand|mm|million|m|M|lakhs?|lacs?|LPA|lpa|L|crores?|cr)?(?![\w])`, "g");
+// Everything the figure's own words take, from the currency before it to the period after it: `text` is that span as written.
+interface Amount { value: number; per: Period | null; at: number; end: number; mark: string | null; text: string; pre?: string }
 function amounts(clause: string): Amount[] {
   const out: Amount[] = [];
   for (const m of clause.matchAll(MONEY)) {
-    let v = Number(m[1].replace(/,/g, ""));
-    const unit = (m[2] || "").toLowerCase(), at = m.index ?? 0, end = at + m[0].length;
+    let v = Number(m[1].replace(/[,' ]/g, ""));
+    const unit = m[2] === "L" ? "lakh" : (m[2] || "").toLowerCase(), at = m.index ?? 0, end = at + m[0].length;
     if (unit === "k" || unit === "thousand") v *= 1000;
-    else if (unit === "m") v *= 1_000_000;
-    const { mark, after } = currencyMark(clause, at, end);
+    else if (unit === "m" || unit === "mm" || unit === "million") v *= 1_000_000;
+    else if (/^(?:lakh|lac|lpa)/.test(unit)) v *= 100_000;
+    else if (/^cr/.test(unit)) v *= 10_000_000;
+    const cm = currencyMark(clause, at, end), after = cm.after;
+    // Lakh and crore count rupees: with no currency named, whose rupee is not known.
+    const mark = cm.mark ?? (/^(?:lakh|lac|lpa|cr)/.test(unit) ? "lakh" : null);
     // The period said with the amount: right after it ("45 GBP/hr", "8k a month", "$3,000 biweekly") or right before ("monthly salary of 6,500").
     const post = PERIOD_AFTER.exec(clause.slice(end + after)), pm = post ?? PERIOD_BEFORE.exec(clause.slice(0, at));
-    const per = pm ? periodOf(pm[1] ?? pm[2]) : null, rated = !!per && per !== "year";
+    const per = unit === "lpa" ? "year" : pm ? periodOf(pm[1] ?? pm[2]) : null, rated = !!per && per !== "year";
     const dollar = !!mark;
     // "401k", "403(b)", "457b" name a retirement plan, never pay (LOOP 13: "a 4% 401k match" was read as a $401,000 base).
     if (!dollar && /^(?:401|403|457)$/.test(m[1]) && /^\s?\(?[kb]\)?/i.test(clause.slice(at + m[0].indexOf(m[1]) + m[1].length))) continue;
     // A bare small number is a count or a date, not pay: pay is "110k", "$110,000", "110000", "$45/hr" or "$1,500 a week".
     if (rated ? v < RATE_RANGE[per!][0] || v > RATE_RANGE[per!][1] : v < 1000) continue;
     if (!dollar && !unit && !rated && (v < 10000 || /^20\d\d$/.test(m[1]))) continue;
-    out.push({ value: v, per, at, end: end + after + (post ? post[0].length : 0), mark, text: m[0].trim() });
+    const lead = new RegExp(String.raw`(?:\b(?:${CODE_RE}|RMB|Rs|US|AU|CA|NZ|SG|HK|MX|[ACSR])\s?\$?|[€£¥￥₹₩₪])\s?$`).exec(clause.slice(0, at));
+    const to = end + after + (post ? post[0].length : 0);
+    out.push({ value: v, per, at: lead ? lead.index : at, end: to, mark, text: clause.slice(lead ? lead.index : at, to).trim(), pre: !post && pm ? pm[0] : undefined });
   }
   return out;
 }
@@ -317,22 +377,29 @@ export function titleIn(text: string): string | null {
 }
 // D-069: the place the person named ("in Sydney", "in Lake Mary, Florida", "based in Warsaw, Poland"), any place: capitalized
 // words after "in", "based in", "located in" or "out of", with one ", Region" after them. Not a month, a currency, a team.
-const NOT_PLACE = new RegExp(`^(?:${CODE_RE}|January|February|March|April|May|June|July|August|September|October|November|December|Q[1-4]|My|Our|Their|Total|Cash|Equity|Stock|Base|Salary|Year|Person|Office)\b`);
+const NOT_PLACE = new RegExp(`^(?:${CODE_RE}|January|February|March|April|May|June|July|August|September|October|November|December|Q[1-4]|My|Our|Their|Total|Cash|Equity|Stock|Base|Salary|Year|Person|Office|RSUs?)\\b`);
 export function placeIn(text: string): string | null {
-  const t = String(text ?? "");
-  const P = String.raw`[A-Z][A-Za-z.'-]*(?:\s+(?:[A-Z][A-Za-z.'-]*|de|del|la|le|of|upon|am|an|sur))*?`;
-  const m = new RegExp(String.raw`\b(?:in|based in|located in|out of|relocating to|moving to)\s+(${P}(?:,\s*${P})?)(?=\s*(?:[;.!?()]|,(?!\s*[A-Z])|\s(?:as|for|with|and|but|plus|at|on|starting|paying|base|offered)\b|$))`).exec(t);
+  // A comma before a new sentence or another company's offer does not join it to the place ("in Seattle, I also ...").
+  const t = String(text ?? "").replace(/,\s*(?=(?:I|It|It's|My|We|They|The|And|But|Also)\b|[A-Z][\w&.'-]*\s+(?:offered|is offering|gave|will)\b)/g, "; ");
+  const P = String.raw`[A-Z][A-Za-z\u00C0-\u024F.'-]*(?:\s+(?:[A-Z][A-Za-z\u00C0-\u024F.'-]*|de|del|la|le|of|upon|am|an|sur))*?`;
+  // "relocating from Toronto to Seattle" names the place the job is in last.
+  const m = new RegExp(String.raw`\b(?:(?:relocating|moving|transferring)\s+from\s+${P}(?:,\s*${P})?\s+to|in|based in|located in|out of|relocating to|moving to)\s+(${P}(?:,\s*${P})?)(?=\s*(?:[;.!?()]|,(?!\s*[A-Z])|\s(?:as|for|with|and|but|plus|at|on|starting|paying|base|offered)\b|$))`).exec(t);
   const w = m?.[1]?.replace(/[.,]+$/, "").trim();
   if (!w || NOT_PLACE.test(w) || w.length > 80) return null;
   return w;
 }
-function occupationFor(role: string | null, sector: string | null, maps: any): Offer["occupation"] {
+// Words that say a level or a kind of the same job, not another profession ("senior software engineer", "backend engineer intern").
+const LEVEL = /^(?:senior|sr|junior|jr|staff|principal|lead|associate|entry|level|new|grad|graduate|summer|intern|i|ii|iii|iv|full|part|time|remote|embedded|backend|back|end|frontend|front|fullstack|stack|infrastructure|platform|mobile|ios|android|cloud|systems|web|ai|ml)$/;
+// 2026-11-13 round 2: a title maps to a benchmark occupation only as a whole phrase from the table. "developer", "analyst" or
+// "consultant" inside another profession ("real estate developer", "market research analyst", "sales consultant") is no match.
+function occupationFor(role: string | null, sector: string | null, maps: any, title?: string | null): Offer["occupation"] {
   if (!role) return null;
-  const r = role.toLowerCase();
+  const r = (title && hasWord(title, role) ? title : role).toLowerCase();
   const occs: any[] = maps?.occupations || [];
   // The longest matching phrase wins ("investment banking analyst" over "analyst").
-  let best: any = null, bestLen = 0;
-  for (const o of occs) for (const w of o.words) if (w.length > bestLen && (r === w || hasWord(r, w))) { best = o; bestLen = w.length; }
+  let best: any = null, bestLen = 0, word = "";
+  for (const o of occs) for (const w of o.words) if (w.length > bestLen && (r === w || hasWord(r, w))) { best = o; bestLen = w.length; word = w; }
+  if (best && !r.replace(new RegExp(`(?<![\\w+#])${esc(word)}(?![\\w+#])`), " ").split(/[^a-z]+/).filter(Boolean).every((x) => LEVEL.test(x))) best = null;
   if (!best && /^(summer )?analyst$/.test(r) && sector) best = occs.find((o) => (o.analyst_sectors || []).includes(sector)) || null;
   return best ? { key: best.key, soc: best.soc, soc_title: best.soc_title, bls_national: best.bls_national ?? null } : null;
 }
@@ -342,24 +409,61 @@ const BENEFIT = /\b(relocation|reloc|stipend|allowance|tuition|(?:401|403|457)\s
 const BENEFIT_AMOUNT = /^\s*(?:in |of |for )?(?:relocation|reloc|stipend|allowance|tuition|(?:401|403|457)\s?\(?[kb]\)?)/i;
 const COMPETING = /\b(another offer|competing offer|other offer|second offer|also (?:have|got) an offer|also offered|offer from .+ too)\b/i;
 
+// ---------- the completeness rule (2026-11-13 round 2) ----------
+export const norm = (s: string) => s.replace(/[’‘]/g, "'").replace(/ /g, " ").replace(/\bRs\.\s?/g, "Rs ").replace(/\bp\.a\.?(?=\s|$)/gi, "per annum").replace(/\bU\.S\.A?\.?(?=\s|$)/g, "US").replace(/\bD\.C\.?/g, "DC").replace(/\bSt\.\s/g, "St ");
+const EQUITY = /\b(?:equity|rsus?|stock|options|shares|vest\w*|cliff)\b/i;
+const TOTAL = /\b(?:OTE|TC)\b|\b(?:total comp(?:ensation)?|total package|total pay|on[- ]target earnings|all[- ]in)\b/i;
+const PART_YEAR = /\b\d{1,2}\s?(?:hrs?|hours)\s?(?:\/|a|per|each)\s?(?:week|wk)\b|\bpart[- ]time\b|\b\d{1,2}-(?:week|month)\b|\b\d{1,2}[- ](?:week|month|wk|mo)s?(?=\s+(?:intern\w*|contract\w*|co-?op|placement|gig|program|term))|\bintern(?:ship)?\b|\bcontract(?:or)?\b|\btemp(?:orary)?\b|\bseasonal\b|\bco-?op\b/gi;
+const RANGE = /\$?\d[\d,.]*\s?[kKmM]?\s?(?:-|–|—|\sto\s)\s?\$?\d[\d,.]*\s?[kKmM]\b|\bbetween\s+\$?\d[\d,.]*\s?[kKmM]?\s+and\s+\$?\d[\d,.]*\s?[kKmM]?/;
+const LEFT_PERIOD = /\btwice a month\b|\bsemi-?monthly\b|\bbi-?monthly\b|\bper (?:hour|day|week|month|year|annum)\b|\/\s?(?:hr|hour|h|day|wk|week|mo|month|yr|year)\b|\ban hour\b|\ba (?:day|month|year)\b|\b(?:hourly|daily|weekly|bi-?weekly|fortnightly|monthly|annually|yearly)\b|\bevery (?:two|2|other) weeks\b/i;
+const NOT_A_PLACE = /^(?:January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|Q[1-4]|I|My|Our|Their|Total|Cash|Equity|Stock|Base|Salary|Year|Person|Office|RSUs?|PTO)\b/;
+// What is left of the message once every field has taken its words: any money, currency, period, total-pay or place word still
+// there was not understood, and is returned in the person's own words.
+function leftOpen(rest: string): string[] {
+  const open: string[] = [], said = (what: string, w: string) => { const x = `${what}: "${w.trim()}"`; if (!open.includes(x)) open.push(x); };
+  for (const m of rest.matchAll(/\d[\d.,' ]*\d|\d/g)) {
+    const tok = m[0].trim(), at = m.index ?? 0, after = rest.slice(at + m[0].length, at + m[0].length + 14), before = rest.slice(Math.max(0, at - 12), at), n = Number(tok.replace(/[,' ]/g, ""));
+    if (/^\s?%/.test(after) || /^(?:401|403|457)$/.test(tok) || /^(?:19|20)\d\d$/.test(tok)) continue;
+    const unit = /^\s?(?:k|m|mm|thousand|million|lakhs?|lacs?|lpa|l|cr|crores?|kr)(?![a-z])/i.exec(after)?.[0] ?? "";
+    const labelled = /^\s?(?:\+\s?)?(?:base|salary|bonus|signing)\b/i.test(after) || /(?:base|salary|bonus)\s?(?:of|is|:)?\s?$/i.test(before) || /[$€£¥￥₹₩₪]\s?$/.test(before);
+    if (unit || n >= 1000 || labelled || (/^\d{1,3}[.,]\d{2,3}$/.test(tok) && !/^\d+\.\d{1,2}$/.test(tok))) said("a figure I did not use", tok + unit);
+  }
+  if (!open.length && /[$€£¥￥₹₩₪]|zł/.test(rest)) said("a currency sign with no figure I could read", /[$€£¥￥₹₩₪]|zł/.exec(rest)![0]);
+  for (const w of freeCur(rest)) said("a currency I did not attach to a figure", w);
+  const lakh = /\b(?:lakhs?|lacs?|crores?|lpa)\b/i.exec(rest); if (lakh && !open.length) said("a currency I did not attach to a figure", lakh[0]);
+  const per = LEFT_PERIOD.exec(rest); if (per) said("a pay period I did not attach to a figure", per[0]);
+  const tot = TOTAL.exec(rest); if (tot) said("total pay with no figure I could read", tot[0]);
+  for (const m of rest.matchAll(/\b(?:in|to)\s+(?:the\s+)?([A-Z][A-Za-zÀ-ɏ'.-]*(?:,?\s+[A-Z][A-Za-zÀ-ɏ'.-]*)*)/g)) if (!NOT_A_PLACE.test(m[1]) && !codeOf(m[1])) said("a second place I did not use", m[1]);
+  return open;
+}
+
 // One message, or one piece of it, read into an offer. Clauses are read one at a time so "110k base, 15k signing" puts
-// each number with its own label, and a clause about another offer never becomes this offer's numbers.
+// each number with its own label, and a clause about another offer never becomes this offer's numbers. Every word a field
+// takes is struck from `rest`; what is left is checked by leftOpen.
 export function parseOfferWords(text: string, data: OfferData = payData(), opts: { asked?: readonly Field[] } = {}): Offer {
-  const t = String(text ?? "");
+  const t = norm(String(text ?? ""));
   const maps = data?.maps;
   const offer: Offer = { company: null, firm_id: null, lca_company_id: null, sector: null, base: null, hourly: null, signing: null, bonus: null, bonus_pct: null,
     city: null, metro: null, metro_label: null, remote: false, role: null, occupation: null, competing: [], deadline: null };
-  const clauses = t.split(/[;\n]|,(?!\d{3})|\.(?=\s|$)|\s+(?:and|but|plus|with)\s+/i).map((c) => c.trim()).filter(Boolean);
-  const main: string[] = [];
+  let rest = t;
+  const open: string[] = [];
+  const eat = (w: string | null | undefined) => { if (!w) return; const i = rest.toLowerCase().indexOf(w.toLowerCase()); if (i >= 0) rest = `${rest.slice(0, i)} | ${rest.slice(i + w.length)}`; };
+  const eatAll = (re: RegExp) => { rest = rest.replace(re, " | "); };
+  const range = RANGE.exec(t);
+  if (range) { open.push(`a range, not one figure: "${range[0].trim()}"`); eat(range[0]); }
+  const clauses = t.split(/[;\n]|,(?!\d{2},\d|\d{3})|\.(?=\s|$)|\s+(?:and|but|plus|with|or)\s+/i).map((c) => c.trim()).filter(Boolean);
+  const main: string[] = [], aside: string[] = [];
   for (const c of clauses) {
     if (COMPETING.test(c) || (/\boffer(?:ed)?\b.*\btoo\b/i.test(c) && amounts(c).length)) {
-      const a = amounts(c)[0];
+      const as = amounts(c), a = as[0];
       if (a) {
         const f = firmIn(c.replace(COMPETING, ""));
         const named = f ? f.name : (c.match(/\b(?:from|at)\s+([A-Z][\w&.'-]*(?:\s+[A-Z][\w&.'-]*){0,2})/)?.[1] ?? null);
-        const f1 = a.per && a.per !== "year" ? ANNUAL[a.per]?.factor ?? null : 1;
-        if (f1 != null) offer.competing.push({ company: named, base: a.value * f1, said: c, mark: a.mark });
+        const rated = !!a.per && a.per !== "year", f1 = rated ? ANNUAL[a.per!]?.factor ?? null : 1, where = placeIn(c);
+        if (f1 != null) offer.competing.push({ company: named, base: a.value * f1, said: c, mark: a.mark, written: a.text, rated, abroad: !!where && readPlace(where, metroIn(where, maps)).kind !== "us" });
       }
+      if (as.length <= 1) eat(c);
+      aside.push(c);
       continue;
     }
     main.push(c);
@@ -370,35 +474,46 @@ export function parseOfferWords(text: string, data: OfferData = payData(), opts:
   else offer.company = namedCompany(body);
   const from: NonNullable<Offer["from"]> = {};
   offer.from = from;
-  const marks: NonNullable<Offer["marks"]> = {}, written: NonNullable<Offer["written"]> = {};
+  const marks: NonNullable<Offer["marks"]> & { total?: string | null } = {}, written: NonNullable<Offer["written"]> = {};
   offer.marks = marks; offer.written = written;
   offer.bonus_target = null;
+  const take = (a: Amount) => { eat(a.text); eat(a.pre?.trim()); };
   for (const c of main) {
-    const as = amounts(c).filter((a) => !BENEFIT_AMOUNT.test(c.slice(a.end, a.end + 40)));
+    // Equity is kept as the person said it and never read as pay (the chat turn reads it; here its words are only struck).
+    if (EQUITY.test(c) && !/\b(?:base|salary)\b/i.test(c)) { eat(c); continue; }
+    const all = amounts(c), as = all.filter((a) => !BENEFIT_AMOUNT.test(c.slice(a.end, a.end + 40)));
+    for (const a of all) if (!as.includes(a)) { take(a); }
     if (!as.length) { const p = c.match(/(\d{1,2}(?:\.\d+)?)\s?%\s*(?:target )?bonus|bonus(?: target)?(?: of)? (\d{1,2}(?:\.\d+)?)\s?%/i); if (p) { offer.bonus_pct = Number(p[1] ?? p[2]); from.bonus_pct = c; } continue; }
     // A relocation, a stipend or a retirement match is a benefit, never the base or a bonus (LOOP 13).
-    if (BENEFIT.test(c) && !/\b(base|salary)\b/i.test(c)) continue;
+    if (BENEFIT.test(c) && !/\b(base|salary)\b/i.test(c)) { as.forEach(take); continue; }
     const a = as[0];
     const rated = !!a.per && a.per !== "year";
-    if (/sign(?:ing|-on| on)/i.test(c)) { offer.signing = a.value; from.signing = c; marks.signing = a.mark; written.signing = a.text; }
-    else if (/bonus/i.test(c) && /\btarget\b/i.test(c)) { offer.bonus_target = a.value; from.bonus_target = c; marks.bonus_target = a.mark; }
-    else if (/bonus/i.test(c)) { offer.bonus = a.value; from.bonus = c; marks.bonus = a.mark; }
+    // Total compensation, OTE or TC is not the base: kept as said, never compared.
+    if (TOTAL.test(c) && !/\bbase\b/i.test(c)) { offer.total = { amount: a.value, written: a.text }; take(a); eatAll(TOTAL); continue; }
+    if (/sign(?:ing|-on| on)/i.test(c)) { offer.signing = a.value; from.signing = c; marks.signing = a.mark; written.signing = a.text; take(a); }
+    else if (/bonus/i.test(c) && /\btarget\b/i.test(c)) { offer.bonus_target = a.value; from.bonus_target = c; marks.bonus_target = a.mark; take(a); }
+    else if (/bonus/i.test(c)) { offer.bonus = a.value; from.bonus = c; marks.bonus = a.mark; take(a); }
     else if (/\b(base|salary|pay|offered|offer of|offering|comp|per year|a year|annual|\/yr)\b/i.test(c) || rated || (offer.base == null && !offer.rate)) {
+      // Two figures that could each be the base: neither is chosen.
+      if (offer.base != null || offer.rate) { open.push(`two figures that could each be the base: "${written.base}" and "${a.text}"`); take(a); continue; }
       // A rate is kept as said; the yearly base is rate x a stated assumption, or nothing for a daily rate.
       if (rated) { const y = ANNUAL[a.per!] ?? null; Object.assign(offer, { rate: { amount: a.value, period: a.per }, annualized: y, base: y ? Math.round(a.value * y.factor) : null, hourly: a.per === "hour" ? a.value : null, period: a.per }); }
       else Object.assign(offer, { rate: null, annualized: null, base: a.value, hourly: null, period: a.per === "year" || /\b(per year|a year|annual(?:ly)?|yearly|\/\s?yr|per annum)\b/i.test(c) ? "year" : null });
-      from.base = c; marks.base = a.mark; written.base = a.text;
+      from.base = c; marks.base = a.mark; written.base = a.text; take(a);
     }
   }
-  const metro = metroIn(body, maps);
   // The place as said is read from the whole message: "Lake Mary, Florida" spans a comma the clauses are split on.
-  const place = placeIn(t.replace(COMPETING, " "));
-  offer.place = place;
+  let place = placeIn(aside.reduce((x, c) => x.replace(c, " "), t));
+  let metro = metroIn(place ?? body, maps) ?? (place ? null : metroIn(body, maps));
+  // An answer to the one ask: the title or the place as said, when the words are nothing else.
+  if (opts.asked?.includes("city") && !metro && !place && !/\bremote\b/i.test(body)) place = placeAnswer(t, opts.asked.length === 1);
+  const where = readPlace(place, metro);
+  metro = where.metro;
+  if (where.open) open.push(where.open);
+  offer.place = place; offer.place_kind = where.kind; offer.state = where.state;
   if (metro) { offer.metro = metro.key; offer.metro_label = metro.label; offer.city = metro.label; }
   else if (place) offer.city = place;
   else if (/\bremote\b/i.test(body)) { offer.remote = true; offer.city = "remote"; }
-  // An answer to the one ask: the title or the place as said, when the words are nothing else.
-  if (opts.asked?.includes("city") && !metro && !place && !offer.remote) { const p = placeAnswer(t, opts.asked.length === 1); if (p) { offer.place = p; offer.city = p; } }
   // The title answer is the words left once the place is taken out ("Seattle" alone names a place, never a title).
   const bare = () => {
     let x = t;
@@ -410,9 +525,25 @@ export function parseOfferWords(text: string, data: OfferData = payData(), opts:
   offer.title = title;
   // A title the pay data knows keeps its known role (the benchmark's words); any other stated title is the role as said.
   offer.role = roleIn(body) ?? title;
-  offer.occupation = occupationFor(offer.role, offer.sector, maps);
+  offer.occupation = occupationFor(offer.role, offer.sector, maps, title);
   const d = t.match(DEADLINE);
   if (d) offer.deadline = { text: d[1] };
+  // Not a full year of full-time work, as the person said it: the rate stays a rate.
+  const part = [...t.matchAll(PART_YEAR)].map((m) => m[0].trim());
+  offer.part_year = part.length ? part.join(", ") : null;
+  // Strike what the fields above took, then read a currency said on its own ("paid in CAD") as the currency of every figure
+  // that has none of its own (or only a "$", when it names a dollar); one that contradicts a figure stays open.
+  for (const w of [place, title, d?.[0], offer.company, ...(metro?.words ?? []), ...(firm ? [firm.name, ...(firm.aliases ?? [])] : [])]) eat(w);
+  eatAll(PART_YEAR); eatAll(/\b(?:relocating|moving|transferring)\s+from\s+[A-Z][\w'.-]*(?:,?\s[A-Z][\w'.-]*)*\s+to\b/g); eatAll(/\bpaid\s+(?:weekly|bi-?weekly|monthly|semi-?monthly|twice a month|every (?:two|other) weeks)\b/gi);
+  const free = freeCur(rest), codes = new Set(free.map(currencyOf));
+  const figs = (["base", "signing", "bonus", "bonus_target"] as Fig[]).filter((f) => marks[f] !== undefined);
+  if (codes.size === 1 && [...codes][0] && figs.length) {
+    const code = [...codes][0]!;
+    if (figs.every((f) => !marks[f] || marks[f] === code || (marks[f] === "$" && DOLLARS.has(code)))) { for (const f of figs) marks[f] = code; eatAll(CUR_CODE); eatAll(CUR_NAME); }
+  }
+  open.push(...leftOpen(rest));
+  if (offer.base != null && !offer.rate && offer.base > 5_000_000 && (!marks.base || marks.base === "$" || marks.base === "USD")) open.push(`"${written.base}" is far above any yearly base I can check; say the amount again`);
+  offer.open = open; offer.unsettled = open.length > 0;
   return settleCurrency(offer);
 }
 
@@ -432,7 +563,12 @@ export function mergeOffers(a: Offer, b: Offer, data: OfferData = payData()): Of
   if (out.currency === undefined) delete out.currency;
   out.written = { ...(a.written ?? {}), ...(b.written ?? {}) };
   if (a.marks || b.marks) { out.marks = { ...(a.marks ?? {}), ...(b.marks ?? {}) }; settleCurrency(out); }
-  out.occupation = occupationFor(out.role, out.sector, data?.maps);
+  out.occupation = occupationFor(out.role, out.sector, data?.maps, out.title);
+  // What a piece left open stays open until the base is said again whole.
+  out.open = b.base != null || b.rate ? [...(b.open ?? [])] : [...new Set([...(a.open ?? []), ...(b.open ?? [])])];
+  out.unsettled = out.open.length > 0;
+  out.part_year = [a.part_year, b.part_year].filter(Boolean).join(", ") || null;
+  if (b.place == null && !b.metro && a.place_kind) { out.place_kind = a.place_kind; out.state = a.state ?? null; }
   return out as Offer;
 }
 export function missingOf(o: Offer): Field[] {
@@ -464,7 +600,7 @@ export function benchmarks(o: Offer, data: OfferData = payData()): Bench[] {
   // D-069: the public pay data on file is US data in US dollars. An offer said in another currency is never placed against it
   // (that would need a conversion with a sourced rate, and a US market for a non-US job).
   // 2026-11-13: nor is an offer whose currency is not known, or one for a place code cannot confirm is in the United States.
-  if (!isUsd(o) || !usMarket(o) || o.currency_assumed?.base) return out;
+  if (!isUsd(o) || !usMarket(o) || o.currency_assumed?.base || o.unsettled || (o.part_year && o.rate)) return out;
   const occ = o.occupation;
   const base = o.base;
   // 1. The employer's own filed H-1B wages for this occupation and metro.
@@ -537,11 +673,25 @@ export interface OfferResult {
   draft: { email: string; call: string; sent: false } | null;
   messages: string[];
 }
+// What was understood, field by field, in the offer's own terms.
+export function readingOf(o: Offer): string[] {
+  const c = o.currencies ?? {};
+  return [o.company ? `company ${o.company}` : null, o.title ?? o.role ? `title ${o.title ?? o.role}` : null, o.city ? `place ${o.city === "remote" ? "remote" : o.metro_label ?? o.place ?? o.city}` : null,
+    o.rate ? `pay ${rateIn(o.rate.amount, c.base ?? o.currency)} ${PER[o.rate.period]}` : o.base != null ? `base ${moneyIn(o.base, c.base ?? o.currency)}` : null,
+    o.signing != null ? `signing bonus ${moneyIn(o.signing, c.signing)}` : null, o.bonus != null ? `bonus ${moneyIn(o.bonus, c.bonus)}` : null, o.bonus_pct != null ? `target bonus ${o.bonus_pct}%` : null,
+    o.total ? `total pay as you said it "${o.total.written}" (not the base)` : null, o.part_year ? `you said ${o.part_year}` : null].filter((x): x is string => !!x);
+}
+// The reply to an offer that is not settled: what was read, what was not, and the ask. No figure is compared or drafted.
+export function unsettledText(o: Offer): string {
+  const read = readingOf(o);
+  return `${read.length ? `Here is what I read: ${read.join("; ")}. ` : ""}I could not place ${(o.open ?? []).join("; ")}. So I have not compared the offer with anything or drafted a counter. Tell me the offer again in one line (company, title, city and state, the base with its currency and whether it is per year, month, week or hour) and I'll redo it.`;
+}
 export function offerReply(o: Offer, notGiven: Field[], data: OfferData = payData()): OfferResult {
+  if (o.unsettled) { const ask = unsettledText(o); return { status: "ask", offer: o, missing: notGiven, ask, benchmarks: [], draft: null, messages: fit([ask]) }; }
   const bench = benchmarks(o, data);
   const c = o.currencies ?? {};
   const parts = [o.company, o.title ?? o.role, o.city === "remote" ? "remote" : o.metro_label ?? o.place ?? o.city, o.base != null ? `base ${moneyIn(o.base, c.base ?? o.currency)}${rateNote(o, c.base ?? o.currency)}` : o.rate ? `${rateIn(o.rate.amount, o.currency)} ${PER[o.rate.period]}` : null,
-    o.signing != null ? `signing ${moneyIn(o.signing, c.signing)}` : null, o.bonus != null ? `bonus ${moneyIn(o.bonus, c.bonus)}` : null, o.bonus_pct != null ? `target bonus ${o.bonus_pct}%` : null].filter(Boolean);
+    o.signing != null ? `signing ${moneyIn(o.signing, c.signing)}` : null, o.bonus != null ? `bonus ${moneyIn(o.bonus, c.bonus)}` : null, o.bonus_pct != null ? `target bonus ${o.bonus_pct}%` : null, o.total ? `total pay as you said it ${o.total.written} (not the base, not compared)` : null].filter(Boolean);
   const lines: string[] = [`Your offer: ${parts.join(", ")}.`];
   if (notGiven.length) lines.push(`Not given: ${notGiven.map((f) => ASK_WORDS[f]).join(", ")}, so I left ${notGiven.length > 1 ? "those" : "that"} out of the comparison.`);
   const why = notPlaced(o);
@@ -564,9 +714,10 @@ export function offerReply(o: Offer, notGiven: Field[], data: OfferData = payDat
   }
   const shown = bench.filter((b) => b.shown);
   if (o.occupation && !why && !shown.length) lines.push("", "So I have no public number to place your offer against yet, and I won't make one up.");
-  const firstUp = shown.find((b) => b.median != null);
+  // A rate is never set against a yearly median in a counter, and only a like-for-like competing offer is weighed.
+  const firstUp = o.rate ? undefined : shown.find((b) => b.median != null);
   const script = (CareerNegotiation as any).factScript({ company: o.company, role: o.title ?? o.role, base: o.base, signing: o.signing },
-    { competing: o.competing.filter((x) => !x.assumed && !o.currency_assumed?.base && sameCurrency(x.currency, o.currency)).map((x) => ({ ...x })), deadline: o.deadline, benchmark: firstUp ? { median: firstUp.median, cite: firstUp.cite } : null, money: moneyFor(o) });
+    { competing: o.competing.filter((x) => comparable(o, x)).map((x) => ({ ...x })), deadline: o.deadline, benchmark: firstUp ? { median: firstUp.median, cite: firstUp.cite } : null, money: moneyFor(o) });
   const uniq = [...new Set(urls)];
   if (uniq.length) lines.push("", "Sources:", ...uniq);
   const draftLines = ["A counter you could send. Nothing is sent: edit it and send it yourself.", "", script.email, "", "On a call:", script.call];

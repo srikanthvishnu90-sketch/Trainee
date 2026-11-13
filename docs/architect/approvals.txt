@@ -382,3 +382,17 @@
 829 950efd0b51482af09faf55c112abba8040eff447 independent-review-20261113 risk=medium note=next-line-values-redacted-no-new-false-redactions-see-the-portal-predates
 831 65707526b78dad3d942b2669f98b7d32430b00e9 independent-review-20261113 risk=high note=0-wrong-clicks-fills-on-126-pages-open-unseen-hidden-formdata-answers-and-icon-submit-refusals
 832 591adafcd204e2b84248988197783eae2d83bd67 independent-review-20261113 risk=medium note=no-branch-only-rows-false-claims-155-to-54-red-suites-pass
+825 0da35d5e725f9095fa27c93d0b49a51ba58e2770 independent-review-20261113 risk=medium note=approved-at-4684cda42-delta-trunk-merges-only
+827 0db7b07402f34dab694a00c32bcd82a65237b56a independent-review-20261113 risk=high note=approved-at-6be6e77d5-delta-trunk-merges-only
+829 1caaa0ca81c818354b19e275fd2385a42dd8de15 independent-review-20261113 risk=medium note=approved-at-950efd0b5-delta-trunk-merges-only
+831 0c3a87ec298e4cca59860a27ed1dbd08db65bd26 independent-review-20261113 risk=high note=approved-at-65707526b-delta-trunk-merges-only
+815 93fa62e57413e6d1a9aa4f6d959392ec4bd95e07 independent-review-20261113 risk=high note=approved-at-d395b92e4-delta-trunk-merges-and-7191a703e-shard-duration-entry-only
+826 f1bd9927b1343d783c7c2db0c9066096fb0479c1 independent-review-20261113 risk=low note=d064-restores-env-it-clears-no-assertion-changed
+830 783598dc3ed210c1e389739f2efeb8f418c91e1d independent-review-20261113 risk=low note=pure-revert-of-811-tree-equals-pre-811-plus-ledger
+834 75b3f84ba412983be9bc206a0da2fc7811d08e9c independent-review-20261113 risk=low note=docs-only-decisions-rows-d076-d078
+833 379d9478e96bfa69955aa3fea3edd3cd3851b5b8 independent-review-20261113 risk=high note=fails-closed-h2-h4-by-ruling-head-ci-green-incl-browser-and-forms-coverage-pagedata-shown-and-hashed
+817 cc079ee15c95daf00978f9abf5cd80b809dfa4a5 independent-review-20261113 risk=medium note=pay-by-place-labelled-or-none-tests-pass-no-existing-test-edited
+824 dbeb4f837c321ffbe2fece04d8f2ea608948afdf independent-review-20261113 risk=medium note=runners-reserve-before-first-call-settle-on-error-6-of-6-pass
+812 a6dc631e14fa297739c8cf3007a2c15d81253103 independent-review-20261113 risk=high note=net-safer-than-trunk-d703-leadin-exception-and-hosted-stale-fact-open-fw3-red-on-trunk-after-815-fixed-by-838
+836 647175a550261b3940f9fb44ed40bcdef5097a1b independent-review-20261113 risk=high note=approved-at-0bb44e151-delta-trunk-merge-only-833-head-ancestor-engine-files-branch-side
+837 73b86cb96dff1970f76e9c21c26a9558b762b430 independent-review-20261113 risk=low note=approved-at-b2fcacbd1-delta-decisions-row-d079-only

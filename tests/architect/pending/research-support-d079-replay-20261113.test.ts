@@ -3,7 +3,7 @@
 // the live judge gave. Only code is under test here: what the code now sends (passage, question, which claims reach the judge), and
 // that the judge prompt now states each rule the judge got wrong. Whether the live judge now answers those right is for the next
 // paid run (owner approval first), not for this file.
-import { assert, assertEquals as eq } from "jsr:@std/assert@1";
+import { assert, assert as ok, assertEquals as eq } from "jsr:@std/assert@1";
 import { CAUSES, D079_WRONG, ASK_OF } from "../../../evals/research-support/d079-replay.ts";
 import { decide, echoes, findSupport, indexPages, quoteClaim, SUPPORT_JUDGE_SYSTEM, supportJudgePayload, type SupportJudge } from "../../../supabase/functions/_shared/agent/research/support.ts";
 import { abbreviated } from "../../../supabase/functions/_shared/agent/research/market.ts";
@@ -14,6 +14,7 @@ const now = (r: (typeof D079_WRONG)[number]) => {
   const f = findSupport(r.claim, idx, [0]);
   return { idx, f, sent: f ? { claim: echoes(r.claim, f.sentence) ? quoteClaim(f.sentence, idx, f.unit.lent) : r.claim, source: f.unit.passage } : null };
 };
+const noPageOf = (p: string) => p.split("\n").filter((l) => !l.startsWith("Page of: ")).join("\n");
 const of = (cause: string) => D079_WRONG.filter((r) => r.cause === cause);
 
 Deno.test("D-079 replay: the recorded data is the 19 wrong verdicts (14 true refused, 5 false passed), each with a cause", () => {
@@ -32,7 +33,8 @@ Deno.test("D-079 replay, harness: a fact that is not about pay is no longer aske
     const { sent } = now(r);
     assert(sent, r.key);
     assert(!sent.claim.includes(PAY_Q), `now: ${r.key}: ${sent.claim}`);
-    eq(sent.source, r.sentPassage, r.key); // the passage itself was right
+    // the passage itself was right (round 11 adds code's "Page of:" line to it)
+    for (const line of r.sentPassage.split("\n")) ok(sent.source.split("\n").includes(line), `${r.key}: ${line}`);
   }
   // A pay fact is still asked under the pay question.
   eq(ASK_OF("Citadel interns earn $5,000 a week."), PAY_Q);
@@ -88,7 +90,8 @@ Deno.test("D-079 replay end to end: what the person would now see, per case", as
   for (const r of D079_WRONG) {
     const { idx, sent } = now(r);
     const judge: SupportJudge = async (cs) => cs.map((c) => {
-      const recorded = c.claim === r.sentClaim && c.source === r.sentPassage;
+      // (Round 11's "Page of:" line is code's note added to every lent page; a passage that differs only by it is the recorded one.)
+      const recorded = c.claim === r.sentClaim && noPageOf(c.source) === r.sentPassage;
       if (!recorded) unseen++;
       return recorded ? r.live : r.want;
     });
@@ -96,7 +99,7 @@ Deno.test("D-079 replay end to end: what the person would now see, per case", as
     const shown = v.how;
     if (r.want === "no" && shown === "model") leak++;
     if (r.want === "yes" && shown === "drop") { lost++; lostIds.push(r.key.split(": ")[1].split(" ")[0]); }
-    rows.push(`${r.key.slice(0, 60)} [${r.cause}] sent ${sent ? (sent.claim === r.sentClaim && sent.source === r.sentPassage ? "same" : "changed") : "stopped by code"} -> ${shown}`);
+    rows.push(`${r.key.slice(0, 60)} [${r.cause}] sent ${sent ? (sent.claim === r.sentClaim && noPageOf(sent.source) === r.sentPassage ? "same" : "changed") : "stopped by code"} -> ${shown}`);
   }
   console.log(rows.join("\n"));
   console.log(`D-079 replay: false in the model's words ${leak} of 5; true dropped ${lost} of 14; claims the live judge never saw ${unseen}`);
@@ -128,4 +131,40 @@ Deno.test("D-079 replay, layer A: the true claims it stopped for its own reading
   for (const claim of stays) for (const [title, page] of TRUE_40.filter((t) => t[2] === claim)) assert(!passes(title, page, claim), claim);
   const g14 = CASES.find((c) => c.id.startsWith("G14"))!;
   assert(!passes(g14.title ?? "Citadel compensation notes", g14.page, g14.claim), "G14");
+});
+
+// ================================================================================================ round 11: live run 2's 10 errors
+import { RUN2_WRONG } from "../../../evals/research-support/d079-replay.ts";
+Deno.test("run 2 replay: 10 wrong verdicts (7 true refused, 3 false passed), each read; code now sends what each needed", async () => {
+  eq(RUN2_WRONG.length, 10);
+  eq(RUN2_WRONG.filter((r) => r.want === "yes").length, 7);
+  const by = (k: string) => RUN2_WRONG.find((r) => r.key.includes(k))!;
+  // Labels: the judge was right on G19 (the claim adds "According to the careers page") and G20 ("It" is Citadel).
+  eq([by("G19").cause, by("G20").cause], ["label", "label"]);
+  // Code: a heading that names no role no longer stands for a claim about interns.
+  const h = by("heading:");
+  eq(findSupport(h.claim, indexPages([{ text: h.page, title: h.title }], abbreviated, ["Citadel"], { ask: ASK_OF(h.claim) }), [0]), null);
+  // Code: on a lent page the judge is told whose page code takes it to be; it was not before.
+  for (const k of ["earn $5,000 a week.", "pays interns $5,000 a week.", "pay range", "Applications close on"]) {
+    const r = by(k);
+    ok(!r.sentPassage.includes("Page of:"), k);
+    ok(now(r).sent!.source.includes("Page of: Citadel (the page title names only it)"), k);
+  }
+  // Harness: the neutral question is no longer about internships.
+  for (const k of ["H-1B", "Applications close on"]) { ok(by(k).sentClaim.includes("citadel internships"), k); ok(!now(by(k)).sent!.claim.includes("internships"), k); }
+  // Prompt: each judge class now has its rule.
+  for (const re of [/closed on March 3\\?"? does not state/, /"?\$4,000 - \$5,000 a week\\?"? states/, /median X salary is \$120 an hour/, /"Page of: X\\?"? line, \\?"?we\\?"?, \\?"?our/, /A heading or label/]) ok(re.test(SUPPORT_JUDGE_SYSTEM), String(re));
+  // End to end with the recorded verdict where code still sends what run 2 sent, the hand label where it now sends something new
+  // (every "fixed" here needs the next live run to confirm).
+  const lost: string[] = [], through: string[] = [];
+  for (const r of RUN2_WRONG) {
+    const { idx } = now(r);
+    const judge: SupportJudge = async (cs) => cs.map((c) => c.claim === r.sentClaim && c.source === r.sentPassage ? r.live : r.want);
+    const [v] = await decide([{ claim: r.claim }], idx, judge);
+    if (r.want === "yes" && v.how === "drop") lost.push(r.key);
+    if (r.want === "no" && v.how === "model") through.push(r.key);
+  }
+  console.log(`run 2 replay: true dropped ${lost.length} of 7 (${lost.join("; ")}); false in the model's words ${through.length} of 3 (${through.join("; ")})`);
+  eq(lost, []);
+  eq(through, []);
 });

@@ -5,8 +5,9 @@
 // deno-lint-ignore-file
 
 // The question the measure asks each case under: a pay claim under the pay question, any other fact under a neutral one (D-079 asked
-// every case the pay question).
-export const ASK_OF = (claim: string) => /\$|pay|earn|salary|stipend|bonus|wage|compensation/i.test(claim) ? "what does citadel pay interns" : "what should i know about citadel internships";
+// every case the pay question; round 11: run 2 asked the others "about citadel internships", and a fact about full-time hires or
+// applications was refused for that).
+export const ASK_OF = (claim: string) => /\$|pay|earn|salary|stipend|bonus|wage|compensation/i.test(claim) ? "what does citadel pay interns" : "what should i know about citadel";
 
 export const CAUSES = {
  "harness": "case label wrong (the measure asked every quote whether it answers \"what does citadel pay interns\"; a visa, date or interview fact does not)",
@@ -227,5 +228,132 @@ export const D079_WRONG: Replay[] = [
   "claim": "Citadel cut pay 10% for interns.",
   "sentClaim": "Citadel cut pay 10% for interns.",
   "sentPassage": "Page title: Citadel notes\nWhole page, the candidate marked:\n>>> Citadel raised pay 10% for interns and cut pay 10% for contractors. <<<"
+ }
+];
+
+// Run 2 (D-080, 2026-11-13, $0.116, ffaa69332): its 10 wrong verdicts, rebuilt exactly at the run's code with no network (the log keeps
+// verdicts, not the judge's text). `why` is the round-11 reading; tests/architect/pending/research-support-d079-replay-20261113.test.ts
+// replays them.
+export interface Replay2 extends Replay { why: string }
+export const RUN2_WRONG: Replay2[] = [
+ {
+  "key": "true 28: G19 without attribution owner",
+  "cause": "label",
+  "live": "no",
+  "want": "yes",
+  "why": "The claim adds \"According to the careers page\"; the page is titled \"Citadel compensation notes\" and says nothing of a careers page. The judge was right; the label is wrong.",
+  "title": "Citadel compensation notes",
+  "page": "The summer program at Citadel runs for eleven weeks in Chicago.",
+  "claim": "According to the careers page, the summer program at Citadel runs for eleven weeks in Chicago.",
+  "sentClaim": "According to the careers page, the summer program at Citadel runs for eleven weeks in Chicago.",
+  "sentPassage": "Page title: Citadel compensation notes\nWhole page, the candidate marked:\n>>> The summer program at Citadel runs for eleven weeks in Chicago. <<<"
+ },
+ {
+  "key": "true 28: G20 quote ends with stop",
+  "cause": "label",
+  "live": "yes",
+  "want": "no",
+  "why": "\"Citadel has 2,800 employees. It was founded in 1990.\" does say Citadel was founded in 1990 (\"It\" is Citadel). The judge was right; the label is wrong.",
+  "title": "Citadel compensation notes",
+  "page": "Citadel has 2,800 employees. It was founded in 1990.",
+  "claim": "Citadel was founded in 1990.",
+  "sentClaim": "Citadel was founded in 1990.",
+  "sentPassage": "Page title: Citadel compensation notes\nWhole page, the candidate marked:\n- Citadel has 2,800 employees.\n>>> It was founded in 1990. <<<"
+ },
+ {
+  "key": "false 101: heading: Citadel pays interns $5,000 weekly.",
+  "cause": "layerA",
+  "live": "yes",
+  "want": "no",
+  "why": "The page is the label \"Citadel: $5,000 weekly\": the claim adds \"interns\". Code: a role the claim names must be in what the judge is shown.",
+  "title": "Citadel notes",
+  "page": "Citadel: $5,000 weekly",
+  "claim": "Citadel pays interns $5,000 weekly.",
+  "sentClaim": "Citadel pays interns $5,000 weekly.",
+  "sentPassage": "Page title: Citadel notes\nWhole page, the candidate marked:\n>>> Citadel: $5,000 weekly <<<"
+ },
+ {
+  "key": "false 101: time: Applications at Citadel close on March 3.",
+  "cause": "prompt",
+  "live": "yes",
+  "want": "no",
+  "why": "\"closed\" (past) taken for \"close\": prompt now says tense is part of the fact.",
+  "title": "Citadel notes",
+  "page": "Applications at Citadel closed on March 3.",
+  "claim": "Applications at Citadel close on March 3.",
+  "sentClaim": "Applications at Citadel close on March 3.",
+  "sentPassage": "Page title: Citadel notes\nWhole page, the candidate marked:\n>>> Applications at Citadel closed on March 3. <<<"
+ },
+ {
+  "key": "true 40: Citadel interns earn $5,000 a week.",
+  "cause": "passage",
+  "live": "no",
+  "want": "yes",
+  "why": "\"Our interns earn $5,000 a week.\" on \"Citadel careers\": nothing in the passage said whose \"our\" it is. Code now adds \"Page of: Citadel (...)\"; the prompt reads we/our on it as Citadel.",
+  "title": "Citadel careers",
+  "page": "Our interns earn $5,000 a week.",
+  "claim": "Citadel interns earn $5,000 a week.",
+  "sentClaim": "Citadel interns earn $5,000 a week.",
+  "sentPassage": "Page title: Citadel careers\nWhole page, the candidate marked:\n>>> Our interns earn $5,000 a week. <<<"
+ },
+ {
+  "key": "true 40: Citadel pays interns $5,000 a week.",
+  "cause": "passage",
+  "live": "no",
+  "want": "yes",
+  "why": "\"We pay interns $5,000 a week.\": as above.",
+  "title": "Citadel careers",
+  "page": "Software Engineering Intern\nWe pay interns $5,000 a week.",
+  "claim": "Citadel pays interns $5,000 a week.",
+  "sentClaim": "Citadel pays interns $5,000 a week.",
+  "sentPassage": "Page title: Citadel careers\nWhole page, the candidate marked:\n- Software Engineering Intern\n>>> We pay interns $5,000 a week. <<<"
+ },
+ {
+  "key": "true 40: Citadel software interns earn a median of $120 per hour.",
+  "cause": "prompt",
+  "live": "no",
+  "want": "yes",
+  "why": "\"The median Citadel software intern salary is $120 an hour.\": a paraphrase; the prompt now has it as an example.",
+  "title": "Levels: Citadel intern pay",
+  "page": "The median Citadel software intern salary is $120 an hour.",
+  "claim": "Citadel software interns earn a median of $120 per hour.",
+  "sentClaim": "Citadel software interns earn a median of $120 per hour.",
+  "sentPassage": "Page title: Levels: Citadel intern pay\nWhole page, the candidate marked:\n>>> The median Citadel software intern salary is $120 an hour. <<<"
+ },
+ {
+  "key": "true 40: Citadel sponsors H-1B visas for full-time hires.",
+  "cause": "harness",
+  "live": "no",
+  "want": "yes",
+  "why": "Asked whether it answers \"what should i know about citadel internships\" (a fact about full-time hires). The measure now asks \"what should i know about citadel\".",
+  "title": "Citadel careers",
+  "page": "Citadel sponsors H-1B visas for full-time hires.",
+  "claim": "Citadel sponsors H-1B visas for full-time hires.",
+  "sentClaim": "The marked text \"Citadel sponsors H-1B visas for full-time hires.\" is the page's own statement of fact about Citadel specifically, not about another firm, not an instruction, an offer or a request to the reader, and it answers the question: what should i know about citadel internships.",
+  "sentPassage": "Page title: Citadel careers\nWhole page, the candidate marked:\n>>> Citadel sponsors H-1B visas for full-time hires. <<<"
+ },
+ {
+  "key": "true 40: Applications close on January 15, 2027.",
+  "cause": "harness",
+  "live": "no",
+  "want": "yes",
+  "why": "No subject on the page and the same internships question; now the neutral question and the \"Page of:\" line.",
+  "title": "Citadel careers",
+  "page": "Applications close on January 15, 2027.",
+  "claim": "Applications close on January 15, 2027.",
+  "sentClaim": "The marked text \"Applications close on January 15, 2027.\" is the page's own statement of fact about Citadel specifically, not about another firm, not an instruction, an offer or a request to the reader, and it answers the question: what should i know about citadel internships.",
+  "sentPassage": "Page title: Citadel careers\nWhole page, the candidate marked:\n>>> Applications close on January 15, 2027. <<<"
+ },
+ {
+  "key": "true 40: The pay range is $4,000 to $5,000 a week.",
+  "cause": "passage",
+  "live": "no",
+  "want": "yes",
+  "why": "\"Pay range: $4,000 - $5,000 a week.\" with no subject and a dash: now the \"Page of:\" line, and the prompt reads a dash range as \"to\".",
+  "title": "Citadel careers",
+  "page": "Pay range: $4,000 - $5,000 a week. Location: Chicago, IL.",
+  "claim": "The pay range is $4,000 to $5,000 a week.",
+  "sentClaim": "The pay range is $4,000 to $5,000 a week.",
+  "sentPassage": "Page title: Citadel careers\nWhole page, the candidate marked:\n>>> Pay range: $4,000 - $5,000 a week. <<<\n- Location: Chicago, IL."
  }
 ];

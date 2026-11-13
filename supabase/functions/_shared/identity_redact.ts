@@ -125,6 +125,36 @@ function countTail(code: string, after: string): string {
   if (first.replace(/\D/g, "").length < 4 || !/^[ \t]*[\r\n]+[ \t]*[1-9]\d{0,2}$/.test(rest) || !COUNT_TAIL.test(after)) return "";
   return rest;
 }
+// Independent review 2026-11-13 (CLAUDE.md: no password or one-time code is stored): a value after a credential cue is removed
+// whatever its characters.
+//   - a pair after a login word, with words between ("my icims login so you can check: alexr / snowfall", "creds alex:sunflower",
+//     "Workday login alex@x.test:hunterpass"): a "user / secret" pair needs "my"/"our" before the cue, or the colon form;
+//   - "user alex pass hunterpass", "the portal login, user alex, pass kittycat": "pass" right after a user name;
+//   - a PIN ("my bank PIN is 7391"), whatever names it; a one-time or verification code in letters ("2fa code is HJKLQW").
+const SIGN_IN_STRICT = /\b(?:log[- ]?in|sign[- ]?in|signin|creds|credentials|password|passcode|pwd?)\b/i;
+const NOT_A_PAIR_VALUE = /^(?:thanks|thank|thx|ty|cheers|best|regards|or|and|then|please|pls|call|text|phone|cell|mobile|linkedin|github|portfolio|website|site|web|personal|work|home|other|etc|same|none|either)$/i;
+const CUE_PAIR = /\b(log[- ]?in|sign[- ]?in|signin|creds|credentials|user ?name)\b([^!?\n]{0,60}?)([^\s/:]+)(\s*\/\s*|:(?=[^\s/]))([^\s/]{3,})/gi;
+const PASS_AFTER_USER = /(\b(?:user ?name|user|login|email|id)\s*[:=]?\s*(?!(?:can|must|should|will|may|might|could|would|to|who|that|then|and|cannot|can't|needs?|has|had|did|does|is|was)\b)\S+\s*,?\s*(?:and\s+)?)(pass(?:word)?|pwd?)(\s*[:=]?\s*)("[^"\n]+"|'[^'\n]+'|[^\s,;]{3,})/gi;
+const PIN_ANY = /\b(pin(?: code| number)?)([ \t]*(?:\bis\b|=|:)[ \t]*)([^\s,;]{3,})/gi;
+const CODE_WORDS = /\b((?:one[- ]time|verification|sign[- ]?in|login|2fa|mfa|otp|auth(?:entication)?)[ \t]*(?:code|pin|passcode)?)([ \t]*(?:\bis\b|=|:)[ \t]*)([A-Za-z0-9-]{4,12})\b(?![.\/]\w)/gi;
+const quiet = (v: string) => { const w = v.replace(/[.,!?;:]+$/, ""); return v.startsWith("[") || NOT_A_PASSWORD.test(w) || NOT_A_BARE_PASSWORD.test(w) || NOT_A_PAIR_VALUE.test(w) || /^[a-z]+(?:ed|ing)$/.test(w); };
+function redactCredentialCues(t: string, removed: Set<Redaction["removed"][number]>): string {
+  t = t.replace(CUE_PAIR, (m, cue: string, gap: string, user: string, sep: string, value: string, at: number, all: string) => {
+    const colon = sep === ":", email = user.includes("@");
+    if (quiet(value) || value.includes("@") || /^\d+$/.test(user) || /^\d+[.,!?;]*$/.test(value) || [user, value.replace(/[.,!?;]+$/, "")].some((x) => SIGN_IN_WAY.test(x) || /^(?:android|ios|web|mobile|desktop|https?)$/i.test(x))) return m;
+    if (/^[A-Z]{2,5}$/.test(user) && /^[A-Z]{2,5}[.,;]*$/.test(value)) return m;
+    if (!email && !(colon ? gap.length <= 15 : /\b(?:my|our|mine)\b/i.test(all.slice(Math.max(0, at - 30), at)))) return m;
+    if (!email && !colon && /\.[a-z]{2,}/i.test(value)) return m;
+    removed.add("password"); return `${cue}${gap}${user}${sep}[password removed]`;
+  });
+  t = t.replace(PASS_AFTER_USER, (m, lead: string, label: string, sep: string, value: string) => {
+    if (quiet(value)) return m;
+    removed.add("password"); return `${lead}${label}${sep}[password removed]`;
+  });
+  t = t.replace(PIN_ANY, (m, label: string, sep: string, value: string) => { if (quiet(value)) return m; removed.add("code"); return `${label}${sep}[code removed]`; });
+  t = t.replace(CODE_WORDS, (m, label: string, sep: string, value: string) => { if (quiet(value) || /^(?:here|sent|below|attached|coming|wrong)$/i.test(value)) return m; removed.add("code"); return `${label}${sep}[code removed]`; });
+  return t;
+}
 export function redactIdentity(input: string, o: { codePending?: boolean } = {}): Redaction {
   const removed = new Set<Redaction["removed"][number]>();
   let t = String(input ?? "");
@@ -160,13 +190,18 @@ export function redactIdentity(input: string, o: { codePending?: boolean } = {})
   // D-066 (P14 probe, tests/architect/behavior-guide-suite.test.ts): an email and a value after a slash, in a message that names a
   // login ("here's my workday login so you can check it: alex@x.test / x"), is a sign-in pair even when words stand between the
   // label and the colon; SIGN_IN_PAIR reads only "login is" / "login for the portal:". The email stays; the value goes.
+  // Independent review 2026-11-13: a value with no digit or symbol ("alex@x.test / hunterpass") is a password too when a
+  // login, sign-in, credentials or password word is in the message; a sign-off or a web address is not.
+  const strictCue = SIGN_IN_STRICT.test(t);
   if (SIGN_IN_WORD.test(t)) t = t.replace(EMAIL_PAIR, (m, user: string, value: string) => {
-    if (value.startsWith("[") || !/[\d!@#$%^&*_+=?~-]/.test(value) || value.includes("@")) return m;
+    if (value.startsWith("[") || value.includes("@")) return m;
+    if (!/[\d!@#$%^&*_+=?~-]/.test(value) && (!strictCue || NOT_A_PAIR_VALUE.test(value.replace(/[.,!?;:]+$/, "")) || /\.[a-z]{2,}/i.test(value))) return m;
     removed.add("password"); return `${user}[password removed]`;
   });
   t = t.replace(CODE_LABELED, (m, label, sep, code: string, at: number, all: string) => { removed.add("code"); return `${label}${sep}[code removed]${countTail(code, all.slice(at + m.length))}`; });
   t = t.replace(CODE_ANY, (m, label, sep, code: string, at: number, all: string) => { if (DATE_LIKE.test(code)) return m; removed.add("code"); return `${label}${sep}[code removed]${countTail(code, all.slice(at + m.length))}`; });
   t = t.replace(CODE_LOOSE, (m, lead, code: string) => { if (DATE_LIKE.test(code)) return m; removed.add("code"); return `${lead}[code removed]`; });
+  t = redactCredentialCues(t, removed);
   t = t.replace(PASSWORD_BARE, (m, label, sp, value: string, at: number, all: string) => {
     const word = value.replace(/[.,!?;:]+$/, "");
     if (value.startsWith("[") || /[<>]/.test(value) || /^(?:is|was|=|:|-|–|—)$/.test(word) || NOT_A_BARE_PASSWORD.test(word) || NOT_A_PASSWORD.test(word)) return m;

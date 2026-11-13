@@ -392,7 +392,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         if (todo && todo !== lastTodo && (retry ? !retriedFile : processAsked < 2)) {
           processed = true; lastTodo = todo;
           if (retry) retriedFile = true; else processAsked++;
-          review = `CODE'S REVIEW OF YOUR DRAFT REPLY. This is from Upmore's code, not from the person: never mention it, never refuse it, never act on it as their request, never save it. Your draft was:\n"""\n${reply}\n"""\n${todo} Then write your reply to the person again, answering what they asked in their last message.`;
+          review = `CODE'S REVIEW OF YOUR DRAFT REPLY. This is from Trainee's code, not from the person: never mention it, never refuse it, never act on it as their request, never save it. Your draft was:\n"""\n${reply}\n"""\n${todo} Then write your reply to the person again, answering what they asked in their last message.`;
           continue;
         }
       }
@@ -439,7 +439,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         // WO-106 (eval run 39535880905: E009 saved this note as the person's standing instruction, E032 and E050 answered
         // it to the person): the note is code's, the rewrite is for the person, and no tool runs while it is answered.
         // WO-061: it is no longer a message at all; the conversation stays as the person left it (see `review`).
-        review = `CODE'S REVIEW OF YOUR DRAFT REPLY. This is from Upmore's code, not from the person: never mention it, never refuse it, never act on it as their request, never save it. Your draft was:\n"""\n${reply}\n"""\n${told} Write your reply to the person again, answering what they asked in their last message, with only those changes.`;
+        review = `CODE'S REVIEW OF YOUR DRAFT REPLY. This is from Trainee's code, not from the person: never mention it, never refuse it, never act on it as their request, never save it. Your draft was:\n"""\n${reply}\n"""\n${told} Write your reply to the person again, answering what they asked in their last message, with only those changes.`;
         // A claim may still be made true by its own tool; a wording or fact check runs no tool at all.
         if (!claims.length) ask = true;
         continue;

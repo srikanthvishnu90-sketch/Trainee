@@ -23,7 +23,8 @@ function EXTRACT() {
   const squash = (s) => String(s || "").replace(/\s+/g, " ").trim();
   const clean = (s) => squash(s).replace(/\(required\)/i, "").replace(/\s*[*✱]+\s*$/, "").replace(/\s*[*✱]+\s*$/, "").trim();
   // An employee sign-in form (MARK_SIGNIN: Teamtailor's "Already working at X?") is never the application's scope or questions.
-  const scope = document.querySelector("form:not([data-upmore-signin])") || document.body;
+  // Review of #797: the form the runner marked as the application (parallel-apply MARK), so the form filled is the one whose Submit is pressed.
+  const scope = document.querySelector("form[data-upmore-app]") || document.querySelector("form:not([data-upmore-signin])") || document.body;
   // Every match under a root, in document order, descending into open shadow roots (SmartRecruiters' components).
   const deepAll = (root, sel) => { const out = []; const walk = (n) => { for (const c of n.children) { if (c.matches(sel)) out.push(c); if (c.shadowRoot) walk(c.shadowRoot); walk(c); } }; walk(root); return out; };
   const rootOf = (el) => (el.getRootNode ? el.getRootNode() : document);

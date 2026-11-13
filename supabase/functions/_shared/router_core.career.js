@@ -27054,15 +27054,17 @@ const CareerRender = (() => {
     for (const m of s.matchAll(/[\[<{]+\s*(?:phone|mobile|tel)[^\]>}|]*[\]>}]+|\bphone number\b/gi)) out.push(m[0]);
     for (const m of s.matchAll(/(?<![\d$.,@\w\/=_-])\+?\(?\d[\d\s().-]{4,}\d(?![\d%\w@])(?:\s*\(TEST\))?/g)) {
       const fixture = /\(TEST\)$/.test(m[0]), t = m[0].replace(/\s*\(TEST\)$/, "").trim(), d = t.replace(/\D/g, ""), plus = t[0] === "+";
-      const nanp = plus ? (d[0] === "1" ? d.slice(1) : null) : d.length === 11 && d[0] === "1" ? d.slice(1) : /^\(?\d{3}\)?[\s.-]*\d{3}[\s.-]*\d{4}$/.test(t) ? d : null;
+      const nanp = plus ? (d[0] === "1" ? d.slice(1) : null) : d.length === 11 && d[0] === "1" ? d.slice(1)
+        : d.length === 10 && /^[2-9]/.test(d) && /^\(?\d{3}\)?[\s.-]*\d{3}[\s.-]*\d{4}$/.test(t) ? d : null;
+      const counting = (x) => x.length >= 7 && ("01234567890123456789".includes(x) || "98765432109876543210".includes(x));
       let bad = false;
       if (fixture && plus && /^155501\d\d$/.test(d)) continue;
-      if (plus && /^155501\d\d$/.test(d)) bad = true;
-      else if (d.length < 7 || (!plus && d.length < 10 && t[0] === "(")) bad = !file && (/^\(\d{3}\)|^\d{3}-\d{3}$/.test(t) || (plus && /\(\d{3}\)/.test(t)));
-      else if (d.length > 15 || (plus && (d[0] === "0" || d.length < 8))) bad = !file || d.length > 15;
-      else if (/^(\d)\1+$/.test(d) || "01234567890123456789".includes(d) || "98765432109876543210".includes(d) || (nanp && "98765432109876543210".includes(nanp))) bad = true;
-      else if (d.length === 7 && !plus) bad = /^55501\d\d$/.test(d) || (!file && /^\d{3}[\s.-]?\d{4}$/.test(t));
-      else if (nanp !== null) bad = nanp.length !== 10 || /^[01]|^555|^\d{3}[01]|^\d{3}55501|^(\d)\1{2}(\d)\2{2}(\d)\3{3}$/.test(nanp) || /^\d{3}0{7}$|^\d{3}5{7}$/.test(nanp) || "01234567890123456789".includes(nanp);
+      if (/^155501\d\d$/.test(d) && plus) bad = true;
+      else if (/^55501\d\d$/.test(d)) bad = true;
+      else if (d.length >= 7 && /^(\d)\1+$/.test(d)) bad = true;
+      else if (counting(d) || (nanp && counting(nanp))) bad = true;
+      else if (nanp !== null) bad = nanp.length !== 10 ? !file : /^555|^\d{3}55501|^\d{3}0{7}$|^\d{3}1234567$|^(\d)\1{2}(\d)\2{2}(\d)\3{3}$/.test(nanp);
+      else if (d.length > 15 || (plus && d[0] === "0")) bad = !file;
       else bad = /^(?:44|0)(?:7700900|2079460)\d{3}$/.test(d) || /^(?:61|0)49157015\d$/.test(d);
       if (bad) out.push(t);
     }

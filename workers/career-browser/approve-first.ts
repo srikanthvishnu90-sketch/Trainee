@@ -92,7 +92,9 @@ export async function prepare(o: {
 }) {
   // No card is built with a resume whose contact is a placeholder or cannot be read (the same gate the submit paths use).
   const gate = (await import("../../supabase/functions/_shared/career_tailor.ts")), file = await Deno.readFile(o.resumePath).catch(() => null);
-  if (file && (await gate.resumeFileContactProblems(file)).length) return { ready: false as const, result: { state: "not_submitted", reason: "RESUME_CONTACT_UNCONFIRMED" } };
+  // Compared with the addresses in the facts the preparation fills from (the person's confirmed answers).
+  const facts = await Deno.readTextFile(o.factsPath).then((t) => { try { return JSON.parse(t); } catch { return null; } }, () => null);
+  if (file && (await gate.resumeFileContactProblems(file, { confirmed: gate.factsEmails(facts) })).length) return { ready: false as const, result: { state: "not_submitted", reason: "RESUME_CONTACT_UNCONFIRMED" } };
   const run = await o.runEngine(["--url", o.url, "--facts", o.factsPath, "--resume", o.resumePath]);
   if (!run || run.result.reason !== "dry_run" || !run.evidence?.approval_hash) {
     return { ready: false as const, result: run?.result ?? { state: "not_submitted", reason: "ENGINE_NO_RESULT" } };

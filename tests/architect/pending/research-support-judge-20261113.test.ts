@@ -12,7 +12,8 @@
 //
 // With the switch on these existing assertions fail (each pins a line in the model's words that no judge passed, or a reading shown
 // as "not confirmed", or the model's title), and may not be edited to pass; the switch stays off until the architect rules on them:
-// measured 2026-11-13 by running the 54 architect files that touch research or the brain with the switch on: 44 tests fail, in
+// measured 2026-11-13 by running the 54 architect files that touch research or the brain with the switch on: 44 tests fail (48
+// after round 2, which is stricter), in
 //   d067-live-round2-20261112 (2), d071-live8-fixes-20261112 (1), d073-live9-fixes-20261112 (3), d073-review-fixes-20261113 (3),
 //   d073-review2-fixes-20261113 (4), research-company-brief-20261109 (5), research-company-f2-20261109 (1),
 //   research-company-review-20261109 (3), research-figures-failclosed-20261113 (6), research-free-brief (4),

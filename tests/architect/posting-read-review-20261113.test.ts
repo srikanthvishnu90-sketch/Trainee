@@ -654,3 +654,93 @@ Deno.test("R18 a redirect from one board to another board's host is not read as 
   const same = any((u) => u === LEVER_API ? to(`${LEVER_API}?x=1`) : u.startsWith(LEVER_API) ? json({ id: LEVER_ID, text: "Analyst" }) : body("", "text/html", 404));
   eq((await readApplyFlow(LEVER, { fetch: same, now: () => NOW })).posting?.title, "Analyst");
 });
+
+// ------------------------------------------------------------------------------------------------ round 5
+Deno.test("R19 a pasted link: the posting's own API first, a 32 MB board feed, and a read that failed is never 'closed'", async () => {
+  const { boardFetchFeed } = await import("../../supabase/functions/_shared/career_ingest.ts");
+  const { linkAsk, postingForLink } = await import("../../supabase/functions/_shared/career_apply_link.ts");
+  const job = (i: number, kb = 1) => ({ id: i, title: `Engineer ${i}`, absolute_url: `https://boards.greenhouse.io/acme/jobs/${i}`, location: { name: "NY" }, updated_at: "2026-11-01T00:00:00Z", content: `&lt;p&gt;${"word ".repeat(kb * 200)}&lt;/p&gt;` });
+  const bigFeed = JSON.stringify({ jobs: Array.from({ length: 1200 }, (_, i) => job(i + 1, 8)) }); // about 9.5 MB
+  ok(bigFeed.length > 9 * 1048576 && bigFeed.length < 32 * 1048576, `${bigFeed.length}`);
+  const gh = { provider: "greenhouse", board: "acme", company: "Acme" } as any;
+  const chat = (f: typeof fetch) => (boardFetchFeed as any)(f, { timeoutMs: 8000, personLink: true });
+  const read: any = await chat(any(() => body(bigFeed)))(gh);
+  eq((Array.isArray(read) ? read : read.postings).length, 1200, "a 9.5 MB board feed reads on the chat path");
+  let pulled = 0;
+  const endless = () => new Response(new ReadableStream<Uint8Array>({ pull(c) { pulled += 1048576; if (pulled > 300 * 1048576) c.close(); else c.enqueue(new Uint8Array(1048576).fill(32)); } }));
+  await assertNode.rejects(() => chat(any(endless))(gh), /not read/);
+  ok(pulled > 30 * 1048576 && pulled <= 34 * 1048576, `the chat path read ${pulled / 1048576} MB`);
+  // The posting's own API is asked first; the board feed only when that does not answer.
+  const ask = linkAsk("apply to https://job-boards.greenhouse.io/acme/jobs/7")!;
+  const mem = () => { const rows = new Map<string, any>(); return { rows, db: { get: async (k: string) => rows.get(k) ?? null, put: async (p: any) => { rows.set(p.job_id, p); } } as any }; };
+  let sent: string[] = [];
+  const one = any((u) => { sent.push(u); return /\/jobs\/7(\?|$)/.test(u) ? json(job(7)) : body(bigFeed); });
+  let m = mem();
+  const viaOne = await postingForLink({ ask, db: m.db, fetchFeed: chat(one), now: NOW });
+  eq([viaOne.kind, (viaOne as any).posting?.title, sent.length], ["found", "Engineer 7", 1]);
+  ok(/\/v1\/boards\/acme\/jobs\/7(\?|$)/.test(sent[0]), sent[0]);
+  sent = []; m = mem();
+  const fallback = await postingForLink({ ask, db: m.db, fetchFeed: chat(any((u) => { sent.push(u); return /\/jobs\/7(\?|$)/.test(u) ? body("busy", "text/plain", 503) : body(bigFeed); })), now: NOW });
+  eq([fallback.kind, (fallback as any).posting?.title, sent.length], ["found", "Engineer 7", 2]);
+  const lvAsk = linkAsk(`apply to https://jobs.lever.co/acme/${LEVER_ID}`)!;
+  sent = []; m = mem();
+  const lv = await postingForLink({ ask: lvAsk, db: m.db, fetchFeed: chat(any((u) => { sent.push(u); return json({ id: LEVER_ID, text: "Analyst", hostedUrl: `https://jobs.lever.co/acme/${LEVER_ID}`, categories: { location: "NY" }, createdAt: 1790000000000, descriptionPlain: "A role." }); })), now: NOW });
+  eq([lv.kind, (lv as any).posting?.title, sent], ["found", "Analyst", [LEVER_API]]);
+  // A posting on file as closed, and a read that failed now (too large, refused, a 503): not read, never "closed".
+  for (const fail of [() => Promise.reject(new Error("HTTP 503")), chat(any(endless)), chat(any(() => to("https://www.linkedin.com/jobs/x")))]) {
+    m = mem(); m.rows.set(ask.key, { job_id: ask.key, title: "Engineer 7", company: "Acme", closed_at: "2026-11-01T00:00:00Z" });
+    const r = await postingForLink({ ask, db: m.db, fetchFeed: fail as any, now: NOW });
+    eq(r.kind, "unreadable");
+    const said = await applyHere.applyHereTurn({ message: "apply here https://job-boards.greenhouse.io/acme/jobs/7", now: NOW, db: m.db, fetchFeed: fail as any, apps: async () => [], facts: [] });
+    ok(/couldn't read/.test(said!.reply) && !/closed/.test(said!.reply), said!.reply);
+  }
+  // Read and not listed, with the posting on file as closed: that is closed.
+  m = mem(); m.rows.set(ask.key, { job_id: ask.key, title: "Engineer 7", company: "Acme", closed_at: "2026-11-01T00:00:00Z" });
+  eq((await postingForLink({ ask, db: m.db, fetchFeed: chat(any((u) => /\/jobs\/7(\?|$)/.test(u) ? json({ status: 404, error: "Job not found" }, 404) : json({ jobs: [job(1)] }))), now: NOW })).kind, "closed");
+});
+
+Deno.test("R20 the name lookup has its own time limit; a lookup that fails in passing is not a refusal; a failed probe is logged and tried again", async () => {
+  const pf: any = await import("../../supabase/functions/_shared/posting_fetch.ts");
+  const nf = () => Promise.reject(Object.assign(new Error("no records found"), { name: "NotFound" }));
+  const good = (h: string, t: string) => h === pf.RESOLVER_PROBE_NAME ? Promise.resolve(t === "A" ? [PUBLIC] : []) : null;
+  // A transient failure after a good probe: not checked, the request goes ahead as on trunk.
+  for (const name of ["TimedOut", "Error", "ConnectionReset"]) {
+    const r = pf.makeSystemResolve((h: string, t: string) => good(h, t) ?? Promise.reject(Object.assign(new Error("x"), { name })));
+    eq(await r("careers.acme.com"), null, name);
+    const c = checker(any(() => body("ok", "text/html")), { resolve: r });
+    eq([await c({ url: "https://careers.acme.com/jobs/1" }), c.debug], ["live", { dns_checked: false }], name);
+  }
+  // Only a definite "no such name" is unknown; a private answer is still refused.
+  await assertNode.rejects(() => pf.makeSystemResolve((h: string, t: string) => good(h, t) ?? nf())("gone.acme.com"));
+  eq(await checker(any(() => body("ok", "text/html")), { resolve: pf.makeSystemResolve((h: string, t: string) => good(h, t) ?? Promise.resolve(t === "A" ? ["10.0.0.7"] : [])) })({ url: "https://careers.acme.com/jobs/1" }), "unknown");
+  // A lookup that hangs: stopped at its own limit, counted as not checked.
+  const timers: number[] = [];
+  const hang = pf.makeSystemResolve((h: string, t: string) => good(h, t) ?? new Promise((res) => timers.push(setTimeout(() => res([PUBLIC]), 5000))), { timeoutMs: 60 });
+  let t0 = Date.now();
+  eq(await hang("slow.acme.com"), null);
+  ok(Date.now() - t0 < 600, `${Date.now() - t0} ms`);
+  ok(pf.DNS_TIMEOUT_MS <= 2000, "a lookup's default limit is at most 2 s");
+  // An injected resolver that hangs is stopped the same way (the link check, and a scheduled ingest's redirect hop).
+  t0 = Date.now();
+  const c = checker(any(() => body("ok", "text/html")), { resolve: () => new Promise((res) => timers.push(setTimeout(() => res([PUBLIC]), 6000))) });
+  eq([await c({ url: "https://careers.acme.com/jobs/1" }), c.debug], ["live", { dns_checked: false }]);
+  ok(Date.now() - t0 < 2600, `${Date.now() - t0} ms`);
+  const { boardFetchFeed } = await import("../../supabase/functions/_shared/career_ingest.ts");
+  t0 = Date.now();
+  const offers = JSON.stringify({ offers: [{ id: 1, title: "Eng", careers_url: "https://careers.acme.com/o/eng", location: "NY", description: "d", status: "published" }] });
+  await (boardFetchFeed as any)(any((u, init) => u === "https://acme.recruitee.com/api/offers/" && init?.redirect === "manual" ? to("https://careers.acme.com/api/offers/", 301) : new Response(offers)), { timeoutMs: 8000, resolve: () => new Promise((res) => timers.push(setTimeout(() => res([PUBLIC]), 6000))) })({ company: "Acme", provider: "recruitee", board: "acme" });
+  ok(Date.now() - t0 < 2600, `the ingest hop waited ${Date.now() - t0} ms on a lookup`);
+  timers.forEach(clearTimeout);
+  // The probe: a failure is logged once, and tried again after the interval (not cached for the life of the process).
+  let now = 1_000_000, probes = 0, up = false;
+  const logs: string[] = [];
+  const r = pf.makeSystemResolve((h: string, t: string) => h === pf.RESOLVER_PROBE_NAME ? (probes++, up && t === "A" ? Promise.resolve([PUBLIC]) : nf()) : nf(), { now: () => now, log: (m: string) => logs.push(m) });
+  eq([await r("a.acme.com"), await r("b.acme.com")], [null, null]);
+  eq([logs.length, probes], [1, 2], "one failed probe (both families), logged once");
+  ok(/DNS/.test(logs[0]) && !/acme/.test(logs[0]), logs[0]);
+  up = true; now += 60_000;
+  eq(await r("c.acme.com"), null, "inside the interval the failure stands");
+  now += pf.RESOLVER_REPROBE_MS;
+  await assertNode.rejects(() => r("d.acme.com"), "after the interval the resolver is probed again, works, and the name does not exist");
+  eq(logs.length, 1);
+});

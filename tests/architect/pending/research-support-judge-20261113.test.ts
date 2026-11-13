@@ -12,7 +12,14 @@
 //
 // With the switch on these existing assertions fail (each pins a line in the model's words that no judge passed, or a reading shown
 // as "not confirmed", or the model's title), and may not be edited to pass; the switch stays off until the architect rules on them:
-// EXISTING-FAILS
+// measured 2026-11-13 by running the 54 architect files that touch research or the brain with the switch on: 44 tests fail, in
+//   d067-live-round2-20261112 (2), d071-live8-fixes-20261112 (1), d073-live9-fixes-20261112 (3), d073-review-fixes-20261113 (3),
+//   d073-review2-fixes-20261113 (4), research-company-brief-20261109 (5), research-company-f2-20261109 (1),
+//   research-company-review-20261109 (3), research-figures-failclosed-20261113 (6), research-free-brief (4),
+//   research-market-reply (4), research-market-review (2), research-market-subject-review (2), research-no-sources-review (2),
+//   web-research-d060 (2). Their tests call the sync enforceMarketReply / enforceCompanyReply with a model reply (which, with the
+//   switch on, lets no model sentence through), pin model-worded lines and questions no judge passed, the "not confirmed" reading
+//   form, the model's title, and a place written into the model's pay sentence.
 // Synthetic pages and figures; no network, no spend, no model.
 //   deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/pending/research-support-judge-20261113.test.ts
 import assertNode from "node:assert/strict";

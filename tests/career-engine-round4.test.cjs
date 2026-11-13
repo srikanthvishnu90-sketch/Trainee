@@ -47,6 +47,7 @@ test("3: the submit window lets out exactly one request: the approved form, to i
     "JSON with a nested consent": req({ contentType: "text/plain", navigation: false, resourceType: "fetch", body: JSON.stringify({ email: "c@x", extra: { consent: true } }) }),
     "another address": req({ url: "http://h/app/other" }),
     "another method": req({ method: "PUT" }),
+    "the page's own request to its API with one more field": req({ url: "http://h/api/apply", navigation: false, resourceType: "fetch", body: "first_name=Casey&email=c%40x&consent=1" }),
     "a beacon": req({ url: "http://h/x6/beacon", resourceType: "ping", navigation: false }),
     "a ping with parameters": { method: "GET", url: "http://h/px?sponsorship=yes", resourceType: "image", navigation: false, body: null },
     "an XHR with parameters": { method: "GET", url: "http://h/api/track?email=c%40x", resourceType: "xhr", navigation: false, body: null },
@@ -56,6 +57,7 @@ test("3: the submit window lets out exactly one request: the approved form, to i
   for (const r of [{ method: "GET", url: "http://h/app.css", resourceType: "stylesheet", navigation: false }, { method: "GET", url: "http://h/logo.png", resourceType: "image", navigation: false },
     { method: "GET", url: "http://h/app/thanks?ref=1", resourceType: "document", navigation: true }]) assert.equal(pa.submitWindowVerdict(r, st()), "allow", r.url);
   assert.equal(pa.submitWindowVerdict(req({ contentType: "application/json", navigation: false, resourceType: "fetch", body: JSON.stringify({ first_name: "Casey", email: "c@x" }) }), st()), "allow", "the same answers as JSON");
+  assert.equal(pa.submitWindowVerdict(req({ url: "http://h/api/apply", contentType: "text/plain", navigation: false, resourceType: "fetch", body: JSON.stringify({ name: "Casey", mail: "c@x", resume: "resume.pdf" }) }), st()), "allow", "a board's own API, its own key names, the form's values");
 });
 
 test("4: a Review step is a step: pressed like Continue when the form's Submit is drawn and hidden", () => {

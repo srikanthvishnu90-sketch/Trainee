@@ -599,16 +599,27 @@ function submitWindowVerdict(r, s) {
     if (!u.search || r.navigation || ASSET.has(r.resourceType)) return "allow";
     return "abort";
   }
-  if (s.used || method !== String(s.method).toUpperCase() || noHash(method === "GET" ? r.url.split("?")[0] : r.url) !== noHash(method === "GET" ? String(s.action).split("?")[0] : s.action)) return "abort";
-  const want = (s.want || []).map(([k, v]) => [k, /^file:/.test(v) ? String(v).replace(/^(file:[^:]*):\d+$/, "$1") : v]);
+  // The form's own submission (a navigation) goes to the form's address by its method. A board that posts the form with its own
+  // script (fetch / XHR: Workable, Breezy) posts it to its own API address: allowed once, if its body holds exactly the form's data.
+  // A beacon or a ping is never the application.
+  if (s.used || ["ping", "beacon"].includes(r.resourceType)) return "abort";
+  if (r.navigation && (method !== String(s.method).toUpperCase() || noHash(method === "GET" ? r.url.split("?")[0] : r.url) !== noHash(method === "GET" ? String(s.action).split("?")[0] : s.action))) return "abort";
   let rows = method === "GET" ? [...u.searchParams.entries()] : bodyRows(r.contentType, r.body);
+  // An upload is compared by its file's name: "file:<name>" in a multipart body, the bare name in an urlencoded or GET one.
+  const multipart = /multipart\/form-data/i.test(String(r.contentType || ""));
+  const want = (s.want || []).map(([k, v]) => [k, /^file:/.test(v) ? (multipart ? String(v).replace(/^(file:[^:]*):\d+$/, "$1") : String(v).replace(/^file:([^:]*):\d+$/, "$1")) : v]);
   if (!rows) {
     let j; try { j = JSON.parse(String(r.body || "")); } catch { return "abort"; }
     rows = [];
     const walk = (o, key) => { if (o && typeof o === "object") { for (const [k, x] of Object.entries(o)) walk(x, k); return; } rows.push([key, String(o)]); };
     walk(j, "");
-    const names = new Map(want.map(([k, v]) => [String(k).toLowerCase().replace(/[^a-z0-9]/g, ""), v]));
-    if (rows.some(([k, v]) => !names.has(String(k).toLowerCase().replace(/[^a-z0-9]/g, "")) || ![...want].some(([k2, v2]) => String(k2).toLowerCase().replace(/[^a-z0-9]/g, "") === String(k).toLowerCase().replace(/[^a-z0-9]/g, "") && String(v2) === v))) return "abort";
+    // A board that posts its form as JSON names the fields its own way (Breezy: cName as "name"): each value must be one the form
+    // holds (an upload by its file's name), under any key but a consent / opt-in / authorisation / demographic one the form does
+    // not have. A value the form does not hold (an added "yes", a sentence, a true) refuses.
+    const norm = (x) => String(x).toLowerCase().replace(/[^a-z0-9]/g, "");
+    const names = new Set(want.map(([k]) => norm(k)));
+    const values = new Set(want.map(([, v]) => String(v).replace(/^file:([^:]*)(?::\d+)?$/, "$1").replace(/\r\n/g, "\n")));
+    if (rows.some(([k, v]) => (v !== "" && !values.has(String(v).replace(/\r\n/g, "\n"))) || (SENSITIVE_KEY.test(k) && !names.has(norm(k))))) return "abort";
   } else if (sentDiffers(want, rows)) return "abort";
   s.used = true;
   return "allow";
@@ -1124,11 +1135,11 @@ async function attempt(browser, p, opts, timing) {
     }, fr.filled.map((f) => String(f.d.q)));
     const untied = submitTieRefusal({ ...tie, outside: lastPick.outside === true });
     if (untied) throw new NeedsUser(untied, p.url);
+    const av = urlVerdict(tie.action, allow);
+    if (!av.ok) throw new NeedsUser("form_action_not_allowed", av.host);
     // Round 4: the pressed control sends where the approved form sends, by its method (a formaction to /delete is not the form's).
     if (tie.formAction) { const t = submitTargetRefusal(tie); if (t) throw new NeedsUser(t, tie.action); }
     const submitter = submitterControl(tie.submitter);
-    const av = urlVerdict(tie.action, allow);
-    if (!av.ok) throw new NeedsUser("form_action_not_allowed", av.host);
     // Review of #797: what EVERY control of the form holds now, the engine's fills and the page's own defaults alike (CONTROLS),
     // each named as ats-fill names its question. A box the page ticked itself, or a consent / authorisation / demographic choice
     // it preselected, was never the person's answer: it is asked (the ask-once hand-off), never sent as it stands.

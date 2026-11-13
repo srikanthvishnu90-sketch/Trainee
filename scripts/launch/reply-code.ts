@@ -71,6 +71,9 @@ export const SHARED_REPLY_MODULES = [
   // D-072 (files reachable, 2026-11-12): the staged route's reading of a File ask, the File family maker behind open_record_file
   // (what it makes and the holds the reply may say), and its deployed wiring (handler-career.ts).
   "file_family_ask.ts", "file_family_make.ts", "file_family_make_supabase.ts",
+  // D-072 (files writers, 2026-11-12): the writers the turn runs (the search plan after a search or watch, a material version for each
+  // delivered tailored file or cover letter, a path comparison from compare_paths) and the path-compare ask the staged route reads.
+  "career_search_plan_writer.ts", "career_material_writer.ts", "career_path_comparisons.ts",
 ] as const;
 
 // D-036 (release flags, agent-chat/release_config.ts RELEASE_FLAGS): the code behind every flag the release serves ON that

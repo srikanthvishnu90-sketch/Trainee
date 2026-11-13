@@ -306,6 +306,8 @@ MIGRATIONS=(
   20261110190000_career_outbox_parts_follow_contact.sql
   20261111120000_career_google_accounts.sql
   20261112130000_career_postings_pay_zones.sql
+  20261112150000_career_path_comparisons.sql
+  20261113120000_career_erase_approved_versions.sql
 )
 MIGRATION_MARK=(
   "to_regclass('public.channel_threads') is not null"
@@ -480,6 +482,8 @@ MIGRATION_MARK=(
   "exists (select 1 from pg_trigger where tgname = 'career_outbox_parts_follow_contact')"
   "to_regclass('public.career_google_accounts') is not null and to_regprocedure('public.career_google_account_commit(uuid,text,text,text,timestamptz)') is not null"
   "exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'career_postings' and column_name = 'pay_zones') and exists (select 1 from pg_constraint where conname = 'career_postings_pay_zones_shape')"
+  "to_regclass('public.career_path_comparisons') is not null and exists (select 1 from pg_trigger where tgname = 'career_path_comparisons_guard')"
+  "exists (select 1 from pg_proc where proname = 'career_file_versions_guard' and prosrc like '%career.erase_person%') and exists (select 1 from pg_proc where proname = 'career_erase_person' and prosrc like '%career.erase_person%')"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.
 EARLIER=(20261015010000_career_knowledge_base.sql 20261015020000_career_watch_kv.sql 20261015234000_career_task_intents_v1.sql

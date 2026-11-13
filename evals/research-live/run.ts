@@ -1,6 +1,6 @@
 // D-060 live proof of Claude's web_search server tool through the gateway's one door (`webSearch`, _shared/model_gateway.ts).
 // It makes at most WEB_PROOF_SEARCHES real searches (one call per query, max_uses 1), with an in-process hard cap of --budget-usd
-// (at most $0.50) on top of the shared $70 ledger reservation the workflow makes first (.github/workflows/research-live.yml).
+// (at most $0.50) on top of the shared $80 ledger reservation the workflow makes first (.github/workflows/research-live.yml).
 // It records exactly what came back (the result pages, the cited passages, the usage and the cost) and says whether the tool is
 // proven: every call answered, searched at least once, and returned at least one result page and one cited passage.
 // Nothing is sent to anyone: the only host is the model API.

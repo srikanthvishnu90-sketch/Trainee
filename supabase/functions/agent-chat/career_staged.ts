@@ -30,6 +30,7 @@ import { askFor } from "../_shared/career_search_judge.ts";
 import { namedDraftAsk, outreachAsk } from "../_shared/outreach_ask.ts";
 import { researchReplyOn } from "../_shared/research_reply.ts"; // D-047
 import { familyAskOf } from "../_shared/file_family_ask.ts"; // D-072 (files reachable)
+import { pathCompareAskOf } from "../_shared/career_path_comparisons.ts"; // D-072 (files writers)
 import { knowledgeOn } from "../_shared/agent/knowledge/index.ts"; // D-060
 export type BrainMode = "router" | "agent" | "staged";
 // The served brain (release_config.ts): the committed PRODUCTION_BRAIN unless CAREER_BRAIN rolls it back to the router.
@@ -476,6 +477,9 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   // brief", "show me my offer comparison") is the brain's, which makes it from their records with open_record_file (or says what is
   // missing); the router's answer is its data. An exact payload, an approval, a control or a bare reply stays code's.
   if (!NON_ENGLISH_KEPT.test(intent) && !PAYLOAD_INTENTS.has(intent) && familyAskOf(o.message)) return { brain: true, mode, intent, reason: "file_family_ask", router: routerAnswer(intent, probe) };
+  // D-072 (files writers): the person comparing paths they are weighing is the brain's, which saves the comparison in their own words
+  // (compare_paths) for their Path comparison File; the router's answer (it read "two paths" as the people graph's) is its data.
+  if (!NON_ENGLISH_KEPT.test(intent) && !PAYLOAD_INTENTS.has(intent) && pathCompareAskOf(o.message)) return { brain: true, mode, intent, reason: "path_compare", router: routerAnswer(intent, probe) };
   // MIRROR-1000: a draft to a named person that the router read as a file ask, an alumni list or a missing recipient is the
   // brain's drafting turn (outreach_ask.ts namedDraftAsk).
   if (DRAFT_MISREAD.has(intent) && namedDraftAsk(o.message)) return { brain: true, mode, intent, reason: "named_draft" };

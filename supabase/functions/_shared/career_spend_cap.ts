@@ -10,7 +10,7 @@
 // production env), so the code IGNORES them, whatever their value, and says so once per boot on the error log.
 //
 // What stays (it is what keeps runaway spend from destroying the product): the GLOBAL budget in the gateway's callModel
-// (_shared/model_budget.ts: the $70 total of D-038a, the reservation before every send, the hard stop and the pause). When
+// (_shared/model_budget.ts: the $80 total of D-038a, the reservation before every send, the hard stop and the pause). When
 // it refuses a call, this wrapper remembers why, so the reply says so in plain words (note()) and the turn's meta records it
 // (refused()). No request was made for a refused call.
 import { ModelUnavailableError } from "./model_calls.ts";

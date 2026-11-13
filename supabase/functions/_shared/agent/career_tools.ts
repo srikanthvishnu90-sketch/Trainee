@@ -29,6 +29,7 @@ import {
 import { legacyRows, REFERRAL_ASK, referralMap, targetFirms } from "../career_referrals.ts";
 import { CONTACT_QUESTION, confirmedOnly, EMAIL_PLACEHOLDER, contactFromMessage, contactQuestion, namedIn, resumeContact, type PersonaStore, type ResumeRenderer, type ResumeStore, restatePersona, savePersona, tailorForPosting, validPersonaName } from "../career_tailor.ts";
 import { recordVersion, type ResumeVersionLog } from "../career_resume_outcomes.ts";
+import { changesOfItems, postingKeyOf } from "../career_material_writer.ts"; // D-072 (files writers)
 import { planLayout } from "../career_resume_rater.ts"; // RELEASE 10
 import { templateId } from "../career_resume_templates.ts"; // RELEASE 10
 import { type OfferPending, offerTurn, saidIn } from "../career_offer.ts";
@@ -213,7 +214,9 @@ export interface TailorTools {
   upload?: (userId: string) => Promise<{ bytes: Uint8Array; kind: "pdf" | "docx" } | null>;
   // 2026-11-08 (review of #596): the files this turn made ride the reply, as the router's tailored files do (agent-chat
   // materializes them into the person's artifact store, channel_artifacts.ts). Turn-scoped: nothing is kept in state.
-  deliver?: (doc: { format: "pdf" | "docx"; filename: string; mime: string; base64: string; sha256: string | null }) => void;
+  // D-072 (files writers): `material` says what the file was made for and what changed (career_material_writer.ts), so the delivered
+  // file is written as a version on the Materials File.
+  deliver?: (doc: { format: "pdf" | "docx"; filename: string; mime: string; base64: string; sha256: string | null; material?: Record<string, unknown> }) => void;
 }
 // D-063 / G11: what the model is told about a file that rides the chat: it is a review draft, the placeholders that print in it,
 // and, for a changed version, each edit as made. The words to the person are the model's; these are its facts.
@@ -985,7 +988,10 @@ export function careerTools(deps: {
           summary: keptNote ? `Your resume's format scores ${plan.rating.score}/100. ${keptNote}` : plan.summary } } : rest;
         // The PDF (and, with a layout, its Word copy) are attached to this reply.
         if (t.deliver) {
-          t.deliver({ format: "pdf", filename: r.filename, mime: "application/pdf", base64: b64(detail.pdf), sha256: r.sha256 });
+          const target = job_id ? text.split("\n")[0].slice(0, 90) : r.company ? `the posting at ${r.company}` : "the posting you pasted";
+          t.deliver({ format: "pdf", filename: r.filename, mime: "application/pdf", base64: b64(detail.pdf), sha256: r.sha256,
+            // A pasted posting has no id: a digest of its own text tells it apart from any other (part of the document's key, never shown).
+            material: { doc_kind: "resume", target, role_job_id: r.job_id, ...(r.job_id ? {} : { posting_key: await postingKeyOf(text) }), based_on: "your confirmed resume", changes: changesOfItems(r.changes), format_check: `ATS read-back: ${r.ats.status}` } });
           if (detail.docx) t.deliver({ format: "docx", filename: r.filename.replace(/\.pdf$/i, "") + ".docx", mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: b64(detail.docx), sha256: null });
           // R10 privacy ruling: with the file attached, no bearer link to the person's resume reaches the model, the reply or the
           // thread's history (the private object stays stored for the email apply path; a link is the signed-in File page only).

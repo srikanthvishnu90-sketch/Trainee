@@ -10,6 +10,8 @@
     "tests/architect/d073-live9-fixes-20261112.test.ts": 0.5,
     "tests/architect/d073-review-fixes-20261113.test.ts": 0.2,
     "tests/architect/d073-review2-fixes-20261113.test.ts": 0.2,
+    "tests/architect/fact-withdrawal-failclosed-20261113.test.ts": 6,
+    "tests/architect/fact-withdrawal-handler-20261113.test.ts": 25,
     "tests/architect/eval-runners-shared-ledger-20261113.test.ts": 4,
     "tests/architect/mail-reply-failclosed-20261113.test.ts": 0.3,
     "tests/architect/stop-hold-failclosed-20261113.test.ts": 0.4,

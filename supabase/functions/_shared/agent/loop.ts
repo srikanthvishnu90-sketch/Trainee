@@ -493,6 +493,9 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
       if (missing.length) { fail(t.effect, `missing required input: ${missing.join(", ")}`); continue; }
       if (t.effect === "external") {
         pending_approvals.push({ tool: t.name, input: JSON.parse(JSON.stringify(input)), summary: t.description });
+        // Review of #790: one yes never means two things. A question code asked about a set-aside fact (its marker is restore_ask)
+        // is not shown in a turn that also asks for an approval, and tools see that one is waiting.
+        if (o.ctx.turn) { (o.ctx.turn as { pendingApprovals?: number }).pendingApprovals = pending_approvals.length; if (o.ctx.turn.show?.meta?.restore_ask) o.ctx.turn.show = undefined; }
         tool_calls.push({ name: t.name, ok: true, effect: t.effect });
         results.push({ type: "tool_result", tool_use_id: u.id, content: JSON.stringify({ status: "needs_approval", note: "Nothing has been sent. The person must approve this exact action first." }) });
         continue;

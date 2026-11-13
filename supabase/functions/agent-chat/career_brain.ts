@@ -1,7 +1,7 @@
 // Which brain answers a career turn (WO-002, D-008): the CareerHost router unless CAREER_BRAIN=agent, and the agent turn
 // itself (model + tools over the person's career state).
 import type { LinkCheck } from "../_shared/link_check.ts";
-import { EMPTY_AFTER_SAVE_REPLY, EMPTY_REPLY, INCOMPLETE_REPLY, REFUSED_FILE_TODO, runAgentTurn, type ModelFn, type TurnResult } from "../_shared/agent/loop.ts";
+import { EMPTY_AFTER_SAVE_REPLY, EMPTY_REPLY, INCOMPLETE_AFTER_SAVE_REPLY, INCOMPLETE_REPLY, MAX_STEPS_AFTER_SAVE_REPLY, MAX_STEPS_REPLY, MODEL_ERROR_AFTER_SAVE_REPLY, MODEL_ERROR_REPLY, REFUSED_FILE_TODO, runAgentTurn, type ModelFn, type TurnResult } from "../_shared/agent/loop.ts";
 import { careerTools, type OutreachDeps, type TailorTools } from "../_shared/agent/career_tools.ts";
 import { importContactsFile, MX_NOT_WIRED, type MxResolver, type Verifier } from "../_shared/career_contacts.ts";
 import { attachAsked, attachTool } from "../_shared/agent/attach_tool.ts";
@@ -27,7 +27,7 @@ import { knowledgeFor, type Knowledge } from "../_shared/agent/knowledge/index.t
 import { styleBlock } from "../_shared/agent/style.ts";
 import { askedPartsOf, asksForDetail, boundaryNote, boundaryOf, capacityAskOf, capacityNote, correctionNote, correctionOf, DRAFT_TOOLS, draftAskOf, draftNote, historyAskOf, historyNote, HYPOTHETICAL_WITHHELD, hypotheticalNote, hypotheticalOf, lengthNote, multiAskNote, overLimit, partsMissing, partsNote, PERSONA_WITHHELD, planSearchAskOf, planSearchNote, whileWorkingNote, postingNote, postingRefOf, REPLY_LENGTH, replyLength, roastNote, roastOf, shownPayNote, shownPayOf, shownPayPlaces, statesNothing, textLength } from "../_shared/agent/turn_notes.ts";
 import { severalAsks } from "../_shared/ask_language.ts";
-import { isOnePlace, practiceAnswerNote, practiceAnswerOf, practiceAskIn, staleFactNote, staleFactsOf } from "../_shared/agent/turn_notes.ts";
+import { factCorrectionHints, factCorrectionNote, isOnePlace, plainAnswer, practiceAnswerNote, practiceAnswerOf, practiceAskIn, RESTORE_ASK_INTENT, restoreAnswerNote, staleFactNote, staleFactsOf } from "../_shared/agent/turn_notes.ts";
 import { answersFirst } from "../_shared/reply_rubric.ts";
 import type { AlertStore } from "../_shared/career_alert_store.ts";
 import type { HiredSource } from "../_shared/career_hired.ts";
@@ -152,6 +152,10 @@ export async function agentTurn(o: {
   paths?: PathStore | null;
   // D-064 (G13): this message arrived while the previous turn (this text, the person's previous message) was still running.
   whileWorking?: string | null;
+  // Review of #790: the marker the turn before returned (restore_ask) when it asked whether a set-aside fact is right again.
+  restoreAsk?: { fact_id: string } | null;
+  // Whether an application card is open for this person now (the handler reads it; unknown counts as open): the restore question is never asked beside one.
+  cardPending?: boolean;
   // D-062: the capability tools (_shared/agent/capability_tools.ts: Gmail record and tracker, people search, answering an email),
   // under the same withholding as every other tool.
   capabilities?: import("../_shared/agent/loop.ts").ToolSpec[] | null;
@@ -176,16 +180,24 @@ export async function agentTurn(o: {
   // D-070 (G9/D-007, live-7 setup: "the 3.9 gpa on there is outdated, don't reuse it"): a stored fact the person says is out of date
   // is set aside by code before the model runs: back to a draft (never used for a resume, an answer or a form), with when and what
   // they said; what was prepared from the old facts goes stale. The model is told, and answers the rest of the message.
-  const stale = hypo ? [] : staleFactsOf(o.message, (o.stores as any)?.profile?.facts);
+  // Review of #790 (BLOCKER): only the one fact staleFactsOf's fail-closed reading names (never a role, a project or a skill; never a
+  // guess). What it was is kept (`was`), so it can be put back; the reply says which fact (setAsideSaid, below). Every other message
+  // that may be correcting a fact changes nothing here: the model gets a note (factCorrectionNote) and asks, or corrects it through
+  // the person's yes.
+  const facts0 = hypo ? [] : (o.stores as any)?.profile?.facts;
+  const stale = staleFactsOf(o.message, facts0), maybe = factCorrectionHints(o.message, facts0);
   for (const f of stale as any[]) {
+    f.withdrawn_by_owner = { at: new Date(o.now).toISOString(), said: String(o.message ?? "").slice(0, 200), was: { status: f.status, needs_confirmation: f.needs_confirmation } };
     f.status = "draft"; f.needs_confirmation = true;
-    f.withdrawn_by_owner = { at: new Date(o.now).toISOString(), said: String(o.message ?? "").slice(0, 200) };
     const pr = (o.stores as any).profile;
     pr.fact_version = (Number.isFinite(pr.fact_version) ? pr.fact_version : 0) + 1;
   }
   // D-070 (item 11, G2/G3): an answer to the practice question Trainee asked is reviewed verdict first, in one short paragraph.
   const practiceAnswer = !roast && !hypo && practiceAnswerOf(o.message, o.history);
-  const turnNotes = [stale.length ? staleFactNote(stale.map((f) => String(f.title || f.text))) : "", practiceAnswer ? practiceAnswerNote() : "", hypo ? hypotheticalNote(hypo) : "", roast ? roastNote(roast) : "", meant.length ? postingNote(meant) : "", boundary ? boundaryNote(boundary) : "",
+  // Review of #790 (round 3): a plain yes or no to code's own restore question (the marker the turn before carried).
+  const restoreFact = o.restoreAsk && !hypo ? ((o.stores as any)?.profile?.facts ?? []).find((f: any) => f?.id === o.restoreAsk!.fact_id && f.withdrawn_by_owner) : null;
+  const restoreAnswer = restoreFact ? plainAnswer(o.message) : null;
+  const turnNotes = [restoreAnswer ? restoreAnswerNote(restoreAnswer, String(restoreFact.id), String(restoreFact.text || restoreFact.title)) : "", stale.length ? staleFactNote(stale.map((f) => String(f.title || f.text))) : "", maybe.length ? factCorrectionNote(maybe.map((f) => String(f.title || f.text))) : "", practiceAnswer ? practiceAnswerNote() : "", hypo ? hypotheticalNote(hypo) : "", roast ? roastNote(roast) : "", meant.length ? postingNote(meant) : "", boundary ? boundaryNote(boundary) : "",
     correction ? correctionNote(correction) : "", typeof o.whileWorking === "string" ? whileWorkingNote(o.whileWorking) : severalAsks(o.message) ? multiAskNote() : "",
     draftAsk ? draftNote(draftLength.aim) : "", planSearch ? planSearchNote() : "", parts.length ? partsNote(parts) : "", capacity ? capacityNote() : "", historyAsk ? historyNote() : "", shownPay.length ? shownPayNote(shownPay) : "", lengthNote(replyLength(o.message, o.history))].filter(Boolean);
   const hypoWithheld = [...(hypo === "persona" ? PERSONA_WITHHELD : hypo ? HYPOTHETICAL_WITHHELD : []), ...(statesNothing(o.message) ? ["add_profile_fact"] : [])];
@@ -203,7 +215,7 @@ export async function agentTurn(o: {
   // already used) never replaces it.
   // D-063 (C4): trace.a keeps a specific advice question's result (research/advice.ts): its one source goes on its own line.
   const trace: { r?: Extract<ResearchResult, { status: "ok" }>; m?: MarketResult | CompanyResult; a?: AdviceResult } = {};
-  const ctx: any = { userId: o.userId, threadId: o.threadId, now: o.now, state: o.stores };
+  const ctx: any = { userId: o.userId, threadId: o.threadId, now: o.now, state: o.stores, restoreAsk: o.restoreAsk ?? null, cardPending: !!o.cardPending };
   const tools = [...withheld([...(o.toolPolicy?.withhold ?? []), ...hypoWithheld], [...careerTools({ postings: o.postings ?? (async () => []), alerts: o.alerts ?? null, memory: o.memory ?? null, events: o.events ?? null, confirmations: o.confirmations ?? null, tz: o.tz, mail: o.mail ?? null, interviews: o.interviews ?? null, digest: o.digest ?? null, outreach: o.outreach ?? null, verifier: o.verifier ?? null, tailor: o.tailor ?? null, hired: o.hired ?? null, wants: o.wants ?? null, limits: o.limits, posting: o.posting ?? null, situation: o.known?.situation ?? null, linkCheck: o.linkCheck ?? null, conversations: o.conversations ?? null, market: o.market ? { ...o.market, onResult: (r) => { if (r.status === "ok" || trace.m?.status !== "ok") trace.m = r; } } : null, postingRecheck: o.postingRecheck ?? null, applyFlow: o.applyFlow ?? null, research: o.knowledge && o.research ? { ...o.research, onResult: (r, m) => { if (r.status === "ok") trace.r = r; o.research?.onResult?.(r, m); }, onAdvice: (r) => { if (r.source || !trace.a?.source) trace.a = r; } } : null }), ...(o.capabilities ?? []), ...(o.paths ? [pathComparisonTool(o.paths)] : [])]), ...(o.shape && attachAsked(o.message) ? [attachTool()] : []), ...(o.files ? [createFileTool(o.files)] : []), ...(o.familyFiles ? [familyFileTool(o.familyFiles, o.files?.ttlHours() ?? 168)] : [])];
   const offered = new Set(tools.map((t) => t.name));
   let result = await runAgentTurn({
@@ -374,9 +386,50 @@ export async function agentTurn(o: {
   // D-071 (live-8 C9: research ran, kept nothing, and the trace could not say why): what the research did with its pages and draft.
   const research = trace.m ? { kind: "kind" in trace.m ? "company" : "market", status: trace.m.status, ...((trace.m as any).audit ?? {}) } : null;
   result = { ...result, reply: nonEmptyReply(result, trace.m), shorten, ...(research ? { research } : {}) } as typeof result;
+  // Review of #790: a fact code set aside this turn is said to the person, by name, on every path. When the reply does not carry
+  // the fact's own figures, its line goes after the reply, in the fact's own words. A turn whose reply is a card (an exact payload)
+  // cannot carry it, so nothing is set aside on that turn: the fact goes back as it was.
+  if (stale.length) {
+    // Round 4: only a card that carries a payload undoes it. Code's own restore question is not one (and is never asked on the
+    // turn that set the fact aside: confirm_profile_fact refuses), so it can never undo a set-aside.
+    if (result.show && result.show.intent !== RESTORE_ASK_INTENT) {
+      for (const f of stale as any[]) { Object.assign(f, f.withdrawn_by_owner.was); delete f.withdrawn_by_owner; }
+    } else {
+      const set = (stale as any[]).map((f) => ({ id: String(f.id), text: String(f.text || f.title) }));
+      result = { ...result, reply: setAsideSaid(result.reply, set.map((x) => x.text)), set_aside: set } as typeof result;
+    }
+  }
+  // Review of #790 (round 3): the marker a later yes needs to put a set-aside fact back is the one CODE set when confirm_profile_fact
+  // asked its own question (the reply is that question, shown as written); a question in the model's words never sets it. It is
+  // dropped when the turn also asked for an approval, or a card is open: the person's next yes belongs to that.
+  const ask = result.show?.intent === RESTORE_ASK_INTENT ? (result.show.meta as any)?.restore_ask : null;
+  if (ask && !result.pending_approvals?.length && !o.cardPending) result = { ...result, restore_ask: ask } as typeof result;
+  else if (ask) result = { ...result, show: { ...result.show!, meta: {} } };
   return know ? { ...result, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : result;
 }
 
+// Review of #790 (rounds 3 and 4): whenever a fact was set aside this turn, code states it itself, once, as the first line, in the
+// fact's own words (the model is told not to: staleFactNote). From the model's reply only this is removed: a sentence that STATES
+// that fact's status (its label or value with a status word: set aside, removed, kept, still on file, updated, using ...), and a
+// general claim that nothing changed ("Nothing on your record was changed."), which the set-aside makes untrue. A question, and a
+// sentence about a form, a posting or a next step that only mentions the label, stay. A turn that did not finish says what was saved.
+const UNFINISHED: Record<string, string> = { [INCOMPLETE_REPLY]: INCOMPLETE_AFTER_SAVE_REPLY, [EMPTY_REPLY]: EMPTY_AFTER_SAVE_REPLY, [MODEL_ERROR_REPLY]: MODEL_ERROR_AFTER_SAVE_REPLY, [MAX_STEPS_REPLY]: MAX_STEPS_AFTER_SAVE_REPLY };
+export const SET_ASIDE_LINE = "Set aside, not deleted (no longer used until you say it's right again): ";
+function namesFact(sentence: string, fact: string): boolean {
+  const m = /^([^:]{1,40}):\s*(.+)$/.exec(fact), label = (m ? m[1] : "").trim(), value = (m ? m[2] : fact).trim();
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return (!!label && new RegExp(`(?<![A-Za-z])${esc(label)}(?![A-Za-z])`, "i").test(sentence)) || new RegExp(`(?<![\\w$.])${esc(value)}(?![\\w%]|\\.\\d)`, "i").test(sentence);
+}
+const STATUS_WORD = /\bset aside\b|\baside\b|\bremov(?:e|ed|ing)\b|\bkept\b|\bkeep(?:ing)? (?:using|it)\b|\bstill on (?:file|record)\b|\bupdated\b|\bchanged\b|\bsaved\b|\bdeleted\b|\busing\b|\bwill use\b|\bon your (?:record|profile)\b|\boff\b|\bno longer (?:used|use)\b|\b(?:won't|will not) (?:be used|use)\b/i;
+const NOTHING_CHANGED = /\b(?:nothing|no facts?|none of your facts)\b[^.!?]*\b(?:changed|removed|updated|deleted|touched|set aside)\b|\b(?:didn't|did not|haven't|have not|hasn't|has not) (?:been )?(?:chang|remov|touch|updat|delet)\w*\b|\bunchanged\b|\bstill confirmed\b|\b(?:all|every one of) your facts\b/i;
+export function setAsideSaid(reply: string, facts: string[]): string {
+  if (!facts.length) return reply;
+  const line = `${SET_ASIDE_LINE}${facts.join("; ")}`, r = String(reply ?? "");
+  if (UNFINISHED[r] || Object.values(UNFINISHED).includes(r)) return `${line}\n\n${UNFINISHED[r] ?? r}`;
+  const goes = (x: string) => !x.trim().endsWith("?") && (NOTHING_CHANGED.test(x) || (STATUS_WORD.test(x) && facts.some((f) => namesFact(x, f))));
+  const kept = r.split("\n").map((l) => l.startsWith(SET_ASIDE_LINE) ? "" : l.split(/(?<=[.!?])[ \t]+/).filter((x) => !goes(x)).join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return kept ? `${line}\n\n${kept}` : line;
+}
 // D-071: "N applications" said with another number than the record's is the record's number; a sentence about having miscounted
 // goes (the count was code's). Other numbers ("1 researched role") are not touched.
 const NUMWORD: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };

@@ -14,7 +14,7 @@ import { CareerJobs } from "./router_core.career.js";
 import { applyEmailOf } from "./apply_email.ts";
 import { BACKLOG_MS, freshWhenSeen } from "./career_fresh.ts";
 import { FEEDS, isMoreProvider, MORE_PROVIDERS } from "./career_ingest_feeds.ts";
-import { boardHost, cappedText, guardedFetch, type Resolve } from "./posting_fetch.ts";
+import { BOARD_SLUG, boardHost, cappedText, guardedFetch, parseJson, POSTING_UUID, type Resolve } from "./posting_fetch.ts";
 // Feature 6: the posting URL-shape guard (packages/domain/166-career-url-shape.js, MUSE-F-010), copied byte for byte
 // (tests/edge/career-ingest-scale.test.ts fails while the copy is stale). It sets globalThis.CareerUrlShape.
 import "./career_url_shape.js";
@@ -746,7 +746,9 @@ export async function sha256Hex(text: string): Promise<string> {
   return h;
 }
 // 2026-10-30: the bounded read's limits (see streamRead).
-export const PERSON_LINK_MAX_BYTES = 8 * 1024 * 1024; // the board read behind a link a person pasted (apply_here.ts)
+// The board read behind a link a person pasted (apply_here.ts). Round 5: 32 MB (8 MB turned real boards' feeds, 9 to 12 MB,
+// into "not read"); the posting's own API is asked first (`one` below), so the feed is the fallback.
+export const PERSON_LINK_MAX_BYTES = 32 * 1024 * 1024;
 export const BOARD_MAX_BYTES = 64 * 1024 * 1024; // a whole board's list read whole (not streamed): stopped beyond this
 export const WHOLE_MAX = 2_000_000, XML_MAX = 8_000_000, STREAM_TIMEOUT_MS = 45000;
 // Where each JSON provider's job array is: a key of the root object, or the root itself (null).
@@ -1037,7 +1039,23 @@ export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?
     if (validators && (validators.etag || validators.last_modified)) return { postings, complete, ...part, ...validators };
     return complete && !more && startPage === 0 ? postings : { postings, complete, ...part };
   };
-  return opts.stream ? streamRead : legacy;
+  // Round 5: ONE posting by its id from the board's own posting API, where it has one (Greenhouse's job endpoint, Lever's
+  // posting endpoint), normalised as the feed's postings are; null when the provider has none or the answer is not a posting
+  // (the caller then reads the feed). The same guarded request, 2 MB.
+  const one = async (b: Board, atsId: string): Promise<FeedPosting | null> => {
+    if (!BOARD_SLUG.test(b.board)) return null;
+    const url = b.provider === "greenhouse" && /^\d{1,20}$/.test(atsId) ? `https://boards-api.greenhouse.io/v1/boards/${b.board}/jobs/${atsId}?content=true&pay_transparency=true`
+      : b.provider === "lever" && POSTING_UUID.test(atsId) ? `https://api.lever.co/v0/postings/${b.board}/${atsId.toLowerCase()}` : null;
+    if (!url) return null;
+    const res = await guarded(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) { try { await res.body?.cancel(); } catch { /* already closed */ } return null; }
+    const j = parseJson(await cappedText(res));
+    if (!j || typeof j !== "object" || Array.isArray(j)) return null;
+    const clean = scrubRaw(j);
+    const normalized = b.provider === "greenhouse" ? CareerJobs.normalizeGreenhouse({ jobs: [clean] }, b.board, b.company) : CareerJobs.normalizeLever([clean], b.board, b.company);
+    return toPostings(b, normalized, [j])[0] ?? null;
+  };
+  return Object.assign(opts.stream ? streamRead : legacy, { one });
 }
 // One read's normalized jobs -> the rows the table takes. Every row must fit the table's constraints
 // (20261019000000_career_postings.sql): one bad row would otherwise fail its board's write on every run. A posting

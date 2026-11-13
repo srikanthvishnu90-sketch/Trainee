@@ -511,7 +511,7 @@ Deno.test("R13 honest reads still read: the recorded postings of four boards say
 });
 
 // ------------------------------------------------------------------------------------------------ round 4 (second review)
-Deno.test("R14 a scheduled ingest read follows a board's redirect to any public https host; a pasted link's read stays on the boards, 8 MB", async () => {
+Deno.test("R14 a scheduled ingest read follows a board's redirect to any public https host; a pasted link's read stays on the boards, capped", async () => {
   const { boardFetchFeed } = await import("../../supabase/functions/_shared/career_ingest.ts");
   const feed = (f: typeof fetch, o: Record<string, unknown> = {}) => (boardFetchFeed as any)(f, { timeoutMs: 3000, resolve: dns({ "inside.acme.com": ["10.0.0.9"] }), ...o });
   const hop = (map: Record<string, string>, final: () => Response) => any((u, init) => map[u] ? (init?.redirect === "manual" ? to(map[u], 301) : final()) : final());
@@ -527,16 +527,16 @@ Deno.test("R14 a scheduled ingest read follows a board's redirect to any public 
     await assertNode.rejects(() => feed(any((u) => { sent.push(u); return sent.length === 1 ? to(target) : new Response(offers); }))({ company: "Acme", provider: "recruitee", board: "acme" }), /not read/, target);
     eq(sent.length, 1, target);
   }
-  // The chat path (a pasted link): the boards' own hosts only, and 8 MB.
+  // The chat path (a pasted link): the boards' own hosts only, and its own cap (32 MB since round 5; R19).
   const gh = { provider: "greenhouse", board: "acme", company: "Acme" };
   await assertNode.rejects(() => feed(any((u) => u.includes("boards-api") ? to("https://careers.acme.com/jobs.json") : new Response(JSON.stringify({ jobs: [] }))), { personLink: true })(gh), /not read/);
   let pulled = 0;
   const endless = () => new Response(new ReadableStream<Uint8Array>({ pull(c) { pulled += 1048576; if (pulled > 200 * 1048576) c.close(); else c.enqueue(new Uint8Array(1048576).fill(32)); } }));
   await assertNode.rejects(() => feed(any(endless), { personLink: true })(gh));
-  ok(pulled <= 10 * 1048576, `a pasted link's board read took ${pulled / 1048576} MB`);
+  ok(pulled <= 34 * 1048576, `a pasted link's board read took ${pulled / 1048576} MB`);
   const handler = Deno.readTextFileSync(new URL("../../supabase/functions/agent-chat/handler-career.ts", import.meta.url));
   const calls = handler.split("\n").filter((l) => /boardFetchFeed\(\(i, init\) => fetch\(i, init\)/.test(l));
-  ok(calls.length >= 2 && calls.every((l) => /personLink: true/.test(l)), "the chat handler's board reads are the strict, 8 MB kind");
+  ok(calls.length >= 2 && calls.every((l) => /personLink: true/.test(l)), "the chat handler's board reads are the strict, capped kind");
 });
 
 Deno.test("R15 a regional board host asks its regional API; a global API's 404 is not that posting's end", async () => {

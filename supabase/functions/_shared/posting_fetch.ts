@@ -55,23 +55,36 @@ export const boardHost = (href: string): boolean => { try { return BOARD_HOSTS.t
 //     was checked (`partial`). Any private address among those returned refuses the address either way.
 // The known-good probe runs once per process (cached).
 export const RESOLVER_PROBE_NAME = "example.com";
+export const DNS_TIMEOUT_MS = 1500; // one lookup (round 5): a resolver that hangs does not hold the read
+export const RESOLVER_REPROBE_MS = 10 * 60 * 1000; // a failed probe is tried again after this, not kept for the life of the process
 type Dns = (host: string, type: "A" | "AAAA") => Promise<string[]>;
-export function makeSystemResolve(dns: Dns | null): Resolve {
-  let usable: Promise<boolean> | null = null;
-  const probe = () => usable ??= (async () => {
-    for (const t of ["A", "AAAA"] as const) { try { if ((await (async () => await dns!(RESOLVER_PROBE_NAME, t))()).length) return true; } catch { /* next family */ } }
-    return false;
-  })();
+export function makeSystemResolve(dns: Dns | null, o: { timeoutMs?: number; now?: () => number; log?: (m: string) => void } = {}): Resolve {
+  const now = o.now ?? Date.now, log = o.log ?? ((m: string) => console.warn(m));
+  const ask = (host: string, t: "A" | "AAAA") => limited(o.timeoutMs ?? DNS_TIMEOUT_MS, async () => await dns!(host, t)); // a synchronous throw is a failure too
+  let probed: { at: number; ok: Promise<boolean>; good?: boolean } | null = null;
+  const probe = (): Promise<boolean> => {
+    if (probed && (probed.good !== false || now() - probed.at < RESOLVER_REPROBE_MS)) return probed.ok;
+    const p: { at: number; ok: Promise<boolean>; good?: boolean } = { at: now(), ok: Promise.resolve(false) };
+    p.ok = (async () => {
+      for (const t of ["A", "AAAA"] as const) { try { if ((await ask(RESOLVER_PROBE_NAME, t)).length) return (p.good = true); } catch { /* next family */ } }
+      // Said once per failed probe, with no address or name of anyone's in it.
+      log("posting_fetch: the DNS resolver here cannot resolve a known-good name; employer pages are read without the private-address lookup until a later probe works");
+      return (p.good = false);
+    })();
+    return (probed = p).ok;
+  };
   return async (host) => {
     if (!dns) return null;
-    const got = await Promise.allSettled((["A", "AAAA"] as const).map(async (t) => await dns(host, t))); // a synchronous throw is a failure too
+    const got = await Promise.allSettled((["A", "AAAA"] as const).map((t) => ask(host, t)));
     const ips = got.flatMap((g) => g.status === "fulfilled" && Array.isArray(g.value) ? g.value.map(String) : []);
     const errors = got.flatMap((g) => g.status === "rejected" ? [String(g.reason?.name)] : []);
     const failed = errors.filter((n) => n !== "NotFound"); // NotFound: that family has no records
     if (ips.length) return failed.length ? { ips, partial: true } : ips;
-    // Nothing answered. Not supported or not permitted, or a resolver that cannot resolve a known-good name either: not usable.
-    if (errors.some((n) => /^(NotSupported|PermissionDenied|NotCapable)$/.test(n)) || !(await probe())) return null;
-    throw new Error("no such name"); // the resolver works, and this name has no address (or its lookup failed)
+    // Nothing answered. A lookup that failed in passing (timed out, not supported, not permitted, any error that is not "no
+    // records"), or a resolver that cannot resolve a known-good name either: not checked. Only a definite "no such name" from
+    // a working resolver refuses the address.
+    if (failed.length || !(await probe())) return null;
+    throw new Error("no such name");
   };
 }
 export const systemResolve: Resolve = makeSystemResolve((h, t) => {
@@ -95,7 +108,11 @@ const check = async (href: string, o: { allow?: (href: string) => boolean; resol
   if (o.allow && !o.allow(href)) throw new NotRead("the address is not on a site this read may open");
   if (boardHost(href) || o.resolve === null) return true; // null: the caller built the address from its own provider list
   let got: Awaited<ReturnType<Resolve>>;
-  try { got = await (o.resolve ?? systemResolve)(new URL(href).hostname.toLowerCase().replace(/\.$/, "")); } catch { throw new NotRead("the site's address could not be looked up"); }
+  const host = new URL(href).hostname.toLowerCase().replace(/\.$/, "");
+  // The system resolver limits each of its lookups itself; a resolver the caller gave is held to the same limit here. A lookup
+  // that runs out of time is not checked (the request goes ahead); a throw is "no such name".
+  try { got = o.resolve ? await limited(DNS_TIMEOUT_MS, () => o.resolve!(host)) : await systemResolve(host); }
+  catch (e) { if ((e as Error)?.name === "TimeoutError") return false; throw new NotRead("the site's name does not exist"); }
   if (got === null) return false;
   const ips = Array.isArray(got) ? got : got.ips, partial = !Array.isArray(got) && got.partial === true;
   if (!Array.isArray(ips) || !ips.length || ips.some((ip) => isPrivateIp(String(ip)))) throw new NotRead("the site's name does not lead to a public address");

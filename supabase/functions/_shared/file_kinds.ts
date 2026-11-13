@@ -288,7 +288,9 @@ function marketBrief(x: Record<string, any>, v: V) {
   const line = (r: unknown, path: string, sourced: boolean) => {
     const q = v.obj(r, path), f = sourced ? v.fact(q, path, { valueKey: "text", labelKey: null }) : { text: v.str(q.text, `${path}.text`, { max: 400, links: false }) };
     if (sourced && typeof q.text === "string" && URL_RX.test(q.text)) v.err(`${path}.text`, "must not contain links; cite the source number");
-    return { ...f, cite: cite(q.cite, `${path}.cite`) };
+    // D-073 review 2: a reading (a condition or a risk) no sentence of its cited page says is marked by code (market.ts, the check
+    // the chat reply uses); the page shows it apart, labelled as not confirmed. Only `true` is kept, and only on a reading.
+    return { ...f, cite: cite(q.cite, `${path}.cite`), ...(!sourced && q.unconfirmed === true ? { unconfirmed: true } : {}) };
   };
   let comparison: unknown;
   if (x.comparison !== undefined) {
@@ -594,19 +596,24 @@ export const marketReadOn = (d: any) => { const ts = (d?.sources ?? []).map((s: 
 const hostOf = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
 const cites = (c: unknown) => Array.isArray(c) && c.length ? ` <span class="rb-cite">${c.map((i) => `[${esc(i)}]`).join("")}</span>` : "";
 const READING = `<span class="src rb-read">Trainee's reading</span>`;
+export const UNCONFIRMED_HEAD = "Not confirmed: no sentence of the cited page says these.", UNCONFIRMED_TAG = "Trainee's reading, not confirmed by a source";
 const MARK = `<svg class="rb-mark" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="var(--accent)"/><text x="32" y="45" font-family="Georgia,serif" font-size="40" font-weight="700" text-anchor="middle" fill="var(--accent-ink)">T</text></svg>`;
 function marketHtml(d: any): string {
   const n = (d.sources ?? []).length, read = marketReadOn(d);
   const cover = `<section class="rb-cover" aria-label="Cover"><p class="rb-brand">${MARK}<span>Trainee</span><span class="rb-dot" aria-hidden="true">·</span><span>Research brief</span></p>`
     + `<p class="rb-thesis">${esc(d.thesis)}${cites(d.thesis_cite)}</p>${d.thesis_summary ? `<p class="rb-basis">A summary of the cited sections below.</p>` : ""}<p class="rb-date">${read ? `Sources read ${esc(read)} · ` : ""}${n} source${n === 1 ? "" : "s"}</p></section>`;
   const list = (xs: any[], sourced: boolean) => `<ul class="rb-list">${xs.filter((f) => sourced ? hasSrc(f) : !!f?.text).map((f) => `<li><span class="rb-t">${esc(f.text)}${cites(f.cite)}</span>${sourced ? src(f.source) : READING}</li>`).join("")}</ul>`;
+  // D-073 review 2: a reading no sentence of its page says is never listed among the others: it is under its own label, in its own
+  // list, and each line says so. The chat reply never states such a reading (market.ts `answerable`); the File agrees.
+  const readings = (xs: any[]) => { const said = xs.filter((f) => f?.text && !f.unconfirmed), not = xs.filter((f) => f?.text && f.unconfirmed);
+    return (said.length ? list(said, false) : "") + (not.length ? `<p class="rb-basis rb-unconfirmed-head">${esc(UNCONFIRMED_HEAD)}</p><ul class="rb-list rb-unconfirmed">${not.map((f) => `<li><span class="rb-t">${esc(f.text)}${cites(f.cite)}</span><span class="src rb-read">${esc(UNCONFIRMED_TAG)}</span></li>`).join("")}</ul>` : ""); };
   const c = d.comparison, opts = (c?.options ?? []).map((o: any) => o.name);
   const cell = (x: any) => hasSrc(x) ? `${esc(x.value)}${cites(x.cite)}<br>${src(x.source)}` : `<span class="meta">Not stated</span>`;
   // Under 560 px each row stacks as a card of option/value pairs (KIND_CSS .rb-tbl): the option name is repeated in each cell as a
   // visual label (aria-hidden; the table's own headers still name the cell), so no column is ever cut off at phone width.
   const table = c ? `<div class="tbl rb-tbl" tabindex="0" role="region" aria-label="Comparison table"><table><caption class="sr">Comparison</caption><thead><tr><th scope="col"><span class="sr">Item</span></th>${opts.map((o: string) => `<th scope="col">${esc(o)}</th>`).join("")}</tr></thead><tbody>${(c.rows ?? []).map((r: any) => `<tr><th scope="row">${esc(r.label)}</th>${(r.cells ?? []).map((x: any, i: number) => `<td><span class="rb-k" aria-hidden="true">${esc(opts[i] ?? "")}</span><span class="rb-v">${cell(x)}</span></td>`).join("")}</tr>`).join("")}</tbody></table></div>` : "";
   const srcs = `<ol class="rb-src">${(d.sources ?? []).map((s: any, i: number) => `<li id="src-${i + 1}"><span class="rb-n">[${i + 1}]</span>${linkHtml(s.url, s.title) || esc(s.title)}<span class="meta"><span class="rb-host" title="${esc(hostOf(s.url))}">${esc(hostOf(s.url))}</span> · Read ${esc(DAY(s.fetched_at))}</span></li>`).join("")}</ol>`;
-  return cover + sec("Summary", list(d.summary ?? [], true)) + sec("Comparison", table) + sec("Where the sources differ", (d.disagreements ?? []).length ? `<ul class="rb-list rb-differ">${d.disagreements.map((x: any) => `<li><span class="rb-t">${esc(x.label)}: ${x.values.map((y: any) => `${esc(y.value)}${cites(y.cite)}`).join(" · ")}. The sources differ; Trainee has not picked one.</span></li>`).join("")}</ul>` : "") + sec("What would have to be true", list(d.conditions ?? [], false)) + sec("Risks", list(d.risks ?? [], false))
+  return cover + sec("Summary", list(d.summary ?? [], true)) + sec("Comparison", table) + sec("Where the sources differ", (d.disagreements ?? []).length ? `<ul class="rb-list rb-differ">${d.disagreements.map((x: any) => `<li><span class="rb-t">${esc(x.label)}: ${x.values.map((y: any) => `${esc(y.value)}${cites(y.cite)}`).join(" · ")}. The sources differ; Trainee has not picked one.</span></li>`).join("")}</ul>` : "") + sec("What would have to be true", readings(d.conditions ?? [])) + sec("Risks", readings(d.risks ?? []))
     + sec("How the sources were chosen", (d.basis ?? []).length ? `<ul class="rb-list rb-basis-list">${d.basis.map((g: string) => `<li><span class="rb-t">${esc(g)}</span></li>`).join("")}</ul>` : "")
     + sec("Not found in a free source", (d.gaps ?? []).length ? `<ul class="rb-list rb-gaps">${d.gaps.map((g: string) => `<li><span class="rb-t">${esc(g)}</span></li>`).join("")}</ul>` : "") + sec("Sources", srcs);
 }
@@ -688,8 +695,12 @@ function marketText(d: any, L: string[]) {
     L.push("## Comparison"); (d.comparison.rows ?? []).forEach((r: any) => { L.push(`### ${r.label}`); (r.cells ?? []).forEach((x: any, i: number) => L.push(hasSrc(x) ? `- ${opts[i]}: ${x.value}${c(x)} [${x.source}]` : `- ${opts[i]}: Not stated`)); }); L.push("");
   }
   if ((d.disagreements ?? []).length) { L.push("## Where the sources differ"); d.disagreements.forEach((x: any) => L.push(`- ${x.label}: ${x.values.map((y: any) => `${y.value}${c(y)}`).join(" · ")}. The sources differ; Trainee has not picked one.`)); L.push(""); }
-  L.push("## What would have to be true"); (d.conditions ?? []).forEach((f: any) => L.push(`- ${f.text}${c(f)} [Trainee's reading]`)); L.push("");
-  L.push("## Risks"); (d.risks ?? []).forEach((f: any) => L.push(`- ${f.text}${c(f)} [Trainee's reading]`)); L.push("");
+  const readings = (xs: any[]) => { const not = xs.filter((f) => f?.unconfirmed);
+    xs.filter((f) => !f?.unconfirmed).forEach((f) => L.push(`- ${f.text}${c(f)} [Trainee's reading]`));
+    if (not.length) { L.push(UNCONFIRMED_HEAD); not.forEach((f) => L.push(`- ${f.text}${c(f)} [${UNCONFIRMED_TAG}]`)); }
+    L.push(""); };
+  L.push("## What would have to be true"); readings(d.conditions ?? []);
+  L.push("## Risks"); readings(d.risks ?? []);
   if ((d.basis ?? []).length) { L.push("## How the sources were chosen"); d.basis.forEach((g: string) => L.push(`- ${g}`)); L.push(""); }
   if ((d.gaps ?? []).length) { L.push("## Not found in a free source"); d.gaps.forEach((g: string) => L.push(`- ${g}`)); L.push(""); }
   L.push("## Sources"); (d.sources ?? []).forEach((s: any, i: number) => L.push(`${i + 1}. ${s.title}: ${s.url} (read ${DAY(s.fetched_at)})`)); L.push("");

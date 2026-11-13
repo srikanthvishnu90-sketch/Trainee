@@ -1,7 +1,7 @@
 // Which brain answers a career turn (WO-002, D-008): the CareerHost router unless CAREER_BRAIN=agent, and the agent turn
 // itself (model + tools over the person's career state).
 import type { LinkCheck } from "../_shared/link_check.ts";
-import { EMPTY_AFTER_SAVE_REPLY, EMPTY_REPLY, REFUSED_FILE_TODO, runAgentTurn, type ModelFn, type TurnResult } from "../_shared/agent/loop.ts";
+import { EMPTY_AFTER_SAVE_REPLY, EMPTY_REPLY, INCOMPLETE_REPLY, REFUSED_FILE_TODO, runAgentTurn, type ModelFn, type TurnResult } from "../_shared/agent/loop.ts";
 import { careerTools, type OutreachDeps, type TailorTools } from "../_shared/agent/career_tools.ts";
 import { importContactsFile, MX_NOT_WIRED, type MxResolver, type Verifier } from "../_shared/career_contacts.ts";
 import { attachAsked, attachTool } from "../_shared/agent/attach_tool.ts";
@@ -229,6 +229,11 @@ export async function agentTurn(o: {
   // Market research: the sources or the file link come from code; the model's links and unsourced figures do not reach the person.
   // R10 WO-H: company research has its own rules (one role question when the role is unknown; a focus keeps that area only).
   if (trace.m && !trace.r && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? enforceCompanyReply(result.reply, trace.m) : enforceMarketReply(result.reply, trace.m as MarketResult, shownPay) };
+  // D-073 review 2: research read pages and none supported an answer, and the model's reply did not stand (the loop removed its
+  // unsourced claim, asked once more and stopped: "incomplete_reply"). The person is told what research found, in code's words: that
+  // it could not be confirmed, with the pages checked. Not after a save: that failure sentence says what was saved, and stays.
+  else if (trace.m && !trace.r && result.stopped === "incomplete_reply" && result.reply === INCOMPLETE_REPLY && trace.m.status === "no_sources" && (trace.m as { checked?: unknown[] }).checked?.length)
+    result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? enforceCompanyReply("", trace.m) : enforceMarketReply("", trace.m as MarketResult, shownPay) };
   // Not an open career question: any link the model wrote that the turn never saw is removed (links not on the turn's allow-list).
   // MIRROR PROCESS (C23, docs/architect/specs/MIRROR-PROCESS.md): a link Trainee itself already showed in this conversation (an
   // earlier reply's source, e.g. the research answer "that citadel process from earlier" recalls) may be given again with the
@@ -428,6 +433,9 @@ export function nonEmptyReply(r: Pick<TurnResult, "reply" | "show" | "tool_calls
     const fromResearch = enforceMarketReply("", m as MarketResult);
     if (/[\p{L}\p{N}]/u.test(fromResearch)) return fromResearch;
   }
+  // D-073 review 2: research read pages and none supported an answer, and the model wrote nothing: the person is still told that it
+  // could not be confirmed, with the pages checked (code's enforcement of an empty draft), never the general empty line.
+  if (m && m.status === "no_sources" && (m as { checked?: unknown[] }).checked?.length) return "kind" in m && m.kind === "company" ? enforceCompanyReply("", m) : enforceMarketReply("", m as MarketResult);
   return (r.tool_calls ?? []).some((c) => c.ok && c.effect === "write_own") ? EMPTY_AFTER_SAVE_REPLY : EMPTY_REPLY;
 }
 

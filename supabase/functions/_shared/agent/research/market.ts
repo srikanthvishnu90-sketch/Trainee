@@ -10,7 +10,7 @@
 //           channel (turn.fileLinks); the inline answer's sources are appended by code (enforceMarketReply), never written by the model.
 import { isBlockedHost, isHttps, normalizeUrl, type FetchedSources, type SourcePage, URL_IN_TEXT, verifiedLinkGuard } from "../../research_sources.ts";
 import type { SearchPlan, SearchProvider } from "../../research_search.ts";
-import { NO_SOURCES } from "../../research_reply.ts";
+import { NO_SOURCES, NOT_CONFIRMED } from "../../research_reply.ts";
 import { contentWords, numbersIn, numEq, specifics } from "./guard.ts";
 import { stripUrls } from "./reply.ts";
 import { parseDraft, readAlike } from "./draft_json.ts";
@@ -490,6 +490,7 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   const need = Math.max(1, parts.length);
   if (keptLines().length < need) for (const l of pageSentences(pages, contentWords(`${i.question} ${companies0.join(" ")}`), companies0, need + 6).filter(payOk)) { if (keptLines().length >= need) break; addPage(l); }
   const disagreements = disagreementsIn(points);
+  const marked = (x: Cited) => answerable.has(x.text) ? x : { ...x, unconfirmed: true as const };
   if (!keptLines().length) {
     const checked: MarketSource[] = pages.slice(0, 4).map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || new URL(p.url).hostname, fetched_at: new Date(p.fetchedAt).toISOString(), kind: sourceKind(p.url, i.plan.companies ?? []) }));
     return { ...none(), checked, ...(i.deps.layout === "messages" ? { layout: "messages" as const } : {}),
@@ -515,7 +516,9 @@ export async function researchMarket(i: { question: string; format: "inline" | "
       const R = "Reported, not verified";
       const data = { variant: "market", title, subject: title, thesis, ...(thesisCite.length ? { thesis_cite: thesisCite } : { thesis_summary: true }), summary: points.map((p) => ({ ...p, source: R })),
         ...(comparison ? { comparison: { options: comparison.options.map((name) => ({ name })), rows: comparison.rows.map((r) => ({ label: r.label, cells: r.cells.map((c) => c ? { value: c.value, source: R, cite: c.cite } : null) })) } } : {}),
-        conditions, risks, ...(disagreements.length ? { disagreements } : {}), ...(basis.length ? { basis } : {}), ...(gaps.length ? { gaps } : {}), sources: sources.map(({ title: t, url, fetched_at }) => ({ title: t, url, fetched_at })) };
+        // D-073 review 2: the File and the chat agree. A reading no sentence of its page says (not `answerable`, the check the chat
+        // reply uses) is marked, and the File shows it apart from the others, labelled as not confirmed (file_kinds.ts marketHtml).
+        conditions: conditions.map(marked), risks: risks.map(marked), ...(disagreements.length ? { disagreements } : {}), ...(basis.length ? { basis } : {}), ...(gaps.length ? { gaps } : {}), sources: sources.map(({ title: t, url, fetched_at }) => ({ title: t, url, fetched_at })) };
       const made = await i.deps.publish(data).catch(() => null);
       if (made && /^https:\/\//.test(made.url)) { file_url = made.url; i.fileLinks?.push(made.url); } else why = "the brief could not be saved";
     }
@@ -567,11 +570,17 @@ export function enforceMarketReply(reply: string, r: MarketResult, shown: { text
   // Research found nothing to stand on: a sentence stays only when it says so (no figure, a plain "couldn't confirm", no
   // "but" carrying a claim after it); anything else is the plain no-source line. "The market is growing rapidly." never stands.
   if (r.status !== "ok") {
-    const kept = stripUrls(reply).split(/(?<=[.!?])\s+/).filter((s) => s && ((!numbersIn(s).length && SAYS_UNCONFIRMED.test(s) && !CLAIM_AFTER.test(s)) || wasShown(s))).join(" ");
+    const says = (s: string) => !numbersIn(s).length && SAYS_UNCONFIRMED.test(s) && !CLAIM_AFTER.test(s);
+    const sents = stripUrls(reply).split(/(?<=[.!?])\s+/).filter((s) => s && (says(s) || wasShown(s)));
+    const kept = sents.join(" ");
     // D-073 review: a reply that says it could not confirm an answer carries the sources that were opened and checked.
-    const checked = kept ? r.checked ?? [] : [];
+    // D-073 review 2 (owner: never a blank research answer): pages were read, so the person is always told that no answer could be
+    // confirmed from them AND which pages they were, whatever the model wrote. When no sentence of the model's says so (an empty
+    // draft, or only claims, which are removed), code's failure sentence does (NOT_CONFIRMED), after any pay line already shown.
+    const checked = r.checked ?? [];
     if (!checked.length) return kept ? withLinks(kept) : NO_SOURCES;
-    return r.layout === "messages" ? [withLinks(kept), ...checked.map((x) => x.url)].join("\n") : `${withLinks(kept)}\n\n${checked.map(sourceLine).join("\n")}`;
+    const text = sents.some(says) ? withLinks(kept) : kept ? `${withLinks(kept)}\n\n${NOT_CONFIRMED}` : NOT_CONFIRMED;
+    return r.layout === "messages" ? [text, ...checked.map((x) => x.url)].join("\n") : `${text}\n\n${checked.map(sourceLine).join("\n")}`;
   }
   const max = r.sources.length;
   // Every kept point with the sources it cites: a figure in the reply must come from a point that cites what the sentence cites.
@@ -601,8 +610,13 @@ export function enforceMarketReply(reply: string, r: MarketResult, shown: { text
     return cs.length > 0 && numsOf(s).every((n) => mine.some((p) => p.nums.some((x) => numEq(x, n))))
       && specifics(s.replace(/\[\d+\]/g, "")).names.every((w) => mine.some((p) => said(w, p.text))) && statOk(s, mine) && labelOk(s);
   };
+  // D-073 review 2: the chat and the File agree. A reading no sentence of its page says is shown on the File apart, as not confirmed
+  // (file_kinds.ts); in chat it is not stated at all, by code or by the model: a sentence that restates one (at least four fifths of
+  // the reading's content words) does not stand, even with its page's number after it.
+  const unsaid = [...r.conditions, ...r.risks].filter((p) => !said1.has(p.text)).map((p) => contentWords(p.text)).filter((w) => w.size > 0);
+  const restates = (s: string) => { const have = contentWords(s.replace(/\[\d+\]/g, " ")); return unsaid.some((w) => [...w].filter((x) => have.has(x)).length / w.size >= 0.8); };
   const keep = (t: string) => stripUrls(t).replace(/\[(\d+)\]/g, (m, n) => Number(n) >= 1 && Number(n) <= max ? m : "")
-    .split(/(?<=[.!?](?:\s*\[\d+\])*)\s+/).filter((s) => s.trim() && ((r.format === "file" ? onRecord(s) && statOk(s, items) : supported(s)) || (!/\[\d+\]/.test(s) && wasShown(s)))).join(" ").trim();
+    .split(/(?<=[.!?](?:\s*\[\d+\])*)\s+/).filter((s) => s.trim() && !restates(s) && ((r.format === "file" ? onRecord(s) && statOk(s, items) : supported(s)) || (!/\[\d+\]/.test(s) && wasShown(s)))).join(" ").trim();
   // D-060 (C9): in the messages layout the model's paragraphs (one topic each) are kept as paragraphs.
   const paras = r.layout === "messages" && r.format !== "file";
   let body = paras ? reply.split(/\n\s*\n/).map(keep).filter(Boolean).join("\n\n") : keep(reply);

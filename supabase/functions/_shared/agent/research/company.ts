@@ -36,7 +36,8 @@ export interface ProjectTie { fact: string; ties: Cited[] }
 export interface FiveItem { label: string; text: string; cite?: number[] }
 export interface CompanySource { n: number; url: string; title: string; fetched_at: string; by: "company" | "reported"; limit?: "paywalled" | "outdated"; dated?: string }
 export type CompanyResult =
-  | { kind: "company"; status: "no_sources"; ask: "role" | null; notes: string[]; unread: string[]; blocker: string; note: string; audit?: ResearchAudit }
+  // checked (D-073 review 2): the pages that were opened and read when none of them gave the brief a line, listed by code after the reply.
+  | { kind: "company"; status: "no_sources"; ask: "role" | null; notes: string[]; unread: string[]; blocker: string; note: string; audit?: ResearchAudit; checked?: { n: number; title: string; url: string; fetched_at: string }[] }
   | { kind: "company"; status: "ok"; format: "file" | "inline"; company: string; role: string | null; ask: "role" | null; focus: Focus; audience: string | null; title: string;
       frame: Cited | null; business: Cited[]; developments: Development[]; competitors: (Cited & { name: string })[]; role_asks: Cited[];
       questions: Question[]; unknowns: string[]; sources: CompanySource[]; products: { name: string; angle: string }[];
@@ -290,7 +291,8 @@ export async function researchCompany(i: { company: string; role?: string | null
   if (ask && focus === "all") unknowns.unshift("Which role you are interviewing for: the brief has no role-specific section until you say.");
   // D-073: every kept, cited line counts toward a brief, the frame (Trainee's reading, checked above) included.
   const any = business.length + developments.length + competitors.length + role_asks.length + questions.length + (frame ? 1 : 0);
-  if (!any) { const blocker = `${pages.length} page(s) about ${company} were opened, but none stated anything the brief could quote`; return { kind: "company", status: "no_sources", ask, notes, unread, blocker, audit, note: `Research found nothing it could stand on: ${blocker}. Say that plainly; do not guess.${roleAsk}` }; }
+  if (!any) { const blocker = `${pages.length} page(s) about ${company} were opened, but none stated anything the brief could quote`; const checked = pages.slice(0, 4).map((p, k) => ({ n: k + 1, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || hostOf(p.url), url: p.url, fetched_at: new Date(p.fetchedAt).toISOString() }));
+    return { kind: "company", status: "no_sources", ask, notes, unread, blocker, audit, checked, note: `Research found nothing it could stand on: ${blocker}. Say that plainly; do not guess. Write no link: code lists the pages that were checked.${roleAsk}` }; }
   // The company's own site: as the turn named it, or as a free source found it (Wikidata P856, the postings' own host).
   const siteHosts = new Set([...(i.plan.sites ?? []), ...(found.sites ?? [])].map((s) => hostOf(`https://${String(s).replace(/^https?:\/\//, "")}`)));
   const sources: CompanySource[] = cited.map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || hostOf(p.url), fetched_at: new Date(p.fetchedAt).toISOString(),
@@ -335,7 +337,14 @@ export function enforceCompanyReply(reply: string, r: CompanyResult): string {
     // a claim) gives way to the blocker code names. The role question stays when the role is unknown.
     const SAYS_NO = /\b(?:couldn['’]?t|could not|can['’]?t|cannot|unable to|wasn['’]?t able|was not able|not able to|blocked|refused|no (?:source|page))\b/i;
     const kept = stripUrls(reply).split(/(?<=[.!?])\s+/).filter((s) => s && !numbersIn(s).length && (/\?\s*$/.test(s) ? !!(r.ask && ROLE_Q.test(s)) : SAYS_NO.test(s) && !/\b(?:but|however)\b/i.test(s))).join(" ");
-    return kept || (r.blocker ? `I couldn't do this research: ${r.blocker}. Nothing was applied for or sent.` : NO_SOURCES);
+    const fail = r.blocker ? `I couldn't do this research: ${r.blocker}. Nothing was applied for or sent.` : NO_SOURCES;
+    // D-073 review 2 (the same rule as a market answer, market.ts): when pages were read and none gave a line, the person is always
+    // told so AND which pages they were, whatever the model wrote: a reply left with only the role question gets the blocker first.
+    const checked = r.checked ?? [];
+    if (!checked.length) return kept || fail;
+    const says = kept.split(/(?<=[.!?])\s+/).some((s) => !/\?\s*$/.test(s) && SAYS_NO.test(s));
+    const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+    return `${says ? kept : [fail, kept].filter(Boolean).join(" ")}\n\n${checked.map((x) => `[${x.n}] ${x.title}: ${x.url} (read ${day(x.fetched_at)})`).join("\n")}`;
   }
   const lines: string[] = r.focus === "all"
     ? [r.frame?.text ?? "", ...r.business.map((x) => x.text), ...r.developments.map((x) => x.text), ...r.competitors.map((x) => `${x.name} ${x.text}`), ...r.role_asks.map((x) => x.text), ...r.questions.map((x) => x.text)]

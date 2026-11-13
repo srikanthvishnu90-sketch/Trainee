@@ -593,8 +593,14 @@ async function fillPlace(page, d, value, country) {
   let list = [];
   // D-072 (item 4, round 2): Lever's lookup (GET /searchLocations) can take longer than 6 s (capture of 2026-11-12: one posting's
   // lookup still loading after 5 s, another answered "Chicago, IL, USA" in 160 ms). Waited on while the question's own loading row
-  // shows, up to 15 s; its own "no location found" row with nothing loading ends the wait.
-  const loading = () => page.evaluate(([q]) => { const el = document.querySelector(`[data-upmore-q="${q}"]`), li = el && el.closest("li"), l = li && li.querySelector(".dropdown-loading-results"); return !!(l && (l.offsetWidth || l.offsetHeight)); }, [d.q]).catch(() => false);
+  // shows, up to 15 s; its own "no location found" row with nothing loading ends the wait. Lever shows one of the two rows at a
+  // time: a page that shows both at once (a capture served without the board's stylesheet, where neither is ever hidden) says
+  // nothing about a lookup in flight, so that is not loading and the wait stays the 6 s it was.
+  const loading = () => page.evaluate(([q]) => {
+    const el = document.querySelector(`[data-upmore-q="${q}"]`), li = el && el.closest("li");
+    const shown = (c) => { const x = li && li.querySelector(c); return !!(x && (x.offsetWidth || x.offsetHeight)); };
+    return shown(".dropdown-loading-results") && !shown(".dropdown-no-results");
+  }, [d.q]).catch(() => false);
   for (let i = 0; i < 75 && !list.length; i++) {
     await page.waitForTimeout(200);
     list = (await opts().allInnerTexts().catch(() => [])).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean);

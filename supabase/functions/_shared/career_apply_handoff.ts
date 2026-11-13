@@ -59,7 +59,10 @@ export function cardText(r: HandoffRow): string {
     `Nothing has been sent. Reply yes to submit exactly this, or no to leave it.`].join("\n");
 }
 
-export async function handoffTurn(o: { message: string; userId: string; threadId: string | null; store: HandoffStore }): Promise<HandoffTurn | null> {
+// `hold`: this turn is not the hand-off's to answer (the person's "don't apply" limit holds every card's yes, or another reply
+// answers this turn first). Nothing is read and nothing is recorded: no done, no yes.
+export async function handoffTurn(o: { message: string; userId: string; threadId: string | null; store: HandoffStore; hold?: boolean }): Promise<HandoffTurn | null> {
+  if (o.hold) return null;
   const msg = String(o.message || "").trim();
   const done = isDone(msg);
   const approval = done ? null : readApproval(msg);

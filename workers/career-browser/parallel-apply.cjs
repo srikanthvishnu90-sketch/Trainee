@@ -33,6 +33,7 @@ const fs = require("node:fs");
 const { fillForm, heldNow, recheckFilled, MARK_SIGNIN } = require("./ats-fill.cjs");
 const { APPLY_TEXT, NEVER_CLICK, OVERLAY_APPLY, CLOSED_MARK, CLOSED_TEXT, applyUrlFor } = require("./apply-entry.cjs");
 const { buildHandoff, PERSON_REASONS } = require("./handoff.cjs");
+const NOT_OFFERED = new Set(["no_matching_option", "ambiguous_option"]);
 const crypto = require("node:crypto");
 
 const sha256 = (b) => crypto.createHash("sha256").update(b).digest("hex");
@@ -343,6 +344,16 @@ function samePostingRedirect(from, to, posting, allow) {
   const parts = new Set([...b.pathname.split("/"), ...[...b.searchParams.values()]].map(slugless));
   return ids.some((id) => parts.has(id));
 }
+// The employer's own page a same-posting redirect led to (its host is in `followed`) is never the application form itself: the
+// host it is refused as, or null when the page may hold the form (a host no redirect added, or Workable's own app on the
+// employer's domain, /_/j/<id>). A page whose address cannot be read is refused.
+function followedPageRefusal(pageUrl, ats, followed) {
+  let u; try { u = new URL(pageUrl); } catch { return "unreadable_page_address"; }
+  const host = normHost(u.hostname);
+  if (!followed || !followed.has(host)) return null;
+  if (ats === "workable" && /^\/_\/j\/[A-Z0-9]+(\/apply)?\/?$/.test(u.pathname)) return null;
+  return host;
+}
 // A posting whose link the board sends to a "not found" page (Lever's cyara posting to apply.workable.com/...?not_found=true): closed.
 const NOT_FOUND_URL = /[?&](?:error|not_found)=true\b/;
 async function attempt(browser, p, opts, timing) {
@@ -508,8 +519,13 @@ async function attempt(browser, p, opts, timing) {
     // own: its embedded form opened at its own address (Greenhouse's job_app frame), or Workable's own app on the employer's domain
     // (/_/j/<id>). Any other form there (a newsletter box, a site search; bench run 43303161774: cribl.io's page reached a Submit
     // with no field filled) is never the application: the run stops as the redirect off the board it was before.
-    const onFollowed = () => followed.has(normHost(new URL(page.url()).hostname));
-    if (onFollowed()) {
+    // Review of #800: the rule holds for every page the run reaches, not only the first. It is checked again after the page's
+    // Apply control is opened (the control may itself lead to the employer's host, which the route guard then allows as the same
+    // posting) and once more on the page as it is the instant before Submit (notOnFollowed, no navigation there): a newsletter
+    // or job-alert box with one Email field there takes the confirmed email, and would otherwise pass every later check.
+    const notOnFollowed = () => { const h = followedPageRefusal(page.url(), p.ats, followed); if (h) throw new NeedsUser("redirect_not_allowed", h); };
+    const leaveFollowed = async () => {
+      if (!followedPageRefusal(page.url(), p.ats, followed)) return;
       const embed = await embeddedFormUrl(page, allow);
       if (embed) {
         try { await page.goto(embed, { waitUntil: "domcontentloaded" }); } catch (e) { onAllowedHost(); throw e; }
@@ -517,10 +533,10 @@ async function attempt(browser, p, opts, timing) {
         await page.waitForSelector(FIELD_SEL, { timeout: 8000 }).catch(() => null);
         await gate();
         await stopAtWall(page, p.url);
-      } else if (!(p.ats === "workable" && /^\/_\/j\/[A-Z0-9]+(\/apply)?\/?$/.test(new URL(page.url()).pathname))) {
-        throw new NeedsUser("redirect_not_allowed", normHost(new URL(page.url()).hostname));
       }
-    }
+      notOnFollowed();
+    };
+    await leaveFollowed();
     // D-072: the board's own form embedded in the employer's page (a frame on an allowed host): opened at its own address.
     if (!(await hasForm())) {
       const embed = await embeddedFormUrl(page, allow);
@@ -538,6 +554,7 @@ async function attempt(browser, p, opts, timing) {
       await gate();
       await stopAtWall(page, p.url);
     }
+    await leaveFollowed();
     timing.load = Date.now() - t0;
     const t1 = Date.now();
     if (!(await hasForm())) {
@@ -583,10 +600,12 @@ async function attempt(browser, p, opts, timing) {
     if (fr.needsUser.length) {
       const first = fr.needsUser[0];
       // D-072 (item 4, round 2): a choice only the person can make is theirs too: an EEO or export-control question with no option
-      // to decline (no_decline_option), or a choice none of whose options is a confirmed fact (no_matching_option, ambiguous_option).
-      // Asked on the hand-off's card (strict run 43276162667: Greenhouse's "This position requires access to information ..." was a
-      // fill failure with no hand-off). handoff.cjs PERSON_REASONS is the one list.
-      const answersOnly = PERSON_REASONS.has(first.reason) || /^(agreement|eeo|upload)_/.test(first.reason);
+      // to decline (no_decline_option). Asked on the hand-off's card (strict run 43276162667: Greenhouse's "This position requires
+      // access to information ..." was a fill failure with no hand-off). handoff.cjs PERSON_REASONS is the one list, less two:
+      // an APPROVED answer or fact that is not exactly one of the offered options (no_matching_option, ambiguous_option) is a
+      // question that could not be filled, not one with no answer: it stays field_not_filled (#340), so the person is never told
+      // a question they answered "has no confirmed answer".
+      const answersOnly = (PERSON_REASONS.has(first.reason) && !NOT_OFFERED.has(first.reason)) || /^(agreement|eeo|upload)_/.test(first.reason);
       // A form that also shows a check (CHECK_IN_FORM) stops as that check, with the person's answers beside it: both are theirs.
       const e = answersOnly && checkInForm ? new NeedsUser("bot_check", p.url, "check_in_form") : new NeedsUser(answersOnly ? "missing_required_answer" : "field_not_filled", first.label);
       if (answersOnly && checkInForm) e.detail = checkInForm;
@@ -606,6 +625,7 @@ async function attempt(browser, p, opts, timing) {
     // Last checks before the click, on what is actually on the page now: still an allowed host, no bot check that appeared
     // while filling, the form posts to an allowed host, and the payload still hashes to what was approved.
     onAllowedHost();
+    notOnFollowed();
     await gate(true);
     await stopAtWall(page, p.url);
     if (!(await markSubmit())) throw new NeedsUser("no_submit_control", p.url);
@@ -621,6 +641,8 @@ async function attempt(browser, p, opts, timing) {
     if (opts.shotBefore) await page.screenshot({ path: opts.shotBefore, fullPage: true });
     // The caller records "submitting" (and re-checks its lease and kill switch) BEFORE the click; a refusal stops here, unsent.
     // A dry run's audit (opts.audit) also gets what each filled question holds at this instant; production passes only the phase.
+    // The page as it is now, the last read before the caller's "submitting" record: never the employer's own page.
+    notOnFollowed();
     // The control about to be pressed, for the caller's own check (the strict bench refuses one inside a sign-in form).
     const submitInfo = await page.$eval("[data-upmore-submit]", (b) => { const f = b.closest("form"); return { signin: !!b.closest("[data-upmore-signin]"), form: f ? f.getAttribute("action") || "" : null }; }).catch(() => ({ signin: false, form: null }));
     if (opts.onPhase) await opts.onPhase("submitting", opts.audit ? { id: p.id, fields: await heldNow(page, fr.filled) } : undefined, submitInfo);
@@ -708,4 +730,4 @@ async function runPool(browser, payloads, opts = {}) {
   return { results, wallMs: Date.now() - started, concurrency };
 }
 
-module.exports = { closedOnPage, declineCookies, samePostingRedirect, postingIds, CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };
+module.exports = { closedOnPage, declineCookies, samePostingRedirect, followedPageRefusal, postingIds, CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };

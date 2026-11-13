@@ -706,8 +706,14 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // at the employer's page re-checks it in Trainee's own browser; "done" again shows the exact answers the page holds as a card;
       // a yes while that card is this thread's last word submits exactly that card (its hash), never anything else. It answers only
       // those words, only when a hand-off is waiting, and stands in the card's place (every turn the card turn guards is skipped).
+      // Review of #800: it is held exactly as any other card's yes is. After "don't apply" (cardHold) a bare yes approves nothing
+      // here either: the held reply below asks which is meant. And a turn another reply answers before the card's place in the
+      // order below (the Outlook connector, crisis text) records neither a done nor a yes: the hand-off turn does not run on it
+      // (hold: it returns before it reads or writes anything).
+      const handoffHeld = cardHold || !!outlookAns
+        || (brainMode(Deno.env) === "staged" && !tapIn && !careerTask && !careerBatch && !host.isHostControlled(message, ctx) && !!crisisReply(message));
       const handoffAns = !tapIn && !connAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
-        ? await handoffTurn({ message, userId: user.id, threadId: tid, store: supabaseHandoffStore(admin) })
+        ? await handoffTurn({ message, userId: user.id, threadId: tid, store: supabaseHandoffStore(admin), hold: handoffHeld })
           .catch((e) => { console.error("hand-off turn:", (e as Error)?.message ?? e); return null; })
         : null;
       const card0 = handoffAns ? ({ reply: handoffAns.reply, status: "handoff", handoff: handoffAns } as any) : !cardHold && !tapIn && !connAns && !outlookAns && !siteNo && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)

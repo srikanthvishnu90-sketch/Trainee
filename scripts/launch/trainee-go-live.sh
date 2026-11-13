@@ -133,6 +133,8 @@ fi
 # 20261019020000_site_capture.sql is main's landing-page capture, already live (WO-081): its mark skips it there. Trunk's
 # channel delivery moved to 20261019020001 so the two never share a version.
 # 20261110120000 (release item 2): the VM drives Personio and Breezy by exact host. Rollback: supabase/rollbacks/20261110120000_career_apply_vm_boards.down.sql.
+# 20261112160000 (D-072 item 4, round 2): the hand-off's re-check and yes on the apply rows; a hand-off row leaves the queue only
+# through career_apply_vm_claim_handoff (the guard trigger). Rollback: supabase/rollbacks/20261112160000_career_apply_handoff_recheck.down.sql.
 MIGRATIONS=(
   20261019000000_channel_threads.sql
   20261019000001_career_postings.sql
@@ -306,6 +308,7 @@ MIGRATIONS=(
   20261110190000_career_outbox_parts_follow_contact.sql
   20261111120000_career_google_accounts.sql
   20261112130000_career_postings_pay_zones.sql
+  20261112160000_career_apply_handoff_recheck.sql
 )
 MIGRATION_MARK=(
   "to_regclass('public.channel_threads') is not null"
@@ -480,6 +483,7 @@ MIGRATION_MARK=(
   "exists (select 1 from pg_trigger where tgname = 'career_outbox_parts_follow_contact')"
   "to_regclass('public.career_google_accounts') is not null and to_regprocedure('public.career_google_account_commit(uuid,text,text,text,timestamptz)') is not null"
   "exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'career_postings' and column_name = 'pay_zones') and exists (select 1 from pg_constraint where conname = 'career_postings_pay_zones_shape')"
+  "exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'career_apply_jobs' and column_name = 'handoff_done_at') and to_regprocedure('public.career_apply_vm_claim_handoff(text,integer,integer,text[])') is not null and exists (select 1 from pg_trigger where tgname = 'career_apply_handoff_claim_guard')"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.
 EARLIER=(20261015010000_career_knowledge_base.sql 20261015020000_career_watch_kv.sql 20261015234000_career_task_intents_v1.sql

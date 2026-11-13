@@ -17,8 +17,15 @@
 --      the queue with handoff_yes = {card_hash}; the VM re-opens the page once more and presses Submit only if the page still holds
 --      exactly that card (handoff.cjs recheck: another card is refused, unsent).
 -- Both are service-role functions; the chat handler (supabase/functions/_shared/career_apply_handoff.ts) calls them for the
--- signed-in person. The apply VM reads a leased row's hand-off state with career_apply_vm_handoff_state (its role has no table
--- rights). The stored approval is checked again (career_apply_vm_approval_refusal): an expired or revoked approval is not re-queued.
+-- signed-in person. The stored approval is checked again (career_apply_vm_approval_refusal): an expired or revoked approval is not
+-- re-queued.
+-- FAIL CLOSED (review of #800): a row with handoff_done_at is never an ordinary approved row. It may leave the queue only through
+-- the one claim that hands its hand-off state to the worker in the same answer (career_apply_vm_claim_handoff: each row carries
+-- handoff {done_at, yes}); the trigger career_apply_handoff_claim_guard leaves it queued, untouched, for every other claim (the VM
+-- build from before this file, the person's own engine, the cloud runner), which would drive it as an ordinary row and press
+-- Submit without the person's yes to the exact-answers card. So the order of the release does not matter: this file and the chat
+-- live before the new VM build means a hand-off row waits; the new VM build before this file means it claims as before.
+-- career_apply_vm_handoff_state stays for a leased row's read (the worker's role has no table rights).
 -- The re-queue clears the claim's source the way 20261109150000's re-queue does (career.apply_requeue names the row; the guard
 -- career_apply_jobs_fixed allows needs_user -> queued with the source cleared for that row only).
 -- Additive and reversible (supabase/rollbacks/20261112160000_career_apply_handoff_recheck.down.sql). Idempotent.
@@ -26,8 +33,24 @@
 alter table public.career_apply_jobs add column if not exists handoff_done_at timestamptz;
 alter table public.career_apply_jobs add column if not exists handoff_yes jsonb;
 alter table public.career_apply_jobs drop constraint if exists career_apply_jobs_handoff_yes_shape;
+-- Added NOT VALID and then validated (as 20261031110000 does), so the queue is not read under the exclusive lock.
 alter table public.career_apply_jobs add constraint career_apply_jobs_handoff_yes_shape
- check (handoff_yes is null or (jsonb_typeof(handoff_yes) = 'object' and coalesce(handoff_yes->>'card_hash', '') ~ '^[0-9a-f]{64}$'));
+ check (handoff_yes is null or (jsonb_typeof(handoff_yes) = 'object' and coalesce(handoff_yes->>'card_hash', '') ~ '^[0-9a-f]{64}$')) not valid;
+alter table public.career_apply_jobs validate constraint career_apply_jobs_handoff_yes_shape;
+
+-- A hand-off row (handoff_done_at set) starts a drive only inside the hand-off claim below. Any other claim's update of that row
+-- is skipped (the row stays queued exactly as it was; the claim hands out its other rows as always).
+create or replace function public.career_apply_handoff_claim_guard() returns trigger
+language plpgsql set search_path = public, pg_temp as $$
+begin
+ if coalesce(current_setting('career.apply_handoff_claim', true), '') = 'on' then return new; end if;
+ return null;
+end $$;
+revoke all on function public.career_apply_handoff_claim_guard() from public, anon, authenticated; -- a trigger function: the trigger runs it
+drop trigger if exists career_apply_handoff_claim_guard on public.career_apply_jobs;
+create trigger career_apply_handoff_claim_guard before update on public.career_apply_jobs
+ for each row when (new.state = 'driving' and old.state is distinct from 'driving' and (old.handoff_done_at is not null or new.handoff_done_at is not null))
+ execute function public.career_apply_handoff_claim_guard();
 
 -- The one re-queue both answers use: back to the queue, unclaimed, sourceless, with the hand-off state given.
 create or replace function public.career_apply_handoff_requeue(j public.career_apply_jobs, p_yes jsonb, p_note jsonb) returns void
@@ -97,6 +120,29 @@ begin
 end $$;
 revoke all on function public.career_apply_handoff_yes_as(uuid, uuid, text) from public, anon, authenticated;
 grant execute on function public.career_apply_handoff_yes_as(uuid, uuid, text) to service_role;
+
+-- The apply VM's claim: career_apply_vm_claim's own rows (same fairness, same approval checks, same lease), hand-off rows included,
+-- each with its hand-off state in the same answer: handoff {done_at, yes}, both null for an ordinary row. The worker never needs a
+-- second call to learn that a row is a re-check, so no failed call can turn a re-check into an ordinary drive.
+create or replace function public.career_apply_vm_claim_handoff(p_worker text, p_limit integer, p_per_user integer default 1, p_skip_hosts text[] default '{}')
+returns jsonb language plpgsql security definer set search_path = public, pg_temp as $$
+declare got jsonb; out jsonb;
+begin
+ perform set_config('career.apply_handoff_claim', 'on', true);
+ got := public.career_apply_vm_claim(p_worker, p_limit, p_per_user, p_skip_hosts);
+ perform set_config('career.apply_handoff_claim', '', true);
+ select coalesce(jsonb_agg(e.v || jsonb_build_object('handoff', jsonb_build_object('done_at', j.handoff_done_at, 'yes', j.handoff_yes)) order by e.o), '[]'::jsonb)
+  into out from jsonb_array_elements(coalesce(got, '[]'::jsonb)) with ordinality as e(v, o)
+  join public.career_apply_jobs j on j.id = (e.v->>'id')::uuid;
+ return out;
+end $$;
+revoke all on function public.career_apply_vm_claim_handoff(text, integer, integer, text[]) from public, anon, authenticated;
+do $$ begin
+ if exists (select from pg_roles where rolname = 'apply_vm_worker') then
+  grant execute on function public.career_apply_vm_claim_handoff(text, integer, integer, text[]) to apply_vm_worker;
+ end if;
+end $$;
+grant execute on function public.career_apply_vm_claim_handoff(text, integer, integer, text[]) to service_role;
 
 -- The apply VM: the hand-off state of the row it holds the lease on (its role reads no table).
 create or replace function public.career_apply_vm_handoff_state(p_id uuid, p_lease uuid, p_worker text) returns jsonb

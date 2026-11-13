@@ -302,8 +302,8 @@ Deno.test("the company brief: every line is judged or quoted; the model's unknow
     const r = await run(j);
     eq(r.status, "ok");
     // Round 5: the 2024 unit carries a year the claim does not, so layer A stands the false claim on the other unit, whose quote the
-    // two drafted lines now share (shown once).
-    eq(r.business.map((x: any) => x.text), ['"Acme Robotics sells warehouse robots to retailers."']);
+    // two drafted lines now share (shown once); the brief then takes the page's other unit as its second line, quoted and judged.
+    eq(r.business.map((x: any) => x.text), ['"Acme Robotics sells warehouse robots to retailers."', '"Acme Robotics stopped selling delivery drones in 2024."']);
     eq(r.frame?.text ?? null, '"Acme Robotics stopped selling delivery drones in 2024."'); // the reading, not judged yes, is the page's sentence
     eq(r.unknowns.filter((u: string) => /drone market/.test(u)), []);
     eq(r.products, []);

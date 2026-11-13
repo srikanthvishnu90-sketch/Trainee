@@ -346,3 +346,9 @@
 800 9fb065805a300aaf8d33e4fe6827283246ae97ef independent-review-20261113 risk=high note=hand-off-re-check-claim-guard-and-locked-rollback-final-review-approve-at-this-head-open-notes-click-time-yes-check-only-in-worker-and-no-concurrent-done-test
 802 288aa3e43dfd8d1dad75358ff23c529c301b4fe1 independent-review-20261113 risk=medium note=D-074-budget-80-total-reviewed-at-this-head-approved-doc-finding-fixed-in-806
 805 17fdf43d97ad6798d1afb849c348549f7d76198d independent-review-20261113 risk=high note=file-ask-allowlist-rebuild-two-adversarial-reviews-before-merge-at-this-head-approved-low-severity-leftovers-recorded
+767 c0e96c0c9e97d47bbed94f8bcd4ef4a7b74c3621 independent-review-20261113 risk=low note=review-lines-from-hashed-row-wording-reply-approves-nothing-handler-test-not-run-locally
+806 39bcc3bc8a5a5ad0709b36f4b15d96965f458640 independent-review-20261113 risk=low note=docs-80-total-correct-stale-70-remains-in-six-other-docs
+807 3dc766a9e23fa36e27e62f49a09f545559683e39 independent-review-20261113 risk=high note=research-figures-approved-as-improvement-over-trunk-only-71-of-94-hostile-cases-still-pass-not-releasable-alone
+810 f13c3d3f968973a90944ee70632ba1ef40a93e9e independent-review-20261113 risk=medium note=support-check-flag-off-byte-identical-to-trunk-on-1548-records-judge-never-called-flag-on-rejected
+814 772ed5c9389701def82ffdf7b33526af8cc0eb09 independent-review-20261113 risk=high note=mail-reply-approved-as-improvement-no-regression-open-items-hung-send-false-proof-kind-isolation-redaction-in-820
+818 04d2b93b6628cb59221e4895f38c0d184a642071 independent-review-20261113 risk=high note=engine-approved-as-improvement-no-regression-open-blockers-on-trunk-wrong-form-non-submit-buttons-linkedin-controls-hidden-answers-false-submitted

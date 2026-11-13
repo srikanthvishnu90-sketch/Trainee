@@ -38,7 +38,7 @@ function* paysIn(t: string): Generator<{ pay: string; at: number; end: number }>
     const g = m.groups ?? {};
     const at0 = m.index ?? 0, lead = t.slice(Math.max(0, at0 - 90), at0);
     // "The hourly range is $32-$55": the period said just before figures that carry none.
-    const said = !(g.per ?? g.ly) && /\bhourly\b[^.!?]{0,80}$/i.test(lead) ? "hourly" : "";
+    const said = !(g.per ?? g.ly) ? (/\b(hourly|monthly|weekly)\b[^.!?]{0,80}$/i.exec(lead)?.[1].toLowerCase() ?? "") : "";
     const per = (g.per ?? g.ly ?? said).toLowerCase();
     const lo = amount(g.lo);
     const hour = /^(?:hour|hr|hourly)$/.test(per);
@@ -54,9 +54,11 @@ function* paysIn(t: string): Generator<{ pay: string; at: number; end: number }>
     if (extra.trim() && (!per || /bonus|equity|rsu|stock|referral|sign|grant|raise|funding/i.test(extra))) continue;
     // "CAD $80,000 - $95,000": the code written before the symbol stays with the figure (never a Canadian range read as "$").
     const code = new RegExp(`\\b(${CODE})\\s*$`).exec(before)?.[1];
-    const out = `${code ? `${code} ` : ""}${m[0].trim().replace(/[.,;]+$/, "")}${said ? ` ${said}` : ""}`;
+    // "$150,000 - $180,000 OTE", "... base": what kind of pay it is, written right after it, stays with it.
+    const kind = /^\s+(OTE|base|total(?:\s+comp(?:ensation)?)?)\b/i.exec(m[0].trim().endsWith(".") ? "" : after)?.[1];
+    const out = `${code ? `${code} ` : ""}${m[0].trim().replace(/[.,;]+$/, "")}${said ? ` ${said}` : ""}${kind ? ` ${kind}` : ""}`;
     const bound = g.hi ? null : BOUND_BEFORE.exec(before)?.[1];
-    yield { pay: bound ? `${bound[0].toUpperCase()}${bound.slice(1).toLowerCase()} ${out}` : out, at, end: at + m[0].length };
+    yield { pay: bound ? `${bound[0].toUpperCase()}${bound.slice(1).toLowerCase()} ${out}` : out, at, end: at + m[0].length + (kind ? after.indexOf(kind) + kind.length : 0) };
   }
 }
 // Pay a posting states for each place, in its own words: "<City>, <Region> | (<range>)" (Workday's pay-by-location table), or
@@ -83,13 +85,16 @@ export function paysByPlace(text: string): { place: string; pay: string }[] {
 const STATES: Record<string, string> = { alabama: "al", alaska: "ak", arizona: "az", arkansas: "ar", california: "ca", colorado: "co", connecticut: "ct", delaware: "de", florida: "fl", georgia: "ga", hawaii: "hi", idaho: "id", illinois: "il", indiana: "in", iowa: "ia", kansas: "ks", kentucky: "ky", louisiana: "la", maine: "me", maryland: "md", massachusetts: "ma", michigan: "mi", minnesota: "mn", mississippi: "ms", missouri: "mo", montana: "mt", nebraska: "ne", nevada: "nv", "new hampshire": "nh", "new jersey": "nj", "new mexico": "nm", "new york": "ny", "north carolina": "nc", "north dakota": "nd", ohio: "oh", oklahoma: "ok", oregon: "or", pennsylvania: "pa", "rhode island": "ri", "south carolina": "sc", "south dakota": "sd", tennessee: "tn", texas: "tx", utah: "ut", vermont: "vt", virginia: "va", washington: "wa", "west virginia": "wv", wisconsin: "wi", wyoming: "wy", "district of columbia": "dc" };
 const CODES = new Set(Object.values(STATES));
 const BAY = new Set(["san francisco", "san jose", "oakland", "palo alto", "mountain view", "sunnyvale", "menlo park", "redwood city", "santa clara", "cupertino", "fremont", "berkeley", "san mateo", "south san francisco", "bay area"]);
-const ALIAS: Record<string, [string, string]> = { nyc: ["new york", "ny"], "new york city": ["new york", "ny"], sf: ["san francisco", "ca"], la: ["los angeles", "ca"] };
+const ALIAS: Record<string, [string, string]> = { nyc: ["new york", "ny"], "new york city": ["new york", "ny"], sf: ["san francisco", "ca"], la: ["los angeles", "ca"], dc: ["washington", "dc"], "washington dc": ["washington", "dc"] };
+// Not the US: Canada's provinces (London, ON is not London) and the country Georgia's cities.
+const PROVINCES = new Set(["on", "bc", "qc", "ab", "mb", "sk", "ns", "nb", "nl", "pe", "ontario", "quebec", "british columbia", "alberta"]);
+const NOT_US_GEORGIA = new Set(["tbilisi", "batumi", "kutaisi", "rustavi"]);
 const words = (s: string) => String(s ?? "").toLowerCase().replace(/[^a-z ]+/g, " ").replace(/\s+/g, " ").trim();
 const cityOf = (s: string) => words(String(s ?? "").split(/[,;|(]/)[0]);
 type Place = { city: string; state: string | null; region: string; only: "state" | "remote" | "bay" | null };
 function placeOf(raw: string): Place {
-  const s = String(raw ?? "").replace(/\([^)]*\)/g, " ").replace(/^\s*(?:hybrid|on-?site|in-?office)\s*,\s*/i, "");
-  const [a, b] = s.split(","), city = cityOf(a), region = words(b ?? "");
+  const s = String(raw ?? "").replace(/\([^)]*\)/g, " ").replace(/^\s*(?:hybrid|on-?site|in-?office)\s*(?:,|\s[-–—])\s*/i, "");
+  const [a, b] = s.split(","), city = cityOf(a).replace(/ (?:metro|area|region)$/, (m0) => (/bay area$/.test(cityOf(a)) ? m0 : "")), region = NOT_US_GEORGIA.has(cityOf(a)) ? "georgia (country)" : words(b ?? "");
   if (/\bremote\b/i.test(raw)) return { city: "remote", state: null, region: "", only: "remote" };
   if (/\bbay area\b/i.test(s)) return { city: "bay area", state: "ca", region: "", only: "bay" };
   if (ALIAS[city]) return { city: ALIAS[city][0], state: ALIAS[city][1], region: ALIAS[city][1], only: null };
@@ -107,15 +112,18 @@ function fit(label: Place, loc: Place): 0 | 1 | 2 {
   return label.city === loc.city && label.city.length >= 2 && regions && loc.only !== "state" ? 2 : 0;
 }
 // A label that lists places ("Zone B (Seattle, Boston)") fits by any of them.
-const fits = (label: string, loc: Place) => Math.max(0, ...[label, ...(/\(([^)]*)\)/.exec(label)?.[1].split(/,|\/|&|\band\b/) ?? [])].filter((x) => x.trim()).map((x) => fit(placeOf(x), loc)));
+const fits = (label: string, loc: Place) => Math.max(0, ...[label, ...label.replace(/\([^)]*\)/g, " ").split(/\s+(?:and|or|&)\s+/), ...(/\(([^)]*)\)/.exec(label)?.[1].split(/,|\/|&|\band\b/) ?? [])].filter((x) => x.trim()).map((x) => fit(placeOf(x), loc)));
+// The currency says the country: a pound, euro or Canadian range is not a US posting's; pounds and euros are not a Canadian one's.
+const abroad = (pays: string[], loc: Place) => { const cur = payCurrency(pays[0] ?? ""), us = !!loc.state || loc.only === "state", ca = PROVINCES.has(loc.region);
+  return (us && cur !== null && cur !== "USD") || (ca && (cur === "GBP" || cur === "EUR")); };
 const CAP = String.raw`(?:(?:St|Ft|Mt)\. )?[A-Z][A-Za-z'-]*(?: [A-Z][A-Za-z'-]*)*(?:, [A-Z][A-Za-z]+(?: [A-Z][a-z]+)?)?`;
-const LABEL = /^(?:[A-Z][A-Za-z.'&-]*|\d{1,2})(?:,? (?:[A-Z][A-Za-z.'&-]*|\d{1,2}|of|the|and|other|all|de|la))*(?: (?:area|metro|locations?|states?|offices?))?$/;
+const LABEL = /^(?:[A-Z][A-Za-z.'&-]*|\d{1,2})(?:,?(?: [-–—])? (?:[A-Z][A-Za-z.'&-]*|\d{1,2}|of|the|and|other|all|de|la))*(?: (?:area|metro|locations?|states?|offices?))?$/;
 const NOT_LABEL = /^(?:Pay|Salar(?:y|ies)|Base|Ranges?|Compensation|Hourly|Annual|Annually|The|This|Our|Rates?|Wages?|USD|Total|Target|Min|Max|Minimum|Maximum|From|Starting|Estimated|Expected|Benefits|Note|Up|To|And|Or|Between|Location)\b/;
 const placeLike = (l: string) => { const p = placeOf(l); return !!(p.only || p.state); };
 // A trailing "and"/"or" is dropped only in lower case: "Portland, OR" keeps its state.
 const asLabel = (x: string) => { const l = x.trim().replace(/^(?:(?:and|or|in|for|at|the|And|Or|In|For|At|The)\s+)+/, "").replace(/(?:\s+(?:and|or|the|of))+$/, "").replace(/[.,]+$/, "").trim(); return l.length >= 2 && l.length <= 50 && LABEL.test(l) && !NOT_LABEL.test(l) ? l : null; };
 const AFTER = [new RegExp(String.raw`^\s*\(([^()$€£]{2,40})\)`), new RegExp(String.raw`^\s*\)?\s*(?:in|for|at)\s+(?:the\s+)?(${CAP})`), new RegExp(String.raw`^\s*[-–—]\s*(${CAP})(?=\s*(?:[.;¶]|$))`), new RegExp(String.raw`^\s+(${CAP})(?=\s*(?:[.;¶]|$))`)];
-const LEAD = new RegExp(String.raw`^(${CAP})\s+[a-z]+$`), PROSE = new RegExp(String.raw`\b(?:[Ii]n|[Ff]or|[Aa]t|[Oo]ur)\s+(?:the\s+)?(${CAP})(?=\s+[a-z]|\s*$)[^A-Z$€£]*$`);
+const LEAD = new RegExp(String.raw`^(?:(?:[Ii]n|[Ff]or|[Aa]t)\s+)?(${CAP})\s+[a-z]+$`), PROSE = new RegExp(String.raw`\b(?:[Ii]n|[Ff]or|[Aa]t|[Oo]ur)\s+(?:the\s+)?(${CAP}(?:(?:,| and| or) ${CAP})*)(?=,?\s+[a-z]|\s*$)[^A-Z$€£]*$`);
 const WIDE = /^(?:US|USA|U\.S\.A?\.?|United States|Nationwide)$/;
 // `sure`: the label is a place (or was written as one: "in San Jose", "(Chicago, IL)"), not just a word before a colon.
 export function paysWithPlace(text: unknown): { place: string | null; pay: string; sure: boolean }[] {
@@ -124,13 +132,15 @@ export function paysWithPlace(text: unknown): { place: string | null; pay: strin
   let from = 0, last: { place: string | null; sure: boolean } | null = null;
   for (const p of paysIn(t)) {
     const gap = t.slice(Math.max(from, p.at - 120), p.at).replace(new RegExp(`\\b(?:${CODE})\\s*$`), "");
-    const head = gap.replace(/\s*\(?\s*$/, "");
+    // "For Colorado applicants: the range is $..." : the words that only introduce the figure are not its label.
+    const head = gap.replace(/\s*\(?\s*$/, "").replace(/([:|])\s*(?:the\s+)?(?:[a-z]+\s+)?(?:range|rate|pay|salary)\s+is$/i, "$1");
     let place: string | null = null, sure = false, end = p.end;
+    const end0 = false;
     const listed = /(?:^\s*|[.;¶|]\s*)([A-Z][A-Za-z-]*(?: [A-Z0-9][A-Za-z0-9-]*)*\s*\([^()$]{1,40}\))\s*[:|]$/.exec(head);
     if (listed) { place = listed[1]; sure = true; }
     else {
       const sep = /\s*(?:[:|=¶]|\s[-–—])\s*$/.exec(head);
-      const seg = ((sep ? head.slice(0, sep.index) : head).split(/(?<!\b(?:St|Ft|Mt))[.!?;]\s+|[:|()¶•]|\s[-–—]\s/).pop() ?? "").trim();
+      const seg = ((sep ? head.slice(0, sep.index) : head).split(/(?<!\b(?:St|Ft|Mt))[.!?;]\s+|[:|()¶•]|\s\/\s|(?<!\b(?:Remote|Hybrid|Onsite|On-site))\s[-–—]\s/).pop() ?? "").trim();
       const whole = asLabel(seg), part = asLabel((sep ? LEAD.exec(seg)?.[1] : null) ?? PROSE.exec(seg)?.[1] ?? "");
       if (whole && (sep || placeLike(whole))) { place = whole; sure = placeLike(whole); }
       else if (part && !WIDE.test(part)) { place = part; sure = true; }
@@ -140,7 +150,9 @@ export function paysWithPlace(text: unknown): { place: string | null; pay: strin
       for (const re of AFTER) { const m = re.exec(rest), l = m && asLabel(m[1]); if (m && l) { place = l; sure = true; end = p.end + m[0].length; break; } }
     }
     // Beside the pay before it, in the same sentence ("$28 - $49 per hour ($58,240 - $101,920 per year)"): the same place.
-    if (!place && last && from > 0 && gap.length <= 12 && !/[.!?;¶]/.test(gap)) ({ place, sure } = last);
+    if (!place && last && from > 0 && gap.length <= 12 && !/[.!?;¶/]/.test(gap)) ({ place, sure } = last);
+    // "$22/hr - $27/hr": one range written with its period on both ends.
+    if (out.length && from > 0 && /^\s*(?:-|–|—|to)\s*$/.test(t.slice(from, p.at)) && !end0) { out[out.length - 1].pay += ` - ${p.pay}`; from = end; continue; }
     out.push({ place, pay: p.pay, sure });
     last = { place, sure }; from = end;
     if (out.length >= 24) break;
@@ -160,7 +172,7 @@ export function placedPay(text: unknown, location: string | null | undefined): s
   // Several ranges and no place on any of them: which is this posting's cannot be told. One range: it is the pay.
   if (!groups.length) return one ? rows[0].pay : null;
   const where = String(location ?? "").split(/;|\bor\b|\/|\|/).map((x) => x.trim()).filter((x) => cityOf(x).length >= 2).map(placeOf);
-  const score = groups.map((g) => Math.max(0, ...where.map((w) => fits(g.place, w))));
+  const score = groups.map((g) => Math.max(0, ...where.map((w) => (abroad(g.pays, w) ? 0 : fits(g.place, w)))));
   const best = Math.max(0, ...score), mine = best ? groups.filter((_g, k) => score[k] === best) : [];
   // One pay in the whole text: it is the pay, wherever the posting is; a place on it is kept when it is not the posting's own.
   if (one) return groups.length === 1 && rows.some((r) => r.sure) && !mine.length ? `${groups[0].place}: ${rows[0].pay}` : rows[0].pay;

@@ -375,3 +375,4 @@
 780 f651d90dcce157dd80150546da201e7595674ecf independent-review-20261113 risk=low note=adds-not-checked-clause-narrow-tone-window
 811 cf4e82a2a8818918a9f80f796689430058c28b83 independent-review-20261113 risk=medium note=no-branch-only-losses-false-claims-145-to-45-edit-turn-claims-stay-beside-true-block
 825 e84c9199a3e7e4799346da5aab00b1499595adb7 independent-review-20261113 risk=medium note=net-fewer-leaks-followup-signin-colon-other-languages-false-redactions
+815 d395b92e4f1fc87aa9ca328441986b00717ec522 independent-review-20261113 risk=high note=no-real-file-regressions-placeholder-phones-off-email-line-still-pass-bundle-rebuild-only-after-review

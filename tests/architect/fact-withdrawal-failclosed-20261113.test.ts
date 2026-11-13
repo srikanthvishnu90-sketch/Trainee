@@ -158,7 +158,9 @@ Deno.test("FW-1 the hostile table through the brain turn: storage is byte-for-by
 // ---------------------------------------------------------------- FW-1 true corrections: the right fact, or a note
 // "withdraw": code sets exactly this fact aside. "note": storage is unchanged and the model is told which fact they may mean.
 const TRUE: [string, "withdraw" | "note", string][] = [
-  [PERSONA.setup[2], "withdraw", "g"],
+  // round 3: D70-3's list message sets the GPA aside only on the record it was written for (its later sentences must each start
+  // with a fact that record holds: FW-A3); on this record, where "Rallyup" and "Harbor" name nothing, it is a note.
+  [PERSONA.setup[2], "note", "g"],
   ["the 3.9 gpa on there is outdated, don't reuse it", "withdraw", "g"],
   ["My 3.9 GPA is out of date.", "withdraw", "g"],
   ["the gpa 3.9 on my resume is outdated", "withdraw", "g"],
@@ -197,7 +199,7 @@ Deno.test("FW-1 true corrections: each withdraws exactly the right fact, or chan
     await agentTurn({ message: m, history: [], stores, userId: "u-fw", threadId: "th", now: NOW, model: async (p: any) => { seen.push(p); return text("Which one do you mean?"); } } as any);
     if (JSON.stringify(stores.profile) !== before) bad.push(`${JSON.stringify(m)}: a note-only correction changed storage`);
     const title = String(facts.find((f) => f.id === id)!.title);
-    if (how === "note" && id === "g" && !hints(m, personaProfile().facts).some((f: any) => f.text === "GPA: 3.9")) bad.push(`${JSON.stringify(m)}: no note on the persona's real record`);
+    if (how === "note" && id === "g" && !staleFactsOf(m, personaProfile().facts).length && !hints(m, personaProfile().facts).some((f: any) => f.text === "GPA: 3.9")) bad.push(`${JSON.stringify(m)}: no note on the persona's real record`);
     if (!/MAY BE CORRECTING/.test(seen[0].system) || !seen[0].system.includes(JSON.stringify(title)) || !/nothing (?:was|has been) changed/i.test(seen[0].system)) bad.push(`${JSON.stringify(m)}: the model was not given the note naming ${title}`);
   }
   eq(bad, []);
@@ -213,32 +215,94 @@ Deno.test("FW-1 a set-aside is stated in the reply (which fact), is recorded wit
   ok(r.reply.includes("GPA: 3.9") && /set aside/i.test(r.reply), `the person is told which fact: ${r.reply}`);
   eq([gpa.status, gpa.needs_confirmation], ["draft", true]);
   eq(gpa.withdrawn_by_owner.was, { status: "confirmed", needs_confirmation: false }, "what it was is kept, so it can be put back");
-  // A reply that already names the fact is left as the model wrote it.
+  // Round 3: code says it itself, once, first; what the model said about that fact is removed (no repeat, no contradiction).
   const p2 = personaProfile();
-  const said = "Got it: the 3.9 GPA is off your record and won't be used.";
-  const r2: any = await agentTurn({ message: PERSONA.setup[2], history: [], stores: { profile: p2 }, userId: "u-fw", threadId: "th", now: NOW, model: async () => text(said) } as any);
-  eq(r2.reply, said);
-  // Put back (round 2): only on a yes to the turn code marked as having asked about THIS fact (restore_ask, kept in the message's
-  // meta); never by the fact's words in the question before.
-  const tools = Object.fromEntries(careerTools({ postings: async () => [] } as any).map((t: any) => [t.name, t]));
-  const ctxFor = (message: string, before: string, restoreAsk?: unknown) => ({ userId: "u-fw", threadId: "th", now: NOW + 60_000, state: stores, restoreAsk, turn: { message, added: [], before } }) as any;
-  for (const before of [r.reply, "Put GPA: 3.9 back on your record?", "Should I leave GPA 3.9 off the Stripe application?", "Apply to Citadel (requires GPA 3.9 or higher)?", ""]) {
-    await assertNode.rejects(() => tools.confirm_profile_fact.run({ id: gpa.id }, ctxFor("yes", before)), /not confirmed/, before);
-    await assertNode.rejects(() => tools.confirm_profile_fact.run({ id: gpa.id }, ctxFor("yes", before, { fact_id: "F-999" })), /not confirmed/, before);
-    eq(gpa.status, "draft");
-  }
-  await assertNode.rejects(() => tools.confirm_profile_fact.run({ id: gpa.id }, ctxFor("maybe", "Is GPA: 3.9 right again?", { fact_id: gpa.id })), /not confirmed/);
-  // The marker is set by code: the model tried to put the fact back, was refused, and its reply asks about that fact.
-  let n = 0;
-  const asked: any = await agentTurn({ message: "actually can you put my gpa back", history: [], stores, userId: "u-fw", threadId: "th", now: NOW + 30_000,
-    model: async (p: any) => p.tools?.length && n++ === 0 ? { content: [{ type: "tool_use", id: "t1", name: "confirm_profile_fact", input: { id: gpa.id } }], stop_reason: "tool_use" } : text("Is GPA: 3.9 right again?") } as any);
-  eq(asked.restore_ask, { fact_id: gpa.id }, "the turn carries the marker");
+  const r2: any = await agentTurn({ message: PERSONA.setup[2], history: [], stores: { profile: p2 }, userId: "u-fw", threadId: "th", now: NOW, model: async () => text("I kept your GPA 3.9; it was not removed. Searching SWE internships next.") } as any);
+  eq(r2.reply, "Set aside, not deleted (no longer used until you say it's right again): GPA: 3.9\n\nSearching SWE internships next.");
+});
+
+// ---------------------------------------------------------------- FW-R (round 3) putting a set-aside fact back
+const toolsOf = () => Object.fromEntries(careerTools({ postings: async () => [] } as any).map((t: any) => [t.name, t]));
+const RESTORE_Q = 'Is this right again: "GPA: 3.9"? Reply yes to put it back on your record, or no to leave it set aside.';
+const callsConfirm = (id: string, say: string) => { let n = 0; return async (p: any) => p.tools?.length && n++ === 0 ? { content: [{ type: "tool_use", id: "t1", name: "confirm_profile_fact", input: { id } }], stop_reason: "tool_use" } : text(say); };
+async function setAsideWorld() {
+  const profile = personaProfile(), stores = { profile }, gpa = (profile.facts as any[]).find((f) => /GPA/.test(String(f.text)));
+  await agentTurn({ message: "the 3.9 gpa is outdated", history: [], stores, userId: "u-fw", threadId: "th", now: NOW, model: async () => text("Okay.") } as any);
   eq(gpa.status, "draft");
-  n = 0;
-  const yes: any = await agentTurn({ message: "yes", history: [{ role: "user", content: "actually can you put my gpa back" }, { role: "assistant", content: asked.reply }], restoreAsk: asked.restore_ask, stores, userId: "u-fw", threadId: "th", now: NOW + 60_000,
-    model: async (p: any) => p.tools?.length && n++ === 0 ? { content: [{ type: "tool_use", id: "t1", name: "confirm_profile_fact", input: { id: gpa.id } }], stop_reason: "tool_use" } : text("GPA: 3.9 is back on your record.") } as any);
-  ok(yes.tool_calls.some((c: any) => c.name === "confirm_profile_fact" && c.ok), JSON.stringify(yes.tool_calls));
-  eq([gpa.status, gpa.needs_confirmation, gpa.withdrawn_by_owner], ["confirmed", false, undefined]);
+  return { profile, stores, gpa };
+}
+Deno.test("FW-R the restore question is code's, asked only through the tool; a question the model writes sets no marker and its yes restores nothing", async () => {
+  const { stores, gpa } = await setAsideWorld();
+  // The model writes its own questions, whatever their polarity: no marker, and a yes after them restores nothing.
+  for (const q of ["Should I leave GPA: 3.9 off the Stripe application?", "Do you want GPA: 3.9 to stay set aside?", "Is GPA: 3.9 still wrong?", "Is GPA: 3.9 right again?", "Apply to Citadel (requires GPA 3.9 or higher)?"]) {
+    const asked: any = await agentTurn({ message: "what about my gpa", history: [], stores, userId: "u-fw", threadId: "th", now: NOW + 1000, model: async () => text(q) } as any);
+    eq([asked.restore_ask, asked.show?.meta?.restore_ask], [undefined, undefined], q);
+    const yes: any = await agentTurn({ message: "yes", history: [{ role: "user", content: "what about my gpa" }, { role: "assistant", content: asked.reply }], restoreAsk: asked.restore_ask ?? null, stores, userId: "u-fw", threadId: "th", now: NOW + 2000, model: callsConfirm(gpa.id, "Done.") } as any);
+    eq(gpa.status, "draft", `a yes after the model's own question restores nothing: ${q}`);
+    // That yes made the tool ask: the reply is code's question, whatever the model wrote.
+    eq(yes.reply, RESTORE_Q);
+  }
+  // Through the tool: code writes the question in its one positive form, shows it as the reply, and sets the marker.
+  const asked: any = await agentTurn({ message: "actually can you put my gpa back", history: [], stores, userId: "u-fw", threadId: "th", now: NOW + 3000, model: callsConfirm(gpa.id, "Should I leave GPA: 3.9 off your record?") } as any);
+  eq([asked.reply, asked.restore_ask, asked.show?.intent, asked.show?.meta], [RESTORE_Q, { fact_id: gpa.id }, "career_fact_restore_ask", { restore_ask: { fact_id: gpa.id } }]);
+  eq(gpa.status, "draft");
+  // The tool, with the marker: only a plain affirmative that is the whole message restores.
+  const tools = toolsOf();
+  const ctxFor = (message: string, restoreAsk: unknown, extra: Record<string, unknown> = {}) => ({ userId: "u-fw", threadId: "th", now: NOW + 60_000, state: stores, restoreAsk, ...extra, turn: { message, added: [], before: RESTORE_Q } }) as any;
+  for (const [m, mark] of [["yes", null], ["yes", { fact_id: "F-999" }], ["no", { fact_id: gpa.id }], ["yep send it", { fact_id: gpa.id }], ["yes send the stripe application", { fact_id: gpa.id }], ["yes approve", { fact_id: gpa.id }], ["yeah maybe", { fact_id: gpa.id }], ["yes?", { fact_id: gpa.id }], ["yes to the application, leave the gpa off", { fact_id: gpa.id }], ["yes, and search chicago internships", { fact_id: gpa.id }]] as [string, unknown][]) {
+    const out = await tools.confirm_profile_fact.run({ id: gpa.id }, ctxFor(m, mark));
+    eq([out.confirmed, gpa.status], [false, "draft"], `${m} ${JSON.stringify(mark)}`);
+  }
+  // Never beside a card: one open now, one shown this turn, or an approval asked for this turn.
+  for (const extra of [{ cardPending: true }, {}] as Record<string, unknown>[]) {
+    const c = ctxFor("put my gpa back", null, extra);
+    if (!extra.cardPending) c.turn.pendingApprovals = 1;
+    await assertNode.rejects(() => tools.confirm_profile_fact.run({ id: gpa.id }, c), /an approval is waiting/);
+    eq(c.turn.show, undefined);
+  }
+  const held: any = await agentTurn({ message: "put my gpa back", history: [], stores, cardPending: true, userId: "u-fw", threadId: "th", now: NOW + 4000, model: callsConfirm(gpa.id, "I'll ask about your GPA after the card.") } as any);
+  eq([held.restore_ask, held.show], [undefined, undefined]);
+  for (const m of ["yes", "yes please", "sure", "ok", "Yes.", "yes that's right"]) {
+    gpa.status = "draft"; gpa.needs_confirmation = true; gpa.withdrawn_by_owner = { at: "x", said: "x", was: { status: "confirmed", needs_confirmation: false } };
+    await tools.confirm_profile_fact.run({ id: gpa.id }, ctxFor(m, { fact_id: gpa.id }));
+    eq([gpa.status, gpa.needs_confirmation, gpa.withdrawn_by_owner], ["confirmed", false, undefined], m);
+  }
+});
+
+Deno.test("FW-R a plain yes or no to code's restore question is the brain's (not the router's 'Yes to what?'), the marker lives one turn, and an offer on an older row is not the last word", async () => {
+  let snap: unknown = null;
+  const mk = () => host.createTurnCtx({ userId: "u-fwr", threadId: "t-fwr", now: NOW, snapshot: snap, accountPersistence: true });
+  for (const m of PERSONA.setup.slice(0, 2)) { const c = mk(); host.runTurn(m, c); snap = host.extractSnapshot(c); }
+  let c = mk();
+  await agentTurn({ message: "the 3.9 gpa is outdated", history: [], stores: c, userId: "u-fwr", threadId: "t-fwr", now: NOW, model: async () => text("Okay.") } as any); snap = host.extractSnapshot(c);
+  const gid = (c as any).profile.facts.find((f: any) => /GPA/.test(f.text)).id;
+  c = mk();
+  const asked: any = await agentTurn({ message: "actually can you put my gpa back", history: [], stores: c, userId: "u-fwr", threadId: "t-fwr", now: NOW, model: callsConfirm(gid, "x") } as any); snap = host.extractSnapshot(c);
+  eq(asked.restore_ask, { fact_id: gid });
+  const route = (m: string, restoreAsk: unknown) => { const d = stagedDecision({ env: STAGED, message: m, ctx: mk(), host, structured: false, restoreAsk } as any); return [d.brain, d.reason]; };
+  for (const m of ["yes", "yes please", "sure", "ok", "no", "nope"]) {
+    eq(route(m, asked.restore_ask), [true, "restore_answer"], m);
+    eq(route(m, null)[0], false, `without the marker "${m}" is the router's, as before`);
+  }
+  eq(route("yes", { fact_id: "F-999" })[0], false, "a marker for another fact routes nothing");
+  // The yes, with the marker, puts it back; the same yes one turn later (no marker on the newest reply) does not.
+  const late = mk();
+  const again: any = await agentTurn({ message: "yes", history: [], restoreAsk: null, stores: late, userId: "u-fwr", threadId: "t-fwr", now: NOW + 2000, model: callsConfirm(gid, "x") } as any);
+  eq([(late as any).profile.facts.find((f: any) => f.id === gid).status, again.reply], ["draft", RESTORE_Q]);
+  const now = mk();
+  const yes: any = await agentTurn({ message: "yes", history: [{ role: "assistant", content: asked.reply }], restoreAsk: asked.restore_ask, stores: now, userId: "u-fwr", threadId: "t-fwr", now: NOW + 1000, model: callsConfirm(gid, "GPA: 3.9 is back on your record.") } as any);
+  eq([(now as any).profile.facts.find((f: any) => f.id === gid).status, yes.restore_ask], ["confirmed", undefined]);
+  // apply_all_yes.ts liveOfferRow: the offer (and the marker) are live only on the thread's NEWEST assistant row with no user
+  // turn after it. A restore question asked after a results list is the last word, so a yes cannot also approve that list.
+  const { liveOfferRow, readOffer } = await import("../../supabase/functions/_shared/apply_all_yes.ts");
+  const adminOf = (rows: { id: number; role: string; meta: Record<string, unknown> }[]) => ({ from: () => { const f: Record<string, unknown> = {}; let gt = -1; const q: any = {
+    select: () => q, eq: (k: string, v: unknown) => { f[k] = v; return q; }, gt: (_k: string, v: number) => { gt = v; return q; }, order: () => q,
+    limit: (n: number) => Promise.resolve({ error: null, data: rows.filter((r) => (!f.role || r.role === f.role) && r.id > gt).sort((x, y) => y.id - x.id).slice(0, n) }) }; return q; } });
+  const offer = { apply_all_offer: { list: "L1", jobs: [{ id: "j1", company: "Acme", title: "SWE Intern", tag: "ready" }] } };
+  const thread = [{ id: 1, role: "assistant", meta: offer }, { id: 2, role: "user", meta: {} }, { id: 3, role: "assistant", meta: { restore_ask: asked.restore_ask } }];
+  const last = await liveOfferRow(adminOf(thread), "t");
+  eq([last?.id, (last?.meta as any)?.restore_ask, readOffer(last?.meta)], [3, asked.restore_ask, null], "the restore question is the last word; the older list's offer is not live");
+  eq(await liveOfferRow(adminOf([...thread, { id: 4, role: "user", meta: {} }, { id: 5, role: "user", meta: {} }]), "t"), null, "a user turn after it ends it");
 });
 
 // ---------------------------------------------------------------- FW-1 routing: unchanged for a correction, and the reason is honest
@@ -433,18 +497,36 @@ Deno.test("FW-A through the turn: none of the reviewer's reproductions changes s
   eq(bad, []);
 });
 
-// ---------------------------------------------------------------- FW-C the reply says it: label, value and a set-aside word together
-Deno.test("FW-C a set-aside counts as said only with the fact's label, its value and a set-aside word in one sentence; an unfinished turn says it first and does not contradict it", async () => {
-  const said = (notes as any) && (await import("../../supabase/functions/agent-chat/career_brain.ts")).setAsideSaid as (r: string, f: string[]) => string;
-  const LINE = /Set aside, not deleted[^\n]*GPA: 3\.9/;
-  for (const r of ["Found 3.9k roles for you in Chicago.", "Found 39 roles; top pays $3.9/hr more.", "Your GPA is now off your record and I will not use it.", "Noted. Your GPA came up at 3.9 of the postings.", "The 3.9 GPA is strong for Citadel."]) ok(LINE.test(said(r, ["GPA: 3.9"])), `appended after: ${r}`);
-  for (const r of ["Got it: the 3.9 GPA is off your record and won't be used.", "I set aside your GPA of 3.9. Searching next.", "Your GPA (3.9) is no longer used."]) eq(said(r, ["GPA: 3.9"]), r);
-  // The turn did not finish: the fact goes first, and the code line after it does not say nothing was saved.
+// ---------------------------------------------------------------- FW-C (round 3) code says it itself, once, first
+Deno.test("FW-C a set-aside is said by code, once and first, whatever the model wrote; what the model said about that fact is removed; an unfinished turn does not contradict it", async () => {
+  const { setAsideSaid } = await import("../../supabase/functions/agent-chat/career_brain.ts");
+  const LINE = "Set aside, not deleted (no longer used until you say it's right again): GPA: 3.9";
+  // The second review's 31 replies (its s4.ts): proper, split, opposite, question, conditional, coincidence, unfinished.
+  const REPLIES = ["Got it: your GPA 3.9 is set aside and won't be used.", "I've taken the 3.9 GPA off your record.", "I've set your 3.9 GPA aside.", "Your GPA is off your record now.", "The 3.9 is off your record now.", "Your SAT 1520 is off your record.",
+    "I kept your GPA 3.9; it was not removed.", "Your GPA 3.9 is still on file and has not been set aside.", "I did not take the GPA 3.9 off your record, it stays.", "Nothing was removed: GPA 3.9 remains in use.", "Should the GPA 3.9 be removed?", "I can have the GPA 3.9 removed if you want.",
+    "If you confirm, GPA 3.9 will be taken off.", "", "Your GPA is set aside. It was 3.9.", "Your GPA 3.90 is set aside.", "Your GPA 3.9/4.0 is set aside.", "Your GPA 3.9% is set aside.", "Found 3.9k GPA-free roles, none removed.", "This posting removed its GPA 3.9 minimum.",
+    "Your friend's GPA 3.9 was removed from his resume.", "Searching SWE internships in Chicago next.", LINE, "- GPA: 3.9 (set aside)\n- next: search", "Your GPA\n3.9 is set aside.", "gpa 3.9 removed.", "GPA 3.9 is set aside but I can still use it on applications.",
+    "I couldn't finish this answer, so I stopped here. Nothing was sent or submitted. Ask me again and I'll pick it up.", "I couldn't produce a complete answer because the AI's reply came back unfinished, so I stopped. Nothing was sent, saved or submitted. Please try again.",
+    "I can't answer right now because the AI service isn't responding. Nothing was sent, saved or submitted. Try again in a minute.", "I couldn't finish that in one reply because it needed more steps than one reply allows, so I stopped partway. Nothing was sent or submitted. Tell me which part to do first."];
+  eq(REPLIES.length, 31);
+  const bad: string[] = [];
+  for (const r of REPLIES) {
+    const out = setAsideSaid(r, ["GPA: 3.9"]), rest = out.slice(LINE.length);
+    if (!out.startsWith(LINE) || out.split(LINE).length !== 2) bad.push(`not once and first: ${JSON.stringify(r)} => ${JSON.stringify(out)}`);
+    if (/gpa/i.test(rest) || /(?<![\w$.])3\.9(?![\w%]|\.\d)/.test(rest)) bad.push(`the model's words about the fact stayed: ${JSON.stringify(out)}`);
+    if (/Nothing was sent, saved or submitted/.test(rest)) bad.push(`says nothing was saved: ${JSON.stringify(out)}`);
+  }
+  eq(bad, []);
+  eq(setAsideSaid("Your SAT 1520 is off your record. Searching next.", ["GPA: 3.9"]), `${LINE}\n\nYour SAT 1520 is off your record. Searching next.`, "another fact's sentence stays");
+  eq(setAsideSaid("Okay.", []), "Okay.");
+  // Through the turn: an unfinished turn says the fact first, then what was saved.
   const profile = personaProfile();
   const r: any = await agentTurn({ message: "the 3.9 gpa is outdated", history: [], stores: { profile }, userId: "u-fw", threadId: "th", now: NOW, model: async () => ({ content: [{ type: "text", text: "" }], stop_reason: "max_tokens" }) } as any);
-  ok(r.stopped !== "final" && r.set_aside?.length === 1, `${r.stopped} ${JSON.stringify(r.set_aside)}`);
-  ok(/^Set aside, not deleted[^\n]*GPA: 3\.9/.test(r.reply), r.reply);
-  ok(!/Nothing was sent, saved or submitted|nothing was saved/i.test(r.reply), `no contradiction: ${r.reply}`);
+  ok(r.stopped !== "final" && r.set_aside?.length === 1 && r.reply.startsWith(LINE) && /what you told me is saved/.test(r.reply), r.reply);
+  // The model is told code states it and not to restate it.
+  const seen: any[] = [];
+  await agentTurn({ message: "the 3.9 gpa is outdated", history: [], stores: { profile: personaProfile() }, userId: "u-fw", threadId: "th", now: NOW, model: async (p: any) => { seen.push(p); return text("Okay."); } } as any);
+  ok(/Code itself tells them which fact was set aside/.test(seen[0].system) && /do not say it again/.test(seen[0].system));
 });
 
 // ---------------------------------------------------------------- FW-D a resume names what is waiting for a yes
@@ -529,4 +611,45 @@ Deno.test("FW-F a turn whose reply is a card leaves the fact as it was; a packet
     }
     eq(D.checkSubmitGuards({ profile: p }, state)?.code, "stale_packet_facts", `after the fact was ${change}`);
   }
+});
+
+// ================================================================ ROUND 3 (second adversarial review, 2026-11-13)
+import { MSGS as REVIEW2_MSGS, PROFILES as REVIEW2_PROFILES } from "./fixtures/fact-withdrawal-review2.ts";
+import { OR_REVIEW2, orCheck } from "./fixtures/or-review2.ts";
+Deno.test("FW-A3 the second review's 156 messages on its 8 records: only the statement itself sets a score aside; no take-back behind the list lead-in does", () => {
+  // Every message of the review's that may set a fact aside: the statement alone (with or without the lead-in), or the list with
+  // one later sentence about something else. Everything else, on every record, changes nothing.
+  const MAY = new Set(["a few things to know: the 3.9 gpa on there is out of date, don't reuse it. I am applying to Stripe next week.", "a few things to know: the 3.9 gpa is outdated", "A FEW THINGS TO KNOW: THE 3.9 GPA IS OUTDATED.",
+    "the gpa 3.9 on there is no longer true, do not use it", "the 1520 sat is outdated", "my sat 1520 on the resume is out of date, do not use it", "the sat 1520 on there is no longer right", "the 3.7 gpa is outdated", "the 333 gre is out of date", "the gre 333 is no longer true"]);
+  const bad: string[] = [];
+  let n = 0;
+  for (const [name, P] of Object.entries(REVIEW2_PROFILES)) for (const m of REVIEW2_MSGS) {
+    const w = staleFactsOf(m, P());
+    if (!w.length) continue;
+    n++;
+    if (!MAY.has(m) || w.length !== 1 || (w[0] as any).kind !== "other") bad.push(`${name}: ${JSON.stringify(m)} => ${(w[0] as any).id}`);
+  }
+  eq([REVIEW2_MSGS.length, Object.keys(REVIEW2_PROFILES).length], [156, 8]);
+  eq(bad, []);
+  console.log(`  FW-A3: ${REVIEW2_MSGS.length} messages x 8 records: ${n} set-asides, ${bad.length} wrong`);
+  // D70-3's own message still does (the pinned test), and only through the one named exception.
+  eq(ids(staleFactsOf(PERSONA.setup[2], personaProfile().facts)), ["F-002"]);
+});
+
+Deno.test("FW-6 the alternatives not searched are returned on every result, an empty one included", async () => {
+  const q = "frontend or backend or fullstack or mobile or devops engineer";
+  const frontend = { job_id: "gh:acme:2", company: "Acme", title: "Frontend Engineer", location: "Remote", url: "https://boards.greenhouse.io/acme/jobs/2", description: "frontend engineer", first_seen_at: "2026-11-10T00:00:00Z" };
+  for (const pool of [[], [frontend]] as any[][]) {
+    const tools: any = Object.fromEntries(careerTools({ postings: async (x: string) => { const ws = x.toLowerCase().split(/\s+/); return pool.filter((p: any) => ws.every((w) => `${p.title} ${p.description}`.toLowerCase().split(/\W+/).includes(w))); } } as any).map((t: any) => [t.name, t]));
+    const out = await tools.search_jobs.run({ query: q }, { userId: "u-fw", threadId: "th", now: NOW, state: { profile: { facts: [] } }, turn: { message: q, added: [], before: "" } });
+    eq([out.postings.length, out.not_searched], [pool.length, ["devops engineer"]]);
+    ok(/not_searched/.test(String(out.note_not_searched)));
+  }
+});
+
+Deno.test("FW-7 the second review's 80 'or' queries: every alternative whole, nothing mixed, shared words in every search", () => {
+  const search = orSearchFn as (q: string) => { queries: string[]; not_searched: string[] };
+  const bad = OR_REVIEW2.flatMap(([q, groups]) => orCheck(q, groups, search(q).queries, search(q).not_searched).slice(0, 1).map((why) => `${q} => ${JSON.stringify(search(q).queries)}: ${why}`));
+  eq(OR_REVIEW2.length, 80);
+  eq(bad, []);
 });

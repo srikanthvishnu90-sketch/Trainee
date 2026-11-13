@@ -379,4 +379,4 @@
 822 d0f975233b6ab873723ffeeb46989a1c27f14016 independent-review-20261113 risk=high note=stale-fact-stops-verified-topic-wording-gaps-minor
 827 6be6e77d5d0c48ec53f3866d49deda523ebdb858 independent-review-20261113 risk=high note=boundaries-always-hold-ask-answered-alongside-compose-prep-unanswered
 825 4684cda4248be478995d2e183be02a9b93c4fb69 independent-review-20261113 risk=medium note=newline-fix-reopens-login-code-next-line-same-as-trunk
-829 d26a20c3683e05d275f50c25bfe44d774066fe3b independent-review-20261113 risk=medium note=newline-fix-reopens-3-next-line-cases-same-as-trunk
+829 950efd0b51482af09faf55c112abba8040eff447 independent-review-20261113 risk=medium note=next-line-values-redacted-no-new-false-redactions-see-the-portal-predates

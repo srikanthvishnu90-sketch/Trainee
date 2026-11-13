@@ -93,7 +93,8 @@ const HOLDS = [
   "Don't start anything new, I'm unsure which direction to take",
   "Don't reach out to anyone, any message now would be too early",
 ];
-// D-061 G1/G6: a boundary beside a real ask limits that ask; it is not a stop.
+// D-061 G1/G6, as ruled in review round 3 (2026-11-13): a boundary beside a real ask is still a hold (never cancelled); the
+// ask is answered alongside it (alongside: true), and the hold is applied to effects only.
 const ASKS_WITH_BOUNDARY = [
   "find me 3 lakeshore alumni working at google or trading firms i could reach out to, just research don't message anyone",
   "who are some lakeshore alumni at Stripe? names and roles, don't reach out to anyone",
@@ -112,7 +113,7 @@ Deno.test("2 hold: a no-send boundary is a hold whatever words share its sentenc
   ok(HOLDS.length + ASKS_WITH_BOUNDARY.length >= 25, "table size");
   const bad: string[] = [];
   for (const m of HOLDS) { const s = host.stopControlOf(m); if (!(s && s.kind === "workflow" && s.boundary === true)) bad.push(`${JSON.stringify(m)} -> ${JSON.stringify(s)}, want a workflow hold`); }
-  for (const m of ASKS_WITH_BOUNDARY) { const s = host.stopControlOf(m); if (s) bad.push(`${JSON.stringify(m)} -> ${JSON.stringify(s)}, want null (the ask is answered, the boundary rides along)`); }
+  for (const m of ASKS_WITH_BOUNDARY) { const s = host.stopControlOf(m); if (!(s && s.kind === "workflow" && s.boundary === true && s.alongside === true) || host.isHostControlled(m, {})) bad.push(`${JSON.stringify(m)} -> ${JSON.stringify(s)}, want a hold alongside the answered ask`); }
   failures(bad);
 });
 
@@ -250,7 +251,7 @@ const HOLDS_R2 = [
   "Don't start anything new. When does my next interview start?",
   "Don't reach out to anyone, my manager might find out.",
 ];
-// A real ask for work beside the boundary still limits that ask (D-061 G1/G6), never a hold.
+// A real ask for work beside the boundary: the hold applies and the ask is answered alongside it (round 3).
 const ASKS_R2 = [
   "What should I say to Leo? Don't message anyone yet.",
   "How should I follow up with Priya? don't text anyone yet",
@@ -262,12 +263,72 @@ const ASKS_R2 = [
 Deno.test("2b hold: a question about state beside a boundary never cancels the hold; 'find out' is not an ask", () => {
   const bad: string[] = [];
   for (const m of HOLDS_R2) { const s = host.stopControlOf(m); if (!(s && s.kind === "workflow" && s.boundary === true)) bad.push(`${JSON.stringify(m)} -> ${JSON.stringify(s)}, want a workflow hold`); }
-  for (const m of ASKS_R2) { const s = host.stopControlOf(m); if (s) bad.push(`${JSON.stringify(m)} -> ${JSON.stringify(s)}, want null`); }
+  for (const m of ASKS_R2) { const s = host.stopControlOf(m); if (!(s && s.boundary === true && s.alongside === true)) bad.push(`${JSON.stringify(m)} -> ${JSON.stringify(s)}, want a hold alongside`); }
   failures(bad);
 });
 Deno.test("4b limits: a company or domain name is not a limit ('Remote.com')", () => {
   const R = c.CareerRouter;
   const bad: string[] = [];
   for (const m of ["find product roles at Remote.com", "jobs at remote.io in Denver"]) { const got = R.statedSearchLimits(m); if (got.length) bad.push(`${JSON.stringify(m)} -> ${JSON.stringify(got)}`); }
+  failures(bad);
+});
+
+// ---------- round 3 (review 2026-11-13): a boundary is a hold, full stop; nothing beside it cancels it ----------
+const HOLDS_R3 = [
+  // the reviewer's
+  "Don't send anything. Why did you queue those jobs?",
+  "Don't message anyone. Who at Google did you already email?",
+  "Don't contact anyone, I'll research them myself.",
+  "Don't send anything, how do I know it's working?",
+  "dont send anything, what would I even say to them",
+  // thirty more: a boundary beside a question, a request, a hand-off, a reason or a plan
+  "Don't send any of them. Can you show me the drafts?",
+  "don't contact anyone. find me data jobs in Austin",
+  "Do not message anyone, what's the status of my Stripe application?",
+  "Don't email anyone. Draft a note to Lena though.",
+  "don't text anyone, look up the recruiters at Ramp",
+  "Leave everything unsent. Which companies replied this week?",
+  "Don't send anything yet, tell me what's in the queue",
+  "Don't reach out to anyone. How many applications are out?",
+  "do not send any of them, list what's waiting",
+  "Don't contact anyone at Plaid, research the team instead",
+  "Don't start anything new. What did I apply to yesterday?",
+  "don't message anyone till friday. who is on the people list?",
+  "Don't send anything!!! where are my drafts",
+  "Leave them unsent. Write me a better version of the Acme note.",
+  "Don't email anyone, show me jobs posted this week",
+  "Do not contact anyone. What would you say to Priya if I said yes later?",
+  "don't send any of it. I'm going to rewrite them all myself",
+  "Don't text anyone, I'm on vacation until the 20th",
+  "Please don't message anyone, my boss follows me online",
+  "Don't send anything. Get the Figma draft over to Marcus for review.",
+  "Don't contact anyone. Give me names of PMs at Notion.",
+  "dont reach out to anyone, just research Datadog's interview loop",
+  "Don't send anything, why is Maya's draft so long?",
+  "Do not send any of them; when is my next interview?",
+  "Don't email anyone. Find product roles at Remote.com.",
+  "leave it all unsent, did the Meta application go through?",
+  "Don't start anything new, how do I pause everything later?",
+  "Don't message anyone until I review. Thanks!",
+  "don't contact anyone - I'll handle outreach myself",
+  "Don't send anything. Seriously, nothing.",
+];
+// Not this person's boundary: quoted words, a hypothetical, a negated boundary, or "anything else" beside a hand-off.
+const NOT_HOLDS_R3 = [
+  "My friend told me \"pause everything\" when she got a job. Should I?",
+  "My mentor said \"don't contact anyone\" before an offer. Is that right?",
+  "If I said don't send anything, would the queue stop?",
+  "Send it over to Marcus. Don't send anything else.",
+];
+Deno.test("2c hold (round 3): a boundary is a hold whatever sits beside it; the other ask is answered alongside, never instead", () => {
+  ok(HOLDS_R3.length >= 35, "the reviewer's five and thirty more");
+  const bad: string[] = [];
+  for (const m of HOLDS_R3) { const s = host.stopControlOf(m); if (!(s && s.kind === "workflow" && s.boundary === true)) bad.push(`${JSON.stringify(m)} -> ${JSON.stringify(s)}, want a hold`); }
+  for (const m of NOT_HOLDS_R3) { const s = host.stopControlOf(m); if (s) bad.push(`${JSON.stringify(m)} -> ${JSON.stringify(s)}, want null`); }
+  // A bare boundary is the host's own turn (the stop reply); one beside an ask is answered and the hold rides along.
+  if (!host.isHostControlled("Don't send any of them.", {})) bad.push("a bare boundary is the host's turn");
+  if (host.isHostControlled("don't contact anyone. find me data jobs in Austin", {})) bad.push("a boundary beside a search is answered, not swallowed");
+  const handler = Deno.readTextFileSync(new URL("../../supabase/functions/agent-chat/handler-career.ts", import.meta.url));
+  if (!/stopAsk\.alongside\)[\s\S]{0,200}holdUnsent\(/.test(handler)) bad.push("handler-career.ts applies the hold on an alongside turn");
   failures(bad);
 });

@@ -495,7 +495,8 @@ export interface ResumeEdit { role: string; lines: number }
 export interface EditDone { role: string; entry: string; asked: number; before: number; now: number; available: number; change: "condensed" | "expanded" | "unchanged"; added_back: boolean; led: boolean; expand_short: boolean;
   // complete: computed after the edit, every number, date and proper name of the confirmed entry is in what prints for it.
   // restored: what the edit as asked would have lost; the entry was printed whole instead.
-  complete: boolean; restored: string[] }
+  // left_out: the entry's confirmed details an asked-for shortening does not print, in their own words.
+  complete: boolean; restored: string[]; left_out: string[] }
 const MAX_EDIT_LINES = 6;
 const roleKey = (s: string) => ` ${String(s ?? "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()} `;
 // A word before a full stop that does not end a sentence. When unsure, the text is not split.
@@ -588,14 +589,19 @@ export function applyEdits(resume: any, profile: any, edits: ResumeEdit[]): { ok
     // (owner must-fix, D-067): the person asked for fewer lines, not for any one thing to be removed.
     const lines = Math.min(n, details.length), cutAt = (k: number) => Math.floor((k * details.length) / (lines || 1));
     let keep = Array.from({ length: lines }, (_, k) => details.slice(cutAt(k), cutAt(k + 1)).join("; "));
+    // The one edit that may leave details out: the person asked for fewer lines than this entry prints now. Its head (employer,
+    // title, dates) stays, its first details stay in their order, and what is left out is named, word for word (left_out).
+    const left_out = n < before ? details.slice(n) : [];
+    if (left_out.length) keep = details.slice(0, n);
     const mk = (entry: string, bs: string[]) => [{ text: entry, factIds: [id], type: "entry" }, ...bs.map((d) => ({ text: d, factIds: [id], type: "bullet" }))];
     // The check, after every edit: each number, date and proper name of the confirmed entry (and of the line the delivered
     // version printed for it) against what this edit prints. On a loss the entry prints whole, as the record holds it; if even
     // that loses one, the edit is refused and says what.
     const source = `${entrySource(f)}\n${wasLine}`, printedOf = (b: { text: string }[]) => b.map((l) => l.text).join("\n");
     let block = mk(keep.length ? (wasLine.startsWith(head) && !wasLine.slice(head.length).startsWith(":") ? wasLine : head) : (wasLine || String(f.title || f.text)), keep);
-    const restored = lostTokens(source, printedOf(block));
+    const restored = lostTokens(source, `${printedOf(block)}\n${left_out.join("\n")}`);
     if (restored.length) {
+      left_out.length = 0;
       keep = (f.bullets || []).map((b: unknown) => String(b ?? "").trim()).filter(Boolean);
       if (!keep.length && f.title && f.text && f.text !== f.title) keep = [String(f.text)];
       block = mk(wasLine && !lostTokens(String(f.title || f.text), wasLine).length ? wasLine : String(f.title || f.text), keep);
@@ -608,7 +614,7 @@ export function applyEdits(resume: any, profile: any, edits: ResumeEdit[]): { ok
     if (led) sec.lines.unshift(...block);
     else sec.lines.splice(added_back ? sec.lines.length : positionOf(sec, resume, id), 0, ...block);
     done.push({ role: e.role, entry: head, asked: n, before, now: keep.length, available: details.length, change, added_back, led, expand_short: !restored.length && n > details.length,
-      complete: lostTokens(source, printedOf(block)).length === 0, restored });
+      complete: !left_out.length && lostTokens(source, printedOf(block)).length === 0, restored, left_out });
   }
   out.lines = out.sections.flatMap((s: any) => (s.lines || []).map((l: any) => ({ ...l, section: s.heading })));
   return { ok: true, resume: out, done };
@@ -634,7 +640,8 @@ export function keepEveryEntry(resume: any, profile: any, opts: { oneLine?: bool
     if (!sec) { sec = { heading, lines: [] }; out.sections.push(sec); }
     const { head } = entryParts(f);
     const bullets = (f.bullets || []).map((b: unknown) => String(b ?? "").trim()).filter(Boolean);
-    sec.lines.push({ text: bullets.length ? head : String(f.title || f.text), factIds: [id], type: "entry" }, ...(opts.oneLine ? [] : bullets.map((t: string) => ({ text: t, factIds: [id], type: "bullet" }))));
+    // Whole, an entry prints its own line with its headline (as the base resume does); on one line, its head.
+    sec.lines.push({ text: bullets.length && opts.oneLine ? head : String(f.title || f.text), factIds: [id], type: "entry" }, ...(opts.oneLine ? [] : bullets.map((t: string) => ({ text: t, factIds: [id], type: "bullet" }))));
     printed.add(id);
     added.push(head.replace(/[.]+$/, ""));
   }
@@ -648,9 +655,11 @@ export function editLine(done: EditDone[]): string {
     // D-067 (live-6 C20: "not the 6 you asked for", when the person named no number): the count of lines is the tool's input,
     // not the person's words, so it is never said as what they asked for.
     // Said only when the comparison found it so (complete), never asserted.
-    const short = e.expand_short && e.complete ? ` (all the confirmed record holds for it)` : "";
+    const short = e.expand_short && e.complete && !e.left_out.length ? ` (all the confirmed record holds for it)` : "";
+    // What a shortening left out is named; a list too long to say is counted (the full list is the edit's left_out).
+    const named = e.left_out.join("; "), out = !e.left_out.length ? "" : ` (left out of ${e.entry.split(/[,(:]/)[0].trim()}: ${named.length <= 240 ? named : `${e.left_out.length} confirmed details`})`;
     const whole = e.restored.length ? ` (printed whole: the edit as asked would have dropped ${e.restored.join(", ")})` : e.change === "condensed" && e.complete ? ` (nothing confirmed was dropped)` : "";
-    return `${e.entry}: ${what}${e.led ? ", now first in its section" : ""}${short}${whole}`;
+    return `${e.entry}: ${what}${e.led ? ", now first in its section" : ""}${short}${whole}${out}`;
   };
   const s = done.map(one).join("; ");
   return `${s.charAt(0).toUpperCase()}${s.slice(1)}.`;

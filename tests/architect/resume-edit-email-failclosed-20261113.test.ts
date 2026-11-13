@@ -90,35 +90,55 @@ Deno.test("finding 2: a confirmed line is cut at ';' and sentence ends only; nev
   for (const [text, want] of more) eq(TT.splitDetails(text), want, text);
 });
 
-Deno.test("finding 1: 40 edits (10 entries x 1, 2, 3, 6 lines): no number, date, employer, title or headline detail of the entry is lost, and the changelog's claim is computed", () => {
+Deno.test("finding 1: 60 edits (10 entries x 1 to 6 lines): 48 that do not ask for fewer lines lose nothing; 12 asked-for shortenings keep the head and name what they left out", () => {
   const profile = { facts: FACTS }, base = T.keepEveryEntry({ sections: [] }, profile).resume;
-  let cases = 0;
-  for (const [i, e] of ENTRIES.entries()) for (const lines of [1, 2, 3, 6]) {
-    cases++;
-    const f = FACTS[i], label = `${e.role} to ${lines}`;
+  const count = { kept: 0, shortened: 0 };
+  for (const [i, e] of ENTRIES.entries()) for (const lines of [1, 2, 3, 4, 5, 6]) {
+    const f = FACTS[i], label = `${e.role} to ${lines}`, 
+      // What the version being edited prints for it: every detail (Kite's are in its text, which that version does not print).
+      shorten = lines < (e.text && !e.title.includes(": ") ? 0 : e.details.length);
     const r: any = T.applyEdits(base, profile, [{ role: e.role, lines }]);
     ok(r.ok, `${label}: ${r.reason}`);
-    const printed = blockOf(r.resume, f.id), text = printed.join("\n");
-    eq(holds(sourceOf(f)).filter((t) => !text.includes(t)), [], `${label}: lost from the confirmed entry; printed ${JSON.stringify(printed)}`);
-    const d = r.done[0];
-    eq([d.now, d.available, d.complete, d.restored], [Math.min(lines, e.details.length), e.details.length, true, []], label);
+    const printed = blockOf(r.resume, f.id), text = printed.join("\n"), d = r.done[0], said = T.editLine(r.done);
+    const lost = holds(sourceOf(f)).filter((t) => !text.includes(t));
     eq(printed.length - 1, d.now, `${label}: the count said is the count printed`);
-    eq(/all the confirmed record holds/.test(T.editLine(r.done)), lines > e.details.length, `${label}: ${T.editLine(r.done)}`);
+    eq([d.now, d.available, d.restored], [Math.min(lines, e.details.length), e.details.length, []], label);
+    if (shorten) {
+      count.shortened++;
+      // Asked for fewer lines than print: the head stays whole, the first details stay, the rest is named word for word.
+      eq([printed[0], printed.slice(1), d.left_out, d.complete, d.change], [T.entryParts(f).head, e.details.slice(0, lines), e.details.slice(lines), false, "condensed"], label);
+      eq(lost.filter((t) => !d.left_out.join(" ").includes(t)), [], `${label}: everything not printed is in left_out`);
+      ok(said.includes(`(left out of ${e.title.split(",")[0]}: `) && d.left_out.every((x: string) => said.includes(x)) && !/all the confirmed record holds|nothing confirmed was dropped/.test(said), `${label}: ${said}`);
+    } else {
+      count.kept++;
+      eq([lost, d.left_out, d.complete], [[], [], true], `${label}: lost from the confirmed entry; printed ${JSON.stringify(printed)}`);
+      eq(/all the confirmed record holds/.test(said), lines > e.details.length, `${label}: ${said}`);
+      ok(!/left out/.test(said), said);
+    }
     // Every other entry is untouched, word for word.
     for (const g of FACTS) if (g.id !== f.id) eq(blockOf(r.resume, g.id), blockOf(base, g.id), `${label}: ${g.id} unchanged`);
   }
-  eq(cases, 40);
+  eq(count, { kept: 48, shortened: 12 });
+  // Not asked for fewer than print (the delivered version printed the entry on one line, no bullets): the lines share the details.
+  const one = T.keepEveryEntry({ sections: [] }, profile, { oneLine: true }).resume;
+  const up: any = T.applyEdits(one, profile, [{ role: "Northwind", lines: 2 }]);
+  eq([holds(sourceOf(FACTS[0])).filter((t) => !blockOf(up.resume, "F-1").join("\n").includes(t)), up.done[0].left_out, up.done[0].now], [[], [], 2]);
 });
 
-Deno.test("finding 1: the reviewer's cases through tailorForPosting: the headline detail prints, in the file itself", async () => {
+Deno.test("finding 1: the reviewer's cases through tailorForPosting: the headline detail prints, in the file itself; a shortening says what it left out", async () => {
   const p = person();
   const all = ["Northwind Logistics", "Jan 2022 - Mar 2024", "18%", "40 lanes", "12 planners", "9% to 4%", "$2.4M", "Acme Robotics", "Jun 2021 - Aug 2021", "300 users", "45 unit tests", "Blue Heron Cafe", "2019 - 2021", "6 new hires", "$3k", "Dr. Smith's audit", "May 2022"];
-  for (const edits of [[{ role: "Northwind", lines: 6 }], [{ role: "Northwind", lines: 1 }], [{ role: "Acme", lines: 1 }], [{ role: "Blue Heron", lines: 4 }], [{ role: "Acme", lines: 1 }, { role: "Northwind", lines: 2 }]]) {
+  const cases: [any[], string[]][] = [[[{ role: "Northwind", lines: 6 }], []], [[{ role: "Blue Heron", lines: 4 }], []], [[{ role: "Northwind", lines: 4 }, { role: "Acme", lines: 2 }], []],
+    [[{ role: "Northwind", lines: 1 }], ["12 planners", "9% to 4%", "$2.4M"]], [[{ role: "Acme", lines: 1 }], ["45 unit tests"]], [[{ role: "Acme", lines: 1 }, { role: "Northwind", lines: 2 }], ["9% to 4%", "$2.4M", "45 unit tests"]]];
+  for (const [edits, out] of cases) {
     const r = await tailor(p, { edits }), label = JSON.stringify(edits);
     ok(r.ok, `${label}: ${r.reason}`);
     const flat = pdfText(r.detail.pdf).replace(/\s+/g, " ");
-    eq(all.filter((t) => !flat.includes(t)), [], `${label}: missing from the file`);
-    ok(r.edits.every((e: any) => e.complete === true && !e.restored.length), label);
+    eq(all.filter((t) => !flat.includes(t)), out, `${label}: missing from the file`);
+    const named = r.edits.flatMap((e: any) => e.left_out).join(" ");
+    ok(out.every((t) => named.includes(t) && r.changelog.includes(t)) && /left out of/.test(r.changelog) === out.length > 0, `${label}: ${r.changelog}`);
+    ok(out.length || r.edits.every((e: any) => e.complete === true), label);
+    ok(!out.length || !/all the confirmed record holds|nothing confirmed was dropped/.test(r.changelog), r.changelog);
   }
   const six = await tailor(p, { edits: [{ role: "Northwind", lines: 6 }] });
   eq([six.edits[0].now, six.edits[0].available, six.edits[0].expand_short], [4, 4, true]);
@@ -138,7 +158,7 @@ Deno.test("finding 1: an edit that would still lose something is printed whole o
   const no: any = T.applyEdits(version("Engineer at Acme Robotics, Berlin, 2020"), { facts: [f] }, [{ role: "Acme", lines: 1 }]);
   ok(!no.ok && /would drop/.test(no.reason) && /Berlin/.test(no.reason) && /2020/.test(no.reason), JSON.stringify(no));
   // The sentence about the whole record is said only when the comparison found it so.
-  const done = { role: "x", entry: "Acme Robotics, Engineer", asked: 6, before: 2, now: 2, available: 2, change: "unchanged", added_back: false, led: true, expand_short: true, complete: false, restored: [] };
+  const done = { role: "x", entry: "Acme Robotics, Engineer", asked: 6, before: 2, now: 2, available: 2, change: "unchanged", added_back: false, led: true, expand_short: true, complete: false, restored: [], left_out: [] };
   ok(!/all the confirmed record holds/.test(T.editLine([done as any])), T.editLine([done as any]));
 });
 

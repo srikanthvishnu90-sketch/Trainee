@@ -227,6 +227,7 @@ function reviewOf(r: any, delivered: boolean): Record<string, unknown> {
   if (!delivered) return out;
   const flags = [
     ...(r.placeholders ?? []).includes("email") ? [`The email at the top prints as the visible placeholder ${EMAIL_PLACEHOLDER}: no email is on their confirmed resume and they have not typed one. Say so in the same sentence that hands over the file, and that it needs their email before it is used anywhere; never fill in the account's or this chat's address.`] : [],
+    ...(r.edits ?? []).filter((e: any) => e.left_out?.length).map((e: any) => `${e.entry}: shortened as they asked; this version no longer prints: ${e.left_out.join("; ")}. Say what was left out; it is still on their record.`),
     ...(r.edits ?? []).filter((e: any) => e.restored?.length).map((e: any) => `${e.entry}: printed whole. Shortening it as asked would have dropped ${e.restored.join(", ")} from what they confirmed, so nothing was removed. Say that, and ask if they want that removed.`),
     ...(r.edits ?? []).filter((e: any) => e.expand_short).map((e: any) => `${e.entry}: their confirmed record holds ${e.available} detail${e.available === 1 ? "" : "s"} for it, so it prints ${e.now} (all it holds). Say that, and ask what else they did there; nothing was written for them. The number of lines is your input to the tool, not theirs: never say they asked for a number they did not type.`),
   ];

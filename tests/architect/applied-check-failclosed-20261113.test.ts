@@ -849,3 +849,29 @@ Deno.test("AC-16 an edit turn that also asks about status keeps the edited text,
     ok(r.reply.startsWith(reply) && /Checked: Gmail account a@x\.test/.test(r.reply), `${m} => ${r.reply}`);
   }
 });
+
+// v3: a question about applications to a company in general is not the person's status, and Trainee's own boundary and
+// research-only lines (written by code, listed here from the codebase) are never a statement of the person's status.
+Deno.test("AC-17 \"how many applications does Google get\" is not their status; Trainee's boundary lines never count as a denial", async () => {
+  for (const [m, reply, keep] of [["how many applications does Google get a year", "Google gets about 3 million applications a year, and hires well under 1%.", /3 million applications/],
+    ["TEST Northwind is hiring a BI analyst, what does it pay?", "The Northwind BI Analyst posting lists $78,000 to $92,000. Nothing is being applied to; this is research only.", /research only/]] as const) {
+    ok(!B.statusQuestion(m), m);
+    const r = await turn(m, scripted(Array(6).fill(text(reply))).model, { capabilities: C4.CA() });
+    eq([r.reply, r.tool_calls.some((c) => c.name === "read_application_mail")], [reply, false], m);
+    ok(keep.test(r.reply));
+  }
+  for (const q of ["how many applications have i sent", "how many have i applied to", "how many places did i apply to"]) ok(B.statusQuestion(q), q);
+  // Every code-written line in the codebase that says nothing was applied for, sent or created.
+  const lines: string[] = [];
+  const walk = (dir: URL) => { for (const e of Deno.readDirSync(dir)) {
+    const u = new URL(e.name + (e.isDirectory ? "/" : ""), dir);
+    if (e.isDirectory) walk(u); else if (/\.ts$/.test(e.name) && !/router_core/.test(e.name)) for (const m of Deno.readTextFileSync(u).matchAll(/["`]([^"`\n]{10,400})["`]/g)) lines.push(m[1]);
+  } };
+  walk(new URL("../../supabase/functions/", import.meta.url));
+  const BOUNDARY = /\b(?:nothing|no\s+account|no\s+application)\b[^.]{0,80}\b(?:appl(?:y|ied|ying)|submi\w*|sent|created)\b|\bresearch\s+only\b/i;
+  const said = [...new Set(lines.filter((l) => BOUNDARY.test(l) && !/\b(?:say|says|said|do not|don't|never say|answer|tell them)\b/i.test(l)).flatMap((l) => l.replace(/\$\{[^}]*\}/g, "Acme").split(/(?<=[.!?])\s+/)).filter((x) => BOUNDARY.test(x)))];
+  ok(said.length >= 15, `${said.length} boundary lines`);
+  // Lines about the person's own record (what Trainee holds for them) are status; they are listed apart.
+  const RECORD = /\bon record\b|\byour application to\b|\bhaven't approved\b|\breceipts?\b|\bchanges any of your applications\b/i;
+  eq(said.filter((x) => !RECORD.test(x) && (B.saysNoApplications(x) || B.statusLike(x))), [], "a boundary line read as their status");
+});

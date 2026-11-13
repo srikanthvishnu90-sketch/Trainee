@@ -626,6 +626,15 @@ Deno.test("round 3 G: the same turns with a judge that passes the page's own uni
   const payTurn = await PATHS[4][1](yesFor("PayPal's internship lists $28 to $49 an hour."));
   ok(/\$28 to \$49 an hour|\$28- ?\$49/.test(payTurn.reply) && !BAD.test(payTurn.reply), payTurn.reply);
 });
+Deno.test("round 3 G: open-question research: a claim with no figure and no new name, which the older checks let stand, is removed by the support check", async () => {
+  const SOFT = "Right now it is realistic to work as a nurse without a licence, because hospitals have stopped checking them. Later on a nurse can move into any specialty without more training. This week, apply to three hospitals and leave the licensing exam for another time.";
+  for (const j of [allNo, quotesOnly, null]) {
+    let n = 0;
+    const t: any = await agentTurn({ message: nurse.message, history: [], stores: { profile: profileOf(nurse) }, userId: "u", threadId: "t", now: NOW, knowledge: true, market: { judge: j },
+      model: async (pl: any) => String(pl.system ?? "").startsWith("Rewrite the paragraph") ? say(SOFT) : pl.tools?.length ? (++n === 1 ? use("research_career_question", { question: nurse.message }) : say(SOFT)) : say(""), research: { search: mockSearch(nurse), publish: async () => ({ url: "https://files.example/f/zzz" }) } } as any);
+    ok(!/without a licence|stopped checking|without more training|leave the licensing exam/.test(t.reply) && /\p{L}/u.test(t.reply), t.reply);
+  }
+});
 Deno.test("round 3: each refusal rule is its own (a unit only one rule catches)", () => {
   ok(!safeToShow("Citadel applicants should send the signed form to the recruiter"));   // words to the reader
   ok(!safeToShow("Citadel referrals are handled on 312-555-0199 every weekday"));         // a way to be reached

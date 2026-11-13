@@ -47,6 +47,9 @@ export function keptResume(call: (op: string, extra?: Record<string, unknown>) =
     const bytes = Uint8Array.from(atob(r.b64), (c) => c.charCodeAt(0));
     const sum = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))).map((n) => n.toString(16).padStart(2, "0")).join("");
     if (!bytes.length || sum !== r.sha256) return null;
+    // No card with a resume whose contact is a placeholder or cannot be read (the same gate the submit paths use).
+    const gate = (await import("../../supabase/functions/_shared/career_tailor.ts"));
+    if ((await gate.resumeFileContactProblems(bytes, { foreign: true, ...gate.recordOf(r) })).length) return null;
     await Deno.mkdir(`${dir}/kept`, { recursive: true, mode: 0o700 });
     const path = `${dir}/kept/${r.filename}`;
     await Deno.writeFile(path, bytes, { mode: 0o600 });

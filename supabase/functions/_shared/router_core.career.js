@@ -26717,10 +26717,29 @@ const CareerRender = (() => {
       const raw = buf.subarray(start, en);
       const room = Math.min(PART_MAX, TOTAL_MAX - total);
       if (room <= 0 || streams.length >= MAX_STREAMS) break;
-      try { const out = zlib.inflateSync(raw, { maxOutputLength: room }); streams.push(out); total += out.length; } catch { total += room;   }
+      try { const out = zlib.inflateSync(raw, { maxOutputLength: room }); streams.push(out); total += out.length; } catch {
+        let out = null;
+        const text = raw.toString("latin1").trim();
+        if (/~>$/.test(text) && raw.length <= room) { try { const b = ascii85(text); out = b && zlib.inflateSync(b, { maxOutputLength: room }); } catch { out = null; } }
+        else if (raw.length <= room && /\bBT\b[\s\S]*\b(?:Tj|TJ)\b/.test(text)) out = Bytes.from(raw);
+        if (out) { streams.push(out); total += out.length; } else total += room;
+      }
       idx = en + 9;
     }
     return streams;
+  }
+  function ascii85(text) {
+    const t = text.replace(/^<~/, "").replace(/~>$/, "").replace(/\s+/g, ""), out = [];
+    for (let i = 0; i < t.length;) {
+      if (t[i] === "z") { out.push(0, 0, 0, 0); i++; continue; }
+      const chunk = t.slice(i, i + 5); i += 5;
+      if (!/^[!-u]+$/.test(chunk) || chunk.length < 2) return null;
+      let v = 0;
+      for (let k = 0; k < 5; k++) v = v * 85 + (k < chunk.length ? chunk.charCodeAt(k) - 33 : 84);
+      const four = [(v / 16777216) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255];
+      out.push(...four.slice(0, chunk.length - 1));
+    }
+    return Bytes.from(out);
   }
   function readPdfLiteral(s, i) {
     const [bytes, ni] = readPdfLiteralBytes(s, i);

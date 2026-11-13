@@ -21,7 +21,7 @@ export const MIN_PER_GROUP = 30; // career_tailor.ts MIN_PER_ARM, the tailored-v
 export type ChangeKind = "reorder" | "drop" | "skills" | "reword";
 const KIND_OF: Record<string, ChangeKind> = { lead: "reorder", drop: "drop", skills: "skills", reword: "reword" };
 // RELEASE 10: the layout "template" names which of the fifteen in template (T01..T15), so rates can be read per template.
-export interface VersionEntry { n: number; layout: "plain" | "trainee" | "own" | "template"; template?: string | null; changes: ChangeKind[]; at: string; job_id: string | null }
+export interface VersionEntry { n: number; layout: "plain" | "trainee" | "own" | "template"; template?: string | null; changes: ChangeKind[]; at: string; job_id: string | null; contact?: { status: string; email_hash: string | null } | null }
 export interface VersionState { next: number; files: Record<string, VersionEntry> }
 export interface ResumeVersionLog { get(userId: string): Promise<VersionState>; save(userId: string, s: VersionState): Promise<void> }
 
@@ -43,7 +43,10 @@ export async function recordVersion(log: ResumeVersionLog, o: { userId: string; 
   try {
     const cur = await log.get(o.userId);
     const { state, version } = withVersion(cur, { sha256: o.out.sha256, layout: o.out.layout, template: o.out.template ?? null, changes: changeKinds(o.out.changes), job_id: o.out.job_id, now: o.now });
-    if (state !== cur) await log.save(o.userId, state);
+    // The file's contact verdict rides its version record (career_tailor.ts contactVerdict): the gates read it, not the bytes alone.
+    const f = state.files[o.out.sha256];
+    if (f && o.out.contact && !f.contact) f.contact = { status: o.out.contact.status, email_hash: o.out.contact.email_hash };
+    if (state !== cur || f?.contact) await log.save(o.userId, state);
     return version;
   } catch (e) {
     console.error("resume version:", e instanceof Error ? e.message : String(e));

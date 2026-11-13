@@ -362,18 +362,56 @@ function contactProblems(R: any, resume: any, buf: any): string[] {
   for (const c of R.contactProblems(resume?.header)) if (c.level === "refuse") reasons.push(`contact_unconfirmed: ${R.contactReason(c)}`);
   return reasons;
 }
-// The submit gates hold only a file's bytes: what its own text says about the contact at its top. A file Trainee made always
-// reads back as text, so one that does not is not confirmed either (foreign: a file the person stored themselves, which this
-// parser may not read; then only what it can read is judged).
-let fileRender: Promise<any> | null = null;
-export async function resumeFileContactProblems(pdf: Uint8Array, o: { foreign?: boolean } = {}): Promise<string[]> {
-  fileRender ??= Promise.all([import("node:zlib"), import("node:crypto"), import("node:buffer")]).then(([zlib, crypto, b]) => (CareerRender as any).withRuntime({ zlib, crypto, Buffer: b.Buffer }));
-  const R = await fileRender;
+// ---------------------------------------------------------------- the contact verdict of a resume file, and the one gate
+// Round 2 of the #776/#785 review: a gate that only re-read the bytes let through a file it could not read. The verdict is
+// now RECORDED when a file is stored (tailorForPosting: TailorOut.contact, kept on its version record) and every gate reads it:
+//   record given (the storage path hands one with the file; null when the row has none): it must be status "ok", and its
+//     email must be the one confirmed now when the caller knows that. Missing or unreadable: not ready.
+//   no record at all (bytes handed in directly: a test or the owner's CLI): the bytes are read; what they show is judged, and
+//     reserved addresses are looked for in the raw bytes too. `foreign` then lets a file this parser cannot read through;
+//     without it an unreadable file is not ready.
+export interface ContactVerdict { status: "ok" | "unconfirmed" | "unreadable"; email_hash: string | null; reasons?: string[] }
+export const UNREADABLE_CONTACT = "could not read the contact details in this file";
+let fileRender: Promise<any> | null = null, loaded: any = null;
+const fileR = () => fileRender ??= Promise.all([import("node:zlib"), import("node:crypto"), import("node:buffer")]).then(([zlib, crypto, b]) => (loaded = (CareerRender as any).withRuntime({ zlib, crypto, Buffer: b.Buffer })));
+const hashWith = (R: any, email: string): string => R.sha256(R.primitives.bytes(String(email).trim().toLowerCase(), "utf8"));
+export async function emailHash(email: string): Promise<string> { return hashWith(await fileR(), email); }
+// A queue that paces its starts (approve-first.ts) loads the reader once, ahead of its jobs, and then judges without waiting.
+export const warmGate = (): Promise<void> => fileR().then(() => undefined);
+export async function contactVerdict(pdf: Uint8Array): Promise<ContactVerdict> { return verdictWith(await fileR(), pdf); }
+function verdictWith(R: any, pdf: Uint8Array): ContactVerdict {
   let lines: string[] = [];
   try { lines = (R.extractPdfLines(R.toBuffer(pdf)) as string[]).filter((l) => String(l ?? "").trim()); } catch { lines = []; }
-  if (!lines.length) return o.foreign ? [] : ["the resume file's text could not be read, so its email is not confirmed"];
-  return (R.fileContactProblems(lines) as any[]).map((c) => R.contactReason(c) as string);
+  if (!lines.length) {
+    // Unreadable. A reserved address standing in the raw bytes is still seen.
+    const raw = new TextDecoder("latin1").decode(pdf.subarray(0, 2_000_000)).match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g) ?? [];
+    const reserved = raw.filter((e) => /reserved domain/.test(String(R.placeholderEmail(e) ?? "")));
+    return reserved.length ? { status: "unconfirmed", email_hash: null, reasons: [`the file holds ${reserved[0]}, an address that cannot receive mail`] } : { status: "unreadable", email_hash: null, reasons: [UNREADABLE_CONTACT] };
+  }
+  const bad = (R.fileContactProblems(lines) as any[]).map((c) => R.contactReason(c) as string);
+  if (bad.length) return { status: "unconfirmed", email_hash: null, reasons: bad };
+  const cut = lines.findIndex((l) => (R.HEADING_ALLOWLIST as string[]).includes(l.trim().toUpperCase()));
+  const email = (lines.slice(0, cut > 0 ? cut : 8).join(" | ").match(/[^\s|,;<>()\[\]{}]+@[^\s|,;<>()\[\]{}]+/) ?? lines.join(" | ").match(/[^\s|,;<>()\[\]{}]+@[^\s|,;<>()\[\]{}]+/) ?? [""])[0];
+  return { status: "ok", email_hash: hashWith(R, email) };
 }
+// The one gate (empty: ready). `record`: pass the key whenever the file came with a stored row, even when the row has none.
+type GateOpts = { foreign?: boolean; record?: ContactVerdict | null; confirmedEmailHash?: string | null };
+export async function resumeFileContactProblems(pdf: Uint8Array, o: GateOpts = {}): Promise<string[]> { return judge(await contactVerdict(pdf), o); }
+// The same gate with no wait, once warmGate has run (null before that).
+export function resumeFileContactProblemsNow(pdf: Uint8Array, o: GateOpts = {}): string[] | null { return loaded ? judge(verdictWith(loaded, pdf), o) : null; }
+function judge(read: ContactVerdict, o: GateOpts): string[] {
+  if (read.status === "unconfirmed") return read.reasons ?? [UNREADABLE_CONTACT];
+  if ("record" in o) {
+    const rec = o.record;
+    if (!rec || typeof rec !== "object" || rec.status !== "ok" || !/^[a-f0-9]{64}$/.test(String(rec.email_hash))) return rec?.status === "unconfirmed" ? (rec.reasons?.length ? rec.reasons : ["the contact details in this file are not confirmed"]) : [UNREADABLE_CONTACT];
+    if (o.confirmedEmailHash && rec.email_hash !== o.confirmedEmailHash) return ["the email in this file is not the email they have confirmed now"];
+    if (read.status === "ok" && read.email_hash !== rec.email_hash) return ["the email in this file is not the one recorded for it"];
+    return [];
+  }
+  return read.status === "unreadable" && !o.foreign ? [UNREADABLE_CONTACT] : [];
+}
+// The record a storage row hands with its file, as the gate takes it: the key is passed whenever the row can carry one.
+export const recordOf = (row: unknown): { record?: ContactVerdict | null } => row && typeof row === "object" && "contact" in row ? { record: ((row as any).contact ?? null) as ContactVerdict | null } : {};
 // RELEASE 9: a layout (career_resume_design.ts) renders the PDF and the DOCX together; the DOCX, the page fit and the
 // printed lines ride the result. With no layout asked for, the renderer is exactly WO-028's (148's own PDF).
 // RELEASE 10: a template (one of the fifteen, branded or neutral), or "own" from the person's PDF rebuilt from its geometry.
@@ -699,6 +737,8 @@ export type TailorOut = {
   ok: true; text: string; link: string; expires_at: string; changelog: string; changes: ChangeItem[]; sha256: string; filename: string;
   // D-063: what prints as a placeholder (a review draft for the chat, never stored for an application), and the edits made.
   placeholders?: string[]; edits?: EditDone[];
+  // The contact verdict recorded for the stored file (null: a review draft, which is not stored). The gates read it.
+  contact: ContactVerdict | null;
   persona: string | null; job_id: string | null; company: string | null; ats: { status: string; warnings: string[] };
   not_on_your_record: string[]; lead_not_picked: string[]; rendered_in: string; ms: number; detail: { doc: any; base: any; diff: any; docx: Uint8Array | null; pdf: Uint8Array };
   // RELEASE 9: the posting against the resume (missing, weak, emphasise) and the top of the file as it prints, both for the
@@ -816,11 +856,12 @@ export async function tailorForPosting(o: {
   if (!r.ats.pass) return { ok: false, refused: "ats_parse", reason: `it failed the ATS parse check: ${r.ats.reasons.slice(0, 3).join("; ")}`, ms: ms() };
   // A placeholder draft is not stored: the private object is what an application attaches, and this one is not ready to be.
   const path = resumePath(o.userId, r.sha256);
-  let link = "";
+  let link = "", verdict: ContactVerdict | null = null;
   if (!placeholder) {
     // The stored object is what an application attaches: the file's own text is read once more before it is kept.
     // (A renderer whose bytes this parser cannot read is judged by the header checks above alone.)
-    const inFile = await resumeFileContactProblems(r.pdf, { foreign: true });
+    verdict = await contactVerdict(r.pdf);
+    const inFile = verdict.status === "unconfirmed" ? verdict.reasons ?? [] : [];
     if (inFile.length) return { ok: false, refused: "ats_parse", reason: `not stored: ${inFile.slice(0, 2).join("; ")}`, ms: ms() };
     await o.deps.resumes.put(path, r.pdf);
     link = await o.deps.resumes.signedUrl(path, LINK_TTL_SECONDS);
@@ -848,7 +889,7 @@ export async function tailorForPosting(o: {
   const text = [`Your resume for ${o.posting.company || "this posting"} is ready. ${log.line}`, ...(link ? [link, "The link works for 7 days."] : [])].join("\n");
   return {
     ok: true, text, link, expires_at: link ? new Date(o.now + LINK_TTL_SECONDS * 1000).toISOString() : "", changelog: log.line, changes: log.items,
-    ...(placeholder ? { placeholders: ["email"] } : {}), ...(edits ? { edits } : {}),
+    ...(placeholder ? { placeholders: ["email"] } : {}), ...(edits ? { edits } : {}), contact: verdict,
     sha256: r.sha256, filename: r.filename, persona: persona?.name ?? null, job_id: o.posting.job_id ?? null, company: o.posting.company ?? null,
     ats: { status: r.ats.status, warnings: r.ats.warnings }, not_on_your_record: (t.requiredGaps || []).map((g: any) => g.requirement),
     lead_not_picked: lead.filter((id) => !selected.has(id)), rendered_in: r.where, ms: ms(), detail: { doc, base, diff, docx: r.docx ?? null, pdf: r.pdf },

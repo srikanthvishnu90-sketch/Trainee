@@ -130,8 +130,8 @@ import { connectUrl, missingIntegration } from "../_shared/agent/integrations.ts
 import { capabilityTools } from "../_shared/agent/capability_tools.ts";
 import { supabaseCapabilityStores } from "../_shared/career_capability_stores.ts";
 import { type AlumniResult, enforcePeopleReply } from "../_shared/career_alumni_search.ts";
-import { inboxReader } from "../_shared/career_mail_reply.ts";
-import { accountToken, googleAccounts } from "../_shared/career_google_accounts.ts"; // D-062: several Google accounts
+import { inboxReader, sentFinder } from "../_shared/career_mail_reply.ts";
+import { accountToken, googleAccounts, ownSendToken } from "../_shared/career_google_accounts.ts"; // D-062: several Google accounts
 import { CAREER_READ_SCOPE as GMAIL_READONLY } from "../_shared/career_mail_gmail.ts";
 import { documentsOf, materializeArtifacts } from "../_shared/channel_artifacts.ts";
 import { scoredN } from "../_shared/career_search.ts";
@@ -1197,8 +1197,11 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
             mailOn: chatSwitches(Deno.env).mailTracking,
             readNow: (u) => mailNow({ userId: u, now: Date.now(), store: supabaseMailStore(admin), cursor: f08Stores.cursor, read: gmailReadNow(f08Grant, fetch, admin), confirm: supabaseConfirmStore(admin) }),
             sendOn: chatSwitches(Deno.env).emailSend, canSend: async (u, from?: string | null) => !!(await (from ? accountToken({ ...f08Grant, admin }, CAREER_SEND_SCOPE)(u, from) : sendToken(u))), sendConsent: sendConsentFor,
-            // D-062: a reply goes from the account the card names (t.from), else the first grant.
-            send: countSend(turnEffects, (u: string, m: any, t?: any) => gmailSender({ fetch, token: (uu: string) => (t?.from ? accountToken({ ...f08Grant, admin }, CAREER_SEND_SCOPE)(uu, t.from) : sendToken(uu)) }).send(u, m, t)), connectAsk: missingIntegration("gmail"), readGrant: gmailReadGrant(admin),
+            // D-062: a reply (t) goes from the account its card names, and only from it: no named account sends only when the
+            // person has exactly one (ownSendToken refuses otherwise; never "the first grant"). A follow-up card (no t) is unchanged.
+            send: countSend(turnEffects, (u: string, m: any, t?: any) => gmailSender({ fetch, token: (uu: string) => (t ? ownSendToken({ ...f08Grant, admin }, CAREER_SEND_SCOPE)(uu, t.from ?? null) : sendToken(uu)) }).send(u, m, t)),
+            sendAccounts: async (u) => (await googleAccounts(admin, u)).filter((a) => a.can_send).map((a) => a.mailbox),
+            findSent: sentFinder({ fetch, token: accountToken({ ...f08Grant, admin }, GMAIL_READONLY) }), connectAsk: missingIntegration("gmail"), readGrant: gmailReadGrant(admin),
           } }).catch((e) => { console.error("follow-up turn:", e?.message ?? e); return null; })
         : null;
       // ROUTING SCENARIOS (2026-10-29): an email-status ask ("where are my emails", "email status", "any update on my emails")

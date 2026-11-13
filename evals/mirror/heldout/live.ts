@@ -15,6 +15,8 @@
 import { DEV_PATH, HELDOUT_PATH, loadSplit } from "./generate.ts";
 import { runConversations } from "./harness.ts";
 import { printSummary, scoreTurn, summarize } from "./score.ts";
+import { openLiveRunLedger } from "../../career/eval_budget.ts";
+import { resolveBudgetGate } from "../../../supabase/functions/_shared/model_budget.ts";
 
 export const PER_TURN_USD = 0.10; // D-065: live-5 measured $1.8375 / 18 brain turns = $0.102 (evals/mirror/instinct-wa-batch1/results/live-5/)
 const a = Deno.args, opt = (n: string) => { const i = a.indexOf(n); return i >= 0 ? a[i + 1] : undefined; };
@@ -47,9 +49,16 @@ const key = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 if (!key) { console.log("refused: needs ANTHROPIC_API_KEY"); Deno.exit(3); }
 if (!(budget > 0)) { console.log("refused: needs --budget-usd <cap>"); Deno.exit(3); }
 if (quote > budget) { console.log(`refused: the quote $${quote.toFixed(2)} is over the cap $${budget}; sample fewer conversations`); Deno.exit(3); }
+// The shared $80 ledger: the cap is reserved before the first model call, settled at the end (eval_budget.ts openLiveRunLedger);
+// a run that dies before it is metered settles as the whole cap.
+const ledger = await openLiveRunLedger({ budgetUsd: budget, approval: Deno.env.get("MIRROR_SPEND_APPROVED") ?? "", get: (k) => Deno.env.get(k), bud: { resolveBudgetGate } });
+if ("error" in ledger) { console.log(`refused: ${ledger.error}`); Deno.exit(3); }
 
 const byId = new Map(convs.flatMap((c) => c.turns.map((t) => [t.id, t] as const)));
-const { records, spent, outbound, stopped } = await runConversations(convs, { mode: "live", budgetUsd: budget, liveKey: key });
+let ran: Awaited<ReturnType<typeof runConversations>>;
+try { ran = await runConversations(convs, { mode: "live", budgetUsd: budget, liveKey: key }); } catch (e) { await ledger.settle(null); throw e; }
+await ledger.settle(ran.spent);
+const { records, spent, outbound, stopped } = ran;
 const scores = records.map((r) => scoreTurn(byId.get(r.id)!.expect, r, "live"));
 const RESULTS = new URL("./results/", import.meta.url).pathname;
 await Deno.mkdir(RESULTS, { recursive: true });

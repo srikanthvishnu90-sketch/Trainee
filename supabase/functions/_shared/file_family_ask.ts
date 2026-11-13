@@ -18,15 +18,23 @@ export const FAMILY_TITLE: Record<MadeFamily, string> = {
 // ---------------------------------------------------------------- the asks
 // A family named as a page to see, open or keep. Each phrase is the File's own name or the plain words for it; a generic phrase
 // ("my interviews", "compare my offers") counts only with a File word beside it, so an ordinary question stays an ordinary question.
-// A control ("pause my weekly brief"), an approval or a bare reply is never an ask here: it has no show/open/make word and no File word.
+// A control ("pause my weekly brief"), an opt-out ("no more weekly brief"), an approval or a bare reply is never an ask here, and
+// neither is an ask to make something new ("build a search plan"): those are the settings tools' and the planning turn's.
 const FILE_WORD = /\b(?:file|page|link|doc(?:ument)?|one[- ]?pager|sheet)s?\b/i;
-const SHOW = /\b(?:show|open|see|view|send|give|get|make|create|build|pull\s+up|bring\s+up|share|put\s+together)\b|\bwhere(?:'s|\s+is)\b|\bwhat(?:'s|\s+is)\s+(?:in|on)\b/i;
+const SHOW = /\b(?:show|open|see|view|send|give|get|pull\s+up|bring\s+up|share)\b|\bwhere(?:'s|\s+is)\b|\bwhat(?:'s|\s+is)\s+(?:in|on)\b/i;
 // A generic phrase is a File ask only with a verb that asks to SEE what is on record (never one that asks to write something new:
 // "make me an interview prep file" is the prep File's, "draft a message" is the draft tool's).
 const SEE = /\b(?:show|open|see|view|pull\s+up|bring\s+up)\b|\b(?:send|give)\s+me\b|\bwhere(?:'s|\s+is)\b/i;
 // A control or a decision about the File's subject is not a File ask: "pause my weekly brief", "approve my search plan".
-const CONTROL = /\b(?:pause|stop|resume|turn\s+(?:off|on)|cancel|unsubscribe|change|move|approve|delete|remove|edit|update)\b/i;
-const WRITE_NEW = /\b(?:write|draft|compose|prep|prepare|practi[cs]e|mock|tailor|research)\b/i;
+// An opt-out is a control however it is worded (review of #798: "don't send me the weekly brief anymore", "no more weekly brief",
+// "skip the weekly summary", "mute weekly brief", "weekly digest off" were each read as "make the File", so the person got a brief
+// link in place of the pause they asked for). Any negation, stop, skip, mute or off word leaves the turn to the settings path.
+const CONTROL = /\b(?:pause|stop|resume|turn\s+(?:off|on)|off|cancel|unsubscribe|opt(?:ing)?[- ]out|skip|mute|silence|snooze|disable|quit|end|change|move|approve|delete|remove|edit|update|never|no\s+(?:more|longer)|not|(?:do|does|did|wo|would|ca|can)n'?t|cannot)\b|\benough\s+(?:of|with)\b/i;
+// An ask to write or make something new is not an ask to open what is on record (review of #798: "make me a search plan for PM
+// roles in NYC", "build a search plan" and "draft a counter plan" were held to opening the existing File, which answers "nothing
+// on record" where the planning turn would have made the plan). Read with the File's own name taken out, so the noun "plan" in
+// "search plan" is not the verb.
+const WRITE_NEW = /\b(?:write|draft|compose|prep|prepare|practi[cs]e|mock|tailor|research|make|create|build|generate|plan|design|start|put\s+together|come\s+up\s+with|set\s+up|work\s+(?:out|up))\b/i;
 const NAMED: [MadeFamily, RegExp][] = [
   ["F-01", /\bcareer\s+brief\b/i],
   ["F-02", /\bprofile\s+facts\b|\bfacts\s+(?:you\s+have|on\s+file|about\s+me)\b/i],
@@ -50,13 +58,13 @@ const WITH_FILE_WORD: [MadeFamily, RegExp][] = [
   ["F-14n", /\bnegotiation\b/i],
   ["F-15", /\bcompar(?:e|ing|ison)\b[^.?!]{0,30}\boffers\b|\bmy\s+offers\b/i],
 ];
-// The family the message asks to see as a File, or null. A File's own name with a verb to see or make it, a File word, or alone
-// ("my weekly brief"); a generic phrase only with a File word and a verb to see it.
+// The family the message asks to see as a File, or null. A File's own name with a verb to see it, a File word, or alone
+// ("my weekly brief"); a generic phrase only with a File word and a verb to see it. Never a control, an opt-out or a new thing to make.
 export function familyAskOf(message: string): MadeFamily | null {
   const m = String(message ?? "").replace(/[\u2019`]/g, "'").trim();
   if (!m || m.length > 600 || CONTROL.test(m)) return null;
   const named = NAMED.find(([, re]) => re.test(m));
-  if (named && (SHOW.test(m) || FILE_WORD.test(m) || m.split(/\s+/).length <= 4)) return named[0];
+  if (named) return !WRITE_NEW.test(m.replace(named[1], " ")) && (SHOW.test(m) || FILE_WORD.test(m) || m.split(/\s+/).length <= 4) ? named[0] : null;
   if (!FILE_WORD.test(m) || !SEE.test(m) || WRITE_NEW.test(m)) return null;
   return WITH_FILE_WORD.find(([, re]) => re.test(m))?.[0] ?? null;
 }

@@ -18,9 +18,10 @@
 // the overview is made meanwhile. A focus ("questions", with an audience such as "hiring manager") drafts and returns that area only.
 import { isBlockedHost, isHttps, normalizeUrl, type SourcePage, URL_IN_TEXT, verifiedLinkGuard } from "../../research_sources.ts";
 import type { SearchPlan } from "../../research_search.ts";
-import { NO_SOURCES } from "../../research_reply.ts";
+import { NO_SOURCES, NOT_CONFIRMED } from "../../research_reply.ts";
 import { contentWords, numbersIn, numEq, specifics } from "./guard.ts";
-import { agrees, auditFromPages, auditLine, checkLine, figuresIn, hasPredicate, type MarketDeps, newAudit, ON_PAGES_SHARE, pageSentences, passagesFor, type ResearchAudit, wordsOnPages } from "./market.ts";
+import { abbreviated, agrees, auditFromPages, auditLine, checkLine, FAIL_CLOSED, figuresIn, hasPredicate, type MarketDeps, newAudit, ON_PAGES_SHARE, pageSentences, passagesFor, pureUnconfirmed, type ResearchAudit, wordsOnPages } from "./market.ts";
+import { bare, decide, indexPages, markSupported, quoted, supportOf, type SupportJudge, type Verdict, type Wanted } from "./support.ts";
 import { stripUrls } from "./reply.ts";
 import { parseDraft } from "./draft_json.ts";
 
@@ -192,8 +193,33 @@ export async function researchCompany(i: { company: string; role?: string | null
   // D-071: checkLine (market.ts) gives the reason a line is dropped, and keeps a line that only rewords its quote as the page's own
   // sentence. A line the later rules drop (date, meaning, competitor) is counted once, by that rule.
   // D-073: every line the brief keeps has at least 60% of its words on the pages it cites (wordsOnPages, the real-set "cited" measure).
-  const fact = (x: any, section: string): { text: string; page: SourcePage; via?: "quote"; section: string } | null => {
+  // FAIL_CLOSED.support (support.ts; the same rule as a market answer): with the switch on every drafted line and the reading are
+  // decided first, in ONE batched judge call: the model's words only when one sentence of the line's page holds its numbers, units,
+  // periods, years and names AND the judge says that sentence states it; else that page sentence in quotation marks; else dropped.
+  // The company's name is lent to no line (D-070's lending is off on this path). What has no quoted form is not shown at all: the
+  // model's "unknowns", a product's angle, and the questions built around a tension the model named.
+  const idx = FAIL_CLOSED.support ? indexPages(pages, abbreviated) : null;
+  const pidx = (p: SourcePage | null) => p ? pages.indexOf(p) : -1;
+  const FRAME = {}, sup = new Map<unknown, Verdict>();
+  if (idx) {
+    const keys: unknown[] = [], wants: Wanted[] = [];
+    for (const [k, x] of [...arr(d.business, 6), ...arr(d.developments, 5), ...arr(d.competitors, 4), ...arr(d.role, 5)].entries()) {
+      const competitor = k >= arr(d.business, 6).length + arr(d.developments, 5).length && k < arr(d.business, 6).length + arr(d.developments, 5).length + arr(d.competitors, 4).length;
+      keys.push(x); wants.push({ claim: squash(x?.text), ...(competitor ? { judged: `${squash(x?.name)}: ${squash(x?.text)}` } : {}), pages: [pidx(pageOf(x?.url))], fallback: squash(x?.quote) });
+    }
+    if (d.frame) { const ks = arr(d.frame.urls, 4).map((u) => pidx(pageOf(u))).filter((k) => k >= 0); keys.push(FRAME); wants.push({ claim: squash(d.frame.text), pages: ks.length ? ks : [-1] }); }
+    (await decide(wants, idx, i.deps.judge)).forEach((v, k) => { if (!sup.has(keys[k])) sup.set(keys[k], v); });
+  }
+  const own = (t: string) => idx ? quoted(t) : t;
+  const fact = (x: any, section: string): { text: string; page: SourcePage; via?: "quote"; section: string; sentence?: string } | null => {
     const p = pageOf(x?.url);
+    if (idx) {
+      const t = squash(x?.text), v = sup.get(x);
+      const why = !t ? "no_text" : t.length > 400 ? "too_long" : !linkFree(t) ? "link_in_text" : !p ? "page_not_read" : !v || v.how === "drop" || !linkFree(v.sentence) ? "unsupported" : "";
+      if (why || !v || v.how === "drop") return drop(why || "unsupported", section, x);
+      const model = v.how === "model" && wordsOnPages(t, [pages[v.page]]) >= ON_PAGES_SHARE;
+      return { text: model ? t : quoted(v.sentence), page: pages[v.page], section, sentence: v.sentence, ...(model ? {} : { via: "quote" as const }) };
+    }
     // D-070: the company's own name is the subject of every line ("Coinbase operates ..." on "It operates ..."), never a new claim.
     const c = checkLine(x?.text, x?.quote, p, company);
     if (!c.ok) return drop(c.why, section, x);
@@ -205,19 +231,19 @@ export async function researchCompany(i: { company: string; role?: string | null
   const on = (f: Focus) => focus === "all" || focus === f;
   // A product line keeps its product only when the quote names it.
   const business: (Cited & { product?: string })[] = on("business") ? arr(d.business, 6).map((x) => { const f = fact(x, "business"); if (!f) return null; const pr = squash(x?.product).slice(0, 40);
-    return { ...kept(f), ...(pr && linkFree(pr) && word(pr, squash(x?.quote)) ? { product: pr } : {}) }; }).filter(Boolean) as (Cited & { product?: string })[] : [];
+    return { ...kept(f), ...(pr && !idx && linkFree(pr) && word(pr, squash(x?.quote)) ? { product: pr } : {}) }; }).filter(Boolean) as (Cited & { product?: string })[] : [];
   const developments: Development[] = on("developments") ? arr(d.developments, 5).map((x) => {
     const day = parseDay(squash(x?.date)), f = fact(x, "developments");
     if (!f) return null;
     if (!day || !dayOnPage(day, f.page.text)) return drop("date_not_on_page", "developments", x); // a recent item has a date, and it is the page's date
-    const m = meaningKept(f.text, squash(x?.quote));
+    const m = meaningKept(f.text, idx ? f.sentence ?? "" : squash(x?.quote));
     if (!m.ok) return drop(`meaning_${m.measure}`, "developments", x);
     return { ...kept(f), date: showDay(day), measure: m.measure };
   }).filter(Boolean) as Development[] : [];
   const competitors = on("competitors") ? arr(d.competitors, 4).map((x) => {
     const name = squash(x?.name).slice(0, 60), f = fact(x, "competitors");
     if (!f) return null;
-    if (!name || !linkFree(name) || word(company, name) || !word(name, squash(x?.quote))) return drop("competitor_not_named", "competitors", x);
+    if (!name || !linkFree(name) || word(company, name) || !word(name, idx ? f.sentence ?? "" : squash(x?.quote))) return drop("competitor_not_named", "competitors", x);
     return { name, ...kept(f) };
   }).filter(Boolean) as (Cited & { name: string })[] : [];
   const role_asks = on("role") && role ? arr(d.role, 5).map((x) => fact(x, "role")).filter(Boolean).map((f) => kept(f!)) : [];
@@ -230,12 +256,12 @@ export async function researchCompany(i: { company: string; role?: string | null
   const facts0 = () => business.length + developments.length + competitors.length + role_asks.length;
   if ((!audit.drafted || facts0() < 2) && on("business")) for (const l of pageSentences(pages, contentWords(`${company} ${role ?? ""} ${i.question}`), [company], 4)) {
     if (audit.drafted && facts0() >= 2) break;
-    if (business.some((b) => b.text === l.text)) continue;
-    business.push({ text: l.text, cite: [num(l.page)] }); auditFromPages(audit, "business");
+    if (business.some((b) => b.text === l.text || b.text === own(l.text)) || (idx && /\?$/.test(l.text))) continue;
+    business.push({ text: own(l.text), cite: [num(l.page)] }); auditFromPages(audit, "business");
   }
   // A question is code's sentence around a verified tension: the area agrees with its quote on a cited page; A and B are each stated
   // on the cited pages (every content word, every figure); A and B differ. Nothing in a question is the model's own claim.
-  const questions: Question[] = on("questions") ? arr(d.tensions, Math.min(6, Math.max(focus === "questions" ? 6 : 5, wanted ?? 0))).map((x) => {
+  const questions: Question[] = on("questions") && !idx ? arr(d.tensions, Math.min(6, Math.max(focus === "questions" ? 6 : 5, wanted ?? 0))).map((x) => {
     const area = squash(x?.area).replace(/[.?!]+$/, ""), a = squash(x?.a).replace(/[.?!]+$/, ""), b = squash(x?.b).replace(/[.?!]+$/, ""), aq = squash(x?.area_quote);
     const ps = arr(x?.urls, 4).map(pageOf).filter(Boolean) as SourcePage[];
     if (!ps.length || ![area, a, b].every((s) => s && s.length <= 120 && linkFree(s))) return drop("tension_malformed", "questions", { text: `${area} | ${a} | ${b}`, quote: aq });
@@ -254,7 +280,12 @@ export async function researchCompany(i: { company: string; role?: string | null
   const questions_n = () => questions.length;
   // Trainee's reading: every page it names passed the guard, and every figure in it is on one of them.
   let frame: Cited | null = null;
-  if (focus === "all" && d.frame) {
+  if (idx && focus === "all" && d.frame) {
+    const t = squash(d.frame.text), v = sup.get(FRAME);
+    if (t && t.length <= 300 && linkFree(t) && v && v.how !== "drop" && linkFree(v.sentence)) {
+      frame = { text: v.how === "model" && wordsOnPages(t, [pages[v.page]]) >= ON_PAGES_SHARE ? t : quoted(v.sentence), cite: [num(pages[v.page])] }; auditLine(audit, { ok: true }, "frame");
+    } else drop("frame_unsupported", "frame", { text: t });
+  } else if (focus === "all" && d.frame) {
     const t = squash(d.frame.text), ps = arr(d.frame.urls, 4).map(pageOf).filter(Boolean) as SourcePage[];
     const nums = ps.flatMap((p) => figuresIn(p.text.slice(0, 60000)));
     // D-073: Trainee's reading has at least 60% of its words on the pages it names (item 10 live: Stripe's and Plaid's model-worded
@@ -263,16 +294,17 @@ export async function researchCompany(i: { company: string; role?: string | null
     else drop("frame_unsupported", "frame", { text: t });
   }
   const cited = order.map((k) => byUrl.get(k)!);
+  const done = <R extends object>(r: R): R => idx ? markSupported(r, idx, cited.map(pidx)) : r;
   const pageText = cited.map((p) => p.text.slice(0, 60000)).join("\n");
   const cited0 = (n: number) => (cited[n - 1]?.text ?? "").slice(0, 60000);
   const known = [company, role ?? ""].join(" ");
-  const unknowns = focus === "all" ? arr(d.unknowns, 4).map(squash).filter((u) => {
+  const unknowns = focus === "all" && !idx ? arr(d.unknowns, 4).map(squash).filter((u) => {
     const ok = u && u.length <= 200 && linkFree(u) && !numbersIn(u).length && specifics(u).names.every((n) => word(n, pageText) || word(n, known));
     if (!ok && u) drop("unknown_names_or_figures", "unknowns", { text: u });
     return ok;
   }) : [];
   // Products (C.22 "Billing: the revenue lifecycle"): a product with kept lines, and an angle every word of which is on those lines' pages.
-  const products = focus === "all" ? arr(d.products, 3).map((x) => ({ name: squash(x?.name).slice(0, 40), angle: squash(x?.angle).replace(/[.]+$/, "").slice(0, 60) })).filter((x) => {
+  const products = focus === "all" && !idx ? arr(d.products, 3).map((x) => ({ name: squash(x?.name).slice(0, 40), angle: squash(x?.angle).replace(/[.]+$/, "").slice(0, 60) })).filter((x) => {
     const mine = business.filter((b) => b.product && b.product.toLowerCase() === x.name.toLowerCase());
     const words = new Set(mine.flatMap((b) => b.cite.flatMap((n) => [...contentWords(cited0(n))])));
     const ok = !!x.name && !!x.angle && linkFree(x.angle) && mine.length > 0 && contentWords(x.angle).size > 0 && [...contentWords(x.angle)].every((w) => words.has(w));
@@ -320,10 +352,10 @@ export async function researchCompany(i: { company: string; role?: string | null
     if (made && /^https:\/\//.test(made.url)) { file_url = made.url; i.fileLinks?.push(made.url); } else { notes.push("answered inline: the brief could not be saved"); format = "inline"; }
   } else { notes.push("answered inline: research files are not switched on here"); format = "inline"; }
   const area = focus === "all" ? "" : ` The person asked to go deeper on ${focus === "questions" ? `the questions${audience ? ` for the ${audience}` : ""}` : `the ${focus}`}: talk about that area only.`;
-  if (format === "inline") return { kind: "company", status: "ok", format, company, role, ask, focus, audience, title, frame, business, developments, competitors, role_asks, questions, unknowns, sources, products, project: { ties, missing }, five, wanted, unread, file_url, dropped, notes, audit,
-    note: `${i.format === "inline" ? "The person asked for the answer in chat." : "No File could be made, so the answer is in chat."} Write three to five short sentences from the lines above only: what the company does and what someone in this role would work on, each sentence ending with its source numbers like [1]. Write no link, no question list and no source list: code adds the interview questions, what the sources cannot establish and the numbered sources after your text.${roleAsk}` };
-  return { kind: "company", status: "ok", format, company, role, ask, focus, audience, title, frame, business, developments, competitors, role_asks, questions, unknowns, sources, products, project: { ties, missing }, five, wanted, unread, file_url, dropped, notes, audit,
-    note: `Reply in two or three plain sentences: the most useful themes for the interview, drawn only from the lines above, and that the brief with its sources is in the file${file_url ? "" : " (no file was made: say so)"}.${area} Write no link and no figure that is not in a line above.${roleAsk}` };
+  if (format === "inline") return done({ kind: "company", status: "ok", format, company, role, ask, focus, audience, title, frame, business, developments, competitors, role_asks, questions, unknowns, sources, products, project: { ties, missing }, five, wanted, unread, file_url, dropped, notes, audit,
+    note: `${i.format === "inline" ? "The person asked for the answer in chat." : "No File could be made, so the answer is in chat."} Write three to five short sentences from the lines above only: what the company does and what someone in this role would work on, each sentence ending with its source numbers like [1]. Write no link, no question list and no source list: code adds the interview questions, what the sources cannot establish and the numbered sources after your text.${roleAsk}` } as CompanyResult);
+  return done({ kind: "company", status: "ok", format, company, role, ask, focus, audience, title, frame, business, developments, competitors, role_asks, questions, unknowns, sources, products, project: { ties, missing }, five, wanted, unread, file_url, dropped, notes, audit,
+    note: `Reply in two or three plain sentences: the most useful themes for the interview, drawn only from the lines above, and that the brief with its sources is in the file${file_url ? "" : " (no file was made: say so)"}.${area} Write no link and no figure that is not in a line above.${roleAsk}` } as CompanyResult);
 }
 
 // The reply, enforced in code: links and citation numbers removed; a sentence with a figure stands only when that figure is in a kept
@@ -331,7 +363,13 @@ export async function researchCompany(i: { company: string; role?: string | null
 // asks one question: the first question about the role stays and every other question is removed. With a focus, a sentence stands only
 // on the focused lines. Nothing is added: with nothing left, the reply is the first kept lines.
 const ROLE_Q = /\b(?:role|position|job|team|internship|title|interviewing\s+for)\b/i;
-export function enforceCompanyReply(reply: string, r: CompanyResult): string {
+export function enforceCompanyReply(reply: string, r: CompanyResult, checked = false): string {
+  // FAIL_CLOSED.support: this function cannot ask the judge, so on its own it lets no sentence of the model's through (the kept
+  // lines answer); enforceCompanyReplySupported checks the reply first. A result not built with the switch on is not confirmed.
+  if (FAIL_CLOSED.support) {
+    if (!checked) reply = "";
+    if (r.status === "ok" && !supportOf(r)) return NOT_CONFIRMED;
+  }
   if (r.status !== "ok") {
     // Only sentences that say research could not run (a blocker, nothing from memory) stand; anything else (apply instructions,
     // a claim) gives way to the blocker code names. The role question stays when the role is unknown.
@@ -398,4 +436,44 @@ export function enforceCompanyReply(reply: string, r: CompanyResult): string {
   if (unk.length) out.push(`Not established by these sources:\n${unk.map((u) => `- ${u}`).join("\n")}`);
   out.push(r.sources.map((x) => `[${x.n}] ${x.title}: ${x.url} (read ${day(x.fetched_at)})`).join("\n"));
   return out.join("\n\n");
+}
+
+// FAIL_CLOSED.support: the company reply, sentence by sentence, before the rules above. A sentence stands as written only when it is
+// a kept line, a could-not-confirm sentence that says nothing else, the one question about the role (naming nothing the person did
+// not), or a sentence that passes both layers against the pages it cites (ONE batched judge call); one the judge does not pass is
+// replaced by the page's own sentence in quotation marks; one with no page sentence is removed. With the switch off this is
+// enforceCompanyReply.
+const ROLE_FRAME = contentWords("role position job team internship title interview interviewing applying apply which what tell know");
+export async function enforceCompanyReplySupported(reply: string, r: CompanyResult, o: { judge?: SupportJudge | null; ask?: string } = {}): Promise<string> {
+  if (!FAIL_CLOSED.support) return enforceCompanyReply(reply, r);
+  const ask = String(o.ask ?? ""), asked = contentWords(ask);
+  const pieces = (t: string) => String(t ?? "").split(/\n+/).flatMap((l) => stripUrls(l).split(/(?<=[.!?]["')*_]*(?:\s*\[\d+\])*)\s+/)).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x));
+  const roleQ = (s: string) => /\?\s*$/.test(s) && !!r.ask && ROLE_Q.test(s) && !numbersIn(s).length && [...contentWords(bare(s))].every((w) => asked.has(w) || ROLE_FRAME.has(w));
+  const sup = r.status === "ok" ? supportOf(r) : null;
+  if (r.status !== "ok" || !sup) return enforceCompanyReply(pieces(reply).filter((s) => roleQ(s) || pureUnconfirmed(s, ask)).join(" "), r, true);
+  const inline = r.format === "inline", max = r.sources.length, plain = (s: string) => bare(s).replace(/\s*[.!?]+$/, "");
+  const kept: Cited[] = [...r.business, ...r.developments, ...r.competitors, ...r.role_asks, ...(r.frame ? [r.frame] : [])];
+  const show = (text: string, cite: number[]) => inline ? `${text.replace(/[.]?$/, "")} ${cite.map((n) => `[${n}]`).join("")}.` : text;
+  const wants: Wanted[] = [], row: (string | number)[] = [];
+  for (const s of pieces(reply)) {
+    const line = kept.find((p) => plain(p.text) === plain(s));
+    if (line) { row.push(show(line.text, line.cite)); continue; }
+    if (roleQ(s) || pureUnconfirmed(s, ask)) { row.push(bare(s)); continue; }
+    if (/\?\s*$/.test(s)) continue; // any other question to the person may carry a claim: it goes
+    const cs = [...s.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1])).filter((n) => n >= 1 && n <= max).map((n) => sup.pageOfN[n - 1]).filter((k) => k >= 0);
+    row.push(wants.length); wants.push({ claim: bare(s), pages: /\[\d+\]/.test(s) ? (cs.length ? cs : [-1]) : sup.pageOfN.length ? sup.pageOfN : [-1] });
+  }
+  const vs = await decide(wants, sup.idx, o.judge);
+  const said = new Set(kept.map((p) => plain(p.text.replace(/^"(.*)"$/s, "$1")).toLowerCase()).filter((k) => row.some((x) => typeof x === "string" && plain(x.replace(/"/g, "")).toLowerCase().includes(k))));
+  const body = row.map((x) => {
+    if (typeof x === "string") return x;
+    const v = vs[x], n = v.how === "drop" ? 0 : sup.pageOfN.indexOf(v.page) + 1;
+    if (v.how === "drop" || n < 1) return "";
+    // A page sentence that stands in for a sentence is said once: not again beside the kept line or the quote that already says it.
+    const text = v.how === "model" ? wants[x].claim : quoted(v.sentence), key = plain(v.how === "model" ? text : v.sentence).toLowerCase();
+    if (said.has(key)) return "";
+    said.add(key);
+    return show(text, [n]);
+  }).filter(Boolean).join(" ");
+  return enforceCompanyReply(body, r, true);
 }

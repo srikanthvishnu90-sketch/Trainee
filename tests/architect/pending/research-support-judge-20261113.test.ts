@@ -32,6 +32,7 @@ import { callModel, TRAINEE_MODEL } from "../../../supabase/functions/_shared/mo
 import { memoryBudgetGate } from "../../../supabase/functions/_shared/model_budget.ts";
 import { payWithSource } from "../../../supabase/functions/agent-chat/career_brain.ts";
 import { shownPayPlaces } from "../../../supabase/functions/_shared/agent/turn_notes.ts";
+import { ECHO_PAGES, FALSE_101, SOLICIT, SPLIT_CLAIM, SPLIT_PAGES, TRUE_40 } from "../../../evals/research-support/cases.ts";
 import { ASKS, GOOD, HOSTILE, LAYER_A, PURE_UNCONFIRMED, SMUGGLES, SMUGGLES_OWN, type SupportCase } from "../../../evals/research-support/cases.ts";
 import { decide, keepSupported } from "../../../supabase/functions/_shared/agent/research/support.ts";
 import { sourceKind } from "../../../supabase/functions/_shared/research_web.ts";
@@ -431,4 +432,106 @@ Deno.test("round 2, the other reply paths: a sentence stands only on what its tu
   const again = (reply: string) => enforceMarketReplySupported(reply, none, shown, { judge: allYes, ask: "what does citadel pay" });
   ok(!/\$49|paypal/.test(await again("Citadel pays its New York SWE interns $49 an hour.")));
   eq(await again("Citadel SWE Intern, New York, NY: pay is $60 an hour."), "Citadel SWE Intern, New York, NY: pay is $60 an hour.\nhttps://jobs.example/citadel");
+});
+
+// ================================================================================================ round 3 (second review)
+const asking = (answer: "yes" | "no" | ((c: { claim: string; source: string }) => "yes" | "no")) => { const asked: { claim: string; source: string }[] = []; const judge: SupportJudge = async (c) => { asked.push(...c); return c.map((x) => typeof answer === "string" ? answer : answer(x)); }; return { judge, asked }; };
+const mk3 = (pages: Page[], draft: unknown, judge: SupportJudge | null, o: any = {}) => researchMarket({ question: o.q ?? "Citadel intern pay", ask: o.ask ?? "what does citadel pay interns", format: o.format ?? "inline", plan: { queries: ["q"], companies: o.co ?? ["Citadel"], ...(o.sites ? { sites: o.sites } : {}) }, deps: deps(pages, draft, { judge, ...(o.extra ?? {}) }) } as any) as Promise<any>;
+const bodyOf3 = (out: string) => out.split(/\n\n\[1\] /)[0];
+
+Deno.test("round 3 A: the judge is never bypassed; a claim that is word for word a page unit goes to the judge with its context (12 split variants)", async () => {
+  let shownPayloads = 0;
+  for (const page of SPLIT_PAGES) {
+    const j = asking("no"), pages = [{ url: U, title: "Citadel notes", text: page }];
+    const r = await mk3(pages, { summary: [{ text: SPLIT_CLAIM, quote: SPLIT_CLAIM, url: U }] }, j.judge);
+    const out = bodyOf3(await enforceMarketReplySupported(`${SPLIT_CLAIM.replace(".", "")} [1].`, r, [], { judge: j.judge, ask: "what does citadel pay interns" }));
+    ok(!out.includes("$5,000 a week"), `${JSON.stringify(page)} => ${out}`);
+    ok(j.asked.length > 0, `the judge was asked: ${JSON.stringify(page)}`);
+    // The passage the judge reads holds the words around the unit: the whole of this short page is in it.
+    const words = page.replace(/[|•;\t\n]|^\s*(?:[-*]|\d[.)])\s/gm, " ").split(/\s+/).filter((w) => /^[A-Za-z]{4,}$/.test(w));
+    ok(j.asked.some((c) => words.every((w) => c.source.includes(w)) && c.source.includes("Citadel notes")), `context in the passage: ${JSON.stringify(page)} => ${JSON.stringify(j.asked[0])}`);
+    if (shownPayloads++ < 2) console.log(`PAYLOAD ${JSON.stringify(j.asked[0])}`);
+  }
+});
+
+Deno.test("round 3 B: a sentence that echoes a page unit is a quote candidate (filtered, judged), never model words; a unit that solicits the reader is never shown", async () => {
+  for (const page of ECHO_PAGES) for (const answer of ["no", "yes"] as const) {
+    const unit = page.split(/(?<=\.)\s/)[1], j = asking(answer), pages = [{ url: U, title: "Citadel notes", text: page }];
+    const r = await mk3(pages, { summary: [{ text: unit, quote: unit, url: U }] }, j.judge);
+    const out = await enforceMarketReplySupported(`${unit.replace(/\.$/, "")} [1].`, r, [], { judge: j.judge, ask: "what does citadel pay interns" });
+    ok(!/wire|\$500|WhatsApp|555/.test(`${out} ${JSON.stringify(r.points ?? [])}`), `${answer}: ${out}`);
+  }
+  // A harmless echo: shown only in quotation marks, and only on the judge's yes.
+  const page = "Citadel interns earn $5,000 a week. Citadel has offices in Chicago and Miami.", pages = [{ url: U, title: "Citadel notes", text: page }];
+  for (const answer of ["no", "yes"] as const) {
+    const j = asking(answer), r = await mk3(pages, { summary: [{ text: K2, quote: K2, url: U }] }, j.judge);
+    const out = bodyOf3(await enforceMarketReplySupported("Citadel has offices in Chicago and Miami [1].", r, [], { judge: j.judge, ask: "what does citadel pay interns" }));
+    ok(j.asked.length > 0);
+    if (answer === "no") eq(out, NOT_CONFIRMED); else ok(out.includes('"Citadel has offices in Chicago and Miami."') && !out.replace(/"[^"]*"/g, "").includes("offices"), out);
+  }
+  const bypass = SOLICIT.filter((u) => indexPages([{ text: u }], undefined, ["Citadel"]).pages[0].sentences.some((x: any) => x.quotable));
+  eq(bypass, []);
+});
+
+Deno.test("round 3 C: on a page code knows is one asked employer's, a unit need not name it; the quote carries the page title (recorded real pages)", async () => {
+  const rec = async (id: string) => JSON.parse(await Deno.readTextFile(new URL(`../../../evals/real-sets/research/recorded/${id}.json`, import.meta.url)));
+  const CASES: [string, string, string, string][] = [
+    ["R10", "jobs/765621", "Gusto targets cash compensation of $186,000/yr - $230,000/yr for San Francisco for this role.", "Our cash compensation amount for this role is targeted at $186,000/yr - $230,000/yr for San Francisco."],
+    ["R10", "jobs/828208", "Gusto's cash compensation for this role is between $188,510 - $232,496/year in Denver.", "Our cash compensation amount for this role is between $188,510 - $232,496/year in Denver and between $221,275 - $272,906/year for New York/San Francisco."],
+    ["R13", "jobs/859495", "Chime's wage notice for the role is $133,000 to $184,000 USD.", "Wage Notice. $133,000 &mdash; $184,000 USD."],
+    ["R09", "jobs/79817", "Affirm's USA base pay range (CA, WA, NY, NJ, CT) per year is $195,000 - $255,000.", "USA base pay range (CA, WA, NY, NJ, CT) per year: $195,000 - $255,000"],
+    ["R09", "jobs/79817", "Affirm's CAN base pay range per year is CAD $153,000 - $213,000.", "CAN base pay range per year: CAD $153,000 - $213,000."],
+  ];
+  let answered = 0;
+  for (const [id, frag, claim, quote] of CASES) {
+    const d = await rec(id), co = d.case.company, pages = d.read.verified.filter((p: any) => p.url.includes(frag)), ask = `what does ${co.toLowerCase()} pay for the ${d.case.role} role`;
+    const dp = { search: { id: "t", needsKey: false, search: async () => ({ hits: pages.map((p: any) => ({ url: p.url, title: p.title, provider: "t", foundAt: p.fetchedAt })), notes: [], provider: "t" }) }, read: async () => ({ verified: pages, rejected: [] }), draft: async () => JSON.stringify({ summary: [{ text: claim, quote, url: pages[0].url }] }), judge: allYes };
+    const r: any = await researchMarket({ question: `${co} ${d.case.role} pay`, ask, format: "inline", plan: { queries: ["q"], companies: [co], sites: d.plan.sites }, deps: dp } as any);
+    const out = bodyOf3(await enforceMarketReplySupported(`${claim.replace(/\.$/, "")} [1].`, r, [], { judge: allYes, ask }));
+    const fig = /\$[\d,]+/.exec(claim)![0];
+    if (out.includes(fig)) answered++; else console.log(`NOT ANSWERED ${id} ${claim} => ${out.slice(0, 200)}`);
+  }
+  console.log(`REAL pages: ${answered} of 5 true pay claims answered with the switch on (3 with it off)`);
+  ok(answered >= 3, `${answered} of 5`);
+  // A page titled for one employer whose unit speaks of another is the judge's to refuse: the title is in the passage.
+  const j = asking("no"), pages = [{ url: U, title: "Citadel careers", text: "Unlike here, Jane Street pays interns $5,000 a week in pay." }];
+  const r = await mk3(pages, { summary: [{ text: "Citadel pays interns $5,000 a week.", quote: "pays interns $5,000 a week", url: U }] }, j.judge);
+  eq(r.status, "no_sources");
+  ok(j.asked.every((c) => c.source.includes("Citadel careers")));
+});
+
+Deno.test("round 3 H: 40 true claims (at most 3 dropped); 101 false claims (what A lets through reaches the judge with its context)", async () => {
+  const tally = { model: 0, quote: 0, drop: 0 }, dropped: string[] = [];
+  for (const [title, page, claim] of TRUE_40) {
+    const pages = [{ url: "https://www.citadel.com/careers", title, text: page }];
+    const r = await mk3(pages, { summary: [{ text: claim, quote: page.split("\n").pop(), url: pages[0].url }] }, allYes);
+    const body = bodyOf3(await enforceMarketReplySupported(`${claim.replace(/\.$/, "")} [1].`, r, [], { judge: allYes, ask: "what does citadel pay interns" }));
+    const how = body.replace(/"[^"]*"/g, "").includes(claim.replace(/\.$/, "")) ? "model" : /"/.test(body) ? "quote" : "drop";
+    tally[how]++; if (how === "drop") dropped.push(`${claim} <= ${page}`);
+  }
+  console.log(`TRUE_40 with a yes judge: ${JSON.stringify(tally)}\n  dropped: ${dropped.join("\n  dropped: ")}`);
+  ok(tally.drop <= 3, `${tally.drop} dropped`);
+  let stops = 0, printed = 0;
+  for (const [cls, page, claim] of FALSE_101) {
+    const j = asking("yes"), idx = indexPages([{ text: page, title: "Citadel notes" } as any], undefined, ["Citadel"]);
+    const [v] = await decide([{ claim, pages: [0] }], idx, j.judge);
+    if (v.how !== "model") { stops++; continue; }
+    const c = j.asked.find((x) => x.claim.includes(claim.replace(/\.$/, "")));
+    ok(c && c.source.includes("Citadel notes") && c.source.replace(/\s+/g, " ").length >= Math.min(page.length, 200) * 0.6, `[${cls}] ${claim}: judged with context ${JSON.stringify(c)}`);
+    if (printed++ < 5) console.log(`PAYLOAD [${cls}] ${JSON.stringify(c)}`);
+  }
+  console.log(`FALSE_101 with a yes judge: layer A stops ${stops}; the other ${FALSE_101.length - stops} reach the judge with context`);
+  ok(stops >= 45);
+});
+
+Deno.test("round 3 E, F: a label is the ask's or the unit's own words, judged with its cells; a shared host is never official", async () => {
+  const pub: any[] = [], j = asking("yes");
+  await mk3([{ url: U, title: "Pay notes", text: `${K2} Jane Street interns earn $4,000 a week.` }], { thesis: K2, summary: [{ text: K2, quote: K2, url: U }], conditions: [{ text: K2, urls: [U] }], risks: [{ text: K2, urls: [U] }],
+    comparison: { options: ["Citadel", "Jane Street"], rows: [{ label: "No pay for interns", cells: [{ value: "$5,000 a week", url: U }, { value: "$4,000 a week", url: U }] }, { label: "Interns pay citadel", cells: [{ value: "$5,000 a week", url: U }, { value: "$4,000 a week", url: U }] }, { label: "pay interns", cells: [{ value: "$5,000 a week", url: U }, { value: "$4,000 a week", url: U }] }] } },
+    j.judge, { format: "file", co: ["Citadel", "Jane Street"], extra: { publish: async (d: any) => { pub.push(d); return { url: "https://trainee.example/file?t=v1.c" }; } } });
+  eq((pub[0]?.comparison?.rows ?? []).map((r: any) => r.label), ["pay interns"]);
+  ok(j.asked.some((c) => /pay interns/.test(c.claim) && /\$5,000 a week/.test(c.claim)), "the label is judged with its cell");
+  for (const u of ["https://sites.google.com/view/google-pay", "https://google.github.io/x", "https://medium.com/@google/x", "https://google.substack.com/p/x", "https://google.notion.site/x", "https://google.wordpress.com/x", "https://google.blogspot.com/x", "https://www.linkedin.com/company/google", "https://www.glassdoor.co.uk/google", "https://www.facebook.com/google"])
+    ok(sourceKind(u, ["Google"], ["google.com", "github.io", "medium.com", "substack.com", "notion.site", "wordpress.com", "blogspot.com", "linkedin.com", "glassdoor.co.uk", "facebook.com"]) !== "official", u);
+  eq(sourceKind("https://careers.google.com/jobs", ["Google"], ["google.com"]), "official");
 });

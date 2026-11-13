@@ -44,14 +44,40 @@ const SIMULATED_UPLOADS = [
   // Architect ruling on #741: Workable posts the resume to its own S3 bucket (strict r12 DIAG: workable-application-form.s3.us-east-1
   // .amazonaws.com/); blocked, the page discards its form a moment later. Answered here the same way, never sent.
   { provider: "workable", host: /^workable-application-form\.s3(?:\.[a-z0-9-]+)?\.amazonaws\.com$/, path: /^\/$/, methods: ["POST", "OPTIONS"] },
+  // D-072 (item 4, round 2): Breezy posts the resume to its own API, https://app.breezy.hr/api/portal/<company>/upload (multipart,
+  // field "file"; capture of 2026-11-12), and its portal script (portal-ga9Z0GTh.js: Rp / iS / onFileSelect) takes any 2xx whose
+  // JSON has a `url` as the stored file and shows it. Answered here with {"url": <a simulated address>}, never sent.
+  // D-072 (item 4, round 2): Teamtailor asks its own site for a presigned upload (POST /uploads/presigned_data, JSON {filename};
+  // capture of 2026-11-12) and its careersite script (chunk-ZHRXYZOI: the resume Dropzone's accept / processFile / handleSuccess)
+  // then posts the file with the answer's `fields` to the answer's `url` and reads the stored file from the Location header. Both
+  // are answered here: the presigned answer names a storage address that does not exist (simulated-upload.invalid), and that
+  // address's POST is answered 204 with its Location. Never sent anywhere.
+  { provider: "teamtailor", host: /./, path: /^\/uploads\/presigned_data$/, methods: ["POST"], presign: true },
+  { provider: "teamtailor", host: /^simulated-upload\.invalid$/, path: /^\/$/, methods: ["POST", "OPTIONS"] },
+  { provider: "breezy", host: /^app\.breezy\.hr$/, path: /^\/api\/portal\/[A-Za-z0-9_-]+\/upload(?:\/file)?$/, methods: ["POST", "OPTIONS"], json: true },
 ];
+// The simulated file's address: never fetched (simulatedFileRead below aborts any request that names it).
+const SIMULATED_FILE = "https://simulated-upload.invalid/TEST-synthetic-resume.pdf";
+const simulatedFileRead = (req) => { try { const t = decodeURIComponent(req.url()); return t.includes(SIMULATED_FILE) || (req.method() !== "POST" && req.method() !== "OPTIONS" && new URL(req.url()).hostname === "simulated-upload.invalid"); } catch { return false; } };
 function simulatedUpload(req, provider) {
   let u; try { u = new URL(req.url()); } catch { return null; }
   const rule = SIMULATED_UPLOADS.find((x) => x.provider === provider && u.protocol === "https:" && x.host.test(u.hostname) && x.path.test(u.pathname) && x.methods.includes(req.method()));
   if (!rule) return null;
   const h = req.headers() || {};
-  const cors = { "access-control-allow-origin": h.origin || "*", "access-control-allow-methods": "POST, OPTIONS", "access-control-allow-headers": h["access-control-request-headers"] || "*", "access-control-expose-headers": "ETag, Location" };
+  // The page's own origin (an XHR sent with credentials needs that exact origin and allow-credentials; "*" is refused by the browser,
+  // and the page then never sees the answer: strict run 43276162667, three job-boards.greenhouse.io forms whose progress stayed 0%).
+  let origin = h.origin || "";
+  if (!origin) { try { origin = new URL(req.frame().url()).origin; } catch { origin = "*"; } }
+  const cors = { "access-control-allow-origin": origin || "*", ...(origin && origin !== "*" ? { "access-control-allow-credentials": "true", vary: "Origin" } : {}),
+    "access-control-allow-methods": "POST, OPTIONS", "access-control-allow-headers": h["access-control-request-headers"] || "*", "access-control-expose-headers": "ETag, Location" };
   if (req.method() === "OPTIONS") return { status: 204, headers: cors, body: "" };
+  if (rule.presign) {
+    // Only the page's own site (a Teamtailor career site on its own domain), never another host's path of the same name.
+    let pageHost = ""; try { pageHost = new URL(req.frame().url()).hostname; } catch { /* none */ }
+    if (pageHost !== u.hostname) return null;
+    return { status: 200, headers: { "content-type": "application/json" }, body: JSON.stringify({ url: "https://simulated-upload.invalid/", fields: { key: "uploads/simulated/${filename}", acl: "private", "x-amz-algorithm": "AWS4-HMAC-SHA256", policy: "simulated", "x-amz-signature": "simulated" } }) };
+  }
+  if (rule.json) return { status: 200, headers: { ...cors, "content-type": "application/json" }, body: JSON.stringify({ url: SIMULATED_FILE, file_name: "TEST-synthetic-resume.pdf" }) };
   // An S3 form POST answers 204, or 201 with the object's key when the form asks for success_action_status 201.
   let body = ""; try { body = (req.postDataBuffer() || Buffer.alloc(0)).toString("latin1"); } catch { /* no body */ }
   const field = (n) => { const m = new RegExp(`name="${n}"\\r\\n\\r\\n([^\\r]*)`).exec(body); return m ? m[1] : ""; };
@@ -119,11 +145,12 @@ async function strictPosting(browser, item, o) {
   const gate = async (req) => {
     let u; try { u = new URL(req.url()); } catch { return false; }
     if (/^(data|blob|about):$/.test(u.protocol)) return true;
+    if (simulatedFileRead(req)) return false;
     const sim = simulatedUpload(req, item.provider);
     if (sim) { if (req.method() === "POST") r.upload_simulated++; return { fulfill: sim }; }
     if (!/^(GET|HEAD|OPTIONS)$/.test(req.method())) {
       if (graphqlRead(req)) { r.graphql_reads++; }
-      else { r.sent_blocked++; if ((r.blocked = r.blocked || []).length < 8) r.blocked.push(`${req.method()} ${u.host}${u.pathname.slice(0, 60)}${u.search.slice(0, 40)}`); return false; }
+      else { r.sent_blocked++; if (/\/wday\/cxs\/[^/]+\/jobpostings\//.test(u.pathname)) r.workday_start_blocked = true; if ((r.blocked = r.blocked || []).length < 8) r.blocked.push(`${req.method()} ${u.host}${u.pathname.slice(0, 60)}${u.search.slice(0, 40)}`); return false; }
     }
     if (["image", "media", "font"].includes(req.resourceType())) return false;
     // Polite pacing is per page load (1 a second per host), not per script or stylesheet a page loads with it.
@@ -206,4 +233,4 @@ async function main() {
   if (s.all.breaches) process.exit(3);
 }
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
-module.exports = { strictStop, simulatedUpload, SIMULATED_UPLOADS, strictPosting, graphqlRead, robotsOk, summarize, markdown, CUSTOM_ONLY, PROVIDER_HOSTS };
+module.exports = { strictStop, simulatedUpload, simulatedFileRead, SIMULATED_FILE, SIMULATED_UPLOADS, strictPosting, graphqlRead, robotsOk, summarize, markdown, CUSTOM_ONLY, PROVIDER_HOSTS };

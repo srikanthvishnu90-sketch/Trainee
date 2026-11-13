@@ -151,7 +151,10 @@ function APPLY_CANDIDATES(args) {
 }
 
 // ---------------------------------------------------------------------------------------------------------- one posting
-const TEST_FACTS = { first_name: "Testy", last_name: "Example", full_name: "Testy Example", email: "dry-run@example.invalid", phone: "+1 555 0100", location: "Chicago, IL", country: "United States", eeo_policy: "decline",
+// D-072 (item 4, round 2): the synthetic phone is a whole number (country code and ten digits, in the 555-01xx range reserved for
+// fiction): "+1 555 0100" had seven digits, and boards that check a number's length (Teamtailor, strict run 43303161774: 10 rows
+// "candidate[phone]" rejected) refused it where a real applicant's number is accepted.
+const TEST_FACTS = { first_name: "Testy", last_name: "Example", full_name: "Testy Example", email: "dry-run@example.invalid", phone: "+1 312 555 0100", location: "Chicago, IL", country: "United States", eeo_policy: "decline",
   // Coordinator ruling 2026-11-10 (b-ashby): a synthetic profile URL, typed into fields only, never opened.
   linkedin_url: "https://www.linkedin.com/in/testy-example-dry-run" };
 // The strict bench's second, separate column (never in place of TEST_FACTS): the same synthetic person with every fact a real

@@ -255,8 +255,9 @@ function checkGate(seen, shown, inForm, phase) {
 }
 // Review of #797: which form is the application and which control is its Submit, decided here on what the page-side reader (SNAP)
 // saw, so the rule is one tested function. The words are the boards' own (D-072 round 2: Recruitee's "Sūtīt", "Wyślij").
-//  - An application form has a file upload, or two or more questions of which one is a name, resume or phone question; a
-//    newsletter, job-alert or search box is not one, and neither its fields nor its button are ever used.
+//  - An application form has a file upload (the resume), or two or more questions of which one is more than an email box, a
+//    tick box or a search box (a name, a phone, a question of the employer's); a newsletter, job-alert or search box is not
+//    one, and neither its fields nor its button are ever used.
 //  - The Submit is a control OF that form: inside it, or tied to it by its own form attribute. A control outside every form is never
 //    a form's Submit. When an application form has no Submit of its own and the page shows a Submit-worded control outside it, the
 //    run is refused before anything is filled (submit_not_tied_to_form); `opener` says every such control is in the Apply words
@@ -266,14 +267,14 @@ function checkGate(seen, shown, inForm, phase) {
 const SUBMIT_WORD = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$|^\s*(bewerbung )?(absenden|senden|abschicken)\s*$|^\s*(sollicitatie )?(versturen|verzenden|verstuur|indienen)\s*$|^\s*(envoyer|enviar|verzenden|skicka|sende|send inn|indsend|l[äa]het[äa]|wy[śs]lij|s[ūu]t[īi]t|si[ųu]sti|saada|odeslat|odosla[ťt]|invia|inviare|trimite|g[öo]nder|k[üu]ld[ée]s|po[šs]alji|po[šs]lji|изпрати|отправить|надіслати|αποστολή|υποβολή)( .{0,24})?$/i;
 const NEXT_WORD = /^\s*(continue|next|next step|weiter|suivant|siguiente|volgende|avanti|pr[oó]ximo)\s*[›»>→]?\s*$/i;
 const PLAIN_SUBMIT = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$/i;
-const APP_FIELD = /(?<!user)name|\bnom\b|pr[ée]nom|nombre|apellido|naam|navn|namn|nimi|imi[eę]|nazwisko|vardas|v[āa]rds|jm[ée]no|cognome|resume|r[ée]sum[ée]|\bcv\b|lebenslauf|curriculum|phone|telefon|tel[ée]fono|linkedin|cover/i;
 const NOT_APPLICATION = /subscribe|newsletter|sign ?up|notify|alert|search|abonn|suchen/i;
-const isApplicationForm = (fields = []) => fields.some((f) => f.type === "file") || (fields.length >= 2 && fields.some((f) => APP_FIELD.test(f.hint || "")));
+const isApplicationForm = (fields = []) => fields.some((f) => f.type === "file") || (fields.length >= 2 && fields.some((f) => !["email", "checkbox", "search"].includes(f.type)));
 function pickControls(snap) {
   const none = { form: null, submit: null, next: null, refuse: null };
   const ctl = (snap.controls || []).filter((c) => !c.signin);
   const forms = (snap.forms || []).map((f, i) => ({ ...f, i })).filter((f) => f.hasControl && !f.signin);
-  const apps = forms.filter((f) => isApplicationForm(f.fields));
+  // `was`: this run already took the form as the application (a board that swaps the upload's input for a chip once the resume is set).
+  const apps = forms.filter((f) => f.was || isApplicationForm(f.fields));
   const typed = (c) => (c.tag === "BUTTON" && (c.type === "submit" || c.type === "")) || (c.tag === "INPUT" && c.type === "submit");
   for (const f of apps) {
     const own = ctl.filter((c) => c.form === f.i && c.vis), t = own.filter(typed), declared = t.filter((c) => c.type === "submit"), worded = own.filter((c) => SUBMIT_WORD.test(c.text));
@@ -307,7 +308,7 @@ function SNAP() {
     const f = b.form || b.closest("form");
     return { c, form: f ? forms.indexOf(f) : -1, inside: !!b.closest("form"), vis: vis(b), text: squash(b.innerText || b.value).slice(0, 120), tag: b.tagName, type: (b.getAttribute("type") || "").toLowerCase(), signin: !!b.closest("[data-upmore-signin]") };
   });
-  return { controls, forms: forms.map((f) => ({ signin: f.hasAttribute("data-upmore-signin"), hasControl: !!f.querySelector("input, select, textarea"), fields: deep(f, "input, select, textarea").filter(isField).map(field) })),
+  return { controls, forms: forms.map((f) => ({ signin: f.hasAttribute("data-upmore-signin"), was: f.hasAttribute("data-upmore-app-seen"), hasControl: !!f.querySelector("input, select, textarea"), fields: deep(f, "input, select, textarea").filter(isField).map(field) })),
     loose: deep(document.body, "input, select, textarea").filter((i) => isField(i) && !i.closest("form") && !i.closest("[data-upmore-signin]")).map(field) };
 }
 // Page side: mark what pickControls chose: the application form (data-upmore-app: the one form ats-fill reads and fills), its
@@ -315,7 +316,7 @@ function SNAP() {
 function MARK(pick) {
   for (const a of ["data-upmore-submit", "data-upmore-next", "data-upmore-app"]) for (const e of document.querySelectorAll(`[${a}]`)) e.removeAttribute(a);
   const f = pick.form >= 0 ? document.querySelectorAll("form")[pick.form] : null;
-  if (f) f.setAttribute("data-upmore-app", "1");
+  if (f) { f.setAttribute("data-upmore-app", "1"); f.setAttribute("data-upmore-app-seen", "1"); }
   for (const [k, a] of [["submit", "data-upmore-submit"], ["next", "data-upmore-next"]]) { const e = pick[k] === null || pick[k] === undefined ? null : document.querySelector(`[data-upmore-c="${pick[k]}"]`); if (e) e.setAttribute(a, "1"); }
 }
 // The last look before the click: the control about to be pressed belongs to the form that was filled, and every filled question

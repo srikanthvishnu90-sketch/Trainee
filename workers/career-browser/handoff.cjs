@@ -83,9 +83,11 @@ const askedQuestions = (handoff) => ((handoff && handoff.remaining) || []).filte
 const PER_LOAD_TOKEN = /csrf|xsrf|authenticity|nonce|(^|_)token$|captcha|recaptcha|turnstile|-captcha-response/i;
 const DEMOGRAPHIC = /gender|\brace\b|ethnic|veteran|disab|hispanic|latino|pronoun|sexual orientation/i;
 const CONSENT = /agree|consent|accept|acknowledg|authori[sz]|privacy|terms|certif|attest|declar|sponsor|visa|eligib|legally|right to work|opt.?in|subscribe|marketing|newsletter|contact(ed)? (me|you)|criminal|convict|background check/i;
+// Words in a box's own text that make it a statement in the person's name (an e-signature, an attestation, a consent).
+const LEGAL_TEXT = /\bi agree\b|certif|consent|attest|authori[sz]|background check|\bdeclare\b|\bi confirm\b/i;
 const set = (c) => c.value !== null && c.value !== undefined && c.value !== "";
 function pageRows(controls, { hidden = false } = {}) {
-  return (controls || []).filter((c) => (c.hidden ? hidden && !PER_LOAD_TOKEN.test(c.name || "") : true))
+  return (controls || []).filter((c) => (c.hidden && !c.answer ? hidden && !PER_LOAD_TOKEN.test(c.name || "") : true))
     .map((c) => [String(c.name || c.label || ""), String(c.type || ""), c.option === null || c.option === undefined ? null : String(c.option), set(c) ? String(c.value) : null]);
 }
 const pageDigest = (controls, o) => crypto.createHash("sha256").update(JSON.stringify(pageRows(controls, o))).digest("hex");
@@ -98,13 +100,16 @@ const pageDigest = (controls, o) => crypto.createHash("sha256").update(JSON.stri
 //    opt-in, a demographic choice, or any other): asked (PERSON_REASONS), never sent as it stands.
 const PRESENTATIONAL = /^(?:(?:site|form|page|display|preferred)\s+)?(?:language|locale|lang)$|\bsort\b|order by|per page|page size|results per|same as (?:above|home|mailing|current)/i;
 const DIAL = /country.?code|dial|calling code|phone.?country|country.{0,12}phone|phone.{0,12}prefix/i;
-const same = (a, b) => String(a).trim().toLowerCase().replace(/\s+/g, " ") === String(b).trim().toLowerCase().replace(/\s+/g, " ");
+// The same answer: the same words, or the same yes / no as a hidden field writes it ("Yes" and "1", "No" and "false").
+const YES = /^(yes|y|true|1|on|checked)$/i, NO = /^(no|n|false|0|off)$/i;
+const same = (a, b) => { const x = String(a).trim().toLowerCase().replace(/\s+/g, " "), y = String(b).trim().toLowerCase().replace(/\s+/g, " "); return x === y || (YES.test(x) && YES.test(y)) || (NO.test(x) && NO.test(y)); };
 function unconfirmedDefaults(controls, person = {}) {
   const out = [], seen = new Set();
   for (const c of controls || []) {
-    if (c.hidden || c.touched || !set(c)) continue;
+    // Round 2 (review of #818): every control the page set and the engine did not, text boxes, hidden answers and contenteditable
+    // regions included; a disabled control is never sent, so it is shown on the card and never asked.
+    if ((c.hidden && !c.answer) || c.pageData || c.touched || c.disabled || !set(c) || c.type === "file") continue;
     const box = c.type === "checkbox" || c.type === "radio";
-    if (!box && !/^select/.test(String(c.type))) continue; // a prefilled text box: shown and hashed (answersCard), not a choice
     const label = String(c.label || c.name || c.option || "").slice(0, 200), key = `${label} ${c.name || ""}`;
     const sensitive = DEMOGRAPHIC.test(key) || CONSENT.test(key);
     const confirmed = person.answer ? person.answer(label) : undefined;
@@ -118,7 +123,8 @@ function unconfirmedDefaults(controls, person = {}) {
     }
     if (seen.has(label)) continue;
     seen.add(label);
-    out.push({ label, reason: DEMOGRAPHIC.test(key) ? "eeo_needs_your_choice" : CONSENT.test(key) || c.type === "checkbox" ? "agreement_needs_you" : "no_confirmed_answer", kind: c.type, detail: `set by the page, not confirmed by you: ${String(c.value).slice(0, 80)}` });
+    const legal = !box && LEGAL_TEXT.test(String(c.value));
+    out.push({ label, reason: DEMOGRAPHIC.test(key) ? "eeo_needs_your_choice" : CONSENT.test(key) || legal || c.type === "checkbox" ? "agreement_needs_you" : "no_confirmed_answer", kind: c.type, detail: `set by the page, not confirmed by you: ${String(c.value).slice(0, 80)}` });
   }
   return out;
 }
@@ -137,11 +143,11 @@ function answersCard({ url, payload_hash, fields, controls }) {
   const have = new Set(answers.map((a) => String(a.field).toLowerCase()));
   for (const c of controls || []) {
     const field = String(c.label || c.name || c.type || "");
-    if (c.hidden || c.touched || !set(c) || have.has(field.toLowerCase())) continue;
+    if ((c.hidden && !c.answer) || c.touched || !set(c) || have.has(field.toLowerCase())) continue;
     have.add(field.toLowerCase());
-    answers.push({ field, value: String(c.value), source: "page_default" });
+    answers.push({ field, value: String(c.value), source: c.pageData ? "page_data" : "page_default" });
   }
-  const card = { url, payload_hash, answers, ...(controls ? { page_digest: pageDigest(controls), hidden_not_hashed: controls.filter((c) => c.hidden).length } : {}) };
+  const card = { url, payload_hash, answers, ...(controls ? { page_digest: pageDigest(controls), hidden_not_hashed: controls.filter((c) => c.hidden && !c.answer).length } : {}) };
   card.hash = cardHash(card);
   return card;
 }

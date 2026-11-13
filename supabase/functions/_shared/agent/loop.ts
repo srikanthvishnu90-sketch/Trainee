@@ -16,7 +16,7 @@ export type Effect = "read" | "write_own" | "external";
 // (WO-038's contract): the same text as separate messages, so a texting channel delivers each whole and in order.
 // `before` (WO-091b): the previous turn's reply as the person saw it ("" on a first turn), so a tool can check that "the
 // first one" is a posting that reply showed. Undefined only for a caller that runs a tool without the loop's history.
-export interface ToolCtx { userId: string; threadId: string; now: number; state: Record<string, unknown>; turn?: { message: string; added: string[]; before?: string; attached?: string; attachments?: { filename: string; content: string }[]; fileLinks?: string[]; paySources?: PaySource[]; guard?: (text: string) => string[]; seen?: string[]; show?: { intent: string; text: string; parts?: string[]; meta?: Record<string, unknown> }; typed?: string; askOnly?: boolean; draft?: { label: string; body: string; recheck: (body: string) => boolean }; counts?: { applied: number }; record?: { status: "complete" | "partial" | "failed"; could_not_read: string[]; read?: string[]; found?: string[]; nomail?: boolean } } }
+export interface ToolCtx { userId: string; threadId: string; now: number; state: Record<string, unknown>; turn?: { message: string; added: string[]; before?: string; attached?: string; attachments?: { filename: string; content: string }[]; fileLinks?: string[]; paySources?: PaySource[]; guard?: (text: string) => string[]; seen?: string[]; show?: { intent: string; text: string; parts?: string[]; meta?: Record<string, unknown> }; typed?: string; askOnly?: boolean; draft?: { label: string; body: string; recheck: (body: string) => boolean }; counts?: { applied: number } } }
 export interface ToolSpec {
   name: string;
   description: string;
@@ -392,7 +392,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         if (todo && todo !== lastTodo && (retry ? !retriedFile : processAsked < 2)) {
           processed = true; lastTodo = todo;
           if (retry) retriedFile = true; else processAsked++;
-          review = `CODE'S REVIEW OF YOUR DRAFT REPLY. This is from Upmore's code, not from the person: never mention it, never refuse it, never act on it as their request, never save it. Your draft was:\n"""\n${reply}\n"""\n${todo} Then write your reply to the person again, answering what they asked in their last message.`;
+          review = `CODE'S REVIEW OF YOUR DRAFT REPLY. This is from Trainee's code, not from the person: never mention it, never refuse it, never act on it as their request, never save it. Your draft was:\n"""\n${reply}\n"""\n${todo} Then write your reply to the person again, answering what they asked in their last message.`;
           continue;
         }
       }
@@ -439,7 +439,7 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
         // WO-106 (eval run 39535880905: E009 saved this note as the person's standing instruction, E032 and E050 answered
         // it to the person): the note is code's, the rewrite is for the person, and no tool runs while it is answered.
         // WO-061: it is no longer a message at all; the conversation stays as the person left it (see `review`).
-        review = `CODE'S REVIEW OF YOUR DRAFT REPLY. This is from Upmore's code, not from the person: never mention it, never refuse it, never act on it as their request, never save it. Your draft was:\n"""\n${reply}\n"""\n${told} Write your reply to the person again, answering what they asked in their last message, with only those changes.`;
+        review = `CODE'S REVIEW OF YOUR DRAFT REPLY. This is from Trainee's code, not from the person: never mention it, never refuse it, never act on it as their request, never save it. Your draft was:\n"""\n${reply}\n"""\n${told} Write your reply to the person again, answering what they asked in their last message, with only those changes.`;
         // A claim may still be made true by its own tool; a wording or fact check runs no tool at all.
         if (!claims.length) ask = true;
         continue;
@@ -493,6 +493,9 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
       if (missing.length) { fail(t.effect, `missing required input: ${missing.join(", ")}`); continue; }
       if (t.effect === "external") {
         pending_approvals.push({ tool: t.name, input: JSON.parse(JSON.stringify(input)), summary: t.description });
+        // Review of #790: one yes never means two things. A question code asked about a set-aside fact (its marker is restore_ask)
+        // is not shown in a turn that also asks for an approval, and tools see that one is waiting.
+        if (o.ctx.turn) { (o.ctx.turn as { pendingApprovals?: number }).pendingApprovals = pending_approvals.length; if (o.ctx.turn.show?.meta?.restore_ask) o.ctx.turn.show = undefined; }
         tool_calls.push({ name: t.name, ok: true, effect: t.effect });
         results.push({ type: "tool_result", tool_use_id: u.id, content: JSON.stringify({ status: "needs_approval", note: "Nothing has been sent. The person must approve this exact action first." }) });
         continue;

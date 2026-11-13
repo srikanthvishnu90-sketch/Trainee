@@ -295,38 +295,9 @@ export function statementsOf(message: string): { asking: boolean; stated: string
     parts.forEach((c, k) => clauses.push({ text: c, ask: (k === parts.length - 1 && /\?\s*$/.test(s)) || ASK_START.test(c.toLowerCase()) }));
   }
   const asking = clauses.some((c) => c.ask);
-  const stated = clauses.map((c) => assertedIn(c.text, c.ask)).filter(Boolean).join(". ");
+  const stated = clauses.filter((c) => !c.ask && FIRST_PERSON.test(c.text.toLowerCase())).map((c) => c.text).join(". ");
   return { asking, stated };
 }
-// Review of #785, round 2 (D-007): what a clause ASSERTS about the person, in their words, or null. The text a record write may
-// draw on is only this. A statement inside a request or question counts ("can you add that I interned at Google?" asserts "I
-// interned at Google"; "could you save my GPA as 3.7?"; "add Rust to my skills"), from its first-person subject to the clause's
-// end. Nothing is asserted by: a question about what to say ("should I say I know Rust?", "is it ok to write that ..."), a
-// condition ("if I ...", "whether I ..."), someone else's words or doings ("my recruiter said ...", "my friend interned ..."), a
-// request for a topic ("add something about leadership", "a line about Python"), or the question's own subject ("have i
-// applied"). A negated assertion is kept negated (career_tools.ts factRefusal never saves its opposite).
-const ASKED_I = /\b(?:do|does|did|have|has|had|can|could|should|shall|would|will|am|was|may|might|must|what|where|when|how|why|who|which)\s+i\b/g;
-const DOUBT = /\b(?:should|could|would|might|may|can|shall)\s+i\s+(?:\w+\s+)?(?:say|add|put|write|claim|mention|note|include|list|tell|pass)\b|\bi\s+(?:should|could|might|may|wish)\b|\bi'd\s+(?:love|like)\b|\bif\s+i\b|\bwhat\s+if\b|\bwhether\b|\bdo\s+i\s+(?:need|have)\s+to\b|\bsupposed\s+to\b|\bto\s+(?:say|write|claim|put|list|mention)\s+(?:down\s+)?(?:that\s+)?i\b|\bis\s+it\s+true\b|\bhow\s+(?:do|should|would|can|could)\s+i\b|\bdo\s+you\s+think\b|\b(?:have|did)\s+i\s+(?:ever\s+)?(?:told|tell|mention(?:ed)?|say|said)\b|\beven\s+though\b|\bor\s+not\b|\bsuppose\b|\bpretend\b|\blet'?s\s+say\b|^\W*(?:say|imagine|assuming|had)\s+i\b|\b(?:assuming|imagine|hoping|planning)\b|\bidk\b|\bmaybe\b|\bprobably\b|\bwould\s+that\s+be\b|\b(?:would|will|do|did|can|could)\s+(?:you|u|they|employers|recruiters|people)\s+(?:tell|say|think|check|care|know)\b|\b(?:almost|barely|hardly)\b|\byeah\s+right\b|\boh\s+sure\b|\bas\s+if\b|\blol\b|\/s\b/;
-// Round 3: "my <someone> ..." is someone else, whatever the verb ("my girlfriend is a PM at Stripe"); "my GPA is 3.6" is theirs.
-const OWN_NOUN = "gpa|major|minor|school|university|college|degree|visa|goal|title|role|job|experience|internship|skills?|name|email|phone|location|team|work|background|status|graduation|grad|resume|linkedin|github|capstone|club|cert\\w*|clearance|salary|target|thesis|projects?|portfolio|website|masters|bachelors|phd|own|current|last|first|\\d[\\d.]*";
-const REPORTED = new RegExp(String.raw`\b(?:said|says|say|told\s+me|thinks?|claims?|according\s+to|asked)\b|^\W*(?:(?:and|but|also|so)\s+)?(?:my\s+(?!(?:${OWN_NOUN})\b)[a-z]+|the\s+[a-z]+|he|she|they|her|his|their|someone|people)\s+[a-z]+`);
-const I_STATE = /\b(?:i'm|im|i've|ive|i'd|i'll|i)\s+[a-z]|\bmy\s+[a-z0-9 .+#-]{1,40}?\s(?:is|are|was|were|as|=)\s|\bmy\s+\d+(?:\.\d+)?\s+(?:years?|months?|internships?|semesters?)\b/;
-const POLITE = /\b(?:can|could|will|would)\s+(?:you|u)\b|\bplease\b|\bpls\b/;
-const SAVE_THING = /(?:^\W*|\b(?:can|could|will|would)\s+(?:you|u)\s+(?:please\s+|pls\s+)?|\b(?:please|pls)\s+)(?:add|put\s+down|note|jot(?:\s+down)?|log|save|write\s+down|include)\b(?:\s+that)?\s*:?\s+(?!(?:a|an|the|some|something|anything|more|it|this|that|to|what|when|where|how|why|me)\b)(\S.*)$/;
-export function assertedIn(clause: string, ask: boolean): string | null {
-  const c = clause.toLowerCase().replace(/[’‘]/g, "'");
-  if (DOUBT.test(c) || REPORTED.test(c)) return null;
-  if (!ask) return FIRST_PERSON.test(c) ? clause : null;
-  // A bare "add that i know Go?" asks whether to; "can you add that ...?" asks for it.
-  if (/^\W*(?:add|put|note|jot|log|save|write|include|record)\b/.test(c) && /\?\s*$/.test(c) && !POLITE.test(c)) return null;
-  const m = I_STATE.exec(c.replace(ASKED_I, (x) => " ".repeat(x.length)));
-  if (m) return clause.slice(m.index);
-  // A request to save a named thing ("can you add Python and Go to my skills?"); a bare "include my linkedin?" asks whether to.
-  const r = SAVE_THING.exec(c);
-  return r && (POLITE.test(c) || !/\?\s*$/.test(c)) ? clause.slice(c.length - r[1].length) : null;
-}
-export const statedInAsk = (clause: string): boolean => assertedIn(clause, true) !== null;
-export const asksLike = (clause: string): boolean => ASK_START.test(clause.toLowerCase());
 // A clause about something to do now ("I need to lock in", "I have to finish my resume") is a task, not a standing rule.
 export const TODO_CLAUSE = /\bi\s+(?:really\s+)?(?:(?:need|have|got|want|should|must)\s+to|gotta|wanna|gonna)\s+(?!be\b|have\b|work\b|stay\b|keep\b|live\b|avoid\b|get paid\b)[a-z]+/;
 
@@ -340,7 +311,7 @@ export function statesNothing(message: string): boolean {
 }
 // G14 (C6: "have i applied to anything yet?" answered "nothing on record" without reading Gmail): an ask about their own
 // application history reads the record that holds it (read_application_mail) before it is answered.
-const HISTORY_ASK = /\b(?:have|did|had)\s+i\s+(?:already\s+|even\s+|ever\s+)?(?:applied|apply|sent|submitted)\b|\bwhat\s+(?:have|did)\s+i\s+(?:already\s+)?(?:apply|applied|submit(?:ted)?)\b|\bwhere\s+(?:have|did)\s+i\s+(?:already\s+)?(?:apply|applied)\b|\b(?:my|the)\s+applications?\s+(?:so\s+far|history|status|tracker)\b|\b(?:keep|keeping)\s+track\s+of\s+(?:my\s+)?(?:applications?|what\s+i\s+applied)\b|\bhow\s+many\s+(?:applications|places|jobs|roles)\s+(?:have|did)\s+i\b|\bany\s+applications?\s+(?:out|in|pending|sent|submitted|so\s+far|yet|on\s+(?:file|record))\b|\b(?:is|are|was|were)\s+my\s+applications?\b[^?]{0,60}\b(?:in|out|sent|submitted|through|received)\b|\bam\s+i\s+(?:already\s+)?(?:in|applied)\s+(?:for|to|at)\b|\b(?:who|which\s+\w+|what\s+\w+)\s+(?:got|has|have|received)\s+my\s+(?:resume|application)\b|\ban?\s+applications?\s+from\s+me\b|\bapplications?\s+(?:have|did)\s+i\s+(?:sent|send|submit(?:ted)?|put\s+in)\b/;
+const HISTORY_ASK = /\b(?:have|did|had)\s+i\s+(?:already\s+|even\s+|ever\s+)?(?:applied|apply|sent|submitted)\b|\bwhat\s+(?:have|did)\s+i\s+(?:already\s+)?(?:apply|applied|submit(?:ted)?)\b|\bwhere\s+(?:have|did)\s+i\s+(?:already\s+)?(?:apply|applied)\b|\b(?:my|the)\s+applications?\s+(?:so\s+far|history|status|tracker)\b|\b(?:keep|keeping)\s+track\s+of\s+(?:my\s+)?(?:applications?|what\s+i\s+applied)\b|\bhow\s+many\s+(?:applications|places|jobs|roles)\s+(?:have|did)\s+i\b/;
 export function historyAskOf(message: string): boolean { return HISTORY_ASK.test(lc(message)); }
 export function historyNote(): string {
   return "THEY ASKED ABOUT THEIR OWN APPLICATIONS (code read it from their words): call read_application_mail first and answer from what it returns " +
@@ -422,30 +393,128 @@ export function shownPayNote(lines: { text: string; url: string | null }[]): str
 // out of date or must not be used again is a correction of a stored fact. Read by grammar (a staleness or do-not-use phrase in
 // the same sentence as what it names), never by a benchmark's wording (P3). Uncertainty ("might conflict", "not 100% sure") is
 // not a withdrawal.
+// Review of #790 (2026-11-13, BLOCKER; owner must-fix "resume edits never drop experience"; D-007), round 2: code un-confirmed
+// facts on a regex guess ("Please don't put the 2024 hackathon first on my resume" set the Acme internship aside, and it left every
+// resume), and the first fix still acted on clauses inside longer messages. Code now FAILS CLOSED, with two readings:
+//   staleFactsOf        the ONE fact code may set aside, or none: the single shape D70-3 pins and nothing else.
+//     1. The whole message is the statement: one sentence. (One exception, KNOWN-UNSAFE and kept only because a pinned test needs
+//        it: d703ListException, below.)
+//     2. Only plain ASCII letters, digits, spaces and . , : ' %; so no question mark of any script, no quotation mark, no symbol, no
+//        other language. No negation, doubt, reported speech, third party or task word (REFUSE). An apostrophe only inside a word; a
+//        colon only as the lead-in's.
+//     3. The statement is exactly: [the|my] <label> <value> | <value> <label> [on there | on my resume | on the resume] is
+//        outdated | out of date | no longer right|correct|true [, don't|do not reuse|use it]. Any other token refuses.
+//     4. Only a score (SCORE: a GPA or a test score) stored as kind "other", "<Label>: <number>", whose number no other fact holds.
+//        Never a role, project, skill, education, leadership, certification, award, contact, work authorisation or date.
+//   factCorrectionHints the wide reading above, for a NOTE only: storage is untouched, and the model asks or uses
+//                       correct_profile_fact, which waits for the person's yes.
 const STALE = /\b(?:outdated|out[- ]of[- ]date|no longer (?:true|accurate|current|right|valid|correct)|not (?:current|accurate|right|valid) any ?more|isn'?t (?:current|accurate|right) any ?more|(?:don'?t|do not|never|stop|please don'?t) (?:re-?use|use|using|put|include|list|show)\b(?: (?:it|that|this|them))?|is (?:old|stale|wrong) now)\b/;
 const sentencesOf = (t: string) => t.split(/(?<=[.!?;])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
 export function staleFactSaid(message: string): boolean { return sentencesOf(lc(message)).some((s) => STALE.test(s)); }
 export interface StoredFact { id?: unknown; kind?: unknown; text?: unknown; title?: unknown; status?: unknown; needs_confirmation?: unknown }
-// The confirmed facts a stale sentence names: by the label before its colon ("GPA: 3.9" -> "gpa"), or by a figure it carries
-// ("3.9"), said in that same sentence.
+// The closed filler list of the statement (rule 3): the only words allowed beside the fact's label, its value and the statement.
+export const SET_ASIDE_FILLER: readonly string[] = ["the", "my", "on", "there", "resume"];
+const SCORE = new Set(["gpa", "sat", "act", "gre", "gmat", "lsat", "mcat", "toefl", "ielts"]);
+const REFUSE = /\b(?:not|never|no|nope|hardly|maybe|perhaps|if|whether|unless|think|guess|said|says|say|claimed|claims|told|wrote|heard|according|brother|sister|mom|mother|dad|father|friend|recruiter|advisor|professor|his|her|hers|their|theirs|someone|somebody|translate|proofread|rewrite|pretend|imagine|suppose|repeat|kidding|joking|joke|lied|lying|jk|lol)\b|n't\b|n t\b/;
+const LIST_LEAD = "a few things to know: ";
+const WRONG_SAID = /^(.+) is (?:outdated|out of date|no longer (?:right|correct|true))(?:, (?:don't|do not) (?:reuse|use) it)?$/;
+const WRONG = /(?:^|\s)(?:(?:is|are|'s)\s+)?(?:now\s+)?(?:outdated|out[- ]of[- ]date)(?![a-z0-9-])|(?:^|\s)(?:(?:is|are|'s)\s+)?no longer (?:true|accurate|current|right|valid|correct)(?![a-z0-9-])|(?:^|\s)(?:is|are)(?:n'?t| not) (?:true|accurate|current|right|valid|correct) any ?more(?![a-z0-9-])|(?:^|\s)(?:is|are) (?:wrong|old|stale)(?: now)?(?![a-z0-9-])/;
+const tokensOf = (t: string) => t.split(/[\s,;:()]+/).map((w) => w.replace(/^[^a-z0-9+#]+|[^a-z0-9+#]+$/g, "")).filter(Boolean);
+const confirmedFact = (f: StoredFact | null | undefined): f is StoredFact => !!f && f.status !== "draft" && f.status !== "rejected" && f.needs_confirmation !== true;
+// A score fact: kind "other", "<Label>: <number>", the label a score's. Nothing else is ever set aside by code (rule 4).
+function scoreOf(f: StoredFact): { label: string; value: string } | null {
+  const m = /^([a-z]+): (\d+(?:\.\d+)?)$/.exec(String(f.text ?? "").trim().toLowerCase());
+  return m && f.kind === "other" && SCORE.has(m[1]) ? { label: m[1], value: m[2] } : null;
+}
 export function staleFactsOf(message: string, facts: StoredFact[] | null | undefined): StoredFact[] {
-  const ss = sentencesOf(lc(message)).filter((s) => STALE.test(s));
+  const raw = String(message ?? "").trim();
+  if (!/^[A-Za-z0-9 .,:'%]+$/.test(raw) || /(?:^|[^A-Za-z])'|'(?:[^A-Za-z]|$)/.test(raw)) return [];
+  const msg = raw.toLowerCase(), listed = msg.startsWith(LIST_LEAD);
+  const [first, ...rest] = (listed ? msg.slice(LIST_LEAD.length) : msg).split(/(?<=\.) +/);
+  if ((rest.length && !listed) || (msg.match(/:/g) ?? []).length !== (listed ? 1 : 0)) return [];
+  const said = WRONG_SAID.exec(first.replace(/\.$/, ""));
+  if (!said || REFUSE.test(said[1])) return [];
+  const all = (facts ?? []).filter(Boolean);
+  const hits = all.filter((f) => {
+    const s = confirmedFact(f) ? scoreOf(f) : null;
+    if (!s || !new RegExp(`^(?:the |my )?(?:${s.label} ${s.value.replace(".", "\\.")}|${s.value.replace(".", "\\.")} ${s.label})(?: on there| on my resume| on the resume)?$`).test(said[1])) return false;
+    // A number another fact also holds names no one fact.
+    return !all.some((o) => o !== f && `${o.title ?? ""} ${o.text ?? ""}`.toLowerCase().split(/[^a-z0-9.]+/).map((w) => w.replace(/\.+$/, "")).includes(s.value));
+  });
+  if (hits.length !== 1) return [];
+  return !rest.length || d703ListException(rest, scoreOf(hits[0])!, all.filter((o) => o !== hits[0])) ? [hits[0]] : [];
+}
+// KNOWN-UNSAFE. This exception exists ONLY because the pinned test D70-3 (tests/architect/d070-live7-fixes-20261112.test.ts:186, :200)
+// requires a code-side set-aside on a message that is a LIST: "a few things to know: <statement>. <other sentences>". A later
+// sentence can take the statement back in words no list can enumerate ("I am only seeing how you handle messages."), so this can
+// still set a fact aside wrongly. The safe behaviour (the list is a note to the model, nothing set aside by code) is asserted in
+// tests/architect/pending/fact-withdrawal-no-leadin-20261113.test.ts; with the owner's yes to amend D70-3, delete this function and
+// its one call. Until then it is as narrow as D70-3 allows. Every later sentence must:
+//   be a whole sentence of five or more words that starts with I / I'm / my, or with the name another stored fact starts with
+//   ("Rallyup's ...", "Harbor ..."): so no imperative and no question;
+//   hold no negation (unless it starts with another fact's name: D70-3's "Harbor dates ... I'm not 100% sure Crestline's ..."), no
+//   word of keeping, ignoring or not acting, no quantifier or pointer over the earlier items, no word of doubt, jest, test or
+//   reported speech, and not the fact's own label or value.
+const NEGATION = /\b(?:not|no|never|none|nothing|nobody|neither|nor|cannot|dont|wont|cant|isnt)\b|n't\b/;
+const POINTS_BACK = /\b(?:any|all|both|each|every|everything|anything|something|these|those|this|that|it|its|them|one|ones|first|second|last|former|above|earlier|before|previous|prior|item|items|line|lines|list|sentence|sentences|statement|statements|thing|things|part|point|points|message|messages|number|numbers|score|scores|record|profile|file)\b/;
+const TAKES_BACK = /\b(?:keep|keeping|ignore|disregard|leave|undo|cancel|forget|strike|scratch|revert|retract|belay|act|acting|change|changing|hold|wait|stop|drop|prefer|reply|test|tests|testing|practice|sample|example|examples|quiz|typo|typos|spam|quote|quoting|dared|messing|fiction|lie|lies|unsure|mistaken|mistake|back|typed|typing|wrote|write|writing|counselor|teacher|roommate|classmate|wrongly|actually|fine|stay|stays|reflection|thought|oops|sorry|true|false|right|wrong|correct|outdated|confused|anyway|obviously|until|unless|once|when|only)\b/;
+function d703ListException(later: string[], score: { label: string; value: string }, others: StoredFact[]): boolean {
+  const names = new Set(others.map((f) => /^[a-z]{4,}/.exec(String(f.title || f.text || "").toLowerCase())?.[0]).filter(Boolean));
+  return later.every((x) => {
+    const words = x.replace(/\.$/, "").split(/[ ,]+/), first = words[0].replace(/'s$/, ""), named = names.has(first);
+    if (!x.endsWith(".") || words.length < 5 || !(named || ["i", "i'm", "my"].includes(words[0]))) return false;
+    if (REFUSE.test(named ? x.replace(/\bnot\b/g, " ") : x) || (!named && NEGATION.test(x)) || POINTS_BACK.test(x) || TAKES_BACK.test(x)) return false;
+    return !words.some((w) => w === score.label || w.replace(/\.+$/, "") === score.value);
+  });
+}
+// The wide reading, for the note only: a confirmed fact named (its label before the colon, a figure it carries) in a sentence with
+// a staleness or do-not-use phrase, or named by a word only its title has in a sentence saying something is wrong or out of date.
+// `byTitle` false keeps the routing reading what it was before the review (label or figure only).
+export function factCorrectionHints(message: string, facts: StoredFact[] | null | undefined, byTitle = true): StoredFact[] {
+  // An ask to take something off their profile or record is read here too (for the note): code never acts on it.
+  const ss = sentencesOf(lc(message)).filter((s) => STALE.test(s) || /\b(?:remove|delete|take) .{1,80}? (?:from|off|out of) my (?:profile|record)\b/.test(s));
   if (!ss.length) return [];
+  const all = (facts ?? []).filter(confirmedFact), set = staleFactsOf(message, facts);
+  const wrong = ss.filter((s) => WRONG.test(s)).map((s) => tokensOf(s));
+  const titleWords = (f: StoredFact) => tokensOf(lc(f.title || f.text)).filter((w) => /^[a-z]{4,}$/.test(w) && !SET_ASIDE_FILLER.includes(w));
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const out: StoredFact[] = [];
-  for (const f of facts ?? []) {
-    if (!f || f.status === "draft" || f.needs_confirmation === true) continue;
+  for (const f of all) {
     const t = lc(f.title || f.text);
-    if (!t) continue;
-    const label = /^([a-z][a-z .'-]{1,30}):/.exec(t)?.[1]?.trim() ?? null;
+    if (!t || set.includes(f)) continue;
+    // Its label: before the colon of its title or of its text (the resume reader stores "GPA 3.9" with the text "GPA: 3.9").
+    const labels = [t, lc(f.text)].map((x) => /^([a-z][a-z .'-]{1,30}):/.exec(x)?.[1]?.trim()).filter((x): x is string => !!x);
     const figs = (t.match(/\d+(?:\.\d+)?/g) ?? []).filter((x) => x.includes(".") || x.length >= 3);
-    const named = (s: string) => (label && new RegExp(`(?<![a-z])${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![a-z])`).test(s)) || figs.some((x) => new RegExp(`(?<![\\d.])${x.replace(/\./g, "\\.")}(?![\\d])`).test(s));
-    if (ss.some(named)) out.push(f);
+    const named = (s: string) => labels.some((l) => new RegExp(`(?<![a-z])${esc(l)}(?![a-z])`).test(s)) || figs.some((x) => new RegExp(`(?<![\\d.])${esc(x)}(?![\\d])`).test(s));
+    const mine = titleWords(f).filter((w) => !all.some((o) => o !== f && titleWords(o).includes(w)));
+    if (ss.some(named) || (byTitle && wrong.some((ws) => mine.some((w) => ws.includes(w))))) out.push(f);
   }
   return out;
 }
 export function staleFactNote(lines: string[]): string {
-  return "THEY SAID A FACT ON THEIR RECORD IS OUT OF DATE (code read it from their words, and code has already set it aside: it is no longer used for anything, and stays off every resume, answer and form until they give a current one): " +
-    lines.map((l) => JSON.stringify(l)).join(", ") + ". Say so in one short clause (for example that it is off their record and won't be used), never call it still on file or still usable, and answer the rest of their message.";
+  return "THEY SAID A FACT ON THEIR RECORD IS OUT OF DATE (code read it from their words, and code has already set it aside: it is not deleted, it is no longer used for anything, and stays off every resume, answer and form until they give a current one or ask for it back): " +
+    lines.map((l) => JSON.stringify(l)).join(", ") + ". Code itself tells them which fact was set aside, in its own line at the top of your reply: do not say it again, do not mention that fact or its value, and never call it still on file or still usable. Answer the rest of their message. " +
+    "If they later want it back, call confirm_profile_fact with its id: code then asks them, and puts it back on their yes.";
+}
+// Review of #790 (round 3): putting a set-aside fact back. The question is CODE's, in one fixed positive form, asked only through
+// confirm_profile_fact (career_tools.ts), which also sets the marker (restore_ask, the fact's id, in that message's meta). A yes
+// counts only as the whole answer to that question: a plain affirmative, nothing else in the message.
+export const RESTORE_ASK_INTENT = "career_fact_restore_ask";
+export const restoreQuestion = (fact: string) => `Is this right again: "${fact}"? Reply yes to put it back on your record, or no to leave it set aside.`;
+export function plainAnswer(message: unknown): "yes" | "no" | null {
+  const m = String(message ?? "").trim().toLowerCase().replace(/[.! ]+$/, "");
+  if (/^(?:yes|yep|yeah|yup|y|sure|ok|okay|correct|right|confirm|confirmed|true|please do|that's right|thats right)(?: please| it is| that's right| thats right| put it back| it's right| its right)?$/.test(m)) return "yes";
+  return /^(?:no|nope|nah|n|not yet|leave it|leave it off|leave it set aside|keep it off)(?: thanks| thank you| leave it| leave it off| leave it set aside)?$/.test(m) ? "no" : null;
+}
+export function restoreAnswerNote(answer: "yes" | "no", id: string, fact: string): string {
+  return answer === "yes"
+    ? `THEY ANSWERED YES to code's question whether the fact ${JSON.stringify(fact)} (id ${id}), which they had set aside, is right again. Call confirm_profile_fact with id ${id} now, then say in one short sentence that it is back on their record.`
+    : `THEY ANSWERED NO to code's question whether the fact ${JSON.stringify(fact)} (id ${id}), which they had set aside, is right again. Change nothing: say in one short sentence that it stays set aside and is not used.`;
+}
+export function factCorrectionNote(lines: string[]): string {
+  return "THEY MAY BE CORRECTING A FACT ON THEIR RECORD (code only matched words; nothing was changed, and every fact below is still confirmed and still used): " +
+    lines.map((l) => JSON.stringify(l)).join(", ") + ". Read their message. If it says one of these is wrong or out of date and gives the right version, use correct_profile_fact; if it gives none, or you cannot tell which fact they mean, ask one short question naming the fact. " +
+    "If the message is about something else (where a line goes on a resume, a posting, a document, someone else's advice, a question), this note does not apply: answer the message. Never say a fact was removed, set aside or changed unless a tool did it this turn.";
 }
 
 // G2 / G3 / G12 (practice item 11: practice questions ran 300 to 500 characters and reviews opened with something other than the

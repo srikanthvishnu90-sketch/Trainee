@@ -108,3 +108,43 @@ export async function ledgerSpentUsd(gate: { status?: () => Promise<{ total: num
   const st = await gate.status();
   return st ? st.total / 1e6 : null;
 }
+
+// ---- live runners outside run.ts (real-sets research/people, mirror run-trainee, mirror held-out live) ------------------------
+// Each one, when --live, goes through the SAME shared ledger as run.ts (model_budget.ts resolveBudgetGate with EVAL_LEDGER=shared,
+// so never the process-local twin): the run's whole cap is reserved before the first model call and settled to the metered cost
+// at the end (also on error; an unknown cost settles as the whole cap). Refused (no model call): a cap above LIVE_RUN_MAX_USD, an
+// approval that is not a row of docs/architect/DECISIONS.md, a missing or unreachable ledger, a refused reservation. In GitHub
+// Actions too the runner reserves and settles its own cap (the workflow gives the run step the ledger secrets): a reservation id
+// handed in from outside is never trusted, since the ledger has no narrow read of one reservation to check it against.
+export const LIVE_RUN_MAX_USD = 10;
+const DECISIONS_URL = new URL("../../docs/architect/DECISIONS.md", import.meta.url);
+export function approvalRowExists(approval: string, decisions: string): boolean {
+  if (!/^D-\d{3}[a-z]?$/.test(approval)) return false;
+  return decisions.split("\n").some((l) => l.startsWith(`| ${approval} |`));
+}
+export interface LiveLedger { id: string; settle(spentUsd: number | null): Promise<boolean> }
+type LedgerGate = { reserve: (m: number, meta?: any) => Promise<{ ok: boolean; id?: string; reason?: string; detail?: string }>; settle: (id: string, actual: number | null) => Promise<boolean>; status?: () => Promise<{ total: number } | null> };
+export async function openLiveRunLedger(o: { budgetUsd: number; approval: string; get: (k: string) => string | undefined;
+  bud: { resolveBudgetGate: (explicit: undefined, get: (k: string) => string | undefined) => unknown }; decisions?: string; model?: string }): Promise<LiveLedger | { error: string }> {
+  if (!(o.budgetUsd > 0 && o.budgetUsd <= LIVE_RUN_MAX_USD)) return { error: `--budget-usd must be above 0 and at most ${LIVE_RUN_MAX_USD} (the per-run maximum)` };
+  let decisions = o.decisions;
+  if (decisions === undefined) { try { decisions = await Deno.readTextFile(DECISIONS_URL); } catch (_) { decisions = ""; } }
+  if (!approvalRowExists(o.approval, decisions)) return { error: `the approval "${o.approval}" is not a row of docs/architect/DECISIONS.md` };
+  const shared = (k: string) => k === "EVAL_LEDGER" ? "shared" : o.get(k);
+  const gate = o.bud.resolveBudgetGate(undefined, shared) as LedgerGate | null;
+  if (!gate) {
+    const missing = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"].filter((k) => !String(o.get(k) ?? "").trim());
+    return { error: `the shared budget ledger cannot be opened (${missing.length ? `missing: ${missing.join(", ")}` : "MODEL_BUDGET_* is malformed"}); a run that is not counted in the one total does not start` };
+  }
+  const st = gate.status ? await gate.status() : null;
+  if (!st) return { error: "the shared budget ledger is unreachable or unreadable; no model call is made" };
+  const r = await gate.reserve(Math.ceil(o.budgetUsd * 1e6), { model: o.model ?? "claude-sonnet-5-5", role: "eval" });
+  if (!r.ok || !r.id) return { error: `the shared ledger refused the cap $${o.budgetUsd} (recorded $${(st.total / 1e6).toFixed(4)}): ${r.reason ?? "refused"}${r.detail ? ` (${r.detail})` : ""}` };
+  const id = r.id;
+  let done = false;
+  return { id, settle: async (spentUsd) => {
+    if (done) return true;
+    done = true;
+    return await gate.settle(id, spentUsd === null || !Number.isFinite(spentUsd) ? null : Math.ceil(Math.max(0, spentUsd) * 1e6));
+  } };
+}

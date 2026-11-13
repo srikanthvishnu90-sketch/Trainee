@@ -13811,15 +13811,19 @@ const CareerRouter = (() => {
     }
     return d[a.length][b.length] <= 1;
   }
-  const NOT_A_SLIP = new Set(["remove", "removed", "poster", "posters", "dates", "date", "dais", "week's"]);
-  const slipWords = (text) => lc(text).split(/[^a-z]+/).filter((w) => w && !NOT_A_SLIP.has(w));
-  const saidWord = (words, target) => words.some((w) => oneSlip(w, target));
+  const LIMIT_REMOTE_RE = /\b(?:remote|remoet|reomte|rmote|remtoe)\b(?![- ](?:sensing|control|pilot|monitoring)\b|\.[a-z])/;
+  const LIMIT_ONLY_RE = /\b(?:only|fully|fuly|fulyl)\b/;
+  const LIMIT_HYBRID_RE = /\b(?:hybrid|hybrdi|hyrbid|hybird|hbyrid)\b(?![- ](?:cloud|car|cars|vehicle|vehicles|app|apps)\b)/;
+  const LIMIT_ONSITE_RE = /\b(?:on[- ]?site|onsight|in[- ](?:the[- ])?office|in[- ]person|office days?|office[- ]based)\b/;
+  const LIMIT_NO_OFFICE_RE = /\b(?:no|not|zero|without|never)\b[^.,;!?]{0,20}\b(?:on[- ]?site|onsight|in[- ](?:the[- ])?office|in[- ]person|office days?)\b/;
+  const LIMIT_RECENT_RE = /\b(?:posted|potsed|psoted|posed|listed)\s+(?:recently|today|yesterday|this week|within\b|in the (?:last|past|lasst)\b|(?:the )?(?:last|past|lasst)\b)|\b(?:recently|newly|freshly|just) (?:posted|listed)\b|\b(?:from|in|within|over)\s+(?:the\s+)?(?:last|past|lasst)\s+(?:\w+\s+)?(?:weeks?|days?|dyas|dayss|24 hours|month)\b|\b(?:recent|fresh|new) (?:postings|posts|listings|openings)\b/;
   function statedSearchLimits(text) {
-    const w = slipWords(text), t = lc(text), out = [];
-    if (saidWord(w, "remote")) out.push(/(?:only|fully)/.test(t) || saidWord(w, "only") ? "remote only" : "remote");
-    if (saidWord(w, "hybrid")) out.push(saidWord(w, "onsite") || saidWord(w, "office") ? "hybrid, not fully onsite" : "hybrid");
-    else if (saidWord(w, "onsite") || saidWord(w, "office")) out.push(/no/.test(t) ? "no office days" : "onsite");
-    if (saidWord(w, "posted") || saidWord(w, "fresh") || saidWord(w, "recent") || saidWord(w, "recently") || /(?:last|past)\s+(?:\w+\s+)?(?:week|days?|dyas|dayss)/.test(t)) out.push("posted recently");
+    const t = lc(text), out = [];
+    if (LIMIT_REMOTE_RE.test(t)) out.push(LIMIT_ONLY_RE.test(t) || /\bremote[- ]only\b/.test(t) ? "remote only" : "remote");
+    const onsite = LIMIT_ONSITE_RE.test(t);
+    if (LIMIT_HYBRID_RE.test(t)) out.push(onsite ? "hybrid, not fully onsite" : "hybrid");
+    else if (onsite) out.push(LIMIT_NO_OFFICE_RE.test(t) ? "no office days" : "onsite");
+    if (LIMIT_RECENT_RE.test(t)) out.push("posted recently");
     return out;
   }
   function emptySearchScope(lp, o, namedRole) {
@@ -13876,8 +13880,8 @@ const CareerRouter = (() => {
       const namedRole = !o.headline && lp.ask === s(text).slice(0, 200) && (!!s(lp.whereText) && /\bin\s+[A-Z]/.test(s(text)) || /\b(?:analyst|engineer|developer|designer|scientist|coordinator|manager|intern|associate|consultant|marketing|product|data|finance|financial|software|ux|operations|sales|nurse|teacher)\b/i.test(s(lp.roleText)));
       const scope = emptySearchScope(lp, o, namedRole);
       const facts = [scope ? "I checked the postings I have on hand and found no open roles for that (career sites outside them were not checked), and I won't make any up."   : namedRole ? "I won't make any up." : "I have no open roles on my list right now, and I won't make any up."];
-      const kept = statedSearchLimits(text);
-      if (kept.length) facts.push(`I kept your limits: ${kept.join("; ")}.`);
+      const asked = statedSearchLimits(text);
+      if (asked.length) facts.push(`You asked for ${asked.join("; ")}; no limit was applied, since there were no postings to apply it to.`);
       if (fams && fams.length) facts.push(`I've kept your ask (${fams.map(familyLabel).join(" + ")}) and will run it as soon as matching roles come in.`);
       const newPerson = !(profile && (profile.facts || []).length);
       const widen = scope && lp.whereText && !lp.remoteOnly ? `Want me to look beyond ${lp.whereText}, remote roles included?` : null;
@@ -16937,6 +16941,13 @@ const CareerRouter = (() => {
     return null;
   }
 
+  const BULK_APPLY_RE = /\b(?:apply|submit|send in)\b(?:\s+(?:for me|my applications?|applications?))?(?:\s+(?:to|for|on))?\s+(?:all|every|everything|each|\d{2,})\b/g;
+  const BULK_NEGATED_RE = /\b(?:don'?t|dont|do not|never|not|no|no need to|stop)\s+(?:(?:just|even|actually|ever|yet|really|go|ahead|and)\s+){0,2}$/;
+  function bulkApplyAsked(t) {
+    BULK_APPLY_RE.lastIndex = 0;
+    for (let m = BULK_APPLY_RE.exec(t); m; m = BULK_APPLY_RE.exec(t)) if (!BULK_NEGATED_RE.test(t.slice(0, m.index))) return true;
+    return false;
+  }
   function handleRefusal(text, ctx) {
     const t = lc(text);
     const falseClaim = /\b(say|claim|tell|pretend|imply)\b[^.]*\b(sent me|referred me|told me to reach out|recommended me)\b/.test(t);
@@ -16957,11 +16968,11 @@ const CareerRouter = (() => {
       } catch { claimOnRecord = false; }
     }
     const unverifiedClaim = materialImperative && (claimToken || admission) && (admission || !claimOnRecord);
-    const noReview = /\b(automatically|while i sleep|tonight|right now|don'?t need to see|no review|without (me|my) (seeing|reviewing)|just do it|all of them|don'?t ask)\b/.test(t);
+    const noReview = /\b(automatically|while i sleep|tonight|right now|don'?t need to see|no review|without (me|my) (seeing|reviewing)|just do it|all of them|don'?t ask|(?:don'?t|do not) care)\b/.test(t);
     const barePluralMass = /\b(applications|jobs|roles)\b/.test(t) && noReview && !/\?\s*$/.test(t) && !/^(did|have|has|do|does|were|was|are)\b/.test(t);
     const massObject = /\b(everything|every job|all jobs|all of them|every role|all roles)\b/.test(t) || /\b(\d{2,})\s*(jobs|applications|roles)\b/.test(t) || barePluralMass;
     const massCount = Number((t.match(/\b(\d{2,})\s*(jobs|applications|roles)\b/) || [])[1]) || 0;
-    const applyAsked = /\b(apply|submit|send in)\b/.test(t.replace(/\b(?:don'?t|do not|never|not|no|nothing)\s+(?:\w+\s+){0,3}?(?:apply|submit|send in)\b[^.;:!?]*/g, " "));
+    const applyAsked = /\b(apply|submit|send in)\b/.test(t.replace(/\b(?:don'?t|do not|never|not|no|nothing)\s+(?:\w+\s+){0,3}?(?:apply|submit|send in)\b[^.;:!?]*/g, " ")) || bulkApplyAsked(t);
     const massApply = applyAsked && massObject && (noReview || massCount >= 50);
     const dismissal = /\b(nobody|no one)\s+(checks|verifies|verified|will (check|verify|verified|find out|know))\b|\bthey (never|don'?t)\s+(check|verify|verified)\b|\bnever (checked|verified)\b/.test(t);
     const dismissalFabricate = dismissal && /\b(add|put|write|include)\b/.test(t);
@@ -25680,7 +25691,7 @@ const CareerRouter = (() => {
       if (m && m.resumeIngest && typeof m.resumeIngest === "object" && intent !== "career_resume_ingest") m.resumeIngest.stale = true;
     } catch {   }
   }
-  return { handleChat, noteServedTurn, handleStateChangeIntents, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf,
+  return { handleChat, noteServedTurn, handleStateChangeIntents, statedSearchLimits, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf,
     _d6Full: rankedShortlistFull, scoredCount, _c01NameMatch: { ltLexicon, ltFormMatches, ltEsc, ltPlain, ltClean, ltIsPlace, ltIsSchool, postingsFromCtx } };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerRouter;
@@ -27006,6 +27017,108 @@ const CareerRender = (() => {
     { re: /\[[^\]]{1,40}\]/, label: "bracketed placeholder [..]" }, { re: /\bTBD\b/, label: "TBD" },
     { re: /\bXXX+\b/, label: "XXX" }, { re: /placeholder/i, label: "the word 'placeholder'" },
   ];
+  const EMAIL_TOKEN_RE = /[^\s|,;<>()\[\]{}]+@[^\s|,;<>()\[\]{}]+/g;
+  const RESERVED_TLDS = new Set(["invalid", "localhost", "example", "local", "tld"]);
+  const DOUBTFUL_LOCALS = new Set(["you", "your", "name", "yourname", "myname", "fullname", "yourfullname", "firstname", "lastname", "firstlast", "firstnamelastname", "youremail", "myemail", "email", "emailaddress", "user", "username", "test", "johndoe", "janedoe"]);
+  const LABEL_RE = /^[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?$/u;
+  const mixedScript = (x) => /[a-z]/i.test(x) && /[Ͱ-ϿЀ-ԯ]/.test(x);
+  function placeholderEmail(v) {
+    const raw = String(v == null ? "" : v), s = raw.trim().toLowerCase();
+    if (!s) return "missing";
+    if (/[\[\]<>{}]/.test(s) || /email\s+protected/.test(s)) return "template text, not an email address";
+    const at = s.indexOf("@"), local = s.slice(0, at), domain = s.slice(at + 1), labels = domain.split("."), tld = labels[labels.length - 1];
+    const okLocal = at > 0 && /^[\p{L}\p{N}!#$%&'*+\/=?^_`|~.-]+$/u.test(local) && !/^\.|\.$|\.\./.test(local);
+    const okDomain = labels.length >= 2 && labels.every((l) => LABEL_RE.test(l)) && (/^\p{L}{2,}$/u.test(tld) || /^xn--[a-z0-9-]+$/.test(tld));
+    if (/[\s​-‏⁠﻿＀-￯。]/.test(raw.trim()) || s.indexOf("@", at + 1) >= 0 || !okLocal || !okDomain || mixedScript(local) || labels.some(mixedScript)) return "not a valid email address";
+    const reg = labels.length >= 3 && tld.length === 2 && ["co", "com", "org", "net", "ac", "edu", "gov"].includes(labels[labels.length - 2]) ? labels[labels.length - 3] : labels[labels.length - 2];
+    if (RESERVED_TLDS.has(tld) || (tld !== "test" && labels.slice(0, -1).includes("example") && (reg === "example" || labels[labels.length - 2] === "example"))) return `on a reserved domain that cannot receive mail (${domain})`;
+    return null;
+  }
+  function doubtfulEmail(v) {
+    const s = String(v == null ? "" : v).trim().toLowerCase();
+    if (placeholderEmail(s)) return null;
+    const local = s.slice(0, s.indexOf("@")).replace(/\+.*$/, "").replace(/[._-]+/g, "");
+    return DOUBTFUL_LOCALS.has(local) ? `the stand-in a template prints (${s.slice(0, s.indexOf("@"))}@)` : null;
+  }
+  function placeholderPhones(text, opts) {
+    const file = !!(opts && opts.file), s = String(text == null ? "" : text).replace(EMAIL_TOKEN_RE, " ").replace(/\b(?:https?:\/\/|www\.)\S+|\b[\w-]+(?:\.[\w-]+)+\/\S*/gi, " "), out = [];
+    for (const m of s.matchAll(/(?:\(\s*([xXnNdD#])\1{2}\s*\)|(?<![A-Za-z#])([xXnNdD#])\2{2})[\s.-]*([xXnNdD#])\3{2}[\s.-]*([xXnNdD#])\4{3}(?![A-Za-z#])/g)) out.push(m[0]);
+    for (const m of s.matchAll(/[\[<{]+\s*(?:phone|mobile|tel)[^\]>}|]*[\]>}]+|\bphone number\b/gi)) out.push(m[0]);
+    for (const m of s.matchAll(/(?<![\d$.,@\w\/=_-])\+?\(?\d[\d\s().-]{4,}\d(?![\d%\w@])(?:\s*\(TEST\))?/g)) {
+      const fixture = /\(TEST\)$/.test(m[0]), t = m[0].replace(/\s*\(TEST\)$/, "").trim(), d = t.replace(/\D/g, ""), plus = t[0] === "+";
+      const nanp = plus ? (d[0] === "1" ? d.slice(1) : null) : d.length === 11 && d[0] === "1" ? d.slice(1)
+        : d.length === 10 && /^[2-9]/.test(d) && /^\(?\d{3}\)?[\s.-]*\d{3}[\s.-]*\d{4}$/.test(t) ? d : null;
+      const counting = (x) => x.length >= 7 && ("01234567890123456789".includes(x) || "98765432109876543210".includes(x));
+      let bad = false;
+      if (fixture && plus && /^155501\d\d$/.test(d)) continue;
+      if (/^155501\d\d$/.test(d) && plus) bad = true;
+      else if (/^55501\d\d$/.test(d)) bad = true;
+      else if (d.length >= 7 && /^(\d)\1+$/.test(d)) bad = true;
+      else if (counting(d) || (nanp && counting(nanp))) bad = true;
+      else if (nanp !== null) bad = nanp.length !== 10 ? !file : /^555|^\d{3}55501|^\d{3}0{7}$|^\d{3}1234567$|^(\d)\1{2}(\d)\2{2}(\d)\3{3}$/.test(nanp);
+      else if (d.length > 15 || (plus && d[0] === "0")) bad = !file;
+      else bad = /^(?:44|0)(?:7700900|2079460)\d{3}$/.test(d) || /^(?:61|0)49157015\d$/.test(d);
+      if (bad) out.push(t);
+    }
+    return out;
+  }
+  const TEMPLATE_TEXT_RE = /\[[^\]\n]{0,40}\]|<[^>\n]{1,40}>|\{\{?[^}\n]{0,40}\}?\}|\byour[\s._-]?(?:name|city|email|phone|address|linkedin|github)\b|\byourname\b|\b(?:first|last)\s?name\b|\bcity,\s*(?:state|st)\b|\bphone(?:\s+number)?\s*(?:$|\|)|\/in\/(?:username|yourname|your-name)\b/i;
+  function contactProblems(header, opts) {
+    const h = header || {}, out = [], own = String(h.email == null ? "" : h.email).trim().toLowerCase();
+    const checked = new Set(((opts && opts.checked) || []).map((x) => String(x).trim().toLowerCase()));
+    const email = (value) => {
+      const why = placeholderEmail(value), doubt = why ? null : doubtfulEmail(value);
+      if (why) out.push({ field: "email", value, why, level: "refuse" });
+      else if (doubt && !checked.has(value)) out.push({ field: "email", value, why: doubt, level: "confirm" });
+    };
+    email(own);
+    const rest = [h.contactLine, h.linksLine, h.location, h.phone].filter((x) => typeof x === "string").join(" | ");
+    for (const m of rest.match(EMAIL_TOKEN_RE) || []) if (m.toLowerCase().replace(/^mailto:/, "") !== own || /^mailto:/i.test(m)) email(m.toLowerCase());
+    for (const p of placeholderPhones(rest)) out.push({ field: "phone", value: p, why: "a placeholder or incomplete number", level: "refuse" });
+    const tpl = TEMPLATE_TEXT_RE.exec(rest.replace(EMAIL_TOKEN_RE, " "));
+    if (tpl) out.push({ field: "contact line", value: tpl[0].replace(/\s*\|$/, ""), why: "a template's own text, not their details", level: "refuse" });
+    return out;
+  }
+  const FILE_TEXT_RE = /[\p{L}\p{N}\s.,;:'"’‘“”()\[\]\-–—@+\/|&%$#·•*!?_~]/gu;
+  function printableLine(l) {
+    const s = String(l == null ? "" : l);
+    if (!s.trim() || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f�]/.test(s)) return false;
+    return (s.match(FILE_TEXT_RE) || []).length / s.length >= 0.9;
+  }
+  const WELL_FORMED = (e) => placeholderEmail(e) === null || /reserved domain/.test(String(placeholderEmail(e)));
+  function contactLike(line) {
+    return line.split(/\s[|·•]\s|\s{2,}|\t/).every((part) => part.replace(EMAIL_TOKEN_RE, " ").replace(/\+?\(?\d[\d\s().-]{5,}\d/g, " ")
+      .replace(/\b(?:https?:\/\/|www\.)\S+|\b[\w-]+(?:\.[\w-]+)+\/\S*/gi, " ").split(/\s+/).filter((w) => /[\p{L}]/u.test(w)).length <= 3);
+  }
+  function fileContactRead(lines, opts) {
+    const all = (lines || []).map((l) => String(l == null ? "" : l)).filter(printableLine).map((l) => l.trim());
+    const confirmed = ((opts && opts.confirmed) || []).map((x) => String(x).trim().toLowerCase()).filter(Boolean);
+    const contact = all.filter((l) => contactLike(l) && (/[^\s|,;<>()\[\]{}]+@[^\s|,;<>()\[\]{}]+/.test(l) || TEMPLATE_TEXT_RE.test(l.replace(EMAIL_TOKEN_RE, " "))));
+    const emails = [], out = [];
+    for (const l of contact) for (const raw of l.match(EMAIL_TOKEN_RE) || []) {
+      let e = raw.replace(/[.,;:]+$/, "");
+      if (!WELL_FORMED(e)) {
+        const at = all.indexOf(l), near = [all[at - 1], all[at + 1]].filter(Boolean);
+        const mended = near.map((n) => /^[.@]/.test(e) ? `${(/[\p{L}\p{N}._%+'-]+$/u.exec(n) || [""])[0]}${e}` : `${e}${(/^[\p{L}\p{N}.-]+/u.exec(n) || [""])[0]}`).find(WELL_FORMED);
+        if (!mended) continue;
+        e = mended;
+      }
+      emails.push(e.toLowerCase());
+    }
+    for (const e of emails) { const w = placeholderEmail(e); if (w) out.push({ field: "email", value: e, why: w, level: "refuse" }); }
+    const real = emails.filter((e) => !placeholderEmail(e));
+    if (confirmed.length && real.length && !real.some((e) => confirmed.includes(e))) out.push({ field: "email", value: real[0], why: `not the email they confirmed (${confirmed[0]})`, level: "refuse" });
+    for (const l of contact) {
+      for (const p of placeholderPhones(l, { file: true })) out.push({ field: "phone", value: p, why: "a placeholder number", level: "refuse" });
+      const tpl = TEMPLATE_TEXT_RE.exec(l.replace(EMAIL_TOKEN_RE, " "));
+      if (tpl) out.push({ field: "contact line", value: tpl[0].replace(/\s*\|$/, ""), why: "a template's own text, not their details", level: "refuse" });
+    }
+    return { status: out.length ? "unconfirmed" : real.length ? "ok" : "unread", problems: out, emails };
+  }
+  const fileContactProblems = (lines, opts) => fileContactRead(lines, opts).problems;
+  const contactReason = (p) => p.level === "confirm"
+    ? `the ${p.field} at the top of the resume (${p.value}) is ${p.why}: it needs the person to confirm it is theirs before this resume is ready to submit`
+    : `the ${p.field} at the top of the resume (${p.value || "none"}) is ${p.why}: the ${p.field} is not confirmed, so this resume is not ready to submit`;
   const NUMERIC_DATE_RES = [/\b\d{1,2}\/\d{4}\b/g, /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g, /\b\d{4}-\d{2}(?:-\d{2})?\b/g, /\b\d{1,2}-\d{4}\b/g];
   function diffSequences(expected, actual) {
     const exp = [...expected], act = [...actual];
@@ -27044,6 +27157,7 @@ const CareerRender = (() => {
       }
     }
 
+    if (resume) for (const p of contactProblems(resume.header)) if (p.why !== "missing" && p.level === "refuse") add("contact_unconfirmed", "fail", contactReason(p));
     if (expected) {
       const seenLine = new Set();
       for (const l of expected) {
@@ -27156,7 +27270,7 @@ const CareerRender = (() => {
 
   const runtime = { zlib: !!rt.zlib, crypto: !!rt.crypto, Buffer: !!Buffer, codec: rt.zlib && rt.crypto ? "platform" : zlib && crypto ? "vendored" : "none" };
   const primitives = { zipBuffer, unzipParts, encodeWinAnsi, pdfLiteral, escXml, deflate: (b) => zlibDeflateFixed(Bytes.from(b)), bytes: (x, enc) => Bytes.from(x, enc), concat: (xs) => Bytes.concat(xs) };
-  return { primitives, renderPdf, renderDocx, parseCheck, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
+  return { primitives, renderPdf, renderDocx, parseCheck, placeholderEmail, doubtfulEmail, placeholderPhones, contactProblems, fileContactProblems, fileContactRead, contactReason, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
   }
   return make(NODE_RUNTIME);
 })();

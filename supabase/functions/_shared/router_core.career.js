@@ -13811,7 +13811,7 @@ const CareerRouter = (() => {
     }
     return d[a.length][b.length] <= 1;
   }
-  const LIMIT_REMOTE_RE = /\b(?:remote|remoet|reomte|rmote|remtoe)\b(?![- ](?:sensing|control|pilot|monitoring)\b)/;
+  const LIMIT_REMOTE_RE = /\b(?:remote|remoet|reomte|rmote|remtoe)\b(?![- ](?:sensing|control|pilot|monitoring)\b|\.[a-z])/;
   const LIMIT_ONLY_RE = /\b(?:only|fully|fuly|fulyl)\b/;
   const LIMIT_HYBRID_RE = /\b(?:hybrid|hybrdi|hyrbid|hybird|hbyrid)\b(?![- ](?:cloud|car|cars|vehicle|vehicles|app|apps)\b)/;
   const LIMIT_ONSITE_RE = /\b(?:on[- ]?site|onsight|in[- ](?:the[- ])?office|in[- ]person|office days?|office[- ]based)\b/;

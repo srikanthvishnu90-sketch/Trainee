@@ -283,16 +283,16 @@ const CareerHost = (() => {
   const BOUNDARY_RE = /\b(?:don'?t|do not|dont)\s+(?:contact|message|email|reach out to|text)\s+anyone\b|\bleave (?:everything|it all|them|it|all of it) unsent\b|\b(?:don'?t|do not|dont)\s+send\s+(?:anything|any of (?:it|them))\b|\b(?:don'?t|do not|dont)\s+start\s+(?:any(?:thing)?\s+)?new(?:\s+work)?\b/i;
   // MIRROR-1000 gaps (2026-11-11): "Don't send anything yet: get that over to Marcus" hands a message to someone; the guard
   // holds the send, and the hand-off is the ask (it is not a stop).
-  const ASK_WORD_RE = /\b(?:find|search|look for|look up|dig up|pull up|get me|show me|give me|apply to|draft|write|tell me about|what'?s|what is|how)\b|\b(?:research only|just research)\b/i;
+  // An ask for work beside a boundary: the boundary limits that ask (D-061 G1/G6) and is not a stop. A request verb ("find",
+  // never "find out"; "draft", "research", a sentence that starts "list"), an advice question about what to say ("what should I
+  // say to Leo?"), or a question for jobs, people or company research ("who at Airbnb could refer me?", "which companies are
+  // hiring analysts?", "what's Stripe like to work for?").
+  const ASK_WORD_RE = /\bfind\b(?!\s+out\b)|\b(?:search|look for|look up|dig up|pull up|get me|show me|give me|apply to|draft|write|tell me about|research)\b|(?:^|[.!?;,:]\s*)(?:list|name)\b|\b(?:what|how) (?:should|do|can|could|would) i\b/i;
   const HANDOFF_RE = /\b(?:[Ss]end|[Gg]et|[Ff]orward|[Pp]ass)\s+(?:it|this|that|them)\s+(?:over\s+|along\s+|on\s+)?to\s+[A-Z]/;
-  // D-061 G1/G6: a boundary phrase beside an ask ("who are some alumni at X? names and roles, don't reach out to anyone",
-  // "find 3 grads ..., research only, don't message anyone") limits that ask; it is not a stop.
-  // Review 2026-11-13 (fail closed): the boundary is read first and wins over these weaker ask words. They count only in a
-  // sentence that holds no boundary, and only as a real question or request there: "Don't send any of them.", "Leave everything
-  // unsent, I don't want any of it going out." and "Do not message anyone, I'm reconsidering which jobs I want" are holds (they
-  // were before #778), while "who are some alumni at Stripe? names and roles, don't reach out to anyone" stays a people search.
-  // A trailer of three words or fewer ("Any questions?") is not an ask.
-  const ASK_MORE_RE = /^\W*(?:who|which|where|when|why|list|names?|give me|research|look up|pull up)\b|\b(?:list|names|give me|research|look up|pull up)\b/i;
+  const WORK_QUESTION_RE = /\b(?:jobs?|roles?|internships?|openings|positions|hiring|like to work|alumni|grads|recruiters?|hiring managers?|contacts|connections|refer(?:ral)?)\b|\bwho (?:are some|at|from|works?|could|can|might)\b/i;
+  // Review 2026-11-13 round 2 (fail closed): a boundary sentence is a hold. A question about state beside it ("don't send
+  // anything. which ones are still pending?", "Don't email anyone. Why did you queue those?") never cancels it; only a real ask
+  // for work does (above), and a question counts as one only when it asks for jobs, people or company research.
   const NEGATED_RE = /\b(?:don'?t|do not|dont|never|no need to)\s+(?:\w+\s+)?$/i;
   const sentencesOf = (s) => s.split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter(Boolean);
   // Review 2026-11-13 (fail closed): a stop is read per clause, never vetoed by a question elsewhere in the message. "Pause
@@ -347,10 +347,9 @@ const CareerHost = (() => {
     const boundary = boundaries.length > 0;
     if (!workflows.length) {
       if (!boundary) return null;
-      // The boundary beside another ask limits that ask (D-061 G1/G6); the ask-more words count only outside a boundary sentence.
-      const inBoundary = new Set(boundaries.map((b) => b.sentence));
-      const askMore = sentencesOf(ask).some((x) => !inBoundary.has(x) && !BOUNDARY_RE.test(x) && x.split(/\s+/).length > 3 && (/\?\s*$/.test(x) || ASK_MORE_RE.test(x)));
-      if (ASK_WORD_RE.test(ask) || HANDOFF_RE.test(ask) || askMore) return null;
+      // The boundary beside a real ask for work limits that ask (D-061 G1/G6); any other sentence beside it never cancels it.
+      const workQuestion = sentencesOf(ask).some((x) => /\?\s*$/.test(x) && !BOUNDARY_RE.test(x) && WORK_QUESTION_RE.test(x));
+      if (ASK_WORD_RE.test(ask) || HANDOFF_RE.test(ask) || workQuestion) return null;
     }
     // An ask the person says is still unanswered ("I asked for company research, and you haven't answered it").
     const open = /\bi asked (?:for|about) ([^.,;!?]{3,80}?)(?:,| and)? (?:and )?you (?:haven'?t|have not|didn'?t|did not)\b/i.exec(ask);

@@ -545,7 +545,7 @@ const CareerRouter = (() => {
   // slips "remoet", "hybrdi", "potsed", "lasst", "fuly"). Typo matching invented limits: "decent" read as "recent" (posted
   // recently), "pasted" as "posted", "officer" or "an office in Austin" as onsite. A limit word inside a field or a name
   // ("remote sensing", "hybrid cloud", "office manager", "Fresh Market", "a recent graduate") is not a limit.
-  const LIMIT_REMOTE_RE = /\b(?:remote|remoet|reomte|rmote|remtoe)\b(?![- ](?:sensing|control|pilot|monitoring)\b)/;
+  const LIMIT_REMOTE_RE = /\b(?:remote|remoet|reomte|rmote|remtoe)\b(?![- ](?:sensing|control|pilot|monitoring)\b|\.[a-z])/; // "Remote.com" is a company
   const LIMIT_ONLY_RE = /\b(?:only|fully|fuly|fulyl)\b/;
   const LIMIT_HYBRID_RE = /\b(?:hybrid|hybrdi|hyrbid|hybird|hbyrid)\b(?![- ](?:cloud|car|cars|vehicle|vehicles|app|apps)\b)/;
   const LIMIT_ONSITE_RE = /\b(?:on[- ]?site|onsight|in[- ](?:the[- ])?office|in[- ]person|office days?|office[- ]based)\b/;

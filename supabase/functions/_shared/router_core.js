@@ -37555,16 +37555,24 @@ const CareerRouter = (() => {
     }
     return d[a.length][b.length] <= 1;
   }
-  const NOT_A_SLIP = new Set(["remove", "removed", "poster", "posters", "dates", "date", "dais", "week's"]);
-  const slipWords = (text) => lc(text).split(/[^a-z]+/).filter((w) => w && !NOT_A_SLIP.has(w));
-  const saidWord = (words, target) => words.some((w) => oneSlip(w, target));
-  // The limits an empty search kept, said back in plain words, so "no roles" also shows what was held to.
+  // The limits a search ask stated, said back in plain words, so "no roles" also shows what was asked for.
+  // Review 2026-11-13 (fail closed): only exact limit words and phrases count, plus the misspellings listed here (the MIRROR-1000
+  // slips "remoet", "hybrdi", "potsed", "lasst", "fuly"). Typo matching invented limits: "decent" read as "recent" (posted
+  // recently), "pasted" as "posted", "officer" or "an office in Austin" as onsite. A limit word inside a field or a name
+  // ("remote sensing", "hybrid cloud", "office manager", "Fresh Market", "a recent graduate") is not a limit.
+  const LIMIT_REMOTE_RE = /\b(?:remote|remoet|reomte|rmote|remtoe)\b(?![- ](?:sensing|control|pilot|monitoring)\b)/;
+  const LIMIT_ONLY_RE = /\b(?:only|fully|fuly|fulyl)\b/;
+  const LIMIT_HYBRID_RE = /\b(?:hybrid|hybrdi|hyrbid|hybird|hbyrid)\b(?![- ](?:cloud|car|cars|vehicle|vehicles|app|apps)\b)/;
+  const LIMIT_ONSITE_RE = /\b(?:on[- ]?site|onsight|in[- ](?:the[- ])?office|in[- ]person|office days?|office[- ]based)\b/;
+  const LIMIT_NO_OFFICE_RE = /\b(?:no|not|zero|without|never)\b[^.,;!?]{0,20}\b(?:on[- ]?site|onsight|in[- ](?:the[- ])?office|in[- ]person|office days?)\b/;
+  const LIMIT_RECENT_RE = /\b(?:posted|potsed|psoted|posed|listed)\s+(?:recently|today|yesterday|this week|within\b|in the (?:last|past|lasst)\b|(?:the )?(?:last|past|lasst)\b)|\b(?:recently|newly|freshly|just) (?:posted|listed)\b|\b(?:from|in|within|over)\s+(?:the\s+)?(?:last|past|lasst)\s+(?:\w+\s+)?(?:weeks?|days?|dyas|dayss|24 hours|month)\b|\b(?:recent|fresh|new) (?:postings|posts|listings|openings)\b/;
   function statedSearchLimits(text) {
-    const w = slipWords(text), t = lc(text), out = [];
-    if (saidWord(w, "remote")) out.push(/(?:only|fully)/.test(t) || saidWord(w, "only") ? "remote only" : "remote");
-    if (saidWord(w, "hybrid")) out.push(saidWord(w, "onsite") || saidWord(w, "office") ? "hybrid, not fully onsite" : "hybrid");
-    else if (saidWord(w, "onsite") || saidWord(w, "office")) out.push(/no/.test(t) ? "no office days" : "onsite");
-    if (saidWord(w, "posted") || saidWord(w, "fresh") || saidWord(w, "recent") || saidWord(w, "recently") || /(?:last|past)\s+(?:\w+\s+)?(?:week|days?|dyas|dayss)/.test(t)) out.push("posted recently");
+    const t = lc(text), out = [];
+    if (LIMIT_REMOTE_RE.test(t)) out.push(LIMIT_ONLY_RE.test(t) || /\bremote[- ]only\b/.test(t) ? "remote only" : "remote");
+    const onsite = LIMIT_ONSITE_RE.test(t);
+    if (LIMIT_HYBRID_RE.test(t)) out.push(onsite ? "hybrid, not fully onsite" : "hybrid");
+    else if (onsite) out.push(LIMIT_NO_OFFICE_RE.test(t) ? "no office days" : "onsite");
+    if (LIMIT_RECENT_RE.test(t)) out.push("posted recently");
     return out;
   }
   function emptySearchScope(lp, o, namedRole) {
@@ -37647,8 +37655,9 @@ const CareerRouter = (() => {
       const scope = emptySearchScope(lp, o, namedRole);
       // MIRROR-1000 gaps (2026-11-11): the empty result in plain words ("I found no open roles"), and the limits kept.
       const facts = [scope ? "I checked the postings I have on hand and found no open roles for that (career sites outside them were not checked), and I won't make any up." /* D-061 G4, G5: what was read, and what was not */ : namedRole ? "I won't make any up." : "I have no open roles on my list right now, and I won't make any up."];
-      const kept = statedSearchLimits(text);
-      if (kept.length) facts.push(`I kept your limits: ${kept.join("; ")}.`);
+      // Review 2026-11-13: no filter ran on an empty pool, so the limits are named as asked for, never as kept.
+      const asked = statedSearchLimits(text);
+      if (asked.length) facts.push(`You asked for ${asked.join("; ")}; no limit was applied, since there were no postings to apply it to.`);
       if (fams && fams.length) facts.push(`I've kept your ask (${fams.map(familyLabel).join(" + ")}) and will run it as soon as matching roles come in.`);
       const newPerson = !(profile && (profile.facts || []).length);
       const widen = scope && lp.whereText && !lp.remoteOnly ? `Want me to look beyond ${lp.whereText}, remote roles included?` : null;
@@ -42011,6 +42020,13 @@ const CareerRouter = (() => {
   }
 
   // ---------- refusal family: blasts + false claims (SC-035/294/295) -------
+  const BULK_APPLY_RE = /\b(?:apply|submit|send in)\b(?:\s+(?:for me|my applications?|applications?))?(?:\s+(?:to|for|on))?\s+(?:all|every|everything|each|\d{2,})\b/g;
+  const BULK_NEGATED_RE = /\b(?:don'?t|dont|do not|never|not|no|no need to|stop)\s+(?:(?:just|even|actually|ever|yet|really|go|ahead|and)\s+){0,2}$/;
+  function bulkApplyAsked(t) {
+    BULK_APPLY_RE.lastIndex = 0;
+    for (let m = BULK_APPLY_RE.exec(t); m; m = BULK_APPLY_RE.exec(t)) if (!BULK_NEGATED_RE.test(t.slice(0, m.index))) return true;
+    return false;
+  }
   function handleRefusal(text, ctx) {
     const t = lc(text);
     const falseClaim = /\b(say|claim|tell|pretend|imply)\b[^.]*\b(sent me|referred me|told me to reach out|recommended me)\b/.test(t);
@@ -42041,7 +42057,7 @@ const CareerRouter = (() => {
       } catch { claimOnRecord = false; }
     }
     const unverifiedClaim = materialImperative && (claimToken || admission) && (admission || !claimOnRecord);
-    const noReview = /\b(automatically|while i sleep|tonight|right now|don'?t need to see|no review|without (me|my) (seeing|reviewing)|just do it|all of them|don'?t ask)\b/.test(t);
+    const noReview = /\b(automatically|while i sleep|tonight|right now|don'?t need to see|no review|without (me|my) (seeing|reviewing)|just do it|all of them|don'?t ask|(?:don'?t|do not) care)\b/.test(t);
     // HELD-OUT (2026-10-24): "submit applications for me overnight
     // while i sleep, don't ask me each time" named no everything/
     // all-jobs object and no count, so it escaped massObject — but
@@ -42054,7 +42070,10 @@ const CareerRouter = (() => {
     const massCount = Number((t.match(/\b(\d{2,})\s*(jobs|applications|roles)\b/) || [])[1]) || 0;
     // MIRROR-1000 (2026-11-11): the person's own guard ("don't apply to anything", "do not apply on my behalf") is not the ask
     // to apply: "what backend developer jobs are open in Detroit right now ... Don't apply to anything" was refused as bulk apply.
-    const applyAsked = /\b(apply|submit|send in)\b/.test(t.replace(/\b(?:don'?t|do not|never|not|no|nothing)\s+(?:\w+\s+){0,3}?(?:apply|submit|send in)\b[^.;:!?]*/g, " "));
+    // Review 2026-11-13 (fail closed): that stripping also ate "no wait apply to all 60 jobs" and "i do not care just apply to
+    // every job". An apply-to-all/every/N clause is the ask unless the negation governs its own verb ("don't apply to all",
+    // "do not just submit all 50", "no need to apply to all 60").
+    const applyAsked = /\b(apply|submit|send in)\b/.test(t.replace(/\b(?:don'?t|do not|never|not|no|nothing)\s+(?:\w+\s+){0,3}?(?:apply|submit|send in)\b[^.;:!?]*/g, " ")) || bulkApplyAsked(t);
     const massApply = applyAsked && massObject && (noReview || massCount >= 50);
     // HELD-OUT (2026-10-24): the insistence shape — "nobody checks
     // anyway, just add one at a bank". The fabrication's object is
@@ -54992,7 +55011,7 @@ const CareerRouter = (() => {
       if (m && m.resumeIngest && typeof m.resumeIngest === "object" && intent !== "career_resume_ingest") m.resumeIngest.stale = true;
     } catch { /* a mark never breaks a turn */ }
   }
-  return { handleChat, noteServedTurn, handleStateChangeIntents, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf,
+  return { handleChat, noteServedTurn, handleStateChangeIntents, statedSearchLimits, recordInvalidation, sha256, rankedShortlist, scoringProfile, adaptPosting, jdTextForPosting, preCheck, detectContradiction, namedRoleTargetOf, detypo, letterTargetOf, namedCompanyOf,
     // C01: the name-match internals, for the old-vs-new equivalence test (tests/career-c01-cpu-hot-path.test.cjs) only.
     _d6Full: rankedShortlistFull, scoredCount, _c01NameMatch: { ltLexicon, ltFormMatches, ltEsc, ltPlain, ltClean, ltIsPlace, ltIsSchool, postingsFromCtx } };
 })();

@@ -1590,7 +1590,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           const kept = (ctx as any).discovery?.heldAtLimit;
           const task = kept?.message && isResume(typedMessage) ? String(kept.message) : String(typedMessage);
           const zone = await readPersonZone(admin, user.id, (ctx as any).profile ?? null);
-          out = { reply: limitHeldReply(task, heldStop, zone, limitRetryAt), intent: HELD_INTENT, resultStatus: "held", contained: false, handler: "limit_held" };
+          out = { reply: limitHeldReply(task, heldStop, zone, limitRetryAt, Array.isArray(turn.tool_calls) ? turn.tool_calls : null), intent: HELD_INTENT, resultStatus: "held", contained: false, handler: "limit_held" };
           (ctx as any).discovery = { ...((ctx as any).discovery ?? {}), heldAtLimit: { message: task.slice(0, 1000), at: Date.now(), stop: heldStop } };
           agentMeta = { brain: staged.chosen ? "staged" : "agent", stopped: turn.stopped, limit_stop: heldStop, ...replyFlagsMeta(turn as { flags?: unknown }) };
         } else {

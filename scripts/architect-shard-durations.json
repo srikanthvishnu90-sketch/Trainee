@@ -10,6 +10,7 @@
     "tests/architect/d073-review-fixes-20261113.test.ts": 0.2,
     "tests/architect/d073-review2-fixes-20261113.test.ts": 0.2,
     "tests/architect/mail-reply-failclosed-20261113.test.ts": 0.3,
+    "tests/architect/stop-hold-failclosed-20261113.test.ts": 0.4,
     "tests/architect/research-figures-failclosed-20261113.test.ts": 0.2,
     "tests/architect/handoff-recheck-live.test.ts": 34,
     "tests/architect/handoff-failclosed-20261113.test.ts": 12,

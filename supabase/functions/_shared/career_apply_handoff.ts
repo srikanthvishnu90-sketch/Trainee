@@ -79,8 +79,15 @@ export async function handoffTurn(o: { message: string; userId: string; threadId
   const rows = await o.store.rows(o.userId);
   if (yes && shown) {
     const r = rows.find((x) => x.id === shown.id);
+    // Round 2 (review of #818): what the person can do next, as it is. A newer card on the same row: "done" shows it. A re-check
+    // already running: "done" in a minute. A row no longer waiting on a card (the re-check stopped it, or it closed): "done" does
+    // nothing here, so the reply never says it will; the link is theirs to finish at.
     if (!r || !cardReady(r) || r.evidence.answers_card!.hash !== shown.hash) {
-      return { reply: `${r ? name(r) : "That application"}: the answers on the page changed since I showed them, so nothing was sent. Say done and I'll re-check and show you the new answers.`, intent: HANDOFF_YES_INTENT, status: "refused" };
+      const what = r ? name(r) : "That application";
+      if (r && cardReady(r)) return { reply: `${what}: the answers on the page changed since I showed them, so nothing was sent. Say done and I'll show you the answers the page holds now.`, intent: HANDOFF_YES_INTENT, status: "refused" };
+      if (r && rechecking(r)) return { reply: `${what}: that card is no longer the current one, so nothing was sent. I'm re-checking the page now; say done in a minute to see the answers.`, intent: HANDOFF_YES_INTENT, status: "refused" };
+      const l = r ? linkOf(r) : null;
+      return { reply: `${what}: that card is no longer current, so nothing was sent, and this hand-off is closed: I can't re-check it from here.${l ? ` You can finish the application yourself at ${l}.` : ""}`, intent: HANDOFF_YES_INTENT, status: "refused" };
     }
     const res = await o.store.yes(o.userId, r.id, shown.hash);
     if (!res.ok) return { reply: `${name(r)}: not sent (${res.why ?? "refused"}). Nothing went to the employer.`, intent: HANDOFF_YES_INTENT, status: "refused" };

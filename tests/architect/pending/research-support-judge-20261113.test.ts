@@ -855,6 +855,9 @@ Deno.test("round 5.4 and 8.1: code decides no 'about': the judge is asked whethe
   const r8 = await mk3([{ url: "https://blog.example/x", title: "Citadel", text: page8 }], { summary: [{ text: "Citadel interns earn $6,500 a week.", quote: "Interns earn $6,500 a week in total.", url: "https://blog.example/x" }] }, j8.judge);
   ok(j8.asked.some((c) => /Hudson River Trading, not Citadel/.test(c.source) && (/Citadel specifically, not about another firm/.test(c.claim) || /Citadel interns earn \$6,500/.test(c.claim))), JSON.stringify(j8.asked));
   ok(!JSON.stringify(r8.points ?? []).includes("6,500"));
+  // The quote question itself names the employer and asks for it specifically.
+  const q8 = j8.asked.find((c) => c.claim.startsWith('The marked text "'));
+  ok(q8 && q8.claim.includes("about Citadel specifically, not about another firm"), JSON.stringify(j8.asked));
   eq(lentOn("Our fund pays interns $7,500 a month."), "Citadel");
   const r = await mk3([{ url: U, title: "Citadel filings", text: "Form 10-K Citadel LLC.\nCitadel employs 4,000 people in its offices." }], { summary: [{ text: "Citadel files a Form 10-K.", quote: "Form 10-K Citadel LLC", url: U }] }, quotesOnly);
   ok(!JSON.stringify(r.points ?? []).includes("Form 10-K Citadel LLC"), JSON.stringify(r.points));

@@ -27006,52 +27006,75 @@ const CareerRender = (() => {
     { re: /\[[^\]]{1,40}\]/, label: "bracketed placeholder [..]" }, { re: /\bTBD\b/, label: "TBD" },
     { re: /\bXXX+\b/, label: "XXX" }, { re: /placeholder/i, label: "the word 'placeholder'" },
   ];
-  const EMAIL_TOKEN_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g;
-  const RESERVED_TLDS = new Set(["invalid", "localhost", "example", "local"]);
-  const PLACEHOLDER_DOMAIN_LABELS = new Set(["example", "domain", "yourdomain", "mydomain", "yourcompany", "company", "email", "youremail", "test", "testing", "placeholder", "sample", "invalid", "localhost", "website", "yoursite", "xxx"]);
-  const PLACEHOLDER_LOCALS = new Set(["you", "your", "name", "yourname", "myname", "fullname", "firstname", "lastname", "firstnamelastname", "youremail", "myemail", "email", "emailaddress", "user", "username", "me", "test", "example", "sample", "placeholder", "johndoe", "janedoe", "xxx", "nobody", "none", "null"]);
+  const EMAIL_TOKEN_RE = /[^\s|,;<>()\[\]{}]+@[^\s|,;<>()\[\]{}]+/g;
+  const RESERVED_TLDS = new Set(["invalid", "localhost", "example", "local", "tld"]);
+  const DOUBTFUL_LOCALS = new Set(["you", "your", "name", "yourname", "myname", "fullname", "yourfullname", "firstname", "lastname", "firstlast", "firstnamelastname", "youremail", "myemail", "email", "emailaddress", "user", "username", "test", "johndoe", "janedoe"]);
+  const LABEL_RE = /^[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?$/u;
+  const mixedScript = (x) => /[a-z]/i.test(x) && /[Ͱ-ϿЀ-ԯ]/.test(x);
   function placeholderEmail(v) {
-    const s = String(v == null ? "" : v).trim().toLowerCase();
+    const raw = String(v == null ? "" : v), s = raw.trim().toLowerCase();
     if (!s) return "missing";
-    if (/[\[\]<>{}]/.test(s)) return "a bracketed placeholder";
-    const m = /^([a-z0-9._%+-]+)@([a-z0-9-]+(?:\.[a-z0-9-]+)*)\.?$/.exec(s);
-    if (!m) return "not an email address";
-    const labels = m[2].split("."), tld = labels[labels.length - 1];
-    if (labels.length < 2 || !/^[a-z]{2,}$/.test(tld)) return RESERVED_TLDS.has(tld) ? `on a reserved domain (${m[2]})` : "not an email address";
-    if (RESERVED_TLDS.has(tld) || (tld !== "test" && PLACEHOLDER_DOMAIN_LABELS.has(labels[labels.length - 2]))) return `on a reserved or template domain (${m[2]})`;
-    const local = m[1].replace(/\+.*$/, "").replace(/[._%-]+/g, "");
-    if (!local || PLACEHOLDER_LOCALS.has(local) || /^x+$/.test(local)) return `a template's stand-in name (${m[1]}@)`;
+    if (/[\[\]<>{}]/.test(s) || /email\s+protected/.test(s)) return "template text, not an email address";
+    const at = s.indexOf("@"), local = s.slice(0, at), domain = s.slice(at + 1), labels = domain.split("."), tld = labels[labels.length - 1];
+    const okLocal = at > 0 && /^[\p{L}\p{N}!#$%&'*+\/=?^_`|~.-]+$/u.test(local) && !/^\.|\.$|\.\./.test(local);
+    const okDomain = labels.length >= 2 && labels.every((l) => LABEL_RE.test(l)) && (/^\p{L}{2,}$/u.test(tld) || /^xn--[a-z0-9-]+$/.test(tld));
+    if (/[\s​-‏⁠﻿＀-￯。]/.test(raw.trim()) || s.indexOf("@", at + 1) >= 0 || !okLocal || !okDomain || mixedScript(local) || labels.some(mixedScript)) return "not a valid email address";
+    const reg = labels.length >= 3 && tld.length === 2 && ["co", "com", "org", "net", "ac", "edu", "gov"].includes(labels[labels.length - 2]) ? labels[labels.length - 3] : labels[labels.length - 2];
+    if (RESERVED_TLDS.has(tld) || (tld !== "test" && labels.slice(0, -1).includes("example") && (reg === "example" || labels[labels.length - 2] === "example"))) return `on a reserved domain that cannot receive mail (${domain})`;
     return null;
   }
+  function doubtfulEmail(v) {
+    const s = String(v == null ? "" : v).trim().toLowerCase();
+    if (placeholderEmail(s)) return null;
+    const local = s.slice(0, s.indexOf("@")).replace(/\+.*$/, "").replace(/[._-]+/g, "");
+    return DOUBTFUL_LOCALS.has(local) ? `the stand-in a template prints (${s.slice(0, s.indexOf("@"))}@)` : null;
+  }
   function placeholderPhones(text) {
-    const s = String(text == null ? "" : text), out = [];
-    for (const m of s.matchAll(/(?:\(\s*[xX#]{3}\s*\)|(?<![A-Za-z#])[xX#]{3})[\s.-]*[xX#]{3}[\s.-]*[xX#]{4}(?![A-Za-z#])/g)) out.push(m[0]);
-    for (const m of s.matchAll(/(?<![\d$.,@\w/=_-])\+?\(?\d[\d\s().-]{5,}\d(?![\d%\w])/g)) {
-      const d = m[0].replace(/\D/g, ""), n = d.length === 11 && d[0] === "1" ? d.slice(1) : d;
-      const bad = n.length === 7 ? /^55501\d\d$/.test(n)
-        : n.length === 10 && (/^(555|000)/.test(n) || /^\d{3}55501/.test(n) || /^(\d)\1{9}$/.test(n) || ["1234567890", "0123456789", "9876543210", "1231231234"].includes(n));
-      if (bad) out.push(m[0].trim());
+    const s = String(text == null ? "" : text).replace(EMAIL_TOKEN_RE, " ").replace(/\b(?:https?:\/\/|www\.)\S+|\b[\w-]+(?:\.[\w-]+)+\/\S*/gi, " "), out = [];
+    for (const m of s.matchAll(/(?:\(\s*([xXnNdD#])\1{2}\s*\)|(?<![A-Za-z#])([xXnNdD#])\2{2})[\s.-]*([xXnNdD#])\3{2}[\s.-]*([xXnNdD#])\4{3}(?![A-Za-z#])/g)) out.push(m[0]);
+    for (const m of s.matchAll(/[\[<{]+\s*(?:phone|mobile|tel)[^\]>}|]*[\]>}]+|\bphone number\b/gi)) out.push(m[0]);
+    for (const m of s.matchAll(/(?<![\d$.,@\w\/=_-])\+?\(?\d[\d\s().-]{4,}\d(?![\d%\w@])/g)) {
+      const t = m[0].trim(), d = t.replace(/\D/g, ""), plus = t[0] === "+";
+      const nanp = plus ? (d[0] === "1" ? d.slice(1) : null) : d.length === 11 && d[0] === "1" ? d.slice(1) : /^\(?\d{3}\)?[\s.-]*\d{3}[\s.-]*\d{4}$/.test(t) ? d : null;
+      let bad = false;
+      if (d.length < 7 || (!plus && d.length < 10 && t[0] === "(")) bad = /^\(\d{3}\)|^\d{3}-\d{3}$/.test(t);
+      else if (d.length > 15 || (plus && (d[0] === "0" || d.length < 8))) bad = true;
+      else if (/^(\d)\1+$/.test(d) || "01234567890123456789".includes(d) || "98765432109876543210".includes(d)) bad = true;
+      else if (d.length === 7 && !plus) bad = /^\d{3}[\s.-]?\d{4}$/.test(t);
+      else if (nanp !== null) bad = nanp.length !== 10 || /^[01]|^555|^\d{3}[01]|^\d{3}55501|^(\d)\1{2}(\d)\2{2}(\d)\3{3}$/.test(nanp) || /^\d{3}0{7}$|^\d{3}5{7}$/.test(nanp) || "01234567890123456789".includes(nanp);
+      else bad = /^(?:44|0)(?:7700900|2079460)\d{3}$/.test(d) || /^(?:61|0)49157015\d$/.test(d);
+      if (bad) out.push(t);
     }
     return out;
   }
-  function contactProblems(header) {
+  const TEMPLATE_TEXT_RE = /\[[^\]\n]{0,40}\]|<[^>\n]{1,40}>|\{\{?[^}\n]{0,40}\}?\}|\byour[\s._-]?(?:name|city|email|phone|address|linkedin|github)\b|\byourname\b|\b(?:first|last)\s?name\b|\bcity,\s*(?:state|st)\b|\bphone(?:\s+number)?\s*(?:$|\|)|\/in\/(?:username|yourname|your-name)\b/i;
+  function contactProblems(header, opts) {
     const h = header || {}, out = [], own = String(h.email == null ? "" : h.email).trim().toLowerCase();
-    const why = placeholderEmail(h.email);
-    if (why) out.push({ field: "email", value: own, why });
+    const checked = new Set(((opts && opts.checked) || []).map((x) => String(x).trim().toLowerCase()));
+    const email = (value) => {
+      const why = placeholderEmail(value), doubt = why ? null : doubtfulEmail(value);
+      if (why) out.push({ field: "email", value, why, level: "refuse" });
+      else if (doubt && !checked.has(value)) out.push({ field: "email", value, why: doubt, level: "confirm" });
+    };
+    email(own);
     const rest = [h.contactLine, h.linksLine, h.location, h.phone].filter((x) => typeof x === "string").join(" | ");
-    for (const m of rest.match(EMAIL_TOKEN_RE) || []) { const w = m.toLowerCase() === own ? null : placeholderEmail(m); if (w) out.push({ field: "email", value: m, why: w }); }
-    for (const p of placeholderPhones(rest)) out.push({ field: "phone", value: p, why: "a placeholder number" });
+    for (const m of rest.match(EMAIL_TOKEN_RE) || []) if (m.toLowerCase().replace(/^mailto:/, "") !== own || /^mailto:/i.test(m)) email(m.toLowerCase());
+    for (const p of placeholderPhones(rest)) out.push({ field: "phone", value: p, why: "a placeholder or incomplete number", level: "refuse" });
+    const tpl = TEMPLATE_TEXT_RE.exec(rest.replace(EMAIL_TOKEN_RE, " "));
+    if (tpl) out.push({ field: "contact line", value: tpl[0].replace(/\s*\|$/, ""), why: "a template's own text, not their details", level: "refuse" });
     return out;
   }
   function fileContactProblems(lines) {
     const all = (lines || []).map((l) => String(l == null ? "" : l)), cut = all.findIndex((l) => HEADING_ALLOWLIST.includes(l.trim().toUpperCase()));
     const top = all.slice(0, cut > 0 ? cut : Math.min(all.length, 8)).join(" | "), emails = top.match(EMAIL_TOKEN_RE) || all.join(" | ").match(EMAIL_TOKEN_RE) || [], out = [];
-    if (!emails.length) out.push({ field: "email", value: "", why: "missing" });
-    for (const e of emails) { const w = placeholderEmail(e); if (w) out.push({ field: "email", value: e, why: w }); }
-    for (const p of placeholderPhones(top)) out.push({ field: "phone", value: p, why: "a placeholder number" });
+    if (!emails.length) out.push({ field: "email", value: "", why: "missing", level: "refuse" });
+    for (const e of emails) { const w = placeholderEmail(e); if (w) out.push({ field: "email", value: e, why: w, level: "refuse" }); }
+    for (const p of placeholderPhones(top)) out.push({ field: "phone", value: p, why: "a placeholder or incomplete number", level: "refuse" });
     return out;
   }
-  const contactReason = (p) => `the ${p.field} at the top of the resume (${p.value || "none"}) is ${p.why}: the ${p.field} is not confirmed, so this resume is not ready to submit`;
+  const contactReason = (p) => p.level === "confirm"
+    ? `the ${p.field} at the top of the resume (${p.value}) is ${p.why}: it needs the person to confirm it is theirs before this resume is ready to submit`
+    : `the ${p.field} at the top of the resume (${p.value || "none"}) is ${p.why}: the ${p.field} is not confirmed, so this resume is not ready to submit`;
   const NUMERIC_DATE_RES = [/\b\d{1,2}\/\d{4}\b/g, /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g, /\b\d{4}-\d{2}(?:-\d{2})?\b/g, /\b\d{1,2}-\d{4}\b/g];
   function diffSequences(expected, actual) {
     const exp = [...expected], act = [...actual];
@@ -27090,7 +27113,7 @@ const CareerRender = (() => {
       }
     }
 
-    if (resume) for (const p of contactProblems(resume.header)) if (p.why !== "missing") add("contact_unconfirmed", "fail", contactReason(p));
+    if (resume) for (const p of contactProblems(resume.header)) if (p.why !== "missing" && p.level === "refuse") add("contact_unconfirmed", "fail", contactReason(p));
     if (expected) {
       const seenLine = new Set();
       for (const l of expected) {
@@ -27203,7 +27226,7 @@ const CareerRender = (() => {
 
   const runtime = { zlib: !!rt.zlib, crypto: !!rt.crypto, Buffer: !!Buffer, codec: rt.zlib && rt.crypto ? "platform" : zlib && crypto ? "vendored" : "none" };
   const primitives = { zipBuffer, unzipParts, encodeWinAnsi, pdfLiteral, escXml, deflate: (b) => zlibDeflateFixed(Bytes.from(b)), bytes: (x, enc) => Bytes.from(x, enc), concat: (xs) => Bytes.concat(xs) };
-  return { primitives, renderPdf, renderDocx, parseCheck, placeholderEmail, placeholderPhones, contactProblems, fileContactProblems, contactReason, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
+  return { primitives, renderPdf, renderDocx, parseCheck, placeholderEmail, doubtfulEmail, placeholderPhones, contactProblems, fileContactProblems, contactReason, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
   }
   return make(NODE_RUNTIME);
 })();

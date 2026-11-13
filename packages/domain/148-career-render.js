@@ -1127,66 +1127,100 @@ const CareerRender = (() => {
     { re: /\[[^\]]{1,40}\]/, label: "bracketed placeholder [..]" }, { re: /\bTBD\b/, label: "TBD" },
     { re: /\bXXX+\b/, label: "XXX" }, { re: /placeholder/i, label: "the word 'placeholder'" },
   ];
-  // ================= contact placeholders (fail closed) =================
-  // An employer reads the email and phone at the top of the file. One that is missing, bracketed, on a reserved or
-  // template domain, or a template's stand-in name ("you@", "firstname.lastname@") is not a confirmed contact: the parse
-  // check fails it, so the file is never a pass and never ready to submit. When unsure, it is not confirmed.
-  const EMAIL_TOKEN_RE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g;
-  // NOT here: the reserved TLD ".test". Every fixture in this repo writes the person's own email as <name>@example.test
-  // (over 900 places, architect tests included), so refusing it turns those tests red; it needs the owner's ruling and a
-  // fixture migration. Until then no domain under .test is refused; a placeholder name on one (you@example.test) still is.
-  const RESERVED_TLDS = new Set(["invalid", "localhost", "example", "local"]);
-  const PLACEHOLDER_DOMAIN_LABELS = new Set(["example", "domain", "yourdomain", "mydomain", "yourcompany", "company", "email", "youremail", "test", "testing", "placeholder", "sample", "invalid", "localhost", "website", "yoursite", "xxx"]);
-  const PLACEHOLDER_LOCALS = new Set(["you", "your", "name", "yourname", "myname", "fullname", "firstname", "lastname", "firstnamelastname", "youremail", "myemail", "email", "emailaddress", "user", "username", "me", "test", "example", "sample", "placeholder", "johndoe", "janedoe", "xxx", "nobody", "none", "null"]);
-  // null when the email reads as a real address; otherwise why it is not one.
+  // ================= the contact at the top (fail closed, never by guessing) =================
+  // Round 2 of the #776/#785 review: guessing which addresses are placeholders refused real people (john.doe@gmail.com,
+  // me@danaokafor.com) and passed template text. The rule, in order:
+  //   1 syntax      one @, a dotted local part, valid domain labels and a TLD; no spaces, mailto:, template marks, look-alike
+  //                 letters or the "[email protected]" a web page leaves. Malformed: refused.
+  //   2 reserved    domains that can never receive mail (RFC 2606/6761: example.com/.org/.net and example.<any>, .example,
+  //                 .invalid, .localhost, .local): refused. No real domain is listed (email.com, domain.com, me.com are real).
+  //   3 (career_tailor.ts) the email that prints must equal one the person confirmed. That is the gate.
+  //   4 doubtful    a template's stand-in name on a real domain (you@, firstname.lastname@, john.doe@) is not refused: it is
+  //                 "confirm", passed once the person has typed that address for their resume (opts.checked).
+  // NOT refused: the reserved TLD ".test". Every fixture in this repo writes the person's own email as <name>@example.test and
+  // these modules have no test seam, so refusing it needs a fixture migration first.
+  const EMAIL_TOKEN_RE = /[^\s|,;<>()\[\]{}]+@[^\s|,;<>()\[\]{}]+/g;
+  const RESERVED_TLDS = new Set(["invalid", "localhost", "example", "local", "tld"]);
+  const DOUBTFUL_LOCALS = new Set(["you", "your", "name", "yourname", "myname", "fullname", "yourfullname", "firstname", "lastname", "firstlast", "firstnamelastname", "youremail", "myemail", "email", "emailaddress", "user", "username", "test", "johndoe", "janedoe"]);
+  const LABEL_RE = /^[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?$/u;
+  const mixedScript = (x) => /[a-z]/i.test(x) && /[Ͱ-ϿЀ-ԯ]/.test(x);
+  // null when the address is one mail can reach; otherwise why it can never be the person's email (rules 1 and 2).
   function placeholderEmail(v) {
-    const s = String(v == null ? "" : v).trim().toLowerCase();
+    const raw = String(v == null ? "" : v), s = raw.trim().toLowerCase();
     if (!s) return "missing";
-    if (/[\[\]<>{}]/.test(s)) return "a bracketed placeholder";
-    const m = /^([a-z0-9._%+-]+)@([a-z0-9-]+(?:\.[a-z0-9-]+)*)\.?$/.exec(s);
-    if (!m) return "not an email address";
-    const labels = m[2].split("."), tld = labels[labels.length - 1];
-    if (labels.length < 2 || !/^[a-z]{2,}$/.test(tld)) return RESERVED_TLDS.has(tld) ? `on a reserved domain (${m[2]})` : "not an email address";
-    if (RESERVED_TLDS.has(tld) || (tld !== "test" && PLACEHOLDER_DOMAIN_LABELS.has(labels[labels.length - 2]))) return `on a reserved or template domain (${m[2]})`;
-    const local = m[1].replace(/\+.*$/, "").replace(/[._%-]+/g, "");
-    if (!local || PLACEHOLDER_LOCALS.has(local) || /^x+$/.test(local)) return `a template's stand-in name (${m[1]}@)`;
+    if (/[\[\]<>{}]/.test(s) || /email\s+protected/.test(s)) return "template text, not an email address";
+    const at = s.indexOf("@"), local = s.slice(0, at), domain = s.slice(at + 1), labels = domain.split("."), tld = labels[labels.length - 1];
+    const okLocal = at > 0 && /^[\p{L}\p{N}!#$%&'*+\/=?^_`|~.-]+$/u.test(local) && !/^\.|\.$|\.\./.test(local);
+    const okDomain = labels.length >= 2 && labels.every((l) => LABEL_RE.test(l)) && (/^\p{L}{2,}$/u.test(tld) || /^xn--[a-z0-9-]+$/.test(tld));
+    if (/[\s​-‏⁠﻿＀-￯。]/.test(raw.trim()) || s.indexOf("@", at + 1) >= 0 || !okLocal || !okDomain || mixedScript(local) || labels.some(mixedScript)) return "not a valid email address";
+    const reg = labels.length >= 3 && tld.length === 2 && ["co", "com", "org", "net", "ac", "edu", "gov"].includes(labels[labels.length - 2]) ? labels[labels.length - 3] : labels[labels.length - 2];
+    if (RESERVED_TLDS.has(tld) || (tld !== "test" && labels.slice(0, -1).includes("example") && (reg === "example" || labels[labels.length - 2] === "example"))) return `on a reserved domain that cannot receive mail (${domain})`;
     return null;
   }
-  // The placeholder phone numbers in a piece of text: 555-0100 to 555-0199 (reserved for fiction), area code 555 or 000,
-  // counting runs (123-456-7890), one digit repeated, and lettered patterns ((xxx) xxx-xxxx).
+  // Rule 4: why a valid address still needs the person's own word (null: it does not).
+  function doubtfulEmail(v) {
+    const s = String(v == null ? "" : v).trim().toLowerCase();
+    if (placeholderEmail(s)) return null;
+    const local = s.slice(0, s.indexOf("@")).replace(/\+.*$/, "").replace(/[._-]+/g, "");
+    return DOUBTFUL_LOCALS.has(local) ? `the stand-in a template prints (${s.slice(0, s.indexOf("@"))}@)` : null;
+  }
+  // The placeholder phone numbers in a piece of text. A phone is 7 to 15 digits (E.164). Refused: lettered templates
+  // ((xxx) xxx-xxxx, NNN-NNN-NNNN), numbers reserved for fiction (555-0100 to 555-0199, +44 7700 900xxx, +61 491 570 15x),
+  // one digit repeated, counting runs, a North American number whose area code or exchange cannot exist, a number cut short
+  // or with no area code, and one too long to dial.
   function placeholderPhones(text) {
-    const s = String(text == null ? "" : text), out = [];
-    for (const m of s.matchAll(/(?:\(\s*[xX#]{3}\s*\)|(?<![A-Za-z#])[xX#]{3})[\s.-]*[xX#]{3}[\s.-]*[xX#]{4}(?![A-Za-z#])/g)) out.push(m[0]);
-    for (const m of s.matchAll(/(?<![\d$.,@\w/=_-])\+?\(?\d[\d\s().-]{5,}\d(?![\d%\w])/g)) {
-      const d = m[0].replace(/\D/g, ""), n = d.length === 11 && d[0] === "1" ? d.slice(1) : d;
-      const bad = n.length === 7 ? /^55501\d\d$/.test(n)
-        : n.length === 10 && (/^(555|000)/.test(n) || /^\d{3}55501/.test(n) || /^(\d)\1{9}$/.test(n) || ["1234567890", "0123456789", "9876543210", "1231231234"].includes(n));
-      if (bad) out.push(m[0].trim());
+    const s = String(text == null ? "" : text).replace(EMAIL_TOKEN_RE, " ").replace(/\b(?:https?:\/\/|www\.)\S+|\b[\w-]+(?:\.[\w-]+)+\/\S*/gi, " "), out = [];
+    for (const m of s.matchAll(/(?:\(\s*([xXnNdD#])\1{2}\s*\)|(?<![A-Za-z#])([xXnNdD#])\2{2})[\s.-]*([xXnNdD#])\3{2}[\s.-]*([xXnNdD#])\4{3}(?![A-Za-z#])/g)) out.push(m[0]);
+    for (const m of s.matchAll(/[\[<{]+\s*(?:phone|mobile|tel)[^\]>}|]*[\]>}]+|\bphone number\b/gi)) out.push(m[0]);
+    for (const m of s.matchAll(/(?<![\d$.,@\w\/=_-])\+?\(?\d[\d\s().-]{4,}\d(?![\d%\w@])/g)) {
+      const t = m[0].trim(), d = t.replace(/\D/g, ""), plus = t[0] === "+";
+      const nanp = plus ? (d[0] === "1" ? d.slice(1) : null) : d.length === 11 && d[0] === "1" ? d.slice(1) : /^\(?\d{3}\)?[\s.-]*\d{3}[\s.-]*\d{4}$/.test(t) ? d : null;
+      let bad = false;
+      if (d.length < 7 || (!plus && d.length < 10 && t[0] === "(")) bad = /^\(\d{3}\)|^\d{3}-\d{3}$/.test(t);                  // a phone cut short; a ZIP or a year is not one
+      else if (d.length > 15 || (plus && (d[0] === "0" || d.length < 8))) bad = true;
+      else if (/^(\d)\1+$/.test(d) || "01234567890123456789".includes(d) || "98765432109876543210".includes(d)) bad = true;
+      else if (d.length === 7 && !plus) bad = /^\d{3}[\s.-]?\d{4}$/.test(t);        // no area code: an employer cannot dial it
+      else if (nanp !== null) bad = nanp.length !== 10 || /^[01]|^555|^\d{3}[01]|^\d{3}55501|^(\d)\1{2}(\d)\2{2}(\d)\3{3}$/.test(nanp) || /^\d{3}0{7}$|^\d{3}5{7}$/.test(nanp) || "01234567890123456789".includes(nanp);
+      else bad = /^(?:44|0)(?:7700900|2079460)\d{3}$/.test(d) || /^(?:61|0)49157015\d$/.test(d);
+      if (bad) out.push(t);
     }
     return out;
   }
-  // What is not a confirmed contact at the top of a resume: [{ field: "email" | "phone", value, why }]; empty when all is.
-  function contactProblems(header) {
+  const TEMPLATE_TEXT_RE = /\[[^\]\n]{0,40}\]|<[^>\n]{1,40}>|\{\{?[^}\n]{0,40}\}?\}|\byour[\s._-]?(?:name|city|email|phone|address|linkedin|github)\b|\byourname\b|\b(?:first|last)\s?name\b|\bcity,\s*(?:state|st)\b|\bphone(?:\s+number)?\s*(?:$|\|)|\/in\/(?:username|yourname|your-name)\b/i;
+  // What is not a usable contact at the top of a resume: [{ field, value, why, level }]; empty when all is.
+  // level "refuse": it can never be theirs (rules 1 and 2, placeholder phones, template text). level "confirm": rule 4,
+  // dropped for an address in opts.checked (the addresses the person typed for their resume).
+  function contactProblems(header, opts) {
     const h = header || {}, out = [], own = String(h.email == null ? "" : h.email).trim().toLowerCase();
-    const why = placeholderEmail(h.email);
-    if (why) out.push({ field: "email", value: own, why });
+    const checked = new Set(((opts && opts.checked) || []).map((x) => String(x).trim().toLowerCase()));
+    const email = (value) => {
+      const why = placeholderEmail(value), doubt = why ? null : doubtfulEmail(value);
+      if (why) out.push({ field: "email", value, why, level: "refuse" });
+      else if (doubt && !checked.has(value)) out.push({ field: "email", value, why: doubt, level: "confirm" });
+    };
+    email(own);
     const rest = [h.contactLine, h.linksLine, h.location, h.phone].filter((x) => typeof x === "string").join(" | ");
-    for (const m of rest.match(EMAIL_TOKEN_RE) || []) { const w = m.toLowerCase() === own ? null : placeholderEmail(m); if (w) out.push({ field: "email", value: m, why: w }); }
-    for (const p of placeholderPhones(rest)) out.push({ field: "phone", value: p, why: "a placeholder number" });
+    for (const m of rest.match(EMAIL_TOKEN_RE) || []) if (m.toLowerCase().replace(/^mailto:/, "") !== own || /^mailto:/i.test(m)) email(m.toLowerCase());
+    for (const p of placeholderPhones(rest)) out.push({ field: "phone", value: p, why: "a placeholder or incomplete number", level: "refuse" });
+    const tpl = TEMPLATE_TEXT_RE.exec(rest.replace(EMAIL_TOKEN_RE, " "));
+    if (tpl) out.push({ field: "contact line", value: tpl[0].replace(/\s*\|$/, ""), why: "a template's own text, not their details", level: "refuse" });
     return out;
   }
-  // The same check on a file's own text (the submit gates, which hold only the bytes): the lines above the first section
-  // heading must carry an email, and no email or phone there may be a placeholder.
+  // The same check on a file's own text (the gates that hold only the bytes): the lines above the first section heading
+  // must carry an email, and no email or phone there may be refused. Rule 4 needs the person's record, which a file lacks.
   function fileContactProblems(lines) {
     const all = (lines || []).map((l) => String(l == null ? "" : l)), cut = all.findIndex((l) => HEADING_ALLOWLIST.includes(l.trim().toUpperCase()));
     // A layout that sets the contact beside the body reads back in another order: then every email in the file is judged.
     const top = all.slice(0, cut > 0 ? cut : Math.min(all.length, 8)).join(" | "), emails = top.match(EMAIL_TOKEN_RE) || all.join(" | ").match(EMAIL_TOKEN_RE) || [], out = [];
-    if (!emails.length) out.push({ field: "email", value: "", why: "missing" });
-    for (const e of emails) { const w = placeholderEmail(e); if (w) out.push({ field: "email", value: e, why: w }); }
-    for (const p of placeholderPhones(top)) out.push({ field: "phone", value: p, why: "a placeholder number" });
+    if (!emails.length) out.push({ field: "email", value: "", why: "missing", level: "refuse" });
+    for (const e of emails) { const w = placeholderEmail(e); if (w) out.push({ field: "email", value: e, why: w, level: "refuse" }); }
+    for (const p of placeholderPhones(top)) out.push({ field: "phone", value: p, why: "a placeholder or incomplete number", level: "refuse" });
     return out;
   }
-  const contactReason = (p) => `the ${p.field} at the top of the resume (${p.value || "none"}) is ${p.why}: the ${p.field} is not confirmed, so this resume is not ready to submit`;
+  // Truthful either way: what cannot be theirs is said as that; a doubtful one is said as needing their word.
+  const contactReason = (p) => p.level === "confirm"
+    ? `the ${p.field} at the top of the resume (${p.value}) is ${p.why}: it needs the person to confirm it is theirs before this resume is ready to submit`
+    : `the ${p.field} at the top of the resume (${p.value || "none"}) is ${p.why}: the ${p.field} is not confirmed, so this resume is not ready to submit`;
   const NUMERIC_DATE_RES = [/\b\d{1,2}\/\d{4}\b/g, /\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/g, /\b\d{4}-\d{2}(?:-\d{2})?\b/g, /\b\d{1,2}-\d{4}\b/g];
   function diffSequences(expected, actual) {
     // returns { missing:[], extra:[], moved:bool }
@@ -1231,7 +1265,7 @@ const CareerRender = (() => {
 
     // Fail closed: a contact email or phone that is a placeholder is never a pass. (A resume with no email at all is failed
     // by the renderer's verdict, career_tailor.ts contactProblems: this check also serves layout files that carry no header.)
-    if (resume) for (const p of contactProblems(resume.header)) if (p.why !== "missing") add("contact_unconfirmed", "fail", contactReason(p));
+    if (resume) for (const p of contactProblems(resume.header)) if (p.why !== "missing" && p.level === "refuse") add("contact_unconfirmed", "fail", contactReason(p));
     // BUG-2026-10-14-NDER (brief B6): two source-level FAILs.
     // (1) duplicate_line — a content line belongs in exactly one section;
     //     the same normalized line twice in the source document fails.
@@ -1365,7 +1399,7 @@ const CareerRender = (() => {
   const runtime = { zlib: !!rt.zlib, crypto: !!rt.crypto, Buffer: !!Buffer, codec: rt.zlib && rt.crypto ? "platform" : zlib && crypto ? "vendored" : "none" };
   // RELEASE 9: the byte primitives career_resume_design.ts builds its two layouts with (same codec, same ZIP writer).
   const primitives = { zipBuffer, unzipParts, encodeWinAnsi, pdfLiteral, escXml, deflate: (b) => zlibDeflateFixed(Bytes.from(b)), bytes: (x, enc) => Bytes.from(x, enc), concat: (xs) => Bytes.concat(xs) };
-  return { primitives, renderPdf, renderDocx, parseCheck, placeholderEmail, placeholderPhones, contactProblems, fileContactProblems, contactReason, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
+  return { primitives, renderPdf, renderDocx, parseCheck, placeholderEmail, doubtfulEmail, placeholderPhones, contactProblems, fileContactProblems, contactReason, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
   }
   return make(NODE_RUNTIME);
 })();

@@ -359,7 +359,7 @@ function contactProblems(R: any, resume: any, buf: any): string[] {
   }
   if (!(resume?.sections || []).some((s: any) => s.lines.some((l: any) => l.type === "entry"))) reasons.push("content: no experience, project or education entry");
   // Fail closed: an email or phone at the top that is missing or a placeholder is never a pass, on any layout.
-  for (const c of R.contactProblems(resume?.header)) reasons.push(`contact_unconfirmed: ${R.contactReason(c)}`);
+  for (const c of R.contactProblems(resume?.header)) if (c.level === "refuse") reasons.push(`contact_unconfirmed: ${R.contactReason(c)}`);
   return reasons;
 }
 // The submit gates hold only a file's bytes: what its own text says about the contact at its top. A file Trainee made always
@@ -496,22 +496,27 @@ export interface EditDone { role: string; entry: string; asked: number; before: 
   // complete: computed after the edit, every number, date and proper name of the confirmed entry is in what prints for it.
   // restored: what the edit as asked would have lost; the entry was printed whole instead.
   // left_out: the entry's confirmed details an asked-for shortening does not print, in their own words.
-  complete: boolean; restored: string[]; left_out: string[] }
+  complete: boolean; restored: string[]; left_out: string[]; id?: string; label?: string }
 const MAX_EDIT_LINES = 6;
-const roleKey = (s: string) => ` ${String(s ?? "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()} `;
+// A role as the person may type it: case, accents ("Zurich" finds Zürich) and punctuation aside.
+const roleKey = (s: string) => ` ${String(s ?? "").normalize("NFKD").replace(/\p{M}+/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim()} `;
+// Scripts written without spaces (メルカリ) have no word edges to match on.
+const names = (hay: string, want: string) => hay.includes(want) || (/[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/.test(want) && hay.includes(want.trim()));
 // A word before a full stop that does not end a sentence. When unsure, the text is not split.
 const ABBREV = new Set("dr mr mrs ms mx prof sr jr st mt ft no inc co corp ltd llc plc vs etc dept univ approx est fig gen gov rep sen col capt sgt rev hon ave blvd rd jan feb mar apr jun jul aug sep sept oct nov dec".split(" "));
 // A confirmed line cut into its details: at "; " and at a sentence end, never inside brackets, never after an abbreviation
 // ("Dr.", "Inc.", "U.S.", "e.g."), an initial ("J. Smith") or inside a number. Every word of the line is in exactly one piece.
 export function splitDetails(text: string): string[] {
   const t = String(text ?? ""), out: string[] = [];
-  let depth = 0, from = 0;
+  let depth = 0, from = 0, quoted = false;
   const cut = (end: number, next: number) => { out.push(t.slice(from, end)); from = next; };
   const shut = (w: string) => ABBREV.has(w) || /^(\p{L}{1,3}\.)+\p{L}{0,3}$/u.test(w) || /^\p{L}$/u.test(w);
   for (let i = 0; i < t.length; i++) {
     const c = t[i];
-    if ("([{".includes(c)) depth++;
-    else if (")]}".includes(c)) depth = Math.max(0, depth - 1);
+    if ("([{“".includes(c)) depth++;
+    else if (")]}”".includes(c)) depth = Math.max(0, depth - 1);
+    else if (c === '"') quoted = !quoted;
+    if (quoted) continue;
     if (depth || !/\s/.test(t[i + 1] ?? "")) continue;
     const gap = /^\s+/.exec(t.slice(i + 1))![0].length, after = t.slice(i + 1 + gap);
     if (c === ";" && after) cut(i, i + 1 + gap);
@@ -545,7 +550,10 @@ export function lostTokens(source: string, printed: string): string[] {
 export function entryParts(f: any): { head: string; details: string[] } {
   const title = String(f?.title || f?.text || "").trim();
   const bullets = (f?.bullets || []).map((b: unknown) => String(b ?? "").trim()).filter(Boolean);
-  const colon = title.indexOf(": ");
+  // The head ends at the ":" after its dates ("Capstone: Route Planner, Team Lead (2023): ..." keeps its own colon); with no
+  // dates in brackets, at the first ": ".
+  const dated = /^[\s\S]*?\)(?=:\s)/.exec(title);
+  const colon = dated ? dated[0].length : title.indexOf(": ");
   const head = colon > 0 ? title.slice(0, colon).trim() : title;
   const details = colon > 0 ? splitDetails(title.slice(colon + 2)) : [];
   const flat = (x: string) => x.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
@@ -560,11 +568,19 @@ export function applyEdits(resume: any, profile: any, edits: ResumeEdit[]): { ok
   out.sections = out.sections || [];
   const facts = (profile.facts || []).filter((f: any) => HEADING[f.kind]);
   const done: EditDone[] = [];
-  for (const e of edits) {
+  // One entry named twice in one call takes its last edit, made against the version being edited: what is said about an entry
+  // is then its final state against where it started, never a step in between.
+  const last = new Map<string, number>();
+  for (const [k, e] of edits.entries()) {
+    const hits = facts.filter((f: any) => names(roleKey(entryParts(f).head), roleKey(e.role)) || names(roleKey(f.org || f.name || ""), roleKey(e.role)));
+    if (roleKey(e.role).trim().length >= 2 && hits.length === 1) last.set(String(hits[0].id), k);
+  }
+  for (const [k, e] of edits.entries()) {
     const want = roleKey(e.role), n = Math.trunc(Number(e.lines));
     if (want.trim().length < 2) return { ok: false, reason: "an edit names no role; ask which entry they mean" };
     if (!Number.isFinite(n) || n < 1 || n > MAX_EDIT_LINES) return { ok: false, reason: `an edit asks for ${e.lines} lines for ${e.role}; it takes 1 to ${MAX_EDIT_LINES}` };
-    const hits = facts.filter((f: any) => roleKey(entryParts(f).head).includes(want) || roleKey(f.org || f.name || "").includes(want));
+    const hits = facts.filter((f: any) => names(roleKey(entryParts(f).head), want) || names(roleKey(f.org || f.name || ""), want));
+    if (hits.length === 1 && last.get(String(hits[0].id)) !== k) continue;
     if (!hits.length) return { ok: false, reason: `no confirmed entry on their record is named "${e.role}"; ask which entry they mean (nothing is invented)` };
     if (hits.length > 1) return { ok: false, reason: `"${e.role}" names ${hits.length} confirmed entries (${hits.map((f: any) => entryParts(f).head).join("; ")}); ask which one they mean` };
     const f = hits[0], id = String(f.id), heading = HEADING[f.kind];
@@ -614,8 +630,12 @@ export function applyEdits(resume: any, profile: any, edits: ResumeEdit[]): { ok
     if (led) sec.lines.unshift(...block);
     else sec.lines.splice(added_back ? sec.lines.length : positionOf(sec, resume, id), 0, ...block);
     done.push({ role: e.role, entry: head, asked: n, before, now: keep.length, available: details.length, change, added_back, led, expand_short: !restored.length && n > details.length,
-      complete: !left_out.length && lostTokens(source, printedOf(block)).length === 0, restored, left_out });
+      complete: !left_out.length && lostTokens(source, printedOf(block)).length === 0, restored, left_out, id,
+      // The employer alone names the entry, unless another entry shares it: then its title and dates are said too.
+      label: facts.some((g: any) => String(g.id) !== id && entryParts(g).head.split(/[,(:]/)[0].trim().toLowerCase() === head.split(/[,(:]/)[0].trim().toLowerCase()) ? head : head.split(/[,(:]/)[0].trim() });
   }
+  // "Now first in its section" is said of the final page: only of the entry that is first there.
+  for (const d of done) d.led = d.led && out.sections.some((s: any) => ((s.lines || []).find((l: any) => l.type === "entry")?.factIds || []).map(String).includes(d.id));
   out.lines = out.sections.flatMap((s: any) => (s.lines || []).map((l: any) => ({ ...l, section: s.heading })));
   return { ok: true, resume: out, done };
 }
@@ -657,7 +677,7 @@ export function editLine(done: EditDone[]): string {
     // Said only when the comparison found it so (complete), never asserted.
     const short = e.expand_short && e.complete && !e.left_out.length ? ` (all the confirmed record holds for it)` : "";
     // What a shortening left out is named; a list too long to say is counted (the full list is the edit's left_out).
-    const named = e.left_out.join("; "), out = !e.left_out.length ? "" : ` (left out of ${e.entry.split(/[,(:]/)[0].trim()}: ${named.length <= 240 ? named : `${e.left_out.length} confirmed details`})`;
+    const named = e.left_out.join("; "), out = !e.left_out.length ? "" : ` (left out of ${e.label ?? e.entry.split(/[,(:]/)[0].trim()}: ${named.length <= 240 ? named : `${e.left_out.length} confirmed details`})`;
     const whole = e.restored.length ? ` (printed whole: the edit as asked would have dropped ${e.restored.join(", ")})` : e.change === "condensed" && e.complete ? ` (nothing confirmed was dropped)` : "";
     return `${e.entry}: ${what}${e.led ? ", now first in its section" : ""}${short}${whole}${out}`;
   };
@@ -684,7 +704,7 @@ export type TailorOut = {
   // RELEASE 9: the posting against the resume (missing, weak, emphasise) and the top of the file as it prints, both for the
   // chat before the file is sent; the layout and its page fit when one was asked for.
   gaps: GapReport; preview: string; layout: DesignLayout | "plain"; template: TemplateId | null; fit: FitRecord | null; own_layout?: { replaced: number; missing: string[] };
-} | { ok: false; refused: "no_confirmed_facts" | "no_contact" | "truth_audit" | "render" | "ats_parse" | "link" | "edit"; reason: string; ms: number };
+} | { ok: false; refused: "no_confirmed_facts" | "no_contact" | "contact_needs_confirmation" | "truth_audit" | "render" | "ats_parse" | "link" | "edit"; reason: string; ms: number };
 
 export async function tailorForPosting(o: {
   userId: string; profile: any; posting: { text: string; job_id?: string | null; company?: string | null };
@@ -706,9 +726,12 @@ export async function tailorForPosting(o: {
   const R0 = CareerRender as any, typedEmail = clean.basics?.email ? String(clean.basics.email) : "";
   const badEmail = top.email ? R0.placeholderEmail(top.email) as string | null : null;
   if (badEmail) {
-    return { ok: false, refused: "no_contact", ms: ms(), reason: `the email on file for the top of the resume (${top.email}) is ${badEmail}: it is not an email they confirmed, and an employer's system reads it. No resume was made or stored. ${
+    return { ok: false, refused: "no_contact", ms: ms(), reason: `the email on file for the top of the resume (${top.email}) is ${badEmail}, so it cannot go on a resume an employer's system reads. No resume was made or stored. ${
       typedEmail && R0.placeholderEmail(typedEmail) ? `Ask exactly: "${EMAIL_QUESTION}"` : "It is on the resume they sent: ask for their real email and for the resume again with it"}` };
   }
+  // Rule 4 (148): a template's stand-in name on a real domain may be theirs. It is theirs once they typed that address for
+  // their resume (set_resume_contact records it in basics.contact_checked); until then the reply asks, and says why.
+  const checked: string[] = Array.isArray(clean.basics?.contact_checked) ? clean.basics.contact_checked.map((x: unknown) => String(x).trim().toLowerCase()) : [];
   const placeholder = !!o.reviewDraft && (o.contact ?? "confirmed") === "confirmed" && !!top.name && !top.email;
   if (!placeholder && (!top.name || !top.email)) {
     // H2H leftovers 1: a piece the confirmed resume header holds is not asked again; only the missing one is. A name or email
@@ -758,7 +781,9 @@ export async function tailorForPosting(o: {
   {
     const rh = (o.contact ?? "confirmed") === "confirmed" && clean.resume_header?.confirmed_at ? clean.resume_header : null;
     const mine = [typedEmail, rh?.email].filter(Boolean).map((x) => String(x).trim().toLowerCase()), prints = String(doc.header?.email ?? "").trim().toLowerCase();
-    const bad = (R0.contactProblems(doc.header) as any[]).filter((c) => !(placeholder && c.field === "email" && c.value === EMAIL_PLACEHOLDER)).map((c) => R0.contactReason(c) as string);
+    const found = (R0.contactProblems(doc.header, { checked }) as any[]).filter((c) => !(placeholder && c.field === "email" && c.value === EMAIL_PLACEHOLDER));
+    const bad = found.filter((c) => c.level === "refuse").map((c) => R0.contactReason(c) as string), ask = found.filter((c) => c.level === "confirm");
+    if (!bad.length && ask.length) return { ok: false, refused: "contact_needs_confirmation", ms: ms(), reason: `${ask[0].value} looks like a template address (${ask[0].why}), so it is not put on a resume until they say it is theirs. No resume was made or stored. Ask exactly: "Is ${ask[0].value} your own email address? Please type the email that should go at the top of your resume."` };
     if (!placeholder && !bad.length && !mine.includes(prints)) bad.push(`the email that would print (${prints || "none"}) is not the email they confirmed`);
     if (bad.length) return { ok: false, refused: "no_contact", reason: `${bad.slice(0, 3).join("; ")}. No resume was made or stored. Ask for the real one${rh ? ", and for the resume again with it" : ""}`, ms: ms() };
   }

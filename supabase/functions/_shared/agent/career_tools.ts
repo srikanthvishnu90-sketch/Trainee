@@ -1018,7 +1018,10 @@ export function careerTools(deps: {
         if (only === null) throw new Error(`not saved: ${hasEmail ? "no name is on their confirmed record either, so their name must be typed too" : hasName ? "no email is on their confirmed record either, so their email must be typed too" : "nothing was typed"}. Ask them: "${question}"`);
         const r = contactFromMessage(c.turn.message, i.name, i.email, only ? { only } : {});
         if (!r.ok) throw new Error(`not saved: ${r.error}. Ask them: "${question}"`);
-        p.basics = { ...(p.basics || {}), ...(only !== "email" ? { name: r.name } : {}), ...(only !== "name" ? { email: r.email } : {}) };
+        // An address they typed for their resume is theirs by their own word (148 rule 4: a template-looking one needs exactly this).
+        const typedNow = only !== "name" && r.email ? [String(r.email).trim().toLowerCase()] : [];
+        p.basics = { ...(p.basics || {}), ...(only !== "email" ? { name: r.name } : {}), ...(only !== "name" ? { email: r.email } : {}),
+          ...(typedNow.length ? { contact_checked: [...new Set([...(Array.isArray(p.basics?.contact_checked) ? p.basics.contact_checked : []), ...typedNow])].slice(-10) } : {}) };
         const shown = resumeContact(confirmedOnly(p));
         return { saved: { ...(only !== "email" ? { name: r.name } : {}), ...(only !== "name" ? { email: r.email } : {}) }, restated: `Your resume will show ${shown.name} and ${shown.email} at the top.` };
       },

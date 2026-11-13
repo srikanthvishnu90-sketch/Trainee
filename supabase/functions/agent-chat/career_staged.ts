@@ -29,7 +29,7 @@ import { correctedAsk, refinedAsk } from "../_shared/search_correction.ts";
 import { askFor } from "../_shared/career_search_judge.ts";
 import { namedDraftAsk, outreachAsk } from "../_shared/outreach_ask.ts";
 import { researchReplyOn } from "../_shared/research_reply.ts"; // D-047
-import { familyAskOf } from "../_shared/file_family_ask.ts"; // D-072 (files reachable)
+import { familyAskOf, fileNamedIn } from "../_shared/file_family_ask.ts"; // D-072 (files reachable)
 import { pathCompareAskOf } from "../_shared/career_path_comparisons.ts"; // D-072 (files writers)
 import { knowledgeOn } from "../_shared/agent/knowledge/index.ts"; // D-060
 export type BrainMode = "router" | "agent" | "staged";
@@ -477,6 +477,11 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   // brief", "show me my offer comparison") is the brain's, which makes it from their records with open_record_file (or says what is
   // missing); the router's answer is its data. An exact payload, an approval, a control or a bare reply stays code's.
   if (!NON_ENGLISH_KEPT.test(intent) && !PAYLOAD_INTENTS.has(intent) && familyAskOf(o.message)) return { brain: true, mode, intent, reason: "file_family_ask", router: routerAnswer(intent, probe) };
+  // Review of #805 (familyAskOf fails closed): a message that names one of those Files but is not a whole-message see-ask ("don't
+  // forget to send me my weekly brief", and equally "dnt send me the weekly brief") was read by the router as a resume delivery
+  // ("no resume has been tailored") whenever it had "send": the wrong answer either way. With no document to deliver it is the
+  // brain's, which has open_record_file and the digest settings and is NOT held to either (familyAskOf is null): the model decides.
+  if (intent === "career_document_delivery" && fileNamedIn(o.message) && !((probe.result as any)?.documents?.length)) return { brain: true, mode, intent, reason: "file_named", router: routerAnswer(intent, probe) };
   // D-072 (files writers): the person comparing paths they are weighing is the brain's, which saves the comparison in their own words
   // (compare_paths) for their Path comparison File; the router's answer (it read "two paths" as the people graph's) is its data.
   if (!NON_ENGLISH_KEPT.test(intent) && !PAYLOAD_INTENTS.has(intent) && pathCompareAskOf(o.message)) return { brain: true, mode, intent, reason: "path_compare", router: routerAnswer(intent, probe) };

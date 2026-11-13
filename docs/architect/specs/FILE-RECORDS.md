@@ -144,7 +144,7 @@ unreachable (item 6b report, `docs/architect/reports/ITEM6B-ROOT-CAUSES-20261112
 
 The chat path for the eleven record-backed families: the person's ask (`_shared/file_family_ask.ts familyAskOf`) routes the
 turn to the brain in staged mode (`career_staged.ts`, reason `file_family_ask`; an exact payload, an approval, a control such as
-"pause my weekly brief" and a bare reply stay code's). The brain calls `open_record_file` with the family's name only
+"pause my weekly brief" and a bare reply stay code's; what counts as an ask is below). The brain calls `open_record_file` with the family's name only
 (`_shared/agent/file_family_tool.ts`); code reads the person's records through the same `FamilyRecords` the File server draws
 the page from (`_shared/file_family_make.ts makeFamilyFile`, `supabaseFamilyMaker`), and makes the File with
 `createFamily(userId, family, title, null, { ref })` only when the records hold something: no view is stored, the page reads the
@@ -154,11 +154,41 @@ is missing (never a hollow File). Records unreadable: nothing is made. If the mo
 process check asks it once (`career_brain.ts processCheck familyFile`). Approvals on these pages stay POST forms bound to the
 payload hash shown (D-MS-1, D-MN-2).
 
-Not a File ask (`familyAskOf` is null, so the turn is not held to the tool): a control or an opt-out however it is worded
-("pause my weekly brief", "no more weekly brief", "don't send me the weekly brief anymore", "weekly digest off"), which stays
-with the settings path, and an ask to make something new ("build a search plan", "draft a counter plan"), which stays with the
-planning turn. The interview time in `holds` is the page's: the person's zone, with the zone named
-(`tests/architect/files-ask-optout-d072.test.ts`).
+The ask reader fails closed (review of #805; three denylist rounds each sent the File to people who had asked for it to
+stop, in words the list did not have). A non-null `familyAskOf` holds the turn to the tool, so it is an allowlist of
+whole-message shapes: a family is returned only when the ENTIRE message, after normalising case, apostrophe variants,
+whitespace, punctuation and politeness (hey, please, thanks, "can you", "could you"), is one of these, and any other word
+anywhere is null:
+
+- a see verb (show, open, see, view, pull up, bring up, send, resend, give, get, share, with "me" or "us"; "can I
+  see/have/get/open"; "I want to / I'd like to / I need to / let me see, open, view, get, look at"; "where is / where's";
+  "what's in / on"; "link to / for"), then my/the/that/our/this, then the File's own name with an optional File word (file,
+  page, link, doc, one-pager, sheet, url) or a generic phrase WITH a File word ("my interviews page", "the page with my
+  profile", "a file comparing my offers"), then at most a tail from a closed list (again, now, today, tonight, this morning,
+  real quick, for me, here, in chat, on telegram/whatsapp/imessage, by end of day, when you can);
+- the File's own name alone ("my weekly brief", "weekly brief?");
+- the File they can't reach ("I can't find my interview hub", "I never got my weekly brief", "my search plan link doesn't
+  open"), optionally followed by "send me the link";
+- with one more clause, before or after, only from a closed list of statements that they can't reach it: "I can't / couldn't
+  find / open / see / get it / the link / the page", "the link / the old one doesn't / won't / isn't work(ing) / load(ing) /
+  open(ing)", "I never got it", "you didn't send it", "I lost the link".
+
+Null by construction, with no list of stop words to keep up: an opt-out or a control however it is worded ("pause my weekly
+brief", "kill the weekly brief", "weekly brief? no thanks", "no me mandes el weekly brief", "send me the weekly brief
+never"), an ask to make something new ("build a search plan", "make me my weekly brief": make and build are not see verbs),
+a comparison or a question about something else ("career brief vs resume", "my boss wants me to send a weekly report"), and
+any message with a second topic or a free clause ("show me my interview hub so I can prepare", "stop. show me my weekly
+brief"). A short list of stop words is also refused outright, as defence in depth. Null never means "no": the turn is only
+not held to the tool. A see-ask that is not one of the shapes is an accepted miss: in staged mode it reaches the brain by
+the other routes with `open_record_file` offered and not held (the model decides), and a message that names one of these
+Files which the router read as a resume delivery ("don't forget to send me my weekly brief" got "no resume has been
+tailored") goes to the brain the same way (`career_staged.ts`, reason `file_named`, `fileNamedIn`; never held). Two kinds
+stay the router's because they name a second task it answers: a role ("... for the design role": a search) and interview
+preparation ("... my interviews page for the research role": the prep File). Measured on the reviewer's 188 messages plus 64
+more opt-outs: opt-outs null 79/79 and 64/64, make-new null 24/24, not-a-File null 25/25, see-asks held 34/60 with the 26
+misses listed (`tests/architect/files-ask-failclosed-20261113.test.ts`, `tests/architect/files-ask-clause-20261113.test.ts`).
+The interview time in `holds` is the page's: the person's zone, with the
+zone named (`tests/architect/files-ask-optout-d072.test.ts`).
 
 | Family | File | The ask (examples) | Creator | Records the page reads | Before D-072 | After |
 | --- | --- | --- | --- | --- | --- | --- |

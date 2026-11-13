@@ -236,3 +236,81 @@ Deno.test({ name: "database: the stop closes only that person's unstarted rows s
     });
   } finally { await pg.stop(); }
 } });
+
+// The chat, end to end on a real Postgres: a correction through correct_profile_fact stops the application stating the old value
+// and the reply names it; putting a set-aside fact back (code's own question, the person's yes) re-queues nothing; when the stop
+// cannot run the reply says the approved applications could not be checked.
+Deno.test({ name: "chat: a correction stops the approved application and says so; restoring the fact re-queues nothing; a stop that cannot run is said", sanitizeResources: false, sanitizeOps: false, async fn() {
+  if (!pgBinDir()) { if (Deno.env.get("CI") === "true") throw new Error("needs Postgres 16"); console.log("NOT_RUN locally: no Postgres binaries"); return; }
+  const WHO2 = "7b0f8f8e-6a43-4a49-9d2c-00000b0d0c02";
+  const pg: Pg = await startPg(), realFetch = globalThis.fetch;
+  let handler: Awaited<ReturnType<typeof careerHandler>> | null = null;
+  // The scripted model: the next tool call it makes (once), then plain text.
+  let next: { name: string; input: Record<string, unknown> } | null = null;
+  const model = async (input: Request | URL | string, init?: RequestInit): Promise<Response> => {
+    const req = input instanceof Request && !init ? input : new Request(input as any, init);
+    if (new URL(req.url).hostname !== "api.anthropic.com") return new Response("no", { status: 404 });
+    return anthropicWire(req, async (body: any) => {
+      const call = next && Array.isArray(body.tools) && body.tools.some((t: any) => (t.function?.name ?? t.name) === next!.name) ? next : null;
+      if (call) next = null;
+      const message = call ? { role: "assistant", content: "", tool_calls: [{ id: "t1", type: "function", function: { name: call.name, arguments: JSON.stringify(call.input) } }] } : { role: "assistant", content: "Okay." };
+      return new Response(JSON.stringify({ id: "f", model: body.model, choices: [{ index: 0, message, finish_reason: call ? "tool_calls" : "stop" }], usage: { prompt_tokens: 10, completion_tokens: 4 } }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+  };
+  const seed = (jid: string, co: string, gpa: string) => pg.sql(`set session_replication_role = replica; insert into public.career_apply_jobs (user_id, job_id, company, url, payload, payload_hash, approval_hash, state, created_at)
+    values ('${WHO2}', '${jid}', '${co}', 'https://boards.greenhouse.io/x/jobs/1', '{"answers":[{"label":"GPA","value":"${gpa}"}]}', repeat('b', 64), repeat('b', 64), 'queued', now()); set session_replication_role = origin;`);
+  const state = async (jid: string) => (await pg.sql(`select state from public.career_apply_jobs where user_id = '${WHO2}' and job_id = '${jid}'`)).trim();
+  const gpa = async () => JSON.parse((await pg.sql(`select jsonb_path_query_first(state, 'strict $.** ? (@.type() == "object" && exists(@.id) && exists(@.text) && @.text like_regex "^GPA: ")')::text from public.agent_flow_state where user_id = '${WHO2}'`)).trim() || "null");
+  try {
+    await supabaseParity(pg);
+    await pg.sql(`insert into auth.users (id, email) values ('${WHO2}', '${WHO2}@example.test'); insert into public.profiles (id) values ('${WHO2}'); insert into public.career_watch_kv (user_id, key, value) values ('${WHO2}', 'career:account', '{"epoch":0,"version":0,"paused":false}');`);
+    for (const k of ["CAREER_BRAIN", "CAREER_BRAIN_ROUTER_INTENTS", "MODEL_PROVIDER", "CAREER_REPLY_WRITER"]) Deno.env.delete(k);
+    Deno.env.set("ANTHROPIC_API_KEY", "sk-fake-not-a-key"); globalThis.fetch = model as typeof fetch;
+    handler = await careerHandler(pg, { "tok-s2": WHO2 });
+    const chat = handler.chat("tok-s2");
+    await chat.say(PERSONA.setup[0]); await chat.say(PERSONA.setup[1]);
+    const fact = await gpa();
+    assertNode.equal(fact?.text, "GPA: 3.9", "the confirmed GPA fact is on file");
+
+    // 1. Set aside: stopped, and the reply says which application.
+    await seed("greenhouse:acme:1", "Acme", "3.9"); await seed("greenhouse:bolt:1", "Bolt", "3.95");
+    const aside = await chat.say("the 3.9 gpa is outdated");
+    assertNode.match(aside.reply, /Set aside, not deleted[^\n]*GPA: 3\.9/);
+    assertNode.match(aside.reply, /1 approved application that hadn't gone out yet states that answer, so it is stopped and not sent \(Acme\)/, `the reply names what was stopped: ${aside.reply}`);
+    assertNode.deepStrictEqual([await state("greenhouse:acme:1"), await state("greenhouse:bolt:1")], ["not_submitted", "queued"], "only the application stating 3.9");
+
+    // 2. Put back: code asks its own question, the person says yes, the fact is theirs again; the stopped application stays stopped.
+    next = { name: "confirm_profile_fact", input: { id: fact.id } };
+    const ask = await chat.say("please put my GPA back on my profile");
+    assertNode.equal(next, null, `the model's confirm_profile_fact call ran: ${ask.reply}`);
+    assertNode.ok((await gpa()).withdrawn_by_owner, "still set aside until their yes");
+    next = { name: "confirm_profile_fact", input: { id: fact.id } };
+    const yes = await chat.say("yes");
+    const back = await gpa();
+    assertNode.ok(!back.withdrawn_by_owner && back.restored_by_owner, `the fact is back: ${yes.reply}`);
+    assertNode.equal(await state("greenhouse:acme:1"), "not_submitted", "putting the fact back re-queues nothing: the person approves again");
+    assertNode.equal((await pg.sql(`select count(*) from public.career_apply_jobs where user_id = '${WHO2}' and state = 'queued'`)).trim(), "1");
+    assertNode.doesNotMatch(yes.reply, /stopped and not sent/);
+
+    // 3. A correction through correct_profile_fact: the application stating the old value is stopped and named.
+    await seed("greenhouse:core:1", "Core", "3.9");
+    next = { name: "correct_profile_fact", input: { id: fact.id, text: "GPA: 3.7" } };
+    const fixed = await chat.say("my GPA is 3.7 now");
+    assertNode.equal(next, null, `the model's correct_profile_fact call ran: ${fixed.reply}`);
+    assertNode.equal((await gpa()).text, "GPA: 3.7");
+    assertNode.match(fixed.reply, /1 approved application that hadn't gone out yet states that answer, so it is stopped and not sent \(Core\)/, `the reply names what the correction stopped: ${fixed.reply}`);
+    assertNode.equal(await state("greenhouse:core:1"), "not_submitted");
+    assertNode.equal((await pg.sql(`select string_agg(reason, ',' order by id) from public.career_apply_fact_changes where user_id = '${WHO2}'`)).trim(), "set_aside,corrected");
+
+    // 4. The stop cannot run (the function is gone): the reply says the approved applications could not be checked.
+    await pg.sql(await Deno.readTextFile(ROLLBACK));
+    await seed("greenhouse:dune:1", "Dune", "3.7");
+    next = { name: "correct_profile_fact", input: { id: fact.id, text: "GPA: 3.6" } };
+    const quiet = console.error; console.error = () => {};
+    let unchecked: Awaited<ReturnType<typeof chat.say>>;
+    try { unchecked = await chat.say("my GPA is 3.6 now"); } finally { console.error = quiet; }
+    assertNode.equal((await gpa()).text, "GPA: 3.6");
+    assertNode.ok(unchecked.reply.includes(STALE_UNCHECKED_LINE), `a stop that could not run is said: ${unchecked.reply}`);
+    assertNode.doesNotMatch(unchecked.reply, /stopped and not sent/);
+  } finally { handler?.restore(); globalThis.fetch = realFetch; await pg.stop(); }
+} });

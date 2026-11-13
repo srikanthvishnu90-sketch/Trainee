@@ -652,7 +652,10 @@ export function statusQuestion(message: string): boolean {
 // Round 3: a sentence of a reply that reads like a statement of where their applications stand, by a broad test: the application
 // words; the ways of saying "none" or "that is all" ("nothing has gone out", "clean slate", "so far", "at zero", "the list is
 // empty", "only Acme"); or a quantity said of the person. What Trainee itself did not send is not one ("Nothing was sent.").
-const IDIOM = /\bgone\s+out\b|\bclean\s+slate\b|\bso\s+far\b|\b(?:at|from|still\s+at)\s+(?:zero|none|square\s+one)\b|\bzero\s+sent\b|\bzilch\b|\bzip\b|\bstarting\s+(?:fresh|from\s+scratch)\b|\bfrom\s+scratch\b|\b(?:board|list|slate|queue)\s+is\s+(?:bare|empty|blank|clear)\b|\bnot\s+a\s+single\b|\bwhole\s+list\b|\bon\s+(?:the|your)\s+list\b|\bhave\s+your\s+resume\b|\b(?:never\s+)?went\s+through\b|\bfirst\s+(?:one|application)\b|\bnothing\s+from\s+you\b|\b(?:[Oo]nly|[Jj]ust)\s+(?-i:[A-Z])[a-z]+\b/i;
+const IDIOM = /\bgone\s+out\b|\bclean\s+slate\b|\bso\s+far\b|\b(?:at|from|still\s+at)\s+(?:zero|none|square\s+one)\b|\bzero\s+sent\b|\bzilch\b|\bzip\b|\bstarting\s+(?:fresh|from\s+scratch)\b|\bfrom\s+scratch\b|\b(?:board|list|slate|queue)\s+is\s+(?:bare|empty|blank|clear)\b|\bnot\s+a\s+single\b|\bwhole\s+list\b|\bon\s+(?:the|your)\s+list\b|\bhave\s+your\s+resume\b|\b(?:never\s+)?went\s+through\b|\bfirst\s+(?:one|application)\b|\bnothing\s+from\s+you\b/i;
+// "only Acme", "just Stripe": a capitalized name after only/just. Case-sensitive on the name's first letter, written without an
+// inline modifier group (not supported in every realm the bundle runs in); the same matches as the /i alternative it replaces.
+const IDIOM_NAMED = /\b(?:[Oo][Nn][Ll][Yy]|[Jj][Uu][Ss][Tt])\s+[A-Z][A-Za-z]+\b/;
 const OF_YOU = /\byou(?:'re|'ve|r)?\b[^.!?]{0,40}\b(?:zero|none|nothing|nobody|no\s+one|only\s+one|anything\s+in|empty)\b|\b(?:zero|none|nothing|nobody)\b[^.!?]{0,30}\byou(?:r)?\b/i;
 // Round 5: the person's own applications only. "Applied" opening a resume line ("Applied ML to churn"), quoted text, and the
 // application words with no "you/your/I/my" in the sentence are not a statement of their status.
@@ -718,7 +721,7 @@ const YOU_DID = /\b(?:you|you've|you'd|u)\s+(?:\w+\s+)?(?:went|gone|did|done|sen
 const BULLET = /^\s*(?:[-*•]|\d+[.)])\s+/;
 function keptSentences(reply: string, strict: boolean, own: string): string {
   const stays = (x: string) => { const t = tidy(x).replace(/\*+/g, "").replace(BULLET, "");
-    return strict ? !HELD_STATUS.test(t) && !IDIOM.test(t) && !OUTCOME.test(t) && !/^\W*(?:yes|yep|yeah|no|nope|nah|not\s+yet)\b/i.test(t) && !YOU_DID.test(t) && (LISTING.test(t) || ACTION.test(t) || ADVICE.test(t) || HELP_Q.test(t)) : !statusLike(t); };
+    return strict ? !HELD_STATUS.test(t) && !IDIOM.test(t) && !IDIOM_NAMED.test(t) && !OUTCOME.test(t) && !/^\W*(?:yes|yep|yeah|no|nope|nah|not\s+yet)\b/i.test(t) && !YOU_DID.test(t) && (LISTING.test(t) || ACTION.test(t) || ADVICE.test(t) || HELP_Q.test(t)) : !statusLike(t); };
   const out: string[] = [];
   let dropped = false, headGone = false, anyBullet = false;
   for (const line of String(reply ?? "").split(own).join("").split("\n")) {

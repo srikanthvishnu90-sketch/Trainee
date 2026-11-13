@@ -47,6 +47,21 @@ const NOT_CUE_AFTER = /^\s*(?:bonus|bonuses|sheet|desk|form|of\s+conduct|review|
 const ID_BEFORE = /(?:\b(?:req|requisition|job|id|ids|ref|reference|confirmation|conf|application|app|candidate|order|ticket|case|invoice|booking|employee|flight|room|suite|building|floor|ext|extension|meeting|conference|webinar|zip|postal|course|class|policy|claim|member|student|registration|item|model|version|v|chapter|page|step|round|level|grade|unit|seat|req\.?\s*#|#)\s*(?:id|no\.?|number|#|is)?\s*[:#]?\s*)$/i;
 const PAY = /\b(?:salary|salaries|base|bonus|bonuses|stipend|rate|rates|compensation|comp|pay|paid|offer|offering|per\s+(?:year|annum|month|hour|week)|annual|annually|hourly|monthly|\/yr|\/hr|\/year|\/hour|ctc|lpa|equity|rsus?|options|relocation|allowance|reimburse\w*|budget|sign-on\s+bonus|raised|grant|usd|eur|gbp|inr|dollars|euros|pounds)\b|[$€£¥₹]/i;
 const MONTH = String.raw`(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?`;
+const PW_WORD = /^(?:passwords?|passwd|pwd|passcodes?|pass\s+codes?|passwort|kennwort|contrase[nñ]a|senha|пароль|mot\s+de\s+passe|密码|密碼|パスワード|비밀번호|סיסמה|पासवर्ड)$/iu;
+// What a waiting credential cue skips: by FORMAT only (never by a label such as Ref, Order or Booking): a year next to (c),
+// Inc or a month name, a price, a percentage, a phone number in phone grouping, a date or a time.
+function carryKeep(tok: string, before: string, after: string): boolean {
+  const t = tok.trim();
+  if (/^(?:19|20)\d{2}$/.test(t) && (/(?:\u00a9|\(c\)|copyright)\s*$/i.test(before) || /^\s*,?\s*(?:\p{Lu}[\p{L}&.-]*\s+){0,3}(?:inc|llc|ltd|corp|gmbh|plc|co)\b/iu.test(after) || new RegExp(String.raw`${MONTH}\s*(?:\d{1,2}(?:st|nd|rd|th)?,?\s*)?$`, "i").test(before) || new RegExp(String.raw`^\s*${MONTH}`, "i").test(after))) return true;
+  if (/[$€£¥₹]\s?$/.test(before) || /^\s*%/.test(after) || /^\s?(?:k|m|usd|eur|gbp|inr|dollars|euros|pounds)\b/i.test(after)) return true;
+  if (/^(?:\(?\d{3}\)?[ .-]\d{3}[ .-]\d{4}|\d{3}[ .-]\d{4})$/.test(t) || (/\+\s?$/.test(before) && t.replace(/\D/g, "").length >= 8)) return true;
+  const dm = /^(\d{1,4})[-./](\d{1,2})[-./](\d{1,4})$/.exec(t);
+  if (dm) { const [a, b, c] = [Number(dm[1]), Number(dm[2]), Number(dm[3])]; if ((a <= 31 && b <= 12) || (a <= 12 && b <= 31) || (a > 1900 && b <= 12 && c <= 31)) return true; }
+  if (/^\d{1,2}[/.]\d{1,2}$/.test(t) && Number(t.split(/[/.]/)[0]) <= 31 && Number(t.split(/[/.]/)[1]) <= 31) return true;
+  if (/^\d{1,2}:\d{2}(?::\d{2})?$/.test(t) && Number(t.split(":")[0]) < 24 && Number(t.split(":")[1]) < 60) return true;
+  if (new RegExp(String.raw`${MONTH}\s*$`, "i").test(before) || new RegExp(String.raw`^\s*${MONTH}`, "i").test(after)) return true;
+  return false;
+}
 function keepToken(tok: string, before: string, after: string, sentence: string, cueGap: number): boolean {
   const t = tok.trim(), digits = t.replace(/\D/g, "");
   if (ID_BEFORE.test(before)) return true;
@@ -106,11 +121,11 @@ function codesIn(line: string, carried: boolean, out: Removed[], strong = false)
     if (gap === Infinity) return;
     const viaCarry = gap === -1, imp = !viaCarry && gap % 1 !== 0;
     if (imp && kind === "digits" && digits < 4) return;
-    if (kind === "digits" && keepToken(tok, line.slice(Math.max(0, start - 40), start), line.slice(end, end + 16), sentence, imp || viaCarry ? 99 : gap)) return;
+    if (kind === "digits" && (viaCarry ? carryKeep(tok, line.slice(Math.max(0, start - 40), start), line.slice(end, end + 30)) : keepToken(tok, line.slice(Math.max(0, start - 40), start), line.slice(end, end + 16), sentence, imp ? 99 : gap))) return;
     // A carried code ends its sentence, or is followed by two words at most ("552019 now"); "556677 people visit yearly" is a count.
     if (viaCarry && ((digits < 4 && !/^[\p{Nd} .-]+$/u.test(line.trim())) || line.slice(end).trim().split(/\s+/).filter((w) => /\p{L}/u.test(w)).length > 2)) return;
     if (imp && kind === "digits" && /^\s+(?:[A-Z][a-z]+\s+)?(?:st|street|ave|avenue|blvd|boulevard|rd|road|lane|ln|dr|drive|way|place|pl|court|ct|square|sq|suite|floor)\b/i.test(line.slice(end, end + 30))) return;
-    if (kind === "alnum" && ID_BEFORE.test(line.slice(Math.max(0, start - 40), start))) return;
+    if (kind === "alnum" && !viaCarry && ID_BEFORE.test(line.slice(Math.max(0, start - 40), start))) return;
     cut.push([start, end, tok, viaCarry]);
   };
   for (const m of line.matchAll(WORD_RUN)) consider(m, "words");
@@ -239,7 +254,7 @@ export function redact(text: unknown): { text: string; removed: Removed[] } {
   for (const [re, ok] of SHAPES) t = t.replace(re, (s) => (s.includes(REMOVED) || !ok(s) ? s : (removed.push({ kind: "secret", token: s }), REMOVED)));
   t = phrasesAndLists(afterCues(t, removed), removed);
   const lines = t.split("\n");
-  let carried = false, hops = 0, strong = false;
+  let carried = false, hops = 0, strong = false, pw = false;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     // A cue reaches only its own sentence: "zip code 60601. The dress code ... Parking code 4471" keeps the zip.
@@ -248,15 +263,25 @@ export function redact(text: unknown): { text: string; removed: Removed[] } {
     // A cue sentence with no value of its own ("Your login code is next.") carries forward through the paragraph: up to four
     // sentences, stopping at a blank line, and the first sentence with a number holds the code ("Do not share. 552019"); lines
     // of digits only keep it going ("Enter these digits:" "4 8 2" "9 1 3"). "Passcode: 551203" has its value and carries nothing.
-    if (!line.trim()) { carried = false; hops = 0; strong = false; continue; }
+    if (!line.trim()) { carried = false; hops = 0; strong = false; pw = false; continue; }
     // Numbers that are not code-shaped do not stop it ("Order 12 ships today.", "2024 Acme Inc."): it ends where it takes a code.
     lines[i] = line.split(/(?<=[.!?])(?<!\b(?:no|nr|nos|ref|approx|ext|apt|vs|mr|mrs|ms|dr|st|e\.g|i\.e|etc)\.)(?=\s+\S)/i).map((part) => {
-      const before = removed.length, done = codesIn(part, carried, removed, strong), took = removed.length > before;
-      const cue = cuesIn(part).filter((c) => !c.imp && !/\p{Nd}|\[removed\]/u.test(part.slice(c.end)));
-      if (cue.length) { carried = true; hops = 0; strong = cue.some((c) => !c.weak); }
+      const before = removed.length;
+      // After a password-type cue the secret is the first mixed token (letters with digits or symbols, 6 to 64 characters).
+      if (carried && pw) part = part.replace(/(^|\s)["“'(]?([^\s"“”'()]{6,64}?)(?=["”')]?[.,;:!?]*(?:\s|$))/u, (all, sp: string, tok: string) =>
+        (/\p{L}/u.test(tok) && /[\p{Nd}!@#$%^&*_+=~?]/u.test(tok) && !/@.*\.|^https?:|[\u0001\u0002]|\[removed\]/u.test(tok) && removed.length === before
+          ? (removed.push({ kind: "secret", token: tok, carried: true }), all.replace(tok, REMOVED)) : all));
+      const done = codesIn(part, carried, removed, strong);
+      // A taken number behind a label (Ref, Order, Booking) is removed, but the carry goes on: the real code may follow it.
+      const added = removed.slice(before), labelled = added.length > 0 && added.every((r) => { const at = part.indexOf(r.token); return at > 0 && ID_BEFORE.test(part.slice(Math.max(0, at - 40), at)); });
+      const took = added.length > 0 && !labelled;
+      // Only a credential cue carries: one-time, login, sign-in, verification, security, access or 2FA code, password, passcode,
+      // PIN, OTP, digits (and translations). promo, discount, coupon, order, booking, dress and zip codes are not cues at all.
+      const cue = cuesIn(part).filter((c) => !c.imp && (!c.weak || /^(?:pins?|digits)$/i.test(part.slice(c.start, c.end))) && !/\p{Nd}|\[removed\]/u.test(part.slice(c.end)));
+      if (cue.length) { carried = true; hops = 0; strong = true; pw = cue.some((c) => PW_WORD.test(part.slice(c.start, c.end))); }
       else if (carried && /^[\p{Nd} .-]+$/u.test(part.trim()) && took) { /* a line of digits only: the next may hold more */ }
       else if (carried && !took && hops < 4) hops++;
-      else { carried = false; hops = 0; strong = false; }
+      else { carried = false; hops = 0; strong = false; pw = false; }
       return done;
     }).join("");
   }

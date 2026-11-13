@@ -13,7 +13,7 @@
 //   - No cost-of-living dataset is on file, so two places are never adjusted; the reply says so.
 //   - Nothing is sent. The counter is a draft on a card (requires_approval, sent: false) bound to its exact text by hash;
 //     there is no send path for it.
-import { anyAssumed, type Bench, benchmarks, comparable, currencyOf, readingOf, settleCurrency, unsettledText, type Field, hasWord, isUsd, known, MAX_MESSAGE, mergeOffers, MIN_N, norm, moneyFor, moneyIn, notPlaced, type Offer, type OfferData, parseOfferWords, payData, PER, placeKind, rateAsk, rateIn, rateNote, sameCurrency, UNKNOWN_CURRENCY, usMarket } from "./career_offer.ts";
+import { anyAssumed, type Bench, benchmarks, comparable, currencyOf, rateThenEstimate, readingOf, statedHours, settleCurrency, unsettledText, type Field, hasWord, isUsd, known, MAX_MESSAGE, mergeOffers, MIN_N, norm, moneyFor, moneyIn, notPlaced, type Offer, type OfferData, parseOfferWords, payData, PER, placeKind, rateAsk, rateIn, rateNote, sameCurrency, UNKNOWN_CURRENCY, usMarket } from "./career_offer.ts";
 import { CareerNegotiation, CareerPaths } from "./router_core.career.js";
 import { searchWords } from "./career_ingest.ts";
 import type { KV, Src } from "./file_family.ts";
@@ -246,7 +246,7 @@ function marketLines(o: Offer, m: Market): string[] {
 function offerLine(f: { offer: Offer; equity: string | null }, check: boolean): string {
   const o = f.offer;
   const head = [o.company, titleOf(o), placeOf(o)].filter(Boolean).join(", ");
-  const pay = [o.base != null && !partRate(o) ? `base ${m$(o, "base", o.base)}${rateNote(o, cur(o, "base"))}` : o.rate ? `${rateSaid(o)}${partRate(o) ? " (not a full-year salary)" : ""}` : null,
+  const pay = [o.base != null && !(o.rate && o.part_year) ? `base ${m$(o, "base", o.base)}${rateNote(o, cur(o, "base"))}` : o.rate ? rateThenEstimate(o, cur(o, "base")) : null,
     o.total ? `total pay as you said it ${o.total.written} (not the base, not compared)` : null, o.signing != null ? `signing ${m$(o, "signing", o.signing)}` : null,
     o.bonus != null ? `bonus ${m$(o, "bonus", o.bonus)}` : null, o.bonus_target != null ? `target bonus ${m$(o, "bonus_target", o.bonus_target)} (not guaranteed)` : null,
     o.bonus_pct != null ? `target bonus ${o.bonus_pct}%${o.base != null && !partRate(o) ? ` (worked out from the base: ${m$(o, "base", o.base * o.bonus_pct / 100)}, not guaranteed)` : " (not guaranteed)"}` : null].filter(Boolean).join(", ");
@@ -268,7 +268,7 @@ const andList = (xs: string[]) => xs.length <= 2 ? xs.join(" and ") : `${xs.slic
 const notAdded = (o: Offer) => `not added up: ${andList([o.base != null ? `base ${m$(o, "base", o.base)}` : null, o.signing != null ? `signing bonus ${m$(o, "signing", o.signing)}` : null, o.bonus != null ? `bonus ${m$(o, "bonus", o.bonus)}` : null].filter((x): x is string => !!x))} ${curs(o).every(known) && new Set(curs(o)).size > 1 ? "are in different currencies, and no sourced exchange rate is on file, so nothing is converted" : "are not all in a confirmed currency, so nothing is added or converted"}`;
 // Round 3: a rate for work that is not a full year of full-time work (an internship, a contract, part-time). Nothing shown to
 // the person turns it into a yearly figure, and it is left out of every sum.
-const partRate = (o: Offer) => !!o.rate && !!o.part_year;
+const partRate = (o: Offer) => statedHours(o);
 const rateSaid = (o: Offer) => `${rateIn(o.rate!.amount, cur(o, "base"))} ${PER[o.rate!.period]}`;
 const NOT_YEARLY = "not a full-year salary";
 const targetAmount = (o: Offer) => partRate(o) ? null : o.bonus_target != null ? o.bonus_target : o.bonus_pct != null && o.base != null ? Math.round(o.base * o.bonus_pct / 100) : null;
@@ -408,7 +408,7 @@ async function compareTurn(all: OnFile[], postings: PostingsReader | null, data:
   lines.push(row("Equity", (f) => f.equity ? `${f.equity} (as you said it, not valued)` : "not given"));
   lines.push(row("Place", (f) => placeOf(f.offer) ?? "not given"));
   lines.push(row("Deadline", (f) => f.offer.deadline?.text ?? "not given"));
-  lines.push(row("First-year cash (base, signing and a stated bonus amount)", (f) => { const g = guaranteed(f.offer); return partRate(f.offer) ? `not worked out (${NOT_YEARLY})` : g != null ? m$(f.offer, "base", g) : f.offer.base != null ? notAdded(f.offer) : "unknown"; }));
+  lines.push(row("First-year cash (base, signing and a stated bonus amount)", (f) => { const g = guaranteed(f.offer); return partRate(f.offer) ? `not worked out (${NOT_YEARLY})` : g != null ? `${m$(f.offer, "base", g)}${f.offer.rate && f.offer.annualized ? ` (an estimate from ${rateSaid(f.offer)} x ${f.offer.annualized.assumption})` : ""}` : f.offer.base != null ? notAdded(f.offer) : "unknown"; }));
   if (list.some((f) => targetAmount(f.offer) != null)) lines.push(row("If the target bonus pays in full (not guaranteed)", (f) => { const t = targetAmount(f.offer), g = guaranteed(f.offer); return t != null && g != null ? m$(f.offer, "base", g + t) : "no target bonus given"; }));
   if (list.some((f) => f.equity)) lines.push(row("Equity worked out (at the grant value; not cash, never added to the cash above)", (f) => f.equity ? equityValue(f.equity).short : "none given"));
   if (list.some((f) => (f.benefits ?? []).length)) lines.push(row("Benefits as given (not added to pay)", (f) => (f.benefits ?? []).length ? f.benefits!.map((b) => b.text).join(", ") : "none given"));

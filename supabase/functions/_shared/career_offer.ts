@@ -182,6 +182,16 @@ export const sameCurrency = (a: string | null | undefined, b: string | null | un
 // A competing offer is weighed against this base only like for like: both yearly as said, one known currency, neither an
 // assumption, and not a job in another country.
 export const comparable = (o: Offer, x: Competing) => x.plain !== false && !o.part_year && !o.rate && !x.rated && !x.assumed && !x.abroad && !o.currency_assumed?.base && !o.unsettled && sameCurrency(x.currency, o.currency);
+// The person stated the hours or how long the job lasts ("20 hrs/week", "12-week internship", "part-time"): a 2,080-hour year
+// contradicts what they said, so no yearly estimate is shown for the rate at all. An internship or contract with no hours or
+// duration stated keeps the estimate, always labelled with its basis.
+export const statedHours = (o: Offer) => !!o.rate && !!o.part_year && /\d|part[- ]time|pro[- ]rata|FTE/i.test(o.part_year);
+// A rate as said, then its labelled yearly estimate when one may be shown.
+export function rateThenEstimate(o: Offer, c: string | null | undefined): string {
+  const r = `${rateIn(o.rate!.amount, c)} ${PER[o.rate!.period]}`;
+  if (statedHours(o) || !o.annualized || o.base == null) return `${r}${o.part_year ? " (not a full-year salary)" : ""}`;
+  return `${r} (estimate: x ${o.annualized.assumption} = ${moneyIn(o.base, c)} a year; you said ${o.part_year}, so a full year is not expected)`;
+}
 export const anyAssumed = (o: Offer) => Object.values(o.currency_assumed ?? {}).some(Boolean);
 const cap = (s: string) => s[0].toUpperCase() + s.slice(1);
 // Each figure's currency from what was written next to it and, for "$" or nothing, the place. A figure with no currency of
@@ -269,7 +279,7 @@ export function notPlaced(o: Offer): string | null {
   if (o.currency === UNKNOWN_CURRENCY) return `${cap(o.currency_fact ?? NOT_STATED)}. So it is not placed against any pay data, and nothing is converted. Tell me the offer again with its currency (USD, CAD, EUR ...) and I'll redo it.`;
   if (!isUsd(o)) return `The offer is in ${o.currency}. The public pay data on file is US data in US dollars, so it is not placed against it, and nothing is converted.`;
   if (o.currency_assumed?.base) return "The currency is an assumption until you confirm it, so the offer is not placed against any pay data.";
-  if (o.part_year) return `You said ${o.part_year}, which is not a full year of full-time work, so ${o.rate ? "the rate is not turned into a yearly figure" : "the figure is not treated as a full-year salary"}, and the full-year pay data is not placed against it.`;
+  if (o.part_year) return `You said ${o.part_year}, which is not a full year of full-time work, so the full-year pay data is not placed against it.`;
   return usMarket(o) ? null : `The public pay data on file is for the United States, and ${placeName(o)} is not a US place I can confirm, so the offer is not placed against it.`;
 }
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -740,7 +750,7 @@ export function offerReply(o: Offer, notGiven: Field[], data: OfferData = payDat
   if (o.unsettled) { const ask = unsettledText(o); return { status: "ask", offer: o, missing: notGiven, ask, benchmarks: [], draft: null, messages: fit([ask]) }; }
   const bench = benchmarks(o, data);
   const c = o.currencies ?? {};
-  const parts = [o.company, o.title ?? o.role, o.city === "remote" ? "remote" : o.metro_label ?? o.place ?? o.city, o.base != null && !(o.rate && o.part_year) ? `base ${moneyIn(o.base, c.base ?? o.currency)}${rateNote(o, c.base ?? o.currency)}` : o.rate ? `${rateIn(o.rate.amount, o.currency)} ${PER[o.rate.period]}${o.part_year ? " (not a full-year salary)" : ""}` : null,
+  const parts = [o.company, o.title ?? o.role, o.city === "remote" ? "remote" : o.metro_label ?? o.place ?? o.city, o.base != null && !(o.rate && o.part_year) ? `base ${moneyIn(o.base, c.base ?? o.currency)}${rateNote(o, c.base ?? o.currency)}` : o.rate ? rateThenEstimate(o, c.base ?? o.currency) : null,
     o.signing != null ? `signing ${moneyIn(o.signing, c.signing)}` : null, o.bonus != null ? `bonus ${moneyIn(o.bonus, c.bonus)}` : null, o.bonus_pct != null ? `target bonus ${o.bonus_pct}%` : null, o.total ? `total pay as you said it ${o.total.written} (not the base, not compared)` : null].filter(Boolean);
   const lines: string[] = [`Your offer: ${parts.join(", ")}.`];
   if (notGiven.length) lines.push(`Not given: ${notGiven.map((f) => ASK_WORDS[f]).join(", ")}, so I left ${notGiven.length > 1 ? "those" : "that"} out of the comparison.`);

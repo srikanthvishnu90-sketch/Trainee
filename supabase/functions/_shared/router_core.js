@@ -21785,7 +21785,7 @@ const CareerProfile = (() => {
   // "MySQL". Each alias group names one skill (Postgres is PostgreSQL, k8s is Kubernetes, Golang is Go).
   const SKILL_ALIASES = [
     ["JavaScript", "JS", "ECMAScript"], ["TypeScript", "TS"], ["PostgreSQL", "Postgres", "psql"], ["Kubernetes", "k8s"], ["Node.js", "NodeJS"],
-    ["Go", "Golang"], ["C++", "cpp"], ["C#", "csharp", "C sharp"], ["AWS", "Amazon Web Services"], ["GCP", "Google Cloud", "Google Cloud Platform"],
+    ["Go", "Golang", "Go lang"], ["Express", "Express.js", "ExpressJS"], ["C++", "cpp"], ["C#", "csharp", "C sharp"], ["AWS", "Amazon Web Services"], ["GCP", "Google Cloud", "Google Cloud Platform"],
     ["Machine Learning", "ML"], ["React", "React.js", "ReactJS"], ["Vue", "Vue.js", "VueJS"], ["Next.js", "NextJS"], ["CI/CD", "CICD"],
     ["A/B Testing", "AB testing", "A/B tests", "A/B test", "split testing"], ["Excel", "Microsoft Excel", "MS Excel"], ["PowerPoint", "Microsoft PowerPoint", "MS PowerPoint"],
     ["MongoDB", "Mongo"], ["scikit-learn", "sklearn", "scikit learn"], ["REST", "RESTful", "REST API", "REST APIs"], ["Capital IQ", "CapIQ", "S&P Capital IQ"],
@@ -21801,24 +21801,82 @@ const CareerProfile = (() => {
     return ALIAS_GROUP.get(skillKey(raw)) || (raw ? [raw] : []);
   }
   const skillKeyOf = (name) => skillKey(skillForms(name)[0] || name);
-  const WORD_NAMES = new Set(["REST", "Excel", "Spark", "Swift", "Rust", "Ruby", "Spring", "Flask", "Go", "Golang", "Express", "Ember", "Julia", "Dart", "Elixir", "Scala"]);
+  const WORD_NAMES = new Set(["REST", "Excel", "Spark", "Swift", "Rust", "Ruby", "Spring", "Flask", "Go", "Golang", "Express", "Ember", "Julia", "Dart", "Elixir", "Scala",
+    "Word", "Access", "Chef", "Puppet", "Unity", "React", "Sketch", "Vue", "Basic", "Hive", "Pig", "Ant", "Salt", "Crystal", "Nim", "Lean"]);
   const _formRe = new Map();
+  const isShort = (form) => (/^[A-Za-z]{1,2}$/.test(form)) || WORD_NAMES.has(form);
   function formRe(form) {
     if (_formRe.has(form)) return _formRe.get(form);
     // A name that is also an English word ("excel at", "the rest of", "spring 2024", "swift", "spark") counts only capitalized.
-    const short = (/^[A-Za-z]{1,2}$/.test(form)) || WORD_NAMES.has(form);
+    const short = isShort(form);
     const body = escRe(form).replace(/\s+/g, "\\s+");
     // A short name: its own capitals only (an all-lower form like "k8s" or "psql" is matched as written), and never joined to
     // "&", "-", "'" or a dotted letter. A longer one: any case, never inside a longer word or a dotted name ("Node" in "Node.js").
     const re = short
-      ? new RegExp(`(?<![A-Za-z0-9+#&.'\\-])${body}(?![A-Za-z0-9+#&'\\-])(?!\\.[A-Za-z0-9])`)
-      : new RegExp(`(?<![A-Za-z0-9+#])${body}(?![A-Za-z0-9+#])(?!\\.[A-Za-z0-9])`, "i");
+      ? new RegExp(`(?<![A-Za-z0-9+#&.'\\-])${body}(?![A-Za-z0-9+#&'\\-])(?!\\.[A-Za-z0-9])`, "gi")
+      : new RegExp(`(?<![A-Za-z0-9+#])${body}(?![A-Za-z0-9+#])(?!\\.[A-Za-z0-9])`, "gi");
     _formRe.set(form, re);
     return re;
   }
+  // 2026-11-13 (review of PR #788): fail closed. The whole-token test above still proved R from "Toys R Us cashier", C from
+  // "Vitamin C study assistant", Go from "Go Bears!", ML from "5 ML doses", TS from "TS/SCI clearance", Excel from "Excel
+  // Academy tutor" and SQL from "I have never used SQL". Two rules on top of it:
+  //   - no skill is named inside a negation ("never used SQL", "no experience with Python, R or SQL", "not familiar with Go");
+  //   - a short or ordinary-word name (one or two letters, or WORD_NAMES) is named only in a skills context: the text is the
+  //     name alone; or it sits in a list (commas, slashes, bullets, "and") next to a known skill; or it follows a cue ("in",
+  //     "using", "with", "skills:", "languages:") and is not the first word of a longer name ("with Excel Academy"); or a
+  //     word of the trade follows it ("ML models", "R scripts", "Excel (pivot tables)").
+  const KNOWN_SKILLS = new Set([...ALIAS_GROUP.keys(), ...[...WORD_NAMES].map(skillKey), ...("python java ruby php perl kotlin scala haskell matlab sas stata spss tableau "
+    + "pytorch tensorflow keras pandas numpy scipy shiny tidyverse ggplot2 docker terraform ansible jenkins linux bash html css sass django rails laravel angular svelte redux "
+    + "graphql grpc kafka airflow hadoop snowflake redshift bigquery dbt looker powerbi figma photoshop illustrator jira salesforce sap oracle azure redis elasticsearch nosql "
+    + "objective-c assembly fortran cobol lua jquery node selenium cypress jest junit pytest phoenix flutter rails postgres unreal blender autocad solidworks verilog vhdl latex vba ai").split(" ")]);
+  const NEGATED = /(?:\b(?:never|not(?!\s+only)|no|without|zero|lacks?|lacking|cannot|unfamiliar|rather than|instead of)|n['’]t)(?:[^\w.;!?\n]+[\w+#.'’/-]+){0,5}[^\w.;!?\n]*$/i;
+  // Round 2 (2026-11-13): not the person's own use. Learning or wanting to ("I am learning Go", "Interested in learning Swift",
+  // "Read a book about Python", "Attended a talk on Kubernetes"), someone else's use ("My manager used SQL"), or a denial
+  // later in the same sentence ("... SQL but never used it", "... SQL, I did not", "(not completed)").
+  const NOT_MINE = /\b(?:learning|(?:want(?:ed|s)?|hop(?:e|ing)|plan(?:ning|s)?|like|love|aim(?:ing)?|going|need) to (?:learn|use|try|study|pick up|get into)|interested in|curious about|pick(?:ing)? up|study(?:ing)?|(?:book|talk|class|course|lecture|article|video|workshop|webinar)s? (?:about|on|in|that mentioned)|read about|heard of|the idea of|exposure to|(?:my|our) (?:manager|boss|colleagues?|coworkers?|client|friend)s?(?: that)? (?:used|uses|wrote|built|knows?|chose))\b(?:[^\w.;!?\n]+[\w+#.'’/-]+){0,4}[^\w.;!?\n]*$/i;
+  const DENIED_AFTER = /^[^.;!?\n]{0,40}?(?:\bbut (?:(?:I|we) )?(?:have )?(?:never|not|didn'?t|haven'?t)\b|,\s*(?:I|we) (?:did not|didn'?t|have not|haven'?t|never)\b|\(not\b|\bbut (?:the team|we|they) (?:chose|used|went with)\b)/i;
+  // A cue right before the name: a preposition or verb of use, a label, years of it, a level word, "from X to", "migrated ... to".
+  const CUE = /(?:\b(?:in|using|with|via|use[sd]?|wrote|writes?|writing|know|knows|learned|taught myself|self-taught in|picked up|(?:skills?|languages?|tools?|stack|tech|technologies|frameworks?|software|proficien(?:t|cy))\s*(?::|-|in|with|is|was|includes?)?|\d+\+?\s*(?:years?|yrs?|months?)(?:\s+of)?(?:\s+experience)?(?:\s+(?:of|in|with|using))?|advanced|expert|strong|daily|intermediate|solid|heavy|fluent|embedded|modern|MS|Microsoft|(?:migrat|port|rewr[io]t|convert|mov|switch)\w*\b[^.;!?\n]{0,30}\bto|but also|from [\w+#.]+ to)\s+)$/i;
+  // A word of the trade right after it (lower case as written, or a product's own second word), or a parenthesis.
+  const TRADE = /^\s+(?:models?|modell?ing|pipelines?|algorithms?|engineer(?:ing|s)?|code|scripts?|scripting|programming|programmers?|programs?|developers?|development|apps?|services?|APIs?|apis?|macros?|formulas?|spreadsheets?|dashboards?|queries|components?|front[- ]?end|back[- ]?end|librar(?:y|ies)|packages?|frameworks?|microservices?|hooks?|notebooks?|users?|power user|fundamentals|CLI|iOS|jobs|chatbots?|agents|databases?|server|game|cookbooks?|research|Boot|on Rails|for (?:numerical|scientific|statistical|data|regression))\b|^\s*\((?!\s*(?:19|20)\d\d\b)/;
+  const LIST_SEP = /\s*(?:[,/;|•·\n]|\s[&+]\s|\s(?:and|or)\s)\s*/;
+  const knownAt = (item, end) => {
+    const words = String(item).replace(/\([^)]*\)/g, " ").replace(/^[\s([]+|[\s.)\]]+$/g, "").split(/\s+/).filter(Boolean);
+    if (!words.length) return false;
+    const pick = (n) => skillKey((end ? words.slice(-n) : words.slice(0, n)).join(" ").replace(/^[^:]*:\s*/, ""));
+    return KNOWN_SKILLS.has(pick(1)) || (words.length > 1 && KNOWN_SKILLS.has(pick(2)));
+  };
+  // `asWritten` false: the name in another case ("react", "go", "r"). That counts only as an item of a list of known skills
+  // ("python, react, sql", "built with react and typescript"), never from a cue or a following word alone ("with access to").
+  function inSkillsContext(t, at, end, asWritten) {
+    const before = t.slice(0, at), after = t.slice(end);
+    if (asWritten && !before.trim() && /^[\s.]*$/.test(after)) return true; // the name alone
+    // "Go to market", "R and D", "Word of mouth", "R. Smith" (an initial and a surname).
+    if (/^[- ]to\b|^\s+(?:and|&|n)\s+D\b|^\s+of\b|^\.\s+[A-Z][a-z]/.test(after)) return false;
+    // The list this name is an item of: the item before ends in a known skill, or the item after starts with one; and the
+    // name is the whole of its own item, or follows a cue ("built with react and typescript"; never "I go, python club").
+    const prev = before.split(LIST_SEP), next = after.split(LIST_SEP), own = prev[prev.length - 1];
+    const alone = (x) => /^[\s([:]*$/.test(x == null ? "" : x.replace(/^.*:\s*/, ""));
+    if (prev.length > 1 && alone(own) && knownAt(prev[prev.length - 2], true)) return true;
+    if (next.length > 1 && /^[\s.)\]]*$/.test(next[0].replace(/\([^)]*\)/g, "")) && (alone(own) || CUE.test(own)) && knownAt(next[1], false)) return true;
+    if (!asWritten) return false;
+    // A cue right before it, and not the first word of a longer name or a season ("Excel Academy", "Spring 2024").
+    if (CUE.test(before) && !/^\s+(?:[A-Z][a-z]|(?:19|20)\d\d\b)/.test(after)) return true;
+    return TRADE.test(after);
+  }
   function textNamesSkill(text, skillName) {
     const t = String(text == null ? "" : text);
-    return !!t && skillForms(skillName).some((f) => formRe(f).test(t));
+    if (!t) return false;
+    for (const f of skillForms(skillName)) {
+      const re = formRe(f); re.lastIndex = 0;
+      for (const m of t.matchAll(re)) {
+        const before = t.slice(0, m.index), after = t.slice(m.index + m[0].length);
+        if (NEGATED.test(before) || NOT_MINE.test(before) || DENIED_AFTER.test(after)) continue;
+        if (!isShort(f) || inSkillsContext(t, m.index, m.index + m[0].length, m[0] === f)) return true;
+      }
+    }
+    return false;
   }
   function skillEvidence(profile, skillName) {
     const name = skillKeyOf(skillName);

@@ -4,13 +4,13 @@
 // (a row of docs/architect/DECISIONS.md), the key and the shared ledger (#824: like every live eval runner, it reserves its cap at the
 // ONE shared $80 ledger before its first model call and settles it to the metered cost at the end, also on error, through
 // evals/career/eval_budget.ts openLiveRunLedger). The CI workflow .github/workflows/research-support-live.yml runs it:
-//   SUPPORT_JUDGE_SPEND_APPROVED=D-0xx ANTHROPIC_API_KEY=... SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
+//   SUPPORT_JUDGE_SPEND_APPROVED=D-0xx SUPPORT_JUDGE_RUN=<n> ANTHROPIC_API_KEY=... SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
 //     deno run -A --no-check --import-map=tests/flow/supabase-npm.json evals/research-support/judge-measure.ts --live --budget-usd 0.5 --out <dir>
 // It sends each case that layer A (code) lets through to the product's model through the gateway (callModel), in batches as a turn
 // would, under an in-process hard cap of --budget-usd (at most $1; a call that does not fit is refused before it is sent), and
 // prints the confusion table against the hand labels, the latency, and `spent_usd=` from the meter; <dir>/result.json keeps it.
 // deno-lint-ignore-file no-explicit-any
-import { CASES, FALSE_101, LAYER_A, SPLIT_CLAIM, SPLIT_PAGES, TRUE_40 } from "./cases.ts";
+import { CASES, FALSE_101, LAYER_A, LIMIT_CLAUSE, SPLIT_CLAIM, SPLIT_PAGES, TRUE_40 } from "./cases.ts";
 import { echoes, findSupport, indexPages, JUDGE_MAX_CLAIMS, judgeAll, modelSupportJudge, quoteClaim, type SupportClaim, supportJudgePayload } from "../../supabase/functions/_shared/agent/research/support.ts";
 import { abbreviated } from "../../supabase/functions/_shared/agent/research/market.ts";
 import { callModel, modelConfig, newMeter, PRICES, TRAINEE_MODEL } from "../../supabase/functions/_shared/model_gateway.ts";
@@ -35,6 +35,7 @@ for (const c of CASES) add(c.good ? "true 28" : "hostile 94", c.id, c.good && c.
 for (const [cls, page, claim] of LAYER_A) add("layer-A 78", `${cls}: ${claim}`, "no", [{ text: page, title: "Notes" }], claim);
 for (const [cls, page, claim] of FALSE_101) add("false 101", `${cls}: ${claim}`, "no", [{ text: page, title: "Citadel notes" }], claim);
 for (const [title, page, claim] of TRUE_40) add("true 40", claim, "yes", [{ text: page, title }], claim);
+for (const [cls, page, claim] of LIMIT_CLAUSE) add("limit 8", `${cls}: ${claim}`, "no", [{ text: page, title: "Citadel notes" }], claim);
 for (const page of SPLIT_PAGES) add("split 12", page.slice(0, 40), "no", [{ text: page, title: "Citadel notes" }], SPLIT_CLAIM);
 console.log(`Stopped by layer A before the judge: ${JSON.stringify(stopped)}. The could-not-confirm smuggles and the solicitations never reach the judge.`);
 const batches: typeof sent[] = [];
@@ -51,7 +52,7 @@ const opt = (k: string) => { const i = Deno.args.indexOf(k); return i >= 0 ? Den
 const budget = Number(opt("--budget-usd") ?? 0), out = opt("--out");
 if (!(budget > 0 && budget <= 1) || !out) { console.log("refused: --live needs --budget-usd (above 0, at most 1) and --out <dir>"); Deno.exit(3); }
 { // a DECISIONS row written for this measurement, with a cap at least this run's (approval.ts)
-  const why = measureApproval(Deno.env.get("SUPPORT_JUDGE_SPEND_APPROVED") ?? "", budget, await Deno.readTextFile(new URL("../../docs/architect/DECISIONS.md", import.meta.url)));
+  const why = measureApproval(Deno.env.get("SUPPORT_JUDGE_SPEND_APPROVED") ?? "", budget, await Deno.readTextFile(new URL("../../docs/architect/DECISIONS.md", import.meta.url)), Number(Deno.env.get("SUPPORT_JUDGE_RUN") ?? ""));
   if (why) { console.log(`refused: ${why}`); Deno.exit(3); }
 }
 if (!Deno.env.get("ANTHROPIC_API_KEY")) { console.log("refused: --live needs ANTHROPIC_API_KEY"); Deno.exit(3); }
@@ -75,6 +76,6 @@ for (const w of wrong) console.log(`  ${w}`);
 console.log(`Calls ${meter.calls} (failed ${meter.failed}); cost $${(meter.usd_micros / 1e6).toFixed(4)} by the meter; latency per call ms: median ${[...ms].sort((a, b) => a - b)[Math.floor(ms.length / 2)]}, max ${Math.max(...ms)}.`);
 const spent = meter.usd_micros / 1e6;
 await Deno.mkdir(out, { recursive: true });
-await Deno.writeTextFile(`${out}/result.json`, JSON.stringify({ kind: "research-support-judge", approval: Deno.env.get("SUPPORT_JUDGE_SPEND_APPROVED"), model: cfg.model, run_id: Deno.env.get("GITHUB_RUN_ID") ?? null, sha: Deno.env.get("GITHUB_SHA") ?? null, at: new Date().toISOString(), budget_usd: budget, calls: meter.calls, failed: meter.failed, table, wrong, latency_ms: ms, spent_usd: Number(spent.toFixed(6)) }, null, 1));
+await Deno.writeTextFile(`${out}/result.json`, JSON.stringify({ kind: "research-support-judge", approval: Deno.env.get("SUPPORT_JUDGE_SPEND_APPROVED"), run: Number(Deno.env.get("SUPPORT_JUDGE_RUN")), model: cfg.model, run_id: Deno.env.get("GITHUB_RUN_ID") ?? null, sha: Deno.env.get("GITHUB_SHA") ?? null, at: new Date().toISOString(), budget_usd: budget, calls: meter.calls, failed: meter.failed, table, wrong, latency_ms: ms, spent_usd: Number(spent.toFixed(6)) }, null, 1));
 console.log(`spent_usd=${spent.toFixed(6)}`);
 } finally { await ledger.settle(meter.calls ? meter.usd_micros / 1e6 : 0); }

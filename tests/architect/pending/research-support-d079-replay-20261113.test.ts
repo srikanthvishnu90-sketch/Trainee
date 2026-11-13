@@ -103,12 +103,11 @@ Deno.test("D-079 replay end to end: what the person would now see, per case", as
   // The 5 false: the relocation bonus is now stopped by code; the two table rows are true of their page (label error); the double
   // negation and the "twice" figure still depend on the judge (prompt rules added; unconfirmed until a live run).
   eq(leak, 4);
-  // Four true cases are still dropped. G09, G15 and G27: code sends what D-079 sent and the live judge said no; the prompt now
-  // states the rule it missed, unconfirmed until a live run. "Applications close on January 15, 2027.": the sentence does not name
-  // Citadel and its page ("Citadel careers") is not on Citadel's own domain, so round 9 lends it nothing (a title proves nothing).
-  // The other ten now reach the person: as the page's quote (a refused model-worded claim falls back to the page's own sentence) or,
-  // for the ';' sentence, in the model's words.
-  eq(lostIds, ["G09", "G15", "G27", "Applications"]);
+  // Three true cases are still dropped. G09, G15 and G27: code sends what D-079 sent and the live judge said no; the prompt now
+  // states the rule it missed, unconfirmed until a live run. (Round 10: "Applications close on January 15, 2027." is lent again by
+  // its page title "Citadel careers", so it is quoted.) The other eleven now reach the person: as the page's quote (a refused
+  // model-worded claim falls back to the page's own sentence) or, for the ';' sentence, in the model's words.
+  eq(lostIds, ["G09", "G15", "G27"]);
 });
 
 // Layer A's 21 true stops in D-079 (true 28: 2, true 40: 17, split 12: 2). Round 9 frees 14: a "-ly" or "per" period read on
@@ -124,7 +123,8 @@ Deno.test("D-079 replay, layer A: the true claims it stopped for its own reading
   for (const claim of freed) { const rows = TRUE_40.filter((t) => t[2] === claim); assert(rows.length, claim); for (const [title, page] of rows) assert(passes(title, page, claim), claim); }
   const g19 = CASES.find((c) => c.id.startsWith("G19"))!;
   assert(passes(g19.title ?? "Citadel compensation notes", g19.page, g19.claim), "G19");
-  const stays = ["Citadel has over 3,000 employees in 17 offices.", "Citadel interns get $5,000 a week plus a housing stipend."];
+  // (Round 10: "Citadel interns get $5,000 a week plus a housing stipend." is lent again by its page title, so it reaches the judge.)
+  const stays = ["Citadel has over 3,000 employees in 17 offices."];
   for (const claim of stays) for (const [title, page] of TRUE_40.filter((t) => t[2] === claim)) assert(!passes(title, page, claim), claim);
   const g14 = CASES.find((c) => c.id.startsWith("G14"))!;
   assert(!passes(g14.title ?? "Citadel compensation notes", g14.page, g14.claim), "G14");

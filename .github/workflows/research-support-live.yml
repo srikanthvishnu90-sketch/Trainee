@@ -2,7 +2,8 @@
 # every review case that code (layer A) lets through, sent to the product's model as a turn would batch them, under an in-process
 # hard cap of the request's budget_usd (at most $1). It runs only on a push to ci/research-support-live that changes
 # evals/research-support/run-request.json, so nothing on trunk or a PR ever spends.
-# Spend: the owner's written approval is the request's `approval` (a row of docs/architect/DECISIONS.md). As real-sets-live.yml does
+# Spend: the owner's written approval is the request's `approval` (a row of docs/architect/DECISIONS.md) and its `run` (a row
+# approves one run, named in it: evals/research-support/approval.ts). As real-sets-live.yml does
 # since #824, the runner itself reserves the cap at the shared $80 ledger before its first model call (refused if it does not fit what
 # remains, or the approval is not a DECISIONS row) and settles it to the metered cost at the end, also on error. The only hosts the
 # run calls are the model API and the ledger.
@@ -27,16 +28,17 @@ jobs:
         run: |
           deno eval '
             const f = JSON.parse(Deno.readTextFileSync("evals/research-support/run-request.json"));
-            const ok = /^D-\d{3}[a-z]?$/.test(f.approval ?? "") && Number(f.budget_usd) > 0 && Number(f.budget_usd) <= 1;
-            if (!ok) { console.log("NOT RUN: bad request (approval D-xxx, 0 < budget_usd <= 1)", JSON.stringify(f)); Deno.exit(2); }
-            Deno.writeTextFileSync(Deno.env.get("GITHUB_OUTPUT"), `approval=${f.approval}\nbudget=${f.budget_usd}\n`, { append: true });
-            console.log(`request: support judge measure, cap $${f.budget_usd} under ${f.approval}`);
+            const ok = /^D-\d{3}[a-z]?$/.test(f.approval ?? "") && Number(f.budget_usd) > 0 && Number(f.budget_usd) <= 1 && Number.isInteger(f.run) && f.run >= 1;
+            if (!ok) { console.log("NOT RUN: bad request (approval D-xxx, 0 < budget_usd <= 1, run a whole number from 1)", JSON.stringify(f)); Deno.exit(2); }
+            Deno.writeTextFileSync(Deno.env.get("GITHUB_OUTPUT"), `approval=${f.approval}\nbudget=${f.budget_usd}\nrun=${f.run}\n`, { append: true });
+            console.log(`request: support judge measure run ${f.run}, cap $${f.budget_usd} under ${f.approval}`);
           '
       - name: The judge, real API
         id: run
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SUPPORT_JUDGE_SPEND_APPROVED: ${{ steps.req.outputs.approval }}
+          SUPPORT_JUDGE_RUN: ${{ steps.req.outputs.run }}
           # The runner reserves the cap at the shared ledger itself before its first model call and settles it to the metered cost
           # (eval_budget.ts openLiveRunLedger, #824); its model calls carry their own in-process gate, so nothing is counted twice.
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

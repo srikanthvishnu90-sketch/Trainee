@@ -186,7 +186,7 @@ const BAY = "Bay Area: $150,000 - $180,000 per year. All other US locations: $13
 const REMOTE = "New York, NY: $50 - $60 per hour. Remote: $40 - $48 per hour.";
 const STATES = "California: $35 - $45 per hour. Illinois: $30 - $40 per hour. Texas: $28 - $38 per hour.";
 const MIXED = "San Jose, CA: $32 - $55 per hour ($66,560 - $114,400 per year). Chicago, IL: $28 - $49 per hour ($58,240 - $101,920 per year).";
-const PROSE = "The hourly range is $32-$55 in San Jose and $28-$49 in Chicago.";
+const PROSE = "The range is $32-$55 per hour in San Jose and $28-$49 per hour in Chicago.";
 const PORTLAND = "Portland, Oregon | ($30 - $40 Hourly) Portland, Maine | ($20 - $25 Hourly)";
 const PART = "The base range is $100,000 - $120,000. In San Francisco, CA: $120,000 - $140,000.";
 // [posting text, the posting's location, the pay read]
@@ -203,7 +203,9 @@ const PAY: [string, string | null, string | null][] = [
   ["Compensation by location\nSan Jose, CA\n$32 - $55 per hour\nChicago, IL\n$28 - $49 per hour", "Chicago, IL", "$28 - $49 per hour (Chicago, IL)"],
   [MIXED, "Chicago, IL", "$28 - $49 per hour / $58,240 - $101,920 per year (Chicago, IL)"],
   [MIXED, "Austin, TX", "San Jose, CA: $32 - $55 per hour / $66,560 - $114,400 per year; Chicago, IL: $28 - $49 per hour / $58,240 - $101,920 per year"],
-  [PROSE, "Chicago, IL", "$28-$49 (Chicago)"], [PROSE, "Austin, TX", "San Jose: $32-$55; Chicago: $28-$49"],
+  [PROSE, "Chicago, IL", "$28-$49 per hour (Chicago)"], [PROSE, "Austin, TX", "San Jose: $32-$55 per hour; Chicago: $28-$49 per hour"],
+  // A bare "$32-$55" with no period after it is not read as pay at all (payFrom's floor): none, never a guess.
+  ["The hourly range is $32-$55 in San Jose and $28-$49 in Chicago.", "Chicago, IL", null],
   [PORTLAND, "Portland, ME", "$20 - $25 Hourly (Portland, Maine)"], [PORTLAND, "Portland", "Portland, Oregon: $30 - $40 Hourly; Portland, Maine: $20 - $25 Hourly"],
   ["Pay: San Jose, California | ($32 - $55 Hourly)", "Chicago, IL", "San Jose, California: $32 - $55 Hourly"], ["Pay: San Jose, California | ($32 - $55 Hourly)", "San Jose, CA", "$32 - $55 Hourly"],
   ["Chicago, IL - $28 to $49 per hour; San Jose, CA - $32 to $55 per hour", "Chicago, IL", "$28 to $49 per hour (Chicago, IL)"],

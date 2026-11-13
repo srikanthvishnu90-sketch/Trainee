@@ -206,7 +206,7 @@ export async function agentTurn(o: {
   const offered = new Set(tools.map((t) => t.name));
   let result = await runAgentTurn({
     process: processCheck({ draftAsk: draftAsk && DRAFT_TOOLS.some((n) => offered.has(n)), planSearch: planSearch && offered.has("search_jobs"), parts,
-      planFile: planSearch && offered.has("create_file"), history: historyAsk && offered.has("read_application_mail"), mail: !hypo && offered.has("read_application_mail"), posting: meant.length > 0 && offered.has("get_posting"), shownPay,
+      planFile: planSearch && offered.has("create_file"), history: historyAsk && offered.has("read_application_mail"), mail: !hypo && offered.has("read_application_mail"), noneClaim: !hypo, record: () => (ctx.turn as any)?.record, posting: meant.length > 0 && offered.has("get_posting"), shownPay,
       marketRate: !hypo && marketRateAskOf(o.message) && offered.has("research_market"), review: practiceAnswer || !!roast ? o.message : null, familyFile: !hypo && offered.has(FAMILY_FILE_TOOL) ? familyAskOf(o.message) : null }),
     system: careerSystemPrompt(localDay(o.now, o.tz)) + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + "\n\n" + MIRROR_RULES + "\n\n" + turnNotes.join("\n\n") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
     history: o.history.slice(-HISTORY_WINDOW).map((m) => ({ role: m.role, content: String(m.content ?? "") })),
@@ -326,6 +326,10 @@ export async function agentTurn(o: {
   // or blank reply is never sent: the research's own sourced points when it found any, else the honest line that it did not finish.
   // D-071 (live-8 C6: "Your Gmail shows 8 applications ... That's 9 listed, so I miscounted 8 above"): the number of applications is
   // the record's (read_application_mail's counts), never the model's own count.
+  // Review of #785 (owner must-fix; D-024): the last word on "you haven't applied" is code's. A reply that still says they have no
+  // applications, on a turn with no successful and complete lookup, is not sent as written (the model was asked once above).
+  const looked = lookupOf(result.tool_calls ?? [], (ctx.turn as any)?.record);
+  if (!hypo && result.reply && !result.show && !looked.ok && saysNoApplications(result.reply)) result = { ...result, reply: unconfirmedApplications(result.reply, looked), flags: [...new Set([...(result.flags ?? []), "applications_unconfirmed"])] };
   const counted = (ctx.turn as any)?.counts?.applied;
   if (typeof counted === "number" && result.reply && result.stopped === "final" && !result.show) result = { ...result, reply: applicationCount(result.reply, counted) };
   // D-071 (live-8 C9: research ran, kept nothing, and the trace could not say why): what the research did with its pages and draft.
@@ -449,8 +453,11 @@ export function nonEmptyReply(r: Pick<TurnResult, "reply" | "show" | "tool_calls
 // is still given, beside a sourced benchmark.
 export const MARKET_RATE_ASK = /\b(?:going|market|typical|average|usual|standard|normal|median)\s+(?:hourly\s+|annual\s+|base\s+)?(?:rate|pay|salary|salaries|wage|wages|comp(?:ensation)?)\b|\bhow\s+much\s+(?:do|does|would|will)\s+[a-z ]{2,40}?\s+(?:make|earn|get\s+paid)\b|\bwhat\s+(?:do|does)\s+[a-z ]{2,40}?\s+(?:make|earn)\b|\bpay\s+(?:range|benchmark)s?\s+for\s+(?:a\s+|an\s+)?[a-z]/i;
 export function marketRateAskOf(message: string): boolean { return MARKET_RATE_ASK.test(String(message ?? "")); }
-export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts: string[]; planFile?: boolean; history?: boolean; mail?: boolean; posting?: boolean; shownPay?: { text: string; url: string | null }[]; marketRate?: boolean; review?: string | null; familyFile?: keyof typeof FAMILY_TITLE | null }): ((reply: string, calls: { name: string; ok: boolean; error?: string }[]) => string | null) | null {
-  if (!o.draftAsk && !o.planSearch && !o.parts.length && !o.history && !o.mail && !o.posting && !o.shownPay?.length && !o.marketRate && !o.review && !o.familyFile) return null;
+export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts: string[]; planFile?: boolean; history?: boolean; mail?: boolean; posting?: boolean; shownPay?: { text: string; url: string | null }[]; marketRate?: boolean; review?: string | null; familyFile?: keyof typeof FAMILY_TITLE | null;
+  // Review of #785: `noneClaim` holds a reply that says they have no applications on every turn, whatever tools it has; `record` is
+  // what this turn's record read came to (loop.ts turn.record), so a lookup that returned without reading everything is not one.
+  noneClaim?: boolean; record?: () => { status: string; could_not_read: string[] } | null | undefined }): ((reply: string, calls: { name: string; ok: boolean; error?: string }[]) => string | null) | null {
+  if (!o.draftAsk && !o.planSearch && !o.parts.length && !o.history && !o.mail && !o.posting && !o.shownPay?.length && !o.marketRate && !o.review && !o.familyFile && !o.noneClaim) return null;
   return (reply, calls: { name: string; ok: boolean; error?: string }[]) => {
     const called = (names: readonly string[]) => calls.some((c) => names.includes(c.name));
     // D-072 (files reachable, D-066 P6): an ask to see one of their record-backed Files gets that File from their records, or is told
@@ -461,7 +468,14 @@ export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts:
     // MIRROR-PROCESS C1: the plan stands on a search of postings they could apply to.
     if (o.planSearch && !called(["search_jobs"])) return "They asked what to do to land postings they could apply to, and no search ran. Call search_jobs now with their goal, then write the plan around what it found (say how many, and if none, what it covered).";
     // D-067 (G14, C6): their own application history is read from the record that holds it.
-    if ((o.history || (o.mail && SAYS_NOT_APPLIED.test(reply))) && !called(["read_application_mail"])) return "They asked about their own applications and you did not read their record. Call read_application_mail now and answer from what it returns, saying what it covered.";
+    // Review of #785 (owner must-fix, D-024): only a lookup that succeeded and read everything counts. A reply that says they have
+    // not applied, or have no applications, with no such lookup this turn is held: the tool is asked for when it was not tried,
+    // and when it was tried and failed the reply is asked again with that fact (agentTurn then enforces it in code).
+    const none = (o.mail || o.noneClaim) && saysNoApplications(reply), look = lookupOf(calls, o.record?.());
+    if ((o.history || (none && o.mail)) && !look.tried) return "They asked about their own applications and you did not read their record. Call read_application_mail now and answer from what it returns, saying what it covered.";
+    if (none && !look.ok) return look.tried
+      ? `Your lookup of their applications ${look.what.length ? `was incomplete: it could not read ${look.what.join("; ")}` : "failed"}. Your draft says they have not applied or have no applications, and nothing verified that. Do not say it, and give no total. Say plainly what could not be read just now, that whether they applied is unconfirmed until it can be, and anything the lookup did find as "at least".`
+      : "Your draft says they have not applied or have no applications, and their application record was not read this turn. Do not say it. Say that you have not checked their applications, so it is unconfirmed.";
     // D-067 (G11, C1): a plan ask gets its plan as a File (the postings and the weeks in it); the reply is the short answer and says the plan is in the file.
     // D-070 (live-7 C1: create_file ran, was refused, and no File reached the person): only a File that was made counts; a refused
     // one is asked again with what refused it.
@@ -492,8 +506,43 @@ export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts:
   };
 }
 
+// Review of #785: what a turn's lookup of the person's applications came to. `ok` only when a lookup tool call succeeded and its
+// read was complete (every account and store read); `what` names what could not be read.
+const LOOKUP_TOOLS = ["read_application_mail", "export_tracker"];
+export function lookupOf(calls: { name: string; ok: boolean }[], record?: { status: string; could_not_read: string[] } | null): { tried: boolean; ok: boolean; what: string[] } {
+  const mine = calls.filter((c) => LOOKUP_TOOLS.includes(c.name));
+  return { tried: mine.length > 0, ok: mine.some((c) => c.ok) && (!record || record.status === "complete"), what: record && record.status !== "complete" ? record.could_not_read : [] };
+}
+// Review of #785 (fail closed): does this reply say the person has no applications, or has not applied (anywhere or somewhere)?
+// Read sentence by sentence. Left out: what Trainee itself did not send ("Nothing was sent or submitted.", "I haven't submitted
+// anything for you"), a condition or a question ("if you haven't applied yet", "have you applied?"), and "no application
+// fee/deadline/needed". Anything else that reads like "none" counts.
+const NOT_APPLIED = /\b(?:you|u)(?:'ve| have| had)?\s+(?:still\s+|really\s+|also\s+)?(?:haven'?t|have\s+not|not|hadn'?t|had\s+not|never|have\s+never|didn'?t|did\s+not|have\s+yet\s+to|are\s+yet\s+to)\s+(?:yet\s+|actually\s+|even\s+)?(?:\w+\s+)?(?:applied|apply|submitted|submit|sent\s+in)\b|(?:^|[,;:]\s*|\b(?:so|and|but)\s+)(?:not|haven'?t|never)\s+(?:yet\s+)?applied\b/;
+const NO_APPLICATIONS = /(?:\b(?:no|zero|not\s+any|not\s+a\s+single|without\s+any|none\s+of(?:\s+your|\s+the)?)|(?<![\d.,])0|n't\s+(?:\w+\s+){0,3}?(?:any|a\s+single))\s+(?:\w+\s+){0,3}?applications?\b(?!\s+(?:fees?|deadlines?|forms?|process|portal|window|cycle|season|page|link|materials|essays?|requirements?|questions?|open(?:ed)?|needed|required|necessary|(?:is|are|was|were)\s+(?:needed|required|necessary|open|due|accepted)))/;
+const NOTHING_THERE = /\bnothing\b[^.!?]{0,30}?\b(?:submitted|applied|on\s+(?:record|file)|shows?|gone\s+out)\b|\bno\s+(?:record|sign|trace|evidence|confirmation|mention)\b[^.!?]{0,30}\bappl(?:y|ied|ying|ication)|\b(?:tracker|applications?\s+(?:list|record|history|log))\s+(?:is|looks|comes\s+up|came\s+back)\s+(?:still\s+)?(?:empty|blank)\b/;
+const NOTHING_SENT = /\bnothing\s+(?:was|has\s+been|is|got|will\s+be)\s+(?:sent|saved|queued|submitted)\b(?:(?:,|\s+or|\s+and)\s+(?:sent|saved|queued|submitted)\b)*/g;
+const TRAINEE_DID_NOT = /\b(?:i|we|trainee)\s+(?:have\s+not|haven'?t|did\s+not|didn'?t|won'?t|will\s+not|never)\s+(?:yet\s+)?(?:sent|submitted|applied|queued)\b|\b(?:sent|submitted|applied|queued)\b[^.!?]{0,20}\b(?:by\s+me|by\s+trainee|for\s+you|on\s+your\s+behalf)\b/;
+const NOT_A_CLAIM = /^(?:so\s+|and\s+|ok(?:ay)?,?\s+)?(?:have|haven'?t|had|did|didn'?t|do|does|is|are|should|want|would|can|could|which|what|where|when|shall)\b[^?]*\?\s*$/;
+export function saysNoApplications(reply: string): boolean { return noApplicationsIn(reply).length > 0; }
+function noApplicationsIn(reply: string): string[] {
+  return String(reply ?? "").split(/(?<=[.!?])\s+|\n+/).filter((x) => {
+    const t = x.trim().toLowerCase().replace(/[’‘`]/g, "'").replace(/\s+/g, " ");
+    if (!t || NOT_A_CLAIM.test(t) || TRAINEE_DID_NOT.test(t)) return false;
+    const c = t.replace(NOTHING_SENT, " ").replace(/\b(?:if|whether|unless|once|when|until|in\s+case)\b[^,;:]*/g, " ");
+    return NOT_APPLIED.test(c) || NO_APPLICATIONS.test(c) || NOTHING_THERE.test(c);
+  });
+}
+// D-024: the reply that reaches the person when it still says "none" with no successful lookup. Each sentence that says it is
+// taken out (the rest is the model's and stands), and code says what is true: what could not be read, and that it is unconfirmed.
+export function unconfirmedApplications(reply: string, look: { tried: boolean; what: string[] } = { tried: false, what: [] }): string {
+  const drop = new Set(noApplicationsIn(reply));
+  const kept = String(reply ?? "").split("\n").map((l) => l.split(/(?<=[.!?])(?=\s)/).filter((x) => !drop.has(x.trim()) && !drop.has(x)).join("").trim()).filter((l, k, xs) => l || (k > 0 && xs[k - 1])).join("\n").trim();
+  const line = look.tried ? `I couldn't read ${look.what.length ? look.what.join(", ") : "your application record"} just now, so whether you've applied is unconfirmed. Ask me again and I'll check.`
+    : "I haven't checked your application record in this reply, so whether you've applied is unconfirmed. Ask me and I'll check.";
+  return kept ? `${line}\n\n${kept}` : line;
+}
 // D-067 (owner, must-fix: "never say 'you haven't applied' without checking connected email first"): a reply that says they have
-// not applied, or that nothing is on record, is a history answer whatever the ask was.
+// not applied, or that nothing is on record, is a history answer whatever the ask was. (Kept for its tests; the check is saysNoApplications.)
 export const SAYS_NOT_APPLIED = /\byou(?:'ve|\s+have)?\s+(?:not|haven'?t|didn'?t|did\s+not|never)\s+(?:yet\s+)?(?:applied|submitted)\b|\byou\s+have\s+no\s+applications?\b|\bno\s+applications?\s+(?:on\s+record|yet|so\s+far|from\s+you|anywhere)\b|\bnothing\s+(?:is\s+)?on\s+record\s+yet\b|\b(?:not|haven'?t)\s+applied\s+(?:to\s+)?any(?:thing|where)\s+yet\b/i;
 // The links Trainee's own earlier replies in the window showed the person (assistant messages only; never a link the person typed,
 // which linksSeen already holds, and never one from a tool the model saw but did not show).

@@ -1,6 +1,7 @@
 {
   "default_s": 5,
   "files": {
+    "tests/architect/applied-check-failclosed-20261113.test.ts": 0.3,
     "tests/architect/d065-live-round1-20261112.test.ts": 0.2,
     "tests/architect/d067-live-round2-20261112.test.ts": 0.3,
     "tests/architect/d070-live7-fixes-20261112.test.ts": 1.6,

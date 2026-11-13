@@ -29,7 +29,11 @@ const EXTRA_AFTER = /^\s*(?:(?:annual|one-time|one time|signing|sign-on|referral
 const EXTRA_BEFORE = /\b(?:bonus|stipend|relocation|allowance|reimbursement|referral|sign-on|signing|equity|rsus?|stock|tuition|gift card|grant)\b(?:\s+(?:assistance|package|support|budget|benefit|award|match))?(?:\s+(?:of|up to|worth|valued at|totaling|totalling|is|:))*\s*$/i;
 const BOUND_BEFORE = /\b(up to|as much as|as high as|maximum of|max(?:imum)?|starting (?:at|from)|starts at|from|at least|minimum of|min(?:imum)?|no less than|over|above)\s*:?\s*$/i;
 export function payFrom(text: unknown): string | null {
-  const t = String(text ?? "").replace(/\s+/g, " ");
+  for (const p of paysIn(String(text ?? "").replace(/\s+/g, " "))) return p.pay;
+  return null;
+}
+// Every pay the text states, in order, each with where it sits (placedPay reads the place around it).
+function* paysIn(t: string): Generator<{ pay: string; at: number; end: number }> {
   for (const m of t.matchAll(RANGE)) {
     const g = m.groups ?? {};
     const per = (g.per ?? g.ly ?? "").toLowerCase();
@@ -47,9 +51,8 @@ export function payFrom(text: unknown): string | null {
     if (extra.trim() && (!per || /bonus|equity|rsu|stock|referral|sign|grant|raise|funding/i.test(extra))) continue;
     const out = m[0].trim().replace(/[.,;]+$/, "");
     const bound = g.hi ? null : BOUND_BEFORE.exec(before)?.[1];
-    return bound ? `${bound[0].toUpperCase()}${bound.slice(1).toLowerCase()} ${out}` : out;
+    yield { pay: bound ? `${bound[0].toUpperCase()}${bound.slice(1).toLowerCase()} ${out}` : out, at, end: at + m[0].length };
   }
-  return null;
 }
 // Pay a posting states for each place, in its own words: "<City>, <Region> | (<range>)" (Workday's pay-by-location table), or
 // "<City>, <Region>: (<range>)" (D-069, real set item 13: PayPal R0137491 states "Scottsdale, Arizona: ($100,500.00 - $149,600.00
@@ -64,16 +67,81 @@ export function paysByPlace(text: string): { place: string; pay: string }[] {
   return out;
 }
 // D-067 (live-6 C1: San Jose's "$32 - $55 Hourly", the first row of PayPal's pay-by-location table, was given as the Chicago pay):
-// a figure keeps its place. When a posting states pay for more than one place, the pay is the row for the posting's own location
-// (its city), else every row with its place; a posting with one pay is read as before (payFrom).
-const cityOf = (s: string) => String(s ?? "").split(/[,;|(]/)[0].toLowerCase().replace(/[^a-z ]+/g, " ").replace(/\s+/g, " ").trim();
+// a figure keeps its place.
+// Review of #785: only the "<City>, <Region> | (<range>)" table was read by place, so "San Jose, CA: $32 - $55 per hour. Chicago,
+// IL: $28 - $49 per hour." gave a Chicago posting San Jose's range with no place on it. Now every pay in the text is read with the
+// label the posting puts on it: before it ("Chicago, IL: ", "Zone A - ", a line of its own), after it ("$28-$49 in Chicago"), or
+// the label of the pay it sits beside ("$28 - $49 per hour ($58,240 - $101,920 per year)"). The pay is the range for the posting's
+// own location when exactly one place matches it (city, then state; "Remote"; a Bay Area city for "Bay Area"); otherwise every
+// range with its place; and none when some ranges carry no place (which one applies cannot be told). One pay is read as before.
+const STATES: Record<string, string> = { alabama: "al", alaska: "ak", arizona: "az", arkansas: "ar", california: "ca", colorado: "co", connecticut: "ct", delaware: "de", florida: "fl", georgia: "ga", hawaii: "hi", idaho: "id", illinois: "il", indiana: "in", iowa: "ia", kansas: "ks", kentucky: "ky", louisiana: "la", maine: "me", maryland: "md", massachusetts: "ma", michigan: "mi", minnesota: "mn", mississippi: "ms", missouri: "mo", montana: "mt", nebraska: "ne", nevada: "nv", "new hampshire": "nh", "new jersey": "nj", "new mexico": "nm", "new york": "ny", "north carolina": "nc", "north dakota": "nd", ohio: "oh", oklahoma: "ok", oregon: "or", pennsylvania: "pa", "rhode island": "ri", "south carolina": "sc", "south dakota": "sd", tennessee: "tn", texas: "tx", utah: "ut", vermont: "vt", virginia: "va", washington: "wa", "west virginia": "wv", wisconsin: "wi", wyoming: "wy", "district of columbia": "dc" };
+const CODES = new Set(Object.values(STATES));
+const BAY = new Set(["san francisco", "san jose", "oakland", "palo alto", "mountain view", "sunnyvale", "menlo park", "redwood city", "santa clara", "cupertino", "fremont", "berkeley", "san mateo", "south san francisco", "bay area"]);
+const words = (s: string) => String(s ?? "").toLowerCase().replace(/[^a-z ]+/g, " ").replace(/\s+/g, " ").trim();
+const cityOf = (s: string) => words(String(s ?? "").split(/[,;|(]/)[0]);
+type Place = { city: string; state: string | null; only: "state" | "remote" | "bay" | null };
+function placeOf(s: string): Place {
+  const [a, b] = String(s ?? "").split(","), city = cityOf(a), region = words(b ?? "");
+  if (/\bremote\b/i.test(s)) return { city: "remote", state: null, only: "remote" };
+  if (/\bbay area\b/i.test(s)) return { city: "bay area", state: "ca", only: "bay" };
+  if (city === "nyc" || city === "new york city") return { city: "new york", state: "ny", only: null };
+  const state = STATES[region] ?? (CODES.has(region) ? region : null);
+  if (!b && (STATES[city] || (CODES.has(city) && /^[A-Z]{2}$/.test(a.trim())))) return { city, state: STATES[city] ?? city, only: "state" };
+  return { city, state, only: null };
+}
+// How a label's place fits the posting's: 2 the same city (or remote, or a Bay Area city), 1 the same state, 0 not this place.
+function fit(label: Place, loc: Place): 0 | 1 | 2 {
+  if (label.only === "remote" || loc.only === "remote") return label.only === loc.only ? 2 : 0;
+  if (label.only === "bay") return BAY.has(loc.city) && (!loc.state || loc.state === "ca") ? 2 : 0;
+  if (label.only === "state") return loc.state === label.state || (loc.only === "state" && loc.city === label.city) ? 1 : loc.city === label.city && !loc.state ? 2 : 0;
+  return label.city === loc.city && label.city.length >= 3 && (!label.state || !loc.state || label.state === loc.state) ? 2 : 0;
+}
+const LABEL = /^(?:[A-Z][A-Za-z.'&-]*|\d{1,2})(?:,? (?:[A-Z][A-Za-z.'&-]*|\d{1,2}|of|the|and|other|all|de|la))*(?: (?:area|metro|locations?|states?|offices?))?$/;
+const NOT_LABEL = /^(?:Pay|Salary|Base|Range|Compensation|Hourly|Annual|Annually|The|This|Our|Rate|Wage|USD|Total|Target|Min|Max|Minimum|Maximum|From|Starting|Estimated|Expected|Benefits|Note|Up|To|And|Or|Between)\b/;
+const placeLike = (l: string) => { const p = placeOf(l); return !!(p.only || p.state); };
+const asLabel = (x: string) => { const l = x.trim().replace(/^(?:(?:and|or|in|for|at|the)\s+)+/i, "").replace(/(?:\s+(?:and|or|the|of))+$/i, "").replace(/[.,]+$/, "").trim(); return l.length >= 2 && l.length <= 50 && LABEL.test(l) && !NOT_LABEL.test(l) ? l : null; };
+export function paysWithPlace(text: unknown): { place: string | null; pay: string }[] {
+  const t = String(text ?? "").replace(/[ \t]*\n+[ \t]*/g, " ¶ ").replace(/\s+/g, " ");
+  const out: { place: string | null; pay: string }[] = [];
+  let from = 0, last: string | null = null;
+  for (const p of paysIn(t)) {
+    const gap = t.slice(Math.max(from, p.at - 120), p.at);
+    const head = gap.replace(/\s*\(?\s*$/, ""), sep = /\s*(?:[:|=¶]|\s[-–—])\s*$/.exec(head);
+    const seg = (sep ? head.slice(0, sep.index) : head).split(/(?<!\b(?:St|Ft|Mt))[.!?;]\s+|[:|()¶•]|\s[-–—]\s/).pop() ?? "";
+    let place = asLabel(seg);
+    if (place && !sep && !placeLike(place)) place = null;
+    let end = p.end;
+    if (!place) {
+      const after = /^\s*\)?\s*(?:in|for|at)\s+(?:the\s+)?([A-Z][A-Za-z.'-]*(?: [A-Z][A-Za-z.'-]*)*(?:, [A-Z][A-Za-z]+(?: [A-Z][a-z]+)?)?)/.exec(t.slice(p.end, p.end + 70));
+      if (after && asLabel(after[1])) { place = asLabel(after[1]); end = p.end + after[0].length; }
+    }
+    // Beside the pay before it, in the same sentence ("$28 - $49 per hour ($58,240 - $101,920 per year)"): the same place.
+    if (!place && last && from > 0 && gap.length <= 12 && !/[.!?;¶]/.test(gap)) place = last;
+    out.push({ place, pay: p.pay });
+    last = place; from = end;
+    if (out.length >= 24) break;
+  }
+  return out;
+}
 export function placedPay(text: unknown, location: string | null | undefined): string | null {
-  const rows = paysByPlace(String(text ?? "").replace(/[ \t]+/g, " "));
-  if (rows.length < 2 || new Set(rows.map((r) => r.pay)).size < 2) return payFrom(text);
-  const where = String(location ?? "").split(/;|\bor\b|\//).map(cityOf).filter((c) => c.length >= 3);
-  const mine = rows.filter((r) => where.includes(cityOf(r.place)));
-  if (mine.length === 1) return `${mine[0].pay} (${mine[0].place})`;
-  return rows.map((r) => `${r.place}: ${r.pay}`).join("; ");
+  const rows = paysWithPlace(text);
+  if (!rows.length) return null;
+  const groups: { place: string; pays: string[] }[] = [];
+  for (const r of rows) {
+    if (!r.place) continue;
+    const g = groups.find((x) => x.place === r.place) ?? (groups.push({ place: r.place, pays: [] }), groups.at(-1)!);
+    if (!g.pays.includes(r.pay)) g.pays.push(r.pay);
+  }
+  if (!groups.length) return payFrom(text);
+  const where = String(location ?? "").split(/;|\bor\b|\/|\|/).map((x) => x.trim()).filter((x) => cityOf(x).length >= 2).map(placeOf);
+  const fits = groups.map((g) => Math.max(0, ...where.map((w) => fit(placeOf(g.place), w))));
+  const best = Math.max(0, ...fits), mine = best ? groups.filter((_g, k) => fits[k] === best) : [];
+  const one = new Set(rows.map((r) => r.pay.replace(/\s+/g, ""))).size < 2;
+  // One pay in the whole text: it is the pay, wherever the posting is; a place on it is kept when it is not the posting's own.
+  if (one) return groups.length === 1 && placeLike(groups[0].place) && !mine.length ? `${groups[0].place}: ${rows[0].pay}` : rows[0].pay;
+  if (mine.length === 1) return `${mine[0].pays.join(" / ")} (${mine[0].place})`;
+  if (rows.some((r) => !r.place)) return null;
+  return groups.slice(0, 12).map((g) => `${g.place}: ${g.pays.join(" / ")}`).join("; ");
 }
 // The currency a pay string is in: "USD" for a plain or US dollar, else the code; null when it names none.
 export function payCurrency(pay: string): string | null {

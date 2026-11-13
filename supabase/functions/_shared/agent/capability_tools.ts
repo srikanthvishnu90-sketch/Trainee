@@ -51,23 +51,50 @@ async function recordFor(d: CapabilityDeps, c: ToolCtx): Promise<ApplicationReco
   const readable = (all ?? []).filter((a) => a.can_read);
   const mail: MailCoverage = { tracking_on: d.tracking, gmail: all === null ? "unknown" : readable.length ? "connected" : all.length ? "not_allowed" : "not_connected",
     mailbox: readable[0]?.mailbox ?? null, read_through: null, accounts_connected: (all ?? []).length, accounts: (all ?? []).map((a) => a.mailbox), accounts_read: [], multiple_accounts_supported: true };
+  // Review of #785 (D-024, owner must-fix "check connected email before saying I haven't applied"): every source is read or
+  // named as not read. A live read that threw or answered an error read no account; an account the read left out was not read;
+  // a store that threw was not read. None of those is a zero.
+  const could: string[] = [];
+  let readOk = false;
+  if (all === null) could.push("which Google accounts are connected");
+  const boxes = readable.map((a) => a.mailbox), inList = (xs: unknown) => boxes.filter((b) => (Array.isArray(xs) ? xs : []).some((x) => String(x).toLowerCase() === b.toLowerCase()));
   // A live read of new mail first (the scheduled run's own code, for this person only, every account), so the answer is as of now.
   if (d.tracking && mail.gmail === "connected" && d.readNow) {
     const r = await d.readNow(c.userId).catch(() => null);
     mail.read_now = r?.status === "ok" ? "read" : r?.status === "ERROR" ? "error" : "not_read";
-    if (r?.status === "ok") { mail.read_through = r.read_through; mail.accounts_read = (r as any).mailboxes ?? readable.map((a) => a.mailbox); }
+    if (r?.status === "ok") mail.read_through = r.read_through;
+    mail.accounts_read = r?.status === "ok" ? (Array.isArray(r.mailboxes) ? inList(r.mailboxes) : boxes) : [];
   }
   if (!mail.read_through && d.cursor && mail.gmail === "connected") mail.read_through = await d.cursor(c.userId).catch(() => null);
+  if (d.tracking && mail.gmail === "connected") {
+    // No live read on this turn: what the scheduled run read stands through its date; with no date, the mailbox was never read.
+    if (!d.readNow && mail.read_through) mail.accounts_read = boxes;
+    mail.accounts_failed = boxes.filter((b) => !mail.accounts_read.includes(b));
+    for (const b of mail.accounts_failed) could.push(`Gmail account ${b}`);
+    readOk ||= mail.accounts_read.length > 0;
+  }
   const here = appsFromTracker((c.state as any)?.trackStore?.rows ?? []);
   let stored: any[] = [], events: any[] = [];
   if (d.mail) {
-    stored = await d.mail.applications(c.userId).catch(() => { unreadable.push("applications"); return []; });
-    events = await d.mail.events(c.userId).catch(() => { unreadable.push("mail events"); return []; });
-  }
+    const got = async <T>(name: string, what: string, f: () => Promise<T[]>): Promise<T[]> => {
+      try { const xs = await f(); readOk = true; return xs; } catch { unreadable.push(name); could.push(what); return []; }
+    };
+    stored = await got("applications", "the saved applications record", () => d.mail!.applications(c.userId) as any);
+    events = await got("mail events", "the saved mail events", () => d.mail!.events(c.userId) as any);
+  } else could.push("the saved applications and mail events");
   const apps = [...here.filter((h) => !stored.some((s) => s.ref === h.ref)), ...stored];
   const previous = d.snapshot ? await d.snapshot.get(c.userId).catch(() => null) : null;
-  return buildRecord({ now: c.now, apps, events, situation: d.situation, listed: (c.state as any)?.discovery?.lastShortlist, mail, previous, unreadable });
+  return buildRecord({ now: c.now, apps, events, situation: d.situation, listed: (c.state as any)?.discovery?.lastShortlist, mail, previous, unreadable, could_not_read: could, read_ok: readOk });
 }
+// The counts a record gives, and what the turn may take as read (loop.ts turn.record, turn.counts): a number of applications only
+// from a complete read. Otherwise it is unknown (null), with what was found as "at least", and the note says so.
+function countsOf(r: ApplicationRecord, c: ToolCtx) {
+  const n = r.read.status === "complete" ? r.applied.length : null;
+  if (c.turn) { c.turn.record = r.read; if (n !== null) c.turn.counts = { applied: n }; else delete c.turn.counts; }
+  return { applied: n, ...(n === null && r.applied.length ? { applied_at_least: r.applied.length } : {}), researched: r.researched.length, drafts: r.drafts.length };
+}
+const incompleteNote = (r: ApplicationRecord) => r.read.status === "complete" ? "" : ` THIS READ ${r.read.status === "failed" ? "FAILED" : "IS PARTIAL"}: could not read ${r.read.could_not_read.join("; ")}. ` +
+  "The number of applications is unknown (counts.applied is null). Never say they have not applied, that there are none, or a total. Say which could not be read, give anything found as \"at least\", and say the rest is unconfirmed until it can be read.";
 const remember = async (d: CapabilityDeps, c: ToolCtx, r: ApplicationRecord) => { await d.snapshot?.set(c.userId, snapshotOf(r)).catch(() => {}); };
 
 const RECORD_NOTE = "Answer from this record only. Keep three groups apart: applications that went (with the evidence for each: the employer's email, " +
@@ -85,11 +112,10 @@ export function capabilityTools(d: CapabilityDeps): ToolSpec[] {
     run: async (_i, c) => {
       const r = await recordFor(d, c);
       await remember(d, c, r);
-      if (c.turn) c.turn.counts = { applied: r.applied.length };
       // D-071 (live-8 C6: "Your Gmail shows 8 applications", then the list of 9 and "I miscounted"): the counts are code's, from the
       // record, and the reply says them as given.
-      return { counts: { applied: r.applied.length, researched: r.researched.length, drafts: r.drafts.length }, ...r, connect_url: r.mail.gmail === "connected" ? null : d.connectUrl,
-        note: `${RECORD_NOTE} Say the numbers in counts exactly (counts.applied applications went); never count the list yourself.` };
+      return { counts: countsOf(r, c), ...r, connect_url: r.mail.gmail === "connected" ? null : d.connectUrl,
+        note: r.read.status === "complete" ? `${RECORD_NOTE} Say the numbers in counts exactly (counts.applied applications went); never count the list yourself.` : `${RECORD_NOTE}${incompleteNote(r)}` };
     },
   }];
   if (d.files) tools.push({
@@ -104,9 +130,9 @@ export function capabilityTools(d: CapabilityDeps): ToolSpec[] {
       const url = made.url ?? made.webApp;
       if (url && c.turn) (c.turn.fileLinks ??= []).push(url);
       await remember(d, c, r);
-      return { status: "ok", counts: { applied: r.applied.length, researched: r.researched.length, drafts: r.drafts.length }, coverage: r.coverage, changes: r.changes, applied: r.applied.map((a) => ({ company: a.company, role: a.role, status: a.status, confirmed_by: a.confirmed_by })),
+      return { status: "ok", counts: countsOf(r, c), read: r.read, coverage: r.coverage, changes: r.changes, applied: r.applied.map((a) => ({ company: a.company, role: a.role, status: a.status, confirmed_by: a.confirmed_by })),
         researched: r.researched, drafts: r.drafts, mail: r.mail, connect_url: r.mail.gmail === "connected" ? null : d.connectUrl,
-        note: "The tracker page was made; the system adds its link. Say what it holds in a sentence or two, state the coverage, correct anything in changes out loud, and say it updates from their Gmail confirmations when they ask again. Nothing was submitted or sent." };
+        note: "The tracker page was made; the system adds its link. Say what it holds in a sentence or two, state the coverage, correct anything in changes out loud, and say it updates from their Gmail confirmations when they ask again. Nothing was submitted or sent." + incompleteNote(r) };
     },
   });
   if (d.people?.on) {

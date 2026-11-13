@@ -33,6 +33,8 @@ export interface MailCoverage {
   accounts_connected: number;
   // D-062: every Google account connected (the first grant first), and those read for this record.
   accounts: string[]; accounts_read: string[];
+  // Review of #785: the readable accounts whose mail could not be read for this record (never counted as read).
+  accounts_failed?: string[];
   multiple_accounts_supported: true;
   read_now?: "read" | "not_read" | "error";
 }
@@ -40,7 +42,12 @@ export interface RecordChange { ref: string; what: string; was: string; now: str
 export interface ApplicationRecord {
   as_of: string; applied: AppliedItem[]; researched: ResearchedItem[]; drafts: DraftItem[];
   mail: MailCoverage; coverage: string[]; changes: RecordChange[]; unreadable: string[];
+  // Review of #785 (D-024): whether every source of this record was read. "partial": at least one was and one was not (an
+  // account, a store); "failed": none was. Anything but "complete" is no ground for a count or for "none": could_not_read names
+  // what was not read, each in plain words.
+  read: RecordRead;
 }
+export interface RecordRead { status: "complete" | "partial" | "failed"; could_not_read: string[] }
 // What was shown, kept per person (career_watch_kv, erased with everything else) so the next record can correct it.
 export interface Snapshot { at: string; items: { ref: string; company: string; role: string | null; stage: string; hashes: string[] }[] }
 
@@ -121,16 +128,19 @@ export function draftsFrom(situation: Situation | null): DraftItem[] {
 }
 
 // Coverage, as data the reply restates in its own words.
-export function coverageOf(m: MailCoverage): string[] {
+export function coverageOf(m: MailCoverage, couldNotRead: string[] = []): string[] {
   const out: string[] = [];
   if (!m.tracking_on) out.push("reading email is switched off, so no email confirmation was read");
   else if (m.gmail === "not_connected") out.push("no Gmail is connected, so no email confirmation was read; the person connects it themselves (they sign in to Google)");
   else if (m.gmail === "not_allowed") out.push("Gmail is connected without permission to read mail, so no email confirmation was read");
   else if (m.gmail === "connected") {
-    const read = m.accounts_read.length ? m.accounts_read : m.accounts;
-    out.push(`Gmail-based: ${read.length === 1 ? "1 Gmail account" : `${read.length} Gmail accounts`} read (${read.join(", ") || "the connected Gmail"})${m.read_through ? `, through ${m.read_through.slice(0, 10)}` : ""}`);
+    // Only an account that was read is said to be read (review of #785: a failed live read was reported as "1 Gmail account read").
+    const read = m.accounts_read.length || m.accounts_failed ? m.accounts_read : m.accounts;
+    if (read.length) out.push(`Gmail-based: ${read.length === 1 ? "1 Gmail account" : `${read.length} Gmail accounts`} read (${read.join(", ") || "the connected Gmail"})${m.read_through ? `, through ${m.read_through.slice(0, 10)}` : ""}`);
     out.push("an application confirmed to an email address that is not connected, or a status change shown only on an employer's portal, is not in this record");
   } else out.push("whether Gmail is connected could not be read just now");
+  for (const w of couldNotRead) out.push(`could not read ${w} just now: what it holds is unknown, not none`);
+  if (couldNotRead.length) out.push("this read is incomplete, so the number of applications is unknown and \"no applications\" is unconfirmed");
   out.push("researched roles are research only, not applications");
   return out;
 }
@@ -150,11 +160,13 @@ export function changesSince(prev: Snapshot | null, applied: AppliedItem[]): Rec
 }
 export const snapshotOf = (r: ApplicationRecord): Snapshot => ({ at: r.as_of, items: r.applied.map((a) => ({ ref: a.ref, company: a.company, role: a.role, stage: a.stage, hashes: a.hashes.slice(0, 10) })) });
 
-export function buildRecord(o: { now: number; apps: TrackedApp[]; events: StatusEvent[]; situation: Situation | null; listed: any[] | null | undefined; mail: MailCoverage; previous: Snapshot | null; unreadable?: string[] }): ApplicationRecord {
+export function buildRecord(o: { now: number; apps: TrackedApp[]; events: StatusEvent[]; situation: Situation | null; listed: any[] | null | undefined; mail: MailCoverage; previous: Snapshot | null; unreadable?: string[]; could_not_read?: string[]; read_ok?: boolean }): ApplicationRecord {
   const applied = appliedFrom(o.apps, o.events, o.situation);
+  const could = [...new Set(o.could_not_read ?? [])];
   return {
     as_of: new Date(o.now).toISOString(), applied, researched: researchedFrom(o.listed, o.situation, applied), drafts: draftsFrom(o.situation),
-    mail: o.mail, coverage: coverageOf(o.mail), changes: changesSince(o.previous, applied), unreadable: [...new Set([...(o.unreadable ?? []), ...(o.situation?.unreadable ?? [])])],
+    mail: o.mail, coverage: coverageOf(o.mail, could), changes: changesSince(o.previous, applied), unreadable: [...new Set([...(o.unreadable ?? []), ...(o.situation?.unreadable ?? [])])],
+    read: { status: !could.length ? "complete" : o.read_ok ? "partial" : "failed", could_not_read: could },
   };
 }
 

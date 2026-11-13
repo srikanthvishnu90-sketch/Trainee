@@ -295,8 +295,21 @@ export function statementsOf(message: string): { asking: boolean; stated: string
     parts.forEach((c, k) => clauses.push({ text: c, ask: (k === parts.length - 1 && /\?\s*$/.test(s)) || ASK_START.test(c.toLowerCase()) }));
   }
   const asking = clauses.some((c) => c.ask);
-  const stated = clauses.filter((c) => !c.ask && FIRST_PERSON.test(c.text.toLowerCase())).map((c) => c.text).join(". ");
+  const stated = clauses.filter((c) => (c.ask ? statedInAsk(c.text) : FIRST_PERSON.test(c.text.toLowerCase()))).map((c) => c.text).join(". ");
   return { asking, stated };
+}
+// Review of #785 (D-007): a request or question can carry a statement about the person ("can you add that I interned at Google
+// last summer?", "could you save my GPA as 3.7?", "do I need sponsorship given that I'm on an F-1 visa?"). Such a clause is stated
+// text too: the record tool is offered and may draw on it (its own checks still hold every word to what they said). A question
+// about themselves ("have i applied", "what should i put on my resume") states nothing. Unsure reads as stated.
+const SAVE_ASK = /\b(?:add|put\s+down|note|save|remember|record|jot|write\s+down|log|include|mention)\b/;
+const ASKED_I = /\b(?:do|does|did|have|has|had|can|could|should|shall|would|will|am|was|may|might|must|what|where|when|how|why|who|which)\s+i\b/g;
+export function statedInAsk(clause: string): boolean {
+  const c = lc(clause).replace(/[’‘]/g, "'");
+  if (SAVE_ASK.test(c)) return true;
+  if (/\b(?:i'm|im|i've|ive|i am|i'd|i'll)\b/.test(c) || /\bmy\s+[a-z0-9 .+#-]{1,40}?\s(?:is|are|was|were|as|=)\s/.test(c)) return true;
+  // "I" as the subject of a statement, not of the question itself ("that i interned" against "have i applied", "what should i put").
+  return /\bi\s+[a-z]/.test(c.replace(ASKED_I, " "));
 }
 // A clause about something to do now ("I need to lock in", "I have to finish my resume") is a task, not a standing rule.
 export const TODO_CLAUSE = /\bi\s+(?:really\s+)?(?:(?:need|have|got|want|should|must)\s+to|gotta|wanna|gonna)\s+(?!be\b|have\b|work\b|stay\b|keep\b|live\b|avoid\b|get paid\b)[a-z]+/;
@@ -311,7 +324,7 @@ export function statesNothing(message: string): boolean {
 }
 // G14 (C6: "have i applied to anything yet?" answered "nothing on record" without reading Gmail): an ask about their own
 // application history reads the record that holds it (read_application_mail) before it is answered.
-const HISTORY_ASK = /\b(?:have|did|had)\s+i\s+(?:already\s+|even\s+|ever\s+)?(?:applied|apply|sent|submitted)\b|\bwhat\s+(?:have|did)\s+i\s+(?:already\s+)?(?:apply|applied|submit(?:ted)?)\b|\bwhere\s+(?:have|did)\s+i\s+(?:already\s+)?(?:apply|applied)\b|\b(?:my|the)\s+applications?\s+(?:so\s+far|history|status|tracker)\b|\b(?:keep|keeping)\s+track\s+of\s+(?:my\s+)?(?:applications?|what\s+i\s+applied)\b|\bhow\s+many\s+(?:applications|places|jobs|roles)\s+(?:have|did)\s+i\b/;
+const HISTORY_ASK = /\b(?:have|did|had)\s+i\s+(?:already\s+|even\s+|ever\s+)?(?:applied|apply|sent|submitted)\b|\bwhat\s+(?:have|did)\s+i\s+(?:already\s+)?(?:apply|applied|submit(?:ted)?)\b|\bwhere\s+(?:have|did)\s+i\s+(?:already\s+)?(?:apply|applied)\b|\b(?:my|the)\s+applications?\s+(?:so\s+far|history|status|tracker)\b|\b(?:keep|keeping)\s+track\s+of\s+(?:my\s+)?(?:applications?|what\s+i\s+applied)\b|\bhow\s+many\s+(?:applications|places|jobs|roles)\s+(?:have|did)\s+i\b|\bany\s+applications?\s+(?:out|in|pending|sent|submitted|so\s+far|yet|on\s+(?:file|record))\b|\b(?:is|are|was|were)\s+my\s+applications?\b[^?]{0,60}\b(?:in|out|sent|submitted|through|received)\b|\bam\s+i\s+(?:already\s+)?(?:in|applied)\s+(?:for|to|at)\b|\b(?:who|which\s+\w+|what\s+\w+)\s+(?:got|has|have|received)\s+my\s+(?:resume|application)\b|\ban?\s+applications?\s+from\s+me\b|\bapplications?\s+(?:have|did)\s+i\s+(?:sent|send|submit(?:ted)?|put\s+in)\b/;
 export function historyAskOf(message: string): boolean { return HISTORY_ASK.test(lc(message)); }
 export function historyNote(): string {
   return "THEY ASKED ABOUT THEIR OWN APPLICATIONS (code read it from their words): call read_application_mail first and answer from what it returns " +

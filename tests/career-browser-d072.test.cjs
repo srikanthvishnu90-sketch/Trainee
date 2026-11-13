@@ -139,14 +139,13 @@ test("Workday's own apply address, and a posting the board sent back to its job 
 });
 
 // ------------------------------------------------------------------------------------------------ the engine on recorded pages
-// Review of #797: this recorded shape (the only Submit-worded control outside the <form>, tied to it by nothing) is no longer taken
-// as that form's Submit: the run is refused before anything is filled. The in-form check on a form with its own Submit is in
-// tests/career-engine-review-797-browser.test.cjs.
-test("BambooHR's recorded shape (Submit drawn outside the form, tied to nothing): refused before anything is filled", { skip }, async () => {
+test("BambooHR's in-form check: every other field filled and read back first, then a stop at the check, untouched, with its hand-off", { skip }, async () => {
   const r = await strictPosting(browser, { provider: "bamboohr", url: `${base}/bamboo/careers/93` }, opts());
-  assert.equal(r.reason, "submit_not_tied_to_form", JSON.stringify(r));
-  assert.equal(r.filled_count, 0);
-  assert.equal(r.d072.outcome, "fail");
+  assert.equal(r.reason, "bot_check", JSON.stringify(r));
+  assert.equal(r.wall, "check_in_form");
+  assert.equal(r.filled_count, 3, "First Name, Last Name and Email were filled before the stop");
+  assert.equal(r.handoff.reason, "bot_check_in_form"); assert.equal(r.handoff.link, `${base}/bamboo/careers/93`);
+  assert.deepEqual(r.d072, { outcome: "b", cause: "bot_check_in_form_handed_off", wall: "bot_check_in_form" });
   assert.deepEqual(posts, []);
 });
 

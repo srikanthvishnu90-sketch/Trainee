@@ -32,8 +32,12 @@ const PAGES = {
   // The same page whose Apply control opens the real application.
   "/opens": doc("Designer", `<a href="/appform">Apply</a>${NEWS}`),
   "/appform": doc("Application", `<form action="/appform/submit" method="post">${FIELDS}<button type="submit">Submit application</button></form>`),
-  // An application form whose only Submit-worded control is outside it, tied to nothing.
+  // BambooHR's recorded shape: the page's one form, an application, and its one Submit drawn directly after it.
   "/outside": doc("Analyst", `<form action="/outside/submit" method="post">${FIELDS}</form><button type="button" onclick="document.forms[0].submit()">Submit Application</button>`),
+  // The same control with anything else in the way: a newsletter form on the page; a search box between the form and the control; a link.
+  "/outside-news": doc("Analyst", `<form action="/outside/submit" method="post">${FIELDS}</form><button type="button" onclick="document.forms[0].submit()">Submit Application</button>${NEWS}`),
+  "/outside-search": doc("Analyst", `<form action="/outside/submit" method="post">${FIELDS}</form><input type="search" aria-label="Search jobs"><button type="button" onclick="document.forms[0].submit()">Submit Application</button>`),
+  "/outside-link": doc("Analyst", `<form action="/outside/submit" method="post">${FIELDS}</form><a role="button" href="/appform">Apply</a>`),
   // A consent box the page ticked itself (not required, so nothing asks for it).
   "/preticked": doc("Writer", `<form action="/preticked/submit" method="post">${FIELDS}<label><input type="checkbox" name="share" checked> I agree to share my application with partner companies</label><button type="submit">Submit application</button></form>`),
 };
@@ -90,10 +94,24 @@ test("2: an Apply control that opens the application is opened, and the applicat
   assert.deepEqual(posts, ["/appform/submit"]);
 });
 
-test("2: a Submit-worded control outside the application form, tied to nothing: refused before anything is typed", o, async () => {
+test("2: the page's one application form with its one Submit drawn directly after it (BambooHR): that form is filled and submitted", o, async () => {
   const r = await run("/outside");
-  assert.deepEqual([r.status, r.reason], ["not_submitted", "submit_not_tied_to_form"], JSON.stringify(r));
-  assert.ok(!beacons.includes("typed")); assert.deepEqual(posts, []);
+  assert.equal(r.status, "submitted_page_confirmed", JSON.stringify(r));
+  assert.deepEqual(posts, ["/outside/submit"]);
+});
+
+test("2: the same outside Submit beside a second form, or past a search box: refused before anything is typed", o, async () => {
+  for (const p0 of ["/outside-news", "/outside-search"]) {
+    const r = await run(p0);
+    assert.deepEqual([r.status, r.reason], ["not_submitted", "submit_not_tied_to_form"], `${p0} ${JSON.stringify(r)}`);
+    assert.ok(!beacons.includes("typed"), p0); assert.deepEqual(posts, [], p0);
+  }
+});
+
+test("2: an outside link in the Apply words is opened as a link, never pressed as the form's Submit", o, async () => {
+  const r = await run("/outside-link");
+  assert.deepEqual(posts.filter((x) => x === "/outside/submit"), [], JSON.stringify(r));
+  assert.deepEqual(posts, ["/appform/submit"], "the link led to the application's own form, and that one was submitted");
 });
 
 test("4: a consent box the page ticked itself is asked of the person, never sent", o, async () => {

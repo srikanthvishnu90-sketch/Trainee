@@ -183,15 +183,11 @@ const QUALIFIES = /(?<![\p{L}])(?:updated|as of|published|posted on|archived?|co
 const DATE_LINE = /^(?=.{4,40}$)(?:[^.!?]*\b(?:19|20)\d\d\b[^.!?]*)$/;
 const SHARED = ["sites.google.com", "docs.google.com", "groups.google.com", "github.io", "github.com", "medium.com", "substack.com", "notion.site", "notion.so", "wordpress.com", "blogspot.com", "linkedin.com", "reddit.com", "facebook.com", "x.com", "twitter.com", "wixsite.com", "weebly.com", "webflow.io", "vercel.app", "netlify.app", "herokuapp.com", "pages.dev", "greenhouse.io", "lever.co", "ashbyhq.com", "myworkdayjobs.com", "glassdoor.com", "indeed.com", "quora.com", "teamblind.com"];
 const PUBLIC_LABELS = /^(?:community|forum|forums|blog|blogs|discuss|discussion|talk|answers|users|people|members|sites|pages|groups|wiki|support|help)$/;
-// A title that is about more than the one employer, or about someone who is not it.
-const TITLE_CUE = /(?<![\p{L}])(?:vs\.?|versus|and|other|others|firms|companies|employers|top|best|list|compared?|comparison|rankings?|ranked|rivals?|competitors?|alternatives?|similar|like|ex|former|alumni|forum|thread|community|reddit|glassdoor|indeed|college|university|school|securities)(?![\p{L}])|[&|]|\d+\s+(?:firms|companies|employers)/iu;
-// A unit that points at someone named elsewhere ("there", "they", "its interns", "the firm", "she said") is not the page owner's.
-// Every unit of every read page. `subjects`: the employers asked about. Round 4: the page is one employer's (`owner`) only when ONE
-// employer is asked about and (a) the page's host is that employer's own registrable domain as the search's record gives it (a host
-// anyone can publish on, a job board, or a community / forum / blog part of the site is not it), or (b) the page's title names that
-// employer as a whole name with no cue that it is about more than it or about someone else (TITLE_CUE). The owner's name is lent
-// to a unit only when the unit names no asked employer itself, does not point at someone named elsewhere, and does not sit under a
-// heading that is another name. A lent quote is labelled in code's words (the host, the employer as asked), never with the title.
+// Every unit of every read page. `subjects`: the employers asked about. Round 9: the page is one employer's (`owner`) only when ONE
+// employer is asked about and the page's host is that employer's own registrable domain as the search's record gives it (a host
+// anyone can publish on, a job board, or a community / forum / blog part of the site is not it); a title proves nothing ("Why I chose
+// DRW over Citadel"). The owner's name is lent to a unit that names no asked employer itself; whether the unit states the claim about
+// that employer specifically is the judge's question. A lent quote is labelled with the host alone, never with the title.
 export function indexPages(pages: { text: string; title?: string; url?: string; fetchedAt?: number }[], read: (s: string) => string = (s) => s, subjects: string[] = [], o: { sites?: string[]; ask?: string } = {}): PageIndex {
   const subs = subjects.map(squash).filter(Boolean);
   const hostOf = (u?: string) => { try { return new URL(String(u)).hostname.toLowerCase().replace(/^www\./, ""); } catch { return ""; } };
@@ -201,8 +197,7 @@ export function indexPages(pages: { text: string; title?: string; url?: string; 
     const title = plainText(decoded(String(p.title ?? ""))), host = hostOf(p.url);
     const one = subs.length === 1 ? subs[0] : null;
     const ownSite = !!one && !!host && !SHARED.some((d) => host === d || host.endsWith(`.${d}`)) && sites.some((d) => (host === d || host.endsWith(`.${d}`)) && d.split(".")[0].startsWith(compactName(one).slice(0, 12)) && !host.slice(0, Math.max(0, host.length - d.length)).split(".").some((l) => PUBLIC_LABELS.test(l)));
-    const whole = !!one && new RegExp(`(?<![\\p{L}\\p{N}])(?<!\\bthe\\s)${one.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:'s)?(?!\\s+(?!(?:Inc|LLC|Ltd|Corp|Corporation|Co|Company|Holdings|Group|Technologies|Labs|Financial)\\b)\\p{Lu})(?![\\p{L}\\p{N}-])`, "u").test(title) && !new RegExp(`(?<![\\p{L}\\p{N}])(?:the|ex-?|former)\\s*-?${one.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(title);
-    const owner = one && (ownSite || (whole && !TITLE_CUE.test(title.replace(nameRe(one), " ")))) ? one : null;
+    const owner = one && ownSite ? one : null;
     // The page, cut into units: line by line; a table row (cells apart by a bar or a tab) is one unit and is never cut; any other
     // line is cut at ";", at bullets and at sentence ends. HTML entities are read first ("&mdash;" is a dash, not a ";").
     type Raw = { text: string; heads: string[]; intro: string; header: string; bullet: boolean; note: boolean; marks: string[]; noteOf: string | null };
@@ -273,10 +268,9 @@ export function indexPages(pages: { text: string; title?: string; url?: string; 
       return clip(build({ notes: 1, top: false, prev: 1, next: 0, prevLen: 100 }), PASSAGE_MAX);
     };
     const unsafe = raw.map((x) => !safeToShow(x.text));
-    // Round 8: a lent quote says where it is from, never what the page is about: the host, and the page's own title word for word
-    // (left out when it carries anything that may not be shown, or a quotation mark).
-    const tTitle = squash(String(p.title ?? "")).slice(0, 160);
-    const pageLabel = `From ${host || "a page"}${tTitle && safeToShow(tTitle) && !/["“”]/.test(tTitle) ? ` ("${tTitle}")` : ""}`;
+    // Round 9: a lent quote says where it is from and nothing else: the host (a title is page text, unchecked: "Citadel confirms
+    // $10k/week for interns" would put an unchecked figure before the quote).
+    const pageLabel = `From ${host || "a page"}`;
     // Round 5: a page that says it is about someone else ("not Citadel", "I left Citadel"), or names another entity that begins with
     // the owner's name ("Citadel Securities", "Citadel Partners LLP"), lends the owner's name to no unit.
     const pageText = raw.map((x) => x.text).join(" ");

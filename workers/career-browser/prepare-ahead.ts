@@ -32,7 +32,7 @@
 import { engineFacts, engineRunner, prepare, questionsToStore, type ResumeTag, type RunEngine, type TextAnswer } from "./approve-first.ts";
 import { trustedManifest } from "../../extension/src/apply_core.ts";
 import { approvedTextAnswers } from "./approved_sources.ts";
-import { type ResumeStore, resumeFileContactProblems, tailorForPosting, type TailorDeps } from "../../supabase/functions/_shared/career_tailor.ts";
+import { confirmedEmails, type ResumeStore, resumeFileContactProblems, tailorForPosting, type TailorDeps } from "../../supabase/functions/_shared/career_tailor.ts";
 import { draftEssay, type ModelFn } from "../../supabase/functions/_shared/essay_draft.ts";
 import { mapQuestion } from "../../supabase/functions/_shared/question_map.ts";
 import { dbHostGate, PacedLimiter, type Pacing, pacingFrom } from "./mass-run.ts";
@@ -352,7 +352,7 @@ export function tailoredResume(o: { render: TailorDeps["render"]; resumes: Resum
       contact: "typed",
     });
     // Defence in depth: the bytes about to go on a card are read; a missing or placeholder email or phone is no resume.
-    if (!t.ok || !bytes || (await resumeFileContactProblems(bytes)).length) return null;
+    if (!t.ok || !bytes || (await resumeFileContactProblems(bytes, { confirmed: confirmedEmails(profile) })).length) return null;
     const path = `${dir}/${t.filename.replace(/[^A-Za-z0-9._-]/g, "_") || "resume.pdf"}`;
     await Deno.writeFile(path, bytes, { mode: 0o600 });
     return { path, sha256: t.sha256, tag: { tailored: true, persona: t.persona } };

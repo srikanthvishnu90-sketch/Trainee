@@ -370,18 +370,19 @@ Deno.test("round 2 B: a stored resume carries its contact verdict; the gates rea
     ok(pdfText(bad).includes("you@example.com"), `armour ${armour}: the text is read`);
     eq([(await T.contactVerdict(bad)).status, (await T.contactVerdict(fine)).status], ["unconfirmed", "ok"]);
   }
-  eq((await T.contactVerdict(IMAGE_ONLY)).status, "unreadable");
-  eq((await T.contactVerdict(new TextEncoder().encode("%PDF-1.4\nnot a pdf you@example.com"))).status, "unconfirmed", "a reserved address in bytes that do not parse is still seen");
-  // The gate. A storage row hands its record (null when it has none): only "ok", for the email confirmed now, is ready.
+  eq((await T.contactVerdict(IMAGE_ONLY)).status, "unread");
+  eq((await T.contactVerdict(new TextEncoder().encode("%PDF-1.4\nnot a pdf you@example.com"))).status, "unread", "bytes that do not parse are not read (round 3: as trunk)");
+  // The gate. A recorded verdict is read only when a row hands one; null or absent is "not recorded": the bytes alone decide.
   const good = out.detail.pdf as Uint8Array, gate = T.resumeFileContactProblems;
   eq(await gate(good, { record: out.contact }), []);
-  eq(await gate(good, { record: out.contact, confirmedEmailHash: out.contact.email_hash }), []);
-  eq(await gate(good, { record: null }), [T.UNREADABLE_CONTACT], "a stored file with no record is not ready");
-  eq(await gate(IMAGE_ONLY, { record: { status: "unreadable", email_hash: null } }), [T.UNREADABLE_CONTACT]);
-  eq(await gate(IMAGE_ONLY, { record: null, foreign: true }), [T.UNREADABLE_CONTACT], "foreign never excuses a stored file");
-  ok((await gate(good, { record: out.contact, confirmedEmailHash: "0".repeat(64) }))[0].includes("not the email they have confirmed now"));
-  ok((await gate(good, { record: { status: "ok", email_hash: "0".repeat(64) } }))[0].includes("not the one recorded for it"));
-  eq(await gate(IMAGE_ONLY), [T.UNREADABLE_CONTACT], "bytes alone, unreadable: not ready");
+  eq(await gate(good, { record: out.contact, confirmed: [MINE] }), []);
+  eq(await gate(good, { record: null }), [], "a row stored before the column (contact: null) is not blocked");
+  eq(await gate(IMAGE_ONLY, { record: null }), [], "not recorded and not readable: passes, as on trunk");
+  eq(await gate(IMAGE_ONLY, { record: { status: "unread", email_hash: null } }), []);
+  ok((await gate(IMAGE_ONLY, { record: { status: "unconfirmed", email_hash: null, reasons: ["the email at the top (you@example.com) is on a reserved domain"] } }))[0].includes("you@example.com"), "a recorded refusal stands");
+  ok((await gate(good, { record: out.contact, confirmed: ["someone.else@gmail.com"] }))[0].includes("is not the email they confirmed"), "the bytes read it first");
+  ok((await gate(IMAGE_ONLY, { record: out.contact, confirmed: ["someone.else@gmail.com"] }))[0].includes("not the email they have confirmed now"), "the record, where the bytes cannot be read");
+  eq(await gate(IMAGE_ONLY), []);
   eq(T.recordOf({ sha256: "x", contact: null }), { record: null });
   eq(T.recordOf({ sha256: "x" }), {});
 });
@@ -389,12 +390,14 @@ Deno.test("round 2 B: a stored resume carries its contact verdict; the gates rea
 Deno.test("round 2 B/C: every card and submit path: an unreadable or placeholder file with a storage record never gets a card or an engine run", async () => {
   const { good, bad } = await files(), okRec = await T.contactVerdict(good);
   const engineOf = (n: { runs: number }): any => async (_a: string[], _e: unknown, controls?: any) => { n.runs++; await controls?.beforeEffect?.(); return { result: { state: "submitted_unconfirmed", reason: "employer confirmation on the page" }, evidence: null }; };
-  const cases: [string, Uint8Array, any, boolean][] = [["good, recorded ok", good, { contact: okRec }, true], ["good, row without a record", good, { contact: null }, false], ["image only, row without a record", IMAGE_ONLY, { contact: null }, false],
-    ["image only, recorded unreadable", IMAGE_ONLY, { contact: { status: "unreadable", email_hash: null } }, false], ["placeholder, wrongly recorded ok", bad, { contact: okRec }, false], ["ReportLab placeholder, no record", foreignPdf("you@example.com", true), {}, false]];
+  // Round 3 (item 4): a row with no record (contact: null, or no key as every production row today) is judged by its bytes alone.
+  const cases: [string, Uint8Array, any, boolean][] = [["good, recorded ok", good, { contact: okRec }, true], ["good, row without a record", good, { contact: null }, true], ["image only, row without a record", IMAGE_ONLY, { contact: null }, true],
+    ["image only, recorded unread", IMAGE_ONLY, { contact: { status: "unread", email_hash: null } }, true], ["placeholder, wrongly recorded ok", bad, { contact: okRec }, false],
+    ["ReportLab placeholder, no record", foreignPdf("you@example.com", true), {}, false], ["recorded for another email", good, { contact: { status: "ok", email_hash: "0".repeat(64) } }, false]];
   for (const [label, bytes, row, ready] of cases) {
     const sha = await hex(bytes), b64 = Buffer.from(bytes).toString("base64"), n = { runs: 0 };
     const job = await cardBound({ id: "job-1", lease_token: "lease-1", user_id: "TEST-owner", company: "Test Co", url: "https://jobs.lever.co/test-co/de-1",
-      payload: { posting: "lever:test-co:de-1", user_id: "TEST-owner", company: "Test Co", url: "https://jobs.lever.co/test-co/de-1", engine_approval: "c".repeat(64), resume_sha256: sha, fields: [] } });
+      payload: { posting: "lever:test-co:de-1", user_id: "TEST-owner", company: "Test Co", url: "https://jobs.lever.co/test-co/de-1", engine_approval: "c".repeat(64), resume_sha256: sha, fields: [{ label: "Email", value: MINE }] } });
     const fin: string[] = [];
     await runCloudJob(job as any, { queue: { claim: async () => [], gatePresent: async () => true, authorize: authorizer().authorize, resume: async () => ({ filename: "resume.pdf", sha256: sha, b64, ...row }), finish: async (_j: unknown, state: string, ev: any) => { fin.push(ev?.reason ?? state); } } as any, runEngine: engineOf(n), log: () => {} });
     eq([n.runs, fin[0] === "RESUME_CONTACT_UNCONFIRMED"], [ready ? 1 : 0, !ready], `cloud submit: ${label}`);
@@ -403,10 +406,11 @@ Deno.test("round 2 B/C: every card and submit path: an unreadable or placeholder
       const m = { runs: 0 }, loc: string[] = [];
       await runApproved({ claim: async () => [{ id: "00000000-0000-4000-8000-000000000011", lease_token: "lease", url: job.url, payload: job.payload } as any], finish: async (_i, _l, state, ev) => { loc.push((ev as any)?.reason ?? state); }, resumeFor: async () => ({ path, sha256: sha, ...row }), writeFacts: async () => path, runEngine: engineOf(m) });
       eq([m.runs, loc[0] === "RESUME_CONTACT_UNCONFIRMED"], [ready ? 1 : 0, !ready], `local submit: ${label}`);
-      eq(!!(await keptResume(async () => ({ b64, sha256: sha, filename: "resume.pdf", ...row }))({ job_id: "x" }, dir)), ready, `the kept resume for a prepared card: ${label}`);
+      eq(!!(await keptResume(async () => ({ b64, sha256: sha, filename: "resume.pdf", ...row }))({ job_id: "x" }, dir, person())), ready, `the kept resume for a prepared card: ${label}`);
       const rpc: any = async (name: string) => { if (name === "career_apply_message_cloud_prepare_context") return { resume: { sha256: sha, b64, filename: "resume.pdf", ...row }, account: { epoch: 1, version: 1 } }; throw Error("PAST_THE_RESUME_GATE"); };
       const card = await prepareCloudCard({ owner: USER, thread: "00000000-0000-4000-8000-0000000000aa", urls: [job.url], resumeSha256: sha }, { rpc, runEngine: engineOf({ runs: 0 }) }).then(() => "prepared", (e) => String(e?.message ?? e));
-      eq(card.includes("PAST_THE_RESUME_GATE"), ready, `cloud card: ${label}: ${card}`);
+      // The cloud card compares a record with the confirmed email only after it reads the profile (this rpc stops before).
+      if (label !== "recorded for another email") eq(card.includes("PAST_THE_RESUME_GATE"), ready, `cloud card: ${label}: ${card}`);
     } finally { await Deno.remove(path); await Deno.remove(dir, { recursive: true }); }
   }
   // approve-first prepare() (the CLI's card and the batch): no dry run starts for a file whose contact is a placeholder.
@@ -416,7 +420,120 @@ Deno.test("round 2 B/C: every card and submit path: an unreadable or placeholder
     const r: any = await prepare({ url: "https://jobs.lever.co/test-co/de-1", factsPath: path, resumePath: path, account: { epoch: 1, version: 1 }, now: NOW, runEngine: (async () => { runs++; return null; }) as any });
     eq([r.ready, r.result.reason, runs], [false, "RESUME_CONTACT_UNCONFIRMED", 0]);
   } finally { await Deno.remove(path); }
-  // The cloud card reads bytes handed with no record strictly: unreadable is not ready.
-  const sha = await hex(IMAGE_ONLY), rpc: any = async () => ({ resume: { sha256: sha, b64: Buffer.from(IMAGE_ONLY).toString("base64"), filename: "resume.pdf" }, account: { epoch: 1, version: 1 } });
-  ok(/RESUME_CONTACT_UNCONFIRMED/.test(await prepareCloudCard({ owner: USER, thread: "00000000-0000-4000-8000-0000000000aa", urls: ["https://jobs.lever.co/test-co/de-1"], resumeSha256: sha }, { rpc, runEngine: (async () => null) as any }).then(() => "prepared", (e) => String(e?.message ?? e))));
+  // Item 2 on this branch: the kept card compares with the profile prepareAhead hands it.
+  const dir = await Deno.makeTempDir();
+  try {
+    for (const [bytes, ok2] of [[CHROME.differ, false], [CHROME.real, true]] as const) {
+      const row = { b64: Buffer.from(bytes).toString("base64"), sha256: await hex(bytes), filename: "resume.pdf" };
+      eq(!!(await keptResume(async () => row)({ job_id: "x" }, dir, person())), ok2, `kept card ${ok2}`);
+    }
+  } finally { await Deno.remove(dir, { recursive: true }); }
+});
+
+// ------------------------------------------------------------------------------------------------ round 3 (2026-11-13)
+// Never worse than trunk: a file gate refuses only what it read with confidence (a well-formed address on a reserved domain,
+// template text, a fiction-range phone, or a well-formed address that is not the one the person confirmed). A file whose
+// contact it cannot read with confidence passes, as on trunk, and is said to be unread.
+const FIX = (n: string) => Deno.readFileSync(new URL(`fixtures/resume-contact/${n}`, import.meta.url));
+// Chrome's "Save as PDF" (Skia): text in reverse order, lines broken mid-address, and font programs that read as text.
+const CHROME = { real: FIX("chrome-real.pdf"), priya: FIX("chrome-priya.pdf"), differ: FIX("chrome-differ.pdf"), example: FIX("chrome-example.pdf") };
+const MINE = "dana.okafor@gmail.com";
+async function rendered(email: string, line = `${email} | (312) 874-2291`, layout?: any) {
+  const { doc } = await files(), d = { ...structuredClone(doc), header: { ...doc.header, email, contactLine: line } };
+  if (!layout) return new Uint8Array(R.renderPdf(d).buffer);
+  const r: any = await T.edgeRenderer()(d, layout);
+  return r.pdf as Uint8Array;
+}
+
+Deno.test("round 3/1: real Chrome PDFs pass every file gate; font bytes read as text are never taken for an email", async () => {
+  for (const [name, bytes] of Object.entries({ "chrome-real": CHROME.real, "chrome-priya": CHROME.priya })) {
+    eq(await T.resumeFileContactProblems(bytes), [], name);
+    eq(await T.resumeFileContactProblems(bytes, { confirmed: [name === "chrome-real" ? MINE : "priya.raman@outlook.com"] }), [], `${name}, with the confirmed email`);
+    eq((await TT.resumeFileContact(bytes)).status, "ok", name);
+  }
+  const why = await T.resumeFileContactProblems(CHROME.example);
+  ok(why.length === 1 && why[0].includes("dana@example.com") && !/[\u0000-\u001f]/.test(why.join("")), JSON.stringify(why));
+  // Lines that are not printable text are not read as a contact.
+  eq(R.fileContactProblems(["Dana Okafor", "MKHG\u0000\u0000\u0001\u0000#\u0000@$", "EXPERIENCE", "x"]), []);
+  eq(R.fileContactProblems(["Dana Okafor", "dana.okafor@gmail.com", "«¨°þ@åÕ.co\u0006", "EXPERIENCE"]), []);
+  // Not read with confidence: passes (as trunk), said to be unread.
+  eq(await TT.resumeFileContact(new TextEncoder().encode("%PDF-1.4\nnot a pdf")), { status: "unread", reasons: [] });
+  eq(R.fileContactProblems(["Casey Rivers", "Chicago, IL", "EXPERIENCE", "Support lead: answered help@example.com tickets"]), [], "an address in a sentence is not the contact");
+});
+
+Deno.test("round 3/2: a file email that is not the confirmed one is refused, truthfully, at every entry point", async () => {
+  const theirs = await rendered("other.person@gmail.com"), mine = await rendered(MINE);
+  for (const [name, bytes] of [["rendered", theirs], ["chrome", CHROME.differ]] as const) {
+    const why = await T.resumeFileContactProblems(bytes, { confirmed: [MINE] });
+    ok(why.length === 1 && why[0].includes("other.person@gmail.com") && why[0].includes("is not the email they confirmed"), `${name}: ${JSON.stringify(why)}`);
+    eq(await T.resumeFileContactProblems(bytes), [], `${name}: with no confirmed email known, nothing is compared`);
+  }
+  eq(T.confirmedEmails(person()), [MINE]);
+  // The email yes reads the person's confirmed email from their profile.
+  const objects = new Map<string, Uint8Array>(), admin = { storage: { from: () => ({ download: async (path: string) => objects.has(path) ? { data: new Blob([objects.get(path)! as BlobPart]) } : { error: { message: "nf" } } }) } };
+  const yes = supabaseResumes(admin, { profile: () => person(), tailor: null });
+  for (const [bytes, sends] of [[theirs, false], [CHROME.differ, false], [mine, true], [CHROME.real, true]] as const) {
+    const sha = await hex(bytes); objects.set(T.resumePath(USER, sha), bytes);
+    eq(!!(await yes.attachment(USER, sha)), sends, `email yes ${sends}`);
+  }
+  // The submit workers read the email the person approved on the application itself (the payload's answers).
+  const engineOf = (n: { runs: number }): any => async (_a: string[], _e: unknown, controls?: any) => { n.runs++; await controls?.beforeEffect?.(); return { result: { state: "submitted_unconfirmed", reason: "employer confirmation on the page" }, evidence: null }; };
+  for (const [bytes, sends] of [[theirs, false], [CHROME.differ, false], [mine, true], [CHROME.real, true]] as const) {
+    const sha = await hex(bytes), b64 = Buffer.from(bytes).toString("base64");
+    const payload = { posting: "lever:test-co:de-1", user_id: "TEST-owner", company: "Test Co", url: "https://jobs.lever.co/test-co/de-1", engine_approval: "c".repeat(64), resume_sha256: sha, fields: [{ label: "Email", value: MINE }] };
+    const job = await cardBound({ id: "job-1", lease_token: "lease-1", user_id: "TEST-owner", company: "Test Co", url: payload.url, payload });
+    const n = { runs: 0 }, fin: string[] = [];
+    await runCloudJob(job as any, { queue: { claim: async () => [], gatePresent: async () => true, authorize: authorizer().authorize, resume: async () => ({ filename: "resume.pdf", sha256: sha, b64 }), finish: async (_j: unknown, _s: string, ev: any) => { fin.push(ev?.reason ?? ""); } } as any, runEngine: engineOf(n), log: () => {} });
+    eq([n.runs > 0, fin[0] === "RESUME_CONTACT_UNCONFIRMED"], [sends, !sends], `cloud submit ${sends}`);
+    const path = await Deno.makeTempFile({ suffix: ".pdf" }); await Deno.writeFile(path, bytes);
+    const m = { runs: 0 }, loc: string[] = [];
+    try {
+      await runApproved({ claim: async () => [{ id: "00000000-0000-4000-8000-000000000011", lease_token: "lease", url: payload.url, payload } as any], finish: async (_i, _l, _s, ev) => { loc.push((ev as any)?.reason ?? ""); }, resumeFor: async () => ({ path, sha256: sha }), writeFacts: async () => path, runEngine: engineOf(m) });
+    } finally { await Deno.remove(path); }
+    eq([m.runs > 0, loc[0] === "RESUME_CONTACT_UNCONFIRMED"], [sends, !sends], `local submit ${sends}`);
+    // The cloud card reads the person's profile from its sources snapshot, then compares.
+    const { hashApplyPayload } = await import("../../supabase/functions/_shared/career_apply_store.ts");
+    const profile = person(), owner = USER, rows: unknown[] = [];
+    const rpc: any = async (name: string) => {
+      if (name === "career_apply_message_cloud_prepare_context") return { resume: { sha256: sha, b64, filename: "resume.pdf" }, account: { epoch: 1, version: 1 } };
+      if (name === "career_apply_message_cloud_sources") return { user_id: owner, profile, rows, digest: await hashApplyPayload({ user_id: owner, profile, rows }) };
+      throw Error("PAST_THE_RESUME_GATE");
+    };
+    const card = await prepareCloudCard({ owner, thread: "00000000-0000-4000-8000-0000000000aa", urls: [payload.url], resumeSha256: sha }, { rpc, runEngine: (async () => null) as any }).then(() => "prepared", (e) => String(e?.message ?? e));
+    eq(card.includes("RESUME_CONTACT_UNCONFIRMED"), !sends, `cloud card: ${card.slice(0, 120)}`);
+  }
+});
+
+Deno.test("round 3/3: set_resume_contact confirms an address only when the person says it is theirs; internationalised addresses are not called invalid", async () => {
+  const tools = Object.fromEntries(careerTools({ postings: async () => [] } as any).map((x: any) => [x.name, x]));
+  const run = async (message: string, input: any, header = "first.last@gmail.com") => {
+    const c: any = { userId: USER, threadId: "t1", now: NOW, state: { profile: header ? person(header) : person("Chicago, IL") }, turn: { message, added: [] } };
+    let err = ""; try { await tools.set_resume_contact.run(input, c); } catch (e) { err = String((e as Error).message); }
+    return { err, checked: c.state.profile.basics?.contact_checked ?? [], email: c.state.profile.basics?.email ?? null, after: await tailor(c.state.profile) };
+  };
+  for (const msg of ["first.last@gmail.com is NOT my email, my template had it. I'm Dana Okafor", "Dana Okafor here - should I use first.last@gmail.com or something else?", "the template says 'first.last@gmail.com' - Dana Okafor", "my old resume had first.last@gmail.com on it, weird right", "Dana Okafor, first.last@gmail.com isn't mine"]) {
+    const r = await run(msg, { name: "Dana Okafor", email: "first.last@gmail.com" });
+    ok(r.checked.length === 0 && !r.after.ok && r.after.refused === "contact_needs_confirmation", `${msg}: ${JSON.stringify(r).slice(0, 240)}`);
+  }
+  for (const msg of ["first.last@gmail.com is my email", "yes, first.last@gmail.com is mine", "use first.last@gmail.com", "my email is first.last@gmail.com"]) {
+    const r = await run(msg, { email: "first.last@gmail.com" });
+    ok(!r.err && r.checked.includes("first.last@gmail.com") && r.after.ok, `${msg}: ${JSON.stringify(r).slice(0, 240)}`);
+  }
+  for (const e of ["josé.garcía@gmail.com", "müller@gmx.de", "o'brien@gmail.com", "d'angelo.r@yahoo.com", "王伟@qq.com", "dana@münchen.de", "олег@почта.рф"]) {
+    const r = await run(`my email is ${e}`, { email: e }, "");
+    ok(!/not a valid email/.test(r.err) && r.email === e, `${e}: saved: ${JSON.stringify(r).slice(0, 200)}`);
+    ok(r.after.ok || (r.after.refused === "no_contact" && /cannot print|can print only/.test(r.after.reason) && !/not a valid/.test(r.after.reason)), `${e}: ${JSON.stringify(r.after).slice(0, 260)}`);
+  }
+});
+
+Deno.test("round 3/5-6: cut-short and counting phones are refused; '+1 555-01xx' passes only as a '(TEST)' fixture; a title's colon and a text that repeats its title", () => {
+  for (const p of ["+1 (212) 5", "+1 (987) 654-3210", "+1 555-0100", "+1 555 0150", "+15550100"]) ok(R.placeholderPhones(`dana.okafor@gmail.com | ${p} | Chicago, IL`).length === 1, p);
+  eq(R.placeholderPhones("Chicago, IL (TEST) | alex.testcase@example.test | +1 555-0100 (TEST)"), []);
+  const pp = { id: "B5", kind: "experience", status: "confirmed", title: "Pied Piper, CTO: Compression (2017 - 2019)", text: "Pied Piper, CTO: Compression (2017 - 2019)", bullets: ["designed middle-out compression", "raised $5M seed"] };
+  eq(T.entryParts(pp), { head: "Pied Piper, CTO: Compression (2017 - 2019)", details: ["designed middle-out compression", "raised $5M seed"] });
+  const hooli = { id: "B2", kind: "experience", status: "confirmed", title: "Hooli, SRE (2021 - 2024)", text: "Hooli, SRE (2021 - 2024)\nmigrated to kubernetes\non-call lead", bullets: [] };
+  eq(T.entryParts(hooli), { head: "Hooli, SRE (2021 - 2024)", details: ["migrated to kubernetes", "on-call lead"] });
+  const base = T.keepEveryEntry({ sections: [] }, { facts: [pp, hooli] }).resume;
+  const r: any = T.applyEdits(base, { facts: [pp, hooli] }, [{ role: "Hooli", lines: 2 }]);
+  eq(blockOf(r.resume, "B2"), ["Hooli, SRE (2021 - 2024)", "migrated to kubernetes", "on-call lead"]);
 });

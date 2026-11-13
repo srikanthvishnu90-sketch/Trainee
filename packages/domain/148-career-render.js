@@ -1190,22 +1190,24 @@ const CareerRender = (() => {
   // ((xxx) xxx-xxxx, NNN-NNN-NNNN), numbers reserved for fiction (555-0100 to 555-0199, +44 7700 900xxx, +61 491 570 15x),
   // one digit repeated, counting runs, a North American number whose area code or exchange cannot exist, a number cut short
   // or with no area code, and one too long to dial.
-  function placeholderPhones(text) {
-    const s = String(text == null ? "" : text).replace(EMAIL_TOKEN_RE, " ").replace(/\b(?:https?:\/\/|www\.)\S+|\b[\w-]+(?:\.[\w-]+)+\/\S*/gi, " "), out = [];
+  function placeholderPhones(text, opts) {
+    const file = !!(opts && opts.file), s = String(text == null ? "" : text).replace(EMAIL_TOKEN_RE, " ").replace(/\b(?:https?:\/\/|www\.)\S+|\b[\w-]+(?:\.[\w-]+)+\/\S*/gi, " "), out = [];
     for (const m of s.matchAll(/(?:\(\s*([xXnNdD#])\1{2}\s*\)|(?<![A-Za-z#])([xXnNdD#])\2{2})[\s.-]*([xXnNdD#])\3{2}[\s.-]*([xXnNdD#])\4{3}(?![A-Za-z#])/g)) out.push(m[0]);
     for (const m of s.matchAll(/[\[<{]+\s*(?:phone|mobile|tel)[^\]>}|]*[\]>}]+|\bphone number\b/gi)) out.push(m[0]);
-    for (const m of s.matchAll(/(?<![\d$.,@\w\/=_-])\+?\(?\d[\d\s().-]{4,}\d(?![\d%\w@])/g)) {
-      const t = m[0].trim(), d = t.replace(/\D/g, ""), plus = t[0] === "+";
+    for (const m of s.matchAll(/(?<![\d$.,@\w\/=_-])\+?\(?\d[\d\s().-]{4,}\d(?![\d%\w@])(?:\s*\(TEST\))?/g)) {
+      const fixture = /\(TEST\)$/.test(m[0]), t = m[0].replace(/\s*\(TEST\)$/, "").trim(), d = t.replace(/\D/g, ""), plus = t[0] === "+";
       const nanp = plus ? (d[0] === "1" ? d.slice(1) : null) : d.length === 11 && d[0] === "1" ? d.slice(1) : /^\(?\d{3}\)?[\s.-]*\d{3}[\s.-]*\d{4}$/.test(t) ? d : null;
       let bad = false;
-      // NOT refused: "+1 555-01xx" with no area code. Two existing architect tests print exactly that as the person's phone and
-      // expect a pass (r9-resume-fit-send-20261108.test.ts:115 and :159, resume-design.test.ts:317-327); refusing it needs
-      // those fixtures moved first. Every other spelling of the fiction range is refused.
-      if (plus && /^155501\d\d$/.test(d)) continue;
-      if (d.length < 7 || (!plus && d.length < 10 && t[0] === "(")) bad = /^\(\d{3}\)|^\d{3}-\d{3}$/.test(t);                  // a phone cut short; a ZIP or a year is not one
-      else if (d.length > 15 || (plus && (d[0] === "0" || d.length < 8))) bad = true;
-      else if (/^(\d)\1+$/.test(d) || "01234567890123456789".includes(d) || "98765432109876543210".includes(d)) bad = true;
-      else if (d.length === 7 && !plus) bad = /^\d{3}[\s.-]?\d{4}$/.test(t);        // no area code: an employer cannot dial it
+      // NOT refused: "+1 555-01xx (TEST)", the fixture marker this repo's tests print after a test person's phone
+      // (r9-resume-fit-send-20261108.test.ts:115 and :159, resume-design.test.ts:317-327 pin it). Without "(TEST)" it is refused.
+      if (fixture && plus && /^155501\d\d$/.test(d)) continue;
+      if (plus && /^155501\d\d$/.test(d)) bad = true;
+      // A number cut short or with no area code: on a header Trainee prints, refused; in a file's text (opts.file), where a
+      // line can break inside a number, not read with confidence, so left alone.
+      else if (d.length < 7 || (!plus && d.length < 10 && t[0] === "(")) bad = !file && (/^\(\d{3}\)|^\d{3}-\d{3}$/.test(t) || (plus && /\(\d{3}\)/.test(t)));
+      else if (d.length > 15 || (plus && (d[0] === "0" || d.length < 8))) bad = !file || d.length > 15;
+      else if (/^(\d)\1+$/.test(d) || "01234567890123456789".includes(d) || "98765432109876543210".includes(d) || (nanp && "98765432109876543210".includes(nanp))) bad = true;
+      else if (d.length === 7 && !plus) bad = /^55501\d\d$/.test(d) || (!file && /^\d{3}[\s.-]?\d{4}$/.test(t)); // no area code: an employer cannot dial it
       else if (nanp !== null) bad = nanp.length !== 10 || /^[01]|^555|^\d{3}[01]|^\d{3}55501|^(\d)\1{2}(\d)\2{2}(\d)\3{3}$/.test(nanp) || /^\d{3}0{7}$|^\d{3}5{7}$/.test(nanp) || "01234567890123456789".includes(nanp);
       else bad = /^(?:44|0)(?:7700900|2079460)\d{3}$/.test(d) || /^(?:61|0)49157015\d$/.test(d);
       if (bad) out.push(t);
@@ -1232,17 +1234,55 @@ const CareerRender = (() => {
     if (tpl) out.push({ field: "contact line", value: tpl[0].replace(/\s*\|$/, ""), why: "a template's own text, not their details", level: "refuse" });
     return out;
   }
-  // The same check on a file's own text (the gates that hold only the bytes): the lines above the first section heading
-  // must carry an email, and no email or phone there may be refused. Rule 4 needs the person's record, which a file lacks.
-  function fileContactProblems(lines) {
-    const all = (lines || []).map((l) => String(l == null ? "" : l)), cut = all.findIndex((l) => HEADING_ALLOWLIST.includes(l.trim().toUpperCase()));
-    // A layout that sets the contact beside the body reads back in another order: then every email in the file is judged.
-    const top = all.slice(0, cut > 0 ? cut : Math.min(all.length, 8)).join(" | "), emails = top.match(EMAIL_TOKEN_RE) || all.join(" | ").match(EMAIL_TOKEN_RE) || [], out = [];
-    if (!emails.length) out.push({ field: "email", value: "", why: "missing", level: "refuse" });
-    for (const e of emails) { const w = placeholderEmail(e); if (w) out.push({ field: "email", value: e, why: w, level: "refuse" }); }
-    for (const p of placeholderPhones(top)) out.push({ field: "phone", value: p, why: "a placeholder or incomplete number", level: "refuse" });
-    return out;
+  // ================= the contact read from a file (the gates that hold only its bytes) =================
+  // Round 3 of the #776/#785 review: never worse than trunk. Trunk had no file gate, so a file gate refuses ONLY what it read
+  // with confidence: a well-formed address on a reserved domain, template text, a fiction-range or counting phone, or a
+  // well-formed address that is not one the person confirmed (opts.confirmed). A file whose contact it cannot read with
+  // confidence (a scan, a font it cannot decode, a line broken where it cannot mend it, no address at all) is NOT refused: it
+  // passes as it did on trunk, and its status says "unread" so the caller can say so.
+  // Only printable lines are read: Chrome's PDFs (Skia) carry font programs that read back as bytes, and an "address" found in
+  // them is noise, never the person's (the first cut of this gate refused every Chrome-printed resume for one).
+  const FILE_TEXT_RE = /[\p{L}\p{N}\s.,;:'"’‘“”()\[\]\-–—@+\/|&%$#·•*!?_~]/gu;
+  function printableLine(l) {
+    const s = String(l == null ? "" : l);
+    if (!s.trim() || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f�]/.test(s)) return false;
+    return (s.match(FILE_TEXT_RE) || []).length / s.length >= 0.9;
   }
+  const WELL_FORMED = (e) => placeholderEmail(e) === null || /reserved domain/.test(String(placeholderEmail(e)));
+  // A contact line: every part between separators is an address, a phone, a link or a few words (a city). A sentence that
+  // mentions an address ("answered help@acme.com tickets") is not one.
+  function contactLike(line) {
+    return line.split(/\s[|·•]\s|\s{2,}|\t/).every((part) => part.replace(EMAIL_TOKEN_RE, " ").replace(/\+?\(?\d[\d\s().-]{5,}\d/g, " ")
+      .replace(/\b(?:https?:\/\/|www\.)\S+|\b[\w-]+(?:\.[\w-]+)+\/\S*/gi, " ").split(/\s+/).filter((w) => /[\p{L}]/u.test(w)).length <= 3);
+  }
+  // { status: "ok" | "unconfirmed" | "unread", problems, emails }.
+  function fileContactRead(lines, opts) {
+    const all = (lines || []).map((l) => String(l == null ? "" : l)).filter(printableLine).map((l) => l.trim());
+    const confirmed = ((opts && opts.confirmed) || []).map((x) => String(x).trim().toLowerCase()).filter(Boolean);
+    const contact = all.filter((l) => contactLike(l) && (/[^\s|,;<>()\[\]{}]+@[^\s|,;<>()\[\]{}]+/.test(l) || TEMPLATE_TEXT_RE.test(l.replace(EMAIL_TOKEN_RE, " "))));
+    const emails = [], out = [];
+    for (const l of contact) for (const raw of l.match(EMAIL_TOKEN_RE) || []) {
+      let e = raw.replace(/[.,;:]+$/, "");
+      if (!WELL_FORMED(e)) {
+        // A line broken inside the address ("other" / ".person@gmail.com"): mended from a neighbouring line, else not read.
+        const at = all.indexOf(l), near = [all[at - 1], all[at + 1]].filter(Boolean);
+        const mended = near.map((n) => /^[.@]/.test(e) ? `${(/[\p{L}\p{N}._%+'-]+$/u.exec(n) || [""])[0]}${e}` : `${e}${(/^[\p{L}\p{N}.-]+/u.exec(n) || [""])[0]}`).find(WELL_FORMED);
+        if (!mended) continue;
+        e = mended;
+      }
+      emails.push(e.toLowerCase());
+    }
+    for (const e of emails) { const w = placeholderEmail(e); if (w) out.push({ field: "email", value: e, why: w, level: "refuse" }); }
+    const real = emails.filter((e) => !placeholderEmail(e));
+    if (confirmed.length && real.length && !real.some((e) => confirmed.includes(e))) out.push({ field: "email", value: real[0], why: `not the email they confirmed (${confirmed[0]})`, level: "refuse" });
+    for (const l of contact) {
+      for (const p of placeholderPhones(l, { file: true })) out.push({ field: "phone", value: p, why: "a placeholder number", level: "refuse" });
+      const tpl = TEMPLATE_TEXT_RE.exec(l.replace(EMAIL_TOKEN_RE, " "));
+      if (tpl) out.push({ field: "contact line", value: tpl[0].replace(/\s*\|$/, ""), why: "a template's own text, not their details", level: "refuse" });
+    }
+    return { status: out.length ? "unconfirmed" : real.length ? "ok" : "unread", problems: out, emails };
+  }
+  const fileContactProblems = (lines, opts) => fileContactRead(lines, opts).problems;
   // Truthful either way: what cannot be theirs is said as that; a doubtful one is said as needing their word.
   const contactReason = (p) => p.level === "confirm"
     ? `the ${p.field} at the top of the resume (${p.value}) is ${p.why}: it needs the person to confirm it is theirs before this resume is ready to submit`
@@ -1425,7 +1465,7 @@ const CareerRender = (() => {
   const runtime = { zlib: !!rt.zlib, crypto: !!rt.crypto, Buffer: !!Buffer, codec: rt.zlib && rt.crypto ? "platform" : zlib && crypto ? "vendored" : "none" };
   // RELEASE 9: the byte primitives career_resume_design.ts builds its two layouts with (same codec, same ZIP writer).
   const primitives = { zipBuffer, unzipParts, encodeWinAnsi, pdfLiteral, escXml, deflate: (b) => zlibDeflateFixed(Bytes.from(b)), bytes: (x, enc) => Bytes.from(x, enc), concat: (xs) => Bytes.concat(xs) };
-  return { primitives, renderPdf, renderDocx, parseCheck, placeholderEmail, doubtfulEmail, placeholderPhones, contactProblems, fileContactProblems, contactReason, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
+  return { primitives, renderPdf, renderDocx, parseCheck, placeholderEmail, doubtfulEmail, placeholderPhones, contactProblems, fileContactProblems, fileContactRead, contactReason, sourceLines, layoutLines, filenameFor, extractPdfLines, extractPdfStrings, extractPdfRuns, extractPdfPoppler, extractDocxLines, extractDocxRuns, extractDocxPython, docxPart, docxPartNames, rebuildDocx, artifact, sha256, crc32, PDF_CONTENT_TYPE, DOCX_CONTENT_TYPE, HEADING_ALLOWLIST, runtime, toBuffer: (bytes) => (Buffer ? Buffer.from(bytes) : null), withRuntime: (r) => make({ ...NODE_RUNTIME, ...(r || {}) }) };
   }
   return make(NODE_RUNTIME);
 })();

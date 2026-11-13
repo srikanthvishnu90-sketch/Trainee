@@ -36,13 +36,15 @@ export async function prepareCloudCard(o: CloudCardPreparation, d: {
   const bytes = bytesOf(r.b64);
   if (!bytes.length || bytes.length > 5 * 1024 * 1024 || await sha256(bytes) !== r.sha256) fail("RESUME_CHANGED");
   // No card is prepared with a resume whose own text shows a placeholder email or phone at its top.
-  const gate = (await import("../../supabase/functions/_shared/career_tailor.ts"));
+  const gate = await import("../../supabase/functions/_shared/career_tailor.ts");
   if ((await gate.resumeFileContactProblems(bytes, gate.recordOf(r))).length) fail("RESUME_CONTACT_UNCONFIRMED");
   const snapshot = await d.rpc("career_apply_message_cloud_sources", { p_user: o.owner });
   if (!object(snapshot) || !Object.hasOwn(snapshot, "profile") || !Array.isArray(snapshot.rows) ||
     snapshot.user_id !== o.owner ||
     await hashApplyPayload({ user_id: o.owner, profile: snapshot.profile, rows: snapshot.rows }) !== snapshot.digest)
     fail("CARD_CLOUD_SOURCE_READ_FAILED");
+  // Against the person's confirmed email, once their profile is read: a file address read with confidence that is not theirs.
+  if ((await gate.resumeFileContactProblems(bytes, { confirmed: gate.confirmedEmails(snapshot.profile), ...gate.recordOf(r) })).length) fail("RESUME_CONTACT_UNCONFIRMED");
   const input = await readEngineInput({ latestProfile: async () => snapshot.profile,
     answeredRows: async () => snapshot.rows }, o.owner, r.sha256);
   const manifest = trustedManifest({ owner: o.owner, file: input.facts, rows: input.facts.text_answers,

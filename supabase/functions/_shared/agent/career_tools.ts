@@ -27,7 +27,7 @@ import {
   type OutreachStore, payloadHash, recordOutreach, SIGNATURE_ASK, guardRecipient,
 } from "../career_outreach.ts";
 import { legacyRows, REFERRAL_ASK, referralMap, targetFirms } from "../career_referrals.ts";
-import { CONTACT_QUESTION, confirmedOnly, EMAIL_PLACEHOLDER, contactFromMessage, contactQuestion, namedIn, resumeContact, type PersonaStore, type ResumeRenderer, type ResumeStore, restatePersona, savePersona, tailorForPosting, validPersonaName } from "../career_tailor.ts";
+import { affirmsOwn, CONTACT_QUESTION, confirmedOnly, EMAIL_PLACEHOLDER, contactFromMessage, contactQuestion, namedIn, resumeContact, type PersonaStore, type ResumeRenderer, type ResumeStore, restatePersona, savePersona, tailorForPosting, validPersonaName } from "../career_tailor.ts";
 import { recordVersion, type ResumeVersionLog } from "../career_resume_outcomes.ts";
 import { changesOfItems, postingKeyOf } from "../career_material_writer.ts"; // D-072 (files writers)
 import { planLayout } from "../career_resume_rater.ts"; // RELEASE 10
@@ -1018,8 +1018,8 @@ export function careerTools(deps: {
         if (only === null) throw new Error(`not saved: ${hasEmail ? "no name is on their confirmed record either, so their name must be typed too" : hasName ? "no email is on their confirmed record either, so their email must be typed too" : "nothing was typed"}. Ask them: "${question}"`);
         const r = contactFromMessage(c.turn.message, i.name, i.email, only ? { only } : {});
         if (!r.ok) throw new Error(`not saved: ${r.error}. Ask them: "${question}"`);
-        // An address they typed for their resume is theirs by their own word (148 rule 4: a template-looking one needs exactly this).
-        const typedNow = only !== "name" && r.email ? [String(r.email).trim().toLowerCase()] : [];
+        // A template-looking address (148 rule 4) is theirs only when they say so in this message ("<a> is my email", "use <a>").
+        const typedNow = only !== "name" && r.email && affirmsOwn(c.turn.message, r.email) ? [String(r.email).trim().toLowerCase()] : [];
         p.basics = { ...(p.basics || {}), ...(only !== "email" ? { name: r.name } : {}), ...(only !== "name" ? { email: r.email } : {}),
           ...(typedNow.length ? { contact_checked: [...new Set([...(Array.isArray(p.basics?.contact_checked) ? p.basics.contact_checked : []), ...typedNow])].slice(-10) } : {}) };
         const shown = resumeContact(confirmedOnly(p));

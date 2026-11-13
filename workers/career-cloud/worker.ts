@@ -21,6 +21,13 @@ import { hashApplyPayload } from "../../supabase/functions/_shared/career_apply_
 import { authorizeCurrentCloudJob } from "./current_sources.ts";
 import { dbHostGate, fileJournal, handBack, type HostGate, type Journal, type JournalResult, massRun, type Pacing, pacingFrom, requeueMissing, sentNothingRefusal, unstartedWhy } from "../career-browser/mass-run.ts";
 
+// The resume file gate (career_tailor.ts), loaded when first used: the email the approved application sends is the one compared.
+// deno-lint-ignore no-explicit-any
+// A row's recorded verdict is read only when the row hands one (career_tailor.ts recordOf; off until the migration).
+const fileGate = async (bytes: Uint8Array, payload: any, row?: unknown): Promise<string[]> => {
+  const g = await import("../../supabase/functions/_shared/career_tailor.ts");
+  return g.resumeFileContactProblems(bytes, { confirmed: g.approvedEmails(payload), ...g.recordOf(row) });
+};
 export interface CloudJob {
   id: string;
   lease_token: string;
@@ -197,8 +204,8 @@ export async function runCloudJob(job: CloudJob, d: {
     const bytes = b64bytes(r.b64);
     if ((await sha256(bytes)) !== p.resume_sha256 || r.sha256 !== p.resume_sha256) throw Object.assign(Error("RESUME_CHANGED"), { code: "RESUME_CHANGED" });
     // The submit gate: a resume whose own text shows a placeholder email or phone at its top is never sent.
-    const gate = (await import("../../supabase/functions/_shared/career_tailor.ts"));
-    if ((await gate.resumeFileContactProblems(bytes, { foreign: true, ...gate.recordOf(r) })).length) throw Object.assign(Error("RESUME_CONTACT_UNCONFIRMED"), { code: "RESUME_CONTACT_UNCONFIRMED" });
+    // The file gate (career_tailor.ts): only a contact read with confidence is refused, against the email this application sends.
+    if ((await fileGate(bytes, p, r)).length) throw Object.assign(Error("RESUME_CONTACT_UNCONFIRMED"), { code: "RESUME_CONTACT_UNCONFIRMED" });
     const name = /^[^/\\.][^/\\]{0,199}$/.test(r.filename) ? r.filename : "resume.pdf";
     // The resume in its own folder, so no file name it may have (facts.json) can stand in for the facts.
     await Deno.mkdir(`${dir}/resume`, { mode: 0o700 });

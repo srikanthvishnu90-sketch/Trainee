@@ -18,7 +18,7 @@ import { type DraftDeps, draftEssay, MIN_FACTS, whatWouldHelp } from "./essay_dr
 import { hashApplyPayload } from "./career_apply_store.ts";
 import { onEmployerDomain, roleOverlap, sameCompany } from "./career_mail.ts";
 import { ONE_ADDRESS, type OutMail, type SendResult } from "./career_mail_gmail.ts";
-import { RESUME_BUCKET, resumeFileContactProblems, resumePath, type TailorDeps, tailorForPosting } from "./career_tailor.ts";
+import { confirmedEmails, RESUME_BUCKET, resumeFileContactProblems, resumePath, type TailorDeps, tailorForPosting } from "./career_tailor.ts";
 
 export const EMAIL_INTENT = "career_apply_email";
 export const EMAIL_CARD_KEY = "career:email-card";
@@ -342,7 +342,7 @@ export function supabaseResumes(admin: any, o: { profile: () => any; tailor?: Ta
         if (t && t.ok) {
           const bytes = await download(resumePath(u, t.sha256));
           // Defence in depth: the file's own text is read; a missing or placeholder email or phone is no resume for a card.
-          if (bytes && (await sha(bytes)) === t.sha256 && !(await resumeFileContactProblems(bytes)).length) return { filename: t.filename, bytes, sha256: t.sha256, tailored: true, mime: "application/pdf" };
+          if (bytes && (await sha(bytes)) === t.sha256 && !(await resumeFileContactProblems(bytes, { confirmed: confirmedEmails(o.profile()) })).length) return { filename: t.filename, bytes, sha256: t.sha256, tailored: true, mime: "application/pdf" };
         }
       }
       return null;
@@ -351,7 +351,7 @@ export function supabaseResumes(admin: any, o: { profile: () => any; tailor?: Ta
       if (!/^[a-f0-9]{64}$/.test(sha256)) return null;
       const tailored = await download(resumePath(u, sha256));
       // The submit gate: at the yes the stored file is read again; one whose contact is not confirmed is not sent.
-      return tailored && (await sha(tailored)) === sha256 && !(await resumeFileContactProblems(tailored)).length ? { filename: "resume.pdf", bytes: tailored, sha256, tailored: true, mime: "application/pdf" } : null;
+      return tailored && (await sha(tailored)) === sha256 && !(await resumeFileContactProblems(tailored, { confirmed: confirmedEmails(o.profile()) })).length ? { filename: "resume.pdf", bytes: tailored, sha256, tailored: true, mime: "application/pdf" } : null;
     },
   };
 }

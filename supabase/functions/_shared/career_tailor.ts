@@ -135,7 +135,8 @@ export function baseResume(profile: any): { sections: { heading: string; lines: 
 export const CONTACT_QUESTION = "What name and email should go at the top of your resume?";
 export const EMAIL_QUESTION = "What email should go at the top of your resume?";
 export const NAME_QUESTION = "What name should go at the top of your resume?";
-const EMAIL = /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.[A-Za-z]{2,24}$/;
+// RFC 6531: a local part and a domain may be in any script (josé.garcía@, o'brien@, 王伟@qq.com, dana@münchen.de).
+const EMAIL = /^(?!\.)(?!.*\.\.)[\p{L}\p{N}._%+'’-]{1,64}(?<!\.)@[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?(?:\.[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?)*\.(?:\p{L}{2,24}|xn--[a-z0-9-]{1,59})$/u;
 const NAME = /^[\p{L}][\p{L}' -]*[\p{L}]$/u;
 const squash = (s: string) => s.replace(/\s+/g, " ").trim();
 const tokenIn = (hay: string, needle: string, edge: RegExp) => {
@@ -150,9 +151,36 @@ export function contactFromMessage(message: string, name: unknown, email: unknow
   const n = squash(String(name ?? "")), e = String(email ?? "").trim(), m = squash(String(message ?? ""));
   if (o.only !== "email" && (n.length < 2 || n.length > 80 || !NAME.test(n))) return { ok: false, error: "the name must be 2 to 80 letters, spaces, hyphens or apostrophes" };
   if (o.only !== "name" && !EMAIL.test(e)) return { ok: false, error: "that is not a valid email address" };
-  if (o.only !== "name" && !tokenIn(m, e, /[A-Za-z0-9._%+@-]/)) return { ok: false, error: "the person did not type that email in this message; they must type it themselves" };
+  if (o.only !== "name" && !tokenIn(m, e, /[\p{L}\p{N}._%+@'’-]/u)) return { ok: false, error: "the person did not type that email in this message; they must type it themselves" };
   if (o.only !== "email" && !tokenIn(m, n, /\p{L}/u)) return { ok: false, error: "the person did not type that name in this message; they must type it themselves" };
+  if (o.only !== "name") { const why = disowned(m, e); if (why) return { ok: false, error: `the person ${why}, so it is not theirs to put on a resume` }; }
   return { ok: true, name: n, email: e };
+}
+// The words around an address the person typed: from the sentence before it to the end of its own sentence ("?" kept).
+function clauseOf(message: string, email: string): string {
+  const m = message.toLowerCase(), at = m.indexOf(email.toLowerCase());
+  if (at < 0) return "";
+  const before = m.slice(0, at), after = m.slice(at + email.length);
+  const start = Math.max(0, ...["\n", "!", "?", ";", ". "].map((b) => before.lastIndexOf(b) < 0 ? 0 : before.lastIndexOf(b) + b.length));
+  const ends = ["\n", "!", "?", ";", ". "].map((b) => after.indexOf(b)).filter((k) => k >= 0), end = ends.length ? Math.min(...ends) + 1 : after.length;
+  return `${before.slice(start)}${email.toLowerCase()}${after.slice(0, end)}`.trim();
+}
+// Why an address typed in the message is not stated as theirs: denied, asked about, quoted, or another document's.
+export function disowned(message: string, email: string): string | null {
+  const q = clauseOf(message, email), e = email.toLowerCase();
+  if (!q) return null;
+  const c = q.split(e).join(" @ "); // the cue words are read around the address, never inside it
+  if (/\b(?:not|never|no longer|wrong)\b|n['’]t\b/.test(c)) return `said ${email} is not theirs`;
+  if (/\?/.test(c) || /\b(?:should i|which|or something else|whether)\b/.test(c)) return `asked about ${email} rather than saying it is theirs`;
+  if (/['"‘“]\s?@\s?['"’”]/.test(c)) return `quoted ${email} rather than saying it is theirs`;
+  if (/\b(?:template|sample|example|placeholder|old (?:resume|cv)|previous (?:resume|cv)|had|says|said|used to)\b/.test(c)) return `named ${email} as another document's, not as theirs`;
+  return null;
+}
+// The person states the address as theirs in so many words ("<a> is my email", "yes, <a> is mine", "use <a>", "my email is
+// <a>"). A template-looking address (148 doubtfulEmail) is put on a resume only after this.
+export function affirmsOwn(message: string, email: string): boolean {
+  const c = clauseOf(message, email).split(email.toLowerCase()).join(" @ ");
+  return !!c.trim() && !disowned(message, email) && /\b(?:mine|my (?:own )?(?:e-?mail|email address|address)|use|yes|yeah|yep|correct)\b/.test(c);
 }
 
 // ---------------------------------------------------------------- personas
@@ -362,56 +390,63 @@ function contactProblems(R: any, resume: any, buf: any): string[] {
   for (const c of R.contactProblems(resume?.header)) if (c.level === "refuse") reasons.push(`contact_unconfirmed: ${R.contactReason(c)}`);
   return reasons;
 }
-// ---------------------------------------------------------------- the contact verdict of a resume file, and the one gate
-// Round 2 of the #776/#785 review: a gate that only re-read the bytes let through a file it could not read. The verdict is
-// now RECORDED when a file is stored (tailorForPosting: TailorOut.contact, kept on its version record) and every gate reads it:
-//   record given (the storage path hands one with the file; null when the row has none): it must be status "ok", and its
-//     email must be the one confirmed now when the caller knows that. Missing or unreadable: not ready.
-//   no record at all (bytes handed in directly: a test or the owner's CLI): the bytes are read; what they show is judged, and
-//     reserved addresses are looked for in the raw bytes too. `foreign` then lets a file this parser cannot read through;
-//     without it an unreadable file is not ready.
-export interface ContactVerdict { status: "ok" | "unconfirmed" | "unreadable"; email_hash: string | null; reasons?: string[] }
-export const UNREADABLE_CONTACT = "could not read the contact details in this file";
+// ---------------------------------------------------------------- the contact read from a resume file, and the one gate
+// Round 3 of the #776/#785 review: never worse than trunk (which had no file gate).
+//   The bytes (148 fileContactRead): refused only for a contact read with confidence: a well-formed address on a reserved
+//     domain, template text, a fiction-range or counting phone, or a well-formed address that is not one the person confirmed
+//     (`confirmed`). A file it cannot read with confidence passes, as on trunk, with status "unread".
+//   The recorded verdict (tailorForPosting computes it when it stores a file: TailorOut.contact, kept on the version record):
+//     read ONLY when the storage row hands one. It is off in production until a migration adds `contact` to
+//     career_apply_cloud_resumes and its RPCs return it; until then rows carry no key, and a row with `contact: null` (stored
+//     before the column) is "not recorded": the byte gate alone decides, so no resume stored earlier is blocked by it.
+//     A record "unconfirmed" is refused; "ok" is refused when its email is not one confirmed now; "unread" passes.
+export interface ContactVerdict { status: "ok" | "unconfirmed" | "unread"; email_hash: string | null; reasons?: string[] }
+export type FileContact = { status: "ok" | "unconfirmed" | "unread"; reasons: string[] };
+type FileGateOpts = { foreign?: boolean; confirmed?: string[] | null; record?: ContactVerdict | null };
 let fileRender: Promise<any> | null = null, loaded: any = null;
 const fileR = () => fileRender ??= Promise.all([import("node:zlib"), import("node:crypto"), import("node:buffer")]).then(([zlib, crypto, b]) => (loaded = (CareerRender as any).withRuntime({ zlib, crypto, Buffer: b.Buffer })));
 const hashWith = (R: any, email: string): string => R.sha256(R.primitives.bytes(String(email).trim().toLowerCase(), "utf8"));
 export async function emailHash(email: string): Promise<string> { return hashWith(await fileR(), email); }
 // A queue that paces its starts (approve-first.ts) loads the reader once, ahead of its jobs, and then judges without waiting.
 export const warmGate = (): Promise<void> => fileR().then(() => undefined);
-export async function contactVerdict(pdf: Uint8Array): Promise<ContactVerdict> { return verdictWith(await fileR(), pdf); }
-function verdictWith(R: any, pdf: Uint8Array): ContactVerdict {
+function readWith(R: any, pdf: Uint8Array, o: FileGateOpts): FileContact & { email: string | null } {
   let lines: string[] = [];
-  try { lines = (R.extractPdfLines(R.toBuffer(pdf)) as string[]).filter((l) => String(l ?? "").trim()); } catch { lines = []; }
-  if (!lines.length) {
-    // Unreadable. A reserved address standing in the raw bytes is still seen.
-    const raw = new TextDecoder("latin1").decode(pdf.subarray(0, 2_000_000)).match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+/g) ?? [];
-    const reserved = raw.filter((e) => /reserved domain/.test(String(R.placeholderEmail(e) ?? "")));
-    return reserved.length ? { status: "unconfirmed", email_hash: null, reasons: [`the file holds ${reserved[0]}, an address that cannot receive mail`] } : { status: "unreadable", email_hash: null, reasons: [UNREADABLE_CONTACT] };
-  }
-  const bad = (R.fileContactProblems(lines) as any[]).map((c) => R.contactReason(c) as string);
-  if (bad.length) return { status: "unconfirmed", email_hash: null, reasons: bad };
-  const cut = lines.findIndex((l) => (R.HEADING_ALLOWLIST as string[]).includes(l.trim().toUpperCase()));
-  const email = (lines.slice(0, cut > 0 ? cut : 8).join(" | ").match(/[^\s|,;<>()\[\]{}]+@[^\s|,;<>()\[\]{}]+/) ?? lines.join(" | ").match(/[^\s|,;<>()\[\]{}]+@[^\s|,;<>()\[\]{}]+/) ?? [""])[0];
-  return { status: "ok", email_hash: hashWith(R, email) };
+  try { lines = R.extractPdfLines(R.toBuffer(pdf)) as string[]; } catch { lines = []; }
+  const read = R.fileContactRead(lines, { confirmed: o.confirmed ?? [] });
+  const reasons = read.status === "unconfirmed" ? (read.problems as any[]).map((c) => (c.why.startsWith("not the email they confirmed") ? `the email in this file (${c.value}) is ${c.why}, so this resume is not ready to submit` : R.contactReason(c)) as string) : [];
+  return { status: read.status, reasons, email: (read.emails as string[]).find((e) => !R.placeholderEmail(e)) ?? null };
 }
-// The one gate (empty: ready). `record`: pass the key whenever the file came with a stored row, even when the row has none.
-type GateOpts = { foreign?: boolean; record?: ContactVerdict | null; confirmedEmailHash?: string | null };
-export async function resumeFileContactProblems(pdf: Uint8Array, o: GateOpts = {}): Promise<string[]> { return judge(await contactVerdict(pdf), o); }
+function gateWith(R: any, pdf: Uint8Array, o: FileGateOpts): FileContact {
+  const read = readWith(R, pdf, o), rec = o.record;
+  if (read.status === "unconfirmed" || !rec || typeof rec !== "object") return { status: read.status, reasons: read.reasons };
+  if (rec.status === "unconfirmed") return { status: "unconfirmed", reasons: rec.reasons?.length ? rec.reasons : ["the contact details recorded for this file are not confirmed"] };
+  const mine = (o.confirmed ?? []).map((e) => hashWith(R, e));
+  if (rec.status === "ok" && mine.length && !mine.includes(String(rec.email_hash))) return { status: "unconfirmed", reasons: ["the email recorded for this file is not the email they have confirmed now, so this resume is not ready to submit"] };
+  return { status: read.status, reasons: [] };
+}
+// The verdict recorded when a file is stored.
+export async function contactVerdict(pdf: Uint8Array): Promise<ContactVerdict> {
+  const R = await fileR(), r = readWith(R, pdf, {});
+  return { status: r.status, email_hash: r.status === "ok" && r.email ? hashWith(R, r.email) : null, ...(r.reasons.length ? { reasons: r.reasons } : {}) };
+}
+export async function resumeFileContact(pdf: Uint8Array, o: FileGateOpts = {}): Promise<FileContact> { return gateWith(await fileR(), pdf, o); }
+export async function resumeFileContactProblems(pdf: Uint8Array, o: FileGateOpts = {}): Promise<string[]> { return (await resumeFileContact(pdf, o)).reasons; }
 // The same gate with no wait, once warmGate has run (null before that).
-export function resumeFileContactProblemsNow(pdf: Uint8Array, o: GateOpts = {}): string[] | null { return loaded ? judge(verdictWith(loaded, pdf), o) : null; }
-function judge(read: ContactVerdict, o: GateOpts): string[] {
-  if (read.status === "unconfirmed") return read.reasons ?? [UNREADABLE_CONTACT];
-  if ("record" in o) {
-    const rec = o.record;
-    if (!rec || typeof rec !== "object" || rec.status !== "ok" || !/^[a-f0-9]{64}$/.test(String(rec.email_hash))) return rec?.status === "unconfirmed" ? (rec.reasons?.length ? rec.reasons : ["the contact details in this file are not confirmed"]) : [UNREADABLE_CONTACT];
-    if (o.confirmedEmailHash && rec.email_hash !== o.confirmedEmailHash) return ["the email in this file is not the email they have confirmed now"];
-    if (read.status === "ok" && read.email_hash !== rec.email_hash) return ["the email in this file is not the one recorded for it"];
-    return [];
-  }
-  return read.status === "unreadable" && !o.foreign ? [UNREADABLE_CONTACT] : [];
-}
-// The record a storage row hands with its file, as the gate takes it: the key is passed whenever the row can carry one.
+export function resumeFileContactProblemsNow(pdf: Uint8Array, o: FileGateOpts = {}): string[] | null { return loaded ? gateWith(loaded, pdf, o).reasons : null; }
+// The record a storage row hands with its file (absent: the row has no `contact` key, as every production row today).
 export const recordOf = (row: unknown): { record?: ContactVerdict | null } => row && typeof row === "object" && "contact" in row ? { record: ((row as any).contact ?? null) as ContactVerdict | null } : {};
+// The addresses the person confirmed for the top of their resume: the one typed for it (and any they said is theirs), and the
+// ones on the resume header they confirmed. Empty: none known, so no file address is compared.
+export function confirmedEmails(profile: any): string[] {
+  const p = confirmedOnly(profile ?? {}), b = p.basics || {}, rh = p.resume_header && typeof p.resume_header === "object" && p.resume_header.confirmed_at ? p.resume_header : null;
+  const all = [b.email, ...(Array.isArray(b.contact_checked) ? b.contact_checked : []), rh?.email, ...[rh?.contactLine, rh?.linksLine].flatMap((l) => String(l ?? "").match(/[^\s|,;<>()\[\]{}]+@[^\s|,;<>()\[\]{}]+/g) ?? [])];
+  return [...new Set(all.filter(Boolean).map((x) => String(x).trim().toLowerCase()))];
+}
+// The addresses an approved application sends (its answers): what the person approved for that application.
+export function approvedEmails(payload: any): string[] {
+  const v: string[] = (Array.isArray(payload?.fields) ? payload.fields : []).flatMap((f: any) => [f?.value, f?.source?.value]).filter((x: unknown): x is string => typeof x === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x.trim()));
+  return [...new Set(v.map((x: string) => x.trim().toLowerCase()))];
+}
 // RELEASE 9: a layout (career_resume_design.ts) renders the PDF and the DOCX together; the DOCX, the page fit and the
 // printed lines ride the result. With no layout asked for, the renderer is exactly WO-028's (148's own PDF).
 // RELEASE 10: a template (one of the fifteen, branded or neutral), or "own" from the person's PDF rebuilt from its geometry.
@@ -591,11 +626,14 @@ export function entryParts(f: any): { head: string; details: string[] } {
   // The head ends at the ":" after its dates ("Capstone: Route Planner, Team Lead (2023): ..." keeps its own colon); with no
   // dates in brackets, at the first ": ".
   const dated = /^[\s\S]*?\)(?=:\s)/.exec(title);
-  const colon = dated ? dated[0].length : title.indexOf(": ");
+  // A title that ends with its dates holds no headline: its own colon stays in it ("Pied Piper, CTO: Compression (2017 - 2019)").
+  const colon = dated ? dated[0].length : /\([^()]*\d{4}[^()]*\)\.?$/.test(title) ? -1 : title.indexOf(": ");
   const head = colon > 0 ? title.slice(0, colon).trim() : title;
   const details = colon > 0 ? splitDetails(title.slice(colon + 2)) : [];
   const flat = (x: string) => x.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
-  const more = bullets.length ? bullets : (f?.title && f?.text && f.text !== f.title ? splitDetails(String(f.text)) : []);
+  // A text that opens with its own title holds the title once ("Hooli, SRE (2021 - 2024)\nmigrated ..."); its lines are details.
+  const text = String(f?.text ?? ""), body = f?.title && text.startsWith(String(f.title)) ? text.slice(String(f.title).length) : text;
+  const more = bullets.length ? bullets : (f?.title && f?.text && f.text !== f.title ? body.split(/\n+/).flatMap(splitDetails) : []);
   for (const d of more) if (!flat(title).includes(flat(d)) && !details.some((x) => flat(x) === flat(d))) details.push(d);
   return { head, details };
 }
@@ -769,6 +807,11 @@ export async function tailorForPosting(o: {
     return { ok: false, refused: "no_contact", ms: ms(), reason: `the email on file for the top of the resume (${top.email}) is ${badEmail}, so it cannot go on a resume an employer's system reads. No resume was made or stored. ${
       typedEmail && R0.placeholderEmail(typedEmail) ? `Ask exactly: "${EMAIL_QUESTION}"` : "It is on the resume they sent: ask for their real email and for the resume again with it"}` };
   }
+  // The PDF writer prints WinAnsi (Latin) letters; an address in another script would not come back out of the file, so an
+  // employer's system could not read it. Said as that, never as an invalid address.
+  const unprintable: string[] = [];
+  if (top.email) R0.primitives.encodeWinAnsi(top.email, unprintable);
+  if (unprintable.length) return { ok: false, refused: "no_contact", ms: ms(), reason: `the email ${top.email} is a valid address, but the resume file can print only Latin letters and cannot print ${unprintable.join("")}, so an employer's system would not read it back from the file. No resume was made or stored. Ask whether they have an address in Latin letters for the resume` };
   // Rule 4 (148): a template's stand-in name on a real domain may be theirs. It is theirs once they typed that address for
   // their resume (set_resume_contact records it in basics.contact_checked); until then the reply asks, and says why.
   const checked: string[] = Array.isArray(clean.basics?.contact_checked) ? clean.basics.contact_checked.map((x: unknown) => String(x).trim().toLowerCase()) : [];
@@ -862,6 +905,7 @@ export async function tailorForPosting(o: {
     // (A renderer whose bytes this parser cannot read is judged by the header checks above alone.)
     verdict = await contactVerdict(r.pdf);
     const inFile = verdict.status === "unconfirmed" ? verdict.reasons ?? [] : [];
+    // A file Trainee made always reads back; "unread" is recorded as it is, never as "ok".
     if (inFile.length) return { ok: false, refused: "ats_parse", reason: `not stored: ${inFile.slice(0, 2).join("; ")}`, ms: ms() };
     await o.deps.resumes.put(path, r.pdf);
     link = await o.deps.resumes.signedUrl(path, LINK_TTL_SECONDS);

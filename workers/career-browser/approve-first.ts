@@ -92,7 +92,7 @@ export async function prepare(o: {
 }) {
   // No card is built with a resume whose contact is a placeholder or cannot be read (the same gate the submit paths use).
   const gate = (await import("../../supabase/functions/_shared/career_tailor.ts")), file = await Deno.readFile(o.resumePath).catch(() => null);
-  if (file && (await gate.resumeFileContactProblems(file, { foreign: true })).length) return { ready: false as const, result: { state: "not_submitted", reason: "RESUME_CONTACT_UNCONFIRMED" } };
+  if (file && (await gate.resumeFileContactProblems(file)).length) return { ready: false as const, result: { state: "not_submitted", reason: "RESUME_CONTACT_UNCONFIRMED" } };
   const run = await o.runEngine(["--url", o.url, "--facts", o.factsPath, "--resume", o.resumePath]);
   if (!run || run.result.reason !== "dry_run" || !run.evidence?.approval_hash) {
     return { ready: false as const, result: run?.result ?? { state: "not_submitted", reason: "ENGINE_NO_RESULT" } };
@@ -390,7 +390,7 @@ export async function runApproved(d: {
       const gate = contactGate ?? await contactGateReady;
       let file: Uint8Array | null = null;
       try { file = Deno.readFileSync(resume.path); } catch { file = null; }
-      if (file && (gate.resumeFileContactProblemsNow(file, { foreign: true, ...gate.recordOf(resume) }) ?? [UNREAD]).length) throw Error("RESUME_CONTACT_UNCONFIRMED");
+      if (file && (gate.resumeFileContactProblemsNow(file, { confirmed: gate.approvedEmails(p), ...gate.recordOf(resume) }) ?? [UNREAD]).length) throw Error("RESUME_CONTACT_UNCONFIRMED");
       const factsPath = await d.writeFacts(job, factsFromPayload(p));
       // WO-096: this drive is the person's approved application, so the code its employer emails may be read for it.
       const codeEnv = d.emailCode ? await d.emailCode(job) : null;

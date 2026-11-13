@@ -40,7 +40,8 @@ export function prepareBridge(o: { url: string; id: string; sandbox: string; tok
 // R9-G2 (E09): asked for the posting it prepares, so a resume tailored for that posting ("tailor ... and apply with it") is
 // the file that goes, and the card names it; any other posting gets the kept resume as before.
 export function keptResume(call: (op: string, extra?: Record<string, unknown>) => Promise<any>) {
-  return async (c: unknown, dir: string): Promise<PreparedResume | null> => {
+  // deno-lint-ignore no-explicit-any
+  return async (c: unknown, dir: string, profile?: any): Promise<PreparedResume | null> => {
     const posting = c && typeof c === "object" && typeof (c as any).job_id === "string" ? (c as any).job_id : null;
     const r = await call("resume", posting ? { posting } : {});
     if (!r || typeof r.b64 !== "string" || !/^[0-9a-f]{64}$/.test(String(r.sha256)) || !/^[^/\\.][^/\\]{0,199}$/.test(String(r.filename))) return null;
@@ -49,7 +50,7 @@ export function keptResume(call: (op: string, extra?: Record<string, unknown>) =
     if (!bytes.length || sum !== r.sha256) return null;
     // No card with a resume whose contact is a placeholder or cannot be read (the same gate the submit paths use).
     const gate = (await import("../../supabase/functions/_shared/career_tailor.ts"));
-    if ((await gate.resumeFileContactProblems(bytes, { foreign: true, ...gate.recordOf(r) })).length) return null;
+    if ((await gate.resumeFileContactProblems(bytes, { confirmed: profile ? gate.confirmedEmails(profile) : [], ...gate.recordOf(r) })).length) return null;
     await Deno.mkdir(`${dir}/kept`, { recursive: true, mode: 0o700 });
     const path = `${dir}/kept/${r.filename}`;
     await Deno.writeFile(path, bytes, { mode: 0o600 });

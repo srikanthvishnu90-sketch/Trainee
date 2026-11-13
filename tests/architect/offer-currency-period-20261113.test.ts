@@ -269,3 +269,33 @@ Deno.test(`round 2: ${EMAILS.length} counter emails say only what the person sai
   if (!/Stripe \$108,000 \(an estimate: \$9,000 a month x 12 months\)/.test(cmp.last.answer.reply)) throw new Error(cmp.last.answer.reply);
   if (!cmp.last.answer.comparison.offers[1].rows.some((r: any) => r.k === "Yearly base basis" && /An estimate, not a stated salary/.test(r.v))) throw new Error("the File row does not label the estimate");
 });
+
+// ---------------------------------------------------------------- round 3: the third review's 175 messages, labelled
+// tests/fixtures/career-offers/review3-20261113.json: 120 single messages and 55 conversations. Each label says what must hold:
+// `b` the base kept on a settled offer; `bu` that base, or nothing stated as fact; `U` nothing stated as fact; `nb` never
+// benchmarked; `bench` benchmarked; `card`/`nocard` a counter drafted or not; `has`/`no` what the replies and the counter
+// must and must not say (a ZIP code or an id as pay, a stale base after a correction, a control phrase as the job title, a
+// currency taken from an ordinary word, a friend's or declined offer as leverage, a yearly figure for an internship's rate).
+Deno.test("round 3: the 175 labelled messages of the third review, through the chat turn", async () => {
+  const labels: any[] = JSON.parse(await Deno.readTextFile(new URL("../fixtures/career-offers/review3-20261113.json", import.meta.url)));
+  const BENCH = /% (?:above|below) the median|percentile|right at the median/, wrong: string[] = [];
+  for (const [i, c] of labels.entries()) {
+    let state: any = null, last: any = null; const all: string[] = [];
+    for (const x of c.m.split(" >> ")) { last = await offerChatTurn({ message: x, state, now: NOW, postings: null }); state = last.state; all.push(last.answer?.reply ?? "", last.answer?.card?.body ?? ""); }
+    const text = all.join("\n"), lastReply = String(last?.answer?.reply ?? ""), settled = (state?.offers ?? []).map((f: any) => f.offer).filter((o: any) => !o.unsettled);
+    const fact = BENCH.test(text) || /^Your offer:|^Checking:/m.test(text), bad: string[] = [];
+    if (c.b != null && !settled.some((o: any) => o.base === c.b)) bad.push(`base ${c.b} not kept`);
+    if (c.bu != null && !(settled.some((o: any) => o.base === c.bu) || !fact)) bad.push(`neither base ${c.bu} nor unsettled`);
+    if (c.U && fact) bad.push("stated as fact");
+    if (c.nb && BENCH.test(text)) bad.push("benchmarked");
+    if (c.bench && !BENCH.test(text)) bad.push("no benchmark");
+    if (c.lastnb && BENCH.test(lastReply)) bad.push("last reply benchmarked");
+    if (c.lastsettled && !/^Your offer:/m.test(lastReply)) bad.push("last reply not settled");
+    if (c.card && !last?.answer?.card) bad.push("no counter");
+    if (c.nocard && last?.answer?.card) bad.push("a counter was drafted");
+    for (const r of c.no ?? []) if (new RegExp(r).test(text)) bad.push(`said /${r}/`);
+    for (const r of c.has ?? []) if (!new RegExp(r).test(text)) bad.push(`missing /${r}/`);
+    if (bad.length) wrong.push(`#${i + 1} ${c.m}\n    ${bad.join("; ")}`);
+  }
+  if (wrong.length) throw new Error(`${wrong.length} of ${labels.length} wrong:\n  ${wrong.join("\n  ")}`);
+});

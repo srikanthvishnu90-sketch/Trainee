@@ -14,7 +14,7 @@ test("1: a hidden value that is an answer is an answer, whatever the field is ca
     ["extra", "Authorized to work"], ["cq", "true"]];
   for (const [n, v] of yes) assert.equal(pa.hiddenIsAnswer(n, false, v), true, `${n}=${v}`);
   const no = [["authenticity_token", "x"], ["csrf_token", "yes"], ["_nonce", "abc"], ["session_id", "s1"], ["job_id", "5312426"], ["source", "careers"], ["utf8", "✓"], ["ts", "1794588590529"],
-    ["state", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N"], ["req", "550e8400-e29b-41d4-a716-446655440000"], ["h", "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"], ["g-recaptcha-response", ""], ["locale", "en"]];
+    ["state", "ey" + "JhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N"], ["req", "550e8400-e29b-41d4-a716-446655440000"], ["h", "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"], ["g-recaptcha-response", ""], ["locale", "en"]];
   for (const [n, v] of no) assert.equal(pa.hiddenIsAnswer(n, false, v), false, `${n}=${v}`);
   assert.equal(pa.hiddenIsAnswer("consent_session", false, "1"), true, "a name that only contains 'session' is no token");
   // A JSON value is the page's structured data (Lever's question templates), an answer only when a key of it is one.

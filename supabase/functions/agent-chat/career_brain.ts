@@ -14,9 +14,11 @@ import type { FileService } from "../_shared/file_service.ts";
 import { careerSystemPrompt, MIRROR_RULES, shapeRulesFor } from "../_shared/agent/prompt.ts";
 import { alertLine, type MemoryStore, type Pipeline, personBlock, type Standing } from "../_shared/agent/memory.ts";
 import type { ResearchDeps, ResearchResult } from "../_shared/agent/research/index.ts";
-import { enforceResearchReply, stripUnseenLinks } from "../_shared/agent/research/reply.ts";
+import { enforceResearchReply, fallbackVerdict, stripUnseenLinks } from "../_shared/agent/research/reply.ts";
 import { type AdviceResult, enforceAdviceReply } from "../_shared/agent/research/advice.ts";
-import { enforceMarketReply, enforceMarketReplySupported, FAIL_CLOSED, type MarketDeps, type MarketResult } from "../_shared/agent/research/market.ts";
+import { enforceMarketReply, enforceMarketReplySupported, FAIL_CLOSED, type MarketDeps, type MarketResult, pureUnconfirmed } from "../_shared/agent/research/market.ts";
+import { keepSupported } from "../_shared/agent/research/support.ts";
+import { NOT_CONFIRMED } from "../_shared/research_reply.ts";
 import { type CompanyResult, enforceCompanyReply, enforceCompanyReplySupported } from "../_shared/agent/research/company.ts";
 import { enforceFollowupAsk } from "../_shared/followup_draft.ts";
 import { urlsIn } from "../_shared/channel_shape.ts";
@@ -234,7 +236,9 @@ export async function agentTurn(o: {
   // R10 WO-H: company research has its own rules (one role question when the role is unknown; a focus keeps that area only).
   // FAIL_CLOSED.support (off by default; support.ts): every sentence of the reply is checked by code and by the judge (o.market.judge,
   // one batched call) before it may stand in the model's words; without a judge none does.
-  if (FAIL_CLOSED.support && trace.m && !trace.r && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? await enforceCompanyReplySupported(result.reply, trace.m, { judge: o.market?.judge ?? null, ask: o.message }) : await enforceMarketReplySupported(result.reply, trace.m as MarketResult, shownPay, { judge: o.market?.judge ?? null, ask: o.message }) };
+  // Round 2: also when an open-question research ran in the same turn (trace.r): the market or company result's check is the one
+  // that stands, since its sources are the numbered ones the reply cites.
+  if (FAIL_CLOSED.support && trace.m && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? await enforceCompanyReplySupported(result.reply, trace.m, { judge: o.market?.judge ?? null, ask: o.message }) : await enforceMarketReplySupported(result.reply, trace.m as MarketResult, shownPay, { judge: o.market?.judge ?? null, ask: o.message }) };
   else if (trace.m && !trace.r && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? enforceCompanyReply(result.reply, trace.m) : enforceMarketReply(result.reply, trace.m as MarketResult, shownPay) };
   // D-073 review 2: research read pages and none supported an answer, and the model's reply did not stand (the loop removed its
   // unsourced claim, asked once more and stopped: "incomplete_reply"). The person is told what research found, in code's words: that
@@ -326,6 +330,28 @@ export async function agentTurn(o: {
   // D-067 (owner, must-fix (d): "each figure carries its source link and place"): a posting's pay said in the reply comes with that
   // posting's link (search_jobs / get_posting returned both); code adds the link when the reply has the figure and not the link.
   // D-073: on every path, research turns included (their shown figure's link was added above; its place is added here).
+  // FAIL_CLOSED.support, round 2: the reply paths that had no check of what a sentence says, each against what its turn stood on, in
+  // one batched judge call (support.ts keepSupported), after any shortening rewrite and before code adds links:
+  //   open-question research (trace.r): every sentence against the quotes of its facts, the person's confirmed facts and code's own
+  //     verdict lines; with nothing left, code's fallback verdict;
+  //   advice (trace.a): every sentence against the passages read; with nothing left, code's not-verified line;
+  //   a pay turn (a posting with pay was read, or pay was shown earlier): every sentence with a number against the postings' own
+  //     records and the lines shown earlier; with nothing left, the records themselves.
+  if (FAIL_CLOSED.support && !trace.m && result.reply && result.stopped === "final" && !result.show) {
+    const judge = o.market?.judge ?? null, pure = (s: string) => pureUnconfirmed(s, o.message);
+    const recs = [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])].filter((p: any) => numbersIn(String(p?.pay ?? "")).length);
+    const recLine = (p: any) => `${[p?.company, p?.title].map((x) => String(x ?? "").trim()).filter(Boolean).join(", ")}: ${String(p.pay).trim()}`;
+    if (trace.r) {
+      const k = await keepSupported(result.reply, [...trace.r.facts.map((f) => f.quote), ...trace.r.person, trace.r.verdict.now, trace.r.verdict.later, trace.r.short?.now ?? "", trace.r.short?.later ?? "", trace.r.short?.act ?? "", trace.r.first_action].filter(Boolean), { judge, pure });
+      result = { ...result, reply: /\p{L}/u.test(k.text.replace(/https?:\/\/\S+/g, "")) ? k.text : [fallbackVerdict(trace.r), ...(k.text.match(/https?:\/\/\S+/g) ?? [])].join("\n") };
+    } else if (trace.a) {
+      const k = await keepSupported(result.reply, trace.a.passages.map((x) => x.text), { judge, pure });
+      result = { ...result, reply: /\p{L}/u.test(k.text.replace(/https?:\/\/\S+/g, "")) ? k.text : [trace.a.not_verified || NOT_CONFIRMED, ...(k.text.match(/https?:\/\/\S+/g) ?? [])].join("\n") };
+    } else if (recs.length || shownPay.length) {
+      const k = await keepSupported(result.reply, [...recs.map(recLine), ...shownPay.map((l) => l.text)], { judge, pure, needs: (s) => numbersIn(s.replace(/https?:\/\/\S+/g, " ")).length > 0 });
+      result = { ...result, reply: /\p{L}/u.test(k.text.replace(/https?:\/\/\S+/g, "")) ? k.text : [...recs.map(recLine), ...shownPay.map((l) => l.text)].join("\n") };
+    }
+  }
   if (result.reply && result.stopped === "final" && !result.show) result = { ...result, reply: payWithSource(result.reply, [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])], shownPayPlaces(o.message, hypo ? [] : o.history)) };
   // D-067 (live-6 C9: research_market ran and the person got an empty message; D-024): the last line of every brain turn. An empty
   // or blank reply is never sent: the research's own sourced points when it found any, else the honest line that it did not finish.

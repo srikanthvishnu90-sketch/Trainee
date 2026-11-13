@@ -26,7 +26,7 @@ export const isQuoted = (text: string) => /^".*"$/s.test(String(text ?? "").trim
 // ------------------------------------------------------------------------------------------------ layer A
 // Round 2 (review of #810: 67 of 78 further cases passed a bag-of-parts check). Layer A is by adjacency, in ONE unit of the page:
 //   unit      the page is cut at line ends, ";", bullets, table bars and sentence ends; support never spans two units. A unit that
-//             is a label (under five words with no full stop: "Related: Citadel visa sponsorship") states nothing; nor does one that
+//             is a label (under five words with no figure and no full stop: "Related: Citadel visa sponsorship") states nothing; nor does one that
 //             asks (a "?" anywhere in it, an inverted opening "Do/Does/Is ...", or a unit answered "No"/"Yes" by the next) states
 //             nothing.
 //   number    each number of the claim must be in the unit with the SAME role around it: its sign, what stands right before it
@@ -130,7 +130,7 @@ export function indexPages(pages: { text: string }[], read: (s: string) => strin
   const named = (x: string) => !subjects.length || subjects.some((n) => n && new RegExp(`(?<![\\p{L}\\p{N}])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(x));
   return { read, pages: pages.map((p) => {
     const raw = readAlike(String(p.text ?? "").slice(0, 60000)).split(/\n+|\s*;\s+|\s*[•·|▪◦●]\s*|\t+|(?<=[.!?]["')\]]*)\s+|^\s*(?:[-*]|\d{1,2}[.)])\s+/m).map(squash).map((x) => x.replace(/^(?:[-*]|\d{1,2}[.)])\s+/, "")).filter(Boolean);
-    return { sentences: raw.map((text, k) => ({ text, k })).filter(({ text, k }) => text.length >= 8 && text.length <= 600 && /\p{L}/u.test(text) && !text.includes("?") && !ASKS_Q.test(text) && (text.split(" ").length >= 5 || /[.!]["')\]]*$/.test(text)) && !(raw[k + 1] && ANSWERS.test(raw[k + 1]) && !/[.!]$/.test(text)))
+    return { sentences: raw.map((text, k) => ({ text, k })).filter(({ text, k }) => text.length >= 8 && text.length <= 600 && /\p{L}/u.test(text) && !text.includes("?") && !ASKS_Q.test(text) && (text.split(" ").length >= 5 || /\d/.test(text) || /[.!]["')\]]*$/.test(text)) && !(raw[k + 1] && ANSWERS.test(raw[k + 1]) && !/[.!]$/.test(text)))
       .map(({ text }) => { const r = read(text); return { text, hard: hardParts(text, read), lower: lowerWords(r), content: contentWords(r), quotable: quotable(text) && named(text) }; }) };
   }) };
 }
@@ -219,6 +219,20 @@ export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudg
   for (const b of batches) (await judgeAll(judge, b.map((j) => ask[j]), timeoutMs)).forEach((y, n) => { if (y) for (const k of at[b[n]]) out[k] = { ...(out[k] as { sentence: string; page: number }), how: "model" }; });
   // A unit that may not be shown as a quote (a quotation mark in it, words to the reader, no asked subject) is no quote: dropped.
   return out.map((v, k) => v && v.how === "quote" && (!canQuote[k] || v.sentence.length > 300) ? { how: "drop" as const } : v ?? { how: "drop" as const });
+}
+// Round 2, the other reply paths (open-question research, advice, a pay-only turn): the reply's sentences against the texts that
+// turn stood on (the quotes its facts carry, the passages read, the postings' own records). A sentence that must be checked (`needs`;
+// all of them when absent) stands only when it is a could-not-confirm sentence in the closed form (`pure`) or passes both layers; it
+// is removed otherwise (these paths have no numbered source to quote). A line that is only a link is code's, and stays.
+export async function keepSupported(reply: string, sources: string[], o: { judge?: SupportJudge | null; read?: (s: string) => string; needs?: (s: string) => boolean; pure?: (s: string) => boolean } = {}): Promise<{ text: string; removed: number }> {
+  const idx = indexPages(sources.map((text) => ({ text })), o.read);
+  const lines = String(reply ?? "").split("\n").map((l) => /^\s*(?:https?:\/\/\S+\s*)*$/.test(l) ? [l] : l.split(/(?<=[.!?]["')*_]*)\s+/).filter((x) => x.trim()));
+  const wants: Wanted[] = [], at: [number, number][] = [];
+  lines.forEach((l, a) => l.forEach((x, b) => { if (/\p{L}/u.test(x.replace(/https?:\/\/\S+/g, "")) && (!o.needs || o.needs(x)) && !o.pure?.(x)) { wants.push({ claim: bare(x) }); at.push([a, b]); } }));
+  const vs = await decide(wants, idx, o.judge);
+  let removed = 0;
+  vs.forEach((v, k) => { if (v.how !== "model") { lines[at[k][0]][at[k][1]] = ""; removed++; } });
+  return { text: lines.map((l) => l.filter((x) => x !== "").join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim(), removed };
 }
 // A result built with the support check on, and what its reply is checked against: the read pages' sentences, and which page each
 // numbered source is. Kept beside the result (never in it: the result is what the model reads).

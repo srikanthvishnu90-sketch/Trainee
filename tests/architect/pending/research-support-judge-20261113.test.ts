@@ -32,7 +32,7 @@ import { memoryBudgetGate } from "../../../supabase/functions/_shared/model_budg
 import { payWithSource } from "../../../supabase/functions/agent-chat/career_brain.ts";
 import { shownPayPlaces } from "../../../supabase/functions/_shared/agent/turn_notes.ts";
 import { ASKS, GOOD, HOSTILE, LAYER_A, PURE_UNCONFIRMED, SMUGGLES, SMUGGLES_OWN, type SupportCase } from "../../../evals/research-support/cases.ts";
-import { decide } from "../../../supabase/functions/_shared/agent/research/support.ts";
+import { decide, keepSupported } from "../../../supabase/functions/_shared/agent/research/support.ts";
 import { sourceKind } from "../../../supabase/functions/_shared/research_web.ts";
 
 FAIL_CLOSED.support = true;
@@ -409,4 +409,25 @@ Deno.test("round 2, source kind: official only on the employer's own domain as t
   eq(sourceKind("https://www.bls.gov/oes/current/oes151252.htm", ["Citadel"], []), "official");
   eq(sourceKind("https://www.citadel.com/careers", ["Citadel"], ["citadel.com"]), "official");
   eq(sourceKind("https://citadel.com.evil.example/careers", ["Citadel"], ["citadel.com"]), "reported");
+});
+
+Deno.test("round 2, the other reply paths: a sentence stands only on what its turn read (records, passages, facts); a shown pay line only whole, with its own link", async () => {
+  const pure = (s: string) => pureUnconfirmed(s, "what does paypal pay");
+  // A pay turn: sentences with a number against the postings' own records.
+  const recs = ["PayPal, SWE Intern: $40/hr", "Stripe, SWE Intern: $9,000 a month"];
+  const needs = (s: string) => /\d/.test(s);
+  const pay = async (reply: string, judge: SupportJudge | null) => (await keepSupported(reply, recs, { judge, pure, needs })).text;
+  eq(await pay("PayPal pays $40/hr. IBM pays $40/hr. Stripe pays $40/hr. Happy to draft a note.", allYes), "PayPal pays $40/hr. Happy to draft a note.");
+  eq(await pay("PayPal pays $40/hr. I couldn't confirm it (Stripe pays $9,000 a week).", allNo), "");
+  eq(await pay("PayPal pays $40 a day.\nhttps://jobs.example/paypal", allYes), "https://jobs.example/paypal");
+  // Advice and open-question research: every sentence against the passages or quotes read.
+  const adv = async (reply: string, judge: SupportJudge | null) => (await keepSupported(reply, ["Recruiters at Acme read resumes for about six seconds."], { judge, pure })).text;
+  eq(await adv("Recruiters at Acme read resumes for about six seconds. Acme rejects 99% of applicants.", allYes), "Recruiters at Acme read resumes for about six seconds.");
+  eq(await adv("Acme recruiters read resumes for about six seconds, so lead with numbers.", null), "");
+  // A pay line said again: only the earlier line whole, with that line's own link, never another line's with the same number.
+  const none: any = { status: "no_sources", format: "inline", notes: [], searched: "t", note: "", checked: [] };
+  const shown = [{ text: "PayPal SWE Intern, Chicago, IL: pay is $49 an hour.", url: "https://jobs.example/paypal" }, { text: "Citadel SWE Intern, New York, NY: pay is $60 an hour.", url: "https://jobs.example/citadel" }];
+  const again = (reply: string) => enforceMarketReplySupported(reply, none, shown, { judge: allYes, ask: "what does citadel pay" });
+  ok(!/\$49|paypal/.test(await again("Citadel pays its New York SWE interns $49 an hour.")));
+  eq(await again("Citadel SWE Intern, New York, NY: pay is $60 an hour."), "Citadel SWE Intern, New York, NY: pay is $60 an hour.\nhttps://jobs.example/citadel");
 });

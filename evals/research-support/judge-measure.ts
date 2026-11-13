@@ -5,7 +5,7 @@
 // sends each case that layer A (code) lets through to the product's model through the gateway and the budget ledger (callModel),
 // in batches as a reply would, and prints the confusion table against the hand labels and the dollar cost the meter recorded.
 // deno-lint-ignore-file no-explicit-any
-import { CASES } from "./cases.ts";
+import { CASES, LAYER_A } from "./cases.ts";
 import { findSupport, indexPages, judgeAll, modelSupportJudge, type SupportClaim, supportJudgePayload } from "../../supabase/functions/_shared/agent/research/support.ts";
 import { abbreviated } from "../../supabase/functions/_shared/agent/research/market.ts";
 import { callModel, modelConfig, newMeter, PRICES, TRAINEE_MODEL } from "../../supabase/functions/_shared/model_gateway.ts";
@@ -20,6 +20,15 @@ for (const c of CASES) {
   if (!f) { byCode++; continue; }
   sent.push({ id: c.id, want: c.good && c.judge === "yes" ? "yes" : "no", c: { claim: c.claim, source: f.sentence } });
 }
+// Round 2: the reviewer's 78 layer-A cases (every claim is false: label "no"); those layer A lets through go to the judge too. The
+// could-not-confirm smuggles never reach the judge with a source (no page states them), so they cost nothing and are not sent.
+let byCode2 = 0;
+for (const [cls, page, claim] of LAYER_A) {
+  const f = findSupport(claim, indexPages([{ text: page }], abbreviated), [0]);
+  if (!f) { byCode2++; continue; }
+  sent.push({ id: `A:${cls}: ${claim}`, want: "no", c: { claim, source: f.sentence } });
+}
+console.log(`Round 2 layer-A cases: ${LAYER_A.length}, of which layer A stops ${byCode2}.`);
 const batches: typeof sent[] = [];
 for (let k = 0; k < sent.length; k += BATCH) batches.push(sent.slice(k, k + BATCH));
 const price = PRICES[TRAINEE_MODEL];

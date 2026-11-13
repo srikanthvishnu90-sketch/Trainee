@@ -17,7 +17,9 @@ before(async () => { if (!skip) h = await start(); });
 after(async () => { if (h) await h.stop(); });
 
 test("6: a value the page rewrote after the fill is refused before the click; nothing is posted", o, async () => {
-  for (const id of ["k28", "k29"]) {
+  // Round 3 (architect ruling): a phone the page only reformats (same digits, k28) is the same value and goes; a rewritten name
+  // (k29) is still refused. Round 3's own tests assert k28 is sent with its digits unchanged.
+  for (const id of ["k29"]) {
     const x = await h.run("/" + id);
     assert.equal(x.r.status, "not_submitted", `${id} ${JSON.stringify(x.r)}`);
     assert.deepEqual(x.posts, [], id); assert.deepEqual(x.phases, [], `${id}: refused before the submitting record`);

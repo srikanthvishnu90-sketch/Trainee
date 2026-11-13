@@ -30,7 +30,7 @@
 //  - local only by default: only loopback hosts are driven. Real employer hosts need `allowHosts` from the caller
 //    (the owner-run approve-first path), and this module never discovers or logs in anywhere.
 const fs = require("node:fs");
-const { fillForm, heldNow, recheckFilled, MARK_SIGNIN, EXTRACT, answerFor, factValue, factsFrom } = require("./ats-fill.cjs");
+const { fillForm, heldNow, recheckFilled, driftedFills, MARK_SIGNIN, EXTRACT, answerFor, factValue, factsFrom } = require("./ats-fill.cjs");
 const { APPLY_TEXT, NEVER_CLICK, OVERLAY_APPLY, CLOSED_MARK, CLOSED_TEXT, applyUrlFor } = require("./apply-entry.cjs");
 const { buildHandoff, PERSON_REASONS, pageDigest, unconfirmedDefaults } = require("./handoff.cjs");
 const NOT_OFFERED = new Set(["no_matching_option", "ambiguous_option"]);
@@ -98,17 +98,28 @@ function SHOWN_CHECK() {
   const text = ((document.body && document.body.innerText) || "").slice(0, 20000);
   if (/verify\s+(?:that\s+)?you(?:\s+are|['\u2019]re)\s+(?:a\s+)?(?:human|not a robot)|are you a robot|i['\u2019]?m not a robot|complete the (security )?check|press (and|&) hold/i.test(text)) return "text";
   if (/^(just a moment|attention required)/i.test(document.title || "")) return "interstitial";
+  // Round 2: a challenge asked as a question (an image of characters to type, "prove you are human"): a check, never a question
+  // handed to the person as one of the form's own.
+  if (/\b(?:type|enter) the (?:characters|letters|text|code|word)s? (?:shown|you see|displayed|from|in) (?:in |on )?(?:the |this )?(?:image|picture|box)|prove (?:that )?you(?:\s+are|['\u2019]re) (?:a )?human|security question to prove/i.test(text)) return "question";
+  const img = [...document.querySelectorAll("img[alt*='captcha' i], img[src*='captcha' i], img[id*='captcha' i], img[class*='captcha' i]")].find(vis);
+  if (img) return "question image";
   // A reCAPTCHA or hCaptcha container the page runs invisibly at its own click is not shown either: a hidden *-captcha-response
   // field with a hidden submit button in the same form (every captured Lever form), or the reCAPTCHA badge (Greenhouse, Ashby).
   // The 2026-11-09 benchmark (run 42676274898) saw 0 shown checks on these boards (architect ruling of 2026-10-19).
   const hiddenEl = (b) => !vis(b) || b.hidden || /(^|\s)hidden(\s|$)/.test(b.className || "");
   const runsInvisibly = (e) => {
     if (!e.matches(".g-recaptcha, .h-captcha")) return false;
+    // A box the widget has drawn at a real size is shown, whatever else the page runs beside it (a v3 badge, a hidden token field).
+    if (onScreen(e)) return false;
     const scope = e.closest("form") || document;
     const token = [...scope.querySelectorAll("[name$='-captcha-response']")].some((t) => t.type === "hidden" || !vis(t));
     const hiddenSubmit = [...scope.querySelectorAll("button[type=submit], input[type=submit]")].some(hiddenEl);
     return (token && hiddenSubmit) || (e.matches(".g-recaptcha") && !!document.querySelector(".grecaptcha-badge"));
   };
+  // Round 2: the other providers' own containers, by class, id or data attribute (Friendly Captcha, Arkose / FunCaptcha, GeeTest,
+  // DataDome, PerimeterX / HUMAN, AWS WAF, MTCaptcha, Cloudflare Turnstile), shown at a real size.
+  const other = [...document.querySelectorAll(".frc-captcha, [data-e2e='enforcement-frame'], #arkose, #FunCaptcha, [id^='funcaptcha' i], [class*='geetest' i], #datadome-captcha, [id^='ddChallenge' i], #px-captcha, [class*='px-captcha' i], awswaf-captcha, #captcha-container.amzn-captcha, .amzn-captcha-modal, .mtcaptcha, [data-captcha-provider]")].find(onScreen);
+  if (other) return `widget ${other.tagName.toLowerCase()}${other.id ? "#" + other.id : ""}.${String(other.className || "").slice(0, 40)} ${other.offsetWidth}x${other.offsetHeight}`;
   const widget = [...document.querySelectorAll(".g-recaptcha, .h-captcha, .cf-turnstile, #challenge-form, #cf-challenge-running")]
     .find((e) => (e.getAttribute("data-size") || "").toLowerCase() !== "invisible" && !/invisible/i.test(e.getAttribute("data-badge") || "") && !runsInvisibly(e)
       // A reCAPTCHA or hCaptcha container is shown only once it has drawn its checkbox: an empty 680x0 box (every live Lever
@@ -118,7 +129,8 @@ function SHOWN_CHECK() {
   if (widget) return `widget ${desc(widget)}`;
   const frame = [...document.querySelectorAll("iframe")].find((f) => {
     const src = f.src || "";
-    if (!/recaptcha\/(?:api2|enterprise)\/(?:anchor|bframe)|\/recaptcha\/anchor|hcaptcha\.com\/captcha|challenges\.cloudflare\.com|captcha-delivery\.com/i.test(src)) return false;
+    if (!/recaptcha\/(?:api2|enterprise)\/(?:anchor|bframe)|\/recaptcha\/anchor|hcaptcha\.com\/captcha|challenges\.cloudflare\.com|captcha-delivery\.com|arkoselabs\.com|funcaptcha|\/fc\/gc\/|geetest|perimeterx|px-cdn|px-cloud|awswaf|friendlycaptcha|mtcaptcha/i.test(src)
+      && !/captcha|verification challenge|security check/i.test(`${f.title || ""} ${f.getAttribute("aria-label") || ""}`)) return false;
     if (/[?&]size=invisible\b/i.test(src)) return false;
     // hCaptcha's enclave frame (hcaptcha-enclave.html, #frame=enclave) is its background scoring frame on every Lever form, never
     // a challenge (strict benchmark run 42707036468); its checkbox and challenge frames are.
@@ -177,13 +189,18 @@ async function openApply(page, timeout) {
   // to the same address. Controls that lead to different places, or buttons with no address, stay ambiguous unless there is one.
   const h = (await page.evaluateHandle(([at, nc, overlay]) => {
     const re = new RegExp(at, "i"), never = new RegExp(nc, "i");
+    // Round 2: a control that mentions LinkedIn or Indeed anywhere (words, accessible name, title, address, data attributes, an
+    // image's alt), or leads to either, is never opened.
+    const dec = (t) => [...String(t || "").matchAll(/atob\(\s*['"]([A-Za-z0-9+/=]+)['"]\s*\)/g)].map((m) => { try { return atob(m[1]); } catch { return ""; } }).join(" ");
+    const li = (e) => /linkedin|lnkd\.in|indeed/i.test([e.innerText, e.getAttribute("aria-label"), e.getAttribute("title"), e.getAttribute("href"), e.href, e.getAttribute("formaction"), e.getAttribute("onclick"), dec(e.getAttribute("onclick")), String(e.getAttribute("onclick") || "").replace(/['"`+,\s]|\.join\(\)/g, ""), String(e.className || ""),
+      ...[...e.attributes].filter((a) => a.name.startsWith("data-")).map((a) => `${a.name}=${a.value}`), ...[...e.querySelectorAll("img, svg")].map((i) => `${i.getAttribute("alt") || ""} ${i.getAttribute("aria-label") || ""} ${i.getAttribute("src") || ""}`)].join(" "));
     // Teamtailor's Apply control by its declared action (apply-entry.cjs OVERLAY_APPLY), outside every form, not a submit: the first
     // visible one (the board draws it twice, in the page and as a bar fixed to the bottom).
-    const ov = [...document.querySelectorAll(overlay)].find((e) => !e.closest("form") && (e.offsetWidth || e.offsetHeight) && (e.getAttribute("type") || "").toLowerCase() !== "submit");
+    const ov = [...document.querySelectorAll(overlay)].find((e) => !e.closest("form") && (e.offsetWidth || e.offsetHeight) && (e.getAttribute("type") || "").toLowerCase() !== "submit" && !li(e));
     if (ov) return ov;
     const c = [...document.querySelectorAll("a, button, [role=button]")].filter((e) => {
       const t = (e.innerText || e.getAttribute("aria-label") || "").trim();
-      return !e.closest("form") && (e.offsetWidth || e.offsetHeight) && re.test(t) && !never.test(t);
+      return !e.closest("form") && (e.offsetWidth || e.offsetHeight) && re.test(t) && !never.test(t) && !li(e) && !e.disabled;
     });
     if (!c.length) return null;
     // Repeats of one control: every link goes to the same address and every button carries a link's words (Personio), or
@@ -211,7 +228,8 @@ async function openApply(page, timeout) {
 // A check over the whole page (a Cloudflare or DataDome challenge, an interstitial, a check outside any form) still stops the
 // run on load, before anything is typed. Read only: the check is never clicked, typed into or scored.
 function CHECK_IN_FORM() {
-  const sel = ".g-recaptcha, .h-captcha, .cf-turnstile, iframe[src*='recaptcha/api2/anchor'], iframe[src*='recaptcha/enterprise/anchor'], iframe[src*='hcaptcha.com/captcha'], iframe[src*='challenges.cloudflare.com']";
+  const sel = ".g-recaptcha, .h-captcha, .cf-turnstile, iframe[src*='recaptcha/api2/anchor'], iframe[src*='recaptcha/enterprise/anchor'], iframe[src*='hcaptcha.com/captcha'], iframe[src*='challenges.cloudflare.com'], "
+    + ".frc-captcha, [data-e2e='enforcement-frame'], #arkose, [class*='geetest' i], #px-captcha, awswaf-captcha, .mtcaptcha, iframe[title*='captcha' i], iframe[title*='challenge' i], iframe[src*='arkoselabs'], iframe[src*='/fc/gc/'], img[alt*='captcha' i], img[src*='captcha' i]";
   if (/^(just a moment|attention required)/i.test(document.title || "")) return false;
   const checks = [...document.querySelectorAll(sel)].filter((e) => e.offsetWidth > 60 && e.offsetHeight > 40);
   if (!checks.length) return false;
@@ -264,37 +282,95 @@ function checkGate(seen, shown, inForm, phase) {
 //    (apply-entry.cjs), so it may be opened once, as a job page's Apply control always was, and the page read again.
 //  - A board with no <form> at all (Ashby): the page is the form when its own fields are an application's and it has exactly one
 //    visible Submit-worded control.
-const SUBMIT_WORD = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$|^\s*(bewerbung )?(absenden|senden|abschicken)\s*$|^\s*(sollicitatie )?(versturen|verzenden|verstuur|indienen)\s*$|^\s*(envoyer|enviar|verzenden|skicka|sende|send inn|indsend|l[äa]het[äa]|wy[śs]lij|s[ūu]t[īi]t|si[ųu]sti|saada|odeslat|odosla[ťt]|invia|inviare|trimite|g[öo]nder|k[üu]ld[ée]s|po[šs]alji|po[šs]lji|изпрати|отправить|надіслати|αποστολή|υποβολή)( .{0,24})?$/i;
-const NEXT_WORD = /^\s*(continue|next|next step|weiter|suivant|siguiente|volgende|avanti|pr[oó]ximo)\s*[›»>→]?\s*$/i;
+const SUBMIT_WORD = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$|^\s*(complete application|finish|finish application)\s*$|^\s*(bewerbung )?(absenden|senden|abschicken)\s*$|^\s*(sollicitatie )?(versturen|verzenden|verstuur|indienen)\s*$|^\s*(envoyer|enviar|verzenden|skicka|sende|send inn|send s[øo]knad|send ans[øo]gning|indsend|l[äa]het[äa]|wy[śs]lij|s[ūu]t[īi]t|si[ųu]sti|saada|odeslat|odosla[ťt]|invia|inviare|trimite|g[öo]nder|k[üu]ld[ée]s|po[šs]alji|po[šs]lji|изпрати|отправить|надіслати|αποστολή|υποβολή)( .{0,24})?$/i;
+const NEXT_WORD = /^\s*(continue|next|next step|review|review application|review your application|weiter|suivant|siguiente|volgende|avanti|pr[oó]ximo)\s*[›»>→]?\s*$/i;
 const PLAIN_SUBMIT = /^\s*(submit|send|apply)( (my|your))?( application| now)?\s*$/i;
-const NOT_APPLICATION = /subscribe|newsletter|sign ?up|notify|alert|search|abonn|suchen/i;
-const isApplicationForm = (fields = []) => fields.some((f) => f.type === "file") || (fields.length >= 2 && fields.some((f) => !["email", "checkbox", "search"].includes(f.type)));
+// Round 2 (review of #818): a wrong click on an employer's site cannot be undone, so every control the engine presses is pressed
+// on positive evidence, never because it is "the only button".
+//  - controlLabel: a control is a Submit (or a Continue) only when its visible words are on the list (SUBMIT_WORD / NEXT_WORD), no
+//    word of SUBMIT_DENY is in its words or its accessible name, and the two do not disagree (one on the list, the other not, or
+//    no visible words at all behind an accessible name: "conflict", which refuses the form as ambiguous_submit).
+//  - LinkedIn and Indeed (the rule that never moves): a control or link that mentions either, in its words, accessible name,
+//    title, address, form address, data attributes or an image's alt (SNAP's `blob`), is never pressed, as a Submit or as an opener.
+const SUBMIT_DENY = /\b(withdraw|delete|remove|cancel|save|draft|later|sign ?in|log ?in|create (an |your )?account|register|subscribe|google|facebook|apple|sso|easy apply|refer|share|back|previous|reset|clear|upload)\b|linkedin|indeed/i;
+const LI_INDEED = /linkedin|lnkd\.in|indeed/i;
+const labelNorm = (x) => String(x || "").toLowerCase().replace(/[\s ]+/g, " ").replace(/^[\s!.»>→›]+|[\s!.»>→›]+$/g, "");
+function controlLabel(c, list = SUBMIT_WORD) {
+  if (c.disabled || LI_INDEED.test(c.blob || "")) return "no";
+  // Round 3: a glyph ("✈", "→") is no words; a control that shows only an icon is named by its accessible name alone; an accessible
+  // name that only adds "form" or "button" to the same words agrees with them.
+  const raw = labelNorm(c.text), text = /[\p{L}\p{N}]/u.test(raw) ? raw : "", name = labelNorm(c.aria), ok = (x) => list.test(x) && !SUBMIT_DENY.test(x);
+  // An icon-only control is taken by its accessible name only when it also declares itself the form's Submit (type=submit, or a
+  // <button> with no type): an icon button of type=button named "Submit application" may be anything (a trash can).
+  if (!text) return name && (ok(name) || ok(name.replace(/\s+(form|button)$/, ""))) ? (c.icon && ((c.tag === "BUTTON" && (c.type === "submit" || c.type === "")) || (c.tag === "INPUT" && c.type === "submit")) ? "yes" : "conflict") : "no";
+  if (SUBMIT_DENY.test(text) || (name && SUBMIT_DENY.test(name))) return ok(text) || (name && list.test(name)) ? "conflict" : "no";
+  const nameOk = !!name && (ok(name) || ok(name.replace(/\s+(form|button)$/, "")));
+  if (name && name !== text && ok(text) !== nameOk) return "conflict";
+  return ok(text) ? "yes" : "no";
+}
+//  - isApplicationForm: a form may be given the person's data only on positive evidence that it is the application: a resume / CV
+//    upload, or a name question AND an email question AND one more application question (phone, cover letter, work
+//    authorisation, experience, ...). And never against contrary evidence: a password box, or the words of a contact, demo,
+//    newsletter, talent-community, job-alert, search, sign-in, returning-candidate, refer-a-friend or feedback form in its
+//    headings, buttons, address (`head`) or its labels and placeholders (`labels`).
+const NOT_APP_HEAD = /contact us|talk to sales|(request|book|get) a demo|newsletter|subscribe|talent (community|network|pool)|job alerts?|returning candidate|already have an account|refer a (friend|colleague|candidate)|\brefer\b|feedback|was this (page )?helpful|\bsign ?in\b|\blog ?in\b|\blogin\b|find jobs|search jobs|job search/i;
+const NOT_APP_LABEL = /contact us|(request|book|get) a demo|returning candidate|refer a (friend|colleague)|keyword|search (jobs|roles|positions|openings)/i;
+// A field's own name or label that says what the form is for (a newsletter's email box, a site search).
+const NOT_APP_FIELD = /newsletter|subscri|job.?alert|talent.?(community|network|pool)|search.?(jobs|query|term|keyword)|^\s*keyword\b/i;
+const Q_NAME = /(?<!user|company|file)[ _-]?name\b|vorname|nachname|pr[ée]nom|\bnom\b|nombre|apellido|naam|navn|namn|nimi|imi[eę]|nazwisko|vardas|v[āa]rds|jm[ée]no|cognome/i;
+const Q_RESUME = /resume|r[ée]sum[ée]|\bcv\b|curriculum|lebenslauf|vita\b/i;
+const Q_MORE = /phone|telefon|mobile|\btel\b|cover|anschreiben|motivation|authori[sz]|sponsor|visa|right to work|experience|erfahrung|linkedin|portfolio|website|salary|notice period|start date|location|city/i;
+// `own`: what the form's own Submit adds (pickControls): 1 when it passes controlLabel, 2 when its words also name the application
+// ("Submit application", "Apply now", "Bewerbung absenden"). The coordinator's rule asks for name AND email AND one more
+// application question; the repo's own recorded forms include boards whose first step asks only name and email (Personio,
+// Recruitee, Teamtailor) and forms with an email and the employer's questions under "Submit application", so the form's own
+// Submit stands in for the third question (own 1 beside a name and an email; own 2 beside an email). STRICT_EVIDENCE = true
+// drops that and holds the rule to the letter.
+const STRICT_EVIDENCE = false;
+const NAMES_APPLICATION = /appl|bewerb|sollicit|candidat|postul|ans[öo]k|s[øo]k|hakemu/i;
+function isApplicationForm(form = [], own = 0) {
+  const f = Array.isArray(form) ? { fields: form } : form, fields = f.fields || [];
+  if (f.password || fields.some((x) => x.type === "password") || NOT_APP_HEAD.test(`${f.head || ""} ${f.action || ""}`) || NOT_APP_LABEL.test(f.labels || "") || fields.some((x) => !["checkbox", "radio"].includes(x.type) && NOT_APP_FIELD.test(x.hint || ""))) return false;
+  const files = fields.filter((x) => x.type === "file"), has = (re) => fields.some((x) => re.test(x.hint || ""));
+  if (files.some((x) => Q_RESUME.test(x.hint || "")) || files.length === 1) return true;
+  const email = fields.some((x) => x.type === "email" || /e-?mail/i.test(x.hint || "")), more = files.length > 0 || fields.some((x) => x.type === "tel") || has(Q_MORE);
+  if (STRICT_EVIDENCE) return has(Q_NAME) && email && more;
+  return email && ((has(Q_NAME) && (more || own >= 1)) || (own >= 2 && fields.length >= 2));
+}
 function pickControls(snap) {
   const none = { form: null, submit: null, next: null, refuse: null };
   const ctl = (snap.controls || []).filter((c) => !c.signin);
   const forms = (snap.forms || []).map((f, i) => ({ ...f, i })).filter((f) => f.hasControl && !f.signin);
+  // The application lives in a frame of this page (an ATS's embedded form): no form of the parent page is the application.
+  if (snap.frameApp) return { ...none, refuse: "application_in_frame" };
   // `was`: this run already took the form as the application (a board that swaps the upload's input for a chip once the resume is set).
-  const apps = forms.filter((f) => f.was || isApplicationForm(f.fields));
-  const typed = (c) => (c.tag === "BUTTON" && (c.type === "submit" || c.type === "")) || (c.tag === "INPUT" && c.type === "submit");
+  const ownSubmit = (f) => Math.max(0, ...ctl.filter((c) => c.form === f.i && controlLabel(c) === "yes").map((c) => (NAMES_APPLICATION.test(c.text) ? 2 : 1)));
+  const apps = forms.filter((f) => f.was || isApplicationForm(f, ownSubmit(f)));
   for (const f of apps) {
-    const own = ctl.filter((c) => c.form === f.i && c.vis), t = own.filter(typed), declared = t.filter((c) => c.type === "submit"), worded = own.filter((c) => SUBMIT_WORD.test(c.text));
-    // A control the form itself declares its Submit (type="submit") is preferred over a button with no type beside it.
-    const pick = worded.length === 1 ? worded[0] : t.length === 1 ? t[0] : worded.find((b) => t.includes(b)) || (declared.length === 1 ? declared[0] : null);
-    if (pick && !NOT_APPLICATION.test(pick.text)) return { ...none, form: f.i, submit: pick.c };
+    const own = ctl.filter((c) => c.form === f.i && c.vis), labels = own.map((c) => controlLabel(c)), cands = own.filter((c, i) => labels[i] === "yes");
+    if (labels.includes("conflict")) return { ...none, refuse: "ambiguous_submit" };
+    if (cands.length === 1) return { ...none, form: f.i, submit: cands[0].c };
+    // Two or more Submit-worded controls in one form: only when exactly one is the form's declared Submit and it is the last of them.
+    const declared = cands.filter((c) => c.type === "submit" && (c.tag === "BUTTON" || c.tag === "INPUT"));
+    if (cands.length > 1) { if (declared.length === 1 && declared[0] === cands[cands.length - 1]) return { ...none, form: f.i, submit: declared[0].c }; return { ...none, refuse: "ambiguous_submit" }; }
   }
   // A form shown in steps (Breezy): one visible "Continue" (not a submit, so pressing it posts nothing) with the form's Submit
   // drawn but hidden until the last step. Two such controls, a submit-typed one, or no hidden Submit beside it: not a step form.
   for (const f of apps) {
-    const mine = ctl.filter((c) => c.form === f.i && c.inside), nexts = mine.filter((c) => c.vis && NEXT_WORD.test(c.text));
-    const hiddenSubmit = mine.some((c) => !c.vis && (c.tag === "BUTTON" || c.tag === "INPUT") && PLAIN_SUBMIT.test(c.text));
+    const mine = ctl.filter((c) => c.form === f.i && c.inside), nexts = mine.filter((c) => c.vis && controlLabel(c, NEXT_WORD) === "yes");
+    const hiddenSubmit = mine.some((c) => !c.vis && (c.tag === "BUTTON" || c.tag === "INPUT") && PLAIN_SUBMIT.test(c.text) && !LI_INDEED.test(c.blob || ""));
     if (nexts.length === 1 && hiddenSubmit && nexts[0].type !== "submit" && (nexts[0].tag !== "BUTTON" || nexts[0].type === "button")) return { ...none, form: f.i, next: nexts[0].c };
   }
   const loose = ctl.filter((c) => c.vis && c.form < 0 && SUBMIT_WORD.test(c.text));
-  if (!forms.length) return isApplicationForm(snap.loose) && loose.length === 1 ? { ...none, form: -1, submit: loose[0].c } : none;
+  if (!forms.length) { const yes = ctl.filter((c) => c.vis && c.form < 0 && controlLabel(c) === "yes"); return isApplicationForm({ fields: snap.loose, head: snap.head }) && loose.length === 1 && yes.length === 1 ? { ...none, form: -1, submit: yes[0].c } : none; }
   // The one exception (BambooHR, D-072: its Submit is drawn just outside its one form): outsideSubmitOf, every condition or none.
   const tied = outsideSubmitOf(snap, forms, ctl);
   if (tied) return { ...none, form: tied.form, submit: tied.submit, outside: true };
-  if (apps.length && loose.length) return { ...none, refuse: "submit_not_tied_to_form", opener: loose.every((c) => APPLY_TEXT.test(c.text) && !NEVER_CLICK.test(c.text)) };
+  // An outside control in the Apply words is opened (once) only when it is a link of the page; a button beside an application
+  // form that is already there is never pressed.
+  // (Any form that asks more than an email counts here, so the refusal names the real reason; nothing is filled either way.)
+  const near = forms.filter((f) => apps.includes(f) || (f.fields || []).some((x) => x.type === "file") || ((f.fields || []).length >= 2 && f.fields.some((x) => !["email", "checkbox", "search"].includes(x.type))));
+  if (near.length && loose.length) return { ...none, refuse: "submit_not_tied_to_form", opener: loose.every((c) => (c.link || c.tag === "A") && APPLY_TEXT.test(c.text) && !NEVER_CLICK.test(c.text) && !LI_INDEED.test(c.blob || "")) };
   return none;
 }
 // Review of #797, follow-up: a Submit drawn outside the form is that form's Submit only when ALL of this holds; anything else stays
@@ -309,12 +385,12 @@ function outsideSubmitOf(snap, forms, ctl) {
   const f = forms[0], fields = f.fields || [];
   const who = fields.some((x) => x.type === "email" || /(?<!user)name|e-?mail/i.test(x.hint || ""));
   const questions = fields.filter((x) => !["email", "checkbox", "search"].includes(x.type)).length;
-  if (!who || !(fields.some((x) => x.type === "file") || questions >= 2)) return null;
+  if (!who || !(fields.some((x) => x.type === "file") || questions >= 2) || (!f.was && !isApplicationForm({ ...f, fields: [...fields, { type: "tel", hint: "" }] }))) return null;
   const like = (c) => c.vis && (SUBMIT_WORD.test(c.text) || (c.tag === "BUTTON" && (c.type === "submit" || c.type === "")) || (c.tag === "INPUT" && c.type === "submit"));
   const out = ctl.filter((c) => c.form < 0 && like(c));
   if (out.length !== 1 || ctl.some((c) => c.form === f.i && like(c))) return null;
   const b = out[0];
-  if (b.link || !OUTSIDE_LABEL.test(b.text) || b.gap !== 0 || !(b.sameBox || b.follows)) return null;
+  if (b.link || !OUTSIDE_LABEL.test(b.text) || controlLabel(b) !== "yes" || b.gap !== 0 || !(b.sameBox || b.follows)) return null;
   return { form: f.i, submit: b.c };
 }
 // Page side: every form (its questions as { type, hint }, shadow roots included), the fields outside every form, and every control
@@ -326,17 +402,30 @@ function SNAP() {
   const isField = (i) => !["hidden", "submit", "button", "image", "reset"].includes(i.type);
   const field = (i) => ({ type: i.type || "", hint: squash(`${(i.labels && i.labels[0] && i.labels[0].innerText) || ""} ${i.getAttribute("aria-label") || ""} ${i.placeholder || ""} ${i.name || ""} ${i.id || ""} ${i.autocomplete || ""}`).slice(0, 240) });
   const forms = [...document.querySelectorAll("form")];
+  // What a control says to a person (text), to assistive technology (aria: aria-label, aria-labelledby, title), and everything it
+  // carries that can name where it leads (blob: both, its address, its form's address, its data attributes, its images' alt).
+  const aria = (b) => squash(b.getAttribute("aria-label") || (b.getAttribute("aria-labelledby") || "").split(/\s+/).map((id) => (document.getElementById(id) || {}).innerText || "").join(" ") || b.getAttribute("title") || "");
+  // Round 3: its click handler's text too, and any atob('...') literal in it decoded (an encoded LinkedIn address).
+  const decoded = (t) => [...String(t || "").matchAll(/atob\(\s*['"]([A-Za-z0-9+/=]+)['"]\s*\)/g)].map((m) => { try { return atob(m[1]); } catch { return ""; } }).join(" ");
+  const blob = (b) => squash([b.innerText || b.value, aria(b), b.getAttribute("href"), b.getAttribute("formaction"), b.getAttribute("onclick"), decoded(b.getAttribute("onclick")), String(b.getAttribute("onclick") || "").replace(/['"`+,\s]|\.join\(\)/g, ""), b.className && String(b.className), b.name, b.id,
+    ...[...b.attributes].filter((a) => a.name.startsWith("data-") && !a.name.startsWith("data-upmore")).map((a) => `${a.name}=${a.value}`), ...[...b.querySelectorAll("img, svg")].map((i) => `${i.getAttribute("alt") || ""} ${i.getAttribute("aria-label") || ""} ${i.getAttribute("src") || ""}`)].join(" ")).slice(0, 600);
+  // A form's own words: its headings, legends and buttons and the heading just before it (head); its labels and placeholders (labels).
+  const head = (f) => { let h = ""; for (let p = f.previousElementSibling, i = 0; p && i < 2; p = p.previousElementSibling, i++) if (/^H[1-6]$/.test(p.tagName)) { h = p.innerText; break; }
+    return squash([h, f.id, f.getAttribute("name"), f.getAttribute("role"), f.getAttribute("aria-label"), ...[...f.querySelectorAll("h1, h2, h3, h4, h5, h6, legend, button:not([type]), button[type=submit], input[type=submit]")].map((e) => e.innerText || e.value)
+      // A third party's own button inside the application ("Apply with LinkedIn", "Sign in with Google") says nothing of the form.
+      .filter((t) => !/linkedin|indeed|google|facebook|apple|github|microsoft|autofill|auto-fill/i.test(t || ""))].join(" | ")).slice(0, 800); };
+  const labels = (f) => squash([...f.querySelectorAll("label, [placeholder]")].map((e) => (e.tagName === "LABEL" ? e.innerText : e.getAttribute("placeholder"))).join(" | ")).slice(0, 1500);
   const controls = [...document.querySelectorAll("button, [role=button], input[type=button], input[type=submit]")].map((b, c) => {
     b.setAttribute("data-upmore-c", String(c));
     const f = b.form || b.closest("form"), one = forms.length === 1 ? forms[0] : null;
     // Where an outside control sits against the page's one form (outsideSubmitOf): after it in the page's order, in its container,
     // and how many fields outside the form lie between the two (or share that container).
     const follows = !f && !!one && !!(one.compareDocumentPosition(b) & 4), sameBox = !f && !!one && one.parentElement !== document.body && one.parentElement.contains(b);
-    const gap = f || !one ? 0 : deep(document.body, "input, select, textarea, [role=search]").filter((i) => i.type !== "hidden" && !one.contains(i)
+    const gap = f || !one ? 0 : deep(document.body, "input, select, textarea, [role=search], [contenteditable=true], [contenteditable='']").filter((i) => i.type !== "hidden" && !one.contains(i)
       && ((sameBox && one.parentElement.contains(i)) || (follows && (one.compareDocumentPosition(i) & 4) && (i.compareDocumentPosition(b) & 4)))).length;
-    return { c, follows, sameBox, gap, link: b.tagName === "A" || b.hasAttribute("href") || b.getAttribute("role") === "link", form: f ? forms.indexOf(f) : -1, inside: !!b.closest("form"), vis: vis(b), text: squash(b.innerText || b.value).slice(0, 120), tag: b.tagName, type: (b.getAttribute("type") || "").toLowerCase(), signin: !!b.closest("[data-upmore-signin]") };
+    return { c, aria: aria(b), blob: blob(b), icon: !/[\p{L}\p{N}]/u.test(b.innerText || b.value || "") && !!b.querySelector("svg, img, i, [class*='icon' i]") || (!/[\p{L}\p{N}]/u.test(b.innerText || "") && /\S/.test(b.innerText || "")), disabled: !!b.disabled || b.getAttribute("aria-disabled") === "true", follows, sameBox, gap, link: b.tagName === "A" || b.hasAttribute("href") || b.getAttribute("role") === "link", form: f ? forms.indexOf(f) : -1, inside: !!b.closest("form"), vis: vis(b), text: squash(b.innerText || b.value).slice(0, 120), tag: b.tagName, type: (b.getAttribute("type") || "").toLowerCase(), signin: !!b.closest("[data-upmore-signin]") };
   });
-  return { controls, forms: forms.map((f) => ({ signin: f.hasAttribute("data-upmore-signin"), was: f.hasAttribute("data-upmore-app-seen"), hasControl: !!f.querySelector("input, select, textarea"), fields: deep(f, "input, select, textarea").filter(isField).map(field) })),
+  return { controls, head: squash([...document.querySelectorAll("h1, h2, h3")].map((e) => e.innerText).join(" | ")).slice(0, 400), forms: forms.map((f) => ({ head: head(f), labels: labels(f), action: f.getAttribute("action") || "", password: !!f.querySelector("input[type=password]"), signin: f.hasAttribute("data-upmore-signin"), was: f.hasAttribute("data-upmore-app-seen"), hasControl: !!f.querySelector("input, select, textarea"), fields: deep(f, "input, select, textarea").filter(isField).map(field) })),
     loose: deep(document.body, "input, select, textarea").filter((i) => isField(i) && !i.closest("form") && !i.closest("[data-upmore-signin]")).map(field) };
 }
 // Page side: mark what pickControls chose: the application form (data-upmore-app: the one form ats-fill reads and fills), its
@@ -350,21 +439,259 @@ function MARK(pick) {
 // The last look before the click: the control about to be pressed belongs to the form that was filled, and every filled question
 // is in that form. `t` is read from the page (attempt): formless (no form was marked), anyForm, sameForm, filledOutside.
 // `outside`: pickControls took the control by the one narrow exception (outsideSubmitOf); it must still belong to no form.
+const CAPTCHA_QUESTION = /captcha|characters (?:shown|you see|displayed|in the image)|(?:text|code|letters) (?:shown |you see )?in the (?:image|picture)|prove (?:that )?you(?:'re| are) (?:a )?human|not a robot/i;
+// Round 2 (review of #818): the in-page guard, armed as the last step before the click. FORM_SNAP is what the application form
+// would send (its FormData, an upload by its name and size, opaque tokens left out) at the last look; GUARD compares the form with
+// it now (a difference refuses before the click) and again at the instant it is sent: on the Submit control's click (capture, before
+// the page's own click handlers) and on the form's submit (bubbling to window, after the page's own submit handlers). A difference
+// there stops the browser from sending it (preventDefault) and leaves a flag; when the page's own script had already taken the
+// submission (it prevented the default to send it itself), the flag says late: it may have been sent. Read after the click by
+// guardVerdict. A board with no <form> has nothing to snapshot and no guard.
+function FORM_SNAP(opaque) {
+  const f = document.querySelector("form[data-upmore-app]");
+  if (!f) return null;
+  const tok = new RegExp(opaque, "i"), rows = [], dom = [];
+  const val = (v) => (typeof v === "string" ? v.replace(/\r\n/g, "\n") : `file:${v.name}:${v.size}`);
+  for (const [k, v] of new FormData(f)) if (!tok.test(k)) rows.push([k, val(v)]);
+  // What the form's own controls hold, as the browser would list them, with no page script in between (a formdata handler can add
+  // or change entries of a FormData, never of this list).
+  for (const e of f.elements) {
+    if (!e.name || e.disabled || ["submit", "button", "reset", "image"].includes(e.type) || e.tagName === "BUTTON" || e.tagName === "FIELDSET" || e.tagName === "OUTPUT" || tok.test(e.name)) continue;
+    if ((e.type === "checkbox" || e.type === "radio") && !e.checked) continue;
+    if (e.tagName === "SELECT") { for (const o of e.selectedOptions) dom.push([e.name, o.value]); continue; }
+    if (e.type === "file") { if (e.files.length) for (const x of e.files) dom.push([e.name, val(x)]); else dom.push([e.name, "file::0"]); continue; }
+    dom.push([e.name, (e.type === "checkbox" || e.type === "radio") ? e.value || "on" : String(e.value).replace(/\r\n/g, "\n")]);
+  }
+  return JSON.stringify({ rows, dom });
+}
+// The guard (armed as the last step before the click): the form compared with the last look now, on the Submit control's click
+// (capture), and on the form's submit (bubbling to window, after the page's own handlers); and every request the page's own script
+// sends while it is armed (fetch, XMLHttpRequest) with a form or JSON body is compared too: one that adds or changes an answer is
+// never sent (its fetch is rejected), and the guard's flag says so.
+function GUARD([want, opaque, rules]) {
+  const f = document.querySelector("form[data-upmore-app]"), b = document.querySelector("[data-upmore-submit]");
+  if (!f || want === null) return { armed: false, same: true };
+  const tok = new RegExp(opaque, "i"), sens = new RegExp(rules.sensitive, "i"), w = JSON.parse(want).rows, wantRows = JSON.stringify(w);
+  const val = (v) => (typeof v === "string" ? v.replace(/\r\n/g, "\n") : `file:${v.name}:${v.size}`);
+  const now = () => { const rows = []; for (const [k, v] of new FormData(f)) if (!tok.test(k)) rows.push([k, val(v)]); return JSON.stringify(rows); };
+  const differs = (got) => { for (const [k, v] of got) { if (tok.test(k)) continue; const mine = w.filter((x) => x[0] === k); if (!mine.length || !mine.some((x) => x[1] === val(v))) return k; } return null; };
+  const names = new Set(w.map((x) => String(x[0]).toLowerCase().replace(/[^a-z0-9]/g, "")));
+  const jsonBad = (s) => { let j; try { j = JSON.parse(s); } catch { return null; } let bad = null; const walk = (o, key) => { if (bad) return; if (o && typeof o === "object") { for (const [k, v] of Object.entries(o)) walk(v, k); return; } if (key && sens.test(key) && !names.has(String(key).toLowerCase().replace(/[^a-z0-9]/g, ""))) bad = key; }; walk(j, ""); return bad; };
+  const bodyBad = (body) => {
+    if (!body) return null;
+    if (body instanceof FormData || body instanceof URLSearchParams) return differs([...body.entries()]);
+    if (typeof body === "string") return jsonBad(body) || (/^[^{[\s][^=&]*=/.test(body) ? differs([...new URLSearchParams(body).entries()]) : null);
+    return null;
+  };
+  const g = window.__upmoreGuard = { aborted: false, late: false, why: null };
+  const stop = (e, late) => { g.aborted = true; g.late = g.late || late; e.preventDefault(); e.stopImmediatePropagation(); };
+  if (b) b.addEventListener("click", (e) => { if (now() !== wantRows) stop(e, false); }, { capture: true, once: true });
+  window.addEventListener("submit", (e) => { if (e.target === f && now() !== wantRows) stop(e, e.defaultPrevented); });
+  const ofetch = window.fetch;
+  window.fetch = function (input, init) { const bad = bodyBad(init && init.body); if (bad) { g.aborted = true; g.why = bad; return Promise.reject(new TypeError("blocked: the request changes the approved application")); } return ofetch.apply(this, arguments); };
+  // A beacon sent while the page unloads (pagehide) is not seen by the network guard (the browser sends it as the page goes):
+  // every beacon is refused here while the guard is armed; the application itself is not a beacon.
+  try { navigator.sendBeacon = function () { g.side = (g.side || 0) + 1; return false; }; } catch (e) { /* read-only */ }
+  const osend = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.send = function (body) { const bad = bodyBad(body); if (bad) { g.aborted = true; g.why = bad; try { this.abort(); } catch (e) { /* none */ } return; } return osend.apply(this, arguments); };
+  return { armed: true, same: now() === wantRows };
+}
+const guardVerdict = (g) => (!g || !g.aborted ? { status: null }
+  : g.late ? { status: "unknown_outcome", reason: "the page changed the form as it was sent, and its own script had already taken it: it may have been sent" }
+    : { status: "not_submitted", reason: "page_changed_at_submit" });
 const submitTieRefusal = (t) => ((t.formless ? !t.anyForm : (t.sameForm || (t.outside === true && t.noForm === true)) && !t.filledOutside) ? null : "submit_not_tied_to_form");
 // Page side, read only: what every control of the application form holds now (the whole page for a board with no <form>): the
 // rows of handoff.cjs pageRows. A box or radio by its own option (value null when not ticked), a select by its chosen options'
 // words (null on its empty placeholder), an upload by its file's name. `touched`: the engine filled that question (filledQs).
-function CONTROLS(filledQs) {
-  const app = document.querySelector("form[data-upmore-app]");
+// Round 2 (review of #818): a hidden input that carries an ANSWER is a control the person must see: by its name (sponsorship, work
+// authorisation, visa, opt-in, consent, age, demographics, relocation, salary, agreement), or because a drawn control beside it
+// writes it (a role=switch / checkbox / radio / combobox / listbox, or aria-checked / aria-pressed / aria-selected). An opaque
+// token (csrf, nonce, session, a timestamp) never is.
+const HIDDEN_ANSWER = /sponsor|work.?auth|authori[sz]|visa|opt.?in|marketing|consent|over.?1[89]|(^|[_-])age([_-]|$)|gender|\brace\b|^race|ethnic|veteran|disab|relocat|salary|agree|terms|certif/i;
+// Round 3 (review of #831): a token by its exact name (never a name that merely contains "session" or "token"), or by its value's
+// shape (long and random, base64 / hex, a UUID, a timestamp). Any other hidden value is read for what it says: a sentence, a legal
+// word, a yes / no, or a short value under a question's id (q_88213, custom_question_4471, answers[3]) is an answer.
+const OPAQUE = /^(?:_?csrf(?:_?token)?|csrfmiddlewaretoken|_?xsrf(?:_?token)?|authenticity_token|_token|token|_?nonce|session_?id|sessionid|jsessionid|phpsessid|state|utf8|ts|timestamp|g-recaptcha-response|h-captcha-response|cf-turnstile-response|frc-captcha-solution|__requestverificationtoken|__viewstate\w*|__eventvalidation)$/i;
+const OPAQUE_VALUE = /^(?:[A-Za-z0-9+/_=\-.:]{24,}|[0-9a-f]{16,}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|\d{9,}|\d{4}-\d\d-\d\dt[\d:.]+z?)$/i;
+const YESNO = /^(?:yes|no|y|n|true|false|on|off|agree|agreed|accept|accepted|decline|declined|ja|nein|oui|non|sí|si)$/i;
+const LEGAL_WORD = /agree|consent|authori[sz]|sponsor|arbitration|certif|attest|acknowledg|opt.?in|marketing/i;
+const QUESTION_ID = /(?:^|[_\-\[])(?:q|qs|question|questions|custom_?question|answer|answers|custom_?field|field|cq|cf)(?:[_\-]?\d+|\[\d*\]|\]|$)|^q\d+$|question|answer/i;
+const isOpaqueName = (n) => OPAQUE.test(String(n || ""));
+// Round 4: a board's own structure, never a question: a question's id or its position / priority / order, and where the visit came
+// from (utm_*, source, referrer, gh_src). Shown on the card as page data and hashed, never asked; unless it says an answer.
+const STRUCT_NAME = /(?:^|[\[_\-])(?:question_?id|priority|position|order|sort_order|sort|index|idx|ordinal)\]?$|(?:^|[\[_])utm_[a-z]+\]?$|^(?:source|referrer|referer|ref|src|gh_src|gh_jid|lever-source|lever-origin|origin_source)$|\[(?:source|referrer)\]$/i;
+function isStructuralHidden(name, value) {
+  const n = String(name || ""), v = String(value ?? "").trim();
+  if (HIDDEN_ANSWER.test(n) || SENSITIVE_KEY.test(n) || LEGAL_WORD.test(v) || YESNO.test(v)) return false;
+  return STRUCT_NAME.test(n) || (/(?:_id|Id|\[id\])\]?$/.test(n) && /^\d{1,12}$/.test(v));
+}
+function hiddenIsAnswer(name, widget, value) {
+  if (isOpaqueName(name)) return false;
+  if (widget || HIDDEN_ANSWER.test(name || "")) return true;
+  if (isStructuralHidden(name, value)) return false;
+  const v = String(value ?? "").trim();
+  if (!v || OPAQUE_VALUE.test(v)) return false;
+  if (/^[[{]/.test(v)) { let j; try { j = JSON.parse(v); } catch { j = undefined; } if (j && typeof j === "object") { const keys = []; const walk = (o) => { if (o && typeof o === "object") for (const [k, x] of Object.entries(o)) { keys.push(k); walk(x); } }; walk(j); return keys.some((k) => SENSITIVE_KEY.test(k)); } }
+  if (LEGAL_WORD.test(v) || YESNO.test(v) || v.split(/\s+/).length >= 3) return true;
+  return QUESTION_ID.test(name || "") && v.length <= 60;
+}
+// What a form sends, compared with what was approved (rows [name, value]): a field it adds or a value it changes is refused (a
+// formdata handler, the page's own fetch); a token by its exact name, and sending less, are not.
+function sentDiffers(want, got) {
+  for (const [k, v] of got || []) {
+    if (isOpaqueName(k)) continue;
+    const mine = (want || []).filter((w) => w[0] === k);
+    if (!mine.length) return `the page added ${String(k).slice(0, 60)}`;
+    if (!mine.some((w) => String(w[1]).replace(/\r\n/g, "\n") === String(v).replace(/\r\n/g, "\n"))) return `the page changed ${String(k).slice(0, 60)}`;
+  }
+  return null;
+}
+// A JSON body the page posts itself is read for answers: a consent, opt-in, authorisation or demographic key the approval does not
+// hold is refused; other keys (the board's own naming of approved answers) are not compared.
+const SENSITIVE_KEY = /consent|agree|opt.?in|marketing|newsletter|sponsor|authori[sz]|arbitration|gender|race|ethnic|veteran|disab|relocat|salary|terms|certif/i;
+function jsonDiffers(want, body) {
+  let j; try { j = JSON.parse(body); } catch { return null; }
+  const names = new Set((want || []).map((w) => String(w[0]).toLowerCase().replace(/[^a-z0-9]/g, "")));
+  const walk = (o, key) => {
+    if (o && typeof o === "object") { for (const [k, v] of Object.entries(o)) { const r = walk(v, k); if (r) return r; } return null; }
+    return key && SENSITIVE_KEY.test(key) && !names.has(String(key).toLowerCase().replace(/[^a-z0-9]/g, "")) ? `the page's own request adds ${key}` : null;
+  };
+  return walk(j, "");
+}
+// Round 4: the pressed control sends to its own formaction / formmethod when it has them; it must be the approved form's own.
+function submitTargetRefusal({ action, method, formAction, formMethod }) {
+  const noHash = (u) => String(u || "").replace(/#.*$/, "");
+  return noHash(action) === noHash(formAction) && String(method || "get").toLowerCase() === String(formMethod || "get").toLowerCase() ? null : "submit_target_mismatch";
+}
+// Round 4: the pressed control's own name and value are sent with the form: a control on the card, an answer when it says one.
+function submitterControl({ name, value, text } = {}) {
+  if (!name) return null;
+  const v = String(value ?? ""), answer = LEGAL_WORD.test(v) || SENSITIVE_KEY.test(v) || SENSITIVE_KEY.test(name) || /subscribe|newsletter|alert|share/i.test(v);
+  return { name, label: `${String(text || name).replace(/\s+/g, " ").trim().slice(0, 80)} (the button pressed)`, type: "submit", option: null, value: v, q: null, touched: false, hidden: !answer, answer, disabled: false };
+}
+// A request body as rows [name, value]: urlencoded, multipart (an upload by its file's name: the browser does not hand its bytes to
+// the guard), or null for a body read as JSON / anything else.
+function bodyRows(contentType, body) {
+  const ct = String(contentType || ""), b = String(body || "");
+  if (/multipart\/form-data/i.test(ct)) {
+    const bd = /boundary=("?)([^";]+)\1/i.exec(ct); if (!bd) return null;
+    const rows = [];
+    for (const part of b.split("--" + bd[2]).slice(1)) {
+      if (/^--/.test(part)) break;
+      const m = /name="([^"]*)"(?:; filename="([^"]*)")?[^]*?\r\n\r\n([^]*)\r\n$/.exec(part);
+      if (m) rows.push([m[1], m[2] !== undefined ? `file:${m[2]}` : m[3]]);
+    }
+    return rows;
+  }
+  if (/x-www-form-urlencoded/i.test(ct) || (!/json/i.test(ct) && /^[^{[\s][^=&]*=/.test(b))) return [...new URLSearchParams(b).entries()];
+  return null;
+}
+// The submit window (from the click to the outcome read): exactly one request may carry the application, the approved form to its
+// own address by its own method, with exactly the approved fields (a token's value may differ; an upload by its file's name); a
+// JSON body only with keys and values the form itself holds. Every other request that sends something is aborted: another POST,
+// a beacon, a frame's form, a fetch or XHR or ping with parameters; GETs of the page's assets and navigations go on.
+const ASSET = new Set(["stylesheet", "script", "font", "media", "manifest", "texttrack"]);
+function submitWindowVerdict(r, s) {
+  const noHash = (u) => String(u || "").replace(/#.*$/, "");
+  const method = String(r.method || "GET").toUpperCase();
+  let u; try { u = new URL(r.url); } catch { return "abort"; }
+  if (method === "GET" && !(String(s.method).toUpperCase() === "GET" && noHash(r.url).split("?")[0] === noHash(s.action).split("?")[0] && r.navigation)) {
+    if (!u.search || r.navigation || ASSET.has(r.resourceType)) return "allow";
+    return "abort";
+  }
+  // The form's own submission (a navigation) goes to the form's address by its method. A board that posts the form with its own
+  // script (fetch / XHR: Workable, Breezy) posts it to its own API address: allowed once, if its body holds exactly the form's data.
+  // A beacon or a ping is never the application.
+  if (s.used || ["ping", "beacon"].includes(r.resourceType)) return "abort";
+  if (r.navigation && (method !== String(s.method).toUpperCase() || noHash(method === "GET" ? r.url.split("?")[0] : r.url) !== noHash(method === "GET" ? String(s.action).split("?")[0] : s.action))) return "abort";
+  let rows = method === "GET" ? [...u.searchParams.entries()] : bodyRows(r.contentType, r.body);
+  // An upload is compared by its file's name: "file:<name>" in a multipart body, the bare name in an urlencoded or GET one.
+  const multipart = /multipart\/form-data/i.test(String(r.contentType || ""));
+  const want = (s.want || []).map(([k, v]) => [k, /^file:/.test(v) ? (multipart ? String(v).replace(/^(file:[^:]*):\d+$/, "$1") : String(v).replace(/^file:([^:]*):\d+$/, "$1")) : v]);
+  if (!rows) {
+    let j; try { j = JSON.parse(String(r.body || "")); } catch { return "abort"; }
+    rows = [];
+    const walk = (o, key) => { if (o && typeof o === "object") { for (const [k, x] of Object.entries(o)) walk(x, k); return; } rows.push([key, String(o)]); };
+    walk(j, "");
+    // A board that posts its form as JSON names the fields its own way (Breezy: cName as "name"): each value must be one the form
+    // holds (an upload by its file's name), under any key but a consent / opt-in / authorisation / demographic one the form does
+    // not have. A value the form does not hold (an added "yes", a sentence, a true) refuses.
+    const norm = (x) => String(x).toLowerCase().replace(/[^a-z0-9]/g, "");
+    const names = new Set(want.map(([k]) => norm(k)));
+    const values = new Set(want.map(([, v]) => String(v).replace(/^file:([^:]*)(?::\d+)?$/, "$1").replace(/\r\n/g, "\n")));
+    if (rows.some(([k, v]) => (v !== "" && !values.has(String(v).replace(/\r\n/g, "\n"))) || (SENSITIVE_KEY.test(k) && !names.has(norm(k))))) return "abort";
+  } else if (sentDiffers(want, rows)) return "abort";
+  s.used = true;
+  return "allow";
+}
+// Only words that say something went wrong count as an error shown, and never a link (a footer's "Report an error").
+const ERRORISH = /error|invalid|required|fail|problem|please (fix|correct|check)|could ?n['’o]?t|unable|try again|missing|must be|not valid/i;
+const isErrorText = (text, isLink) => !isLink && ERRORISH.test(String(text || ""));
+// Page side, read only: what every control of the application form holds now (the whole page for a board with no <form>): the
+// rows of handoff.cjs pageRows. A box or radio by its own option (value null when not ticked), a select by its chosen options'
+// words (null on its empty placeholder), an upload by its file's name, a contenteditable region by its text. `touched`: the engine
+// filled that question (filled, by data-upmore-q), or the control lives inside the one question it filled (a drawn widget's own
+// input). A hidden input is `hidden` (an opaque value, counted, never shown) unless it carries an answer (`answer`, shown under its
+// widget's words). The argument is the filled questions, or { filled, answer, opaque } (the two rules above, as sources).
+function CONTROLS(arg) {
+  const filledQs = Array.isArray(arg) ? arg : arg.filled || [];
+  const answerRe = new RegExp(arg.answer || "^$", "i"), opaqueRe = new RegExp(arg.opaque || "^$", "i");
+  const byValue = Array.isArray(arg.value), [opaqueValueRe, legalRe, yesNoRe, questionRe, sensRe, structRe] = (arg.value || ["^$", "^$", "^$", "^$", "^$", "(?!)"]).map((x) => new RegExp(x, "i"));
+  const structural = (n, v) => byValue && !answerRe.test(n) && !sensRe.test(n) && !legalRe.test(v) && !yesNoRe.test(v) && (structRe.test(n) || (/(?:_id|Id|\[id\])\]?$/.test(n) && /^\d{1,12}$/.test(v)));
+  // A JSON value is the page's own structured data (Lever keeps each question's template in a hidden field); it is an answer only
+  // when one of its keys is a consent, opt-in, authorisation or demographic key.
+  const jsonAnswer = (v) => { let j; try { j = JSON.parse(v); } catch { return null; } if (!j || typeof j !== "object") return null; let hit = false; const walk = (o) => { if (hit || !o || typeof o !== "object") return; for (const [k, x] of Object.entries(o)) { if (sensRe.test(k)) { hit = true; return; } walk(x); } }; walk(j); return hit; };
+  const valueAnswer = (name, v) => { if (!byValue || !v || opaqueValueRe.test(v)) return false; const js = /^[[{]/.test(v) ? jsonAnswer(v) : null; if (js !== null) return js; return legalRe.test(v) || yesNoRe.test(v) || v.split(/\s+/).length >= 3 || (questionRe.test(name) && v.length <= 60); };
+  const app = document.querySelector("form[data-upmore-app]"), root = app || document.body;
   const squash = (x) => String(x || "").replace(/\s+/g, " ").trim();
-  return (app ? [...app.elements] : [...document.querySelectorAll("input, select, textarea")])
+  const WIDGET = "[role=radio], [role=checkbox], [role=switch], [role=listbox], [role=combobox], [role=radiogroup], [aria-checked], [aria-selected], [aria-pressed]";
+  const inQuestion = (e) => {
+    for (let a = e.parentElement, i = 0; a && i < 3 && a !== root && a !== document.body && a.tagName !== "FORM"; a = a.parentElement, i++) {
+      const qs = new Set([...a.querySelectorAll("[data-upmore-q]")].map((x) => x.getAttribute("data-upmore-q")));
+      if (qs.size) return qs.size === 1 && filledQs.includes([...qs][0]);
+    }
+    return false;
+  };
+  const widgetOf = (e) => {
+    const near = [e.previousElementSibling, e.previousElementSibling && e.previousElementSibling.previousElementSibling, e.nextElementSibling, e.parentElement !== root && e.parentElement.tagName !== "FORM" ? e.parentElement : null];
+    for (const n of near) { if (!n) continue; if (n.matches(WIDGET)) return n; const w = n.querySelector(WIDGET); if (w) return n.matches("[role=group], [role=radiogroup]") || n.hasAttribute("aria-label") ? n : w; }
+    return null;
+  };
+  const named = (w, value) => {
+    const by = (w.getAttribute("aria-labelledby") || "").split(/\s+/).map((id) => (document.getElementById(id) || {}).innerText || "").join(" ");
+    let t = squash(w.getAttribute("aria-label") || by || w.innerText).replace(/^[^\p{L}\p{N}]+/u, "");
+    const v = squash(value);
+    if (v && t.toLowerCase().endsWith(" " + v.toLowerCase())) t = t.slice(0, -v.length - 1).trim();
+    return t.slice(0, 200);
+  };
+  const fields = (app ? [...app.elements] : [...document.querySelectorAll("input, select, textarea")])
     .filter((e) => /^(INPUT|SELECT|TEXTAREA)$/.test(e.tagName) && !["submit", "button", "image", "reset", "password"].includes(e.type) && !e.closest("[data-upmore-signin]")).map((e) => {
       const box = e.type === "checkbox" || e.type === "radio", q = e.getAttribute("data-upmore-q");
       const own = squash(e.labels && e.labels[0] && e.labels[0].innerText);
-      const value = box ? (e.checked ? own || squash(e.value) || "on" : null) : e.tagName === "SELECT" ? [...e.selectedOptions].filter((o) => o.value !== "").map((o) => squash(o.textContent)).join(", ") || null
+      const value = box ? (e.checked ? own || squash(e.value) || "on" : null) : e.tagName === "SELECT" ? [...e.selectedOptions].filter((o) => o.value !== "" && !o.disabled && !/^[\s\-–—.…]*(?:(?:please\s+)?(?:select|choose|pick)(?:\s+(?:one|an?\s+(?:option|answer|value)))?)?[\s\-–—.…]*$/i.test(squash(o.textContent))).map((o) => squash(o.textContent)).join(", ") || null
         : e.type === "file" ? [...(e.files || [])].map((f) => f.name).join(", ") || null : String(e.value) === "" ? null : String(e.value);
-      return { name: e.name || "", label: squash((e.labels && e.labels[0] && e.labels[0].innerText) || e.getAttribute("aria-label") || e.placeholder).slice(0, 200), type: e.type, option: box ? squash(e.value) : null, value, q, touched: q !== null && filledQs.includes(q), hidden: e.type === "hidden" };
+      const touched = (q !== null && filledQs.includes(q)) || (q === null && inQuestion(e));
+      let label = squash((e.labels && e.labels[0] && e.labels[0].innerText) || e.getAttribute("aria-label") || e.placeholder).slice(0, 200), hidden = e.type === "hidden", answer = false;
+      if (hidden) {
+        const w = widgetOf(e);
+        const v = String(e.value || "").trim();
+        // The "off" value a form keeps beside its own tick box of the same name (Lever: consent[marketing]=0 beside the box, sent
+        // when it is not ticked) is that box's unticked state, not an answer of its own: the box is the question.
+        const offOfBox = /^(?:0|no|false|off|)$/i.test(v) && !!e.name && [...(e.form ? e.form.elements : document.querySelectorAll("input"))].some((x) => x !== e && x.name === e.name && (x.type === "checkbox" || x.type === "radio"));
+        answer = !offOfBox && !opaqueRe.test(e.name || "") && (!!w || answerRe.test(e.name || "") || (!structural(e.name || "", v) && valueAnswer(e.name || "", v)));
+        // A board's structure (a question's id, its priority; utm_*, source): shown on the card as page data and hashed, never asked.
+        if (!answer && !w && !opaqueRe.test(e.name || "") && structural(e.name || "", v)) { hidden = false; label = squash(e.name).replace(/[_\-\[\]]+/g, " ").trim(); return { name: e.name || "", label, type: e.type, option: null, value: v || null, q, touched: false, hidden, answer: false, pageData: true, disabled: !!e.disabled }; }
+        if (answer) { hidden = false; label = w ? named(w, value) : squash(e.name).replace(/[_-]+/g, " "); }
+      }
+      return { name: e.name || "", label, type: e.type, option: box ? squash(e.value) : null, value, q, touched, hidden, answer, disabled: !!e.disabled };
     });
+  // A contenteditable region of the form is a control too: the page's script sends what it says.
+  const edits = [...root.querySelectorAll("[contenteditable=''], [contenteditable=true]")].filter((e) => !e.parentElement.closest("[contenteditable=''], [contenteditable=true]")).map((e) => {
+    const by = (e.getAttribute("aria-labelledby") || "").split(/\s+/).map((id) => (document.getElementById(id) || {}).innerText || "").join(" ");
+    const value = squash(e.innerText);
+    return { name: e.id || "", label: squash(e.getAttribute("aria-label") || by || e.getAttribute("data-placeholder")).slice(0, 200), type: "contenteditable", option: null, value: value || null, q: null, touched: false, hidden: false, answer: false, disabled: false };
+  });
+  return [...fields, ...edits];
 }
 // D-072: an employer page that embeds the board's own form in a frame (Greenhouse's job_app embed on bitwarden.com, lucidmotors.com):
 // the frame's address, when it is on an allowed host, is the application form one GET away.
@@ -419,6 +746,24 @@ async function botCheck(page) {
 const hasApproval = (p) => !!p.approval && typeof p.approval.approval_id === "string" && p.approval.approval_id.trim() !== ""
   && typeof p.approval.hash === "string" && p.approval.hash === payloadHash(p);
 const CONFIRM_RE = /thank you for applying|application (has been )?submitted|we['’]ve received your application/i;
+// Round 2 (review of #818): what proves an application was sent. The employer's page must SHOW its success words (rendered text,
+// never a hidden template), not negated anywhere on the page ("could not confirm", "was not submitted", "failed", "unable",
+// "error"), with no error list shown; and when a POST of the click was seen, every one answered 2xx or 3xx (0: it failed). Anything
+// else is unknown_outcome: the application may or may not have reached the employer, and the reply says it is unconfirmed.
+const NEGATED = /\b(?:not|n['’]t|never|unable|fail(?:ed|ure)?|error|went wrong|try again|already applied|expired|would (?:see|appear|show)|you['’]d see|if (?:this|it) had|for example|an example|example only|sample|preview)\b/i;
+const NEGATED_ANYWHERE = /\bnot (?:been )?(?:submitted|sent|received|saved|complete)|\bcould ?n['’o]?t\b|\bunable to\b|\bsession (?:has )?expired|\bwent wrong|\balready applied|\bif (?:this|it) had\b|\byou['’]d see\b/i;
+function outcomeVerdict({ text = "", errors = [], posts = [] } = {}) {
+  const bad = posts.find((st) => !(st >= 200 && st < 400));
+  if (bad !== undefined) return { confirmed: false, reason: bad === 0 ? "the POST of the application failed" : `the POST of the application answered ${bad}` };
+  if (errors.length) return { confirmed: false, reason: `the page shows an error: ${String(errors[0]).slice(0, 80)}` };
+  if (!CONFIRM_RE.test(text)) return { confirmed: false, reason: "no confirmation text on the page after submit" };
+  // Round 3: the words that say otherwise count in the confirmation's own sentence, and the strong ones ("not submitted", "could
+  // not", "session expired") anywhere on the page; a footer's "Report an error" elsewhere is not a negation.
+  const own = String(text).split(/[.!?\n]+/).filter((x) => CONFIRM_RE.test(x));
+  if (own.some((x) => NEGATED.test(x)) || NEGATED_ANYWHERE.test(text)) return { confirmed: false, reason: "the page's words around the confirmation say it did not go through" };
+  const code = /\b(?:GH|LV)-[A-Z0-9-]+/.exec(text);
+  return { confirmed: true, code: code ? code[0] : null };
+}
 
 class NeedsUser extends Error { constructor(reason, field, wall) { super(`${reason}${field ? `: ${field}` : ""}`); this.reason = reason; this.field = field; this.needs = null; this.wall = wall || null; this.filled = null; this.at = null; } }
 
@@ -493,6 +838,10 @@ const NOT_FOUND_URL = /[?&](?:error|not_found)=true\b/;
 async function attempt(browser, p, opts, timing) {
   const ctx = await browser.newContext({ viewport: { width: 900, height: 1100 } });
   const page = await ctx.newPage();
+  // The answer to every request the Submit click sends that is not a GET (outcomeVerdict), counted from the instant before the click.
+  const postAnswers = []; let watchPosts = false;
+  page.on("response", (r) => { if (watchPosts && r.request().method() !== "GET") postAnswers.push(r.status()); });
+  page.on("requestfailed", (r) => { if (watchPosts && r.method() !== "GET") postAnswers.push(0); });
   page.setDefaultTimeout(opts.stepTimeoutMs || 15000);
   // A copy: a same-posting redirect (samePostingRedirect) adds the employer's own host for this attempt only.
   const allow = [...(opts.allowHosts || [])];
@@ -517,8 +866,16 @@ async function attempt(browser, p, opts, timing) {
   // whole worker process with every other posting it holds (strict heldout run 42772190953: "route.fetch: Request context
   // disposed").
   await ctx.route("**/*", (route) => guardRoute(route).catch(() => route.abort("blockedbyclient").catch(() => {})));
+  // Round 4: the submit window's network guard (submitWindowVerdict), set just before the click and cleared once the outcome is read.
+  let submitWindow = null;
   async function guardRoute(route) {
     const req = route.request();
+    if (submitWindow) {
+      let nav = false; try { nav = req.isNavigationRequest(); } catch { /* none */ }
+      const buf = req.postDataBuffer();
+      const verdict = submitWindowVerdict({ method: req.method(), url: req.url(), resourceType: req.resourceType(), navigation: nav, contentType: (req.headers() || {})["content-type"], body: buf ? buf.toString("latin1") : null }, submitWindow);
+      if (verdict === "abort") { submitWindow.blocked.push(`${req.method()} ${req.url().slice(0, 120)}`); return route.abort("blockedbyclient"); }
+    }
     // A gate may answer a request inside the browser itself (the strict benchmark's simulated resume upload): nothing is sent.
     if (opts.requestGate) { const gv = await opts.requestGate(req); if (gv && typeof gv === "object" && gv.fulfill) return route.fulfill(gv.fulfill); if (!gv) return route.abort("blockedbyclient"); }
     if (!req.isNavigationRequest()) return route.continue();
@@ -554,7 +911,19 @@ async function attempt(browser, p, opts, timing) {
   // stops the run before anything is typed; before the step form's Continue and before Submit, a check shown now or seen on any
   // earlier step of this run stops it, as wall check_in_form with everything else already filled and read back.
   let checkInForm = null;
+  // Round 2: a widget drawn late (Turnstile a second or two after load) is waited for before every Continue and Submit: the page
+  // must have stopped changing for checkSettleMs (2 s), at most three times that. Read only.
+  const settleMs = opts.checkSettleMs ?? 2000;
+  const settled = () => page.evaluate(([quiet, max]) => new Promise((done) => {
+    const t0 = Date.now(); let timer;
+    const end = () => { mo.disconnect(); clearTimeout(timer); done(); };
+    const arm = () => { clearTimeout(timer); timer = setTimeout(end, Math.max(0, Math.min(quiet, max - (Date.now() - t0)))); };
+    const mo = new MutationObserver(arm);
+    mo.observe(document.documentElement, { childList: true, subtree: true });
+    arm();
+  }), [settleMs, settleMs * 3]).catch(() => {});
   const gate = async (phase = "enter") => {
+    if (phase !== "enter" && settleMs > 0) await settled();
     const shown = await botCheck(page);
     const g = checkGate(checkInForm, shown, shown ? await page.evaluate(CHECK_IN_FORM).catch(() => false) : false, phase);
     checkInForm = g.seen;
@@ -586,8 +955,13 @@ async function attempt(browser, p, opts, timing) {
       await page.evaluate(MARK_SIGNIN).catch(() => 0);
       const snap = await page.evaluate(SNAP);
       // Forms in the page's other frames (a captcha provider's own frame is not the page's): a frame that cannot be read counts as one.
+      // A frame that holds a form with an upload or three or more questions holds the application (frameApp): the parent's forms are never filled.
       snap.otherFrameForms = 0;
-      for (const f of page.frames()) if (f !== page.mainFrame() && !/recaptcha|hcaptcha|challenges\.cloudflare\.com|turnstile/i.test(f.url())) snap.otherFrameForms += await f.evaluate(() => document.forms.length).catch(() => 1);
+      for (const f of page.frames()) {
+        if (f === page.mainFrame() || /recaptcha|hcaptcha|challenges\.cloudflare\.com|turnstile/i.test(f.url())) continue;
+        const n = await f.evaluate(() => [document.forms.length, [...document.forms].some((x) => x.querySelector("input[type=file]") || x.querySelectorAll("input:not([type=hidden]), select, textarea").length >= 3)]).catch(() => [1, false]);
+        snap.otherFrameForms += n[0]; if (n[1]) snap.frameApp = true;
+      }
       lastPick = pickControls(snap);
       await page.evaluate(MARK, lastPick);
       return lastPick;
@@ -692,9 +1066,11 @@ async function attempt(browser, p, opts, timing) {
       onAllowedHost();
       await gate("continue");
       await stopAtWall(page, p.url);
-      const before = await page.evaluate(() => [...document.querySelectorAll("input, select, textarea")].filter((e) => e.offsetWidth || e.offsetHeight).length + "|" + (document.body.innerText || "").length);
+      // What the step shows: its visible fields, its text, and its visible buttons (a Review step that only swaps "Review" for "Submit").
+      const STEP_SIG = () => [...document.querySelectorAll("input, select, textarea")].filter((e) => e.offsetWidth || e.offsetHeight).length + "|" + (document.body.innerText || "").length + "|" + [...document.querySelectorAll("button, input[type=submit], [role=button]")].filter((e) => e.offsetWidth || e.offsetHeight).map((e) => e.innerText || e.value).join("/");
+      const before = await page.evaluate(STEP_SIG);
       await page.click("[data-upmore-next]");
-      const moved = await page.waitForFunction((b) => [...document.querySelectorAll("input, select, textarea")].filter((e) => e.offsetWidth || e.offsetHeight).length + "|" + (document.body.innerText || "").length !== b, before, { timeout: 5000 }).then(() => true, () => false);
+      const moved = await page.waitForFunction((b) => [...document.querySelectorAll("input, select, textarea")].filter((e) => e.offsetWidth || e.offsetHeight).length + "|" + (document.body.innerText || "").length + "|" + [...document.querySelectorAll("button, input[type=submit], [role=button]")].filter((e) => e.offsetWidth || e.offsetHeight).map((e) => e.innerText || e.value).join("/") !== b, before, { timeout: 5000 }).then(() => true, () => false);
       // The page did not move on (its own check held the step back): handed back, never pressed again.
       if (!moved) {
         // What the page says held it back, in its own visible words (an error line on the step), for the person and the record.
@@ -706,6 +1082,12 @@ async function attempt(browser, p, opts, timing) {
       }
       await page.waitForTimeout(300);
       onAllowedHost();
+    }
+    // Round 2: a challenge the form asks as a question ("Enter the characters shown in the image") is the check, never one of the
+    // person's questions: it leaves the list, and the stop is the check's own hand-off.
+    if (checkInForm) {
+      fr.needsUser = fr.needsUser.filter((n) => !CAPTCHA_QUESTION.test(n.label || ""));
+      if (!fr.needsUser.length && !fr.invalid.length && !fr.failed.length) { const e = new NeedsUser("bot_check", p.url, "check_in_form"); e.detail = checkInForm; throw e; }
     }
     if (fr.needsUser.length) {
       const first = fr.needsUser[0];
@@ -747,21 +1129,40 @@ async function attempt(browser, p, opts, timing) {
       const app = document.querySelector("form[data-upmore-app]"), f = b.form || b.closest("form");
       const inApp = (el) => { for (let n = el; n; n = n.parentNode || n.host) if (n === app) return true; return false; };
       const a = b.getAttribute("formaction") ?? ((f || app) && (f || app).getAttribute("action"));
-      return { noForm: !f, formless: !app, anyForm: !!document.querySelector("form:not([data-upmore-signin]) :is(input, select, textarea)"), sameForm: !!app && f === app,
+      const form = f || app, bm = b.getAttribute("formmethod"), fm = form && form.getAttribute("method");
+      return { method: (bm || fm || "get").toLowerCase(), formMethod: (fm || "get").toLowerCase(), formAction: app ? new URL(app.getAttribute("action") || location.href, document.baseURI).href : null,
+        submitter: { name: b.getAttribute("name") || "", value: b.value ?? b.getAttribute("value") ?? "", text: (b.innerText || b.value || b.getAttribute("aria-label") || "").trim() },
+        noForm: !f, formless: !app, anyForm: !!document.querySelector("form:not([data-upmore-signin]) :is(input, select, textarea)"), sameForm: !!app && f === app,
         filledOutside: app ? qs.filter((q) => { const el = document.querySelector(`[data-upmore-q="${q}"]`); return el && !inApp(el); }).length : 0, action: new URL(a || location.href, document.baseURI).href };
     }, fr.filled.map((f) => String(f.d.q)));
     const untied = submitTieRefusal({ ...tie, outside: lastPick.outside === true });
     if (untied) throw new NeedsUser(untied, p.url);
     const av = urlVerdict(tie.action, allow);
     if (!av.ok) throw new NeedsUser("form_action_not_allowed", av.host);
+    // Round 4: the pressed control sends where the approved form sends, by its method (a formaction to /delete is not the form's).
+    if (tie.formAction) { const t = submitTargetRefusal(tie); if (t) throw new NeedsUser(t, tie.action); }
+    const submitter = submitterControl(tie.submitter);
     // Review of #797: what EVERY control of the form holds now, the engine's fills and the page's own defaults alike (CONTROLS),
     // each named as ats-fill names its question. A box the page ticked itself, or a consent / authorisation / demographic choice
     // it preselected, was never the person's answer: it is asked (the ask-once hand-off), never sent as it stands.
     const readControls = async () => {
       const labels = new Map((await page.evaluate(EXTRACT).catch(() => [])).map((d) => [String(d.q), d.label]));
-      return (await page.evaluate(CONTROLS, fr.filled.map((f) => String(f.d.q)))).map((c) => { const label = labels.get(String(c.q)) || c.label; return { ...c, label, value: c.type === "checkbox" && c.value && c.value === label ? "checked" : c.value }; });
+      return (await page.evaluate(CONTROLS, { filled: fr.filled.map((f) => String(f.d.q)), answer: HIDDEN_ANSWER.source, opaque: OPAQUE.source, value: [OPAQUE_VALUE.source, LEGAL_WORD.source, YESNO.source, QUESTION_ID.source, SENSITIVE_KEY.source, STRUCT_NAME.source] })).concat(submitter ? [submitter] : []).map((c) => { const label = labels.get(String(c.q)) || c.label; return { ...c, label, value: c.type === "checkbox" && c.value && c.value === label ? "checked" : c.value }; });
     };
+    // Round 2: every typed answer still says exactly what was approved (a page that rewrote one after the fill is refused).
+    // The focus leaves the last field first, as a person's click on Submit would make it: a page that reformats on blur does it now.
+    await page.evaluate(() => { const a = document.activeElement; if (a && a !== document.body && a.blur) a.blur(); }).catch(() => {});
+    await page.waitForTimeout(150);
+    // A board that re-renders late drops the values (empty, not rewritten): they are set once more and read back (recheckFilled).
+    { let drifted = await driftedFills(page, fr.filled, factsFrom(p.facts || {}, p.answers || {}));
+      if (drifted.length) { const lost = await recheckFilled(page, fr.filled, { facts: p.facts, answers: p.answers || {}, resumePath: p.resume.path }); if (!lost.length) drifted = await driftedFills(page, fr.filled, factsFrom(p.facts || {}, p.answers || {})); } if (drifted.length) { const e = new NeedsUser("field_not_filled", drifted[0]); e.needs = drifted.map((l) => ({ label: l, reason: "value_changed_by_page" })); throw e; } }
     const controls = await readControls();
+    const formSnap = await page.evaluate(FORM_SNAP, OPAQUE.source).catch(() => null);
+    // Round 4: the pressed control's own name and value are sent with the form: part of what the network guard lets out.
+    const sentRows = formSnap ? JSON.parse(formSnap).rows.concat(submitter ? [[submitter.name, submitter.value]] : []) : null;
+    // Round 3: what the browser would send must be what the form's controls show: a page whose formdata handler adds or changes an
+    // entry is sending something nobody sees. Refused here, before the submitting record.
+    if (formSnap) { const fs = JSON.parse(formSnap), why = sentDiffers(fs.dom, fs.rows); if (why) { const e = new NeedsUser("page_changed_at_submit", why); throw e; } }
     // The person's own confirmed answer to a question, as ats-fill reads it (an approved answer, else a confirmed fact).
     const known = factsFrom(p.facts || {}, p.answers || {});
     const unconfirmed = unconfirmedDefaults(controls, { answer: (l) => { const a = answerFor(l, p.answers || {}); return a === undefined || a === null || String(a).trim() === "" ? factValue(l, known) : a; }, phone: known.phone, country: known.country });
@@ -782,24 +1183,42 @@ async function attempt(browser, p, opts, timing) {
     if (opts.onPhase) await opts.onPhase("submitting", audit, submitInfo);
     // Past this line nothing is retried: the employer may have received it.
     const t2 = Date.now();
+    // Round 2: the guard is armed and the form compared with the last look as the last step before the click; nothing between.
+    const armed = await page.evaluate(GUARD, [formSnap, OPAQUE.source, { sensitive: SENSITIVE_KEY.source }]).catch(() => ({ armed: false, same: formSnap === null }));
+    if (!armed.same) throw new NeedsUser("page_changed_before_submit", p.url);
     timing.submitClicked = true;
+    watchPosts = true;
+    if (sentRows) submitWindow = { action: tie.action, method: tie.method, want: sentRows, used: false, blocked: [] };
+    // Nothing the application did not approve left the browser: the guard stopped every request, the application's own included.
+    const heldBack = () => submitWindow && submitWindow.blocked.length && !submitWindow.used ? { status: "not_submitted", reason: "page_changed_at_submit", blocked: submitWindow.blocked.slice(0, 5), filled } : null;
     try {
       await Promise.all([page.waitForLoadState("domcontentloaded"), page.click("[data-upmore-submit]")]);
+      const gv = guardVerdict(await page.evaluate(() => window.__upmoreGuard || null).catch(() => null));
+      if (gv.status) return { status: gv.status, reason: gv.reason, filled };
+      await page.waitForTimeout(200);
+      if (heldBack()) return heldBack();
       await page.waitForSelector("#confirmation, h1", { timeout: opts.stepTimeoutMs || 15000 });
       if (blocked.length) return { status: "unknown_outcome", reason: `after submit: navigation to a disallowed host was refused (${blocked[0]})`, filled };
     } catch (e) {
+      if (heldBack()) return heldBack();
       return { status: "unknown_outcome", reason: `after submit: ${e.message.split("\n")[0]}`, filled };
     }
     timing.submit = Date.now() - t2;
-    const text = (await page.textContent("body")) || "";
+    // A page that answers in place (its own script posts the form) gets a moment to show its words; then only what it renders counts.
+    await page.waitForFunction((re) => new RegExp(re, "i").test((document.body && document.body.innerText) || ""), CONFIRM_RE.source, { timeout: 3000 }).catch(() => {});
+    await page.waitForLoadState("networkidle", { timeout: 3000 }).catch(() => {});
+    const seen = await page.evaluate(() => ({ text: (document.body && document.body.innerText) || "",
+      errors: [...document.querySelectorAll("[role=alert], .error, .errors, .error-message, [class*='error' i]")].filter((e) => (e.offsetWidth || e.offsetHeight) && getComputedStyle(e).visibility !== "hidden" && !e.closest("a, [role=link]"))
+        .map((e) => (e.innerText || "").replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 3) })).catch(() => ({ text: "", errors: [] }));
     if (opts.shotAfter) await page.screenshot({ path: opts.shotAfter, fullPage: true });
-    if (!CONFIRM_RE.test(text)) {
+    if (heldBack()) return heldBack();
+    const v = outcomeVerdict({ ...seen, errors: seen.errors.filter((t) => isErrorText(t, false)), posts: postAnswers });
+    if (!v.confirmed) {
       // The page's own check can become a shown challenge at the click: the person finishes it; it is never solved or retried.
       if (await botCheck(page)) return { status: "unknown_outcome", reason: "after submit: the page showed a verification check; nothing is confirmed until you finish it", filled };
-      return { status: "unknown_outcome", reason: "no confirmation text on the page after submit", filled };
+      return { status: "unknown_outcome", reason: v.reason, filled };
     }
-    const code = /\b(?:GH|LV)-[A-Z0-9-]+/.exec(text);
-    return { status: "submitted_page_confirmed", confirmation: code ? code[0] : null, filled };
+    return { status: "submitted_page_confirmed", confirmation: v.code, filled };
   } catch (e) {
     // A benchmark's dry run asks what the page showed at a stop (opts.diag); production never does.
     if (e instanceof NeedsUser) {
@@ -811,6 +1230,7 @@ async function attempt(browser, p, opts, timing) {
     if (opts.diag && e instanceof NeedsUser) e.diag = await page.evaluate(DIAG, e.field || "").catch(() => null);
     throw e;
   } finally {
+    submitWindow = null;
     await ctx.close();
   }
 }
@@ -864,4 +1284,4 @@ async function runPool(browser, payloads, opts = {}) {
   return { results, wallMs: Date.now() - started, concurrency };
 }
 
-module.exports = { checkGate, pickControls, outsideSubmitOf, isApplicationForm, submitTieRefusal, sentToJobList, SNAP, MARK, CONTROLS, closedOnPage, declineCookies, samePostingRedirect, followedPageRefusal, postingIds, CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };
+module.exports = { submitTargetRefusal, submitterControl, bodyRows, submitWindowVerdict, isStructuralHidden, sentDiffers, jsonDiffers, isErrorText, isOpaqueName, guardVerdict, GUARD, FORM_SNAP, outcomeVerdict, hiddenIsAnswer, HIDDEN_ANSWER, CAPTCHA_QUESTION, controlLabel, SUBMIT_DENY, checkGate, pickControls, outsideSubmitOf, isApplicationForm, submitTieRefusal, sentToJobList, SNAP, MARK, CONTROLS, closedOnPage, declineCookies, samePostingRedirect, followedPageRefusal, postingIds, CHECK_IN_FORM, closedAfterLoad, embeddedFormUrl, botCheck, SHOWN_CHECK, applyOne, runPool, payloadHash, checkPayload, sha256, urlVerdict, ssoSignIn, DENY_HOSTS, DENY_HOST_RULES, DENY_LAUNCH_ARGS, denyLaunchOptions, HANDOFF_REASONS, NeedsUser };

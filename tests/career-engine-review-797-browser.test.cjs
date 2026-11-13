@@ -43,7 +43,7 @@ const PAGES = {
 };
 let server, base, browser, resume, rsha;
 const posts = [], beacons = [];
-const state = { city: "Leeds", listSaysClosed: false };
+const state = { city: "Leeds", lang: "English", listSaysClosed: false };
 before(async () => {
   if (skip) return;
   server = http.createServer((req, res) => {
@@ -52,8 +52,11 @@ before(async () => {
     if (req.method !== "GET") { posts.push(u.pathname); return html("<h1>Thank you for applying</h1>"); }
     if (u.pathname.startsWith("/beacon/")) { beacons.push(u.pathname.slice(8)); return res.writeHead(204).end(); }
     if (PAGES[u.pathname]) return html(PAGES[u.pathname]);
-    // A value the page sets itself (a prefilled box), which the server can change between two loads.
-    if (u.pathname === "/default") return html(doc("Planner", `<form action="/default/submit" method="post">${FIELDS}<label>Preferred office <input name="office" value="${state.city}"></label><input type="hidden" name="csrf_token" value="${Math.random()}"><button type="submit">Submit application</button></form>`));
+    // Architect amendment (round 2, stricter): a value the page sets itself that round 2 still allows without asking (the form's
+    // language, a presentational default), which the server can change between two loads.
+    if (u.pathname === "/default") return html(doc("Planner", `<form action="/default/submit" method="post">${FIELDS}<label>Language <select name="lang">${["English", "Français"].map((l) => `<option${l === state.lang ? " selected" : ""}>${l}</option>`).join("")}</select></label><input type="hidden" name="csrf_token" value="${Math.random()}"><button type="submit">Submit application</button></form>`));
+    // A box the page prefilled with text the person never gave: asked (round 2).
+    if (u.pathname === "/prefilled") return html(doc("Planner", `<form action="/default/submit" method="post">${FIELDS}<label>Preferred office <input name="office" value="${state.city}"></label><input type="hidden" name="csrf_token" value="${Math.random()}"><button type="submit">Submit application</button></form>`));
     if (u.pathname === "/jobs/55") return res.writeHead(302, { location: "/jobs" }).end();
     if (u.pathname === "/jobs") return html(doc("Open roles", state.listSaysClosed ? "<p>This job is no longer available.</p>" : "<ul><li>Engineer</li></ul>"));
     res.writeHead(404).end();
@@ -121,18 +124,25 @@ test("4: a consent box the page ticked itself is asked of the person, never sent
   assert.equal(r.handoff.card, "ask_once"); assert.deepEqual(posts, []);
 });
 
+// Architect amendment (round 2, stricter): the page-set value is now a presentational default (the form's language), which round 2
+// shows and hashes without asking; a prefilled text box the person never gave is asked (last assertion).
 test("4: the card carries a value the page set itself; a yes to that card is refused once the page holds another value, and sent when it holds the same", o, async () => {
-  posts.length = 0; state.city = "Leeds";
+  posts.length = 0; state.lang = "English";
   const ready = await recheck(browser, job("/default"), { stepTimeoutMs: 8000 });
   assert.equal(ready.state, "ready_for_yes", JSON.stringify(ready));
-  assert.deepEqual(ready.card.answers.filter((a) => a.source === "page_default").map((a) => [a.field, a.value]), [["Preferred office", "Leeds"]]);
+  assert.deepEqual(ready.card.answers.filter((a) => a.source === "page_default").map((a) => [a.field, a.value]), [["Language", "English"]]);
   assert.equal(ready.card.hidden_not_hashed, 1);
-  state.city = "York";
+  state.lang = "Français";
   const changed = await recheck(browser, job("/default"), { stepTimeoutMs: 8000, yes: { card_hash: ready.card.hash } });
   assert.deepEqual([changed.state, changed.reason], ["stopped", "APPROVED_APPLICATION_CHANGED"]); assert.deepEqual(posts, []);
-  state.city = "Leeds";
+  state.lang = "English";
   const sent = await recheck(browser, job("/default"), { stepTimeoutMs: 8000, yes: { card_hash: ready.card.hash } });
   assert.equal(sent.state, "submitted", JSON.stringify(sent)); assert.deepEqual(posts, ["/default/submit"]);
+  posts.length = 0;
+  const asked = await recheck(browser, job("/prefilled"), { stepTimeoutMs: 8000 });
+  assert.notEqual(asked.state, "ready_for_yes", JSON.stringify(asked));
+  assert.deepEqual((asked.handoff ? asked.handoff.remaining : []).filter((x) => x.kind === "answer").map((x) => x.what), ["Preferred office"], "a prefilled text box the person never gave is asked");
+  assert.deepEqual(posts, []);
 });
 
 test("5: a posting the board sends to its job list is closed only when that page says so", o, async () => {

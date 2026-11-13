@@ -102,12 +102,17 @@ if (live) {
   if (!/^D-\d{3}[a-z]?$/.test(approval)) { console.log("refused: --live is model spend (web search); it needs PEOPLE_SEARCH_SPEND_APPROVED=<the DECISIONS.md line> (quote: README.md)"); Deno.exit(3); }
   if (!Deno.env.get("ANTHROPIC_API_KEY")) { console.log("refused: --live needs ANTHROPIC_API_KEY"); Deno.exit(3); }
   if (!(budget > 0 && budget <= 3)) { console.log("refused: --budget-usd must be above 0 and at most 3"); Deno.exit(3); }
+  // The shared $80 ledger: the cap is reserved before the first model call, settled at the end (eval_budget.ts openLiveRunLedger).
+  const bud = await import("../../../supabase/functions/_shared/model_budget.ts");
+  const { openLiveRunLedger } = await import("../../career/eval_budget.ts");
+  const ledger = await openLiveRunLedger({ budgetUsd: budget, approval, get: (k) => Deno.env.get(k), bud });
+  if ("error" in ledger) { console.log(`refused: ${ledger.error}`); Deno.exit(3); }
   const { modelConfigFor, TRAINEE_MODEL, webSearch } = await import("../../../supabase/functions/_shared/model_gateway.ts");
-  const { memoryBudgetGate } = await import("../../../supabase/functions/_shared/model_budget.ts");
   const cfg = modelConfigFor({ get: (k: string) => Deno.env.get(k) }, TRAINEE_MODEL);
-  const gate = memoryBudgetGate(Math.round(budget * 1e6));
+  const gate = bud.memoryBudgetGate(Math.round(budget * 1e6));
   const rows: any[] = [];
   let spent = 0;
+  try {
   for (const q of QUERIES) {
     const r = await runOne(q, async (query, w) => { const x: any = await webSearch(query, { cfg, budget: gate, ...w }); spent += x.cost_usd ?? 0; return x; }, null);
     rows.push({ ...r, leads: await Promise.all(r.leads.map(async (l: any) => ({ name: await hash(l.name), employer: l.employer, school_match: l.school_match, host: new URL(l.url).hostname, page_age: l.page_age }))) });
@@ -123,6 +128,7 @@ if (live) {
   await Deno.writeTextFile(`${dir}/results.json`, JSON.stringify({ approval, budget_usd: budget, spent_usd: Number(metered.toFixed(4)), line, note: "names are sha256 prefixes; no real name is stored", rows }, null, 1) + "\n");
   console.log(line);
   console.log(`REAL-SET PEOPLE LIVE spent_usd=${metered.toFixed(4)} -> ${dir}`);
+  } finally { await ledger.settle(Math.max(spent, gate.snapshot().spent / 1e6)); }
   Deno.exit(0);
 }
 

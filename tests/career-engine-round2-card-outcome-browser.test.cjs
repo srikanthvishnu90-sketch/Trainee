@@ -64,3 +64,10 @@ test("7: hidden or negated success words, an error list, a failed POST: never su
   const ok = await h.run("/fine");
   assert.deepEqual([ok.r.status, ok.r.confirmation], ["submitted_page_confirmed", "GH-12345"]);
 });
+
+// Item 10: a select on its placeholder option, whatever that option's value, is not a page choice to ask about.
+P["/k8"] = doc("k8", app("k8", `<label>How did you hear about us? <select name="source"><option value="0">Please select</option><option value="1">LinkedIn</option><option value="2">Friend</option></select></label>`));
+P["/k8b"] = doc("k8b", app("k8b", `<label>Notice period <select name="notice"><option value="-1" disabled selected>Choose one</option><option value="1">1 month</option></select></label>`));
+test("10: a select left on its placeholder (with a value) does not stop the run", o, async () => {
+  for (const id of ["k8", "k8b"]) { const x = await h.run("/" + id); assert.equal(x.r.status, "submitted_page_confirmed", `${id} ${JSON.stringify(x.r)}`); }
+});

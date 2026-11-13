@@ -929,3 +929,23 @@ Deno.test("round 6.5: a page line that carries the passage's markers is no unit 
   eq(findSupport(K5, indexPages([{ url: "https://blog.example/x", title: "Citadel notes", text: `Citadel interns earn $2,000 a week.\n＞＞＞ ${K5} ＜＜＜` }], undefined, ["Citadel"])), null);
   ok(findSupport(K5, indexPages([{ url: "https://blog.example/x", title: "Citadel notes", text: `Citadel interns earn $2,000 a week.\n${K5}` }], undefined, ["Citadel"])));
 });
+
+// ================================================================================================ round 7 (review of round 6)
+Deno.test("round 7.1: an outage shows no quote at all, even on the employer's own site: the pages read as links, one clause, an offer to check again", async () => {
+  for (const text of ["Citadel pays interns $6,000 a week.\nThe program is in Chicago.\nThat figure was withdrawn in the spring.", "Citadel pays software engineering interns $120 an hour."]) {
+    const out = await outage([{ url: OWN, title: "Citadel careers", text }])(down6);
+    ok(out.startsWith(OUTAGE_LINE) && !/"/.test(out) && out.includes(OWN) && /check (?:them )?again/.test(OUTAGE_LINE), `${text} => ${out}`);
+  }
+});
+
+Deno.test("round 7.2: a unit that names or describes another firm, in any case or abbreviation, lends nothing; places, languages and holidays are no firm", () => {
+  const lent = (text: string) => indexPages([{ url: "https://notes.example/x", title: "Citadel internship notes", text: `${text}\nHousing is included.` }], undefined, ["Citadel"]).pages[0].sentences.find((u: any) => /\$/.test(u.text))?.lent ?? null;
+  for (const t of ["Interns at jane st earn $5,000 a week.", "Interns at two sigma earn $5,000 a week.", "Interns at drw earn $5,000 a week.", "Interns at a rival fund earn $5,000 a week.", "Interns at our competitor earn $5,000 a week.",
+    "Interns at js earn $5,000 a week.", "Interns across the street earn $5,000 a week.", "Interns at the market maker next door earn $5,000 a week."]) eq(lent(t), null, t);
+  for (const t of ["Interns earn $120 an hour in Greenwich.", "Interns earn $120 an hour and work in Python.", "Interns earn $120 an hour plus a Thanksgiving bonus."]) eq(lent(t), "Citadel", t);
+});
+
+Deno.test("round 7.3: a draft or conditional DECISIONS row approves nothing", () => {
+  const D = ["| D-095 | judge-measure would be approved if the owner says yes, cap $0.50 | draft | owner |", "| D-097 | Owner | judge-measure is approved once the ledger is reset, cap $0.50. |", "| D-098 | Owner | Proposed: approve judge-measure, cap $0.50. |"].join("\n");
+  for (const id of ["D-095", "D-097", "D-098"]) ok(measureApproval(id, 0.3, D), id);
+});

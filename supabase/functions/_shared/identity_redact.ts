@@ -33,7 +33,7 @@ const CARD_CANDIDATE = /(?<!\d[.,-]?)(?<![.,]\d*)\b(?:\d(?:[ -]?\d){12,18}|\d{4}
 const CARD_LABELED = /\b(card|visa|amex|american express|mastercard|master card|discover|cc#?|debit|credit)(\s*(?:card)?\s*(?:number|no\.?|num|#)?\s*(?:is|=|:|#)?\s*)(\d(?:[ .-]?\d){12,18})\b(?![.,-]?\d)(?!-?[0-9a-f]{2,})/gi;
 // A reference right before the digits: an order, confirmation or tracking number, or a job, posting or application id.
 const REFERENCE_BEFORE = /\b(?:order|confirmation|conf|ref|reference|tracking|invoice|case|ticket|job|posting|requisition|req|application|applicant|candidate|employee|student)\s*(?:id|number|no\.?|#)?\s*(?:is\s*)?[:#]?\s*$/i;
-const PASSPHRASE = /\b(pass ?phrase)(\s*(?:is|=|:)\s*)([^.,;!?\n]*[^.,;!?\n\s])/gi;
+const PASSPHRASE = /\b(pass ?phrase)([ \t]*(?:is|=|:)[ \t]*)([^.,;!?\n]*[^.,;!?\n\s])/gi;
 const PW_WORD = String.raw`(?:password|passwd|passcode|passphrase|pwd|pw)`;
 // The word right after "password is" is the password, unless it describes it ("my password is wrong").
 const NOT_A_PASSWORD = /^(?:wrong|incorrect|expired|invalid|not|too|the|a|an|my|same|correct|right|saved|stored|reset|changed|locked|weak|strong|missing|required|needed|forgotten|case|different|new|old|long|short|fine|ok|okay|working|broken|blocked|bad|good|stuck|gone|compromised|leaked|hacked)$/i;
@@ -136,16 +136,16 @@ const SIGN_IN_STRICT = /\b(?:log[- ]?in|sign[- ]?in|signin|creds|credentials|pas
 const NOT_A_PAIR_VALUE = /^(?:thanks|thank|thx|ty|cheers|best|regards|or|and|then|please|pls|call|text|phone|cell|mobile|linkedin|github|portfolio|website|site|web|personal|work|home|other|etc|same|none|either)$/i;
 const CUE_PAIR = /\b(log[- ]?in|sign[- ]?in|signin|creds|credentials|user ?name)\b([^!?\n]{0,60}?)([^\s/:]+)(\s*\/\s*|:(?=[^\s/]))([^\s/]{3,})/gi;
 const PASS_AFTER_USER = /(\b(?:user ?name|user|login|email|id)\s*[:=]?\s*(?!(?:can|must|should|will|may|might|could|would|to|who|that|then|and|cannot|can't|needs?|has|had|did|does|is|was)\b)\S+\s*,?\s*(?:and\s+)?)(pass(?:word)?|pwd?)(\s*[:=]?\s*)("[^"\n]+"|'[^'\n]+'|[^\s,;]{3,})/gi;
-const PIN_ANY = /\b(pin(?: code| number)?)(\s*(?:\bis\b|=|:)\s*)([^\s,;]*\d[^\s,;]*)/gi;
+const PIN_ANY = /\b(pin(?: code| number)?)([ \t]*(?:\bis\b|=|:)[ \t]*)([^\s,;]*\d[^\s,;]*)/gi;
 // Review round 2 (#825): "log in with alex and hunter2"; the same cues in Spanish, French, German, Portuguese and Italian
 // ("mot de passe : papillon", "mein Passwort ist Schmetterling", "código: 739201"); two product names are no pair.
-const WITH_AND = /\b((?:log[- ]?in|sign[- ]?in)\s+(?:with|using|as)\s+)(\S+)(\s+and\s+)(\S{3,})/gi;
-const FOREIGN_PW = /\b(mot de passe|contrase[ñn]a|clave|passwort|kennwort|senha|palavra[- ]passe|password)(\s*(?:(?<!\p{L})(?:est|es|ist|é|è|era|war)(?!\p{L})\s*:?|[:=])\s*)(\S{3,})/giu;
-const FOREIGN_CODE = /(c[óo]digo|codice|\bcode(?=\s+est\b))(\s*(?:(?<!\p{L})(?:est|es|é|è)(?!\p{L})\s*:?|[:=])\s*)(\d(?:[ -]?\d){3,7})\b/giu;
+const WITH_AND = /\b((?:log[- ]?in|sign[- ]?in)[ \t]+(?:with|using|as)[ \t]+)(\S+)([ \t]+and[ \t]+)(\S{3,})/gi;
+const FOREIGN_PW = /\b(mot de passe|contrase[ñn]a|clave|passwort|kennwort|senha|palavra[- ]passe|password)([ \t]*(?:(?<!\p{L})(?:est|es|ist|é|è|era|war)(?!\p{L})[ \t]*:?|[:=])[ \t]*)(\S{3,})/giu;
+const FOREIGN_CODE = /(c[óo]digo|codice|\bcode(?=[ \t]+est\b))([ \t]*(?:(?<!\p{L})(?:est|es|é|è)(?!\p{L})[ \t]*:?|[:=])[ \t]*)(\d(?:[ -]?\d){3,7})\b/giu;
 const NOT_A_FOREIGN_VALUE = /^(?:incorrect[oa]?|incorrecte|falsch|errad[oa]|sbagliat[oa]|oubli[ée]e?|olvidad[oa]|vergessen|caducad[oa]|expir[ée]e?|abgelaufen|scadut[oa]|nuev[oa]|nouveau|neu|nov[oa]|nuov[oa])$/i;
 const PRODUCT = /^(?:workday|taleo|greenhouse|lever|icims|successfactors|smartrecruiters|jobvite|ashby|bamboohr|indeed|linkedin|handshake|google|microsoft|okta|both)$/i;
 const productPair = (u: string, v: string) => [u, v].some((x) => PRODUCT.test(x.replace(/[.,!?;:]+$/, ""))) || (/^[A-Z]{2,5}$/.test(u) && /^[A-Z]{2,5}[.,;]*$/.test(v));
-const CODE_WORDS = /\b((?:one[- ]time|verification|2fa|mfa|otp|auth(?:entication)?)\s*(?:code|pin|passcode)?|(?:sign[- ]?in|login)\s*(?:code|pin|passcode))(\s*(?:\bis\b|=|:)\s*)([A-Za-z0-9-]{4,12})\b(?![.\/]\w|\s*\/)/gi;
+const CODE_WORDS = /\b((?:one[- ]time|verification|2fa|mfa|otp|auth(?:entication)?)[ \t]*(?:code|pin|passcode)?|(?:sign[- ]?in|login)[ \t]*(?:code|pin|passcode))([ \t]*(?:\bis\b|=|:)[ \t]*)([A-Za-z0-9-]{4,12})\b(?![.\/]\w|[ \t]*\/)/gi;
 const quiet = (v: string) => { const w = v.replace(/[.,!?;:]+$/, ""); return v.startsWith("[") || NOT_A_PASSWORD.test(w) || NOT_A_BARE_PASSWORD.test(w) || NOT_A_PAIR_VALUE.test(w) || /^[a-z]+(?:ed|ing)$/.test(w); };
 function redactCredentialCues(t: string, removed: Set<Redaction["removed"][number]>): string {
   t = t.replace(CUE_PAIR, (m, cue: string, gap: string, user: string, sep: string, value: string, at: number, all: string) => {

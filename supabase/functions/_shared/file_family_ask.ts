@@ -16,102 +16,102 @@ export const FAMILY_TITLE: Record<MadeFamily, string> = {
 };
 
 // ---------------------------------------------------------------- the asks
-// A family named as a page to see, open or keep. Each phrase is the File's own name or the plain words for it; a generic phrase
-// ("my interviews", "compare my offers") counts only with a File word beside it, so an ordinary question stays an ordinary question.
-// A control ("pause my weekly brief"), an opt-out ("no more weekly brief"), an approval or a bare reply is never an ask here, and
-// neither is an ask to make something new ("build a search plan"): those are the settings tools' and the planning turn's.
-const FILE_WORD = /\b(?:file|page|link|doc(?:ument)?|one[- ]?pager|sheet)s?\b/i;
-const SHOW = /\b(?:show|open|see|view|send|give|get|pull\s+up|bring\s+up|share)\b|\bwhere(?:'s|\s+is)\b|\bwhat(?:'s|\s+is)\s+(?:in|on)\b/i;
-// A generic phrase is a File ask only with a verb that asks to SEE what is on record (never one that asks to write something new:
-// "make me an interview prep file" is the prep File's, "draft a message" is the draft tool's).
-const SEE = /\b(?:show|open|see|view|pull\s+up|bring\s+up)\b|\b(?:send|give)\s+me\b|\bwhere(?:'s|\s+is)\b/i;
-// A control or a decision about the File's subject is not a File ask: "pause my weekly brief", "approve my search plan". An
-// opt-out is a control however it is worded (review of #798: "don't send me the weekly brief anymore", "no more weekly brief",
-// "skip the weekly summary", "mute weekly brief", "weekly digest off" each got a brief link in place of the pause asked for).
-// Review of #803: these words were read anywhere in the message, so "where's my weekly brief? I can't find the link", "show me my
-// weekly brief by end of day" and "show me my materials page for the design role" stopped being asks. They are now read only where
-// they GOVERN the File's name: in the name's own clause before the name (the verb and its negation: "don't send me the weekly
-// brief", "no more weekly brief"), straight after it ("weekly digest off"), or in another clause that points back at it ("the weekly
-// brief is too much, stop sending it"). A clause is cut at sentence punctuation, a comma, and "so", "because", "before", "but", "then".
-const CLAUSE_CUT = /[.?!;:,\n]+|\s+(?:so(?:\s+that)?|because|cause|before|after|but|then|since|while|though|although|once)\s+/i;
-const CTRL = /\b(?:pause|stop|resume|turn\s+(?:off|on)|off|cancel|unsubscribe|opt(?:ing)?[- ]out|skip|mute|silence|snooze|disable|quit|end|change|move|approve|delete|remove|edit|update)\b|\benough\s+(?:of|with)\b/i;
-const NEG = /\b(?:never|no\s+(?:more|longer)|not|(?:do|does|did|wo|would|ca|can)n'?t|cannot)\b/i;
-// Words that look like a control or a negation and are neither: "by end of day", "don't forget to send", "make sure", "not sure where".
-const BENIGN = /\b(?:by|at|before|until|till)\s+(?:the\s+)?end\b|\bend\s+of\b|\b(?:do\s+not|don'?t)\s+forget\b|\bmake\s+sure\b|\bnot\s+sure\b|\bwhy\s+not\b|\b(?:can'?t|cannot)\s+wait\b/gi;
-// "can't open my career brief", "I didn't get my weekly brief": the person can't reach the File, which is an ask to see it.
-const CANT_REACH = /\b(?:(?:ca|can|could|did|have|has)n'?t|cannot|can\s+not|unable\s+to|not\s+able\s+to)(?:\s+(?:i|we|even|seem\s+to|manage\s+to|yet))?\s+(?:open|find|access|load|get(?:\s+(?:to|into))?|got(?:ten)?|receive[d]?|see|seen|view|locate|pull\s+up|reach)(?:\s+(?:my|the|this|that|our|to|into|up))*\s*$/i;
-// Straight after the name: "weekly digest off", "the weekly brief needs to stop", "weekly brief emails no more".
-const OFF_AFTER = /^\s*(?:(?:file|page|link|email|text|message)s?)?[\s\-–—]*(?:(?:is|are|should|needs?\s+to|has\s+to|must|can|please|to)\s+)*(?:(?:be|get|go)\s+)?(?:off|no\s+more|stop(?:ped|s)?|paused?|cancel(?:l?ed)?|muted?|disabled?|end(?:ed|s)?|gone|away|skipped|skip|snoozed?|unsubscribe)\b/i;
-// Another clause that points back at the File: a bare control ("please stop"), a control on "it" ("stop sending it", "turn it off"),
-// or "don't send it", "I don't want them".
-const STRONG = "pause|stop|turn\\s+off|cancel|unsubscribe|opt(?:ing)?[- ]out|skip|mute|silence|snooze|disable|quit|delete|remove";
-const POINTS = "(?:it|them|that|this|those|these)\\b";
-const FAR_OFF = new RegExp(`^\\W*(?:please\\s+|just\\s+)?(?:${STRONG}|off)(?:\\s+please)?\\W*$|\\b(?:${STRONG})\\s+(?:(?:sending|emailing|texting|messaging|getting|receiving)\\s+)?(?:me\\s+)?${POINTS}|\\bturn\\s+${POINTS}\\s+off\\b|\\bopt(?:ing)?[- ]out\\b|\\bunsubscribe\\b|\\bno\\s+more\\s+of\\s+${POINTS}|\\b(?:never|not|(?:do|does|did|wo|would)n'?t|no\\s+longer)\\s+(?:\\w+\\s+){0,2}?(?:send|want|need|show|give|text|email|message|get|receive|like)(?:\\s+(?:me|to\\s+(?:see|get|receive)))?\\s+${POINTS}`, "i");
-// An ask to write or make something new is not an ask to open what is on record (review of #798: "make me a search plan for PM
-// roles in NYC", "build a search plan" and "draft a counter plan" are the planning turn's). Review of #803: only when the File's
-// name is the verb's OBJECT ("draft a counter plan"), not when the verb is somewhere else in the message ("show me my interview hub
-// so I can prepare", "my materials page for the design role"), and when the message asks for a new one beside it ("and draft a new one").
-const WRITE = "write|draft|compose|prep|prepare|practi[cs]e|mock|tailor|research|make|create|build|generate|plan|design|start|put\\s+together|come\\s+up\\s+with|set\\s+up|work\\s+(?:out|up)";
-const WRITE_NEW = new RegExp(`\\b(?:${WRITE})\\b`, "i");
-const WRITE_OBJECT = new RegExp(`\\b(?:${WRITE})(?:\\s+(?:me|us|a|an|the|my|our|new|another|one|up|out|quick|short|better|fresh|some|this|that|first|full|whole|different))*\\s*$`, "i");
-const WRITE_ANOTHER = new RegExp(`\\b(?:${WRITE})\\s+(?:(?:me|us|a|an|up)\\s+)*(?:(?:new|another|different|fresh|updated)\\s+)?(?:one|version)\\b`, "i");
-// "make me my weekly brief": the File is the person's own ("my", "the") and its page is drawn for everyone from what is on record
-// (F-01, F-02, F-14 never answer "nothing on record"), so making it IS opening it (#798: "made from the chat when the ask calls for
-// it"). "a search plan", "my search plan for consulting" and the plan families stay the planning turn's.
-const MAKE_OWN = /\b(?:make|create|build|generate|put\s+together)(?:\s+(?:me|us))?\s+(?:my|the)\s*$/i;
-const ALWAYS_DRAWN = new Set<MadeFamily>(["F-01", "F-02", "F-14"]);
-const NAMED: [MadeFamily, RegExp][] = [
-  ["F-01", /\bcareer\s+brief\b/i],
-  ["F-02", /\bprofile\s+facts\b|\bfacts\s+(?:you\s+have|on\s+file|about\s+me)\b/i],
-  ["F-03", /\bpath\s+comparison\b/i],
-  ["F-04", /\bsearch\s+plan\b/i],
-  ["F-07", /\bmaterials?\s+(?:studio|file|page)\b|\b(?:resume|r[e\u00e9]sum[e\u00e9]|cover\s+letter)\s+versions\b/i],
-  ["F-08", /\banswer\s+library\b|\bsaved\s+answers\b/i],
-  ["F-12", /\bmessage\s+review\b/i],
-  ["F-13", /\binterview\s+hub\b/i],
-  ["F-14", /\bweekly\s+(?:brief|summary|digest|report)\b/i],
-  ["F-14n", /\bnegotiation\s+plan\b|\bcounter(?:offer)?\s+plan\b/i],
-  ["F-15", /\boffer\s+comparison\b/i],
+// A non-null answer HOLDS the brain's turn to opening that File (career_staged.ts reason file_family_ask; career_brain.ts
+// processCheck familyFile). So this reader FAILS CLOSED (review of #805: three rounds of "an ask unless a listed stop word is
+// found" each sent the File to people who had asked for it to stop, in words the list did not have). It is an ALLOWLIST of whole
+// messages: a family is returned only when the ENTIRE message, once normalised, is one of the shapes below. Any other word anywhere
+// means null: an opt-out however it is worded, a new thing to make, a comparison, a question about something else, a second topic.
+// A see-ask that is not one of the shapes is null too (it stays with the older routes, never held to the tool): a person who has to
+// rephrase is a small cost, a person sent the thing they asked to stop is not.
+//   polite   hey / please / thanks around the ask; "can you", "could you", "would you" before it
+//   see      show | open | see | view | pull up | bring up | send | resend | give | get | share [me|us], "can i see|have|get|open",
+//            "i want to|i'd like to|i need to|let me see|open|view|get|look at", "where is|where's", "what's in|on", "link to|for"
+//   File     [my|the|that|our|this] + the File's own name [+ a File word], or a generic phrase WITH a File word ("my interviews
+//            page", "the page with my profile", "a file comparing my offers")
+//   tail     again, now, today, tonight, this morning, real quick, for me, here, in chat, on telegram|whatsapp|imessage,
+//            by end of day, when you can
+//   bare     the File's own name alone ("my weekly brief", "weekly brief?")
+//   can't    "i can't find|open|see|get <File>", "i never got <File>", "<File> link doesn't open" [, send me the link]
+//   + one clause, before or after, that says they can't reach it: "i can't find the link", "the old one doesn't work",
+//     "i never got it", "you didn't send it", "i lost the link". Nothing else.
+const alt = (...xs: string[]) => `(?:${xs.join("|")})`;
+const FW = "(?:file|page|link|doc|document|one[- ]?pager|sheet|url)";
+const DET = "(?:my|the|that|our|this)";
+// The File's own name, and the generic words for it that count only with a File word beside them.
+const FAMILY_WORDS: [MadeFamily, string, string | null, string | null][] = [
+  // family, own name, generic + File word after it, File word + "with|comparing ..." before it
+  ["F-01", "career brief", null, null],
+  ["F-02", alt("profile facts", "facts you have on file", "facts you have about me", "facts you have", "facts on file", "facts about me"), alt("profile", "facts"), `(?:with|of|for) ${alt("my profile", "my facts", "what you know about me")}`],
+  ["F-03", "path comparison", null, `(?:comparing|that compares) (?:my|the) ${alt("paths", "directions")}`],
+  ["F-04", "search plan", null, null],
+  ["F-07", alt("materials? studio", "(?:resume|r[eé]sum[eé]|cover letter) versions"), "materials?", "(?:with|of|for) my materials"],
+  ["F-08", alt("answer library", "saved answers"), "(?:saved |application )?answers", "(?:with|of|for) my (?:saved |application )?answers"],
+  ["F-12", "message review", "(?:outreach |email )?(?:draft|message)", `(?:with|of|for) ${DET} (?:outreach |email )?(?:draft|message)`],
+  ["F-13", "interview hub", "(?:upcoming )?interviews?", "(?:with|of|for) my (?:upcoming )?interviews?"],
+  ["F-14", "weekly (?:brief|summary|digest|report)", null, null],
+  ["F-14n", alt("negotiation plan", "counter(?:offer)? plan"), "negotiation", "(?:with|of|for) my negotiation"],
+  ["F-15", "offer comparison", "offers", "(?:comparing|that compares) (?:my|the) offers"],
 ];
-const WITH_FILE_WORD: [MadeFamily, RegExp][] = [
-  ["F-02", /\bmy\s+(?:profile|facts)\b|\bwhat\s+you\s+know\s+about\s+me\b/i],
-  ["F-03", /\bcompar(?:e|ing|ison)\b[^.?!]{0,30}\b(?:paths?|directions)\b/i],
-  ["F-07", /\bmy\s+materials\b/i],
-  ["F-08", /\bmy\s+(?:saved\s+|application\s+)?answers\b/i],
-  ["F-12", /\b(?:my|the|that)\s+(?:outreach\s+|email\s+)?(?:draft|message)\b/i],
-  ["F-13", /\bmy\s+(?:upcoming\s+)?interviews?\b/i],
-  ["F-14n", /\bnegotiation\b/i],
-  ["F-15", /\bcompar(?:e|ing|ison)\b[^.?!]{0,30}\boffers\b|\bmy\s+offers\b/i],
-];
-// How the message stands to the File whose name `re` matches: "off" (a control or an opt-out governs it), "new" (it is the
-// object of a verb that writes something new), "own" (an ask to make the person's own always-drawn File), "cant" (they can't reach it)
-// or "" (none of these).
-function standingOf(m: string, re: RegExp, family: MadeFamily, named: boolean): "off" | "new" | "own" | "cant" | "" {
-  const clauses = m.split(CLAUSE_CUT).filter((c) => c && c.trim());
-  const withName = clauses.filter((c) => re.test(c));
-  if (clauses.some((c) => !re.test(c) && FAR_OFF.test(c))) return "off";
-  let out: "new" | "own" | "cant" | "" = WRITE_ANOTHER.test(m.replace(re, " ")) ? "new" : "";
-  for (const c of withName.length ? withName : [m]) {
-    const at = re.exec(c)!;
-    const pre = c.slice(0, at.index).replace(BENIGN, " "), post = c.slice(at.index + at[0].length);
-    if (CTRL.test(pre) || OFF_AFTER.test(post) || FAR_OFF.test(post)) return "off";
-    if (CANT_REACH.test(pre)) { out ||= "cant"; continue; }
-    if (NEG.test(pre)) return "off";
-    if (!(named ? WRITE_OBJECT : WRITE_NEW).test(named ? pre : c.replace(BENIGN, " "))) continue;
-    out = out !== "new" && named && MAKE_OWN.test(pre) && ALWAYS_DRAWN.has(family) && !/^\s*(?:(?:file|page|link)\s+)?(?:for|about|on)\s+(?!me\b)/i.test(post) ? "own" : "new";
-  }
-  return out;
+const POLITE = "(?:hey|hi|hello|ok|okay|please|pls|plz|thanks|thank you|thx|ty)";
+const PRE = `(?:${POLITE}[,.!]? ){0,3}`;
+const POST = `(?:[.?!,]? ${POLITE}){0,3}`;
+const JUST = "(?:(?:please|pls|just) )?";
+// Verbs asked OF Trainee ("send me ...") and verbs the person does ("can i see ..."): "can i send my weekly report" is neither.
+const ASKED = alt("show", "open", "pull up", "bring up", "send", "resend", "give", "get", "share");
+const DOES = alt("see", "view", "open", "get", "look at", "pull up");
+const LINK_TO = `(?:${alt("the", "a", "my")} link (?:to|for) )?`;
+const SEE_VERB = alt(
+  `(?:(?:can|could|would|will) you )?${JUST}${ASKED}(?: (?:me|us))? ${LINK_TO}`,
+  `${JUST}(?:see|view) ${LINK_TO}`,
+  `(?:can|could|may) i ${JUST}(?:${DOES}|have) ${LINK_TO}`,
+  `${alt("i want to", "i wanna", "i'd like to", "id like to", "i would like to", "i need to", "let me")} ${JUST}${DOES} ${LINK_TO}`,
+  "where(?:'s|s| is) ", "what(?:'s|s| is) (?:in|on) ", "link (?:to|for) ",
+);
+const TAIL = `(?: ${alt("again", "now", "right now", "today", "tonight", "this morning", "real quick", "for me", "here", "in (?:the )?chat", "on (?:telegram|whatsapp|imessage)", "by (?:the )?end of (?:the )?day", "by eod", "when you can", "when you get a chance")}){0,3}`;
+const NT = "(?:n't|nt| not)";
+const CANT = `(?:ca${NT}|cannot|can not|could${NT})`;
+const IT = alt("it", "the link", "that link", "the page", "the file");
+// The closed list of statements that the person can't reach the File or its link (never a statement about wanting it or not).
+const FAIL = alt(
+  `(?:i )?${CANT} ${alt("find", "open", "see", "get", "access", "load")} ${IT}`,
+  `${alt("it", "(?:the|that|my) (?:old |last )?(?:link|one|page|file)")} ${alt(`does${NT}`, "won't", "wont", "will not", `is${NT}`, `did${NT}`)} ${alt("work", "load", "open")}(?:ing)?`,
+  `i ${alt("never", `did${NT}`, `have${NT}`)} ${alt("got", "get", "gotten", "received", "receive")} ${IT}`,
+  `you ${alt(`did${NT}`, "never")} sen[dt] ${IT}`,
+  `i lost ${IT}`,
+);
+const SEP = alt("[.?!,] (?:(?:and|but|because|cause|since) )?", " (?:and|but|because|cause|since) ");
+const SHAPES: [MadeFamily, RegExp][] = FAMILY_WORDS.map(([family, own, generic, pageWith]) => {
+  const named = `(?:${DET} )?${own}(?: ${FW})?`;
+  const file = alt(named, ...(generic ? [`(?:${DET} )?${generic} ${FW}`] : []), ...(pageWith ? [`(?:a|${DET}) ${FW} ${pageWith}`] : []));
+  const see = `${SEE_VERB}${file}${TAIL}`;
+  // The File they can't reach, said of the File itself, with nothing after it but an ask for the link.
+  const cant = alt(
+    `(?:i )?${CANT} ${alt("find", "open", "see", "get", "access", "load")} ${named}`,
+    `(?:i )?${alt("never", `did${NT}`, `have${NT}`)} ${alt("got", "get", "gotten", "received", "receive")} ${named}(?: yet)?`,
+    `${named} ${alt(`does${NT}`, "won't", "wont", "will not", `is${NT}`, `did${NT}`)} ${alt("work", "load", "open", "arrive", "come")}(?:ing)?`,
+  ) + `(?:${SEP}${JUST}(?:re)?send (?:me )?${alt("it", "the link", "a link", "a new link", "a new one")}(?: again)?)?`;
+  return [family, new RegExp(`^${PRE}${alt(`(?:${FAIL}${SEP})?${PRE}${alt(see, named)}${POST}(?:${SEP}${FAIL})?`, cant)}${POST}$`)];
+});
+// Defence in depth: none of these words is in any shape above, so each is null already; said outright so a later edit to a shape
+// cannot let one through.
+const HARD_NULL = /\b(?:stop\w*|unsub\w*|cancel\w*|paus\w*|mut(?:e|ed|ing)|off|quit\w*|opt(?:ing)?[- ]?out|no more|skip\w*|disabl\w*|delet\w*|remov\w*|eras\w*|wip(?:e|ed|ing))\b/;
+// Case, apostrophe variants, dashes and whitespace made one; each run of punctuation one mark and one space; none at the end.
+function normalised(message: string): string {
+  return String(message ?? "").toLowerCase().replace(/[‘’ʼ´′`]/g, "'").replace(/[—–;:]|\s-\s/g, ", ")
+    .replace(/\s*([.?!,])[.?!,\s]*/g, "$1 ").replace(/\s+/g, " ").trim().replace(/[.?!,]+$/, "").trim();
 }
-// The family the message asks to see as a File, or null. A File's own name with a verb to see it, a File word, or alone
-// ("my weekly brief"); a generic phrase only with a File word and a verb to see it. Never a control, an opt-out or a new thing to
-// make, each read from the clause that governs the File's name (standingOf). Genuinely mixed messages are null (the older routes).
+// The family the WHOLE message asks to see as a File, or null (see the allowlist above). Null is never "no": it only means this
+// turn is not held to open_record_file.
 export function familyAskOf(message: string): MadeFamily | null {
-  const m = String(message ?? "").replace(/[’`]/g, "'").trim();
-  if (!m || m.length > 600) return null;
-  const named = NAMED.find(([, re]) => re.test(m));
-  const hit = named ?? (FILE_WORD.test(m) && SEE.test(m) ? WITH_FILE_WORD.find(([, re]) => re.test(m)) : undefined);
-  if (!hit) return null;
-  const st = standingOf(m, hit[1], hit[0], !!named);
-  if (st === "off" || st === "new") return null;
-  return !named || st === "own" || st === "cant" || SHOW.test(m) || FILE_WORD.test(m) || m.split(/\s+/).length <= 4 ? hit[0] : null;
+  if (typeof message !== "string" || message.length > 600) return null;
+  const m = normalised(message);
+  if (!m || HARD_NULL.test(m)) return null;
+  return SHAPES.find(([, re]) => re.test(m))?.[0] ?? null;
+}
+// A record-backed File's own name is somewhere in the message (no shape asked of the rest). NOT an ask and never holds a turn to
+// the tool: career_staged.ts uses it only to take a message the router read as a resume delivery ("no resume has been tailored")
+// to the brain, which has open_record_file and the settings tools and decides for itself what the person meant.
+const OWN_NAME = new RegExp(`\\b${alt(...FAMILY_WORDS.map(([, own]) => own))}\\b`);
+export function fileNamedIn(message: string): boolean {
+  return typeof message === "string" && message.length <= 600 && OWN_NAME.test(normalised(message));
 }

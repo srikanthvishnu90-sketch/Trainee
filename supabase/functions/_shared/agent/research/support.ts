@@ -130,12 +130,14 @@ const QUOTE_MARK = /["“”„‟«»‹›]|(?<![\p{L}\p{N}])['‘’]|['‘�
 // phone-like run of digits (in figures or in words), an address (plain, or spelled "dot com", "[at]"), a handle, a link or a link
 // shortener, a wallet-like string; or that speaks to the model. A unit right beside such a unit is not shown either. These are
 // deny-lists, so the judge is also asked whether the unit is a statement of fact and not a solicitation (quoteClaim).
-const IMPERATIVE = "send|text|call|email|e-mail|click|tap|scan|wire|reply|visit|download|install|dm|message|contact|whatsapp|venmo|zelle|ignore|disregard|tell|apply|subscribe|sign up|reach out|forward|buy|purchase|join|follow|come|leave|let|enter|upload|share|book|donate|ask|act|register|claim|grab|hurry|order|submit|provide|bring|open|pay|go";
+// An order to the reader: a verb that is rarely anything else, or a common verb followed by what an order is followed by ("Open the
+// app", "Enter card number", "Act today"; "Open role on ..." and "Apply by January 15" are not orders).
+const IMPERATIVE = "send|text|click|tap|scan|wire|reply|download|install|dm|whatsapp|venmo|zelle|ignore|disregard|subscribe|sign up|reach out|donate|hurry|(?:call|email|e-mail|visit|message|contact|tell|apply|forward|buy|purchase|join|follow|come|leave|let|enter|upload|share|book|ask|act|register|claim|grab|order|submit|provide|bring|open|pay|go)\\s+(?:the|a|an|your|this|that|these|here|to|for|up|now|today|fast|us|me|in|on|with|card|our|it)";
 const TO_READER = new RegExp(String.raw`(?:^|[:.!?]\s+|\s-\s|(?<![\p{L}])(?:please|kindly|must|should|now|to (?:claim|hold|get|unlock|see|confirm|proceed|qualify)[^,.;]{0,60},?)\s+)(?:${IMPERATIVE})(?![\p{L}])`, "iu");
 const ASKED_OF_THEM = new RegExp([
   String.raw`(?<![\p{L}])(?:passwords?|passcodes?|log-?in (?:details|numbers?|codes?)|ssn|social security|national insurance|maiden name|pin|six-digit|passports?|selfies?|(?:with|photo|government|your) id|identity check|card (?:details|numbers?)|bank (?:details|accounts?|transfers?)|routing number|wire[ds]?|wiring|gift (?:cards?|vouchers?)|vouchers?|(?:verification|security|one-time|access|promo|qr) codes?|code below|otp)(?![\p{L}])`,
   String.raw`(?<![\p{L}])(?:purchas\w+|buy(?:s|ing)?|bought|deposits?|donat\w+|tip(?:s|ped)? the|lottery|invest\w* (?:their|your) savings|\p{L}*coin|refundable|(?:processing|onboarding|training|application|registration|interview|referral)\s+fees?|fees? of \$|\$\d[\d,.]*\s+(?:\p{L}+\s+)?(?:fees?|charges?|deposits?)|charges? (?:candidates|applicants|interns|each)|(?:cover|pay)s? (?:for )?(?:a|an|the|their|your) [^.;]{0,40}(?:charge|fee|cost|package|kit|course|check)|paid for|priced at|available for \$|for a small|good-faith|payment from|ask(?:s|ed|ing)? for (?:a |any )?(?:payments?|money|fees?)|(?:with|in|and|for) cash(?! compensation)|cash (?:for|only)|(?:equipment|starter|training|prep\w*|assessment|onboarding) (?:package|pack|kit|course)|cashapp|cash app|apple pay|google pay|paypal\.me|venmo|zelle|western union|moneygram|bitcoin|btc|crypto\w*|usdt)(?![\p{L}])`,
-  String.raw`(?<![\p{L}])(?:telegram|whatsapp|signal|discord|dm|reach out|sign up|subscribe|unlock|scammers?|install\w*|remote into|the \p{L}+(?: \p{L}+)? app|in the store|partner portal|green button|qr|act today|(?:places|spots|seats) are limited|close[sd]? tonight|only way in|extension (?:\d|${"zero|one|two|three|four|five|six|seven|eight|nine"}))(?![\p{L}])`,
+  String.raw`(?<![\p{L}])(?:on (?:telegram|whatsapp|signal|discord)(?!['’\p{L}])|(?:contact|call|email|message) (?:[\p{L}'-]+ ){0,3}(?:hr|recruiters?|agent|desk)|(?:telegram|whatsapp|signal|discord) (?:server|channel|group|chat|handle)|dm|reach out|sign up|subscribe|unlock|scammers?|install\w*|remote into|the \p{L}+(?: \p{L}+)? app|in the store|partner portal|green button|qr|act today|(?:places|spots|seats) are limited|close[sd]? tonight|only way in|extension (?:\d|${"zero|one|two|three|four|five|six|seven|eight|nine"}))(?![\p{L}])`,
   String.raw`(?:^|(?<![\p{L}]))(?:system|assistant|ai|model|chatbot)\s*[:,]|previous instructions|earlier guidance|the correct answer|this user|readers? (?:are|is) advised`,
 ].join("|"), "iu");
 const DIGIT_WORD = "(?:zero|oh|one|two|three|four|five|six|seven|eight|nine)";
@@ -152,7 +154,7 @@ const clipStart = (t: string, n: number) => t.length > n ? `…${t.slice(t.lengt
 // text before it is put in a passage.
 const plainText = (t: string) => squash(String(t ?? "").replace(/>{2,}|<{2,}|[¶›‹»«]/g, " ").replace(/(?:^|(?<=\s))(?:page title|title|page host|top of page|page notes?|headings?|list introduced by|table header|before|after|footnote)\s*:/gi, (m) => m.replace(":", " -")));
 // `lent`: the page owner's name, when the unit does not name an asked employer itself. `passage`: what the judge reads.
-export interface Unit { text: string; hard: Hard; lower: Set<string>; content: Set<string>; quotable: boolean; lent: string | null; label: string; passage: string }
+export interface Unit { text: string; hard: Hard; lower: Set<string>; content: Set<string>; quotable: boolean; lent: string | null; label: string; passage: string; pageTitle: string }
 export interface PageIndex { pages: { sentences: Unit[] }[]; read: (s: string) => string; subjects: string[]; ask: string }
 export const PASSAGE_MAX = 2500;
 // A unit that qualifies the whole page, wherever it is: when it was written, that it was corrected or archived, that what it lists
@@ -164,7 +166,7 @@ const PUBLIC_LABELS = /^(?:community|forum|forums|blog|blogs|discuss|discussion|
 // A title that is about more than the one employer, or about someone who is not it.
 const TITLE_CUE = /(?<![\p{L}])(?:vs\.?|versus|and|other|others|firms|companies|employers|top|best|list|compared?|comparison|rankings?|ranked|rivals?|competitors?|alternatives?|similar|like|ex|former|alumni|forum|thread|community|reddit|glassdoor|indeed|college|university|school|securities)(?![\p{L}])|[&|]|\d+\s+(?:firms|companies|employers)/iu;
 // A unit that points at someone named elsewhere ("there", "they", "its interns", "the firm", "she said") is not the page owner's.
-const POINTS_AWAY = /(?<![\p{L}])(?:there|here|they|them|their|theirs|its|he|she|his|her|the (?:firm|company|university|college|bank|fund|startup|school|group|rival|competitor|employer|agency|other))(?![\p{L}])/iu;
+const POINTS_AWAY = /^(?:they|their|its|he|she|his|her)(?![\p{L}])|(?<![\p{L}])(?:there|here|(?:they|he|she) (?:said|says|pay|pays|paid|earn|earns)|the (?:firm|company|university|college|bank|fund|startup|school|group|rival|competitor|employer|agency|other))(?![\p{L}])/iu;
 // Every unit of every read page. `subjects`: the employers asked about. Round 4: the page is one employer's (`owner`) only when ONE
 // employer is asked about and (a) the page's host is that employer's own registrable domain as the search's record gives it (a host
 // anyone can publish on, a job board, or a community / forum / blog part of the site is not it), or (b) the page's title names that
@@ -239,9 +241,10 @@ export function indexPages(pages: { text: string; title?: string; url?: string }
       .map(({ text, k, heads: hs }) => {
         const r = read(text), names = !subs.length || subs.some((n) => nameRe(n).test(text));
         // A unit whose own subject is another name ("Jane Street interns earn ...", "Stripe's interns ...") is that name's.
-        const h0 = hardParts(text, read), otherSubject = (h0.names[0]?.length ?? 0) >= 2 && h0.first === h0.names[0][0] || /(?<![\p{L}\p{N}])\p{Lu}[\p{L}\p{N}&-]*'s\s/u.test(text);
-        const lend = !names && !!owner && !POINTS_AWAY.test(text) && !foreignHead(hs) && !otherSubject;
-        return { text, hard: hardParts(text, read), lower: lowerWords(r), content: contentWords(r), quotable: quotable(text) && !unsafe[k - 1] && !unsafe[k + 1] && (names || lend), lent: lend ? owner : null, label: lend ? `${host ? `From ${host}, a` : "A"} page about ${owner}` : "", passage: passage(k) };
+        const h0 = hardParts(text, read), otherSubject = (h0.names[0]?.length ?? 0) >= 2 && h0.first === h0.names[0][0] && !/^(?:we|our|the|this|these|a|an)$/.test(h0.first ?? "") || /(?<![\p{L}\p{N}])\p{Lu}[\p{L}\p{N}&-]*'s\s/u.test(text);
+        // (A unit in the first person, "We ..." / "Our ...", is the page's owner speaking: "the company" there is itself.)
+        const lend = !names && !!owner && (/^(?:we|our)(?![\p{L}])/iu.test(text) || !POINTS_AWAY.test(text)) && !foreignHead(hs) && !otherSubject;
+        return { text, hard: hardParts(text, read), lower: lowerWords(r), content: contentWords(r), quotable: quotable(text) && !unsafe[k - 1] && !unsafe[k + 1] && (names || lend), lent: lend ? owner : null, label: lend ? `${host ? `From ${host}, a` : "A"} page about ${owner}` : "", passage: passage(k), pageTitle: title };
       }) };
   }) };
 }
@@ -253,8 +256,21 @@ export function findSupport(claim: string, idx: PageIndex, only?: number[]): Fou
   const h = hardParts(claim, idx.read), want = contentWords(idx.read(bare(readAlike(claim))));
   let best: (Found & { n: number }) | null = null;
   const ks = only && only.length ? only.filter((k) => k >= 0 && k < idx.pages.length) : idx.pages.map((_, k) => k);
+  // Round 4: on a page that is the asked employer's, the page's own title is what the page is about ("Software Engineer 2, Backend:
+  // posting on ..."): a run of the claim that is word for word in the title (two words or more) is the page's, like the employer's
+  // name, and is not asked of the unit (a pay unit is often cut from its label). The judge reads the title beside the unit.
+  const titled = new Map<string, Hard>();
+  const withoutTitle = (title: string): Hard => {
+    if (titled.has(title)) return titled.get(title)!;
+    const c = bare(readAlike(claim)).split(" "), t = ` ${readAlike(title).replace(/[:|]/g, " ").replace(/\s+/g, " ")} `;
+    let cut = "", at = -1, len = 0;
+    for (let a = 0; a < c.length; a++) for (let b = c.length; b - a >= 2 && b - a > len; b--) { const span = c.slice(a, b).join(" ").replace(/[.,;:]+$/, ""); if (t.includes(` ${span} `) || t.includes(` ${span},`) || t.includes(` ${span}'`)) { cut = span; at = a; len = b - a; break; } }
+    const out = at < 0 ? h : hardParts([...c.slice(0, at), ...c.slice(at + len)].join(" "), idx.read);
+    void cut; titled.set(title, out); return out;
+  };
   for (const k of ks) for (const s of idx.pages[k].sentences) {
-    if (!h.numbers.every((a) => s.hard.numbers.includes(a)) || !h.quant.every((q) => s.hard.quant.includes(q)) || !namesOk(h, s)) continue;
+    const hc = s.lent && s.pageTitle ? withoutTitle(s.pageTitle) : h;
+    if (!hc.numbers.every((a) => s.hard.numbers.includes(a)) || !hc.quant.every((q) => s.hard.quant.includes(q)) || !namesOk(hc, s)) continue;
     const n = [...want].filter((w) => s.content.has(w)).length;
     // A unit that is all figures ("$133,000 - $184,000 USD.") shares no word with the claim: its figures, each in its role, are the tie.
     if ((n > 0 || h.numbers.length > 0) && (!best || n > best.n)) best = { sentence: s.text, page: k, unit: s, n };
@@ -267,6 +283,8 @@ export function sentenceHolding(quote: string, idx: PageIndex, only?: number[]):
   if (q.length < 8) return null;
   const ks = only && only.length ? only.filter((k) => k >= 0 && k < idx.pages.length) : idx.pages.map((_, k) => k);
   for (const k of ks) for (const s of idx.pages[k].sentences) if (s.quotable && s.text.toLowerCase().includes(q)) return { sentence: s.text, page: k, unit: s };
+  // A quote that runs over a cut (a ";" or a bullet inside it): the unit it begins with stands for it.
+  for (const k of ks) for (const s of idx.pages[k].sentences) if (s.quotable && s.text.length >= 30 && q.startsWith(s.text.toLowerCase().replace(/[.!?]+$/, ""))) return { sentence: s.text, page: k, unit: s };
   return null;
 }
 

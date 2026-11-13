@@ -131,7 +131,7 @@ Deno.test("allYes judge: what layer A (code) stops alone, by case", async () => 
   // thing, a name or a year the cited sentence does not have, a question on the page.
   for (const id of ["N24", "F04", "F05", "F06", "U01", "U02", "U03", "U04", "U05", "U06", "U07", "U09", "W01", "W02", "W05", "W06", "W09", "W10", "W11", "C03", "C05", "T04", "R01", "R03", "R10", "R12", "R16", "X01", "X04"]) ok(!through.includes(id), `layer A alone stops ${id}`);
 });
-const LAYER_A_THROUGH = 49; // round 4: 45 stopped by code alone (56 in round 3, when a sentence one word off a unit was read as that unit; it is now a claim of its own, for the judge). Before: 49 through (round 2), 59 (round 1).
+const LAYER_A_THROUGH = 50; // round 4: 44 stopped by code alone (56 in round 3, when a sentence one word off a unit was read as that unit; it is now a claim of its own, for the judge). Before: 49 through (round 2), 59 (round 1).
 const LAYER_A_THROUGH_R2 = 49; // round 2: 45 of the 94 are stopped by code alone (35 in round 1); the other 49 need the judge (polarity, hedges, who did what to whom)
 
 Deno.test("oracle judge: the 28 true cases; none with a supporting page sentence is dropped", async () => {
@@ -176,6 +176,9 @@ Deno.test("the judge call: a timeout is no; an answer that is not the JSON array
   eq(await judgeAll(() => new Promise(() => {}), claims, 20), [false, false]);
   eq(await judgeAll(async () => ["yes", "no"], claims), [true, false]);
   eq(await judgeAll(undefined, claims), [false, false]);
+  // Only the exact lower-case word is a yes (round 4: said on purpose, and pinned).
+  eq(await judgeAll((async () => ["Yes", "YES"]) as any, claims), [false, false]);
+  eq(await judgeAll((async () => ["yes ", " yes"]) as any, claims), [false, false]);
   eq(await judgeAll(allYes, []), []);
   eq(parseVerdicts('["yes","no"]'), ["yes", "no"]);
   eq(parseVerdicts('["Yes","YES"," yes","yes."]'), ["no", "no", "no", "no"]);

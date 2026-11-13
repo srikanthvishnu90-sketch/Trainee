@@ -403,7 +403,9 @@ export async function keepSupported(reply: string, sources: (string | { text: st
   const lines = String(reply ?? "").split("\n").map((l) => /^\s*(?:https?:\/\/\S+\s*)*$/.test(l) ? [l] : l.split(/(?<=[.!?]["')*_]*)\s+/).filter((x) => x.trim()));
   const wants: Wanted[] = [], at: [number, number][] = [];
   lines.forEach((l, a) => l.forEach((x, b) => {
-    if (!/\p{L}/u.test(x.replace(/https?:\/\/\S+/g, "")) || o.pure?.(x)) return;
+    // A piece with no word in it ("1.", "-") is what is left of a list around removed sentences: it goes; a link alone is code's.
+    if (!/\p{L}/u.test(x.replace(/https?:\/\/\S+/g, ""))) { if (!/https?:\/\//.test(x)) lines[a][b] = ""; return; }
+    if (o.pure?.(x)) return;
     // Round 4: one of code's own lines stands only when the sentence IS that line, and then the stored line itself is what is said.
     const mine = own.get(norm(x));
     if (mine !== undefined) { lines[a][b] = mine; return; }

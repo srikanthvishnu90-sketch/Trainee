@@ -343,9 +343,11 @@ export async function agentTurn(o: {
     const recLine = (p: any) => `${[p?.company, p?.title].map((x) => String(x ?? "").trim()).filter(Boolean).join(", ")}: ${String(p.pay).trim()}`;
     const letters = (t: string) => /\p{L}/u.test(t.replace(/https?:\/\/\S+/g, "")), links = (t: string) => t.match(/https?:\/\/\S+/g) ?? [];
     if (trace.r) {
-      const own = [trace.r.verdict.now, trace.r.verdict.later, trace.r.short?.now ?? "", trace.r.short?.later ?? "", trace.r.short?.act ?? "", trace.r.first_action].filter(Boolean).flatMap((x) => x.split(/(?<=[.!?])\s+/));
+      // Code's own lines: the verdict, the first action, and the fallback paragraph code writes (its last sentence carries the File link).
+      const own = [trace.r.verdict.now, trace.r.verdict.later, trace.r.short?.now ?? "", trace.r.short?.later ?? "", trace.r.short?.act ?? "", trace.r.first_action, fallbackVerdict(trace.r)].filter(Boolean).flatMap((x) => x.split(/(?<=[.!?])\s+(?!https?:)/));
       const k = await keepSupported(result.reply, [...trace.r.facts.map((f) => ({ text: f.quote, title: f.label })), ...trace.r.person.map((text) => ({ text, title: "What the person confirmed" }))], { judge, pure, own, ask: o.message });
-      result = { ...result, reply: letters(k.text) ? k.text : [fallbackVerdict(trace.r), ...links(k.text)].join("\n") };
+      // With nothing of the model's left, code's own fallback paragraph (it already ends with the File link, when there is one).
+      result = { ...result, reply: letters(k.text) ? k.text : fallbackVerdict(trace.r) };
     } else if (trace.a) {
       const k = await keepSupported(result.reply, trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), { judge, pure, ask: o.message });
       result = { ...result, reply: letters(k.text) ? k.text : [trace.a.not_verified || NOT_CONFIRMED, ...links(k.text)].join("\n") };

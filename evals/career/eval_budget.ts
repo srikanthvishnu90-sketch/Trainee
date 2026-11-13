@@ -1,18 +1,18 @@
-// Eval spend control for a Claude-only campaign (owner, 2026-11-02: ONE total of $70 for the cycle; target and hard max are both $70).
+// Eval spend control for a Claude-only campaign (owner, 2026-11-02: ONE total of $80 for the cycle; target and hard max are both $80).
 //
 // Three layers, outermost first (the first two live in supabase/functions/_shared/model_budget.ts, owned by the
 // feat/claude-only-gateway PR; this file only reads and obeys them):
 //   1. every model call reserves against a BudgetGate before it is sent (callModel). With SUPABASE_URL and
 //      SUPABASE_SERVICE_ROLE_KEY set that is the shared database ledger (restBudgetGate); without them, a process-local twin.
-//   2. env MODEL_BUDGET_TARGET_USD (70) and MODEL_BUDGET_HARD_USD (70) name the ledger's target and hard stop.
+//   2. env MODEL_BUDGET_TARGET_USD (80) and MODEL_BUDGET_HARD_USD (80) name the ledger's target and hard stop.
 //   3. THIS FILE: a per-run preflight quote (token estimate x price) that refuses to start a run that would cross 80% of what
 //      remains under the target, and a spend line written to the run summary. Parallel passes (five processes, each seeing only
 //      the spend recorded before it started) are quoted together via EVAL_PARALLEL / --parallel.
 // Dependency (not in this PR): if the gateway PR exports a ledger status reader, pass it as `status` to preflight().
 import type { PriceRow } from "../../supabase/functions/_shared/model_budget.ts";
 
-export const DEFAULT_TARGET_USD = 70;
-export const DEFAULT_HARD_USD = 70;
+export const DEFAULT_TARGET_USD = 80;
+export const DEFAULT_HARD_USD = 80;
 export const PREFLIGHT_SHARE = 1;
 
 export function budgetTargets(get: (k: string) => string | undefined): { target: number; hard: number } {
@@ -23,7 +23,7 @@ export function budgetTargets(get: (k: string) => string | undefined): { target:
 }
 
 // Spend already recorded on disk that counts against the Anthropic campaign: result files of a run that used a Claude model
-// (brain or judge): brain + judge cost. OpenAI-era files are history, not part of the $70 (owner to confirm).
+// (brain or judge): brain + judge cost. OpenAI-era files are history, not part of the $80 (owner to confirm).
 export function claudeSpentUsd(results: { label?: string; model?: string | null; judge_model?: string | null; judge_model_2?: string | null; cost?: unknown; cost_usd?: { brain?: number; judge?: number } | number }[], exceptLabel = ""): number {
   const seen = new Set<string>();
   let sum = 0;
@@ -69,7 +69,7 @@ export function quoteRun(o: { items: number; brain: "router" | "staged" | "agent
 }
 
 export interface Preflight { ok: boolean; reason: string | null; line: string; quote_usd: number; parallel: number; remaining_usd: number }
-// Refuse when the quote (times the passes that run at once) exceeds what remains of the $70 total (remaining = total minus recorded spend); the line prints the remaining allowance.
+// Refuse when the quote (times the passes that run at once) exceeds what remains of the $80 total (remaining = total minus recorded spend); the line prints the remaining allowance.
 export function preflight(o: { quote: Quote; parallel?: number; spent_usd: number; target_usd: number; hard_usd: number; ledger: "shared" | "process-local" }): Preflight {
   const parallel = Math.max(1, o.parallel ?? 1), q = o.quote.total_usd * parallel, remaining = Math.max(0, o.target_usd - o.spent_usd);
   let reason: string | null = null;
@@ -101,7 +101,7 @@ export function openGate(bud: { resolveBudgetGate: (explicit: undefined, get: (k
   return { gate, shared };
 }
 
-// Total recorded spend (settled + reserved) in the shared ledger, in USD: what ALL runs have used of the one $70. null = unreadable
+// Total recorded spend (settled + reserved) in the shared ledger, in USD: what ALL runs have used of the one $80. null = unreadable
 // (the caller refuses to start).
 export async function ledgerSpentUsd(gate: { status?: () => Promise<{ total: number } | null> } | null): Promise<number | null> {
   if (!gate?.status) return null;

@@ -184,3 +184,52 @@ Deno.test("CR-4 through runAgentTurn, the ask is put back once and then cut befo
   const t = await runAgentTurn({ system: "s", history: [], message: "check my workday application", tools: [], model: async () => ({ content: [{ type: "text", text: honest }], stop_reason: "end_turn" }), ctx: { userId: "u", threadId: "t", now: 0, state: {} } } as any);
   eq(t.reply.trim(), honest);
 });
+
+// Review round 2 (#825): the second element of a "user / secret" pair after a login cue is the secret, not the user name;
+// cue words in Spanish, French, German, Portuguese and Italian; "log in with X and Y"; a whole passphrase. A PIN needs a
+// value, not a word ("team PIN is great"); a colon after "sign in" is not a code; two product names are not a pair.
+export const MUST_REDACT_2: [string, string][] = [
+  ["sign in: alexr / lavender", "lavender"],
+  ["login: jsmith / bluebird", "bluebird"],
+  ["mot de passe : papillon", "papillon"],
+  ["mon mot de passe est papillon", "papillon"],
+  ["contraseña: mariposa", "mariposa"],
+  ["mi contraseña es mariposa", "mariposa"],
+  ["mein Passwort ist Schmetterling", "Schmetterling"],
+  ["Kennwort: Schmetterling", "Schmetterling"],
+  ["senha: borboleta", "borboleta"],
+  ["a minha senha é borboleta", "borboleta"],
+  ["la mia password è farfalla", "farfalla"],
+  ["código: 739201", "739201"],
+  ["el código es 739201", "739201"],
+  ["le code est 739201", "739201"],
+  ["log in with alex and hunter2", "hunter2"],
+  ["sign in with alex@x.test and lavender", "lavender"],
+  ["passphrase: correct horse battery staple", "correct horse battery staple"],
+  ["my passphrase is correct horse battery staple, thanks", "horse battery staple"],
+];
+export const MUST_KEEP_2: string[] = [
+  "I need to sign in: what's the URL?",
+  "I work at Pin Interest, team PIN is great",
+  "Login: Workday / Taleo both",
+  "creds: CPA / CFA",
+  "sign in: Greenhouse / Lever",
+  "log in with Google and then open the portal",
+  "the PIN is fine",
+  "Mot de passe oublié, que faire ?",
+];
+export const ASKS_2: string[] = [
+  "Forward me the email with the code in it.",
+  "Mind sending your username and password?",
+  "Tell me what the text message code says.",
+  "Once the code arrives, just text it to me.",
+  "When the code comes in, send it my way.",
+];
+
+Deno.test("CR-5 review round 2: pairs, other languages, passphrases; no false PIN, code or product pair; more asks", () => {
+  const missed = MUST_REDACT_2.filter(([m, s]) => { const i = chatInput(m, [], 4000) as any; return i.userContent.includes(s) || !i.redacted.length; });
+  eq(missed, [], "secrets kept");
+  eq(MUST_KEEP_2.filter((m) => (chatInput(m, [], 4000) as any).userContent !== m), [], "ordinary text changed");
+  eq(ASKS_2.filter((r) => credentialAsks(r).length !== 1), [], "asks missed");
+  eq(HONEST.filter((r) => credentialAsks(r).length !== 0), [], "honest replies caught");
+});

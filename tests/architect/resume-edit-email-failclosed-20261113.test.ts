@@ -1,0 +1,269 @@
+// Review of #776 and #785 (2026-11-13), three findings, each reproduced here before its fix. $0, no database, no model.
+//   1 MAJOR    an edit to a resume version dropped an entry's own headline detail and the changelog said the opposite.
+//   2 MINOR    an entry's text was split at "Dr." and other abbreviations.
+//   3 BLOCKER  only the bracketed "[your email]" was refused: you@example.com / name@domain.com passed the ATS check, was
+//              stored with a link, and could reach an application. Every entry point is held here: the render, the tailor,
+//              the chat tool, the email card and its yes, the form card (prepare-ahead), the cloud card, the cloud submit
+//              and the local submit.
+//   deno test -A --no-check tests/architect/resume-edit-email-failclosed-20261113.test.ts
+import assertNode from "node:assert/strict";
+import * as zlib from "node:zlib";
+import * as crypto from "node:crypto";
+import { Buffer } from "node:buffer";
+import { CareerRender, CareerRouter, CareerTailor } from "../../supabase/functions/_shared/router_core.career.js";
+import * as T from "../../supabase/functions/_shared/career_tailor.ts";
+import { careerTools } from "../../supabase/functions/_shared/agent/career_tools.ts";
+import { supabaseResumes } from "../../supabase/functions/_shared/career_apply_email.ts";
+import { tailoredResume } from "../../workers/career-browser/prepare-ahead.ts";
+import { runApproved } from "../../workers/career-browser/approve-first.ts";
+import { runCloudJob } from "../../workers/career-cloud/worker.ts";
+import { prepareCloudCard } from "../../workers/career-cloud/prepare.ts";
+import { authorizer, cardBound } from "../helpers/cloud_card_auth.ts";
+
+const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
+const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
+const R = (CareerRender as any).withRuntime({ zlib, crypto, Buffer });
+const TT = T as any;
+const pdfText = (pdf: Uint8Array) => (R.extractPdfLines(Buffer.from(pdf)) as string[]).join("\n");
+const hex = async (b: Uint8Array) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", b as BufferSource))].map((x) => x.toString(16).padStart(2, "0")).join("");
+const NOW = Date.UTC(2026, 10, 13, 12), USER = "00000000-0000-4000-8000-000000001113";
+const POSTING = { text: "Software Engineer Intern at PayPal (TEST)\n\nSummer 2027 software engineering internship. Python, Java, SQL.", job_id: "greenhouse:paypalwa1:9101", company: "PayPal" };
+const RESUME = (email: string, extra = "") => `Here's my resume:
+Dana Okafor
+${email}${extra}
+Experience
+Northwind Logistics, Operations Analyst (Jan 2022 - Mar 2024): cut freight cost 18% across 40 lanes.
+- Built a Python forecasting model used by 12 planners
+- Reduced late shipments from 9% to 4%
+- Managed a $2.4M carrier budget
+Acme Robotics, Software Engineer Intern (Jun 2021 - Aug 2021): shipped a SQL dashboard for 300 users; wrote 45 unit tests.
+Blue Heron Cafe, Shift Lead (2019 - 2021): trained 6 new hires. Handled $3k in daily cash with Dr. Smith's audit.
+Education
+Lakeshore University, BS Computer Science, May 2022`;
+function person(email = "dana.okafor@gmail.com", extra = "") {
+  const ctx: any = { now: NOW, thread: {} };
+  CareerRouter.handleChat(RESUME(email, extra), ctx); CareerRouter.handleChat("Yes, that's my resume", ctx);
+  ok(ctx.profile.resume_header?.confirmed_at, "the resume and its header are confirmed");
+  return ctx.profile;
+}
+const typed = (email: string) => { const p = person(); p.basics = { ...(p.basics || {}), name: "Dana Okafor", email }; return p; };
+const tailor = (profile: any, o: any = {}, store = T.memoryResumeStore()) => T.tailorForPosting({ userId: USER, profile, posting: POSTING, deps: { render: T.edgeRenderer(), resumes: store }, now: NOW, ...o }) as Promise<any>;
+// A file with a placeholder contact, made by the renderer alone (no gate): what a defect upstream could hand a submit gate.
+async function files() {
+  const good: any = await tailor(person());
+  ok(good.ok, JSON.stringify(good).slice(0, 300));
+  const doc = structuredClone(good.detail.doc); doc.header = { ...doc.header, email: "you@example.com", contactLine: null };
+  const bad = new Uint8Array(R.renderPdf(doc).buffer);
+  ok(pdfText(bad).includes("you@example.com"));
+  return { good: good.detail.pdf as Uint8Array, bad, doc: good.detail.doc };
+}
+
+// ------------------------------------------------------------------------------------------------ 1 and 2: edits
+// Each row: a confirmed entry, the word that names it, and the details its own words hold (finding 2's truth table).
+const ENTRIES: { role: string; kind?: string; title: string; text?: string; bullets?: string[]; details: string[] }[] = [
+  { role: "Northwind", title: "Northwind Logistics, Operations Analyst (Jan 2022 - Mar 2024): cut freight cost 18% across 40 lanes.", bullets: ["Built a Python forecasting model used by 12 planners", "Reduced late shipments from 9% to 4%", "Managed a $2.4M carrier budget"],
+    details: ["cut freight cost 18% across 40 lanes", "Built a Python forecasting model used by 12 planners", "Reduced late shipments from 9% to 4%", "Managed a $2.4M carrier budget"] },
+  { role: "Acme", title: "Acme Robotics, Software Engineer Intern (Jun 2021 - Aug 2021): shipped a SQL dashboard for 300 users; wrote 45 unit tests.", details: ["shipped a SQL dashboard for 300 users", "wrote 45 unit tests"] },
+  { role: "Blue Heron", title: "Blue Heron Cafe, Shift Lead (2019 - 2021): trained 6 new hires. Handled $3k in daily cash with Dr. Smith's audit.", details: ["trained 6 new hires", "Handled $3k in daily cash with Dr. Smith's audit"] },
+  { role: "Orbit", title: "Orbit Labs Inc., Analyst (2020 - 2021): reported to J. Rivera at Orbit Labs Inc. Grew revenue 2.5x to $1.2M in the U.S. market.", details: ["reported to J. Rivera at Orbit Labs Inc. Grew revenue 2.5x to $1.2M in the U.S. market"] },
+  { role: "Mary", title: "St. Mary's Hospital, Volunteer (2018): logged 120.5 hours; trained with Mr. Lee, e.g. on intake. Covered No. 4 ward.", details: ["logged 120.5 hours", "trained with Mr. Lee, e.g. on intake", "Covered No. 4 ward"] },
+  { role: "Delta", title: "Delta Co., Engineer (2019 - 2020): built parsers (JSON; XML; CSV) for 3 teams; cut p95 latency from 1.2s to 0.4s.", details: ["built parsers (JSON; XML; CSV) for 3 teams", "cut p95 latency from 1.2s to 0.4s"] },
+  { role: "Kite", title: "Kite Ltd., Intern (Summer 2017)", text: "Wrote 30 tests for Dr. A. Gupta's lab. Shipped v2.0 to 5 schools.", details: ["Wrote 30 tests for Dr. A. Gupta's lab", "Shipped v2.0 to 5 schools"] },
+  { role: "Pine", title: "Pine & Co, Buyer (2016): negotiated 12 vendor contracts.", text: "Saved $40k in 2016 with the U.S. team. Led 3 audits.", details: ["negotiated 12 vendor contracts", "Saved $40k in 2016 with the U.S. team", "Led 3 audits"] },
+  { role: "Trailmap", kind: "project", title: "Trailmap, Creator (2023): 1,200 monthly users; 4.8 rating on 350 reviews; featured by Outdoor Weekly.", details: ["1,200 monthly users", "4.8 rating on 350 reviews", "featured by Outdoor Weekly"] },
+  { role: "Lakeshore", kind: "education", title: "Lakeshore University, BS Computer Science, May 2022", details: [] },
+];
+const FACTS = ENTRIES.map((e, i) => ({ id: `F-${i + 1}`, kind: e.kind ?? "experience", status: "confirmed", title: e.title, text: e.text ?? e.title, bullets: e.bullets ?? [] }));
+// This file's own reading of what an entry holds (not the code's): every number and every capitalised word.
+const holds = (s: string) => [...new Set(s.match(/\d+(?:[.,]\d+)*|[A-Z][A-Za-z]+/g) ?? [])];
+const sourceOf = (f: any) => [f.title, f.text !== f.title ? f.text : "", ...f.bullets].join(" ");
+const blockOf = (resume: any, id: string) => resume.sections.flatMap((s: any) => s.lines).filter((l: any) => (l.factIds || []).includes(id)).map((l: any) => l.text as string);
+
+Deno.test("finding 2: a confirmed line is cut at ';' and sentence ends only; never at Dr., Inc., U.S., e.g., an initial, a decimal or inside brackets", () => {
+  for (const [i, e] of ENTRIES.entries()) eq(T.entryParts(FACTS[i]).details, e.details, e.role);
+  const more: [string, string[]][] = [
+    ["met Ms. Okoro weekly. Filed 3 reports", ["met Ms. Okoro weekly", "Filed 3 reports"]], ["worked vs. Team B on pricing", ["worked vs. Team B on pricing"]],
+    ["ran the i.e. Friday close. Closed 14 books", ["ran the i.e. Friday close", "Closed 14 books"]], ["moved to St. Louis for Acme Corp. Opened 2 sites", ["moved to St. Louis for Acme Corp. Opened 2 sites"]],
+    ["raised $1.5M. Hired 4", ["raised $1.5M. Hired 4"]], ["grew 3.5%. Then 7%", ["grew 3.5%", "Then 7%"]], ["used SQL. Then Python", ["used SQL. Then Python"]],
+    ["shipped v1 (beta. Then GA); sold 9", ["shipped v1 (beta. Then GA)", "sold 9"]], ["QA; UX", ["QA", "UX"]], ["one thing", ["one thing"]],
+  ];
+  for (const [text, want] of more) eq(TT.splitDetails(text), want, text);
+});
+
+Deno.test("finding 1: 40 edits (10 entries x 1, 2, 3, 6 lines): no number, date, employer, title or headline detail of the entry is lost, and the changelog's claim is computed", () => {
+  const profile = { facts: FACTS }, base = T.keepEveryEntry({ sections: [] }, profile).resume;
+  let cases = 0;
+  for (const [i, e] of ENTRIES.entries()) for (const lines of [1, 2, 3, 6]) {
+    cases++;
+    const f = FACTS[i], label = `${e.role} to ${lines}`;
+    const r: any = T.applyEdits(base, profile, [{ role: e.role, lines }]);
+    ok(r.ok, `${label}: ${r.reason}`);
+    const printed = blockOf(r.resume, f.id), text = printed.join("\n");
+    eq(holds(sourceOf(f)).filter((t) => !text.includes(t)), [], `${label}: lost from the confirmed entry; printed ${JSON.stringify(printed)}`);
+    const d = r.done[0];
+    eq([d.now, d.available, d.complete, d.restored], [Math.min(lines, e.details.length), e.details.length, true, []], label);
+    eq(printed.length - 1, d.now, `${label}: the count said is the count printed`);
+    eq(/all the confirmed record holds/.test(T.editLine(r.done)), lines > e.details.length, `${label}: ${T.editLine(r.done)}`);
+    // Every other entry is untouched, word for word.
+    for (const g of FACTS) if (g.id !== f.id) eq(blockOf(r.resume, g.id), blockOf(base, g.id), `${label}: ${g.id} unchanged`);
+  }
+  eq(cases, 40);
+});
+
+Deno.test("finding 1: the reviewer's cases through tailorForPosting: the headline detail prints, in the file itself", async () => {
+  const p = person();
+  const all = ["Northwind Logistics", "Jan 2022 - Mar 2024", "18%", "40 lanes", "12 planners", "9% to 4%", "$2.4M", "Acme Robotics", "Jun 2021 - Aug 2021", "300 users", "45 unit tests", "Blue Heron Cafe", "2019 - 2021", "6 new hires", "$3k", "Dr. Smith's audit", "May 2022"];
+  for (const edits of [[{ role: "Northwind", lines: 6 }], [{ role: "Northwind", lines: 1 }], [{ role: "Acme", lines: 1 }], [{ role: "Blue Heron", lines: 4 }], [{ role: "Acme", lines: 1 }, { role: "Northwind", lines: 2 }]]) {
+    const r = await tailor(p, { edits }), label = JSON.stringify(edits);
+    ok(r.ok, `${label}: ${r.reason}`);
+    const flat = pdfText(r.detail.pdf).replace(/\s+/g, " ");
+    eq(all.filter((t) => !flat.includes(t)), [], `${label}: missing from the file`);
+    ok(r.edits.every((e: any) => e.complete === true && !e.restored.length), label);
+  }
+  const six = await tailor(p, { edits: [{ role: "Northwind", lines: 6 }] });
+  eq([six.edits[0].now, six.edits[0].available, six.edits[0].expand_short], [4, 4, true]);
+  ok(/all the confirmed record holds for it/.test(six.changelog), six.changelog);
+});
+
+Deno.test("finding 1: an edit that would still lose something is printed whole or refused with what it would drop; the claim is never asserted", () => {
+  const f = { id: "F-1", kind: "experience", status: "confirmed", title: "Acme Robotics, Engineer: shipped 3 services; wrote 45 tests.", text: "Acme Robotics, Engineer: shipped 3 services; wrote 45 tests.", bullets: [] };
+  const version = (line: string) => ({ sections: [{ heading: "Experience", lines: [{ text: line, factIds: ["F-1"], type: "entry" }] }] });
+  // The delivered version printed the entry's dates after its line: shortening it keeps them by printing the entry whole.
+  const whole: any = T.applyEdits(version(`${f.title} (2020 - 2022)`), { facts: [f] }, [{ role: "Acme", lines: 1 }]);
+  ok(whole.ok, whole.reason);
+  eq(holds(`${f.title} 2020 2022`).filter((t) => !blockOf(whole.resume, "F-1").join(" ").includes(t)), []);
+  eq([whole.done[0].restored, whole.done[0].change], [["2020", "2022"], "unchanged"]);
+  ok(/printed whole.*2020, 2022/.test(T.editLine(whole.done)) && !/condensed/.test(T.editLine(whole.done)), T.editLine(whole.done));
+  // The delivered line holds what the record's own line cannot carry: refused, saying what, nothing made up.
+  const no: any = T.applyEdits(version("Engineer at Acme Robotics, Berlin, 2020"), { facts: [f] }, [{ role: "Acme", lines: 1 }]);
+  ok(!no.ok && /would drop/.test(no.reason) && /Berlin/.test(no.reason) && /2020/.test(no.reason), JSON.stringify(no));
+  // The sentence about the whole record is said only when the comparison found it so.
+  const done = { role: "x", entry: "Acme Robotics, Engineer", asked: 6, before: 2, now: 2, available: 2, change: "unchanged", added_back: false, led: true, expand_short: true, complete: false, restored: [] };
+  ok(!/all the confirmed record holds/.test(T.editLine([done as any])), T.editLine([done as any]));
+});
+
+// ------------------------------------------------------------------------------------------------ 3: the contact
+const BAD_EMAILS = ["", "[your email]", "<email>", "you@example.com", "name@domain.com", "your.name@gmail.com", "firstname.lastname@gmail.com", "john.doe@gmail.com", "jane.doe@outlook.com", "user@company.org",
+  "email@email.com", "me@gmail.com", "your.email@email.com", "dana@example.org", "dana@example.net", "dana@mail.example.com", "dana@host.invalid", "dana@localhost", "dana@yourdomain.com", "YOU@EXAMPLE.COM",
+  "dana@test.com", "username@gmail.com", "you+jobs@gmail.com", "dana okafor@gmail.com", "dana@", "@gmail.com", "dana.gmail.com", "xxx@gmail.com", "test@gmail.com", "yourname@university.edu"];
+const GOOD_EMAILS = ["a.khan@gmail.com", "first.last@university.edu", "dana.okafor@gmail.com", "d.okafor+jobs@outlook.com", "priya_s@cs.stanford.edu", "j.o'neil@tcd.ie".replace("'", ""), "mei.lin@alumni.berkeley.edu", "tom@smith.dev", "youssef.name@proton.me", "emailie.user@yahoo.co.uk"];
+const BAD_PHONES = ["555-0100", "555-0199", "(212) 555-0142", "123-456-7890", "(123) 456-7890", "+1 123 456 7890", "(xxx) xxx-xxxx", "XXX-XXX-XXXX", "(555) 555-5555", "000-000-0000", "555-123-4567", "111-111-1111", "(###) ###-####"];
+const GOOD_PHONES = ["(415) 867-5309", "+1 212-736-5000", "646.555.0234", "+44 20 7946 0958", "312-555-1212", "Chicago, IL 60614", "2019 - 2021"];
+
+Deno.test("finding 3: 60 emails and phones: a placeholder is never a confirmed contact; a real-looking one is", () => {
+  eq(BAD_EMAILS.length + GOOD_EMAILS.length + BAD_PHONES.length + GOOD_PHONES.length, 60);
+  for (const e of BAD_EMAILS) ok(typeof R.placeholderEmail(e) === "string" && R.placeholderEmail(e), `refused: ${JSON.stringify(e)}`);
+  for (const e of GOOD_EMAILS) eq(R.placeholderEmail(e), null, e);
+  for (const p of BAD_PHONES) ok(R.placeholderPhones(`Chicago, IL | ${p} | linkedin.com/in/dana`).length === 1, `refused: ${p}`);
+  for (const p of GOOD_PHONES) eq(R.placeholderPhones(`Chicago, IL | ${p}`), [], p);
+});
+
+Deno.test("finding 3, the render: a placeholder email or phone at the top is not a pass and cannot be marked ready, on the plain and the designed layouts", async () => {
+  const { doc } = await files(), render = T.edgeRenderer();
+  const withHeader = (h: any) => ({ ...structuredClone(doc), header: { ...doc.header, ...h } });
+  for (const [h, field] of [[{ email: "you@example.com" }, "email"], [{ email: "name@domain.com" }, "email"], [{ email: "" }, "email"], [{ contactLine: "dana.okafor@gmail.com | (555) 555-5555" }, "phone"], [{ contactLine: "you@example.com | 312-867-5309" }, "email"]] as const) {
+    for (const opts of [undefined, { layout: "trainee" }] as any[]) {
+      const r: any = await render(withHeader(h), opts);
+      ok(r.ok && r.ats.pass === false && r.ats.status === "FAIL" && r.ats.reasons.some((x: string) => x.startsWith("contact_unconfirmed:") && x.includes(`the ${field} is not confirmed`)), `${JSON.stringify(h)} ${JSON.stringify(opts)}: ${JSON.stringify(r.ats ?? r)}`);
+    }
+  }
+  const fine: any = await render(withHeader({ contactLine: "dana.okafor@gmail.com | (312) 867-5309" }));
+  ok(fine.ats.pass, JSON.stringify(fine.ats));
+});
+
+Deno.test("finding 3, the tailor (the call the apply paths make): typed or on the resume header, a placeholder email or phone is refused and nothing is stored", async () => {
+  for (const email of ["you@example.com", "name@domain.com", "your.email@email.com", "email@example.com", "[your email]"]) {
+    for (const o of [{}, { reviewDraft: true }, { contact: "typed" }]) {
+      const store = T.memoryResumeStore(), r = await tailor(typed(email), o, store);
+      ok(!r.ok && r.refused === "no_contact" && /not an email they confirmed/.test(r.reason) && r.reason.includes(T.EMAIL_QUESTION), `${email} ${JSON.stringify(o)}: ${JSON.stringify(r).slice(0, 300)}`);
+      eq([store.files.size, store.signed.length], [0, 0], `${email}: nothing stored, no link`);
+    }
+  }
+  for (const [email, extra] of [["you@example.com", ""], ["you@example.com", " | (555) 555-5555"], ["dana.okafor@gmail.com", " | (555) 555-0123"], ["dana.okafor@gmail.com", " | 123-456-7890"]]) {
+    for (const o of [{}, { reviewDraft: true }]) {
+      const store = T.memoryResumeStore(), r = await tailor(person(email, extra), o, store);
+      ok(!r.ok && r.refused === "no_contact" && /No resume was made or stored/.test(r.reason), `${email}${extra}: ${JSON.stringify(r).slice(0, 300)}`);
+      eq(store.files.size, 0);
+    }
+  }
+  // The email that prints is the one they confirmed: an assembler that prints another is refused.
+  const other = (p: any, jd: any, o: any) => { const t = (CareerTailor as any).tailorResume(p, jd, o); t.resume.header = { ...t.resume.header, email: "someone.else@gmail.com" }; return t; };
+  const store = T.memoryResumeStore();
+  const r: any = await T.tailorForPosting({ userId: USER, profile: person(), posting: POSTING, deps: { render: T.edgeRenderer(), resumes: store, tailor: other }, now: NOW });
+  ok(!r.ok && /is not the email they confirmed/.test(r.reason) && store.files.size === 0, JSON.stringify(r).slice(0, 300));
+  // A real one, with a real phone, is made and stored as before.
+  const real = T.memoryResumeStore(), fine = await tailor(person("a.khan@gmail.com", " | (312) 867-5309"), {}, real);
+  ok(fine.ok && fine.link && real.files.size === 1 && fine.ats.status !== "FAIL", JSON.stringify(fine).slice(0, 300));
+});
+
+Deno.test("finding 3, the chat tool: tailor_resume refuses a placeholder email with or without a deliverer; nothing is sent or stored", async () => {
+  for (const deliver of [true, false]) {
+    const sent: any[] = [], store = T.memoryResumeStore();
+    const tools = Object.fromEntries(careerTools({ postings: async () => [], tailor: { posting: async (id: string) => ({ job_id: id, title: "Software Engineer Intern", company: "PayPal", description: POSTING.text }), personas: T.memoryPersonaStore(), resumes: store, render: T.edgeRenderer(), versions: null, ...(deliver ? { deliver: (d: any) => sent.push(d) } : {}) } } as any).map((x: any) => [x.name, x]));
+    let out: any;
+    try { out = await tools.tailor_resume.run({ job_id: POSTING.job_id }, { userId: USER, threadId: "t1", now: NOW, state: { profile: typed("you@example.com") }, turn: { message: "make my resume for paypal", added: [] } }); } catch (e) { out = { threw: String((e as Error).message) }; }
+    ok(out.threw ? /not an email they confirmed/.test(out.threw) : out.ok === false, JSON.stringify(out).slice(0, 300));
+    eq([sent.length, store.files.size], [0, 0]);
+  }
+});
+
+Deno.test("finding 3, the email card and its yes: no resume for a card from a placeholder email; a stored file with one is not attached at the yes", async () => {
+  const { good, bad } = await files(), objects = new Map<string, Uint8Array>();
+  const admin = { storage: { from: () => ({ download: async (path: string) => objects.has(path) ? { data: new Blob([objects.get(path)! as BlobPart]) } : { error: { message: "not found" } } }) } };
+  const store: any = { ...T.memoryResumeStore(), put: async (path: string, pdf: Uint8Array) => { objects.set(path, pdf); }, signedUrl: async (path: string) => `https://project.supabase.test/storage/v1/object/sign/career-resumes/${path}?token=t` };
+  const post: any = { job_id: POSTING.job_id, title: "Software Engineer Intern", company: "PayPal", description: POSTING.text };
+  for (const profile of [typed("you@example.com"), typed("name@domain.com"), person("you@example.com")]) {
+    eq(await supabaseResumes(admin, { profile: () => profile, tailor: { render: T.edgeRenderer(), resumes: store } }).resume(USER, post), null);
+    eq(objects.size, 0);
+  }
+  const r = supabaseResumes(admin, { profile: () => person(), tailor: { render: T.edgeRenderer(), resumes: store } });
+  const card = await r.resume(USER, post);
+  ok(card && card.tailored && (await r.attachment(USER, card.sha256))?.sha256 === card.sha256, "a real contact still reaches the card and the yes");
+  // At the yes: the stored bytes are read again. A file with a placeholder (however it got there) is not attached.
+  const badSha = await hex(bad); objects.set(T.resumePath(USER, badSha), bad);
+  eq(await r.attachment(USER, badSha), null);
+  ok(good.length > 0);
+  // A renderer that wrongly passes a placeholder file: still no resume for the card (the bytes are read).
+  const lying: any = async () => ({ ok: true, pdf: bad, sha256: badSha, filename: "resume.pdf", where: "test", ats: { pass: true, status: "PASS", reasons: [], warnings: [] } });
+  eq(await supabaseResumes(admin, { profile: () => person(), tailor: { render: lying, resumes: store } }).resume(USER, post), null);
+});
+
+Deno.test("finding 3, the form card (prepare-ahead): no resume is prepared from a placeholder email, or from a file that carries one", async () => {
+  const { bad } = await files(), dir = await Deno.makeTempDir();
+  const c: any = { user_id: USER, job_id: POSTING.job_id, title: "Software Engineer Intern", company: "PayPal", description: POSTING.text };
+  try {
+    for (const email of ["you@example.com", "name@domain.com", "jane.doe@gmail.com"]) eq(await tailoredResume({ render: T.edgeRenderer(), resumes: T.memoryResumeStore(), now: () => NOW })(c, dir, typed(email)), null, email);
+    const lying: any = async () => ({ ok: true, pdf: bad, sha256: await hex(bad), filename: "resume.pdf", where: "test", ats: { pass: true, status: "PASS", reasons: [], warnings: [] } });
+    eq(await tailoredResume({ render: lying, resumes: T.memoryResumeStore(), now: () => NOW })(c, dir, typed("dana.okafor@gmail.com")), null);
+    eq([...Deno.readDirSync(dir)].length, 0, "no file was written for a card");
+    const fine = await tailoredResume({ render: T.edgeRenderer(), resumes: T.memoryResumeStore(), now: () => NOW })(c, dir, typed("dana.okafor@gmail.com"));
+    ok(fine && /^[a-f0-9]{64}$/.test(fine.sha256), "a real typed email is prepared as before");
+  } finally { await Deno.remove(dir, { recursive: true }); }
+});
+
+Deno.test("finding 3, the submit gates: the cloud card, the cloud submit and the local submit never start the engine with a placeholder-contact resume", async () => {
+  const { good, bad } = await files();
+  for (const [bytes, sends] of [[bad, false], [good, true]] as const) {
+    const sha = await hex(bytes), b64 = Buffer.from(bytes).toString("base64");
+    // Cloud submit (workers/career-cloud/worker.ts).
+    const job = await cardBound({ id: "job-1", lease_token: "lease-1", user_id: "TEST-owner", company: "Test Co", url: "https://jobs.lever.co/test-co/de-1",
+      payload: { posting: "lever:test-co:de-1", user_id: "TEST-owner", company: "Test Co", url: "https://jobs.lever.co/test-co/de-1", engine_approval: "c".repeat(64), resume_sha256: sha, fields: [] } });
+    const finished: any[] = []; let runs = 0;
+    const engine: any = async (_a: string[], _e: unknown, controls?: any) => { runs++; await controls?.beforeEffect?.(); return { result: { state: "submitted_unconfirmed", reason: "employer confirmation on the page" }, evidence: null }; };
+    await runCloudJob(job as any, { queue: { claim: async () => [], gatePresent: async () => true, authorize: authorizer().authorize, resume: async () => ({ filename: "resume.pdf", sha256: sha, b64 }), finish: async (_j: unknown, state: string, ev: any) => { finished.push([state, ev?.reason ?? null]); } } as any, runEngine: engine, log: () => {} });
+    eq([runs, finished], sends ? [1, [["submitted_unconfirmed", "employer confirmation on the page"]]] : [0, [["not_submitted", "RESUME_CONTACT_UNCONFIRMED"]]], "cloud submit");
+    // Local submit (workers/career-browser/approve-first.ts runApproved).
+    const path = await Deno.makeTempFile({ suffix: ".pdf" }); await Deno.writeFile(path, bytes);
+    const local: any[] = []; runs = 0;
+    try {
+      await runApproved({ claim: async () => [{ id: "00000000-0000-4000-8000-000000000011", lease_token: "lease", url: "https://jobs.lever.co/test-co/de-1", payload: job.payload } as any], finish: async (_i, _l, state, ev) => { local.push([state, (ev as any)?.reason ?? null]); },
+        resumeFor: async () => ({ path, sha256: sha }), writeFacts: async () => path, runEngine: engine });
+    } finally { await Deno.remove(path); }
+    eq([runs, local], sends ? [1, [["submitted_unconfirmed", "employer confirmation on the page"]]] : [0, [["not_submitted", "RESUME_CONTACT_UNCONFIRMED"]]], "local submit");
+    // Cloud card (workers/career-cloud/prepare.ts): refused before any source is read or any dry run starts.
+    const calls: string[] = [];
+    const rpc: any = async (name: string) => { calls.push(name); if (name === "career_apply_message_cloud_prepare_context") return { resume: { sha256: sha, b64, filename: "resume.pdf" }, account: { epoch: 1, version: 1 } }; throw Error("STOP_AFTER_RESUME_GATE"); };
+    const err = await prepareCloudCard({ owner: USER, thread: "00000000-0000-4000-8000-0000000000aa", urls: ["https://jobs.lever.co/test-co/de-1"], resumeSha256: sha }, { rpc, runEngine: engine }).then(() => "prepared", (e) => String(e?.message ?? e));
+    ok(sends ? /STOP_AFTER_RESUME_GATE/.test(err) : /RESUME_CONTACT_UNCONFIRMED/.test(err) && calls.length === 1, `cloud card: ${err} after ${calls}`);
+  }
+});

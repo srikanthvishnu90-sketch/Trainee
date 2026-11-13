@@ -17,6 +17,7 @@ import { callModel, modelConfig, newMeter, PRICES, TRAINEE_MODEL } from "../../s
 import * as bud from "../../supabase/functions/_shared/model_budget.ts";
 import { openLiveRunLedger } from "../career/eval_budget.ts";
 import { measureApproval } from "./approval.ts";
+import { ASK_OF } from "./d079-replay.ts";
 
 const BATCH = JUDGE_MAX_CLAIMS; // as a turn batches them (support.ts)
 // What layer A sends on: the claim beside the passage of the one page unit that holds its hard parts (round 3: the unit with its
@@ -24,7 +25,9 @@ const BATCH = JUDGE_MAX_CLAIMS; // as a turn batches them (support.ts)
 const sent: { id: string; want: "yes" | "no"; c: SupportClaim }[] = [];
 const stopped: Record<string, number> = {};
 function add(set: string, id: string, want: "yes" | "no", pages: { text: string; title: string }[], claim: string) {
-  const idx = indexPages(pages, abbreviated, ["Citadel"], { ask: "what does citadel pay interns" }), f = findSupport(claim, idx, [0]);
+  // Round 9 (the D-079 run asked every quote whether it "answers the question: what does citadel pay interns", so the visa, interview
+  // and date facts were refused for being off the question, not for being false): the ask is the case's own, or a neutral one.
+  const idx = indexPages(pages, abbreviated, ["Citadel"], { ask: ASK_OF(claim) }), f = findSupport(claim, idx, [0]);
   if (!f) { stopped[set] = (stopped[set] ?? 0) + 1; return; }
   sent.push({ id: `${set}: ${id}`, want, c: { claim: echoes(claim, f.sentence) ? quoteClaim(f.sentence, idx, f.unit.lent) : claim, source: f.unit.passage } });
 }

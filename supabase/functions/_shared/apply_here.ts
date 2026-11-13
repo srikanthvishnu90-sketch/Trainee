@@ -20,7 +20,16 @@ import type { AppRow } from "./career_apply_status.ts";
 import type { FetchFeed, PostingsDb } from "./career_ingest.ts";
 import { type WorkdayRead, workdayUrl } from "./workday_posting.ts";
 
-export const APPLY_HERE_MAX_LINKS = 25;
+// Review of #775 (2026-11-13): at most 10 links are read per message, inside one time limit for the whole message; a link the
+// limit left unread is named as not read.
+export const APPLY_HERE_MAX_LINKS = 10;
+export const APPLY_HERE_BUDGET_MS = 20_000;
+const LATE = Symbol("late");
+const within = async <T>(p: Promise<T>, ms: number): Promise<T | typeof LATE> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try { return await Promise.race([p, new Promise<typeof LATE>((res) => { timer = setTimeout(() => res(LATE), Math.max(0, ms)); })]); }
+  finally { clearTimeout(timer); }
+};
 const URL_IN = /https?:\/\/[^\s<>"'()]+/gi;
 const HOW = /^\s*(how|what|where|when|why|which|should|is|are|am|do|does|did)\b/i;
 // "apply here", "apply to this", "apply to that one", "apply for it": about the posting just shown, no link in the text.
@@ -55,6 +64,7 @@ export async function applyHereTurn(o: {
   // D-062: a pasted Workday link is read (workday_posting.ts: title, company, open or closed, the deadline it states) so the
   // refusal names the posting; a Workday application is the person's own sign-in on the employer's site (D-013, D-050).
   readWorkday?: ((url: string) => Promise<WorkdayRead | null>) | null;
+  budgetMs?: number; // the time limit for reading every link of the message (default APPLY_HERE_BUDGET_MS)
 }): Promise<ApplyHereResult | null> {
   const ask = applyHereAsk(o.message, o.last ?? null);
   if (!ask) return null;
@@ -65,10 +75,15 @@ export async function applyHereTurn(o: {
   catch { return none("I couldn't check your applications just now, so nothing was set up. Send the link again in a minute."); }
   const hits: ApplyHereHit[] = [], seen = new Set<string>();
   const urls = ask.urls.slice(0, APPLY_HERE_MAX_LINKS);
+  const until = Date.now() + (o.budgetMs ?? APPLY_HERE_BUDGET_MS);
+  const unread = (url: string) => { refused.push({ url, why: `${hostOf(url) || "that link"}: not read (I ran out of time on this message); send it again on its own.` }); };
   for (const url of urls) {
+    if (Date.now() >= until) { unread(url); continue; }
     const la = linkOf(url);
     if (!la && o.readWorkday && workdayUrl(url)) {
-      const w = await o.readWorkday(url).catch(() => null), p = w?.posting;
+      const w = await within(o.readWorkday(url).catch(() => null), until - Date.now());
+      if (w === LATE) { unread(url); continue; }
+      const p = w?.posting;
       const what = p ? `${p.title}${p.company ? ` at ${p.company}` : ""} (${w!.state === "closed" ? "closed" : w!.state === "open" ? "open" : "open not confirmed"}${p.deadline && w!.state !== "closed" ? `, applications close ${p.deadline}` : ""})` : hostOf(url);
       refused.push({ url, why: `${what}: a Workday application needs your own sign-in on the employer's site, so apply there yourself.` });
       continue;
@@ -76,7 +91,8 @@ export async function applyHereTurn(o: {
     if (!la) { refused.push({ url, why: `${hostOf(url) || "that site"}: I can only open Greenhouse, Lever and Ashby postings for you, so apply there yourself.` }); continue; }
     if (seen.has(la.key.toLowerCase())) continue;
     seen.add(la.key.toLowerCase());
-    const f = await postingForLink({ ask: la, db: o.db, fetchFeed: o.fetchFeed, now: o.now });
+    const f = await within(postingForLink({ ask: la, db: o.db, fetchFeed: o.fetchFeed, now: o.now }), until - Date.now());
+    if (f === LATE) { seen.delete(la.key.toLowerCase()); unread(url); continue; }
     if (f.kind !== "found") {
       const why = f.kind === "closed" ? "that posting is closed" : f.kind === "not_on_board" ? `${f.board.company}'s board doesn't list it (closed, or never there)` : `I couldn't read ${f.board.company}'s board just now (${f.why.slice(0, 80)})`;
       refused.push({ url, why: `${hostOf(url)}: ${why}; nothing was set up.` });
@@ -89,7 +105,7 @@ export async function applyHereTurn(o: {
     const nc = s.gate.unchecked[0]?.facts.map((x) => String(x).replace(/_/g, " "));
     hits.push({ job_id: p.job_id, company: p.company, title: p.title, location: p.location ?? "", url: p.url || url, apply_here: true, ...(nc?.length ? { not_checked: nc } : {}) });
   }
-  if (ask.urls.length > urls.length) refused.push({ url: "", why: `I read the first ${urls.length} links only.` });
+  if (ask.urls.length > urls.length) refused.push({ url: "", why: `I read the first ${urls.length} links only; the other ${ask.urls.length - urls.length} were not read.` });
   const skipped = refused.length ? ` Skipped ${refused.length}: ${refused[0].why}${refused.length > 1 ? ` (+${refused.length - 1} more)` : ""}` : "";
   if (!hits.length) return none(refused.length === 1 ? `Not set up: ${refused[0].why}` : `Nothing set up. ${refused.slice(0, 3).map((r) => r.why).join(" ")}`);
   const one = hits.length === 1;

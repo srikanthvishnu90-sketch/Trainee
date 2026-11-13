@@ -3,7 +3,12 @@
 // any other link is fetched and a 404 or 410, or Greenhouse's redirect to "?error=true", is dead. A check that cannot finish
 // (timeout, network) is "unknown": never called live, never hidden as dead. Wrong is worse than empty: a dead link is never
 // shown.
+// Review of #775 (2026-11-13): every request goes through posting_fetch.ts: redirects are walked by hand (at most 3, each hop
+// held to the same rule as the first address: https, a named public host, never a site Trainee does not open, and a job board's
+// own host when the first address was one); a refused address or hop is "unknown", never live. A board name or posting id that
+// is not a plain slug builds no address. A Workday posting is live only when its own data says canApply true.
 import { workdayUrl } from "./workday_posting.ts";
+import { boardHost, BOARD_SLUG, cappedJson, guardedFetch, POSTING_UUID } from "./posting_fetch.ts";
 export type LinkState = "live" | "dead" | "unknown";
 // Architect ruling E.21 (release item 8): every search re-checks the postings it shows, and only those (searchCheck below):
 // at most the count asked, never more than SEARCH_CHECK_MAX, each on its own posting page by id. No board listing is read.
@@ -12,48 +17,48 @@ export type LinkCheck = (job: { job_id?: string; url?: string }) => Promise<Link
 
 export function apiUrlFor(jobId: string): string | null {
   const m = /^(greenhouse|lever|smartrecruiters):([A-Za-z0-9._-]+):([A-Za-z0-9-]+)$/.exec(String(jobId ?? ""));
-  if (!m) return null;
+  if (!m || !BOARD_SLUG.test(m[2])) return null;
   const [, family, board, id] = m;
   if (family === "greenhouse") return /^\d+$/.test(id) ? `https://boards-api.greenhouse.io/v1/boards/${board}/jobs/${id}` : null;
   // R10 WO-C: SmartRecruiters' public posting API answers 404 for a posting that is gone.
   if (family === "smartrecruiters") return /^\d+$/.test(id) ? `https://api.smartrecruiters.com/v1/companies/${board}/postings/${id}` : null;
-  return /^[0-9a-f-]{8,}$/i.test(id) ? `https://api.lever.co/v0/postings/${board}/${id.toLowerCase()}` : null;
+  return POSTING_UUID.test(id) ? `https://api.lever.co/v0/postings/${board}/${id.toLowerCase()}` : null;
 }
 // R10 WO-C: an Ashby posting is live while its board's public list still holds its id (the list answers for every board).
 export function ashbyBoardFor(jobId: string): { url: string; id: string } | null {
   const m = /^ashby:([A-Za-z0-9._-]+):([0-9a-f-]{8,})$/i.exec(String(jobId ?? ""));
-  return m ? { url: `https://api.ashbyhq.com/posting-api/job-board/${m[1]}`, id: m[2].toLowerCase() } : null;
+  return m && BOARD_SLUG.test(m[1]) && POSTING_UUID.test(m[2]) ? { url: `https://api.ashbyhq.com/posting-api/job-board/${m[1]}`, id: m[2].toLowerCase() } : null;
 }
 
 // An Ashby posting's own page by id (jobs.ashbyhq.com/<board>/<id>), for a check that never reads the board's listing.
 export function ashbyPageFor(jobId: string): string | null {
   const m = /^ashby:([A-Za-z0-9._-]+):([0-9a-f-]{8,})$/i.exec(String(jobId ?? ""));
-  return m ? `https://jobs.ashbyhq.com/${m[1]}/${m[2].toLowerCase()}` : null;
+  return m && BOARD_SLUG.test(m[1]) && POSTING_UUID.test(m[2]) ? `https://jobs.ashbyhq.com/${m[1]}/${m[2].toLowerCase()}` : null;
 }
 
 // `ashby: "posting"` (E.21, the search path): an Ashby posting is checked on its own page by id, never by reading the board's
 // list; a 404 or 410, or a redirect off the posting's own page, is dead. The default ("board") keeps the board-list read.
 export function linkChecker(f: typeof fetch, o: { timeoutMs?: number; userAgent?: string; ashby?: "board" | "posting" } = {}): LinkCheck {
   const timeoutMs = o.timeoutMs ?? 4000, ua = o.userAgent ?? "Trainee job link check";
-  const get = async (url: string) => {
+  // One guarded request (posting_fetch.ts): a board address stays on the boards' hosts through every hop. `read` takes the body
+  // (to 2 MB, or `max`) inside the same time limit; without it the body is dropped unread.
+  const ask = async <T>(url: string, accept: string, read?: (r: Response) => Promise<T>): Promise<{ r: Response; at: string; body: T | null }> => {
     const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), timeoutMs);
     try {
-      const r = await f(url, { method: "GET", redirect: "follow", signal: ctl.signal, headers: { "user-agent": ua, accept: "application/json,text/html" } });
-      await r.body?.cancel().catch(() => {});
-      return r;
+      const { res: r, url: at } = await guardedFetch(f as any, url, { method: "GET", signal: ctl.signal, headers: { "user-agent": ua, accept } }, boardHost(url) ? { allow: boardHost } : {});
+      const body = read ? await read(r) : (await r.body?.cancel().catch(() => {}), null);
+      return { r, at, body };
     } finally { clearTimeout(timer); }
   };
+  const get = async (url: string) => { const { r, at } = await ask(url, "application/json,text/html"); return { status: r.status, ok: r.ok, url: at }; };
   const ashbyBoards = new Map<string, Promise<Set<string> | "dead" | "unknown">>();
   const readAshby = async (url: string): Promise<Set<string> | "dead" | "unknown"> => {
     try {
-      const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), timeoutMs);
-      try {
-        const r = await f(url, { method: "GET", signal: ctl.signal, headers: { "user-agent": ua, accept: "application/json" } });
-        if (r.status === 404) { await r.body?.cancel().catch(() => {}); return "dead"; }
-        if (!r.ok) { await r.body?.cancel().catch(() => {}); return "unknown"; }
-        const body: any = await r.json().catch(() => null);
-        return Array.isArray(body?.jobs) ? new Set(body.jobs.map((j: any) => String(j?.id ?? "").toLowerCase())) : "unknown";
-      } finally { clearTimeout(timer); }
+      // A whole board's list (larger than one posting): read to 16 MB.
+      const { r, body } = await ask<any>(url, "application/json", (x) => x.ok ? cappedJson(x, 16 * 1024 * 1024) : (x.body?.cancel().catch(() => {}), Promise.resolve(null)));
+      if (r.status === 404) return "dead";
+      if (!r.ok) return "unknown";
+      return Array.isArray(body?.jobs) ? new Set(body.jobs.map((j: any) => String(j?.id ?? "").toLowerCase())) : "unknown";
     } catch { return "unknown"; }
   };
   return async (job) => {
@@ -71,18 +76,15 @@ export function linkChecker(f: typeof fetch, o: { timeoutMs?: number; userAgent?
     }
     // D-062: a Workday posting is asked of its own CXS endpoint by its path (workday_posting.ts). Its public page is the same app
     // shell (HTTP 200) for a live and a removed posting, so the page itself is never the check. Gone: HTTP 404 or 410, or
-    // errorCode S21 / S22; open: the answer holds the posting and does not say canApply false; anything else is unknown.
+    // errorCode S21 / S22, or canApply false; live: the answer holds the posting and says canApply true; anything else (canApply
+    // absent included) is unknown.
     const wd = workdayUrl(String(job.url ?? ""));
     if (wd) {
       try {
-        const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), timeoutMs);
-        try {
-          const r = await f(wd.cxs, { method: "GET", signal: ctl.signal, headers: { "user-agent": ua, accept: "application/json" } });
-          const body: any = await r.json().catch(() => null);
-          if (r.status === 404 || r.status === 410 || body?.errorCode === "S21" || body?.errorCode === "S22") return "dead";
-          if (r.ok && body?.jobPostingInfo?.title) return body.jobPostingInfo.canApply === false ? "dead" : "live";
-          return "unknown";
-        } finally { clearTimeout(timer); }
+        const { r, body } = await ask<any>(wd.cxs, "application/json", (x) => cappedJson(x));
+        if (r.status === 404 || r.status === 410 || body?.errorCode === "S21" || body?.errorCode === "S22") return "dead";
+        if (r.ok && body?.jobPostingInfo?.title) return body.jobPostingInfo.canApply === false ? "dead" : body.jobPostingInfo.canApply === true ? "live" : "unknown";
+        return "unknown";
       } catch { return "unknown"; }
     }
     const ashby = ashbyBoardFor(String(job.job_id ?? ""));
@@ -95,6 +97,7 @@ export function linkChecker(f: typeof fetch, o: { timeoutMs?: number; userAgent?
     const api = apiUrlFor(String(job.job_id ?? ""));
     const url = api ?? String(job.url ?? "");
     if (!/^https?:\/\//i.test(url)) return "dead";
+    // An address that is never requested (plain http, an IP or private name, userinfo, a never-open site) throws below: unknown.
     try {
       const r = await get(url);
       if (r.status === 404 || r.status === 410) return "dead";

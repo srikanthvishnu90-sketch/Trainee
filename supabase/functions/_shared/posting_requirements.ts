@@ -14,13 +14,21 @@
 //   Workday          workday_posting.ts (the posting's CXS data). Its application's questions are behind the person's own
 //                    sign-in on the employer's careers site: said so, never guessed.
 //
-// Nothing here creates an account, a saved application or a submission; no request goes to an apply, submit, upload or sign-in
-// endpoint, and a captcha on the form is recorded (captcha_expected), never touched. Every request made is returned (reads).
-// The questions are the form's shape only: never an answer and never a payload (D-007).
+// Nothing here creates an account, a saved application or a submission; nothing is ever sent to a submit, upload or sign-in
+// endpoint. The only request to an application page is the one GET of Lever's public apply page named above (the form's HTML,
+// read for its questions; nothing is posted to it). A captcha on the form is recorded (captcha_expected), never touched.
+// Every request made is returned (reads). The questions are the form's shape only: never an answer and never a payload (D-007).
+//
+// Review of #775 (2026-11-13): requests go through posting_fetch.ts (redirects walked by hand, at most 3, every hop on a job
+// board's own host; bodies read to 2 MB); a refused address or hop, or a body past the cap, is status "not_readable" with a why
+// that begins "not read". A board name or posting id that is not a plain slug builds no address. Every string a posting
+// supplied (title, company, place, pay, question labels and options) passes posting_pay.ts postingTextForModel: it is data,
+// and none of it is placed in a tool's note (agent/career_tools.ts).
 import { schemaFromGreenhouse } from "./posting_schema.ts";
 import { placedPay, postingTextForModel } from "./posting_pay.ts";
 import { decodeHtmlEntities } from "./posting_text.ts";
-import { htmlToText, readWorkdayPosting, workdayUrl, type WorkdayDeps } from "./workday_posting.ts";
+import { htmlToText, postingField, readWorkdayPosting, workdayUrl, type WorkdayDeps } from "./workday_posting.ts";
+import { boardHost, BOARD_SLUG, cappedJson, cappedText, guardedFetch, NotRead, POSTING_UUID, refusedAddress, stopWords } from "./posting_fetch.ts";
 import { neverOpen } from "./career_people_sites.ts";
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
@@ -86,22 +94,24 @@ export function requirementsFrom(html: string): Requirements {
 export function boardOf(url: string): { board: Board; parts: string[] } | null {
   let u: URL;
   try { u = new URL(String(url ?? "").trim()); } catch { return null; }
-  if (u.protocol !== "https:") return null;
+  if (refusedAddress(u.href)) return null; // https, no userinfo or port, a named public host
   const host = u.hostname.toLowerCase(), seg = u.pathname.split("/").filter(Boolean);
   if (/^(job-boards|boards)(\.eu)?\.greenhouse\.io$/.test(host) || host === "boards-api.greenhouse.io") {
     const i = seg.indexOf("jobs"), board = (i > 0 ? seg[i - 1] : u.searchParams.get("for")) ?? "", id = i >= 0 ? seg[i + 1] : u.searchParams.get("token");
-    return board && id && /^\d+$/.test(id) && /^[A-Za-z0-9._-]+$/.test(board) ? { board: "Greenhouse", parts: [board, id] } : null;
+    return board && id && /^\d{1,20}$/.test(id) && BOARD_SLUG.test(board) ? { board: "Greenhouse", parts: [board, id] } : null;
   }
-  if (/^jobs(\.eu)?\.lever\.co$/.test(host) && seg.length >= 2 && /^[0-9a-f-]{8,}$/i.test(seg[1])) return { board: "Lever", parts: [seg[0], seg[1].toLowerCase()] };
-  if (host === "jobs.ashbyhq.com" && seg.length >= 2 && /^[0-9a-f-]{8,}$/i.test(seg[1])) return { board: "Ashby", parts: [seg[0], seg[1].toLowerCase()] };
-  if (host === "jobs.smartrecruiters.com" && seg.length >= 2) { const id = /^(\d+)/.exec(seg[1])?.[1]; return id && /^[A-Za-z0-9._-]+$/.test(seg[0]) ? { board: "SmartRecruiters", parts: [seg[0], id] } : null; }
+  // A board name that is not a plain slug ("..%2f..%2fx") names no board: no address is built from it.
+  if (/^jobs(\.eu)?\.lever\.co$/.test(host) && seg.length >= 2) return BOARD_SLUG.test(seg[0]) && POSTING_UUID.test(seg[1]) ? { board: "Lever", parts: [seg[0], seg[1].toLowerCase()] } : null;
+  if (host === "jobs.ashbyhq.com" && seg.length >= 2) return BOARD_SLUG.test(seg[0]) && POSTING_UUID.test(seg[1]) ? { board: "Ashby", parts: [seg[0], seg[1].toLowerCase()] } : null;
+  if (host === "jobs.smartrecruiters.com" && seg.length >= 2) { const id = /^(\d{1,20})/.exec(seg[1])?.[1]; return id && BOARD_SLUG.test(seg[0]) ? { board: "SmartRecruiters", parts: [seg[0], id] } : null; }
   if (workdayUrl(url)) return { board: "Workday", parts: [] };
   return null;
 }
 
-const strip = (s: string) => decodeHtmlEntities(String(s ?? "").replace(/<[^>]+>/g, " ")).replace(/✱|\*$/g, "").replace(/\s+/g, " ").trim();
+// A label as the form shows it, as data: tags out, and a sentence written to an AI taken out (postingField).
+const strip = (s: string) => postingField(decodeHtmlEntities(String(s ?? "").replace(/<[^>]+>/g, " ")).replace(/✱|\*$/g, "").replace(/\s+/g, " ").trim(), 300);
 const opts = (list: string[]): Pick<Question, "options" | "more_options"> => {
-  const o = list.map((x) => x.trim()).filter(Boolean);
+  const o = list.map((x) => postingField(x, 120)).filter(Boolean);
   return o.length ? { options: o.slice(0, 12), ...(o.length > 12 ? { more_options: o.length - 12 } : {}) } : {};
 };
 const GH_TYPE: Record<string, string> = { input_text: "text", textarea: "long text", input_file: "file", multi_value_single_select: "choose one", multi_value_multi_select: "choose any", input_hidden: "hidden" };
@@ -162,6 +172,7 @@ export function ashbyAppData(html: string): any | null {
 }
 
 // ------------------------------------------------------------------------------------------------ the read
+const isoDay = (v: unknown) => { const s = String(v ?? "").slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s)) ? s : null; };
 export interface ReadDeps { fetch: Fetch; timeoutMs?: number; userAgent?: string; now?: () => number }
 export async function readApplyFlow(href: string, d: ReadDeps): Promise<ApplyFlow> {
   const url = String(href ?? "").trim();
@@ -174,19 +185,24 @@ export async function readApplyFlow(href: string, d: ReadDeps): Promise<ApplyFlo
   if (!b) return { ...base(null), status: "not_readable", why: `Trainee does not read ${host.replace(/^www\./, "")} postings` };
   const get = async (u: string, accept: string, init: RequestInit = {}) => {
     reads.push(`${init.method ?? "GET"} ${u}`);
-    return await d.fetch(u, { method: "GET", redirect: "follow", ...init, signal: AbortSignal.timeout(d.timeoutMs ?? 8000), headers: { accept, "user-agent": d.userAgent ?? "Trainee posting reader", ...(init.headers ?? {}) } });
+    // One time limit for the request, its redirects and its body.
+    return (await guardedFetch(d.fetch, u, { method: "GET", ...init, signal: AbortSignal.timeout(d.timeoutMs ?? 8000), headers: { accept, "user-agent": d.userAgent ?? "Trainee posting reader", ...(init.headers ?? {}) } }, { allow: boardHost })).res;
   };
-  const failed = (o: ApplyFlow, e: unknown, what: string): ApplyFlow => ({ ...o, why: `${what} did not finish (${String((e as Error)?.name === "TimeoutError" ? "timeout" : (e as Error)?.message ?? e).slice(0, 80)})` });
+  // What stopped a read, in fixed words (an error's message can quote the page). A refused address or hop, or a body past the
+  // cap: not read, never "ok".
+  const failed = (o: ApplyFlow, e: unknown, what: string): ApplyFlow => e instanceof NotRead ? { ...o, status: "not_readable", posting: null, why: `${e.message} (${what})` } : { ...o, why: `${what} did not finish (${stopWords(e)})` };
+  const formStop = (e: unknown) => e instanceof NotRead ? e.message : stopWords(e);
   const out = base(b.board);
   const posting = (title: string, company: string | null, location: string | null, text: string, deadline: string | null = null, state: "open" | "closed" | "unknown" = "open") =>
-    ({ title, company, location, pay: placedPay(postingTextForModel(text, Infinity).text, location), deadline, deadline_text: deadline, state });
+    ({ title: postingField(title), company: postingField(company) || null, location: postingField(location) || null, pay: placedPay(postingTextForModel(text, Infinity).text, location), deadline: isoDay(deadline), deadline_text: isoDay(deadline), state });
+  const said = (v: unknown) => postingField(v, 120) || null; // a pay summary as the board states it
 
   if (b.board === "Workday") {
     const w = await readWorkdayPosting(url, d as WorkdayDeps);
     reads.push(...(w?.reads ?? []));
     const p = w?.posting;
     return {
-      ...out, status: p ? "ok" : "unknown", why: w?.why ?? "",
+      ...out, status: p ? "ok" : /not read/.test(w?.why ?? "") ? "not_readable" : "unknown", why: w?.why ?? "",
       // D-067 (C1): a posting that states pay by place never hands over one place's range unlabelled: `pay` is each range with its place.
     posting: p ? { title: p.title, company: p.company, location: p.location, pay: p.pays.length > 1 && new Set(p.pays.map((x) => x.pay)).size > 1 ? p.pays.map((x) => `${x.place}: ${x.pay}`).join("; ") : p.pay, ...(p.pays.length ? { pay_by_place: p.pays } : {}), deadline: p.deadline, deadline_text: p.deadline_text, state: w!.state } : null,
       requirements: p ? requirementsFrom(p.description_html) : out.requirements,
@@ -202,7 +218,8 @@ export async function readApplyFlow(href: string, d: ReadDeps): Promise<ApplyFlo
       const r = await get(`https://boards-api.greenhouse.io/v1/boards/${board}/jobs/${id}?questions=true`, "application/json");
       if (r.status === 404 || r.status === 410) { await r.body?.cancel().catch(() => {}); return { ...out, status: "ok", posting: null, why: "Greenhouse no longer lists this posting (closed)", questions_why: "The posting is closed." }; }
       if (!r.ok) { await r.body?.cancel().catch(() => {}); return { ...out, why: `Greenhouse answered HTTP ${r.status}` }; }
-      const j: any = await r.json();
+      const j: any = await cappedJson(r);
+      if (!j || typeof j !== "object") return { ...out, why: "Greenhouse's answer was not its posting data" };
       const qs = greenhouseQuestions(j);
       const deadline = typeof j.application_deadline === "string" ? j.application_deadline.slice(0, 10) : null;
       return { ...out, status: "ok", why: "read live from Greenhouse's public posting API",
@@ -219,21 +236,22 @@ export async function readApplyFlow(href: string, d: ReadDeps): Promise<ApplyFlo
       const r = await get(`https://api.lever.co/v0/postings/${site}/${id}`, "application/json");
       if (r.status === 404 || r.status === 410) { await r.body?.cancel().catch(() => {}); return { ...out, status: "ok", why: "Lever no longer lists this posting (closed)", questions_why: "The posting is closed." }; }
       if (!r.ok) { await r.body?.cancel().catch(() => {}); return { ...out, why: `Lever answered HTTP ${r.status}` }; }
-      const j: any = await r.json();
+      const j: any = await cappedJson(r);
+      if (!j || typeof j !== "object") return { ...out, why: "Lever's answer was not its posting data" };
       const lists = (Array.isArray(j.lists) ? j.lists : []).map((l: any) => `<h3>${l.text ?? ""}</h3><ul>${l.content ?? ""}</ul>`).join("");
       const text = [j.descriptionPlain, (j.lists ?? []).map((l: any) => `${l.text}\n${htmlToText(l.content ?? "")}`).join("\n"), j.additionalPlain].filter(Boolean).join("\n");
       const sal = j.salaryRange && Number.isFinite(j.salaryRange.min) ? `${j.salaryRange.currency ?? ""} ${j.salaryRange.min} - ${j.salaryRange.max} ${String(j.salaryRange.interval ?? "").replace(/-/g, " ")}`.trim() : null;
       const p = posting(String(j.text ?? ""), null, j.categories?.location ?? null, text);
-      o = { ...out, status: "ok", why: "read live from Lever's public posting API", posting: { ...p, pay: sal ?? p.pay }, requirements: requirementsFrom(`${j.description ?? ""}${lists}${j.additional ?? ""}`), entry: ["one form on the posting's apply page; no account needed"] };
+      o = { ...out, status: "ok", why: "read live from Lever's public posting API", posting: { ...p, pay: said(sal) ?? p.pay }, requirements: requirementsFrom(`${j.description ?? ""}${lists}${j.additional ?? ""}`), entry: ["one form on the posting's apply page; no account needed"] };
     } catch (e) { return failed(out, e, "the Lever read"); }
     try {
       const r = await get(`https://jobs.lever.co/${site}/${id}/apply`, "text/html");
       if (!r.ok) { await r.body?.cancel().catch(() => {}); return { ...o, questions_why: `The form page answered HTTP ${r.status}; its questions were not read.` }; }
-      const html = await r.text();
+      const html = await cappedText(r);
       const qs = leverQuestions(html);
       return { ...o, questions: qs, questions_read: qs ? "read" : "not_read", captcha_expected: /h-captcha|hcaptcha/i.test(html),
         questions_why: qs ? "Every question on the posting's public apply page (no sign-in on Lever)." : "The apply page held no questions this reader knows." };
-    } catch (e) { return { ...o, questions_why: `The form page read did not finish (${String((e as Error)?.message ?? e).slice(0, 60)}); its questions were not read.` }; }
+    } catch (e) { return { ...o, questions_why: `The form page read did not finish (${formStop(e)}); its questions were not read.` }; }
   }
   if (b.board === "Ashby") {
     const [board, id] = b.parts;
@@ -242,19 +260,19 @@ export async function readApplyFlow(href: string, d: ReadDeps): Promise<ApplyFlo
       const r = await get(`https://jobs.ashbyhq.com/${board}/${id}`, "text/html");
       if (r.status === 404 || r.status === 410) { await r.body?.cancel().catch(() => {}); return { ...out, status: "ok", why: "Ashby no longer shows this posting (closed)", questions_why: "The posting is closed." }; }
       if (!r.ok) { await r.body?.cancel().catch(() => {}); return { ...out, why: `Ashby answered HTTP ${r.status}` }; }
-      const data = ashbyAppData(await r.text()), p = data?.posting;
+      const data = ashbyAppData(await cappedText(r)), p = data?.posting;
       if (!p || String(p.id ?? "").toLowerCase() !== id) return { ...out, status: "ok", why: "Ashby's page does not hold this posting (closed, or never there)", questions_why: "The posting is not on Ashby's page." };
       const base = posting(String(p.title ?? ""), data?.organization?.name ?? null, p.locationName ?? null, htmlToText(String(p.descriptionHtml ?? "")), typeof p.applicationDeadline === "string" ? p.applicationDeadline.slice(0, 10) : null);
-      o = { ...out, status: "ok", why: "read live from the posting's Ashby page", posting: { ...base, pay: p.scrapeableCompensationSalarySummary || p.compensationTierSummary || base.pay }, requirements: requirementsFrom(String(p.descriptionHtml ?? "")), entry: ["one form on the posting's application page; no account needed"] };
+      o = { ...out, status: "ok", why: "read live from the posting's Ashby page", posting: { ...base, pay: said(p.scrapeableCompensationSalarySummary) || said(p.compensationTierSummary) || base.pay }, requirements: requirementsFrom(String(p.descriptionHtml ?? "")), entry: ["one form on the posting's application page; no account needed"] };
     } catch (e) { return failed(out, e, "the Ashby read"); }
     try {
       const r = await get("https://jobs.ashbyhq.com/api/non-user-graphql?op=ApiJobPosting", "application/json", { method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ operationName: "ApiJobPosting", variables: { organizationHostedJobsPageName: board, jobPostingId: id }, query: ASHBY_FORM_QUERY }) });
       if (!r.ok) { await r.body?.cancel().catch(() => {}); return { ...o, questions_why: `Ashby's form read answered HTTP ${r.status}; its questions were not read.` }; }
-      const qs = ashbyQuestions(await r.json());
+      const qs = ashbyQuestions(await cappedJson(r));
       return { ...o, questions: qs, questions_read: qs ? "read" : "not_read", captcha_expected: true,
         questions_why: qs ? "Every question on the posting's form, from the read-only query Ashby's own page makes (no sign-in on Ashby)." : "Ashby's answer held no form." };
-    } catch (e) { return { ...o, questions_why: `Ashby's form read did not finish (${String((e as Error)?.message ?? e).slice(0, 60)}); its questions were not read.` }; }
+    } catch (e) { return { ...o, questions_why: `Ashby's form read did not finish (${formStop(e)}); its questions were not read.` }; }
   }
   // SmartRecruiters
   const [company, id] = b.parts;
@@ -262,7 +280,9 @@ export async function readApplyFlow(href: string, d: ReadDeps): Promise<ApplyFlo
     const r = await get(`https://api.smartrecruiters.com/v1/companies/${company}/postings/${id}`, "application/json");
     if (r.status === 404 || r.status === 410) { await r.body?.cancel().catch(() => {}); return { ...out, status: "ok", why: "SmartRecruiters no longer lists this posting (closed)", questions_why: "The posting is closed." }; }
     if (!r.ok) { await r.body?.cancel().catch(() => {}); return { ...out, why: `SmartRecruiters answered HTTP ${r.status}` }; }
-    const j: any = await r.json(), s = j.jobAd?.sections ?? {};
+    const j: any = await cappedJson(r);
+    if (!j || typeof j !== "object") return { ...out, why: "SmartRecruiters' answer was not its posting data" };
+    const s = j.jobAd?.sections ?? {};
     const html = ["jobDescription", "qualifications", "additionalInformation"].map((k) => s[k] ? `<h3>${s[k].title ?? ""}</h3>${s[k].text ?? ""}` : "").join("");
     return { ...out, status: "ok", why: "read live from SmartRecruiters' public posting API",
       posting: { ...posting(String(j.name ?? ""), j.company?.name ?? null, j.location?.fullLocation ?? null, htmlToText(html)), state: j.active === false ? "closed" : "open" },

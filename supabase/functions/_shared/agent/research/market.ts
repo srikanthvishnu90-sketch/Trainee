@@ -15,6 +15,7 @@ import { contentWords, numbersIn, numEq, specifics } from "./guard.ts";
 import { stripUrls } from "./reply.ts";
 import { parseDraft, readAlike } from "./draft_json.ts";
 import { type SourceKind, sourceKind } from "../../research_web.ts";
+import { bare, decide, indexPages, markSupported, quoted as inQuotes, supportOf, type SupportJudge, type Verdict, type Wanted } from "./support.ts";
 
 export interface MarketDeps {
   search: SearchProvider;
@@ -26,6 +27,9 @@ export interface MarketDeps {
   layout?: "messages" | null;
   // D-073: eval runs only (the real-set runner): the audit keeps each dropped line's text and reason (ResearchAudit.samples).
   auditSamples?: boolean;
+  // FAIL_CLOSED.support (2026-11-13): the judge of layer B (support.ts), the product's own model through the same gateway and
+  // ledger, one batched call. Absent with the switch on: every line the model worded is shown as its page's sentence or dropped.
+  judge?: SupportJudge | null;
 }
 type Cited = { text: string; cite: number[] };
 // kind (D-060): official, reported, self_reported or anecdote (research_web.ts sourceKind); via "search_passage" when the page is the
@@ -226,7 +230,13 @@ export function sentenceOf(page: string, quote: string): string | null {
 //   output (research-market-reply, research-market-review, research-market-subject-review, research-no-sources-review,
 //   web-research-d060, research-company-brief-20261109, research-free-brief): with it on, those assertions fail, and they may not be
 //   edited to pass. tests/architect/pending/research-figures-verbatim-20261113.test.ts is its acceptance test.
-export const FAIL_CLOSED = { figures: false };
+//   Support (FAIL_CLOSED.support; review of #807, support.ts): a sentence reaches the person in the model's words only when one
+//   sentence of a page it cites holds every number, unit, period, year and name of it (code) AND the judge says that sentence
+//   states it; otherwise the page's own sentence stands in its place in quotation marks, or the line is dropped. It covers the
+//   summary, the comparison, the conditions and risks, the File's thesis, title and labels, the company brief and every sentence of
+//   the chat reply (enforceMarketReplySupported). OFF: tests/architect/pending/research-support-judge-20261113.test.ts is its
+//   acceptance test, and the header of that file lists the existing assertions that fail with it on.
+export const FAIL_CLOSED = { figures: false, support: false };
 const NEGATING = /\b(?:not|no|never|none|neither|nor|nobody|nothing|nowhere|without|unlike|cannot|except|excluding|hardly|barely|scarcely|rarely|seldom|false|untrue|lacks?|lacking|fail(?:s|ed|ing)?|den(?:y|ies|ied)|refus(?:e|es|ed))\b|n['’]t\b/i;
 export const negates = (s: string) => NEGATING.test(readAlike(String(s ?? "")));
 // D-071: one sourced line, checked, with why it was dropped. A claim that only rewords its quote (its figures all in the quote, at
@@ -500,19 +510,54 @@ export async function researchMarket(i: { question: string; format: "inline" | "
     // The page's own sentence (a reading with a number) cites the page it is on; a reading in the model's words, the pages it named.
     return hit && hit.text !== t ? { text: hit.text, cite: [num(hit.page)] } : { text: t, cite: [...new Set(ps.map(num))] };
   };
-  const points = [...new Map((arr(d.summary, 5).map((x) => fact(x?.text, x?.quote, x?.url)).filter(Boolean) as Cited[]).map((x) => [x.text, x])).values()];
+  // FAIL_CLOSED.support (support.ts): with the switch on, every line the draft worded (summary, comparison cells, conditions, risks,
+  // the thesis) is decided before anything is kept, in ONE batched judge call: it stands in the model's words only when one sentence
+  // of a page it names holds its numbers, units, periods, years and names AND the judge says that sentence states it; otherwise that
+  // page sentence stands in its place in quotation marks, or the line is dropped. Nothing the old word checks allowed is taken on
+  // trust: checkLine, sayer and the unconfirmed-reading form are not used on this path. A comparison cell has no quoted form (its
+  // row label and column are judged with it): not supported, it is empty.
+  const idx = FAIL_CLOSED.support ? indexPages(pages, abbreviated) : null;
+  const pidx = (p: SourcePage | null) => p ? pages.indexOf(p) : -1;
+  const THESIS = {}, sup = new Map<unknown, Verdict>(), srcOf = new Map<string, string>();
+  if (idx) {
+    const keys: unknown[] = [], wants: Wanted[] = [];
+    for (const x of arr(d.summary, 5)) { keys.push(x); wants.push({ claim: squash(x?.text), pages: [pidx(pageOf(x?.url))], fallback: squash(x?.quote) }); }
+    const os = arr(d.comparison?.options, 4).map(squash).filter((o) => o && o.length <= 60 && linkFree(o));
+    for (const r of arr(d.comparison?.rows, 10)) arr(r?.cells, 4).forEach((c, j) => { if (c && typeof c === "object" && os[j]) { keys.push(c); wants.push({ claim: `${os[j]} ${squash(c.value)}`, judged: `${os[j]}, ${squash(r?.label)}: ${squash(c.value)}`, pages: [pidx(pageOf(c.url))] }); } });
+    for (const x of [...arr(d.conditions, 6), ...arr(d.risks, 6)]) { const ks = arr(x?.urls, 4).map((u) => pidx(pageOf(u))).filter((k) => k >= 0); keys.push(x); wants.push({ claim: squash(x?.text), pages: ks.length ? ks : [-1] }); }
+    keys.push(THESIS); wants.push({ claim: squash(d.thesis) });
+    (await decide(wants, idx, i.deps.judge)).forEach((v, k) => { if (!sup.has(keys[k])) sup.set(keys[k], v); });
+  }
+  const lineS = (x: any, text: unknown, section: string, o: { subject?: string; quote?: boolean } = {}): Cited | null => {
+    const t = squash(text), v = sup.get(x), reading = section !== "summary" && section !== "comparison";
+    const named = reading ? arr(x?.urls, 4).some((u) => pageOf(u)) : !!pageOf(x?.url);
+    const why = !named ? "page_not_read" : !t ? "no_text" : t.length > 400 ? "too_long" : !linkFree(t) ? "link_in_text" : !v || v.how === "drop" || !linkFree(v.sentence) || figuresIn(o.subject ?? "").length ? "unsupported"
+      : o.subject && !nameIn(o.subject, v.sentence) ? "column_not_in_quote" : "";
+    const hit = why ? null : v as { how: "model" | "quote"; sentence: string; page: number };
+    // D-073's measure still holds for a line in the model's words: at least 60% of its words on its page; else the page's sentence.
+    const model = !!hit && hit.how === "model" && wordsOnPages(t, [pages[hit.page]]) >= ON_PAGES_SHARE;
+    if (!hit || (!model && o.quote === false)) { dropped++; auditLine(audit, { ok: false, why: why || "unsupported" }, section, { text, quote: x?.quote }); return null; }
+    const out = model ? t : inQuotes(hit.sentence);
+    auditLine(audit, model ? { ok: true } : { ok: true, via: "quote" }, section);
+    srcOf.set(out, hit.sentence);
+    if (reading) answerable.add(out);
+    return { text: out, cite: [num(pages[hit.page])] };
+  };
+  const points = [...new Map((arr(d.summary, 5).map((x) => idx ? lineS(x, x?.text, "summary") : fact(x?.text, x?.quote, x?.url)).filter(Boolean) as Cited[]).map((x) => [x.text, x])).values()];
   let comparison: Extract<MarketResult, { status: "ok" }>["comparison"] = null;
   const opts = arr(d.comparison?.options, 4).map(squash).filter((o) => o && o.length <= 60 && linkFree(o));
   if (opts.length >= 2) {
     const rows = arr(d.comparison?.rows, 10).map((r) => ({ label: squash(r?.label).slice(0, 80), cells: opts.map((_, j) => {
       const c = arr(r?.cells, 4)[j];
-      const f = c ? fact(c.value, c.quote, c.url, opts[j]) : null;
+      const f = c ? (idx ? lineS(c, c.value, "comparison", { subject: opts[j], quote: false }) : fact(c.value, c.quote, c.url, opts[j])) : null;
       return f && f.text.length <= 600 ? { value: f.text, cite: f.cite } : null;
     }) })).filter((r) => r.label && linkFree(r.label) && r.cells.some(Boolean));
-    if (rows.length) comparison = { options: opts, rows };
+    // FAIL_CLOSED.support: a row's label carries no figure, and a column with no supported cell is no column of a comparison.
+    const rowsS = idx ? rows.filter((r) => !figuresIn(r.label).length) : rows;
+    if (idx ? rowsS.length > 0 && opts.every((_, j) => rowsS.some((r) => r.cells[j])) : rows.length) comparison = { options: opts, rows: rowsS };
   }
-  const conditions = arr(d.conditions, 6).map(reading("conditions")).filter(Boolean) as Cited[];
-  const risks = arr(d.risks, 6).map(reading("risks")).filter(Boolean) as Cited[];
+  const conditions = arr(d.conditions, 6).map(idx ? (x: any) => lineS(x, x?.text, "conditions") : reading("conditions")).filter(Boolean) as Cited[];
+  const risks = arr(d.risks, 6).map(idx ? (x: any) => lineS(x, x?.text, "risks") : reading("risks")).filter(Boolean) as Cited[];
   // D-073 (live-9 C9: 10 lines drafted, 5 kept, and the reply said "I couldn't confirm anything on Citadel"; C22: 4 kept, no_sources):
   // every kept, cited line counts toward the answer (a summary point, a comparison cell, a condition, a risk). And the pages' own
   // sentences (pageSentences, word for word, each citing its page) are used not only when the draft gave no line, but whenever the
@@ -525,16 +570,26 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   const asked = `${i.ask ?? ""} ${i.question}`;
   // 2026-11-13: by the sentence's own words or the sentence before it on the page; the page's title never makes it so.
   const payOk = (l: { text: string; page: SourcePage; prev?: string }) => !covers(l.text, PAY_PART) || aboutAsked(l.text, l.prev ?? "", asked);
-  const addPage = (l: { text: string; page: SourcePage }) => { if (keptLines().some((x) => x.text === l.text)) return; points.push({ text: l.text, cite: [num(l.page)] }); auditFromPages(audit); };
-  for (const part of parts.filter((pt) => !keptLines().some((l) => covers(l.text, pt)))) for (const l of pageSentences(pages, part.words, companies0, 6).filter(payOk).slice(0, 1)) addPage(l);
+  // FAIL_CLOSED.support: a page's own sentence is shown as what it is, in quotation marks; a question on the page states nothing.
+  const own = (t: string) => idx ? inQuotes(t) : t, stated = (l: { text: string }) => !idx || !/\?$/.test(l.text);
+  const addPage = (l: { text: string; page: SourcePage }) => { if (keptLines().some((x) => x.text === l.text || x.text === own(l.text))) return; points.push({ text: own(l.text), cite: [num(l.page)] }); if (idx) srcOf.set(own(l.text), l.text); auditFromPages(audit); };
+  for (const part of parts.filter((pt) => !keptLines().some((l) => covers(l.text, pt)))) for (const l of pageSentences(pages, part.words, companies0, 6).filter(payOk).filter(stated).slice(0, 1)) addPage(l);
   const need = Math.max(1, parts.length);
-  if (keptLines().length < need) for (const l of pageSentences(pages, contentWords(`${i.question} ${companies0.join(" ")}`), companies0, need + 6).filter(payOk)) { if (keptLines().length >= need) break; addPage(l); }
+  if (keptLines().length < need) for (const l of pageSentences(pages, contentWords(`${i.question} ${companies0.join(" ")}`), companies0, need + 6).filter(payOk).filter(stated)) { if (keptLines().length >= need) break; addPage(l); }
   const disagreements = disagreementsIn(points);
   const marked = (x: Cited) => answerable.has(x.text) ? x : { ...x, unconfirmed: true as const };
   if (!keptLines().length) {
     const checked: MarketSource[] = pages.slice(0, 4).map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || new URL(p.url).hostname, fetched_at: new Date(p.fetchedAt).toISOString(), kind: sourceKind(p.url, i.plan.companies ?? []) }));
     return { ...none(), checked, ...(i.deps.layout === "messages" ? { layout: "messages" as const } : {}),
       note: "Sources were opened but none supported an answer. Say what you looked for and that you couldn't confirm it from what they say; do not guess, and give no figure. Write no link: code lists the sources that were checked." };
+  }
+  // FAIL_CLOSED.support: the thesis is decided like any other line (one page sentence holds it and the judge says so: the model's
+  // words, citing that page; else that sentence in quotation marks); with neither, the cover is the first kept line. Never "a
+  // summary of the cited sections" that no sentence states. The title is the person's own ask, never the model's wording of it.
+  let leadS: Cited | null = null;
+  if (idx) {
+    const t = squash(d.thesis), v = sup.get(THESIS);
+    if (v && v.how !== "drop" && linkFree(v.sentence)) { const text = v.how === "model" && linkFree(t) ? t : inQuotes(v.sentence); if (text.length <= 160) leadS = { text, cite: [num(pages[v.page])] }; }
   }
   const cited = order.map((k) => byUrl.get(k)!);
   const thesis0 = squash(d.thesis), title0 = squash(d.title).slice(0, 80);
@@ -551,10 +606,10 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   const unsaidWords = [...conditions, ...risks].filter((x) => !answerable.has(x.text)).map((x) => contentWords(x.text)).filter((w) => w.size > 0);
   const echoes = (t: string) => { const have = contentWords(t); return unsaidWords.some((w) => [...w].filter((x) => have.has(x)).length / w.size >= 0.8 || (have.size > 0 && [...have].filter((x) => w.has(x)).length / have.size >= 0.8)); };
   const asSummary = fits && !said0 && !FAIL_CLOSED.figures && !figuresIn(thesis0).length && !echoes(thesis0);
-  const lead = said0 && said0.text.length <= 160 ? { text: said0.text, cite: [cited.indexOf(said0.page) + 1] } : asSummary ? { text: thesis0, cite: [] as number[] } : [...points, ...keptLines()].find((x) => x.text.length <= 160) ?? null;
+  const lead = idx ? leadS ?? [...points, ...keptLines()].find((x) => x.text.length <= 160) ?? null : said0 && said0.text.length <= 160 ? { text: said0.text, cite: [cited.indexOf(said0.page) + 1] } : asSummary ? { text: thesis0, cite: [] as number[] } : [...points, ...keptLines()].find((x) => x.text.length <= 160) ?? null;
   const thesis = lead ? lead.text : null, thesisCite = lead ? lead.cite : [];
   const qn = figuresIn(i.question);
-  const title = title0 && linkFree(title0) && figuresIn(title0).every((n) => qn.some((x) => numEq(x, n))) ? title0 : squash(i.question).replace(/[?]+$/, "").slice(0, 80);
+  const title = idx ? (stripUrls(squash(i.ask?.trim() ? i.ask : i.question)).replace(/[?]+$/, "").slice(0, 80) || "Research") : title0 && linkFree(title0) && figuresIn(title0).every((n) => qn.some((x) => numEq(x, n))) ? title0 : squash(i.question).replace(/[?]+$/, "").slice(0, 80);
   const companies = i.plan.companies ?? [];
   const sources: MarketSource[] = cited.map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || new URL(p.url).hostname, fetched_at: new Date(p.fetchedAt).toISOString(),
     kind: sourceKind(p.url, companies), ...(quoted.has(normalizeUrl(p.url)) ? { via: "search_passage" as const } : {}), ...(dated.get(normalizeUrl(p.url)) ? { dated: dated.get(normalizeUrl(p.url)) } : {}) }));
@@ -578,11 +633,12 @@ export async function researchMarket(i: { question: string; format: "inline" | "
     if (why) notes.push(`answered inline: ${why}`);
   }
   const format = file_url ? "file" : "inline";
-  return { status: "ok", format, asked: i.format, title, thesis, points, conditions, risks, comparison, sources, file_url, dropped, notes, searched, audit, ...(parts.length ? { parts: parts.map((pt) => ({ label: pt.label, words: [...pt.words] })) } : {}), answerable: [...conditions, ...risks].filter((x) => answerable.has(x.text)).map((x) => x.text), ...(gaps.length ? { gaps } : {}), ...(basis.length ? { basis } : {}), ...(disagreements.length ? { disagreements } : {}), ...(thesis ? (thesisCite.length ? { thesis_cite: thesisCite } : { thesis_summary: true }) : {}), ...(layout ? { layout } : {}),
+  const result: MarketResult = { status: "ok", format, asked: i.format, title, thesis, points, conditions, risks, comparison, sources, file_url, dropped, notes, searched, audit, ...(parts.length ? { parts: parts.map((pt) => ({ label: pt.label, words: [...pt.words] })) } : {}), answerable: [...conditions, ...risks].filter((x) => answerable.has(x.text)).map((x) => x.text), ...(gaps.length ? { gaps } : {}), ...(basis.length ? { basis } : {}), ...(disagreements.length ? { disagreements } : {}), ...(thesis ? (thesisCite.length ? { thesis_cite: thesisCite } : { thesis_summary: true }) : {}), ...(layout ? { layout } : {}),
     note: format === "file"
       ? "Reply in one or two plain sentences: the thesis, then that the full brief with its sources is in the file. Write no link and no figure: code sends the file link."
       : layout ? WEB_NOTE + (disagreements.length ? " The sources differ on a figure (see disagreements): give each value with its source number and say they differ; never pick one." : "")
       : `Reply in one to three short sentences using only the points above (and the comparison, if any). Put the source number after each claim, like [1]. Write no link: code adds the numbered sources after your reply. Use no figure, name or date that is not in the points.${disagreements.length ? " The sources differ on a figure (see disagreements): give each value with its source number and say they differ; never pick one." : ""}` };
+  return idx ? markSupported(result, idx, cited.map(pidx)) : result;
 }
 
 const STAT_WORD = /\b(median|average|mean)\b/gi;
@@ -620,12 +676,33 @@ export function onlySaysUnconfirmed(s: string): boolean {
   const after = t.slice(m.index + m[0].length);
   return ONLY_LOOKED.test(t.slice(0, m.index).trim()) && ABOUT_CONFIRMING.test(`${m[0]}${after}`) && !SECOND_CLAUSE.test(after);
 }
+// FAIL_CLOSED.support (review of #807: "I couldn't confirm it (interns there are paid extremely well)." and "I couldn't confirm that
+// Citadel interns earn less than the industry-leading rate they are famous for." went out whole): a could-not-confirm sentence may
+// name what the person asked about and nothing else. It is one only when it has the shape above AND, with the words of the person's
+// own message removed, every word left is a word of saying so (confirming, finding, the sources, the answer); any other word, a
+// figure, or a name the person did not write makes it a sentence like any other, which must be supported or go.
+const UNCONFIRMED_FRAME = contentWords("confirm confirmed verify verified find found locate determine establish source sources page pages read opened checked looked searched answer figure number information anything exact reliable sorry unfortunately able unable sure");
+export function pureUnconfirmed(s: string, ask: string): boolean {
+  const t = bare(s);
+  if (!onlySaysUnconfirmed(t)) return false;
+  const asked = contentWords(ask), said = new Set(String(ask ?? "").toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}&'-]*/gu) ?? []);
+  const rest = t.replace(new RegExp(SAYS_UNCONFIRMED.source, "gi"), " ");
+  const names = (rest.match(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}\p{N}&'-]*/gu) ?? []).map((w) => w.toLowerCase().replace(/'s$/, ""));
+  return [...contentWords(rest)].every((w) => asked.has(w) || UNCONFIRMED_FRAME.has(w)) && names.every((w) => said.has(w) || /^(?:i|i'm|i've|sorry|unfortunately)$/.test(w));
+}
 // The reply, enforced in code: every link the model wrote is removed; a citation number with no source is removed; an inline
 // sentence stands only when it cites a source, every figure in it is on a kept point citing that source, and every name in it is
 // named by a kept point citing that source (a file reply's figures must be on a kept point); the inline answer ends with its numbered sources (each a page fetched this turn, with its
 // read date). With nothing left, the answer is the kept points themselves; with no source at all, only a sentence saying research
 // could not confirm an answer, else the plain no-source line.
-export function enforceMarketReply(reply: string, r: MarketResult, shown: { text: string; url: string | null }[] = []): string {
+export function enforceMarketReply(reply: string, r: MarketResult, shown: { text: string; url: string | null }[] = [], pre?: { body?: string }): string {
+  // FAIL_CLOSED.support: this function cannot ask the judge, so on its own it lets no sentence of the model's through (the reply is
+  // read as empty: the kept lines answer); enforceMarketReplySupported checks the reply and passes what stood as `pre`. A result
+  // that was not built with the switch on has lines no one checked: it is answered as not confirmed, with its pages.
+  if (FAIL_CLOSED.support) {
+    if (!pre) reply = "";
+    if (r.status === "ok" && !supportOf(r)) r = { status: "no_sources", format: "inline", notes: r.notes, searched: r.searched, note: "", checked: r.sources, ...(r.layout ? { layout: r.layout } : {}) };
+  }
   // D-067 (G7, live-6 C22): a figure Trainee already showed in this conversation (its own earlier reply, from the posting or source
   // it named there; career_brain.ts passes those lines) may be said again; every figure of the sentence must be on such a line.
   // Such a sentence carries its source: the link of the line its figures are on goes after the answer (D-067 (d)).
@@ -711,7 +788,7 @@ export function enforceMarketReply(reply: string, r: MarketResult, shown: { text
     .split(/(?<=[.!?](?:\s*\[\d+\])*)\s+/).filter((s) => s.trim() && !restates(s) && ((r.format === "file" ? figureOk(s, null) && onRecord(s) && statOk(s, items) : supported(s)) || (!/\[\d+\]/.test(s) && wasShown(s)))).join(" ").trim();
   // D-060 (C9): in the messages layout the model's paragraphs (one topic each) are kept as paragraphs.
   const paras = r.layout === "messages" && r.format !== "file";
-  let body = paras ? reply.split(/\n\s*\n/).map(keep).filter(Boolean).join("\n\n") : keep(reply);
+  let body = pre?.body !== undefined ? pre.body : paras ? reply.split(/\n\s*\n/).map(keep).filter(Boolean).join("\n\n") : keep(reply);
   // D-073 (live-9 C9, C22): the kept lines are the answer when none of the model's sentences stood: every kept line counts (a summary
   // point, a comparison cell, a condition, a risk), each with its source number (its link, in the messages layout), one line for each
   // part the person asked about first. A part the model's answer left out gets its kept line after it, with its source.
@@ -739,6 +816,55 @@ export function enforceMarketReply(reply: string, r: MarketResult, shown: { text
   if (r.format === "file") return body || (r.thesis ?? "") || pool.filter((p) => labelOk(`${p.text} ${p.cite.map((n) => `[${n}]`).join("")}`)).slice(0, 2).map((p) => p.text.replace(/[.]?$/, ".")).join(" ") || NO_SOURCES;
   if (r.layout === "messages") return messagesLayout(body, r.sources);
   return `${body}\n\n${r.sources.map(sourceLine).join("\n")}`;
+}
+// FAIL_CLOSED.support: the reply, sentence by sentence (every line, a sentence in parentheses or after a could-not-confirm sentence
+// included). A sentence stands as written only when it is a kept line (already decided), a could-not-confirm sentence that says
+// nothing else (pureUnconfirmed), a pay line this conversation already showed, word for word, or a sentence that passes both layers
+// against the pages it cites (all the cited pages when it cites none), in ONE batched judge call; one that fails the judge is
+// replaced by the page's own sentence in quotation marks with its citation; one with no page sentence is removed. With the switch
+// off this is enforceMarketReply.
+const plainLine = (s: string) => bare(s).replace(/\s*[.!?]+$/, "");
+export async function enforceMarketReplySupported(reply: string, r: MarketResult, shown: { text: string; url: string | null }[] = [], o: { judge?: SupportJudge | null; ask?: string } = {}): Promise<string> {
+  if (!FAIL_CLOSED.support) return enforceMarketReply(reply, r, shown);
+  const ask = String(o.ask ?? "");
+  const pieces = (t: string) => String(t ?? "").split(/\n+/).flatMap((l) => stripUrls(l).split(/(?<=[.!?]["')*_]*(?:\s*\[\d+\])*)\s+/)).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x));
+  const shownWhole = (s: string) => shown.some((l) => plainLine(l.text) === plainLine(s));
+  const sup = r.status === "ok" ? supportOf(r) : null;
+  if (r.status !== "ok" || !sup) {
+    const all = pieces(reply), first = all.find((s) => pureUnconfirmed(s, ask));
+    return enforceMarketReply(all.filter((s, k) => (s === first && all.indexOf(s) === k) || shownWhole(s)).join(" "), r, shown, {});
+  }
+  const max = r.sources.length, inline = r.format !== "file";
+  const kept: Cited[] = [...r.points, ...(r.comparison?.rows ?? []).flatMap((x) => x.cells.flatMap((c) => c ? [{ text: c.value, cite: c.cite }] : [])), ...r.conditions, ...r.risks];
+  const kindOf = (n: number) => r.sources.find((x) => x.n === n)?.kind;
+  const tag = (text: string, cite: number[]) => !cite.length || cite.some((c) => { const k = kindOf(c); return !k || k === "official" || k === "reported"; }) || UNVERIFIED_LABEL.test(text) ? "" : cite.every((n) => kindOf(n) === "anecdote") ? " (anecdote)" : " (self-reported)";
+  const show = (text: string, cite: number[]) => inline ? `${text.replace(/[.]?$/, "")}${tag(text, cite)} ${cite.map((n) => `[${n}]`).join("")}.` : text;
+  const wants: Wanted[] = [], rows: (string | number)[][] = [];
+  for (const para of r.layout === "messages" && inline ? reply.split(/\n\s*\n/) : [reply]) {
+    const row: (string | number)[] = [];
+    for (const s of pieces(para)) {
+      const line = kept.find((p) => plainLine(p.text) === plainLine(s));
+      if (line) { row.push(show(line.text, line.cite)); continue; }
+      if (pureUnconfirmed(s, ask) || shownWhole(s)) { row.push(bare(s)); continue; }
+      const cs = [...s.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1])).filter((n) => n >= 1 && n <= max).map((n) => sup.pageOfN[n - 1]).filter((k) => k >= 0);
+      const cites = /\[\d+\]/.test(s);
+      row.push(wants.length); wants.push({ claim: bare(s), pages: cites ? (cs.length ? cs : [-1]) : sup.pageOfN.length ? sup.pageOfN : [-1] });
+    }
+    rows.push(row);
+  }
+  const vs = await decide(wants, sup.idx, o.judge);
+  const said = new Set(kept.map((p) => plainLine(p.text.replace(/^"(.*)"$/s, "$1")).toLowerCase()).filter((k) => rows.flat().some((x) => typeof x === "string" && plainLine(x.replace(/"/g, "")).toLowerCase().includes(k))));
+  const body = rows.map((row) => row.map((x) => {
+    if (typeof x === "string") return x;
+    const v = vs[x], n = v.how === "drop" ? 0 : sup.pageOfN.indexOf(v.page) + 1;
+    if (v.how === "drop" || n < 1) return "";
+    // A page sentence that stands in for a sentence is said once: not again beside the kept line or the quote that already says it.
+    const text = v.how === "model" ? wants[x].claim : inQuotes(v.sentence), key = plainLine(v.how === "model" ? text : v.sentence).toLowerCase();
+    if (said.has(key)) return "";
+    said.add(key);
+    return show(text, [n]);
+  }).filter(Boolean).join(" ")).filter(Boolean).join("\n\n");
+  return enforceMarketReply("", r, shown, { body });
 }
 function sourceLine(s: MarketSource): string {
   const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });

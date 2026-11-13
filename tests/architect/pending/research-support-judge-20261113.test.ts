@@ -777,3 +777,70 @@ Deno.test("round 4.10: whole turns with a judge that says yes only to a page's o
     ok(!BAD4.test(t.reply.split("\n\n[1] ")[0]) && !/\bAll Citadel\b/.test(t.reply), `${rep} => ${t.reply}`);
   }
 });
+
+// ================================================================================================ round 5 (review of round 4)
+import { UNCHECKED_LINE } from "../../../supabase/functions/_shared/agent/research/support.ts";
+import { measureApproval } from "../../../evals/research-support/approval.ts";
+const K5 = "Citadel interns earn $5,000 a week.";
+const longPad = (n: number) => Array.from({ length: n }, (_, k) => `The firm keeps meeting room number ${k + 1} on the upper floor of its tower.`).join("\n");
+
+Deno.test("round 5.1: a figure, date or name of the claim is on the supporting unit itself; the title lends none of them", () => {
+  const idx = indexPages([{ url: "https://blog.example/x", title: "Myth: Citadel interns earn $5,000 a week", text: "The real figure is $2,000 a week for interns." }], undefined, ["Citadel"]);
+  eq(findSupport(K5, idx), null);
+  const role = indexPages([{ url: "https://www.citadel.com/x", title: "Software Engineer 2, Backend: posting on Citadel's board", text: "Base pay: $196,000 to $230,000 USD." }], undefined, ["Citadel"], { sites: ["citadel.com"] });
+  eq(findSupport("Citadel lists $196,000 to $230,000 USD for the Software Engineer 2, Backend role.", role), null); // "2" and the role's name are only in the title
+  ok(findSupport("Citadel lists $196,000 to $230,000 USD.", role)); // the owner's name is the page's; the figures are the unit's
+});
+
+Deno.test("round 5.2: what disputes, dates or footnotes a unit reaches the judge, however far away on the page", () => {
+  for (const [text, key] of [
+    [`${K5}\n${longPad(30)}\nNone of the statements above is accurate.`, "None of the statements above is accurate"],
+    [`We used to say the following in our brochure, and it is wrong now.\n${longPad(30)}\n${K5}`, "it is wrong now"],
+    [`${K5}\n${longPad(30)}\nThe line at the top is a lie told by a forum troll.`, "a lie"],
+    [`This post was written in the summer of 2017, long ago.\n${longPad(30)}\n${K5}`, "summer of 2017"],
+    [`${K5}[1]\n${longPad(30)}\n[1] A recruiter's estimate, never confirmed by the firm.`, "never confirmed"],
+    [`${K5}¹\n${longPad(30)}\n¹ Applies to PhD quant interns only.`, "PhD quant interns only"],
+    [`${K5}*\n${longPad(30)}\n* Figure from 2019, before the program was cut.`, "Figure from 2019"],
+    [`Citadel interns earn $5,000 a week (a)\n${longPad(30)}\n(a) This figure is the London office in pounds converted at 2019 rates.`, "converted at 2019 rates"],
+  ] as const) {
+    const p = passageOf([{ url: "https://blog.example/x", title: "Citadel notes", text }], K5);
+    ok(p && p.includes(key) && p.length <= 2500, `${key}: ${p?.slice(0, 300)}`);
+  }
+  // A short page travels whole.
+  const short = passageOf([{ url: "https://blog.example/x", title: "Citadel notes", text: `${K5}\nInterns start in June.\nThe program lasts ten weeks.\nHousing is offered in Chicago.\nThe office is downtown.\nNone of the statements above is accurate.` }], K5)!;
+  ok(/Whole page/.test(short) && short.includes("None of the statements above is accurate"), short);
+});
+
+Deno.test("round 5.3: the judge cannot answer: the pages' own units, labelled as not checked, never blank, never the model's words", async () => {
+  const down: SupportJudge = async () => { throw new Error("529 overloaded"); };
+  for (const judge of [down, null]) {
+    const r = await mk3([{ url: U, title: "Citadel notes", text: `${K5}\nInterns start in June.` }], { summary: [{ text: "Citadel interns earn $9,000 a week.", quote: K5, url: U }] }, judge);
+    const out = bodyOf3(await enforceMarketReplySupported("Citadel interns earn $9,000 a week [1]. Citadel is the best payer.", r, [], { judge, ask: "what does citadel pay interns" }));
+    ok(out.startsWith(`"${K5}" [1].`) && out.endsWith(UNCHECKED_LINE) && !/9,000|best payer/.test(out), out);
+  }
+  // A unit whose page disputes, dates or disowns it is not shown even then: code's could-not-confirm line and the pages.
+  for (const text of [`${K5}\nThe line above is a lie.`, `${K5}\nUpdated 2019.`, "Citadel Securities pays interns $60 an hour."]) {
+    const r = await mk3([{ url: U, title: "Citadel notes", text }], { summary: [{ text: K5, quote: K5, url: U }] }, down);
+    eq(bodyOf3(await enforceMarketReplySupported(`${K5.replace(".", "")} [1].`, r, [], { judge: down, ask: "what does citadel pay interns" })), NOT_CONFIRMED, text);
+  }
+  // A judge that answers no to everything is an answer, not an outage: nothing unchecked is shown.
+  const r = await mk3([{ url: U, title: "Citadel notes", text: `${K5}\nInterns start in June.` }], { summary: [{ text: K5, quote: K5, url: U }] }, allNo);
+  eq(bodyOf3(await enforceMarketReplySupported(`${K5.replace(".", "")} [1].`, r, [], { judge: allNo, ask: "what does citadel pay interns" })), NOT_CONFIRMED);
+});
+
+Deno.test("round 5.4: a heading that is another name lends the owner's name to nothing under it; a heading is never a quoted line", async () => {
+  const lentUnder = (heading: string) => indexPages([{ url: "https://blog.example/x", title: "Citadel internship guide", text: `${longPad(30)}\n${heading}\nInterns earn $7,500 a week in pay.` }], undefined, ["Citadel"]).pages[0].sentences.find((u: any) => /7,500/.test(u.text))?.lent ?? null;
+  eq(lentUnder("Tower Research"), null);
+  eq(lentUnder("Internship Guide"), "Citadel"); // a heading in the words of the page's own title is not another name
+  const r = await mk3([{ url: U, title: "Citadel filings", text: "Form 10-K Citadel LLC.\nCitadel employs 4,000 people in its offices." }], { summary: [{ text: "Citadel files a Form 10-K.", quote: "Form 10-K Citadel LLC", url: U }] }, quotesOnly);
+  ok(!JSON.stringify(r.points ?? []).includes("Form 10-K Citadel LLC"), JSON.stringify(r.points));
+});
+
+Deno.test("round 5.6: the live measurement runs only under a DECISIONS row written for it, with a cap at least the run's", () => {
+  const D = "| D-090 | 2026-11-14 | Owner: run evals/research-support/judge-measure.ts live, cap $0.50 | approved |\n| D-091 | 2026-11-14 | Another spend, cap $5 | approved |";
+  eq(measureApproval("D-090", 0.5, D), null);
+  ok(measureApproval("D-090", 0.75, D)); // over the row's cap
+  ok(measureApproval("D-091", 0.5, D)); // a row for something else
+  ok(measureApproval("D-099", 0.5, D)); // no such row
+  ok(measureApproval("PENDING", 0.5, D));
+});

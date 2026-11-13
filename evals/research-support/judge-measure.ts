@@ -16,6 +16,7 @@ import { abbreviated } from "../../supabase/functions/_shared/agent/research/mar
 import { callModel, modelConfig, newMeter, PRICES, TRAINEE_MODEL } from "../../supabase/functions/_shared/model_gateway.ts";
 import * as bud from "../../supabase/functions/_shared/model_budget.ts";
 import { openLiveRunLedger } from "../career/eval_budget.ts";
+import { measureApproval } from "./approval.ts";
 
 const BATCH = JUDGE_MAX_CLAIMS; // as a turn batches them (support.ts)
 // What layer A sends on: the claim beside the passage of the one page unit that holds its hard parts (round 3: the unit with its
@@ -46,7 +47,10 @@ if (!Deno.args.includes("--live")) { console.log("Not run: pass --live to send t
 const opt = (k: string) => { const i = Deno.args.indexOf(k); return i >= 0 ? Deno.args[i + 1] : undefined; };
 const budget = Number(opt("--budget-usd") ?? 0), out = opt("--out");
 if (!(budget > 0 && budget <= 1) || !out) { console.log("refused: --live needs --budget-usd (above 0, at most 1) and --out <dir>"); Deno.exit(3); }
-if (!/^D-\d{3}[a-z]?$/.test(Deno.env.get("SUPPORT_JUDGE_SPEND_APPROVED") ?? "")) { console.log("refused: --live needs SUPPORT_JUDGE_SPEND_APPROVED=<the DECISIONS.md line>"); Deno.exit(3); }
+{ // a DECISIONS row written for this measurement, with a cap at least this run's (approval.ts)
+  const why = measureApproval(Deno.env.get("SUPPORT_JUDGE_SPEND_APPROVED") ?? "", budget, await Deno.readTextFile(new URL("../../docs/architect/DECISIONS.md", import.meta.url)));
+  if (why) { console.log(`refused: ${why}`); Deno.exit(3); }
+}
 if (!Deno.env.get("ANTHROPIC_API_KEY")) { console.log("refused: --live needs ANTHROPIC_API_KEY"); Deno.exit(3); }
 // The shared $80 ledger first (refused: no model call); then an in-process gate of the same cap on every call, so a call that does
 // not fit is refused before it is sent and nothing is counted twice.

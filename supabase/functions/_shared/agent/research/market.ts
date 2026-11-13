@@ -518,7 +518,7 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   // page sentence stands in its place in quotation marks, or the line is dropped. Nothing the old word checks allowed is taken on
   // trust: checkLine, sayer and the unconfirmed-reading form are not used on this path. A comparison cell has no quoted form (its
   // row label and column are judged with it): not supported, it is empty.
-  const idx = FAIL_CLOSED.support ? indexPages(pages, abbreviated, companies0, { sites: found.sites ?? [], ask: i.ask?.trim() ? i.ask : i.question }) : null;
+  const idx = FAIL_CLOSED.support ? indexPages(pages, abbreviated, companies0, { sites: [...(i.plan.sites ?? []), ...(found.sites ?? [])], ask: i.ask?.trim() ? i.ask : i.question }) : null;
   // Round 2: a page's own sentence is offered only as one unit of its page that may be quoted (support.ts quotable), never as two
   // lines read as one sentence.
   const units = new Set((idx?.pages ?? []).flatMap((p) => p.sentences.filter((u) => u.quotable).map((u) => u.text)));
@@ -623,7 +623,7 @@ export async function researchMarket(i: { question: string; format: "inline" | "
     if (unchecked) notes.push("the judge could not check the lines this turn: the pages' own sentences are shown, labelled as not checked");
   }
   if (!keptLines().length) {
-    const checked: MarketSource[] = pages.slice(0, 4).map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || new URL(p.url).hostname, fetched_at: new Date(p.fetchedAt).toISOString(), kind: sourceKind(p.url, i.plan.companies ?? [], FAIL_CLOSED.support ? found.sites ?? [] : undefined) }));
+    const checked: MarketSource[] = pages.slice(0, 4).map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || new URL(p.url).hostname, fetched_at: new Date(p.fetchedAt).toISOString(), kind: sourceKind(p.url, i.plan.companies ?? [], FAIL_CLOSED.support ? [...(i.plan.sites ?? []), ...(found.sites ?? [])] : undefined) }));
     return { ...none(), checked, ...(i.deps.layout === "messages" ? { layout: "messages" as const } : {}),
       note: "Sources were opened but none supported an answer. Say what you looked for and that you couldn't confirm it from what they say; do not guess, and give no figure. Write no link: code lists the sources that were checked." };
   }
@@ -656,7 +656,7 @@ export async function researchMarket(i: { question: string; format: "inline" | "
   const title = idx ? (stripUrls(squash(i.ask?.trim() ? i.ask : i.question)).replace(/[?]+$/, "").slice(0, 80) || "Research") : title0 && linkFree(title0) && figuresIn(title0).every((n) => qn.some((x) => numEq(x, n))) ? title0 : squash(i.question).replace(/[?]+$/, "").slice(0, 80);
   const companies = i.plan.companies ?? [];
   const sources: MarketSource[] = cited.map((p, k) => ({ n: k + 1, url: p.url, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || new URL(p.url).hostname, fetched_at: new Date(p.fetchedAt).toISOString(),
-    kind: sourceKind(p.url, companies, idx ? found.sites ?? [] : undefined), ...(quoted.has(normalizeUrl(p.url)) ? { via: "search_passage" as const } : {}), ...(dated.get(normalizeUrl(p.url)) ? { dated: dated.get(normalizeUrl(p.url)) } : {}) }));
+    kind: sourceKind(p.url, companies, idx ? [...(i.plan.sites ?? []), ...(found.sites ?? [])] : undefined), ...(quoted.has(normalizeUrl(p.url)) ? { via: "search_passage" as const } : {}), ...(dated.get(normalizeUrl(p.url)) ? { dated: dated.get(normalizeUrl(p.url)) } : {}) }));
   const layout = i.deps.layout === "messages" ? "messages" as const : undefined;
 
   // The format: the brain's choice, kept unless a File cannot honestly be made.

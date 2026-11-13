@@ -198,7 +198,7 @@ export async function researchCompany(i: { company: string; role?: string | null
   // periods, years and names AND the judge says that sentence states it; else that page sentence in quotation marks; else dropped.
   // The company's name is lent to no line (D-070's lending is off on this path). What has no quoted form is not shown at all: the
   // model's "unknowns", a product's angle, and the questions built around a tension the model named.
-  const idx = FAIL_CLOSED.support ? indexPages(pages, abbreviated, [company], { sites: found.sites ?? [], ask: i.question }) : null;
+  const idx = FAIL_CLOSED.support ? indexPages(pages, abbreviated, [company], { sites: [...(i.plan.sites ?? []), ...(found.sites ?? [])], ask: i.question }) : null;
   const units = new Set((idx?.pages ?? []).flatMap((p) => p.sentences.filter((u) => u.quotable).map((u) => u.text)));
   const pidx = (p: SourcePage | null) => p ? pages.indexOf(p) : -1;
   const FRAME = {}, sup = new Map<unknown, Verdict>();

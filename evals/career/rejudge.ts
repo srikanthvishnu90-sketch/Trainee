@@ -1,4 +1,4 @@
-// Re-judge stored transcripts with the Claude judges, without running any brain (owner directive 2026-11-02: Claude only, $70).
+// Re-judge stored transcripts with the Claude judges, without running any brain (owner directive 2026-11-02: Claude only, $80).
 //
 //   Replay (the baseline for S3 and the judge-pair calibration):
 //     deno run -A evals/career/rejudge.ts --from-branch ci/brain-eval --run <ci run id> [--new-run <id>] [--parallel 1] [--no-log]
@@ -126,7 +126,7 @@ if (import.meta.main) {
   const parallel = Math.max(1, Number(opt("--parallel") ?? get("EVAL_PARALLEL") ?? 1) || 1);
   const opened = openGate(bud, get, before, target, parallel);
   if ("error" in opened) { console.log(`NOT RUN: ${opened.error}.`); Deno.exit(2); }
-  // Shared ledger: refuse to start unless the one $70 ledger can be read; spend before = what ALL runs recorded in it.
+  // Shared ledger: refuse to start unless the one $80 ledger can be read; spend before = what ALL runs recorded in it.
   try { const st = await bud.assertRunMayStart(opened.gate, undefined, { model: "rejudge", role: "eval" }); if (opened.shared) { before = st.total / 1e6; console.log(`shared ledger: $${(st.total / 1e6).toFixed(3)} recorded across all runs; remaining allowance $${Math.max(0, (st.target - st.total) / 1e6).toFixed(3)} of $${(st.target / 1e6).toFixed(2)}`); } }
   catch (e) { console.log(e instanceof Error ? e.message : String(e)); Deno.exit(2); }
   const meter = gw.newMeter();

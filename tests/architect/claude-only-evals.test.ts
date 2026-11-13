@@ -196,7 +196,7 @@ Deno.test("CO/12 brain-eval.yml: every run block parses in bash (the push's-apos
   assert(!/push's/.test(req), "the apostrophe that closed the shell quote is back");
   assert(!/openai|gpt-/i.test(wf.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n")), "an OpenAI name is in the workflow");
   assert(/ANTHROPIC_API_KEY: \$\{\{ secrets\.ANTHROPIC_API_KEY \}\}/.test(wf) && /EVAL_JUDGE_MODEL: claude-sonnet-5-5/.test(wf) && /EVAL_JUDGE_MODEL_2: claude-haiku-5-5/.test(wf));
-  assert(/MODEL_BUDGET_TARGET_USD: "70"/.test(wf) && /MODEL_BUDGET_HARD_USD: "70"/.test(wf) && /ANTHROPIC_EVAL_BUDGET_USD/.test(wf) && !/\bEVAL_BUDGET_USD:/.test(wf));
+  assert(/MODEL_BUDGET_TARGET_USD: "80"/.test(wf) && /MODEL_BUDGET_HARD_USD: "80"/.test(wf) && /ANTHROPIC_EVAL_BUDGET_USD/.test(wf) && !/\bEVAL_BUDGET_USD:/.test(wf));
   assert(/--model claude/.test(wf) && !/--model openai/.test(wf));
   assert(/rejudge\.ts --from-branch ci\/brain-eval --run/.test(wf), "no rejudge action");
 });

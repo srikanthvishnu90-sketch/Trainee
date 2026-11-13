@@ -5,7 +5,7 @@
 // sent the graduation-window template with "as of 2026-10-13" and then "The limit resets at midnight UTC."
 //
 // The limits, from the model call's own refusal (model_calls.ts ModelUnavailableError types):
-//   global        the product's AI budget is used up (model_budget.ts, $70 for the cycle): the owner must approve more
+//   global        the product's AI budget is used up (model_budget.ts, $80 for the cycle): the owner must approve more
 //   budget_day    an approved day window's own cap is used up: it resets when the budget day turns, midnight US Central
 //                 (model_budget_day: the America/Chicago date; chicagoDay is its twin), said in the person's own zone
 //   budget_after  the budget window ended: the owner must approve more

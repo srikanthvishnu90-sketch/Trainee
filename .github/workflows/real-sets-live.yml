@@ -1,9 +1,9 @@
-# REAL SETS, live mode (D-068, owner 2026-11-12: "Show real proof ... before deploying"; $20 over D-060's $10, the $70 total stands).
+# REAL SETS, live mode (D-068, owner 2026-11-12: "Show real proof ... before deploying"; $20 over D-060's $10, the $80 total stands).
 # Runs one real set's --live mode (evals/real-sets/README.md): `research` (item 10: 20 real companies, Claude's web search plus the
 # free sources, the real model drafting, at most $5) or `people` (item 5: 20 real school x employer asks through the real
 # find_people tool and its guard, at most $3). It runs only on a push to ci/real-sets-live that changes evals/real-sets/**, so nothing
 # on trunk or a PR ever spends. The request is evals/real-sets/run-request.json: {set, approval (a DECISIONS.md line), budget_usd}.
-# The cap is reserved at the shared $70 ledger BEFORE the run (refused if it does not fit what remains) and settled to the metered
+# The cap is reserved at the shared $80 ledger BEFORE the run (refused if it does not fit what remains) and settled to the metered
 # cost after it, as mirror-conversation.yml does; the ledger secrets go only to those two steps. Inside the run the cap is also a
 # hard in-process budget gate (memoryBudgetGate). Public GETs only and the model API; nothing is sent to anyone, no real name is
 # stored (people: sha256 prefixes).
@@ -41,8 +41,8 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           EVAL_LEDGER: shared
-          MODEL_BUDGET_TARGET_USD: "70"
-          MODEL_BUDGET_HARD_USD: "70"
+          MODEL_BUDGET_TARGET_USD: "80"
+          MODEL_BUDGET_HARD_USD: "80"
           CAP_USD: ${{ steps.req.outputs.budget }}
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then echo "NOT RUN: a secret is missing (ANTHROPIC_API_KEY or the shared ledger); no model call was made"; exit 2; fi
@@ -52,9 +52,9 @@ jobs:
             if (!gate) { console.log("NOT RUN: the shared ledger could not be opened"); Deno.exit(2); }
             const st = await gate.status();
             const r = await gate.reserve(Math.round(Number(Deno.env.get("CAP_USD")) * 1e6), { model: "claude-sonnet-5-5", role: "eval" });
-            if (!r?.ok || !r.id) { console.log(`NOT RUN: the ledger refused the cap (recorded $${(st.total / 1e6).toFixed(4)} of $70):`, JSON.stringify(r)); Deno.exit(2); }
+            if (!r?.ok || !r.id) { console.log(`NOT RUN: the ledger refused the cap (recorded $${(st.total / 1e6).toFixed(4)} of $80):`, JSON.stringify(r)); Deno.exit(2); }
             Deno.writeTextFileSync(Deno.env.get("GITHUB_OUTPUT"), `id=${r.id}\n`, { append: true });
-            console.log(`reserved $${Deno.env.get("CAP_USD")} (recorded before: $${(st.total / 1e6).toFixed(4)} of $70)`);
+            console.log(`reserved $${Deno.env.get("CAP_USD")} (recorded before: $${(st.total / 1e6).toFixed(4)} of $80)`);
           '
       - name: The real set, live
         id: run
@@ -80,8 +80,8 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           EVAL_LEDGER: shared
-          MODEL_BUDGET_TARGET_USD: "70"
-          MODEL_BUDGET_HARD_USD: "70"
+          MODEL_BUDGET_TARGET_USD: "80"
+          MODEL_BUDGET_HARD_USD: "80"
           ID: ${{ steps.reserve.outputs.id }}
           SPENT: ${{ steps.run.outputs.spent }}
         run: |
@@ -93,7 +93,7 @@ jobs:
             const micros = spent && /^[0-9.]+$/.test(spent) ? Math.ceil(Number(spent) * 1e6) : null;
             const ok = await gate.settle(Deno.env.get("ID"), micros);
             const st = await gate.status();
-            console.log(`settled ${micros === null ? "the full cap (cost not proven)" : "$" + spent}: ${ok ? "recorded" : "NOT recorded"}; ledger now $${(st.total / 1e6).toFixed(4)} of $70`);
+            console.log(`settled ${micros === null ? "the full cap (cost not proven)" : "$" + spent}: ${ok ? "recorded" : "NOT recorded"}; ledger now $${(st.total / 1e6).toFixed(4)} of $80`);
             if (!ok) Deno.exit(1);
           '
       - uses: actions/upload-artifact@v4

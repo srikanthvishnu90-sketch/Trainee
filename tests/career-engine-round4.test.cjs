@@ -63,9 +63,14 @@ test("3: the submit window lets out exactly one request: the approved form, to i
   const thanks = { method: "GET", url: "http://h/app/thanks?ref=1", resourceType: "document", navigation: true };
   assert.equal(pa.submitWindowVerdict(thanks, st()), "abort", "a GET navigation with parameters before the approved post");
   assert.equal(pa.submitWindowVerdict({ ...thanks, redirected: true }, { ...st(), used: true }), "allow", "the approved post's own redirect");
+  // Round 6 (architect amendment): and, once the approved POST has been answered, the page's own outcome page on its own origin with
+  // parameters that carry no answer (y1).
+  assert.equal(pa.submitWindowVerdict(thanks, { ...st(), used: true }), "abort", "the approved post sent, its answer not yet in");
+  assert.equal(pa.submitWindowVerdict(thanks, { ...st(), used: true, answered: true }), "allow", "the outcome page after the approved post's answer");
   assert.equal(pa.submitWindowVerdict(req({ contentType: "application/json", navigation: false, resourceType: "fetch", body: JSON.stringify({ first_name: "Casey", email: "c@x" }) }), st()), "allow", "the same answers as JSON");
   // Round 5 (architect amendment, stricter, n7): a JSON body's keys must be the form's own names or that board's own schema (Breezy:
-  // name, email, phone, resume); a key outside both (here "mail") is refused even when its value is one of the form's.
+  // name, email, phone, resume); a key outside both (here "mail": not Breezy's schema) is refused even when its value is one of the
+  // form's. This drops the round-4 allowed case of an API with its own key names: only a known board schema is accepted.
   const api = (body, ats) => pa.submitWindowVerdict(req({ url: "http://h/api/apply", contentType: "text/plain", navigation: false, resourceType: "fetch", body: JSON.stringify(body) }), { ...st(), ats });
   assert.equal(api({ name: "Casey", email: "c@x", resume: "resume.pdf" }, "breezy"), "allow", "a board's own API, its own schema, the form's values");
   assert.equal(api({ name: "Casey", mail: "c@x", resume: "resume.pdf" }, "breezy"), "abort", "a key outside the form's names and the board's schema");

@@ -32,10 +32,12 @@ test("n3, n16-n19: during the window only assets the page already loaded from, b
     assert.equal(pa.submitWindowVerdict(get(u, t), st()), "abort", why);
 });
 
+// Round 6 (architect amendment, stricter): a constant is only a hidden input of the page at load (tests/career-engine-round6.test.cjs);
+// the h2 and h4 cases below that passed on a value found in the page's text are now refused, as the coordinator ruled acceptable.
 test("n7, h2: a JSON body's keys must be the form's own names or the board's own schema; a constant must have been on the page before the fill", () => {
   assert.equal(pa.submitWindowVerdict(post({ candidate: { email: "c@x", first: "Casey" }, answers: { q_77: "Yes", q_78: "Casey" } }), st()), "abort", "answers under innocuous keys reusing form values");
   assert.equal(pa.submitWindowVerdict(post({ first_name: "Casey", email: "c@x", licence: "Yes" }), st()), "allow", "the form's own names");
-  assert.equal(pa.submitWindowVerdict(post({ candidate: { firstname: "Casey", lastname: "Example", email: "c@x" }, job_shortcode: "AB12CD34", domain: "apply.example.test", answers: [] }, { url: "http://h/h2/api/v1/jobs/AB12CD34/apply" }), st({ ats: "workable" })), "allow", "Workable: its schema, two constants of the page");
+  assert.equal(pa.submitWindowVerdict(post({ candidate: { firstname: "Casey", lastname: "Example", email: "c@x" }, job_shortcode: "AB12CD34", domain: "apply.example.test", answers: [] }, { url: "http://h/h2/api/v1/jobs/AB12CD34/apply" }), st({ ats: "workable" })), "abort", "round 6: a value found only in the page's script is no constant (h2 refusal ruled acceptable)");
   assert.equal(pa.submitWindowVerdict(post({ candidate: { firstname: "Casey", email: "c@x" }, job_shortcode: "ZZ99ZZ99" }), st({ ats: "workable" })), "abort", "a 'constant' the page never had");
   assert.equal(pa.submitWindowVerdict(post({ name: "Casey", email: "c@x", phone: "", resume: "resume.pdf" }), st({ ats: "breezy" })), "allow", "Breezy: its own schema");
   assert.equal(pa.submitWindowVerdict(post({ name: "Casey", email: "c@x", note: "Yes" }), st({ ats: "breezy" })), "abort", "a key outside the schema");
@@ -46,7 +48,7 @@ test("h4: a form post with one extra field the page itself carried before the fi
   const mp = (extra) => `--B\r\nContent-Disposition: form-data; name="first_name"\r\n\r\nCasey\r\n--B\r\nContent-Disposition: form-data; name="email"\r\n\r\nc@x\r\n${extra}--B--\r\n`;
   const part = (n, v) => `--B\r\nContent-Disposition: form-data; name="${n}"\r\n\r\n${v}\r\n`;
   const r = (body) => ({ method: "POST", url: "http://h/app/submit", resourceType: "fetch", navigation: false, contentType: "multipart/form-data; boundary=B", body });
-  assert.equal(pa.submitWindowVerdict(r(mp(part("job_application[source]", "job_board"))), st()), "allow");
+  assert.equal(pa.submitWindowVerdict(r(mp(part("job_application[source]", "job_board"))), st()), "abort", "round 6: a field the page's script adds is no hidden input at load (h4 refusal ruled acceptable)");
   assert.equal(pa.submitWindowVerdict(r(mp(part("consent", "1"))), st()), "abort");
   assert.equal(pa.submitWindowVerdict(r(mp(part("ref", "ZZZZ"))), st()), "abort", "not on the page before");
 });

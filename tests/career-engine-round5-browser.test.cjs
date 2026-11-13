@@ -59,8 +59,11 @@ test("nothing the card did not show leaves the browser during the submit window,
     assert.deepEqual(leak, [], `${id} ${JSON.stringify(x.r).slice(0, 200)}`);
   }
 });
+// Round 6 (architect amendment, stricter): h2 and h4 add a field the page's script built from its own text, not a hidden input at
+// load; they are refused, never sent (ruled acceptable).
 test("the boards' honest shapes are sent", o, async () => {
-  for (const id of Object.keys(EXP).filter((k) => EXP[k] === "honest")) {
+  for (const id of ["h2", "h4"]) { const x = await h.run("/" + id, X[id] || {}); assert.equal(x.r.status === "submitted_page_confirmed", false, id); }
+  for (const id of Object.keys(EXP).filter((k) => EXP[k] === "honest" && !["h2", "h4"].includes(k))) {
     const x = await h.run("/" + id, X[id] || {});
     assert.equal(x.r.status, "submitted_page_confirmed", `${id} ${JSON.stringify(x.r).slice(0, 300)}`);
   }

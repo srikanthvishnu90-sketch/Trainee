@@ -529,9 +529,9 @@ Deno.test("round 3 C: on a page code knows is one asked employer's, a unit need 
   console.log(`REAL pages: ${answered} of 5 true pay claims answered with the switch on (3 with it off)`);
   // Round 9: the recorded pages are job-board postings (greenhouse.io, not the employer's own domain) whose pay units do not name the
   // employer: with no title lending, none of the five is answered (flag off answers 3). The cost of the rule, measured here.
-  // Round 12 (review: a title owns a page only off shared hosts): these postings are on greenhouse.io, a shared host, and their pay
-  // units do not name the employer, so none is answered (round 10/11: 4; flag off: 3). The measured cost of the ruling, kept exact.
-  eq(answered, 0, `${answered} of 5`);
+  // Round 13: the postings are on the employer's own Greenhouse board (boards-api.greenhouse.io/v1/boards/<slug>), its own page
+  // (round 12 answered 0, with greenhouse.io shared; flag off answers 3).
+  ok(answered >= 4, `${answered} of 5`);
   // A page titled for one employer whose unit speaks of another is the judge's to refuse: the title is in the passage.
   const j = asking("no"), pages = [{ url: U, title: "Citadel careers", text: "Unlike here, Jane Street pays interns $5,000 a week in pay." }];
   const r = await mk3(pages, { summary: [{ text: "Citadel pays interns $5,000 a week.", quote: "pays interns $5,000 a week", url: U }] }, j.judge);
@@ -712,10 +712,11 @@ Deno.test("round 4.3, 4.4 and 8.1: a lent quote is labelled by code with where i
   const lent = (url: string, title: string, text: string, o: any = {}) => indexPages([{ url, title, text }], undefined, o.subjects ?? ["Citadel"], { sites: o.sites ?? [] }).pages[0].sentences.map((u: any) => u.lent);
   const unit = "Interns earn $5,000 a week in pay.";
   eq(lent("https://www.citadel.com/careers", "Careers", unit, { sites: ["citadel.com"] }), ["Citadel"]);              // the employer's own domain
+  eq(lent("https://boards.greenhouse.io/citadel", "Jobs", unit), ["Citadel"]);                                          // round 13: its own job board
   eq(lent("https://blog.example/x", "Citadel internship guide", unit), ["Citadel"]);                                     // round 10: the title names one company alone
   eq(lent("https://blog.example/x", "Citadel internship guide", "Jane Street interns earn $5,000 a week in pay."), ["Citadel"]); // about-ness is the judge's
   for (const [url, title, sites] of [["https://community.citadel.com/t/1", "Thread", ["citadel.com"]], ["https://blog.citadel.com/x", "Post", ["citadel.com"]], ["https://sites.google.com/view/citadel-pay", "Pay", ["google.com"]], ["https://citadel.github.io/x", "Pay", ["github.io"]],
-    ["https://boards.greenhouse.io/citadel", "Jobs", ["greenhouse.io"]], ["https://blog.example/x", "Citadel vs Jane Street intern pay", []], ["https://blog.example/x", "Citadel and other top firms", []], ["https://blog.example/x", "Top 10 firms: Citadel", []], ["https://blog.example/x", "Best paying companies like Citadel", []], ["https://blog.example/x", "Citadel & Optiver compared", []]] as const)
+    ["https://boards.greenhouse.io/janestreet", "Jobs", ["greenhouse.io"]], ["https://www.greenhouse.io/blog/citadel-pay", "Citadel pay", []], ["https://blog.example/x", "Citadel vs Jane Street intern pay", []], ["https://blog.example/x", "Citadel and other top firms", []], ["https://blog.example/x", "Top 10 firms: Citadel", []], ["https://blog.example/x", "Best paying companies like Citadel", []], ["https://blog.example/x", "Citadel & Optiver compared", []]] as const)
     eq(lent(url, title, unit, { sites, subjects: url.includes("google") ? ["Google"] : ["Citadel"] }), [null], `${url} ${title}`);
   // Round 8: a unit that names someone else is still the owner page's; whether it is about the employer is the judge's question.
   eq(lent("https://www.citadel.com/x", "Careers", "Jane Street interns earn $5,000 a week in pay.", { sites: ["citadel.com"] }), ["Citadel"]);

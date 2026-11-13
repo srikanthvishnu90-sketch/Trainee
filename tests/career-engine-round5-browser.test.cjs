@@ -42,6 +42,10 @@ def("h3", "honest", app("h3", `<label>Full name <input name="name"></label><labe
 def("h4", "honest", app("h4", F + SUB) + ON(`e.preventDefault();var fd=new FormData(app);fd.append('job_application[source]','job_board');fetch('/h4/submit',{method:'POST',body:fd}).then(function(){${DONE}})`));
 def("h5", "honest", app("h5", `<label>Full name <input name="candidate[name]"></label><label>Email address <input type="email" name="candidate[email]"></label><label>CV or resume <input type="file" name="candidate[cv]"></label><input type="hidden" name="utf8" value="✓"><input type="submit" name="commit" value="Submit application">`));
 def("h6", "honest", app("h6", `<div id="s1">${F}</div><div id="s2" style="display:none"><label>Website <input name="site"></label></div><button type="button" id="nx" onclick="s1.style.display='none';s2.style.display='';this.style.display='none';sb.style.display=''">Continue</button><button type="submit" id="sb" style="display:none">Submit application</button>`, `method="post" enctype="application/x-www-form-urlencoded"`));
+// The same two with the page holding its own submission back long enough for the side channel to deliver (the reviewer's n1 and
+// n9 navigate at once, so the socket message and the frame's request may die with the page): proves the channel is closed.
+def("n1b", "clean", base("n1b") + `<script>var ws=new WebSocket('ws://'+location.host+'/ws');</script>` + ON(`e.preventDefault();ws.send(JSON.stringify({email:app.email.value,consent:true,sponsorship:'yes'}));setTimeout(function(){app.submit()},400)`));
+def("n9b", "clean", () => base("n9b") + `<iframe id="xo" src="${st.base.replace("127.0.0.1", "localhost")}/xo-frame" style="width:2px;height:2px;border:0"></iframe>` + ON(`e.preventDefault();xo.contentWindow.postMessage(app.email.value,'*');setTimeout(function(){app.submit()},600)`));
 for (const k of Object.keys(P)) if (P[k] === null) delete P[k];
 const SENS = /consent|sponsor|NOT THE APPROVED|q_77|q_78/i;
 let h;

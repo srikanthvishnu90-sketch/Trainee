@@ -42,8 +42,9 @@ stay disabled on every page until their stores exist.
 
 - **Built** (20261110160000): as above, with `watch` stored as `{ text, active }`; `payload_hash` is computed on insert from the
   content; `career_search_plan_approve_as` answers `approved`, `already`, `stale` (another hash), `superseded` (a newer version
-  exists) or `missing`. The plan-step writer is not built yet.
-- **Writes:** the career brain's plan step (agent-chat) inserts a new version; the File's `approveplan` action sets
+  exists) or `missing`. The writer is built (D-072 files writers, `_shared/career_search_plan_writer.ts`): a search set or changed
+  in chat, or a watch set, changed, paused or stopped, writes a new version when the plan differs from the newest.
+- **Writes:** agent-chat inserts a new version when the person's search or watch changes (D-072 files writers); the File's `approveplan` action sets
   `approved_at`/`approved_hash` for that exact version through the trainee-file handler (it changes only this person's
   own row - the architect's condition for `approveplan` being WO-E's).
 - **Reads:** F-04 adapter; the search reads only the newest approved version. Approval authorizes searching and
@@ -119,7 +120,9 @@ insert from the content, and `approved_at`/`approved_hash`/`approved_role`). A r
 approved row is never changed or deleted while its owner exists (a trigger). `approvedoc` (`career_material_version_approve_as`)
 approves the exact version for the role it was made for: a stale hash is `stale`, another role `wrong_role`, and approving a
 newer version leaves every approved one as it was. The apply engine must send the approved version for that role, never the
-newest (wiring the engine to read it is not part of S3).
+newest (wiring the engine to read it is not part of S3). The writer is built (D-072 files writers, `_shared/career_material_writer.ts`): every
+tailored resume or cover letter delivered in chat writes one version (one document per target posting or target, the file itself, what
+changed from the producer's own change list); the same file again writes nothing.
 
 ## Order of work (proposal)
 
@@ -161,10 +164,10 @@ planning turn. The interview time in `holds` is the page's: the person's zone, w
 | --- | --- | --- | --- | --- | --- | --- |
 | F-01 | Career brief | "show me my career brief" | `open_record_file` career_brief | account (stated facts, confirmed resume), standing, events | unreachable | reachable (drawn for everyone: what is not on record is named "Not set yet" / Unknown) |
 | F-02 | Profile facts | "show me my profile facts", "give me the page with my profile" | `open_record_file` profile_facts | account, standing | unreachable | reachable (drawn for everyone, Unknowns named) |
-| F-03 | Path comparison | "open my path comparison" | `open_record_file` path_comparison | none: no store of compared directions exists | unreachable | wired; answers "nothing on record" and makes no File until a store exists |
-| F-04 | Search plan | "show me my search plan" | `open_record_file` search_plan | `career_search_plans` (newest version) | unreachable | reachable when a plan row exists (the plan-step writer, section 1, is not built) |
+| F-03 | Path comparison | "open my path comparison" | `open_record_file` path_comparison | `career_path_comparisons` (newest), written by `compare_paths` when the person compares paths in chat (D-072 files writers) | unreachable | reachable when a comparison exists; else "nothing on record" and no File |
+| F-04 | Search plan | "show me my search plan" | `open_record_file` search_plan | `career_search_plans` (newest version), written when a search or watch is set or changed (D-072 files writers) | unreachable | reachable when a plan row exists |
 | F-05, F-06, F-10, F-11 | Roles list, role workspace, batch, pipeline | a search ("find me analyst internships in Chicago") | the results list (`role_results.ts`, `file_family_live.ts`) | the results list | reachable | unchanged |
-| F-07 | Materials | "open my materials page" | `open_record_file` materials | `career_material_versions` (the newest document) | unreachable | reachable when a version row exists (no production writer yet, section 5) |
+| F-07 | Materials | "open my materials page" | `open_record_file` materials | `career_material_versions` (the newest document), written when a tailored resume or cover letter is delivered (D-072 files writers) | unreachable | reachable when a version row exists |
 | F-08 | Answer library | "what's in my answer library?", "show me my answers page" | `open_record_file` answer_library | `career_apply_questions` | unreachable | reachable |
 | F-09 | Application review | the card's review link | `createReview` (`application_review_links.ts`) | the prepared application | reachable | unchanged |
 | F-12 | Message review | "show me the message review" | `open_record_file` message_review | `career_outreach_drafts` (newest waiting for a decision, else newest) | unreachable | reachable |
@@ -176,3 +179,31 @@ planning turn. The interview time in `holds` is the page's: the person's zone, w
 Tests: `tests/architect/files-reachable-d072.test.ts` (each family from its ask through the real brain turn and File server,
 nothing on record, hash-bound approvals, the process check) and `tests/architect/files-reachable-d072-pg.test.ts` (the real
 agent-chat handler on Postgres 16, the link opened through the deployed File server's dependencies).
+
+## 7. The writers of F-03, F-04 and F-07 (D-072, files writers)
+
+| Family | Store | Writer | Fires from |
+| --- | --- | --- | --- |
+| F-04 | `career_search_plans` | `career_search_plan_writer.ts writeSearchPlan` | the search path (`handler-career.ts`, after `askFor`), the watch sync (`syncWatchAlerts` saved or off), the brain's `set_job_alerts`/`stop_job_alerts` |
+| F-07 | `career_material_versions` | `career_material_writer.ts writeTurnMaterials`, `withLetterVersions` | each stored turn document its producer marked (resume task, `tailor_resume`, the router's posting tailor); the brain's `create_file` cover letter |
+| F-03 | `career_path_comparisons` (20261112150000) | `agent/path_comparison_tool.ts` `compare_paths` | a message comparing paths (`pathCompareAskOf`, routed to the brain: `career_staged.ts` reason `path_compare`) |
+
+Each writes a new version only when the content differs (F-04) or the file differs (F-07), never overwrites one, and never fails the turn.
+Tests: `tests/architect/files-writers-d072-pg.test.ts` (each writer from its chat path through the real handler on Postgres 16, then the
+family File opened with those rows) and `tests/architect/files-writers-d072.test.ts`.
+
+Review fixes (PR #799, 2026-11-13; `tests/architect/files-writers-review-20261113.test.ts`, `tests/db/career_erase_approved_versions.check.sql`):
+
+- **Erase.** `career_erase_person` ("forget everything") deletes the person's approved plans and documents: for its own transaction
+  it names the one person it is erasing (`career.erase_person`, transaction-local, cleared when it ends) and the versions guard
+  lets only that person's approved rows go. Every other delete of an approved version is refused as before (migration
+  `20261113120000`, with its rollback). Account deletion (the cascade) and `career_path_comparisons` (no delete guard) were not affected.
+- **One document per posting (F-07).** `doc_key` tells postings apart: by the posting id, else by a digest of the pasted posting's own
+  text (`postingKeyOf`, never shown or stored as text); a target the key's alphabet cannot spell (no Latin letters, "C++"/"C#")
+  adds a digest of its words. Not covered: the router's posting tailor when its artifact carries a company and no posting id
+  (the artifact holds no posting text), which still keys on the company.
+- **A letter's basis.** `based_on` on a cover letter is "the N facts listed on the draft" when the draft lists them, else empty.
+- **Path comparison (F-03).** A direction's name is the person's wording: the model's name is kept only when it stands in their
+  message, else their quoted words are the name; the title likewise. Related confirmed facts hold two of the path's distinct words
+  as whole words (or its only word); Strong needs three such facts each holding two (a one-word path is never Strong); an offer
+  is matched by the company's name as whole words in what they wrote.

@@ -112,22 +112,24 @@ function gmail(o: { behave: (n: number) => "ok" | "timeout" | "503"; lag: number
   };
 }
 async function scenario(g: ReturnType<typeof gmail>, steps: (c: any) => Promise<void>) {
-  const store = out.memoryOutreachStore(), warned: boolean[] = [];
+  // Each delivery is attributed to its card by the card's own Message-ID (never by counting deliveries around a yes: two yeses at
+  // once would both see the same delivery). A card counts as warned when its yes carried an acknowledgement.
+  const store = out.memoryOutreachStore(), toldByCard = new Map<string, boolean>();
+  const cardOf = (mid: string) => /^<trainee-reply\.([^.]+)\./.exec(String(mid ?? ""))?.[1] ?? "";
   const inbox = { search: async () => ({ status: "ok", mails: [] }), read: async (_u: string, ref: string) => ({ status: "ok", text: "Hi Sam, can you do Tuesday at 3pm for a chat? Dana", removed: [], mail: { ref, account: A, thread_id: "thr", from: "dana@acme.com", from_name: "Dana Lee", reply_to: null, subject: "Chat", date: new Date(now).toISOString(), snippet: "", message_id: "<m1@acme.com>" } }) };
   const c = {
     store,
     card: async (at: number, thread = "t1") => { g.setClock(at); return await r.draftReply({ userId: "u1", threadId: thread, now: at, inbox, outreach: store, ref: "abc", body: BODY, said: "reply to Dana and say Tuesday at 3pm works", facts: [], signature: "Sam", canSend: async () => true, accounts: [A], findSent: g.findSent }); },
     yes: async (meta: any, at: number) => {
       g.setClock(at);
-      const before = g.delivered.length, told = !!(meta?.mail_reply?.acknowledged?.length || meta?.mail_reply?.prior_unconfirmed);
-      const res = await r.replyAnswer({ userId: "u1", now: at, answer: "yes", meta, deps: { outreach: store, sendOn: true, canSend: async () => true, send: g.send, accounts: async () => [A], findSent: g.findSent } });
-      if (g.delivered.length > before) warned.push(told);
-      return res;
+      const told = !!(meta?.mail_reply?.acknowledged?.length || meta?.mail_reply?.prior_unconfirmed);
+      toldByCard.set(String(meta?.mail_reply_card), told);
+      return await r.replyAnswer({ userId: "u1", now: at, answer: "yes", meta, deps: { outreach: store, sendOn: true, canSend: async () => true, send: g.send, accounts: async () => [A], findSent: g.findSent } });
     },
   };
   await steps(c);
   // The first delivery needs no warning; every later one does.
-  return { delivered: g.delivered.length, unwarned: warned.slice(1).filter((w) => !w).length };
+  return { delivered: g.delivered.length, unwarned: g.delivered.slice(1).filter((d) => !toldByCard.get(cardOf(d.mid))).length };
 }
 Deno.test("5 a second reply to one email never goes without a warning first: the review's nine scenarios", async () => {
   const res: Record<string, { delivered: number; unwarned: number }> = {};

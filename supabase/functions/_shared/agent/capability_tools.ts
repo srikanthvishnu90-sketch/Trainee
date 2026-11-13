@@ -109,7 +109,7 @@ async function recordFor(d: CapabilityDeps, c: ToolCtx): Promise<ApplicationReco
 // from a complete read. Otherwise it is unknown (null), with what was found as "at least", and the note says so.
 function countsOf(r: ApplicationRecord, c: ToolCtx) {
   const n = r.read.status === "complete" ? r.applied.length : null;
-  if (c.turn) { c.turn.record = { ...r.read, nomail: r.mail.gmail === "not_connected", found: r.applied.slice(0, 12).map(foundLine).concat(r.applied.length > 12 ? [`and ${r.applied.length - 12} more`] : []) }; if (n !== null) c.turn.counts = { applied: n }; else delete c.turn.counts; }
+  if (c.turn) { c.turn.record = { ...r.read, nomail: r.mail.gmail === "not_connected", researched: r.researched.slice(0, 8).map((x) => `${x.company}${x.role ? ` (${x.role})` : ""}`), found: r.applied.slice(0, 12).map(foundLine).concat(r.applied.length > 12 ? [`and ${r.applied.length - 12} more`] : []) }; if (n !== null) c.turn.counts = { applied: n }; else delete c.turn.counts; }
   return { applied: n, ...(n === null && r.applied.length ? { applied_at_least: r.applied.length } : {}), researched: r.researched.length, drafts: r.drafts.length };
 }
 // One application as code states it in the reply (career_brain.ts coverageLine): employer, role, date, and what it stands on.

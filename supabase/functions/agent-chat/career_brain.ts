@@ -614,12 +614,12 @@ export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts:
 // read nothing; "partial"; "complete" every account and store was read; "unknown" a lookup returned but left no record of what it
 // read (round 3: that is never taken for complete). `what` names what could not be read, `read` what was, `found` each application.
 const LOOKUP_TOOLS = ["read_application_mail", "export_tracker"];
-type LookRecord = { status: string; could_not_read: string[]; read?: string[]; found?: string[]; nomail?: boolean };
-export interface Look { tried: boolean; ok: boolean; status: "none" | "failed" | "partial" | "complete" | "unknown"; what: string[]; read: string[]; found: string[]; nomail?: boolean }
+type LookRecord = { status: string; could_not_read: string[]; read?: string[]; found?: string[]; nomail?: boolean; researched?: string[] };
+export interface Look { tried: boolean; ok: boolean; status: "none" | "failed" | "partial" | "complete" | "unknown"; what: string[]; read: string[]; found: string[]; nomail?: boolean; researched?: string[] }
 export function lookupOf(calls: { name: string; ok: boolean }[], record?: LookRecord | null): Look {
   const mine = calls.filter((c) => LOOKUP_TOOLS.includes(c.name)), ran = mine.some((c) => c.ok);
   const status = !mine.length ? "none" : !ran ? "failed" : !record ? "unknown" : record.status === "complete" || record.status === "partial" ? record.status : "failed";
-  return { tried: mine.length > 0, ok: status === "complete", status, what: ran && record && status !== "complete" ? record.could_not_read : [], read: ran ? record?.read ?? [] : [], found: ran ? record?.found ?? [] : [], nomail: ran && !!record?.nomail };
+  return { tried: mine.length > 0, ok: status === "complete", status, what: ran && record && status !== "complete" ? record.could_not_read : [], read: ran ? record?.read ?? [] : [], found: ran ? record?.found ?? [] : [], nomail: ran && !!record?.nomail, researched: ran ? record?.researched ?? [] : [] };
 }
 // Round 2 (structural, not by phrasing): does this text touch the status of the person's applications at all?
 const APP_STATUS = /\bappl(?:ied|ications?)\b|\b(?:did|do|does|didn'?t)\s+i\s+(?:\w+\s+)?apply\b|\bsubmi(?:tted|ssions?)\b|\bsent\s+(?:in|out)\b|\bin\s+flight\b|\bon\s+(?:record|file)\b|\bheard\s+back\b|\breject(?:ed|ions?)\b|\banywhere\s+(?:yet|else|new)\b|\b(?:yet|need|still)\s+to\s+apply\b|\bnot\s+appl|\bapps\b|\byour\s+(?:tracker|pipeline)\s+(?:is|has|shows|looks|holds)\b|\bapl+(?:ied|y|ication)|\bapplyed\b|\bmy\s+apps?\b|\bapp\s+(?:count|status)\b|\bpostul\w*|\bsolicitud\w*|\bcandidat(?:ure|ura|ei|é)\w*|\bbeworben\b|\bbewerbung\w*|\bapply\s+kiya\b|आवेदन/i;
@@ -653,12 +653,20 @@ const OF_YOU = /\byou(?:'re|'ve|r)?\b[^.!?]{0,40}\b(?:zero|none|nothing|nobody|n
 // Round 5: the person's own applications only. "Applied" opening a resume line ("Applied ML to churn"), quoted text, and the
 // application words with no "you/your/I/my" in the sentence are not a statement of their status.
 const PERSON = /\b(?:you|your|you've|you're|you'd|u|i|i've|i'm|my|me)\b/i;
+// v2 (CI on #811: a reply's "before we reach submission", "no account, saved application or submission was created" brought the
+// lookup and code's block onto turns not about their status): a reply speaks of their status only when it says what THEY applied
+// to or how many, "your application(s)" doing something, or one of the plain ways of saying none has gone out. Trainee's own
+// boundary lines are never one.
+const YOU_STATUS = /\b(?:you|u)(?:'ve|\s+have|'re|\s+are|\s+had)?\s+(?:already\s+|still\s+|never\s+|not\s+|haven'?t\s+|hadn'?t\s+|didn'?t\s+|did\s+not\s+|have\s+not\s+|yet\s+to\s+)*(?:applied|submitted|sent\s+(?:in|out)|put\s+in)\b|\byour\s+(?:\w+\s+){0,2}(?:applications?|apps)\b(?!\s+(?:fee|deadline|form|question|essay|portal|link|page|materials|packet|draft))|\b(?:you|u)(?:'ve|\s+have|'re\s+at|\s+are\s+at|'ve\s+got)\s+(?:\d+|no|zero|one|two|three|four|five|six|seven|eight|nine|ten|a\s+few|several|many)\s+(?:\w+\s+)?(?:applications?|apps|places|companies)\b/i;
+const IDIOM_T = /\bgone\s+out\b|\bclean\s+slate\b|\bzero\s+sent\b|\bzilch\b|\bzip\b|\b(?:at|from|still\s+at)\s+(?:zero|none|square\s+one)\b|\bstarting\s+(?:fresh|from\s+scratch)\b|\b(?:board|slate|queue|pipeline|tracker)\s+is\s+(?:bare|empty|blank|clear)\b|\bnot\s+a\s+single\s+(?:one|application|app)\b|\bnothing\s+from\s+you\b/i;
+const OF_YOU_T = /\byou(?:'re|\s+are|'ve|\s+have)\s+(?:got\s+)?(?:at\s+)?(?:zero|none|nothing|nobody|no\s+one)\b(?!\s+(?:to\s+(?:do|worry)|else))|\b(?:zero|none|nothing|nobody)\s+(?:is\s+|are\s+)?(?:out|pending)\b/i;
+const BOUNDARY_LINE = /\b(?:was|were|is|are|been)\s+(?:created|made|queued|submitted|applied\s+for|sent)\b[^.]{0,40}$|\bnothing\s+is\s+being\s+(?:applied|sent|submitted)\b|\bbefore\s+(?:any|we\s+reach|the)\s+submission\b/i;
 export function statusLike(text: string): boolean {
   return tidy(text).split(/(?<=[.!?])\s+|\n+/).some((x) => {
     const c = x.replace(BULLET, "").replace(/^\W*(?:try|rewrote\s+it|here'?s?)?\s*:?\s*Applied\s+(?!to\b|for\b|anywhere\b)/, " ").replace(/"[^"]*"|'[^']{4,}'/g, " ").replace(NOTHING_SENT_I, " ");
     if (!c.trim() || POLICY.test(c.toLowerCase()) || TRAINEE_DID_NOT.test(c.toLowerCase())) return false;
-    const mine = PERSON.test(c) || /\b[A-Z][a-z]+\b[^.]{0,20}\bappl(?:ied|ication)\b/.test(c.replace(/^\W*\w+/, ""));
-    return (mine && touchesApplications(c)) || IDIOM.test(c) || OF_YOU.test(c) || saysNoApplications(c);
+    if (BOUNDARY_LINE.test(c)) return false;
+    return YOU_STATUS.test(c) || IDIOM_T.test(c) || OF_YOU_T.test(c) || saysNoApplications(c);
   });
 }
 const listed = (xs: string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}` : xs[0] ?? "");
@@ -673,6 +681,10 @@ const readList = (read: string[]) => {
   return boxes.length > 1 ? parts.join("; ") : listed(parts);
 };
 export function coverageLine(look: Look): string {
+  const line = coverageCore(look), res = look.researched?.length ? ` ${look.researched.join("; ")}: research only in this conversation, not ${look.researched.length > 1 ? "applications" : "an application"}.` : "";
+  return line + (look.status === "complete" || look.status === "partial" ? res : "");
+}
+function coverageCore(look: Look): string {
   if (!look.tried) return NOT_CHECKED;
   if (look.status === "unknown" || (look.status === "failed" && !look.what.length)) return NOT_READ;
   const n = look.found.filter((f) => !/^and \d+ more$/.test(f)).length + Number(/^and (\d+) more$/.exec(look.found.at(-1) ?? "")?.[1] ?? 0);
@@ -744,13 +756,13 @@ export function applicationsEnforced(reply: string, look: Look, o: { message: st
 const NOT_APPLIED = /\b(?:you|u)(?:'ve| have| had)?\s+(?:still\s+|really\s+|also\s+)?(?:haven'?t|have\s+not|not|hadn'?t|had\s+not|never|have\s+never|didn'?t|did\s+not|have\s+yet\s+to|are\s+yet\s+to)\s+(?:yet\s+|actually\s+|even\s+)?(?:\w+\s+)?(?:applied|apply|submitted|submit|sent\s+in)\b|(?:^|[,;:]\s*|\b(?:so|and|but)\s+)(?:not|haven'?t|never)\s+(?:yet\s+)?applied\b/;
 const NO_APPLICATIONS = /(?:\b(?:no|zero|not\s+any|not\s+a\s+single|without\s+any|none\s+of(?:\s+your|\s+the)?)|(?<![\d.,])0(?!\s+of\b)|n't\s+(?:\w+\s+){0,3}?(?:any|a\s+single))\s+(?:(?!rejected|new|other|more|further|declined|withdrawn|pending|open|unanswered|response|reply|update|answer|news|word)\w+\s+){0,3}?applications?\b(?!\s+(?:fees?|deadlines?|forms?|process|portal|window|cycle|season|page|link|materials|essays?|requirements?|questions?|open(?:ed)?|needed|required|necessary|(?:is|are|was|were)\s+(?:needed|required|necessary|open|due|accepted)))/;
 const NOTHING_THERE = /\bnothing\b[^.!?]{0,30}?\b(?:submitted|applied|on\s+(?:record|file)(?!\s+(?:for|of|about)\s+(?:the|your|that|this|an?)\s+(?!appl)\w)|shows?\b[^.!?]{0,30}\bappl\w*|gone\s+out)\b|\bno\s+(?:record|sign|trace|evidence|confirmation|mention)\b[^.!?]{0,30}\bappl(?:y|ied|ying|ication)|\b(?:tracker|applications?\s+(?:list|record|history|log))\s+(?:is|looks|comes\s+up|came\s+back)\s+(?:still\s+)?(?:empty|blank)\b/;
-const NOTHING_SENT_I = /\bnothing\s+(?:was|has\s+been|is|got|will\s+be)\s+(?:sent|saved|queued|submitted|created|applied\s+for)\b(?:(?:,|\s+or|\s+and)\s+(?:sent|saved|queued|submitted|created|applied\s+for)\b)*/gi;
-const NOTHING_SENT = /\bnothing\s+(?:was|has\s+been|is|got|will\s+be)\s+(?:sent|saved|queued|submitted|created|applied\s+for)\b(?:(?:,|\s+or|\s+and)\s+(?:sent|saved|queued|submitted|created|applied\s+for)\b)*/g;
+const NOTHING_SENT_I = /\bnothing\s+(?:was|has\s+been|is|got|will\s+be)\s+(?:sent|saved|queued|submitted|created|applied(?:\s+(?:to|for))?)\b(?:(?:,|\s+or|\s+and)\s+(?:sent|saved|queued|submitted|created|applied(?:\s+(?:to|for))?)\b)*/gi;
+const NOTHING_SENT = /\bnothing\s+(?:was|has\s+been|is|got|will\s+be)\s+(?:sent|saved|queued|submitted|created|applied(?:\s+(?:to|for))?)\b(?:(?:,|\s+or|\s+and)\s+(?:sent|saved|queued|submitted|created|applied(?:\s+(?:to|for))?)\b)*/g;
 const TRAINEE_DID_NOT = /\b(?:i|we|trainee)\s+(?:have\s+not|haven'?t|did\s+not|didn'?t|won'?t|will\s+not|never)\s+(?:yet\s+)?(?:sent|submitted|applied|queued)\b|\b(?:sent|submitted|applied|queued)\b[^.!?]{0,20}\b(?:by\s+me|by\s+trainee|for\s+you|on\s+your\s+behalf)\b/;
 const NOT_A_CLAIM = /^(?:so\s+|and\s+|ok(?:ay)?,?\s+)?(?:have|haven'?t|had|did|didn'?t|do|does|is|are|should|want|would|can|could|which|what|where|when|shall)\b[^?]*\?\s*$/;
 // Round 2 (false alarms the review found): what Trainee never does without a yes; "applied the feedback"; "no rejected applications".
 // Also not a claim about their record: their own words given back, what cannot be confirmed, people in general, an employer's rule.
-const POLICY = /\bwithout\s+your\s+(?:yes|approval|ok|okay|say(?:-so)?|go-ahead|permission|confirmation)\b|\bon\s+(?:its|my)\s+own\b|\byou\s+(?:told|said)\b|\b(?:can't|cannot|couldn't|not)\s+(?:confirm|say|saying|tell|verify)\b|^(?:most|many|some)\s+(?:people|students|candidates)\b|\b(?:don't|doesn't|no)\s+need\b|\b(?:takes?|accepts?|accepting)\s+no\b|\bby\s+(?:me|trainee)\b|\banywhere\s+(?:new|else)\b|\bnone\s+of\s+your\s+applications\s+(?:were|was|got)\b|^(?:n?ever)\b[^?]*\?\s*$/;
+const POLICY = /\bwithout\s+your\s+(?:yes|approval|ok|okay|say(?:-so)?|go-ahead|permission|confirmation)\b|\bon\s+(?:its|my)\s+own\b|\byou\s+(?:told|said)\b|\b(?:can't|cannot|couldn't|not)\s+(?:confirm|say|saying|tell|verify)\b|^(?:most|many|some)\s+(?:people|students|candidates)\b|\b(?:don't|doesn't|no)\s+need\b|\b(?:takes?|accepts?|accepting)\s+no\b|\bno\s+longer\s+(?:takes?|accepts?|accepting|taking)\b|\b(?:posting|role|job)\b[^.]{0,60}\bclosed\b|\bby\s+(?:me|trainee)\b|\banywhere\s+(?:new|else)\b|\bnone\s+of\s+your\s+applications\s+(?:were|was|got)\b|^(?:n?ever)\b[^?]*\?\s*$/;
 const APPLIED_A_THING = /\bappl(?:ied|y)\s+(?:the|your|my|any|those|these|that|this)\s+(?:\w+\s+){0,2}?(?:feedback|edits?|changes?|fix(?:es)?|advice|suggestions?|filters?|tips?|notes?)\b/g;
 export function saysNoApplications(reply: string): boolean { return noApplicationsIn(reply).length > 0; }
 function noApplicationsIn(reply: string): string[] {

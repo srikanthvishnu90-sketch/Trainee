@@ -314,7 +314,8 @@ Deno.test("R6 no board says open or live without its own positive signal; a past
   // The link check: a 200 is live only when the board's answer is the posting.
   const lv = { job_id: `lever:acme:${LEVER_ID}` }, gh = { job_id: "greenhouse:acme:123" }, sr = { job_id: "smartrecruiters:acme:744000012345678" }, ab = { job_id: `ashby:acme:${LEVER_ID}` };
   eq(await checker(any(() => json({ ok: false, error: "not found" })))(lv), "unknown", "Lever 200 with an error body");
-  eq(await checker(any(() => body("<html>captcha</html>", "text/html")))(gh), "unknown", "Greenhouse 200 bot wall");
+  // (A 200 that is not JSON at all keeps trunk's answer for now: tests/architect/pending/posting-link-nonjson-20261113.test.ts.)
+  eq(await checker(any(() => json(null)))(gh), "unknown", "Greenhouse 200 null");
   eq(await checker(any(() => json({ id: 999, title: "Other" })))(gh), "unknown", "Greenhouse another posting");
   eq(await checker(any(() => json({ id: "744000012345678", name: "Eng", active: false })))(sr), "dead");
   eq(await checker(any(() => json({ id: "744000012345678", name: "Eng" })))(sr), "unknown");
@@ -378,7 +379,12 @@ Deno.test("R9 a name that resolves to a private address is never requested; rese
   // A redirect hop to such a name is not followed; a name that does not resolve is refused.
   eq(await check({ url: "https://careers.acme.com/jobs/hop" }), "unknown");
   eq(sent, ["https://careers.acme.com/jobs/hop"]);
-  eq(await checker(f, { resolve: async () => { throw new Error("no resolver"); } })({ url: "https://careers.acme.com/jobs/1" }), "unknown");
+  eq(await checker(f, { resolve: async () => { throw new Error("NXDOMAIN"); } })({ url: "https://careers.acme.com/jobs/1" }), "unknown", "a name that does not resolve");
+  // A runtime with no resolver (null): the name-based refusals still apply, the request goes ahead as before, and it is recorded.
+  const bare = checker(f, { resolve: async () => null });
+  eq([await bare({ url: "https://careers.acme.com/jobs/1" }), bare.debug], ["live", { dns_checked: false }]);
+  eq([await bare({ url: "https://foo.internal/x" }), await bare({ url: "https://10.0.0.8/x" }), await bare({ url: "https://www.linkedin.com/jobs/view/1" })], ["unknown", "unknown", "unknown"]);
+  eq(check.debug, { dns_checked: true });
   // An honest public page still reads live, and the job boards' own hosts need no lookup.
   eq(await check({ url: "https://careers.acme.com/jobs/1" }), "live");
   eq(await checker(any(() => json({ id: 123, title: "Eng" })), { resolve: async () => { throw new Error("no resolver"); } })({ job_id: "greenhouse:acme:123" }), "live");

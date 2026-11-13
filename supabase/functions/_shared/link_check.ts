@@ -14,7 +14,9 @@ export type LinkState = "live" | "dead" | "unknown";
 // Architect ruling E.21 (release item 8): every search re-checks the postings it shows, and only those (searchCheck below):
 // at most the count asked, never more than SEARCH_CHECK_MAX, each on its own posting page by id. No board listing is read.
 export const SEARCH_CHECK_MAX = 10;
-export type LinkCheck = (job: { job_id?: string; url?: string }) => Promise<LinkState>;
+// `debug` (linkChecker's checkers carry it): dns_checked false when an employer page was requested with no name lookup because
+// this runtime has no resolver (posting_fetch.ts). For logs and tests; never part of what a model is shown.
+export type LinkCheck = ((job: { job_id?: string; url?: string }) => Promise<LinkState>) & { debug?: { dns_checked: boolean } };
 
 export function apiUrlFor(jobId: string): string | null {
   const m = /^(greenhouse|lever|smartrecruiters):([A-Za-z0-9._-]+):([A-Za-z0-9-]+)$/.exec(String(jobId ?? ""));
@@ -58,7 +60,8 @@ export function linkChecker(f: typeof fetch, o: { timeoutMs?: number; userAgent?
     } catch { return "unknown"; }
   };
   const named = (v: unknown) => typeof v === "string" && v.trim().length > 0;
-  return async (job) => {
+  const debug = { dns_checked: true };
+  return Object.assign(async (job: { job_id?: string; url?: string }): Promise<LinkState> => {
     let id = String(job.job_id ?? "");
     const link = String(job.url ?? "");
     // Round 2: a job board's page address with no board job_id is asked of the board by the posting id its address names; no
@@ -107,6 +110,9 @@ export function linkChecker(f: typeof fetch, o: { timeoutMs?: number; userAgent?
         if (/[?&]error=true\b/.test(r.url)) return "dead";
         if (!r.ok) return "unknown";
         const j = parseJson(r.text), [family, , pid] = id.split(":");
+        // A 200 whose body is not JSON keeps trunk's answer ("live") for now: tests/architect/wo-106-agent-slice.test.ts:180
+        // pins it. tests/architect/pending/posting-link-nonjson-20261113.test.ts wants "unknown" here (a bot wall is not a posting).
+        if (j === null && !/^\s*null\s*$/.test(r.text)) return "live";
         if (!j || typeof j !== "object" || Array.isArray(j) || String(j.id ?? "").toLowerCase() !== pid.toLowerCase()) return "unknown";
         if (family === "greenhouse") return named(j.title) ? "live" : "unknown";
         if (family === "lever") return !named(j.text) ? "unknown" : j.state === undefined || j.state === "published" ? "live" : "dead";
@@ -120,13 +126,14 @@ export function linkChecker(f: typeof fetch, o: { timeoutMs?: number; userAgent?
     // leads to a private address, userinfo, a never-open site) throws: unknown.
     try {
       const r = await ask(link, "application/json,text/html", { body: false });
+      if (!r.dns_checked) debug.dns_checked = false;
       if (r.status === 404 || r.status === 410) return "dead";
       if (/[?&]error=true\b/.test(r.url)) return "dead";
       return r.ok ? "live" : "unknown";
     } catch {
       return "unknown";
     }
-  };
+  }, { debug });
 }
 
 // The shown list after the check: dead ones out (counted), unknown ones kept and marked, so the reply can say so.

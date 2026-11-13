@@ -54,10 +54,21 @@ test("3: the submit window lets out exactly one request: the approved form, to i
     "a frame's form": req({ url: "http://h/x8/side", resourceType: "document", body: "consent=1" }),
   };
   for (const [why, r] of Object.entries(abort)) assert.equal(pa.submitWindowVerdict(r, st()), "abort", why);
-  for (const r of [{ method: "GET", url: "http://h/app.css", resourceType: "stylesheet", navigation: false }, { method: "GET", url: "http://h/logo.png", resourceType: "image", navigation: false },
-    { method: "GET", url: "http://h/app/thanks?ref=1", resourceType: "document", navigation: true }]) assert.equal(pa.submitWindowVerdict(r, st()), "allow", r.url);
+  // Round 5 (architect amendment, stricter): an asset is allowed only by an address or folder the page loaded before the window;
+  // the same requests with no record of earlier loads are refused, and allowed once the page had loaded from there.
+  const assets = [{ method: "GET", url: "http://h/app.css", resourceType: "stylesheet", navigation: false }, { method: "GET", url: "http://h/logo.png", resourceType: "image", navigation: false }];
+  for (const r of assets) assert.equal(pa.submitWindowVerdict(r, st()), "abort", `${r.url} with no earlier load`);
+  for (const r of assets) assert.equal(pa.submitWindowVerdict(r, { ...st(), assets: new Set(["http://h/"]) }), "allow", `${r.url} under a folder loaded before`);
+  // A navigation with parameters is the approved post's own redirect only once that post has gone; before it, it is refused (n2).
+  const thanks = { method: "GET", url: "http://h/app/thanks?ref=1", resourceType: "document", navigation: true };
+  assert.equal(pa.submitWindowVerdict(thanks, st()), "abort", "a GET navigation with parameters before the approved post");
+  assert.equal(pa.submitWindowVerdict({ ...thanks, redirected: true }, { ...st(), used: true }), "allow", "the approved post's own redirect");
   assert.equal(pa.submitWindowVerdict(req({ contentType: "application/json", navigation: false, resourceType: "fetch", body: JSON.stringify({ first_name: "Casey", email: "c@x" }) }), st()), "allow", "the same answers as JSON");
-  assert.equal(pa.submitWindowVerdict(req({ url: "http://h/api/apply", contentType: "text/plain", navigation: false, resourceType: "fetch", body: JSON.stringify({ name: "Casey", mail: "c@x", resume: "resume.pdf" }) }), st()), "allow", "a board's own API, its own key names, the form's values");
+  // Round 5 (architect amendment, stricter, n7): a JSON body's keys must be the form's own names or that board's own schema (Breezy:
+  // name, email, phone, resume); a key outside both (here "mail") is refused even when its value is one of the form's.
+  const api = (body, ats) => pa.submitWindowVerdict(req({ url: "http://h/api/apply", contentType: "text/plain", navigation: false, resourceType: "fetch", body: JSON.stringify(body) }), { ...st(), ats });
+  assert.equal(api({ name: "Casey", email: "c@x", resume: "resume.pdf" }, "breezy"), "allow", "a board's own API, its own schema, the form's values");
+  assert.equal(api({ name: "Casey", mail: "c@x", resume: "resume.pdf" }, "breezy"), "abort", "a key outside the form's names and the board's schema");
 });
 
 test("4: a Review step is a step: pressed like Continue when the form's Submit is drawn and hidden", () => {

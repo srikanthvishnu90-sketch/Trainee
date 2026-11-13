@@ -782,7 +782,6 @@ Deno.test("round 4.10: whole turns with a judge that says yes only to a page's o
 });
 
 // ================================================================================================ round 5 (review of round 4)
-import { UNCHECKED_LINE } from "../../../supabase/functions/_shared/agent/research/support.ts";
 import { measureApproval } from "../../../evals/research-support/approval.ts";
 const K5 = "Citadel interns earn $5,000 a week.";
 const longPad = (n: number) => Array.from({ length: n }, (_, k) => `The firm keeps meeting room number ${k + 1} on the upper floor of its tower.`).join("\n");
@@ -821,10 +820,10 @@ Deno.test("round 5.2: what disputes, dates or footnotes a unit reaches the judge
 Deno.test("round 5.3 and 6.1: the judge cannot answer: never blank, never the model's words", async () => {
   const down: SupportJudge = async () => { throw new Error("529 overloaded"); };
   for (const judge of [down, null]) {
-    // On the employer's own site, a plain sentence of the page, labelled as not checked.
+    // Round 7: even on the employer's own site, no line is shown: code's clause and the pages read.
     const r = await mk3([{ url: U, title: "Citadel notes", text: `${K5}\nInterns start in June.` }], { summary: [{ text: "Citadel interns earn $9,000 a week.", quote: K5, url: U }] }, judge, { sites: ["citadel.example"] });
-    const out = bodyOf3(await enforceMarketReplySupported("Citadel interns earn $9,000 a week [1]. Citadel is the best payer.", r, [], { judge, ask: "what does citadel pay interns" }));
-    ok(out.startsWith(`"${K5}" [1].`) && out.endsWith(UNCHECKED_LINE) && !/9,000|best payer/.test(out), out);
+    const out = await enforceMarketReplySupported("Citadel interns earn $9,000 a week [1]. Citadel is the best payer.", r, [], { judge, ask: "what does citadel pay interns" });
+    ok(out.startsWith(OUTAGE_LINE) && out.includes(U) && !/"|9,000|best payer/.test(out), out);
   }
   // Elsewhere, or a unit whose page disputes, dates or disowns it: code's clause, then the pages read as links.
   for (const [text, sites] of [[`${K5}\nInterns start in June.`, []], [`${K5}\nThe line above is a lie.`, ["citadel.example"]], [`${K5}\nUpdated 2019.`, ["citadel.example"]], ["Citadel Securities pays interns $60 an hour.", ["citadel.example"]]] as const) {
@@ -882,9 +881,9 @@ const outage = (pages: Page[], o: any = {}) => async (judge: SupportJudge | null
 const down6: SupportJudge = async () => { throw new Error("529 overloaded"); };
 
 Deno.test("round 6.1: an outage shows a page's unit only when it passes the positive test on the employer's own site; otherwise the pages as links and one clause", async () => {
-  // A plain sentence on Citadel's own site: shown, quoted, labelled as not checked.
+  // Round 7: a plain sentence on Citadel's own site is not shown either: code's clause and the pages read.
   const good = await outage([{ url: OWN, title: "Citadel careers", text: "Citadel pays software engineering interns $120 an hour.\nInterns start in June." }])(down6);
-  ok(good.startsWith('"Citadel pays software engineering interns $120 an hour." [1].') && good.includes(UNCHECKED_LINE) && !/9,000|best payer/.test(good), good);
+  ok(good.startsWith(OUTAGE_LINE) && good.includes(OWN) && !/"|9,000|best payer/.test(good), good);
   // The same sentence on another site: links only.
   const other = await outage([{ url: "https://blog.example/pay", title: "Citadel careers", text: "Citadel pays software engineering interns $120 an hour.\nInterns start in June." }])(down6);
   ok(other.startsWith(OUTAGE_LINE) && other.includes("https://blog.example/pay") && !/"/.test(other.split("\n\n")[0]), other);
@@ -902,7 +901,7 @@ Deno.test("round 6.1: an outage shows a page's unit only when it passes the posi
   let n = 0;
   const flaky: SupportJudge = async (c) => { if (n++ === 0) throw new Error("timeout"); return c.map((x) => isQuoteClaim(x.claim) ? "yes" : "no"); };
   const retried = await outage([{ url: OWN, title: "Citadel careers", text: "Citadel pays software engineering interns $120 an hour." }])(flaky);
-  ok(retried.startsWith('"Citadel pays software engineering interns $120 an hour." [1].') && !retried.includes(UNCHECKED_LINE), retried);
+  ok(retried.startsWith('"Citadel pays software engineering interns $120 an hour." [1].') && !retried.includes(OUTAGE_LINE), retried);
 });
 
 Deno.test("round 6.2 and 6.3: a unit that names another employer anywhere lends nothing; a lone numbered line and a source line reach the judge", () => {

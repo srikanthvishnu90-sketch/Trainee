@@ -141,10 +141,13 @@ function namesOk(claim: Hard, unit: { hard: Hard; lower: Set<string>; lent?: str
   }
   return !loose.length || proper > 0;
 }
-// Capitals that name no one: role and unit abbreviations, months and days.
+// Round 7: a unit that names another firm in any case or short form ("jane st", "drw", "js"), or describes one ("a rival fund", "our
+// competitor", "across the street", "next door"), is that firm's, never the asked employer's.
+const OTHER_FIRM = /(?<![\p{L}\p{N}])(?:jane\s+st(?:reet)?|two\s+sigma|2\s*sigma|drw|hrt|hudson\s+river(?:\s+trading)?|jump(?:\s+trading)?|optiver|imc|susquehanna|de\s+shaw|d\.\s?e\.\s?shaw|millennium|point72|bridgewater|renaissance|rentec|virtu|akuna|tower\s+research|citadel\s+securities|goldman(?:\s+sachs)?|morgan\s+stanley|jp\s?morgan|jpm|blackrock|aqr|balyasny|squarepoint|xtx|flow\s+traders|five\s+rings|old\s+mission|headlands|g-research|pdt|sig|(?:at|from|with|than|vs\.?|for)\s+(?:js|gs|ms))(?![\p{L}\p{N}])|(?<![\p{L}])(?:rivals?|competitors?|competing|another\s+(?:firm|fund|shop|company|bank)|(?:the\s+)?other\s+(?:firms?|funds?|shops?|compan(?:y|ies)|banks?)|a\s+different\s+(?:firm|fund|shop|company|bank)|peer\s+firms?|across\s+the\s+street|next\s+door|down\s+the\s+(?:road|street)|elsewhere)(?![\p{L}])/iu;
+// Capitals that name no one: role and unit abbreviations, months and days, languages and holidays (places are below).
 // Places are not employers either: US state codes, the cities and countries research pages name for pay ("for San Francisco",
 // "in Denver", "(CA, WA, NY)"), and the abbreviation forms the reader writes ("SWEx" for "software engineering").
-const COMMON_CAPS = /^(?:swe|sde|phd|usd|cad|eur|gbp|us|usa|u\.s|uk|eu|ceo|cto|cfo|hr|ai|ml|api|gpa|ipo|q[1-4]|l\d|ii|iii|iv|january|february|march|april|may|june|july|august|september|october|november|december|monday|tuesday|wednesday|thursday|friday|saturday|sunday|aix|mlx|usax|ukx|nycx|sfx|ceox|ctox|ipox|apix|saasx|swex|rndx|wlbx|can|canada|remote|hybrid|al|ak|az|ar|ca|co|ct|de|fl|ga|hi|id|il|in|ia|ks|ky|la|me|md|ma|mi|mn|ms|mo|mt|ne|nv|nh|nj|nm|ny|nc|nd|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|vt|va|wa|wv|wi|wy|dc|new york(?: city)?|san francisco|seattle|chicago|boston|austin|denver|miami|los angeles|london|toronto|dublin|singapore|hong kong|paris|zurich|sydney|bay area|silicon valley|united states|united kingdom|europe|asia|north america)$/i;
+const COMMON_CAPS = /^(?:swe|sde|phd|usd|cad|eur|gbp|us|usa|u\.s|uk|eu|ceo|cto|cfo|hr|ai|ml|api|gpa|ipo|q[1-4]|l\d|ii|iii|iv|january|february|march|april|may|june|july|august|september|october|november|december|monday|tuesday|wednesday|thursday|friday|saturday|sunday|aix|mlx|usax|ukx|nycx|sfx|ceox|ctox|ipox|apix|saasx|swex|rndx|wlbx|can|canada|remote|hybrid|al|ak|az|ar|ca|co|ct|de|fl|ga|hi|id|il|in|ia|ks|ky|la|me|md|ma|mi|mn|ms|mo|mt|ne|nv|nh|nj|nm|ny|nc|nd|oh|ok|or|pa|ri|sc|sd|tn|tx|ut|vt|va|wa|wv|wi|wy|dc|new york(?: city)?|san francisco|seattle|chicago|boston|austin|denver|miami|los angeles|london|toronto|dublin|singapore|hong kong|paris|zurich|sydney|bay area|silicon valley|united states|united kingdom|europe|asia|north america|greenwich|stamford|princeton|new jersey|connecticut|palo alto|menlo park|mountain view|sunnyvale|cambridge|amsterdam|tokyo|shanghai|python|java|javascript|typescript|c\+\+|rust|go|golang|kotlin|scala|ruby|matlab|excel|sql|linux|thanksgiving|christmas|easter|new year|new year's|labor day|memorial day|juneteenth|halloween|diwali|eid|hanukkah|ramadan)$/i;
 const ASKS_Q = /^(?:[\p{L}\p{N} ]{1,14}:\s*)?(?:do|does|did|is|are|was|were|can|could|will|would|should|has|have|had|whether|ever wondered|wondering)\s/iu;
 const ANSWERS = /^(?:no|nope|not|yes|yep|false|true|wrong|myth|never)(?![\p{L}])/iu;
 const QUOTE_MARK = /["“”„‟«»‹›]|(?<![\p{L}\p{N}])['‘’]|['‘’](?![\p{L}\p{N}])/u;
@@ -178,7 +181,7 @@ const clipStart = (t: string, n: number) => t.length > n ? `…${t.slice(t.lengt
 // text before it is put in a passage.
 const plainText = (t: string) => squash(String(t ?? "").replace(/>{2,}|<{2,}|[¶›‹»«]/g, " ").replace(/(?:^|(?<=\s))(?:page title|title|page host|top of page|page notes?|headings?|list introduced by|table header|before|after|footnote|whole page[^:\n]{0,30})\s*:/gi, (m) => m.replace(":", " -")));
 // `lent`: the page owner's name, when the unit does not name an asked employer itself. `passage`: what the judge reads.
-export interface Unit { text: string; hard: Hard; lower: Set<string>; content: Set<string>; quotable: boolean; lent: string | null; label: string; passage: string; pageTitle: string; otherEntity: boolean; plain: boolean; ownSite: boolean; url: string }
+export interface Unit { text: string; hard: Hard; lower: Set<string>; content: Set<string>; quotable: boolean; lent: string | null; label: string; passage: string; pageTitle: string; otherEntity: boolean; ownSite: boolean; url: string }
 export interface PageIndex { pages: { sentences: Unit[] }[]; read: (s: string) => string; subjects: string[]; ask: string }
 export const PASSAGE_MAX = 2500;
 // A unit that qualifies the whole page, wherever it is: when it was written, that it was corrected or archived, that what it lists
@@ -278,28 +281,6 @@ export function indexPages(pages: { text: string; title?: string; url?: string; 
       return clip(build({ notes: 1, top: false, prev: 1, next: 0, prevLen: 100 }), PASSAGE_MAX);
     };
     const unsafe = raw.map((x) => !safeToShow(x.text));
-    // Round 6, the positive test a unit must pass to be shown when the judge cannot answer: one plain declarative sentence of the
-    // page's own text that names the asked employer itself and no one else, outside any heading, list, table or note, with no
-    // footnote mark, no hedge, attribution, condition, past or future construction, and the only figure of its kind on the page.
-    const HEDGE = /(?<![\p{L}])(?:may|might|could|would|will|should|can|shall|must|if|unless|until|once|when|whether|or so|according|reportedly|allegedly|apparently|said|says|told|claims?|claimed|estimated?|approximately|about|around|roughly|nearly|almost|up to|at least|at most|as much as|as little as|before|after|since|used to|was|were|had|been|plans?|planned|proposed|proposal|expected|set to|going to|hopes?|aims?|targets?|rumou?r\p{L}*|speculat\p{L}*|unofficial|anonymous|average|median|typical|range|ranges|between|depending|varies|vary|only|some|most|many|few)(?![\p{L}])|['’]\d\d\b|\b(?:19|20)\d\d\b/iu;
-    const figs = raw.map((x) => hardParts(x.text, read).numbers.map((n) => n.split("|").slice(3).join("|")));
-    // A page that dates itself anywhere (a year before the year it was read, or a "'19") dates the unit too.
-    const readYear = p.fetchedAt ? new Date(p.fetchedAt).getUTCFullYear() : null;
-    // A page that points at its own lines ("the line above", "the following", "this figure") qualifies them: nothing on it is plain.
-    // So does a page that speaks of itself ("This is a parody.", "It is from a forum.", "This article first ran …"), that carries
-    // notes (a footnote, a "Source:" or "Note:" line), or whose lines carry labels of their own ("Page notes: …", "H E A D I N G S: …").
-    const refersBack = raw.some((x) => x.note || /(?<![\p{L}])(?:above|below|at the top|the following|this (?:line|figure|number|claim|statement|list|table|page|article|post|site|sheet|guide|story|piece|thread)|these (?:lines|figures|numbers|claims|statements))(?![\p{L}])|^(?:this|it|that)\s+(?:is|was|page|article|post|site)(?![\p{L}])|^[\p{L}][\p{L} ]{0,24}\s*[:—–]/iu.test(x.text));
-    const datedPage = /['’]\d\d\b/.test(`${title} ${raw.map((x) => x.text).join(" ")}`) || [...`${title} ${raw.map((x) => x.text).join(" ")}`.matchAll(/\b((?:19|20)\d\d)\b/g)].some((m) => !readYear || Number(m[1]) < readYear);
-    const plainOf = (text: string, k: number, hs: string[], names: boolean, others: boolean) => {
-      const u = raw[k];
-      if (datedPage || refersBack || u.note || u.bullet || u.header || u.marks.length || hs.length || u.intro || !names || others) return false;
-      if (!/^\p{Lu}/u.test(text) || !/\.$/.test(text) || /[:;?!"“”()\[\]]/.test(text) || text.split(" ").length < 5 || HEDGE.test(text)) return false;
-      // the only amount of its kind on the page: no other unit gives a different amount in the same currency (or percent), whatever
-      // its period ("the contract said $3,000" beside "$6,000 a week")
-      const kind = (f: string) => { const x = f.split("|"); return `${x[0]}|${x[4]}`; }, val = (f: string) => f.split("|")[1];
-      const mine = figs[k].filter((f) => kind(f) !== "|");
-      return !raw.some((_, j) => j !== k && figs[j].some((f) => mine.some((g) => kind(g) === kind(f) && val(g) !== val(f))));
-    };
     // Round 5: a page that says it is about someone else ("not Citadel", "I left Citadel"), or names another entity that begins with
     // the owner's name ("Citadel Securities", "Citadel Partners LLP"), lends the owner's name to no unit.
     const pageText = raw.map((x) => x.text).join(" ");
@@ -318,12 +299,12 @@ export function indexPages(pages: { text: string; title?: string; url?: string; 
         // Round 6 (B06 "Interns at DE Shaw earn …", B07 "… a week at Jump."): a unit that names anyone besides the asked employer, in
         // any place in it, is not the owner's (role words and a few common capitals apart).
         const others = (h0.names.filter((r, j) => !(j === 0 && h0.first === r[0] && r.length === 1)).map((r) => r.join(" ")).filter((n) => !COMMON_CAPS.test(n) && !subs.some((x) => x.toLowerCase() === n || x.toLowerCase().startsWith(`${n} `))));
-        const lend = !names && !!owner && !otherEntity && !others.length && (/^(?:we|our)(?![\p{L}])/iu.test(text) || !POINTS_AWAY.test(text)) && !foreignHead(hs) && !otherSubject;
+        const lend = !names && !!owner && !otherEntity && !others.length && !OTHER_FIRM.test(text) && (/^(?:we|our)(?![\p{L}])/iu.test(text) || !POINTS_AWAY.test(text)) && !foreignHead(hs) && !otherSubject;
         // A table row is read with its header's period ("Hourly pay" over "$120" is "$120 per hour"): the header is the row's own.
         const PERIOD_HEAD = /(?<![\p{L}])(hourly|weekly|monthly|annual|yearly|daily)(?![\p{L}])|per (hour|day|week|month|year)/iu;
         const rowText = hd ? text.split(" | ").map((c, j) => { const m = PERIOD_HEAD.exec(hd.split(" | ")[j] ?? ""); const w = m ? ({ hourly: "hour", weekly: "week", monthly: "month", annual: "year", yearly: "year", daily: "day" } as Record<string, string>)[(m[1] ?? "").toLowerCase()] ?? m[2] : ""; return w && /\d/.test(c) && !/(?<![\p{L}])(?:per|an?|\/)\s*(?:hour|day|week|month|year)|hourly|weekly|monthly|yearly|annual/iu.test(c) ? `${c} per ${w}` : c; }).join(" | ") : text;
         return { text, hard: hardParts(rowText, read), lower: lowerWords(r), content: contentWords(r), quotable: quotable(text) && !raw[k].note && !unsafe[k - 1] && !unsafe[k + 1] && (names || lend), lent: lend ? owner : null, label: lend ? `${host ? `From ${host}, a` : "A"} page about ${owner}` : "", passage: passage(k), pageTitle: title,
-          ownSite: !!ownSite, url: String(p.url ?? ""), plain: plainOf(text, k, hs, names, others.length > 0),
+          ownSite: !!ownSite, url: String(p.url ?? ""),
           otherEntity: subs.some((n) => new RegExp(`(?<![\\p{L}])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+(?!(?:Inc|LLC|Ltd|Corp|Corporation|Co|Company|Holdings|Group|Technologies|Labs|Financial)\\b)\\p{Lu}`, "u").test(`${text} ${title}`)) };
       }) };
   }) };
@@ -514,11 +495,10 @@ export async function keepSupported(reply: string, sources: (string | { text: st
 // dates, hedges or disowns it.
 // (The page's title is read too: "Citadel intern pay (2017)" dates every unit under it. A unit or title that names another entity
 // starting with the asked employer's name, "Citadel Securities", is never shown unchecked.)
-// Round 6 (review: a negative word list cannot win): a unit is shown during an outage only when it passes the positive test (plain)
-// AND its page is on the asked employer's own registrable domain as the search's record gives it; any other page is given as a link.
-export const uncheckedOk = (u: Unit) => u.quotable && !u.otherEntity && u.plain && u.ownSite;
-export const OUTAGE_LINE = "I couldn't check what these pages say against your question just now, so here they are to read yourself.";
-export const UNCHECKED_LINE = "I couldn't check these against the pages this time, so they are the pages' own words, not confirmed by me.";
+// Round 7 (review of round 6: on the employer's own site 8 of 17 hostile pages still gave a misleading unit, the disqualifier
+// elsewhere on the page, while 6 of 8 true pages were blocked): when the judge cannot answer, no line of any page is shown. The pages
+// read are listed by code (title, link) after this one clause; the person can open them, or ask again for them to be checked.
+export const OUTAGE_LINE = "I couldn't check what these pages say against your question just now, so I'm not quoting any of them: here they are to open yourself, and I can check them again if you ask.";
 // A result built with the support check on, and what its reply is checked against: the read pages' sentences, and which page each
 // numbered source is. Kept beside the result (never in it: the result is what the model reads).
 const BUILT = new WeakMap<object, { idx: PageIndex; pageOfN: number[] }>();

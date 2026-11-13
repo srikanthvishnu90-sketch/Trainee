@@ -6,6 +6,8 @@
 //   - deny nothing: no "not", "no", "never", "don't", "do not", "denied", "declined", "rejected", "withdrawn", "pending", "superseded";
 //   - give a dollar cap at least the run's --budget-usd.
 const NEGATED = /(?<![\p{L}])(?:not|no|never|don['’]?t|do not|cannot|can['’]?t|denied|deny|declined?|rejected|reject|withdrawn|withdraw|pending|superseded|revoked|paused|halt(?:ed)?|stop(?:ped)?|unapproved)(?![\p{L}])/iu;
+// Round 7: a draft or a condition approves nothing ("would be approved if the owner says yes", "approved once …", "Proposed: …").
+const CONDITIONAL = /(?<![\p{L}])(?:would|could|should|might|may|if|unless|once|when|until|after|provided|subject to|draft|drafts|proposed|proposal|propose|tbd|to be decided|tentative|planned|plan to|expected)(?![\p{L}])/iu;
 const APPROVES = /(?<![\p{L}])(?:approved?|approves|yes|go ahead|go-ahead|run it|authori[sz]ed?)(?![\p{L}])/iu;
 export function measureApproval(approval: string, budgetUsd: number, decisions: string): string | null {
   if (!/^D-\d{3}[a-z]?$/.test(approval)) return `the approval "${approval}" is not a DECISIONS.md id (D-xxx)`;
@@ -16,6 +18,7 @@ export function measureApproval(approval: string, budgetUsd: number, decisions: 
   const text = cells.filter((c) => !/^owner(?![\p{L}])/iu.test(c)).join(" | ");
   if (!/judge-measure/i.test(text)) return `DECISIONS ${approval} does not name this measurement (judge-measure)`;
   if (NEGATED.test(text)) return `DECISIONS ${approval} does not approve it without a "not", "no" or a refusal`;
+  if (CONDITIONAL.test(text)) return `DECISIONS ${approval} is a draft or a condition, not an approval`;
   if (!APPROVES.test(text)) return `DECISIONS ${approval} does not say judge-measure is approved`;
   const caps = [...text.matchAll(/\$\s?(\d+(?:\.\d+)?)/g)].map((m) => Number(m[1]));
   if (!caps.some((c) => c >= budgetUsd)) return `DECISIONS ${approval} gives no dollar cap of at least $${budgetUsd}`;

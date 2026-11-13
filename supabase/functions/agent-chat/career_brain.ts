@@ -236,7 +236,9 @@ export async function agentTurn(o: {
   // D-073 review 2: research read pages and none supported an answer, and the model's reply did not stand (the loop removed its
   // unsourced claim, asked once more and stopped: "incomplete_reply"). The person is told what research found, in code's words: that
   // it could not be confirmed, with the pages checked. Not after a save: that failure sentence says what was saved, and stays.
-  else if (trace.m && !trace.r && result.stopped === "incomplete_reply" && result.reply === INCOMPLETE_REPLY && trace.m.status === "no_sources" && (trace.m as { checked?: unknown[] }).checked?.length)
+  // 2026-11-13 (review of #801): the same when research kept lines (status ok): the person gets those lines with their sources, in
+  // the pages' own words (code's enforcement of an empty draft), not the generic unfinished-reply line.
+  else if (trace.m && !trace.r && result.stopped === "incomplete_reply" && result.reply === INCOMPLETE_REPLY && (trace.m.status === "ok" || (trace.m.status === "no_sources" && (trace.m as { checked?: unknown[] }).checked?.length)))
     result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? enforceCompanyReply("", trace.m) : enforceMarketReply("", trace.m as MarketResult, shownPay) };
   // Not an open career question: any link the model wrote that the turn never saw is removed (links not on the turn's allow-list).
   // MIRROR PROCESS (C23, docs/architect/specs/MIRROR-PROCESS.md): a link Trainee itself already showed in this conversation (an
@@ -370,8 +372,19 @@ function placeOfPay(p: { pay?: string | null; place?: string | null }, figures: 
   const held = [...new Set(byPlace.filter((m) => numbersIn(m[2]).some((y) => figures.some((n) => numEq(y, n)))).map((m) => m[1].trim()))];
   if (held.length) return held.length === 1 ? held[0] : null;
   const inPay = /\(([^()$\d]{2,60})\)/.exec(pay)?.[1]?.trim();
-  return String(p?.place ?? "").trim() || inPay || null;
+  return onePlace(String(p?.place ?? "")) || inPay || null;
 }
+// 2026-11-13 (review of #801; a missing place is acceptable, a wrong one is not): the record's location is written beside the pay
+// only when it is one place. Several places ("San Jose, CA; Austin, TX", "Chicago, IL / New York, NY", "Multiple locations") or
+// remote together with an office name no one place for the pay; remote alone is said as the record says it.
+function onePlace(place: string): string | null {
+  const t = place.replace(/\s+/g, " ").trim();
+  if (!t || /[;|\/]|\b(?:or|and|multiple|various|several|locations|anywhere)\b/i.test(t)) return null;
+  if (/\bremote\b/i.test(t)) return /^remote(?:\s*[-,(]\s*(?:US|USA|U\.S\.|United States)\)?)?$/i.test(t) ? t : null;
+  return t;
+}
+// A sentence about the person's own job ("Your current job pays $40 an hour", "my last job paid $40/hr") is not a posting's.
+const OWN_JOB = /\b(?:your|my|our)\b/i;
 // D-073 review (item 1: "Stripe pays $40/hr. PayPal pays $40/hr." had PayPal's sentence given Stripe's place, then its own): a place
 // is a fact code writes into the reply, so it goes only into the sentence(s) bound to that one posting or shown line (`binds`: the
 // sentence, the figures, the place), never into every sentence that happens to give the same figure. A sentence bound to two
@@ -383,7 +396,7 @@ function withPlace(reply: string, binds: PlaceBind[]): string {
     if (/https?:\/\//.test(x)) return x;
     const mine = binds.filter((b) => b.key === x.trim());
     const places = [...new Set(mine.map((b) => b.place.toLowerCase()))];
-    if (places.length !== 1) return x;
+    if (places.length !== 1 || OWN_JOB.test(x)) return x;
     const place = mine[0].place, figures = mine.flatMap((b) => b.figures), city = place.split(",")[0].trim().toLowerCase();
     if (!city || x.toLowerCase().includes(city)) return x;
     const m = MONEY_PHRASE.exec(x);
@@ -409,7 +422,9 @@ export function payWithSource(reply: string, postings: { company?: string | null
       const place = placeOfPay(p, numbersIn(x).filter((n) => ns.some((y) => numEq(y, n))));
       if (!place) continue;
       if (companies.some((c) => c !== co && namesWord(x, c))) continue;
-      if (!(co && namesWord(x, co)) && otherNames(x, `${place} ${p.title ?? ""}`).length) continue;
+      // 2026-11-13 (review of #801: with PayPal's posting read, "IBM pays $40/hr." took PayPal's city): any other name in the
+      // sentence, in capitals or all capitals, may be another employer, whether or not the sentence names this one too.
+      if (otherNames(x, `${place} ${p.title ?? ""} ${p.company ?? ""}`).length) continue;
       binds.push({ key: x.trim(), figures: ns, place });
     }
     if (!reply.includes(url) && !add.includes(url)) add.push(url);
@@ -425,12 +440,13 @@ export function payWithSource(reply: string, postings: { company?: string | null
   const out = withPlace(String(reply), binds);
   return add.length ? `${out.trimEnd()}\n\n${add.join("\n")}` : out;
 }
-// The names a sentence gives beyond the posting's own place and title (capitalised words; an all-capitals word such as "SWE" or "US" is not a name
-// here; a first word is one unless it is a common way to start a sentence). A word wrongly read as a name only means no place is added.
+// The names a sentence gives beyond the posting's own place, title and employer: capitalised words and (2026-11-13) all-capitals
+// ones ("IBM", "NVIDIA"), other than a small closed list ("SWE", "US", months, days); a first word is one unless it is a common way
+// to start a sentence. A word wrongly read as a name only means no place is added.
 const STARTER = /^(?:The|A|An|For|In|At|On|It|Its|That|This|Their|They|There|Here|Pay|Base|Hourly|And|But|So|Yes|No|You|Your|With|From|To|As|Per|Each|Most|Also|Salary|Compensation|Posted|Listed|Stated)$/;
 function otherNames(x: string, own: string): string[] {
   const inPlace = own.toLowerCase(), first = /^\S+/.exec(x.trim())?.[0].replace(/[^\p{L}'-]/gu, "") ?? "";
-  return (x.trim().match(/(?<![\p{L}\p{N}])\p{Lu}\p{Ll}[\p{L}'-]*/gu) ?? []).filter((w, k) => !(k === 0 && w === first && STARTER.test(w)) && !inPlace.includes(w.toLowerCase()) && !/^(?:I|I'm|I've|I'll|January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)$/.test(w));
+  return (x.trim().match(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}\p{N}'&-]+/gu) ?? []).filter((w, k) => !(k === 0 && w === first && STARTER.test(w)) && !inPlace.includes(w.toLowerCase().replace(/'s$/, "")) && !/^(?:I|I'm|I've|I'll|SWE|SDE|US|USA|USD|PTO|HR|January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)$/.test(w));
 }
 // D-067: the reply, never blank. A shown payload stands as shown; a market research result with sources gives its points (code's
 // own enforcement of an empty draft: the kept points with their sources, or the plain no-source line).

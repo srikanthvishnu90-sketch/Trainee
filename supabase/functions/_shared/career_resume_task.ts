@@ -43,7 +43,7 @@ export interface ResumeTask {
   // Round 6: the task has no target of the person's yet (it began with that question); nothing is built until one is named.
   noTarget?: boolean;
 }
-type Doc = { kind: "document"; format: string; filename: string; mime: string; base64: string; sha256: string };
+type Doc = { kind: "document"; format: string; filename: string; mime: string; base64: string; sha256: string; material?: Record<string, unknown> };
 export type ResumeTurn = { reply: string; intent: string; resultStatus: string; documents: Doc[]; link: string | null; task: ResumeTask };
 
 const lc = (s: unknown) => String(s ?? "").toLowerCase().replace(/[’‘]/g, "'");
@@ -588,7 +588,13 @@ async function resumeTaskTurnInner(o: { message: string; ctx: any; userId: strin
     return { reply: `I couldn't make a PDF for ${target.label} that reads back correctly, so I haven't sent one. Ask me again and I'll rebuild it.`, intent: RESUME_TASK_INTENT, resultStatus: "failed", documents: [], link: null, task };
   }
   const sha = await hex(out.pdf), filename = `${fileStem(target)}.pdf`;
-  const documents: Doc[] = [{ kind: "document", format: "pdf", filename, mime: "application/pdf", base64: b64(out.pdf), sha256: sha }];
+  // D-072 (files writers): the delivered PDF is a version of the resume for this target on the Materials File (career_material_writer.ts),
+  // with what changed as this build itself reports it (order moved, bullets reworded as approved, bullets left off to fit).
+  const material = { doc_kind: "resume", target: target.label, role_job_id: null, based_on: source, format_check: "The words read back out of the PDF are exactly the lines built",
+    changes: [...built.moved.map((m) => ({ kind: "Emphasis", after: `Moved ${m}`, text: "Order changed; no fact changed." })),
+      ...(task.swaps ?? []).map((w) => ({ kind: "Wording", before: w.before, after: w.after, text: "Reworded as you approved." })),
+      ...built.left.map((l) => ({ kind: "Emphasis", after: `Left off: ${l}`, text: "Left off to fit the page; still on your record." }))].slice(0, 20) };
+  const documents: Doc[] = [{ kind: "document", format: "pdf", filename, mime: "application/pdf", base64: b64(out.pdf), sha256: sha, material }];
   if (/\b(docx|word)\b/.test(t)) documents.push({ kind: "document", format: "docx", filename: `${fileStem(target)}.docx`, mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", base64: b64(out.docx), sha256: await hex(out.docx) });
   // A link only when the person asks for one (T3: "send a download link … the attachment isn't opening"): the File page, sign-in first.
   const wantsLink = ask === "link" || /\b(link|download)\b/.test(t);

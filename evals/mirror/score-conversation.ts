@@ -18,6 +18,10 @@
 //                owner's earlier +-10% of Instinct's characters (+-6 under 60) stays the tracked target (`length_target`), a
 //                signal, not the pass bar. Text is every message of the turn with link-only lines and bare links taken out.
 //   answers_first, internal_words   supabase/functions/_shared/reply_rubric.ts on Trainee's reply (see the notes where read).
+//                answers_first is given the turn's ask (RubricInput.ask, a required input: the rule is "the first sentence
+//                takes up the ask or gives a result"), as every other caller gives it. wa-1/d066 left it out, so the rule's
+//                ask half could never match (2026-11-13: live-9's C16 "Your tracker is set up." failed for it). The scorer
+//                version changed with it (wa-1/d066-ask), so --compare refuses a score file made by the earlier scorer.
 // A scored turn passes when outcome, length (not far over), answers_first, internal words, boundary and no_action all pass.
 // The headline is always "passed / scored, with N coverage gaps", never a rate over the whole set. --compare refuses to
 // compare two runs unless they scored the same turns with the same scorer (like for like).
@@ -25,7 +29,7 @@
 import { answersFirst, internalWords } from "../../supabase/functions/_shared/reply_rubric.ts";
 import { replyLength } from "../../supabase/functions/_shared/agent/turn_notes.ts";
 
-export const SCORER_VERSION = "wa-1/d066";
+export const SCORER_VERSION = "wa-1/d066-ask";
 const URL_RX = /https?:\/\/\S+/g;
 export function textOf(messages: string[]): string {
   return messages.flatMap((m) => String(m).split("\n")).filter((l) => l.trim() && !/^\s*(?:https?:\/\/\S+|\[[^\]]*link[^\]]*\])\s*$/i.test(l))
@@ -71,10 +75,11 @@ export function coverageGap(t: Line | undefined, p: Prompt, byId: Map<string, Li
 
 export function scoreTurn(t: Line, iMessages: string[], p: Prompt, judged: Judged) {
   const iText = textOf(iMessages), tText = textOf([t.reply]);
-  // answers_first is a heuristic: it also fails Instinct on 4 of the 26 turns. A turn passes it when Trainee passes, or when
-  // Instinct's own reply to the same turn fails it too (the mirror is the bar, not the heuristic). An "internal word" the
-  // person typed themselves ("first_unique", their function's name) is theirs, not Trainee's.
-  const af = answersFirst({ reply: t.reply } as any).length === 0 || answersFirst({ reply: iText } as any).length > 0;
+  // answers_first is a heuristic: given the ask it still fails Instinct on 1 of the 26 turns (C7). A turn passes it when
+  // Trainee passes, or when Instinct's own reply to the same turn fails it too (the mirror is the bar, not the heuristic). Both
+  // sides are read against the same ask, the person's message of this turn. An "internal word" the person typed themselves
+  // ("first_unique", their function's name) is theirs, not Trainee's.
+  const af = answersFirst({ ask: p.prompt, reply: t.reply }).length === 0 || answersFirst({ ask: p.prompt, reply: iText }).length > 0;
   const iw = internalWords({ reply: t.reply } as any).filter((v: any) => !(v.quote && p.prompt.includes(v.quote))).length === 0;
   const boundary = !RESTATED.test(iText) || TRAINEE_RESTATED.test(tText);
   // A refused read (a research host the run does not reach) is not an action; a queue, prepare, submit or send is.

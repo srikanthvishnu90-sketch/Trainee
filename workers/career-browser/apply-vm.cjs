@@ -21,7 +21,7 @@ const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
 const { applyOne, payloadHash, NeedsUser } = require("./parallel-apply.cjs");
-const { recheck } = require("./handoff.cjs");
+const { recheck, askedQuestions } = require("./handoff.cjs");
 // What the person is told was handed to them, per HANDOFF_REASONS (the same words as parallel-apply.cjs and scripts/apply.ts).
 const HANDED_BACK = {
   login_required: "the employer asks the person to sign in; they finish it at the link",
@@ -121,7 +121,11 @@ function createWorker(o) {
   // (no handoff object, or one that is not {done_at: null | text, yes: null | {card_hash}}): never read as "an ordinary row".
   function handoffState(row) {
     const ev = row.evidence && typeof row.evidence === "object" ? row.evidence : {};
-    let done = row.handoff_done_at || ev.handoff_done_at || null, yes = row.handoff_yes || ev.handoff_yes || null;
+    // Review of #797: the yes has one source, the row's own hand-off state as the database hands it out. A hand-off row leaves the
+    // queue only through career_apply_vm_claim_handoff (the guard of 20261112160000 holds it back from every other claim), which
+    // carries {done_at, yes} from the columns career_apply_handoff_yes_as wrote; evidence (which the worker itself writes) is never
+    // read for a yes. A done noted in evidence still makes the row a re-check: that direction only ever sends less.
+    let done = row.handoff_done_at || ev.handoff_done_at || null, yes = row.handoff_yes || null;
     if (row._handoffClaim) {
       const h = row.handoff;
       if (!h || typeof h !== "object" || Array.isArray(h)) return { unreadable: true };
@@ -203,6 +207,9 @@ function createWorker(o) {
         // That application is the person's own browser's to finish (the extension, or submitting at the link themselves): marked
         // needs_extension, kept as the hand-off stop, never a pass. Its reason stays the wall's, so the person's own answer
         // (career_apply_person_finished_as) still applies.
+        // Review of #797: the check is still on the form and the person's own answers are still missing beside it: they are asked
+        // (needs_answers, the state the database re-prepares from), never left to end as needs_extension with nobody asked.
+        if (rc.state === "still_walled" && rc.handoff.reason === "bot_check_in_form" && askedQuestions(rc.handoff).length) return void (await askAnswers(row, { handoff: rc.handoff }, { link: row.url }, askedQuestions(rc.handoff)));
         if (rc.state === "still_walled") {
           const wall = rc.handoff.reason === "bot_check_in_form" ? "bot_check" : rc.handoff.reason;
           const session = ["login_required", "bot_check", "email_code"].includes(wall);
@@ -228,6 +235,12 @@ function createWorker(o) {
     stats.refusedHosts++;
     try { await rpc("career_apply_host_refused_for", { p_id: row.id, p_lease: row.lease_token, p_reason: why, p_retry_after_seconds: retryAfter ?? null, p_now: new Date().toISOString() }); } catch (e) { log(`HOST_BACKOFF_FAILED ${e.message.slice(0, 100)}`); }
   }
+  // The person's own questions, ended exactly as the cloud runner ends them (not_submitted / needs_answers, nothing sent).
+  async function askAnswers(row, res, ev, needs, alsoCheck = true) {
+    const questions = needs.map((n) => ({ label: String(n.label || "").replace(/\s+/g, " ").slice(0, 200), ...(Array.isArray(n.options) && n.options.length ? { options: n.options.map(String).slice(0, 60) } : {}) }));
+    return complete(row, "not_submitted", "needs_answers", { ...ev, nothing_sent: true, field: res.field, fields: questions.map((q) => q.label), questions, needs: res.needs || null, handed_back: "a required question has no confirmed answer",
+      ...(alsoCheck ? { also_check: true } : {}), ...(res.handoff ? { handoff: res.handoff } : {}) });
+  }
   async function settle(row, res, shotDir, t0) {
     const before = shotDir && fileProof(path.join(shotDir, `${row.id}-1-filled.png`)), after = shotDir && fileProof(path.join(shotDir, `${row.id}-2-confirmation.png`));
     const ev = {
@@ -243,6 +256,8 @@ function createWorker(o) {
     }
     if (res.status === "needs_user") {
       if (res.reason === "bot_check") await refused(row, "bot_wall", null);
+      // Review of #797: answers only the person can give, missing beside an in-form check, are asked now (both are theirs).
+      if (res.reason === "bot_check" && res.handoff && askedQuestions(res.handoff).length) return void (await askAnswers(row, res, ev, askedQuestions(res.handoff)));
       // A wall stops the run before Submit (parallel-apply never hands one back after the click): nothing was sent, which
       // is what lets the person finish it themselves or have it prepared again (WO-L). The wall kind is kept; the page's
       // contents are not.
@@ -256,9 +271,7 @@ function createWorker(o) {
     // asked, and the new answer goes only on a NEW card and a NEW approval. The questions travel in the evidence, in the form's
     // own words and options, never in the reason (the trigger matches the reason exactly).
     if (res.reason === "missing_required_answer") {
-      const needs = Array.isArray(res.needs) && res.needs.length ? res.needs : [{ label: res.field || "" }];
-      const questions = needs.map((n) => ({ label: String(n.label || "").replace(/\s+/g, " ").slice(0, 200), ...(Array.isArray(n.options) && n.options.length ? { options: n.options.map(String).slice(0, 60) } : {}) }));
-      return void (await complete(row, "not_submitted", "needs_answers", { ...ev, nothing_sent: true, field: res.field, fields: questions.map((q) => q.label), questions, needs: res.needs || null, handed_back: "a required question has no confirmed answer", ...(res.handoff ? { handoff: res.handoff } : {}) }));
+      return void (await askAnswers(row, res, ev, Array.isArray(res.needs) && res.needs.length ? res.needs : [{ label: res.field || "" }], false));
     }
     // One that could not be set and read back: handed back by name, never guessed.
     if (res.reason === "field_not_filled") {

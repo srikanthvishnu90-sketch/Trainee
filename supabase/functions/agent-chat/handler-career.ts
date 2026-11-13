@@ -1097,7 +1097,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
       // intake; a bare "apply here <link>" or a pasted link alone stays code's.
       const g1LinkQuestion = questionShaped(message.replace(/https?:\/\/\S+/gi, " "));
       const hereOut = !noApply && !g1LinkQuestion && Deno.env.get("CAREER_APPLY_HERE") !== "off" && writerChannel((body as any)?.channel) === "telegram" && !billing && !cancelled && !card && !mock && !asked && !which && !emailed && !outreachAns && !repliesAns && !cloud && !cardYes && !paced && !employerAns && !siteNo && !planned && !careerTask && !careerBatch && !host.isHostControlled(message, ctx)
-        ? await applyHereTurn({ message, now: Date.now(), db: supabasePostingsDb(admin), fetchFeed: boardFetchFeed((i, init) => fetch(i, init), { timeoutMs: 8000 }),
+        ? await applyHereTurn({ message, now: Date.now(), db: supabasePostingsDb(admin), fetchFeed: boardFetchFeed((i, init) => fetch(i, init), { timeoutMs: 8000, personLink: true }),
           readWorkday: (u) => readWorkdayPosting(u, { fetch, userAgent: `Trainee posting reader (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }), // D-062
             apps: () => supabaseApplications(admin)(user.id), facts: screenFacts,
             last: (() => { const l = (loaded.snapshot as any)?.stores?.discovery?.lastShortlist; return Array.isArray(l) && l.length === 1 ? l[0] : null; })() })
@@ -1148,7 +1148,7 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           // FEATURE E2E: a pasted posting link (or a role at a registered board) read from the ATS's public API on demand
           // and stored as the ingest stores it (career_apply_link.ts). CAREER_APPLY_LINK=off turns the read off.
           link: Deno.env.get("CAREER_APPLY_LINK") === "off" ? null
-            : { db: supabasePostingsDb(admin), fetchFeed: boardFetchFeed((i, init) => fetch(i, init), { timeoutMs: 8000 }) },
+            : { db: supabasePostingsDb(admin), fetchFeed: boardFetchFeed((i, init) => fetch(i, init), { timeoutMs: 8000, personLink: true }) },
           message: reach?.apply ?? tailorApply?.apply ?? message, userId: user.id, now: Date.now(), postings: supabasePostingsDb(admin), wants: supabaseWantStore(admin),
           apps: () => supabaseApplications(admin)(user.id),
           facts: screenFacts,

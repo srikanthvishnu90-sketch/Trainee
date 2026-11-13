@@ -14,7 +14,7 @@ import { CareerJobs } from "./router_core.career.js";
 import { applyEmailOf } from "./apply_email.ts";
 import { BACKLOG_MS, freshWhenSeen } from "./career_fresh.ts";
 import { FEEDS, isMoreProvider, MORE_PROVIDERS } from "./career_ingest_feeds.ts";
-import { boardHost, cappedText, guardedFetch } from "./posting_fetch.ts";
+import { boardHost, cappedText, guardedFetch, type Resolve } from "./posting_fetch.ts";
 // Feature 6: the posting URL-shape guard (packages/domain/166-career-url-shape.js, MUSE-F-010), copied byte for byte
 // (tests/edge/career-ingest-scale.test.ts fails while the copy is stale). It sets globalThis.CareerUrlShape.
 import "./career_url_shape.js";
@@ -746,11 +746,13 @@ export async function sha256Hex(text: string): Promise<string> {
   return h;
 }
 // 2026-10-30: the bounded read's limits (see streamRead).
+export const PERSON_LINK_MAX_BYTES = 8 * 1024 * 1024; // the board read behind a link a person pasted (apply_here.ts)
 export const BOARD_MAX_BYTES = 64 * 1024 * 1024; // a whole board's list read whole (not streamed): stopped beyond this
 export const WHOLE_MAX = 2_000_000, XML_MAX = 8_000_000, STREAM_TIMEOUT_MS = 45000;
 // Where each JSON provider's job array is: a key of the root object, or the root itself (null).
 const CORE_ARRAY: Record<string, string | null> = { greenhouse: "jobs", lever: null, ashby: "jobs" };
-export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?: string; timeoutMs?: number; bodyHash?: boolean; stream?: boolean; wholeMax?: number; wholeBytes?: number } = {}): FetchFeed {
+export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?: string; timeoutMs?: number; bodyHash?: boolean; stream?: boolean; wholeMax?: number; wholeBytes?: number; personLink?: boolean; resolve?: Resolve } = {}): FetchFeed {
+  const wholeBytes = opts.wholeBytes ?? (opts.personLink ? PERSON_LINK_MAX_BYTES : BOARD_MAX_BYTES);
   const headers: Record<string, string> = { accept: "application/json" };
   if (opts.userAgent) headers["user-agent"] = opts.userAgent;
   const timeoutMs = opts.timeoutMs ?? 15000;
@@ -760,7 +762,12 @@ export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?
   // from the provider list (career_ingest_feeds.ts), so no name lookup is made for it.
   const guarded = async (url: string, init: RequestInit): Promise<Response> => {
     const hostOf = (h: string) => { try { return new URL(h).hostname.toLowerCase(); } catch { return ""; } };
-    return (await guardedFetch(fetchFn as any, url, init, { allow: (h) => boardHost(h) || hostOf(h) === hostOf(url), resolve: null })).res;
+    // Round 4: a scheduled ingest reads feeds the operator configured, and a board may redirect off its host (Recruitee to the
+    // employer's careers domain, Personio .de to .com): any public https host that passes the refusals is followed (never a
+    // never-open site, a reserved or private name, or a name that leads to a private address where a resolver exists). The
+    // first address is built here from the provider list, so only the hops are looked up. A pasted link's read (personLink,
+    // the chat path) stays on the host asked and the job boards' own hosts.
+    return (await guardedFetch(fetchFn as any, url, init, opts.personLink ? { allow: (h) => boardHost(h) || hostOf(h) === hostOf(url), resolve: null } : { resolve: opts.resolve, trustFirst: true })).res;
   };
   // WO-037: `cond` sends the board's last validators (If-None-Match / If-Modified-Since); a 304 comes back as NOT_MODIFIED
   // (2026-10-30: it was null, so a board whose body was the JSON `null` read as "not modified").
@@ -776,7 +783,7 @@ export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?
     if (seen) { seen.etag = res.headers.get("etag"); seen.last_modified = res.headers.get("last-modified"); }
     if (res.status === 304 && cond) { try { await res.body?.cancel(); } catch { /* already closed */ } return NOT_MODIFIED; }
     if (res.status < 200 || res.status >= 300) { try { await res.body?.cancel(); } catch { /* already closed */ } throw new Error(`HTTP ${res.status}`); }
-    const text = await cappedText(res, opts.wholeBytes ?? BOARD_MAX_BYTES);
+    const text = await cappedText(res, wholeBytes);
     if (opts.bodyHash && seen) {
       seen.body_sha = await sha256Hex(text);
       if (cond?.body_sha && cond.body_sha === seen.body_sha) return NOT_MODIFIED; // the same body as the last full read
@@ -816,7 +823,7 @@ export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?
       if (res.status === 304 && cond && (b.etag || b.last_modified)) { try { await res.body?.cancel(); } catch { /* already closed */ } return null; }
       if (res.status < 200 || res.status >= 300) { try { await res.body?.cancel(); } catch { /* already closed */ } throw new Error(`HTTP ${res.status}`); }
       if (cond) validators = { etag: res.headers.get("etag"), last_modified: res.headers.get("last-modified") };
-      const text = await cappedText(res, opts.wholeBytes ?? BOARD_MAX_BYTES);
+      const text = await cappedText(res, wholeBytes);
       if (cond && opts.bodyHash) {
         const sha = await sha256Hex(text);
         if (b.body_sha && b.body_sha === sha) return { same: true as const, sha, validators };

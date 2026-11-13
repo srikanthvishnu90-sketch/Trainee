@@ -20,7 +20,7 @@
 // behind the person's sign-in on the employer's site; this module says so and never guesses them (posting_requirements.ts).
 import { payFrom, paysByPlace, postingTextForModel } from "./posting_pay.ts";
 import { decodeHtmlEntities } from "./posting_text.ts";
-import { boardHost, guardedText, INVISIBLE, NotRead, parseJson, stopWords } from "./posting_fetch.ts";
+import { guardedText, sameBoard, INVISIBLE, NotRead, parseJson, stopWords } from "./posting_fetch.ts";
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 export interface WorkdayUrl { host: string; tenant: string; site: string; jobPath: string; cxs: string; page: string; key: string }
@@ -91,6 +91,8 @@ export interface WorkdayPosting {
   description_html: string;
   text: string; // plain text, with any sentence written to an AI removed (posting_pay.ts postingTextForModel)
   can_apply: boolean | null;
+  is_posted?: boolean | null; // Workday's `posted`, when the answer carries it
+  job_posting_id?: string | null; // Workday's jobPostingId: the posting the answer is for
   questionnaire: boolean; // the employer attached its own application questions (they are behind the person's sign-in)
 }
 export type WorkdayState = "open" | "closed" | "unknown";
@@ -183,7 +185,7 @@ export function parseWorkdayCxs(json: unknown, pageUrl: string): WorkdayPosting 
     req_id: f(j.jobReqId), time_type: f(j.timeType), remote_type: f(j.remoteType),
     posted: f(j.postedOn), start_date: day(j.startDate), deadline: day(j.endDate), deadline_text: deadlineText,
     pay: payFrom(full.text), pays: paysByPlace(full.text), description_html: html, text: postingTextForModel(htmlToText(html)).text,
-    can_apply: typeof j.canApply === "boolean" ? j.canApply : null, questionnaire: !!str(j.questionnaireId),
+    can_apply: typeof j.canApply === "boolean" ? j.canApply : null, is_posted: typeof j.posted === "boolean" ? j.posted : null, job_posting_id: str(j.jobPostingId).slice(0, 300) || null, questionnaire: !!str(j.questionnaireId),
   };
 }
 
@@ -213,8 +215,21 @@ export interface WorkdayDeps { fetch: Fetch; timeoutMs?: number; userAgent?: str
 const req = async (d: WorkdayDeps, url: string, reads: string[], accept: string, init: RequestInit = {}) => {
   reads.push(`${init.method ?? "GET"} ${url}`);
   // One time limit for the request, its redirects and its body (posting_fetch.ts limited: it holds whatever the fetch does).
-  return await guardedText(d.fetch, url, { method: "GET", ...init, headers: { accept, "user-agent": d.userAgent ?? "Trainee posting reader", ...(init.headers ?? {}) } }, { allow: boardHost, timeoutMs: d.timeoutMs ?? 8000 });
+  return await guardedText(d.fetch, url, { method: "GET", ...init, headers: { accept, "user-agent": d.userAgent ?? "Trainee posting reader", ...(init.headers ?? {}) } }, { allow: sameBoard(url), timeoutMs: d.timeoutMs ?? 8000 }); // every hop on this career site's own host
 };
+// Round 4: ONE state for a Workday posting's data, used by the reader below and by the link check (link_check.ts). The answer
+// must be for the posting asked: Workday addresses a posting by the requisition id that ends its path ("..._R0138586"), and
+// the answer's jobPostingId ends with the same one (the words before it may differ). open: canApply true, not `posted` false,
+// its end date not passed. closed: canApply false, posted false, or the end date passed. Anything else: unknown.
+export function workdayState(p: WorkdayPosting, url: WorkdayUrl, today: string): { state: WorkdayState; why: string; other?: boolean } {
+  const key = (s: string) => { let t = s; try { t = decodeURIComponent(s); } catch { /* as written */ } return t.toLowerCase().split("_").at(-1)!; };
+  if (p.job_posting_id && key(p.job_posting_id) !== key(url.jobPath.split("/").at(-1)!)) return { state: "unknown", why: "Workday's answer is for another posting than the one asked: not read", other: true };
+  if (p.can_apply === false) return { state: "closed", why: "Workday says the posting no longer takes applications (canApply false)" };
+  if (p.is_posted === false) return { state: "closed", why: "Workday says the posting is not posted (posted false)" };
+  if (p.deadline && p.deadline < today) return { state: "closed", why: `its stated end date (${p.deadline}) has passed` };
+  if (p.can_apply !== true) return { state: "unknown", why: "Workday's answer does not say whether the posting takes applications (no canApply): open is not confirmed" };
+  return { state: "open", why: "read live from the posting's Workday page data" };
+}
 // Workday's error code, only in its own shape ("S21"); anything else a body puts there is not repeated.
 const errorCode = (v: unknown) => { const c = str(v); return /^[A-Z]\d{1,4}$/.test(c) ? c : ""; };
 const today = (now: number) => new Date(now).toISOString().slice(0, 10);
@@ -237,12 +252,7 @@ export async function readWorkdayPosting(href: string, d: WorkdayDeps): Promise<
       return { state: "closed", posting: null, why: `Workday answered ${code ? `errorCode ${code}` : `HTTP ${r.status}`} for this posting: it is no longer published`, reads, url };
     }
     const p = r.ok ? parseWorkdayCxs(body, url.page) : null;
-    if (p) {
-      if (p.can_apply === false) return { state: "closed", posting: p, why: "Workday says the posting no longer takes applications (canApply false)", reads, url };
-      if (p.deadline && p.deadline < today(now)) return { state: "closed", posting: p, why: `its stated end date (${p.deadline}) has passed`, reads, url };
-      if (p.can_apply !== true) return { state: "unknown", posting: p, why: "Workday's answer does not say whether the posting takes applications (no canApply): open is not confirmed", reads, url };
-      return { state: "open", posting: p, why: "read live from the posting's Workday page data", reads, url };
-    }
+    if (p) { const s = workdayState(p, url, today(now)); return { state: s.state, posting: s.other ? null : p, why: s.why, reads, url }; }
     why = r.ok ? "Workday's answer held no posting" : `Workday answered HTTP ${r.status}`;
   } catch (e) {
     why = e instanceof NotRead ? `the posting's Workday data was ${e.message}` : `the Workday read did not finish (${stopWords(e)})`;

@@ -28,7 +28,7 @@ import { schemaFromGreenhouse } from "./posting_schema.ts";
 import { placedPay, postingTextForModel } from "./posting_pay.ts";
 import { decodeHtmlEntities } from "./posting_text.ts";
 import { htmlToText, postingField, readWorkdayPosting, workdayUrl, type WorkdayDeps } from "./workday_posting.ts";
-import { boardHost, BOARD_SLUG, guardedText, INVISIBLE, NotRead, parseJson, POSTING_UUID, refusedAddress, stopWords } from "./posting_fetch.ts";
+import { BOARD_SLUG, guardedText, sameBoard, INVISIBLE, NotRead, parseJson, POSTING_UUID, refusedAddress, stopWords } from "./posting_fetch.ts";
 import { neverOpen } from "./career_people_sites.ts";
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
@@ -93,17 +93,19 @@ export function requirementsFrom(html: string): Requirements {
 }
 
 // ------------------------------------------------------------------------------------------------ the boards
-export function boardOf(url: string): { board: Board; parts: string[] } | null {
+// `eu`: the address is on the board's EU site (jobs.eu.lever.co, job-boards.eu.greenhouse.io), whose postings the global API
+// does not hold.
+export function boardOf(url: string): { board: Board; parts: string[]; eu?: boolean } | null {
   let u: URL;
   try { u = new URL(String(url ?? "").trim()); } catch { return null; }
   if (refusedAddress(u.href)) return null; // https, no userinfo or port, a named public host
   const host = u.hostname.toLowerCase(), seg = u.pathname.split("/").filter(Boolean);
   if (/^(job-boards|boards)(\.eu)?\.greenhouse\.io$/.test(host) || host === "boards-api.greenhouse.io") {
     const i = seg.indexOf("jobs"), board = (i > 0 ? seg[i - 1] : u.searchParams.get("for")) ?? "", id = i >= 0 ? seg[i + 1] : u.searchParams.get("token");
-    return board && id && /^\d{1,20}$/.test(id) && BOARD_SLUG.test(board) ? { board: "Greenhouse", parts: [board, id] } : null;
+    return board && id && /^\d{1,20}$/.test(id) && BOARD_SLUG.test(board) ? { board: "Greenhouse", parts: [board, id], ...(/\.eu\./.test(host) ? { eu: true } : {}) } : null;
   }
   // A board name that is not a plain slug ("..%2f..%2fx") names no board: no address is built from it.
-  if (/^jobs(\.eu)?\.lever\.co$/.test(host) && seg.length >= 2) return BOARD_SLUG.test(seg[0]) && POSTING_UUID.test(seg[1]) ? { board: "Lever", parts: [seg[0], seg[1].toLowerCase()] } : null;
+  if (/^jobs(\.eu)?\.lever\.co$/.test(host) && seg.length >= 2) return BOARD_SLUG.test(seg[0]) && POSTING_UUID.test(seg[1]) ? { board: "Lever", parts: [seg[0], seg[1].toLowerCase()], ...(/\.eu\./.test(host) ? { eu: true } : {}) } : null;
   if (host === "jobs.ashbyhq.com" && seg.length >= 2) return BOARD_SLUG.test(seg[0]) && POSTING_UUID.test(seg[1]) ? { board: "Ashby", parts: [seg[0], seg[1].toLowerCase()] } : null;
   if (host === "jobs.smartrecruiters.com" && seg.length >= 2) { const id = /^(\d{1,20})/.exec(seg[1])?.[1]; return id && BOARD_SLUG.test(seg[0]) ? { board: "SmartRecruiters", parts: [seg[0], id] } : null; }
   if (workdayUrl(url)) return { board: "Workday", parts: [] };
@@ -176,6 +178,21 @@ export function ashbyAppData(html: string): any | null {
 }
 
 // ------------------------------------------------------------------------------------------------ the read
+// Round 4: ONE state for a board's answer, used by the reader below and by the link check (link_check.ts), so they cannot
+// disagree. null: the answer is not this posting's data (an error body, another posting's id, no title). "open" needs the
+// board's own signal: the posting itself from an API that lists only published postings (Greenhouse; Lever, unless it carries
+// a `state` other than "published"), `active` true and not a non-public `visibility` (SmartRecruiters), `isListed` true
+// (Ashby). A stated deadline that has passed is closed. Anything else is unknown. (Workday: workday_posting.ts workdayState.)
+export type PostingState = "open" | "closed" | "unknown";
+export function boardState(board: Exclude<Board, "Workday">, j: any, id: string, today: string): PostingState | null {
+  if (!j || typeof j !== "object" || Array.isArray(j)) return null;
+  const named = (v: unknown) => typeof v === "string" && v.trim().length > 0;
+  const past = (v: unknown) => { const d = isoDay(v); return !!d && d < today; };
+  if (board === "Greenhouse") return String(j.id) !== id || !named(j.title) ? null : past(j.application_deadline) ? "closed" : "open";
+  if (board === "Lever") return String(j.id ?? "").toLowerCase() !== id.toLowerCase() || !named(j.text) ? null : j.state === undefined || j.state === "published" ? "open" : typeof j.state === "string" ? "closed" : "unknown";
+  if (board === "SmartRecruiters") return String(j.id) !== id || !named(j.name) ? null : j.active === false ? "closed" : j.visibility !== undefined && j.visibility !== "PUBLIC" ? "unknown" : j.active === true ? "open" : "unknown";
+  return String(j.id ?? "").toLowerCase() !== id.toLowerCase() || !named(j.title) ? null : past(j.applicationDeadline) ? "closed" : j.isListed === true ? "open" : "unknown";
+}
 const isoDay = (v: unknown) => { const s = String(v ?? "").slice(0, 10); return /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s)) ? s : null; };
 export interface ReadDeps { fetch: Fetch; timeoutMs?: number; userAgent?: string; now?: () => number }
 export async function readApplyFlow(href: string, d: ReadDeps): Promise<ApplyFlow> {
@@ -191,7 +208,8 @@ export async function readApplyFlow(href: string, d: ReadDeps): Promise<ApplyFlo
   const get = async (u: string, accept: string, init: RequestInit = {}) => {
     reads.push(`${init.method ?? "GET"} ${u}`);
     // One time limit for the request, its redirects and its body (posting_fetch.ts limited: it holds whatever the fetch does).
-    return await guardedText(d.fetch, u, { method: "GET", ...init, headers: { accept, "user-agent": d.userAgent ?? "Trainee posting reader", ...(init.headers ?? {}) } }, { allow: boardHost, timeoutMs: d.timeoutMs ?? 8000 });
+    // Every hop stays on this board's own hosts: an answer that came from another board is not this board's (sameBoard).
+    return await guardedText(d.fetch, u, { method: "GET", ...init, headers: { accept, "user-agent": d.userAgent ?? "Trainee posting reader", ...(init.headers ?? {}) } }, { allow: sameBoard(u), timeoutMs: d.timeoutMs ?? 8000 });
   };
   // What stopped a read, in fixed words (an error's message can quote the page). A refused address or hop, or a body past the
   // cap: not read, never "ok".
@@ -199,14 +217,10 @@ export async function readApplyFlow(href: string, d: ReadDeps): Promise<ApplyFlo
   const formStop = (e: unknown) => e instanceof NotRead ? e.message : stopWords(e);
   const out = base(b.board);
   const today = new Date((d.now ?? Date.now)()).toISOString().slice(0, 10);
-  // Round 2: "open" is never the default. It needs the board's own signal on a well-formed posting (`listed` true: the answer
-  // is this posting, by its id, with a title, and the board's listed / active / published flag where its API has one). A
-  // stated deadline that has passed is closed; a flag that says no is closed; anything else is unknown.
-  const stateOf = (listed: boolean | null, deadline: string | null): "open" | "closed" | "unknown" => deadline && deadline < today ? "closed" : listed === false ? "closed" : listed === true ? "open" : "unknown";
-  const posting = (title: string, company: unknown, location: unknown, text: string, listed: boolean | null, deadline: unknown = null) =>
-    ({ title: postingField(title), company: postingField(company) || null, location: postingField(location) || null, pay: placedPay(postingTextForModel(text, Infinity).text, postingField(location) || null), deadline: isoDay(deadline), deadline_text: isoDay(deadline), state: stateOf(listed, isoDay(deadline)) });
+  // Round 2: "open" is never the default: the state is boardState's (above), the same one the link check uses.
+  const posting = (title: string, company: unknown, location: unknown, text: string, state: PostingState, deadline: unknown = null) =>
+    ({ title: postingField(title), company: postingField(company) || null, location: postingField(location) || null, pay: placedPay(postingTextForModel(text, Infinity).text, postingField(location) || null), deadline: isoDay(deadline), deadline_text: isoDay(deadline), state });
   const said = (v: unknown, max = 120) => postingField(v, max) || null; // a pay summary as the board states it
-  const named = (v: unknown) => typeof v === "string" && v.trim().length > 0;
   // An answer that is not this posting's data (an error body, another posting, HTML where JSON belongs): not read.
   const notIt = (who: string): ApplyFlow => ({ ...out, status: "not_readable", why: `not read: ${who} answer was not this posting's data` });
   const capped = (qs: Question[] | null) => qs && qs.length > MAX_QUESTIONS ? { questions: qs.slice(0, MAX_QUESTIONS), questions_more: qs.length - MAX_QUESTIONS } : { questions: qs };
@@ -230,14 +244,17 @@ export async function readApplyFlow(href: string, d: ReadDeps): Promise<ApplyFlo
     const [board, id] = b.parts;
     try {
       const r = await get(`https://boards-api.greenhouse.io/v1/boards/${board}/jobs/${id}?questions=true`, "application/json");
+      // A board on Greenhouse's EU site is not in the global API, and its regional API host is not known here: a 404 from the
+      // global API says nothing about that posting.
+      if ((r.status === 404 || r.status === 410) && b.eu) return { ...out, status: "not_readable", why: "not read: this board is on Greenhouse's EU site, whose posting API this reader does not know" };
       if (r.status === 404 || r.status === 410) return { ...out, status: "ok", posting: null, why: "Greenhouse no longer lists this posting (closed)", questions_why: "The posting is closed." };
       if (!r.ok) return { ...out, why: `Greenhouse answered HTTP ${r.status}` };
       const j: any = parseJson(r.text);
-      // Greenhouse's posting API answers only for a published posting: the posting itself (its id, a title) is the signal.
-      if (!j || typeof j !== "object" || Array.isArray(j) || String(j.id) !== id || !named(j.title)) return notIt("Greenhouse's");
+      const st = boardState("Greenhouse", j, id, today);
+      if (st === null) return notIt("Greenhouse's");
       const qs = greenhouseQuestions(j);
       return { ...out, status: "ok", why: "read live from Greenhouse's public posting API",
-        posting: posting(j.title, j.company_name, j.location?.name, htmlToText(decodeHtmlEntities(String(j.content ?? ""))), true, j.application_deadline),
+        posting: posting(j.title, j.company_name, j.location?.name, htmlToText(decodeHtmlEntities(String(j.content ?? ""))), st, j.application_deadline),
         requirements: requirementsFrom(String(j.content ?? "")), ...capped(qs), questions_read: qs ? "read" : "not_read",
         questions_why: qs ? "Every question on the posting's form, from Greenhouse's public posting API (no sign-in on Greenhouse)." : "The form's questions were not in Greenhouse's answer.",
         entry: ["one form on the posting page; no account needed"] };
@@ -247,21 +264,20 @@ export async function readApplyFlow(href: string, d: ReadDeps): Promise<ApplyFlo
     const [site, id] = b.parts;
     let o: ApplyFlow = out;
     try {
-      const r = await get(`https://api.lever.co/v0/postings/${site}/${id}`, "application/json");
+      const r = await get(`https://${b.eu ? "api.eu.lever.co" : "api.lever.co"}/v0/postings/${site}/${id}`, "application/json"); // an EU site's postings are in Lever's EU API
       if (r.status === 404 || r.status === 410) return { ...out, status: "ok", why: "Lever no longer lists this posting (closed)", questions_why: "The posting is closed." };
       if (!r.ok) return { ...out, why: `Lever answered HTTP ${r.status}` };
       const j: any = parseJson(r.text);
-      // Lever's public postings API lists published postings only: the posting (its id, its title) is the signal; a `state`
-      // other than "published", where an answer carries one, is closed.
-      if (!j || typeof j !== "object" || Array.isArray(j) || String(j.id ?? "").toLowerCase() !== id || !named(j.text)) return notIt("Lever's");
+      const st = boardState("Lever", j, id, today);
+      if (st === null) return notIt("Lever's");
       const lists = (Array.isArray(j.lists) ? j.lists : []).map((l: any) => `<h3>${l?.text ?? ""}</h3><ul>${l?.content ?? ""}</ul>`).join("");
       const text = [j.descriptionPlain, (Array.isArray(j.lists) ? j.lists : []).map((l: any) => `${l?.text}\n${htmlToText(l?.content ?? "")}`).join("\n"), j.additionalPlain].filter(Boolean).join("\n");
       const sal = j.salaryRange && Number.isFinite(j.salaryRange.min) ? `${j.salaryRange.currency ?? ""} ${j.salaryRange.min} - ${j.salaryRange.max} ${String(j.salaryRange.interval ?? "").replace(/-/g, " ")}`.trim() : null;
-      const p = posting(j.text, null, j.categories?.location, text, j.state === undefined || j.state === "published");
+      const p = posting(j.text, null, j.categories?.location, text, st);
       o = { ...out, status: "ok", why: "read live from Lever's public posting API", posting: { ...p, pay: said(sal) ?? p.pay }, requirements: requirementsFrom(`${j.description ?? ""}${lists}${j.additional ?? ""}`), entry: ["one form on the posting's apply page; no account needed"] };
     } catch (e) { return failed(out, e, "the Lever read"); }
     try {
-      const r = await get(`https://jobs.lever.co/${site}/${id}/apply`, "text/html");
+      const r = await get(`https://${b.eu ? "jobs.eu.lever.co" : "jobs.lever.co"}/${site}/${id}/apply`, "text/html");
       if (!r.ok) return { ...o, questions_why: `The form page answered HTTP ${r.status}; its questions were not read.` };
       const qs = leverQuestions(r.text);
       return { ...o, ...capped(qs), questions_read: qs ? "read" : "not_read", captcha_expected: /h-captcha|hcaptcha/i.test(r.text),
@@ -277,9 +293,9 @@ export async function readApplyFlow(href: string, d: ReadDeps): Promise<ApplyFlo
       if (!r.ok) return { ...out, why: `Ashby answered HTTP ${r.status}` };
       const data = ashbyAppData(r.text), p = data?.posting;
       if (!p || String(p.id ?? "").toLowerCase() !== id) return { ...out, status: "ok", why: "Ashby's page does not hold this posting (closed, or never there)", questions_why: "The posting is not on Ashby's page." };
-      if (!named(p.title)) return notIt("Ashby's");
-      // Ashby's page data says whether the posting is listed (isListed): open needs it true; an unlisted one is not confirmed.
-      const base = posting(p.title, data?.organization?.name, p.locationName, htmlToText(String(p.descriptionHtml ?? "")), p.isListed === true ? true : null, p.applicationDeadline);
+      const st = boardState("Ashby", p, id, today);
+      if (st === null) return notIt("Ashby's");
+      const base = posting(p.title, data?.organization?.name, p.locationName, htmlToText(String(p.descriptionHtml ?? "")), st, p.applicationDeadline);
       o = { ...out, status: "ok", why: "read live from the posting's Ashby page", posting: { ...base, pay: said(p.scrapeableCompensationSalarySummary) || said(p.compensationTierSummary) || base.pay }, requirements: requirementsFrom(String(p.descriptionHtml ?? "")), entry: ["one form on the posting's application page; no account needed"] };
     } catch (e) { return failed(out, e, "the Ashby read"); }
     try {
@@ -298,12 +314,12 @@ export async function readApplyFlow(href: string, d: ReadDeps): Promise<ApplyFlo
     if (r.status === 404 || r.status === 410) return { ...out, status: "ok", why: "SmartRecruiters no longer lists this posting (closed)", questions_why: "The posting is closed." };
     if (!r.ok) return { ...out, why: `SmartRecruiters answered HTTP ${r.status}` };
     const j: any = parseJson(r.text);
-    if (!j || typeof j !== "object" || Array.isArray(j) || String(j.id) !== id || !named(j.name)) return notIt("SmartRecruiters'");
+    const st = boardState("SmartRecruiters", j, id, today);
+    if (st === null) return notIt("SmartRecruiters'");
     const s = j.jobAd?.sections ?? {};
     const html = ["jobDescription", "qualifications", "additionalInformation"].map((k) => s[k] ? `<h3>${s[k].title ?? ""}</h3>${s[k].text ?? ""}` : "").join("");
-    // SmartRecruiters' posting says whether it is active: open needs `active` true (the boolean), false is closed.
     return { ...out, status: "ok", why: "read live from SmartRecruiters' public posting API",
-      posting: posting(j.name, j.company?.name, j.location?.fullLocation, htmlToText(html), j.active === true ? true : j.active === false ? false : null),
+      posting: posting(j.name, j.company?.name, j.location?.fullLocation, htmlToText(html), st),
       requirements: requirementsFrom(html), questions_read: "not_public",
       questions_why: "SmartRecruiters does not publish an application's questions (its application API needs a partner key, and its form page is behind a bot check Trainee never solves). They were not read, and are not known.",
       entry: ["one form on SmartRecruiters' apply page; no account needed"] };

@@ -19,9 +19,10 @@ import { neverOpen } from "./career_people_sites.ts";
 import { isPrivateIp } from "./contact_sources/web_gate.ts";
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
-// The addresses a name leads to; null when no lookup could be made here (no resolver, or not permitted); a throw when the
-// name does not resolve.
-export type Resolve = (host: string) => Promise<string[] | null>;
+// The addresses a name leads to; null when no lookup could be made here (no usable resolver); `partial` when only one address
+// family answered (the other failed, which is not "no records"): what answered is checked, the lookup is not complete; a
+// throw when the name does not exist.
+export type Resolve = (host: string) => Promise<string[] | null | { ips: string[]; partial: boolean }>;
 export const MAX_HOPS = 3;
 export const MAX_BODY_BYTES = 2 * 1024 * 1024;
 // A board name or a posting id as it sits in a path: letters, digits, "_" and "-", single dots inside. Never "..", "%", "/" or "?".
@@ -46,36 +47,67 @@ export function refusedAddress(href: string): string | null {
 // The job boards' own hosts: the posting APIs and pages the readers ask (link_check.ts, posting_requirements.ts, workday_posting.ts).
 const BOARD_HOSTS = /^(?:boards-api\.greenhouse\.io|(?:job-boards|boards)(?:\.eu)?\.greenhouse\.io|api(?:\.eu)?\.lever\.co|jobs(?:\.eu)?\.lever\.co|jobs\.ashbyhq\.com|api\.ashbyhq\.com|api\.smartrecruiters\.com|jobs\.smartrecruiters\.com|[a-z0-9][a-z0-9-]{0,62}\.wd\d{1,3}\.myworkdayjobs\.com|wd\d{1,3}\.myworkdaysite\.com)$/;
 export const boardHost = (href: string): boolean => { try { return BOARD_HOSTS.test(new URL(href).hostname.toLowerCase()); } catch { return false; } };
-// The system's resolver (Deno.resolveDns). A family with no records is empty. No resolver, or one the runtime does not
-// support or permit: null (not checked). A name that does not exist: a throw.
-export const systemResolve: Resolve = async (host) => {
-  const dns = (globalThis as any).Deno?.resolveDns;
-  if (typeof dns !== "function") return null;
-  const got = await Promise.allSettled([dns(host, "A"), dns(host, "AAAA")]);
-  const out = got.flatMap((g) => g.status === "fulfilled" && Array.isArray(g.value) ? g.value.map(String) : []);
-  if (out.length) return out;
-  if (got.some((g) => g.status === "rejected" && /^(NotSupported|PermissionDenied|NotCapable)$/.test(String(g.reason?.name)))) return null;
-  if (got.every((g) => g.status === "rejected")) throw new Error("no answer");
-  return out;
+// The system's resolver (Deno.resolveDns), told apart three ways:
+//   * not usable (absent; not supported or not permitted; or it cannot resolve a known-good name either, as in a sandbox whose
+//     resolver answers NotFound for everything): null, the request proceeds as before this check, dns_checked false;
+//   * usable, and this name has no address in either family: a throw (the name does not exist), so the address is refused;
+//   * it answered: the addresses. When one family failed for another reason than "no records", only the family that answered
+//     was checked (`partial`). Any private address among those returned refuses the address either way.
+// The known-good probe runs once per process (cached).
+export const RESOLVER_PROBE_NAME = "example.com";
+type Dns = (host: string, type: "A" | "AAAA") => Promise<string[]>;
+export function makeSystemResolve(dns: Dns | null): Resolve {
+  let usable: Promise<boolean> | null = null;
+  const probe = () => usable ??= (async () => {
+    for (const t of ["A", "AAAA"] as const) { try { if ((await (async () => await dns!(RESOLVER_PROBE_NAME, t))()).length) return true; } catch { /* next family */ } }
+    return false;
+  })();
+  return async (host) => {
+    if (!dns) return null;
+    const got = await Promise.allSettled((["A", "AAAA"] as const).map(async (t) => await dns(host, t))); // a synchronous throw is a failure too
+    const ips = got.flatMap((g) => g.status === "fulfilled" && Array.isArray(g.value) ? g.value.map(String) : []);
+    const errors = got.flatMap((g) => g.status === "rejected" ? [String(g.reason?.name)] : []);
+    const failed = errors.filter((n) => n !== "NotFound"); // NotFound: that family has no records
+    if (ips.length) return failed.length ? { ips, partial: true } : ips;
+    // Nothing answered. Not supported or not permitted, or a resolver that cannot resolve a known-good name either: not usable.
+    if (errors.some((n) => /^(NotSupported|PermissionDenied|NotCapable)$/.test(n)) || !(await probe())) return null;
+    throw new Error("no such name"); // the resolver works, and this name has no address (or its lookup failed)
+  };
+}
+export const systemResolve: Resolve = makeSystemResolve((h, t) => {
+  const dns = (globalThis as any).Deno?.resolveDns; // looked at on each call: absent is "not supported"
+  if (typeof dns !== "function") throw Object.assign(new Error("no resolver"), { name: "NotSupported" });
+  return dns(h, t);
+});
+// One job board is one family of hosts (Greenhouse's, Lever's, ...); a Workday career site is its own host. A hop from one
+// board to another is not that board's answer (round 4): callers that read a board pass sameBoard(first address) as `allow`.
+const FAMILIES: [string, RegExp][] = [["greenhouse", /(^|\.)greenhouse\.io$/], ["lever", /(^|\.)lever\.co$/], ["ashby", /(^|\.)ashbyhq\.com$/], ["smartrecruiters", /(^|\.)smartrecruiters\.com$/]];
+export const boardFamily = (href: string): string | null => {
+  if (!boardHost(href)) return null;
+  const host = new URL(href).hostname.toLowerCase();
+  return FAMILIES.find(([, re]) => re.test(host))?.[0] ?? `workday:${host}`;
 };
+export const sameBoard = (first: string) => { const family = boardFamily(first); return (href: string) => family !== null && boardFamily(href) === family; };
 // True when the address was looked up (or needs no lookup); false when no lookup could be made here.
 const check = async (href: string, o: { allow?: (href: string) => boolean; resolve?: Resolve | null }): Promise<boolean> => {
   const why = refusedAddress(href);
   if (why) throw new NotRead(why);
   if (o.allow && !o.allow(href)) throw new NotRead("the address is not on a site this read may open");
   if (boardHost(href) || o.resolve === null) return true; // null: the caller built the address from its own provider list
-  let ips: string[] | null;
-  try { ips = await (o.resolve ?? systemResolve)(new URL(href).hostname.toLowerCase().replace(/\.$/, "")); } catch { throw new NotRead("the site's address could not be looked up"); }
-  if (ips === null) return false;
+  let got: Awaited<ReturnType<Resolve>>;
+  try { got = await (o.resolve ?? systemResolve)(new URL(href).hostname.toLowerCase().replace(/\.$/, "")); } catch { throw new NotRead("the site's address could not be looked up"); }
+  if (got === null) return false;
+  const ips = Array.isArray(got) ? got : got.ips, partial = !Array.isArray(got) && got.partial === true;
   if (!Array.isArray(ips) || !ips.length || ips.some((ip) => isPrivateIp(String(ip)))) throw new NotRead("the site's name does not lead to a public address");
-  return true;
+  return !partial;
 };
 // One request, its redirects walked by hand. `url` in the result is the address that answered.
-export async function guardedFetch(f: Fetch, href: string, init: RequestInit = {}, o: { allow?: (href: string) => boolean; resolve?: Resolve | null; maxHops?: number } = {}): Promise<{ res: Response; url: string; dns_checked: boolean }> {
+export async function guardedFetch(f: Fetch, href: string, init: RequestInit = {}, o: { allow?: (href: string) => boolean; resolve?: Resolve | null; maxHops?: number; trustFirst?: boolean } = {}): Promise<{ res: Response; url: string; dns_checked: boolean }> {
   let url = href, dns_checked = true;
   const max = o.maxHops ?? MAX_HOPS;
   for (let hop = 0; ; hop++) {
-    dns_checked = (await check(url, o)) && dns_checked;
+    // trustFirst: the caller built the first address from its own provider list (a scheduled feed); every hop after it is looked up.
+    dns_checked = (await check(url, hop === 0 && o.trustFirst ? { ...o, resolve: null } : o)) && dns_checked;
     const res = await f(url, { ...init, redirect: "manual" });
     // A fetch that followed a redirect anyway names where it ended: that address is held to the same rule.
     if (res.url && res.url !== url) {

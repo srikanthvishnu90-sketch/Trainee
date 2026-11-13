@@ -515,7 +515,7 @@ async function show(state: OfferChatState, f: OnFile, then: Then, check: boolean
   // Not settled: the restatement and the ask, as before. Nothing is compared, so there is nothing to confirm yet.
   if (f.offer.unsettled) return { answer: answer(OFFER_INTENT.ask, "unsettled", [[unsettledText(f.offer)]]), state };
   const block = blockOf(f, check);
-  const shown: Shown = { hash: await readingHash(block), block, at: now, then, notGiven, check: check ? f : null, ...(o.names?.length ? { names: o.names } : {}) };
+  const shown: Shown = { hash: readingHash(block), block, at: now, then, notGiven, check: check ? f : null, ...(o.names?.length ? { names: o.names } : {}) };
   return { answer: answer(OFFER_INTENT.confirm, "confirm", [[...(o.lead ? [o.lead] : []), block]]), state: { ...state, shown } };
 }
 // The person's yes: the offer whose block, printed again now, is the block shown (same hash) is confirmed, with the time;
@@ -523,7 +523,7 @@ async function show(state: OfferChatState, f: OnFile, then: Then, check: boolean
 async function confirmShown(shown: Shown, state: OfferChatState, postings: PostingsReader | null, data: OfferData, now: number, lastReply: string | null): Promise<OfferTurnResult> {
   const cands = shown.check ? [shown.check] : state.offers;
   let hit: OnFile | null = null;
-  for (const f of cands) { const b = blockOf(f, !!shown.check); if (b === shown.block && (await readingHash(b)) === shown.hash) { hit = f; break; } }
+  for (const f of cands) { const b = blockOf(f, !!shown.check); if (b === shown.block && readingHash(b) === shown.hash) { hit = f; break; } }
   if (!hit || (lastReply && !lastReply.includes(shown.block))) {
     return { answer: answer(OFFER_INTENT.confirm, "not_confirmed", [["That yes was not to the reading I showed just before it, so it confirms nothing and I have compared nothing. Tell me the offer again and I'll show you how I read it."]]), state };
   }

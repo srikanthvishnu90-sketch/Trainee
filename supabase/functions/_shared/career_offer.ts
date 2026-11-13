@@ -785,15 +785,32 @@ export function readingBlock(o: Offer, x: ReadingExtra = {}): string {
   if (o.deadline) lines.push(`- Deadline: ${o.deadline.text}`);
   for (const k of o.competing ?? []) lines.push(`- Another offer you mentioned: ${k.company ?? "a company not named"}, ${k.written ?? moneyIn(k.base, k.currency)}${k.assumed ? " (currency not sure)" : ""}`);
   if (o.ask) lines.push(`- The figure you want: "${o.ask.written}"`);
-  if (o.current) lines.push(`- Your pay now: "${o.current}" (not the offer)`);
+  // The pay they make now is never said back (it is not the offer, and it is theirs to keep private); it is only left out.
   for (const q of o.open ?? []) notSure.push(q);
   if (notSure.length) lines.push(`- Not sure: ${[...new Set(notSure)].join("; ")}`);
   lines.push(CONFIRM_ASK);
   return lines.join("\n");
 }
-export async function readingHash(block: string): Promise<string> {
-  const h = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(block));
-  return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join("");
+// SHA-256 (FIPS 180-4) of the block's UTF-8 bytes, hex: the same digest crypto.subtle gives (checked in the D-078 test), done
+// in place so the brain's offer tool keeps its synchronous shape.
+const K256 = Array.from({ length: 64 }, (_, i) => { let n = 2, c = 0; for (;; n++) { let p = true; for (let d = 2; d * d <= n; d++) if (n % d === 0) { p = false; break; } if (p && c++ === i) break; } return (Math.cbrt(n) % 1) * 2 ** 32 >>> 0; });
+export function readingHash(block: string): string {
+  const b = new TextEncoder().encode(block), l = b.length, words = new Uint32Array(((l + 9 + 63) >> 6) << 4);
+  for (let i = 0; i < l; i++) words[i >> 2] |= b[i] << (24 - (i % 4) * 8);
+  words[l >> 2] |= 0x80 << (24 - (l % 4) * 8);
+  words[words.length - 1] = l * 8; words[words.length - 2] = Math.floor(l / 2 ** 29);
+  const H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19], W = new Uint32Array(64);
+  const r = (x: number, n: number) => (x >>> n) | (x << (32 - n));
+  for (let j = 0; j < words.length; j += 16) {
+    for (let t = 0; t < 64; t++) W[t] = t < 16 ? words[j + t] : (r(W[t - 2], 17) ^ r(W[t - 2], 19) ^ (W[t - 2] >>> 10)) + W[t - 7] + (r(W[t - 15], 7) ^ r(W[t - 15], 18) ^ (W[t - 15] >>> 3)) + W[t - 16];
+    let [a, bb, c, d, e, f, g, h] = H;
+    for (let t = 0; t < 64; t++) {
+      const t1 = (h + (r(e, 6) ^ r(e, 11) ^ r(e, 25)) + ((e & f) ^ (~e & g)) + K256[t] + W[t]) >>> 0, t2 = ((r(a, 2) ^ r(a, 13) ^ r(a, 22)) + ((a & bb) ^ (a & c) ^ (bb & c))) >>> 0;
+      h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = bb; bb = a; a = (t1 + t2) >>> 0;
+    }
+    [a, bb, c, d, e, f, g, h].forEach((v, i) => { H[i] = (H[i] + v) >>> 0; });
+  }
+  return H.map((v) => v.toString(16).padStart(8, "0")).join("");
 }
 // A plain yes to the block shown, in this message alone: 122's confirmationReply (the reader every fact confirmation uses).
 export const plainYes = (message: string) => (CareerProfile as any).confirmationReply(String(message ?? "")).kind === "yes";
@@ -849,7 +866,7 @@ export function offerReply(o: Offer, notGiven: Field[], data: OfferData = payDat
 // ---------- the tool's turn: read, ask once, answer ----------
 // D-078: `reading` is the block last shown for the person's yes (its hash, its time and the pieces it was read from).
 export interface OfferPending { v: 1; pieces: string[]; asked: Field[]; at: number; reading?: { hash: string; block: string; at: number; missing: Field[] } }
-export async function offerTurn(o: { words: string; pending: OfferPending | null; now: number; data?: OfferData; lastReply?: string | null }): Promise<{ result: OfferResult; pending: OfferPending | null }> {
+export function offerTurn(o: { words: string; pending: OfferPending | null; now: number; data?: OfferData; lastReply?: string | null }): { result: OfferResult; pending: OfferPending | null } {
   const data = o.data ?? payData();
   const fresh = o.pending && o.now - o.pending.at < ASK_TTL_MS ? o.pending : null;
   // D-078: the person's plain yes to the reading shown in the reply just before this one confirms exactly that reading. The
@@ -859,8 +876,8 @@ export async function offerTurn(o: { words: string; pending: OfferPending | null
     const offer = o.pending!.pieces.map((p, i) => parseOfferWords(p, data, i ? { asked: o.pending!.asked } : {})).reduce((a, b) => mergeOffers(a, b, data));
     const block = readingBlock(offer, { notGiven: shown.missing });
     const before = typeof o.lastReply === "string" && o.lastReply.trim() ? o.lastReply : null;
-    if (block === shown.block && (await readingHash(block)) === shown.hash && (!before || before.includes(block))) return { result: offerReply(offer, shown.missing, data), pending: null };
-    const again = { hash: await readingHash(block), block, at: o.now, missing: shown.missing };
+    if (block === shown.block && readingHash(block) === shown.hash && (!before || before.includes(block))) return { result: offerReply(offer, shown.missing, data), pending: null };
+    const again = { hash: readingHash(block), block, at: o.now, missing: shown.missing };
     return { result: { status: "confirm", offer, missing: shown.missing, ask: block, benchmarks: [], draft: null, messages: [`That yes was not to the reading shown just before it, so it confirms nothing.\n${block}`] }, pending: { ...o.pending!, at: o.now, reading: again } };
   }
   const now = parseOfferWords(o.words, data);
@@ -884,7 +901,7 @@ export async function offerTurn(o: { words: string; pending: OfferPending | null
   if (offer.unsettled) return { result: offerReply(offer, missing, data), pending: null };
   // Asked once already: what is still missing is said, never asked again; the reading is shown for the person's yes.
   const block = readingBlock(offer, { notGiven: missing });
-  return { result: { status: "confirm", offer, missing, ask: block, benchmarks: [], draft: null, messages: [block] }, pending: { v: 1, pieces, asked, at: o.now, reading: { hash: await readingHash(block), block, at: o.now, missing } } };
+  return { result: { status: "confirm", offer, missing, ask: block, benchmarks: [], draft: null, messages: [block] }, pending: { v: 1, pieces, asked, at: o.now, reading: { hash: readingHash(block), block, at: o.now, missing } } };
 }
 // The words must be the person's own, from this turn's message.
 export function saidIn(message: string, words: string): boolean {

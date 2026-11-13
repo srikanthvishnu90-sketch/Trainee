@@ -14,6 +14,13 @@ import { benchmarks, moneyIn, offerReply, parseOfferWords } from "../../supabase
 import { offerChatTurn } from "../../supabase/functions/_shared/career_offer_chat.ts";
 
 const NOW = Date.UTC(2026, 10, 13, 15);
+// Architect amendment (owner decision 2026-11-13, D-078: confirm before compare): every offer's reading is shown first and the
+// person's plain yes to it comes before any benchmark, comparison or counter. `turnYes` is one chat turn as before, with the
+// reading (when one is shown) answered "yes"; it replaces each offerChatTurn call below, and no assertion changes.
+async function turnYes(o: Parameters<typeof offerChatTurn>[0]) {
+  const r = await offerChatTurn(o);
+  return r.answer?.intent === "career_offer_confirm" ? offerChatTurn({ ...o, message: "yes", state: r.state, lastReply: r.answer.reply }) : r;
+}
 function eq(a: unknown, b: unknown, m = "") { const x = JSON.stringify(a), y = JSON.stringify(b); if (x !== y) throw new Error(`${m}\n  got:  ${x}\n  want: ${y}`); }
 interface Case { m: string; cur: string; base?: number | null; period?: string | null; rate?: number; factor?: number; signing?: string; bonus?: string; bench: boolean; not?: RegExp; has?: RegExp; assumed?: string[]; wrote?: string[] }
 const swe = (pay: string, place: string) => `Offer from Acme: ${pay} as a software engineer in ${place}`;
@@ -116,8 +123,8 @@ Deno.test(`the offer reader on ${CASES.length} offers: currency, period and benc
       if (c.signing) eq(o.currencies?.signing, c.signing, "signing currency");
       if (c.bonus) eq(o.currencies?.bonus, c.bonus, "bonus currency");
       const brain = offerReply(o, []);
-      const first = await offerChatTurn({ message: c.m, state: null, now: NOW, postings: null });
-      const second = o.base != null ? await offerChatTurn({ message: "help me negotiate", state: first.state, now: NOW + 1000, postings: null }) : null;
+      const first = await turnYes({ message: c.m, state: null, now: NOW, postings: null });
+      const second = o.base != null ? await turnYes({ message: "help me negotiate", state: first.state, now: NOW + 1000, postings: null }) : null;
       const all = [...brain.messages, brain.draft?.email ?? "", first.answer?.reply ?? "", second?.answer?.reply ?? "", second?.answer?.card?.body ?? ""].join("\n");
       if (!first.answer) throw new Error("the chat turn did not take the offer");
       if (c.cur === "XXX" || c.signing === "XXX" || c.bonus === "XXX") {
@@ -148,26 +155,26 @@ Deno.test("an amount in an unknown currency is written without a symbol, and nev
   eq(moneyIn(95000, "CAD"), "CAD 95,000");
   eq(moneyIn(95000, "USD"), "$95,000");
   // Two unknown-currency figures are not added up; a competing offer in an unknown currency is never the counter's lever.
-  const t = await offerChatTurn({ message: "I got an offer from Shopify: $95k base and a $10k signing bonus as a software engineer in Toronto", state: null, now: NOW, postings: null });
-  const cash = await offerChatTurn({ message: "I got an offer from Betaworks: $120k base as a software engineer in Toronto", state: t.state, now: NOW + 1, postings: null });
-  const cmp = await offerChatTurn({ message: "compare my offers", state: cash.state, now: NOW + 2, postings: null });
+  const t = await turnYes({ message: "I got an offer from Shopify: $95k base and a $10k signing bonus as a software engineer in Toronto", state: null, now: NOW, postings: null });
+  const cash = await turnYes({ message: "I got an offer from Betaworks: $120k base as a software engineer in Toronto", state: t.state, now: NOW + 1, postings: null });
+  const cmp = await turnYes({ message: "compare my offers", state: cash.state, now: NOW + 2, postings: null });
   const row = (i: number, k: string) => (cmp.answer as any).comparison.offers[i].rows.find((r: any) => r.k === k)?.v;
   eq(row(0, "Base"), "95,000 (currency not stated)");
   if (/105,000/.test(String(row(0, "Guaranteed first-year cash")))) throw new Error(`added two figures of unknown currency: ${row(0, "Guaranteed first-year cash")}`);
   if (cmp.answer!.reply.includes("$")) throw new Error(`"$" in the comparison: ${cmp.answer!.reply}`);
-  const neg = await offerChatTurn({ message: "help me negotiate with Shopify", state: cash.state, now: NOW + 3, postings: null });
+  const neg = await turnYes({ message: "help me negotiate with Shopify", state: cash.state, now: NOW + 3, postings: null });
   if (/120,000/.test(neg.answer!.card!.body)) throw new Error("an offer in an unknown currency was used as leverage");
   // A competing figure with no currency of its own inherits the only stated one; with two stated, it is unknown.
   eq(parseOfferWords("Offer from Acme: €90k base as a data analyst in Berlin, I also have another offer from Beta for 100k").competing.map((x) => x.currency), ["EUR"]);
   eq(parseOfferWords("Offer from Acme: 90k base as a data analyst in Berlin, I also have another offer from Beta for 100k").competing.map((x) => [x.currency, x.assumed]), [["USD", true]]);
   eq(parseOfferWords("Offer from Acme: 90k base as a data analyst in Toronto, I also have another offer from Beta for 100k").competing.map((x) => x.currency), ["XXX"]);
   // The city answered later settles a bare amount: a US metro reads it as US dollars and says that it did.
-  const a = await offerChatTurn({ message: "Stripe offered me 150k", state: null, now: NOW, postings: null });
+  const a = await turnYes({ message: "Stripe offered me 150k", state: null, now: NOW, postings: null });
   if (a.answer!.reply.includes("$")) throw new Error(`"$" before the currency is known: ${a.answer!.reply}`);
-  const b = await offerChatTurn({ message: "software engineer in Seattle", state: a.state, now: NOW + 5, postings: null });
+  const b = await turnYes({ message: "software engineer in Seattle", state: a.state, now: NOW + 5, postings: null });
   eq((b.state as any).offers.at(-1).offer.currency, "USD");
   if (!/currency not stated/i.test(b.answer!.reply) || !/\$150,000/.test(b.answer!.reply)) throw new Error(b.answer!.reply);
-  const c = await offerChatTurn({ message: "software engineer in Toronto", state: a.state, now: NOW + 5, postings: null });
+  const c = await turnYes({ message: "software engineer in Toronto", state: a.state, now: NOW + 5, postings: null });
   eq((c.state as any).offers.at(-1).offer.currency, "XXX");
 });
 
@@ -175,7 +182,7 @@ Deno.test("an amount in an unknown currency is written without a symbol, and nev
 // Every money, currency, period, range, total-pay or place word must be taken by exactly one field; what is not is `open`, the
 // offer is `unsettled`, and the reply restates what was read and asks: no benchmark, no percent, no leverage, no counter.
 const G = (pay: string, where = "in Seattle") => `Google offered me ${pay} as a software engineer ${where}`;
-const run = async (m: string) => { let state: any = null, last: any = null; for (const x of m.split(" >> ")) { last = await offerChatTurn({ message: x, state, now: NOW, postings: null }); state = last.state; } return { last, state, o: state?.offers?.at(-1)?.offer }; };
+const run = async (m: string) => { let state: any = null, last: any = null; for (const x of m.split(" >> ")) { last = await turnYes({ message: x, state, now: NOW, postings: null }); state = last.state; } return { last, state, o: state?.offers?.at(-1)?.offer }; };
 interface R2 { m: string; unsettled?: true; cur?: string; base?: number | null; metro?: string | null; kind?: string; bench?: boolean; total?: string; occ?: null; part?: true; period?: string }
 const ROUND2: R2[] = [
   // A: a currency said away from the figure settles it; a contradiction, a range, a second figure or a second place does not
@@ -215,7 +222,7 @@ Deno.test(`round 2: ${ROUND2.length} offers are read whole or left unsettled; no
         if (!o?.unsettled || !(o.open ?? []).length) throw new Error(`not unsettled: ${JSON.stringify([o?.base, o?.currency, o?.place, o?.open])}`);
         if (last.answer?.status !== "unsettled" || !/I could not place/.test(reply) || !/Here is what I read/.test(reply)) throw new Error(`the reply does not restate and ask: ${reply}`);
         if (/median|percentile|% (?:above|below)/.test(reply) || benchmarks(o).length) throw new Error("an unsettled offer was compared");
-        const neg = await offerChatTurn({ message: "help me negotiate", state, now: NOW + 9, postings: null });
+        const neg = await turnYes({ message: "help me negotiate", state, now: NOW + 9, postings: null });
         if (neg.answer?.card) throw new Error("a counter was drafted for an unsettled offer");
         continue;
       }
@@ -281,7 +288,7 @@ Deno.test("round 3: the 175 labelled messages of the third review, through the c
   const BENCH = /% (?:above|below) the median|percentile|right at the median/, wrong: string[] = [];
   for (const [i, c] of labels.entries()) {
     let state: any = null, last: any = null; const all: string[] = [];
-    for (const x of c.m.split(" >> ")) { last = await offerChatTurn({ message: x, state, now: NOW, postings: null }); state = last.state; all.push(last.answer?.reply ?? "", last.answer?.card?.body ?? ""); }
+    for (const x of c.m.split(" >> ")) { last = await turnYes({ message: x, state, now: NOW, postings: null }); state = last.state; all.push(last.answer?.reply ?? "", last.answer?.card?.body ?? ""); }
     const text = all.join("\n"), lastReply = String(last?.answer?.reply ?? ""), settled = (state?.offers ?? []).map((f: any) => f.offer).filter((o: any) => !o.unsettled);
     const fact = BENCH.test(text) || /^Your offer:|^Checking:/m.test(text), bad: string[] = [];
     if (c.b != null && !settled.some((o: any) => o.base === c.b)) bad.push(`base ${c.b} not kept`);

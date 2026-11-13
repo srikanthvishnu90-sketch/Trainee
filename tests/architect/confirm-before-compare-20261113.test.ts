@@ -14,6 +14,7 @@ import { offerTurn, payData, readingBlock, readingHash, parseOfferWords } from "
 import { CareerProfile } from "../../supabase/functions/_shared/router_core.career.js";
 import { careerTools } from "../../supabase/functions/_shared/agent/career_tools.ts";
 import { edgeRenderer, memoryPersonaStore, memoryResumeStore, tailorForPosting, withoutInferredSkills } from "../../supabase/functions/_shared/career_tailor.ts";
+import { offerCases, rng } from "./scenarios/research-r2-generator.ts";
 
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -201,23 +202,26 @@ Deno.test("D-078/offer compare 03: the counter email quotes the figures exactly 
 });
 Deno.test("D-078/offer compare 04: the block's hash is the SHA-256 of exactly the block shown", async () => {
   const a = await offerChatTurn({ message: "Granite offered $95k as a data analyst in Chicago", state: null, now: NOW });
-  eq(a.state!.shown!.hash, await readingHash(a.state!.shown!.block));
+  eq(a.state!.shown!.hash, readingHash(a.state!.shown!.block));
+  const subtle = [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(a.state!.shown!.block)))].map((b) => b.toString(16).padStart(2, "0")).join("");
+  eq(readingHash(a.state!.shown!.block), subtle, "the SHA-256 crypto.subtle gives");
+  for (const t of ["", "abc", "é".repeat(100), "x".repeat(55), "x".repeat(56), "x".repeat(64)]) eq(readingHash(t), [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(t)))].map((b) => b.toString(16).padStart(2, "0")).join(""), `length ${t.length}`);
   ok(a.answer!.reply.includes(a.state!.shown!.block));
   eq(a.state!.shown!.block, readingBlock(parseOfferWords("Granite offered $95k as a data analyst in Chicago", fixtures), { equity: null, benefits: [], check: false, estimate: false }));
 });
 
 // ---------- 6. the brain's tool (WO-036 offer_benchmark) holds the same line ----------
 Deno.test("D-078/offer brain 01: offer_benchmark shows the reading; the yes in the next turn, to that reply, benchmarks", async () => {
-  const a = await offerTurn({ words: "JPM offered 110k base, 15k signing, NYC, analyst", pending: null, now: NOW, data: fixtures });
+  const a = offerTurn({ words: "JPM offered 110k base, 15k signing, NYC, analyst", pending: null, now: NOW, data: fixtures });
   eq(a.result.status, "confirm");
   ok(!COMPARED.test(a.result.messages.join("\n")) && a.result.benchmarks.length === 0 && a.result.draft === null);
-  const b = await offerTurn({ words: "yes", pending: a.pending, now: NOW + 60_000, data: fixtures, lastReply: a.result.messages.join("\n") });
+  const b = offerTurn({ words: "yes", pending: a.pending, now: NOW + 60_000, data: fixtures, lastReply: a.result.messages.join("\n") });
   eq(b.result.status, "benchmarked");
   ok(b.result.draft !== null);
 });
 Deno.test("D-078/offer brain 02: a yes when the reply before did not show the reading confirms nothing", async () => {
-  const a = await offerTurn({ words: "JPM offered 110k base, 15k signing, NYC, analyst", pending: null, now: NOW, data: fixtures });
-  const b = await offerTurn({ words: "yes", pending: a.pending, now: NOW + 60_000, data: fixtures, lastReply: "Want me to look for jobs?" });
+  const a = offerTurn({ words: "JPM offered 110k base, 15k signing, NYC, analyst", pending: null, now: NOW, data: fixtures });
+  const b = offerTurn({ words: "yes", pending: a.pending, now: NOW + 60_000, data: fixtures, lastReply: "Want me to look for jobs?" });
   eq(b.result.status, "confirm");
   eq(b.result.draft, null);
 });
@@ -337,4 +341,29 @@ Deno.test("D-078/skill resume 06: an inference the stricter reader does not supp
   const t = tools(), p = person({ exp: ["Built Python reports for the finance team; I have never used SQL"] });
   const first = await t.tailor_resume.run({ posting_text: POSTING }, ctx(p, "make me a resume for this")) as any;
   ok(!(first.skills_to_confirm ?? []).some((x: any) => x.name === "SQL"), JSON.stringify(first.skills_to_confirm));
+});
+
+// ---------- 8. the 1,000 generated offers of research round 2 (D), through the yes ----------
+// scenarios-research-r2 D checks the first reply; with the reading shown first, the same oracle runs here on the reply after the
+// person's yes too, so the benchmarked path keeps its coverage: the current pay is never said back, and every figure is the
+// offer's or a named source's.
+Deno.test("D-078/offer generated: 1,000 offers with the current pay beside them, confirmed then benchmarked: no figure but the offer's or a source's", () => {
+  const MONEY = /\$\d[\d,]*(?:\.\d+)?k?|\b\d{2,3}k\b/gi;
+  const moneyOf = (s: string) => (s.match(MONEY) ?? []).map((m) => { const k = /k$/i.test(m); const n = Number(m.replace(/[$,k]/gi, "")); return k ? n * 1000 : n; });
+  const bad: string[] = [];
+  let benchmarked = 0;
+  for (const [i, c] of offerCases(rng(20261030 + 3), 1000).entries()) {
+    const shown = offerTurn({ words: c.words, pending: null, now: NOW });
+    const t = shown.result.status === "confirm" ? offerTurn({ words: "yes", pending: shown.pending, now: NOW + 1000, lastReply: shown.result.messages.join("\n") }) : shown;
+    if (t.result.status === "benchmarked") benchmarked++;
+    for (const r of [shown, t]) {
+      const msgs = (r.result.messages ?? []).join("\n");
+      if (moneyOf(msgs).includes(c.current * 1000)) bad.push(`#${i} current pay said: ${msgs.slice(0, 160)}`);
+      const sourced = new Set<number>([c.base * 1000]);
+      for (const b of r.result.benchmarks ?? []) for (const v of Object.values(b as Record<string, unknown>)) if (typeof v === "number") sourced.add(Math.round(v));
+      for (const n of moneyOf(msgs)) if (!sourced.has(n) && !(r.result.draft && JSON.stringify(r.result.draft).includes(String(n)))) bad.push(`#${i} $${n} unsourced: ${msgs.slice(0, 160)}`);
+    }
+  }
+  eq(bad.slice(0, 5), []);
+  ok(benchmarked >= 900, `most generated offers reach the benchmark after the yes (${benchmarked})`);
 });

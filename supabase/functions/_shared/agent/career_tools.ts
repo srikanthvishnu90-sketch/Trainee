@@ -895,7 +895,7 @@ export function careerTools(deps: {
         const pending = (c.state.offerBenchmark as OfferPending | undefined) ?? null;
         // D-078: the reading is shown first; only the person's plain yes in the next turn (to the reply that showed it) lets
         // it be benchmarked or drafted.
-        const { result, pending: next } = await offerTurn({ words, pending, now: c.now, lastReply: typeof c.turn.before === "string" ? c.turn.before : null });
+        const { result, pending: next } = offerTurn({ words, pending, now: c.now, lastReply: typeof c.turn.before === "string" ? c.turn.before : null });
         if (next) c.state.offerBenchmark = next;
         else delete c.state.offerBenchmark;
         return { status: result.status, ask: result.ask, offer: result.offer, not_given: result.status === "ask" ? [] : result.missing, benchmarks: result.benchmarks, draft: result.draft, messages: result.messages };

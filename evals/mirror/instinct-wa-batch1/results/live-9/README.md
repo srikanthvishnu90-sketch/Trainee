@@ -18,6 +18,7 @@ error or disconnect/reset before headers", in the run log), and the product's no
 | `trainee-live-9.jsonl` | The transcript from the run's log: every reply, the tool trace (`shorten`, `research`, `args`, `call_errors`), each File link's status and page text, and each attached document's printed text. |
 | `judged-live-9.json` | The outcome judgement per turn (correct, usable, honest, why), the input of `score-conversation.ts --judged`. |
 | `score-live-9.json`, `score-live-9.txt` | `score-conversation.ts` (`wa-1/d066`) on live-9. |
+| `rescore-live-9-recorded-text-scorer-wa-1-d066-ask.json`, `.txt` | NOT a new run: the same recorded transcript and the same judgement, scored again at $0 on 2026-11-13 with the corrected scorer (`wa-1/d066-ask`: answers-first is given the turn's ask). 5/23 pass, answers first 22/23. Against `score-live-9`: C16 and C21 now pass; C20 passes answers-first and is still far over; **C21f now fails** answers-first (Trainee's "That's a plot summary, not an answer." takes up nothing of the person's answer, and Instinct's reply, read against the ask, passes, so the mirror allowance no longer applies). Every other row is identical. Everything below this table is the original `wa-1/d066` score and is unchanged. |
 
 ## Totals (wa-1/d066)
 

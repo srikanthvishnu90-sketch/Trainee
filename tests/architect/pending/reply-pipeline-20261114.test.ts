@@ -43,7 +43,7 @@ Deno.test("ledger: chat tool results, pages and the record (what it lacks includ
 
 Deno.test("verify: each clause against the units it cites only; a fact with no tag fails; a hedge needs none", async () => {
   const l = finance();
-  const v = await verifyTagged("Hudson Ridge Capital pays $55-$60 an hour in New York [E1], and the posting closes January 15, 2027 [E2]. That's a reported figure, not proof. Analysts work 70 to 80 hours a week. Want me to check the questions?", l, { judge: yes });
+  const v = await verifyTagged("Hudson Ridge Capital pays $55-$60 an hour in New York [E1], and the posting closes January 15, 2027 [E2]. That's an anecdote, not proof. Analysts work 70 to 80 hours a week. Want me to check the questions?", l, { judge: yes });
   eq(v.failures.map((f) => f.sentence), ["Analysts work 70 to 80 hours a week."]);
   ok(/cites no evidence unit/.test(v.failures[0].reason));
   ok(v.text.startsWith("Hudson Ridge Capital pays $55-$60 an hour in New York, and the posting closes January 15, 2027."), v.text);
@@ -86,10 +86,60 @@ Deno.test("length and the task contract go to the same one repair call; over the
   const long = "Brightloop engineers ship to production every day [E1]. They own their features end to end [E1]. One reviewer said on-call weeks were exhausting [E2]. That's an anecdote, not proof.";
   const out = await runReplyPipeline(long, l, { judge: yes, repair: async (x) => { user = x.user; return "Brightloop engineers ship daily and own their features [E1]."; }, ask: "what's brightloop's engineering culture", maxChars: 80 });
   ok(/LENGTH: the reply is \d+ characters; the limit is 80/.test(user), user);
-  ok(out.text.length <= 80, out.text);
+  ok(out.text.replace(/\nhttps?:\/\/\S+/g, "").length <= 80, out.text);
   const cs = contractsFor("career_followup_draft", "draft a note asking a nurse manager in houston for a referral");
   eq(cs.map((c) => c.id).sort(), ["answer_first", "draft", "referral"]);
   eq(CONTRACTS.referral.missing("Hi [Name], could we chat about your unit?", ""), "the message never asks for a referral");
   eq(CONTRACTS.requirements.missing("You need: a resume, a transcript, and two references.", ""), null);
   eq(CONTRACTS.answer_first.missing("Great question! Pay is $55 an hour.", ""), "the first sentence is a preamble, not the answer");
+});
+
+// ---- review of PR #849 (head 0b6d48c73)
+import { normDates, noClaim, personQuestion, splitSentences } from "../../../supabase/functions/_shared/agent/research/support.ts";
+import { fallbackLine } from "../../../supabase/functions/_shared/agent/reply_pipeline.ts";
+
+Deno.test("review 3: the tags go, the sources stay: a kept sentence's cited unit link is listed (D-024, D-060)", async () => {
+  const l = new Ledger();
+  l.add("page", "Citadel software engineering interns are paid $120 an hour.", { host: "citadel.example", source: "official", url: "https://citadel.example/careers/interns" });
+  const out = await runReplyPipeline("Citadel software engineering interns are paid $120 an hour [E1].", l, { judge: yes, ask: "what do citadel swe interns make" });
+  eq(out.text, "Citadel software engineering interns are paid $120 an hour.\nhttps://citadel.example/careers/interns");
+});
+
+Deno.test("review 4: a question goes unjudged only when it asks the person about their own situation", async () => {
+  for (const q of ["Which email should go on the resume?", "Want me to check the questions?", "Are you authorized to work in the U.S. without sponsorship?"]) ok(personQuestion(q), q);
+  for (const q of ["Did you know Stripe stopped sponsoring visas?", "Is Stripe still hiring interns?", "Have you heard that the posting closed?", "Can you believe interns earn $90 an hour?"]) ok(!personQuestion(q), q);
+  const v = await verifyTagged("Did you know Stripe stopped sponsoring visas?", startup(), { judge: yes });
+  eq(v.text, "");
+});
+
+Deno.test("review 5: a caveat is exempt only when it speaks of Trainee's own knowledge; a status word is never exempt", () => {
+  for (const s of ["That's an anecdote, not proof.", "I can't verify it.", "I don't have its date.", "Nothing was sent or applied for.", "That's a self-reported figure, not proof."]) ok(noClaim(s), s);
+  for (const s of ["That's the official posting, not a scam.", "That's a verified figure, not an estimate.", "This is a legitimate posting.", "That's a real offer, not an example.", "I can't verify it, but it is official."]) ok(!noClaim(s), s);
+});
+
+Deno.test("review 6 and 7: abbreviations; day-first dates; a numeric date only in ISO order", () => {
+  eq(splitSentences("Applications close Jan. 15, 2027 [E2]. Then more."), ["Applications close Jan. 15, 2027 [E2].", "Then more."]);
+  eq(splitSentences("Acme Co. and Beta Ltd. merged vs. Gamma Corp. last year. Next."), ["Acme Co. and Beta Ltd. merged vs. Gamma Corp. last year.", "Next."]);
+  eq(normDates("6 December 2026"), "Date20261206");
+  eq(normDates("Sunday, 6th December 2026"), "Date20261206");
+  eq(normDates("Jan. 15, 2027"), "Date20270115");
+  eq(normDates("12/06/2026"), "12/06/2026");
+});
+
+Deno.test("review 8: the fallback matches the ask's employer and place both (D73-6)", () => {
+  const l = new Ledger();
+  l.add("chat", "PayPal, Software Engineer Intern - Summer 2027 (Chicago, IL): pay $28- $49 Hourly", { url: "https://paypal.example/r1" });
+  ok(!fallbackLine(l, "what does citadel pay interns in chicago", ["Citadel"]).includes("PayPal"));
+  ok(fallbackLine(l, "what does paypal pay interns in chicago").includes("$28- $49"));
+  ok(!fallbackLine(l, "what do interns earn").includes("PayPal"), "an ask that names no one lists nothing");
+});
+
+Deno.test("review 9: an exact restatement of a strict subset of the unit stands (the place qualifying the figure may be left to the judge)", async () => {
+  const l = new Ledger();
+  l.add("chat", "Stripe (Chicago, IL): pay $40/hr", { url: "https://stripe.example/j1" });
+  for (const s of ["Stripe pays $40/hr [E1].", "Stripe pays $40/hr in Chicago [E1]."]) eq((await verifyTagged(s, l, { judge: yes })).failures, [], s);
+  // A figure that is another employer's never stands.
+  const m = new Ledger(); m.add("chat", "Jane Street, Citadel: pay $40/hr"); m.add("chat", "Citadel pays $40/hr; Jane Street pays $50/hr.");
+  ok((await verifyTagged("Jane Street pays $40/hr [E1].", m, { judge: yes })).failures.length === 1);
+  ok((await verifyTagged("Jane Street pays $40/hr [E2].", m, { judge: yes })).failures.length === 1);
 });

@@ -13,7 +13,7 @@
 //             code's words; the answer is verified again; what still fails is dropped. It replaces the shortener and the quote fallback.
 //   fallback  after the drop, when nothing left answers, code says what it could not verify and what the ledger holds (a posting's
 //             pay with its link).
-import { clausesOf, findSupport, hardParts, indexPages, judgeAll, noClaim, splitSentences, type SupportJudge } from "./research/support.ts";
+import { clausesOf, findSupport, hardParts, indexPages, judgeAll, nameFoundIn, noClaim, personQuestion, splitSentences, type SupportJudge } from "./research/support.ts";
 
 // ON (ruling 2026-11-14): the drafting prompt asks for tags and every tool result carries its units. The path is chosen by the draft:
 // a TAGGED draft goes through this pipeline (no page quote is ever put in place of a sentence); an UNTAGGED one (a model that ignored
@@ -84,7 +84,7 @@ export function tagsOf(sentence: string): { ids: string[]; text: string } {
 export const stripTags = (t: string) => String(t ?? "").replace(TAG, "").replace(/[ \t]+([.,;:!?])/g, "$1");
 
 export interface Failure { sentence: string; reason: string }
-export interface Verified { text: string; failures: Failure[]; kept: string[] }
+export interface Verified { text: string; failures: Failure[]; kept: string[]; cites: string[] }
 
 // What layer A found missing, in code's words: each figure, name or date of the clause that no cited unit holds.
 export function missingSpecifics(clause: string, units: EvidenceUnit[]): string[] {
@@ -102,18 +102,19 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   const lines = String(reply ?? "").split("\n").map((l) => /^\s*(?:https?:\/\/\S+\s*)*$/.test(l) ? [l] : splitSentences(l).filter((x) => x.trim()));
   const failures: Failure[] = [], kept: string[] = [];
   const checks: { a: number; b: number; clause: string; units: EvidenceUnit[]; claim: string }[] = [];
-  const bad = new Set<string>();
+  const bad = new Set<string>(), citeAt = new Map<string, string[]>();
   lines.forEach((l, a) => l.forEach((x, b) => {
     if (/^\s*(?:https?:\/\/\S+\s*)*$/.test(x)) return;
     const { ids, text } = tagsOf(x);
     lines[a][b] = text;
-    if (!/\p{L}/u.test(text) || own.has(text) || noClaim(text) || (/\?\s*$/.test(text) && !/\d/.test(text))) return;
+    if (!/\p{L}/u.test(text) || own.has(text) || noClaim(text) || personQuestion(text)) return;
     if (o.onRecord?.(text) === true) return;
     if (!ids.length) { failures.push({ sentence: text, reason: "it states a fact and cites no evidence unit" }); bad.add(`${a}:${b}`); return; }
     const units = ids.map((id) => ledger.get(id)).filter(Boolean) as EvidenceUnit[];
     if (units.length < ids.length) { failures.push({ sentence: text, reason: `it cites ${ids.filter((id) => !ledger.get(id)).join(", ")}, which no evidence unit is` }); bad.add(`${a}:${b}`); return; }
+    citeAt.set(`${a}:${b}`, ids);
     for (const c of clausesOf(text)) {
-      if (noClaim(c) || o.onRecord?.(c) === true) continue;
+      if (noClaim(c) || personQuestion(c) || o.onRecord?.(c) === true) continue;
       if (o.onRecord?.(c) === false) { failures.push({ sentence: text, reason: `"${c}" is not what the person's record holds` }); bad.add(`${a}:${b}`); return; }
       checks.push({ a, b, clause: c, units, claim: text });
     }
@@ -130,8 +131,9 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   const got = await judgeAll(o.judge, asks.map((x) => ({ claim: x.claim, source: x.source })));
   asks.forEach((x, j) => { const c = checks[x.k]; if (!got[j] && !bad.has(`${c.a}:${c.b}`)) { failures.push({ sentence: c.claim, reason: `the cited unit does not state "${x.claim}"` }); bad.add(`${c.a}:${c.b}`); } });
   const text = lines.map((l, a) => l.filter((x, b) => x && !bad.has(`${a}:${b}`)).join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
-  lines.forEach((l, a) => l.forEach((x, b) => { if (x && !bad.has(`${a}:${b}`)) kept.push(x); }));
-  return { text, failures, kept };
+  const cites: string[] = [];
+  lines.forEach((l, a) => l.forEach((x, b) => { if (x && !bad.has(`${a}:${b}`)) { kept.push(x); for (const id of citeAt.get(`${a}:${b}`) ?? []) if (!cites.includes(id)) cites.push(id); } }));
+  return { text, failures, kept, cites };
 }
 
 // ------------------------------------------------------------------------------------------------ task contract
@@ -160,13 +162,13 @@ export const REPAIR_SYSTEM = "You fix a text message from a career assistant. Yo
   "support from these units. If a length limit is given, the whole reply must fit it. If something the reply must contain is missing, add one sentence for it. No other text.";
 export interface PipelineOut { text: string; repaired: boolean; dropped: Failure[]; calls: number; fallback: boolean }
 export async function runReplyPipeline(draft: string, ledger: Ledger, o: { judge?: SupportJudge | null; repair?: RepairModel | null; own?: string[]; onRecord?: (s: string) => boolean | null;
-  ask: string; contracts?: Contract[]; maxChars?: number; answers?: (text: string) => boolean }): Promise<PipelineOut> {
+  ask: string; contracts?: Contract[]; maxChars?: number; answers?: (text: string) => boolean; names?: string[] }): Promise<PipelineOut> {
   const v1 = await verifyTagged(draft, ledger, o);
   const len = (t: string) => t.replace(/https?:\/\/\S+/g, "").replace(/\s+/g, " ").trim().length;
   const contractMiss = (t: string) => (o.contracts ?? []).map((c) => c.missing(t, o.ask)).filter(Boolean) as string[];
   const tooLong = o.maxChars && len(v1.text) > o.maxChars ? `the reply is ${len(v1.text)} characters; the limit is ${o.maxChars}` : null;
   const miss = contractMiss(v1.text);
-  let text = v1.text, calls = 0, repaired = false, dropped = v1.failures;
+  let text = v1.text, calls = 0, repaired = false, dropped = v1.failures, cites = [...v1.cites];
   if ((v1.failures.length || tooLong || miss.length) && o.repair) {
     const user = [v1.failures.length ? `FAILED SENTENCES:\n${v1.failures.map((f) => `- ${f.sentence} (code: ${f.reason})`).join("\n")}` : "",
       tooLong ? `LENGTH: ${tooLong}. The sentences that stood:\n${v1.text}` : "", miss.length ? `MISSING: ${miss.join("; ")}.` : "",
@@ -179,7 +181,7 @@ export async function runReplyPipeline(draft: string, ledger: Ledger, o: { judge
       // (a repaired opening sentence opens the reply again: the answer comes first)
       const firstFailed = v1.failures.length && tagsOf(splitSentences(String(draft).split("\n")[0] ?? "")[0] ?? "").text === v1.failures[0].sentence;
       const joined = tooLong && v2.text && len(v2.text) < len(text) ? v2.text : (firstFailed ? [v2.text, text] : [text, v2.text]).filter(Boolean).join(" ");
-      if (!o.maxChars || len(joined) <= o.maxChars || len(joined) <= len(text)) { text = joined; repaired = true; }
+      if (!o.maxChars || len(joined) <= o.maxChars || len(joined) <= len(text)) { text = joined; repaired = true; cites = [...new Set([...cites, ...v2.cites])]; }
       dropped = v2.failures;
     }
   }
@@ -193,12 +195,18 @@ export async function runReplyPipeline(draft: string, ledger: Ledger, o: { judge
   text = text.replace(/\s*\[\d+\](?:\s*\[\d+\])*/g, "").split("\n").filter((l) => !/^\s*[.,;:]?\s*$/.test(l) || !l.trim()).join("\n").trim();
   const answers = o.answers ?? ((t: string) => splitSentences(t).some((s) => /\p{L}/u.test(s.replace(/https?:\/\/\S+/g, "")) && !noClaim(s) && !/\?\s*$/.test(s)));
   let fallback = false;
-  if (!answers(text)) { text = [text, fallbackLine(ledger, o.ask)].filter(Boolean).join("\n\n"); fallback = true; }
+  if (!answers(text)) { text = [text, fallbackLine(ledger, o.ask, o.names)].filter(Boolean).join("\n\n"); fallback = true; }
+  // Live-12 review (item 3; D-024, D-060): the tags go, the sources stay: each kept sentence's cited unit's link, on its own line, once.
+  const links = [...new Set(cites.map((id) => ledger.get(id)?.url).filter((u): u is string => !!u))].filter((u) => !text.includes(u));
+  if (links.length && !fallback) text = `${text}\n${links.join("\n")}`;
   return { text: stripTags(text).trim(), repaired, dropped, calls, fallback };
 }
-// What could not be verified, and what the ledger does hold for what was asked (a chat unit naming a word of the ask), with its link.
-export function fallbackLine(ledger: Ledger, ask: string): string {
-  const words = new Set(String(ask ?? "").toLowerCase().match(/\p{L}{3,}/gu) ?? []);
-  const held = ledger.units.filter((u) => u.kind === "chat" && /\d/.test(u.text) && (u.text.toLowerCase().match(/\p{L}{3,}/gu) ?? []).some((w) => words.has(w) && !/^(?:the|and|pay|for|with)$/.test(w)));
+// What could not be verified, and what the ledger does hold for what was asked, with its link. Live-12 review (item 8, D73-6): the ask's
+// names (an employer, a place: the words of the ask that are names in this conversation, `names`, or in the ledger) must ALL be in the
+// unit: a Citadel ask never gets another employer's pay, and an ask that names no one gets nothing listed.
+export function fallbackLine(ledger: Ledger, ask: string, names: string[] = []): string {
+  const known = new Set([...names, ...ledger.units.flatMap((u) => u.text.match(/(?<![\p{L}])\p{Lu}[\p{L}&'-]{2,}/gu) ?? [])].map((w) => w.toLowerCase().replace(/'s$/, "")));
+  const asked = [...new Set((String(ask ?? "").toLowerCase().match(/\p{L}[\p{L}&'-]{1,}/gu) ?? []).map((w) => w.replace(/'s$/, "")))].filter((w) => known.has(w) && !/^(?:i|the|and|pay|what|how|for|with|is|are|my|your)$/.test(w));
+  const held = !asked.length ? [] : ledger.units.filter((u) => u.kind === "chat" && /\d/.test(u.text) && asked.every((w) => nameFoundIn(w, u.text)));
   return [`I couldn't verify an answer to that from what I read.${held.length ? " This chat's tool results do hold:" : ""}`, ...held.slice(0, 3).map((u) => `${u.text}${u.url ? `\n${u.url}` : ""}`)].join("\n");
 }

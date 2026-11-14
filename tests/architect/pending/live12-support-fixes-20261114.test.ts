@@ -23,7 +23,7 @@ Deno.test("item 4: a full date is one token however it is written", () => {
 });
 
 Deno.test("item 2: a hedge, a caveat or a 'nothing was sent' line is not a claim; a claim about the world with no name or figure still is", () => {
-  for (const s of ["That's an anecdote, not proof.", "Nothing was sent or applied for.", "Resume text only, nothing sent.", "That's a reported figure, not proof."]) ok(noClaim(s), s);
+  for (const s of ["That's an anecdote, not proof.", "Nothing was sent or applied for.", "Resume text only, nothing sent.", "That's a self-reported figure, not proof."]) ok(noClaim(s), s);
   for (const s of ["Hospitals have stopped checking licences.", "Citadel is under federal investigation.", "citadel does not pay interns", "The posting is closed.",
     "I'd treat $28 as a floor.", "That's one internship posting, not a market rate.", "I found that recruiters reject two-page resumes.", "Recruiters reject two-page resumes outright.", "That's why Citadel pays more.", "Is it open?"]) ok(!noClaim(s), s);
 });

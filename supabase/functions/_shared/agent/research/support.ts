@@ -23,7 +23,11 @@ const same = (a: string, b: string) => bare(readAlike(a)).toLowerCase().replace(
 export const quoted = (sentence: string) => `"${sentence}"`;
 // Live-12 (C11: "… authorized to work in the U.S. without sponsorship?" was cut at "U.S." and "without sponsorship?" sent alone): the
 // sentence splitter never ends a sentence at an abbreviation's stop.
-const ABBR_STOP = /(?<![\p{L}])(?:U\.S\.A\.|U\.S\.|U\.K\.|e\.g\.|i\.e\.|Inc\.|Jr\.|Sr\.|St\.|Mr\.|Mrs\.|Ms\.|Dr\.|vs\.|a\.m\.|p\.m\.|No\.(?=\s*\d))/gu;
+const STATE_NAMES = "alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming";
+// (a "City, State" owner is the city's only when the second part is a US state: "Jane Street, Citadel" is two employers)
+const isState = (o: string) => new RegExp(`^(?:${STATE_CODES}|${STATE_NAMES})$`, "i").test(String(o ?? "").trim());
+const STATE_CODES = "AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC|PR";
+const ABBR_STOP = /(?<![\p{L}])(?:U\.S\.A\.|U\.S\.|U\.K\.|e\.g\.|i\.e\.|Inc\.|Jr\.|Sr\.|St\.|Mr\.|Mrs\.|Ms\.|Dr\.|vs\.|approx\.|Co\.|Ltd\.|Corp\.|(?:Jan|Feb|Mar|Apr|Aug|Sept|Sep|Oct|Nov|Dec)\.(?=\s*\d)|a\.m\.|p\.m\.|No\.(?=\s*\d))/gu;
 const HELD = "\u2024";
 export function splitSentences(line: string, re: RegExp = /(?<=[.!?]["')*_]*)\s+/): string[] {
   const held = String(line ?? "").replace(ABBR_STOP, (m) => m.replaceAll(".", HELD));
@@ -31,11 +35,14 @@ export function splitSentences(line: string, re: RegExp = /(?<=[.!?]["')*_]*)\s+
 }
 const MONTHS: Record<string, number> = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
 const DATE_WORDS = /(?:(?:mon|tues|wednes|thurs|fri|satur|sun)day,?\s+)?(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+((?:19|20)\d\d)(?!\d)/giu;
+const DAY_FIRST = /(?:(?:mon|tues|wednes|thurs|fri|satur|sun)day,?\s+)?(\d{1,2})(?:st|nd|rd|th)?\s+(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?,?\s+((?:19|20)\d\d)(?!\d)/giu;
 // Live-12 (C11: "Sunday, December 6th, 2026" on a posting that closes 2026-12-06): a full date is one token, the same however it is
 // written ("December 6, 2026", "Dec 6th, 2026", "2026-12-06"); layer A reads it as one name that must be in the unit.
 export function normDates(t: string): string {
   const tok = (y: string, m: number, d: string) => `Date${y}${String(m).padStart(2, "0")}${String(Number(d)).padStart(2, "0")}`;
+  // (day first too, "6 December 2026"; a numeric date only in ISO order, "2026-12-06": "12/06/2026" is left as written, never guessed)
   return String(t ?? "").replace(DATE_WORDS, (_, mo: string, d: string, y: string) => tok(y, MONTHS[mo.slice(0, 3).toLowerCase()], d))
+    .replace(DAY_FIRST, (_, d: string, mo: string, y: string) => tok(y, MONTHS[mo.slice(0, 3).toLowerCase()], d))
     .replace(/(?<![\d-])((?:19|20)\d\d)-(\d{2})-(\d{2})(?![\d-])/g, (_, y: string, m: string, d: string) => tok(y, Number(m), d));
 }
 const MONTH_OR_DAY = /(?<![\p{L}])(?:jan(?:uary)?|feb(?:ruary)?|march|apr(?:il)?|june|july|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow|yesterday)(?![\p{L}])/iu;
@@ -43,24 +50,42 @@ const MONTH_OR_DAY = /(?<![\p{L}])(?:jan(?:uary)?|feb(?:ruary)?|march|apr(?:il)?
 // in one of the closed shapes that say something about the answer itself, not the world: a gap admitted ("I couldn't verify it"), a
 // caveat on a source ("That's an anecdote, not proof", "Treat it as a rough benchmark"), or a "nothing was sent" line. It is not
 // judged, as a question is not. Anything else ("Hospitals have stopped checking licences.") is a claim, judged as before.
-const PLAIN_FIRST = /^(?:i|i'd|i'm|i've|i'll|that's|that|this|it's|it|these|those|nothing|no|treat|take|use|resume|read|public)$/i;
+const PLAIN_FIRST = /^(?:i|i'd|i'm|i've|i'll|that's|that|this|it's|it|these|those|nothing|no|treat|take|resume)$/i;
+// Only what Trainee itself knows, checked or did: a gap ("I can't verify it", "I don't have its date"), a source's own kind ("That's
+// an anecdote, not proof", "self-reported"), "nothing was sent". A word that asserts a status of anything in the world is never exempt.
+const ASSERTS_STATUS = /(?<![\p{L}])(?:verified|official|legitimate|legit|scam|fraud|confirmed|genuine|authentic|real|accurate|true|false|reliable|trustworthy|safe|valid|approved|accredited|licensed|guaranteed|open|closed|hiring)(?![\p{L}])/iu;
 const HEDGE_SHAPES = [
-  /^i\s+(?:can't|cannot|couldn't|could not)\s+(?:verify|tell)\s+(?:it|this|that|them|whether it|if it)\b[^,;:]*$/i,
+  /^i\s+(?:can't|cannot|couldn't|could not)\s+tell\s+(?:whether|if)\s+(?:it|this|that|they)\b[^,;:]*$/i,
+  /^i\s+(?:can't|cannot|couldn't|could not)\s+verify\s+(?:it|this|that|them)$/i,
+  /^i\s+(?:don't|do not)\s+have\s+(?:its|their|the|a|an|any)\s+[\p{L} -]{1,30}$/iu,
   /^i\s+found\s+(?:no|nothing)\b[^,;:]*$/i,
-  /^(?:that's|that is|this is|it's|it is|these are|those are)\s+(?:an?\s+|one\s+|only\s+)?(?:[\p{L}-]+\s+){0,3}(?:anecdote|guide|posting|figure|estimate|benchmark|report|account|example|range|number|source|page|data point)s?(?:,?\s+(?:not|and not)\s+(?:an?\s+)?[\p{L} -]{1,40})*$/iu,
-  /^treat\s+(?:it|this|that|them|these)\s+as\s+(?:an?\s+)?(?:rough|loose|starting|ballpark)?\s*(?:benchmark|estimate|guide|floor|starting point|signal)\b[^,;:]*$/i,
+  /^(?:that's|that is|this is|it's|it is|these are|those are)\s+(?:an?\s+|one\s+|only\s+)?(?:self-reported\s+|reported\s+|single\s+|personal\s+)?(?:anecdote|estimate|benchmark|example|account|data point|self-reported figure|self-reported number)s?(?:,?\s+(?:not|and not)\s+(?:an?\s+)?(?:proof|a rule|a guarantee|a market rate|a promise|data))*$/iu,
+  /^treat\s+(?:it|this|that|them|these)\s+as\s+(?:an?\s+)?(?:rough|loose|ballpark)?\s*(?:benchmark|estimate|floor|starting point|signal)\b[^,;:]*$/i,
   /^(?:nothing|no application|no account)\b[^,;:]*\b(?:sent|submitted|applied(?: for| to)?|queued|saved|created)$/i,
   /^[\p{L} ]{1,30}\bonly,\s+nothing\s+(?:was\s+)?(?:sent|submitted|applied(?: for| to)?)$/iu,
 ];
 export function noClaim(s: string): boolean {
   const b = bare(String(s ?? "")).replace(/https?:\/\/\S+/g, " ").replace(/[’‘]/g, "'").trim().replace(/[.!]+$/, "");
   if (!/\p{L}/u.test(b) || /["\u201c\u201d?]/.test(b) || MONTH_OR_DAY.test(b) || /\d/.test(b)) return false;
-  if (!HEDGE_SHAPES.some((re) => re.test(b))) return false;
+  if (!HEDGE_SHAPES.some((re) => re.test(b)) || ASSERTS_STATUS.test(b)) return false;
   const first = /^[\p{L}'’]+/u.exec(b)?.[0] ?? "";
   if (/^\p{Lu}/u.test(first) && !PLAIN_FIRST.test(first)) return false;
   const h = hardParts(b);
   if (h.numbers.length || h.years.length || h.quant.length) return false;
   return !h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).some((r) => r.length);
+}
+// Live-12 review (item 4): a question goes unjudged only when it asks the person about their own situation: no figure, no name, no
+// assertion inside it ("Did you know Stripe stopped sponsoring visas?" is a claim), or one asked of them directly ("are you
+// authorized to work in the U.S.?"). A clause in that form counts too, with or without its question mark.
+const ASK_THEM = /^(?:and\s+|so\s+)?(?:are|do|did|can|could|would|will|have|has|should|is)\s+(?:you|your)\b/i;
+const ASSERTS_IN_Q = /\b(?:did you (?:know|hear|see|read)|have you (?:heard|seen|read)|is it true|were you aware|you know that|aware that|heard that)\b/i;
+export function personQuestion(s: string): boolean {
+  const b = bare(String(s ?? "")).replace(/[’‘]/g, "'").trim();
+  if (/\d/.test(b) || ASSERTS_IN_Q.test(b) || /["\u201c\u201d]/.test(b)) return false;
+  if (ASK_THEM.test(b)) return true;
+  if (!/\?\s*$/.test(b)) return false;
+  const h = hardParts(b);
+  return !h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).some((r) => r.length) && !(/^\p{Lu}/u.test(b) && h.first && !/^(?:which|what|where|when|who|how|should|would|could|can|do|does|did|is|are|want|shall|will|have|has)$/i.test(h.first));
 }
 // Live-12 (item 5): a sentence of joined clauses ("…; …", "…, and …", "…, so …") is read clause by clause.
 export const clausesOf = (s: string) => bare(s).replace(/[.!?]+$/, "").split(/;\s+|,\s+(?:and|so|but)\s+/u).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x));
@@ -477,7 +502,11 @@ export function findSupport(claim: string, idx: PageIndex, only?: number[], unit
     const ROLE = /(?<![\p{L}])(?:interns?|internships?|engineers?|engineering|swe|sde|analysts?|developers?|managers?|scientists?|traders?|associates?|directors?|leads?|staff|senior|junior|new grads?|graduates?|level|l\d|base|pay|salary|compensation|bonus|role|team|office)(?![\p{L}])/iu;
     // (live-10 C11: "Chicago, Illinois: $28- $49 Hourly": the owner read is "Illinois", the state of the claim's own city; a place
     // written "City, State" is the city's)
-    const otherOwner = (o: string | null) => !!o && !ROLE.test(o) && h.names.some((r) => nameRe(r.join(" ")).test(s.text)) && !h.names.some((r) => nameRe(`${r.join(" ")}, ${o}`).test(s.text));
+    // (live-12 review item 9: "Stripe (Chicago, IL): pay $40/hr" for "Stripe pays $40/hr": the name nearest the figure is its place,
+    // "City, ST", which qualifies the figure; it is no other employer's. Whether the place may be left out is the judge's to read.)
+    const esc = (o: string) => o.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const placeOf = (o: string) => new RegExp(`(?<![\\p{L}])${esc(o)},\\s(?:${STATE_CODES})(?![\\p{L}])`, "iu").test(s.text) || (new RegExp(`^(?:${STATE_CODES})$`, "i").test(o) && new RegExp(`\\p{L},\\s${esc(o)}(?![\\p{L}])`, "iu").test(s.text));
+    const otherOwner = (o: string | null) => !!o && !ROLE.test(o) && !placeOf(o) && h.names.some((r) => nameRe(r.join(" ")).test(s.text)) && !(isState(o) && h.names.some((r) => nameRe(`${r.join(" ")}, ${o}`).test(s.text)));
     if (!h.numbers.every((a) => s.hard.numbers.some((b, j) => b === a && (!otherOwner(s.hard.owners[j]) || [...mine].some((n) => n === s.hard.owners[j] || n.startsWith(`${s.hard.owners[j]} `) || s.hard.owners[j]!.startsWith(`${n} `)) && !(s.lent && s.hard.owners[j]!.startsWith(`${s.lent.toLowerCase()} `)))))) continue;
     const n = [...want].filter((w) => s.content.has(w)).length;
     // A unit that is all figures ("$133,000 - $184,000 USD.") shares no word with the claim: its figures, each in its role, are the tie.

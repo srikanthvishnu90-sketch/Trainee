@@ -62,3 +62,23 @@ Deno.test("an untagged draft keeps the support check (pipeline 'untagged'); no r
   eq(s.repairs.length, 0);
   ok(!/\[E\d/.test(r.reply), r.reply);
 });
+
+Deno.test("review 2: on the tagged path a link no unit, tool result or File gave is removed (after the draft and after the repair)", async () => {
+  const s = model((ev) => `Hudson Ridge Capital's Summer Analyst role in New York pays $55-$60 an hour [${idOf(ev, /pay/)}].\nhttps://evil.example/stripe-apply`, () => "");
+  const r: any = await agentTurn({ message: ASK, history: [], stores: { profile: { facts: [] } }, userId: "u-rp", threadId: "th-rp", now: NOW, model: s.m, capabilities: [postingTool], market: { judge } } as any);
+  eq(r.pipeline, "tagged");
+  ok(!r.reply.includes("evil.example") && r.reply.includes(URL0), r.reply);
+  const s2 = model((ev) => `Hudson Ridge Capital's Summer Analyst role in New York pays $55-$60 an hour [${idOf(ev, /pay/)}]. Its analysts sit on the credit desk [${idOf(ev, /pay/)}].`, (ev) => `Its analysts sit on the credit desk [${idOf(ev, /pay/)}].\nhttps://evil.example/stripe-apply`);
+  const r2: any = await agentTurn({ message: ASK, history: [], stores: { profile: { facts: [] } }, userId: "u-rp", threadId: "th-rp", now: NOW, model: s2.m, capabilities: [postingTool], market: { judge } } as any);
+  ok(!r2.reply.includes("evil.example"), r2.reply);
+});
+
+Deno.test("review 1: only facts the person confirmed enter the ledger (D-007)", async () => {
+  const facts = [{ id: "f1", kind: "skill", text: "SYN-OWN-CONFIRMED-SKILL Python", status: "confirmed", needs_confirmation: false, source: "user" },
+    { id: "f2", kind: "skill", text: "SYN-GENERATED-CERT AWS", status: "confirmed", needs_confirmation: false, provenance: { source: "assistant" } },
+    { id: "f3", kind: "goal", text: "SYN-DRAFT-GOAL design", status: "draft", needs_confirmation: true }];
+  const s = model(() => "Nothing was sent.", () => "");
+  await agentTurn({ message: ASK, history: [], stores: { profile: { facts } }, userId: "u-rp", threadId: "th-rp", now: NOW, model: s.m, capabilities: [postingTool], market: { judge } } as any);
+  const sys = String(s.seen[0].system), led = sys.slice(sys.indexOf("EVIDENCE:"), sys.indexOf("EVIDENCE:") + 2000);
+  ok(led.includes("SYN-OWN-CONFIRMED-SKILL") && !led.includes("SYN-GENERATED-CERT") && !led.includes("SYN-DRAFT-GOAL"), led.slice(0, 600));
+});

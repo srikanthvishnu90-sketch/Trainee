@@ -17,7 +17,8 @@ import type { ResearchDeps, ResearchResult } from "../_shared/agent/research/ind
 import { enforceResearchReply, fallbackVerdict, stripUnseenLinks } from "../_shared/agent/research/reply.ts";
 import { type AdviceResult, enforceAdviceReply } from "../_shared/agent/research/advice.ts";
 import { enforceMarketReply, enforceMarketReplySupported, FAIL_CLOSED, type MarketDeps, type MarketResult, pureUnconfirmed, type ResearchCheck } from "../_shared/agent/research/market.ts";
-import { bare, keepSupported, splitSentences } from "../_shared/agent/research/support.ts";
+import { bare, keepSupported, personQuestion, splitSentences } from "../_shared/agent/research/support.ts";
+import { confirmedRow, factRows } from "../_shared/agent/memory.ts";
 import { contractBlock, contractsFor, isTagged, Ledger, LEDGER_RULE, PIPELINE, runReplyPipeline, stripTags } from "../_shared/agent/reply_pipeline.ts";
 import { factText, ownerConfirmedFacts } from "../_shared/essay_draft.ts";
 import { NOT_CONFIRMED } from "../_shared/research_reply.ts";
@@ -226,7 +227,8 @@ export async function agentTurn(o: {
   const contracts = PIPELINE.on ? contractsFor(null, o.message) : [];
   if (ledger) {
     const pf = (o.stores as any)?.profile ?? {}, contact = { ...(pf.basics ?? {}), ...(pf.resume_header?.confirmed_at ? pf.resume_header : {}) };
-    ledger.addRecord(ownerConfirmedFacts(pf.facts ?? []).map((f: any) => `${String(f?.kind ?? "fact")}: ${String(f?.text ?? "").trim()}`).filter((x: string) => x.length > 8)
+    // (only what the person confirmed: the same rows the prompt's "Confirmed facts (usable in applications)" shows, D-007)
+    ledger.addRecord(factRows(pf).filter(confirmedRow).map((f: any) => `${String(f?.kind ?? "fact")}: ${String(f?.text ?? "").trim()}`).filter((x: string) => x.length > 8)
       .concat(["name", "email", "phone", "city"].filter((k) => typeof contact[k] === "string" && contact[k].trim()).map((k) => `contact: ${k} ${contact[k].trim()}`)),
       ["city", "phone", "email"].filter((k) => !(typeof contact[k] === "string" && contact[k].trim())));
     // (this chat's earlier posting lines, from tool results an earlier reply already showed, with their links)
@@ -292,8 +294,11 @@ export async function agentTurn(o: {
   if (pipeline === "tagged" && result.reply && !result.show) {
     const l0 = replyLength(o.message, o.history);
     const repair = async (x: { system: string; user: string }) => { const res = await o.model({ system: x.system, messages: [{ role: "user", content: [{ type: "text", text: x.user }] }], tools: [], max_tokens: 500, tool_choice: { type: "none" } } as any); return ((res as any)?.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join("").trim(); };
-    piped = await runReplyPipeline(result.reply, ledger!, { judge: o.market?.judge ?? null, repair, own: [...(result.codeLines ?? [])], ask: o.message, contracts, maxChars: l0.kind === "draft" ? undefined : overLimit(l0) });
-    result = { ...result, reply: piped.text };
+    const names = [...new Set((o.history ?? []).filter((m: any) => typeof m?.content === "string").flatMap((m: any) => (m.content as string).match(/(?<![\p{L}])\p{Lu}[\p{L}&'-]{2,}/gu) ?? []))];
+    piped = await runReplyPipeline(result.reply, ledger!, { judge: o.market?.judge ?? null, repair, own: [...(result.codeLines ?? [])], ask: o.message, contracts, names, maxChars: l0.kind === "draft" ? undefined : overLimit(l0) });
+    // Live-12 review (item 2): a link stays only when a ledger unit, a tool result or a File made this turn gave it (after the draft and
+    // after the repair alike: this runs on what the pipeline returns).
+    result = { ...result, reply: stripUnseenLinks(piped.text, [...(result.linksSeen ?? []), ...(result.fileLinks ?? []), ...shownBefore(o.history), ...ledger!.units.map((u) => u.url).filter((u): u is string => !!u)]) };
   }
   const researchDraft = !piped && FAIL_CLOSED.support && trace.m && result.reply && result.stopped === "final" ? String(result.reply) : null;
   // Live-12 (item 4): this chat's tool results as source units: the postings this turn read (pay by place, deadline, state) and the
@@ -424,7 +429,7 @@ export async function agentTurn(o: {
   if (FAIL_CLOSED.support && !piped && !trace.m && result.reply && result.stopped === "final" && !result.show) {
     const judge = o.market?.judge ?? null, pure = (s: string) => pureUnconfirmed(s, o.message);
     // Live-11 C11: a question to the person ("Which email should go on the resume?") is never judged, when it states no figure.
-    const askOnly = (s: string) => /\?\s*$/.test(s.trim()) && !numbersIn(s).length;
+    const askOnly = (s: string) => personQuestion(s);
     const recs = [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])].filter((p: any) => numbersIn(String(p?.pay ?? "")).length);
     const recLine = (p: any) => `${[p?.company, p?.title].map((x) => String(x ?? "").trim()).filter(Boolean).join(", ")}: ${String(p.pay).trim()}`;
     const letters = (t: string) => /\p{L}/u.test(t.replace(/https?:\/\/\S+/g, "")), links = (t: string) => t.match(/https?:\/\/\S+/g) ?? [];
@@ -507,7 +512,11 @@ export async function agentTurn(o: {
   // reply says that it could not verify a figure, and gives what this chat's tool results do hold for the place or employer asked (a
   // posting's pay, with its link). Never another employer's pay for this ask (D73-6), and never a page's sentence in place of one.
   const askWords = new Set(o.message.toLowerCase().match(/\p{L}[\p{L}&'-]*/gu) ?? []);
-  const shownAsked = shownPay.filter((l) => (l.text.match(/(?<=[\p{L}\p{N},;:(]\s+)\p{Lu}[\p{L}&'-]*/gu) ?? []).some((w) => w.length > 2 && askWords.has(w.toLowerCase())));
+  // (live-12 review item 8: every name the ask gives, an employer and a place, must be on the line: "citadel ... chicago" never
+  // gets PayPal's Chicago pay; a name is a word written capitalised in this conversation)
+  const convNames = new Set((o.history ?? []).filter((m: any) => typeof m?.content === "string").flatMap((m: any) => (m.content as string).match(/(?<![\p{L}])\p{Lu}[\p{L}&'-]{2,}/gu) ?? []).map((w: string) => w.toLowerCase().replace(/'s$/, "")));
+  const askNames = [...askWords].filter((w) => w.length > 2 && convNames.has(w) && !/^(?:the|and|what|how|for|with|pay|you|your|are|can)$/.test(w));
+  const shownAsked = shownPay.filter((l) => (l.text.match(/(?<=[\p{L}\p{N},;:(]\s+)\p{Lu}[\p{L}&'-]*/gu) ?? []).some((w) => w.length > 2 && askWords.has(w.toLowerCase())) && askNames.every((w) => new RegExp(`(?<![\\p{L}])${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "iu").test(l.text)));
   const plainS = (x: string) => bare(x).replace(/[.!?]+$/, "").toLowerCase();
   const figSentences = researchDraft ? researchDraft.split(/\n+/).flatMap((l) => splitSentences(l.replace(/https?:\/\/\S+/g, " "))).map((x) => x.replace(/\[\d+\]/g, " ").trim()).filter((x) => /\p{L}/u.test(x) && numbersIn(x).length) : [];
   const figSurvived = !!result.reply && figSentences.some((x) => plainS(result.reply!).includes(plainS(x)));

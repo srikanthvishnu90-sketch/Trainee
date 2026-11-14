@@ -552,7 +552,9 @@ export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudg
 // Everything else is judged as any claim is.
 const ROLE_IN_FACT = /(?<![\p{L}])(?:founder|co-founder|intern|internship|engineer|researcher|analyst|manager|associate|employee|team|staff|contractor|consultant|director|lead|friend|at)(?![\p{L}])/iu;
 const ADVICE_VERB = "put|lead|move|cut|add|leave|keep|rewrite|list|drop|remove|delete|replace|update|swap|start|end|place|group|shorten|trim|bold|fix|include|mention|split|merge|change|rename|order|highlight|open|close|use|write|reword|tighten|spell";
-const REMOVE_VERB = /^(?:you could\s+)?(?:leave|cut|drop|remove|delete|update|fix|replace|change|trim)\b/i;
+// An unambiguous removal (review of 78603b243: "Leave the 3.9 GPA in." keeps it): remove, cut, drop, delete, take … out, leave … off/out.
+const REMOVE_VERB = /^(?:you could\s+)?(?:(?:remove|cut|drop|delete)\b(?!.*\b(?:back in|in place|keep)\b)|take\b.*\bout\b|leave\b.*\b(?:off|out)\b)/iu;
+const LEAD_IN = /^(?:for|at|in|on|under) (?:the )?[\p{L} -]{1,40}? (?:of )?your [\p{L} -]{1,30}?[:,]\s*/iu;
 const INSTRUCTION = new RegExp(`^(?:(?:for|at|in|on|under) (?:the )?[\\p{L} -]{1,40}? (?:of )?your [\\p{L} -]{1,30}?[:,]\\s*(?:your\\b|(?:${ADVICE_VERB})\\b)|(?:you could\\s+)?(?:${ADVICE_VERB})\\b)`, "iu");
 const EVALUATIVE = /(?<![\p{L}])(?:strong(?:er|est)?|weak(?:er|est)?|top(?! of (?:your|it|the page))|competitive|clears?|values?|looks? for|pays?|paid|earns?|hires?|hiring|typical(?:ly)?|average|median|usual(?:ly)?|better|worse|best|worst|more than|less than|fewer than|the market|market|industry|recruiters?|employers?|compan(?:y|ies)|banks?|firms?|demand|impress\w*|stand(?:s)? out|cutoff|bar|most|least|every|always|never)(?![\p{L}])/iu;
 export function adviceOfTheirOwn(confirmed: string[], drafts: string[] = []): (s: string) => boolean {
@@ -562,7 +564,10 @@ export function adviceOfTheirOwn(confirmed: string[], drafts: string[] = []): (s
   const orgs = [...confirmed, ...drafts].filter((f) => ROLE_IN_FACT.test(f)).flatMap((f) => [f.split(/[,;:(]/)[0].trim(), ...[...f.matchAll(/\bat ([\p{Lu}][\p{L}&.-]*(?: [\p{Lu}][\p{L}&.-]*)*)/gu)].map((m) => m[1])]).filter((x) => x.length > 1);
   return (s: string) => {
     const t = bare(s).trim();
-    if (!INSTRUCTION.test(t) || EVALUATIVE.test(t)) return false;
+    if (!INSTRUCTION.test(t) || EVALUATIVE.test(t) || /\?\s*$/.test(t)) return false; // a question is judged
+    // One clause only (review of 78603b243): after the lead-in, a further ":" ";" or dash clause may carry a claim ("Drop Snowflake;
+    // Snowflake is dying."): judged.
+    if (/[:;]|\s[-–—]\s|\s?—\s?/u.test(t.replace(LEAD_IN, "").replace(/"[^"]*"/g, '""'))) return false;
     const from = REMOVE_VERB.test(t) ? own : record, mine = numbersIn(from);
     const ns = numbersIn(t), names = specifics(t).names.filter((n) => !new RegExp(`^(?:${ADVICE_VERB}|you|for|at|in|on|under)$`, "i").test(n));
     return ns.every((n) => mine.some((y) => numEq(y, n))) && names.every((n) => has(from, n) && !orgs.some((o) => has(o, n)));

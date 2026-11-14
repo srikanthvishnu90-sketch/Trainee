@@ -127,6 +127,12 @@ Deno.test("ruling 1 at the turn: the review's leaks are judged and refused; plai
     const t = await adviceTurn(history, reply, extra);
     ok(!bad.test(t.reply), `${name}: ${t.reply}`);
   }
+  // Review of 78603b243: a further clause after the instruction, and a draft fact kept rather than removed, are judged.
+  for (const [name, reply, bad] of [["a ':' clause", "Mention SQL: it is what data teams want now.", /what data teams want/], ["a ';' clause", "Drop Python; Python is dying.", /dying/],
+    ["a dash clause", "Move SQL up — data teams want it now.", /want it now/], ["a draft kept", "Leave the 3.9 GPA in.", /3\.9/]] as const) {
+    const t = await adviceTurn([], reply, [{ id: "F-8", kind: "other", text: "GPA: 3.9", status: "draft", needs_confirmation: true }]);
+    ok(!bad.test(t.reply), `${name}: ${t.reply}`);
+  }
   for (const good of ["Leave the outdated 3.9 GPA off.", "Move SQL ahead of the education line."]) {
     const t = await adviceTurn([], good, [{ id: "F-8", kind: "other", text: "GPA: 3.9", status: "draft", needs_confirmation: true }]);
     ok(t.reply.includes(good), `${good} => ${t.reply}`);

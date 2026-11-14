@@ -420,3 +420,7 @@
 820 22d4183f631fd6224acadd5519e6af258424f530 independent-review-20261113 risk=high note=approved-at-f46c8a18e-delta-migration-rename-4b4c07eb8-trunk-merges-toolctx-union-resolution-only
 777 abe7a8be2e401a751e3d7b8f697cbfbbd37e31d8 fix-forward-D-076 risk=high note=rejected-as-merged;fixed-by-#814-#820-independently-approved-and-merged
 779 e8aedd81c1beceda54bc3930095ed7877fe61105 fix-forward-D-076 risk=high note=rejected-as-merged;fixed-by-#814-#820-independently-approved-and-merged
+843 d40b408537fd10dfcfec180bfacf0dd73980e426 independent-review-20261114 risk=high note=check-ON-approved;no-advice-exemption;sets-0-leaks-0-misleading;561/561;plus-two-test-helper-changes-only
+772 99d5888839820929d225567e4526a32a31fa049d fix-forward-D-076 risk=high note=rejected-as-merged;fixed-by-#837-#843-research-support-check-switched-on-(owner-decision-2026-11-14)-independently-approved-and-merged
+792 9ed96781bc98a2bc40143157c8951f6408029ac5 fix-forward-D-076 risk=high note=rejected-as-merged;fixed-by-#837-#843-research-support-check-switched-on-(owner-decision-2026-11-14)-independently-approved-and-merged
+801 0c354f9ecccd5a602ec289dcfb7d6a2541f2477e fix-forward-D-076 risk=high note=rejected-as-merged;fixed-by-#837-#843-research-support-check-switched-on-(owner-decision-2026-11-14)-independently-approved-and-merged

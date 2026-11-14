@@ -11,7 +11,9 @@ type Ok = Extract<ResearchResult, { status: "ok" }>;
 // address, a bare host with a path ("evil.example.com/apply") and a javascript:/data:/mailto: URI. The only link a reply
 // carries is the file link code adds (withLink strips every one the model wrote, of any shape).
 const MODEL_LINK = /\[([^\]]*)\]\((?:[^()]|\([^)]*\))*\)|[a-z][a-z0-9+.-]*:\/\/[^\s<>"')\]]+|\b(?:javascript|data|vbscript|mailto|file):[^\s<>"']+|\bwww\.[^\s<>"']+|\b(?:[a-z0-9-]+\.)+[a-z]{2,}\/[^\s<>"']*/gi;
-export const stripUrls = (s: string) => s.replace(MODEL_LINK, (_m, label) => label ?? "").replace(/\s+([.,;:!?])/g, "$1").replace(/\s{2,}/g, " ").replace(/[\s:]+$/, "").trim();
+// (2026-11-14: a link at a sentence's end took its full stop with it, so "…in the file https://x.example/f. What role…?" became one
+// sentence and the role question no longer matched its fixed wording: the stop the link swallowed is kept.)
+export const stripUrls = (s: string) => s.replace(MODEL_LINK, (m, label) => (label ?? "") + (label === undefined ? (/[.,;:!?]+$/.exec(m)?.[0] ?? "") : "")).replace(/\s+([.,;:!?])/g, "$1").replace(/\s{2,}/g, " ").replace(/[\s:]+$/, "").trim();
 // A model-written link survives only when the turn saw it (the person typed it or a tool returned it, exact match, any shape):
 // an invented or hostile one ("evil.example.com/apply", "www.", a markdown link, a javascript: URI) is removed, its label kept.
 // Applied to every final reply the agent brain writes, research or not (the research reply strips them all and adds its own file link).

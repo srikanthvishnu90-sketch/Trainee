@@ -7,11 +7,17 @@
 import assertNode from "node:assert/strict";
 import { agentTurn } from "../../supabase/functions/agent-chat/career_brain.ts";
 import { companyInterviewAsk, researchAsk } from "../../supabase/functions/agent-chat/career_staged.ts";
-import { dayOnPage, enforceCompanyReply, meaningKept, pageLimit, parseDay, researchCompany } from "../../supabase/functions/_shared/agent/research/company.ts";
+import { dayOnPage, enforceCompanyReply, enforceCompanyReplySupported, meaningKept, pageLimit, parseDay, researchCompany } from "../../supabase/functions/_shared/agent/research/company.ts";
 import type { MarketDeps } from "../../supabase/functions/_shared/agent/research/market.ts";
 import { bodyHtml, textOf, validateKind } from "../../supabase/functions/_shared/file_kinds.ts";
-import { NOW, U, world } from "../helpers/research_company_web.ts";
+import { NOT_CONFIRMED } from "../../supabase/functions/_shared/research_reply.ts";
+import { NOW, U, world as world0 } from "../helpers/research_company_web.ts";
+import { testSupportJudge } from "./support-test-judge.ts";
 
+// Architect amendment (owner decision 2026-11-13: research support check switched on): research needs its judge to keep a line
+// (no judge fails closed). The test judge says yes to a model-worded line only when its page sentence states every content word with
+// the same negation, and to code's own quote candidates; layer A (every figure, year and name in one page sentence) runs before it.
+const world = () => { const w = world0(); w.deps = { ...w.deps, judge: testSupportJudge }; return w; };
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
 
@@ -53,21 +59,43 @@ Deno.test("WO-H/2 the brief: facts, reading and unknowns separate; dated develop
   const r: any = await researchCompany({ company: "Stripe", role: "Data analyst internship", question: T1, plan: { queries: ["Stripe"], companies: ["Stripe"], sites: ["stripe.example"] }, deps: w.deps, now: NOW });
   eq(r.status, "ok");
   // E.49: volume is not revenue; a forecast is not a result. E.43: recent items have dates that their page carries.
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): a development whose page sentence the
+  // model only repeats is shown as that sentence in quotation marks (one that does not name Stripe says which host it is from);
+  // still exactly these two, each with its page's date and its measure. The defect "Stripe revenue was $1.9 trillion" may stand
+  // only as the page's own volume sentence, and that sentence is said once: never a second line.
   eq(r.developments.map((x: any) => [x.date, x.measure, x.text]), [
-    ["Feb 24, 2026", "volume", "Businesses on Stripe generated $1.9 trillion in total volume in 2025, up 34% from 2024."],
-    ["Feb 2026", "forecast", "The Revenue suite is on track to reach a $1 billion annual run rate in 2026."],
+    ["Feb 24, 2026", "volume", '"Businesses on Stripe generated $1.9 trillion in total volume in 2025, up 34% from 2024."'],
+    ["Feb 2026", "forecast", 'From stripe.example: "The Revenue suite is on track to reach a $1 billion annual run rate in 2026."'],
   ]);
+  ok(!/revenue was|reached a \$1 billion/i.test(JSON.stringify(r)), "neither the volume-as-revenue nor the forecast-as-result wording is anywhere");
   // E.48: no invented team initiative; competitors backed by a quote that names them.
   eq(r.competitors.map((x: any) => x.name), ["Adyen"]);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; re-amended for the fixes on
+  // ag/research-on-fixes, 80d6e4da1: questions and unknowns are kept under their own checks): the grounded question and the
+  // unknown with no figure stand as before; the invented crypto initiative and the invented 3% are dropped and are nowhere.
   eq(r.questions.map((q: any) => q.text), ["Your team is working on blocking fraudulent payments with Radar. How do you decide between blocking more payments to reduce fraud losses and letting good payments through?"]);
+  ok(!/crypto|\b3%|acceptance rate/i.test(JSON.stringify(r)), "the invented initiative and the invented figure are nowhere");
   eq(r.unknowns, ["Which team the role sits on and how it is measured."], "an unknown with an invented figure is dropped");
   eq(r.role_asks.length, 2);
-  ok(r.frame && r.frame.cite.length === 2, "the reading names its sources");
-  eq(r.dropped, 7, "revenue-for-volume, forecast-as-result, undated, Square, crypto initiative, invented 3%, the product Atlas");
-  eq(r.products.map((x: any) => x.name), ["Billing", "Radar"]);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; re-amended for the fixes on
+  // ag/research-on-fixes, 80d6e4da1: the labelled reading is kept under its own check): no page sentence states the model's
+  // "easier to understand …", so the reading is the page's own sentence it rests on, in quotation marks, citing that one page.
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; architect ruling 2026-11-14 on fix 3 of
+  // ag/research-on-fixes: the reading is Trainee's labelled reading, kept under its own code check, not judged as a page claim): it
+  // stands in the model's words with every page it rests on, and passes that check (its figures and most of its words on them).
+  eq(r.frame, { text: "Stripe is easier to understand as payments plus software for the revenue lifecycle than as card processing alone.", cite: [1, 4] }, "the reading names its sources");
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; re-amended for the fixes on
+  // ag/research-on-fixes, 80d6e4da1): the count is the support path's: the paywalled line (its page sentence sits beside "Subscribe
+  // to continue reading.", an order to the reader, so it is never shown), revenue-for-volume or forecast-as-result (unsupported; the
+  // other is said only as its page sentence, once), undated, Square, the crypto initiative and the invented 3%.
+  eq([r.dropped, r.audit.dropped], [6, { unsupported: 2, date_not_on_page: 1, competitor_not_named: 1, tension_not_stated: 1, unknown_names_or_figures: 1 }]);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): a product's angle has no quoted form.
+  eq(r.products, [], "a product's angle has no quoted form");
   // E.47: paywalled and outdated sources are marked; an unopened source is named with why.
   const by = Object.fromEntries(r.sources.map((s: any) => [s.url, s]));
-  eq([by[U.paywall].limit, by[U.update].by, by[U.rivals].by], ["paywalled", "company", "reported"]);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): the paywalled page's only line is never
+  // shown (above), so the page is no source; a page cited is still marked company or reported.
+  eq([by[U.paywall], by[U.update].by, by[U.rivals].by], [undefined, "company", "reported"]);
   ok(r.unread.some((u: string) => /^refuses\.example: not read, because it answered with an error/.test(u)), JSON.stringify(r.unread));
   eq([by[U.old].limit, by[U.old].dated], ["outdated", "Mar 3, 2023"], "a page whose newest date is over 18 months old is marked outdated");
   ok(!r.sources.some((s: any) => s.url === U.refused), "a page that could not be opened is never a source");
@@ -75,18 +103,30 @@ Deno.test("WO-H/2 the brief: facts, reading and unknowns separate; dated develop
   const { html, text } = render(w.published[0]);
   const heads = [...html.matchAll(/<h2>([^<]+)<\/h2>/g)].map((m) => m[1]);
   // The order of the owner's target pages (app-layer-visuals p-88/p-89) and spec C.22.
-  eq(heads, ["The short answer", "How the business works", "Evidence versus interpretation", "Billing: the revenue lifecycle", "Radar: fraudulent payments and good payments", "Recent developments", "Competitors and tradeoffs", "What the role page asks for",
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; re-amended for the fixes on
+  // ag/research-on-fixes, 80d6e4da1): only the product sections are not made (an angle has no quoted form); the order is unchanged.
+  eq(heads, ["The short answer", "How the business works", "Evidence versus interpretation", "Recent developments", "Competitors and tradeoffs", "What the role page asks for",
     "How to use your project without overstating it", "Questions worth asking", "Five minutes before the interview", "What this brief cannot tell you", "Sources"]);
   ok(/No confirmed facts about your projects yet/.test(html), "with no confirmed facts the section says what is missing");
-  ok(/<dt>Reported fact<\/dt><dd>Feb 24, 2026: Businesses on Stripe generated \$1\.9 trillion/.test(html) && /<dt>Interpretation<\/dt>/.test(html) && /<dt>Unknown<\/dt>/.test(html) && /<dt>Source state<\/dt><dd>7 sources read Nov 9, 2026; 1 paywalled; 1 outdated; 1 could not be opened<\/dd>/.test(html), "evidence versus interpretation, as on p-89");
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; re-amended for the fixes on
+  // ag/research-on-fixes, 80d6e4da1): the reported fact and the interpretation are page sentences in quotation marks, the unknown is
+  // listed; the model's own reading, which no page states, is in no section.
+  ok(/<dt>Reported fact<\/dt><dd>Feb 24, 2026: &quot;Businesses on Stripe generated \$1\.9 trillion/.test(html) && /<dt>Interpretation<\/dt><dd>Stripe is easier to understand as payments plus software/.test(html) && /<dt>Unknown<\/dt>/.test(html) && /<dt>Source state<\/dt><dd>6 sources read Nov 9, 2026; 1 outdated; 1 could not be opened<\/dd>/.test(html), "evidence versus interpretation, as on p-89");
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; architect ruling 2026-11-14 on fix 3): the
+  // labelled reading is shown under "Interpretation" only, never as a fact of the business.
+  ok(!/<h2>How the business works<\/h2>[^]*easier to understand[^]*<h2>Evidence versus interpretation/.test(html), "the reading is never a business fact");
   ok(html.includes('<span class="src rb-measure">Volume, not revenue</span>') && html.includes("A forecast at the time, not a result"));
-  ok(/Stripe signed more enterprise customers this year\.[^]*?<span class="src rb-limit">\[\d+\] paywalled<\/span>/.test(html), "the paywall mark sits beside the claim it affects");
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): the paywalled claim is not shown at all
+  // (above), so neither it nor its page is anywhere in the File.
+  ok(!/enterprise customers/.test(html) && !/bizdaily/.test(html) && !/enterprise customers/.test(text), "the paywalled page's line is never shown unmarked: it is not shown");
   ok(html.includes("Trainee&#39;s reading") || html.includes("Trainee's reading"), "the frame is labelled as Trainee's reading");
   ok(html.includes("Research only: nothing was sent or applied for"));
   ok(!/<script|javascript:/i.test(html));
-  ok(text.includes("## Recent developments") && text.includes("Feb 24, 2026: Businesses on Stripe generated $1.9 trillion") && text.includes("(Volume, not revenue)"));
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): the development is the page's quoted sentence.
+  ok(text.includes("## Recent developments") && text.includes('Feb 24, 2026: "Businesses on Stripe generated $1.9 trillion') && text.includes("(Volume, not revenue)"));
   ok(/usage-based billing for software companies\.[^]*?<span class="src rb-limit">\[\d+\] outdated · Mar 3, 2023<\/span>/.test(html), "the outdated mark sits beside its claim");
-  ok(text.includes("paywalled") && text.includes("outdated, Mar 3, 2023"), "the text twin carries the limits too");
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): no paywalled source is cited (above).
+  ok(text.includes("outdated, Mar 3, 2023") && !/source \[\d+\] paywalled/.test(text), "the text twin carries the limits too");
 });
 
 Deno.test("WO-H/3 turns 2 and 3: the role is used without asking again; 'less generic' expands the questions only", async () => {
@@ -116,7 +156,7 @@ Deno.test("WO-H/4 routing: the spec's interview research asks reach the research
   for (const m of ["what should I ask in my interview?", "I have an interview tomorrow", "I have a final round interview, what should I wear?"]) ok(!companyInterviewAsk(m), m);
 });
 
-Deno.test("WO-H/5 guards on their own: dates, metric meaning, source limits, reply enforcement", () => {
+Deno.test("WO-H/5 guards on their own: dates, metric meaning, source limits, reply enforcement", async () => {
   eq(parseDay("Feb 24, 2026"), { y: 2026, m: 2, d: 24 }); eq(parseDay("2026-02"), { y: 2026, m: 2, d: null }); eq(parseDay("someday"), null);
   ok(dayOnPage(parseDay("2026-02-24")!, "Published February 24, 2026.") && !dayOnPage(parseDay("2026-02-25")!, "Published February 24, 2026."));
   eq(meaningKept("Stripe's revenue was $1.9 trillion", "Businesses on Stripe generated $1.9 trillion in total volume").ok, false);
@@ -126,7 +166,20 @@ Deno.test("WO-H/5 guards on their own: dates, metric meaning, source limits, rep
   eq(pageLimit("Posted March 3, 2023.", NOW), { limit: "outdated", dated: "Mar 3, 2023" });
   eq(pageLimit("Posted October 2, 2026.", NOW), {});
   const r: any = { kind: "company", status: "ok", company: "Stripe", role: null, ask: "role", focus: "all", audience: null, frame: null, business: [{ text: "Stripe Billing handles subscriptions.", cite: [1] }], developments: [], competitors: [], role_asks: [], questions: [], unknowns: [], sources: [], unread: [] };
-  eq(enforceCompanyReply("Stripe grew 80% last year. Billing handles subscriptions. Which role is it for? What date is the interview?", r), "Billing handles subscriptions. Which role is it for?");
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): the synchronous form cannot ask the judge,
+  // so on a result not built with the check on it lets no sentence of the model's through: code's could-not-confirm line.
+  eq(enforceCompanyReply("Stripe grew 80% last year. Billing handles subscriptions. Which role is it for? What date is the interview?", r), NOT_CONFIRMED);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): the reply is enforced on a result research
+  // built with its judge (role unknown), through the awaited form. The unsourced 80% goes, the kept line stands, and the one role
+  // question stands in its closed form ("Which role are you interviewing for?"); any other question goes.
+  const w = world();
+  const built: any = await researchCompany({ company: "Stripe", question: "Research Stripe before my interview.", plan: { queries: ["Stripe"], companies: ["Stripe"], sites: ["stripe.example"] }, deps: w.deps, now: NOW });
+  eq([built.status, built.ask], ["ok", "role"]);
+  eq(await enforceCompanyReplySupported("Stripe grew 80% last year. Stripe Billing lets businesses bill customers with subscriptions and invoices. Which role are you interviewing for? What date is the interview?", built, { judge: testSupportJudge, ask: "Research Stripe before my interview." }),
+    // (re-amended for the fixes on ag/research-on-fixes, 80d6e4da1: the draft's cited unit is tried first, so the kept line is the
+    // page's own sentence, in quotation marks)
+    '"Stripe Billing lets businesses bill customers with subscriptions and invoices." Which role are you interviewing for?');
+  eq(await enforceCompanyReplySupported("Stripe grew 80% last year. Which role is it for?", built, { judge: testSupportJudge, ask: "Research Stripe before my interview." }).then((x) => /80%|Which role is it for/.test(x)), false, "an unsourced figure and a question outside the closed form never stand");
 });
 
 Deno.test("WO-H/6 the person's side: confirmed facts tie to what the role page asks, never stretched; five minutes before the interview", async () => {

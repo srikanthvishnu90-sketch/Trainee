@@ -68,6 +68,11 @@ export interface TurnResult {
   attachments?: { filename: string; content: string }[];
   linksSeen?: string[];
   paySources?: PaySource[]; // D-070: postings a tool read this turn that state pay, each with its link
+  // 2026-11-14 (research support check on): what code wrote into the reply itself (a closed posting's note) and what a tool read
+  // from a posting this turn (its requirements, the read-only boundary, that its questions are behind a sign-in). The brain's
+  // support check keeps code's lines as they are and checks the model's sentences against the read lines too.
+  codeLines?: string[];
+  readLines?: string[];
   fileLinks?: string[]; // FILE KINDS: links to the files create_file made this turn, minted by code; the channel sends them, the model never writes them
 }
 
@@ -298,7 +303,25 @@ export async function runAgentTurn(o: Parameters<typeof runAgentTurnInner>[0]): 
   const seen = o.ctx.turn?.seen ?? [];
   const typed = [o.said ?? o.message, ...o.history.filter((m: any) => m && m.role === "user").map((m: any) => typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""))].join("\n");
   const fileLinks = o.ctx.turn?.fileLinks ?? [], paySources = o.ctx.turn?.paySources ?? [];
-  return { ...r, ...(attachments.length ? { attachments } : {}), ...(fileLinks.length ? { fileLinks } : {}), ...(paySources.length ? { paySources } : {}), linksSeen: urlsIn(`${typed}\n${seen.join("\n")}`) };
+  const { codeLines, readLines } = turnLines(seen);
+  return { ...r, ...(attachments.length ? { attachments } : {}), ...(fileLinks.length ? { fileLinks } : {}), ...(paySources.length ? { paySources } : {}), ...(codeLines.length ? { codeLines } : {}), ...(readLines.length ? { readLines } : {}), linksSeen: urlsIn(`${typed}\n${seen.join("\n")}`) };
+}
+// The closed-posting notes code would write for this turn's results, and the posting lines a tool read (see TurnResult.codeLines).
+export function turnLines(seen: string[]): { codeLines: string[]; readLines: string[] } {
+  const codeLines: string[] = [], readLines: string[] = [];
+  for (const t of seen) {
+    let v: any = null;
+    try { v = JSON.parse(t); } catch { continue; }
+    for (const p of Array.isArray(v) ? v : [v]) {
+      if (!p || typeof p !== "object") continue;
+      if (p.closed === true && typeof p.company === "string") codeLines.push(...closedNotes(p.company, [JSON.stringify(p)]));
+      const req = p.requirements && typeof p.requirements === "object" ? p.requirements : null;
+      if (req) for (const k of ["required", "preferred"]) for (const x of Array.isArray(req[k]) ? req[k] : []) if (typeof x === "string" && x.trim()) readLines.push(x.trim());
+      if (typeof p.boundary === "string" && p.boundary.trim()) { readLines.push(p.boundary.trim()); codeLines.push(p.boundary.trim()); }
+      if (p.sign_in_required === true) readLines.push(`To apply, the person signs in to the employer's careers site themselves; the application's questions are behind that sign-in${typeof p.board === "string" ? ` (${p.board})` : ""}.`);
+    }
+  }
+  return { codeLines: [...new Set(codeLines)], readLines: [...new Set(readLines)] };
 }
 const COMPLETENESS_REPAIR = "The previous draft did not contain an answer body after output validation. Answer the person's original request using only the conversation and successful tool results already available. Give the requested content, or ask a concrete question for missing information. A generic acknowledgement, action receipt, closing confirmation or unresolved fill-in field is not the requested answer. Keep placeholders only in a draft or template the person requested. Do not invent personal facts or claim actions. Tools are disabled for this single repair; do not repeat any action.";
 

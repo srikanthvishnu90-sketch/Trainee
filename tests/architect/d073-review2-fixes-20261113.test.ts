@@ -10,8 +10,10 @@
 //   deno test -A --no-check --import-map=tests/flow/supabase-npm.json tests/architect/d073-review2-fixes-20261113.test.ts
 import assertNode from "node:assert/strict";
 import { agentTurn, nonEmptyReply } from "../../supabase/functions/agent-chat/career_brain.ts";
-import { enforceMarketReply, researchMarket } from "../../supabase/functions/_shared/agent/research/market.ts";
-import { enforceCompanyReply, researchCompany } from "../../supabase/functions/_shared/agent/research/company.ts";
+import { enforceMarketReply, enforceMarketReplySupported, researchMarket } from "../../supabase/functions/_shared/agent/research/market.ts";
+import { enforceCompanyReply, enforceCompanyReplySupported, researchCompany } from "../../supabase/functions/_shared/agent/research/company.ts";
+import { supportsClaim, testSupportJudge } from "./support-test-judge.ts";
+import type { SupportJudge } from "../../supabase/functions/_shared/agent/research/support.ts";
 import { NO_SOURCES, NOT_CONFIRMED } from "../../supabase/functions/_shared/research_reply.ts";
 import { bodyHtml, textOf, UNCONFIRMED_HEAD, UNCONFIRMED_TAG, validateKind } from "../../supabase/functions/_shared/file_kinds.ts";
 
@@ -22,13 +24,26 @@ type Page = { url: string; title: string; text: string };
 const marketDeps = (pages: Page[], draft: unknown, extra: Record<string, unknown> = {}) => ({
   search: { id: "t", needsKey: false, search: async () => ({ hits: pages.map((p) => ({ url: p.url, title: p.title, provider: "t", foundAt: NOW })), notes: [], provider: "t" }) },
   read: async () => ({ verified: pages.map((p) => ({ url: p.url, requested: p.url, status: 200, title: p.title, text: p.text, fetchedAt: NOW })), rejected: [] }),
-  draft: async () => JSON.stringify(draft), ...extra,
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): research needs its judge to keep a line
+  // (the deterministic test judge, support-test-judge.ts, unless a test gives its own).
+  draft: async () => JSON.stringify(draft), judge: testSupportJudge, ...extra,
+});
+// Architect amendment (owner decision 2026-11-13: research support check switched on): a judge that answers per these pages' truth.
+// A claim in the model's words: the test judge's word-and-negation reading. A quote candidate ("the marked text is the page's own
+// statement ... and it answers the question: <ask>"): yes only for the page sentences listed as answering the ask. (The test judge
+// says yes to every quote candidate, which would let the senior traders' salary stand for what interns earn.)
+const oracle = (answers: string[]): SupportJudge => async (cs) => cs.map((c) => {
+  const m = /^The marked text "(.*)" is the page's own statement/s.exec(c.claim);
+  return (m ? answers.includes(m[1]) : supportsClaim(c.claim, c.source)) ? "yes" : "no";
 });
 const ASK = "what do citadel software engineer interns earn";
 const PAGES: Page[] = [{ url: "https://citadel.example/pay", title: "Citadel compensation notes", text: "Senior traders at Citadel earn a base salary of $350,000." }];
 const DRAFT = { summary: [{ text: "Citadel interns earn $350,000.", quote: "earn a base salary of $350,000", url: PAGES[0].url }], conditions: [{ text: "Citadel interns earn $350,000 a year.", urls: [PAGES[0].url] }], risks: [] };
 const LISTED = "[1] Citadel compensation notes: https://citadel.example/pay (read Nov 13, 2026)";
-const market = (extra: Record<string, unknown> = {}, pages = PAGES) => researchMarket({ question: "Citadel software engineer intern pay", ask: ASK, format: "inline", plan: { queries: ["citadel intern pay"], companies: ["Citadel"] }, deps: marketDeps(pages, DRAFT, extra) as any }) as Promise<any>;
+// Architect amendment (owner decision 2026-11-13: research support check switched on): no sentence of PAGES answers what interns
+// earn, so the Citadel research is judged by the page-truth judge (with no judge at all the result would be the judge-outage path).
+const market = (extra: Record<string, unknown> = {}, pages = PAGES) => researchMarket({ question: "Citadel software engineer intern pay", ask: ASK, format: "inline", plan: { queries: ["citadel intern pay"], companies: ["Citadel"] }, deps: marketDeps(pages, DRAFT, { judge: oracle([]), ...extra }) as any }) as Promise<any>;
+const supported = (reply: string, r: any, shown: { text: string; url: string | null }[] = []) => enforceMarketReplySupported(reply, r, shown, { judge: oracle([]), ask: ASK });
 
 Deno.test("G1 market: pages read, nothing verified: the reply always says it could not be confirmed and lists the pages checked", async () => {
   const r = await market();
@@ -36,14 +51,21 @@ Deno.test("G1 market: pages read, nothing verified: the reply always says it cou
   // Whatever the model wrote without a "couldn't confirm" sentence of its own: nothing, a claim, a claim with a citation, a hedge.
   for (const draft of ["", "Citadel interns earn $350,000 [1].", "Citadel pays interns very well.", "I couldn't confirm it, but interns earn about $350,000.", "Here is what I found: https://evil.example/x"]) {
     eq(enforceMarketReply(draft, r), `${NOT_CONFIRMED}\n\n${LISTED}`, JSON.stringify(draft));
+    // Architect amendment (owner decision 2026-11-13: research support check switched on): the same as the brain sends it.
+    eq(await supported(draft, r), `${NOT_CONFIRMED}\n\n${LISTED}`, JSON.stringify(draft));
   }
   ok(/couldn't confirm/.test(NOT_CONFIRMED) && !/\d/.test(NOT_CONFIRMED), "the failure sentence says so and carries no figure");
   // The model's own sentence saying so still stands as written, with the same list (the first round's behaviour, unchanged).
-  eq(enforceMarketReply("I looked for Citadel's intern pay and couldn't confirm it from the pages I read.", r), `I looked for Citadel's intern pay and couldn't confirm it from the pages I read.\n\n${LISTED}`);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): checked as the brain sends it, a
+  // could-not-confirm sentence stands unjudged only in the closed form ("I couldn't confirm it."); a longer one is replaced by code's.
+  eq(await supported("I couldn't confirm it.", r), `I couldn't confirm it.\n\n${LISTED}`);
+  eq(await supported("I looked for Citadel's intern pay and couldn't confirm it from the pages I read.", r), `${NOT_CONFIRMED}\n\n${LISTED}`);
   // A pay line this conversation already showed stays with its link; that research confirmed nothing is still said, with the pages.
+  // Architect amendment (same): a shown line stands only whole, word for word; a reworded one ("PayPal pays $40 hourly.") does not.
   const shown = [{ text: "The PayPal internship pay is $40 hourly.", url: "https://jobs.example/paypal" }];
-  const a = enforceMarketReply("PayPal pays $40 hourly.", r, shown);
-  eq(a, `PayPal pays $40 hourly.\nhttps://jobs.example/paypal\n\n${NOT_CONFIRMED}\n\n${LISTED}`);
+  const a = await supported("The PayPal internship pay is $40 hourly.", r, shown);
+  eq(a, `The PayPal internship pay is $40 hourly.\nhttps://jobs.example/paypal\n\n${NOT_CONFIRMED}\n\n${LISTED}`);
+  eq(await supported("PayPal pays $40 hourly.", r, shown), `${NOT_CONFIRMED}\n\n${LISTED}`);
   // The messages layout: the sentence, then each checked page's link on its own line.
   const rm = await market({ layout: "messages" });
   eq(enforceMarketReply("Citadel interns earn $350,000.", rm), `${NOT_CONFIRMED}\n${PAGES[0].url}`);
@@ -58,7 +80,8 @@ Deno.test("G1 through the turn: a claim-only reply, and an empty one, both end a
     const model = async (p: any) => !p.tools?.length ? { content: [{ type: "text", text: "" }], stop_reason: "end_turn" } : (++step === 1
       ? { content: [{ type: "tool_use", id: "m1", name: "research_market", input: { question: "Citadel software engineer intern pay", format: "inline", queries: ["citadel intern pay"], companies: ["Citadel"] } }], stop_reason: "tool_use" }
       : { content: [{ type: "text", text: final }], stop_reason: "end_turn" });
-    const t: any = await agentTurn({ message: ASK, history: [], stores: { profile: {} }, userId: "u1", threadId: "t1", now: NOW, model, market: marketDeps(PAGES, DRAFT) } as any);
+    // Architect amendment (owner decision 2026-11-13: research support check switched on): the page-truth judge (above).
+    const t: any = await agentTurn({ message: ASK, history: [], stores: { profile: {} }, userId: "u1", threadId: "t1", now: NOW, model, market: marketDeps(PAGES, DRAFT, { judge: oracle([]) }) } as any);
     ok(/couldn't confirm/.test(t.reply) && t.reply.includes(PAGES[0].url) && t.reply.includes("Citadel compensation notes") && !/350,000/.test(t.reply), `${JSON.stringify(final)} -> ${t.reply}`);
   }
   const r = await market();
@@ -71,14 +94,26 @@ Deno.test("G1 company research: pages opened and nothing quotable: the reply say
   const r = await run("data analyst intern");
   eq([r.status, r.checked.map((x: any) => [x.title, x.url])], ["no_sources", [["Welcome", pages[0].url]]]);
   const list = "[1] Welcome: https://zentrafin.example/ (read Nov 13, 2026)";
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; product fix, ag/research-on-fixes: the
+  // "none stated anything the brief could quote" blocker is said only when drafted lines were refused): this draft gave no line,
+  // so code's blocker says nothing was drafted that the brief could check. It still says so, lists the page, and keeps no claim.
+  const BLOCKER = "I couldn't do this research: 1 page(s) about Zentrafin were opened, but nothing was drafted from them that the brief could check.";
   for (const draft of ["", "Zentrafin is a fast-growing fintech with 5,000 staff.", "Apply on their careers page."]) {
     const a = enforceCompanyReply(draft, r);
-    ok(a.startsWith("I couldn't do this research: 1 page(s) about Zentrafin were opened, but none stated anything the brief could quote.") && a.endsWith(`\n\n${list}`) && !/5,000|fintech|Apply on/.test(a), `${JSON.stringify(draft)} -> ${a}`);
+    ok(a.startsWith(BLOCKER) && a.endsWith(`\n\n${list}`) && !/5,000|fintech|Apply on/.test(a), `${JSON.stringify(draft)} -> ${a}`);
   }
-  eq(enforceCompanyReply("I couldn't find anything I could quote about Zentrafin.", r), `I couldn't find anything I could quote about Zentrafin.\n\n${list}`);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): checked as the brain sends it
+  // (enforceCompanyReplySupported), a could-not-find sentence stands unjudged only in the closed form ("I couldn't find it."); the
+  // model's longer one is replaced by code's blocker sentence, with the pages.
+  const companyAsk = "Research Zentrafin before my interview.";
+  eq(await enforceCompanyReplySupported("I couldn't find it.", r, { judge: testSupportJudge, ask: companyAsk }), `I couldn't find it.\n\n${list}`);
+  const longer = await enforceCompanyReplySupported("I couldn't find anything I could quote about Zentrafin.", r, { judge: testSupportJudge, ask: companyAsk });
+  ok(longer.startsWith(BLOCKER) && longer.endsWith(`\n\n${list}`), longer);
   eq(nonEmptyReply({ reply: "", show: undefined, tool_calls: [] } as any, r), enforceCompanyReply("", r));
   // Role unknown and the reply is only the role question: the blocker is said first, the question stays, the page is listed.
-  const q = await run(null), aq = enforceCompanyReply("Which role are you interviewing for?", q);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): as the brain sends it (the role question in
+  // its closed form stands; the sync form, which cannot ask the judge, keeps no sentence of the model's).
+  const q = await run(null), aq = await enforceCompanyReplySupported("Which role are you interviewing for?", q, { judge: testSupportJudge, ask: companyAsk });
   ok(aq.startsWith("I couldn't do this research:") && aq.includes("Which role are you interviewing for?") && aq.endsWith(list), aq);
 });
 
@@ -97,11 +132,21 @@ Deno.test("G2 the brief File lists a reading as a condition or risk only when a 
   const ask = { question: "What would change the market for home batteries?", plan: { queries: ["home battery market"] } };
   const r: any = await researchMarket({ ...ask, format: "file", deps: marketDeps(BATT, BRIEF, { publish: async (d: unknown) => { published.push(d); return { url: "https://trainee.example/file?t=v1.g2" }; } }) as any });
   eq([r.status, r.format, published.length], ["ok", "file", 1]);
-  eq(r.answerable, [SAID], "the chat's check: one reading is said by its page");
-  const d = published[0];
-  // The File's data marks exactly the readings the chat's check did not pass.
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): on the support path a reading reaches the
+  // File (or the chat) only as a sentence of its page: the one its page says stands as that sentence, in quotation marks; NOT_SAID[0]
+  // has no page sentence and is dropped; NOT_SAID[1] fails the judge and its page's own sentence stands in its place, quoted. So no
+  // reading the pages do not say is in the File at all, and the File and the chat agree on every reading.
+  const TARIFF = "The state board reviews the storage tariff every year.";
+  eq(r.answerable, [`"${SAID}"`, `"${TARIFF}"`], "the chat's check: each reading kept is its page's own sentence");
+  const d0 = published[0];
+  eq([...d0.conditions, ...d0.risks].map((x: any) => [x.text, x.unconfirmed === true]), [[`"${SAID}"`, false], [`"${TARIFF}"`, false]]);
+  eq([...d0.conditions, ...d0.risks].filter((x: any) => !x.unconfirmed).map((x: any) => x.text), r.answerable, "File and chat agree on which readings stand");
+  for (const t of NOT_SAID) ok(!JSON.stringify(d0).includes(t.replace(/\.$/, "")), `${t} is nowhere in the File`);
+  ok(validateKind("research_brief", d0, { now: NOW }).ok);
+  // The File's own rule for a reading marked not confirmed (a brief code marks; none is made on the support path) still holds: the
+  // same brief with the readings marked as before renders them apart, labelled, in their own list.
+  const d = { ...d0, conditions: [{ text: SAID, cite: [1] }, { text: NOT_SAID[0], cite: [1], unconfirmed: true }], risks: [{ text: NOT_SAID[1], cite: [2], unconfirmed: true }] };
   eq([...d.conditions, ...d.risks].map((x: any) => [x.text, x.unconfirmed === true]), [[SAID, false], [NOT_SAID[0], true], [NOT_SAID[1], true]]);
-  eq([...d.conditions, ...d.risks].filter((x: any) => !x.unconfirmed).map((x: any) => x.text), r.answerable, "File and chat agree on which readings stand");
   const v: any = validateKind("research_brief", d, { now: NOW });
   ok(v.ok, JSON.stringify(v));
   eq([...v.data.conditions, ...v.data.risks].map((x: any) => x.unconfirmed === true), [false, true, true], "the mark survives the kind's validation");
@@ -135,11 +180,14 @@ Deno.test("G2 the brief File lists a reading as a condition or risk only when a 
   // The chat answer from the same pages and draft: the said reading may be stated; an unconfirmed one never is, whatever the model wrote.
   const ri: any = await researchMarket({ ...ask, format: "inline", deps: marketDeps(BATT, BRIEF) as any });
   eq(ri.answerable, r.answerable);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): the reply as the brain sends it, too.
   for (const draft of ["", `${NOT_SAID[0].replace(/\.$/, "")} [1]. ${NOT_SAID[1].replace(/\.$/, "")} [2].`]) {
-    const a = enforceMarketReply(draft, ri);
-    for (const t of NOT_SAID) ok(!a.includes(t.replace(/\.$/, "")), `${t}\n${a}`);
+    for (const a of [enforceMarketReply(draft, ri), await enforceMarketReplySupported(draft, ri, [], { judge: testSupportJudge, ask: ask.question })])
+      for (const t of NOT_SAID) ok(!a.includes(t.replace(/\.$/, "")), `${t}\n${a}`);
   }
-  ok(enforceMarketReply(`${SAID.replace(/\.$/, "")} [1].`, ri).startsWith(`${SAID.replace(/\.$/, "")} [1].`), "the reading its page says may be stated, with its source");
+  // The reading its page says may be stated, with its source: as that page's sentence, in quotation marks.
+  const saidA = await enforceMarketReplySupported(`${SAID.replace(/\.$/, "")} [1].`, ri, [], { judge: testSupportJudge, ask: ask.question });
+  ok(saidA.startsWith(`"${SAID}" [1].`) && saidA.includes(BATT[0].url), saidA);
   // A brief made before this mark (no `unconfirmed` on any line) renders as it did: one list per section, no label.
   const old: any = validateKind("research_brief", { ...d, conditions: d.conditions.map(({ unconfirmed: _u, ...c }: any) => c), risks: d.risks.map(({ unconfirmed: _u, ...c }: any) => c) }, { now: NOW });
   ok(old.ok && !bodyHtml({ ...rec, data: old.data }, "fs1." + "a".repeat(64)).includes("rb-unconfirmed"));

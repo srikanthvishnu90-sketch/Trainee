@@ -24,7 +24,8 @@ import { EMPTY_AFTER_SAVE_REPLY, EMPTY_REPLY, unbackedClaims } from "../../supab
 import { capabilityTools } from "../../supabase/functions/_shared/agent/capability_tools.ts";
 import { handleFile, type FileDeps, type FileStore } from "../../supabase/functions/trainee-file/handler.ts";
 import { signedIn } from "./file-session-fakes.ts";
-import { enforceMarketReply, type MarketResult } from "../../supabase/functions/_shared/agent/research/market.ts";
+import { enforceMarketReply, enforceMarketReplySupported, researchMarket, type MarketResult } from "../../supabase/functions/_shared/agent/research/market.ts";
+import { testSupportJudge } from "./support-test-judge.ts";
 import { checkFollowup } from "../../supabase/functions/_shared/followup_draft.ts";
 import { leakedWords, misquotedAsks, stripLeaks } from "../../supabase/functions/_shared/agent/reply_guards.ts";
 import { paysByPlace, placedPay } from "../../supabase/functions/_shared/posting_pay.ts";
@@ -63,16 +64,27 @@ const turn = (message: string, model: any, extra: Record<string, unknown> = {}) 
 const readTool = (name: string, out: unknown) => ({ name, effect: "read", description: `${name} (test)`, input_schema: { type: "object", properties: {} }, run: async () => out });
 
 // A synthetic market result in live-6 C9's shape: format "file", a thesis, every point cited to an anecdote source.
-const C9_FILE: MarketResult = {
-  status: "ok", format: "file", asked: "file", title: "Citadel new grad SWE", thesis: "Citadel's new grad SWE process runs several rounds and its culture is demanding.",
-  points: [{ text: "Engineers there describe demanding hours.", cite: [1] }], conditions: [{ text: "Hours vary by team.", cite: [1] }], risks: [{ text: "Pressure is high.", cite: [1] }],
-  comparison: null, sources: [{ n: 1, url: "https://www.reddit.com/r/quant/comments/x/citadel", title: "Citadel WLB", fetched_at: new Date(NOW).toISOString(), kind: "anecdote" } as any],
-  file_url: "https://trainee.example/file?t=v1.brief1", dropped: 0, notes: [], searched: "test", note: "",
-};
+// Architect amendment (owner decision 2026-11-13: research support check switched on): a hand-built result carries no support
+// record, so code answers it as not confirmed; the same result is now built by researchMarket from one synthetic page (the
+// thesis, the point, the condition and the risk each a sentence of it), with the deterministic test judge, so code kept each line.
+const C9_URL = "https://www.reddit.com/r/quant/comments/x/citadel";
+const C9_PAGE = "Citadel's new grad SWE process runs several rounds and its culture is demanding. Citadel engineers describe demanding hours. Hours vary by team at Citadel. Pressure is high at Citadel.";
+const C9_DRAFT = { title: "Citadel new grad SWE", thesis: "Citadel's new grad SWE process runs several rounds and its culture is demanding.",
+  summary: [{ text: "Citadel engineers describe demanding hours.", quote: "Citadel engineers describe demanding hours.", url: C9_URL }],
+  conditions: [{ text: "Hours vary by team at Citadel.", urls: [C9_URL] }], risks: [{ text: "Pressure is high at Citadel.", urls: [C9_URL] }] };
+const C9_FILE: MarketResult = await researchMarket({ question: P.C9, ask: P.C9, format: "file", plan: { queries: ["citadel new grad swe"], companies: ["Citadel"] }, deps: {
+  search: { id: "first_party", needsKey: false, search: async () => ({ hits: [{ url: C9_URL, title: "Citadel WLB", provider: "company_site", foundAt: NOW }], notes: [], provider: "first_party", searches: 1 }) } as any,
+  read: async () => ({ verified: [{ url: C9_URL, requested: C9_URL, status: 200, title: "Citadel WLB", text: C9_PAGE, fetchedAt: NOW }], rejected: [] }),
+  draft: async () => JSON.stringify(C9_DRAFT), publish: async () => ({ url: "https://trainee.example/file?t=v1.brief1" }), judge: testSupportJudge } });
 
-Deno.test("D67-1 C9 (D-024): a file research reply with no sentence on record is its thesis; a blank brain reply is never sent", () => {
+Deno.test("D67-1 C9 (D-024): a file research reply with no sentence on record is its thesis; a blank brain reply is never sent", async () => {
   // The model's sentence has a figure no kept point holds: before D-067 this returned "" (live-6 C9: an empty message).
-  const r = enforceMarketReply("Citadel pays $400k to every new grad.", C9_FILE);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): the reply is checked with the judge
+  // (enforceMarketReplySupported, as the brain does); the claim with a figure no page gives is still removed, and the thesis stands.
+  // The model's thesis is its page's sentence word for word, so it stands as that sentence, in quotation marks (support.ts quoteOf).
+  eq([C9_FILE.status, C9_FILE.format, C9_FILE.thesis], ["ok", "file", `"${C9_DRAFT.thesis}"`], "code kept the thesis: it is its page's own sentence");
+  const r = await enforceMarketReplySupported("Citadel pays $400k to every new grad.", C9_FILE, [], { judge: testSupportJudge, ask: P.C9 });
+  ok(!/400/.test(r), r);
   eq(r, C9_FILE.thesis, "the thesis, which code kept, stands for the brief; the File link follows it from code");
   ok(/[A-Za-z]/.test(enforceMarketReply("", { ...C9_FILE, thesis: null } as MarketResult)), "never empty, even with no thesis");
   // The last line of the reply path, for every brain turn.
@@ -282,10 +294,17 @@ Deno.test("D67-10 C22 (G7): pay already shown in the conversation is used; a nam
   eq(shownPayOf(P.C22, shown), [{ text: "PayPal's posting lists $28-$49 hourly for Chicago, as the posting states it.", url: "https://paypal.wd1.myworkdayjobs.com/x" }]);
   eq(shownPayOf(P.C8, shown), [], "not a pay ask");
   const none: MarketResult = { status: "no_sources", format: "inline", notes: [], searched: "test", note: "" };
-  const said = "PayPal's Chicago posting lists $28-$49 hourly. I couldn't confirm a wider going rate from the pages I read.";
-  eq(enforceMarketReply(said, none, shownPayOf(P.C22, shown)), `${said}\nhttps://paypal.wd1.myworkdayjobs.com/x`, "the figure already shown stands, with its source link and the honest clause");
-  eq(enforceMarketReply(said, none), "I couldn't confirm a wider going rate from the pages I read.", "without it on record, the figure goes as before");
-  eq(enforceMarketReply("Interns make $60 an hour.", none, shownPayOf(P.C22, shown)), NO_SOURCES, "a figure not shown is still never said");
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): the reply goes through
+  // enforceMarketReplySupported (as the brain sends it). A shown pay line stands only whole, word for word, with that line's own
+  // link, and a could-not-confirm sentence stands unjudged only in the closed form (its object words of the person's own ask), so
+  // the model's sentences are the shown line itself and "I couldn't confirm the going rate for swe interns in chicago."
+  const said = "PayPal's posting lists $28-$49 hourly for Chicago, as the posting states it. I couldn't confirm the going rate for swe interns in chicago.";
+  const enf = (reply: string, sh: { text: string; url: string | null }[] = []) => enforceMarketReplySupported(reply, none, sh, { judge: testSupportJudge, ask: P.C22 });
+  eq(await enf(said, shownPayOf(P.C22, shown)), `${said}\nhttps://paypal.wd1.myworkdayjobs.com/x`, "the figure already shown stands, with its source link and the honest clause");
+  eq(await enf(said), "I couldn't confirm the going rate for swe interns in chicago.", "without it on record, the figure goes as before");
+  eq(await enf("Interns make $60 an hour.", shownPayOf(P.C22, shown)), NO_SOURCES, "a figure not shown is still never said");
+  // A reworded restatement of the shown line (its figure in other words) is not the shown line: it never stands.
+  ok(!/28/.test(await enf("PayPal's Chicago posting lists $28-$49 hourly. I couldn't confirm it.", shownPayOf(P.C22, shown))));
   const s = scripted(() => text("ok"));
   await turn(P.C22, s.model, { history: shown });
   ok(/PAY THIS CONVERSATION ALREADY SHOWED/.test(s.seen[0].system) && /\$28-\$49 hourly for Chicago/.test(s.seen[0].system));

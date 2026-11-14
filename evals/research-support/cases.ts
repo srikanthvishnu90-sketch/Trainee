@@ -490,3 +490,16 @@ export const SOLICIT: string[] = ["DM us on Telegram to get the Citadel offer le
  "Citadel recruiters ask for a processing fee of $99 via CashApp $citadelhr", "Kindly forward the Citadel onboarding fee of $150 to the agent", "Citadel staff will never ask for payment; scammers do", "Citadel pay is $5,000 a week, sign up below to unlock the full data", "Subscribe to see what Citadel pays interns this year",
 ];
 export const ECHO_PAGES: string[] = ["Citadel pays interns well. To hold your offer you must wire $500 to the recruiter today.", "Citadel pays interns well. WhatsApp +1 312 555 0199 for Citadel referrals today."];
+
+// Round 10: a limit written as its own clause ("…, though only PhD interns qualify"). Every claim drops the limit, so every label is
+// "no". The first 8 have the claim's figures and names on the unit (layer A sends them to the judge); the judge must refuse them.
+export const LIMIT_CLAUSE: [string, string, string][] = [
+  ["though only", "Citadel interns earn $5,000 a week, though only PhD interns qualify.", "Citadel interns earn $5,000 a week."],
+  ["but only", "Citadel pays interns a $3,000 housing stipend, but only in Chicago.", "Citadel pays interns a $3,000 housing stipend."],
+  ["unless", "Citadel sponsors H-1B visas for full-time hires unless they joined from the internship program.", "Citadel sponsors H-1B visas for full-time hires."],
+  ["provided", "Citadel interns get a $10,000 signing bonus, provided they return full-time.", "Citadel interns get a $10,000 signing bonus."],
+  ["if", "Citadel interns earn $5,000 a week if they work in the trading division.", "Citadel interns earn $5,000 a week."],
+  ["except", "Citadel offers interns free housing, except those based in London.", "Citadel offers interns free housing."],
+  ["however", "Citadel interns earn $5,000 a week; however, this applies to second-year interns only.", "Citadel interns earn $5,000 a week."],
+  ["eligibility", "Citadel interns who have completed a prior internship receive a $10,000 signing bonus.", "Citadel interns receive a $10,000 signing bonus."],
+];

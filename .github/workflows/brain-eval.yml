@@ -1,6 +1,6 @@
 # CLAUDE ONLY (owner directive, 2026-11-02): Trainee is Claude-only, judges included; no OpenAI call anywhere in this workflow.
-# Total spend $80 (MODEL_BUDGET_TARGET_USD and MODEL_BUDGET_HARD_USD are both $80; every eval process charges the shared
-# budget ledger and run.ts refuses to start a run whose preflight quote exceeds what remains of the $80). The reply brain is
+# Total spend $85 (MODEL_BUDGET_TARGET_USD and MODEL_BUDGET_HARD_USD are both $85; every eval process charges the shared
+# budget ledger and run.ts refuses to start a run whose preflight quote exceeds what remains of the $85). The reply brain is
 # Haiku (the committed default); there is no fallback model: Sonnet is Judge A only (owner, 2026-11-03 01:15 CT).
 # The bar (WO-061 / D-030, owner, 95%): the chat brain must score 95% or better on the held-out set, and the owner ruled
 # 2026-11-02 that this means all FIVE passes (verdict.ts releaseGate: the RELEASE brain, release_brain in the request, default
@@ -73,18 +73,18 @@ jobs:
       # The sealed set opens with HELDOUT_SEAL_KEY alone, after the owner has run the rewrap workflow (sealed-set-rewrap.yml):
       # the set was first sealed to a key derived from the old provider secret, which this workflow no longer receives.
       HELDOUT_SEAL_KEY: ${{ secrets.HELDOUT_SEAL_KEY }}
-      # OWNER'S DIRECTIVE (2026-11-02): total spend $80 (target = hard max), across every run and retry. The shared
+      # OWNER'S DIRECTIVE (2026-11-02): total spend $85 (target = hard max), across every run and retry. The shared
       # ledger (supabase/functions/_shared/model_budget.ts) takes these two names; run.ts and rejudge.ts read them for the
       # preflight quote and stop at the target. Builder's note: five passes run in parallel, so EVAL_PARALLEL=5 makes each one
       # quote all five.
-      MODEL_BUDGET_TARGET_USD: "80"
-      MODEL_BUDGET_HARD_USD: "80"
-      # ONE $80 across every run: the shared database ledger (the same one production reserves in). The runners fail closed
+      MODEL_BUDGET_TARGET_USD: "85"
+      MODEL_BUDGET_HARD_USD: "85"
+      # ONE $85 across every run: the shared database ledger (the same one production reserves in). The runners fail closed
       # (NOT RUN, exit 2, no model call) when EVAL_LEDGER=shared and the ledger or either secret below is missing or unreachable.
       EVAL_LEDGER: shared
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-      ANTHROPIC_EVAL_BUDGET_USD: "80"
+      ANTHROPIC_EVAL_BUDGET_USD: "85"
       EVAL_PARALLEL: "5"
       EVAL_JUDGE_MODEL: claude-sonnet-5-5
       EVAL_JUDGE_MODEL_2: claude-haiku-5-5
@@ -99,7 +99,7 @@ jobs:
       - name: The shared ledger secrets are present
         run: |
           for k in SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY; do
-            if [ -z "$(printenv "$k")" ]; then echo "NOT RUN: the repository secret $k is not set (the shared \$80 budget ledger); no model call was made"; exit 2; fi
+            if [ -z "$(printenv "$k")" ]; then echo "NOT RUN: the repository secret $k is not set (the shared \$85 budget ledger); no model call was made"; exit 2; fi
           done
       - name: What this run measures
         id: req
@@ -124,9 +124,9 @@ jobs:
             if (model && (!MODELS.includes(model) || suite !== "heldout" || set === "sealed")) { console.log(`NOT RUN: model ${model} needs the allowlist (${MODELS.join(", ")}), the heldout suite and a set other than sealed`); Deno.exit(2); }
             if (set === "sealed" && (!brains.includes(releaseBrain) || !["router", "staged", "agent"].includes(releaseBrain))) { console.log(`NOT RUN: a sealed request names its release_brain (${releaseBrain || "missing"}), and it must be one of the brains measured (${brains})`); Deno.exit(2); }
             if (!["heldout", "tasks"].includes(suite) || (suite === "tasks" && (action !== "eval" || set !== "dev"))) { console.log(`NOT RUN: bad suite ${suite} (heldout, or tasks with action eval on the dev set)`); Deno.exit(2); }
-            // D-054 (owner, 2026-11-10): budget_usd caps the total spend of one run (all passes and judges) at the shared ledger. Optional; at most $80.
+            // D-054 (owner, 2026-11-10): budget_usd caps the total spend of one run (all passes and judges) at the shared ledger. Optional; at most $85.
             const runBudget = f.budget_usd === undefined || ev ? "" : String(f.budget_usd);
-            if (runBudget && !(/^[0-9]{1,2}(\.[0-9]{1,2})?$/.test(runBudget) && Number(runBudget) > 0 && Number(runBudget) <= 80)) { console.log(`NOT RUN: budget_usd ${runBudget} must be a positive number of dollars, at most 80`); Deno.exit(2); }
+            if (runBudget && !(/^[0-9]{1,2}(\.[0-9]{1,2})?$/.test(runBudget) && Number(runBudget) > 0 && Number(runBudget) <= 85)) { console.log(`NOT RUN: budget_usd ${runBudget} must be a positive number of dollars, at most 85`); Deno.exit(2); }
             if (set === "d054" && (!runBudget || Number(runBudget) > 3)) { console.log("NOT RUN: the d054 set runs only under the D-054 cap: budget_usd 3 or less"); Deno.exit(2); }
             if (!["dev", "sealed", "fresh", "d054"].includes(set) || !brains.length || brains.some((b) => !["router", "staged", "agent"].includes(b)) || !["eval", "pubkey", "rejudge"].includes(action) || passes !== 5 || (action === "rejudge" && !/^[0-9]+$/.test(rejudgeRun))) {
               console.log(`NOT RUN: bad request (set ${set}, brains ${brains}, action ${action}, rejudge run ${rejudgeRun}, passes ${passes}; the owner requires five passes)`); Deno.exit(2);
@@ -141,7 +141,7 @@ jobs:
           IN_REJUDGE_RUN: ${{ inputs.rejudge_run }}
           IN_RELEASE_BRAIN: ${{ inputs.release_brain }}
       # D-054: a request with budget_usd caps this run at the shared ledger itself: the ledger's target and hard max for this job
-      # become what is recorded now plus budget_usd (never above $80), so run.ts's preflight refuses a quote (all parallel passes)
+      # become what is recorded now plus budget_usd (never above $85), so run.ts's preflight refuses a quote (all parallel passes)
       # over budget_usd, and the ledger refuses any call that would take this run's spend past it. No model call here.
       - name: Run budget at the shared ledger (budget_usd)
         if: steps.req.outputs.budget != ''
@@ -152,8 +152,8 @@ jobs:
             const gate = bud.resolveBudgetGate(undefined, (k) => Deno.env.get(k));
             const st = gate?.status ? await gate.status() : null;
             if (!st) { console.log("NOT RUN: the shared budget ledger could not be read; no model call was made."); Deno.exit(2); }
-            const cap = Math.min(80 * 1e6, st.total + Math.round(Number(Deno.env.get("RUN_BUDGET_USD")) * 1e6));
-            if (cap <= st.total) { console.log(`NOT RUN: nothing remains of the $80 (recorded $${(st.total / 1e6).toFixed(6)})`); Deno.exit(2); }
+            const cap = Math.min(85 * 1e6, st.total + Math.round(Number(Deno.env.get("RUN_BUDGET_USD")) * 1e6));
+            if (cap <= st.total) { console.log(`NOT RUN: nothing remains of the $85 (recorded $${(st.total / 1e6).toFixed(6)})`); Deno.exit(2); }
             const usd = (Math.floor(cap) / 1e6).toFixed(6);
             Deno.writeTextFileSync(Deno.env.get("GITHUB_ENV"), `MODEL_BUDGET_TARGET_USD=${usd}\nMODEL_BUDGET_HARD_USD=${usd}\n`, { append: true });
             console.log(`run budget: $${((cap - st.total) / 1e6).toFixed(3)} on top of $${(st.total / 1e6).toFixed(6)} recorded; the ledger target and hard max for this job are $${usd}`);

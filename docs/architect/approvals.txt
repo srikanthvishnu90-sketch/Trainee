@@ -414,3 +414,5 @@
 775 c6fdad51c1f3b015ed0fe08a0f18c347f7377aed fix-forward-D-076 risk=high note=rejected-as-merged;fixed-by-#809-independently-approved-and-merged
 832 5704ca9ecef053c04f40ea483722497cf74bac73 independent-review-20261113 risk=medium note=approved-at-38c089d02-delta-type-only-fix-7c2a5956c-and-trunk-merges
 785 af17c27a453b3f2a55b281b6595e6a22b60a561c fix-forward-D-076 risk=high note=rejected-as-merged;fixed-by-#817-#832-independently-approved-and-merged
+839 59e0d0af79e91ecdc6a07853f8301c97ea189ef5 independent-review-20261113 risk=high note=approved-at-a8c15c1f0-delta-both-sides-tailor-merge-trunk-merges-and-d078-golden-hash-amendment-ci-green
+788 21cd42de82d38fe01aac806c66608437df414d76 fix-forward-D-076 risk=high note=rejected-as-merged;fixed-by-#839-(D-078-confirm-before-compare)-independently-approved-and-merged

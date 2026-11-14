@@ -409,3 +409,6 @@
 782 c79259393820599e9e474173cce40c7365d381a8 fix-forward-D-076 risk=high note=rejected-as-merged;fixed-by-#827-independently-approved-and-merged
 771 81171002e52e39e94f1b46b3d993277fb40630c4 fix-forward-D-076 risk=medium note=D-059-test-amendment-ratified-by-owner-in-D-078-(#834)
 822 792097f0cf7c3997fd40cc866918d549ff9daf92 independent-review-20261113 risk=high note=approved-at-d0f975233-delta-env-hygiene-revoke-tightening-write-count-fail-safe-dup-row-removal-fw3-fixture-trunk-merges
+809 12c131499d4ee5277ae93bdb5f8a016138037924 independent-review-20261113 risk=medium note=approved-at-a1897a04e-delta-trunk-merges-only-shard-durations
+840 553b160461393d60248bae3b627af114dae902db independent-review-20261113 risk=low note=docs-only-decisions-row-d081
+775 c6fdad51c1f3b015ed0fe08a0f18c347f7377aed fix-forward-D-076 risk=high note=rejected-as-merged;fixed-by-#809-independently-approved-and-merged

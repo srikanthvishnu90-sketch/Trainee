@@ -41,7 +41,7 @@ export function payPostingsOf(out: unknown): PaySource[] {
     const byPlace = Array.isArray(inner?.pay_by_place) ? inner.pay_by_place.map((r: any) => `${r?.place ?? ""}: ${r?.pay ?? ""}`).join("; ") : "";
     const u = String(url ?? "");
     const place = String(inner?.location ?? x?.location ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
-    return (pay || byPlace) && /^https:\/\//.test(u) ? { company: (inner?.company ?? x?.company ?? null) || null, title: (inner?.title ?? x?.title ?? null) || null, pay: [pay, byPlace].filter(Boolean).join("; "), url: u, ...(place ? { place } : {}) } : null;
+    return (pay || byPlace) && /^https:\/\//.test(u) ? { company: (inner?.company ?? x?.company ?? null) || null, title: (inner?.title ?? x?.title ?? null) || null, pay: (pay && byPlace && byPlace.split("; ").every((x: string) => pay.replace(/\s+/g, "").includes(x.replace(/\s+/g, ""))) ? [pay] : [pay, byPlace]).filter(Boolean).join("; ") /* live-10 C11: a by-place list the pay already gives is not given twice */, url: u, ...(place ? { place } : {}) } : null;
   };
   const xs: (PaySource | null)[] = [];
   if (Array.isArray(o.postings)) for (const p of o.postings.slice(0, 50)) xs.push(one(p, p?.url));

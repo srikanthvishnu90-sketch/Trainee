@@ -1,0 +1,129 @@
+{
+ "C1": {
+  "calls": [
+   {
+    "name": "search_jobs",
+    "args": {
+     "limit": 10,
+     "query": "software engineer intern summer 2027 Chicago or remote"
+    }
+   },
+   {
+    "name": "remember_instruction",
+    "args": {}
+   },
+   {
+    "name": "create_file",
+    "args": {}
+   }
+  ],
+  "reply": "The search found one posting, and it's a related role rather than a match: PayPal, Software Engineer Intern - Summer 2027, Chicago, IL (fit 38, Reach, $28-$49 hourly, not verified still open). https://paypal.wd1.myworkdayjobs.com/en-US/jobs/job/Software-Engineer-Intern---Summer-2027_R0138586\n\nNo resume has been made yet, so there's no file to point you to. The plan is to lead with Pixelforge (70+ React sites, $9k MRR), Rallyup and Waypoint, and keep the finance, GTM and research lines short. Before anything goes out I need Crestline's exact name and your Harbor dates. Nothing has been sent or applied. Is it \"Crestline Partners\" or \"Crestline Search Partners\"?"
+ },
+ "C2": {
+  "calls": [
+   {
+    "name": "draft_followup",
+    "args": {}
+   },
+   {
+    "name": "draft_followup",
+    "args": {}
+   }
+  ],
+  "reply": "Hi [Name], I'm Sam, a CS and Finance student at Lakeshore University looking for a SWE internship for summer 2027. I hand-coded 70+ React websites for clients at Pixelforge and I'm now building a career agent, Waypoint. Could we have a short call about what your team looks for? If it seems like a fit, I'd value a referral for [role/link]. No worries if the timing is off. Thanks, Sam\n\nDraft, not sent."
+ },
+ "C3": {
+  "calls": [],
+  "reply": "I found 1 software engineer internship in chicago or remote, and it lists pay. Here it is, with Apply on it.\n1. PayPal \u2014 Software Engineer Intern - Summer 2027, Chicago, IL \u2014 this employer requires your own account (open-checked)\nhttps://file.example.test?t=v1.eyJ1IjoiN2IwZjhmOGUtNmE0My00YTQ5LTlkMmMtMDAwMGEyMDAwMDAwIiwiciI6IjMyYzVjN2QwYjkiLCJrIjoibCIsImoiOiI4ZTRlMzA0Mzk0NzViYTIyIiwiaSI6MTc5NDUwNTU5NjM4OSwiZSI6MTc5NDU5MTk5NjM4OX0.r2UXCGmWQBG34-3wPgLiIIfpK0UtOAtJ7czEhRriywI"
+ },
+ "C4": {
+  "calls": [
+   {
+    "name": "research_career_question",
+    "args": {
+     "question": "what should i put at the very top of my resume for swe roles, be specific",
+     "kind": "advice",
+     "query": "what should i put at the very top of my resume for swe roles, be specific"
+    }
+   }
+  ],
+  "reply": "Put your name, email, and a GitHub or portfolio link at the very top, then go straight to Education: Lakeshore University, BS Computer Science and Finance, Expected June 2029. A university career center guide I read says most college resumes don't need an objective statement and that education leads with the expected graduation date, so skip the summary. Leave the GPA off, since you told me 3.9 is outdated. Under Education, add a Skills line (Python, TypeScript/JavaScript, React, SQL). Then put Pixelforge first in Experience (70+ React sites, $9k peak MRR), since it's your strongest SWE proof. I don't have your email or links yet, so those stay blank until you give them. Nothing has been sent or changed. Source\nhttps://careers.umd.edu/sites/default/files/2021-12/Resume%20Writng%20with%20Samples%202021.pdf"
+ },
+ "C5": {
+  "calls": [],
+  "reply": "Question 1: Write a function that takes a list of integers and returns the first value that appears more than once, or None if every value is unique. Before any code, tell me your approach and its time and space cost, then write it."
+ },
+ "C6": {
+  "calls": [
+   {
+    "name": "read_application_mail",
+    "args": {}
+   }
+  ],
+  "reply": "Yes, 9 applications went, each confirmed by an employer \"Thank you for applying\" email in your Gmail (sam.rivera@example.test):\n\n1. Apparel Co, Sales Associate (Nov 12)\n2. Finance Co, Finance Intern (Nov 12)\n3. Startup Co, Growth Intern (Nov 11)\n4. Shirt Co, Retail Associate (Nov 11)\n5. Gym Co, Front Desk Associate (Nov 11)\n6. Grill Co, Line Cook (Nov 10)\n7. Coffee Co, Barista (Nov 10)\n8. Golf Co, Operations Intern (Nov 10)\n9. Bank A, Summer Analyst (Nov 10)\n\nNone of them is a SWE role, and Trainee's own apply queue is empty, so I didn't send any of them. If you didn't submit these yourself, check that account. PayPal's SWE internship is only researched, not applied to. This covers one Gmail account; an application confirmed to another address, or shown only on an employer's portal, wouldn't appear. Want me to keep this as a running tracker?"
+ },
+ "C5f1": {
+  "calls": [],
+  "reply": "That's the right instinct for a different question, and the \"o\ud83d\udc4e\" reads as O(n) for both, which is correct for what you described. But it answers \"first non-repeating value,\" and I asked for the first value that appears more than once. Reading carefully before you code is part of what I'm scoring.\n\nYour two-pass approach also does more work than needed here. One pass with a set of seen values returns the first repeat the moment you see it: O(n) time, O(n) space, and it can exit early.\n\nQuestion 1, retry: write the one-pass version, then tell me what changes if the list is huge and memory is tight."
+ },
+ "C5f2": {
+  "calls": [],
+  "reply": "This is correct for first_unique, but it's still not the question I asked. You wrote the first non-repeating value again, not the first value that repeats. You've ignored the correction twice, and in a real interview that's the flaw that costs you.\n\nTwo code problems too. The list comprehension used only for side effects is a style red flag, since a plain for loop is what an interviewer wants to see. And next() with no default raises StopIteration when every value repeats, so you'd crash instead of returning None.\n\nRewrite it for the actual prompt: one pass, a set, and return None if nothing repeats. Then tell me what changes if memory is tight."
+ },
+ "C7": {
+  "calls": [],
+  "reply": "I wouldn't let the pay gap decide it alone, since NYC usually costs more to live in and the raise could shrink or vanish after rent and taxes. I don't have verified cost-of-living or tax figures for either city, so run both written offers through a take-home calculator. Then compare the team and manager, what you'd learn in year one, whether the role converts or grows, and where you want to be in two years.\n\nIf those come out equal, I'd take the higher net pay after housing. If NYC wins on growth, use that to ask Chicago for more money or more time. Nothing is saved from this, and nothing was sent. Which would you rank first: pay, learning, or location?"
+ },
+ "C8": {
+  "calls": [
+   {
+    "name": "get_profile",
+    "args": {}
+   },
+   {
+    "name": "get_memory",
+    "args": {}
+   }
+  ],
+  "reply": "I couldn't finish your last request without the AI: it is kept. The AI service failed on this one (an error on its side, not a limit). Say \"continue\" in a minute and I'll pick it up. Nothing was applied for, and searching postings still works now."
+ },
+ "C9": {
+  "calls": [
+   {
+    "name": "research_market",
+    "args": {
+     "format": "inline",
+     "queries": [
+      "Citadel new grad software engineer interview process",
+      "Citadel software engineer new grad compensation base salary",
+      "Citadel culture software engineer working at Citadel"
+     ],
+     "companies": [
+      "Citadel"
+     ]
+    }
+   }
+  ],
+  "reply": "I couldn't confirm anything on Citadel this turn, so I have no sourced answer for any of the three parts. Culture: no verified source read this turn. Pay: no verified figure read this turn. The only pay I have is the PayPal SWE internship posting you saw earlier, listed at $28-$49 hourly, and that isn't Citadel. Interview process: no verified source read this turn.\nhttps://paypal.wd1.myworkdayjobs.com/en-US/jobs/job/Software-Engineer-Intern---Summer-2027_R0138586"
+ },
+ "C10": {
+  "calls": [
+   {
+    "name": "tailor_resume",
+    "args": {}
+   }
+  ],
+  "reply": "Your tailored PayPal Software Engineer Intern (Chicago) resume is made as a review draft, with a PDF and a Word version attached. Nothing was submitted. It leads with Elmstead (GTM), which I'd swap for Pixelforge, Rallyup and Waypoint on a SWE role, so say the word. It shows Python and React, and Java and Data Structures and Algorithms are left off since they're not on your record.\n\nBefore it's sent: your email prints as [your email], Harbor Global has no dates, and Crestline's name needs settling. I also haven't verified whether Java is required, since the posting text was cut off before the requirements. Is it \"Crestline Partners\" or \"Crestline Search Partners\"?"
+ },
+ "C11": {
+  "calls": [
+   {
+    "name": "inspect_apply_flow",
+    "args": {
+     "job_id": "workday:paypal.wd1/jobs:Software-Engineer-Intern---Summer-2027_R0138586"
+    }
+   }
+  ],
+  "reply": "The posting is open, and the deadline is Sunday, December 6th, 2026 (the page data lists it as 2026-12-07). Chicago pay is $28-$49 hourly.\n\nWhat it requires, in its words:\n- Experience with at least one programming language (Java, Python, C++, JavaScript or similar)\n- Familiarity with data structures, algorithms, object-oriented programming and debugging\n- Projects through coursework, internships, research or personal projects\n- Currently pursuing a bachelor's or master's in CS or a related technical field\n- Returning to school in Fall 2027\n- Legally authorized to work in the U.S. without sponsorship\n\nFrom you, I need:\n1. Your own careers account on paypal.wd1.myworkdayjobs.com. You sign in or create it yourself, and I never do it for you.\n2. Your work authorization, which I don't have on file.\n3. Confirmation that you're returning to school in Fall 2027. Your June 2029 graduation suggests you are, but you haven't said it.\n4. Crestline's exact name, and Harbor's dates if you want them shown.\n5. Your email on the resume.\n\nPayPal's own questions only appear after you sign in, so I couldn't read them and won't guess them. I only read public pages: no account, saved application or submission was created, and nothing was applied for.\n\nIs it \"Crestline Partners\" or \"Crestline Search Partners\"?\n\nhttps://paypal.wd1.myworkdayjobs.com/en-US/jobs/job/Software-Engineer-Intern---Summer-2027_R0138586"
+ }
+}

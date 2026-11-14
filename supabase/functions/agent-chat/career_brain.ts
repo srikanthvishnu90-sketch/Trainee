@@ -160,7 +160,7 @@ export async function agentTurn(o: {
   // D-062: the capability tools (_shared/agent/capability_tools.ts: Gmail record and tracker, people search, answering an email),
   // under the same withholding as every other tool.
   capabilities?: import("../_shared/agent/loop.ts").ToolSpec[] | null;
-}): Promise<TurnResult & { shorten?: Shorten; research?: Record<string, unknown>; knowledge?: { playbooks: string[]; unknown: string[]; stage: string | null } }> {
+}): Promise<TurnResult & { shorten?: Shorten; research?: Record<string, unknown>; support?: { draft: string; refused: { sentence: string; why: string }[] }; knowledge?: { playbooks: string[]; unknown: string[]; stage: string | null } }> {
   // MIRROR WA-1 gaps (turn_notes.ts): what code read from this message and this conversation, for this turn only. A hypothetical
   // person is answered without their saved facts (the profile is left out of the block) and with every record tool withheld;
   // a hypothetical situation writes nothing.
@@ -368,6 +368,9 @@ export async function agentTurn(o: {
   //   advice (trace.a): every sentence against the passages read; with nothing left, code's not-verified line;
   //   a pay turn (a posting with pay was read, or pay was shown earlier): every sentence with a number against the postings' own
   //     records and the lines shown earlier; with nothing left, the records themselves.
+  // Live-10 diagnosis: the model's draft before the check, and each sentence the check removed with its reason, ride the turn's trace.
+  const supportTrace: { draft: string; refused: { sentence: string; why: string }[] } | null = FAIL_CLOSED.support && !trace.m && result.reply && result.stopped === "final" && !result.show ? { draft: String(result.reply), refused: [] } : null;
+  const keepSupportedT: typeof keepSupported = async (...args) => { const k = await keepSupported(...args); supportTrace?.refused.push(...((k as any).why ?? [])); return k; };
   if (FAIL_CLOSED.support && !trace.m && result.reply && result.stopped === "final" && !result.show) {
     const judge = o.market?.judge ?? null, pure = (s: string) => pureUnconfirmed(s, o.message);
     const recs = [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])].filter((p: any) => numbersIn(String(p?.pay ?? "")).length);
@@ -390,7 +393,7 @@ export async function agentTurn(o: {
     if (trace.r) {
       // Code's own lines: the verdict, the first action, and the fallback paragraph code writes (its last sentence carries the File link).
       const own = [...codeLines, trace.r.verdict.now, trace.r.verdict.later, trace.r.short?.now ?? "", trace.r.short?.later ?? "", trace.r.short?.act ?? "", trace.r.first_action, fallbackVerdict(trace.r)].filter(Boolean).flatMap((x) => x.split(/(?<=[.!?])\s+(?!https?:)/));
-      const k = await keepSupported(result.reply, [...trace.r.facts.map((f) => ({ text: f.quote, title: f.label })), ...trace.r.person.map((text) => ({ text, title: "What the person confirmed" }))], { judge, pure, own, ask: o.message });
+      const k = await keepSupportedT(result.reply, [...trace.r.facts.map((f) => ({ text: f.quote, title: f.label })), ...trace.r.person.map((text) => ({ text, title: "What the person confirmed" }))], { judge, pure, own, ask: o.message });
       // With nothing of the model's left, code's own fallback paragraph (it already ends with the File link, when there is one).
       result = { ...result, reply: letters(k.text) ? k.text : fallbackVerdict(trace.r) };
     } else if (trace.a) {
@@ -405,7 +408,7 @@ export async function agentTurn(o: {
       const draftLines = hypo ? [] : (((o.stores as any)?.profile?.facts ?? []) as any[]).filter((f) => f && typeof f === "object" && (f.status !== "confirmed" || f.withdrawn_by_owner) && (f.kind !== "other" || /^gpa$/i.test(String(f.name ?? ""))))
         .map((f) => `${String(f.kind ?? "fact")}: ${String(f.text ?? "").trim()}`).filter((x) => x.length > 8);
       const REMOVE_OR_UPDATE = /^(?:you could\s+)?(?:(?:remove|drop|cut|delete|update|correct)\b|take\b.*\bout\b|leave\b.*\b(?:off|out)\b)/iu;
-      const k = await keepSupported(result.reply, [...trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), ...recordSource, ...readSources],
+      const k = await keepSupportedT(result.reply, [...trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), ...recordSource, ...readSources],
         { judge, pure, own: codeLines, ask: o.message, instructions: true, ...(record.length && trace.a.passages.length ? { joint: { guide: trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), record: record.join("\n") } } : {}), ...(draftLines.length ? { also: { when: (s: string) => REMOVE_OR_UPDATE.test(s.trim()), sources: [{ text: draftLines.join("\n"), title: "Not confirmed by the person (do not state as fact):", one: true }] } } : {}) });
       result = { ...result, reply: letters(k.text) ? k.text : [trace.a.not_verified || NOT_CONFIRMED, ...links(k.text)].join("\n") };
     } else if (recs.length || shownPay.length) {
@@ -421,10 +424,11 @@ export async function agentTurn(o: {
       // on: each posting's own record (its title, place, fit and verdict as the tool returned them), what a tool read from a posting
       // (its requirements), and the person's confirmed record (facts about them only, one line each). A pay figure still stands only
       // on a unit that gives it (layer A: the figure and its names in one unit).
-      const postingLine = (p: any) => [[p?.company, p?.title].map((x: any) => String(x ?? "").trim()).filter(Boolean).join(", "), p?.location ? `in ${String(p.location).trim()}` : "", Number.isFinite(p?.fit) ? `fit ${p.fit}` : "", typeof p?.verdict === "string" ? p.verdict : typeof p?.band === "string" ? p.band : ""].filter(Boolean).join(", ");
+      const fitOf = (p: any) => { const f = p?.fit; const n = Number.isFinite(f) ? f : Number.isFinite(f?.score) ? f.score : null; const tier = [f?.tier, f?.band, f?.label, p?.tier, p?.band, p?.verdict].find((x) => typeof x === "string" && x.trim()); return [n !== null ? `fit ${n}` : "", tier ?? ""].filter(Boolean); };
+      const postingLine = (p: any) => [[p?.company, p?.title].map((x: any) => String(x ?? "").trim()).filter(Boolean).join(", "), p?.location ? String(p.location).trim() : "", ...fitOf(p), typeof p?.pay === "string" && p.pay.trim() ? p.pay.trim() : ""].filter(Boolean).join(", ");
       const postingsAll = [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])];
       const recordLines = hypo ? [] : ownerConfirmedFacts((o.stores as any)?.profile?.facts ?? []).filter((f: any) => f?.kind !== "other" || /^gpa$/i.test(String(f?.name ?? ""))).map((f: any) => `${String(f.kind ?? "fact")}: ${String(f.text ?? "").trim()}`).filter((x: string) => x.length > 8);
-      const k = await keepSupported(result.reply, [...recs.map((p: any) => ({ text: recLine(p), title: "Posting record" })), ...postingsAll.map((p: any) => ({ text: postingLine(p), title: "Posting record" })).filter((x) => x.text),
+      const k = await keepSupportedT(result.reply, [...recs.map((p: any) => ({ text: recLine(p), title: "Posting record" })), ...postingsAll.map((p: any) => ({ text: postingLine(p), title: "Posting record" })).filter((x) => x.text),
         ...about.map((l) => ({ text: l.text, title: "Pay shown earlier in this conversation" })), ...readSources, ...(recordLines.length ? [{ text: recordLines.join("\n"), title: "The person's confirmed record:", one: true }] : [])],
         { judge, pure, own: [...about.map((l) => l.text), ...codeLines], ask: o.message, instructions: true });
       const named = recordsNamed(o.message, recs);
@@ -477,7 +481,8 @@ export async function agentTurn(o: {
   const ask = result.show?.intent === RESTORE_ASK_INTENT ? (result.show.meta as any)?.restore_ask : null;
   if (ask && !result.pending_approvals?.length && !o.cardPending) result = { ...result, restore_ask: ask } as typeof result;
   else if (ask) result = { ...result, show: { ...result.show!, meta: {} } };
-  return know ? { ...result, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : result;
+  const withSupport = supportTrace && supportTrace.refused.length ? { ...result, support: supportTrace } : result;
+  return know ? { ...withSupport, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : withSupport;
 }
 
 // Review of #790 (rounds 3 and 4): whenever a fact was set aside this turn, code states it itself, once, as the first line, in the

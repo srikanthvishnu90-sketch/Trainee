@@ -289,7 +289,8 @@ const nameIn = (name: string, text: string) => new RegExp(`(?<![\\p{L}\\p{N}])${
 export function pageSentences(pages: SourcePage[], want: Set<string>, names: string[], max: number): { text: string; page: SourcePage; prev: string }[] {
   const scored: { text: string; page: SourcePage; prev: string; n: number; k: number; i: number }[] = [];
   for (const [k, p] of pages.entries()) {
-    const ss = squash(readAlike(p.text.slice(0, 60000))).split(/(?<=[.!?])\s+/);
+    // 2026-11-14: line by line first, so a page's title line is never glued onto its first sentence.
+    const ss = p.text.slice(0, 60000).split(/\n+/).flatMap((l) => squash(readAlike(l)).split(/(?<=[.!?])\s+/)).filter(Boolean);
     for (const [i, x] of ss.entries()) {
       if (x.length < 40 || x.length > 300 || !/[.!?]$/.test(x) || !/[a-z]/.test(x) || !linkFree(x) || !hasPredicate(x, p.title)) continue;
       if (names.length && !names.some((nm) => nameIn(nm, x) || nameIn(nm, p.title))) continue;
@@ -493,7 +494,7 @@ export async function researchMarket(i: { question: string; format: "inline" | "
     const want = contentWords(t);
     for (const p of ps) {
       const named = companies0.filter((c) => nameIn(c, p.text) || nameIn(c, p.title)).join(" ");
-      for (const x of squash(readAlike(p.text.slice(0, 60000))).split(/(?<=[.!?])\s+/)) {
+      for (const x of p.text.slice(0, 60000).split(/\n+/).flatMap((l) => squash(readAlike(l)).split(/(?<=[.!?])\s+/)).filter(Boolean)) {
         if (x.length < 8 || x.length > 600 || ![...contentWords(x)].some((w) => want.has(w))) continue;
         const c = checkLine(t, x, { ...p, text: x }, named, { fallback: false, predicate: false });
         if (c.ok) return { text: c.text, page: p };
@@ -593,7 +594,8 @@ export async function researchMarket(i: { question: string; format: "inline" | "
       const fromPages = labelYears.every((y) => unitYears.has(y)) && !figuresIn(r.label.replace(/(?<!\d)(?:19|20)\d\d(?!\d)/g, " ")).length && !/[^\p{L}\p{N} '&()-]/u.test(r.label)
         && [...contentWords(r.label)].every((w) => have.has(w) || askWords.has(w));
       return contentWords(r.label).size > 0 && (fromPages || (!figuresIn(r.label).length && !/[^\p{L}\p{N} '&-]/u.test(r.label) && (askSpan(lab, i.ask ?? "") || units0.some((u) => u.startsWith(`${lab} `))))); }) : rows;
-    if (idx ? rowsS.length > 0 && opts.every((_, j) => rowsS.some((r) => r.cells[j])) : rows.length) comparison = { options: opts, rows: rowsS };
+    // 2026-11-14: a refused cell drops that cell only (it is left unknown); the table stands while two columns keep a cell.
+    if (idx ? rowsS.length > 0 && opts.filter((_, j) => rowsS.some((r) => r.cells[j])).length >= 2 : rows.length) comparison = { options: opts, rows: rowsS };
   }
   const conditions = arr(d.conditions, 6).map(idx ? (x: any) => lineS(x, x?.text, "conditions") : reading("conditions")).filter(Boolean) as Cited[];
   const risks = arr(d.risks, 6).map(idx ? (x: any) => lineS(x, x?.text, "risks") : reading("risks")).filter(Boolean) as Cited[];

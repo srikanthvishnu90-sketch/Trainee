@@ -92,14 +92,10 @@ Deno.test("fixes 9 and 11: code's own lines (a closed posting's note, the read-o
 // ---- architect ruling 2026-11-14 (by shape, on review of 8cd4de7d4): advice outside the page judge is an instruction about the
 // person's own materials, on their own record, with no evaluative or world predicate
 import { adviceOfTheirOwn, keepSupported } from "../../../supabase/functions/_shared/agent/research/support.ts";
-Deno.test("ruling 1 by shape: the instruction kinds that stand, and the claim kinds that are judged", () => {
-  const own = adviceOfTheirOwn(["Lakeshore University, BS Computer Science and Finance, Expected June 2029", "Skill: Python", "Skill: SQL", "Pixelforge, Founder (2023-2025): hand-coded 70+ React websites"], ["GPA: 3.9"]);
-  ok(own("Leave the outdated 3.9 GPA off."), "removes a draft of theirs");
-  ok(own('For the top of your resume: your name and contact links, then "Lakeshore University | BS Computer Science and Finance | Expected June 2029", then a compact skills line led by Python and SQL.'));
-  ok(own("Move SQL ahead of Python in your skills line."));
-  ok(!own("Put your 3.9 GPA next to Lakeshore University."), "a draft is not theirs to assert");
-  ok(!own("Lead with Pixelforge, the strongest line you have."), "evaluative");
-  ok(!own("Lakeshore University graduates get hired fast."), "not an instruction");
+Deno.test("ruling 1, closed world: only record items and layout words after the leading verb", () => {
+  const own = adviceOfTheirOwn(["Lakeshore University, BS Computer Science and Finance, Expected June 2029", "Python", "SQL", "Pixelforge, Founder (2023-2025)"], ["GPA", "3.9"]);
+  for (const s of ["Put Python and SQL first.", "Move SQL above Python.", "Leave the outdated 3.9 GPA off.", "List Pixelforge, Founder (2023-2025) first under experience."]) ok(own(s), s);
+  for (const s of ["Leave the 3.9 GPA in.", "Put your 3.9 GPA next to Lakeshore University.", "Lead with Pixelforge, the strongest line you have.", "Lakeshore University graduates get hired fast.", "Mention SQL?"]) ok(!own(s), s);
 });
 // Turn-level (the entry point every version exposes): the review's two leaks and four variants through agentTurn's advice path,
 // with a judge that says no. Red on 7487f3600 (each sentence was kept unjudged), green here.
@@ -108,7 +104,7 @@ const aSay = (t: string) => ({ content: [{ type: "text", text: t }], stop_reason
 const aUse = (name: string, input: unknown) => ({ content: [{ type: "tool_use", id: "t1", name, input }], stop_reason: "tool_use" });
 const GUIDE_URL = "https://careers.stateuniversity.edu/resume";
 const guideSearch = async () => ({ status: "ok", facts: [{ id: "", kind: "program", text: "Goldman Sachs and other banks read the top third of a resume first; keep it to one page.", quote: "Goldman Sachs and other banks read the top third of a resume first; keep it to one page.", url: GUIDE_URL, label: "State University career center" }], urls: [GUIDE_URL], cost_usd: 0.01 });
-const FACTS = [{ id: "F-1", kind: "education", text: "Lakeshore University, BS Computer Science and Finance, Expected June 2029", status: "confirmed" }, { id: "F-2", kind: "skill", text: "Skill: SQL", name: "SQL", status: "confirmed", unproven: true }];
+const FACTS = [{ id: "F-1", kind: "education", text: "Lakeshore University, BS Computer Science and Finance, Expected June 2029", status: "confirmed" }, { id: "F-2", kind: "skill", text: "Skill: SQL", name: "SQL", status: "confirmed", unproven: true }, { id: "F-3", kind: "skill", text: "Skill: Python", name: "Python", status: "confirmed" }];
 const adviceTurn = (history: { role: string; content: string }[], reply: string, extra: any[] = []) => agentTurn({ message: "what goes at the top of my resume?", history, stores: { profile: { facts: [...structuredClone(FACTS), ...extra] } }, userId: "u", threadId: "t", now: Date.parse("2026-11-14T00:00:00Z"), knowledge: true,
   market: { judge: async (cs: any[]) => cs.map(() => "no") }, model: (() => { let n = 0; return async (p: any) => p.tools?.length ? [aUse("research_career_question", { question: "what goes at the top of my resume?", kind: "advice", query: "resume top" }), aSay(reply)][Math.min(n++, 1)] : aSay(""); })(), research: { search: guideSearch } } as any) as Promise<any>;
 Deno.test("ruling 1 at the turn: the review's leaks are judged and refused; plain instructions on the record stand", async () => {
@@ -122,6 +118,13 @@ Deno.test("ruling 1 at the turn: the review's leaks are judged and refused; plai
     ["leak: a record GPA as a cutoff", [{ id: "F-9", kind: "other", text: "GPA: 3.7", status: "confirmed" }], [], "A 3.7 GPA clears the cutoff.", /cutoff/],
     ["leak: an unconfirmed figure asserted", [], [{ role: "user", content: "My GPA is 3.4." }], "Put your 3.4 GPA next to Lakeshore University.", /3\.4/],
     ["leak: a market claim", [], [], "SQL is the most requested skill at every bank this year.", /most requested/],
+    // review of 3c0a85b2f: a clause after the instruction, in any form
+    ["clause: which", [], [], "Mention SQL, which data teams want now.", /want now/],
+    ["clause: and say", [], [], "Move SQL up and say data teams want it now.", /want it now/],
+    ["clause: because", [], [], "Lead with SQL because data teams want it now.", /want it now/],
+    ["clause: since", [], [], "Put SQL first, since it is what data teams ask for.", /ask for/],
+    ["clause: so", [], [], "Put SQL first so recruiters see it.", /recruiters see/],
+    ["clause: to", [], [], "List SQL first to beat other applicants.", /beat other/],
   ];
   for (const [name, extra, history, reply, bad] of cases) {
     const t = await adviceTurn(history, reply, extra);
@@ -130,11 +133,11 @@ Deno.test("ruling 1 at the turn: the review's leaks are judged and refused; plai
   // Review of 78603b243: a further clause after the instruction, and a draft fact kept rather than removed, are judged.
   for (const [name, reply, bad] of [["a ':' clause", "Mention SQL: it is what data teams want now.", /what data teams want/], ["a ';' clause", "Drop Python; Python is dying.", /dying/],
     ["a dash clause", "Move SQL up — data teams want it now.", /want it now/], ["a draft kept", "Leave the 3.9 GPA in.", /3\.9/]] as const) {
-    const t = await adviceTurn([], reply, [{ id: "F-8", kind: "other", text: "GPA: 3.9", status: "draft", needs_confirmation: true }]);
+    const t = await adviceTurn([], reply, [{ id: "F-8", kind: "other", text: "GPA: 3.9", name: "GPA", gpa: "3.9", status: "draft", needs_confirmation: true }]);
     ok(!bad.test(t.reply), `${name}: ${t.reply}`);
   }
-  for (const good of ["Leave the outdated 3.9 GPA off.", "Move SQL ahead of the education line."]) {
-    const t = await adviceTurn([], good, [{ id: "F-8", kind: "other", text: "GPA: 3.9", status: "draft", needs_confirmation: true }]);
+  for (const good of ["Leave the outdated 3.9 GPA off.", "Put Python and SQL first.", "Move SQL above Python."]) {
+    const t = await adviceTurn([], good, [{ id: "F-8", kind: "other", text: "GPA: 3.9", name: "GPA", gpa: "3.9", status: "draft", needs_confirmation: true }]);
     ok(t.reply.includes(good), `${good} => ${t.reply}`);
   }
 });

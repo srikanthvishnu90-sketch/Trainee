@@ -397,10 +397,16 @@ export async function agentTurn(o: {
     } else if (trace.a) {
       // Architect ruling 2026-11-14 (narrowed): advice about the person's own materials is outside the page judge only when it
       // stands on their confirmed record alone (support.ts adviceOfTheirOwn).
-      // A draft or unconfirmed fact of theirs counts only for an instruction that removes or updates it ("Leave the outdated 3.9 GPA off.").
-      // (one they withdrew counts too: "the 3.9 gpa on there is outdated" is exactly what to leave off)
-      const drafts = hypo ? [] : (((o.stores as any)?.profile?.facts ?? []) as any[]).filter((f) => f && typeof f === "object" && (f.status !== "confirmed" || f.withdrawn_by_owner)).map(factText).filter(Boolean);
-      const advice = adviceOfTheirOwn(confirmed.map((c) => c.text), drafts);
+      // The items of their own record (closed world, support.ts adviceOfTheirOwn): a skill's name; an education or experience fact's
+      // head (what comes before its first ":"), their school, degree, dates, role and employer; never the rest of a fact's sentence
+      // ("My friend at Citadel earns $10k a week" gives nothing). A draft or withdrawn fact's items count only for a removal.
+      const itemsOf = (f: any): string[] => { if (!f || typeof f !== "object") return []; const head = String(f.text ?? "").split(":")[0];
+        if (f.kind === "skill") return [String(f.name ?? head.replace(/^Skill\s*/i, ""))];
+        if (f.kind === "education" || f.kind === "experience") return [head];
+        return typeof f.name === "string" && f.name.split(/\s+/).length <= 4 ? [f.name, ...(typeof f.gpa === "string" ? [f.gpa] : [])] : []; };
+      const all = hypo ? [] : (((o.stores as any)?.profile?.facts ?? []) as any[]);
+      const confirmedIds = new Set(ownerConfirmedFacts(all).map((f: any) => f));
+      const advice = adviceOfTheirOwn(all.filter((f) => confirmedIds.has(f)).flatMap(itemsOf), all.filter((f) => f && typeof f === "object" && (f.status !== "confirmed" || f.withdrawn_by_owner)).flatMap(itemsOf));
       const k = await keepSupported(result.reply, [...trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), ...confirmed, ...readSources], { judge, pure, own: codeLines, ask: o.message, advice });
       result = { ...result, reply: letters(k.text) ? k.text : [trace.a.not_verified || NOT_CONFIRMED, ...links(k.text)].join("\n") };
     } else if (recs.length || shownPay.length) {

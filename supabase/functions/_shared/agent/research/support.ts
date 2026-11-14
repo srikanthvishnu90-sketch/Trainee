@@ -543,34 +543,32 @@ export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudg
 // sentence stands when it is one of code's own lines (`own`: word for word), a could-not-confirm sentence in the closed form
 // (`pure`), or the judge says yes to it (as a claim in its own words, or as a source's own unit said again); it is removed otherwise
 // (these paths have no numbered source to quote). A line that is only a link is code's, and stays.
-// Architect ruling 2026-11-14 (by shape, on review of 8cd4de7d4): on an advice turn, a sentence skips the page judge only when it is
-// an instruction to the person about their own materials: it starts with a verb addressed to them ("Put", "Lead", "Leave", ..., or
-// "You could" + one), or with a lead-in that names their material ("For the top of your resume:") followed by such a verb or by what
-// goes there ("your name and contact links, then ..."); every figure and name in it is of their own record (a confirmed fact; a draft
-// or unconfirmed fact of theirs only when the instruction removes or updates it: "Leave the outdated 3.9 GPA off."); no name in it is
-// an organisation the record lists as a place they worked or founded; and it has no evaluative, comparative or world predicate.
-// Everything else is judged as any claim is.
-const ROLE_IN_FACT = /(?<![\p{L}])(?:founder|co-founder|intern|internship|engineer|researcher|analyst|manager|associate|employee|team|staff|contractor|consultant|director|lead|friend|at)(?![\p{L}])/iu;
-const ADVICE_VERB = "put|lead|move|cut|add|leave|keep|rewrite|list|drop|remove|delete|replace|update|swap|start|end|place|group|shorten|trim|bold|fix|include|mention|split|merge|change|rename|order|highlight|open|close|use|write|reword|tighten|spell";
-// An unambiguous removal (review of 78603b243: "Leave the 3.9 GPA in." keeps it): remove, cut, drop, delete, take … out, leave … off/out.
-const REMOVE_VERB = /^(?:you could\s+)?(?:(?:remove|cut|drop|delete)\b(?!.*\b(?:back in|in place|keep)\b)|take\b.*\bout\b|leave\b.*\b(?:off|out)\b)/iu;
-const LEAD_IN = /^(?:for|at|in|on|under) (?:the )?[\p{L} -]{1,40}? (?:of )?your [\p{L} -]{1,30}?[:,]\s*/iu;
-const INSTRUCTION = new RegExp(`^(?:(?:for|at|in|on|under) (?:the )?[\\p{L} -]{1,40}? (?:of )?your [\\p{L} -]{1,30}?[:,]\\s*(?:your\\b|(?:${ADVICE_VERB})\\b)|(?:you could\\s+)?(?:${ADVICE_VERB})\\b)`, "iu");
-const EVALUATIVE = /(?<![\p{L}])(?:strong(?:er|est)?|weak(?:er|est)?|top(?! of (?:your|it|the page))|competitive|clears?|values?|looks? for|pays?|paid|earns?|hires?|hiring|typical(?:ly)?|average|median|usual(?:ly)?|better|worse|best|worst|more than|less than|fewer than|the market|market|industry|recruiters?|employers?|compan(?:y|ies)|banks?|firms?|demand|impress\w*|stand(?:s)? out|cutoff|bar|most|least|every|always|never)(?![\p{L}])/iu;
-export function adviceOfTheirOwn(confirmed: string[], drafts: string[] = []): (s: string) => boolean {
-  const record = confirmed.join("\n"), own = [...confirmed, ...drafts].join("\n");
-  const has = (hay: string, n: string) => new RegExp(`(?<![\\p{L}\\p{N}])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(hay);
-  // The organisations of the record: the name a fact about a job, a venture or a person they know leads with or is "at".
-  const orgs = [...confirmed, ...drafts].filter((f) => ROLE_IN_FACT.test(f)).flatMap((f) => [f.split(/[,;:(]/)[0].trim(), ...[...f.matchAll(/\bat ([\p{Lu}][\p{L}&.-]*(?: [\p{Lu}][\p{L}&.-]*)*)/gu)].map((m) => m[1])]).filter((x) => x.length > 1);
+// Architect ruling 2026-11-14 (final, closed world, on review of 3c0a85b2f): on an advice turn, a sentence skips the page judge only
+// when it is an instruction (it starts with a verb addressed to the person, "You could" + one, or a lead-in made of the words below)
+// and EVERY word after that is either part of an item of their own record (a confirmed fact's name, figure, skill or their own role
+// and employer; a draft or withdrawn fact's only when the leading verb removes it) or in a small fixed vocabulary of layout and
+// function words; "and" only between such words. Any other word (which, because, say, want, now, any other adjective or verb) and the
+// sentence is judged like any claim. A question is judged. This is an allowlist: nothing outside it is ever exempt.
+const ADVICE_VERBS = new Set("put lead move list add leave keep drop remove delete cut place start end group order swap mention include bold shorten trim rewrite reword spell".split(" "));
+const REMOVAL = /^(?:you could\s+)?(?:(?:remove|cut|drop|delete)\b|take\b.*\bout\b|leave\b.*\b(?:off|out)\b)/iu;
+const LAYOUT = new Set(("a an the of for at to in on by with from into onto as your my it its them their top first last near next above below under before after " +
+  "section sections line lines bullet bullets header heading summary resume résumé cv page skills skill experience education projects project list order " +
+  "outdated old current off out up then name contact links link email phone compact short led").split(" "));
+export function adviceOfTheirOwn(items: string[], draftItems: string[] = []): (s: string) => boolean {
+  const toks = (t: string) => (bare(t).toLowerCase().match(/[\p{L}\p{N}$][\p{L}\p{N}$.,'’/+&#%-]*/gu) ?? []).map((w) => w.replace(/[.,'’-]+$/, "").replace(/['’]s$/, "")).filter(Boolean);
+  const mine = new Set(items.flatMap(toks)), drafts = new Set(draftItems.flatMap(toks));
   return (s: string) => {
     const t = bare(s).trim();
-    if (!INSTRUCTION.test(t) || EVALUATIVE.test(t) || /\?\s*$/.test(t)) return false; // a question is judged
-    // One clause only (review of 78603b243): after the lead-in, a further ":" ";" or dash clause may carry a claim ("Drop Snowflake;
-    // Snowflake is dying."): judged.
-    if (/[:;]|\s[-–—]\s|\s?—\s?/u.test(t.replace(LEAD_IN, "").replace(/"[^"]*"/g, '""'))) return false;
-    const from = REMOVE_VERB.test(t) ? own : record, mine = numbersIn(from);
-    const ns = numbersIn(t), names = specifics(t).names.filter((n) => !new RegExp(`^(?:${ADVICE_VERB}|you|for|at|in|on|under)$`, "i").test(n));
-    return ns.every((n) => mine.some((y) => numEq(y, n))) && names.every((n) => has(from, n) && !orgs.some((o) => has(o, n)));
+    if (!t || /\?\s*$/.test(t)) return false;
+    let w = toks(t);
+    if (w[0] === "you" && w[1] === "could") w = w.slice(2);
+    if (!w.length) return false;
+    const verb = ADVICE_VERBS.has(w[0]);
+    if (!verb && !LAYOUT.has(w[0])) return false; // not an instruction
+    const allowed = new Set([...mine, ...(verb && REMOVAL.test(t) ? drafts : [])]);
+    const ok = (x: string) => LAYOUT.has(x) || allowed.has(x);
+    const rest = verb ? w.slice(1) : w;
+    return rest.length > 0 && rest.every((x, k) => x === "and" ? k > 0 && k < rest.length - 1 && ok(rest[k - 1]) && ok(rest[k + 1]) : ok(x)) && rest.some((x) => allowed.has(x));
   };
 }
 export async function keepSupported(reply: string, sources: (string | { text: string; title?: string })[], o: { judge?: SupportJudge | null; read?: (s: string) => string; pure?: (s: string) => boolean; own?: string[]; advice?: (s: string) => boolean; subjects?: string[]; ask?: string } = {}): Promise<{ text: string; removed: string[] }> {

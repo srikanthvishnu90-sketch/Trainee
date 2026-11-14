@@ -380,7 +380,9 @@ export async function agentTurn(o: {
     // read from a posting this turn (its requirements, that its questions are behind a sign-in) is a source the model's sentences
     // may stand on; the person's confirmed facts are a source for what is said about them (D-007).
     const codeLines = (result.codeLines ?? []).flatMap((x) => x.split(/(?<=[.!?])\s+(?!https?:)/));
-    const readSources = (result.readLines ?? []).map((text) => ({ text, title: "Read from the posting this turn" }));
+    const readSources = [...(result.readLines ?? []).map((text) => ({ text, title: "Read from the posting this turn" })),
+      // Ruling 2026-11-14: a File this turn made (its text passed the File's fact guard) is a source for the reply that restates it.
+      ...((result as any).fileTexts?.length ? [{ text: ((result as any).fileTexts as string[]).join("\n"), title: "The File made this turn:", one: true }] : [])];
     // A sentence that restates code's boundary ("… no account, saved application or submission was created.") is that boundary:
     // code's own line takes its place, unjudged.
     for (const line of codeLines) {

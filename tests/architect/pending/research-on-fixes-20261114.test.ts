@@ -192,3 +192,13 @@ Deno.test("ruling: joint guide + record support for advice; never for a recombin
     ok(!t.reply.includes(bad), `${bad} => ${t.reply}`);
   }
 });
+
+// Ruling 2026-11-14 (live-10): a small fixed table of career abbreviations in layer A; never beyond it, never a figure.
+import { findSupport as fs2, indexPages as ip2, nameFoundIn } from "../../../supabase/functions/_shared/agent/research/support.ts";
+Deno.test("abbreviations: MRR, SWE and GPA are found by their expansions; a false figure with one is still refused", () => {
+  ok(nameFoundIn("MRR", "peak $9k monthly recurring revenue") && nameFoundIn("swe", "software engineering intern") && nameFoundIn("software engineer", "a SWE role"));
+  ok(!nameFoundIn("QA", "quality assurance"), "nothing beyond the table");
+  const rec = ip2([{ text: "experience: Pixelforge, Founder (2023-2025): hand-coded 70+ React websites for clients; peak $9k monthly recurring revenue.", title: "The person's confirmed record:", one: true }]);
+  ok(!!fs2("Pixelforge reached $9k MRR.", rec), "the record's own figure, with the abbreviation");
+  ok(!fs2("Pixelforge reached an MRR of $20k.", rec), "a figure the record does not give is refused");
+});

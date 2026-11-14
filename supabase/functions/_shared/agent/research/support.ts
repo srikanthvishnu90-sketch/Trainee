@@ -142,6 +142,13 @@ export function hardParts(text: string, read: (s: string) => string = (s) => s):
 const lowerWords = (t: string) => new Set(fold(t).match(/(?<![\p{L}\p{N}])\p{Ll}[\p{L}\p{N}&'-]*/gu) ?? []);
 // Does the unit give this name as a whole name? The same run of capitalised words; the unit's first word, capitalised only because
 // it is first, may or may not be part of a name, so the unit's runs are read both with it and without it.
+// Ruling 2026-11-14: a small fixed table of career abbreviations. A name in a claim is found in a source when it, or its expansion,
+// is there (and the other way round); nothing beyond this table is read as the same name.
+export const ABBREV: Record<string, string[]> = { swe: ["software engineer", "software engineering"], mrr: ["monthly recurring revenue"], arr: ["annual recurring revenue"],
+  gtm: ["go-to-market", "go to market"], pm: ["product manager"], pe: ["private equity"], ib: ["investment banking"], ml: ["machine learning"], yoy: ["year over year"],
+  "m&a": ["mergers and acquisitions"], mba: ["master of business administration"], gpa: ["grade point average"], cs: ["computer science"] };
+const ABBREV_OF = new Map(Object.entries(ABBREV).flatMap(([k, vs]) => vs.map((v) => [v, k] as [string, string])));
+export const nameFoundIn = (name: string, text: string) => nameRe(name).test(text) || (ABBREV[name.toLowerCase()] ?? []).some((v) => nameRe(v).test(text)) || (ABBREV_OF.has(name.toLowerCase()) && nameRe(ABBREV_OF.get(name.toLowerCase())!).test(text));
 function namesOk(claim: Hard, unit: { hard: Hard; lower: Set<string>; lent?: string | null }): boolean {
   // Round 3: on a page code knows is one asked employer's (indexPages `owner`), that employer's name is the page's, not the claim's.
   const lent = unit.lent ? unit.lent.toLowerCase().split(/\s+/).map((w) => w.replace(/[.'-]+$/, "").replace(/'s$/, "")) : null;
@@ -154,6 +161,9 @@ function namesOk(claim: Hard, unit: { hard: Hard; lower: Set<string>; lent?: str
     const r = lent && r0.length > lent.length && lent.every((w, j) => r0[j] === w) ? r0.slice(lent.length) : r0;
     if (r !== r0) proper++;
     if (has(r)) { proper++; continue; }
+    // (the abbreviation table: "SWE" found as "software engineering" in the unit, or the other way round)
+    const ut = String((unit as { text?: string }).text ?? "");
+    if (ut && Object.hasOwn(ABBREV, r.join(" ")) || ABBREV_OF.has(r.join(" "))) { if (nameFoundIn(r.join(" "), ut)) { proper++; continue; } }
     // The owner's name is lent only to a unit that names no one the claim does not (a row "Jane Street interns: $5,000 a week" on a
     // page titled for Citadel is Jane Street's, and lends nothing).
     if (lent && r.length === lent.length && r.every((w, j) => w === lent[j]) && alt.every((u) => claim.names.some((c) => c.length === u.length && c.every((w, j) => w === u[j])))) { proper++; continue; }
@@ -394,7 +404,7 @@ export function findSupport(claim: string, idx: PageIndex, only?: number[], unit
     // line by line.
     if ((s as Unit & { record?: boolean }).record) {
       const vals = new Set(s.hard.numbers.map((n) => n.split("|")[4]));
-      if (h.numbers.every((a) => vals.has(a.split("|")[4])) && h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).filter((r) => r.length).every((r) => r.every((w) => s.lower.has(w) || nameRe(w).test(s.text)))) {
+      if (h.numbers.every((a) => vals.has(a.split("|")[4])) && h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).filter((r) => r.length).every((r) => r.every((w) => s.lower.has(w) || nameFoundIn(w, s.text)))) {
         const n = [...want].filter((w) => s.content.has(w)).length;
         if (!best || n > best.n) best = { sentence: s.text, page: k, unit: s, n };
       }
@@ -606,7 +616,7 @@ export async function keepSupported(reply: string, sources: (string | { text: st
       const h = hardParts(w.claim, o.read), vals = new Set([...rec.hard.numbers, ...hardParts(gText, o.read).numbers].map((n) => n.split("|")[4]));
       if (!h.numbers.every((a) => vals.has(a.split("|")[4]))) return false;
       // (live-10 C4: a name the guide gives, "GitHub", "Education", is the guide's; layer A reads the joint unit, guide and record)
-      if (!h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).filter((r) => r.length).every((r) => r.every((x) => rec.lower.has(x) || nameRe(x).test(rec.text) || nameRe(x).test(gText)))) return false;
+      if (!h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).filter((r) => r.length).every((r) => r.every((x) => rec.lower.has(x) || nameFoundIn(x, rec.text) || nameFoundIn(x, gText)))) return false;
       // (layer A as everywhere: names and figures, with their units, periods and years; wording is the judge's to read)
       return h.years.every((y) => vals.has(y) || rec.hard.years.includes(y));
     });

@@ -73,6 +73,7 @@ export interface TurnResult {
   // support check keeps code's lines as they are and checks the model's sentences against the read lines too.
   codeLines?: string[];
   readLines?: string[];
+  fileTexts?: string[]; // the text of a File made this turn that passed its fact guard (file_tool.ts)
   fileLinks?: string[]; // FILE KINDS: links to the files create_file made this turn, minted by code; the channel sends them, the model never writes them
 }
 
@@ -304,7 +305,8 @@ export async function runAgentTurn(o: Parameters<typeof runAgentTurnInner>[0]): 
   const typed = [o.said ?? o.message, ...o.history.filter((m: any) => m && m.role === "user").map((m: any) => typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? ""))].join("\n");
   const fileLinks = o.ctx.turn?.fileLinks ?? [], paySources = o.ctx.turn?.paySources ?? [];
   const { codeLines, readLines } = turnLines(seen);
-  return { ...r, ...(attachments.length ? { attachments } : {}), ...(fileLinks.length ? { fileLinks } : {}), ...(paySources.length ? { paySources } : {}), ...(codeLines.length ? { codeLines } : {}), ...(readLines.length ? { readLines } : {}), linksSeen: urlsIn(`${typed}\n${seen.join("\n")}`) };
+  const fileTexts = ((o.ctx.turn as any)?.fileTexts ?? []) as string[];
+  return { ...r, ...(attachments.length ? { attachments } : {}), ...(fileLinks.length ? { fileLinks } : {}), ...(paySources.length ? { paySources } : {}), ...(codeLines.length ? { codeLines } : {}), ...(readLines.length ? { readLines } : {}), ...(fileTexts.length ? { fileTexts } : {}), linksSeen: urlsIn(`${typed}\n${seen.join("\n")}`) };
 }
 // The closed-posting notes code would write for this turn's results, and the posting lines a tool read (see TurnResult.codeLines).
 export function turnLines(seen: string[]): { codeLines: string[]; readLines: string[] } {

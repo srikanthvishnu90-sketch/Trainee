@@ -186,7 +186,11 @@ try {
     const r = await person.say(s);
     lines.push(JSON.stringify({ id: label, setup: true, reply: String(r.reply ?? ""), intent: r.intent }));
   }
+  // A turn is started only while the cap holds a turn's worth (live-9 and live-10: at most $0.45 a turn, $3.2 to $3.4 for 26 turns),
+  // so a live run stops between turns, never inside one, and a $4.50 cap completes all 26.
+  const TURN_RESERVE_USD = 0.5;
   for (const t of turns) {
+    if (live && budget - spent < TURN_RESERVE_USD) { stopped = `budget: $${spent.toFixed(3)} of $${budget} spent; less than a turn's reserve ($${TURN_RESERVE_USD}) left before ${t.id}`; break; }
     label = t.id;
     const before = await counts(person.id), outBefore = w.outbound.length, callsBefore = modelCalls, spentBefore = spent, webBefore = webSearches, t1 = performance.now();
     calls = [];

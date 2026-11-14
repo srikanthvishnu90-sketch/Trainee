@@ -10,11 +10,47 @@
    },
    {
     "name": "remember_instruction",
-    "args": {}
+    "args": {
+     "quote": "x"
+    }
    },
    {
     "name": "create_file",
-    "args": {}
+    "args": {
+     "kind": "plan_review",
+     "data": {
+      "title": "SWE internship plan, summer 2027",
+      "variant": "pipeline",
+      "period": "This week",
+      "sections": [
+       {
+        "heading": "Live roles",
+        "items": [
+         {
+          "label": "PayPal, Software Engineer Intern - Summer 2027",
+          "value": "Chicago, IL. Fit score 38 (Reach). $28-$49 hourly.",
+          "source": "From the posting"
+         }
+        ]
+       },
+       {
+        "heading": "Resume",
+        "items": [
+         {
+          "label": "Lead with",
+          "value": "Pixelforge, Founder (2023-2025): hand-coded 70+ React websites for clients; peak $9k monthly recurring revenue.",
+          "source": "From your resume"
+         },
+         {
+          "label": "Then",
+          "value": "Rallyup, Co-founder and Waypoint, Solo founder (part-time)",
+          "source": "From your resume"
+         }
+        ]
+       }
+      ]
+     }
+    }
    }
   ],
   "reply": "The search found one posting, and it's a related role rather than a match: PayPal, Software Engineer Intern - Summer 2027, Chicago, IL (fit 38, Reach, $28-$49 hourly, not verified still open). https://paypal.wd1.myworkdayjobs.com/en-US/jobs/job/Software-Engineer-Intern---Summer-2027_R0138586\n\nNo resume has been made yet, so there's no file to point you to. The plan is to lead with Pixelforge (70+ React sites, $9k MRR), Rallyup and Waypoint, and keep the finance, GTM and research lines short. Before anything goes out I need Crestline's exact name and your Harbor dates. Nothing has been sent or applied. Is it \"Crestline Partners\" or \"Crestline Search Partners\"?"

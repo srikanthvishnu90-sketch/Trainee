@@ -2,8 +2,27 @@
 // Helpers for the group C amendments (owner decision 2026-11-13: the research support check is switched on). Nothing here says yes
 // to a claim the page does not state: every judge below answers by the page text it is shown (support-test-judge.ts), and the draft
 // lines below are sentences the synthetic pages themselves state.
-import { supportJudgeAnswer, isSupportJudgeCall, testSupportJudge } from "./support-test-judge.ts";
+import { bare, type SupportJudge } from "../../supabase/functions/_shared/agent/research/support.ts";
+import { isSupportJudgeCall, supportsClaim, testSupportJudge } from "./support-test-judge.ts";
 export { testSupportJudge };
+
+// support-test-judge.ts says yes to every quote check ("The marked text "…" is the page's own statement of fact …, and it answers
+// the question: …"). The real judge is asked whether the unit answers the question, and says no to a page sentence that has nothing
+// to do with it (a tariff review for "the outlook for hydrogen trucks"). This judge answers that part by the page too: a quote check
+// is yes only when the marked text shares a content word with the question (the person's own words, not code's). Model-worded
+// claims are judged exactly as support-test-judge.ts judges them.
+const STOP = new Set("a an the and or of to in on at for by with from as is are was were be been it its this that what which who how why when where do does did will would could should can me my i you your we our they their there these those give tell show find get about any some much many more most give research compare file".split(" "));
+const stem = (w: string) => w.replace(/(?:ies|es|s|ed|ing)$/, "");
+const wordsOf = (t: string) => new Set((bare(t).toLowerCase().match(/[\p{L}][\p{L}'’-]*/gu) ?? []).map((w) => w.replace(/['’]s$/, "")).filter((w) => w.length > 2 && !STOP.has(w)).map(stem));
+const QUOTE_CHECK = /^The marked text "([\s\S]*)" is the page's own statement of fact[\s\S]*?(?:, and it answers the question: ([\s\S]*?))?\.?$/;
+export function answersAsk(claim: string, source: string): boolean {
+  const q = QUOTE_CHECK.exec(claim);
+  if (!q) return supportsClaim(claim, source);
+  if (!q[2]) return true;
+  const have = wordsOf(q[1]);
+  return [...wordsOf(q[2])].some((w) => have.has(w));
+}
+export const askAwareJudge: SupportJudge = async (cs) => cs.map((c) => answersAsk(c.claim, c.source) ? "yes" : "no");
 
 // The synthetic Greenhouse board's own lines (tests/helpers/research_free_web.ts, GH_JOBS, as the free reader writes them). With the
 // check on, a brief's "what would have to be true" and "risks" lines stand only when a page states them; the free web's company
@@ -24,7 +43,7 @@ export function recordingJudge() {
 }
 
 // For a test whose Anthropic stub scripts the brain's turns: the support judge's request goes to the same API. This wraps the stub's
-// fetch so a request whose system prompt is the support judge's is answered here, by the page truth (supportJudgeAnswer), as the
+// fetch so a request whose system prompt is the support judge's is answered here, by the page truth (answersAsk), as the
 // API's JSON message, and never reaches (or advances) the brain's script.
 export function answerSupportJudge(inner: typeof fetch, seen: { judged: number } = { judged: 0 }): typeof fetch {
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -35,7 +54,9 @@ export function answerSupportJudge(inner: typeof fetch, seen: { judged: number }
       if (body && isSupportJudgeCall(body.system)) {
         seen.judged++;
         const user = body.messages?.[0]?.content;
-        const text = supportJudgeAnswer(typeof user === "string" ? user : Array.isArray(user) ? String(user[0]?.text ?? "") : "");
+        let items: { claim: string; source: string }[] = [];
+        try { items = JSON.parse(typeof user === "string" ? user : Array.isArray(user) ? String(user[0]?.text ?? "") : ""); } catch { /* empty */ }
+        const text = JSON.stringify(items.map((x) => answersAsk(String(x.claim ?? ""), String(x.source ?? "")) ? "yes" : "no"));
         return new Response(JSON.stringify({ id: "msg_judge", type: "message", role: "assistant", model: body.model ?? "claude", content: [{ type: "text", text }], stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 1 } }), { status: 200, headers: { "content-type": "application/json" } });
       }
     }

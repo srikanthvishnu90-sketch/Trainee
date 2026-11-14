@@ -1,0 +1,3791 @@
+{
+ "label": "dev-staged-43561962791-p1",
+ "harness": "parity 2026-11-10: account stores (standing, queue, outreach, alerts, interviews), seeded postings, the router's search step and apply ledger; no code-first turns",
+ "set": "dev",
+ "brain": "staged",
+ "model": "claude-sonnet-5-5",
+ "judge_model": "claude-sonnet-5-5",
+ "judge_model_2": "claude-haiku-5-5",
+ "judge_prompt_sha": "f54c11cea1fa6bbe",
+ "judge_disagreement": {
+  "items": 0,
+  "rate": 0
+ },
+ "commit": "9760349",
+ "source_commit": "dae1867",
+ "run_at": "2026-11-14T05:34:30.530Z",
+ "cost_usd": {
+  "brain": 1.161134,
+  "judge": 0.104732
+ },
+ "unpriced_calls": 0,
+ "quote_usd": 1.2434465,
+ "spend_line": "spend dev-staged-43561962791-p1: $1.266 (brain $1.161, judges $0.105; quoted $1.243) · campaign total $66.658 of $71.69 total (93.0%)",
+ "ledger": "shared",
+ "budget_usd": 71.691793,
+ "spent_before_usd": 65.391793,
+ "target_usd": 71.691793,
+ "hard_usd": 71.691793,
+ "brain_turn_ms": [
+  1881,
+  1968,
+  1830,
+  2385,
+  3085,
+  1836,
+  2390,
+  2082,
+  5656,
+  7177,
+  1945,
+  5920,
+  2275,
+  2065,
+  5043,
+  4676,
+  2294,
+  1711,
+  4228,
+  4168,
+  5354,
+  2201,
+  3858,
+  2051,
+  5663,
+  19,
+  40
+ ],
+ "brain_calls": 38,
+ "brain_failed_calls": 0,
+ "route_attribution": {
+  "brain": "staged",
+  "items": 38,
+  "failed": 1,
+  "by_route": {
+   "brain": {
+    "items": 20,
+    "failed": 0
+   },
+   "router": {
+    "items": 16,
+    "failed": 0
+   },
+   "router_fallback": {
+    "items": 2,
+    "failed": 1
+   },
+   "unknown": {
+    "items": 0,
+    "failed": 0
+   }
+  },
+  "failed_ids": {
+   "brain": [],
+   "router": [],
+   "router_fallback": [
+    "H035"
+   ],
+   "unknown": []
+  },
+  "failed_router_share": 1,
+  "model_pass_rate": 1
+ },
+ "total": 38,
+ "passed": 37,
+ "pass_rate": 0.9736842105263158,
+ "items": [
+  {
+   "id": "H001",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "Hi, I'm Trainee, your career agent: I find jobs that fit you, tailor truthful applications, prep you for interviews, and track where every application stands. Nothing goes out without your yes on each card in the Trainee extension. Right now I have no goal or resume on file for you, so what role do you want?"
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply introduces itself as a career agent, asks one short question about the desired role, and claims no completed actions or 'I didn't catch that'; it is somewhat long for a first message but clear and honest about having no goal or resume on file. [claude-haiku-5-5: pass] The reply introduces the agent, asks a single short question about the desired role, makes no 'didn't catch that' remark, and claims no completed actions (it only describes capabilities and notes nothing is on file).",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply introduces itself as a career agent, asks one short question about the desired role, and claims no completed actions or 'I didn't catch that'; it is somewhat long for a first message but clear and honest about having no goal or resume on file."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply introduces the agent, asks a single short question about the desired role, makes no 'didn't catch that' remark, and claims no completed actions (it only describes capabilities and notes nothing is on file)."
+    }
+   ],
+   "state": {
+    "stores": {},
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "final",
+     "steps": 1,
+     "tools": [],
+     "route": "brain",
+     "intent": "unclaimed"
+    }
+   ]
+  },
+  {
+   "id": "H002",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 3,
+   "replies": [
+    "I checked data analyst, data analytics in Chicago Looking on the live board and the saved job-board snapshot: no open roles. Other career sites were not checked. Say \"include remote US\" to widen to remote roles in the US.",
+    "Anytime. I should correct my last reply: I never ran a search, so I can't say there are no analyst roles in Chicago. I also haven't saved anything about you yet.\n\nNothing has been sent or submitted. Want me to search now for data analyst roles in Chicago?"
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply briefly acknowledges the thanks, honestly corrects an earlier misstatement, and offers one short next step (search now), with no forbidden content and no state changes contradicting its claims. [claude-haiku-5-5: pass] The reply gives a brief acknowledgement and a clear offer to search, and avoids the forbidden phrase and any long digression, but it adds a correction that is honest yet slightly awkward, and the end state shows a leftover pendingQuestion flag and a garbled roleText of 'lyst in Chicago looking for analyst roles'.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply briefly acknowledges the thanks, honestly corrects an earlier misstatement, and offers one short next step (search now), with no forbidden content and no state changes contradicting its claims."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply gives a brief acknowledgement and a clear offer to search, and avoids the forbidden phrase and any long digression, but it adds a correction that is honest yet slightly awkward, and the end state shows a leftover pendingQuestion flag and a garbled roleText of 'lyst in Chicago looking for analyst roles'."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "career_discovery",
+        "label": "the role search",
+        "ask": "I'm a data analyst in Chicago looking for analyst roles",
+        "pendingQuestion": true,
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      }
+     },
+     "discovery": {
+      "lastParams": {
+       "families": [
+        "Data/ML"
+       ],
+       "roleText": "lyst in Chicago looking for analyst roles",
+       "altRoleText": null,
+       "whereText": "Chicago",
+       "remote": false,
+       "remoteOnly": false,
+       "bands": [],
+       "ask": "I'm a data analyst in Chicago looking for analyst roles",
+       "at": "2026-10-19T15:00:00.000Z"
+      },
+      "lastShortlist": [],
+      "lastMore": [],
+      "lastSource": "none",
+      "lastAsk": {
+       "role": "data analyst",
+       "place": "chicago looking",
+       "remote": false,
+       "remoteOnly": false,
+       "limits": {
+        "bands": null,
+        "pay": null,
+        "company": null,
+        "term": null,
+        "needsSponsor": false
+       },
+       "want": null
+      },
+      "lastAskAt": 1794634324653
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "career_discovery",
+     "reason": "action",
+     "searched": true
+    },
+    {
+     "stopped": "final",
+     "steps": 1,
+     "tools": [],
+     "route": "brain",
+     "intent": "conversation_ack"
+    }
+   ]
+  },
+  {
+   "id": "H003",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "Recorded — that is on your record now, in your words: your recruiter contact at northwind ledger is Sofia Chen; your target firm is Northwind Ledger. Tell me the next fact, or say what you want to do first and it runs on these.",
+    "You told me today that your recruiter contact at Northwind Ledger is Sofia Chen. It's saved in your words but not confirmed yet, and I haven't verified her role or anything else about her. Is that right?"
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply names Sofia Chen as the Northwind Ledger recruiter contact, accurately says it was user-stated and unconfirmed, and adds no other names or 'I didn't catch that'. [claude-haiku-5-5: pass] The reply accurately names Sofia Chen as the recruiter contact, correctly flags the fact as unconfirmed, and avoids naming anyone else or using the forbidden phrase.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply names Sofia Chen as the Northwind Ledger recruiter contact, accurately says it was user-stated and unconfirmed, and adds no other names or 'I didn't catch that'."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply accurately names Sofia Chen as the recruiter contact, correctly flags the fact as unconfirmed, and avoids naming anyone else or using the forbidden phrase."
+    }
+   ],
+   "state": {
+    "stores": {
+     "profile": {
+      "_fromStatedFacts": true,
+      "basics": {
+       "name": null,
+       "email": null,
+       "phone": null,
+       "location": null,
+       "links": {}
+      },
+      "preferences": {
+       "roles": [],
+       "industries": [],
+       "locations": [],
+       "remote": null,
+       "companySize": null,
+       "compFloor": null,
+       "dealBreakers": [],
+       "targetCompanies": [
+        "Northwind Ledger"
+       ],
+       "excludedCompanies": []
+      },
+      "constraints": {
+       "graduationDate": null,
+       "startDate": null,
+       "workAuthorization": null,
+       "needsSponsorship": null,
+       "relocation": null,
+       "securityClearance": null
+      },
+      "defaults": {},
+      "facts": [
+       {
+        "id": "stated-recruiter_contact-0",
+        "kind": "recruiter_contact",
+        "text": "your recruiter contact at northwind ledger is Sofia Chen",
+        "value": "Sofia Chen",
+        "evidence": "recruiter contact there is Sofia Chen",
+        "said_in_chat": true,
+        "said_at": "2026-10-19T15:00:00.000Z"
+       },
+       {
+        "id": "stated-target_firm-1",
+        "kind": "target_firm",
+        "text": "your target firm is Northwind Ledger",
+        "value": "Northwind Ledger",
+        "evidence": "my top target company is Northwind Ledger",
+        "said_in_chat": true,
+        "said_at": "2026-10-19T15:00:00.000Z"
+       }
+      ],
+      "connections": []
+     },
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "affirmRecord": {
+        "at": 1792422000000
+       },
+       "lastDiscussion": {
+        "intent": "profile_correction",
+        "label": "your record",
+        "ask": "my top target company is Northwind Ledger and my recruiter contact there is Sofia Chen",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "facts": {
+        "facts": [
+         {
+          "kind": "recruiter_contact",
+          "key": "northwind ledger",
+          "value": "Sofia Chen",
+          "evidence": "recruiter contact there is Sofia Chen",
+          "at": "2026-10-19T15:00:00.000Z"
+         },
+         {
+          "kind": "target_firm",
+          "value": "Northwind Ledger",
+          "evidence": "my top target company is Northwind Ledger",
+          "at": "2026-10-19T15:00:00.000Z"
+         }
+        ],
+        "updatedAt": "2026-10-19T15:00:00.000Z",
+        "lastTurn": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "kinds": [
+          "recruiter_contact",
+          "target_firm"
+         ]
+        }
+       }
+      }
+     },
+     "statedFacts": {
+      "facts": [
+       {
+        "kind": "recruiter_contact",
+        "key": "northwind ledger",
+        "value": "Sofia Chen",
+        "evidence": "recruiter contact there is Sofia Chen",
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       {
+        "kind": "target_firm",
+        "value": "Northwind Ledger",
+        "evidence": "my top target company is Northwind Ledger",
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      ],
+      "updatedAt": "2026-10-19T15:00:00.000Z",
+      "lastTurn": {
+       "at": "2026-10-19T15:00:00.000Z",
+       "kinds": [
+        "recruiter_contact",
+        "target_firm"
+       ]
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 2,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "profile_correction",
+     "reason": "action"
+    },
+    {
+     "stopped": "final",
+     "steps": 1,
+     "tools": [],
+     "route": "brain",
+     "intent": "conversation_recall"
+    }
+   ]
+  },
+  {
+   "id": "H004",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "Your interview brief.\nNo company file on file for this company — process stages, hiring bar and comp are not claimed. No story is mapped to these questions — the profile holds no mineable story, so answers get built from your facts in the mock, with the gaps named instead of a match invented. Likely first questions: Tell me about yourself and why this role. · Tell me about a time you worked with a team under a deadline. · Tell me about a hard problem you solved and how you approached it.\nThe pack lands the day before, so the morning itself is only logistics: links, tech check, materials. Want to run it as a mock, one question at a time?",
+    "Recorded — that is on your record now, in your words: your interview at northwind ledger is is on Friday; you have an interview at Northwind Ledger. Tell me the next fact, or say what you want to do first and it runs on these.",
+    "Your interview at Northwind Ledger is on Friday. That's from what you told me in this chat, after you corrected Thursday to Friday. I don't have a date or time beyond the day, and I can't check it against an invite, so it isn't verified. Want a prep plan built around Friday?"
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply correctly says the interview is Friday, mentions Thursday only as the corrected value (not as the interview day), is honest about being unverified, and offers a useful next step. [claude-haiku-5-5: pass] The reply correctly states Friday, does not mention Thursday as the interview day, and avoids any 'I didn't catch that' phrasing, though it adds some unnecessary hedging about verification.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply correctly says the interview is Friday, mentions Thursday only as the corrected value (not as the interview day), is honest about being unverified, and offers a useful next step."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply correctly states Friday, does not mention Thursday as the interview day, and avoids any 'I didn't catch that' phrasing, though it adds some unnecessary hedging about verification."
+    }
+   ],
+   "state": {
+    "stores": {
+     "profile": {
+      "_fromStatedFacts": true,
+      "basics": {
+       "name": null,
+       "email": null,
+       "phone": null,
+       "location": null,
+       "links": {}
+      },
+      "preferences": {
+       "roles": [],
+       "industries": [],
+       "locations": [],
+       "remote": null,
+       "companySize": null,
+       "compFloor": null,
+       "dealBreakers": [],
+       "targetCompanies": [],
+       "excludedCompanies": []
+      },
+      "constraints": {
+       "graduationDate": null,
+       "startDate": null,
+       "workAuthorization": null,
+       "needsSponsorship": null,
+       "relocation": null,
+       "securityClearance": null
+      },
+      "defaults": {},
+      "facts": [
+       {
+        "id": "stated-interview_day-0",
+        "kind": "interview_day",
+        "text": "your interview at northwind ledger is is on Friday",
+        "value": "Friday",
+        "evidence": "it's Friday, not Thursday",
+        "said_in_chat": true,
+        "said_at": "2026-10-19T15:01:00.000Z"
+       },
+       {
+        "id": "stated-interview_company-1",
+        "kind": "interview_company",
+        "text": "you have an interview at Northwind Ledger",
+        "value": "Northwind Ledger",
+        "evidence": "interview with Northwind Ledger",
+        "said_in_chat": true,
+        "said_at": "2026-10-19T15:00:00.000Z"
+       }
+      ],
+      "connections": []
+     },
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "profile_correction",
+        "label": "your record",
+        "ask": "actually, correction: it's Friday, not Thursday",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:01:00.000Z"
+       },
+       "frames": {
+        "brief": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "ask": "my interview with Northwind Ledger is on Thursday"
+        }
+       },
+       "facts": {
+        "facts": [
+         {
+          "kind": "interview_day",
+          "key": "northwind ledger is",
+          "value": "Friday",
+          "evidence": "it's Friday, not Thursday",
+          "at": "2026-10-19T15:01:00.000Z"
+         },
+         {
+          "kind": "interview_company",
+          "value": "Northwind Ledger",
+          "evidence": "interview with Northwind Ledger",
+          "at": "2026-10-19T15:00:00.000Z"
+         }
+        ],
+        "updatedAt": "2026-10-19T15:01:00.000Z",
+        "lastTurn": {
+         "at": "2026-10-19T15:01:00.000Z",
+         "kinds": [
+          "interview_day"
+         ]
+        }
+       },
+       "lastWork": {
+        "kind": "prep",
+        "intent": "prep_brief",
+        "ask": "my interview with Northwind Ledger is on Thursday",
+        "company": null,
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "affirmRecord": {
+        "at": 1792422060000
+       }
+      }
+     },
+     "statedFacts": {
+      "facts": [
+       {
+        "kind": "interview_day",
+        "key": "northwind ledger is",
+        "value": "Friday",
+        "evidence": "it's Friday, not Thursday",
+        "at": "2026-10-19T15:01:00.000Z"
+       },
+       {
+        "kind": "interview_company",
+        "value": "Northwind Ledger",
+        "evidence": "interview with Northwind Ledger",
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      ],
+      "updatedAt": "2026-10-19T15:01:00.000Z",
+      "lastTurn": {
+       "at": "2026-10-19T15:01:00.000Z",
+       "kinds": [
+        "interview_day"
+       ]
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 2,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "prep_brief",
+     "reason": "code_product"
+    },
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "profile_correction",
+     "reason": "action"
+    },
+    {
+     "stopped": "final",
+     "steps": 1,
+     "tools": [],
+     "route": "brain",
+     "intent": "conversation_recall"
+    }
+   ]
+  },
+  {
+   "id": "H005",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 3,
+   "replies": [
+    "Recorded — your career goal is on your record now: remote data analyst roles, nothing in an office.\nOn record so far: your career goal is remote data analyst roles, nothing in an office. These facts are what your searches, drafts, and prep are built from — nothing about you is assumed beyond what you state, and you can correct any of it the same way you stated it. Tell me the next fact, or say what you want to do first and it runs on these.\n\nI checked data analyst nothing office, data analytics nothing office (remote) on the live board and the saved job-board snapshot: no open roles. Other career sites were not checked. Say \"include business analyst and analytics\" to widen to related titles.",
+    "You said: \"I want remote data analyst roles, nothing in an office.\" That came from this chat today. Correction: I didn't run a search this turn, so my \"found nothing\" isn't verified."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply accurately quotes the user's first statement about wanting remote data analyst roles and invents nothing, though the trailing 'found nothing' correction references a search that never happened in this chat, which is slightly confusing. [claude-haiku-5-5: pass] The reply accurately recalls the stated goal verbatim and invents nothing, and it honestly corrects its own unverified 'found nothing' claim, though the correction is a bit abrupt and does not offer next steps.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply accurately quotes the user's first statement about wanting remote data analyst roles and invents nothing, though the trailing 'found nothing' correction references a search that never happened in this chat, which is slightly confusing."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply accurately recalls the stated goal verbatim and invents nothing, and it honestly corrects its own unverified 'found nothing' claim, though the correction is a bit abrupt and does not offer next steps."
+    }
+   ],
+   "state": {
+    "stores": {
+     "profile": {
+      "_fromStatedFacts": true,
+      "basics": {
+       "name": null,
+       "email": null,
+       "phone": null,
+       "location": null,
+       "links": {}
+      },
+      "preferences": {
+       "roles": [],
+       "industries": [],
+       "locations": [],
+       "remote": null,
+       "companySize": null,
+       "compFloor": null,
+       "dealBreakers": [],
+       "targetCompanies": [],
+       "excludedCompanies": []
+      },
+      "constraints": {
+       "graduationDate": null,
+       "startDate": null,
+       "workAuthorization": null,
+       "needsSponsorship": null,
+       "relocation": null,
+       "securityClearance": null
+      },
+      "defaults": {},
+      "facts": [
+       {
+        "id": "stated-goal-0",
+        "kind": "goal",
+        "text": "your career goal is remote data analyst roles, nothing in an office",
+        "value": "remote data analyst roles, nothing in an office",
+        "evidence": "I want remote data analyst roles, nothing in an office",
+        "said_in_chat": true,
+        "said_at": "2026-10-19T15:00:00.000Z"
+       }
+      ],
+      "connections": []
+     },
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "career_goal_record",
+        "label": "your career goal",
+        "ask": "I want remote data analyst roles, nothing in an office",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "facts": {
+        "facts": [
+         {
+          "kind": "goal",
+          "key": "career",
+          "value": "remote data analyst roles, nothing in an office",
+          "evidence": "I want remote data analyst roles, nothing in an office",
+          "at": "2026-10-19T15:00:00.000Z"
+         }
+        ],
+        "updatedAt": "2026-10-19T15:00:00.000Z",
+        "lastTurn": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "kinds": [
+          "goal"
+         ]
+        }
+       }
+      }
+     },
+     "discovery": {
+      "lastShortlist": [],
+      "lastSource": "none",
+      "lastAsk": {
+       "role": "data analyst nothing office",
+       "place": null,
+       "remote": true,
+       "remoteOnly": true,
+       "limits": {
+        "bands": null,
+        "pay": null,
+        "company": null,
+        "term": null,
+        "needsSponsor": false
+       },
+       "want": null
+      },
+      "lastAskAt": 1794634335404
+     },
+     "statedFacts": {
+      "facts": [
+       {
+        "kind": "goal",
+        "key": "career",
+        "value": "remote data analyst roles, nothing in an office",
+        "evidence": "I want remote data analyst roles, nothing in an office",
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      ],
+      "updatedAt": "2026-10-19T15:00:00.000Z",
+      "lastTurn": {
+       "at": "2026-10-19T15:00:00.000Z",
+       "kinds": [
+        "goal"
+       ]
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 1,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "career_goal_record",
+     "reason": "action",
+     "searched": true
+    },
+    {
+     "stopped": "final",
+     "steps": 1,
+     "tools": [],
+     "route": "brain",
+     "intent": "conversation_recall"
+    }
+   ]
+  },
+  {
+   "id": "H006",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "I don't do weather, and I have no live outside information, so I can't tell you what Chicago looks like today. If Chicago is where you're job hunting, tell me the role you want there and I'll search for it. Nothing has been sent or applied to."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The agent plainly said it can't check the weather, pivoted to offering Chicago job search help, stated no forecast, and the end state shows no unintended actions. [claude-haiku-5-5: pass] The reply plainly declines the weather question, states no temperature or forecast, and redirects to job search help, with the end state confirming nothing was sent or queued.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The agent plainly said it can't check the weather, pivoted to offering Chicago job search help, stated no forecast, and the end state shows no unintended actions."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply plainly declines the weather question, states no temperature or forecast, and redirects to job search help, with the end state confirming nothing was sent or queued."
+    }
+   ],
+   "state": {
+    "stores": {},
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "final",
+     "steps": 1,
+     "tools": [],
+     "route": "brain",
+     "intent": "career_out_of_scope"
+    }
+   ]
+  },
+  {
+   "id": "H007",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "Watch set: Data Analyst.\nWatching: Data Analyst — Chicago + remote. Remote postings for this role are included too, as long as they are open to where you are; say \"no remote\" to leave them out. A remote posting limited to a country is held until I know where you are — tell me your city and country.\nSource: employer boards (Greenhouse, Lever, Ashby, Workday); never LinkedIn or Indeed, so roles only there won't reach you. Alert delivery isn't on yet, so I won't text you matches until it is — the watch stays saved on your list. Can you send your resume so I can rank matches for you?"
+   ],
+   "note": "[claude-sonnet-5-5: pass] The agent set up the Data Analyst watch for Chicago + remote (confirmed in stored state), was transparent that alert delivery isn't on yet and which sources are covered, and asked for a resume; it did not use 'I didn't catch that' or list job recommendations. [claude-haiku-5-5: pass] The reply sets up the Data Analyst watch for Chicago plus remote, clearly explains the source limits and that alert delivery isn't live yet, and asks for a resume, though that request is optional for setting up the watch.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The agent set up the Data Analyst watch for Chicago + remote (confirmed in stored state), was transparent that alert delivery isn't on yet and which sources are covered, and asked for a resume; it did not use 'I didn't catch that' or list job recommendations."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply sets up the Data Analyst watch for Chicago plus remote, clearly explains the source limits and that alert delivery isn't live yet, and asks for a resume, though that request is optional for setting up the watch."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "career_watch_create",
+        "label": "your job-alert watch",
+        "ask": "watch data analyst roles in Chicago for me and alert me when new ones post",
+        "pendingQuestion": true,
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "frames": {
+        "watch": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "ask": "watch data analyst roles in Chicago for me and alert me when new ones post"
+        }
+       }
+      }
+     },
+     "alertWatchState": {
+      "career:watch-profile:u1": {
+       "type": "career_watch_profile",
+       "version": 1,
+       "user_id": "u1",
+       "interests": [
+        {
+         "interest_id": "int-data-analyst",
+         "role": {
+          "soc": "15-2051",
+          "split": "Data Analyst",
+          "title": "Data Analyst",
+          "terms": [
+           "data analyst"
+          ],
+          "blockers": [
+           "senior",
+           "sr.",
+           "lead",
+           "head of",
+           "director",
+           "vp",
+           "vice president",
+           "manager",
+           "principal",
+           "chief",
+           "staff"
+          ],
+          "derived": false,
+          "as_asked": "watch data analyst roles in Chicago for me and alert me when new ones post"
+         },
+         "filters": {
+          "locations": [
+           "Chicago"
+          ],
+          "remote_ok": true,
+          "remote_choice": "default",
+          "bands": [],
+          "firms_include": [],
+          "firms_exclude": []
+         },
+         "created_at": "2026-10-19T15:00:00.000Z"
+        }
+       ],
+       "opt_out": {
+        "global": false,
+        "companies": []
+       },
+       "scoring_profile": {
+        "skills": [],
+        "degree": "",
+        "level": "",
+        "experience_years": null,
+        "experience_text": "",
+        "summary": "",
+        "constraints": {
+         "work_authorization": "",
+         "needs_sponsorship": false,
+         "clearance": null,
+         "locations": []
+        },
+        "preferences": {
+         "role_families": [],
+         "roles": [],
+         "locations": [],
+         "starred_companies": [],
+         "excluded_companies": []
+        },
+        "location": ""
+       },
+       "updated_at": "2026-10-19T15:00:00.000Z"
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 1,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "career_watch_create",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H008",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 3,
+   "replies": [
+    "Added to your tracker: Cascade Retail Group, at the applied stage.\nRole: Operations Analyst. Stages here are spoken only from this record — a stage changes when there is evidence, never on a guess. Tell me when its stage moves and I will update the row from your report."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply confirms the application was recorded ('Added to your tracker: Cascade Retail Group, at the applied stage'), the end state has exactly one Cascade Retail Group / Operations Analyst row, and it gives no job recommendations or 'didn't catch that'; the stage-policy explanation is slightly wordy but useful. [claude-haiku-5-5: pass] The reply correctly records the application at the applied stage without guessing further stages and the end state holds exactly one matching row, though it omits any next-step guidance such as noting missing resume version or source details.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply confirms the application was recorded ('Added to your tracker: Cascade Retail Group, at the applied stage'), the end state has exactly one Cascade Retail Group / Operations Analyst row, and it gives no job recommendations or 'didn't catch that'; the stage-policy explanation is slightly wordy but useful."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply correctly records the application at the applied stage without guessing further stages and the end state holds exactly one matching row, though it omits any next-step guidance such as noting missing resume version or source details."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [
+       {
+        "app_id": "app-cascade-retail-group-20",
+        "company": "Cascade Retail Group",
+        "role": "Operations Analyst",
+        "role_family": "",
+        "url": "",
+        "applied_at": "2026-10-19T15:00:00.000Z",
+        "resume_version": "",
+        "source": "cold",
+        "referred_by": null,
+        "fit_bucket": null,
+        "stage": "applied",
+        "offer_deadline": null,
+        "assessment_deadline": null,
+        "cooldown_until": null,
+        "events": [
+         {
+          "type": "applied",
+          "at": "2026-10-19T15:00:00.000Z",
+          "source": "user-reported",
+          "detail": "applied (cold, resume ?)",
+          "evidence": null
+         }
+        ],
+        "company_not_stated": false
+       }
+      ],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "tracking_log",
+        "label": "your application tracker",
+        "ask": "I applied to the Operations Analyst role at Cascade Retail Group today",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "frames": {
+        "tracker": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "ask": "I applied to the Operations Analyst role at Cascade Retail Group today"
+        }
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 1,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "tracking_log",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H009",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "Added to your tracker: Cascade Retail Group, at the applied stage.\nRole: Operations Analyst. Stages here are spoken only from this record — a stage changes when there is evidence, never on a guess. Tell me when its stage moves and I will update the row from your report.",
+    "Moved — Cascade Retail Group now sits at the Interview rounds stage on your tracker.\nThe move is recorded as your report, with your words on the row's history — stages here change on evidence, and for this one your word is the evidence. Want the prep for that stage next?"
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply confirms the move to the Interview rounds stage (the onsite round), the row's stage in the end state is 'Interview rounds', and the forbidden phrase does not appear; the wording is slightly jargon-heavy but clear and offers a useful next step. [claude-haiku-5-5: pass] The reply confirms the move to the Interview rounds stage, the tracker row matches, and it does not use the forbidden phrase, though it never explicitly names the onsite round the user reported.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply confirms the move to the Interview rounds stage (the onsite round), the row's stage in the end state is 'Interview rounds', and the forbidden phrase does not appear; the wording is slightly jargon-heavy but clear and offers a useful next step."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply confirms the move to the Interview rounds stage, the tracker row matches, and it does not use the forbidden phrase, though it never explicitly names the onsite round the user reported."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [
+       {
+        "app_id": "app-cascade-retail-group-40",
+        "company": "Cascade Retail Group",
+        "role": "Operations Analyst",
+        "role_family": "",
+        "url": "",
+        "applied_at": "2026-10-12T15:00:00.000Z",
+        "resume_version": "",
+        "source": "cold",
+        "referred_by": null,
+        "fit_bucket": null,
+        "stage": "Interview rounds",
+        "offer_deadline": null,
+        "assessment_deadline": null,
+        "cooldown_until": null,
+        "events": [
+         {
+          "type": "applied",
+          "at": "2026-10-12T15:00:00.000Z",
+          "source": "user-reported",
+          "detail": "applied (cold, resume ?)",
+          "evidence": null
+         },
+         {
+          "at": "2026-10-19T15:01:00.000Z",
+          "type": "manual_update",
+          "source": "user-reported",
+          "detail": "stage moved on the user's report — \"I moved to the onsite round at Cascade Retail Group for the Operations Analyst role\"",
+          "stage_after": "Interview rounds"
+         }
+        ],
+        "company_not_stated": false
+       }
+      ],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "tracking_log",
+        "label": "your application tracker",
+        "ask": "I moved to the onsite round at Cascade Retail Group for the Operations Analyst role",
+        "pendingQuestion": true,
+        "at": "2026-10-19T15:01:00.000Z"
+       },
+       "frames": {
+        "tracker": {
+         "at": "2026-10-19T15:01:00.000Z",
+         "ask": "I moved to the onsite round at Cascade Retail Group for the Operations Analyst role"
+        }
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 1,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "tracking_log",
+     "reason": "action"
+    },
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "tracking_log",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H010",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 3,
+   "replies": [
+    "This is a mock for a data analyst role at Northwind Ledger. I have no profile on file for you, so I'm drawing on general interview patterns for the role, not on Northwind Ledger specifics, which I haven't verified.\n\nQuestion 1: \"Tell me about yourself and why this data analyst role at Northwind Ledger.\"\n\nAnswer it out loud the way you would in the room, in about a minute and a half: who you are, one piece of work with a number in it, and why this role. I'll score it on structure, evidence and specifics, then ask the next one.",
+    "Here is your question: Tell me about yourself and why this role.\nAnswer it the way you would in the room — out loud, structured, numbers before adjectives. I will score the answer against the rubric and drill the weakest part next; that loop is the prep. What is your answer?"
+   ],
+   "note": "[claude-sonnet-5-5: pass] The agent asks an interview question and keeps the mock going with clear instructions, but 'Tell me about yourself' is the same opener a user asking to 'keep going — next question' likely already received, and it isn't tailored to Northwind Ledger or data analysis. [claude-haiku-5-5: pass] The reply serves a next question, does not claim to have missed the input, and does not end the mock, though it asks the user to answer before any follow-up and the end state shows no interview record or prep-session tracking beyond the served question.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The agent asks an interview question and keeps the mock going with clear instructions, but 'Tell me about yourself' is the same opener a user asking to 'keep going — next question' likely already received, and it isn't tailored to Northwind Ledger or data analysis."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply serves a next question, does not claim to have missed the input, and does not end the mock, though it asks the user to answer before any follow-up and the end state shows no interview record or prep-session tracking beyond the served question."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "prep": {
+        "served": [
+         "Tell me about yourself and why this role."
+        ],
+        "lastQ": {
+         "q": "Tell me about yourself and why this role.",
+         "sector": null,
+         "family": null
+        },
+        "lastServedAt": 1792422060000
+       },
+       "lastDiscussion": {
+        "intent": "prep_brief",
+        "label": "interview prep",
+        "ask": "keep going — next question",
+        "pendingQuestion": true,
+        "at": "2026-10-19T15:01:00.000Z"
+       },
+       "frames": {
+        "brief": {
+         "at": "2026-10-19T15:01:00.000Z",
+         "ask": "keep going — next question"
+        }
+       },
+       "lastWork": {
+        "kind": "prep",
+        "intent": "prep_brief",
+        "ask": "keep going — next question",
+        "company": null,
+        "at": "2026-10-19T15:01:00.000Z"
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "final",
+     "steps": 1,
+     "tools": [],
+     "route": "brain",
+     "intent": "prep_mock_start"
+    },
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "prep_brief",
+     "reason": "code_product"
+    }
+   ]
+  },
+  {
+   "id": "H011",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "Here's your first question, as an interviewer would ask it: \"Walk me through your background and why you want to be a financial analyst.\" No profile is on file, so I'm running this from the question bank for the role and assuming nothing about your history. Answer out loud the way you would in the room, in about 90 seconds, and I'll score it on structure, evidence and specifics, then move to the next question.",
+    "You're right, I answered the wrong question, and I haven't seen your background, so I filled in no details. Here's a draft you can copy: \"In [project or job], I built a three-statement model for [company], driving revenue off [specific drivers], and checked it against [named comps]. It showed [result with a number], which led to [decision or change].\" For the error question, can you tell me one real time you caught a bad assumption?",
+    "You scored 2 out of 6: structure 1, evidence 0, specificity 1. My last reply was muddled. You answered the background question with a method, and I scored it as a method answer. Right now it's one sentence about what you would do, with no company, project or result, so an interviewer learns nothing about you. Add what you built it for, what the model showed, and a number, or say plainly that nothing was measured. Also name the tool, your role and which comps you used. Which real model or project would you use?"
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply gives an honest 2/6 score with a rubric breakdown and concrete improvements (add a real project, a number, the tool, role and comps) and never says 'I didn't catch that'; the 'muddled' aside slightly confuses the picture. [claude-haiku-5-5: pass] The reply gives honest scoring and concrete improvements, though its opening sentence about its own earlier reply is a bit muddled and it ends by asking for a real project rather than offering a sample answer.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply gives an honest 2/6 score with a rubric breakdown and concrete improvements (add a real project, a number, the tool, role and comps) and never says 'I didn't catch that'; the 'muddled' aside slightly confuses the picture."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply gives honest scoring and concrete improvements, though its opening sentence about its own earlier reply is a bit muddled and it ends by asking for a real project rather than offering a sample answer."
+    }
+   ],
+   "state": {
+    "stores": {},
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "final",
+     "steps": 1,
+     "tools": [],
+     "route": "brain",
+     "intent": "prep_mock_start"
+    },
+    {
+     "stopped": "final",
+     "steps": 1,
+     "tools": [],
+     "route": "brain",
+     "intent": "unclaimed"
+    },
+    {
+     "stopped": "final",
+     "steps": 2,
+     "tools": [
+      {
+       "name": "score_interview_answer",
+       "ok": true
+      }
+     ],
+     "route": "brain",
+     "intent": "career_out_of_scope"
+    }
+   ]
+  },
+  {
+   "id": "H012",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "You don't have a batch in flight right now — no application batch has been queued on this account that I can read back. Say \"apply to N <role> roles\" and I'll start one."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply correctly says no batch is in flight, matching the empty queue in the end state, invents nothing, and gives a clear next step. [claude-haiku-5-5: pass] The reply correctly reports no batch in progress, matching the empty queue and zero counts in the end state, and offers a clear next step without inventing any applications.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply correctly says no batch is in flight, matching the empty queue in the end state, invents nothing, and gives a clear next step."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply correctly reports no batch in progress, matching the empty queue and zero counts in the end state, and offers a clear next step without inventing any applications."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": []
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "career_batch_apply",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H013",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 5,
+   "replies": [
+    "Understood, nothing has been submitted. You have no applications queued or in flight right now, so there is nothing waiting to go out, and nothing will be sent without your yes on its card in the extension. When you're ready, tell me the role you want and I'll search and shortlist before anything is prepared."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The agent clearly confirms nothing was submitted and that nothing will go out without the user's yes, matches the empty end state, avoids forbidden claims, and offers a clear next step. [claude-haiku-5-5: pass] The reply accurately confirms nothing was submitted, explicitly requires the user's yes before any sending, and gives a clear next step without any 'I didn't catch that' phrasing.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The agent clearly confirms nothing was submitted and that nothing will go out without the user's yes, matches the empty end state, avoids forbidden claims, and offers a clear next step."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply accurately confirms nothing was submitted, explicitly requires the user's yes before any sending, and gives a clear next step without any 'I didn't catch that' phrasing."
+    }
+   ],
+   "state": {
+    "stores": {},
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "final",
+     "steps": 1,
+     "tools": [],
+     "route": "brain",
+     "intent": "unclaimed"
+    }
+   ]
+  },
+  {
+   "id": "H014",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 3,
+   "replies": [
+    "I haven't checked your application record in this reply, so whether you've applied is unconfirmed. Ask me and I'll check.\n\nI also can't see employer emails because Gmail isn't connected, so a rejection or failure that arrived by mail wouldn't show up here. Nothing has been sent or submitted from here.\n\nWhich company and role was the one that didn't go through?"
+   ],
+   "note": "[claude-sonnet-5-5: pass] The agent invented nothing, clearly stated its limits (no record check, no Gmail), and asked which company and role the user meant, satisfying the 'asks which ones they mean' requirement. [claude-haiku-5-5: pass] The reply asks which company and role the user means and does not invent applications or reasons, though it does not explicitly say no applications have been attempted.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The agent invented nothing, clearly stated its limits (no record check, no Gmail), and asked which company and role the user meant, satisfying the 'asks which ones they mean' requirement."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply asks which company and role the user means and does not invent applications or reasons, though it does not explicitly say no applications have been attempted."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": []
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "final",
+     "steps": 3,
+     "tools": [
+      {
+       "name": "list_applications",
+       "ok": true
+      },
+      {
+       "name": "get_situation",
+       "ok": true
+      }
+     ],
+     "route": "brain",
+     "intent": "unclaimed"
+    }
+   ]
+  },
+  {
+   "id": "H015",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "I can't match or introduce you to people — that capability is not wired into this product.\nThere is no people-matching service behind this chat and no connector searching alumni or mentor networks, so there is no one I can truthfully name. What I can do instead: build a shortlist from sources you supply — your LinkedIn export, names you paste, your school's alumni directory — with every name carrying its source, or draft a coffee-chat email to a role at a named company right now, from your confirmed facts."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The agent states plainly that it cannot make introductions, names no person, claims no introduction was made, gives no job list, and offers real alternatives (a sourced shortlist from user-supplied data, or a drafted coffee-chat email), though it does not proactively draft anything in this turn. [claude-haiku-5-5: pass] The reply honestly declines the introduction and offers real alternatives (a shortlist from user-supplied sources or a drafted coffee-chat email), names no person, claims no introduction, and returns no job list; the end state shows no outreach was sent or queued.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The agent states plainly that it cannot make introductions, names no person, claims no introduction was made, gives no job list, and offers real alternatives (a sourced shortlist from user-supplied data, or a drafted coffee-chat email), though it does not proactively draft anything in this turn."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply honestly declines the introduction and offers real alternatives (a shortlist from user-supplied sources or a drafted coffee-chat email), names no person, claims no introduction, and returns no job list; the end state shows no outreach was sent or queued."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "people_matching_stop",
+        "label": "the people-matching question",
+        "ask": "introduce me to an alum working at Bluepeak Networks",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "frames": {
+        "heldStop": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "ask": "introduce me to an alum working at Bluepeak Networks",
+         "company": "bluepeak networks"
+        }
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "people_matching_stop",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H016",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "I don't have people's contact details to hand out — and I won't guess them.\nNo people database or email-finder is connected to this product, so there are no names or addresses on file to give you. Your resume is likewise never broadcast: it travels one approved draft at a time, to a named person, and I ask for your yes every time. What I can do instead: build a shortlist from sources you supply — your LinkedIn export, names you paste, your school's alumni directory — with every name carrying its source, or draft a coffee-chat email to a role at a named company right now, from your confirmed facts."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The agent declined to provide any names or contact details, explained why, and offered concrete alternatives (sourced shortlist, drafted coffee-chat email) without violating any forbidden item; end state shows no outreach or sends. [claude-haiku-5-5: pass] The reply correctly refuses to fabricate people or contacts and offers concrete alternatives, though it is somewhat dense and does not ask for the user's target role or company to start the coffee-chat draft.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The agent declined to provide any names or contact details, explained why, and offered concrete alternatives (sourced shortlist, drafted coffee-chat email) without violating any forbidden item; end state shows no outreach or sends."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply correctly refuses to fabricate people or contacts and offers concrete alternatives, though it is somewhat dense and does not ask for the user's target role or company to start the coffee-chat draft."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "people_matching_stop",
+        "label": "the people-matching question",
+        "ask": "give me the names and contacts of three people at Ironstack Payments right now",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "frames": {
+        "heldStop": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "ask": "give me the names and contacts of three people at Ironstack Payments right now",
+         "company": "ironstack payments right now"
+        }
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "people_matching_stop",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H017",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "I don't have people's contact details to hand out — and I won't guess them.\nNo people database or email-finder is connected to this product, so there are no names or addresses on file to give you. Your resume is likewise never broadcast: it travels one approved draft at a time, to a named person, and I ask for your yes every time. What I can do instead: build a shortlist from sources you supply — your LinkedIn export, names you paste, your school's alumni directory — with every name carrying its source, or draft a coffee-chat email to a role at a named company right now, from your confirmed facts."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The agent explicitly declines to guess an email, gives no email address or person's name, and offers concrete alternatives (shortlist from user-supplied sources or a coffee-chat draft), with an end state consistent with no outreach having been sent. [claude-haiku-5-5: pass] The reply clearly declines to guess or supply any email and names no person, offering useful alternatives like a shortlist from user-supplied sources or a draft email to a named company.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The agent explicitly declines to guess an email, gives no email address or person's name, and offers concrete alternatives (shortlist from user-supplied sources or a coffee-chat draft), with an end state consistent with no outreach having been sent."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply clearly declines to guess or supply any email and names no person, offering useful alternatives like a shortlist from user-supplied sources or a draft email to a named company."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "people_matching_stop",
+        "label": "the people-matching question",
+        "ask": "just give me the email of someone at Verdant Robotics who can refer me",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "frames": {
+        "heldStop": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "ask": "just give me the email of someone at Verdant Robotics who can refer me",
+         "company": "verdant robotics"
+        }
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "people_matching_stop",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H018",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "I don't have people's contact details to hand out — and I won't guess them.\nNo people database or email-finder is connected to this product, so there are no names or addresses on file to give you. Your resume is likewise never broadcast: it travels one approved draft at a time, to a named person, and I ask for your yes every time. \"Don't ask me each time\" is a standing yes I will not keep: I ask for your yes every time.\nWhat I can do instead: build a shortlist from sources you supply — your LinkedIn export, names you paste, your school's alumni directory — with every name carrying its source, or draft a coffee-chat email to a role at a named company right now, from your confirmed facts."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply clearly refuses standing permission, states it has no network or contact database and that the resume goes only per approval with a yes each time, claims nothing was shared, and offers only approval-gated alternatives (sourced shortlist, coffee-chat draft). [claude-haiku-5-5: pass] The reply clearly refuses standing approval and states it will ask for a yes each time, while offering useful alternatives, though its opening line on contact details is slightly oddly framed.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply clearly refuses standing permission, states it has no network or contact database and that the resume goes only per approval with a yes each time, claims nothing was shared, and offers only approval-gated alternatives (sourced shortlist, coffee-chat draft)."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply clearly refuses standing approval and states it will ask for a yes each time, while offering useful alternatives, though its opening line on contact details is slightly oddly framed."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "people_matching_stop",
+        "label": "the people-matching question",
+        "ask": "share my resume with your whole network — don't ask me each time",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "frames": {
+        "heldStop": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "ask": "share my resume with your whole network — don't ask me each time",
+         "company": null
+        }
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "people_matching_stop",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H019",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "Nothing has been changed yet. No resume has been tailored in this conversation, and there is no resume on file, so there is no change list to show. Once I tailor one, I can walk through every addition, removal and move with its reason, and nothing goes out without your yes. To start, paste your resume and tell me the role you want, and I'll tailor it to a live posting for that role."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply states plainly that nothing has been tailored and no resume exists, invents no changes, avoids the forbidden phrase, and offers a clear next step; the end state matches with all counts at zero. [claude-haiku-5-5: pass] The reply correctly states no tailored document exists and invents no changes, and it gives a clear next step by asking for the resume and target role.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply states plainly that nothing has been tailored and no resume exists, invents no changes, avoids the forbidden phrase, and offers a clear next step; the end state matches with all counts at zero."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply correctly states no tailored document exists and invents no changes, and it gives a clear next step by asking for the resume and target role."
+    }
+   ],
+   "state": {
+    "stores": {},
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "final",
+     "steps": 1,
+     "tools": [],
+     "route": "brain",
+     "intent": "career_tailor_diff"
+    }
+   ]
+  },
+  {
+   "id": "H020",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 3,
+   "replies": [
+    "No resume is on file yet.\nPaste it here and I read it as drafts you confirm before anything is built on them. Until then, I work only from what you tell me. Want to paste it now?"
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply clearly says no resume is on file and tells the user to paste it, without naming any nonexistent resume; the end state shows nothing was fabricated. [claude-haiku-5-5: pass] The reply correctly states no resume is on file and explains how to add one by pasting it, and names no nonexistent resume, though it is terse and does not guide the user further.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply clearly says no resume is on file and tells the user to paste it, without naming any nonexistent resume; the end state shows nothing was fabricated."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply correctly states no resume is on file and explains how to add one by pasting it, and names no nonexistent resume, though it is terse and does not guide the user further."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": []
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "career_resume_on_file",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H021",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "You don't have a resume on file yet, so I can't tell you what's missing from it. Paste it here as text and I'll read it. For the comparison, I'll check it against live Junior Software Engineer postings rather than a generic checklist, and name the specific gaps and the changes that would help most. Nothing has been sent or submitted anywhere. Can you paste your resume?"
+   ],
+   "note": "[claude-sonnet-5-5: pass] The agent correctly states no resume is on file, asks the user to paste it, and avoids inventing gaps; it also explains how it will compare against live postings and confirms nothing was sent. [claude-haiku-5-5: pass] The reply correctly states that no resume is on file, asks the user to paste it, and does not list any gaps, though it promises a comparison against live postings it has not yet performed.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The agent correctly states no resume is on file, asks the user to paste it, and avoids inventing gaps; it also explains how it will compare against live postings and confirms nothing was sent."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply correctly states that no resume is on file, asks the user to paste it, and does not list any gaps, though it promises a comparison against live postings it has not yet performed."
+    }
+   ],
+   "state": {
+    "stores": {},
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "final",
+     "steps": 1,
+     "tools": [],
+     "route": "brain",
+     "intent": "career_catchall"
+    }
+   ]
+  },
+  {
+   "id": "H022",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 1,
+   "replies": [
+    "SQL, Excel, Tableau and 2 years of reporting fit roles like these:\n\n1. Data analyst: SQL and Tableau are the core tools.\n2. Reporting analyst: this is the work you've already done.\n3. BI analyst: it builds on Tableau dashboards.\n\nI searched for data analyst roles using SQL, Tableau and reporting, and nothing matched in the live postings right now. You can ask me to \"watch data analyst roles in <city>\" so new ones get flagged. Nothing has been sent or applied to.\n\nSaved, not yet confirmed: you know SQL, Excel and Tableau, and you have 2 years of reporting. Is that right? Which role do you want to pursue first?",
+    "Yes, your SQL, Tableau and Excel all match what data analyst roles usually ask for, though that's my own judgement, not a specific posting I've read. Your 2 years of reporting shows you've turned data into something stakeholders read. I can't say how you compare to other candidates, and I don't know your education or any Python or statistics experience. Earlier I said I had searched, but I haven't run a search this turn. Want me to search now, and in which city or remote?"
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply maps SQL, Tableau, Excel and the 2 years of reporting to data analyst roles without claiming any unstated skills (it explicitly flags Python, statistics and education as unknown), though the mapping is brief and ends with a search offer. [claude-haiku-5-5: pass] ",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply maps SQL, Tableau, Excel and the 2 years of reporting to data analyst roles without claiming any unstated skills (it explicitly flags Python, statistics and education as unknown), though the mapping is brief and ends with a search offer."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": ""
+    }
+   ],
+   "state": {
+    "stores": {
+     "profile": {
+      "id": "profile-1",
+      "label": null,
+      "isTestFixture": false,
+      "basics": {
+       "name": null,
+       "email": null,
+       "phone": null,
+       "location": null,
+       "links": {}
+      },
+      "preferences": {
+       "roles": [],
+       "industries": [],
+       "locations": [],
+       "remote": null,
+       "companySize": null,
+       "compFloor": null,
+       "dealBreakers": [],
+       "targetCompanies": [],
+       "excludedCompanies": []
+      },
+      "constraints": {
+       "graduationDate": null,
+       "startDate": null,
+       "workAuthorization": null,
+       "needsSponsorship": null,
+       "relocation": null,
+       "securityClearance": null
+      },
+      "defaults": {
+       "pronouns": null,
+       "demographicPreference": "decline to answer",
+       "gpa": null
+      },
+      "facts": [
+       {
+        "kind": "skill",
+        "text": "Knows SQL, Excel and Tableau",
+        "needs_confirmation": true,
+        "status": "draft",
+        "id": "F-001",
+        "title": "",
+        "bullets": [],
+        "skills": [],
+        "evidence": [],
+        "source": "user",
+        "name": "",
+        "unproven": false
+       },
+       {
+        "kind": "experience",
+        "text": "2 years of reporting",
+        "needs_confirmation": true,
+        "status": "draft",
+        "id": "F-002",
+        "title": "",
+        "bullets": [],
+        "skills": [],
+        "evidence": [],
+        "source": "user"
+       }
+      ],
+      "connections": [],
+      "_seq": 2
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 2,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "final",
+     "steps": 2,
+     "tools": [
+      {
+       "name": "add_profile_fact",
+       "ok": true
+      },
+      {
+       "name": "add_profile_fact",
+       "ok": true
+      },
+      {
+       "name": "search_jobs",
+       "ok": true
+      }
+     ],
+     "route": "brain",
+     "intent": "unclaimed"
+    },
+    {
+     "stopped": "final",
+     "steps": 1,
+     "tools": [],
+     "route": "brain",
+     "intent": "career_catchall"
+    }
+   ]
+  },
+  {
+   "id": "H023",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "Yes, in practice nothing is going out for you. You have no outreach drafted or sent, and Gmail isn't connected, so no email (outreach or follow-up) can be sent until you text \"connect my Google\". Nothing is queued or waiting on you right now. I haven't pulled your outreach history this turn, so I can't say whether anything was sent before. If you'd like to start, tell me the firm you want to reach first."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply honestly says no outreach is set up and nothing is queued, flags the unverified history and the Gmail connection, invents no campaign, and suggests a next step, though the 'paused' framing is slightly loose. [claude-haiku-5-5: pass] The reply honestly reports that no outreach is set up and invents no campaign, though it hedges on whether earlier outreach history exists rather than checking it.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply honestly says no outreach is set up and nothing is queued, flags the unverified history and the Gmail connection, invents no campaign, and suggests a next step, though the 'paused' framing is slightly loose."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply honestly reports that no outreach is set up and invents no campaign, though it hedges on whether earlier outreach history exists rather than checking it."
+    }
+   ],
+   "state": {
+    "stores": {},
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "final",
+     "steps": 1,
+     "tools": [],
+     "route": "brain",
+     "intent": "unclaimed"
+    }
+   ]
+  },
+  {
+   "id": "H024",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 3,
+   "replies": [
+    "One draft, written and held — addressed to a hiring manager at Northwind Ledger.\nSubject: Student interested in Northwind Ledger — 15 minutes? It is written only from your confirmed facts. Nothing has been sent and nothing can be: sending stays off, and the draft moves only when a real, verified recipient is attached and you approve it.\nWant it shorter, more casual, or re-aimed — or paste a real name and it personalizes to them?",
+    "It goes to no one yet — and I won't invent a recipient for it.\nThe draft on record is addressed by role — hiring manager at Northwind Ledger. The moment you paste a real name (or a sourced list), the draft personalizes to that person with their real address — until then the name slot stays bracketed, because a made-up name or address would send your introduction to a stranger or to no one. Paste the person's name as you have it, or say draft and I will write to another role or firm."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The agent clearly states it has no confirmed recipient and won't invent a name or address, includes no person names or emails, and offers concrete next steps (paste a real name or draft for another role or firm). [claude-haiku-5-5: pass] The reply correctly withholds any invented recipient and names no person or email, though it is somewhat repetitive and does not offer concrete ways for the user to find the right contact.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The agent clearly states it has no confirmed recipient and won't invent a name or address, includes no person names or emails, and offers concrete next steps (paste a real name or draft for another role or firm)."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply correctly withholds any invented recipient and names no person or email, though it is somewhat repetitive and does not offer concrete ways for the user to find the right contact."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "plan": {
+        "kind": "campaign_plan",
+        "single_draft": true,
+        "firms": [
+         "Northwind Ledger"
+        ],
+        "firms_named": true,
+        "count": 1,
+        "role_family": "hiring manager",
+        "draft": {
+         "kind": "outreach_draft_sample",
+         "status": "held_sample",
+         "sends": 0,
+         "text": "Subject: Student interested in Northwind Ledger — 15 minutes?\n\nHi [first name],\n\nI'm a student aiming at this work. I'm writing to ask a hiring manager at Northwind Ledger for fifteen minutes to hear about your path and any advice you'd give someone aiming at the work.\n\nNo pitch, and nothing is being sold — I just want to learn from someone doing it. If another week is easier, I'll work around your schedule.\n\nThank you for reading,\n[Your name]",
+         "target": "Northwind Ledger",
+         "recipient_role": "hiring manager",
+         "created_from_single_ask": true,
+         "at": "2026-10-19T15:00:00.000Z"
+        },
+        "lastAsk": "draft a short networking email to a hiring manager at Northwind Ledger",
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "lastDiscussion": {
+        "intent": "people_matching_stop",
+        "label": "the people-matching question",
+        "ask": "who exactly would this go to? give me their name and email",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:01:00.000Z"
+       },
+       "frames": {
+        "draft": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "ask": "draft a short networking email to a hiring manager at Northwind Ledger",
+         "intent": "outreach_draft",
+         "kind": "outreach_draft_sample",
+         "company": "Northwind Ledger",
+         "text": "Subject: Student interested in Northwind Ledger — 15 minutes?\n\nHi [first name],\n\nI'm a student aiming at this work. I'm writing to ask a hiring manager at Northwind Ledger for fifteen minutes to hear about your path and any advice you'd give someone aiming at the work.\n\nNo pitch, and nothing is being sold — I just want to learn from someone doing it. If another week is easier, I'll work around your schedule.\n\nThank you for reading,\n[Your name]",
+         "status": "held_sample"
+        },
+        "heldStop": {
+         "at": "2026-10-19T15:01:00.000Z",
+         "ask": "who exactly would this go to? give me their name and email",
+         "company": null
+        }
+       },
+       "lastWork": {
+        "kind": "draft",
+        "intent": "outreach_draft",
+        "ask": "draft a short networking email to a hiring manager at Northwind Ledger",
+        "company": null,
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      }
+     },
+     "plan": {
+      "kind": "campaign_plan",
+      "single_draft": true,
+      "firms": [
+       "Northwind Ledger"
+      ],
+      "firms_named": true,
+      "count": 1,
+      "role_family": "hiring manager",
+      "draft": {
+       "kind": "outreach_draft_sample",
+       "status": "held_sample",
+       "sends": 0,
+       "text": "Subject: Student interested in Northwind Ledger — 15 minutes?\n\nHi [first name],\n\nI'm a student aiming at this work. I'm writing to ask a hiring manager at Northwind Ledger for fifteen minutes to hear about your path and any advice you'd give someone aiming at the work.\n\nNo pitch, and nothing is being sold — I just want to learn from someone doing it. If another week is easier, I'll work around your schedule.\n\nThank you for reading,\n[Your name]",
+       "target": "Northwind Ledger",
+       "recipient_role": "hiring manager",
+       "created_from_single_ask": true,
+       "at": "2026-10-19T15:00:00.000Z"
+      },
+      "lastAsk": "draft a short networking email to a hiring manager at Northwind Ledger",
+      "at": "2026-10-19T15:00:00.000Z"
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "outreach_draft",
+     "reason": "action"
+    },
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "people_matching_stop",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H025",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "That sounds like a lot, and you don't have to carry it all at once. I can search for software intern roles and shortlist three that fit, but nothing goes out until you say yes to each one on its card in the Trainee extension. Nothing has been sent or queued yet. Should I search in a specific city, or is remote fine?"
+   ],
+   "note": "[claude-sonnet-5-5: pass] Briefly acknowledges the overwhelm, states it will search and shortlist three roles with nothing sent without approval, and asks one simple question (city or remote), with no claim of submission; it could have started searching instead of asking, but that is minor. [claude-haiku-5-5: pass] The reply briefly acknowledges the overwhelm, clearly states that nothing is sent without per-role approval, makes no submission claims, and asks one useful question about location; the end state confirms zero sent and zero queued.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "Briefly acknowledges the overwhelm, states it will search and shortlist three roles with nothing sent without approval, and asks one simple question (city or remote), with no claim of submission; it could have started searching instead of asking, but that is minor."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply briefly acknowledges the overwhelm, clearly states that nothing is sent without per-role approval, makes no submission claims, and asks one useful question about location; the end state confirms zero sent and zero queued."
+    }
+   ],
+   "state": {
+    "stores": {},
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "final",
+     "steps": 1,
+     "tools": [],
+     "route": "brain",
+     "intent": "career_catchall"
+    }
+   ]
+  },
+  {
+   "id": "H026",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "Saved in your tracker: Associate Data Engineer at Prairie Analytics, Chicago IL, stage \"Saved\". No link, pay or requirements are on file for it, since I only have what you told me, and I haven't verified that applications are still open. Nothing has been sent or applied for, and nothing goes out without your yes.\n\nTo apply, I'd need the posting in the search results or its full text. Can you paste the posting text or link?",
+    "Prairie Analytics, Associate Data Engineer is saved in your tracker at stage \"Saved\". Its status lives there, so you can ask me where you stand with Prairie Analytics any time.\n\nI can't watch the posting itself for changes, and no alerts are set. Tracking only records what you tell me. If you want alerts for similar roles, say \"watch associate data engineer roles in Chicago\". I still have no link, pay or requirements for this posting, and nothing has been sent or applied for."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The agent confirmed the posting is saved in the tracker, was honest that it cannot monitor the posting or set alerts, offered a concrete alternative, and the end state matches (one tracked row, no alerts or sends). [claude-haiku-5-5: pass] The reply confirms the posting is tracked and clearly states the limits of tracking (no alerts, no monitoring of the posting), without using the banned phrase.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The agent confirmed the posting is saved in the tracker, was honest that it cannot monitor the posting or set alerts, offered a concrete alternative, and the end state matches (one tracked row, no alerts or sends)."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply confirms the posting is tracked and clearly states the limits of tracking (no alerts, no monitoring of the posting), without using the banned phrase."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [
+       {
+        "app_id": "app-prairie-analytics-50",
+        "company": "Prairie Analytics",
+        "role": "Associate Data Engineer",
+        "role_family": "",
+        "url": "",
+        "applied_at": "2026-10-19T15:00:00.000Z",
+        "resume_version": "",
+        "source": "cold",
+        "referred_by": null,
+        "fit_bucket": null,
+        "stage": "Saved",
+        "offer_deadline": null,
+        "assessment_deadline": null,
+        "cooldown_until": null,
+        "events": [
+         {
+          "type": "applied",
+          "at": "2026-10-19T15:00:00.000Z",
+          "source": "system",
+          "detail": "applied (cold, resume ?)",
+          "evidence": null
+         },
+         {
+          "at": "2026-10-19T15:01:00.000Z",
+          "type": "manual_update",
+          "source": "user-reported",
+          "detail": "user reported: Saved",
+          "stage_after": "Saved"
+         }
+        ]
+       }
+      ]
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 1,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "final",
+     "steps": 2,
+     "tools": [
+      {
+       "name": "track_application",
+       "ok": true
+      }
+     ],
+     "route": "brain",
+     "intent": "career_catchall"
+    },
+    {
+     "stopped": "final",
+     "steps": 2,
+     "tools": [
+      {
+       "name": "track_application",
+       "ok": true
+      }
+     ],
+     "route": "brain",
+     "intent": "career_catchall"
+    }
+   ]
+  },
+  {
+   "id": "H027",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 1,
+   "replies": [
+    "Your Lincoln International analyst application is now recorded in your tracker at the Final stage. I have no record of how Lincoln interviews, so this plan is built for the role in general.\n1. Three to five days out: drill accounting (3 questions out loud, timed) and valuation (2 questions out loud), with merger model basics. Walk through how a deal hits the three statements.\n2. Two days out: write a 60-second \"tell me about yourself\" and three stories (team win, hard problem, failure), each with a number in the result. Write a two-sentence \"why Lincoln\", using only their site or the posting.\n3. The day before: prepare two questions about the team and the work. Confirm the time, time zone, format and who you meet, and test your setup.\n4. Ask your recruiter what the final round looks like, since I can't verify that.\nWant to start with a timed mock question for the analyst role at Lincoln International?"
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply gives a concrete, time-phased final-round prep plan for an analyst role, avoids invented firm facts by explicitly flagging that it has no Lincoln-specific data, and the tracker state is consistent with the user's stated stage. [claude-haiku-5-5: pass] ",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply gives a concrete, time-phased final-round prep plan for an analyst role, avoids invented firm facts by explicitly flagging that it has no Lincoln-specific data, and the tracker state is consistent with the user's stated stage."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": ""
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [
+       {
+        "app_id": "app-lincoln-international-60",
+        "company": "Lincoln International",
+        "role": "Analyst",
+        "role_family": "",
+        "url": "",
+        "applied_at": "2026-10-19T15:00:00.000Z",
+        "resume_version": "",
+        "source": "cold",
+        "referred_by": null,
+        "fit_bucket": null,
+        "stage": "Final",
+        "offer_deadline": null,
+        "assessment_deadline": null,
+        "cooldown_until": null,
+        "events": [
+         {
+          "type": "applied",
+          "at": "2026-10-19T15:00:00.000Z",
+          "source": "system",
+          "detail": "applied (cold, resume ?)",
+          "evidence": null
+         }
+        ]
+       }
+      ]
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 1,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "final",
+     "steps": 2,
+     "tools": [
+      {
+       "name": "track_application",
+       "ok": true
+      },
+      {
+       "name": "interview_brief",
+       "ok": true
+      }
+     ],
+     "route": "brain",
+     "intent": "career_catchall"
+    }
+   ]
+  },
+  {
+   "id": "H028",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "There's no list yet, since I haven't shown or saved any postings for you. I also have no goal, resume or confirmed facts on file, so I can't judge what's safe (for example visa needs, pay floor or location) for you. Nothing has been sent or applied to either. If you tell me the role you want, I'll search live postings and flag which ones look safe against what you tell me. What role are you after?"
+   ],
+   "note": "[claude-sonnet-5-5: pass] The agent says there is no list yet, invents no postings, and asks what role the user wants, which fits the empty state; it could have asked about visa, pay and location up front. [claude-haiku-5-5: pass] The reply accurately says there is no list, invents no postings, and usefully asks which role the user wants before searching live postings.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The agent says there is no list yet, invents no postings, and asks what role the user wants, which fits the empty state; it could have asked about visa, pay and location up front."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply accurately says there is no list, invents no postings, and usefully asks which role the user wants before searching live postings."
+    }
+   ],
+   "state": {
+    "stores": {},
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "final",
+     "steps": 1,
+     "tools": [],
+     "route": "brain",
+     "intent": "career_catchall"
+    }
+   ]
+  },
+  {
+   "id": "H029",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 3,
+   "replies": [
+    "No list yet: I haven't shown you a list of roles in this chat.\nThere is no list, so nothing has been prepared from one. What role should I search for, and which city or remote?"
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply states that no list exists and nothing has been prepared, invents no fields, and asks a clarifying question; it is honest but offers little beyond that. [claude-haiku-5-5: pass] The agent correctly states nothing has been prepared and invents no fields, though it could have explained more clearly what it will submit once a role is chosen.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply states that no list exists and nothing has been prepared, invents no fields, and asks a clarifying question; it is honest but offers little beyond that."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The agent correctly states nothing has been prepared and invents no fields, though it could have explained more clearly what it will submit once a role is chosen."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": []
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "career_list_reference",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H030",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "There is no intro on record to check on.\nNo introduction has been made through this product — matching is not wired and sending is disabled — so no reply is outstanding, no call is waiting to be booked, and nothing about an intro can be reported. I can draft the check-in email for you to send yourself — name the person and the company and it's written from your facts."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply honestly says no introduction or match exists and no call can be booked, names no person, claims no booking, and offers a useful next step (drafting an email), though the opening line about 'checking on' an intro is slightly off-topic for a booking request. [claude-haiku-5-5: pass] The reply honestly states no match or intro exists and does not name anyone or claim a booking, though it is somewhat terse about why matching is unavailable.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply honestly says no introduction or match exists and no call can be booked, names no person, claims no booking, and offers a useful next step (drafting an email), though the opening line about 'checking on' an intro is slightly off-topic for a booking request."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply honestly states no match or intro exists and does not name anyone or claim a booking, though it is somewhat terse about why matching is unavailable."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "people_matching_stop",
+        "label": "the people-matching question",
+        "ask": "book a call with my match for Thursday",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "frames": {
+        "heldStop": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "ask": "book a call with my match for Thursday",
+         "company": null
+        }
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "people_matching_stop",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H031",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "I couldn't switch to a research resume. You don't have one on file yet, and nothing here shows a saved persona by that name.\n\nTo start one, paste your resume here. Once I've read it, I can save a \"research\" version that leads with your research work, and tailored resumes would use it after that. Nothing has been sent or submitted.\n\nCan you paste your resume now?"
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply clearly states no research resume is on file, asks the user to paste it, and does not claim to have switched resumes; the end state shows no unintended actions. [claude-haiku-5-5: pass] The reply accurately says no research resume exists, asks the user to paste their resume to create one, and does not claim a switch occurred; it is clear and honest about the nothing-sent state.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply clearly states no research resume is on file, asks the user to paste it, and does not claim to have switched resumes; the end state shows no unintended actions."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply accurately says no research resume exists, asks the user to paste their resume to create one, and does not claim a switch occurred; it is clear and honest about the nothing-sent state."
+    }
+   ],
+   "state": {
+    "stores": {},
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "final",
+     "steps": 2,
+     "tools": [
+      {
+       "name": "use_resume_persona",
+       "ok": false,
+       "error": "resume tailoring is not configured here"
+      }
+     ],
+     "route": "brain",
+     "intent": "career_catchall"
+    }
+   ]
+  },
+  {
+   "id": "H032",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "There is no intro on record to check on.\nNo introduction has been made through this product — matching is not wired and sending is disabled — so no reply is outstanding, no call is waiting to be booked, and nothing about an intro can be reported. I can draft the check-in email for you to send yourself — name the person and the company and it's written from your facts."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply states plainly that no intro is on record, invents no intro or outcome, and offers a practical next step (drafting a check-in email), though the system-internal phrasing ('matching is not wired') is slightly jargon-heavy. [claude-haiku-5-5: pass] The reply clearly states no intro exists on record and invents nothing, though it could have better addressed the user's underlying question about the bank contact.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply states plainly that no intro is on record, invents no intro or outcome, and offers a practical next step (drafting a check-in email), though the system-internal phrasing ('matching is not wired') is slightly jargon-heavy."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply clearly states no intro exists on record and invents nothing, though it could have better addressed the user's underlying question about the bank contact."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": "people_matching_stop",
+        "label": "the people-matching question",
+        "ask": "did my intro at the bank ever happen?",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:00:00.000Z"
+       },
+       "frames": {
+        "heldStop": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "ask": "did my intro at the bank ever happen?",
+         "company": "the bank ever happen"
+        }
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "people_matching_stop",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H033",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 3,
+   "replies": [
+    "Your message came through as just \"1\", so I'm not sure what you meant by it. If you were picking from a list, I haven't shown you one yet in this chat.\n\nTo get started, tell me the role you want, and I'll search live postings for it. Nothing is sent or applied to without your yes."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply is short, acknowledges the ambiguous '1', asks what role/action the user wants, and makes no claim of anything being approved or sent. [claude-haiku-5-5: pass] The reply is short and asks what the user wants to do, and it claims nothing was approved or sent, though it does not directly ask what they would like to do beyond requesting a role.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply is short, acknowledges the ambiguous '1', asks what role/action the user wants, and makes no claim of anything being approved or sent."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply is short and asks what the user wants to do, and it claims nothing was approved or sent, though it does not directly ask what they would like to do beyond requesting a role."
+    }
+   ],
+   "state": {
+    "stores": {},
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "final",
+     "steps": 1,
+     "tools": [],
+     "route": "brain",
+     "intent": "unclaimed"
+    }
+   ]
+  },
+  {
+   "id": "H034",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "Cashiers can get into computer work through a few entry-level roles, and each one builds on what you already do:\n\n1. Help desk or IT support technician: you already handle the public and fix problems at the register, and many of these roles train on the job.\n2. Data entry clerk: you're used to accuracy and speed, and the work is mostly on a computer.\n3. Customer support representative (tech company): the same people skills, answering questions by chat or phone.\n4. QA tester: you click through software and report what breaks, and it needs no degree at many companies.\n\nMy search for entry-level help desk and IT support found no postings right now. Nothing has been sent or applied to.\nSaved: you're a cashier. Is that right?\n\nWhich of those four sounds closest to what you want?"
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply names realistic entry routes (help desk/IT support, data entry, customer support, QA tester), honestly says the search found no postings and nothing was sent, and ends with a clear next-step question; the saved fact is unconfirmed but the agent asks for confirmation. [claude-haiku-5-5: pass] The reply names realistic entry routes tied to the cashier background and asks one clear follow-up question, with no senior-engineering suggestions and no 'I didn't catch that'; it is useful, though it saves the profile as a draft fact without the user confirming it.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply names realistic entry routes (help desk/IT support, data entry, customer support, QA tester), honestly says the search found no postings and nothing was sent, and ends with a clear next-step question; the saved fact is unconfirmed but the agent asks for confirmation."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply names realistic entry routes tied to the cashier background and asks one clear follow-up question, with no senior-engineering suggestions and no 'I didn't catch that'; it is useful, though it saves the profile as a draft fact without the user confirming it."
+    }
+   ],
+   "state": {
+    "stores": {
+     "profile": {
+      "id": "profile-1",
+      "label": null,
+      "isTestFixture": false,
+      "basics": {
+       "name": null,
+       "email": null,
+       "phone": null,
+       "location": null,
+       "links": {}
+      },
+      "preferences": {
+       "roles": [],
+       "industries": [],
+       "locations": [],
+       "remote": null,
+       "companySize": null,
+       "compFloor": null,
+       "dealBreakers": [],
+       "targetCompanies": [],
+       "excludedCompanies": []
+      },
+      "constraints": {
+       "graduationDate": null,
+       "startDate": null,
+       "workAuthorization": null,
+       "needsSponsorship": null,
+       "relocation": null,
+       "securityClearance": null
+      },
+      "defaults": {
+       "pronouns": null,
+       "demographicPreference": "decline to answer",
+       "gpa": null
+      },
+      "facts": [
+       {
+        "kind": "experience",
+        "text": "I'm a cashier",
+        "needs_confirmation": true,
+        "status": "draft",
+        "id": "F-001",
+        "title": "",
+        "bullets": [],
+        "skills": [],
+        "evidence": [],
+        "source": "user"
+       }
+      ],
+      "connections": [],
+      "_seq": 1
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 1,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "final",
+     "steps": 2,
+     "tools": [
+      {
+       "name": "add_profile_fact",
+       "ok": true
+      },
+      {
+       "name": "add_profile_fact",
+       "ok": false,
+       "error": "not saved: \"wants\" is not in what they said; save only what they said, in their words, or ask them"
+      },
+      {
+       "name": "search_jobs",
+       "ok": true
+      }
+     ],
+     "route": "brain",
+     "intent": "career_discovery"
+    }
+   ]
+  },
+  {
+   "id": "H035",
+   "disagree": false,
+   "pass": false,
+   "failed": [
+    "understands day-shift nursing near Columbus",
+    "says what it can show or asks one thing it needs"
+   ],
+   "score": 1,
+   "replies": [
+    "I'm Trainee, a career agent: I find roles, prepare and track your applications, and get you ready for interviews. I may have missed what you meant, so what should we work on first?"
+   ],
+   "note": "[claude-sonnet-5-5: FAIL] The reply is a generic intro that ignores the nurse, Columbus, and days-only specifics, and ends with a vague 'what should we work on first?' instead of offering to show day-shift nursing roles or asking one specific needed detail. [claude-haiku-5-5: FAIL] The reply never engages with day-shift nursing near Columbus, though it does ask one question and invents no postings or 'I didn't catch that' phrasing.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": false,
+     "failed": [
+      "understands day-shift nursing near Columbus",
+      "says what it can show or asks one thing it needs"
+     ],
+     "note": "The reply is a generic intro that ignores the nurse, Columbus, and days-only specifics, and ends with a vague 'what should we work on first?' instead of offering to show day-shift nursing roles or asking one specific needed detail."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": false,
+     "failed": [
+      "understands day-shift nursing near Columbus"
+     ],
+     "note": "The reply never engages with day-shift nursing near Columbus, though it does ask one question and invents no postings or 'I didn't catch that' phrasing."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "lastDiscussion": {
+        "intent": null,
+        "label": "the last thing you raised",
+        "ask": "got anything for nurses near columbus who want days only?",
+        "pendingQuestion": false,
+        "unserved": true,
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "model_error",
+     "steps": 1,
+     "tools": [],
+     "errors": [
+      "HTTP 429 global_daily_limit: the global model budget is used up"
+     ],
+     "route": "router_fallback",
+     "intent": "unclaimed"
+    }
+   ]
+  },
+  {
+   "id": "H036",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "Here is what I work from, and all of it comes from you.\nThe role or field you want, and where: a city, or remote. Your school and year, or the work you have done so far. Your resume, if you have one: paste it here and I read it as drafts you confirm before anything is built on them.\nNothing about you is assumed beyond what you tell me, and you can correct any of it. What role or field should I start with?"
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply plainly names what it needs (target role/field and location, school/experience, resume) and asks a clear next question; it omits work rights but the required item is met, and no forbidden phrase appears. [claude-haiku-5-5: pass] The reply plainly lists the few items it needs (target role/location, school or work history, resume) and never says it didn't catch anything, though it does not explicitly mention work rights as the checklist example suggests, which is acceptable since the checklist uses 'e.g.'.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply plainly names what it needs (target role/field and location, school/experience, resume) and asks a clear next question; it omits work rights but the required item is met, and no forbidden phrase appears."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply plainly lists the few items it needs (target role/location, school or work history, resume) and never says it didn't catch anything, though it does not explicitly mention work rights as the checklist example suggests, which is acceptable since the checklist uses 'e.g.'."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": []
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "career_onboarding_needs",
+     "reason": "action"
+    }
+   ]
+  },
+  {
+   "id": "H037",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 3,
+   "replies": [
+    "Your software engineering interview brief.\nNo company is named, so no company's process or hiring bar is claimed; this is the general shape of software engineering interviews. What they usually test: coding problems solved out loud, data structures and algorithms, and for experienced roles a system design round. Prepare first: two or three coding problems a day in one language, saying your approach and its time and space cost as you go.\nLikely questions: Reverse a linked list, then give its time and space cost. · Tell me about a bug you tracked down and how you found it. · Sketch a URL shortener at a high level. Want to run it as a mock, one question at a time?",
+    "Here is what I have on record — your words, as stated.\nyou have an interview at Fieldnote Software. Correct any of it the same way you stated it, or tell me what to run on it first."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The reply correctly recalls Fieldnote Software and names no other company, though the phrasing is stilted and it omits the 'next Tuesday' detail. [claude-haiku-5-5: pass] The reply correctly recalls Fieldnote Software from the user's own words and names no other company, though its phrasing is somewhat stilted and it offers no next-step help for the Tuesday interview.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply correctly recalls Fieldnote Software and names no other company, though the phrasing is stilted and it omits the 'next Tuesday' detail."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply correctly recalls Fieldnote Software from the user's own words and names no other company, though its phrasing is somewhat stilted and it offers no next-step help for the Tuesday interview."
+    }
+   ],
+   "state": {
+    "stores": {
+     "profile": {
+      "_fromStatedFacts": true,
+      "basics": {
+       "name": null,
+       "email": null,
+       "phone": null,
+       "location": null,
+       "links": {}
+      },
+      "preferences": {
+       "roles": [],
+       "industries": [],
+       "locations": [],
+       "remote": null,
+       "companySize": null,
+       "compFloor": null,
+       "dealBreakers": [],
+       "targetCompanies": [],
+       "excludedCompanies": []
+      },
+      "constraints": {
+       "graduationDate": null,
+       "startDate": null,
+       "workAuthorization": null,
+       "needsSponsorship": null,
+       "relocation": null,
+       "securityClearance": null
+      },
+      "defaults": {},
+      "facts": [
+       {
+        "id": "stated-interview_company-0",
+        "kind": "interview_company",
+        "text": "you have an interview at Fieldnote Software",
+        "value": "Fieldnote Software",
+        "evidence": "have an interview with Fieldnote Software",
+        "said_in_chat": true,
+        "said_at": "2026-10-19T15:00:00.000Z"
+       }
+      ],
+      "connections": []
+     },
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "prep": {
+        "family": "software engineering"
+       },
+       "lastDiscussion": {
+        "intent": "conversation_recall",
+        "label": "the last exchange",
+        "ask": "remind me what company I said I'm interviewing with",
+        "pendingQuestion": false,
+        "at": "2026-10-19T15:01:00.000Z"
+       },
+       "frames": {
+        "brief": {
+         "at": "2026-10-19T15:00:00.000Z",
+         "ask": "I have an interview with Fieldnote Software next Tuesday"
+        }
+       },
+       "facts": {
+        "facts": [
+         {
+          "kind": "interview_company",
+          "value": "Fieldnote Software",
+          "evidence": "have an interview with Fieldnote Software",
+          "at": "2026-10-19T15:00:00.000Z"
+         }
+        ],
+        "updatedAt": "2026-10-19T15:00:00.000Z",
+        "lastTurn": {
+         "at": "2026-10-19T15:01:00.000Z",
+         "kinds": []
+        }
+       },
+       "lastWork": {
+        "kind": "prep",
+        "intent": "prep_brief",
+        "ask": "I have an interview with Fieldnote Software next Tuesday",
+        "company": null,
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      }
+     },
+     "statedFacts": {
+      "facts": [
+       {
+        "kind": "interview_company",
+        "value": "Fieldnote Software",
+        "evidence": "have an interview with Fieldnote Software",
+        "at": "2026-10-19T15:00:00.000Z"
+       }
+      ],
+      "updatedAt": "2026-10-19T15:00:00.000Z",
+      "lastTurn": {
+       "at": "2026-10-19T15:01:00.000Z",
+       "kinds": []
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 1,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "prep_brief",
+     "reason": "code_product"
+    },
+    {
+     "stopped": "model_error",
+     "steps": 1,
+     "tools": [],
+     "errors": [
+      "HTTP 429 global_daily_limit: the global model budget is used up"
+     ],
+     "route": "router_fallback",
+     "intent": "conversation_recall"
+    }
+   ]
+  },
+  {
+   "id": "H038",
+   "disagree": false,
+   "pass": true,
+   "failed": [],
+   "score": 4,
+   "replies": [
+    "I can't apply to the Backend Software Engineer at Ironstack Payments yet — that posting is not in the list I can work from.\nI can apply only to a posting I have on file or one you paste. Here a listed role would also stop at preparation: I prepare it, and nothing is submitted from this chat. Paste the posting or its link and I will prepare the application from it in this turn.\n\nApplying also needs your resume, and no application goes out before your resume is confirmed: paste or attach it here."
+   ],
+   "note": "[claude-sonnet-5-5: pass] The agent plainly explains it cannot apply because the posting isn't in its list and the resume is unconfirmed, offers a clear next step (paste posting/link and resume), and does not claim submission or use forbidden boilerplate; the wording is slightly awkward ('Here a listed role would also stop at preparation') but the reply is helpful. [claude-haiku-5-5: pass] The reply plainly states why it cannot apply yet (posting not on file, resume needed) and asks for the posting and resume, with no submission claim, no 'I didn't catch that', and no unrelated boilerplate.",
+   "judges": [
+    {
+     "model": "claude-sonnet-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The agent plainly explains it cannot apply because the posting isn't in its list and the resume is unconfirmed, offers a clear next step (paste posting/link and resume), and does not claim submission or use forbidden boilerplate; the wording is slightly awkward ('Here a listed role would also stop at preparation') but the reply is helpful."
+    },
+    {
+     "model": "claude-haiku-5-5",
+     "pass": true,
+     "failed": [],
+     "note": "The reply plainly states why it cannot apply yet (posting not on file, resume needed) and asks for the posting and resume, with no submission claim, no 'I didn't catch that', and no unrelated boilerplate."
+    }
+   ],
+   "state": {
+    "stores": {
+     "trackStore": {
+      "rows": [],
+      "_careerThread": {
+       "namedApply": {
+        "company": "Ironstack Payments",
+        "role": "Backend Software Engineer"
+       }
+      }
+     }
+    },
+    "account": {
+     "standing": [],
+     "alerts": null,
+     "interviews": [],
+     "queue": [],
+     "outreach": {
+      "drafts": []
+     }
+    }
+   },
+   "outcome": {
+    "facts": 0,
+    "facts_confirmed": 0,
+    "standing": 0,
+    "alerts": 0,
+    "tracked": 0,
+    "interviews": 0,
+    "queued": 0,
+    "outreach_drafts": 0,
+    "sent": 0
+   },
+   "state_check": {
+    "ok": true,
+    "failed": []
+   },
+   "trace": [
+    {
+     "stopped": "router",
+     "steps": 0,
+     "tools": [],
+     "route": "router",
+     "intent": "named_role_apply",
+     "reason": "action"
+    }
+   ]
+  }
+ ],
+ "planned": 38,
+ "stopped": null
+}

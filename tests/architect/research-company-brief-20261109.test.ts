@@ -70,21 +70,23 @@ Deno.test("WO-H/2 the brief: facts, reading and unknowns separate; dated develop
   ok(!/revenue was|reached a \$1 billion/i.test(JSON.stringify(r)), "neither the volume-as-revenue nor the forecast-as-result wording is anywhere");
   // E.48: no invented team initiative; competitors backed by a quote that names them.
   eq(r.competitors.map((x: any) => x.name), ["Adyen"]);
-  // Architect amendment (owner decision 2026-11-13: research support check switched on): what has no page sentence to stand for it
-  // is not shown at all (company.ts): the questions built around a tension the model named, the model's unknowns and a product's
-  // angle. So no question (the invented crypto initiative is never one), no model unknown (the invented 3% never shown), no product.
-  eq(r.questions, [], "no question stands on the model's tension");
-  ok(!/crypto|3%|acceptance rate/i.test(JSON.stringify(r)), "the invented initiative and the invented figure are nowhere");
-  eq(r.unknowns, [], "an unknown with an invented figure is dropped (no model unknown is shown)");
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; re-amended for the fixes on
+  // ag/research-on-fixes, 80d6e4da1: questions and unknowns are kept under their own checks): the grounded question and the
+  // unknown with no figure stand as before; the invented crypto initiative and the invented 3% are dropped and are nowhere.
+  eq(r.questions.map((q: any) => q.text), ["Your team is working on blocking fraudulent payments with Radar. How do you decide between blocking more payments to reduce fraud losses and letting good payments through?"]);
+  ok(!/crypto|\b3%|acceptance rate/i.test(JSON.stringify(r)), "the invented initiative and the invented figure are nowhere");
+  eq(r.unknowns, ["Which team the role sits on and how it is measured."], "an unknown with an invented figure is dropped");
   eq(r.role_asks.length, 2);
-  // Architect amendment (owner decision 2026-11-13: research support check switched on): Trainee's reading is a line like any other:
-  // no page sentence states "easier to understand as payments plus software", so it is dropped, never shown as a fact.
-  eq(r.frame, null, "the reading no page sentence states is dropped");
-  // Architect amendment (owner decision 2026-11-13: research support check switched on): the count is the support path's: the
-  // paywalled line (unsupported: its page sentence sits beside "Subscribe to continue reading.", an order to the reader, so it is
-  // never shown), forecast-as-result, undated, Square and the reading; the defects above that have no quoted form are not drafted
-  // lines of this path (they are shown nowhere, pinned above).
-  eq([r.dropped, r.audit.dropped], [5, { unsupported: 1, meaning_forecast: 1, date_not_on_page: 1, competitor_not_named: 1, frame_unsupported: 1 }]);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; re-amended for the fixes on
+  // ag/research-on-fixes, 80d6e4da1: the labelled reading is kept under its own check): no page sentence states the model's
+  // "easier to understand …", so the reading is the page's own sentence it rests on, in quotation marks, citing that one page.
+  eq(r.frame, { text: '"Stripe offers payments plus software, not card processing alone."', cite: [1] }, "the reading names its source");
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; re-amended for the fixes on
+  // ag/research-on-fixes, 80d6e4da1): the count is the support path's: the paywalled line (its page sentence sits beside "Subscribe
+  // to continue reading.", an order to the reader, so it is never shown), revenue-for-volume or forecast-as-result (unsupported; the
+  // other is said only as its page sentence, once), undated, Square, the crypto initiative and the invented 3%.
+  eq([r.dropped, r.audit.dropped], [6, { unsupported: 2, date_not_on_page: 1, competitor_not_named: 1, tension_not_stated: 1, unknown_names_or_figures: 1 }]);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): a product's angle has no quoted form.
   eq(r.products, [], "a product's angle has no quoted form");
   // E.47: paywalled and outdated sources are marked; an unopened source is named with why.
   const by = Object.fromEntries(r.sources.map((s: any) => [s.url, s]));
@@ -98,14 +100,15 @@ Deno.test("WO-H/2 the brief: facts, reading and unknowns separate; dated develop
   const { html, text } = render(w.published[0]);
   const heads = [...html.matchAll(/<h2>([^<]+)<\/h2>/g)].map((m) => m[1]);
   // The order of the owner's target pages (app-layer-visuals p-88/p-89) and spec C.22.
-  // Architect amendment (owner decision 2026-11-13: research support check switched on): the sections with no kept line are not made
-  // (the short answer was the dropped reading; the product sections and the questions have no quoted form); the order is unchanged.
-  eq(heads, ["How the business works", "Evidence versus interpretation", "Recent developments", "Competitors and tradeoffs", "What the role page asks for",
-    "How to use your project without overstating it", "Five minutes before the interview", "What this brief cannot tell you", "Sources"]);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; re-amended for the fixes on
+  // ag/research-on-fixes, 80d6e4da1): only the product sections are not made (an angle has no quoted form); the order is unchanged.
+  eq(heads, ["The short answer", "How the business works", "Evidence versus interpretation", "Recent developments", "Competitors and tradeoffs", "What the role page asks for",
+    "How to use your project without overstating it", "Questions worth asking", "Five minutes before the interview", "What this brief cannot tell you", "Sources"]);
   ok(/No confirmed facts about your projects yet/.test(html), "with no confirmed facts the section says what is missing");
-  // Architect amendment (owner decision 2026-11-13: research support check switched on): the reported fact is the page's sentence in
-  // quotation marks; with no reading kept there is no interpretation row, and no reading is stated anywhere in the File.
-  ok(/<dt>Reported fact<\/dt><dd>Feb 24, 2026: &quot;Businesses on Stripe generated \$1\.9 trillion/.test(html) && !/<dt>Interpretation<\/dt>/.test(html) && /<dt>Source state<\/dt><dd>6 sources read Nov 9, 2026; 1 outdated; 1 could not be opened<\/dd>/.test(html), "evidence versus interpretation, as on p-89");
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; re-amended for the fixes on
+  // ag/research-on-fixes, 80d6e4da1): the reported fact and the interpretation are page sentences in quotation marks, the unknown is
+  // listed; the model's own reading, which no page states, is in no section.
+  ok(/<dt>Reported fact<\/dt><dd>Feb 24, 2026: &quot;Businesses on Stripe generated \$1\.9 trillion/.test(html) && /<dt>Interpretation<\/dt><dd>&quot;Stripe offers payments plus software/.test(html) && /<dt>Unknown<\/dt>/.test(html) && /<dt>Source state<\/dt><dd>6 sources read Nov 9, 2026; 1 outdated; 1 could not be opened<\/dd>/.test(html), "evidence versus interpretation, as on p-89");
   ok(!/easier to understand/.test(html) && !/easier to understand/.test(text), "a reading no page states is in no section");
   ok(html.includes('<span class="src rb-measure">Volume, not revenue</span>') && html.includes("A forecast at the time, not a result"));
   // Architect amendment (owner decision 2026-11-13: research support check switched on): the paywalled claim is not shown at all
@@ -168,7 +171,9 @@ Deno.test("WO-H/5 guards on their own: dates, metric meaning, source limits, rep
   const built: any = await researchCompany({ company: "Stripe", question: "Research Stripe before my interview.", plan: { queries: ["Stripe"], companies: ["Stripe"], sites: ["stripe.example"] }, deps: w.deps, now: NOW });
   eq([built.status, built.ask], ["ok", "role"]);
   eq(await enforceCompanyReplySupported("Stripe grew 80% last year. Stripe Billing lets businesses bill customers with subscriptions and invoices. Which role are you interviewing for? What date is the interview?", built, { judge: testSupportJudge, ask: "Research Stripe before my interview." }),
-    "Stripe Billing lets businesses bill customers with subscriptions and invoices. Which role are you interviewing for?");
+    // (re-amended for the fixes on ag/research-on-fixes, 80d6e4da1: the draft's cited unit is tried first, so the kept line is the
+    // page's own sentence, in quotation marks)
+    '"Stripe Billing lets businesses bill customers with subscriptions and invoices." Which role are you interviewing for?');
   eq(await enforceCompanyReplySupported("Stripe grew 80% last year. Which role is it for?", built, { judge: testSupportJudge, ask: "Research Stripe before my interview." }).then((x) => /80%|Which role is it for/.test(x)), false, "an unsourced figure and a question outside the closed form never stand");
 });
 
@@ -178,10 +183,8 @@ Deno.test("WO-H/6 the person's side: confirmed facts tie to what the role page a
   const r: any = await researchCompany({ company: "Stripe", role: "Data analyst internship", question: T1, facts: FACTS, plan: { queries: ["Stripe"], companies: ["Stripe"], sites: ["stripe.example"] }, deps: w.deps, now: NOW });
   eq(r.project.ties.map((t: any) => t.fact), ["skill: SQL and dashboards in Tableau"], "only the fact that shares what the role page asks");
   eq(r.project.missing, null);
-  // Architect amendment (owner decision 2026-11-13: research support check switched on): the frame no page sentence states is
-  // dropped and no question stands on the model's tension (company.ts), so five minutes holds the number and the example only.
-  eq(r.five.map((f: any) => f.label), ["One number, correctly named", "Your example"]);
-  ok(/That is volume, not revenue\.$/.test(r.five[0].text) && r.five[1].text === "skill: SQL and dashboards in Tableau");
+  eq(r.five.map((f: any) => f.label), ["The frame", "One number, correctly named", "Your example", "Your first question"]);
+  ok(/That is volume, not revenue\.$/.test(r.five[1].text) && r.five[2].text === "skill: SQL and dashboards in Tableau");
   const { html, text } = render(w.published[0]);
   ok(/<b>Your confirmed fact:<\/b> skill: SQL and dashboards in Tableau/.test(html) && /The role page asks:<\/b> The Data Analyst Intern will define metrics and build reports and dashboards/.test(html));
   ok(html.includes("Say only what the fact says: no scale, result, tool or title it does not name."));
@@ -189,6 +192,5 @@ Deno.test("WO-H/6 the person's side: confirmed facts tie to what the role page a
   // Facts that tie to nothing are named as such; the brief never stretches one to fit.
   const w2 = world();
   const r2: any = await researchCompany({ company: "Stripe", role: "Data analyst internship", question: T1, facts: ["hobby: marathon running"], plan: { queries: ["Stripe"], companies: ["Stripe"], sites: ["stripe.example"] }, deps: w2.deps, now: NOW });
-  // Architect amendment (owner decision 2026-11-13: research support check switched on): "Your example" is the second item (above).
-  ok(/None of your confirmed facts matches what the role page asks for/.test(r2.project.missing) && r2.five[1].label === "Your example" && r2.five[1].text.startsWith("Not confirmed yet"));
+  ok(/None of your confirmed facts matches what the role page asks for/.test(r2.project.missing) && r2.five[2].text.startsWith("Not confirmed yet"));
 });

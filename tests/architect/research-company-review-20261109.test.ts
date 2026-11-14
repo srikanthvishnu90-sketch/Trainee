@@ -74,7 +74,9 @@ Deno.test("F2-file-off: with no research File (publish off or failing), F2A is a
     const r: any = await researchCompany({ company: "Stripe", role: "data analyst intern", question: F2A, now: CNOW, plan: { queries: ["Stripe"], companies: ["Stripe"], sites: ["stripe.example"] }, deps: { ...w.deps, publish: publish as any, judge: testSupportJudge } });
     eq([r.status, r.format, r.file_url], ["ok", "inline", null]);
     const out = await enforceCompanyReplySupported("Stripe Billing lets businesses bill customers with subscriptions and invoices [1].", r, { judge: testSupportJudge, ask: F2A });
-    ok(/Stripe Billing lets businesses bill customers with subscriptions and invoices \[1\]\./.test(out) && /\n\[1\] [^\n]+: https:\/\//.test(out), out);
+    // Architect amendment (owner decision 2026-11-13: research support check switched on; re-amended for the fixes on
+    // ag/research-on-fixes, 80d6e4da1: the draft's cited unit is tried first): the page's own sentence, in quotation marks.
+    ok(/"Stripe Billing lets businesses bill customers with subscriptions and invoices\." \[1\]\./.test(out) && /\n\[1\] [^\n]+: https:\/\//.test(out), out);
   }
 });
 

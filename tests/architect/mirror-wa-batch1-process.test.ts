@@ -60,7 +60,25 @@ Deno.test("MP-0 every turn of the benchmark is EXISTS or BLOCKED with a named bl
 // Architect amendment (D-066): the script below moved verbatim to tests/architect/helpers/mirror_wa_script.ts (shared with the
 // behavior-guide suite); every assertion in this file is unchanged.
 import { C2_BODY, C14_BODY, C13_BODY, C5_Q, C21_Q, C4_GUIDE, C4_ANSWER, C9_Q, CITADEL_QUERIES, WEB, WEB_BY_TURN, web, draft, cite, SCRIPT } from "./helpers/mirror_wa_script.ts";
-import { isSupportJudgeCall, supportJudgeAnswer } from "./support-test-judge.ts";
+import { isSupportJudgeCall, supportsClaim } from "./support-test-judge.ts";
+// Architect amendment (owner decision 2026-11-13: research support check switched on; architect ruling 2026-11-14 on 5e7b9fa95): this
+// test's stub judge reads an advice sentence's fixed instruction words (its leading imperative verb, and leave/keep/move/put/cut/drop/
+// remove/list/lead, off/out/in/up/first/top/above/below, outdated/old/current) as needing no support; every other word of the sentence
+// must still be in the one source passage it is judged against (support-test-judge.ts supportsClaim). The product is unchanged.
+const INSTRUCTION_WORDS = /(?<![\p{L}])(?:leave|keep|move|put|cut|drop|remove|list|lead|off|out|in|up|first|top|above|below|outdated|old|current)(?![\p{L}])/giu;
+const mirrorJudgeAnswer = (user: string) => {
+  let items: { claim: string; source: string }[] = [];
+  try { items = JSON.parse(user); } catch { /* empty */ }
+  return JSON.stringify(items.map((x) => { const c = String(x.claim ?? ""), lead = /^\s*([\p{L}]+)/u.exec(c)?.[1] ?? "";
+    const rest = /^The marked text "/.test(c) ? c : c.replace(new RegExp(`^\\s*${lead}\\b`, "u"), "").replace(INSTRUCTION_WORDS, " ");
+    // A record passage (its facts apart by " | ") is read line by line: a sentence must be stated by one fact, never two recombined.
+    const src = String(x.source ?? ""), m = /^>>> (.*) <<<$/m.exec(src)?.[1] ?? "";
+    const lines = m.includes(" | ") ? m.split(" | ").map((l) => src.replace(`>>> ${m} <<<`, `>>> ${l} <<<`)) : [src];
+    return lines.some((l) => supportsClaim(rest, l)) ? "yes" : "no"; }));
+};
+export { mirrorJudgeAnswer };
+// (and the scripted C4 answer drops "SWE": a goal said in chat, never saved as a fact, which the product rightly refuses)
+const C4_SAID = C4_ANSWER.replace("your SWE resume", "your resume");
 const result = (calls: Call[], name: string) => { const c = calls.find((x) => x.name === name); return c ? c.result : ""; };
 
 Deno.test({ name: "MP-1 the EXISTS turns follow Instinct's process: the tools offered and called, the artifact, the boundary, nothing sent", sanitizeOps: false, sanitizeResources: false, ignore: canRun() !== null && canRun() !== "FAIL", fn: async () => {
@@ -68,11 +86,11 @@ Deno.test({ name: "MP-1 the EXISTS turns follow Instinct's process: the tools of
   // Architect amendment (owner decision 2026-11-13: research support check switched on): the handler's support judge calls the model
   // with no tools, which the conversation runner hands to `draft`; it is answered as the deterministic test judge would (a JSON array,
   // support-test-judge.ts) and never advances the script.
-  const draftOrJudge = (system: string, user: string) => isSupportJudgeCall(system) ? supportJudgeAnswer(user) : draft(system, user);
+  const draftOrJudge = (system: string, user: string) => isSupportJudgeCall(system) ? mirrorJudgeAnswer(user) : draft(system, user);
   // Architect amendment (same): with the switch on, a source is "official" (and a sentence that does not name Citadel speaks for
   // Citadel) only on the employer's own domain on record: the brain's C9 research_market call names it (sites: ["citadel.com"]), as
   // the brain passes a domain it knows. The shared script is left as it is; this file's copy of the C9 step carries the site.
-  const script: Record<string, Step[]> = { ...SCRIPT, C9: SCRIPT.C9.map((st: any) => st.tool === "research_market" ? { ...st, input: { ...st.input, sites: ["citadel.com"] } } : st) };
+  const script: Record<string, Step[]> = { ...SCRIPT, C4: SCRIPT.C4.map((st: any) => "text" in st ? { ...st, text: C4_SAID } : st), C9: SCRIPT.C9.map((st: any) => st.tool === "research_market" ? { ...st, input: { ...st.input, sites: ["citadel.com"] } } : st) };
   const { seen, flags, world, person, close } = await runConversation(script, { web: (body, turn) => isPeopleSearch(body) ? peopleSearchAnswer(body) : web(body, turn), draft: draftOrJudge }); // Architect amendment (D-062): the people search stub
   try {
     // The backtest is production's configuration (owner, 2026-11-11): on every turn the handler's effective switches are
@@ -210,7 +228,7 @@ Deno.test({ name: "MP-1 the EXISTS turns follow Instinct's process: the tools of
     ok(c4.tools.includes("research_career_question") && "kind" in (c4.schemas.research_career_question?.properties ?? {}), "C4 offers the advice kind");
     ok(/Lakeshore University/.test(c4.system) && /outdated/i.test(c4.history), "C4: the confirmed education and the GPA correction are in view");
     eq([a4.status, a4.source?.url, c4.searches], ["advice", C4_GUIDE, 1], `C4 advice: ${JSON.stringify(a4).slice(0, 300)}`);
-    eq(c4.reply, `${C4_ANSWER}\n${C4_GUIDE}`, "C4: answer first, then the one source on its own line");
+    eq(c4.reply, `${C4_SAID}\n${C4_GUIDE}`, "C4: answer first, then the one source on its own line");
     // C10: the posting the conversation listed, tailored from confirmed facts; one PDF (its Word copy may ride with it,
     // RESUME-TEMPLATES 1.1); no email on the confirmed resume and none typed, so the email is a visible placeholder the tool flags,
     // and the draft is never stored for an application (D-063); nothing submitted.

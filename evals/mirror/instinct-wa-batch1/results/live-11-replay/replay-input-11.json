@@ -1,0 +1,335 @@
+{
+ "C1": {
+  "calls": [
+   {
+    "name": "search_jobs",
+    "args": {
+     "limit": 10,
+     "query": "software engineer intern summer 2027 Chicago or remote"
+    }
+   },
+   {
+    "name": "get_profile",
+    "args": {}
+   },
+   {
+    "name": "create_file",
+    "args": {
+     "kind": "plan_review",
+     "data": {
+      "title": "SWE internship, Summer 2027 (Chicago or remote): plan",
+      "variant": "pipeline",
+      "period": "Week of 2026-11-14",
+      "sections": [
+       {
+        "heading": "Postings the search found (1 internship)",
+        "items": [
+         {
+          "label": "PayPal, Software Engineer Intern - Summer 2027, Chicago, IL",
+          "value": "Pay $28-$49 hourly. Fit score 38 (Reach): Python and React match; SQL not counted because no experience on your profile backs it. Link: https://paypal.wd1.myworkdayjobs.com/en-US/jobs/job/Software-Engineer-Intern---Summer-2027_R0138586 . Open status and deadline not verified.",
+          "source": "From the posting"
+         },
+         {
+          "label": "NVIDIA, Software Engineer, OpenShell, Remote US",
+          "value": "Full-time role, not an internship; listed only as a related role. Link: https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/job/US-Remote/Software-Engineer--OpenShell_JR2020825",
+          "source": "From the posting"
+         }
+        ]
+       },
+       {
+        "heading": "Week 1 (now): fix the resume",
+        "items": [
+         {
+          "label": "Drop the GPA",
+          "value": "You said 3.9 is outdated, so it stays off until you give the current number.",
+          "source": "From you"
+         },
+         {
+          "label": "Settle Harbor Global dates",
+          "value": "You said the dates might conflict; get them right before anything goes out.",
+          "source": "From you"
+         },
+         {
+          "label": "Settle the Crestline name",
+          "value": "Crestline Partners or Crestline Search Partners: check your offer letter or old email.",
+          "source": "From you"
+         },
+         {
+          "label": "Lead with Pixelforge and Rallyup",
+          "value": "70+ React sites, peak $9k MRR, paying teams. Add a number and the stack to each bullet.",
+          "source": "From your resume"
+         },
+         {
+          "label": "Back up SQL",
+          "value": "SQL is listed with no project behind it. Use it in one real project or the Crestline data work, or cut it.",
+          "source": "From your resume"
+         }
+        ]
+       },
+       {
+        "heading": "Week 2: pipeline",
+        "items": [
+         {
+          "label": "Find more postings",
+          "value": "Check company career pages directly, since my search covered only 2 results.",
+          "source": "From your resume"
+         },
+         {
+          "label": "Referrals",
+          "value": "Message Lakeshore alumni at target companies; ask for advice first, not a referral.",
+          "source": "Reported, not verified"
+         }
+        ]
+       },
+       {
+        "heading": "Weeks 3 to 4: interview readiness",
+        "items": [
+         {
+          "label": "Coding practice",
+          "value": "Practice data structures and algorithms problems out loud, a few per week.",
+          "source": "Reported, not verified"
+         },
+         {
+          "label": "Project stories",
+          "value": "Prepare 3 stories with a number: Pixelforge, Rallyup, Waypoint.",
+          "source": "From your resume"
+         }
+        ]
+       }
+      ]
+     }
+    }
+   }
+  ],
+  "reply": "I made a plan from the search: one summer 2027 SWE internship, PayPal in Chicago ($28-$49 hourly, a reach at fit 38). Whether it's still open is not verified. https://paypal.wd1.myworkdayjobs.com/en-US/jobs/job/Software-Engineer-Intern---Summer-2027_R0138586\n\nResume changes: GPA stays off, Pixelforge and Rallyup lead with numbers. Before anything goes out, settle the Harbor dates, the Crestline name, and SQL (back it up or cut it). Nothing was sent or submitted. Want me to queue PayPal for your approval?"
+ },
+ "C2": {
+  "calls": [
+   {
+    "name": "draft_followup",
+    "args": {
+     "kind": "note",
+     "body": "Hi [Name], I'm Sam, a CS and Finance student at Lakeshore University looking for a summer 2027 SWE internship. I hand-coded 70+ React websites at Pixelforge, reaching $9k in monthly recurring revenue, and I'm building a career agent at Waypoint. I saw your work on [specific project or team] and liked [what]. Could we have a short call this week so I can ask about [one narrow question]? If it seems like a fit, I'd value a referral for [role link]. No problem if the timing is off. Thanks, Sam"
+    }
+   },
+   {
+    "name": "draft_followup",
+    "args": {
+     "kind": "note",
+     "body": "Hi [Name], I'm Sam, a CS and Finance student at Lakeshore University looking for a summer 2027 SWE internship. I hand-coded 70+ React websites at Pixelforge, reaching $9k in monthly recurring revenue, and I'm building a career agent at Waypoint. I saw your work on [specific project or team] and liked [what]. Could we have a short call this week so I can ask about [one narrow question]? If it seems like a fit, I'd value a referral for [role link]. No problem if the timing is off. Thanks, Sam"
+    }
+   }
+  ],
+  "reply": "Hi [Name], I'm Sam, a CS and Finance student at Lakeshore University looking for a summer 2027 SWE internship. I hand-coded 70+ React websites at Pixelforge, reaching $9k in monthly recurring revenue, and I'm building a career agent at Waypoint. I saw your work on [specific project or team] and liked [what]. Could we have a short call this week so I can ask about [one narrow question]? If it seems like a fit, I'd value a referral for [role link]. No problem if the timing is off. Thanks, Sam\n\nDraft, not sent."
+ },
+ "C3": {
+  "calls": [],
+  "reply": "I found 1 software engineer internship in chicago or remote, and it lists pay. Here it is, with Apply on it.\n1. PayPal \u2014 Software Engineer Intern - Summer 2027, Chicago, IL \u2014 this employer requires your own account (open-checked)\nhttps://file.example.test?t=v1.eyJ1IjoiN2IwZjhmOGUtNmE0My00YTQ5LTlkMmMtMDAwMGEyMDAwMDAwIiwiciI6Ijk1MzQ1ZTg2NWMiLCJrIjoibCIsImoiOiJmYTFmODhkMTU4MjQzNjg4IiwiaSI6MTc5NDY2NzczMDIxMSwiZSI6MTc5NDc1NDEzMDIxMX0.4ad2htTVqb6dQwlYxN7GDuGDxIsudZ5NmaU37-WZs5M"
+ },
+ "C4": {
+  "calls": [
+   {
+    "name": "research_career_question",
+    "args": {
+     "question": "what should i put at the very top of my resume for swe roles, be specific",
+     "kind": "advice",
+     "query": "what should i put at the very top of my resume for swe roles, be specific"
+    }
+   }
+  ],
+  "reply": "Start with a header: Sam Rivera, your city and state, phone, and email, since the UC Davis career center lists those as required. I'd add GitHub and a portfolio link, my own call for SWE roles. Right under it, put Education: Lakeshore University, BS Computer Science and Finance, Expected June 2029, with no GPA since you said 3.9 is outdated. Then lead Experience with Pixelforge (70+ React sites, $9k peak monthly recurring revenue). Your phone, city, and links aren't on file, so add them yourself.\nhttps://careercenter.ucdavis.edu/resumes-and-materials/resumes"
+ },
+ "C5": {
+  "calls": [],
+  "reply": "Question 1: Write a function that takes a list of integers and returns the first value that appears more than once, or None if every value is unique. Before any code, tell me your approach and its time and space cost, then write it."
+ },
+ "C6": {
+  "calls": [
+   {
+    "name": "read_application_mail",
+    "args": {}
+   }
+  ],
+  "reply": "Keep this as a running tracker?"
+ },
+ "C5f1": {
+  "calls": [],
+  "reply": "Your approach is right for a different question, and that's the flaw. I asked for the first value that appears more than once, and you described the first value whose count is 1, which is the first unique value. On [3, 1, 3, 1] it returns None when the answer is 3. Also, \"o\ud83d\udc4e\" isn't a complexity, so I can't score it; say O(n) time and O(n) space plainly.\n\nYour dict and two passes work, but you don't need the second pass. Scan once with a set of seen values and return the first number already in it.\n\nFollow-up: you can't use extra memory beyond O(1), and the list has n+1 integers from 1 to n. How would you find a duplicate? Give the approach first, no code."
+ },
+ "C5f2": {
+  "calls": [],
+  "reply": "This code is correct for first_unique, but it still answers the wrong question. I asked for the first value that appears more than once, and this returns the first value that appears exactly once. On [3, 1, 3, 1] it hits the right counts and returns nothing sensible, when the answer is 3.\n\nIt has two other flaws:\n1. The list comprehension is used only for its side effect. It builds a throwaway list of Nones, and interviewers read that as a red flag. Use a plain for loop, or collections.Counter.\n2. next() with no default raises StopIteration when nothing is unique. Pass None as the default.\n\nA single pass fixes the problem and drops the counts dict: keep a set called seen, and return n as soon as it is already in seen. That's O(n) time and O(n) space, and I still need you to say those costs in plain words.\n\nRewrite it for the actual question, and I'll hold the O(1)-space follow-up until you do."
+ },
+ "C7": {
+  "calls": [],
+  "reply": "I'd lean toward Chicago unless the NYC role has a clear edge beyond the higher salary. Cost of living usually eats a gap like that: NYC rent and taxes can take a big share of it, and I don't have verified cost data to say how much. Only a post-tax, post-rent comparison settles it. If NYC wins on manager, learning and network, take it; if it's even, take Chicago. This is hypothetical, so nothing is saved or recorded."
+ },
+ "C8": {
+  "calls": [
+   {
+    "name": "get_profile",
+    "args": {}
+   },
+   {
+    "name": "get_memory",
+    "args": {}
+   }
+  ],
+  "reply": "Your file has nine confirmed entries, newest first: Elmstead GTM team (September 2026 to present); Mindgrove AI Research, researcher on AI continuity and memory (August 2026 to present); Crestline Partners PE intern (2025), Python data tooling; Pixelforge founder (2023-2025), 70+ hand-coded React sites, peak $9k monthly recurring revenue; Harbor Global intern; Rallyup co-founder; Waypoint solo founder (part-time); Ondo founder; and your leadership roles.\n\nThree things are still open. Harbor's dates and the Crestline name (Partners vs Search Partners) are unresolved, so nothing goes out with them until you fix them. Rallyup's newest customers, Northside Athletics and Prime Court Athletics, are saved but waiting for your yes, so I can't use them in applications yet. The 3.9 GPA is withdrawn and unused.\n\nIs the Rallyup customer line right, so I can confirm it?"
+ },
+ "C9": {
+  "calls": [
+   {
+    "name": "research_market",
+    "args": {
+     "format": "file",
+     "queries": [
+      "Citadel new grad software engineer compensation base salary",
+      "Citadel software engineer interview process new grad",
+      "Citadel culture software engineer careers"
+     ],
+     "companies": [
+      "Citadel"
+     ]
+    }
+   }
+  ],
+  "reply": "It calls the bonus discretionary and tied to profit and loss, so it can swing.\nhttps://gitgood.dev/comp/citadel/swe\n\n\"Citadel hedge-fund engineering offers cluster around p50.\"\nhttps://gitgood.dev/comp/citadel/swe\n\nCitadel and Citadel Securities are separate employers, and this source covers Citadel only.\nhttps://gitgood.dev/comp/citadel/swe"
+ },
+ "C10": {
+  "calls": [
+   {
+    "name": "tailor_resume",
+    "args": {}
+   }
+  ],
+  "reply": "Your PayPal resume is a review draft, not a final file, and nothing was applied to. Skills now read Python, JavaScript, TypeScript, React, SQL, and GPA 3.9 is cut. Still open: [your email], the Harbor Global dates, the Crestline name, and leading with Pixelforge's 70+ React sites. Which email goes on top?"
+ },
+ "C11": {
+  "calls": [
+   {
+    "name": "inspect_apply_flow",
+    "args": {
+     "job_id": "workday:paypal.wd1/jobs:Software-Engineer-Intern---Summer-2027_R0138586"
+    }
+   }
+  ],
+  "reply": "To submit the PayPal application, I'd need these from you. The posting is open as of now and closes Sunday, December 6th, 2026 by its own wording. Chicago pays $28-$49 hourly.\n\n1. Your own sign-in or a new account on PayPal's Workday site. You do that yourself, and I never sign in for you.\n2. Work authorization. The posting requires you to be legally authorized to work in the U.S. without sponsorship, and I don't have that on file.\n3. Confirmation that you'll be returning to school in Fall 2027, which the posting requires. I have no return date on file, only your Lakeshore [your degree] with an expected date of June 2029.\n4. The open resume items: your email, the Harbor Global dates, and the Crestline name.\n5. Answers to PayPal's own questions. They sit behind sign-in, so I haven't read them and won't guess them.\n\nI only read the public pages. No account, saved application or submission was created, and nothing was applied for.\n\nWhich email should go on the resume?"
+ },
+ "C12": {
+  "calls": [],
+  "reply": "I haven't verified I could do 50 in one night, and I wouldn't promise it. Your last search found only one SWE internship in Chicago or remote, and each application needs your approval on its card in the Trainee extension. PayPal's questions sit behind your own sign-in too. A better first batch is 5 to 10 roles you approve one by one, once the open items (Harbor dates, Crestline name, your email, work authorization) are fixed. Nothing was applied to or queued. Which first, the Harbor dates or the Crestline name?"
+ },
+ "C13": {
+  "calls": [
+   {
+    "name": "draft_followup",
+    "args": {
+     "kind": "note",
+     "body": "Hi [Name], quick question on the [role] position: is the comp range of [range] flexible at all, or is it fixed? Either way, I'm excited about the role. Thanks, Sam",
+     "tone": "casual"
+    }
+   },
+   {
+    "name": "draft_followup",
+    "args": {
+     "kind": "note",
+     "body": "Hi [Name], quick question on the [role] position: is the comp range of [range] flexible at all, or is it fixed? Either way, I'm excited about the role. Thanks, Sam",
+     "tone": "casual"
+    }
+   }
+  ],
+  "reply": "Hi [Name], quick question on the [role] position: is the comp range of [range] flexible at all, or is it fixed? Either way, I'm excited about the role. Thanks, Sam\n\nDraft, not sent."
+ },
+ "C14": {
+  "calls": [
+   {
+    "name": "draft_followup",
+    "args": {
+     "kind": "note",
+     "body": "Hey [Name], I'm Sam, a CS and Finance student at Lakeshore going for a summer 2027 SWE internship. I hand-coded 70+ React sites at Pixelforge. Open to a quick chat about [team]? A referral for [role link] would mean a lot. Thanks!",
+     "tone": "casual"
+    }
+   }
+  ],
+  "reply": "Hey [Name], I'm Sam, a CS and Finance student at Lakeshore going for a summer 2027 SWE internship. I hand-coded 70+ React sites at Pixelforge. Open to a quick chat about [team]? A referral for [role link] would mean a lot. Thanks!\n\nDraft, not sent."
+ },
+ "C15": {
+  "calls": [],
+  "reply": "Projects and direct outreach have to carry what the internships and GPA can't. Build two or three shipped projects with real users or numbers, and put them at the top of your resume with the GPA left off unless a form requires it. Send about ten short messages a week to alumni and team leads, each with one specific reason, and apply to smaller employers too. Track replies in a sheet. If nothing replies, change the resume top or the message, not the volume. Nothing is saved or sent from this."
+ },
+ "C16": {
+  "calls": [
+   {
+    "name": "export_tracker",
+    "args": {}
+   }
+  ],
+  "reply": "Your application record shows 9 applications: Apparel Co (Sales Associate), 2026-11-14, from an employer email in sam.rivera@example.test; Finance Co (Finance Intern), 2026-11-13, from an employer email in sam.rivera@example.test; Startup Co (Growth Intern), 2026-11-13, from an employer email in sam.rivera@example.test; Shirt Co (Retail Associate), 2026-11-13, from an employer email in sam.rivera@example.test; Gym Co (Front Desk Associate), 2026-11-13, from an employer email in sam.rivera@example.test; Grill Co (Line Cook), 2026-11-12, from an employer email in sam.rivera@example.test; Coffee Co (Barista), 2026-11-12, from an employer email in sam.rivera@example.test; Golf Co (Operations Intern), 2026-11-12, from an employer email in sam.rivera@example.test; Bank A (Summer Analyst), 2026-11-12, from an employer email in sam.rivera@example.test. Checked: Gmail account sam.rivera@example.test and Trainee's saved record. PayPal (Software Engineer Intern - Summer 2027) and NVIDIA (Software Engineer, OpenShell) were research only in this conversation, not applications."
+ },
+ "C17": {
+  "calls": [
+   {
+    "name": "read_application_mail",
+    "args": {}
+   }
+  ],
+  "reply": "\"I'm a CS and Finance student at Lakeshore, graduating June 2029, and I like building software people pay for. At Pixelforge I hand-coded 70+ React sites for clients and got to $9k in monthly recurring revenue. Since then I co-founded Rallyup, youth-sports management software, where I talked to coaches and trainers and got paying teams. I've also written Python data tooling at a private equity firm and AI tooling for an M&A team. Now I'm researching AI memory at Mindgrove and building a career agent at Waypoint. I want a SWE internship at [company] because [specific reason about their product or team].\"\n\nBefore you use it, settle the Crestline name (Partners vs Search Partners) and the Harbor dates, since it mentions both roles. Which role should I fit the last line to?"
+ },
+ "C18": {
+  "calls": [
+   {
+    "name": "check_posting_open",
+    "args": {
+     "job_id": "workday:paypal.wd1/jobs:Software-Engineer-Intern---Summer-2027_R0138586"
+    }
+   }
+  ],
+  "reply": "Yes, it's still open: I checked the Workday page just now, and the posting says applications are accepted through Sunday, December 6th, 2026. Nothing was applied for.\n\nhttps://paypal.wd1.myworkdayjobs.com/en-US/jobs/job/Software-Engineer-Intern---Summer-2027_R0138586"
+ },
+ "C19": {
+  "calls": [
+   {
+    "name": "find_people",
+    "args": {}
+   }
+  ],
+  "reply": "I found no public page naming a Lakeshore alum at Google, Jane Street, or Citadel Securities, so I have no names to give you. I picked the two trading firms myself as well-known examples, and the search only reads public pages, so it can't see LinkedIn. The better route is Lakeshore's alumni directory or career office, plus your Sigma Tau and investing and finance club contacts. Nobody was contacted and nothing was sent.\n\nWant me to draft a short note you could post in the finance club or Sigma Tau group asking who has worked at those firms?"
+ },
+ "C20": {
+  "calls": [
+   {
+    "name": "tailor_resume",
+    "args": {}
+   }
+  ],
+  "reply": "Pixelforge is now one line, but Waypoint couldn't be expanded. Your confirmed record holds only one detail for it, so that's all it prints, and I didn't invent more. Waypoint now leads its section.\n\nThe $9k peak monthly recurring revenue no longer prints on this version. It's still on your record. The email at the top still reads [your email], so this is a review draft and needs your email before it goes anywhere. Nothing was submitted.\n\nWhat else did you do at Waypoint (users, features shipped, how it's built) that I can add?"
+ },
+ "C21": {
+  "calls": [],
+  "reply": "Question: \"Tell me about a time you failed.\" Answer it as you would in the room, using something that really happened, and I'll roast it bluntly once you do."
+ },
+ "C22": {
+  "calls": [
+   {
+    "name": "research_market",
+    "args": {
+     "format": "inline",
+     "queries": [
+      "software engineer intern hourly pay Chicago 2026",
+      "BLS software developers hourly wage Chicago-Naperville-Elgin"
+     ]
+    }
+   }
+  ],
+  "reply": "\"Percentile wage estimates for Software Developers:\".\nhttps://www.bls.gov/oes/2023/may/oes151252.htm"
+ },
+ "C21f": {
+  "calls": [],
+  "reply": "Your answer is a plot summary: a client didn't like the site, you redid it, and you \"learned to communicate better,\" which every candidate says and nobody believes. What's missing is what you personally got wrong. Did you skip requirements, show the design too late, or promise too much? There's also no cost, like a lost client, unpaid hours or a refund, and no specific step you changed afterward. \"Communicate better\" isn't a step. Rebuild it from what actually happened, then say it out loud again."
+ },
+ "C23": {
+  "calls": [],
+  "reply": "I don't have a total length for Citadel's process. My source covered pay, bonus and the Citadel vs Citadel Securities split, not timing, and I won't guess. Want a company brief for the SWE role?"
+ }
+}

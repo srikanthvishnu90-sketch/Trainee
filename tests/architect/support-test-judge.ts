@@ -35,3 +35,12 @@ export function supportJudgeAnswer(userContent: string): string {
   try { items = JSON.parse(userContent); } catch { /* empty */ }
   return JSON.stringify(items.map((x) => supportsClaim(String(x.claim ?? ""), String(x.source ?? "")) ? "yes" : "no"));
 }
+// Added for the group-A amendments (owner decision 2026-11-13): the same judge for a claim that names its source first ("The posting
+// says ...", "According to its careers page, ..."). "The posting says X" is stated by the page exactly when X is: the attribution is
+// read off and the rest is judged by supportsClaim, word for word and negation for negation, as above.
+const ATTRIBUTED = /^(?:the (?:posting|page|careers page|job board|board|site|filing|listing) (?:says|states|lists|notes)(?: that)?:?|according to (?:the|its) [\p{L} ]{1,30}?,)\s+/iu;
+export function supportsAttributedClaim(claim: string, source: string): boolean {
+  const m = ATTRIBUTED.exec(claim);
+  return supportsClaim(m ? claim.slice(m[0].length) : claim, source);
+}
+export const attributedTestSupportJudge: SupportJudge = async (cs) => cs.map((c) => supportsAttributedClaim(c.claim, c.source) ? "yes" : "no");

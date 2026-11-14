@@ -21,6 +21,7 @@ import assertNode from "node:assert/strict";
 import { CareerRouter } from "../../supabase/functions/_shared/router_core.career.js";
 import { agentTurn, applicationCount, marketRateAskOf, processCheck, shortenedOk } from "../../supabase/functions/agent-chat/career_brain.ts";
 import { checkLine, enforceMarketReply, researchMarket, withoutAttribution } from "../../supabase/functions/_shared/agent/research/market.ts";
+import { attributedTestSupportJudge, testSupportJudge } from "./support-test-judge.ts";
 import { researchCompany } from "../../supabase/functions/_shared/agent/research/company.ts";
 import { contentWords } from "../../supabase/functions/_shared/agent/research/guard.ts";
 import { readAlike } from "../../supabase/functions/_shared/agent/research/draft_json.ts";
@@ -111,7 +112,7 @@ Deno.test("D71-1 LENGTH: a faithful shorter text is used even when still over th
   ok(textLength(r3.reply) > 600 && !/^Workday needs your own account/.test(r3.reply), "the long reply stands");
   ok(/dropped/.test(r3.shorten.why), r3.shorten.why);
   // C9 (research laid out in code) says why the pass did not run.
-  const m = await marketTurn(P.C9, [], (n) => n === 0 ? use("research_market", { question: C9_Q, format: "inline", companies: ["Citadel"], queries: CITADEL_QUERIES }) : text("Pay: the base salary range is $235,000 to $300,000 [1]."));
+  const m = await marketTurn(P.C9, [], (n) => n === 0 ? use("research_market", { question: C9_Q, format: "inline", companies: ["Citadel"], sites: CITADEL_SITES, queries: CITADEL_QUERIES }) : text("Pay: the base salary range is $235,000 to $300,000 [1]."));
   eq([m.r.shorten.ran, m.r.shorten.outcome], [false, "not_run"]);
   ok(/research reply/.test(m.r.shorten.why), m.r.shorten.why);
 });
@@ -136,7 +137,14 @@ const marketDeps = (pages: { url: string; title: string; text: string }[], draft
   search: { id: "t", needsKey: false, search: async () => ({ hits: pages.map((p) => ({ url: p.url, title: p.title, provider: "t", foundAt: NOW })), notes: [], provider: "t" }) },
   read: async () => ({ verified: pages.map((p) => ({ url: p.url, requested: p.url, status: 200, title: p.title, text: p.text, fetchedAt: NOW })), rejected: [] }),
   draft: async (payload: any) => draft(payload.messages[0].content), layout: "messages" as const,
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): research needs its judge to keep a line
+  // (the deterministic test judge, support-test-judge.ts), in researchMarket and in the brain's research_market alike.
+  judge: testSupportJudge,
 });
+// Architect amendment (owner decision 2026-11-13: research support check switched on): a page sentence that does not name Citadel
+// ("The base salary range for this role is ...") speaks for Citadel only on a page code knows is Citadel's own: its domain on
+// record (the plan's sites, as the brain passes them). Every Citadel research call of this file gives it.
+const CITADEL_SITES = ["citadel.com"];
 const CITADEL = Object.entries(WEB).slice(0, 4).map(([url, p]) => ({ url, title: p.title, text: p.text }));
 // The C9 draft as a model words it from the Citadel pages (the Instinct benchmark's sources, tests/architect/helpers/mirror_wa_script.ts;
 // the live-8 run log records no page text): each quote word for word, each claim in the model's own framing.
@@ -158,7 +166,7 @@ Deno.test("D71-2 RESEARCH (C9, C23, item 10): lines worded the way the model wor
   eq(withoutAttribution("The posting says the team ships weekly."), "the team ships weekly.");
   eq(withoutAttribution("According to its careers page, interns rotate."), "interns rotate.");
   // C9: research_market on the Citadel pages; pay, process and culture each stand with their source link.
-  const r: any = await researchMarket({ question: C9_Q, format: "inline", plan: { queries: CITADEL_QUERIES, companies: ["Citadel"] } as any, deps: marketDeps(CITADEL, () => C9_DRAFT) as any });
+  const r: any = await researchMarket({ question: C9_Q, format: "inline", plan: { queries: CITADEL_QUERIES, companies: ["Citadel"], sites: CITADEL_SITES } as any, deps: marketDeps(CITADEL, () => C9_DRAFT) as any });
   eq(r.status, "ok", JSON.stringify(r).slice(0, 400));
   eq(r.points.length, 4, JSON.stringify(r.audit));
   eq([r.audit.drafted, r.audit.kept, r.audit.dropped], [4, 4, {}]);
@@ -176,12 +184,15 @@ Deno.test("D71-2 RESEARCH (C9, C23, item 10): lines worded the way the model wor
   eq(checkLine("Anonymous posters report demanding hours, with performance pressure at Citadel.", "Anonymous posters describe demanding hours and performance pressure at Citadel.", pg(2), "Citadel"),
     { ok: true, text: "Anonymous posters describe demanding hours and performance pressure at Citadel.", via: "quote" });
   // A draft that gives no line at all (live: the trace could not say) still gives the pages' own sentences, each with its source.
-  const empty: any = await researchMarket({ question: C9_Q, format: "inline", plan: { queries: CITADEL_QUERIES, companies: ["Citadel"] } as any, deps: marketDeps(CITADEL, () => "I can't write that.") as any });
+  const empty: any = await researchMarket({ question: C9_Q, format: "inline", plan: { queries: CITADEL_QUERIES, companies: ["Citadel"], sites: CITADEL_SITES } as any, deps: marketDeps(CITADEL, () => "I can't write that.") as any });
   eq(empty.status, "ok");
   ok(empty.points.length >= 2 && empty.audit.from_pages === empty.points.length && empty.audit.parse === "failed", JSON.stringify(empty.audit));
-  for (const p of empty.points) ok(CITADEL.some((c) => c.text === p.text), p.text);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): a page's own sentence is shown as what it
+  // is, in quotation marks; inside the marks it is still that page's text.
+  const unq = (t: string) => t.replace(/^(?:From [^:"]+: )?"(.*)"$/s, "$1");
+  for (const p of empty.points) ok(/^(?:From [^:"]+: )?".*"$/s.test(p.text) && CITADEL.some((c) => c.text === unq(p.text)), p.text);
   // The turn's meta carries the trace (handler meta `research`; the mirror runner's trace.research).
-  const t = await marketTurn(P.C9, [], (n) => n === 0 ? use("research_market", { question: C9_Q, format: "inline", companies: ["Citadel"], queries: CITADEL_QUERIES }) : text("Pay: Citadel's posting lists a base salary range of $235,000 to $300,000 [1]."));
+  const t = await marketTurn(P.C9, [], (n) => n === 0 ? use("research_market", { question: C9_Q, format: "inline", companies: ["Citadel"], sites: CITADEL_SITES, queries: CITADEL_QUERIES }) : text("Pay: Citadel's posting lists a base salary range of $235,000 to $300,000 [1]."));
   eq([t.r.research.kind, t.r.research.status, t.r.research.drafted, t.r.research.kept], ["market", "ok", 4, 4]);
   for (const f of ["../../supabase/functions/agent-chat/handler-career.ts", "../../evals/mirror/run-conversation.ts"]) ok(/research: \(turn as any\)\.research|research: meta\.research/.test(Deno.readTextFileSync(new URL(f, import.meta.url))), f);
   // Item 10: the five companies that kept nothing live, replayed on their recorded pages with lines worded as the model words them.
@@ -189,16 +200,20 @@ Deno.test("D71-2 RESEARCH (C9, C23, item 10): lines worded the way the model wor
     const rec = JSON.parse(Deno.readTextFileSync(new URL(`recorded/${id}.json`, REC)));
     const pages = (rec.read.verified as any[]).filter((v) => v.status === 200).map((v) => ({ url: v.url, text: String(v.text ?? "") }));
     const lines = modelLines(rec.case.company, pages);
+    // Architect amendment (owner decision 2026-11-13: research support check switched on): these lines name their source ("The
+    // posting says ..."); the judge reads "the posting says X" as stated exactly when the page states X (attributedTestSupportJudge).
     const d = JSON.stringify({ title: rec.case.company, business: lines.slice(0, 6), role: lines.slice(6, 9), developments: [], competitors: [], tensions: [], unknowns: [] });
-    const rr: any = await researchCompany({ company: rec.case.company, role: rec.case.role, question: `Research ${rec.case.company}.`, plan: rec.plan, now: Date.UTC(2026, 10, 12, 15), format: "inline", deps: { search: { id: "first_party", needsKey: false, search: async () => rec.search }, read: async () => rec.read, draft: async () => d } as any });
+    const rr: any = await researchCompany({ company: rec.case.company, role: rec.case.role, question: `Research ${rec.case.company}.`, plan: rec.plan, now: Date.UTC(2026, 10, 12, 15), format: "inline", deps: { search: { id: "first_party", needsKey: false, search: async () => rec.search }, read: async () => rec.read, draft: async () => d, judge: attributedTestSupportJudge } as any });
     eq(rr.status, "ok", `${id}: ${rr.blocker ?? ""}`);
     ok(rr.business.length + rr.role_asks.length >= 3 && rr.audit.drafted === lines.length, `${id}: ${JSON.stringify(rr.audit)}`);
     for (const l of [...rr.business, ...rr.role_asks]) { const src = rr.sources.find((x: any) => x.n === l.cite[0]); ok(src && pages.some((pg) => pg.url === src.url), `${id}: ${l.text}`); }
     // With no draft line at all, the pages' own sentences that name the company.
-    const none: any = await researchCompany({ company: rec.case.company, role: rec.case.role, question: `Research ${rec.case.company}.`, plan: rec.plan, now: Date.UTC(2026, 10, 12, 15), format: "inline", deps: { search: { id: "first_party", needsKey: false, search: async () => rec.search }, read: async () => rec.read, draft: async () => "" } as any });
+    const none: any = await researchCompany({ company: rec.case.company, role: rec.case.role, question: `Research ${rec.case.company}.`, plan: rec.plan, now: Date.UTC(2026, 10, 12, 15), format: "inline", deps: { search: { id: "first_party", needsKey: false, search: async () => rec.search }, read: async () => rec.read, draft: async () => "", judge: testSupportJudge } as any });
     eq(none.status, "ok", `${id} with no draft: ${none.blocker ?? ""}`);
     ok(none.business.length >= 1 && none.audit.from_pages === none.business.length, JSON.stringify(none.audit));
-    for (const l of none.business) ok(pages.some((pg) => readAlike(pg.text).replace(/\s+/g, " ").includes(l.text)), `${id}: word for word from its page: ${l.text}`);
+    // Architect amendment (owner decision 2026-11-13: research support check switched on): the page's sentence is shown in quotation
+    // marks (with "From <host>, a page about <Employer>: " when the page lends the name); inside the marks, word for word.
+    for (const l of none.business) ok(/^(?:From [^:"]+: )?".*"$/s.test(l.text) && pages.some((pg) => readAlike(pg.text).replace(/\s+/g, " ").includes(unq(l.text))), `${id}: word for word from its page: ${l.text}`);
   }
   // The real-set results record the trace (evals/real-sets/research/run.ts).
   ok(/research: r\.audit/.test(Deno.readTextFileSync(new URL("run.ts", REC))));

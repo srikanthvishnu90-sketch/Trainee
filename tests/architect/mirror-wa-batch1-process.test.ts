@@ -60,11 +60,20 @@ Deno.test("MP-0 every turn of the benchmark is EXISTS or BLOCKED with a named bl
 // Architect amendment (D-066): the script below moved verbatim to tests/architect/helpers/mirror_wa_script.ts (shared with the
 // behavior-guide suite); every assertion in this file is unchanged.
 import { C2_BODY, C14_BODY, C13_BODY, C5_Q, C21_Q, C4_GUIDE, C4_ANSWER, C9_Q, CITADEL_QUERIES, WEB, WEB_BY_TURN, web, draft, cite, SCRIPT } from "./helpers/mirror_wa_script.ts";
+import { isSupportJudgeCall, supportJudgeAnswer } from "./support-test-judge.ts";
 const result = (calls: Call[], name: string) => { const c = calls.find((x) => x.name === name); return c ? c.result : ""; };
 
 Deno.test({ name: "MP-1 the EXISTS turns follow Instinct's process: the tools offered and called, the artifact, the boundary, nothing sent", sanitizeOps: false, sanitizeResources: false, ignore: canRun() !== null && canRun() !== "FAIL", fn: async () => {
   if (canRun() === "FAIL") throw new Error("MP-1 needs Postgres 16 in CI");
-  const { seen, flags, world, person, close } = await runConversation(SCRIPT, { web: (body, turn) => isPeopleSearch(body) ? peopleSearchAnswer(body) : web(body, turn), draft }); // Architect amendment (D-062): the people search stub
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): the handler's support judge calls the model
+  // with no tools, which the conversation runner hands to `draft`; it is answered as the deterministic test judge would (a JSON array,
+  // support-test-judge.ts) and never advances the script.
+  const draftOrJudge = (system: string, user: string) => isSupportJudgeCall(system) ? supportJudgeAnswer(user) : draft(system, user);
+  // Architect amendment (same): with the switch on, a source is "official" (and a sentence that does not name Citadel speaks for
+  // Citadel) only on the employer's own domain on record: the brain's C9 research_market call names it (sites: ["citadel.com"]), as
+  // the brain passes a domain it knows. The shared script is left as it is; this file's copy of the C9 step carries the site.
+  const script: Record<string, Step[]> = { ...SCRIPT, C9: SCRIPT.C9.map((st: any) => st.tool === "research_market" ? { ...st, input: { ...st.input, sites: ["citadel.com"] } } : st) };
+  const { seen, flags, world, person, close } = await runConversation(script, { web: (body, turn) => isPeopleSearch(body) ? peopleSearchAnswer(body) : web(body, turn), draft: draftOrJudge }); // Architect amendment (D-062): the people search stub
   try {
     // The backtest is production's configuration (owner, 2026-11-11): on every turn the handler's effective switches are
     // RELEASE_FLAGS exactly as release_config.ts ships them, no never-on switch is on, and the brain is PRODUCTION_BRAIN.
@@ -177,7 +186,12 @@ Deno.test({ name: "MP-1 the EXISTS turns follow Instinct's process: the tools of
     ok(m9.sources.some((x: any) => x.kind === "official") && m9.sources.some((x: any) => x.kind === "anecdote"), `C9: official and anecdotal sources told apart: ${JSON.stringify(m9.sources.map((x: any) => [x.url, x.kind]))}`);
     const parts9 = c9.reply.split(/\n\n+/);
     ok(parts9.length >= 3 && parts9.every((p) => /\nhttps:\/\/\S+$/.test(p)), `C9: one topic per message, its link on its own line: ${c9.reply}`);
-    ok(/anecdotes? rather than proof|anecdotes?, not proof/i.test(c9.reply), "C9 labels the anecdote");
+    // Architect amendment (owner decision 2026-11-13: research support check switched on): the model's own wording ("..., anecdotes
+    // rather than proof") does not reach the person; the forum's line is its page's own sentence, quoted, which says itself that it is
+    // anonymous accounts, or else code tags it "(anecdote)" (market.ts UNVERIFIED_LABEL). Either way the paragraph that carries the
+    // forum's link labels it as an anecdote.
+    const forum9 = parts9.find((p) => p.includes("reddit.com"));
+    ok(forum9 && (/anecdotes? rather than proof|anecdotes?, not proof|\(anecdote\)/i.test(forum9) || /^(?:From [^:"]+: )?"Anonymous (?:posters|accounts)/.test(forum9)), `C9 labels the anecdote: ${c9.reply}`);
     ok(c9.reply.includes("https://www.citadel.com/careers/career-perspectives/our-engineering-interview-process"), "C9 cites the interview guide");
 
     // C22: the posting's own pay read, then self-reported figures from one web search, labelled self-reported, each with its link.

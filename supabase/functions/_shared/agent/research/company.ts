@@ -403,13 +403,13 @@ export function enforceCompanyReply(reply: string, r: CompanyResult, checked = f
     // Only sentences that say research could not run (a blocker, nothing from memory) stand; anything else (apply instructions,
     // a claim) gives way to the blocker code names. The role question stays when the role is unknown.
     const SAYS_NO = /\b(?:couldn['’]?t|could not|can['’]?t|cannot|unable to|wasn['’]?t able|was not able|not able to|blocked|refused|no (?:source|page))\b/i;
-    const kept = stripUrls(reply).split(/(?<=[.!?])\s+/).filter((s) => s && !numbersIn(s).length && (/\?\s*$/.test(s) ? !!(r.ask && ROLE_Q.test(s)) : SAYS_NO.test(s) && !/\b(?:but|however)\b/i.test(s))).join(" ");
+    const kept = stripUrls(reply).split(/(?<=[.!?]["”')]*)\s+(?!\[\d)/).filter((s) => s && !numbersIn(s).length && (/\?\s*$/.test(s) ? !!(r.ask && ROLE_Q.test(s)) : SAYS_NO.test(s) && !/\b(?:but|however)\b/i.test(s))).join(" ");
     const fail = r.blocker ? `I couldn't do this research: ${r.blocker}. Nothing was applied for or sent.` : NO_SOURCES;
     // D-073 review 2 (the same rule as a market answer, market.ts): when pages were read and none gave a line, the person is always
     // told so AND which pages they were, whatever the model wrote: a reply left with only the role question gets the blocker first.
     const checked = r.checked ?? [];
     if (!checked.length) return kept || fail;
-    const says = kept.split(/(?<=[.!?])\s+/).some((s) => !/\?\s*$/.test(s) && SAYS_NO.test(s));
+    const says = kept.split(/(?<=[.!?]["”')]*)\s+(?!\[\d)/).some((s) => !/\?\s*$/.test(s) && SAYS_NO.test(s));
     const day = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
     return `${says ? kept : [fail, kept].filter(Boolean).join(" ")}\n\n${checked.map((x) => `[${x.n}] ${x.title}: ${x.url} (read ${day(x.fetched_at)})`).join("\n")}`;
   }
@@ -423,7 +423,8 @@ export function enforceCompanyReply(reply: string, r: CompanyResult, checked = f
   const facts: Cited[] = [...r.business, ...r.developments, ...r.competitors.map((x) => ({ text: `${x.name} ${x.text}`, cite: x.cite })), ...r.role_asks];
   const cleaned = inline ? stripUrls(reply).replace(/\[(\d+)\]/g, (m, n) => Number(n) >= 1 && Number(n) <= max ? m : "") : stripUrls(reply).replace(/\s*\[\d+\]/g, "");
   // A line left with only list markers once its link is removed ("- https://..." -> "-") is no sentence.
-  const body0 = cleaned.split("\n").filter((l) => /[\p{L}\p{N}]/u.test(l)).join("\n").split(/(?<=[.!?])\s+/).filter((s) => {
+  // 2026-11-14: a sentence that ends in a closing quotation mark (a quoted unit, "… invoices.") ends there too.
+  const body0 = cleaned.split("\n").filter((l) => /[\p{L}\p{N}]/u.test(l)).join("\n").split(/(?<=[.!?]["”')]*)\s+(?!\[\d)/).filter((s) => {
     if (!s.trim()) return false;
     if (/\?\s*$/.test(s)) { // a question to the person
       if (!r.ask) return !numbersIn(s).length && specifics(s).names.every((n) => word(n, known));
@@ -447,8 +448,8 @@ export function enforceCompanyReply(reply: string, r: CompanyResult, checked = f
   }).join(" ").trim();
   // Item 10 loop (E.46): a reply with no sentence of its own left (a list of links under "Here are the sources:") is no synthesis; the
   // kept lines answer instead, and a question to the person stays.
-  const prose = body0.split(/(?<=[.!?])\s+|\n+/).some((s) => !/[?:]\s*$/.test(s) && (s.match(/\p{L}{2,}/gu) ?? []).length >= 2);
-  const body = prose ? body0 : body0.split(/(?<=[.!?])\s+|\n+/).filter((s) => /\?\s*$/.test(s)).join(" ");
+  const prose = body0.split(/(?<=[.!?]["”')]*)\s+(?!\[\d)|\n+/).some((s) => !/[?:]\s*$/.test(s) && (s.match(/\p{L}{2,}/gu) ?? []).length >= 2);
+  const body = prose ? body0 : body0.split(/(?<=[.!?]["”')]*)\s+(?!\[\d)|\n+/).filter((s) => /\?\s*$/.test(s)).join(" ");
   // Nothing of the reply stood: the kept lines themselves (in chat, each with its source numbers).
   const lead = inline ? facts.slice(0, 3).map((f) => `${f.text.replace(/[.]?$/, "")} ${f.cite.map((n) => `[${n}]`).join("")}.`).join(" ") : lines.filter((l) => l && l !== r.frame?.text).slice(0, 2).join(" "); // the reading is never stated as a fact
   const text = prose ? body : [lead, body].filter(Boolean).join(" ");

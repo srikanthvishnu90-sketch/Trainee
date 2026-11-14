@@ -528,7 +528,7 @@ export async function researchMarket(i: { question: string; format: "inline" | "
     const keys: unknown[] = [], wants: Wanted[] = [];
     for (const x of arr(d.summary, 5)) { keys.push(x); wants.push({ claim: squash(x?.text), pages: [pidx(pageOf(x?.url))], fallback: squash(x?.quote) }); }
     const os = arr(d.comparison?.options, 4).map(squash).filter((o) => o && o.length <= 60 && linkFree(o));
-    for (const r of arr(d.comparison?.rows, 10)) arr(r?.cells, 4).forEach((c, j) => { if (c && typeof c === "object" && os[j]) { keys.push(c); wants.push({ claim: `${os[j]} is ${squash(c.value)}` /* 2026-11-14: a word between, so a capitalised value is not read as part of the column's name ("Globex Power Home") */, judged: `${os[j]}, ${squash(r?.label)}: ${squash(c.value)}`, pages: [pidx(pageOf(c.url))] }); } });
+    for (const r of arr(d.comparison?.rows, 10)) arr(r?.cells, 4).forEach((c, j) => { if (c && typeof c === "object" && os[j]) { keys.push(c); wants.push({ claim: cellClaim(os[j], squash(c.value), squash(r?.label)) /* 2026-11-14: as a clause ("Acme Energy is 41,000 home batteries installed (2025)"): a word between, so a capitalised value is not read as part of the column's name ("Globex Power Home"), and the row's label after the value, so a bare figure carries what it counts */, judged: `${os[j]}, ${squash(r?.label)}: ${squash(c.value)}`, pages: [pidx(pageOf(c.url))] }); } });
     for (const x of [...arr(d.conditions, 6), ...arr(d.risks, 6)]) { const ks = arr(x?.urls, 4).map((u) => pidx(pageOf(u))).filter((k) => k >= 0); keys.push(x); wants.push({ claim: squash(x?.text), pages: ks.length ? ks : [-1] }); }
     keys.push(THESIS); wants.push({ claim: squash(d.thesis) });
     // Round 3: a page unit code picks itself (pageSentences, below) is a quote candidate too, and is judged in this same call: at
@@ -543,6 +543,12 @@ export async function researchMarket(i: { question: string; format: "inline" | "
     // Round 4: a draft longer than the judge may be asked about loses lines unchecked; the result says so, so the reply can.
     if (vs.unasked) notes.push(`${vs.unasked} drafted line(s) could not be checked this turn and were left out: say that not everything found could be checked`);
   }
+  // A comparison cell as one clause for layer A: "<column> is <value> <label>", the value's capital (a cell's, not a name's) and the
+  // label's "(2025)" read as words ("Acme Energy is 41,000 home batteries installed in 2025").
+  function cellClaim(column: string, value: string, label: string) {
+    const v = value.replace(/^\p{Lu}(?=\p{Ll})/u, (ch) => ch.toLowerCase()), l = label.replace(/\(\s*((?:19|20)\d\d)\s*\)/g, "in $1").replace(/^\p{Lu}(?=\p{Ll})/u, (ch) => ch.toLowerCase());
+    return `${column} is ${v}${l ? ` ${l}` : ""}`;
+  }
   const lineS = (x: any, text: unknown, section: string, o: { subject?: string; quote?: boolean } = {}): Cited | null => {
     const t = squash(text), v = sup.get(x), reading = section !== "summary" && section !== "comparison";
     const named = reading ? arr(x?.urls, 4).some((u) => pageOf(u)) : !!pageOf(x?.url);
@@ -554,7 +560,8 @@ export async function researchMarket(i: { question: string; format: "inline" | "
     // Round 4: a page's unit shown in its own words must say something: a heading ("Form 10-K Hollow Oak Logistics Inc.") is no line.
     // 2026-11-14: so must a line in the model's words, and the unit it stands on: a heading or a document's title ("Form 10-K Hollow
     // Oak Logistics Inc.") is not a claim, however it is worded.
-    const said = !!hit && hasPredicate(hit.sentence, pages[hit.page].title) && (!model || hasPredicate(t, pages[hit.page].title));
+    // (A comparison cell is a value under its row's label, not a sentence: only its unit must say something.)
+    const said = !!hit && hasPredicate(hit.sentence, pages[hit.page].title) && (!model || section === "comparison" || hasPredicate(t, pages[hit.page].title) || /(?<![\p{L}])(?:is|are|was|were|has|have|had)(?![\p{L}])/iu.test(t));
     if (!hit || !said || (!model && o.quote === false)) { dropped++; auditLine(audit, { ok: false, why: why || "unsupported" }, section, { text, quote: x?.quote }); return null; }
     const out = model ? t : quoteOf(hit);
     auditLine(audit, model ? { ok: true } : { ok: true, via: "quote" }, section);
@@ -755,7 +762,7 @@ export function enforceMarketReply(reply: string, r: MarketResult, shown: { text
     // 2026-11-13: one such sentence, the first; no other sentence of the model's survives (a pay line this conversation already
     // showed is code's own record of an earlier reply and stays with its link, as before).
     const isUnconfirmed = pre?.unconfirmed ?? onlySaysUnconfirmed;
-    const all = (pre?.unconfirmed ? reply.split("\n") : stripUrls(reply).split(/(?<=[.!?])\s+/)).filter(Boolean), own = all.find(isUnconfirmed);
+    const all = (pre?.unconfirmed ? reply.split("\n") : stripUrls(reply).split(/(?<=[.!?]["”')]*)\s+(?!\[\d)/)).filter(Boolean), own = all.find(isUnconfirmed);
     const says = (s: string) => s === own;
     const sents = all.filter((s, k) => (s === own && all.indexOf(s) === k) || (!isUnconfirmed(s) && wasShown(s)));
     const kept = sents.join(" ");
@@ -899,12 +906,15 @@ export async function enforceMarketReplySupported(reply: string, r: MarketResult
   }
   const vs = await decide(wants, sup.idx, o.judge);
   const said = new Set(kept.map((p) => plainLine(p.text.replace(/^"(.*)"$/s, "$1")).toLowerCase()).filter((k) => rows.flat().some((x) => typeof x === "string" && plainLine(x.replace(/"/g, "")).toLowerCase().includes(k))));
+  const anyStood = rows.flat().some((x) => typeof x === "string" || (vs[x].how !== "drop" && sup.pageOfN.indexOf(vs[x].page) >= 0));
   const body = rows.map((row) => row.map((x) => {
     if (typeof x === "string") return x;
     const v = vs[x], n = v.how === "drop" ? 0 : sup.pageOfN.indexOf(v.page) + 1;
     if (v.how === "drop" || n < 1) {
       // 2026-11-14: a refused sentence that gives a kept line's figures from that line's own source is replaced by the kept line
-      // (already checked), said once; never a figure the kept line does not have.
+      // (already checked), said once; never a figure the kept line does not have. Only when some sentence of the model's stands:
+      // with none, code's own answer (the kept lines) is given as before.
+      if (!anyStood) return "";
       const figs = figuresIn(wants[x].claim);
       const p = figs.length ? kept.find((k) => k.cite.some((c) => cited[x]?.includes(c)) && figs.every((f) => figuresIn(k.text).some((y) => numEq(y, f)))) : null;
       if (!p) return "";

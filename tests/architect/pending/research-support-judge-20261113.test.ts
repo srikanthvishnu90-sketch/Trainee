@@ -308,11 +308,16 @@ Deno.test("the company brief: every line is judged or quoted; the model's unknow
     eq(r.status, "ok");
     // Round 5: the 2024 unit carries a year the claim does not, so layer A stands the false claim on the other unit, whose quote the
     // two drafted lines now share (shown once); the brief then takes the page's other unit as its second line, quoted and judged.
-    eq(r.business.map((x: any) => x.text), ['"Acme Robotics sells warehouse robots to retailers."', '"Acme Robotics stopped selling delivery drones in 2024."']);
+    // 2026-11-14: the unit the draft cited is offered first in a refused line's place, so the first line is the 2024 unit (the same two
+    // units, in the drafted order).
+    eq(r.business.map((x: any) => x.text), ['"Acme Robotics stopped selling delivery drones in 2024."', '"Acme Robotics sells warehouse robots to retailers."']);
     eq(r.frame?.text ?? null, '"Acme Robotics sells warehouse robots to retailers."'); // round 5: the dated unit is no support for an undated reading // the reading, not judged yes, is the page's sentence
-    eq(r.unknowns.filter((u: string) => /drone market/.test(u)), []);
+    // 2026-11-14 (owner decision to switch the check on; design): the model's unknowns and the questions code builds are not claims
+    // about a page: they are kept under their own code checks (no figure, no name the pages or the person do not have; each side of
+    // a question stated on its pages). A product's angle is still not shown.
+    ok(r.unknowns.every((u: string) => !/\d/.test(u)), JSON.stringify(r.unknowns));
     eq(r.products, []);
-    eq(r.questions, []);
+    ok(r.questions.every((q: any) => /^Your team is working on .+\. How do you decide between .+ and .+\?$/.test(q.text)), JSON.stringify(r.questions));
     const out = await enforceCompanyReplySupported("Acme Robotics sells delivery drones [1]. Acme Robotics is under federal investigation [1]. I couldn't confirm it (the drones were a hit). Did you know Acme Robotics is profitable?", r, { judge: j, ask: "research acme robotics" });
     const rest = out.replace(/"[^"]+"/g, " ");
     ok(!/sells delivery drones|investigation|hit|profitable/.test(rest), out);
@@ -324,9 +329,9 @@ Deno.test("the company brief: every line is judged or quoted; the model's unknow
   ok(!/2026|Globex/.test(out.split("\n\n[1] ")[0]), out);
 });
 
-Deno.test("the switch is off in the product", async () => {
+Deno.test("the switch is on in the product (owner decision 2026-11-13)", async () => {
   const src = await Deno.readTextFile(new URL("../../../supabase/functions/_shared/agent/research/market.ts", import.meta.url));
-  ok(/export const FAIL_CLOSED = \{ figures: false, support: false \};/.test(src));
+  ok(/export const FAIL_CLOSED = \{ figures: false, support: true \};/.test(src));
 });
 
 // ================================================================================================ round 2 (review of #810)

@@ -64,3 +64,27 @@ Deno.test("the shared test judge refuses a forecast stated as a result, and a re
   ok(!supportsClaim("The Revenue suite will reach a $1 billion annual run rate.", src("The Revenue suite reached a $1 billion annual run rate.")));
   ok(supportsClaim("The Revenue suite is on track to reach a $1 billion annual run rate in 2026.", src("The Revenue suite is on track to reach a $1 billion annual run rate in 2026.")));
 });
+
+// ---- fixes 5 to 11 (groups A and C)
+import { quotable } from "../../../supabase/functions/_shared/agent/research/support.ts";
+import { readableText } from "../../../supabase/functions/_shared/research_sources.ts";
+import { turnLines } from "../../../supabase/functions/_shared/agent/loop.ts";
+Deno.test("fix 5: \"installed\" in a fact is not a software install; an install order still is", () => {
+  ok(quotable("Acme Energy installed 41,000 home batteries in 2025."));
+  ok(quotable("Globex Power has installed solar panels on 9,000 homes."));
+  for (const u of ["Citadel interns must install the RemoteDesk tool on a personal laptop.", "Candidates install our screening app before the call.", "Download the installer to continue your application."]) ok(!quotable(u), u);
+});
+Deno.test("fix 7: a page's title ends its own line, so it is never glued onto the first sentence", () => {
+  const { title, text } = readableText("<html><head><title>Careers at Zentrafin</title></head><body><p>Zentrafin hires new grads into engineering.</p></body></html>");
+  eq(title, "Careers at Zentrafin");
+  ok(text.split("\n").some((l) => l.trim() === "Zentrafin hires new grads into engineering."), JSON.stringify(text));
+});
+Deno.test("fixes 9 and 11: code's own lines (a closed posting's note, the read-only boundary) and a posting's read lines are reported for the support check", () => {
+  const seen = [JSON.stringify({ company: "Stripe", title: "Data Analyst Intern", closed: true, closed_on: "2026-09-15" }),
+    JSON.stringify({ board: "Workday", boundary: "Read only: no account, saved application or submission was created.", sign_in_required: true, requirements: { required: ["MS/PhD in Computer Science"], preferred: ["CUDA"] } }), "not json"];
+  const { codeLines, readLines } = turnLines(seen);
+  ok(codeLines.includes("Note: the Data Analyst Intern posting at Stripe closed on 2026-09-15; it no longer takes applications."), JSON.stringify(codeLines));
+  ok(codeLines.includes("Read only: no account, saved application or submission was created."));
+  ok(readLines.includes("MS/PhD in Computer Science") && readLines.includes("CUDA") && readLines.some((l) => /questions are behind that sign-in/.test(l)), JSON.stringify(readLines));
+  eq(turnLines([JSON.stringify({ company: "Stripe", closed: false })]), { codeLines: [], readLines: [] });
+});

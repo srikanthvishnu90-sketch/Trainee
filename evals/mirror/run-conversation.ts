@@ -53,8 +53,35 @@ let calls: { tools: string[]; web: boolean; json: boolean }[] = [];
 const modelErrors = new Map<number, string>();
 const prompts: string[] = [];
 const PRICE = { input: 2 / 1e6, output: 10 / 1e6, cacheRead: 0.1 / 1e6, cacheWrite: 2.5 / 1e6 };
+// Replay (live-10 diagnosis, $0): --replay <file> gives, per turn id, the tool calls a live run made ({name, args}) and the reply text
+// to give after them (the model's draft). A dry run then plays them through the real handler, and answers the support judge's calls
+// per --judge: "stub" (the mirror suite's word stub, tests/architect/helpers/mirror_stub_judge.ts) or "yes" (yes to every claim, so
+// what is still removed is removed by code, not the judge).
+const replay: Record<string, { calls: { name: string; args: Record<string, unknown> }[]; reply: string }> | null = opt("--replay") ? JSON.parse(await Deno.readTextFile(opt("--replay")!)) : null;
+const judgeMode = opt("--judge") ?? "stub";
+const { mirrorJudgeAnswer } = await import("../../tests/architect/helpers/mirror_stub_judge.ts");
+let step = 0, stepLabel = "";
+const replayed = (chat: any): string | { calls: { name: string; args: Record<string, unknown> }[] } | null => {
+  const r = replay?.[label];
+  if (!r) return null;
+  const sys = String(chat.messages?.[0]?.role === "system" ? chat.messages[0].content : "");
+  if (/^You check claims against passages/.test(sys)) {
+    const items = JSON.parse(String(chat.messages.find((m: any) => m.role === "user")?.content ?? "[]"));
+    return judgeMode === "yes" ? JSON.stringify(items.map(() => "yes")) : mirrorJudgeAnswer(JSON.stringify(items));
+  }
+  if (chat.response_format) return "{}";
+  if (!chat.tools?.length) return r.reply; // a rewrite pass gets the same draft back (so it never shortens it into something else)
+  if (stepLabel !== label) { stepLabel = label; step = 0; }
+  const c = r.calls[step++];
+  return c ? { calls: [c] } : r.reply;
+};
 const scripted = (chat: any) => {
   modelCalls++;
+  const rp = replayed(chat);
+  if (rp !== null) {
+    if (typeof rp === "string") return Response.json({ id: "mirror-replay", model: chat.model, choices: [{ index: 0, message: { role: "assistant", content: rp }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 10 } });
+    return Response.json({ id: "mirror-replay", model: chat.model, choices: [{ index: 0, message: { role: "assistant", content: null, tool_calls: rp.calls.map((c, k) => ({ id: `rp-${label}-${step}-${k}`, type: "function", function: { name: c.name, arguments: JSON.stringify(c.args ?? {}) } })) }, finish_reason: "tool_calls" }], usage: { prompt_tokens: 10, completion_tokens: 10 } });
+  }
   if (promptLog) prompts.push(`=== ${label}\n${JSON.stringify(chat.messages?.[0]?.content ?? "").slice(0, 20000)}`);
   const text = chat.response_format ? "{}" : `Dry run, no model (${label}).`;
   return Response.json({ id: "mirror-dry", model: chat.model, choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 10 } });
@@ -159,7 +186,11 @@ try {
     const r = await person.say(s);
     lines.push(JSON.stringify({ id: label, setup: true, reply: String(r.reply ?? ""), intent: r.intent }));
   }
+  // A turn is started only while the cap holds a turn's worth (live-9 and live-10: at most $0.45 a turn, $3.2 to $3.4 for 26 turns),
+  // so a live run stops between turns, never inside one, and a $4.50 cap completes all 26.
+  const TURN_RESERVE_USD = 0.5;
   for (const t of turns) {
+    if (live && budget - spent < TURN_RESERVE_USD) { stopped = `budget: $${spent.toFixed(3)} of $${budget} spent; less than a turn's reserve ($${TURN_RESERVE_USD}) left before ${t.id}`; break; }
     label = t.id;
     const before = await counts(person.id), outBefore = w.outbound.length, callsBefore = modelCalls, spentBefore = spent, webBefore = webSearches, t1 = performance.now();
     calls = [];
@@ -186,6 +217,8 @@ try {
       shorten: meta.shorten ?? null,
       // D-071: what research did with its pages and draft (drafted, kept, dropped by reason), and what each search asked.
       research: meta.research ?? null,
+      // Live-10: the model's draft before the support check, and each sentence it removed with the reason (layer A or the judge).
+      support: meta.support ?? null,
       args: ((meta.tool_calls ?? []) as any[]).filter((x) => x && x.args).map((x) => ({ name: String(x.name), args: x.args })),
       router_intent: meta.router_intent ?? null, brain: meta.brain ?? null, artifact, files, documents,
     };

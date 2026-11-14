@@ -142,6 +142,13 @@ export function hardParts(text: string, read: (s: string) => string = (s) => s):
 const lowerWords = (t: string) => new Set(fold(t).match(/(?<![\p{L}\p{N}])\p{Ll}[\p{L}\p{N}&'-]*/gu) ?? []);
 // Does the unit give this name as a whole name? The same run of capitalised words; the unit's first word, capitalised only because
 // it is first, may or may not be part of a name, so the unit's runs are read both with it and without it.
+// Ruling 2026-11-14: a small fixed table of career abbreviations. A name in a claim is found in a source when it, or its expansion,
+// is there (and the other way round); nothing beyond this table is read as the same name.
+export const ABBREV: Record<string, string[]> = { swe: ["software engineer", "software engineering"], mrr: ["monthly recurring revenue"], arr: ["annual recurring revenue"],
+  gtm: ["go-to-market", "go to market"], pm: ["product manager"], pe: ["private equity"], ib: ["investment banking"], ml: ["machine learning"], yoy: ["year over year"],
+  "m&a": ["mergers and acquisitions"], mba: ["master of business administration"], gpa: ["grade point average"], cs: ["computer science"] };
+const ABBREV_OF = new Map(Object.entries(ABBREV).flatMap(([k, vs]) => vs.map((v) => [v, k] as [string, string])));
+export const nameFoundIn = (name: string, text: string) => nameRe(name).test(text) || (ABBREV[name.toLowerCase()] ?? []).some((v) => nameRe(v).test(text)) || (ABBREV_OF.has(name.toLowerCase()) && nameRe(ABBREV_OF.get(name.toLowerCase())!).test(text));
 function namesOk(claim: Hard, unit: { hard: Hard; lower: Set<string>; lent?: string | null }): boolean {
   // Round 3: on a page code knows is one asked employer's (indexPages `owner`), that employer's name is the page's, not the claim's.
   const lent = unit.lent ? unit.lent.toLowerCase().split(/\s+/).map((w) => w.replace(/[.'-]+$/, "").replace(/'s$/, "")) : null;
@@ -154,6 +161,9 @@ function namesOk(claim: Hard, unit: { hard: Hard; lower: Set<string>; lent?: str
     const r = lent && r0.length > lent.length && lent.every((w, j) => r0[j] === w) ? r0.slice(lent.length) : r0;
     if (r !== r0) proper++;
     if (has(r)) { proper++; continue; }
+    // (the abbreviation table: "SWE" found as "software engineering" in the unit, or the other way round)
+    const ut = String((unit as { text?: string }).text ?? "");
+    if (ut && Object.hasOwn(ABBREV, r.join(" ")) || ABBREV_OF.has(r.join(" "))) { if (nameFoundIn(r.join(" "), ut)) { proper++; continue; } }
     // The owner's name is lent only to a unit that names no one the claim does not (a row "Jane Street interns: $5,000 a week" on a
     // page titled for Citadel is Jane Street's, and lends nothing).
     if (lent && r.length === lent.length && r.every((w, j) => w === lent[j]) && alt.every((u) => claim.names.some((c) => c.length === u.length && c.every((w, j) => w === u[j])))) { proper++; continue; }
@@ -394,7 +404,7 @@ export function findSupport(claim: string, idx: PageIndex, only?: number[], unit
     // line by line.
     if ((s as Unit & { record?: boolean }).record) {
       const vals = new Set(s.hard.numbers.map((n) => n.split("|")[4]));
-      if (h.numbers.every((a) => vals.has(a.split("|")[4])) && h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).filter((r) => r.length).every((r) => r.every((w) => s.lower.has(w) || nameRe(w).test(s.text)))) {
+      if (h.numbers.every((a) => vals.has(a.split("|")[4])) && h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).filter((r) => r.length).every((r) => r.every((w) => s.lower.has(w) || nameFoundIn(w, s.text)))) {
         const n = [...want].filter((w) => s.content.has(w)).length;
         if (!best || n > best.n) best = { sentence: s.text, page: k, unit: s, n };
       }
@@ -415,7 +425,9 @@ export function findSupport(claim: string, idx: PageIndex, only?: number[], unit
     if (!roles.every((r) => r.test(s.passage))) continue;
     const mine = new Set([...h.names.map((r) => r.join(" ")), ...(s.lent ? [s.lent.toLowerCase()] : [])]);
     const ROLE = /(?<![\p{L}])(?:interns?|internships?|engineers?|engineering|swe|sde|analysts?|developers?|managers?|scientists?|traders?|associates?|directors?|leads?|staff|senior|junior|new grads?|graduates?|level|l\d|base|pay|salary|compensation|bonus|role|team|office)(?![\p{L}])/iu;
-    const otherOwner = (o: string | null) => !!o && !ROLE.test(o) && h.names.some((r) => nameRe(r.join(" ")).test(s.text));
+    // (live-10 C11: "Chicago, Illinois: $28- $49 Hourly": the owner read is "Illinois", the state of the claim's own city; a place
+    // written "City, State" is the city's)
+    const otherOwner = (o: string | null) => !!o && !ROLE.test(o) && h.names.some((r) => nameRe(r.join(" ")).test(s.text)) && !h.names.some((r) => nameRe(`${r.join(" ")}, ${o}`).test(s.text));
     if (!h.numbers.every((a) => s.hard.numbers.some((b, j) => b === a && (!otherOwner(s.hard.owners[j]) || [...mine].some((n) => n === s.hard.owners[j] || n.startsWith(`${s.hard.owners[j]} `) || s.hard.owners[j]!.startsWith(`${n} `)) && !(s.lent && s.hard.owners[j]!.startsWith(`${s.lent.toLowerCase()} `)))))) continue;
     const n = [...want].filter((w) => s.content.has(w)).length;
     // A unit that is all figures ("$133,000 - $184,000 USD.") shares no word with the claim: its figures, each in its role, are the tie.
@@ -565,7 +577,7 @@ export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudg
 // sentence stands when it is one of code's own lines (`own`: word for word), a could-not-confirm sentence in the closed form
 // (`pure`), or the judge says yes to it (as a claim in its own words, or as a source's own unit said again); it is removed otherwise
 // (these paths have no numbered source to quote). A line that is only a link is code's, and stays.
-export async function keepSupported(reply: string, sources: (string | { text: string; title?: string; one?: boolean })[], o: { judge?: SupportJudge | null; read?: (s: string) => string; pure?: (s: string) => boolean; own?: string[]; instructions?: boolean; joint?: { guide: { text: string; title?: string }[]; record: string }; also?: { when: (s: string) => boolean; sources: { text: string; title?: string; one?: boolean }[] }; subjects?: string[]; ask?: string } = {}): Promise<{ text: string; removed: string[] }> {
+export async function keepSupported(reply: string, sources: (string | { text: string; title?: string; one?: boolean })[], o: { judge?: SupportJudge | null; read?: (s: string) => string; pure?: (s: string) => boolean; own?: string[]; instructions?: boolean; joint?: { guide: { text: string; title?: string }[]; record: string }; also?: { when: (s: string) => boolean; sources: { text: string; title?: string; one?: boolean }[] }; subjects?: string[]; ask?: string } = {}): Promise<{ text: string; removed: string[]; why?: { sentence: string; why: string }[] }> {
   const idx = indexPages(sources.map((x) => typeof x === "string" ? { text: x } : x), o.read, o.subjects ?? [], { ask: o.ask });
   const norm = (x: string) => bare(readAlike(x)).toLowerCase().replace(/[.!?]+$/, "");
   const own = new Map((o.own ?? []).map((x) => [norm(x), x]));
@@ -586,6 +598,7 @@ export async function keepSupported(reply: string, sources: (string | { text: st
   const idx2 = o.also && withAlso.some(Boolean) ? indexPages([...sources.map((x) => typeof x === "string" ? { text: x } : x), ...o.also.sources], o.read, o.subjects ?? [], { ask: o.ask }) : null;
   const plainW = wants.filter((_, k) => !withAlso[k]), alsoW = wants.filter((_, k) => withAlso[k]);
   const v1 = await decide(plainW, idx, o.judge), v2 = idx2 ? await decide(alsoW, idx2, o.judge) : [];
+  const judgeFailed = !!(v1 as any).failed || !!(v2 as any).failed, why: { sentence: string; why: string }[] = [];
   let n1 = 0, n2 = 0;
   const vs = wants.map((_, k) => withAlso[k] ? v2[n2++] : v1[n1++]);
   // Architect ruling 2026-11-14 (on 3ad157b2e), advice turns only: a sentence no one source holds may be supported jointly by the
@@ -600,9 +613,10 @@ export async function keepSupported(reply: string, sources: (string | { text: st
       "The person's confirmed record (each line is one fact about them; never join two lines into one fact):", ...recLines.map((l) => `- ${l}`)].join("\n"), PASSAGE_MAX);
     const tryJoint = wants.map((w, k) => {
       if (withAlso[k] || vs[k].how !== "drop" || !rec) return false;
-      const h = hardParts(w.claim, o.read), vals = new Set(rec.hard.numbers.map((n) => n.split("|")[4]));
+      const h = hardParts(w.claim, o.read), vals = new Set([...rec.hard.numbers, ...hardParts(gText, o.read).numbers].map((n) => n.split("|")[4]));
       if (!h.numbers.every((a) => vals.has(a.split("|")[4]))) return false;
-      if (!h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).filter((r) => r.length).every((r) => r.every((x) => rec.lower.has(x) || nameRe(x).test(rec.text)))) return false;
+      // (live-10 C4: a name the guide gives, "GitHub", "Education", is the guide's; layer A reads the joint unit, guide and record)
+      if (!h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).filter((r) => r.length).every((r) => r.every((x) => rec.lower.has(x) || nameFoundIn(x, rec.text) || nameFoundIn(x, gText)))) return false;
       // (layer A as everywhere: names and figures, with their units, periods and years; wording is the judge's to read)
       return h.years.every((y) => vals.has(y) || rec.hard.years.includes(y));
     });
@@ -619,9 +633,14 @@ export async function keepSupported(reply: string, sources: (string | { text: st
     const [a, b] = at[k];
     if (v.how === "model") return;
     if (v.how === "quote" && echoes(wants[k].claim, v.sentence)) { lines[a][b] = v.sentence; return; }
-    removed.push(lines[a][b]); lines[a][b] = "";
+    removed.push(lines[a][b]);
+    // Live-10 diagnosis: why each sentence went (layer A: no one source unit holds its names and figures; else the judge said no,
+    // or could not answer).
+    const ix = withAlso[k] ? idx2! : idx;
+    why.push({ sentence: lines[a][b], why: findSupport(wants[k].claim, ix) ? (judgeFailed ? "judge could not answer" : "judge: no") : "layer A: no source unit holds its names and figures" });
+    lines[a][b] = "";
   });
-  return { text: lines.map((l) => l.filter((x) => x !== "").join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim(), removed };
+  return { text: lines.map((l) => l.filter((x) => x !== "").join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim(), removed, why };
 }
 // Round 5 (owner: a research answer is never blank): when the judge could not answer at all, code may show the pages' own units it
 // picked for the ask, in quotation marks with their sources and a plain clause that they were not checked; never the model's words.

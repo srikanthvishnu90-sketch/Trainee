@@ -2,7 +2,7 @@
 //   deno run -A --no-check --import-map=tests/flow/supabase-npm.json evals/research-support/judge-measure.ts
 // prints the case count and an estimated cost and exits; nothing is sent. Live, only with the owner's written approval of the spend
 // (a row of docs/architect/DECISIONS.md), the key and the shared ledger (#824: like every live eval runner, it reserves its cap at the
-// ONE shared $85 ledger before its first model call and settles it to the metered cost at the end, also on error, through
+// ONE shared $93 ledger before its first model call and settles it to the metered cost at the end, also on error, through
 // evals/career/eval_budget.ts openLiveRunLedger). The CI workflow .github/workflows/research-support-live.yml runs it:
 //   SUPPORT_JUDGE_SPEND_APPROVED=D-0xx SUPPORT_JUDGE_RUN=<n> ANTHROPIC_API_KEY=... SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=... \
 //     deno run -A --no-check --import-map=tests/flow/supabase-npm.json evals/research-support/judge-measure.ts --live --budget-usd 0.5 --out <dir>
@@ -56,7 +56,7 @@ if (!(budget > 0 && budget <= 1) || !out) { console.log("refused: --live needs -
   if (why) { console.log(`refused: ${why}`); Deno.exit(3); }
 }
 if (!Deno.env.get("ANTHROPIC_API_KEY")) { console.log("refused: --live needs ANTHROPIC_API_KEY"); Deno.exit(3); }
-// The shared $85 ledger first (refused: no model call); then an in-process gate of the same cap on every call, so a call that does
+// The shared $93 ledger first (refused: no model call); then an in-process gate of the same cap on every call, so a call that does
 // not fit is refused before it is sent and nothing is counted twice.
 const ledger = await openLiveRunLedger({ budgetUsd: budget, approval: Deno.env.get("SUPPORT_JUDGE_SPEND_APPROVED")!, get: (k) => Deno.env.get(k), bud });
 if ("error" in ledger) { console.log(`refused: ${ledger.error}`); Deno.exit(3); }

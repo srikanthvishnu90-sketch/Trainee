@@ -102,7 +102,7 @@ if (live) {
   if (!/^D-\d{3}[a-z]?$/.test(approval)) { console.log("refused: --live is model spend (web search); it needs PEOPLE_SEARCH_SPEND_APPROVED=<the DECISIONS.md line> (quote: README.md)"); Deno.exit(3); }
   if (!Deno.env.get("ANTHROPIC_API_KEY")) { console.log("refused: --live needs ANTHROPIC_API_KEY"); Deno.exit(3); }
   if (!(budget > 0 && budget <= 3)) { console.log("refused: --budget-usd must be above 0 and at most 3"); Deno.exit(3); }
-  // The shared $85 ledger: the cap is reserved before the first model call, settled at the end (eval_budget.ts openLiveRunLedger).
+  // The shared $93 ledger: the cap is reserved before the first model call, settled at the end (eval_budget.ts openLiveRunLedger).
   const bud = await import("../../../supabase/functions/_shared/model_budget.ts");
   const { openLiveRunLedger } = await import("../../career/eval_budget.ts");
   const ledger = await openLiveRunLedger({ budgetUsd: budget, approval, get: (k) => Deno.env.get(k), bud });

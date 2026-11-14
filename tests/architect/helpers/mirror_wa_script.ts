@@ -17,8 +17,9 @@ export const C21_Q = "Tell me about a time you failed: what were you responsible
 export const C4_GUIDE = "https://student-to-software-engineer.org/docs/find-your-first-internship/resumes/";
 // Architect amendment (owner decision 2026-11-13: research support check switched on; architect ruling 2026-11-14, by shape): advice
 // skips the page judge only when every name in it is of the person's own record. "SWE" is not (a goal said in chat, never saved as a
-// fact), so it is the one word taken out; "Leave the outdated 3.9 GPA off." stands as written (it removes a draft fact of theirs).
-export const C4_ANSWER = "For the top of your resume: your name and contact links, then \"Lakeshore University | BS Computer Science and Finance | Expected June 2029\", then a compact skills line led by Python, TypeScript/JavaScript, React and SQL. Leave the outdated 3.9 GPA off.";
+// fact), so it is taken out; "Leave the outdated 3.9 GPA off." stands as written (it removes a draft fact of theirs). Closed world
+// (review of 1f3f5f18a): only the leading verb is a verb, so the skills line is "with" its skills, not "led by" them.
+export const C4_ANSWER = "For the top of your resume: your name and contact links, then \"Lakeshore University | BS Computer Science and Finance | Expected June 2029\", then a compact skills line with Python, TypeScript/JavaScript, React and SQL. Leave the outdated 3.9 GPA off.";
 export const C9_Q = "what's citadel like for new grad swe, culture pay interview process, give me real sources";
 export const CITADEL_QUERIES = ["Citadel new grad software engineer pay", "Citadel engineering interview process", "Citadel culture hours"];
 export const WEB: Record<string, { title: string; text: string }> = {

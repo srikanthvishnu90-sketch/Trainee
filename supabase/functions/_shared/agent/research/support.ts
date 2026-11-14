@@ -543,32 +543,42 @@ export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudg
 // sentence stands when it is one of code's own lines (`own`: word for word), a could-not-confirm sentence in the closed form
 // (`pure`), or the judge says yes to it (as a claim in its own words, or as a source's own unit said again); it is removed otherwise
 // (these paths have no numbered source to quote). A line that is only a link is code's, and stays.
-// Architect ruling 2026-11-14 (final, closed world, on review of 3c0a85b2f): on an advice turn, a sentence skips the page judge only
-// when it is an instruction (it starts with a verb addressed to the person, "You could" + one, or a lead-in made of the words below)
-// and EVERY word after that is either part of an item of their own record (a confirmed fact's name, figure, skill or their own role
-// and employer; a draft or withdrawn fact's only when the leading verb removes it) or in a small fixed vocabulary of layout and
-// function words; "and" only between such words. Any other word (which, because, say, want, now, any other adjective or verb) and the
-// sentence is judged like any claim. A question is judged. This is an allowlist: nothing outside it is ever exempt.
-const ADVICE_VERBS = new Set("put lead move list add leave keep drop remove delete cut place start end group order swap mention include bold shorten trim rewrite reword spell".split(" "));
+// Architect ruling 2026-11-14 (final, closed world; tightened on review of 1f3f5f18a): on an advice turn, a sentence skips the page
+// judge only when it is an instruction to the person (a leading verb addressed to them, "You could" + one, or a lead-in made only of
+// layout words and closed by ":", "For the top of your resume:") and everything after that is either a WHOLE item of their own record,
+// exactly as one fact about them states it (a skill, a school, a degree, a date, an employer, a role, an employer and role together,
+// a project, a contact item; a draft or withdrawn item only when the leading verb removes it), or a word of a small fixed layout and
+// function vocabulary (no verbs: the leading one is the only verb), with "and", "," and a quoted line's "|" only between them. Any other
+// word, a ":" ";" dash or bracket outside an item, and the sentence is judged like any claim. A question is judged.
+const ADVICE_VERBS = new Set("put lead move list add leave keep drop remove delete cut place start end group order swap mention include bold shorten trim".split(" "));
 const REMOVAL = /^(?:you could\s+)?(?:(?:remove|cut|drop|delete)\b|take\b.*\bout\b|leave\b.*\b(?:off|out)\b)/iu;
-const LAYOUT = new Set(("a an the of for at to in on by with from into onto as your my it its them their top first last near next above below under before after " +
-  "section sections line lines bullet bullets header heading summary resume résumé cv page skills skill experience education projects project list order " +
-  "outdated old current off out up then name contact links link email phone compact short led").split(" "));
+const LAYOUT = new Set(("a an the of for at to in on by with from as your my top first last near next above below under before after then " +
+  "section line bullet header heading summary resume résumé cv page skills skill experience education projects project list order " +
+  "outdated old current off out up name contact links link email phone compact short").split(" "));
+const advTokens = (t: string) => (bare(t).toLowerCase().match(/[\p{L}\p{N}$][\p{L}\p{N}$.'’/+&#%-]*[\p{L}\p{N}%]|[\p{L}\p{N}$]|[,:;|()"“”–—]|\s-\s/gu) ?? []).map((x) => x.trim().replace(/[“”]/g, '"')).map((x) => x.replace(/['’]s$/, ""));
 export function adviceOfTheirOwn(items: string[], draftItems: string[] = []): (s: string) => boolean {
-  const toks = (t: string) => (bare(t).toLowerCase().match(/[\p{L}\p{N}$][\p{L}\p{N}$.,'’/+&#%-]*/gu) ?? []).map((w) => w.replace(/[.,'’-]+$/, "").replace(/['’]s$/, "")).filter(Boolean);
-  const mine = new Set(items.flatMap(toks)), drafts = new Set(draftItems.flatMap(toks));
+  const phrases = (xs: string[]) => [...new Set(xs.map((x) => String(x ?? "").trim()).filter((x) => x.length > 1))].map(advTokens).filter((x) => x.length).sort((a, b) => b.length - a.length);
+  const mine = phrases(items), drafts = phrases(draftItems);
   return (s: string) => {
     const t = bare(s).trim();
     if (!t || /\?\s*$/.test(t)) return false;
-    let w = toks(t);
+    let w = advTokens(t.replace(/[.!]+$/, ""));
     if (w[0] === "you" && w[1] === "could") w = w.slice(2);
     if (!w.length) return false;
-    const verb = ADVICE_VERBS.has(w[0]);
-    if (!verb && !LAYOUT.has(w[0])) return false; // not an instruction
-    const allowed = new Set([...mine, ...(verb && REMOVAL.test(t) ? drafts : [])]);
-    const ok = (x: string) => LAYOUT.has(x) || allowed.has(x);
-    const rest = verb ? w.slice(1) : w;
-    return rest.length > 0 && rest.every((x, k) => x === "and" ? k > 0 && k < rest.length - 1 && ok(rest[k - 1]) && ok(rest[k + 1]) : ok(x)) && rest.some((x) => allowed.has(x));
+    let k = 0;
+    if (ADVICE_VERBS.has(w[0])) k = 1;
+    else { const c = w.indexOf(":"); if (c < 1 || !w.slice(0, c).every((x) => LAYOUT.has(x))) return false; k = c + 1; } // a layout-only lead-in
+    const allowed = ADVICE_VERBS.has(w[0]) && REMOVAL.test(t) ? [...mine, ...drafts].sort((a, b) => b.length - a.length) : mine;
+    let items = 0, prev: "item" | "word" | "sep" | null = null;
+    while (k < w.length) {
+      const hit = allowed.find((p) => p.every((x, n) => w[k + n] === x));
+      if (hit) { k += hit.length; items++; prev = "item"; continue; }
+      const x = w[k];
+      if (x === "and" || x === "," || x === "|" || x === '"') { if (prev === null && x !== '"') return false; prev = x === '"' ? prev : "sep"; k++; continue; }
+      if (!LAYOUT.has(x)) return false; // another word, or ":" ";" a dash or a bracket outside an item: a clause
+      prev = "word"; k++;
+    }
+    return items > 0;
   };
 }
 export async function keepSupported(reply: string, sources: (string | { text: string; title?: string })[], o: { judge?: SupportJudge | null; read?: (s: string) => string; pure?: (s: string) => boolean; own?: string[]; advice?: (s: string) => boolean; subjects?: string[]; ask?: string } = {}): Promise<{ text: string; removed: string[] }> {

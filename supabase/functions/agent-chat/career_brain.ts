@@ -397,15 +397,22 @@ export async function agentTurn(o: {
     } else if (trace.a) {
       // Architect ruling 2026-11-14 (narrowed): advice about the person's own materials is outside the page judge only when it
       // stands on their confirmed record alone (support.ts adviceOfTheirOwn).
-      // The items of their own record (closed world, support.ts adviceOfTheirOwn): a skill's name; an education or experience fact's
-      // head (what comes before its first ":"), their school, degree, dates, role and employer; never the rest of a fact's sentence
-      // ("My friend at Citadel earns $10k a week" gives nothing). A draft or withdrawn fact's items count only for a removal.
-      const itemsOf = (f: any): string[] => { if (!f || typeof f !== "object") return []; const head = String(f.text ?? "").split(":")[0];
-        if (f.kind === "skill") return [String(f.name ?? head.replace(/^Skill\s*/i, ""))];
-        if (f.kind === "education" || f.kind === "experience") return [head];
-        return typeof f.name === "string" && f.name.split(/\s+/).length <= 4 ? [f.name, ...(typeof f.gpa === "string" ? [f.gpa] : [])] : []; };
+      // The items of their own record (closed world, support.ts adviceOfTheirOwn), from facts ABOUT the person only: a skill's name;
+      // an education fact's school, degree and dates and the whole line; an experience or project fact's employer, role, the two
+      // together and their dates; a contact item; a GPA. Never a fact about someone else ("My friend at Citadel earns $10k a week").
+      const itemsOf = (f: any): string[] => {
+        if (!f || typeof f !== "object") return [];
+        const head = String(f.text ?? "").split(":")[0].trim(), parts = head.split(/,\s*/).map((x) => x.trim()).filter(Boolean);
+        if (f.kind === "skill") return [String(f.name ?? head.replace(/^Skill\s*/i, "")).trim()];
+        if (f.kind === "education") return [head, ...parts];
+        // (only the employer, the role and the two together: never the rest of the line, "trading bot returned 12%")
+        if (f.kind === "experience" || f.kind === "project") { const role = parts[1] ? parts[1].replace(/\s*\([^)]*\)\s*$/, "") : ""; return [...(parts.length <= 2 ? [head] : []), parts[0] ?? "", ...(parts[1] ? [parts[1]] : []), ...(parts[0] && role ? [`${parts[0]}, ${role}`, `${role} at ${parts[0]}`] : [])].filter(Boolean); }
+        if (f.kind === "contact" || f.kind === "email" || f.kind === "phone") return [String(f.value ?? f.text ?? "")];
+        if (/^gpa$/i.test(String(f.name ?? "")) && typeof f.gpa === "string") return [`${f.gpa} GPA`, `GPA ${f.gpa}`, "GPA"];
+        return [];
+      };
       const all = hypo ? [] : (((o.stores as any)?.profile?.facts ?? []) as any[]);
-      const confirmedIds = new Set(ownerConfirmedFacts(all).map((f: any) => f));
+      const confirmedIds = new Set(ownerConfirmedFacts(all));
       const advice = adviceOfTheirOwn(all.filter((f) => confirmedIds.has(f)).flatMap(itemsOf), all.filter((f) => f && typeof f === "object" && (f.status !== "confirmed" || f.withdrawn_by_owner)).flatMap(itemsOf));
       const k = await keepSupported(result.reply, [...trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), ...confirmed, ...readSources], { judge, pure, own: codeLines, ask: o.message, advice });
       result = { ...result, reply: letters(k.text) ? k.text : [trace.a.not_verified || NOT_CONFIRMED, ...links(k.text)].join("\n") };

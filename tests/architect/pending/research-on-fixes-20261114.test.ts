@@ -125,6 +125,11 @@ Deno.test("ruling 1 at the turn: the review's leaks are judged and refused; plai
     ["clause: since", [], [], "Put SQL first, since it is what data teams ask for.", /ask for/],
     ["clause: so", [], [], "Put SQL first so recruiters see it.", /recruiters see/],
     ["clause: to", [], [], "List SQL first to beat other applicants.", /beat other/],
+    // review of 1f3f5f18a: record words recombined, a fact about someone else, a ":" clause (fixtures whose words the old allowlist let through)
+    ["recombined: another employer", [{ id: "F-9", kind: "experience", text: "Robinhood, Engineer, led a team of 4", status: "confirmed" }, { id: "F-10", kind: "other", name: "Citadel friend", text: "My friend at Citadel earns $10k a week", status: "confirmed" }], [], "Led a team of 4 at Citadel.", /Citadel/],
+    ["a friend's fact", [{ id: "F-10", kind: "experience", text: "Citadel friend earns $10k a week", status: "confirmed" }], [], "Mention Citadel earns $10k a week.", /10k/],
+    ["a ':' figure", [{ id: "F-11", kind: "experience", text: "Stripe, Intern, salary $120,000", status: "confirmed" }], [], "Mention your Stripe salary: $120,000.", /120,000/],
+    ["recombined: a project claim", [{ id: "F-13", kind: "experience", text: "Stripe, Intern, trading bot returned 12%", status: "confirmed" }], [], "Mention the trading bot returned 12% at Stripe.", /12%/],
   ];
   for (const [name, extra, history, reply, bad] of cases) {
     const t = await adviceTurn(history, reply, extra);
@@ -136,6 +141,8 @@ Deno.test("ruling 1 at the turn: the review's leaks are judged and refused; plai
     const t = await adviceTurn([], reply, [{ id: "F-8", kind: "other", text: "GPA: 3.9", name: "GPA", gpa: "3.9", status: "draft", needs_confirmation: true }]);
     ok(!bad.test(t.reply), `${name}: ${t.reply}`);
   }
+  ok((await adviceTurn([], "Put Stripe first.", [{ id: "F-12", kind: "experience", text: "Stripe, Intern (2025)", status: "confirmed" }])).reply.includes("Put Stripe first."), "their own role's employer");
+  ok(!(await adviceTurn([], "Put Citadel first.", [{ id: "F-10", kind: "other", text: "My friend at Citadel earns $10k a week", status: "confirmed" }])).reply.includes("Put Citadel first."), "not their employer");
   for (const good of ["Leave the outdated 3.9 GPA off.", "Put Python and SQL first.", "Move SQL above Python."]) {
     const t = await adviceTurn([], good, [{ id: "F-8", kind: "other", text: "GPA: 3.9", name: "GPA", gpa: "3.9", status: "draft", needs_confirmation: true }]);
     ok(t.reply.includes(good), `${good} => ${t.reply}`);

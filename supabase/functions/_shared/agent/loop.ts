@@ -550,7 +550,10 @@ async function runAgentTurnInner(o: { system: string; history: any[]; message: s
           o.ctx.turn!.attachments!.push({ filename: att.filename, content: att.content });
         }
         tool_calls.push({ name: t.name, ok: true, effect: t.effectOf ? t.effectOf(out) : t.effect, ...(args ? { args } : {}) });
-        results.push({ type: "tool_result", tool_use_id: u.id, content: resultText(out) });
+        // REPLY PIPELINE: with the evidence ledger on, the units this result adds ride it, numbered, for the draft to cite.
+        const led = (o.ctx as any).ledger as { fromToolResult: (n: string, x: unknown) => string[]; block: (ids?: string[]) => string } | undefined;
+        const evIds = led ? led.fromToolResult(u.name, out) : [];
+        results.push({ type: "tool_result", tool_use_id: u.id, content: evIds.length ? `${resultText(out)}\n\nevidence (cite these ids):\n${led!.block(evIds)}` : resultText(out) });
         seen.push(resultText(out));
         if (u.name === "search_jobs" && out && Array.isArray((out as any).postings)) found = (out as any).postings.slice(0, 50);
         // D-070 (live-7 C11): every posting a tool read this turn with its stated pay and link (get_posting, inspect_apply_flow,

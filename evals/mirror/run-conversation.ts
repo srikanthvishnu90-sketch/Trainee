@@ -71,7 +71,7 @@ const replayed = (chat: any): string | { calls: { name: string; args: Record<str
   const sys = String(chat.messages?.[0]?.role === "system" ? chat.messages[0].content : "");
   if (/^You check claims against passages/.test(sys)) {
     const items = JSON.parse(String(chat.messages.find((m: any) => m.role === "user")?.content ?? "[]"));
-    if (judgeMode === "recorded") return JSON.stringify(items.map((x: any) => { const c = String(x.claim ?? "").trim(); return verdicts[c] ?? (supportsClaim(c, String(x.source ?? "")) ? "yes" : "no"); }));
+    if (judgeMode === "recorded" || judgeMode === "recorded-no") return JSON.stringify(items.map((x: any) => { const c = String(x.claim ?? "").trim(); return verdicts[c] ?? (judgeMode === "recorded-no" ? "no" : supportsClaim(c, String(x.source ?? "")) ? "yes" : "no"); }));
     return judgeMode === "yes" ? JSON.stringify(items.map(() => "yes")) : mirrorJudgeAnswer(JSON.stringify(items));
   }
   if (chat.response_format) return "{}";

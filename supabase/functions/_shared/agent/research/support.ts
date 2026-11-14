@@ -21,6 +21,49 @@ const squash = (s: unknown) => String(s ?? "").replace(/\s+/g, " ").trim();
 export const bare = (s: string) => squash(String(s ?? "").replace(/\[\d+\]/g, " ").replace(/[*_`]+/g, " ")).replace(/\s+([.,;:!?])/g, "$1");
 const same = (a: string, b: string) => bare(readAlike(a)).toLowerCase().replace(/[.!?]+$/, "") === bare(readAlike(b)).toLowerCase().replace(/[.!?]+$/, "");
 export const quoted = (sentence: string) => `"${sentence}"`;
+// Live-12 (C11: "… authorized to work in the U.S. without sponsorship?" was cut at "U.S." and "without sponsorship?" sent alone): the
+// sentence splitter never ends a sentence at an abbreviation's stop.
+const ABBR_STOP = /(?<![\p{L}])(?:U\.S\.A\.|U\.S\.|U\.K\.|e\.g\.|i\.e\.|Inc\.|Jr\.|Sr\.|St\.|Mr\.|Mrs\.|Ms\.|Dr\.|vs\.|a\.m\.|p\.m\.|No\.(?=\s*\d))/gu;
+const HELD = "\u2024";
+export function splitSentences(line: string, re: RegExp = /(?<=[.!?]["')*_]*)\s+/): string[] {
+  const held = String(line ?? "").replace(ABBR_STOP, (m) => m.replaceAll(".", HELD));
+  return held.split(re).map((x) => x.replaceAll(HELD, "."));
+}
+const MONTHS: Record<string, number> = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+const DATE_WORDS = /(?:(?:mon|tues|wednes|thurs|fri|satur|sun)day,?\s+)?(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+((?:19|20)\d\d)(?!\d)/giu;
+// Live-12 (C11: "Sunday, December 6th, 2026" on a posting that closes 2026-12-06): a full date is one token, the same however it is
+// written ("December 6, 2026", "Dec 6th, 2026", "2026-12-06"); layer A reads it as one name that must be in the unit.
+export function normDates(t: string): string {
+  const tok = (y: string, m: number, d: string) => `Date${y}${String(m).padStart(2, "0")}${String(Number(d)).padStart(2, "0")}`;
+  return String(t ?? "").replace(DATE_WORDS, (_, mo: string, d: string, y: string) => tok(y, MONTHS[mo.slice(0, 3).toLowerCase()], d))
+    .replace(/(?<![\d-])((?:19|20)\d\d)-(\d{2})-(\d{2})(?![\d-])/g, (_, y: string, m: string, d: string) => tok(y, Number(m), d));
+}
+const MONTH_OR_DAY = /(?<![\p{L}])(?:jan(?:uary)?|feb(?:ruary)?|march|apr(?:il)?|june|july|aug(?:ust)?|sept?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow|yesterday)(?![\p{L}])/iu;
+// Live-12 (item 2): a sentence with no figure, no capitalised name (its first word too, unless a plain function word) and no date,
+// in one of the closed shapes that say something about the answer itself, not the world: a gap admitted ("I couldn't verify it"), a
+// caveat on a source ("That's an anecdote, not proof", "Treat it as a rough benchmark"), or a "nothing was sent" line. It is not
+// judged, as a question is not. Anything else ("Hospitals have stopped checking licences.") is a claim, judged as before.
+const PLAIN_FIRST = /^(?:i|i'd|i'm|i've|i'll|that's|that|this|it's|it|these|those|nothing|no|treat|take|use|resume|read|public)$/i;
+const HEDGE_SHAPES = [
+  /^i\s+(?:can't|cannot|couldn't|could not)\s+(?:verify|tell)\s+(?:it|this|that|them|whether it|if it)\b[^,;:]*$/i,
+  /^i\s+found\s+(?:no|nothing)\b[^,;:]*$/i,
+  /^(?:that's|that is|this is|it's|it is|these are|those are)\s+(?:an?\s+|one\s+|only\s+)?(?:[\p{L}-]+\s+){0,3}(?:anecdote|guide|posting|figure|estimate|benchmark|report|account|example|range|number|source|page|data point)s?(?:,?\s+(?:not|and not)\s+(?:an?\s+)?[\p{L} -]{1,40})*$/iu,
+  /^treat\s+(?:it|this|that|them|these)\s+as\s+(?:an?\s+)?(?:rough|loose|starting|ballpark)?\s*(?:benchmark|estimate|guide|floor|starting point|signal)\b[^,;:]*$/i,
+  /^(?:nothing|no application|no account)\b[^,;:]*\b(?:sent|submitted|applied(?: for| to)?|queued|saved|created)$/i,
+  /^[\p{L} ]{1,30}\bonly,\s+nothing\s+(?:was\s+)?(?:sent|submitted|applied(?: for| to)?)$/iu,
+];
+export function noClaim(s: string): boolean {
+  const b = bare(String(s ?? "")).replace(/https?:\/\/\S+/g, " ").replace(/[’‘]/g, "'").trim().replace(/[.!]+$/, "");
+  if (!/\p{L}/u.test(b) || /["\u201c\u201d?]/.test(b) || MONTH_OR_DAY.test(b) || /\d/.test(b)) return false;
+  if (!HEDGE_SHAPES.some((re) => re.test(b))) return false;
+  const first = /^[\p{L}'’]+/u.exec(b)?.[0] ?? "";
+  if (/^\p{Lu}/u.test(first) && !PLAIN_FIRST.test(first)) return false;
+  const h = hardParts(b);
+  if (h.numbers.length || h.years.length || h.quant.length) return false;
+  return !h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).some((r) => r.length);
+}
+// Live-12 (item 5): a sentence of joined clauses ("…; …", "…, and …", "…, so …") is read clause by clause.
+export const clausesOf = (s: string) => bare(s).replace(/[.!?]+$/, "").split(/;\s+|,\s+(?:and|so|but)\s+/u).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x));
 export const isQuoted = (text: string) => /^".*"$/s.test(String(text ?? "").trim());
 
 // ------------------------------------------------------------------------------------------------ layer A
@@ -65,7 +108,7 @@ const numerals = (t: string) => t.replace(NUMWORD, (w) => { const p = w.toLowerC
 // text's own first word), or null: "Jane Street interns $6,000" makes $6,000 Jane Street's. years: the years used as years.
 export interface Hard { numbers: string[]; quant: string[]; names: string[][]; first: string | null; owners: (string | null)[]; years: string[] }
 export function hardParts(text: string, read: (s: string) => string = (s) => s): Hard {
-  const t = numerals(fold(read(squash(readAlike(String(text ?? "").replace(/(^|\s)\.(\d)/g, "$10.$2")).replace(/\[\d+\]/g, " ").replace(/[*_`]+/g, " "))))).replace(/[–—]/g, "-");
+  const t = numerals(fold(read(squash(normDates(readAlike(String(text ?? "").replace(/(^|\s)\.(\d)/g, "$10.$2")).replace(/\[\d+\]/g, " ").replace(/[*_`]+/g, " ")))))).replace(/[–—]/g, "-");
   const found: { sig: string[]; v: number; start: number; end: number }[] = [];
   for (const m of t.matchAll(NUM)) {
     const start = m.index ?? 0, digits = m[3].replace(/,+$/, "");
@@ -170,6 +213,9 @@ function namesOk(claim: Hard, unit: { hard: Hard; lower: Set<string>; lent?: str
     // The claim's own first word may be a common word in a capital ("Interns at Citadel ..."): it may be the unit's word in small
     // letters only when another name of the claim is in the unit as a name ("Target pays ..." never stands on "our target").
     if (k === 0 && claim.first === r[0] && r.length === 1 && unit.lower.has(r[0])) { loose.push(r); continue; }
+    // (live-12 C11: "Applications are open through December 6, 2026": a capitalised first word beside a full date the unit holds is
+    // that sentence's subject word, not a name; the date ties it to the unit)
+    if (k === 0 && claim.first === r[0] && r.length === 1 && claim.names.some((x) => x.length === 1 && /^date\d{8}$/.test(x[0]) && has(x))) { loose.push(r); continue; }
     return false;
   }
   return !loose.length || proper > 0;
@@ -196,7 +242,11 @@ const ASKED_OF_THEM = new RegExp([
 const DIGIT_WORD = "(?:zero|oh|one|two|three|four|five|six|seven|eight|nine)";
 const CONTACT = new RegExp(String.raw`[\w.+-]+@[\w-]+\.[\w.-]+|(?<![\p{L}\p{N}])@[\p{L}\p{N}_.]{2,}|\$[A-Za-z][\w-]{2,}|(?:\+?\d[\s().-]?){7,}|(?<![\d,.$€£])\d{5,}(?![\d,])|\b\d{3}[-.\s]\d{4}\b|(?:\b${DIGIT_WORD}[\s,-]+){2,}${DIGIT_WORD}\b|[a-z][a-z0-9+.-]*:\/\/|\bwww\.|\b[a-z0-9-]{2,}\.(?:[a-z]{2,10})(?:\/\S*)?(?![\p{L}])|\b(?:dot|\[dot\]|\(dot\))\s*(?:com|org|net|io|co|info|xyz|me|ly)\b|\[at\]|\(at\)|\b[A-Za-z0-9]*(?:[A-Za-z]\d|\d[A-Za-z])[A-Za-z0-9]{16,}\b|\b\d+ [A-Z][a-z]+ (?:Road|Street|Avenue|Lane|Drive)\b`, "iu");
 export const safeToShow = (text: string) => !TO_READER.test(text) && !ASKED_OF_THEM.test(text) && !CONTACT.test(text);
-export const quotable = (unit: string) => unit.length >= 20 && unit.length <= 300 && !QUOTE_MARK.test(unit) && safeToShow(unit);
+// Live-12 (C9: "Mostly because Citadel engineers do work on trading ..."; C22: "So I don't read Chicago developer salary data as
+// trivia."): a unit that opens on a connective, or on the page writer's own "I", is a fragment of their argument, never
+// shown as a quote on its own.
+const FRAGMENT = /^\s*(?:mostly|mainly|partly|largely)?\s*(?:because|so|and|but|or|which|while|whereas|since|though|although|also|plus|then|that's why|this is why)\b|^\s*(?:i|i'm|i've|i'd|i'll)\b/iu; // ("we"/"our" on an employer's own page is the employer: kept)
+export const quotable = (unit: string) => unit.length >= 20 && unit.length <= 300 && !QUOTE_MARK.test(unit) && safeToShow(unit) && !FRAGMENT.test(unit.replace(/^["'\u201c]/, ""));
 const ENTITY: Record<string, string> = { mdash: "—", ndash: "–", amp: "&", nbsp: " ", quot: '"', apos: "'", lt: "<", gt: ">", hellip: "...", rsquo: "'", lsquo: "'", ldquo: '"', rdquo: '"', bull: "•", middot: "·" };
 const decoded = (t: string) => t.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (m, e: string) => e[0] === "#" ? (() => { const n = /^#x/i.test(e) ? parseInt(e.slice(2), 16) : Number(e.slice(1)); return n > 31 && n < 0x10ffff ? String.fromCodePoint(n) : " "; })() : ENTITY[e.toLowerCase()] ?? m);
 const nameRe = (n: string) => new RegExp(`(?<![\\p{L}\\p{N}])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu");
@@ -404,7 +454,7 @@ export function findSupport(claim: string, idx: PageIndex, only?: number[], unit
     // line by line.
     if ((s as Unit & { record?: boolean }).record) {
       const vals = new Set(s.hard.numbers.map((n) => n.split("|")[4]));
-      if (h.numbers.every((a) => vals.has(a.split("|")[4])) && h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).filter((r) => r.length).every((r) => r.every((w) => s.lower.has(w) || nameFoundIn(w, s.text)))) {
+      if (h.numbers.every((a) => vals.has(a.split("|")[4])) && h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).filter((r) => r.length).every((r) => r.every((w) => s.lower.has(w) || s.lower.has(one(w)) || nameFoundIn(w, s.text) || nameFoundIn(one(w), s.text)))) {
         const n = [...want].filter((w) => s.content.has(w)).length;
         if (!best || n > best.n) best = { sentence: s.text, page: k, unit: s, n };
       }
@@ -431,7 +481,8 @@ export function findSupport(claim: string, idx: PageIndex, only?: number[], unit
     if (!h.numbers.every((a) => s.hard.numbers.some((b, j) => b === a && (!otherOwner(s.hard.owners[j]) || [...mine].some((n) => n === s.hard.owners[j] || n.startsWith(`${s.hard.owners[j]} `) || s.hard.owners[j]!.startsWith(`${n} `)) && !(s.lent && s.hard.owners[j]!.startsWith(`${s.lent.toLowerCase()} `)))))) continue;
     const n = [...want].filter((w) => s.content.has(w)).length;
     // A unit that is all figures ("$133,000 - $184,000 USD.") shares no word with the claim: its figures, each in its role, are the tie.
-    if ((n > 0 || h.numbers.length > 0) && (!best || n > best.n)) best = { sentence: s.text, page: k, unit: s, n };
+    // (live-12: a full date, one token, ties the claim to the unit as a figure does: "open through December 6, 2026" on "closes 2026-12-06")
+    if ((n > 0 || h.numbers.length > 0 || h.names.some((r) => r.some((w) => /^date\d{8}$/.test(w)))) && (!best || n > best.n)) best = { sentence: s.text, page: k, unit: s, n };
   }
   return best ? { sentence: best.sentence, page: best.page, unit: best.unit } : null;
 }
@@ -497,7 +548,8 @@ export type Verdict = { how: "model" | "quote"; sentence: string; page: number; 
 // `instruction`: the claim is the model's own instruction to the person (an advice turn): its being words to the reader is not held
 // against it (it still never asks them to pay, hand over details or contact anyone).
 export interface Wanted { claim: string; judged?: string; pages?: number[]; fallback?: string | null; unit?: boolean; instruction?: boolean }
-export const quoteOf = (v: { sentence: string; label?: string }) => `${v.label ? `${v.label}: ` : ""}"${v.sentence}"`;
+// (live-12 C9: "**$391k**": a page's markdown emphasis is not part of its words)
+export const quoteOf = (v: { sentence: string; label?: string }) => `${v.label ? `${v.label}: ` : ""}"${v.sentence.replace(/\*\*|__|(?<![\p{L}\p{N}])[*_](?=\S)|(?<=\S)[*_](?![\p{L}\p{N}])/gu, "")}"`;
 // At most 12 claims and about 6 KB of passages in one judge call, and at most 2 calls for one reply or one draft: the first asks the
 // model-worded claims and the quote candidates that have no claim; the second asks, for each claim the first refused, whether the
 // page's own unit may stand in its place. A claim that does not fit is not asked, and so is "no".
@@ -577,16 +629,19 @@ export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudg
 // sentence stands when it is one of code's own lines (`own`: word for word), a could-not-confirm sentence in the closed form
 // (`pure`), or the judge says yes to it (as a claim in its own words, or as a source's own unit said again); it is removed otherwise
 // (these paths have no numbered source to quote). A line that is only a link is code's, and stays.
-export async function keepSupported(reply: string, sources: (string | { text: string; title?: string; one?: boolean })[], o: { judge?: SupportJudge | null; read?: (s: string) => string; pure?: (s: string) => boolean; own?: string[]; instructions?: boolean; joint?: { guide: { text: string; title?: string }[]; record: string; drafts?: string }; also?: { when: (s: string) => boolean; sources: { text: string; title?: string; one?: boolean }[] }; subjects?: string[]; ask?: string } = {}): Promise<{ text: string; removed: string[]; why?: { sentence: string; why: string }[] }> {
+export async function keepSupported(reply: string, sources: (string | { text: string; title?: string; one?: boolean })[], o: { judge?: SupportJudge | null; read?: (s: string) => string; pure?: (s: string) => boolean; own?: string[]; instructions?: boolean; joint?: { guide: { text: string; title?: string }[]; record: string; drafts?: string }; also?: { when: (s: string) => boolean; sources: { text: string; title?: string; one?: boolean }[] }; subjects?: string[]; ask?: string; onRecord?: (s: string) => boolean | null } = {}): Promise<{ text: string; removed: string[]; why?: { sentence: string; why: string }[] }> {
   const idx = indexPages(sources.map((x) => typeof x === "string" ? { text: x } : x), o.read, o.subjects ?? [], { ask: o.ask });
   const norm = (x: string) => bare(readAlike(x)).toLowerCase().replace(/[.!?]+$/, "");
   const own = new Map((o.own ?? []).map((x) => [norm(x), x]));
-  const lines = String(reply ?? "").split("\n").map((l) => /^\s*(?:https?:\/\/\S+\s*)*$/.test(l) ? [l] : l.split(/(?<=[.!?]["')*_]*)\s+/).filter((x) => x.trim()));
+  const lines = String(reply ?? "").split("\n").map((l) => /^\s*(?:https?:\/\/\S+\s*)*$/.test(l) ? [l] : splitSentences(l).filter((x) => x.trim()));
+  // Live-12 (item 6): what is or is not on the person's record is code's to check (o.onRecord: true it holds, false it does not).
+  const freeOf = (x: string) => !!o.pure?.(x) || noClaim(x) || o.onRecord?.(x) === true;
   const wants: Wanted[] = [], at: [number, number][] = [];
   lines.forEach((l, a) => l.forEach((x, b) => {
     // A piece with no word in it ("1.", "-") is what is left of a list around removed sentences: it goes; a link alone is code's.
     if (!/\p{L}/u.test(x.replace(/https?:\/\/\S+/g, ""))) { if (!/https?:\/\//.test(x)) lines[a][b] = ""; return; }
-    if (o.pure?.(x)) return;
+    if (o.pure?.(x) || noClaim(x) || o.onRecord?.(x) === true) return;
+    if (o.onRecord?.(x) === false) { lines[a][b] = ""; return; }
     // Round 4: one of code's own lines stands only when the sentence IS that line, and then the stored line itself is what is said.
     const mine = own.get(norm(x));
     if (mine !== undefined) { lines[a][b] = mine; return; }
@@ -632,6 +687,19 @@ export async function keepSupported(reply: string, sources: (string | { text: st
       ks.forEach((k, j) => { if (got[j]) vs[k] = { how: "model", sentence: wants[k].claim, page: 0 }; });
     }
   }
+  // Live-12 (item 5): a refused sentence of joined clauses stands when every clause stands on its own (a clause with no claim, code's
+  // record check, or a unit that holds it whole and the judge's yes), each possibly on a different unit; no clause spans two units.
+  const split = vs.map((v, k) => v.how === "drop" && !withAlso[k] ? clausesOf(wants[k].claim) : []).map((cs) => cs.length > 1 ? cs : []);
+  const cw: Wanted[] = [], of: number[] = [];
+  split.forEach((cs, k) => { for (const c of cs) if (!freeOf(c) && o.onRecord?.(c) !== false) { cw.push({ claim: c, ...(o.instructions ? { instruction: true } : {}) }); of.push(k); } });
+  if (cw.length) {
+    const vc = await decide(cw, idx, o.judge);
+    split.forEach((cs, k) => {
+      if (!cs.length || cs.some((c) => o.onRecord?.(c) === false)) return;
+      const mine = of.flatMap((x, j) => x === k ? [vc[j]] : []);
+      if (mine.length && mine.every((v) => v.how === "model")) vs[k] = { how: "model", sentence: wants[k].claim, page: (mine[0] as { page: number }).page };
+    });
+  } else split.forEach((cs, k) => { if (cs.length && cs.every((c) => freeOf(c))) vs[k] = { how: "model", sentence: wants[k].claim, page: 0 }; });
   const removed: string[] = [];
   // What was judged is what is emitted: on a "model" verdict the sentence as written (it was the judged claim); on a "quote" verdict
   // (the sentence is a source's own unit said again) the unit's own text; otherwise nothing.

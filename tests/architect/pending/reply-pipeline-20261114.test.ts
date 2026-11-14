@@ -1,0 +1,95 @@
+// REPLY PIPELINE (docs/architect/specs/REPLY-PIPELINE.md): evidence ledger, tagged draft, verification against the cited units only,
+// one repair pass, the drop and code's fallback line, the task contract. New examples in three domains, none from the mirror set.
+import { assert as ok, assertEquals as eq } from "jsr:@std/assert@1";
+import { FAIL_CLOSED } from "../../../supabase/functions/_shared/agent/research/market.ts";
+import { contractsFor, CONTRACTS, Ledger, runReplyPipeline, stripTags, tagsOf, verifyTagged } from "../../../supabase/functions/_shared/agent/reply_pipeline.ts";
+import { testSupportJudge } from "../support-test-judge.ts";
+
+FAIL_CLOSED.support = true;
+const yes = async (cs: { claim: string }[]) => cs.map(() => "yes" as const);
+
+// Finance: a New York summer analyst posting read this turn, and a page on bank analyst hours.
+function finance() {
+  const l = new Ledger();
+  l.fromToolResult("get_posting", { posting: { company: "Hudson Ridge Capital", title: "Summer Analyst 2027", location: "New York, NY", pay: "New York, NY: $55 - $60 Hourly", deadline: "2027-01-15", state: "open", url: "https://careers.hudsonridge.example/sa" } });
+  l.add("page", "First-year analysts at bulge-bracket banks report working 70 to 80 hours a week.", { host: "wallstreetoasis.example", source: "self_reported", url: "https://wallstreetoasis.example/hours" });
+  l.addRecord(["education: Eastbrook College, BA Economics, Expected May 2028", "skill: Excel"], ["city", "phone"]);
+  return l;
+}
+// Nursing: a BLS page unit for Texas, and nothing about the person's licence.
+function nursing() {
+  const l = new Ledger();
+  l.add("page", "Registered nurses in Texas earned a mean hourly wage of $42.85 in May 2024.", { host: "bls.example", source: "official", url: "https://bls.example/oes/tx" });
+  l.addRecord(["education: Lone Star Nursing School, ADN, Expected June 2027"], ["licence number"]);
+  return l;
+}
+// A startup's culture: one employee review and a company page.
+function startup() {
+  const l = new Ledger();
+  l.add("page", "Brightloop engineers ship to production every day and own their features end to end.", { host: "brightloop.example", source: "official", url: "https://brightloop.example/eng" });
+  l.add("page", "One reviewer said on-call weeks at Brightloop were exhausting.", { host: "reviews.example", source: "anecdote", url: "https://reviews.example/brightloop" });
+  return l;
+}
+
+Deno.test("ledger: chat tool results, pages and the record (what it lacks included) are numbered units", () => {
+  const l = finance();
+  ok(l.units.some((u) => u.kind === "chat" && /Hudson Ridge Capital, Summer Analyst 2027 \(New York, NY\): pay New York, NY: \$55 - \$60 Hourly/.test(u.text)));
+  ok(l.units.some((u) => u.kind === "chat" && /is open; it closes 2027-01-15/.test(u.text)));
+  ok(l.units.some((u) => u.kind === "absent" && u.text === "Not on file: city, phone."));
+  ok(/^\[E1\] \(this chat's tool result\)/.test(l.block()));
+  eq(tagsOf("Pay is $55-$60 an hour [E1, E2].").ids, ["E1", "E2"]);
+  eq(stripTags("Pay is $55-$60 an hour [E1]."), "Pay is $55-$60 an hour.");
+});
+
+Deno.test("verify: each clause against the units it cites only; a fact with no tag fails; a hedge needs none", async () => {
+  const l = finance();
+  const v = await verifyTagged("Hudson Ridge Capital pays $55-$60 an hour in New York [E1], and the posting closes January 15, 2027 [E2]. That's a reported figure, not proof. Analysts work 70 to 80 hours a week. Want me to check the questions?", l, { judge: yes });
+  eq(v.failures.map((f) => f.sentence), ["Analysts work 70 to 80 hours a week."]);
+  ok(/cites no evidence unit/.test(v.failures[0].reason));
+  ok(v.text.startsWith("Hudson Ridge Capital pays $55-$60 an hour in New York, and the posting closes January 15, 2027."), v.text);
+  // Citing the wrong unit fails even though another unit holds it, with code's reason naming the specific.
+  const w = await verifyTagged("Texas nurses earn a mean of $42.85 an hour [E2].", nursing(), { judge: yes });
+  eq(w.text, "");
+  ok(/'\$42\.85[^']*' is in no cited unit/.test(w.failures[0].reason), w.failures[0].reason);
+});
+
+Deno.test("repair: one call for everything that failed, verified again; what still fails is dropped", async () => {
+  let calls = 0, asked = "";
+  const repair = async (x: { system: string; user: string }) => { calls++; asked = x.user; return "Registered nurses in Texas earned a mean hourly wage of $42.85 in May 2024 [E1].\nNurses in Texas get a $10,000 signing bonus [E1]."; };
+  const out = await runReplyPipeline("Texas nurses make about $50 an hour [E1]. That's an estimate, not proof.", nursing(), { judge: testSupportJudge, repair, ask: "what do nurses make in texas per hour" });
+  eq(calls, 1);
+  ok(/'\$50[^']*' is in no cited unit/.test(asked), asked);
+  ok(out.text.startsWith("Registered nurses in Texas earned a mean hourly wage of $42.85 in May 2024."), out.text);
+  ok(!/\$10,000|\$50/.test(out.text), out.text);
+  eq(out.dropped.map((f) => f.sentence), ["Nurses in Texas get a $10,000 signing bonus."]);
+});
+
+Deno.test("fallback: nothing left answers, so code says what it could not verify and what the ledger holds, with its link", async () => {
+  const out = await runReplyPipeline("Hudson Ridge Capital analysts get a $20,000 bonus [E3].", finance(), { judge: yes, repair: async () => "", ask: "what does hudson ridge capital pay summer analysts in new york" });
+  ok(out.fallback);
+  ok(out.text.startsWith("I couldn't verify an answer to that from what I read."), out.text);
+  ok(out.text.includes("$55 - $60 Hourly") && out.text.includes("https://careers.hudsonridge.example/sa"), out.text);
+  // A startup culture ask with nothing verified: no figure from anywhere is invented.
+  const s = await runReplyPipeline("Brightloop has unlimited vacation [E1].", startup(), { judge: testSupportJudge, ask: "what's the culture like at brightloop" });
+  ok(s.fallback && !/unlimited/.test(s.text), s.text);
+});
+
+Deno.test("the record: what is not on file is code's to say from the record", async () => {
+  const onRecord = (x: string) => /^your city and phone aren't on file\.?$/i.test(x) ? true : /^your education isn't on file\.?$/i.test(x) ? false : null;
+  const v = await verifyTagged("Your city and phone aren't on file. Your education isn't on file.", finance(), { judge: yes, onRecord });
+  eq(v.text, "Your city and phone aren't on file.");
+});
+
+Deno.test("length and the task contract go to the same one repair call; over the limit after it, whole sentences go from the end", async () => {
+  const l = startup();
+  let user = "";
+  const long = "Brightloop engineers ship to production every day [E1]. They own their features end to end [E1]. One reviewer said on-call weeks were exhausting [E2]. That's an anecdote, not proof.";
+  const out = await runReplyPipeline(long, l, { judge: yes, repair: async (x) => { user = x.user; return "Brightloop engineers ship daily and own their features [E1]."; }, ask: "what's brightloop's engineering culture", maxChars: 80 });
+  ok(/LENGTH: the reply is \d+ characters; the limit is 80/.test(user), user);
+  ok(out.text.length <= 80, out.text);
+  const cs = contractsFor("career_followup_draft", "draft a note asking a nurse manager in houston for a referral");
+  eq(cs.map((c) => c.id).sort(), ["answer_first", "draft", "referral"]);
+  eq(CONTRACTS.referral.missing("Hi [Name], could we chat about your unit?", ""), "the message never asks for a referral");
+  eq(CONTRACTS.requirements.missing("You need: a resume, a transcript, and two references.", ""), null);
+  eq(CONTRACTS.answer_first.missing("Great question! Pay is $55 an hour.", ""), "the first sentence is a preamble, not the answer");
+});

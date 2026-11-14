@@ -16,8 +16,9 @@ import { alertLine, type MemoryStore, type Pipeline, personBlock, type Standing 
 import type { ResearchDeps, ResearchResult } from "../_shared/agent/research/index.ts";
 import { enforceResearchReply, fallbackVerdict, stripUnseenLinks } from "../_shared/agent/research/reply.ts";
 import { type AdviceResult, enforceAdviceReply } from "../_shared/agent/research/advice.ts";
-import { enforceMarketReply, enforceMarketReplySupported, FAIL_CLOSED, type MarketDeps, type MarketResult, pureUnconfirmed } from "../_shared/agent/research/market.ts";
-import { keepSupported } from "../_shared/agent/research/support.ts";
+import { enforceMarketReply, enforceMarketReplySupported, FAIL_CLOSED, type MarketDeps, type MarketResult, pureUnconfirmed, type ResearchCheck } from "../_shared/agent/research/market.ts";
+import { bare, keepSupported, splitSentences } from "../_shared/agent/research/support.ts";
+import { contractBlock, contractsFor, Ledger, LEDGER_RULE, PIPELINE, runReplyPipeline } from "../_shared/agent/reply_pipeline.ts";
 import { factText, ownerConfirmedFacts } from "../_shared/essay_draft.ts";
 import { NOT_CONFIRMED } from "../_shared/research_reply.ts";
 import { type CompanyResult, enforceCompanyReply, enforceCompanyReplySupported } from "../_shared/agent/research/company.ts";
@@ -219,13 +220,24 @@ export async function agentTurn(o: {
   // D-063 (C4): trace.a keeps a specific advice question's result (research/advice.ts): its one source goes on its own line.
   const trace: { r?: Extract<ResearchResult, { status: "ok" }>; m?: MarketResult | CompanyResult; a?: AdviceResult } = {};
   const ctx: any = { userId: o.userId, threadId: o.threadId, now: o.now, state: o.stores, restoreAsk: o.restoreAsk ?? null, cardPending: !!o.cardPending };
+  // REPLY PIPELINE (PIPELINE.on; docs/architect/specs/REPLY-PIPELINE.md): the evidence ledger starts with the person's confirmed record
+  // and what it lacks; each tool result adds its units (loop.ts). The draft cites them; the task contract is stated up front.
+  const ledger = PIPELINE.on && !hypo ? new Ledger() : null;
+  const contracts = PIPELINE.on ? contractsFor(null, o.message) : [];
+  if (ledger) {
+    const pf = (o.stores as any)?.profile ?? {}, contact = { ...(pf.basics ?? {}), ...(pf.resume_header?.confirmed_at ? pf.resume_header : {}) };
+    ledger.addRecord(ownerConfirmedFacts(pf.facts ?? []).map((f: any) => `${String(f?.kind ?? "fact")}: ${String(f?.text ?? "").trim()}`).filter((x: string) => x.length > 8)
+      .concat(["name", "email", "phone", "city"].filter((k) => typeof contact[k] === "string" && contact[k].trim()).map((k) => `contact: ${k} ${contact[k].trim()}`)),
+      ["city", "phone", "email"].filter((k) => !(typeof contact[k] === "string" && contact[k].trim())));
+    ctx.ledger = ledger;
+  }
   const tools = [...withheld([...(o.toolPolicy?.withhold ?? []), ...hypoWithheld], [...careerTools({ postings: o.postings ?? (async () => []), alerts: o.alerts ?? null, memory: o.memory ?? null, events: o.events ?? null, confirmations: o.confirmations ?? null, tz: o.tz, mail: o.mail ?? null, interviews: o.interviews ?? null, digest: o.digest ?? null, outreach: o.outreach ?? null, verifier: o.verifier ?? null, tailor: o.tailor ?? null, hired: o.hired ?? null, wants: o.wants ?? null, limits: o.limits, posting: o.posting ?? null, situation: o.known?.situation ?? null, linkCheck: o.linkCheck ?? null, conversations: o.conversations ?? null, market: o.market ? { ...o.market, onResult: (r) => { if (r.status === "ok" || trace.m?.status !== "ok") trace.m = r; } } : null, postingRecheck: o.postingRecheck ?? null, applyFlow: o.applyFlow ?? null, research: o.knowledge && o.research ? { ...o.research, onResult: (r, m) => { if (r.status === "ok") trace.r = r; o.research?.onResult?.(r, m); }, onAdvice: (r) => { if (r.source || !trace.a?.source) trace.a = r; } } : null }), ...(o.capabilities ?? []), ...(o.paths ? [pathComparisonTool(o.paths)] : [])]), ...(o.shape && attachAsked(o.message) ? [attachTool()] : []), ...(o.files ? [createFileTool(o.files)] : []), ...(o.familyFiles ? [familyFileTool(o.familyFiles, o.files?.ttlHours() ?? 168)] : [])];
   const offered = new Set(tools.map((t) => t.name));
   let result = await runAgentTurn({
     process: processCheck({ draftAsk: draftAsk && DRAFT_TOOLS.some((n) => offered.has(n)), planSearch: planSearch && offered.has("search_jobs"), parts,
       planFile: planSearch && offered.has("create_file"), history: historyAsk && offered.has("read_application_mail"), mail: !appHypo && offered.has("read_application_mail"), noneClaim: !appHypo, record: () => (ctx.turn as any)?.record, posting: meant.length > 0 && offered.has("get_posting"), shownPay,
       marketRate: !hypo && marketRateAskOf(o.message) && offered.has("research_market"), review: practiceAnswer || !!roast ? o.message : null, familyFile: !hypo && offered.has(FAMILY_FILE_TOOL) ? familyAskOf(o.message) : null }),
-    system: careerSystemPrompt(localDay(o.now, o.tz)) + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + "\n\n" + MIRROR_RULES + "\n\n" + turnNotes.join("\n\n") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
+    system: careerSystemPrompt(localDay(o.now, o.tz)) + (ledger ? `\n\n${LEDGER_RULE}\n${ledger.block()}\n${contractBlock(contracts)}` : "") + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + "\n\n" + MIRROR_RULES + "\n\n" + turnNotes.join("\n\n") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
     history: o.history.slice(-HISTORY_WINDOW).map((m) => ({ role: m.role, content: String(m.content ?? "") })),
     message: [o.message, ...notes].filter(Boolean).join("\n\n"),
     // ADVERSARIAL ROUND 2: an attached file's name and text are not the person's words: no tool reads them as said.
@@ -270,8 +282,23 @@ export async function agentTurn(o: {
   // Round 2: also when an open-question research ran in the same turn (trace.r): the market or company result's check is the one
   // that stands, since its sources are the numbered ones the reply cites.
   // Live-11 (C9: 10 of 11 drafted lines dropped and the trace held none of them): a research turn's draft is recorded too.
-  const researchDraft = FAIL_CLOSED.support && trace.m && result.reply && result.stopped === "final" ? String(result.reply) : null;
-  if (FAIL_CLOSED.support && trace.m && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? await enforceCompanyReplySupported(result.reply, trace.m, { judge: o.market?.judge ?? null, ask: o.message }) : await enforceMarketReplySupported(result.reply, trace.m as MarketResult, shownPay, { judge: o.market?.judge ?? null, ask: o.message }) };
+  let piped: Awaited<ReturnType<typeof runReplyPipeline>> | null = null;
+  if (ledger && result.reply && result.stopped === "final" && !result.show) {
+    const l0 = replyLength(o.message, o.history);
+    const repair = async (x: { system: string; user: string }) => { const res = await o.model({ system: x.system, messages: [{ role: "user", content: [{ type: "text", text: x.user }] }], tools: [], max_tokens: 500, tool_choice: { type: "none" } } as any); return ((res as any)?.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join("").trim(); };
+    piped = await runReplyPipeline(result.reply, ledger, { judge: o.market?.judge ?? null, repair, own: [...(result.codeLines ?? [])], ask: o.message, contracts, maxChars: l0.kind === "draft" ? undefined : overLimit(l0) });
+    result = { ...result, reply: piped.text };
+  }
+  const researchDraft = !piped && FAIL_CLOSED.support && trace.m && result.reply && result.stopped === "final" ? String(result.reply) : null;
+  // Live-12 (item 4): this chat's tool results as source units: the postings this turn read (pay by place, deadline, state) and the
+  // posting lines Trainee's earlier replies gave from them, each with its link.
+  let researchRows: ResearchCheck[] | null = null;
+  const chatUnits = () => [
+    ...[...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])].map((p: any) => ({ text: [p?.company, p?.title, p?.location, p?.pay ? `pay ${p.pay}` : "", p?.deadline ? `closes ${p.deadline}` : "", p?.state ? `is ${p.state}` : ""].filter((x) => typeof x === "string" && x.trim()).join(", "), title: "A posting read in this chat", url: typeof p?.url === "string" ? p.url : null })).filter((x) => /\d/.test(x.text)),
+    ...(hypo ? [] : shownPayOf("what is the pay", o.history)).map((l) => ({ text: l.text, title: "A posting line shown earlier in this chat", url: l.url })),
+  ];
+  if (piped) { /* the reply pipeline checked it */ }
+  else if (FAIL_CLOSED.support && trace.m && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? await enforceCompanyReplySupported(result.reply, trace.m, { judge: o.market?.judge ?? null, ask: o.message }) : await enforceMarketReplySupported(result.reply, trace.m as MarketResult, shownPay, { judge: o.market?.judge ?? null, ask: o.message, chat: chatUnits(), trace: (rows) => { researchRows = rows; } }) };
   else if (trace.m && !trace.r && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? enforceCompanyReply(result.reply, trace.m) : enforceMarketReply(result.reply, trace.m as MarketResult, shownPay) };
   // D-073 review 2: research read pages and none supported an answer, and the model's reply did not stand (the loop removed its
   // unsourced claim, asked once more and stopped: "incomplete_reply"). The person is told what research found, in code's words: that
@@ -308,7 +335,7 @@ export async function agentTurn(o: {
   // D-071 (live-8: the pass did not run on C9 and recorded no reason): every way it does not run says why.
   let shorten: Shorten = { ran: false, outcome: "not_run", why: !result.reply ? "no reply to shorten" : result.stopped !== "final" ? `the turn did not finish (${result.stopped})`
     : trace.r || trace.m ? "a research reply, laid out and sourced in code (never rewritten)" : "" };
-  if (result.reply && result.stopped === "final" && !trace.r && !trace.m) {
+  if (result.reply && result.stopped === "final" && !trace.r && !trace.m && !piped) {
     const l = replyLength(o.message, o.history), bound = overLimit(l), n = textLength(result.reply);
     // D-072 (item 11): a practice turn (a question asked, or a review of their answer) is shortened like any reply unless it shows a
     // code block; the code it names (a call, an index, an operator, a complexity) is kept verbatim (codeKept). Complexity notation
@@ -374,8 +401,21 @@ export async function agentTurn(o: {
   //     records and the lines shown earlier; with nothing left, the records themselves.
   // Live-10 diagnosis: the model's draft before the check, and each sentence the check removed with its reason, ride the turn's trace.
   const supportTrace: { draft: string; refused: { sentence: string; why: string }[] } | null = FAIL_CLOSED.support && !trace.m && result.reply && result.stopped === "final" && !result.show ? { draft: String(result.reply), refused: [] } : null;
-  const keepSupportedT: typeof keepSupported = async (...args) => { const k = await keepSupported(...args); supportTrace?.refused.push(...((k as any).why ?? [])); return k; };
-  if (FAIL_CLOSED.support && !trace.m && result.reply && result.stopped === "final" && !result.show) {
+  // Live-12 (item 6, C4: "Your city and phone aren't on file" was refused): whether something is on the person's record is code's to
+  // say, from the record itself (their facts, confirmed or not, and their profile's contact fields): true when none of the things the
+  // sentence names is there, false when one is.
+  const recordWords = hypo ? "" : [...(((o.stores as any)?.profile?.facts ?? []) as any[]).map((f) => `${String(f?.kind ?? "")} ${String(f?.name ?? "")} ${String(f?.text ?? "")}`),
+    ...Object.entries({ ...((o.stores as any)?.profile?.basics ?? {}), ...((o.stores as any)?.profile?.resume_header ?? {}) }).filter(([, v]) => typeof v === "string" && v.trim()).map(([k2, v]) => `${k2} ${v}`)].join("\n").toLowerCase();
+  const NOT_ON_FILE = /^(?:but\s+)?(?:(?:i\s+(?:don't|do not)\s+have\s+)(.{2,60}?)\s+on\s+(?:file|record)|(.{2,60}?)\s+(?:isn't|is not|aren't|are not)\s+on\s+(?:file|record|your record))$/iu;
+  const onRecord = (x: string): boolean | null => {
+    const m = NOT_ON_FILE.exec(bare(x).replace(/[’]/g, "'").replace(/[.!?]+$/, "").trim());
+    if (!m || hypo) return null;
+    const items = String(m[1] ?? m[2]).toLowerCase().replace(/\b(?:your|the|my|a|an|line|lines|details?|exact)\b/g, " ").split(/,|\band\b|\bor\b|\//).map((w) => w.trim()).filter(Boolean);
+    if (!items.length) return null;
+    return items.every((w) => !w.split(/\s+/).every((t) => new RegExp(`(?<![\\p{L}\\p{N}])${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "u").test(recordWords)));
+  };
+  const keepSupportedT: typeof keepSupported = async (r0, src, opts) => { const k = await keepSupported(r0, src, { onRecord, ...(opts ?? {}) }); supportTrace?.refused.push(...((k as any).why ?? [])); return k; };
+  if (FAIL_CLOSED.support && !piped && !trace.m && result.reply && result.stopped === "final" && !result.show) {
     const judge = o.market?.judge ?? null, pure = (s: string) => pureUnconfirmed(s, o.message);
     // Live-11 C11: a question to the person ("Which email should go on the resume?") is never judged, when it states no figure.
     const askOnly = (s: string) => /\?\s*$/.test(s.trim()) && !numbersIn(s).length;
@@ -457,15 +497,19 @@ export async function agentTurn(o: {
     // A File this turn made is code's: its link goes from fileLinks, sent by the channel after the answer (its own message on Telegram,
     // its own line on WhatsApp and iMessage, D65-5), whatever the check removed; it is never written into the reply here.
   }
-  // Live-11 C22: a pay ask is never answered by lines with no figure (a quoted table heading): the pay this conversation already
-  // showed from a posting (its record, with its link) is given instead.
-  // (a research turn only: a draft or a question with no figure is not a pay answer)
-  // (only a shown line that names a place or employer the ask names: "chicago" asked, "PayPal in Chicago ($28-$49 hourly)" shown;
-  // never PayPal's pay for a Citadel ask, D73-6)
+  // Live-11 C22 / live-12 (item 1): on a research turn, when no sentence of the model's own words that carries a figure survived, the
+  // reply says that it could not verify a figure, and gives what this chat's tool results do hold for the place or employer asked (a
+  // posting's pay, with its link). Never another employer's pay for this ask (D73-6), and never a page's sentence in place of one.
   const askWords = new Set(o.message.toLowerCase().match(/\p{L}[\p{L}&'-]*/gu) ?? []);
   const shownAsked = shownPay.filter((l) => (l.text.match(/(?<=[\p{L}\p{N},;:(]\s+)\p{Lu}[\p{L}&'-]*/gu) ?? []).some((w) => w.length > 2 && askWords.has(w.toLowerCase())));
-  if (FAIL_CLOSED.support && (trace.m || trace.r) && result.reply && result.stopped === "final" && !result.show && shownAsked.length && !numbersIn(result.reply.replace(/https?:\/\/\S+/g, " ")).length)
-    result = { ...result, reply: [`I couldn't confirm a figure from the pages I read. The pay I showed earlier, with its source:`, ...new Set(shownAsked.map((l) => [l.text.replace(/^(?:I|We)\b[^:]{0,80}:\s*/u, "").replace(/^\p{Ll}/u, (c) => c.toUpperCase()), l.url].filter(Boolean).join("\n")))].join("\n\n") };
+  const plainS = (x: string) => bare(x).replace(/[.!?]+$/, "").toLowerCase();
+  const figSentences = researchDraft ? researchDraft.split(/\n+/).flatMap((l) => splitSentences(l.replace(/https?:\/\/\S+/g, " "))).map((x) => x.replace(/\[\d+\]/g, " ").trim()).filter((x) => /\p{L}/u.test(x) && numbersIn(x).length) : [];
+  const figSurvived = !!result.reply && figSentences.some((x) => plainS(result.reply!).includes(plainS(x)));
+  if (FAIL_CLOSED.support && (trace.m || trace.r) && result.reply && result.stopped === "final" && !result.show && shownAsked.length && !figSurvived && (figSentences.length || !numbersIn(result.reply.replace(/https?:\/\/\S+/g, " ")).length)) {
+    const known = [...new Set(shownAsked.map((l) => [l.text.replace(/^(?:I|We)\b[^:]{0,80}:\s*/u, "").replace(/^\p{Ll}/u, (c) => c.toUpperCase()), l.url].filter(Boolean).join("\n")))];
+    const honest = /couldn't (?:confirm|verify|find)/i.test(result.reply) ? [] : ["I couldn't verify a figure for that from the pages I read."];
+    result = { ...result, reply: [...honest, result.reply, `What this chat's posting shows:`, ...known].join("\n\n") };
+  }
   if (result.reply && result.stopped === "final" && !result.show) result = { ...result, reply: payWithSource(result.reply, [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])], shownPayPlaces(o.message, hypo ? [] : o.history)) };
   // D-067 (live-6 C9: research_market ran and the person got an empty message; D-024): the last line of every brain turn. An empty
   // or blank reply is never sent: the research's own sourced points when it found any, else the honest line that it did not finish.
@@ -515,7 +559,8 @@ export async function agentTurn(o: {
   const ask = result.show?.intent === RESTORE_ASK_INTENT ? (result.show.meta as any)?.restore_ask : null;
   if (ask && !result.pending_approvals?.length && !o.cardPending) result = { ...result, restore_ask: ask } as typeof result;
   else if (ask) result = { ...result, show: { ...result.show!, meta: {} } };
-  const researchTrace = researchDraft ? { draft: researchDraft, refused: researchDraft.split(/\n+/).flatMap((l) => l.split(/(?<=[.!?])\s+/)).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x) && !String(result.reply ?? "").includes(x.replace(/\s*\[\d+\]/g, "").replace(/[.!?]$/, ""))).map((sentence) => ({ sentence, why: "research check: not kept" })) } : null;
+  const researchTrace = researchDraft && researchRows ? { draft: researchDraft, refused: (researchRows as ResearchCheck[]).filter((x) => x.verdict === "drop").map((x) => ({ sentence: x.sentence, why: "research check: not kept" })), checked: researchRows }
+    : researchDraft ? { draft: researchDraft, refused: researchDraft.split(/\n+/).flatMap((l) => l.split(/(?<=[.!?])\s+/)).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x) && !String(result.reply ?? "").includes(x.replace(/\s*\[\d+\]/g, "").replace(/[.!?]$/, ""))).map((sentence) => ({ sentence, why: "research check: not kept" })) } : null;
   const supportAll = supportTrace && supportTrace.refused.length ? supportTrace : researchTrace;
   const withSupport = supportAll ? { ...result, support: supportAll } : result;
   return know ? { ...withSupport, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : withSupport;

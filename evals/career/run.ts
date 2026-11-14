@@ -10,7 +10,7 @@
 // A stopped run is written with "stopped", and is not a score.
 // Claude only (owner, 2026-11-02): needs ANTHROPIC_API_KEY (the two judges, judges.ts; and the brain). Without it, or with a
 // non-claude- judge or brain: NOT RUN, exit 2. A score is never faked. Before the first item a preflight quote (eval_budget.ts)
-// refuses a run that would cross 80% of what remains under MODEL_BUDGET_TARGET_USD (85; hard max MODEL_BUDGET_HARD_USD, 85).
+// refuses a run that would cross 80% of what remains under MODEL_BUDGET_TARGET_USD (93; hard max MODEL_BUDGET_HARD_USD, 93).
 // Results: evals/career/results/<label>.json, plus the pass rate and failing ids on stdout.
 // 2026-10-26 (sealed set): `category` names the journey stage; `expect` is the outcome counted by code from the end state
 // (harness.ts outcomeOf: rows written or not), checked beside the judges: an item passes only when both judges pass it AND
@@ -294,7 +294,7 @@ if (import.meta.main) {
   const opened = openGate(bud, get, before, target, parallel);
   if ("error" in opened) { console.log(`NOT RUN: ${opened.error}.`); Deno.exit(2); }
   const { gate, shared: sharedLedger } = opened;
-  // Shared ledger: the spend before this run is what ALL runs recorded in the one $85 ledger (not just result files on this disk).
+  // Shared ledger: the spend before this run is what ALL runs recorded in the one $93 ledger (not just result files on this disk).
   if (sharedLedger) { const led = await ledgerSpentUsd(gate); if (led === null) { console.log("NOT RUN: the shared budget ledger could not be read; no model call was made."); Deno.exit(2); } before = led; console.log(`shared ledger: $${led.toFixed(3)} recorded across all runs; remaining allowance $${Math.max(0, target - led).toFixed(3)} of $${target.toFixed(2)}`); }
   const call = (meterOf: typeof meter) => (cfg: any, payload: any) => gw.callModel(cfg, payload, { meter: meterOf, role: "chat", budget: gate });
   const brain: Brain = await makeBrain({ name: brainName as any, env: Deno.env, model: usesModel ? (p: any) => gw.callModel(brainCfg, p, { meter, role: "chat", budget: gate }) : null });

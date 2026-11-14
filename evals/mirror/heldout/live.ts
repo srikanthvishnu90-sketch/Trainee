@@ -49,7 +49,7 @@ const key = Deno.env.get("ANTHROPIC_API_KEY") ?? "";
 if (!key) { console.log("refused: needs ANTHROPIC_API_KEY"); Deno.exit(3); }
 if (!(budget > 0)) { console.log("refused: needs --budget-usd <cap>"); Deno.exit(3); }
 if (quote > budget) { console.log(`refused: the quote $${quote.toFixed(2)} is over the cap $${budget}; sample fewer conversations`); Deno.exit(3); }
-// The shared $85 ledger: the cap is reserved before the first model call, settled at the end (eval_budget.ts openLiveRunLedger);
+// The shared $93 ledger: the cap is reserved before the first model call, settled at the end (eval_budget.ts openLiveRunLedger);
 // a run that dies before it is metered settles as the whole cap.
 const ledger = await openLiveRunLedger({ budgetUsd: budget, approval: Deno.env.get("MIRROR_SPEND_APPROVED") ?? "", get: (k) => Deno.env.get(k), bud: { resolveBudgetGate } });
 if ("error" in ledger) { console.log(`refused: ${ledger.error}`); Deno.exit(3); }

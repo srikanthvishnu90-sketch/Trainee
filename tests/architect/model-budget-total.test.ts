@@ -19,10 +19,10 @@ const body = (usage: unknown = { input_tokens: 100, output_tokens: 20 }) => JSON
 const fakeProvider = () => { const sent: unknown[] = []; return { sent, request: (async (_u: string, init: any) => { sent.push(JSON.parse(init.body)); return new Response(body(), { status: 200 }); }) as unknown as typeof fetch }; };
 const payload = { max_tokens: 100, messages: [{ role: "user", content: "hello" }] };
 
-Deno.test("limits: unset is one $85 total (target and hard both 85; D-084); set values are honoured; a malformed value or a hard max below the target is refused", () => {
-  eq(Budget.budgetLimits(env({})), { target: 85 * M, hard: 85 * M }); // Architect amendment (owner decision 2026-11-14, D-084: total raised to $85)
+Deno.test("limits: unset is one $93 total (target and hard both 93; D-085); set values are honoured; a malformed value or a hard max below the target is refused", () => {
+  eq(Budget.budgetLimits(env({})), { target: 93 * M, hard: 93 * M }); // Architect amendment (owner decision 2026-11-14, D-085: total raised to $93)
   eq(Budget.budgetLimits(env({ MODEL_BUDGET_TARGET_USD: "50", MODEL_BUDGET_HARD_USD: "75.5" })), { target: 50 * M, hard: 75_500_000 });
-  eq(Budget.budgetLimits(env({ MODEL_BUDGET_TARGET_USD: " ", MODEL_BUDGET_HARD_USD: "" })), { target: 85 * M, hard: 85 * M }, "blank is unset"); // Architect amendment (owner decision 2026-11-14, D-084: total raised to $85)
+  eq(Budget.budgetLimits(env({ MODEL_BUDGET_TARGET_USD: " ", MODEL_BUDGET_HARD_USD: "" })), { target: 93 * M, hard: 93 * M }, "blank is unset"); // Architect amendment (owner decision 2026-11-14, D-085: total raised to $93)
   for (const bad of [{ MODEL_BUDGET_TARGET_USD: "seventy" }, { MODEL_BUDGET_HARD_USD: "-1" }, { MODEL_BUDGET_HARD_USD: "0" }, { MODEL_BUDGET_TARGET_USD: "1e9" }, { MODEL_BUDGET_TARGET_USD: "80", MODEL_BUDGET_HARD_USD: "60" }])
     eq(Budget.budgetLimits(env(bad)), null, `refused: ${JSON.stringify(bad)}`);
   eq(Budget.resolveBudgetGate(undefined, env({ MODEL_BUDGET_HARD_USD: "oops" })), null, "a malformed limit refuses to spend (no gate)");
@@ -198,16 +198,16 @@ Deno.test({ name: "end to end: 200 concurrent callModel calls on the real total 
     assert(err instanceof ModelBudgetBlockedError, "and no eval or test run may start");
   }) });
 
-Deno.test("owner 2026-11-02 22:02, raised 2026-11-12 (D-074), to $85 2026-11-14 (D-084): the default gate is ONE $85 total: warns at $68, refuses what does not fit, and stops at $85", async () => {
+Deno.test("owner 2026-11-02 22:02, raised 2026-11-12 (D-074), to $85 then $93 2026-11-14 (D-084, D-085): the default gate is ONE $93 total: warns at $74.40, refuses what does not fit, and stops at $93", async () => {
   const g = Budget.memoryBudgetGate();
-  eq([g.snapshot().limit, g.snapshot().target], [85 * M, 85 * M]); // Architect amendment (owner decision 2026-11-14, D-084: total raised to $85)
-  const a = await g.reserve(67 * M, { model: "m", role: "r" }); assert(a.ok && !a.warn, "$67 is under 80%"); // Architect amendment (owner decision 2026-11-14, D-084: total raised to $85)
-  const b = await g.reserve(1 * M, { model: "m", role: "r" }); assert(b.ok && b.warn === true, "$68 is 80%: warns"); // Architect amendment (owner decision 2026-11-14, D-084: total raised to $85)
-  const c = await g.reserve(18 * M, { model: "m", role: "r" }); assert(!c.ok && c.reason === "limit", "$86 does not fit: refused before any call"); // Architect amendment (owner decision 2026-11-14, D-084: total raised to $85)
-  const d = await g.reserve(17 * M, { model: "m", role: "r" }); assert(d.ok && d.overTarget === true, "exactly $85"); // Architect amendment (owner decision 2026-11-14, D-084: total raised to $85)
+  eq([g.snapshot().limit, g.snapshot().target], [93 * M, 93 * M]); // Architect amendment (owner decision 2026-11-14, D-085: total raised to $93)
+  const a = await g.reserve(74 * M, { model: "m", role: "r" }); assert(a.ok && !a.warn, "$74 is under 80%"); // Architect amendment (owner decision 2026-11-14, D-085: total raised to $93)
+  const b = await g.reserve(400_000, { model: "m", role: "r" }); assert(b.ok && b.warn === true, "$74.40 is 80%: warns"); // Architect amendment (owner decision 2026-11-14, D-085: total raised to $93)
+  const c = await g.reserve(19 * M, { model: "m", role: "r" }); assert(!c.ok && c.reason === "limit", "$93.40 does not fit: refused before any call"); // Architect amendment (owner decision 2026-11-14, D-085: total raised to $93)
+  const d = await g.reserve(18_600_000, { model: "m", role: "r" }); assert(d.ok && d.overTarget === true, "exactly $93"); // Architect amendment (owner decision 2026-11-14, D-085: total raised to $93)
   eq((await g.status!()).state, "stopped");
-  const none = await g.reserve(1, { model: "m", role: "r" }); assert(!none.ok && none.reason === "limit", "nothing at $85"); // Architect amendment (owner decision 2026-11-14, D-084: total raised to $85)
-  await assertNode.rejects(() => Budget.assertRunMayStart(g), "an eval run does not start at $85"); // Architect amendment (owner decision 2026-11-14, D-084: total raised to $85)
+  const none = await g.reserve(1, { model: "m", role: "r" }); assert(!none.ok && none.reason === "limit", "nothing at $93"); // Architect amendment (owner decision 2026-11-14, D-085: total raised to $93)
+  await assertNode.rejects(() => Budget.assertRunMayStart(g), "an eval run does not start at $93"); // Architect amendment (owner decision 2026-11-14, D-085: total raised to $93)
 });
 
 // Regression (CI of #447, flow-scenarios-telegram "budget 75"): production keeps its own daily gate. While the owner's per-day window is

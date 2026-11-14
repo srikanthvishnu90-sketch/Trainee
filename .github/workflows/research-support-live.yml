@@ -4,7 +4,7 @@
 # evals/research-support/run-request.json, so nothing on trunk or a PR ever spends.
 # Spend: the owner's written approval is the request's `approval` (a row of docs/architect/DECISIONS.md) and its `run` (a row
 # approves one run, named in it: evals/research-support/approval.ts). As real-sets-live.yml does
-# since #824, the runner itself reserves the cap at the shared $85 ledger before its first model call (refused if it does not fit what
+# since #824, the runner itself reserves the cap at the shared $93 ledger before its first model call (refused if it does not fit what
 # remains, or the approval is not a DECISIONS row) and settles it to the metered cost at the end, also on error. The only hosts the
 # run calls are the model API and the ledger.
 name: research-support-live
@@ -43,8 +43,8 @@ jobs:
           # (eval_budget.ts openLiveRunLedger, #824); its model calls carry their own in-process gate, so nothing is counted twice.
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          MODEL_BUDGET_TARGET_USD: "85"
-          MODEL_BUDGET_HARD_USD: "85"
+          MODEL_BUDGET_TARGET_USD: "93"
+          MODEL_BUDGET_HARD_USD: "93"
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then echo "NOT RUN: a secret is missing (ANTHROPIC_API_KEY or the shared ledger); no model call was made"; exit 2; fi
           mkdir -p "$RUNNER_TEMP/out"

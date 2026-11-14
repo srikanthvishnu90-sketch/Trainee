@@ -24,7 +24,6 @@ import { type CompanyResult, enforceCompanyReply, enforceCompanyReplySupported }
 import { enforceFollowupAsk } from "../_shared/followup_draft.ts";
 import { urlsIn } from "../_shared/channel_shape.ts";
 import { numbersIn, numEq } from "../_shared/agent/research/guard.ts";
-import { adviceOfTheirOwn } from "../_shared/agent/research/support.ts";
 import { knowledgeFor, type Knowledge } from "../_shared/agent/knowledge/index.ts";
 import { styleBlock } from "../_shared/agent/style.ts";
 import { askedPartsOf, asksForDetail, boundaryNote, boundaryOf, capacityAskOf, capacityNote, correctionNote, correctionOf, DRAFT_TOOLS, draftAskOf, draftNote, historyAskOf, historyNote, HYPOTHETICAL_WITHHELD, hypotheticalNote, hypotheticalOf, lengthNote, multiAskNote, overLimit, partsMissing, partsNote, PERSONA_WITHHELD, planSearchAskOf, planSearchNote, whileWorkingNote, postingNote, postingRefOf, REPLY_LENGTH, replyLength, roastNote, roastOf, shownPayNote, shownPayOf, shownPayPlaces, statesNothing, textLength } from "../_shared/agent/turn_notes.ts";
@@ -395,26 +394,13 @@ export async function agentTurn(o: {
       // With nothing of the model's left, code's own fallback paragraph (it already ends with the File link, when there is one).
       result = { ...result, reply: letters(k.text) ? k.text : fallbackVerdict(trace.r) };
     } else if (trace.a) {
-      // Architect ruling 2026-11-14 (narrowed): advice about the person's own materials is outside the page judge only when it
-      // stands on their confirmed record alone (support.ts adviceOfTheirOwn).
-      // The items of their own record (closed world, support.ts adviceOfTheirOwn), from facts ABOUT the person only: a skill's name;
-      // an education fact's school, degree and dates and the whole line; an experience or project fact's employer, role, the two
-      // together and their dates; a contact item; a GPA. Never a fact about someone else ("My friend at Citadel earns $10k a week").
-      const itemsOf = (f: any): string[] => {
-        if (!f || typeof f !== "object") return [];
-        const head = String(f.text ?? "").split(":")[0].trim(), parts = head.split(/,\s*/).map((x) => x.trim()).filter(Boolean);
-        if (f.kind === "skill") return [String(f.name ?? head.replace(/^Skill\s*/i, "")).trim()];
-        if (f.kind === "education") return [head, ...parts];
-        // (only the employer, the role and the two together: never the rest of the line, "trading bot returned 12%")
-        if (f.kind === "experience" || f.kind === "project") { const role = parts[1] ? parts[1].replace(/\s*\([^)]*\)\s*$/, "") : ""; return [...(parts.length <= 2 ? [head] : []), parts[0] ?? "", ...(parts[1] ? [parts[1]] : []), ...(parts[0] && role ? [`${parts[0]}, ${role}`, `${role} at ${parts[0]}`] : [])].filter(Boolean); }
-        if (f.kind === "contact" || f.kind === "email" || f.kind === "phone") return [String(f.value ?? f.text ?? "")];
-        if (/^gpa$/i.test(String(f.name ?? "")) && typeof f.gpa === "string") return [`${f.gpa} GPA`, `GPA ${f.gpa}`, "GPA"];
-        return [];
-      };
-      const all = hypo ? [] : (((o.stores as any)?.profile?.facts ?? []) as any[]);
-      const confirmedIds = new Set(ownerConfirmedFacts(all));
-      const advice = adviceOfTheirOwn(all.filter((f) => confirmedIds.has(f)).flatMap(itemsOf), all.filter((f) => f && typeof f === "object" && (f.status !== "confirmed" || f.withdrawn_by_owner)).flatMap(itemsOf));
-      const k = await keepSupported(result.reply, [...trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), ...confirmed, ...readSources], { judge, pure, own: codeLines, ask: o.message, advice });
+      // Architect ruling 2026-11-14 (final, review of f8d477168): no advice exemption. Every advice sentence is checked like any
+      // claim; the person's confirmed record (facts about them only, each its own line with its kind; never a draft) is one more source,
+      // so advice that the record and the cited guide state passes, and a recombination is judged as the claim it is.
+      const record = hypo ? [] : ownerConfirmedFacts((o.stores as any)?.profile?.facts ?? []).filter((f: any) => f?.kind !== "other" || /^gpa$/i.test(String(f?.name ?? "")))
+        .map((f: any) => { const x = factText(f); return x ? `${String(f.kind ?? "fact")}: ${String(f.text ?? x).trim()}` : ""; }).filter(Boolean);
+      const recordSource = record.length ? [{ text: record.join("\n"), title: "The person's confirmed record:" }] : [];
+      const k = await keepSupported(result.reply, [...trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), ...recordSource, ...readSources], { judge, pure, own: codeLines, ask: o.message });
       result = { ...result, reply: letters(k.text) ? k.text : [trace.a.not_verified || NOT_CONFIRMED, ...links(k.text)].join("\n") };
     } else if (recs.length || shownPay.length) {
       // Round 3: EVERY sentence of a pay turn is checked (not only those with a number), against the postings' own records and the

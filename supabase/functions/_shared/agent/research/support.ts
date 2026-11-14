@@ -543,45 +543,7 @@ export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudg
 // sentence stands when it is one of code's own lines (`own`: word for word), a could-not-confirm sentence in the closed form
 // (`pure`), or the judge says yes to it (as a claim in its own words, or as a source's own unit said again); it is removed otherwise
 // (these paths have no numbered source to quote). A line that is only a link is code's, and stays.
-// Architect ruling 2026-11-14 (final, closed world; tightened on review of 1f3f5f18a): on an advice turn, a sentence skips the page
-// judge only when it is an instruction to the person (a leading verb addressed to them, "You could" + one, or a lead-in made only of
-// layout words and closed by ":", "For the top of your resume:") and everything after that is either a WHOLE item of their own record,
-// exactly as one fact about them states it (a skill, a school, a degree, a date, an employer, a role, an employer and role together,
-// a project, a contact item; a draft or withdrawn item only when the leading verb removes it), or a word of a small fixed layout and
-// function vocabulary (no verbs: the leading one is the only verb), with "and", "," and a quoted line's "|" only between them. Any other
-// word, a ":" ";" dash or bracket outside an item, and the sentence is judged like any claim. A question is judged.
-const ADVICE_VERBS = new Set("put lead move list add leave keep drop remove delete cut place start end group order swap mention include bold shorten trim".split(" "));
-const REMOVAL = /^(?:you could\s+)?(?:(?:remove|cut|drop|delete)\b|take\b.*\bout\b|leave\b.*\b(?:off|out)\b)/iu;
-const LAYOUT = new Set(("a an the of for at to in on by with from as your my top first last near next above below under before after then " +
-  "section line bullet header heading summary resume résumé cv page skills skill experience education projects project list order " +
-  "outdated old current off out up name contact links link email phone compact short").split(" "));
-const advTokens = (t: string) => (bare(t).toLowerCase().match(/[\p{L}\p{N}$][\p{L}\p{N}$.'’/+&#%-]*[\p{L}\p{N}%]|[\p{L}\p{N}$]|[,:;|()"“”–—]|\s-\s/gu) ?? []).map((x) => x.trim().replace(/[“”]/g, '"')).map((x) => x.replace(/['’]s$/, ""));
-export function adviceOfTheirOwn(items: string[], draftItems: string[] = []): (s: string) => boolean {
-  const phrases = (xs: string[]) => [...new Set(xs.map((x) => String(x ?? "").trim()).filter((x) => x.length > 1))].map(advTokens).filter((x) => x.length).sort((a, b) => b.length - a.length);
-  const mine = phrases(items), drafts = phrases(draftItems);
-  return (s: string) => {
-    const t = bare(s).trim();
-    if (!t || /\?\s*$/.test(t)) return false;
-    let w = advTokens(t.replace(/[.!]+$/, ""));
-    if (w[0] === "you" && w[1] === "could") w = w.slice(2);
-    if (!w.length) return false;
-    let k = 0;
-    if (ADVICE_VERBS.has(w[0])) k = 1;
-    else { const c = w.indexOf(":"); if (c < 1 || !w.slice(0, c).every((x) => LAYOUT.has(x))) return false; k = c + 1; } // a layout-only lead-in
-    const allowed = ADVICE_VERBS.has(w[0]) && REMOVAL.test(t) ? [...mine, ...drafts].sort((a, b) => b.length - a.length) : mine;
-    let items = 0, prev: "item" | "word" | "sep" | null = null;
-    while (k < w.length) {
-      const hit = allowed.find((p) => p.every((x, n) => w[k + n] === x));
-      if (hit) { k += hit.length; items++; prev = "item"; continue; }
-      const x = w[k];
-      if (x === "and" || x === "," || x === "|" || x === '"') { if (prev === null && x !== '"') return false; prev = x === '"' ? prev : "sep"; k++; continue; }
-      if (!LAYOUT.has(x)) return false; // another word, or ":" ";" a dash or a bracket outside an item: a clause
-      prev = "word"; k++;
-    }
-    return items > 0;
-  };
-}
-export async function keepSupported(reply: string, sources: (string | { text: string; title?: string })[], o: { judge?: SupportJudge | null; read?: (s: string) => string; pure?: (s: string) => boolean; own?: string[]; advice?: (s: string) => boolean; subjects?: string[]; ask?: string } = {}): Promise<{ text: string; removed: string[] }> {
+export async function keepSupported(reply: string, sources: (string | { text: string; title?: string })[], o: { judge?: SupportJudge | null; read?: (s: string) => string; pure?: (s: string) => boolean; own?: string[]; subjects?: string[]; ask?: string } = {}): Promise<{ text: string; removed: string[] }> {
   const idx = indexPages(sources.map((x) => typeof x === "string" ? { text: x } : x), o.read, o.subjects ?? [], { ask: o.ask });
   const norm = (x: string) => bare(readAlike(x)).toLowerCase().replace(/[.!?]+$/, "");
   const own = new Map((o.own ?? []).map((x) => [norm(x), x]));
@@ -591,10 +553,6 @@ export async function keepSupported(reply: string, sources: (string | { text: st
     // A piece with no word in it ("1.", "-") is what is left of a list around removed sentences: it goes; a link alone is code's.
     if (!/\p{L}/u.test(x.replace(/https?:\/\/\S+/g, ""))) { if (!/https?:\/\//.test(x)) lines[a][b] = ""; return; }
     if (o.pure?.(x)) return;
-    // 2026-11-14 (architect ruling): on an advice turn, a sentence of advice to the person about their own materials that states
-    // no figure, name or claim beyond the person's confirmed record and what they said (o.advice decides) is outside the page judge;
-    // D-007's fact check and D-063's one cited source govern it.
-    if (o.advice?.(x)) return;
     // Round 4: one of code's own lines stands only when the sentence IS that line, and then the stored line itself is what is said.
     const mine = own.get(norm(x));
     if (mine !== undefined) { lines[a][b] = mine; return; }

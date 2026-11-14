@@ -89,14 +89,9 @@ Deno.test("fixes 9 and 11: code's own lines (a closed posting's note, the read-o
   eq(turnLines([JSON.stringify({ company: "Stripe", closed: false })]), { codeLines: [], readLines: [] });
 });
 
-// ---- architect ruling 2026-11-14 (by shape, on review of 8cd4de7d4): advice outside the page judge is an instruction about the
-// person's own materials, on their own record, with no evaluative or world predicate
-import { adviceOfTheirOwn, keepSupported } from "../../../supabase/functions/_shared/agent/research/support.ts";
-Deno.test("ruling 1, closed world: only record items and layout words after the leading verb", () => {
-  const own = adviceOfTheirOwn(["Lakeshore University, BS Computer Science and Finance, Expected June 2029", "Python", "SQL", "Pixelforge, Founder (2023-2025)"], ["GPA", "3.9"]);
-  for (const s of ["Put Python and SQL first.", "Move SQL above Python.", "Leave the outdated 3.9 GPA off.", "List Pixelforge, Founder (2023-2025) first under experience."]) ok(own(s), s);
-  for (const s of ["Leave the 3.9 GPA in.", "Put your 3.9 GPA next to Lakeshore University.", "Lead with Pixelforge, the strongest line you have.", "Lakeshore University graduates get hired fast.", "Mention SQL?"]) ok(!own(s), s);
-});
+// ---- architect ruling 2026-11-14 (final, review of f8d477168): no advice exemption; every advice sentence is checked, with the
+// person's confirmed record as one more source. The leaks below stay refused (now by layer A and the judge).
+import { keepSupported } from "../../../supabase/functions/_shared/agent/research/support.ts";
 // Turn-level (the entry point every version exposes): the review's two leaks and four variants through agentTurn's advice path,
 // with a judge that says no. Red on 7487f3600 (each sentence was kept unjudged), green here.
 import { agentTurn } from "../../../supabase/functions/agent-chat/career_brain.ts";
@@ -107,7 +102,7 @@ const guideSearch = async () => ({ status: "ok", facts: [{ id: "", kind: "progra
 const FACTS = [{ id: "F-1", kind: "education", text: "Lakeshore University, BS Computer Science and Finance, Expected June 2029", status: "confirmed" }, { id: "F-2", kind: "skill", text: "Skill: SQL", name: "SQL", status: "confirmed", unproven: true }, { id: "F-3", kind: "skill", text: "Skill: Python", name: "Python", status: "confirmed" }];
 const adviceTurn = (history: { role: string; content: string }[], reply: string, extra: any[] = []) => agentTurn({ message: "what goes at the top of my resume?", history, stores: { profile: { facts: [...structuredClone(FACTS), ...extra] } }, userId: "u", threadId: "t", now: Date.parse("2026-11-14T00:00:00Z"), knowledge: true,
   market: { judge: async (cs: any[]) => cs.map(() => "no") }, model: (() => { let n = 0; return async (p: any) => p.tools?.length ? [aUse("research_career_question", { question: "what goes at the top of my resume?", kind: "advice", query: "resume top" }), aSay(reply)][Math.min(n++, 1)] : aSay(""); })(), research: { search: guideSearch } } as any) as Promise<any>;
-Deno.test("ruling 1 at the turn: the review's leaks are judged and refused; plain instructions on the record stand", async () => {
+Deno.test("advice at the turn: the review's leaks are judged and refused (no exemption; the record is a source)", async () => {
   const cases: [string, any[], { role: string; content: string }[], string, RegExp][] = [
     ["repro: heard", [], [{ role: "user", content: "I heard Citadel pays $10k a week." }], "Citadel pays interns $10k a week, which is the top of the market.", /Citadel|10k/],
     ["repro: guide name", [], [{ role: "user", content: "My internship pays $120 an hour." }], "Goldman Sachs pays $120 an hour to interns.", /Goldman|120/],
@@ -141,10 +136,16 @@ Deno.test("ruling 1 at the turn: the review's leaks are judged and refused; plai
     const t = await adviceTurn([], reply, [{ id: "F-8", kind: "other", text: "GPA: 3.9", name: "GPA", gpa: "3.9", status: "draft", needs_confirmation: true }]);
     ok(!bad.test(t.reply), `${name}: ${t.reply}`);
   }
-  ok((await adviceTurn([], "Put Stripe first.", [{ id: "F-12", kind: "experience", text: "Stripe, Intern (2025)", status: "confirmed" }])).reply.includes("Put Stripe first."), "their own role's employer");
   ok(!(await adviceTurn([], "Put Citadel first.", [{ id: "F-10", kind: "other", text: "My friend at Citadel earns $10k a week", status: "confirmed" }])).reply.includes("Put Citadel first."), "not their employer");
-  for (const good of ["Leave the outdated 3.9 GPA off.", "Put Python and SQL first.", "Move SQL above Python."]) {
-    const t = await adviceTurn([], good, [{ id: "F-8", kind: "other", text: "GPA: 3.9", name: "GPA", gpa: "3.9", status: "draft", needs_confirmation: true }]);
-    ok(t.reply.includes(good), `${good} => ${t.reply}`);
-  }
+});
+Deno.test("advice: the record is one source passage, so a recombination across facts fails layer A, and a draft is never a source", async () => {
+  const seen: string[] = [];
+  const judge = async (cs: any[]) => cs.map((c: any) => { seen.push(c.source); return "yes"; });
+  const t = await agentTurn({ message: "what goes at the top of my resume?", history: [], stores: { profile: { facts: [
+    { id: "F-1", kind: "experience", text: "Robinhood, Software engineering intern", status: "confirmed" }, { id: "F-2", kind: "experience", text: "Stripe, Team lead", status: "confirmed" },
+    { id: "F-3", kind: "other", text: "GPA: 3.9", name: "GPA", gpa: "3.9", status: "draft", needs_confirmation: true }] } }, userId: "u", threadId: "t", now: Date.parse("2026-11-14T00:00:00Z"), knowledge: true,
+    market: { judge }, model: (() => { let n = 0; return async (p: any) => p.tools?.length ? [aUse("research_career_question", { question: "x", kind: "advice", query: "resume top" }), aSay("List Software engineering intern at Stripe. Your Robinhood role was Software engineering intern. Leave the 3.9 GPA in.")][Math.min(n++, 1)] : aSay(""); })(), research: { search: guideSearch } } as any) as any;
+  ok(!/at Stripe/.test(t.reply), `a role joined to another employer never stands, even with a yes judge: ${t.reply}`);
+  ok(!/3\.9/.test(t.reply), `a draft is no source: ${t.reply}`);
+  ok(seen.some((x) => /The person's confirmed record/.test(x) && /experience: Robinhood, Software engineering intern/.test(x)), `record passage seen: ${seen.length} ${t.reply}`);
 });

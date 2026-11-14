@@ -196,13 +196,15 @@ export async function researchCompany(i: { company: string; role?: string | null
   // FAIL_CLOSED.support (support.ts; the same rule as a market answer): with the switch on every drafted line and the reading are
   // decided first, in ONE batched judge call: the model's words only when one sentence of the line's page holds its numbers, units,
   // periods, years and names AND the judge says that sentence states it; else that page sentence in quotation marks; else dropped.
-  // The company's name is lent to no line (D-070's lending is off on this path). What has no quoted form is not shown at all: the
-  // model's "unknowns", a product's angle, and the questions built around a tension the model named.
+  // The company's name is lent to no line (D-070's lending is off on this path). 2026-11-14: what is not a claim about a page (the
+  // questions code builds around a tension, the model's unknowns, and Trainee's labelled reading) is not judged: it keeps its own
+  // code checks below (each side of a question, every word and figure, on its cited pages; an unknown names no figure and no name the
+  // pages or the person do not; the reading's figures on its pages), so it states nothing unchecked. A product's angle is not shown.
   const idx = FAIL_CLOSED.support ? indexPages(pages, abbreviated, [company], { sites: [...(i.plan.sites ?? []), ...(found.sites ?? [])], ask: i.question }) : null;
   const units = new Set((idx?.pages ?? []).flatMap((p) => p.sentences.filter((u) => u.quotable).map((u) => u.text)));
   const pidx = (p: SourcePage | null) => p ? pages.indexOf(p) : -1;
   const FRAME = {}, sup = new Map<unknown, Verdict>();
-  let judgeDown = false;
+  let judgeDown = false, refused = 0;
   if (idx) {
     const keys: unknown[] = [], wants: Wanted[] = [];
     for (const [k, x] of [...arr(d.business, 6), ...arr(d.developments, 5), ...arr(d.competitors, 4), ...arr(d.role, 5)].entries()) {
@@ -214,6 +216,7 @@ export async function researchCompany(i: { company: string; role?: string | null
     if (d.frame) { const ks = arr(d.frame.urls, 4).map((u) => pidx(pageOf(u))).filter((k) => k >= 0); keys.push(FRAME); wants.push({ claim: squash(d.frame.text), pages: ks.length ? ks : [-1] }); }
     const vs = await decide(wants, idx, i.deps.judge);
     judgeDown = vs.failed;
+    refused = vs.filter((v) => v.how === "drop").length; // drafted lines the judge (or layer A) refused: what "could not quote" counts
     vs.forEach((v, k) => { if (!sup.has(keys[k])) sup.set(keys[k], v); });
     if (vs.unasked) notes.push(`${vs.unasked} drafted line(s) could not be checked this turn and were left out: say that not everything found could be checked`);
   }
@@ -250,6 +253,9 @@ export async function researchCompany(i: { company: string; role?: string | null
     if (!m.ok) return drop(`meaning_${m.measure}`, "developments", x);
     return { ...kept(f), date: showDay(day), measure: m.measure };
   }).filter(Boolean) as Development[] : [];
+  // 2026-11-14 (WO-H/2): developments are one line per page unit too ("Stripe revenue was $1.9 trillion" stands as the page's own
+  // volume sentence, which another drafted line already is).
+  if (idx) for (let k = developments.length - 1; k >= 0; k--) if (developments.findIndex((b) => b.text === developments[k].text) < k) developments.splice(k, 1);
   const competitors = on("competitors") ? arr(d.competitors, 4).map((x) => {
     const name = squash(x?.name).slice(0, 60), f = fact(x, "competitors");
     if (!f) return null;
@@ -275,7 +281,7 @@ export async function researchCompany(i: { company: string; role?: string | null
   }
   // A question is code's sentence around a verified tension: the area agrees with its quote on a cited page; A and B are each stated
   // on the cited pages (every content word, every figure); A and B differ. Nothing in a question is the model's own claim.
-  const questions: Question[] = on("questions") && !idx ? arr(d.tensions, Math.min(6, Math.max(focus === "questions" ? 6 : 5, wanted ?? 0))).map((x) => {
+  const questions: Question[] = on("questions") ? arr(d.tensions, Math.min(6, Math.max(focus === "questions" ? 6 : 5, wanted ?? 0))).map((x) => {
     const area = squash(x?.area).replace(/[.?!]+$/, ""), a = squash(x?.a).replace(/[.?!]+$/, ""), b = squash(x?.b).replace(/[.?!]+$/, ""), aq = squash(x?.area_quote);
     const ps = arr(x?.urls, 4).map(pageOf).filter(Boolean) as SourcePage[];
     if (!ps.length || ![area, a, b].every((s) => s && s.length <= 120 && linkFree(s))) return drop("tension_malformed", "questions", { text: `${area} | ${a} | ${b}`, quote: aq });
@@ -294,11 +300,19 @@ export async function researchCompany(i: { company: string; role?: string | null
   const questions_n = () => questions.length;
   // Trainee's reading: every page it names passed the guard, and every figure in it is on one of them.
   let frame: Cited | null = null;
+  // 2026-11-14: with the check on, a reading the judge does not find stated is still Trainee's labelled reading when it passes the
+  // reading's own code guard (as with the check off): every figure on the pages it names, an initiative they state, most of its words
+  // on them. It is shown labelled as the reading, never as a page's statement.
+  const labelledReading = (t: string) => {
+    const ps = arr(d.frame?.urls, 4).map(pageOf).filter(Boolean) as SourcePage[], nums = ps.flatMap((p) => figuresIn(p.text.slice(0, 60000)));
+    if (!(t && t.length <= 300 && linkFree(t) && ps.length && figuresIn(t).every((n) => nums.some((y) => numEq(y, n))) && initiativeStated(t, ps.map((p) => p.text.slice(0, 60000)).join("\n")) && wordsOnPages(t, ps) >= ON_PAGES_SHARE)) return false;
+    frame = { text: t, cite: [...new Set(ps.map(num))] }; auditLine(audit, { ok: true }, "frame"); return true;
+  };
   if (idx && focus === "all" && d.frame) {
     const t = squash(d.frame.text), v = sup.get(FRAME);
     if (t && t.length <= 300 && linkFree(t) && v && v.how !== "drop" && linkFree(v.sentence)) {
       frame = { text: v.how === "model" && wordsOnPages(t, [pages[v.page]]) >= ON_PAGES_SHARE ? t : quoteOf(v), cite: [num(pages[v.page])] }; auditLine(audit, { ok: true }, "frame");
-    } else drop("frame_unsupported", "frame", { text: t });
+    } else if (!labelledReading(t)) drop("frame_unsupported", "frame", { text: t });
   } else if (focus === "all" && d.frame) {
     const t = squash(d.frame.text), ps = arr(d.frame.urls, 4).map(pageOf).filter(Boolean) as SourcePage[];
     const nums = ps.flatMap((p) => figuresIn(p.text.slice(0, 60000)));
@@ -312,7 +326,7 @@ export async function researchCompany(i: { company: string; role?: string | null
   const pageText = cited.map((p) => p.text.slice(0, 60000)).join("\n");
   const cited0 = (n: number) => (cited[n - 1]?.text ?? "").slice(0, 60000);
   const known = [company, role ?? ""].join(" ");
-  const unknowns = focus === "all" && !idx ? arr(d.unknowns, 4).map(squash).filter((u) => {
+  const unknowns = focus === "all" ? arr(d.unknowns, 4).map(squash).filter((u) => {
     const ok = u && u.length <= 200 && linkFree(u) && !numbersIn(u).length && specifics(u).names.every((n) => word(n, pageText) || word(n, known));
     if (!ok && u) drop("unknown_names_or_figures", "unknowns", { text: u });
     return ok;
@@ -338,7 +352,7 @@ export async function researchCompany(i: { company: string; role?: string | null
   // D-073: every kept, cited line counts toward a brief, the frame (Trainee's reading, checked above) included.
   const any = business.length + developments.length + competitors.length + role_asks.length + questions.length + (frame ? 1 : 0);
   // Round 7: the judge could not answer: the blocker says so (the pages are listed after it), never that the pages said nothing.
-  if (!any) { const blocker = idx && judgeDown ? `${pages.length} page(s) about ${company} were opened, but I couldn't check what they say just now; I can check them again if you ask` : `${pages.length} page(s) about ${company} were opened, but none stated anything the brief could quote`; const checked = pages.slice(0, 4).map((p, k) => ({ n: k + 1, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || hostOf(p.url), url: p.url, fetched_at: new Date(p.fetchedAt).toISOString() }));
+  if (!any) { const blocker = idx && judgeDown ? `${pages.length} page(s) about ${company} were opened, but I couldn't check what they say just now; I can check them again if you ask` : idx && !refused ? `${pages.length} page(s) about ${company} were opened, but nothing was drafted from them that the brief could check` : `${pages.length} page(s) about ${company} were opened, but none stated anything the brief could quote`; const checked = pages.slice(0, 4).map((p, k) => ({ n: k + 1, title: squash(p.title).replace(URL_IN_TEXT, "").slice(0, 120) || hostOf(p.url), url: p.url, fetched_at: new Date(p.fetchedAt).toISOString() }));
     return { kind: "company", status: "no_sources", ask, notes, unread, blocker, audit, checked, note: `Research found nothing it could stand on: ${blocker}. Say that plainly; do not guess. Write no link: code lists the pages that were checked.${roleAsk}` }; }
   // The company's own site: as the turn named it, or as a free source found it (Wikidata P856, the postings' own host).
   const siteHosts = new Set([...(i.plan.sites ?? []), ...(found.sites ?? [])].map((s) => hostOf(`https://${String(s).replace(/^https?:\/\//, "")}`)));

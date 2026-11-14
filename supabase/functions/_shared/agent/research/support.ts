@@ -370,7 +370,7 @@ export function indexPages(pages: { text: string; title?: string; url?: string; 
 type Found = { sentence: string; page: number; unit: Unit };
 // Layer A: the one unit (of the pages named, by index; all when none is named) that holds every hard part of the claim in its role;
 // among several, the one that shares the most words with it. null: no single unit does.
-export function findSupport(claim: string, idx: PageIndex, only?: number[]): Found | null {
+export function findSupport(claim: string, idx: PageIndex, only?: number[], unitText?: string): Found | null {
   if (!bare(claim) || /[?]/.test(bare(claim))) return null;
   const h = hardParts(claim, idx.read), want = contentWords(idx.read(bare(readAlike(claim))));
   const roles = [...new Set((bare(claim).match(/(?<![\p{L}])(?:intern(?:s|ship|ships)?|engineers?|analysts?|developers?|traders?|scientists?|researchers?|contractors?|graduates?|new grads?|full-time hires?|employees?|staff)(?![\p{L}])/giu) ?? []).map((w) => w.toLowerCase().replace(/(?:ships?|s)$/, "")))].map((w) => new RegExp(`(?<![\\p{L}])${w.replace(/\s+/g, "[\\s-]+")}`, "iu"));
@@ -379,6 +379,7 @@ export function findSupport(claim: string, idx: PageIndex, only?: number[]): Fou
   // Round 5 (review of round 4: a title "Myth: Citadel interns earn $5,000 a week" lent its figure to a unit that gave $2,000): every
   // figure, date and name of the claim is in the supporting unit itself; the page's title lends nothing but the owner's name.
   for (const k of ks) for (const s of idx.pages[k].sentences) {
+    if (unitText !== undefined && s.text !== unitText) continue;
     if (!h.numbers.every((a) => s.hard.numbers.includes(a)) || !h.quant.every((q) => s.hard.quant.includes(q)) || !namesOk(h, s)) continue;
     // Round 5: a year the unit puts on its figures is the claim's too ("earned $5,000 a week in 2019" is not "earn $5,000 a week"),
     // and each of the claim's figures is not, on the unit, another name's (the name written nearest before it).
@@ -478,11 +479,17 @@ const SPENT = new WeakMap<object, number>();
 // `unasked` on the result: how many items had a page unit but were never put to the judge (the cap, the time), and so were dropped.
 export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudge | null | undefined, o: { callMs?: number; budgetMs?: number } = {}): Promise<Verdict[] & { unasked: number; failed: boolean }> {
   const out: Verdict[] = items.map(() => ({ how: "drop" as const }));
-  const found: (Found | null)[] = [], first: { k: number; c: SupportClaim; quote: boolean }[] = [];
+  const found: (Found | null)[] = [], alt: (Found | null)[] = [], first: { k: number; c: SupportClaim; quote: boolean }[] = [];
   const askWords = contentWords(idx.read(idx.ask));
   for (const [k, it] of items.entries()) {
-    const f = it.unit ? sentenceHolding(it.claim, idx, it.pages) : findSupport(it.claim, idx, it.pages) ?? (it.fallback ? sentenceHolding(it.fallback, idx, it.pages) : null);
+    // 2026-11-14 (F2-sources: a role line was matched to the posting's header, the judge refused the header, and the line was dropped
+    // though the sentence the draft cited states it): the unit holding the draft's own quote is tried first, when layer A passes the
+    // claim on it; then the unit layer A finds; then the quote's unit as a quote.
+    const q = !it.unit && it.fallback ? sentenceHolding(it.fallback, idx, it.pages) : null;
+    const f = it.unit ? sentenceHolding(it.claim, idx, it.pages) : (q ? findSupport(it.claim, idx, it.pages, q.unit.text) : null) ?? findSupport(it.claim, idx, it.pages) ?? q;
     found[k] = f;
+    // When the claim is refused, the page's own sentence offered in its place is the one the draft cited, if there is one.
+    alt[k] = q && f && q.unit.text !== f.unit.text && q.unit.quotable ? q : null;
     if (!f) continue;
     const judged = it.judged ?? it.claim, asClaim = !it.unit && !!findSupport(it.claim, idx, it.pages) && !echoes(judged, f.sentence) && safeToShow(bare(judged));
     if (asClaim) first.push({ k, c: { claim: bare(judged), source: f.unit.passage }, quote: false });
@@ -518,13 +525,13 @@ export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudg
     got.forEach((y, j) => { if (y) for (const k of at[j]) yes.add(k); });
     return yes;
   };
-  const quoteV = (k: number): Verdict => { const f = found[k]!; return { how: "quote", sentence: f.sentence, page: f.page, ...(f.unit.lent && f.unit.label ? { label: f.unit.label } : {}) }; };
-  const settle = (x: { k: number; quote: boolean }, yes: boolean) => { const f = found[x.k]!; if (yes) out[x.k] = x.quote ? quoteV(x.k) : { how: "model", sentence: f.sentence, page: f.page }; };
+  const quoteV = (k: number, g?: Found): Verdict => { const f = g ?? found[k]!; return { how: "quote", sentence: f.sentence, page: f.page, ...(f.unit.lent && f.unit.label ? { label: f.unit.label } : {}) }; };
+  const settle = (x: { k: number; quote: boolean; g?: Found }, yes: boolean) => { const f = found[x.k]!; if (yes) out[x.k] = x.quote ? quoteV(x.k, x.g) : { how: "model", sentence: f.sentence, page: f.page }; };
   const one = order(first), y1 = await ask(one), got1 = new Set(asked);
   for (const x of one) if (got1.has(x.k)) settle(x, y1.has(x.k));
   // The second call: first, for each claim the first refused, whether the page's own unit may stand in its place; then the claims
   // (and quote candidates) the first call had no room for.
-  const again = [...one.filter((x) => got1.has(x.k) && !y1.has(x.k) && !x.quote && found[x.k]!.unit.quotable).map((x) => ({ k: x.k, c: { claim: quoteClaim(found[x.k]!.sentence, idx, found[x.k]!.unit.lent), source: found[x.k]!.unit.passage }, quote: true })), ...one.filter((x) => !got1.has(x.k))];
+  const again = [...one.filter((x) => got1.has(x.k) && !y1.has(x.k) && !x.quote && (alt[x.k] ?? found[x.k]!).unit.quotable).map((x) => { const g = alt[x.k] ?? found[x.k]!; return { k: x.k, c: { claim: quoteClaim(g.sentence, idx, g.unit.lent), source: g.unit.passage }, quote: true, g }; }), ...one.filter((x) => !got1.has(x.k))];
   asked.clear();
   const y2 = await ask(again), got2 = new Set(asked);
   for (const x of again) if (got2.has(x.k)) settle(x, y2.has(x.k));

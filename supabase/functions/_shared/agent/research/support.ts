@@ -600,9 +600,10 @@ export async function keepSupported(reply: string, sources: (string | { text: st
       "The person's confirmed record (each line is one fact about them; never join two lines into one fact):", ...recLines.map((l) => `- ${l}`)].join("\n"), PASSAGE_MAX);
     const tryJoint = wants.map((w, k) => {
       if (withAlso[k] || vs[k].how !== "drop" || !rec) return false;
-      const h = hardParts(w.claim, o.read), vals = new Set(rec.hard.numbers.map((n) => n.split("|")[4]));
+      const h = hardParts(w.claim, o.read), vals = new Set([...rec.hard.numbers, ...hardParts(gText, o.read).numbers].map((n) => n.split("|")[4]));
       if (!h.numbers.every((a) => vals.has(a.split("|")[4]))) return false;
-      if (!h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).filter((r) => r.length).every((r) => r.every((x) => rec.lower.has(x) || nameRe(x).test(rec.text)))) return false;
+      // (live-10 C4: a name the guide gives, "GitHub", "Education", is the guide's; layer A reads the joint unit, guide and record)
+      if (!h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).filter((r) => r.length).every((r) => r.every((x) => rec.lower.has(x) || nameRe(x).test(rec.text) || nameRe(x).test(gText)))) return false;
       // (layer A as everywhere: names and figures, with their units, periods and years; wording is the judge's to read)
       return h.years.every((y) => vals.has(y) || rec.hard.years.includes(y));
     });

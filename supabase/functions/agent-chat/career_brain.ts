@@ -417,11 +417,23 @@ export async function agentTurn(o: {
       // "If Jane Street matched it, their pay would be $95 an hour." said after a Citadel line is not Citadel's pay.
       const said = new Set(o.message.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}&'-]*/gu) ?? []);
       const about = shownPay.filter((l) => (l.text.match(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}\p{N}&'-]*/gu) ?? []).slice(/^\p{Lu}\p{Ll}*\s+\p{Ll}/u.test(l.text) ? 1 : 0).some((w) => said.has(w.toLowerCase().replace(/'s$/, ""))));
-      const k = await keepSupported(result.reply, [...recs.map((p: any) => ({ text: recLine(p), title: "Posting record" })), ...about.map((l) => ({ text: l.text, title: "Pay shown earlier in this conversation" })), ...readSources], { judge, pure, own: [...about.map((l) => l.text), ...codeLines], ask: o.message });
+      // Live-10 (C1, C11): a pay turn's other sentences are not pay claims. They are checked too, but against what this turn stands
+      // on: each posting's own record (its title, place, fit and verdict as the tool returned them), what a tool read from a posting
+      // (its requirements), and the person's confirmed record (facts about them only, one line each). A pay figure still stands only
+      // on a unit that gives it (layer A: the figure and its names in one unit).
+      const postingLine = (p: any) => [[p?.company, p?.title].map((x: any) => String(x ?? "").trim()).filter(Boolean).join(", "), p?.location ? `in ${String(p.location).trim()}` : "", Number.isFinite(p?.fit) ? `fit ${p.fit}` : "", typeof p?.verdict === "string" ? p.verdict : typeof p?.band === "string" ? p.band : ""].filter(Boolean).join(", ");
+      const postingsAll = [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])];
+      const recordLines = hypo ? [] : ownerConfirmedFacts((o.stores as any)?.profile?.facts ?? []).filter((f: any) => f?.kind !== "other" || /^gpa$/i.test(String(f?.name ?? ""))).map((f: any) => `${String(f.kind ?? "fact")}: ${String(f.text ?? "").trim()}`).filter((x: string) => x.length > 8);
+      const k = await keepSupported(result.reply, [...recs.map((p: any) => ({ text: recLine(p), title: "Posting record" })), ...postingsAll.map((p: any) => ({ text: postingLine(p), title: "Posting record" })).filter((x) => x.text),
+        ...about.map((l) => ({ text: l.text, title: "Pay shown earlier in this conversation" })), ...readSources, ...(recordLines.length ? [{ text: recordLines.join("\n"), title: "The person's confirmed record:", one: true }] : [])],
+        { judge, pure, own: [...about.map((l) => l.text), ...codeLines], ask: o.message, instructions: true });
       const named = recordsNamed(o.message, recs);
       const mine = [...new Set((named.length ? named : recs.length === 1 ? recs : []).map(recLine))].filter((l) => !numbersIn(l).every((n) => numbersIn(k.text).some((x) => numEq(x, n))));
       result = { ...result, reply: !k.removed.length ? k.text : [k.text, ...(mine.length ? mine : letters(k.text) ? [] : about.length ? [...new Set(about.map((l) => l.text))] : [NOT_CONFIRMED])].filter(Boolean).join("\n") };
     }
+    // Live-10 C1: a File this turn made is code's: its link always stays, whatever the check removed around it.
+    const fl = ((result as any).fileLinks ?? []) as any[];
+    for (const l of fl) { const u = typeof l === "string" ? l : l?.url; if (u && result.reply && !result.reply.includes(u)) result = { ...result, reply: `${result.reply}\n${u}` }; }
   }
   if (result.reply && result.stopped === "final" && !result.show) result = { ...result, reply: payWithSource(result.reply, [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])], shownPayPlaces(o.message, hypo ? [] : o.history)) };
   // D-067 (live-6 C9: research_market ran and the person got an empty message; D-024): the last line of every brain turn. An empty

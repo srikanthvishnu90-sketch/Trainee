@@ -246,7 +246,7 @@ export async function agentTurn(o: {
   const editTurn = EDIT_ASK.test(String(o.message ?? "")), editStatus = editTurn && statusQuestion(o.message);
   let codeRan = false;
   // A turn that stopped unfinished still gets the read when they asked: code's statement then answers it.
-  if (!appHypo && (!editTurn || editStatus) && lookTool && result.reply && !lookupOf(result.tool_calls ?? []).tried && ((result.stopped === "final" || result.stopped === "incomplete_reply") && statusQuestion(o.message) || (result.stopped === "final" && !result.show && statusLike(result.reply)))) {
+  if (!appHypo && (!editTurn || editStatus) && lookTool && result.reply && (({ tried, own }) => !tried || !!own)(lookupOf(result.tool_calls ?? [])) && ((result.stopped === "final" || result.stopped === "incomplete_reply") && statusQuestion(o.message) || (result.stopped === "final" && !result.show && statusLike(result.reply)))) {
     codeRan = true;
     const out: any = await Promise.resolve().then(() => lookTool.run({}, ctx)).catch(() => null);
     result = { ...result, tool_calls: [...(result.tool_calls ?? []), { name: lookTool.name, ok: !!out, effect: "read" as const, ...(out ? {} : { error: "the record could not be read" }) }] };
@@ -431,8 +431,8 @@ export async function agentTurn(o: {
   // Review of #785 (owner must-fix; D-024): the last word on their applications is code's (applicationsEnforced): after a lookup
   // the status is stated by code from its result and the model's own status sentences go; with none, a denial is held. A payload
   // being shown is never touched: what code states goes after it.
-  const looked = lookupOf(result.tool_calls ?? [], (ctx.turn as any)?.record);
-  const editLook = lookupOf(result.tool_calls ?? [], (ctx.turn as any)?.record);
+  const looked = lookupOf(result.tool_calls ?? [], (ctx.turn as any)?.record, (ctx.turn as any)?.ownRecord);
+  const editLook = lookupOf(result.tool_calls ?? [], (ctx.turn as any)?.record, (ctx.turn as any)?.ownRecord);
   if (editTurn && result.reply && !result.show && (editStatus || saysNoApplications(result.reply)) && !result.reply.includes(coverageLine(editLook))) result = { ...result, reply: `${result.reply.trimEnd()}\n\n${coverageLine(editLook)}` };
   else if (!appHypo && !editTurn && result.reply) {
     const held = result.show ? (looked.tried && statusQuestion(o.message) ? `${result.reply.trimEnd()}\n\n${coverageLine(looked)}` : result.reply) : applicationsEnforced(result.reply, looked, { message: o.message, codeRan });
@@ -666,7 +666,7 @@ export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts:
     // not applied, or have no applications, with no such lookup this turn is held: the tool is asked for when it was not tried,
     // and when it was tried and failed the reply is asked again with that fact (agentTurn then enforces it in code).
     const none = (o.mail || o.noneClaim) && saysNoApplications(reply), look = lookupOf(calls, o.record?.());
-    if ((o.history || (none && o.mail)) && !look.tried) return "They asked about their own applications and you did not read their record. Call read_application_mail now and answer from what it returns, saying what it covered.";
+    if ((o.history || (none && o.mail)) && (!look.tried || look.own)) return "They asked about their own applications and you did not read their record. Call read_application_mail now and answer from what it returns, saying what it covered.";
     if (none && !look.ok && look.status !== "unknown") return look.tried
       ? `Your lookup of their applications ${look.what.length ? `was incomplete: it could not read ${look.what.join("; ")}` : "failed"}. Your draft says they have not applied or have no applications, and nothing verified that. Do not say it, and give no total. Say plainly what could not be read just now, that whether they applied is unconfirmed until it can be, and anything the lookup did find as "at least".`
       : "Your draft says they have not applied or have no applications, and their application record was not read this turn. Do not say it. Say that you have not checked their applications, so it is unconfirmed.";
@@ -706,9 +706,22 @@ export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts:
 const LOOKUP_TOOLS = ["read_application_mail", "export_tracker"];
 type Researched = { company: string; role: string | null };
 type LookRecord = { status: string; could_not_read: string[]; read?: string[]; found?: string[]; nomail?: boolean; connect?: string | null; researched?: Researched[]; changes?: string[] };
-export interface Look { tried: boolean; ok: boolean; status: "none" | "failed" | "partial" | "complete" | "unknown"; what: string[]; read: string[]; found: string[]; nomail?: boolean; connect?: string | null; researched?: Researched[]; changes?: string[] }
-export function lookupOf(calls: { name: string; ok: boolean }[], record?: LookRecord | null): Look {
+export interface Look { tried: boolean; ok: boolean; status: "none" | "failed" | "partial" | "complete" | "unknown"; what: string[]; read: string[]; found: string[]; nomail?: boolean; connect?: string | null; researched?: Researched[]; changes?: string[]; own?: boolean }
+// S3 eval (after #832): list_applications reads Trainee's own record (the apply queue, the tracker, what they told Trainee) and
+// no email. With no mail lookup this turn it is a lookup of that record only (`own`): its answer stands with the line that the
+// email was not checked; failed, or with a store it could not read (loop.ts turn.ownRecord), it backs nothing. A mail lookup in
+// the same turn decides. It never counts as a mail check (agentTurn still runs read_application_mail, processCheck still asks).
+const OWN_TOOLS = ["list_applications"];
+export const OWN_RECORD_NOTE = "That is Trainee's own record; your email was not checked for this answer.";
+export function lookupOf(calls: { name: string; ok: boolean }[], record?: LookRecord | null, ownRecord?: { unreadable?: string[]; found?: string[] } | null): Look {
   const mine = calls.filter((c) => LOOKUP_TOOLS.includes(c.name)), ran = mine.some((c) => c.ok);
+  const own = mine.length ? [] : calls.filter((c) => OWN_TOOLS.includes(c.name));
+  if (own.length) {
+    // What it found is code's to state (ownRecord.found, from its rows); a lookup that left no record of what it read backs nothing.
+    const read = own.some((c) => c.ok) && !!ownRecord, unread = read ? [...new Set(ownRecord?.unreadable ?? [])] : [];
+    const st = !own.some((c) => c.ok) ? "failed" : !ownRecord ? "unknown" : unread.length ? "partial" : "complete";
+    return { tried: true, ok: st === "complete", status: st, what: unread, read: read ? ["Trainee's saved record"] : [], found: read ? ownRecord?.found ?? [] : [], nomail: false, connect: null, changes: [], researched: [], own: true };
+  }
   const status = !mine.length ? "none" : !ran ? "failed" : !record ? "unknown" : record.status === "complete" || record.status === "partial" ? record.status : "failed";
   return { tried: mine.length > 0, ok: status === "complete", status, what: ran && record && status !== "complete" ? record.could_not_read : [], read: ran ? record?.read ?? [] : [], found: ran ? record?.found ?? [] : [], nomail: ran && !!record?.nomail, connect: ran ? record?.connect ?? null : null, changes: ran ? record?.changes ?? [] : [], researched: ran ? record?.researched ?? [] : [] };
 }
@@ -791,6 +804,12 @@ export function coverageLine(look: Look): string {
 }
 function coverageCore(look: Look): string {
   if (!look.tried) return NOT_CHECKED;
+  // Trainee's own record only (list_applications): what its rows hold, and always that the email was not checked.
+  if (look.own && (look.status === "complete" || look.status === "partial")) {
+    const n = look.found.filter((f) => !/^and \d+ more$/.test(f)).length + Number(/^and (\d+) more$/.exec(look.found.at(-1) ?? "")?.[1] ?? 0);
+    if (look.status === "partial") return `I read Trainee's saved record but couldn't read ${listed(look.what)}, so whether you've applied is unconfirmed.${look.found.length ? ` Found so far, at least: ${look.found.join("; ")}.` : ""} ${OWN_RECORD_NOTE}`;
+    return `${n ? `Trainee's saved record shows ${n} application${n === 1 ? "" : "s"}: ${look.found.join("; ")}.` : "Trainee's saved record shows no applications of yours."} ${OWN_RECORD_NOTE}`;
+  }
   if (look.status === "unknown" || (look.status === "failed" && !look.what.length)) return NOT_READ;
   const n = look.found.filter((f) => !/^and \d+ more$/.test(f)).length + Number(/^and (\d+) more$/.exec(look.found.at(-1) ?? "")?.[1] ?? 0);
   if (look.status === "complete") {
@@ -850,6 +869,10 @@ export function heldReply(reply: string, look: Look, strict = true): string {
 // it read backs nothing: a denial after it is held.
 export function applicationsEnforced(reply: string, look: Look, o: { message: string; codeRan?: boolean }): string {
   const asked = statusQuestion(o.message), speaks = statusLike(reply), strict = asked || (look.tried && !o.codeRan);
+  // Review of #845: Trainee's own record (list_applications) gets the same claim check as any lookup: when the turn is about their
+  // applications, the status is code's statement from its rows, with the line that the email was not checked (code's, always), and
+  // no sentence of the model's about status, mail or Gmail stays. A turn that only used the list for something else is untouched.
+  if (look.own) return asked || speaks || saysNoApplications(reply) ? heldReply(reply, look, true) : reply;
   if (look.status === "none" || look.status === "unknown") return (look.status === "none" && asked) || saysNoApplications(reply) ? heldReply(reply, look, asked || look.status === "unknown") : reply;
   if (!asked && !speaks && o.codeRan) return reply;
   return heldReply(reply, look, strict);

@@ -82,20 +82,28 @@ const ASSERTS_IN_Q = /\b(?:did you (?:know|hear|see|read)|have you (?:heard|seen
 // (re-review of 940195e08) A question put to the person ("are you …?") is exempt only with no figure, no date and no capitalised name
 // but names from their own record or the ask (`allowed`), and no report of a world event ("Stripe's layoffs last month").
 const PAST_EVENT = /(?<![\p{L}])(?:last (?:week|month|year|quarter)|yesterday|ago|recently|this (?:week|month)|just (?:announced|laid|cut|closed|froze)|laid off|layoffs?|announced|reported|was (?:sued|fined|acquired)|went (?:bankrupt|public))(?![\p{L}])/iu;
-export function personQuestion(s: string, allowed = ""): boolean {
+// Final review of 5804c92a4: fail closed and small. A question to the person goes unjudged only when ALL hold: (a) one bare clause
+// (no comma, no ";", and after its first word none of where/which/that/who/given/since/now that/even though/though/although/
+// because/after/before/while/if/when/with/despite/except/unless/as); (b) no figure, date or period word; (c) no capitalised name but a
+// place inside an eligibility or preference template ("authorized to work in", "open to relocating to", "willing to work in", "open
+// to working in"), an employer never; (d) at most 16 words. Everything else is judged. (`allowed` is kept for callers; it lends nothing.)
+const Q_BANNED = /(?<![\p{L}])(?:where|which|that|who|given|since|now that|even though|though|although|because|after|before|while|if|when|with|despite|except|unless|as)(?![\p{L}])/iu;
+const Q_PERIOD = /(?<![\p{L}])(?:hours?|hourly|days?|daily|weeks?|weekly|months?|monthly|years?|yearly|annual(?:ly)?|quarters?|today|tomorrow|tonight|yesterday|ago|recently|soon|now|later|summer|fall|autumn|winter|spring|season)(?![\p{L}])/iu;
+const Q_PLACE_TEMPLATE = /(?<![\p{L}])(?:authori[sz]ed to work in|open to relocating to|willing to work in|open to working in)\s+((?:the\s+)?\p{Lu}[\p{L}.'-]*(?:\s+\p{Lu}[\p{L}.'-]*){0,2})/u;
+const Q_OPENERS = /^(?:which|what|where|when|who|how|should|would|could|can|do|does|did|is|are|want|shall|will|have|has|and|so)$/i;
+export function personQuestion(s: string, _allowed = ""): boolean {
+  void _allowed;
   const b = bare(String(s ?? "")).replace(/[’‘]/g, "'").trim();
-  if (/\d/.test(b) || ASSERTS_IN_Q.test(b) || /["\u201c\u201d]/.test(b) || MONTH_OR_DAY.test(b) || PAST_EVENT.test(b)) return false;
-  const h = hardParts(b);
-  const names = h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).filter((r) => r.length).map((r) => r.join(" "));
-  // (a place may be named when the question is only about the person's own eligibility or preference: "authorized to work in the
-  // U.S.", "open to relocating to New York", "willing to work in Texas"; an employer, a figure, a date or an event still is judged)
-  const ELIGIBLE = /\b(?:authori[sz]ed to work in|eligible to work in|legally (?:able|allowed) to work in|open to (?:relocating|moving|working) (?:to|in)|willing to (?:relocate|move|work) (?:to|in)|able to (?:relocate|move|work) (?:to|in)|okay (?:relocating|moving|working) (?:to|in)|prefer (?:to )?(?:work|live) in)\s+((?:the\s+)?[\p{Lu}][\p{L}.'-]*(?:\s+[\p{Lu}][\p{L}.'-]*){0,2})/iu;
-  const place = ASK_THEM.test(b) ? ELIGIBLE.exec(b)?.[1]?.replace(/^the\s+/i, "").toLowerCase().replace(/[.']/g, "") : null;
-  const isPlaceName = (n: string) => !!place && place.replace(/\s+/g, " ").includes(n.replace(/[.']/g, "").replace(/\s+/g, " "));
-  if (!names.every((n) => n && (nameFoundIn(n, String(allowed ?? "")) || isPlaceName(n)))) return false;
-  if (ASK_THEM.test(b)) return true;
-  if (!/\?\s*$/.test(b)) return false;
-  return !(/^\p{Lu}/u.test(b) && h.first && !/^(?:which|what|where|when|who|how|should|would|could|can|do|does|did|is|are|want|shall|will|have|has)$/i.test(h.first));
+  if (!b || /["\u201c\u201d]/.test(b) || /[,;:]/.test(b.replace(/[?.]+$/, ""))) return false;
+  if (!/\?\s*$/.test(b) && !ASK_THEM.test(b)) return false;
+  const words = b.replace(/[?.!]+$/, "").split(/\s+/).filter(Boolean);
+  if (!words.length || words.length > 16 || !Q_OPENERS.test(words[0].replace(/'.*$/, ""))) return false;
+  if (Q_BANNED.test(words.slice(1).join(" "))) return false;
+  if (/\d/.test(b) || MONTH_OR_DAY.test(b) || Q_PERIOD.test(b) || ASSERTS_IN_Q.test(b) || PAST_EVENT.test(b) || /(?<![\p{L}])aware(?![\p{L}])/iu.test(b)) return false;
+  const tpl = Q_PLACE_TEMPLATE.exec(b);
+  const rest = tpl ? b.replace(tpl[1], " ") : b;
+  const h = hardParts(rest);
+  return !h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).some((r) => r.length) && !/(?<!^)(?<![.?!]\s)\p{Lu}/u.test(rest.slice(1).replace(/\bI\b/g, "i"));
 }
 // Live-12 (item 5): a sentence of joined clauses ("…; …", "…, and …", "…, so …") is read clause by clause.
 export const clausesOf = (s: string) => bare(s).replace(/[.!?]+$/, "").split(/;\s+|,\s+(?:and|so|but)\s+/u).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x));

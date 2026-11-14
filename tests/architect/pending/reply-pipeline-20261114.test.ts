@@ -163,7 +163,14 @@ Deno.test("re-review 1: another employer's 'X, ST' is an owner, never a place (l
 Deno.test("re-review 2: a question to the person naming a world event, or a name not theirs, is judged", async () => {
   ok(!personQuestion("Are you okay with Stripe's layoffs last month?"));
   ok(!personQuestion("Are you okay with the layoffs last month?"));
-  ok(personQuestion("Do you want me to tailor it for Stripe?", "what does stripe pay"));
+  ok(!personQuestion("Do you want me to tailor it for Stripe?", "what does stripe pay"), "an employer's name is always judged");
   const v = await verifyTagged("Are you okay with Stripe's layoffs last month?", startup(), { judge: async (cs) => cs.map(() => "no" as const) });
   eq(v.text, "");
+});
+
+Deno.test("final review: the question exemption fails closed and small", () => {
+  for (const q of ["Are you aware Stripe is freezing hiring?", "Are you okay with the pay cut Stripe made?", "Are you open to relocating to New York, where interns earn far more?",
+    "Are you authorized to work in the United States, which Stripe no longer sponsors?", "Did you know Stripe stopped sponsoring visas?", "Are you okay with Stripe's layoffs last month?",
+    "Is Stripe still hiring interns?", "Do you want me to tailor it for Stripe?"]) ok(!personQuestion(q, "stripe"), q);
+  for (const q of ["Are you authorized to work in the U.S. without sponsorship?", "Are you open to relocating to New York?", "Which role is this for?", "Do you want me to draft it?"]) ok(personQuestion(q), q);
 });

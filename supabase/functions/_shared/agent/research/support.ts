@@ -543,13 +543,18 @@ export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudg
 // sentence stands when it is one of code's own lines (`own`: word for word), a could-not-confirm sentence in the closed form
 // (`pure`), or the judge says yes to it (as a claim in its own words, or as a source's own unit said again); it is removed otherwise
 // (these paths have no numbered source to quote). A line that is only a link is code's, and stays.
-// Architect ruling 2026-11-14: on an advice turn, a sentence is advice of the person's own (outside the page judge) when every figure
+// Architect ruling 2026-11-14: on an advice turn, a sentence is advice of the person's own (outside the page judge) when it carries
+// something of their own record, every figure
 // in it is in their confirmed record or their own words, and every name in it is there or in the guide the answer cites. Anything
 // else (an employer, a pay figure, a market) is judged as any claim is.
 export function adviceOfTheirOwn(personText: string, guideText: string): (s: string) => boolean {
   const has = (hay: string, n: string) => new RegExp(`(?<![\\p{L}\\p{N}])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(hay);
   const theirs = numbersIn(personText);
-  return (s: string) => numbersIn(s).every((n) => theirs.some((y) => numEq(y, n))) && specifics(s).names.every((n) => has(personText, n) || has(guideText, n));
+  // ... and it is about their own materials: it carries at least one figure or name of their own record or words ("Put your photo
+  // at the top." or "Recruiters reject two-page resumes." is general advice or a claim about the world: judged).
+  return (s: string) => { const ns = numbersIn(s), names = specifics(s).names;
+    return ns.every((n) => theirs.some((y) => numEq(y, n))) && names.every((n) => has(personText, n) || has(guideText, n))
+      && (ns.length > 0 || names.some((n) => has(personText, n))); };
 }
 export async function keepSupported(reply: string, sources: (string | { text: string; title?: string })[], o: { judge?: SupportJudge | null; read?: (s: string) => string; pure?: (s: string) => boolean; own?: string[]; advice?: (s: string) => boolean; subjects?: string[]; ask?: string } = {}): Promise<{ text: string; removed: string[] }> {
   const idx = indexPages(sources.map((x) => typeof x === "string" ? { text: x } : x), o.read, o.subjects ?? [], { ask: o.ask });

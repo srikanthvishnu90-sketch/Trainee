@@ -104,3 +104,8 @@ Deno.test("ruling 1: an advice sentence of the person's own record stands unjudg
   ok(k.text.includes(ok1) && k.text.includes("Leave the outdated 3.9 GPA off.") && !/Citadel|5,000/.test(k.text), k.text);
   eq(k.removed, ["Citadel pays interns $5,000 a week, so lead with Python."]);
 });
+Deno.test("ruling 1: general advice or a claim about the world that carries nothing of the person's record is judged", () => {
+  const own = adviceOfTheirOwn("Lakeshore University, Expected June 2029\nSkill: Python", "Start with your name and contact links.");
+  for (const s of ["Put your photo and date of birth at the top.", "Recruiters reject two-page resumes outright.", "Keep a resume to one page for early-career roles never."]) ok(!own(s), s);
+  ok(own("Your education line is Lakeshore University, Expected June 2029."));
+});

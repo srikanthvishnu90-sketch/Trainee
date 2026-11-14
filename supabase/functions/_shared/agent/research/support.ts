@@ -543,18 +543,20 @@ export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudg
 // sentence stands when it is one of code's own lines (`own`: word for word), a could-not-confirm sentence in the closed form
 // (`pure`), or the judge says yes to it (as a claim in its own words, or as a source's own unit said again); it is removed otherwise
 // (these paths have no numbered source to quote). A line that is only a link is code's, and stays.
-// Architect ruling 2026-11-14: on an advice turn, a sentence is advice of the person's own (outside the page judge) when it carries
-// something of their own record, every figure
-// in it is in their confirmed record or their own words, and every name in it is there or in the guide the answer cites. Anything
-// else (an employer, a pay figure, a market) is judged as any claim is.
-export function adviceOfTheirOwn(personText: string, guideText: string): (s: string) => boolean {
+// Architect ruling 2026-11-14 (narrowed on review of 7487f3600): on an advice turn, a sentence is advice of the person's own (outside
+// the page judge) only when every figure and every name in it is in their CONFIRMED record (D-007: never what they say they heard,
+// never their unconfirmed words, never a page), it names no employer or company (an organisation the record lists as a place they
+// worked or founded included), and it carries at least one item of that record. Anything else is judged as any claim is.
+const ROLE_IN_FACT = /(?<![\p{L}])(?:founder|co-founder|intern|internship|engineer|researcher|analyst|manager|associate|employee|team|staff|contractor|consultant|director|lead)(?![\p{L}])/iu;
+export function adviceOfTheirOwn(confirmed: string[]): (s: string) => boolean {
+  const record = confirmed.join("\n");
   const has = (hay: string, n: string) => new RegExp(`(?<![\\p{L}\\p{N}])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(hay);
-  const theirs = numbersIn(personText);
-  // ... and it is about their own materials: it carries at least one figure or name of their own record or words ("Put your photo
-  // at the top." or "Recruiters reject two-page resumes." is general advice or a claim about the world: judged).
+  // The organisations of the record: the name a fact about a job or a venture leads with ("Pixelforge, Founder ...").
+  const orgs = confirmed.filter((f) => ROLE_IN_FACT.test(f)).map((f) => f.split(/[,;:(]/)[0].trim()).filter((x) => x.length > 1);
+  const theirs = numbersIn(record);
   return (s: string) => { const ns = numbersIn(s), names = specifics(s).names;
-    return ns.every((n) => theirs.some((y) => numEq(y, n))) && names.every((n) => has(personText, n) || has(guideText, n))
-      && (ns.length > 0 || names.some((n) => has(personText, n))); };
+    return ns.every((n) => theirs.some((y) => numEq(y, n))) && names.every((n) => has(record, n) && !orgs.some((o) => has(o, n)))
+      && (ns.length > 0 || names.length > 0); };
 }
 export async function keepSupported(reply: string, sources: (string | { text: string; title?: string })[], o: { judge?: SupportJudge | null; read?: (s: string) => string; pure?: (s: string) => boolean; own?: string[]; advice?: (s: string) => boolean; subjects?: string[]; ask?: string } = {}): Promise<{ text: string; removed: string[] }> {
   const idx = indexPages(sources.map((x) => typeof x === "string" ? { text: x } : x), o.read, o.subjects ?? [], { ask: o.ask });

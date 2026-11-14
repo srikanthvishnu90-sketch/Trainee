@@ -89,23 +89,28 @@ Deno.test("fixes 9 and 11: code's own lines (a closed posting's note, the read-o
   eq(turnLines([JSON.stringify({ company: "Stripe", closed: false })]), { codeLines: [], readLines: [] });
 });
 
-// ---- architect ruling 2026-11-14: advice about the person's own materials is outside the page judge; anything else in it is not
+// ---- architect ruling 2026-11-14 (narrowed on review of 7487f3600): advice outside the page judge stands on the CONFIRMED record
+// alone: no employer or company, no figure or name from what the person says they heard, from their unconfirmed words or from a page
 import { adviceOfTheirOwn, keepSupported } from "../../../supabase/functions/_shared/agent/research/support.ts";
-Deno.test("ruling 1: an advice sentence of the person's own record stands unjudged; one that slips in an employer fact or a pay figure is judged and refused", async () => {
-  const person = "Lakeshore University, BS Computer Science and Finance, Expected June 2029\nSkill: Python\nSkill: React\nI use TypeScript and JavaScript and SQL. My 3.9 GPA is outdated.";
-  const guide = "Start with your name and contact links, then education, then a short skills line. Recruiters skim a SWE resume in seconds.";
-  const own = adviceOfTheirOwn(person, guide);
-  const ok1 = 'For the top of your SWE resume: your name and contact links, then "Lakeshore University | BS Computer Science and Finance | Expected June 2029", then a skills line led by Python, React and SQL.';
-  ok(own(ok1));
-  ok(own("Leave the outdated 3.9 GPA off."));
-  for (const bad of ["Citadel pays interns $5,000 a week, so lead with Python.", "Stripe is hiring 40 data interns this fall.", "Lead with React: demand for it grew 35% last year."]) ok(!own(bad), bad);
+const CONFIRMED = ["Lakeshore University, BS Computer Science and Finance, Expected June 2029", "Skill: Python", "Skill: React", "Pixelforge, Founder (2023-2025): hand-coded 70+ React websites for clients."];
+Deno.test("ruling 1: an advice sentence on the confirmed record alone stands unjudged", async () => {
+  const own = adviceOfTheirOwn(CONFIRMED);
+  const good = "Your education line is Lakeshore University, BS Computer Science and Finance, Expected June 2029, and your skills line leads with Python and React.";
+  ok(own(good));
   const no: SupportJudge = async (cs) => cs.map(() => "no" as const);
-  const k = await keepSupported(`${ok1} Citadel pays interns $5,000 a week, so lead with Python.\nLeave the outdated 3.9 GPA off.`, [{ text: guide, title: "Guide" }], { judge: no, advice: own });
-  ok(k.text.includes(ok1) && k.text.includes("Leave the outdated 3.9 GPA off.") && !/Citadel|5,000/.test(k.text), k.text);
-  eq(k.removed, ["Citadel pays interns $5,000 a week, so lead with Python."]);
+  const k = await keepSupported(`${good} Citadel pays interns $10k a week, which is the top of the market.`, [{ text: "Start with your name and contact links.", title: "Guide" }], { judge: no, advice: own });
+  ok(k.text.includes(good) && !/Citadel|10k/.test(k.text), k.text);
 });
-Deno.test("ruling 1: general advice or a claim about the world that carries nothing of the person's record is judged", () => {
-  const own = adviceOfTheirOwn("Lakeshore University, Expected June 2029\nSkill: Python", "Start with your name and contact links.");
-  for (const s of ["Put your photo and date of birth at the top.", "Recruiters reject two-page resumes outright.", "Keep a resume to one page for early-career roles never."]) ok(!own(s), s);
-  ok(own("Your education line is Lakeshore University, Expected June 2029."));
+Deno.test("ruling 1: the review's repros and four variants are judged, never kept unjudged", () => {
+  const own = adviceOfTheirOwn(CONFIRMED);
+  for (const bad of [
+    "Citadel pays interns $10k a week, which is the top of the market.",   // the person said "I heard Citadel pays $10k a week."
+    "Goldman Sachs pays $120 an hour to interns.",                          // "My internship pays $120 an hour."; the name from the guide
+    "Your Pixelforge work earned $9k a month, so lead with it.",            // an organisation of the record, with a figure it does not hold
+    "Pixelforge is a fast-growing studio, so lead with it.",                // an organisation of the record, with a claim about it
+    "Put your photo and date of birth at the top.",                         // general advice, nothing of the record
+    "Recruiters reject two-page resumes outright.",                         // a claim about the world
+    "List TypeScript and SQL after Python.",                                // names the person never confirmed
+    "Your 3.9 GPA from Lakeshore University belongs on top.",               // a figure the person never confirmed
+  ]) ok(!own(bad), bad);
 });

@@ -21,6 +21,8 @@
     "tests/architect/research-figures-failclosed-20261113.test.ts": 0.2,
     "tests/architect/handoff-recheck-live.test.ts": 34,
     "tests/architect/handoff-failclosed-20261113.test.ts": 12,
+    "tests/architect/offer-currency-period-20261113.test.ts": 0.3,
+    "tests/architect/confirm-before-compare-20261113.test.ts": 1.5,
     "tests/architect/hosted-apply-stale-fact-20261113.test.ts": 45,
     "tests/architect/d066-behavior-guide-20261112.test.ts": 0.5,
     "tests/architect/credential-redaction-20261113.test.ts": 0.3,

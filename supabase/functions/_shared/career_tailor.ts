@@ -84,6 +84,32 @@ export function withListedSkills(resume: any, p: any): any {
   if (Array.isArray(out.lines)) out.lines = out.sections.flatMap((s: any) => (s.lines || []).map((l: any) => ({ ...l, section: s.heading })));
   return out;
 }
+// D-078 (owner decision 2026-11-13: confirm before compare): a skill on the Skills line that the person never stated (no
+// confirmed skill fact names it, no confirmed fact lists it) was read from their experience text, and does not print until
+// they say yes to it. It is taken off the line here; `withheld` names each one with the confirmed facts whose words named
+// it (none: the stricter reader, 122 textNamesSkill, does not support it, so it is dropped without being asked).
+export interface WithheldSkill { name: string; factIds: string[] }
+// deno-lint-ignore no-explicit-any
+export function withoutInferredSkills(resume: any, p: any): { resume: any; withheld: WithheldSkill[] } {
+  const withheld: WithheldSkill[] = [];
+  const out = clone(resume);
+  for (const sec of out.sections || []) {
+    sec.lines = (sec.lines || []).filter((l: any) => {
+      if (l?.type !== "skills") return true;
+      const lead = /^technical skills:\s*/i.exec(String(l.text || ""))?.[0] ?? "";
+      const names = skillsOfLine(l.text);
+      const keep = names.filter((n) => (CareerProfile as any).statedSkill(p, n) || n.split("/").map((x) => x.trim()).filter(Boolean).every((x) => (CareerProfile as any).statedSkill(p, x)));
+      for (const n of names) if (!keep.includes(n) && !withheld.some((w) => w.name.toLowerCase() === n.toLowerCase())) withheld.push({ name: n, factIds: (CareerProfile as any).inferredSkillEvidence(p, n) });
+      if (keep.length === names.length) return true;
+      if (!keep.length) return false;
+      l.text = `${lead}${keep.join(", ")}`;
+      return true;
+    });
+  }
+  out.sections = (out.sections || []).filter((sec: any) => (sec.lines || []).length);
+  if (Array.isArray(out.lines)) out.lines = out.sections.flatMap((sec: any) => (sec.lines || []).map((l: any) => ({ ...l, section: sec.heading })));
+  return { resume: out, withheld };
+}
 // RELEASE 9: the header the person confirmed with their resume (142 confirmResumeHeader: shown word for word with the
 // entries, recorded only at their yes, with its time) travels with the confirmed record; one never confirmed does not.
 // 123 prints it only where no name was typed for the resume (set_resume_contact wins).
@@ -765,6 +791,8 @@ export type TailorOut = {
   not_on_your_record: string[]; lead_not_picked: string[]; rendered_in: string; ms: number; detail: { doc: any; base: any; diff: any; docx: Uint8Array | null; pdf: Uint8Array };
   // RELEASE 9: the posting against the resume (missing, weak, emphasise) and the top of the file as it prints, both for the
   // chat before the file is sent; the layout and its page fit when one was asked for.
+  // D-078: skills read from experience text that are not on the file until the person says yes to them.
+  skills_withheld?: WithheldSkill[];
   gaps: GapReport; preview: string; layout: DesignLayout | "plain"; template: TemplateId | null; fit: FitRecord | null; own_layout?: { replaced: number; missing: string[] };
 } | { ok: false; refused: "no_confirmed_facts" | "no_contact" | "contact_needs_confirmation" | "truth_audit" | "render" | "ats_parse" | "link" | "edit"; reason: string; ms: number };
 
@@ -819,7 +847,11 @@ export async function tailorForPosting(o: {
   if (t.mode !== "full" || !t.resume) return { ok: false, refused: "truth_audit", reason: t.reason || "no resume was assembled", ms: ms() };
   const lead = persona ? persona.lead.filter((id) => CareerProfile.getFact(picked, id)) : [];
   // `picked`, not `clean`: a skill a persona hides stays hidden.
-  let ordered = withListedSkills(applyPersonaOrder(t.resume, lead), picked);
+  // D-078: skills read from experience text and never confirmed are taken off the Skills line before anything prints.
+  const gate0 = withoutInferredSkills(withListedSkills(applyPersonaOrder(t.resume, lead), picked), picked);
+  // 123's builder already withheld the inferred skills it found (every resume path); this line catches any added after it.
+  const gate = { ...gate0, withheld: [...((t.resume.withheldSkills ?? []) as WithheldSkill[]), ...gate0.withheld].filter((w, i, all) => all.findIndex((x) => x.name.toLowerCase() === w.name.toLowerCase()) === i) };
+  let ordered = gate.resume;
   let edits: EditDone[] | undefined, keptBack: string[] = [], shortened: string[] = [];
   if (o.edits?.length) {
     // D-071 (live-8 C20: "Waypoint is now added back", though the first version printed it): an edit changes the version that was
@@ -927,7 +959,7 @@ export async function tailorForPosting(o: {
     ...(placeholder ? { placeholders: ["email"] } : {}), ...(edits ? { edits } : {}), ...(shortened.length ? { shortened } : {}), ...(held.length ? { held_back: held } : {}),
     sha256: r.sha256, filename: r.filename, persona: persona?.name ?? null, job_id: o.posting.job_id ?? null, company: o.posting.company ?? null,
     ats: { status: r.ats.status, warnings: r.ats.warnings }, not_on_your_record: (t.requiredGaps || []).map((g: any) => g.requirement),
-    lead_not_picked: lead.filter((id) => !selected.has(id)), rendered_in: r.where, ms: ms(), detail: { doc, base, diff, docx: r.docx ?? null, pdf: r.pdf },
+    lead_not_picked: lead.filter((id) => !selected.has(id)), rendered_in: r.where, ...(gate.withheld.length ? { skills_withheld: gate.withheld } : {}), ms: ms(), detail: { doc, base, diff, docx: r.docx ?? null, pdf: r.pdf },
     gaps: gapAnalysis({ jd, profile: clean, doc, gaps: t.gaps || [] }), preview: previewText(r.lines ?? ((CareerRender as any).sourceLines(doc) as { text: string }[]).map((l) => l.text)),
     layout: r.layout ?? "plain", template: r.template ?? null, fit: r.fit ? fitRecord(r.fit) : null, ...(r.replaced !== undefined ? { own_layout: { replaced: r.replaced, missing: r.missing ?? [] } } : {}),
   };

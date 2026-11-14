@@ -59,7 +59,9 @@ Deno.test("D-069/1 skillEvidence: on the 35 real postings, R and SQL are never p
 });
 
 // ---------------------------------------------------------------- 2 and 3. the offer: any place, any title, its own currency
-const turns = async (msgs: string[]) => { let state: any = null, last: any = null; for (const m of msgs) { last = await offerChatTurn({ message: m, state, now: NOW, postings: null }); state = last.state; } return last; };
+// Architect amendment (owner decision 2026-11-13, D-078: confirm before compare): the reading of each offer is shown first and
+// the person's plain yes to it comes before anything is compared, so each reading shown is answered "yes" here.
+const turns = async (msgs: string[]) => { let state: any = null, last: any = null; for (const m of msgs) { last = await offerChatTurn({ message: m, state, now: NOW, postings: null }); state = last.state; if (last.answer?.intent === "career_offer_confirm") { last = await offerChatTurn({ message: "yes", state, now: NOW, postings: null, lastReply: last.answer.reply }); state = last.state; } } return last; };
 Deno.test("D-069/2 a non-USD offer keeps its currency everywhere; offers in two currencies are not converted or added", async () => {
   const o = parseOfferWords("Coinbase offered me AUD 87,600 base and a $10,000 signing bonus as a complaints analyst in Sydney");
   eq([o.company, o.base, o.currency, o.currencies?.signing, o.signing, o.place, o.title], ["Coinbase", 87600, "AUD", "USD", 10000, "Sydney", "complaints analyst"]);

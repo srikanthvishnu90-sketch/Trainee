@@ -1008,16 +1008,20 @@ export function careerTools(deps: {
     {
       // WO-036. The half-told offer waits in the thread's state (offerBenchmark) so the missing piece is asked once.
       name: "offer_benchmark", effect: "write_own",
-      description: "Use when the person texts a job offer (\"JPM offered 110k base, 15k signing, NYC, analyst\"). Reads it from their words in THIS message, asks once for a missing company, base, city or title, places the base against public pay data and drafts a counter from their own facts. Send its messages as written. Nothing is sent to the employer.",
+      description: "Use when the person texts a job offer (\"JPM offered 110k base, 15k signing, NYC, analyst\"). Reads it from THIS message, asks once for a missing piece, then shows its reading (status confirm). Call again with their next message (a plain yes, or a correction); only after the yes does it benchmark and draft a counter. Send its messages as written. Nothing is sent to the employer.",
       input_schema: obj({ offer_words: str("The person's exact words about the offer from this message; leave out to read the whole message") }),
       run: async (i, c) => {
         const message = c.turn?.message ?? "";
         const words = i.offer_words ? String(i.offer_words) : message;
         if (!c.turn || !words.trim() || !saidIn(message, words)) throw new Error("not read: the offer must be the person's own words in this message; ask them to text the offer");
         const pending = (c.state.offerBenchmark as OfferPending | undefined) ?? null;
-        const { result, pending: next } = offerTurn({ words, pending, now: c.now });
+        // D-078: the reading is shown first; only the person's plain yes in the next turn (to the reply that showed it) lets
+        // it be benchmarked or drafted.
+        const { result, pending: next } = offerTurn({ words, message, pending, now: c.now, lastReply: typeof c.turn.before === "string" ? c.turn.before : null });
         if (next) c.state.offerBenchmark = next;
         else delete c.state.offerBenchmark;
+        // The reading is the reply, word for word (the brain cannot reword it), so the yes is to exactly the block hashed.
+        if (result.status === "confirm") c.turn.show = { intent: "career_offer_confirm", text: result.messages.join("\n") };
         return { status: result.status, ask: result.ask, offer: result.offer, not_given: result.status === "ask" ? [] : result.missing, benchmarks: result.benchmarks, draft: result.draft, messages: result.messages };
       },
     },
@@ -1101,8 +1105,19 @@ export function careerTools(deps: {
             : `not made: there are no confirmed experience, project or education facts on file. Ask them for their work experience and education in their own words; nothing is invented. Do not call another tool this turn. Nothing was stored or sent.`);
         }
         if (!r.ok) throw new Error(`not made: ${r.reason}. ${r.refused === "link" ? "The file stays private; no link was given." : "Nothing was stored or sent."}`);
-        const { detail, ...rest0 } = r;
-        const rest = { ...rest0, ...reviewOf(r, !!t.deliver) };
+        // D-078: skills read from their experience text are not printed until they say yes. Each one not put to them before
+        // is saved as a draft skill fact (in the words of the question) and asked once; their plain yes next turn confirms it
+        // with confirm_profile_fact like any other draft, and the next resume prints it. One already asked is not asked again.
+        const toAsk: { id: string; name: string }[] = [];
+        for (const w of r.skills_withheld ?? []) {
+          if (!w.factIds.length || CareerProfile.inferredSkillAsked(profileOf(c), w.name)) continue;
+          const fact = CareerProfile.addFact(profileOf(c), CareerProfile.inferredSkillDraft(w.name, w.factIds));
+          c.turn?.added.push(fact.id);
+          toAsk.push({ id: fact.id, name: w.name });
+        }
+        if (toAsk.length) r = { ...r, text: `${r.text}\n${CareerProfile.SKILL_QUESTION(toAsk.map((x) => x.name))}` };
+        const { detail, skills_withheld: _sw, ...rest0 } = r;
+        const rest = { ...rest0, ...reviewOf(r, !!t.deliver), ...(toAsk.length ? { skills_to_confirm: toAsk, skills_question: CareerProfile.SKILL_QUESTION(toAsk.map((x) => x.name)), skills_next: "Send skills_question as written. Only on their plain yes in the next turn, call confirm_profile_fact for each skills_to_confirm id." } : {}) };
         const out = plan?.rating ? { ...rest, format_check: { score: plan.rating.score, keep: plan.rating.keep, kept_layout: r.layout === "own", hard_failures: plan.rating.hardFailures,
           findings: plan.rating.findings.filter((f) => f.measured && !f.pass).map((f) => ({ criterion: f.criterion, detail: f.detail, where: f.where.slice(0, 3) })),
           recommended: plan.recommended ? { template: Number(plan.recommended.template.slice(1)), name: plan.recommended.name, why: plan.recommended.why } : null,
@@ -1118,7 +1133,7 @@ export function careerTools(deps: {
           // R10 privacy ruling: with the file attached, no bearer link to the person's resume reaches the model, the reply or the
           // thread's history (the private object stays stored for the email apply path; a link is the signed-in File page only).
           const { link: _l, expires_at: _e, ...noLink } = out;
-          return { ...noLink, text: out.text.split("\n")[0], attached: [r.filename, ...(detail.docx ? [r.filename.replace(/\.pdf$/i, "") + ".docx"] : [])] };
+          return { ...noLink, text: [out.text.split("\n")[0], ...(toAsk.length ? [CareerProfile.SKILL_QUESTION(toAsk.map((x) => x.name))] : [])].join("\n"), attached: [r.filename, ...(detail.docx ? [r.filename.replace(/\.pdf$/i, "") + ".docx"] : [])] };
         }
         return out;
       },

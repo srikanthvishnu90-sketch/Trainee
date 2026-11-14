@@ -108,7 +108,11 @@ Deno.test("review 3: the tags go, the sources stay: a kept sentence's cited unit
 Deno.test("review 4: a question goes unjudged only when it asks the person about their own situation", async () => {
   for (const q of ["Which email should go on the resume?", "Want me to check the questions?", "Are you authorized to work without sponsorship?"]) ok(personQuestion(q), q);
   // (a name that is neither the person's record's nor the ask's makes it a claim to judge: re-review of 940195e08)
-  ok(!personQuestion("Are you authorized to work in the U.S. without sponsorship?"));
+  // (a place in a question only about their own eligibility or preference stays theirs: the C11 work-authorization question)
+  ok(personQuestion("Are you authorized to work in the U.S. without sponsorship?"));
+  ok(personQuestion("Are you open to relocating to New York?"));
+  ok(!personQuestion("Are you authorized to work at Stripe in New York?"), "an employer named");
+  ok(!personQuestion("Are you open to relocating to New York by 2027?"), "a figure");
   for (const q of ["Did you know Stripe stopped sponsoring visas?", "Is Stripe still hiring interns?", "Have you heard that the posting closed?", "Can you believe interns earn $90 an hour?"]) ok(!personQuestion(q), q);
   const v = await verifyTagged("Did you know Stripe stopped sponsoring visas?", startup(), { judge: yes });
   eq(v.text, "");

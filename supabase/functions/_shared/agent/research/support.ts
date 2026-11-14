@@ -87,7 +87,12 @@ export function personQuestion(s: string, allowed = ""): boolean {
   if (/\d/.test(b) || ASSERTS_IN_Q.test(b) || /["\u201c\u201d]/.test(b) || MONTH_OR_DAY.test(b) || PAST_EVENT.test(b)) return false;
   const h = hardParts(b);
   const names = h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).filter((r) => r.length).map((r) => r.join(" "));
-  if (!names.every((n) => n && nameFoundIn(n, String(allowed ?? "")))) return false;
+  // (a place may be named when the question is only about the person's own eligibility or preference: "authorized to work in the
+  // U.S.", "open to relocating to New York", "willing to work in Texas"; an employer, a figure, a date or an event still is judged)
+  const ELIGIBLE = /\b(?:authori[sz]ed to work in|eligible to work in|legally (?:able|allowed) to work in|open to (?:relocating|moving|working) (?:to|in)|willing to (?:relocate|move|work) (?:to|in)|able to (?:relocate|move|work) (?:to|in)|okay (?:relocating|moving|working) (?:to|in)|prefer (?:to )?(?:work|live) in)\s+((?:the\s+)?[\p{Lu}][\p{L}.'-]*(?:\s+[\p{Lu}][\p{L}.'-]*){0,2})/iu;
+  const place = ASK_THEM.test(b) ? ELIGIBLE.exec(b)?.[1]?.replace(/^the\s+/i, "").toLowerCase().replace(/[.']/g, "") : null;
+  const isPlaceName = (n: string) => !!place && place.replace(/\s+/g, " ").includes(n.replace(/[.']/g, "").replace(/\s+/g, " "));
+  if (!names.every((n) => n && (nameFoundIn(n, String(allowed ?? "")) || isPlaceName(n)))) return false;
   if (ASK_THEM.test(b)) return true;
   if (!/\?\s*$/.test(b)) return false;
   return !(/^\p{Lu}/u.test(b) && h.first && !/^(?:which|what|where|when|who|how|should|would|could|can|do|does|did|is|are|want|shall|will|have|has)$/i.test(h.first));

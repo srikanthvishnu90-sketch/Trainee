@@ -132,13 +132,13 @@ code and tested.
   - `report(checks[], limits[])` returns the report text.
   - `boundClaims(reply, report)` refuses a claim of a check that was not run.
 - `xlsx.ts`
-  - `writeXlsx(model, sheets, charts)` writes OOXML with live formulas, defined names, tables and charts.
+  - `writeXlsx(book)` (a book of sheets, charts and expected values, as `cohortWorkbook` returns) writes OOXML with live formulas, defined names, tables and charts.
   - `formula.ts`: the independent evaluator for the formula subset `xlsx.ts` emits (`SUM`, `SUMIFS`, `IF`, `IFERROR`,
     `ISNUMBER`, `ABS`, `AND`, `OR`, arithmetic).
 - `docs.ts`
-  - `writeDocx(model)` and `writePptx(model)` (speaker notes, charts bound to data).
+  - `writeDocx(model)` and `writePptx(deck)` (speaker notes, charts whose cached values are the model's cells). A typed number matching no cell throws `LooseNumber`.
   - `writePdf(model)`.
-  - `pages(pdf)` for the clipping check.
+  - `pages(pdf)` returns `{ count, clipped }` for the clipping check; `counts(text)` returns words, characters and seconds at 150 wpm.
 - `ics.ts`
   - `writeIcs(events)`.
   - `lintIcs(text)`: CRLF line ends, folding at 75 octets, escaping, UTC, CLASS, and no METHOD for a hold.

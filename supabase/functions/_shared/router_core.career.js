@@ -1273,7 +1273,7 @@ const CareerProfile = (() => {
   function unprovenSkills(profile) { refreshSkillFlags(profile); return (profile.facts || []).filter((f) => f.kind === "skill" && f.unproven); }
   const SKILL_ALIASES = [
     ["JavaScript", "JS", "ECMAScript"], ["TypeScript", "TS"], ["PostgreSQL", "Postgres", "psql"], ["Kubernetes", "k8s"], ["Node.js", "NodeJS"],
-    ["Go", "Golang"], ["C++", "cpp"], ["C#", "csharp", "C sharp"], ["AWS", "Amazon Web Services"], ["GCP", "Google Cloud", "Google Cloud Platform"],
+    ["Go", "Golang", "Go lang"], ["Express", "Express.js", "ExpressJS"], ["C++", "cpp"], ["C#", "csharp", "C sharp"], ["AWS", "Amazon Web Services"], ["GCP", "Google Cloud", "Google Cloud Platform"],
     ["Machine Learning", "ML"], ["React", "React.js", "ReactJS"], ["Vue", "Vue.js", "VueJS"], ["Next.js", "NextJS"], ["CI/CD", "CICD"],
     ["A/B Testing", "AB testing", "A/B tests", "A/B test", "split testing"], ["Excel", "Microsoft Excel", "MS Excel"], ["PowerPoint", "Microsoft PowerPoint", "MS PowerPoint"],
     ["MongoDB", "Mongo"], ["scikit-learn", "sklearn", "scikit learn"], ["REST", "RESTful", "REST API", "REST APIs"], ["Capital IQ", "CapIQ", "S&P Capital IQ"],
@@ -1288,21 +1288,79 @@ const CareerProfile = (() => {
     return ALIAS_GROUP.get(skillKey(raw)) || (raw ? [raw] : []);
   }
   const skillKeyOf = (name) => skillKey(skillForms(name)[0] || name);
-  const WORD_NAMES = new Set(["REST", "Excel", "Spark", "Swift", "Rust", "Ruby", "Spring", "Flask", "Go", "Golang", "Express", "Ember", "Julia", "Dart", "Elixir", "Scala"]);
+  const WORD_NAMES = new Set(["REST", "Excel", "Spark", "Swift", "Rust", "Ruby", "Spring", "Flask", "Go", "Golang", "Express", "Ember", "Julia", "Dart", "Elixir", "Scala",
+    "Word", "Access", "Chef", "Puppet", "Unity", "React", "Sketch", "Vue", "Basic", "Hive", "Pig", "Ant", "Salt", "Crystal", "Nim", "Lean", "Java", "Python", "SAS", "Scratch", "Processing", "Flutter", "Scheme"]);
+  const WORD_KEYS = new Set([...WORD_NAMES].map((w) => w.toLowerCase()));
   const _formRe = new Map();
+  const isShort = (form) => (/^[A-Za-z]{1,2}$/.test(form)) || WORD_NAMES.has(form);
   function formRe(form) {
     if (_formRe.has(form)) return _formRe.get(form);
-    const short = (/^[A-Za-z]{1,2}$/.test(form)) || WORD_NAMES.has(form);
+    const short = isShort(form);
     const body = escRe(form).replace(/\s+/g, "\\s+");
     const re = short
-      ? new RegExp(`(?<![A-Za-z0-9+#&.'\\-])${body}(?![A-Za-z0-9+#&'\\-])(?!\\.[A-Za-z0-9])`)
-      : new RegExp(`(?<![A-Za-z0-9+#])${body}(?![A-Za-z0-9+#])(?!\\.[A-Za-z0-9])`, "i");
+      ? new RegExp(`(?<![A-Za-z0-9+#&.'\\-])${body}(?![A-Za-z0-9+#&'\\-])(?!\\.[A-Za-z0-9])`, "gi")
+      : new RegExp(`(?<![A-Za-z0-9+#])${body}(?![A-Za-z0-9+#])(?!\\.[A-Za-z0-9])`, "gi");
     _formRe.set(form, re);
     return re;
   }
+  const KNOWN_SKILLS = new Set([...ALIAS_GROUP.keys(), ...[...WORD_NAMES].map(skillKey), ...("python java ruby php perl kotlin scala haskell matlab sas stata spss tableau "
+    + "pytorch tensorflow keras pandas numpy scipy shiny tidyverse ggplot2 docker terraform ansible jenkins linux bash html css sass django rails laravel angular svelte redux "
+    + "graphql grpc kafka airflow hadoop snowflake redshift bigquery dbt looker powerbi figma photoshop illustrator jira salesforce sap oracle azure redis elasticsearch nosql "
+    + "objective-c assembly fortran cobol lua jquery node selenium cypress jest junit pytest phoenix flutter rails postgres akka apache pyspark rstudio racket swiftui gin gorm scratch processing scheme unreal blender autocad solidworks verilog vhdl latex vba ai").split(" ")]);
+  const NOT_NEG = /\bnot (?:only|just)\b|\bno stranger to\b|\bnever (?:stopped|quit|gave up)\b|\bcan(?:['’]t|not) imagine [\w ]*?without\b/gi;
+  const NEG = /(?:\b(?:not|never|none|no|without|neither|nor|zero|unfamiliar|lack\w*|limited|rather than|instead of)\b|n['’]t\b|\byet to\b)/i;
+  const INTENT = /\b(?:wish|would love|want(?:ed|s)? to|hop(?:e|ing) to|plan(?:ning|s)? to|goal|learning|to learn|become proficient|interested in|curious about|pick(?:ing)? up|taking a course|currently taking|enrolled|bootcamp|coursework|intro(?:duction)? to|(?:book|talk|class|course|lecture|article|video|workshop|webinar)s? (?:about|on|in|that mentioned)|read about|heard (?:of|about)|the idea of|exposure to|basic knowledge of|someday)\b/i;
+  const NOT_ME = /\b(?:she|he|they)\s+(?:is|was|were|are|built|wrote|used|uses|knows?)\b|\b(?:my|our) (?:teammate|manager|boss|colleagues?|coworkers?|client|friend)s?\b|\bthe team (?:used|uses|chose|wrote)\b|\bvendor\b|\b(?:hired|recruit\w+|interviewed|sold|selling|job ads?|job postings?)\b/i;
+  const words = (x, n, fromEnd) => { const w = x.split(/\s+/).filter(Boolean); return (fromEnd ? w.slice(-n) : w.slice(0, n)).join(" "); };
+  function notOwnUse(before, after) {
+    const b = before, a = after;
+    return NEG.test(words(b, 6, true)) || NEG.test(words(a, 6, false)) || INTENT.test(`${b} | ${a}`) || NOT_ME.test(`${b} | ${a}`);
+  }
+  const CUE = /(?:\b(?:in|using|with|via|use[sd]?|wrote|writes?|writing|know|knows|learned|taught myself|self-taught in|picked up|applied|mostly|mainly|primarily|also|(?:skills?|languages?|tools?|stack|tech|technologies|frameworks?|software|proficien(?:t|cy)|analysis|programming|experience)\s*(?::|-|—|–|in|with|is|was|includes?)?|\d+\+?\s*(?:years?|yrs?|months?)(?:\s+of)?(?:\s+experience)?(?:\s+(?:of|in|with|using))?|advanced|expert(?:-level)?|strong|daily|intermediate|solid|heavy|fluent|embedded|modern|low-level|ANSI|Apache|Visual|MS|Microsoft|(?:migrat|port|rewr[io]t|convert|mov|switch)\w*\b[^.;!?\n]{0,30}\bto|but also|from [\w+#.]+ to)\s+)$/i;
+  const TRADE = /^\s+(?:models?|modell?ing|pipelines?|algorithms?|engineer(?:ing|s)?|code|scripts?|scripting|programming|programmers?|programs?|developers?|development|apps?|services?|APIs?|apis?|macros?|formulas?|spreadsheets?|dashboards?|queries|components?|front[- ]?end|back[- ]?end|librar(?:y|ies)|frameworks?|microservices?|hooks?|notebooks?|users?|power user|fundamentals|CLI|iOS|jobs|chatbots?|agents|databases?|server|game|cookbooks?|research|Boot|Native|Streaming|Shiny|Markdown|on Rails|for (?:numerical|scientific|statistical|data|regression)|is (?:my|what|the|our))\b|^\s*\((?!\s*(?:19|20)\d\d\b)(?![A-Z][a-z]+(?: [A-Z][a-z]+){0,2}\))|^\s*:\s*\S|^\s*\)/;
+  const TECHY = /\b(?:APIs?|SDK|CLI|backend|back-end|front[- ]?end|full-stack|microservices?|firmware|iOS|Android|apps?|databases?|quer(?:y|ies)|pipelines?|ETL|jobs|events|latency|deploy\w*|cluster|compiler|generics|concurrency|middleware|scripting|scripts?|programming|programmer|developer|software|codebase|code|coded|monorepo|library|framework|server|client|game|shader|dashboards?|models?|regression|simulation|ARM|REST|auth|production|rewrite|rewrote|refactor\w*|composition|streaming|configuration|cross-platform|macros|VLOOKUP|pivot|spreadsheets?|forecasting|languages?|proficient|experienced|expert|hands-on|comfortable|systems|optimi[sz]ation|generative)\b/;
+  const OK_NEXT = (w) => KNOWN_SKILLS.has(skillKey(w)) || /[a-z][A-Z]|^[A-Z0-9#+]{2,}$/.test(w) || /^(?:Boot|Native|Streaming|Shiny|Markdown|Rails)$/.test(w);
+  const LIST_SEP = /\s*(?:[,/;|•·\n—–]|\s[&+-]\s|\s(?:and|or)\s)\s*/;
+  const knownAt = (item, end) => {
+    const ws = String(item).replace(/\([^)]*\)/g, " ").replace(/^[\s([]+|[\s.)\]]+$/g, "").split(/\s+/).filter(Boolean);
+    if (!ws.length) return false;
+    const pick = (n) => skillKey((end ? ws.slice(-n) : ws.slice(0, n)).join(" ").replace(/^[^:]*:\s*/, ""));
+    return KNOWN_SKILLS.has(pick(1)) || (ws.length > 1 && KNOWN_SKILLS.has(pick(2)));
+  };
+  function inSkillsContext(t, at, end, asWritten, name) {
+    const before = t.slice(0, at), after = t.slice(end), cued = CUE.test(before);
+    if (!before.trim() && /^[\s.]*$/.test(after)) return true;
+    if ((/^[- ]to\b|^\s+at\b/.test(after) && !cued) || /^[- ]to[- ]market\b|^\s+(?:and|&|n)\s+D\b|^\s+of\b|^\.\s+[A-Z][a-z]|^,\s+(?:the|my|our)\s+[\w ]{1,25}(?:,|$)/.test(after)) return false;
+    const nextWord = /^\s+([A-Z][\w+#.-]*)/.exec(after);
+    if (nextWord && !OK_NEXT(nextWord[1].replace(/[.,]$/, ""))) return false;
+    if (nextWord && asWritten) return true;
+    const prev = before.split(LIST_SEP), next = after.split(LIST_SEP), own = prev[prev.length - 1];
+    const alone = (x) => /^[\s([:]*$/.test(x == null ? "" : x.replace(/^.*[:(]\s*/, ""));
+    const others = [...KNOWN_SKILLS].filter((k) => k !== skillKey(name) && k.length > 1 && new RegExp(`(?<![A-Za-z0-9+#])${escRe(k)}(?![A-Za-z0-9+#])`, "i").test(t));
+    const plainOther = others.some((k) => !isShort(k) && !WORD_KEYS.has(k)), listOnly = !t.replace(/\([^)]*\)/g, "").split(LIST_SEP).some((x) => x.trim().split(/\s+/).length > 2);
+    const listCue = CUE.test(own) || prev.slice(0, -1).some((it) => CUE.test(it.replace(/\S+\s*$/, "")));
+    const neighbour = (item, e) => knownAt(item, e) && (plainOther || listOnly || others.length >= 2 || listCue || TECHY.test(t));
+    if (prev.length > 1 && alone(own) && neighbour(prev[prev.length - 2], true)) return true;
+    if (next.length > 1 && /^[\s.)\]]*$/.test(next[0].replace(/\([^)]*\)/g, "")) && (alone(own) || CUE.test(own)) && neighbour(next[1], false)) return true;
+    if (!asWritten) return false;
+    if (cued && !/^\s+(?:19|20)\d\d\b/.test(after)) return true;
+    if (TRADE.test(after) && !/^\s*\)/.test(after)) return true;
+    return TECHY.test(`${before} | ${after}`) || plainOther || others.length >= 2;
+  }
   function textNamesSkill(text, skillName) {
-    const t = String(text == null ? "" : text);
-    return !!t && skillForms(skillName).some((f) => formRe(f).test(t));
+    const t = String(text == null ? "" : text).replace(NOT_NEG, " using ");
+    if (!t) return false;
+    for (const f of skillForms(skillName)) {
+      const re = formRe(f); re.lastIndex = 0;
+      for (const m of t.matchAll(re)) {
+        const cs = Math.max(...[...t.slice(0, m.index).matchAll(/(?<!\b[A-Z])\.(?=\s)|[;!?](?=\s)|\n/g)].map((x) => x.index + 1), 0), endRe = /(?<!\b[A-Z])\.(?=\s|$)|[;!?](?=\s|$)|\n/g;
+        endRe.lastIndex = m.index + m[0].length;
+        const ce0 = endRe.exec(t), ce = ce0 ? ce0.index : t.length, before = t.slice(cs, m.index), after = t.slice(m.index + m[0].length, ce);
+        if (notOwnUse(before, after)) continue;
+        if (!isShort(f) || inSkillsContext(t.slice(cs, ce), m.index - cs, m.index - cs + m[0].length, m[0] === f, f)) return true;
+      }
+    }
+    return false;
   }
   function skillEvidence(profile, skillName) {
     const name = skillKeyOf(skillName);
@@ -1311,6 +1369,36 @@ const CareerProfile = (() => {
     const evidenceIds = new Set([].concat((skill && skill.evidence) || [], supporting.map((f) => f.id)));
     return { skill: skill || null, proven: evidenceIds.size > 0 && (skill ? !skill.unproven || supporting.length > 0 : supporting.length > 0), evidenceFactIds: [...evidenceIds], supportingFactIds: supporting.map((f) => f.id) };
   }
+
+  const usableFact = (f) => f && !f.needs_confirmation && f.status !== "draft" && (f.status === undefined || f.status === "confirmed") && !quarantinedFact(f);
+  function statedSkill(profile, skillName) {
+    const key = skillKeyOf(skillName);
+    if (!key) return false;
+    return (profile && profile.facts || []).some((f) => usableFact(f) && (
+      (f.skills || []).some((s) => skillKeyOf(s) === key)
+      || (f.kind === "skill" && ([f.name, f.title].some((n) => n && skillKeyOf(String(n).replace(/^Skill:\s*/i, "")) === key) || namedInSkillFact(f.text, skillName)))));
+  }
+  function namedInSkillFact(text, skillName) {
+    const t = String(text == null ? "" : text);
+    for (const form of skillForms(skillName)) {
+      const re = formRe(form); re.lastIndex = 0;
+      for (const m of t.matchAll(re)) if (!notOwnUse(t.slice(0, m.index), t.slice(m.index + m[0].length))) return true;
+    }
+    return false;
+  }
+  const INFERRED_SOURCE = "inferred-from-experience";
+  function inferredSkillAsked(profile, skillName) {
+    const key = skillKeyOf(skillName);
+    return (profile && profile.facts || []).some((f) => f && f.kind === "skill" && f.source === INFERRED_SOURCE && skillKeyOf(f.name || f.title || "") === key);
+  }
+  function inferredSkillEvidence(profile, skillName) {
+    return (profile && profile.facts || []).filter((f) => usableFact(f) && f.kind !== "skill" && textNamesSkill([f.title, f.text, ...(f.bullets || [])].filter(Boolean).join(". "), skillName)).map((f) => f.id);
+  }
+  function inferredSkillDraft(skillName, evidence) {
+    const name = String(skillName).trim();
+    return { kind: "skill", name, title: name, text: `${name}, read from your experience`, skills: [name], evidence: (evidence || []).slice(), source: INFERRED_SOURCE, needs_confirmation: true, status: "draft" };
+  }
+  const SKILL_QUESTION = (names) => `I read these skills from your experience: ${names.join(", ")}: keep them? They are not on your resume until you say yes.`;
 
   const METRIC_RE = /\b\d+(\.\d+)?\s*(%|users?|customers?|teams?|members?|people|hours?|minutes?|pages?|companies|participants|requests|ms\b|x\b)/i;
   const NUMBER_RE = /\b\d[\d,.]*\b/;
@@ -1802,7 +1890,7 @@ const CareerProfile = (() => {
     return receipt;
   }
 
-  return { KINDS, createProfile, profileFromData, addFact, updateFact, getFact, listFacts, confirmFact, confirmedFacts, quarantinedFact, QUARANTINE_VERSION, unprovenSkills, skillEvidence, textNamesSkill, skillForms, factMiningQuestions, isThin, parseCsv, parseLinkedInConnections, parseLinkedInProfile, ingestLinkedIn, parseResumeText, parseResumeSections, ingestResume, supersedeResume, confirmationReply, fieldCorrectionOf, classifyResumeIngest, SUPPORTED_RESUME_FORMATS, refreshSkillFlags, RETENTION_DECLARATION, retentionDeclaration, previewProfileDeletion, deleteProfileData };
+  return { KINDS, createProfile, profileFromData, addFact, updateFact, getFact, listFacts, confirmFact, confirmedFacts, quarantinedFact, QUARANTINE_VERSION, unprovenSkills, skillEvidence, textNamesSkill, skillForms, statedSkill, inferredSkillAsked, inferredSkillEvidence, inferredSkillDraft, SKILL_QUESTION, INFERRED_SOURCE, factMiningQuestions, isThin, parseCsv, parseLinkedInConnections, parseLinkedInProfile, ingestLinkedIn, parseResumeText, parseResumeSections, ingestResume, supersedeResume, confirmationReply, fieldCorrectionOf, classifyResumeIngest, SUPPORTED_RESUME_FORMATS, refreshSkillFlags, RETENTION_DECLARATION, retentionDeclaration, previewProfileDeletion, deleteProfileData };
 })();
 if (typeof module !== "undefined" && module.exports) module.exports = CareerProfile;
 
@@ -2275,7 +2363,13 @@ const CareerTailor = (() => {
     const famVocabScope = new Set((FAMILY_SKILLS[jd.family] || []).map((x) => String(x).toLowerCase()));
     const rawLcScope = String(jd.rawText || "").toLowerCase();
     const mentionedInJd = (name) => { const n = String(name).toLowerCase(); let i = rawLcScope.indexOf(n); while (i >= 0) { const b = i === 0 ? " " : rawLcScope[i - 1]; const a = rawLcScope[i + n.length] || " "; if (!/[a-z0-9]/.test(b) && !/[a-z0-9]/.test(a)) return true; i = rawLcScope.indexOf(n, i + 1); } return false; };
-    const skillsProven = skillsProvenAll.filter((s) => wantedLcScope.has(s.name.toLowerCase()) || famVocabScope.has(s.name.toLowerCase()) || mentionedInJd(s.name));
+    const skillsScoped = skillsProvenAll.filter((s) => wantedLcScope.has(s.name.toLowerCase()) || famVocabScope.has(s.name.toLowerCase()) || mentionedInJd(s.name));
+    const withheldSkills = [];
+    const skillsProven = skillsScoped.filter((s) => {
+      if (Profile.statedSkill(profile, s.name)) return true;
+      withheldSkills.push({ name: s.name, factIds: Profile.inferredSkillEvidence(profile, s.name) });
+      return false;
+    });
     const skillsLine = skillsProven.length ? { heading: "Skills", lines: [] } : null;
     if (skillsLine) {
       const ids = [...new Set(skillsProven.map((s) => s.factId))];
@@ -2337,7 +2431,7 @@ const CareerTailor = (() => {
     }
     for (let i = sections.length - 1; i >= 0; i--) if (!sections[i].lines.length) sections.splice(i, 1);
     const lines = sections.flatMap((s) => s.lines.map((l) => ({ ...l, section: s.heading })));
-    return { family, familyLabel: fam.label, conventions: fam.conventions, pageLimit: fam.pageLimit, header: headerOf(profile), sections, lines, deduped, selectedFactIds: selected.map((x) => x.fact.id) };
+    return { family, familyLabel: fam.label, conventions: fam.conventions, pageLimit: fam.pageLimit, header: headerOf(profile), sections, lines, deduped, selectedFactIds: selected.map((x) => x.fact.id), withheldSkills };
   }
 
   function auditResume(resume, profile) {
@@ -6962,7 +7056,7 @@ const CareerNegotiation = (() => {
     const fmt = typeof opts.money === "function" ? opts.money : null;
     const usd = (n, field) => fmt ? fmt(n, field) : "$" + Math.round(n).toLocaleString("en-US");
     const o = offer || {};
-    const role = o.role || "role";
+    const role = String(o.role || "role").replace(/\s+role$/i, "");
     const competing = (opts.competing || []).filter((c) => c && c.said && Number.isFinite(c.base));
     const best = competing.slice().sort((a, b) => b.base - a.base)[0] || null;
     const bench = opts.benchmark && Number.isFinite(opts.benchmark.median) ? opts.benchmark : null;
@@ -6982,11 +7076,11 @@ const CareerNegotiation = (() => {
     const deadline = opts.deadline && opts.deadline.text ? String(opts.deadline.text) : null;
     const stated = [base != null ? `a base of ${usd(base)}` : null, o.signing != null ? `a ${usd(o.signing, "signing")} signing bonus` : null].filter(Boolean).join(" and ");
     const email = [
-      `Subject: ${role[0].toUpperCase() + role.slice(1)} offer${o.company ? `, ${o.company}` : ""}`,
+      `Subject: ${o.role ? role[0].toUpperCase() + role.slice(1) : "Your"} offer${o.company ? `, ${o.company}` : ""}`,
       "",
       "Hi,",
       "",
-      `Thank you for the offer for the ${role} role${stated ? `, with ${stated}` : ""}. Before I decide, I'd like to talk about the pay.`,
+      `Thank you for the offer${o.role ? ` for the ${role} role` : ""}${stated ? `, with ${stated}` : ""}. Before I decide, I'd like to talk about the pay.`,
       ...because,
       `${ask} ${fallback}`,
       deadline ? `I'll get back to you by ${deadline}.` : null,

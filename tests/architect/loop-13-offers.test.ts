@@ -132,6 +132,14 @@ Deno.test({ name: "LOOP 13: 20 offers through the real handler and the F-15 path
         const r = await chat.say(m);
         ok(r.status === 200 && String(r.intent).startsWith("career_offer_"), `turn "${m}": ${r.intent} ${r.reply.slice(0, 200)}`);
         said.push(r.reply);
+        // Architect amendment (owner decision 2026-11-13, D-078: confirm before compare): the reading of each offer is shown
+        // first and nothing is compared until the person's plain yes to it; the person says "yes" through the same handler. The
+        // reading's own dollar figures stay under the check below (it is pushed to `said` too).
+        if (r.intent === "career_offer_confirm") {
+          const y = await chat.say("yes");
+          ok(y.status === 200 && String(y.intent).startsWith("career_offer_") && y.intent !== "career_offer_confirm", `yes to "${m}": ${y.intent} ${y.reply.slice(0, 200)}`);
+          said.push(y.reply);
+        }
       }
       const cmp = await chat.say("compare my offers");
       said.push(cmp.reply);

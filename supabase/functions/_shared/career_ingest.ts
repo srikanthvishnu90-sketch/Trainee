@@ -14,6 +14,7 @@ import { CareerJobs } from "./router_core.career.js";
 import { applyEmailOf } from "./apply_email.ts";
 import { BACKLOG_MS, freshWhenSeen } from "./career_fresh.ts";
 import { FEEDS, isMoreProvider, MORE_PROVIDERS } from "./career_ingest_feeds.ts";
+import { BOARD_SLUG, boardHost, cappedText, guardedFetch, parseJson, POSTING_UUID, type Resolve } from "./posting_fetch.ts";
 // Feature 6: the posting URL-shape guard (packages/domain/166-career-url-shape.js, MUSE-F-010), copied byte for byte
 // (tests/edge/career-ingest-scale.test.ts fails while the copy is stale). It sets globalThis.CareerUrlShape.
 import "./career_url_shape.js";
@@ -745,13 +746,31 @@ export async function sha256Hex(text: string): Promise<string> {
   return h;
 }
 // 2026-10-30: the bounded read's limits (see streamRead).
+// The board read behind a link a person pasted (apply_here.ts). Round 5: 32 MB (8 MB turned real boards' feeds, 9 to 12 MB,
+// into "not read"); the posting's own API is asked first (`one` below), so the feed is the fallback.
+export const PERSON_LINK_MAX_BYTES = 32 * 1024 * 1024;
+export const BOARD_MAX_BYTES = 64 * 1024 * 1024; // a whole board's list read whole (not streamed): stopped beyond this
 export const WHOLE_MAX = 2_000_000, XML_MAX = 8_000_000, STREAM_TIMEOUT_MS = 45000;
 // Where each JSON provider's job array is: a key of the root object, or the root itself (null).
 const CORE_ARRAY: Record<string, string | null> = { greenhouse: "jobs", lever: null, ashby: "jobs" };
-export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?: string; timeoutMs?: number; bodyHash?: boolean; stream?: boolean; wholeMax?: number } = {}): FetchFeed {
+export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?: string; timeoutMs?: number; bodyHash?: boolean; stream?: boolean; wholeMax?: number; wholeBytes?: number; personLink?: boolean; resolve?: Resolve } = {}): FetchFeed {
+  const wholeBytes = opts.wholeBytes ?? (opts.personLink ? PERSON_LINK_MAX_BYTES : BOARD_MAX_BYTES);
   const headers: Record<string, string> = { accept: "application/json" };
   if (opts.userAgent) headers["user-agent"] = opts.userAgent;
   const timeoutMs = opts.timeoutMs ?? 15000;
+  // Review of #775, round 2 (2026-11-13): a board read never follows a redirect unchecked (posting_fetch.ts guardedFetch:
+  // redirect "manual", at most 3 hops, each https, on the host asked or a job board's own host, never a never-open site), and
+  // a whole-body read stops at BOARD_MAX_BYTES (the streamed read below has its own bounds). The first address is built here
+  // from the provider list (career_ingest_feeds.ts), so no name lookup is made for it.
+  const guarded = async (url: string, init: RequestInit): Promise<Response> => {
+    const hostOf = (h: string) => { try { return new URL(h).hostname.toLowerCase(); } catch { return ""; } };
+    // Round 4: a scheduled ingest reads feeds the operator configured, and a board may redirect off its host (Recruitee to the
+    // employer's careers domain, Personio .de to .com): any public https host that passes the refusals is followed (never a
+    // never-open site, a reserved or private name, or a name that leads to a private address where a resolver exists). The
+    // first address is built here from the provider list, so only the hops are looked up. A pasted link's read (personLink,
+    // the chat path) stays on the host asked and the job boards' own hosts.
+    return (await guardedFetch(fetchFn as any, url, init, opts.personLink ? { allow: (h) => boardHost(h) || hostOf(h) === hostOf(url), resolve: null } : { resolve: opts.resolve, trustFirst: true })).res;
+  };
   // WO-037: `cond` sends the board's last validators (If-None-Match / If-Modified-Since); a 304 comes back as NOT_MODIFIED
   // (2026-10-30: it was null, so a board whose body was the JSON `null` read as "not modified").
   async function getJson(prov: string, url: string, deadline: number, cond?: Board, seen?: { etag?: string | null; last_modified?: string | null; body_sha?: string | null }): Promise<any> {
@@ -761,12 +780,12 @@ export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?
     if (cond?.etag) h["if-none-match"] = cond.etag;
     if (cond?.last_modified) h["if-modified-since"] = cond.last_modified;
     let res: Response;
-    try { res = await fetchFn(url, { headers: h, signal: AbortSignal.timeout(left) }); }
+    try { res = await guarded(url, { headers: h, signal: AbortSignal.timeout(left) }); }
     catch (e) { throw new Error(e instanceof Error && /timed? ?out|abort/i.test(`${e.name} ${e.message}`) ? `timed out after ${timeoutMs / 1000}s` : e instanceof Error ? e.message : String(e)); }
     if (seen) { seen.etag = res.headers.get("etag"); seen.last_modified = res.headers.get("last-modified"); }
     if (res.status === 304 && cond) { try { await res.body?.cancel(); } catch { /* already closed */ } return NOT_MODIFIED; }
     if (res.status < 200 || res.status >= 300) { try { await res.body?.cancel(); } catch { /* already closed */ } throw new Error(`HTTP ${res.status}`); }
-    const text = await res.text();
+    const text = await cappedText(res, wholeBytes);
     if (opts.bodyHash && seen) {
       seen.body_sha = await sha256Hex(text);
       if (cond?.body_sha && cond.body_sha === seen.body_sha) return NOT_MODIFIED; // the same body as the last full read
@@ -799,14 +818,14 @@ export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?
       if (cond && b.last_modified) h["if-modified-since"] = b.last_modified;
       if (rq.body) h["content-type"] = "application/json";
       let res: Response;
-      try { res = await fetchFn(rq.url, { method: rq.method, headers: h, body: rq.body, signal: AbortSignal.timeout(left) }); }
+      try { res = await guarded(rq.url, { method: rq.method, headers: h, body: rq.body, signal: AbortSignal.timeout(left) }); }
       catch (e) {
         if (page > startPage) { complete = false; more = true; break; }
         throw new Error(e instanceof Error && /timed? ?out|abort/i.test(`${e.name} ${e.message}`) ? `timed out after ${timeoutMs / 1000}s` : e instanceof Error ? e.message : String(e)); }
       if (res.status === 304 && cond && (b.etag || b.last_modified)) { try { await res.body?.cancel(); } catch { /* already closed */ } return null; }
       if (res.status < 200 || res.status >= 300) { try { await res.body?.cancel(); } catch { /* already closed */ } throw new Error(`HTTP ${res.status}`); }
       if (cond) validators = { etag: res.headers.get("etag"), last_modified: res.headers.get("last-modified") };
-      const text = await res.text();
+      const text = await cappedText(res, wholeBytes);
       if (cond && opts.bodyHash) {
         const sha = await sha256Hex(text);
         if (b.body_sha && b.body_sha === sha) return { same: true as const, sha, validators };
@@ -892,7 +911,7 @@ export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?
     let streaming = false;
     try {
       let res: Response;
-      try { res = await fetchFn(rq.url, { method: rq.method, headers: h, signal: ctl.signal }); }
+      try { res = await guarded(rq.url, { method: rq.method, headers: h, signal: ctl.signal }); }
       catch (e) { throw new Error(ctl.signal.aborted || (e instanceof Error && /timed? ?out|abort/i.test(`${e.name} ${e.message}`)) ? `timed out after ${timeoutMs / 1000}s` : e instanceof Error ? e.message : String(e)); }
       const notModified = { postings: [], complete: false, not_modified: true as const, etag: b.etag ?? null, last_modified: b.last_modified ?? null, ...(opts.bodyHash ? { body_sha: b.body_sha ?? null } : {}) };
       if (res.status === 304 && (b.etag || b.last_modified)) { try { await res.body?.cancel(); } catch { /* closed */ } return notModified; }
@@ -1020,7 +1039,23 @@ export function boardFetchFeed(fetchFn: typeof fetch = fetch, opts: { userAgent?
     if (validators && (validators.etag || validators.last_modified)) return { postings, complete, ...part, ...validators };
     return complete && !more && startPage === 0 ? postings : { postings, complete, ...part };
   };
-  return opts.stream ? streamRead : legacy;
+  // Round 5: ONE posting by its id from the board's own posting API, where it has one (Greenhouse's job endpoint, Lever's
+  // posting endpoint), normalised as the feed's postings are; null when the provider has none or the answer is not a posting
+  // (the caller then reads the feed). The same guarded request, 2 MB.
+  const one = async (b: Board, atsId: string): Promise<FeedPosting | null> => {
+    if (!BOARD_SLUG.test(b.board)) return null;
+    const url = b.provider === "greenhouse" && /^\d{1,20}$/.test(atsId) ? `https://boards-api.greenhouse.io/v1/boards/${b.board}/jobs/${atsId}?content=true&pay_transparency=true`
+      : b.provider === "lever" && POSTING_UUID.test(atsId) ? `https://api.lever.co/v0/postings/${b.board}/${atsId.toLowerCase()}` : null;
+    if (!url) return null;
+    const res = await guarded(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+    if (!res.ok) { try { await res.body?.cancel(); } catch { /* already closed */ } return null; }
+    const j = parseJson(await cappedText(res));
+    if (!j || typeof j !== "object" || Array.isArray(j)) return null;
+    const clean = scrubRaw(j);
+    const normalized = b.provider === "greenhouse" ? CareerJobs.normalizeGreenhouse({ jobs: [clean] }, b.board, b.company) : CareerJobs.normalizeLever([clean], b.board, b.company);
+    return toPostings(b, normalized, [j])[0] ?? null;
+  };
+  return Object.assign(opts.stream ? streamRead : legacy, { one });
 }
 // One read's normalized jobs -> the rows the table takes. Every row must fit the table's constraints
 // (20261019000000_career_postings.sql): one bad row would otherwise fail its board's write on every run. A posting

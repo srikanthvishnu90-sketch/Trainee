@@ -250,10 +250,10 @@ export async function callModel(cfg: ModelConfig, payload: any, o: CallOptions =
     console.error(`[model] budget ${got.reason}${got.detail ? `: ${got.detail}` : ""}`);
     throw new ModelBudgetBlockedError(got.reason, got.reason === "limit" ? (got.day ? `the model budget for ${got.day} is used up` : "the global model budget is used up") : got.reason === "paused" ? "the model budget is switched off" : got.reason === "before" ? "the model budget window has not opened" : got.reason === "after" ? "the model budget window has ended and no new budget is approved" : `the model budget could not be checked${got.detail ? `: ${got.detail}` : ""}`, got.reason === "limit" ? got.day ?? null : null);
   }
-  // The total is $85: 80% ($68) warns; a reservation that does not fit (above) is refused and, at $85, the database pauses every
+  // The total is $93: 80% ($74.40) warns; a reservation that does not fit (above) is refused and, at $93, the database pauses every
   // call. Eval and test runners also refuse new runs at the total (assertRunMayStart).
   if (got.overTarget) console.error("[model] BUDGET TARGET EXCEEDED: the release+test spend total (MODEL_BUDGET_TARGET_USD) is reached; eval and test runs must not start");
-  else if (got.warn) console.error("[model] budget warning: 80% of the $85 release+test spend total (MODEL_BUDGET_TARGET_USD) is spent or reserved");
+  else if (got.warn) console.error("[model] budget warning: 80% of the $93 release+test spend total (MODEL_BUDGET_TARGET_USD) is spent or reserved");
   // Until proven otherwise the whole worst case is spent. Only the branches below that prove more change this.
   let close: { kind: "keep" } | { kind: "actual"; micros: number } | { kind: "release" } = { kind: "keep" };
   try {

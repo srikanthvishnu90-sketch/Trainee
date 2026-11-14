@@ -592,7 +592,12 @@ export async function researchMarket(i: { question: string; format: "inline" | "
       const unitYears = new Set(units0.flatMap((u) => u.match(/(?<!\d)(?:19|20)\d\d(?!\d)/g) ?? []));
       const labelYears = (r.label.match(/(?<!\d)(?:19|20)\d\d(?!\d)/g) ?? []);
       const fromPages = labelYears.every((y) => unitYears.has(y)) && !figuresIn(r.label.replace(/(?<!\d)(?:19|20)\d\d(?!\d)/g, " ")).length && !/[^\p{L}\p{N} '&()-]/u.test(r.label)
-        && [...contentWords(r.label)].every((w) => have.has(w) || askWords.has(w));
+        && [...contentWords(r.label)].every((w) => have.has(w) || askWords.has(w))
+        // never a negation, and its words in a unit's (or the ask's) own order: "No pay for interns" and "Interns pay Citadel" are not
+        // "Citadel pays interns"
+        && !/(?<![\p{L}])(?:no|not|never|none|without|non)(?![\p{L}])|n['’]t(?![\p{L}])/iu.test(r.label)
+        // (a noun phrase with its participle after it, "Home batteries installed (2025)", is the unit's "installed … home batteries")
+        && (/^[\p{L} '&-]+\s\p{L}+ed(?:\s*\(\s*(?:19|20)\d\d\s*\))?$/iu.test(r.label.trim()) || [...units0, (i.ask ?? "").toLowerCase()].some((u) => { const uw = [...contentWords(u)]; let at = 0; for (const w of contentWords(r.label)) { const k = uw.indexOf(w, at); if (k < 0) return false; at = k + 1; } return true; }));
       return contentWords(r.label).size > 0 && (fromPages || (!figuresIn(r.label).length && !/[^\p{L}\p{N} '&-]/u.test(r.label) && (askSpan(lab, i.ask ?? "") || units0.some((u) => u.startsWith(`${lab} `))))); }) : rows;
     // 2026-11-14: a refused cell drops that cell only (it is left unknown); the table stands while two columns keep a cell.
     if (idx ? rowsS.length > 0 && opts.filter((_, j) => rowsS.some((r) => r.cells[j])).length >= 2 : rows.length) comparison = { options: opts, rows: rowsS };
@@ -924,9 +929,8 @@ export async function enforceMarketReplySupported(reply: string, r: MarketResult
       // with none, code's own answer (the kept lines) is given as before.
       if (!anyStood) return "";
       const figs = figuresIn(wants[x].claim);
-      // (and only when every name the sentence gives is the kept line's: Acme's figure is never given for a sentence about Globex)
-      const names = specifics(wants[x].claim).names;
-      const p = figs.length ? kept.find((k) => k.cite.some((c) => cited[x]?.includes(c)) && figs.every((f) => figuresIn(k.text).some((y) => numEq(y, f))) && names.every((n) => k.text.toLowerCase().includes(n.toLowerCase()))) : null;
+      // (the kept line says whose figure it is, in its own words: "Globex Power installed 41,000 …" gives Acme's quote, naming Acme)
+      const p = figs.length ? kept.find((k) => k.cite.some((c) => cited[x]?.includes(c)) && figs.every((f) => figuresIn(k.text).some((y) => numEq(y, f)))) : null;
       if (!p) return "";
       const key = plainLine(p.text.replace(/^"(.*)"$/s, "$1")).toLowerCase();
       if (said.has(key)) return "";

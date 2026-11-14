@@ -382,7 +382,9 @@ export async function agentTurn(o: {
     const codeLines = (result.codeLines ?? []).flatMap((x) => x.split(/(?<=[.!?])\s+(?!https?:)/));
     const readSources = [...(result.readLines ?? []).map((text) => ({ text, title: "Read from the posting this turn" })),
       // Ruling 2026-11-14: a File this turn made (its text passed the File's fact guard) is a source for the reply that restates it.
-      ...((result as any).fileTexts?.length ? [{ text: ((result as any).fileTexts as string[]).join("\n"), title: "The File made this turn:", one: true }] : [])];
+      ...((result as any).fileTexts?.length ? [{ text: ((result as any).fileTexts as string[]).join("\n"), title: "The File made this turn:", one: true }] : []),
+      // Ruling 2026-11-14 (live-10 C1, "one posting"): a count code knows this turn is a source for that count of that noun only.
+      ...(Array.isArray(result.postings) ? [{ text: `The search this turn returned ${result.postings.length} posting${result.postings.length === 1 ? "" : "s"}.`, title: "Counts code knows this turn" }] : [])];
     // A sentence that restates code's boundary ("… no account, saved application or submission was created.") is that boundary:
     // code's own line takes its place, unjudged.
     for (const line of codeLines) {

@@ -202,3 +202,15 @@ Deno.test("abbreviations: MRR, SWE and GPA are found by their expansions; a fals
   ok(!!fs2("Pixelforge reached $9k MRR.", rec), "the record's own figure, with the abbreviation");
   ok(!fs2("Pixelforge reached an MRR of $20k.", rec), "a figure the record does not give is refused");
 });
+
+// Ruling 2026-11-14 (live-10 C1): a count in a reply sentence stands when it is a count code knows this turn, for that noun only.
+Deno.test("a count code knows this turn: \"one posting\" with one result stands; \"three postings\" with one result is refused", async () => {
+  const one = [{ job_id: "c1", company: "Acme", title: "Software Engineer Intern", location: "Chicago, IL", url: "https://jobs.example/acme/1", description: "Software engineer intern role.", pay: "$40 an hour" }];
+  const run = (reply: string) => agentTurn({ message: "find me a software engineer internship", history: [], stores: { profile: { facts: [] } }, userId: "u", threadId: "t", now: Date.parse("2026-11-14T00:00:00Z"),
+    market: { judge: async (cs: any[]) => cs.map(() => "yes") }, postings: async () => one,
+    model: (() => { let n = 0; return async (p: any) => p.tools?.length ? [aUse("search_jobs", { query: "software engineer intern" }), aSay(reply)][Math.min(n++, 1)] : aSay(""); })() } as any) as Promise<any>;
+  const a = await run("The search found one posting.");
+  ok(a.reply.includes("The search found one posting."), a.reply);
+  const b = await run("The search found three postings.");
+  ok(!b.reply.includes("three postings"), b.reply);
+});

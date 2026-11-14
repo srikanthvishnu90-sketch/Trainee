@@ -9,6 +9,8 @@ import { bodyHtml, textOf, validateKind } from "../../supabase/functions/_shared
 import { fetchSources, isBlockedHost } from "../../supabase/functions/_shared/research_sources.ts";
 import { freeProvider, freeReader } from "../../supabase/functions/_shared/research_free_sources.ts";
 import { freeWeb, html, nf, NOW, PUBLIC } from "../helpers/research_free_web.ts";
+import { testSupportJudge as judge } from "./support-test-judge.ts";
+import { BOARD, BOARD_CONDITION, BOARD_RISK } from "./support-test-judge-c.ts";
 
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -22,10 +24,15 @@ Deno.test("a research brief File from free sources: the ATS count is cited to th
       { text: "Zentrafin had 2,400 employees as of 2025.", quote: "Zentrafin had 2,400 employees as of 2025, according to Wikidata.", url: "https://www.wikidata.org/wiki/Special:EntityData/Q999001.json" },
       { text: "Zentrafin had 9,000 employees.", quote: "Zentrafin had 2,400 employees as of 2025", url: "https://www.wikidata.org/wiki/Special:EntityData/Q999001.json" },
     ],
-    conditions: [{ text: "Zentrafin keeps hiring new grads into engineering.", urls: ["https://zentrafin.example/careers"] }],
-    risks: [{ text: "Fewer open roles would mean fewer first jobs.", urls: ["https://boards-api.greenhouse.io/v1/boards/zentrafin/jobs"] }] };
+    // Architect amendment (owner decision 2026-11-13: research support check switched on): a File needs a condition and a risk a page
+    // states; the model's own readings ("keeps hiring", "fewer open roles would mean ...") are on no page and are dropped, so the
+    // draft gives lines the board states.
+    conditions: [{ text: BOARD_CONDITION, urls: [BOARD] }],
+    risks: [{ text: BOARD_RISK, urls: [BOARD] }] };
   const deps: MarketDeps = { search: freeProvider({ fetch: f, now: () => NOW, userAgent: null }), read, draft: async () => JSON.stringify(draft),
-    publish: async (d) => { published.push(d); return { url: "https://trainee.example/file?t=v1.free1" }; } };
+    publish: async (d) => { published.push(d); return { url: "https://trainee.example/file?t=v1.free1" }; },
+    // Architect amendment (owner decision 2026-11-13: research support check switched on): research needs its judge to keep a line.
+    judge };
   const r = await researchMarket({ question: "research Zentrafin as an employer and give me a file", format: "file", plan: { queries: ["Zentrafin employer"], companies: ["Zentrafin"], sites: ["zentrafin.example"] }, deps });
   eq([r.status, r.format, (r as any).dropped], ["ok", "file", 1], "the 9,000 claim is dropped: its number is not in its quote");
   const d = published[0];
@@ -46,20 +53,34 @@ Deno.test("the cover thesis names its sources, or says it summarizes the cited s
   const mk = async (thesis: string) => {
     const published: any[] = [];
     const draft = { title: "Zentrafin", thesis, summary: [{ text: "The Greenhouse job board with the token zentrafin lists 4 open roles.", quote: "The Greenhouse job board with the token zentrafin lists 4 open roles.", url: "https://boards-api.greenhouse.io/v1/boards/zentrafin/jobs" }],
-      conditions: [{ text: "Zentrafin keeps hiring new grads into engineering.", urls: ["https://zentrafin.example/careers"] }], risks: [{ text: "Fewer open roles would mean fewer first jobs.", urls: ["https://boards-api.greenhouse.io/v1/boards/zentrafin/jobs"] }] };
+      // Architect amendment (owner decision 2026-11-13: research support check switched on): a File needs a condition and a risk a
+      // page states (the model's readings are on no page and are dropped), so the draft gives lines the board states.
+      conditions: [{ text: BOARD_CONDITION, urls: [BOARD] }], risks: [{ text: BOARD_RISK, urls: [BOARD] }] };
     await researchMarket({ question: "research Zentrafin", format: "file", plan: { queries: ["Zentrafin"], companies: ["Zentrafin"], sites: ["zentrafin.example"] },
-      deps: { search: freeProvider({ fetch: f, now: () => NOW, userAgent: null }), read, draft: async () => JSON.stringify(draft), publish: async (d) => { published.push(d); return { url: "https://trainee.example/file?t=v1.x" }; } } });
+      deps: { search: freeProvider({ fetch: f, now: () => NOW, userAgent: null }), read, draft: async () => JSON.stringify(draft), publish: async (d) => { published.push(d); return { url: "https://trainee.example/file?t=v1.x" }; },
+        // Architect amendment (owner decision 2026-11-13: research support check switched on): research needs its judge to keep a line.
+        judge } });
     const v: any = validateKind("research_brief", published[0], { now: NOW });
     ok(v.ok, JSON.stringify(v));
     return { d: v.data, h: bodyHtml({ id: "f", userId: "u", kind: "research_brief", data: v.data, state: {}, tag: null, created_at: NOW, expires_at: NOW + 1, revoked_at: null } as any, "fs1." + "a".repeat(64)) };
   };
-  const a = await mk("Zentrafin hires new grads into engineering.");
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): a thesis stands in the model's words only
+  // when one page sentence states it and the judge says so. The free web's careers page reads with its title glued to its sentence
+  // ("Careers at Zentrafin Zentrafin hires ..."), so no page holds "Zentrafin hires new grads into engineering."; the model's thesis
+  // here is the board's own line said another way, which the board states, and it is cited to the board.
+  const a = await mk("The Greenhouse board with the token zentrafin lists 4 open roles.");
   ok(Array.isArray(a.d.thesis_cite) && a.d.thesis_cite.length >= 1 && !a.d.thesis_summary, JSON.stringify(a.d));
-  ok(/<p class="rb-thesis">Zentrafin hires new grads into engineering\. <span class="rb-cite">\[\d\]/.test(a.h));
+  ok(/<p class="rb-thesis">The Greenhouse board with the token zentrafin lists 4 open roles\. <span class="rb-cite">\[\d\]/.test(a.h), a.h);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): a thesis no page states is never the cover
+  // as "a summary of the cited sections" any more; the cover is a page's own sentence in quotation marks, cited to that page, and
+  // so it names its source. Stricter than before: an unstated headline is not shown at all.
   const b = await mk("Zentrafin is a sensible first employer.");
-  eq([b.d.thesis_cite, b.d.thesis_summary], [undefined, true]);
-  ok(b.h.includes('<p class="rb-basis">A summary of the cited sections below.</p>'));
-  ok(/<span class="rb-host" title="zentrafin\.example">zentrafin\.example<\/span> · Read/.test(a.h));
+  eq(b.d.thesis_summary, undefined, JSON.stringify(b.d));
+  ok(/^".+"$/.test(b.d.thesis) && b.d.thesis_cite.length === 1 && b.d.sources[b.d.thesis_cite[0] - 1], JSON.stringify(b.d));
+  ok(!b.h.includes("sensible") && !b.h.includes('<p class="rb-basis">'), b.h);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): the brief now cites only the board (the
+  // careers page holds no line that stands), so the host checked is the board's, shown whole with the ellipsis style on it.
+  ok(/<span class="rb-host" title="boards-api\.greenhouse\.io">boards-api\.greenhouse\.io<\/span> · Read/.test(a.h));
   ok(!validateKind("research_brief", { ...a.d, thesis_cite: [9] }, { now: NOW }).ok, "a thesis cite must be a source number");
 });
 
@@ -78,8 +99,12 @@ Deno.test("facts guard: a heading or form name is never a fact; a filing's form 
     { text: "Form 10-K Hollow Oak Logistics Inc.", quote: "Form 10-K Hollow Oak Logistics Inc.", url: page },
     { text: "Hollow Oak Logistics operates 14 distribution centers in the Midwest.", quote: "Hollow Oak Logistics operates 14 distribution centers in the Midwest.", url: page }], conditions: [], risks: [] };
   const r: any = await researchMarket({ question: "research Hollow Oak Logistics", format: "inline", plan: { queries: ["x"] },
-    deps: { search: { id: "first_party", needsKey: false, search: async () => ({ hits: [{ url: page, title: "t", provider: "sec_edgar", foundAt: NOW }], notes: [], provider: "first_party", searches: 1 }) }, read: (u) => fetchSources(u, { fetch: f, resolver: PUBLIC, now: () => NOW }), draft: async () => JSON.stringify(draft) } });
-  eq([r.points.map((p: any) => p.text), r.dropped], [["Hollow Oak Logistics operates 14 distribution centers in the Midwest."], 1]);
+    deps: { search: { id: "first_party", needsKey: false, search: async () => ({ hits: [{ url: page, title: "t", provider: "sec_edgar", foundAt: NOW }], notes: [], provider: "first_party", searches: 1 }) }, read: (u) => fetchSources(u, { fetch: f, resolver: PUBLIC, now: () => NOW }), draft: async () => JSON.stringify(draft),
+      // Architect amendment (owner decision 2026-11-13: research support check switched on): research needs its judge to keep a line.
+      judge } });
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): the real fact stands as the page's own
+  // sentence in quotation marks (the draft only said it again); the heading is still dropped, never shown as a fact.
+  eq([r.points.map((p: any) => p.text), r.dropped], [['"Hollow Oak Logistics operates 14 distribution centers in the Midwest."'], 1]);
 });
 
 Deno.test("when two cited sources differ on a figure, the brief shows both with their sources and says so; it never picks one", async () => {
@@ -97,10 +122,14 @@ Deno.test("when two cited sources differ on a figure, the brief shows both with 
   const draft = { title: "Hollow Oak Logistics", thesis: "Hollow Oak Logistics hires new grads every year.", summary: [
     { text: "Hollow Oak Logistics employs about 600 people across 10 offices.", quote: "Hollow Oak Logistics employs about 600 people across 10 offices.", url: a },
     { text: "Hollow Oak Logistics had 3,900 full-time employees at the end of the fiscal year.", quote: "Hollow Oak Logistics had 3,900 full-time employees at the end of the fiscal year.", url: b }],
-    conditions: [{ text: "Hollow Oak Logistics keeps hiring new grads.", urls: [a] }], risks: [{ text: "Hiring could slow at Hollow Oak Logistics.", urls: [a] }] };
+    // Architect amendment (owner decision 2026-11-13: research support check switched on): a File needs a risk a page states; "Hiring
+    // could slow" is on no page and is dropped, so the draft's risk is the filing's own sentence (the File is what is under test).
+    conditions: [{ text: "Hollow Oak Logistics keeps hiring new grads.", urls: [a] }], risks: [{ text: "Hollow Oak Logistics had 3,900 full-time employees at the end of the fiscal year.", urls: [b] }] };
   const r: any = await researchMarket({ question: "research Hollow Oak Logistics and give me a file", format: "file", plan: { queries: ["x"] },
     deps: { search: { id: "first_party", needsKey: false, search: async () => ({ hits: [a, b].map((url) => ({ url, title: "t", provider: "company_site" as const, foundAt: NOW })), notes: [], provider: "first_party", searches: 1 }) },
-      read: (u) => fetchSources(u, { fetch: f, resolver: PUBLIC, now: () => NOW }), draft: async () => JSON.stringify(draft), publish: async (d) => { published.push(d); return { url: "https://trainee.example/file?t=v1.d" }; } } });
+      read: (u) => fetchSources(u, { fetch: f, resolver: PUBLIC, now: () => NOW }), draft: async () => JSON.stringify(draft), publish: async (d) => { published.push(d); return { url: "https://trainee.example/file?t=v1.d" }; },
+      // Architect amendment (owner decision 2026-11-13: research support check switched on): research needs its judge to keep a line.
+      judge } });
   eq(r.disagreements, [{ label: "Headcount, Hollow Oak Logistics", values: [{ value: "600", cite: [1] }, { value: "3,900", cite: [2] }] }]);
   eq(r.points.length, 2, "both figures stay; neither is dropped or chosen");
   const v: any = validateKind("research_brief", published[0], { now: NOW });
@@ -110,7 +139,9 @@ Deno.test("when two cited sources differ on a figure, the brief shows both with 
   ok(h.indexOf(">Summary<") < h.indexOf(">Where the sources differ<") && h.indexOf(">Where the sources differ<") < h.indexOf(">What would have to be true<"));
   // An inline answer is told to give both.
   const inline: any = await researchMarket({ question: "how many people work at Hollow Oak Logistics", format: "inline", plan: { queries: ["x"] },
-    deps: { search: { id: "first_party", needsKey: false, search: async () => ({ hits: [a, b].map((url) => ({ url, title: "t", provider: "company_site" as const, foundAt: NOW })), notes: [], provider: "first_party", searches: 1 }) }, read: (u) => fetchSources(u, { fetch: f, resolver: PUBLIC, now: () => NOW }), draft: async () => JSON.stringify(draft) } });
+    deps: { search: { id: "first_party", needsKey: false, search: async () => ({ hits: [a, b].map((url) => ({ url, title: "t", provider: "company_site" as const, foundAt: NOW })), notes: [], provider: "first_party", searches: 1 }) }, read: (u) => fetchSources(u, { fetch: f, resolver: PUBLIC, now: () => NOW }), draft: async () => JSON.stringify(draft),
+      // Architect amendment (owner decision 2026-11-13: research support check switched on): research needs its judge to keep a line.
+      judge } });
   ok(/give each value with its source number and say they differ; never pick one/.test(inline.note));
 });
 

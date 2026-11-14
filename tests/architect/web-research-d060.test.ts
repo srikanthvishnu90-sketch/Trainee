@@ -18,9 +18,10 @@ import { anthropicWire } from "./helpers/anthropic_wire.ts";
 import { costMicros, modelConfigFor, TRAINEE_MODEL, WEB_SEARCH_AVAILABLE, WEB_SEARCH_MAX_USES, WEB_SEARCH_TOOL, webSearch } from "../../supabase/functions/_shared/model_gateway.ts";
 import { memoryBudgetGate } from "../../supabase/functions/_shared/model_budget.ts";
 import { claudeWebProvider, memoryWebCache, postingJobId, recheckPosting, sourceKind, webResearchOn, WEB_RESEARCH_SEARCHES, withWebSearch } from "../../supabase/functions/_shared/research_web.ts";
-import { enforceMarketReply, messagesLayout, type MarketResult, researchMarket } from "../../supabase/functions/_shared/agent/research/market.ts";
+import { enforceMarketReplySupported, messagesLayout, type MarketResult, researchMarket } from "../../supabase/functions/_shared/agent/research/market.ts";
 import { RELEASE_FLAGS, RELEASE_NEVER_ON } from "../../supabase/functions/agent-chat/release_config.ts";
 import { NEVER_SEARCH_DOMAINS } from "../../supabase/functions/_shared/research_never.ts";
+import { judgeResponse, testSupportJudge } from "./support-test-judge-c.ts";
 
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -114,20 +115,48 @@ const RES = (o: Partial<Extract<MarketResult, { status: "ok" }>> = {}): MarketRe
   conditions: [], risks: [], comparison: null, file_url: null, dropped: 0, notes: [], searched: "claude_web", note: "", layout: "messages",
   sources: [{ n: 1, url: CITADEL, title: "Citadel", fetched_at: "2026-11-11T00:00:00Z", kind: "official" }, { n: 2, url: REDDIT, title: "reddit", fetched_at: "2026-11-11T00:00:00Z", kind: "anecdote" }, { n: 3, url: LEVELS, title: "levels", fetched_at: "2026-11-11T00:00:00Z", kind: "self_reported" }], ...o } as MarketResult);
 
-Deno.test("D-060 reply rules: one topic per message with its link on its own line (C9); labels; no unsourced median (C22); no invented figure", () => {
+// Architect amendment (owner decision 2026-11-13: research support check switched on): a hand-built result (RES) was never checked, so
+// with the check on it is answered as not confirmed; the reply-rule tests build the same three points through researchMarket from
+// the same pages (the search's passages), with the test judge, and check the reply with the judge (enforceMarketReplySupported).
+const PAGE_TEXT: Record<string, { title: string; text: string }> = {
+  [CITADEL]: { title: "Citadel", text: "There are four steps in the process. At Citadel, the overall process takes roughly eight weeks from start to finish." },
+  [REDDIT]: { title: "reddit", text: PASSAGES[REDDIT].text }, [LEVELS]: { title: "levels", text: PASSAGES[LEVELS].text },
+  "https://www.bls.gov/x": { title: "BLS", text: "The median hourly pay is $40." },
+};
+async function built(question: string, summary: { text: string; quote: string; url: string }[], layout: "messages" | null = "messages", companies = ["Citadel"]) {
+  const urls = [...new Set(summary.map((p) => p.url))];
+  return await researchMarket({ question, format: "inline", plan: { queries: ["Citadel new grad"], companies }, deps: {
+    search: { id: "first_party", needsKey: false, search: async () => ({ hits: urls.map((url) => ({ url, title: PAGE_TEXT[url].title, provider: "company_site" as const, foundAt: Date.parse("2026-11-11T00:00:00Z") })), notes: [], provider: "claude_web", searches: 1 }) } as any,
+    read: async (us) => ({ verified: us.map((u) => ({ url: u, requested: u, status: 200 as const, title: PAGE_TEXT[u].title, text: PAGE_TEXT[u].text, fetchedAt: Date.parse("2026-11-11T00:00:00Z") })), rejected: [] }),
+    draft: async () => JSON.stringify({ title: "Citadel", summary }), judge: testSupportJudge, ...(layout ? { layout } : {}) } });
+}
+const THREE = [{ text: "Citadel's process has four steps", quote: "There are four steps in the process.", url: CITADEL }, { text: "Anonymous posters describe 70-hour weeks at Citadel", quote: "Anonymous posters describe 70-hour weeks at Citadel.", url: REDDIT },
+  { text: "Citadel new grad total compensation reported at $400,000", quote: "Citadel new grad software engineer total compensation reported at $400,000.", url: LEVELS }];
+Deno.test("D-060 reply rules: one topic per message with its link on its own line (C9); labels; no unsourced median (C22); no invented figure", async () => {
   const reply = "Citadel's process has four steps [1].\n\nAnonymous posters describe 70-hour weeks at Citadel, anecdotes rather than proof [2]. The hours there are brutal [2].\n\nSelf-reported total compensation is $400,000, and those reports can lag [3]. The median new grad pay at Citadel is $400,000 [3]. Citadel pays new grads $999,000 [1].";
-  const out = enforceMarketReply(reply, RES());
-  eq(out, [
-    `Citadel's process has four steps.\n${CITADEL}`,
-    `Anonymous posters describe 70-hour weeks at Citadel, anecdotes rather than proof.\n${REDDIT}`,
-    `Self-reported total compensation is $400,000, and those reports can lag.\n${LEVELS}`,
-  ].join("\n\n"));
+  const ask = "what's Citadel like for new grad SWE";
+  const r0 = await built(ask, THREE);
+  const out = await enforceMarketReplySupported(reply, r0, [], { judge: testSupportJudge, ask });
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): a sentence stands in the model's words only
+  // when its page states it; the model's added clauses ("anecdotes rather than proof", "those reports can lag") are on no page, so
+  // the anecdote is said as the passage's own sentence (which says "Anonymous" itself), and a pay sentence no page states is not
+  // said. Still: one topic per message, its link alone on the next line, only the search's sources, every figure on its own
+  // source's message, and no unlabelled anecdote, unsourced median or invented figure.
+  const paras = out.split("\n\n");
+  eq(paras[0], `Citadel's process has four steps.\n${CITADEL}`, out);
+  ok(paras[1]?.startsWith('"Anonymous posters describe 70-hour weeks at Citadel."') && paras[1].endsWith(`\n${REDDIT}`), out);
+  for (const p of paras) { const [t, ...links] = p.split("\n"); ok(links.length >= 1 && links.every((l) => [CITADEL, REDDIT, LEVELS].includes(l)) && !/https?:/.test(t), p); }
+  ok(paras.every((p) => !/\$400,000/.test(p) || p.endsWith(`\n${LEVELS}`)), out);
   ok(!/brutal|median|999/.test(out), "an unlabelled anecdote, an unsourced median and an invented figure are all dropped");
   // A point that itself says median lets the reply say median.
-  const med = enforceMarketReply("The median hourly pay is $40 [1].", RES({ points: [{ text: "The median hourly pay is $40", cite: [1] }], sources: [{ n: 1, url: "https://www.bls.gov/x", title: "BLS", fetched_at: "2026-11-11T00:00:00Z", kind: "official" }] }));
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): built and checked as above.
+  const rm = await built("what is the median hourly pay", [{ text: "The median hourly pay is $40", quote: "The median hourly pay is $40.", url: "https://www.bls.gov/x" }], "messages", []);
+  const med = await enforceMarketReplySupported("The median hourly pay is $40 [1].", rm, [], { judge: testSupportJudge, ask: "what is the median hourly pay" });
   ok(/median hourly pay is \$40/.test(med), med);
   // Without the web layout the reply keeps the numbered sources, and labels the kind of each.
-  const plain = enforceMarketReply("Citadel's process has four steps [1].", RES({ layout: undefined }));
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): built and checked as above.
+  const rp = await built(ask, THREE, null);
+  const plain = await enforceMarketReplySupported("Citadel's process has four steps [1].", rp, [], { judge: testSupportJudge, ask });
   ok(/\[1\] Citadel: https:\/\/www\.citadel\.com/.test(plain) && /\[2\] reddit \(anecdote\)/.test(plain) && /\[3\] levels \(self-reported\)/.test(plain), plain);
   eq(messagesLayout("A [1][2].\n\nB.", RES().status === "ok" ? (RES() as any).sources : []), `A.\n${CITADEL}\n${REDDIT}\n\nB.`);
 });
@@ -136,6 +165,8 @@ Deno.test("D-060 research: a passage the search quoted stands for a page the rea
   const search = claudeWebProvider({ search: async () => await webSearch("q", { cfg: modelConfigFor(env({ ANTHROPIC_API_KEY: "sk-test-not-real" }), TRAINEE_MODEL), budget: memoryBudgetGate(), request: (async () => Response.json(searchAnswer({ model: TRAINEE_MODEL }))) as typeof fetch }), now: () => 5000 });
   let drafted = "";
   const r = await researchMarket({ question: "what's Citadel like for new grad SWE", format: "inline", plan: { queries: ["Citadel new grad"], companies: ["Citadel"] }, deps: { search, layout: "messages",
+    // Architect amendment (owner decision 2026-11-13: research support check switched on): research needs its judge to keep a line.
+    judge: testSupportJudge,
     read: async (urls) => ({ verified: urls.filter((u) => PAGES[u]).map((u) => ({ url: u, requested: u, status: 200 as const, title: "Our Campus Engineering Interview Process - Citadel", text: "There are four steps in the process. At Citadel, the overall process takes roughly eight weeks from start to finish.", fetchedAt: 1 })), rejected: urls.filter((u) => !PAGES[u]).map((url) => ({ url, why: "http_status" as const })) }),
     draft: async (p) => { drafted = p.messages[0].content; return JSON.stringify({ title: "Citadel", summary: [
       { text: "At Citadel the overall process takes roughly eight weeks", quote: "At Citadel, the overall process takes roughly eight weeks from start to finish.", url: CITADEL },
@@ -144,8 +175,13 @@ Deno.test("D-060 research: a passage the search quoted stands for a page the rea
   ok(r.status === "ok", JSON.stringify(r));
   if (r.status !== "ok") return;
   ok(!/glassdoor/i.test(drafted), "a never-list page is never put in front of the model");
-  eq(r.points.map((p) => p.text), ["At Citadel the overall process takes roughly eight weeks", "Anonymous posters describe 70-hour weeks at Citadel"]);
-  eq(r.sources.map((s) => [s.url, s.kind, s.via ?? "read"]), [[CITADEL, "official", "read"], [REDDIT, "anecdote", "search_passage"]]);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): the draft's second line only says the passage
+  // again, so it stands as the passage's own sentence, in quotation marks; the never-list page is still never a point.
+  eq(r.points.map((p) => p.text), ["At Citadel the overall process takes roughly eight weeks", '"Anonymous posters describe 70-hour weeks at Citadel."']);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): with the check on, "official" is only a
+  // government domain or the employer's own domain as its record gives it (the plan's sites or the search's own finding, never a
+  // name in a host); this plan and this search give none, so citadel.com reads "reported". Never more certain than the record.
+  eq(r.sources.map((s) => [s.url, s.kind, s.via ?? "read"]), [[CITADEL, "reported", "read"], [REDDIT, "anecdote", "search_passage"]]);
   eq(r.layout, "messages");
   ok(/Official sources first/.test(r.note) && /benchmark, never a median/.test(r.note) && /different employers/.test(r.note) && /same source/.test(r.note), "the note asks for Instinct's process");
 });
@@ -182,7 +218,7 @@ const GH = "https://boards.greenhouse.io/paypal/jobs/12345";
 const WD = "https://paypal.wd1.myworkdayjobs.com/en-US/jobs/job/Software-Engineer-Intern---Summer-2027_R0138586";
 type Seen = { tools: string[]; toolResult: string | null; lastUser: string };
 const seen: Seen[] = [], webCalls: any[] = [], hosts: string[] = [];
-let stage = 0;
+let stage = 0, judgeCalls = 0;
 const last = (msgs: any[]) => msgs.at(-1);
 const scripted = async (body: any): Promise<any> => {
   const msgs: any[] = body.messages ?? [], tools: string[] = (body.tools ?? []).map((t: any) => t.function?.name);
@@ -243,6 +279,11 @@ async function withHandler(fn: (h: Awaited<ReturnType<typeof careerHandler>>) =>
       const u = new URL(req.url);
       if (u.hostname === "api.anthropic.com") {
         const body = await req.clone().json();
+        // Architect amendment (owner decision 2026-11-13: research support check switched on): the support judge's call goes to the same
+        // API; it is answered by the page truth (support-test-judge-c.ts judgeResponse), never by the brain's script, which it would
+        // otherwise advance (the crash on a no_sources result).
+        const judged = judgeResponse(body);
+        if (judged) { judgeCalls++; return judged; }
         if ((body.tools ?? []).some((t: any) => /^web_search_/.test(String(t.type)))) { webCalls.push(body); return Response.json(searchAnswer(body)); }
         return anthropicWire(req, (b) => scripted(b));
       }
@@ -292,8 +333,13 @@ Deno.test({ name: "D-060 at the real handler: research with sources, one search 
     ok(seen.some((s) => s.toolResult && /already used/.test(s.toolResult)), "the second ask in the turn is told the search was used");
     // C9: each topic its own message, its link alone on the next line; only the search's sources; labels kept, the rest dropped.
     ok(r.reply.includes(`roughly eight weeks.\n${CITADEL}`), r.reply);
-    ok(r.reply.includes(`anecdotes rather than proof.\n${REDDIT}`), r.reply);
-    ok(r.reply.includes(`can lag.\n${LEVELS}`), r.reply);
+    // Architect amendment (owner decision 2026-11-13: research support check switched on): the model's added clauses ("anecdotes rather
+    // than proof", "those reports can lag") are on no page, so the anecdote is said as the passage's own sentence (it says "Anonymous"
+    // itself), its link on the next line; a pay sentence no page states is not said, and a figure that is said is on its own
+    // source's message. The judge was asked (through the stub), and the brain's script was not advanced by it.
+    ok(judgeCalls > 0, "the support judge was asked");
+    ok(r.reply.includes(`"Anonymous posters describe 70-hour weeks at Citadel."`) && /Anonymous posters describe 70-hour weeks at Citadel\.".?\n/.test(r.reply) && r.reply.split("\n\n").some((p) => p.includes("Anonymous posters") && p.endsWith(`\n${REDDIT}`)), r.reply);
+    ok(r.reply.split("\n\n").every((p) => !/\$400,000/.test(p) || p.endsWith(`\n${LEVELS}`)), r.reply);
     ok(!/brutal|median|999/i.test(r.reply), `no unlabelled anecdote, unsourced median or invented figure: ${r.reply}`);
     const links = [...r.reply.matchAll(/https?:\/\/\S+/g)].map((m) => m[0]);
     ok(links.every((l) => [CITADEL, REDDIT, LEVELS].includes(l)), `every link is a source the search returned: ${links.join(" ")}`);

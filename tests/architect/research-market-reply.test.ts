@@ -70,7 +70,13 @@ Deno.test("example 1, 'what would change the market for X': a research brief Fil
   const out = await turn(q, { format: "file", queries: ["home battery market outlook"] }, "Cheaper packs and storage tariffs decide it. Full details: https://evil.example/brief. Prices will drop 90% next year.", d);
   eq(published.length, 1);
   const data = published[0];
-  eq(data.summary.map((s: any) => s.text), ["Battery pack prices fell 20% in 2024.", "Acme Energy installed 41,000 home batteries in 2025."]);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; fix "the install pattern narrowed" and the
+  // exact page sentence shown as the page's own): Acme's line, which is its page's sentence word for word, stands as that sentence in
+  // quotation marks; any other line is a page's own sentence in quotation marks. The unsupported lines (60%, LinkedIn, the quote not
+  // on its page) are still not in the brief.
+  const sum = data.summary.map((s: any) => s.text);
+  ok(sum[0] === "Battery pack prices fell 20% in 2024." && sum.includes('"Acme Energy installed 41,000 home batteries in 2025."') && sum.slice(1).every((t: string) => /^".+"$/.test(t)), JSON.stringify(sum));
+  ok(!sum.some((t: string) => /60%|LinkedIn|doubled|Prices keep falling/.test(t)), JSON.stringify(sum));
   eq(data.risks.length, 1, "a risk with a link in it is dropped");
   citationsValid(data);
   eq(out.fileLinks, ["https://trainee.example/file?t=v1.brief1"], "the File link is code's, sent by the channel");
@@ -158,9 +164,9 @@ Deno.test("no source could be opened, or none supports an answer: the reply says
   const r2 = await researchMarket({ question: "battery market?", format: "inline", plan: { queries: ["battery market"] }, deps: bad.d });
   const a2 = enforceMarketReply("", r2);
   ok(r2.status === "ok" && !/99%/.test(a2), a2);
-  // Architect amendment (owner decision 2026-11-13: research support check switched on): the page's own sentence is shown in quotation
-  // marks, word for word (the reader glues the page title to it), with its source.
-  eq(a2.split("\n\n")[0], '"Battery price survey 2024 Battery pack prices fell 20% in 2024 according to the annual survey of cell makers." [1].', "only the page's own sentence");
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; fix "a page title ends its own line"): the
+  // page's own sentence is shown in quotation marks, word for word, without the page title glued to it, with its source.
+  eq(a2.split("\n\n")[0], '"Battery pack prices fell 20% in 2024 according to the annual survey of cell makers." [1].', "only the page's own sentence");
   for (const x of [...MARKET_DRAFT.conditions, ...MARKET_DRAFT.risks]) ok(!a2.includes(x.text.replace(/\.$/, "")), `a model-worded reading is not the answer: ${x.text}`);
   const r3 = await researchMarket({ question: "What is the outlook for hydrogen trucks?", format: "inline", plan: { queries: ["battery market"] }, deps: bad.d });
   ok(r3.status === "no_sources" && /couldn't confirm/.test(r3.note));

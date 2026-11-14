@@ -577,7 +577,7 @@ export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudg
 // sentence stands when it is one of code's own lines (`own`: word for word), a could-not-confirm sentence in the closed form
 // (`pure`), or the judge says yes to it (as a claim in its own words, or as a source's own unit said again); it is removed otherwise
 // (these paths have no numbered source to quote). A line that is only a link is code's, and stays.
-export async function keepSupported(reply: string, sources: (string | { text: string; title?: string; one?: boolean })[], o: { judge?: SupportJudge | null; read?: (s: string) => string; pure?: (s: string) => boolean; own?: string[]; instructions?: boolean; joint?: { guide: { text: string; title?: string }[]; record: string }; also?: { when: (s: string) => boolean; sources: { text: string; title?: string; one?: boolean }[] }; subjects?: string[]; ask?: string } = {}): Promise<{ text: string; removed: string[]; why?: { sentence: string; why: string }[] }> {
+export async function keepSupported(reply: string, sources: (string | { text: string; title?: string; one?: boolean })[], o: { judge?: SupportJudge | null; read?: (s: string) => string; pure?: (s: string) => boolean; own?: string[]; instructions?: boolean; joint?: { guide: { text: string; title?: string }[]; record: string; drafts?: string }; also?: { when: (s: string) => boolean; sources: { text: string; title?: string; one?: boolean }[] }; subjects?: string[]; ask?: string } = {}): Promise<{ text: string; removed: string[]; why?: { sentence: string; why: string }[] }> {
   const idx = indexPages(sources.map((x) => typeof x === "string" ? { text: x } : x), o.read, o.subjects ?? [], { ask: o.ask });
   const norm = (x: string) => bare(readAlike(x)).toLowerCase().replace(/[.!?]+$/, "");
   const own = new Map((o.own ?? []).map((x) => [norm(x), x]));
@@ -606,17 +606,23 @@ export async function keepSupported(reply: string, sources: (string | { text: st
   // its wording is the judge's to read. The judge reads both passages, the record a fact per line (never two lines joined). Never a web page, another employer's
   // page or the draft passage.
   if (o.joint && o.joint.record && o.joint.guide.length) {
-    const rec = indexPages([{ text: o.joint.record, title: "The person's confirmed record:", one: true }], o.read).pages[0].sentences[0];
+    const rec0 = indexPages([{ text: o.joint.record, title: "The person's confirmed record:", one: true }], o.read).pages[0].sentences[0];
+    // A sentence that removes a draft item of theirs (o.also.when) may stand on the drafts too (live-11 C4: "… with no GPA since you
+    // said 3.9 is outdated"); no other sentence ever reads them.
+    const recD = o.joint.drafts ? indexPages([{ text: `${o.joint.record}\n${o.joint.drafts}`, title: "The person's record and not-confirmed items:", one: true }], o.read).pages[0].sentences[0] : null;
     const gText = o.joint.guide.map((g) => g.text).join("\n");
+    const gTitles = o.joint.guide.map((g) => g.title ?? "").join("\n");
     const recLines = o.joint.record.split(/\n+/).map((x) => squash(x)).filter(Boolean);
     const source = clip([`Two passages, read together. The guide the answer cites (${squash(o.joint.guide[0].title ?? "") || "guide"}):`, `>>> ${squash(gText).slice(0, 1400)} <<<`,
       "The person's confirmed record (each line is one fact about them; never join two lines into one fact):", ...recLines.map((l) => `- ${l}`)].join("\n"), PASSAGE_MAX);
     const tryJoint = wants.map((w, k) => {
-      if (withAlso[k] || vs[k].how !== "drop" || !rec) return false;
+      const rec = withAlso[k] && recD ? recD : rec0;
+      if (vs[k].how !== "drop" || !rec) return false;
       const h = hardParts(w.claim, o.read), vals = new Set([...rec.hard.numbers, ...hardParts(gText, o.read).numbers].map((n) => n.split("|")[4]));
       if (!h.numbers.every((a) => vals.has(a.split("|")[4]))) return false;
       // (live-10 C4: a name the guide gives, "GitHub", "Education", is the guide's; layer A reads the joint unit, guide and record)
-      if (!h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).filter((r) => r.length).every((r) => r.every((x) => rec.lower.has(x) || nameFoundIn(x, rec.text) || nameFoundIn(x, gText)))) return false;
+      // (live-11 C4: the guide's own name, its title, "the UC Davis career center"; and a name the person typed in this ask, "SWE roles")
+      if (!h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).filter((r) => r.length).every((r) => r.every((x) => rec.lower.has(x) || nameFoundIn(x, rec.text) || nameFoundIn(x, gText) || nameFoundIn(x, gTitles) || nameFoundIn(x, String(o.ask ?? ""))))) return false;
       // (layer A as everywhere: names and figures, with their units, periods and years; wording is the judge's to read)
       return h.years.every((y) => vals.has(y) || rec.hard.years.includes(y));
     });

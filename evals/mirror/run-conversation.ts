@@ -60,6 +60,10 @@ const PRICE = { input: 2 / 1e6, output: 10 / 1e6, cacheRead: 0.1 / 1e6, cacheWri
 const replay: Record<string, { calls: { name: string; args: Record<string, unknown> }[]; reply: string }> | null = opt("--replay") ? JSON.parse(await Deno.readTextFile(opt("--replay")!)) : null;
 const judgeMode = opt("--judge") ?? "stub";
 const { mirrorJudgeAnswer } = await import("../../tests/architect/helpers/mirror_stub_judge.ts");
+// "recorded" (live-11 replay): the verdicts a live run's judge gave ({claim: "yes" | "no"}, --verdicts <file>); a claim it never
+// judged gets the truth rule of the support tests (tests/architect/support-test-judge.ts supportsClaim).
+const { supportsClaim } = await import("../../tests/architect/support-test-judge.ts");
+const verdicts: Record<string, string> = opt("--verdicts") ? JSON.parse(await Deno.readTextFile(opt("--verdicts")!)) : {};
 let step = 0, stepLabel = "";
 const replayed = (chat: any): string | { calls: { name: string; args: Record<string, unknown> }[] } | null => {
   const r = replay?.[label];
@@ -67,6 +71,7 @@ const replayed = (chat: any): string | { calls: { name: string; args: Record<str
   const sys = String(chat.messages?.[0]?.role === "system" ? chat.messages[0].content : "");
   if (/^You check claims against passages/.test(sys)) {
     const items = JSON.parse(String(chat.messages.find((m: any) => m.role === "user")?.content ?? "[]"));
+    if (judgeMode === "recorded") return JSON.stringify(items.map((x: any) => { const c = String(x.claim ?? "").trim(); return verdicts[c] ?? (supportsClaim(c, String(x.source ?? "")) ? "yes" : "no"); }));
     return judgeMode === "yes" ? JSON.stringify(items.map(() => "yes")) : mirrorJudgeAnswer(JSON.stringify(items));
   }
   if (chat.response_format) return "{}";

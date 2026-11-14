@@ -942,7 +942,10 @@ export async function enforceMarketReplySupported(reply: string, r: MarketResult
     if (said.has(key)) return "";
     said.add(key);
     return show(text, [n]);
-  }).filter(Boolean).join(" ")).filter(Boolean).join("\n\n");
+  }).filter(Boolean).join(" ")).filter(Boolean)
+    // Live-11 C9: a paragraph whose first kept sentence opens on a pronoun ("It calls the bonus ...") points at a sentence that was
+    // removed: it goes (a fragment with no subject of its own).
+    .filter((para) => !/^(?:It|They|This|These|That|Those|He|She|Its|Their)\b/.test(para.trim())).join("\n\n");
   return enforceMarketReply("", r, shown, { body });
 }
 function sourceLine(s: MarketSource): string {

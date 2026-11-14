@@ -320,7 +320,14 @@ export function turnLines(seen: string[]): { codeLines: string[]; readLines: str
       const req = p.requirements && typeof p.requirements === "object" ? p.requirements : null;
       if (req) for (const k of ["required", "preferred"]) for (const x of Array.isArray(req[k]) ? req[k] : []) if (typeof x === "string" && x.trim()) readLines.push(x.trim());
       if (typeof p.boundary === "string" && p.boundary.trim()) { readLines.push(p.boundary.trim()); codeLines.push(p.boundary.trim()); }
-      if (p.sign_in_required === true) readLines.push(`To apply, the person signs in to the employer's careers site themselves; the application's questions are behind that sign-in${typeof p.board === "string" ? ` (${p.board})` : ""}.`);
+      const co = typeof p.posting?.company === "string" ? p.posting.company : typeof p.company === "string" ? p.company : "the employer";
+      if (p.sign_in_required === true) readLines.push(`To apply, the person signs in to, or creates, their own account on ${co}'s ${typeof p.board === "string" ? `${p.board} ` : ""}careers site themselves; ${co}'s own application questions are behind that sign-in, so they were not read.`);
+      // Live-11 C11: what the tool read of the posting itself (open or closed, its deadline) is a source too.
+      if (p.posting && typeof p.posting === "object") {
+        const st = typeof p.posting.state === "string" ? p.posting.state : typeof p.status === "string" ? p.status : "";
+        const dl = [p.posting.deadline, p.posting.closes, p.posting.close_date, p.deadline].find((x) => typeof x === "string" && x.trim());
+        if (st || dl) readLines.push(`${co}'s posting${p.posting.title ? ` ${p.posting.title}` : ""} is ${st || "listed"}${dl ? `; it closes ${dl}` : ""}.`);
+      }
     }
   }
   return { codeLines: [...new Set(codeLines)], readLines: [...new Set(readLines)] };

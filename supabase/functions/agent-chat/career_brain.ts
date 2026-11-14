@@ -1,26 +1,35 @@
 // Which brain answers a career turn (WO-002, D-008): the CareerHost router unless CAREER_BRAIN=agent, and the agent turn
 // itself (model + tools over the person's career state).
 import type { LinkCheck } from "../_shared/link_check.ts";
-import { EMPTY_AFTER_SAVE_REPLY, EMPTY_REPLY, runAgentTurn, type ModelFn, type TurnResult } from "../_shared/agent/loop.ts";
+import { EMPTY_AFTER_SAVE_REPLY, EMPTY_REPLY, INCOMPLETE_AFTER_SAVE_REPLY, INCOMPLETE_REPLY, MAX_STEPS_AFTER_SAVE_REPLY, MAX_STEPS_REPLY, MODEL_ERROR_AFTER_SAVE_REPLY, MODEL_ERROR_REPLY, REFUSED_FILE_TODO, runAgentTurn, type ModelFn, type TurnResult } from "../_shared/agent/loop.ts";
 import { careerTools, type OutreachDeps, type TailorTools } from "../_shared/agent/career_tools.ts";
 import { importContactsFile, MX_NOT_WIRED, type MxResolver, type Verifier } from "../_shared/career_contacts.ts";
 import { attachAsked, attachTool } from "../_shared/agent/attach_tool.ts";
 import { createFileTool } from "../_shared/agent/file_tool.ts";
+import { FAMILY_FILE_TOOL, familyFileTool } from "../_shared/agent/file_family_tool.ts";
+import { pathComparisonTool } from "../_shared/agent/path_comparison_tool.ts"; // D-072 (files writers)
+import type { PathStore } from "../_shared/career_path_comparisons.ts";
+import { FAMILY_TITLE, familyAskOf, type FamilyMakeDeps } from "../_shared/file_family_make.ts";
 import type { FileService } from "../_shared/file_service.ts";
 import { careerSystemPrompt, MIRROR_RULES, shapeRulesFor } from "../_shared/agent/prompt.ts";
 import { alertLine, type MemoryStore, type Pipeline, personBlock, type Standing } from "../_shared/agent/memory.ts";
 import type { ResearchDeps, ResearchResult } from "../_shared/agent/research/index.ts";
-import { enforceResearchReply, stripUnseenLinks } from "../_shared/agent/research/reply.ts";
+import { enforceResearchReply, fallbackVerdict, stripUnseenLinks } from "../_shared/agent/research/reply.ts";
 import { type AdviceResult, enforceAdviceReply } from "../_shared/agent/research/advice.ts";
-import { enforceMarketReply, type MarketDeps, type MarketResult } from "../_shared/agent/research/market.ts";
-import { type CompanyResult, enforceCompanyReply } from "../_shared/agent/research/company.ts";
+import { enforceMarketReply, enforceMarketReplySupported, FAIL_CLOSED, type MarketDeps, type MarketResult, pureUnconfirmed } from "../_shared/agent/research/market.ts";
+import { keepSupported } from "../_shared/agent/research/support.ts";
+import { factText, ownerConfirmedFacts } from "../_shared/essay_draft.ts";
+import { NOT_CONFIRMED } from "../_shared/research_reply.ts";
+import { type CompanyResult, enforceCompanyReply, enforceCompanyReplySupported } from "../_shared/agent/research/company.ts";
 import { enforceFollowupAsk } from "../_shared/followup_draft.ts";
 import { urlsIn } from "../_shared/channel_shape.ts";
 import { numbersIn, numEq } from "../_shared/agent/research/guard.ts";
 import { knowledgeFor, type Knowledge } from "../_shared/agent/knowledge/index.ts";
 import { styleBlock } from "../_shared/agent/style.ts";
-import { askedPartsOf, asksForDetail, boundaryNote, boundaryOf, capacityAskOf, capacityNote, correctionNote, correctionOf, DRAFT_TOOLS, draftAskOf, draftNote, historyAskOf, historyNote, HYPOTHETICAL_WITHHELD, hypotheticalNote, hypotheticalOf, lengthNote, multiAskNote, overLimit, partsMissing, partsNote, PERSONA_WITHHELD, planSearchAskOf, planSearchNote, whileWorkingNote, postingNote, postingRefOf, REPLY_LENGTH, replyLength, roastNote, roastOf, shownPayNote, shownPayOf, statesNothing, textLength } from "../_shared/agent/turn_notes.ts";
+import { askedPartsOf, asksForDetail, boundaryNote, boundaryOf, capacityAskOf, capacityNote, correctionNote, correctionOf, DRAFT_TOOLS, draftAskOf, draftNote, historyAskOf, historyNote, HYPOTHETICAL_WITHHELD, hypotheticalNote, hypotheticalOf, lengthNote, multiAskNote, overLimit, partsMissing, partsNote, PERSONA_WITHHELD, planSearchAskOf, planSearchNote, whileWorkingNote, postingNote, postingRefOf, REPLY_LENGTH, replyLength, roastNote, roastOf, shownPayNote, shownPayOf, shownPayPlaces, statesNothing, textLength } from "../_shared/agent/turn_notes.ts";
 import { severalAsks } from "../_shared/ask_language.ts";
+import { factCorrectionHints, factCorrectionNote, isOnePlace, plainAnswer, practiceAnswerNote, practiceAnswerOf, practiceAskIn, RESTORE_ASK_INTENT, restoreAnswerNote, staleFactNote, staleFactsOf } from "../_shared/agent/turn_notes.ts";
+import { answersFirst } from "../_shared/reply_rubric.ts";
 import type { AlertStore } from "../_shared/career_alert_store.ts";
 import type { HiredSource } from "../_shared/career_hired.ts";
 import type { WantStore } from "../_shared/career_apply_want.ts";
@@ -138,12 +147,20 @@ export async function agentTurn(o: {
   // handler passes a File service, which it does on every channel (the link rides shape.links after the answer; where File links
   // are not set up the service refuses and the brain says so); no longer tied to the reply writer, which stays off (RELEASE_NEVER_ON).
   files?: FileService | null;
+  // D-072 (files reachable): the record-backed File families (file_family_make.ts), offered as open_record_file. Absent: no such tool.
+  familyFiles?: FamilyMakeDeps | null;
+  // D-072 (files writers): where a path comparison the person makes in chat is kept, offered as compare_paths. Absent: no such tool.
+  paths?: PathStore | null;
   // D-064 (G13): this message arrived while the previous turn (this text, the person's previous message) was still running.
   whileWorking?: string | null;
+  // Review of #790: the marker the turn before returned (restore_ask) when it asked whether a set-aside fact is right again.
+  restoreAsk?: { fact_id: string } | null;
+  // Whether an application card is open for this person now (the handler reads it; unknown counts as open): the restore question is never asked beside one.
+  cardPending?: boolean;
   // D-062: the capability tools (_shared/agent/capability_tools.ts: Gmail record and tracker, people search, answering an email),
   // under the same withholding as every other tool.
   capabilities?: import("../_shared/agent/loop.ts").ToolSpec[] | null;
-}): Promise<TurnResult & { knowledge?: { playbooks: string[]; unknown: string[]; stage: string | null } }> {
+}): Promise<TurnResult & { shorten?: Shorten; research?: Record<string, unknown>; knowledge?: { playbooks: string[]; unknown: string[]; stage: string | null } }> {
   // MIRROR WA-1 gaps (turn_notes.ts): what code read from this message and this conversation, for this turn only. A hypothetical
   // person is answered without their saved facts (the profile is left out of the block) and with every record tool withheld;
   // a hypothetical situation writes nothing.
@@ -160,10 +177,32 @@ export async function agentTurn(o: {
   const draftLength = replyLength(o.message).kind === "draft" ? replyLength(o.message) : { kind: "draft" as const, ...REPLY_LENGTH.draft };
   // D-067 (live round 2): an ask about their own applications reads the Gmail record first (G14, C6); pay this conversation already
   // showed is used for a pay ask (G7, C22); a question that states nothing about them is not offered a record write (G1, C1).
-  const historyAsk = !hypo && historyAskOf(o.message), shownPay = hypo ? [] : shownPayOf(o.message, o.history);
-  const turnNotes = [hypo ? hypotheticalNote(hypo) : "", roast ? roastNote(roast) : "", meant.length ? postingNote(meant) : "", boundary ? boundaryNote(boundary) : "",
+  // Round 2: a direct question about their real applications is answered from the record even inside a hypothetical.
+  const appHypo = !!hypo && !statusQuestion(o.message);
+  const historyAsk = !appHypo && historyAskOf(o.message), shownPay = hypo ? [] : shownPayOf(o.message, o.history);
+  // D-070 (G9/D-007, live-7 setup: "the 3.9 gpa on there is outdated, don't reuse it"): a stored fact the person says is out of date
+  // is set aside by code before the model runs: back to a draft (never used for a resume, an answer or a form), with when and what
+  // they said; what was prepared from the old facts goes stale. The model is told, and answers the rest of the message.
+  // Review of #790 (BLOCKER): only the one fact staleFactsOf's fail-closed reading names (never a role, a project or a skill; never a
+  // guess). What it was is kept (`was`), so it can be put back; the reply says which fact (setAsideSaid, below). Every other message
+  // that may be correcting a fact changes nothing here: the model gets a note (factCorrectionNote) and asks, or corrects it through
+  // the person's yes.
+  const facts0 = hypo ? [] : (o.stores as any)?.profile?.facts;
+  const stale = staleFactsOf(o.message, facts0), maybe = factCorrectionHints(o.message, facts0);
+  for (const f of stale as any[]) {
+    f.withdrawn_by_owner = { at: new Date(o.now).toISOString(), said: String(o.message ?? "").slice(0, 200), was: { status: f.status, needs_confirmation: f.needs_confirmation } };
+    f.status = "draft"; f.needs_confirmation = true;
+    const pr = (o.stores as any).profile;
+    pr.fact_version = (Number.isFinite(pr.fact_version) ? pr.fact_version : 0) + 1;
+  }
+  // D-070 (item 11, G2/G3): an answer to the practice question Trainee asked is reviewed verdict first, in one short paragraph.
+  const practiceAnswer = !roast && !hypo && practiceAnswerOf(o.message, o.history);
+  // Review of #790 (round 3): a plain yes or no to code's own restore question (the marker the turn before carried).
+  const restoreFact = o.restoreAsk && !hypo ? ((o.stores as any)?.profile?.facts ?? []).find((f: any) => f?.id === o.restoreAsk!.fact_id && f.withdrawn_by_owner) : null;
+  const restoreAnswer = restoreFact ? plainAnswer(o.message) : null;
+  const turnNotes = [restoreAnswer ? restoreAnswerNote(restoreAnswer, String(restoreFact.id), String(restoreFact.text || restoreFact.title)) : "", stale.length ? staleFactNote(stale.map((f) => String(f.title || f.text))) : "", maybe.length ? factCorrectionNote(maybe.map((f) => String(f.title || f.text))) : "", practiceAnswer ? practiceAnswerNote() : "", hypo ? hypotheticalNote(hypo) : "", roast ? roastNote(roast) : "", meant.length ? postingNote(meant) : "", boundary ? boundaryNote(boundary) : "",
     correction ? correctionNote(correction) : "", typeof o.whileWorking === "string" ? whileWorkingNote(o.whileWorking) : severalAsks(o.message) ? multiAskNote() : "",
-    draftAsk ? draftNote(draftLength.aim) : "", planSearch ? planSearchNote() : "", parts.length ? partsNote(parts) : "", capacity ? capacityNote() : "", historyAsk ? historyNote() : "", shownPay.length ? shownPayNote(shownPay) : "", lengthNote(replyLength(o.message))].filter(Boolean);
+    draftAsk ? draftNote(draftLength.aim) : "", planSearch ? planSearchNote() : "", parts.length ? partsNote(parts) : "", capacity ? capacityNote() : "", historyAsk ? historyNote() : "", shownPay.length ? shownPayNote(shownPay) : "", lengthNote(replyLength(o.message, o.history))].filter(Boolean);
   const hypoWithheld = [...(hypo === "persona" ? PERSONA_WITHHELD : hypo ? HYPOTHETICAL_WITHHELD : []), ...(statesNothing(o.message) ? ["add_profile_fact"] : [])];
   const block = o.known ? personBlock({ profile: hypo === "persona" ? null : o.stores.profile, ...o.known }) : null;
   const notes: string[] = [];
@@ -179,21 +218,39 @@ export async function agentTurn(o: {
   // already used) never replaces it.
   // D-063 (C4): trace.a keeps a specific advice question's result (research/advice.ts): its one source goes on its own line.
   const trace: { r?: Extract<ResearchResult, { status: "ok" }>; m?: MarketResult | CompanyResult; a?: AdviceResult } = {};
-  const ctx: any = { userId: o.userId, threadId: o.threadId, now: o.now, state: o.stores };
-  const tools = [...withheld([...(o.toolPolicy?.withhold ?? []), ...hypoWithheld], [...careerTools({ postings: o.postings ?? (async () => []), alerts: o.alerts ?? null, memory: o.memory ?? null, events: o.events ?? null, confirmations: o.confirmations ?? null, tz: o.tz, mail: o.mail ?? null, interviews: o.interviews ?? null, digest: o.digest ?? null, outreach: o.outreach ?? null, verifier: o.verifier ?? null, tailor: o.tailor ?? null, hired: o.hired ?? null, wants: o.wants ?? null, limits: o.limits, posting: o.posting ?? null, situation: o.known?.situation ?? null, linkCheck: o.linkCheck ?? null, conversations: o.conversations ?? null, market: o.market ? { ...o.market, onResult: (r) => { if (r.status === "ok" || trace.m?.status !== "ok") trace.m = r; } } : null, postingRecheck: o.postingRecheck ?? null, applyFlow: o.applyFlow ?? null, research: o.knowledge && o.research ? { ...o.research, onResult: (r, m) => { if (r.status === "ok") trace.r = r; o.research?.onResult?.(r, m); }, onAdvice: (r) => { if (r.source || !trace.a?.source) trace.a = r; } } : null }), ...(o.capabilities ?? [])]), ...(o.shape && attachAsked(o.message) ? [attachTool()] : []), ...(o.files ? [createFileTool(o.files)] : [])];
+  const ctx: any = { userId: o.userId, threadId: o.threadId, now: o.now, state: o.stores, restoreAsk: o.restoreAsk ?? null, cardPending: !!o.cardPending };
+  const tools = [...withheld([...(o.toolPolicy?.withhold ?? []), ...hypoWithheld], [...careerTools({ postings: o.postings ?? (async () => []), alerts: o.alerts ?? null, memory: o.memory ?? null, events: o.events ?? null, confirmations: o.confirmations ?? null, tz: o.tz, mail: o.mail ?? null, interviews: o.interviews ?? null, digest: o.digest ?? null, outreach: o.outreach ?? null, verifier: o.verifier ?? null, tailor: o.tailor ?? null, hired: o.hired ?? null, wants: o.wants ?? null, limits: o.limits, posting: o.posting ?? null, situation: o.known?.situation ?? null, linkCheck: o.linkCheck ?? null, conversations: o.conversations ?? null, market: o.market ? { ...o.market, onResult: (r) => { if (r.status === "ok" || trace.m?.status !== "ok") trace.m = r; } } : null, postingRecheck: o.postingRecheck ?? null, applyFlow: o.applyFlow ?? null, research: o.knowledge && o.research ? { ...o.research, onResult: (r, m) => { if (r.status === "ok") trace.r = r; o.research?.onResult?.(r, m); }, onAdvice: (r) => { if (r.source || !trace.a?.source) trace.a = r; } } : null }), ...(o.capabilities ?? []), ...(o.paths ? [pathComparisonTool(o.paths)] : [])]), ...(o.shape && attachAsked(o.message) ? [attachTool()] : []), ...(o.files ? [createFileTool(o.files)] : []), ...(o.familyFiles ? [familyFileTool(o.familyFiles, o.files?.ttlHours() ?? 168)] : [])];
   const offered = new Set(tools.map((t) => t.name));
   let result = await runAgentTurn({
     process: processCheck({ draftAsk: draftAsk && DRAFT_TOOLS.some((n) => offered.has(n)), planSearch: planSearch && offered.has("search_jobs"), parts,
-      planFile: planSearch && offered.has("create_file"), history: historyAsk && offered.has("read_application_mail"), mail: !hypo && offered.has("read_application_mail"), posting: meant.length > 0 && offered.has("get_posting") }),
+      planFile: planSearch && offered.has("create_file"), history: historyAsk && offered.has("read_application_mail"), mail: !appHypo && offered.has("read_application_mail"), noneClaim: !appHypo, record: () => (ctx.turn as any)?.record, posting: meant.length > 0 && offered.has("get_posting"), shownPay,
+      marketRate: !hypo && marketRateAskOf(o.message) && offered.has("research_market"), review: practiceAnswer || !!roast ? o.message : null, familyFile: !hypo && offered.has(FAMILY_FILE_TOOL) ? familyAskOf(o.message) : null }),
     system: careerSystemPrompt(localDay(o.now, o.tz)) + "\n\n" + styleBlock(o.message) + (block ? "\n\n" + block : "") + (know ? "\n\n" + know.text : "") + (o.summary ? "\n\n" + o.summary : "") + (o.toolPolicy ? "\n\n" + o.toolPolicy.note : "") + "\n\n" + MIRROR_RULES + "\n\n" + turnNotes.join("\n\n") + (o.shape ? "\n\n" + shapeRulesFor(attachAsked(o.message)) : ""),
     history: o.history.slice(-HISTORY_WINDOW).map((m) => ({ role: m.role, content: String(m.content ?? "") })),
     message: [o.message, ...notes].filter(Boolean).join("\n\n"),
     // ADVERSARIAL ROUND 2: an attached file's name and text are not the person's words: no tool reads them as said.
     said: o.message,
+    shown: shownPay.map((l) => l.text),
     tools,
     model: o.model,
     ctx,
   });
+  // Rounds 2 and 3 (owner must-fix; D-024): a turn that asks about, or whose reply speaks of, the status of their applications
+  // stands on a lookup. When the model made none, code reads the record itself (the same read-only tool), on any turn, whatever
+  // else it did; what is then said about their applications is code's (applicationsEnforced, at the end of the turn).
+  const lookTool = tools.find((t) => t.name === "read_application_mail");
+  // Round 5: a turn that asks to edit, rewrite or draft text (a resume line, a bullet, a checklist, a letter) and does not also ask
+  // about their applications gets no lookup, and its text loses no sentence.
+  // Round 6: whatever else the message asks, the produced text is never removed; when it also asks about status, the lookup runs and
+  // code's block goes after the text.
+  const editTurn = EDIT_ASK.test(String(o.message ?? "")), editStatus = editTurn && statusQuestion(o.message);
+  let codeRan = false;
+  // A turn that stopped unfinished still gets the read when they asked: code's statement then answers it.
+  if (!appHypo && (!editTurn || editStatus) && lookTool && result.reply && !lookupOf(result.tool_calls ?? []).tried && ((result.stopped === "final" || result.stopped === "incomplete_reply") && statusQuestion(o.message) || (result.stopped === "final" && !result.show && statusLike(result.reply)))) {
+    codeRan = true;
+    const out: any = await Promise.resolve().then(() => lookTool.run({}, ctx)).catch(() => null);
+    result = { ...result, tool_calls: [...(result.tool_calls ?? []), { name: lookTool.name, ok: !!out, effect: "read" as const, ...(out ? {} : { error: "the record could not be read" }) }] };
+  }
   // R10 WO-H fix 14b: a draft that could not be written without settling which document or recipient: the reply is that one
   // question, and nothing else (no draft, no second question). Without a question in the reply, it stands as written.
   if (ctx.turn?.askOnly && !ctx.turn?.show && result.reply && result.stopped === "final") result = { ...result, reply: enforceFollowupAsk(result.reply) ?? result.reply };
@@ -208,7 +265,19 @@ export async function agentTurn(o: {
   }
   // Market research: the sources or the file link come from code; the model's links and unsourced figures do not reach the person.
   // R10 WO-H: company research has its own rules (one role question when the role is unknown; a focus keeps that area only).
-  if (trace.m && !trace.r && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? enforceCompanyReply(result.reply, trace.m) : enforceMarketReply(result.reply, trace.m as MarketResult, shownPay) };
+  // FAIL_CLOSED.support (off by default; support.ts): every sentence of the reply is checked by code and by the judge (o.market.judge,
+  // one batched call) before it may stand in the model's words; without a judge none does.
+  // Round 2: also when an open-question research ran in the same turn (trace.r): the market or company result's check is the one
+  // that stands, since its sources are the numbered ones the reply cites.
+  if (FAIL_CLOSED.support && trace.m && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? await enforceCompanyReplySupported(result.reply, trace.m, { judge: o.market?.judge ?? null, ask: o.message }) : await enforceMarketReplySupported(result.reply, trace.m as MarketResult, shownPay, { judge: o.market?.judge ?? null, ask: o.message }) };
+  else if (trace.m && !trace.r && result.reply && result.stopped === "final") result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? enforceCompanyReply(result.reply, trace.m) : enforceMarketReply(result.reply, trace.m as MarketResult, shownPay) };
+  // D-073 review 2: research read pages and none supported an answer, and the model's reply did not stand (the loop removed its
+  // unsourced claim, asked once more and stopped: "incomplete_reply"). The person is told what research found, in code's words: that
+  // it could not be confirmed, with the pages checked. Not after a save: that failure sentence says what was saved, and stays.
+  // 2026-11-13 (review of #801): the same when research kept lines (status ok): the person gets those lines with their sources, in
+  // the pages' own words (code's enforcement of an empty draft), not the generic unfinished-reply line.
+  else if (trace.m && !trace.r && result.stopped === "incomplete_reply" && result.reply === INCOMPLETE_REPLY && (trace.m.status === "ok" || (trace.m.status === "no_sources" && (trace.m as { checked?: unknown[] }).checked?.length)))
+    result = { ...result, reply: "kind" in trace.m && trace.m.kind === "company" ? enforceCompanyReply("", trace.m) : enforceMarketReply("", trace.m as MarketResult, shownPay) };
   // Not an open career question: any link the model wrote that the turn never saw is removed (links not on the turn's allow-list).
   // MIRROR PROCESS (C23, docs/architect/specs/MIRROR-PROCESS.md): a link Trainee itself already showed in this conversation (an
   // earlier reply's source, e.g. the research answer "that citadel process from earlier" recalls) may be given again with the
@@ -230,12 +299,49 @@ export async function agentTurn(o: {
   // ("a detailed plan for my whole job search, everything") is the channel's to lay out in parts (telegram-loop-30,
   // long-reply-bubbles), never the shortener's. A turn whose tools wrote anything, an exact payload, an approval, or code is never
   // condensed (condensable).
+  // D-070 (live-7: 13 of 24 replies far over their bound, and the trace could not say whether this pass ran): every turn records
+  // what the length pass did (`shorten`: ran or not, accepted or rejected, and why). A turn whose only writes made a File or a
+  // resume (tailor_resume, export_tracker, create_file; no record write, no draft, no approval) is now shortened too: its reply
+  // describes what was made (the File or PDF holds the content), and its list of changes is said in one line.
+  // D-071 (live-8: the pass did not run on C9 and recorded no reason): every way it does not run says why.
+  let shorten: Shorten = { ran: false, outcome: "not_run", why: !result.reply ? "no reply to shorten" : result.stopped !== "final" ? `the turn did not finish (${result.stopped})`
+    : trace.r || trace.m ? "a research reply, laid out and sourced in code (never rewritten)" : "" };
   if (result.reply && result.stopped === "final" && !trace.r && !trace.m) {
-    const l = replyLength(o.message), bound = overLimit(l);
+    const l = replyLength(o.message, o.history), bound = overLimit(l), n = textLength(result.reply);
+    // D-072 (item 11): a practice turn (a question asked, or a review of their answer) is shortened like any reply unless it shows a
+    // code block; the code it names (a call, an index, an operator, a complexity) is kept verbatim (codeKept). Complexity notation
+    // alone ("O(n) time") is not code. Every other turn keeps D-067's rule: code in the message or the reply is never shortened.
+    const practiceTurn = practiceAnswer || !!roast || (l.kind === "question" && practiceAskIn(o.message, o.history));
+    const codeSkip = practiceTurn ? /```/.test(result.reply) : carriesCode(o.message) || carriesCode(result.reply);
+    const fileTurn = !condensable(result, { max: -1 }) && onlyFileWrites(result);
     // A "draft" kind written in prose is not a message draft (those go through draft_followup, below): it is a rewrite of their
-    // own text ("make the answer less formal"), whose length is the text's, not a draft's.
-    if (l.kind !== "draft" && !(l.kind === "everything" && asksForDetail(o.message)) && !carriesCode(o.message) && !carriesCode(result.reply) && textLength(result.reply) > bound && condensable(result, { max: -1 })) {
-      const short = await condenseReply(o.model, result.reply, { max: bound, aim: l.aim }, (long, out) => shortenedOk(long, out, bound));
+    // own text ("make the answer less formal"), whose length is the text's, not a draft's. A File turn's reply is not a draft.
+    const why = n <= bound ? "within the bound" : l.kind === "draft" && !fileTurn ? "a draft kind (its length is the text's)" : l.kind === "everything" && asksForDetail(o.message) ? "the ask asks for detail"
+      : codeSkip ? (practiceTurn ? "a practice reply with a code block" : "carries code") : !(condensable(result, { max: -1 }) || fileTurn) ? "the turn wrote a record, a draft or an approval" : "";
+    if (why) shorten = { ran: false, outcome: n <= bound ? "within" : "skipped", why, chars: n, bound };
+    else {
+      // D-071 (live-8: 11 of 14 shortened texts were refused only for being still over the bound, and the long reply was sent; C4's
+      // 602 would have passed the far bound): a shorter text that passes every preservation check (every figure, link and
+      // [placeholder] kept, the boundary and the caveat kept, at most one question, a rewrite of this same reply) is used even when
+      // it is still over the bound, and it gets ONE more pass toward the bound under the same checks against the original reply.
+      const long = result.reply, seen = { out: "" };
+      const faithful = (from: string) => (l0: string, out: string) => shortenedOk(l0, out, Number.POSITIVE_INFINITY) && shortenedOk(from, out, Number.POSITIVE_INFINITY) && (!practiceTurn || codeKept(from, out));
+      // D-073 (live-9: 7 shorter texts still over the bound, the second pass stopping short of it; C4, C6, C11 refused for dropping
+      // a caveat or a figure): each pass is told the number to reach (the kind's upper end, inside the scorer's D-066 kind bound)
+      // and what must stay (keepList: every figure, link-free, every [placeholder], each sentence saying what was not done or is
+      // not known), instead of being refused after.
+      const keep = keepList(long), extra = (t: string, k: number) => [fileTurn ? FILE_TURN_CONDENSE : "", lengthTarget(textLength(t), l.upper, k), keep].filter(Boolean).join(" ");
+      let short = await condenseReply(o.model, long, { max: bound, aim: l.aim }, faithful(long), extra(long, 1), seen);
+      let passes = 1, why = short ? "" : shortenRejection(long, seen.out, Number.POSITIVE_INFINITY);
+      if (short && textLength(short) > bound) {
+        const seen2 = { out: "" };
+        const second = await condenseReply(o.model, short, { max: bound, aim: l.aim }, faithful(long), extra(short, 2), seen2);
+        passes = 2;
+        if (second) short = second;
+      }
+      const after = short ? textLength(short) : null;
+      if (short && after! > bound) why = `shorter but still over the bound (${after} > ${bound})`;
+      shorten = { ran: true, outcome: !short ? "rejected" : after! <= bound ? "accepted" : "shorter", why, chars: n, bound, passes, ...(short ? { after: after! } : {}) };
       if (short) result = { ...result, reply: trace.a ? enforceAdviceReply(short, trace.a) : short };
     }
   }
@@ -254,24 +360,271 @@ export async function agentTurn(o: {
   }
   // D-067 (owner, must-fix (d): "each figure carries its source link and place"): a posting's pay said in the reply comes with that
   // posting's link (search_jobs / get_posting returned both); code adds the link when the reply has the figure and not the link.
-  if (result.reply && result.stopped === "final" && !result.show) result = { ...result, reply: payWithSource(result.reply, Array.isArray(result.postings) ? result.postings as any[] : []) };
+  // D-073: on every path, research turns included (their shown figure's link was added above; its place is added here).
+  // FAIL_CLOSED.support, round 2: the reply paths that had no check of what a sentence says, each against what its turn stood on, in
+  // one batched judge call (support.ts keepSupported), after any shortening rewrite and before code adds links:
+  //   open-question research (trace.r): every sentence against the quotes of its facts, the person's confirmed facts and code's own
+  //     verdict lines; with nothing left, code's fallback verdict;
+  //   advice (trace.a): every sentence against the passages read; with nothing left, code's not-verified line;
+  //   a pay turn (a posting with pay was read, or pay was shown earlier): every sentence with a number against the postings' own
+  //     records and the lines shown earlier; with nothing left, the records themselves.
+  if (FAIL_CLOSED.support && !trace.m && result.reply && result.stopped === "final" && !result.show) {
+    const judge = o.market?.judge ?? null, pure = (s: string) => pureUnconfirmed(s, o.message);
+    const recs = [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])].filter((p: any) => numbersIn(String(p?.pay ?? "")).length);
+    const recLine = (p: any) => `${[p?.company, p?.title].map((x) => String(x ?? "").trim()).filter(Boolean).join(", ")}: ${String(p.pay).trim()}`;
+    const letters = (t: string) => /\p{L}/u.test(t.replace(/https?:\/\/\S+/g, "")), links = (t: string) => t.match(/https?:\/\/\S+/g) ?? [];
+    // 2026-11-14: code's own lines in the reply (a closed posting's note, the read-only boundary) are never judged, and what a tool
+    // read from a posting this turn (its requirements, that its questions are behind a sign-in) is a source the model's sentences
+    // may stand on; the person's confirmed facts are a source for what is said about them (D-007).
+    const codeLines = (result.codeLines ?? []).flatMap((x) => x.split(/(?<=[.!?])\s+(?!https?:)/));
+    const readSources = (result.readLines ?? []).map((text) => ({ text, title: "Read from the posting this turn" }));
+    // A sentence that restates code's boundary ("… no account, saved application or submission was created.") is that boundary:
+    // code's own line takes its place, unjudged.
+    for (const line of codeLines) {
+      const core = line.replace(/^Read only:\s*/i, "").replace(/[.]$/, "").toLowerCase();
+      if (core.length < 20 || core === line.toLowerCase()) continue;
+      result = { ...result, reply: result.reply!.split(/\n/).map((l) => l.split(/(?<=[.!?])\s+/).map((x) => x.toLowerCase().includes(core) ? line : x).join(" ")).join("\n") };
+    }
+    // (2026-11-14: every fact the person confirmed, a confirmed skill not yet evidenced in a bullet included: "Skill: SQL" is theirs.)
+    const confirmed = hypo ? [] : ownerConfirmedFacts((o.stores as any)?.profile?.facts ?? []).map(factText).filter(Boolean).map((text: string) => ({ text, title: "What the person confirmed" }));
+    if (trace.r) {
+      // Code's own lines: the verdict, the first action, and the fallback paragraph code writes (its last sentence carries the File link).
+      const own = [...codeLines, trace.r.verdict.now, trace.r.verdict.later, trace.r.short?.now ?? "", trace.r.short?.later ?? "", trace.r.short?.act ?? "", trace.r.first_action, fallbackVerdict(trace.r)].filter(Boolean).flatMap((x) => x.split(/(?<=[.!?])\s+(?!https?:)/));
+      const k = await keepSupported(result.reply, [...trace.r.facts.map((f) => ({ text: f.quote, title: f.label })), ...trace.r.person.map((text) => ({ text, title: "What the person confirmed" }))], { judge, pure, own, ask: o.message });
+      // With nothing of the model's left, code's own fallback paragraph (it already ends with the File link, when there is one).
+      result = { ...result, reply: letters(k.text) ? k.text : fallbackVerdict(trace.r) };
+    } else if (trace.a) {
+      // Architect ruling 2026-11-14 (final, review of f8d477168): no advice exemption. Every advice sentence is checked like any
+      // claim; the person's confirmed record (facts about them only, each its own line with its kind; never a draft) is one more source,
+      // so advice that the record and the cited guide state passes, and a recombination is judged as the claim it is.
+      const record = hypo ? [] : ownerConfirmedFacts((o.stores as any)?.profile?.facts ?? []).filter((f: any) => f?.kind !== "other" || /^gpa$/i.test(String(f?.name ?? "")))
+        .map((f: any) => { const x = factText(f); return x ? `${String(f.kind ?? "fact")}: ${String(f.text ?? x).trim()}` : ""; }).filter(Boolean);
+      // Ruling (MP-1 C4): the record is ONE passage and one unit (support.ts indexPages `one`); the person's draft or withdrawn facts
+      // are a separate passage, read only for a sentence that tells them to remove or update that item (code checks the verb first).
+      const recordSource = record.length ? [{ text: record.join("\n"), title: "The person's confirmed record:", one: true }] : [];
+      const draftLines = hypo ? [] : (((o.stores as any)?.profile?.facts ?? []) as any[]).filter((f) => f && typeof f === "object" && (f.status !== "confirmed" || f.withdrawn_by_owner) && (f.kind !== "other" || /^gpa$/i.test(String(f.name ?? ""))))
+        .map((f) => `${String(f.kind ?? "fact")}: ${String(f.text ?? "").trim()}`).filter((x) => x.length > 8);
+      const REMOVE_OR_UPDATE = /^(?:you could\s+)?(?:(?:remove|drop|cut|delete|update|correct)\b|take\b.*\bout\b|leave\b.*\b(?:off|out)\b)/iu;
+      const k = await keepSupported(result.reply, [...trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), ...recordSource, ...readSources],
+        { judge, pure, own: codeLines, ask: o.message, instructions: true, ...(record.length && trace.a.passages.length ? { joint: { guide: trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), record: record.join("\n") } } : {}), ...(draftLines.length ? { also: { when: (s: string) => REMOVE_OR_UPDATE.test(s.trim()), sources: [{ text: draftLines.join("\n"), title: "Not confirmed by the person (do not state as fact):", one: true }] } } : {}) });
+      result = { ...result, reply: letters(k.text) ? k.text : [trace.a.not_verified || NOT_CONFIRMED, ...links(k.text)].join("\n") };
+    } else if (recs.length || shownPay.length) {
+      // Round 3: EVERY sentence of a pay turn is checked (not only those with a number), against the postings' own records and the
+      // lines shown earlier; a shown line said again whole is code's record and stays. A posting's own pay is never lost to the
+      // check: when a sentence was removed, the record line of each posting the person's message names (the only posting, when it
+      // names none) is given by code, once, unless the reply that is left already gives its figures.
+      // A line shown earlier is code's record only when it is about what the person asks now (it names a name their message has);
+      // "If Jane Street matched it, their pay would be $95 an hour." said after a Citadel line is not Citadel's pay.
+      const said = new Set(o.message.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}&'-]*/gu) ?? []);
+      const about = shownPay.filter((l) => (l.text.match(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}\p{N}&'-]*/gu) ?? []).slice(/^\p{Lu}\p{Ll}*\s+\p{Ll}/u.test(l.text) ? 1 : 0).some((w) => said.has(w.toLowerCase().replace(/'s$/, ""))));
+      const k = await keepSupported(result.reply, [...recs.map((p: any) => ({ text: recLine(p), title: "Posting record" })), ...about.map((l) => ({ text: l.text, title: "Pay shown earlier in this conversation" })), ...readSources], { judge, pure, own: [...about.map((l) => l.text), ...codeLines], ask: o.message });
+      const named = recordsNamed(o.message, recs);
+      const mine = [...new Set((named.length ? named : recs.length === 1 ? recs : []).map(recLine))].filter((l) => !numbersIn(l).every((n) => numbersIn(k.text).some((x) => numEq(x, n))));
+      result = { ...result, reply: !k.removed.length ? k.text : [k.text, ...(mine.length ? mine : letters(k.text) ? [] : about.length ? [...new Set(about.map((l) => l.text))] : [NOT_CONFIRMED])].filter(Boolean).join("\n") };
+    }
+  }
+  if (result.reply && result.stopped === "final" && !result.show) result = { ...result, reply: payWithSource(result.reply, [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])], shownPayPlaces(o.message, hypo ? [] : o.history)) };
   // D-067 (live-6 C9: research_market ran and the person got an empty message; D-024): the last line of every brain turn. An empty
   // or blank reply is never sent: the research's own sourced points when it found any, else the honest line that it did not finish.
-  result = { ...result, reply: nonEmptyReply(result, trace.m) };
+  // D-071 (live-8 C6: "Your Gmail shows 8 applications ... That's 9 listed, so I miscounted 8 above"): the number of applications is
+  // the record's (read_application_mail's counts), never the model's own count.
+  // Review of #785 (owner must-fix; D-024): the last word on their applications is code's (applicationsEnforced): after a lookup
+  // the status is stated by code from its result and the model's own status sentences go; with none, a denial is held. A payload
+  // being shown is never touched: what code states goes after it.
+  const looked = lookupOf(result.tool_calls ?? [], (ctx.turn as any)?.record);
+  const editLook = lookupOf(result.tool_calls ?? [], (ctx.turn as any)?.record);
+  if (editTurn && result.reply && !result.show && (editStatus || saysNoApplications(result.reply)) && !result.reply.includes(coverageLine(editLook))) result = { ...result, reply: `${result.reply.trimEnd()}\n\n${coverageLine(editLook)}` };
+  else if (!appHypo && !editTurn && result.reply) {
+    const held = result.show ? (looked.tried && statusQuestion(o.message) ? `${result.reply.trimEnd()}\n\n${coverageLine(looked)}` : result.reply) : applicationsEnforced(result.reply, looked, { message: o.message, codeRan });
+    if (held !== result.reply) result = { ...result, reply: held, flags: [...new Set([...(result.flags ?? []), looked.ok ? "applications_basis" : "applications_unconfirmed"])] };
+  }
+  const counted = (ctx.turn as any)?.counts?.applied;
+  if (typeof counted === "number" && result.reply && result.stopped === "final" && !result.show) result = { ...result, reply: applicationCount(result.reply, counted) };
+  // D-071 (live-8 C9: research ran, kept nothing, and the trace could not say why): what the research did with its pages and draft.
+  const research = trace.m ? { kind: "kind" in trace.m ? "company" : "market", status: trace.m.status, ...((trace.m as any).audit ?? {}) } : null;
+  result = { ...result, reply: nonEmptyReply(result, trace.m), shorten, ...(research ? { research } : {}) } as typeof result;
+  // Review of #790: a fact code set aside this turn is said to the person, by name, on every path. When the reply does not carry
+  // the fact's own figures, its line goes after the reply, in the fact's own words. A turn whose reply is a card (an exact payload)
+  // cannot carry it, so nothing is set aside on that turn: the fact goes back as it was.
+  if (stale.length) {
+    // Round 4: only a card that carries a payload undoes it. Code's own restore question is not one (and is never asked on the
+    // turn that set the fact aside: confirm_profile_fact refuses), so it can never undo a set-aside.
+    if (result.show && result.show.intent !== RESTORE_ASK_INTENT) {
+      for (const f of stale as any[]) { Object.assign(f, f.withdrawn_by_owner.was); delete f.withdrawn_by_owner; }
+    } else {
+      const set = (stale as any[]).map((f) => ({ id: String(f.id), text: String(f.text || f.title) }));
+      result = { ...result, reply: setAsideSaid(result.reply, set.map((x) => x.text)), set_aside: set } as typeof result;
+    }
+  }
+  // D-075: the facts correct_profile_fact replaced this turn (old words, new words), for the stop of applications stating the old ones.
+  const corrected = (ctx.turn as any)?.corrected;
+  if (Array.isArray(corrected) && corrected.length) result = { ...result, corrected } as typeof result;
+  // Review of #790 (round 3): the marker a later yes needs to put a set-aside fact back is the one CODE set when confirm_profile_fact
+  // asked its own question (the reply is that question, shown as written); a question in the model's words never sets it. It is
+  // dropped when the turn also asked for an approval, or a card is open: the person's next yes belongs to that.
+  const ask = result.show?.intent === RESTORE_ASK_INTENT ? (result.show.meta as any)?.restore_ask : null;
+  if (ask && !result.pending_approvals?.length && !o.cardPending) result = { ...result, restore_ask: ask } as typeof result;
+  else if (ask) result = { ...result, show: { ...result.show!, meta: {} } };
   return know ? { ...result, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : result;
 }
 
+// Review of #790 (rounds 3 and 4): whenever a fact was set aside this turn, code states it itself, once, as the first line, in the
+// fact's own words (the model is told not to: staleFactNote). From the model's reply only this is removed: a sentence that STATES
+// that fact's status (its label or value with a status word: set aside, removed, kept, still on file, updated, using ...), and a
+// general claim that nothing changed ("Nothing on your record was changed."), which the set-aside makes untrue. A question, and a
+// sentence about a form, a posting or a next step that only mentions the label, stay. A turn that did not finish says what was saved.
+const UNFINISHED: Record<string, string> = { [INCOMPLETE_REPLY]: INCOMPLETE_AFTER_SAVE_REPLY, [EMPTY_REPLY]: EMPTY_AFTER_SAVE_REPLY, [MODEL_ERROR_REPLY]: MODEL_ERROR_AFTER_SAVE_REPLY, [MAX_STEPS_REPLY]: MAX_STEPS_AFTER_SAVE_REPLY };
+export const SET_ASIDE_LINE = "Set aside, not deleted (no longer used until you say it's right again): ";
+function namesFact(sentence: string, fact: string): boolean {
+  const m = /^([^:]{1,40}):\s*(.+)$/.exec(fact), label = (m ? m[1] : "").trim(), value = (m ? m[2] : fact).trim();
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return (!!label && new RegExp(`(?<![A-Za-z])${esc(label)}(?![A-Za-z])`, "i").test(sentence)) || new RegExp(`(?<![\\w$.])${esc(value)}(?![\\w%]|\\.\\d)`, "i").test(sentence);
+}
+const STATUS_WORD = /\bset aside\b|\baside\b|\bremov(?:e|ed|ing)\b|\bkept\b|\bkeep(?:ing)? (?:using|it)\b|\bstill on (?:file|record)\b|\bupdated\b|\bchanged\b|\bsaved\b|\bdeleted\b|\busing\b|\bwill use\b|\bon your (?:record|profile)\b|\boff\b|\bno longer (?:used|use)\b|\b(?:won't|will not) (?:be used|use)\b/i;
+const NOTHING_CHANGED = /\b(?:nothing|no facts?|none of your facts)\b[^.!?]*\b(?:changed|removed|updated|deleted|touched|set aside)\b|\b(?:didn't|did not|haven't|have not|hasn't|has not) (?:been )?(?:chang|remov|touch|updat|delet)\w*\b|\bunchanged\b|\bstill confirmed\b|\b(?:all|every one of) your facts\b/i;
+export function setAsideSaid(reply: string, facts: string[]): string {
+  if (!facts.length) return reply;
+  const line = `${SET_ASIDE_LINE}${facts.join("; ")}`, r = String(reply ?? "");
+  if (UNFINISHED[r] || Object.values(UNFINISHED).includes(r)) return `${line}\n\n${UNFINISHED[r] ?? r}`;
+  const goes = (x: string) => !x.trim().endsWith("?") && (NOTHING_CHANGED.test(x) || (STATUS_WORD.test(x) && facts.some((f) => namesFact(x, f))));
+  const kept = r.split("\n").map((l) => l.startsWith(SET_ASIDE_LINE) ? "" : l.split(/(?<=[.!?])[ \t]+/).filter((x) => !goes(x)).join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return kept ? `${line}\n\n${kept}` : line;
+}
+// D-071: "N applications" said with another number than the record's is the record's number; a sentence about having miscounted
+// goes (the count was code's). Other numbers ("1 researched role") are not touched.
+const NUMWORD: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
+export function applicationCount(reply: string, n: number): string {
+  let changed = false;
+  const out = String(reply).replace(/\b(\d{1,3}|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)(\s+(?:[a-z-]+\s+){0,2}?applications?\b)/gi, (m, k: string, rest: string) => {
+    const v = /^\d/.test(k) ? Number(k) : NUMWORD[k.toLowerCase()];
+    if (v === n || /researched|draft/i.test(rest)) return m;
+    changed = true; return `${n}${rest.replace(/\bapplication\b/i, n === 1 ? "application" : "applications")}`;
+  });
+  if (!changed && !/\bmiscount/i.test(out)) return reply;
+  const keep = (x: string) => !/\bmiscount/i.test(x) && !/^(?:\d{1,3}|[a-z]+) is right\.?$/i.test(x.trim());
+  return out.split("\n").map((line) => line.split(/(?<=[^\d\s][.!?])[ \t]+/).filter(keep).join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
 // D-067 (d): every posting whose stated pay the reply gives (its figures, in a sentence naming its company) has its link in the reply.
-export function payWithSource(reply: string, postings: { company?: string | null; pay?: string | null; url?: string | null }[]): string {
+// D-070 (live-7 C11: "For Chicago the pay is $28-$49 hourly", read by inspect_apply_flow, went out with no link): every tool that read
+// a posting's pay this turn is a source (loop.ts paySources), not search_jobs alone; and when the turn read exactly one posting
+// with pay, a sentence giving that pay is about it whether or not it names the employer again. Pay this conversation already showed
+// (shownPayOf's lines, each with the link it was shown with) carries that link when the reply says it again.
+// D-073 (live-9 C9, owner must-fix (d) "each figure carries its source link and place"): on every path (a posting read this turn,
+// pay this conversation already showed, research turns included) a sentence giving a posting's pay names its place: when the
+// sentence does not name it, the place the tool or the earlier reply gave (`place`; else the pay's own "(Chicago, Illinois)") goes
+// right after the figure, in parentheses. Nothing else in the sentence changes.
+const MONEY_PHRASE = /\$\s?\d[\d,.]*(?:\s?[kK])?(?:\s?(?:-|–|to)\s?\$?\s?\d[\d,.]*(?:\s?[kK])?)?(?:\s?\/\s?(?:hr|hour|yr|year)\b|\s(?:an?|per)\s(?:hour|year)\b|\s(?:hourly|annually|yearly|a year)\b)?/;
+function placeOfPay(p: { pay?: string | null; place?: string | null }, figures: ReturnType<typeof numbersIn>): string | null {
+  const pay = String(p?.pay ?? "");
+  // Pay by place ("Chicago, IL: $28-$49; San Jose, CA: $36-$62"): the place whose range holds the figure.
+  // The sentence's own figures decide; figures that sit in two places' ranges name no one place, so none is written.
+  const byPlace = pay.split(/;\s*/).map((seg) => /^([^:$]{2,60}):\s*(.*)$/.exec(seg.trim())).filter(Boolean) as RegExpExecArray[];
+  const held = [...new Set(byPlace.filter((m) => numbersIn(m[2]).some((y) => figures.some((n) => numEq(y, n)))).map((m) => m[1].trim()))];
+  if (held.length) return held.length === 1 ? held[0] : null;
+  const inPay = /\(([^()$\d]{2,60})\)/.exec(pay)?.[1]?.trim();
+  return onePlace(String(p?.place ?? "")) || inPay || null;
+}
+// FAIL_CLOSED.support, round 4 (review: "the role you put in my inbox" matched Box; "dropbox" matched Box and Dropbox): the posting
+// records the person's message names: the record's employer name, the whole of it, as whole words of the message.
+export function recordsNamed<T extends { company?: string | null }>(message: string, recs: T[]): T[] {
+  return recs.filter((p) => { const c = String(p?.company ?? "").replace(/\s+/g, " ").trim(); return !!c && new RegExp(`(?<![\\p{L}\\p{N}])${c.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/ /g, "\\s+")}(?:'s)?(?![\\p{L}\\p{N}])`, "iu").test(String(message ?? "")); });
+}
+// 2026-11-13 (review of #801; a missing place is acceptable, a wrong one is not): the record's location is written beside the pay
+// only when it is one place. Several places ("San Jose, CA; Austin, TX", "Chicago, IL / New York, NY", "Multiple locations") or
+// remote together with an office name no one place for the pay; remote alone is said as the record says it.
+function onePlace(place: string): string | null {
+  const t = place.replace(/\s+/g, " ").trim();
+  if (!t || /[;|\/]|\b(?:or|and|multiple|various|several|locations|anywhere)\b/i.test(t)) return null;
+  if (/\bremote\b/i.test(t)) return /^remote(?:\s*[-,(]\s*(?:US|USA|U\.S\.|United States)\)?)?$/i.test(t) ? t : null;
+  return t;
+}
+// A sentence about the person's own job ("Your current job pays $40 an hour", "my last job paid $40/hr") is not a posting's.
+const OWN_JOB = /\b(?:your|my|our)\b/i;
+// D-073 review (item 1: "Stripe pays $40/hr. PayPal pays $40/hr." had PayPal's sentence given Stripe's place, then its own): a place
+// is a fact code writes into the reply, so it goes only into the sentence(s) bound to that one posting or shown line (`binds`: the
+// sentence, the figures, the place), never into every sentence that happens to give the same figure. A sentence bound to two
+// different places, or naming another posting's employer, is ambiguous and gets nothing.
+type PlaceBind = { key: string; figures: ReturnType<typeof numbersIn>; place: string };
+function withPlace(reply: string, binds: PlaceBind[]): string {
+  if (!binds.length) return reply;
+  return reply.split("\n").map((line) => line.split(/(?<=[.!?])(?=\s)/).map((x) => {
+    if (/https?:\/\//.test(x)) return x;
+    const mine = binds.filter((b) => b.key === x.trim());
+    const places = [...new Set(mine.map((b) => b.place.toLowerCase()))];
+    if (places.length !== 1 || OWN_JOB.test(x)) return x;
+    const place = mine[0].place, figures = mine.flatMap((b) => b.figures), city = place.split(",")[0].trim().toLowerCase();
+    if (!city || x.toLowerCase().includes(city)) return x;
+    const m = MONEY_PHRASE.exec(x);
+    return m && numbersIn(m[0]).some((n) => figures.some((y) => numEq(y, n))) ? `${x.slice(0, m.index + m[0].length)} (${place})${x.slice(m.index + m[0].length)}` : x;
+  }).join("")).join("\n");
+}
+const namesWord = (x: string, name: string) => !!name && new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(x);
+export function payWithSource(reply: string, postings: { company?: string | null; title?: string | null; pay?: string | null; url?: string | null; place?: string | null }[], shown: { text: string; url: string | null; place?: string | null }[] = []): string {
   const add: string[] = [];
   const sentences = String(reply).replace(/https?:\/\/\S+/g, " ").split(/(?<=[.!?])\s+|\n+/);
-  for (const p of postings ?? []) {
-    const ns = numbersIn(String(p?.pay ?? "")), url = String(p?.url ?? "");
-    if (!ns.length || !/^https:\/\//.test(url) || reply.includes(url) || add.includes(url)) continue;
-    const co = String(p?.company ?? "").toLowerCase();
-    if (sentences.some((x) => co && x.toLowerCase().includes(co) && numbersIn(x).some((n) => ns.some((y) => numEq(y, n))))) add.push(url);
+  // FAIL_CLOSED.support (review of #807, class 8: with PayPal's posting read, "the ibm role pays $40/hr." was given PayPal's city, and
+  // a city read from an earlier reply's text was attached to another employer's pay): no place is written into a sentence of the
+  // model's, and none is taken from reply text. A posting's place is written by code beside that posting's own link, from that
+  // posting's own record (employer, title, place: all three from the one record the link is from), and only when the record names
+  // one place (isOnePlace, or remote alone) and no other record with that link names another.
+  if (FAIL_CLOSED.support) {
+    const recs = (postings ?? []).filter((p) => numbersIn(String(p?.pay ?? "")).length && /^https:\/\//.test(String(p?.url ?? "")));
+    const urls = [...new Set(recs.map((p) => String(p.url)))];
+    const placeOf = (p: { place?: string | null }) => { const t = String(p?.place ?? "").replace(/[ \t]+/g, " ").trim(); return isOnePlace(t) || /^remote$/i.test(t) ? t : null; };
+    for (const url of urls) {
+      const mine = recs.filter((p) => String(p.url) === url), p = mine[mine.length - 1], co = String(p?.company ?? "").trim().toLowerCase(), ns = numbersIn(String(p?.pay ?? ""));
+      if (!sentences.some((x) => (urls.length === 1 || (co && x.toLowerCase().includes(co))) && numbersIn(x).some((n) => ns.some((y) => numEq(y, n)))) || reply.includes(url)) continue;
+      const places = mine.map(placeOf), place = places.every(Boolean) && new Set(places.map((x) => x!.toLowerCase())).size === 1 ? places[0] : null;
+      const whose = [p?.company, p?.title].map((x) => String(x ?? "").replace(/\s+/g, " ").trim()).filter(Boolean).join(", ");
+      add.push(place ? `${whose ? `${whose} ` : ""}(${place}): ${url}` : url);
+    }
+    for (const l of shown ?? []) {
+      const ns = numbersIn(l.text), url = String(l.url ?? "");
+      if (!ns.length || !sentences.some((x) => { const xs = numbersIn(x); return xs.length > 0 && xs.every((n) => ns.some((y) => numEq(y, n))); })) continue;
+      if (/^https:\/\//.test(url) && !reply.includes(url) && !add.some((a) => a.endsWith(url))) add.push(url);
+    }
+    return add.length ? `${String(reply).trimEnd()}\n\n${add.join("\n")}` : String(reply);
   }
-  return add.length ? `${reply.trimEnd()}\n\n${add.join("\n")}` : reply;
+  const withPay = [...new Map((postings ?? []).filter((p) => numbersIn(String(p?.pay ?? "")).length && /^https:\/\//.test(String(p?.url ?? ""))).map((p) => [String(p.url), p])).values()];
+  const only = withPay.length === 1;
+  const companies = [...new Set((postings ?? []).map((p) => String(p?.company ?? "").trim().toLowerCase()).filter(Boolean))];
+  const binds: PlaceBind[] = [];
+  for (const p of withPay) {
+    const ns = numbersIn(String(p?.pay ?? "")), url = String(p?.url ?? "");
+    const co = String(p?.company ?? "").trim().toLowerCase();
+    const mine = sentences.filter((x) => (only || (co && x.toLowerCase().includes(co))) && numbersIn(x).some((n) => ns.some((y) => numEq(y, n))));
+    if (!mine.length) continue;
+    // The place: only where the sentence is this posting's alone (it names no other posting's employer; and when it does not name
+    // this employer either, the one posting read this turn, it names no one at all).
+    for (const x of mine) {
+      const place = placeOfPay(p, numbersIn(x).filter((n) => ns.some((y) => numEq(y, n))));
+      if (!place) continue;
+      if (companies.some((c) => c !== co && namesWord(x, c))) continue;
+      // 2026-11-13 (review of #801: with PayPal's posting read, "IBM pays $40/hr." took PayPal's city): any other name in the
+      // sentence, in capitals or all capitals, may be another employer, whether or not the sentence names this one too.
+      if (otherNames(x, `${place} ${p.title ?? ""} ${p.company ?? ""}`).length) continue;
+      binds.push({ key: x.trim(), figures: ns, place });
+    }
+    if (!reply.includes(url) && !add.includes(url)) add.push(url);
+  }
+  for (const l of shown ?? []) {
+    const ns = numbersIn(l.text), url = String(l.url ?? "");
+    if (!ns.length) continue;
+    const mine = sentences.filter((x) => { const xs = numbersIn(x); return xs.length > 0 && xs.every((n) => ns.some((y) => numEq(y, n))); });
+    if (!mine.length) continue;
+    if (l.place) for (const x of mine) binds.push({ key: x.trim(), figures: ns, place: l.place });
+    if (/^https:\/\//.test(url) && !reply.includes(url) && !add.includes(url)) add.push(url);
+  }
+  const out = withPlace(String(reply), binds);
+  return add.length ? `${out.trimEnd()}\n\n${add.join("\n")}` : out;
+}
+// The names a sentence gives beyond the posting's own place, title and employer: capitalised words and (2026-11-13) all-capitals
+// ones ("IBM", "NVIDIA"), other than a small closed list ("SWE", "US", months, days); a first word is one unless it is a common way
+// to start a sentence. A word wrongly read as a name only means no place is added.
+const STARTER = /^(?:The|A|An|For|In|At|On|It|Its|That|This|Their|They|There|Here|Pay|Base|Hourly|And|But|So|Yes|No|You|Your|With|From|To|As|Per|Each|Most|Also|Salary|Compensation|Posted|Listed|Stated)$/;
+function otherNames(x: string, own: string): string[] {
+  const inPlace = own.toLowerCase(), first = /^\S+/.exec(x.trim())?.[0].replace(/[^\p{L}'-]/gu, "") ?? "";
+  return (x.trim().match(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}\p{N}'&-]+/gu) ?? []).filter((w, k) => !(k === 0 && w === first && STARTER.test(w)) && !inPlace.includes(w.toLowerCase().replace(/'s$/, "")) && !/^(?:I|I'm|I've|I'll|SWE|SDE|US|USA|USD|PTO|HR|January|February|March|April|May|June|July|August|September|October|November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday)$/.test(w));
 }
 // D-067: the reply, never blank. A shown payload stands as shown; a market research result with sources gives its points (code's
 // own enforcement of an empty draft: the kept points with their sources, or the plain no-source line).
@@ -282,34 +635,252 @@ export function nonEmptyReply(r: Pick<TurnResult, "reply" | "show" | "tool_calls
     const fromResearch = enforceMarketReply("", m as MarketResult);
     if (/[\p{L}\p{N}]/u.test(fromResearch)) return fromResearch;
   }
+  // D-073 review 2: research read pages and none supported an answer, and the model wrote nothing: the person is still told that it
+  // could not be confirmed, with the pages checked (code's enforcement of an empty draft), never the general empty line.
+  if (m && m.status === "no_sources" && (m as { checked?: unknown[] }).checked?.length) return "kind" in m && m.kind === "company" ? enforceCompanyReply("", m) : enforceMarketReply("", m as MarketResult);
   return (r.tool_calls ?? []).some((c) => c.ok && c.effect === "write_own") ? EMPTY_AFTER_SAVE_REPLY : EMPTY_REPLY;
 }
 
 // D-065: the process the turn still owes before its reply stands (loop.ts `process`, asked once). Each names its ruling.
-export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts: string[]; planFile?: boolean; history?: boolean; mail?: boolean; posting?: boolean }): ((reply: string, calls: { name: string; ok: boolean }[]) => string | null) | null {
-  if (!o.draftAsk && !o.planSearch && !o.parts.length && !o.history && !o.mail && !o.posting) return null;
-  return (reply, calls) => {
+// D-071 (live-8 C22: "what's the going rate for swe interns in chicago, hourly" was answered with one posting's range and an offer
+// to look; no research ran): an ask for the going, market or typical pay of a role is a research ask. The posting pay already shown
+// is still given, beside a sourced benchmark.
+export const MARKET_RATE_ASK = /\b(?:going|market|typical|average|usual|standard|normal|median)\s+(?:hourly\s+|annual\s+|base\s+)?(?:rate|pay|salary|salaries|wage|wages|comp(?:ensation)?)\b|\bhow\s+much\s+(?:do|does|would|will)\s+[a-z ]{2,40}?\s+(?:make|earn|get\s+paid)\b|\bwhat\s+(?:do|does)\s+[a-z ]{2,40}?\s+(?:make|earn)\b|\bpay\s+(?:range|benchmark)s?\s+for\s+(?:a\s+|an\s+)?[a-z]/i;
+export function marketRateAskOf(message: string): boolean { return MARKET_RATE_ASK.test(String(message ?? "")); }
+export function processCheck(o: { draftAsk: boolean; planSearch: boolean; parts: string[]; planFile?: boolean; history?: boolean; mail?: boolean; posting?: boolean; shownPay?: { text: string; url: string | null }[]; marketRate?: boolean; review?: string | null; familyFile?: keyof typeof FAMILY_TITLE | null;
+  // Review of #785: `noneClaim` holds a reply that says they have no applications on every turn, whatever tools it has; `record` is
+  // what this turn's record read came to (loop.ts turn.record), so a lookup that returned without reading everything is not one.
+  noneClaim?: boolean; record?: () => { status: string; could_not_read: string[] } | null | undefined }): ((reply: string, calls: { name: string; ok: boolean; error?: string }[]) => string | null) | null {
+  if (!o.draftAsk && !o.planSearch && !o.parts.length && !o.history && !o.mail && !o.posting && !o.shownPay?.length && !o.marketRate && !o.review && !o.familyFile && !o.noneClaim) return null;
+  return (reply, calls: { name: string; ok: boolean; error?: string }[]) => {
     const called = (names: readonly string[]) => calls.some((c) => names.includes(c.name));
+    // D-072 (files reachable, D-066 P6): an ask to see one of their record-backed Files gets that File from their records, or is told
+    // plainly what is missing (the tool's own answer); it is never described from memory.
+    if (o.familyFile && !called([FAMILY_FILE_TOOL])) return `They asked to see their ${FAMILY_TITLE[o.familyFile]}. Call ${FAMILY_FILE_TOOL} now with that family, then say in a sentence or two what it holds (only from its holds), or, if it was not made, what is missing. Write no link: code adds it.`;
     // G10 / D-059: the draft tool is the only path for a draft; a draft written in the reply's prose is never shown.
     if (o.draftAsk && !called(DRAFT_TOOLS)) return "They asked for a message draft and you wrote it in your reply. Call draft_followup now with the draft as body (keep [placeholders] for what you don't know); code shows its text as your reply.";
     // MIRROR-PROCESS C1: the plan stands on a search of postings they could apply to.
     if (o.planSearch && !called(["search_jobs"])) return "They asked what to do to land postings they could apply to, and no search ran. Call search_jobs now with their goal, then write the plan around what it found (say how many, and if none, what it covered).";
     // D-067 (G14, C6): their own application history is read from the record that holds it.
-    if ((o.history || (o.mail && SAYS_NOT_APPLIED.test(reply))) && !called(["read_application_mail"])) return "They asked about their own applications and you did not read their record. Call read_application_mail now and answer from what it returns, saying what it covered.";
+    // Review of #785 (owner must-fix, D-024): only a lookup that succeeded and read everything counts. A reply that says they have
+    // not applied, or have no applications, with no such lookup this turn is held: the tool is asked for when it was not tried,
+    // and when it was tried and failed the reply is asked again with that fact (agentTurn then enforces it in code).
+    const none = (o.mail || o.noneClaim) && saysNoApplications(reply), look = lookupOf(calls, o.record?.());
+    if ((o.history || (none && o.mail)) && !look.tried) return "They asked about their own applications and you did not read their record. Call read_application_mail now and answer from what it returns, saying what it covered.";
+    if (none && !look.ok && look.status !== "unknown") return look.tried
+      ? `Your lookup of their applications ${look.what.length ? `was incomplete: it could not read ${look.what.join("; ")}` : "failed"}. Your draft says they have not applied or have no applications, and nothing verified that. Do not say it, and give no total. Say plainly what could not be read just now, that whether they applied is unconfirmed until it can be, and anything the lookup did find as "at least".`
+      : "Your draft says they have not applied or have no applications, and their application record was not read this turn. Do not say it. Say that you have not checked their applications, so it is unconfirmed.";
     // D-067 (G11, C1): a plan ask gets its plan as a File (the postings and the weeks in it); the reply is the short answer and says the plan is in the file.
-    if (o.planFile && called(["search_jobs"]) && !called(["create_file"])) return "They asked for a plan: put the plan (the postings the search found, with their links, and the steps by week) in a File with create_file (kind plan_review), then reply in a few sentences with the answer first and say the full plan is in the file. Write no link: code adds it.";
+    // D-070 (live-7 C1: create_file ran, was refused, and no File reached the person): only a File that was made counts; a refused
+    // one is asked again with what refused it.
+    const madeFile = calls.some((c) => c.name === "create_file" && c.ok);
+    const refusedFile = [...calls].reverse().find((c) => c.name === "create_file" && !c.ok) as { error?: string } | undefined;
+    // D-073 (live-9 C1): the refusal's exact error, whole (its words before the kind's shape, and the shape), and the fix it asks for.
+    if (o.planFile && called(["search_jobs"]) && !madeFile) return refusedFile
+      ? `${REFUSED_FILE_TODO}${refusedFile.error ? `: ${String(refusedFile.error).slice(0, 900)}` : ""}. Fix exactly what that error names${/source/i.test(String(refusedFile.error ?? "")) ? " (give every fact its source, leave out what no tool returned and they did not say)" : ""}, keep everything else as it was, and call create_file (kind plan_review) again now, then reply in a few sentences with the answer first and say the full plan is in the file. Write no link: code adds it.`
+      : "They asked for a plan: put the plan (the postings the search found, with their links, and the steps by week) in a File with create_file (kind plan_review), then reply in a few sentences with the answer first and say the full plan is in the file. Write no link: code adds it.";
     // D-067 (G14, C22): a posting they named is read before research about it.
     const firstResearch = calls.findIndex((c) => c.name === "research_market"), firstRead = calls.findIndex((c) => c.name === "get_posting");
     if (o.posting && firstResearch >= 0 && (firstRead < 0 || firstRead > firstResearch)) return "They named a posting this conversation already showed, and you researched before reading it. Call get_posting on it now and answer from what the posting itself states (its pay for their place, as written) before any research figure.";
+    // D-070 (live-7 C22, G7, owner must-fix (d)): a pay ask that this conversation already answered with a posting's pay gets that
+    // pay, with its place and where it came from: "the only pay I have is what the posting lists" without the figure answers nothing.
+    const money = (t: string) => (String(t).match(/\$\s?\d[\d,.]*(?:\s?[kK])?/g) ?? []).flatMap((x) => numbersIn(x));
+    const shownNums = (o.shownPay ?? []).flatMap((l) => money(l.text));
+    if (shownNums.length && !money(reply).some((n) => shownNums.some((x) => numEq(x, n)))) return `This conversation already showed pay that answers this ask: ${(o.shownPay ?? []).map((l) => `"${l.text}"`).join("; ")}. State that figure with its place, naming the posting or source it came from (a single posting's range is not a market rate: say so), alongside anything else you found. Write no link: code adds its source.`;
+    // D-071 (C22): a market-rate ask tries sourced research (a benchmark with its sources), whatever pay this conversation showed.
+    if (o.marketRate && !called(["research_market"])) return "They asked for the going rate, not one posting's pay. Call research_market now (format inline) for a sourced benchmark for that role and place, then answer with what it found (or say it found nothing) beside the posting pay already shown, each with where it came from. Write no link: code adds the sources.";
     // G3 / G4 (C9): every part they named is answered.
     const missing = partsMissing(reply, o.parts);
     if (missing.length) return `They asked about ${o.parts.join(", ")}, and your reply does not cover: ${missing.join(", ")}. Add each missing part from what you read this turn (call the research tool again only if needed), and where nothing covers it, say that in one plain sentence for that part.`;
+    // D-072 (item 11, G2: live-7 and live-8 reviews opened "Right approach for the wrong problem." and "That's a summary of events,
+    // not an interview answer.", a verdict that never says what it is a verdict on): a review of their practice answer opens with
+    // the verdict ON what they said, naming their answer or approach in their own terms (reply_rubric.ts answersFirst, the G2 rule).
+    if (o.review && answersFirst({ ask: o.review, reply } as any).length) return `Your first sentence is: "${String(reply).trim().split(/(?<=[.!?])\s+/)[0]?.slice(0, 200) ?? ""}". It gives a verdict without saying what it is a verdict on. Make the FIRST sentence your verdict on their answer and name what they actually said or did (their approach, their code, their story, in their own words). Keep the rest of the review, as short as it was or shorter, with at most one question at the end.`;
     return null;
   };
 }
 
+// Review of #785: what a turn's lookup of the person's applications came to. `status`: "none" no lookup ran; "failed" it ran and
+// read nothing; "partial"; "complete" every account and store was read; "unknown" a lookup returned but left no record of what it
+// read (round 3: that is never taken for complete). `what` names what could not be read, `read` what was, `found` each application.
+const LOOKUP_TOOLS = ["read_application_mail", "export_tracker"];
+type Researched = { company: string; role: string | null };
+type LookRecord = { status: string; could_not_read: string[]; read?: string[]; found?: string[]; nomail?: boolean; connect?: string | null; researched?: Researched[]; changes?: string[] };
+export interface Look { tried: boolean; ok: boolean; status: "none" | "failed" | "partial" | "complete" | "unknown"; what: string[]; read: string[]; found: string[]; nomail?: boolean; connect?: string | null; researched?: Researched[]; changes?: string[] }
+export function lookupOf(calls: { name: string; ok: boolean }[], record?: LookRecord | null): Look {
+  const mine = calls.filter((c) => LOOKUP_TOOLS.includes(c.name)), ran = mine.some((c) => c.ok);
+  const status = !mine.length ? "none" : !ran ? "failed" : !record ? "unknown" : record.status === "complete" || record.status === "partial" ? record.status : "failed";
+  return { tried: mine.length > 0, ok: status === "complete", status, what: ran && record && status !== "complete" ? record.could_not_read : [], read: ran ? record?.read ?? [] : [], found: ran ? record?.found ?? [] : [], nomail: ran && !!record?.nomail, connect: ran ? record?.connect ?? null : null, changes: ran ? record?.changes ?? [] : [], researched: ran ? record?.researched ?? [] : [] };
+}
+// Round 2 (structural, not by phrasing): does this text touch the status of the person's applications at all?
+const APP_STATUS = /\bappl(?:ied|ications?)\b|\b(?:did|do|does|didn'?t)\s+i\s+(?:\w+\s+)?apply\b|\bsubmi(?:tted|ssions?)\b|\bsent\s+(?:in|out)\b|\bin\s+flight\b|\bon\s+(?:record|file)\b|\bheard\s+back\b|\breject(?:ed|ions?)\b|\banywhere\s+(?:yet|else|new)\b|\b(?:yet|need|still)\s+to\s+apply\b|\bnot\s+appl|\bapps\b|\byour\s+(?:tracker|pipeline)\s+(?:is|has|shows|looks|holds)\b|\bapl+(?:ied|y|ication)|\bapplyed\b|\bmy\s+apps?\b|\bapp\s+(?:count|status)\b|\bpostul\w*|\bsolicitud\w*|\bcandidat(?:ure|ura|ei|é)\w*|\bbeworben\b|\bbewerbung\w*|\bapply\s+kiya\b|आवेदन/i;
+const tidy = (t: string) => String(t ?? "").replace(/[’‘`]/g, "'");
+// A condition is not a statement of status ("If you hadn't applied anywhere, I'd start with three a week.").
+export function touchesApplications(text: string): boolean { return APP_STATUS.test(tidy(text).replace(/\b(?:if|suppose|supposing|unless|whether)\b[^,;:.!?]*/gi, " ")); }
+// A direct question about their real applications, even inside a hypothetical ("have i applied anywhere? if i had, which ones?").
+export function realApplicationsAsk(message: string): boolean { const t = tidy(message); return historyAskOf(t) || (APP_STATUS.test(t) && /\b(?:have|did|had|am|do|hav)\s+i\b|\b(?:did|has|is|was)\s+my\s+(?:\w+\s+){0,2}(?:application|app)\b/i.test(t)); }
+// Rounds 3 and 4: a question about their own application status. Sentence by sentence, a supposition apart ("if i had applied
+// ..."); a bare "have i?" or "did i?" counts beside a sentence about applying. Specific phrases only (round 4: "what's out there" is
+// a search; "catch me up on the news", "what's pending on my calendar", "where am i supposed to upload" are not status), common
+// typos and the core words in Spanish, French, German, Portuguese and Hindi. Wording coverage is partial by nature.
+const STATUS_ASK = /^\W*(?:status|staus)\W*$|\b(?:(?:my|application|app)\s+(?:status|staus)|(?:status|staus)\s+of\s+my\s+(?:app|application)|(?:anything|what'?s)\s+pending(?!\s+(?:on|in|for|with)\b)|in\s+flight|heard?\s+back|hear\s+from\s+[a-z]|get\s+back\s+to\s+me|(?:companies|anyone|anybody)\s+(?:responded|replied)|any\s+(?:luck|news|updates?|word)(?!\s+(?:finding|getting|on\s+the|in\s|about\s+(?!my)))|any\s+rejections|where\s+(?:am|are)\s+(?:i|we)\s+(?:at|with)\b|where\s+do\s+(?:i|things)\s+stand|catch\s+me\s+up(?!\s+on\b)|the\s+damage|my\s+name\s+on\s+it|(?:get|got|have|has)\s+my\s+(?:stuff|resume|application)|who\s+have\s+i\s+sent|(?:still\s+in|out\s+of)\s+the\s+running|still\s+alive|interviews?\s+lined\s+up|offer\s+situation|turn(?:ed)?\s+(?:me|you)\s+down|waiting\s+on\s+anyone|job\s+hunt|latest\s+on\s+my|remind\s+me\s+(?:where|which|what)\b[^?.]{0,20}\bi\s+(?:applied|went|did|sent|aplied)|where'?d\s+my\s+(?:applications?|apps?)|my\s+(?:applications?|apps?)\s+end\s+up|did\s+i\s+do\s+the\s+[\w ]{1,20}\s+one|(?:list|count\s+of)\s+my\s+(?:apps|applications)|app\s+count|hit\s+up|shot\s+my\s+shot|how\s+many\s+(?:have|did)\s+i|how\s+many\s+(?:applications|apps|places|companies|jobs|roles)\s+(?:have|did)\s+i\b|how\s+many\s+(?:applications|apps)\s+(?:do\s+i\s+have|i\s+have|i'?ve|are\s+out|out|so\s+far)|how\s+many\s+so\s+far|(?:did|has|have|is|was)\s+(?:my|the|that|it|this)\b[^?.]{0,30}?\b(?:go|get|gone|went|gotten)\s+thr(?:ough|u)\b|go\s+anywhere|get\s+lost|(?:has|did|is)\s+anything\s+(?:gone|go|went)\s+out|send\s+anything\s+to|sent\s+(?:stuff|anything)\s+to|apply\s+kiya)\b|आवेदन/i;
+const NOT_STATUS = /\b(?:calendar|news\s+in|upload|transcript|cover\s+letter|template|resume\s+rewrite|posting\s+link|interview\s+rounds?|leetcode|hours)\b/i;
+export const EDIT_ASK = /\b(?:rewrite|rewrote|write\s+(?:my|me|a|an|the|this|up)\b|re-?word|edit|polish|shorten|tighten|draft|proofread|improve|make\s+(?:my|this|it|the)\b[^?.]{0,30}\b(?:sound|shorter|longer|stronger)|give\s+me\s+a\s+(?:checklist|template|list|sample)|checklist|bullet|cover\s+letter|this\s+line)\b/i;
+// A command about applications ("hold all applications??", "pause my applications") is the command's turn, not a status question.
+const COMMAND = /^\W*(?:please\s+)?(?:hold|pause|stop|resume|unpause|restart|cancel|withdraw|freeze|queue|send|submit|apply|start|delete|remove|undo)\b/i;
+export function statusQuestion(message: string): boolean {
+  const all = tidy(message), real = all.split(/(?<=[.!?])\s+|\n+/).filter((x) => !/^\W*(?:if|suppose|supposing|imagine|hypothetically|what\s+if|say)\b/i.test(x) || /\b(?:have|did|has)\s+(?:i|anything)\b[^,]*\?\s*$/i.test(x));
+  if (real.some((x) => realApplicationsAsk(x))) return true;
+  // A short question about their own applying ("applied anywhere?", "any apps out?", "did i apply?"); a topic about applications
+  // in general ("application deadlines for Google APM?", "tips for applications to nonprofits?") never.
+  if (real.some((x) => /\?\s*$/.test(x) && x.split(/\s+/).length <= 6 && APP_STATUS.test(x) && !NOT_STATUS.test(x) && !COMMAND.test(x)
+    && (/\b(?:my|mine|i|me|i've|i'm|your|you)\b/i.test(x) || /^\W*(?:(?:any|anything)\s+)?(?:applied|aplied|apps?|applications?)\s+(?:anywhere|out|back|yet)\b/i.test(x)))) return true;
+  if (APP_STATUS.test(all) && real.some((x) => /^\W*(?:and\s+|so\s+|also\s+)?(?:have|did|has|am)\s+(?:i|it|anything)\b[^.]{0,20}\?\s*$/i.test(x.trim()))) return true;
+  // In another language: the core word in a question ("¿ya postulé a algún lugar?", "Habe ich mich schon irgendwo beworben?").
+  if (real.some((x) => /\?|\?\s*$/.test(x) && /postul|candidat|beworben|bewerbung|aplicad|solicitud|apply\s+kiya|आवेदन/i.test(x))) return true;
+  return real.some((x) => STATUS_ASK.test(x) && !(NOT_STATUS.test(x) && !APP_STATUS.test(x)));
+}
+// Round 3: a sentence of a reply that reads like a statement of where their applications stand, by a broad test: the application
+// words; the ways of saying "none" or "that is all" ("nothing has gone out", "clean slate", "so far", "at zero", "the list is
+// empty", "only Acme"); or a quantity said of the person. What Trainee itself did not send is not one ("Nothing was sent.").
+const IDIOM = /\bgone\s+out\b|\bclean\s+slate\b|\bso\s+far\b|\b(?:at|from|still\s+at)\s+(?:zero|none|square\s+one)\b|\bzero\s+sent\b|\bzilch\b|\bzip\b|\bstarting\s+(?:fresh|from\s+scratch)\b|\bfrom\s+scratch\b|\b(?:board|list|slate|queue)\s+is\s+(?:bare|empty|blank|clear)\b|\bnot\s+a\s+single\b|\bwhole\s+list\b|\bon\s+(?:the|your)\s+list\b|\bhave\s+your\s+resume\b|\b(?:never\s+)?went\s+through\b|\bfirst\s+(?:one|application)\b|\bnothing\s+from\s+you\b/i;
+// "only Acme", "just Stripe": a capitalized name after only/just. Case-sensitive on the name's first letter, written without an
+// inline modifier group (not supported in every realm the bundle runs in); the same matches as the /i alternative it replaces.
+const IDIOM_NAMED = /\b(?:[Oo][Nn][Ll][Yy]|[Jj][Uu][Ss][Tt])\s+[A-Z][A-Za-z]+\b/;
+const OF_YOU = /\byou(?:'re|'ve|r)?\b[^.!?]{0,40}\b(?:zero|none|nothing|nobody|no\s+one|only\s+one|anything\s+in|empty)\b|\b(?:zero|none|nothing|nobody)\b[^.!?]{0,30}\byou(?:r)?\b/i;
+// Round 5: the person's own applications only. "Applied" opening a resume line ("Applied ML to churn"), quoted text, and the
+// application words with no "you/your/I/my" in the sentence are not a statement of their status.
+const PERSON = /\b(?:you|your|you've|you're|you'd|u|i|i've|i'm|my|me)\b/i;
+// v2 (CI on #811: a reply's "before we reach submission", "no account, saved application or submission was created" brought the
+// lookup and code's block onto turns not about their status): a reply speaks of their status only when it says what THEY applied
+// to or how many, "your application(s)" doing something, or one of the plain ways of saying none has gone out. Trainee's own
+// boundary lines are never one.
+const YOU_STATUS = /\b(?:you|u)(?:'ve|\s+have|'re|\s+are|\s+had)?\s+(?:already\s+|still\s+|never\s+|not\s+|haven'?t\s+|hadn'?t\s+|didn'?t\s+|did\s+not\s+|have\s+not\s+|yet\s+to\s+)*(?:applied|submitted|sent\s+(?:in|out)|put\s+in)\b|\byour\s+(?:\w+\s+){0,2}(?:applications?|apps)\b(?!\s+(?:fee|deadline|form|question|essay|portal|link|page|materials|packet|draft))|\b(?:you|u)(?:'ve|\s+have|'re\s+at|\s+are\s+at|'ve\s+got)\s+(?:\d+|no|zero|one|two|three|four|five|six|seven|eight|nine|ten|a\s+few|several|many)\s+(?:\w+\s+)?(?:applications?|apps|places|companies)\b/i;
+const IDIOM_T = /\bgone\s+out\b|\bclean\s+slate\b|\bzero\s+sent\b|\bzilch\b|\bzip\b|\b(?:at|from|still\s+at)\s+(?:zero|none|square\s+one)\b|\bstarting\s+(?:fresh|from\s+scratch)\b|\b(?:board|slate|queue|pipeline|tracker)\s+is\s+(?:bare|empty|blank|clear)\b|\bnot\s+a\s+single\s+(?:one|application|app)\b|\bnothing\s+from\s+you\b/i;
+const OF_YOU_T = /\byou(?:'re|\s+are|'ve|\s+have)\s+(?:got\s+)?(?:at\s+)?(?:zero|none|nothing|nobody|no\s+one)\b(?!\s+(?:to\s+(?:do|worry)|else))|\b(?:zero|none|nothing|nobody)\s+(?:is\s+|are\s+)?(?:out|pending)\b/i;
+const BOUNDARY_LINE = /\b(?:was|were|is|are|been)\s+(?:created|made|queued|submitted|applied\s+for|sent)\b[^.]{0,40}$|\bnothing\s+is\s+being\s+(?:applied|sent|submitted)\b|\bbefore\s+(?:any|we\s+reach|the)\s+submission\b/i;
+export function statusLike(text: string): boolean {
+  return tidy(text).split(/(?<=[.!?])\s+|\n+/).some((x) => {
+    const c = x.replace(BULLET, "").replace(/^\W*(?:try|rewrote\s+it|here'?s?)?\s*:?\s*Applied\s+(?!to\b|for\b|anywhere\b)/, " ").replace(/"[^"]*"|'[^']{4,}'/g, " ").replace(NOTHING_SENT_I, " ");
+    if (!c.trim() || POLICY.test(c.toLowerCase()) || TRAINEE_DID_NOT.test(c.toLowerCase())) return false;
+    if (BOUNDARY_LINE.test(c)) return false;
+    return YOU_STATUS.test(c) || IDIOM_T.test(c) || OF_YOU_T.test(c) || saysNoApplications(c);
+  });
+}
+const listed = (xs: string[]) => (xs.length > 1 ? `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}` : xs[0] ?? "");
+const NOT_CHECKED = "I haven't checked your application record in this reply, so whether you've applied is unconfirmed. Ask me and I'll check.";
+const NOT_READ = "I couldn't read your application record just now, so whether you've applied is unconfirmed. Ask me again and I'll check.";
+// D-024, rounds 3 and 4: the status of their applications, stated by code from the lookup's result and nothing else: each
+// application found (employer, role, date, what it stands on, an outcome an employer's email gave), or that none was found, and what
+// was read and what was not (the mailboxes named once; no Gmail connected said as such).
+const readList = (read: string[]) => {
+  const boxes = read.filter((r) => r.startsWith("Gmail account ")).map((r) => r.slice(14)), rest = read.filter((r) => !r.startsWith("Gmail account "));
+  const parts = [...(boxes.length ? [`Gmail account${boxes.length > 1 ? "s" : ""} ${listed(boxes)}`] : []), ...rest];
+  return boxes.length > 1 ? parts.join("; ") : listed(parts);
+};
+// D-062 (d062-capabilities-process C6): a role only researched is named as such ("PayPal was research only in this conversation"),
+// a correction since the record was last shown is stated (G9), and with no Gmail connected the reply says so and carries the record's own connect link (the tool's connect_url, never the model's).
+const researchedLine = (xs: Researched[]) => xs.length === 1
+  ? ` ${xs[0].company} was research only in this conversation${xs[0].role ? ` (${xs[0].role})` : ""}, not an application.`
+  : ` ${listed(xs.map((x) => `${x.company}${x.role ? ` (${x.role})` : ""}`))} were research only in this conversation, not applications.`;
+export function coverageLine(look: Look): string {
+  const line = coverageCore(look), res = look.researched?.length ? researchedLine(look.researched) : "";
+  const connect = look.status === "complete" && look.nomail && look.connect ? `\n\nNo Gmail is connected, so employer emails are not in this record. Connect it yourself here (you sign in to Google):\n${look.connect}` : "";
+  const fixes = look.status === "complete" && look.changes?.length ? ` ${look.changes.join(" ")}` : "";
+  return line + fixes + (look.status === "complete" || look.status === "partial" ? res : "") + connect;
+}
+function coverageCore(look: Look): string {
+  if (!look.tried) return NOT_CHECKED;
+  if (look.status === "unknown" || (look.status === "failed" && !look.what.length)) return NOT_READ;
+  const n = look.found.filter((f) => !/^and \d+ more$/.test(f)).length + Number(/^and (\d+) more$/.exec(look.found.at(-1) ?? "")?.[1] ?? 0);
+  if (look.status === "complete") {
+    const none = look.nomail ? "Trainee's saved record shows no applications of yours." : "I found no applications of yours.";
+    return `${n ? `Your application record shows ${n} application${n === 1 ? "" : "s"}: ${look.found.join("; ")}.` : none} Checked: ${readList(look.read)}${look.nomail ? "; no Gmail connected, so no employer email was checked" : ""}.`;
+  }
+  const found = look.found.length ? ` Found so far, at least: ${look.found.join("; ")}.` : "";
+  return look.status === "partial" && look.read.length
+    ? `I read ${readList(look.read)}. I couldn't read ${listed(look.what)}, so what is there is unconfirmed.${found}`
+    : `I couldn't read ${listed(look.what)} just now, so whether you've applied is unconfirmed.${found} Ask me again and I'll check.`;
+}
+// The model's sentences that may stay beside code's statement. `strict` (they asked about their applications, or the model itself
+// looked them up): a sentence stays only if it is plainly something else (round 4): a job listing or search result, a draft or an
+// action done this turn, a piece of advice, or an offer of help, with no word of application status, reading or checking, and no
+// outcome. Everything else, whatever its wording (a count, "Acme and Ramp.", "You did, on Oct 28.", "Yes."), goes: counts and
+// lists of where they applied are code's alone. Otherwise (the reply only brushed the subject): every sentence but the
+// status-like ones. A sentence that hangs on a dropped one goes with it (its list, "That means ...", a heading left empty).
+const HELD_STATUS = new RegExp(`${APP_STATUS.source}|\\bstatus\\b|\\bthings\\s+stand\\b|\\bfollow\\s+up\\s+on\\b|\\bconfirm\\w*\\b|\\bgmail\\b|\\binbox\\b|\\bmailbox\\b|\\baccounts?\\b|\\bread\\b|\\bcheck(?:ed|ing)?\\b|\\blooked\\b|\\bscanned\\b|\\bsearched\\b|\\brecords?\\b|\\bsent\\b|\\bwent\\s+through\\b`, "i");
+const OUTCOME = /\b(?:rejected|rejection|invited|interview(?:ed|ing)?\s+(?:you|stage)|offers?\b|replied|responded|moved\s+you|passed\s+on|turned\s+you|reviewing|under\s+review|received|got\s+(?:it|your))\b/i;
+const LISTING = /\b(?:roles?|postings?|openings?|internships?|positions?|jobs?|fits?|matches|options|programs?)\b/i;
+const ACTION = /^\W*(?:saved|noted|added|updated|fixed|done|shortened|swapped|changed|removed|here'?s|here\s+(?:is|are)|i'?ll|i\s+will|will\s+remind|got\s+it|thanks)\b/i;
+const ADVICE = /^\W*(?:start|try|practice|focus|keep|aim|then|next|prep|prepare|reach|consider|let'?s|tailor|follow|reconnect|connect|ask|make|use|look|plan|set|block|spend|review|study|take|write|pick|remember)\b/i;
+const HELP_Q = /^\W*(?:want|should|shall|would\s+you|do\s+you|can\s+i|need|ready)\b[^.!]*\?\s*$/i;
+// What the person did, said by the model ("You went for the PM role at Notion."): a status sentence, even when it names a role.
+const YOU_DID = /\b(?:you|you've|you'd|u)\s+(?:\w+\s+)?(?:went|gone|did|done|sent|hit|tried|put|got|landed|made|pursued|chose)\b/i;
+const BULLET = /^\s*(?:[-*•]|\d+[.)])\s+/;
+function keptSentences(reply: string, strict: boolean, own: string): string {
+  const stays = (x: string) => { const t = tidy(x).replace(/\*+/g, "").replace(BULLET, "");
+    return strict ? !HELD_STATUS.test(t) && !IDIOM.test(t) && !IDIOM_NAMED.test(t) && !OUTCOME.test(t) && !/^\W*(?:yes|yep|yeah|no|nope|nah|not\s+yet)\b/i.test(t) && !YOU_DID.test(t) && (LISTING.test(t) || ACTION.test(t) || ADVICE.test(t) || HELP_Q.test(t)) : !statusLike(t); };
+  const out: string[] = [];
+  let dropped = false, headGone = false, anyBullet = false;
+  for (const line of String(reply ?? "").split(own).join("").split("\n")) {
+    if (!line.trim()) { out.push(""); dropped = false; continue; }
+    const bullet = BULLET.test(line), parts = line.replace(BULLET, "").split(/(?<=[.!?])\s+/);
+    if (bullet && (headGone || !parts.every(stays))) { anyBullet = dropped = true; continue; }
+    if (!bullet) headGone = false;
+    const kept: string[] = [];
+    for (const x of parts) {
+      const ok: boolean = stays(x) && !(dropped && /^\W*(?:that|this|it|those|these|which|so)\b|\b(?:it|them)\b/i.test(x));
+      if (ok) kept.push(x); else if (/:\s*$/.test(x)) headGone = true;
+      dropped = !ok;
+    }
+    if (kept.length) out.push(kept.join(" "));
+  }
+  const lines = out.map((l) => (anyBullet ? l.replace(/^\s*\d+[.)]\s+/, "") : l)).filter((l, k, xs) => !(/:\s*$/.test(l) && !BULLET.test(xs[k + 1] ?? "")));
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+export function heldReply(reply: string, look: Look, strict = true): string {
+  const own = coverageLine(look);
+  return [own, keptSentences(reply, strict, own)].filter(Boolean).join("\n\n");
+}
+// The last word on a turn's reply about applications (agentTurn), round 4. Code's statement is added only when they asked about
+// their own application status, or the reply speaks of it. A lookup ran: the status is code's statement (coverageLine), and no
+// sentence of the model's about it stays: strictly (allow-list) when they asked or the model itself looked, otherwise the
+// status-like sentences go and the rest stands. No lookup ran (no tool for it): a status question, or a reply that says "none", is
+// held the same way with the line that the record was not checked; any other reply stands. A lookup that left no record of what
+// it read backs nothing: a denial after it is held.
+export function applicationsEnforced(reply: string, look: Look, o: { message: string; codeRan?: boolean }): string {
+  const asked = statusQuestion(o.message), speaks = statusLike(reply), strict = asked || (look.tried && !o.codeRan);
+  if (look.status === "none" || look.status === "unknown") return (look.status === "none" && asked) || saysNoApplications(reply) ? heldReply(reply, look, asked || look.status === "unknown") : reply;
+  if (!asked && !speaks && o.codeRan) return reply;
+  return heldReply(reply, look, strict);
+}
+// Review of #785 (fail closed): does this reply say the person has no applications, or has not applied (anywhere or somewhere)?
+// Read sentence by sentence. Left out: what Trainee itself did not send ("Nothing was sent or submitted.", "I haven't submitted
+// anything for you"), a condition or a question ("if you haven't applied yet", "have you applied?"), and "no application
+// fee/deadline/needed". Anything else that reads like "none" counts.
+const NOT_APPLIED = /\b(?:you|u)(?:'ve| have| had)?\s+(?:still\s+|really\s+|also\s+)?(?:haven'?t|have\s+not|not|hadn'?t|had\s+not|never|have\s+never|didn'?t|did\s+not|have\s+yet\s+to|are\s+yet\s+to)\s+(?:yet\s+|actually\s+|even\s+)?(?:\w+\s+)?(?:applied|apply|submitted|submit|sent\s+in)\b|(?:^|[,;:]\s*|\b(?:so|and|but)\s+)(?:not|haven'?t|never)\s+(?:yet\s+)?applied\b/;
+const NO_APPLICATIONS = /(?:\b(?:no|zero|not\s+any|not\s+a\s+single|without\s+any|none\s+of(?:\s+your|\s+the)?)|(?<![\d.,])0(?!\s+of\b)|n't\s+(?:\w+\s+){0,3}?(?:any|a\s+single))\s+(?:(?!rejected|new|other|more|further|declined|withdrawn|pending|open|unanswered|response|reply|update|answer|news|word)\w+\s+){0,3}?applications?\b(?!\s+(?:fees?|deadlines?|forms?|process|portal|window|cycle|season|page|link|materials|essays?|requirements?|questions?|open(?:ed)?|needed|required|necessary|(?:is|are|was|were)\s+(?:needed|required|necessary|open|due|accepted)))/;
+const NOTHING_THERE = /\bnothing\b[^.!?]{0,30}?\b(?:submitted|applied|on\s+(?:record|file)(?!\s+(?:for|of|about)\s+(?:the|your|that|this|an?)\s+(?!appl)\w)|shows?\b[^.!?]{0,30}\bappl\w*|gone\s+out)\b|\bno\s+(?:record|sign|trace|evidence|confirmation|mention)\b[^.!?]{0,30}\bappl(?:y|ied|ying|ication)|\b(?:tracker|applications?\s+(?:list|record|history|log))\s+(?:is|looks|comes\s+up|came\s+back)\s+(?:still\s+)?(?:empty|blank)\b/;
+const NOTHING_SENT_I = /\bnothing\s+(?:was|has\s+been|is\s+being|is|got|will\s+be)\s+(?:sent|saved|queued|submitted|created|applied(?:\s+(?:to|for))?)\b(?:(?:,|\s+or|\s+and)\s+(?:sent|saved|queued|submitted|created|applied(?:\s+(?:to|for))?)\b)*/gi;
+const NOTHING_SENT = /\bnothing\s+(?:was|has\s+been|is\s+being|is|got|will\s+be)\s+(?:sent|saved|queued|submitted|created|applied(?:\s+(?:to|for))?)\b(?:(?:,|\s+or|\s+and)\s+(?:sent|saved|queued|submitted|created|applied(?:\s+(?:to|for))?)\b)*/g;
+const TRAINEE_DID_NOT = /\b(?:i|we|trainee)\s+(?:have\s+not|haven'?t|did\s+not|didn'?t|won'?t|will\s+not|never)\s+(?:yet\s+)?(?:sent|submitted|applied|queued)\b|\b(?:sent|submitted|applied|queued)\b[^.!?]{0,20}\b(?:by\s+me|by\s+trainee|for\s+you|on\s+your\s+behalf)\b/;
+const NOT_A_CLAIM = /^(?:so\s+|and\s+|ok(?:ay)?,?\s+)?(?:have|haven'?t|had|did|didn'?t|do|does|is|are|should|want|would|can|could|which|what|where|when|shall)\b[^?]*\?\s*$/;
+// Round 2 (false alarms the review found): what Trainee never does without a yes; "applied the feedback"; "no rejected applications".
+// Also not a claim about their record: their own words given back, what cannot be confirmed, people in general, an employer's rule.
+const POLICY = /\bwithout\s+your\s+(?:yes|approval|ok|okay|say(?:-so)?|go-ahead|permission|confirmation)\b|\bon\s+(?:its|my)\s+own\b|\byou\s+(?:told|said)\b|\b(?:can't|cannot|couldn't|not)\s+(?:confirm|say|saying|tell|verify)\b|^(?:most|many|some)\s+(?:people|students|candidates)\b|\b(?:don't|doesn't|no)\s+need\b|\b(?:takes?|accepts?|accepting)\s+no\b|\bno\s+longer\s+(?:takes?|accepts?|accepting|taking)\b|\bresearch\s+only\b|\bread\s+only\b|\bsearch\s+only\b|\bnothing\s+more\s+was\b|\bwill\s+be\s+(?:prepared|sent|submitted)(?:\s+or\s+\w+)?\s+until\b|\bcan\s+be\s+submitted\s+from\b|^\W*nothing\s+submitted\W*$|\bno\s+account,\s+saved\s+application\b|\bno\s+application\s+was\s+(?:queued|sent|made)\b|\bnothing\s+(?:has\s+)?(?:gone|went|goes)\s+to\s+the\s+employer\b|\buntil\s+you\s+approve\b|\bstill\s+needs\s+its\s+own\s+review\b|\bnothing\s+to\s+apply\s+to\b|\bapproving\s+covers\b|\bnothing\s+prepares\b|\b(?:posting|role|job)\b[^.]{0,60}\bclosed\b|\bby\s+(?:me|trainee)\b|\banywhere\s+(?:new|else)\b|\bnone\s+of\s+your\s+applications\s+(?:were|was|got)\b|^(?:n?ever)\b[^?]*\?\s*$/;
+const APPLIED_A_THING = /\bappl(?:ied|y)\s+(?:the|your|my|any|those|these|that|this)\s+(?:\w+\s+){0,2}?(?:feedback|edits?|changes?|fix(?:es)?|advice|suggestions?|filters?|tips?|notes?)\b/g;
+export function saysNoApplications(reply: string): boolean { return noApplicationsIn(reply).length > 0; }
+function noApplicationsIn(reply: string): string[] {
+  return String(reply ?? "").split(/(?<=[.!?])\s+|\n+/).filter((x) => {
+    const t = x.trim().toLowerCase().replace(/[’‘`]/g, "'").replace(/\s+/g, " ");
+    if (!t || NOT_A_CLAIM.test(t) || TRAINEE_DID_NOT.test(t)) return false;
+    if (POLICY.test(t)) return false;
+    const c = t.replace(NOTHING_SENT, " ").replace(APPLIED_A_THING, " ").replace(/\b(?:if|whether|unless|once|when|until|in\s+case|suppose)\b[^,;]*/g, " ");
+    return NOT_APPLIED.test(c) || NO_APPLICATIONS.test(c) || NOTHING_THERE.test(c);
+  });
+}
 // D-067 (owner, must-fix: "never say 'you haven't applied' without checking connected email first"): a reply that says they have
-// not applied, or that nothing is on record, is a history answer whatever the ask was.
+// not applied, or that nothing is on record, is a history answer whatever the ask was. (Kept for its tests; the check is saysNoApplications.)
 export const SAYS_NOT_APPLIED = /\byou(?:'ve|\s+have)?\s+(?:not|haven'?t|didn'?t|did\s+not|never)\s+(?:yet\s+)?(?:applied|submitted)\b|\byou\s+have\s+no\s+applications?\b|\bno\s+applications?\s+(?:on\s+record|yet|so\s+far|from\s+you|anywhere)\b|\bnothing\s+(?:is\s+)?on\s+record\s+yet\b|\b(?:not|haven'?t)\s+applied\s+(?:to\s+)?any(?:thing|where)\s+yet\b/i;
 // The links Trainee's own earlier replies in the window showed the person (assistant messages only; never a link the person typed,
 // which linksSeen already holds, and never one from a tool the model saw but did not show).
@@ -342,17 +913,20 @@ export function condensable(r: Pick<TurnResult, "reply" | "show" | "pending_appr
   const wrote = (r.tool_calls ?? []).some((c) => (c.ok !== false && c.effect !== null && c.effect !== undefined && c.effect !== "read") || WRITER_TOOL.test(c.name));
   return reply.length > limit.max && !r.show && !(r.pending_approvals ?? []).length && !wrote && !/```/.test(reply);
 }
-const WRITER_TOOL = /^(?:draft_\w+|tailor_resume|create_file|attach_document|export_tracker|save_resume_persona|use_resume_persona|set_resume_contact)$/;
+const WRITER_TOOL = /^(?:draft_\w+|tailor_resume|create_file|open_record_file|attach_document|export_tracker|save_resume_persona|use_resume_persona|set_resume_contact)$/;
 const BOUNDARY = /\b(?:nothing|not|never|haven'?t|hasn'?t|didn'?t|wasn'?t|isn'?t|won'?t|no one|nobody)\b[^.!?\n]{0,60}\b(?:sent|submitted|applied|queued|contacted|messaged|emailed)\b|\b(?:sent|submitted|applied)\b[^.!?\n]{0,20}\b(?:nothing|nowhere)\b/i;
 const CAVEAT = /\b(?:not (?:verified|confirmed|guaranteed|listed|on file)|unverified|unconfirmed|(?:i )?(?:don'?t|do not|can'?t|cannot|couldn'?t) (?:have|verify|confirm|check|tell|find)|no verified)\b/i;
 const NUMBER = /\$?\d[\d,.]*(?:k|%)?/gi, LINK = /https?:\/\/\S+/g;
+// D-070 (live-7 C11, C15: a numbered list's markers "1." to "5." counted as figures the shorter text had to keep, so a faithful
+// shortening that wrote the list as sentences was always refused): a list marker at the start of a line is not a figure.
+const figureText = (t: string) => String(t ?? "").replace(/^[ \t]*(?:\d{1,2}[.)]|[-*•])[ \t]+/gm, "");
 // The condensed text, or null when it fails a guard (then the long reply stands): shorter, not empty, every number and link in
 // it was in the long reply, at most one question.
 export function condensedOk(long: string, short: string, limit: { max: number }): boolean {
   const s = String(short ?? "").trim();
   if (!s || s.length >= long.length || s.length > limit.max) return false;
-  const nums = new Set((long.match(NUMBER) ?? []).map((x) => x.replace(/[,.]$/, "")));
-  if ((s.match(NUMBER) ?? []).some((x) => !nums.has(x.replace(/[,.]$/, "")))) return false;
+  const nums = new Set((figureText(long).match(NUMBER) ?? []).map((x) => x.replace(/[,.]$/, "")));
+  if ((figureText(s).match(NUMBER) ?? []).some((x) => !nums.has(x.replace(/[,.]$/, "")))) return false;
   const links = new Set(long.match(LINK) ?? []);
   if ((s.match(LINK) ?? []).some((x) => !links.has(x))) return false;
   // MIRROR WA-1 gaps: what was not done and what is not known survive the shortening: a boundary ("nothing was sent", "not
@@ -368,8 +942,8 @@ export function shortenedOk(long: string, short: string, bound: number): boolean
   if (!condensedOk(long, s, { max: Number.POSITIVE_INFINITY }) || textLength(s) > bound) return false;
   if ((long.match(LINK) ?? []).some((x) => !s.includes(x))) return false;
   // Facts kept: every figure of the long text is still in the short one (a shortening drops words, never a fact's number).
-  const nums = new Set((s.match(NUMBER) ?? []).map((x) => x.replace(/[,.]$/, "")));
-  if ((long.replace(LINK, " ").match(NUMBER) ?? []).some((x) => !nums.has(x.replace(/[,.]$/, "")))) return false;
+  const nums = new Set((figureText(s).match(NUMBER) ?? []).map((x) => x.replace(/[,.]$/, "")));
+  if ((figureText(long).replace(LINK, " ").match(NUMBER) ?? []).some((x) => !nums.has(x.replace(/[,.]$/, "")))) return false;
   if (!(long.match(PLACEHOLDERS) ?? []).every((x) => s.includes(x))) return false;
   // D-067 (live-6 C5f2: the condenser answered "It looks like there was no text to rewrite ... please paste it", and that reached
   // the person in place of a code review): the shorter text must be a rewrite of THIS reply. It says nothing about the rewriting
@@ -392,16 +966,67 @@ export function sameContent(long: string, short: string): boolean {
 // D-067 (G12): a practice session's code review carries code (the person's function, the fix): the shortener never touches it.
 const CODE_IN = /```|`[^`\n]{2,}`|\bdef\s+\w+\s*\(|\bfunction\s+\w+\s*\(|=>|\breturn\s+[^.\n]*[([{=]|\bnext\(|\blambda\b|\w+\(\s*\w*\s*\)\s*[:{]|\bO\(\s*(?:1|n|n\^?2|log ?n|n log ?n)\s*\)/i;
 export function carriesCode(text: string): boolean { return CODE_IN.test(String(text ?? "")); }
-export async function condenseReply(model: ModelFn, long: string, limit: { max: number; aim: string }, ok: (long: string, short: string) => boolean = (a, b) => condensedOk(a, b, limit)): Promise<string | null> {
+// D-072 (item 11): the code a practice reply names, kept verbatim by its shortening: inline code, a call or an index ("next(",
+// "counts["), an identifier with an underscore, an operator, a complexity ("O(n)").
+const CODE_TOKEN = /`[^`\n]+`|\b[A-Za-z_][\w.]*[([]|\b[A-Za-z]+_[\w]+\b|==|!=|<=|>=|=>|\+=|-=|\bO\([^)\n]{1,20}\)/g;
+export function codeKept(long: string, short: string): boolean {
+  const s = String(short ?? "");
+  return [...new Set(String(long ?? "").replace(LINK, " ").match(CODE_TOKEN) ?? [])].every((t) => s.includes(t));
+}
+// D-070: what the length pass did on a turn (recorded in the turn's meta, and by the mirror runner in its trace).
+// D-071: "shorter" = a faithful shorter text was used though it is still over the bound; `passes` = how many shortening calls ran.
+export interface Shorten { ran: boolean; outcome: "not_run" | "within" | "skipped" | "accepted" | "shorter" | "rejected"; why: string; chars?: number; bound?: number; after?: number; passes?: number }
+// A turn's writes were only the File and resume makers (whose reply describes what was made).
+const FILE_MAKERS = new Set(["tailor_resume", "export_tracker", "create_file", FAMILY_FILE_TOOL]);
+export function onlyFileWrites(r: Pick<TurnResult, "reply" | "show" | "pending_approvals"> & { tool_calls?: TurnResult["tool_calls"] }): boolean {
+  const reply = String(r.reply ?? "");
+  const writes = (r.tool_calls ?? []).filter((c) => (c.ok !== false && c.effect !== null && c.effect !== undefined && c.effect !== "read") || WRITER_TOOL.test(c.name));
+  return writes.length > 0 && writes.every((c) => FILE_MAKERS.has(c.name)) && !r.show && !(r.pending_approvals ?? []).length && !/```/.test(reply);
+}
+export const FILE_TURN_CONDENSE = "This reply describes a file or resume that was just made (the file holds the detail). Say what was made first; then the changes in ONE line; then what must be settled before it is sent, in one short sentence naming each item.";
+// D-073: what the length pass must keep, said to it up front: every figure (list markers and links apart), every [placeholder], and
+// each sentence that says what was not done, sent or verified, or what is not known (BOUNDARY, CAVEAT). The guards still check it.
+export function keepList(long: string): string {
+  const figs = [...new Set((figureText(long).replace(LINK, " ").match(NUMBER) ?? []).map((x) => x.replace(/[,.]$/, "")))];
+  const marks = [...new Set(long.match(PLACEHOLDERS) ?? [])];
+  const said = [...new Set(String(long).replace(LINK, " ").split(/(?<=[.!?])\s+|\n+/).map((x) => x.trim()).filter((x) => x && (BOUNDARY.test(x) || CAVEAT.test(x))))].slice(0, 4);
+  const parts = [figs.length ? `every one of these figures, exactly as written: ${figs.join(", ")}` : "", marks.length ? `these placeholders: ${marks.join(", ")}` : "",
+    said.length ? `what each of these says (shorter wording is fine; keep the words that say it was not done or is not known): ${said.map((x) => `"${x}"`).join(" ")}` : ""].filter(Boolean);
+  return parts.length ? `It must keep ${parts.join("; and ")}.` : "";
+}
+// D-073: the length the pass is to reach, as a number (the kind's upper end); the second pass is told how far the first one fell short.
+export function lengthTarget(now: number, upper: number, pass: number): string {
+  return `The whole message must be at most ${upper} characters, links apart. It is ${now} now${pass > 1 ? `, still over after one pass: cut at least ${Math.max(0, now - upper)} more characters by dropping whole sentences that add least` : ""}.`;
+}
+// Why the shorter text was refused, in the guard's own terms (for the trace).
+export function shortenRejection(long: string, short: string, bound: number): string {
+  const s = String(short ?? "").trim();
+  if (!s) return "the condenser returned nothing";
+  if (textLength(s) > bound) return `still over the bound (${textLength(s)} > ${bound})`;
+  if (s.length >= long.length) return "not shorter";
+  const nums = new Set((figureText(s).match(NUMBER) ?? []).map((x) => x.replace(/[,.]$/, "")));
+  const lost = (figureText(long).replace(LINK, " ").match(NUMBER) ?? []).filter((x) => !nums.has(x.replace(/[,.]$/, "")));
+  if (lost.length) return `a figure was dropped (${[...new Set(lost)].slice(0, 3).join(", ")})`;
+  const added = (figureText(s).match(NUMBER) ?? []).filter((x) => !new Set((figureText(long).match(NUMBER) ?? []).map((y) => y.replace(/[,.]$/, ""))).has(x.replace(/[,.]$/, "")));
+  if (added.length) return `a new figure (${added.slice(0, 3).join(", ")})`;
+  if ((long.match(LINK) ?? []).some((x) => !s.includes(x))) return "a link was dropped";
+  if (!(long.match(PLACEHOLDERS) ?? []).every((x) => s.includes(x))) return "a placeholder was dropped";
+  for (const [k, re] of [["boundary", BOUNDARY], ["caveat", CAVEAT]] as const) if (re.test(long) && !re.test(s)) return `the ${k} was dropped`;
+  if ((s.match(/\?/g) ?? []).length > 1) return "more than one question";
+  if (!sameContent(long, s)) return "not a rewrite of the reply";
+  return "refused by the guards";
+}
+export async function condenseReply(model: ModelFn, long: string, limit: { max: number; aim: string }, ok: (long: string, short: string) => boolean = (a, b) => condensedOk(a, b, limit), extra = "", seen?: { out: string }): Promise<string | null> {
   try {
     const res = await model({
       system: `Rewrite this text message from a career assistant so it reads like a text: ${limit.aim}, plain sentences, at most two short paragraphs. ` +
         "Keep the direct answer first. Keep every name, figure, date and link exactly as written, and every statement of what was not done, not sent, not saved or not verified. " +
         "A draft message the person can copy stays a draft they can copy: shorten it if it is long and keep its [brackets]. " +
-        "Drop numbered or bulleted lists (write sentences), headings, repeated points and advice they did not ask for. Add nothing that is not in the text. At most one question, at the end. Output the message only.",
+        "Drop numbered or bulleted lists (write sentences), headings, repeated points and advice they did not ask for. Add nothing that is not in the text. At most one question, at the end. Output the message only." + (extra ? ` ${extra}` : ""),
       messages: [{ role: "user", content: [{ type: "text", text: long }] }], tools: [], max_tokens: 600, tool_choice: { type: "none" },
     } as any);
     const out = ((res as any)?.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join("").trim();
+    if (seen) seen.out = out;
     return ok(long, out) ? out : null;
   } catch { return null; }
 }

@@ -1,10 +1,11 @@
 {
- "note": "D-068 (owner, 2026-11-12): items 7 and 9 (b) re-measured on the D-054 set at trunk 44b436f9 (D-064..D-069), capped at $2.50; measure the second parent",
+ "note": "D-081 (owner, 2026-11-13, about $9 for the release quality run): S3 on release candidate dae186707b8ce63d5c45b21d9883dcaf6a058867; measure the second parent",
+ "approval": "D-081",
  "action": "eval",
- "set": "d054",
+ "set": "dev",
  "brains": [
   "staged"
  ],
  "passes": 5,
- "budget_usd": 2.5
+ "budget_usd": 6.3
 }

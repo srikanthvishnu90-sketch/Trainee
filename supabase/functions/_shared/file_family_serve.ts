@@ -11,6 +11,8 @@
 //   an employer or source page      unchanged (an https link).
 //   anything else                   shown off, with the reason: a state change or approval this File cannot do yet (S1-S6 serve them
 //                                   as POST forms with the page token; approvals bind the payload hash, D-MS-1, D-MN-2).
+//   a post with no records behind it the chat, with the question filled in and "nothing is approved, sent or changed until I say yes
+//   (a stored view; D-072 item 6b)   to that" (never a form; a post to it is refused). With no chat link, shown off (NO_CHAT).
 import { type Act, type Block, FAMILIES, type FamilyFile, type FamilyId, type Part, type StateInput } from "./file_family.ts";
 import { answerLibraryFile, careerBriefFile, materialsFile, pathComparisonFile, profileFactsFile, searchPlanFile } from "./file_family_plan.ts";
 import { applicationReviewFile, interviewHubFile, messageReviewFile, negotiationFile, offerComparisonFile, weeklyBriefFile } from "./file_family_apply.ts";
@@ -29,7 +31,20 @@ export const isServedFamily = (x: unknown): x is ServedFamily => typeof x === "s
 
 // The decisions that need the person's own words (ruling 2): the query keys the family builders use for them.
 export const ASK_KEYS = new Set(["answer", "edit", "correct", "propose", "decide", "followup", "prefer", "priorities", "recipient", "questions", "negotiate", "decision",
-  "plan", "add", "tighten", "adjacent", "widen", "find", "practice", "start"]);
+  "plan", "add", "tighten", "adjacent", "widen", "find", "practice", "start",
+  // D-072 (item 6b): the decisions a family page drew with its own query key, which the File server never read (each was shown off as
+  // "not available on this page yet"). Each needs the person's words, as its record-backed twin already asks in the chat:
+  //   review   F-02 "Review 2 conflicts" (which of two facts is right)       stop     F-02 "Stop reusing a fact" (which fact)
+  //   compare  F-07 "Compare changes" (the versions' differences explained)  answers  F-08 "Review 2 answers needed" (the answers)
+  //   use      F-08 "Use once" (this answer, this application only)          reuse    F-08 "Never reuse" (this answer)
+  //   cancel   F-09 "Cancel" (don't send this application; the live F-09 page asks the same as ?decide=cancel)
+  //   brief    F-13 "Open prep brief" (the chat makes the prep File)          decisions F-14 "Review 2 decisions"
+  //   draft    F-14n "Review draft", "Review the counter draft" (the wording; nothing is sent to an employer)
+  "review", "stop", "compare", "answers", "use", "reuse", "cancel", "brief", "decisions", "draft"]);
+// D-072 (item 6b): what the chat question adds when a post (an approval, a send, a pause) sits on a page whose records cannot answer it
+// (a stored view): nothing is approved, sent or changed from the page; the chat shows the exact current payload and asks for the yes
+// to that payload there (D-MS-1, D-MN-2). Every chat yes-reader is anchored at the start of the message, so this question never reads as a yes.
+export const ASK_FIRST = "show me exactly what this covers first; nothing is approved, sent or changed until I say yes to that";
 // The posts each family serves (S1-S6). One line per family, so each builder adds only its own line: a post listed here is drawn as
 // a form carrying this page's token (the handler checks the cookie, the token and the site, then hands it to that family's
 // FamilySource.act). Every other post stays shown off with NOT_YET. Approvals bind the payload hash shown (D-MS-1, D-MN-2).
@@ -92,7 +107,13 @@ export function servedAct(a: Act, c: ServeCtx, item: string | null): Act {
   // A post this family serves keeps its form, with this page's token; any other is shown off (S1-S6 serve each one).
   // It is drawn as a form only when it is listed AND this page's records answer it (o.answers): a listed post on a page with no source
   // behind it (a stored view) would post and fail, so it is shown off instead.
-  if (a.post) return c.token && c.family && SERVED_POSTS[c.family].has(a.post.action) && c.answers?.(a.post.action) ? { ...a, post: { ...a.post, token: c.token } } : { ...a, post: undefined, href: null, off: NOT_YET };
+  // D-072 (item 6b): a post this page cannot answer (a stored view: no records behind it) is never a form; it opens the chat with the
+  // question filled in, where the exact current payload is shown and approved (D-MS-1). Pressing it changes nothing.
+  if (a.post) {
+    if (c.token && c.family && SERVED_POSTS[c.family].has(a.post.action) && c.answers?.(a.post.action)) return { ...a, post: { ...a.post, token: c.token } };
+    const h = chatAsk(c.bot, askText(c.title, item, `${a.label} (${ASK_FIRST})`));
+    return h ? { ...a, post: undefined, effect: "open", href: h, aria: `${a.label}: opens the chat with the question filled in. Nothing is approved, sent or changed here.` } : { ...a, post: undefined, href: null, off: NO_CHAT };
+  }
   if (/^https:\/\//i.test(href)) return a;
   if (a.effect === "download" && href.startsWith("?") && c.gets?.([...new URLSearchParams(href.slice(1)).keys()][0] ?? "")) return a; // S3: the real file
   if (a.effect === "download" || /^\/files\//.test(href)) return { ...a, effect: "download", href: "?format=json" };

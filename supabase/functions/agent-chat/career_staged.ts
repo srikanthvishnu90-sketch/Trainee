@@ -20,7 +20,7 @@ import { NO_CLOCK, type TurnClock } from "./turn_clock.ts";
 import { crisisReply } from "./crisis.ts";
 import { PAYLOAD_INTENTS } from "../_shared/career_reply_writer.ts";
 import { multiAsk, nonEnglishAsk, severalAsks } from "../_shared/ask_language.ts";
-import { boundaryOf, correctionOf, hypotheticalOf } from "../_shared/agent/turn_notes.ts"; // D-061 G1, G8, G9
+import { boundaryOf, correctionOf, factCorrectionHints, hypotheticalOf, plainAnswer, practiceAskOf, staleFactsOf } from "../_shared/agent/turn_notes.ts"; // D-061 G1, G8, G9; D-070
 
 type Env = { get(k: string): string | undefined };
 type Host = { runTurn(text: string, ctx: any): { intent: string | null; handler: string | null; reply?: string; contained?: boolean; result?: any }; isHostControlled(text: string, ctx: any): boolean };
@@ -29,6 +29,8 @@ import { correctedAsk, refinedAsk } from "../_shared/search_correction.ts";
 import { askFor } from "../_shared/career_search_judge.ts";
 import { namedDraftAsk, outreachAsk } from "../_shared/outreach_ask.ts";
 import { researchReplyOn } from "../_shared/research_reply.ts"; // D-047
+import { familyAskOf, fileNamedIn } from "../_shared/file_family_ask.ts"; // D-072 (files reachable)
+import { pathCompareAskOf } from "../_shared/career_path_comparisons.ts"; // D-072 (files writers)
 import { knowledgeOn } from "../_shared/agent/knowledge/index.ts"; // D-060
 export type BrainMode = "router" | "agent" | "staged";
 // The served brain (release_config.ts): the committed PRODUCTION_BRAIN unless CAREER_BRAIN rolls it back to the router.
@@ -429,7 +431,7 @@ export function followupOffTask(message: string, intent: string, result: unknown
   return false;
 }
 const NON_ENGLISH_KEPT = /^(?:conversation_|intent_cancelled|intent_recipient_change|prep_mock|negotiation_roleplay|career_erase|career_profile_erased|career_paused|career_resumed|paused_|pause_status|career_pending_approvals|career_approval|career_batch_apply|doorstep_|queue_|captcha_|portal_|disconnect|connect_|intent_opt_out|people_matching_stop)/;
-export function stagedDecision(o: { env: Env; message: string; ctx: Record<string, unknown>; host: Host; structured: boolean; clock?: TurnClock }): StagedDecision {
+export function stagedDecision(o: { env: Env; message: string; ctx: Record<string, unknown>; host: Host; structured: boolean; clock?: TurnClock; restoreAsk?: { fact_id?: unknown } | null }): StagedDecision {
   const clock = o.clock ?? NO_CLOCK;
   const mode = brainMode(o.env);
   if (mode !== "staged") return { brain: false, mode, intent: null, reason: "not_staged" };
@@ -437,6 +439,10 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   if (o.host.isHostControlled(o.message, o.ctx)) return { brain: false, mode, intent: null, reason: "host_control" };
   // Crisis text is code's (crisis.ts): never the brain's, whatever the router would class it as.
   if (crisisReply(o.message) !== null) return { brain: false, mode, intent: null, reason: "crisis" };
+  // Review of #790 (round 3): the turn before asked code's own question whether a set-aside fact is right again (its marker,
+  // restore_ask, is on the thread's newest reply). A plain yes or no answers that question: the brain's, where the answer is
+  // checked against the marker. The router has nothing waiting on a yes and would ask "Yes to what?".
+  if (o.restoreAsk?.fact_id && plainAnswer(o.message) && ((o.ctx as any)?.profile?.facts ?? []).some((f: any) => f?.id === o.restoreAsk!.fact_id && f.withdrawn_by_owner)) return { brain: true, mode, intent: null, reason: "restore_answer" };
   // Spec 2.3: a correction to the last search ("remote only", "only individual-contributor roles") changes its constraints in
   // code (search_correction.ts) and the next results use them; it is not a question for the brain.
   if (correctedAsk(o.message, o.ctx.discovery) || refinedAsk(o.message, o.ctx.discovery)) return { brain: false, mode, intent: null, reason: "search_correction" };
@@ -467,6 +473,25 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   // D-058 ruling 3: two asks in one message are the model's, which answers both; the router keeps single asks, payload intents
   // included. The account's controls, approvals and bare replies stay code's (the same set the non-English route keeps).
   if (multiAsk(o.message) && !NON_ENGLISH_KEPT.test(intent)) return { brain: true, mode, intent, reason: "multi_part" };
+  // D-070 (G9/D-007, live-7 setup: "the 3.9 gpa on there is outdated, don't reuse it" went to the internship search and the GPA
+  // stayed in use): a message saying a stored fact of theirs is out of date is a correction of that fact, the brain's (code sets
+  // the fact aside before the model runs, career_brain.ts); what the router would have answered is its data.
+  if (!NON_ENGLISH_KEPT.test(intent) && staleFactsOf(o.message, (o.ctx as any)?.profile?.facts).length) return { brain: true, mode, intent, reason: "stale_fact_correction", router: routerAnswer(intent, probe) };
+  // Review of #790: a message that only MAY be correcting a stored fact is the brain's too (as it was), and is named as that: code
+  // changes nothing for it (turn_notes.ts factCorrectionHints); the model reads it and asks, or corrects through their yes.
+  if (!NON_ENGLISH_KEPT.test(intent) && factCorrectionHints(o.message, (o.ctx as any)?.profile?.facts, false).length) return { brain: true, mode, intent, reason: "possible_fact_correction", router: routerAnswer(intent, probe) };
+  // D-072 (files reachable; owner standard "complete product"): an ask to see one of their record-backed Files ("send me my weekly
+  // brief", "show me my offer comparison") is the brain's, which makes it from their records with open_record_file (or says what is
+  // missing); the router's answer is its data. An exact payload, an approval, a control or a bare reply stays code's.
+  if (!NON_ENGLISH_KEPT.test(intent) && !PAYLOAD_INTENTS.has(intent) && familyAskOf(o.message)) return { brain: true, mode, intent, reason: "file_family_ask", router: routerAnswer(intent, probe) };
+  // Review of #805 (familyAskOf fails closed): a message that names one of those Files but is not a whole-message see-ask ("don't
+  // forget to send me my weekly brief", and equally "dnt send me the weekly brief") was read by the router as a resume delivery
+  // ("no resume has been tailored") whenever it had "send": the wrong answer either way. With no document to deliver it is the
+  // brain's, which has open_record_file and the digest settings and is NOT held to either (familyAskOf is null): the model decides.
+  if (intent === "career_document_delivery" && fileNamedIn(o.message) && !((probe.result as any)?.documents?.length)) return { brain: true, mode, intent, reason: "file_named", router: routerAnswer(intent, probe) };
+  // D-072 (files writers): the person comparing paths they are weighing is the brain's, which saves the comparison in their own words
+  // (compare_paths) for their Path comparison File; the router's answer (it read "two paths" as the people graph's) is its data.
+  if (!NON_ENGLISH_KEPT.test(intent) && !PAYLOAD_INTENTS.has(intent) && pathCompareAskOf(o.message)) return { brain: true, mode, intent, reason: "path_compare", router: routerAnswer(intent, probe) };
   // MIRROR-1000: a draft to a named person that the router read as a file ask, an alumni list or a missing recipient is the
   // brain's drafting turn (outreach_ask.ts namedDraftAsk).
   if (DRAFT_MISREAD.has(intent) && namedDraftAsk(o.message)) return { brain: true, mode, intent, reason: "named_draft" };
@@ -514,7 +539,7 @@ export function stagedDecision(o: { env: Env; message: string; ctx: Record<strin
   // turn: it reads official sources first (research_company, research_market, each reply enforced in code: enforceCompanyReply),
   // with the file's answer as data. With web research rolled back (CAREER_KNOWLEDGE=off), the sourced file stays code's (D-007).
   if (intent === "company_intel" && has((probe.result ?? {}) as Record<string, unknown>, "company") && codeProduct(intent, probe.result) && knowledgeOn(o.env) && researchReplyOn(o.env)) return g1Brain(o, intent, probe, clock);
-  if (codeProduct(intent, probe.result)) return g1Override(o.message) || (o.ctx as any)?._whileWorking === true || (intent === "prep_brief" && !prepSessionOpen(o.ctx) && !G1_FILE_ASK.test(o.message) && G1_REQUEST.test(o.message)) ? g1Brain(o, intent, probe, clock) : { brain: false, mode, intent, reason: "code_product" };
+  if (codeProduct(intent, probe.result)) return g1Override(o.message) || (o.ctx as any)?._whileWorking === true || (intent === "prep_brief" && !prepSessionOpen(o.ctx) && !G1_FILE_ASK.test(o.message) && (G1_REQUEST.test(o.message) || practiceAskOf(o.message))) ? g1Brain(o, intent, probe, clock) : { brain: false, mode, intent, reason: "code_product" };
   return { brain: true, mode, intent, reason: "question", router: routerAnswer(intent, probe), rules: approvalRules(o, intent, clock) };
 }
 
@@ -700,7 +725,7 @@ export const STAGED_PROMPT_NOTE = "In this conversation you answer questions and
 export const STAGED_TOOL_POLICY = { withhold: STAGED_WITHHELD_TOOLS, note: STAGED_PROMPT_NOTE } as const;
 
 // Lazy and memoized: the probe runs only when the handler reaches the brain test, at most once a turn.
-export function stagedRoute(o: { env: Env; message: string; ctx: Record<string, unknown>; host: Host; structured: boolean; clock?: TurnClock }) {
+export function stagedRoute(o: { env: Env; message: string; ctx: Record<string, unknown>; host: Host; structured: boolean; clock?: TurnClock; restoreAsk?: { fact_id?: unknown } | null }) {
   let d: StagedDecision | null = null;
   return {
     toBrain(): boolean { d ??= stagedDecision(o); return d.brain; },

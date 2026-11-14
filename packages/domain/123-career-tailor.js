@@ -755,7 +755,17 @@ const CareerTailor = (() => {
     const famVocabScope = new Set((FAMILY_SKILLS[jd.family] || []).map((x) => String(x).toLowerCase()));
     const rawLcScope = String(jd.rawText || "").toLowerCase();
     const mentionedInJd = (name) => { const n = String(name).toLowerCase(); let i = rawLcScope.indexOf(n); while (i >= 0) { const b = i === 0 ? " " : rawLcScope[i - 1]; const a = rawLcScope[i + n.length] || " "; if (!/[a-z0-9]/.test(b) && !/[a-z0-9]/.test(a)) return true; i = rawLcScope.indexOf(n, i + 1); } return false; };
-    const skillsProven = skillsProvenAll.filter((s) => wantedLcScope.has(s.name.toLowerCase()) || famVocabScope.has(s.name.toLowerCase()) || mentionedInJd(s.name));
+    const skillsScoped = skillsProvenAll.filter((s) => wantedLcScope.has(s.name.toLowerCase()) || famVocabScope.has(s.name.toLowerCase()) || mentionedInJd(s.name));
+    // D-078 (owner decision 2026-11-13: confirm before compare): a skill read from experience text, which no confirmed skill
+    // fact states and no confirmed fact lists (122 statedSkill), does not print until the person says yes to it. This is the
+    // one builder every resume path uses (the chat tool, the router's tailor, packets, batch apply); each withheld name is
+    // returned with the facts whose words named it, so a chat path can ask about it once.
+    const withheldSkills = [];
+    const skillsProven = skillsScoped.filter((s) => {
+      if (Profile.statedSkill(profile, s.name)) return true;
+      withheldSkills.push({ name: s.name, factIds: Profile.inferredSkillEvidence(profile, s.name) });
+      return false;
+    });
     const skillsLine = skillsProven.length ? { heading: "Skills", lines: [] } : null;
     if (skillsLine) {
       const ids = [...new Set(skillsProven.map((s) => s.factId))];
@@ -836,7 +846,7 @@ const CareerTailor = (() => {
     }
     for (let i = sections.length - 1; i >= 0; i--) if (!sections[i].lines.length) sections.splice(i, 1);
     const lines = sections.flatMap((s) => s.lines.map((l) => ({ ...l, section: s.heading })));
-    return { family, familyLabel: fam.label, conventions: fam.conventions, pageLimit: fam.pageLimit, header: headerOf(profile), sections, lines, deduped, selectedFactIds: selected.map((x) => x.fact.id) };
+    return { family, familyLabel: fam.label, conventions: fam.conventions, pageLimit: fam.pageLimit, header: headerOf(profile), sections, lines, deduped, selectedFactIds: selected.map((x) => x.fact.id), withheldSkills };
   }
 
   // ---- TRUTH AUDIT — hard gate (APPE-002) ----

@@ -19,6 +19,7 @@ import { isBlockedHost, isHttps, normalizeUrl } from "./research_sources.ts";
 import { NEVER_SEARCH_DOMAINS } from "./research_never.ts";
 import type { SearchHit, SearchOut, SearchPlan, SearchProvider } from "./research_search.ts";
 import { type WorkdayRead, workdayUrl } from "./workday_posting.ts";
+import { BOARD_SLUG, POSTING_UUID, refusedAddress } from "./posting_fetch.ts";
 
 type Env = { get(k: string): string | undefined };
 // Web research is on when the knowledge release flag is (D-060: CAREER_KNOWLEDGE is a release flag, rolled back with =off) and
@@ -39,14 +40,21 @@ const ANECDOTE = ["reddit.com", "teamblind.com", "quora.com", "wallstreetoasis.c
 const SELF_REPORTED = ["levels.fyi", "payscale.com", "salary.com", "comparably.com", "builtin.com", "simplify.jobs"];
 // The employer's own postings, on the applicant tracking systems that host them.
 const ATS = ["greenhouse.io", "lever.co", "ashbyhq.com", "smartrecruiters.com", "myworkdayjobs.com", "workday.com", "icims.com", "jobvite.com"];
+const SHARED_HOSTS = ["sites.google.com", "docs.google.com", "groups.google.com", "github.io", "github.com", "medium.com", "substack.com", "notion.site", "notion.so", "wordpress.com", "blogspot.com", "linkedin.com", "reddit.com", "facebook.com", "x.com", "twitter.com", "wixsite.com", "weebly.com", "webflow.io", "vercel.app", "netlify.app", "herokuapp.com", "pages.dev"];
 const compact = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "");
 // official: a government or university source, an ATS posting, or the named employer's own site (its name is in the host's
 // registrable label, "citadel" in citadel.com; not "citadelsecurities.com" for Citadel, which is a different employer).
-export function sourceKind(url: string, companies: string[] = []): SourceKind {
+// `domains` (market.ts FAIL_CLOSED.support passes it; review of #810: citadel.xyz and any .edu student page read as official): when
+// given, "official" is only a government domain or a host whose registrable domain IS one of these, the employer's own domains as
+// its record gives them (the search's own finding, never the model's); a name in a host, an ATS board or a .edu page is "reported".
+export function sourceKind(url: string, companies: string[] = [], domains?: string[]): SourceKind {
   const host = hostOf(url);
   if (!host) return "reported";
   if (ANECDOTE.some((d) => under(host, d))) return "anecdote";
   if (SELF_REPORTED.some((d) => under(host, d))) return "self_reported";
+  // Round 3: a host anyone can publish on is never official, whoever's name or domain it carries (sites.google.com for google.com).
+  if (domains && (SHARED_HOSTS.some((d) => under(host, d)) || /(?:^|\.)glassdoor\.[a-z.]+$/.test(host))) return "reported";
+  if (domains) { const reg = host.split(".").slice(-2).join("."); return /\.(gov|mil)$/.test(host) || domains.map((d) => hostOf(`https://${String(d).replace(/^https?:\/\//, "")}`)).some((d) => d && d.split(".").length === 2 && d === reg) ? "official" : "reported"; }
   if (/\.(gov|mil)$/.test(host) || /\.edu$/.test(host) || ATS.some((d) => under(host, d))) return "official";
   const label = host.split(".").slice(-2, -1)[0] ?? "";
   if (companies.map(compact).some((c) => c.length >= 3 && label === c)) return "official";
@@ -136,12 +144,15 @@ export type PostingRecheck = { state: "open" | "closed" | "unknown"; board: stri
 export const READABLE_BOARDS = ["Greenhouse", "Lever", "SmartRecruiters", "Ashby", "Workday"] as const;
 export function postingJobId(url: string): { id: string; board: string } | null {
   let u: URL; try { u = new URL(url); } catch { return null; }
+  // Review of #775: https, no userinfo or port, a named host; a board name that is not a plain slug names no posting.
+  if (refusedAddress(u.href)) return null;
   const host = u.hostname.toLowerCase(), seg = u.pathname.split("/").filter(Boolean);
+  if (seg.length >= 2 && /^(jobs(\.eu)?\.lever\.co|jobs\.ashbyhq\.com|jobs\.smartrecruiters\.com)$/.test(host) && (!BOARD_SLUG.test(seg[0]) || (host !== "jobs.smartrecruiters.com" && !POSTING_UUID.test(seg[1])))) return null;
   if (/(^|\.)greenhouse\.io$/.test(host)) {
     const i = seg.indexOf("jobs"), board = (i > 0 ? seg[i - 1] : u.searchParams.get("for")) ?? "", id = i >= 0 ? seg[i + 1] : u.searchParams.get("token");
-    return board && id && /^\d+$/.test(id) && /^[A-Za-z0-9._-]+$/.test(board) ? { id: `greenhouse:${board}:${id}`, board: "Greenhouse" } : null;
+    return board && id && /^\d+$/.test(id) && BOARD_SLUG.test(board) ? { id: `greenhouse:${board}:${id}`, board: "Greenhouse" } : null;
   }
-  if (host === "jobs.lever.co" && seg.length >= 2 && /^[0-9a-f-]{8,}$/i.test(seg[1])) return { id: `lever:${seg[0]}:${seg[1].toLowerCase()}`, board: "Lever" };
+  if (/^jobs(\.eu)?\.lever\.co$/.test(host) && seg.length >= 2 && /^[0-9a-f-]{8,}$/i.test(seg[1])) return { id: `lever:${seg[0]}:${seg[1].toLowerCase()}`, board: "Lever" }; // the EU site too (link_check.ts asks its EU API)
   if (host === "jobs.ashbyhq.com" && seg.length >= 2 && /^[0-9a-f-]{8,}$/i.test(seg[1])) return { id: `ashby:${seg[0]}:${seg[1].toLowerCase()}`, board: "Ashby" };
   if (host === "jobs.smartrecruiters.com" && seg.length >= 2) { const id = /^(\d+)/.exec(seg[1])?.[1]; return id ? { id: `smartrecruiters:${seg[0]}:${id}`, board: "SmartRecruiters" } : null; }
   const wd = workdayUrl(url);

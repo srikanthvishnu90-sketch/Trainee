@@ -42,23 +42,26 @@ export function recordingJudge() {
   return { judge, asked };
 }
 
-// For a test whose Anthropic stub scripts the brain's turns: the support judge's request goes to the same API. This wraps the stub's
-// fetch so a request whose system prompt is the support judge's is answered here, by the page truth (answersAsk), as the
-// API's JSON message, and never reaches (or advances) the brain's script.
+// For a test whose Anthropic stub scripts the brain's turns: the support judge's request goes to the same API. A request whose system
+// prompt is the support judge's is answered here, by the page truth (answersAsk), as the API's JSON message, so it never reaches
+// (or advances) the brain's script. judgeResponse(body) is that answer, or null for any other request; answerSupportJudge wraps a
+// stub's fetch with it.
+export function judgeResponse(body: any): Response | null {
+  if (!body || !isSupportJudgeCall(body.system)) return null;
+  const user = body.messages?.[0]?.content;
+  let items: { claim: string; source: string }[] = [];
+  try { items = JSON.parse(typeof user === "string" ? user : Array.isArray(user) ? String(user[0]?.text ?? "") : ""); } catch { /* empty */ }
+  const text = JSON.stringify(items.map((x) => answersAsk(String(x.claim ?? ""), String(x.source ?? "")) ? "yes" : "no"));
+  return Response.json({ id: "msg_judge", type: "message", role: "assistant", model: body.model ?? "claude", content: [{ type: "text", text }], stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 1 } });
+}
 export function answerSupportJudge(inner: typeof fetch, seen: { judged: number } = { judged: 0 }): typeof fetch {
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input instanceof Request ? input.url : input);
-    if (/api\.anthropic\.com/.test(url) && init?.body) {
+    if (/api\.anthropic\.com/.test(url)) {
       let body: any = null;
-      try { body = JSON.parse(String(init.body)); } catch { /* not JSON */ }
-      if (body && isSupportJudgeCall(body.system)) {
-        seen.judged++;
-        const user = body.messages?.[0]?.content;
-        let items: { claim: string; source: string }[] = [];
-        try { items = JSON.parse(typeof user === "string" ? user : Array.isArray(user) ? String(user[0]?.text ?? "") : ""); } catch { /* empty */ }
-        const text = JSON.stringify(items.map((x) => answersAsk(String(x.claim ?? ""), String(x.source ?? "")) ? "yes" : "no"));
-        return new Response(JSON.stringify({ id: "msg_judge", type: "message", role: "assistant", model: body.model ?? "claude", content: [{ type: "text", text }], stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 1 } }), { status: 200, headers: { "content-type": "application/json" } });
-      }
+      try { body = input instanceof Request && !init ? await input.clone().json() : JSON.parse(String(init?.body ?? "")); } catch { /* not JSON */ }
+      const r = judgeResponse(body);
+      if (r) { seen.judged++; return r; }
     }
     return inner(input, init);
   }) as typeof fetch;

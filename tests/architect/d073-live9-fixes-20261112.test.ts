@@ -31,6 +31,7 @@ import { normalizeUrl } from "../../supabase/functions/_shared/research_sources.
 import { lengthFarOver } from "../../evals/mirror/score-conversation.ts";
 import { POSTINGS } from "../../evals/mirror/instinct-wa-batch1/world.ts";
 import { C9_Q, WEB } from "./helpers/mirror_wa_script.ts";
+import { testSupportJudge } from "./support-test-judge.ts";
 
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
@@ -64,8 +65,14 @@ const readTool = { name: "get_situation_test", effect: "read", description: "rea
 const marketDeps = (pages: { url: string; title: string; text: string }[], draft: () => string, extra: Record<string, unknown> = {}) => ({
   search: { id: "t", needsKey: false, search: async () => ({ hits: pages.map((p) => ({ url: p.url, title: p.title, provider: "t", foundAt: NOW })), notes: [], provider: "t" }) },
   read: async () => ({ verified: pages.map((p) => ({ url: p.url, requested: p.url, status: 200, title: p.title, text: p.text, fetchedAt: NOW })), rejected: [] }),
-  draft: async () => draft(), layout: "messages" as const, ...extra,
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): research needs its judge to keep a line
+  // (the deterministic test judge, support-test-judge.ts), in researchMarket and in the brain's research_market alike.
+  draft: async () => draft(), layout: "messages" as const, judge: testSupportJudge, ...extra,
 });
+// Architect amendment (owner decision 2026-11-13: research support check switched on): a Citadel page sentence that does not name
+// Citadel ("The base salary range for this role is ...") speaks for Citadel only on a page code knows is Citadel's own, by its
+// domain on record (the plan's sites, as the brain passes them); the Citadel research of this file gives it.
+const CITADEL_SITES = ["citadel.com"];
 // The real-set "cited" check, written out independently of the product (evals/real-sets/research/run.ts scoreLive): every figure of a
 // kept line on its cited pages, and at least 60% of its words (four letters or more, by their first five) on them.
 function evalCited(line: string, pages: string[]): boolean {
@@ -105,15 +112,20 @@ Deno.test("D73-1 RESEARCH (C9, C22, item 10 Datadog/Affirm/Toast): every kept li
   for (const co of ["Datadog", "Affirm", "Toast"]) eq([AUDIT[co].status, AUDIT[co].research.kept, AUDIT[co].checks.brief], ["no_sources", 1, false], `${co} live`);
 
   // C9 replayed: the same audit shape, now an answer.
-  const r: any = await researchMarket({ question: C9_Q, format: "inline", plan: { queries: C9_PLAN.queries, companies: C9_PLAN.companies }, deps: marketDeps(CITADEL, () => C9_DRAFT) as any });
+  const r: any = await researchMarket({ question: C9_Q, format: "inline", plan: { queries: C9_PLAN.queries, companies: C9_PLAN.companies, sites: CITADEL_SITES }, deps: marketDeps(CITADEL, () => C9_DRAFT) as any });
   eq(r.status, "ok");
-  eq([r.audit.drafted, r.audit.dropped], [10, { claim_words_not_in_quote: 4, figure_not_in_quote: 1 }], "the live drop shape");
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): the five summary lines worded past their
+  // quotes (four) or with a figure the quote lacks (one) are no longer dropped: none stands in the model's words; each is shown as
+  // its page's own sentence in quotation marks (the support path), so no line of them is lost and none of their wording is kept.
+  eq([r.audit.drafted, r.audit.dropped], [10, {}], "the live drop shape, on the support path: every summary line given as its page's sentence");
+  ok(r.audit.from_quote >= 5 && r.points.every((p: any) => /^(?:From [^:"]+: )?".*"$/s.test(p.text)), JSON.stringify(r.points));
+  ok(!/\$400,000|signing bonus|relaxed|loop is fast|shares its engineering/.test(JSON.stringify([r.points, r.conditions, r.risks])), "no mis-worded claim is kept");
   ok(r.audit.kept >= 5, JSON.stringify(r.audit));
   eq(r.audit.sections.conditions + r.audit.sections.risks, 5, `each kept line's section: ${JSON.stringify(r.audit.sections)}`);
   eq(r.parts.map((p: any) => p.label), ["pay", "interview process", "culture"]);
   // Through the turn, with the reply the model gave live ("I couldn't confirm anything on Citadel ..."): pay, process and culture
   // each answered from a kept line, each with its source link on its own line.
-  const s = scripted((_p, n) => n === 0 ? use("research_market", { question: C9_Q, format: "inline", ...C9_PLAN }) : text(LIVE9.C9.reply));
+  const s = scripted((_p, n) => n === 0 ? use("research_market", { question: C9_Q, format: "inline", ...C9_PLAN, sites: CITADEL_SITES }) : text(LIVE9.C9.reply));
   const t: any = await agentTurn({ message: P.C9, history: [], stores: { profile: personaProfile() }, userId: "u-d073", threadId: "th-d073", now: NOW, model: s.model, market: marketDeps(CITADEL, () => C9_DRAFT) } as any);
   const paras = t.reply.split(/\n\s*\n/);
   const partOf = (re: RegExp, url: string) => paras.find((x: string) => re.test(x) && x.includes(url));
@@ -153,10 +165,13 @@ Deno.test("D73-1 RESEARCH (C9, C22, item 10 Datadog/Affirm/Toast): every kept li
     const draft = JSON.stringify({ title: `${co} brief`, frame: { text: `${co} posts software engineering roles on its job board.`, urls: [pages[0].url] },
       business: sentences.map((s) => ({ text: `${co} heavily invests in groundbreaking proprietary innovation: ${s.x.slice(0, 60)}`, quote: s.x, url: s.url })) });
     const out: any = await researchCompany({ company: co, role: rec.case.role, question: `Research ${co} before my interview.`, plan: rec.plan, now: NOW, format: "inline",
-      deps: { search: { id: "r", needsKey: false, search: async () => rec.search }, read: async () => rec.read, draft: async () => draft } as any });
+      deps: { search: { id: "r", needsKey: false, search: async () => rec.search }, read: async () => rec.read, draft: async () => draft, judge: testSupportJudge } as any });
     const before = { ...out.audit.dropped };
     eq(out.status, "ok", `${co}: a brief (live: no_sources with the frame kept)`);
-    ok(before.claim_words_not_in_quote >= 1 && out.audit.sections.frame === 1 && out.audit.from_pages >= 1, `${co}: ${JSON.stringify(out.audit)}`);
+    // Architect amendment (owner decision 2026-11-13: research support check switched on): the support path records one drop reason,
+    // "unsupported"; and the frame in the model's words ("<co> posts software engineering roles on its job board.") stands only when
+    // one sentence of its page says it, which none of these pages does: it is dropped (frame_unsupported), never kept unsaid.
+    ok(before.unsupported >= 1 && out.frame === null && before.frame_unsupported === 1 && out.audit.from_pages >= 1, `${co}: ${JSON.stringify(out.audit)}`);
     const byN = (n: number) => pages.find((p) => normalizeUrl(p.url) === normalizeUrl(out.sources.find((x: any) => x.n === n).url)).text;
     for (const l of [...(out.frame ? [out.frame] : []), ...out.business, ...out.questions]) ok(evalCited(l.text, l.cite.map(byN)), `${co}: "${l.text}" passes the eval's cited check`);
     ok(/\[\d\]/.test(enforceCompanyReply("", out)), `${co}: the chat answer cites its sources`);
@@ -184,7 +199,9 @@ Deno.test("D73-2 'claim words not in quote' (201 of 416): only the form of a wor
   // The eval run keeps each dropped line (text, quote, reason, section); production never asks for it, so no line text is logged.
   const draft = () => JSON.stringify({ summary: [{ text: "Citadel pays new grads generously.", quote: "The base salary range for this role is $235,000 to $300,000, plus a discretionary bonus.", url: POSTING }] });
   const withS: any = await researchMarket({ question: C9_Q, format: "inline", plan: { queries: ["Citadel pay"], companies: ["Citadel"] }, deps: marketDeps(CITADEL, draft, { auditSamples: true }) as any });
-  eq(withS.audit.samples[0], { section: "summary", why: "claim_words_not_in_quote", text: "Citadel pays new grads generously.", quote: "The base salary range for this role is $235,000 to $300,000, plus a discretionary bonus." });
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): the support path records one drop reason,
+  // "unsupported" (no site on record here, so the posting's sentence, which does not name Citadel, cannot stand in for the line).
+  eq(withS.audit.samples[0], { section: "summary", why: "unsupported", text: "Citadel pays new grads generously.", quote: "The base salary range for this role is $235,000 to $300,000, plus a discretionary bonus." });
   const without: any = await researchMarket({ question: C9_Q, format: "inline", plan: { queries: ["Citadel pay"], companies: ["Citadel"] }, deps: marketDeps(CITADEL, draft) as any });
   eq("samples" in without.audit, false);
   const runner = Deno.readTextFileSync(new URL("../../evals/real-sets/research/run.ts", import.meta.url));
@@ -198,10 +215,12 @@ Deno.test("D73-2 'claim words not in quote' (201 of 416): only the form of a wor
   const worded = "Stripe's moat is its relentless obsession with developer delight and craftsmanship.";
   ok(wordsOnPages(worded, pages) < ON_PAGES_SHARE && !evalCited(worded, pages.map((p) => p.text)), "the model-worded frame fails the eval's check");
   const out: any = await researchCompany({ company: "Stripe", role: rec.case.role, question: "Research Stripe before my interview.", plan: rec.plan, now: NOW, format: "inline",
-    deps: { search: { id: "r", needsKey: false, search: async () => rec.search }, read: async () => rec.read, draft: async () => JSON.stringify({ frame: { text: worded, urls: [pages[0].url] }, business: [{ text: s0, quote: s0, url: pages[1].url }] }) } as any });
+    deps: { search: { id: "r", needsKey: false, search: async () => rec.search }, read: async () => rec.read, draft: async () => JSON.stringify({ frame: { text: worded, urls: [pages[0].url] }, business: [{ text: s0, quote: s0, url: pages[1].url }] }), judge: testSupportJudge } as any });
   eq(out.frame, null, "the frame under 60% is dropped");
   eq(out.audit.dropped.frame_unsupported, 1);
-  ok(out.status === "ok" && out.business.some((b: any) => b.text === s0), "the quoted line stands");
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): the line that is its page's sentence word
+  // for word stands as that sentence, in quotation marks (with "From <host>, a page about Stripe: " when the page lends the name).
+  ok(out.status === "ok" && out.business.some((b: any) => b.text === `"${s0}"` || b.text.endsWith(`: "${s0}"`)), JSON.stringify(out.business));
 });
 
 // ---------------------------------------------------------------- D73-3 create_file
@@ -324,14 +343,29 @@ Deno.test("D73-6 C9: pay said again from an earlier reply carries its place and 
   const history = [{ role: "user", content: PERSONA.setup[2] ?? P.C1 }, { role: "assistant", content: LIVE9["setup-2"].reply }];
   const lines = shownPayPlaces(P.C9, history as any);
   ok(lines.some((x) => /\$28-\$49/.test(x.text) && x.place === "Chicago, IL"), JSON.stringify(lines));
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): no place is written into a sentence of the
+  // model's, and none is taken from an earlier reply's text (review of #807, class 8: a city read from reply text was put on another
+  // employer's pay). Pay said again from an earlier reply carries that line's own link after it; the sentence is left as written.
   const out = payWithSource(said, [], lines);
-  ok(out.includes("$28-$49 hourly (Chicago, IL), and that isn't Citadel.") && out.includes(POSTINGS[0].url), out);
+  eq(out, `${said}\n\n${POSTINGS[0].url}`, out);
   eq(payWithSource("Chicago pay is $28-$49 hourly.", [], lines).split("\n")[0], "Chicago pay is $28-$49 hourly.", "a sentence naming the place is left as it is");
-  // A posting read this turn: its place from the tool (or its pay's own "(Chicago, Illinois)").
-  eq(payWithSource("PayPal lists $28-$49 an hour.", [{ company: "PayPal", pay: "$28- $49 Hourly (Chicago, Illinois)", url: POSTINGS[0].url }]), `PayPal lists $28-$49 an hour (Chicago, Illinois).\n\n${POSTINGS[0].url}`);
+  // A posting read this turn: its place goes beside that posting's own link, from that posting's own record (employer, place), never
+  // into the model's sentence; a record that names no place gets the link alone.
+  eq(payWithSource("PayPal lists $28-$49 an hour.", [{ company: "PayPal", pay: "$28- $49 Hourly (Chicago, Illinois)", url: POSTINGS[0].url, place: "Chicago, IL" }]), `PayPal lists $28-$49 an hour.\n\nPayPal (Chicago, IL): ${POSTINGS[0].url}`);
+  eq(payWithSource("PayPal lists $28-$49 an hour.", [{ company: "PayPal", pay: "$28- $49 Hourly (Chicago, Illinois)", url: POSTINGS[0].url }]), `PayPal lists $28-$49 an hour.\n\n${POSTINGS[0].url}`);
   // Through the C9 turn (research found nothing on these pages; the model restates the shown pay): place and link.
-  const s = scripted((_p, n) => n === 0 ? use("research_market", { question: C9_Q, format: "inline", ...C9_PLAN }) : text(LIVE9.C9.reply));
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): on the research path a shown pay line
+  // stands only whole, word for word (enforceMarketReplySupported), with that line's own link; live-9's reworded restatement is
+  // removed with every other unsourced sentence (checked here). The model restates the shown line itself; any place it carries is
+  // the shown line's own words.
+  const shownLine = lines.find((x) => /\$28-\$49/.test(x.text))!;
+  const s0 = scripted((_p, n) => n === 0 ? use("research_market", { question: C9_Q, format: "inline", ...C9_PLAN, sites: CITADEL_SITES }) : text(LIVE9.C9.reply));
+  const r0: any = await agentTurn({ message: P.C9, history, stores: { profile: personaProfile() }, userId: "u-d073", threadId: "th-d073", now: NOW, model: s0.model, market: marketDeps(CITADEL, () => "{}", { read: async () => ({ verified: [], rejected: [] }) }) } as any);
+  ok(!/\$28-\$49|isn't Citadel/.test(r0.reply) && /[A-Za-z]/.test(r0.reply), r0.reply);
+  const s = scripted((_p, n) => n === 0 ? use("research_market", { question: C9_Q, format: "inline", ...C9_PLAN, sites: CITADEL_SITES }) : text(`${shownLine.text} I couldn't confirm it.`));
   const r: any = await agentTurn({ message: P.C9, history, stores: { profile: personaProfile() }, userId: "u-d073", threadId: "th-d073", now: NOW, model: s.model, market: marketDeps(CITADEL, () => "{}", { read: async () => ({ verified: [], rejected: [] }) }) } as any);
   const line = r.reply.split(/\n/).find((x: string) => /\$28-\$49/.test(x));
-  ok(line && /Chicago/.test(line) && r.reply.includes(POSTINGS[0].url), r.reply);
+  // (The shown line here, "Pay is listed as $28-$49 hourly.", names no place, and code takes none from reply text: the figure goes
+  // with the link of the posting it came from, whose page states the place.)
+  ok(line && line.includes(shownLine.text) && !/Chicago/.test(line) && r.reply.includes(POSTINGS[0].url), r.reply);
 });

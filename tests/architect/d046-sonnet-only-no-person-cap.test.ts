@@ -198,7 +198,7 @@ Deno.test("D-046 global budget stays: an exhausted $70 total refuses every call 
   eq(p.bodies.length, 0, "nothing was sent");
   eq(cap.refused(), "global");
   eq(cap.note(), Budget.GLOBAL_LIMIT_REPLY, "the reply says the AI budget stopped it, in plain words");
-  eq(Budget.DEFAULT_HARD_USD, 85, "the $85 total (D-038a as amended by D-074 and D-084, owner 2026-11-14) is the stop"); // Architect amendment (D-074): the owner raised the one total from $70 to $80; architect amendment (owner decision 2026-11-14, D-084: total raised to $85)
+  eq(Budget.DEFAULT_HARD_USD, 93, "the $93 total (D-038a as amended by D-074, D-084 and D-085, owner 2026-11-14) is the stop"); // Architect amendment (D-074): the owner raised the one total from $70 to $80; architect amendment (owner decision 2026-11-14, D-085: total raised to $93)
 });
 
 Deno.test("D-046 the per-person path is gone from replies and the handler", async () => {

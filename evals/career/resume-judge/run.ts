@@ -5,7 +5,7 @@
 //   deno run -A evals/career/resume-judge/run.ts --label <label>                         fake judge: $0, deterministic, wiring only
 //   deno run -A evals/career/resume-judge/run.ts --label <label> --model claude --budget-usd 4 [--sample 90] [--templates T01,T05]
 //
-// --model claude is PAID (ANTHROPIC_API_KEY, Claude only, D-038a's $85 cycle). It is never run by a builder: the architect runs
+// --model claude is PAID (ANTHROPIC_API_KEY, Claude only, D-038a's $93 cycle). It is never run by a builder: the architect runs
 // it within budget. Before the first call the run is quoted (pages x tokens x price) and refused when the quote is over
 // --budget-usd; the spend is read from each response's usage and the run stops before the next item at the budget.
 // The fake judge scores from the checker's measurements (career_resume_pixel.ts): it proves the harness, never a template.

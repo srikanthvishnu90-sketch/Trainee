@@ -24,8 +24,8 @@ export function supabaseFamilyMaker(admin: any, files: Pick<FileService, "create
     refs: {
       latestDoc: (u) => first(admin.from("career_material_versions").select("doc_key").eq("user_id", u).order("created_at", { ascending: false }).limit(1), "read the document versions"),
       // The newest draft waiting for the person's decision, else the newest draft.
-      latestDraft: async (u) => await first(admin.from("career_outreach_drafts").select("id").eq("user_id", u).eq("status", "shown").order("created_at", { ascending: false }).limit(1), "read the drafts")
-        ?? await first(admin.from("career_outreach_drafts").select("id").eq("user_id", u).order("created_at", { ascending: false }).limit(1), "read the drafts"),
+      latestDraft: async (u) => await first(admin.from("career_outreach_drafts").select("id").eq("user_id", u).or("recipient->>kind.is.null,recipient->>kind.neq.mail_reply").eq("status", "shown").order("created_at", { ascending: false }).limit(1), "read the drafts")
+        ?? await first(admin.from("career_outreach_drafts").select("id").eq("user_id", u).or("recipient->>kind.is.null,recipient->>kind.neq.mail_reply").order("created_at", { ascending: false }).limit(1), "read the drafts"),
     },
   };
 }

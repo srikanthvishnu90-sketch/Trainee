@@ -1322,6 +1322,17 @@ echo "== career_apply_stop_stale_facts.check.sql (a changed fact stops the appro
 "${QUIET[@]}" -f "$ROOT/supabase/migrations/20261113140000_career_apply_stop_stale_facts.sql"
 "${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_apply_stop_stale_facts.check.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
 echo "  ok   rollback leaves nothing of the stale-facts stop; up again"
+# Mail replies, round 2 (20261113150000): career_outreach_threads_adopt never adopts a mail reply's thread. Applied twice
+# (idempotent), its check, the rollback (the function as 20261027240000 defined it), up again and the check again.
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261113150000_career_outreach_adopt_skip_mail_reply.sql"
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261113150000_career_outreach_adopt_skip_mail_reply.sql"
+echo "== career_outreach_adopt_skip_mail_reply.check.sql (an outreach thread is adopted once; a mail reply's thread never)"
+"${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_outreach_adopt_skip_mail_reply.check.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
+"${QUIET[@]}" -f "$ROOT/supabase/rollbacks/20261113150000_career_outreach_adopt_skip_mail_reply.down.sql"
+[[ "$("${PSQL[@]}" -tAc "select not exists (select 1 from pg_proc where proname = 'career_outreach_threads_adopt' and prosrc like '%mail_reply%') and to_regprocedure('public.career_outreach_threads_adopt(integer)') is not null")" == "t" ]] || { echo "FAIL career_outreach_adopt_skip_mail_reply rollback"; exit 1; }
+"${QUIET[@]}" -f "$ROOT/supabase/migrations/20261113150000_career_outreach_adopt_skip_mail_reply.sql"
+"${PSQL[@]}" -t -A -o /dev/null -f "$HERE/career_outreach_adopt_skip_mail_reply.check.sql" 2>&1 | sed -E 's/^psql:[^ ]+ NOTICE:  /  /'
+echo "  ok   rollback restores the adopt function as it was; up again"
 # LAUNCH READINESS B1 (2026-10-26, audit PR #192): the definer lockdown, last, on the schema every phase above left
 # (the card-cloud bridge included). The test applies it (twice) over production's shape, then checks the whole schema:
 # no SECURITY DEFINER function anon can run, none without a fixed search_path.

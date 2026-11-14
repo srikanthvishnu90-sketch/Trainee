@@ -37,7 +37,9 @@ export function buildRaw(m: Message, t?: Threading | null): string {
   return b64url(`${head.join("\r\n")}\r\n\r\n${m.text.replace(/\r?\n/g, "\r\n")}`);
 }
 
-export interface GmailDeps { fetch: typeof fetch; token: (userId: string, scope: string) => Promise<string | null> }
+// sendTimeoutMs: the send request is cut off after this long (SEND_TIMEOUT_MS by default), so no send call outlives it.
+export interface GmailDeps { fetch: typeof fetch; token: (userId: string, scope: string) => Promise<string | null>; sendTimeoutMs?: number }
+export const SEND_TIMEOUT_MS = 30_000;
 
 export function gmailSender(d: GmailDeps) {
   return {
@@ -47,7 +49,18 @@ export function gmailSender(d: GmailDeps) {
       const token = await d.token(userId, GMAIL_SEND_SCOPE);
       if (!token) return { status: "NOT_WIRED", reason: "no career Google grant with gmail.send" };
       const thread = t?.threadId && /^[A-Za-z0-9_-]{1,64}$/.test(t.threadId) ? { threadId: t.threadId } : {};
-      const r = await d.fetch(`${API}/messages/send`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ raw, ...thread }) });
+      // A hard limit on the one request that sends: aborted, thrown or unanswered is an unknown outcome (never "not sent"), and
+      // the call has ENDED when this returns, which is what the wait before any second try is counted from.
+      const stop = new AbortController(), ms = d.sendTimeoutMs ?? SEND_TIMEOUT_MS;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let r: Response;
+      try {
+        r = await Promise.race([
+          d.fetch(`${API}/messages/send`, { method: "POST", headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ raw, ...thread }), signal: stop.signal }),
+          new Promise<never>((_ok, no) => { timer = setTimeout(() => { stop.abort(); no(new Error(`no answer from Gmail in ${Math.round(ms / 1000)} s`)); }, ms); }),
+        ]);
+      } catch (e) { return { status: "ERROR", detail: `send: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200) }; }
+      finally { clearTimeout(timer); }
       if (r.status === 429 || r.status === 403 && /rateLimit|quota/i.test(await r.clone().text())) return { status: "RATE_LIMITED", detail: `HTTP ${r.status}` };
       // A 4xx is Gmail's refusal: nothing went. A 5xx (or no answer at all: the fetch throws) says nothing about whether it went.
       if (!r.ok) return { status: "ERROR", detail: `send: HTTP ${r.status}`, ...(r.status >= 400 && r.status < 500 ? { not_sent: true } : {}) };

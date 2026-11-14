@@ -409,3 +409,14 @@
 782 c79259393820599e9e474173cce40c7365d381a8 fix-forward-D-076 risk=high note=rejected-as-merged;fixed-by-#827-independently-approved-and-merged
 771 81171002e52e39e94f1b46b3d993277fb40630c4 fix-forward-D-076 risk=medium note=D-059-test-amendment-ratified-by-owner-in-D-078-(#834)
 822 792097f0cf7c3997fd40cc866918d549ff9daf92 independent-review-20261113 risk=high note=approved-at-d0f975233-delta-env-hygiene-revoke-tightening-write-count-fail-safe-dup-row-removal-fw3-fixture-trunk-merges
+809 12c131499d4ee5277ae93bdb5f8a016138037924 independent-review-20261113 risk=medium note=approved-at-a1897a04e-delta-trunk-merges-only-shard-durations
+840 553b160461393d60248bae3b627af114dae902db independent-review-20261113 risk=low note=docs-only-decisions-row-d081
+775 c6fdad51c1f3b015ed0fe08a0f18c347f7377aed fix-forward-D-076 risk=high note=rejected-as-merged;fixed-by-#809-independently-approved-and-merged
+832 5704ca9ecef053c04f40ea483722497cf74bac73 independent-review-20261113 risk=medium note=approved-at-38c089d02-delta-type-only-fix-7c2a5956c-and-trunk-merges
+785 af17c27a453b3f2a55b281b6595e6a22b60a561c fix-forward-D-076 risk=high note=rejected-as-merged;fixed-by-#817-#832-independently-approved-and-merged
+839 59e0d0af79e91ecdc6a07853f8301c97ea189ef5 independent-review-20261113 risk=high note=approved-at-a8c15c1f0-delta-both-sides-tailor-merge-trunk-merges-and-d078-golden-hash-amendment-ci-green
+788 21cd42de82d38fe01aac806c66608437df414d76 fix-forward-D-076 risk=high note=rejected-as-merged;fixed-by-#839-(D-078-confirm-before-compare)-independently-approved-and-merged
+842 cf06418a50db251cb0d6b4652e316fc4f57e37b8 independent-review-20261113 risk=low note=test-clock-pinned-to-file-NOW-no-assertion-changed-22-of-22-today-20-of-22-without
+820 22d4183f631fd6224acadd5519e6af258424f530 independent-review-20261113 risk=high note=approved-at-f46c8a18e-delta-migration-rename-4b4c07eb8-trunk-merges-toolctx-union-resolution-only
+777 abe7a8be2e401a751e3d7b8f697cbfbbd37e31d8 fix-forward-D-076 risk=high note=rejected-as-merged;fixed-by-#814-#820-independently-approved-and-merged
+779 e8aedd81c1beceda54bc3930095ed7877fe61105 fix-forward-D-076 risk=high note=rejected-as-merged;fixed-by-#814-#820-independently-approved-and-merged

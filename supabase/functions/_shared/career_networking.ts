@@ -22,7 +22,7 @@ import { parsePeopleAsk, type PeopleDeps, type PersonRec, peopleTurn } from "./c
 import { chatAsk, companyKey } from "./career_people_import.ts";
 import { isCompanyLabel, registrable } from "./career_people_gmail.ts";
 import { batchMessages, confirmed, draftFor, type Drafted, emailHash, footerOf, messageOf, type ModelFn, OUTREACH_INTENT, type OutreachDraft,
-  type KeyedContact, type OutreachStore, payloadHash, type Recipient, recordOutreach, blockedAddresses, BLOCKED_WHY, draftLangOf, guardRecipient } from "./career_outreach.ts";
+  type KeyedContact, type OutreachStore, payloadHash, type Recipient, recordOutreach, blockedAddresses, BLOCKED_WHY, draftLangOf, guardRecipient, isMailReply } from "./career_outreach.ts";
 import type { EventStore } from "./agent/timeline.ts";
 import { siteAsk, trackTurn } from "./career_outreach_track.ts";
 
@@ -753,7 +753,7 @@ async function draftTurn(o: NetworkingDeps, ask: Extract<Ask, { kind: "draft" }>
   const blocked = await blockedAddresses(o.store, o.userId, pool.map((r) => r.email ?? "").filter(Boolean));
   // FAMILY NETWORKING: who was already written to, and how far it went. A by-name ask for someone whose only draft is
   // still waiting (never approved or sent) replaces that draft: the person changed their mind about what to say.
-  const hist = o.store.history ? await o.store.history(o.userId, 500).catch(() => []) : [];
+  const hist = (o.store.history ? await o.store.history(o.userId, 500).catch(() => []) : []).filter((d) => !isMailReply(d));
   const live = (email: string) => hist.filter((d) => d.recipient.email.toLowerCase() === email && d.status !== "skipped");
   const replace: OutreachDraft[] = [];
   const pick: ContactRow[] = [], held: { name: string; why: string }[] = [];

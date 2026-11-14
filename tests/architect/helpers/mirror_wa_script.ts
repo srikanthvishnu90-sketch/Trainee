@@ -65,7 +65,9 @@ export const SCRIPT: Record<string, Step[]> = {
   C17: [{ tool: "get_profile", input: {} }, { text: "I'm studying computer science and finance at Lakeshore; I started Pixelforge and built over 70 React websites, and now I'm building Waypoint." }],
   C11: [{ tool: "inspect_apply_flow", input: { job_id: PAYPAL.id } }, { text: `To submit it I'd need your approval of the final resume, the email and phone to put on it, and your answers to the form's own questions. I couldn't read PayPal's form just now, so I can't list those questions yet. I only read the public pages: no account, saved application or submission was created.\n${PAYPAL.url}` }],
   C18: [{ tool: "check_posting_open", input: { url: PAYPAL.url } }, { text: `I couldn't check PayPal's posting just now, so I can't call it open. Nothing was applied for.\n${PAYPAL.url}` }],
-  C9: [{ tool: "research_market", input: { question: C9_Q, format: "inline", companies: ["Citadel"], queries: CITADEL_QUERIES } }, { text: (calls) => {
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): the scripted research call passes the
+  // plan's sites, as a real turn does.
+  C9: [{ tool: "research_market", input: { question: C9_Q, format: "inline", companies: ["Citadel"], queries: CITADEL_QUERIES, sites: ["citadel.com"] } }, { text: (calls) => {
     const n = cite(calls);
     return [`Pay: Citadel's posting lists a base salary range of $235,000 to $300,000, plus a discretionary bonus [${n("software-engineer-university-graduate")}].`,
       `Interviews: the overall process takes roughly eight weeks [${n("our-engineering-interview-process")}].`,

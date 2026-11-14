@@ -424,3 +424,5 @@
 772 99d5888839820929d225567e4526a32a31fa049d fix-forward-D-076 risk=high note=rejected-as-merged;fixed-by-#837-#843-research-support-check-switched-on-(owner-decision-2026-11-14)-independently-approved-and-merged
 792 9ed96781bc98a2bc40143157c8951f6408029ac5 fix-forward-D-076 risk=high note=rejected-as-merged;fixed-by-#837-#843-research-support-check-switched-on-(owner-decision-2026-11-14)-independently-approved-and-merged
 801 0c354f9ecccd5a602ec289dcfb7d6a2541f2477e fix-forward-D-076 risk=high note=rejected-as-merged;fixed-by-#837-#843-research-support-check-switched-on-(owner-decision-2026-11-14)-independently-approved-and-merged
+845 279e467c9d5522078fb78763f01bf689c0858188 independent-review-20261114 risk=medium note=own-record-lookup:rows-only-status,not-checked-note-always,failed-situation-read-partial;13-scenarios-clean;32/32
+846 594e76d0a1ca3e39a7ae6bdd6cc0611e05ba3d24 independent-review-20261114 risk=medium note=cap-80-to-85-numbers-only(D-084);tests-pass;eval-runners-ledger-test-no-race-5-reruns

@@ -286,7 +286,10 @@ const ashbyPage = (p: unknown) => body(`<script>window.__appData = ${JSON.string
 // A resolver for the tests: public names answer a public address, the rest what the table says; an unknown name does not resolve.
 const PUBLIC = "93.184.216.34";
 const dns = (table: Record<string, string[]> = {}) => async (host: string) => { if (host in table) return table[host]; if (/\.(com|io|me|co)$/.test(host)) return [PUBLIC]; throw new Error("no such name"); };
-const checker = (f: typeof fetch, o: Record<string, unknown> = {}) => (linkCheck.linkChecker as any)(f, { resolve: dns(), ...o }) as linkCheck.LinkCheck;
+// Architect amendment (clock only, no assertion changed): the link check read the real clock, so the recorded Workday posting
+// (endDate 2026-11-13) turned "closed" on 2026-11-14 and R13/R17 failed on every PR. The checker now reads the file's own
+// NOW (2026-11-13), as every reader call in this file already does; a test can still pass its own `now`.
+const checker = (f: typeof fetch, o: Record<string, unknown> = {}) => (linkCheck.linkChecker as any)(f, { resolve: dns(), now: () => NOW, ...o }) as linkCheck.LinkCheck;
 
 Deno.test("R6 no board says open or live without its own positive signal; a past deadline is closed; a malformed answer is not read", async () => {
   const lever404 = () => body("", "text/html", 404);

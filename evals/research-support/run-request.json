@@ -1,1 +1,1 @@
-{ "approval": "PENDING", "run": 2, "budget_usd": 0.5, "note": "Set approval to the owner's DECISIONS.md line (D-xxx) that names this run (\"run 2\"; a row approves one run) to run; PENDING is refused by the workflow's first step, so no call is made." }
+{"approval": "D-083", "run": 4, "budget_usd": 0.2, "note": "Run 4 under D-083 (owner's $4), cap $0.20, on the switched-on check."}

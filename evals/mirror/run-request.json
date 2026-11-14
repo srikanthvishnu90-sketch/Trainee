@@ -1,1 +1,1 @@
-{ "label": "live-9", "approval": "D-068", "budget_usd": 4.0, "conv": "evals/mirror/instinct-wa-batch1/prompts.jsonl", "persona": "evals/mirror/instinct-wa-batch1/persona.json" }
+{ "label": "live-10", "approval": "D-084", "budget_usd": 3.5, "conv": "evals/mirror/instinct-wa-batch1/prompts.jsonl", "persona": "evals/mirror/instinct-wa-batch1/persona.json", "note": "release candidate 6aa178cc4; D-084 plus the owner's ~$1 more (2026-11-14: \"Approve ~$1 more, run them\")" }

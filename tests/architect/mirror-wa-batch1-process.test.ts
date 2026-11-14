@@ -60,33 +60,10 @@ Deno.test("MP-0 every turn of the benchmark is EXISTS or BLOCKED with a named bl
 // Architect amendment (D-066): the script below moved verbatim to tests/architect/helpers/mirror_wa_script.ts (shared with the
 // behavior-guide suite); every assertion in this file is unchanged.
 import { C2_BODY, C14_BODY, C13_BODY, C5_Q, C21_Q, C4_GUIDE, C4_ANSWER, C9_Q, CITADEL_QUERIES, WEB, WEB_BY_TURN, web, draft, cite, SCRIPT } from "./helpers/mirror_wa_script.ts";
-import { isSupportJudgeCall, supportsClaim } from "./support-test-judge.ts";
-// Architect amendment (owner decision 2026-11-13: research support check switched on; architect ruling 2026-11-14 on 5e7b9fa95): this
-// test's stub judge reads an advice sentence's fixed instruction words (its leading imperative verb, and leave/keep/move/put/cut/drop/
-// remove/list/lead, off/out/in/up/first/top/above/below, outdated/old/current) as needing no support; every other word of the sentence
-// must still be in the one source passage it is judged against (support-test-judge.ts supportsClaim); the joint passage (the guide and
-// the record) is read whole, with no role joined to another line's employer. The product is unchanged.
-const INSTRUCTION_WORDS = /(?<![\p{L}])(?:leave|keep|move|put|cut|drop|remove|list|lead|off|out|in|up|first|top|above|below|outdated|old|current)(?![\p{L}])/giu;
-const mirrorJudgeAnswer = (user: string) => {
-  let items: { claim: string; source: string }[] = [];
-  try { items = JSON.parse(user); } catch { /* empty */ }
-  return JSON.stringify(items.map((x) => { const c = String(x.claim ?? ""), lead = /^\s*([\p{L}]+)/u.exec(c)?.[1] ?? "";
-    const rest = /^The marked text "/.test(c) ? c : c.replace(new RegExp(`^\\s*${lead}\\b`, "u"), "").replace(INSTRUCTION_WORDS, " ");
-    const src = String(x.source ?? ""), m = /^>>> (.*) <<<$/m.exec(src)?.[1] ?? "";
-    // The joint passage (the cited guide and the person's record, a fact per line): every word in the guide or the record, and no
-    // role joined to an employer from another line ("Software engineering intern at Stripe").
-    if (/^Two passages, read together/.test(src)) {
-      const lines = src.split("\n").filter((l) => l.startsWith("- ")).map((l) => l.slice(2));
-      const joined = src.replace(`>>> ${m} <<<`, `>>> ${m} ${lines.join(" ")} <<<`);
-      const at = /([\p{L}][\p{L} -]*?)\s+at\s+(\p{Lu}[\p{L}&.-]*(?:\s\p{Lu}[\p{L}&.-]*)*)/u.exec(rest);
-      const sameLine = !at || lines.some((l) => l.includes(at[2]) && at[1].trim().split(/\s+/).slice(-3).every((w) => l.toLowerCase().includes(w.toLowerCase())));
-      return sameLine && supportsClaim(rest, joined) ? "yes" : "no";
-    }
-    // A record passage (its facts apart by " | ") is read line by line: a sentence must be stated by one fact, never two recombined.
-    const lines = m.includes(" | ") ? m.split(" | ").map((l) => src.replace(`>>> ${m} <<<`, `>>> ${l} <<<`)) : [src];
-    return lines.some((l) => supportsClaim(rest, l)) ? "yes" : "no"; }));
-};
-export { mirrorJudgeAnswer };
+import { isSupportJudgeCall } from "./support-test-judge.ts";
+// Architect amendment (owner decision 2026-11-13: research support check switched on; architect rulings 2026-11-14): the stub judge
+// lives in helpers/mirror_stub_judge.ts (so other tests use it without running MP-1).
+import { mirrorJudgeAnswer, SCRIPTED_TRUE } from "./helpers/mirror_stub_judge.ts";
 // (and the scripted C4 answer drops "SWE": a goal said in chat, never saved as a fact, which the product rightly refuses)
 const C4_SAID = C4_ANSWER.replace("your SWE resume", "your resume");
 const result = (calls: Call[], name: string) => { const c = calls.find((x) => x.name === name); return c ? c.result : ""; };
@@ -239,6 +216,8 @@ Deno.test({ name: "MP-1 the EXISTS turns follow Instinct's process: the tools of
     ok(/Lakeshore University/.test(c4.system) && /outdated/i.test(c4.history), "C4: the confirmed education and the GPA correction are in view");
     eq([a4.status, a4.source?.url, c4.searches], ["advice", C4_GUIDE, 1], `C4 advice: ${JSON.stringify(a4).slice(0, 300)}`);
     eq(c4.reply, `${C4_SAID}\n${C4_GUIDE}`, "C4: answer first, then the one source on its own line");
+    // Architect amendment (same): the stub's scripted-truth table holds exactly C4's two advice sentences, nothing else.
+    eq([...SCRIPTED_TRUE].sort(), C4_SAID.split(/(?<=[.!?])\s+(?=[A-Z])/).sort(), "the scripted table is C4's two sentences only");
     // C10: the posting the conversation listed, tailored from confirmed facts; one PDF (its Word copy may ride with it,
     // RESUME-TEMPLATES 1.1); no email on the confirmed resume and none typed, so the email is a visible placeholder the tool flags,
     // and the draft is never stored for an application (D-063); nothing submitted.

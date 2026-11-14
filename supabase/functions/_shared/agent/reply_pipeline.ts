@@ -15,8 +15,11 @@
 //             pay with its link).
 import { clausesOf, findSupport, hardParts, indexPages, judgeAll, noClaim, splitSentences, type SupportJudge } from "./research/support.ts";
 
-// Off until a live run measures it (owner and architect decide the switch); with it off every reply keeps the support check.
-export const PIPELINE = { on: false };
+// ON (ruling 2026-11-14): the drafting prompt asks for tags and every tool result carries its units. The path is chosen by the draft:
+// a TAGGED draft goes through this pipeline (no page quote is ever put in place of a sentence); an UNTAGGED one (a model that ignored
+// the tags, a scripted test) keeps the support check unchanged, its quote fallback included. The trace says which (`pipeline`).
+export const PIPELINE = { on: true };
+export const isTagged = (t: string) => /\[E\d+(?:\s*,\s*E\d+)*\]/.test(String(t ?? ""));
 export type EvidenceKind = "page" | "chat" | "record" | "absent";
 export interface EvidenceUnit { id: string; kind: EvidenceKind; text: string; host?: string | null; url?: string | null; source?: string }
 
@@ -88,7 +91,8 @@ export function missingSpecifics(clause: string, units: EvidenceUnit[]): string[
   const all = units.map((u) => u.text).join(" \n ").toLowerCase(), h = hardParts(clause);
   const names = h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).filter((r) => r.length).map((r) => r.join(" "));
   const figs = [...String(clause).matchAll(/(?:[$€£]\s?)?\d[\d,.]*(?:\s?(?:k|%|percent|days? ago|hours?|an hour|a year|per \w+))?/gi)].map((m) => m[0].trim());
-  const out = [...figs.filter((f) => !all.includes(f.toLowerCase().replace(/^[$€£]\s?/, ""))), ...names.filter((n) => !all.includes(n.replace(/^date(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3")))];
+  const digits = (f: string) => (/\d[\d,.]*/.exec(f)?.[0] ?? "").replace(/[.,]$/, "");
+  const out = [...figs.filter((f) => !all.includes(digits(f))), ...names.filter((n) => !all.includes(n.replace(/^date(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3")))];
   return [...new Set(out)];
 }
 
@@ -185,7 +189,9 @@ export async function runReplyPipeline(draft: string, ledger: Ledger, o: { judge
     while (ss.length > 1 && len(ss.join(" ")) > o.maxChars) ss.pop();
     text = ss.join(" ");
   }
-  const answers = o.answers ?? ((t: string) => splitSentences(t).some((s) => s.trim() && !noClaim(s) && !/\?\s*$/.test(s)));
+  // (a page's own source numbers, "[1]", mean nothing on this path: the units carry their links)
+  text = text.replace(/\s*\[\d+\](?:\s*\[\d+\])*/g, "").split("\n").filter((l) => !/^\s*[.,;:]?\s*$/.test(l) || !l.trim()).join("\n").trim();
+  const answers = o.answers ?? ((t: string) => splitSentences(t).some((s) => /\p{L}/u.test(s.replace(/https?:\/\/\S+/g, "")) && !noClaim(s) && !/\?\s*$/.test(s)));
   let fallback = false;
   if (!answers(text)) { text = [text, fallbackLine(ledger, o.ask)].filter(Boolean).join("\n\n"); fallback = true; }
   return { text: stripTags(text).trim(), repaired, dropped, calls, fallback };
@@ -194,5 +200,5 @@ export async function runReplyPipeline(draft: string, ledger: Ledger, o: { judge
 export function fallbackLine(ledger: Ledger, ask: string): string {
   const words = new Set(String(ask ?? "").toLowerCase().match(/\p{L}{3,}/gu) ?? []);
   const held = ledger.units.filter((u) => u.kind === "chat" && /\d/.test(u.text) && (u.text.toLowerCase().match(/\p{L}{3,}/gu) ?? []).some((w) => words.has(w) && !/^(?:the|and|pay|for|with)$/.test(w)));
-  return ["I couldn't verify an answer to that from what I read.", ...held.slice(0, 3).map((u) => `What this chat's tool results hold: ${u.text}${u.url ? `\n${u.url}` : ""}`)].join("\n");
+  return [`I couldn't verify an answer to that from what I read.${held.length ? " This chat's tool results do hold:" : ""}`, ...held.slice(0, 3).map((u) => `${u.text}${u.url ? `\n${u.url}` : ""}`)].join("\n");
 }

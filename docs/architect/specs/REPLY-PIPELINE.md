@@ -1,7 +1,14 @@
 # Reply pipeline: evidence ledger, tagged draft, verify, one repair, fallback
 
-Status: built behind `PIPELINE.on` (`supabase/functions/_shared/agent/reply_pipeline.ts`). It is **off** until the owner and the
-architect switch it on after a live run. While it is off, every reply keeps the support check (`FAIL_CLOSED.support`).
+Status: **on** in production (`PIPELINE.on`, ruling 2026-11-14), `supabase/functions/_shared/agent/reply_pipeline.ts`.
+
+The drafting prompt asks for tags, and the path is chosen by the draft:
+- A **tagged** draft (it carries `[E#]`) goes through this pipeline. No page quote is ever put in place of one of its sentences.
+- An **untagged** draft (from a model that ignored the tags, or from a scripted test) keeps the support check unchanged, quote
+  fallback included. The architect research-support tests keep testing exactly what they test today, unedited.
+
+The trace says which path each turn took (`pipeline: tagged | untagged`, and `piped` with its repair calls, drops and fallback), so
+a live run shows how often the model tags.
 
 Why: live-12 showed that good drafts were broken by checking after the fact. The checker had to guess which unit each sentence
 stood on. When it guessed wrong, it refused true sentences, and its quote fallback then replaced them with unrelated page text.
@@ -57,7 +64,7 @@ The fix is for the drafting model to say which unit each sentence rests on, and 
 
 Each contract's `says` text goes to the drafting model up front. Its `missing` check feeds the repair pass.
 
-## Fixes that apply with the pipeline off (support check)
+## Fixes on the untagged path (support check)
 
 - An abbreviation-aware sentence splitter (`splitSentences`: U.S., U.K., e.g., i.e., Inc., Jr., St., a.m./p.m., No.).
 - Full dates normalized to one token ("Sunday, December 6th, 2026", "December 6, 2026" and "2026-12-06" match).
@@ -68,8 +75,8 @@ Each contract's `says` text goes to the drafting model up front. Its `missing` c
 - Every research sentence's checked unit and its page link are recorded in the trace, so a $0 replay can cover research turns.
 - Page fragments ("So I…", "Mostly because…") are never quoted, and page markdown is stripped.
 
-The quote fallback itself is unchanged while the pipeline is off: the architect research-support tests require it ("every judge
-failure is a quote of the page"; D73-1 "the reply is built from the kept lines"). The pipeline replaces it.
+On the untagged path the quote fallback is unchanged. The architect research-support tests require it ("every judge failure is a
+quote of the page"; D73-1 "the reply is built from the kept lines"). On the tagged path the repair pass replaces it.
 
 ## Cost
 
@@ -81,4 +88,6 @@ about $0.0014 per turn on average.
 
 `tests/architect/pending/reply-pipeline-20261114.test.ts` covers three domains that are not in the mirror set: a finance internship
 in New York, nursing pay in Texas, and a startup's culture. `tests/architect/pending/live12-support-fixes-20261114.test.ts` covers
-the support-check fixes.
+the support-check fixes. `tests/architect/pending/reply-pipeline-turn-20261114.test.ts` runs a production-shaped turn end to end:
+the real drafting prompt, evidence in a tool result, a tagged draft, one repair call and the drop. It also shows that an untagged
+draft keeps the support check.

@@ -67,7 +67,7 @@ Deno.test("repair: one call for everything that failed, verified again; what sti
 Deno.test("fallback: nothing left answers, so code says what it could not verify and what the ledger holds, with its link", async () => {
   const out = await runReplyPipeline("Hudson Ridge Capital analysts get a $20,000 bonus [E3].", finance(), { judge: yes, repair: async () => "", ask: "what does hudson ridge capital pay summer analysts in new york" });
   ok(out.fallback);
-  ok(out.text.startsWith("I couldn't verify an answer to that from what I read."), out.text);
+  ok(out.text.startsWith("I couldn't verify an answer to that from what I read. This chat's tool results do hold:"), out.text);
   ok(out.text.includes("$55 - $60 Hourly") && out.text.includes("https://careers.hudsonridge.example/sa"), out.text);
   // A startup culture ask with nothing verified: no figure from anywhere is invented.
   const s = await runReplyPipeline("Brightloop has unlimited vacation [E1].", startup(), { judge: testSupportJudge, ask: "what's the culture like at brightloop" });

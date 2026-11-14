@@ -59,6 +59,17 @@ const PRICE = { input: 2 / 1e6, output: 10 / 1e6, cacheRead: 0.1 / 1e6, cacheWri
 // what is still removed is removed by code, not the judge).
 const replay: Record<string, { calls: { name: string; args: Record<string, unknown> }[]; reply: string }> | null = opt("--replay") ? JSON.parse(await Deno.readTextFile(opt("--replay")!)) : null;
 const judgeMode = opt("--judge") ?? "stub";
+// --tag-synthetic (SYNTHETIC, labelled so in every output): the recorded draft is tagged by a script, not a model: each sentence gets
+// the evidence unit (from the prompt's ledger and the tool results' `evidence`) that layer A finds for it, or none.
+const tagSynthetic = a.includes("--tag-synthetic");
+const { findSupport, indexPages, splitSentences } = await import("../../supabase/functions/_shared/agent/research/support.ts");
+const tagged = (draft: string, chat: any) => {
+  const all = (chat.messages ?? []).map((m: any) => typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? "")).join("\n").replace(/\\"/g, '"');
+  const units = [...new Map([...all.matchAll(/\[(E\d+)\] \(([^)]*)\) ([^"\n]+)/g)].map((m) => [m[1], m[3].trim()])).entries()];
+  if (!units.length) return draft;
+  const idx = indexPages(units.map(([, t]) => ({ text: t, one: false })));
+  return draft.split("\n").map((l) => /^\s*https?:\/\//.test(l) ? l : splitSentences(l).map((x) => { const f = findSupport(x, idx); return f ? (/[.!?]["')]*\s*$/.test(x) ? x.replace(/\s*([.!?]["')]*)\s*$/, ` [${units[f.page][0]}]$1`) : `${x} [${units[f.page][0]}]`) : x; }).join(" ")).join("\n");
+};
 const { mirrorJudgeAnswer } = await import("../../tests/architect/helpers/mirror_stub_judge.ts");
 // "recorded" (live-11 replay): the verdicts a live run's judge gave ({claim: "yes" | "no"}, --verdicts <file>); a claim it never
 // judged gets the truth rule of the support tests (tests/architect/support-test-judge.ts supportsClaim).
@@ -75,10 +86,12 @@ const replayed = (chat: any): string | { calls: { name: string; args: Record<str
     return judgeMode === "yes" ? JSON.stringify(items.map(() => "yes")) : mirrorJudgeAnswer(JSON.stringify(items));
   }
   if (chat.response_format) return "{}";
+  // SYNTHETIC (--tag-synthetic): the repair pass is stubbed as "no change" (nothing comes back, so what failed is dropped).
+  if (tagSynthetic && /^You fix a text message from a career assistant/.test(sys)) return "";
   if (!chat.tools?.length) return r.reply; // a rewrite pass gets the same draft back (so it never shortens it into something else)
   if (stepLabel !== label) { stepLabel = label; step = 0; }
   const c = r.calls[step++];
-  return c ? { calls: [c] } : r.reply;
+  return c ? { calls: [c] } : tagSynthetic ? tagged(r.reply, chat) : r.reply;
 };
 const scripted = (chat: any) => {
   modelCalls++;
@@ -224,6 +237,7 @@ try {
       research: meta.research ?? null,
       // Live-10: the model's draft before the support check, and each sentence it removed with the reason (layer A or the judge).
       support: meta.support ?? null,
+      pipeline: meta.pipeline ?? null, piped: meta.piped ?? null,
       args: ((meta.tool_calls ?? []) as any[]).filter((x) => x && x.args).map((x) => ({ name: String(x.name), args: x.args })),
       router_intent: meta.router_intent ?? null, brain: meta.brain ?? null, artifact, files, documents,
     };

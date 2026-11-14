@@ -18,7 +18,7 @@ import { enforceResearchReply, fallbackVerdict, stripUnseenLinks } from "../_sha
 import { type AdviceResult, enforceAdviceReply } from "../_shared/agent/research/advice.ts";
 import { enforceMarketReply, enforceMarketReplySupported, FAIL_CLOSED, type MarketDeps, type MarketResult, pureUnconfirmed, type ResearchCheck } from "../_shared/agent/research/market.ts";
 import { bare, keepSupported, splitSentences } from "../_shared/agent/research/support.ts";
-import { contractBlock, contractsFor, Ledger, LEDGER_RULE, PIPELINE, runReplyPipeline } from "../_shared/agent/reply_pipeline.ts";
+import { contractBlock, contractsFor, isTagged, Ledger, LEDGER_RULE, PIPELINE, runReplyPipeline, stripTags } from "../_shared/agent/reply_pipeline.ts";
 import { factText, ownerConfirmedFacts } from "../_shared/essay_draft.ts";
 import { NOT_CONFIRMED } from "../_shared/research_reply.ts";
 import { type CompanyResult, enforceCompanyReply, enforceCompanyReplySupported } from "../_shared/agent/research/company.ts";
@@ -229,6 +229,8 @@ export async function agentTurn(o: {
     ledger.addRecord(ownerConfirmedFacts(pf.facts ?? []).map((f: any) => `${String(f?.kind ?? "fact")}: ${String(f?.text ?? "").trim()}`).filter((x: string) => x.length > 8)
       .concat(["name", "email", "phone", "city"].filter((k) => typeof contact[k] === "string" && contact[k].trim()).map((k) => `contact: ${k} ${contact[k].trim()}`)),
       ["city", "phone", "email"].filter((k) => !(typeof contact[k] === "string" && contact[k].trim())));
+    // (this chat's earlier posting lines, from tool results an earlier reply already showed, with their links)
+    for (const l of shownPayOf("what is the pay", o.history)) ledger.add("chat", l.text.replace(/^(?:[^.:]*\bdo hold:\s*)+/i, ""), { url: l.url, source: "an earlier reply in this chat" });
     ctx.ledger = ledger;
   }
   const tools = [...withheld([...(o.toolPolicy?.withhold ?? []), ...hypoWithheld], [...careerTools({ postings: o.postings ?? (async () => []), alerts: o.alerts ?? null, memory: o.memory ?? null, events: o.events ?? null, confirmations: o.confirmations ?? null, tz: o.tz, mail: o.mail ?? null, interviews: o.interviews ?? null, digest: o.digest ?? null, outreach: o.outreach ?? null, verifier: o.verifier ?? null, tailor: o.tailor ?? null, hired: o.hired ?? null, wants: o.wants ?? null, limits: o.limits, posting: o.posting ?? null, situation: o.known?.situation ?? null, linkCheck: o.linkCheck ?? null, conversations: o.conversations ?? null, market: o.market ? { ...o.market, onResult: (r) => { if (r.status === "ok" || trace.m?.status !== "ok") trace.m = r; } } : null, postingRecheck: o.postingRecheck ?? null, applyFlow: o.applyFlow ?? null, research: o.knowledge && o.research ? { ...o.research, onResult: (r, m) => { if (r.status === "ok") trace.r = r; o.research?.onResult?.(r, m); }, onAdvice: (r) => { if (r.source || !trace.a?.source) trace.a = r; } } : null }), ...(o.capabilities ?? []), ...(o.paths ? [pathComparisonTool(o.paths)] : [])]), ...(o.shape && attachAsked(o.message) ? [attachTool()] : []), ...(o.files ? [createFileTool(o.files)] : []), ...(o.familyFiles ? [familyFileTool(o.familyFiles, o.files?.ttlHours() ?? 168)] : [])];
@@ -283,10 +285,14 @@ export async function agentTurn(o: {
   // that stands, since its sources are the numbered ones the reply cites.
   // Live-11 (C9: 10 of 11 drafted lines dropped and the trace held none of them): a research turn's draft is recorded too.
   let piped: Awaited<ReturnType<typeof runReplyPipeline>> | null = null;
-  if (ledger && result.reply && result.stopped === "final" && !result.show) {
+  // The path, by the draft: tagged -> the reply pipeline; untagged -> the support check as before (a stray tag never reaches anyone).
+  const pipeline = ledger && result.reply && result.stopped === "final" ? (isTagged(result.reply) ? "tagged" : "untagged") : null;
+  if (pipeline === "untagged" && result.reply) result = { ...result, reply: stripTags(result.reply) };
+  if (pipeline === "tagged" && result.show && result.reply) result = { ...result, reply: stripTags(result.reply) };
+  if (pipeline === "tagged" && result.reply && !result.show) {
     const l0 = replyLength(o.message, o.history);
     const repair = async (x: { system: string; user: string }) => { const res = await o.model({ system: x.system, messages: [{ role: "user", content: [{ type: "text", text: x.user }] }], tools: [], max_tokens: 500, tool_choice: { type: "none" } } as any); return ((res as any)?.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join("").trim(); };
-    piped = await runReplyPipeline(result.reply, ledger, { judge: o.market?.judge ?? null, repair, own: [...(result.codeLines ?? [])], ask: o.message, contracts, maxChars: l0.kind === "draft" ? undefined : overLimit(l0) });
+    piped = await runReplyPipeline(result.reply, ledger!, { judge: o.market?.judge ?? null, repair, own: [...(result.codeLines ?? [])], ask: o.message, contracts, maxChars: l0.kind === "draft" ? undefined : overLimit(l0) });
     result = { ...result, reply: piped.text };
   }
   const researchDraft = !piped && FAIL_CLOSED.support && trace.m && result.reply && result.stopped === "final" ? String(result.reply) : null;
@@ -562,7 +568,8 @@ export async function agentTurn(o: {
   const researchTrace = researchDraft && researchRows ? { draft: researchDraft, refused: (researchRows as ResearchCheck[]).filter((x) => x.verdict === "drop").map((x) => ({ sentence: x.sentence, why: "research check: not kept" })), checked: researchRows }
     : researchDraft ? { draft: researchDraft, refused: researchDraft.split(/\n+/).flatMap((l) => l.split(/(?<=[.!?])\s+/)).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x) && !String(result.reply ?? "").includes(x.replace(/\s*\[\d+\]/g, "").replace(/[.!?]$/, ""))).map((sentence) => ({ sentence, why: "research check: not kept" })) } : null;
   const supportAll = supportTrace && supportTrace.refused.length ? supportTrace : researchTrace;
-  const withSupport = supportAll ? { ...result, support: supportAll } : result;
+  const withSupport0 = supportAll ? { ...result, support: supportAll } : result;
+  const withSupport = pipeline ? { ...withSupport0, pipeline, ...(piped ? { piped: { repaired: piped.repaired, calls: piped.calls, fallback: piped.fallback, dropped: piped.dropped } } : {}) } : withSupport0;
   return know ? { ...withSupport, knowledge: { playbooks: know.playbooks, unknown: know.unknown, stage: know.stage } } : withSupport;
 }
 

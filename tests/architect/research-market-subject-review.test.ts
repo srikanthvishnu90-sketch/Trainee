@@ -51,9 +51,15 @@ Deno.test("review: an inline sentence names only who its cited points name", asy
   // Architect amendment (owner decision 2026-11-13: research support check switched on): the reply is checked with the judge
   // (enforceMarketReplySupported); the synchronous form lets no model sentence through with the check on.
   const body = async (s: string) => (await enforceMarketReplySupported(s, r, [], { judge: testSupportJudge, ask: "Compare Acme Energy and Globex Power" })).split("\n\n")[0];
-  eq(await body("Globex Power installed 41,000 home batteries in 2025 [1]. Globex Power also sells EV chargers [2]."), "Globex Power also sells EV chargers [2].",
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; fix "a refused sentence is replaced by the kept
+  // line it restates when another sentence stood"): the Globex sentence is still refused; in its place stands Acme's own page sentence,
+  // in quotation marks, which names Acme. Acme's figure is never said under Globex's name.
+  eq(await body("Globex Power installed 41,000 home batteries in 2025 [1]. Globex Power also sells EV chargers [2]."), '"Acme Energy installed 41,000 home batteries in 2025." [1]. Globex Power also sells EV chargers [2].',
     "Acme's figure under Globex's name is dropped though [1] and 41,000 match");
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; fix "a refused sentence is replaced by the kept
+  // line it restates"): one sentence on two pages is no one page's statement, so it is refused and the kept lines it restates stand
+  // in its place, each name with its own source.
   eq(await body("Acme Energy installed 41,000 home batteries in 2025 [1], and Globex Power sells EV chargers [2]."),
-    "Acme Energy installed 41,000 home batteries in 2025 [1], and Globex Power sells EV chargers [2].", "each name with its own source stands");
+    '"Acme Energy installed 41,000 home batteries in 2025." [1]. Globex Power sells home batteries, solar panels and EV chargers [2].', "each name with its own source stands");
   eq(await body("In 2025 Acme Energy installed 41,000 home batteries [1]."), "In 2025 Acme Energy installed 41,000 home batteries [1].");
 });

@@ -565,7 +565,7 @@ export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudg
 // sentence stands when it is one of code's own lines (`own`: word for word), a could-not-confirm sentence in the closed form
 // (`pure`), or the judge says yes to it (as a claim in its own words, or as a source's own unit said again); it is removed otherwise
 // (these paths have no numbered source to quote). A line that is only a link is code's, and stays.
-export async function keepSupported(reply: string, sources: (string | { text: string; title?: string; one?: boolean })[], o: { judge?: SupportJudge | null; read?: (s: string) => string; pure?: (s: string) => boolean; own?: string[]; instructions?: boolean; also?: { when: (s: string) => boolean; sources: { text: string; title?: string; one?: boolean }[] }; subjects?: string[]; ask?: string } = {}): Promise<{ text: string; removed: string[] }> {
+export async function keepSupported(reply: string, sources: (string | { text: string; title?: string; one?: boolean })[], o: { judge?: SupportJudge | null; read?: (s: string) => string; pure?: (s: string) => boolean; own?: string[]; instructions?: boolean; joint?: { guide: { text: string; title?: string }[]; record: string }; also?: { when: (s: string) => boolean; sources: { text: string; title?: string; one?: boolean }[] }; subjects?: string[]; ask?: string } = {}): Promise<{ text: string; removed: string[] }> {
   const idx = indexPages(sources.map((x) => typeof x === "string" ? { text: x } : x), o.read, o.subjects ?? [], { ask: o.ask });
   const norm = (x: string) => bare(readAlike(x)).toLowerCase().replace(/[.!?]+$/, "");
   const own = new Map((o.own ?? []).map((x) => [norm(x), x]));
@@ -588,6 +588,31 @@ export async function keepSupported(reply: string, sources: (string | { text: st
   const v1 = await decide(plainW, idx, o.judge), v2 = idx2 ? await decide(alsoW, idx2, o.judge) : [];
   let n1 = 0, n2 = 0;
   const vs = wants.map((_, k) => withAlso[k] ? v2[n2++] : v1[n1++]);
+  // Architect ruling 2026-11-14 (on 3ad157b2e), advice turns only: a sentence no one source holds may be supported jointly by the
+  // cited guide and the person's confirmed record. Layer A: every name and figure of it is in the record; every other content word
+  // is in the guide or the record, and at least one is the guide's (a sentence the record alone would state is the record's to
+  // state, line by line). The judge then reads both passages, the record a fact per line. Never a web page, another employer's
+  // page or the draft passage.
+  if (o.joint && o.joint.record && o.joint.guide.length) {
+    const rec = indexPages([{ text: o.joint.record, title: "The person's confirmed record:", one: true }], o.read).pages[0].sentences[0];
+    const gText = o.joint.guide.map((g) => g.text).join("\n"), gWords = contentWords((o.read ?? ((x: string) => x))(gText));
+    const recLines = o.joint.record.split(/\n+/).map((x) => squash(x)).filter(Boolean);
+    const source = clip([`Two passages, read together. The guide the answer cites (${squash(o.joint.guide[0].title ?? "") || "guide"}):`, `>>> ${squash(gText).slice(0, 1400)} <<<`,
+      "The person's confirmed record (each line is one fact about them; never join two lines into one fact):", ...recLines.map((l) => `- ${l}`)].join("\n"), PASSAGE_MAX);
+    const tryJoint = wants.map((w, k) => {
+      if (withAlso[k] || vs[k].how !== "drop" || !rec) return false;
+      const h = hardParts(w.claim, o.read), vals = new Set(rec.hard.numbers.map((n) => n.split("|")[4]));
+      if (!h.numbers.every((a) => vals.has(a.split("|")[4]))) return false;
+      if (!h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).filter((r) => r.length).every((r) => r.every((x) => rec.lower.has(x) || nameRe(x).test(rec.text)))) return false;
+      const cw = [...contentWords((o.read ?? ((x: string) => x))(bare(readAlike(w.claim))))];
+      return cw.every((x) => gWords.has(x) || rec.content.has(x)) && cw.some((x) => gWords.has(x) && !rec.content.has(x));
+    });
+    const ks = tryJoint.flatMap((t, k) => t ? [k] : []);
+    if (ks.length) {
+      const got = await judgeAll(o.judge, ks.map((k) => ({ claim: wants[k].claim, source })));
+      ks.forEach((k, j) => { if (got[j]) vs[k] = { how: "model", sentence: wants[k].claim, page: 0 }; });
+    }
+  }
   const removed: string[] = [];
   // What was judged is what is emitted: on a "model" verdict the sentence as written (it was the judged claim); on a "quote" verdict
   // (the sentence is a source's own unit said again) the unit's own text; otherwise nothing.

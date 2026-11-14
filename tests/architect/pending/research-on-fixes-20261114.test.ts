@@ -171,3 +171,21 @@ Deno.test("ruling: a recombination of record lines passes layer A but a line-rea
     ok(t.reply.includes(good), `${good} => ${t.reply}`);
   }
 });
+// Ruling on 3ad157b2e: an advice sentence may stand on the cited guide and the confirmed record together (layer A: names and figures
+// in the record, the other content words in the guide or the record, at least one the guide's); the judge reads both.
+const GUIDE2 = "Start with your name and contact links, then education with your school, degree and expected graduation date, followed by a short technical skills section.";
+const guide2Search = async () => ({ status: "ok", facts: [{ id: "", kind: "program", text: GUIDE2, quote: GUIDE2, url: GUIDE_URL, label: "Student guide" }], urls: [GUIDE_URL], cost_usd: 0.01 });
+const jointJudge: SupportJudge = async (cs) => cs.map((c) => /^Two passages, read together/.test(c.source) ? "yes" : "no");
+const jointTurn = (reply: string, facts: any[]) => agentTurn({ message: "what goes at the top of my resume?", history: [], stores: { profile: { facts: structuredClone(facts) } }, userId: "u", threadId: "t", now: Date.parse("2026-11-14T00:00:00Z"), knowledge: true,
+  market: { judge: jointJudge }, model: (() => { let n = 0; return async (p: any) => p.tools?.length ? [aUse("research_career_question", { question: "x", kind: "advice", query: "resume top" }), aSay(reply)][Math.min(n++, 1)] : aSay(""); })(), research: { search: guide2Search } } as any) as Promise<any>;
+const MINE = [{ id: "J-1", kind: "education", text: "Lakeshore University, BS Computer Science and Finance, Expected June 2029", status: "confirmed" }, { id: "J-2", kind: "skill", text: "Skill: SQL", name: "SQL", status: "confirmed" },
+  { id: "J-3", kind: "experience", text: "Robinhood, Software engineering intern", status: "confirmed" }, { id: "J-4", kind: "experience", text: "Stripe, Team lead", status: "confirmed" },
+  { id: "J-5", kind: "other", text: "My friend at Citadel earns $10k a week", status: "confirmed" }, { id: "J-6", kind: "other", name: "GPA", gpa: "3.9", text: "GPA: 3.9", status: "draft", needs_confirmation: true }];
+Deno.test("ruling: joint guide + record support for advice; never for a recombination, a draft, hearsay or a claim the guide does not make", async () => {
+  const good = "Start with your name and contact links, then education with Lakeshore University, BS Computer Science and Finance, Expected June 2029, followed by a short technical skills section with SQL.";
+  ok((await jointTurn(good, MINE)).reply.includes(good), "the guide's layout with the record's items stands");
+  for (const bad of ["List Software engineering intern at Stripe.", "Mention Team lead at Robinhood first in your skills section.", "You have a 3.9 GPA.", "Citadel interns earn $10k a week.", "SQL is the most requested skill at every bank.", "Start with your name and contact links, then your Citadel internship."]) {
+    const t = await jointTurn(bad, MINE);
+    ok(!t.reply.includes(bad), `${bad} => ${t.reply}`);
+  }
+});

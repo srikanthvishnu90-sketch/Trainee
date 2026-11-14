@@ -406,7 +406,7 @@ export async function agentTurn(o: {
         .map((f) => `${String(f.kind ?? "fact")}: ${String(f.text ?? "").trim()}`).filter((x) => x.length > 8);
       const REMOVE_OR_UPDATE = /^(?:you could\s+)?(?:(?:remove|drop|cut|delete|update|correct)\b|take\b.*\bout\b|leave\b.*\b(?:off|out)\b)/iu;
       const k = await keepSupported(result.reply, [...trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), ...recordSource, ...readSources],
-        { judge, pure, own: codeLines, ask: o.message, instructions: true, ...(draftLines.length ? { also: { when: (s: string) => REMOVE_OR_UPDATE.test(s.trim()), sources: [{ text: draftLines.join("\n"), title: "Not confirmed by the person (do not state as fact):", one: true }] } } : {}) });
+        { judge, pure, own: codeLines, ask: o.message, instructions: true, ...(record.length && trace.a.passages.length ? { joint: { guide: trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), record: record.join("\n") } } : {}), ...(draftLines.length ? { also: { when: (s: string) => REMOVE_OR_UPDATE.test(s.trim()), sources: [{ text: draftLines.join("\n"), title: "Not confirmed by the person (do not state as fact):", one: true }] } } : {}) });
       result = { ...result, reply: letters(k.text) ? k.text : [trace.a.not_verified || NOT_CONFIRMED, ...links(k.text)].join("\n") };
     } else if (recs.length || shownPay.length) {
       // Round 3: EVERY sentence of a pay turn is checked (not only those with a number), against the postings' own records and the

@@ -100,12 +100,18 @@ const COMPARE_DRAFT = {
 Deno.test("example 2, 'compare these 3 companies': a brief with the comparison table; a cell no page supports is left unknown", async () => {
   const { d, published } = deps(KEY, COMPARE_DRAFT);
   const out = await turn("Compare these 3 companies: Acme Energy, Globex Power, Initech Grid", { format: "file", queries: ["Acme Energy Globex Power Initech Grid compare"], companies: ["Acme Energy", "Globex Power", "Initech Grid"] }, "Acme Energy and Globex Power sell to homes [1][2].", d);
-  const data = published[0];
-  eq(data.comparison.options.map((o: any) => o.name), ["Acme Energy", "Globex Power", "Initech Grid"]);
-  eq(data.comparison.rows[0].cells.map((c: any) => c?.value ?? null), ["41,000", null, null], "Initech's '500' is on no page: unknown, not guessed");
-  eq(data.conditions[0].cite.length, 1, "the Indeed page is never a source");
-  citationsValid(data);
-  eq(out.fileLinks?.length, 1);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; architect ruling 2026-11-14): a cell that
+  // claims more than its page sentence is refused ("Batteries and solar panels" under "Sells to homes": the page never says "to
+  // homes"), and so is Initech's "500" (on no page). Only Acme's 41,000 stands, one column, so there is no table; the drafted
+  // condition is on no page, so there is no File either. Every cell that is shown is one its page states.
+  eq(published.length, 0, "no File for an unsourced condition");
+  eq(out.fileLinks?.length ?? 0, 0);
+  ok(!/\b500\b/.test(out.reply) && !/indeed\.com/.test(out.reply), out.reply);
+  const { d: d2 } = deps(KEY, COMPARE_DRAFT);
+  const r: any = await researchMarket({ question: "Compare these 3 companies: Acme Energy, Globex Power, Initech Grid", format: "file", plan: { queries: ["Acme Energy Globex Power Initech Grid compare"], companies: ["Acme Energy", "Globex Power", "Initech Grid"] }, deps: d2 } as any);
+  eq(r.status, "ok");
+  for (const row of r.comparison?.rows ?? []) for (const c of row.cells) if (c) ok(c.cite.every((n: number) => r.sources.some((x: any) => x.n === n)), JSON.stringify(c));
+  ok(!JSON.stringify(r.comparison ?? {}).includes('"500"') && !/Batteries and solar panels|Batteries, solar, EV chargers/.test(JSON.stringify(r.comparison ?? {})), JSON.stringify(r.comparison));
 });
 
 const SALARY_DRAFT = {

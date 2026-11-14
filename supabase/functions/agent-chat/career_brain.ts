@@ -24,6 +24,7 @@ import { type CompanyResult, enforceCompanyReply, enforceCompanyReplySupported }
 import { enforceFollowupAsk } from "../_shared/followup_draft.ts";
 import { urlsIn } from "../_shared/channel_shape.ts";
 import { numbersIn, numEq } from "../_shared/agent/research/guard.ts";
+import { adviceOfTheirOwn } from "../_shared/agent/research/support.ts";
 import { knowledgeFor, type Knowledge } from "../_shared/agent/knowledge/index.ts";
 import { styleBlock } from "../_shared/agent/style.ts";
 import { askedPartsOf, asksForDetail, boundaryNote, boundaryOf, capacityAskOf, capacityNote, correctionNote, correctionOf, DRAFT_TOOLS, draftAskOf, draftNote, historyAskOf, historyNote, HYPOTHETICAL_WITHHELD, hypotheticalNote, hypotheticalOf, lengthNote, multiAskNote, overLimit, partsMissing, partsNote, PERSONA_WITHHELD, planSearchAskOf, planSearchNote, whileWorkingNote, postingNote, postingRefOf, REPLY_LENGTH, replyLength, roastNote, roastOf, shownPayNote, shownPayOf, shownPayPlaces, statesNothing, textLength } from "../_shared/agent/turn_notes.ts";
@@ -375,7 +376,13 @@ export async function agentTurn(o: {
       // With nothing of the model's left, code's own fallback paragraph (it already ends with the File link, when there is one).
       result = { ...result, reply: letters(k.text) ? k.text : fallbackVerdict(trace.r) };
     } else if (trace.a) {
-      const k = await keepSupported(result.reply, [...trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), ...confirmed, ...readSources], { judge, pure, own: codeLines, ask: o.message });
+      // Architect ruling 2026-11-14: advice to the person about their own materials is not a claim about the world. A sentence whose
+      // every figure is the person's (their confirmed record or their own words this conversation) and every name is theirs or the
+      // cited guide's is kept unjudged; one that brings in any other figure or name (an employer, a pay figure, a market) is judged.
+      const personText = [...confirmed.map((c) => c.text), o.message, ...(hypo ? [] : o.history.filter((m: any) => m?.role === "user").map((m: any) => typeof m.content === "string" ? m.content : ""))].join("\n");
+      const guideText = trace.a.passages.map((x) => x.text).join("\n");
+      const advice = adviceOfTheirOwn(personText, guideText);
+      const k = await keepSupported(result.reply, [...trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), ...confirmed, ...readSources], { judge, pure, own: codeLines, ask: o.message, advice });
       result = { ...result, reply: letters(k.text) ? k.text : [trace.a.not_verified || NOT_CONFIRMED, ...links(k.text)].join("\n") };
     } else if (recs.length || shownPay.length) {
       // Round 3: EVERY sentence of a pay turn is checked (not only those with a number), against the postings' own records and the

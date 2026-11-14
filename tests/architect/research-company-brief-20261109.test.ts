@@ -80,7 +80,10 @@ Deno.test("WO-H/2 the brief: facts, reading and unknowns separate; dated develop
   // Architect amendment (owner decision 2026-11-13: research support check switched on; re-amended for the fixes on
   // ag/research-on-fixes, 80d6e4da1: the labelled reading is kept under its own check): no page sentence states the model's
   // "easier to understand …", so the reading is the page's own sentence it rests on, in quotation marks, citing that one page.
-  eq(r.frame, { text: '"Stripe offers payments plus software, not card processing alone."', cite: [1] }, "the reading names its source");
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; architect ruling 2026-11-14 on fix 3 of
+  // ag/research-on-fixes: the reading is Trainee's labelled reading, kept under its own code check, not judged as a page claim): it
+  // stands in the model's words with every page it rests on, and passes that check (its figures and most of its words on them).
+  eq(r.frame, { text: "Stripe is easier to understand as payments plus software for the revenue lifecycle than as card processing alone.", cite: [1, 4] }, "the reading names its sources");
   // Architect amendment (owner decision 2026-11-13: research support check switched on; re-amended for the fixes on
   // ag/research-on-fixes, 80d6e4da1): the count is the support path's: the paywalled line (its page sentence sits beside "Subscribe
   // to continue reading.", an order to the reader, so it is never shown), revenue-for-volume or forecast-as-result (unsupported; the
@@ -108,8 +111,10 @@ Deno.test("WO-H/2 the brief: facts, reading and unknowns separate; dated develop
   // Architect amendment (owner decision 2026-11-13: research support check switched on; re-amended for the fixes on
   // ag/research-on-fixes, 80d6e4da1): the reported fact and the interpretation are page sentences in quotation marks, the unknown is
   // listed; the model's own reading, which no page states, is in no section.
-  ok(/<dt>Reported fact<\/dt><dd>Feb 24, 2026: &quot;Businesses on Stripe generated \$1\.9 trillion/.test(html) && /<dt>Interpretation<\/dt><dd>&quot;Stripe offers payments plus software/.test(html) && /<dt>Unknown<\/dt>/.test(html) && /<dt>Source state<\/dt><dd>6 sources read Nov 9, 2026; 1 outdated; 1 could not be opened<\/dd>/.test(html), "evidence versus interpretation, as on p-89");
-  ok(!/easier to understand/.test(html) && !/easier to understand/.test(text), "a reading no page states is in no section");
+  ok(/<dt>Reported fact<\/dt><dd>Feb 24, 2026: &quot;Businesses on Stripe generated \$1\.9 trillion/.test(html) && /<dt>Interpretation<\/dt><dd>Stripe is easier to understand as payments plus software/.test(html) && /<dt>Unknown<\/dt>/.test(html) && /<dt>Source state<\/dt><dd>6 sources read Nov 9, 2026; 1 outdated; 1 could not be opened<\/dd>/.test(html), "evidence versus interpretation, as on p-89");
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; architect ruling 2026-11-14 on fix 3): the
+  // labelled reading is shown under "Interpretation" only, never as a fact of the business.
+  ok(!/<h2>How the business works<\/h2>[^]*easier to understand[^]*<h2>Evidence versus interpretation/.test(html), "the reading is never a business fact");
   ok(html.includes('<span class="src rb-measure">Volume, not revenue</span>') && html.includes("A forecast at the time, not a result"));
   // Architect amendment (owner decision 2026-11-13: research support check switched on): the paywalled claim is not shown at all
   // (above), so neither it nor its page is anywhere in the File.

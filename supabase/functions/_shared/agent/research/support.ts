@@ -10,7 +10,7 @@
 //     does not match, no judge at all) is "no".
 // A line that fails either layer is shown as the page's own sentence, word for word, in quotation marks with its citation; with no
 // page sentence to stand for it, it is dropped. This file adds no list of negating words: polarity is the judge's.
-import { contentWords, fold } from "./guard.ts";
+import { contentWords, fold, numbersIn, numEq, specifics } from "./guard.ts";
 import { readAlike } from "./draft_json.ts";
 
 export type SupportClaim = { claim: string; source: string };
@@ -543,7 +543,15 @@ export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudg
 // sentence stands when it is one of code's own lines (`own`: word for word), a could-not-confirm sentence in the closed form
 // (`pure`), or the judge says yes to it (as a claim in its own words, or as a source's own unit said again); it is removed otherwise
 // (these paths have no numbered source to quote). A line that is only a link is code's, and stays.
-export async function keepSupported(reply: string, sources: (string | { text: string; title?: string })[], o: { judge?: SupportJudge | null; read?: (s: string) => string; pure?: (s: string) => boolean; own?: string[]; subjects?: string[]; ask?: string } = {}): Promise<{ text: string; removed: string[] }> {
+// Architect ruling 2026-11-14: on an advice turn, a sentence is advice of the person's own (outside the page judge) when every figure
+// in it is in their confirmed record or their own words, and every name in it is there or in the guide the answer cites. Anything
+// else (an employer, a pay figure, a market) is judged as any claim is.
+export function adviceOfTheirOwn(personText: string, guideText: string): (s: string) => boolean {
+  const has = (hay: string, n: string) => new RegExp(`(?<![\\p{L}\\p{N}])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(hay);
+  const theirs = numbersIn(personText);
+  return (s: string) => numbersIn(s).every((n) => theirs.some((y) => numEq(y, n))) && specifics(s).names.every((n) => has(personText, n) || has(guideText, n));
+}
+export async function keepSupported(reply: string, sources: (string | { text: string; title?: string })[], o: { judge?: SupportJudge | null; read?: (s: string) => string; pure?: (s: string) => boolean; own?: string[]; advice?: (s: string) => boolean; subjects?: string[]; ask?: string } = {}): Promise<{ text: string; removed: string[] }> {
   const idx = indexPages(sources.map((x) => typeof x === "string" ? { text: x } : x), o.read, o.subjects ?? [], { ask: o.ask });
   const norm = (x: string) => bare(readAlike(x)).toLowerCase().replace(/[.!?]+$/, "");
   const own = new Map((o.own ?? []).map((x) => [norm(x), x]));
@@ -553,6 +561,10 @@ export async function keepSupported(reply: string, sources: (string | { text: st
     // A piece with no word in it ("1.", "-") is what is left of a list around removed sentences: it goes; a link alone is code's.
     if (!/\p{L}/u.test(x.replace(/https?:\/\/\S+/g, ""))) { if (!/https?:\/\//.test(x)) lines[a][b] = ""; return; }
     if (o.pure?.(x)) return;
+    // 2026-11-14 (architect ruling): on an advice turn, a sentence of advice to the person about their own materials that states
+    // no figure, name or claim beyond the person's confirmed record and what they said (o.advice decides) is outside the page judge;
+    // D-007's fact check and D-063's one cited source govern it.
+    if (o.advice?.(x)) return;
     // Round 4: one of code's own lines stands only when the sentence IS that line, and then the stored line itself is what is said.
     const mine = own.get(norm(x));
     if (mine !== undefined) { lines[a][b] = mine; return; }

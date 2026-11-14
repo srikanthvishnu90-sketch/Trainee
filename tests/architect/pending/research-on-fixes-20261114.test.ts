@@ -88,3 +88,19 @@ Deno.test("fixes 9 and 11: code's own lines (a closed posting's note, the read-o
   ok(readLines.includes("MS/PhD in Computer Science") && readLines.includes("CUDA") && readLines.some((l) => /questions are behind that sign-in/.test(l)), JSON.stringify(readLines));
   eq(turnLines([JSON.stringify({ company: "Stripe", closed: false })]), { codeLines: [], readLines: [] });
 });
+
+// ---- architect ruling 2026-11-14: advice about the person's own materials is outside the page judge; anything else in it is not
+import { adviceOfTheirOwn, keepSupported } from "../../../supabase/functions/_shared/agent/research/support.ts";
+Deno.test("ruling 1: an advice sentence of the person's own record stands unjudged; one that slips in an employer fact or a pay figure is judged and refused", async () => {
+  const person = "Lakeshore University, BS Computer Science and Finance, Expected June 2029\nSkill: Python\nSkill: React\nI use TypeScript and JavaScript and SQL. My 3.9 GPA is outdated.";
+  const guide = "Start with your name and contact links, then education, then a short skills line. Recruiters skim a SWE resume in seconds.";
+  const own = adviceOfTheirOwn(person, guide);
+  const ok1 = 'For the top of your SWE resume: your name and contact links, then "Lakeshore University | BS Computer Science and Finance | Expected June 2029", then a skills line led by Python, React and SQL.';
+  ok(own(ok1));
+  ok(own("Leave the outdated 3.9 GPA off."));
+  for (const bad of ["Citadel pays interns $5,000 a week, so lead with Python.", "Stripe is hiring 40 data interns this fall.", "Lead with React: demand for it grew 35% last year."]) ok(!own(bad), bad);
+  const no: SupportJudge = async (cs) => cs.map(() => "no" as const);
+  const k = await keepSupported(`${ok1} Citadel pays interns $5,000 a week, so lead with Python.\nLeave the outdated 3.9 GPA off.`, [{ text: guide, title: "Guide" }], { judge: no, advice: own });
+  ok(k.text.includes(ok1) && k.text.includes("Leave the outdated 3.9 GPA off.") && !/Citadel|5,000/.test(k.text), k.text);
+  eq(k.removed, ["Citadel pays interns $5,000 a week, so lead with Python."]);
+});

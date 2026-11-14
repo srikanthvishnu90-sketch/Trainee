@@ -412,3 +412,5 @@
 809 12c131499d4ee5277ae93bdb5f8a016138037924 independent-review-20261113 risk=medium note=approved-at-a1897a04e-delta-trunk-merges-only-shard-durations
 840 553b160461393d60248bae3b627af114dae902db independent-review-20261113 risk=low note=docs-only-decisions-row-d081
 775 c6fdad51c1f3b015ed0fe08a0f18c347f7377aed fix-forward-D-076 risk=high note=rejected-as-merged;fixed-by-#809-independently-approved-and-merged
+832 5704ca9ecef053c04f40ea483722497cf74bac73 independent-review-20261113 risk=medium note=approved-at-38c089d02-delta-type-only-fix-7c2a5956c-and-trunk-merges
+785 af17c27a453b3f2a55b281b6595e6a22b60a561c fix-forward-D-076 risk=high note=rejected-as-merged;fixed-by-#817-#832-independently-approved-and-merged

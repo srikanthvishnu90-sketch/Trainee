@@ -138,14 +138,36 @@ Deno.test("advice at the turn: the review's leaks are judged and refused (no exe
   }
   ok(!(await adviceTurn([], "Put Citadel first.", [{ id: "F-10", kind: "other", text: "My friend at Citadel earns $10k a week", status: "confirmed" }])).reply.includes("Put Citadel first."), "not their employer");
 });
-Deno.test("advice: the record is one source passage, so a recombination across facts fails layer A, and a draft is never a source", async () => {
+Deno.test("advice: the record is one source passage the judge sees, and a draft is never a source for a sentence that keeps it", async () => {
   const seen: string[] = [];
   const judge = async (cs: any[]) => cs.map((c: any) => { seen.push(c.source); return "yes"; });
   const t = await agentTurn({ message: "what goes at the top of my resume?", history: [], stores: { profile: { facts: [
     { id: "F-1", kind: "experience", text: "Robinhood, Software engineering intern", status: "confirmed" }, { id: "F-2", kind: "experience", text: "Stripe, Team lead", status: "confirmed" },
     { id: "F-3", kind: "other", text: "GPA: 3.9", name: "GPA", gpa: "3.9", status: "draft", needs_confirmation: true }] } }, userId: "u", threadId: "t", now: Date.parse("2026-11-14T00:00:00Z"), knowledge: true,
     market: { judge }, model: (() => { let n = 0; return async (p: any) => p.tools?.length ? [aUse("research_career_question", { question: "x", kind: "advice", query: "resume top" }), aSay("List Software engineering intern at Stripe. Your Robinhood role was Software engineering intern. Leave the 3.9 GPA in.")][Math.min(n++, 1)] : aSay(""); })(), research: { search: guideSearch } } as any) as any;
-  ok(!/at Stripe/.test(t.reply), `a role joined to another employer never stands, even with a yes judge: ${t.reply}`);
+  // (A recombination now passes layer A on the one record unit and is the judge's to refuse: the ruling test below, with a judge
+  // that reads line by line.)
   ok(!/3\.9/.test(t.reply), `a draft is no source: ${t.reply}`);
   ok(seen.some((x) => /The person's confirmed record/.test(x) && /experience: Robinhood, Software engineering intern/.test(x)), `record passage seen: ${seen.length} ${t.reply}`);
+});
+// Ruling (MP-1 C4): the record is one passage and one layer-A unit; a judge that reads it line by line refuses a recombination; the
+// person's drafts are read only for a sentence that removes or updates them.
+const perLine: SupportJudge = async (cs) => cs.map((c) => {
+  const m = /^>>> (.*) <<<$/m.exec(c.source)?.[1] ?? "";
+  const ws = (t: string) => (t.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}.\/-]*/gu) ?? []).map((w) => w.replace(/[.]$/, "")).filter((w) => !["the", "a", "an", "your", "you", "have", "was", "is", "at", "list", "mention", "put", "leave", "off", "outdated", "remove", "drop", "of", "and"].includes(w));
+  return m.split(" | ").some((line) => ws(c.claim).every((w) => ws(line).includes(w))) ? "yes" : "no";
+});
+const RECORD = [{ id: "R-1", kind: "experience", text: "Robinhood, Software engineering intern", status: "confirmed" }, { id: "R-2", kind: "experience", text: "Stripe, Team lead", status: "confirmed" },
+  { id: "R-3", kind: "experience", text: "Citadel, Quant researcher", status: "confirmed" }, { id: "R-4", kind: "other", name: "GPA", gpa: "3.9", text: "GPA: 3.9", status: "draft", needs_confirmation: true }];
+const recordTurn = (reply: string) => agentTurn({ message: "what goes at the top of my resume?", history: [], stores: { profile: { facts: structuredClone(RECORD) } }, userId: "u", threadId: "t", now: Date.parse("2026-11-14T00:00:00Z"), knowledge: true,
+  market: { judge: perLine }, model: (() => { let n = 0; return async (p: any) => p.tools?.length ? [aUse("research_career_question", { question: "x", kind: "advice", query: "resume top" }), aSay(reply)][Math.min(n++, 1)] : aSay(""); })(), research: { search: guideSearch } } as any) as Promise<any>;
+Deno.test("ruling: a recombination of record lines passes layer A but a line-reading judge refuses it; a draft only for its removal", async () => {
+  for (const bad of ["List Software engineering intern at Stripe.", "Mention Team lead at Robinhood.", "Remove Citadel, then list Quant intern at Citadel.", "You have a 3.9 GPA."]) {
+    const t = await recordTurn(bad);
+    ok(!t.reply.includes(bad), `${bad} => ${t.reply}`);
+  }
+  for (const good of ["Mention Robinhood, Software engineering intern.", "Leave the 3.9 GPA off."]) {
+    const t = await recordTurn(good);
+    ok(t.reply.includes(good), `${good} => ${t.reply}`);
+  }
 });

@@ -230,12 +230,21 @@ const TITLE_CUE = /(?<![\p{L}])(?:vs\.?|versus|and|other|others|firms|companies|
 // no cue that it is about more than it or about someone else (TITLE_CUE). The owner's name is lent to a unit that names no asked
 // employer itself; whether the unit states the claim about that employer specifically is the judge's question. A lent quote is
 // labelled with the host alone, never with the title (round 9).
-export function indexPages(pages: { text: string; title?: string; url?: string; fetchedAt?: number }[], read: (s: string) => string = (s) => s, subjects: string[] = [], o: { sites?: string[]; ask?: string } = {}): PageIndex {
+export function indexPages(pages: { text: string; title?: string; url?: string; fetchedAt?: number; one?: boolean }[], read: (s: string) => string = (s) => s, subjects: string[] = [], o: { sites?: string[]; ask?: string } = {}): PageIndex {
   const subs = subjects.map(squash).filter(Boolean);
   const hostOf = (u?: string) => { try { return new URL(String(u)).hostname.toLowerCase().replace(/^www\./, ""); } catch { return ""; } };
   const sites = (o.sites ?? []).map((d) => String(d).toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "")).filter((d) => d.split(".").length === 2 && !SHARED.includes(d));
   const compactName = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, "");
   return { read, subjects: subs, ask: squash(o.ask), pages: pages.map((p) => {
+    // Architect ruling 2026-11-14 (MP-1 C4): a record passage is ONE unit (its lines kept apart inside it, " | "), so a sentence that
+    // names several of its items co-occurs there for layer A; the judge then decides whether the record states it.
+    if (p.one) {
+      const lines = String(p.text ?? "").split(/\n+/).map((x) => squash(plainText(decoded(x)))).filter(Boolean);
+      if (!lines.length) return { sentences: [] };
+      const text = lines.join(" | "), title = plainText(decoded(String(p.title ?? "")));
+      return { sentences: [{ record: true, text, heads: [], intro: "", header: "", bullet: false, note: false, marks: [], noteOf: null, k: 0, hard: hardParts(text, read), lower: lowerWords(read(text)), content: contentWords(read(text)), quotable: false, lent: null, label: "",
+        passage: clip([`Page title: ${title || "(none)"}`, "Whole page, the candidate marked (its lines apart by \" | \"; each line is one fact):", `>>> ${text} <<<`].join("\n"), PASSAGE_MAX), pageTitle: title, ownSite: false, url: String(p.url ?? "") } as Unit] };
+    }
     const title = plainText(decoded(String(p.title ?? ""))), host = hostOf(p.url);
     const one = subs.length === 1 ? subs[0] : null;
     const ownSite = !!one && !!host && !SHARED.some((d) => host === d || host.endsWith(`.${d}`)) && sites.some((d) => (host === d || host.endsWith(`.${d}`)) && d.split(".")[0].startsWith(compactName(one).slice(0, 12)) && !host.slice(0, Math.max(0, host.length - d.length)).split(".").some((l) => PUBLIC_LABELS.test(l)));
@@ -380,6 +389,17 @@ export function findSupport(claim: string, idx: PageIndex, only?: number[], unit
   // figure, date and name of the claim is in the supporting unit itself; the page's title lends nothing but the owner's name.
   for (const k of ks) for (const s of idx.pages[k].sentences) {
     if (unitText !== undefined && s.text !== unitText) continue;
+    // A record unit (indexPages `one`: the person's facts, one per line) holds many facts: each figure of the claim is one of its
+    // figures (by value), each word of each name is in it, and its own years are its lines', not the claim's. The judge then reads it
+    // line by line.
+    if ((s as Unit & { record?: boolean }).record) {
+      const vals = new Set(s.hard.numbers.map((n) => n.split("|")[4]));
+      if (h.numbers.every((a) => vals.has(a.split("|")[4])) && h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).filter((r) => r.length).every((r) => r.every((w) => s.lower.has(w) || nameRe(w).test(s.text)))) {
+        const n = [...want].filter((w) => s.content.has(w)).length;
+        if (!best || n > best.n) best = { sentence: s.text, page: k, unit: s, n };
+      }
+      continue;
+    }
     if (!h.numbers.every((a) => s.hard.numbers.includes(a)) || !h.quant.every((q) => s.hard.quant.includes(q)) || !namesOk(h, s)) continue;
     // Round 5: a year the unit puts on its figures is the claim's too ("earned $5,000 a week in 2019" is not "earn $5,000 a week"),
     // and each of the claim's figures is not, on the unit, another name's (the name written nearest before it).
@@ -462,7 +482,9 @@ export async function judgeAll(judge: SupportJudge | null | undefined, claims: S
 // (the judge said yes to the unit itself); `label` is its page's title when the unit does not name the asked employer. drop: neither.
 export type Verdict = { how: "model" | "quote"; sentence: string; page: number; label?: string } | { how: "drop" };
 // `unit`: a page unit the code picked itself (never the model's words): a quote candidate, judged like any other.
-export interface Wanted { claim: string; judged?: string; pages?: number[]; fallback?: string | null; unit?: boolean }
+// `instruction`: the claim is the model's own instruction to the person (an advice turn): its being words to the reader is not held
+// against it (it still never asks them to pay, hand over details or contact anyone).
+export interface Wanted { claim: string; judged?: string; pages?: number[]; fallback?: string | null; unit?: boolean; instruction?: boolean }
 export const quoteOf = (v: { sentence: string; label?: string }) => `${v.label ? `${v.label}: ` : ""}"${v.sentence}"`;
 // At most 12 claims and about 6 KB of passages in one judge call, and at most 2 calls for one reply or one draft: the first asks the
 // model-worded claims and the quote candidates that have no claim; the second asks, for each claim the first refused, whether the
@@ -491,7 +513,7 @@ export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudg
     // When the claim is refused, the page's own sentence offered in its place is the one the draft cited, if there is one.
     alt[k] = q && f && q.unit.text !== f.unit.text && q.unit.quotable ? q : null;
     if (!f) continue;
-    const judged = it.judged ?? it.claim, asClaim = !it.unit && !!findSupport(it.claim, idx, it.pages) && !echoes(judged, f.sentence) && safeToShow(bare(judged));
+    const judged = it.judged ?? it.claim, asClaim = !it.unit && !!findSupport(it.claim, idx, it.pages) && !echoes(judged, f.sentence) && (it.instruction ? !ASKED_OF_THEM.test(bare(judged)) && !CONTACT.test(bare(judged)) : safeToShow(bare(judged)));
     if (asClaim) first.push({ k, c: { claim: bare(judged), source: f.unit.passage }, quote: false });
     else if (f.unit.quotable) first.push({ k, c: { claim: quoteClaim(f.sentence, idx, f.unit.lent), source: f.unit.passage }, quote: true });
   }
@@ -543,7 +565,7 @@ export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudg
 // sentence stands when it is one of code's own lines (`own`: word for word), a could-not-confirm sentence in the closed form
 // (`pure`), or the judge says yes to it (as a claim in its own words, or as a source's own unit said again); it is removed otherwise
 // (these paths have no numbered source to quote). A line that is only a link is code's, and stays.
-export async function keepSupported(reply: string, sources: (string | { text: string; title?: string })[], o: { judge?: SupportJudge | null; read?: (s: string) => string; pure?: (s: string) => boolean; own?: string[]; subjects?: string[]; ask?: string } = {}): Promise<{ text: string; removed: string[] }> {
+export async function keepSupported(reply: string, sources: (string | { text: string; title?: string; one?: boolean })[], o: { judge?: SupportJudge | null; read?: (s: string) => string; pure?: (s: string) => boolean; own?: string[]; instructions?: boolean; also?: { when: (s: string) => boolean; sources: { text: string; title?: string; one?: boolean }[] }; subjects?: string[]; ask?: string } = {}): Promise<{ text: string; removed: string[] }> {
   const idx = indexPages(sources.map((x) => typeof x === "string" ? { text: x } : x), o.read, o.subjects ?? [], { ask: o.ask });
   const norm = (x: string) => bare(readAlike(x)).toLowerCase().replace(/[.!?]+$/, "");
   const own = new Map((o.own ?? []).map((x) => [norm(x), x]));
@@ -556,9 +578,16 @@ export async function keepSupported(reply: string, sources: (string | { text: st
     // Round 4: one of code's own lines stands only when the sentence IS that line, and then the stored line itself is what is said.
     const mine = own.get(norm(x));
     if (mine !== undefined) { lines[a][b] = mine; return; }
-    wants.push({ claim: bare(x) }); at.push([a, b]);
+    wants.push({ claim: bare(x), ...(o.instructions ? { instruction: true } : {}) }); at.push([a, b]);
   }));
-  const vs = await decide(wants, idx, o.judge);
+  // Architect ruling 2026-11-14: o.also's sources (the person's not-confirmed facts) are read ONLY for a sentence o.also.when lets
+  // through (code checks its removal verb first); every other sentence is checked without them.
+  const withAlso = wants.map((w) => !!o.also && o.also.when(w.claim));
+  const idx2 = o.also && withAlso.some(Boolean) ? indexPages([...sources.map((x) => typeof x === "string" ? { text: x } : x), ...o.also.sources], o.read, o.subjects ?? [], { ask: o.ask }) : null;
+  const plainW = wants.filter((_, k) => !withAlso[k]), alsoW = wants.filter((_, k) => withAlso[k]);
+  const v1 = await decide(plainW, idx, o.judge), v2 = idx2 ? await decide(alsoW, idx2, o.judge) : [];
+  let n1 = 0, n2 = 0;
+  const vs = wants.map((_, k) => withAlso[k] ? v2[n2++] : v1[n1++]);
   const removed: string[] = [];
   // What was judged is what is emitted: on a "model" verdict the sentence as written (it was the judged claim); on a "quote" verdict
   // (the sentence is a source's own unit said again) the unit's own text; otherwise nothing.

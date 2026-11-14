@@ -399,8 +399,14 @@ export async function agentTurn(o: {
       // so advice that the record and the cited guide state passes, and a recombination is judged as the claim it is.
       const record = hypo ? [] : ownerConfirmedFacts((o.stores as any)?.profile?.facts ?? []).filter((f: any) => f?.kind !== "other" || /^gpa$/i.test(String(f?.name ?? "")))
         .map((f: any) => { const x = factText(f); return x ? `${String(f.kind ?? "fact")}: ${String(f.text ?? x).trim()}` : ""; }).filter(Boolean);
-      const recordSource = record.length ? [{ text: record.join("\n"), title: "The person's confirmed record:" }] : [];
-      const k = await keepSupported(result.reply, [...trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), ...recordSource, ...readSources], { judge, pure, own: codeLines, ask: o.message });
+      // Ruling (MP-1 C4): the record is ONE passage and one unit (support.ts indexPages `one`); the person's draft or withdrawn facts
+      // are a separate passage, read only for a sentence that tells them to remove or update that item (code checks the verb first).
+      const recordSource = record.length ? [{ text: record.join("\n"), title: "The person's confirmed record:", one: true }] : [];
+      const draftLines = hypo ? [] : (((o.stores as any)?.profile?.facts ?? []) as any[]).filter((f) => f && typeof f === "object" && (f.status !== "confirmed" || f.withdrawn_by_owner) && (f.kind !== "other" || /^gpa$/i.test(String(f.name ?? ""))))
+        .map((f) => `${String(f.kind ?? "fact")}: ${String(f.text ?? "").trim()}`).filter((x) => x.length > 8);
+      const REMOVE_OR_UPDATE = /^(?:you could\s+)?(?:(?:remove|drop|cut|delete|update|correct)\b|take\b.*\bout\b|leave\b.*\b(?:off|out)\b)/iu;
+      const k = await keepSupported(result.reply, [...trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), ...recordSource, ...readSources],
+        { judge, pure, own: codeLines, ask: o.message, instructions: true, ...(draftLines.length ? { also: { when: (s: string) => REMOVE_OR_UPDATE.test(s.trim()), sources: [{ text: draftLines.join("\n"), title: "Not confirmed by the person (do not state as fact):", one: true }] } } : {}) });
       result = { ...result, reply: letters(k.text) ? k.text : [trace.a.not_verified || NOT_CONFIRMED, ...links(k.text)].join("\n") };
     } else if (recs.length || shownPay.length) {
       // Round 3: EVERY sentence of a pay turn is checked (not only those with a number), against the postings' own records and the

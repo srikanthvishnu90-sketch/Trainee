@@ -1,5 +1,5 @@
 {
- "note": "D-081 (owner, 2026-11-13, about $9 for the release quality run): S3 on release candidate dae186707b8ce63d5c45b21d9883dcaf6a058867; measure the second parent",
+ "note": "D-081 (owner, 2026-11-13, about $9 for the release quality run): S3 on release candidate dae186707b8ce63d5c45b21d9883dcaf6a058867; measure the second parent. The workflow carries trunk's $80 cap (D-074).",
  "approval": "D-081",
  "action": "eval",
  "set": "dev",

@@ -49,7 +49,7 @@ Deno.test("D-038: every career call site reads the one default; no stray model i
   }
   const wf = read(".github/workflows/brain-eval.yml");
   eq((wf.match(/^\s*CAREER(_REPLY)?_MODEL:.*$/gm) ?? []).map((l) => l.trim()), ["CAREER_REPLY_MODEL: ${{ steps.req.outputs.model }}"], "brain-eval never pins a model; only the (allowlisted) request names one");
-  assert(/ANTHROPIC_API_KEY: \$\{\{ secrets\.ANTHROPIC_API_KEY \}\}/.test(wf) && /ANTHROPIC_EVAL_BUDGET_USD: "80"/.test(wf), "the Anthropic key and its own cap reach the run");
+  assert(/ANTHROPIC_API_KEY: \$\{\{ secrets\.ANTHROPIC_API_KEY \}\}/.test(wf) && /ANTHROPIC_EVAL_BUDGET_USD: "85"/.test(wf), "the Anthropic key and its own cap reach the run"); // Architect amendment (owner decision 2026-11-14, D-084: total raised to $85)
 });
 
 Deno.test("D-038: CAREER_REPLY_MODEL rolls back only to a listed, priced, keyed Claude model; any other id serves the default", () => {

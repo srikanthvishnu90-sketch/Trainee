@@ -744,6 +744,8 @@ export function careerTools(deps: {
       input_schema: obj(),
       run: async (_i, c) => {
         const rows = trackOf(c).rows, s = deps.situation;
+        // What this read of Trainee's own record could not read (career_brain.ts lookupOf, the own-record lookup).
+        if (c.turn) (c.turn as any).ownRecord = { unreadable: s?.unreadable ?? [] };
         if (!s) return { applications: rows };
         const theirs = s.tasks.filter((t) => ["application", "apply_request", "tracked"].includes(t.kind) && !(t.kind === "tracked" && rows.some((r: any) => sameCompany(r.company, t.company))))
           .map((t) => ({ company: t.company, role: t.title, state: t.state, stage: t.evidence.stage, blocker: t.blocker, confirmation_id: t.evidence.confirmation_id, reason: t.evidence.reason, since: t.since, source: t.source }));

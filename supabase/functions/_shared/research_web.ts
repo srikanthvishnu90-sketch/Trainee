@@ -19,6 +19,7 @@ import { isBlockedHost, isHttps, normalizeUrl } from "./research_sources.ts";
 import { NEVER_SEARCH_DOMAINS } from "./research_never.ts";
 import type { SearchHit, SearchOut, SearchPlan, SearchProvider } from "./research_search.ts";
 import { type WorkdayRead, workdayUrl } from "./workday_posting.ts";
+import { BOARD_SLUG, POSTING_UUID, refusedAddress } from "./posting_fetch.ts";
 
 type Env = { get(k: string): string | undefined };
 // Web research is on when the knowledge release flag is (D-060: CAREER_KNOWLEDGE is a release flag, rolled back with =off) and
@@ -143,12 +144,15 @@ export type PostingRecheck = { state: "open" | "closed" | "unknown"; board: stri
 export const READABLE_BOARDS = ["Greenhouse", "Lever", "SmartRecruiters", "Ashby", "Workday"] as const;
 export function postingJobId(url: string): { id: string; board: string } | null {
   let u: URL; try { u = new URL(url); } catch { return null; }
+  // Review of #775: https, no userinfo or port, a named host; a board name that is not a plain slug names no posting.
+  if (refusedAddress(u.href)) return null;
   const host = u.hostname.toLowerCase(), seg = u.pathname.split("/").filter(Boolean);
+  if (seg.length >= 2 && /^(jobs(\.eu)?\.lever\.co|jobs\.ashbyhq\.com|jobs\.smartrecruiters\.com)$/.test(host) && (!BOARD_SLUG.test(seg[0]) || (host !== "jobs.smartrecruiters.com" && !POSTING_UUID.test(seg[1])))) return null;
   if (/(^|\.)greenhouse\.io$/.test(host)) {
     const i = seg.indexOf("jobs"), board = (i > 0 ? seg[i - 1] : u.searchParams.get("for")) ?? "", id = i >= 0 ? seg[i + 1] : u.searchParams.get("token");
-    return board && id && /^\d+$/.test(id) && /^[A-Za-z0-9._-]+$/.test(board) ? { id: `greenhouse:${board}:${id}`, board: "Greenhouse" } : null;
+    return board && id && /^\d+$/.test(id) && BOARD_SLUG.test(board) ? { id: `greenhouse:${board}:${id}`, board: "Greenhouse" } : null;
   }
-  if (host === "jobs.lever.co" && seg.length >= 2 && /^[0-9a-f-]{8,}$/i.test(seg[1])) return { id: `lever:${seg[0]}:${seg[1].toLowerCase()}`, board: "Lever" };
+  if (/^jobs(\.eu)?\.lever\.co$/.test(host) && seg.length >= 2 && /^[0-9a-f-]{8,}$/i.test(seg[1])) return { id: `lever:${seg[0]}:${seg[1].toLowerCase()}`, board: "Lever" }; // the EU site too (link_check.ts asks its EU API)
   if (host === "jobs.ashbyhq.com" && seg.length >= 2 && /^[0-9a-f-]{8,}$/i.test(seg[1])) return { id: `ashby:${seg[0]}:${seg[1].toLowerCase()}`, board: "Ashby" };
   if (host === "jobs.smartrecruiters.com" && seg.length >= 2) { const id = /^(\d+)/.exec(seg[1])?.[1]; return id ? { id: `smartrecruiters:${seg[0]}:${id}`, board: "SmartRecruiters" } : null; }
   const wd = workdayUrl(url);

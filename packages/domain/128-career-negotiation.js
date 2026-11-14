@@ -281,7 +281,8 @@ const CareerNegotiation = (() => {
     const fmt = typeof opts.money === "function" ? opts.money : null;
     const usd = (n, field) => fmt ? fmt(n, field) : "$" + Math.round(n).toLocaleString("en-US");
     const o = offer || {};
-    const role = o.role || "role";
+    // 2026-11-13: a title that already ends in "role" is not doubled, and an offer with no title is not "the role role".
+    const role = String(o.role || "role").replace(/\s+role$/i, "");
     const competing = (opts.competing || []).filter((c) => c && c.said && Number.isFinite(c.base));
     const best = competing.slice().sort((a, b) => b.base - a.base)[0] || null;
     const bench = opts.benchmark && Number.isFinite(opts.benchmark.median) ? opts.benchmark : null;
@@ -302,11 +303,11 @@ const CareerNegotiation = (() => {
     const deadline = opts.deadline && opts.deadline.text ? String(opts.deadline.text) : null;
     const stated = [base != null ? `a base of ${usd(base)}` : null, o.signing != null ? `a ${usd(o.signing, "signing")} signing bonus` : null].filter(Boolean).join(" and ");
     const email = [
-      `Subject: ${role[0].toUpperCase() + role.slice(1)} offer${o.company ? `, ${o.company}` : ""}`,
+      `Subject: ${o.role ? role[0].toUpperCase() + role.slice(1) : "Your"} offer${o.company ? `, ${o.company}` : ""}`,
       "",
       "Hi,",
       "",
-      `Thank you for the offer for the ${role} role${stated ? `, with ${stated}` : ""}. Before I decide, I'd like to talk about the pay.`,
+      `Thank you for the offer${o.role ? ` for the ${role} role` : ""}${stated ? `, with ${stated}` : ""}. Before I decide, I'd like to talk about the pay.`,
       ...because,
       `${ask} ${fallback}`,
       deadline ? `I'll get back to you by ${deadline}.` : null,

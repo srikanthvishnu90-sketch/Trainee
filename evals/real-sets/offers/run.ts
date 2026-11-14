@@ -72,7 +72,7 @@ for (let i = 0; i < figs.length; i++) {
   const ma = `${A.employer} offered me ${said(A, A.lo)} base as ${an(A.role)} ${A.role} in ${A.city}`;
   const mb = `${B.employer} offered me ${said(B, B.hi)} base and a $10,000 signing bonus as ${an(B.role)} ${B.role} in ${B.city}`;
   const notes: string[] = [];
-  let state: any = null, last: any = null;
+  let state: any = null, last: any = null, shownOk = true;
   // The asker answers one follow-up question the way a person would (the city, or the job title), then asks to compare.
   for (const [m, f] of [[ma, A], [mb, B], ["compare my offers", null]] as [string, Fig | null][]) {
     last = await offerChatTurn({ message: m, state, now: NOW, postings: null }); state = last.state;
@@ -82,12 +82,19 @@ for (let i = 0; i < figs.length; i++) {
       last = await offerChatTurn({ message: ans, state, now: NOW, postings: null }); state = last.state;
       if (!last.answer || last.answer.status === "ask") notes.push(`not kept: "${m}" was asked "${q.split("\n")[0].replace(/^.*?(To place it)/, "$1")}", and the answer "${ans}" ${last.answer ? "was asked again" : "was not taken"}`);
     }
+    // Architect amendment (owner decision 2026-11-13, D-078: confirm before compare): Trainee shows its reading of each offer
+    // and compares nothing until the person's plain yes to that reading. The asker reads it and says "yes" (simulated); a
+    // reading that does not show the employer it was told is a note (the case fails), so the step is checked, not skipped.
+    if (f && last.answer?.intent === "career_offer_confirm") {
+      if (!String(last.answer.reply).includes(`Company: ${f.employer}`)) shownOk = false, notes.push(`the reading shown does not name ${f.employer}: ${String(last.answer.reply).split("\n").slice(0, 3).join(" | ")}`);
+      last = await offerChatTurn({ message: "yes", state, now: NOW, postings: null, lastReply: last.answer.reply }); state = last.state;
+    } else if (f && last.answer?.status !== "unsettled") shownOk = false, notes.push(`no reading was shown for "${m}" before it was used (status ${last.answer?.status})`);
   }
   const cmp = last?.answer?.comparison;
   const row = (o: any, k2: string) => o?.rows?.find((r: any) => r.k === k2);
   const ba = baseOf(A, A.lo), bb = baseOf(B, B.hi);
   const want = (f: Fig, n: number, base: number) => f.currency !== "USD" ? null : hourly(f) ? `$${n} an hour x 2,080 hours = ${usd(base)} a year` : usd(base);
-  let compare = !!cmp && cmp.offers?.length === 2;
+  let compare = !!cmp && cmp.offers?.length === 2 && shownOk;
   if (compare) {
     const [oa, ob] = cmp.offers;
     const checks: [boolean, string][] = [

@@ -110,12 +110,15 @@ Deno.test("design/3 snapshot: the fixture renders the same bytes every time, and
   const h = (x: string) => crypto.createHash("sha256").update(x).digest("hex");
   eq([h(ops(a.pdf)), h(part("word/document.xml")), h(part("word/styles.xml"))], [
     // Architect design amendment 2026-11-10 (#673, D-007 confirmed skills): the Skills line's order moved; nothing else.
-    "bb6bfcc5eef6d948015098c379d0542c0ffbca0e321079f8b95d4d811226a893",
-    "ba5a4a59c33c89a13da0f68b1e1f56abec3ac8310f531e725d2a6ae44d7786ef",
+    // Architect amendment (owner decision 2026-11-13, D-078: confirm before compare): Statistics, Probability, Data Structures
+    // and Algorithms were read from the coursework line, never stated as skills, so they wait for the person's yes; the Skills
+    // line is shorter and nothing else moved (styles.xml is unchanged).
+    "accab43e3461efa6577cef432452377d706e5b4816e0736131f14cfeb00e67e5",
+    "d896f1c957f23b169e8e1c8bc3e8e932395ed71a5ee7abda987781a2af17e336",
     "f38c7e3b4664373bf51bc36dc19e2b3f9b4895497f133c0f096a5f760358a35d",
   ], "the layout snapshot");
   eq(a.lines, [
-    "Alex Testcase", "alex.testcase@example.test | Chicago, IL", "SKILLS", "Python, React, Kubernetes, PostgreSQL, Statistics, Probability, Data Structures, Algorithms",
+    "Alex Testcase", "alex.testcase@example.test | Chicago, IL", "SKILLS", "Python, React, Kubernetes, PostgreSQL", // Architect amendment (D-078): was "Python, React, Kubernetes, PostgreSQL, Statistics, Probability, Data Structures, Algorithms"
     "PROJECTS", "DeployBoard (TEST project)", "• Built DeployBoard in Go to deploy containerised apps on Kubernetes, deployed on AWS EKS for 12 student teams",
     "EXPERIENCE", "Software Engineering Intern, TEST Systems Inc, June 2025 - August 2025",
     "• Built a reporting dashboard in React and Python used by 200 internal users",

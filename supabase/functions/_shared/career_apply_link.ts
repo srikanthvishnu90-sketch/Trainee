@@ -116,10 +116,19 @@ export async function postingForLink(o: { ask: LinkAsk; db: PostingsDb; fetchFee
   let onFile: Posting | null = null;
   try { onFile = await o.db.get(ask.key) ?? await o.db.get(`${ask.family}:${ask.board.toLowerCase()}:${ask.atsId}`); } catch { onFile = null; }
   if (onFile && !onFile.closed_at) return { kind: "found", posting: onFile, fetched: false };
-  let read: FeedPosting[];
-  try { read = postingsOf(await o.fetchFeed(board)); }
-  catch (e) { return onFile ? { kind: "closed", posting: onFile } : { kind: "unreadable", board, why: String((e as Error)?.message ?? e) }; }
-  const hit = read.find((p) => sameKey(p.job_id, ask.key) || sameKey(String(p.ats_id ?? ""), ask.atsId));
+  const named = (p: FeedPosting) => sameKey(p.job_id, ask.key) || sameKey(String(p.ats_id ?? ""), ask.atsId);
+  // Review of #775, round 5: the posting's own API first, where the feed reader has one (career_ingest.ts boardFetchFeed
+  // `one`); the whole board feed when that does not answer with this posting.
+  let read: FeedPosting[] | null = null;
+  const one = (o.fetchFeed as { one?: (b: Board, atsId: string) => Promise<FeedPosting | null> }).one;
+  if (typeof one === "function") { try { const p = await one(board, ask.atsId); if (p && named(p)) read = [p]; } catch { /* the feed, below */ } }
+  // A read that failed (too large, refused, an error) is NOT READ: never "closed". The state on file is from an earlier read,
+  // and is not handed over as a fresh answer.
+  if (!read) {
+    try { read = postingsOf(await o.fetchFeed(board)); }
+    catch (e) { return { kind: "unreadable", board, why: String((e as Error)?.message ?? e) }; }
+  }
+  const hit = read.find(named);
   if (!hit) return onFile ? { kind: "closed", posting: onFile } : { kind: "not_on_board", board };
   const at = new Date(o.now).toISOString();
   const posting: Posting = {

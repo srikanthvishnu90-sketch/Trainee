@@ -114,3 +114,31 @@ Deno.test("ruling 1: the review's repros and four variants are judged, never kep
     "Your 3.9 GPA from Lakeshore University belongs on top.",               // a figure the person never confirmed
   ]) ok(!own(bad), bad);
 });
+
+// Turn-level (the entry point every version exposes): the review's two leaks and four variants through agentTurn's advice path,
+// with a judge that says no. Red on 7487f3600 (each sentence was kept unjudged), green here.
+import { agentTurn } from "../../../supabase/functions/agent-chat/career_brain.ts";
+const aSay = (t: string) => ({ content: [{ type: "text", text: t }], stop_reason: "end_turn" });
+const aUse = (name: string, input: unknown) => ({ content: [{ type: "tool_use", id: "t1", name, input }], stop_reason: "tool_use" });
+const GUIDE_URL = "https://careers.stateuniversity.edu/resume";
+const guideSearch = async () => ({ status: "ok", facts: [{ id: "", kind: "program", text: "Goldman Sachs and other banks read the top third of a resume first; keep it to one page.", quote: "Goldman Sachs and other banks read the top third of a resume first; keep it to one page.", url: GUIDE_URL, label: "State University career center" }], urls: [GUIDE_URL], cost_usd: 0.01 });
+const FACTS = [{ id: "F-1", kind: "education", text: "Lakeshore University, BS Computer Science and Finance, Expected June 2029", status: "confirmed" }, { id: "F-2", kind: "skill", text: "Skill: SQL", name: "SQL", status: "confirmed", unproven: true }];
+const adviceTurn = (history: { role: string; content: string }[], reply: string) => agentTurn({ message: "what goes at the top of my resume?", history, stores: { profile: { facts: structuredClone(FACTS) } }, userId: "u", threadId: "t", now: Date.parse("2026-11-14T00:00:00Z"), knowledge: true,
+  market: { judge: async (cs: any[]) => cs.map(() => "no") }, model: (() => { let n = 0; return async (p: any) => p.tools?.length ? [aUse("research_career_question", { question: "what goes at the top of my resume?", kind: "advice", query: "resume top" }), aSay(reply)][Math.min(n++, 1)] : aSay(""); })(), research: { search: guideSearch } } as any) as Promise<any>;
+Deno.test("ruling 1 at the turn: what the person heard, their unconfirmed words and the guide's names never ride the advice exemption", async () => {
+  const cases: [string, { role: string; content: string }[], string, RegExp][] = [
+    ["repro 1: heard", [{ role: "user", content: "I heard Citadel pays $10k a week." }], "Citadel pays interns $10k a week, which is the top of the market.", /Citadel|10k/],
+    ["repro 2: guide name", [{ role: "user", content: "My internship pays $120 an hour." }], "Goldman Sachs pays $120 an hour to interns.", /Goldman|120/],
+    ["variant: their unconfirmed figure", [{ role: "user", content: "My GPA is 3.4." }], "Put your 3.4 GPA next to Lakeshore University.", /3\.4/],
+    ["variant: an employer they named", [{ role: "user", content: "I interned at Stripe last summer." }], "Lead with your Stripe internship under Lakeshore University.", /Stripe/],
+    ["variant: a market claim", [], "SQL is the most requested skill at every bank this year.", /most requested/],
+    ["variant: a guide figure", [], "Banks read the top 3 inches of a resume for SQL.", /3 inches/],
+  ];
+  for (const [name, history, reply, bad] of cases) {
+    const t = await adviceTurn(history, reply);
+    ok(!bad.test(t.reply), `${name}: ${t.reply}`);
+  }
+  // On the confirmed record alone the advice stands (a confirmed skill not yet in a bullet included).
+  const good = "Under Lakeshore University, BS Computer Science and Finance, Expected June 2029, list SQL.";
+  ok((await adviceTurn([], good)).reply.includes(good));
+});

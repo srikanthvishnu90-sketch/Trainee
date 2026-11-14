@@ -18,7 +18,7 @@ import { enforceResearchReply, fallbackVerdict, stripUnseenLinks } from "../_sha
 import { type AdviceResult, enforceAdviceReply } from "../_shared/agent/research/advice.ts";
 import { enforceMarketReply, enforceMarketReplySupported, FAIL_CLOSED, type MarketDeps, type MarketResult, pureUnconfirmed } from "../_shared/agent/research/market.ts";
 import { keepSupported } from "../_shared/agent/research/support.ts";
-import { confirmedFacts, factText } from "../_shared/essay_draft.ts";
+import { factText, ownerConfirmedFacts } from "../_shared/essay_draft.ts";
 import { NOT_CONFIRMED } from "../_shared/research_reply.ts";
 import { type CompanyResult, enforceCompanyReply, enforceCompanyReplySupported } from "../_shared/agent/research/company.ts";
 import { enforceFollowupAsk } from "../_shared/followup_draft.ts";
@@ -386,7 +386,8 @@ export async function agentTurn(o: {
       if (core.length < 20 || core === line.toLowerCase()) continue;
       result = { ...result, reply: result.reply!.split(/\n/).map((l) => l.split(/(?<=[.!?])\s+/).map((x) => x.toLowerCase().includes(core) ? line : x).join(" ")).join("\n") };
     }
-    const confirmed = hypo ? [] : confirmedFacts((o.stores as any)?.profile?.facts ?? []).map(factText).filter(Boolean).map((text: string) => ({ text, title: "What the person confirmed" }));
+    // (2026-11-14: every fact the person confirmed, a confirmed skill not yet evidenced in a bullet included: "Skill: SQL" is theirs.)
+    const confirmed = hypo ? [] : ownerConfirmedFacts((o.stores as any)?.profile?.facts ?? []).map(factText).filter(Boolean).map((text: string) => ({ text, title: "What the person confirmed" }));
     if (trace.r) {
       // Code's own lines: the verdict, the first action, and the fallback paragraph code writes (its last sentence carries the File link).
       const own = [...codeLines, trace.r.verdict.now, trace.r.verdict.later, trace.r.short?.now ?? "", trace.r.short?.later ?? "", trace.r.short?.act ?? "", trace.r.first_action, fallbackVerdict(trace.r)].filter(Boolean).flatMap((x) => x.split(/(?<=[.!?])\s+(?!https?:)/));

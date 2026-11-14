@@ -554,8 +554,11 @@ export function adviceOfTheirOwn(confirmed: string[]): (s: string) => boolean {
   // The organisations of the record: the name a fact about a job or a venture leads with ("Pixelforge, Founder ...").
   const orgs = confirmed.filter((f) => ROLE_IN_FACT.test(f)).map((f) => f.split(/[,;:(]/)[0].trim()).filter((x) => x.length > 1);
   const theirs = numbersIn(record);
+  // A sentence that speaks of the world (employers, the market, what is usual or most) is a claim, never advice of their own: it is
+  // judged. This list only narrows the exemption; it never lets a sentence through.
+  const WORLD = /(?<![\p{L}])(?:most|least|every|all|always|never|best|worst|highest|lowest|average|median|typical(?:ly)?|usual(?:ly)?|recruiters?|employers?|compan(?:y|ies)|banks?|firms?|funds?|market|industry|demand|hiring|hires?|pays?|paid|salary|salaries|wages?|this year|last year|next year|percent)(?![\p{L}])/iu;
   return (s: string) => { const ns = numbersIn(s), names = specifics(s).names;
-    return ns.every((n) => theirs.some((y) => numEq(y, n))) && names.every((n) => has(record, n) && !orgs.some((o) => has(o, n)))
+    return !WORLD.test(s) && ns.every((n) => theirs.some((y) => numEq(y, n))) && names.every((n) => has(record, n) && !orgs.some((o) => has(o, n)))
       && (ns.length > 0 || names.length > 0); };
 }
 export async function keepSupported(reply: string, sources: (string | { text: string; title?: string })[], o: { judge?: SupportJudge | null; read?: (s: string) => string; pure?: (s: string) => boolean; own?: string[]; advice?: (s: string) => boolean; subjects?: string[]; ask?: string } = {}): Promise<{ text: string; removed: string[] }> {

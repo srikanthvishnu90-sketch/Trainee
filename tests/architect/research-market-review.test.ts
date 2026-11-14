@@ -37,7 +37,9 @@ Deno.test("review: a claim stands only on a quote that says it", async () => {
   const texts = r.points.map((p) => p.text);
   ok(!texts.some((t) => /solar panel/i.test(t)), `another subject on the same figure is never shown: ${JSON.stringify(texts)}`);
   ok(texts.every((t) => t === "Acme Energy installed 41,000 home batteries." || t === "Battery pack prices fell 20% in 2024." || /^".+"$/.test(t)), JSON.stringify(texts));
-  ok(texts.includes("Acme Energy installed 41,000 home batteries.") && texts.includes("Battery pack prices fell 20% in 2024."), `the true lines stand: ${JSON.stringify(texts)}`);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; fix "a refused figure sentence becomes the kept
+  // quote"): the Acme line that drops its page's year stands as that page's own sentence, in quotation marks.
+  ok(texts.includes('"Acme Energy installed 41,000 home batteries in 2025."') && texts.includes("Battery pack prices fell 20% in 2024."), `the true lines stand: ${JSON.stringify(texts)}`);
   ok(!agrees("Battery pack prices fell 25% in 2024", "Battery pack prices fell 20% in 2024", "Battery pack prices fell 20% in 2024 according to the survey."), "a figure the quote does not state");
   ok(agrees("The national annual mean wage is $150,000.", "Annual mean wage: $150,000", "15-1252 Software Developers. National estimates. Annual mean wage: $150,000 (synthetic fixture)."), "a heading just before the quote counts");
 });
@@ -55,7 +57,8 @@ Deno.test("review: an inline sentence's figures come from the points its own cit
   // words; each figure is said as its own page's sentence, in quotation marks, with that page's number. Still: $180,000 is never
   // source 2's, the uncited sentence is dropped, and each figure keeps its own source.
   const body = async (s: string) => (await enforceMarketReplySupported(s, r, [], { judge: testSupportJudge, ask: "salary for a software developer in Seattle?" })).split("\n\n")[0];
-  const KEPT = '"Seattle-Tacoma-Bellevue, WA wage estimates 15-1252 Software Developers annual mean wage $180,000 in the Seattle-Tacoma-Bellevue metro area (synthetic fixture)." [1]. "Annual mean wage: $150,000 (synthetic fixture)." [2].';
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; fix "a page title ends its own line").
+  const KEPT = '"15-1252 Software Developers annual mean wage $180,000 in the Seattle-Tacoma-Bellevue metro area (synthetic fixture)." [1]. "Annual mean wage: $150,000 (synthetic fixture)." [2].';
   eq(await body("The national annual mean wage is $180,000 [2]. Seattle developers average $180,000 [1]."), KEPT, "$180,000 is source 1's, never source 2's");
   eq(await body("Pay is rising fast everywhere. Seattle developers average $180,000 [1]."), KEPT, "an uncited sentence is dropped");
   eq(await body("Seattle averages $180,000 [1], against $150,000 nationally [2]."), KEPT, "each figure with its own source stands");

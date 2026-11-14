@@ -282,6 +282,9 @@ const nameKey = (s: unknown) => String(s ?? "").normalize("NFKD").replace(/\p{M}
 const plainName = (v: unknown) => nameKey(String(v ?? "").trim());
 // "Maya" names "Maya Chen"; "Maya Chen" names "Maya Chen" (and "Maya Chen-Li"), never "Mayan Chen".
 const namedAs = (rowName: unknown, k: string) => { const n = nameKey(rowName); return !!k && (n === k || n.startsWith(`${k} `)); };
+// One application of Trainee's own record as code states it (career_brain.ts coverageLine): employer, role, stage or state, date.
+const ownLine = (a: any) => { const when = String(a.applied_at ?? a.since ?? "").slice(0, 10), stage = a.stage || a.state;
+  return `${a.company || "an employer not named"}${a.role ? ` (${a.role})` : ""}${stage ? `, ${stage}` : ""}${/^\d{4}-\d\d-\d\d$/.test(when) ? `, ${when}` : ""}`; };
 const trackOf = (c: ToolCtx) => ((c.state.trackStore as any) ??= CareerTrack.createMemoryStore([]));
 
 // WO-028: tailoring needs the posting by id (career_postings), where personas are kept, the private resume store and
@@ -744,11 +747,13 @@ export function careerTools(deps: {
       input_schema: obj(),
       run: async (_i, c) => {
         const rows = trackOf(c).rows, s = deps.situation;
-        // What this read of Trainee's own record could not read (career_brain.ts lookupOf, the own-record lookup).
-        if (c.turn) (c.turn as any).ownRecord = { unreadable: s?.unreadable ?? [] };
-        if (!s) return { applications: rows };
-        const theirs = s.tasks.filter((t) => ["application", "apply_request", "tracked"].includes(t.kind) && !(t.kind === "tracked" && rows.some((r: any) => sameCompany(r.company, t.company))))
+        const theirs = !s ? [] : s.tasks.filter((t) => ["application", "apply_request", "tracked"].includes(t.kind) && !(t.kind === "tracked" && rows.some((r: any) => sameCompany(r.company, t.company))))
           .map((t) => ({ company: t.company, role: t.title, state: t.state, stage: t.evidence.stage, blocker: t.blocker, confirmation_id: t.evidence.confirmation_id, reason: t.evidence.reason, since: t.since, source: t.source }));
+        // What this read of Trainee's own record found and could not read (career_brain.ts lookupOf, the own-record lookup): the
+        // situation not read this turn (null: its read failed) leaves the queue and the other threads unread, so the read is partial.
+        if (c.turn) (c.turn as any).ownRecord = { unreadable: s ? s.unreadable : ["the apply queue and the other conversations' applications"],
+          found: [...rows, ...theirs].slice(0, 12).map((a: any) => ownLine(a)).concat(rows.length + theirs.length > 12 ? [`and ${rows.length + theirs.length - 12} more`] : []) };
+        if (!s) return { applications: rows, unreadable: ["situation"] };
         return { applications: [...rows, ...theirs], unreadable: s.unreadable };
       },
     },

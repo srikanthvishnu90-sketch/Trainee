@@ -713,13 +713,14 @@ export interface Look { tried: boolean; ok: boolean; status: "none" | "failed" |
 // the same turn decides. It never counts as a mail check (agentTurn still runs read_application_mail, processCheck still asks).
 const OWN_TOOLS = ["list_applications"];
 export const OWN_RECORD_NOTE = "That is Trainee's own record; your email was not checked for this answer.";
-export function lookupOf(calls: { name: string; ok: boolean }[], record?: LookRecord | null, ownRecord?: { unreadable?: string[] } | null): Look {
+export function lookupOf(calls: { name: string; ok: boolean }[], record?: LookRecord | null, ownRecord?: { unreadable?: string[]; found?: string[] } | null): Look {
   const mine = calls.filter((c) => LOOKUP_TOOLS.includes(c.name)), ran = mine.some((c) => c.ok);
   const own = mine.length ? [] : calls.filter((c) => OWN_TOOLS.includes(c.name));
   if (own.length) {
-    const read = own.some((c) => c.ok), unread = read ? [...new Set(ownRecord?.unreadable ?? [])] : [];
-    const st = !read ? "failed" : unread.length ? "partial" : "complete";
-    return { tried: true, ok: st === "complete", status: st, what: unread, read: read ? ["Trainee's saved record"] : [], found: [], nomail: false, connect: null, changes: [], researched: [], own: true };
+    // What it found is code's to state (ownRecord.found, from its rows); a lookup that left no record of what it read backs nothing.
+    const read = own.some((c) => c.ok) && !!ownRecord, unread = read ? [...new Set(ownRecord?.unreadable ?? [])] : [];
+    const st = !own.some((c) => c.ok) ? "failed" : !ownRecord ? "unknown" : unread.length ? "partial" : "complete";
+    return { tried: true, ok: st === "complete", status: st, what: unread, read: read ? ["Trainee's saved record"] : [], found: read ? ownRecord?.found ?? [] : [], nomail: false, connect: null, changes: [], researched: [], own: true };
   }
   const status = !mine.length ? "none" : !ran ? "failed" : !record ? "unknown" : record.status === "complete" || record.status === "partial" ? record.status : "failed";
   return { tried: mine.length > 0, ok: status === "complete", status, what: ran && record && status !== "complete" ? record.could_not_read : [], read: ran ? record?.read ?? [] : [], found: ran ? record?.found ?? [] : [], nomail: ran && !!record?.nomail, connect: ran ? record?.connect ?? null : null, changes: ran ? record?.changes ?? [] : [], researched: ran ? record?.researched ?? [] : [] };
@@ -803,6 +804,12 @@ export function coverageLine(look: Look): string {
 }
 function coverageCore(look: Look): string {
   if (!look.tried) return NOT_CHECKED;
+  // Trainee's own record only (list_applications): what its rows hold, and always that the email was not checked.
+  if (look.own && (look.status === "complete" || look.status === "partial")) {
+    const n = look.found.filter((f) => !/^and \d+ more$/.test(f)).length + Number(/^and (\d+) more$/.exec(look.found.at(-1) ?? "")?.[1] ?? 0);
+    if (look.status === "partial") return `I read Trainee's saved record but couldn't read ${listed(look.what)}, so whether you've applied is unconfirmed.${look.found.length ? ` Found so far, at least: ${look.found.join("; ")}.` : ""} ${OWN_RECORD_NOTE}`;
+    return `${n ? `Trainee's saved record shows ${n} application${n === 1 ? "" : "s"}: ${look.found.join("; ")}.` : "Trainee's saved record shows no applications of yours."} ${OWN_RECORD_NOTE}`;
+  }
   if (look.status === "unknown" || (look.status === "failed" && !look.what.length)) return NOT_READ;
   const n = look.found.filter((f) => !/^and \d+ more$/.test(f)).length + Number(/^and (\d+) more$/.exec(look.found.at(-1) ?? "")?.[1] ?? 0);
   if (look.status === "complete") {
@@ -862,8 +869,10 @@ export function heldReply(reply: string, look: Look, strict = true): string {
 // it read backs nothing: a denial after it is held.
 export function applicationsEnforced(reply: string, look: Look, o: { message: string; codeRan?: boolean }): string {
   const asked = statusQuestion(o.message), speaks = statusLike(reply), strict = asked || (look.tried && !o.codeRan);
-  // Trainee's own record was read in full by the model's own lookup: its answer stands, saying its basis (the email unread).
-  if (look.own && look.ok) return (asked || speaks) && !/\bemail\s+(?:was|wasn't|was\s+not|isn't|is\s+not)\s+(?:not\s+)?checked\b/i.test(reply) ? `${reply.trimEnd()}\n\n${OWN_RECORD_NOTE}` : reply;
+  // Review of #845: Trainee's own record (list_applications) gets the same claim check as any lookup: when the turn is about their
+  // applications, the status is code's statement from its rows, with the line that the email was not checked (code's, always), and
+  // no sentence of the model's about status, mail or Gmail stays. A turn that only used the list for something else is untouched.
+  if (look.own) return asked || speaks || saysNoApplications(reply) ? heldReply(reply, look, true) : reply;
   if (look.status === "none" || look.status === "unknown") return (look.status === "none" && asked) || saysNoApplications(reply) ? heldReply(reply, look, asked || look.status === "unknown") : reply;
   if (!asked && !speaks && o.codeRan) return reply;
   return heldReply(reply, look, strict);

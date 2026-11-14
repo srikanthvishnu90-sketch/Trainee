@@ -79,7 +79,8 @@ export function readableText(html: string): { title: string; text: string } {
   const og = h.match(/<meta[^>]+property=["']og:title["'][^>]*content=["']([^"']+)["']/i)?.[1];
   const title = decode((og ?? h.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "").replace(/\s+/g, " ").trim()).slice(0, 200);
   const text = decode(h.replace(/<(script|style|noscript|svg|template)[\s\S]*?<\/\1>/gi, " ").replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<(br|\/p|\/div|\/li|\/h\d|\/tr)[^>]*>/gi, "\n").replace(/<[^>]+>/g, " ")).replace(/[ \t\f\r]+/g, " ").replace(/\n\s*/g, "\n").trim();
+    // 2026-11-14: the title ends its own line ("Careers at Zentrafin" was glued onto "Zentrafin hires ...": one sentence, two names).
+    .replace(/<(br|\/p|\/div|\/li|\/h\d|\/tr|\/title)[^>]*>/gi, "\n").replace(/<[^>]+>/g, " ")).replace(/[ \t\f\r]+/g, " ").replace(/\n\s*/g, "\n").trim();
   return { title, text };
 }
 

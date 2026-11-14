@@ -528,7 +528,7 @@ export async function researchMarket(i: { question: string; format: "inline" | "
     const keys: unknown[] = [], wants: Wanted[] = [];
     for (const x of arr(d.summary, 5)) { keys.push(x); wants.push({ claim: squash(x?.text), pages: [pidx(pageOf(x?.url))], fallback: squash(x?.quote) }); }
     const os = arr(d.comparison?.options, 4).map(squash).filter((o) => o && o.length <= 60 && linkFree(o));
-    for (const r of arr(d.comparison?.rows, 10)) arr(r?.cells, 4).forEach((c, j) => { if (c && typeof c === "object" && os[j]) { keys.push(c); wants.push({ claim: `${os[j]} ${squash(c.value)}`, judged: `${os[j]}, ${squash(r?.label)}: ${squash(c.value)}`, pages: [pidx(pageOf(c.url))] }); } });
+    for (const r of arr(d.comparison?.rows, 10)) arr(r?.cells, 4).forEach((c, j) => { if (c && typeof c === "object" && os[j]) { keys.push(c); wants.push({ claim: `${os[j]} is ${squash(c.value)}` /* 2026-11-14: a word between, so a capitalised value is not read as part of the column's name ("Globex Power Home") */, judged: `${os[j]}, ${squash(r?.label)}: ${squash(c.value)}`, pages: [pidx(pageOf(c.url))] }); } });
     for (const x of [...arr(d.conditions, 6), ...arr(d.risks, 6)]) { const ks = arr(x?.urls, 4).map((u) => pidx(pageOf(u))).filter((k) => k >= 0); keys.push(x); wants.push({ claim: squash(x?.text), pages: ks.length ? ks : [-1] }); }
     keys.push(THESIS); wants.push({ claim: squash(d.thesis) });
     // Round 3: a page unit code picks itself (pageSentences, below) is a quote candidate too, and is judged in this same call: at
@@ -552,7 +552,10 @@ export async function researchMarket(i: { question: string; format: "inline" | "
     // D-073's measure still holds for a line in the model's words: at least 60% of its words on its page; else the page's sentence.
     const model = !!hit && hit.how === "model" && wordsOnPages(t, [pages[hit.page]]) >= ON_PAGES_SHARE;
     // Round 4: a page's unit shown in its own words must say something: a heading ("Form 10-K Hollow Oak Logistics Inc.") is no line.
-    if (!hit || (!model && (o.quote === false || !hasPredicate(hit.sentence, pages[hit.page].title)))) { dropped++; auditLine(audit, { ok: false, why: why || "unsupported" }, section, { text, quote: x?.quote }); return null; }
+    // 2026-11-14: so must a line in the model's words, and the unit it stands on: a heading or a document's title ("Form 10-K Hollow
+    // Oak Logistics Inc.") is not a claim, however it is worded.
+    const said = !!hit && hasPredicate(hit.sentence, pages[hit.page].title) && (!model || hasPredicate(t, pages[hit.page].title));
+    if (!hit || !said || (!model && o.quote === false)) { dropped++; auditLine(audit, { ok: false, why: why || "unsupported" }, section, { text, quote: x?.quote }); return null; }
     const out = model ? t : quoteOf(hit);
     auditLine(audit, model ? { ok: true } : { ok: true, via: "quote" }, section);
     srcOf.set(out, hit.sentence);
@@ -877,8 +880,10 @@ export async function enforceMarketReplySupported(reply: string, r: MarketResult
   const kept: Cited[] = [...r.points, ...(r.comparison?.rows ?? []).flatMap((x) => x.cells.flatMap((c) => c ? [{ text: c.value, cite: c.cite }] : [])), ...r.conditions, ...r.risks];
   const kindOf = (n: number) => r.sources.find((x) => x.n === n)?.kind;
   const tag = (text: string, cite: number[]) => !cite.length || cite.some((c) => { const k = kindOf(c); return !k || k === "official" || k === "reported"; }) || UNVERIFIED_LABEL.test(text) ? "" : cite.every((n) => kindOf(n) === "anecdote") ? " (anecdote)" : " (self-reported)";
-  const show = (text: string, cite: number[]) => inline ? `${text.replace(/[.]?$/, "")}${tag(text, cite)} ${cite.map((n) => `[${n}]`).join("")}.` : text;
-  const wants: Wanted[] = [], rows: (string | number)[][] = [];
+  // 2026-11-14: a quoted unit already ends its sentence ('"… at Citadel."'): in the messages layout (whose numbers are taken out) no
+  // second stop is added after it.
+  const show = (text: string, cite: number[]) => inline ? `${text.replace(/[.]?$/, "")}${tag(text, cite)} ${cite.map((n) => `[${n}]`).join("")}${r.layout === "messages" && /[.!?]["”]$/.test(text) && !tag(text, cite) ? "" : "."}` : text;
+  const wants: Wanted[] = [], rows: (string | number)[][] = [], cited: number[][] = [];
   for (const para of r.layout === "messages" && inline ? reply.split(/\n\s*\n/) : [reply]) {
     const row: (string | number)[] = [];
     for (const s of pieces(para)) {
@@ -887,6 +892,7 @@ export async function enforceMarketReplySupported(reply: string, r: MarketResult
       if (pureUnconfirmed(s, ask) || shownWhole(s)) { row.push(bare(s)); continue; }
       const cs = [...s.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1])).filter((n) => n >= 1 && n <= max).map((n) => sup.pageOfN[n - 1]).filter((k) => k >= 0);
       const cites = /\[\d+\]/.test(s);
+      cited[wants.length] = [...s.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1])).filter((n) => n >= 1 && n <= max);
       row.push(wants.length); wants.push({ claim: bare(s), pages: cites ? (cs.length ? cs : [-1]) : sup.pageOfN.length ? sup.pageOfN : [-1] });
     }
     rows.push(row);
@@ -896,7 +902,17 @@ export async function enforceMarketReplySupported(reply: string, r: MarketResult
   const body = rows.map((row) => row.map((x) => {
     if (typeof x === "string") return x;
     const v = vs[x], n = v.how === "drop" ? 0 : sup.pageOfN.indexOf(v.page) + 1;
-    if (v.how === "drop" || n < 1) return "";
+    if (v.how === "drop" || n < 1) {
+      // 2026-11-14: a refused sentence that gives a kept line's figures from that line's own source is replaced by the kept line
+      // (already checked), said once; never a figure the kept line does not have.
+      const figs = figuresIn(wants[x].claim);
+      const p = figs.length ? kept.find((k) => k.cite.some((c) => cited[x]?.includes(c)) && figs.every((f) => figuresIn(k.text).some((y) => numEq(y, f)))) : null;
+      if (!p) return "";
+      const key = plainLine(p.text.replace(/^"(.*)"$/s, "$1")).toLowerCase();
+      if (said.has(key)) return "";
+      said.add(key);
+      return show(p.text, p.cite);
+    }
     // A page sentence that stands in for a sentence is said once: not again beside the kept line or the quote that already says it.
     const text = v.how === "model" ? wants[x].claim : quoteOf(v), key = plainLine(v.how === "model" ? text : v.sentence).toLowerCase();
     if (said.has(key)) return "";

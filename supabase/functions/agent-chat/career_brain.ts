@@ -18,6 +18,7 @@ import { enforceResearchReply, fallbackVerdict, stripUnseenLinks } from "../_sha
 import { type AdviceResult, enforceAdviceReply } from "../_shared/agent/research/advice.ts";
 import { enforceMarketReply, enforceMarketReplySupported, FAIL_CLOSED, type MarketDeps, type MarketResult, pureUnconfirmed } from "../_shared/agent/research/market.ts";
 import { keepSupported } from "../_shared/agent/research/support.ts";
+import { confirmedFacts, factText } from "../_shared/essay_draft.ts";
 import { NOT_CONFIRMED } from "../_shared/research_reply.ts";
 import { type CompanyResult, enforceCompanyReply, enforceCompanyReplySupported } from "../_shared/agent/research/company.ts";
 import { enforceFollowupAsk } from "../_shared/followup_draft.ts";
@@ -354,14 +355,20 @@ export async function agentTurn(o: {
     const recs = [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])].filter((p: any) => numbersIn(String(p?.pay ?? "")).length);
     const recLine = (p: any) => `${[p?.company, p?.title].map((x) => String(x ?? "").trim()).filter(Boolean).join(", ")}: ${String(p.pay).trim()}`;
     const letters = (t: string) => /\p{L}/u.test(t.replace(/https?:\/\/\S+/g, "")), links = (t: string) => t.match(/https?:\/\/\S+/g) ?? [];
+    // 2026-11-14: code's own lines in the reply (a closed posting's note, the read-only boundary) are never judged, and what a tool
+    // read from a posting this turn (its requirements, that its questions are behind a sign-in) is a source the model's sentences
+    // may stand on; the person's confirmed facts are a source for what is said about them (D-007).
+    const codeLines = (result.codeLines ?? []).flatMap((x) => x.split(/(?<=[.!?])\s+(?!https?:)/));
+    const readSources = (result.readLines ?? []).map((text) => ({ text, title: "Read from the posting this turn" }));
+    const confirmed = hypo ? [] : confirmedFacts((o.stores as any)?.profile?.facts ?? []).map(factText).filter(Boolean).map((text: string) => ({ text, title: "What the person confirmed" }));
     if (trace.r) {
       // Code's own lines: the verdict, the first action, and the fallback paragraph code writes (its last sentence carries the File link).
-      const own = [trace.r.verdict.now, trace.r.verdict.later, trace.r.short?.now ?? "", trace.r.short?.later ?? "", trace.r.short?.act ?? "", trace.r.first_action, fallbackVerdict(trace.r)].filter(Boolean).flatMap((x) => x.split(/(?<=[.!?])\s+(?!https?:)/));
+      const own = [...codeLines, trace.r.verdict.now, trace.r.verdict.later, trace.r.short?.now ?? "", trace.r.short?.later ?? "", trace.r.short?.act ?? "", trace.r.first_action, fallbackVerdict(trace.r)].filter(Boolean).flatMap((x) => x.split(/(?<=[.!?])\s+(?!https?:)/));
       const k = await keepSupported(result.reply, [...trace.r.facts.map((f) => ({ text: f.quote, title: f.label })), ...trace.r.person.map((text) => ({ text, title: "What the person confirmed" }))], { judge, pure, own, ask: o.message });
       // With nothing of the model's left, code's own fallback paragraph (it already ends with the File link, when there is one).
       result = { ...result, reply: letters(k.text) ? k.text : fallbackVerdict(trace.r) };
     } else if (trace.a) {
-      const k = await keepSupported(result.reply, trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), { judge, pure, ask: o.message });
+      const k = await keepSupported(result.reply, [...trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), ...confirmed, ...readSources], { judge, pure, own: codeLines, ask: o.message });
       result = { ...result, reply: letters(k.text) ? k.text : [trace.a.not_verified || NOT_CONFIRMED, ...links(k.text)].join("\n") };
     } else if (recs.length || shownPay.length) {
       // Round 3: EVERY sentence of a pay turn is checked (not only those with a number), against the postings' own records and the
@@ -372,7 +379,7 @@ export async function agentTurn(o: {
       // "If Jane Street matched it, their pay would be $95 an hour." said after a Citadel line is not Citadel's pay.
       const said = new Set(o.message.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}&'-]*/gu) ?? []);
       const about = shownPay.filter((l) => (l.text.match(/(?<![\p{L}\p{N}])\p{Lu}[\p{L}\p{N}&'-]*/gu) ?? []).slice(/^\p{Lu}\p{Ll}*\s+\p{Ll}/u.test(l.text) ? 1 : 0).some((w) => said.has(w.toLowerCase().replace(/'s$/, ""))));
-      const k = await keepSupported(result.reply, [...recs.map((p: any) => ({ text: recLine(p), title: "Posting record" })), ...about.map((l) => ({ text: l.text, title: "Pay shown earlier in this conversation" }))], { judge, pure, own: about.map((l) => l.text), ask: o.message });
+      const k = await keepSupported(result.reply, [...recs.map((p: any) => ({ text: recLine(p), title: "Posting record" })), ...about.map((l) => ({ text: l.text, title: "Pay shown earlier in this conversation" })), ...readSources], { judge, pure, own: [...about.map((l) => l.text), ...codeLines], ask: o.message });
       const named = recordsNamed(o.message, recs);
       const mine = [...new Set((named.length ? named : recs.length === 1 ? recs : []).map(recLine))].filter((l) => !numbersIn(l).every((n) => numbersIn(k.text).some((x) => numEq(x, n))));
       result = { ...result, reply: !k.removed.length ? k.text : [k.text, ...(mine.length ? mine : letters(k.text) ? [] : about.length ? [...new Set(about.map((l) => l.text))] : [NOT_CONFIRMED])].filter(Boolean).join("\n") };

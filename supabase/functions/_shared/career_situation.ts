@@ -90,11 +90,18 @@ export function situationFrom(r: SituationRows, now: number): Situation {
     const live = ["shown", "approved", "sending"].includes(d.status);
     if (!live && !(d.status === "sent" && Date.parse(d.sent_at ?? d.created_at) >= now - 14 * DAY)) continue;
     const who = d.recipient?.name ? `${d.recipient.name}${d.recipient.title ? ` (${d.recipient.title})` : ""}` : "a contact";
-    const blocker: Task["blocker"] = d.status === "shown"
+    // A reply to an email in the person's inbox (recipient.kind "mail_reply") is approved only on its own card, and a try whose
+    // outcome is unknown is unconfirmed, never "sends on the schedule" (career_mail_reply.ts).
+    const reply = d.recipient?.kind === "mail_reply", unknown = /^unknown_outcome/.test(String(d.result ?? ""));
+    const blocker: Task["blocker"] = reply
+      ? d.status === "shown" ? { what: `reply to ${who} waits for a yes on its card`, who: "person", how: 'answer "yes" while that reply card is the last message, or ask Trainee to draft the reply again' }
+        : d.status === "sending" && unknown ? { what: `reply to ${who}: unconfirmed whether it was sent; Trainee will not send that card again`, who: "person", how: "check your Sent folder; if it is not there, ask Trainee to draft the reply again" }
+        : live ? { what: `reply to ${who} is being sent now`, who: "trainee", how: "nothing for you to do" } : null
+      : d.status === "shown"
       ? { what: `draft to ${who} waits for a yes${gmailSend ? "" : "; Gmail is not connected, so it cannot be sent"}`, who: "person", how: gmailSend ? 'text "show my drafts", then "send 1"' : 'connect Gmail (text "connect my Google"), then text "show my drafts" and approve it' }
       : d.status === "approved" && !gmailSend ? { what: "approved, but Gmail is not connected", who: "person", how: 'connect Gmail (text "connect my Google")' }
       : live ? { what: "approved, sends on the schedule", who: "trainee", how: "nothing for you to do" } : null;
-    add({ id: `out:${d.id ?? d.n}`, kind: "outreach", company: str(d.recipient?.firm), title: `email to ${who}`, state: d.status === "shown" ? "awaiting_approval" : d.status, since: d.created_at ?? null, source: "career_outreach_drafts", blocker });
+    add({ id: `out:${d.id ?? d.n}`, kind: "outreach", company: str(d.recipient?.firm), title: `${reply ? "reply" : "email"} to ${who}`, state: d.status === "shown" ? "awaiting_approval" : reply && unknown && d.status === "sending" ? "unconfirmed" : d.status, since: d.created_at ?? null, source: "career_outreach_drafts", blocker });
   }
   for (const m of r.mail_drafts.filter((x) => x.state === "drafted")) {
     add({ id: `mail:${m.id}`, kind: "mail_draft", company: str(m.company), title: `${m.kind === "thank_you" ? "thank-you" : "follow-up"} draft`, state: "drafted", since: m.created_at ?? null, source: "career_mail_drafts",
@@ -161,7 +168,7 @@ export async function readSituation(admin: any, userId: string, now: number): Pr
     prepared: q("career_apply_prepared").select("id,job_id,company,url,state,created_at").eq("user_id", userId).in("state", ["ready", "shown"]).limit(200),
     card: q("career_apply_cards").select("shown_at").eq("user_id", userId).eq("state", "open").order("shown_at", { ascending: false }).limit(1),
     questions: q("career_apply_questions").select("id,company,label,options,job_ids,answer,misfit,created_at").eq("user_id", userId).eq("state", "open").limit(100),
-    outreach: q("career_outreach_drafts").select("id,n,recipient,status,created_at,sent_at").eq("user_id", userId).or(`status.in.(shown,approved,sending),updated_at.gte.${since}`).limit(100),
+    outreach: q("career_outreach_drafts").select("id,n,recipient,status,created_at,sent_at,result").eq("user_id", userId).or(`status.in.(shown,approved,sending),updated_at.gte.${since}`).limit(100),
     mail_drafts: q("career_mail_drafts").select("id,kind,company,state,created_at").eq("user_id", userId).eq("state", "drafted").limit(50),
     interviews: q("career_interviews").select("id,company,role,starts_at,interview_date").eq("user_id", userId).or(`starts_at.gte.${today},interview_date.gte.${today.slice(0, 10)}`).limit(20),
     alerts: q("career_alert_prefs").select("prefs,tz").eq("user_id", userId).maybeSingle(),

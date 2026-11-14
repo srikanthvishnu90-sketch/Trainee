@@ -23,7 +23,7 @@ import { releaseFlagOn } from "../agent-chat/release_config.ts"; // D-036 releas
 import { neverOpen } from "./career_people_sites.ts";
 import type { EventStore } from "./agent/timeline.ts";
 import { batchMessages, blockedAddresses, confirmed, draftFor, emailHash, type Followup, FOLLOWUP_DAYS, footerOf, messageOf, type ModelFn, OUTREACH_INTENT,
-  type OutreachDraft, type OutreachStore, payloadHash, recordOutreach } from "./career_outreach.ts";
+  isMailReply, type OutreachDraft, type OutreachStore, payloadHash, recordOutreach } from "./career_outreach.ts";
 
 export const TRACK_INTENT = "career_outreach_track";
 export const LINKEDIN_INTENT = "career_linkedin_refused";
@@ -223,7 +223,8 @@ export async function trackTurn(o: TrackDeps): Promise<TrackResult | null> {
   if (!ask) return null;
   if (ask.kind === "site") return await siteTurn(o, ask.site);
   if (!o.store.history) return null;
-  const rows = await o.store.history(o.userId, 500);
+  // A reply to an email in the person's inbox (its own kind) is no outreach: never listed, marked sent or replied, or reminded here.
+  const rows = (await o.store.history(o.userId, 500)).filter((d) => !isMailReply(d));
   // Nothing on record to track: only the list answers (plainly); every other ask is someone else's (the router's).
   if (!rows.length) return ask.kind === "list" ? { reply: `You haven't reached out to anyone through Trainee yet: there are no networking emails on record. Send me your contacts (a LinkedIn Connections.csv or rows like Name,Company,Email), then say "email <name> at <firm> about <what you want to ask>".`, intent: TRACK_INTENT, status: "empty" } : null;
   const follow = o.store.followups ? await o.store.followups(o.userId) : [];
@@ -444,7 +445,7 @@ export async function runOutreachFollowups(o: RunOpts) {
       if (quiet.has(user_id)) { stats.quiet += due.length; held.push({ user_id, items }); continue; } // kept; released after the loop
       try {
         // Only the drafts these reminders are about (by id), never the person's whole history.
-        const rows = o.store.drafts ? await o.store.drafts(user_id, due.map((f) => f.draft_id)) : await o.store.history!(user_id, 500);
+        const rows = (o.store.drafts ? await o.store.drafts(user_id, due.map((f) => f.draft_id)) : await o.store.history!(user_id, 500)).filter((d) => !isMailReply(d));
         const done: Followup[] = [];
         for (const f of due) {
           const d = rows.find((x) => x.id === f.draft_id);

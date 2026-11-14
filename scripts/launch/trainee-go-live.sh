@@ -314,6 +314,7 @@ MIGRATIONS=(
   20261112160000_career_apply_handoff_recheck.sql
   20261113120000_career_erase_approved_versions.sql
   20261113140000_career_apply_stop_stale_facts.sql
+  20261113150000_career_outreach_adopt_skip_mail_reply.sql
 )
 MIGRATION_MARK=(
   "to_regclass('public.channel_threads') is not null"
@@ -492,6 +493,7 @@ MIGRATION_MARK=(
   "exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'career_apply_jobs' and column_name = 'handoff_done_at') and to_regprocedure('public.career_apply_vm_claim_handoff(text,integer,integer,text[])') is not null and exists (select 1 from pg_trigger where tgname = 'career_apply_handoff_claim_guard')"
   "exists (select 1 from pg_proc where proname = 'career_file_versions_guard' and prosrc like '%career.erase_person%') and exists (select 1 from pg_proc where proname = 'career_erase_person' and prosrc like '%career.erase_person%')"
   "to_regprocedure('public.career_apply_stop_stale_facts(uuid,jsonb,text)') is not null and exists (select 1 from pg_trigger where tgname = 'career_apply_facts_claim_guard') and exists (select 1 from pg_trigger where tgname = 'career_apply_facts_write_record')"
+  "exists (select 1 from pg_proc where proname = 'career_outreach_threads_adopt' and prosrc like '%mail_reply%')"
 )
 # The career chat (agent-chat's career entry) already reads these; checked, never applied here.
 EARLIER=(20261015010000_career_knowledge_base.sql 20261015020000_career_watch_kv.sql 20261015234000_career_task_intents_v1.sql

@@ -26,7 +26,8 @@ import { agentTurn, onlyFileWrites, payWithSource, shortenedOk } from "../../sup
 import { stagedDecision } from "../../supabase/functions/agent-chat/career_staged.ts";
 import { parseDraft, readAlike, RESEARCH_DRAFT_MAX_TOKENS } from "../../supabase/functions/_shared/agent/research/draft_json.ts";
 import { enforceCompanyReply, researchCompany } from "../../supabase/functions/_shared/agent/research/company.ts";
-import { agrees, enforceMarketReply, researchMarket } from "../../supabase/functions/_shared/agent/research/market.ts";
+import { agrees, enforceMarketReply, enforceMarketReplySupported, researchMarket } from "../../supabase/functions/_shared/agent/research/market.ts";
+import { testSupportJudge } from "./support-test-judge.ts";
 import { edgeRenderer, memoryResumeStore, tailorForPosting, withListedSkills } from "../../supabase/functions/_shared/career_tailor.ts";
 import { askedPartsOf, overLimit, partsMissing, practiceAnswerOf, practiceAskOf, replyKind, replyLength, shownPayOf, staleFactsOf, textLength } from "../../supabase/functions/_shared/agent/turn_notes.ts";
 import { orAlternatives, searchAlternatives } from "../../supabase/functions/_shared/career_search.ts";
@@ -89,13 +90,19 @@ Deno.test("D70-1 research (item 10, C9, C23): a cut-off draft keeps its whole so
   ok(p.value.business.every((b: any) => b.text && b.quote && b.url), "only whole items are kept; the cut-off item is left out");
   eq(parseDraft(`Here is the brief:\n${whole}`).how, "whole", "prose before the JSON is not the JSON");
   eq(parseDraft("I can't write that.").value, null);
-  const deps = (draft: string) => ({ search: { id: "first_party", needsKey: false, search: async () => rec.search }, read: async () => rec.read, draft: async () => draft });
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): research needs its judge to keep a line
+  // (the deterministic test judge, support-test-judge.ts); every research call of this test gets it.
+  const deps = (draft: string) => ({ search: { id: "first_party", needsKey: false, search: async () => rec.search }, read: async () => rec.read, draft: async () => draft, judge: testSupportJudge });
   const ask = { company: c.company, role: c.role, question: `Research ${c.company} before my interview for the ${c.role} role.`, plan: rec.plan, now: Date.UTC(2026, 10, 12, 15), format: "inline" as const };
   const r: any = await researchCompany({ ...ask, deps: deps(cut) as any });
   eq(r.status, "ok", JSON.stringify(r).slice(0, 300));
   const kept = [...r.business, ...r.role_asks];
   ok(kept.length >= 3 && kept.every((l: any) => l.cite.length > 0), `${kept.length} sourced lines stand`);
-  for (const l of kept) { const s = r.sources.find((x: any) => x.n === l.cite[0]); ok(pages.find((pg) => pg.url === s.url)!.text.replace(/\s+/g, " ").includes(l.text), l.text); }
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): a line that is its page's sentence word for
+  // word is shown as that sentence in quotation marks (with "From <host>, a page about <Employer>: " when the page lends the name);
+  // the words inside the marks are still on the page it cites.
+  const unq = (t: string) => t.replace(/^(?:From [^:"]+: )?"(.*)"$/s, "$1");
+  for (const l of kept) { const s = r.sources.find((x: any) => x.n === l.cite[0]); ok(pages.find((pg) => pg.url === s.url)!.text.replace(/\s+/g, " ").includes(unq(l.text)), l.text); }
   const reply = enforceCompanyReply("", r);
   ok(/\[1\]/.test(reply) && reply.includes(r.sources[0].url), "the chat answer carries its numbered sources");
   // Every one of the 20 recorded real-set cases (evals/real-sets/research/recorded), its draft cut off before its end: each draft
@@ -105,7 +112,7 @@ Deno.test("D70-1 research (item 10, C9, C23): a cut-off draft keeps its whole so
     const pk = (rk.read.verified as any[]).filter((v) => v.status === 200).map((v) => ({ url: v.url, text: String(v.text ?? "") }));
     const w = cutDraft(pk, rk.case.company).whole, cutK = w.slice(0, Math.floor(w.length * 0.7));
     assertNode.throws(() => JSON.parse(cutK), rk.case.id);
-    const rr: any = await researchCompany({ company: rk.case.company, role: rk.case.role, question: `Research ${rk.case.company}.`, plan: rk.plan, now: Date.UTC(2026, 10, 12, 15), format: "inline", deps: { search: { id: "first_party", needsKey: false, search: async () => rk.search }, read: async () => rk.read, draft: async () => cutK } as any });
+    const rr: any = await researchCompany({ company: rk.case.company, role: rk.case.role, question: `Research ${rk.case.company}.`, plan: rk.plan, now: Date.UTC(2026, 10, 12, 15), format: "inline", deps: { search: { id: "first_party", needsKey: false, search: async () => rk.search }, read: async () => rk.read, draft: async () => cutK, judge: testSupportJudge } as any });
     eq(rr.status, "ok", `${rk.case.id}: ${rr.blocker ?? ""}`);
   }
   // The cap the draft call now runs at (handler-career.ts and the real-set live run): room for a full brief.
@@ -124,7 +131,7 @@ Deno.test("D70-1 research (item 10, C9, C23): a cut-off draft keeps its whole so
     { text: "The interview process has a first-round interview, then three interviews and team matching.", quote: "The interview process has a first-round interview, then three interviews and team matching.", url: page.url },
     { text: "The culture is described as fast paced, with high standards and direct feedback.", quote: "Our culture is described as fast paced, with high standards and direct feedback.", url: page.url },
     { text: "Engineers there describe long weeks, and teams say the hours vary widely by desk and by season.", quote: "Engineers there describe long", url: page.url }] });
-  const m: any = await researchMarket({ question: P.C9, format: "inline", plan: { queries: ["x"] } as any, deps: { search: { id: "t", needsKey: false, search: async () => ({ hits: [{ url: page.url, title: "SWE new grad", provider: "t", foundAt: NOW }], notes: [], provider: "t" }) }, read: async () => ({ verified: [{ url: page.url, requested: page.url, status: 200, title: "SWE new grad", text: page.text, fetchedAt: NOW }], rejected: [] }), draft: async () => draft.slice(0, draft.length - 60), layout: "messages" } as any });
+  const m: any = await researchMarket({ question: P.C9, format: "inline", plan: { queries: ["x"] } as any, deps: { search: { id: "t", needsKey: false, search: async () => ({ hits: [{ url: page.url, title: "SWE new grad", provider: "t", foundAt: NOW }], notes: [], provider: "t" }) }, read: async () => ({ verified: [{ url: page.url, requested: page.url, status: 200, title: "SWE new grad", text: page.text, fetchedAt: NOW }], rejected: [] }), draft: async () => draft.slice(0, draft.length - 60), layout: "messages", judge: testSupportJudge } as any });
   eq(m.status, "ok", JSON.stringify(m).slice(0, 300));
   eq(m.points.length, 3, "the three whole lines stand; the cut-off fourth is left out");
   const said = enforceMarketReply("Pay: the base salary range for this role is $150,000 to $200,000 [1].\n\nInterview process: a first-round interview, then three interviews and team matching [1].\n\nCulture: described as fast paced, with high standards and direct feedback [1].", m);
@@ -216,18 +223,29 @@ Deno.test("D70-4 C11, C22 (D-067 (6), must-fix (d)): pay from any posting read c
     requirements: { required: [], preferred: [] }, questions: null, questions_read: "sign_in", questions_why: "behind sign-in", entry: [], sign_in_required: true, captcha_expected: false, reads: [], why: "", boundary: "Read only." };
   const s = scripted((_p, n) => n === 0 ? use("inspect_apply_flow", { url: p.url }) : text(LIVE7.C11));
   const r = await turn(P.C11, s.model, { applyFlow: async () => flow });
-  ok(r.reply.includes(p.url) && /\$28-\$49/.test(r.reply), r.reply);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): the model's pay sentence is not checked
+  // against the posting here, so the posting's own record line stands in its place ("$28- $49 Hourly", as the posting writes it),
+  // with the posting's link; the figure is still the posting's and still carries its link.
+  ok(r.reply.includes(p.url) && /\$28- ?\$49/.test(r.reply), r.reply);
   eq(payWithSource("PayPal is hiring.", [{ company: "PayPal", pay: "$28-$49", url: p.url }]), "PayPal is hiring.", "no figure, no link");
   eq(payWithSource("The range is $28-$49.", [{ company: "PayPal", pay: "$28-$49", url: p.url }, { company: "NVIDIA", pay: "$40-$60", url: "https://nvidia.example/x" }]), "The range is $28-$49.", "two postings: the sentence must name its employer");
   // C22: the pay C1 showed (with the Workday link) answers the ask; live-7's reply named the posting and gave no figure.
   const history = [{ role: "user", content: P.C1 }, { role: "assistant", content: LIVE7.C1 }];
   const shown = shownPayOf(P.C22, history as any);
   ok(shown.some((l) => /\$28-\$49/.test(l.text) && l.url === p.url), JSON.stringify(shown));
-  const restated = "PayPal's Chicago posting lists $28-$49 hourly; that is one posting's range, not a market rate. I don't have a verified going rate beyond it.";
+  // Architect amendment (owner decision 2026-11-13: research support check switched on): pay already shown stands only as the shown
+  // line itself, whole and word for word, with that line's own link; a could-not-confirm sentence stands unjudged only in the closed
+  // form. So the model's restatement is the shown line and "I couldn't confirm the going rate for swe interns in chicago."
+  // (a reworded restatement is replaced by the shown line, checked below).
+  const restated = `${shown.find((l) => /\$28-\$49/.test(l.text))!.text} I couldn't confirm the going rate for swe interns in chicago.`;
   const s2 = scripted((_p, n) => n === 0 ? text(LIVE7.C22) : text(restated));
   const r2 = await agentTurn({ message: P.C22, history, stores: { profile: personaProfile() }, userId: "u", threadId: "t", now: NOW, model: s2.model } as any);
   ok(s2.seen.some((x) => /already showed pay that answers this ask/.test(x.system)), "one review asks for the shown pay");
   ok(r2.reply.startsWith(restated) && r2.reply.includes(p.url), r2.reply);
+  const reworded = "PayPal's Chicago posting lists $28-$49 hourly; that is one posting's range, not a market rate. I don't have a verified going rate beyond it.";
+  const s3 = scripted((_p, n) => n === 0 ? text(LIVE7.C22) : text(reworded));
+  const r3 = await agentTurn({ message: P.C22, history, stores: { profile: personaProfile() }, userId: "u", threadId: "t", now: NOW, model: s3.model } as any);
+  ok(!r3.reply.includes(reworded) && (!/\$28-\$49/.test(r3.reply) || r3.reply.includes(p.url)), r3.reply);
 });
 
 // ---------------------------------------------------------------- D70-5 length

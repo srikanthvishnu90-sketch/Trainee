@@ -36,7 +36,9 @@ Deno.test("review: a fact never names another employer than its quote", async ()
   const texts = r.points.map((p) => p.text);
   ok(!texts.some((t) => /Globex/.test(t) && /41,000/.test(t)), `Acme's figure is never Globex's: ${JSON.stringify(texts)}`);
   ok(texts.every((t) => t === "Acme Energy installed 41,000 home batteries in 2025." || /^".+"$/.test(t)), JSON.stringify(texts));
-  ok(texts.includes("Acme Energy installed 41,000 home batteries in 2025."), `the true Acme line stands: ${JSON.stringify(texts)}`);
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; fix "the install pattern narrowed" and the
+  // exact page sentence shown as the page's own): the true line, its page's sentence word for word, stands in quotation marks.
+  ok(texts.includes('"Acme Energy installed 41,000 home batteries in 2025."'), `the true Acme line stands: ${JSON.stringify(texts)}`);
 });
 
 Deno.test("review: failed research never sounds certain", async () => {

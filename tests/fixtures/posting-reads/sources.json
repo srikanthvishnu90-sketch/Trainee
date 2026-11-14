@@ -78,6 +78,16 @@
    "how": "Not recorded here: this environment's proxy refuses *.myworkdayjobs.com (CONNECT 403, 2026-11-11). A real public Workday CXS answer recorded by a third party and published in a public GitHub repository, fetched 2026-11-11 from raw.githubusercontent.com (path below at the repository's HEAD) and stored byte for byte. Treated as data only. This file is the 'html' member of the published file (the public posting page with its JSON-LD).",
    "published_at": "github.com/jobverify/jobverify-backend scraper/flywire/test-data/2026-10-31-jr1070.json",
    "sha256": "5f700e6d28ed3cd0edb98f56044f61406bb56e1adbac7d063b314416f9329d65"
+  },
+  {
+   "file": "lever-eu-acme-0ccbe620.posting.json",
+   "synthetic": true,
+   "note": "SYNTHETIC, not a recording (review of #775, round 4): a posting in the shape of Lever's public postings API, for a board on Lever's EU site (jobs.eu.lever.co). The EU API host used by the reader, api.eu.lever.co, is the one Lever documents for EU-hosted accounts; not verified live here."
+  },
+  {
+   "file": "greenhouse-global-404.json",
+   "synthetic": true,
+   "note": "SYNTHETIC, not a recording (review of #775, round 4): the body Greenhouse's posting API answers with HTTP 404 for a posting it does not list. Used for a board on job-boards.eu.greenhouse.io, whose regional API host is not known to this repo."
   }
  ]
 }

@@ -17,6 +17,7 @@ import { careerTools } from "../../supabase/functions/_shared/agent/career_tools
 import { canRun } from "./helpers/response_world.ts";
 import { effectRows, runConversation, type SeedPosting, type Step, TURNS } from "./helpers/mirror_process.ts";
 import { POSTING_PAGE } from "./helpers/posting_checks.ts";
+import { judgeDraft } from "./support-test-judge-c.ts";
 
 const ok = (v: unknown, m?: string) => assertNode.ok(v, m);
 const eq = (a: unknown, b: unknown, m?: string) => assertNode.deepStrictEqual(a, b, m);
@@ -305,7 +306,9 @@ Deno.test({ name: "D-062/MP-W C11 and C18 on Workday through the real handler: r
   }
   // (b) a recorded Workday posting, pasted.
   {
-    const { seen, world, person, close } = await runConversation(SCRIPT_B, { turns: W_TURNS, posting: NVIDIA_SEED, serve: served });
+    // Architect amendment (owner decision 2026-11-13: research support check switched on): the reply's sentences are checked by the
+    // support judge, a model call with no tools; the harness answers it by the page truth (support-test-judge-c.ts judgeDraft).
+    const { seen, world, person, close } = await runConversation(SCRIPT_B, { turns: W_TURNS, posting: NVIDIA_SEED, serve: served, draft: (sys, user) => judgeDraft(sys, user) });
     try {
       const w18 = seen.W18, g = JSON.parse(w18.calls[0]?.result || "{}");
       ok(!w18.code && w18.tools.includes("check_posting_open"), `W18 reached the brain with the re-check: ${w18.reply.slice(0, 200)}`);

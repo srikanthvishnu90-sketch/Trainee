@@ -66,3 +66,12 @@ export function answerSupportJudge(inner: typeof fetch, seen: { judged: number }
     return inner(input, init);
   }) as typeof fetch;
 }
+
+// For a harness that answers every no-tools model call through a hook given (system, user) (tests/architect/helpers/mirror_process.ts
+// runConversation's `draft`): the support judge's answer by the page truth, or null for any other call.
+export function judgeDraft(system: string, user: string): string | null {
+  if (!isSupportJudgeCall(system)) return null;
+  let items: { claim: string; source: string }[] = [];
+  try { items = JSON.parse(user); } catch { /* empty */ }
+  return JSON.stringify(items.map((x) => answersAsk(String(x.claim ?? ""), String(x.source ?? "")) ? "yes" : "no"));
+}

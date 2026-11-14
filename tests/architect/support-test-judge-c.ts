@@ -12,7 +12,7 @@ export { testSupportJudge };
 // is yes only when the marked text shares a content word with the question (the person's own words, not code's). Model-worded
 // claims are judged exactly as support-test-judge.ts judges them.
 const STOP = new Set("a an the and or of to in on at for by with from as is are was were be been it its this that what which who how why when where do does did will would could should can me my i you your we our they their there these those give tell show find get about any some much many more most give research compare file".split(" "));
-const stem = (w: string) => w.replace(/(?:ies|es|s|ed|ing)$/, "");
+const stem = (w: string) => w.replace(/ies$/, "y").replace(/(?:es|s|ed|ing)$/, ""); // "batteries" and "battery" are one word
 const wordsOf = (t: string) => new Set((bare(t).toLowerCase().match(/[\p{L}][\p{L}'’-]*/gu) ?? []).map((w) => w.replace(/['’]s$/, "")).filter((w) => w.length > 2 && !STOP.has(w)).map(stem));
 const QUOTE_CHECK = /^The marked text "([\s\S]*)" is the page's own statement of fact[\s\S]*?(?:, and it answers the question: ([\s\S]*?))?\.?$/;
 export function answersAsk(claim: string, source: string): boolean {

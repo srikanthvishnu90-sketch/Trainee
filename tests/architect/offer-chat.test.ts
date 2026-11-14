@@ -62,10 +62,16 @@ Deno.test("F12/U4 the turn: a half-told ask is the last word only; another ask d
   eq(brain.result.offer.company, "Stripe");
 });
 
+// Architect amendment (owner decision 2026-11-13, D-078: confirm before compare): an offer's reading is shown first and the
+// person's plain yes to it comes before any comparison or counter, so `told` answers the reading shown with "yes".
+async function told(message: string, state: OfferChatState | null) {
+  const r = await offerChatTurn({ message, state, now: NOW });
+  return r.answer?.intent === "career_offer_confirm" ? offerChatTurn({ message: "yes", state: r.state, now: NOW, lastReply: r.answer.reply }) : r;
+}
 Deno.test("F12/U5 compare: two places say no cost-of-living data; equity is never valued; nothing is invented for a missing field", async () => {
   let s: OfferChatState | null = null;
   for (const m of ["Stripe offered me $160k base as a software engineer in New York with 0.1% equity", "Acme Robotics offered 150k base, Seattle, software engineer, 10% target bonus"]) {
-    s = (await offerChatTurn({ message: m, state: s, now: NOW })).state;
+    s = (await told(m, s)).state; // Architect amendment (D-078): each reading confirmed
   }
   const r = await offerChatTurn({ message: "which offer is better? compare them", state: s, now: NOW });
   eq(r.answer?.intent, "career_offer_compare");
@@ -79,15 +85,15 @@ Deno.test("F12/U5 compare: two places say no cost-of-living data; equity is neve
 
 Deno.test("F12/U6 counter: a competing offer leads, the benchmark is still cited; with no market number none is cited", async () => {
   let s: OfferChatState | null = null;
-  s = (await offerChatTurn({ message: "JPM offered 110k base, 15k signing, NYC, analyst", state: s, now: NOW })).state;
-  s = (await offerChatTurn({ message: "Citi offered me 115k base in New York as an analyst", state: s, now: NOW })).state;
+  s = (await told("JPM offered 110k base, 15k signing, NYC, analyst", s)).state; // Architect amendment (D-078): each reading confirmed
+  s = (await told("Citi offered me 115k base in New York as an analyst", s)).state;
   const r = await offerChatTurn({ message: "help me negotiate with JPM", state: s, now: NOW });
   eq(r.answer?.intent, "career_offer_counter");
   const body = r.answer!.card!.body;
   assert(/I have another offer from Citi with a base of \$115,000\./.test(body) && /shows a median of \$120,000\./.test(body), body);
   eq(r.answer!.card!.sent, false);
   clean(r.answer!.parts);
-  const none = await offerChatTurn({ message: "Acme offered me $150k as a product manager in Denver. Help me negotiate", state: null, now: NOW });
+  const none = await told("Acme offered me $150k as a product manager in Denver. Help me negotiate", null); // Architect amendment (D-078)
   eq(none.answer?.intent, "career_offer_counter");
   assert(/I have no market number with enough data behind it, so the draft cites none/.test(none.answer!.reply) && !/median/.test(none.answer!.card!.body), none.answer!.reply);
 });

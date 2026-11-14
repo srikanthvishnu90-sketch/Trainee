@@ -401,7 +401,7 @@ export async function findTargets(userId: string, ask: TargetAsk, d: TargetDeps)
   let companies = ask.kind === "applied" ? await d.store.appliedCompanies(userId) : [ask.company];
   companies = [...new Map(companies.map((c) => [companyKey(c), cleanCell(c, 120)])).entries()].filter(([k]) => k).map(([, c]) => c);
   if (!companies.length) {
-    return { status: "no_companies", reply: "You haven't applied anywhere I have on record yet, so there are no companies to look for people at. Tell me a company and the roles you want, like \"engineering managers at Stripe\".", candidates: [], companies: [], waiting: 0 };
+    return { status: "no_companies", reply: "Trainee's own record shows no application of yours yet (your email was not checked for this answer), so there are no companies to look for people at. Tell me a company and the roles you want, like \"engineering managers at Stripe\".", candidates: [], companies: [], waiting: 0 };
   }
   const roles = ask.kind === "alumni" ? { titles: [] as string[], seniority: [] as string[] } : { titles: ask.titles, seniority: ask.seniority };
   const wired = !!(d.config.provider && d.config.apiKey && d.provider);

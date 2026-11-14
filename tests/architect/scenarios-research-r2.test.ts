@@ -213,8 +213,11 @@ Deno.test("D. 1,000 texted offers with the current pay beside them: every figure
   const f: Fails = new Map();
   for (const [i, c] of cases.entries()) {
     const tag = `[${c.family}] #${i} ${JSON.stringify(c.words)}`;
-    const t = offerTurn({ words: c.words, pending: null, now: NOW });
-    const msgs = (t.result.messages ?? []).join("\n");
+    // Architect amendment (owner decision 2026-11-13, D-078: confirm before compare): offer_benchmark shows its reading first and
+    // benchmarks only after the person's plain yes; the reading and the benchmarked reply after the yes are both checked below.
+    const shown = offerTurn({ words: c.words, pending: null, now: NOW });
+    const t = shown.result.status === "confirm" ? offerTurn({ words: "yes", pending: shown.pending, now: NOW + 1000, lastReply: shown.result.messages.join("\n") }) : shown;
+    const msgs = [...(shown === t ? [] : shown.result.messages ?? []), ...(t.result.messages ?? [])].join("\n");
     if (moneyOf(msgs).includes(c.current * 1000)) fail(f, "current-pay-said", `${tag}: ${msgs.slice(0, 200)}`);
     const sourced = new Set<number>([c.base * 1000]);
     for (const b of t.result.benchmarks ?? []) for (const n of moneyOf(JSON.stringify(b).replace(/(\d)(?=(\d{3})+(?!\d))/g, "$1"))) sourced.add(n);

@@ -21,11 +21,11 @@ import { clausesOf, findSupport, hardParts, indexPages, judgeAll, nameFoundIn, n
 export const PIPELINE = { on: true };
 export const isTagged = (t: string) => /\[E\d+(?:\s*,\s*E\d+)*\]/.test(String(t ?? ""));
 export type EvidenceKind = "page" | "chat" | "record" | "absent";
-export interface EvidenceUnit { id: string; kind: EvidenceKind; text: string; host?: string | null; url?: string | null; source?: string }
+export interface EvidenceUnit { id: string; kind: EvidenceKind; text: string; host?: string | null; url?: string | null; source?: string; places?: string[] }
 
 export class Ledger {
   units: EvidenceUnit[] = [];
-  add(kind: EvidenceKind, text: string, meta: { host?: string | null; url?: string | null; source?: string } = {}): string {
+  add(kind: EvidenceKind, text: string, meta: { host?: string | null; url?: string | null; source?: string; places?: string[] } = {}): string {
     const t = String(text ?? "").replace(/\s+/g, " ").trim();
     if (!t) return "";
     const had = this.units.find((u) => u.kind === kind && u.text === t && (u.url ?? null) === (meta.url ?? null));
@@ -45,7 +45,9 @@ export class Ledger {
     for (const p of postings) {
       const who = [p?.company, p?.title].filter((x) => typeof x === "string" && x.trim()).join(", ");
       const url = typeof p?.url === "string" ? p.url : typeof o.url === "string" ? o.url : null;
-      if (typeof p?.pay === "string" && p.pay.trim()) for (const part of p.pay.split(/;\s*/)) ids.push(this.add("chat", `${who}${p?.location ? ` (${p.location})` : ""}: pay ${part.trim()}`, { url, source: name }));
+      // (the posting's own places, so layer A reads "Chicago, IL" there as a place, never as an owner)
+      const places = [p?.location, ...String(p?.pay ?? "").split(/;\s*/).map((x: string) => /^([^:]+):/.exec(x)?.[1])].filter((x): x is string => typeof x === "string" && /,/.test(x)).map((x) => x.trim());
+      if (typeof p?.pay === "string" && p.pay.trim()) for (const part of p.pay.split(/;\s*/)) ids.push(this.add("chat", `${who}${p?.location ? ` (${p.location})` : ""}: pay ${part.trim()}`, { url, source: name, places }));
       const dl = [p?.deadline, p?.closes, p?.close_date].find((x) => typeof x === "string" && x.trim());
       const st = typeof p?.state === "string" ? p.state : null;
       if (st || dl) ids.push(this.add("chat", `${who}: the posting is ${st ?? "listed"}${dl ? `; it closes ${dl}` : ""}.`, { url, source: name }));
@@ -97,7 +99,9 @@ export function missingSpecifics(clause: string, units: EvidenceUnit[]): string[
 }
 
 // Verify a tagged reply against its ledger: what stands (tags removed), and every failure with its reason.
-export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: SupportJudge | null; own?: string[]; onRecord?: (s: string) => boolean | null } = {}): Promise<Verified> {
+export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: SupportJudge | null; own?: string[]; onRecord?: (s: string) => boolean | null; ask?: string } = {}): Promise<Verified> {
+  // (a question to the person may name only what their own record or their ask names)
+  const allowed = [String(o.ask ?? ""), ...ledger.units.filter((u) => u.kind === "record").map((u) => u.text)].join("\n");
   const own = new Set((o.own ?? []).map((x) => x.trim()));
   const lines = String(reply ?? "").split("\n").map((l) => /^\s*(?:https?:\/\/\S+\s*)*$/.test(l) ? [l] : splitSentences(l).filter((x) => x.trim()));
   const failures: Failure[] = [], kept: string[] = [];
@@ -107,14 +111,14 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
     if (/^\s*(?:https?:\/\/\S+\s*)*$/.test(x)) return;
     const { ids, text } = tagsOf(x);
     lines[a][b] = text;
-    if (!/\p{L}/u.test(text) || own.has(text) || noClaim(text) || personQuestion(text)) return;
+    if (!/\p{L}/u.test(text) || own.has(text) || noClaim(text) || personQuestion(text, allowed)) return;
     if (o.onRecord?.(text) === true) return;
     if (!ids.length) { failures.push({ sentence: text, reason: "it states a fact and cites no evidence unit" }); bad.add(`${a}:${b}`); return; }
     const units = ids.map((id) => ledger.get(id)).filter(Boolean) as EvidenceUnit[];
     if (units.length < ids.length) { failures.push({ sentence: text, reason: `it cites ${ids.filter((id) => !ledger.get(id)).join(", ")}, which no evidence unit is` }); bad.add(`${a}:${b}`); return; }
     citeAt.set(`${a}:${b}`, ids);
     for (const c of clausesOf(text)) {
-      if (noClaim(c) || personQuestion(c) || o.onRecord?.(c) === true) continue;
+      if (noClaim(c) || personQuestion(c, allowed) || o.onRecord?.(c) === true) continue;
       if (o.onRecord?.(c) === false) { failures.push({ sentence: text, reason: `"${c}" is not what the person's record holds` }); bad.add(`${a}:${b}`); return; }
       checks.push({ a, b, clause: c, units, claim: text });
     }
@@ -123,7 +127,7 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   const asks: { k: number; claim: string; source: string }[] = [];
   checks.forEach((c, k) => {
     if (bad.has(`${c.a}:${c.b}`)) return;
-    const idx = indexPages(c.units.map((u) => ({ text: u.text, title: u.kind === "page" ? `Page${u.host ? ` (${u.host})` : ""}` : u.kind === "chat" ? "This chat's tool result" : "The person's confirmed record:", ...(u.kind === "record" || u.kind === "absent" ? { one: true } : {}) })));
+    const idx = indexPages(c.units.map((u) => ({ text: u.text, title: u.kind === "page" ? `Page${u.host ? ` (${u.host})` : ""}` : u.kind === "chat" ? "This chat's tool result" : "The person's confirmed record:", places: u.places ?? [], ...(u.kind === "record" || u.kind === "absent" ? { one: true } : {}) })));
     const f = findSupport(c.clause, idx);
     if (!f) { const miss = missingSpecifics(c.clause, c.units); failures.push({ sentence: c.claim, reason: miss.length ? miss.map((m) => `'${m}' is in no cited unit`).join("; ") : `no single cited unit holds "${c.clause}"` }); bad.add(`${c.a}:${c.b}`); return; }
     asks.push({ k, claim: c.clause, source: f.unit.passage });

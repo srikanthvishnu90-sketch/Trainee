@@ -429,7 +429,7 @@ export async function agentTurn(o: {
   if (FAIL_CLOSED.support && !piped && !trace.m && result.reply && result.stopped === "final" && !result.show) {
     const judge = o.market?.judge ?? null, pure = (s: string) => pureUnconfirmed(s, o.message);
     // Live-11 C11: a question to the person ("Which email should go on the resume?") is never judged, when it states no figure.
-    const askOnly = (s: string) => personQuestion(s);
+    const askOnly = (s: string) => personQuestion(s, [o.message, ...(hypo ? [] : factRows((o.stores as any)?.profile).filter(confirmedRow).map((f: any) => String(f.text ?? "")))].join("\n"));
     const recs = [...(Array.isArray(result.postings) ? result.postings as any[] : []), ...(result.paySources ?? [])].filter((p: any) => numbersIn(String(p?.pay ?? "")).length);
     const recLine = (p: any) => `${[p?.company, p?.title].map((x) => String(x ?? "").trim()).filter(Boolean).join(", ")}: ${String(p.pay).trim()}`;
     const letters = (t: string) => /\p{L}/u.test(t.replace(/https?:\/\/\S+/g, "")), links = (t: string) => t.match(/https?:\/\/\S+/g) ?? [];

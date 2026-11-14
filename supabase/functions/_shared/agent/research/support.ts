@@ -79,13 +79,18 @@ export function noClaim(s: string): boolean {
 // authorized to work in the U.S.?"). A clause in that form counts too, with or without its question mark.
 const ASK_THEM = /^(?:and\s+|so\s+)?(?:are|do|did|can|could|would|will|have|has|should|is)\s+(?:you|your)\b/i;
 const ASSERTS_IN_Q = /\b(?:did you (?:know|hear|see|read)|have you (?:heard|seen|read)|is it true|were you aware|you know that|aware that|heard that)\b/i;
-export function personQuestion(s: string): boolean {
+// (re-review of 940195e08) A question put to the person ("are you …?") is exempt only with no figure, no date and no capitalised name
+// but names from their own record or the ask (`allowed`), and no report of a world event ("Stripe's layoffs last month").
+const PAST_EVENT = /(?<![\p{L}])(?:last (?:week|month|year|quarter)|yesterday|ago|recently|this (?:week|month)|just (?:announced|laid|cut|closed|froze)|laid off|layoffs?|announced|reported|was (?:sued|fined|acquired)|went (?:bankrupt|public))(?![\p{L}])/iu;
+export function personQuestion(s: string, allowed = ""): boolean {
   const b = bare(String(s ?? "")).replace(/[’‘]/g, "'").trim();
-  if (/\d/.test(b) || ASSERTS_IN_Q.test(b) || /["\u201c\u201d]/.test(b)) return false;
+  if (/\d/.test(b) || ASSERTS_IN_Q.test(b) || /["\u201c\u201d]/.test(b) || MONTH_OR_DAY.test(b) || PAST_EVENT.test(b)) return false;
+  const h = hardParts(b);
+  const names = h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).filter((r) => r.length).map((r) => r.join(" "));
+  if (!names.every((n) => n && nameFoundIn(n, String(allowed ?? "")))) return false;
   if (ASK_THEM.test(b)) return true;
   if (!/\?\s*$/.test(b)) return false;
-  const h = hardParts(b);
-  return !h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).some((r) => r.length) && !(/^\p{Lu}/u.test(b) && h.first && !/^(?:which|what|where|when|who|how|should|would|could|can|do|does|did|is|are|want|shall|will|have|has)$/i.test(h.first));
+  return !(/^\p{Lu}/u.test(b) && h.first && !/^(?:which|what|where|when|who|how|should|would|could|can|do|does|did|is|are|want|shall|will|have|has)$/i.test(h.first));
 }
 // Live-12 (item 5): a sentence of joined clauses ("…; …", "…, and …", "…, so …") is read clause by clause.
 export const clausesOf = (s: string) => bare(s).replace(/[.!?]+$/, "").split(/;\s+|,\s+(?:and|so|but)\s+/u).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x));
@@ -282,7 +287,7 @@ const clipStart = (t: string, n: number) => t.length > n ? `…${t.slice(t.lengt
 // text before it is put in a passage.
 const plainText = (t: string) => squash(String(t ?? "").replace(/>{2,}|<{2,}|[¶›‹»«]/g, " ").replace(/(?:^|(?<=\s))(?:page title|title|page host|page of|top of page|page notes?|headings?|its whole sentence|list introduced by|table header|before|after|footnote|whole page[^:\n]{0,30})\s*:/gi, (m) => m.replace(":", " -")));
 // `lent`: the page owner's name, when the unit does not name an asked employer itself. `passage`: what the judge reads.
-export interface Unit { text: string; hard: Hard; lower: Set<string>; content: Set<string>; quotable: boolean; lent: string | null; label: string; passage: string; pageTitle: string; ownSite: boolean; url: string }
+export interface Unit { text: string; hard: Hard; lower: Set<string>; content: Set<string>; quotable: boolean; lent: string | null; label: string; passage: string; pageTitle: string; ownSite: boolean; url: string; places?: string[] }
 export interface PageIndex { pages: { sentences: Unit[] }[]; read: (s: string) => string; subjects: string[]; ask: string }
 export const PASSAGE_MAX = 2500;
 // A unit that qualifies the whole page, wherever it is: when it was written, that it was corrected or archived, that what it lists
@@ -315,7 +320,7 @@ const TITLE_CUE = /(?<![\p{L}])(?:vs\.?|versus|and|other|others|firms|companies|
 // no cue that it is about more than it or about someone else (TITLE_CUE). The owner's name is lent to a unit that names no asked
 // employer itself; whether the unit states the claim about that employer specifically is the judge's question. A lent quote is
 // labelled with the host alone, never with the title (round 9).
-export function indexPages(pages: { text: string; title?: string; url?: string; fetchedAt?: number; one?: boolean }[], read: (s: string) => string = (s) => s, subjects: string[] = [], o: { sites?: string[]; ask?: string } = {}): PageIndex {
+export function indexPages(pages: { text: string; title?: string; url?: string; fetchedAt?: number; one?: boolean; places?: string[] }[], read: (s: string) => string = (s) => s, subjects: string[] = [], o: { sites?: string[]; ask?: string } = {}): PageIndex {
   const subs = subjects.map(squash).filter(Boolean);
   const hostOf = (u?: string) => { try { return new URL(String(u)).hostname.toLowerCase().replace(/^www\./, ""); } catch { return ""; } };
   const sites = (o.sites ?? []).map((d) => String(d).toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/.*$/, "")).filter((d) => d.split(".").length === 2 && !SHARED.includes(d));
@@ -457,7 +462,7 @@ export function indexPages(pages: { text: string; title?: string; url?: string; 
         const PERIOD_HEAD = /(?<![\p{L}])(hourly|weekly|monthly|annual|yearly|daily)(?![\p{L}])|per (hour|day|week|month|year)/iu;
         const rowText = hd ? text.split(" | ").map((c, j) => { const m = PERIOD_HEAD.exec(hd.split(" | ")[j] ?? ""); const w = m ? ({ hourly: "hour", weekly: "week", monthly: "month", annual: "year", yearly: "year", daily: "day" } as Record<string, string>)[(m[1] ?? "").toLowerCase()] ?? m[2] : ""; return w && /\d/.test(c) && !/(?<![\p{L}])(?:per|an?|\/)\s*(?:hour|day|week|month|year)|hourly|weekly|monthly|yearly|annual/iu.test(c) ? `${c} per ${w}` : c; }).join(" | ") : text;
         return { text, hard: hardParts(rowText, read), lower: lowerWords(r), content: contentWords(r), quotable: quotable(text) && !raw[k].note && !unsafe[k - 1] && !unsafe[k + 1] && !cutFromLimit[k] && (names || lend), lent: lend ? owner : null, label: lend ? pageLabel : "", passage: passage(k), pageTitle: title,
-          ownSite: !!ownSite, url: String(p.url ?? "") };
+          ownSite: !!ownSite, url: String(p.url ?? ""), places: Array.isArray((p as { places?: string[] }).places) ? (p as { places?: string[] }).places! : [] };
       }) };
   }) };
 }
@@ -504,8 +509,20 @@ export function findSupport(claim: string, idx: PageIndex, only?: number[], unit
     // written "City, State" is the city's)
     // (live-12 review item 9: "Stripe (Chicago, IL): pay $40/hr" for "Stripe pays $40/hr": the name nearest the figure is its place,
     // "City, ST", which qualifies the figure; it is no other employer's. Whether the place may be left out is the judge's to read.)
+    // (re-review of 940195e08: "… while Jane Street, NY interns earn $6,000 a week." must never lend Jane Street's figure to Citadel.)
+    // A capitalised "X, ST" is a place, not an owner, only (a) right after a location word ("in", "at", "near", "from", "based in",
+    // "located in", "office in", or a location field's "-", "|"), or (b) when it is exactly a place this chat's tool results gave
+    // (the unit's `places`). Otherwise it stays a possible owner.
     const esc = (o: string) => o.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const placeOf = (o: string) => new RegExp(`(?<![\\p{L}])${esc(o)},\\s(?:${STATE_CODES})(?![\\p{L}])`, "iu").test(s.text) || (new RegExp(`^(?:${STATE_CODES})$`, "i").test(o) && new RegExp(`\\p{L},\\s${esc(o)}(?![\\p{L}])`, "iu").test(s.text));
+    const placeOf = (o: string) => {
+      for (const m of s.text.matchAll(new RegExp(`(\\p{Lu}[\\p{L}.'-]*(?:\\s\\p{Lu}[\\p{L}.'-]*)*),\\s(${STATE_CODES}|${STATE_NAMES})(?![\\p{L}])`, "giu"))) {
+        const city = m[1], st = m[2], whole = `${city}, ${st}`;
+        if (city.toLowerCase() !== o && st.toLowerCase() !== o && !city.toLowerCase().endsWith(` ${o}`)) continue;
+        if (((s as { places?: string[] }).places ?? []).some((p) => p.toLowerCase() === whole.toLowerCase())) return true;
+        if (new RegExp(`(?:^|[\\s(,])(?:in|at|near|from|based in|located in|offices? in)\\s+${esc(whole)}|[-|]\\s*${esc(whole)}`, "iu").test(s.text)) return true;
+      }
+      return false;
+    };
     const otherOwner = (o: string | null) => !!o && !ROLE.test(o) && !placeOf(o) && h.names.some((r) => nameRe(r.join(" ")).test(s.text)) && !(isState(o) && h.names.some((r) => nameRe(`${r.join(" ")}, ${o}`).test(s.text)));
     if (!h.numbers.every((a) => s.hard.numbers.some((b, j) => b === a && (!otherOwner(s.hard.owners[j]) || [...mine].some((n) => n === s.hard.owners[j] || n.startsWith(`${s.hard.owners[j]} `) || s.hard.owners[j]!.startsWith(`${n} `)) && !(s.lent && s.hard.owners[j]!.startsWith(`${s.lent.toLowerCase()} `)))))) continue;
     const n = [...want].filter((w) => s.content.has(w)).length;

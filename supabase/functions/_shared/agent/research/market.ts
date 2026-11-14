@@ -925,7 +925,7 @@ export async function enforceMarketReplySupported(reply: string, r: MarketResult
       if (line) { row.push(show(line.text, line.cite)); continue; }
       if (pureUnconfirmed(s, ask) || shownWhole(s)) { row.push(bare(s)); continue; }
       // Live-12 (item 2): a hedge, a caveat or a gap admitted (no figure, no name, no date), or a question with no figure, is not judged.
-      if (noClaim(s) || personQuestion(s)) { row.push(bare(s)); continue; }
+      if (noClaim(s) || personQuestion(s, ask)) { row.push(bare(s)); continue; }
       const cs = [...s.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1])).filter((n) => n >= 1 && n <= max).map((n) => sup.pageOfN[n - 1]).filter((k) => k >= 0);
       const cites = /\[\d+\]/.test(s);
       cited[wants.length] = [...s.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1])).filter((n) => n >= 1 && n <= max);
@@ -988,7 +988,7 @@ export async function enforceMarketReplySupported(reply: string, r: MarketResult
     // removed: it goes (a fragment with no subject of its own).
     .filter((para) => !/^(?:It|They|This|These|That|Those|He|She|Its|Their)\b/.test(para.trim())).join("\n\n");
   // (a body of hedges alone answers nothing: it is said only beside a sentence that stood; else code says it could not verify one)
-  const answered = rows.flat().some((x) => typeof x === "number" && vs[x].how !== "drop") || rows.flat().some((x) => typeof x === "string" && !noClaim(x) && !personQuestion(x));
+  const answered = rows.flat().some((x) => typeof x === "number" && vs[x].how !== "drop") || rows.flat().some((x) => typeof x === "string" && !noClaim(x) && !personQuestion(x, ask));
   const withChat = chatLinks.length && body ? `${body}\n${chatLinks.join("\n")}` : body;
   return enforceMarketReply("", r, shown, { body: answered ? withChat : "" });
 }

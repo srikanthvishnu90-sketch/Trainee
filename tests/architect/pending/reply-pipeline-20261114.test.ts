@@ -106,7 +106,9 @@ Deno.test("review 3: the tags go, the sources stay: a kept sentence's cited unit
 });
 
 Deno.test("review 4: a question goes unjudged only when it asks the person about their own situation", async () => {
-  for (const q of ["Which email should go on the resume?", "Want me to check the questions?", "Are you authorized to work in the U.S. without sponsorship?"]) ok(personQuestion(q), q);
+  for (const q of ["Which email should go on the resume?", "Want me to check the questions?", "Are you authorized to work without sponsorship?"]) ok(personQuestion(q), q);
+  // (a name that is neither the person's record's nor the ask's makes it a claim to judge: re-review of 940195e08)
+  ok(!personQuestion("Are you authorized to work in the U.S. without sponsorship?"));
   for (const q of ["Did you know Stripe stopped sponsoring visas?", "Is Stripe still hiring interns?", "Have you heard that the posting closed?", "Can you believe interns earn $90 an hour?"]) ok(!personQuestion(q), q);
   const v = await verifyTagged("Did you know Stripe stopped sponsoring visas?", startup(), { judge: yes });
   eq(v.text, "");
@@ -136,10 +138,28 @@ Deno.test("review 8: the fallback matches the ask's employer and place both (D73
 
 Deno.test("review 9: an exact restatement of a strict subset of the unit stands (the place qualifying the figure may be left to the judge)", async () => {
   const l = new Ledger();
-  l.add("chat", "Stripe (Chicago, IL): pay $40/hr", { url: "https://stripe.example/j1" });
+  l.add("chat", "Stripe (Chicago, IL): pay $40/hr", { url: "https://stripe.example/j1", places: ["Chicago, IL"] });
   for (const s of ["Stripe pays $40/hr [E1].", "Stripe pays $40/hr in Chicago [E1]."]) eq((await verifyTagged(s, l, { judge: yes })).failures, [], s);
   // A figure that is another employer's never stands.
   const m = new Ledger(); m.add("chat", "Jane Street, Citadel: pay $40/hr"); m.add("chat", "Citadel pays $40/hr; Jane Street pays $50/hr.");
   ok((await verifyTagged("Jane Street pays $40/hr [E1].", m, { judge: yes })).failures.length === 1);
   ok((await verifyTagged("Jane Street pays $40/hr [E2].", m, { judge: yes })).failures.length === 1);
+});
+
+// ---- re-review of 940195e08
+import { findSupport, indexPages } from "../../../supabase/functions/_shared/agent/research/support.ts";
+Deno.test("re-review 1: another employer's 'X, ST' is an owner, never a place (layer A refuses); a located place is a place", () => {
+  const holds = (u: string, c: string, places: string[] = []) => !!findSupport(c, indexPages([{ text: u, title: "T", places }]));
+  ok(!holds("Citadel interns earn $5,000 a week while Jane Street, NY interns earn $6,000 a week.", "Citadel interns earn $6,000 a week."));
+  ok(!holds("Citadel interns earn $5,000 a week while DRW, IL interns earn $6,000 a week.", "Citadel interns earn $6,000 a week."));
+  ok(holds("Stripe pays $40/hr in Chicago, IL.", "Stripe pays $40/hr"));
+  ok(holds("Stripe (Chicago, IL): pay $40/hr", "Stripe pays $40/hr", ["Chicago, IL"]), "a place the chat's tool results gave");
+  ok(!holds("Stripe (Chicago, IL): pay $40/hr", "Stripe pays $40/hr"), "with no location word and no chat place, it stays a possible owner");
+});
+Deno.test("re-review 2: a question to the person naming a world event, or a name not theirs, is judged", async () => {
+  ok(!personQuestion("Are you okay with Stripe's layoffs last month?"));
+  ok(!personQuestion("Are you okay with the layoffs last month?"));
+  ok(personQuestion("Do you want me to tailor it for Stripe?", "what does stripe pay"));
+  const v = await verifyTagged("Are you okay with Stripe's layoffs last month?", startup(), { judge: async (cs) => cs.map(() => "no" as const) });
+  eq(v.text, "");
 });

@@ -46,7 +46,7 @@ Deno.test("WO-061/4 a run already at the cap runs nothing", async () => {
 Deno.test("WO-061/5 the workflow passes the cap, never reads a stopped run as a score, judges twice with Claude and logs every run", async () => {
   const wf = await Deno.readTextFile(".github/workflows/brain-eval.yml");
   { const m = wf.match(/MODEL_BUDGET_TARGET_USD: "([0-9.]+)"/), h = wf.match(/MODEL_BUDGET_HARD_USD: "([0-9.]+)"/);
-    if (!m || Number(m[1]) !== 70 || !h || Number(h[1]) !== 70) throw new Error("the owner's directive (2026-11-02) is one $70 total: target and hard max both 70"); }
+    if (!m || Number(m[1]) !== 85 || !h || Number(h[1]) !== 85) throw new Error("the owner's directive (2026-11-02, raised 2026-11-12, D-074, to $85 2026-11-14, D-084) is one $85 total: target and hard max both 85"); } // Architect amendment (owner decision 2026-11-14, D-084: total raised to $85)
   if (!/ANTHROPIC_EVAL_BUDGET_USD: "[0-9.]+"/.test(wf)) throw new Error("no Anthropic budget cap env");
   { const vt = await Deno.readTextFile("evals/career/verdict.ts"), second = wf.slice(wf.indexOf("A second, independent reading"));
     if (!/\.stopped/.test(vt) || !/judge error/.test(vt)) throw new Error("the verdict reads a stopped run or a run whose judge errored");

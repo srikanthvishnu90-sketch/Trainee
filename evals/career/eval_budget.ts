@@ -1,18 +1,18 @@
-// Eval spend control for a Claude-only campaign (owner, 2026-11-02: ONE total of $70 for the cycle; target and hard max are both $70).
+// Eval spend control for a Claude-only campaign (owner, 2026-11-02: ONE total of $85 for the cycle; target and hard max are both $85).
 //
 // Three layers, outermost first (the first two live in supabase/functions/_shared/model_budget.ts, owned by the
 // feat/claude-only-gateway PR; this file only reads and obeys them):
 //   1. every model call reserves against a BudgetGate before it is sent (callModel). With SUPABASE_URL and
 //      SUPABASE_SERVICE_ROLE_KEY set that is the shared database ledger (restBudgetGate); without them, a process-local twin.
-//   2. env MODEL_BUDGET_TARGET_USD (70) and MODEL_BUDGET_HARD_USD (70) name the ledger's target and hard stop.
+//   2. env MODEL_BUDGET_TARGET_USD (85) and MODEL_BUDGET_HARD_USD (85) name the ledger's target and hard stop.
 //   3. THIS FILE: a per-run preflight quote (token estimate x price) that refuses to start a run that would cross 80% of what
 //      remains under the target, and a spend line written to the run summary. Parallel passes (five processes, each seeing only
 //      the spend recorded before it started) are quoted together via EVAL_PARALLEL / --parallel.
 // Dependency (not in this PR): if the gateway PR exports a ledger status reader, pass it as `status` to preflight().
 import type { PriceRow } from "../../supabase/functions/_shared/model_budget.ts";
 
-export const DEFAULT_TARGET_USD = 70;
-export const DEFAULT_HARD_USD = 70;
+export const DEFAULT_TARGET_USD = 85;
+export const DEFAULT_HARD_USD = 85;
 export const PREFLIGHT_SHARE = 1;
 
 export function budgetTargets(get: (k: string) => string | undefined): { target: number; hard: number } {
@@ -23,7 +23,7 @@ export function budgetTargets(get: (k: string) => string | undefined): { target:
 }
 
 // Spend already recorded on disk that counts against the Anthropic campaign: result files of a run that used a Claude model
-// (brain or judge): brain + judge cost. OpenAI-era files are history, not part of the $70 (owner to confirm).
+// (brain or judge): brain + judge cost. OpenAI-era files are history, not part of the $85 (owner to confirm).
 export function claudeSpentUsd(results: { label?: string; model?: string | null; judge_model?: string | null; judge_model_2?: string | null; cost?: unknown; cost_usd?: { brain?: number; judge?: number } | number }[], exceptLabel = ""): number {
   const seen = new Set<string>();
   let sum = 0;
@@ -69,7 +69,7 @@ export function quoteRun(o: { items: number; brain: "router" | "staged" | "agent
 }
 
 export interface Preflight { ok: boolean; reason: string | null; line: string; quote_usd: number; parallel: number; remaining_usd: number }
-// Refuse when the quote (times the passes that run at once) exceeds what remains of the $70 total (remaining = total minus recorded spend); the line prints the remaining allowance.
+// Refuse when the quote (times the passes that run at once) exceeds what remains of the $85 total (remaining = total minus recorded spend); the line prints the remaining allowance.
 export function preflight(o: { quote: Quote; parallel?: number; spent_usd: number; target_usd: number; hard_usd: number; ledger: "shared" | "process-local" }): Preflight {
   const parallel = Math.max(1, o.parallel ?? 1), q = o.quote.total_usd * parallel, remaining = Math.max(0, o.target_usd - o.spent_usd);
   let reason: string | null = null;
@@ -101,10 +101,50 @@ export function openGate(bud: { resolveBudgetGate: (explicit: undefined, get: (k
   return { gate, shared };
 }
 
-// Total recorded spend (settled + reserved) in the shared ledger, in USD: what ALL runs have used of the one $70. null = unreadable
+// Total recorded spend (settled + reserved) in the shared ledger, in USD: what ALL runs have used of the one $85. null = unreadable
 // (the caller refuses to start).
 export async function ledgerSpentUsd(gate: { status?: () => Promise<{ total: number } | null> } | null): Promise<number | null> {
   if (!gate?.status) return null;
   const st = await gate.status();
   return st ? st.total / 1e6 : null;
+}
+
+// ---- live runners outside run.ts (real-sets research/people, mirror run-trainee, mirror held-out live) ------------------------
+// Each one, when --live, goes through the SAME shared ledger as run.ts (model_budget.ts resolveBudgetGate with EVAL_LEDGER=shared,
+// so never the process-local twin): the run's whole cap is reserved before the first model call and settled to the metered cost
+// at the end (also on error; an unknown cost settles as the whole cap). Refused (no model call): a cap above LIVE_RUN_MAX_USD, an
+// approval that is not a row of docs/architect/DECISIONS.md, a missing or unreachable ledger, a refused reservation. In GitHub
+// Actions too the runner reserves and settles its own cap (the workflow gives the run step the ledger secrets): a reservation id
+// handed in from outside is never trusted, since the ledger has no narrow read of one reservation to check it against.
+export const LIVE_RUN_MAX_USD = 10;
+const DECISIONS_URL = new URL("../../docs/architect/DECISIONS.md", import.meta.url);
+export function approvalRowExists(approval: string, decisions: string): boolean {
+  if (!/^D-\d{3}[a-z]?$/.test(approval)) return false;
+  return decisions.split("\n").some((l) => l.startsWith(`| ${approval} |`));
+}
+export interface LiveLedger { id: string; settle(spentUsd: number | null): Promise<boolean> }
+type LedgerGate = { reserve: (m: number, meta?: any) => Promise<{ ok: boolean; id?: string; reason?: string; detail?: string }>; settle: (id: string, actual: number | null) => Promise<boolean>; status?: () => Promise<{ total: number } | null> };
+export async function openLiveRunLedger(o: { budgetUsd: number; approval: string; get: (k: string) => string | undefined;
+  bud: { resolveBudgetGate: (explicit: undefined, get: (k: string) => string | undefined) => unknown }; decisions?: string; model?: string }): Promise<LiveLedger | { error: string }> {
+  if (!(o.budgetUsd > 0 && o.budgetUsd <= LIVE_RUN_MAX_USD)) return { error: `--budget-usd must be above 0 and at most ${LIVE_RUN_MAX_USD} (the per-run maximum)` };
+  let decisions = o.decisions;
+  if (decisions === undefined) { try { decisions = await Deno.readTextFile(DECISIONS_URL); } catch (_) { decisions = ""; } }
+  if (!approvalRowExists(o.approval, decisions)) return { error: `the approval "${o.approval}" is not a row of docs/architect/DECISIONS.md` };
+  const shared = (k: string) => k === "EVAL_LEDGER" ? "shared" : o.get(k);
+  const gate = o.bud.resolveBudgetGate(undefined, shared) as LedgerGate | null;
+  if (!gate) {
+    const missing = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"].filter((k) => !String(o.get(k) ?? "").trim());
+    return { error: `the shared budget ledger cannot be opened (${missing.length ? `missing: ${missing.join(", ")}` : "MODEL_BUDGET_* is malformed"}); a run that is not counted in the one total does not start` };
+  }
+  const st = gate.status ? await gate.status() : null;
+  if (!st) return { error: "the shared budget ledger is unreachable or unreadable; no model call is made" };
+  const r = await gate.reserve(Math.ceil(o.budgetUsd * 1e6), { model: o.model ?? "claude-sonnet-5-5", role: "eval" });
+  if (!r.ok || !r.id) return { error: `the shared ledger refused the cap $${o.budgetUsd} (recorded $${(st.total / 1e6).toFixed(4)}): ${r.reason ?? "refused"}${r.detail ? ` (${r.detail})` : ""}` };
+  const id = r.id;
+  let done = false;
+  return { id, settle: async (spentUsd) => {
+    if (done) return true;
+    done = true;
+    return await gate.settle(id, spentUsd === null || !Number.isFinite(spentUsd) ? null : Math.ceil(Math.max(0, spentUsd) * 1e6));
+  } };
 }

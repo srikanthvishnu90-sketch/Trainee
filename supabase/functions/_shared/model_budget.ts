@@ -1,13 +1,13 @@
-// The shared TOTAL model budget (owner, 2026-11-02 22:02 CT: Claude-only; the release+test cycle has ONE total of $70, and
+// The shared TOTAL model budget (owner, 2026-11-02 22:02 CT: Claude-only; the release+test cycle has ONE total of $85, and
 // MODEL_BUDGET_TARGET_USD and MODEL_BUDGET_HARD_USD both default to it). ONE ledger covers production AND evals: when a Supabase project is
 // configured every caller reserves in the same database ledger (supabase/migrations/20261102160000_model_budget_total_cap.sql, which
 // sums spend over all days); where there is no project the process-local twin applies the same arithmetic. Replaces the per-day
 // windows of 2026-10-28 (the old daily rows stay as history; the total sums them, so nothing already spent is forgotten).
 //
-//   MODEL_BUDGET_TARGET_USD (default 70)   at 80% of it ($56): a warning flag (reserve answers warn; the gateway logs it; one
+//   MODEL_BUDGET_TARGET_USD (default 85)   at 80% of it ($68): a warning flag (reserve answers warn; the gateway logs it; one
 //                                          founder_alerts row). Eval and test runners refuse to start a run at or over it
 //                                          (assertRunMayStart below).
-//   MODEL_BUDGET_HARD_USD   (default 70)   the same $70 total, as the stop. A reservation counts toward it BEFORE its call; one that does not fit
+//   MODEL_BUDGET_HARD_USD   (default 85)   the same $85 total, as the stop. A reservation counts toward it BEFORE its call; one that does not fit
 //                                          makes NO request (ModelBudgetBlockedError "limit"). When spent + reserved reaches it the
 //                                          database sets the 'paused' setting (the MODEL_BUDGET_PAUSED switch's twin) and every model
 //                                          call is refused until the owner raises the hard max and clears it.
@@ -24,8 +24,8 @@
 // a failing database, the call is refused.
 import { ModelBudgetBlockedError } from "./model_calls.ts";
 
-export const DEFAULT_TARGET_USD = 70;
-export const DEFAULT_HARD_USD = 70;
+export const DEFAULT_TARGET_USD = 85;
+export const DEFAULT_HARD_USD = 85;
 export const DEFAULT_TARGET_MICROS = DEFAULT_TARGET_USD * 1_000_000;
 export const DEFAULT_HARD_MICROS = DEFAULT_HARD_USD * 1_000_000;
 // The warning flag rises at this share of the TARGET (spent + reserved).
@@ -64,7 +64,7 @@ export function chicagoDay(ms: number): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: BUDGET_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(ms));
 }
 
-// MODEL_BUDGET_TARGET_USD and MODEL_BUDGET_HARD_USD as whole micro-dollars. Unset or blank = the default ($70 total for both). Anything
+// MODEL_BUDGET_TARGET_USD and MODEL_BUDGET_HARD_USD as whole micro-dollars. Unset or blank = the default ($85 total for both). Anything
 // else must be a positive number of dollars, and the hard max must not be below the target; otherwise null and the caller refuses
 // to spend (a typo must never lift or hide a limit).
 const usdMicros = (raw: string, dflt: number): number | null => {
@@ -100,7 +100,7 @@ export function rpcBudgetGate(rpc: Rpc, limits: BudgetLimits = { target: DEFAULT
         if (r.error) return { ok: false, reason: "unavailable", detail: String(r.error.message ?? r.error).slice(0, 200) };
         const d = r.data;
         if (d && d.ok === true && isUuid(d.id)) return { ok: true, id: d.id, ...(d.warn === true ? { warn: true } : {}), ...(d.over_target === true ? { overTarget: true } : {}) };
-        // R10 WO-D: a refusal that names a day is that budget day's own cap (its window is open); the $70 total names none.
+        // R10 WO-D: a refusal that names a day is that budget day's own cap (its window is open); the $85 total names none.
         if (d && d.ok === false && d.state === "limit") return { ok: false, reason: "limit", ...(typeof d.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d.day) ? { day: d.day } : {}) };
         if (d && d.ok === false && d.state === "paused") return { ok: false, reason: "paused" };
         if (d && d.ok === false && d.state === "before_window") return { ok: false, reason: "before" };
@@ -143,7 +143,7 @@ export function restBudgetGate(url: string, serviceKey: string, request: typeof 
 // ---- the process-local twin ------------------------------------------------------------------------------------------
 // Same arithmetic, in one JS process (every step is synchronous, so it cannot interleave): one total for the life of the
 // process, no calendar. For machines without a project.
-// limitMicros is the HARD max; the target defaults to $70 or the hard max, whichever is lower.
+// limitMicros is the HARD max; the target defaults to $85 or the hard max, whichever is lower.
 export function memoryBudgetGate(limitMicros = DEFAULT_HARD_MICROS, targetMicros = Math.min(DEFAULT_TARGET_MICROS, limitMicros)): BudgetGate & { status(): Promise<BudgetStatus>; snapshot(): { spent: number; reserved: number; limit: number; target: number; warn: boolean; overTarget: boolean } } {
   const t = { spent: 0, reserved: 0 };
   const open = new Map<string, number>();
@@ -175,7 +175,7 @@ export function denoEnvGet(): EnvGet | null {
 
 // The gate for a call: the caller's own (tests, a handler with an admin client), else the project's shared ledger, else the local twin.
 // null = refuse (a project URL with no service key).
-// EVAL_LEDGER=shared (set by every eval/measure workflow): the run must count against the ONE $70 database ledger. A process-local twin
+// EVAL_LEDGER=shared (set by every eval/measure workflow): the run must count against the ONE $85 database ledger. A process-local twin
 // would only see this process, so when the project URL or service key is missing the answer is "no gate" (fail closed), and the problem
 // names the missing piece.
 export const evalLedgerShared = (get: EnvGet | null): boolean => String(get?.("EVAL_LEDGER") ?? "").trim().toLowerCase() === "shared";
@@ -231,7 +231,7 @@ export function usageProven(provider: string, raw: any): boolean {
   return ok(u.input_tokens) && ok(u.output_tokens);
 }
 
-// An eval or test runner calls this BEFORE starting any new run (owner, 2026-11-02): at or over the $70 total the run does not
+// An eval or test runner calls this BEFORE starting any new run (owner, 2026-11-02): at or over the $85 total the run does not
 // start; and when the run's quoted worst case is given (micros) the ledger must be able to take it right now (it is reserved,
 // then released: a proven no-call). Production serving does not call it (each of its calls reserves in callModel; no per-person gate, D-046); every
 // reservation still counts in the ledger. An unreadable ledger also refuses (fail closed). Throws ModelBudgetBlockedError

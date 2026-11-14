@@ -202,6 +202,7 @@
     "tests/career-r1c11-gap-classes.test.cjs": 0.1,
     "tests/career-referrals-completion.test.cjs": 0.4,
     "tests/career-render-edge-pdf.test.cjs": 0.2,
+    "tests/career-render-contact-failclosed.test.cjs": 0.1,
     "tests/career-render-skills-floor.test.cjs": 0.1,
     "tests/career-render.test.cjs": 0.2,
     "tests/career-rendered-values.test.cjs": 0.6,

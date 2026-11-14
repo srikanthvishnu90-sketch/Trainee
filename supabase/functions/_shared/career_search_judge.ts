@@ -358,6 +358,8 @@ const boardName = (jobId: string) => BOARD_NAMES[String(jobId).split(":")[0]] ??
 export interface ShortlistEntry { id: string | null; title: string; company: string | null; location: string | null; url: string | null }
 // limits: the level, pay floor, employer, season and sponsorship the person stated (posting_constraints.ts); remoteOnly: they
 // asked for remote alone, not "this city or remote".
+// How many roles a search lists when the person names no count (D-072 files writers: the search plan's first batch says it).
+export const SHOW_DEFAULT = 8;
 export interface SearchAsk { role: string; place: string | null; remote: boolean; remoteOnly?: boolean; limits?: Limits; prevPlace?: string | null;
   // R10 WO-C: a widened search (search_widen.ts): every role title asked for so far, the place's metro area, remote in the US
   // only, and the roles an earlier reply listed (kept first, under the same numbers).
@@ -509,7 +511,7 @@ export async function searchJudgeTurn(o: {
 }): Promise<SearchJudgeResult | null> {
   const clock = o.clock ?? NO_CLOCK;
   const ask = o.ask, roleWords = roleWordsOf(ask.role), placeWords = ask.place ? searchWords(ask.place) : [];
-  const show = Math.max(1, Math.min(12, o.show ?? 8));
+  const show = Math.max(1, Math.min(12, o.show ?? SHOW_DEFAULT));
   const N = Math.max(1, Math.min(JUDGE_MAX_N, Math.floor(Number(o.judge.n) || JUDGE_DEFAULT_N)));
   // 1. The source: the live board when it has a match, else the snapshot. A read that fails is said, never guessed.
   let source: "live" | "snapshot" | "none" = "none", pool: SourcePosting[] = [], liveNote = "";

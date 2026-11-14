@@ -21,13 +21,13 @@ import { type ConfirmStore } from "./career_apply_confirm.ts";
 import { assessmentDeadline, type Deadline, type Draft, dueText as dueTextOf, sameCompany } from "./career_mail.ts";
 import { careerTokenFor, CAREER_READ_SCOPE, type ReadResult, readMailSince, type TokenDeps } from "./career_mail_gmail.ts";
 import type { MailStore } from "./career_mail_store.ts";
-import { type Admit, dayStartOf, type Message, messageOf, type OutreachDraft, type OutreachStore, payloadHash, recordOutreach, type SendResult } from "./career_outreach.ts";
+import { type Admit, dayStartOf, isMailReply, type Message, messageOf, type OutreachDraft, type OutreachStore, payloadHash, recordOutreach, type SendResult } from "./career_outreach.ts";
 import { ONE_ADDRESS, type Threading } from "./career_outreach_gmail.ts";
 import { runMail } from "./career_proactive_run.ts";
 import { type DraftRow, type ReadStanding, standingFrom } from "./career_standing.ts";
 import { vaultRefreshWrite } from "./oauth_vault_refresh.ts";
 import { PARTIAL_WORDS } from "./oauth_connect.ts";
-import { MAIL_REPLY_CARD_INTENT, type ReplyCardMeta, replyAnswer } from "./career_mail_reply.ts"; // D-062: answering an email
+import { MAIL_REPLY_CARD_INTENT, type ReplyAnswerDeps, type ReplyCardMeta, replyAnswer } from "./career_mail_reply.ts"; // D-062: answering an email
 import { accountToken, googleAccounts, readAllMailboxes } from "./career_google_accounts.ts"; // D-062: several Google accounts
 
 export const CHECK_INTENT = "career_inbox_check";
@@ -166,6 +166,9 @@ export interface FollowupDeps {
   mailOn: boolean; readNow: (userId: string) => Promise<MailNow>;
   sendOn: boolean; canSend: (userId: string, from?: string | null) => Promise<boolean>; send: (userId: string, m: Message, t?: Threading | null) => Promise<SendResult>;
   connectAsk?: string;
+  // Answering an email (career_mail_reply.ts): the person's own accounts that may send, and the Sent mailbox check a try with an
+  // unknown outcome needs before anything is sent again.
+  sendAccounts?: ReplyAnswerDeps["accounts"]; findSent?: ReplyAnswerDeps["findSent"];
   // D-037 (incremental authorization): the person's "allow sending" link (a connect link with reason "send" that asks Google
   // for gmail.send on top of their grant), or null when it can't be made. Offered only when a send was refused for want of it.
   sendConsent?: (userId: string) => Promise<string | null>;
@@ -204,7 +207,7 @@ async function isOutreachPerson(store: OutreachStore, userId: string, name: stri
   if (!store.history) return false;
   const want = String(name ?? "").toLowerCase().replace(/[^a-z ]+/g, " ").replace(/\s+/g, " ").trim();
   if (!want) return false;
-  const rows = await store.history(userId, 500).catch(() => []);
+  const rows = (await store.history(userId, 500).catch(() => [])).filter((d) => !isMailReply(d));
   return rows.some((d) => { const n = String(d.recipient?.name ?? "").toLowerCase().replace(/[^a-z ]+/g, " ").replace(/\s+/g, " ").trim(); return n === want || n.split(" ")[0] === want; });
 }
 // Which follow-up the person means: the drafted one for that employer first, then the due one, of the kind they named.
@@ -225,7 +228,7 @@ export async function followupTurn(o: { message: string; userId: string; threadI
   // D-062: the reply card for an email in the person's inbox (career_mail_reply.ts): a yes sends exactly it once, a no drops it.
   if (last?.intent === MAIL_REPLY_CARD_INTENT && typeof last.meta?.mail_reply_card === "string" && last.meta?.mail_reply && (ans.kind === "yes" || ans.kind === "no")) {
     return await replyAnswer({ userId: o.userId, now: o.now, answer: ans.kind, meta: last.meta as unknown as ReplyCardMeta,
-      deps: { outreach: o.deps.outreach, sendOn: o.deps.sendOn, canSend: o.deps.canSend, send: o.deps.send, sendConsent: o.deps.sendConsent } });
+      deps: { outreach: o.deps.outreach, sendOn: o.deps.sendOn, canSend: o.deps.canSend, send: o.deps.send, sendConsent: o.deps.sendConsent, accounts: o.deps.sendAccounts, findSent: o.deps.findSent } });
   }
   if (!last || last.intent !== FOLLOWUP_CARD_INTENT) return null;
   if (last.meta?.followup_ask && typeof last.meta.followup_ask === "object") return await askAnswer(o, ans, last.meta.followup_ask as Card);
@@ -271,7 +274,7 @@ async function cardTurn(o: { userId: string; threadId: string; now: number; deps
     if (!known && await isOutreachPerson(o.deps.outreach, o.userId, ask.company)) return null;
     return done(known
       ? `No ${what} is due for ${clip(ask.company, 80)} right now: an application gets a follow-up after 14 days with no reply, and an interview step a thank-you after 7 days with nothing since. Nothing was drafted or sent.`
-      : `There's no application to ${clip(ask.company, 80)} on record, so there's no ${what} to send. Nothing was drafted or sent.`, "none_due");
+      : `There's no application to ${clip(ask.company, 80)} on record, so there's no ${what} to send. That is Trainee's own record and your tracker; your email was not checked for this answer. Nothing was drafted or sent.`, "none_due");
   }
   const c = found[0];
   if (ask.to) return await show(o, { ...c, to: ask.to, via: "typed" });
@@ -340,10 +343,12 @@ async function cardAnswer(o: { userId: string; threadId: string; now: number; de
   const at = new Date(o.now).toISOString();
   const approved: OutreachDraft = { ...d, status: "approved", approved_hash: h, approved_at: at };
   if (!(await s.update(o.userId, approved, { status: "shown", hash: h }))) return done("Not sent: the email changed after you saw it, so your yes was not for this version.", "changed");
-  const admit = await s.claim(o.userId, approved, h, o.now, dayStartOf(o.now));
+  // As for a mail reply (career_mail_reply.ts): the approval stands only with its claim; a claim that throws puts the card back.
+  let admit: string;
+  try { admit = await s.claim(o.userId, approved, h, o.now, dayStartOf(o.now)); } catch (e) { console.error("follow-up: claim failed", e instanceof Error ? e.message : String(e)); admit = "error"; }
   if (admit !== "ok") {
-    await s.update(o.userId, { ...approved, status: "shown", approved_hash: null, approved_at: null, result: admit }, { status: "approved" });
-    return waiting(`Not sent: ${ADMIT[admit] ?? admit}. Nothing went to ${co}.`, admit);
+    await s.update(o.userId, { ...approved, status: "shown", approved_hash: null, approved_at: null, result: admit }, { status: "approved" }).catch(() => false);
+    return waiting(`Not sent: ${admit === "error" ? "the approval could not be recorded just now" : (ADMIT as Record<string, string>)[admit] ?? admit}. Nothing went to ${co}.`, admit === "error" ? "not_recorded" : admit);
   }
   const sending: OutreachDraft = { ...approved, status: "sending", sent_at: at };
   const r = await o.deps.send(o.userId, m).catch((e) => ({ status: "ERROR", detail: e instanceof Error ? e.message : String(e) }) as SendResult);
@@ -352,6 +357,12 @@ async function cardAnswer(o: { userId: string; threadId: string; now: number; de
     await o.deps.markSent(o.userId, c, d.id, o.now).catch((e) => console.error("follow-up: sent, not marked on the mail draft", e instanceof Error ? e.message : String(e)));
     await recordOutreach(o.deps.events, o.userId, "outreach_sent", d, o.now, { followup: c.kind, key: c.key });
     return done(`Sent to ${m.to} from your Gmail: your ${word(c.kind)} to ${co}, exactly as shown. I'll tell you when ${co} writes back, once I read your mail.`, "sent");
+  }
+  // No answer, a timeout or a 5xx: Gmail may have taken it. The row stays claimed ("sending"), so no later yes or run sends it
+  // again, and the reply says it is unconfirmed (this card has no Sent check of its own: the person looks in Sent).
+  if (r.status === "ERROR" && r.not_sent !== true) {
+    await s.update(o.userId, { ...sending, result: `unknown_outcome: ${r.detail}`.slice(0, 200) }, { status: "sending" });
+    return done(`Unconfirmed: I can't tell whether your ${word(c.kind)} to ${co} was sent (${clip(r.detail, 120)}). It may have gone, so I have not tried again and won't. Look in your Sent folder; if it is not there, ask me for the ${word(c.kind)} again.`, "unknown_outcome");
   }
   // Nothing went (no grant that may send, a limit, Gmail's refusal): the same card waits for a fresh yes.
   await s.update(o.userId, { ...sending, status: "shown", approved_hash: null, approved_at: null, sent_at: null, result: r.status === "NOT_WIRED" ? "not_wired" : r.status === "RATE_LIMITED" ? "rate_limited" : `error: ${r.detail}`.slice(0, 200) }, { status: "sending" });

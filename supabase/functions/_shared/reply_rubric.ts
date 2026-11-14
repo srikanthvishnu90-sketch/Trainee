@@ -4,7 +4,8 @@
 // the rules the reply breaks, each with the words that break it. It never changes a reply.
 //
 // Who uses it: unit tests (tests/edge/reply-rubric.test.ts), the WO-N sweep over the flow and journey suites, and the R10
-// loop's R-3 writing-quality row. It is not on the live reply path: nothing in agent-chat imports it.
+// loop's R-3 writing-quality row. On the live reply path only answersFirst is used, and only as a check that asks the model once
+// to rewrite (D-072: agent-chat/career_brain.ts processCheck, a review of a practice answer); it never changes a reply itself.
 //
 // A rule that needs an input the caller did not give (facts, proofs, a pending decision, a blocker, the person's zone) is
 // reported in `skipped`, never passed silently.

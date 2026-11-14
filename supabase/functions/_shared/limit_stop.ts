@@ -5,7 +5,7 @@
 // sent the graduation-window template with "as of 2026-10-13" and then "The limit resets at midnight UTC."
 //
 // The limits, from the model call's own refusal (model_calls.ts ModelUnavailableError types):
-//   global        the product's AI budget is used up (model_budget.ts, $70 for the cycle): the owner must approve more
+//   global        the product's AI budget is used up (model_budget.ts, $85 for the cycle): the owner must approve more
 //   budget_day    an approved day window's own cap is used up: it resets when the budget day turns, midnight US Central
 //                 (model_budget_day: the America/Chicago date; chicagoDay is its twin), said in the person's own zone
 //   budget_after  the budget window ended: the owner must approve more
@@ -73,7 +73,9 @@ function timeIn(ms: number, zone: PersonZone | null): string {
 }
 
 // What stopped and the next step, said for this limit. A time is given only when one is known (the provider's retry-after).
-export function nextStepOf(stop: LimitStop, zone: PersonZone | null, retryAt: number | null = null): string {
+// `noneSent`: the turn's recorded effects show nothing ran that could have sent or applied (effectsOf); only then does the
+// spending-limit line say "nothing was sent".
+export function nextStepOf(stop: LimitStop, zone: PersonZone | null, retryAt: number | null = null, noneSent = true): string {
   switch (stop) {
     case "rate_limit": return retryAt
       ? `The AI service is turning requests away for now. Say "continue" after ${timeIn(retryAt, zone)} and I'll pick it up.`
@@ -86,7 +88,7 @@ export function nextStepOf(stop: LimitStop, zone: PersonZone | null, retryAt: nu
     case "budget_before": return `Trainee's AI budget hasn't opened yet. Once it opens, say "continue" and I'll pick it up.`;
     case "paused": return `Trainee's AI is switched off for a short while. Say "continue" later and I'll pick it up.`;
     case "unchecked": return `I couldn't check Trainee's AI budget, so I made no AI call. Say "continue" later and I'll pick it up.`;
-    case "spend_limit": return `The AI was stopped at a spending limit, so this was not finished and nothing was sent. Once more spend is approved, say "continue" and I'll pick it up.`;
+    case "spend_limit": return `The AI was stopped at a spending limit, so this was not finished${noneSent ? " and nothing was sent" : ""}. Once more spend is approved, say "continue" and I'll pick it up.`;
     case "outage": return `The AI service failed on this one (an error on its side, not a limit). Say "continue" in a minute and I'll pick it up.`;
   }
 }
@@ -109,9 +111,34 @@ export function taskOf(message: string): string {
   return of ? `your question about ${of.trim()}` : "your last request";
 }
 
-// The reply in place of an answer the AI could not give: the kept task named, the next step, nothing applied for.
-export function heldReply(message: string, stop: LimitStop, zone: PersonZone | null, retryAt: number | null = null): string {
-  return `I couldn't finish ${taskOf(message)} without the AI: it is kept. ${nextStepOf(stop, zone, retryAt)} Nothing was applied for, and searching postings still works now.`;
+// Review 2026-11-13 (fail closed): what the turn did before the AI stopped, from the loop's own record of its tool calls
+// (agent/loop.ts TurnResult.tool_calls: name, ok, effect). "Nothing was sent" / "Nothing was applied for" is said only when
+// that record shows no write ran and none failed partway. An external action is never run by the loop (it is put up for the
+// person's yes), so it is named as waiting. A write that ran is named; a write or an unknown tool that failed, or a turn whose
+// record is missing (null), is said as not confirmed.
+export interface TurnEffectCall { name: string; ok: boolean; effect: "read" | "write_own" | "external" | null }
+const words = (name: string) => String(name || "a step").replace(/_/g, " ");
+export function effectsOf(calls: readonly TurnEffectCall[] | null): { none: boolean; line: string } {
+  if (!Array.isArray(calls)) return { none: false, line: "I couldn't confirm what this turn did before it stopped, so whether anything was sent or applied for is not confirmed." };
+  const ran = [...new Set(calls.filter((c) => c.ok && c.effect === "write_own").map((c) => words(c.name)))];
+  const unsure = [...new Set(calls.filter((c) => !c.ok && c.effect !== "read").map((c) => words(c.name)))];
+  const waiting = calls.filter((c) => c.ok && c.effect === "external").length;
+  if (!ran.length && !unsure.length && !waiting) return { none: true, line: "" };
+  const out: string[] = [];
+  if (ran.length) out.push(`Before it stopped, this ran: ${ran.join(", ")}.`);
+  if (unsure.length) out.push(`${unsure.join(", ")} failed partway, and I couldn't confirm what it changed.`);
+  if (waiting && !ran.length && !unsure.length) out.push(`Nothing was sent: ${waiting === 1 ? "one action waits" : `${waiting} actions wait`} for your yes.`);
+  else if (waiting) out.push(`${waiting === 1 ? "One action waits" : `${waiting} actions wait`} for your yes and was not sent.`);
+  return { none: false, line: out.join(" ") };
+}
+
+// The reply in place of an answer the AI could not give: the kept task named, the next step, and what the turn did (`effects`:
+// its recorded tool calls; [] when no tool ran, null when the record is missing).
+export function heldReply(message: string, stop: LimitStop, zone: PersonZone | null, retryAt: number | null = null, effects: readonly TurnEffectCall[] | null = []): string {
+  const e = effectsOf(effects);
+  return e.none
+    ? `I couldn't finish ${taskOf(message)} without the AI: it is kept. ${nextStepOf(stop, zone, retryAt)} Nothing was applied for, and searching postings still works now.`
+    : `I couldn't finish ${taskOf(message)} without the AI: it is kept. ${nextStepOf(stop, zone, retryAt, false)} ${e.line} Searching postings still works now.`;
 }
 
 // The task a limit stopped, kept on the thread (discovery.heldAtLimit), and the message that resumes it, once a minute has

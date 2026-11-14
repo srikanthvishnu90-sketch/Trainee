@@ -65,12 +65,17 @@ if (mode === "live") {
   if (!/^D-\d{3}[a-z]?$/.test(approval)) { console.log("refused: --live is model spend; it needs WEB_RESEARCH_SPEND_APPROVED=<the DECISIONS.md line> (quote: README.md)"); Deno.exit(3); }
   if (!Deno.env.get("ANTHROPIC_API_KEY")) { console.log("refused: --live needs ANTHROPIC_API_KEY"); Deno.exit(3); }
   if (!(budget > 0 && budget <= 5)) { console.log("refused: --budget-usd must be above 0 and at most 5"); Deno.exit(3); }
+  // The shared $85 ledger: the cap is reserved before the first model call, settled at the end (eval_budget.ts openLiveRunLedger).
+  const bud = await import("../../../supabase/functions/_shared/model_budget.ts");
+  const { openLiveRunLedger } = await import("../../career/eval_budget.ts");
+  const ledger = await openLiveRunLedger({ budgetUsd: budget, approval, get: (k) => Deno.env.get(k), bud });
+  if ("error" in ledger) { console.log(`refused: ${ledger.error}`); Deno.exit(3); }
   const { callModel, modelConfigFor, TRAINEE_MODEL, webSearch } = await import("../../../supabase/functions/_shared/model_gateway.ts");
-  const { memoryBudgetGate } = await import("../../../supabase/functions/_shared/model_budget.ts");
   const { claudeWebProvider, withWebSearch } = await import("../../../supabase/functions/_shared/research_web.ts");
   const cfg = modelConfigFor({ get: (k: string) => Deno.env.get(k) }, TRAINEE_MODEL);
-  const gate = memoryBudgetGate(Math.round(budget * 1e6));
+  const gate = bud.memoryBudgetGate(Math.round(budget * 1e6));
   const out: any[] = [], scored: any[] = [];
+  try {
   for (const c of CASES) {
     const free = freeResearchFor(env, fetch);
     const search = withWebSearch(claudeWebProvider({ search: (q: string, w: any) => webSearch(q, { cfg, budget: gate, ...w }), now: Date.now }), free.search);
@@ -79,7 +84,7 @@ if (mode === "live") {
     const reads: any[] = [];
     const read = async (urls: string[]) => { const r = await free.read(urls); reads.push(r); return r; };
     let r: any;
-    try { r = await researchCompany({ company: c.company, role: c.role, question: question(c), plan: planOf(c), deps: { search, read, draft }, now: Date.now(), format: "inline" } as any); }
+    try { r = await researchCompany({ company: c.company, role: c.role, question: question(c), plan: planOf(c), deps: { search, read, draft, auditSamples: true }, now: Date.now(), format: "inline" } as any); }
     catch (e) { r = { status: "error", blocker: String((e as Error).message ?? e).slice(0, 300) }; }
     const s = scoreLive(c, r, reads);
     out.push({ case: c, result: r, read: { verified: reads.flatMap((x) => x.verified ?? []).map((v: any) => ({ url: v.url, status: v.status, fetched_at: v.fetchedAt ?? v.fetched_at ?? null, chars: String(v.text ?? "").length })), rejected: reads.flatMap((x) => x.rejected ?? []) } });
@@ -96,6 +101,7 @@ if (mode === "live") {
   await Deno.writeTextFile(`${dir}/results.json`, JSON.stringify({ approval, budget_usd: budget, spent_usd: Number(spent.toFixed(4)), line, scored, out }, null, 1) + "\n");
   console.log(line);
   console.log(`REAL-SET RESEARCH LIVE spent_usd=${spent.toFixed(4)} -> ${dir}`);
+  } finally { await ledger.settle(gate.snapshot().spent / 1e6); }
   Deno.exit(0);
 }
 

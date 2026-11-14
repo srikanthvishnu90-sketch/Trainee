@@ -22,7 +22,7 @@ that would change reply words with nothing measuring them stay OFF (reply writer
 `ROLLBACK_MODELS` is Sonnet 5.5 alone; `_shared/career_reader_model.ts`). `CAREER_REPLY_MODEL`, `CAREER_MODEL`,
 `MODEL_PROVIDER` and `ANTHROPIC_MODEL` naming anything else are ignored with one log line; nothing falls back to Haiku. There
 is no per-person AI cap: `CAREER_MODEL_DAILY_USD` and `CAREER_MODEL_DAILY_CALLS` are ignored (one log line if set). What
-stays: the global $70 model budget (D-038a: a reservation before every call, the hard stop, `MODEL_BUDGET_PAUSED`) and the
+stays: the global $80 model budget (D-038a as amended by D-074: a reservation before every call, the hard stop, `MODEL_BUDGET_PAUSED`) and the
 safety limits on external actions (200 applications a day, D-R9-1; the per-employer pace; 20 new contacts a day and 2
 follow-ups, D-043). Tested by `tests/architect/d046-sonnet-only-no-person-cap.test.ts`.
 

@@ -28,8 +28,22 @@ export function coerceShape(data: unknown, key = ""): unknown {
     }
     return v;
   }
-  if (isObj(v)) return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, coerceShape(x, k)]));
+  if (isObj(v)) return longLabel(Object.fromEntries(Object.entries(v).map(([k, x]) => [k, coerceShape(x, k)])));
   return v;
+}
+// D-073 (live-9 C1: create_file refused "sections[0].items[0].label: is over 80 characters", and no File was made): a fact's label over
+// 80 characters keeps its first words (at most 80 characters, cut at a word, marked with "…") and the whole label goes into the
+// fact's own text, before its value. Nothing is added or reworded: every word the model wrote is still on the page, and the fact
+// guard still reads all of it.
+export const LABEL_MAX = 80;
+function longLabel(x: Record<string, any>): Record<string, any> {
+  const label = typeof x.label === "string" ? x.label.replace(/\s+/g, " ").trim() : null;
+  const key = typeof x.value === "string" ? "value" : typeof x.text === "string" ? "text" : null;
+  if (!label || label.length <= LABEL_MAX || !key) return x;
+  const cut = label.slice(0, LABEL_MAX - 1), at = cut.lastIndexOf(" ");
+  const head = `${(at >= 20 ? cut.slice(0, at) : cut).replace(/[\s,;:.\-–—]+$/, "")}…`;
+  const body = String(x[key]).trim();
+  return { ...x, label: head, [key]: body && !body.includes(label) ? `${label.replace(/[.:;]+$/, "")}: ${body}` : body || label };
 }
 // The exact data each kind takes, said in the refusal so a second call can be right.
 export const KIND_SHAPE: Record<string, string> = {

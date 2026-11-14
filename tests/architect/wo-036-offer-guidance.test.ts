@@ -79,6 +79,10 @@ Deno.test("WO-036/T2 the offer is read from the person's words", () => {
   eq([noise.base, noise.firm_id], [null, null]);
 });
 
+// Architect amendment (owner decision 2026-11-13, D-078: confirm before compare): offer_benchmark shows its reading first
+// (status "confirm") and only the person's plain yes to that reading, in the next turn, benchmarks and drafts. `yes` answers
+// the reading shown; every assertion on the benchmarked reply is unchanged.
+const yes = (t: ReturnType<typeof offerTurn>, data?: any) => t.result.status === "confirm" ? offerTurn({ words: "yes", pending: t.pending, now: NOW + 1000, data, lastReply: t.result.messages.join("\n") }) : t;
 Deno.test("WO-036/T3 a missing piece is asked once, then what is still missing is said, never asked again", () => {
   const a = offerTurn({ words: "got an offer from Stripe, 150k", pending: null, now: NOW });
   eq(a.result.status, "ask");
@@ -86,13 +90,13 @@ Deno.test("WO-036/T3 a missing piece is asked once, then what is still missing i
   eq(a.result.messages.length, 1);
   assert((a.result.messages[0].match(/\?/g) || []).length === 1, "one question");
   assert(a.pending, "the half-told offer waits");
-  const b = offerTurn({ words: "Seattle", pending: a.pending, now: NOW + 60_000 });
+  const b = yes(offerTurn({ words: "Seattle", pending: a.pending, now: NOW + 60_000 })); // Architect amendment (D-078)
   eq(b.result.status, "benchmarked", "asked once already: no second question");
   eq(b.result.missing, ["role"]);
   assert(b.result.messages[0].includes("Not given: the job title"), "says what is still missing");
   assert(!b.result.messages.some((m) => /what (is|are) (it|they)\?/i.test(m)), "never asks again");
   eq(b.pending, null);
-  const full = offerTurn({ words: "Stripe offered 150k base, software engineer in Seattle", pending: null, now: NOW });
+  const full = yes(offerTurn({ words: "Stripe offered 150k base, software engineer in Seattle", pending: null, now: NOW })); // Architect amendment (D-078)
   eq(full.result.status, "benchmarked", "nothing missing, nothing asked");
   // A stale half-told offer does not leak into a new one.
   const later = offerTurn({ words: "Seattle", pending: a.pending, now: NOW + 3 * 86400_000 });
@@ -106,10 +110,10 @@ Deno.test("WO-036/T4 a median from fewer than 5 filings is never a benchmark; ev
   const lca = gs.find((b) => b.kind === "lca")!;
   eq([lca.shown, lca.n, lca.median], [false, 4, null], "4 filings: not shown");
   assert(/too few/.test(lca.reason!), lca.reason!);
-  const gsReply = offerTurn({ words: "Goldman offered 100k base, NYC, analyst", pending: null, now: NOW, data }).result;
+  const gsReply = yes(offerTurn({ words: "Goldman offered 100k base, NYC, analyst", pending: null, now: NOW, data }), data).result; // Architect amendment (D-078)
   assert(!gsReply.messages.join("\n").includes("117,820"), "the n=4 median never appears");
   assert(gsReply.messages[0].includes("only 4 filings"), "says why it is left out");
-  const jpm = offerTurn({ words: "JPM offered 110k base, 15k signing, NYC, analyst", pending: null, now: NOW, data }).result;
+  const jpm = yes(offerTurn({ words: "JPM offered 110k base, 15k signing, NYC, analyst", pending: null, now: NOW, data }), data).result; // Architect amendment (D-078)
   const shown = jpm.benchmarks.find((b) => b.kind === "lca")!;
   eq([shown.shown, shown.n, shown.median], [true, 5, 120000]);
   const text = jpm.messages[0];
@@ -127,7 +131,7 @@ Deno.test("WO-036/T4 a median from fewer than 5 filings is never a benchmark; ev
   const awaiting = (d: any) => ({ ...d, status: "awaiting_import", period: null, reference_period: null, cells: [] });
   const shipped = payData();
   const empty = { ...shipped, lca_wages: awaiting(shipped.lca_wages), oews_metro: awaiting(shipped.oews_metro) };
-  const now = offerTurn({ words: "JPM offered 110k base, 15k signing, NYC, analyst", pending: null, now: NOW, data: empty as any }).result;
+  const now = yes(offerTurn({ words: "JPM offered 110k base, 15k signing, NYC, analyst", pending: null, now: NOW, data: empty as any }), empty).result; // Architect amendment (D-078)
   assert(now.messages[0].includes("not loaded yet"), "a missing file is said, not filled");
   const nat = now.benchmarks.find((b) => b.kind === "bls_national")!;
   eq([nat.shown, nat.median, nat.period], [true, 101910, "May 2024"]);
@@ -137,7 +141,7 @@ Deno.test("WO-036/T4 a median from fewer than 5 filings is never a benchmark; ev
 Deno.test("WO-036/T4b the shipped data is CI's real import: a New York software offer gets a BLS metro benchmark with its period", () => {
   const shipped = payData();
   eq([shipped.oews_metro.status, shipped.lca_wages.status], ["imported", "imported"], "both datasets imported");
-  const r = offerTurn({ words: "Google offered 150k base, NYC, software engineer", pending: null, now: NOW }).result;
+  const r = yes(offerTurn({ words: "Google offered 150k base, NYC, software engineer", pending: null, now: NOW })).result; // Architect amendment (D-078)
   const oews = r.benchmarks.find((b) => b.kind === "oews")!;
   assert(oews.shown && typeof oews.median === "number" && oews.median > 50000 && oews.median < 400000, JSON.stringify(oews));
   assert(/^May 20\d\d$/.test(String(oews.period)), `period is said: ${oews.period}`);
@@ -147,7 +151,7 @@ Deno.test("WO-036/T4b the shipped data is CI's real import: a New York software 
 
 Deno.test("WO-036/T5 the counter never invents a competing offer, a preference or a deadline", async () => {
   const data = await fixtureData();
-  const none = offerTurn({ words: "JPM offered 110k base, 15k signing, NYC, analyst", pending: null, now: NOW, data }).result;
+  const none = yes(offerTurn({ words: "JPM offered 110k base, 15k signing, NYC, analyst", pending: null, now: NOW, data }), data).result; // Architect amendment (D-078)
   const draft = `${none.draft!.email}\n${none.draft!.call}`;
   assert(!/another offer|competing|other offer|second offer/i.test(draft), `invented a competing offer:\n${draft}`);
   assert(!/first choice|ready to sign|ready to accept|dream/i.test(draft), "invented a preference");
@@ -155,7 +159,7 @@ Deno.test("WO-036/T5 the counter never invents a competing offer, a preference o
   eq(none.draft!.sent, false);
   assert(none.messages.some((m) => m.includes("Nothing is sent")), "says nothing is sent");
   assert(none.messages.some((m) => m.includes(none.draft!.email)), "the draft is shown in full");
-  const two = offerTurn({ words: "Goldman offered me $95,000 salary in New York as a summer analyst. I also have an offer from Citi at 105k. Need to answer by Friday", pending: null, now: NOW, data }).result;
+  const two = yes(offerTurn({ words: "Goldman offered me $95,000 salary in New York as a summer analyst. I also have an offer from Citi at 105k. Need to answer by Friday", pending: null, now: NOW, data }), data).result; // Architect amendment (D-078)
   const d2 = `${two.draft!.email}\n${two.draft!.call}`;
   assert(d2.includes("another offer from Citi with a base of $105,000"), "the stated competing offer, as stated");
   assert(d2.includes("by Friday"), "their actual deadline");
@@ -169,7 +173,7 @@ Deno.test("WO-036/T5 the counter never invents a competing offer, a preference o
 
 Deno.test("WO-036/T6 offer time: from the offer text to the reply, offline", () => {
   const t0 = performance.now();
-  const r = offerTurn({ words: "JPM offered 110k base, 15k signing, NYC, analyst", pending: null, now: NOW });
+  const r = yes(offerTurn({ words: "JPM offered 110k base, 15k signing, NYC, analyst", pending: null, now: NOW })); // Architect amendment (D-078): the reading, then the yes
   const ms = performance.now() - t0;
   eq(r.result.status, "benchmarked");
   assert(ms < 2000, `took ${ms.toFixed(0)} ms`);
@@ -292,7 +296,10 @@ Deno.test("WO-036/T12 the brain tools: effects, descriptions that say when to us
   const ask = await tools.offer_benchmark.run({}, turn("Got an offer from Stripe, 150k!")) as any;
   eq(ask.status, "ask");
   assert(state.offerBenchmark, "the half-told offer is kept on the thread");
-  const done = await tools.offer_benchmark.run({ offer_words: "software engineer in Seattle" }, turn("it's software engineer in Seattle")) as any;
+  const shown = await tools.offer_benchmark.run({ offer_words: "software engineer in Seattle" }, turn("it's software engineer in Seattle")) as any;
+  // Architect amendment (owner decision 2026-11-13, D-078): the reading is shown first; the person's yes in the next turn benchmarks.
+  eq(shown.status, "confirm");
+  const done = await tools.offer_benchmark.run({ offer_words: "yes" }, { ...turn("yes"), turn: { message: "yes", added: [] as string[], before: shown.messages.join("\n") } }) as any;
   eq([done.status, done.offer.company, done.offer.metro, done.draft.sent], ["benchmarked", "Stripe", "seattle", false]);
   eq(state.offerBenchmark, undefined, "cleared once benchmarked");
   // The guidance tool reads only confirmed facts.

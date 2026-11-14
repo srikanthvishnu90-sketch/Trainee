@@ -3,7 +3,7 @@
 # request's budget_usd (at most $0.50). It runs only on a push to ci/research-live that changes evals/research-live/**, so nothing
 # on trunk or a PR ever spends.
 # Spend: the owner's written approval is the request's `approval` (D-060: web research on; live verification at most $10 in total
-# for this effort, reserved against the $70 ledger). The cap is reserved at the shared $70 ledger BEFORE the run (refused if it does
+# for this effort, reserved against the $85 ledger). The cap is reserved at the shared $85 ledger BEFORE the run (refused if it does
 # not fit what remains) and settled to the metered cost after it, as mirror-conversation.yml does. The ledger secrets are given only
 # to those two steps, never to the run. The only host the run calls is the model API; nothing is sent to anyone.
 name: research-live
@@ -39,8 +39,8 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           EVAL_LEDGER: shared
-          MODEL_BUDGET_TARGET_USD: "70"
-          MODEL_BUDGET_HARD_USD: "70"
+          MODEL_BUDGET_TARGET_USD: "85"
+          MODEL_BUDGET_HARD_USD: "85"
           CAP_USD: ${{ steps.req.outputs.budget }}
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then echo "NOT RUN: a secret is missing (ANTHROPIC_API_KEY or the shared ledger); no model call was made"; exit 2; fi
@@ -50,9 +50,9 @@ jobs:
             if (!gate) { console.log("NOT RUN: the shared ledger could not be opened"); Deno.exit(2); }
             const st = await gate.status();
             const r = await gate.reserve(Math.round(Number(Deno.env.get("CAP_USD")) * 1e6), { model: "claude-sonnet-5-5", role: "eval" });
-            if (!r?.ok || !r.id) { console.log(`NOT RUN: the ledger refused the cap (recorded $${(st.total / 1e6).toFixed(4)} of $70):`, JSON.stringify(r)); Deno.exit(2); }
+            if (!r?.ok || !r.id) { console.log(`NOT RUN: the ledger refused the cap (recorded $${(st.total / 1e6).toFixed(4)} of $85):`, JSON.stringify(r)); Deno.exit(2); }
             Deno.writeTextFileSync(Deno.env.get("GITHUB_OUTPUT"), `id=${r.id}\n`, { append: true });
-            console.log(`reserved $${Deno.env.get("CAP_USD")} (recorded before: $${(st.total / 1e6).toFixed(4)} of $70)`);
+            console.log(`reserved $${Deno.env.get("CAP_USD")} (recorded before: $${(st.total / 1e6).toFixed(4)} of $85)`);
           '
       - name: The searches, real API
         id: run
@@ -76,8 +76,8 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           EVAL_LEDGER: shared
-          MODEL_BUDGET_TARGET_USD: "70"
-          MODEL_BUDGET_HARD_USD: "70"
+          MODEL_BUDGET_TARGET_USD: "85"
+          MODEL_BUDGET_HARD_USD: "85"
           ID: ${{ steps.reserve.outputs.id }}
           SPENT: ${{ steps.run.outputs.spent }}
         run: |
@@ -89,7 +89,7 @@ jobs:
             const micros = spent && /^[0-9.]+$/.test(spent) ? Math.ceil(Number(spent) * 1e6) : null;
             const ok = await gate.settle(Deno.env.get("ID"), micros);
             const st = await gate.status();
-            console.log(`settled ${micros === null ? "the full cap (cost not proven)" : "$" + spent}: ${ok ? "recorded" : "NOT recorded"}; ledger now $${(st.total / 1e6).toFixed(4)} of $70`);
+            console.log(`settled ${micros === null ? "the full cap (cost not proven)" : "$" + spent}: ${ok ? "recorded" : "NOT recorded"}; ledger now $${(st.total / 1e6).toFixed(4)} of $85`);
             if (!ok) Deno.exit(1);
           '
       - uses: actions/upload-artifact@v4

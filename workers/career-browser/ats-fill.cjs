@@ -23,7 +23,8 @@ function EXTRACT() {
   const squash = (s) => String(s || "").replace(/\s+/g, " ").trim();
   const clean = (s) => squash(s).replace(/\(required\)/i, "").replace(/\s*[*✱]+\s*$/, "").replace(/\s*[*✱]+\s*$/, "").trim();
   // An employee sign-in form (MARK_SIGNIN: Teamtailor's "Already working at X?") is never the application's scope or questions.
-  const scope = document.querySelector("form:not([data-upmore-signin])") || document.body;
+  // Review of #797: the form the runner marked as the application (parallel-apply MARK), so the form filled is the one whose Submit is pressed.
+  const scope = document.querySelector("form[data-upmore-app]") || document.querySelector("form:not([data-upmore-signin])") || document.body;
   // Every match under a root, in document order, descending into open shadow roots (SmartRecruiters' components).
   const deepAll = (root, sel) => { const out = []; const walk = (n) => { for (const c of n.children) { if (c.matches(sel)) out.push(c); if (c.shadowRoot) walk(c.shadowRoot); walk(c); } }; walk(root); return out; };
   const rootOf = (el) => (el.getRootNode ? el.getRootNode() : document);
@@ -117,8 +118,25 @@ function EXTRACT() {
   // never used before on this page: a control the board removed or hid can never share a number with a live one (strict run
   // 42737911402: a field read as empty after a re-render).
   const tagOf = (el) => (el && el.hasAttribute("data-upmore-q") ? Number(el.getAttribute("data-upmore-q")) : null);
-  let qn = 1 + deepAll(document, "[data-upmore-q]").reduce((m, e) => Math.max(m, Number(e.getAttribute("data-upmore-q")) || 0), -1);
-  const push = (d, el) => { const t = tagOf(el); d.q = t !== null && !out.some((x) => x.q === t) ? t : qn++; out.push(d); return d.q; };
+  // The page keeps its own high-water mark too: a board that re-renders every input (dropping every tag) never gets an old number
+  // back for a different question.
+  let qn = Math.max(Number(window.__upmoreQn) || 0, 1 + deepAll(document, "[data-upmore-q]").reduce((m, e) => Math.max(m, Number(e.getAttribute("data-upmore-q")) || 0), -1));
+  // Round 2: what a person can see of the question's control (isHoneypot, Node side): its box on the page, whether it or a parent is
+  // hidden, transparent, aria-hidden or clipped to nothing, and whether its label is shown.
+  const seenBy = (el) => {
+    if (!el || !el.getBoundingClientRect) return null;
+    const r = el.getBoundingClientRect(); let hidden = false, clipped = false;
+    for (let n = el; n && n.nodeType === 1; n = up(n)) {
+      const cs = getComputedStyle(n);
+      if (cs.display === "none" || cs.visibility === "hidden" || cs.visibility === "collapse" || Number(cs.opacity) < 0.05 || n.getAttribute("aria-hidden") === "true") hidden = true;
+      if (n !== el && /hidden|clip/.test(`${cs.overflowX} ${cs.overflowY}`) && (n.clientWidth < 2 || n.clientHeight < 2)) clipped = true;
+    }
+    const lab = labelNode(el);
+    return { w: r.width, h: r.height, right: r.right + scrollX, bottom: r.bottom + scrollY, left: r.left + scrollX, pageW: Math.max(document.documentElement.scrollWidth, innerWidth), hidden, clipped,
+      tabNeg: el.getAttribute("tabindex") === "-1", labelSeen: !!lab && !!(lab.offsetWidth || lab.offsetHeight), name: el.name || el.id || "",
+      widget: el.getAttribute("role") === "combobox" || el.hasAttribute("aria-autocomplete") || el.hasAttribute("aria-haspopup") || el.hasAttribute("aria-controls") };
+  };
+  const push = (d, el) => { d.seen = seenBy(el); const t = tagOf(el); d.q = t !== null && !out.some((x) => x.q === t) ? t : qn++; window.__upmoreQn = Math.max(Number(window.__upmoreQn) || 0, qn); out.push(d); return d.q; };
   const all = deepAll(scope, "input, select, textarea").filter((e) => !e.closest("[data-upmore-signin]"));
 
   // Yes/No button pairs (Ashby): the hidden checkbox inside them is not a question of its own.
@@ -235,7 +253,8 @@ function STATE(qs) {
     if (!el) return { q: d.q, filled: false, text: "", gone: true };
     switch (d.kind) {
       // AngularJS (Breezy) shows an unset model as its own "? undefined:undefined ?" option: nothing is chosen.
-      case "select": { const o = el.options[el.selectedIndex]; const ph = !el.value || /^\? .* \?$/.test(el.value); return { q: d.q, filled: !ph, text: ph ? "" : squash(o && o.textContent) }; }
+      // Round 2: an option in a placeholder's words ("Please select", "Choose one", "--"), or a disabled one, is no answer whatever its value.
+      case "select": { const o = el.options[el.selectedIndex]; const ph = !el.value || /^\? .* \?$/.test(el.value) || !o || o.disabled || /^[\s\-–—.…]*(?:(?:please\s+)?(?:select|choose|pick)(?:\s+(?:one|an?\s+(?:option|answer|value)))?)?[\s\-–—.…]*$/i.test(squash(o.textContent)); return { q: d.q, filled: !ph, text: ph ? "" : squash(o && o.textContent) }; }
       case "radio": case "checkgroup": { const on = els.filter((e) => e.checked || (!("checked" in e) && e.getAttribute("aria-checked") === "true")); const picked = [...new Set(on.map((e) => e.getAttribute("data-upmore-o") ?? e.getAttribute("data-upmore-io")))]; return { q: d.q, filled: picked.length > 0, picked }; }
       case "buttons": { const on = els.filter((e) => e.getAttribute("aria-pressed") === "true"); return { q: d.q, filled: on.length > 0, picked: on.map((e) => e.getAttribute("data-upmore-o")) }; }
       case "checkbox": return { q: d.q, filled: !!el.checked, text: el.checked ? "checked" : "" };
@@ -269,8 +288,8 @@ function INVALID() {
 
 // ---- answers ---------------------------------------------------------------------------------------------------------------
 const FACT_RULES = [
-  [/^first name\b|^given name\b|^vorname\b|^voornaam\b|^pr nom\b|^nombre$/, "first_name"],
-  [/^last name\b|^surname\b|^family name\b|^nachname\b|^achternaam\b|^apellidos?\b|^nom de famille\b/, "last_name"],
+  [/^first name\b|^given name\b|^vorname\b|^voornaam\b|^pr nom\b|^nombre$|^f rnamn$|^fornamn$|^fornavn$|^etunimi$/, "first_name"],
+  [/^last name\b|^surname\b|^family name\b|^nachname\b|^achternaam\b|^apellidos?\b|^nom de famille\b|^efternamn$|^etternavn$|^efternavn$|^cognome$|^sukunimi$|^nazwisko$/, "last_name"],
   [/^preferred (first )?name\b/, "preferred_name"],
   [/^(full |legal |your )?name$|^full legal name\b/, "full_name"],
   // The same question in the languages the benchmark's boards ask it in (German, Dutch, Spanish, French, Portuguese, Swedish).
@@ -589,7 +608,21 @@ async function fillPlace(page, d, value, country) {
   await input.fill("");
   await input.pressSequentially(String(value), { delay: 25 });
   let list = [];
-  for (let i = 0; i < 30 && !list.length; i++) { await page.waitForTimeout(200); list = (await opts().allInnerTexts().catch(() => [])).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean); }
+  // D-072 (item 4, round 2): Lever's lookup (GET /searchLocations) can take longer than 6 s (capture of 2026-11-12: one posting's
+  // lookup still loading after 5 s, another answered "Chicago, IL, USA" in 160 ms). Waited on while the question's own loading row
+  // shows, up to 15 s; its own "no location found" row with nothing loading ends the wait. Lever shows one of the two rows at a
+  // time: a page that shows both at once (a capture served without the board's stylesheet, where neither is ever hidden) says
+  // nothing about a lookup in flight, so that is not loading and the wait stays the 6 s it was.
+  const loading = () => page.evaluate(([q]) => {
+    const el = document.querySelector(`[data-upmore-q="${q}"]`), li = el && el.closest("li");
+    const shown = (c) => { const x = li && li.querySelector(c); return !!(x && (x.offsetWidth || x.offsetHeight)); };
+    return shown(".dropdown-loading-results") && !shown(".dropdown-no-results");
+  }, [d.q]).catch(() => false);
+  for (let i = 0; i < 75 && !list.length; i++) {
+    await page.waitForTimeout(200);
+    list = (await opts().allInnerTexts().catch(() => [])).map((t) => t.replace(/\s+/g, " ").trim()).filter(Boolean);
+    if (!list.length && i >= 29 && !(await loading())) break;
+  }
   if (!list.length) return { ok: false, reason: "place_not_offered" };
   const m = matchPlace(list, value, country);
   if (m.error) return { ok: false, reason: m.error, options: list.slice(0, 12) };
@@ -683,8 +716,23 @@ async function pickOption(opts, m) { await opts().nth(m.index).click(); }
 // The kinds of question under each label, so a fact is held back only when two questions that could each take it share the
 // label. Ashby puts its "Phone" label over the number box and over a Yes/No texting consent (strict benchmark run 42719264485:
 // 5 of 20 postings stopped on label_on_form_twice); the consent can never hold the number, so the number box is not ambiguous.
+// The boards' own standard candidate fields, by their fixed names (Breezy: cName, cEmail, cPhoneNumber).
+const BOARD_STANDARD = /^c(?:Name|Email|PhoneNumber)$/;
+const labelNames = (qs) => { const m = new Map(); for (const d of qs) if (d.kind !== "file") { const k = labelKey(d); if (!m.has(k)) m.set(k, []); m.get(k).push(String(d.name || "")); } return m; };
 const labelKinds = (qs) => { const m = new Map(); for (const d of qs) if (d.kind !== "file") { const k = labelKey(d); if (!m.has(k)) m.set(k, []); m.get(k).push(d.kind); } return m; };
 const takesFact = (kind, label) => CHOICE_FACTS.has(factKey(label)) ? CHOICE_KINDS.includes(kind) : ["text", "textarea", "select"].includes(kind) || (kind === "combobox" && /location|city|state/i.test(label));
+// Round 2: a box a person cannot see is never typed into (a trap for automated fills, or a field the page keeps for itself).
+// Only what the engine would TYPE into (a text box or a text area that is not a drawn widget's own input): off the page, of no
+// size, hidden, transparent or aria-hidden (itself or a parent), clipped to nothing, or named like a trap (website, url,
+// homepage, fax, company, honeypot) with no label a person can see. `seen` is EXTRACT's reading (seenBy).
+const TRAP_NAME = /^(website|url|homepage|fax|company|address2?)$|honey|hp[_-]|[_-]hp$/i;
+function isHoneypot(d) {
+  const v = d && d.seen;
+  if (!v || !["text", "textarea"].includes(d.kind) || v.widget) return false;
+  if (v.hidden || v.clipped || v.w < 2 || v.h < 2 || v.right <= 0 || v.bottom <= 0 || v.left >= v.pageW) return true;
+  return TRAP_NAME.test(v.name || "") && !v.labelSeen;
+}
+const BARE_NAME = /^(name|namn|naam|navn|nimi|nom|nome|nombre)$/;
 // Decide what to do with one question. status: fill | ask | skip. Never invents a value.
 function decide(d, ctx) {
   const { facts, answers, resumePath } = ctx;
@@ -695,7 +743,14 @@ function decide(d, ctx) {
   }
   // ROUND 3: one label on two questions of this form (a second "Phone" in a references block): the approved answer belongs
   // to at most one of them, so neither is filled from it; the person is asked (as the extension's planForm does).
-  if (ctx.labelCount && (ctx.labelCount.get(labelKey(d)) || 0) > 1) {
+  // D-072 (item 4, round 2): the board's own standard field beside an employer's custom question in the same words (Breezy's
+  // "Phone Number", name cPhoneNumber, and a custom "Phone Number" question, strict run 43276162667): the confirmed fact belongs to
+  // the board's own field; the employer's copy is a question only the person answers (asked on the hand-off, never guessed).
+  const sameLabel = ctx.labelNames && ctx.labelNames.get(labelKey(d));
+  const standard = (sameLabel || []).filter((n) => BOARD_STANDARD.test(n));
+  const boardOwn = standard.length === 1 && BOARD_STANDARD.test(String(d.name || ""));
+  if (ctx.labelCount && (ctx.labelCount.get(labelKey(d)) || 0) > 1 && !boardOwn && standard.length === 1 && blank(answerFor(d.label, answers))) return { status: "ask", reason: "no_confirmed_answer" };
+  if (ctx.labelCount && (ctx.labelCount.get(labelKey(d)) || 0) > 1 && !boardOwn) {
     if (!blank(answerFor(d.label, answers))) return { status: "ask", reason: "label_on_form_twice" };
     const kinds = ctx.labelKinds && ctx.labelKinds.get(labelKey(d));
     if (!blank(factValue(d.label, facts || {})) && (!kinds || (takesFact(d.kind, d.label) && kinds.filter((k) => takesFact(k, d.label)).length > 1))) return { status: "ask", reason: "label_on_form_twice" };
@@ -710,6 +765,20 @@ function decide(d, ctx) {
   }
   const a = answerFor(d.label, answers);
   if (!blank(a)) return { status: "fill", value: String(a), source: "answer" };
+  // Round 3 (review of #831): a bare "Name" in a language where it may be one half (Swedish "Namn" beside "Efternamn", French
+  // "Nom" beside "Prénom", Italian "Nome" beside "Cognome") is the half its neighbours leave, or what the box's own name says
+  // (candidate[first_name]); alone, a word that means "name" is the full name, and one that may mean a half (nom, nome, nombre) is
+  // asked. Both halves beside it: asked. The full name is never typed into a first-name box.
+  const bare = BARE_NAME.exec(norm(d.label));
+  if (bare && (!d.kind || ["text", "textarea"].includes(d.kind))) {
+    const own = String(d.name || "");
+    const keys = new Set((ctx.siblings || []).filter((l) => norm(l) !== norm(d.label)).map((l) => factKey(l)));
+    const half = /first|given|fname|vorname|prenom/i.test(own) ? "first_name" : /last|family|surname|lname|nachname/i.test(own) ? "last_name"
+      : keys.has("first_name") && keys.has("last_name") ? "ask" : keys.has("last_name") ? "first_name" : keys.has("first_name") ? "last_name" : /^(nom|nome|nombre)$/.test(bare[1]) ? "ask" : "full_name";
+    const value = half === "ask" ? undefined : half === "full_name" ? factValue("full name", facts || {}) : (facts || {})[half];
+    if (!blank(value)) return { status: "fill", value: String(value), source: "fact" };
+    return d.required || half === "ask" ? { status: "ask", reason: "no_confirmed_answer" } : { status: "skip", reason: "optional_left_blank" };
+  }
   if (d.eeo) {
     if (facts && facts.eeo_policy === "decline" && ["select", "combobox", "radio", "buttons"].includes(d.kind)) return { status: "fill", pick: "decline", source: "eeo_policy" };
     return d.required ? { status: "ask", reason: "eeo_needs_your_choice" } : { status: "skip", reason: "eeo_left_blank" };
@@ -773,12 +842,15 @@ async function fillForm(page, ctx0) {
     const qs = await page.evaluate(EXTRACT);
     ctx.labelCount = labelCounts(qs);
     ctx.labelKinds = labelKinds(qs);
+    ctx.labelNames = labelNames(qs);
+    ctx.siblings = qs.map((x) => x.label);
     const fresh = qs.filter((d) => !handled.has(`${d.label}|${d.kind}|${d.name}`));
     if (!fresh.length) break;
     for (const d of fresh) {
       handled.add(`${d.label}|${d.kind}|${d.name}`);
       const entry = { label: d.label, kind: d.kind, required: !!d.required, eeo: !!d.eeo, options: d.options ? d.options.length : undefined };
       map.push(entry);
+      if (isHoneypot(d)) { entry.status = "skipped"; entry.reason = "not_visible_to_a_person"; continue; }
       const before = (await page.evaluate(STATE, [d]))[0];
       const dec = decide(d, ctx);
       entry.source = dec.source;
@@ -786,7 +858,20 @@ async function fillForm(page, ctx0) {
       if (dec.status === "skip") { entry.status = "skipped"; entry.reason = dec.reason; continue; }
       if (dec.status === "ask") { entry.status = "needs_user"; entry.reason = dec.reason; needsUser.push({ label: d.label, reason: dec.reason, kind: d.kind, ...(d.options ? { options: d.options.map((o) => o.label).slice(0, 40) } : {}) }); continue; }
       let r;
+      // Once the board has re-rendered (below), a question read before it is looked up again first, not waited on.
+      if (ctx.retagged && !(await page.$(sel(d.q)).catch(() => null))) {
+        const now = (await page.evaluate(EXTRACT).catch(() => [])).find((x) => x.label === d.label && x.kind === d.kind && x.name === d.name);
+        if (now) Object.assign(d, now);
+      }
       try { r = await doFill(page, d, dec, ctx); } catch (e) { r = { ok: false, reason: "fill_error", detail: String(e.message).split("\n")[0].slice(0, 120) }; }
+      // D-072 (item 4, round 2): a board that re-renders its form after the questions were read (React hydration on
+      // job-boards.greenhouse.io, strict run 43276162667: every field "locator.fill: Timeout 20000ms exceeded" on 4 forms; the same
+      // fields fill in 50 ms once read again, capture of 2026-11-12) drops the tags on its inputs. The question is read again from the
+      // page as it is now and the same approved value set once more, then read back as always.
+      if (!r.ok && r.reason === "fill_error" && !(await page.$(sel(d.q)).catch(() => null))) {
+        const again = (await page.evaluate(EXTRACT).catch(() => [])).find((x) => x.label === d.label && x.kind === d.kind && x.name === d.name);
+        if (again) { ctx.retagged = true; try { r = await doFill(page, again, dec, ctx); if (r.ok) Object.assign(d, again); } catch (e) { r = { ok: false, reason: "fill_error", detail: String(e.message).split("\n")[0].slice(0, 120) }; } }
+      }
       if (r.ok) {
         entry.status = "filled"; filled.push({ label: d.label, source: dec.source, kind: d.kind, value: dec.pick === "decline" ? "decline" : dec.source === "resume" ? require("node:path").basename(ctx.resumePath) : dec.value, d });
         // What a choice question now holds, in the form's own option words (never a typed answer's text).
@@ -831,7 +916,7 @@ async function fillForm(page, ctx0) {
   const states = qsNow.length ? await page.evaluate(STATE, qsNow) : [];
   for (const d of qsNow) {
     const s = states.find((x) => x.q === d.q);
-    if (d.required && s && !s.filled && !accounted.has(d.label)) { needsUser.push({ label: d.label, reason: "still_empty_after_fill", kind: d.kind }); accounted.add(d.label); }
+    if (d.required && s && !s.filled && !accounted.has(d.label) && !isHoneypot(d)) { needsUser.push({ label: d.label, reason: "still_empty_after_fill", kind: d.kind }); accounted.add(d.label); }
   }
   const invalid = await page.evaluate(INVALID).catch(() => []);
   return { map, filled, needsUser, failed, invalid };
@@ -890,6 +975,35 @@ async function recheckFilled(page, filled, ctx0, { settleMs = 300 } = {}) {
   lost = await dropped();
   return lost.map((f) => f.label);
 }
+// Round 2 (review of #818), item 10: an option in a placeholder's words, or a disabled one, is no answer, whatever its value
+// (STATE and parallel-apply CONTROLS use the same words).
+const PLACEHOLDER_OPTION = /^[\s\-–—.…]*(?:(?:please\s+)?(?:select|choose|pick)(?:\s+(?:one|an?\s+(?:option|answer|value)))?)?[\s\-–—.…]*$/i;
+const isPlaceholderOption = (text, disabled) => !!disabled || PLACEHOLDER_OPTION.test(String(text || "").replace(/\s+/g, " "));
+// Round 2 (review of #818): a text answer the page rewrote after it was filled and read back ("Example" to "EXAMPLE JR" on change,
+// a phone reformatted on blur) no longer says what the person approved. Read once more at the end, each typed answer must be the
+// approved text exactly (spaces at its ends aside), or for a phone the approved digits, less only a dial code that the field's own
+// picker shows (phoneSame, the fill's own rule). Returns the labels that drifted.
+// A box the board re-rendered (its tag gone) is found again as recheckFilled finds it; a place the fill chose from the board's own
+// list is the same place by the fill's own rule (holdsApproved, with the confirmed facts).
+async function driftedFills(page, filled, facts = {}) {
+  const typed = filled.filter((f) => ["text", "textarea"].includes(f.kind) && f.source !== "resume");
+  if (!typed.length) return [];
+  const held = await heldNow(page, typed, { menus: false });
+  const qs = held.some((x) => !x || x.gone) ? await page.evaluate(EXTRACT).catch(() => []) : [];
+  const out = [];
+  for (const [i, f] of typed.entries()) {
+    let now = held[i] && !held[i].gone ? String(held[i].held ?? "") : null;
+    if (now === null) { const again = qs.find((x) => x.label === f.d.label && x.kind === f.d.kind && x.name === f.d.name); now = again ? String((await stateOf(page, again).catch(() => ({}))).text ?? "") : ""; }
+    if (now.trim() === String(f.value).trim()) continue;
+    if (held[i] && holdsApproved({ ...held[i], held: now }, f.value, facts)) continue;
+    if (isPhone(f.d, f.value) && await phoneSame(page, f.d, f.value, now)) continue;
+    // Round 3: a phone box that reformats on blur ("+1 415 555 0100" shown as "(415) 555-0100") holds the same number when its
+    // digits are the approved ones, less only the approved number's own country code. Any other digit refuses.
+    if (isPhone(f.d, f.value)) { const cc = /^\s*\+(\d{1,3})[\s\-.(]/.exec(String(f.value)), want = digitsOf(f.value), got = digitsOf(now); if (got && (got === want || (cc && want === cc[1] + got))) continue; }
+    out.push(f.label);
+  }
+  return out;
+}
 // Does a field's one held value say the approved answer, by the same exact rule the fill chose it by? A country by its name or
 // its listed other spellings, a place as the same city, state and country (matchPlace), a state by name or postal code, the
 // phone's country picker as the country with the approved phone's own dial code. Anything else: only the same words.
@@ -906,4 +1020,4 @@ function holdsApproved(f, want, facts = {}) {
   if (key === "state") return !matchState([held], want).error;
   return false;
 }
-module.exports = { MARK_SIGNIN, heldNow, recheckFilled, holdsApproved, factsFrom, fillForm, matchOption, matchPlace, matchState, countryNames, phoneCountryMatch, factKey, factValue, answerFor, decide, labelCounts, labelKinds, norm, EXTRACT, STATE, DECLINE };
+module.exports = { PLACEHOLDER_OPTION, isPlaceholderOption, driftedFills, isHoneypot, MARK_SIGNIN, heldNow, recheckFilled, holdsApproved, factsFrom, fillForm, matchOption, matchPlace, matchState, countryNames, phoneCountryMatch, factKey, factValue, answerFor, decide, labelCounts, labelKinds, norm, EXTRACT, STATE, DECLINE };

@@ -16,7 +16,7 @@ export class ModelUnavailableError extends Error {
 // The global daily budget said no (limit reached, switched off, or not checkable): no request was made. A model failure
 // to every caller that already handles one; type says which, so the reply can say it in plain words (model_budget.ts).
 export class ModelBudgetBlockedError extends ModelUnavailableError {
-  // R10 WO-D: day, when a per-day window's cap (not the $70 total) refused it: that Chicago budget day (YYYY-MM-DD).
+  // R10 WO-D: day, when a per-day window's cap (not the $85 total) refused it: that Chicago budget day (YYYY-MM-DD).
   constructor(readonly block:"limit"|"paused"|"unavailable"|"before"|"after",detail:string,readonly day:string|null=null){
     super(block==="limit"?429:503,{limit:"global_daily_limit",paused:"budget_paused",unavailable:"budget_unavailable",before:"budget_not_open",after:"budget_ended"}[block],detail);
   }

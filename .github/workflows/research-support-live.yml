@@ -1,0 +1,64 @@
+# The support judge, measured live (FAIL_CLOSED.support; research/support.ts). Runs evals/research-support/judge-measure.ts --live:
+# every review case that code (layer A) lets through, sent to the product's model as a turn would batch them, under an in-process
+# hard cap of the request's budget_usd (at most $1). It runs only on a push to ci/research-support-live that changes
+# evals/research-support/run-request.json, so nothing on trunk or a PR ever spends.
+# Spend: the owner's written approval is the request's `approval` (a row of docs/architect/DECISIONS.md) and its `run` (a row
+# approves one run, named in it: evals/research-support/approval.ts). As real-sets-live.yml does
+# since #824, the runner itself reserves the cap at the shared $85 ledger before its first model call (refused if it does not fit what
+# remains, or the approval is not a DECISIONS row) and settles it to the metered cost at the end, also on error. The only hosts the
+# run calls are the model API and the ledger.
+name: research-support-live
+on:
+  push:
+    branches: [ci/research-support-live]
+    paths: [evals/research-support/run-request.json, .github/workflows/research-support-live.yml]
+permissions:
+  contents: read
+concurrency: { group: research-support-live, cancel-in-progress: false }
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with: { deno-version: "v2.9.6" }
+      - name: The request
+        id: req
+        run: |
+          deno eval '
+            const f = JSON.parse(Deno.readTextFileSync("evals/research-support/run-request.json"));
+            const ok = /^D-\d{3}[a-z]?$/.test(f.approval ?? "") && Number(f.budget_usd) > 0 && Number(f.budget_usd) <= 1 && Number.isInteger(f.run) && f.run >= 1;
+            if (!ok) { console.log("NOT RUN: bad request (approval D-xxx, 0 < budget_usd <= 1, run a whole number from 1)", JSON.stringify(f)); Deno.exit(2); }
+            Deno.writeTextFileSync(Deno.env.get("GITHUB_OUTPUT"), `approval=${f.approval}\nbudget=${f.budget_usd}\nrun=${f.run}\n`, { append: true });
+            console.log(`request: support judge measure run ${f.run}, cap $${f.budget_usd} under ${f.approval}`);
+          '
+      - name: The judge, real API
+        id: run
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SUPPORT_JUDGE_SPEND_APPROVED: ${{ steps.req.outputs.approval }}
+          SUPPORT_JUDGE_RUN: ${{ steps.req.outputs.run }}
+          # The runner reserves the cap at the shared ledger itself before its first model call and settles it to the metered cost
+          # (eval_budget.ts openLiveRunLedger, #824); its model calls carry their own in-process gate, so nothing is counted twice.
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          MODEL_BUDGET_TARGET_USD: "85"
+          MODEL_BUDGET_HARD_USD: "85"
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ] || [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then echo "NOT RUN: a secret is missing (ANTHROPIC_API_KEY or the shared ledger); no model call was made"; exit 2; fi
+          mkdir -p "$RUNNER_TEMP/out"
+          set +e
+          deno run -A --no-check --import-map=tests/flow/supabase-npm.json evals/research-support/judge-measure.ts --live --budget-usd "${{ steps.req.outputs.budget }}" --out "$RUNNER_TEMP/out" | tee "$RUNNER_TEMP/out/summary.txt"
+          code=${PIPESTATUS[0]}
+          set -e
+          # The cases are synthetic and the recorded pages public, so the record is printed.
+          cat "$RUNNER_TEMP/out/result.json" || true
+          spent=$(grep -o 'spent_usd=[0-9.]*' "$RUNNER_TEMP/out/summary.txt" | cut -d= -f2)
+          echo "spent=${spent:-}" >> "$GITHUB_OUTPUT"
+          exit $code
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: research-support-live-${{ github.run_id }}
+          path: ${{ runner.temp }}/out/

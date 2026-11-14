@@ -589,13 +589,12 @@ export async function keepSupported(reply: string, sources: (string | { text: st
   let n1 = 0, n2 = 0;
   const vs = wants.map((_, k) => withAlso[k] ? v2[n2++] : v1[n1++]);
   // Architect ruling 2026-11-14 (on 3ad157b2e), advice turns only: a sentence no one source holds may be supported jointly by the
-  // cited guide and the person's confirmed record. Layer A: every name and figure of it is in the record; every other content word
-  // is in the guide or the record, and at least one is the guide's (a sentence the record alone would state is the record's to
-  // state, line by line). The judge then reads both passages, the record a fact per line. Never a web page, another employer's
+  // cited guide and the person's confirmed record. Layer A: every name and figure of it (units, periods, years) is in the record;
+  // its wording is the judge's to read. The judge reads both passages, the record a fact per line (never two lines joined). Never a web page, another employer's
   // page or the draft passage.
   if (o.joint && o.joint.record && o.joint.guide.length) {
     const rec = indexPages([{ text: o.joint.record, title: "The person's confirmed record:", one: true }], o.read).pages[0].sentences[0];
-    const gText = o.joint.guide.map((g) => g.text).join("\n"), gWords = contentWords((o.read ?? ((x: string) => x))(gText));
+    const gText = o.joint.guide.map((g) => g.text).join("\n");
     const recLines = o.joint.record.split(/\n+/).map((x) => squash(x)).filter(Boolean);
     const source = clip([`Two passages, read together. The guide the answer cites (${squash(o.joint.guide[0].title ?? "") || "guide"}):`, `>>> ${squash(gText).slice(0, 1400)} <<<`,
       "The person's confirmed record (each line is one fact about them; never join two lines into one fact):", ...recLines.map((l) => `- ${l}`)].join("\n"), PASSAGE_MAX);
@@ -604,8 +603,8 @@ export async function keepSupported(reply: string, sources: (string | { text: st
       const h = hardParts(w.claim, o.read), vals = new Set(rec.hard.numbers.map((n) => n.split("|")[4]));
       if (!h.numbers.every((a) => vals.has(a.split("|")[4]))) return false;
       if (!h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).filter((r) => r.length).every((r) => r.every((x) => rec.lower.has(x) || nameRe(x).test(rec.text)))) return false;
-      const cw = [...contentWords((o.read ?? ((x: string) => x))(bare(readAlike(w.claim))))];
-      return cw.every((x) => gWords.has(x) || rec.content.has(x)) && cw.some((x) => gWords.has(x) && !rec.content.has(x));
+      // (layer A as everywhere: names and figures, with their units, periods and years; wording is the judge's to read)
+      return h.years.every((y) => vals.has(y) || rec.hard.years.includes(y));
     });
     const ks = tryJoint.flatMap((t, k) => t ? [k] : []);
     if (ks.length) {

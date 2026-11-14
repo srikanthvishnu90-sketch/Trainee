@@ -175,7 +175,10 @@ Deno.test("ruling: a recombination of record lines passes layer A but a line-rea
 // in the record, the other content words in the guide or the record, at least one the guide's); the judge reads both.
 const GUIDE2 = "Start with your name and contact links, then education with your school, degree and expected graduation date, followed by a short technical skills section.";
 const guide2Search = async () => ({ status: "ok", facts: [{ id: "", kind: "program", text: GUIDE2, quote: GUIDE2, url: GUIDE_URL, label: "Student guide" }], urls: [GUIDE_URL], cost_usd: 0.01 });
-const jointJudge: SupportJudge = async (cs) => cs.map((c) => /^Two passages, read together/.test(c.source) ? "yes" : "no");
+// A judge for the joint passage that reads what a careful judge would: every word in the guide or a record line (instruction words
+// aside), and no role joined to an employer from another line.
+import { mirrorJudgeAnswer } from "../mirror-wa-batch1-process.test.ts";
+const jointJudge: SupportJudge = async (cs) => JSON.parse(mirrorJudgeAnswer(JSON.stringify(cs)));
 const jointTurn = (reply: string, facts: any[]) => agentTurn({ message: "what goes at the top of my resume?", history: [], stores: { profile: { facts: structuredClone(facts) } }, userId: "u", threadId: "t", now: Date.parse("2026-11-14T00:00:00Z"), knowledge: true,
   market: { judge: jointJudge }, model: (() => { let n = 0; return async (p: any) => p.tools?.length ? [aUse("research_career_question", { question: "x", kind: "advice", query: "resume top" }), aSay(reply)][Math.min(n++, 1)] : aSay(""); })(), research: { search: guide2Search } } as any) as Promise<any>;
 const MINE = [{ id: "J-1", kind: "education", text: "Lakeshore University, BS Computer Science and Finance, Expected June 2029", status: "confirmed" }, { id: "J-2", kind: "skill", text: "Skill: SQL", name: "SQL", status: "confirmed" },

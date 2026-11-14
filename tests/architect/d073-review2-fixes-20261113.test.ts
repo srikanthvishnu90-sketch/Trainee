@@ -94,9 +94,13 @@ Deno.test("G1 company research: pages opened and nothing quotable: the reply say
   const r = await run("data analyst intern");
   eq([r.status, r.checked.map((x: any) => [x.title, x.url])], ["no_sources", [["Welcome", pages[0].url]]]);
   const list = "[1] Welcome: https://zentrafin.example/ (read Nov 13, 2026)";
+  // Architect amendment (owner decision 2026-11-13: research support check switched on; product fix, ag/research-on-fixes: the
+  // "none stated anything the brief could quote" blocker is said only when drafted lines were refused): this draft gave no line,
+  // so code's blocker says nothing was drafted that the brief could check. It still says so, lists the page, and keeps no claim.
+  const BLOCKER = "I couldn't do this research: 1 page(s) about Zentrafin were opened, but nothing was drafted from them that the brief could check.";
   for (const draft of ["", "Zentrafin is a fast-growing fintech with 5,000 staff.", "Apply on their careers page."]) {
     const a = enforceCompanyReply(draft, r);
-    ok(a.startsWith("I couldn't do this research: 1 page(s) about Zentrafin were opened, but none stated anything the brief could quote.") && a.endsWith(`\n\n${list}`) && !/5,000|fintech|Apply on/.test(a), `${JSON.stringify(draft)} -> ${a}`);
+    ok(a.startsWith(BLOCKER) && a.endsWith(`\n\n${list}`) && !/5,000|fintech|Apply on/.test(a), `${JSON.stringify(draft)} -> ${a}`);
   }
   // Architect amendment (owner decision 2026-11-13: research support check switched on): checked as the brain sends it
   // (enforceCompanyReplySupported), a could-not-find sentence stands unjudged only in the closed form ("I couldn't find it."); the
@@ -104,7 +108,7 @@ Deno.test("G1 company research: pages opened and nothing quotable: the reply say
   const companyAsk = "Research Zentrafin before my interview.";
   eq(await enforceCompanyReplySupported("I couldn't find it.", r, { judge: testSupportJudge, ask: companyAsk }), `I couldn't find it.\n\n${list}`);
   const longer = await enforceCompanyReplySupported("I couldn't find anything I could quote about Zentrafin.", r, { judge: testSupportJudge, ask: companyAsk });
-  ok(longer.startsWith("I couldn't do this research: 1 page(s) about Zentrafin were opened, but none stated anything the brief could quote.") && longer.endsWith(`\n\n${list}`), longer);
+  ok(longer.startsWith(BLOCKER) && longer.endsWith(`\n\n${list}`), longer);
   eq(nonEmptyReply({ reply: "", show: undefined, tool_calls: [] } as any, r), enforceCompanyReply("", r));
   // Role unknown and the reply is only the role question: the blocker is said first, the question stays, the page is listed.
   // Architect amendment (owner decision 2026-11-13: research support check switched on): as the brain sends it (the role question in

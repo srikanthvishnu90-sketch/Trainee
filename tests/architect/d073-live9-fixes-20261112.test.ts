@@ -171,7 +171,10 @@ Deno.test("D73-1 RESEARCH (C9, C22, item 10 Datadog/Affirm/Toast): every kept li
     // Architect amendment (owner decision 2026-11-13: research support check switched on): the support path records one drop reason,
     // "unsupported"; and the frame in the model's words ("<co> posts software engineering roles on its job board.") stands only when
     // one sentence of its page says it, which none of these pages does: it is dropped (frame_unsupported), never kept unsaid.
-    ok(before.unsupported >= 1 && out.frame === null && before.frame_unsupported === 1 && out.audit.from_pages >= 1, `${co}: ${JSON.stringify(out.audit)}`);
+    // Architect amendment (owner decision 2026-11-13: research support check switched on; product fix 3, ag/research-on-fixes: the
+    // labelled reading is kept under its own code checks, not judged as a quote): the frame stands again as Trainee's reading; it
+    // must still pass the eval's own cited check below, like every kept line.
+    ok(before.unsupported >= 1 && out.audit.sections.frame === 1 && !before.frame_unsupported && out.audit.from_pages >= 1, `${co}: ${JSON.stringify(out.audit)}`);
     const byN = (n: number) => pages.find((p) => normalizeUrl(p.url) === normalizeUrl(out.sources.find((x: any) => x.n === n).url)).text;
     for (const l of [...(out.frame ? [out.frame] : []), ...out.business, ...out.questions]) ok(evalCited(l.text, l.cite.map(byN)), `${co}: "${l.text}" passes the eval's cited check`);
     ok(/\[\d\]/.test(enforceCompanyReply("", out)), `${co}: the chat answer cites its sources`);

@@ -543,23 +543,30 @@ export async function decide(items: Wanted[], idx: PageIndex, judge: SupportJudg
 // sentence stands when it is one of code's own lines (`own`: word for word), a could-not-confirm sentence in the closed form
 // (`pure`), or the judge says yes to it (as a claim in its own words, or as a source's own unit said again); it is removed otherwise
 // (these paths have no numbered source to quote). A line that is only a link is code's, and stays.
-// Architect ruling 2026-11-14 (narrowed on review of 7487f3600): on an advice turn, a sentence is advice of the person's own (outside
-// the page judge) only when every figure and every name in it is in their CONFIRMED record (D-007: never what they say they heard,
-// never their unconfirmed words, never a page), it names no employer or company (an organisation the record lists as a place they
-// worked or founded included), and it carries at least one item of that record. Anything else is judged as any claim is.
-const ROLE_IN_FACT = /(?<![\p{L}])(?:founder|co-founder|intern|internship|engineer|researcher|analyst|manager|associate|employee|team|staff|contractor|consultant|director|lead)(?![\p{L}])/iu;
-export function adviceOfTheirOwn(confirmed: string[]): (s: string) => boolean {
-  const record = confirmed.join("\n");
+// Architect ruling 2026-11-14 (by shape, on review of 8cd4de7d4): on an advice turn, a sentence skips the page judge only when it is
+// an instruction to the person about their own materials: it starts with a verb addressed to them ("Put", "Lead", "Leave", ..., or
+// "You could" + one), or with a lead-in that names their material ("For the top of your resume:") followed by such a verb or by what
+// goes there ("your name and contact links, then ..."); every figure and name in it is of their own record (a confirmed fact; a draft
+// or unconfirmed fact of theirs only when the instruction removes or updates it: "Leave the outdated 3.9 GPA off."); no name in it is
+// an organisation the record lists as a place they worked or founded; and it has no evaluative, comparative or world predicate.
+// Everything else is judged as any claim is.
+const ROLE_IN_FACT = /(?<![\p{L}])(?:founder|co-founder|intern|internship|engineer|researcher|analyst|manager|associate|employee|team|staff|contractor|consultant|director|lead|friend|at)(?![\p{L}])/iu;
+const ADVICE_VERB = "put|lead|move|cut|add|leave|keep|rewrite|list|drop|remove|delete|replace|update|swap|start|end|place|group|shorten|trim|bold|fix|include|mention|split|merge|change|rename|order|highlight|open|close|use|write|reword|tighten|spell";
+const REMOVE_VERB = /^(?:you could\s+)?(?:leave|cut|drop|remove|delete|update|fix|replace|change|trim)\b/i;
+const INSTRUCTION = new RegExp(`^(?:(?:for|at|in|on|under) (?:the )?[\\p{L} -]{1,40}? (?:of )?your [\\p{L} -]{1,30}?[:,]\\s*(?:your\\b|(?:${ADVICE_VERB})\\b)|(?:you could\\s+)?(?:${ADVICE_VERB})\\b)`, "iu");
+const EVALUATIVE = /(?<![\p{L}])(?:strong(?:er|est)?|weak(?:er|est)?|top(?! of (?:your|it|the page))|competitive|clears?|values?|looks? for|pays?|paid|earns?|hires?|hiring|typical(?:ly)?|average|median|usual(?:ly)?|better|worse|best|worst|more than|less than|fewer than|the market|market|industry|recruiters?|employers?|compan(?:y|ies)|banks?|firms?|demand|impress\w*|stand(?:s)? out|cutoff|bar|most|least|every|always|never)(?![\p{L}])/iu;
+export function adviceOfTheirOwn(confirmed: string[], drafts: string[] = []): (s: string) => boolean {
+  const record = confirmed.join("\n"), own = [...confirmed, ...drafts].join("\n");
   const has = (hay: string, n: string) => new RegExp(`(?<![\\p{L}\\p{N}])${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(hay);
-  // The organisations of the record: the name a fact about a job or a venture leads with ("Pixelforge, Founder ...").
-  const orgs = confirmed.filter((f) => ROLE_IN_FACT.test(f)).map((f) => f.split(/[,;:(]/)[0].trim()).filter((x) => x.length > 1);
-  const theirs = numbersIn(record);
-  // A sentence that speaks of the world (employers, the market, what is usual or most) is a claim, never advice of their own: it is
-  // judged. This list only narrows the exemption; it never lets a sentence through.
-  const WORLD = /(?<![\p{L}])(?:most|least|every|all|always|never|best|worst|highest|lowest|average|median|typical(?:ly)?|usual(?:ly)?|recruiters?|employers?|compan(?:y|ies)|banks?|firms?|funds?|market|industry|demand|hiring|hires?|pays?|paid|salary|salaries|wages?|this year|last year|next year|percent)(?![\p{L}])/iu;
-  return (s: string) => { const ns = numbersIn(s), names = specifics(s).names;
-    return !WORLD.test(s) && ns.every((n) => theirs.some((y) => numEq(y, n))) && names.every((n) => has(record, n) && !orgs.some((o) => has(o, n)))
-      && (ns.length > 0 || names.length > 0); };
+  // The organisations of the record: the name a fact about a job, a venture or a person they know leads with or is "at".
+  const orgs = [...confirmed, ...drafts].filter((f) => ROLE_IN_FACT.test(f)).flatMap((f) => [f.split(/[,;:(]/)[0].trim(), ...[...f.matchAll(/\bat ([\p{Lu}][\p{L}&.-]*(?: [\p{Lu}][\p{L}&.-]*)*)/gu)].map((m) => m[1])]).filter((x) => x.length > 1);
+  return (s: string) => {
+    const t = bare(s).trim();
+    if (!INSTRUCTION.test(t) || EVALUATIVE.test(t)) return false;
+    const from = REMOVE_VERB.test(t) ? own : record, mine = numbersIn(from);
+    const ns = numbersIn(t), names = specifics(t).names.filter((n) => !new RegExp(`^(?:${ADVICE_VERB}|you|for|at|in|on|under)$`, "i").test(n));
+    return ns.every((n) => mine.some((y) => numEq(y, n))) && names.every((n) => has(from, n) && !orgs.some((o) => has(o, n)));
+  };
 }
 export async function keepSupported(reply: string, sources: (string | { text: string; title?: string })[], o: { judge?: SupportJudge | null; read?: (s: string) => string; pure?: (s: string) => boolean; own?: string[]; advice?: (s: string) => boolean; subjects?: string[]; ask?: string } = {}): Promise<{ text: string; removed: string[] }> {
   const idx = indexPages(sources.map((x) => typeof x === "string" ? { text: x } : x), o.read, o.subjects ?? [], { ask: o.ask });

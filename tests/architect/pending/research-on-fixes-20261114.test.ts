@@ -89,32 +89,18 @@ Deno.test("fixes 9 and 11: code's own lines (a closed posting's note, the read-o
   eq(turnLines([JSON.stringify({ company: "Stripe", closed: false })]), { codeLines: [], readLines: [] });
 });
 
-// ---- architect ruling 2026-11-14 (narrowed on review of 7487f3600): advice outside the page judge stands on the CONFIRMED record
-// alone: no employer or company, no figure or name from what the person says they heard, from their unconfirmed words or from a page
+// ---- architect ruling 2026-11-14 (by shape, on review of 8cd4de7d4): advice outside the page judge is an instruction about the
+// person's own materials, on their own record, with no evaluative or world predicate
 import { adviceOfTheirOwn, keepSupported } from "../../../supabase/functions/_shared/agent/research/support.ts";
-const CONFIRMED = ["Lakeshore University, BS Computer Science and Finance, Expected June 2029", "Skill: Python", "Skill: React", "Pixelforge, Founder (2023-2025): hand-coded 70+ React websites for clients."];
-Deno.test("ruling 1: an advice sentence on the confirmed record alone stands unjudged", async () => {
-  const own = adviceOfTheirOwn(CONFIRMED);
-  const good = "Your education line is Lakeshore University, BS Computer Science and Finance, Expected June 2029, and your skills line leads with Python and React.";
-  ok(own(good));
-  const no: SupportJudge = async (cs) => cs.map(() => "no" as const);
-  const k = await keepSupported(`${good} Citadel pays interns $10k a week, which is the top of the market.`, [{ text: "Start with your name and contact links.", title: "Guide" }], { judge: no, advice: own });
-  ok(k.text.includes(good) && !/Citadel|10k/.test(k.text), k.text);
+Deno.test("ruling 1 by shape: the instruction kinds that stand, and the claim kinds that are judged", () => {
+  const own = adviceOfTheirOwn(["Lakeshore University, BS Computer Science and Finance, Expected June 2029", "Skill: Python", "Skill: SQL", "Pixelforge, Founder (2023-2025): hand-coded 70+ React websites"], ["GPA: 3.9"]);
+  ok(own("Leave the outdated 3.9 GPA off."), "removes a draft of theirs");
+  ok(own('For the top of your resume: your name and contact links, then "Lakeshore University | BS Computer Science and Finance | Expected June 2029", then a compact skills line led by Python and SQL.'));
+  ok(own("Move SQL ahead of Python in your skills line."));
+  ok(!own("Put your 3.9 GPA next to Lakeshore University."), "a draft is not theirs to assert");
+  ok(!own("Lead with Pixelforge, the strongest line you have."), "evaluative");
+  ok(!own("Lakeshore University graduates get hired fast."), "not an instruction");
 });
-Deno.test("ruling 1: the review's repros and four variants are judged, never kept unjudged", () => {
-  const own = adviceOfTheirOwn(CONFIRMED);
-  for (const bad of [
-    "Citadel pays interns $10k a week, which is the top of the market.",   // the person said "I heard Citadel pays $10k a week."
-    "Goldman Sachs pays $120 an hour to interns.",                          // "My internship pays $120 an hour."; the name from the guide
-    "Your Pixelforge work earned $9k a month, so lead with it.",            // an organisation of the record, with a figure it does not hold
-    "Pixelforge is a fast-growing studio, so lead with it.",                // an organisation of the record, with a claim about it
-    "Put your photo and date of birth at the top.",                         // general advice, nothing of the record
-    "Recruiters reject two-page resumes outright.",                         // a claim about the world
-    "List TypeScript and SQL after Python.",                                // names the person never confirmed
-    "Your 3.9 GPA from Lakeshore University belongs on top.",               // a figure the person never confirmed
-  ]) ok(!own(bad), bad);
-});
-
 // Turn-level (the entry point every version exposes): the review's two leaks and four variants through agentTurn's advice path,
 // with a judge that says no. Red on 7487f3600 (each sentence was kept unjudged), green here.
 import { agentTurn } from "../../../supabase/functions/agent-chat/career_brain.ts";
@@ -123,22 +109,26 @@ const aUse = (name: string, input: unknown) => ({ content: [{ type: "tool_use", 
 const GUIDE_URL = "https://careers.stateuniversity.edu/resume";
 const guideSearch = async () => ({ status: "ok", facts: [{ id: "", kind: "program", text: "Goldman Sachs and other banks read the top third of a resume first; keep it to one page.", quote: "Goldman Sachs and other banks read the top third of a resume first; keep it to one page.", url: GUIDE_URL, label: "State University career center" }], urls: [GUIDE_URL], cost_usd: 0.01 });
 const FACTS = [{ id: "F-1", kind: "education", text: "Lakeshore University, BS Computer Science and Finance, Expected June 2029", status: "confirmed" }, { id: "F-2", kind: "skill", text: "Skill: SQL", name: "SQL", status: "confirmed", unproven: true }];
-const adviceTurn = (history: { role: string; content: string }[], reply: string) => agentTurn({ message: "what goes at the top of my resume?", history, stores: { profile: { facts: structuredClone(FACTS) } }, userId: "u", threadId: "t", now: Date.parse("2026-11-14T00:00:00Z"), knowledge: true,
+const adviceTurn = (history: { role: string; content: string }[], reply: string, extra: any[] = []) => agentTurn({ message: "what goes at the top of my resume?", history, stores: { profile: { facts: [...structuredClone(FACTS), ...extra] } }, userId: "u", threadId: "t", now: Date.parse("2026-11-14T00:00:00Z"), knowledge: true,
   market: { judge: async (cs: any[]) => cs.map(() => "no") }, model: (() => { let n = 0; return async (p: any) => p.tools?.length ? [aUse("research_career_question", { question: "what goes at the top of my resume?", kind: "advice", query: "resume top" }), aSay(reply)][Math.min(n++, 1)] : aSay(""); })(), research: { search: guideSearch } } as any) as Promise<any>;
-Deno.test("ruling 1 at the turn: what the person heard, their unconfirmed words and the guide's names never ride the advice exemption", async () => {
-  const cases: [string, { role: string; content: string }[], string, RegExp][] = [
-    ["repro 1: heard", [{ role: "user", content: "I heard Citadel pays $10k a week." }], "Citadel pays interns $10k a week, which is the top of the market.", /Citadel|10k/],
-    ["repro 2: guide name", [{ role: "user", content: "My internship pays $120 an hour." }], "Goldman Sachs pays $120 an hour to interns.", /Goldman|120/],
-    ["variant: their unconfirmed figure", [{ role: "user", content: "My GPA is 3.4." }], "Put your 3.4 GPA next to Lakeshore University.", /3\.4/],
-    ["variant: an employer they named", [{ role: "user", content: "I interned at Stripe last summer." }], "Lead with your Stripe internship under Lakeshore University.", /Stripe/],
-    ["variant: a market claim", [], "SQL is the most requested skill at every bank this year.", /most requested/],
-    ["variant: a guide figure", [], "Banks read the top 3 inches of a resume for SQL.", /3 inches/],
+Deno.test("ruling 1 at the turn: the review's leaks are judged and refused; plain instructions on the record stand", async () => {
+  const cases: [string, any[], { role: string; content: string }[], string, RegExp][] = [
+    ["repro: heard", [], [{ role: "user", content: "I heard Citadel pays $10k a week." }], "Citadel pays interns $10k a week, which is the top of the market.", /Citadel|10k/],
+    ["repro: guide name", [], [{ role: "user", content: "My internship pays $120 an hour." }], "Goldman Sachs pays $120 an hour to interns.", /Goldman|120/],
+    ["leak: a friend's employer", [{ id: "F-9", kind: "other", text: "My friend at Citadel earns $10k a week", status: "confirmed" }], [], "Citadel interns earn $10k a week.", /Citadel|10k/],
+    ["leak: a skill's vendor", [{ id: "F-9", kind: "skill", text: "Skill: Palantir Foundry", name: "Palantir Foundry", status: "confirmed" }], [], "Palantir values Foundry experience.", /values/],
+    ["leak: a skill as an employer", [{ id: "F-9", kind: "skill", text: "Skill: Snowflake", name: "Snowflake", status: "confirmed" }], [], "Snowflake looks for Snowflake skills in new grads.", /looks for/],
+    ["leak: a record figure as a market claim", [{ id: "F-9", kind: "offer", text: "Offer: $120,000 in Chicago", status: "confirmed" }], [], "$120,000 is a strong number for a new grad.", /strong/],
+    ["leak: a record GPA as a cutoff", [{ id: "F-9", kind: "other", text: "GPA: 3.7", status: "confirmed" }], [], "A 3.7 GPA clears the cutoff.", /cutoff/],
+    ["leak: an unconfirmed figure asserted", [], [{ role: "user", content: "My GPA is 3.4." }], "Put your 3.4 GPA next to Lakeshore University.", /3\.4/],
+    ["leak: a market claim", [], [], "SQL is the most requested skill at every bank this year.", /most requested/],
   ];
-  for (const [name, history, reply, bad] of cases) {
-    const t = await adviceTurn(history, reply);
+  for (const [name, extra, history, reply, bad] of cases) {
+    const t = await adviceTurn(history, reply, extra);
     ok(!bad.test(t.reply), `${name}: ${t.reply}`);
   }
-  // On the confirmed record alone the advice stands (a confirmed skill not yet in a bullet included).
-  const good = "Under Lakeshore University, BS Computer Science and Finance, Expected June 2029, list SQL.";
-  ok((await adviceTurn([], good)).reply.includes(good));
+  for (const good of ["Leave the outdated 3.9 GPA off.", "Move SQL ahead of the education line."]) {
+    const t = await adviceTurn([], good, [{ id: "F-8", kind: "other", text: "GPA: 3.9", status: "draft", needs_confirmation: true }]);
+    ok(t.reply.includes(good), `${good} => ${t.reply}`);
+  }
 });

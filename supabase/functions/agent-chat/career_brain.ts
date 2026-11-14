@@ -397,7 +397,10 @@ export async function agentTurn(o: {
     } else if (trace.a) {
       // Architect ruling 2026-11-14 (narrowed): advice about the person's own materials is outside the page judge only when it
       // stands on their confirmed record alone (support.ts adviceOfTheirOwn).
-      const advice = adviceOfTheirOwn(confirmed.map((c) => c.text));
+      // A draft or unconfirmed fact of theirs counts only for an instruction that removes or updates it ("Leave the outdated 3.9 GPA off.").
+      // (one they withdrew counts too: "the 3.9 gpa on there is outdated" is exactly what to leave off)
+      const drafts = hypo ? [] : (((o.stores as any)?.profile?.facts ?? []) as any[]).filter((f) => f && typeof f === "object" && (f.status !== "confirmed" || f.withdrawn_by_owner)).map(factText).filter(Boolean);
+      const advice = adviceOfTheirOwn(confirmed.map((c) => c.text), drafts);
       const k = await keepSupported(result.reply, [...trace.a.passages.map((x) => ({ text: x.text, title: trace.a!.source?.label ?? "" })), ...confirmed, ...readSources], { judge, pure, own: codeLines, ask: o.message, advice });
       result = { ...result, reply: letters(k.text) ? k.text : [trace.a.not_verified || NOT_CONFIRMED, ...links(k.text)].join("\n") };
     } else if (recs.length || shownPay.length) {

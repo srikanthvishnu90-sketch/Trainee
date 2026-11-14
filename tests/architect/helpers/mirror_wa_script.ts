@@ -15,12 +15,10 @@ export const C21_Q = "Tell me about a time you failed: what were you responsible
 // quoting these passages; the market draft (market.ts RULES) quotes them back word for word. The pages themselves are refused
 // like every other host, so each passage stands for its page (via "search_passage"), as D-060 allows.
 export const C4_GUIDE = "https://student-to-software-engineer.org/docs/find-your-first-internship/resumes/";
-// Architect amendment (owner decision 2026-11-13: research support check switched on; architect ruling 2026-11-14, narrowed on review
-// of 7487f3600): advice skips the page judge only on the person's CONFIRMED record (D-007). The seeded world confirms the education
-// and the four skills (F-001, F-003 to F-006: "Skill: TypeScript/JavaScript", "Skill: SQL" included), but not "SWE" (a goal said in
-// chat, never saved as a fact) and not the GPA (F-002 "GPA: 3.9" is a draft, and the persona says it is outdated: it must never be
-// confirmed). So the scripted answer says only what the confirmed record holds; the GPA correction stays in the brain's view.
-export const C4_ANSWER = "For the top of your resume: your name and contact links, then \"Lakeshore University | BS Computer Science and Finance | Expected June 2029\", then a compact skills line led by Python, TypeScript/JavaScript, React and SQL.";
+// Architect amendment (owner decision 2026-11-13: research support check switched on; architect ruling 2026-11-14, by shape): advice
+// skips the page judge only when every name in it is of the person's own record. "SWE" is not (a goal said in chat, never saved as a
+// fact), so it is the one word taken out; "Leave the outdated 3.9 GPA off." stands as written (it removes a draft fact of theirs).
+export const C4_ANSWER = "For the top of your resume: your name and contact links, then \"Lakeshore University | BS Computer Science and Finance | Expected June 2029\", then a compact skills line led by Python, TypeScript/JavaScript, React and SQL. Leave the outdated 3.9 GPA off.";
 export const C9_Q = "what's citadel like for new grad swe, culture pay interview process, give me real sources";
 export const CITADEL_QUERIES = ["Citadel new grad software engineer pay", "Citadel engineering interview process", "Citadel culture hours"];
 export const WEB: Record<string, { title: string; text: string }> = {

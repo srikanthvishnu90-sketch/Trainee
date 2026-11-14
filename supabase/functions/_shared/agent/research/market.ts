@@ -586,7 +586,13 @@ export async function researchMarket(i: { question: string; format: "inline" | "
       // for word; and it was judged with each of its cells as one claim ("<column>, <label>: <value>", lineS).
       const lab = r.label.toLowerCase(), units0 = r.cells.map((c) => c ? (srcOf.get(c.value) ?? "").toLowerCase() : "").filter(Boolean);
       void have; void askWords;
-      return !figuresIn(r.label).length && contentWords(r.label).size > 0 && !/[^\p{L}\p{N} '&-]/u.test(r.label) && (askSpan(lab, i.ask ?? "") || units0.some((u) => u.startsWith(`${lab} `))); }) : rows;
+      // 2026-11-14 (a TRUE cell was dropped for its label: "Sells", "Home batteries installed (2025)"): a label also stands when every
+      // word of it is the ask's or its cells' units' and any figure in it is a year those units carry.
+      const unitYears = new Set(units0.flatMap((u) => u.match(/(?<!\d)(?:19|20)\d\d(?!\d)/g) ?? []));
+      const labelYears = (r.label.match(/(?<!\d)(?:19|20)\d\d(?!\d)/g) ?? []);
+      const fromPages = labelYears.every((y) => unitYears.has(y)) && !figuresIn(r.label.replace(/(?<!\d)(?:19|20)\d\d(?!\d)/g, " ")).length && !/[^\p{L}\p{N} '&()-]/u.test(r.label)
+        && [...contentWords(r.label)].every((w) => have.has(w) || askWords.has(w));
+      return contentWords(r.label).size > 0 && (fromPages || (!figuresIn(r.label).length && !/[^\p{L}\p{N} '&-]/u.test(r.label) && (askSpan(lab, i.ask ?? "") || units0.some((u) => u.startsWith(`${lab} `))))); }) : rows;
     if (idx ? rowsS.length > 0 && opts.every((_, j) => rowsS.some((r) => r.cells[j])) : rows.length) comparison = { options: opts, rows: rowsS };
   }
   const conditions = arr(d.conditions, 6).map(idx ? (x: any) => lineS(x, x?.text, "conditions") : reading("conditions")).filter(Boolean) as Cited[];
@@ -916,7 +922,9 @@ export async function enforceMarketReplySupported(reply: string, r: MarketResult
       // with none, code's own answer (the kept lines) is given as before.
       if (!anyStood) return "";
       const figs = figuresIn(wants[x].claim);
-      const p = figs.length ? kept.find((k) => k.cite.some((c) => cited[x]?.includes(c)) && figs.every((f) => figuresIn(k.text).some((y) => numEq(y, f)))) : null;
+      // (and only when every name the sentence gives is the kept line's: Acme's figure is never given for a sentence about Globex)
+      const names = specifics(wants[x].claim).names;
+      const p = figs.length ? kept.find((k) => k.cite.some((c) => cited[x]?.includes(c)) && figs.every((f) => figuresIn(k.text).some((y) => numEq(y, f))) && names.every((n) => k.text.toLowerCase().includes(n.toLowerCase()))) : null;
       if (!p) return "";
       const key = plainLine(p.text.replace(/^"(.*)"$/s, "$1")).toLowerCase();
       if (said.has(key)) return "";

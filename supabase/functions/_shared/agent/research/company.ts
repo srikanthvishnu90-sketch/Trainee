@@ -486,9 +486,15 @@ export async function enforceCompanyReplySupported(reply: string, r: CompanyResu
   const kept: Cited[] = [...r.business, ...r.developments, ...r.competitors, ...r.role_asks, ...(r.frame ? [r.frame] : [])];
   const show = (text: string, cite: number[]) => inline ? `${text.replace(/[.]?$/, "")} ${cite.map((n) => `[${n}]`).join("")}.` : text;
   const wants: Wanted[] = [], row: (string | number)[] = [];
+  // 2026-11-14 (WO-H/3): a sentence of one of the File's own questions (code built it and checked each side on its pages) is that
+  // question, said again: kept, unjudged. So is the line that says how many of them the File holds for whom, when it is true.
+  const qParts = new Set(r.questions.flatMap((q) => q.text.split(/(?<=[.?])\s+/)).map((x) => plain(x).toLowerCase()));
+  const NUM: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 };
+  const countLine = (s: string) => { const m = /^(\d+|one|two|three|four|five|six) (?:more )?questions? (?:for (?:the |your )?([\p{L} ]{2,40}?) )?(?:are|is) in the (?:file|brief)\.?$/iu.exec(bare(s).trim()); if (!m) return false; const n = Number(m[1]) || NUM[m[1].toLowerCase()]; return n === r.questions.length && (!m[2] || (!!r.audience && m[2].toLowerCase() === String(r.audience).toLowerCase())); };
   for (const s of pieces(reply)) {
     const line = kept.find((p) => plain(p.text) === plain(s));
     if (line) { row.push(show(line.text, line.cite)); continue; }
+    if (qParts.has(plain(s).toLowerCase()) || countLine(s)) { row.push(bare(s)); continue; }
     if (roleQ(s) || pureUnconfirmed(s, ask)) { row.push(bare(s)); continue; }
     if (/\?\s*$/.test(s)) continue; // any other question to the person may carry a claim: it goes
     const cs = [...s.matchAll(/\[(\d+)\]/g)].map((m) => Number(m[1])).filter((n) => n >= 1 && n <= max).map((n) => sup.pageOfN[n - 1]).filter((k) => k >= 0);
@@ -500,6 +506,8 @@ export async function enforceCompanyReplySupported(reply: string, r: CompanyResu
     if (typeof x === "string") return x;
     const v = vs[x], n = v.how === "drop" ? 0 : sup.pageOfN.indexOf(v.page) + 1;
     if (v.how === "drop" || n < 1) return "";
+    // 2026-11-14: a turn that asked for one area (questions, say) gets no page sentence from outside it in a refused line's place.
+    if (v.how === "quote" && r.focus !== "all" && !kept.some((p) => plain(p.text.replace(/^(?:From [^:]+: )?"(.*)"$/s, "$1")) === plain(v.sentence))) return "";
     // A page sentence that stands in for a sentence is said once: not again beside the kept line or the quote that already says it.
     const text = v.how === "model" ? wants[x].claim : quoteOf(v), key = plain(v.how === "model" ? text : v.sentence).toLowerCase();
     if (said.has(key)) return "";

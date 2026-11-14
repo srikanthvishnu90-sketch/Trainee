@@ -360,6 +360,13 @@ export async function agentTurn(o: {
     // may stand on; the person's confirmed facts are a source for what is said about them (D-007).
     const codeLines = (result.codeLines ?? []).flatMap((x) => x.split(/(?<=[.!?])\s+(?!https?:)/));
     const readSources = (result.readLines ?? []).map((text) => ({ text, title: "Read from the posting this turn" }));
+    // A sentence that restates code's boundary ("… no account, saved application or submission was created.") is that boundary:
+    // code's own line takes its place, unjudged.
+    for (const line of codeLines) {
+      const core = line.replace(/^Read only:\s*/i, "").replace(/[.]$/, "").toLowerCase();
+      if (core.length < 20 || core === line.toLowerCase()) continue;
+      result = { ...result, reply: result.reply!.split(/\n/).map((l) => l.split(/(?<=[.!?])\s+/).map((x) => x.toLowerCase().includes(core) ? line : x).join(" ")).join("\n") };
+    }
     const confirmed = hypo ? [] : confirmedFacts((o.stores as any)?.profile?.facts ?? []).map(factText).filter(Boolean).map((text: string) => ({ text, title: "What the person confirmed" }));
     if (trace.r) {
       // Code's own lines: the verdict, the first action, and the fallback paragraph code writes (its last sentence carries the File link).

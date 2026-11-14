@@ -4,6 +4,8 @@
 import type { Call, Step } from "./mirror_process.ts";
 import { PAYPAL } from "./mirror_process.ts";
 import { C16_STEPS, C19_STEPS, C6_STEPS } from "./d062_fixtures.ts";
+import { isSupportJudgeCall } from "../support-test-judge.ts";
+import { mirrorJudgeAnswer } from "./mirror_stub_judge.ts";
 
 // What the brain does on each EXISTS turn (the process's tool calls) and its final words; code decides what each call returns.
 export const C2_BODY = "Hi [Name], I'm Sam, a Computer Science and Finance student at Lakeshore looking for a summer 2027 SWE internship at Google: [job link]. I'm building Waypoint, a career agent, and previously built 70+ React websites for clients through Pixelforge. Would you be open to taking a look at my resume and considering a referral if you think I'd be a fit? Best, Sam";
@@ -37,7 +39,10 @@ export const web = (body: any, turn: string) => {
     ...urls.map((u) => ({ type: "text", text: WEB[u].text, citations: [{ type: "web_search_result_location", url: u, title: WEB[u].title, cited_text: WEB[u].text, encrypted_index: "x" }] })),
   ], usage: { input_tokens: 9000, output_tokens: 300, server_tool_use: { web_search_requests: 1 } } };
 };
-export const draft = (system: string, user: string) => /^You answer a market research question from the PAGES/.test(system)
+// Architect amendment (owner decision 2026-11-13: research support check switched on): the handler's support judge calls the model
+// with no tools, which the conversation runner hands to `draft`; it is answered by the mirror stub judge (helpers/mirror_stub_judge.ts,
+// a JSON array) and never advances the script, for every suite that runs this script.
+export const draft = (system: string, user: string) => isSupportJudgeCall(system) ? mirrorJudgeAnswer(user) : /^You answer a market research question from the PAGES/.test(system)
   ? JSON.stringify({ title: "Research", summary: Object.entries(WEB).filter(([u]) => user.includes(u)).map(([url, p]) => ({ text: p.text.replace(/\.$/, ""), quote: p.text, url })) })
   : null;
 // The source number research_market gave a page (by a piece of its address), for the brain's citation.

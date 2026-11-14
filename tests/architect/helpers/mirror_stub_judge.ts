@@ -4,7 +4,10 @@ import { C4_ANSWER } from "./mirror_wa_script.ts";
 // Architect amendment (ruling 2026-11-14 on 69ad43a79): a scripted-truth table, like group B's pageTruthJudge. C4's two advice
 // sentences are recorded as supported by the joint guide and record passage (the real judge reads the paraphrase "a compact skills
 // line" for the guide's "a short technical skills section"; this stub reads words only). Every other claim keeps the word rule below.
-export const SCRIPTED_TRUE = new Set(C4_ANSWER.replace("your SWE resume", "your resume").split(/(?<=[.!?])\s+(?=[A-Z])/).map((x) => x.trim()));
+// (computed on first use: mirror_wa_script.ts imports this module too)
+let table: Set<string> | null = null;
+export const scriptedTrue = () => table ??= new Set(C4_ANSWER.replace("your SWE resume", "your resume").split(/(?<=[.!?])\s+(?=[A-Z])/).map((x) => x.trim()));
+export const SCRIPTED_TRUE = { [Symbol.iterator]: () => scriptedTrue()[Symbol.iterator](), has: (x: string) => scriptedTrue().has(x) } as unknown as Set<string>;
 // Architect amendment (owner decision 2026-11-13: research support check switched on; architect ruling 2026-11-14 on 5e7b9fa95): this
 // test's stub judge reads an advice sentence's fixed instruction words (its leading imperative verb, and leave/keep/move/put/cut/drop/
 // remove/list/lead, off/out/in/up/first/top/above/below, outdated/old/current) as needing no support; every other word of the sentence

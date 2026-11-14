@@ -124,7 +124,7 @@ Deno.test("SL/5 every workflow that can reach a model sets EVAL_LEDGER=shared an
       eq(String(jobEnv.EVAL_LEDGER), "shared", `${e.name}/${jobName}: EVAL_LEDGER must be shared`);
       eq(String(jobEnv.SUPABASE_URL).replace(/\s/g, ""), "${{secrets.SUPABASE_URL}}", `${e.name}/${jobName}: SUPABASE_URL from secrets`);
       eq(String(jobEnv.SUPABASE_SERVICE_ROLE_KEY).replace(/\s/g, ""), "${{secrets.SUPABASE_SERVICE_ROLE_KEY}}", `${e.name}/${jobName}: SUPABASE_SERVICE_ROLE_KEY from secrets`);
-      eq(String(jobEnv.MODEL_BUDGET_TARGET_USD), "80"); eq(String(jobEnv.MODEL_BUDGET_HARD_USD), "80"); // Architect amendment (D-074): the owner raised the one total to $80
+      eq(String(jobEnv.MODEL_BUDGET_TARGET_USD), "85"); eq(String(jobEnv.MODEL_BUDGET_HARD_USD), "85"); // Architect amendment (D-074): the owner raised the one total to $80; architect amendment (owner decision 2026-11-14, D-084: total raised to $85)
     }
   }
   const be = Deno.readTextFileSync(`${dir}/brain-eval.yml`);

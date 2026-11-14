@@ -1,5 +1,5 @@
 // The four live eval runners outside evals/career/run.ts (real-sets research and people, mirror run-trainee, mirror held-out live)
-// go through the ONE shared $80 ledger when --live (eval_budget.ts openLiveRunLedger): the cap is reserved before the first model
+// go through the ONE shared $85 ledger when --live (eval_budget.ts openLiveRunLedger): the cap is reserved before the first model
 // call and settled after; an unreachable ledger, a refused reservation, a cap above the per-run maximum or an approval that is not a
 // DECISIONS.md row refuses the run before any model call. Fakes only: a fake PostgREST ledger and a fake HTTPS proxy on 127.0.0.1
 // that records every CONNECT and forwards nothing, so no request leaves the machine and nothing is spent.

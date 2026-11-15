@@ -91,8 +91,19 @@ const Q_BANNED = /(?<![\p{L}])(?:where|which|that|who|given|since|now that|even 
 const Q_PERIOD = /(?<![\p{L}])(?:hours?|hourly|days?|daily|weeks?|weekly|months?|monthly|years?|yearly|annual(?:ly)?|quarters?|today|tomorrow|tonight|yesterday|ago|recently|soon|now|later|summer|fall|autumn|winter|spring|season)(?![\p{L}])/iu;
 const Q_PLACE_TEMPLATE = /(?<![\p{L}])(?:authori[sz]ed to work in|open to relocating to|willing to work in|open to working in)\s+((?:the\s+)?\p{Lu}[\p{L}.'-]*(?:\s+\p{Lu}[\p{L}.'-]*){0,2})/u;
 const Q_OPENERS = /^(?:which|what|where|when|who|how|should|would|could|can|do|does|did|is|are|want|shall|will|have|has|and|so)$/i;
-export function personQuestion(s: string, _allowed = ""): boolean {
-  void _allowed;
+// Review of #849 (21 of 39 adversarial questions passed unjudged): fail closed. Beyond the rules above, a question is exempt only
+// when it holds no number word, no word that presupposes a fact or an event (Q_PRESUPPOSES), no "at/from" naming a place or
+// employer, a place in the eligibility template only when the person's record or ask names it, and every "your X" names
+// something the record or the ask holds. Everything else is judged (not dropped).
+const Q_NUMBER_WORDS = /(?<![\p{L}])(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|dozen|couple|half|double|triple|twice|several|few)(?![\p{L}])/iu;
+const Q_PRESUPPOSES = /(?<![\p{L}])(?:already|again|still|anyway|closed?|closing|sent|submitted|accepted|rejected|reject|offer(?:ed|s)?|unpaid|paid|paying|pays|pay|salary|stipend|raise|cut|frozen|froze|dropped|ghosted|deadline|posting|clearance|recruiter|manager|ceo|founder|degree|master'?s|phd|certification|internship|gpa|promotion|laid|layoffs?)(?![\p{L}])/iu;
+// A country, a U.S. state or a large city may fill the eligibility template; any other name (an employer) only when the record or the ask names it.
+const KNOWN_PLACE = /^(?:U\.?S\.?A?\.?|United States|America|UK|U\.K\.|United Kingdom|Canada|Mexico|Germany|France|Spain|Italy|Ireland|Netherlands|India|China|Japan|Singapore|Australia|Brazil|EU|Europe|Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming|Chicago|Boston|Seattle|Austin|Denver|Atlanta|London|Toronto|San Francisco|Los Angeles|New York City)$/i;
+// A "your X" claims a fact about the person only when X names a record fact; those must be in the record or the ask.
+const RECORD_NOUN = /^(?:degree|degrees|major|minor|gpa|school|university|college|internship|internships|employer|company|certification|certifications|certificate|award|awards|phone|email|address|city|visa|citizenship|salary|offer|offers|graduation|clearance|license|patent|patents|publication|publications|thesis)$/i;
+const Q_AT = /(?<![\p{L}])(?:at|from)\s+(?!all\b|this\b|that\b|the moment\b|least\b|most\b|home\b|first\b)\p{L}/iu;
+export function personQuestion(s: string, allowed = ""): boolean {
+  const allowedText = String(allowed ?? "").toLowerCase();
   const b = bare(String(s ?? "")).replace(/[’‘]/g, "'").trim();
   if (!b || /["\u201c\u201d]/.test(b) || /[,;:]/.test(b.replace(/[?.]+$/, ""))) return false;
   if (!/\?\s*$/.test(b) && !ASK_THEM.test(b)) return false;
@@ -100,10 +111,28 @@ export function personQuestion(s: string, _allowed = ""): boolean {
   if (!words.length || words.length > 16 || !Q_OPENERS.test(words[0].replace(/'.*$/, ""))) return false;
   if (Q_BANNED.test(words.slice(1).join(" "))) return false;
   if (/\d/.test(b) || MONTH_OR_DAY.test(b) || Q_PERIOD.test(b) || ASSERTS_IN_Q.test(b) || PAST_EVENT.test(b) || /(?<![\p{L}])aware(?![\p{L}])/iu.test(b)) return false;
+  if (Q_NUMBER_WORDS.test(b) || Q_PRESUPPOSES.test(b) || Q_AT.test(b)) return false;
+  for (const m of b.matchAll(/(?<![\p{L}])your\s+(?:[\p{L}'-]+\s+)?([\p{L}'-]+)/giu)) if (RECORD_NOUN.test(m[1]) && !allowedText.includes(m[1].toLowerCase())) return false;
   const tpl = Q_PLACE_TEMPLATE.exec(b);
+  if (tpl && !KNOWN_PLACE.test(tpl[1].replace(/^the\s+/i, "").trim()) && !allowedText.includes(tpl[1].replace(/^the\s+/i, "").toLowerCase())) return false;
   const rest = tpl ? b.replace(tpl[1], " ") : b;
   const h = hardParts(rest);
   return !h.names.map((r, j) => j === 0 && r[0] === h.first ? r.slice(1) : r).some((r) => r.length) && !/(?<!^)(?<![.?!]\s)\p{Lu}/u.test(rest.slice(1).replace(/\bI\b/g, "i"));
+}
+// Review of #849 (round 2): a sentence with no figure, no date and no name may go untagged and unjudged only when it is plain advice
+// or talk: the same fail-closed tests as an exempt question (no time or period word, nothing that presupposes an event or a state,
+// no "at/from <name>", every "your X" in the record or the ask). Anything else is judged.
+export function plainTalk(s: string, allowed = ""): boolean {
+  const b = bare(String(s ?? "")).replace(/[’‘]/g, "'").trim();
+  if (!/\p{L}/u.test(b) || /\d/.test(b) || MONTH_OR_DAY.test(b) || Q_PERIOD.test(b) || ASSERTS_IN_Q.test(b) || PAST_EVENT.test(b) || ASSERTS_STATUS.test(b)) return false;
+  if (Q_PRESUPPOSES.test(b) || Q_AT.test(b) || /(?<![\p{L}])(?:hiring|hires|hired|froze|layoffs?|reorg\w*|acquired|merger|ipo|funding|raised|closes|opens|opened|posted|listed|removed|cancel\w*|aware)(?![\p{L}])/iu.test(b)) return false;
+  const allowedText = String(allowed ?? "").toLowerCase();
+  for (const m of b.matchAll(/(?<![\p{L}])your\s+(?:[\p{L}'-]+\s+)?([\p{L}'-]+)/giu)) if (RECORD_NOUN.test(m[1]) && !allowedText.includes(m[1].toLowerCase())) return false;
+  const h = hardParts(b);
+  if (h.numbers.length || h.years.length || h.quant.length) return false;
+  // A capitalised first word is a name unless it is an ordinary sentence starter (an imperative or a discourse word).
+  const starter = (w: string) => PLAIN_FIRST.test(w) || /^(?:let|keep|lead|try|use|add|make|ask|start|focus|consider|remember|please|happy|sure|good|great|okay|ok|yes|thanks|here|say|send|tell|write|open|put|show|list|mention|drop|cut|avoid|skip|aim|pick|choose|be|do|don't|if|when|once|after|before|then|also|and|but|so|you|you're|your|we|we're|our|my|me|a|an|the|one|that's|there's|what|which|how|want|would|could|should|can)$/i.test(w);
+  return !h.names.some((r) => r.length > (r[0] === h.first && starter(r[0]) ? 1 : 0));
 }
 // Live-12 (item 5): a sentence of joined clauses ("…; …", "…, and …", "…, so …") is read clause by clause.
 export const clausesOf = (s: string) => bare(s).replace(/[.!?]+$/, "").split(/;\s+|,\s+(?:and|so|but)\s+/u).map((x) => x.trim()).filter((x) => /\p{L}/u.test(x));

@@ -13,7 +13,7 @@
 //             code's words; the answer is verified again; what still fails is dropped. It replaces the shortener and the quote fallback.
 //   fallback  after the drop, when nothing left answers, code says what it could not verify and what the ledger holds (a posting's
 //             pay with its link).
-import { clausesOf, findSupport, hardParts, indexPages, judgeAll, nameFoundIn, noClaim, personQuestion, splitSentences, type SupportJudge } from "./research/support.ts";
+import { clausesOf, findSupport, hardParts, indexPages, judgeAll, nameFoundIn, noClaim, personQuestion, plainTalk, splitSentences, type SupportJudge } from "./research/support.ts";
 
 // ON (ruling 2026-11-14): the drafting prompt asks for tags and every tool result carries its units. The path is chosen by the draft:
 // a TAGGED draft goes through this pipeline (no page quote is ever put in place of a sentence); an UNTAGGED one (a model that ignored
@@ -58,6 +58,8 @@ export class Ledger {
     if (o.sign_in_required === true) ids.push(this.add("chat", "To apply, the person signs in to the employer's careers site themselves; its own questions are behind that sign-in and were not read.", { source: name }));
     for (const s of Array.isArray(o.sources) ? o.sources : []) for (const pt of [...(Array.isArray(o.points) ? o.points : []), ...(Array.isArray(o.summary) ? o.summary : [])])
       if (Array.isArray(pt?.cite) && pt.cite.includes(s?.n) && typeof pt?.text === "string") ids.push(this.add("page", pt.text, { url: s?.url ?? null, host: hostOf(s?.url), source: s?.kind ?? "reported" }));
+    // Review of #849: the advice tool's guide passages are evidence too (they were never units, so advice could not be cited).
+    for (const pg of Array.isArray(o.passages) ? o.passages : []) if (typeof pg?.text === "string") ids.push(this.add("page", pg.text, { url: typeof pg?.url === "string" ? pg.url : null, host: hostOf(pg?.url), source: typeof pg?.title === "string" ? pg.title : "guide" }));
     const link = typeof o.url === "string" && /file|tracker|page/i.test(name) ? o.url : null;
     if (link) ids.push(this.add("chat", `A ${name.replace(/_/g, " ")} file was made this turn.`, { url: link, source: name }));
     return ids.filter(Boolean);
@@ -105,7 +107,7 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   const own = new Set((o.own ?? []).map((x) => x.trim()));
   const lines = String(reply ?? "").split("\n").map((l) => /^\s*(?:https?:\/\/\S+\s*)*$/.test(l) ? [l] : splitSentences(l).filter((x) => x.trim()));
   const failures: Failure[] = [], kept: string[] = [];
-  const checks: { a: number; b: number; clause: string; units: EvidenceUnit[]; claim: string }[] = [];
+  const checks: { a: number; b: number; clause: string; units: EvidenceUnit[]; claim: string; subject?: string | null }[] = [];
   const bad = new Set<string>(), citeAt = new Map<string, string[]>();
   lines.forEach((l, a) => l.forEach((x, b) => {
     if (/^\s*(?:https?:\/\/\S+\s*)*$/.test(x)) return;
@@ -113,14 +115,30 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
     lines[a][b] = text;
     if (!/\p{L}/u.test(text) || own.has(text) || noClaim(text) || personQuestion(text, allowed)) return;
     if (o.onRecord?.(text) === true) return;
-    if (!ids.length) { failures.push({ sentence: text, reason: "it states a fact and cites no evidence unit" }); bad.add(`${a}:${b}`); return; }
+    // The record's verdict comes before the plain-sentence rule: a sentence about the record that the record contradicts fails.
+    if (o.onRecord?.(text) === false) { failures.push({ sentence: text, reason: "it is not what the person's record holds" }); bad.add(`${a}:${b}`); return; }
+    // Review of #849: a sentence with no figure, no date and no name needs no tag (LEDGER_RULE says so); only one that names or
+    // counts something must cite a unit.
+    if (!ids.length) {
+      if (plainTalk(text, allowed)) return;
+      failures.push({ sentence: text, reason: "it states a fact and cites no evidence unit" }); bad.add(`${a}:${b}`); return;
+    }
     const units = ids.map((id) => ledger.get(id)).filter(Boolean) as EvidenceUnit[];
     if (units.length < ids.length) { failures.push({ sentence: text, reason: `it cites ${ids.filter((id) => !ledger.get(id)).join(", ")}, which no evidence unit is` }); bad.add(`${a}:${b}`); return; }
     citeAt.set(`${a}:${b}`, ids);
+    // Review of #849: a clause that names no one of its own is about the sentence's subject (its first name), so the unit that supports
+    // it must name that subject too ("PayPal pays $28-$49 in Chicago, and pays $80 in New York" cannot borrow Citadel's $80).
+    const hs = hardParts(text);
+    const COMMON_START = /^(?:the|a|an|it|its|they|their|this|that|these|those|we|our|you|your|i|my|he|she|his|her|there|here|and|but|so|if|when|in|on|at|for|with|from|by|as|of|to|both|each|every|all|most|some|many|no|not|yes)$/i;
+    const firstWord = /^[\p{Lu}][\p{L}&'.-]*/u.exec(text.trim())?.[0] ?? "";
+    const subject = firstWord && !COMMON_START.test(firstWord) ? firstWord : ((hs.names.map((r, j) => j === 0 && r[0] === hs.first ? r.slice(1) : r).map((r) => r.filter((w) => !/^date\d{8}$/.test(w))).find((r) => r.length) ?? [])[0] ?? null);
     for (const c of clausesOf(text)) {
       if (noClaim(c) || personQuestion(c, allowed) || o.onRecord?.(c) === true) continue;
       if (o.onRecord?.(c) === false) { failures.push({ sentence: text, reason: `"${c}" is not what the person's record holds` }); bad.add(`${a}:${b}`); return; }
-      checks.push({ a, b, clause: c, units, claim: text });
+      // A clause has its own subject only when a name opens it ("Citadel pays…"); a place later in it ("…in New York") is not one.
+      const lead = /^[\p{Lu}][\p{L}&'.-]*/u.exec(c.trim())?.[0] ?? "";
+      const own = !!lead && !COMMON_START.test(lead);
+      checks.push({ a, b, clause: c, units, claim: text, subject: own ? null : subject });
     }
   }));
   // Layer A: each clause against an index of the units it cites, a record unit read as one record (a fact per line).
@@ -130,7 +148,8 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
     const idx = indexPages(c.units.map((u) => ({ text: u.text, title: u.kind === "page" ? `Page${u.host ? ` (${u.host})` : ""}` : u.kind === "chat" ? "This chat's tool result" : "The person's confirmed record:", places: u.places ?? [], ...(u.kind === "record" || u.kind === "absent" ? { one: true } : {}) })));
     const f = findSupport(c.clause, idx);
     if (!f) { const miss = missingSpecifics(c.clause, c.units); failures.push({ sentence: c.claim, reason: miss.length ? miss.map((m) => `'${m}' is in no cited unit`).join("; ") : `no single cited unit holds "${c.clause}"` }); bad.add(`${c.a}:${c.b}`); return; }
-    asks.push({ k, claim: c.clause, source: f.unit.passage });
+    if (c.subject && !nameFoundIn(c.subject, f.unit.passage)) { failures.push({ sentence: c.claim, reason: `the unit that holds "${c.clause}" is not about ${c.subject}` }); bad.add(`${c.a}:${c.b}`); return; }
+    asks.push({ k, claim: `${c.subject && !c.clause.includes(c.subject) ? `${c.subject}: ` : ""}${c.clause}`, source: f.unit.passage });
   });
   const got = await judgeAll(o.judge, asks.map((x) => ({ claim: x.claim, source: x.source })));
   asks.forEach((x, j) => { const c = checks[x.k]; if (!got[j] && !bad.has(`${c.a}:${c.b}`)) { failures.push({ sentence: c.claim, reason: `the cited unit does not state "${x.claim}"` }); bad.add(`${c.a}:${c.b}`); } });
@@ -184,7 +203,10 @@ export async function runReplyPipeline(draft: string, ledger: Ledger, o: { judge
       // The repaired sentences join what stood (or, for a length repair, replace it when shorter and every figure it keeps is checked).
       // (a repaired opening sentence opens the reply again: the answer comes first)
       const firstFailed = v1.failures.length && tagsOf(splitSentences(String(draft).split("\n")[0] ?? "")[0] ?? "").text === v1.failures[0].sentence;
-      const joined = tooLong && v2.text && len(v2.text) < len(text) ? v2.text : (firstFailed ? [v2.text, text] : [text, v2.text]).filter(Boolean).join(" ");
+      // Review of #849: the repair returns only the fixed sentences, so it never replaces what stood (a one-sentence repair wiped the
+      // verified answer). A length overrun is handled below by dropping whole sentences from the end.
+      const fresh = [...new Set(splitSentences(v2.text).map((x) => x.trim()).filter((x) => x && !text.includes(x)))].join(" ");
+      const joined = (firstFailed ? [fresh, text] : [text, fresh]).filter(Boolean).join(" ");
       if (!o.maxChars || len(joined) <= o.maxChars || len(joined) <= len(text)) { text = joined; repaired = true; cites = [...new Set([...cites, ...v2.cites])]; }
       dropped = v2.failures;
     }

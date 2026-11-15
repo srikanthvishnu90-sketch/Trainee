@@ -139,7 +139,7 @@ export function dateSpans(t: string): Span[] {
     if (monthOk(m[2]) && realDay(+m[3], MONTHS3.indexOf(m[2].slice(0, 3).toLowerCase()), +m[1])) add(m);
   }
   for (const m of t.matchAll(new RegExp(`\\b${MONTH_SRC}\\.?,?\\s+((?:19|20)\\d\\d)\\b(?!\\s*[A-Za-z])`, "gi"))) if (monthOk(m[1])) add(m);
-  for (const m of t.matchAll(/(?:\bat\s+)?\b([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?(\s?[ap]\.?m\.?\b)?/gi)) if (m[3] || /^at\s/i.test(m[0])) add(m);
+  for (const m of t.matchAll(/(?:\bat\s+)?\b([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?(?!\d)(\s?[ap]\.?m\.?\b)?/gi)) if (m[3] || /^at\s/i.test(m[0])) add(m);
   for (const m of t.matchAll(/\b(?:from\s+)?((?:19|20)\d\d)\s*(?:-|–|to|through)\s*((?:19|20)\d\d)\b(?!\s*[A-Za-z])/gi)) if (+m[2] >= +m[1]) add(m);
   const YEAR_CTX = new RegExp(`(?:\\b(?:in|since|until|till|through|thru|during|fy|q[1-4]|h[12])\\s*|\\b(?:mid|early|late)-|\\b${MONTH_SRC}\\.?,?\\s+)((?:19|20)\\d\\d)\\b`, "gi");
   for (const m of t.matchAll(YEAR_CTX)) {
@@ -198,7 +198,11 @@ export function loose(prose: string, values: Values): string[] {
   for (const m of text.matchAll(NUM)) {
     if (!m[3] && !m[4]) continue;
     const at = m.index! + (m[1]?.length ?? 0) + m[2].length;
-    if (masked.has(at)) continue;
+    // Skipped only when the whole figure lies inside a date span (round 6: "at 9:30000" and "2026-11-14,000" hid digits).
+    const end = m.index! + m[0].length;
+    let inside = true;
+    for (let i = at; i < end; i++) if (!masked.has(i)) { inside = false; break; }
+    if (inside) continue;
     const cur = !!m[1];
     const intPart = (m[3] || "0").replace(/,/g, "");
     const suffix = (m[6] ?? "").toLowerCase();

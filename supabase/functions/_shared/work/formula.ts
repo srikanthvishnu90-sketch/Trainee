@@ -15,7 +15,8 @@ const TOL = 1e-9;
 const isErr = (v: unknown): v is Err => typeof v === "object" && v !== null && "error" in v;
 const isRange = (v: unknown): v is Range => typeof v === "object" && v !== null && "range" in v;
 const unxml = (s: string) =>
-  s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&");
+  s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&")
+    .replace(/_x([0-9A-Fa-f]{4})_/g, (_m, h: string) => String.fromCharCode(parseInt(h, 16)));
 const attr = (tag: string, name: string) => new RegExp(`\\s${name}="([^"]*)"`).exec(tag)?.[1];
 
 function colNum(c: string): number {

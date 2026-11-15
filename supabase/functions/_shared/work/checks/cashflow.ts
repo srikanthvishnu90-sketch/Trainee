@@ -7,18 +7,42 @@ export type CashResult = {
   outstandingLockup: number; findings: string[]; balances: { day: number; balance: number }[];
 };
 
+export class CashInputError extends RangeError {
+  constructor(msg: string) { super(msg); this.name = "CashInputError"; }
+}
+
+// The low point is read after every event, not at day ends: within one day the order of events is not known, so the
+// day's outflows are applied before its inflows (the worst case). Before, a same-day -2000 then +2000 showed no dip
+// (review of WO-124c). balances[] still lists the end-of-day balance for each day.
 export function run({ start, events }: { start: number; events: CashEvent[] }): CashResult {
-  const ordered = events.map((e, i) => ({ e, i })).sort((a, b) => a.e.day - b.e.day || a.i - b.i).map((x) => x.e);
+  if (!Number.isFinite(start)) throw new CashInputError("the starting balance must be a finite number");
+  for (const [i, e] of events.entries()) {
+    if (!Number.isFinite(e.day) || !Number.isFinite(e.amount)) throw new CashInputError(`event ${i + 1} needs a finite day and amount`);
+    if (e.refundableDay !== undefined && !Number.isFinite(e.refundableDay)) throw new CashInputError(`event ${i + 1} has a non-finite refundable day`);
+  }
+  const ordered = events.map((e, i) => ({ e, i })).sort((a, b) =>
+    a.e.day - b.e.day || Math.sign(a.e.amount) - Math.sign(b.e.amount) || a.i - b.i
+  ).map((x) => x.e);
   const balances: { day: number; balance: number }[] = [];
   let bal = start, minBalance = start, minDay: number | null = null;
+  const findings: string[] = [];
+  let lockedSoFar = 0, refundedSoFar = 0, earlyRefund = false;
   for (const e of ordered) {
     bal += e.amount;
+    if (bal < minBalance) (minBalance = bal, minDay = e.day);
     const lastDay = balances[balances.length - 1];
     if (lastDay?.day === e.day) lastDay.balance = bal;
     else balances.push({ day: e.day, balance: bal });
+    if (e.kind === "deposit_lockup") lockedSoFar += -e.amount;
+    if (e.kind === "deposit_refund") {
+      refundedSoFar += e.amount;
+      // A refund cannot come back before the lock-up it returns was paid (checked in time order, not only in total).
+      if (refundedSoFar > lockedSoFar + 1e-9 && !earlyRefund) {
+        earlyRefund = true;
+        findings.push(`a refund on day ${e.day} comes before the lock-up it returns was paid`);
+      }
+    }
   }
-  for (const b of balances) if (b.balance < minBalance) (minBalance = b.balance, minDay = b.day);
-  const findings: string[] = [];
   const locked = -ordered.filter((e) => e.kind === "deposit_lockup").reduce((s, e) => s + e.amount, 0);
   const refunded = ordered.filter((e) => e.kind === "deposit_refund").reduce((s, e) => s + e.amount, 0);
   if (refunded > locked + 1e-9) findings.push(`refunds (${refunded}) exceed the amount paid in (${locked})`);

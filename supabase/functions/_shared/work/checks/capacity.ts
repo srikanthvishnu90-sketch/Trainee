@@ -10,7 +10,33 @@ export type Solve = { feasible: boolean; proof?: Proof; plan: Plan[]; dropped: s
 
 const capBy = (days: Day[], due: number) => days.filter((x) => x.d <= due).reduce((s, x) => s + x.hours, 0);
 
+export class CapacityInputError extends RangeError {
+  constructor(msg: string) { super(msg); this.name = "CapacityInputError"; }
+}
+
+// Inputs are checked before solving (review of WO-124c): negative hours made infeasible work look feasible, and a NaN
+// made every comparison false. A day is a finite number listed once with finite hours >= 0; a task has a unique
+// non-empty id, finite hours > 0 and a finite due day.
+function validate(days: Day[], tasks: Task[]) {
+  if (!Array.isArray(days) || !Array.isArray(tasks)) throw new CapacityInputError("days and tasks must be lists");
+  const seenDays = new Set<number>();
+  for (const x of days) {
+    if (!Number.isFinite(x?.d)) throw new CapacityInputError("each day needs a finite day number");
+    if (seenDays.has(x.d)) throw new CapacityInputError(`day ${x.d} is listed twice`);
+    seenDays.add(x.d);
+    if (!Number.isFinite(x.hours) || x.hours < 0) throw new CapacityInputError(`day ${x.d} needs hours of zero or more`);
+  }
+  const seenIds = new Set<string>();
+  for (const t of tasks) {
+    if (!t?.id || seenIds.has(t.id)) throw new CapacityInputError(`task id "${t?.id ?? ""}" is missing or repeated`);
+    seenIds.add(t.id);
+    if (!Number.isFinite(t.hours) || t.hours <= 0) throw new CapacityInputError(`task ${t.id} needs more than zero hours`);
+    if (!Number.isFinite(t.due)) throw new CapacityInputError(`task ${t.id} needs a finite due day`);
+  }
+}
+
 export function solve({ days, tasks }: { days: Day[]; tasks: Task[] }): Solve {
+  validate(days, tasks);
   const req = tasks.filter((t) => t.required !== false);
   for (const due of [...new Set(req.map((t) => t.due))].sort((a, b) => a - b)) {
     const required = req.filter((t) => t.due <= due).reduce((s, t) => s + t.hours, 0);

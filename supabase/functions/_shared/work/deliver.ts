@@ -12,20 +12,27 @@ const XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 const PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
 
 // The types each channel takes as a file today. Conservative: a type is listed only where the code already sends it,
-// or the channel's own document rail is known to take it.
-//  - whatsapp: whatsapp_twilio.ts sends a channel_artifacts bytes-ref as Twilio MediaUrl (resume PDF and DOCX today).
-//    WhatsApp's document media takes PDF, Office files and plain text; it refuses archives (benchmark 0010 and 0019).
+// or the channel's own document rail is documented to take it.
+//  - whatsapp: whatsapp_twilio.ts sends a channel_artifacts bytes-ref as a Twilio MediaUrl, so Twilio's list governs,
+//    not Meta's longer Cloud API list. Twilio "Supported MIME Types" (checked 2026-11-15):
+//    https://www.twilio.com/docs/whatsapp/guidance-whatsapp-media-messages
+//    images JPG/JPEG/PNG; documents PDF, DOC, DOCX, PPTX, XLSX. No text/plain, CSV, ICS, HTML or ZIP (benchmark 0010 and
+//    0019 saw the ZIP refused). Limits on the same page: 20 MB per message, 5 MB per image.
 //  - telegram: telegram.ts sendDocument (multipart bytes) carries the resume PDF/DOCX and channel_shape.ts .md/.txt
-//    attachments; Bot API sendDocument takes general files, so Office files, CSV and ICS ride as documents. ZIP is
-//    left out until a channel test proves it.
+//    attachments; Bot API sendDocument takes general files up to 50 MB
+//    (https://core.telegram.org/bots/api#senddocument), so Office files, CSV and ICS ride as documents. ZIP is left
+//    out until a channel test proves it.
 //  - imessage: loopmessage.ts has no file send (no sendDocument on its adapter), so nothing is native there.
 export const ACCEPTED: Record<Channel, readonly string[]> = {
-  whatsapp: [PDF, DOCX, XLSX, PPTX, "text/plain", "image/png", "image/jpeg"],
+  whatsapp: [PDF, DOCX, XLSX, PPTX, "image/png", "image/jpeg"],
   telegram: [PDF, DOCX, XLSX, PPTX, "text/plain", "text/markdown", "text/csv", "text/calendar", "image/png", "image/jpeg"],
   imessage: [],
 };
-// WhatsApp's document size limit is 100 MB; Telegram's bot upload limit is 50 MB.
-export const MAX_NATIVE_BYTES: Record<Channel, number> = { whatsapp: 100 * 1024 * 1024, telegram: 50 * 1024 * 1024, imessage: 0 };
+export const MAX_NATIVE_BYTES: Record<Channel, number> = { whatsapp: 20 * 1024 * 1024, telegram: 50 * 1024 * 1024, imessage: 0 };
+// Per-type caps inside a channel's limit (Twilio: an image is at most 5 MB).
+const MAX_TYPE_BYTES: Partial<Record<Channel, Record<string, number>>> = {
+  whatsapp: { "image/png": 5 * 1024 * 1024, "image/jpeg": 5 * 1024 * 1024 },
+};
 // The trainee-file page serves the bytes behind a signed, expiring, owner-scoped link (file_link.ts).
 export const FILE_PAGE_MAX_BYTES = 20 * 1024 * 1024;
 
@@ -38,7 +45,8 @@ export function chooseDelivery(
 ): Delivery {
   const m = base(mime);
   const size = o.bytes ?? 0;
-  if ((ACCEPTED[channel] ?? []).includes(m) && size <= (MAX_NATIVE_BYTES[channel] ?? 0)) return "native";
+  const cap = Math.min(MAX_NATIVE_BYTES[channel] ?? 0, MAX_TYPE_BYTES[channel]?.[m] ?? Infinity);
+  if ((ACCEPTED[channel] ?? []).includes(m) && size <= cap) return "native";
   if (o.filePage !== false && size <= FILE_PAGE_MAX_BYTES) return "file_page";
   return "text_builder";
 }

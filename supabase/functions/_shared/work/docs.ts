@@ -32,7 +32,7 @@ export const cleanText = (s: string): string => String(s).replace(INVISIBLE, "")
 const esc = (s: string): string => P.escXml(cleanText(s));
 // The formats model.formatValue prints; anything else could print text or digits that are not the cell.
 // "General" is not on the list: formatValue would print it at zero decimals (0.4 as "0"), unlike Excel (124d review 2).
-export const FORMAT_OK = /^(?:#,##)?0(?:\.0{1,4})?%?$/;
+export const FORMAT_OK = /^(?:0|0\.0|#,##0|#,##0\.00|0%|0\.0%)$/; // exactly the list D-088 states
 export class BadFormat extends Error {
   constructor(public format: string) { super(`number format "${format}" is not one of 0, 0.0, #,##0, #,##0.00, 0%, 0.0%`); this.name = "BadFormat"; }
 }

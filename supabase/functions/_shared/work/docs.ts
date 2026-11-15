@@ -26,7 +26,7 @@ function widthPt(text: string, font: "F1" | "F2", size: number): number {
   const ascii = text.replace(/[^\x00-\x7F]/g, ""), wide = text.length - ascii.length;
   return afmWidth(ascii, font, size) + wide * size;
 }
-import { asciiDigits, type Cell, dateSpans, evaluate, loose, render, type Values } from "./model.ts";
+import { type Cell, dateSpans, evaluate, loose, render, type Values } from "./model.ts";
 
 // deno-lint-ignore no-explicit-any
 const P = (CareerRender as any).primitives;
@@ -122,16 +122,19 @@ export function typedNumbers(text: string): string[] {
   // Normalised one character at a time, so positions line up and one ™ or "…" does not switch the date exception off.
   // A number character whose NFKC form is not exactly one ASCII digit (⑳, ½, ⒛) breaks a date instead of joining one
   // (round 4: "19⑳0" read as the year 1920).
+  // Round 8: the text the date reader sees lines up with the printed text, and only ASCII digits can complete a date. ASCII stays
+  // as it is; a character whose NFKC form is ASCII punctuation or letters with no digit or space ("…" -> ".") is that
+  // character; anything else (an astral or superscript digit, a spacing accent whose NFKC starts with a space, any other
+  // symbol) becomes "#", which breaks a date rather than joining one ("Jan 𝟏2019", "Jan 1¸2019", "in 2⁰¹⁹" are refused).
   const norm = [...blank].map((ch) => {
+    if (/^[\x00-\x7F]$/.test(ch)) return ch;
     const n = ch.normalize("NFKC");
-    // Also any character whose NFKC form holds a number but is not exactly one ASCII digit (round 5: ㏩ is "10日", ㍘ is
-    // "0点"; they are not \p{N} but completed a date while printing extra digits).
-    if ((/\p{N}/u.test(ch) || /\p{N}/u.test(n)) && !/^\d$/.test(asciiDigits(n))) return "#".repeat(ch.length);
-    return n.length === ch.length ? n : n.slice(0, ch.length).padEnd(ch.length, " ");
+    if (/^[\x21-\x7E]+$/.test(n) && !/\d/.test(n)) return n[0].repeat(ch.length);
+    return "#".repeat(ch.length);
   }).join("");
   // Round 7: a percent, a multiplier or a scale word right after a date makes a figure of it ("May 2019%", "at 9:30%").
   const SCALE_AFTER = /^\s*(?:[%‰‱٪％﹪×]|(?:x|k|m|mn|bn|b|percent|per\s?cent|pct|bps|thousand|million|billion)(?![\p{L}\p{N}]))/iu;
-  for (const [, b] of dateSpans(norm)) if (SCALE_AFTER.test(norm.slice(b))) out.push(norm.slice(Math.max(0, b - 8), b + 4));
+  for (const [, b] of dateSpans(norm)) if (SCALE_AFTER.test(blank.slice(b).normalize("NFKC"))) out.push(blank.slice(Math.max(0, b - 8), b + 4));
   for (const [a, b] of dateSpans(norm)) blank = blank.slice(0, a) + " ".repeat(b - a) + blank.slice(b);
   for (const m of blank.matchAll(/[\p{N}][\p{N}.,]*/gu)) out.push(m[0]);
   for (const w of loose(blank.replace(/\p{N}/gu, " "), {})) out.push(w);

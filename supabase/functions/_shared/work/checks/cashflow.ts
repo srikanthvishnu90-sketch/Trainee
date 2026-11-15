@@ -7,6 +7,7 @@ export type CashResult = {
   outstandingLockup: number; findings: string[]; balances: { day: number; balance: number }[];
 };
 
+export const KINDS: ReadonlySet<string> = new Set(["deposit_lockup", "deposit_refund", "income", "stipend", "salary", "bonus", "expense", "rent", "fee", "tax", "transfer_in", "transfer_out"]);
 export class CashInputError extends RangeError {
   constructor(msg: string) { super(msg); this.name = "CashInputError"; }
 }
@@ -20,9 +21,10 @@ export function run({ start, events }: { start: number; events: CashEvent[] }): 
   for (const [i, e] of events.entries()) {
     if (!e || typeof e !== "object") throw new CashInputError(`event ${i + 1} is not an event`);
     if (typeof e.kind !== "string" || !e.kind.trim()) throw new CashInputError(`event ${i + 1} needs a kind`);
-    // A refund or lock-up under another name would skip the cap and timing checks (third review of WO-124c).
-    if (/refund/i.test(e.kind) && e.kind !== "deposit_refund") throw new CashInputError(`event ${i + 1}: a refund is kind "deposit_refund"`);
-    if (/lock[-_ ]?up|deposit(?!_refund)/i.test(e.kind) && e.kind !== "deposit_lockup") throw new CashInputError(`event ${i + 1}: a lock-up is kind "deposit_lockup"`);
+    // A closed list of kinds (round 4: escrow / escrow_return, bond / bond_back skipped the cap and timing checks).
+    // Money held and returned is always deposit_lockup / deposit_refund; anything else is plain income or a cost.
+    if (!KINDS.has(e.kind)) throw new CashInputError(`event ${i + 1}: kind "${e.kind}" is not one of ${[...KINDS].join(", ")}`);
+    if (e.refundableDay !== undefined && e.kind !== "deposit_lockup") throw new CashInputError(`event ${i + 1}: only a deposit_lockup has a refundable day`);
     if (!Number.isFinite(e.day) || !Number.isFinite(e.amount)) throw new CashInputError(`event ${i + 1} needs a finite day and amount`);
     if (e.refundableDay !== undefined && !Number.isFinite(e.refundableDay)) throw new CashInputError(`event ${i + 1} has a non-finite refundable day`);
   }
@@ -75,5 +77,6 @@ export function run({ start, events }: { start: number; events: CashEvent[] }): 
   if (refunded > locked + 1e-9) findings.push(`refunds (${refunded}) exceed the amount paid in (${locked})`);
   for (const e of ordered) if (e.kind === "deposit_lockup" && e.refundableDay !== undefined && e.refundableDay < e.day) findings.push(`a lock-up on day ${e.day} is refundable before it is paid`);
   const outstandingLockup = Math.max(0, locked - refunded);
-  return { minBalance, minDay, final: bal, feasible: minBalance >= 0, shortfall: Math.max(0, -minBalance), outstandingLockup, findings, balances };
+  // An early refund's money is not really there yet (round 4): the plan is not feasible while one is flagged.
+  return { minBalance, minDay, final: bal, feasible: minBalance >= 0 && !earlyRefund, shortfall: Math.max(0, -minBalance), outstandingLockup, findings, balances };
 }

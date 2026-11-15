@@ -117,7 +117,7 @@ export function checkSheetName(n: string): void {
   }
 }
 export function checkDefinedName(n: string): void {
-  if (!/^[A-Za-z_\\][A-Za-z0-9_.]*$/.test(n) || /^[A-Za-z]{1,3}\d+$/.test(n) || /^r\d*c\d*$/i.test(n) || n.length > 255) {
+  if (/^(?:r|c|true|false)$/i.test(n) || !/^[A-Za-z_\\][A-Za-z0-9_.]*$/.test(n) || /^[A-Za-z]{1,3}\d+$/.test(n) || /^r\d*c\d*$/i.test(n) || n.length > 255) {
     throw new RangeError(`defined name ${JSON.stringify(n)} is not one Excel accepts`);
   }
 }
@@ -175,6 +175,7 @@ export function cohortWorkbook({ rows, mature }: { rows: CohortRow[]; mature: (r
     const k = String(r.cohort);
     if (names.has(k)) throw new RangeError(`cohort ${JSON.stringify(k)} appears twice`);
     if (k === "baseline") throw new RangeError(`"baseline" is reserved for the mature totals`);
+    if (k.length > 32767) throw new RangeError("a cohort name is longer than a cell can hold (32,767 characters)");
     names.add(k);
   }
   const last = rows.length + 1;

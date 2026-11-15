@@ -92,7 +92,14 @@ export function verdict(limits: Limit[], sources: Source[]): Record<string, Verd
     if (speaking.length) {
       const last = speaking[speaking.length - 1];
       // Every source that cannot be ordered against the newest: same instant, or same day with either one untimed.
-      const tied = speaking.filter((x) => x.p.t === last.p.t || (x.p.day === last.p.day && (!x.p.timed || !last.p.timed)));
+      // Unordered with the newest: the same instant; or, when either has no time, any instant that could fall on that
+      // calendar day somewhere on Earth (UTC-14 to UTC+12: day start - 14 h to day end + 12 h). Round 4: a timed "yes"
+      // late on the 11th west of UTC outranked an untimed "no" dated the 12th.
+      const H = 3600_000;
+      const could = (day: number, t: number) => t >= day - 12 * H && t < day + 24 * H + 14 * H;
+      const unordered = (a: typeof last.p, b: typeof last.p) => a.t === b.t ||
+        (!a.timed && !b.timed && a.day === b.day) || (!a.timed && b.timed && could(a.day, b.t)) || (a.timed && !b.timed && could(b.day, a.t));
+      const tied = speaking.filter((x) => unordered(x.p, last.p));
       v = tied.every((x) => x.v === last.v) ? last.v : "unknown";
     }
     const loose = undated.filter(({ s }) => typeof s.says[l.id] === "string").map(({ s }) => classify(s.says[l.id]));
@@ -107,8 +114,12 @@ export function verdict(limits: Limit[], sources: Source[]): Record<string, Verd
 export function rank(jobs: { id: string; verdicts: Record<string, Verdict> }[]) {
   const actionable: string[] = [], open: { id: string; unknown: string[] }[] = [], blocked: { id: string; conflict: string[] }[] = [];
   for (const j of jobs) {
-    const by = (v: Verdict) => Object.entries(j.verdicts).filter(([, x]) => x === v).map(([k]) => k);
-    const conflict = by("conflict"), unknown = by("unknown");
+    // Allow-list (round 4): a job is actionable only when every verdict is exactly "meets"; any value that is not a
+    // verdict ("Conflict", "no", undefined) is unknown.
+    const entries = Object.entries(j.verdicts ?? {});
+    const conflict = entries.filter(([, x]) => x === "conflict").map(([k]) => k);
+    const unknown = entries.filter(([, x]) => x !== "conflict" && x !== "meets").map(([k]) => k);
+    if (!entries.length) { open.push({ id: j.id, unknown: ["(no verdicts)"] }); continue; }
     if (conflict.length) blocked.push({ id: j.id, conflict });
     else if (unknown.length) open.push({ id: j.id, unknown });
     else actionable.push(j.id);

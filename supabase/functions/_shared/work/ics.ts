@@ -37,7 +37,12 @@ export function fold(line: string): string {
 
 // A time must say its offset (Z or +hh:mm): one without would be read in the server's own zone (third review).
 export function utc(iso: string): string {
-  if (/T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/.test(String(iso))) throw new Error(`time ${iso} has no offset; add Z or +hh:mm`);
+  // Strict ISO 8601 with an offset, on a day that exists (round 4: "2026-11-10 10:00" and "Nov 10 2026 10:00" were read in
+  // the server's own zone, and 2026-02-30 rolled into March).
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/.exec(String(iso));
+  if (!m) throw new Error(`time ${iso} is not ISO 8601 with Z or +hh:mm`);
+  const probe = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  if (probe.getUTCFullYear() !== +m[1] || probe.getUTCMonth() !== +m[2] - 1 || probe.getUTCDate() !== +m[3] || +m[4] > 23 || +m[5] > 59 || +(m[6] ?? 0) > 59) throw new Error(`time ${iso} does not exist`);
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) throw new Error(`bad time ${iso}`);
   return d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");

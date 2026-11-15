@@ -158,11 +158,13 @@ code and tested.
 - Spend: generating and checking artifacts is code at $0 per turn. The model calls are the turn's normal calls. The
   15-case eval is new spend, and the owner approves it.
 
-## Open decision for the owner: where code runs (WO-126)
-Two options need measuring before the owner decides:
-- **(a) Pyodide (WASM Python, which includes sqlite3) inside an edge function.** No new vendor and no network, but
-  memory and cold-start limits need measuring.
-- **(b) An external sandbox (for example Vercel Sandbox or E2B).** A new vendor, a new credential and new spend.
+## Where code runs: Vercel Sandbox (owner ruling D-087, 2026-11-15)
+The WO-124f spike (`docs/architect/specs/SANDBOX-SPIKE.md`, on branch `ag/wo-124f` until its own PR lands) measured
+option (a), Pyodide (WASM Python with sqlite3) inside an edge function, and ruled it out: a cold load takes 3.3-4.6 s of
+CPU against the 2 s limit, the snapshot load peaks at 240-270 MB of the 256 MB cap, and the person's code can reach
+`fetch` and `Deno.env` through `Function`. The owner chose option (b), Vercel Sandbox (D-087).
 
-WO-126 is a $0 measurement of option (a) that reports the numbers. Until the owner rules, a bundle is delivered with
-"tests not run here" in its report. It is never delivered with a claim that the tests ran.
+Before 124g builds on it, a second spike measures latency and that all outbound network is blocked. That spike needs a
+Vercel Sandbox credential, which the owner adds themselves (it never travels through chat), and any sandbox usage that
+is billed needs the owner's written yes first. Until 124g ships, a bundle is delivered with "tests not run here" in its
+report. It is never delivered with a claim that the tests ran.

@@ -28,8 +28,9 @@ function validate(days: Day[], tasks: Task[]) {
   }
   const seenIds = new Set<string>();
   for (const t of tasks) {
-    if (!t?.id || seenIds.has(t.id)) throw new CapacityInputError(`task id "${t?.id ?? ""}" is missing or repeated`);
-    seenIds.add(t.id);
+    const id = t?.id === undefined || t?.id === null ? "" : String(t.id);
+    if (!id || seenIds.has(id)) throw new CapacityInputError(`task id "${id}" is missing or repeated`);
+    seenIds.add(id);
     if (!Number.isFinite(t.hours) || t.hours <= 0) throw new CapacityInputError(`task ${t.id} needs more than zero hours`);
     if (!Number.isFinite(t.due)) throw new CapacityInputError(`task ${t.id} needs a finite due day`);
   }

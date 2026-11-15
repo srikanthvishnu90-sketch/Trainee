@@ -5,36 +5,51 @@ export type Verdict = "meets" | "unknown" | "conflict";
 export type Limit = { id: string; text: string; kind: string };
 export type Source = { source: string; date?: string; says: Record<string, string> };
 
-const HEDGE = /\b(may|might|could|possibly|potentially|consider(ed)?|case[- ]by[- ]case|depend(s|ing)?|not guaranteed|tbd|unclear|open to)\b/i;
-// A modal hedge keeps even a negative statement open ("may not sponsor" is not a refusal). "consider" is not modal:
-// "do not consider" and "will not be considered" are refusals (review of WO-124c).
-const MODAL = /\b(may|might|could|possibly|potentially|case[- ]by[- ]case|depend(s|ing)?|not guaranteed|tbd|unclear|open to)\b/i;
-const REFUSAL = /\b(will not|won't|cannot|can't|can ?not|do(es)? not|don't|doesn't|unable|not able|not eligible|no longer|never|refuse[sd]?|not (offer|provide|support|sponsor|consider(ed)?)|no sponsorship|not available|excluded?)\b/i;
-const COMMIT = /\b(will|does|do|yes|confirmed?|guarantee[sd]?|provides?|offers?|sponsors?|supports?|available|eligible|included|allowed|meets?)\b/i;
-// A commitment with a carve-out ("sponsor H-1B but not OPT", "only for seniors", "except interns") does not say
-// whether the person's case is inside it, so it is never meets; it is unknown until the person's case is matched.
-const CARVE_OUT = /\b(but not|except|excluding|other than|only|unless|limited to|not for|\bnot\b)\b/i;
+// Read fail closed (second review of WO-124c). "meets" needs a plain commitment with no negation, hedge or carve-out
+// anywhere in the statement; any doubt is unknown, never meets.
+//  - A negation is any refusal word, bare or passive: no, none, nobody, not, n't, never, without, lacks, false, zero,
+//    unable, cannot, ineligible, unavailable, declined, "not provided/offered/sponsored", and an answer of "no" or
+//    "false" after a colon or question mark ("eligible: no", "we will sponsor? no").
+//  - The first clause states the policy. When it is negated (and not hedged by a modal: "may not sponsor" stays open),
+//    the verdict is conflict, whatever follows ("cannot sponsor visas but offer great benefits" is conflict).
+//  - A commitment followed by a contrast or carve-out ("sponsor H-1B but not OPT", "yes, except interns", "only for
+//    seniors") is unknown: whether the person's case is inside it is not stated.
+//  - Two negations in one clause ("we don't not sponsor") are unknown.
+const MODAL = /\b(may|might|could|possibly|potentially|perhaps|case[- ]by[- ]case|depend(s|ing|ent)?|not guaranteed|tbd|unclear|open to|consider(ed|ing)? on)\b/i;
+const HEDGE = /\b(may|might|could|possibly|potentially|perhaps|consider(ed|ing)?|case[- ]by[- ]case|depend(s|ing|ent)?|not guaranteed|tbd|unclear|open to|subject to|typically|usually|generally)\b/i;
+const NEG = /\b(no|none|nobody|nothing|not|never|neither|nor|without|lacks?|lacking|false|zero|unable|cannot|ineligible|unavailable|declined?|refuse[sd]?|excluded?|disqualif\w*)\b|n't\b|\bcan ?not\b/gi;
+const COMMIT = /\b(will|does|do|yes|true|confirmed?|guarantee[sd]?|provides?|provided|offers?|offered|sponsors?|sponsored|sponsoring|supports?|available|eligible|included|allowed|accepts?|meets?)\b/i;
+const CONTRAST = /\s*(?:\bbut\b|\bhowever\b|\bexcept\b|\bexcluding\b|\balthough\b|\bthough\b|\bunless\b|\bother than\b|;)\s*/i;
+const CARVE = /\b(only|except|excluding|unless|limited to|other than|not for|restricted to)\b/i;
+const negCount = (t: string) => (t.match(NEG) ?? []).length;
 
 /** Classifies one statement about one constraint. */
 export function classify(says: string): Verdict {
-  const s = says.trim().toLowerCase();
+  const s = says.trim().toLowerCase().normalize("NFKC");
   if (s === "meets" || s === "unknown" || s === "conflict") return s;
-  if (REFUSAL.test(s) && !MODAL.test(s) && !COMMIT_THEN_CARVE.test(s)) return "conflict";
+  if (!s) return "unknown";
+  const [first, ...rest] = s.split(CONTRAST).filter((x) => x.trim());
+  const n1 = negCount(first);
+  if (n1 >= 2) return "unknown";
+  if (n1 === 1) return MODAL.test(first) ? "unknown" : "conflict";
+  // The first clause is not negated from here on.
   if (HEDGE.test(s)) return "unknown";
-  if (COMMIT.test(s) && !CARVE_OUT.test(s)) return "meets";
-  return "unknown";
+  if (!COMMIT.test(first)) return "unknown";
+  if (rest.length || CARVE.test(s) || negCount(s) > 0) return "unknown";
+  return "meets";
 }
-// "sponsors H-1B but does not sponsor OPT": a commitment then a refusal of part of it is a carve-out, not a refusal.
-const COMMIT_THEN_CARVE = /\b(sponsors?|offers?|provides?|supports?|accepts?|allows?|will)\b.*\b(but|except|however)\b/i;
 
 // A source's date as a time. ISO (2026-11-10, with or without a time) and month-name dates (Nov 10, 2026; 10 November
 // 2026) are read; anything else is undated. Before, dates were compared as strings, so "Nov 10, 2026" sorted before
 // "2026-11-01" and an older ad overrode a newer follow-up.
+// A calendar day that exists: Feb 30 and Nov 31 are refused, not rolled into the next month.
+const realDay = (y: number, m: number, d: number) => { const t = new Date(Date.UTC(y, m, d)); return t.getUTCFullYear() === y && t.getUTCMonth() === m && t.getUTCDate() === d; };
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 export function dateOf(d?: string): number | null {
   const s = String(d ?? "").trim().toLowerCase();
-  let m = /^(\d{4})-(\d{2})-(\d{2})(?:[t ](\d{2}):(\d{2})(?::(\d{2}))?(z|[+-]\d{2}:?\d{2})?)?$/.exec(s);
+  let m = /^(\d{4})-(\d{2})-(\d{2})(?:[t ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(z|[+-]\d{2}:?\d{2})?)?$/.exec(s);
   if (m) {
+    if (!realDay(+m[1], +m[2] - 1, +m[3])) return null;
     const t = Date.parse(`${m[1]}-${m[2]}-${m[3]}T${m[4] ?? "00"}:${m[5] ?? "00"}:${m[6] ?? "00"}${m[7] ? m[7].toUpperCase().replace(/^([+-]\d{2})(\d{2})$/, "$1:$2") : "Z"}`);
     return Number.isFinite(t) ? t : null;
   }
@@ -46,13 +61,13 @@ export function dateOf(d?: string): number | null {
     if (n) [day, mon, yr] = [n[1], n[2], n[3]];
   }
   const mi = mon ? MONTHS.indexOf(mon) : -1;
-  if (mi < 0 || !day || !yr || Number(day) < 1 || Number(day) > 31) return null;
+  if (mi < 0 || !day || !yr || !realDay(Number(yr), mi, Number(day))) return null;
   return Date.UTC(Number(yr), mi, Number(day));
 }
 
 /**
  * Verdict per constraint id. Dated sources are applied oldest to newest, so the newest dated source that speaks to a
- * constraint controls; ties keep input order. An undated (or unreadable) source cannot be placed in time: when it
+ * constraint controls; two sources at the same instant that disagree give unknown. An undated (or unreadable) source cannot be placed in time: when it
  * disagrees with the dated verdict, the verdict is unknown, because either one might be the newer (fail closed).
  */
 export function verdict(limits: Limit[], sources: Source[]): Record<string, Verdict> {
@@ -61,8 +76,14 @@ export function verdict(limits: Limit[], sources: Source[]): Record<string, Verd
   const undated = placed.filter((x) => x.t === null);
   const out: Record<string, Verdict> = {};
   for (const l of limits) {
-    let v: Verdict | null = null;
-    for (const { s } of dated) if (typeof s.says[l.id] === "string") v = classify(s.says[l.id]);
+    let v: Verdict | null = null, at: number | null = null;
+    for (const { s, t } of dated) {
+      if (typeof s.says[l.id] !== "string") continue;
+      const next = classify(s.says[l.id]);
+      // Two sources on the same instant that disagree cannot be ordered: unknown (second review of WO-124c).
+      v = at === t && v !== null && v !== next ? "unknown" : next;
+      at = t;
+    }
     const loose = undated.filter(({ s }) => typeof s.says[l.id] === "string").map(({ s }) => classify(s.says[l.id]));
     if (v === null) v = loose.length && loose.every((x) => x === loose[0]) ? loose[0] : "unknown";
     else if (loose.some((x) => x !== v)) v = "unknown";

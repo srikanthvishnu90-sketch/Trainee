@@ -12,8 +12,11 @@ const octets = (s: string) => enc.encode(s).length;
 const TEXT_PROPS = new Set(["SUMMARY", "DESCRIPTION", "LOCATION", "COMMENT"]);
 const FORBIDDEN = ["METHOD", "ATTENDEE", "ORGANIZER"];
 
+// RFC 5545 section 3.3.11: TEXT may not hold control characters other than HTAB; line breaks become \n. Any other C0
+// control or DEL is dropped (it cannot be written), and lintIcs reports one if it appears (second review of WO-124c).
+const ICS_CTL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
 export function escapeText(s: string): string {
-  return s.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r\n|\r|\n/g, "\\n");
+  return s.replace(ICS_CTL, "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r\n|\r|\n/g, "\\n");
 }
 
 /** Folds one content line so no physical line exceeds 75 octets, never splitting a UTF-8 character. */
@@ -67,6 +70,7 @@ export function lintIcs(text: string): string[] {
   const f: string[] = [];
   if (/(^|[^\r])\n/.test(text)) f.push("line endings must be CRLF");
   if (/\r(?!\n)/.test(text)) f.push("bare CR found; line endings must be CRLF");
+  if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(text)) f.push("a control character is in the text (RFC 5545 3.3.11)");
   const physical = text.split(/\r?\n/);
   physical.forEach((l, i) => { if (octets(l) > 75) f.push(`line ${i + 1} is ${octets(l)} octets, over the 75-octet fold limit`); });
   const lines: string[] = [];

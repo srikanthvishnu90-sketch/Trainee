@@ -12,11 +12,13 @@ export type Expected = { sheet: string; ref: string; value: CellValue };
 
 const STYLE_ID = { header: 1, percent: 2, count: 3, money: 4 } as const;
 
+// CR is legal XML but a parser turns "a\rb" and "a\r\nb" into "a\nb" (end-of-line handling), so it is escaped as
+// _x000D_ too, the way Excel writes it (second review of WO-124b).
 // XML 1.0 forbids C0 controls other than tab, LF and CR, U+FFFE, U+FFFF and lone surrogates; one in a cohort name made
 // the part unreadable (review of WO-124b). They are written as OOXML's ST_Xstring escape _xHHHH_ (ECMA-376 Part 1,
 // 22.9.2.19), and a literal "_x" that already looks like an escape is itself escaped as _x005F_, so the text reads back
 // exactly. formula.ts decodes the same escape.
-const BAD_XML = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+const BAD_XML = /[\u0000-\u0008\u000B\u000C\r\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 const hex4 = (c: string) => `_x${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, "0")}_`;
 export function esc(s: string): string {
   return s.replace(/_x(?=[0-9A-Fa-f]{4}_)/g, "_x005F_x").replace(BAD_XML, hex4)
@@ -46,7 +48,7 @@ function cellXml(ref: string, c: Cell): string {
   }
   if (typeof c.v === "boolean") return `<c r="${ref}"${s} t="b">${f}<v>${c.v ? 1 : 0}</v></c>`;
   if (c.f) return `<c r="${ref}"${s} t="str">${f}<v>${esc(c.v)}</v></c>`;
-  return `<c r="${ref}"${s} t="inlineStr"><is><t>${esc(c.v)}</t></is></c>`;
+  return `<c r="${ref}"${s} t="inlineStr"><is><t xml:space="preserve">${esc(c.v)}</t></is></c>`;
 }
 
 function sheetXml(sh: Sheet): string {

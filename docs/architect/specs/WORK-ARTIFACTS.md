@@ -168,3 +168,56 @@ Before 124g builds on it, a second spike measures latency and that all outbound 
 Vercel Sandbox credential, which the owner adds themselves (it never travels through chat), and any sandbox usage that
 is billed needs the owner's written yes first. Until 124g ships, a bundle is delivered with "tests not run here" in its
 report. It is never delivered with a claim that the tests ran.
+
+## Review bar and limits (D-088, owner, 2026-11-15)
+**Status:** WO-124a-e are not on trunk yet. The guarantees below are what their code must meet when it lands, and what
+their reviews check. They do not describe shipped behaviour.
+
+**What D-088 changes, and what it leaves alone.** D-088 sets the bar only for *content and word-list findings* in a
+WO-124 order's own checks. Everything that blocked before still blocks:
+- every rule in CLAUDE.md;
+- the review checks in `docs/architect/PROCESS.md`: one change, scope (files), tests unedited, gate green, no secret, no
+  spend or credential without the owner's written yes, no external effect without approval of the exact payload.
+
+Within that, a content finding blocks when it is a **structural fail-open**: a path that by design lets one of these
+through:
+- a figure that is not a model cell;
+- a claim the report does not back;
+- a revoked value;
+- a fact about the person that they did not confirm (D-007, in any case, practice or not);
+- a practice input reaching the profile;
+- an outside upload.
+
+The word lists in the code (number words, scale and unit words, check vocabulary, refusal words) are backstops. A gap
+found in one is a stated limit: it is added here and to the tests, and the code fails closed where it can.
+
+**Structural guarantees** (file and rule each review checks; paths are under `supabase/functions/_shared/work/`):
+- **D1** (`docs.ts`, `typedNumbers`). A document prints a figure only through a `{{ref:id}}` slot that names one of the
+  model's own cells (`Object.hasOwn`).
+  - Formats: only those in `FORMAT_OK` (0, 0.0, #,##0, #,##0.00, 0%, 0.0%).
+  - Before a slot: only the start of the text, whitespace, an opening bracket or quote, or a currency sign ($ € £ ¥ ₹,
+    with at most one space). Never a sign (- − – + ±).
+  - After a slot: only the end of the text, whitespace, or closing punctuation (. , ; : ! ? ) ] ' "), and never
+    straight into a digit or another slot. The next word may not be on the `SCALE` list.
+  - With slots removed, any `\p{N}` character is refused, except inside a span `model.ts` `dateSpans` returns. Those
+    spans are: an ISO date that exists; a month-name date with a real day and a year; "Month YYYY"; an am/pm or "at"
+    time; a year range; and a year 1900-2099 after a year word with no noun after it.
+- **D4** (`revoke_scan.ts`, `views`). The revoke scan reads each part's text, and every attribute value except those whose
+  local name is in `STRUCTURAL` ("val" only on the elements in `VAL_CONTENT`). It inflates a PDF's Flate streams. It
+  compares numbers as numbers.
+- **D6** (`case.ts`). A case is practice unless it is made with `practice: false`, and that flag cannot change afterwards.
+- **D8** (124e, `_shared/agent/work_tool.ts` `boundWorkReply`, applied last in `career_brain.ts`). **The guarantee:**
+  code's status line, built from the check log, ends every reply that delivered a work file. Removing sentences that
+  claim a check the report does not show as passed (`proof.ts` `boundClaims`) is a backstop: it reads words, so it has
+  the limits below.
+- **D9** (`checks/triage.ts`). Triage says meets only for a statement matching one of the `MEETS` patterns. `rank` makes
+  a job actionable only when every verdict is exactly "meets".
+
+**Stated limits** (word lists; each new gap found is added here with a test):
+- Number words, scale words and unit words that are not on the lists.
+- Number words in other languages, and CJK numerals. An owner ruling is open: refusing them would also refuse ordinary
+  Chinese or Spanish prose.
+- Roman numerals spelled in letters, and look-alike letters.
+- A year range or an "at" time can carry a count ("from 1950 to 2050").
+- Check-claim wording the vocabulary does not hold (other languages, new slang). The D8 status line is the guarantee.
+- Fail-closed over-refusal in documents of words that are not figures ("last quarter", "third-party", "zero-trust").

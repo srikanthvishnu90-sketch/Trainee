@@ -5,84 +5,95 @@ export type Verdict = "meets" | "unknown" | "conflict";
 export type Limit = { id: string; text: string; kind: string };
 export type Source = { source: string; date?: string; says: Record<string, string> };
 
-// Read fail closed (second review of WO-124c). "meets" needs a plain commitment with no negation, hedge or carve-out
-// anywhere in the statement; any doubt is unknown, never meets.
-//  - A negation is any refusal word, bare or passive: no, none, nobody, not, n't, never, without, lacks, false, zero,
-//    unable, cannot, ineligible, unavailable, declined, "not provided/offered/sponsored", and an answer of "no" or
-//    "false" after a colon or question mark ("eligible: no", "we will sponsor? no").
-//  - The first clause states the policy. When it is negated (and not hedged by a modal: "may not sponsor" stays open),
-//    the verdict is conflict, whatever follows ("cannot sponsor visas but offer great benefits" is conflict).
-//  - A commitment followed by a contrast or carve-out ("sponsor H-1B but not OPT", "yes, except interns", "only for
-//    seniors") is unknown: whether the person's case is inside it is not stated.
-//  - Two negations in one clause ("we don't not sponsor") are unknown.
-const MODAL = /\b(may|might|could|possibly|potentially|perhaps|case[- ]by[- ]case|depend(s|ing|ent)?|not guaranteed|tbd|unclear|open to|consider(ed|ing)? on)\b/i;
-const HEDGE = /\b(may|might|could|possibly|potentially|perhaps|consider(ed|ing)?|case[- ]by[- ]case|depend(s|ing|ent)?|not guaranteed|tbd|unclear|open to|subject to|typically|usually|generally)\b/i;
-const NEG = /\b(no|none|nobody|nothing|not|never|neither|nor|without|lacks?|lacking|false|zero|unable|cannot|ineligible|unavailable|declined?|refuse[sd]?|excluded?|disqualif\w*)\b|n't\b|\bcan ?not\b/gi;
-const COMMIT = /\b(will|does|do|yes|true|confirmed?|guarantee[sd]?|provides?|provided|offers?|offered|sponsors?|sponsored|sponsoring|supports?|available|eligible|included|allowed|accepts?|meets?)\b/i;
+// Read fail closed, by allow-list (third review of WO-124c: a word list cannot read English safely, so it must not be
+// the thing that says "meets").
+//  - meets: ONLY a short, closed set of plain commitment forms (MEETS below), after normalising case, curly quotes,
+//    zero-width characters and spacing. "yes", "we sponsor visas", "sponsorship is available". Anything longer or
+//    different (a condition, a time, a group, a past tense, a hedge) is not on the list and is unknown.
+//  - conflict: a refusal in the first clause (a negation word, an apostrophe-less contraction, "nope", "non-",
+//    "stopped", "no longer", "used to"), unless a modal hedges it or it is a known positive idiom ("no questions asked",
+//    "no problem", "without exception"). An ambiguous statement is unknown, never conflict.
+//  - everything else: unknown.
+const MEETS: RegExp[] = [
+  /^(?:yes|yep|yeah|confirmed|correct|true|meets)$/,
+  /^(?:yes,? )?(?:we |they |the company |the employer |it )?(?:do |does |will |can |always )?(?:sponsors?|offers?|provides?|supports?)(?: (?:visas?|work visas?|visa sponsorship|sponsorship|it|that|this))?$/,
+  /^(?:yes,? )?(?:visa |work visa )?sponsorship (?:is )?(?:available|offered|provided|included|supported)$/,
+  /^(?:yes,? )?(?:relocation|remote work|remote|hybrid|the stipend|housing|a stipend)(?: support)? (?:is )?(?:available|offered|provided|included|allowed|paid|covered)$/,
+  /^(?:yes,? )?(?:it|this|that) is (?:available|offered|provided|included|allowed|covered)$/,
+];
+const MODAL = /\b(may|might|could|possibly|potentially|perhaps|case[- ]by[- ]case|depend(s|ing|ent)?|not guaranteed|tbd|unclear|open to|pending|subject to)\b/i;
+const NEG = /\b(no|none|nope|nah|nobody|nothing|not|never|neither|nor|without|lacks?|lacking|false|zero|unable|cannot|ineligible|unavailable|declined?|refuse[sd]?|excluded?|disqualif\w*|stopped|discontinued|no longer|used to|non|dont|wont|cant|doesnt|isnt|arent|wasnt|didnt|cannot)\b|n't\b|\bcan ?not\b/i;
+const POSITIVE_IDIOM = /\b(no questions asked|no problem|no worries|without (?:exception|question|issue)|no exceptions?|no cap|no limit|nothing stops|never (?:refuse|decline|deny)|not a problem|no issue)\b/i;
 const CONTRAST = /\s*(?:\bbut\b|\bhowever\b|\bexcept\b|\bexcluding\b|\balthough\b|\bthough\b|\bunless\b|\bother than\b|;)\s*/i;
-const CARVE = /\b(only|except|excluding|unless|limited to|other than|not for|restricted to)\b/i;
-const negCount = (t: string) => (t.match(NEG) ?? []).length;
+
+export function normalise(says: string): string {
+  return String(says ?? "").normalize("NFKC").toLowerCase()
+    .replace(/[​-‍⁠﻿­]/g, "")
+    .replace(/[‘’‛′´`]/g, "'")
+    .replace(/[“”‟″]/g, '"')
+    .replace(/\s+/g, " ").trim();
+}
 
 /** Classifies one statement about one constraint. */
 export function classify(says: string): Verdict {
-  const s = says.trim().toLowerCase().normalize("NFKC");
+  const s = normalise(says);
   if (s === "meets" || s === "unknown" || s === "conflict") return s;
   if (!s) return "unknown";
-  const [first, ...rest] = s.split(CONTRAST).filter((x) => x.trim());
-  const n1 = negCount(first);
-  if (n1 >= 2) return "unknown";
-  if (n1 === 1) return MODAL.test(first) ? "unknown" : "conflict";
-  // The first clause is not negated from here on.
-  if (HEDGE.test(s)) return "unknown";
-  if (!COMMIT.test(first)) return "unknown";
-  if (rest.length || CARVE.test(s) || negCount(s) > 0) return "unknown";
-  return "meets";
+  const bare = s.replace(/[.!]+$/, "").trim();
+  if (MEETS.some((re) => re.test(bare))) return "meets";
+  const first = s.split(CONTRAST).filter((x) => x.trim())[0] ?? s;
+  const negs = (first.match(new RegExp(NEG.source, "gi")) ?? []).length;
+  if (negs === 1 && !MODAL.test(first) && !POSITIVE_IDIOM.test(s)) return "conflict";
+  return "unknown";
 }
 
-// A source's date as a time. ISO (2026-11-10, with or without a time) and month-name dates (Nov 10, 2026; 10 November
-// 2026) are read; anything else is undated. Before, dates were compared as strings, so "Nov 10, 2026" sorted before
-// "2026-11-01" and an older ad overrode a newer follow-up.
-// A calendar day that exists: Feb 30 and Nov 31 are refused, not rolled into the next month.
+// A source's date as a time, with its precision. ISO (2026-11-10, with or without a time) and month-name dates (Nov 10,
+// 2026; 10 November 2026) are read, and only real month names and real days; anything else is undated.
+const MONTH_NAMES: Record<string, number> = { jan: 0, january: 0, feb: 1, february: 1, mar: 2, march: 2, apr: 3, april: 3, may: 4, jun: 5, june: 5, jul: 6, july: 6, aug: 7, august: 7, sep: 8, sept: 8, september: 8, oct: 9, october: 9, nov: 10, november: 10, dec: 11, december: 11 };
 const realDay = (y: number, m: number, d: number) => { const t = new Date(Date.UTC(y, m, d)); return t.getUTCFullYear() === y && t.getUTCMonth() === m && t.getUTCDate() === d; };
-const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
-export function dateOf(d?: string): number | null {
+export function datePlaced(d?: string): { t: number; day: number; timed: boolean } | null {
   const s = String(d ?? "").trim().toLowerCase();
   let m = /^(\d{4})-(\d{2})-(\d{2})(?:[t ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,9})?)?(z|[+-]\d{2}:?\d{2})?)?$/.exec(s);
   if (m) {
     if (!realDay(+m[1], +m[2] - 1, +m[3])) return null;
+    if (m[4] !== undefined && !m[7]) return null; // a time with no offset cannot be placed: undated
     const t = Date.parse(`${m[1]}-${m[2]}-${m[3]}T${m[4] ?? "00"}:${m[5] ?? "00"}:${m[6] ?? "00"}${m[7] ? m[7].toUpperCase().replace(/^([+-]\d{2})(\d{2})$/, "$1:$2") : "Z"}`);
-    return Number.isFinite(t) ? t : null;
+    if (!Number.isFinite(t)) return null;
+    return { t, day: Date.UTC(+m[1], +m[2] - 1, +m[3]), timed: m[4] !== undefined };
   }
-  m = /^([a-z]{3})[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})$/.exec(s) ?? null;
+  m = /^([a-z]+)\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})$/.exec(s);
   let mon: string | undefined, day: string | undefined, yr: string | undefined;
   if (m) [mon, day, yr] = [m[1], m[2], m[3]];
   else {
-    const n = /^(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]{3})[a-z]*\.?,?\s+(\d{4})$/.exec(s);
+    const n = /^(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]+)\.?,?\s+(\d{4})$/.exec(s);
     if (n) [day, mon, yr] = [n[1], n[2], n[3]];
   }
-  const mi = mon ? MONTHS.indexOf(mon) : -1;
+  const mi = mon !== undefined && mon in MONTH_NAMES ? MONTH_NAMES[mon] : -1;
   if (mi < 0 || !day || !yr || !realDay(Number(yr), mi, Number(day))) return null;
-  return Date.UTC(Number(yr), mi, Number(day));
+  const t = Date.UTC(Number(yr), mi, Number(day));
+  return { t, day: t, timed: false };
 }
+export function dateOf(d?: string): number | null { return datePlaced(d)?.t ?? null; }
 
 /**
  * Verdict per constraint id. Dated sources are applied oldest to newest, so the newest dated source that speaks to a
- * constraint controls; two sources at the same instant that disagree give unknown. An undated (or unreadable) source cannot be placed in time: when it
- * disagrees with the dated verdict, the verdict is unknown, because either one might be the newer (fail closed).
+ * constraint controls. Two sources that cannot be ordered and disagree give unknown: the same instant, or the same
+ * calendar day when either has no time. An undated (or unreadable) source cannot be placed in time: when it disagrees
+ * with the dated verdict, the verdict is unknown, because either one might be the newer (fail closed).
  */
 export function verdict(limits: Limit[], sources: Source[]): Record<string, Verdict> {
-  const placed = sources.map((s, i) => ({ s, i, t: dateOf(s.date) }));
-  const dated = placed.filter((x) => x.t !== null).sort((a, b) => a.t! - b.t! || a.i - b.i);
-  const undated = placed.filter((x) => x.t === null);
+  const placed = sources.map((s, i) => ({ s, i, p: datePlaced(s.date) }));
+  const dated = placed.filter((x) => x.p !== null).sort((a, b) => a.p!.t - b.p!.t || a.i - b.i);
+  const undated = placed.filter((x) => x.p === null);
   const out: Record<string, Verdict> = {};
   for (const l of limits) {
-    let v: Verdict | null = null, at: number | null = null;
-    for (const { s, t } of dated) {
-      if (typeof s.says[l.id] !== "string") continue;
-      const next = classify(s.says[l.id]);
-      // Two sources on the same instant that disagree cannot be ordered: unknown (second review of WO-124c).
-      v = at === t && v !== null && v !== next ? "unknown" : next;
-      at = t;
+    const speaking = dated.filter(({ s }) => typeof s.says[l.id] === "string").map(({ s, p }) => ({ v: classify(s.says[l.id]), p: p! }));
+    let v: Verdict | null = null;
+    if (speaking.length) {
+      const last = speaking[speaking.length - 1];
+      // Every source that cannot be ordered against the newest: same instant, or same day with either one untimed.
+      const tied = speaking.filter((x) => x.p.t === last.p.t || (x.p.day === last.p.day && (!x.p.timed || !last.p.timed)));
+      v = tied.every((x) => x.v === last.v) ? last.v : "unknown";
     }
     const loose = undated.filter(({ s }) => typeof s.says[l.id] === "string").map(({ s }) => classify(s.says[l.id]));
     if (v === null) v = loose.length && loose.every((x) => x === loose[0]) ? loose[0] : "unknown";

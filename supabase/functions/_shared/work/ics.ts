@@ -35,7 +35,9 @@ export function fold(line: string): string {
   return out.join("\r\n");
 }
 
+// A time must say its offset (Z or +hh:mm): one without would be read in the server's own zone (third review).
 export function utc(iso: string): string {
+  if (/T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/.test(String(iso))) throw new Error(`time ${iso} has no offset; add Z or +hh:mm`);
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) throw new Error(`bad time ${iso}`);
   return d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
@@ -119,6 +121,8 @@ function offsetAt(zone: string, t: number): number {
 export function offsetOn(zone: string, isoDate: string): number {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
   if (!m) throw new Error(`bad date ${isoDate}`);
+  const probe = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  if (probe.getUTCFullYear() !== +m[1] || probe.getUTCMonth() !== +m[2] - 1 || probe.getUTCDate() !== +m[3]) throw new Error(`date ${isoDate} does not exist`);
   const noon = Date.UTC(+m[1], +m[2] - 1, +m[3], 12);
   const first = offsetAt(zone, noon);
   return offsetAt(zone, noon - first * 60000);

@@ -31,7 +31,8 @@ function validate(days: Day[], tasks: Task[]) {
     const id = t?.id === undefined || t?.id === null ? "" : String(t.id);
     if (!id || seenIds.has(id)) throw new CapacityInputError(`task id "${id}" is missing or repeated`);
     seenIds.add(id);
-    if (!Number.isFinite(t.hours) || t.hours <= 0) throw new CapacityInputError(`task ${t.id} needs more than zero hours`);
+    // At least a minute: smaller amounts fall under the solver's rounding and would be "planned" without a slot.
+    if (!Number.isFinite(t.hours) || t.hours < 1 / 60) throw new CapacityInputError(`task ${t.id} needs at least a minute`);
     if (!Number.isFinite(t.due)) throw new CapacityInputError(`task ${t.id} needs a finite due day`);
   }
 }
@@ -42,7 +43,7 @@ export function solve({ days, tasks }: { days: Day[]; tasks: Task[] }): Solve {
   for (const due of [...new Set(req.map((t) => t.due))].sort((a, b) => a - b)) {
     const required = req.filter((t) => t.due <= due).reduce((s, t) => s + t.hours, 0);
     const capacity = capBy(days, due);
-    if (required > capacity + 1e-9) return { feasible: false, proof: { due, required, capacity }, plan: [], dropped: [], slack: 0 };
+    if (required > capacity + 1e-12) return { feasible: false, proof: { due, required, capacity }, plan: [], dropped: [], slack: 0 };
   }
   const left = [...days].sort((a, b) => a.d - b.d).map((x) => ({ ...x }));
   const plan: Plan[] = [], dropped: string[] = [];

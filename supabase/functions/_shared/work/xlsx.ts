@@ -108,7 +108,27 @@ const rels = (items: [string, string, string][]) =>
 const OD = "officeDocument/2006/relationships/";
 
 /** Writes the workbook. Sheets with a chart get a drawing; chart n is xl/charts/chart{n+1}.xml. */
+// Excel's rules for a sheet name (it refuses the file otherwise): 1-31 characters, none of : \\ / ? * [ ], no
+// control character, not starting or ending with an apostrophe, unique (case-insensitive), and not "History".
+// A defined name starts with a letter, _ or \\, holds only letters, digits, _ and ., and is not a cell reference.
+export function checkSheetName(n: string): void {
+  if (typeof n !== "string" || n.length < 1 || n.length > 31 || /[:\\/?*\[\]\u0000-\u001F]/.test(n) || /^'|'$/.test(n) || n.toLowerCase() === "history") {
+    throw new RangeError(`sheet name ${JSON.stringify(n)} is not one Excel accepts`);
+  }
+}
+export function checkDefinedName(n: string): void {
+  if (!/^[A-Za-z_\\][A-Za-z0-9_.]*$/.test(n) || /^[A-Za-z]{1,3}\d+$/.test(n) || /^r\d*c\d*$/i.test(n) || n.length > 255) {
+    throw new RangeError(`defined name ${JSON.stringify(n)} is not one Excel accepts`);
+  }
+}
 export function writeXlsx(book: Book): Uint8Array {
+  const seen = new Set<string>();
+  for (const sh of book.sheets) {
+    checkSheetName(sh.name);
+    if (seen.has(sh.name.toLowerCase())) throw new RangeError(`sheet name ${JSON.stringify(sh.name)} is used twice`);
+    seen.add(sh.name.toLowerCase());
+  }
+  for (const n of Object.keys(book.names ?? {})) checkDefinedName(n);
   const files: Record<string, Uint8Array> = {};
   const put = (p: string, s: string) => (files[p] = strToU8(s));
   const overrides: string[] = [];
@@ -149,6 +169,14 @@ const ratio = (num: number, den: number, undef: string): CellValue => (den === 0
 /** The cohort workbook: Inputs (typed numbers), Metrics (live formulas), a mature baseline by weighted totals, and a chart. */
 export function cohortWorkbook({ rows, mature }: { rows: CohortRow[]; mature: (r: CohortRow) => boolean }): Book {
   if (!rows.length) throw new Error("cohortWorkbook needs at least one row");
+  // Each cohort keys its own expected cells; a repeated name or the reserved "baseline" would overwrite another's.
+  const names = new Set<string>();
+  for (const r of rows) {
+    const k = String(r.cohort);
+    if (names.has(k)) throw new RangeError(`cohort ${JSON.stringify(k)} appears twice`);
+    if (k === "baseline") throw new RangeError(`"baseline" is reserved for the mature totals`);
+    names.add(k);
+  }
   const last = rows.length + 1;
   const inputs: Record<string, Cell> = {}, metrics: Record<string, Cell> = {};
   const expected: Record<string, Expected> = {};

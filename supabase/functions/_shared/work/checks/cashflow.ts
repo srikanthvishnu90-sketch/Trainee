@@ -12,6 +12,7 @@ const INFLOW = new Set(["deposit_refund", "income", "stipend", "salary", "bonus"
 const OUTFLOW = new Set(["deposit_lockup", "expense", "rent", "fee", "tax", "transfer_out"]);
 const MAX_MONEY = 1e12;
 const cents = (x: number) => Math.round(x * 100);
+const wholeCents = (x: number) => Math.abs(x * 100 - Math.round(x * 100)) < 1e-6;
 export class CashInputError extends RangeError {
   constructor(msg: string) { super(msg); this.name = "CashInputError"; }
 }
@@ -24,6 +25,8 @@ export function run({ start, events }: { start: number; events: CashEvent[] }): 
   // Round 9: money is added in whole cents, exactly. Amounts and the balance are kept within $1 trillion, far inside what
   // integer cents can hold exactly, so no sum can round (past 2^53, or with fractional amounts that drift).
   if (Math.abs(start) > MAX_MONEY) throw new CashInputError("a starting balance over $1 trillion is out of range");
+  // Round 10: money is in whole cents; a sub-cent amount is refused, never rounded (rounding each event drifted).
+  if (!wholeCents(start)) throw new CashInputError("the starting balance is not a whole number of cents");
   if (!Array.isArray(events)) throw new CashInputError("events must be a list");
   for (const [i, e] of events.entries()) {
     if (!e || typeof e !== "object") throw new CashInputError(`event ${i + 1} is not an event`);
@@ -34,6 +37,7 @@ export function run({ start, events }: { start: number; events: CashEvent[] }): 
     if (e.refundableDay !== undefined && e.kind !== "deposit_lockup") throw new CashInputError(`event ${i + 1}: only a deposit_lockup has a refundable day`);
     if (!Number.isFinite(e.day) || !Number.isFinite(e.amount)) throw new CashInputError(`event ${i + 1} needs a finite day and amount`);
     if (Math.abs(e.amount) > MAX_MONEY) throw new CashInputError(`event ${i + 1}: an amount over $1 trillion is out of range`);
+    if (!wholeCents(e.amount)) throw new CashInputError(`event ${i + 1}: the amount is not a whole number of cents`);
     if (e.refundableDay !== undefined && !Number.isFinite(e.refundableDay)) throw new CashInputError(`event ${i + 1} has a non-finite refundable day`);
   }
   const ordered = events.map((e, i) => ({ e, i })).sort((a, b) =>

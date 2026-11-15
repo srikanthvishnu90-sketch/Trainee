@@ -44,10 +44,11 @@ const SUBJECTS: [RegExp, RegExp][] = [
 ];
 // The constraint's own subjects: a subject word counts only when no negation stands within three words before it
 // ("fully remote, not relocation" is about remote, not relocation; round 6).
+// Round 10: a subject is wanted only when no negation stands anywhere in its clause, before or after it ("remote not
+// acceptable", "Remote: no.", "relocation is not wanted").
 function topicHas(topic: string, about: RegExp): boolean {
-  for (const m of topic.matchAll(new RegExp(about.source, "g"))) {
-    const before = topic.slice(0, m.index!).split(/\s+/).slice(-3).join(" ");
-    if (!NEG.test(before)) return true;
+  for (const clause of topic.split(/[;,.!?()\n]+|\s(?:but|however|although|though)\s/)) {
+    if (new RegExp(about.source).test(clause) && !NEG.test(clause) && !/\b(?:dealbreaker|deal breaker|unacceptable|not acceptable|not ok|not okay|out of the question|won't|can't)\b/.test(clause)) return true;
   }
   return false;
 }
@@ -131,7 +132,7 @@ export function verdict(limits: Limit[], sources: Source[]): Record<string, Verd
   const placed = sources.map((s, i) => ({ s, i, p: datePlaced(s.date) }));
   const dated = placed.filter((x) => x.p !== null).sort((a, b) => a.p!.t - b.p!.t || a.i - b.i);
   const undated = placed.filter((x) => x.p === null);
-  const out: Record<string, Verdict> = {};
+  const out: Record<string, Verdict> = Object.create(null); // no inherited keys ("__proto__" is an ordinary id)
   for (const l of limits) {
     // A source that gives this constraint a value that is not a string (false, null, ["no"]) has spoken, but not in a
     // form that can be read: unknown, never skipped (round 6: an older "yes" won over a newer false).

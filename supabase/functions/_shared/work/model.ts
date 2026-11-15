@@ -155,7 +155,7 @@ export function dateSpans(t: string): Span[] {
 const ONES = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
   "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
 const TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
-const UNITS: Record<string, number> = { dozen: 12, half: 0.5, twice: 2, thrice: 3 };
+const UNITS: Record<string, number> = { dozen: 12, dozens: 12, half: 0.5, twice: 2, thrice: 3, third: 1 / 3, thirds: 1 / 3, quarter: 0.25, quarters: 0.25, doubled: 2, tripled: 3, quadrupled: 4, tenfold: 10, couple: 2, score: 20, hundreds: 100, thousands: 1e3, millions: 1e6 };
 ONES.forEach((w, i) => (UNITS[w] = i));
 TENS.forEach((w, i) => { if (w) UNITS[w] = i * 10; });
 const SCALES: Record<string, number> = { hundred: 100, thousand: 1e3, million: 1e6, billion: 1e9 };
@@ -208,13 +208,21 @@ export function loose(prose: string, values: Values): string[] {
     const dec = m[4] ? m[4].length - 1 : 0;
     found.push({ at: m.index!, raw: (m[0] + (word ? ` ${word}` : "")).trim(), typed: sign * Number(intPart + (m[4] ?? "")) * scale, step: Math.pow(10, -dec) * scale, pct });
   }
+  // A digit group written any other way (12,5 / 3,5% / 1,23,456 / 1.234,56 / 1'234 / 1.2.3) is not US-grouped, so it
+  // can never be matched to a cell with confidence: it is listed as typed (third review of WO-124a).
+  for (const m of text.matchAll(/[$€£¥₹]?\d[\d.,'’]*\d(?:%|[A-Za-z]+)?/g)) {
+    if (masked.has(m.index!) || masked.has(m.index! + m[0].length - 1)) continue;
+    const core = m[0].replace(/^[$€£¥₹]/, "").replace(/(?:%|[A-Za-z]+)$/, "");
+    if (/^(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?$/.test(core)) continue; // US-grouped or plain: read above
+    if (!found.some((f) => f.at === m.index && f.raw === m[0])) found.push({ at: m.index!, raw: m[0], typed: NaN, step: 0, pct: false });
+  }
   const spans = found.map((f) => [f.at, f.at + f.raw.length] as Span);
   for (const m of text.matchAll(WORDS_RE)) {
     if (spans.some(([a, b]) => m.index! >= a && m.index! < b)) continue; // "5 million": already read with its digits
     const body = m[0].replace(/\s*(?:%|per\s?cent|percent)$/i, "");
     const pct = !!m[1];
     if (/^one$/i.test(body.trim()) && !pct) continue;
-    found.push({ at: m.index!, raw: m[0].trim(), typed: wordsValue(body), step: /half/i.test(body) ? 0.5 : 1, pct });
+    found.push({ at: m.index!, raw: m[0].trim(), typed: wordsValue(body), step: /half/i.test(body) ? 1e-9 : 1, pct });
   }
   found.sort((x, y) => x.at - y.at);
   const near = (v: number, t: number, step: number) => Math.abs(v - t) <= step / 2 + 1e-9 * Math.max(1, Math.abs(v));

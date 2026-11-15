@@ -61,37 +61,71 @@ const CLAIMS: { cat: Category | "generic"; says: RegExp }[] = [
   { cat: "invariants", says: /\b(?:baseline|everything else|other (?:rows|cells|figures))\b.*\bunchanged\b|\binvariants?\b/i },
   { cat: "generic", says: /\b(?:all|every) checks?\b|\beverything\b.*\b(?:checks? out|passed|verified|works)\b|\b(?:verif(?:y|ied|ies)|validated|double[- ]checked|checks? out|checked out|confirmed correct|fully tested|tested)\b/i },
 ];
-// Fail closed (second review of WO-124a): a clause that sounds like an assurance but names no category above is a
-// generic claim, so it needs every check in the report run and ok. A list of phrasings can never be complete; this
-// catches the words an assurance is made of.
-const ASSURANCE = /\b(?:works?|worked|working|ok|okay|green|pass(?:es|ed|ing)?|correct(?:ly)?|right|accurate|checked|confirmed|proven|validated|verified|succeed(?:s|ed)?|success(?:ful(?:ly)?)?|clean|ready(?: to (?:ship|go|send|use))?|all set|good to go|bug[- ]free|error[- ]free|flawless|guaranteed|solid|safe)\b|\b(?:no|zero|nothing|without) (?:failures?|failed|bugs?|errors?|issues|problems|mistakes)\b|\bnothing (?:failed|broke)\b|\b(?:ran|runs|compiles)\b/i;
+// Third review of WO-124a: a list of assurance phrasings can never be complete ("Downstream figures stand." passed a
+// failed recompute). So boundClaims reads each clause for its SUBJECT and its TONE, and is strict whenever the report is
+// not all green:
+//  - subject: which check category the clause is about, from the claim patterns above and a subject vocabulary
+//    (figures, totals, formulas -> recompute; tests, code, script, n/n -> tests; pages -> pages; ...). A clause that
+//    starts with "and"/"but" and names no subject of its own carries the previous clause's subject.
+//  - tone: any word an assurance or a verdict is made of (CHECK_VOCAB), broad on purpose.
+//  - When every check in the report ran and passed: a clause naming a subject needs that subject's checks in the report
+//    (a page claim with no page check is refused); a generic assurance is allowed.
+//  - When any check failed or did not run: a clause passes only if it has no check vocabulary at all, or every subject
+//    it names has only passing checks, or it plainly reports a check as not run or failed (and holds no negated
+//    failure such as "did not fail", which is a success claim).
+const SUBJECT: [Category, RegExp][] = [
+  ["recompute", /\b(?:formulas?|figures?|numbers?|totals?|sums?|math|maths|calc\w*|comput\w*|recomput\w*|reconcil\w*|tie(?:s|d)? out|ties?|add(?:s)? up|downstream|cells?|values?|amounts?|workbook|spreadsheet)\b/i],
+  ["tests", /\b(?:tests?|specs?|suites?|pytest|jest|ci|code|script|bundle|program|build|compiles?|runs?|ran|executes?|executed|\d+\s*(?:\/|of)\s*\d+)\b/i],
+  ["pages", /\b(?:pages?|clip\w*|overflow\w*|layout|margins?|cut off)\b/i],
+  ["lint", /\b(?:lint\w*|ics|calendar|invite|hold file|well-formed)\b/i],
+  ["counts", /\b(?:words?|characters?|chars?|length|limit|minutes?|seconds?|speaking)\b/i],
+  ["revoke", /\b(?:revok\w*|removed|scrubbed|redact\w*|no trace|no mention)\b/i],
+  ["invariants", /\b(?:baseline|invariants?|unchanged|untouched|same as before)\b/i],
+];
+const CHECK_VOCAB = /\b(?:works?|worked|working|functional|ok|okay|fine|good|great|perfect|flawless|solid|safe|sound|green|clean|pass\w*|correct\w*|right|accurate|exact\w*|valid\w*|verif\w*|confirm\w*|check\w*|prov(?:en|ed)|test\w*|qa\W?d?|succe\w*|ready|ship\w*|approv\w*|sign(?:ed)? off|all set|good to go|guarantee\w*|sure|certain|stand\w*|holds?|held|match\w*|tie\w*|reconcil\w*|adds? up|in order|discrepanc\w*|mismatch\w*|defect\w*|bugs?|regress\w*|broken|broke|wrong|issues?|problems?|errors?|fail\w*|mistakes?|nothing|none|zero|no)\b|\b\d+\s*(?:\/|of)\s*\d+\b/i;
+const HONEST_MISS = /\b(?:not (?:run|tested|checked|verified|confirmed)|were(?:n't| not) (?:run|tested|checked)|(?:did|could)(?:n't| not) (?:run|test|check|verify)|unverified|untested|failed|not yet (?:run|tested))\b/i;
+const NEGATED_FAIL = /\b(?:no|not|never|none|nothing|zero|without|didn't|did not|0)\b[^.]{0,20}\bfail\w*|\bfail\w*[^.]{0,12}\b(?:none|zero|nothing)\b/i;
 
-// Clauses split at sentence ends, semicolons, commas that end a phrase, and "and"/"but".
-function clauses(reply: string): string[] {
-  return reply.split(/[.!?;]+(?=\s|$)|,\s+|\s+(?:and|but)\s+/i).map((s) => s.trim()).filter(Boolean);
+// Clauses split at sentence ends, semicolons, commas that end a phrase, and "and"/"but" (kept as a marker).
+function clauses(reply: string): { text: string; joined: boolean }[] {
+  const out: { text: string; joined: boolean }[] = [];
+  for (const sentence of reply.split(/[.!?;]+(?=\s|$)/)) {
+    const parts = sentence.split(/(,\s+|\s+(?:and|but)\s+)/i);
+    let joined = false;
+    for (const p of parts) {
+      if (/^(?:,\s+|\s+(?:and|but)\s+)$/i.test(p)) { joined = /and|but/i.test(p); continue; }
+      const t = p.trim();
+      if (t) out.push({ text: t, joined });
+      joined = false;
+    }
+  }
+  return out;
 }
 
-// D8, fail closed. A clause that claims a category is backed only when that category has a check that ran and passed,
-// none that failed, and (when the clause says all/every) none that did not run. A generic claim is backed only when
-// the report shows at least one check run, every check ok, and no check not run. A clause may claim several things;
-// the first unbacked claim refuses it.
 export function boundClaims(reply: string, rep: string): { refused: string[]; ok: boolean } {
   const checks = parseReport(rep).map((c) => ({ ...c, cat: categoryOf(c.name) }));
+  const green = checks.length > 0 && checks.every((c) => c.status === "ok");
   const refused: string[] = [];
-  for (const clause of clauses(reply)) {
+  let carried: Category[] = [];
+  for (const { text: clause, joined } of clauses(reply)) {
     const all = /\b(?:all|every|each|fully)\b/i.test(clause);
-    const claimed: (Category | "generic")[] = CLAIMS.filter((k) => k.says.test(clause)).map((k) => k.cat);
-    if (!claimed.length && ASSURANCE.test(clause)) claimed.push("generic");
-    // A specific claim settles the clause; "generic" counts only when no specific category was named.
-    const cats = claimed.some((c) => c !== "generic") ? claimed.filter((c) => c !== "generic") : claimed;
-    for (const cat of cats) {
-      const backing = cat === "generic" ? checks : checks.filter((c) => c.cat === cat);
-      const backed = cat === "generic"
-        ? backing.length > 0 && backing.every((c) => c.status === "ok")
-        : backing.some((c) => c.status === "ok") && !backing.some((c) => c.status === "failed") &&
-          !(all && backing.some((c) => c.status === "not run"));
-      if (!backed) { refused.push(clause); break; }
-    }
+    const named = new Set<Category>();
+    for (const k of CLAIMS) if (k.cat !== "generic" && k.says.test(clause)) named.add(k.cat as Category);
+    for (const [cat, re] of SUBJECT) if (re.test(clause)) named.add(cat);
+    let cats = [...named];
+    if (!cats.length && joined) cats = carried;
+    carried = cats.length ? cats : carried;
+    const vocab = CHECK_VOCAB.test(clause) || CLAIMS.some((k) => k.says.test(clause));
+    if (!vocab && !cats.length) continue; // says nothing about the work's checks
+    const catOk = (cat: Category) => {
+      const b = checks.filter((c) => c.cat === cat);
+      return b.some((c) => c.status === "ok") && !b.some((c) => c.status === "failed") && !(all && b.some((c) => c.status === "not run"));
+    };
+    const honest = HONEST_MISS.test(clause) && !NEGATED_FAIL.test(clause);
+    if (honest) continue;
+    if (!vocab) continue; // a subject named with no verdict ("here is the workbook")
+    if (cats.length) { if (!cats.every(catOk)) refused.push(clause); continue; }
+    if (!green) refused.push(clause); // a generic assurance while something failed or did not run
   }
   return { refused, ok: refused.length === 0 };
 }

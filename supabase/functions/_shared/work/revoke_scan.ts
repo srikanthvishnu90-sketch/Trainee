@@ -2,6 +2,7 @@
 // OOXML part (unzipped), metadata, filenames, alt text, and derived forms of the value. The audit names categories and
 // counts only; it never repeats a value, a form or a part name (a part name can itself carry the value).
 import { unzipSync, unzlibSync } from "npm:fflate@0.8.2";
+import { asciiDigits } from "./model.ts";
 
 export type RevokedValue = string | number | { before: string | number; after: string | number };
 export type PartCategory = "body" | "metadata" | "alt text or media" | "comments or notes" | "filename";
@@ -60,13 +61,13 @@ function numberWords(n: number): string | null {
   return parts.map((w, i) => w === "and?" ? "(?:and[\\s-]+)?" : (i ? "" : "") + w + (i < parts.length - 1 && parts[i + 1] !== "and?" ? "[\\s-]+" : (parts[i + 1] === "and?" ? "[\\s-]+" : ""))).join("");
 }
 
-interface Parsed { num: number; unit: string | null }
+interface Parsed { num: number; unit: string | null; currency: string | null }
 function parse(v: string | number): Parsed | null {
-  if (typeof v === "number") return Number.isFinite(v) ? { num: v, unit: null } : null;
-  const m = v.trim().match(/^[$€£]?\s*(-?\d[\d,  ]*(?:\.\d+)?)\s*(%|[A-Za-z]+)?$/);
+  if (typeof v === "number") return Number.isFinite(v) ? { num: v, unit: null, currency: null } : null;
+  const m = v.trim().match(/^([$€£¥₹])?\s*(-?\d[\d,  ]*(?:\.\d+)?)\s*(%|[A-Za-z]+)?$/);
   if (!m) return null;
-  const num = Number(m[1].replace(/[,  ]/g, ""));
-  return Number.isFinite(num) ? { num, unit: m[2] ?? null } : null;
+  const num = Number(m[2].replace(/[,  ]/g, ""));
+  return Number.isFinite(num) ? { num, unit: m[3] ?? null, currency: m[1] ?? null } : null;
 }
 
 function matchersFor(v: RevokedValue): { form: RevokeHit["form"]; test: (s: string) => boolean } {
@@ -80,23 +81,35 @@ function matchersFor(v: RevokedValue): { form: RevokeHit["form"]; test: (s: stri
   }
   const p = parse(v);
   if (!p) {
-    const re = new RegExp(esc(String(v).trim()).replace(/\s+/g, "[\\s\\-_]+"), "i");
+    const re = new RegExp(esc(clean(String(v)).normalize("NFC").trim()).replace(/\s+/g, "[\\s\\-_]+"), "i");
     return { form: "text", test: (s) => re.test(s) };
   }
   const unit = p.unit ? UNIT_WORDS[p.unit.toLowerCase()] ?? `\\s?${esc(p.unit)}\\b` : "";
-  const res = [new RegExp(numberPattern(p.num) + unit, "i")];
+  // A small whole number (under 10) is everywhere in a file; it is a hit only with its own unit or currency sign beside
+  // it ("$5", "5%", "5 ms"), never bare (third review of WO-124a: revoking $1 blocked every file).
+  const small = Number.isInteger(p.num) && Math.abs(p.num) < 10;
+  const cur = p.currency ? `${esc(p.currency)}\\s?` : "";
+  const res = [new RegExp((small && cur ? cur : "") + numberPattern(p.num) + unit, "i")];
+  if (small && !unit && !cur) res.length = 0;
+  // Numbers compared as numbers: float noise (0.30000000000000004), E-notation (1.728E4, 4E-1) and leading-dot
+  // decimals (.4) are the same value. Targets: the value (not when small), a percent's fraction (only when not a whole
+  // number: 100% is 1 and 0% is 0, which every file holds), and the scaled whole of a k/m/bn value.
+  const targets: number[] = [];
+  if (!small) targets.push(p.num);
   const words = numberWords(Math.abs(p.num));
   if (words) res.push(new RegExp(`\\b${words}\\b` + unit, "i"));
   // A percent is also stored as its fraction: an xlsx cell formatted 0% holds <v>0.4</v> for 40%.
-  if (p.unit === "%") res.push(new RegExp(numberPattern(Number((p.num / 100).toPrecision(12)), true)));
+  if (p.unit === "%" && !Number.isInteger(p.num / 100)) { res.push(new RegExp(numberPattern(Number((p.num / 100).toPrecision(12)), true))); targets.push(p.num / 100); }
   // Scaled forms: $1.5m is also 1,500,000; 17,280 is also 17.3k / 17k / 17.28 thousand (second review of WO-124a).
   const scale = p.unit ? ({ k: 1e3, m: 1e6, mn: 1e6, bn: 1e9, b: 1e9 } as Record<string, number>)[p.unit.toLowerCase()] : undefined;
-  if (scale) res.push(new RegExp(numberPattern(p.num * scale, true)));
+  if (scale) { res.push(new RegExp(numberPattern(p.num * scale, true))); targets.push(p.num * scale); }
   const whole = scale ? p.num * scale : p.num;
   for (const [div, word] of [[1e3, "(?:k|thousand)"], [1e6, "(?:m|mn|million)"], [1e9, "(?:bn|b|billion)"]] as const) {
     if (Math.abs(whole) >= div && Math.abs(whole) < div * 1000) res.push(new RegExp(numberPattern(Number((whole / div).toPrecision(6))) + `\\s?${word}\\b`, "i"));
   }
-  return { form: p.unit === "%" ? "percent" : "number", test: (s) => res.some((re) => re.test(s)) };
+  const near = (x: number, t: number) => Math.abs(x - t) <= 1e-9 * Math.max(1, Math.abs(t));
+  const numeric = (s: string) => targets.length > 0 && numbersIn(s).some((x) => targets.some((t) => near(x, t)));
+  return { form: p.unit === "%" ? "percent" : "number", test: (s) => res.some((re) => re.test(s)) || numeric(s) };
 }
 
 function categoryOf(part: string): PartCategory {
@@ -122,12 +135,30 @@ function decodings(b: Uint8Array): string[] {
   return out;
 }
 const ENT: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+// Every number written in a text, as a number (E-notation and leading-dot decimals included).
+function numbersIn(s: string): number[] {
+  return [...s.matchAll(/(?<![\w.])[-−]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?(?![\w])/g)].map((m) => Number(m[0].replace("−", "-"))).filter(Number.isFinite);
+}
+// Markup is not content (third review of WO-124a): version="1.0", sheetId="1", sz="12" and pageMargins left="0.7"
+// made every file "hold" a revoked 100%, $1, $12 or 30%. A part is read as its text (tags removed, and tags as spaces
+// for values split across runs) plus only the attributes that carry text a person sees (alt text, titles, names). ISO
+// timestamps are removed first, so a 12:00 in core.xml is not a revoked 12.
+const TEXT_ATTRS = /\s(?:descr|title|alt|name|tooltip|caption|display)="([^"]*)"/gi;
 function views(raw: string): string[] {
   const unent = (s: string) => s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) =>
     e[0] === "#" ? String.fromCodePoint(e[1].toLowerCase() === "x" ? parseInt(e.slice(2), 16) : Number(e.slice(1))) : ENT[e.toLowerCase()] ?? m);
-  // Raw (attributes such as descr= and title= keep alt text), tags removed (a value split across runs), tags as spaces.
-  // NFKC folds fullwidth digits and signs (４０％) to ASCII before matching.
-  return [unent(raw), unent(raw.replace(/<[^>]*>/g, "")), unent(raw.replace(/<[^>]*>/g, " "))].map((t) => t.normalize("NFKC"));
+  const xml = /<[A-Za-z?!\/]/.test(raw);
+  const attrs = xml ? [...raw.matchAll(TEXT_ATTRS)].map((m) => m[1]).join(" ") : "";
+  const texts = xml ? [raw.replace(/<[^>]*>/g, ""), raw.replace(/<[^>]*>/g, " "), attrs] : [raw];
+  return texts.map((t) => clean(unent(t)));
+}
+// NFKC (fullwidth), every script's digits as ASCII, one apostrophe and quote form, no zero-width characters, and no ISO
+// timestamps.
+export function clean(t: string): string {
+  return asciiDigits(t.normalize("NFKC"))
+    .replace(/[\u200B-\u200D\u2060\uFEFF\u00AD]/g, "")
+    .replace(/[\u2018\u2019\u201B\u2032\u00B4`]/g, "'").replace(/[\u201C\u201D\u201F\u2033]/g, '"')
+    .replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?/g, " ");
 }
 
 // A PDF's text is in Flate-compressed content streams; each is inflated and its string operands added as a part, so a

@@ -37,7 +37,8 @@ function validate(days: Day[], tasks: Task[]) {
     if (!Number.isFinite(t.due)) throw new CapacityInputError(`task ${t.id} needs a finite due day`);
   }
   // Sums that overflow would compare Infinity with Infinity (round 6), and past 2^53 they are not exact (round 7).
-  if ([...days.map((x) => x.hours), ...tasks.map((t) => t.hours)].some((h) => h > Number.MAX_SAFE_INTEGER)) throw new CapacityInputError("hours past 2^53 cannot be added exactly");
+  // Round 9: each total is kept under a billion hours, so sums stay exact enough that a 1e-12 tolerance cannot hide a shortfall.
+  if (total(days.map((x) => x.hours)) > 1e9 || total(tasks.map((t) => t.hours)) > 1e9) throw new CapacityInputError("more than a billion hours is out of range");
   if (!Number.isFinite(total(days.map((x) => x.hours))) || !Number.isFinite(total(tasks.map((t) => t.hours)))) throw new CapacityInputError("the hours add up past what can be compared");
 }
 
@@ -65,7 +66,16 @@ export function solve({ days, tasks }: { days: Day[]; tasks: Task[] }): Solve {
     return true;
   };
   const byDue = (a: Task, b: Task) => a.due - b.due;
-  for (const t of [...req].sort(byDue)) place(t, true);
+  // Round 9: every required hour must be placed; a shortfall after placing is reported infeasible, never feasible.
+  for (const t of [...req].sort(byDue)) {
+    const before = plan.length;
+    place(t, true);
+    const placed = plan.slice(before).reduce((a, x) => a + x.hours, 0);
+    if (placed + 1e-9 < t.hours) {
+      const capacity = capBy(days, t.due);
+      return { feasible: false, proof: { due: t.due, required: req.filter((x) => x.due <= t.due).reduce((a, x) => a + x.hours, 0), capacity }, plan: [], dropped: [], slack: 0 };
+    }
+  }
   for (const t of tasks.filter((t) => t.required === false).sort(byDue)) if (!place(t, false)) dropped.push(t.id);
   return { feasible: true, plan, dropped, slack: left.reduce((s, x) => s + x.hours, 0) };
 }

@@ -19,7 +19,7 @@ import { type AdviceResult, enforceAdviceReply } from "../_shared/agent/research
 import { enforceMarketReply, enforceMarketReplySupported, FAIL_CLOSED, type MarketDeps, type MarketResult, pureUnconfirmed, type ResearchCheck } from "../_shared/agent/research/market.ts";
 import { bare, keepSupported, personQuestion, splitSentences } from "../_shared/agent/research/support.ts";
 import { confirmedRow, factRows } from "../_shared/agent/memory.ts";
-import { contractBlock, contractsFor, isTagged, Ledger, LEDGER_RULE, PIPELINE, runReplyPipeline, stripTags } from "../_shared/agent/reply_pipeline.ts";
+import { contractBlock, contractsFor, evidenceTurn, isTagged, Ledger, LEDGER_RULE, PIPELINE, runReplyPipeline, stripTags } from "../_shared/agent/reply_pipeline.ts";
 import { factText, ownerConfirmedFacts } from "../_shared/essay_draft.ts";
 import { NOT_CONFIRMED } from "../_shared/research_reply.ts";
 import { type CompanyResult, enforceCompanyReply, enforceCompanyReplySupported } from "../_shared/agent/research/company.ts";
@@ -288,7 +288,9 @@ export async function agentTurn(o: {
   // Live-11 (C9: 10 of 11 drafted lines dropped and the trace held none of them): a research turn's draft is recorded too.
   let piped: Awaited<ReturnType<typeof runReplyPipeline>> | null = null;
   // The path, by the draft: tagged -> the reply pipeline; untagged -> the support check as before (a stray tag never reaches anyone).
-  const pipeline = ledger && result.reply && result.stopped === "final" ? (isTagged(result.reply) ? "tagged" : "untagged") : null;
+  // Review of #849 (round 2): the pipeline runs only on a turn that rests on evidence a tool read this turn; a plain advice or chat
+  // turn keeps the path it had before (tags stripped), as the support check never ran on those.
+  const pipeline = ledger && result.reply && result.stopped === "final" ? (isTagged(result.reply) && evidenceTurn(ledger) ? "tagged" : "untagged") : null;
   if (pipeline === "untagged" && result.reply) result = { ...result, reply: stripTags(result.reply) };
   if (pipeline === "tagged" && result.show && result.reply) result = { ...result, reply: stripTags(result.reply) };
   if (pipeline === "tagged" && result.reply && !result.show) {

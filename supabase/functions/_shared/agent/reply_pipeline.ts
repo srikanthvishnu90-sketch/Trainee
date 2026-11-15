@@ -13,7 +13,7 @@
 //             code's words; the answer is verified again; what still fails is dropped. It replaces the shortener and the quote fallback.
 //   fallback  after the drop, when nothing left answers, code says what it could not verify and what the ledger holds (a posting's
 //             pay with its link).
-import { clausesOf, findSupport, hardParts, indexPages, judgeAll, nameFoundIn, noClaim, personQuestion, plainTalk, splitSentences, type SupportJudge } from "./research/support.ts";
+import { clausesOf, findSupport, hardParts, indexPages, judgeAll, nameFoundIn, noClaim, personQuestion, splitSentences, type SupportJudge } from "./research/support.ts";
 
 // ON (ruling 2026-11-14): the drafting prompt asks for tags and every tool result carries its units. The path is chosen by the draft:
 // a TAGGED draft goes through this pipeline (no page quote is ever put in place of a sentence); an UNTAGGED one (a model that ignored
@@ -21,17 +21,23 @@ import { clausesOf, findSupport, hardParts, indexPages, judgeAll, nameFoundIn, n
 export const PIPELINE = { on: true };
 export const isTagged = (t: string) => /\[E\d+(?:\s*,\s*E\d+)*\]/.test(String(t ?? ""));
 export type EvidenceKind = "page" | "chat" | "record" | "absent";
-export interface EvidenceUnit { id: string; kind: EvidenceKind; text: string; host?: string | null; url?: string | null; source?: string; places?: string[] }
+export interface EvidenceUnit { id: string; kind: EvidenceKind; text: string; host?: string | null; url?: string | null; source?: string; places?: string[]; owner?: string | null }
 
+// Units a tool added this turn (pages, posting records, counts): the turn rests on evidence only when it has one. Lines carried from
+// earlier replies, the person's record and what it lacks do not make a turn an evidence turn.
+export const evidenceTurn = (l: Ledger | null) => !!l && l.units.some((u) => (u.kind === "page" || u.kind === "chat") && u.source !== "an earlier reply in this chat");
 export class Ledger {
   units: EvidenceUnit[] = [];
-  add(kind: EvidenceKind, text: string, meta: { host?: string | null; url?: string | null; source?: string; places?: string[] } = {}): string {
+  add(kind: EvidenceKind, text: string, meta: { host?: string | null; url?: string | null; source?: string; places?: string[]; owner?: string | null } = {}): string {
     const t = String(text ?? "").replace(/\s+/g, " ").trim();
     if (!t) return "";
     const had = this.units.find((u) => u.kind === kind && u.text === t && (u.url ?? null) === (meta.url ?? null));
     if (had) return had.id;
     const id = `E${this.units.length + 1}`;
-    this.units.push({ id, kind, text: t, ...meta });
+    // A chat unit written "Employer, Title (Place): …" belongs to that employer even when the caller named no owner (lines carried
+    // from earlier replies); a figure's subject is checked against it.
+    const inferred = kind === "chat" && meta.owner === undefined ? (/^(\p{Lu}[\p{L}&'. -]*?)(?=,|\s\(|:)/u.exec(t)?.[1]?.trim() ?? null) : meta.owner;
+    this.units.push({ id, kind, text: t, ...meta, owner: inferred ?? null });
     return id;
   }
   get(id: string): EvidenceUnit | undefined { return this.units.find((u) => u.id === id); }
@@ -47,10 +53,10 @@ export class Ledger {
       const url = typeof p?.url === "string" ? p.url : typeof o.url === "string" ? o.url : null;
       // (the posting's own places, so layer A reads "Chicago, IL" there as a place, never as an owner)
       const places = [p?.location, ...String(p?.pay ?? "").split(/;\s*/).map((x: string) => /^([^:]+):/.exec(x)?.[1])].filter((x): x is string => typeof x === "string" && /,/.test(x)).map((x) => x.trim());
-      if (typeof p?.pay === "string" && p.pay.trim()) for (const part of p.pay.split(/;\s*/)) ids.push(this.add("chat", `${who}${p?.location ? ` (${p.location})` : ""}: pay ${part.trim()}`, { url, source: name, places }));
+      if (typeof p?.pay === "string" && p.pay.trim()) for (const part of p.pay.split(/;\s*/)) ids.push(this.add("chat", `${who}${p?.location ? ` (${p.location})` : ""}: pay ${part.trim()}`, { url, source: name, places, owner: typeof p?.company === "string" ? p.company : null }));
       const dl = [p?.deadline, p?.closes, p?.close_date].find((x) => typeof x === "string" && x.trim());
       const st = typeof p?.state === "string" ? p.state : null;
-      if (st || dl) ids.push(this.add("chat", `${who}: the posting is ${st ?? "listed"}${dl ? `; it closes ${dl}` : ""}.`, { url, source: name }));
+      if (st || dl) ids.push(this.add("chat", `${who}: the posting is ${st ?? "listed"}${dl ? `; it closes ${dl}` : ""}.`, { url, source: name, owner: typeof p?.company === "string" ? p.company : null }));
     }
     if (Array.isArray(o.postings)) ids.push(this.add("chat", `The search (${name}) returned ${o.postings.length} posting${o.postings.length === 1 ? "" : "s"}.`, { source: name }));
     const req = o.requirements && typeof o.requirements === "object" ? o.requirements : null;
@@ -107,8 +113,10 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   const own = new Set((o.own ?? []).map((x) => x.trim()));
   const lines = String(reply ?? "").split("\n").map((l) => /^\s*(?:https?:\/\/\S+\s*)*$/.test(l) ? [l] : splitSentences(l).filter((x) => x.trim()));
   const failures: Failure[] = [], kept: string[] = [];
-  const checks: { a: number; b: number; clause: string; units: EvidenceUnit[]; claim: string; subject?: string | null }[] = [];
+  const checks: { a: number; b: number; clause: string; units: EvidenceUnit[]; claim: string; subject?: string | null; untagged?: boolean }[] = [];
   const bad = new Set<string>(), citeAt = new Map<string, string[]>();
+  const owners = [...new Set(ledger.units.map((u) => u.owner).filter((w): w is string => !!w && w.trim().length > 1))];
+  let carried: string | null = null;
   lines.forEach((l, a) => l.forEach((x, b) => {
     if (/^\s*(?:https?:\/\/\S+\s*)*$/.test(x)) return;
     const { ids, text } = tagsOf(x);
@@ -119,26 +127,27 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
     if (o.onRecord?.(text) === false) { failures.push({ sentence: text, reason: "it is not what the person's record holds" }); bad.add(`${a}:${b}`); return; }
     // Review of #849: a sentence with no figure, no date and no name needs no tag (LEDGER_RULE says so); only one that names or
     // counts something must cite a unit.
-    if (!ids.length) {
-      if (plainTalk(text, allowed)) return;
-      failures.push({ sentence: text, reason: "it states a fact and cites no evidence unit" }); bad.add(`${a}:${b}`); return;
-    }
-    const units = ids.map((id) => ledger.get(id)).filter(Boolean) as EvidenceUnit[];
-    if (units.length < ids.length) { failures.push({ sentence: text, reason: `it cites ${ids.filter((id) => !ledger.get(id)).join(", ")}, which no evidence unit is` }); bad.add(`${a}:${b}`); return; }
+    // Review of #849 (round 2): an untagged sentence on an evidence turn is checked against EVERY unit (layer A, then the judge), as the
+    // support check always did; it is neither dropped unread nor let through unread.
+    const cited = ids.length ? ids : ledger.units.map((u) => u.id);
+
+    const units = cited.map((id) => ledger.get(id)).filter(Boolean) as EvidenceUnit[];
+    if (units.length < cited.length) { failures.push({ sentence: text, reason: `it cites ${cited.filter((id) => !ledger.get(id)).join(", ")}, which no evidence unit is` }); bad.add(`${a}:${b}`); return; }
+    if (!units.length) { failures.push({ sentence: text, reason: "it states a fact and no evidence unit holds it" }); bad.add(`${a}:${b}`); return; }
     citeAt.set(`${a}:${b}`, ids);
     // Review of #849: a clause that names no one of its own is about the sentence's subject (its first name), so the unit that supports
     // it must name that subject too ("PayPal pays $28-$49 in Chicago, and pays $80 in New York" cannot borrow Citadel's $80).
-    const hs = hardParts(text);
-    const COMMON_START = /^(?:the|a|an|it|its|they|their|this|that|these|those|we|our|you|your|i|my|he|she|his|her|there|here|and|but|so|if|when|in|on|at|for|with|from|by|as|of|to|both|each|every|all|most|some|many|no|not|yes)$/i;
-    const firstWord = /^[\p{Lu}][\p{L}&'.-]*/u.exec(text.trim())?.[0] ?? "";
-    const subject = firstWord && !COMMON_START.test(firstWord) ? firstWord : ((hs.names.map((r, j) => j === 0 && r[0] === hs.first ? r.slice(1) : r).map((r) => r.filter((w) => !/^date\d{8}$/.test(w))).find((r) => r.length) ?? [])[0] ?? null);
+    // Review of #849 (round 2): subjects are the employers the ledger knows (each posting unit's owner). A sentence names one, or it is
+    // about the employer of the sentence before ("It pays $80…", "In New York, the same role…"). A clause naming its own known
+    // employer is about that one. A figure's unit must belong to that employer.
+    const mentioned = (t: string) => owners.filter((w) => nameFoundIn(w, t));
+    const sentSubject = mentioned(text)[0] ?? carried;
+    carried = sentSubject;
     for (const c of clausesOf(text)) {
       if (noClaim(c) || personQuestion(c, allowed) || o.onRecord?.(c) === true) continue;
       if (o.onRecord?.(c) === false) { failures.push({ sentence: text, reason: `"${c}" is not what the person's record holds` }); bad.add(`${a}:${b}`); return; }
-      // A clause has its own subject only when a name opens it ("Citadel pays…"); a place later in it ("…in New York") is not one.
-      const lead = /^[\p{Lu}][\p{L}&'.-]*/u.exec(c.trim())?.[0] ?? "";
-      const own = !!lead && !COMMON_START.test(lead);
-      checks.push({ a, b, clause: c, units, claim: text, subject: own ? null : subject });
+      const subject = /\d/.test(c) ? (mentioned(c)[0] ?? sentSubject) : null;
+      checks.push({ a, b, clause: c, units, claim: text, subject, untagged: !ids.length });
     }
   }));
   // Layer A: each clause against an index of the units it cites, a record unit read as one record (a fact per line).
@@ -147,12 +156,13 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
     if (bad.has(`${c.a}:${c.b}`)) return;
     const idx = indexPages(c.units.map((u) => ({ text: u.text, title: u.kind === "page" ? `Page${u.host ? ` (${u.host})` : ""}` : u.kind === "chat" ? "This chat's tool result" : "The person's confirmed record:", places: u.places ?? [], ...(u.kind === "record" || u.kind === "absent" ? { one: true } : {}) })));
     const f = findSupport(c.clause, idx);
-    if (!f) { const miss = missingSpecifics(c.clause, c.units); failures.push({ sentence: c.claim, reason: miss.length ? miss.map((m) => `'${m}' is in no cited unit`).join("; ") : `no single cited unit holds "${c.clause}"` }); bad.add(`${c.a}:${c.b}`); return; }
-    if (c.subject && !nameFoundIn(c.subject, f.unit.passage)) { failures.push({ sentence: c.claim, reason: `the unit that holds "${c.clause}" is not about ${c.subject}` }); bad.add(`${c.a}:${c.b}`); return; }
+    if (!f) { const miss = missingSpecifics(c.clause, c.units); failures.push({ sentence: c.claim, reason: c.untagged ? "it states a fact and cites no evidence unit, and no unit holds it" : miss.length ? miss.map((m) => `'${m}' is in no cited unit`).join("; ") : `no single cited unit holds "${c.clause}"` }); bad.add(`${c.a}:${c.b}`); return; }
+    const unitOwner = c.units.find((u) => f.unit.passage.includes(u.text.slice(0, 40)))?.owner ?? null;
+    if (c.subject && (unitOwner ? unitOwner !== c.subject : !nameFoundIn(c.subject, f.unit.passage))) { failures.push({ sentence: c.claim, reason: `the unit that holds "${c.clause}" is not about ${c.subject}` }); bad.add(`${c.a}:${c.b}`); return; }
     asks.push({ k, claim: `${c.subject && !c.clause.includes(c.subject) ? `${c.subject}: ` : ""}${c.clause}`, source: f.unit.passage });
   });
   const got = await judgeAll(o.judge, asks.map((x) => ({ claim: x.claim, source: x.source })));
-  asks.forEach((x, j) => { const c = checks[x.k]; if (!got[j] && !bad.has(`${c.a}:${c.b}`)) { failures.push({ sentence: c.claim, reason: `the cited unit does not state "${x.claim}"` }); bad.add(`${c.a}:${c.b}`); } });
+  asks.forEach((x, j) => { const c = checks[x.k]; if (!got[j] && !bad.has(`${c.a}:${c.b}`)) { failures.push({ sentence: c.claim, reason: c.untagged ? "it states a fact and cites no evidence unit, and no unit states it" : `the cited unit does not state "${x.claim}"` }); bad.add(`${c.a}:${c.b}`); } });
   const text = lines.map((l, a) => l.filter((x, b) => x && !bad.has(`${a}:${b}`)).join(" ")).join("\n").replace(/\n{3,}/g, "\n\n").trim();
   const cites: string[] = [];
   lines.forEach((l, a) => l.forEach((x, b) => { if (x && !bad.has(`${a}:${b}`)) { kept.push(x); for (const id of citeAt.get(`${a}:${b}`) ?? []) if (!cites.includes(id)) cites.push(id); } }));

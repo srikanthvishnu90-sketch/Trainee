@@ -82,7 +82,14 @@ function matchersFor(v: RevokedValue): { form: RevokeHit["form"]; test: (s: stri
   const p = parse(v);
   if (!p) {
     const re = new RegExp(esc(clean(String(v)).normalize("NFC").trim()).replace(/\s+/g, "[\\s\\-_]+"), "i");
-    return { form: "text", test: (s) => re.test(s) };
+    // Round 8: a value written in words around a number ("USD 150,000", "$150K-$160K", "1.5 million dollars", "~150000") also
+    // matches each number in it, read as a value with its scale, so the number itself is searched for (fail closed).
+    const nums = [...clean(String(v)).matchAll(/[$€£¥₹]?\s?(\d[\d,]*(?:\.\d+)?)\s?(k|m|mn|bn|thousand|million|billion)?\b/gi)].map((m) => {
+      const n = Number(m[1].replace(/,/g, "")), sc = ({ k: 1e3, thousand: 1e3, m: 1e6, mn: 1e6, million: 1e6, bn: 1e9, billion: 1e9 } as Record<string, number>)[(m[2] ?? "").toLowerCase()] ?? 1;
+      return n * sc;
+    }).filter((n) => Number.isFinite(n) && !(Number.isInteger(n) && Math.abs(n) < 10));
+    const subs = nums.map((n) => matchersFor(n));
+    return { form: "text", test: (s) => re.test(s) || subs.some((m) => m.test(s)) };
   }
   const unit = p.unit ? UNIT_WORDS[p.unit.toLowerCase()] ?? `\\s?${esc(p.unit)}\\b` : "";
   // A small whole number (under 10) is everywhere in a file; it is a hit only with its own unit or currency sign beside
@@ -190,15 +197,15 @@ function views(raw: string, pdf = false, part = ""): string[] {
   // "val" is content only on elements that carry text (a content control's alias or tag, a document variable, a
   // presentation tag, a list item); on sz, color, jc, numFmt and the like it is a setting.
   const attrs: string[] = [];
-  for (const tag of body.matchAll(/<(?:[\w.-]+:)?([\w.-]+)(\s[^>]*)>/g)) {
-    const el = tag[1].toLowerCase();
-    for (const m of tag[2].matchAll(ATTR)) {
-      const name = m[2].toLowerCase(), prefix = (m[1] ?? "").toLowerCase();
-      if (prefix.startsWith("xmlns") || name === "xmlns" || STRUCTURAL.has(name)) continue;
-      if (name === "val" && !VAL_CONTENT.has(el)) continue;
-      attrs.push(m[3] ?? m[4] ?? "");
-    }
+  // Round 8: attributes are read across the whole part (a quoted value may hold ">"), each with the element it sits on.
+  for (const m of body.matchAll(ATTR)) {
+    const name = m[2].toLowerCase(), prefix = (m[1] ?? "").toLowerCase();
+    if (prefix.startsWith("xmlns") || name === "xmlns" || STRUCTURAL.has(name)) continue;
+    const el = (/<(?:[\w.-]+:)?([\w.-]+)(?:\s+[^\s=<>]+\s*=\s*(?:"[^"]*"|'[^']*'))*\s*$/.exec(body.slice(0, m.index!))?.[1] ?? "").toLowerCase();
+    if (name === "val" && !VAL_CONTENT.has(el)) continue;
+    attrs.push(m[3] ?? m[4] ?? "");
   }
+
   // Stored cell values on their own (xlsx <v>, pivot-cache v=): the view in which a "$5" is just 5.
   const cells = [...body.matchAll(/<(?:\w+:)?v>([^<]*)<\/(?:\w+:)?v>|<(?:\w+:)?n\s[^>]*\bv="([^"]*)"/g)].map((m) => m[1] ?? m[2]).join(" ");
   const texts = [body.replace(/<[^>]*>/g, ""), body.replace(/<[^>]*>/g, " "), attrs.join(" \u0001 ")];
@@ -249,7 +256,7 @@ export function pdfUnreadable(bytes: Uint8Array): boolean {
     const names = f[1].startsWith("[") ? [...f[1].matchAll(/\/([A-Za-z0-9]+)/g)].map((x) => x[1]) : f[1].startsWith("/") ? [f[1].slice(1)] : ["(indirect)"];
     if (!names.length || names.some((n) => !["FlateDecode", "Fl", "DCTDecode", "DCT"].includes(n))) return true;
   }
-  for (const m of s.matchAll(/stream\r?\n/g)) {
+  for (const m of s.matchAll(/(?<!end)stream\r?\n/g)) {
     const dict = s.slice(Math.max(0, m.index! - 400), m.index!);
     const filters = [...(dict.slice(dict.lastIndexOf("<<")).matchAll(/\/(\w+Decode|AHx|A85|Fl|LZW|RL|CCF|DCT)\b/g))].map((x) => x[1]);
     if (filters.some((f) => f !== "FlateDecode" && f !== "Fl" && f !== "DCTDecode" && f !== "DCT")) return true;
@@ -263,7 +270,7 @@ export function pdfUnreadable(bytes: Uint8Array): boolean {
 function pdfText(bytes: Uint8Array): string[] {
   const s = new TextDecoder("latin1").decode(bytes);
   const out: string[] = [];
-  for (const m of s.matchAll(/stream\r?\n/g)) {
+  for (const m of s.matchAll(/(?<!end)stream\r?\n/g)) {
     const start = m.index! + m[0].length, end = s.indexOf("endstream", start);
     if (end < 0) continue;
     let body = bytes.subarray(start, end);

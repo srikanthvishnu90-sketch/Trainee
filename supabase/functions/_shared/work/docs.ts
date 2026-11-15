@@ -34,8 +34,11 @@ const XML_BAD = /[\u0000-\u0008\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uD
 // Invisible format characters (\p{Cf}: zero-width space and joiners, word joiner, soft hyphen, bidi marks) and the
 // combining grapheme joiner are removed from what is checked and from what is printed (round 4: "for\u200Bty percent"
 // read as two words to the checker and as "forty percent" to a reader).
-const INVISIBLE = /[\p{Cf}\u034F]/gu;
-export const cleanText = (s: string): string => String(s).replace(INVISIBLE, "").replace(/[\u000B\u000C]/g, " ").replace(/\r\n?/g, "\n").replace(XML_BAD, "");
+// Round 6: every Default_Ignorable code point (variation selectors too), and blank-looking letters (Hangul fillers,
+// braille blank) become spaces, so none can hide a sign, a scale word or a date join.
+const INVISIBLE = /[\p{Cf}\p{Default_Ignorable_Code_Point}\u034F]/gu;
+const BLANK = /[\u3164\u2800\u115F\u1160\uFFA0]/gu;
+export const cleanText = (s: string): string => String(s).replace(INVISIBLE, "").replace(BLANK, " ").replace(/[\u000B\u000C]/g, " ").replace(/\r\n?/g, "\n").replace(XML_BAD, "");
 const esc = (s: string): string => P.escXml(cleanText(s));
 // The formats model.formatValue prints; anything else could print text or digits that are not the cell.
 // "General" is not on the list: formatValue would print it at zero decimals (0.4 as "0"), unlike Excel (124d review 2).
@@ -94,15 +97,19 @@ export function typedNumbers(text: string): string[] {
     const okBefore = (before === "" || /(?:^|[\s(\["'“‘])$/u.test(before) || /(?:^|[\s(\["'“‘])[$€£¥₹] ?$/u.test(before)) &&
       // A sign anywhere in the run of prefix characters before the slot ("-(", "- $", "−'") would print a figure the cell
       // does not hold (round 4: the sign sat behind an allowed "$" or "("). Signs: - − – — ‒ + ± － and the word "minus".
-      !/(?:[-−–—‒+±－]|\bminus|\bnegative)[\s$€£¥₹(\["'“‘]*$/iu.test(before);
+      !/(?:[\p{Pd}+±⁻₋−]|\bminus|\bnegative)[\s$€£¥₹(\["'“‘]*$/iu.test(before.normalize("NFKC"));
     let okAfter = after === "" || /^[\s.,;:!?)\]'"”’]/u.test(after);
     // Punctuation straight into a digit or another slot joins figures ("{{ref:a}}.{{ref:b}}", "{{ref:a}}'{{ref:b}}").
     if (okAfter && /^[.,;:!?)\]'"”’]+[\p{N}{]/u.test(after)) okAfter = false;
     const next = after.replace(/^[\s\u00A0\u202F\u2009]+/, "").normalize("NFKC");
     if (okAfter && next !== after && (/^\{\{/.test(next) || /^\p{N}/u.test(next) || SCALE.test(next))) okAfter = false;
+    // Round 6: after closing punctuation too ("({{ref:g}})%", "{{ref:a}}) bn").
+    const past = after.normalize("NFKC").replace(/^[)\]'"”’.!?:;,]+[\s\u00A0\u202F\u2009]*/u, "");
+    if (okAfter && past !== after.normalize("NFKC") && SCALE.test(past)) okAfter = false;
     // A slot straight after a date would join its digits ("in 2019 280"): refused (round 5, fail closed). A slot alone in
     // brackets ("(500)", read as a negative in accounts) is allowed by D-088's rule; an owner ruling is open.
-    const afterDate = dateSpans(before.normalize("NFKC")).some(([, b]) => /^\s*$/.test(before.normalize("NFKC").slice(b)) && b > 0);
+    // Round 6: whitespace, quotes or brackets between a date and a slot still join them ("May 2019'280").
+    const afterDate = dateSpans(before.normalize("NFKC")).some(([, b]) => b > 0 && /^[\s'"‘“’”(\[]*$/u.test(before.normalize("NFKC").slice(b)));
     if (!okBefore || !okAfter || afterDate) out.push(m[0]);
   }
   // 3. With slots blanked and real dates masked, no digit in any script and no number word remains.

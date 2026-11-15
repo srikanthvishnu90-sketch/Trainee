@@ -100,7 +100,10 @@ export function typedNumbers(text: string): string[] {
     if (okAfter && /^[.,;:!?)\]'"”’]+[\p{N}{]/u.test(after)) okAfter = false;
     const next = after.replace(/^[\s\u00A0\u202F\u2009]+/, "").normalize("NFKC");
     if (okAfter && next !== after && (/^\{\{/.test(next) || /^\p{N}/u.test(next) || SCALE.test(next))) okAfter = false;
-    if (!okBefore || !okAfter) out.push(m[0]);
+    // A slot straight after a date would join its digits ("in 2019 280"): refused (round 5, fail closed). A slot alone in
+    // brackets ("(500)", read as a negative in accounts) is allowed by D-088's rule; an owner ruling is open.
+    const afterDate = dateSpans(before.normalize("NFKC")).some(([, b]) => /^\s*$/.test(before.normalize("NFKC").slice(b)) && b > 0);
+    if (!okBefore || !okAfter || afterDate) out.push(m[0]);
   }
   // 3. With slots blanked and real dates masked, no digit in any script and no number word remains.
   let blank = t.replace(REF_ANY, (x) => " ".repeat(x.length));
@@ -109,7 +112,9 @@ export function typedNumbers(text: string): string[] {
   // (round 4: "19⑳0" read as the year 1920).
   const norm = [...blank].map((ch) => {
     const n = ch.normalize("NFKC");
-    if (/\p{N}/u.test(ch) && !/^\d$/.test(asciiDigits(n))) return "#".repeat(ch.length);
+    // Also any character whose NFKC form holds a number but is not exactly one ASCII digit (round 5: ㏩ is "10日", ㍘ is
+    // "0点"; they are not \p{N} but completed a date while printing extra digits).
+    if ((/\p{N}/u.test(ch) || /\p{N}/u.test(n)) && !/^\d$/.test(asciiDigits(n))) return "#".repeat(ch.length);
     return n.length === ch.length ? n : n.slice(0, ch.length).padEnd(ch.length, " ");
   }).join("");
   for (const [a, b] of dateSpans(norm)) blank = blank.slice(0, a) + " ".repeat(b - a) + blank.slice(b);

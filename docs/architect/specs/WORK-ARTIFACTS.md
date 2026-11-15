@@ -66,7 +66,10 @@ code and tested.
    - Stated limits under D-088 (word lists are backstops; a structural path that lets a non-cell figure through blocks):
      scale words and number words outside the lists (each new one found is added with a test); Roman numerals in
      letters and look-alike letters ("lOO"); a year range or an "at" time can carry a count ("from 1950 to 2050"); and
-     fail-closed over-refusal of non-figures ("last quarter", "third-party", "zero-trust", "half-day", "credit score").
+     fail-closed over-refusal of non-figures ("last quarter", "third-party", "zero-trust", "half-day", "credit score");
+     chart axis tick labels, which PowerPoint computes from the cells; PPTX and DOCX text overflow is not checked (only the
+     PDF is measured), so no reply may claim a deck or memo "fits"; and a slot alone in brackets ("(500)", which accounts
+     read as a negative) is allowed until the owner rules.
    - The one exception is a real calendar date (`model.dateSpans`): a valid ISO date, a month-name date with a real day
      and a year, "Month YYYY", an am/pm or "at" time, a year range, or a year after a year word with no noun after it.
    - In prose outside documents (`model.loose`, used where a figure may equal a cell), the same reading applies, and a

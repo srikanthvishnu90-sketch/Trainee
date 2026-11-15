@@ -63,6 +63,10 @@ code and tested.
      read as numbers (a known limit). Open for the owner: CJK numerals (七, 三十) are letters, not `\p{N}`, and number
      words in other languages ("veinte por ciento") are not read; refusing them would also refuse ordinary Chinese or
      Spanish prose. Until a ruling, they are a stated limit in every document's report.
+   - Stated limits under D-088 (word lists are backstops; a structural path that lets a non-cell figure through blocks):
+     scale words and number words outside the lists (each new one found is added with a test); Roman numerals in
+     letters and look-alike letters ("lOO"); a year range or an "at" time can carry a count ("from 1950 to 2050"); and
+     fail-closed over-refusal of non-figures ("last quarter", "third-party", "zero-trust", "half-day", "credit score").
    - The one exception is a real calendar date (`model.dateSpans`): a valid ISO date, a month-name date with a real day
      and a year, "Month YYYY", an am/pm or "at" time, a year range, or a year after a year word with no noun after it.
    - In prose outside documents (`model.loose`, used where a figure may equal a cell), the same reading applies, and a

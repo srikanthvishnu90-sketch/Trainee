@@ -19,12 +19,16 @@
 import { strToU8, unzlibSync, zipSync } from "npm:fflate@0.8.2";
 import { CareerRender } from "../router_core.career.js";
 import { widthPt } from "../career_resume_design.ts";
-import { type Cell, dateSpans, evaluate, loose, render, type Values } from "./model.ts";
+import { asciiDigits, type Cell, dateSpans, evaluate, loose, render, type Values } from "./model.ts";
 
 // deno-lint-ignore no-explicit-any
 const P = (CareerRender as any).primitives;
 const XML_BAD = /[\u0000-\u0008\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
-export const cleanText = (s: string): string => String(s).replace(/[\u000B\u000C]/g, " ").replace(/\r\n?/g, "\n").replace(XML_BAD, "");
+// Invisible format characters (\p{Cf}: zero-width space and joiners, word joiner, soft hyphen, bidi marks) and the
+// combining grapheme joiner are removed from what is checked and from what is printed (round 4: "for\u200Bty percent"
+// read as two words to the checker and as "forty percent" to a reader).
+const INVISIBLE = /[\p{Cf}\u034F]/gu;
+export const cleanText = (s: string): string => String(s).replace(INVISIBLE, "").replace(/[\u000B\u000C]/g, " ").replace(/\r\n?/g, "\n").replace(XML_BAD, "");
 const esc = (s: string): string => P.escXml(cleanText(s));
 // The formats model.formatValue prints; anything else could print text or digits that are not the cell.
 // "General" is not on the list: formatValue would print it at zero decimals (0.4 as "0"), unlike Excel (124d review 2).
@@ -64,7 +68,7 @@ export class Unencodable extends Error {
 const SLOT = /\{\{\s*ref:([A-Za-z_][A-Za-z0-9_]*)\s*\|\s*([^}]+?)\s*\}\}/g;
 const REF_ANY = /\{\{\s*ref:([A-Za-z_][A-Za-z0-9_]*)\s*(?:\|\s*([^}]*?)\s*)?\}\}/g;
 export function typedNumbers(text: string): string[] {
-  const t = String(text);
+  const t = cleanText(String(text));
   const out: string[] = [];
   // 1. Every {{ or }} belongs to a well-formed ref slot with an allowed format.
   const slots = [...t.matchAll(REF_ANY)];
@@ -76,10 +80,12 @@ export function typedNumbers(text: string): string[] {
   //    or a currency sign ($, €, £, ¥, ₹, each optionally followed by one space). After a slot: the end, or a space or
   //    closing punctuation (. , ; : ! ? ) ] ' "), and the next word after a space may not be another slot, a digit, or a
   //    scale or unit token (k, m, mn, bn, b, x, lakh, crore, %, ‰, percent, thousand, million, billion, ...).
-  const SCALE = /^(?:[kmb]|mn|mm|bn|x|lakhs?|crores?|percent|per\s?cent|pct|bps|basis|thousand|million|billion|trillion|dozen|hundred|[%‰‱٪％﹪])(?![\p{L}\p{N}])/iu;
+  // A backstop list (D-088: gaps are stated limits).
+  const SCALE = /^(?:[kmblx×]|mn|mm|bn|bil|bln|tn|trn|mil|mio|mrd|thou|grand|cr|lac|lacs|lakhs?|crores?|pc|percent|per\s?cent|pct|bps|basis|thousands?|millions?|billions?|trillions?|dozens?|hundreds?|[%‰‱٪％﹪])(?![\p{L}\p{N}])/iu;
   for (const m of slots) {
     const before = t.slice(0, m.index!), after = t.slice(m.index! + m[0].length);
-    const okBefore = before === "" || /(?:^|[\s(\["'“‘])$/u.test(before) || /(?:^|[\s(\["'“‘])[$€£¥₹] ?$/u.test(before);
+    const okBefore = (before === "" || /(?:^|[\s(\["'“‘])$/u.test(before) || /(?:^|[\s(\["'“‘])[$€£¥₹] ?$/u.test(before)) &&
+      !/[-−–+±]\s*$/u.test(before); // a sign, even with a space, would change the figure ("Net: − {{ref:a}}")
     let okAfter = after === "" || /^[\s.,;:!?)\]'"”’]/u.test(after);
     // Punctuation straight into a digit or another slot joins figures ("{{ref:a}}.{{ref:b}}", "{{ref:a}}'{{ref:b}}").
     if (okAfter && /^[.,;:!?)\]'"”’]+[\p{N}{]/u.test(after)) okAfter = false;
@@ -90,7 +96,13 @@ export function typedNumbers(text: string): string[] {
   // 3. With slots blanked and real dates masked, no digit in any script and no number word remains.
   let blank = t.replace(REF_ANY, (x) => " ".repeat(x.length));
   // Normalised one character at a time, so positions line up and one ™ or "…" does not switch the date exception off.
-  const norm = [...blank].map((ch) => { const n = ch.normalize("NFKC"); return n.length === ch.length ? n : n.slice(0, ch.length).padEnd(ch.length, " "); }).join("");
+  // A number character whose NFKC form is not exactly one ASCII digit (⑳, ½, ⒛) breaks a date instead of joining one
+  // (round 4: "19⑳0" read as the year 1920).
+  const norm = [...blank].map((ch) => {
+    const n = ch.normalize("NFKC");
+    if (/\p{N}/u.test(ch) && !/^\d$/.test(asciiDigits(n))) return "#".repeat(ch.length);
+    return n.length === ch.length ? n : n.slice(0, ch.length).padEnd(ch.length, " ");
+  }).join("");
   for (const [a, b] of dateSpans(norm)) blank = blank.slice(0, a) + " ".repeat(b - a) + blank.slice(b);
   for (const m of blank.matchAll(/[\p{N}][\p{N}.,]*/gu)) out.push(m[0]);
   for (const w of loose(blank.replace(/\p{N}/gu, " "), {})) out.push(w);
@@ -113,7 +125,9 @@ function prepare(cells: Cell[], texts: [string, string][], formats: Record<strin
   const values = evaluate({ cells, text: texts.map(([, t]) => t) });
   const bad = texts.flatMap(([where, t]) => typedNumbers(t).map((number) => ({ where, number })));
   if (bad.length) throw new LooseNumber(bad);
-  return { values, r: (t: string) => renderText(t, values, formats) };
+  // A cell's own format applies unless formats names another (round 4: {value: 0.4, format: "0%"} printed 0.4).
+  const all = { ...Object.fromEntries(cells.filter((c) => c.format !== undefined).map((c) => [c.id, String(c.format)])), ...(formats ?? {}) };
+  return { values, r: (t: string) => renderText(t, values, all) };
 }
 const BLOCK_KINDS = new Set(["heading", "para", "bullets", "table"]);
 function docTexts(m: DocModel): [string, string][] {
@@ -234,7 +248,7 @@ function chartXml(chart: NonNullable<Slide["chart"]>, values: Values, formats: R
     const n = s.refs.length, fmt = formats[s.refs[0]] ?? "General";
     const strPts = s.labels.map((l, j) => `<c:pt idx="${j}"><c:v>${esc(r(l))}</c:v></c:pt>`).join("");
     const numPts = s.refs.map((id, j) => {
-      if (!(id in values)) throw new Error(`chart series "${s.name}" names no cell "${id}"`);
+      if (!Object.hasOwn(values, id)) throw new Error(`chart series "${s.name}" names no cell "${id}"`);
       return `<c:pt idx="${j}"><c:v>${values[id]}</c:v></c:pt>`;
     }).join("");
     return `<c:ser><c:idx val="${i}"/><c:order val="${i}"/><c:tx><c:strRef><c:f>Sheet1!$${col(i)}$1</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${esc(r(s.name))}</c:v></c:pt></c:strCache></c:strRef></c:tx>${
@@ -288,7 +302,7 @@ export function writePptx(deck: Deck): Uint8Array {
     if (s.chart) {
       chartN++;
       const x = bullets.length ? M + W / 2 : M, w = bullets.length ? W / 2 : W;
-      parts[`ppt/charts/chart${chartN}.xml`] = chartXml(s.chart, values, formats, r);
+      parts[`ppt/charts/chart${chartN}.xml`] = chartXml(s.chart, values, { ...Object.fromEntries(deck.cells.filter((c) => c.format !== undefined).map((c) => [c.id, String(c.format)])), ...formats }, r);
       over.push([`/ppt/charts/chart${chartN}.xml`, "application/vnd.openxmlformats-officedocument.drawingml.chart+xml"]);
       slideRels.push(["rId3", "chart", `../charts/chart${chartN}.xml`]);
       shapes.push(`<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="4" name="Chart ${chartN}"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr><p:xfrm><a:off x="${x}" y="${top}"/><a:ext cx="${w}" cy="${bodyH}"/></p:xfrm><a:graphic><a:graphicData uri="${C_NS}"><c:chart xmlns:c="${C_NS}" r:id="rId3"/></a:graphicData></a:graphic></p:graphicFrame>`);

@@ -35,14 +35,28 @@ export class LedgerError extends Error {
   constructor(msg: string) { super(msg); this.name = "LedgerError"; }
 }
 
+// D6: whether a case is practice is fixed when the case is made. It is kept here, out of reach of the case object, so
+// flipping c.practice later (or forging a case object) cannot open the profile. A case this module did not make is
+// treated as practice: the guard fails closed.
+const SEALED = new WeakMap<WorkCase, boolean>();
+export function isPractice(c: WorkCase): boolean {
+  return SEALED.has(c) ? SEALED.get(c) === true : true;
+}
+
 export function newCase(o: { owner: string; practice: boolean; title: string; now: number }): WorkCase {
   if (!o.owner) throw new LedgerError("a case needs an owner");
   const slug = String(o.title ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "case";
-  return {
-    id: `${o.practice ? "practice" : "own"}:${o.now.toString(36)}:${slug}`,
-    owner: o.owner, practice: o.practice === true, title: String(o.title ?? ""), createdAt: o.now,
+  const practice = o.practice === true;
+  const c = {
+    id: `${practice ? "practice" : "own"}:${o.now.toString(36)}:${slug}`,
+    owner: o.owner, title: String(o.title ?? ""), createdAt: o.now,
     rounds: [], rows: [], versions: [], guardLog: [],
-  };
+  } as unknown as WorkCase;
+  // Read-only and not configurable: an assignment throws in strict mode and is ignored otherwise.
+  Object.defineProperty(c, "practice", { value: practice, enumerable: true, writable: false, configurable: false });
+  Object.defineProperty(c, "id", { value: c.id, enumerable: true, writable: false, configurable: false });
+  SEALED.set(c, practice);
+  return c;
 }
 
 export function currentRound(c: WorkCase): number {
@@ -91,14 +105,18 @@ export function revoked(c: WorkCase): string[] {
   return out;
 }
 
-// D6: the only way a case reaches the profile. io is the caller's own profile accessor (none in this module).
+// D6: the only way a case reaches the profile. io is the caller's own profile accessor (none in this module). The
+// practice flag is read once, from the sealed record, when the guard is made; io stays inside this closure and the
+// returned guard is frozen, so neither the flag nor the accessor can be reached or swapped through the guard.
 export function profileGuard<T = unknown>(c: WorkCase, io?: { read: () => T; write: (fact: unknown) => void }, now = c.createdAt) {
+  const practice = isPractice(c);
+  const read = io?.read, write = io?.write;
   const gate = (op: "read" | "write") => {
-    c.guardLog.push({ at: now, op, refused: c.practice });
-    if (c.practice) throw new PracticeIsolation(op);
+    c.guardLog.push({ at: now, op, refused: practice });
+    if (practice || isPractice(c)) throw new PracticeIsolation(op);
   };
-  return {
-    read(): T | undefined { gate("read"); return io?.read(); },
-    write(fact: unknown): void { gate("write"); io?.write(fact); },
-  };
+  return Object.freeze({
+    read(): T | undefined { gate("read"); return read?.call(io); },
+    write(fact: unknown): void { gate("write"); write?.call(io, fact); },
+  });
 }

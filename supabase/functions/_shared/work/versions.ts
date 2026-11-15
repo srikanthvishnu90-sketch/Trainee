@@ -5,12 +5,20 @@ import { currentRound, type WorkCase, type WorkVersion } from "./case.ts";
 import { evaluate, type Model, type Values } from "./model.ts";
 
 export interface DiffRow { path: string; before: unknown; after: unknown; round: number; constraint: string[] }
-export interface Invariant { name: string; fn: (prev: Values, next: Values) => boolean; tol: number }
+export interface Invariant { name: string; fn: (prev: Values, next: Values, tol: number) => boolean; tol: number }
 export interface InvariantResult { name: string; tol: number; ran: boolean; ok: boolean; why?: string }
 
-export function invariant(name: string, fn: (prev: Values, next: Values) => boolean, tol: number): Invariant {
-  if (!(tol >= 0)) throw new RangeError(`invariant "${name}" needs a tolerance of zero or more`);
+// fn receives the stated tolerance as its third argument, so the tolerance the report prints is the one applied.
+export function invariant(name: string, fn: (prev: Values, next: Values, tol: number) => boolean, tol: number): Invariant {
+  if (!(tol >= 0) || !Number.isFinite(tol)) throw new RangeError(`invariant "${name}" needs a finite tolerance of zero or more`);
   return { name, fn, tol };
+}
+
+// The common invariant: each named cell is unchanged, one by one, within tol. A cell missing from either version fails.
+export function unchanged(name: string, ids: string[], tol: number): Invariant {
+  if (!ids.length) throw new RangeError(`invariant "${name}" names no cells`);
+  return invariant(name, (prev, next, t) => ids.every((k) =>
+    typeof prev[k] === "number" && typeof next[k] === "number" && Math.abs(prev[k] - next[k]) <= t), tol);
 }
 
 const cellDef = (m: Model, id: string) => {
@@ -48,7 +56,7 @@ export function saveVersion(
   const d = diff(prev ? prev.model as Model : null, v.model, round, stated);
   const inv: InvariantResult[] = (v.invariants ?? []).map((k) => {
     if (!prev) return { name: k.name, tol: k.tol, ran: false, ok: false, why: "no earlier version to compare" };
-    try { return { name: k.name, tol: k.tol, ran: true, ok: k.fn(prev.values, values) === true }; }
+    try { return { name: k.name, tol: k.tol, ran: true, ok: k.fn(prev.values, values, k.tol) === true }; }
     catch (e) { return { name: k.name, tol: k.tol, ran: true, ok: false, why: (e as Error).message }; }
   });
   const saved = {

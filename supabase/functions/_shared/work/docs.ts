@@ -18,7 +18,14 @@
 // a word that cannot wrap is set whole and reported.
 import { strToU8, unzlibSync, zipSync } from "npm:fflate@0.8.2";
 import { CareerRender } from "../router_core.career.js";
-import { widthPt } from "../career_resume_design.ts";
+import { widthPt as afmWidth } from "../career_resume_design.ts";
+// Round 4: the shared widths guess non-ASCII glyphs below their real Helvetica widths (æ 556 vs 889, ™ 722 vs 1000), so
+// a cell could be cut while pages() said it fit. Every non-ASCII character is measured at the full em (1000 units),
+// never less than its real width, for both wrapping and the clipping check.
+function widthPt(text: string, font: "F1" | "F2", size: number): number {
+  const ascii = text.replace(/[^\x00-\x7F]/g, ""), wide = text.length - ascii.length;
+  return afmWidth(ascii, font, size) + wide * size;
+}
 import { asciiDigits, type Cell, dateSpans, evaluate, loose, render, type Values } from "./model.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -85,11 +92,13 @@ export function typedNumbers(text: string): string[] {
   for (const m of slots) {
     const before = t.slice(0, m.index!), after = t.slice(m.index! + m[0].length);
     const okBefore = (before === "" || /(?:^|[\s(\["'“‘])$/u.test(before) || /(?:^|[\s(\["'“‘])[$€£¥₹] ?$/u.test(before)) &&
-      !/[-−–+±]\s*$/u.test(before); // a sign, even with a space, would change the figure ("Net: − {{ref:a}}")
+      // A sign anywhere in the run of prefix characters before the slot ("-(", "- $", "−'") would print a figure the cell
+      // does not hold (round 4: the sign sat behind an allowed "$" or "("). Signs: - − – — ‒ + ± － and the word "minus".
+      !/(?:[-−–—‒+±－]|\bminus|\bnegative)[\s$€£¥₹(\["'“‘]*$/iu.test(before);
     let okAfter = after === "" || /^[\s.,;:!?)\]'"”’]/u.test(after);
     // Punctuation straight into a digit or another slot joins figures ("{{ref:a}}.{{ref:b}}", "{{ref:a}}'{{ref:b}}").
     if (okAfter && /^[.,;:!?)\]'"”’]+[\p{N}{]/u.test(after)) okAfter = false;
-    const next = after.replace(/^[\s\u00A0\u202F\u2009]+/, "");
+    const next = after.replace(/^[\s\u00A0\u202F\u2009]+/, "").normalize("NFKC");
     if (okAfter && next !== after && (/^\{\{/.test(next) || /^\p{N}/u.test(next) || SCALE.test(next))) okAfter = false;
     if (!okBefore || !okAfter) out.push(m[0]);
   }
@@ -127,7 +136,9 @@ function prepare(cells: Cell[], texts: [string, string][], formats: Record<strin
   if (bad.length) throw new LooseNumber(bad);
   // A cell's own format applies unless formats names another (round 4: {value: 0.4, format: "0%"} printed 0.4).
   const all = { ...Object.fromEntries(cells.filter((c) => c.format !== undefined).map((c) => [c.id, String(c.format)])), ...(formats ?? {}) };
-  return { values, r: (t: string) => renderText(t, values, all) };
+  // The text that is checked is the text that is printed (round 4: invisible characters were removed for the check but
+  // not for the render, so "{{ref:net\u200B|0.0%}}" printed as a literal and a soft hyphen printed as a minus).
+  return { values, r: (t: string) => renderText(cleanText(t), values, all) };
 }
 const BLOCK_KINDS = new Set(["heading", "para", "bullets", "table"]);
 function docTexts(m: DocModel): [string, string][] {
@@ -281,6 +292,9 @@ export function writePptx(deck: Deck): Uint8Array {
         const fs = new Set(se.refs.map((r) => (deck.formats ?? {})[r] ?? deck.cells.find((c) => c.id === r)?.format ?? ""));
         if (fs.size > 1) throw new RangeError(`${at}: series "${se.name}" mixes number formats; one series, one format`);
       }
+      // One value axis, one format: every series in a chart shares it (round 4: a 0% axis misstated a #,##0 series).
+      const chartFmts = new Set(s.chart.series.map((se) => (deck.formats ?? {})[se.refs[0]] ?? deck.cells.find((c) => c.id === se.refs[0])?.format ?? ""));
+      if (chartFmts.size > 1) throw new RangeError(`${at}: a chart's series use different number formats; one chart, one format`);
       if (s.chart.series.length > 24) throw new RangeError(`${at}: a chart takes at most 24 series`);
       for (const se of s.chart.series) if (se.labels.length !== se.refs.length) throw new RangeError(`${at}: series "${se.name}" has ${se.labels.length} labels for ${se.refs.length} values`);
     }

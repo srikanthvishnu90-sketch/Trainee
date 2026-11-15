@@ -18,7 +18,7 @@ const MEETS: RegExp[] = [
   /^(?:yes|yep|yeah|confirmed|correct|true|meets)$/,
   /^(?:yes,? )?(?:we |they |the company |the employer |it )?(?:do |does |will |can |always )?(?:sponsors?|offers?|provides?|supports?)(?: (?:visas?|work visas?|visa sponsorship|sponsorship|it|that|this))?$/,
   /^(?:yes,? )?(?:visa |work visa )?sponsorship (?:is )?(?:available|offered|provided|included|supported)$/,
-  /^(?:yes,? )?(?:relocation|remote work|remote|hybrid|the stipend|housing|a stipend)(?: support)? (?:is )?(?:available|offered|provided|included|allowed|paid|covered)$/,
+  /^(?:yes,? )?(?:relocation|remote work|remote|hybrid)(?: support)? (?:is )?(?:available|offered|provided|included|allowed|paid|covered)$/,
   /^(?:yes,? )?(?:it|this|that) is (?:available|offered|provided|included|allowed|covered)$/,
 ];
 const MODAL = /\b(may|might|could|possibly|potentially|perhaps|case[- ]by[- ]case|depend(s|ing|ent)?|not guaranteed|tbd|unclear|open to|pending|subject to)\b/i;
@@ -34,13 +34,27 @@ export function normalise(says: string): string {
     .replace(/\s+/g, " ").trim();
 }
 
-/** Classifies one statement about one constraint. */
-export function classify(says: string): Verdict {
+// Round 5: a commitment that names its subject meets only a constraint about that subject ("Hybrid is available" does
+// not meet "fully remote"). A statement with no named subject ("yes", "we do") is read as about the constraint asked.
+const SUBJECTS: [RegExp, RegExp][] = [
+  [/\b(?:visas?|sponsor\w*|h-?1b|opt|work visa)\b/, /\b(?:visa|sponsor|h-?1b|opt|immigration|work authori[sz]ation)/],
+  [/\breloc\w*\b/, /\breloc/],
+  [/\bremote\b/, /\bremote\b/],
+  [/\bhybrid\b/, /\bhybrid\b/],
+];
+function aboutOther(s: string, limit?: { id: string; text: string }): boolean {
+  if (!limit) return false;
+  const topic = normalise(`${limit.id} ${limit.text}`);
+  return SUBJECTS.some(([said, about]) => said.test(s) && !about.test(topic));
+}
+
+/** Classifies one statement about one constraint (pass the constraint so a commitment about another subject is unknown). */
+export function classify(says: string, limit?: { id: string; text: string }): Verdict {
   const s = normalise(says);
   if (s === "meets" || s === "unknown" || s === "conflict") return s;
   if (!s) return "unknown";
   const bare = s.replace(/[.!]+$/, "").trim();
-  if (MEETS.some((re) => re.test(bare))) return "meets";
+  if (MEETS.some((re) => re.test(bare))) return aboutOther(bare, limit) ? "unknown" : "meets";
   const first = s.split(CONTRAST).filter((x) => x.trim())[0] ?? s;
   const negs = (first.match(new RegExp(NEG.source, "gi")) ?? []).length;
   if (negs === 1 && !MODAL.test(first) && !POSITIVE_IDIOM.test(s)) return "conflict";
@@ -87,22 +101,23 @@ export function verdict(limits: Limit[], sources: Source[]): Record<string, Verd
   const undated = placed.filter((x) => x.p === null);
   const out: Record<string, Verdict> = {};
   for (const l of limits) {
-    const speaking = dated.filter(({ s }) => typeof s.says[l.id] === "string").map(({ s, p }) => ({ v: classify(s.says[l.id]), p: p! }));
+    const speaking = dated.filter(({ s }) => typeof s.says[l.id] === "string").map(({ s, p }) => ({ v: classify(s.says[l.id], l), p: p! }));
     let v: Verdict | null = null;
     if (speaking.length) {
       const last = speaking[speaking.length - 1];
       // Every source that cannot be ordered against the newest: same instant, or same day with either one untimed.
       // Unordered with the newest: the same instant; or, when either has no time, any instant that could fall on that
-      // calendar day somewhere on Earth (UTC-14 to UTC+12: day start - 14 h to day end + 12 h). Round 4: a timed "yes"
-      // late on the 11th west of UTC outranked an untimed "no" dated the 12th.
+      // calendar day somewhere on Earth. Round 4: a timed "yes" late on the 11th west of UTC outranked an untimed "no"
+      // dated the 12th; round 5: the window's bounds were swapped.
       const H = 3600_000;
-      const could = (day: number, t: number) => t >= day - 12 * H && t < day + 24 * H + 14 * H;
+      // A calendar day spans [day - 14 h, day + 36 h) in UTC across every zone (UTC+14 starts it first, UTC-12 ends it last).
+      const could = (day: number, t: number) => t >= day - 14 * H && t < day + 36 * H;
       const unordered = (a: typeof last.p, b: typeof last.p) => a.t === b.t ||
         (!a.timed && !b.timed && a.day === b.day) || (!a.timed && b.timed && could(a.day, b.t)) || (a.timed && !b.timed && could(b.day, a.t));
       const tied = speaking.filter((x) => unordered(x.p, last.p));
       v = tied.every((x) => x.v === last.v) ? last.v : "unknown";
     }
-    const loose = undated.filter(({ s }) => typeof s.says[l.id] === "string").map(({ s }) => classify(s.says[l.id]));
+    const loose = undated.filter(({ s }) => typeof s.says[l.id] === "string").map(({ s }) => classify(s.says[l.id], l));
     if (v === null) v = loose.length && loose.every((x) => x === loose[0]) ? loose[0] : "unknown";
     else if (loose.some((x) => x !== v)) v = "unknown";
     out[l.id] = v;

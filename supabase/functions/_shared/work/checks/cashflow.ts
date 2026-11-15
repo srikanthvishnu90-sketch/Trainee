@@ -8,6 +8,8 @@ export type CashResult = {
 };
 
 export const KINDS: ReadonlySet<string> = new Set(["deposit_lockup", "deposit_refund", "income", "stipend", "salary", "bonus", "expense", "rent", "fee", "tax", "transfer_in", "transfer_out"]);
+const INFLOW = new Set(["deposit_refund", "income", "stipend", "salary", "bonus", "transfer_in"]);
+const OUTFLOW = new Set(["deposit_lockup", "expense", "rent", "fee", "tax", "transfer_out"]);
 export class CashInputError extends RangeError {
   constructor(msg: string) { super(msg); this.name = "CashInputError"; }
 }
@@ -39,6 +41,8 @@ export function run({ start, events }: { start: number; events: CashEvent[] }): 
   for (const e of ordered) {
     if (e.kind === "deposit_lockup" && e.amount > 0) findings.push(`a lock-up on day ${e.day} is entered as money in; a lock-up is paid out`);
     if (e.kind === "deposit_refund" && e.amount < 0) findings.push(`a refund on day ${e.day} is entered as money out; a refund comes back in`);
+    if (INFLOW.has(e.kind) && e.kind !== "deposit_refund" && e.amount < 0) findings.push(`a ${e.kind} on day ${e.day} is entered as money out`);
+    if (OUTFLOW.has(e.kind) && e.kind !== "deposit_lockup" && e.amount > 0) findings.push(`a ${e.kind} on day ${e.day} is entered as money in`);
   }
 
   // Per lock-up, in time order: each refund is matched to the lock-ups paid before it, oldest first, and the part of it
@@ -46,12 +50,9 @@ export function run({ start, events }: { start: number; events: CashEvent[] }): 
   // missed early refunds).
   const open: { amount: number; from: number }[] = [];
   for (const e of ordered) {
-    bal += e.amount;
-    if (!Number.isFinite(bal)) throw new CashInputError("the balance overflows");
-    if (bal < minBalance) (minBalance = bal, minDay = e.day);
-    const lastDay = balances[balances.length - 1];
-    if (lastDay?.day === e.day) lastDay.balance = bal;
-    else balances.push({ day: e.day, balance: bal });
+    // Round 5: a refund counts in the balance only for the part matched to a lock-up already paid; the rest is not money
+    // the person will get, so it is never credited (the cap is applied to the running balance, not only reported).
+    let credit = e.amount;
     if (e.kind === "deposit_lockup" && e.amount < 0) { lockedSoFar += -e.amount; open.push({ amount: -e.amount, from: e.refundableDay ?? e.day }); }
     if (e.kind === "deposit_refund" && e.amount > 0) {
       refundedSoFar += e.amount;
@@ -62,6 +63,7 @@ export function run({ start, events }: { start: number; events: CashEvent[] }): 
         if (take > 0 && e.day < l.from) early += take;
         l.amount -= take; left -= take;
       }
+      credit = e.amount - Math.max(0, left);
       const laterLockup = ordered.some((x) => x.kind === "deposit_lockup" && x.day > e.day);
       if (left > 1e-9 && laterLockup && !earlyRefund) {
         earlyRefund = true;
@@ -71,12 +73,19 @@ export function run({ start, events }: { start: number; events: CashEvent[] }): 
         findings.push(`a refund on day ${e.day} comes before the lock-up's refundable day`);
       }
     }
+    bal += credit;
+    if (!Number.isFinite(bal)) throw new CashInputError("the balance overflows");
+    if (bal < minBalance) (minBalance = bal, minDay = e.day);
+    const lastDay = balances[balances.length - 1];
+    if (lastDay?.day === e.day) lastDay.balance = bal;
+    else balances.push({ day: e.day, balance: bal });
   }
   const locked = -ordered.filter((e) => e.kind === "deposit_lockup").reduce((s, e) => s + e.amount, 0);
   const refunded = ordered.filter((e) => e.kind === "deposit_refund").reduce((s, e) => s + e.amount, 0);
   if (refunded > locked + 1e-9) findings.push(`refunds (${refunded}) exceed the amount paid in (${locked})`);
   for (const e of ordered) if (e.kind === "deposit_lockup" && e.refundableDay !== undefined && e.refundableDay < e.day) findings.push(`a lock-up on day ${e.day} is refundable before it is paid`);
   const outstandingLockup = Math.max(0, locked - refunded);
-  // An early refund's money is not really there yet (round 4): the plan is not feasible while one is flagged.
-  return { minBalance, minDay, final: bal, feasible: minBalance >= 0 && !earlyRefund, shortfall: Math.max(0, -minBalance), outstandingLockup, findings, balances };
+  // Feasible only with no finding at all (round 5): an early refund, an over-refund, a sign error or a lock-up refundable
+  // before it is paid each means the balances above may not be real.
+  return { minBalance, minDay, final: bal, feasible: minBalance >= 0 && findings.length === 0, shortfall: Math.max(0, -minBalance), outstandingLockup, findings, balances };
 }

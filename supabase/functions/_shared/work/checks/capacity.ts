@@ -18,6 +18,7 @@ export class CapacityInputError extends RangeError {
 // made every comparison false. A day is a finite number listed once with finite hours >= 0; a task has a unique
 // non-empty id, finite hours > 0 and a finite due day.
 function validate(days: Day[], tasks: Task[]) {
+  const total = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
   if (!Array.isArray(days) || !Array.isArray(tasks)) throw new CapacityInputError("days and tasks must be lists");
   const seenDays = new Set<number>();
   for (const x of days) {
@@ -35,6 +36,8 @@ function validate(days: Day[], tasks: Task[]) {
     if (!Number.isFinite(t.hours) || t.hours < 1 / 60) throw new CapacityInputError(`task ${t.id} needs at least a minute`);
     if (!Number.isFinite(t.due)) throw new CapacityInputError(`task ${t.id} needs a finite due day`);
   }
+  // Sums that overflow would compare Infinity with Infinity (round 6).
+  if (!Number.isFinite(total(days.map((x) => x.hours))) || !Number.isFinite(total(tasks.map((t) => t.hours)))) throw new CapacityInputError("the hours add up past what can be compared");
 }
 
 export function solve({ days, tasks }: { days: Day[]; tasks: Task[] }): Solve {

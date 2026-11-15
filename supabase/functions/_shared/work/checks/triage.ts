@@ -42,10 +42,21 @@ const SUBJECTS: [RegExp, RegExp][] = [
   [/\bremote\b/, /\bremote\b/],
   [/\bhybrid\b/, /\bhybrid\b/],
 ];
+// The constraint's own subjects: a subject word counts only when no negation stands within three words before it
+// ("fully remote, not relocation" is about remote, not relocation; round 6).
+function topicHas(topic: string, about: RegExp): boolean {
+  for (const m of topic.matchAll(new RegExp(about.source, "g"))) {
+    const before = topic.slice(0, m.index!).split(/\s+/).slice(-3).join(" ");
+    if (!/\b(?:not|no|without|except|excluding|never|nor|non)\b/.test(before)) return true;
+  }
+  return false;
+}
 function aboutOther(s: string, limit?: { id: string; text: string }): boolean {
   if (!limit) return false;
-  const topic = normalise(`${limit.id} ${limit.text}`);
-  return SUBJECTS.some(([said, about]) => said.test(s) && !about.test(topic));
+  // When the constraint's id names a subject, that is its subject; otherwise its text's un-negated subjects are.
+  const id = normalise(limit.id.replace(/[_-]+/g, " "));
+  const topic = SUBJECTS.some(([, about]) => about.test(id)) ? id : normalise(`${limit.id} ${limit.text}`);
+  return SUBJECTS.some(([said, about]) => said.test(s) && !topicHas(topic, about));
 }
 
 /** Classifies one statement about one constraint (pass the constraint so a commitment about another subject is unknown). */
@@ -101,7 +112,11 @@ export function verdict(limits: Limit[], sources: Source[]): Record<string, Verd
   const undated = placed.filter((x) => x.p === null);
   const out: Record<string, Verdict> = {};
   for (const l of limits) {
-    const speaking = dated.filter(({ s }) => typeof s.says[l.id] === "string").map(({ s, p }) => ({ v: classify(s.says[l.id], l), p: p! }));
+    // A source that gives this constraint a value that is not a string (false, null, ["no"]) has spoken, but not in a
+    // form that can be read: unknown, never skipped (round 6: an older "yes" won over a newer false).
+    const said = (x: unknown): boolean => Object.prototype.hasOwnProperty.call(x ?? {}, l.id) && (x as Record<string, unknown>)[l.id] !== undefined;
+    const read = (s: Source, lim: Limit): Verdict => typeof s.says[l.id] === "string" ? classify(s.says[l.id], lim) : "unknown";
+    const speaking = dated.filter(({ s }) => said(s.says)).map(({ s, p }) => ({ v: read(s, l), p: p! }));
     let v: Verdict | null = null;
     if (speaking.length) {
       const last = speaking[speaking.length - 1];
@@ -117,7 +132,7 @@ export function verdict(limits: Limit[], sources: Source[]): Record<string, Verd
       const tied = speaking.filter((x) => unordered(x.p, last.p));
       v = tied.every((x) => x.v === last.v) ? last.v : "unknown";
     }
-    const loose = undated.filter(({ s }) => typeof s.says[l.id] === "string").map(({ s }) => classify(s.says[l.id], l));
+    const loose = undated.filter(({ s }) => said(s.says)).map(({ s }) => read(s, l));
     if (v === null) v = loose.length && loose.every((x) => x === loose[0]) ? loose[0] : "unknown";
     else if (loose.some((x) => x !== v)) v = "unknown";
     out[l.id] = v;

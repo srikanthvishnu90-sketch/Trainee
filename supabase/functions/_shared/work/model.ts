@@ -127,8 +127,8 @@ const MONTH_SRC = "(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|j
 const MONTHS3 = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 const realDay = (y: number, m: number, d: number) => { const t = new Date(Date.UTC(y, m, d)); return t.getUTCFullYear() === y && t.getUTCMonth() === m && t.getUTCDate() === d; };
 const monthOk = (raw: string) => raw !== "may"; // "may" is a month only when capitalised ("May")
-type Span = [number, number];
-function dateSpans(t: string): Span[] {
+export type Span = [number, number];
+export function dateSpans(t: string): Span[] {
   const out: Span[] = [];
   const add = (m: RegExpMatchArray) => out.push([m.index!, m.index! + m[0].length]);
   for (const m of t.matchAll(/\b(\d{4})-(\d{2})-(\d{2})(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?\b/g)) if (realDay(+m[1], +m[2] - 1, +m[3])) add(m);

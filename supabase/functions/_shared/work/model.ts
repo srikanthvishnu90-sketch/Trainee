@@ -110,36 +110,58 @@ export function render(text: string, values: Values, formats: Record<string, str
 
 // D1: the numbers typed in prose that no cell accounts for. A figure matches a cell when it equals the value at the
 // precision it was typed (19,280 and 19.3k match 19280; 19,200 does not), or, with "%", the value or the value times 100.
-// Read fail closed (review of WO-124a):
-//  - the text is NFKC-normalised first, so fullwidth digits and signs read as ASCII;
-//  - a unit glued to the digits is read (17280USD, 1.5x, 40ms); k, m, mn and bn scale only where they mean thousand,
-//    million or billion (k always; m, mn, bn after a currency sign or before a currency word); any other unit is kept
-//    as a label and does not scale;
-//  - number words are figures too ("forty percent", "twenty-five", "two hundred"). A lone "one" is read as the article
-//    sense and is not listed (it is listed when it carries a unit or percent, or joins a larger number);
-//  - calendar dates and times are not figures: an ISO date (2026-11-14), a month-name date (Nov 14, 2026 or 14 November
-//    2026), a clock time (10:30), and a year from 1900 to 2099 written bare after a year word (in, by, since, until,
-//    from, through, during, of, FY, Q1-Q4, a month name) or before a month.
-const MONTH = "(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
-const DATE_SPANS = [
-  /\b\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:?\d{2})?)?\b/g,
-  new RegExp(`\\b${MONTH}\\.?\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s+\\d{4})?\\b`, "gi"),
-  new RegExp(`\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?${MONTH}\\.?(?:,?\\s+\\d{4})?\\b`, "gi"),
-  /\b\d{1,2}:\d{2}(?::\d{2})?(?:\s?[ap]\.?m\.?)?\b/gi,
-];
-const YEAR_BEFORE = new RegExp(`(?:\\b(?:in|by|since|until|till|from|through|thru|during|of|fy|q[1-4]|h[12])|${MONTH}\\.?|[-–])\\s*$`, "i");
-const YEAR_AFTER = new RegExp(`^\\s*(?:[-–]\\s*\\d{2,4}\\b|${MONTH}\\b)`, "i");
+// Read fail closed (reviews of WO-124a and WO-124d): when in doubt, a figure is listed.
+//  - Every Unicode decimal digit is read as its ASCII digit first (fullwidth, Arabic-Indic, Devanagari, ...).
+//  - Digits are figures even when glued to letters on either side (USD19,200, Rs19200, x30, 17280USD, 1.5x, 40ms, H1B,
+//    Q3, COVID-19); a leading-dot decimal (.5%) and a sign (-500) are read.
+//  - A unit decides scale: k always; m, mn, bn after a currency sign or before a currency word; "thousand", "million",
+//    "billion" after a space; "percent" / "per cent" after a space is a percent. Any other unit is a label.
+//  - Number words are figures ("forty percent", "twenty-five", "a dozen", "half", "twice"). A lone "one" in its
+//    article sense is not listed.
+//  - Calendar dates are not figures, and only real ones: an ISO date that exists (2026-11-14), a month-name date with a
+//    day from 1 to 31 and a year, "Month YYYY", a clock time with am/pm or after "at", a year range of two years
+//    (2024-2026, from 2024 to 2026), and a year 1900-2099 after in / since / until / through / during / FY / Q1-Q4 /
+//    H1-H2 / mid- / early- / late- / a month name, when no noun follows it ("in 2026 users" lists 2026). Lower-case
+//    "may" is never read as a month.
+const MONTH_SRC = "(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
+const MONTHS3 = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+const realDay = (y: number, m: number, d: number) => { const t = new Date(Date.UTC(y, m, d)); return t.getUTCFullYear() === y && t.getUTCMonth() === m && t.getUTCDate() === d; };
+const monthOk = (raw: string) => raw !== "may"; // "may" is a month only when capitalised ("May")
+type Span = [number, number];
+function dateSpans(t: string): Span[] {
+  const out: Span[] = [];
+  const add = (m: RegExpMatchArray) => out.push([m.index!, m.index! + m[0].length]);
+  for (const m of t.matchAll(/\b(\d{4})-(\d{2})-(\d{2})(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?\b/g)) if (realDay(+m[1], +m[2] - 1, +m[3])) add(m);
+  for (const m of t.matchAll(new RegExp(`\\b${MONTH_SRC}\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(\\d{4})\\b`, "gi"))) {
+    if (monthOk(m[1]) && realDay(+m[3], MONTHS3.indexOf(m[1].slice(0, 3).toLowerCase()), +m[2])) add(m);
+  }
+  for (const m of t.matchAll(new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?${MONTH_SRC}\\.?,?\\s+(\\d{4})\\b`, "gi"))) {
+    if (monthOk(m[2]) && realDay(+m[3], MONTHS3.indexOf(m[2].slice(0, 3).toLowerCase()), +m[1])) add(m);
+  }
+  for (const m of t.matchAll(new RegExp(`\\b${MONTH_SRC}\\.?,?\\s+((?:19|20)\\d\\d)\\b(?!\\s*[A-Za-z])`, "gi"))) if (monthOk(m[1])) add(m);
+  for (const m of t.matchAll(/(?:\bat\s+)?\b([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?(\s?[ap]\.?m\.?\b)?/gi)) if (m[3] || /^at\s/i.test(m[0])) add(m);
+  for (const m of t.matchAll(/\b(?:from\s+)?((?:19|20)\d\d)\s*(?:-|–|to|through)\s*((?:19|20)\d\d)\b(?!\s*[A-Za-z])/gi)) if (+m[2] >= +m[1]) add(m);
+  const YEAR_CTX = new RegExp(`(?:\\b(?:in|since|until|till|through|thru|during|fy|q[1-4]|h[12])\\s*|\\b(?:mid|early|late)-|\\b${MONTH_SRC}\\.?,?\\s+)((?:19|20)\\d\\d)\\b`, "gi");
+  for (const m of t.matchAll(YEAR_CTX)) {
+    const after = t.slice(m.index! + m[0].length);
+    if (/^\s*(?:$|[.,;:!?)\]]|(?:and|or|but|when|while|as|so|we|i|they|he|she|it|you|the|a|an|our|my|this|that|to)\b)/i.test(after)) {
+      if (m[2] && !monthOk(m[2])) continue;
+      out.push([m.index! + m[0].length - 4, m.index! + m[0].length]);
+    }
+  }
+  return out;
+}
 
-const UNITS: Record<string, number> = {};
 const ONES = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
   "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
 const TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
+const UNITS: Record<string, number> = { dozen: 12, half: 0.5, twice: 2, thrice: 3 };
 ONES.forEach((w, i) => (UNITS[w] = i));
 TENS.forEach((w, i) => { if (w) UNITS[w] = i * 10; });
 const SCALES: Record<string, number> = { hundred: 100, thousand: 1e3, million: 1e6, billion: 1e9 };
 const WORD = `(?:${[...Object.keys(UNITS), ...Object.keys(SCALES)].join("|")})`;
 const WORDS_RE = new RegExp(`\\b${WORD}(?:(?:\\s+and\\s+|[\\s-]+)${WORD})*\\b(\\s*(?:%|per\\s?cent\\b|percent\\b))?`, "gi");
-const CURRENCY_WORD = /^\s*(?:usd|eur|gbp|dollars?|euros?|pounds?)\b/i;
+const CURRENCY_WORD = /^\s*(?:usd|eur|gbp|inr|dollars?|euros?|pounds?|rupees?)\b/i;
 
 function wordsValue(src: string): number {
   let total = 0, cur = 0;
@@ -151,35 +173,48 @@ function wordsValue(src: string): number {
   return total + cur;
 }
 
-const NUM = /([$€£¥]\s?)?(?<![\w.,])(\d{1,3}(?:,\d{3})+|\d+)(\.\d+)?(?:(%)|([A-Za-z]+))?(?![\d]|[.,]\d)/g;
+// Each Unicode decimal digit as its ASCII digit (a decimal block is ten consecutive code points starting at zero).
+export function asciiDigits(s: string): string {
+  return s.replace(/\p{Nd}/gu, (ch) => {
+    const cp = ch.codePointAt(0)!;
+    let z = cp;
+    while (cp - z < 9 && /\p{Nd}/u.test(String.fromCodePoint(z - 1))) z--;
+    return String(cp - z);
+  });
+}
+
+const NUM = /([$€£¥₹]\s?)?(?<![\d.,])([-−]?)(\d{1,3}(?:,\d{3})+|\d+|(?=\.\d))(\.\d+)?(?:(%)|([A-Za-z]+))?(?![\d]|[.,]\d)/g;
 export function loose(prose: string, values: Values): string[] {
-  const text = String(prose ?? "").normalize("NFKC");
+  const text = asciiDigits(String(prose ?? "").normalize("NFKC"));
   const vals = Object.values(values);
   const masked = new Set<number>();
-  for (const re of DATE_SPANS) for (const m of text.matchAll(re)) for (let i = m.index!; i < m.index! + m[0].length; i++) masked.add(i);
+  for (const [a, b] of dateSpans(text)) for (let i = a; i < b; i++) masked.add(i);
   const found: { at: number; raw: string; typed: number; step: number; pct: boolean }[] = [];
   for (const m of text.matchAll(NUM)) {
-    const at = m.index! + (m[1]?.length ?? 0);
+    if (!m[3] && !m[4]) continue;
+    const at = m.index! + (m[1]?.length ?? 0) + m[2].length;
     if (masked.has(at)) continue;
     const cur = !!m[1];
-    const intPart = m[2].replace(/,/g, "");
-    const suffix = (m[5] ?? "").toLowerCase();
+    const intPart = (m[3] || "0").replace(/,/g, "");
+    const suffix = (m[6] ?? "").toLowerCase();
     const after = text.slice(m.index! + m[0].length);
-    const isYear = !cur && !m[3] && !m[4] && !suffix && !m[2].includes(",") && /^(19|20)\d\d$/.test(intPart) &&
-      (YEAR_BEFORE.test(text.slice(0, m.index!)) || YEAR_AFTER.test(after));
-    if (isYear) continue;
+    const word = /^\s+(thousand|million|billion|per\s?cent|percent)\b/i.exec(after)?.[1]?.toLowerCase() ?? "";
     const moneyCtx = cur || CURRENCY_WORD.test(after);
-    const scale = suffix === "k" ? 1e3
-      : (suffix === "m" || suffix === "mn" || suffix === "mm") && moneyCtx ? 1e6
-      : (suffix === "bn" || suffix === "b") && moneyCtx ? 1e9 : 1;
-    const dec = m[3] ? m[3].length - 1 : 0;
-    found.push({ at: m.index!, raw: m[0].trim(), typed: Number(intPart + (m[3] ?? "")) * scale, step: Math.pow(10, -dec) * scale, pct: m[4] === "%" });
+    const scale = suffix === "k" || word === "thousand" ? 1e3
+      : ((suffix === "m" || suffix === "mn" || suffix === "mm") && moneyCtx) || word === "million" ? 1e6
+      : ((suffix === "bn" || suffix === "b") && moneyCtx) || word === "billion" ? 1e9 : 1;
+    const pct = m[5] === "%" || /cent/.test(word);
+    const sign = m[2] ? -1 : 1;
+    const dec = m[4] ? m[4].length - 1 : 0;
+    found.push({ at: m.index!, raw: (m[0] + (word ? ` ${word}` : "")).trim(), typed: sign * Number(intPart + (m[4] ?? "")) * scale, step: Math.pow(10, -dec) * scale, pct });
   }
+  const spans = found.map((f) => [f.at, f.at + f.raw.length] as Span);
   for (const m of text.matchAll(WORDS_RE)) {
+    if (spans.some(([a, b]) => m.index! >= a && m.index! < b)) continue; // "5 million": already read with its digits
     const body = m[0].replace(/\s*(?:%|per\s?cent|percent)$/i, "");
     const pct = !!m[1];
     if (/^one$/i.test(body.trim()) && !pct) continue;
-    found.push({ at: m.index!, raw: m[0].trim(), typed: wordsValue(body), step: 1, pct });
+    found.push({ at: m.index!, raw: m[0].trim(), typed: wordsValue(body), step: /half/i.test(body) ? 0.5 : 1, pct });
   }
   found.sort((x, y) => x.at - y.at);
   const near = (v: number, t: number, step: number) => Math.abs(v - t) <= step / 2 + 1e-9 * Math.max(1, Math.abs(v));

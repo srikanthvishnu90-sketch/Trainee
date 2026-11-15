@@ -1,7 +1,7 @@
 // WO-124a: the revoke scan (spec D4). A value the person took back is searched for in every part of the bytes: each
 // OOXML part (unzipped), metadata, filenames, alt text, and derived forms of the value. The audit names categories and
 // counts only; it never repeats a value, a form or a part name (a part name can itself carry the value).
-import { unzipSync } from "npm:fflate@0.8.2";
+import { unzipSync, unzlibSync } from "npm:fflate@0.8.2";
 
 export type RevokedValue = string | number | { before: string | number; after: string | number };
 export type PartCategory = "body" | "metadata" | "alt text or media" | "comments or notes" | "filename";
@@ -24,16 +24,21 @@ function digitsPattern(intPart: string): string {
   return groups.join("[,.\\u00a0\\u202f' ]?");
 }
 
-// Every written form of one number: as typed, rounded to whole and to one decimal, any separator style.
-function numberPattern(n: number): string {
+// Every written form of one number: as typed, rounded to whole and to one decimal, any separator style. A rounded form is
+// added only when it keeps at least two significant digits (17.28 -> 17, 17.3; but 2.5 -> not 3, and 0.4 -> not 0),
+// so a revoke never matches every lone "0" or "3" in a file (second review of WO-124a). exact = no rounded forms.
+function numberPattern(n: number, exact = false): string {
   const forms = new Set<string>();
+  const sig = (x: string) => x.replace(/^-?0*\.?0*/, "").replace(/\./, "").length;
   const add = (x: string) => {
     const [i, d] = x.replace(/^-/, "").split(".");
     // Trailing zeros are the same number: 0.4 is also 0.40, and 40 is also 40.0 (review of WO-124a).
     forms.add(digitsPattern(i) + (d ? `[.,]${d}0*` : "(?:[.,]0+)?"));
   };
   add(String(Math.abs(n)));
-  if (!Number.isInteger(n)) { add(String(Math.round(Math.abs(n)))); add(Math.abs(n).toFixed(1).replace(/\.0$/, "")); }
+  if (!exact && !Number.isInteger(n)) {
+    for (const r of [String(Math.round(Math.abs(n))), Math.abs(n).toFixed(1).replace(/\.0$/, "")]) if (sig(r) >= 2) add(r);
+  }
   return `(?<![\\d.,])-?(?:${[...forms].join("|")})(?![\\d]|[.,]\\d)`;
 }
 
@@ -83,7 +88,14 @@ function matchersFor(v: RevokedValue): { form: RevokeHit["form"]; test: (s: stri
   const words = numberWords(Math.abs(p.num));
   if (words) res.push(new RegExp(`\\b${words}\\b` + unit, "i"));
   // A percent is also stored as its fraction: an xlsx cell formatted 0% holds <v>0.4</v> for 40%.
-  if (p.unit === "%") res.push(new RegExp(numberPattern(p.num / 100)));
+  if (p.unit === "%") res.push(new RegExp(numberPattern(Number((p.num / 100).toPrecision(12)), true)));
+  // Scaled forms: $1.5m is also 1,500,000; 17,280 is also 17.3k / 17k / 17.28 thousand (second review of WO-124a).
+  const scale = p.unit ? ({ k: 1e3, m: 1e6, mn: 1e6, bn: 1e9, b: 1e9 } as Record<string, number>)[p.unit.toLowerCase()] : undefined;
+  if (scale) res.push(new RegExp(numberPattern(p.num * scale, true)));
+  const whole = scale ? p.num * scale : p.num;
+  for (const [div, word] of [[1e3, "(?:k|thousand)"], [1e6, "(?:m|mn|million)"], [1e9, "(?:bn|b|billion)"]] as const) {
+    if (Math.abs(whole) >= div && Math.abs(whole) < div * 1000) res.push(new RegExp(numberPattern(Number((whole / div).toPrecision(6))) + `\\s?${word}\\b`, "i"));
+  }
   return { form: p.unit === "%" ? "percent" : "number", test: (s) => res.some((re) => re.test(s)) };
 }
 
@@ -118,6 +130,24 @@ function views(raw: string): string[] {
   return [unent(raw), unent(raw.replace(/<[^>]*>/g, "")), unent(raw.replace(/<[^>]*>/g, " "))].map((t) => t.normalize("NFKC"));
 }
 
+// A PDF's text is in Flate-compressed content streams; each is inflated and its string operands added as a part, so a
+// value docs.ts printed in a PDF is found (second review of WO-124d: the scan saw nothing in a PDF).
+const isPdf = (b: Uint8Array) => b.length > 4 && b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46;
+function pdfText(bytes: Uint8Array): string[] {
+  const s = new TextDecoder("latin1").decode(bytes);
+  const out: string[] = [];
+  for (const m of s.matchAll(/stream\r?\n/g)) {
+    const start = m.index! + m[0].length, end = s.indexOf("endstream", start);
+    if (end < 0) continue;
+    let body = bytes.subarray(start, end);
+    try { body = unzlibSync(body); } catch { /* not Flate: read as is */ }
+    const ops = new TextDecoder("latin1").decode(body);
+    const strings = [...ops.matchAll(/\((?:\\[^]|[^\\)])*\)/g)].map((x) => x[0].slice(1, -1).replace(/\\([()\\])/g, "$1"));
+    out.push(strings.join(" "), strings.join(""));
+  }
+  return out;
+}
+
 function partsOf(files: Record<string, Uint8Array>): [string, Uint8Array][] {
   const out: [string, Uint8Array][] = [];
   const walk = (name: string, bytes: Uint8Array, depth: number) => {
@@ -138,7 +168,7 @@ export function scan(files: Record<string, Uint8Array>, values: RevokedValue[]):
   const ms = values.map(matchersFor);
   const hits: RevokeHit[] = [];
   for (const [part, bytes] of partsOf(files)) {
-    const texts = decodings(bytes).flatMap(views);
+    const texts = [...decodings(bytes), ...(isPdf(bytes) ? pdfText(bytes) : [])].flatMap(views);
     const name = part.split("!").map((s) => s.split("/").pop() ?? s).join(" ").normalize("NFKC");
     ms.forEach((m, i) => {
       if (m.test(name)) hits.push({ part, category: "filename", value: i, form: m.form });

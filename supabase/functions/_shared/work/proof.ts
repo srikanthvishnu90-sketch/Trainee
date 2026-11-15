@@ -52,7 +52,7 @@ export function categoryOf(name: string): Category {
 // How a reply claims each category. "generic" is a claim about the work as a whole ("all checks passed", "verified").
 const CLAIMS: { cat: Category | "generic"; says: RegExp }[] = [
   { cat: "mutants", says: /\bmutants?\b|\bmutation\b/i },
-  { cat: "tests", says: /\btests?\b.*\b(?:pass(?:es|ed|ing)?|green|succeed(?:s|ed)?|ran clean|run clean|all good)\b|\bpass(?:es|ed)?\b.*\btests?\b|\b(?:code|script|bundle)\b.*\b(?:works|runs (?:clean|fine|correctly))\b/i },
+  { cat: "tests", says: /\b(?:tests?|specs?|suites?|pytest|jest|unit tests?|ci|builds?)\b.*\b(?:pass(?:es|ed|ing)?|green|ok|okay|succeed(?:s|ed)?|ran clean|run clean|all good|\d+\s*\/\s*\d+)\b|\bpass(?:es|ed)?\b.*\btests?\b|\b(?:it|code|script|bundle|program|function|query)\b.*\b(?:works?|worked|runs?|ran|compiles?|compiled|executes?|executed)\b|\bi (?:ran|executed|tested|compiled) (?:it|the|this|that)\b/i },
   { cat: "recompute", says: /\bre-?(?:comput|calculat|calc|evaluat)\w*|\b(?:formulas?|totals?|figures|numbers|math|sums?)\b.*\b(?:check(?:s|ed)? out|add(?:s)? up|correct|tie out|match(?:es)?|verified)\b/i },
   { cat: "pages", says: /\bfits?\b.*\bpages?\b|\b(?:one|single|1)[- ]page\b|\bno (?:clipping|overflow)\b|\bnothing (?:is )?(?:clipped|cut off)\b/i },
   { cat: "lint", says: /\bno (?:errors?|issues|problems|warnings)\b|\berror[- ]free\b|\bwithout (?:any )?errors?\b|\blints? clean\b|\b(?:valid|well-formed) (?:ics|calendar|file)\b/i },
@@ -61,6 +61,10 @@ const CLAIMS: { cat: Category | "generic"; says: RegExp }[] = [
   { cat: "invariants", says: /\b(?:baseline|everything else|other (?:rows|cells|figures))\b.*\bunchanged\b|\binvariants?\b/i },
   { cat: "generic", says: /\b(?:all|every) checks?\b|\beverything\b.*\b(?:checks? out|passed|verified|works)\b|\b(?:verif(?:y|ied|ies)|validated|double[- ]checked|checks? out|checked out|confirmed correct|fully tested|tested)\b/i },
 ];
+// Fail closed (second review of WO-124a): a clause that sounds like an assurance but names no category above is a
+// generic claim, so it needs every check in the report run and ok. A list of phrasings can never be complete; this
+// catches the words an assurance is made of.
+const ASSURANCE = /\b(?:works?|worked|working|ok|okay|green|pass(?:es|ed|ing)?|correct(?:ly)?|right|accurate|checked|confirmed|proven|validated|verified|succeed(?:s|ed)?|success(?:ful(?:ly)?)?|clean|ready(?: to (?:ship|go|send|use))?|all set|good to go|bug[- ]free|error[- ]free|flawless|guaranteed|solid|safe)\b|\b(?:no|zero|nothing|without) (?:failures?|failed|bugs?|errors?|issues|problems|mistakes)\b|\bnothing (?:failed|broke)\b|\b(?:ran|runs|compiles)\b/i;
 
 // Clauses split at sentence ends, semicolons, commas that end a phrase, and "and"/"but".
 function clauses(reply: string): string[] {
@@ -76,7 +80,8 @@ export function boundClaims(reply: string, rep: string): { refused: string[]; ok
   const refused: string[] = [];
   for (const clause of clauses(reply)) {
     const all = /\b(?:all|every|each|fully)\b/i.test(clause);
-    const claimed = CLAIMS.filter((k) => k.says.test(clause)).map((k) => k.cat);
+    const claimed: (Category | "generic")[] = CLAIMS.filter((k) => k.says.test(clause)).map((k) => k.cat);
+    if (!claimed.length && ASSURANCE.test(clause)) claimed.push("generic");
     // A specific claim settles the clause; "generic" counts only when no specific category was named.
     const cats = claimed.some((c) => c !== "generic") ? claimed.filter((c) => c !== "generic") : claimed;
     for (const cat of cats) {

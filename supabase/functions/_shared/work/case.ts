@@ -46,7 +46,9 @@ export function isPractice(c: WorkCase): boolean {
 export function newCase(o: { owner: string; practice: boolean; title: string; now: number }): WorkCase {
   if (!o.owner) throw new LedgerError("a case needs an owner");
   const slug = String(o.title ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "case";
-  const practice = o.practice === true;
+  // Fail closed (second review of WO-124a): only a real boolean false makes an own case. "true", 1, undefined or any
+  // value parsed loosely from a model's input is practice.
+  const practice = o.practice !== false;
   const c = {
     id: `${practice ? "practice" : "own"}:${o.now.toString(36)}:${slug}`,
     owner: o.owner, title: String(o.title ?? ""), createdAt: o.now,

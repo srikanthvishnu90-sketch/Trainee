@@ -1,25 +1,36 @@
 // WO-124d: DOCX, PPTX and PDF built from the typed model (spec WORK-ARTIFACTS.md D1, D2). Every figure printed is a
-// cell rendered by model.ts; prose holds {{ref:id}} or {{ref:id|format}} slots. Before any byte is written, the text of
-// every block (slots removed) is run through model.loose with no values, so any typed number throws LooseNumber.
-//
-// The stated exemptions (the only numbers prose may type):
-//   years   a 19xx or 20xx four-digit year in a date context: an ISO date (2026-11-14), after a month name
-//           (Nov 14, 2026; November 2026), before one (14 November 2026), after in / since / by / from / until / to /
-//           through / during / before / after / FY / Q1-Q4 / class of, or a year range (2025-2026, 2025-26).
-//   ordinals a list ordinal ("1." or "2)") at the start of a line or item; 1st, 2nd and 3rd are words, not numbers.
+// cell rendered by model.ts; prose holds {{ref:id}} or {{ref:id|format}} slots. Before any byte is written, every text
+// is checked, fail closed (architect ruling on 124d, and its adversarial review, 2026-11-15):
+//   - any {{...}} that is not a ref slot, or names a format outside the whitelist, is refused (it would print as typed);
+//   - a slot may not touch a digit, a letter, another slot, a "%" or a scale word ("{{ref:a}}{{ref:b}}", "{{ref:x}}k"),
+//     because the printed figure would not be the cell;
+//   - with slots removed, ANY digit in any script (\p{N}: 7, ٧, ७, ½, Ⅻ) is refused, and so is a number word
+//     (model.loose with no values), except inside a real calendar date (model.dateSpans: a valid ISO or month-name date,
+//     an am/pm time, a year range, a year after a year word). "H-1B", "Python 3" and a phone number are refused: a
+//     figure the person wants printed goes in a cell. Roman numerals written in letters (XII) are not read as numbers.
+// Text is cleaned of characters XML 1.0 forbids (U+000B and U+000C become spaces; other C0 controls, U+FFFE, U+FFFF and
+// lone surrogates are dropped), and number formats are only those model.formatValue prints.
 //
 // The PDF uses the standard faces Helvetica and Helvetica-Bold (no embedding), measured with the Adobe AFM widths in
 // career_resume_design.ts widthPt; pages() measures every run with the same widths. Each page's /ArtBox is its content
-// box, and every table cell is drawn inside its own clip rectangle, so pages() can report a run wider than its box as
-// clipped. Nothing is ever cut by the writer: a word that cannot wrap is set whole and reported.
+// box, and every table cell is drawn inside its own clip rectangle, so pages() can report a run wider than its box, or
+// outside the page's MediaBox, as clipped. The margin must leave a real content box. Nothing is ever cut by the writer:
+// a word that cannot wrap is set whole and reported.
 import { strToU8, unzlibSync, zipSync } from "npm:fflate@0.8.2";
 import { CareerRender } from "../router_core.career.js";
 import { widthPt } from "../career_resume_design.ts";
-import { type Cell, evaluate, loose, render, type Values } from "./model.ts";
+import { type Cell, dateSpans, evaluate, loose, render, type Values } from "./model.ts";
 
 // deno-lint-ignore no-explicit-any
 const P = (CareerRender as any).primitives;
-const esc = (s: string): string => P.escXml(String(s));
+const XML_BAD = /[\u0000-\u0008\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+export const cleanText = (s: string): string => String(s).replace(/[\u000B\u000C]/g, " ").replace(/\r\n?/g, "\n").replace(XML_BAD, "");
+const esc = (s: string): string => P.escXml(cleanText(s));
+// The formats model.formatValue prints; anything else could print text or digits that are not the cell.
+export const FORMAT_OK = /^(?:General|(?:#,##)?0(?:\.0{1,4})?%?)$/;
+export class BadFormat extends Error {
+  constructor(public format: string) { super(`number format "${format}" is not one of General, 0, 0.0, #,##0, #,##0.00, 0%, 0.0%`); this.name = "BadFormat"; }
+}
 
 export type DocBlock =
   | { kind: "heading"; text: string }
@@ -50,21 +61,29 @@ export class Unencodable extends Error {
 
 // ---------------------------------------------------------------- slots and the loose-number check
 const SLOT = /\{\{\s*ref:([A-Za-z_][A-Za-z0-9_]*)\s*\|\s*([^}]+?)\s*\}\}/g;
-const ANY_SLOT = /\{\{[^}]*\}\}/g;
-const MONTH = "(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\\.?";
-const YEAR = "(?:19|20)\\d{2}";
-const EXEMPT = [
-  new RegExp(`\\b${YEAR}-\\d{2}-\\d{2}\\b`, "g"),
-  new RegExp(`\\b${MONTH}\\s+(?:\\d{1,2}(?:st|nd|rd|th)?,?\\s+)?${YEAR}\\b`, "g"),
-  new RegExp(`\\b\\d{1,2}(?:st|nd|rd|th)?\\s+${MONTH},?\\s+${YEAR}\\b`, "g"),
-  new RegExp(`\\b(?:in|since|by|from|until|to|through|during|before|after|FY|Q[1-4]|class of)\\s+${YEAR}\\b`, "gi"),
-  new RegExp(`\\b${YEAR}\\s*[-–]\\s*(?:${YEAR}|\\d{2})\\b`, "g"),
-  /^\s*\d{1,2}[.)](?=\s)/gm,
-];
+const REF_ANY = /\{\{\s*ref:([A-Za-z_][A-Za-z0-9_]*)\s*(?:\|\s*([^}]*?)\s*)?\}\}/g;
 export function typedNumbers(text: string): string[] {
-  let t = String(text).replace(ANY_SLOT, " ");
-  for (const re of EXEMPT) t = t.replace(re, (m) => " ".repeat(m.length));
-  return loose(t, {});
+  const t = String(text);
+  const out: string[] = [];
+  // 1. Every {{ or }} belongs to a well-formed ref slot with an allowed format.
+  const slots = [...t.matchAll(REF_ANY)];
+  const covered = (i: number) => slots.some((m) => i >= m.index! && i < m.index! + m[0].length);
+  for (const m of t.matchAll(/\{\{|\}\}/g)) if (!covered(m.index!)) { out.push(t.slice(m.index!, m.index! + 24)); break; }
+  for (const m of slots) if (m[2] !== undefined && !FORMAT_OK.test(m[2])) out.push(m[0]);
+  // 2. A slot touches nothing that would change the printed figure.
+  for (const m of slots) {
+    const before = t.slice(0, m.index!), after = t.slice(m.index! + m[0].length);
+    if (/[\p{N}}]$|\p{N}[.,]$/u.test(before) || /^(?:[\p{N}\p{L}{%]|[.,](?=[\p{N}{])|\s*(?:percent|per\s?cent|thousand|million|billion)\b)/iu.test(after)) out.push(m[0]);
+  }
+  // 3. With slots blanked and real dates masked, no digit in any script and no number word remains.
+  let blank = t.replace(REF_ANY, (x) => " ".repeat(x.length));
+  const norm = blank.normalize("NFKC");
+  if (norm.length === blank.length) {
+    for (const [a, b] of dateSpans(norm)) blank = blank.slice(0, a) + " ".repeat(b - a) + blank.slice(b);
+  }
+  for (const m of blank.matchAll(/[\p{N}][\p{N}.,]*/gu)) out.push(m[0]);
+  for (const w of loose(blank.replace(/\p{N}/gu, " "), {})) out.push(w);
+  return [...new Set(out)];
 }
 
 // render: {{ref:id|format}} first (a format named in the slot), then model.render for {{ref:id}} with the model's formats.
@@ -75,12 +94,16 @@ export function renderText(text: string, values: Values, formats: Record<string,
 
 // Evaluates the model and checks every text before anything is rendered; returns the renderer.
 function prepare(cells: Cell[], texts: [string, string][], formats: Record<string, string> = {}) {
+  for (const f of Object.values(formats ?? {})) if (!FORMAT_OK.test(String(f))) throw new BadFormat(String(f));
+  for (const c of cells) if (c.format !== undefined && !FORMAT_OK.test(String(c.format))) throw new BadFormat(String(c.format));
   const values = evaluate({ cells, text: texts.map(([, t]) => t) });
   const bad = texts.flatMap(([where, t]) => typedNumbers(t).map((number) => ({ where, number })));
   if (bad.length) throw new LooseNumber(bad);
   return { values, r: (t: string) => renderText(t, values, formats) };
 }
 function docTexts(m: DocModel): [string, string][] {
+  // A table with no row writes a <w:tbl> Word reports as corrupt; it is refused, not written (124d review N7).
+  m.blocks.forEach((b, i) => { if (b.kind === "table" && !(b.rows?.length && b.rows.some((r) => r.length))) throw new RangeError(`block ${i + 1}: a table needs at least one row with a cell`); });
   const out: [string, string][] = [["title", m.title]];
   m.blocks.forEach((b, i) => {
     if (b.kind === "table") b.rows.forEach((row, ri) => row.forEach((c, ci) => out.push([`block ${i + 1} row ${ri + 1} cell ${ci + 1}`, c])));
@@ -121,9 +144,17 @@ const ROOT_RELS = (main: string) => rels([["rId1", "officeDocument", main], ["rI
 // ---------------------------------------------------------------- DOCX
 const W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 const PAGE_PT = { letter: [612, 792], a4: [595, 842] } as const;
+// The page and a margin that leaves a real content box (at least 18 pt, and a content box at least 144 pt each way).
+function pageOf(m: DocModel): { pw: number; ph: number; margin: number } {
+  const size = m.page?.size ?? "letter";
+  if (!(size in PAGE_PT)) throw new RangeError(`page size "${size}" is not letter or a4`);
+  const [pw, ph] = PAGE_PT[size], margin = m.page?.margin ?? 54;
+  if (!Number.isFinite(margin) || margin < 18 || Math.min(pw, ph) - 2 * margin < 144) throw new RangeError(`margin ${margin} pt leaves no content box on a ${size} page`);
+  return { pw, ph, margin };
+}
 export function writeDocx(m: DocModel): Uint8Array {
   const { r } = prepare(m.cells, docTexts(m), m.formats);
-  const [pw, ph] = PAGE_PT[m.page?.size ?? "letter"], margin = m.page?.margin ?? 54, tw = (pt: number) => Math.round(pt * 20);
+  const { pw, ph, margin } = pageOf(m), tw = (pt: number) => Math.round(pt * 20);
   const run = (t: string, bold = false) => `<w:r>${bold ? "<w:rPr><w:b/></w:rPr>" : ""}<w:t xml:space="preserve">${esc(t)}</w:t></w:r>`;
   const para = (t: string, style?: string, bold = false) => `<w:p>${style ? `<w:pPr><w:pStyle w:val="${style}"/></w:pPr>` : ""}${run(t, bold)}</w:p>`;
   const body = [para(r(m.title), "Title")];
@@ -211,6 +242,12 @@ export function writePptx(deck: Deck): Uint8Array {
   const texts: [string, string][] = [["title", deck.title]];
   deck.slides.forEach((s, i) => {
     const at = `slide ${i + 1}`;
+    // Chart shape (124d review N3): one label per value, and no more series than the sheet columns B..Y the refs use.
+    if (s.chart) {
+      if (!s.chart.series.length) throw new RangeError(`${at}: a chart needs a series`);
+      if (s.chart.series.length > 24) throw new RangeError(`${at}: a chart takes at most 24 series`);
+      for (const se of s.chart.series) if (se.labels.length !== se.refs.length) throw new RangeError(`${at}: series "${se.name}" has ${se.labels.length} labels for ${se.refs.length} values`);
+    }
     texts.push([`${at} title`, s.title], ...(s.bullets ?? []).map((b, j): [string, string] => [`${at} bullet ${j + 1}`, b]), [`${at} notes`, s.notes ?? ""]);
     if (s.chart) texts.push([`${at} chart title`, s.chart.title ?? ""], ...s.chart.series.flatMap((se) => [se.name, ...se.labels].map((t): [string, string] => [`${at} chart`, t])));
   });
@@ -277,7 +314,7 @@ type Run = { font: "F1" | "F2"; size: number; x: number; y: number; text: string
 const pdfNum = (n: number) => String(Math.round(n * 100) / 100);
 export function writePdf(m: DocModel): Uint8Array {
   const { r } = prepare(m.cells, docTexts(m), m.formats);
-  const [pw, ph] = PAGE_PT[m.page?.size ?? "letter"], margin = m.page?.margin ?? 54;
+  const { pw, ph, margin } = pageOf(m);
   const x0 = margin, x1 = pw - margin, bottom = margin, top = ph - margin, wrapCells = m.wrapTables !== false;
   const pages: { runs: Run[]; rules: [number, number, number][] }[] = [{ runs: [], rules: [] }];
   let y = top;
@@ -380,6 +417,7 @@ export function pages(pdf: Uint8Array): { count: number; clipped: Clipped[] } {
   const clipped: Clipped[] = [];
   pageDicts.forEach((pm, pi) => {
     const art = /\/ArtBox \[([\d. -]+)\]/.exec(pm[0])?.[1].trim().split(/\s+/).map(Number) ?? [0, 0, Infinity, Infinity];
+    const media = /\/MediaBox \[([\d. -]+)\]/.exec(pm[0])?.[1].trim().split(/\s+/).map(Number) ?? [0, 0, 0, 0];
     const at = objAt(Number(pm[1])), len = Number(/\/Length (\d+)/.exec(s.slice(at, at + 200))![1]);
     const start = s.indexOf("stream\n", at) + 7;
     const ops = new TextDecoder("latin1").decode(unzlibSync(pdf.subarray(start, start + len)));
@@ -388,7 +426,9 @@ export function pages(pdf: Uint8Array): { count: number; clipped: Clipped[] } {
       const text = unLiteral(m[9]), x = Number(m[7]), y = Number(m[8]);
       const w = widthPt(text, m[5] as "F1" | "F2", Number(m[6]));
       const [bx0, bx1] = m[1] ? [Number(m[1]), Number(m[1]) + Number(m[3])] : [art[0], art[2]];
-      const over = Math.max(x + w - bx1, bx0 - x, art[1] - y, 0);
+      const size = Number(m[6]);
+      // Outside the content box, a clip box, or the page itself (left, right, bottom or top edge of the MediaBox).
+      const over = Math.max(x + w - bx1, bx0 - x, art[1] - y, y + size - art[3], x + w - media[2], media[0] - x, media[1] - y, y + size - media[3], 0);
       if (over > 0.01) clipped.push({ page: pi + 1, text, width_pt: Math.round(w * 10) / 10, box_pt: Math.round((bx1 - bx0) * 10) / 10, over_pt: Math.round(over * 10) / 10 });
     }
   });

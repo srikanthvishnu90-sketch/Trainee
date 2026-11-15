@@ -53,9 +53,16 @@ code and tested.
      document only through a `{{ref:id}}` slot, so the document's numbers are exactly the model's, at the model's format.
      This is stricter than "matches no cell", on purpose: an equal-looking typed figure can be a stale copy (0011) or a
      coincidence, and the slot is the only form a later version's diff and revoke scan can follow.
-   - What counts as a typed number is `model.loose` (124a): digits with or without separators, a glued unit
-     (17280USD, 1.5x, 40ms), a percent, and number words ("forty", "twenty-five"; a lone "one" in its article sense is
-     not a figure). Calendar dates, clock times and a year after a year word ("in 2026") are not figures and are allowed.
+   - What is refused in a document (`docs.typedNumbers`, after its adversarial review): any `{{...}}` that is not a
+     `{{ref:id}}` slot with a whitelisted format (General, 0, 0.0, #,##0, #,##0.00, 0%, 0.0%); a slot touching a digit,
+     a letter, another slot, "%" or a scale word; and, with slots removed, any digit in any script (`\p{N}`: 7, ٧, ७, ½,
+     Ⅻ) or number word ("forty", "a dozen", "half", "twice"). "H-1B", "Python 3", "401(k)" and a phone number are
+     therefore refused: a figure the person wants printed goes in a cell. Roman numerals spelled in letters (XII) are not
+     read as numbers (a known limit).
+   - The one exception is a real calendar date (`model.dateSpans`): a valid ISO date, a month-name date with a real day
+     and a year, "Month YYYY", an am/pm or "at" time, a year range, or a year after a year word with no noun after it.
+   - In prose outside documents (`model.loose`, used where a figure may equal a cell), the same reading applies, and a
+     figure equal to a cell at its typed precision is allowed.
    - Closes: 0011 (17,280 + 2,000 printed as 19,200, then "downstream figures stand"); 0013 (an unsupported "30%");
      0017 and 0018 (counts claimed, not computed).
 2. **D2, checked by execution and never by assertion.** Before delivery:

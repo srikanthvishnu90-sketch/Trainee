@@ -103,7 +103,7 @@ export function formatValue(v: number, fmt?: string): string {
 
 export function render(text: string, values: Values, formats: Record<string, string> = {}): string {
   return text.replace(/\{\{\s*ref:([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g, (_, id: string) => {
-    if (!(id in values)) throw new UnknownRef(id);
+    if (!Object.hasOwn(values, id)) throw new UnknownRef(id); // own keys only: {{ref:__proto__}} is no cell
     return formatValue(values[id], formats[id]);
   });
 }
@@ -155,10 +155,15 @@ export function dateSpans(t: string): Span[] {
 const ONES = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
   "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
 const TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
-const UNITS: Record<string, number> = { dozen: 12, dozens: 12, half: 0.5, twice: 2, thrice: 3, third: 1 / 3, thirds: 1 / 3, quarter: 0.25, quarters: 0.25, doubled: 2, tripled: 3, quadrupled: 4, tenfold: 10, couple: 2, score: 20, hundreds: 100, thousands: 1e3, millions: 1e6 };
+// A backstop word list (D-088: word-list gaps are stated limits, not blockers); fail closed where it reads.
+const UNITS: Record<string, number> = { dozen: 12, dozens: 12, half: 0.5, halved: 0.5, halves: 0.5, twice: 2, thrice: 3, third: 1 / 3, thirds: 1 / 3,
+  quarter: 0.25, quarters: 0.25, fourth: 0.25, fourths: 0.25, fifth: 0.2, fifths: 0.2, sixth: 1 / 6, seventh: 1 / 7, eighth: 0.125, ninth: 1 / 9,
+  tenth: 0.1, tenths: 0.1, hundredth: 0.01, thousandth: 0.001, double: 2, doubled: 2, triple: 3, tripled: 3, quadruple: 4, quadrupled: 4,
+  quintupled: 5, couple: 2, pair: 2, score: 20, gross: 144, nought: 0, naught: 0, nil: 0, hundreds: 100, thousands: 1e3, millions: 1e6,
+  billions: 1e9, trillions: 1e12 };
 ONES.forEach((w, i) => (UNITS[w] = i));
 TENS.forEach((w, i) => { if (w) UNITS[w] = i * 10; });
-const SCALES: Record<string, number> = { hundred: 100, thousand: 1e3, million: 1e6, billion: 1e9 };
+const SCALES: Record<string, number> = { hundred: 100, thousand: 1e3, million: 1e6, billion: 1e9, trillion: 1e12 };
 const WORD = `(?:${[...Object.keys(UNITS), ...Object.keys(SCALES)].join("|")})`;
 const WORDS_RE = new RegExp(`\\b${WORD}(?:(?:\\s+and\\s+|[\\s-]+)${WORD})*\\b(\\s*(?:%|per\\s?cent\\b|percent\\b))?`, "gi");
 const CURRENCY_WORD = /^\s*(?:usd|eur|gbp|inr|dollars?|euros?|pounds?|rupees?)\b/i;
@@ -223,6 +228,9 @@ export function loose(prose: string, values: Values): string[] {
     const pct = !!m[1];
     if (/^one$/i.test(body.trim()) && !pct) continue;
     found.push({ at: m.index!, raw: m[0].trim(), typed: wordsValue(body), step: /half/i.test(body) ? 1e-9 : 1, pct });
+  }
+  for (const m of text.matchAll(/\b[a-z]+fold\b/gi)) {
+    if (!found.some((f) => f.at === m.index)) found.push({ at: m.index!, raw: m[0], typed: NaN, step: 0, pct: false });
   }
   found.sort((x, y) => x.at - y.at);
   const near = (v: number, t: number, step: number) => Math.abs(v - t) <= step / 2 + 1e-9 * Math.max(1, Math.abs(v));

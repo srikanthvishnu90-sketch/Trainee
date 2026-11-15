@@ -104,9 +104,10 @@ function matchersFor(v: RevokedValue): { form: RevokeHit["form"]; test: (s: stri
   const words = numberWords(Math.abs(p.num));
   if (words) res.push(new RegExp(`\\b${words}\\b` + unit, "i"));
   // A percent is also stored as its fraction: an xlsx cell formatted 0% holds <v>0.4</v> for 40%.
-  if (p.unit === "%" && !Number.isInteger(p.num / 100)) { res.push(new RegExp(numberPattern(Number((p.num / 100).toPrecision(12)), true))); targets.push(p.num / 100); }
+  const pct = p.unit === "%" || /^(?:percent|pct)$/i.test(p.unit ?? "");
+  if (pct && !Number.isInteger(p.num / 100)) { res.push(new RegExp(numberPattern(Number((p.num / 100).toPrecision(12)), true))); targets.push(p.num / 100); }
   // Scaled forms: $1.5m is also 1,500,000; 17,280 is also 17.3k / 17k / 17.28 thousand (second review of WO-124a).
-  const scale = p.unit ? ({ k: 1e3, m: 1e6, mn: 1e6, bn: 1e9, b: 1e9 } as Record<string, number>)[p.unit.toLowerCase()] : undefined;
+  const scale = p.unit ? ({ k: 1e3, thousand: 1e3, m: 1e6, mn: 1e6, million: 1e6, bn: 1e9, b: 1e9, billion: 1e9 } as Record<string, number>)[p.unit.toLowerCase()] : undefined;
   if (scale) { res.push(new RegExp(numberPattern(p.num * scale, true))); targets.push(p.num * scale); }
   const whole = scale ? p.num * scale : p.num;
   for (const [div, word] of [[1e3, "(?:k|thousand)"], [1e6, "(?:m|mn|million)"], [1e9, "(?:bn|b|billion)"]] as const) {
@@ -231,6 +232,22 @@ export function pdfStrings(src: string): string[] {
   });
   return [lit.join(" "), lit.join(""), hex.join(" "), hex.join("")];
 }
+// Round 6: a stream with a filter other than FlateDecode, a Flate stream that will not inflate, or a Type0 (CID) font
+// whose glyph codes are not text cannot be read, so the PDF is reported as unreadable rather than clean.
+export function pdfUnreadable(bytes: Uint8Array): boolean {
+  const s = new TextDecoder("latin1").decode(bytes);
+  if (/\/Subtype\s*\/Type0\b/.test(s)) return true;
+  for (const m of s.matchAll(/stream\r?\n/g)) {
+    const dict = s.slice(Math.max(0, m.index! - 400), m.index!);
+    const filters = [...(dict.slice(dict.lastIndexOf("<<")).matchAll(/\/(\w+Decode|AHx|A85|Fl|LZW|RL|CCF|DCT)\b/g))].map((x) => x[1]);
+    if (filters.some((f) => f !== "FlateDecode" && f !== "Fl" && f !== "DCTDecode" && f !== "DCT")) return true;
+    if (filters.length && filters.every((f) => f === "FlateDecode" || f === "Fl")) {
+      const start = m.index! + m[0].length, end = s.indexOf("endstream", start);
+      try { unzlibSync(bytes.subarray(start, s[end - 1] === "\n" ? (s[end - 2] === "\r" ? end - 2 : end - 1) : end)); } catch { return true; }
+    }
+  }
+  return false;
+}
 function pdfText(bytes: Uint8Array): string[] {
   const s = new TextDecoder("latin1").decode(bytes);
   const out: string[] = [];
@@ -277,8 +294,10 @@ export function scan(files: Record<string, Uint8Array>, values: RevokedValue[]):
   for (const [part, bytes, unreadable] of partsOf(files)) {
     if (unreadable) { ms.forEach((m, i) => hits.push({ part, category: "unreadable container", value: i, form: m.form })); continue; }
     const pdf = isPdf(bytes);
+    if (pdf && pdfUnreadable(bytes)) { ms.forEach((m, i) => hits.push({ part, category: "unreadable container", value: i, form: m.form })); continue; }
     const texts = [...decodings(bytes), ...(pdf ? [...pdfText(bytes), ...pdfStrings(new TextDecoder("latin1").decode(bytes))] : [])].flatMap((t) => views(t, pdf, part));
-    const name = part.split("!").map((s) => s.split("/").pop() ?? s).join(" ").normalize("NFKC");
+    // The whole path, every folder included (124e review: a revoked value in a bundle's folder name was delivered).
+    const name = clean(part.split("!").join(" ").replace(/[\/\\]/g, " ")).normalize("NFKC");
     ms.forEach((m, i) => {
       if (m.test(name)) hits.push({ part, category: "filename", value: i, form: m.form });
       else if (texts.some((t) => m.test(t))) hits.push({ part, category: categoryOf(part), value: i, form: m.form });

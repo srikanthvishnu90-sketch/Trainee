@@ -23,7 +23,9 @@ export function report(checks: Check[], limits: string[]): string {
 type Status = "ok" | "failed" | "not run";
 function parseReport(r: string): { name: string; status: Status }[] {
   const out: { name: string; status: Status }[] = [];
-  for (const line of r.split("\n")) {
+  // Only the check sections are read; the Limits section is text, never a check (round 6).
+  const at = r.indexOf("\nLimits:");
+  for (const line of (at >= 0 ? r.slice(0, at) : r).split("\n")) {
     const m = line.match(/^- (ok|failed|not run): (.+?)(?: \(.*\))?$/);
     if (m) out.push({ status: m[1] as Status, name: m[2].toLowerCase() });
   }
@@ -115,7 +117,11 @@ export function boundClaims(reply: string, rep: string): { refused: string[]; ok
     let cats = [...named];
     // Round 5: a clause about the whole ("all checks passed", "the rest checks out", "everything else") never borrows the
     // previous clause's subject; it is a generic claim and needs a fully green report.
-    const wholeWork = /\b(?:all|every|rest|everything|else|overall|altogether)\b/i.test(clause) || CLAIMS.some((k) => k.cat === "generic" && k.says.test(clause));
+    // A claim about the whole work, whatever subject it also names: "all/every check(s)", "everything", "the rest",
+    // "overall", "fully/entirely/completely verified|tested|checked". A subject's own claim ("Formulas check out",
+    // "all tests pass") is judged on that subject.
+    const wholeWork = /\b(?:all|every|each)\s+(?:of\s+)?(?:the\s+)?checks?\b|\b(?:everything|the rest|everything else|overall|altogether)\b|\b(?:fully|entirely|completely)\s+(?:verified|tested|checked|validated)\b/i.test(clause) ||
+      (!cats.length && CLAIMS.some((k) => k.cat === "generic" && k.says.test(clause)));
     if (!cats.length && joined && !wholeWork) cats = carried;
     carried = cats.length ? cats : carried;
     const vocab = CHECK_VOCAB.test(clause) || CLAIMS.some((k) => k.says.test(clause));
@@ -130,6 +136,9 @@ export function boundClaims(reply: string, rep: string): { refused: string[]; ok
     const honest = HONEST_MISS.test(clause) && !NEGATED_FAIL.test(clause) && !CHECK_VOCAB.test(rest) && !/\b(?:passed|pass|works?|right|correct|fine|good)\b/i.test(clause.replace(new RegExp(HONEST_MISS.source, "gi"), " "));
     if (honest) continue;
     if (!vocab) continue; // a subject named with no verdict ("here is the workbook")
+    // Round 6: a whole-work claim ("All checks passed on the workbook", "fully verified") also needs a fully green report,
+    // whatever subject it names.
+    if (wholeWork && !green) { refused.push(clause); continue; }
     if (cats.length) { if (!cats.every(catOk)) refused.push(clause); continue; }
     if (!green) refused.push(clause); // a generic assurance while something failed or did not run
   }

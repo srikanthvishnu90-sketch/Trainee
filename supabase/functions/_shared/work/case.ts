@@ -102,7 +102,7 @@ export function addRound(c: WorkCase, r: { round: number; text: string; constrai
   return round;
 }
 
-export function ledger(c: WorkCase): LedgerRow[] { return c.rows.map((r) => ({ ...r })); }
+export function ledger(c: WorkCase): LedgerRow[] { return c.rows.map((r) => ({ ...r, ...(r.values ? { values: [...r.values] } : {}) })); }
 export function active(c: WorkCase): LedgerRow[] { return ledger(c).filter((r) => r.status === "active"); }
 
 // Values the person took back: those on revoked rows, and any named on the revoking row itself.

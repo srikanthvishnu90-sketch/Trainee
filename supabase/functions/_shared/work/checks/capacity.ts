@@ -36,7 +36,8 @@ function validate(days: Day[], tasks: Task[]) {
     if (!Number.isFinite(t.hours) || t.hours < 1 / 60) throw new CapacityInputError(`task ${t.id} needs at least a minute`);
     if (!Number.isFinite(t.due)) throw new CapacityInputError(`task ${t.id} needs a finite due day`);
   }
-  // Sums that overflow would compare Infinity with Infinity (round 6).
+  // Sums that overflow would compare Infinity with Infinity (round 6), and past 2^53 they are not exact (round 7).
+  if ([...days.map((x) => x.hours), ...tasks.map((t) => t.hours)].some((h) => h > Number.MAX_SAFE_INTEGER)) throw new CapacityInputError("hours past 2^53 cannot be added exactly");
   if (!Number.isFinite(total(days.map((x) => x.hours))) || !Number.isFinite(total(tasks.map((t) => t.hours)))) throw new CapacityInputError("the hours add up past what can be compared");
 }
 

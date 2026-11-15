@@ -47,7 +47,7 @@ const SUBJECTS: [RegExp, RegExp][] = [
 function topicHas(topic: string, about: RegExp): boolean {
   for (const m of topic.matchAll(new RegExp(about.source, "g"))) {
     const before = topic.slice(0, m.index!).split(/\s+/).slice(-3).join(" ");
-    if (!/\b(?:not|no|without|except|excluding|never|nor|non)\b/.test(before)) return true;
+    if (!NEG.test(before)) return true;
   }
   return false;
 }
@@ -55,7 +55,12 @@ function aboutOther(s: string, limit?: { id: string; text: string }): boolean {
   if (!limit) return false;
   // When the constraint's id names a subject, that is its subject; otherwise its text's un-negated subjects are.
   const id = normalise(limit.id.replace(/[_-]+/g, " "));
-  const topic = SUBJECTS.some(([, about]) => about.test(id)) ? id : normalise(`${limit.id} ${limit.text}`);
+  if (SUBJECTS.some(([, about]) => about.test(id))) return SUBJECTS.some(([said, about]) => said.test(s) && !about.test(id));
+  const topic = normalise(`${limit.id} ${limit.text}`);
+  // Round 7: when the constraint's text names more than one subject, which one it wants cannot be read safely ("Fully
+  // remote, won't relocate"; "remote only, hybrid is a dealbreaker"), so any statement naming a subject is unknown.
+  const named = SUBJECTS.filter(([, about]) => about.test(topic));
+  if (named.length > 1) return SUBJECTS.some(([said]) => said.test(s));
   return SUBJECTS.some(([said, about]) => said.test(s) && !topicHas(topic, about));
 }
 
@@ -107,6 +112,10 @@ export function dateOf(d?: string): number | null { return datePlaced(d)?.t ?? n
  * with the dated verdict, the verdict is unknown, because either one might be the newer (fail closed).
  */
 export function verdict(limits: Limit[], sources: Source[]): Record<string, Verdict> {
+  // Each constraint id once (round 7: a repeated id let the second constraint overwrite the first's verdict).
+  const ids = limits.map((l) => l.id);
+  const dup = ids.find((x, i) => ids.indexOf(x) !== i);
+  if (dup !== undefined) throw new RangeError(`constraint id "${dup}" is used twice`);
   const placed = sources.map((s, i) => ({ s, i, p: datePlaced(s.date) }));
   const dated = placed.filter((x) => x.p !== null).sort((a, b) => a.p!.t - b.p!.t || a.i - b.i);
   const undated = placed.filter((x) => x.p === null);

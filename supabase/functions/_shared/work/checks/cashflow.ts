@@ -19,6 +19,7 @@ export class CashInputError extends RangeError {
 // (review of WO-124c). balances[] still lists the end-of-day balance for each day.
 export function run({ start, events }: { start: number; events: CashEvent[] }): CashResult {
   if (!Number.isFinite(start)) throw new CashInputError("the starting balance must be a finite number");
+  if (Math.abs(start) > Number.MAX_SAFE_INTEGER) throw new CashInputError("a starting balance past 2^53 cannot be added exactly");
   if (!Array.isArray(events)) throw new CashInputError("events must be a list");
   for (const [i, e] of events.entries()) {
     if (!e || typeof e !== "object") throw new CashInputError(`event ${i + 1} is not an event`);
@@ -28,6 +29,7 @@ export function run({ start, events }: { start: number; events: CashEvent[] }): 
     if (!KINDS.has(e.kind)) throw new CashInputError(`event ${i + 1}: kind "${e.kind}" is not one of ${[...KINDS].join(", ")}`);
     if (e.refundableDay !== undefined && e.kind !== "deposit_lockup") throw new CashInputError(`event ${i + 1}: only a deposit_lockup has a refundable day`);
     if (!Number.isFinite(e.day) || !Number.isFinite(e.amount)) throw new CashInputError(`event ${i + 1} needs a finite day and amount`);
+    if (Math.abs(e.amount) > Number.MAX_SAFE_INTEGER) throw new CashInputError(`event ${i + 1}: an amount past 2^53 cannot be added exactly`);
     if (e.refundableDay !== undefined && !Number.isFinite(e.refundableDay)) throw new CashInputError(`event ${i + 1} has a non-finite refundable day`);
   }
   const ordered = events.map((e, i) => ({ e, i })).sort((a, b) =>

@@ -55,7 +55,19 @@ function aboutOther(s: string, limit?: { id: string; text: string }): boolean {
   if (!limit) return false;
   // When the constraint's id names a subject, that is its subject; otherwise its text's un-negated subjects are.
   const id = normalise(limit.id.replace(/[_-]+/g, " "));
-  if (SUBJECTS.some(([, about]) => about.test(id))) return SUBJECTS.some(([said, about]) => said.test(s) && !about.test(id));
+  // Round 8: the id goes through the same rules as the text: a negated subject (no_hybrid) is not the subject, and an id or
+  // text naming several subjects (visa_and_relocation) lets no subject-bearing statement meet.
+  const idSubjects = SUBJECTS.filter(([, about]) => about.test(id));
+  if (idSubjects.length) {
+    if (idSubjects.length > 1) return SUBJECTS.some(([said]) => said.test(s));
+    const [, about] = idSubjects[0];
+    // A negation anywhere in the id (no_hybrid, hybrid_not_ok) means the id does not plainly want its subject.
+    if (!topicHas(id, about) || NEG.test(id)) return SUBJECTS.some(([said]) => said.test(s));
+    const textSubjects = SUBJECTS.filter(([, a]) => a.test(normalise(limit.text ?? "")));
+    if (textSubjects.some(([, a]) => a !== about)) return SUBJECTS.some(([said]) => said.test(s));
+    if (!topicHas(normalise(limit.text ?? "") || id, about) && textSubjects.length) return SUBJECTS.some(([said]) => said.test(s));
+    return SUBJECTS.some(([said, a]) => said.test(s) && a !== about);
+  }
   const topic = normalise(`${limit.id} ${limit.text}`);
   // Round 7: when the constraint's text names more than one subject, which one it wants cannot be read safely ("Fully
   // remote, won't relocate"; "remote only, hybrid is a dealbreaker"), so any statement naming a subject is unknown.

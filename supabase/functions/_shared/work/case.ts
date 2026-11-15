@@ -50,7 +50,9 @@ export function newCase(o: { owner: string; practice: boolean; title: string; no
   // value parsed loosely from a model's input is practice.
   const practice = o.practice !== false;
   const c = {
-    id: `${practice ? "practice" : "own"}:${o.now.toString(36)}:${slug}`,
+    // A unique part (round 5 of 124e: two cases made in one turn with one title got one id, and the second replaced the
+    // first, dropping its revokes).
+    id: `${practice ? "practice" : "own"}:${o.now.toString(36)}:${crypto.randomUUID().slice(0, 8)}:${slug}`,
     owner: o.owner, title: String(o.title ?? ""), createdAt: o.now,
     rounds: [], rows: [], versions: [], guardLog: [],
   } as unknown as WorkCase;
@@ -82,6 +84,12 @@ export function addRound(c: WorkCase, r: { round: number; text: string; constrai
     if (row.status !== "active") throw new LedgerError(`constraint "${target}" is already ${row.status}`);
   };
   for (const k of r.constraints) { check(k.supersedes, k.id); check(k.revokes, k.id); }
+  // Round 5: a revoke must say what it takes back, or the scan has nothing to search and its audit would read clean.
+  for (const k of r.constraints) {
+    if (k.revokes && !(byId.get(k.revokes)?.values?.length) && !k.values?.length) {
+      throw new LedgerError(`constraint "${k.id}" revokes "${k.revokes}" but neither names the values to take back`);
+    }
+  }
   for (const k of r.constraints) {
     for (const [target, status] of [[k.supersedes, "superseded"], [k.revokes, "revoked"]] as const) {
       const row = target ? byId.get(target) : undefined;

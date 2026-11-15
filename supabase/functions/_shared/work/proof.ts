@@ -113,7 +113,10 @@ export function boundClaims(reply: string, rep: string): { refused: string[]; ok
     for (const k of CLAIMS) if (k.cat !== "generic" && k.says.test(clause)) named.add(k.cat as Category);
     for (const [cat, re] of SUBJECT) if (re.test(clause)) named.add(cat);
     let cats = [...named];
-    if (!cats.length && joined) cats = carried;
+    // Round 5: a clause about the whole ("all checks passed", "the rest checks out", "everything else") never borrows the
+    // previous clause's subject; it is a generic claim and needs a fully green report.
+    const wholeWork = /\b(?:all|every|rest|everything|else|overall|altogether)\b/i.test(clause) || CLAIMS.some((k) => k.cat === "generic" && k.says.test(clause));
+    if (!cats.length && joined && !wholeWork) cats = carried;
     carried = cats.length ? cats : carried;
     const vocab = CHECK_VOCAB.test(clause) || CLAIMS.some((k) => k.says.test(clause));
     if (!vocab && !cats.length) continue; // says nothing about the work's checks

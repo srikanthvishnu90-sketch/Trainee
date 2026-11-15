@@ -121,7 +121,10 @@ export function boundClaims(reply: string, rep: string): { refused: string[]; ok
       const b = checks.filter((c) => c.cat === cat);
       return b.some((c) => c.status === "ok") && !b.some((c) => c.status === "failed") && !(all && b.some((c) => c.status === "not run"));
     };
-    const honest = HONEST_MISS.test(clause) && !NEGATED_FAIL.test(clause);
+    // Honest only if, with the reported miss taken out, nothing else in the clause is a verdict (round 4: "Tests passed
+    // while the page check was not run" hid a success claim behind the miss).
+    const rest = clause.replace(new RegExp(HONEST_MISS.source, "gi"), " ").replace(/\b(?:the|a|an|check|checks|was|were|is|are|been|here|yet|so|i|have|has|it|this|that|one|two|earlier|on|cells?|page|pages?|tests?|recompute|formulas?|lint|scan|run)\b/gi, " ");
+    const honest = HONEST_MISS.test(clause) && !NEGATED_FAIL.test(clause) && !CHECK_VOCAB.test(rest) && !/\b(?:passed|pass|works?|right|correct|fine|good)\b/i.test(clause.replace(new RegExp(HONEST_MISS.source, "gi"), " "));
     if (honest) continue;
     if (!vocab) continue; // a subject named with no verdict ("here is the workbook")
     if (cats.length) { if (!cats.every(catOk)) refused.push(clause); continue; }

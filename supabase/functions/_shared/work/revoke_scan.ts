@@ -90,12 +90,17 @@ function matchersFor(v: RevokedValue): { form: RevokeHit["form"]; test: (s: stri
   const small = Number.isInteger(p.num) && Math.abs(p.num) < 10;
   const cur = p.currency ? `${esc(p.currency)}\\s?` : "";
   const res = [new RegExp((small && cur ? cur : "") + numberPattern(p.num) + unit, "i")];
-  if (small && !unit && !cur) res.length = 0;
+  // Round 4 (D-088): a bare small number (revoked "7") is matched bare too: a miss that reports "nothing found" fails
+  // open, a false block fails closed. Markup and app.xml counters are no longer read, so this blocks far less than before.
+  if (small && !unit && !cur) res.splice(0, 1, new RegExp(numberPattern(p.num)));
   // Numbers compared as numbers: float noise (0.30000000000000004), E-notation (1.728E4, 4E-1) and leading-dot
   // decimals (.4) are the same value. Targets: the value (not when small), a percent's fraction (only when not a whole
   // number: 100% is 1 and 0% is 0, which every file holds), and the scaled whole of a k/m/bn value.
   const targets: number[] = [];
-  if (!small) targets.push(p.num);
+  // A small number revoked with its unit or sign ("$5") matches bare only in stored cell values, where the sign is a format
+  // and not text (<v>5</v>); in prose it needs its sign ("score 5 of 9" is not "$5").
+  const cellOnly = small && !!(unit || cur);
+  targets.push(p.num);
   const words = numberWords(Math.abs(p.num));
   if (words) res.push(new RegExp(`\\b${words}\\b` + unit, "i"));
   // A percent is also stored as its fraction: an xlsx cell formatted 0% holds <v>0.4</v> for 40%.
@@ -108,7 +113,10 @@ function matchersFor(v: RevokedValue): { form: RevokeHit["form"]; test: (s: stri
     if (Math.abs(whole) >= div && Math.abs(whole) < div * 1000) res.push(new RegExp(numberPattern(Number((whole / div).toPrecision(6))) + `\\s?${word}\\b`, "i"));
   }
   const near = (x: number, t: number) => Math.abs(x - t) <= 1e-9 * Math.max(1, Math.abs(t));
-  const numeric = (s: string) => targets.length > 0 && numbersIn(s).some((x) => targets.some((t) => near(x, t)));
+  const numeric = (s: string) => {
+    const isCells = s.startsWith(CELLS);
+    return numbersIn(s).some((x) => targets.some((t) => near(x, t) && (!cellOnly || t !== p.num || isCells)));
+  };
   return { form: p.unit === "%" ? "percent" : "number", test: (s) => res.some((re) => re.test(s)) || numeric(s) };
 }
 
@@ -143,14 +151,43 @@ function numbersIn(s: string): number[] {
 // made every file "hold" a revoked 100%, $1, $12 or 30%. A part is read as its text (tags removed, and tags as spaces
 // for values split across runs) plus only the attributes that carry text a person sees (alt text, titles, names). ISO
 // timestamps are removed first, so a 12:00 in core.xml is not a revoked 12.
-const TEXT_ATTRS = /\s(?:descr|title|alt|name|tooltip|caption|display)="([^"]*)"/gi;
-function views(raw: string): string[] {
+// Round 4: reading only a few named attributes missed values in namespaced (w:val, w:instr, w:alias), single-quoted and
+// relationship (Target="mailto:...") attributes. Fail closed instead: every attribute value is read EXCEPT those whose
+// local name is structural (ids, sizes, positions, styles, versions, namespaces), and docProps/app.xml's counters.
+const ATTR = /\s([A-Za-z_][\w.-]*:)?([A-Za-z_][\w.-]*)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+const STRUCTURAL = new Set(["version", "encoding", "standalone", "id", "rid", "sheetid", "r", "s", "t", "sz", "szcs", "w", "h", "x", "y", "cx", "cy", "ilvl", "numid",
+  "left", "right", "top", "bottom", "header", "footer", "gutter", "space", "basecolwidth", "defaultrowheight", "ht", "customwidth", "width", "min", "max",
+  "xfid", "fontid", "fillid", "borderid", "numfmtid", "applynumberformat", "applyfont", "applyfill", "applyborder", "applyalignment", "count", "uniquecount",
+  "idx", "order", "ptcount", "type", "xmlns", "ignorable", "lang", "eastasia", "bidi", "ascii", "hansi", "cs", "rsidr", "rsidrpr", "rsidrdefault", "rsidp",
+  "rsidsect", "tabselected", "workbookviewid", "activetab", "zoomscale", "spans", "dyDescent".toLowerCase(), "rot", "flip", "prst", "algn", "anchor", "lins", "tins", "rins", "bins",
+  "dirty", "b", "i", "u", "baseline", "kern", "spc", "cap", "extension", "contenttype", "partname", "targetmode", "calcid", "fullcalcload", "fullcalconload",
+  "pos", "lim", "dist", "distt", "distb", "distl", "distr", "simplepos", "relativeheight", "behinddoc", "locked", "layoutincell", "allowoverlap", "noproof",
+  "orient", "code", "char", "pitchfamily", "charset", "typeface", "panose", "mod", "sx", "sy", "kx", "ky", "spid", "shapeid", "nvpr", "ph", "hasCustomPrompt".toLowerCase()]);
+const CELLS = "\u0002cells ";
+const VAL_CONTENT = new Set(["alias", "tag", "docvar", "listitem", "displaytext", "placeholder", "comboboxitem", "dropdownlistitem", "text", "title", "fldsimple"]);
+const APP_COUNTERS = /<(?:\w+:)?(?:AppVersion|TotalTime|Words|Characters|CharactersWithSpaces|Pages|Lines|Paragraphs|Slides|Notes|HiddenSlides|MMClips|DocSecurity)>[^<]*</gi;
+function views(raw: string, pdf = false): string[] {
   const unent = (s: string) => s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) =>
     e[0] === "#" ? String.fromCodePoint(e[1].toLowerCase() === "x" ? parseInt(e.slice(2), 16) : Number(e.slice(1))) : ENT[e.toLowerCase()] ?? m);
-  const xml = /<[A-Za-z?!\/]/.test(raw);
-  const attrs = xml ? [...raw.matchAll(TEXT_ATTRS)].map((m) => m[1]).join(" ") : "";
-  const texts = xml ? [raw.replace(/<[^>]*>/g, ""), raw.replace(/<[^>]*>/g, " "), attrs] : [raw];
-  return texts.map((t) => clean(unent(t)));
+  const xml = !pdf && /<[A-Za-z?!\/]/.test(raw);
+  if (!xml) return [clean(unent(raw))];
+  const body = raw.replace(APP_COUNTERS, "<");
+  // "val" is content only on elements that carry text (a content control's alias or tag, a document variable, a
+  // presentation tag, a list item); on sz, color, jc, numFmt and the like it is a setting.
+  const attrs: string[] = [];
+  for (const tag of body.matchAll(/<(?:[\w.-]+:)?([\w.-]+)(\s[^>]*)>/g)) {
+    const el = tag[1].toLowerCase();
+    for (const m of tag[2].matchAll(ATTR)) {
+      const name = m[2].toLowerCase(), prefix = (m[1] ?? "").toLowerCase();
+      if (prefix.startsWith("xmlns") || name === "xmlns" || STRUCTURAL.has(name)) continue;
+      if (name === "val" && !VAL_CONTENT.has(el)) continue;
+      attrs.push(m[3] ?? m[4] ?? "");
+    }
+  }
+  // Stored cell values on their own (xlsx <v>, pivot-cache v=): the view in which a "$5" is just 5.
+  const cells = [...body.matchAll(/<(?:\w+:)?v>([^<]*)<\/(?:\w+:)?v>|<(?:\w+:)?n\s[^>]*\bv="([^"]*)"/g)].map((m) => m[1] ?? m[2]).join(" ");
+  const texts = [body.replace(/<[^>]*>/g, ""), body.replace(/<[^>]*>/g, " "), attrs.join(" \u0001 ")];
+  return [...texts.map((t) => clean(unent(t))), CELLS + clean(unent(cells))];
 }
 // NFKC (fullwidth), every script's digits as ASCII, one apostrophe and quote form, no zero-width characters, and no ISO
 // timestamps.
@@ -199,7 +236,8 @@ export function scan(files: Record<string, Uint8Array>, values: RevokedValue[]):
   const ms = values.map(matchersFor);
   const hits: RevokeHit[] = [];
   for (const [part, bytes] of partsOf(files)) {
-    const texts = [...decodings(bytes), ...(isPdf(bytes) ? pdfText(bytes) : [])].flatMap(views);
+    const pdf = isPdf(bytes);
+    const texts = [...decodings(bytes), ...(pdf ? pdfText(bytes) : [])].flatMap((t) => views(t, pdf));
     const name = part.split("!").map((s) => s.split("/").pop() ?? s).join(" ").normalize("NFKC");
     ms.forEach((m, i) => {
       if (m.test(name)) hits.push({ part, category: "filename", value: i, form: m.form });

@@ -48,6 +48,14 @@ code and tested.
 1. **D1, computed and never typed.** Every number in an artifact is a cell of the artifact's typed model, evaluated by
    code. A number in prose is a reference to that cell (`{{ref:net_cash}}`), not text the model typed. A number in a
    draft that matches no cell is refused.
+   - **Documents are stricter (architect ruling, 2026-11-15, on WO-124d):** in a DOCX, PPTX or PDF built by `docs.ts`,
+     *every* number typed in prose is refused (`LooseNumber`), even one that equals a cell. A figure reaches a
+     document only through a `{{ref:id}}` slot, so the document's numbers are exactly the model's, at the model's format.
+     This is stricter than "matches no cell", on purpose: an equal-looking typed figure can be a stale copy (0011) or a
+     coincidence, and the slot is the only form a later version's diff and revoke scan can follow.
+   - What counts as a typed number is `model.loose` (124a): digits with or without separators, a glued unit
+     (17280USD, 1.5x, 40ms), a percent, and number words ("forty", "twenty-five"; a lone "one" in its article sense is
+     not a figure). Calendar dates, clock times and a year after a year word ("in 2026") are not figures and are allowed.
    - Closes: 0011 (17,280 + 2,000 printed as 19,200, then "downstream figures stand"); 0013 (an unsupported "30%");
      0017 and 0018 (counts claimed, not computed).
 2. **D2, checked by execution and never by assertion.** Before delivery:
@@ -136,7 +144,7 @@ code and tested.
   - `formula.ts`: the independent evaluator for the formula subset `xlsx.ts` emits (`SUM`, `SUMIFS`, `IF`, `IFERROR`,
     `ISNUMBER`, `ABS`, `AND`, `OR`, arithmetic).
 - `docs.ts`
-  - `writeDocx(model)` and `writePptx(deck)` (speaker notes, charts whose cached values are the model's cells). A typed number matching no cell throws `LooseNumber`.
+  - `writeDocx(model)` and `writePptx(deck)` (speaker notes, charts whose cached values are the model's cells). Any number typed in prose throws `LooseNumber`, even one equal to a cell (D1, documents ruling); figures enter only through `{{ref:id}}` slots.
   - `writePdf(model)`.
   - `pages(pdf)` returns `{ count, clipped }` for the clipping check; `counts(text)` returns words, characters and seconds at 150 wpm.
 - `ics.ts`

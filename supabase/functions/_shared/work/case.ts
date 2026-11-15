@@ -74,6 +74,11 @@ export function addRound(c: WorkCase, r: { round: number; text: string; constrai
   for (const k of r.constraints) {
     if (!k.id || seen.has(k.id)) throw new LedgerError(`constraint id "${k.id}" is missing or repeated`);
     if (!KINDS.includes(k.kind)) throw new LedgerError(`constraint "${k.id}" has unknown kind "${k.kind}"`);
+    // Values are what a revoke scan searches for: each must be a non-empty string of at most 200 characters (124e
+    // review: a null, object or very long value made every later round throw).
+    if (k.values !== undefined && (!Array.isArray(k.values) || !k.values.every((v) => typeof v === "string" && v.trim().length > 0 && v.length <= 200))) {
+      throw new LedgerError(`constraint "${k.id}": values must be non-empty strings of at most 200 characters`);
+    }
     seen.add(k.id);
   }
   const byId = new Map(c.rows.map((x) => [x.id, x]));
@@ -84,6 +89,11 @@ export function addRound(c: WorkCase, r: { round: number; text: string; constrai
     if (row.status !== "active") throw new LedgerError(`constraint "${target}" is already ${row.status}`);
   };
   for (const k of r.constraints) { check(k.supersedes, k.id); check(k.revokes, k.id); }
+  // One ender per row in a round (round 7: a revoke then a supersede of the same row left it "superseded", and the
+  // revoked value was no longer searched for).
+  const ends = r.constraints.flatMap((k) => [k.supersedes, k.revokes].filter(Boolean)) as string[];
+  const twice = ends.find((t, i) => ends.indexOf(t) !== i);
+  if (twice) throw new LedgerError(`constraint "${twice}" is ended twice in one round; revoke it, or supersede it, not both`);
   // Round 5: a revoke must say what it takes back, or the scan has nothing to search and its audit would read clean.
   for (const k of r.constraints) {
     if (k.revokes && !(byId.get(k.revokes)?.values?.length) && !k.values?.length) {

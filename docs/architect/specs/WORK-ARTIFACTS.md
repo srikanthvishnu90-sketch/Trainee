@@ -168,3 +168,29 @@ Before 124g builds on it, a second spike measures latency and that all outbound 
 Vercel Sandbox credential, which the owner adds themselves (it never travels through chat), and any sandbox usage that
 is billed needs the owner's written yes first. Until 124g ships, a bundle is delivered with "tests not run here" in its
 report. It is never delivered with a claim that the tests ran.
+
+## Review bar and limits (D-088, owner, 2026-11-15)
+A review blocks a WO-124 order only for a structural fail-open: a path that by design lets a figure that is not a cell, a
+claim the report does not back, a revoked value, a practice fact or an outside upload through. The word lists in the
+code (number words, scale and unit words, check vocabulary, refusal words) are backstops. A gap found in one is a stated
+limit: it is added here and to the tests, and the code fails closed where it can.
+
+Structural guarantees the reviews hold the code to:
+- **D1:** a document prints a figure only through a `{{ref:id}}` slot naming the model's own cell, at a whitelisted
+  format, with no neighbour that could change it. Digits in any script are refused outside real calendar dates.
+- **D4:** the revoke scan reads every part's text and every non-structural attribute (PDF streams inflated). It compares
+  numbers as numbers.
+- **D6:** a case is practice unless it is made with `practice: false`, and that flag cannot change afterwards.
+- **D8:** code's status line, built from the check log, ends every reply that delivered a work file. Sentences claiming a
+  check the report does not show as passed are removed.
+- **D9:** triage says meets only for a closed list of plain commitment forms. A job is actionable only when every
+  verdict is exactly meets.
+
+Stated limits (word lists; each new gap found is added here with a test):
+- Number words and scale or unit words that are not on the lists, number words in other languages, CJK numerals (an owner
+  ruling is open: refusing them would also refuse ordinary Chinese or Spanish prose), Roman numerals spelled in letters,
+  and look-alike letters.
+- A year range or an "at" time can carry a count ("from 1950 to 2050").
+- Check-claim wording the vocabulary does not hold (other languages, new slang). The D8 status line is the guarantee:
+  the person always reads code's own account of the checks.
+- Fail-closed over-refusal in documents of words that are not figures ("last quarter", "third-party", "zero-trust").

@@ -54,11 +54,15 @@ code and tested.
      This is stricter than "matches no cell", on purpose: an equal-looking typed figure can be a stale copy (0011) or a
      coincidence, and the slot is the only form a later version's diff and revoke scan can follow.
    - What is refused in a document (`docs.typedNumbers`, after its adversarial review): any `{{...}}` that is not a
-     `{{ref:id}}` slot with a whitelisted format (General, 0, 0.0, #,##0, #,##0.00, 0%, 0.0%); a slot touching a digit,
-     a letter, another slot, "%" or a scale word; and, with slots removed, any digit in any script (`\p{N}`: 7, ٧, ७, ½,
+     `{{ref:id}}` slot with a whitelisted format (0, 0.0, #,##0, #,##0.00, 0%, 0.0%; not "General", which would print
+     0.4 as "0"); a slot whose neighbours could change the printed figure (only a space, an opening bracket or quote, or
+     a currency sign may come before it; only a space or closing punctuation after it, never straight into a digit or
+     another slot, and the next word may not be a scale or unit such as k, bn, lakh, x, %, ‰); and, with slots removed, any digit in any script (`\p{N}`: 7, ٧, ७, ½,
      Ⅻ) or number word ("forty", "a dozen", "half", "twice"). "H-1B", "Python 3", "401(k)" and a phone number are
      therefore refused: a figure the person wants printed goes in a cell. Roman numerals spelled in letters (XII) are not
-     read as numbers (a known limit).
+     read as numbers (a known limit). Open for the owner: CJK numerals (七, 三十) are letters, not `\p{N}`, and number
+     words in other languages ("veinte por ciento") are not read; refusing them would also refuse ordinary Chinese or
+     Spanish prose. Until a ruling, they are a stated limit in every document's report.
    - The one exception is a real calendar date (`model.dateSpans`): a valid ISO date, a month-name date with a real day
      and a year, "Month YYYY", an am/pm or "at" time, a year range, or a year after a year word with no noun after it.
    - In prose outside documents (`model.loose`, used where a figure may equal a cell), the same reading applies, and a

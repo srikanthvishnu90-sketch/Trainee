@@ -27,9 +27,10 @@ const XML_BAD = /[\u0000-\u0008\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uD
 export const cleanText = (s: string): string => String(s).replace(/[\u000B\u000C]/g, " ").replace(/\r\n?/g, "\n").replace(XML_BAD, "");
 const esc = (s: string): string => P.escXml(cleanText(s));
 // The formats model.formatValue prints; anything else could print text or digits that are not the cell.
-export const FORMAT_OK = /^(?:General|(?:#,##)?0(?:\.0{1,4})?%?)$/;
+// "General" is not on the list: formatValue would print it at zero decimals (0.4 as "0"), unlike Excel (124d review 2).
+export const FORMAT_OK = /^(?:#,##)?0(?:\.0{1,4})?%?$/;
 export class BadFormat extends Error {
-  constructor(public format: string) { super(`number format "${format}" is not one of General, 0, 0.0, #,##0, #,##0.00, 0%, 0.0%`); this.name = "BadFormat"; }
+  constructor(public format: string) { super(`number format "${format}" is not one of 0, 0.0, #,##0, #,##0.00, 0%, 0.0%`); this.name = "BadFormat"; }
 }
 
 export type DocBlock =
@@ -70,17 +71,27 @@ export function typedNumbers(text: string): string[] {
   const covered = (i: number) => slots.some((m) => i >= m.index! && i < m.index! + m[0].length);
   for (const m of t.matchAll(/\{\{|\}\}/g)) if (!covered(m.index!)) { out.push(t.slice(m.index!, m.index! + 24)); break; }
   for (const m of slots) if (m[2] !== undefined && !FORMAT_OK.test(m[2])) out.push(m[0]);
-  // 2. A slot touches nothing that would change the printed figure.
+  // 2. A slot sits only beside what cannot change the figure it prints (124d review 2: a deny-list of neighbours kept
+  //    missing "-", ".", "x", "19 280", "5 bn", "5‰"). Before a slot: the start, a space, an opening bracket or quote,
+  //    or a currency sign ($, €, £, ¥, ₹, each optionally followed by one space). After a slot: the end, or a space or
+  //    closing punctuation (. , ; : ! ? ) ] ' "), and the next word after a space may not be another slot, a digit, or a
+  //    scale or unit token (k, m, mn, bn, b, x, lakh, crore, %, ‰, percent, thousand, million, billion, ...).
+  const SCALE = /^(?:[kmb]|mn|mm|bn|x|lakhs?|crores?|percent|per\s?cent|pct|bps|basis|thousand|million|billion|trillion|dozen|hundred|[%‰‱٪％﹪])(?![\p{L}\p{N}])/iu;
   for (const m of slots) {
     const before = t.slice(0, m.index!), after = t.slice(m.index! + m[0].length);
-    if (/[\p{N}}]$|\p{N}[.,]$/u.test(before) || /^(?:[\p{N}\p{L}{%]|[.,](?=[\p{N}{])|\s*(?:percent|per\s?cent|thousand|million|billion)\b)/iu.test(after)) out.push(m[0]);
+    const okBefore = before === "" || /(?:^|[\s(\["'“‘])$/u.test(before) || /(?:^|[\s(\["'“‘])[$€£¥₹] ?$/u.test(before);
+    let okAfter = after === "" || /^[\s.,;:!?)\]'"”’]/u.test(after);
+    // Punctuation straight into a digit or another slot joins figures ("{{ref:a}}.{{ref:b}}", "{{ref:a}}'{{ref:b}}").
+    if (okAfter && /^[.,;:!?)\]'"”’]+[\p{N}{]/u.test(after)) okAfter = false;
+    const next = after.replace(/^[\s\u00A0\u202F\u2009]+/, "");
+    if (okAfter && next !== after && (/^\{\{/.test(next) || /^\p{N}/u.test(next) || SCALE.test(next))) okAfter = false;
+    if (!okBefore || !okAfter) out.push(m[0]);
   }
   // 3. With slots blanked and real dates masked, no digit in any script and no number word remains.
   let blank = t.replace(REF_ANY, (x) => " ".repeat(x.length));
-  const norm = blank.normalize("NFKC");
-  if (norm.length === blank.length) {
-    for (const [a, b] of dateSpans(norm)) blank = blank.slice(0, a) + " ".repeat(b - a) + blank.slice(b);
-  }
+  // Normalised one character at a time, so positions line up and one ™ or "…" does not switch the date exception off.
+  const norm = [...blank].map((ch) => { const n = ch.normalize("NFKC"); return n.length === ch.length ? n : n.slice(0, ch.length).padEnd(ch.length, " "); }).join("");
+  for (const [a, b] of dateSpans(norm)) blank = blank.slice(0, a) + " ".repeat(b - a) + blank.slice(b);
   for (const m of blank.matchAll(/[\p{N}][\p{N}.,]*/gu)) out.push(m[0]);
   for (const w of loose(blank.replace(/\p{N}/gu, " "), {})) out.push(w);
   return [...new Set(out)];
@@ -89,7 +100,10 @@ export function typedNumbers(text: string): string[] {
 // render: {{ref:id|format}} first (a format named in the slot), then model.render for {{ref:id}} with the model's formats.
 export function renderText(text: string, values: Values, formats: Record<string, string> = {}): string {
   const withFmt = String(text).replace(SLOT, (_, id: string, fmt: string) => render(`{{ref:${id}}}`, values, { [id]: fmt }));
-  return render(withFmt, values, formats);
+  const out = render(withFmt, values, formats);
+  // A figure JavaScript prints in E-notation (1e+21, 1e-7) is not a figure a reader can check (124d review 2).
+  if (/\d[eE][+-]?\d/.test(out) && !/\d[eE][+-]?\d/.test(String(text).replace(/\{\{[^}]*\}\}/g, " "))) throw new RangeError("a cell's value prints in E-notation; give it a format or a smaller unit");
+  return out;
 }
 
 // Evaluates the model and checks every text before anything is rendered; returns the renderer.
@@ -101,7 +115,9 @@ function prepare(cells: Cell[], texts: [string, string][], formats: Record<strin
   if (bad.length) throw new LooseNumber(bad);
   return { values, r: (t: string) => renderText(t, values, formats) };
 }
+const BLOCK_KINDS = new Set(["heading", "para", "bullets", "table"]);
 function docTexts(m: DocModel): [string, string][] {
+  m.blocks.forEach((b, i) => { if (!b || !BLOCK_KINDS.has((b as { kind?: string }).kind ?? "")) throw new RangeError(`block ${i + 1}: unknown kind ${JSON.stringify((b as { kind?: string })?.kind)}`); });
   // A table with no row writes a <w:tbl> Word reports as corrupt; it is refused, not written (124d review N7).
   m.blocks.forEach((b, i) => { if (b.kind === "table" && !(b.rows?.length && b.rows.some((r) => r.length))) throw new RangeError(`block ${i + 1}: a table needs at least one row with a cell`); });
   const out: [string, string][] = [["title", m.title]];
@@ -239,12 +255,18 @@ function chartXml(chart: NonNullable<Slide["chart"]>, values: Values, formats: R
 }
 
 export function writePptx(deck: Deck): Uint8Array {
+  if (!deck.slides?.length) throw new RangeError("a deck needs at least one slide");
   const texts: [string, string][] = [["title", deck.title]];
   deck.slides.forEach((s, i) => {
     const at = `slide ${i + 1}`;
     // Chart shape (124d review N3): one label per value, and no more series than the sheet columns B..Y the refs use.
     if (s.chart) {
       if (!s.chart.series.length) throw new RangeError(`${at}: a chart needs a series`);
+      for (const se of s.chart.series) {
+        if (!se.refs.length) throw new RangeError(`${at}: series "${se.name}" has no values`);
+        const fs = new Set(se.refs.map((r) => (deck.formats ?? {})[r] ?? deck.cells.find((c) => c.id === r)?.format ?? ""));
+        if (fs.size > 1) throw new RangeError(`${at}: series "${se.name}" mixes number formats; one series, one format`);
+      }
       if (s.chart.series.length > 24) throw new RangeError(`${at}: a chart takes at most 24 series`);
       for (const se of s.chart.series) if (se.labels.length !== se.refs.length) throw new RangeError(`${at}: series "${se.name}" has ${se.labels.length} labels for ${se.refs.length} values`);
     }

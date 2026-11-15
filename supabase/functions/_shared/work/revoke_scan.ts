@@ -1,11 +1,11 @@
 // WO-124a: the revoke scan (spec D4). A value the person took back is searched for in every part of the bytes: each
 // OOXML part (unzipped), metadata, filenames, alt text, and derived forms of the value. The audit names categories and
 // counts only; it never repeats a value, a form or a part name (a part name can itself carry the value).
-import { unzipSync, unzlibSync } from "npm:fflate@0.8.2";
+import { gunzipSync, unzipSync, unzlibSync } from "npm:fflate@0.8.2";
 import { asciiDigits } from "./model.ts";
 
 export type RevokedValue = string | number | { before: string | number; after: string | number };
-export type PartCategory = "body" | "metadata" | "alt text or media" | "comments or notes" | "filename";
+export type PartCategory = "body" | "metadata" | "alt text or media" | "comments or notes" | "filename" | "unreadable container";
 export interface RevokeHit { part: string; category: PartCategory; value: number; form: "percent" | "number" | "pair" | "text" }
 
 const UNIT_WORDS: Record<string, string> = {
@@ -164,14 +164,22 @@ const STRUCTURAL = new Set(["version", "encoding", "standalone", "id", "rid", "s
   "pos", "lim", "dist", "distt", "distb", "distl", "distr", "simplepos", "relativeheight", "behinddoc", "locked", "layoutincell", "allowoverlap", "noproof",
   "orient", "code", "char", "pitchfamily", "charset", "typeface", "panose", "mod", "sx", "sy", "kx", "ky", "spid", "shapeid", "nvpr", "ph", "hasCustomPrompt".toLowerCase()]);
 const CELLS = "\u0002cells ";
-const VAL_CONTENT = new Set(["alias", "tag", "docvar", "listitem", "displaytext", "placeholder", "comboboxitem", "dropdownlistitem", "text", "title", "fldsimple"]);
+const VAL_CONTENT = new Set(["alias", "tag", "docvar", "listitem", "displaytext", "placeholder", "comboboxitem", "dropdownlistitem", "text", "title", "fldsimple",
+  "default", "listentry", "statustext", "helptext", "cfvo", "crossesat", "max", "min", "result", "calcpr"]);
 const APP_COUNTERS = /<(?:\w+:)?(?:AppVersion|TotalTime|Words|Characters|CharactersWithSpaces|Pages|Lines|Paragraphs|Slides|Notes|HiddenSlides|MMClips|DocSecurity)>[^<]*</gi;
-function views(raw: string, pdf = false): string[] {
+// OOXML parts (XML inside a zip) are read without markup; any other file (code, HTML, plain text) is also read raw, so a
+// value inside "a<b ... >" survives (round 5).
+const isOoxmlPart = (part: string) => /\.(?:xml|rels|vml)$/i.test(part);
+function views(raw: string, pdf = false, part = ""): string[] {
+  raw = raw.replace(/<!\[CDATA\[([^]*?)\]\]>/g, " $1 ").replace(/<!--([^]*?)-->/g, " $1 ");
   const unent = (s: string) => s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) =>
     e[0] === "#" ? String.fromCodePoint(e[1].toLowerCase() === "x" ? parseInt(e.slice(2), 16) : Number(e.slice(1))) : ENT[e.toLowerCase()] ?? m);
   const xml = !pdf && /<[A-Za-z?!\/]/.test(raw);
   if (!xml) return [clean(unent(raw))];
-  const body = raw.replace(APP_COUNTERS, "<");
+  // app.xml (extended properties) by name, or by shape: a <Properties> root holding <AppVersion>. Only there are the
+  // counters stripped (round 5: stripping them from every part hid a customXml <Notes>).
+  const appXml = /docProps\/app\.xml$/i.test(part) || (/<(?:\w+:)?Properties\b/.test(raw) && /<(?:\w+:)?AppVersion>/.test(raw));
+  const body = appXml ? raw.replace(APP_COUNTERS, "<") : raw;
   // "val" is content only on elements that carry text (a content control's alias or tag, a document variable, a
   // presentation tag, a list item); on sz, color, jc, numFmt and the like it is a setting.
   const attrs: string[] = [];
@@ -187,7 +195,8 @@ function views(raw: string, pdf = false): string[] {
   // Stored cell values on their own (xlsx <v>, pivot-cache v=): the view in which a "$5" is just 5.
   const cells = [...body.matchAll(/<(?:\w+:)?v>([^<]*)<\/(?:\w+:)?v>|<(?:\w+:)?n\s[^>]*\bv="([^"]*)"/g)].map((m) => m[1] ?? m[2]).join(" ");
   const texts = [body.replace(/<[^>]*>/g, ""), body.replace(/<[^>]*>/g, " "), attrs.join(" \u0001 ")];
-  return [...texts.map((t) => clean(unent(t))), CELLS + clean(unent(cells))];
+  const rawView = isOoxmlPart(part) ? [] : [clean(unent(raw))];
+  return [...texts.map((t) => clean(unent(t))), ...rawView, CELLS + clean(unent(cells))];
 }
 // NFKC (fullwidth), every script's digits as ASCII, one apostrophe and quote form, no zero-width characters, and no ISO
 // timestamps.
@@ -201,6 +210,27 @@ export function clean(t: string): string {
 // A PDF's text is in Flate-compressed content streams; each is inflated and its string operands added as a part, so a
 // value docs.ts printed in a PDF is found (second review of WO-124d: the scan saw nothing in a PDF).
 const isPdf = (b: Uint8Array) => b.length > 4 && b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46;
+// Every PDF string, decoded (round 5): literal strings with all escapes (\\ddd octal, \\n, \\(, line continuations),
+// hex strings, and UTF-16BE strings that start with FE FF.
+function decodePdfLiteral(body: string): string {
+  return body.replace(/\\(?:([0-7]{1,3})|(\r\n|\r|\n)|(.))/g, (_m, oct?: string, nl?: string, ch?: string) =>
+    oct ? String.fromCharCode(parseInt(oct, 8)) : nl ? "" : ({ n: "\n", r: "\r", t: "\t", b: "\b", f: "\f" } as Record<string, string>)[ch!] ?? ch!);
+}
+function utf16be(bin: string): string {
+  if (bin.charCodeAt(0) !== 0xfe || bin.charCodeAt(1) !== 0xff) return bin;
+  let out = "";
+  for (let i = 2; i + 1 < bin.length; i += 2) out += String.fromCharCode((bin.charCodeAt(i) << 8) | bin.charCodeAt(i + 1));
+  return out;
+}
+export function pdfStrings(src: string): string[] {
+  const lit = [...src.matchAll(/\((?:\\[^]|[^\\)])*\)/g)].map((m) => utf16be(decodePdfLiteral(m[0].slice(1, -1))));
+  const hex = [...src.matchAll(/<([0-9A-Fa-f\s]+)>/g)].map((m) => {
+    const h = m[1].replace(/\s+/g, ""); let bin = "";
+    for (let i = 0; i + 1 < h.length; i += 2) bin += String.fromCharCode(parseInt(h.slice(i, i + 2), 16));
+    return utf16be(bin);
+  });
+  return [lit.join(" "), lit.join(""), hex.join(" "), hex.join("")];
+}
 function pdfText(bytes: Uint8Array): string[] {
   const s = new TextDecoder("latin1").decode(bytes);
   const out: string[] = [];
@@ -210,22 +240,31 @@ function pdfText(bytes: Uint8Array): string[] {
     let body = bytes.subarray(start, end);
     try { body = unzlibSync(body); } catch { /* not Flate: read as is */ }
     const ops = new TextDecoder("latin1").decode(body);
-    const strings = [...ops.matchAll(/\((?:\\[^]|[^\\)])*\)/g)].map((x) => x[0].slice(1, -1).replace(/\\([()\\])/g, "$1"));
-    out.push(strings.join(" "), strings.join(""));
+    out.push(...pdfStrings(ops));
   }
   return out;
 }
 
-function partsOf(files: Record<string, Uint8Array>): [string, Uint8Array][] {
-  const out: [string, Uint8Array][] = [];
+// Round 5: a container the scan cannot open (too deeply nested, corrupt, or gzip) is never a clean part: it is
+// returned as unreadable, and scan() reports it as a hit for every value (fail closed).
+const MAX_DEPTH = 6;
+const isGzip = (b: Uint8Array) => b.length > 2 && b[0] === 0x1f && b[1] === 0x8b;
+function partsOf(files: Record<string, Uint8Array>): [string, Uint8Array, boolean][] {
+  const out: [string, Uint8Array, boolean][] = [];
   const walk = (name: string, bytes: Uint8Array, depth: number) => {
-    if (depth < 3 && isZip(bytes)) {
+    if (isZip(bytes)) {
+      if (depth >= MAX_DEPTH) { out.push([name, bytes, true]); return; }
       let inner: Record<string, Uint8Array>;
-      try { inner = unzipSync(bytes); } catch { out.push([name, bytes]); return; }
+      try { inner = unzipSync(bytes); } catch { out.push([name, bytes, true]); return; }
       for (const [n, b] of Object.entries(inner)) walk(`${name}!${n}`, b, depth + 1);
       return;
     }
-    out.push([name, bytes]);
+    if (isGzip(bytes)) {
+      if (depth >= MAX_DEPTH) { out.push([name, bytes, true]); return; }
+      try { walk(`${name}!gunzip`, gunzipSync(bytes), depth + 1); } catch { out.push([name, bytes, true]); }
+      return;
+    }
+    out.push([name, bytes, false]);
   };
   for (const [n, b] of Object.entries(files)) walk(n, b, 0);
   return out;
@@ -235,9 +274,10 @@ function partsOf(files: Record<string, Uint8Array>): [string, Uint8Array][] {
 export function scan(files: Record<string, Uint8Array>, values: RevokedValue[]): Promise<RevokeHit[]> {
   const ms = values.map(matchersFor);
   const hits: RevokeHit[] = [];
-  for (const [part, bytes] of partsOf(files)) {
+  for (const [part, bytes, unreadable] of partsOf(files)) {
+    if (unreadable) { ms.forEach((m, i) => hits.push({ part, category: "unreadable container", value: i, form: m.form })); continue; }
     const pdf = isPdf(bytes);
-    const texts = [...decodings(bytes), ...(pdf ? pdfText(bytes) : [])].flatMap((t) => views(t, pdf));
+    const texts = [...decodings(bytes), ...(pdf ? [...pdfText(bytes), ...pdfStrings(new TextDecoder("latin1").decode(bytes))] : [])].flatMap((t) => views(t, pdf, part));
     const name = part.split("!").map((s) => s.split("/").pop() ?? s).join(" ").normalize("NFKC");
     ms.forEach((m, i) => {
       if (m.test(name)) hits.push({ part, category: "filename", value: i, form: m.form });

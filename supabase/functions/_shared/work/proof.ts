@@ -133,7 +133,9 @@ export function boundClaims(reply: string, rep: string): { refused: string[]; ok
     // Honest only if, with the reported miss taken out, nothing else in the clause is a verdict (round 4: "Tests passed
     // while the page check was not run" hid a success claim behind the miss).
     const rest = clause.replace(new RegExp(HONEST_MISS.source, "gi"), " ").replace(/\b(?:the|a|an|check|checks|was|were|is|are|been|here|yet|so|i|have|has|it|this|that|one|two|earlier|on|cells?|page|pages?|tests?|recompute|formulas?|lint|scan|run)\b/gi, " ");
-    const honest = HONEST_MISS.test(clause) && !NEGATED_FAIL.test(clause) && !CHECK_VOCAB.test(rest) && !/\b(?:passed|pass|works?|right|correct|fine|good)\b/i.test(clause.replace(new RegExp(HONEST_MISS.source, "gi"), " "));
+    const honest = HONEST_MISS.test(clause) && !NEGATED_FAIL.test(clause) && !CHECK_VOCAB.test(rest) &&
+      // round 7: the claim patterns are checked on the rest of the clause too
+      !CLAIMS.some((k) => k.cat !== "recompute" && k.cat !== "generic" && k.says.test(clause.replace(new RegExp(HONEST_MISS.source, "gi"), " "))) && !/\b(?:passed|pass|works?|right|correct|fine|good)\b/i.test(clause.replace(new RegExp(HONEST_MISS.source, "gi"), " "));
     if (honest) continue;
     if (!vocab) continue; // a subject named with no verdict ("here is the workbook")
     // Round 6: a whole-work claim ("All checks passed on the workbook", "fully verified") also needs a fully green report,

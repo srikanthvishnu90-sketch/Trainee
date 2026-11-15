@@ -90,6 +90,9 @@ function matchersFor(v: RevokedValue): { form: RevokeHit["form"]; test: (s: stri
   const small = Number.isInteger(p.num) && Math.abs(p.num) < 10;
   const cur = p.currency ? `${esc(p.currency)}\\s?` : "";
   const res = [new RegExp((small && cur ? cur : "") + numberPattern(p.num) + unit, "i")];
+  // A number revoked with a unit is also the number alone ("150000 USD" is in "$150,000 a year"), unless it is small
+  // (round 7). Small numbers keep their unit or sign, or a stored cell (below).
+  if (!small && (unit || cur)) res.push(new RegExp(numberPattern(p.num)));
   // Round 4 (D-088): a bare small number (revoked "7") is matched bare too: a miss that reports "nothing found" fails
   // open, a false block fails closed. Markup and app.xml counters are no longer read, so this blocks far less than before.
   if (small && !unit && !cur) res.splice(0, 1, new RegExp(numberPattern(p.num)));
@@ -146,7 +149,10 @@ function decodings(b: Uint8Array): string[] {
 const ENT: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
 // Every number written in a text, as a number (E-notation and leading-dot decimals included).
 function numbersIn(s: string): number[] {
-  return [...s.matchAll(/(?<![\w.])[-−]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?(?![\w])/g)].map((m) => Number(m[0].replace("−", "-"))).filter(Number.isFinite);
+  // US-grouped numbers are read whole (round 7: 17,280 read as 17 and 280), as well as plain and E-notation ones.
+  const grouped = [...s.matchAll(/(?<![\w.,])[-−]?\d{1,3}(?:,\d{3})+(?:\.\d+)?(?![\w]|,\d)/g)].map((m) => Number(m[0].replace("−", "-").replace(/,/g, "")));
+  const plain = [...s.matchAll(/(?<![\w.])[-−]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?(?![\w])/g)].map((m) => Number(m[0].replace("−", "-")));
+  return [...grouped, ...plain].filter(Number.isFinite);
 }
 // Markup is not content (third review of WO-124a): version="1.0", sheetId="1", sz="12" and pageMargins left="0.7"
 // made every file "hold" a revoked 100%, $1, $12 or 30%. A part is read as its text (tags removed, and tags as spaces
@@ -236,7 +242,13 @@ export function pdfStrings(src: string): string[] {
 // whose glyph codes are not text cannot be read, so the PDF is reported as unreadable rather than clean.
 export function pdfUnreadable(bytes: Uint8Array): boolean {
   const s = new TextDecoder("latin1").decode(bytes);
-  if (/\/Subtype\s*\/Type0\b/.test(s)) return true;
+  // Fonts whose codes are not text, encryption, and any /Filter anywhere in the file that is not plain Flate or DCT
+  // (an indirect /Filter, an array, LZW, ASCII85...) make the PDF unreadable (round 7: a nested dictionary hid the filter).
+  if (/\/Subtype\s*\/Type[03]\b|\/Encrypt\b/.test(s)) return true;
+  for (const f of s.matchAll(/\/Filter\s*(\[[^\]]*\]|\/[A-Za-z0-9]+|\d+\s+\d+\s+R)/g)) {
+    const names = f[1].startsWith("[") ? [...f[1].matchAll(/\/([A-Za-z0-9]+)/g)].map((x) => x[1]) : f[1].startsWith("/") ? [f[1].slice(1)] : ["(indirect)"];
+    if (!names.length || names.some((n) => !["FlateDecode", "Fl", "DCTDecode", "DCT"].includes(n))) return true;
+  }
   for (const m of s.matchAll(/stream\r?\n/g)) {
     const dict = s.slice(Math.max(0, m.index! - 400), m.index!);
     const filters = [...(dict.slice(dict.lastIndexOf("<<")).matchAll(/\/(\w+Decode|AHx|A85|Fl|LZW|RL|CCF|DCT)\b/g))].map((x) => x[1]);
@@ -289,7 +301,10 @@ function partsOf(files: Record<string, Uint8Array>): [string, Uint8Array, boolea
 
 // Returns a promise so a later scanner (a PDF text layer) can join without changing callers.
 export function scan(files: Record<string, Uint8Array>, values: RevokedValue[]): Promise<RevokeHit[]> {
-  const ms = values.map(matchersFor);
+  // A value the scan cannot build a matcher for is a hit everywhere (fail closed), never a throw or a clean pass.
+  const ms = values.map((v) => {
+    try { return matchersFor(v); } catch { return { form: "text" as const, test: () => true }; }
+  });
   const hits: RevokeHit[] = [];
   for (const [part, bytes, unreadable] of partsOf(files)) {
     if (unreadable) { ms.forEach((m, i) => hits.push({ part, category: "unreadable container", value: i, form: m.form })); continue; }

@@ -220,7 +220,9 @@ export function loose(prose: string, values: Values): string[] {
   // A digit group written any other way (12,5 / 3,5% / 1,23,456 / 1.234,56 / 1'234 / 1.2.3) is not US-grouped, so it
   // can never be matched to a cell with confidence: it is listed as typed (third review of WO-124a).
   for (const m of text.matchAll(/[$€£¥₹]?\d[\d.,'’]*\d(?:%|[A-Za-z]+)?/g)) {
-    if (masked.has(m.index!) || masked.has(m.index! + m[0].length - 1)) continue;
+    let all = true; // skipped only when the whole token lies inside a date span (round 7)
+    for (let i = m.index!; i < m.index! + m[0].length; i++) if (!masked.has(i)) { all = false; break; }
+    if (all) continue;
     const core = m[0].replace(/^[$€£¥₹]/, "").replace(/(?:%|[A-Za-z]+)$/, "");
     if (/^(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?$/.test(core)) continue; // US-grouped or plain: read above
     if (!found.some((f) => f.at === m.index && f.raw === m[0])) found.push({ at: m.index!, raw: m[0], typed: NaN, step: 0, pct: false });

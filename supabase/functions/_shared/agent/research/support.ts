@@ -58,7 +58,7 @@ const HEDGE_SHAPES = [
   /^i\s+(?:can't|cannot|couldn't|could not)\s+tell\s+(?:whether|if)\s+(?:it|this|that|they)\b[^,;:]*$/i,
   /^i\s+(?:can't|cannot|couldn't|could not)\s+verify\s+(?:it|this|that|them)$/i,
   /^i\s+(?:don't|do not)\s+have\s+(?:its|their|the|a|an|any)\s+[\p{L} -]{1,30}$/iu,
-  /^i\s+found\s+(?:no|nothing)\b[^,;:]*$/i,
+  // (round 3 of #849: "I found no X" is a claim about what a search returned; it is checked, never exempt)
   /^(?:that's|that is|this is|it's|it is|these are|those are)\s+(?:an?\s+|one\s+|only\s+)?(?:self-reported\s+|reported\s+|single\s+|personal\s+)?(?:anecdote|estimate|benchmark|example|account|data point|self-reported figure|self-reported number)s?(?:,?\s+(?:not|and not)\s+(?:an?\s+)?(?:proof|a rule|a guarantee|a market rate|a promise|data))*$/iu,
   /^treat\s+(?:it|this|that|them|these)\s+as\s+(?:an?\s+)?(?:rough|loose|ballpark)?\s*(?:benchmark|estimate|floor|starting point|signal)\b[^,;:]*$/i,
   /^(?:nothing|no application|no account)\b[^,;:]*\b(?:sent|submitted|applied(?: for| to)?|queued|saved|created)$/i,

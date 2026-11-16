@@ -270,6 +270,22 @@ export function clean(t: string): string {
 
 // A PDF's text is in Flate-compressed content streams; each is inflated and its string operands added as a part, so a
 // value docs.ts printed in a PDF is found (second review of WO-124d: the scan saw nothing in a PDF).
+const GLYPH: Record<string, string> = { zero: "0", one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9", space: " ", period: ".", comma: ",", percent: "%", dollar: "$", hyphen: "-", minus: "-", plus: "+" };
+// Round 13: the inflated bodies of a PDF's metadata (XMP) and embedded-file streams, which viewers show (document properties,
+// attachments) but the string reading of content streams never saw. Content streams stay read by their strings only, since
+// their operators are full of layout numbers.
+export function pdfStreams(bytes: Uint8Array): Uint8Array[] {
+  const s = new TextDecoder("latin1").decode(bytes), out: Uint8Array[] = [];
+  for (const m of s.matchAll(STREAM)) {
+    if (!m[1]) continue;
+    const dict = s.slice(Math.max(0, m.index! - 400), m.index!), own = dict.slice(dict.lastIndexOf("<<"));
+    if (!/\/Type\s*\/(?:Metadata|EmbeddedFile)\b|\/Subtype\s*\/XML\b/.test(own)) continue;
+    const body = streamBody(bytes, s, m);
+    if (!body) continue;
+    try { out.push(unzlibSync(body)); } catch { out.push(body); }
+  }
+  return out;
+}
 // Round 9: readers accept %PDF anywhere in the first 1024 bytes, so the scan does too.
 const isPdf = (b: Uint8Array) => b.length > 4 && latin1(b.subarray(0, 1024)).includes("%PDF");
 // Round 9: "stream" is followed by CRLF, LF, a lone CR, or spaces before the end of line; each is a stream start.
@@ -311,6 +327,17 @@ export function pdfUnreadable(bytes: Uint8Array): boolean {
   // Fonts whose codes are not text, encryption, and any /Filter anywhere in the file that is not plain Flate or DCT
   // (an indirect /Filter, an array, LZW, ASCII85...) make the PDF unreadable (round 7: a nested dictionary hid the filter).
   if (/\/Subtype\s*\/Type[03]\b|\/Encrypt\b/.test(s)) return true;
+  // Round 13: a simple font's /Differences that draws a code as another digit or letter ("a" drawn as "one") hides text
+  // from the string reading, so the PDF is unreadable; ordinary encodings that keep each code's own character are fine.
+  for (const d of s.matchAll(/\/Differences\s*\[([^\]]*)\]/g)) {
+    let code = -1;
+    for (const t of d[1].matchAll(/(\d+)|\/([A-Za-z0-9._]+)/g)) {
+      if (t[1]) { code = Number(t[1]); continue; }
+      const ch = GLYPH[t[2]] ?? (/^[A-Za-z]$/.test(t[2]) ? t[2] : null);
+      if (ch !== null && code >= 0 && ch !== String.fromCharCode(code)) return true;
+      code++;
+    }
+  }
   for (const f of s.matchAll(/\/Filter\s*(\[[^\]]*\]|\/[A-Za-z0-9]+|\d+\s+\d+\s+R)/g)) {
     const names = f[1].startsWith("[") ? [...f[1].matchAll(/\/([A-Za-z0-9]+)/g)].map((x) => x[1]) : f[1].startsWith("/") ? [f[1].slice(1)] : ["(indirect)"];
     if (!names.length || names.some((n) => !["FlateDecode", "Fl", "DCTDecode", "DCT"].includes(n))) return true;
@@ -321,6 +348,10 @@ export function pdfUnreadable(bytes: Uint8Array): boolean {
     const filters = [...(dict.slice(dict.lastIndexOf("<<")).matchAll(/\/(\w+Decode|AHx|A85|Fl|LZW|RL|CCF|DCT)\b/g))].map((x) => x[1]);
     if (filters.some((f) => f !== "FlateDecode" && f !== "Fl" && f !== "DCTDecode" && f !== "DCT")) return true;
     if (filters.some((f) => f === "DCTDecode" || f === "DCT")) continue; // an image
+    // Round 13: a PNG/TIFF predictor scrambles the inflated bytes, so such a stream is unreadable unless it is a cross-reference
+    // stream (numbers about the file's layout, not content).
+    const own = dict.slice(dict.lastIndexOf("<<"));
+    if (/\/Predictor\s+(\d+)/.test(own) && Number(/\/Predictor\s+(\d+)/.exec(own)![1]) > 1 && !/\/Type\s*\/XRef\b/.test(own)) return true;
     const body = streamBody(bytes, s, m);
     if (!body) return true;
     // Round 9: a stream is readable only if it inflates or is plain text; a Flate stream whose dictionary the scan
@@ -366,15 +397,18 @@ function zipEntries(b: Uint8Array): [string, Uint8Array][] {
   // record and the comment at the end of the file; entries tile the file from byte 0 to the directory with no gap or overlap;
   // each local header matches its central record (name, flags, method, CRC and sizes, or a matching data descriptor); only
   // known extra fields. Anything else throws, and the file is unreadable.
-  let ends = 0;
-  for (let i = Math.max(0, b.length - 65557); i + 3 < b.length; i++) if (b[i] === 0x50 && b[i + 1] === 0x4b && b[i + 2] === 0x05 && b[i + 3] === 0x06) ends++;
+  const ends: number[] = [];
+  for (let i = Math.max(0, b.length - 65557); i + 3 < b.length; i++) if (b[i] === 0x50 && b[i + 1] === 0x4b && b[i + 2] === 0x05 && b[i + 3] === 0x06) ends.push(i);
   const e = eocdAt(b);
-  if (e < 0 || ends !== 1) throw new RangeError("end record");
+  if (e < 0) throw new RangeError("end record");
   const n = u16(b, e + 10), cdSize = u32(b, e + 12), cdOff = u32(b, e + 16);
   if (u16(b, e + 4) || u16(b, e + 6) || u16(b, e + 8) !== n || n === 0xffff || cdOff === 0xffffffff) throw new RangeError("end record fields");
   if (cdOff + cdSize !== e || e + 22 + u16(b, e + 20) !== b.length) throw new RangeError("directory bounds");
-  const KNOWN_EXTRA = new Set([0x5455, 0x7875, 0x000a, 0xcafe, 0x5855, 0x7855]);
-  const extrasOk = (x: Uint8Array) => { let q = 0; while (q < x.length) { if (q + 4 > x.length) return false; const id = u16(x, q), len = u16(x, q + 2); if (!KNOWN_EXTRA.has(id) || q + 4 + len > x.length) return false; q += 4 + len; } return true; };
+  // Round 13: Office's growth-hint padding (0xa220) is a known field; every known field's payload is also read as text (a
+  // payload is file bytes like any other), returned as one "extra fields" part.
+  const KNOWN_EXTRA = new Set([0x5455, 0x7875, 0x000a, 0xcafe, 0x5855, 0x7855, 0xa220]);
+  const extras: Uint8Array[] = [];
+  const extrasOk = (x: Uint8Array) => { let q = 0; while (q < x.length) { if (q + 4 > x.length) return false; const id = u16(x, q), len = u16(x, q + 2); if (!KNOWN_EXTRA.has(id) || q + 4 + len > x.length) return false; extras.push(x.subarray(q + 4, q + 4 + len)); q += 4 + len; } return true; };
   const out: [string, Uint8Array][] = [], seen = new Set<string>(), spans: [number, number][] = [];
   let p = cdOff;
   for (let k = 0; k < n; k++) {
@@ -414,6 +448,10 @@ function zipEntries(b: Uint8Array): [string, Uint8Array][] {
   let at = 0;
   for (const [a, z] of spans) { if (a !== at) throw new RangeError("gap or overlap"); at = z; }
   if (at !== cdOff) throw new RangeError("bytes before the directory");
+  // Round 13: an end-record signature inside an entry's own data (a stored zip inside the zip) is that entry's, not a second
+  // end record of this file; any other one is.
+  if (ends.filter((i) => !spans.some(([a, z]) => i >= a && i < z)).length !== 1) throw new RangeError("second end record");
+  if (extras.some((x) => x.length)) out.push(["(zip extra fields)", new TextEncoder().encode(extras.map(latin1).join("\n"))]);
   return out;
 }
 // Round 11: every gzip member, each to its true end, with its CRC and size checked; the file must end exactly after the last
@@ -426,7 +464,7 @@ function gzipMembers(b: Uint8Array): [Uint8Array, string] {
     if (m.length < 18 || m[0] !== 0x1f || m[1] !== 0x8b || m[2] !== 8 || (m[3] & 0xe0)) throw new RangeError("gzip member");
     const flg = m[3];
     let q = 10;
-    if (flg & 4) q += 2 + u16(m, q);
+    if (flg & 4) { const xl = u16(m, q); metas.push(latin1(m.subarray(q + 2, q + 2 + xl))); q += 2 + xl; } // round 13: FEXTRA is read too
     for (const bit of [8, 16]) { if (!(flg & bit)) continue; const end = m.indexOf(0, q); if (end < 0) throw new RangeError("gzip header"); metas.push(latin1(m.subarray(q, end))); q = end + 1; }
     if (flg & 2) q += 2;
     const [d, used] = inflateRaw(m.subarray(q));
@@ -460,6 +498,8 @@ function partsOf(files: Record<string, Uint8Array>): [string, Uint8Array, boolea
       walk(`${name}!gunzip`, inner, depth + 1);
       return;
     }
+    // Round 13: a PDF's metadata and attachments are parts of their own (an attached docx is opened like any zip).
+    if (isPdf(bytes) && depth < MAX_DEPTH) pdfStreams(bytes).forEach((b, k) => walk(`${name}!pdf-stream-${k}`, b, depth + 1));
     out.push([name, bytes, false]);
   };
   for (const [n, b] of Object.entries(files)) walk(n, b, 0);

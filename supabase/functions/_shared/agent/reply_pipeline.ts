@@ -126,13 +126,22 @@ export function unitNames(u: EvidenceUnit, weak = false): string[] {
     const words = m[0].replace(/[.'’]+$/, "").split(/\s+/).filter((w) => !NOT_NAME.test(w.replace(/[.'’s]+$/, "")) && !NOT_NAME.test(w) && !PLACE.test(w));
     // (with `weak`, an opening single word counts when what follows reads as an organisation's: "Citadel interns must…",
     // "Acme pays…", "Stripe's…"; "Registered nurses…" does not)
-    const orgish = /^(?:['’]s\b|\s+(?:interns?|internships?|employees?|engineers?|analysts?|staff|hires?|hiring|pays?|paid|offers?|requires?|wants?|expects?|asks?|has|have|is|was|gives?|provides?|sponsors?|recruits?|accepts?|rejects?|posted|lists?)\b)/i.test(text.slice(m.index! + m[0].length));
+    // (round 7: an adverb or an appositive may sit between the name and its verb, "X typically requires", "X, a hedge fund,
+    // pays"; and a name after at/for/with/joining is an employer too, "At Citadel, interns must…", "interns at Citadel")
+    const after = text.slice(m.index! + m[0].length), before = text.slice(Math.max(0, m.index! - 40), m.index!);
+    const VERB = "(?:interns?|internships?|employees?|engineers?|analysts?|staff|hires?|hiring|pays?|paid|offers?|requires?|wants?|expects?|asks?|has|have|is|was|gives?|provides?|sponsors?|recruits?|accepts?|rejects?|posted|lists?|needs?|must|will|can|does|doesn't|won't)";
+    const orgish = new RegExp(`^(?:['’]s\\b|,\\s[^,.]{1,40},\\s+${VERB}\\b|\\s+(?:(?:typically|reportedly|also|only|usually|now|still|currently|generally|often|always|never)\\s+)?${VERB}\\b)`, "i").test(after) ||
+      /^(?:at|for|with|joining|join)\s/i.test(m[0]) ||
+      /\b(?:at|for|with|joining|join|from)\s+$/i.test(before) && !/\b(?:according|based|data|figures?|numbers?|reports?)\s+(?:to|on|from)\s+$/i.test(before);
+    // (round 7: a source is dropped only where it is used as one, "on Glassdoor", "according to BLS", "per Levels.fyi"; Google or
+    // the page's own host stating an employer fact about itself is that employer)
+    const asSource = /\b(?:on|per|via|according to|source:|from|data from|reported by|by)\s+(?:the\s+)?$/i.test(before) || /^\s+(?:reports?|data|says|survey|estimates?|lists|shows)\b/i.test(after);
     // Round 6: a name counts only where the page states an employer fact about it ("Citadel interns must…", "Acme pays…");
     // "Python", "Fall 2027" or a source named in passing ("…on Glassdoor") name no employer.
-    if (!orgish) continue;
+    if (!orgish || asSource) continue;
     if (start && words.length < 2 && m[0].split(/\s+/).length < 2 && !weak) continue;
     const name = words.join(" ").replace(/['’]s$/, "").trim();
-    if (name.length > 1 && !places.has(name.toLowerCase()) && !SOURCE.test(name) && name.toLowerCase().replace(/\s+/g, "") !== host) out.push(name);
+    if (name.length > 1 && !places.has(name.toLowerCase()) && !(asSource && (SOURCE.test(name) || name.toLowerCase().replace(/\s+/g, "") === host))) out.push(name);
   }
   return [...new Set(out)];
 }
@@ -167,6 +176,10 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   // (round 6: "one employer or several" counts the posting owners only)
   // (an owner guessed for a line carried from an earlier reply is that line's subject, not another employer of this turn)
   const postingOwners = new Set(ledger.units.filter((u) => u.source !== "an earlier reply in this chat").map((u) => u.owner).filter((w): w is string => !!w && w.trim().length > 1));
+  // (round 7: a known employer written anywhere in a page names that page, whatever the phrasing)
+  for (const u of ledger.units) if (u.kind === "page") for (const o of postingOwners) if (nameFoundIn(o, u.text)) {
+    for (const map of [named, anyNamed]) { const xs = map.get(u.id) ?? []; if (!xs.includes(o)) map.set(u.id, [...xs, o]); }
+  }
   const mine = (u: EvidenceUnit, subj: string | null) => u.owner ? (subj ? u.owner === subj : postingOwners.size < 2)
     : subj ? nameFoundIn(subj, u.text) : (anyNamed.get(u.id) ?? []).length === 0 && !(postingOwners.size >= 2 && u.source === "an earlier reply in this chat");
   let carried: string | null = null;

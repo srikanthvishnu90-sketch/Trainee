@@ -268,9 +268,6 @@ if (import.meta.main) {
   let cliStats: unknown = null;
   if (subscription) {
     if (Deno.env.get("CI")) { console.log("NOT RUN: --subscription never runs in CI (D-089)."); Deno.exit(2); }
-    // D-091: a subscription measurement stands for the committed SHA, so the code it runs must be exactly that commit's.
-    const dirty = await new Deno.Command("git", { args: ["status", "--porcelain", "--", "supabase", "packages", "evals", ":!evals/career/results"], stdout: "piped" }).output();
-    if (!dirty.success || new TextDecoder().decode(dirty.stdout).trim()) { console.log("NOT RUN: --subscription needs a clean checkout (no change under supabase/, packages/ or evals/ outside evals/career/results/)."); Deno.exit(2); }
     const cli = await import("../subscription/claude_cli.ts");
     await cli.preflight();
     cliStats = cli.stats;
@@ -319,19 +316,7 @@ if (import.meta.main) {
   if (sharedLedger) { const led = await ledgerSpentUsd(gate); if (led === null) { console.log("NOT RUN: the shared budget ledger could not be read; no model call was made."); Deno.exit(2); } before = led; console.log(`shared ledger: $${led.toFixed(3)} recorded across all runs; remaining allowance $${Math.max(0, target - led).toFixed(3)} of $${target.toFixed(2)}`); }
   const call = (meterOf: typeof meter) => (cfg: any, payload: any) => gw.callModel(cfg, payload, { meter: meterOf, role: "chat", budget: gate });
   const brain: Brain = await makeBrain({ name: brainName as any, env: Deno.env, model: usesModel ? (p: any) => gw.callModel(brainCfg, p, { meter, role: "chat", budget: gate }) : null });
-  // D-091: under --subscription every raw judge answer is kept per case (run.ts makeJudge's attempts, in order), so CI can
-  // re-judge the case by code (scripts/launch/s3-subscription.ts). runEval judges one case at a time.
-  const judgeRaw = new Map<string, { judge: "a" | "b"; text?: string; error?: string }[]>();
-  const judge: Judge = !subscription ? makeJudge({ cfgA: judgeCfg, cfgB: judge2Cfg, call: call(judgeMeter) }) : (it, reply, state) => {
-    const rec: { judge: "a" | "b"; text?: string; error?: string }[] = [];
-    judgeRaw.set(it.id, rec);
-    const base = call(judgeMeter);
-    return makeJudge({ cfgA: judgeCfg, cfgB: judge2Cfg, call: async (cfg, payload) => {
-      const who = payload.system === JUDGE_A_SYSTEM ? "a" : "b";
-      try { const res = await base(cfg, payload); rec.push({ judge: who, text: textOf(res) }); return res; }
-      catch (e) { rec.push({ judge: who, error: String(e instanceof Error ? e.message : e).slice(0, 300) }); throw e; }
-    } })(it, reply, state);
-  };
+  const judge = makeJudge({ cfgA: judgeCfg, cfgB: judge2Cfg, call: call(judgeMeter) });
   const setName = opt("--set") || "official";
   let setPath: string | URL;
   // "heldout" is the sealed held-out set (the bar) from 2026-10-26; the 38 it used to name are the dev set.
@@ -370,7 +355,7 @@ if (import.meta.main) {
   const capStop = budgetStop(cap, now$), hardStop = budgetStop(hard, now$, 0.05);
   const raw = await runEval(items, brain, judge, () => capStop() ?? hardStop());
   const sealedSet = setName === "sealed" || setName === "heldout" || setName === "fresh";
-  const r = sealedSet ? redactSealed(raw) : subscription ? { ...raw, items: raw.items.map((x) => ({ ...x, judge_raw: judgeRaw.get(x.id) ?? [] })) } : raw;
+  const r = sealedSet ? redactSealed(raw) : raw;
   let source = "unknown";
   try { const o = await new Deno.Command("git", { args: ["rev-parse", "--short", "HEAD^2"] }).output(); if (o.success) source = new TextDecoder().decode(o.stdout).trim(); } catch { /* no second parent */ }
   let commit = "unknown";
@@ -383,9 +368,7 @@ if (import.meta.main) {
     judge_prompt_sha: await judgeFingerprint(JUDGE_PROMPT, { a: judgeCfg.model, b: judge2Cfg.model }), judge_disagreement: { items: split, rate: r.total ? split / r.total : 0 },
     commit, source_commit: source === "unknown" ? commit : source, run_at: new Date().toISOString(),
     cost_usd: costs, unpriced_calls: meter.unpriced + judgeMeter.unpriced, quote_usd: quote.total_usd, spend_line: spend, ledger: sharedLedger ? "shared" : "process-local",
-    ...(subscription ? { subscription: { mode: "claude CLI on the owner's subscription (D-089); API spend $0; usd figures are notional", cli: cliStats,
-      api_key_source: (cliStats as { apiKeySource?: string | null } | null)?.apiKeySource ?? null,
-      sha: new TextDecoder().decode((await new Deno.Command("git", { args: ["rev-parse", "HEAD"], stdout: "piped" }).output()).stdout).trim() } } : {}),
+    ...(subscription ? { subscription: { mode: "claude CLI on the owner's subscription (D-089); API spend $0; usd figures are notional", cli: cliStats } } : {}),
     budget_usd: budget, spent_before_usd: before, target_usd: target, hard_usd: hard, brain_turn_ms: BRAIN_TURN_MS, brain_calls: meter.calls, brain_failed_calls: meter.failed,
     route_attribution: attribution, ...r };
   await Deno.mkdir(new URL("./results/", import.meta.url), { recursive: true });

@@ -144,7 +144,8 @@ export function typedNumbers(text: string): string[] {
   }).join("");
   // Round 7: a percent, a multiplier or a scale word right after a date makes a figure of it ("May 2019%", "at 9:30%").
   const SCALE_AFTER = /^\s*(?:[%‰‱٪％﹪×]|(?:x|k|m|mn|bn|b|percent|per\s?cent|pct|bps|thousand|million|billion)(?![\p{L}\p{N}]))/iu;
-  for (const [, b] of dateSpans(norm)) if (SCALE_AFTER.test(blank.slice(b).normalize("NFKC"))) out.push(blank.slice(Math.max(0, b - 8), b + 4));
+  // Round 11: the same scale list as after a slot ("May 1, 2019 crore", "at 9:30 grand").
+  for (const [, b] of dateSpans(norm)) if (SCALE_AFTER.test(blank.slice(b).normalize("NFKC")) || SCALE.test(blank.slice(b).normalize("NFKC").replace(/^\s+/, ""))) out.push(blank.slice(Math.max(0, b - 8), b + 4));
   for (const [a, b] of dateSpans(norm)) blank = blank.slice(0, a) + " ".repeat(b - a) + blank.slice(b);
   for (const m of blank.matchAll(/[\p{N}][\p{N}.,]*/gu)) out.push(m[0]);
   // Round 9: a character that is not a number but carries digits (㏪, ㋋, ㍘: "11日", "12月", "0点") is a figure too.

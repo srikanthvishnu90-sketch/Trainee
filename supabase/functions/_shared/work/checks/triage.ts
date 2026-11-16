@@ -48,7 +48,7 @@ const SUBJECTS: [RegExp, RegExp][] = [
 // acceptable", "Remote: no.", "relocation is not wanted").
 // Round 11: the whole text is read, not clause by clause; a split at a comma or a bracket cut "Remote, not acceptable"
 // from its negation. Several subjects are already refused before this (round 7), so nothing needs splitting.
-const REFUSAL = /\b(?:dealbreaker|deal breaker|unacceptable|not acceptable|not ok|not okay|out of the question|won't|can't|avoid\w*|is out|anything but|opposite)\b/;
+const REFUSAL = /\b(?:dealbreaker|deal breaker|unacceptable|not acceptable|not ok|not okay|out of the question|won't|can't|avoid\w*|is out|anything but|opposite|un acceptable|off the table|rejected|forbidden|prohibited|hard pass)\b|❌/;
 function topicHas(topic: string, about: RegExp): boolean {
   return new RegExp(about.source).test(topic) && !NEG.test(topic) && !REFUSAL.test(topic);
 }
@@ -59,7 +59,7 @@ function aboutOther(s: string, limit?: { id: string; text: string }): boolean {
   // Round 12: a constraint that names a subject and carries a negation or refusal anywhere, in its id or its text, does not
   // plainly want that subject, so no commitment meets it: not one naming a subject, and not "yes", "it is available" or
   // "we offer it" either (the subject named only in the id, with "Not acceptable" as the text, had met).
-  const full = normalise(`${id} ${limit.text ?? ""}`);
+  const full = normalise(`${id} ${limit.text ?? ""}`.replace(/[_-]+/g, " ")); // round 13: "deal-breaker", "un-acceptable"
   if (SUBJECTS.some(([, a]) => new RegExp(a.source).test(full)) && (NEG.test(full) || REFUSAL.test(full))) return true;
   // Round 8: the id goes through the same rules as the text: a negated subject (no_hybrid) is not the subject, and an id or
   // text naming several subjects (visa_and_relocation) lets no subject-bearing statement meet.
@@ -85,7 +85,9 @@ function aboutOther(s: string, limit?: { id: string; text: string }): boolean {
 /** Classifies one statement about one constraint (pass the constraint so a commitment about another subject is unknown). */
 export function classify(says: string, limit?: { id: string; text: string }): Verdict {
   const s = normalise(says);
-  if (s === "meets" || s === "unknown" || s === "conflict") return s;
+  // Round 13: a literal "meets" goes through the subject check like any commitment; only the fail-closed words return at once.
+  if (s === "unknown" || s === "conflict") return s;
+  if (s === "meets") return aboutOther(s, limit) ? "unknown" : "meets";
   if (!s) return "unknown";
   const bare = s.replace(/[.!]+$/, "").trim();
   if (MEETS.some((re) => re.test(bare))) return aboutOther(bare, limit) ? "unknown" : "meets";

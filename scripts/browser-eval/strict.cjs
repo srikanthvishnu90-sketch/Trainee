@@ -16,6 +16,7 @@
 //   - a page script cancels every form submit, form.submit() and requestSubmit(), and counts the attempt;
 //   - the runner is stopped before its click, with retries 0; robots.txt is obeyed; 1 page load a second per host.
 //   node scripts/browser-eval/strict.cjs --sample scripts/browser-eval/sample.csv --label strict-1 [--max-per-provider 20] [--providers greenhouse,lever,workable,breezy,ashby] [--persona default|full]
+//     [--answered | --answered-from <an earlier strict.jsonl>]  (the answered column: synth-answers.cjs; never the headline)
 // --persona full (eval-lib FULL_FACTS) is a separate run and a separate column: the same synthetic person with the facts a real
 // applicant confirms (city, state, US work authorization, no sponsorship need). The default persona's number is never replaced.
 const fs = require("node:fs");
@@ -23,6 +24,7 @@ const path = require("node:path");
 const crypto = require("node:crypto");
 const lib = require("./eval-lib.cjs");
 const d072 = require("./d072.cjs");
+const { synthesize } = require("./synth-answers.cjs");
 const { applyOne, payloadHash, NeedsUser } = require("../../workers/career-browser/parallel-apply.cjs");
 // The apply VM's own verdict on the link (atsOf): a pass on a board the VM refuses is not one production can reach.
 const { atsOf } = require("../../workers/career-browser/apply-vm.cjs");
@@ -177,7 +179,7 @@ async function strictPosting(browser, item, o) {
   const twin = host.startsWith("www.") ? host.slice(4) : `www.${host}`;
   const allowHosts = [...new Set([host, twin, ...(PROVIDER_HOSTS[item.provider] || [])])];
   const resumeSha = crypto.createHash("sha256").update(fs.readFileSync(o.resumePath)).digest("hex");
-  const p = { id: `${item.provider}-${item.n ?? ""}`, ats: item.provider, url: item.url, facts: lib.PERSONAS[persona], answers: {}, resume: { path: o.resumePath, sha256: resumeSha, preparedWithSha256: resumeSha } };
+  const p = { id: `${item.provider}-${item.n ?? ""}`, ats: item.provider, url: item.url, facts: lib.PERSONAS[persona], answers: o.answers || {}, resume: { path: o.resumePath, sha256: resumeSha, preparedWithSha256: resumeSha } };
   p.approval = { approval_id: "strict-dry-run", hash: payloadHash(p) };
   const gate = strictGate(item, r, o);
   const stop = strictStop();
@@ -194,18 +196,43 @@ async function strictPosting(browser, item, o) {
   return r;
 }
 
+// --answered (synth-answers.cjs): the same posting driven again with a synthetic answer to every question the runner handed back
+// as the person's, up to three rounds. Its own column; the headline row above is never changed by it.
+const REACHED = new Set(["pass", "ready_except_upload"]);
+async function answeredPosting(browser, item, o, first) {
+  const cut = (row, rounds, asked, extra = {}) => ({ result: REACHED.has(row.result) ? row.result : "fail", reason: row.reason, field: row.field || row.error || null, rounds, asked,
+    needs: row.result === "pass" ? null : (row.needs || []).slice(0, 8).map((n) => ({ label: String(n.label || "").slice(0, 80), reason: n.reason, ...(n.kind ? { kind: n.kind } : {}), ...(n.detail ? { detail: String(n.detail).slice(0, 160) } : {}) })), ...extra });
+  let row = first, answers = {};
+  for (let round = 1; round <= 3; round++) {
+    if (REACHED.has(row.result) || row.reason !== "missing_required_answer") return cut(row, round - 1, Object.keys(answers).length);
+    const s = synthesize(row.needs, answers);
+    if (s.unanswerable.length) return cut(row, round - 1, Object.keys(answers).length, { unanswerable: s.unanswerable.slice(0, 6) });
+    answers = s.answers;
+    row = await strictPosting(browser, item, { ...o, answers });
+    if (/^BREACH/.test(row.reason || "")) return { result: "fail", reason: row.reason, rounds: round, asked: Object.keys(answers).length };
+  }
+  return cut(row, 3, Object.keys(answers).length);
+}
+
+// The answered column's counts (absent when the run had no --answered).
+function answeredCounts(rs) {
+  const a = rs.filter((x) => x.answered);
+  if (!a.length) return {};
+  const fails = Object.entries(a.filter((x) => x.answered.result === "fail").reduce((m, x) => ((m[x.answered.reason] = (m[x.answered.reason] || 0) + 1), m), {})).sort((p, q) => q[1] - p[1]);
+  return { answered_pass: a.filter((x) => x.answered.result === "pass").length, answered_upload: a.filter((x) => x.answered.result === "ready_except_upload").length, answered_top_fail: fails.slice(0, 4) };
+}
 function summarize(rows) {
   const by = new Map();
   for (const x of rows) { if (!by.has(x.provider)) by.set(x.provider, []); by.get(x.provider).push(x); }
   const reasons = (rs) => Object.entries(rs.filter((x) => x.result === "fail").reduce((m, x) => ((m[x.reason] = (m[x.reason] || 0) + 1), m), {})).sort((a, b) => b[1] - a[1]);
   const prov = [...by].sort().map(([provider, rs]) => ({ provider, sampled: rs.length, pass: rs.filter((x) => x.result === "pass").length,
     ready_if_answered: rs.filter((x) => x.result === "ready_if_answered").length, ready_except_upload: rs.filter((x) => x.result === "ready_except_upload").length, fail: rs.filter((x) => x.result === "fail").length, top_fail: reasons(rs).slice(0, 3),
-    vm_drives: rs.filter((x) => (x.vm || vmVerdict(x.url)) === "drives").length, vm_pass: rs.filter((x) => x.result === "pass" && (x.vm || vmVerdict(x.url)) === "drives").length }));
+    vm_drives: rs.filter((x) => (x.vm || vmVerdict(x.url)) === "drives").length, ...answeredCounts(rs), vm_pass: rs.filter((x) => x.result === "pass" && (x.vm || vmVerdict(x.url)) === "drives").length }));
   const all = { sampled: rows.length, pass: rows.filter((x) => x.result === "pass").length,
     vm_pass: rows.filter((x) => x.result === "pass" && (x.vm || vmVerdict(x.url)) === "drives").length, ready_if_answered: rows.filter((x) => x.result === "ready_if_answered").length,
     ready_except_upload: rows.filter((x) => x.result === "ready_except_upload").length, uploads_simulated: rows.reduce((a, x) => a + (x.upload_simulated || 0), 0),
     sends_blocked: rows.reduce((a, x) => a + x.sent_blocked, 0), graphql_reads: rows.reduce((a, x) => a + x.graphql_reads, 0),
-    breaches: rows.filter((x) => /^BREACH/.test(x.reason || "")).length, top_fail: reasons(rows).slice(0, 8) };
+    breaches: rows.filter((x) => /^BREACH/.test(x.reason || "") || /^BREACH/.test((x.answered && x.answered.reason) || "")).length, top_fail: reasons(rows).slice(0, 8), ...answeredCounts(rows) };
   return { all, prov, d072: d072.tally(rows) };
 }
 
@@ -216,6 +243,10 @@ function markdown(label, s, persona = "default") {
     "| provider | sampled | pass | pass % | ready if answered | ready except upload | fail | VM today | pass the VM drives | top failure reasons |", "|---|---|---|---|---|---|---|---|---|---|"];
   for (const x of s.prov) L.push(`| ${x.provider} | ${x.sampled} | ${x.pass} | ${pct(x.pass, x.sampled)} | ${x.ready_if_answered} | ${x.ready_except_upload} | ${x.fail} | ${x.vm_drives === x.sampled ? "drives" : x.vm_drives ? `drives ${x.vm_drives}/${x.sampled}` : "refuses"} | ${x.vm_pass} | ${x.top_fail.map(([k, n]) => `${k} ${n}`).join("; ")} |`);
   L.push("", "Failure reasons overall: " + s.all.top_fail.map(([k, n]) => `${k} ${n}`).join("; "));
+  if (s.all.answered_pass !== undefined) {
+    L.push("", `**Answered (--answered, not the headline): ${s.all.answered_pass} / ${s.all.sampled} reached the instant before Submit once every question the runner handed back as the person's had a synthetic TEST answer (+ ${s.all.answered_upload} with the upload simulated).** Execution failures left: ${s.all.answered_top_fail.map(([k, n]) => `${k} ${n}`).join("; ")}.`, "",
+      "| provider | answered: reached Submit | answered: upload simulated | answered: top failures |", "|---|---|---|---|", ...s.prov.map((x) => `| ${x.provider} | ${x.answered_pass} | ${x.answered_upload} | ${(x.answered_top_fail || []).map(([k, n]) => `${k} ${n}`).join("; ")} |`));
+  }
   if (s.d072) {
     const t = s.d072;
     L.push("", `**D-072 (99% bar): (a) ${t.a} + (b) ${t.b} = ${t.a + t.b} / ${t.n}; needs ${t.need}; ${t.meets ? "meets" : "does not meet"}.** Raw reached Submit: ${t.raw_pass}.`, "",
@@ -238,8 +269,14 @@ async function main() {
   if (!lib.PERSONAS[persona]) { console.error(`unknown --persona ${persona} (default|full)`); process.exit(2); }
   const o = { persona, robots: new Map(), pacer: lib.createPacer(), ua: `Mozilla/5.0 ${lib.UA_TOKEN}`, resumePath: lib.syntheticResume(path.join(out, "fixtures")) };
   const rows = new Array(items.length); let next = 0;
+  // --answered: the answered column beside the headline. --answered-from <strict.jsonl>: the headline rows of a run already made
+  // (same sample) are kept as they are and only the answered rounds are driven (fewer page loads on the boards).
+  const answered = a.includes("--answered") || !!arg("answered-from", "");
+  const prior = arg("answered-from", "") ? new Map(fs.readFileSync(arg("answered-from"), "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).map((x) => [x.url, x])) : null;
   const conc = Math.max(1, Number(arg("concurrency", 6)));
-  await Promise.all(Array.from({ length: conc }, async () => { while (next < items.length) { const i = next++; rows[i] = await strictPosting(browser, items[i], o);
+  await Promise.all(Array.from({ length: conc }, async () => { while (next < items.length) { const i = next++; rows[i] = (prior && prior.get(items[i].url)) || await strictPosting(browser, items[i], o);
+    if (answered) { rows[i].answered = await answeredPosting(browser, items[i], o, rows[i]); const w = rows[i].answered;
+      console.log(["ANSWERED", rows[i].provider, w.result, w.reason, w.field || "", `rounds=${w.rounds}`, `asked=${w.asked}`, rows[i].url, JSON.stringify(w.unanswerable || (w.result === "fail" ? w.needs : []) || [])].join(" | ")); }
     const x = rows[i]; console.log(["STRICT", x.provider, x.result, `vm=${x.vm}`, x.reason, x.field || x.error || "", `blocked=${x.sent_blocked}`, `gql=${x.graphql_reads}`, `upload_simulated=${x.upload_simulated}`, `${(x.ms / 1000).toFixed(1)}s`, x.url, `persona=${x.persona}`].join(" | "));
     if (x.handoff) console.log("HANDOFF | " + x.provider + " | " + x.url + " | " + JSON.stringify({ reason: x.handoff.reason, wall: x.handoff.wall, link: x.handoff.link, card: x.handoff.card || null, step: x.handoff.step, filled: x.handoff.filled.length, at_door: x.handoff.at_door, remaining: x.handoff.remaining.slice(0, 6) }));
     console.log("D072 | " + x.provider + " | " + x.d072.outcome + " | " + x.d072.cause + " | " + x.url);
@@ -256,4 +293,4 @@ async function main() {
   if (s.all.breaches) process.exit(3);
 }
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
-module.exports = { strictGate, STRICT_INIT, strictStop, simulatedUpload, simulatedFileRead, SIMULATED_FILE, SIMULATED_UPLOADS, strictPosting, graphqlRead, robotsOk, summarize, markdown, CUSTOM_ONLY, PROVIDER_HOSTS };
+module.exports = { answeredPosting, answeredCounts, strictGate, STRICT_INIT, strictStop, simulatedUpload, simulatedFileRead, SIMULATED_FILE, SIMULATED_UPLOADS, strictPosting, graphqlRead, robotsOk, summarize, markdown, CUSTOM_ONLY, PROVIDER_HOSTS };

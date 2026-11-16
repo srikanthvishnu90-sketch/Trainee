@@ -40,7 +40,15 @@ const INVISIBLE = /[\p{Cf}\p{Default_Ignorable_Code_Point}\u034F]/gu;
 const BLANK = /[\u3164\u2800\u115F\u1160\uFFA0]/gu;
 // Round 7: every space character prints as U+0020 and a line break inside a run as a space, so a hair or thin space cannot
 // join two slots into one figure ("19,\u200A280") in DOCX or PPTX, as the PDF writer already did.
-export const cleanText = (s: string): string => String(s).replace(INVISIBLE, "").replace(BLANK, " ").replace(/[\p{Zs}\t\r\n\u2028\u2029]/gu, " ").replace(/[\u000B\u000C]/g, " ").replace(/[\u0080-\u009F]/g, "").replace(/\r\n?/g, "\n").replace(XML_BAD, "");
+// Round 10: lone surrogates go first, and the cleaning repeats until nothing changes, so a removal cannot join two halves into a
+// new character the first pass let through ("for\uDB40\u0085\uDC01ty" checked as two words and printed as "forty").
+const LONE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+export const cleanText = (s: string): string => {
+  let prev: string, cur = String(s);
+  do { prev = cur; cur = cleanOnce(cur); } while (cur !== prev);
+  return cur;
+};
+const cleanOnce = (s: string): string => String(s).replace(LONE, "").replace(INVISIBLE, "").replace(BLANK, " ").replace(/[\p{Zs}\t\r\n\u2028\u2029]/gu, " ").replace(/[\u000B\u000C]/g, " ").replace(/[\u0080-\u009F]/g, "").replace(/\r\n?/g, "\n").replace(XML_BAD, "");
 const esc = (s: string): string => P.escXml(cleanText(s));
 // The formats model.formatValue prints; anything else could print text or digits that are not the cell.
 // "General" is not on the list: formatValue would print it at zero decimals (0.4 as "0"), unlike Excel (124d review 2).

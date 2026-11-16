@@ -64,7 +64,9 @@ function numberWords(n: number): string | null {
 interface Parsed { num: number; unit: string | null; currency: string | null }
 function parse(v: string | number): Parsed | null {
   if (typeof v === "number") return Number.isFinite(v) ? { num: v, unit: null, currency: null } : null;
-  const m = v.trim().match(/^([$€£¥₹])?\s*(-?\d[\d,  ]*(?:\.\d+)?)\s*(%|[A-Za-z]+)?$/);
+  // Round 9: a comma or space is a thousands group only in the US form (1,500 / 12 500); "1,5%" is not 15 but goes to the
+  // text matcher, which searches both readings.
+  const m = v.trim().match(/^([$€£¥₹])?\s*(-?(?:\d{1,3}(?:[,  ]\d{3})+|\d+)(?:\.\d+)?)\s*(%|[A-Za-z]+)?$/);
   if (!m) return null;
   const num = Number(m[2].replace(/[,  ]/g, ""));
   return Number.isFinite(num) ? { num, unit: m[3] ?? null, currency: m[1] ?? null } : null;
@@ -84,9 +86,18 @@ function matchersFor(v: RevokedValue): { form: RevokeHit["form"]; test: (s: stri
     const re = new RegExp(esc(clean(String(v)).normalize("NFC").trim()).replace(/\s+/g, "[\\s\\-_]+"), "i");
     // Round 8: a value written in words around a number ("USD 150,000", "$150K-$160K", "1.5 million dollars", "~150000") also
     // matches each number in it, read as a value with its scale, so the number itself is searched for (fail closed).
-    const nums = [...clean(String(v)).matchAll(/[$€£¥₹]?\s?(\d[\d,]*(?:\.\d+)?)\s?(k|m|mn|bn|thousand|million|billion)?\b/gi)].map((m) => {
-      const n = Number(m[1].replace(/,/g, "")), sc = ({ k: 1e3, thousand: 1e3, m: 1e6, mn: 1e6, million: 1e6, bn: 1e9, billion: 1e9 } as Record<string, number>)[(m[2] ?? "").toLowerCase()] ?? 1;
-      return n * sc;
+    // Round 9: a comma is a US thousands group only as \d{1,3}(,\d{3})+; any other comma or a dot before exactly three
+    // digits is read both ways ("1,5" is 1.5 and 15; "1.500" is 1.5 and 1500), so neither reading is missed.
+    const nums = [...clean(String(v)).matchAll(/[$€£¥₹]?\s?(\d+(?:[.,]\d+)*)\s?(k|m|mn|bn|thousand|million|billion)?\b/gi)].flatMap((m) => {
+      const t = m[1], sc = ({ k: 1e3, thousand: 1e3, m: 1e6, mn: 1e6, million: 1e6, bn: 1e9, billion: 1e9 } as Record<string, number>)[(m[2] ?? "").toLowerCase()] ?? 1;
+      const reads = new Set<number>();
+      if (/^\d+(?:\.\d+)?$/.test(t)) reads.add(Number(t));
+      if (t.includes(",")) {
+        reads.add(Number(t.replace(/,/g, "")));
+        if ((t.match(/,/g) ?? []).length === 1 && !t.includes(".")) reads.add(Number(t.replace(",", ".")));
+      }
+      if (/^\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(t)) reads.add(Number(t.replace(/\./g, "").replace(",", ".")));
+      return [...reads].map((n) => n * sc);
     }).filter((n) => Number.isFinite(n) && !(Number.isInteger(n) && Math.abs(n) < 10));
     const subs = nums.map((n) => matchersFor(n));
     return { form: "text", test: (s) => re.test(s) || subs.some((m) => m.test(s)) };
@@ -139,7 +150,43 @@ function categoryOf(part: string): PartCategory {
   return "body";
 }
 
-const isZip = (b: Uint8Array) => b.length > 3 && b[0] === 0x50 && b[1] === 0x4b && b[2] === 0x03 && b[3] === 0x04;
+// Round 9: a zip is known by its end-of-central-directory record too, so bytes before the first entry (a stub, a
+// prefix) do not make it a plain part.
+function eocdAt(b: Uint8Array): number {
+  for (let i = b.length - 22; i >= Math.max(0, b.length - 65557); i--) if (b[i] === 0x50 && b[i + 1] === 0x4b && b[i + 2] === 0x05 && b[i + 3] === 0x06) return i;
+  return -1;
+}
+const isZip = (b: Uint8Array) => (b.length > 3 && b[0] === 0x50 && b[1] === 0x4b && b[2] === 0x03 && b[3] === 0x04) || eocdAt(b) >= 0;
+const u16 = (b: Uint8Array, i: number) => { if (i < 0 || i + 1 >= b.length) throw new RangeError("short"); return b[i] | (b[i + 1] << 8); };
+const u32 = (b: Uint8Array, i: number) => u16(b, i) + u16(b, i + 2) * 65536;
+const latin1 = (b: Uint8Array) => new TextDecoder("latin1").decode(b);
+// Round 9: the archive comment and each entry's comment are text in the file that unzip does not return.
+function zipComments(b: Uint8Array): string {
+  const e = eocdAt(b);
+  if (e < 0) return "";
+  const out = [new TextDecoder().decode(b.subarray(e + 22, e + 22 + u16(b, e + 20)))];
+  let p = u32(b, e + 16);
+  for (let k = 0, n = u16(b, e + 10); k < n; k++) {
+    if (u32(b, p) !== 0x02014b50) throw new RangeError("central directory");
+    const nl = u16(b, p + 28), xl = u16(b, p + 30), cl = u16(b, p + 32);
+    out.push(new TextDecoder().decode(b.subarray(p + 46 + nl + xl, p + 46 + nl + xl + cl)));
+    p += 46 + nl + xl + cl;
+  }
+  return out.filter(Boolean).join("\n");
+}
+// Round 9: a gzip header's stored file name and comment.
+function gzipMeta(b: Uint8Array): string {
+  const flg = b[3], out: string[] = [];
+  let p = 10;
+  if (flg & 4) p += 2 + u16(b, p);
+  for (const bit of [8, 16]) {
+    if (!(flg & bit)) continue;
+    const end = b.indexOf(0, p);
+    if (end < 0) throw new RangeError("gzip header");
+    out.push(latin1(b.subarray(p, end))); p = end + 1;
+  }
+  return out.join("\n");
+}
 const decoder = new TextDecoder("utf-8", { fatal: false });
 // A part may be UTF-16 (a BOM, or every other byte zero, as in some exported XML and text). Each likely encoding is
 // read; scanning a wrong decoding only costs a non-match, never a miss.
@@ -218,12 +265,22 @@ export function clean(t: string): string {
   return asciiDigits(t.normalize("NFKC"))
     .replace(/[\u200B-\u200D\u2060\uFEFF\u00AD]/g, "")
     .replace(/[\u2018\u2019\u201B\u2032\u00B4`]/g, "'").replace(/[\u201C\u201D\u201F\u2033]/g, '"')
-    .replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?/g, " ");
+    .replace(/\b\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,3})?)?(?:Z|[+-](?:0\d|1[0-4]):?[0-5]\d)?(?![\d.:])/g, " ");
 }
 
 // A PDF's text is in Flate-compressed content streams; each is inflated and its string operands added as a part, so a
 // value docs.ts printed in a PDF is found (second review of WO-124d: the scan saw nothing in a PDF).
-const isPdf = (b: Uint8Array) => b.length > 4 && b[0] === 0x25 && b[1] === 0x50 && b[2] === 0x44 && b[3] === 0x46;
+// Round 9: readers accept %PDF anywhere in the first 1024 bytes, so the scan does too.
+const isPdf = (b: Uint8Array) => b.length > 4 && latin1(b.subarray(0, 1024)).includes("%PDF");
+// Round 9: "stream" is followed by CRLF, LF, a lone CR, or spaces before the end of line; each is a stream start.
+const STREAM = /(?<![A-Za-z])stream[ \t]*(\r\n|\r|\n)?/g;
+function streamBody(bytes: Uint8Array, s: string, m: RegExpMatchArray): Uint8Array | null {
+  const start = m.index! + m[0].length, end = s.indexOf("endstream", start);
+  if (end < 0) return null;
+  return bytes.subarray(start, s[end - 1] === "\n" ? (s[end - 2] === "\r" ? end - 2 : end - 1) : s[end - 1] === "\r" ? end - 1 : end);
+}
+// A stream that does not inflate and holds control bytes is compressed or binary data the scan cannot read.
+const binary = (b: Uint8Array) => b.some((x) => x < 0x09 || (x > 0x0d && x < 0x20));
 // Every PDF string, decoded (round 5): literal strings with all escapes (\\ddd octal, \\n, \\(, line continuations),
 // hex strings, and UTF-16BE strings that start with FE FF.
 function decodePdfLiteral(body: string): string {
@@ -256,24 +313,28 @@ export function pdfUnreadable(bytes: Uint8Array): boolean {
     const names = f[1].startsWith("[") ? [...f[1].matchAll(/\/([A-Za-z0-9]+)/g)].map((x) => x[1]) : f[1].startsWith("/") ? [f[1].slice(1)] : ["(indirect)"];
     if (!names.length || names.some((n) => !["FlateDecode", "Fl", "DCTDecode", "DCT"].includes(n))) return true;
   }
-  for (const m of s.matchAll(/(?<!end)stream\r?\n/g)) {
+  for (const m of s.matchAll(STREAM)) {
+    if (s.slice(Math.max(0, m.index! - 3), m.index!) === "end") continue;
+    if (!m[1]) return true; // "stream" with no end of line: not a stream the scan can place
     const dict = s.slice(Math.max(0, m.index! - 400), m.index!);
     const filters = [...(dict.slice(dict.lastIndexOf("<<")).matchAll(/\/(\w+Decode|AHx|A85|Fl|LZW|RL|CCF|DCT)\b/g))].map((x) => x[1]);
     if (filters.some((f) => f !== "FlateDecode" && f !== "Fl" && f !== "DCTDecode" && f !== "DCT")) return true;
-    if (filters.length && filters.every((f) => f === "FlateDecode" || f === "Fl")) {
-      const start = m.index! + m[0].length, end = s.indexOf("endstream", start);
-      try { unzlibSync(bytes.subarray(start, s[end - 1] === "\n" ? (s[end - 2] === "\r" ? end - 2 : end - 1) : end)); } catch { return true; }
-    }
+    if (filters.some((f) => f === "DCTDecode" || f === "DCT")) continue; // an image
+    const body = streamBody(bytes, s, m);
+    if (!body) return true;
+    // Round 9: a stream is readable only if it inflates or is plain text; a Flate stream whose dictionary the scan
+    // did not see is never read as raw bytes.
+    try { unzlibSync(body); } catch { if (filters.length || binary(body)) return true; }
   }
   return false;
 }
 function pdfText(bytes: Uint8Array): string[] {
   const s = new TextDecoder("latin1").decode(bytes);
   const out: string[] = [];
-  for (const m of s.matchAll(/(?<!end)stream\r?\n/g)) {
-    const start = m.index! + m[0].length, end = s.indexOf("endstream", start);
-    if (end < 0) continue;
-    let body = bytes.subarray(start, end);
+  for (const m of s.matchAll(STREAM)) {
+    if (s.slice(Math.max(0, m.index! - 3), m.index!) === "end" || !m[1]) continue;
+    let body = streamBody(bytes, s, m);
+    if (!body) continue;
     try { body = unzlibSync(body); } catch { /* not Flate: read as is */ }
     const ops = new TextDecoder("latin1").decode(body);
     out.push(...pdfStrings(ops));
@@ -292,12 +353,18 @@ function partsOf(files: Record<string, Uint8Array>): [string, Uint8Array, boolea
       if (depth >= MAX_DEPTH) { out.push([name, bytes, true]); return; }
       let inner: Record<string, Uint8Array>;
       try { inner = unzipSync(bytes); } catch { out.push([name, bytes, true]); return; }
+      let note: string;
+      try { note = zipComments(bytes); } catch { out.push([name, bytes, true]); return; }
+      if (note) out.push([`${name}!comment`, new TextEncoder().encode(note), false]);
       for (const [n, b] of Object.entries(inner)) walk(`${name}!${n}`, b, depth + 1);
       return;
     }
     if (isGzip(bytes)) {
       if (depth >= MAX_DEPTH) { out.push([name, bytes, true]); return; }
-      try { walk(`${name}!gunzip`, gunzipSync(bytes), depth + 1); } catch { out.push([name, bytes, true]); }
+      let inner: Uint8Array, meta: string;
+      try { inner = gunzipSync(bytes); meta = gzipMeta(bytes); } catch { out.push([name, bytes, true]); return; }
+      if (meta) out.push([`${name}!gzip-name`, new TextEncoder().encode(meta), false]);
+      walk(`${name}!gunzip`, inner, depth + 1);
       return;
     }
     out.push([name, bytes, false]);

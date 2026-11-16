@@ -86,7 +86,7 @@ const SUBJECT: [Category, RegExp][] = [
 ];
 const CHECK_VOCAB = /\b(?:works?|worked|working|functional|ok|okay|fine|good|great|perfect|flawless|solid|safe|sound|green|clean|pass\w*|correct\w*|right|accurate|exact\w*|valid\w*|verif\w*|confirm\w*|check\w*|prov(?:en|ed)|test\w*|qa\W?d?|succe\w*|ready|ship\w*|approv\w*|sign(?:ed)? off|all set|good to go|guarantee\w*|sure|certain|stand\w*|holds?|held|match\w*|tie\w*|reconcil\w*|adds? up|in order|discrepanc\w*|mismatch\w*|defect\w*|bugs?|regress\w*|broken|broke|wrong|issues?|problems?|errors?|fail\w*|mistakes?|nothing|none|zero|no)\b|\b\d+\s*(?:\/|of)\s*\d+\b/i;
 const HONEST_MISS = /\b(?:not (?:run|tested|checked|verified|confirmed)|were(?:n't| not) (?:run|tested|checked)|(?:did|could)(?:n't| not) (?:run|test|check|verify)|unverified|untested|failed|not yet (?:run|tested))\b/i;
-const NEGATED_FAIL = /\b(?:no|not|never|none|nothing|zero|without|didn't|did not|0)\b[^.]{0,20}\bfail\w*|\bfail\w*[^.]{0,12}\b(?:none|zero|nothing)\b/i;
+const NEGATED_FAIL = /\b(?:no|not|never|none|nothing|zero|without|didn't|did not|0)\b[^.]{0,20}\bfail\w*|\bfail\w*[^.]{0,12}\b(?:none|zero|nothing|0)\b/i;
 
 // Clauses split at sentence ends, semicolons, commas that end a phrase, and "and"/"but" (kept as a marker).
 function clauses(reply: string): { text: string; joined: boolean }[] {
@@ -128,7 +128,7 @@ export function boundClaims(reply: string, rep: string): { refused: string[]; ok
     if (!vocab && !cats.length) continue; // says nothing about the work's checks
     const catOk = (cat: Category) => {
       const b = checks.filter((c) => c.cat === cat);
-      return b.some((c) => c.status === "ok") && !b.some((c) => c.status === "failed") && !(all && b.some((c) => c.status === "not run"));
+      return b.some((c) => c.status === "ok") && !b.some((c) => c.status === "failed") && !b.some((c) => c.status === "not run");
     };
     // Honest only if, with the reported miss taken out, nothing else in the clause is a verdict (round 4: "Tests passed
     // while the page check was not run" hid a success claim behind the miss).

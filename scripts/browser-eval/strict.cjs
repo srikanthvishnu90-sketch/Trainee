@@ -128,21 +128,28 @@ function strictStop() {
     throw new NeedsUser("strict_reached_submit");
   };
 }
-async function strictPosting(browser, item, o) {
-  const persona = o.persona || "default";
-  if (!lib.PERSONAS[persona]) throw new Error(`unknown persona: ${persona}`);
-  const r = { provider: item.provider, url: item.url, persona, vm: vmVerdict(item.url), result: "fail", reason: null, field: null, needs: null, sent_blocked: 0, upload_simulated: 0, graphql_reads: 0, submit_attempts: 0, ms: 0 };
-  const t0 = Date.now();
-  const rb = await robotsOk(item.url, o.robots, o.ua, o.pacer);
-  if (rb !== true) { r.reason = rb === "unreachable" ? "host_unreachable" : "robots_disallowed"; r.ms = Date.now() - t0; r.d072 = d072.classify(r); return r; }
-  const host = new URL(item.url).hostname.toLowerCase();
-  // The posting's own host and its www twin (sofi.com sends every visitor to www.sofi.com: the same site, not a redirect off it).
-  const twin = host.startsWith("www.") ? host.slice(4) : `www.${host}`;
-  const allowHosts = [...new Set([host, twin, ...(PROVIDER_HOSTS[item.provider] || [])])];
-  const resumeSha = crypto.createHash("sha256").update(fs.readFileSync(o.resumePath)).digest("hex");
-  const p = { id: `${item.provider}-${item.n ?? ""}`, ats: item.provider, url: item.url, facts: lib.PERSONAS[persona], answers: {}, resume: { path: o.resumePath, sha256: resumeSha, preparedWithSha256: resumeSha } };
-  p.approval = { approval_id: "strict-dry-run", hash: payloadHash(p) };
-  const gate = async (req) => {
+// The page script of the dry run: every form submit, form.submit() and requestSubmit() is cancelled (eval-lib SUBMIT_TRAP's
+// rule), and a WebSocket never opens (a socket is not a request the gate sees): it reports closed and sends nothing.
+function STRICT_INIT() {
+  window.__strictTrapped = 0;
+  const hit = () => { window.__strictTrapped++; try { window.__evalSubmitAttempt(); } catch { /* not bound in the strict bench */ } };
+  window.addEventListener("submit", (e) => { e.preventDefault(); e.stopImmediatePropagation(); hit(); }, true);
+  HTMLFormElement.prototype.submit = function () { hit(); };
+  HTMLFormElement.prototype.requestSubmit = function () { hit(); };
+  class NoSocket extends EventTarget {
+    constructor(url) { super(); this.url = String(url); this.readyState = 3; window.__strictSockets = (window.__strictSockets || 0) + 1; setTimeout(() => { const e = new Event("close"); if (typeof this.onclose === "function") this.onclose(e); this.dispatchEvent(e); }, 0); }
+    send() { /* never sent */ }
+    close() { /* already closed */ }
+  }
+  NoSocket.CONNECTING = 0; NoSocket.OPEN = 1; NoSocket.CLOSING = 2; NoSocket.CLOSED = 3;
+  window.WebSocket = NoSocket;
+}
+// The bench's own guard on every request the page makes (the second wall after strictStop; the third is STRICT_INIT): every
+// request but GET/HEAD/OPTIONS is aborted in the browser, except a GraphQL read and the board's own resume upload answered
+// inside the browser (simulatedUpload); images, fonts and media are not fetched; page loads are paced per provider. It holds
+// even if the runner pressed Submit (tests/career-browser-strict-guard.test.cjs).
+function strictGate(item, r, o) {
+  return async (req) => {
     let u; try { u = new URL(req.url()); } catch { return false; }
     if (/^(data|blob|about):$/.test(u.protocol)) return true;
     if (simulatedFileRead(req)) return false;
@@ -157,8 +164,24 @@ async function strictPosting(browser, item, o) {
     if (req.isNavigationRequest()) await o.pacer.wait(paceKey(u.host));
     return true;
   };
+}
+async function strictPosting(browser, item, o) {
+  const persona = o.persona || "default";
+  if (!lib.PERSONAS[persona]) throw new Error(`unknown persona: ${persona}`);
+  const r = { provider: item.provider, url: item.url, persona, vm: vmVerdict(item.url), result: "fail", reason: null, field: null, needs: null, sent_blocked: 0, upload_simulated: 0, graphql_reads: 0, submit_attempts: 0, ms: 0 };
+  const t0 = Date.now();
+  const rb = await robotsOk(item.url, o.robots, o.ua, o.pacer);
+  if (rb !== true) { r.reason = rb === "unreachable" ? "host_unreachable" : "robots_disallowed"; r.ms = Date.now() - t0; r.d072 = d072.classify(r); return r; }
+  const host = new URL(item.url).hostname.toLowerCase();
+  // The posting's own host and its www twin (sofi.com sends every visitor to www.sofi.com: the same site, not a redirect off it).
+  const twin = host.startsWith("www.") ? host.slice(4) : `www.${host}`;
+  const allowHosts = [...new Set([host, twin, ...(PROVIDER_HOSTS[item.provider] || [])])];
+  const resumeSha = crypto.createHash("sha256").update(fs.readFileSync(o.resumePath)).digest("hex");
+  const p = { id: `${item.provider}-${item.n ?? ""}`, ats: item.provider, url: item.url, facts: lib.PERSONAS[persona], answers: {}, resume: { path: o.resumePath, sha256: resumeSha, preparedWithSha256: resumeSha } };
+  p.approval = { approval_id: "strict-dry-run", hash: payloadHash(p) };
+  const gate = strictGate(item, r, o);
   const stop = strictStop();
-  const out = await applyOne(browser, p, { allowHosts, retries: 0, diag: true, stepTimeoutMs: 20000, requestGate: gate, initScript: lib.SUBMIT_TRAP, onPhase: stop }).catch((e) => ({ status: "error", reason: `driver_error: ${String(e && e.message).split("\n")[0].slice(0, 140)}` }));
+  const out = await applyOne(browser, p, { allowHosts, retries: 0, diag: true, stepTimeoutMs: 20000, requestGate: gate, initScript: STRICT_INIT, onPhase: stop }).catch((e) => ({ status: "error", reason: `driver_error: ${String(e && e.message).split("\n")[0].slice(0, 140)}` }));
   r.reason = out.reason || out.status; r.error = out.error ? String(out.error).slice(0, 140) : out.check ? `shown: ${out.check}` : null; r.field = out.field ? String(out.field).slice(0, 80) : null; r.needs = out.needs || null;
   if (out.reason === "strict_reached_submit") r.result = r.upload_simulated ? "ready_except_upload" : "pass";
   else if (out.reason === "missing_required_answer" && CUSTOM_ONLY(out.needs)) r.result = "ready_if_answered";
@@ -233,4 +256,4 @@ async function main() {
   if (s.all.breaches) process.exit(3);
 }
 if (require.main === module) main().catch((e) => { console.error(e); process.exit(1); });
-module.exports = { strictStop, simulatedUpload, simulatedFileRead, SIMULATED_FILE, SIMULATED_UPLOADS, strictPosting, graphqlRead, robotsOk, summarize, markdown, CUSTOM_ONLY, PROVIDER_HOSTS };
+module.exports = { strictGate, STRICT_INIT, strictStop, simulatedUpload, simulatedFileRead, SIMULATED_FILE, SIMULATED_UPLOADS, strictPosting, graphqlRead, robotsOk, summarize, markdown, CUSTOM_ONLY, PROVIDER_HOSTS };

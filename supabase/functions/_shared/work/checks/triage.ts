@@ -64,8 +64,16 @@ function aboutOther(s: string, limit?: { id: string; text: string }): boolean {
   const spaced = (x: string) => String(x ?? "").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[\p{Cf}\u034F]/gu, "").replace(/[\p{Pd}_\u2212]+/gu, " ").replace(/\u02BC/g, "'");
   // Round 15: the split and the unsplit forms both, so a camelCase split inside a word ("ReLocation") hides nothing.
   const unsplit = (x: string) => String(x ?? "").replace(/[\p{Cf}\u034F]/gu, "").replace(/[\p{Pd}_\u2212]+/gu, " ").replace(/\u02BC/g, "'");
-  const full = normalise(`${spaced(String(limit.id))} ${spaced(String(limit.text ?? ""))} ${unsplit(String(limit.id))} ${unsplit(String(limit.text ?? ""))}`); // round 13: "deal-breaker", "un-acceptable"
-  if (SUBJECTS.some(([, a]) => new RegExp(a.source).test(full)) && (NEG.test(full) || REFUSAL.test(full))) return true;
+  // Round 16: an invisible format character is also read as a space (then camelCase split), so one between two words
+  // ("not\u200Bacceptable", "no\u200Bremote") does not glue them into a word no list matches.
+  const gapped = (x: string) => String(x ?? "").replace(/[\p{Cf}\u034F]/gu, " ").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[\p{Pd}_\u2212]+/gu, " ").replace(/\u02BC/g, "'");
+  const full = normalise([limit.id, limit.text ?? ""].flatMap((x) => [spaced(String(x)), unsplit(String(x)), gapped(String(x))]).join(" ")); // round 13: "deal-breaker", "un-acceptable"
+  const refuses = NEG.test(full) || REFUSAL.test(full);
+  if (SUBJECTS.some(([, a]) => new RegExp(a.source).test(full)) && refuses) return true;
+  // Round 16: a constraint that refuses something (any negation or refusal in its id or text) is not plainly met by a
+  // statement naming no subject ("yes", "it is available"), whatever it refuses, listed subject or not ("Moving is a
+  // dealbreaker"): which thing the statement answers cannot be read, so it is unknown.
+  if (refuses && !SUBJECTS.some(([said]) => said.test(s))) return true;
   // Round 8: the id goes through the same rules as the text: a negated subject (no_hybrid) is not the subject, and an id or
   // text naming several subjects (visa_and_relocation) lets no subject-bearing statement meet.
   const idSubjects = SUBJECTS.filter(([, about]) => about.test(id));

@@ -68,6 +68,9 @@ function parse(v: string | number): Parsed | null {
   // text matcher, which searches both readings.
   const m = v.trim().match(/^([$€£¥₹])?\s*(-?(?:\d{1,3}(?:[,  ]\d{3})+|\d+)(?:\.\d+)?)\s*(%|[A-Za-z]+)?$/);
   if (!m) return null;
+  // Round 10: one separator before exactly three digits ("1.500", "1,500", "17.280") is either a group or a decimal; such a
+  // value goes to the text matcher, which searches both readings.
+  if (/^-?\d{1,3}[.,]\d{3}$/.test(m[2])) return null;
   const num = Number(m[2].replace(/[,  ]/g, ""));
   return Number.isFinite(num) ? { num, unit: m[3] ?? null, currency: m[1] ?? null } : null;
 }
@@ -88,17 +91,19 @@ function matchersFor(v: RevokedValue): { form: RevokeHit["form"]; test: (s: stri
     // matches each number in it, read as a value with its scale, so the number itself is searched for (fail closed).
     // Round 9: a comma is a US thousands group only as \d{1,3}(,\d{3})+; any other comma or a dot before exactly three
     // digits is read both ways ("1,5" is 1.5 and 15; "1.500" is 1.5 and 1500), so neither reading is missed.
-    const nums = [...clean(String(v)).matchAll(/[$€£¥₹]?\s?(\d+(?:[.,]\d+)*)\s?(k|m|mn|bn|thousand|million|billion)?\b/gi)].flatMap((m) => {
-      const t = m[1], sc = ({ k: 1e3, thousand: 1e3, m: 1e6, mn: 1e6, million: 1e6, bn: 1e9, billion: 1e9 } as Record<string, number>)[(m[2] ?? "").toLowerCase()] ?? 1;
+    const nums = [...clean(String(v)).matchAll(/[$€£¥₹]?\s?(\d+(?:[.,]\d+)*)\s?(?:(%)|(k|m|mn|bn|thousand|million|billion)\b)?/gi)].flatMap((m) => {
+      const t = m[1], pct = !!m[2], sc = ({ k: 1e3, thousand: 1e3, m: 1e6, mn: 1e6, million: 1e6, bn: 1e9, billion: 1e9 } as Record<string, number>)[(m[3] ?? "").toLowerCase()] ?? 1;
       const reads = new Set<number>();
       if (/^\d+(?:\.\d+)?$/.test(t)) reads.add(Number(t));
+      if (/^\d{1,3}\.\d{3}$/.test(t)) reads.add(Number(t.replace(".", "")));
       if (t.includes(",")) {
         reads.add(Number(t.replace(/,/g, "")));
         if ((t.match(/,/g) ?? []).length === 1 && !t.includes(".")) reads.add(Number(t.replace(",", ".")));
       }
       if (/^\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(t)) reads.add(Number(t.replace(/\./g, "").replace(",", ".")));
-      return [...reads].map((n) => n * sc);
-    }).filter((n) => Number.isFinite(n) && !(Number.isInteger(n) && Math.abs(n) < 10));
+      // Round 10: a percent keeps its sign on each reading, so its stored-fraction form (0.015 for 1,5%) is searched too.
+      return [...reads].map((n) => pct ? `${n * sc}%` : n * sc);
+    }).filter((n) => typeof n === "string" || (Number.isFinite(n) && !(Number.isInteger(n) && Math.abs(n) < 10)));
     const subs = nums.map((n) => matchersFor(n));
     return { form: "text", test: (s) => re.test(s) || subs.some((m) => m.test(s)) };
   }
@@ -168,6 +173,9 @@ function zipComments(b: Uint8Array): string {
   let p = u32(b, e + 16);
   for (let k = 0, n = u16(b, e + 10); k < n; k++) {
     if (u32(b, p) !== 0x02014b50) throw new RangeError("central directory");
+    // Round 10: an encrypted entry (flag bit 0) or one stored with a method unzip does not decode is unreadable; unzip returned
+    // its ciphertext as if it were text.
+    if ((u16(b, p + 8) & 1) || ![0, 8].includes(u16(b, p + 10))) throw new RangeError("encrypted or unknown method");
     const nl = u16(b, p + 28), xl = u16(b, p + 30), cl = u16(b, p + 32);
     out.push(new TextDecoder().decode(b.subarray(p + 46 + nl + xl, p + 46 + nl + xl + cl)));
     p += 46 + nl + xl + cl;
@@ -265,7 +273,7 @@ export function clean(t: string): string {
   return asciiDigits(t.normalize("NFKC"))
     .replace(/[\u200B-\u200D\u2060\uFEFF\u00AD]/g, "")
     .replace(/[\u2018\u2019\u201B\u2032\u00B4`]/g, "'").replace(/[\u201C\u201D\u201F\u2033]/g, '"')
-    .replace(/\b\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,3})?)?(?:Z|[+-](?:0\d|1[0-4]):?[0-5]\d)?(?![\d.:])/g, " ");
+    .replace(/\b\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,3})?)?(?:Z|[+-](?:0\d|1[0-4]):?[0-5]\d)?(?![\d:]|\.\d)/g, " ");
 }
 
 // A PDF's text is in Flate-compressed content streams; each is inflated and its string operands added as a part, so a
@@ -273,7 +281,8 @@ export function clean(t: string): string {
 // Round 9: readers accept %PDF anywhere in the first 1024 bytes, so the scan does too.
 const isPdf = (b: Uint8Array) => b.length > 4 && latin1(b.subarray(0, 1024)).includes("%PDF");
 // Round 9: "stream" is followed by CRLF, LF, a lone CR, or spaces before the end of line; each is a stream start.
-const STREAM = /(?<![A-Za-z])stream[ \t]*(\r\n|\r|\n)?/g;
+// Round 10: only after a dictionary's close (">>"), as a reader parses it; the word "stream" in a title is not one.
+const STREAM = />>[\s]*stream[ \t]*(\r\n|\r|\n)?/g;
 function streamBody(bytes: Uint8Array, s: string, m: RegExpMatchArray): Uint8Array | null {
   const start = m.index! + m[0].length, end = s.indexOf("endstream", start);
   if (end < 0) return null;
@@ -314,7 +323,6 @@ export function pdfUnreadable(bytes: Uint8Array): boolean {
     if (!names.length || names.some((n) => !["FlateDecode", "Fl", "DCTDecode", "DCT"].includes(n))) return true;
   }
   for (const m of s.matchAll(STREAM)) {
-    if (s.slice(Math.max(0, m.index! - 3), m.index!) === "end") continue;
     if (!m[1]) return true; // "stream" with no end of line: not a stream the scan can place
     const dict = s.slice(Math.max(0, m.index! - 400), m.index!);
     const filters = [...(dict.slice(dict.lastIndexOf("<<")).matchAll(/\/(\w+Decode|AHx|A85|Fl|LZW|RL|CCF|DCT)\b/g))].map((x) => x[1]);
@@ -332,7 +340,7 @@ function pdfText(bytes: Uint8Array): string[] {
   const s = new TextDecoder("latin1").decode(bytes);
   const out: string[] = [];
   for (const m of s.matchAll(STREAM)) {
-    if (s.slice(Math.max(0, m.index! - 3), m.index!) === "end" || !m[1]) continue;
+    if (!m[1]) continue;
     let body = streamBody(bytes, s, m);
     if (!body) continue;
     try { body = unzlibSync(body); } catch { /* not Flate: read as is */ }
@@ -363,6 +371,12 @@ function partsOf(files: Record<string, Uint8Array>): [string, Uint8Array, boolea
       if (depth >= MAX_DEPTH) { out.push([name, bytes, true]); return; }
       let inner: Uint8Array, meta: string;
       try { inner = gunzipSync(bytes); meta = gzipMeta(bytes); } catch { out.push([name, bytes, true]); return; }
+      // Round 10: gunzip reads the first member only. A second member, or bytes after the first member's trailer, would go
+      // unscanned, so the file is unreadable unless its trailer's size is the size read and no further gzip header follows.
+      const isize = bytes.length >= 4 ? (bytes[bytes.length - 4] | bytes[bytes.length - 3] << 8 | bytes[bytes.length - 2] << 16 | bytes[bytes.length - 1] << 24) >>> 0 : -1;
+      let again = false;
+      for (let i = 10; i + 2 < bytes.length && !again; i++) again = bytes[i] === 0x1f && bytes[i + 1] === 0x8b && bytes[i + 2] === 0x08;
+      if (isize !== (inner.length >>> 0) || again) { out.push([name, bytes, true]); return; }
       if (meta) out.push([`${name}!gzip-name`, new TextEncoder().encode(meta), false]);
       walk(`${name}!gunzip`, inner, depth + 1);
       return;

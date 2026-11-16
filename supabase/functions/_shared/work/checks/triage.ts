@@ -56,6 +56,11 @@ function aboutOther(s: string, limit?: { id: string; text: string }): boolean {
   if (!limit) return false;
   // When the constraint's id names a subject, that is its subject; otherwise its text's un-negated subjects are.
   const id = normalise(limit.id.replace(/[_-]+/g, " "));
+  // Round 12: a constraint that names a subject and carries a negation or refusal anywhere, in its id or its text, does not
+  // plainly want that subject, so no commitment meets it: not one naming a subject, and not "yes", "it is available" or
+  // "we offer it" either (the subject named only in the id, with "Not acceptable" as the text, had met).
+  const full = normalise(`${id} ${limit.text ?? ""}`);
+  if (SUBJECTS.some(([, a]) => new RegExp(a.source).test(full)) && (NEG.test(full) || REFUSAL.test(full))) return true;
   // Round 8: the id goes through the same rules as the text: a negated subject (no_hybrid) is not the subject, and an id or
   // text naming several subjects (visa_and_relocation) lets no subject-bearing statement meet.
   const idSubjects = SUBJECTS.filter(([, about]) => about.test(id));

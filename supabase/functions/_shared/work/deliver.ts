@@ -2,6 +2,11 @@
 // owner-scoped, signed and expiring trainee-file page (file_page), then a plain-text builder with a SHA-256 manifest
 // (text_builder). This module has no network of its own: the caller hands it the channel's send (channel_artifacts.ts
 // bytes-ref seam) and the trainee-file page minting. Nothing here uploads to, or links from, any outside store.
+// Fifteenth review (owner ruling): deliver() sends only bytes a Trainee writer produced for this case (provenance.ts) and
+// only when the revoke scan of those bytes finds nothing and can read them; otherwise it refuses before any send.
+import { revoked, type WorkCase } from "./case.ts";
+import { writtenFor } from "./provenance.ts";
+import { audit, scan } from "./revoke_scan.ts";
 
 export type Channel = "whatsapp" | "telegram" | "imessage";
 export type Delivery = "native" | "file_page" | "text_builder";
@@ -59,7 +64,10 @@ export interface DeliverIo {
   filePage?: (f: WorkFile) => Promise<string | null>;
   sendText: (text: string) => Promise<{ ok: boolean }>;
 }
-export interface DeliverResult { how: Delivery; ok: boolean; url?: string; tried: Delivery[]; note: string }
+export interface DeliverResult {
+  how: Delivery; ok: boolean; url?: string; tried: Delivery[]; note: string;
+  refused?: "not written by Trainee for this case" | "revoked value or unreadable";
+}
 
 const NOT_RECALLED = "Copies already sent cannot be recalled.";
 
@@ -90,8 +98,18 @@ async function partsOf(f: WorkFile): Promise<WorkFile[]> {
   return Object.entries(unzipSync(f.bytes)).filter(([n]) => !n.endsWith("/")).map(([n, b]) => ({ filename: n, mime: "text/plain", bytes: b }));
 }
 
-export async function deliver(channel: Channel, f: WorkFile, io: DeliverIo): Promise<DeliverResult> {
+export async function deliver(channel: Channel, f: WorkFile, io: DeliverIo, c: WorkCase): Promise<DeliverResult> {
   const tried: Delivery[] = [];
+  // The gate, before any call on io: provenance first (outside bytes are refused whatever a scan would say), then the scan.
+  if (!c || !(f?.bytes instanceof Uint8Array) || !writtenFor(c, f.bytes)) {
+    return { how: "text_builder", ok: false, tried, refused: "not written by Trainee for this case",
+      note: "This file was not made by Trainee for this work, so it was not sent. Nothing was sent anywhere." };
+  }
+  const values = revoked(c);
+  const hits = values.length ? await scan({ [f.filename]: f.bytes }, values) : [];
+  if (hits.length) {
+    return { how: "text_builder", ok: false, tried, refused: "revoked value or unreadable", note: `${audit(hits)} Nothing was sent.` };
+  }
   let how = chooseDelivery(channel, f.mime, { bytes: f.bytes.length, filePage: !!io.filePage });
   if (how === "native") {
     tried.push("native");

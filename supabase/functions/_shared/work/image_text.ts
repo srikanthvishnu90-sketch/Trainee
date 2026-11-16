@@ -10,9 +10,17 @@ const latin1 = (b: Uint8Array) => new TextDecoder("latin1").decode(b);
 const utf8 = (b: Uint8Array) => new TextDecoder("utf-8").decode(b);
 const startsWith = (b: Uint8Array, s: string) => s.length <= b.length && [...s].every((c, i) => b[i] === c.charCodeAt(0));
 const cat = (a: Uint8Array[]) => { const o = new Uint8Array(a.reduce((n, x) => n + x.length, 0)); let i = 0; for (const x of a) { o.set(x, i); i += x.length; } return o; };
-const inflate = (b: Uint8Array) => new Uint8Array(zlib.inflateSync(b, { maxOutputLength: 64 * 1024 * 1024 } as never));
+// WO-124a fifteenth review (B2): every byte this module decodes is charged to the caller's scan budget (revoke_scan.ts sets
+// the meter for the length of one scan). Overlapping Exif entries read the same bytes many times; past the budget the meter
+// throws, the image reads as null, and the caller reports it unreadable instead of building gigabytes of text.
+export const meter = { charge(_n: number): void {}, left(): number { return 64 * 1024 * 1024; } };
+const inflate = (b: Uint8Array) => {
+  const out = new Uint8Array(zlib.inflateSync(b, { maxOutputLength: Math.max(1, Math.min(64 * 1024 * 1024, meter.left())) } as never));
+  meter.charge(out.length);
+  return out;
+};
 // Bytes of unknown text encoding are read every likely way; a wrong decoding only costs a non-match.
-const anyText = (b: Uint8Array) => [latin1(b), utf8(b), new TextDecoder("utf-16le").decode(b), new TextDecoder("utf-16be").decode(b)];
+const anyText = (b: Uint8Array) => { meter.charge(4 * b.length); return [latin1(b), utf8(b), new TextDecoder("utf-16le").decode(b), new TextDecoder("utf-16be").decode(b)]; };
 
 const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
 function crc32(b: Uint8Array): number { let c = 0xffffffff; for (const x of b) c = CRC[(c ^ x) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
@@ -93,7 +101,7 @@ function exif(t: Uint8Array, out: ImageRead): boolean {
       if (tag === 0x014a) return false; // SubIFDs: further images
       if (tag === 0x0201) thumbOff = scalar;
       if (tag === 0x0202) thumbLen = scalar;
-      if (type === 2) out.texts.push(latin1(t.subarray(at, at + len)));
+      if (type === 2) { meter.charge(len); out.texts.push(latin1(t.subarray(at, at + len))); }
       else if (type === 1 || type === 6 || type === 7) out.texts.push(...anyText(t.subarray(at, at + len)));
     }
     queue.push(r32(off + 2 + 12 * n));

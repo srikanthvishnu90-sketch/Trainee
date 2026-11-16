@@ -1,10 +1,39 @@
 // WO-124a: the revoke scan (spec D4). A value the person took back is searched for in every part of the bytes: each
 // OOXML part (unzipped), metadata, filenames, alt text, and derived forms of the value. The audit names categories and
 // counts only; it never repeats a value, a form or a part name (a part name can itself carry the value).
-import { unzlibSync } from "npm:fflate@0.8.2";
+//
+// Scope (owner ruling, fifteenth review of WO-124a): only files Trainee's own writers produce are delivered (provenance.ts;
+// deliver.ts refuses any other bytes). Outside files are never re-delivered, so this scan is a second check on Trainee's own
+// output, not a general-format reader. Stated limits for OUTSIDE files (not fixed here, since such files are refused before
+// any send): an image's chunk or segment bytes that are not text chunks (PNG tIME/pHYs/IHDR padding/IDAT/sPLT entries, JPEG
+// APP0/APP14/DQT/scan data, numeric Exif tags, bytes after an IFD, UTF-16 XMP or iTXt, IRB resolution blocks) are not read;
+// a PDF's filter chains, indirect /DecodeParms, strings split between literal and hex form, non-content Flate streams
+// (JavaScript, ICC, Flate-wrapped JPEG), embedded fonts with a built-in encoding, incremental updates that redefine an object,
+// and non-ASCII characters of WinAnsi/MacRoman encodings are not read as a reader would. What does hold on any input: scan()
+// never throws, finishes within its time budget, and reports "unreadable container" (fail closed) when it cannot finish.
 import zlib from "node:zlib";
 import { asciiDigits } from "./model.ts";
-import { isGif, isJpeg, isPng, jpegText, pngText } from "./image_text.ts";
+import { isGif, isJpeg, isPng, jpegText, meter, pngText } from "./image_text.ts";
+
+// WO-124a fifteenth review (B2): one scan's budget. Every byte decoded, inflated or lexed is charged; past a few times the
+// input's size (with a floor and a hard cap), or past the deadline, the scan stops and every file reads as unreadable.
+export class ScanLimit extends Error { constructor() { super("revoke scan budget exceeded"); this.name = "ScanLimit"; } }
+const BUDGET = { left: Infinity, deadline: Infinity };
+export const SCAN_DEADLINE_MS = 1800;
+function charge(n: number): void {
+  BUDGET.left -= n;
+  if (BUDGET.left < 0 || performance.now() > BUDGET.deadline) throw new ScanLimit();
+}
+const isLimit = (e: unknown) => e instanceof ScanLimit || e instanceof RangeError && /buffer|length|size|memory/i.test(e.message) ||
+  (e as { code?: string })?.code === "ERR_BUFFER_TOO_LARGE";
+// zlib-wrapped data inflated within the budget; a stream past it is a ScanLimit, any other failure a plain error.
+function inflateZ(b: Uint8Array): Uint8Array {
+  let out: Uint8Array;
+  try { out = new Uint8Array(zlib.inflateSync(b, { maxOutputLength: Math.max(1, Math.min(256 * 1024 * 1024, BUDGET.left)) } as never)); }
+  catch (e) { if (isLimit(e)) throw new ScanLimit(); throw e; }
+  charge(out.length);
+  return out;
+}
 
 export type RevokedValue = string | number | { before: string | number; after: string | number };
 export type PartCategory = "body" | "metadata" | "alt text or media" | "comments or notes" | "filename" | "unreadable container";
@@ -196,6 +225,7 @@ const decoder = new TextDecoder("utf-8", { fatal: false });
 // A part may be UTF-16 (a BOM, or every other byte zero, as in some exported XML and text). Each likely encoding is
 // read; scanning a wrong decoding only costs a non-match, never a miss.
 function decodings(b: Uint8Array): string[] {
+  charge(3 * b.length);
   const out = [decoder.decode(b)];
   const bomLE = b[0] === 0xff && b[1] === 0xfe, bomBE = b[0] === 0xfe && b[1] === 0xff;
   let zeroOdd = 0, zeroEven = 0;
@@ -238,8 +268,50 @@ const APP_COUNTERS = /<(?:\w+:)?(?:AppVersion|TotalTime|Words|Characters|Charact
 // OOXML parts (XML inside a zip) are read without markup; any other file (code, HTML, plain text) is also read raw, so a
 // value inside "a<b ... >" survives (round 5).
 const isOoxmlPart = (part: string) => /\.(?:xml|rels|vml)$/i.test(part);
+// Round 15 (B4): hand-written linear scanners in place of regexes that rescan to the end from every unclosed "<", "<!--" or
+// "<![CDATA[". Each keeps the regex's own result: a section with no close is left as written, and so is everything after it.
+function unwrap(s: string, open: string, close: string): string {
+  let out = "", i = 0;
+  for (;;) {
+    const a = s.indexOf(open, i);
+    if (a < 0) break;
+    const z = s.indexOf(close, a + open.length);
+    if (z < 0) break;
+    out += s.slice(i, a) + " " + s.slice(a + open.length, z) + " ";
+    i = z + close.length;
+  }
+  return i ? out + s.slice(i) : s;
+}
+// Tags removed (as /<[^>]*>/g did): each "<" to the next ">"; with no ">" left, the rest is text.
+function stripTags(s: string, sep: string): string {
+  let out = "", i = 0;
+  for (;;) {
+    const a = s.indexOf("<", i);
+    if (a < 0) break;
+    const z = s.indexOf(">", a + 1);
+    if (z < 0) break;
+    out += s.slice(i, a) + sep;
+    i = z + 1;
+  }
+  return out + s.slice(i);
+}
+// Stored cell values: <v>..</v> and the v="" of a pivot cache's <n ...> tag, each tag read once from its "<" to its ">".
+function cellValues(s: string): string {
+  const out: string[] = [];
+  for (const m of s.matchAll(/<(?:\w+:)?v>([^<]*)<\/(?:\w+:)?v>/g)) out.push(m[1]);
+  const N = /<(?:\w+:)?n\s/y;
+  for (let i = s.indexOf("<"); i >= 0; ) {
+    const z = s.indexOf(">", i + 1);
+    if (z < 0) break;
+    N.lastIndex = i;
+    if (N.test(s)) { const v = /\bv="([^"]*)"/.exec(s.slice(i, z)); if (v) out.push(v[1]); }
+    i = s.indexOf("<", z + 1);
+  }
+  return out.join(" ");
+}
 function views(raw: string, pdf = false, part = ""): string[] {
-  raw = raw.replace(/<!\[CDATA\[([^]*?)\]\]>/g, " $1 ").replace(/<!--([^]*?)-->/g, " $1 ");
+  charge(8 * raw.length);
+  raw = unwrap(unwrap(raw, "<![CDATA[", "]]>"), "<!--", "-->");
   const unent = (s: string) => s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) =>
     e[0] === "#" ? cp(e[1].toLowerCase() === "x" ? parseInt(e.slice(2), 16) : Number(e.slice(1)), m) : ENT[e.toLowerCase()] ?? m);
   const xml = !pdf && /<[A-Za-z?!\/]/.test(raw);
@@ -266,8 +338,8 @@ function views(raw: string, pdf = false, part = ""): string[] {
   }
 
   // Stored cell values on their own (xlsx <v>, pivot-cache v=): the view in which a "$5" is just 5.
-  const cells = [...body.matchAll(/<(?:\w+:)?v>([^<]*)<\/(?:\w+:)?v>|<(?:\w+:)?n\s[^>]*\bv="([^"]*)"/g)].map((m) => m[1] ?? m[2]).join(" ");
-  const texts = [body.replace(/<[^>]*>/g, ""), body.replace(/<[^>]*>/g, " "), attrs.join(" \u0001 ")];
+  const cells = cellValues(body);
+  const texts = [stripTags(body, ""), stripTags(body, " "), attrs.join(" \u0001 ")];
   const rawView = isOoxmlPart(part) ? [] : [clean(unent(raw))];
   return [...texts.map((t) => clean(unent(t))), ...rawView, CELLS + clean(unent(cells))];
 }
@@ -298,11 +370,16 @@ function streamBody(bytes: Uint8Array, s: string, m: RegExpExecArray): Uint8Arra
 // it opens ("N G obj"), and the stream after it. An unterminated string, an unbalanced >>, an unclosed << or a stream with no
 // end is not a file the scan can place: the PDF is unreadable.
 interface PdfStream { dict: string; num: number | null; m: RegExpExecArray; body: Uint8Array }
-interface Lexed { dicts: string[]; streams: PdfStream[]; objs: Map<number, string>; bad: boolean }
-function lexPdf(s: string, bytes: Uint8Array | null): Lexed {
+interface Lexed { dicts: string[]; streams: PdfStream[]; objs: Map<number, string>; bad: boolean; end: number }
+// Round 15 (B3): lexing may start at an offset and stop at the close of the first top-level dictionary, so reading one
+// value dictionary costs its own length, not the rest of the file. Nesting deeper than MAX_NEST is unreadable.
+const MAX_NEST = 64;
+function lexPdf(s: string, bytes: Uint8Array | null, start = 0, first = false): Lexed {
   const dicts: string[] = [], streams: PdfStream[] = [], objs = new Map<number, string>(), stack: number[] = [];
-  let cur: number | null = null, bad = false, i = 0;
+  let cur: number | null = null, bad = false, i = start;
   const n = s.length;
+  try { return lex(); } finally { charge(i - start); }
+  function lex(): Lexed {
   while (i < n) {
     const c = s[i];
     if (c === "%") { while (i < n && s[i] !== "\n" && s[i] !== "\r") i++; continue; }
@@ -313,7 +390,7 @@ function lexPdf(s: string, bytes: Uint8Array | null): Lexed {
       i++; continue;
     }
     if (c === "<") {
-      if (s[i + 1] === "<") { stack.push(i); i += 2; continue; }
+      if (s[i + 1] === "<") { stack.push(i); if (stack.length > MAX_NEST) { bad = true; break; } i += 2; continue; }
       const e = s.indexOf(">", i);
       if (e < 0) { bad = true; break; }
       i = e + 1; continue;
@@ -324,6 +401,7 @@ function lexPdf(s: string, bytes: Uint8Array | null): Lexed {
       if (!stack.length) {
         const dict = s.slice(o, i + 2), num = cur;
         dicts.push(dict);
+        if (first) { i += 2; return { dicts, streams, objs, bad, end: i }; }
         if (cur !== null) { if (!objs.has(cur)) objs.set(cur, dict); cur = null; }
         if (bytes) {
           STREAM_AT.lastIndex = i;
@@ -345,12 +423,14 @@ function lexPdf(s: string, bytes: Uint8Array | null): Lexed {
     }
     i++;
   }
-  return { dicts, streams, objs, bad: bad || stack.length > 0 };
+  return { dicts, streams, objs, bad: bad || stack.length > 0, end: i };
+  }
 }
 // Names may be written with #xx escapes (/Type#30 is /Type0); every check reads them decoded.
-const names = (d: string) => d.replace(/#([0-9A-Fa-f]{2})/g, (_m, h: string) => String.fromCharCode(parseInt(h, 16)));
+const names = (d: string) => (charge(d.length), d).replace(/#([0-9A-Fa-f]{2})/g, (_m, h: string) => String.fromCharCode(parseInt(h, 16)));
 // A dictionary's own top level: nested dictionaries kept only as "<<>>" and strings dropped, so a key is read where it is.
 function topLevel(d: string): string {
+  charge(d.length);
   let out = "", depth = 0;
   for (let i = 0; i < d.length; i++) {
     if (d[i] === "(") { let k = 0; for (; i < d.length; i++) { if (d[i] === "\\") { i++; continue; } if (d[i] === "(") k++; else if (d[i] === ")" && --k === 0) break; } continue; }
@@ -361,7 +441,18 @@ function topLevel(d: string): string {
   return out;
 }
 const FLATE = (d: string) => /\/(?:FlateDecode|Fl)(?![\w])/.test(names(d));
-const streamData = (st: PdfStream) => FLATE(st.dict) ? new Uint8Array(zlib.inflateSync(st.body, { maxOutputLength: 256 * 1024 * 1024 } as never)) : st.body;
+// Each stream is inflated once per scan (round 15: it was inflated up to three times, with no cap on two of them).
+const INFLATED = new WeakMap<PdfStream, Uint8Array | Error>();
+function inflated(st: PdfStream): Uint8Array {
+  let r = INFLATED.get(st);
+  if (r === undefined) {
+    try { r = inflateZ(st.body); } catch (e) { if (e instanceof ScanLimit) throw e; r = e instanceof Error ? e : new Error(String(e)); }
+    INFLATED.set(st, r);
+  }
+  if (r instanceof Error) throw r;
+  return r;
+}
+const streamData = (st: PdfStream) => FLATE(st.dict) ? inflated(st) : st.body;
 // The objects of a PDF: raw ones, and those packed in compressed object streams (/Type /ObjStm, PDF 1.5+, pdf-lib's default),
 // whose inflated text is kept too so every structural check reads it (round 14: fonts packed there were never checked).
 interface PdfModel { s: string; streams: PdfStream[]; dicts: string[]; objs: Map<number, string>; packed: string[]; bad: boolean }
@@ -396,16 +487,21 @@ function pdfModel(bytes: Uint8Array): PdfModel {
 // The values of a dictionary of references (a font resource dictionary, an /EF dictionary): each is "N G R" (resolved
 // through the object table) or an inline dictionary. Anything else, or a reference to no object, returns null.
 function entries(d: string, objs: Map<number, string>): { dict: string | null; num: number | null }[] | null {
-  const body = d.replace(/^<<|>>$/g, ""), out: { dict: string | null; num: number | null }[] = [];
-  let i = 0;
-  const sp = () => { while (i < body.length && /\s/.test(body[i])) i++; };
-  for (sp(); i < body.length; sp()) {
-    const k = /^\/[^\s\/<>\[\]()]*/.exec(body.slice(i));
+  // Round 15 (B3): read in place with sticky patterns; no slice of the rest per entry.
+  if (!d.startsWith("<<") || !d.endsWith(">>")) return null;
+  const end = d.length - 2, out: { dict: string | null; num: number | null }[] = [];
+  const K = /\/[^\s\/<>\[\]()]*/y, R = /(\d+)\s+\d+\s+R(?![\w])/y;
+  let i = 2;
+  const sp = () => { while (i < end && /\s/.test(d[i])) i++; };
+  for (sp(); i < end; sp()) {
+    K.lastIndex = i;
+    const k = K.exec(d);
     if (!k) return null;
     i += k[0].length; sp();
-    const r = /^(\d+)\s+\d+\s+R(?![\w])/.exec(body.slice(i));
-    if (r) { i += r[0].length; out.push({ dict: objs.get(Number(r[1])) ?? null, num: Number(r[1]) }); continue; }
-    if (body.startsWith("<<", i)) { const sub = lexPdf(body.slice(i), null); if (!sub.dicts.length) return null; out.push({ dict: sub.dicts[0], num: null }); i += sub.dicts[0].length; continue; }
+    R.lastIndex = i;
+    const r = R.exec(d);
+    if (r && i + r[0].length <= end) { i += r[0].length; out.push({ dict: objs.get(Number(r[1])) ?? null, num: Number(r[1]) }); continue; }
+    if (d.startsWith("<<", i)) { const sub = lexPdf(d, null, i, true); if (!sub.dicts.length || sub.end > end) return null; out.push({ dict: sub.dicts[0], num: null }); i = sub.end; continue; }
     return null;
   }
   return out;
@@ -414,7 +510,7 @@ function entries(d: string, objs: Map<number, string>): { dict: string | null; n
 function valueDicts(d: string, key: string, objs: Map<number, string>): (string | null)[] {
   const out: (string | null)[] = [], re = new RegExp(`\\/${key}(?![\\w])\\s*(?:(<<)|(\\d+)\\s+\\d+\\s+R(?![\\w]))`, "g");
   for (const m of d.matchAll(re)) {
-    if (m[1]) { const sub = lexPdf(d.slice(m.index! + m[0].length - 2), null); out.push(sub.dicts[0] ?? null); }
+    if (m[1]) { const sub = lexPdf(d, null, m.index! + m[0].length - 2, true); out.push(sub.dicts[0] ?? null); }
     else out.push(objs.get(Number(m[2])) ?? null);
   }
   return out;
@@ -478,7 +574,7 @@ export function pdfStreams(bytes: Uint8Array): Uint8Array[] {
   const md = pdfModel(bytes), out: Uint8Array[] = [], { refs } = attachments(md);
   for (const st of md.streams) {
     if (!/\/Type\s*\/(?:Metadata|EmbeddedFile)(?![\w])|\/Subtype\s*\/XML(?![\w])/.test(names(st.dict)) && !(st.num !== null && refs.has(st.num))) continue;
-    try { out.push(streamData(st)); } catch { out.push(st.body); }
+    try { out.push(streamData(st)); } catch (e) { if (e instanceof ScanLimit) throw e; out.push(st.body); }
   }
   return out;
 }
@@ -503,14 +599,50 @@ function utf16be(bin: string): string {
 // phrase is matched with its separators removed too ("JordanPike"), so each gap counts as an optional space.
 export const JOINED = "\u0003joined ";
 const squeeze = (t: string) => JOINED + t.replace(/[\s\-_]+/g, "");
+// Round 15 (B4): literal strings found by a linear scan with the old pattern's meaning: from "(" to the first ")" that is not
+// escaped. When one "(" has no such ")", no later one has either (the escapes pair up the same way), so the scan stops.
+function literals(src: string): string[] {
+  const out: string[] = [];
+  for (let i = src.indexOf("("); i >= 0; ) {
+    let j = i + 1;
+    while (j < src.length && src[j] !== ")") j += src[j] === "\\" ? 2 : 1;
+    if (j >= src.length) break;
+    out.push(src.slice(i + 1, j));
+    i = src.indexOf("(", j + 1);
+  }
+  return out;
+}
 export function pdfStrings(src: string): string[] {
-  const lit = [...src.matchAll(/\((?:\\[^]|[^\\)])*\)/g)].map((m) => utf16be(decodePdfLiteral(m[0].slice(1, -1))));
+  charge(6 * src.length);
+  const lit = literals(src).map((m) => utf16be(decodePdfLiteral(m)));
   const hex = [...src.matchAll(/<([0-9A-Fa-f\s]+)>/g)].map((m) => {
     const h = m[1].replace(/\s+/g, ""); let bin = "";
     for (let i = 0; i + 1 < h.length; i += 2) bin += String.fromCharCode(parseInt(h.slice(i, i + 2), 16));
     return utf16be(bin);
   });
   return [lit.join(" "), lit.join(""), hex.join(" "), hex.join(""), squeeze(lit.join("")), squeeze(hex.join(""))];
+}
+// Round 15 (B4): the body of each "[" ... "]" array that follows a key, found by indexOf (the old /\[[^\]]*\]/ pattern rescanned
+// to the end from every unclosed "["). An array with no "]" yields null and stops the list.
+function* arrays(s: string, key: RegExp): Generator<string | null> {
+  for (const m of s.matchAll(key)) {
+    const a = m.index! + m[0].length, z = s.indexOf("]", a);
+    if (z < 0) { yield null; return; }
+    yield s.slice(a, z);
+  }
+}
+// Each /Filter value: an array (with its brackets), a name, or an indirect reference; null for an array with no close.
+function* filterValues(s: string): Generator<string | null> {
+  const V = /\s*(\[|\/[A-Za-z0-9]+|\d+\s+\d+\s+R)/y;
+  for (const m of s.matchAll(/\/Filter/g)) {
+    V.lastIndex = m.index! + m[0].length;
+    const v = V.exec(s);
+    if (!v) continue;
+    if (v[1] !== "[") { yield v[1]; continue; }
+    const z = s.indexOf("]", V.lastIndex);
+    if (z < 0) { yield null; return; }
+    yield s.slice(V.lastIndex - 1, z + 1);
+  }
 }
 // Round 6: a stream with a filter other than FlateDecode, a Flate stream that will not inflate, or a font whose codes are
 // not text cannot be read, so the PDF is reported as unreadable rather than clean.
@@ -524,17 +656,19 @@ export function pdfUnreadable(bytes: Uint8Array): boolean {
   if (/\/Subtype\s*\/Type[03]\b|\/Encrypt\b/.test(s)) return true;
   // Round 13: a simple font's /Differences that draws a code as another digit or letter ("a" drawn as "one") hides text
   // from the string reading, so the PDF is unreadable. (Round 14's font allow-list refuses every /Differences on a font.)
-  for (const d of s.matchAll(/\/Differences\s*\[([^\]]*)\]/g)) {
+  for (const d of arrays(s, /\/Differences\s*\[/g)) {
+    if (d === null) return true; // an array with no close
     let code = -1;
-    for (const t of d[1].matchAll(/(\d+)|\/([A-Za-z0-9._]+)/g)) {
+    for (const t of d.matchAll(/(\d+)|\/([A-Za-z0-9._]+)/g)) {
       if (t[1]) { code = Number(t[1]); continue; }
       const ch = GLYPH[t[2]] ?? (/^[A-Za-z]$/.test(t[2]) ? t[2] : null);
       if (ch !== null && code >= 0 && ch !== String.fromCharCode(code)) return true;
       code++;
     }
   }
-  for (const f of s.matchAll(/\/Filter\s*(\[[^\]]*\]|\/[A-Za-z0-9]+|\d+\s+\d+\s+R)/g)) {
-    const fs = f[1].startsWith("[") ? [...f[1].matchAll(/\/([A-Za-z0-9]+)/g)].map((x) => x[1]) : f[1].startsWith("/") ? [f[1].slice(1)] : ["(indirect)"];
+  for (const f of filterValues(s)) {
+    if (f === null) return true; // an array with no close
+    const fs = f.startsWith("[") ? [...f.matchAll(/\/([A-Za-z0-9]+)/g)].map((x) => x[1]) : f.startsWith("/") ? [f.slice(1)] : ["(indirect)"];
     if (!fs.length || fs.some((n) => !["FlateDecode", "Fl", "DCTDecode", "DCT"].includes(n))) return true;
   }
   if (!fontsReadable(md) || attachments(md).bad) return true;
@@ -549,7 +683,7 @@ export function pdfUnreadable(bytes: Uint8Array): boolean {
     if (/\/Predictor\s+(\d+)/.test(own) && Number(/\/Predictor\s+(\d+)/.exec(own)![1]) > 1 && !/\/Type\s*\/XRef\b/.test(own)) return true;
     // Round 9: a stream is readable only if it inflates or is plain text; a Flate stream whose dictionary the scan
     // did not see is never read as raw bytes.
-    try { unzlibSync(st.body); } catch { if (filters.length || binary(st.body)) return true; }
+    try { inflated(st); } catch (e) { if (e instanceof ScanLimit) throw e; if (filters.length || binary(st.body)) return true; }
   }
   return false;
 }
@@ -557,7 +691,7 @@ function pdfText(bytes: Uint8Array): string[] {
   const out: string[] = [];
   for (const st of pdfModel(bytes).streams) {
     let body = st.body;
-    try { body = unzlibSync(body); } catch { /* not Flate: read as is */ }
+    try { body = inflated(st); } catch (e) { if (e instanceof ScanLimit) throw e; /* not Flate: read as is */ }
     out.push(...pdfStrings(latin1(body)));
   }
   return out;
@@ -574,7 +708,12 @@ function crc32(b: Uint8Array): number { let c = 0xffffffff; for (const x of b) c
 // Inflates a raw deflate stream to its true end, with no size hint; returns the data and how many input bytes it used.
 function inflateRaw(b: Uint8Array, max = 256 * 1024 * 1024): [Uint8Array, number] {
   // (capped, so a small entry cannot expand without bound; past the cap it throws and the container is unreadable)
-  const r = zlib.inflateRawSync(b, { info: true, maxOutputLength: max } as never) as unknown as { buffer: Uint8Array; engine: { bytesWritten: number } };
+  // (round 15: also within the scan's budget; past it, a ScanLimit)
+  const cap = Math.max(1, Math.min(max, BUDGET.left));
+  let r: { buffer: Uint8Array; engine: { bytesWritten: number } };
+  try { r = zlib.inflateRawSync(b, { info: true, maxOutputLength: cap } as never) as unknown as typeof r; }
+  catch (e) { if (cap < max && isLimit(e)) throw new ScanLimit(); throw e; }
+  charge(r.buffer.length);
   return [new Uint8Array(r.buffer), r.engine.bytesWritten];
 }
 // Round 11: the zip is read from its own central directory, not by unzip's name-keyed map: every entry (duplicate names
@@ -639,7 +778,13 @@ function zipEntries(b: Uint8Array): [[string, Uint8Array][], string] {
   if (at !== cdOff) throw new RangeError("bytes before the directory");
   // Round 13: an end-record signature inside an entry's own data (a stored zip inside the zip) is that entry's, not a second
   // end record of this file; any other one is.
-  if (ends.filter((i) => !spans.some(([a, z]) => i >= a && i < z)).length !== 1) throw new RangeError("second end record");
+  // (round 15: one merge of two sorted lists, not every signature against every entry)
+  let outside = 0;
+  for (let k = 0, j = 0; k < ends.length; k++) {
+    while (j < spans.length && spans[j][1] <= ends[k]) j++;
+    if (!(j < spans.length && ends[k] >= spans[j][0])) outside++;
+  }
+  if (outside !== 1) throw new RangeError("second end record");
   // Round 14: returned apart from the entries, so it is read as the text it is and no entry can take its name.
   return [out, extras.some((x) => x.length) ? extras.map(latin1).join("\n") : ""];
 }
@@ -669,6 +814,7 @@ function gzipMembers(b: Uint8Array): [Uint8Array, string] {
 // with no BOM only when nine in ten code units are ASCII (every other byte zero), as exported XML and text are.
 const CONTROL = /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]/;
 function textLike(b: Uint8Array): boolean {
+  charge(3 * b.length);
   const ok = (enc: string) => { try { return !CONTROL.test(new TextDecoder(enc, { fatal: true }).decode(b)); } catch { return false; } };
   if (b[0] === 0xff && b[1] === 0xfe) return ok("utf-16le");
   if (b[0] === 0xfe && b[1] === 0xff) return ok("utf-16be");
@@ -724,18 +870,42 @@ function partsOf(files: Record<string, Uint8Array>): [string, Uint8Array, boolea
   return out;
 }
 
+// Round 15 (B2): the budget is a few times the input's size, with a floor and a hard cap, and a deadline.
+export const SCAN_BUDGET = (inputBytes: number) => Math.min(1 << 30, 64 * inputBytes + 64 * 1024 * 1024);
 // Returns a promise so a later scanner (a PDF text layer) can join without changing callers.
 export function scan(files: Record<string, Uint8Array>, values: RevokedValue[]): Promise<RevokeHit[]> {
   // A value the scan cannot build a matcher for is a hit everywhere (fail closed), never a throw or a clean pass.
   const ms = values.map((v) => {
-    try { return matchersFor(v); } catch { return { form: "text" as const, test: () => true }; }
+    try { return matchersFor(v); } catch { return { form: "text" as const, test: (_s: string) => true }; }
   });
+  const total = Object.values(files).reduce((n, b) => n + (b?.length ?? 0), 0);
+  const saved = { ...BUDGET }, savedMeter = { charge: meter.charge, left: meter.left };
+  BUDGET.left = SCAN_BUDGET(total);
+  BUDGET.deadline = performance.now() + SCAN_DEADLINE_MS;
+  meter.charge = charge;
+  meter.left = () => Math.max(0, BUDGET.left);
+  try {
+    return Promise.resolve(scanParts(files, ms));
+  } catch {
+    // Round 15 (B2): anything the scan could not finish (its budget, its deadline, or any error) is every file unreadable.
+    const hits: RevokeHit[] = [];
+    for (const part of Object.keys(files)) ms.forEach((m, i) => hits.push({ part, category: "unreadable container", value: i, form: m.form }));
+    return Promise.resolve(hits);
+  } finally {
+    Object.assign(BUDGET, saved);
+    meter.charge = savedMeter.charge;
+    meter.left = savedMeter.left;
+  }
+}
+type Matcher = { form: RevokeHit["form"]; test: (s: string) => boolean };
+function scanParts(files: Record<string, Uint8Array>, ms: Matcher[]): RevokeHit[] {
   const hits: RevokeHit[] = [];
   for (const [part, bytes, unreadable] of partsOf(files)) {
     if (unreadable) { ms.forEach((m, i) => hits.push({ part, category: "unreadable container", value: i, form: m.form })); continue; }
     const pdf = isPdf(bytes);
     if (pdf && pdfUnreadable(bytes)) { ms.forEach((m, i) => hits.push({ part, category: "unreadable container", value: i, form: m.form })); continue; }
     const texts = [...decodings(bytes), ...(pdf ? [...pdfText(bytes), ...pdfStrings(new TextDecoder("latin1").decode(bytes))] : [])].flatMap((t) => views(t, pdf, part));
+    charge(ms.length * texts.reduce((n, t) => n + t.length, 0));
     // The whole path, every folder included (124e review: a revoked value in a bundle's folder name was delivered).
     const name = clean(part.split("!").join(" ").replace(/[\/\\]/g, " ")).normalize("NFKC");
     ms.forEach((m, i) => {
@@ -743,7 +913,7 @@ export function scan(files: Record<string, Uint8Array>, values: RevokedValue[]):
       else if (texts.some((t) => m.test(t))) hits.push({ part, category: categoryOf(part), value: i, form: m.form });
     });
   }
-  return Promise.resolve(hits);
+  return hits;
 }
 
 const FORM_WORD: Record<RevokeHit["form"], string> = { percent: "a percentage", number: "a number", pair: "a before-and-after pair", text: "a phrase" };

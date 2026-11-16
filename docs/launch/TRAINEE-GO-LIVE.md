@@ -90,6 +90,39 @@ read from the environment or asked on a hidden prompt; none is echoed, written t
 | `--allow-send` | the smoke also sends `HELP` to `trainee-inbound` as if from `TRAINEE_SMOKE_CONTACT`, and **the help reply is texted to that number**. Use your own |
 | `--no-wait` | the smoke does not wait (up to 7 minutes) for each schedule to fire once |
 
+## S3 on the owner's subscription (D-091)
+
+The release's reply-quality check (deploy standard S3) can be measured on your Claude subscription instead of an API run
+in CI ($0 API spend; it uses your subscription's limits and takes a few hours). CI cannot run it: the `claude` CLI runs
+only on your machine. Run it on the **final** release candidate, after everything for the release has merged. The
+`claude` CLI must be signed in to your subscription: `claude -p --output-format stream-json --verbose` must report
+`apiKeySource: none`, and the runner refuses otherwise. `--brain` is the brain the candidate serves (`PRODUCTION_BRAIN` in
+`supabase/functions/agent-chat/release_config.ts`, `staged` today). Run the five passes once, in one sitting, and pack
+those five; never pick five from more.
+
+```
+SHA=<the 40-character release candidate>
+git fetch origin && git worktree add --detach ~/trainee-s3-$SHA $SHA && cd ~/trainee-s3-$SHA
+for p in 1 2 3 4 5; do
+  env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN deno run -A evals/career/run.ts --subscription --brain staged --set dev --label s3sub-$SHA-p$p || break
+done
+env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN deno run -A scripts/launch/s3-subscription.ts --sha $SHA --out ~/trainee-s3-evidence evals/career/results/s3sub-$SHA-p{1,2,3,4,5}.json
+git worktree add --detach ~/trainee-brain-eval-$SHA origin/ci/brain-eval
+mkdir -p ~/trainee-brain-eval-$SHA/evals/career/subscription
+cp ~/trainee-s3-evidence/evals/career/subscription/$SHA.json ~/trainee-brain-eval-$SHA/evals/career/subscription/
+git -C ~/trainee-brain-eval-$SHA add evals/career/subscription/$SHA.json
+git -C ~/trainee-brain-eval-$SHA commit -m "S3 subscription evidence for $SHA (D-091)"
+git -C ~/trainee-brain-eval-$SHA push origin HEAD:ci/brain-eval
+```
+
+The runner refuses a checkout with changes under `supabase/`, `packages/` or `evals/` (results aside). The packer checks
+the evidence exactly as S3 will and prints `MEETS` or `BELOW the bar` with every pass's count. Push the evidence only if it
+meets the bar; S3 fails it otherwise. If the push is refused because CI wrote to `ci/brain-eval` meanwhile, run
+`git -C ~/trainee-brain-eval-$SHA pull --rebase origin ci/brain-eval` and push again. Then push `$SHA` to
+`release/production` as usual. `deploy-production.yml`'s measure job finds the evidence and makes no API measurement; S3
+prints `SUBSCRIPTION (D-091): staged worst pass N/38 >= 95%`. The same evidence also counts for a later SHA within 10
+first-parent commits whose reply code and eval code are unchanged.
+
 ## What you are asked for
 
 | Input | What it is | Where it ends up |

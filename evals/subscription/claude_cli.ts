@@ -18,8 +18,9 @@
 //   Other server tools are dropped and counted (`stats.serverToolsDropped`).
 // - Images in messages are replaced by "[image omitted]".
 
-export interface CliStats { calls: number; failed: number; serverToolsDropped: number; webSearches: number; ms: number }
-export const stats: CliStats = { calls: 0, failed: 0, serverToolsDropped: 0, webSearches: 0, ms: 0 };
+// apiKeySource: what the CLI's init event reported at the preflight (only "none" lets a run start); S3 evidence carries it (D-091).
+export interface CliStats { calls: number; failed: number; serverToolsDropped: number; webSearches: number; ms: number; apiKeySource: string | null }
+export const stats: CliStats = { calls: 0, failed: 0, serverToolsDropped: 0, webSearches: 0, ms: 0, apiKeySource: null };
 
 const SCHEMA = {
   type: "object",
@@ -95,6 +96,7 @@ export async function preflight(model = "claude-sonnet-5-5"): Promise<void> {
   const r = await cli([...BASE, "--model", model, "--output-format", "stream-json", "--verbose", "--system-prompt", "Reply with the word ok."], "ok?");
   const init = r.out.split("\n").map((l) => { try { return JSON.parse(l); } catch { return null; } }).find((e) => e?.type === "system" && e?.subtype === "init");
   if (!init) throw new Error(`subscription preflight: the claude CLI did not start (${r.err.slice(0, 200)})`);
+  stats.apiKeySource = String(init.apiKeySource);
   if (init.apiKeySource !== "none") throw new Error(`subscription preflight: apiKeySource is ${JSON.stringify(init.apiKeySource)}, not "none"; refusing (it would bill the API)`);
   preflighted = true;
 }

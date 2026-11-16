@@ -21351,6 +21351,7 @@ const CareerRouter = (() => {
   const DISCLOSURE_RE = /\balready\b[^.]*\b(applied|submitted)\b|\b(applied|submitted)\b[^.]*\b(manually|myself)\b|\bapplied (manually|myself)\b|\bi applied to\b[^.]*\b(manually|yesterday|on their site)\b/;
   function handlePriorApplication(text, ctx) {
     if (!DISCLOSURE_RE.test(lc(text))) return null;
+    if (/\b(check|checking|see|look|looking|search|find|verify|confirm|whether|if|any sign|any evidence|any record|proof|did i|have i|make sure)\b[^.!?]*\balready\b[^.!?]*\b(applied|submitted)\b/.test(lc(text))) return null;
     if (applicationAssertionOf(text) === "hypothetical") return null;
     if (interrogativeTurn(text) && !/\bi (already )?(applied|submitted)\b[^.]*\b(manually|yesterday|last (week|month)|on their site|through their (site|portal))\b/.test(lc(text)) && !/\bi already (applied|submitted)\b/.test(lc(text))) return null;
     const store = doorstepStore(ctx);

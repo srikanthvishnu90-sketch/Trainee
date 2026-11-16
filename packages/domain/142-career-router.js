@@ -11142,6 +11142,10 @@ const CareerRouter = (() => {
   const DISCLOSURE_RE = /\balready\b[^.]*\b(applied|submitted)\b|\b(applied|submitted)\b[^.]*\b(manually|myself)\b|\bapplied (manually|myself)\b|\bi applied to\b[^.]*\b(manually|yesterday|on their site)\b/;
   function handlePriorApplication(text, ctx) {
     if (!DISCLOSURE_RE.test(lc(text))) return null;
+    // Real-task review (2026-11-16, the owner's Vista request): "check my Gmail for any sign I already applied" asks Trainee to
+    // FIND OUT whether an application exists; it reports nothing. A disclosure inside a check, search or whether-clause is a
+    // question, so no record is written and the turn goes on to the task.
+    if (/\b(check|checking|see|look|looking|search|find|verify|confirm|whether|if|any sign|any evidence|any record|proof|did i|have i|make sure)\b[^.!?]*\balready\b[^.!?]*\b(applied|submitted)\b/.test(lc(text))) return null;
     // BUG-169 invariant: a quoted or attributed application claim is
     // not the user's own disclosure — the assertion test (which
     // strips quotes and hears attribution) decides.

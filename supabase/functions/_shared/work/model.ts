@@ -122,7 +122,8 @@ export function render(text: string, values: Values, formats: Record<string, str
 //    day from 1 to 31 and a year, "Month YYYY", a clock time with am/pm or after "at", a year range of two years
 //    (2024-2026, from 2024 to 2026), and a year 1900-2099 after in / since / until / through / during / FY / Q1-Q4 /
 //    H1-H2 / mid- / early- / late- / a month name, when no noun follows it ("in 2026 users" lists 2026). Lower-case
-//    "may" is never read as a month.
+//    "may" is never read as a month. An ISO time tail is a real time (hour 00-23, minute and second 00-59, at most three
+//    fraction digits, an offset of at most 14 hours); anything else in it is read as figures (124d review 9).
 const MONTH_SRC = "(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)";
 const MONTHS3 = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 const realDay = (y: number, m: number, d: number) => { const t = new Date(Date.UTC(y, m, d)); return t.getUTCFullYear() === y && t.getUTCMonth() === m && t.getUTCDate() === d; };
@@ -131,7 +132,7 @@ export type Span = [number, number];
 export function dateSpans(t: string): Span[] {
   const out: Span[] = [];
   const add = (m: RegExpMatchArray) => out.push([m.index!, m.index! + m[0].length]);
-  for (const m of t.matchAll(/\b(\d{4})-(\d{2})-(\d{2})(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?\b/g)) if (realDay(+m[1], +m[2] - 1, +m[3])) add(m);
+  for (const m of t.matchAll(/\b(\d{4})-(\d{2})-(\d{2})(?:[T ](?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,3})?)?(?:Z|[+-](?:0\d|1[0-4]):?[0-5]\d)?)?\b/g)) if (realDay(+m[1], +m[2] - 1, +m[3])) add(m);
   for (const m of t.matchAll(new RegExp(`\\b${MONTH_SRC}\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(\\d{4})\\b`, "gi"))) {
     if (monthOk(m[1]) && realDay(+m[3], MONTHS3.indexOf(m[1].slice(0, 3).toLowerCase()), +m[2])) add(m);
   }

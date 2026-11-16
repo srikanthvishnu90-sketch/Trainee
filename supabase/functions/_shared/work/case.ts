@@ -1,5 +1,6 @@
 // WO-124a: a work case, its rounds and its constraint ledger (spec docs/architect/specs/WORK-ARTIFACTS.md, D4 and D6).
 // Pure: no database, no network; the clock is an input. A practice case is a sealed namespace: the profile guard throws.
+import type { DiffRow } from "./versions.ts";
 
 export type ConstraintKind = "hard" | "preference" | "permission" | "output";
 export type ConstraintStatus = "active" | "superseded" | "revoked";
@@ -18,7 +19,7 @@ export interface Round { round: number; text: string; constraints: string[] }
 export interface GuardEvent { at: number; op: "read" | "write"; refused: boolean }
 export interface WorkVersion {
   version: number; round: number; kind: string; model: unknown; files: Record<string, Uint8Array>;
-  values: Record<string, number>; diff: unknown[]; invariants: unknown[];
+  values: Record<string, number>; diff: DiffRow[]; invariants: unknown[];
 }
 export interface WorkCase {
   id: string; owner: string; practice: boolean; title: string; createdAt: number;

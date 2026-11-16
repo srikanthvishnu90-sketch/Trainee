@@ -102,9 +102,35 @@ export interface Failure { sentence: string; reason: string }
 export interface Verified { text: string; failures: Failure[]; kept: string[]; cites: string[] }
 
 // What layer A found missing, in code's words: each figure, name or date of the clause that no cited unit holds.
+// The organisations a unit names: its owner, or for an unowned unit the capitalised name runs in its text, without its places,
+// months and days, and without a sentence's first word when that word is a common opener (round 5 of #849).
+const PLACE = /^(?:alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|hampshire|jersey|mexico|york|carolina|dakota|ohio|oklahoma|oregon|pennsylvania|rhode|island|tennessee|texas|utah|vermont|virginia|washington|wisconsin|wyoming|chicago|boston|seattle|austin|dallas|houston|atlanta|denver|miami|francisco|san|los|angeles|diego|jose|new|city|canada|india|london|europe|america|american|states|united)$/i;
+const NOT_NAME = /^(?:the|a|an|in|on|at|for|of|to|and|or|but|by|with|from|as|this|that|these|those|it|its|they|their|we|our|you|your|he|she|his|her|i|interns?|internships?|students?|software|engineers?|engineering|most|many|some|all|each|every|median|average|typical|pay|salary|salaries|base|total|jobs?|roles?|positions?|candidates?|applicants?|employers?|companies|firms|new|graduates?|entry|junior|senior|us|u\.s\.|usa|uk|eu|january|february|march|april|may|june|july|august|september|october|november|december|monday|tuesday|wednesday|thursday|friday|saturday|sunday|note|source|page|report|data|according)$/i;
+// Figures in words that support.ts does not read as numbers: singular magnitudes and ordinals (round 5 of #849).
+const UNREAD = /\b(?:hundred|thousand|million|billion|trillion|dozen|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|twice|thrice)\b|\bfirst\s+(?:round|interview|stage|year|place|call|screen)\b/i;
+export function unitNames(u: EvidenceUnit, weak = false): string[] {
+  if (u.owner) return [u.owner];
+  if (u.kind !== "page" && u.kind !== "chat") return [];
+  const places = new Set((u.places ?? []).flatMap((p) => p.split(/,\s*/)).map((p) => p.trim().toLowerCase()));
+  const out: string[] = [];
+  const text = String(u.text);
+  for (const m of text.matchAll(/\p{Lu}[\p{L}&'.-]*(?:\s+(?:&\s+)?\p{Lu}[\p{L}&'.-]*)*/gu)) {
+    // (a single word that opens a sentence is often an ordinary word, "Registered nurses…", so it names no one; a run of two
+    // or more, or a capitalised word inside a sentence, does)
+    const start = /(?:^|[.!?:]\s+)$/.test(text.slice(0, m.index!));
+    const words = m[0].replace(/[.'’]+$/, "").split(/\s+/).filter((w) => !NOT_NAME.test(w.replace(/[.'’s]+$/, "")) && !NOT_NAME.test(w) && !PLACE.test(w));
+    // (with `weak`, an opening single word counts when what follows reads as an organisation's: "Citadel interns must…",
+    // "Acme pays…", "Stripe's…"; "Registered nurses…" does not)
+    const orgish = /^(?:['’]s\b|\s+(?:interns?|internships?|employees?|engineers?|analysts?|staff|hires?|hiring|pays?|paid|offers?|requires?|wants?|expects?|asks?|has|have|is|was|gives?|provides?|sponsors?|recruits?|accepts?|rejects?|posted|lists?)\b)/i.test(text.slice(m.index! + m[0].length));
+    if (start && words.length < 2 && m[0].split(/\s+/).length < 2 && !(weak && orgish)) continue;
+    const name = words.join(" ").replace(/['’]s$/, "").trim();
+    if (name.length > 1 && !places.has(name.toLowerCase())) out.push(name);
+  }
+  return [...new Set(out)];
+}
 // Round 4 of #849: with `strict`, a name that opens the sentence is checked too ("Google requires…" was never checked), unless it is a
 // common sentence opener; the judge path uses strict, so a one-word employer at the start is never left to the judge.
-const OPENER = /^(?:sadly|unfortunately|note|start|also|however|good|great|here|yes|no|both|all|each|most|some|apply|send|ask|check|look|focus|use|keep|try|first|next|then|finally|overall|today|currently|right|so|still|plus|again|instead|meanwhile|otherwise|honestly|luckily|happily|thankfully|importantly|remember)$/i;
+const OPENER = /^(?:want|would|shall|should|can|could|do|did|does|is|are|was|were|will|worth|heads|before|after|if|when|while|since|because|let|happy|glad|sure|ok|okay|thanks|please|may|might|must|need|how|what|which|who|why|where|sadly|unfortunately|note|start|also|however|good|great|here|yes|no|both|all|each|most|some|apply|send|ask|check|look|focus|use|keep|try|first|next|then|finally|overall|today|currently|right|so|still|plus|again|instead|meanwhile|otherwise|honestly|luckily|happily|thankfully|importantly|remember)$/i;
 export function missingSpecifics(clause: string, units: EvidenceUnit[], strict = false): string[] {
   const all = units.map((u) => u.text).join(" \n ").toLowerCase(), h = hardParts(clause);
   const names = h.names.map((r, j) => j === 0 && r[0] === h.first && (!strict || OPENER.test(r[0] ?? "")) ? r.slice(1) : r).filter((r) => r.length).map((r) => r.join(" "));
@@ -123,7 +149,15 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   const failures: Failure[] = [], kept: string[] = [];
   const checks: { a: number; b: number; clause: string; units: EvidenceUnit[]; claim: string; subject?: string | null; soft?: boolean; untagged?: boolean }[] = [];
   const bad = new Set<string>(), citeAt = new Map<string, string[]>();
-  const owners = [...new Set(ledger.units.map((u) => u.owner).filter((w): w is string => !!w && w.trim().length > 1))];
+  // Round 5 of #849: a page unit belongs to every organisation it names (a page sentence about Citadel is Citadel's), so the
+  // employers known to the turn are the posting owners and the names in its page units, and a unit naming another one is never
+  // used for a sentence about a different subject, or about none.
+  const named = new Map(ledger.units.map((u) => [u.id, unitNames(u)]));
+  // (for a sentence about no one, any name in the page counts, a sentence-opening one too: "Citadel interns must…")
+  const anyNamed = new Map(ledger.units.map((u) => [u.id, unitNames(u, true)]));
+  const owners = [...new Set([...ledger.units.map((u) => u.owner), ...[...named.values()].flat()].filter((w): w is string => !!w && w.trim().length > 1))];
+  const mine = (u: EvidenceUnit, subj: string | null) => u.owner ? (subj ? u.owner === subj : owners.length < 2)
+    : subj ? nameFoundIn(subj, u.text) : (anyNamed.get(u.id) ?? []).length === 0;
   let carried: string | null = null;
   lines.forEach((l, a) => l.forEach((x, b) => {
     if (/^\s*(?:https?:\/\/\S+\s*)*$/.test(x)) return;
@@ -166,7 +200,7 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
       const ownSubj = owners.length ? (mentioned(c)[0] ?? named) : null;
       const subject = owners.length ? (ownSubj ?? sentSubject) : null;
       // (a carried subject may not rest on a line from an earlier reply whose owner is unknown: it may be another employer's)
-      const allowedUnits = units.filter((u) => u.owner ? (subject ? u.owner === subject : owners.length < 2) : !(subject && !ownSubj && u.source === "an earlier reply in this chat"));
+      const allowedUnits = units.filter((u) => mine(u, subject) && !(subject && !ownSubj && !u.owner && u.source === "an earlier reply in this chat"));
       if (!allowedUnits.length) { failures.push({ sentence: text, reason: subject ? `no cited unit is about ${subject}` : "it names no employer, and every unit that could hold it is one employer's" }); bad.add(`${a}:${b}`); return; }
       checks.push({ a, b, clause: c, units: allowedUnits, claim: text, subject, soft: !ownSubj, untagged: !ids.length });
     }
@@ -181,11 +215,15 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
     // cited units of its subject only; a figure is never left to the judge alone.
     // Round 4: a figure is any number code reads, words included ("five", "six-figure", "fifty dollars"), not only a digit.
     const hp = hardParts(c.clause);
-    const figure = /\d/.test(c.clause) || hp.numbers.length > 0 || hp.years.length > 0 || hp.quant.length > 0;
+    // Round 5: a singular magnitude ("a hundred dollars", "a million") and an ordinal ("a second round") are figures too.
+    const figure = /\d/.test(c.clause) || hp.numbers.length > 0 || hp.years.length > 0 || hp.quant.length > 0 ||
+      UNREAD.test(c.clause);
+    // (a figure code cannot read as a number is refused: no unit check can hold it, and the judge never decides a figure alone)
+    if (UNREAD.test(c.clause) && !hp.numbers.length && !/\d/.test(c.clause)) { failures.push({ sentence: c.claim, reason: `"${UNREAD.exec(c.clause)![0]}" is a figure code cannot check` }); bad.add(`${c.a}:${c.b}`); return; }
     if (!f && !figure && o.judge) {
       const pool = c.units; // already only the subject's own units and unowned ones
       // (only when every name of the clause, the opening one too, is in those units: code failed on wording alone, never on a fact)
-      if (pool.length && !missingSpecifics(c.clause, pool, true).length) { asks.push({ k, claim: `${c.subject && pool.some((u) => u.owner) && !c.clause.includes(c.subject) ? `${c.subject}: ` : ""}${c.clause}`, source: pool.map((u) => u.text).join("\n").slice(0, 2400) }); return; }
+      if (pool.length && !missingSpecifics(c.clause, pool, true).length) { asks.push({ k, claim: `${c.subject && pool.some((u) => u.owner || (named.get(u.id) ?? []).length) && !c.clause.includes(c.subject) ? `${c.subject}: ` : ""}${c.clause}`, source: pool.map((u) => u.text).join("\n").slice(0, 2400) }); return; }
     }
     if (!f) { const miss = missingSpecifics(c.clause, c.units); failures.push({ sentence: c.claim, reason: c.untagged ? "it states a fact and cites no evidence unit, and no unit holds it" : miss.length ? miss.map((m) => `'${m}' is in no cited unit`).join("; ") : `no single cited unit holds "${c.clause}"` }); bad.add(`${c.a}:${c.b}`); return; }
     const held = c.units[f.page]; // indexPages makes one page per cited unit, in order
@@ -193,7 +231,7 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
     if (c.subject && (unitOwner ? unitOwner !== c.subject : !c.soft && !nameFoundIn(c.subject, f.unit.passage))) { failures.push({ sentence: c.claim, reason: `the unit that holds "${c.clause}" is not about ${c.subject}` }); bad.add(`${c.a}:${c.b}`); return; }
     // (an untagged sentence a unit supports keeps that unit's source link, as a tagged one does)
     if (c.untagged && held) citeAt.set(`${c.a}:${c.b}`, [...new Set([...(citeAt.get(`${c.a}:${c.b}`) ?? []), held.id])]);
-    asks.push({ k, claim: `${c.subject && unitOwner && !c.clause.includes(c.subject) ? `${c.subject}: ` : ""}${c.clause}`, source: f.unit.passage });
+    asks.push({ k, claim: `${c.subject && (unitOwner || (held && (named.get(held.id) ?? []).length)) && !c.clause.includes(c.subject) ? `${c.subject}: ` : ""}${c.clause}`, source: f.unit.passage });
   });
   const got = await judgeAll(o.judge, asks.map((x) => ({ claim: x.claim, source: x.source })));
   asks.forEach((x, j) => { const c = checks[x.k]; if (!got[j] && !bad.has(`${c.a}:${c.b}`)) { failures.push({ sentence: c.claim, reason: c.untagged ? "it states a fact and cites no evidence unit, and no unit states it" : `the cited unit does not state "${x.claim}"` }); bad.add(`${c.a}:${c.b}`); } });

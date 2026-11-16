@@ -1,7 +1,8 @@
 // WO-124a: the revoke scan (spec D4). A value the person took back is searched for in every part of the bytes: each
 // OOXML part (unzipped), metadata, filenames, alt text, and derived forms of the value. The audit names categories and
 // counts only; it never repeats a value, a form or a part name (a part name can itself carry the value).
-import { gunzipSync, unzipSync, unzlibSync } from "npm:fflate@0.8.2";
+import { unzlibSync } from "npm:fflate@0.8.2";
+import zlib from "node:zlib";
 import { asciiDigits } from "./model.ts";
 
 export type RevokedValue = string | number | { before: string | number; after: string | number };
@@ -91,7 +92,7 @@ function matchersFor(v: RevokedValue): { form: RevokeHit["form"]; test: (s: stri
     // matches each number in it, read as a value with its scale, so the number itself is searched for (fail closed).
     // Round 9: a comma is a US thousands group only as \d{1,3}(,\d{3})+; any other comma or a dot before exactly three
     // digits is read both ways ("1,5" is 1.5 and 15; "1.500" is 1.5 and 1500), so neither reading is missed.
-    const nums = [...clean(String(v)).matchAll(/[$€£¥₹]?\s?(\d+(?:[.,]\d+)*)\s?(?:(%)|(k|m|mn|bn|thousand|million|billion)\b)?/gi)].flatMap((m) => {
+    const nums = [...clean(String(v)).matchAll(/[$€£¥₹]?\s?(\d+(?:[.,]\d+)*)\s?(?:(%|percent\b|per\s?cent\b|pct\b)|(k|m|mn|bn|thousand|million|billion)\b)?/gi)].flatMap((m) => {
       const t = m[1], pct = !!m[2], sc = ({ k: 1e3, thousand: 1e3, m: 1e6, mn: 1e6, million: 1e6, bn: 1e9, billion: 1e9 } as Record<string, number>)[(m[3] ?? "").toLowerCase()] ?? 1;
       const reads = new Set<number>();
       if (/^\d+(?:\.\d+)?$/.test(t)) reads.add(Number(t));
@@ -101,6 +102,10 @@ function matchersFor(v: RevokedValue): { form: RevokeHit["form"]; test: (s: stri
         if ((t.match(/,/g) ?? []).length === 1 && !t.includes(".")) reads.add(Number(t.replace(",", ".")));
       }
       if (/^\d{1,3}(?:\.\d{3})+(?:,\d+)?$/.test(t)) reads.add(Number(t.replace(/\./g, "").replace(",", ".")));
+      // Round 11: with a currency, or "000" after the separator, one separator before three digits is a thousands group only
+      // ("$150,000" is not 150; "$1,500" is not 1.5); the decimal reading is kept only for a bare value like "1,500" or "1.500".
+      const money = /[$€£¥₹]/.test(m[0]) || /\b(?:usd|eur|gbp|inr|jpy|cad|aud|dollars?|euros?|pounds?|rupees?)\b/i.test(String(v));
+      if ((money || /[.,]000$/.test(t)) && /^\d{1,3}[.,]\d{3}$/.test(t)) { reads.clear(); reads.add(Number(t.replace(/[.,]/, ""))); }
       // Round 10: a percent keeps its sign on each reading, so its stored-fraction form (0.015 for 1,5%) is searched too.
       return [...reads].map((n) => pct ? `${n * sc}%` : n * sc);
     }).filter((n) => typeof n === "string" || (Number.isFinite(n) && !(Number.isInteger(n) && Math.abs(n) < 10)));
@@ -182,19 +187,6 @@ function zipComments(b: Uint8Array): string {
   }
   return out.filter(Boolean).join("\n");
 }
-// Round 9: a gzip header's stored file name and comment.
-function gzipMeta(b: Uint8Array): string {
-  const flg = b[3], out: string[] = [];
-  let p = 10;
-  if (flg & 4) p += 2 + u16(b, p);
-  for (const bit of [8, 16]) {
-    if (!(flg & bit)) continue;
-    const end = b.indexOf(0, p);
-    if (end < 0) throw new RangeError("gzip header");
-    out.push(latin1(b.subarray(p, end))); p = end + 1;
-  }
-  return out.join("\n");
-}
 const decoder = new TextDecoder("utf-8", { fatal: false });
 // A part may be UTF-16 (a BOM, or every other byte zero, as in some exported XML and text). Each likely encoding is
 // read; scanning a wrong decoding only costs a non-match, never a miss.
@@ -242,7 +234,7 @@ const isOoxmlPart = (part: string) => /\.(?:xml|rels|vml)$/i.test(part);
 function views(raw: string, pdf = false, part = ""): string[] {
   raw = raw.replace(/<!\[CDATA\[([^]*?)\]\]>/g, " $1 ").replace(/<!--([^]*?)-->/g, " $1 ");
   const unent = (s: string) => s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) =>
-    e[0] === "#" ? String.fromCodePoint(e[1].toLowerCase() === "x" ? parseInt(e.slice(2), 16) : Number(e.slice(1))) : ENT[e.toLowerCase()] ?? m);
+    e[0] === "#" ? cp(e[1].toLowerCase() === "x" ? parseInt(e.slice(2), 16) : Number(e.slice(1)), m) : ENT[e.toLowerCase()] ?? m);
   const xml = !pdf && /<[A-Za-z?!\/]/.test(raw);
   if (!xml) return [clean(unent(raw))];
   // app.xml (extended properties) by name, or by shape: a <Properties> root holding <AppVersion>. Only there are the
@@ -282,7 +274,8 @@ export function clean(t: string): string {
 const isPdf = (b: Uint8Array) => b.length > 4 && latin1(b.subarray(0, 1024)).includes("%PDF");
 // Round 9: "stream" is followed by CRLF, LF, a lone CR, or spaces before the end of line; each is a stream start.
 // Round 10: only after a dictionary's close (">>"), as a reader parses it; the word "stream" in a title is not one.
-const STREAM = />>[\s]*stream[ \t]*(\r\n|\r|\n)?/g;
+// Round 11: a comment ("%…" to the end of its line) between ">>" and "stream" is whitespace to a reader, so to the scan too.
+const STREAM = />>(?:\s|%[^\r\n]*(?:\r\n|\r|\n))*stream[ \t]*(\r\n|\r|\n)?/g;
 function streamBody(bytes: Uint8Array, s: string, m: RegExpMatchArray): Uint8Array | null {
   const start = m.index! + m[0].length, end = s.indexOf("endstream", start);
   if (end < 0) return null;
@@ -354,29 +347,84 @@ function pdfText(bytes: Uint8Array): string[] {
 // returned as unreadable, and scan() reports it as a hit for every value (fail closed).
 const MAX_DEPTH = 6;
 const isGzip = (b: Uint8Array) => b.length > 2 && b[0] === 0x1f && b[1] === 0x8b;
+// Round 11: an entity past the last code point is left as written, never a throw.
+function cp(n: number, raw: string): string { return Number.isInteger(n) && n >= 0 && n <= 0x10ffff ? String.fromCodePoint(n) : raw; }
+const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(b: Uint8Array): number { let c = 0xffffffff; for (const x of b) c = CRC[(c ^ x) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; }
+// Inflates a raw deflate stream to its true end, with no size hint; returns the data and how many input bytes it used.
+function inflateRaw(b: Uint8Array): [Uint8Array, number] {
+  const r = zlib.inflateRawSync(b, { info: true } as never) as unknown as { buffer: Uint8Array; engine: { bytesWritten: number } };
+  return [new Uint8Array(r.buffer), r.engine.bytesWritten];
+}
+// Round 11: the zip is read from its own central directory, not by unzip's name-keyed map: every entry (duplicate names
+// included) is returned, each inflated to its true end with no size hint, and an entry whose size, CRC, flags or method
+// disagree with its headers, or a duplicate name, makes the zip unreadable (throws).
+function zipEntries(b: Uint8Array): [string, Uint8Array][] {
+  const e = eocdAt(b);
+  if (e < 0) throw new RangeError("no central directory");
+  const n = u16(b, e + 10), out: [string, Uint8Array][] = [], seen = new Set<string>();
+  if (n === 0xffff || u32(b, e + 16) === 0xffffffff) throw new RangeError("zip64");
+  let p = u32(b, e + 16);
+  for (let k = 0; k < n; k++) {
+    if (u32(b, p) !== 0x02014b50) throw new RangeError("central directory");
+    const flags = u16(b, p + 8), method = u16(b, p + 10), crc = u32(b, p + 16), csize = u32(b, p + 20), usize = u32(b, p + 24);
+    const nl = u16(b, p + 28), xl = u16(b, p + 30), cl = u16(b, p + 32), off = u32(b, p + 42);
+    const name = new TextDecoder().decode(b.subarray(p + 46, p + 46 + nl));
+    if ((flags & 1) || ![0, 8].includes(method) || csize === 0xffffffff || usize === 0xffffffff || seen.has(name)) throw new RangeError("entry");
+    seen.add(name);
+    if (u32(b, off) !== 0x04034b50 || (u16(b, off + 6) & 1) || u16(b, off + 8) !== method) throw new RangeError("local header");
+    const start = off + 30 + u16(b, off + 26) + u16(b, off + 28);
+    if (start + csize > b.length) throw new RangeError("short entry");
+    const raw = b.subarray(start, start + csize);
+    let data: Uint8Array;
+    if (method === 0) data = raw;
+    else { const [d, used] = inflateRaw(raw); if (used !== csize) throw new RangeError("deflate length"); data = d; }
+    if (data.length !== usize || crc32(data) !== crc) throw new RangeError("size or crc");
+    out.push([name, data]);
+    p += 46 + nl + xl + cl;
+  }
+  return out;
+}
+// Round 11: every gzip member, each to its true end, with its CRC and size checked; the file must end exactly after the last
+// member. Returns the data of all members and the text of every header (stored names and comments).
+function gzipMembers(b: Uint8Array): [Uint8Array, string] {
+  const datas: Uint8Array[] = [], metas: string[] = [];
+  let p = 0;
+  while (p < b.length) {
+    const m = b.subarray(p);
+    if (m.length < 18 || m[0] !== 0x1f || m[1] !== 0x8b || m[2] !== 8 || (m[3] & 0xe0)) throw new RangeError("gzip member");
+    const flg = m[3];
+    let q = 10;
+    if (flg & 4) q += 2 + u16(m, q);
+    for (const bit of [8, 16]) { if (!(flg & bit)) continue; const end = m.indexOf(0, q); if (end < 0) throw new RangeError("gzip header"); metas.push(latin1(m.subarray(q, end))); q = end + 1; }
+    if (flg & 2) q += 2;
+    const [d, used] = inflateRaw(m.subarray(q));
+    const t = q + used;
+    if (t + 8 > m.length || u32(m, t) !== crc32(d) || u32(m, t + 4) !== (d.length >>> 0)) throw new RangeError("gzip trailer");
+    datas.push(d); p += t + 8;
+  }
+  if (!datas.length) throw new RangeError("empty gzip");
+  const all = new Uint8Array(datas.reduce((n, d) => n + d.length, 0)); let i = 0; for (const d of datas) { all.set(d, i); i += d.length; }
+  return [all, metas.join("\n")];
+}
 function partsOf(files: Record<string, Uint8Array>): [string, Uint8Array, boolean][] {
   const out: [string, Uint8Array, boolean][] = [];
   const walk = (name: string, bytes: Uint8Array, depth: number) => {
     if (isZip(bytes)) {
       if (depth >= MAX_DEPTH) { out.push([name, bytes, true]); return; }
-      let inner: Record<string, Uint8Array>;
-      try { inner = unzipSync(bytes); } catch { out.push([name, bytes, true]); return; }
+      let inner: [string, Uint8Array][];
+      try { inner = zipEntries(bytes); } catch { out.push([name, bytes, true]); return; }
       let note: string;
       try { note = zipComments(bytes); } catch { out.push([name, bytes, true]); return; }
       if (note) out.push([`${name}!comment`, new TextEncoder().encode(note), false]);
-      for (const [n, b] of Object.entries(inner)) walk(`${name}!${n}`, b, depth + 1);
+      inner.forEach(([n, b], k) => walk(`${name}!${n}${inner.findIndex(([x]) => x === n) === k ? "" : `#${k}`}`, b, depth + 1));
       return;
     }
     if (isGzip(bytes)) {
       if (depth >= MAX_DEPTH) { out.push([name, bytes, true]); return; }
       let inner: Uint8Array, meta: string;
-      try { inner = gunzipSync(bytes); meta = gzipMeta(bytes); } catch { out.push([name, bytes, true]); return; }
-      // Round 10: gunzip reads the first member only. A second member, or bytes after the first member's trailer, would go
-      // unscanned, so the file is unreadable unless its trailer's size is the size read and no further gzip header follows.
-      const isize = bytes.length >= 4 ? (bytes[bytes.length - 4] | bytes[bytes.length - 3] << 8 | bytes[bytes.length - 2] << 16 | bytes[bytes.length - 1] << 24) >>> 0 : -1;
-      let again = false;
-      for (let i = 10; i + 2 < bytes.length && !again; i++) again = bytes[i] === 0x1f && bytes[i + 1] === 0x8b && bytes[i + 2] === 0x08;
-      if (isize !== (inner.length >>> 0) || again) { out.push([name, bytes, true]); return; }
+      // Round 11: every member read to its true end and checked (round 10's size and header test could be forged).
+      try { [inner, meta] = gzipMembers(bytes); } catch { out.push([name, bytes, true]); return; }
       if (meta) out.push([`${name}!gzip-name`, new TextEncoder().encode(meta), false]);
       walk(`${name}!gunzip`, inner, depth + 1);
       return;

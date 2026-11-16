@@ -7,7 +7,9 @@
 // with the same content blocks the API would return (text and tool_use). The child process runs with ANTHROPIC_API_KEY and
 // ANTHROPIC_AUTH_TOKEN removed (otherwise the CLI silently bills the API), in an empty folder with `--setting-sources project`
 // (so no CLAUDE.md or user settings reach the model), no tools of its own (`--tools ""`), no MCP servers, no saved session.
-// preflight() checks once that the CLI reports apiKeySource "none" and refuses to run otherwise.
+// Every call runs with --output-format stream-json and is refused unless that call's own init event reports apiKeySource
+// "none" (preflight() checks it once before the first request as well). The module refuses to run in CI (CI set) whoever
+// imports it, and removes its empty folder when the process ends.
 //
 // Known differences from the API (stated, so a measurement says what it measured):
 // - The CLI adds a small base context of its own (about 600 tokens) in front of the request's system prompt.
@@ -18,7 +20,8 @@
 //   Other server tools are dropped and counted (`stats.serverToolsDropped`).
 // - Images in messages are replaced by "[image omitted]".
 
-// apiKeySource: what the CLI's init event reported at the preflight (only "none" lets a run start); S3 evidence carries it (D-091).
+// apiKeySource: "none" while every call's init event reported "none"; otherwise the first other value seen (that call was
+// refused). S3 evidence carries it (D-091).
 export interface CliStats { calls: number; failed: number; serverToolsDropped: number; webSearches: number; ms: number; apiKeySource: string | null }
 export const stats: CliStats = { calls: 0, failed: 0, serverToolsDropped: 0, webSearches: 0, ms: 0, apiKeySource: null };
 
@@ -76,30 +79,51 @@ export function render(body: any): { system: string; prompt: string; schema: unk
 }
 
 let preflighted = false;
-const EMPTY = Deno.makeTempDirSync({ prefix: "claude-cli-empty-" });
-function childEnv(): Record<string, string> {
-  const env = { ...Deno.env.toObject() };
-  delete env.ANTHROPIC_API_KEY; delete env.ANTHROPIC_AUTH_TOKEN; delete env.ANTHROPIC_BASE_URL; delete env.CLAUDE_CODE_USE_BEDROCK; delete env.CLAUDE_CODE_USE_VERTEX;
+// The variables that would point the CLI at API billing or another provider; removed from the child's environment.
+export const STRIPPED_ENV = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"] as const;
+export function childEnv(from: Record<string, string> = Deno.env.toObject()): Record<string, string> {
+  const env = { ...from };
+  for (const k of STRIPPED_ENV) delete env[k];
   return env;
 }
+// Never in CI, whoever imports this module (the runners refuse too; this holds for any other caller).
+function refuseCi(): void {
+  if (Deno.env.get("CI")) throw new Error("subscription mode never runs in CI (D-089)");
+}
+let empty: string | null = null;
+function emptyDir(): string {
+  if (empty) return empty;
+  empty = Deno.makeTempDirSync({ prefix: "claude-cli-empty-" });
+  globalThis.addEventListener("unload", () => { try { if (empty) Deno.removeSync(empty, { recursive: true }); } catch { /* already gone */ } });
+  return empty;
+}
 const BASE = ["-p", "--tools", "", "--strict-mcp-config", "--setting-sources", "project", "--no-session-persistence"];
-async function cli(args: string[], stdin: string): Promise<{ code: number; out: string; err: string }> {
-  const p = new Deno.Command("claude", { args, cwd: EMPTY, env: childEnv(), clearEnv: true, stdin: "piped", stdout: "piped", stderr: "piped" }).spawn();
+// Every call streams its events (stream-json): the init event names the call's apiKeySource, the result event carries the
+// answer. A call whose init does not report "none" is refused (it would have billed the API), whatever preflight saw.
+async function cli(args: string[], stdin: string): Promise<{ code: number; out: string; err: string; result: any }> {
+  refuseCi();
+  const p = new Deno.Command("claude", { args: [...args, "--output-format", "stream-json", "--verbose"], cwd: emptyDir(), env: childEnv(), clearEnv: true, stdin: "piped", stdout: "piped", stderr: "piped" }).spawn();
   const w = p.stdin.getWriter(); await w.write(new TextEncoder().encode(stdin)); await w.close();
   const r = await p.output();
-  return { code: r.code, out: new TextDecoder().decode(r.stdout), err: new TextDecoder().decode(r.stderr) };
+  const out = new TextDecoder().decode(r.stdout), err = new TextDecoder().decode(r.stderr);
+  const events = out.split("\n").map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  const init = events.find((e: any) => e?.type === "system" && e?.subtype === "init");
+  if (!init) throw new Error(`subscription mode: the claude CLI did not start (exit ${r.code}): ${(err || out).slice(0, 200)}`);
+  if (stats.apiKeySource === null || stats.apiKeySource === "none") stats.apiKeySource = String(init.apiKeySource); // sticky: one other value stays
+  if (init.apiKeySource !== "none") throw new Error(`subscription mode: apiKeySource is ${JSON.stringify(init.apiKeySource)}, not "none"; refusing (it would bill the API)`);
+  return { code: r.code, out, err, result: events.find((e: any) => e?.type === "result") ?? null };
 }
 
 /** Refuses unless the CLI is signed in to a subscription and would bill no API key. */
 export async function preflight(model = "claude-sonnet-5-5"): Promise<void> {
+  refuseCi();
   if (preflighted) return;
-  const r = await cli([...BASE, "--model", model, "--output-format", "stream-json", "--verbose", "--system-prompt", "Reply with the word ok."], "ok?");
-  const init = r.out.split("\n").map((l) => { try { return JSON.parse(l); } catch { return null; } }).find((e) => e?.type === "system" && e?.subtype === "init");
-  if (!init) throw new Error(`subscription preflight: the claude CLI did not start (${r.err.slice(0, 200)})`);
-  stats.apiKeySource = String(init.apiKeySource);
-  if (init.apiKeySource !== "none") throw new Error(`subscription preflight: apiKeySource is ${JSON.stringify(init.apiKeySource)}, not "none"; refusing (it would bill the API)`);
+  await cli([...BASE, "--model", model, "--system-prompt", "Reply with the word ok."], "ok?");
   preflighted = true;
 }
+
+/** The Messages API endpoint itself: not /v1/messages/count_tokens, not /v1/messages/batches. */
+export const isMessagesUrl = (url: string) => /^https:\/\/api\.anthropic\.com\/v1\/messages\/?(\?.*)?$/.test(url);
 
 /** Answers one Messages API body through the CLI; returns the API's response shape. */
 const SEARCH_SCHEMA = {
@@ -123,10 +147,10 @@ async function searchCall(body: any, tool: any): Promise<any> {
   ].join(" ");
   const t0 = performance.now();
   stats.calls++;
-  const r = await cli(["-p", "--tools", "WebSearch", "--allowedTools", "WebSearch", "--strict-mcp-config", "--setting-sources", "project", "--no-session-persistence", "--model", String(body.model || "claude-sonnet-5-5"), "--output-format", "json", "--system-prompt", `${sys}\n\n${protocol}`, "--json-schema", JSON.stringify(SEARCH_SCHEMA)], q);
+  const r = await cli(["-p", "--tools", "WebSearch", "--allowedTools", "WebSearch", "--strict-mcp-config", "--setting-sources", "project", "--no-session-persistence", "--model", String(body.model || "claude-sonnet-5-5"), "--system-prompt", `${sys}\n\n${protocol}`, "--json-schema", JSON.stringify(SEARCH_SCHEMA)], q);
   stats.ms += performance.now() - t0;
-  let out: any;
-  try { out = JSON.parse(r.out); } catch { stats.failed++; throw new Error(`claude CLI web search answered no JSON (exit ${r.code}): ${(r.err || r.out).slice(0, 300)}`); }
+  const out: any = r.result;
+  if (!out) { stats.failed++; throw new Error(`claude CLI web search gave no result (exit ${r.code}): ${(r.err || r.out).slice(0, 300)}`); }
   if (out.is_error || !out.structured_output) { stats.failed++; throw new Error(`claude CLI web search error: ${String(out.result ?? out.subtype).slice(0, 300)}`); }
   const so = out.structured_output, https = (u: unknown) => typeof u === "string" && /^https:\/\//i.test(u);
   const searches = Math.max(0, Math.min(Number(tool.max_uses) || 3, Number(so.searches) || 0));
@@ -147,10 +171,10 @@ export async function messages(body: any): Promise<any> {
   const { system, prompt, schema } = render(body);
   const t0 = performance.now();
   stats.calls++;
-  const r = await cli([...BASE, "--model", String(body.model || "claude-sonnet-5-5"), "--output-format", "json", "--system-prompt", system, "--json-schema", JSON.stringify(schema)], prompt);
+  const r = await cli([...BASE, "--model", String(body.model || "claude-sonnet-5-5"), "--system-prompt", system, "--json-schema", JSON.stringify(schema)], prompt);
   stats.ms += performance.now() - t0;
-  let out: any;
-  try { out = JSON.parse(r.out); } catch { stats.failed++; throw new Error(`claude CLI answered no JSON (exit ${r.code}): ${(r.err || r.out).slice(0, 300)}`); }
+  const out: any = r.result;
+  if (!out) { stats.failed++; throw new Error(`claude CLI gave no result (exit ${r.code}): ${(r.err || r.out).slice(0, 300)}`); }
   if (out.is_error || !out.structured_output) { stats.failed++; throw new Error(`claude CLI error: ${String(out.result ?? out.subtype).slice(0, 300)}`); }
   const u = out.usage ?? {};
   const usage = { input_tokens: u.input_tokens ?? 0, output_tokens: u.output_tokens ?? 0, cache_read_input_tokens: u.cache_read_input_tokens ?? 0, cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0 };

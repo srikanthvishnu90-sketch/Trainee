@@ -14,6 +14,7 @@ const FORBIDDEN = ["METHOD", "ATTENDEE", "ORGANIZER"];
 
 // RFC 5545 section 3.3.11: TEXT may not hold control characters other than HTAB; line breaks become \n. Any other C0
 // control or DEL is dropped (it cannot be written), and lintIcs reports one if it appears (second review of WO-124c).
+// deno-lint-ignore no-control-regex
 const ICS_CTL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g;
 export function escapeText(s: string): string {
   return s.replace(ICS_CTL, "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r\n|\r|\n/g, "\\n");
@@ -52,9 +53,11 @@ export function writeIcs(events: IcsEvent[], opts: { now?: string } = {}): strin
   const stamp = utc(opts.now ?? new Date().toISOString());
   const lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Trainee//Work artifacts//EN", "CALSCALE:GREGORIAN"];
   for (const e of events) {
-    if (new Date(e.end) <= new Date(e.start)) throw new Error(`event ${e.uid} ends before it starts`);
+    // Compared as written (whole seconds), so a sub-second event cannot become zero length (review 17 of WO-124c).
+    const start = utc(e.start), end = utc(e.end);
+    if (end <= start) throw new Error(`event ${e.uid} ends before it starts, or at the same second`);
     lines.push("BEGIN:VEVENT", `UID:${escapeText(e.uid)}`, `DTSTAMP:${e.stamp ? utc(e.stamp) : stamp}`,
-      `DTSTART:${utc(e.start)}`, `DTEND:${utc(e.end)}`, `SUMMARY:${escapeText(e.summary)}`);
+      `DTSTART:${start}`, `DTEND:${end}`, `SUMMARY:${escapeText(e.summary)}`);
     if (e.description) lines.push(`DESCRIPTION:${escapeText(e.description)}`);
     if (e.location) lines.push(`LOCATION:${escapeText(e.location)}`);
     lines.push(`CLASS:${e.private === false ? "PUBLIC" : "PRIVATE"}`, `STATUS:${e.tentative === false ? "CONFIRMED" : "TENTATIVE"}`,
@@ -77,6 +80,7 @@ export function lintIcs(text: string): string[] {
   const f: string[] = [];
   if (/(^|[^\r])\n/.test(text)) f.push("line endings must be CRLF");
   if (/\r(?!\n)/.test(text)) f.push("bare CR found; line endings must be CRLF");
+  // deno-lint-ignore no-control-regex
   if (/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/.test(text)) f.push("a control character is in the text (RFC 5545 3.3.11)");
   const physical = text.split(/\r?\n/);
   physical.forEach((l, i) => { if (octets(l) > 75) f.push(`line ${i + 1} is ${octets(l)} octets, over the 75-octet fold limit`); });
@@ -89,14 +93,20 @@ export function lintIcs(text: string): string[] {
   if (!lines.includes("VERSION:2.0")) f.push("VERSION:2.0 missing");
   if (!lines.some((l) => l.startsWith("PRODID:"))) f.push("PRODID missing");
   let ev: string[] | null = null, events = 0;
+  const uids = new Set<string>();
   for (const l of lines) {
+    // Component and property names are case-insensitive (RFC 5545 section 2); trailing blanks are not a different name.
+    const norm = l.toUpperCase().trim();
     const name = /^[A-Za-z-]+/.exec(l)?.[0].toUpperCase() ?? "";
     const value = l.slice(l.indexOf(":") + 1);
     if (FORBIDDEN.includes(name)) f.push(`${name} is not allowed in a hold (it would invite or send)`);
-    if (l === "BEGIN:VALARM") f.push("VALARM is not allowed in a hold");
-    if (l === "BEGIN:VEVENT") { ev = []; events++; continue; }
-    if (l === "END:VEVENT" && ev) {
+    if (norm === "BEGIN:VALARM") f.push("VALARM is not allowed in a hold");
+    if (norm === "BEGIN:VEVENT") { ev = []; events++; continue; }
+    if (norm === "END:VEVENT" && ev) {
       const uid = ev.find((x) => x.startsWith("UID:")) ?? "(no UID)";
+      if (uid !== "(no UID)") { if (uids.has(uid)) f.push(`${uid}: duplicate UID`); uids.add(uid); }
+      const ds = ev.find((x) => x.startsWith("DTSTART:"))?.slice(8), de = ev.find((x) => x.startsWith("DTEND:"))?.slice(6);
+      if (ds && de && /^\d{8}T\d{6}Z$/.test(ds) && /^\d{8}T\d{6}Z$/.test(de) && de <= ds) f.push(`${uid}: DTEND is not after DTSTART`);
       for (const req of ["UID:", "DTSTAMP:", "DTSTART", "DTEND"]) if (!ev.some((x) => x.startsWith(req))) f.push(`${uid}: ${req.replace(":", "")} missing`);
       if (!ev.includes("CLASS:PRIVATE")) f.push(`${uid}: CLASS:PRIVATE missing`);
       if (!ev.includes("STATUS:TENTATIVE")) f.push(`${uid}: STATUS:TENTATIVE missing`);

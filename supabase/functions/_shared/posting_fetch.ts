@@ -118,14 +118,65 @@ const check = async (href: string, o: { allow?: (href: string) => boolean; resol
   if (!Array.isArray(ips) || !ips.length || ips.some((ip) => isPrivateIp(String(ip)))) throw new NotRead("the site's name does not lead to a public address");
   return !partial;
 };
-// One request, its redirects walked by hand. `url` in the result is the address that answered.
-export async function guardedFetch(f: Fetch, href: string, init: RequestInit = {}, o: { allow?: (href: string) => boolean; resolve?: Resolve | null; maxHops?: number; trustFirst?: boolean } = {}): Promise<{ res: Response; url: string; dns_checked: boolean }> {
+// A cookie jar for ONE read (2026-11-15, live posting read): an employer's careers site that sets a session cookie on a redirect
+// and sends the visitor back until it sees that cookie loops forever without one ("redirected too many times"). The jar lives
+// only as long as the read that made it: nothing is kept, shared between people or reads, or sent to another site. A cookie
+// goes back only to the host that set it (or, with a Domain attribute, that domain's hosts, never a bare public suffix); no
+// Path, expiry or SameSite handling beyond that: a read is a few GETs inside one time limit.
+export interface CookieJar { header(href: string): string | null; take(href: string, res: Response): void }
+export function cookieJar(maxCookies = 50): CookieJar {
+  const kept = new Map<string, { domain: string; hostOnly: boolean; value: string }>();
+  const hostOf = (href: string) => { try { return new URL(href).hostname.toLowerCase().replace(/\.$/, ""); } catch { return ""; } };
+  const matches = (host: string, c: { domain: string; hostOnly: boolean }) => c.hostOnly ? host === c.domain : host === c.domain || host.endsWith("." + c.domain);
+  return {
+    header(href) {
+      const host = hostOf(href), out: string[] = [];
+      for (const [k, c] of kept) if (matches(host, c)) out.push(`${k.split("\u0000")[1]}=${c.value}`);
+      return out.length ? out.join("; ") : null;
+    },
+    take(href, res) {
+      const host = hostOf(href);
+      if (!host) return;
+      const lines = typeof (res.headers as any).getSetCookie === "function" ? (res.headers as any).getSetCookie() as string[] : (res.headers.get("set-cookie") ? [res.headers.get("set-cookie")!] : []);
+      for (const line of lines.slice(0, maxCookies)) {
+        const [pair, ...attrs] = String(line).split(";");
+        const eqAt = pair.indexOf("=");
+        if (eqAt <= 0) continue;
+        const name = pair.slice(0, eqAt).trim(), value = pair.slice(eqAt + 1).trim();
+        if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/.test(name) || value.length > 4096 || /[;\r\n]/.test(value)) continue;
+        let domain = host, hostOnly = true, expired = false;
+        for (const a of attrs) {
+          const [k0, ...v0] = a.split("="), k = k0.trim().toLowerCase(), v = v0.join("=").trim();
+          if (k === "domain" && v) {
+            const d = v.toLowerCase().replace(/^\./, "").replace(/\.$/, "");
+            // Only the host itself or a parent of it with at least two labels; anything else is not this site's to set.
+            if (!d.includes(".") || !(host === d || host.endsWith("." + d))) { domain = ""; break; }
+            domain = d; hostOnly = false;
+          }
+          if (k === "max-age" && Number(v) <= 0) expired = true;
+        }
+        if (!domain) continue;
+        const key = `${domain}\u0000${name}`;
+        if (expired) { kept.delete(key); continue; }
+        if (kept.size >= maxCookies && !kept.has(key)) continue;
+        kept.set(key, { domain, hostOnly, value });
+      }
+    },
+  };
+}
+// One request, its redirects walked by hand. `url` in the result is the address that answered. With `cookies`, each hop sends the
+// cookies earlier hops of this read set for its host, and keeps the ones it sets (cookieJar above).
+export async function guardedFetch(f: Fetch, href: string, init: RequestInit = {}, o: { allow?: (href: string) => boolean; resolve?: Resolve | null; maxHops?: number; trustFirst?: boolean; cookies?: CookieJar } = {}): Promise<{ res: Response; url: string; dns_checked: boolean }> {
   let url = href, dns_checked = true;
   const max = o.maxHops ?? MAX_HOPS;
   for (let hop = 0; ; hop++) {
     // trustFirst: the caller built the first address from its own provider list (a scheduled feed); every hop after it is looked up.
     dns_checked = (await check(url, hop === 0 && o.trustFirst ? { ...o, resolve: null } : o)) && dns_checked;
-    const res = await f(url, { ...init, redirect: "manual" });
+    let hopInit: RequestInit = { ...init, redirect: "manual" };
+    const cookie = o.cookies?.header(url);
+    if (cookie) { const h = new Headers(init.headers ?? {}); h.set("cookie", cookie); hopInit = { ...hopInit, headers: h }; }
+    const res = await f(url, hopInit);
+    o.cookies?.take(url, res);
     // A fetch that followed a redirect anyway names where it ended: that address is held to the same rule.
     if (res.url && res.url !== url) {
       try { dns_checked = (await check(res.url, o)) && dns_checked; } catch (e) { await res.body?.cancel().catch(() => {}); throw e; }
@@ -179,7 +230,7 @@ export async function limited<T>(ms: number, work: (signal: AbortSignal) => Prom
   try { return await Promise.race([run, late]); } finally { clearTimeout(timer); }
 }
 // One guarded GET (or the given method) with its body as text, all inside one time limit.
-export async function guardedText(f: Fetch, href: string, init: RequestInit, o: { allow?: (href: string) => boolean; resolve?: Resolve; timeoutMs: number; max?: number; body?: boolean }): Promise<{ status: number; ok: boolean; url: string; text: string; headers: Headers; dns_checked: boolean }> {
+export async function guardedText(f: Fetch, href: string, init: RequestInit, o: { allow?: (href: string) => boolean; resolve?: Resolve; timeoutMs: number; max?: number; body?: boolean; maxHops?: number; cookies?: CookieJar }): Promise<{ status: number; ok: boolean; url: string; text: string; headers: Headers; dns_checked: boolean }> {
   return await limited(o.timeoutMs, async (signal) => {
     const { res, url, dns_checked } = await guardedFetch(f, href, { ...init, signal }, o);
     const text = o.body === false ? (await res.body?.cancel().catch(() => {}), "") : await cappedText(res, o.max ?? MAX_BODY_BYTES, signal);

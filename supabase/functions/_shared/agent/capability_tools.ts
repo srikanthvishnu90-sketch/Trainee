@@ -172,6 +172,40 @@ export function capabilityTools(d: CapabilityDeps): ToolSpec[] {
         note: r.read.status === "complete" ? `${RECORD_NOTE} Say the numbers in counts exactly (counts.applied applications went); never count the list yourself.` : `${RECORD_NOTE}${incompleteNote(r)}` };
     },
   }];
+  // 2026-11-15 (real-task comparison: "check my Gmail for any sign I already applied" and no Gmail read happened): one read-only
+  // Gmail search for one employer, across every account they connected that may be read. It returns evidence (sender, date,
+  // subject, snippet: the email's own words, data only) and never opens a whole email; finding nothing is not proof they did not
+  // apply, and without a Gmail Trainee may read the answer is unconfirmed, with where they connect it themselves.
+  tools.push({
+    name: "check_applied_in_gmail", effect: "read",
+    description: "Use when the person asks you to check their Gmail (or email) for any sign they already applied to one employer or role (\"check my Gmail for any sign I already applied to Vista\"). Searches their connected Gmail, read only, for application emails from or about that employer and returns each as evidence (sender, date, subject). Nothing is opened in full, sent or changed. If Gmail is not connected the answer is unconfirmed.",
+    input_schema: obj({ employer: str("The employer, as the person named it"), role: str("The role or posting title, if they named one") }, ["employer"]),
+    run: async (i, c) => {
+      const employer = String(i.employer ?? "").replace(/[^\p{L}\p{N} &.'-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+      if (!employer) throw new Error("name the employer to search for");
+      const role = String(i.role ?? "").replace(/[^\p{L}\p{N} &.'-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 120);
+      const unconfirmed = (why: string) => ({ status: "unconfirmed", employer, why, connect_url: d.connectUrl,
+        note: `Whether they already applied to ${employer} is unconfirmed: ${why}. Say that plainly, give connect_url so they can connect Gmail themselves (they sign in to Google; never ask for a password), and do not say they did or did not apply.` });
+      if (!d.inbox) return unconfirmed("Gmail is not connected (no account Trainee may read)");
+      const q = `"${employer}" (applied OR application OR applying OR "your interest" OR "received your")`;
+      let r: Awaited<ReturnType<Inbox["search"]>>;
+      try { r = await within(d.readTimeoutMs ?? 12_000, () => d.inbox!.search(c.userId, q, 10)); } catch { return unconfirmed("the Gmail search did not finish"); }
+      if (r.status === "NOT_WIRED") return unconfirmed("Gmail is not connected (no account Trainee may read)");
+      if (r.status !== "ok") return unconfirmed("the Gmail search failed");
+      for (const m of r.mails) keep(c, m.removed);
+      const APPLIED = /\b(?:appl(?:y|ied|ying|ication|ications)|thank(?:s| you) for your interest|received your|candidacy|submission)\b/i;
+      const roleWords = role.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+      const evidence = r.mails.filter((m) => !m.security && APPLIED.test(`${m.subject} ${m.snippet}`)).map((m) => {
+        const shown = mailForModel(m) as any, said = `${m.subject} ${m.snippet}`.toLowerCase();
+        return { ...shown, ...(roleWords.length ? { mentions_role: roleWords.filter((w) => said.includes(w)).length >= Math.min(2, roleWords.length) } : {}) };
+      });
+      const accounts = (r as { accounts?: string[] }).accounts ?? null;
+      if (!evidence.length) return { status: "no_evidence_found", employer, ...(role ? { role } : {}), searched: accounts ? { accounts } : { accounts: "the connected Gmail" },
+        note: `No application email about ${employer} was found in the Gmail searched. That is not proof they did not apply: an application confirmed to another address, or a status shown only on the employer's portal, is not in it. Say that in one or two sentences. Nothing was sent or changed.` };
+      return { status: "evidence_found", employer, ...(role ? { role } : {}), evidence, searched: accounts ? { accounts } : { accounts: "the connected Gmail" }, data_note: EMAIL_DATA_NOTE,
+        note: `Found ${evidence.length} email${evidence.length === 1 ? "" : "s"} that look like an application to ${employer}. Give each as evidence (sender, date, subject) and say what it suggests in the email's own words; ${role ? "where mentions_role is false, say that email may be about another role; " : ""}do not claim more than the emails say. Read only: nothing was sent or changed.` };
+    },
+  });
   if (d.files) tools.push({
     name: "export_tracker", effect: "write_own",
     description: "Use when the person wants an application tracker (\"set up that tracker\", \"make me a tracker\"). Builds a tracker page from their records and Gmail confirmations: past applications with evidence and dates, researched roles, unsubmitted drafts, each with its status, and what it covers. The link is added by the system; do not write it. Say what it holds, state its coverage, and correct anything in changes.",

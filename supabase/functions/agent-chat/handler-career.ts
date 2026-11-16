@@ -44,6 +44,7 @@ import { callModel as callModelUncapped, newMeter, turnLedger, webSearch } from 
 import { claudeWebProvider, memoryWebCache, recheckPosting, webResearchOn, withWebSearch } from "../_shared/research_web.ts"; // D-060
 import { readWorkdayPosting } from "../_shared/workday_posting.ts"; // D-062
 import { readApplyFlow } from "../_shared/posting_requirements.ts"; // D-062
+import { readLivePosting } from "../_shared/posting_live.ts"; // 2026-11-15: the live posting read (get_posting)
 import { careerModelConfig } from "./release_model.ts";
 // LAUNCH READINESS (2026-10-26): the per-turn model wrapper (no per-person cap since D-046), the per-person turn order, the pool read only when used.
 import { spendCap } from "../_shared/career_spend_cap.ts";
@@ -1559,6 +1560,10 @@ async function handleChatInner(req: Request, flowCtx: TurnCtx): Promise<Response
           // D-062 (1): "what would you need from me to apply?": the posting's requirements and its application's questions, read
           // from public pages only (posting_requirements.ts); never an account, a saved application or a submission.
           applyFlow: (url: string) => readApplyFlow(url, { fetch: fetchAsAsked(), userAgent: `Trainee posting reader (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }),
+          // 2026-11-15: "open the live posting": get_posting opens the posting's link when the copy on file is missing or stale
+          // (posting_live.ts: guarded hops, at most 8 redirects, a cookie jar for that one read, a time limit and a size cap; never
+          // LinkedIn or Indeed, no sign-in, no captcha). A read that fails is said, never guessed.
+          livePosting: (url: string) => readLivePosting(url, { fetch: fetchAsAsked(), userAgent: `Trainee posting reader (contact: ${Deno.env.get("INGEST_CONTACT_EMAIL") || "unset"})` }),
           research: webResearchOn(Deno.env) && cfg.apiKey ? { search: gatewayGroundSearch((q, w) => webSearch(q, { cfg, meter, ...w })), cache: researchCache, publish: fileKindPublisher(createFileService({ store: supabaseFileKindStore(admin), env: Deno.env, now: Date.now }), user.id), derive: modelDerive(async (system, user) => { const r = await callModel(cfg, { system, messages: [{ role: "user", content: [{ type: "text", text: user }] }], max_tokens: 200 }, { meter, role: "chat" }); return (r.content ?? []).filter((b: any) => b?.type === "text").map((b: any) => b.text).join(""); }) } : null,
           // D-062 (owner, 2026-11-11: "be able to answer emails, find alumni, do all of it"): the person's Gmail confirmations and the
           // tracker File (CAREER_MAIL_TRACKING), answering an email from their own Gmail (a yes to the exact card sends it:

@@ -107,10 +107,15 @@ export interface Verified { text: string; failures: Failure[]; kept: string[]; c
 const PLACE = /^(?:alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|hampshire|jersey|mexico|york|carolina|dakota|ohio|oklahoma|oregon|pennsylvania|rhode|island|tennessee|texas|utah|vermont|virginia|washington|wisconsin|wyoming|chicago|boston|seattle|austin|dallas|houston|atlanta|denver|miami|francisco|san|los|angeles|diego|jose|new|city|canada|india|london|europe|america|american|states|united)$/i;
 const NOT_NAME = /^(?:the|a|an|in|on|at|for|of|to|and|or|but|by|with|from|as|this|that|these|those|it|its|they|their|we|our|you|your|he|she|his|her|i|interns?|internships?|students?|software|engineers?|engineering|most|many|some|all|each|every|median|average|typical|pay|salary|salaries|base|total|jobs?|roles?|positions?|candidates?|applicants?|employers?|companies|firms|new|graduates?|entry|junior|senior|us|u\.s\.|usa|uk|eu|january|february|march|april|may|june|july|august|september|october|november|december|monday|tuesday|wednesday|thursday|friday|saturday|sunday|note|source|page|report|data|according)$/i;
 // Figures in words that support.ts does not read as numbers: singular magnitudes and ordinals (round 5 of #849).
-const UNREAD = /\b(?:hundred|thousand|million|billion|trillion|dozen|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|eleventh|twelfth|twice|thrice)\b|\bfirst\s+(?:round|interview|stage|year|place|call|screen)\b/i;
+// (round 6: number senses only: "a hundred dollars", "a million", "second round"; "a second look" or a "Second," list opener is no figure)
+const UNREAD = /\b(?:a|an|one|a few|several|over a|about a|nearly a|almost a)\s+(?:hundred|thousand|million|billion|trillion|dozen)\b|\b(?:hundreds|thousands|millions|billions)\b|\b(?:first|second|third|fourth|fifth|final|last)\s+(?:round|interview|stage|screen|call|cut|year|place|offer)s?\b|\b(?:twice|thrice)\b/i;
+// Round 6 of #849: data sources and job boards are where a figure comes from, not whose it is.
+const SOURCE = /^(?:glassdoor|levels(?:\.fyi)?|indeed|linkedin|handshake|payscale|ziprecruiter|reddit|blind|bls|bureau of labor statistics|labor statistics|wikipedia|forbes|bloomberg|reuters|cnbc|google|zippia|salary\.com|comparably|built ?in|wellfound|simplify|yahoo|investopedia)$/i;
 export function unitNames(u: EvidenceUnit, weak = false): string[] {
   if (u.owner) return [u.owner];
-  if (u.kind !== "page" && u.kind !== "chat") return [];
+  // Round 6: only a page's own text names organisations; lines carried from an earlier reply and the record name none here.
+  if (u.kind !== "page") return [];
+  const host = String(u.host ?? "").toLowerCase().replace(/^www\./, "").split(".")[0];
   const places = new Set((u.places ?? []).flatMap((p) => p.split(/,\s*/)).map((p) => p.trim().toLowerCase()));
   const out: string[] = [];
   const text = String(u.text);
@@ -122,9 +127,12 @@ export function unitNames(u: EvidenceUnit, weak = false): string[] {
     // (with `weak`, an opening single word counts when what follows reads as an organisation's: "Citadel interns must…",
     // "Acme pays…", "Stripe's…"; "Registered nurses…" does not)
     const orgish = /^(?:['’]s\b|\s+(?:interns?|internships?|employees?|engineers?|analysts?|staff|hires?|hiring|pays?|paid|offers?|requires?|wants?|expects?|asks?|has|have|is|was|gives?|provides?|sponsors?|recruits?|accepts?|rejects?|posted|lists?)\b)/i.test(text.slice(m.index! + m[0].length));
-    if (start && words.length < 2 && m[0].split(/\s+/).length < 2 && !(weak && orgish)) continue;
+    // Round 6: a name counts only where the page states an employer fact about it ("Citadel interns must…", "Acme pays…");
+    // "Python", "Fall 2027" or a source named in passing ("…on Glassdoor") name no employer.
+    if (!orgish) continue;
+    if (start && words.length < 2 && m[0].split(/\s+/).length < 2 && !weak) continue;
     const name = words.join(" ").replace(/['’]s$/, "").trim();
-    if (name.length > 1 && !places.has(name.toLowerCase())) out.push(name);
+    if (name.length > 1 && !places.has(name.toLowerCase()) && !SOURCE.test(name) && name.toLowerCase().replace(/\s+/g, "") !== host) out.push(name);
   }
   return [...new Set(out)];
 }
@@ -156,8 +164,11 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
   // (for a sentence about no one, any name in the page counts, a sentence-opening one too: "Citadel interns must…")
   const anyNamed = new Map(ledger.units.map((u) => [u.id, unitNames(u, true)]));
   const owners = [...new Set([...ledger.units.map((u) => u.owner), ...[...named.values()].flat()].filter((w): w is string => !!w && w.trim().length > 1))];
-  const mine = (u: EvidenceUnit, subj: string | null) => u.owner ? (subj ? u.owner === subj : owners.length < 2)
-    : subj ? nameFoundIn(subj, u.text) : (anyNamed.get(u.id) ?? []).length === 0;
+  // (round 6: "one employer or several" counts the posting owners only)
+  // (an owner guessed for a line carried from an earlier reply is that line's subject, not another employer of this turn)
+  const postingOwners = new Set(ledger.units.filter((u) => u.source !== "an earlier reply in this chat").map((u) => u.owner).filter((w): w is string => !!w && w.trim().length > 1));
+  const mine = (u: EvidenceUnit, subj: string | null) => u.owner ? (subj ? u.owner === subj : postingOwners.size < 2)
+    : subj ? nameFoundIn(subj, u.text) : (anyNamed.get(u.id) ?? []).length === 0 && !(postingOwners.size >= 2 && u.source === "an earlier reply in this chat");
   let carried: string | null = null;
   lines.forEach((l, a) => l.forEach((x, b) => {
     if (/^\s*(?:https?:\/\/\S+\s*)*$/.test(x)) return;
@@ -191,8 +202,12 @@ export async function verifyTagged(reply: string, ledger: Ledger, o: { judge?: S
     // that employer's, and an unowned unit (a page, a count) may hold it. With no subject at all and two or more employers in the
     // ledger, only unowned units may hold it ("An active security clearance is required" cannot stand on Citadel's unit in a PayPal reply).
     const named = mentioned(text)[0] ?? null;
-    const sentSubject = named ?? carried;
-    carried = sentSubject;
+    // Round 6: the subject is carried only into a sentence that leans on the one before (a pronoun, "the role/posting/same…",
+    // a place-led opening); a sentence that opens its own topic ("Software engineering interns earn…") carries none, and the
+    // no-subject rule (unowned units naming no employer) applies to it.
+    const leans = /^(?:(?:it|its|it's|they|their|them|this|that|these|those|the same|the role|the posting|the job|the internship|the position|this role|that role|this posting|that posting|there|and|also|plus)\b|in\s+\p{Lu}[\p{L}.]*(?:\s+\p{Lu}[\p{L}.]*)*,)/iu.test(text.trim());
+    const sentSubject = named ?? (leans ? carried : null);
+    carried = named ?? (leans ? carried : null);
     for (const c of clausesOf(text)) {
       if (noClaim(c) || personQuestion(c, allowed) || o.onRecord?.(c) === true) continue;
       if (o.onRecord?.(c) === false) { failures.push({ sentence: text, reason: `"${c}" is not what the person's record holds` }); bad.add(`${a}:${b}`); return; }

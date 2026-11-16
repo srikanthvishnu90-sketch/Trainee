@@ -262,6 +262,24 @@ export function redactSealed(r: EvalResult): EvalResult {
 // ---------------------------------------------------------------------------------------------------- CLI
 if (import.meta.main) {
   const args = Deno.args, opt = (n: string) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] ?? null : null; };
+  // D-089 subscription mode: every model call (brain and both judges) is answered by the `claude` CLI on the owner's subscription
+  // (evals/subscription/claude_cli.ts); no API key, no API spend, a process-local notional meter. Local only, never in CI.
+  const subscription = args.includes("--subscription");
+  let cliStats: unknown = null;
+  if (subscription) {
+    if (Deno.env.get("CI")) { console.log("NOT RUN: --subscription never runs in CI (D-089)."); Deno.exit(2); }
+    const cli = await import("../subscription/claude_cli.ts");
+    await cli.preflight();
+    cliStats = cli.stats;
+    for (const k of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "EVAL_LEDGER"]) Deno.env.delete(k);
+    Deno.env.set("ANTHROPIC_API_KEY", "sk-subscription-mode-not-a-key"); // the product's "configured" check; the request never leaves this process
+    const below = globalThis.fetch;
+    globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) => {
+      const req = input instanceof Request && !init ? input : new Request(input as any, init);
+      return /^https:\/\/api\.anthropic\.com\/v1\/messages/.test(req.url) ? await cli.cliFetch(req) : await below(req);
+    }) as typeof fetch;
+    console.log("subscription mode (D-089): model calls go to the claude CLI on the subscription; apiKeySource none checked");
+  }
   const get = (k: string) => Deno.env.get(k);
   const brainName = opt("--brain") || "router", label = opt("--label") || `${brainName}-${new Date().toISOString().slice(0, 10)}`;
   if (!["router", "agent", "staged"].includes(brainName)) { console.log(`NOT RUN: --brain must be router, agent or staged (got ${brainName}).`); Deno.exit(2); }
@@ -290,7 +308,7 @@ if (import.meta.main) {
       for await (const e of Deno.readDir(new URL(dir, import.meta.url))) if (e.name.endsWith(".json")) prior.push(JSON.parse(await Deno.readTextFile(new URL(`${dir}${e.name}`, import.meta.url))));
     } catch { /* no results yet */ }
   }
-  let before = claudeSpentUsd(prior, label);
+  let before = subscription ? 0 : claudeSpentUsd(prior, label);
   const opened = openGate(bud, get, before, target, parallel);
   if ("error" in opened) { console.log(`NOT RUN: ${opened.error}.`); Deno.exit(2); }
   const { gate, shared: sharedLedger } = opened;
@@ -350,6 +368,7 @@ if (import.meta.main) {
     judge_prompt_sha: await judgeFingerprint(JUDGE_PROMPT, { a: judgeCfg.model, b: judge2Cfg.model }), judge_disagreement: { items: split, rate: r.total ? split / r.total : 0 },
     commit, source_commit: source === "unknown" ? commit : source, run_at: new Date().toISOString(),
     cost_usd: costs, unpriced_calls: meter.unpriced + judgeMeter.unpriced, quote_usd: quote.total_usd, spend_line: spend, ledger: sharedLedger ? "shared" : "process-local",
+    ...(subscription ? { subscription: { mode: "claude CLI on the owner's subscription (D-089); API spend $0; usd figures are notional", cli: cliStats } } : {}),
     budget_usd: budget, spent_before_usd: before, target_usd: target, hard_usd: hard, brain_turn_ms: BRAIN_TURN_MS, brain_calls: meter.calls, brain_failed_calls: meter.failed,
     route_attribution: attribution, ...r };
   await Deno.mkdir(new URL("./results/", import.meta.url), { recursive: true });
